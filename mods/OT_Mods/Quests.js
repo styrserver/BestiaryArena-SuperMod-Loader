@@ -574,6 +574,24 @@ async function ensureQuestDialogueLoaded() {
   } catch (_) { /* fallback to empty shells */ }
 }
 
+function sanitizeDialogueText(value, fallback = '') {
+  const text = String(value ?? '').trim();
+  if (!text) return fallback;
+  const lower = text.toLowerCase();
+  if (lower === 'undefined' || lower === 'null' || lower === 'nan') return fallback;
+  return text;
+}
+
+async function ensureNpcDialogueAssetsReady(logPrefix = '[Quests Mod][NPC]') {
+  try {
+    await loadQuestDialogueAssets();
+    return true;
+  } catch (error) {
+    console.warn(`${logPrefix} Dialogue assets not ready, using safe fallback copy.`, error);
+    return false;
+  }
+}
+
 
 
 // Toast duration constants (in milliseconds)
@@ -631,6 +649,7 @@ const TOAST_MESSAGES = {
   putridChamberNotStrongEnough: 'You are not strong enough.',
   travelingPutridChamber: 'The floor gives way — you are pulled into the Putrid Chamber!',
   travelingWithSvenson: 'Traveling with Svenson...',
+  travelingGhazHideout: 'Traveling to Ghazbaran\'s Hideout...',
   fishingFoundAxe: 'You found a Small Axe with your Magnet!',
   fishingFoundNothingMagnet: 'You found nothing. Maybe a magnet would help?',
   fishingFoundNothing: 'You found nothing.',
@@ -648,7 +667,8 @@ const BATTLE_TOAST_LOG = {
   mornenion: '[Quests Mod][Mornenion]',
   bansheeLastRoom: '[Quests Mod][Banshee Last Room]',
   spiderLair: '[Quests Mod][Spider Lair]',
-  putridChamber: '[Quests Mod][Putrid Chamber]'
+  putridChamber: '[Quests Mod][Putrid Chamber]',
+  weakenedArchdemon: '[Quests Mod][Weakened Archdemon]'
 };
 
 // NPC chat: 1s before a single-line reply; 2s before each line of a multi-line reply.
@@ -824,6 +844,7 @@ const APPRENTICE_SHENG_MISSION = { id: 'apprentice_sheng' };
 
 const CHRISTMAS_MIRACLE_MISSION = { id: 'christmas_miracle' };
 const SVENSON_LOVE_STORY_MISSION = { id: 'svenson_love_story' };
+const WEAKENED_ARCHDEMON_MISSION = { id: 'weakened_archdemon' };
 
 
 registerMissionForDialogue(SERPENTINE_TOWER_MISSION);
@@ -842,11 +863,20 @@ registerMissionForDialogue(MOTHER_OF_ALL_SPIDERS_MISSION);
 registerMissionForDialogue(APPRENTICE_SHENG_MISSION);
 registerMissionForDialogue(CHRISTMAS_MIRACLE_MISSION);
 registerMissionForDialogue(SVENSON_LOVE_STORY_MISSION);
+registerMissionForDialogue(WEAKENED_ARCHDEMON_MISSION);
 
 const MINOTAUR_TROPHY_CONFIG = {
   productName: 'Wooden Plank',
   icon: 'Wooden_Plank.gif',
   description: 'A sturdy wooden plank from the battle wreckage.',
+  rarity: 5,
+  maxCount: 1
+};
+
+const ORB_CONFIG = {
+  productName: 'Orb',
+  icon: 'Orb.gif',
+  description: 'A mysterious glowing orb pulsing with ancient power.',
   rarity: 5,
   maxCount: 1
 };
@@ -1332,6 +1362,11 @@ const BOARD_NPC_SANTA_ID = 'santa-claus';
 const SANTA_CLAUS_OVERLAY_CLASS = 'quests-santa-claus-overlay';
 const SANTA_OUTFIT_SPRITE_ID = '69'; // Dwarf outfit shell; spritesheet swapped to Santa_ClausIdle.png
 const SANTA_DIALOGUE_ICON_URL = 'https://bestiaryarena.com/assets/icons/fight.png';
+const BOARD_NPC_AL_DEE_RAT_PLAGUE_ID = 'al-dee-rat-plague';
+const RAT_PLAGUE_ROOM_NAME = 'Rat Plague';
+const RAT_PLAGUE_AL_DEE_TILE_INDEX = 30;
+const RAT_PLAGUE_AL_DEE_OVERLAY_CLASS = 'quests-rat-plague-al-dee-overlay';
+const RAT_PLAGUE_AL_DEE_DIALOGUE_ICON_URL = 'https://bestiaryarena.com/assets/icons/fight.png';
 const BOARD_NPC_SVENSON_ID = 'svenson';
 const SVENSON_ROOM_NAME = 'Folda Boat';
 const SVENSON_TILE_INDEX = 109;
@@ -1349,6 +1384,13 @@ const DANE_WHITE_WAVE_TILE_INDEX = 80;
 const DANE_OVERLAY_CLASS = 'quests-dane-overlay';
 const DANE_OUTFIT_SPRITE_ID = ROOKSTAYER_OUTFIT_SPRITE_ID;
 const DANE_DIALOGUE_ICON_URL = 'https://bestiaryarena.com/assets/icons/fight.png';
+const GHAZBARAN_HIDEOUT_ROOM_NAME = "Ruprecht's Hut";
+const GHAZBARAN_HIDEOUT_DISPLAY_NAME = "Ghazbaran's Hideout";
+const GHAZBARAN_TILE_INDEX = 62;
+const GHAZBARAN_NICKNAME = 'Weakened Ghazbaran';
+const GHAZBARAN_AURA_NICKNAME = "Ghazbaran's Aura";
+const GHAZ_OUTFIT_OVERLAY_CLASS = 'quests-ghaz-outfit-overlay';
+const GHAZ_OUTFIT_STYLE_ID = 'quests-ghaz-outfit-sheet-style';
 
 const KING_TIBIANUS_TAB_ID = 'quests-mod-king-tibianus-tab';
 const ARENA_LEADERBOARD_TAB_ID = 'quests-mod-arena-leaderboard-tab';
@@ -1376,7 +1418,8 @@ const QUEST_LOG_MISSIONS = [
   SERPENTINE_TOWER_MISSION,
   APPRENTICE_SHENG_MISSION,
   CHRISTMAS_MIRACLE_MISSION,
-  SVENSON_LOVE_STORY_MISSION
+  SVENSON_LOVE_STORY_MISSION,
+  WEAKENED_ARCHDEMON_MISSION
 ];
 
 // Quest Log mission card icons — prefer the key quest item or objective over NPC portraits.
@@ -1395,7 +1438,8 @@ const MISSION_QUEST_LOG_ICON_MAP = {
   [SERPENTINE_TOWER_MISSION.id]: DESTROY_FIELD_RUNE_CONFIG.icon,
   [APPRENTICE_SHENG_MISSION.id]: MINOTAUR_TROPHY_CONFIG.icon,
   [CHRISTMAS_MIRACLE_MISSION.id]: WISHLIST_CONFIG.icon,
-  [SVENSON_LOVE_STORY_MISSION.id]: 'Spool_of_Yarn.gif'
+  [SVENSON_LOVE_STORY_MISSION.id]: 'Spool_of_Yarn.gif',
+  [WEAKENED_ARCHDEMON_MISSION.id]: ORB_CONFIG.icon
 };
 
 // Game board sprite ids used as Quest Log mission card icons (preferred over GIF when set).
@@ -1550,6 +1594,7 @@ function createNPCCooldownManager() {
     progressApprenticeSheng: { accepted: false, completed: false, battleCompleted: false, rookstayerDismissed: false },
     progressChristmasMiracle: { accepted: false, completed: false },
     progressSvensonLoveStory: { accepted: false, completed: false, plankDelivered: false, strandedAtAwash: false, awashYarnDelivered: false, awashYarnRequested: false, strandedAtUnderground: false, undergroundPlankDelivered: false, undergroundCompassRequested: false, strandedAtWhiteWave: false, whiteWaveSlippersDelivered: false },
+    progressWeakenedArchdemon: { accepted: false, completed: false, battleCompleted: false },
     costelloVisited: false,
     mornenionDefeated: false, // Mornenion defeat flag (also stored in Firebase as progress.mornenion.defeated); keep in sync so getAllMissionProgress() includes it when saving
     sevenSealsCompleted: getDefaultSevenSealsCompleted(), // one boolean per seal (index 0 = First Seal … 6 = Seventh Seal); complete each seal separately via setSealCompleted(sealIndex, true)
@@ -1671,6 +1716,39 @@ function createNPCCooldownManager() {
   let playerAcceptedApprenticeShengBattle = false;
   let apprenticeShengBattle = null;
 
+  // Weakened Archdemon (Ruprecht's Hut via Svenson → Ghazbaran)
+  let playerTraveledToGhazHideout = false;
+  let ghazbaranBattle = null;
+  let ghazOutfitObserver = null;
+  let ghazAbilityDebugLogged = false;
+  let ghazServerSnapshotLogged = false;
+  let ghazBattleStartSnapshotLogged = false;
+  let ghazGameTimerDebugUnsub = null;
+  let ghazNewGameDebugUnsub = null;
+  let ghazLastDebugGameTimerState = null;
+  let ghazWorldEventDebugLogged = false;
+  let ghazPseudoLavaholeGameId = 70;
+  let ghazBattleWorld = null;
+  let ghazLastPseudoLavaholeTick = null;
+  let ghazLastPseudoLavahole2Tick = null;
+  let ghazLavaholeInterval = null;
+  let ghazNativeDamageDomObserver = null;
+  let ghazNativeDamageHpSampleLogged = false;
+  let ghazNativeDamageEventCount = 0;
+  let ghazNativeDamageDomEventCount = 0;
+  let ghazNativeDamageActorEnterUnsub = null;
+  let ghazNativeSpellDamageSample = null;
+  let ghazAnimLastStateByKey = new Map();
+  let ghazBossHpBarEl = null;
+  let ghazBossHpBarFillEl = null;
+  let ghazBossHpBarValueEl = null;
+  let ghazBossHpBarInterval = null;
+  let ghazBossHpBarLastKey = null;
+  const GHAZ_BOSS_HP_BAR_ID = 'quests-ghaz-boss-hp-bar';
+  const GHAZ_BOSS_HP_BAR_STYLE_ID = 'quests-ghaz-boss-hp-bar-styles';
+  const GHAZ_NATIVE_DAMAGE_LOG_LIMIT = 60;
+  const GHAZ_NATIVE_DAMAGE_DOM_LOG_LIMIT = 40;
+
   // =======================
   // Quest Log System State
   // =======================
@@ -1689,6 +1767,8 @@ function createNPCCooldownManager() {
   let questOverlayHider = null;
   let abDendrielMutationObserver = null; // MutationObserver for continuous cleanup in Ab'Dendriel
   let gameTimerSubscription = null; // Subscription for game timer to detect battle completion in sandbox
+  let hideQuestOverlaysFloorTimer = null;
+  let hideQuestOverlaysModeTimer = null;
   let playerUsedHoleToAbDendriel = false; // Track if player used hole to enter Ab'Dendriel
   let villainSetupDone = false; // Track if villain setup has been done for current Ab'Dendriel session
   let overlayHidingDone = false; // Track if overlay hiding has been done for current Ab'Dendriel session
@@ -4508,6 +4588,16 @@ function createNPCCooldownManager() {
       productDefinitions.push(minotaurTrophyDef);
     }
 
+    const orbDef = {
+      name: ORB_CONFIG.productName,
+      icon: ORB_CONFIG.icon,
+      description: ORB_CONFIG.description,
+      rarity: ORB_CONFIG.rarity
+    };
+    if (!productDefinitions.find(p => p.name === orbDef.name)) {
+      productDefinitions.push(orbDef);
+    }
+
     // Add global Rookgaard drops to product definitions
     for (const globalDrop of ROOKGAARD_GLOBAL_DROPS) {
       if (!productDefinitions.find(p => p.name === globalDrop.name)) {
@@ -5280,7 +5370,8 @@ function createNPCCooldownManager() {
       'minotaur_trophy': MINOTAUR_TROPHY_CONFIG.productName
     };
     const maxCountByCanonical = {
-      [MINOTAUR_TROPHY_CONFIG.productName]: MINOTAUR_TROPHY_CONFIG.maxCount || 1
+      [MINOTAUR_TROPHY_CONFIG.productName]: MINOTAUR_TROPHY_CONFIG.maxCount || 1,
+      [ORB_CONFIG.productName]: ORB_CONFIG.maxCount || 1
     };
     const normalized = {};
     for (const [key, value] of Object.entries(products)) {
@@ -5554,7 +5645,8 @@ function createNPCCooldownManager() {
     [SERPENTINE_TOWER_MISSION.id]: 'progressSerpentineTower',
     [APPRENTICE_SHENG_MISSION.id]: 'progressApprenticeSheng',
     [CHRISTMAS_MIRACLE_MISSION.id]: 'progressChristmasMiracle',
-    [SVENSON_LOVE_STORY_MISSION.id]: 'progressSvensonLoveStory'
+    [SVENSON_LOVE_STORY_MISSION.id]: 'progressSvensonLoveStory',
+    [WEAKENED_ARCHDEMON_MISSION.id]: 'progressWeakenedArchdemon'
   };
 
   const MISSION_FIREBASE_KEY_MAP = {
@@ -5573,7 +5665,8 @@ function createNPCCooldownManager() {
     [SERPENTINE_TOWER_MISSION.id]: 'serpentineTower',
     [APPRENTICE_SHENG_MISSION.id]: 'apprenticeSheng',
     [CHRISTMAS_MIRACLE_MISSION.id]: 'christmasMiracle',
-    [SVENSON_LOVE_STORY_MISSION.id]: 'svensonLoveStory'
+    [SVENSON_LOVE_STORY_MISSION.id]: 'svensonLoveStory',
+    [WEAKENED_ARCHDEMON_MISSION.id]: 'weakenedArchdemon'
   };
 
   function getExtraMissionProgressFields(firebaseKey, source = null) {
@@ -5606,6 +5699,11 @@ function createNPCCooldownManager() {
         undergroundCompassRequested: !!source?.undergroundCompassRequested,
         strandedAtWhiteWave: !!source?.strandedAtWhiteWave,
         whiteWaveSlippersDelivered: !!source?.whiteWaveSlippersDelivered
+      };
+    }
+    if (firebaseKey === 'weakenedArchdemon') {
+      return {
+        battleCompleted: !!source?.battleCompleted
       };
     }
     return {};
@@ -7222,6 +7320,7 @@ function createNPCCooldownManager() {
     [TOAST_MESSAGES.putridChamberNotStrongEnough]: 'warning',
     [TOAST_MESSAGES.travelingPutridChamber]: 'info',
     [TOAST_MESSAGES.travelingWithSvenson]: 'info',
+    [TOAST_MESSAGES.travelingGhazHideout]: 'info',
     [TOAST_MESSAGES.fishingFoundAxe]: 'found',
     [TOAST_MESSAGES.fishingFoundNothingMagnet]: 'nothing',
     [TOAST_MESSAGES.fishingFoundNothing]: 'nothing',
@@ -7267,6 +7366,65 @@ function createNPCCooldownManager() {
     const resolvedVariant = variant || resolveToastVariant(message);
     return TOAST_VARIANT_DURATIONS[resolvedVariant] ?? TOAST_DURATION_DEFAULT;
   }
+
+  const QUEST_TOAST_ITEM_CLASS = 'quest-toast-item';
+  const QUEST_TOAST_GAP = 6;
+  const QUEST_TOAST_ITEM_STYLE = 'left:0;right:0;display:flex;position:absolute;transition:230ms cubic-bezier(0.21,1.02,0.73,1);bottom:0;justify-content:flex-end;';
+
+  function relayoutQuestToasts(container) {
+    if (!container) return;
+    const items = Array.from(container.querySelectorAll(`.${QUEST_TOAST_ITEM_CLASS}`));
+    const persistent = items.filter((item) => item.dataset.toastKind === 'persistent');
+    const transient = items.filter((item) => item.dataset.toastKind !== 'persistent');
+    const ordered = [...persistent, ...transient];
+
+    let offset = 0;
+    ordered.forEach((item) => {
+      item.style.transform = `translateY(-${offset}px)`;
+      const height = Math.ceil(item.getBoundingClientRect().height);
+      offset += (height > 0 ? height : 46) + QUEST_TOAST_GAP;
+    });
+  }
+
+  function createQuestToastShell({ message, variant, productName, dismissable = true }) {
+    const flexContainer = document.createElement('div');
+    flexContainer.className = QUEST_TOAST_ITEM_CLASS;
+    flexContainer.style.cssText = QUEST_TOAST_ITEM_STYLE;
+
+    const toast = document.createElement(dismissable ? 'button' : 'div');
+    toast.className = 'non-dismissable-dialogs shadow-lg animate-in fade-in zoom-in-95 slide-in-from-top lg:slide-in-from-bottom';
+    if (!dismissable) {
+      toast.setAttribute('role', 'presentation');
+    }
+
+    const widgetTop = document.createElement('div');
+    widgetTop.className = 'widget-top h-2.5';
+
+    const widgetBottom = document.createElement('div');
+    widgetBottom.className = 'widget-bottom pixel-font-16 flex items-center gap-2 px-2 py-1 text-whiteHighlight';
+
+    if (productName) {
+      const productDef = buildProductDefinitions().find((p) => p.name === productName);
+      if (productDef) {
+        widgetBottom.appendChild(createProductIcon(productDef, 16));
+      }
+    }
+
+    const messageDiv = document.createElement('div');
+    messageDiv.className = 'text-left';
+    if (typeof message === 'string' && message.indexOf('\n') !== -1) {
+      messageDiv.style.whiteSpace = 'pre-line';
+    }
+    messageDiv.style.color = TOAST_VARIANT_COLORS[variant] || TOAST_VARIANT_COLORS.info;
+    messageDiv.textContent = message;
+    widgetBottom.appendChild(messageDiv);
+
+    toast.appendChild(widgetTop);
+    toast.appendChild(widgetBottom);
+    flexContainer.appendChild(toast);
+
+    return { flexContainer, toast, messageDiv };
+  }
   
   const NotificationService = {
     getContainer() {
@@ -7286,80 +7444,38 @@ function createNPCCooldownManager() {
     },
 
     updatePositions(container) {
-      const toasts = container.querySelectorAll('.toast-item');
-      toasts.forEach((toast, index) => {
-        const offset = index * 46;
-        toast.style.transform = `translateY(-${offset}px)`;
-      });
+      relayoutQuestToasts(container || this.getContainer());
     },
 
     show({ productName, message, duration, logPrefix = '[Quests Mod]', variant }) {
       try {
         const mainContainer = this.getContainer();
-        const existingToasts = mainContainer.querySelectorAll('.toast-item');
-        const stackOffset = existingToasts.length * 46;
         const resolvedVariant = variant || resolveToastVariant(message);
         const resolvedDuration = duration ?? resolveToastDuration(message, resolvedVariant);
 
-        const flexContainer = document.createElement('div');
-        flexContainer.className = 'toast-item';
-        flexContainer.style.cssText = `
-          left: 0px;
-          right: 0px;
-          display: flex;
-          position: absolute;
-          transition: 230ms cubic-bezier(0.21, 1.02, 0.73, 1);
-          transform: translateY(-${stackOffset}px);
-          bottom: 0px;
-          justify-content: flex-end;
-        `;
+        const { flexContainer, toast } = createQuestToastShell({
+          message,
+          variant: resolvedVariant,
+          productName,
+          dismissable: true
+        });
+        flexContainer.dataset.toastKind = 'transient';
 
-        const toast = document.createElement('button');
-        toast.className = 'non-dismissable-dialogs shadow-lg animate-in fade-in zoom-in-95 slide-in-from-top lg:slide-in-from-bottom';
-
-        const widgetTop = document.createElement('div');
-        widgetTop.className = 'widget-top h-2.5';
-
-        const widgetBottom = document.createElement('div');
-        widgetBottom.className = 'widget-bottom pixel-font-16 flex items-center gap-2 px-2 py-1 text-whiteHighlight';
-
-        if (productName) {
-          const productDef = buildProductDefinitions().find(p => p.name === productName);
-          if (productDef) {
-            const iconImg = createProductIcon(productDef, 16);
-            widgetBottom.appendChild(iconImg);
-          }
-        }
-
-        const messageDiv = document.createElement('div');
-        messageDiv.className = 'text-left';
-        if (typeof message === 'string' && message.indexOf('\n') !== -1) {
-          messageDiv.style.whiteSpace = 'pre-line';
-        }
-        messageDiv.style.color = TOAST_VARIANT_COLORS[resolvedVariant] || TOAST_VARIANT_COLORS.info;
-        messageDiv.textContent = message;
-        widgetBottom.appendChild(messageDiv);
-
-        toast.appendChild(widgetTop);
-        toast.appendChild(widgetBottom);
-        flexContainer.appendChild(toast);
         mainContainer.appendChild(flexContainer);
+        requestAnimationFrame(() => relayoutQuestToasts(mainContainer));
 
         console.log(`${logPrefix} Toast shown: ${message}`);
 
-        toast.addEventListener('click', () => {
+        const dismissToast = () => {
           if (flexContainer && flexContainer.parentNode) {
             flexContainer.parentNode.removeChild(flexContainer);
-            this.updatePositions(mainContainer);
+            relayoutQuestToasts(mainContainer);
           }
-        });
+        };
 
-        setTimeout(() => {
-          if (flexContainer && flexContainer.parentNode) {
-            flexContainer.parentNode.removeChild(flexContainer);
-            this.updatePositions(mainContainer);
-          }
-        }, resolvedDuration);
+        toast.addEventListener('click', dismissToast);
+
+        setTimeout(dismissToast, resolvedDuration);
 
       } catch (error) {
         console.error(`${logPrefix} Error showing toast:`, error);
@@ -7462,67 +7578,41 @@ function createNPCCooldownManager() {
 
   let customBattleStatusToastHandle = null;
 
-  function getCustomBattleStatusToastContainer() {
-    if (typeof document === 'undefined') return null;
-    let el = document.getElementById('quest-custom-battle-toast-container');
-    if (!el) {
-      el = document.createElement('div');
-      el.id = 'quest-custom-battle-toast-container';
-      el.style.cssText = 'position: fixed; z-index: 9999; inset: 16px 16px 64px; pointer-events: none;';
-      document.body.appendChild(el);
-    }
-    return el;
-  }
-
   function removeCustomBattleStatusToast() {
     if (customBattleStatusToastHandle && typeof customBattleStatusToastHandle.remove === 'function') {
       customBattleStatusToastHandle.remove();
     }
     customBattleStatusToastHandle = null;
+    NotificationService.updatePositions();
   }
 
   function showCustomBattleStatusToast({ battleName, allyLimit, logPrefix = '[Quests Mod][Battle]' }) {
     if (!battleName) return;
-    const container = getCustomBattleStatusToastContainer();
-    if (!container) return;
+    const mainContainer = NotificationService.getContainer();
+    if (!mainContainer) return;
 
     const creaturesAllowed = typeof allyLimit === 'number' ? allyLimit : 'N/A';
     const text = `Battling ${battleName}\nCreatures allowed: ${creaturesAllowed}`;
+    const variant = resolveToastVariant(text);
 
     if (customBattleStatusToastHandle && typeof customBattleStatusToastHandle.updateMessage === 'function') {
       customBattleStatusToastHandle.updateMessage(text);
+      requestAnimationFrame(() => NotificationService.updatePositions(mainContainer));
       return;
     }
 
-    const flexContainer = document.createElement('div');
-    flexContainer.className = 'quest-custom-battle-toast-item';
-    flexContainer.style.cssText = 'left: 0px; right: 0px; display: flex; position: absolute; transition: 230ms cubic-bezier(0.21, 1.02, 0.73, 1); transform: translateY(0px); bottom: 0px; justify-content: flex-end;';
-
-    const toast = document.createElement('div');
-    toast.className = 'non-dismissable-dialogs shadow-lg animate-in fade-in zoom-in-95 slide-in-from-top lg:slide-in-from-bottom';
-    toast.setAttribute('role', 'presentation');
-
-    const widgetTop = document.createElement('div');
-    widgetTop.className = 'widget-top h-2.5';
-
-    const widgetBottom = document.createElement('div');
-    widgetBottom.className = 'widget-bottom pixel-font-16 flex items-center gap-2 px-2 py-1 text-whiteHighlight';
-
-    const messageDiv = document.createElement('div');
-    messageDiv.className = 'text-left';
-    messageDiv.style.whiteSpace = 'pre-line';
-    messageDiv.style.color = TOAST_VARIANT_COLORS[resolveToastVariant(text)] || TOAST_VARIANT_COLORS.info;
-    messageDiv.textContent = text;
-    widgetBottom.appendChild(messageDiv);
-
-    toast.appendChild(widgetTop);
-    toast.appendChild(widgetBottom);
-    flexContainer.appendChild(toast);
-    container.appendChild(flexContainer);
+    const { flexContainer, messageDiv } = createQuestToastShell({
+      message: text,
+      variant,
+      dismissable: false
+    });
+    flexContainer.dataset.toastKind = 'persistent';
+    mainContainer.appendChild(flexContainer);
 
     customBattleStatusToastHandle = {
       updateMessage(newText) {
         messageDiv.textContent = newText || '';
+        requestAnimationFrame(() => NotificationService.updatePositions(mainContainer));
       },
       remove() {
         if (flexContainer && flexContainer.parentNode) {
@@ -7531,6 +7621,7 @@ function createNPCCooldownManager() {
       }
     };
 
+    requestAnimationFrame(() => NotificationService.updatePositions(mainContainer));
     console.log(`${logPrefix} Battle status toast shown: ${text}`);
   }
 
@@ -12991,6 +13082,14 @@ function createNPCCooldownManager() {
       return mission.objectiveLine1;
     }
 
+    if (mission.id === WEAKENED_ARCHDEMON_MISSION.id) {
+      if (progress?.battleCompleted) return mission.objectiveLine3 || mission.objectiveLine2;
+      if (playerTraveledToGhazHideout || isOnRoomByName(GHAZBARAN_HIDEOUT_ROOM_NAME)) {
+        return mission.objectiveLine2 || mission.objectiveLine1;
+      }
+      return mission.objectiveLine1;
+    }
+
     if (mission.id === KING_CROSSING_THE_LINE_MISSION.id) {
       if (progress?.crossingObjectiveComplete) return mission.objectiveLine2;
       return mission.objectiveLine1;
@@ -13025,6 +13124,10 @@ function createNPCCooldownManager() {
       if (progress?.strandedAtAwash && !progress?.awashYarnDelivered) {
         if (!progress?.awashYarnRequested) return '';
         return mission.hintAwash || mission.hint || '';
+      }
+      if (progress?.plankDelivered) {
+        // Travel step ("Talk to Svenson and set sail") should not display item-finding hints.
+        return '';
       }
       return mission.hint || '';
     }
@@ -13098,6 +13201,10 @@ function createNPCCooldownManager() {
     }
 
     if (mission.id === APPRENTICE_SHENG_MISSION.id) {
+      return makeActiveMissionCountProgress(progress?.battleCompleted ? 1 : 0, 1);
+    }
+
+    if (mission.id === WEAKENED_ARCHDEMON_MISSION.id) {
       return makeActiveMissionCountProgress(progress?.battleCompleted ? 1 : 0, 1);
     }
 
@@ -14583,6 +14690,17 @@ function createNPCCooldownManager() {
             updateAllBoardNpcStates(boardContext);
           }
 
+          // Weakened Archdemon: leaving Ruprecht's Hut cancels the Ghazbaran battle
+          if (
+            (playerTraveledToGhazHideout || ghazbaranBattle)
+            && currentRoomName
+            && currentRoomName !== GHAZBARAN_HIDEOUT_ROOM_NAME
+            && !ghazbaranBattle?.isRoomReloadInProgress?.()
+          ) {
+            console.log('[Quests Mod][Weakened Archdemon] Left Ruprecht\'s Hut — cancelling custom battle');
+            cleanupGhazbaranBattle();
+          }
+
           // Banshee's Last Room: one-shot entry villain setup via CustomBattle
           if (currentRoomName === BANSHEE_LAST_ROOM_NAME && playerUsedPortalToBansheeLastRoom && bansheeLastRoomBattle) {
             bansheeLastRoomBattle.runEntryVillainSetupIfNeeded({
@@ -14593,6 +14711,21 @@ function createNPCCooldownManager() {
               }
             });
             bansheeLastRoomBattle.ensureCustomVillainsPresent();
+          }
+
+          // Weakened Archdemon: keep Ghaz on board and refresh custom outfit while in hideout
+          if (currentRoomName === GHAZBARAN_HIDEOUT_ROOM_NAME && playerTraveledToGhazHideout && ghazbaranBattle) {
+            ghazbaranBattle.runEntryVillainSetupIfNeeded({
+              isActiveCheck: () => playerTraveledToGhazHideout && isWeakenedArchdemonQuestActive(),
+              onComplete: () => {
+                hideQuestOverlays();
+                hideHeroEditorButton();
+                startGhazOutfitObserver();
+                refreshGhazOutfitSprites();
+              }
+            });
+            ghazbaranBattle.ensureCustomVillainsPresent();
+            refreshGhazOutfitSprites();
           }
 
           // Spider Lair: re-init battle after defeat (cleanup cleared battle) so player can retry without tile 77 — only when spiderLairRetryWithoutTile77 (set in onClose on defeat)
@@ -14879,6 +15012,14 @@ function createNPCCooldownManager() {
 
   function hideQuestOverlays() {
     // Room info overlay (Monsters / map name) is owned by custom-battles.js during CustomBattles.
+    if (hideQuestOverlaysFloorTimer) {
+      clearTimeout(hideQuestOverlaysFloorTimer);
+      hideQuestOverlaysFloorTimer = null;
+    }
+    if (hideQuestOverlaysModeTimer) {
+      clearTimeout(hideQuestOverlaysModeTimer);
+      hideQuestOverlaysModeTimer = null;
+    }
 
     // Hide the floor selector UI (the vertical floor slider)
     const floorContainers = document.querySelectorAll('.absolute.right-0.z-3');
@@ -14902,7 +15043,7 @@ function createNPCCooldownManager() {
     });
 
     // Add a delayed check in case the floor selector appears after initial hiding
-    setTimeout(() => {
+    hideQuestOverlaysFloorTimer = setTimeout(() => {
       const delayedFloorContainers = document.querySelectorAll('.absolute.right-0.z-3');
       delayedFloorContainers.forEach((container) => {
         if (container.style.display !== 'none') {
@@ -14914,10 +15055,11 @@ function createNPCCooldownManager() {
           }
         }
       });
+      hideQuestOverlaysFloorTimer = null;
     }, 500); // Check again after 500ms
 
     // Set game mode to sandbox using the Game State API
-    setTimeout(() => {
+    hideQuestOverlaysModeTimer = setTimeout(() => {
       try {
         globalThis.state.board.send({ type: "setPlayMode", mode: "sandbox" });
         // Hide the mode selector buttons in the UI to prevent user changes during quest events
@@ -14931,11 +15073,20 @@ function createNPCCooldownManager() {
       } catch (error) {
         console.error('[Quests Mod][Game Mode] Failed to set sandbox mode:', error);
       }
+      hideQuestOverlaysModeTimer = null;
     }, 1000); // Wait 1 second for state to be ready
   }
 
   function showQuestOverlays() {
     // Room info overlay restore is owned by custom-battles.js.
+    if (hideQuestOverlaysFloorTimer) {
+      clearTimeout(hideQuestOverlaysFloorTimer);
+      hideQuestOverlaysFloorTimer = null;
+    }
+    if (hideQuestOverlaysModeTimer) {
+      clearTimeout(hideQuestOverlaysModeTimer);
+      hideQuestOverlaysModeTimer = null;
+    }
 
     // Restore floor selector visibility
     const floorSelectorContainers = document.querySelectorAll('.absolute.right-0.z-3');
@@ -14955,6 +15106,23 @@ function createNPCCooldownManager() {
         if (btn) {
           btn.style.display = '';
         }
+      });
+      // Also unhide Start button next to mode selector in case it inherited hidden style.
+      const startButtons = document.querySelectorAll('button[data-full], button[data-state][disabled]');
+      startButtons.forEach((btn) => {
+        if (btn && btn.textContent && /start/i.test(btn.textContent)) {
+          btn.style.display = '';
+        }
+      });
+
+      // Restore normal board mode after quest battles forced sandbox.
+      // Retry a few times because UI/state can remount during room reload.
+      [0, 120, 300, 650].forEach((delay) => {
+        setTimeout(() => {
+          try {
+            globalThis.state?.board?.send?.({ type: 'setPlayMode', mode: 'manual' });
+          } catch (_) { /* noop */ }
+        }, delay);
       });
       console.log('[Quests Mod][Game Mode] Restored game mode selector when leaving Ab\'Dendriel Hive');
     } catch (e) {
@@ -16549,6 +16717,21 @@ function createNPCCooldownManager() {
     }
   }
 
+  // Shared progression gate for all "connect to Al Dee" entry points.
+  function canAccessAlDeeByLetterProgression() {
+    try {
+      const letterMissionProgress = kingChatState.progressLetter || { accepted: false, completed: false };
+      const isMissionAccessible = letterMissionProgress.accepted || letterMissionProgress.completed;
+      if (!isMissionAccessible) return false;
+      if (letterMissionProgress.completed) return true;
+      const currentProducts = cachedQuestItems || {};
+      return (currentProducts['Stamped Letter'] || 0) > 0;
+    } catch (error) {
+      console.error('[Quests Mod][Al Dee Access] Error checking progression gate:', error);
+      return false;
+    }
+  }
+
   // Check if Tile 79 should be right-clickable
   function shouldEnableTile79RightClick(boardContext = null) {
     try {
@@ -16560,24 +16743,7 @@ function createNPCCooldownManager() {
 
       if (!isInSewers) return false;
 
-      // Check if KING_LETTER_MISSION is active or completed (source of truth: Firebase-loaded kingChatState)
-      const letterMissionProgress = kingChatState.progressLetter || { accepted: false, completed: false };
-      const isMissionAccessible = letterMissionProgress.accepted || letterMissionProgress.completed;
-
-      if (!isMissionAccessible) {
-        return false;
-      }
-
-      // For completed missions, always allow access. For active missions, require stamped letter.
-      if (letterMissionProgress.completed) {
-        return true;
-      }
-
-      // Check if user has Stamped Letter in quest items (not regular player inventory)
-      const currentProducts = cachedQuestItems || {};
-      const hasStampedLetter = (currentProducts['Stamped Letter'] || 0) > 0;
-
-      return hasStampedLetter;
+      return canAccessAlDeeByLetterProgression();
     } catch (error) {
       console.error('[Quests Mod][Tile 79] Error checking right-click conditions:', error);
       return false;
@@ -16607,6 +16773,11 @@ function createNPCCooldownManager() {
       console.error('[Quests Mod][Tile 79] Error checking for Stamped Letter:', error);
       return false;
     }
+  }
+
+  // Rat Plague Al Dee should follow the same letter progression gate as normal Al Dee access.
+  function shouldEnableRatPlagueAlDee() {
+    return canAccessAlDeeByLetterProgression();
   }
 
   // Create context menu for Tile 79 with "Visit Al Dee" button
@@ -19117,6 +19288,26 @@ function createNPCCooldownManager() {
       nameColor: 'rgb(96, 192, 96)'
     },
     {
+      id: BOARD_NPC_AL_DEE_RAT_PLAGUE_ID,
+      name: 'Al Dee',
+      hideLevel: true,
+      level: 15,
+      tileIndex: RAT_PLAGUE_AL_DEE_TILE_INDEX,
+      roomName: RAT_PLAGUE_ROOM_NAME,
+      overlayClass: RAT_PLAGUE_AL_DEE_OVERLAY_CLASS,
+      // Board shell mirrors Rookstayer while swapping in the Al Dee idle spritesheet.
+      outfitSpriteId: ROOKSTAYER_OUTFIT_SPRITE_ID,
+      facing: 'south',
+      outfitSpritesheetUrl: getQuestItemsAssetUrl('Al_DeeIdle.png'),
+      outfitSheetFrameCount: 1,
+      dialogueIconUrl: RAT_PLAGUE_AL_DEE_DIALOGUE_ICON_URL,
+      logPrefix: '[Quests Mod][Board NPC][Al Dee Rat Plague]',
+      isUnlocked: () => shouldEnableRatPlagueAlDee(),
+      chat: {},
+      hpBarColor: 'rgb(96, 192, 96)',
+      nameColor: 'rgb(96, 192, 96)'
+    },
+    {
       id: BOARD_NPC_SANTA_ID,
       name: 'Santa Claus',
       hideLevel: true,
@@ -19239,7 +19430,7 @@ function createNPCCooldownManager() {
       console.log('[Quests Mod][Apprentice Sheng] Mission completed — Wooden Plank awarded; Rookstayer dismissed');
       return true;
     } catch (error) {
-      console.error('[Quests Mod][Apprentice Sheng] Error completing mission with trophy:', error);
+      console.error('[Quests Mod][Apprentice Sheng] Error completing mission with Wooden Plank reward:', error);
       return false;
     }
   }
@@ -19373,15 +19564,8 @@ function createNPCCooldownManager() {
 
   function ensureBoardNpcTileOverflowVisible(tileElement) {
     if (!tileElement) return;
+    // Do not walk ancestors — that clears the board clip and lets edge nameplates cover the client frame.
     tileElement.style.overflow = 'visible';
-    let node = tileElement.parentElement;
-    let depth = 0;
-    while (node && depth < 4) {
-      if (node.id === 'actors') break;
-      node.style.overflow = 'visible';
-      node = node.parentElement;
-      depth++;
-    }
   }
 
   function removeBoardNpcOverlay(npcConfig, tileElement = null) {
@@ -19811,10 +19995,1919 @@ function createNPCCooldownManager() {
     }
   }
 
-  function showBoardNpcKeywordModal(npcConfig) {
+  function isWeakenedArchdemonQuestActive() {
+    const progress = getMissionProgress(WEAKENED_ARCHDEMON_MISSION) || {};
+    return !!progress.accepted && !progress.completed && !progress.battleCompleted;
+  }
+
+  function isWeakenedArchdemonBattleCompletedPendingReward() {
+    const progress = getMissionProgress(WEAKENED_ARCHDEMON_MISSION) || {};
+    return !!progress.battleCompleted && !progress.completed;
+  }
+
+  async function startWeakenedArchdemonMission() {
+    const progress = getMissionProgress(WEAKENED_ARCHDEMON_MISSION);
+    if (progress?.accepted) return false;
+    await persistMissionProgress(WEAKENED_ARCHDEMON_MISSION, {
+      accepted: true,
+      completed: false,
+      battleCompleted: false
+    });
+    NotificationService.showQuestAccepted(WEAKENED_ARCHDEMON_MISSION, BATTLE_TOAST_LOG.weakenedArchdemon);
+    return true;
+  }
+
+  async function markWeakenedArchdemonBattleCompleted() {
+    const progress = getMissionProgress(WEAKENED_ARCHDEMON_MISSION);
+    if (!progress?.accepted || progress?.completed || progress?.battleCompleted) return false;
+    await persistMissionProgress(WEAKENED_ARCHDEMON_MISSION, {
+      accepted: true,
+      completed: false,
+      battleCompleted: true
+    });
+    return true;
+  }
+
+  async function completeWeakenedArchdemonMissionWithOrb() {
+    const progress = getMissionProgress(WEAKENED_ARCHDEMON_MISSION);
+    if (!progress?.battleCompleted || progress?.completed) return false;
+
     try {
+      await addQuestItem(ORB_CONFIG.productName, 1);
+      showQuestItemNotification(ORB_CONFIG.productName, 1);
+      await persistMissionProgress(WEAKENED_ARCHDEMON_MISSION, {
+        accepted: true,
+        completed: true,
+        battleCompleted: true
+      });
+      NotificationService.showQuestCompleted(WEAKENED_ARCHDEMON_MISSION, BATTLE_TOAST_LOG.weakenedArchdemon);
+      boardNpcRuntimeState.lastRoomById.delete(BOARD_NPC_DANE_ID);
+      updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+      return true;
+    } catch (error) {
+      console.error('[Quests Mod][Weakened Archdemon] Error completing mission with Orb reward:', error);
+      return false;
+    }
+  }
+
+  function navigateToGhazbaranHideout() {
+    try {
+      const roomId = getRoomIdByRoomName(GHAZBARAN_HIDEOUT_ROOM_NAME);
+      if (!roomId) {
+        console.warn('[Quests Mod][Weakened Archdemon] Ruprecht\'s Hut room not found');
+        return false;
+      }
+      globalThis.state.board.send({
+        type: 'selectRoomById',
+        roomId
+      });
+      return true;
+    } catch (error) {
+      console.error('[Quests Mod][Weakened Archdemon] Error navigating to Ghazbaran\'s Hideout:', error);
+      return false;
+    }
+  }
+
+  function navigateToFoldaBoat() {
+    try {
+      const roomId = getRoomIdByRoomName(SVENSON_ROOM_NAME);
+      if (!roomId) {
+        console.warn('[Quests Mod][Weakened Archdemon] Folda Boat room not found');
+        return false;
+      }
+      globalThis.state.board.send({
+        type: 'selectRoomById',
+        roomId
+      });
+      return true;
+    } catch (error) {
+      console.error('[Quests Mod][Weakened Archdemon] Error navigating to Folda Boat:', error);
+      return false;
+    }
+  }
+
+  function ensureGhazOutfitSheetStyles() {
+    let style = document.getElementById(GHAZ_OUTFIT_STYLE_ID);
+    if (!style) {
+      style = document.createElement('style');
+      style.id = GHAZ_OUTFIT_STYLE_ID;
+      document.head.appendChild(style);
+    }
+    const url = getQuestItemsAssetUrl('ghaz-idle.png').replace(/"/g, '\\"');
+    const movingUrl = getQuestItemsAssetUrl('ghaz-moving.png').replace(/"/g, '\\"');
+    const auraName = String(GHAZBARAN_AURA_NICKNAME || '').replace(/"/g, '\\"');
+    // Match Dragon (id-34) board viewport: fixed 144x144 (zoom is applied by the board, not here).
+    const size = '144px';
+    style.textContent = `
+      .${GHAZ_OUTFIT_OVERLAY_CLASS} > .viewport > img.actor.spritesheet,
+      .${GHAZ_OUTFIT_OVERLAY_CLASS} img.actor.spritesheet {
+        display: none !important;
+        visibility: hidden !important;
+        opacity: 0 !important;
+        background-image: none !important;
+      }
+      .${GHAZ_OUTFIT_OVERLAY_CLASS}.sprite.outfit {
+        width: ${size} !important;
+        height: ${size} !important;
+        max-width: none !important;
+        max-height: none !important;
+        overflow: visible !important;
+      }
+      .${GHAZ_OUTFIT_OVERLAY_CLASS} > .viewport {
+        width: ${size} !important;
+        height: ${size} !important;
+        max-width: none !important;
+        max-height: none !important;
+        position: relative !important;
+        overflow: visible !important;
+      }
+      .${GHAZ_OUTFIT_OVERLAY_CLASS} .quests-custom-outfit-sheet {
+        position: absolute !important;
+        inset: 0 !important;
+        width: ${size} !important;
+        height: ${size} !important;
+        z-index: 2 !important;
+        background-image: url("${url}") !important;
+        background-repeat: no-repeat !important;
+        background-size: 400% 100% !important;
+        image-rendering: pixelated !important;
+        pointer-events: none !important;
+        animation: none !important;
+      }
+      .${GHAZ_OUTFIT_OVERLAY_CLASS}.moving .quests-custom-outfit-sheet {
+        background-image: url("${movingUrl}") !important;
+        /* Ghaz moving atlas: 4 direction columns x 8 animation rows. */
+        background-size: 400% 800% !important;
+        animation: quests-ghaz-moving-frames 884ms steps(8) infinite !important;
+      }
+      .${GHAZ_OUTFIT_OVERLAY_CLASS} .quests-custom-outfit-sheet[data-facing="north"] { background-position-x: 0% !important; }
+      .${GHAZ_OUTFIT_OVERLAY_CLASS} .quests-custom-outfit-sheet[data-facing="east"]  { background-position-x: 33.333% !important; }
+      .${GHAZ_OUTFIT_OVERLAY_CLASS} .quests-custom-outfit-sheet[data-facing="south"] { background-position-x: 66.666% !important; }
+      .${GHAZ_OUTFIT_OVERLAY_CLASS} .quests-custom-outfit-sheet[data-facing="west"]  { background-position-x: 100% !important; }
+      .${GHAZ_OUTFIT_OVERLAY_CLASS}.idle .quests-custom-outfit-sheet {
+        background-position-y: 0% !important;
+      }
+      @keyframes quests-ghaz-moving-frames {
+        from { background-position-y: 0%; }
+        to { background-position-y: 87.5%; }
+      }
+      /* Hide the secondary ability-carrier unit so Ghaz still looks like one creature. */
+      [data-name="${auraName}"] {
+        display: none !important;
+        visibility: hidden !important;
+        opacity: 0 !important;
+        pointer-events: none !important;
+      }
+      /* Hide level badge on Weakened Ghazbaran */
+      .${GHAZ_OUTFIT_OVERLAY_CLASS} ~ .level,
+      .${GHAZ_OUTFIT_OVERLAY_CLASS} + .level,
+      [data-name="${String(GHAZBARAN_NICKNAME).replace(/"/g, '\\"')}"] .level,
+      [data-custom-battle-nickname="${String(GHAZBARAN_NICKNAME).replace(/"/g, '\\"')}"] .level {
+        display: none !important;
+      }
+    `;
+  }
+
+  function getGhazSpriteFacing(sprite) {
+    if (!sprite?.classList) return 'south';
+    if (sprite.classList.contains('north')) return 'north';
+    if (sprite.classList.contains('east')) return 'east';
+    if (sprite.classList.contains('west')) return 'west';
+    return 'south';
+  }
+
+  function applyGhazOutfitToSprite(sprite) {
+    if (!sprite?.classList) return false;
+    const spriteNick = sprite.dataset?.customBattleNickname || '';
+    if (spriteNick && spriteNick !== GHAZBARAN_NICKNAME) return false;
+    ensureGhazOutfitSheetStyles();
+    sprite.classList.add(GHAZ_OUTFIT_OVERLAY_CLASS);
+    sprite.dataset.questsGhazOutfit = '1';
+    const viewport = sprite.querySelector(':scope > .viewport') || sprite.querySelector('.viewport') || sprite;
+    let sheet = viewport.querySelector(':scope > .quests-custom-outfit-sheet')
+      || viewport.querySelector('.quests-custom-outfit-sheet');
+    if (!sheet) {
+      sheet = document.createElement('div');
+      sheet.className = 'quests-custom-outfit-sheet';
+      sheet.setAttribute('aria-label', GHAZBARAN_NICKNAME);
+      viewport.appendChild(sheet);
+    }
+    const facing = getGhazSpriteFacing(sprite);
+    const isIdle = sprite.classList.contains('idle');
+    const movingSheetUrl = getQuestItemsAssetUrl('ghaz-moving.png');
+    const idleSheetUrl = getQuestItemsAssetUrl('ghaz-idle.png');
+    const facingToX = {
+      north: '0%',
+      east: '33.333%',
+      south: '66.666%',
+      west: '100%'
+    };
+    const facingX = facingToX[facing] || facingToX.south;
+
+    sheet.setAttribute('data-facing', facing);
+    sheet.style.backgroundPositionX = facingX;
+    sheet.style.backgroundRepeat = 'no-repeat';
+    sheet.style.willChange = 'background-position';
+    if (isIdle) {
+      sheet.style.backgroundImage = `url("${idleSheetUrl}")`;
+      sheet.style.backgroundSize = '400% 100%';
+      sheet.style.backgroundPositionY = '0%';
+      sheet.style.animation = 'none';
+    } else {
+      sheet.style.backgroundImage = `url("${movingSheetUrl}")`;
+      sheet.style.backgroundSize = '400% 800%';
+      // 87.5% is the last valid row in an 8-row spritesheet.
+      sheet.style.animation = 'quests-ghaz-moving-frames 884ms steps(8) infinite';
+    }
+    try {
+      const tileHint = sprite.closest?.('[id^="tile-index-"]')?.id || 'unknown-tile';
+      const key = String(sprite.dataset?.customBattleNickname || '') || tileHint;
+      const state = isIdle ? 'idle' : 'moving';
+      ghazAnimLastStateByKey.set(key, `${state}|${facing}|${tileHint}`);
+    } catch (_) { /* noop */ }
+    return true;
+  }
+
+  function collectGhazOutfitSprites() {
+    const found = new Set();
+
+    document.querySelectorAll(`[data-name="${GHAZBARAN_NICKNAME}"] .sprite.outfit`).forEach((sprite) => {
+      found.add(sprite);
+    });
+
+    document.querySelectorAll(`[data-custom-battle-nickname="${GHAZBARAN_NICKNAME}"]`).forEach((el) => {
+      const sprite = el.classList?.contains('outfit') ? el : el.querySelector?.('.sprite.outfit');
+      if (sprite) found.add(sprite);
+    });
+
+    document.querySelectorAll('button[data-custom-battle-locked="1"]').forEach((button) => {
+      const nickEl = button.querySelector('[data-custom-battle-nickname]');
+      const nick = nickEl?.dataset?.customBattleNickname || button.dataset?.customBattleNickname || '';
+      if (nick !== GHAZBARAN_NICKNAME) return;
+      button.querySelectorAll('.sprite.outfit').forEach((sprite) => found.add(sprite));
+    });
+
+    const tile = document.getElementById(`tile-index-${GHAZBARAN_TILE_INDEX}`);
+    const tileBottom = tile?.style?.bottom || '';
+    const tileRight = tile?.style?.right || '';
+    if (tileBottom && tileRight) {
+      document.querySelectorAll('button[aria-roledescription="draggable"]').forEach((button) => {
+        if (button.style.bottom === tileBottom && button.style.right === tileRight) {
+          button.querySelectorAll('.sprite.outfit').forEach((sprite) => found.add(sprite));
+        }
+      });
+    }
+
+    const col = GHAZBARAN_TILE_INDEX % 15;
+    const row = Math.floor(GHAZBARAN_TILE_INDEX / 15);
+    const expectedTranslate = `calc(${col * 32}px * var(--zoomFactor)) calc(${row * 32}px * var(--zoomFactor))`;
+    document.querySelectorAll('button[aria-roledescription="draggable"]').forEach((button) => {
+      const translate = button.style.translate || '';
+      if (translate === expectedTranslate || translate.startsWith(expectedTranslate)) {
+        button.querySelectorAll('.sprite.outfit').forEach((sprite) => found.add(sprite));
+      }
+    });
+
+    tile?.querySelectorAll?.('.sprite.outfit')?.forEach((sprite) => found.add(sprite));
+
+    return [...found];
+  }
+
+  function getSpriteCustomBattleNickname(sprite) {
+    if (!sprite) return '';
+    const direct = sprite.dataset?.customBattleNickname;
+    if (direct) return String(direct);
+    const owner = sprite.closest?.('[data-custom-battle-nickname]');
+    if (owner?.dataset?.customBattleNickname) return String(owner.dataset.customBattleNickname);
+    const lockedButton = sprite.closest?.('button[data-custom-battle-locked="1"]');
+    if (lockedButton?.dataset?.customBattleNickname) return String(lockedButton.dataset.customBattleNickname);
+    return '';
+  }
+
+  function removeWrongGhazOutfitOverlays() {
+    document.querySelectorAll(`.sprite.outfit.${GHAZ_OUTFIT_OVERLAY_CLASS}`).forEach((sprite) => {
+      const nick = getSpriteCustomBattleNickname(sprite);
+      if (nick && nick === GHAZBARAN_NICKNAME) return;
+      sprite.classList.remove(GHAZ_OUTFIT_OVERLAY_CLASS);
+      delete sprite.dataset.questsGhazOutfit;
+      sprite.querySelectorAll('.quests-custom-outfit-sheet').forEach((sheet) => sheet.remove());
+    });
+  }
+
+  let ghazOutfitRefreshQueued = false;
+  function refreshGhazOutfitSprites() {
+    if (!playerTraveledToGhazHideout) return;
+    removeWrongGhazOutfitOverlays();
+    let targets = collectGhazOutfitSprites();
+    // Fallback: target only pieces on Ghaz's tile, not all locked pieces.
+    if (!targets.length) {
+      const ghazTile = document.getElementById(`tile-index-${GHAZBARAN_TILE_INDEX}`);
+      if (ghazTile) {
+        targets = [...ghazTile.querySelectorAll('.sprite.outfit')];
+      }
+    }
+    targets.forEach((sprite) => applyGhazOutfitToSprite(sprite));
+  }
+
+  function queueGhazOutfitRefresh() {
+    if (ghazOutfitRefreshQueued || !playerTraveledToGhazHideout) return;
+    ghazOutfitRefreshQueued = true;
+    requestAnimationFrame(() => {
+      ghazOutfitRefreshQueued = false;
+      refreshGhazOutfitSprites();
+    });
+  }
+
+  function startGhazOutfitObserver() {
+    stopGhazOutfitObserver();
+    ensureGhazOutfitSheetStyles();
+    refreshGhazOutfitSprites();
+    // Retry a few times — CustomBattles locks pieces after board DOM settles.
+    [80, 200, 500, 1000, 2000].forEach((delay) => {
+      setTimeout(() => {
+        if (playerTraveledToGhazHideout) refreshGhazOutfitSprites();
+      }, delay);
+    });
+    ghazOutfitObserver = new MutationObserver(() => {
+      queueGhazOutfitRefresh();
+    });
+    const root = document.querySelector('#board')
+      || document.querySelector('[class*="board"]')
+      || document.body;
+    ghazOutfitObserver.observe(root, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['class', 'style', 'data-custom-battle-locked']
+    });
+  }
+
+  function stopGhazOutfitObserver() {
+    if (ghazOutfitObserver) {
+      ghazOutfitObserver.disconnect();
+      ghazOutfitObserver = null;
+    }
+    ghazOutfitRefreshQueued = false;
+    ghazAnimLastStateByKey.clear();
+  }
+
+  function createGhazbaranBattleInstance(roomId) {
+    if (!window.CustomBattles) {
+      console.error('[Quests Mod][Weakened Archdemon] CustomBattles still not available');
+      return null;
+    }
+    const dragonGameId = getGameIdByCreatureName('Dragon', 35);
+    const rookstayerBodyGameId = getGameIdByCreatureName('Orc', 5);
+    const druidGameId = getGameIdByCreatureName('Druid', 33);
+    ghazPseudoLavaholeGameId = getGameIdByCreatureName('Lavahole', 70);
+    const genes = { hp: 750, ad: 20, ap: 20, armor: 100, magicResist: 100 };
+    const ghazAllyGenes = { hp: 30, ad: 30, ap: 30, armor: 30, magicResist: 30 };
+    const druidGenes = { hp: 20, ad: 18, ap: 24, armor: 20, magicResist: 22 };
+    const spellbookOfAncientArcanaEquip = buildVillainEquip('Spellbook of Ancient Arcana', 'ap', 1);
+    const villains = [
+      {
+        nickname: GHAZBARAN_NICKNAME,
+        keyPrefix: `ghazbaran-tile-${GHAZBARAN_TILE_INDEX}-`,
+        tileIndex: GHAZBARAN_TILE_INDEX,
+        gameId: dragonGameId,
+        awakened: true,
+        level: 500,
+        tier: 2,
+        direction: 'south',
+        genes
+      }
+    ];
+    const allies = [
+      {
+        nickname: 'Eternal Oblivion',
+        keyPrefix: 'ghaz-ally-eternal-oblivion-tile-77-',
+        tileIndex: 77,
+        gameId: rookstayerBodyGameId,
+        outfitSpriteId: ROOKSTAYER_OUTFIT_SPRITE_ID,
+        shiny: true,
+        level: 300,
+        tier: 2,
+        direction: 'north',
+        genes: ghazAllyGenes
+      },
+      {
+        nickname: 'Druid I',
+        keyPrefix: 'ghaz-ally-druid-tile-10-',
+        tileIndex: 10,
+        gameId: druidGameId,
+        awakened: false,
+        level: 100,
+        tier: 1,
+        direction: 'south',
+        genes: druidGenes,
+        ...(spellbookOfAncientArcanaEquip && { equip: spellbookOfAncientArcanaEquip })
+      },
+      {
+        nickname: 'Druid II',
+        keyPrefix: 'ghaz-ally-druid-tile-11-',
+        tileIndex: 11,
+        gameId: druidGameId,
+        awakened: false,
+        level: 100,
+        tier: 2,
+        direction: 'south',
+        genes: druidGenes,
+        ...(spellbookOfAncientArcanaEquip && { equip: spellbookOfAncientArcanaEquip })
+      },
+      {
+        nickname: 'Druid III',
+        keyPrefix: 'ghaz-ally-druid-tile-25-',
+        tileIndex: 25,
+        gameId: druidGameId,
+        awakened: false,
+        level: 100,
+        tier: 3,
+        direction: 'south',
+        genes: druidGenes,
+        ...(spellbookOfAncientArcanaEquip && { equip: spellbookOfAncientArcanaEquip })
+      },
+      {
+        nickname: 'Druid IV',
+        keyPrefix: 'ghaz-ally-druid-tile-26-',
+        tileIndex: 26,
+        gameId: druidGameId,
+        awakened: false,
+        level: 100,
+        tier: 4,
+        direction: 'south',
+        genes: druidGenes,
+        ...(spellbookOfAncientArcanaEquip && { equip: spellbookOfAncientArcanaEquip })
+      }
+    ];
+    return window.CustomBattles.create({
+      name: GHAZBARAN_HIDEOUT_DISPLAY_NAME,
+      roomId,
+      villains,
+      allies,
+      allyLimit: 10,
+      preventVillainMovement: false,
+      hideVillainSprites: false,
+      activationCheck: (isSandbox, inBattleArea) => {
+        return isSandbox && inBattleArea && playerTraveledToGhazHideout && isWeakenedArchdemonQuestActive();
+      },
+      victoryDefeat: {
+        onVictory: async () => {
+          await markWeakenedArchdemonBattleCompleted().catch((error) => {
+            console.error('[Quests Mod][Weakened Archdemon] Error saving battleCompleted flag:', error);
+          });
+        },
+        onDefeat: () => {},
+        reloadRoomOnClose: false,
+        onClose: () => {
+          cleanupGhazbaranBattle();
+          setTimeout(() => navigateToFoldaBoat(), 100);
+        },
+        victoryTitle: 'Victory!',
+        defeatTitle: 'Defeat',
+        victoryMessage: getMissionDialogueLine(
+          WEAKENED_ARCHDEMON_MISSION,
+          'battleVictory',
+          'Ghazbaran has fallen. Return to Dane to claim your reward.'
+        ),
+        defeatMessage: getMissionDialogueLine(
+          WEAKENED_ARCHDEMON_MISSION,
+          'battleDefeat',
+          'The weakened archdemon still proved too strong.'
+        ),
+        showItems: false,
+        items: []
+      }
+    });
+  }
+
+  function initializeGhazbaranBattle(roomId) {
+    if (window.CustomBattles) {
+      return createGhazbaranBattleInstance(roomId);
+    }
+    return waitForCustomBattles({ logPrefix: BATTLE_TOAST_LOG.weakenedArchdemon }).then((api) => {
+      if (!api) return null;
+      return createGhazbaranBattleInstance(roomId);
+    });
+  }
+
+  function restoreBoardSetupGhazbaran() {
+    if (ghazbaranBattle) {
+      ghazbaranBattle.restoreBoardSetup();
+    }
+  }
+
+  function cleanupGhazbaranBattle() {
+    try {
+      removeCustomBattleStatusToast();
+      stopGhazOutfitObserver();
+      if (ghazbaranBattle) {
+        ghazbaranBattle.cleanup(restoreBoardSetupGhazbaran, showQuestOverlays);
+        ghazbaranBattle = null;
+      }
+      cleanupGhazRuntimeDebugHooks();
+      playerTraveledToGhazHideout = false;
+      ghazAbilityDebugLogged = false;
+      ghazServerSnapshotLogged = false;
+      ghazBattleStartSnapshotLogged = false;
+      ghazLastDebugGameTimerState = null;
+      ghazWorldEventDebugLogged = false;
+      ghazBattleWorld = null;
+      ghazLastPseudoLavaholeTick = null;
+      ghazLastPseudoLavahole2Tick = null;
+      ghazNativeDamageHpSampleLogged = false;
+      ghazNativeDamageEventCount = 0;
+      ghazNativeDamageDomEventCount = 0;
+      ghazNativeSpellDamageSample = null;
+      if (ghazLavaholeInterval) { clearInterval(ghazLavaholeInterval); ghazLavaholeInterval = null; }
+      removeGhazBossHpBar();
+      document.getElementById(GHAZ_OUTFIT_STYLE_ID)?.remove();
+      console.log('[Quests Mod][Weakened Archdemon] Battle cleaned up');
+    } catch (error) {
+      console.error('[Quests Mod][Weakened Archdemon] Error cleaning up:', error);
+    }
+  }
+
+  function setupGhazbaranBattleInstance(battle) {
+    if (!battle) return false;
+    ghazbaranBattle = battle;
+    ghazbaranBattle.setup(
+      () => playerTraveledToGhazHideout && isWeakenedArchdemonQuestActive(),
+      NotificationService.createBattleToastCallback(BATTLE_TOAST_LOG.weakenedArchdemon)
+    );
+    ghazbaranBattle.resetSandboxBattleState();
+    showCustomBattleStatusToast({
+      battleName: GHAZBARAN_NICKNAME,
+      allyLimit: 10,
+      logPrefix: BATTLE_TOAST_LOG.weakenedArchdemon
+    });
+    const logGhazPlacementDebug = (phase) => {
+      try {
+        const boardContext = globalThis.state?.board?.getSnapshot?.()?.context;
+        const boardConfig = Array.isArray(boardContext?.boardConfig) ? boardContext.boardConfig : [];
+        const trackedNameList = [
+          GHAZBARAN_NICKNAME,
+          'Eternal Oblivion',
+          'Druid I',
+          'Druid II',
+          'Druid III',
+          'Druid IV'
+        ];
+        const trackedNames = new Set(trackedNameList);
+        const trackedBoard = boardConfig
+          .filter((entity) => trackedNames.has(String(entity?.nickname || entity?.name || '')))
+          .map((entity) => ({
+            nickname: entity?.nickname || entity?.name || null,
+            tileIndex: entity?.tileIndex ?? null,
+            gameId: entity?.gameId ?? null,
+            awakened: entity?.awakened ?? entity?.awaken ?? null,
+            level: entity?.level ?? null,
+            villain: !!entity?.villain
+          }));
+        const sinceSetupMs = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - ghazSetupStartedAtMs);
+        trackedBoard.forEach((entry) => {
+          const name = String(entry?.nickname || '');
+          if (!name) return;
+          if (ghazPlacementFirstSeenMs[name] == null) {
+            ghazPlacementFirstSeenMs[name] = sinceSetupMs;
+          }
+        });
+        const presentNames = trackedBoard.map((entry) => String(entry?.nickname || '')).filter(Boolean);
+        const missingNames = trackedNameList.filter((name) => !presentNames.includes(name));
+        const compactBoardState = trackedBoard
+          .map((entry) => `${entry.nickname}@${entry.tileIndex}${entry.villain ? '[V]' : '[A]'}`)
+          .join(', ');
+
+        const plannedVillains = Array.isArray(ghazbaranBattle?.config?.villains)
+          ? ghazbaranBattle.config.villains.map((v) => ({
+            nickname: v?.nickname || null,
+            tileIndex: v?.tileIndex ?? null,
+            gameId: v?.gameId ?? null,
+            awakened: !!(v?.awakened || v?.awaken),
+            level: v?.level ?? null
+          }))
+          : [];
+        const plannedAllies = Array.isArray(ghazbaranBattle?.config?.allies)
+          ? ghazbaranBattle.config.allies
+            .filter((a) => trackedNames.has(String(a?.nickname || a?.name || '')))
+            .map((a) => ({
+              nickname: a?.nickname || a?.name || null,
+              tileIndex: a?.tileIndex ?? null,
+              gameId: a?.gameId ?? null,
+              awakened: !!(a?.awakened || a?.awaken),
+              level: a?.level ?? null
+            }))
+          : [];
+
+        console.log('[Quests Mod][Weakened Archdemon][Debug] Ghaz placement snapshot', {
+          phase,
+          sinceSetupMs,
+          allyLimit: ghazbaranBattle?.config?.allyLimit ?? null,
+          plannedVillains,
+          plannedAllies,
+          boardTrackedCount: trackedBoard.length,
+          boardTracked: trackedBoard,
+          compactBoardState,
+          presentNames,
+          missingNames,
+          firstSeenMs: { ...ghazPlacementFirstSeenMs }
+        });
+      } catch (error) {
+        console.warn('[Quests Mod][Weakened Archdemon][Debug] Failed Ghaz placement snapshot:', error);
+      }
+    };
+    const ghazSetupStartedAtMs = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    const ghazPlacementFirstSeenMs = {};
+
+    // Hard-delete existing villains before Ghaz setup (not just visual hide).
+    removeAllVillainCreaturesFromBoard();
+    // Reusable CustomBattles hook: immediate rewrite without waiting for in-battle-area timing.
+    if (typeof ghazbaranBattle.forceImmediateBoardRewrite === 'function') {
+      const forced = ghazbaranBattle.forceImmediateBoardRewrite();
+      console.log('[Quests Mod][Weakened Archdemon][Debug] Forced immediate board rewrite pass', { forced });
+    } else {
+      // Backward-compatible fallback for older CustomBattles builds.
+      try {
+        if (typeof ghazbaranBattle.removeOriginalVillains === 'function') {
+          ghazbaranBattle.removeOriginalVillains();
+          console.log('[Quests Mod][Weakened Archdemon][Debug] Forced immediate removeOriginalVillains pass (fallback)');
+        }
+      } catch (error) {
+        console.warn('[Quests Mod][Weakened Archdemon][Debug] Immediate removeOriginalVillains fallback failed:', error);
+      }
+    }
+    console.log('[Quests Mod][Weakened Archdemon][Debug] setupGhazbaranBattleInstance initialized');
+    logGhazPlacementDebug('setup-before-schedule');
+    [0, 40, 90, 160, 300, 600, 1000].forEach((delay) => {
+      setTimeout(() => {
+        if (!playerTraveledToGhazHideout || !ghazbaranBattle) return;
+        logGhazPlacementDebug(`setup-timeline+${delay}ms`);
+      }, delay);
+    });
+    setupGhazRuntimeDebugHooks();
+    logGhazServerActorSnapshot('setup-immediate');
+    ghazbaranBattle.scheduleEntryVillainSetup({
+      // First attempt ASAP, then short retries so Ghaz and forced allies settle in the same startup window.
+      attemptDelays: [0, 40, 90, 160, 300, 600],
+      isActiveCheck: () => playerTraveledToGhazHideout && isWeakenedArchdemonQuestActive(),
+      onComplete: () => {
+        hideQuestOverlays();
+        hideHeroEditorButton();
+        logGhazServerActorSnapshot('entry-onComplete');
+        logGhazPlacementDebug('entry-onComplete');
+        setTimeout(() => logGhazPlacementDebug('entry-onComplete+150ms'), 150);
+        setTimeout(() => logGhazPlacementDebug('entry-onComplete+600ms'), 600);
+        startGhazOutfitObserver();
+        refreshGhazOutfitSprites();
+      }
+    });
+    return true;
+  }
+
+  function beginGhazbaranHideoutBattle() {
+    playerTraveledToGhazHideout = true;
+    const roomId = getRoomIdByRoomName(GHAZBARAN_HIDEOUT_ROOM_NAME);
+    if (!roomId) {
+      console.warn('[Quests Mod][Weakened Archdemon] Cannot start battle — room not found');
+      return;
+    }
+    const initResult = initializeGhazbaranBattle(roomId);
+    if (initResult && initResult.then) {
+      initResult.then((battle) => {
+        if (battle) {
+          setupGhazbaranBattleInstance(battle);
+        }
+      });
+      return;
+    }
+    if (initResult) {
+      setupGhazbaranBattleInstance(initResult);
+    }
+  }
+
+  function getGhazbaranBoardEntity() {
+    const boardContext = globalThis.state?.board?.getSnapshot?.()?.context;
+    const boardConfig = Array.isArray(boardContext?.boardConfig) ? boardContext.boardConfig : [];
+    return boardConfig.find((entity) =>
+      entity?.villain === true
+      && (
+        entity?.nickname === GHAZBARAN_NICKNAME
+        || String(entity?.key || '').startsWith(`ghazbaran-tile-${GHAZBARAN_TILE_INDEX}-`)
+      )
+    ) || null;
+  }
+
+  function debugAndTryApplyGhazHybridAbility() {
+    // Hybrid Minotaur injection was retired in favor of a scripted Lavahole pseudo ability.
+    return false;
+  }
+
+  function patchGhazAbilityCooldownTo3s(world = null) {
+    const ghazActor = findGhazBattleActor(world || ghazBattleWorld);
+    const abilityCd = ghazActor?.abilityCooldown;
+    if (!abilityCd || typeof abilityCd !== 'object') return false;
+
+    const TARGET_TICKS = 48; // 3s at 16 ticks/s
+    const TARGET_MS = 3000;
+    let changed = false;
+    const before = {
+      baseCooldownTicks: abilityCd.baseCooldownTicks,
+      baseCooldown: abilityCd.baseCooldown,
+      baseCooldownMs: abilityCd.baseCooldownMs,
+      baseCooldownMilliseconds: abilityCd.baseCooldownMilliseconds,
+      baseDuration: abilityCd.baseDuration
+    };
+    const setBase = (key, value) => {
+      if (!(key in abilityCd) || typeof abilityCd[key] !== 'number') return;
+      if (abilityCd[key] === value) return;
+      abilityCd[key] = value;
+      changed = true;
+    };
+    setBase('baseCooldownTicks', TARGET_TICKS);
+    setBase('baseCooldown', TARGET_TICKS);
+    setBase('_baseCooldown', TARGET_TICKS);
+    setBase('baseCooldownMs', TARGET_MS);
+    setBase('baseCooldownMilliseconds', TARGET_MS);
+    setBase('baseDuration', TARGET_MS);
+
+    if (changed) {
+      console.log('[Quests Mod][Weakened Archdemon][Debug] Patched Ghaz ability base cooldown to 3s', {
+        before,
+        after: {
+          baseCooldownTicks: abilityCd.baseCooldownTicks,
+          baseCooldown: abilityCd.baseCooldown,
+          baseCooldownMs: abilityCd.baseCooldownMs,
+          baseCooldownMilliseconds: abilityCd.baseCooldownMilliseconds,
+          baseDuration: abilityCd.baseDuration
+        }
+      });
+    }
+    return changed;
+  }
+
+  function logGhazServerActorSnapshot(label = 'battle-start') {
+    if (ghazServerSnapshotLogged) return false;
+    try {
+      const boardContext = globalThis.state?.board?.getSnapshot?.()?.context;
+      const serverResults = boardContext?.serverResults || null;
+      const boardConfig = Array.isArray(boardContext?.boardConfig) ? boardContext.boardConfig : [];
+      const ghazBoard = getGhazbaranBoardEntity();
+      if (!serverResults) {
+        if (!ghazBattleStartSnapshotLogged) {
+          ghazBattleStartSnapshotLogged = true;
+          console.log(`[Quests Mod][Weakened Archdemon][Debug][${label}] Live battle-start snapshot (no serverResults yet)`, {
+            mode: boardContext?.mode ?? null,
+            boardGhaz: ghazBoard ? {
+              key: ghazBoard.key,
+              nickname: ghazBoard.nickname,
+              tileIndex: ghazBoard.tileIndex,
+              gameId: ghazBoard.gameId,
+              monsterId: ghazBoard.monsterId,
+              databaseId: ghazBoard.databaseId,
+              abilityGameId: ghazBoard.abilityGameId,
+              abilitySourceGameId: ghazBoard.abilitySourceGameId,
+              level: ghazBoard.level,
+              awaken: ghazBoard.awaken,
+              awakened: ghazBoard.awakened,
+              starTier: ghazBoard.starTier
+            } : null,
+            boardVillains: boardConfig
+              .filter((e) => e?.villain === true)
+              .map((e) => ({
+                key: e?.key,
+                nickname: e?.nickname,
+                tileIndex: e?.tileIndex,
+                gameId: e?.gameId,
+                monsterId: e?.monsterId,
+                databaseId: e?.databaseId,
+                abilityGameId: e?.abilityGameId
+              }))
+          });
+        }
+        return false;
+      }
+
+      const rewardParty = Array.isArray(serverResults?.rewardScreen?.party)
+        ? serverResults.rewardScreen.party
+        : [];
+      const monstersTop = Array.isArray(serverResults?.monsters) ? serverResults.monsters : [];
+      const battleMonsters = Array.isArray(serverResults?.battleData?.monsters) ? serverResults.battleData.monsters : [];
+      const ghazDbId = ghazBoard?.databaseId;
+      const ghazName = String(GHAZBARAN_NICKNAME || '').toLowerCase();
+
+      const matchesByName = (entry) => {
+        const name = String(entry?.name || entry?.nickname || entry?.metadata?.name || '').toLowerCase();
+        return !!name && name.includes(ghazName);
+      };
+      const matchesById = (entry) => {
+        if (ghazDbId == null) return false;
+        return entry?.id === ghazDbId || entry?.databaseId === ghazDbId || entry?.monsterId === ghazDbId;
+      };
+
+      const rewardHit = rewardParty.find((p) => matchesById(p) || matchesByName(p)) || null;
+      const topHit = monstersTop.find((m) => matchesById(m) || matchesByName(m)) || null;
+      const battleHit = battleMonsters.find((m) => matchesById(m) || matchesByName(m)) || null;
+
+      console.log(`[Quests Mod][Weakened Archdemon][Debug][${label}] Ghaz server-side actor snapshot`, {
+        seed: serverResults?.seed ?? null,
+        mode: boardContext?.mode ?? null,
+        boardGhaz: ghazBoard ? {
+          key: ghazBoard.key,
+          gameId: ghazBoard.gameId,
+          monsterId: ghazBoard.monsterId,
+          databaseId: ghazBoard.databaseId,
+          abilityGameId: ghazBoard.abilityGameId,
+          level: ghazBoard.level,
+          awaken: ghazBoard.awaken,
+          awakened: ghazBoard.awakened,
+          starTier: ghazBoard.starTier
+        } : null,
+        rewardPartyCount: rewardParty.length,
+        topMonstersCount: monstersTop.length,
+        battleMonstersCount: battleMonsters.length,
+        rewardPartyHit: rewardHit,
+        topMonsterHit: topHit,
+        battleMonsterHit: battleHit,
+        boardVillains: boardConfig
+          .filter((e) => e?.villain === true)
+          .map((e) => ({
+            key: e?.key,
+            nickname: e?.nickname,
+            gameId: e?.gameId,
+            monsterId: e?.monsterId,
+            databaseId: e?.databaseId,
+            abilityGameId: e?.abilityGameId
+          }))
+      });
+      ghazServerSnapshotLogged = true;
+      return true;
+    } catch (error) {
+      console.error(`[Quests Mod][Weakened Archdemon][Debug][${label}] Error logging server snapshot:`, error);
+      return false;
+    }
+  }
+
+  function cleanupGhazRuntimeDebugHooks() {
+    const clean = (unsub) => {
+      if (!unsub) return;
+      try {
+        if (typeof unsub === 'function') unsub();
+        else if (typeof unsub.unsubscribe === 'function') unsub.unsubscribe();
+      } catch (_) { /* noop */ }
+    };
+    clean(ghazGameTimerDebugUnsub);
+    clean(ghazNewGameDebugUnsub);
+    clean(ghazNativeDamageActorEnterUnsub);
+    ghazGameTimerDebugUnsub = null;
+    ghazNewGameDebugUnsub = null;
+    ghazNativeDamageActorEnterUnsub = null;
+    unpatchGhazNativeDamageTracking(ghazBattleWorld);
+    if (ghazNativeDamageDomObserver) {
+      ghazNativeDamageDomObserver.disconnect();
+      ghazNativeDamageDomObserver = null;
+    }
+    if (ghazLavaholeInterval) { clearInterval(ghazLavaholeInterval); ghazLavaholeInterval = null; }
+    stopGhazBossHpBarPolling();
+  }
+
+  function getGhazBossHpBarMountRoot() {
+    return document.querySelector('.relative.z-0.select-none')
+      || document.querySelector('[class*="relative"]')
+      || document.body;
+  }
+
+  function ensureGhazBossHpBarStyles() {
+    if (document.getElementById(GHAZ_BOSS_HP_BAR_STYLE_ID)) return;
+    const style = document.createElement('style');
+    style.id = GHAZ_BOSS_HP_BAR_STYLE_ID;
+    style.textContent = `
+      #${GHAZ_BOSS_HP_BAR_ID} {
+        position: absolute;
+        top: 9px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 999999;
+        pointer-events: none;
+        width: fit-content;
+        max-width: min(420px, calc(100vw - 24px));
+      }
+      #${GHAZ_BOSS_HP_BAR_ID} .quests-ghaz-hp-bg {
+        position: absolute;
+        inset: 0;
+        background: url("https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png");
+        background-size: auto;
+        background-repeat: repeat;
+        opacity: 0.92;
+        border-radius: 4px;
+        pointer-events: none;
+        z-index: 0;
+      }
+      #${GHAZ_BOSS_HP_BAR_ID} .quests-ghaz-hp-content {
+        position: relative;
+        z-index: 1;
+        box-sizing: border-box;
+        border: 4px solid transparent;
+        border-image: url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 4 stretch;
+        border-radius: 4px;
+        padding: 6px 10px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 280px;
+        color: #fff;
+      }
+      #${GHAZ_BOSS_HP_BAR_ID} .quests-ghaz-hp-icon {
+        width: 28px;
+        height: 28px;
+        image-rendering: pixelated;
+        flex: 0 0 auto;
+      }
+      #${GHAZ_BOSS_HP_BAR_ID} .quests-ghaz-hp-main {
+        flex: 1 1 auto;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+      }
+      #${GHAZ_BOSS_HP_BAR_ID} .quests-ghaz-hp-title {
+        font-size: 12px;
+        line-height: 1.2;
+        color: #ffcc66;
+        text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      #${GHAZ_BOSS_HP_BAR_ID} .quests-ghaz-hp-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      #${GHAZ_BOSS_HP_BAR_ID} .quests-ghaz-hp-track {
+        flex: 1 1 auto;
+        height: 12px;
+        background: rgba(0, 0, 0, 0.55);
+        border: 1px solid #111;
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+        overflow: hidden;
+      }
+      #${GHAZ_BOSS_HP_BAR_ID} .quests-ghaz-hp-fill {
+        height: 100%;
+        width: 100%;
+        transform-origin: left center;
+        transform: scaleX(1);
+        background: linear-gradient(180deg, #e85a4f 0%, #b42828 55%, #7a1515 100%);
+        transition: transform 120ms linear, background 180ms ease;
+      }
+      #${GHAZ_BOSS_HP_BAR_ID} .quests-ghaz-hp-fill[data-pct="low"] {
+        background: linear-gradient(180deg, #ff7a3a 0%, #d44518 55%, #8a2208 100%);
+      }
+      #${GHAZ_BOSS_HP_BAR_ID} .quests-ghaz-hp-fill[data-pct="critical"] {
+        background: linear-gradient(180deg, #ff4444 0%, #aa1010 55%, #5a0000 100%);
+      }
+      #${GHAZ_BOSS_HP_BAR_ID} .quests-ghaz-hp-value {
+        font-size: 11px;
+        line-height: 1;
+        color: #ffffff;
+        text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;
+        white-space: nowrap;
+        min-width: 72px;
+        text-align: right;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  function findGhazBattleActor(world = ghazBattleWorld) {
+    const actors = getBattleWorldActors(world);
+    if (!actors.length) return null;
+    const nickname = String(GHAZBARAN_NICKNAME).toLowerCase();
+    const boardGameId = Number(getGhazbaranBoardEntity()?.gameId);
+    return actors.find((actor) => actor?.villain === true && String(actor?.name || actor?.metadata?.name || '').toLowerCase().includes(nickname))
+      || actors.find((actor) => actor?.villain === true && Number.isFinite(boardGameId) && Number(actor?.gameId ?? actor?.monsterId ?? actor?.metadata?.id) === boardGameId)
+      || actors.find((actor) => String(actor?.name || actor?.metadata?.name || actor?.entityTag || '').toLowerCase().includes('ghazbaran'))
+      || null;
+  }
+
+  function readGhazBossHpValues(actor) {
+    const hpComp = actor?.hp || actor?.getComponent?.('hp') || null;
+    let current = null;
+    let max = null;
+    if (hpComp) {
+      if (Number.isFinite(Number(hpComp._hp))) current = Number(hpComp._hp);
+      else if (Number.isFinite(Number(hpComp.currentHP))) current = Number(hpComp.currentHP);
+      if (Number.isFinite(Number(hpComp.max))) max = Number(hpComp.max);
+      else if (Number.isFinite(Number(hpComp.maxHp))) max = Number(hpComp.maxHp);
+    }
+    if (!Number.isFinite(current)) {
+      const snap = getActorHpSnapshot(actor);
+      if (Number.isFinite(snap.hp)) current = snap.hp;
+      if (!Number.isFinite(max) && Number.isFinite(snap.maxHp)) max = snap.maxHp;
+    }
+    if (!Number.isFinite(max) || max <= 0) max = Number.isFinite(current) ? current : 0;
+    if (!Number.isFinite(current)) current = max;
+    current = Math.max(0, Math.min(max, Math.floor(current)));
+    max = Math.max(0, Math.floor(max));
+    const alive = !(hpComp?._isAlive === false || actor?.dead || actor?.isDead || current <= 0);
+    return { current, max, alive, ratio: max > 0 ? current / max : 0 };
+  }
+
+  function stopGhazBossHpBarPolling() {
+    if (ghazBossHpBarInterval) {
+      clearInterval(ghazBossHpBarInterval);
+      ghazBossHpBarInterval = null;
+    }
+  }
+
+  function removeGhazBossHpBar() {
+    stopGhazBossHpBarPolling();
+    ghazBossHpBarEl?.remove?.();
+    ghazBossHpBarEl = null;
+    ghazBossHpBarFillEl = null;
+    ghazBossHpBarValueEl = null;
+    ghazBossHpBarLastKey = null;
+    document.getElementById(GHAZ_BOSS_HP_BAR_ID)?.remove();
+    document.getElementById(GHAZ_BOSS_HP_BAR_STYLE_ID)?.remove();
+  }
+
+  function updateGhazBossHpBar(force = false) {
+    if (!ghazBossHpBarEl || !document.contains(ghazBossHpBarEl)) {
+      if (playerTraveledToGhazHideout && ghazbaranBattle && ghazBattleWorld) showGhazBossHpBar();
+      return;
+    }
+    if (!playerTraveledToGhazHideout || !ghazbaranBattle) {
+      removeGhazBossHpBar();
+      return;
+    }
+
+    const actor = findGhazBattleActor();
+    if (!actor) {
+      // Battle world exists but actor not ready yet — keep placeholder, never show 0/0.
+      if (force || ghazBossHpBarLastKey !== 'pending') {
+        ghazBossHpBarLastKey = 'pending';
+        if (ghazBossHpBarFillEl) {
+          ghazBossHpBarFillEl.style.transform = 'scaleX(1)';
+          ghazBossHpBarFillEl.setAttribute('data-pct', 'full');
+        }
+        if (ghazBossHpBarValueEl) ghazBossHpBarValueEl.textContent = '— / —';
+      }
+      return;
+    }
+
+    const { current, max, ratio, alive } = readGhazBossHpValues(actor);
+    if (!Number.isFinite(max) || max <= 0) {
+      if (ghazBossHpBarValueEl) ghazBossHpBarValueEl.textContent = '— / —';
+      return;
+    }
+
+    const pct = Math.max(0, Math.min(1, ratio));
+    const key = `${current}/${max}:${alive ? 1 : 0}`;
+    if (!force && key === ghazBossHpBarLastKey) return;
+    ghazBossHpBarLastKey = key;
+
+    if (ghazBossHpBarFillEl) {
+      ghazBossHpBarFillEl.style.transform = `scaleX(${pct})`;
+      let band = 'full';
+      if (pct <= 0.25) band = 'critical';
+      else if (pct <= 0.5) band = 'low';
+      ghazBossHpBarFillEl.setAttribute('data-pct', band);
+    }
+    if (ghazBossHpBarValueEl) {
+      ghazBossHpBarValueEl.textContent = alive
+        ? `${current} / ${max}`
+        : 'Defeated';
+    }
+  }
+
+  function startGhazBossHpBarPolling() {
+    stopGhazBossHpBarPolling();
+    updateGhazBossHpBar(true);
+    ghazBossHpBarInterval = setInterval(() => {
+      if (!playerTraveledToGhazHideout || !ghazbaranBattle) {
+        removeGhazBossHpBar();
+        return;
+      }
+      updateGhazBossHpBar(false);
+    }, 200);
+  }
+
+  function showGhazBossHpBar() {
+    if (!playerTraveledToGhazHideout || !ghazbaranBattle) return;
+    // Wait until a fight world exists so we don't flash 0/0 on board setup.
+    if (!ghazBattleWorld && !findGhazBattleActor()) return;
+    ensureGhazBossHpBarStyles();
+
+    let wrapper = document.getElementById(GHAZ_BOSS_HP_BAR_ID);
+    if (!wrapper) {
+      wrapper = document.createElement('div');
+      wrapper.id = GHAZ_BOSS_HP_BAR_ID;
+      wrapper.setAttribute('aria-label', `${GHAZBARAN_NICKNAME} health`);
+
+      const bg = document.createElement('div');
+      bg.className = 'quests-ghaz-hp-bg';
+      wrapper.appendChild(bg);
+
+      const content = document.createElement('div');
+      content.className = 'quests-ghaz-hp-content';
+
+      const icon = document.createElement('img');
+      icon.className = 'quests-ghaz-hp-icon';
+      icon.alt = '';
+      icon.src = getQuestItemsAssetUrl('ghaz-icon.gif');
+      icon.draggable = false;
+      content.appendChild(icon);
+
+      const main = document.createElement('div');
+      main.className = 'quests-ghaz-hp-main';
+
+      const title = document.createElement('div');
+      title.className = 'quests-ghaz-hp-title pixel-font-14';
+      title.textContent = GHAZBARAN_NICKNAME;
+      main.appendChild(title);
+
+      const row = document.createElement('div');
+      row.className = 'quests-ghaz-hp-row';
+
+      const track = document.createElement('div');
+      track.className = 'quests-ghaz-hp-track';
+      const fill = document.createElement('div');
+      fill.className = 'quests-ghaz-hp-fill';
+      fill.setAttribute('data-pct', 'full');
+      track.appendChild(fill);
+      row.appendChild(track);
+
+      const value = document.createElement('div');
+      value.className = 'quests-ghaz-hp-value pixel-font-14';
+      value.textContent = '— / —';
+      row.appendChild(value);
+
+      main.appendChild(row);
+      content.appendChild(main);
+      wrapper.appendChild(content);
+
+      ghazBossHpBarFillEl = fill;
+      ghazBossHpBarValueEl = value;
+    } else {
+      ghazBossHpBarFillEl = wrapper.querySelector('.quests-ghaz-hp-fill');
+      ghazBossHpBarValueEl = wrapper.querySelector('.quests-ghaz-hp-value');
+    }
+
+    const mountRoot = getGhazBossHpBarMountRoot();
+    if (wrapper.parentNode !== mountRoot) {
+      mountRoot.appendChild(wrapper);
+    }
+    ghazBossHpBarEl = wrapper;
+    startGhazBossHpBarPolling();
+  }
+
+  function getBattleWorldActors(world) {
+    if (!world?.grid) return [];
+    if (Array.isArray(world.grid.actors)) return world.grid.actors;
+    const entries = world.grid.childrenById?.entries?.();
+    if (entries && typeof entries[Symbol.iterator] === 'function') {
+      const actors = [];
+      for (const [, actor] of entries) actors.push(actor);
+      return actors;
+    }
+    return [];
+  }
+
+  function getActorHpSnapshot(actor) {
+    const hpKeys = ['hp', 'currentHp', 'health', 'hitPoints', 'currentHealth'];
+    const maxHpKeys = ['maxHp', 'baseHp', 'maxHealth', 'healthMax', 'totalHp'];
+    let hpKey = null;
+    let maxHpKey = null;
+    for (const k of hpKeys) {
+      if (typeof actor?.[k] === 'number' && Number.isFinite(actor[k])) {
+        hpKey = k;
+        break;
+      }
+    }
+    for (const k of maxHpKeys) {
+      if (typeof actor?.[k] === 'number' && Number.isFinite(actor[k])) {
+        maxHpKey = k;
+        break;
+      }
+    }
+    const hp = hpKey ? Number(actor[hpKey]) : null;
+    const maxHp = maxHpKey ? Number(actor[maxHpKey]) : null;
+    return { hpKey, maxHpKey, hp, maxHp };
+  }
+
+  function getGhazActorDisplayLabel(actor) {
+    if (!actor) return 'unknown';
+    return String(
+      actor.name
+      || actor.metadata?.name
+      || actor.nickname
+      || actor.metadata?.nickname
+      || actor.entityTag
+      || actor.id
+      || 'unknown'
+    ).trim();
+  }
+
+  function getGhazActorTileIndex(actor) {
+    if (!actor) return null;
+    const raw = actor?.position?.tile?.index
+      ?? actor?.position?.tileIndex
+      ?? actor?.tileIndex
+      ?? actor?.spawnTileIndex
+      ?? actor?.initialTileIndex;
+    const tileIndex = Number(raw);
+    return Number.isFinite(tileIndex) ? tileIndex : null;
+  }
+
+  function resolveGhazDamageSourceLabel(from) {
+    if (!from) return null;
+    if (typeof from === 'object') return getGhazActorDisplayLabel(from.owner || from);
+    return String(from);
+  }
+
+  function summarizeGhazHpComponent(hp) {
+    if (!hp || typeof hp !== 'object') return null;
+    const publishKeys = Object.keys(hp).filter((key) => key.startsWith('on') && typeof hp[key]?.publish === 'function');
+    return {
+      keys: Object.keys(hp).slice(0, 40),
+      publishKeys,
+      _hp: hp._hp,
+      max: hp.max,
+      currentHP: hp.currentHP,
+      _isAlive: hp._isAlive,
+      hasApplyDamage: typeof hp.applyDamage === 'function',
+      hasHealHp: typeof hp.healHp === 'function',
+      hasCalculateAppliedDamage: typeof hp.calculateAppliedDamage === 'function',
+      ownerLabel: getGhazActorDisplayLabel(hp.owner)
+    };
+  }
+
+  function sanitizeGhazDamageOpts(opts) {
+    if (opts == null) return opts;
+    if (typeof opts === 'number') return { points: opts, _note: 'passed as raw number' };
+    const safe = {};
+    ['points', 'damageType', 'crit', 'rawPoints', 'overkill', 'skillId', 'abilityId', 'isAbility', 'isAutoAttack'].forEach((key) => {
+      if (opts[key] !== undefined) safe[key] = opts[key];
+    });
+    safe.from = resolveGhazDamageSourceLabel(opts.from);
+    safe.optsKeys = Object.keys(opts).slice(0, 25);
+    return safe;
+  }
+
+  function sanitizeGhazDamageResult(result) {
+    if (result == null) return result;
+    if (typeof result === 'number') return { applied: result };
+    if (typeof result !== 'object') return { value: result, type: typeof result };
+    const safe = { resultType: typeof result, resultKeys: Object.keys(result).slice(0, 20) };
+    ['damageType', 'crit', 'blocked', 'dodged', 'applied', 'calculatedDamage', 'damageToApply'].forEach((key) => {
+      if (result[key] !== undefined) safe[key] = result[key];
+    });
+    const numeric = Number(result);
+    if (Number.isFinite(numeric)) safe.numeric = numeric;
+    return safe;
+  }
+
+  function sanitizeGhazHpChangePayload(payload) {
+    if (!payload || typeof payload !== 'object') return payload;
+    const safe = {};
+    ['current', 'previous', 'damage', 'heal', 'points', 'damageType', 'crit', 'overkill'].forEach((key) => {
+      if (payload[key] !== undefined) safe[key] = payload[key];
+    });
+    safe.source = resolveGhazDamageSourceLabel(payload.source || payload.from);
+    safe.payloadKeys = Object.keys(payload).slice(0, 25);
+    return safe;
+  }
+
+  function describeGhazDamageDomNode(node) {
+    if (!node || node.nodeType !== 1) return null;
+    const rect = node.getBoundingClientRect?.();
+    return {
+      tag: node.tagName?.toLowerCase?.() || null,
+      id: node.id || null,
+      className: String(node.className || '').slice(0, 120),
+      text: String(node.textContent || '').trim().slice(0, 32),
+      ariaLabel: node.getAttribute?.('aria-label') || null,
+      parentTag: node.parentElement?.tagName?.toLowerCase?.() || null,
+      parentClass: String(node.parentElement?.className || '').slice(0, 80),
+      rect: rect ? {
+        left: Math.round(rect.left),
+        top: Math.round(rect.top),
+        w: Math.round(rect.width),
+        h: Math.round(rect.height)
+      } : null
+    };
+  }
+
+  function looksLikeGhazNativeDamageDomNode(node) {
+    if (!node || node.nodeType !== 1) return false;
+    const cls = String(node.className || '');
+    if (cls.includes('quests-pseudo-damage')) return false;
+    if (node.matches?.('canvas.font-outlined, .font-outlined-fill, .font-outlined')) return true;
+    const text = String(node.textContent || '').trim();
+    if (/^[-+]?\d+$/.test(text) && text.length <= 7) {
+      try {
+        const style = window.getComputedStyle(node);
+        if (style.position === 'fixed' || style.position === 'absolute') return true;
+      } catch (_) { /* noop */ }
+    }
+    return false;
+  }
+
+  function collectGhazFloatingDamageDomCandidates(root = document.body) {
+    if (!root?.querySelectorAll) return [];
+    const seen = new Set();
+    const out = [];
+    const push = (node) => {
+      if (!node || seen.has(node)) return;
+      seen.add(node);
+      out.push(node);
+    };
+    ['canvas.font-outlined', '.font-outlined-fill', '.font-outlined'].forEach((sel) => {
+      try { root.querySelectorAll(sel).forEach(push); } catch (_) { /* noop */ }
+    });
+    const battleRoot = document.getElementById('battle-area')
+      || document.querySelector('[data-battle-area]')
+      || root;
+    try {
+      battleRoot.querySelectorAll('div, span').forEach((el) => {
+        if (el.children.length > 0) return;
+        const text = String(el.textContent || '').trim();
+        if (!/^[-+]?\d+$/.test(text)) return;
+        const style = window.getComputedStyle(el);
+        if (style.position === 'fixed' || style.position === 'absolute') push(el);
+      });
+    } catch (_) { /* noop */ }
+    return out;
+  }
+
+  function findGhazNewDamageDomNodes(beforeNodes, afterNodes) {
+    const beforeSet = new Set(beforeNodes || []);
+    return (afterNodes || []).filter((node) => !beforeSet.has(node));
+  }
+
+  function logGhazNativeDamageDomNodes(label, nodes, extra = {}) {
+    if (!nodes?.length) return;
+    if (ghazNativeDamageDomEventCount >= GHAZ_NATIVE_DAMAGE_DOM_LOG_LIMIT) return;
+    ghazNativeDamageDomEventCount += 1;
+    console.log(`[Quests Mod][Weakened Archdemon][Debug][nativeDamage][${label}]`, {
+      ...extra,
+      nodes: nodes.map(describeGhazDamageDomNode).slice(0, 8)
+    });
+  }
+
+  function unpatchGhazNativeDamageTracking(world) {
+    const actors = getBattleWorldActors(world);
+    actors.forEach((actor) => {
+      const hp = actor?.hp;
+      if (!hp?.__ghazOrigApplyDamage) return;
+      hp.applyDamage = hp.__ghazOrigApplyDamage;
+      delete hp.__ghazOrigApplyDamage;
+      delete actor.__ghazNativeDamagePatched;
+      delete hp.__ghazHpChangeSubbed;
+    });
+  }
+
+  function subscribeGhazHpChangeDebug(actor) {
+    const hp = actor?.hp;
+    if (!hp?.onHpChange || typeof hp.onHpChange.subscribe !== 'function' || hp.__ghazHpChangeSubbed) return;
+    hp.__ghazHpChangeSubbed = true;
+    try {
+      hp.onHpChange.subscribe((payload) => {
+        if (!playerTraveledToGhazHideout || !ghazbaranBattle) return;
+        if (ghazNativeDamageEventCount >= GHAZ_NATIVE_DAMAGE_LOG_LIMIT) return;
+        ghazNativeDamageEventCount += 1;
+        console.log('[Quests Mod][Weakened Archdemon][Debug][nativeDamage] onHpChange', {
+          target: getGhazActorDisplayLabel(actor),
+          payload: sanitizeGhazHpChangePayload(payload)
+        });
+        if (getGhazActorDisplayLabel(actor).toLowerCase().includes(String(GHAZBARAN_NICKNAME).toLowerCase())) {
+          updateGhazBossHpBar(true);
+        }
+        requestAnimationFrame(() => {
+          const domNodes = collectGhazFloatingDamageDomCandidates();
+          logGhazNativeDamageDomNodes('onHpChange-dom-scan', domNodes.slice(-4), {
+            target: getGhazActorDisplayLabel(actor)
+          });
+        });
+      });
+    } catch (error) {
+      console.warn('[Quests Mod][Weakened Archdemon][Debug][nativeDamage] onHpChange subscribe failed:', error);
+    }
+  }
+
+  function patchGhazNativeDamageTracking(world) {
+    if (!world) return 0;
+    const actors = getBattleWorldActors(world);
+    let patched = 0;
+    actors.forEach((actor) => {
+      const hp = actor?.hp;
+      if (!hp || typeof hp.applyDamage !== 'function' || actor.__ghazNativeDamagePatched) return;
+
+      if (!ghazNativeDamageHpSampleLogged) {
+        ghazNativeDamageHpSampleLogged = true;
+        console.log('[Quests Mod][Weakened Archdemon][Debug][nativeDamage] HP component sample', {
+          actor: getGhazActorDisplayLabel(actor),
+          hp: summarizeGhazHpComponent(hp)
+        });
+      }
+
+      const origApplyDamage = hp.applyDamage.bind(hp);
+      hp.__ghazOrigApplyDamage = origApplyDamage;
+      hp.applyDamage = (opts = {}) => {
+        if (!playerTraveledToGhazHideout || !ghazbaranBattle) {
+          return origApplyDamage(opts);
+        }
+
+        const targetLabel = getGhazActorDisplayLabel(actor);
+        const beforeHp = hp._hp ?? hp.currentHP ?? null;
+        const domBefore = collectGhazFloatingDamageDomCandidates();
+        const shouldLog = ghazNativeDamageEventCount < GHAZ_NATIVE_DAMAGE_LOG_LIMIT;
+
+        let result;
+        let threw = null;
+        try {
+          result = origApplyDamage(opts);
+        } catch (error) {
+          threw = error;
+          throw error;
+        } finally {
+          if (shouldLog) {
+            ghazNativeDamageEventCount += 1;
+            const afterHp = hp._hp ?? hp.currentHP ?? null;
+            const logPayload = {
+              target: targetLabel,
+              source: resolveGhazDamageSourceLabel(opts?.from),
+              opts: sanitizeGhazDamageOpts(opts),
+              result: sanitizeGhazDamageResult(result),
+              hpBefore: beforeHp,
+              hpAfter: afterHp,
+              hpDelta: (Number.isFinite(beforeHp) && Number.isFinite(afterHp)) ? (afterHp - beforeHp) : null,
+              threw: threw ? String(threw?.message || threw) : null
+            };
+            const sourceLabel = logPayload.source || '';
+            if (
+              !ghazNativeSpellDamageSample
+              && sourceLabel.toLowerCase().includes(String(GHAZBARAN_NICKNAME).toLowerCase())
+              && Number.isFinite(Number(opts?.points))
+              && Number(opts.points) > 0
+            ) {
+              ghazNativeSpellDamageSample = {
+                damageType: opts.damageType || 'fire',
+                isAbility: opts.isAbility,
+                crit: opts.crit === true
+              };
+              console.log('[Quests Mod][Weakened Archdemon][Debug][nativeDamage] Captured Ghaz spell sample for pseudo spells', ghazNativeSpellDamageSample);
+            }
+            console.log('[Quests Mod][Weakened Archdemon][Debug][nativeDamage] applyDamage', logPayload);
+            if (targetLabel.toLowerCase().includes(String(GHAZBARAN_NICKNAME).toLowerCase())) {
+              updateGhazBossHpBar(true);
+            }
+            requestAnimationFrame(() => {
+              const domAfter = collectGhazFloatingDamageDomCandidates();
+              const newNodes = findGhazNewDamageDomNodes(domBefore, domAfter);
+              logGhazNativeDamageDomNodes('applyDamage-new-nodes', newNodes, {
+                target: targetLabel,
+                source: logPayload.source
+              });
+            });
+          }
+        }
+        return result;
+      };
+
+      subscribeGhazHpChangeDebug(actor);
+      actor.__ghazNativeDamagePatched = true;
+      patched += 1;
+    });
+    return patched;
+  }
+
+  function setupGhazNativeDamageDomObserver() {
+    if (ghazNativeDamageDomObserver) return;
+    ghazNativeDamageDomObserver = new MutationObserver((mutations) => {
+      if (!playerTraveledToGhazHideout || !ghazbaranBattle) return;
+      if (ghazNativeDamageDomEventCount >= GHAZ_NATIVE_DAMAGE_DOM_LOG_LIMIT) return;
+      mutations.forEach((mutation) => {
+        mutation.addedNodes.forEach((node) => {
+          if (node.nodeType !== 1) return;
+          if (looksLikeGhazNativeDamageDomNode(node)) {
+            logGhazNativeDamageDomNodes('mutation-added', [node]);
+            return;
+          }
+          node.querySelectorAll?.('canvas.font-outlined, .font-outlined-fill, .font-outlined, div, span').forEach((child) => {
+            if (looksLikeGhazNativeDamageDomNode(child)) {
+              logGhazNativeDamageDomNodes('mutation-child', [child]);
+            }
+          });
+        });
+      });
+    });
+    ghazNativeDamageDomObserver.observe(document.body, { childList: true, subtree: true });
+    console.log('[Quests Mod][Weakened Archdemon][Debug][nativeDamage] DOM observer started');
+  }
+
+  function scheduleGhazNativeDamageTracking(world, label = 'newGame') {
+    const run = (phase) => {
+      if (!playerTraveledToGhazHideout || !ghazbaranBattle) return;
+      const patched = patchGhazNativeDamageTracking(world || ghazBattleWorld);
+      if (patched > 0) {
+        console.log('[Quests Mod][Weakened Archdemon][Debug][nativeDamage] applyDamage hooks installed', {
+          phase,
+          patched
+        });
+      }
+    };
+    run(`${label}-immediate`);
+    [100, 400, 1000].forEach((delay) => {
+      setTimeout(() => run(`${label}+${delay}ms`), delay);
+    });
+  }
+
+  function buildGhazPseudoDamageOpts(sourceActor, points) {
+    return {
+      points: Math.floor(points)
+    };
+  }
+
+  function applyPseudoLavaholeDamageToActor(actor, sourceActor, damage, debugLabel = 'Lavahole') {
+    if (!actor || !Number.isFinite(damage) || damage <= 0) return 0;
+    const dmg = Math.floor(damage);
+    const hpComp = actor?.hp || actor?.getComponent?.('hp') || null;
+    if (!hpComp || typeof hpComp.applyDamage !== 'function') {
+      console.warn('[Quests Mod][Weakened Archdemon][Debug][pseudoDamage] failed — applyDamage unavailable', {
+        debugLabel,
+        target: getGhazActorDisplayLabel(actor),
+        hpComponent: summarizeGhazHpComponent(hpComp)
+      });
+      return 0;
+    }
+    if (hpComp._isAlive === false || actor?.dead || actor?.isDead) return 0;
+
+    const before = hpComp._hp ?? hpComp.currentHP ?? null;
+    const applyFn = hpComp.__ghazOrigApplyDamage || hpComp.applyDamage.bind(hpComp);
+    const opts = buildGhazPseudoDamageOpts(sourceActor, dmg);
+
+    try {
+      const result = applyFn(opts);
+      const applied = Number(result);
+      const after = hpComp._hp ?? hpComp.currentHP ?? null;
+      let appliedAmount = Number.isFinite(applied) && applied > 0 ? applied : 0;
+      if (!appliedAmount && Number.isFinite(before) && Number.isFinite(after) && after < before) {
+        appliedAmount = before - after;
+      }
+      return appliedAmount;
+    } catch (error) {
+      // Some runtime builds can throw inside applyDamage when optional fields
+      // are present with unexpected shapes. Retry once with a minimal payload.
+      try {
+        const fallbackOpts = { points: dmg };
+        const fallbackResult = applyFn(fallbackOpts);
+        const fallbackApplied = Number(fallbackResult);
+        const after = hpComp._hp ?? hpComp.currentHP ?? null;
+        let fallbackAppliedAmount = Number.isFinite(fallbackApplied) && fallbackApplied > 0 ? fallbackApplied : 0;
+        if (!fallbackAppliedAmount && Number.isFinite(before) && Number.isFinite(after) && after < before) {
+          fallbackAppliedAmount = before - after;
+        }
+        if (fallbackAppliedAmount > 0) return fallbackAppliedAmount;
+      } catch (_) {
+        // Fall through to original warning below.
+      }
+      console.warn('[Quests Mod][Weakened Archdemon][Debug][pseudoDamage] applyDamage threw', {
+        debugLabel,
+        target: getGhazActorDisplayLabel(actor),
+        opts,
+        error: String(error?.message || error)
+      });
+      return 0;
+    }
+  }
+
+  function tileDistanceChebyshev(fromTile, toTile, boardWidth = 15) {
+    const from = Number(fromTile);
+    const to = Number(toTile);
+    if (!Number.isFinite(from) || !Number.isFinite(to)) return Number.POSITIVE_INFINITY;
+    const fx = from % boardWidth;
+    const fy = Math.floor(from / boardWidth);
+    const tx = to % boardWidth;
+    const ty = Math.floor(to / boardWidth);
+    return Math.max(Math.abs(fx - tx), Math.abs(fy - ty));
+  }
+
+  const GHAZ_LAVAHOLE_EFFECT_URL = 'https://bestiaryarena.com/assets/EFFECT/4.png';
+  const GHAZ_LAVAHOLE_EFFECT_STYLE_ID = 'quests-ghaz-lavahole-effect-styles';
+  const GHAZ_LAVAHOLE_EFFECT_FRAME_MS = 24;
+  const GHAZ_LAVAHOLE_EFFECT_FRAME_COUNT = 7;
+  const GHAZ_LAVAHOLE_EFFECT_CLASS = 'quests-ghaz-lavahole-effect';
+
+  const GHAZ_LAVAHOLE2_EFFECT_URL = 'https://bestiaryarena.com/assets/EFFECT/35.png';
+  const GHAZ_LAVAHOLE2_EFFECT_STYLE_ID = 'quests-ghaz-lavahole2-effect-styles';
+  const GHAZ_LAVAHOLE2_EFFECT_FRAME_COUNT = 7;
+  const GHAZ_LAVAHOLE2_EFFECT_CLASS = 'quests-ghaz-lavahole2-effect';
+  const GHAZ_PSEUDO_LIGHT_VFX_FRAME_MS = 18;
+  const GHAZ_PSEUDO_LIGHT_VFX_MAX_TARGETS = 6;
+
+  function ensureGhazPseudoImpactStyles(effectClass, styleId, keyframesName) {
+    if (typeof document === 'undefined') return;
+    if (document.getElementById(styleId)) return;
+    const safeClass = String(effectClass).replace(/"/g, '\\"');
+    const style = document.createElement('style');
+    style.id = styleId;
+    style.textContent = `
+      .${safeClass} {
+        position: absolute;
+        right: 0;
+        bottom: 0;
+        width: calc(32px * var(--zoomFactor, 1));
+        height: calc(32px * var(--zoomFactor, 1));
+        pointer-events: none;
+        z-index: 10000;
+        overflow: hidden;
+        background-repeat: no-repeat;
+        image-rendering: pixelated;
+      }
+      @keyframes ${keyframesName} {
+        from { transform: translateY(0); }
+        to { transform: translateY(-100%); }
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  function playGhazPseudoImpactEffectOnActors(actors, effectUrl, effectClass, styleId, frameCount = 4) {
+    if (!Array.isArray(actors) || !actors.length || !effectUrl || !effectClass) return;
+    const keyframesName = `${effectClass}-impact-play`;
+    ensureGhazPseudoImpactStyles(effectClass, styleId, keyframesName);
+    const uniqueTiles = [];
+    const seen = new Set();
+    actors.forEach((actor) => {
+      const tileIndex = getGhazActorTileIndex(actor);
+      if (tileIndex == null || seen.has(tileIndex)) return;
+      seen.add(tileIndex);
+      uniqueTiles.push(tileIndex);
+    });
+    uniqueTiles.slice(0, GHAZ_PSEUDO_LIGHT_VFX_MAX_TARGETS).forEach((tileIndex) => {
+      const tileEl = getTileElement(tileIndex);
+      if (!tileEl || tileEl.querySelector(`.${effectClass}`)) return;
+      const frames = Math.max(1, Number(frameCount) || 1);
+      const durationMs = frames * GHAZ_PSEUDO_LIGHT_VFX_FRAME_MS;
+      const viewport = document.createElement('div');
+      viewport.className = effectClass;
+      viewport.style.backgroundImage = `url("${effectUrl}")`;
+      viewport.style.backgroundSize = `100% ${frames * 100}%`;
+      viewport.style.animation = `${keyframesName} ${durationMs}ms steps(${frames}, end) 1 forwards`;
+      tileEl.appendChild(viewport);
+      setTimeout(() => {
+        if (viewport.parentNode) viewport.remove();
+      }, durationMs + 40);
+    });
+  }
+
+  function playGhazPseudoEffectOnWalkableTiles(effectUrl, effectClass, styleId, frameCount = GHAZ_LAVAHOLE_EFFECT_FRAME_COUNT) {
+    const play = globalThis.CustomBattles?.playEffectOnWalkableTiles;
+    if (typeof play !== 'function') return false;
+    return !!play({
+      effectUrl,
+      effectClass,
+      styleId,
+      frameMs: GHAZ_LAVAHOLE_EFFECT_FRAME_MS,
+      frameCount,
+      zIndex: 10000,
+      mountToParent: false,
+      mountToBody: false,
+      tileSizePx: 32,
+      keyframesName: `${effectClass}-play`
+    });
+  }
+
+  function getGhazPseudoPulseTargets(world, { includeDiagnostics = false } = {}) {
+    const actors = getBattleWorldActors(world);
+    if (!actors.length) return null;
+
+    const ghazActor = findGhazBattleActor(world);
+    if (!ghazActor) return null;
+
+    const seenAllies = new Set();
+    const allyActors = [];
+    actors.forEach((actor) => {
+      if (actor === ghazActor) return;
+      if (actor?.villain === true) return;
+      const hpComp = actor?.hp || actor?.getComponent?.('hp');
+      if (hpComp && hpComp._isAlive === false) return;
+      if (actor?.dead || actor?.isDead) return;
+      const dedupeKey = actor?.id ?? actor?.actorId ?? actor;
+      if (seenAllies.has(dedupeKey)) return;
+      seenAllies.add(dedupeKey);
+      allyActors.push(actor);
+    });
+    if (!allyActors.length) return null;
+
+    return { ghazActor, allyActors };
+  }
+
+  function triggerGhazPseudoPulseVariant(currentTick, options = {}) {
+    const {
+      cooldownTicks = 64,
+      getLastTick = () => null,
+      setLastTick = () => {},
+      effectUrl,
+      effectClass,
+      styleId,
+      effectFrameCount = GHAZ_LAVAHOLE_EFFECT_FRAME_COUNT,
+      debugLabel = 'Lavahole',
+      includeDiagnostics = false,
+      includeGameId = false
+    } = options;
+
+    if (!playerTraveledToGhazHideout || !ghazbaranBattle || !isWeakenedArchdemonQuestActive()) return false;
+    const world = ghazBattleWorld;
+    if (!world?.grid) return false;
+    const tick = Number(currentTick);
+    if (!Number.isFinite(tick) || tick <= 0) return false;
+    const lastTick = Number(getLastTick?.());
+    if (Number.isFinite(lastTick) && (tick - lastTick) < cooldownTicks) return false;
+    const targets = getGhazPseudoPulseTargets(world, { includeDiagnostics });
+    if (!targets) return false;
+    const { ghazActor, allyActors } = targets;
+
+    let damagedCount = 0;
+    let totalDamage = 0;
+    const impactedActors = [];
+    allyActors.forEach((ally) => {
+      const hpComp = ally?.hp || ally?.getComponent?.('hp');
+      const maxHp = hpComp?.max || hpComp?._hp || 100;
+      const damage = Math.max(1, Math.floor(maxHp * 0.05));
+      const applied = applyPseudoLavaholeDamageToActor(ally, ghazActor, damage, debugLabel);
+      if (applied > 0) {
+        damagedCount += 1;
+        totalDamage += applied;
+        impactedActors.push(ally);
+      }
+    });
+
+    if (!damagedCount) return false;
+    setLastTick?.(tick);
+    playGhazPseudoImpactEffectOnActors(impactedActors, effectUrl, effectClass, styleId, effectFrameCount);
+    const debugPayload = {
+      cooldownTicks,
+      currentTick: tick,
+      damagedAllies: damagedCount,
+      totalDamage
+    };
+    if (includeGameId) debugPayload.lavaholeGameId = ghazPseudoLavaholeGameId;
+    return true;
+  }
+
+  function triggerGhazPseudoLavahole2Pulse(currentTick) {
+    return triggerGhazPseudoPulseVariant(currentTick, {
+      cooldownTicks: 80,
+      getLastTick: () => ghazLastPseudoLavahole2Tick,
+      setLastTick: (tick) => { ghazLastPseudoLavahole2Tick = tick; },
+      effectUrl: GHAZ_LAVAHOLE2_EFFECT_URL,
+      effectClass: GHAZ_LAVAHOLE2_EFFECT_CLASS,
+      styleId: GHAZ_LAVAHOLE2_EFFECT_STYLE_ID,
+      effectFrameCount: GHAZ_LAVAHOLE2_EFFECT_FRAME_COUNT,
+      debugLabel: 'Lavahole2'
+    });
+  }
+
+  function triggerGhazPseudoLavaholePulse(currentTick) {
+    return triggerGhazPseudoPulseVariant(currentTick, {
+      cooldownTicks: 64,
+      getLastTick: () => ghazLastPseudoLavaholeTick,
+      setLastTick: (tick) => { ghazLastPseudoLavaholeTick = tick; },
+      effectUrl: GHAZ_LAVAHOLE_EFFECT_URL,
+      effectClass: GHAZ_LAVAHOLE_EFFECT_CLASS,
+      styleId: GHAZ_LAVAHOLE_EFFECT_STYLE_ID,
+      effectFrameCount: GHAZ_LAVAHOLE_EFFECT_FRAME_COUNT,
+      debugLabel: 'Lavahole',
+      includeDiagnostics: false,
+      includeGameId: true
+    });
+  }
+
+  function setupGhazRuntimeDebugHooks() {
+    cleanupGhazRuntimeDebugHooks();
+    ghazLastDebugGameTimerState = null;
+    ghazWorldEventDebugLogged = false;
+    ghazNativeDamageHpSampleLogged = false;
+    ghazNativeDamageEventCount = 0;
+    ghazNativeDamageDomEventCount = 0;
+    // Heavy DOM mutation observer disabled for performance.
+    // setupGhazNativeDamageDomObserver();
+
+    ghazGameTimerDebugUnsub = null;
+
+    const logWorldSnapshot = (eventName, event) => {
+        if (!playerTraveledToGhazHideout || !ghazbaranBattle) return;
+        const world = event?.world;
+        const entries = [];
+        const byIdEntries = world?.grid?.childrenById?.entries?.();
+        if (byIdEntries && typeof byIdEntries[Symbol.iterator] === 'function') {
+          for (const [id, actor] of byIdEntries) entries.push([id, actor]);
+        }
+        const actorsArray = Array.isArray(world?.grid?.actors) ? world.grid.actors : null;
+        if (entries.length === 0 && actorsArray?.length) {
+          actorsArray.forEach((actor, idx) => {
+            const id = actor?.id ?? actor?.actorId ?? `arr-${idx}`;
+            entries.push([id, actor]);
+          });
+        }
+        if (entries.length === 0) {
+          if (!ghazWorldEventDebugLogged) {
+            ghazWorldEventDebugLogged = true;
+            console.log(`[Quests Mod][Weakened Archdemon][Debug][${eventName}] world/grid snapshot unavailable`, {
+              eventKeys: event ? Object.keys(event).slice(0, 20) : [],
+              worldKeys: world ? Object.keys(world).slice(0, 20) : [],
+              gridKeys: world?.grid ? Object.keys(world.grid).slice(0, 20) : []
+            });
+          }
+          return;
+        }
+        ghazWorldEventDebugLogged = true;
+        const ghazCandidates = [];
+        for (const [id, actor] of entries) {
+          const name = actor?.metadata?.name || actor?.name || actor?.nickname || '';
+          const gameId = Number(actor?.gameId ?? actor?.monsterId ?? actor?.metadata?.id ?? actor?.metadata?.gameId);
+          const ghazBoard = getGhazbaranBoardEntity();
+          const isLikelyGhaz =
+            String(name).toLowerCase().includes(String(GHAZBARAN_NICKNAME).toLowerCase())
+            || (Number.isFinite(gameId) && Number.isFinite(Number(ghazBoard?.gameId)) && gameId === Number(ghazBoard?.gameId) && actor?.villain === true);
+          if (!isLikelyGhaz) continue;
+
+          if (String(name).toLowerCase().includes(String(GHAZBARAN_NICKNAME).toLowerCase())) {
+            ghazCandidates.push({
+              id,
+              name,
+              gameId: gameId,
+              metadataId: actor?.metadata?.id ?? null,
+              metadataGameId: actor?.metadata?.gameId ?? null,
+              villain: actor?.villain ?? null,
+              level: actor?.level ?? null,
+              tier: actor?.tier ?? null,
+              skillSrc: actor?.metadata?.skill?.src ?? actor?.skill?.src ?? null,
+              cooldownTicks: actor?.abilityCooldown?.cooldownTicks ?? actor?.ability?.cooldown?.cooldownTicks ?? null,
+              keys: Object.keys(actor || {}).slice(0, 20)
+            });
+          }
+        }
+        console.log(`[Quests Mod][Weakened Archdemon][Debug][${eventName}] Ghaz world actor snapshot`, {
+          totalActors: entries.length,
+          ghazCandidates
+        });
+    };
+
+    try {
+      const unsubs = [];
+      const board = globalThis.state?.board;
+      const pushUnsub = (u) => { if (u) unsubs.push(u); };
+      pushUnsub(board?.on?.('newGame', (event) => {
+        ghazBattleWorld = event?.world || null;
+        ghazLastPseudoLavaholeTick = null;
+        ghazLastPseudoLavahole2Tick = null;
+        ghazNativeDamageHpSampleLogged = false;
+        ghazNativeDamageEventCount = 0;
+        ghazNativeDamageDomEventCount = 0;
+        ghazNativeSpellDamageSample = null;
+        if (ghazLavaholeInterval) { clearInterval(ghazLavaholeInterval); ghazLavaholeInterval = null; }
+        showGhazBossHpBar();
+        patchGhazAbilityCooldownTo3s(event?.world || null);
+        const LAVAHOLE_POLL_MS = 1000;
+        let internalTick = 0;
+        ghazLavaholeInterval = setInterval(() => {
+          if (!playerTraveledToGhazHideout || !ghazbaranBattle) {
+            clearInterval(ghazLavaholeInterval); ghazLavaholeInterval = null; return;
+          }
+          const timerCtx = globalThis.state?.gameTimer?.getSnapshot?.()?.context;
+          const state = timerCtx?.state;
+          if (state === 'victory' || state === 'defeat') {
+            clearInterval(ghazLavaholeInterval); ghazLavaholeInterval = null; return;
+          }
+          internalTick += Math.round(LAVAHOLE_POLL_MS / 62.5); // ~16 ticks per 1000ms
+          triggerGhazPseudoLavaholePulse(internalTick);
+          triggerGhazPseudoLavahole2Pulse(internalTick);
+        }, LAVAHOLE_POLL_MS);
+      }));
+      pushUnsub(board?.on?.('emitNewGame', (event) => {
+        if (event?.world) ghazBattleWorld = event.world;
+        showGhazBossHpBar();
+      }));
+      ghazNewGameDebugUnsub = () => {
+        unsubs.forEach((u) => {
+          try {
+            if (typeof u === 'function') u();
+            else if (u && typeof u.unsubscribe === 'function') u.unsubscribe();
+          } catch (_) { /* noop */ }
+        });
+      };
+    } catch (error) {
+      console.warn('[Quests Mod][Weakened Archdemon][Debug] Could not subscribe newGame/emitNewGame:', error);
+    }
+  }
+
+  async function showBoardNpcKeywordModal(npcConfig) {
+    try {
+      await ensureNpcDialogueAssetsReady(npcConfig?.logPrefix || '[Quests Mod][NPC]');
       const playerName = getCurrentPlayerName() || 'Player';
-      let welcome = String(npcConfig.chat.welcomeMessage || '').replace(/Player/g, playerName);
+      const baseWelcome = sanitizeDialogueText(npcConfig?.chat?.welcomeMessage, `Hello ${playerName}.`);
+      let welcome = baseWelcome.replace(/Player/g, playerName);
       if (npcConfig.id === BOARD_NPC_SVENSON_ID) {
         const progress = getMissionProgress(SVENSON_LOVE_STORY_MISSION) || {};
         const inWhiteWaveCellar = isOnRoomByName(SVENSON_WHITE_WAVE_ROOM_NAME);
@@ -19860,8 +21953,8 @@ function createNPCCooldownManager() {
         npcName: npcConfig.name,
         playerName,
         imageAlt: npcConfig.name,
-        welcomeMessage: welcome,
-        placeholder: npcConfig.chat.placeholder,
+        welcomeMessage: sanitizeDialogueText(welcome, `Hello ${playerName}.`),
+        placeholder: sanitizeDialogueText(npcConfig?.chat?.placeholder, 'Type your message...'),
         modalWidth: KING_TIBI_MODAL_WIDTH,
         modalHeight: COSTELLO_MODAL_HEIGHT,
         messageContainerId: `${npcConfig.id}-messages`
@@ -19884,6 +21977,9 @@ function createNPCCooldownManager() {
       let awaitingSvensonAwashTravelConfirm = false;
       let awaitingSvensonUndergroundTravelConfirm = false;
       let awaitingSvensonPostLoveTravelConfirm = false;
+      let awaitingSvensonDestinationChoice = false;
+      let awaitingSvensonGhazTravelConfirm = false;
+      let awaitingDaneWeakenedConfirm = false;
 
       const reply = async () => {
         const text = (textarea.value || '').trim();
@@ -20503,6 +22599,170 @@ function createNPCCooldownManager() {
             return;
           }
 
+          const weakenedActive = isWeakenedArchdemonQuestActive();
+          const wantsWhiteWaveDest = lower.includes('white wave') || (/\bcellar\b/.test(lower) && !lower.includes('ghaz'));
+          const wantsGhazDest = lower.includes('ghazbaran') || lower.includes('ghaz') || lower.includes('hideout') || lower.includes('ruprecht');
+
+          // Destination answers first — "Ghazbaran" must not re-open the destination prompt.
+          if (
+            missionDone &&
+            inFoldaBoat &&
+            weakenedActive &&
+            (wantsGhazDest || wantsWhiteWaveDest)
+          ) {
+            if (wantsGhazDest) {
+              awaitingSvensonDestinationChoice = false;
+              awaitingSvensonPostLoveTravelConfirm = false;
+              awaitingSvensonGhazTravelConfirm = true;
+              cooldown.queueResponse(
+                text,
+                getMissionDialogueLine(
+                  WEAKENED_ARCHDEMON_MISSION,
+                  'svensonGhazTravelPrompt',
+                  'Ghazbaran\'s Hideout... few who sail there return. The archdemon may be weakened, but his aura still kills. Are you certain you want to go?'
+                ),
+                addMessageToConversation,
+                npcConfig.name,
+                ModalHelpers.getFarewellCloseCallback(text)
+              );
+              return;
+            }
+            if (wantsWhiteWaveDest) {
+              awaitingSvensonDestinationChoice = false;
+              awaitingSvensonPostLoveTravelConfirm = false;
+              awaitingSvensonGhazTravelConfirm = false;
+              const whiteWaveUnlocked = isRoomUnlockedByName(SVENSON_WHITE_WAVE_ROOM_NAME);
+              if (!whiteWaveUnlocked) {
+                cooldown.queueResponse(
+                  text,
+                  getMissionDialogueLine(
+                    SVENSON_LOVE_STORY_MISSION,
+                    'svensonTravelLocked',
+                    'You are not ready for that route yet. Come back when you are stronger.'
+                  ),
+                  addMessageToConversation,
+                  npcConfig.name,
+                  ModalHelpers.getFarewellCloseCallback(text)
+                );
+                return;
+              }
+              showToast({
+                message: TOAST_MESSAGES.travelingWithSvenson,
+                logPrefix: '[Quests Mod][A Love Story]'
+              });
+              cooldown.queueResponse(
+                text,
+                getMissionDialogueLine(
+                  SVENSON_LOVE_STORY_MISSION,
+                  'svensonPostLoveTravelStart',
+                  'Then aboard with you! White Wave awaits.'
+                ),
+                addMessageToConversation,
+                npcConfig.name,
+                () => {
+                  const SVENSON_POST_LOVE_TRAVEL_DELAY_MS = 2000;
+                  const WHITE_WAVE_POST_LOVE_CLEANUP_DELAY_MS = 180;
+                  const WHITE_WAVE_POST_LOVE_NPC_PLACEMENT_DELAY_MS = 260;
+                  setTimeout(() => {
+                    ModalHelpers.closeModal(0);
+                    setTimeout(() => {
+                      navigateToWhiteWaveCellar();
+                      setTimeout(() => {
+                        removeAllVillainCreaturesFromBoard();
+                      }, WHITE_WAVE_POST_LOVE_CLEANUP_DELAY_MS);
+                      setTimeout(() => {
+                        boardNpcRuntimeState.lastRoomById.delete(BOARD_NPC_DANE_ID);
+                        clearAllSvensonOverlays();
+                        updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+                      }, WHITE_WAVE_POST_LOVE_NPC_PLACEMENT_DELAY_MS);
+                    }, 120);
+                  }, SVENSON_POST_LOVE_TRAVEL_DELAY_MS);
+                }
+              );
+              return;
+            }
+          }
+
+          if (missionDone && inFoldaBoat && awaitingSvensonGhazTravelConfirm && lower.includes('yes')) {
+            awaitingSvensonGhazTravelConfirm = false;
+            awaitingSvensonDestinationChoice = false;
+            awaitingSvensonPostLoveTravelConfirm = false;
+            const hideoutUnlocked = isRoomUnlockedByName(GHAZBARAN_HIDEOUT_ROOM_NAME);
+            if (!hideoutUnlocked) {
+              cooldown.queueResponse(
+                text,
+                getMissionDialogueLine(
+                  WEAKENED_ARCHDEMON_MISSION,
+                  'svensonGhazTravelLocked',
+                  'You are not ready for that route yet. Come back when you are stronger.'
+                ),
+                addMessageToConversation,
+                npcConfig.name,
+                ModalHelpers.getFarewellCloseCallback(text)
+              );
+              return;
+            }
+            showToast({
+              message: TOAST_MESSAGES.travelingGhazHideout,
+              logPrefix: BATTLE_TOAST_LOG.weakenedArchdemon
+            });
+            cooldown.queueResponse(
+              text,
+              getMissionDialogueLine(
+                WEAKENED_ARCHDEMON_MISSION,
+                'svensonGhazTravelStart',
+                'Then may the gods watch over you. Once we land, there is no turning back until the fight is done.'
+              ),
+              addMessageToConversation,
+              npcConfig.name,
+              () => {
+                const SVENSON_GHAZ_TRAVEL_DELAY_MS = 2000;
+                setTimeout(() => {
+                  ModalHelpers.closeModal(0);
+                  setTimeout(() => {
+                    if (navigateToGhazbaranHideout()) {
+                      beginGhazbaranHideoutBattle();
+                    }
+                  }, 120);
+                }, SVENSON_GHAZ_TRAVEL_DELAY_MS);
+              }
+            );
+            return;
+          }
+
+          if (missionDone && inFoldaBoat && awaitingSvensonGhazTravelConfirm && lower.includes('no')) {
+            awaitingSvensonGhazTravelConfirm = false;
+            awaitingSvensonDestinationChoice = false;
+            awaitingSvensonPostLoveTravelConfirm = false;
+            cooldown.queueResponse(
+              text,
+              getMissionDialogueLine(
+                SVENSON_LOVE_STORY_MISSION,
+                'svensonTravelDeclined',
+                'Very well. Tell me when you are ready to sail.'
+              ),
+              addMessageToConversation,
+              npcConfig.name,
+              ModalHelpers.getFarewellCloseCallback(text)
+            );
+            return;
+          }
+
+          if (missionDone && inFoldaBoat && awaitingSvensonDestinationChoice) {
+            cooldown.queueResponse(
+              text,
+              getMissionDialogueLine(
+                WEAKENED_ARCHDEMON_MISSION,
+                'svensonDestinationPrompt',
+                'Where shall I take you — White Wave Cellar, or Ghazbaran\'s Hideout?'
+              ),
+              addMessageToConversation,
+              npcConfig.name,
+              ModalHelpers.getFarewellCloseCallback(text)
+            );
+            return;
+          }
+
           if (
             missionDone &&
             inFoldaBoat &&
@@ -20513,13 +22773,32 @@ function createNPCCooldownManager() {
               lower.includes('travel')
             )
           ) {
+            if (weakenedActive) {
+              awaitingSvensonDestinationChoice = true;
+              awaitingSvensonPostLoveTravelConfirm = false;
+              awaitingSvensonGhazTravelConfirm = false;
+              cooldown.queueResponse(
+                text,
+                getMissionDialogueLine(
+                  WEAKENED_ARCHDEMON_MISSION,
+                  'svensonDestinationPrompt',
+                  'Where shall I take you — White Wave Cellar, or Ghazbaran\'s Hideout?'
+                ),
+                addMessageToConversation,
+                npcConfig.name,
+                ModalHelpers.getFarewellCloseCallback(text)
+              );
+              return;
+            }
             awaitingSvensonPostLoveTravelConfirm = true;
+            awaitingSvensonDestinationChoice = false;
+            awaitingSvensonGhazTravelConfirm = false;
             cooldown.queueResponse(
               text,
               getMissionDialogueLine(
                 SVENSON_LOVE_STORY_MISSION,
                 'svensonPostLoveTravelPrompt',
-                'Ready for another run? I can take you to White Wave Cellar. Do you want to travel now?'
+                'I can take you to White Wave Cellar. Do you want to travel now?'
               ),
               addMessageToConversation,
               npcConfig.name,
@@ -20530,6 +22809,8 @@ function createNPCCooldownManager() {
 
           if (missionDone && inFoldaBoat && awaitingSvensonPostLoveTravelConfirm && lower.includes('yes')) {
             awaitingSvensonPostLoveTravelConfirm = false;
+            awaitingSvensonDestinationChoice = false;
+            awaitingSvensonGhazTravelConfirm = false;
             const whiteWaveUnlocked = isRoomUnlockedByName(SVENSON_WHITE_WAVE_ROOM_NAME);
             if (!whiteWaveUnlocked) {
               cooldown.queueResponse(
@@ -20583,6 +22864,8 @@ function createNPCCooldownManager() {
 
           if (missionDone && inFoldaBoat && awaitingSvensonPostLoveTravelConfirm && lower.includes('no')) {
             awaitingSvensonPostLoveTravelConfirm = false;
+            awaitingSvensonDestinationChoice = false;
+            awaitingSvensonGhazTravelConfirm = false;
             cooldown.queueResponse(
               text,
               getMissionDialogueLine(
@@ -20721,7 +23004,112 @@ function createNPCCooldownManager() {
 
         if (npcConfig.id === BOARD_NPC_DANE_ID) {
           const svensonProgress = getMissionProgress(SVENSON_LOVE_STORY_MISSION) || {};
+          const weakenedProgress = getMissionProgress(WEAKENED_ARCHDEMON_MISSION) || {};
           const askedMission = lower.includes('mission') || lower.includes('quest') || lower.includes('help');
+          const askedGhazbaran = lower.includes('ghazbaran') || lower.includes('ghaz') || lower.includes('archdemon');
+
+          if (askedMission && svensonProgress?.completed && weakenedProgress?.completed) {
+            cooldown.queueResponse(
+              text,
+              getMissionDialogueLine(
+                WEAKENED_ARCHDEMON_MISSION,
+                'alreadyCompleted',
+                'You already struck down the weakened archdemon. White Wave Cellar sleeps easier for it.'
+              ),
+              addMessageToConversation,
+              npcConfig.name,
+              ModalHelpers.getFarewellCloseCallback(text)
+            );
+            return;
+          }
+
+          if (
+            svensonProgress?.completed
+            && weakenedProgress?.battleCompleted
+            && !weakenedProgress?.completed
+            && (askedMission || askedGhazbaran)
+          ) {
+            completeWeakenedArchdemonMissionWithOrb().catch((error) => {
+              console.error(`${npcConfig.logPrefix} Error completing Weakened Archdemon:`, error);
+            });
+            cooldown.queueResponse(
+              text,
+              getMissionDialogueLine(
+                WEAKENED_ARCHDEMON_MISSION,
+                'daneCompletion',
+                'You did it, Player. The north is safer because of you. Take this orb — may it serve you well.'
+              ),
+              addMessageToConversation,
+              npcConfig.name,
+              ModalHelpers.getFarewellCloseCallback(text)
+            );
+            return;
+          }
+
+          if (askedMission && svensonProgress?.completed && weakenedProgress?.accepted && !weakenedProgress?.completed) {
+            cooldown.queueResponse(
+              text,
+              getMissionDialogueLine(
+                WEAKENED_ARCHDEMON_MISSION,
+                weakenedProgress?.battleCompleted ? 'daneAwaitingReward' : 'alreadyActive',
+                weakenedProgress?.battleCompleted
+                  ? 'Ghazbaran is fallen. Speak with me when you are ready to claim your reward.'
+                  : 'You already accepted this task. Ask Svenson for passage to Ghazbaran\'s Hideout, then defeat the archdemon.'
+              ),
+              addMessageToConversation,
+              npcConfig.name,
+              ModalHelpers.getFarewellCloseCallback(text)
+            );
+            return;
+          }
+
+          if (askedMission && svensonProgress?.completed && !weakenedProgress?.accepted) {
+            awaitingDaneWeakenedConfirm = true;
+            cooldown.queueResponse(
+              text,
+              getMissionDialogueLine(
+                WEAKENED_ARCHDEMON_MISSION,
+                'prompt',
+                'Player... word reaches me that Ghazbaran has been weakened. The archdemon hides in the north still, but this may be our only chance. Will you seek him out and defeat him?'
+              ),
+              addMessageToConversation,
+              npcConfig.name,
+              ModalHelpers.getFarewellCloseCallback(text)
+            );
+            return;
+          }
+
+          if (awaitingDaneWeakenedConfirm && svensonProgress?.completed && !weakenedProgress?.accepted && lower.includes('yes')) {
+            awaitingDaneWeakenedConfirm = false;
+            startWeakenedArchdemonMission().catch((error) => {
+              console.error(`${npcConfig.logPrefix} Error starting Weakened Archdemon:`, error);
+            });
+            cooldown.queueResponse(
+              text,
+              getMissionDialogueLine(
+                WEAKENED_ARCHDEMON_MISSION,
+                'accept',
+                'Good. Speak with Svenson on Folda Boat — ask him for passage to Ghazbaran\'s Hideout.'
+              ),
+              addMessageToConversation,
+              npcConfig.name,
+              ModalHelpers.getFarewellCloseCallback(text)
+            );
+            return;
+          }
+
+          if (awaitingDaneWeakenedConfirm && lower.includes('no')) {
+            awaitingDaneWeakenedConfirm = false;
+            cooldown.queueResponse(
+              text,
+              getMissionCommonLine('notReady', 'Return when you are ready for this task.'),
+              addMessageToConversation,
+              npcConfig.name,
+              ModalHelpers.getFarewellCloseCallback(text)
+            );
+            return;
+          }
+
           if (askedMission && svensonProgress?.completed) {
             cooldown.queueResponse(
               text,
@@ -20806,8 +23194,14 @@ function createNPCCooldownManager() {
     }
   }
 
-  function showBoardNpcModal(npcConfig) {
+  async function showBoardNpcModal(npcConfig) {
     try {
+      await ensureNpcDialogueAssetsReady(npcConfig?.logPrefix || '[Quests Mod][NPC]');
+      if (npcConfig.id === BOARD_NPC_AL_DEE_RAT_PLAGUE_ID) {
+        showAlDeeModal();
+        return;
+      }
+
       if (npcConfig.id === BOARD_NPC_ROOKSTAYER_ID && isApprenticeShengBattleCompletedPendingReward()) {
         showRookstayerThankYouModal(npcConfig);
         return;
@@ -20827,8 +23221,8 @@ function createNPCCooldownManager() {
         outfitShiny: npcConfig.modalOutfitShiny === true,
         outfitPortraitTranslate: npcConfig.modalOutfitTranslate || '-12px -12px',
         imageAlt: npcConfig.name,
-        welcomeMessage: npcConfig.chat.welcomeMessage,
-        placeholder: npcConfig.chat.placeholder,
+        welcomeMessage: sanitizeDialogueText(npcConfig?.chat?.welcomeMessage, `Hello ${playerName}.`),
+        placeholder: sanitizeDialogueText(npcConfig?.chat?.placeholder, 'Type your message...'),
         modalWidth: KING_TIBI_MODAL_WIDTH,
         modalHeight: COSTELLO_MODAL_HEIGHT,
         messageContainerId: `${npcConfig.id}-messages`
@@ -22387,7 +24781,8 @@ function createNPCCooldownManager() {
     [SERPENTINE_TOWER_MISSION.id]: SERPENTINE_TOWER_MISSION,
     [APPRENTICE_SHENG_MISSION.id]: APPRENTICE_SHENG_MISSION,
     [CHRISTMAS_MIRACLE_MISSION.id]: CHRISTMAS_MIRACLE_MISSION,
-    [SVENSON_LOVE_STORY_MISSION.id]: SVENSON_LOVE_STORY_MISSION
+    [SVENSON_LOVE_STORY_MISSION.id]: SVENSON_LOVE_STORY_MISSION,
+    [WEAKENED_ARCHDEMON_MISSION.id]: WEAKENED_ARCHDEMON_MISSION
   };
 
   const QUESTS_DEV_COMPLETE_REWARDS = {
@@ -22932,7 +25327,7 @@ function createNPCCooldownManager() {
     console.log('[Quests Mod][Dev] QuestsDev API:', Object.keys(QuestsDev));
     console.log('[Quests Mod][Dev] Mission IDs:', Object.keys(MISSION_STATE_MAP));
     console.log('[Quests Mod][Dev] Item keys for grant():', Object.keys(QUESTS_DEV_ITEM_KEYS));
-    console.log('[Quests Mod][Dev] Examples: QuestsDev.grant({ leather: 1, monksStudy: 1 }); QuestsDev.reset("king_copper_key"); QuestsDev.reset("svenson_love_story"); QuestsDev.resetLoveStoryWithItems(); QuestsDev.resetSanta(); QuestsDev.completeAll(); QuestsDev.resetAll();');
+    console.log('[Quests Mod][Dev] Examples: QuestsDev.grant({ leather: 1, monksStudy: 1 }); QuestsDev.reset("king_copper_key"); QuestsDev.reset("svenson_love_story"); QuestsDev.reset("weakened_archdemon"); QuestsDev.resetLoveStoryWithItems(); QuestsDev.resetSanta(); QuestsDev.completeAll(); QuestsDev.resetAll();');
   }
 
   const QuestsDev = {
@@ -22977,6 +25372,10 @@ function createNPCCooldownManager() {
     window.resetLoveStory = async function() {
       console.log('[Quests Mod][Dev] Resetting A Love Story');
       await resetQuest(SVENSON_LOVE_STORY_MISSION.id);
+    };
+    window.resetWeakenedArchdemon = async function() {
+      console.log('[Quests Mod][Dev] Resetting The Weakened Archdemon');
+      await resetQuest(WEAKENED_ARCHDEMON_MISSION.id);
     };
     window.resetLoveStoryWithItems = resetLoveStoryWithItems;
     window.setSealCompleted = setSealCompleted;

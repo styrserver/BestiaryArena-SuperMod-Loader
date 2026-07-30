@@ -1008,6 +1008,7 @@
     
     // Board analysis detection
     isBoardAnalyzing: false,
+    analysisRestoreCooldownUntil: 0,
     
     // Debounced update scheduling
     pendingMapCode: null,
@@ -1276,6 +1277,9 @@
 // =======================
   // Helper to handle state transitions
   function handleStateTransition(previousState, currentState) {
+    if (isAnalysisCoordinationActiveNow() || BetterHighscoresState.isBoardAnalyzing) {
+      return;
+    }
     // Detect playing -> initial transitions
     if (previousState === 'playing' && currentState === 'initial') {
       if (isLeaderboardSuppressed()) {
@@ -1397,6 +1401,9 @@
 
   // Helper to handle battle completion (victory/defeat states)
   async function handleBattleCompletion() {
+    if (isAnalysisCoordinationActiveNow() || BetterHighscoresState.isBoardAnalyzing) {
+      return;
+    }
     if (isBetterHighscoresHidden()) {
       return;
     }
@@ -1452,6 +1459,9 @@
   }
 
   function scheduleContainerUpdate() {
+    if (isAnalysisCoordinationActiveNow() || BetterHighscoresState.isBoardAnalyzing) {
+      return;
+    }
     if (isSandboxMode()) {
       console.log('[Better Highscores] Main container changed in sandbox mode, skipping leaderboard re-application');
       return;
@@ -1592,10 +1602,15 @@
     }
   }
 
+  function isAnalysisCoordinationActiveNow() {
+    return window.ModCoordination?.isModActive('Board Analyzer') ||
+           window.ModCoordination?.isModActive('Manual Runner') ||
+           false;
+  }
+
   function isBoardAnalyzing() {
     try {
-      // Use the global coordination flag set by Board Analyzer
-      const isAnalyzing = window.ModCoordination?.isModActive('Board Analyzer') || false;
+      const isAnalyzing = isAnalysisCoordinationActiveNow();
       
       // Track state changes and trigger restore when analysis ends
       if (isAnalyzing !== BetterHighscoresState.isBoardAnalyzing) {
@@ -1604,14 +1619,20 @@
         
         if (isAnalyzing) {
           console.log('[Better Highscores] Board analysis detected, disabling updates');
+          BetterHighscoresState.analysisRestoreCooldownUntil = 0;
         } else if (wasAnalyzing) {
           console.log('[Better Highscores] Board analysis ended, re-enabling updates');
+          // Avoid immediate sandbox preserve/restore thrash after analysis.
+          BetterHighscoresState.analysisRestoreCooldownUntil = Date.now() + 2500;
+          if (isSandboxMode()) {
+            BetterHighscoresState.wasInSandboxMode = true;
+          }
           
           // Restore container if we have one preserved
           if (BetterHighscoresState.preservedContainer) {
             console.log('[Better Highscores] Board analysis completed, restoring preserved container');
             scheduleTimeout(() => {
-              restoreContainer();
+              restoreContainer({ fromAnalysis: true });
             }, DELAYS.RESTORE);
           }
         }
@@ -1624,8 +1645,19 @@
     }
   }
 
+  function isAnalysisRestoreCooldownActive() {
+    return Date.now() < (BetterHighscoresState.analysisRestoreCooldownUntil || 0);
+  }
+
   // Function to preserve the current container when entering sandbox mode
   function preserveContainer() {
+    // Already frozen for analysis — keep the first snapshot only.
+    if (BetterHighscoresState.isBoardAnalyzing && BetterHighscoresState.preservedContainer) {
+      return;
+    }
+    if (isAnalysisRestoreCooldownActive()) {
+      return;
+    }
     if (leaderboardContainer && !BetterHighscoresState.preservedContainer) {
       console.log('[Better Highscores] Preserving container for sandbox mode');
       BetterHighscoresState.preservedContainer = leaderboardContainer.cloneNode(true);
@@ -1639,8 +1671,13 @@
   }
 
   // Function to restore the preserved container when exiting sandbox mode
-  function restoreContainer() {
+  function restoreContainer(options = {}) {
     if (isBetterHighscoresHidden() || isLeaderboardSuppressed()) {
+      return;
+    }
+
+    // Mid-analysis restores fight Board Analyzer's sandbox runs — only allow explicit end-of-analysis restore.
+    if (isAnalysisCoordinationActiveNow() && !options.fromAnalysis) {
       return;
     }
 
@@ -1653,7 +1690,9 @@
       return;
     }
     
-    const source = BetterHighscoresState.wasInSandboxMode ? 'sandbox mode' : 'board analysis';
+    const source = options.fromAnalysis
+      ? 'board analysis'
+      : (BetterHighscoresState.wasInSandboxMode ? 'sandbox mode' : 'board analysis');
     console.log(`[Better Highscores] Restoring preserved container from ${source}`);
     
     // Remove any existing containers first
@@ -1672,12 +1711,14 @@
       console.log('[Better Highscores] Could not find main container for restoration');
     }
     
-    // Clear preserved state
+    // Clear preserved snapshot; keep sandbox flag if still in sandbox so we don't re-preserve.
     BetterHighscoresState.preservedContainer = null;
-    BetterHighscoresState.wasInSandboxMode = false;
+    BetterHighscoresState.wasInSandboxMode = isSandboxMode();
     
-    // Force update to ensure correct map data is displayed
-    scheduleTimeout(() => updateLeaderboards(), DELAYS.RESTORE);
+    // Force update to ensure correct map data is displayed (skip during post-analysis cooldown)
+    if (!isAnalysisRestoreCooldownActive()) {
+      scheduleTimeout(() => updateLeaderboards(), DELAYS.RESTORE);
+    }
   }
 
   function getMedalColor(position) {
@@ -2472,7 +2513,6 @@
     
     // Skip updates during board analysis to prevent spam
     if (isBoardAnalyzing()) {
-      console.log('[Better Highscores] Board analysis in progress, skipping update');
       return;
     }
     
@@ -2480,8 +2520,12 @@
     
     // Handle sandbox mode entry (preserve container when first entering)
     if (currentlyInSandbox && !BetterHighscoresState.wasInSandboxMode) {
-      console.log('[Better Highscores] Just entered sandbox mode, preserving container');
-      preserveContainer();
+      if (!isAnalysisRestoreCooldownActive()) {
+        console.log('[Better Highscores] Just entered sandbox mode, preserving container');
+        preserveContainer();
+      } else {
+        BetterHighscoresState.wasInSandboxMode = true;
+      }
     }
 
     try {
@@ -2749,9 +2793,13 @@
           const isInSandbox = currentMode === 'sandbox';
           
           if (isInSandbox && !wasInSandbox) {
-            // Just entered sandbox mode
-            console.log('[Better Highscores] Entered sandbox mode, preserving container');
-            preserveContainer();
+            if (isAnalysisRestoreCooldownActive()) {
+              BetterHighscoresState.wasInSandboxMode = true;
+            } else {
+              // Just entered sandbox mode
+              console.log('[Better Highscores] Entered sandbox mode, preserving container');
+              preserveContainer();
+            }
           } else if (!isInSandbox && wasInSandbox) {
             // Just exited sandbox mode
             console.log('[Better Highscores] Exited sandbox mode');
@@ -2823,6 +2871,9 @@
         // Set up MutationObserver to detect when leaderboard gets removed from DOM
         window.BetterHighscoresInternals = window.BetterHighscoresInternals || {};
         window.BetterHighscoresInternals.observer = new MutationObserver((mutations) => {
+          if (isAnalysisCoordinationActiveNow() || BetterHighscoresState.isBoardAnalyzing) {
+            return;
+          }
           if (!isAutoplayMode()) return;
           
           for (const mutation of mutations) {

@@ -206,6 +206,12 @@ const isBoardAnalyzerRunning = () => {
   return window.ModCoordination?.isModActive('Board Analyzer') || false;
 };
 
+const isAnalysisCoordinationActive = () => {
+  return window.ModCoordination?.isModActive('Board Analyzer') ||
+         window.ModCoordination?.isModActive('Manual Runner') ||
+         false;
+};
+
 // Simulate ESC key press (repeated pattern)
 const simulateEscKey = () => {
   const escEvent = new KeyboardEvent('keydown', {
@@ -3351,6 +3357,11 @@ const subscribeToGameState = () => {
     if (globalThis.state && globalThis.state.board) {
       // Consolidated new game handler with debouncing
       const handleNewGame = (event) => {
+        // Board Analyzer / Manual Runner fire newGame every sandbox run — skip all work.
+        if (isAnalysisCoordinationActive()) {
+          return;
+        }
+
         const now = Date.now();
         if (now - lastGameStateChange < GAME_STATE_DEBOUNCE_MS) {
           return;
@@ -3374,6 +3385,9 @@ const subscribeToGameState = () => {
       
       // Subscribe to emitNewGame event (secondary handler for countdown cancellation only)
       gameStateUnsubscribers.push(globalThis.state.board.on('emitNewGame', (event) => {
+        if (isAnalysisCoordinationActive()) {
+          return;
+        }
         if (currentCountdownTask) {
           console.log('[Bestiary Automator] Game started during countdown, cancelling...');
           cancelCurrentCountdown();
@@ -3382,6 +3396,9 @@ const subscribeToGameState = () => {
       
       // Monitor for other board state changes that should cancel countdowns
       gameStateUnsubscribers.push(globalThis.state.board.on('stateChange', (event) => {
+        if (isAnalysisCoordinationActive()) {
+          return;
+        }
         const boardContext = event.context;
         
         // Cancel countdown if map picker opens (user changing maps)
@@ -4195,8 +4212,8 @@ const stopAutomation = () => {
 
 const runAutomationTasks = async () => {
   try {
-    // Check if Board Analyzer is running - if so, skip all automation tasks
-    if (isBoardAnalyzerRunning()) {
+    // Check if Board Analyzer / Manual Runner is running - if so, skip all automation tasks
+    if (isAnalysisCoordinationActive()) {
       return;
     }
     

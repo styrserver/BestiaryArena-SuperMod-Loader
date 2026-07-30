@@ -1681,6 +1681,11 @@ async function cleanupDefeatedRuns() {
 // 7. Event Listeners
 // =======================
 // Set up network listener to catch server results and replay data
+function isRunTrackerAnalysisBlockingActive() {
+  return window.ModCoordination?.isModActive('Board Analyzer') ||
+         window.ModCoordination?.isModActive('Manual Runner');
+}
+
 function setupNetworkListener() {
   try {
     // Monitor fetch requests for server results
@@ -1690,6 +1695,10 @@ function setupNetworkListener() {
       
       // Check if RunTracker is enabled before processing
       if (!window.RunTrackerAPI || !window.RunTrackerAPI._initialized) {
+        return response;
+      }
+
+      if (isRunTrackerAnalysisBlockingActive()) {
         return response;
       }
       
@@ -1742,6 +1751,10 @@ function setupNetworkListener() {
       
       // Check if RunTracker is enabled before processing
       if (!window.RunTrackerAPI || !window.RunTrackerAPI._initialized) {
+        return;
+      }
+
+      if (isRunTrackerAnalysisBlockingActive()) {
         return;
       }
       

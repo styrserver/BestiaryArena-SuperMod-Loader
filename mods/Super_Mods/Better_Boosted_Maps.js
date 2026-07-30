@@ -35,6 +35,14 @@ const AUTOMATION_CHECK_DELAY = 300;    // Reduced from 1000ms for faster respons
 const BESTIARY_INTEGRATION_DELAY = 300; // Reduced from 500ms for faster response
 const BESTIARY_RETRY_DELAY = 1500;     // Reduced from 2000ms for faster response
 const BESTIARY_INIT_WAIT = 2000;       // Reduced from 3000ms for faster response
+const ROOM_NAV_POLL_MS = 100;
+const ROOM_NAV_TIMEOUT_MS = 8000;
+const ROOM_NAV_TIMEOUT_HIDDEN_MS = 20000;
+const DOM_ACTION_RETRY_DELAY_MS = 500;
+const DOM_ACTION_RETRY_DELAY_HIDDEN_MS = 1000;
+const DOM_ACTION_MAX_ATTEMPTS = 5;
+const DOM_ACTION_MAX_ATTEMPTS_HIDDEN = 40;
+const STAMINA_REGEN_MS = 60000;
 
 // User-configurable delays
 const DEFAULT_START_DELAY = 3;         // 3 seconds default (user-configurable 1-10)
@@ -197,7 +205,11 @@ let staminaRecoveryCallback = null;
  */
 function getCurrentStamina() {
     try {
-        // Read stamina directly from DOM (same approach as Bestiary Automator)
+        const fromApi = getStaminaFromGameState();
+        if (fromApi !== null) {
+            return fromApi;
+        }
+
         const elStamina = document.querySelector('[title="Stamina"]');
         if (!elStamina) {
             console.log('[Better Boosted Maps] Stamina element not found');
@@ -211,12 +223,105 @@ function getCurrentStamina() {
         }
         
         const stamina = Number(staminaElement.textContent);
-        console.log('[Better Boosted Maps] Current stamina from DOM:', stamina);
-        return stamina;
+        return Number.isFinite(stamina) ? stamina : 0;
     } catch (error) {
         console.error('[Better Boosted Maps] Error reading stamina:', error);
         return 0;
     }
+}
+
+function isDocumentHidden() {
+    return typeof document !== 'undefined' &&
+        (document.hidden === true || document.visibilityState === 'hidden');
+}
+
+function getStaminaFromGameState() {
+    try {
+        if (typeof globalThis.state?.utils?.getCurrentStamina === 'function') {
+            const fromUtils = Number(globalThis.state.utils.getCurrentStamina());
+            if (Number.isFinite(fromUtils)) {
+                return fromUtils;
+            }
+        }
+
+        const playerContext = globalThis.state?.player?.getSnapshot?.()?.context;
+        if (!playerContext) {
+            return null;
+        }
+
+        for (const key of ['stamina', 'currentStamina']) {
+            const value = Number(playerContext[key]);
+            if (Number.isFinite(value)) {
+                return value;
+            }
+        }
+
+        const willBeFullAt = playerContext.staminaWillBeFullAt;
+        const regenMax = Number(playerContext.maxStamina ?? playerContext.staminaMax);
+        if (willBeFullAt != null && Number.isFinite(regenMax) && regenMax > 0) {
+            const missing = Math.ceil((willBeFullAt - Date.now()) / STAMINA_REGEN_MS);
+            const regenStamina = Math.max(0, regenMax - missing);
+            const excessMs = Math.max(0, Number(playerContext.staminaExcessMs) || 0);
+            return Math.floor(regenStamina + excessMs / STAMINA_REGEN_MS);
+        }
+    } catch (_) {
+        // fall through
+    }
+    return null;
+}
+
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function waitForRoomSelection(roomId) {
+    if (roomId == null || roomId === '') {
+        return false;
+    }
+    if (String(getCurrentRoomId()) === String(roomId)) {
+        return true;
+    }
+
+    const timeoutMs = isDocumentHidden() ? ROOM_NAV_TIMEOUT_HIDDEN_MS : ROOM_NAV_TIMEOUT_MS;
+    const pollMs = isDocumentHidden() ? Math.max(ROOM_NAV_POLL_MS, 250) : ROOM_NAV_POLL_MS;
+    const deadline = Date.now() + timeoutMs;
+
+    while (Date.now() < deadline) {
+        await sleep(pollMs);
+        if (String(getCurrentRoomId()) === String(roomId)) {
+            return true;
+        }
+    }
+
+    const matched = String(getCurrentRoomId()) === String(roomId);
+    if (!matched) {
+        console.log(
+            `[Better Boosted Maps] Room selection timeout (hidden=${isDocumentHidden()}): wanted ${roomId}, got ${getCurrentRoomId()}`
+        );
+    }
+    return matched;
+}
+
+async function findButtonWithRetries(findFn, label = 'button') {
+    const hidden = isDocumentHidden();
+    const maxAttempts = hidden ? DOM_ACTION_MAX_ATTEMPTS_HIDDEN : DOM_ACTION_MAX_ATTEMPTS;
+    const delayMs = hidden ? DOM_ACTION_RETRY_DELAY_HIDDEN_MS : DOM_ACTION_RETRY_DELAY_MS;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        const button = typeof findFn === 'function' ? findFn() : null;
+        if (button) {
+            if (attempt > 1) {
+                console.log(`[Better Boosted Maps] Found ${label} on attempt ${attempt}/${maxAttempts}`);
+            }
+            return button;
+        }
+        if (attempt < maxAttempts) {
+            await sleep(delayMs);
+        }
+    }
+
+    console.log(`[Better Boosted Maps] ${label} not found after ${maxAttempts} attempts (hidden=${hidden})`);
+    return null;
 }
 
 /**
@@ -257,13 +362,21 @@ function getCurrentRoomId() {
  * @returns {Object} { insufficient: boolean, cost: number }
  */
 function hasInsufficientStamina() {
+    const cost = getCurrentMapStaminaCost();
+
+    if (isDocumentHidden()) {
+        const current = getCurrentStamina();
+        const insufficient = current < cost;
+        if (insufficient) {
+            console.log(`[Better Boosted Maps] Background stamina check: Insufficient (${current}/${cost})`);
+        }
+        return { insufficient, cost };
+    }
+
     // Look for stamina tooltip (icon-based, language-independent)
     const staminaTooltip = document.querySelector(
         '[role="tooltip"] img[alt="stamina"], [data-state="instant-open"] img[alt="stamina"]'
     );
-    
-    // Get stamina cost from game API
-    const cost = getCurrentMapStaminaCost();
     
     if (staminaTooltip) {
         // Found stamina icon in tooltip = insufficient stamina
@@ -360,13 +473,16 @@ function startStaminaTooltipMonitoring(onRecovered, requiredStamina) {
         const timeRemaining = Math.max(0, (requiredStamina || DEFAULT_STAMINA_COST) - currentStamina);
         console.log(`[Better Boosted Maps] Waiting for stamina (${currentStamina}/${requiredStamina || DEFAULT_STAMINA_COST}) - ~${timeRemaining} min remaining`);
         
-        // Also check if tooltip disappeared (double-check)
         const tooltipStillExists = document.querySelector(
             '[role="tooltip"] img[alt="stamina"], [data-state="instant-open"] img[alt="stamina"]'
         );
+        const needed = requiredStamina || DEFAULT_STAMINA_COST;
+        const recovered = isDocumentHidden()
+            ? (currentStamina >= needed)
+            : (!tooltipStillExists && hasStaminaIssue);
         
-        if (!tooltipStillExists && hasStaminaIssue) {
-            console.log(`[Better Boosted Maps] ✅ STAMINA RECOVERED (tooltip gone) - current: ${currentStamina}`);
+        if (recovered && hasStaminaIssue) {
+            console.log(`[Better Boosted Maps] ✅ STAMINA RECOVERED${isDocumentHidden() ? ' (API, background)' : ' (tooltip gone)'} - current: ${currentStamina}`);
             hasStaminaIssue = false;
             
             // Save callback before cleanup (cleanup clears the callback)
@@ -509,6 +625,8 @@ const modState = {
 };
 
 let betterBoostedMapsOpenContextMenu = null;
+let pageVisibilityHandler = null;
+let lastPageVisibilityChange = 0;
 
 const BBM_CTX_COLOR_ACCENT = '#ffe066';
 const BBM_CTX_COLOR_WHITE = '#ffffff';
@@ -4124,7 +4242,18 @@ function createMapsTab(settings) {
 
 function isRaidRoomId(roomId) {
     try {
-        return typeof window.mapsDatabase?.isRaid === 'function' && window.mapsDatabase.isRaid(roomId);
+        const mapsDb = globalThis.mapsDatabase;
+        if (!mapsDb) return false;
+        if (typeof mapsDb.isMapRaidComprehensive === 'function') {
+            return mapsDb.isMapRaidComprehensive(roomId);
+        }
+        if (typeof mapsDb.isRaid === 'function' && mapsDb.isRaid(roomId)) {
+            return true;
+        }
+        if (typeof mapsDb.isDynamicEventMap === 'function' && mapsDb.isDynamicEventMap(roomId)) {
+            return true;
+        }
+        return false;
     } catch (_) {
         return false;
     }
@@ -4135,26 +4264,57 @@ function getRealRegionName(region) {
     if (typeof globalThis.mapsDatabase?.getRegionDisplayNameFromRegion === 'function') {
         return globalThis.mapsDatabase.getRegionDisplayNameFromRegion(region);
     }
-    if (region.name) return region.name;
-    const regionId = region.id || '';
-    if (typeof globalThis.mapsDatabase?.getRegionDisplayName === 'function') {
-        return globalThis.mapsDatabase.getRegionDisplayName(regionId);
+    if (typeof globalThis.mapsDatabase?.getRegionDisplayName === 'function' && region.id) {
+        return globalThis.mapsDatabase.getRegionDisplayName(region.id);
     }
-    const key = String(regionId).toLowerCase();
-    const mapped = globalThis.mapsDatabase?.REGION_NAME_MAP?.[key];
-    if (mapped) return mapped;
-    return region.id
-        ? region.id.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase())
-        : 'Unknown Region';
+    return region.name || region.id || 'Unknown Region';
+}
+
+// Regions in game order with full room lists (getRegionsInOrder only returns id/name)
+function getRegionsWithRoomsInOrder() {
+    const fullRegions = globalThis.state?.utils?.REGIONS || [];
+    if (!Array.isArray(fullRegions) || fullRegions.length === 0) {
+        return [];
+    }
+    const byId = new Map(fullRegions.map((region) => [region?.id, region]));
+    const mapsDb = globalThis.mapsDatabase;
+    const orderedIds = typeof mapsDb?.getRegionsInOrder === 'function'
+        ? mapsDb.getRegionsInOrder().map((region) => region?.id).filter(Boolean)
+        : [];
+
+    const out = [];
+    const seen = new Set();
+    for (const id of orderedIds) {
+        const region = byId.get(id);
+        if (!region || seen.has(id)) continue;
+        seen.add(id);
+        out.push(region);
+    }
+    for (const region of fullRegions) {
+        const id = region?.id;
+        if (!id || seen.has(id)) continue;
+        seen.add(id);
+        out.push(region);
+    }
+    return out;
 }
 
 function organizeMapsByRegion() {
     const roomNames = globalThis.state?.utils?.ROOM_NAME || {};
-    const regions = globalThis.state?.utils?.REGIONS || [];
-    const roomsData = globalThis.state?.utils?.ROOMS || {};
+    const mapsDb = globalThis.mapsDatabase;
+    const regions = getRegionsWithRoomsInOrder();
     
     if (!regions || regions.length === 0) {
-        // No region data - return all non-raid maps unsorted (raids cannot be daily boosted)
+        // Prefer maps-database non-raid list when region data is missing
+        const nonRaid = typeof mapsDb?.getNonRaidMaps === 'function' ? mapsDb.getNonRaidMaps() : [];
+        if (Array.isArray(nonRaid) && nonRaid.length > 0) {
+            return {
+                'All Maps': nonRaid
+                    .filter((room) => room?.id && roomNames[room.id] && !isRaidRoomId(room.id))
+                    .map((room) => ({ id: room.id, name: roomNames[room.id] }))
+                    .sort((a, b) => a.name.localeCompare(b.name))
+            };
+        }
         return {
             'All Maps': Object.entries(roomNames)
                 .filter(([id]) => !isRaidRoomId(id))
@@ -4697,7 +4857,13 @@ async function startBoostedMapFarming(force = false) {
                 type: 'selectRoomById',
                 roomId: farmCheck.roomId
             });
-            await new Promise(resolve => setTimeout(resolve, NAVIGATION_DELAY));
+            const roomReady = await waitForRoomSelection(farmCheck.roomId);
+            if (!roomReady) {
+                await sleep(NAVIGATION_DELAY);
+                if (String(getCurrentRoomId()) !== String(farmCheck.roomId)) {
+                    throw new Error(`Failed to navigate to room ${farmCheck.roomId}`);
+                }
+            }
             
             const { floor } = getEffectiveMapAutomationSettings(
                 farmCheck.roomId,
@@ -4707,7 +4873,7 @@ async function startBoostedMapFarming(force = false) {
             );
             console.log(`[Better Boosted Maps] Setting floor to ${floor} for map ${farmCheck.roomId}`);
             globalThis.state.board.trigger.setState({ fn: (prev) => ({ ...prev, floor: floor }) });
-            await new Promise(resolve => setTimeout(resolve, 100));
+            await sleep(100);
             
             console.log('[Better Boosted Maps] Navigation completed');
         } catch (error) {
@@ -4730,7 +4896,10 @@ async function startBoostedMapFarming(force = false) {
         
         // Find and click the appropriate setup button
         console.log(`[Better Boosted Maps] Looking for ${setupMethod} button...`);
-        const setupButton = findSetupButton(setupMethod);
+        const setupButton = await findButtonWithRetries(
+            () => findSetupButton(setupMethod),
+            `${setupMethod} button`
+        );
         if (!setupButton) {
             console.log(`[Better Boosted Maps] ${setupMethod} button not found`);
             cancelBoostedMapFarming(`${setupMethod} button not found`);
@@ -4739,7 +4908,7 @@ async function startBoostedMapFarming(force = false) {
         
         console.log(`[Better Boosted Maps] Clicking ${setupMethod} button...`);
         setupButton.click();
-        await new Promise(resolve => setTimeout(resolve, AUTO_SETUP_DELAY));
+        await sleep(AUTO_SETUP_DELAY);
         
         // Check automation status after setup
         if (!checkAutomationEnabled('after setup')) return;
@@ -4811,7 +4980,10 @@ async function startBoostedMapFarming(force = false) {
         
         // Find and click Start button
         console.log('[Better Boosted Maps] Looking for Start button...');
-        const startButton = findButtonByText('Start');
+        const startButton = await findButtonWithRetries(
+            () => findButtonByText('Start'),
+            'Start button'
+        );
         if (!startButton) {
             console.log('[Better Boosted Maps] Start button not found');
             cancelBoostedMapFarming('Start button not found');
@@ -4820,7 +4992,7 @@ async function startBoostedMapFarming(force = false) {
         
         console.log('[Better Boosted Maps] Clicking Start button...');
         startButton.click();
-        await new Promise(resolve => setTimeout(resolve, AUTOMATION_CHECK_DELAY));
+        await sleep(AUTOMATION_CHECK_DELAY);
         
         // Final check after clicking Start button
         if (!checkAutomationEnabled('after clicking Start')) return;
@@ -5239,6 +5411,7 @@ function init() {
     if (modState.enabled) {
         console.log('[Better Boosted Maps] Mod is enabled - setting up daily state monitoring');
         setupDailyStateMonitoring();
+        setupPageVisibilityMonitoring();
         
         // Check and start boosted map farming after delay
         setTimeout(() => {
@@ -5279,6 +5452,59 @@ function updateExposedState() {
     exposeBoostedMapsState();
 }
 
+function handlePageVisibilityChange() {
+    try {
+        const now = Date.now();
+        if (now - lastPageVisibilityChange < 1000) {
+            return;
+        }
+        lastPageVisibilityChange = now;
+
+        if (document.visibilityState !== 'visible') {
+            console.log('[Better Boosted Maps] Page became hidden - maintaining farming state');
+            return;
+        }
+
+        if (!modState.enabled || !modState.farming.isActive) {
+            return;
+        }
+
+        console.log('[Better Boosted Maps] Page became visible - reclaiming autoplay if idle');
+        const boardContext = globalThis.state?.board?.getSnapshot?.()?.context;
+        const sessionRunning = !!(boardContext?.isRunning || boardContext?.autoplayRunning || boardContext?.gameStarted);
+        if (sessionRunning || hasInsufficientStamina().insufficient) {
+            return;
+        }
+
+        if (!isOnCorrectBoostedMap()) {
+            return;
+        }
+
+        void (async () => {
+            const startButton = await findButtonWithRetries(
+                () => findButtonByText('Start'),
+                'Start button (foreground reclaim)'
+            );
+            if (startButton) {
+                console.log('[Better Boosted Maps] Foreground reclaim - clicking Start');
+                startButton.click();
+            }
+        })();
+    } catch (error) {
+        console.error('[Better Boosted Maps] Error handling page visibility change:', error);
+    }
+}
+
+function setupPageVisibilityMonitoring() {
+    if (pageVisibilityHandler) {
+        document.removeEventListener('visibilitychange', pageVisibilityHandler);
+        pageVisibilityHandler = null;
+    }
+    pageVisibilityHandler = handlePageVisibilityChange;
+    document.addEventListener('visibilitychange', pageVisibilityHandler);
+    console.log('[Better Boosted Maps] Page visibility monitoring set up');
+}
+
 // Initial state exposure
 exposeBoostedMapsState();
 
@@ -5308,6 +5534,11 @@ context.exports = {
         
         // Clean up stamina tooltip monitoring
         stopStaminaTooltipMonitoring();
+
+        if (pageVisibilityHandler) {
+            document.removeEventListener('visibilitychange', pageVisibilityHandler);
+            pageVisibilityHandler = null;
+        }
         
         if (modState.activeModal) {
             cleanupModal();

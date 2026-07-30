@@ -1844,6 +1844,128 @@ let mapDebugLastLogTime = 0;
 let mapDebugLogCount = 0;
 let timeoutIds = [];
 
+const HUNT_ANALYZER_ANALYSIS_BLOCKING_MODS = ['Board Analyzer', 'Manual Runner'];
+const HUNT_ANALYZER_ANALYSIS_HIDDEN_ATTR = 'data-ba-analysis-panel-hidden';
+let huntAnalyzerPausedForAnalysis = false;
+let huntAnalyzerAnalysisCoordinationUnsubscribe = null;
+let huntAnalyzerAnalysisCoordinationSetupTimer = null;
+let huntAnalyzerPausedUpdateInterval = false;
+let huntAnalyzerPausedAutoSaveInterval = false;
+
+function isHuntAnalyzerAnalysisBlockingActive() {
+  if (!window.ModCoordination) return false;
+  return HUNT_ANALYZER_ANALYSIS_BLOCKING_MODS.some((name) => window.ModCoordination.isModActive(name));
+}
+
+function pauseHuntAnalyzerForAnalysis() {
+  if (huntAnalyzerPausedForAnalysis) return;
+  huntAnalyzerPausedForAnalysis = true;
+  console.log('[Hunt Analyzer] Board Analyzer/Manual Runner active - pausing panel updates and tracking');
+
+  huntAnalyzerPausedUpdateInterval = !!updateIntervalId;
+  if (updateIntervalId) {
+    clearInterval(updateIntervalId);
+    updateIntervalId = null;
+  }
+  huntAnalyzerPausedAutoSaveInterval = !!autoSaveIntervalId;
+  if (autoSaveIntervalId) {
+    clearInterval(autoSaveIntervalId);
+    autoSaveIntervalId = null;
+  }
+  try {
+    if (typeof stopInternalClock === 'function') {
+      stopInternalClock();
+    }
+  } catch (_) { /* ignore */ }
+
+  const panel = document.getElementById(PANEL_ID);
+  if (panel && panel.getAttribute(HUNT_ANALYZER_ANALYSIS_HIDDEN_ATTR) !== '1') {
+    panel.setAttribute(HUNT_ANALYZER_ANALYSIS_HIDDEN_ATTR, '1');
+    panel.style.setProperty('display', 'none', 'important');
+  }
+}
+
+function resumeHuntAnalyzerAfterAnalysis() {
+  if (!huntAnalyzerPausedForAnalysis) return;
+  huntAnalyzerPausedForAnalysis = false;
+  console.log('[Hunt Analyzer] Analysis finished - resuming Hunt Analyzer');
+
+  const panel = document.getElementById(PANEL_ID);
+  if (panel?.getAttribute(HUNT_ANALYZER_ANALYSIS_HIDDEN_ATTR) === '1') {
+    panel.style.removeProperty('display');
+    panel.removeAttribute(HUNT_ANALYZER_ANALYSIS_HIDDEN_ATTR);
+  }
+
+  if (panel && huntAnalyzerPausedUpdateInterval && !updateIntervalId) {
+    updateIntervalId = setInterval(updatePanelDisplay, 1000);
+  }
+  if (panel && huntAnalyzerPausedAutoSaveInterval && HuntAnalyzerState.settings.persistData && !autoSaveIntervalId) {
+    autoSaveIntervalId = setInterval(() => {
+      if (HuntAnalyzerState.data.sessions.length > 0) {
+        saveHuntAnalyzerData();
+      }
+    }, CONFIG.AUTO_SAVE_INTERVAL);
+  }
+  huntAnalyzerPausedUpdateInterval = false;
+  huntAnalyzerPausedAutoSaveInterval = false;
+  if (panel) {
+    try {
+      updatePanelDisplay();
+    } catch (_) { /* ignore */ }
+  }
+}
+
+function handleHuntAnalyzerAnalysisCoordination() {
+  try {
+    const blocking = isHuntAnalyzerAnalysisBlockingActive();
+    if (blocking && !huntAnalyzerPausedForAnalysis) {
+      pauseHuntAnalyzerForAnalysis();
+    } else if (!blocking && huntAnalyzerPausedForAnalysis) {
+      resumeHuntAnalyzerAfterAnalysis();
+    }
+  } catch (error) {
+    console.error('[Hunt Analyzer] Error in Board Analyzer coordination:', error);
+  }
+}
+
+function setupHuntAnalyzerAnalysisCoordination() {
+  if (huntAnalyzerAnalysisCoordinationUnsubscribe) return;
+  if (!window.ModCoordination) {
+    if (huntAnalyzerAnalysisCoordinationSetupTimer) clearTimeout(huntAnalyzerAnalysisCoordinationSetupTimer);
+    huntAnalyzerAnalysisCoordinationSetupTimer = setTimeout(setupHuntAnalyzerAnalysisCoordination, 500);
+    return;
+  }
+  huntAnalyzerAnalysisCoordinationSetupTimer = null;
+  try {
+    huntAnalyzerAnalysisCoordinationUnsubscribe = window.ModCoordination.on('modActiveChanged', (data) => {
+      if (HUNT_ANALYZER_ANALYSIS_BLOCKING_MODS.includes(data.modName)) {
+        handleHuntAnalyzerAnalysisCoordination();
+      }
+    });
+    handleHuntAnalyzerAnalysisCoordination();
+  } catch (error) {
+    console.error('[Hunt Analyzer] Analysis coordination setup failed:', error);
+  }
+}
+
+function teardownHuntAnalyzerAnalysisCoordination(options = {}) {
+  if (huntAnalyzerAnalysisCoordinationSetupTimer) {
+    clearTimeout(huntAnalyzerAnalysisCoordinationSetupTimer);
+    huntAnalyzerAnalysisCoordinationSetupTimer = null;
+  }
+  if (huntAnalyzerAnalysisCoordinationUnsubscribe) {
+    try {
+      huntAnalyzerAnalysisCoordinationUnsubscribe();
+    } catch (_) { /* ignore */ }
+    huntAnalyzerAnalysisCoordinationUnsubscribe = null;
+  }
+  if (options.restore !== false && huntAnalyzerPausedForAnalysis) {
+    resumeHuntAnalyzerAfterAnalysis();
+  } else {
+    huntAnalyzerPausedForAnalysis = false;
+  }
+}
+
 // Event handler tracking for memory leak prevention
 let panelResizeMouseMoveHandler = null;
 let panelResizeMouseUpHandler = null;
@@ -7250,6 +7372,9 @@ function updatePanelLayout(panel) {
 if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.board && globalThis.state.board.on) {
     
     globalThis.state.board.on('newGame', (event) => {
+        if (huntAnalyzerPausedForAnalysis || isHuntAnalyzerAnalysisBlockingActive()) {
+            return;
+        }
         // Only process if the panel is open
         if (!document.getElementById(PANEL_ID)) {
             return; // Exit immediately if panel is not open
@@ -7293,6 +7418,9 @@ if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.bo
 
     if (globalThis.state.board.subscribe) {
         boardSubscription = globalThis.state.board.subscribe(({ context }) => {
+            if (huntAnalyzerPausedForAnalysis || isHuntAnalyzerAnalysisBlockingActive()) {
+                return;
+            }
             // Only process if the panel is open
             if (!document.getElementById(PANEL_ID)) {
                 return; // Exit immediately if panel is not open
@@ -7348,6 +7476,9 @@ if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.bo
             let lastSelectedRoomId = null;
             let lastKnownMode = null;
             modeMapSubscription = globalThis.state.board.subscribe((state) => {
+                if (huntAnalyzerPausedForAnalysis || isHuntAnalyzerAnalysisBlockingActive()) {
+                    return;
+                }
                 const ctx = state?.context || {};
                 const playerCtx = globalThis.state?.player?.getSnapshot?.()?.context || {};
                 const roomId = (ctx.selectedMap && ctx.selectedMap.selectedRoom && ctx.selectedMap.selectedRoom.id)
@@ -7892,6 +8023,7 @@ const panelState = {
 async function cleanupHuntAnalyzer() {
     
     try {
+        teardownHuntAnalyzerAnalysisCoordination({ restore: false });
         // 1. Clear intervals and timeouts
         if (updateIntervalId) {
             clearInterval(updateIntervalId);
@@ -8215,4 +8347,5 @@ exports = {
     getStats: getHuntAnalyzerPublicStats
 };
 
+setupHuntAnalyzerAnalysisCoordination();
 console.log('[Hunt Analyzer] Mod initialization complete');

@@ -48,11 +48,17 @@ const MODAL_OPEN_DELAY = 1000;
 const DEFAULT_START_DELAY = 3;         // 3 seconds default (user-configurable 1-10)
 const MAX_START_DELAY = 10;            // 10 seconds maximum
 const STAMINA_MONITOR_INTERVAL = 5000;
+const DEFAULT_STAMINA_COST = 30;
+const STAMINA_REGEN_MS = 60000;
+const ROOM_NAV_POLL_MS = 100;
+const ROOM_NAV_TIMEOUT_MS = 8000;
+const ROOM_NAV_TIMEOUT_HIDDEN_MS = 20000;
+const DOM_ACTION_RETRY_DELAY_MS = 500;
+const DOM_ACTION_RETRY_DELAY_HIDDEN_MS = 1000;
+const DOM_ACTION_MAX_ATTEMPTS = 5;
+const DOM_ACTION_MAX_ATTEMPTS_HIDDEN = 40;
 const RAID_STATUS_UPDATE_INTERVAL = 600000; // 10 minutes
 const RAID_END_CHECK_INTERVAL = 30000;
-
-// Stamina constants
-const DEFAULT_STAMINA_COST = 30;
 
 // Count
 const MAX_RETRY_ATTEMPTS = 3;
@@ -115,12 +121,12 @@ function getRaidPriority(raidName) {
     try {
         const settings = loadSettings();
         const raidPriorities = settings.raidPriorities || {};
-        const defaultPriorityString = EVENT_TEXTS.includes(raidName) ? 'medium' : 'high';
+        const defaultPriorityString = isStaticRaidEventName(raidName) ? 'medium' : 'high';
         const priorityString = raidPriorities[raidName] || defaultPriorityString;
         return priorityStringToNumber(priorityString);
     } catch (_) {
         // Default: static raids = MEDIUM, dynamic events = LOW
-        return EVENT_TEXTS.includes(raidName) ? RAID_PRIORITY.MEDIUM : RAID_PRIORITY.HIGH;
+        return isStaticRaidEventName(raidName) ? RAID_PRIORITY.MEDIUM : RAID_PRIORITY.HIGH;
     }
 }
 
@@ -629,11 +635,18 @@ function skipInvalidRaidAndRetry(reason, allowInterrupt = false) {
 const HALLOWEEN_MANSION_RAID = 'Halloween Mansion';
 const JOLLY_AXEMAN_RAIDS = ['Jolly Axeman Tavern', 'Dog Raceway', "Ruprecht's Hut", 'White Wave Cellar'];
 
-const EVENT_TO_ROOM_MAPPING = globalThis.mapsDatabase?.EVENT_TO_ROOM_MAPPING || {};
-// Centralized static raid/event definitions from maps-database.js.
-const EVENT_TEXTS = Object.keys(EVENT_TO_ROOM_MAPPING);
-if (!EVENT_TEXTS.length) {
-    console.warn('[Raid Hunter] mapsDatabase static raid definitions unavailable; event lists are empty.');
+// Live accessors — always read from maps-database (do not snapshot at load time).
+function getEventToRoomMapping() {
+    return globalThis.mapsDatabase?.EVENT_TO_ROOM_MAPPING || {};
+}
+
+function getStaticRaidEventNames() {
+    return Object.keys(getEventToRoomMapping());
+}
+
+function isStaticRaidEventName(raidName) {
+    if (!raidName) return false;
+    return Object.prototype.hasOwnProperty.call(getEventToRoomMapping(), raidName);
 }
 
 // ============================================================================
@@ -644,13 +657,111 @@ if (!EVENT_TEXTS.length) {
 let staminaTooltipObserver = null;
 let staminaRecoveryCallback = null;
 
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function isDocumentHidden() {
+    return typeof document !== 'undefined' &&
+        (document.hidden === true || document.visibilityState === 'hidden');
+}
+
+function getStaminaFromGameState() {
+    try {
+        if (typeof globalThis.state?.utils?.getCurrentStamina === 'function') {
+            const fromUtils = Number(globalThis.state.utils.getCurrentStamina());
+            if (Number.isFinite(fromUtils)) {
+                return fromUtils;
+            }
+        }
+
+        const playerContext = globalThis.state?.player?.getSnapshot?.()?.context;
+        if (!playerContext) {
+            return null;
+        }
+
+        for (const key of ['stamina', 'currentStamina']) {
+            const value = Number(playerContext[key]);
+            if (Number.isFinite(value)) {
+                return value;
+            }
+        }
+
+        const willBeFullAt = playerContext.staminaWillBeFullAt;
+        const regenMax = Number(playerContext.maxStamina ?? playerContext.staminaMax);
+        if (willBeFullAt != null && Number.isFinite(regenMax) && regenMax > 0) {
+            const missing = Math.ceil((willBeFullAt - Date.now()) / STAMINA_REGEN_MS);
+            const regenStamina = Math.max(0, regenMax - missing);
+            const excessMs = Math.max(0, Number(playerContext.staminaExcessMs) || 0);
+            return Math.floor(regenStamina + excessMs / STAMINA_REGEN_MS);
+        }
+    } catch (_) {
+        // fall through
+    }
+    return null;
+}
+
+async function waitForRoomSelection(roomId) {
+    if (roomId == null || roomId === '') {
+        return false;
+    }
+    if (String(getCurrentRoomId()) === String(roomId)) {
+        return true;
+    }
+
+    const timeoutMs = isDocumentHidden() ? ROOM_NAV_TIMEOUT_HIDDEN_MS : ROOM_NAV_TIMEOUT_MS;
+    const pollMs = isDocumentHidden() ? Math.max(ROOM_NAV_POLL_MS, 250) : ROOM_NAV_POLL_MS;
+    const deadline = Date.now() + timeoutMs;
+
+    while (Date.now() < deadline) {
+        await sleep(pollMs);
+        if (String(getCurrentRoomId()) === String(roomId)) {
+            return true;
+        }
+    }
+
+    const matched = String(getCurrentRoomId()) === String(roomId);
+    if (!matched) {
+        console.log(
+            `[Raid Hunter] Room selection timeout (hidden=${isDocumentHidden()}): wanted ${roomId}, got ${getCurrentRoomId()}`
+        );
+    }
+    return matched;
+}
+
+async function findButtonWithRetries(findFn, label = 'button') {
+    const hidden = isDocumentHidden();
+    const maxAttempts = hidden ? DOM_ACTION_MAX_ATTEMPTS_HIDDEN : DOM_ACTION_MAX_ATTEMPTS;
+    const delayMs = hidden ? DOM_ACTION_RETRY_DELAY_HIDDEN_MS : DOM_ACTION_RETRY_DELAY_MS;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        const button = typeof findFn === 'function' ? findFn() : null;
+        if (button) {
+            if (attempt > 1) {
+                console.log(`[Raid Hunter] Found ${label} on attempt ${attempt}/${maxAttempts}`);
+            }
+            return button;
+        }
+        if (attempt < maxAttempts) {
+            await sleep(delayMs);
+        }
+    }
+
+    console.log(`[Raid Hunter] ${label} not found after ${maxAttempts} attempts (hidden=${hidden})`);
+    return null;
+}
+
 /**
- * Calculate current stamina using game state API
+ * Calculate current stamina using game state API when possible
  * @returns {number} Current stamina amount
  */
 function getCurrentStamina() {
     try {
-        // Read stamina directly from DOM (same approach as Bestiary Automator)
+        const fromApi = getStaminaFromGameState();
+        if (fromApi !== null) {
+            return fromApi;
+        }
+
         const elStamina = document.querySelector('[title="Stamina"]');
         if (!elStamina) {
             console.log('[Raid Hunter] Stamina element not found');
@@ -664,8 +775,7 @@ function getCurrentStamina() {
         }
         
         const stamina = Number(staminaElement.textContent);
-        console.log('[Raid Hunter] Current stamina from DOM:', stamina);
-        return stamina;
+        return Number.isFinite(stamina) ? stamina : 0;
     } catch (error) {
         console.error('[Raid Hunter] Error reading stamina:', error);
         return 0;
@@ -697,13 +807,21 @@ function getCurrentMapStaminaCost() {
  * @returns {Object} { insufficient: boolean, cost: number }
  */
 function hasInsufficientStamina() {
+    const cost = getCurrentMapStaminaCost();
+
+    if (isDocumentHidden()) {
+        const current = getCurrentStamina();
+        const insufficient = current < cost;
+        if (insufficient) {
+            console.log(`[Raid Hunter] Background stamina check: Insufficient (${current}/${cost})`);
+        }
+        return { insufficient, cost };
+    }
+
     // Look for stamina tooltip (icon-based, language-independent)
     const staminaTooltip = document.querySelector(
         '[role="tooltip"] img[alt="stamina"], [data-state="instant-open"] img[alt="stamina"]'
     );
-    
-    // Get stamina cost from game API
-    const cost = getCurrentMapStaminaCost();
     
     if (staminaTooltip) {
         // Found stamina icon in tooltip = insufficient stamina
@@ -740,11 +858,37 @@ function startStaminaTooltipMonitoring(onRecovered, requiredStamina = null) {
         }
         
         const currentStamina = getCurrentStamina();
-        
-        // Also check if tooltip disappeared (double-check)
         const tooltipStillExists = document.querySelector(
             '[role="tooltip"] img[alt="stamina"], [data-state="instant-open"] img[alt="stamina"]'
         );
+        const hidden = isDocumentHidden();
+        const apiRecovered = requiredStamina != null && currentStamina >= requiredStamina;
+
+        if (hidden) {
+            if (!apiRecovered) {
+                hasStaminaIssue = true;
+                if (requiredStamina) {
+                    const timeRemaining = Math.max(0, requiredStamina - currentStamina);
+                    console.log(`[Raid Hunter] Waiting for stamina (${currentStamina}/${requiredStamina}) - ~${timeRemaining} min remaining`);
+                }
+                return;
+            }
+            if (!hasStaminaIssue) {
+                return;
+            }
+            console.log(`[Raid Hunter] ✅ STAMINA RECOVERED (API, background) - current: ${currentStamina}`);
+            hasStaminaIssue = false;
+            const callback = staminaRecoveryCallback;
+            clearInterval(staminaCheckInterval);
+            stopStaminaTooltipMonitoring();
+            if (typeof callback === 'function' && !isPageVisibilityTransitioning) {
+                callback();
+            } else if (isPageVisibilityTransitioning) {
+                console.log('[Raid Hunter] Skipping stamina recovery callback - page visibility transition in progress');
+                startStaminaTooltipMonitoring(callback, requiredStamina);
+            }
+            return;
+        }
         
         if (!tooltipStillExists && hasStaminaIssue) {
             console.log(`[Raid Hunter] ✅ STAMINA RECOVERED - current: ${currentStamina}`);
@@ -1869,6 +2013,17 @@ function handlePageVisibilityChange() {
                             if (!autoplayEnabled) {
                                 console.log('[Raid Hunter] Could not enable autoplay - will retry later');
                                 // Don't cancel the raid - just wait for next check
+                            }
+                        }
+
+                        // Click Start if session is idle (common after background navigation)
+                        const boardNow = globalThis.state?.board?.getSnapshot?.()?.context;
+                        const sessionRunning = !!(boardNow?.isRunning || boardNow?.autoplayRunning || boardNow?.gameStarted);
+                        if (!sessionRunning && !hasInsufficientStamina().insufficient) {
+                            const startButton = findButtonByText('Start');
+                            if (startButton) {
+                                console.log('[Raid Hunter] Foreground reclaim - clicking Start');
+                                startButton.click();
                             }
                         }
                         
@@ -3265,7 +3420,7 @@ function getRoomIdForEvent(eventName) {
     }
     
     // Fallback to hardcoded mapping (backward compatibility)
-    return EVENT_TO_ROOM_MAPPING[eventName] || null;
+    return getEventToRoomMapping()[eventName] || null;
 }
 
 /**
@@ -3284,7 +3439,7 @@ function getEventNameForRoomId(roomId) {
     }
     
     // Fallback to hardcoded mapping (only needed for backward compatibility)
-    for (const [eventName, mappedRoomId] of Object.entries(EVENT_TO_ROOM_MAPPING)) {
+    for (const [eventName, mappedRoomId] of Object.entries(getEventToRoomMapping())) {
         if (mappedRoomId === roomId) {
             return eventName;
         }
@@ -4067,7 +4222,13 @@ async function handleEventOrRaid(roomId) {
             type: 'selectRoomById',
             roomId: roomId
         });
-        await new Promise(resolve => setTimeout(resolve, NAVIGATION_DELAY));
+        const roomReady = await waitForRoomSelection(roomId);
+        if (!roomReady) {
+            await sleep(NAVIGATION_DELAY);
+            if (String(getCurrentRoomId()) !== String(roomId)) {
+                throw new Error(`Failed to navigate to room ${roomId}`);
+            }
+        }
         
         // Set floor for this raid (default to 0 if not configured)
         const raidFloors = settings.raidFloors || {};
@@ -4089,7 +4250,7 @@ async function handleEventOrRaid(roomId) {
             }
             
             globalThis.state.board.trigger.setState({ fn: (prev) => ({ ...prev, floor: floor }) });
-            await new Promise(resolve => setTimeout(resolve, 100));
+            await sleep(100);
         }
         
         console.log('[Raid Hunter] Navigation completed');
@@ -4120,7 +4281,10 @@ async function handleEventOrRaid(roomId) {
     
     // Find and click the appropriate setup button
     console.log(`[Raid Hunter] Looking for ${setupMethod} button...`);
-    const setupButton = findSetupButton(setupMethod);
+    const setupButton = await findButtonWithRetries(
+        () => findSetupButton(setupMethod),
+        `${setupMethod} button`
+    );
     if (!setupButton) {
         console.log(`[Raid Hunter] ${setupMethod} button not found`);
         handleRaidFailure(`${setupMethod} button not found`);
@@ -4129,7 +4293,7 @@ async function handleEventOrRaid(roomId) {
     
     console.log(`[Raid Hunter] Clicking ${setupMethod} button...`);
     setupButton.click();
-    await new Promise(resolve => setTimeout(resolve, AUTO_SETUP_DELAY));
+    await sleep(AUTO_SETUP_DELAY);
     
     // Check automation status after auto-setup
     if (!isAutomationActive()) {
@@ -4244,37 +4408,21 @@ async function handleEventOrRaid(roomId) {
         return;
     }
 
-    // Find and click Start button with retry logic (especially needed after interrupts)
+    // Find and click Start button with retry logic (especially needed after interrupts / background tabs)
     console.log('[Raid Hunter] Looking for Start button...');
-    const startButton = findButtonByText('Start');
+    const startButton = await findButtonWithRetries(
+        () => findButtonByText('Start'),
+        'Start button'
+    );
     if (!startButton) {
-        console.log('[Raid Hunter] Start button not found - retrying with delay (page may still be loading after interrupt)...');
-        
-        // Retry logic for Start button (especially needed after interrupts)
-        const tryFindStartButton = async (retries = 5, delay = 500) => {
-            const button = findButtonByText('Start');
-            if (button) {
-                console.log('[Raid Hunter] Start button found on retry - clicking...');
-                button.click();
-                return;
-            } else if (retries > 0) {
-                console.log(`[Raid Hunter] Start button not found - retrying in ${delay}ms (${retries} retries left)`);
-                await new Promise(resolve => setTimeout(resolve, delay));
-                return tryFindStartButton(retries - 1, delay);
-            } else {
-                console.log('[Raid Hunter] Start button not found after all retries');
-                handleRaidFailure('Start button not found');
-                return;
-            }
-        };
-        
-        await tryFindStartButton();
-        await new Promise(resolve => setTimeout(resolve, AUTOMATION_CHECK_DELAY));
-    } else {
-        console.log('[Raid Hunter] Clicking Start button...');
-        startButton.click();
-        await new Promise(resolve => setTimeout(resolve, AUTOMATION_CHECK_DELAY));
+        console.log('[Raid Hunter] Start button not found after all retries');
+        handleRaidFailure('Start button not found');
+        return;
     }
+
+    console.log('[Raid Hunter] Clicking Start button...');
+    startButton.click();
+    await sleep(AUTOMATION_CHECK_DELAY);
     
     // Final check after clicking Start button
     if (!isAutomationActive()) {
@@ -5583,39 +5731,8 @@ function createRaidMapSelection() {
         background: rgba(0, 0, 0, 0.3);
     `;
     
-    // Group raids by region for better organization
-    const raidGroups = {
-        'Rookgaard': [
-            'Rat Plague'
-        ],
-        'Carlin': [
-            'Buzzing Madness',
-            'Monastery Catacombs',
-            'Ghostlands Boneyard'
-        ],
-        'Folda': [
-            'Permafrosted Hole',
-            'Jammed Mailbox',
-            'Frosted Bunker'
-        ],
-        'Ab\'Dendriel': [
-            'Hedge Maze Trap',
-            'Tower of Whitewatch (Shield)',
-            'Tower of Whitewatch (Helmet)',
-            'Tower of Whitewatch (Armor)',
-            'Orcish Barricade'
-        ],
-        'Kazordoon': [
-            'Poacher Cave (Bear)',
-            'Poacher Cave (Wolf)'
-        ],
-        'Venore': [
-            'Dwarven Bank Heist',
-            'An Arcanist Ritual'
-        ]
-    };
-    
-    // Helper: Get region name for a room ID using game state API
+    // Build static raid groups from maps-database EVENT_TO_ROOM_MAPPING + live REGIONS.
+    // Do not hardcode region→raid lists here; mapping is the single source of truth.
     function getRegionNameForRoomId(roomId) {
         try {
             const regions = globalThis.state?.utils?.REGIONS;
@@ -5628,11 +5745,10 @@ function createRaidMapSelection() {
                         if (typeof globalThis.mapsDatabase?.getRegionDisplayNameFromRegion === 'function') {
                             return globalThis.mapsDatabase.getRegionDisplayNameFromRegion(region);
                         }
-                        if (region.name) return region.name;
-                        if (typeof globalThis.mapsDatabase?.getRegionDisplayName === 'function') {
+                        if (typeof globalThis.mapsDatabase?.getRegionDisplayName === 'function' && region.id) {
                             return globalThis.mapsDatabase.getRegionDisplayName(region.id);
                         }
-                        return region.id;
+                        return region.name || region.id || null;
                     }
                 }
             }
@@ -5641,8 +5757,27 @@ function createRaidMapSelection() {
         }
         return null;
     }
+
+    function buildStaticRaidGroupsFromMapping() {
+        const groups = {};
+        const mapping = getEventToRoomMapping();
+
+        for (const [eventName, roomId] of Object.entries(mapping)) {
+            if (!eventName || !roomId) continue;
+            const regionName = getRegionNameForRoomId(roomId) || 'Other';
+            if (!groups[regionName]) {
+                groups[regionName] = [];
+            }
+            if (!groups[regionName].includes(eventName)) {
+                groups[regionName].push(eventName);
+            }
+        }
+        return groups;
+    }
+
+    const raidGroups = buildStaticRaidGroupsFromMapping();
     
-    // Enhanced: Add ALL raid maps from game state that aren't already in EVENT_TEXTS
+    // Enhanced: Add ALL raid maps from game state that aren't already in the static mapping
     // This ensures all raid maps are visible, with Event badges for non-core raids
     try {
         const knownStatic = new Set(Object.values(raidGroups).flat());
@@ -5651,23 +5786,16 @@ function createRaidMapSelection() {
         if (regions && Array.isArray(regions)) {
             for (const region of regions) {
                 if (region.rooms && Array.isArray(region.rooms)) {
-                    const regionName = (() => {
-                        if (typeof globalThis.mapsDatabase?.getRegionDisplayNameFromRegion === 'function') {
-                            return globalThis.mapsDatabase.getRegionDisplayNameFromRegion(region);
-                        }
-                        if (region.name) return region.name;
-                        if (typeof globalThis.mapsDatabase?.getRegionDisplayName === 'function') {
-                            return globalThis.mapsDatabase.getRegionDisplayName(region.id);
-                        }
-                        return region.id;
-                    })();
+                    const regionName = (typeof globalThis.mapsDatabase?.getRegionDisplayNameFromRegion === 'function'
+                        ? globalThis.mapsDatabase.getRegionDisplayNameFromRegion(region)
+                        : null) || region.name || region.id;
 
                     // Initialize region if it doesn't exist
                     if (!raidGroups[regionName]) {
                         raidGroups[regionName] = [];
                     }
 
-                    // Add all raid maps from this region that aren't already in EVENT_TEXTS
+                    // Add all raid maps from this region that aren't already listed
                     for (const room of region.rooms) {
                         if (room.raid === true) {
                             const raidName = getEventNameForRoomId(room.id);
@@ -5698,8 +5826,15 @@ function createRaidMapSelection() {
                 if (!raidGroups[regionName].includes(raidName)) {
                     raidGroups[regionName].push(raidName);
                 }
+            } else if (regionName) {
+                if (!raidGroups[regionName]) {
+                    raidGroups[regionName] = [];
+                }
+                if (!raidGroups[regionName].includes(raidName)) {
+                    raidGroups[regionName].push(raidName);
+                }
             } else {
-                // Fallback: Unknown region - add to first region or create "Other" category
+                // Fallback: Unknown region
                 if (!raidGroups['Other']) {
                     raidGroups['Other'] = [];
                 }
@@ -5798,9 +5933,8 @@ function createRaidMapSelection() {
             // Add custom settings indicator if raid has custom settings
             updateRaidCustomSettingsIndicator(raidDiv, raidName);
             
-            // Add "Event" badge only for raids NOT in the hardcoded EVENT_TEXTS list
-            // These are truly dynamic events that are not statically defined
-            if (!EVENT_TEXTS.includes(raidName)) {
+            // Add "Event" badge only for raids NOT in maps-database EVENT_TO_ROOM_MAPPING
+            if (!isStaticRaidEventName(raidName)) {
                 const eventBadge = document.createElement('span');
                 eventBadge.textContent = t('mods.raidHunter.event');
                 eventBadge.className = 'pixel-font-16';
@@ -5850,7 +5984,7 @@ function createRaidMapSelection() {
             });
             // Set initial value from settings (default: medium for static raids, low for events)
             const raidPriorities = settings.raidPriorities || {};
-            const defaultPriority = EVENT_TEXTS.includes(raidName) ? 'medium' : 'high';
+            const defaultPriority = isStaticRaidEventName(raidName) ? 'medium' : 'high';
             prioritySelect.value = raidPriorities[raidName] || defaultPriority;
             try { stylePrioritySelect(prioritySelect); } catch (_) {}
             prioritySelect.addEventListener('change', (e) => {
@@ -6443,22 +6577,16 @@ function validateRaidDelay(value) {
 
 function validateRaidMaps(maps) {
     if (!Array.isArray(maps)) return false;
-    // Allow static raids (in EVENT_TEXTS) OR events that exist in game state API or fallback mapping
+    // Allow static raids (maps-database mapping) OR events that exist in game state API
     return maps.every(map => {
-        // Static raids
-        if (EVENT_TEXTS.includes(map)) return true;
+        if (isStaticRaidEventName(map)) return true;
         
-        // Check game state API for dynamic events (primary method)
         try {
             if (globalThis.state?.utils?.ROOM_NAME) {
                 const roomNames = globalThis.state.utils.ROOM_NAME;
-                const existsInGameState = Object.values(roomNames).includes(map);
-                if (existsInGameState) return true;
+                if (Object.values(roomNames).includes(map)) return true;
             }
         } catch (_) {}
-        
-        // Fallback to hardcoded mapping (backward compatibility)
-        if (EVENT_TO_ROOM_MAPPING.hasOwnProperty(map)) return true;
         
         return false;
     });
@@ -6618,6 +6746,7 @@ function autoSaveSettings() {
         // Collect all currently visible raid checkboxes (checked and unchecked)
         const checkedRaids = new Set();
         const visibleEventRaids = new Set(); // Track which event raids are currently visible
+        const visibleStaticRaids = new Set(); // Track which static raids are currently visible
         
         document.querySelectorAll('input[type="checkbox"][id^="raid-"]').forEach(checkbox => {
             // Get the actual raid name from the label text (more reliable than parsing ID)
@@ -6626,8 +6755,10 @@ function autoSaveSettings() {
             if (!raidName) return;
             
             // Track all visible event raids (checked or unchecked)
-            if (!EVENT_TEXTS.includes(raidName)) {
+            if (!isStaticRaidEventName(raidName)) {
                 visibleEventRaids.add(raidName);
+            } else {
+                visibleStaticRaids.add(raidName);
             }
             
             // Track checked raids
@@ -6637,7 +6768,7 @@ function autoSaveSettings() {
         });
         
         // Save static raids based on current checkbox state
-        EVENT_TEXTS.forEach(eventText => {
+        getStaticRaidEventNames().forEach(eventText => {
             if (checkedRaids.has(eventText)) {
                 enabledRaidMaps.push(eventText);
             }
@@ -6645,20 +6776,19 @@ function autoSaveSettings() {
         
         // Save currently visible event raids based on their checkbox state
         checkedRaids.forEach(raidName => {
-            if (!EVENT_TEXTS.includes(raidName) && !enabledRaidMaps.includes(raidName)) {
+            if (!isStaticRaidEventName(raidName) && !enabledRaidMaps.includes(raidName)) {
                 enabledRaidMaps.push(raidName);
             }
         });
         
-        // Preserve event raid states that aren't currently visible
-        // If an event raid was previously saved (checked) but isn't visible now, keep it checked
+        // Preserve previously enabled raids that aren't currently visible in the UI
         previouslySavedMaps.forEach(savedRaidName => {
-            if (!EVENT_TEXTS.includes(savedRaidName) && !visibleEventRaids.has(savedRaidName)) {
-                // This is an event raid that was previously saved but not currently visible
-                // Preserve its checked state
-                if (!enabledRaidMaps.includes(savedRaidName)) {
-                    enabledRaidMaps.push(savedRaidName);
-                }
+            const isStatic = isStaticRaidEventName(savedRaidName);
+            const isVisible = isStatic
+                ? visibleStaticRaids.has(savedRaidName)
+                : visibleEventRaids.has(savedRaidName);
+            if (!isVisible && !enabledRaidMaps.includes(savedRaidName)) {
+                enabledRaidMaps.push(savedRaidName);
             }
         });
         
@@ -6834,7 +6964,7 @@ function loadAndApplySettings() {
         }
 
         // Add auto-save listeners to all raid map checkboxes
-        EVENT_TEXTS.forEach(eventText => {
+        getStaticRaidEventNames().forEach(eventText => {
             const checkboxId = `raid-${eventText.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase()}`;
             const checkbox = document.getElementById(checkboxId);
             if (checkbox) {

@@ -150,7 +150,7 @@ if (window.EventCompetition) {
   raidsUnsubscribe: null,
   countdownToastInterval: null,
   countdownRaidsUnsubscribe: null,
-  lastCountdownToastDays: null,
+  lastCountdownToastBucket: null,
   lastCountdownToastLiveShown: false,
   eventNextCheckEndTime: null,
   floorBarRows: null,
@@ -1748,14 +1748,24 @@ function getTblEventMapName() {
   return roomNames[cfg.roomId] || cfg.roomId;
 }
 
-function getTblEventCountdownToastMessage(daysRemaining) {
+function getTblEventCountdownToastMessage(msRemaining) {
+  const daysRemaining = getTblEventDaysRemaining(msRemaining);
   if (daysRemaining === 0) {
-    return tEvent('EventEndsTodayToast');
+    return tEvent('EventEndsInToast', { time: formatTblEventTimer(msRemaining) });
   }
   if (daysRemaining === 1) {
     return tEvent('EventDayLeftToast');
   }
   return tEvent('EventDaysLeftToast', { days: daysRemaining });
+}
+
+function getTblEventCountdownToastBucket(msRemaining) {
+  const daysRemaining = getTblEventDaysRemaining(msRemaining);
+  if (daysRemaining <= 0) {
+    const totalHours = Math.floor(Math.max(0, Math.ceil(msRemaining / 1000)) / 3600);
+    return `0:${totalHours}`;
+  }
+  return String(daysRemaining);
 }
 
 function getTblEventLiveToastMessage() {
@@ -1782,6 +1792,7 @@ function maybeShowTblEventCountdownToast(options = {}) {
   }
 
   const daysRemaining = getTblEventDaysRemaining(msRemaining);
+  const countdownBucket = getTblEventCountdownToastBucket(msRemaining);
   const force = options.force === true;
 
   if (daysRemaining >= maxDays) {
@@ -1790,7 +1801,7 @@ function maybeShowTblEventCountdownToast(options = {}) {
     }
 
     state.lastCountdownToastLiveShown = true;
-    state.lastCountdownToastDays = null;
+    state.lastCountdownToastBucket = null;
     showTblEventToast(
       getTblEventLiveToastMessage(),
       {
@@ -1801,13 +1812,13 @@ function maybeShowTblEventCountdownToast(options = {}) {
   }
 
   state.lastCountdownToastLiveShown = false;
-  if (!force && state.lastCountdownToastDays === daysRemaining) {
+  if (!force && state.lastCountdownToastBucket === countdownBucket) {
     return;
   }
 
-  state.lastCountdownToastDays = daysRemaining;
+  state.lastCountdownToastBucket = countdownBucket;
   showTblEventToast(
-    getTblEventCountdownToastMessage(daysRemaining),
+    getTblEventCountdownToastMessage(msRemaining),
     {
       onClick: () => openTblCompetitionFromCountdownToast()
     }
@@ -5652,7 +5663,7 @@ function cleanupTblFloorLeague() {
   state.myEventRankScores = {};
   state.myEventRankTicks = {};
   state.eventNextCheckEndTime = null;
-  state.lastCountdownToastDays = null;
+  state.lastCountdownToastBucket = null;
   state.lastCountdownToastLiveShown = false;
   state.eventWasActive = false;
   state.floorBarRows = null;
@@ -5710,6 +5721,290 @@ function cleanupTblFloorLeague() {
 
   const instances = new Map();
 
+  // ---------------------------------------------------------------------------
+  // Live-event nudge: toast when a known event is live but Better Highscores
+  // is disabled (so the full EventCompetition adapter never registers).
+  // ---------------------------------------------------------------------------
+  const EVENT_NUDGE_TOAST = {
+    containerId: 'event-competition-nudge-toast-container',
+    durationMs: 14000,
+    pollIntervalMs: 2000,
+    startupGraceMs: 2500
+  };
+
+  const KNOWN_EVENT_NUDGES = [
+    {
+      id: 'tbl-wcfield',
+      roomId: 'wcfield',
+      i18nKey: 'mods.betterUI.tblLeagueEventNeedsHighscoresToast',
+      fallbackMessage:
+        'Event competition [[green]]live[[/green]] for {mapName}!\nEnable [[yellow]]Better Highscores[[/yellow]] to participate.'
+    }
+  ];
+
+  const nudgeState = {
+    started: false,
+    readyAt: 0,
+    pollInterval: null,
+    raidsUnsubscribe: null,
+    // eventId -> `${expiresAt}` of the live period we already toasted for
+    shownForLiveKey: new Map()
+  };
+
+  function escapeNudgeHtml(text) {
+    return String(text)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  const NUDGE_HIGHLIGHT_COLORS = {
+    green: '#8f8',
+    red: '#f88',
+    yellow: '#ff8',
+    muted: '#ccc'
+  };
+  const NUDGE_HIGHLIGHT_TAG_RE = /\[\[(green|red|yellow|muted)\]\]([\s\S]*?)\[\[\/\1\]\]/g;
+
+  function formatNudgeHighlightHtml(text) {
+    const source = String(text || '');
+    if (!source) {
+      return '';
+    }
+    let html = '';
+    let lastIndex = 0;
+    NUDGE_HIGHLIGHT_TAG_RE.lastIndex = 0;
+    let match = NUDGE_HIGHLIGHT_TAG_RE.exec(source);
+    while (match) {
+      html += escapeNudgeHtml(source.slice(lastIndex, match.index));
+      const color = NUDGE_HIGHLIGHT_COLORS[match[1]] || '#fff';
+      html += `<span style="color:${color};font-weight:normal;text-shadow:1px 0 0 ${color},0 0 2px ${color}66,0 1px 1px rgba(0,0,0,0.4);">${escapeNudgeHtml(match[2])}</span>`;
+      lastIndex = NUDGE_HIGHLIGHT_TAG_RE.lastIndex;
+      match = NUDGE_HIGHLIGHT_TAG_RE.exec(source);
+    }
+    html += escapeNudgeHtml(source.slice(lastIndex));
+    return html;
+  }
+
+  function translateNudge(key, params, fallback) {
+    let value = fallback;
+    try {
+      const translated = window.BestiaryModAPI?.i18n?.t?.(key);
+      if (typeof translated === 'string' && translated && translated !== key) {
+        value = translated;
+      }
+    } catch (_) {
+      // keep fallback
+    }
+    if (params && typeof value === 'string') {
+      Object.entries(params).forEach(([paramKey, paramValue]) => {
+        value = value.replace(new RegExp(`\\{${paramKey}\\}`, 'g'), String(paramValue));
+      });
+    }
+    return value;
+  }
+
+  function getNudgeMapName(roomId) {
+    const roomNames = globalThis.state?.utils?.ROOM_NAME || {};
+    return roomNames[roomId] || roomId;
+  }
+
+  function findBetterHighscoresMod() {
+    const mods = window.localMods;
+    if (!Array.isArray(mods) || mods.length === 0) {
+      return null;
+    }
+    return mods.find((mod) => (
+      typeof mod?.name === 'string' && mod.name.includes('Better Highscores')
+    )) || null;
+  }
+
+  function isBetterHighscoresDisabled() {
+    const mod = findBetterHighscoresMod();
+    if (mod) {
+      return mod.enabled !== true;
+    }
+    const modsListed = Array.isArray(window.localMods) && window.localMods.length > 0;
+    const loadDone = window.localModsAPI?.wasCompletionSignalSent?.() === true;
+    if (!modsListed && !loadDone) {
+      return null;
+    }
+    // Mods finished (or list present) but Better Highscores is absent → treat as unavailable.
+    return true;
+  }
+
+  function isEventNudgeHandlerRegistered(eventDef) {
+    if (instances.has(eventDef.id)) {
+      return true;
+    }
+    for (const instance of instances.values()) {
+      if (instance?.config?.roomId === eventDef.roomId) {
+        return true;
+      }
+      if (typeof instance?.isMapActive === 'function' && instance.isMapActive(eventDef.roomId)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function getLiveRaidForRoom(roomId) {
+    const list = globalThis.state?.raids?.getSnapshot?.()?.context?.list || [];
+    const raid = list.find((entry) => entry?.roomId === roomId) || null;
+    const expiresAt = Number(raid?.expiresAt) || 0;
+    // Same gate as EventCompetition "Event ends in: …" — not ended, not inactive/next-check.
+    if (expiresAt > Date.now()) {
+      return raid;
+    }
+    return null;
+  }
+
+  function getNudgeToastContainer() {
+    if (typeof document === 'undefined') {
+      return null;
+    }
+    let container = document.getElementById(EVENT_NUDGE_TOAST.containerId);
+    if (!container) {
+      container = document.createElement('div');
+      container.id = EVENT_NUDGE_TOAST.containerId;
+      container.style.cssText = 'position: fixed; z-index: 9999; inset: 16px 16px 64px; pointer-events: none;';
+      document.body.appendChild(container);
+    }
+    return container;
+  }
+
+  function updateNudgeToastPositions(container) {
+    if (!container) {
+      return;
+    }
+    container.querySelectorAll('.event-competition-nudge-toast-item').forEach((toast, index) => {
+      toast.style.transform = `translateY(-${index * 46}px)`;
+    });
+  }
+
+  function showEventNeedsHighscoresToast(message) {
+    const rawMessage = message != null && message !== '' ? String(message) : '';
+    if (!rawMessage) {
+      return;
+    }
+    try {
+      const container = getNudgeToastContainer();
+      if (!container) {
+        return;
+      }
+      const existingToasts = container.querySelectorAll('.event-competition-nudge-toast-item');
+      const stackOffset = existingToasts.length * 46;
+      const flexContainer = document.createElement('div');
+      flexContainer.className = 'event-competition-nudge-toast-item';
+      flexContainer.style.cssText = `display: flex; position: absolute; transition: 230ms cubic-bezier(0.21, 1.02, 0.73, 1); transform: translateY(-${stackOffset}px); bottom: 0px; right: 0px; justify-content: flex-end; pointer-events: none; width: max-content; max-width: 100%;`;
+
+      const toast = document.createElement('button');
+      toast.type = 'button';
+      toast.className = 'non-dismissable-dialogs shadow-lg animate-in fade-in zoom-in-95 slide-in-from-top lg:slide-in-from-bottom';
+      toast.style.pointerEvents = 'auto';
+      toast.style.cursor = 'pointer';
+
+      const widgetTop = document.createElement('div');
+      widgetTop.className = 'widget-top h-2.5';
+      const widgetBottom = document.createElement('div');
+      widgetBottom.className = 'widget-bottom pixel-font-16 flex items-center gap-2 px-2 py-1 text-whiteHighlight';
+
+      const messageDiv = document.createElement('div');
+      messageDiv.className = 'text-left';
+      messageDiv.style.flex = '1 1 auto';
+      messageDiv.style.whiteSpace = 'pre-line';
+      messageDiv.innerHTML = formatNudgeHighlightHtml(rawMessage);
+      widgetBottom.appendChild(messageDiv);
+
+      toast.appendChild(widgetTop);
+      toast.appendChild(widgetBottom);
+      flexContainer.appendChild(toast);
+      container.appendChild(flexContainer);
+
+      const removeToast = () => {
+        if (flexContainer.parentNode) {
+          flexContainer.parentNode.removeChild(flexContainer);
+          updateNudgeToastPositions(container);
+        }
+      };
+      toast.addEventListener('click', removeToast);
+      setTimeout(removeToast, EVENT_NUDGE_TOAST.durationMs);
+    } catch (error) {
+      console.warn('[EventCompetition] Nudge toast failed:', error);
+    }
+  }
+
+  function maybeShowEventNeedsHighscoresNudge(eventDef) {
+    const disabled = isBetterHighscoresDisabled();
+    if (disabled !== true) {
+      return;
+    }
+    if (isEventNudgeHandlerRegistered(eventDef)) {
+      return;
+    }
+
+    // Only while the competition is live (UI: "Event ends in: …"). Skip ended / inactive.
+    const raid = getLiveRaidForRoom(eventDef.roomId);
+    if (!raid) {
+      nudgeState.shownForLiveKey.delete(eventDef.id);
+      return;
+    }
+
+    const liveKey = String(Number(raid.expiresAt) || 0);
+    if (nudgeState.shownForLiveKey.get(eventDef.id) === liveKey) {
+      return;
+    }
+
+    if (nudgeState.readyAt && Date.now() < nudgeState.readyAt) {
+      return;
+    }
+
+    const mapName = getNudgeMapName(eventDef.roomId);
+    const message = translateNudge(
+      eventDef.i18nKey,
+      { mapName },
+      eventDef.fallbackMessage.replace(/\{mapName\}/g, mapName)
+    );
+    nudgeState.shownForLiveKey.set(eventDef.id, liveKey);
+    showEventNeedsHighscoresToast(message);
+  }
+
+  function updateEventNeedsHighscoresNudges() {
+    KNOWN_EVENT_NUDGES.forEach((eventDef) => {
+      maybeShowEventNeedsHighscoresNudge(eventDef);
+    });
+  }
+
+  function setupEventNeedsHighscoresNudgeWatcher() {
+    if (nudgeState.started) {
+      return;
+    }
+    nudgeState.started = true;
+    nudgeState.readyAt = Date.now() + EVENT_NUDGE_TOAST.startupGraceMs;
+
+    const tryMarkReadyFromMods = () => {
+      // Disabled Better Highscores: shorten grace — no adapter registration will arrive.
+      if (isBetterHighscoresDisabled() === true) {
+        nudgeState.readyAt = Math.min(nudgeState.readyAt, Date.now() + 400);
+      }
+    };
+    tryMarkReadyFromMods();
+    setTimeout(tryMarkReadyFromMods, 500);
+    setTimeout(tryMarkReadyFromMods, 1500);
+
+    updateEventNeedsHighscoresNudges();
+    nudgeState.pollInterval = setInterval(
+      updateEventNeedsHighscoresNudges,
+      EVENT_NUDGE_TOAST.pollIntervalMs
+    );
+    if (globalThis.state?.raids?.subscribe) {
+      nudgeState.raidsUnsubscribe = globalThis.state.raids.subscribe(() => {
+        updateEventNeedsHighscoresNudges();
+      });
+    }
+  }
+
   window.EventCompetition = {
     create: createEventCompetitionInstance,
     register(config, deps) {
@@ -5732,5 +6027,7 @@ function cleanupTblFloorLeague() {
       return Array.from(instances.values());
     }
   };
+
+  setupEventNeedsHighscoresNudgeWatcher();
 })();
 }

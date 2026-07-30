@@ -434,6 +434,12 @@ if (window.CustomBattles) {
                 this.outfitSpriteOverrideObserver = null;
                 this.outfitSpriteOverrideTimer = null;
                 this.outfitSpriteOverrideInterval = null;
+                this.outfitSpriteOverrideIntervalStopTimer = null;
+                this._outfitOverrideMissLogCount = 0;
+                this._outfitOverrideMissLogByKey = new Map();
+                this.geneIntegrityTimerIds = [];
+                this.preBattleGeneTamperCount = 0;
+                this.lastPreBattleGeneIntegrityCheckAt = 0;
                 if (!config.roomId) {
                     throw new Error('CustomBattle config must include roomId');
                 }
@@ -752,6 +758,21 @@ if (window.CustomBattles) {
             }
 
             /**
+             * Rebuild board villains/allies immediately, bypassing in-battle-area gating.
+             * Useful for quests that need custom villains present before delayed entry checks.
+             */
+            forceImmediateBoardRewrite() {
+                try {
+                    if (this.isBoardBattleActive()) return false;
+                    this.removeOriginalVillains();
+                    return true;
+                } catch (error) {
+                    console.error('[Custom Battles] Error in forceImmediateBoardRewrite:', error);
+                    return false;
+                }
+            }
+
+            /**
              * Delayed entry setup — tries immediately, then retries until the room is ready.
              */
             scheduleEntryVillainSetup({ delayMs, attemptDelays, isActiveCheck, onComplete } = {}) {
@@ -995,6 +1016,190 @@ if (window.CustomBattles) {
                     if (ally?.tileIndex != null) tiles.push(Number(ally.tileIndex));
                 });
                 return [...new Set(tiles.filter((tileIndex) => Number.isFinite(tileIndex)))];
+            }
+
+            getConfiguredGeneIntegrityPieces() {
+                const normalize = (piece, isVillain) => {
+                    if (!piece?.genes || typeof piece.genes !== 'object') return null;
+                    return {
+                        isVillain,
+                        tileIndex: Number(piece.tileIndex),
+                        nickname: String(piece.nickname || piece.name || ''),
+                        gameId: Number(piece.gameId),
+                        genes: piece.genes
+                    };
+                };
+                const villains = (this.config.villains || [])
+                    .map((v) => normalize(v, true))
+                    .filter(Boolean);
+                const allies = (this.config.allies || [])
+                    .map((a) => normalize(a, false))
+                    .filter(Boolean);
+                return [...villains, ...allies];
+            }
+
+            clearGeneIntegrityTimers() {
+                while (this.geneIntegrityTimerIds.length > 0) {
+                    const timerId = this.geneIntegrityTimerIds.pop();
+                    clearTimeout(timerId);
+                }
+            }
+
+            maybeRunPreBattleGeneIntegrityCheck() {
+                if (!this.isActive) return false;
+                if (this.isBoardBattleActive()) return false;
+                const now = Date.now();
+                if (now - this.lastPreBattleGeneIntegrityCheckAt < 400) return false;
+                this.lastPreBattleGeneIntegrityCheckAt = now;
+                const changed = this.enforceConfiguredGenesIntegrity(null, 'pre-battle-watch');
+                if (changed) {
+                    this.preBattleGeneTamperCount += 1;
+                    console.warn(
+                        `[Custom Battles][${this.config.name || 'Battle'}] Pre-battle gene tamper detected and corrected (#${this.preBattleGeneTamperCount})`
+                    );
+                }
+                return changed;
+            }
+
+            getActorTileIndex(actor) {
+                const raw = actor?.position?.tile?.index
+                    ?? actor?.position?.tileIndex
+                    ?? actor?.tileIndex
+                    ?? actor?.spawnTileIndex
+                    ?? actor?.initialTileIndex;
+                const tile = Number(raw);
+                return Number.isFinite(tile) ? tile : null;
+            }
+
+            applyGenesToContainer(container, genes) {
+                if (!container || typeof container !== 'object' || !genes || typeof genes !== 'object') return false;
+                let changed = false;
+                const setNumeric = (key, value) => {
+                    const n = Number(value);
+                    if (!Number.isFinite(n)) return;
+                    if (Number(container[key]) === n) return;
+                    container[key] = n;
+                    changed = true;
+                };
+                setNumeric('hp', genes.hp);
+                setNumeric('ad', genes.ad);
+                setNumeric('ap', genes.ap);
+                setNumeric('armor', genes.armor);
+                if ('magicResist' in container || !('mr' in container)) {
+                    setNumeric('magicResist', genes.magicResist);
+                }
+                if ('mr' in container) {
+                    setNumeric('mr', genes.magicResist);
+                }
+                return changed;
+            }
+
+            boardEntityMatchesGenePiece(entity, piece) {
+                if (!entity || !!entity.villain !== !!piece.isVillain) return false;
+                if (Number.isFinite(piece.tileIndex) && Number(entity.tileIndex) !== piece.tileIndex) return false;
+                if (Number.isFinite(piece.gameId)) {
+                    const entityGameId = Number(entity.gameId ?? entity.monsterId ?? entity.databaseId);
+                    if (Number.isFinite(entityGameId) && entityGameId !== piece.gameId) return false;
+                }
+                if (piece.nickname) {
+                    const entityName = String(entity.nickname || entity.name || '');
+                    if (entityName && entityName !== piece.nickname) return false;
+                }
+                return true;
+            }
+
+            actorMatchesGenePiece(actor, piece) {
+                if (!actor || !!actor.villain !== !!piece.isVillain) return false;
+                if (Number.isFinite(piece.tileIndex)) {
+                    const actorTile = this.getActorTileIndex(actor);
+                    if (Number.isFinite(actorTile) && actorTile !== piece.tileIndex) return false;
+                }
+                if (Number.isFinite(piece.gameId)) {
+                    const actorGameId = Number(actor.gameId ?? actor.monsterId ?? actor.metadata?.id ?? actor.metadata?.gameId);
+                    if (Number.isFinite(actorGameId) && actorGameId !== piece.gameId) return false;
+                }
+                if (piece.nickname) {
+                    const actorName = String(actor.name || actor.metadata?.name || actor.nickname || '');
+                    if (actorName && actorName !== piece.nickname) return false;
+                }
+                return true;
+            }
+
+            enforceConfiguredGenesIntegrity(world = null, reason = 'runtime') {
+                const pieces = this.getConfiguredGeneIntegrityPieces();
+                if (!pieces.length) return false;
+                let changed = false;
+
+                // Keep board config pieces aligned to configured genes.
+                try {
+                    const boardContext = globalThis.state?.board?.getSnapshot?.()?.context;
+                    const boardConfig = Array.isArray(boardContext?.boardConfig) ? boardContext.boardConfig : [];
+                    const patchedBoard = boardConfig.map((entity) => {
+                        const piece = pieces.find((p) => this.boardEntityMatchesGenePiece(entity, p));
+                        if (!piece) return entity;
+                        if (!entity?.genes || typeof entity.genes !== 'object') {
+                            changed = true;
+                            return { ...entity, genes: { ...piece.genes } };
+                        }
+                        if (!this.applyGenesToContainer(entity.genes, piece.genes)) return entity;
+                        changed = true;
+                        return entity;
+                    });
+                    if (changed) {
+                        globalThis.state.board.send({
+                            type: 'setState',
+                            fn: (prev) => ({ ...prev, boardConfig: patchedBoard })
+                        });
+                    }
+                } catch (_) {
+                    // no-op
+                }
+
+                // Keep runtime actor copies aligned as well.
+                try {
+                    const activeWorld = world || globalThis.state?.board?.getSnapshot?.()?.context?.world || null;
+                    const entries = activeWorld?.grid?.childrenById?.entries?.();
+                    const actors = [];
+                    if (entries && typeof entries[Symbol.iterator] === 'function') {
+                        for (const [, actor] of entries) actors.push(actor);
+                    } else if (Array.isArray(activeWorld?.grid?.actors)) {
+                        actors.push(...activeWorld.grid.actors);
+                    }
+                    actors.forEach((actor) => {
+                        const piece = pieces.find((p) => this.actorMatchesGenePiece(actor, p));
+                        if (!piece) return;
+                        const containers = [
+                            actor.genes,
+                            actor.metadata?.genes,
+                            actor.stats?.genes,
+                            actor.baseGenes
+                        ];
+                        containers.forEach((container) => {
+                            if (this.applyGenesToContainer(container, piece.genes)) changed = true;
+                        });
+                    });
+                } catch (_) {
+                    // no-op
+                }
+
+                if (changed) {
+                    console.log(`[Custom Battles][${this.config.name || 'Battle'}] Enforced configured genes integrity (${reason})`);
+                }
+                return changed;
+            }
+
+            scheduleConfiguredGenesIntegrityChecks(world = null, reason = 'newGame') {
+                const pieces = this.getConfiguredGeneIntegrityPieces();
+                if (!pieces.length) return;
+                this.clearGeneIntegrityTimers();
+                this.enforceConfiguredGenesIntegrity(world, `${reason}-immediate`);
+                [150, 600, 1200].forEach((delay) => {
+                    const timerId = setTimeout(() => {
+                        if (!this.isActive) return;
+                        this.enforceConfiguredGenesIntegrity(world, `${reason}+${delay}ms`);
+                    }, delay);
+                    this.geneIntegrityTimerIds.push(timerId);
+                });
             }
 
             findBoardPieceButtonsForTile(tileIndex) {
@@ -1341,6 +1546,17 @@ if (window.CustomBattles) {
                 const actorGameId = this.getActorGameId(actor);
                 if (Number.isFinite(expectedGameId) && actorGameId !== expectedGameId) return false;
 
+                // Allies must stay bound to forced-ally identity so player-placed
+                // creatures of the same species are never renamed by custom nicknames.
+                if (!isVillain) {
+                    const expectedPrefix = String(pieceConfig.keyPrefix || '').trim();
+                    const actorKey = String(actor?.key || actor?.entityTag || '').trim();
+                    if (expectedPrefix && actorKey) {
+                        return actorKey.startsWith(expectedPrefix);
+                    }
+                    return this.isForcedAllyEntity(actor);
+                }
+
                 // Setup: bind each piece to its spawn tile. Mid-battle actors move / revive
                 // off-tile — match by combat identity only so nicknames stay applied.
                 if (!this.isBoardBattleActive()) {
@@ -1458,6 +1674,17 @@ if (window.CustomBattles) {
                     String(piece?.outfitSpriteId ?? ''),
                     piece?.shiny === true ? '1' : '0'
                 ].join('|');
+            }
+
+            shouldLogOutfitOverrideMiss(key) {
+                const now = Date.now();
+                const lastAt = this._outfitOverrideMissLogByKey.get(key) || 0;
+                const underGlobalCap = this._outfitOverrideMissLogCount < 6;
+                const perKeyWindowPassed = now - lastAt > 5000;
+                if (!underGlobalCap || !perKeyWindowPassed) return false;
+                this._outfitOverrideMissLogByKey.set(key, now);
+                this._outfitOverrideMissLogCount += 1;
+                return true;
             }
 
             escapeCssAttrValue(value) {
@@ -1633,8 +1860,8 @@ if (window.CustomBattles) {
                     });
 
                     if (!claimed) {
-                        if (!this._outfitOverrideMissLogAt || Date.now() - this._outfitOverrideMissLogAt > 1000) {
-                            this._outfitOverrideMissLogAt = Date.now();
+                        const key = `${primary.tileIndex}|${combatGameId}|${toId}`;
+                        if (this.shouldLogOutfitOverrideMiss(key)) {
                             console.log(
                                 `[Custom Battles][${this.config.name || 'Battle'}] Outfit override: no sprite found yet`,
                                 {
@@ -1659,6 +1886,10 @@ if (window.CustomBattles) {
                     clearInterval(this.outfitSpriteOverrideInterval);
                     this.outfitSpriteOverrideInterval = null;
                 }
+                if (this.outfitSpriteOverrideIntervalStopTimer) {
+                    clearTimeout(this.outfitSpriteOverrideIntervalStopTimer);
+                    this.outfitSpriteOverrideIntervalStopTimer = null;
+                }
                 if (this.outfitSpriteOverrideObserver) {
                     try {
                         this.outfitSpriteOverrideObserver.disconnect();
@@ -1667,6 +1898,8 @@ if (window.CustomBattles) {
                     }
                     this.outfitSpriteOverrideObserver = null;
                 }
+                this._outfitOverrideMissLogByKey.clear();
+                this._outfitOverrideMissLogCount = 0;
             }
 
             scheduleVillainOutfitSpriteOverrides({ force = false } = {}) {
@@ -1709,9 +1942,17 @@ if (window.CustomBattles) {
                 };
                 fire();
 
+                // Keep a light periodic sync for short-lived DOM churn, then rely on MutationObserver.
                 this.outfitSpriteOverrideInterval = setInterval(() => {
                     this.syncCustomPieceDom();
-                }, 100);
+                }, 250);
+                this.outfitSpriteOverrideIntervalStopTimer = setTimeout(() => {
+                    if (this.outfitSpriteOverrideInterval) {
+                        clearInterval(this.outfitSpriteOverrideInterval);
+                        this.outfitSpriteOverrideInterval = null;
+                    }
+                    this.outfitSpriteOverrideIntervalStopTimer = null;
+                }, 6000);
 
                 const observeRoot = document.body || document.documentElement;
                 if (!observeRoot) return;
@@ -1973,13 +2214,13 @@ if (window.CustomBattles) {
                     const allies = boardConfig.filter(isAlly);
                     const forcedAllies = allies.filter((piece) => this.isForcedAllyEntity(piece));
                     const playerAllies = allies.filter((piece) => !this.isForcedAllyEntity(piece));
-                    const allyCount = allies.length;
+                    // Forced allies (quest NPCs / scripted helpers) do not count toward max creatures.
+                    const allyCount = playerAllies.length;
                     
                     if (allyCount > this.config.allyLimit) {
                         console.log(`[Custom Battles][${this.config.name || 'Battle'}] Ally limit exceeded: ${allyCount} > ${this.config.allyLimit}, removing excess`);
                         
-                        const playerSlots = Math.max(0, this.config.allyLimit - forcedAllies.length);
-                        const playerAlliesToKeep = playerAllies.slice(0, playerSlots);
+                        const playerAlliesToKeep = playerAllies.slice(0, this.config.allyLimit);
                         const keysToKeep = new Set([
                             ...forcedAllies.map((ally) => ally.key),
                             ...playerAlliesToKeep.map((ally) => ally.key)
@@ -3067,6 +3308,7 @@ if (window.CustomBattles) {
                     this.newGameUnsub = board.on('newGame', (event) => {
                         const world = event && event.world;
                         this.scheduleConfiguredActorDisplayNames(world || null, 'newGame');
+                        this.scheduleConfiguredGenesIntegrityChecks(world || null, 'newGame');
                         if (!world || !world.grid || !world.grid.onActorDeath) return;
                         this.allyDeathsThisGame = 0;
                         this.unsubscribeAllyDeathTracking();
@@ -3590,6 +3832,7 @@ if (window.CustomBattles) {
                     if (!this.isActive) return;
                     if (typeof activationCallback === 'function' && !activationCallback()) return;
                     if (!this.shouldRestrictionsBeActive(activationCallback)) return;
+                    this.maybeRunPreBattleGeneIntegrityCheck();
                     this.ensureForcedAlliesPresent();
                 });
                 console.log(`[Custom Battles][${this.config.name || 'Battle'}] Forced ally watch enabled`);
@@ -3688,6 +3931,9 @@ if (window.CustomBattles) {
                 this.entryVillainSetupDone = false;
                 this.cancelSceneSpriteReplacementTimer();
                 this.cancelOutfitSpriteOverrideWatch();
+                this.clearGeneIntegrityTimers();
+                this.preBattleGeneTamperCount = 0;
+                this.lastPreBattleGeneIntegrityCheckAt = 0;
                 if (this.forcedAllyWatchUnsub) {
                     try {
                         if (typeof this.forcedAllyWatchUnsub === 'function') this.forcedAllyWatchUnsub();
@@ -3808,7 +4054,8 @@ if (window.CustomBattles) {
         // Optional rule.scope: "background" (absolute floor layers / #floor-below) or "tile" (tile-index decorations).
         // Optional villain.outfitSpriteId / allies[].outfitSpriteId overrides the rendered outfit sprite class while keeping gameId combat identity.
         // Optional config.allies places non-removable custom allies (customForcedAlly) during entry setup.
-        // Forced allies are excluded from creature-duplicate checks and their tiles block player ally placement.
+        // Forced allies are excluded from allyLimit / max-creature counts and from creature-duplicate checks;
+        // their tiles still block player ally placement.
         // Custom villain + forced-ally board buttons are interaction-locked (disabled / no pointer events).
         // While active, room info overlay (monster count / map name) and Better Highscores are suppressed.
         // Optional victoryDefeat.reloadRoomOnClose reloads config.roomId after Close (same-room bounce
@@ -3817,11 +4064,149 @@ if (window.CustomBattles) {
         // Same flow for all: create(config) → setup(activationCallback, showToast)
         // → scheduleEntryVillainSetup / runEntryVillainSetupIfNeeded → onClose cleanup + navigate.
 
+        function ensureDynamicStyle(styleId, cssText) {
+            if (!styleId || !cssText || typeof document === 'undefined') return false;
+            if (document.getElementById(styleId)) return true;
+            try {
+                const style = document.createElement('style');
+                style.id = styleId;
+                style.textContent = cssText;
+                document.head.appendChild(style);
+                return true;
+            } catch (error) {
+                console.warn('[Custom Battles] Failed to inject dynamic style:', error);
+                return false;
+            }
+        }
+
+        const effectFrameCountCache = new Map();
+        function getCachedEffectFrameCount(effectUrl, tileSizePx, fallbackFrameCount = 1) {
+            if (!effectUrl) return Math.max(1, Number(fallbackFrameCount) || 1);
+            if (effectFrameCountCache.has(effectUrl)) {
+                return Math.max(1, Number(effectFrameCountCache.get(effectUrl)) || 1);
+            }
+            const fallback = Math.max(1, Number(fallbackFrameCount) || 1);
+            try {
+                const probe = new Image();
+                probe.decoding = 'async';
+                probe.onload = () => {
+                    try {
+                        const frameWidth = probe.naturalWidth || Number(tileSizePx) || 32;
+                        const frameCount = Math.max(1, Math.round((probe.naturalHeight || frameWidth) / frameWidth));
+                        effectFrameCountCache.set(effectUrl, frameCount);
+                    } catch (_) {
+                        effectFrameCountCache.set(effectUrl, fallback);
+                    }
+                };
+                probe.onerror = () => {
+                    effectFrameCountCache.set(effectUrl, fallback);
+                };
+                probe.src = effectUrl;
+            } catch (_) {
+                effectFrameCountCache.set(effectUrl, fallback);
+            }
+            return fallback;
+        }
+
+        function playEffectOnWalkableTiles(options = {}) {
+            const {
+                effectUrl,
+                effectClass = 'custom-battle-tile-effect',
+                frameMs = 70,
+                zIndex = 350,
+                tileSizePx = 32,
+                frameCount: configuredFrameCount = null,
+                mountToParent = false,
+                mountToBody = false,
+                keyframesName = `${effectClass}-play`,
+                styleId = `${effectClass}-styles`
+            } = options || {};
+
+            if (!effectUrl || !effectClass) return false;
+            const boardContext = globalThis.state?.board?.getSnapshot?.()?.context;
+            const hitboxes = boardContext?.selectedMap?.selectedRoom?.file?.data?.hitboxes;
+            const tileElements = document.querySelectorAll('[id^="tile-index-"]');
+            if (!tileElements.length) return false;
+
+            const escapedClass = String(effectClass).replace(/"/g, '\\"');
+            ensureDynamicStyle(
+                styleId,
+                `
+                .${escapedClass} {
+                    position: absolute;
+                    right: 0;
+                    bottom: 0;
+                    width: calc(${Number(tileSizePx) || 32}px * var(--zoomFactor, 1));
+                    height: calc(${Number(tileSizePx) || 32}px * var(--zoomFactor, 1));
+                    pointer-events: none;
+                    z-index: ${Number(zIndex) || 350};
+                    overflow: hidden;
+                    background-repeat: no-repeat;
+                    image-rendering: pixelated;
+                }
+                @keyframes ${keyframesName} {
+                    from { transform: translateY(0); }
+                    to { transform: translateY(-100%); }
+                }
+                `
+            );
+            const fallbackFrameCount = Math.max(1, Number(configuredFrameCount) || 1);
+            const frameCount = getCachedEffectFrameCount(effectUrl, tileSizePx, fallbackFrameCount);
+            const durationMs = frameCount * (Number(frameMs) || 70);
+
+            tileElements.forEach((tileEl) => {
+                const tileId = parseInt(tileEl.id.replace('tile-index-', ''), 10);
+                if (hitboxes && tileId < hitboxes.length && hitboxes[tileId] !== false) return;
+                if (tileEl.querySelector(`.${effectClass}`)) return;
+
+                const viewport = document.createElement('div');
+                viewport.className = effectClass;
+                viewport.style.backgroundImage = `url("${effectUrl}")`;
+                viewport.style.backgroundSize = `100% ${Math.max(1, frameCount) * 100}%`;
+                viewport.style.animation = `${keyframesName} ${durationMs}ms steps(${Math.max(1, frameCount)}, end) 1 forwards`;
+                if (mountToBody) {
+                    const tileRect = tileEl.getBoundingClientRect?.();
+                    if (!tileRect || tileRect.width <= 0 || tileRect.height <= 0) return;
+                    viewport.style.position = 'fixed';
+                    viewport.style.left = `${Math.round(tileRect.left)}px`;
+                    viewport.style.top = `${Math.round(tileRect.top)}px`;
+                    viewport.style.width = `${Math.round(tileRect.width)}px`;
+                    viewport.style.height = `${Math.round(tileRect.height)}px`;
+                    viewport.style.right = 'auto';
+                    viewport.style.bottom = 'auto';
+                    const body = document.body || document.documentElement;
+                    body.appendChild(viewport);
+                } else if (mountToParent) {
+                    const parentEl = tileEl.parentElement || tileEl;
+                    const parentStyle = window.getComputedStyle(parentEl);
+                    if (parentStyle?.position === 'static') {
+                        parentEl.style.position = 'relative';
+                    }
+                    // Use board-grid coordinates from the tile itself (right/bottom) instead of
+                    // viewport rect math; this stays correct under board transforms/zoom.
+                    viewport.style.right = tileEl.style.right || '0px';
+                    viewport.style.bottom = tileEl.style.bottom || '0px';
+                    viewport.style.left = 'auto';
+                    viewport.style.top = 'auto';
+                    viewport.style.width = `calc(${Number(tileSizePx) || 32}px * var(--zoomFactor, 1))`;
+                    viewport.style.height = `calc(${Number(tileSizePx) || 32}px * var(--zoomFactor, 1))`;
+                    parentEl.appendChild(viewport);
+                } else {
+                    tileEl.appendChild(viewport);
+                }
+                setTimeout(() => {
+                    if (viewport.parentNode) viewport.remove();
+                }, durationMs + 100);
+            });
+            return true;
+        }
+
         // Expose globally
             try {
                 window.CustomBattles = {
                     create: (config) => new CustomBattle(config),
                     isAllyContextMenuBlocked: shouldBlockAllyContextMenu,
+                    playEffectOnWalkableTiles,
                     navigateToRoom: (roomId) => {
                         if (!roomId || !globalThis.state?.board?.send) return false;
                         try {

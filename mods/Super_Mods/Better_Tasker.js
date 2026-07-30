@@ -98,9 +98,17 @@ const ESC_KEY_DELAY = 50;
 const TASK_START_DELAY = 200;
 const MANUAL_PLAY_PAUSE_MS = 180000; // 3 minutes — back off after user changes map manually
 const PROGRAMMATIC_NAV_GUARD_MS = 5000;
+const ROOM_NAV_POLL_MS = 100;
+const ROOM_NAV_TIMEOUT_MS = 8000;
+const ROOM_NAV_TIMEOUT_HIDDEN_MS = 20000;
+const DOM_ACTION_RETRY_DELAY_MS = 500;
+const DOM_ACTION_RETRY_DELAY_HIDDEN_MS = 1000;
+const DOM_ACTION_MAX_ATTEMPTS = 5;
+const DOM_ACTION_MAX_ATTEMPTS_HIDDEN = 40;
 
 // Stamina constants
 const DEFAULT_STAMINA_COST = 30;
+const STAMINA_REGEN_MS = 60000;
 
 // Paw and Fur-style tasks: default kill quota when API does not expose a goal field
 const DEFAULT_TASK_KILL_TARGET = 60;
@@ -303,31 +311,44 @@ function getAllMapOptions(creatureName = null) {
     try {
         const roomNameMap = globalThis.state?.utils?.ROOM_NAME;
         if (!roomNameMap || typeof roomNameMap !== 'object') return [];
-        const mapsDb = window.mapsDatabase;
-        let rows = Object.entries(roomNameMap)
-            .map(([id, name]) => ({ id: String(id), name: String(name || '').trim() }))
-            .filter((entry) => entry.id && entry.name)
-            .sort((a, b) => a.name.localeCompare(b.name));
+        const mapsDb = globalThis.mapsDatabase;
 
-        // Exclude raid + dynamic event maps from task creature overrides.
-        rows = rows.filter((row) => {
+        const isExcluded = (roomId) => {
             try {
-                if (mapsDb && typeof mapsDb.isRaid === 'function' && mapsDb.isRaid(row.id)) {
-                    return false;
+                if (!mapsDb) return false;
+                if (typeof mapsDb.isMapRaidComprehensive === 'function') {
+                    return mapsDb.isMapRaidComprehensive(roomId);
                 }
-                if (mapsDb && typeof mapsDb.isDynamicEventMap === 'function' && mapsDb.isDynamicEventMap(row.id)) {
-                    return false;
-                }
-                // Fallback if mapsDatabase is unavailable or incomplete.
-                const room = typeof mapsDb?.getMapById === 'function'
-                    ? mapsDb.getMapById(row.id)
-                    : (globalThis.state?.utils?.ROOMS || []).find((r) => String(r?.id) === row.id);
-                if (room?.raid === true) return false;
-                return true;
+                if (typeof mapsDb.isRaid === 'function' && mapsDb.isRaid(roomId)) return true;
+                if (typeof mapsDb.isDynamicEventMap === 'function' && mapsDb.isDynamicEventMap(roomId)) return true;
+                const room = typeof mapsDb.getMapById === 'function' ? mapsDb.getMapById(roomId) : null;
+                return room?.raid === true;
             } catch (_) {
-                return true;
+                return false;
             }
-        });
+        };
+
+        // Prefer maps-database non-raid catalog when available
+        let rows;
+        const nonRaid = typeof mapsDb?.getNonRaidMaps === 'function' ? mapsDb.getNonRaidMaps() : null;
+        if (Array.isArray(nonRaid) && nonRaid.length > 0) {
+            rows = nonRaid
+                .map((room) => ({
+                    id: String(room?.id || ''),
+                    name: String(roomNameMap[room?.id] || room?.name || '').trim()
+                }))
+                .filter((entry) => entry.id && entry.name && !isExcluded(entry.id));
+        } else {
+            rows = Object.entries(roomNameMap)
+                .map(([id, name]) => ({ id: String(id), name: String(name || '').trim() }))
+                .filter((entry) => entry.id && entry.name && !isExcluded(entry.id));
+        }
+
+        if (typeof mapsDb?.compareMapsByGameOrder === 'function') {
+            rows.sort((a, b) => mapsDb.compareMapsByGameOrder(a.id, b.id) || a.name.localeCompare(b.name));
+        } else {
+            rows.sort((a, b) => a.name.localeCompare(b.name));
+        }
 
         const creatureGameId = getCreatureGameIdByName(creatureName);
         const getBoardMonstersFromRoomId = globalThis.state?.utils?.getBoardMonstersFromRoomId;
@@ -708,6 +729,127 @@ function sleep(timeout = 1000) {
     });
 }
 
+function isDocumentHidden() {
+    return typeof document !== 'undefined' &&
+        (document.hidden === true || document.visibilityState === 'hidden');
+}
+
+function getStaminaFromGameState() {
+    try {
+        if (typeof globalThis.state?.utils?.getCurrentStamina === 'function') {
+            const fromUtils = Number(globalThis.state.utils.getCurrentStamina());
+            if (Number.isFinite(fromUtils)) {
+                return fromUtils;
+            }
+        }
+
+        const playerContext = globalThis.state?.player?.getSnapshot?.()?.context;
+        if (!playerContext) {
+            return null;
+        }
+
+        for (const key of ['stamina', 'currentStamina']) {
+            const value = Number(playerContext[key]);
+            if (Number.isFinite(value)) {
+                return value;
+            }
+        }
+
+        const willBeFullAt = playerContext.staminaWillBeFullAt;
+        const regenMax = Number(
+            playerContext.maxStamina ??
+            playerContext.staminaMax ??
+            document.querySelector('[title="Stamina"] span[data-full]')?.getAttribute?.('data-max')
+        );
+        if (willBeFullAt != null && Number.isFinite(regenMax) && regenMax > 0) {
+            const missing = Math.ceil((willBeFullAt - Date.now()) / STAMINA_REGEN_MS);
+            const regenStamina = Math.max(0, regenMax - missing);
+            const excessMs = Math.max(0, Number(playerContext.staminaExcessMs) || 0);
+            return Math.floor(regenStamina + excessMs / STAMINA_REGEN_MS);
+        }
+    } catch (_) {
+        // fall through
+    }
+    return null;
+}
+
+async function waitForRoomSelection(roomId) {
+    if (roomId == null || roomId === '') {
+        return false;
+    }
+    if (String(getCurrentRoomId()) === String(roomId)) {
+        return true;
+    }
+
+    const timeoutMs = isDocumentHidden() ? ROOM_NAV_TIMEOUT_HIDDEN_MS : ROOM_NAV_TIMEOUT_MS;
+    const pollMs = isDocumentHidden() ? Math.max(ROOM_NAV_POLL_MS, 250) : ROOM_NAV_POLL_MS;
+    const deadline = Date.now() + timeoutMs;
+
+    while (Date.now() < deadline) {
+        await sleep(pollMs);
+        if (String(getCurrentRoomId()) === String(roomId)) {
+            return true;
+        }
+    }
+
+    const matched = String(getCurrentRoomId()) === String(roomId);
+    if (!matched) {
+        console.log(
+            `[Better Tasker] Room selection timeout (hidden=${isDocumentHidden()}): wanted ${roomId}, got ${getCurrentRoomId()}`
+        );
+    }
+    return matched;
+}
+
+async function waitForDocumentVisible(isStillActive = () => true) {
+    if (!isDocumentHidden()) {
+        return true;
+    }
+
+    console.log('[Better Tasker] Waiting for tab to become visible before continuing DOM actions...');
+    return new Promise((resolve) => {
+        const cleanup = () => {
+            document.removeEventListener('visibilitychange', onVisibility);
+            clearInterval(cancelPoll);
+        };
+        const onVisibility = () => {
+            if (!isDocumentHidden()) {
+                cleanup();
+                resolve(true);
+            }
+        };
+        const cancelPoll = setInterval(() => {
+            if (typeof isStillActive === 'function' && !isStillActive()) {
+                cleanup();
+                resolve(false);
+            }
+        }, 2000);
+        document.addEventListener('visibilitychange', onVisibility);
+    });
+}
+
+async function findButtonWithRetries(findFn, label = 'button') {
+    const hidden = isDocumentHidden();
+    const maxAttempts = hidden ? DOM_ACTION_MAX_ATTEMPTS_HIDDEN : DOM_ACTION_MAX_ATTEMPTS;
+    const delayMs = hidden ? DOM_ACTION_RETRY_DELAY_HIDDEN_MS : DOM_ACTION_RETRY_DELAY_MS;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        const button = typeof findFn === 'function' ? findFn() : null;
+        if (button) {
+            if (attempt > 1) {
+                console.log(`[Better Tasker] Found ${label} on attempt ${attempt}/${maxAttempts}`);
+            }
+            return button;
+        }
+        if (attempt < maxAttempts) {
+            await sleep(delayMs);
+        }
+    }
+
+    console.log(`[Better Tasker] ${label} not found after ${maxAttempts} attempts (hidden=${hidden})`);
+    return null;
+}
+
 // Clear modals by simulating ESC key presses (async version with delays)
 async function clearModalsWithEsc(count = 3, delayBetween = ESC_KEY_DELAY) {
     for (let i = 0; i < count; i++) {
@@ -985,7 +1127,12 @@ let staminaRecoveryCallback = null;
  */
 function getCurrentStamina() {
     try {
-        // Read stamina directly from DOM (same approach as Bestiary Automator)
+        const fromApi = getStaminaFromGameState();
+        if (fromApi !== null) {
+            return fromApi;
+        }
+
+        // DOM fallback (less reliable in background tabs)
         const elStamina = document.querySelector('[title="Stamina"]');
         if (!elStamina) {
             console.log('[Better Tasker] Stamina element not found');
@@ -999,7 +1146,7 @@ function getCurrentStamina() {
         }
         
         const stamina = Number(staminaElement.textContent);
-        return stamina;
+        return Number.isFinite(stamina) ? stamina : 0;
     } catch (error) {
         console.error('[Better Tasker] Error reading stamina:', error);
         return 0;
@@ -1031,13 +1178,22 @@ function getCurrentMapStaminaCost() {
  * @returns {Object} { insufficient: boolean, cost: number }
  */
 function hasInsufficientStamina() {
+    const cost = getCurrentMapStaminaCost();
+
+    // Background tabs often omit tooltips; compare Game State stamina vs map cost.
+    if (isDocumentHidden()) {
+        const current = getCurrentStamina();
+        const insufficient = current < cost;
+        if (insufficient) {
+            console.log(`[Better Tasker] Background stamina check: Insufficient (${current}/${cost})`);
+        }
+        return { insufficient, cost };
+    }
+
     // Look for stamina tooltip (icon-based, language-independent)
     const staminaTooltip = document.querySelector(
         '[role="tooltip"] img[alt="stamina"], [data-state="instant-open"] img[alt="stamina"]'
     );
-    
-    // Get stamina cost from game API
-    const cost = getCurrentMapStaminaCost();
     
     if (staminaTooltip) {
         // Found stamina icon in tooltip = insufficient stamina
@@ -1073,6 +1229,31 @@ function startStaminaTooltipMonitoring(onRecovered, requiredStamina = null) {
         const currentStamina = getCurrentStamina();
         
         const tooltipStillExists = !!document.querySelector(staminaTooltipSel);
+        const hidden = isDocumentHidden();
+        const apiRecovered = requiredStamina != null && currentStamina >= requiredStamina;
+
+        if (hidden) {
+            if (!apiRecovered) {
+                hasStaminaIssue = true;
+                if (requiredStamina) {
+                    const timeRemaining = Math.max(0, requiredStamina - currentStamina);
+                    console.log(`[Better Tasker] Waiting for stamina (${currentStamina}/${requiredStamina}) - ~${timeRemaining} min remaining`);
+                }
+                return;
+            }
+            if (!hasStaminaIssue) {
+                return;
+            }
+            console.log(`[Better Tasker] ✅ STAMINA RECOVERED (API, background) - current: ${currentStamina}`);
+            hasStaminaIssue = false;
+            const callback = staminaRecoveryCallback;
+            clearInterval(staminaCheckInterval);
+            stopStaminaTooltipMonitoring();
+            if (typeof callback === 'function') {
+                callback();
+            }
+            return;
+        }
         
         if (tooltipStillExists) {
             hasStaminaIssue = true;
@@ -1290,6 +1471,7 @@ function getTaskKillProgress() {
     try {
         const task = globalThis.state?.player?.getSnapshot()?.context?.questLog?.task;
         const dom = parseTaskKillProgressFromDom();
+        const preferApi = isDocumentHidden();
 
         if (!(task && task.gameId != null) && !dom) {
             return null;
@@ -1316,9 +1498,21 @@ function getTaskKillProgress() {
         }
 
         if (dom) {
-            current = dom.current;
-            target = dom.target;
-            sourceBits.unshift('dom');
+            if (preferApi) {
+                // Background: keep API killCount when present; DOM only fills gaps.
+                if (current === null) {
+                    current = dom.current;
+                    sourceBits.push('dom-fallback');
+                }
+                if (!sourceBits.some((bit) => bit !== 'api' && bit !== 'dom-fallback')) {
+                    target = dom.target;
+                    sourceBits.push('dom-target');
+                }
+            } else {
+                current = dom.current;
+                target = dom.target;
+                sourceBits.unshift('dom');
+            }
         }
 
         if (current === null || !Number.isFinite(current)) {
@@ -1527,94 +1721,120 @@ function onTaskHuntingEmitNewGameGuard() {
 }
 
 // Create continuous stamina monitoring callback
+function isTaskAutoplaySessionActive(boardContext = null) {
+    try {
+        const ctx = boardContext || globalThis.state?.board?.getSnapshot?.()?.context;
+        if (!ctx) {
+            return false;
+        }
+        // gameStarted covers mid-battle when isRunning/autoplayRunning briefly clear between ticks
+        return !!(ctx.isRunning || ctx.autoplayRunning || ctx.gameStarted);
+    } catch (_) {
+        return false;
+    }
+}
+
+async function resumeTaskAutoplayAfterStaminaRecovery(logPrefix, successMessage) {
+    if (!hasActiveTask()) {
+        console.log('[Better Tasker] No active task found during stamina recovery');
+        stopStaminaTooltipMonitoring();
+        return;
+    }
+
+    if (!isOnCorrectTaskingMap()) {
+        console.log('[Better Tasker] User changed map - stopping stamina monitoring');
+        stopStaminaTooltipMonitoring();
+        // Only clear navigation if we are not mid-hunt on a known tasking map
+        if (!taskHuntingOngoing || !taskingMapId) {
+            resetState('navigation');
+        }
+        return;
+    }
+
+    const boardContext = globalThis.state?.board?.getSnapshot?.()?.context;
+    if (isTaskAutoplaySessionActive(boardContext)) {
+        console.log('[Better Tasker] Autoplay/battle already active - continuing stamina monitoring');
+        const requiredStamina = getCurrentMapStaminaCost();
+        const callback = createStaminaMonitoringCallback(logPrefix, successMessage);
+        startStaminaTooltipMonitoring(callback, requiredStamina);
+        return;
+    }
+
+    console.log('[Better Tasker] Autoplay session not running - clicking Start button');
+
+    if (boardContext?.mode !== 'autoplay') {
+        ensureAutoplayMode();
+        await sleep(AUTOPLAY_SETUP_DELAY);
+    }
+
+    const startButton = await findButtonWithRetries(
+        () => findAutoplayStartButton() || findButtonByText('Start'),
+        'Start button (stamina recovery)'
+    );
+
+    if (!startButton) {
+        // Mid-task: never wipe navigation/hunting state — UI may still be settling or Pause is shown.
+        console.log(
+            '[Better Tasker] Start button not found after stamina recovery - keeping task hunting and retrying'
+        );
+        if (taskHuntingOngoing) {
+            modifyQuestButtonForTasking();
+            questButtonModifiedForTasking = true;
+            startQuestButtonValidation();
+            const requiredStamina = getCurrentMapStaminaCost();
+            const callback = createStaminaMonitoringCallback(logPrefix, successMessage);
+            // Brief delay then re-check; avoid immediate recursive spam
+            setTimeout(() => {
+                if (!taskHuntingOngoing) {
+                    return;
+                }
+                if (isTaskAutoplaySessionActive()) {
+                    startStaminaTooltipMonitoring(callback, requiredStamina);
+                    return;
+                }
+                void resumeTaskAutoplayAfterStaminaRecovery(logPrefix, successMessage);
+            }, 2000);
+        }
+        return;
+    }
+
+    console.log('[Better Tasker] Clicking Start button after stamina recovery...');
+    refreshTaskHuntingRunsBudget('stamina-recovery-restart');
+    startButton.click();
+
+    if (successMessage) {
+        showToast(successMessage);
+    }
+
+    modifyQuestButtonForTasking();
+    questButtonModifiedForTasking = true;
+    startQuestButtonValidation();
+
+    const handleStaminaDepletion = () => {
+        const continuousStaminaMonitoring = createStaminaMonitoringCallback(
+            'Stamina depleted during task - restarting',
+            'Task restarted after stamina recovery'
+        );
+        const requiredStamina = getCurrentMapStaminaCost();
+        startStaminaTooltipMonitoring(continuousStaminaMonitoring, requiredStamina);
+    };
+
+    const depletionCheckInterval = setInterval(() => {
+        const currentCheck = hasInsufficientStamina();
+        if (currentCheck.insufficient) {
+            console.log('[Better Tasker] Stamina depleted during autoplay - starting recovery monitoring');
+            clearInterval(depletionCheckInterval);
+            handleStaminaDepletion();
+        }
+    }, 5000);
+    window.betterTaskerDepletionInterval = depletionCheckInterval;
+    console.log('[Better Tasker] Autoplay started after stamina recovery');
+}
+
 function createStaminaMonitoringCallback(logPrefix, successMessage) {
     return () => {
         console.log(`[Better Tasker] ${logPrefix}`);
-
-        // Check if there's still an active task (not just if task hunting is ongoing)
-        if (!hasActiveTask()) {
-            console.log('[Better Tasker] No active task found during stamina recovery');
-            stopStaminaTooltipMonitoring();
-            return;
-        }
-
-        // Check if user is still on correct tasking map
-        if (!isOnCorrectTaskingMap()) {
-            console.log('[Better Tasker] User changed map - stopping stamina monitoring');
-            stopStaminaTooltipMonitoring();
-            resetState('navigation');
-            return;
-        }
-
-        // Check if autoplay session is actually running (not just mode enabled)
-        const boardContext = globalThis.state.board.getSnapshot().context;
-        const isAutoplayMode = boardContext.mode === 'autoplay';
-        const isAutoplaySessionRunning = boardContext.isRunning || boardContext.autoplayRunning;
-
-        if (isAutoplayMode && isAutoplaySessionRunning) {
-            // Autoplay session is actually running - just continue monitoring
-            console.log('[Better Tasker] Autoplay session running - continuing stamina monitoring');
-            const requiredStamina = getCurrentMapStaminaCost();
-            const callback = createStaminaMonitoringCallback(logPrefix, successMessage);
-            startStaminaTooltipMonitoring(callback, requiredStamina);
-        } else {
-            // Autoplay session is not running - need to click Start button
-            console.log('[Better Tasker] Autoplay session not running - clicking Start button');
-
-            // Find and click Start button
-            const startButton = findButtonByText('Start');
-            if (!startButton) {
-                console.log('[Better Tasker] Start button not found after stamina recovery');
-                resetState('navigation');
-                return;
-            }
-
-            console.log('[Better Tasker] Clicking Start button after stamina recovery...');
-            refreshTaskHuntingRunsBudget('stamina-recovery-restart');
-            startButton.click();
-
-            // Show success toast if message provided
-            if (successMessage) {
-                showToast(successMessage);
-            }
-
-            // Modify quest button appearance to show tasking state
-            modifyQuestButtonForTasking();
-            questButtonModifiedForTasking = true;
-
-            // Start quest button validation monitoring for task hunting
-            startQuestButtonValidation();
-
-            // Set up stamina depletion monitoring for the new autoplay session
-            const handleStaminaDepletion = () => {
-                const continuousStaminaMonitoring = createStaminaMonitoringCallback(
-                    'Stamina depleted during task - restarting',
-                    'Task restarted after stamina recovery'
-                );
-
-                const requiredStamina = getCurrentMapStaminaCost();
-                startStaminaTooltipMonitoring(continuousStaminaMonitoring, requiredStamina);
-            };
-
-            // Start continuous stamina monitoring for depletion during autoplay
-            const watchStaminaDepletion = () => {
-                const depletionCheckInterval = setInterval(() => {
-                    const currentCheck = hasInsufficientStamina();
-                    if (currentCheck.insufficient) {
-                        console.log('[Better Tasker] Stamina depleted during autoplay - starting recovery monitoring');
-                        clearInterval(depletionCheckInterval);
-                        handleStaminaDepletion();
-                    }
-                }, 5000); // Check every 5 seconds
-
-                // Store for cleanup
-                window.betterTaskerDepletionInterval = depletionCheckInterval;
-            };
-
-            watchStaminaDepletion();
-
-            console.log('[Better Tasker] Autoplay started after stamina recovery');
-        }
+        void resumeTaskAutoplayAfterStaminaRecovery(logPrefix, successMessage);
     };
 }
 
@@ -2526,6 +2746,22 @@ async function scheduleForegroundTaskRecheck() {
         if (!isGameRunning && taskHuntingOngoing) {
             console.log('[Better Tasker] Foreground recheck while task hunting - running task finishing check');
             await handleTaskFinishing();
+
+            // If hunting is still active and autoplay is idle, try Start (common after background nav).
+            const boardAfter = globalThis.state?.board?.getSnapshot?.()?.context;
+            const stillIdle = !(boardAfter?.gameStarted && gameTimerContext?.state === 'initial') &&
+                !(boardAfter?.isRunning || boardAfter?.autoplayRunning);
+            if (stillIdle && isOnCorrectTaskingMap() && !hasInsufficientStamina().insufficient) {
+                const startButton = await findButtonWithRetries(
+                    () => findButtonByText('Start'),
+                    'Start button (foreground reclaim)'
+                );
+                if (startButton) {
+                    console.log('[Better Tasker] Foreground reclaim - clicking Start');
+                    refreshTaskHuntingRunsBudget('foreground-reclaim-start');
+                    startButton.click();
+                }
+            }
         }
     } catch (error) {
         console.error('[Better Tasker] Error during foreground task recheck:', error);
@@ -4774,7 +5010,16 @@ async function handleQuestLogState(roomId, targetFloor = 0) {
         type: 'selectRoomById',
         roomId: roomId
     });
-    await sleep(NAVIGATION_DELAY);
+
+    const roomReady = await waitForRoomSelection(roomId);
+    if (!roomReady) {
+        // Keep a short grace delay for slow board transitions, then re-check once.
+        await sleep(NAVIGATION_DELAY);
+        if (String(getCurrentRoomId()) !== String(roomId)) {
+            console.log('[Better Tasker] Navigation via API did not reach target room');
+            return false;
+        }
+    }
     
     // Set floor from override (default 0)
     const resolvedFloor = Math.max(0, Math.min(15, Number(targetFloor) || 0));
@@ -5006,6 +5251,10 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                 
                 // Handle quest log state and navigation
                 const navigationCompleted = await handleQuestLogState(roomId, roomAutomation.floor);
+                if (!navigationCompleted) {
+                    console.log('[Better Tasker] Navigation failed - aborting stored-map start');
+                    return false;
+                }
                 
                 // Set the tasking map ID for future validation (already set, but ensure it's preserved)
                 taskingMapId = roomId;
@@ -5015,7 +5264,10 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                 
                 // Find and click the appropriate setup button
                 console.log(`[Better Tasker] Looking for ${setupMethod} button...`);
-                const setupButton = findSetupButton(setupMethod);
+                const setupButton = await findButtonWithRetries(
+                    () => findSetupButton(setupMethod),
+                    `${setupMethod} button`
+                );
                 if (!setupButton) {
                     console.log(`[Better Tasker] ${setupMethod} button not found`);
                     return false;
@@ -5067,7 +5319,10 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                 }
                 
                 // Stamina is sufficient - proceed with Start button
-                const startButton = findButtonByText('Start');
+                const startButton = await findButtonWithRetries(
+                    () => findButtonByText('Start'),
+                    'Start button'
+                );
                 if (!startButton) {
                     console.log('[Better Tasker] Start button not found');
                     return false;
@@ -5087,52 +5342,10 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                 startQuestButtonValidation();
                 
                 // Start continuous stamina monitoring for depletion during autoplay
-                const continuousStaminaMonitoring = () => {
-                    console.log('[Better Tasker] Stamina recovered - checking autoplay state');
-                    
-                    // Check if still valid to continue
-                    if (!taskHuntingOngoing) {
-                        console.log('[Better Tasker] Task no longer active during stamina recovery');
-                        stopStaminaTooltipMonitoring();
-                        return;
-                    }
-                    
-                    // Check if user is still on correct tasking map
-                    if (!isOnCorrectTaskingMap()) {
-                        console.log('[Better Tasker] User changed map - stopping stamina monitoring');
-                        stopStaminaTooltipMonitoring();
-                        return;
-                    }
-                    
-                    // Check if autoplay session is actually running (not just mode enabled)
-                    const boardContext = globalThis.state.board.getSnapshot().context;
-                    const isAutoplayMode = boardContext.mode === 'autoplay';
-                    const isAutoplaySessionRunning = boardContext.isRunning || boardContext.autoplayRunning;
-                    
-                    if (isAutoplayMode && isAutoplaySessionRunning) {
-                        // Autoplay session is actually running - just continue monitoring
-                        console.log('[Better Tasker] Autoplay session running - continuing stamina monitoring');
-                        startStaminaTooltipMonitoring(continuousStaminaMonitoring);
-                    } else {
-                        // Autoplay session is not running - need to click Start button
-                        console.log('[Better Tasker] Autoplay session not running - clicking Start button');
-                        
-                        // Find and click Start button
-                        const startButton = findButtonByText('Start');
-                        if (!startButton) {
-                            console.log('[Better Tasker] Start button not found after stamina recovery');
-                            resetState('navigation');
-                            return;
-                        }
-                        
-                        console.log('[Better Tasker] Clicking Start button after stamina recovery...');
-                        refreshTaskHuntingRunsBudget('navigate-stored-map-stamina-recovery');
-                        startButton.click();
-                        
-                        // Continue monitoring for stamina depletion
-                        startStaminaTooltipMonitoring(continuousStaminaMonitoring);
-                    }
-                };
+                const continuousStaminaMonitoring = createStaminaMonitoringCallback(
+                    'Stamina recovered - checking autoplay state',
+                    'Autoplay started after stamina recovery'
+                );
                 
                 startStaminaTooltipMonitoring(continuousStaminaMonitoring);
                 
@@ -5219,6 +5432,10 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                 
                 // Handle quest log state and navigation
                 const navigationCompleted = await handleQuestLogState(roomId, roomAutomation.floor);
+                if (!navigationCompleted) {
+                    console.log('[Better Tasker] Navigation failed - aborting suggested-map start');
+                    return false;
+                }
                 
                 // Set the tasking map ID for future validation
                 taskingMapId = roomId;
@@ -5228,7 +5445,10 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                 
                 // Find and click the appropriate setup button
                 console.log(`[Better Tasker] Looking for ${setupMethod} button...`);
-                const setupButton = findSetupButton(setupMethod);
+                const setupButton = await findButtonWithRetries(
+                    () => findSetupButton(setupMethod),
+                    `${setupMethod} button`
+                );
                 if (!setupButton) {
                     console.log(`[Better Tasker] ${setupMethod} button not found`);
                     return;
@@ -5279,7 +5499,10 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                 }
                 
                 // Stamina is sufficient - proceed with Start button
-                const startButton = findButtonByText('Start');
+                const startButton = await findButtonWithRetries(
+                    () => findButtonByText('Start'),
+                    'Start button'
+                );
                 if (!startButton) {
                     console.log('[Better Tasker] Start button not found');
                     return;
@@ -5310,53 +5533,11 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                 // Start quest button validation monitoring for task hunting
                 startQuestButtonValidation();
                 
-                // Start continuous stamina monitoring for depletion during autoplay (recursive)
-                const continuousStaminaMonitoring = () => {
-                    console.log('[Better Tasker] Stamina recovered - checking autoplay state');
-                    
-                    // Check if still valid to continue
-                    if (!taskHuntingOngoing) {
-                        console.log('[Better Tasker] Task no longer active during stamina recovery');
-                        stopStaminaTooltipMonitoring();
-                        return;
-                    }
-                    
-                    // Check if user is still on correct tasking map
-                    if (!isOnCorrectTaskingMap()) {
-                        console.log('[Better Tasker] User changed map - stopping stamina monitoring');
-                        stopStaminaTooltipMonitoring();
-                        return;
-                    }
-                    
-                    // Check if autoplay session is actually running (not just mode enabled)
-                    const boardContext = globalThis.state.board.getSnapshot().context;
-                    const isAutoplayMode = boardContext.mode === 'autoplay';
-                    const isAutoplaySessionRunning = boardContext.isRunning || boardContext.autoplayRunning;
-                    
-                    if (isAutoplayMode && isAutoplaySessionRunning) {
-                        // Autoplay session is actually running - just continue monitoring
-                        console.log('[Better Tasker] Autoplay session running - continuing stamina monitoring');
-                        startStaminaTooltipMonitoring(continuousStaminaMonitoring);
-                    } else {
-                        // Autoplay session is not running - need to click Start button
-                        console.log('[Better Tasker] Autoplay session not running - clicking Start button');
-                        
-                        // Find and click Start button
-                        const startButton = findButtonByText('Start');
-                        if (!startButton) {
-                            console.log('[Better Tasker] Start button not found after stamina recovery');
-                            resetState('navigation');
-                            return;
-                        }
-                        
-                        console.log('[Better Tasker] Clicking Start button after stamina recovery...');
-                        refreshTaskHuntingRunsBudget('navigate-suggested-map-stamina-recovery');
-                        startButton.click();
-                        
-                        // Continue monitoring for stamina depletion
-                        startStaminaTooltipMonitoring(continuousStaminaMonitoring);
-                    }
-                };
+                // Start continuous stamina monitoring for depletion during autoplay
+                const continuousStaminaMonitoring = createStaminaMonitoringCallback(
+                    'Stamina recovered - checking autoplay state',
+                    'Autoplay started after stamina recovery'
+                );
                 
                 startStaminaTooltipMonitoring(continuousStaminaMonitoring);
                 

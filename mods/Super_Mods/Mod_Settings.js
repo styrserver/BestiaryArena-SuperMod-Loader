@@ -260,10 +260,23 @@ const initState = {
 // 2. Helper Functions
 // =======================
 
-// Check if blocking mods (Board Analyzer or Autoscroller) are active
+const ANALYSIS_BLOCKING_MODS = ['Board Analyzer', 'Manual Runner'];
+const ANALYSIS_PAUSE_INVENTORY_ATTR = 'data-ba-analysis-inventory-hidden';
+
+let isPausedForAnalysis = false;
+let analysisCoordinationUnsubscribe = null;
+let analysisCoordinationSetupTimer = null;
+
+// Check if Board Analyzer / Manual Runner / Autoscroller should skip cosmetic DOM work
 function isBlockedByAnalysisMods() {
-  return window.ModCoordination?.isModActive('Board Analyzer') || 
+  return window.ModCoordination?.isModActive('Board Analyzer') ||
+         window.ModCoordination?.isModActive('Manual Runner') ||
          window.ModCoordination?.isModActive('Autoscroller');
+}
+
+function isAnalysisBlockingModActive() {
+  if (!window.ModCoordination) return false;
+  return ANALYSIS_BLOCKING_MODS.some((name) => window.ModCoordination.isModActive(name));
 }
 
 // =======================
@@ -886,12 +899,8 @@ function getInventoryItemsPerColumn() {
   return cols === 1 || cols === 2 || cols === 4 ? cols : 4;
 }
 
-function logPersistentInventory(message, details) {
-  if (details !== undefined) {
-    console.log(`[Mod Settings] Persistent inventory: ${message}`, details);
-    return;
-  }
-  console.log(`[Mod Settings] Persistent inventory: ${message}`);
+function logPersistentInventory(_message, _details) {
+  // Intentionally quiet — restore/drag paths used to flood the console.
 }
 
 const EXPECTED_INVENTORY_MOD_BUTTON_CLASSES = [
@@ -3664,9 +3673,11 @@ function verifyInventoryModButtonsIntegrity(source = 'unknown') {
 }
 
 function startInventoryModButtonsObserver() {
+  if (isPausedForAnalysis) return null;
   if (observers.inventoryModButtons) return observers.inventoryModButtons;
 
   const observer = new MutationObserver(() => {
+    if (isPausedForAnalysis) return;
     if (inventoryModButtonsState.verifyDebounceTimeout) {
       clearTimeout(inventoryModButtonsState.verifyDebounceTimeout);
       activeTimeouts.delete(inventoryModButtonsState.verifyDebounceTimeout);
@@ -3758,11 +3769,13 @@ function scheduleTimeout(callback, delay) {
 }
 
 // Disconnect observer helper for cleanup
-function disconnectObserver(observer, name) {
+function disconnectObserver(observer, name, options = {}) {
   if (observer) {
     try {
       observer.disconnect();
-      console.log(`[Mod Settings] ${name} observer disconnected`);
+      if (!options.silent) {
+        console.log(`[Mod Settings] ${name} observer disconnected`);
+      }
     } catch (error) {
       console.warn(`[Mod Settings] Error disconnecting ${name} observer:`, error);
     }
@@ -14701,6 +14714,7 @@ function runPersistentInventoryRestoreAttempt() {
 
 function applyPersistentInventory() {
   if (!config.persistentInventory) return;
+  if (isPausedForAnalysis || isAnalysisBlockingModActive()) return;
 
   startPersistentInventoryObserver();
   applyInventoryHorizontalLayout(findInventoryWidgetRoot());
@@ -14905,10 +14919,12 @@ function bindPersistentInventoryDragListeners() {
 
 function startPersistentInventoryObserver() {
   if (!config.persistentInventory) return null;
+  if (isPausedForAnalysis || isAnalysisBlockingModActive()) return null;
   if (observers.persistentInventory) return observers.persistentInventory;
 
   let debounceTimeout = null;
   const observer = new MutationObserver(() => {
+    if (isPausedForAnalysis) return;
     if (!config.persistentInventory || persistentInventoryState.dragActive) return;
     if (debounceTimeout) {
       clearTimeout(debounceTimeout);
@@ -15305,15 +15321,20 @@ function initTabObserver() {
 }
 
 // Start observer for creature container changes (search filtering)
-function startCreatureContainerObserver() {
+function startCreatureContainerObserver(options = {}) {
+  const quiet = options.quiet === true;
+  if (isPausedForAnalysis) return;
+
   // Find the creature container
   const creatureContainer = document.querySelector('[data-testid="monster-grid"]') || 
                            document.querySelector('.grid') ||
                            document.querySelector('[class*="grid"]');
   
   if (!creatureContainer) {
-    console.log('[Mod Settings] Creature container not found, retrying in 1 second...');
-    scheduleTimeout(startCreatureContainerObserver, TIMEOUT_DELAYS.OBSERVER_RETRY);
+    if (!quiet) {
+      console.log('[Mod Settings] Creature container not found, retrying in 1 second...');
+    }
+    scheduleTimeout(() => startCreatureContainerObserver(options), TIMEOUT_DELAYS.OBSERVER_RETRY);
     return;
   }
   
@@ -15323,6 +15344,7 @@ function startCreatureContainerObserver() {
   }
   
   observers.creature = new MutationObserver((mutations) => {
+    if (isPausedForAnalysis) return;
     let shouldUpdate = false;
     
     mutations.forEach(mutation => {
@@ -15415,7 +15437,9 @@ function startCreatureContainerObserver() {
     subtree: true
   });
   
-  console.log('[Mod Settings] Creature container observer started');
+  if (!quiet) {
+    console.log('[Mod Settings] Creature container observer started');
+  }
 }
 
 /**
@@ -15466,7 +15490,8 @@ function stopMonsterBestiarySearchCosmeticsListener() {
 }
 
 // Start observer for scroll lock state changes
-function initScrollLockObserver() {
+function initScrollLockObserver(options = {}) {
+  const quiet = options.quiet === true;
   // Track previous scroll lock state
   let previouslyLocked = isScrollLocked();
   let scrollUnlockDebounce = null;
@@ -15524,17 +15549,23 @@ function initScrollLockObserver() {
     attributeFilter: ['data-scroll-locked']
   });
   
-  console.log('[Mod Settings] Scroll lock observer started');
+  if (!quiet) {
+    console.log('[Mod Settings] Scroll lock observer started');
+  }
 }
 
 // Start observer for battle board changes (for shiny enemies)
 let battleBoardObserver = null;
 let boardStateUnsubscribe = null;
 
-function startBattleBoardObserver() {
+function startBattleBoardObserver(options = {}) {
+  const quiet = options.quiet === true;
   if (!config.enableShinyEnemies) return;
+  if (isPausedForAnalysis) return;
   
-  console.log('[Mod Settings] Starting battle board observer...');
+  if (!quiet) {
+    console.log('[Mod Settings] Starting battle board observer...');
+  }
   
   // Disconnect existing observer if any
   if (battleBoardObserver) {
@@ -15555,8 +15586,8 @@ function startBattleBoardObserver() {
   let attributeChangeDebounce = null;
   
   const processBattleMutations = (mutations) => {
-    // Skip if Board Analyzer or Autoscroller is running
-    if (window.ModCoordination?.isModActive('Board Analyzer') || window.ModCoordination?.isModActive('Autoscroller')) {
+    // Skip if Board Analyzer / Manual Runner / Autoscroller is running
+    if (isBlockedByAnalysisMods() || isPausedForAnalysis) {
       return;
     }
     
@@ -15758,7 +15789,9 @@ function startBattleBoardObserver() {
     attributeOldValue: true
   });
   
-  console.log('[Mod Settings] Battle board observer started');
+  if (!quiet) {
+    console.log('[Mod Settings] Battle board observer started');
+  }
   
   // Variables to store unsubscribe functions
   let newGameUnsubscribe, endGameUnsubscribe, autoSetupUnsubscribe, boardConfigUnsubscribe;
@@ -15767,7 +15800,7 @@ function startBattleBoardObserver() {
   if (globalThis.state?.board?.on) {
     try {
       newGameUnsubscribe = globalThis.state.board.on('emitNewGame', (event) => {
-        if (window.ModCoordination?.isModActive('Board Analyzer') || window.ModCoordination?.isModActive('Autoscroller')) return;
+        if (isBlockedByAnalysisMods() || isPausedForAnalysis) return;
         console.log('[Mod Settings] New game started, re-applying shiny enemies...');
         scheduleTimeout(() => {
           applyShinyEnemies();
@@ -15776,7 +15809,7 @@ function startBattleBoardObserver() {
       
       // Listen for game end event
       endGameUnsubscribe = globalThis.state.board.on('emitEndGame', (event) => {
-        if (window.ModCoordination?.isModActive('Board Analyzer') || window.ModCoordination?.isModActive('Autoscroller')) return;
+        if (isBlockedByAnalysisMods() || isPausedForAnalysis) return;
         console.log('[Mod Settings] Game ended, re-applying shiny enemies...');
         scheduleTimeout(() => {
           applyShinyEnemies();
@@ -15785,14 +15818,16 @@ function startBattleBoardObserver() {
       
       // Listen for auto-setup board event
       autoSetupUnsubscribe = globalThis.state.board.on('autoSetupBoard', (event) => {
-        if (window.ModCoordination?.isModActive('Board Analyzer') || window.ModCoordination?.isModActive('Autoscroller')) return;
+        if (isBlockedByAnalysisMods() || isPausedForAnalysis) return;
         console.log('[Mod Settings] Auto-setup detected, re-applying shiny enemies...');
         scheduleTimeout(() => {
           applyShinyEnemies();
         }, 150);
       });
       
-      console.log('[Mod Settings] Board state listeners added');
+      if (!quiet) {
+        console.log('[Mod Settings] Board state listeners added');
+      }
     } catch (error) {
       console.error('[Mod Settings] Error setting up board state listeners:', error);
     }
@@ -15804,7 +15839,7 @@ function startBattleBoardObserver() {
       let lastEnemyCount = 0;
       
       boardConfigUnsubscribe = globalThis.state.board.subscribe((state) => {
-        if (window.ModCoordination?.isModActive('Board Analyzer') || window.ModCoordination?.isModActive('Autoscroller')) return;
+        if (isBlockedByAnalysisMods() || isPausedForAnalysis) return;
         
         const boardConfig = state.context?.boardConfig;
         if (!boardConfig || !Array.isArray(boardConfig)) return;
@@ -15822,7 +15857,9 @@ function startBattleBoardObserver() {
         lastEnemyCount = currentEnemyCount;
       });
       
-      console.log('[Mod Settings] Board config subscription added for summoned enemies');
+      if (!quiet) {
+        console.log('[Mod Settings] Board config subscription added for summoned enemies');
+      }
     } catch (error) {
       console.error('[Mod Settings] Error setting up board config subscription:', error);
     }
@@ -15939,22 +15976,29 @@ function getAutoplaySessionTime() {
 }
 
 // Start monitoring the autoplay session timer
-function startAutoplayRefreshMonitor() {
+function startAutoplayRefreshMonitor(options = {}) {
+  const quiet = options.quiet === true;
   try {
-    console.log('[Mod Settings] Starting autoplay refresh monitor');
+    if (!quiet) {
+      console.log('[Mod Settings] Starting autoplay refresh monitor');
+    }
     
     // Clear any existing monitoring
-    stopAutoplayRefreshMonitor();
+    stopAutoplayRefreshMonitor({ quiet: true });
     
     // Check if game state is available
     if (!globalThis.state) {
-      console.log('[Mod Settings] Game state not available, cannot start autoplay refresh monitor');
+      if (!quiet) {
+        console.log('[Mod Settings] Game state not available, cannot start autoplay refresh monitor');
+      }
       return;
     }
     
-    console.log('[Mod Settings] Game state available:', !!globalThis.state);
-    console.log('[Mod Settings] Board state available:', !!globalThis.state.board);
-    console.log('[Mod Settings] Game timer available:', !!globalThis.state.gameTimer);
+    if (!quiet) {
+      console.log('[Mod Settings] Game state available:', !!globalThis.state);
+      console.log('[Mod Settings] Board state available:', !!globalThis.state.board);
+      console.log('[Mod Settings] Game timer available:', !!globalThis.state.gameTimer);
+    }
     
     // Listen for new game events to start monitoring autoplay session
     if (globalThis.state.board) {
@@ -16004,15 +16048,21 @@ function startAutoplayRefreshMonitor() {
         resetBoardActivityTimer();
       });
       
-      console.log('[Mod Settings] Game event listeners set up for newGame, setPlayMode, and board state changes');
+      if (!quiet) {
+        console.log('[Mod Settings] Game event listeners set up for newGame, setPlayMode, and board state changes');
+      }
     }
     
     // Also check immediately if a game is already running
     if (globalThis.state.gameTimer) {
       const gameTimerState = globalThis.state.gameTimer.getSnapshot();
-      console.log('[Mod Settings] Current game timer state:', gameTimerState.context.state);
+      if (!quiet) {
+        console.log('[Mod Settings] Current game timer state:', gameTimerState.context.state);
+      }
       if (gameTimerState.context.state === 'playing') {
-        console.log('[Mod Settings] Game already running, checking autoplay refresh threshold');
+        if (!quiet) {
+          console.log('[Mod Settings] Game already running, checking autoplay refresh threshold');
+        }
         checkAutoplayRefreshThreshold();
       }
     }
@@ -16023,7 +16073,11 @@ function startAutoplayRefreshMonitor() {
     // Initialize internal timer if using internal timer mode or both mode
     const timerMode = config.autoplayRefreshTimerMode || (config.useInternalTimer ? 'internal' : 'autoplay');
     if (timerMode === 'internal' || timerMode === 'both') {
-      resetInternalTimer();
+      if (quiet) {
+        internalTimerStartTime = Date.now();
+      } else {
+        resetInternalTimer();
+      }
     }
     
     // Set up periodic check interval (check every 10 seconds)
@@ -16031,11 +16085,11 @@ function startAutoplayRefreshMonitor() {
       checkAutoplayRefreshThreshold();
     }, 10000); // Check every 10 seconds
     
-    console.log('[Mod Settings] Autoplay refresh monitor started - waiting for new game or monitoring current game');
-    
-    // Test the autoplay session timer detection
-    const testTime = getAutoplaySessionTime();
-    console.log(`[Mod Settings] Test autoplay session time: ${testTime.toFixed(1)} minutes`);
+    if (!quiet) {
+      console.log('[Mod Settings] Autoplay refresh monitor started - waiting for new game or monitoring current game');
+      const testTime = getAutoplaySessionTime();
+      console.log(`[Mod Settings] Test autoplay session time: ${testTime.toFixed(1)} minutes`);
+    }
   } catch (error) {
     console.error('[Mod Settings] Error starting autoplay refresh monitor:', error);
   }
@@ -16112,8 +16166,6 @@ function checkAutoplayRefreshThreshold() {
       const sessionMinutes = getAutoplaySessionTime();
       const inactivityMinutes = (Date.now() - lastBoardActivityTime) / (1000 * 60);
       
-      console.log(`[Mod Settings] Autoplay refresh check (both timers): internal=${internalMinutes.toFixed(1)}/${config.autoplayRefreshMinutes} minutes, session=${sessionMinutes.toFixed(1)}/${config.autoplayRefreshMinutes} minutes, inactivity=${inactivityMinutes.toFixed(1)}/${config.autoplayRefreshMinutes} minutes`);
-      
       // Check internal timer threshold
       const internalThresholdReached = internalMinutes >= config.autoplayRefreshMinutes;
       
@@ -16142,8 +16194,6 @@ function checkAutoplayRefreshThreshold() {
       const internalMinutes = (Date.now() - internalTimerStartTime) / (1000 * 60);
       const inactivityMinutes = (Date.now() - lastBoardActivityTime) / (1000 * 60);
       
-      console.log(`[Mod Settings] Autoplay refresh check (internal timer): internal=${internalMinutes.toFixed(1)}/${config.autoplayRefreshMinutes} minutes, inactivity=${inactivityMinutes.toFixed(1)}/${config.autoplayRefreshMinutes} minutes`);
-      
       // Check internal timer threshold
       const internalThresholdReached = internalMinutes >= config.autoplayRefreshMinutes;
       
@@ -16156,8 +16206,6 @@ function checkAutoplayRefreshThreshold() {
       // Use autoplay session time mode (original behavior)
       const currentMinutes = getAutoplaySessionTime();
       const inactivityMinutes = (Date.now() - lastBoardActivityTime) / (1000 * 60);
-      
-      console.log(`[Mod Settings] Autoplay refresh check (session timer): session=${currentMinutes.toFixed(1)}/${config.autoplayRefreshMinutes} minutes, inactivity=${inactivityMinutes.toFixed(1)}/${config.autoplayRefreshMinutes} minutes`);
       
       // Check session time threshold
       const sessionThresholdReached = currentMinutes > 0 && currentMinutes >= config.autoplayRefreshMinutes;
@@ -16189,24 +16237,31 @@ function checkAutoplayRefreshThreshold() {
 }
 
 // Stop monitoring the autoplay session timer
-function stopAutoplayRefreshMonitor() {
+function stopAutoplayRefreshMonitor(options = {}) {
+  const quiet = options.quiet === true;
   try {
     if (subscriptions.autoplayRefreshGame && typeof subscriptions.autoplayRefreshGame === 'function') {
       subscriptions.autoplayRefreshGame();
       subscriptions.autoplayRefreshGame = null;
-      console.log('[Mod Settings] Autoplay refresh game subscription stopped');
+      if (!quiet) {
+        console.log('[Mod Settings] Autoplay refresh game subscription stopped');
+      }
     }
     
     if (subscriptions.autoplayRefreshSetPlayMode && typeof subscriptions.autoplayRefreshSetPlayMode === 'function') {
       subscriptions.autoplayRefreshSetPlayMode();
       subscriptions.autoplayRefreshSetPlayMode = null;
-      console.log('[Mod Settings] Autoplay refresh setPlayMode subscription stopped');
+      if (!quiet) {
+        console.log('[Mod Settings] Autoplay refresh setPlayMode subscription stopped');
+      }
     }
     
     if (subscriptions.autoplayRefreshBoardState && typeof subscriptions.autoplayRefreshBoardState === 'function') {
       subscriptions.autoplayRefreshBoardState();
       subscriptions.autoplayRefreshBoardState = null;
-      console.log('[Mod Settings] Autoplay refresh board state subscription stopped');
+      if (!quiet) {
+        console.log('[Mod Settings] Autoplay refresh board state subscription stopped');
+      }
     }
     
     // Clear board inactivity timer
@@ -16224,7 +16279,9 @@ function stopAutoplayRefreshMonitor() {
     // Clear internal timer
     internalTimerStartTime = null;
     
-    console.log('[Mod Settings] Autoplay refresh monitor stopped');
+    if (!quiet) {
+      console.log('[Mod Settings] Autoplay refresh monitor stopped');
+    }
   } catch (error) {
     console.error('[Mod Settings] Error stopping autoplay refresh monitor:', error);
   }
@@ -16958,6 +17015,171 @@ function updatePriorityStatus(statusSpan, mod, currentPriority) {
 // 16. Initialization
 // =======================
 
+function hidePersistentInventoryForAnalysis() {
+  const root = findInventoryWidgetRoot();
+  if (!root) return;
+  if (root.getAttribute(ANALYSIS_PAUSE_INVENTORY_ATTR) === '1') return;
+  root.setAttribute(ANALYSIS_PAUSE_INVENTORY_ATTR, '1');
+  root.style.setProperty('display', 'none', 'important');
+  stopPersistentInventoryObserver();
+}
+
+function restorePersistentInventoryAfterAnalysis() {
+  const hiddenRoots = document.querySelectorAll(`[${ANALYSIS_PAUSE_INVENTORY_ATTR}="1"]`);
+  let restoredExisting = false;
+  hiddenRoots.forEach((el) => {
+    el.style.removeProperty('display');
+    el.removeAttribute(ANALYSIS_PAUSE_INVENTORY_ATTR);
+    restoredExisting = true;
+  });
+  if (!config.persistentInventory) return;
+
+  // Soft restore: widget was only hidden — do not re-run open/pin retry spam.
+  if (restoredExisting) {
+    const root = findInventoryWidgetRoot();
+    if (root) {
+      applyInventoryHorizontalLayout(root);
+      if (
+        config.inventoryWidgetPinned === true &&
+        getSavedInventoryWidgetPosition().left != null
+      ) {
+        applyInventoryWidgetPosition(root);
+      }
+      bindPersistentInventoryDragListeners();
+      bindPersistentInventoryPinButtonListener(root);
+      startPersistentInventoryObserver();
+      return;
+    }
+  }
+
+  applyPersistentInventory();
+}
+
+function pauseModSettingsForAnalysis() {
+  if (isPausedForAnalysis) return;
+  isPausedForAnalysis = true;
+  console.log('[Mod Settings] Board Analyzer/Manual Runner active - pausing laggy features');
+
+  hidePersistentInventoryForAnalysis();
+
+  const silent = { silent: true };
+  if (observers.creature?.updateTimeout) {
+    clearTimeout(observers.creature.updateTimeout);
+    activeTimeouts.delete(observers.creature.updateTimeout);
+    observers.creature.updateTimeout = null;
+  }
+  observers.creature = disconnectObserver(observers.creature, 'Creature container', silent);
+  battleBoardObserver = disconnectObserver(battleBoardObserver, 'Battle board', silent);
+  if (boardStateUnsubscribe) {
+    try {
+      boardStateUnsubscribe();
+    } catch (_) { /* ignore */ }
+    boardStateUnsubscribe = null;
+  }
+  if (observers.inventoryModButtons) {
+    observers.inventoryModButtons.disconnect();
+    observers.inventoryModButtons = null;
+  }
+  if (inventoryModButtonsState.verifyDebounceTimeout) {
+    clearTimeout(inventoryModButtonsState.verifyDebounceTimeout);
+    activeTimeouts.delete(inventoryModButtonsState.verifyDebounceTimeout);
+    inventoryModButtonsState.verifyDebounceTimeout = null;
+  }
+  observers.scrollLock = disconnectObserver(observers.scrollLock, 'Scroll lock', silent);
+  if (observers.stamina) {
+    observers.stamina.disconnect();
+  }
+
+  clearPlayerCountIntervals();
+  stopAutoplayRefreshMonitor({ quiet: true });
+  stopAutoUploadMonitor();
+}
+
+function resumeModSettingsAfterAnalysis() {
+  if (!isPausedForAnalysis) return;
+  isPausedForAnalysis = false;
+  console.log('[Mod Settings] Analysis finished - resuming Mod Settings features');
+
+  restorePersistentInventoryAfterAnalysis();
+
+  startCreatureContainerObserver({ quiet: true });
+  if (config.enableShinyEnemies) {
+    startBattleBoardObserver({ quiet: true });
+  }
+  observers.inventoryModButtons = startInventoryModButtonsObserver();
+  initScrollLockObserver({ quiet: true });
+  if (config.showStaminaTimer && observers.stamina) {
+    const staminaDiv = document.querySelector(SELECTORS.STAMINA_DIV);
+    const staminaSpan = staminaDiv?.querySelector(SELECTORS.STAMINA_PARENT_SPAN);
+    if (staminaSpan) {
+      observers.stamina.observe(staminaSpan, {
+        childList: true,
+        subtree: true,
+        characterData: true
+      });
+    }
+  }
+
+  if (config.enablePlayercount) {
+    startPlayerCountUpdates();
+  }
+  if (config.enableAutoplayRefresh) {
+    startAutoplayRefreshMonitor({ quiet: true });
+  }
+  if (config.autoUploadRuns && config.enableFirebaseRunsUpload) {
+    startAutoUploadMonitor();
+  }
+}
+
+function handleAnalysisModCoordination() {
+  try {
+    const blocking = isAnalysisBlockingModActive();
+    if (blocking && !isPausedForAnalysis) {
+      pauseModSettingsForAnalysis();
+    } else if (!blocking && isPausedForAnalysis) {
+      resumeModSettingsAfterAnalysis();
+    }
+  } catch (error) {
+    console.error('[Mod Settings] Error in Board Analyzer coordination:', error);
+  }
+}
+
+function setupAnalysisModCoordination() {
+  if (analysisCoordinationUnsubscribe) return;
+  if (!window.ModCoordination) {
+    if (analysisCoordinationSetupTimer) clearTimeout(analysisCoordinationSetupTimer);
+    analysisCoordinationSetupTimer = setTimeout(setupAnalysisModCoordination, 500);
+    return;
+  }
+  analysisCoordinationSetupTimer = null;
+  try {
+    analysisCoordinationUnsubscribe = window.ModCoordination.on('modActiveChanged', (data) => {
+      if (ANALYSIS_BLOCKING_MODS.includes(data.modName)) {
+        handleAnalysisModCoordination();
+      }
+    });
+    handleAnalysisModCoordination();
+  } catch (error) {
+    console.error('[Mod Settings] Analysis coordination setup failed:', error);
+  }
+}
+
+function teardownAnalysisModCoordination() {
+  if (analysisCoordinationSetupTimer) {
+    clearTimeout(analysisCoordinationSetupTimer);
+    analysisCoordinationSetupTimer = null;
+  }
+  if (analysisCoordinationUnsubscribe) {
+    try {
+      analysisCoordinationUnsubscribe();
+    } catch (_) { /* ignore */ }
+    analysisCoordinationUnsubscribe = null;
+  }
+  if (isPausedForAnalysis) {
+    resumeModSettingsAfterAnalysis();
+  }
+}
+
 function initBetterUI() {
   if (initState.inProgress) {
     console.log('[Mod Settings] Initialization already in progress, skipping duplicate call');
@@ -17099,6 +17321,7 @@ function initBetterUI() {
     scheduleTimeout(() => {
       checkAndOpenHuntAnalyzer();
     }, 500); // Small delay to ensure all mods are loaded
+    setupAnalysisModCoordination();
     initState.initialized = true;
   } catch (error) {
     console.error('[Mod Settings] Initialization error:', error);
@@ -17120,6 +17343,7 @@ window.betterUIConfig = config;
 function cleanupBetterUI() {
   console.log('[Mod Settings] Cleanup called');
   try {
+    teardownAnalysisModCoordination();
     const openModal = modSettingsModalInstance;
     if (openModal && typeof openModal.close === 'function') {
       try {

@@ -951,6 +951,13 @@ function showSkillIncreaseNotification(skillType, oldLevel, newLevel, equipment)
 
 // Initialize battle result tracking
 async function initializeSkillBattleTracking() {
+  if (guildsPausedForAnalysis || isGuildsAnalysisBlockingActive()) {
+    console.log('[Guilds] Skipping skill battle tracking setup - analysis mod active');
+    return;
+  }
+  if (skillBattleSubscription) {
+    return;
+  }
   // Set up battle detection using serverResults (same as Hunt Analyzer)
   // This is more reliable than game timer events
   if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.board && globalThis.state.board.subscribe) {
@@ -3065,6 +3072,9 @@ let lastProcessedSkillSeed = null;
 function setupGuildCoinsDropSystem() {
   if (guildCoinsBoardSubscription) {
     return; // Already set up
+  }
+  if (guildsPausedForAnalysis || isGuildsAnalysisBlockingActive()) {
+    return;
   }
   
   if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.board && globalThis.state.board.subscribe) {
@@ -11158,6 +11168,130 @@ let playerDataBackgroundPushInFlight = false;
 let guildMembershipReconciledThisSession = false;
 const GUILD_BACKGROUND_SYNC_INTERVAL_MS = 60 * 1000; // 1 minute
 
+const GUILDS_ANALYSIS_BLOCKING_MODS = ['Board Analyzer', 'Manual Runner'];
+let guildsPausedForAnalysis = false;
+let guildsAnalysisCoordinationUnsubscribe = null;
+let guildsAnalysisCoordinationSetupTimer = null;
+
+function isGuildsAnalysisBlockingActive() {
+  if (!window.ModCoordination) return false;
+  return GUILDS_ANALYSIS_BLOCKING_MODS.some((name) => window.ModCoordination.isModActive(name));
+}
+
+function stopGuildBackgroundIntervals() {
+  if (guildBackgroundSyncInterval) {
+    clearInterval(guildBackgroundSyncInterval);
+    guildBackgroundSyncInterval = null;
+  }
+  guildBackgroundSyncInFlight = false;
+  if (playerDataBackgroundPushInterval) {
+    clearInterval(playerDataBackgroundPushInterval);
+    playerDataBackgroundPushInterval = null;
+  }
+  playerDataBackgroundPushInFlight = false;
+  if (cacheCleanupInterval) {
+    clearInterval(cacheCleanupInterval);
+    cacheCleanupInterval = null;
+  }
+}
+
+function pauseGuildBattleSubscriptions() {
+  if (guildCoinsBoardSubscription) {
+    try {
+      if (typeof guildCoinsBoardSubscription === 'function') {
+        guildCoinsBoardSubscription();
+      } else if (typeof guildCoinsBoardSubscription.unsubscribe === 'function') {
+        guildCoinsBoardSubscription.unsubscribe();
+      }
+    } catch (_) { /* ignore */ }
+    guildCoinsBoardSubscription = null;
+  }
+  if (skillBattleSubscription) {
+    try {
+      skillBattleSubscription.unsubscribe();
+    } catch (_) { /* ignore */ }
+    skillBattleSubscription = null;
+  }
+}
+
+function pauseGuildsForAnalysis() {
+  if (guildsPausedForAnalysis) return;
+  guildsPausedForAnalysis = true;
+  console.log('[Guilds] Board Analyzer/Manual Runner active - pausing background sync and battle tracking');
+  stopGuildBackgroundIntervals();
+  pauseGuildBattleSubscriptions();
+}
+
+function resumeGuildsAfterAnalysis() {
+  if (!guildsPausedForAnalysis) return;
+  guildsPausedForAnalysis = false;
+  console.log('[Guilds] Analysis finished - resuming background sync and battle tracking');
+  startGuildBackgroundSync();
+  startPlayerDataBackgroundPush();
+  if (!cacheCleanupInterval) {
+    cacheCleanupInterval = setInterval(() => {
+      try {
+        playerExistsCache.cleanup();
+        playerProfileCache.cleanup();
+        guildPointsCache.cleanup();
+      } catch (error) {
+        console.error('[Guilds] Error during cache cleanup:', error);
+      }
+    }, 5 * 60 * 1000);
+  }
+  setupGuildCoinsDropSystem();
+  initializeSkillBattleTracking().catch((error) => {
+    console.warn('[Guilds] Failed to resume skill battle tracking:', error);
+  });
+}
+
+function handleGuildsAnalysisCoordination() {
+  try {
+    const blocking = isGuildsAnalysisBlockingActive();
+    if (blocking && !guildsPausedForAnalysis) {
+      pauseGuildsForAnalysis();
+    } else if (!blocking && guildsPausedForAnalysis) {
+      resumeGuildsAfterAnalysis();
+    }
+  } catch (error) {
+    console.error('[Guilds] Error in Board Analyzer coordination:', error);
+  }
+}
+
+function setupGuildsAnalysisCoordination() {
+  if (guildsAnalysisCoordinationUnsubscribe) return;
+  if (!window.ModCoordination) {
+    if (guildsAnalysisCoordinationSetupTimer) clearTimeout(guildsAnalysisCoordinationSetupTimer);
+    guildsAnalysisCoordinationSetupTimer = setTimeout(setupGuildsAnalysisCoordination, 500);
+    return;
+  }
+  guildsAnalysisCoordinationSetupTimer = null;
+  try {
+    guildsAnalysisCoordinationUnsubscribe = window.ModCoordination.on('modActiveChanged', (data) => {
+      if (GUILDS_ANALYSIS_BLOCKING_MODS.includes(data.modName)) {
+        handleGuildsAnalysisCoordination();
+      }
+    });
+    handleGuildsAnalysisCoordination();
+  } catch (error) {
+    console.error('[Guilds] Analysis coordination setup failed:', error);
+  }
+}
+
+function teardownGuildsAnalysisCoordination() {
+  if (guildsAnalysisCoordinationSetupTimer) {
+    clearTimeout(guildsAnalysisCoordinationSetupTimer);
+    guildsAnalysisCoordinationSetupTimer = null;
+  }
+  if (guildsAnalysisCoordinationUnsubscribe) {
+    try {
+      guildsAnalysisCoordinationUnsubscribe();
+    } catch (_) { /* ignore */ }
+    guildsAnalysisCoordinationUnsubscribe = null;
+  }
+  guildsPausedForAnalysis = false;
+}
+
 function startGuildBackgroundSync() {
   if (guildBackgroundSyncInterval) return;
 
@@ -11343,6 +11477,7 @@ async function initializeGuilds() {
   
   // Initialize guild coins drop system
   setupGuildCoinsDropSystem();
+  setupGuildsAnalysisCoordination();
 }
 
 /** Full scan of all guild member lists — use only for repair/reconcile, not background sync. */
@@ -11547,6 +11682,7 @@ exports = {
   
   cleanup: function() {
     try {
+      teardownGuildsAnalysisCoordination();
       // Stop account menu observer
       if (accountMenuObserver) {
         accountMenuObserver.disconnect();

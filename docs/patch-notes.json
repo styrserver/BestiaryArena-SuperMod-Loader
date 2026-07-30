@@ -4,6 +4,106 @@
   },
   "notes": [
     {
+      "version": "4.7.0",
+      "changes": [
+        {
+          "mod": "Awaken Tracker",
+          "type": "changed",
+          "text": "Pauses board/player subscriptions and hides the panel while Board Analyzer or Manual Runner is active, then resumes afterward."
+        },
+        {
+          "mod": "Bestiary Automator",
+          "type": "changed",
+          "text": "Skips newGame/session-flag handling and automation ticks while Board Analyzer or Manual Runner is active to reduce between-run overhead during analysis."
+        },
+        {
+          "mod": "Better Boosted Maps",
+          "type": "changed",
+          "text": "Background-tab farming is more reliable: room navigation waits for the selected map, stamina uses Game State when the tab is hidden, Start/setup retries longer off-screen, and returning to the tab can reclaim idle autoplay. Map pickers prefer maps-database helpers for raid exclusion, region labels, and region order."
+        },
+        {
+          "mod": "Better Boosted Maps",
+          "type": "fixed",
+          "text": "Mod no longer crashes on load from accessing the page-visibility handler before it was initialized."
+        },
+        {
+          "mod": "Better Highscores",
+          "type": "added",
+          "text": "When a Tibia Ball League event competition is live (raid timer active / Event ends in) but Better Highscores is disabled, a toast notifies that the event is live and Better Highscores must be enabled to participate. No toast after the event has ended or while inactive."
+        },
+        {
+          "mod": "Better Highscores",
+          "type": "changed",
+          "text": "Freezes sandbox preserve/restore and DOM mutation restores while Board Analyzer or Manual Runner is active, and adds a short post-analysis cooldown to stop preserve/restore thrashing."
+        },
+        {
+          "mod": "Better Highscores",
+          "type": "fixed",
+          "text": "Tibia Ball League countdown toasts on the final day now show the precise remaining time (e.g. 8h 30m) instead of only \"ends today,\" and refresh hourly as the deadline approaches."
+        },
+        {
+          "mod": "Better Tasker",
+          "type": "changed",
+          "text": "Background-tab tasking prefers Game State kill progress over DOM, polls until room navigation completes, reads stamina from Game State when hidden, and uses maps-database for non-raid map options and game order."
+        },
+        {
+          "mod": "Better Tasker",
+          "type": "fixed",
+          "text": "Stamina recovery no longer clears an in-progress hunt when Start is missing or a battle is already running; it keeps hunting state and retries instead of reopening the quest log."
+        },
+        {
+          "mod": "Custom Battles",
+          "type": "fixed",
+          "text": "Forced custom allies no longer count toward allyLimit / max-creature enforcement; only player-placed creatures are limited. Outfit-override DOM sync now uses deduped miss-logging and stricter timer cleanup to reduce retry noise and prevent lingering watcher timers after re-setup/cleanup cycles. Gene integrity enforcement is now shared for all configured custom battle creatures (villains/allies): pre-battle tamper checks auto-correct modified genes, and post-start integrity passes re-apply configured values during early runtime sync."
+        },
+        {
+          "mod": "Guilds",
+          "type": "changed",
+          "text": "Pauses Firebase background sync/push and battle-result subscriptions while Board Analyzer or Manual Runner is active, then resumes afterward."
+        },
+        {
+          "mod": "Hunt Analyzer",
+          "type": "changed",
+          "text": "Pauses live panel updates/auto-save and hides the panel while Board Analyzer or Manual Runner is active; board handlers also skip work during analysis."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "changed",
+          "text": "While Board Analyzer or Manual Runner is active, pauses laggy work (creature/battle observers, inventory observers, autoplay refresh, playercount, auto-upload) and hides Persistent Inventory, then restores everything when analysis ends. Analysis resume no longer re-runs the full inventory open/pin restore when the widget was only hidden, and noisy Persistent Inventory / autoplay-refresh console spam is removed."
+        },
+        {
+          "mod": "Quests",
+          "type": "added",
+          "text": "Added The Weakened Archdemon, a new endgame quest continuing the ferry storyline with expanded travel routing and a custom boss encounter that includes scripted abilities, native damage number feedback, and a live top-of-board boss HP bar during the fight."
+        },
+        {
+          "mod": "Quests",
+          "type": "changed",
+          "text": "Added an alternate board access point for an existing quest contact and refactored progression checks so both access routes now share one synchronized unlock gate. The Weakened Archdemon encounter no longer counts scripted allies toward the player creature limit, returns you to the ferry hub after victory or defeat, uses a more ominous pre-battle travel confirmation, and has updated boss tuning (HP reduced to 500 while defensive stats remain elevated). Ferry passage prompts before the archdemon quest are shorter."
+        },
+        {
+          "mod": "Quests",
+          "type": "fixed",
+          "text": "Polished quest interaction consistency by updating a legacy reward-name dialogue reference, suppressing misleading travel-step item hints, and correcting board-NPC portrait rendering plus nameplate display for single-frame outfit sheets. Board-NPC overlays no longer force overflow:visible up the board ancestors, which was punching holes in the client frame on edge tiles. Custom toasts now use one shared vertical stack with height-based spacing so persistent battle-status messages stay beneath transient warnings such as ally-limit toasts. Heavy archdemon battle debug spam was reduced while preserving actionable setup/error logs."
+        },
+        {
+          "mod": "Raid Hunter",
+          "type": "changed",
+          "text": "Static raid settings groups are built from maps-database EVENT_TO_ROOM_MAPPING plus live regions (no hardcoded region→raid lists); mapping is read live. Background-tab navigation polls for the room, stamina uses Game State when hidden, and Start/setup retries are longer off-screen. Previously enabled raids stay saved when their checkboxes are not currently visible."
+        },
+        {
+          "mod": "RunTracker",
+          "type": "changed",
+          "text": "Skips network/replay run capture while Board Analyzer or Manual Runner is active to avoid sandbox churn."
+        },
+        {
+          "mod": "Stamina Optimizer",
+          "type": "changed",
+          "text": "Background-tab map navigation waits for the selected room and stamina prefers Game State. Specific-map picker uses maps-database for raid exclusion, non-raid catalogs, region labels, and game map order."
+        }
+      ]
+    },
+    {
       "version": "4.6.11",
       "changes": [
         {

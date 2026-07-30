@@ -56,6 +56,14 @@ const MODS_LOADING_GRACE_PERIOD = 5000; // 5 seconds after allModsLoaded before 
 const ACTION_START_DELAY = 1000;
 const ACTION_START_TOAST_COOLDOWN_MS = 10000;
 const MAX_WAIT_FOR_SIGNAL = 15000; // Maximum time to wait for allModsLoaded signal (15 seconds)
+const ROOM_NAV_POLL_MS = 100;
+const ROOM_NAV_TIMEOUT_MS = 8000;
+const ROOM_NAV_TIMEOUT_HIDDEN_MS = 20000;
+const DOM_ACTION_RETRY_DELAY_MS = 500;
+const DOM_ACTION_RETRY_DELAY_HIDDEN_MS = 1000;
+const DOM_ACTION_MAX_ATTEMPTS = 5;
+const DOM_ACTION_MAX_ATTEMPTS_HIDDEN = 40;
+const STAMINA_REGEN_MS = 60000;
 
 const COLOR_ACCENT = '#ffe066';
 const COLOR_WHITE = '#fff';
@@ -155,9 +163,14 @@ function scheduleTrackedTimeout(callback, ms) {
 // 3. STAMINA MONITORING FUNCTIONS
 // ============================================================================
 
-// Calculate current stamina using game state API - Returns: Current stamina amount (number)
+// Calculate current stamina using game state API when possible - Returns: Current stamina amount (number)
 function getCurrentStamina() {
     try {
+        const fromApi = getStaminaFromGameState();
+        if (fromApi !== null) {
+            return fromApi;
+        }
+
         const elStamina = document.querySelector('[title="Stamina"]');
         if (!elStamina) {
             return 0;
@@ -169,11 +182,101 @@ function getCurrentStamina() {
         }
         
         const stamina = Number(staminaElement.textContent);
-        return stamina;
+        return Number.isFinite(stamina) ? stamina : 0;
     } catch (error) {
         console.error('[Stamina Optimizer] Error reading stamina:', error);
         return 0;
     }
+}
+
+function isDocumentHidden() {
+    return typeof document !== 'undefined' &&
+        (document.hidden === true || document.visibilityState === 'hidden');
+}
+
+function getStaminaFromGameState() {
+    try {
+        if (typeof globalThis.state?.utils?.getCurrentStamina === 'function') {
+            const fromUtils = Number(globalThis.state.utils.getCurrentStamina());
+            if (Number.isFinite(fromUtils)) {
+                return fromUtils;
+            }
+        }
+
+        const playerContext = globalThis.state?.player?.getSnapshot?.()?.context;
+        if (!playerContext) {
+            return null;
+        }
+
+        for (const key of ['stamina', 'currentStamina']) {
+            const value = Number(playerContext[key]);
+            if (Number.isFinite(value)) {
+                return value;
+            }
+        }
+
+        const willBeFullAt = playerContext.staminaWillBeFullAt;
+        const regenMax = Number(playerContext.maxStamina ?? playerContext.staminaMax);
+        if (willBeFullAt != null && Number.isFinite(regenMax) && regenMax > 0) {
+            const missing = Math.ceil((willBeFullAt - Date.now()) / STAMINA_REGEN_MS);
+            const regenStamina = Math.max(0, regenMax - missing);
+            const excessMs = Math.max(0, Number(playerContext.staminaExcessMs) || 0);
+            return Math.floor(regenStamina + excessMs / STAMINA_REGEN_MS);
+        }
+    } catch (_) {
+        // fall through
+    }
+    return null;
+}
+
+async function waitForRoomSelection(roomId) {
+    if (roomId == null || roomId === '') {
+        return false;
+    }
+    if (String(getCurrentMapId()) === String(roomId)) {
+        return true;
+    }
+
+    const timeoutMs = isDocumentHidden() ? ROOM_NAV_TIMEOUT_HIDDEN_MS : ROOM_NAV_TIMEOUT_MS;
+    const pollMs = isDocumentHidden() ? Math.max(ROOM_NAV_POLL_MS, 250) : ROOM_NAV_POLL_MS;
+    const deadline = Date.now() + timeoutMs;
+
+    while (Date.now() < deadline) {
+        await sleep(pollMs);
+        if (String(getCurrentMapId()) === String(roomId)) {
+            return true;
+        }
+    }
+
+    const matched = String(getCurrentMapId()) === String(roomId);
+    if (!matched) {
+        console.log(
+            `[Stamina Optimizer] Room selection timeout (hidden=${isDocumentHidden()}): wanted ${roomId}, got ${getCurrentMapId()}`
+        );
+    }
+    return matched;
+}
+
+async function findButtonWithRetries(findFn, label = 'button') {
+    const hidden = isDocumentHidden();
+    const maxAttempts = hidden ? DOM_ACTION_MAX_ATTEMPTS_HIDDEN : DOM_ACTION_MAX_ATTEMPTS;
+    const delayMs = hidden ? DOM_ACTION_RETRY_DELAY_HIDDEN_MS : DOM_ACTION_RETRY_DELAY_MS;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        const button = typeof findFn === 'function' ? findFn() : null;
+        if (button) {
+            if (attempt > 1) {
+                console.log(`[Stamina Optimizer] Found ${label} on attempt ${attempt}/${maxAttempts}`);
+            }
+            return button;
+        }
+        if (attempt < maxAttempts) {
+            await sleep(delayMs);
+        }
+    }
+
+    console.log(`[Stamina Optimizer] ${label} not found after ${maxAttempts} attempts (hidden=${hidden})`);
+    return null;
 }
 
 // Check if Bestiary Automator recently refilled stamina - Returns: True if refilled recently (boolean)
@@ -240,18 +343,54 @@ function findBestiaryAutomator() {
 // 4. MAP, SETUP AND FLOOR MANAGEMENT
 // ============================================================================
 
+// Regions in game order with full room lists (getRegionsInOrder only returns id/name)
+function getRegionsWithRoomsInOrder() {
+    const fullRegions = globalThis.state?.utils?.REGIONS || [];
+    if (!Array.isArray(fullRegions) || fullRegions.length === 0) {
+        return [];
+    }
+    const byId = new Map(fullRegions.map((region) => [region?.id, region]));
+    const mapsDb = globalThis.mapsDatabase;
+    const orderedIds = typeof mapsDb?.getRegionsInOrder === 'function'
+        ? mapsDb.getRegionsInOrder().map((region) => region?.id).filter(Boolean)
+        : [];
+
+    const out = [];
+    const seen = new Set();
+    for (const id of orderedIds) {
+        const region = byId.get(id);
+        if (!region || seen.has(id)) continue;
+        seen.add(id);
+        out.push(region);
+    }
+    for (const region of fullRegions) {
+        const id = region?.id;
+        if (!id || seen.has(id)) continue;
+        seen.add(id);
+        out.push(region);
+    }
+    return out;
+}
+
 // Exclude raid and dynamic event maps from stamina farming options (maps-database)
 function isExcludedMap(roomId) {
     if (!roomId) return true;
     try {
         const mapsDb = globalThis.mapsDatabase;
-        if (typeof mapsDb?.isRaid === 'function' && mapsDb.isRaid(roomId)) {
+        if (!mapsDb) {
+            const room = (globalThis.state?.utils?.ROOMS || []).find((r) => r?.id === roomId);
+            return room?.raid === true;
+        }
+        if (typeof mapsDb.isMapRaidComprehensive === 'function') {
+            return mapsDb.isMapRaidComprehensive(roomId);
+        }
+        if (typeof mapsDb.isRaid === 'function' && mapsDb.isRaid(roomId)) {
             return true;
         }
-        if (typeof mapsDb?.isDynamicEventMap === 'function' && mapsDb.isDynamicEventMap(roomId)) {
+        if (typeof mapsDb.isDynamicEventMap === 'function' && mapsDb.isDynamicEventMap(roomId)) {
             return true;
         }
-        const room = typeof mapsDb?.getMapById === 'function'
+        const room = typeof mapsDb.getMapById === 'function'
             ? mapsDb.getMapById(roomId)
             : (globalThis.state?.utils?.ROOMS || []).find((r) => r?.id === roomId);
         return room?.raid === true;
@@ -260,25 +399,27 @@ function isExcludedMap(roomId) {
     }
 }
 
-// Get region display name from region id (uses maps-database)
+// Get region display name from region object (uses maps-database)
 function getRealRegionName(region) {
     if (!region) return 'Unknown Region';
     if (typeof globalThis.mapsDatabase?.getRegionDisplayNameFromRegion === 'function') {
         return globalThis.mapsDatabase.getRegionDisplayNameFromRegion(region);
     }
-    if (region.name) return region.name;
-    const regionId = region.id || 'unknown';
-    if (typeof globalThis.mapsDatabase?.getRegionDisplayName === 'function') {
-        return globalThis.mapsDatabase.getRegionDisplayName(regionId);
+    if (typeof globalThis.mapsDatabase?.getRegionDisplayName === 'function' && region.id) {
+        return globalThis.mapsDatabase.getRegionDisplayName(region.id);
     }
-    return String(regionId).replace(/\w\S*/g, (txt) =>
-        txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase()
-    );
+    return region.name || region.id || 'Unknown Region';
 }
 
 // Build room-id → index map from maps-database / state.utils.ROOMS order
 function getMapsRoomOrderIndex() {
-    const rooms = globalThis.mapsDatabase?.getAllMaps?.()
+    const mapsDb = globalThis.mapsDatabase;
+    if (typeof mapsDb?.buildMapOrderIndex === 'function') {
+        try {
+            return mapsDb.buildMapOrderIndex();
+        } catch (_) { /* fall through */ }
+    }
+    const rooms = mapsDb?.getAllMaps?.()
         || globalThis.state?.utils?.ROOMS
         || [];
     const orderMap = new Map();
@@ -291,6 +432,13 @@ function getMapsRoomOrderIndex() {
 
 // Sort maps by maps-database order (fallback to name for unknown ids)
 function sortMapsByDatabaseOrder(maps) {
+    const mapsDb = globalThis.mapsDatabase;
+    if (typeof mapsDb?.compareMapsByGameOrder === 'function') {
+        return [...maps].sort((a, b) => {
+            const cmp = mapsDb.compareMapsByGameOrder(a.id, b.id);
+            return cmp !== 0 ? cmp : a.name.localeCompare(b.name);
+        });
+    }
     const orderMap = getMapsRoomOrderIndex();
     return [...maps].sort((a, b) => {
         const orderA = orderMap.has(a.id) ? orderMap.get(a.id) : Number.MAX_SAFE_INTEGER;
@@ -302,7 +450,9 @@ function sortMapsByDatabaseOrder(maps) {
 
 // All maps in maps-database order (used when region data is unavailable)
 function getAllMapsInDatabaseOrder(roomNames) {
-    const rooms = globalThis.mapsDatabase?.getAllMaps?.()
+    const mapsDb = globalThis.mapsDatabase;
+    const rooms = (typeof mapsDb?.getNonRaidMaps === 'function' ? mapsDb.getNonRaidMaps() : null)
+        || mapsDb?.getAllMaps?.()
         || globalThis.state?.utils?.ROOMS
         || [];
     if (Array.isArray(rooms) && rooms.length > 0) {
@@ -321,7 +471,8 @@ function getAllMapsInDatabaseOrder(roomNames) {
 function organizeMapsByRegion() {
     try {
         const roomNames = globalThis.state?.utils?.ROOM_NAME || {};
-        const regions = globalThis.state?.utils?.REGIONS || [];
+        const mapsDb = globalThis.mapsDatabase;
+        const regions = getRegionsWithRoomsInOrder();
         
         if (!regions || regions.length === 0) {
             return { 'All Maps': getAllMapsInDatabaseOrder(roomNames) };
@@ -370,8 +521,7 @@ function organizeMapsByRegion() {
         return organizedMaps;
     } catch (error) {
         console.error('[Stamina Optimizer] Error organizing maps by region:', error);
-        const roomNames = globalThis.state?.utils?.ROOM_NAME || {};
-        return { 'All Maps': getAllMapsInDatabaseOrder(roomNames) };
+        return { 'All Maps': getAllMapsInDatabaseOrder(globalThis.state?.utils?.ROOM_NAME || {}) };
     }
 }
 
@@ -662,7 +812,14 @@ async function navigateToSpecificMap(mapId) {
             roomId: mapId
         });
         
-        await sleep(NAVIGATION_DELAY);
+        const roomReady = await waitForRoomSelection(mapId);
+        if (!roomReady) {
+            await sleep(NAVIGATION_DELAY);
+            if (String(getCurrentMapId()) !== String(mapId)) {
+                console.error(`[Stamina Optimizer] Navigation did not reach map ${mapId}`);
+                return false;
+            }
+        }
         return true;
     } catch (error) {
         console.error('[Stamina Optimizer] Error navigating to map:', error);
@@ -1247,7 +1404,10 @@ async function startAutoplay() {
         
         // Step 2: Find and click the Start button
         await sleep(200);
-        const startButton = findStartButton();
+        const startButton = await findButtonWithRetries(
+            () => findStartButton(),
+            'Start button'
+        );
         
         if (!startButton) {
             console.error('[Stamina Optimizer] ❌ Start button not found!');
@@ -1510,7 +1670,10 @@ async function startSpecificMapPlay() {
             if (boardContext.mode === 'autoplay') {
                 console.log('[Stamina Optimizer] Already in autoplay mode, checking if running...');
                 // If already in autoplay but not started, we still need to click Start
-                const startButton = findStartButton();
+                const startButton = await findButtonWithRetries(
+                    () => findStartButton(),
+                    'Start button'
+                );
                 if (startButton) {
                     console.log('[Stamina Optimizer] Clicking Start button...');
                     startButton.click();

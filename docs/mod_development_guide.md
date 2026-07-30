@@ -810,7 +810,7 @@ For more details on the game state API, see the [Game State API Documentation](g
 
 ### Community event competitions
 
-`content/event-competition.js` exposes `window.EventCompetition`, a config-driven framework for Firebase-backed floor/rank leaderboards (join flow, modal UI, auto-submit on victory, raid timer). Better Highscores registers Tibia Ball League via a thin adapter; future timed events can call `EventCompetition.register(config, deps)` with their own `roomId`, Firebase paths, floor ranges, and `i18nPrefix`. The script is injected after `custom-battles.js` by `injector.js`, `utility_injector.js`, and `content_injector.js`. Wait for `window.EventCompetition` if your mod loads before the framework (same pattern as `window.CustomBattles` in Quests).
+`content/event-competition.js` exposes `window.EventCompetition`, a config-driven framework for Firebase-backed floor/rank leaderboards (join flow, modal UI, auto-submit on victory, raid timer). Better Highscores registers Tibia Ball League via a thin adapter; future timed events can call `EventCompetition.register(config, deps)` with their own `roomId`, Firebase paths, floor ranges, and `i18nPrefix`. The script is injected after `custom-battles.js` by `injector.js`, `utility_injector.js`, and `content_injector.js`. Wait for `window.EventCompetition` if your mod loads before the framework (same pattern as `window.CustomBattles` in Quests). When a known event room is live in `state.raids` but no adapter is registered (e.g. Better Highscores disabled), the framework shows a one-shot nudge toast telling the player to enable Better Highscores.
 
 ## Best Practices
 

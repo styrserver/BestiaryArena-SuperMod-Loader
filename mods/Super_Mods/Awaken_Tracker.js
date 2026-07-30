@@ -146,6 +146,97 @@
     let renderDebounceId = null;
     let boardSubscription = null;
     let lastSeenRoomId = null;
+
+    const AWAKEN_ANALYSIS_BLOCKING_MODS = ['Board Analyzer', 'Manual Runner'];
+    const AWAKEN_ANALYSIS_HIDDEN_ATTR = 'data-ba-analysis-panel-hidden';
+    let awakenPausedForAnalysis = false;
+    let awakenAnalysisCoordinationUnsubscribe = null;
+    let awakenAnalysisCoordinationSetupTimer = null;
+
+    function isAwakenAnalysisBlockingActive() {
+        if (!window.ModCoordination) return false;
+        return AWAKEN_ANALYSIS_BLOCKING_MODS.some((name) => window.ModCoordination.isModActive(name));
+    }
+
+    function pauseAwakenTrackerForAnalysis() {
+        if (awakenPausedForAnalysis) return;
+        awakenPausedForAnalysis = true;
+        console.log('[Awaken Tracker] Board Analyzer/Manual Runner active - pausing subscriptions');
+        teardownListeners();
+        teardownBoardSub();
+        teardownPlayerSub();
+        const panel = document.getElementById(PANEL_ID);
+        if (panel && panel.getAttribute(AWAKEN_ANALYSIS_HIDDEN_ATTR) !== '1') {
+            panel.setAttribute(AWAKEN_ANALYSIS_HIDDEN_ATTR, '1');
+            panel.style.setProperty('display', 'none', 'important');
+        }
+    }
+
+    function resumeAwakenTrackerAfterAnalysis() {
+        if (!awakenPausedForAnalysis) return;
+        awakenPausedForAnalysis = false;
+        console.log('[Awaken Tracker] Analysis finished - resuming');
+        const panel = document.getElementById(PANEL_ID);
+        if (panel?.getAttribute(AWAKEN_ANALYSIS_HIDDEN_ATTR) === '1') {
+            panel.style.removeProperty('display');
+            panel.removeAttribute(AWAKEN_ANALYSIS_HIDDEN_ATTR);
+        }
+        setupListeners();
+        setupBoardSub();
+        setupPlayerSub();
+        if (panel) {
+            try { scheduleRender(); } catch (_) { /* ignore */ }
+        }
+    }
+
+    function handleAwakenAnalysisCoordination() {
+        try {
+            const blocking = isAwakenAnalysisBlockingActive();
+            if (blocking && !awakenPausedForAnalysis) {
+                pauseAwakenTrackerForAnalysis();
+            } else if (!blocking && awakenPausedForAnalysis) {
+                resumeAwakenTrackerAfterAnalysis();
+            }
+        } catch (error) {
+            console.error('[Awaken Tracker] Error in Board Analyzer coordination:', error);
+        }
+    }
+
+    function setupAwakenAnalysisCoordination() {
+        if (awakenAnalysisCoordinationUnsubscribe) return;
+        if (!window.ModCoordination) {
+            if (awakenAnalysisCoordinationSetupTimer) clearTimeout(awakenAnalysisCoordinationSetupTimer);
+            awakenAnalysisCoordinationSetupTimer = setTimeout(setupAwakenAnalysisCoordination, 500);
+            return;
+        }
+        awakenAnalysisCoordinationSetupTimer = null;
+        try {
+            awakenAnalysisCoordinationUnsubscribe = window.ModCoordination.on('modActiveChanged', (data) => {
+                if (AWAKEN_ANALYSIS_BLOCKING_MODS.includes(data.modName)) {
+                    handleAwakenAnalysisCoordination();
+                }
+            });
+            handleAwakenAnalysisCoordination();
+        } catch (error) {
+            console.error('[Awaken Tracker] Analysis coordination setup failed:', error);
+        }
+    }
+
+    function teardownAwakenAnalysisCoordination(options = {}) {
+        if (awakenAnalysisCoordinationSetupTimer) {
+            clearTimeout(awakenAnalysisCoordinationSetupTimer);
+            awakenAnalysisCoordinationSetupTimer = null;
+        }
+        if (awakenAnalysisCoordinationUnsubscribe) {
+            try { awakenAnalysisCoordinationUnsubscribe(); } catch (_) { /* ignore */ }
+            awakenAnalysisCoordinationUnsubscribe = null;
+        }
+        if (options.restore !== false && awakenPausedForAnalysis) {
+            resumeAwakenTrackerAfterAnalysis();
+        } else {
+            awakenPausedForAnalysis = false;
+        }
+    }
     let lastPauseAttemptMs = 0;
     let isDraggingSlot = false;
     let panelResizeMouseMoveHandler = null;
@@ -613,9 +704,11 @@
 
     function setupBoardSub() {
         if (boardSubscription) return;
+        if (awakenPausedForAnalysis || isAwakenAnalysisBlockingActive()) return;
         const board = globalThis.state?.board;
         if (!board || typeof board.subscribe !== 'function') return;
         boardSubscription = board.subscribe(() => {
+            if (awakenPausedForAnalysis) return;
             const roomId = resolveCurrentRoomId();
             if (roomId !== lastSeenRoomId) {
                 lastSeenRoomId = roomId;
@@ -640,9 +733,11 @@
     let playerRenderDebounceId = null;
     function setupPlayerSub() {
         if (playerSubscription) return;
+        if (awakenPausedForAnalysis || isAwakenAnalysisBlockingActive()) return;
         const player = globalThis.state?.player;
         if (!player || typeof player.subscribe !== 'function') return;
         playerSubscription = player.subscribe(() => {
+            if (awakenPausedForAnalysis) return;
             if (playerRenderDebounceId) clearTimeout(playerRenderDebounceId);
             playerRenderDebounceId = setTimeout(() => {
                 playerRenderDebounceId = null;
@@ -2377,6 +2472,7 @@
     // =======================
     function cleanup() {
         try {
+            teardownAwakenAnalysisCoordination({ restore: false });
             detachPanelViewportListener();
             teardownPanelResizeListeners();
             teardownListeners();
@@ -2423,6 +2519,7 @@
         setupBoardSub();
         setupPlayerSub();
         createToolbarButton();
+        setupAwakenAnalysisCoordination();
 
         // Reopen panel if it was open before reload
         const panelSettings = loadPanelSettings();
