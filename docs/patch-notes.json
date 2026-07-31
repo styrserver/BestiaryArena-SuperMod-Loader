@@ -4,6 +4,31 @@
   },
   "notes": [
     {
+      "version": "4.7.2",
+      "changes": [
+        {
+          "mod": "Better Highscores",
+          "type": "changed",
+          "text": "Tibia Ball League Winners tab now shows only the category metric per column (ticks, points, or shiny count)."
+        },
+        {
+          "mod": "Quests",
+          "type": "added",
+          "text": "Quest item definitions, toast copy, and world/room configuration now load from dedicated assets files alongside existing mission, NPC, and battle data. Swearing at a royal NPC ends the audience with an angry dismissal and closes the chat after a short delay. Firebase admins get a Quest Log developer-tools card (above the mission leaderboard) for local quest QA helpers. A toast now appears when a timed gathering hand-in becomes ready to claim."
+        },
+        {
+          "mod": "Quests",
+          "type": "changed",
+          "text": "Firebase mission progress is hydrated before any cloud writes; board/quest listeners attach only for incomplete missions; in-file data fallbacks were removed so the assets files are the single source of truth after load. The royal forge gathering quest now shows two Quest Log mission tabs with separate progress bars. Early messenger and multi-step tower missions use stage-aware Quest Log objectives and progress. Board-NPC access for mid-mission hand-offs unlocks at the correct stage. Dialogue player-name placeholders resolve from live game state, and several keyword hints were cleaned up to match current progression."
+        },
+        {
+          "mod": "Quests",
+          "type": "fixed",
+          "text": "Partial progress writes no longer wipe unrelated missions or drop secondary fields when updating unrelated flags; older saves missing a linked defeat flag are backfilled when the related mission is already complete. Giving the starter coin to the royal NPC is now persisted so a reload does not grant another token. Quest backpack no longer races missing on first inventory open. Dig and seal highlights only appear on the relevant tiles and clear when finished; highlight hitboxes no longer block right-clicks on fields or levers. Pickup glow clears after loot is taken. Roman-numeral seal questions no longer match a shorter seal id. Hand-in dialogue no longer tells you to return when you are already speaking with the quest giver. Fishing no longer suggests a magnet after the needed tool is already recovered. One custom battle’s ally limit now matches its placeable tiles, and digging a cave hole no longer uses the mined-ore toast."
+        }
+      ]
+    },
+    {
       "version": "4.7.1",
       "changes": [
         {

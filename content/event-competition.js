@@ -5342,7 +5342,13 @@ function buildTblLeagueWinnersCategoryHtml(competitionMode, rowsOrSnapshotEntrie
       ? escapeTblHtml(tEvent('WinnersShinyStats', {
         count: getTblStandingShinyCount(entry.player)
       }))
-      : escapeTblHtml(formatTblOverallStandingStats(entry.player, competitionMode));
+      : competitionMode === COMPETITION_TAB.RANK
+        ? escapeTblHtml(tEvent('WinnersRankStats', {
+          points: getTblStandingPoints(entry.player)
+        }))
+        : escapeTblHtml(tEvent('WinnersTicksStats', {
+          ticks: getTblStandingTicks(entry.player, COMPETITION_TAB.FLOOR)
+        }));
     return `<div class="tbl-league-winners-entry">
       ${formatTblWinnersMedalHtml(entry.rank)}
       <div class="tbl-league-winners-entry-body">

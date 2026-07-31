@@ -8,11 +8,9 @@ console.log('[Quests Mod] Initializing...');
 // =======================
 
 const BUTTON_CHECK_INTERVAL = 1000;
-const BUTTON_CHECK_TIMEOUT = 10000;
-const BUTTON_RETRY_MAX = 3;
-const BUTTON_RETRY_DELAY = 250;
-const OBSERVER_DEBOUNCE_DELAY = 250;
-const OBSERVER_MIN_INTERVAL = 100;
+const BUTTON_RETRY_MAX = 8;
+const BUTTON_RETRY_DELAY = 200;
+const OBSERVER_DEBOUNCE_DELAY = 100;
 const QUESTS_MODAL_CONFIG = {
   viewportPadding: 16,
   minWidth: 280,
@@ -374,13 +372,17 @@ function setupQuestsModalResponsiveLayout(modalRef, contentRoot, maxWidth, maxHe
 }
 
 const KING_GUILD_COIN_REWARD = 50;
-// Quest dialogue/battle data loaded from assets/quests/*.json
+// Quest dialogue/battle/item/toast/room data loaded from assets/quests/*.json
 let questMissionsDialogue = null;
 let questNpcsDialogue = null;
 let questBattlesConfig = null;
+let questItemsConfigData = null;
+let questToastsConfigData = null;
+let questRoomsConfigData = null;
 let questDialogueLoadPromise = null;
 let questDialogueReady = false;
 let patchBoardNpcChatFromDialogue = null;
+let rebuildToastMessageVariants = null;
 
 let MISSION_COMPLETION_SUMMARIES = {};
 let SEAL_TRANSCRIPTS = [];
@@ -396,6 +398,9 @@ let SVENSON_RESPONSES = {};
 let DANE_RESPONSES = {};
 let DANE_RUMOUR_LINES = [];
 let KING_TIBIANUS_CONFUSION_RESPONSES = [];
+let KING_TIBIANUS_SWEAR_WORDS = [];
+let KING_TIBIANUS_SWEAR_RESPONSE = 'How dare you! Guards, remove this insolent subject!';
+const KING_TIBIANUS_SWEAR_CLOSE_DELAY_MS = 2000;
 let AL_DEE_CONFUSION_RESPONSES = [];
 let COSTELLO_CONFUSION_RESPONSES = [];
 let WYDA_CONFUSION_RESPONSES = [];
@@ -421,6 +426,16 @@ function getMissionCommonLine(key, fallback = '') {
 
 function getDialoguePlayerNameFallback() {
   try {
+    const playerState = globalThis.state?.player?.getSnapshot?.()?.context;
+    if (playerState?.name) return playerState.name;
+    if (typeof window !== 'undefined') {
+      if (window.gameState?.player?.name) return window.gameState.player.name;
+      if (typeof window.api?.gameState?.getPlayerName === 'function') {
+        const apiName = window.api.gameState.getPlayerName();
+        if (apiName) return apiName;
+      }
+    }
+    // IIFE-scoped helper may already be visible in some load orders.
     if (typeof getCurrentPlayerName === 'function') {
       return getCurrentPlayerName() || 'Player';
     }
@@ -513,6 +528,8 @@ function applyQuestDialogueFromAssets(missionsData, npcsData) {
   DANE_RUMOUR_LINES = Array.isArray(dane.rumourLines) ? [...dane.rumourLines] : [];
   SANTA_THANK_YOU_LINES = [...(santa.thankYouLines || [])];
   KING_TIBIANUS_CONFUSION_RESPONSES = [...(king.confusion || [])];
+  KING_TIBIANUS_SWEAR_WORDS = Array.isArray(king.swear?.words) ? [...king.swear.words] : [];
+  KING_TIBIANUS_SWEAR_RESPONSE = king.swear?.response || KING_TIBIANUS_SWEAR_RESPONSE;
   AL_DEE_CONFUSION_RESPONSES = [...(alDee.confusion || [])];
   COSTELLO_CONFUSION_RESPONSES = [...(costello.confusion || [])];
   WYDA_CONFUSION_RESPONSES = [...(wyda.confusion || [])];
@@ -538,24 +555,352 @@ function getQuestBattleConfig(battleId) {
   return questBattlesConfig?.[battleId] || null;
 }
 
+function replaceObjectContents(target, source) {
+  if (!target || !source || typeof source !== 'object') return;
+  for (const key of Object.keys(target)) {
+    delete target[key];
+  }
+  Object.assign(target, source);
+}
+
+function replaceArrayContents(target, source) {
+  if (!Array.isArray(target) || !Array.isArray(source)) return;
+  target.length = 0;
+  for (const entry of source) target.push(entry);
+}
+
+function applyQuestItemsFromAssets(itemsData) {
+  if (!itemsData || typeof itemsData !== 'object') return;
+  const products = itemsData.products || {};
+  if (products.silverToken) Object.assign(SILVER_TOKEN_CONFIG, products.silverToken);
+  if (products.scarabCoin) Object.assign(SCARAB_COIN_CONFIG, products.scarabCoin);
+  if (products.destroyFieldRune) Object.assign(DESTROY_FIELD_RUNE_CONFIG, products.destroyFieldRune);
+  if (products.scorpionSceptre) Object.assign(SCORPION_SCEPTRE_CONFIG, products.scorpionSceptre);
+  if (products.honeyflower) Object.assign(HONEYFLOWER_CONFIG, products.honeyflower);
+  if (products.minotaurTrophy) Object.assign(MINOTAUR_TROPHY_CONFIG, products.minotaurTrophy);
+  if (products.orb) Object.assign(ORB_CONFIG, products.orb);
+  if (products.copperKey) Object.assign(COPPER_KEY_CONFIG, products.copperKey);
+  if (products.mapColour) Object.assign(MAP_COLOUR_CONFIG, products.mapColour);
+  if (products.wishlist) Object.assign(WISHLIST_CONFIG, products.wishlist);
+  if (products.present) Object.assign(PRESENT_CONFIG, products.present);
+  if (products.bunnySlippers) Object.assign(BUNNY_SLIPPERS_CONFIG, products.bunnySlippers);
+  if (products.lootEffect) Object.assign(LOOT_EFFECT_CONFIG, products.lootEffect);
+
+  DESTROY_FIELD_RUNE_ITEM_NAME = DESTROY_FIELD_RUNE_CONFIG.productName || DESTROY_FIELD_RUNE_ITEM_NAME;
+
+  if (itemsData.creatureDrops) {
+    replaceObjectContents(QUEST_ITEMS_CONFIG, itemsData.creatureDrops);
+  }
+  if (itemsData.rookgaardGlobal) {
+    if (typeof itemsData.rookgaardGlobal.poolDropChance === 'number') {
+      ROOKGAARD_GLOBAL_POOL_DROP_CHANCE = itemsData.rookgaardGlobal.poolDropChance;
+    }
+    if (Array.isArray(itemsData.rookgaardGlobal.drops)) {
+      replaceArrayContents(ROOKGAARD_GLOBAL_DROPS, itemsData.rookgaardGlobal.drops);
+    }
+  }
+  if (Array.isArray(itemsData.questItemChatEntries)) {
+    replaceArrayContents(QUEST_ITEM_CHAT_ENTRIES, itemsData.questItemChatEntries);
+  }
+  if (itemsData.questLogIcons) {
+    replaceObjectContents(MISSION_QUEST_LOG_ICON_MAP, itemsData.questLogIcons);
+  }
+  if (itemsData.questLogSpriteIcons) {
+    replaceObjectContents(MISSION_QUEST_LOG_SPRITE_ICON_MAP, itemsData.questLogSpriteIcons);
+  }
+  questItemsConfigData = itemsData;
+}
+
+function applyQuestToastsFromAssets(toastsData) {
+  if (!toastsData || typeof toastsData !== 'object') return;
+  if (toastsData.messages && typeof toastsData.messages === 'object') {
+    replaceObjectContents(TOAST_MESSAGE_TEMPLATES, toastsData.messages);
+    rebuildToastMessagesFromTemplates();
+  }
+  if (toastsData.variants && typeof toastsData.variants === 'object') {
+    replaceObjectContents(TOAST_VARIANT_BY_KEY, toastsData.variants);
+  }
+  if (toastsData.battleLog && typeof toastsData.battleLog === 'object') {
+    replaceObjectContents(BATTLE_TOAST_LOG, toastsData.battleLog);
+  }
+  if (typeof toastsData.mornenionDefeated === 'string' && toastsData.mornenionDefeated) {
+    MORNENION_DEFEATED_MESSAGE = toastsData.mornenionDefeated;
+  }
+  if (typeof rebuildToastMessageVariants === 'function') {
+    rebuildToastMessageVariants();
+  }
+  questToastsConfigData = toastsData;
+}
+
+function fillPlayerTileRange(target, range) {
+  if (!Array.isArray(target) || !range || typeof range !== 'object') return;
+  const from = Number(range.from);
+  const to = Number(range.to);
+  if (!Number.isFinite(from) || !Number.isFinite(to) || to < from) return;
+  target.length = 0;
+  for (let i = from; i <= to; i++) target.push(i);
+}
+
+function applyQuestRoomsFromAssets(roomsData) {
+  if (!roomsData || typeof roomsData !== 'object') return;
+
+  if (roomsData.fishing) Object.assign(FISHING_CONFIG, roomsData.fishing);
+  if (roomsData.mining) {
+    Object.assign(MINING_CONFIG, roomsData.mining);
+    if (roomsData.mining.SPRITE_TRANSFORM) {
+      MINING_CONFIG.SPRITE_TRANSFORM = { ...roomsData.mining.SPRITE_TRANSFORM };
+    }
+  }
+  if (roomsData.desertDigging) Object.assign(DESERT_DIGGING_CONFIG, roomsData.desertDigging);
+
+  const serpentine = roomsData.serpentine;
+  if (serpentine) {
+    if (serpentine.teshaTileIndex != null) TESHA_TILE_INDEX = serpentine.teshaTileIndex;
+    if (serpentine.basementRoomName) SERPENTINE_TOWER_BASEMENT_ROOM_NAME = serpentine.basementRoomName;
+    if (serpentine.fieldSpriteId != null) {
+      SERPENTINE_FIELD_SPRITE_ID = serpentine.fieldSpriteId;
+      SERPENTINE_FIELD_SPRITE_SELECTOR = `.sprite.item.relative.id-${SERPENTINE_FIELD_SPRITE_ID}`;
+    }
+    if (Array.isArray(serpentine.runePickupSpriteIds)) {
+      replaceArrayContents(SERPENTINE_RUNE_PICKUP_SPRITE_IDS, serpentine.runePickupSpriteIds);
+    }
+    if (serpentine.leverTile != null) SERPENTINE_LEVER_TILE = serpentine.leverTile;
+    if (serpentine.leverSprite) Object.assign(SERPENTINE_LEVER_SPRITE, serpentine.leverSprite);
+    if (serpentine.leverWarpNavDelayMs != null) SERPENTINE_LEVER_WARP_NAV_DELAY_MS = serpentine.leverWarpNavDelayMs;
+    const putrid = serpentine.putridChamber;
+    if (putrid) {
+      if (putrid.roomName) PUTRID_CHAMBER_ROOM_NAME = putrid.roomName;
+      if (putrid.backgroundSceneId) PUTRID_CHAMBER_BACKGROUND_SCENE_ID = putrid.backgroundSceneId;
+      if (Array.isArray(putrid.floorBelowSpriteIds)) {
+        replaceArrayContents(PUTRID_CHAMBER_FLOOR_BELOW_SPRITE_IDS, putrid.floorBelowSpriteIds);
+      }
+      if (putrid.floorBelowReplacementSpriteId != null) {
+        PUTRID_CHAMBER_FLOOR_BELOW_REPLACEMENT_SPRITE_ID = putrid.floorBelowReplacementSpriteId;
+      }
+      if (putrid.floorBelow4394ReplacementSpriteId != null) {
+        PUTRID_CHAMBER_FLOOR_BELOW_4394_REPLACEMENT_SPRITE_ID = putrid.floorBelow4394ReplacementSpriteId;
+      }
+      if (putrid.sprite2127ReplacementId != null) {
+        PUTRID_CHAMBER_SPRITE_2127_REPLACEMENT_ID = putrid.sprite2127ReplacementId;
+      }
+      if (Array.isArray(putrid.villainSetupAttemptDelaysMs)) {
+        replaceArrayContents(PUTRID_CHAMBER_VILLAIN_SETUP_ATTEMPT_DELAYS_MS, putrid.villainSetupAttemptDelaysMs);
+      }
+      if (Array.isArray(putrid.sceneSpriteAttemptDelaysMs)) {
+        replaceArrayContents(PUTRID_CHAMBER_SCENE_SPRITE_ATTEMPT_DELAYS_MS, putrid.sceneSpriteAttemptDelaysMs);
+      }
+      PUTRID_CHAMBER_SCENE_SPRITE_REPLACEMENTS.rootId = PUTRID_CHAMBER_BACKGROUND_SCENE_ID;
+      PUTRID_CHAMBER_SCENE_SPRITE_REPLACEMENTS.rules = [
+        { sourceIds: PUTRID_CHAMBER_FLOOR_BELOW_SPRITE_IDS, replacementId: PUTRID_CHAMBER_FLOOR_BELOW_REPLACEMENT_SPRITE_ID, scope: 'background' },
+        { sourceIdRange: { from: 4394, to: 4410 }, replacementId: PUTRID_CHAMBER_FLOOR_BELOW_4394_REPLACEMENT_SPRITE_ID, scope: 'tile' },
+        { sourceIds: [2127], replacementId: PUTRID_CHAMBER_SPRITE_2127_REPLACEMENT_ID, makeRelative: true, scope: 'tile' }
+      ];
+    }
+  }
+
+  const honey = roomsData.honeyflower;
+  if (honey) {
+    if (honey.tileIndex != null) HONEYFLOWER_TILE_INDEX = honey.tileIndex;
+    if (honey.pickupSpriteId != null) HONEYFLOWER_PICKUP_SPRITE_ID = honey.pickupSpriteId;
+    if (honey.roomName) HONEYFLOWER_TOWER_ROOM_NAME = honey.roomName;
+  }
+
+  const crossing = roomsData.crossingTheLine;
+  if (crossing) {
+    if (crossing.roomName) CITY_BOARDGAMES_ROOM_NAME = crossing.roomName;
+    if (Array.isArray(crossing.tiles)) replaceArrayContents(CROSSING_THE_LINE_TILES, crossing.tiles);
+    if (crossing.okBorderColor) CROSSING_THE_LINE_OK_BORDER_COLOR = crossing.okBorderColor;
+  }
+
+  const sheng = roomsData.apprenticeSheng;
+  if (sheng) {
+    if (sheng.roomName) APPRENTICE_SHENG_ROOM_NAME = sheng.roomName;
+    if (sheng.tileIndex != null) APPRENTICE_SHENG_TILE_INDEX = sheng.tileIndex;
+    if (sheng.battleTileIndex != null) APPRENTICE_SHENG_BATTLE_TILE_INDEX = sheng.battleTileIndex;
+    if (Array.isArray(sheng.minotaurTiles)) replaceArrayContents(APPRENTICE_SHENG_MINOTAUR_TILES, sheng.minotaurTiles);
+    if (Array.isArray(sheng.allyTiles)) replaceArrayContents(APPRENTICE_SHENG_ALLY_TILES, sheng.allyTiles);
+    if (sheng.playerTiles) fillPlayerTileRange(APPRENTICE_SHENG_PLAYER_TILES, sheng.playerTiles);
+    if (sheng.villainGameIdFallback != null) APPRENTICE_SHENG_VILLAIN_GAME_ID_FALLBACK = sheng.villainGameIdFallback;
+    if (sheng.fightIconUrl) APPRENTICE_SHENG_FIGHT_ICON_URL = sheng.fightIconUrl;
+    if (sheng.rookstayerOutfitSpriteId) {
+      ROOKSTAYER_OUTFIT_SPRITE_ID = sheng.rookstayerOutfitSpriteId;
+      SVENSON_OUTFIT_SPRITE_ID = ROOKSTAYER_OUTFIT_SPRITE_ID;
+      DANE_OUTFIT_SPRITE_ID = ROOKSTAYER_OUTFIT_SPRITE_ID;
+    }
+  }
+
+  const seals = roomsData.sevenSeals;
+  if (seals) {
+    if (Array.isArray(seals.roomNames)) {
+      replaceArrayContents(SEVEN_SEALS_GHOSTLANDS_ROOM_NAMES, seals.roomNames);
+      SEVEN_SEALS_COUNT = SEVEN_SEALS_GHOSTLANDS_ROOM_NAMES.length;
+    }
+    if (seals.first) {
+      if (seals.first.room) FIRST_SEAL_GHOSTLANDS_SURFACE_ROOM = seals.first.room;
+      if (Array.isArray(seals.first.poisonTiles)) replaceArrayContents(FIRST_SEAL_POISON_TILES, seals.first.poisonTiles);
+      if (seals.first.minPoisonTiles != null) FIRST_SEAL_MIN_POISON_TILES = seals.first.minPoisonTiles;
+      if (seals.first.celebrationDurationMs != null) FIRST_SEAL_CELEBRATION_DURATION_MS = seals.first.celebrationDurationMs;
+    }
+    if (seals.second) {
+      if (seals.second.room) SECOND_SEAL_ROOM = seals.second.room;
+      if (seals.second.tile != null) SECOND_SEAL_TILE_34 = seals.second.tile;
+      if (seals.second.leverAnimationMs != null) SECOND_SEAL_LEVER_ANIMATION_MS = seals.second.leverAnimationMs;
+    }
+    if (seals.third) {
+      if (seals.third.room) THIRD_SEAL_ROOM = seals.third.room;
+      if (seals.third.tile != null) THIRD_SEAL_TILE_52 = seals.third.tile;
+      if (seals.third.spellAnimationMs != null) THIRD_SEAL_SPELL_ANIMATION_MS = seals.third.spellAnimationMs;
+    }
+    if (seals.fourth) {
+      if (seals.fourth.room) FOURTH_SEAL_ROOM = seals.fourth.room;
+      if (seals.fourth.maxTicks != null) FOURTH_SEAL_MAX_TICKS = seals.fourth.maxTicks;
+    }
+    if (seals.fifth) {
+      if (seals.fifth.room) FIFTH_SEAL_ROOM = seals.fifth.room;
+      if (seals.fifth.tile != null) FIFTH_SEAL_TILE_41 = seals.fifth.tile;
+      if (seals.fifth.leverSprite) Object.assign(FIFTH_SEAL_LEVER_SPRITE, seals.fifth.leverSprite);
+    }
+    if (seals.sixth) {
+      if (seals.sixth.room) SIXTH_SEAL_ROOM = seals.sixth.room;
+      if (Array.isArray(seals.sixth.leverTiles)) replaceArrayContents(SIXTH_SEAL_LEVER_TILES, seals.sixth.leverTiles);
+      if (Array.isArray(seals.sixth.leverOrder)) replaceArrayContents(SIXTH_SEAL_LEVER_ORDER, seals.sixth.leverOrder);
+      if (seals.sixth.leverSprite) Object.assign(SIXTH_SEAL_LEVER_SPRITE, seals.sixth.leverSprite);
+    }
+    if (seals.seventh) {
+      if (seals.seventh.tile126 != null) SEVENTH_SEAL_TILE_126 = seals.seventh.tile126;
+      if (seals.seventh.tile127 != null) SEVENTH_SEAL_TILE_127 = seals.seventh.tile127;
+      if (seals.seventh.tile126Sprite) Object.assign(SEVENTH_SEAL_TILE_126_SPRITE, seals.seventh.tile126Sprite);
+      if (seals.seventh.tile127Sprite) Object.assign(SEVENTH_SEAL_TILE_127_SPRITE, seals.seventh.tile127Sprite);
+      if (seals.seventh.bansheeLastRoomName) BANSHEE_LAST_ROOM_NAME = seals.seventh.bansheeLastRoomName;
+      if (seals.seventh.useDemonrageIfMissing != null) BANSHEE_LAST_ROOM_USE_DEMONRAGE_IF_MISSING = !!seals.seventh.useDemonrageIfMissing;
+    }
+  }
+
+  const spider = roomsData.spiderLair;
+  if (spider) {
+    if (spider.secludedHerbRoomName) SECLUDED_HERB_ROOM_NAME = spider.secludedHerbRoomName;
+    if (spider.spiderLairRoomName) SPIDER_LAIR_ROOM_NAME = spider.spiderLairRoomName;
+    if (spider.useSecludedHerbIfMissing != null) SPIDER_LAIR_USE_SECLUDED_HERB_IF_MISSING = !!spider.useSecludedHerbIfMissing;
+    if (spider.secludedHerbTile != null) SECLUDED_HERB_TILE_77 = spider.secludedHerbTile;
+    if (spider.tile86 != null) SPIDER_LAIR_TILE_86 = spider.tile86;
+    if (spider.tile87 != null) SPIDER_LAIR_TILE_87 = spider.tile87;
+    if (spider.tile86SpriteId) SPIDER_LAIR_TILE_86_SPRITE_ID = spider.tile86SpriteId;
+    if (spider.tile87SpriteId) SPIDER_LAIR_TILE_87_SPRITE_ID = spider.tile87SpriteId;
+    if (spider.spriteToRemoveId) SPIDER_LAIR_SPRITE_TO_REMOVE_ID = spider.spriteToRemoveId;
+    if (Array.isArray(spider.tilesAddSprite2127)) replaceArrayContents(SPIDER_LAIR_TILES_ADD_SPRITE_2127, spider.tilesAddSprite2127);
+    if (spider.addSprite2127Id) SPIDER_LAIR_ADD_SPRITE_2127_ID = spider.addSprite2127Id;
+    if (Array.isArray(spider.tilesAddSprite4312)) replaceArrayContents(SPIDER_LAIR_TILES_ADD_SPRITE_4312, spider.tilesAddSprite4312);
+    if (spider.addSprite4312Id) SPIDER_LAIR_ADD_SPRITE_4312_ID = spider.addSprite4312Id;
+  }
+
+  const board = roomsData.boardNpcs;
+  if (board) {
+    if (board.santa) {
+      if (board.santa.roomName) SANTA_CLAUS_ROOM_NAME = board.santa.roomName;
+      if (board.santa.tileIndex != null) SANTA_CLAUS_TILE_INDEX = board.santa.tileIndex;
+      if (board.santa.id) BOARD_NPC_SANTA_ID = board.santa.id;
+      if (board.santa.outfitSpriteId) SANTA_OUTFIT_SPRITE_ID = board.santa.outfitSpriteId;
+      if (board.santa.dialogueIconUrl) SANTA_DIALOGUE_ICON_URL = board.santa.dialogueIconUrl;
+    }
+    if (board.alDeeRatPlague) {
+      if (board.alDeeRatPlague.id) BOARD_NPC_AL_DEE_RAT_PLAGUE_ID = board.alDeeRatPlague.id;
+      if (board.alDeeRatPlague.roomName) RAT_PLAGUE_ROOM_NAME = board.alDeeRatPlague.roomName;
+      if (board.alDeeRatPlague.roomId) RAT_PLAGUE_ROOM_ID = board.alDeeRatPlague.roomId;
+      if (board.alDeeRatPlague.tileIndex != null) RAT_PLAGUE_AL_DEE_TILE_INDEX = board.alDeeRatPlague.tileIndex;
+      if (board.alDeeRatPlague.dialogueIconUrl) RAT_PLAGUE_AL_DEE_DIALOGUE_ICON_URL = board.alDeeRatPlague.dialogueIconUrl;
+    }
+    if (board.svenson) {
+      if (board.svenson.id) BOARD_NPC_SVENSON_ID = board.svenson.id;
+      if (board.svenson.roomName) SVENSON_ROOM_NAME = board.svenson.roomName;
+      if (board.svenson.tileIndex != null) SVENSON_TILE_INDEX = board.svenson.tileIndex;
+      if (board.svenson.awashRoomName) SVENSON_AWASH_ROOM_NAME = board.svenson.awashRoomName;
+      if (board.svenson.awashTileIndex != null) SVENSON_AWASH_TILE_INDEX = board.svenson.awashTileIndex;
+      if (board.svenson.undergroundRoomName) SVENSON_UNDERGROUND_ROOM_NAME = board.svenson.undergroundRoomName;
+      if (board.svenson.undergroundTileIndex != null) SVENSON_UNDERGROUND_TILE_INDEX = board.svenson.undergroundTileIndex;
+      if (board.svenson.whiteWaveRoomName) SVENSON_WHITE_WAVE_ROOM_NAME = board.svenson.whiteWaveRoomName;
+      if (board.svenson.whiteWaveTileIndex != null) SVENSON_WHITE_WAVE_TILE_INDEX = board.svenson.whiteWaveTileIndex;
+      if (board.svenson.dialogueIconUrl) SVENSON_DIALOGUE_ICON_URL = board.svenson.dialogueIconUrl;
+    }
+    if (board.dane) {
+      if (board.dane.id) BOARD_NPC_DANE_ID = board.dane.id;
+      if (board.dane.whiteWaveTileIndex != null) DANE_WHITE_WAVE_TILE_INDEX = board.dane.whiteWaveTileIndex;
+      if (board.dane.dialogueIconUrl) DANE_DIALOGUE_ICON_URL = board.dane.dialogueIconUrl;
+    }
+  }
+
+  const ghaz = roomsData.ghazbaran;
+  if (ghaz) {
+    if (ghaz.hideoutRoomName) GHAZBARAN_HIDEOUT_ROOM_NAME = ghaz.hideoutRoomName;
+    if (ghaz.hideoutDisplayName) GHAZBARAN_HIDEOUT_DISPLAY_NAME = ghaz.hideoutDisplayName;
+    if (ghaz.tileIndex != null) GHAZBARAN_TILE_INDEX = ghaz.tileIndex;
+    if (ghaz.nickname) GHAZBARAN_NICKNAME = ghaz.nickname;
+    if (ghaz.auraNickname) GHAZBARAN_AURA_NICKNAME = ghaz.auraNickname;
+  }
+
+  if (roomsData.effects) {
+    if (roomsData.effects.tileSuccessEffectUrl) {
+      QUEST_TILE_SUCCESS_EFFECT_URL = roomsData.effects.tileSuccessEffectUrl;
+      CROSSING_THE_LINE_ORC_SUCCESS_EFFECT_URL = QUEST_TILE_SUCCESS_EFFECT_URL;
+    }
+    if (roomsData.effects.tileSuccessFrameMs != null) {
+      QUEST_TILE_SUCCESS_FRAME_MS = roomsData.effects.tileSuccessFrameMs;
+      CROSSING_THE_LINE_ORC_SUCCESS_FRAME_MS = QUEST_TILE_SUCCESS_FRAME_MS;
+    }
+  }
+
+  if (Array.isArray(roomsData.kingArenaRanks)) {
+    replaceArrayContents(KING_ARENA_RANKS, roomsData.kingArenaRanks);
+  }
+
+  questRoomsConfigData = roomsData;
+}
+
 async function loadQuestDialogueAssets() {
-  if (questDialogueReady && questMissionsDialogue && questNpcsDialogue && questBattlesConfig) {
-    return { missions: questMissionsDialogue, npcs: questNpcsDialogue, battles: questBattlesConfig };
+  if (
+    questDialogueReady &&
+    questMissionsDialogue &&
+    questNpcsDialogue &&
+    questBattlesConfig &&
+    questItemsConfigData &&
+    questToastsConfigData &&
+    questRoomsConfigData
+  ) {
+    return {
+      missions: questMissionsDialogue,
+      npcs: questNpcsDialogue,
+      battles: questBattlesConfig,
+      items: questItemsConfigData,
+      toasts: questToastsConfigData,
+      rooms: questRoomsConfigData
+    };
   }
   if (!questDialogueLoadPromise) {
     questDialogueLoadPromise = (async () => {
-      const [missionsData, npcsData, battlesData] = await Promise.all([
+      const [missionsData, npcsData, battlesData, itemsData, toastsData, roomsData] = await Promise.all([
         fetchQuestJsonAsset('missions.json'),
         fetchQuestJsonAsset('npcs.json'),
-        fetchQuestJsonAsset('battles.json')
+        fetchQuestJsonAsset('battles.json'),
+        fetchQuestJsonAsset('items.json'),
+        fetchQuestJsonAsset('toasts.json'),
+        fetchQuestJsonAsset('rooms.json')
       ]);
       applyQuestDialogueFromAssets(missionsData, npcsData);
       applyQuestBattlesFromAssets(battlesData);
+      applyQuestItemsFromAssets(itemsData);
+      applyQuestToastsFromAssets(toastsData);
+      applyQuestRoomsFromAssets(roomsData);
       if (typeof patchBoardNpcChatFromDialogue === 'function') {
         patchBoardNpcChatFromDialogue();
       }
-      console.log('[Quests Mod] Loaded quest dialogue and battles from assets/quests');
-      return { missions: missionsData, npcs: npcsData, battles: battlesData };
+      console.log('[Quests Mod] Loaded quest dialogue, battles, items, toasts, and rooms from assets/quests');
+      return {
+        missions: missionsData,
+        npcs: npcsData,
+        battles: battlesData,
+        items: itemsData,
+        toasts: toastsData,
+        rooms: roomsData
+      };
     })().catch((error) => {
       questDialogueLoadPromise = null;
       console.error('[Quests Mod] Failed to load quest dialogue assets:', error);
@@ -626,61 +971,64 @@ const TOAST_VARIANT_DURATIONS = {
   completed: 10000 // longest — mission/task/seal completed
 };
 
-const TOAST_MESSAGES = {
-  questDiscovered: (title) => `New quest discovered: ${title}`,
-  questAccepted: (title) => `New quest: ${title}`,
-  questCompleted: (title) => `Mission completed: ${title}`,
-  questCompletedWithCoins: (title, coins) => `Mission completed: ${title}. Received ${coins} guild coins!`,
-  taskCompletedWithCoins: (title, coins) => `The ${title} task is complete. Received ${coins} guild coins!`,
-  itemReceived: (name) => `Received ${name}!`,
-  itemRemoved: (name) => `Removed ${name}.`,
-  deliveredTo: (recipient) => `Delivered to ${recipient}!`,
-  returnedTo: (recipient) => `Returned to ${recipient}!`,
-  diaryReturned: 'Costello\'s diary has been returned.',
-  sealCompleted: (ordinal) => `${ordinal} seal completed`,
-  copperKeyFound: 'Found Copper Key!',
-  mapReceived: 'Received Map!',
-  navigatedToMines: 'Navigated to the mines!',
-  kingTookCoin: 'King Tibianus took your coin!',
-  frightenedHole: 'You feel frightened and unprepared to go down the hole.',
-  fishingEnabled: 'Fishing enabled!',
-  fishingDisabled: 'Fishing disabled!',
-  shovelEnabled: 'Shovel enabled!',
-  shovelDisabled: 'Shovel disabled!',
-  minedOre: 'You mined some ore!',
-  travelingAbDendriel: 'Traveling to Ab\'Dendriel Hive...',
-  teleportedAlDee: 'Teleported to Al Dee!',
-  teleportAlDeeFailed: 'Failed to teleport to Al Dee',
-  bansheeLastRoomNotFound: 'Banshee\'s Last Room not found.',
-  travelingBansheeLastRoom: 'Traveling to Banshee\'s Last Room...',
-  bansheeLastRoomBattleHere: 'Banshee\'s Last Room battle starting here.',
-  spiderLairNotFound: 'Spider Lair not found.',
-  enteringSpiderLair: 'Entering Old Widow\'s Lair...',
-  spiderLairBattleHere: 'Spider Lair battle starting here.',
-  putridChamberNotStrongEnough: 'You are not strong enough.',
-  travelingPutridChamber: 'The floor gives way — you are pulled into the Putrid Chamber!',
-  travelingWithSvenson: 'Traveling with Svenson...',
-  travelingGhazHideout: 'Traveling to Ghazbaran\'s Hideout...',
-  fishingFoundAxe: 'You found a Small Axe with your Magnet!',
-  fishingFoundNothingMagnet: 'You found nothing. Maybe a magnet would help?',
-  fishingFoundNothing: 'You found nothing.',
-  fishingMagnetHint: 'Seems as a magnet will help here.',
-  fishingError: 'Something went wrong while fishing.',
-  desertDigNothing: 'You dig in the sand but find nothing.',
-  desertDigSandsEmpty: 'The sands feel empty.',
-  desertDigNeedMission: 'The sands yield nothing. Perhaps the king knows what to seek here.',
-  missingDestroyFieldRune: 'You are missing a Destroy Field Rune.',
-  alreadyHaveDestroyFieldRune: 'You already carry a destroy field rune.',
-  crossingTheLineObjectiveComplete: 'Fastest Bishop in Carlin completed! Return to the king to claim your reward.'
-};
+const TOAST_MESSAGE_TEMPLATES = {};
+const TOAST_VARIANT_BY_KEY = {};
+const TOAST_MESSAGES = {};
 
-const BATTLE_TOAST_LOG = {
-  mornenion: '[Quests Mod][Mornenion]',
-  bansheeLastRoom: '[Quests Mod][Banshee Last Room]',
-  spiderLair: '[Quests Mod][Spider Lair]',
-  putridChamber: '[Quests Mod][Putrid Chamber]',
-  weakenedArchdemon: '[Quests Mod][Weakened Archdemon]'
-};
+function rebuildToastMessagesFromTemplates() {
+  const t = TOAST_MESSAGE_TEMPLATES;
+  TOAST_MESSAGES.questDiscovered = (title) => formatDialogueLine(t.questDiscovered, { title });
+  TOAST_MESSAGES.questAccepted = (title) => formatDialogueLine(t.questAccepted, { title });
+  TOAST_MESSAGES.questCompleted = (title) => formatDialogueLine(t.questCompleted, { title });
+  TOAST_MESSAGES.questCompletedWithCoins = (title, coins) => formatDialogueLine(t.questCompletedWithCoins, { title, coins });
+  TOAST_MESSAGES.taskCompletedWithCoins = (title, coins) => formatDialogueLine(t.taskCompletedWithCoins, { title, coins });
+  TOAST_MESSAGES.itemReceived = (name) => formatDialogueLine(t.itemReceived, { name });
+  TOAST_MESSAGES.itemRemoved = (name) => formatDialogueLine(t.itemRemoved, { name });
+  TOAST_MESSAGES.deliveredTo = (recipient) => formatDialogueLine(t.deliveredTo, { recipient });
+  TOAST_MESSAGES.returnedTo = (recipient) => formatDialogueLine(t.returnedTo, { recipient });
+  TOAST_MESSAGES.diaryReturned = t.diaryReturned || '';
+  TOAST_MESSAGES.sealCompleted = (ordinal) => formatDialogueLine(t.sealCompleted, { ordinal });
+  TOAST_MESSAGES.copperKeyFound = t.copperKeyFound || '';
+  TOAST_MESSAGES.mapReceived = t.mapReceived || '';
+  TOAST_MESSAGES.navigatedToMines = t.navigatedToMines || '';
+  TOAST_MESSAGES.kingTookCoin = t.kingTookCoin || '';
+  TOAST_MESSAGES.frightenedHole = t.frightenedHole || '';
+  TOAST_MESSAGES.fishingEnabled = t.fishingEnabled || '';
+  TOAST_MESSAGES.fishingDisabled = t.fishingDisabled || '';
+  TOAST_MESSAGES.shovelEnabled = t.shovelEnabled || '';
+  TOAST_MESSAGES.shovelDisabled = t.shovelDisabled || '';
+  TOAST_MESSAGES.minedOre = t.minedOre || '';
+  TOAST_MESSAGES.dugMornenionHole = t.dugMornenionHole || '';
+  TOAST_MESSAGES.travelingAbDendriel = t.travelingAbDendriel || '';
+  TOAST_MESSAGES.teleportedAlDee = t.teleportedAlDee || '';
+  TOAST_MESSAGES.teleportAlDeeFailed = t.teleportAlDeeFailed || '';
+  TOAST_MESSAGES.bansheeLastRoomNotFound = t.bansheeLastRoomNotFound || '';
+  TOAST_MESSAGES.travelingBansheeLastRoom = t.travelingBansheeLastRoom || '';
+  TOAST_MESSAGES.bansheeLastRoomBattleHere = t.bansheeLastRoomBattleHere || '';
+  TOAST_MESSAGES.spiderLairNotFound = t.spiderLairNotFound || '';
+  TOAST_MESSAGES.enteringSpiderLair = t.enteringSpiderLair || '';
+  TOAST_MESSAGES.spiderLairBattleHere = t.spiderLairBattleHere || '';
+  TOAST_MESSAGES.putridChamberNotStrongEnough = t.putridChamberNotStrongEnough || '';
+  TOAST_MESSAGES.travelingPutridChamber = t.travelingPutridChamber || '';
+  TOAST_MESSAGES.travelingWithSvenson = t.travelingWithSvenson || '';
+  TOAST_MESSAGES.travelingGhazHideout = t.travelingGhazHideout || '';
+  TOAST_MESSAGES.fishingFoundAxe = t.fishingFoundAxe || '';
+  TOAST_MESSAGES.fishingFoundNothingMagnet = t.fishingFoundNothingMagnet || '';
+  TOAST_MESSAGES.fishingFoundNothing = t.fishingFoundNothing || '';
+  TOAST_MESSAGES.fishingMagnetHint = t.fishingMagnetHint || '';
+  TOAST_MESSAGES.fishingError = t.fishingError || '';
+  TOAST_MESSAGES.desertDigNothing = t.desertDigNothing || '';
+  TOAST_MESSAGES.desertDigSandsEmpty = t.desertDigSandsEmpty || '';
+  TOAST_MESSAGES.desertDigNeedMission = t.desertDigNeedMission || '';
+  TOAST_MESSAGES.missingDestroyFieldRune = t.missingDestroyFieldRune || '';
+  TOAST_MESSAGES.alreadyHaveDestroyFieldRune = t.alreadyHaveDestroyFieldRune || '';
+  TOAST_MESSAGES.crossingTheLineObjectiveComplete = t.crossingTheLineObjectiveComplete || '';
+  TOAST_MESSAGES.ironOreRewardReady = t.ironOreRewardReady || '';
+}
+
+rebuildToastMessagesFromTemplates();
+
+const BATTLE_TOAST_LOG = {};
 
 // NPC chat: 1s before a single-line reply; 2s before each line of a multi-line reply.
 const NPC_CHAT_RESPONSE_DELAY_MS = 1000;
@@ -688,146 +1036,81 @@ const NPC_CHAT_MULTI_LINE_DELAY_MS = 2000;
 // Delay (ms) after the final farewell line before closing an NPC chat modal.
 const NPC_MODAL_CLOSE_DELAY_MS = 1000;
 
-// Mornenion quest messages
-const MORNENION_DEFEATED_MESSAGE = 'The cave entrance is sealed. Mornenion has been defeated.';
+// Hydrated from assets/quests/toasts.json
+let MORNENION_DEFEATED_MESSAGE = '';
 
-const SILVER_TOKEN_CONFIG = {
-  productName: 'Silver Token',
-  icon: 'Silver_Token.gif',
-  description: 'A small silver coin used to greet King Tibianus.',
-  rarity: 4
-};
-
-// Fishing system configuration
-const FISHING_CONFIG = {
-  SPRITE_IDS: ['12706', '622', '4597', '4609', '4598'],
-  ANIMATION_SIZE: 64,
-  ANIMATION_DURATION: 500, // milliseconds
-  MAP_SWITCH_DELAY: 500 // milliseconds
-};
-
-// Digging system configuration
-const MINING_CONFIG = {
-  TARGET_TILE_ID: '82', // Tile 82 on Hedge Maze
-  TARGET_MAP: "Hedge Maze", // Map name where mining is available
-  SPRITE_TRANSFORM: {
-    from: '1822', // Original sprite ID (the one to replace)
-    to: '385'    // Transformed sprite ID
-  },
-  ANIMATION_SIZE: 64,
-  ANIMATION_DURATION: 500 // milliseconds
-};
-
-const DESERT_DIGGING_CONFIG = {
-  TARGET_MAP: 'Darama Oasis',
-  DESERT_SPRITE_ID: '231',
-  SCARAB_COIN_TILE: 46,
-  POOF_EFFECT_URL: 'https://bestiaryarena.com/assets/EFFECT/3.png',
-  POOF_FRAME_COUNT: 7,
-  POOF_FRAME_MS: 60
-};
-
-const LOOT_EFFECT_CONFIG = {
-  filename: 'Loot_Effect.gif',
-  size: 48,
-  durationMs: 1000
-};
+// Product / world shells — filled from assets/quests/{items,rooms}.json
+const SILVER_TOKEN_CONFIG = {};
+const FISHING_CONFIG = {};
+const MINING_CONFIG = {};
+const DESERT_DIGGING_CONFIG = {};
+const LOOT_EFFECT_CONFIG = {};
 
 const SERPENTINE_TOWER_MISSION = { id: 'serpentine_tower' };
 
-const SCARAB_COIN_CONFIG = {
-  productName: 'Scarab Coin',
-  icon: 'Scarab_Coin.gif',
-  description: 'You see a scarab coin.',
-  rarity: 3,
-  maxCount: 1
-};
+const SCARAB_COIN_CONFIG = {};
 
-const TESHA_TILE_INDEX = 157;
+let TESHA_TILE_INDEX = null;
 const TESHA_ARROW_CLASS = 'quests-tesha-arrow';
 const TILE_HIGHLIGHT_CLASS = 'quests-tile-highlight';
 const TILE_HIGHLIGHT_TILE_ATTR = 'data-quests-tile-highlight';
 const QUEST_ACCESS_CURSOR = 'pointer';
 const QUEST_ACCESS_TILE_TITLE = 'Right-click';
 
-const SERPENTINE_TOWER_BASEMENT_ROOM_NAME = 'Serpentine Tower Basement';
-const DESTROY_FIELD_RUNE_ITEM_NAME = 'Destroy Field Rune';
-const DESTROY_FIELD_RUNE_CONFIG = {
-  productName: DESTROY_FIELD_RUNE_ITEM_NAME,
-  icon: 'Destroy_Field_Rune.gif',
-  description: 'You see a destroy field rune ("adito grav").',
-  rarity: 3,
-  maxCount: 1
-};
-const SCORPION_SCEPTRE_CONFIG = {
-  productName: 'Compass',
-  icon: 'The_Time_Compass.gif',
-  description: 'It shows the cardinal directions and also many other symbols that you cannot decipher.',
-  rarity: 5,
-  maxCount: 1
-};
-const SERPENTINE_FIELD_SPRITE_ID = 2122;
-const SERPENTINE_FIELD_SPRITE_SELECTOR = `.sprite.item.relative.id-${SERPENTINE_FIELD_SPRITE_ID}`;
-const SERPENTINE_RUNE_PICKUP_SPRITE_IDS = [6011, 2886];
-const SERPENTINE_LEVER_TILE = 64;
-const SERPENTINE_LEVER_SPRITE = { from: '2772', to: '2773' };
-const PUTRID_CHAMBER_ROOM_NAME = 'Putrid Chamber';
-const PUTRID_CHAMBER_BACKGROUND_SCENE_ID = 'background-scene';
-const PUTRID_CHAMBER_FLOOR_BELOW_SPRITE_IDS = [4680, 4683, 4684, 4686, 4687, 4688, 4689, 4690, 4738, 4739, 4740, 4743, 4744];
-const PUTRID_CHAMBER_FLOOR_BELOW_REPLACEMENT_SPRITE_ID = 838;
-const PUTRID_CHAMBER_FLOOR_BELOW_4394_REPLACEMENT_SPRITE_ID = 410;
-const PUTRID_CHAMBER_SPRITE_2127_REPLACEMENT_ID = 2137;
-const PUTRID_CHAMBER_SCENE_SPRITE_REPLACEMENTS = {
-  rootId: PUTRID_CHAMBER_BACKGROUND_SCENE_ID,
-  rules: [
-    { sourceIds: PUTRID_CHAMBER_FLOOR_BELOW_SPRITE_IDS, replacementId: PUTRID_CHAMBER_FLOOR_BELOW_REPLACEMENT_SPRITE_ID, scope: 'background' },
-    { sourceIdRange: { from: 4394, to: 4410 }, replacementId: PUTRID_CHAMBER_FLOOR_BELOW_4394_REPLACEMENT_SPRITE_ID, scope: 'tile' },
-    { sourceIds: [2127], replacementId: PUTRID_CHAMBER_SPRITE_2127_REPLACEMENT_ID, makeRelative: true, scope: 'tile' }
-  ]
-};
-const SERPENTINE_LEVER_WARP_NAV_DELAY_MS = 200;
-const PUTRID_CHAMBER_VILLAIN_SETUP_ATTEMPT_DELAYS_MS = [0, 100, 250];
-const PUTRID_CHAMBER_SCENE_SPRITE_ATTEMPT_DELAYS_MS = [0, 100, 250, 500, 800, 1200];
+let SERPENTINE_TOWER_BASEMENT_ROOM_NAME = '';
+let DESTROY_FIELD_RUNE_ITEM_NAME = '';
+const DESTROY_FIELD_RUNE_CONFIG = {};
+const SCORPION_SCEPTRE_CONFIG = {};
+let SERPENTINE_FIELD_SPRITE_ID = null;
+let SERPENTINE_FIELD_SPRITE_SELECTOR = '';
+const SERPENTINE_RUNE_PICKUP_SPRITE_IDS = [];
+let SERPENTINE_LEVER_TILE = null;
+const SERPENTINE_LEVER_SPRITE = {};
+let PUTRID_CHAMBER_ROOM_NAME = '';
+let PUTRID_CHAMBER_BACKGROUND_SCENE_ID = '';
+const PUTRID_CHAMBER_FLOOR_BELOW_SPRITE_IDS = [];
+let PUTRID_CHAMBER_FLOOR_BELOW_REPLACEMENT_SPRITE_ID = null;
+let PUTRID_CHAMBER_FLOOR_BELOW_4394_REPLACEMENT_SPRITE_ID = null;
+let PUTRID_CHAMBER_SPRITE_2127_REPLACEMENT_ID = null;
+const PUTRID_CHAMBER_SCENE_SPRITE_REPLACEMENTS = { rootId: '', rules: [] };
+let SERPENTINE_LEVER_WARP_NAV_DELAY_MS = 0;
+const PUTRID_CHAMBER_VILLAIN_SETUP_ATTEMPT_DELAYS_MS = [];
+const PUTRID_CHAMBER_SCENE_SPRITE_ATTEMPT_DELAYS_MS = [];
 
-const HONEYFLOWER_TILE_INDEX = 84;
-const HONEYFLOWER_PICKUP_SPRITE_ID = 2984;
+let HONEYFLOWER_TILE_INDEX = null;
+let HONEYFLOWER_PICKUP_SPRITE_ID = null;
 const HONEYFLOWER_TILE_HINT_ID = 'quests-honeyflower-tile-hint';
 const CROSSING_THE_LINE_TILE_HINT_ID = 'quests-crossing-the-line-tile-hint';
-const QUEST_TILE_SUCCESS_EFFECT_URL = 'https://bestiaryarena.com/assets/EFFECT/32.png';
+let QUEST_TILE_SUCCESS_EFFECT_URL = '';
 const QUEST_TILE_SUCCESS_EFFECT_CLASS = 'quests-tile-success-effect';
-const QUEST_TILE_SUCCESS_FRAME_MS = 80;
-const CROSSING_THE_LINE_ORC_SUCCESS_EFFECT_URL = QUEST_TILE_SUCCESS_EFFECT_URL;
+let QUEST_TILE_SUCCESS_FRAME_MS = 0;
+let CROSSING_THE_LINE_ORC_SUCCESS_EFFECT_URL = '';
 const CROSSING_THE_LINE_ORC_SUCCESS_EFFECT_CLASS = QUEST_TILE_SUCCESS_EFFECT_CLASS;
-const CROSSING_THE_LINE_ORC_SUCCESS_FRAME_MS = QUEST_TILE_SUCCESS_FRAME_MS;
+let CROSSING_THE_LINE_ORC_SUCCESS_FRAME_MS = 0;
 const CROSSING_THE_LINE_OK_BORDER_CLASS = 'quests-crossing-tile-ok-border';
-const CROSSING_THE_LINE_OK_BORDER_COLOR = '#98C379';
+let CROSSING_THE_LINE_OK_BORDER_COLOR = '';
 const COPPER_KEY_CORYM_SUCCESS_EFFECT_CLASS = QUEST_TILE_SUCCESS_EFFECT_CLASS;
 const GAME_FRAME_BORDER_IMAGE = 'url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 4 stretch';
 const GAME_FRAME_BACKGROUND = 'url("https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png")';
-const HONEYFLOWER_TOWER_ROOM_NAME = 'Honeyflower Tower';
-const APPRENTICE_SHENG_ROOM_NAME = 'Minotaur Mage Room';
-const APPRENTICE_SHENG_TILE_INDEX = 43;
-const APPRENTICE_SHENG_BATTLE_TILE_INDEX = 50;
-const APPRENTICE_SHENG_MINOTAUR_TILES = [35, 81, 94, 113];
-const APPRENTICE_SHENG_ALLY_TILES = [34, 49];
-const APPRENTICE_SHENG_PLAYER_TILES = Array.from({ length: 34 }, (_, i) => 95 + i); // 95-128
-const APPRENTICE_SHENG_VILLAIN_GAME_ID_FALLBACK = 23;
+let HONEYFLOWER_TOWER_ROOM_NAME = '';
+let APPRENTICE_SHENG_ROOM_NAME = '';
+let APPRENTICE_SHENG_TILE_INDEX = null;
+let APPRENTICE_SHENG_BATTLE_TILE_INDEX = null;
+const APPRENTICE_SHENG_MINOTAUR_TILES = [];
+const APPRENTICE_SHENG_ALLY_TILES = [];
+const APPRENTICE_SHENG_PLAYER_TILES = [];
+let APPRENTICE_SHENG_VILLAIN_GAME_ID_FALLBACK = null;
 const APPRENTICE_SHENG_OVERLAY_CLASS = 'quests-rookstayer-overlay';
-const APPRENTICE_SHENG_FIGHT_ICON_URL = 'https://bestiaryarena.com/assets/icons/fight.png';
-const ROOKSTAYER_OUTFIT_SPRITE_ID = '500002';
+let APPRENTICE_SHENG_FIGHT_ICON_URL = '';
+let ROOKSTAYER_OUTFIT_SPRITE_ID = '';
 const BOARD_NPC_ROOKSTAYER_ID = 'rookstayer';
 const BOARD_NPC_NAME_TAG_DATA_ATTR = 'data-quests-board-npc-id';
-const HONEYFLOWER_CONFIG = {
-  productName: 'Honeyflower',
-  icon: 'Honey_Flower.gif',
-  description: 'A fragrant honeyflower plucked fresh from the tower.',
-  rarity: 2
-};
+const HONEYFLOWER_CONFIG = {};
 
 const KING_HONEYFLOWER_MISSION = { id: 'king_honeyflower' };
 
-const CITY_BOARDGAMES_ROOM_NAME = 'City Boardgames';
-const CROSSING_THE_LINE_TILES = [18, 25, 123, 130];
+let CITY_BOARDGAMES_ROOM_NAME = '';
+const CROSSING_THE_LINE_TILES = [];
 
 const KING_CROSSING_THE_LINE_MISSION = { id: 'king_crossing_the_line' };
 
@@ -876,21 +1159,8 @@ registerMissionForDialogue(CHRISTMAS_MIRACLE_MISSION);
 registerMissionForDialogue(SVENSON_LOVE_STORY_MISSION);
 registerMissionForDialogue(WEAKENED_ARCHDEMON_MISSION);
 
-const MINOTAUR_TROPHY_CONFIG = {
-  productName: 'Wooden Plank',
-  icon: 'Wooden_Plank.gif',
-  description: 'A sturdy wooden plank from the battle wreckage.',
-  rarity: 5,
-  maxCount: 1
-};
-
-const ORB_CONFIG = {
-  productName: 'Orb',
-  icon: 'Orb.gif',
-  description: 'A mysterious glowing orb pulsing with ancient power.',
-  rarity: 5,
-  maxCount: 1
-};
+const MINOTAUR_TROPHY_CONFIG = {};
+const ORB_CONFIG = {};
 
 function getMissionCompletionSummary(mission) {
   if (!mission) return '';
@@ -927,14 +1197,11 @@ function getMissionCompletionRewardText(mission) {
   }
 }
 
-// Room names that count as "the seven seals of Ghostlands". Index i = i-th seal (0 = First Seal, 6 = Seventh Seal).
-const SEVEN_SEALS_GHOSTLANDS_ROOM_NAMES = [
-  'Seal I', 'Seal II', 'Seal III', 'Seal IV', 'Seal V', 'Seal VI', 'Seal VII'
-];
-const SEVEN_SEALS_COUNT = SEVEN_SEALS_GHOSTLANDS_ROOM_NAMES.length;
+// Seal room/tile data — filled from assets/quests/rooms.json
+const SEVEN_SEALS_GHOSTLANDS_ROOM_NAMES = [];
+// Structural default: seven seals until rooms.json hydrates (keeps progress arrays sized at init).
+let SEVEN_SEALS_COUNT = 7;
 
-// Transcript text for Costello's diary: shown per seal (incomplete = hint, complete = sealed message).
-// Seal indices for completing seals separately (use with setSealCompleted(sealIndex, true)).
 const FIRST_SEAL = 0;
 const SECOND_SEAL = 1;
 const THIRD_SEAL = 2;
@@ -946,117 +1213,55 @@ function getDefaultSevenSealsCompleted() {
   return Array(SEVEN_SEALS_COUNT).fill(false);
 }
 
-// First Seal: completed on Ghostlands Surface by placing poison creatures on ≥3 of the configured tiles and winning the battle.
-const FIRST_SEAL_GHOSTLANDS_SURFACE_ROOM = 'Ghostlands Surface';
+let FIRST_SEAL_GHOSTLANDS_SURFACE_ROOM = '';
+let SECOND_SEAL_ROOM = '';
+let SECOND_SEAL_TILE_34 = null;
+let SECOND_SEAL_LEVER_ANIMATION_MS = 0;
+let THIRD_SEAL_ROOM = '';
+let THIRD_SEAL_TILE_52 = null;
+let THIRD_SEAL_SPELL_ANIMATION_MS = 0;
+let FOURTH_SEAL_ROOM = '';
+let FOURTH_SEAL_MAX_TICKS = 0;
+let FIFTH_SEAL_ROOM = '';
+let FIFTH_SEAL_TILE_41 = null;
+const FIFTH_SEAL_LEVER_SPRITE = {};
+const FIRST_SEAL_POISON_TILES = [];
+let FIRST_SEAL_MIN_POISON_TILES = 0;
+let FIRST_SEAL_CELEBRATION_DURATION_MS = 0;
+let SIXTH_SEAL_ROOM = '';
+const SIXTH_SEAL_LEVER_TILES = [];
+const SIXTH_SEAL_LEVER_ORDER = [];
+const SIXTH_SEAL_LEVER_SPRITE = {};
+let SEVENTH_SEAL_TILE_126 = null;
+let SEVENTH_SEAL_TILE_127 = null;
+const SEVENTH_SEAL_TILE_126_SPRITE = {};
+const SEVENTH_SEAL_TILE_127_SPRITE = {};
+let BANSHEE_LAST_ROOM_NAME = '';
+let BANSHEE_LAST_ROOM_USE_DEMONRAGE_IF_MISSING = false;
 
-// Second Seal: completed in Ghostlands Library by right-clicking on tile 34 (lever in the bookshelves).
-const SECOND_SEAL_ROOM = 'Ghostlands Library';
-const SECOND_SEAL_TILE_34 = 34;
-const SECOND_SEAL_LEVER_ANIMATION_MS = 1500;
+let SECLUDED_HERB_ROOM_NAME = '';
+let SPIDER_LAIR_ROOM_NAME = '';
+let SPIDER_LAIR_USE_SECLUDED_HERB_IF_MISSING = false;
+let SECLUDED_HERB_TILE_77 = null;
+let SPIDER_LAIR_TILE_86 = null;
+let SPIDER_LAIR_TILE_87 = null;
+let SPIDER_LAIR_TILE_86_SPRITE_ID = '';
+let SPIDER_LAIR_TILE_87_SPRITE_ID = '';
+let SPIDER_LAIR_SPRITE_TO_REMOVE_ID = '';
+const SPIDER_LAIR_TILES_ADD_SPRITE_2127 = [];
+let SPIDER_LAIR_ADD_SPRITE_2127_ID = '';
+const SPIDER_LAIR_TILES_ADD_SPRITE_4312 = [];
+let SPIDER_LAIR_ADD_SPRITE_4312_ID = '';
 
-// Third Seal: completed in Ghostlands Ritual Site by right-clicking on tile 52 (rune) — spell animation then seal completed.
-const THIRD_SEAL_ROOM = 'Ghostlands Ritual Site';
-const THIRD_SEAL_TILE_52 = 52;
-const THIRD_SEAL_SPELL_ANIMATION_MS = 2000;
-
-// Fourth Seal: completed on Demon Skeleton Hell by winning the battle with tick count under 150.
-const FOURTH_SEAL_ROOM = 'Demon Skeleton Hell';
-const FOURTH_SEAL_MAX_TICKS = 150;
-
-// Fifth Seal: completed on Zathroth's Throne by right-clicking on tile 41 (lever); sprite 2772 → 2773.
-const FIFTH_SEAL_ROOM = "Zathroth's Throne";
-const FIFTH_SEAL_TILE_41 = 41;
-const FIFTH_SEAL_LEVER_SPRITE = { from: '2772', to: '2773' };
-
-const FIRST_SEAL_POISON_TILES = [21, 49, 56, 68, 77, 124];
-const FIRST_SEAL_MIN_POISON_TILES = 3;
-const FIRST_SEAL_CELEBRATION_DURATION_MS = 5000;
-
-// Sixth Seal: completed on Demonrage Seal by right-clicking levers in order 70, 100, 85, 55, 115.
-const SIXTH_SEAL_ROOM = 'Demonrage Seal';
-const SIXTH_SEAL_LEVER_TILES = [55, 70, 85, 100, 115];
-const SIXTH_SEAL_LEVER_ORDER = [70, 100, 85, 55, 115];
-const SIXTH_SEAL_LEVER_SPRITE = { from: '2773', to: '2772' }; // unpulled -> pulled
-
-// Seventh seal: when sixth is completed and seventh is not, tile 126 (and 127) sprite 1959 is replaced with 1949 (teleport)
-const SEVENTH_SEAL_TILE_126 = 126;
-const SEVENTH_SEAL_TILE_127 = 127;
-const SEVENTH_SEAL_TILE_126_SPRITE = { from: '1959', to: '1949' };
-const SEVENTH_SEAL_TILE_127_SPRITE = { from: '1959', to: '1949' }; // same sprite swap; when seventh completed, tile 127 will not transform
-const BANSHEE_LAST_ROOM_NAME = "Banshee's Last Room";
-// If Banshee's Last Room is not in ROOM_NAME, we run the battle on Demonrage Seal (same map as portal).
-const BANSHEE_LAST_ROOM_USE_DEMONRAGE_IF_MISSING = true;
-
-// Mother of All Spiders: tile 77 in "A Secluded Herb" (Venore) leads to "Spider Lair" custom battle.
-const SECLUDED_HERB_ROOM_NAME = 'A Secluded Herb';
-const SPIDER_LAIR_ROOM_NAME = 'Spider Lair';
-const SPIDER_LAIR_USE_SECLUDED_HERB_IF_MISSING = true;
-const SECLUDED_HERB_TILE_77 = 77;
-// Spider Lair: replace tile 85/86 sprites with id-1951 and id-1950 for visual consistency. Remove sprite id-233 from tile 85.
-const SPIDER_LAIR_TILE_86 = 85;
-const SPIDER_LAIR_TILE_87 = 86;
-const SPIDER_LAIR_TILE_86_SPRITE_ID = '1951';
-const SPIDER_LAIR_TILE_87_SPRITE_ID = '1950';
-const SPIDER_LAIR_SPRITE_TO_REMOVE_ID = '233';
-const SPIDER_LAIR_TILES_ADD_SPRITE_2127 = [82, 52, 98, 95, 78, 111]; // append sprite 2127 to these tiles (keep existing content)
-const SPIDER_LAIR_ADD_SPRITE_2127_ID = '2127';
-const SPIDER_LAIR_TILES_ADD_SPRITE_4312 = [37, 32, 96, 84]; // append sprite 4312 to these tiles (keep existing content)
-const SPIDER_LAIR_ADD_SPRITE_4312_ID = '4312';
-
-const KING_ARENA_RANKS = [
-  'Scout of the Arena',      // 1–2 missions
-  'Sentinel of the Arena',   // 3–4 missions
-  'Steward of the Arena',    // 5–6 missions
-  'Warden of the Arena',     // 7–8 missions
-  'Squire of the Arena',     // 9–10 missions
-  'Warrior of the Arena',    // 11–12 missions
-  'Keeper of the Arena',     // 13–14 missions
-  'Guardian of the Arena',   // 15–16 missions
-  'Sage of the Arena',       // 17–18 missions
-  'Savant of the Arena',     // 19–20 missions
-  'Enlightened of the Arena' // 21+ missions
-];
+const KING_ARENA_RANKS = [];
 
 // Firebase configuration
 const FIREBASE_CONFIG = {
   firebaseUrl: 'https://vip-list-messages-default-rtdb.europe-west1.firebasedatabase.app'
 };
 
-// Quest item mentions in NPC chat — longest keyword wins. Involved NPCs get specific lines;
-// others get a unique uninvolved line per NPC (see NPC_QUEST_ITEM_UNINVOLVED_TEMPLATES).
-const QUEST_ITEM_CHAT_ENTRIES = [
-  { id: 'letter_from_al_dee', productName: 'Letter from Al Dee', keywords: ['letter from al dee'] },
-  { id: 'stamped_letter', productName: 'Stamped Letter', keywords: ['stamped letter'] },
-  { id: 'red_dragon_leather', productName: 'Red Dragon Leather', keywords: ['red dragon leather', 'dragon leather'] },
-  { id: 'red_dragon_scale', productName: 'Red Dragon Scale', keywords: ['red dragon scale', 'dragon scale'] },
-  { id: 'elvenhair_rope', productName: 'Elvenhair Rope', keywords: ['elvenhair rope', 'elven hair rope'] },
-  { id: 'destroy_field_rune', productName: DESTROY_FIELD_RUNE_ITEM_NAME, keywords: ['destroy field rune', 'adito grav'] },
-  { id: 'compass', productName: 'Compass', keywords: ['compass'] },
-  { id: 'scarab_coin', productName: 'Scarab Coin', keywords: ['scarab coin'] },
-  { id: 'map_to_mines', productName: 'Map to the Mines', keywords: ['map to the mines', 'map to mines'] },
-  { id: 'obsidian_knife', productName: 'Obsidian Knife', keywords: ['obsidian knife'] },
-  { id: 'light_shovel', productName: 'Light Shovel', keywords: ['light shovel'] },
-  { id: 'holy_tible', productName: 'The Holy Tible', keywords: ['holy tible', 'the holy tible'] },
-  { id: 'costello_diary', productName: 'Costello\'s diary', keywords: ['costello\'s diary', 'costellos diary', 'castello\'s diary', 'castellos diary'] },
-  { id: 'blessed_ankh', productName: 'Blessed Ankh', keywords: ['blessed ankh'] },
-  { id: 'spider_silk', productName: 'Spider Silk', keywords: ['spider silk'] },
-  { id: 'spool_of_yarn', productName: 'Spool of Yarn', keywords: ['spool of yarn'] },
-  { id: 'bunny_slippers', productName: 'Bunny Slippers', keywords: ['bunny slippers', 'bunnyslippers'] },
-  { id: 'wooden_plank', productName: 'Wooden Plank', keywords: ['wooden plank', 'plank'] },
-  { id: 'dragon_claw', productName: 'Dragon Claw', keywords: ['dragon claw'] },
-  { id: 'fishing_rod', productName: 'Fishing Rod', keywords: ['fishing rod'] },
-  { id: 'silver_token', productName: 'Silver Token', keywords: ['silver token'] },
-  { id: 'copper_key', productName: 'Copper Key', keywords: ['copper key'] },
-  { id: 'honeyflower', productName: 'Honeyflower', keywords: ['honeyflower', 'honey flower'] },
-  { id: 'iron_ore', productName: 'Iron Ore', keywords: ['iron ore'] },
-  { id: 'small_axe', productName: 'Small Axe', keywords: ['small axe'] },
-  { id: 'magnet', productName: 'Magnet', keywords: ['magnet'] },
-  { id: 'wishlist', productName: 'Wishlist', keywords: ['wishlist', 'wish list'] },
-  { id: 'christmas_present', productName: 'Present', keywords: ['christmas present', 'wrapped present'] },
-  { id: 'present', productName: 'Present', keywords: ['present'] },
-  { id: 'yarn', productName: 'Spool of Yarn', keywords: ['yarn'] },
-  { id: 'orb', productName: 'Orb', keywords: ['orb'] }
-];
+// Quest item chat keywords — filled from assets/quests/items.json
+const QUEST_ITEM_CHAT_ENTRIES = [];
 
 function matchQuestItemInChatMessage(message) {
   const lower = String(message ?? '').toLowerCase();
@@ -1221,29 +1426,34 @@ function getWydaResponse(message, playerName = 'Player') {
   });
 }
 
-// Seal phrase patterns (longer first so "first seal" matches before "seal"): [ [ pattern, sealIndex ], ... ]
+// Seal phrase patterns. Matching uses longest phrase first so "seal vii" does not hit "seal v".
 const COSTELLO_SEAL_PATTERNS = [
-  ['first seal', 0], ['seal 1', 0], ['seal i', 0],
-  ['second seal', 1], ['seal 2', 1], ['seal ii', 1],
-  ['third seal', 2], ['seal 3', 2], ['seal iii', 2],
-  ['fourth seal', 3], ['seal 4', 3], ['seal iv', 3],
-  ['fifth seal', 4], ['seal 5', 4], ['seal v', 4],
-  ['sixth seal', 5], ['seal 6', 5], ['seal vi', 5],
-  ['seventh seal', 6], ['seal 7', 6], ['seal vii', 6]
-];
+  ['seventh seal', 6], ['seal vii', 6], ['seal 7', 6],
+  ['sixth seal', 5], ['seal vi', 5], ['seal 6', 5],
+  ['fifth seal', 4], ['seal v', 4], ['seal 5', 4],
+  ['fourth seal', 3], ['seal iv', 3], ['seal 4', 3],
+  ['third seal', 2], ['seal iii', 2], ['seal 3', 2],
+  ['second seal', 1], ['seal ii', 1], ['seal 2', 1],
+  ['first seal', 0], ['seal i', 0], ['seal 1', 0]
+].slice().sort((a, b) => b[0].length - a[0].length);
 
 function getCostelloResponse(message, playerName = 'Player') {
   const lowerMessage = message.toLowerCase().trim();
 
-  // Seal-related questions (check before generic keywords so "first seal" matches)
+  // Prefer the longest matching seal phrase ("Seal VII" must not match "seal v").
+  let bestMatch = null;
   for (const [phrase, sealIndex] of COSTELLO_SEAL_PATTERNS) {
     const p = phrase.trim();
-    if (lowerMessage.includes(p) || lowerMessage === p) {
-      if (typeof getSealCompleted === 'function' && SEAL_TRANSCRIPTS && SEAL_TRANSCRIPTS[sealIndex]) {
-        const transcript = SEAL_TRANSCRIPTS[sealIndex];
-        return getSealCompleted(sealIndex) ? transcript.complete : transcript.incomplete;
+    if (!p) continue;
+    if (lowerMessage === p || lowerMessage.includes(p)) {
+      if (!bestMatch || p.length > bestMatch.phrase.length) {
+        bestMatch = { phrase: p, sealIndex };
       }
     }
+  }
+  if (bestMatch && typeof getSealCompleted === 'function' && SEAL_TRANSCRIPTS && SEAL_TRANSCRIPTS[bestMatch.sealIndex]) {
+    const transcript = SEAL_TRANSCRIPTS[bestMatch.sealIndex];
+    return getSealCompleted(bestMatch.sealIndex) ? transcript.complete : transcript.incomplete;
   }
   if (lowerMessage.includes('seals') || lowerMessage === 'seal') {
     return COSTELLO_SEAL_GUIDANCE_FALLBACK || "The seven seals of Ghostlands must be completed one by one.";
@@ -1271,147 +1481,82 @@ function isNpcFarewellMessage(message) {
   return /\bbye\b/.test(lower);
 }
 
-// =======================
-// Quest Items Configuration
-// Maps creature gameId to their quest item drops
-// =======================
-
-const QUEST_ITEMS_CONFIG = {
-  // Dragon Lord (gameId: 26) - Normal creature
-  26: {
-    creatureName: 'Dragon Lord',
-    products: [
-      {
-        name: 'Red Dragon Leather',
-        icon: 'Red_Dragon_Leather.PNG',
-        dropChance: 0.25, // 25% per 3 stamina spent (scaled, capped at 100%)
-        description: 'Obtained by defeating Dragon Lord',
-        rarity: 4
-      },
-      {
-        name: 'Red Dragon Scale',
-        icon: 'Red_Dragon_Scale.PNG',
-        dropChance: 0.25, // 25% per 3 stamina spent (scaled, capped at 100%)
-        description: 'Obtained by defeating Dragon Lord',
-        rarity: 4
-      }
-    ]
-  }
-  // Add more creatures here in the future:
-  // [gameId]: {
-  //   creatureName: 'Creature Name',
-  //   products: [
-  //     { name: 'Product Name', icon: 'icon.gif', dropChance: 0.10, description: '...' }
-  //   ]
-  // }
-};
-
-// Rookgaard region drop configuration - applies to ANY creature defeated in Rookgaard.
-// Letter and Iron Ore share one stamina-scaled roll; letter is awarded first when the roll wins.
-const ROOKGAARD_GLOBAL_POOL_DROP_CHANCE = 0.01; // 1% per 3 stamina spent (scaled, capped at 100%)
-const ROOKGAARD_GLOBAL_DROPS = [
-  {
-    name: 'Letter from Al Dee',
-    icon: 'Scroll.gif',
-    description: 'Feeling lost?\nWould you give all your gold for a rope now?\nAl Dee\'s shop - come to where the ropes are!',
-    rarity: 1
-  },
-  {
-    name: 'Iron Ore',
-    icon: 'Iron_Ore.gif',
-    description: 'A chunk of iron ore, useful for crafting and forging.',
-    rarity: 2
-  }
-];
+function messageContainsNpcSwear(message, swearWords = KING_TIBIANUS_SWEAR_WORDS) {
+  const lower = String(message ?? '').toLowerCase();
+  if (!lower || !Array.isArray(swearWords) || swearWords.length === 0) return false;
+  return swearWords.some((word) => {
+    const w = String(word ?? '').toLowerCase().trim();
+    if (!w) return false;
+    if (w.includes(' ')) return lower.includes(w);
+    const escaped = w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`\\b${escaped}\\b`, 'i').test(lower);
+  });
+}
 
 // =======================
-// Copper Key Configuration
+// Quest Items Configuration (assets/quests/items.json)
 // =======================
 
-const COPPER_KEY_CONFIG = {
-  productName: 'Copper Key',
-  icon: 'Copper_Key.PNG',
-  targetRoomName: 'Mine Hub',
-  targetMonsterName: 'Corym Charlatan',
-  targetTileIndex: 69,
-  description: 'A very ornate key, made of solid copper.',
-  rarity: 2
-};
+const QUEST_ITEMS_CONFIG = {};
+let ROOKGAARD_GLOBAL_POOL_DROP_CHANCE = 0;
+const ROOKGAARD_GLOBAL_DROPS = [];
 
-const MAP_COLOUR_CONFIG = {
-  productName: 'Map to the Mines',
-  icon: 'Map_(Colour).PNG',
-  description: 'The map shows the way to the mines in Kazoordoon.',
-  rarity: 1
-};
+const COPPER_KEY_CONFIG = {};
+const MAP_COLOUR_CONFIG = {};
+const WISHLIST_CONFIG = {};
+const PRESENT_CONFIG = {};
+const BUNNY_SLIPPERS_CONFIG = {};
 
-const WISHLIST_CONFIG = {
-  productName: 'Wishlist',
-  icon: 'Wishlist.gif',
-  dropChance: 0.01, // 1% per 3 stamina spent (scaled, capped at 100%)
-  description: 'A crumpled wishlist. Someone in Folda might be interested.',
-  rarity: 2
-};
-
-const PRESENT_CONFIG = {
-  productName: 'Present',
-  spriteId: 6505,
-  iconUrl: 'https://bestiaryarena.com/assets/ITEM/6505.png',
-  description: 'A carefully wrapped Christmas present. Open it to see what is inside.',
-  rarity: 3
-};
-
-const BUNNY_SLIPPERS_CONFIG = {
-  productName: 'Bunny Slippers',
-  icon: 'Bunnyslippers.gif',
-  description: 'Soft pink bunny slippers. A gift from Santa Claus.',
-  rarity: 3
-};
-
-const SANTA_CLAUS_ROOM_NAME = 'Santa Claus Home';
-const SANTA_CLAUS_TILE_INDEX = 34;
-const BOARD_NPC_SANTA_ID = 'santa-claus';
+let SANTA_CLAUS_ROOM_NAME = '';
+let SANTA_CLAUS_TILE_INDEX = null;
+let BOARD_NPC_SANTA_ID = '';
 const SANTA_CLAUS_OVERLAY_CLASS = 'quests-santa-claus-overlay';
-const SANTA_OUTFIT_SPRITE_ID = '69'; // Dwarf outfit shell; spritesheet swapped to Santa_ClausIdle.png
-const SANTA_DIALOGUE_ICON_URL = 'https://bestiaryarena.com/assets/icons/fight.png';
-const BOARD_NPC_AL_DEE_RAT_PLAGUE_ID = 'al-dee-rat-plague';
-const RAT_PLAGUE_ROOM_NAME = 'Rat Plague';
-const RAT_PLAGUE_AL_DEE_TILE_INDEX = 30;
+let SANTA_OUTFIT_SPRITE_ID = '';
+let SANTA_DIALOGUE_ICON_URL = '';
+let BOARD_NPC_AL_DEE_RAT_PLAGUE_ID = '';
+let RAT_PLAGUE_ROOM_NAME = '';
+let RAT_PLAGUE_ROOM_ID = '';
+let RAT_PLAGUE_AL_DEE_TILE_INDEX = null;
 const RAT_PLAGUE_AL_DEE_OVERLAY_CLASS = 'quests-rat-plague-al-dee-overlay';
-const RAT_PLAGUE_AL_DEE_DIALOGUE_ICON_URL = 'https://bestiaryarena.com/assets/icons/fight.png';
-const BOARD_NPC_SVENSON_ID = 'svenson';
-const SVENSON_ROOM_NAME = 'Folda Boat';
-const SVENSON_TILE_INDEX = 109;
-const SVENSON_AWASH_ROOM_NAME = 'Awash Steamship';
-const SVENSON_AWASH_TILE_INDEX = 33;
-const SVENSON_UNDERGROUND_ROOM_NAME = 'Underground Lake';
-const SVENSON_UNDERGROUND_TILE_INDEX = 69;
-const SVENSON_WHITE_WAVE_ROOM_NAME = 'White Wave Cellar';
-const SVENSON_WHITE_WAVE_TILE_INDEX = 84;
+let RAT_PLAGUE_AL_DEE_DIALOGUE_ICON_URL = '';
+let BOARD_NPC_SVENSON_ID = '';
+let SVENSON_ROOM_NAME = '';
+let SVENSON_TILE_INDEX = null;
+let SVENSON_AWASH_ROOM_NAME = '';
+let SVENSON_AWASH_TILE_INDEX = null;
+let SVENSON_UNDERGROUND_ROOM_NAME = '';
+let SVENSON_UNDERGROUND_TILE_INDEX = null;
+let SVENSON_WHITE_WAVE_ROOM_NAME = '';
+let SVENSON_WHITE_WAVE_TILE_INDEX = null;
 const SVENSON_OVERLAY_CLASS = 'quests-svenson-overlay';
-const SVENSON_OUTFIT_SPRITE_ID = ROOKSTAYER_OUTFIT_SPRITE_ID;
-const SVENSON_DIALOGUE_ICON_URL = 'https://bestiaryarena.com/assets/icons/fight.png';
-const BOARD_NPC_DANE_ID = 'dane';
-const DANE_WHITE_WAVE_TILE_INDEX = 80;
+let SVENSON_OUTFIT_SPRITE_ID = '';
+let SVENSON_DIALOGUE_ICON_URL = '';
+let BOARD_NPC_DANE_ID = '';
+let DANE_WHITE_WAVE_TILE_INDEX = null;
 const DANE_OVERLAY_CLASS = 'quests-dane-overlay';
-const DANE_OUTFIT_SPRITE_ID = ROOKSTAYER_OUTFIT_SPRITE_ID;
-const DANE_DIALOGUE_ICON_URL = 'https://bestiaryarena.com/assets/icons/fight.png';
-const GHAZBARAN_HIDEOUT_ROOM_NAME = "Ruprecht's Hut";
-const GHAZBARAN_HIDEOUT_DISPLAY_NAME = "Ghazbaran's Hideout";
-const GHAZBARAN_TILE_INDEX = 62;
-const GHAZBARAN_NICKNAME = 'Weakened Ghazbaran';
-const GHAZBARAN_AURA_NICKNAME = "Ghazbaran's Aura";
+let DANE_OUTFIT_SPRITE_ID = '';
+let DANE_DIALOGUE_ICON_URL = '';
+let GHAZBARAN_HIDEOUT_ROOM_NAME = '';
+let GHAZBARAN_HIDEOUT_DISPLAY_NAME = '';
+let GHAZBARAN_TILE_INDEX = null;
+let GHAZBARAN_NICKNAME = '';
+let GHAZBARAN_AURA_NICKNAME = '';
 const GHAZ_OUTFIT_OVERLAY_CLASS = 'quests-ghaz-outfit-overlay';
 const GHAZ_OUTFIT_STYLE_ID = 'quests-ghaz-outfit-sheet-style';
 
 const KING_TIBIANUS_TAB_ID = 'quests-mod-king-tibianus-tab';
 const ARENA_LEADERBOARD_TAB_ID = 'quests-mod-arena-leaderboard-tab';
+const QUEST_ADMIN_DEV_TAB_ID = 'quests-mod-admin-dev-tab';
+const QUEST_ADMIN_DEV_OPEN_BTN_ID = 'quests-admin-dev-open-btn';
 const ARENA_RANKINGS_OPEN_BTN_ID = 'arena-rankings-open-btn';
 const ARENA_LEADERBOARD_MODAL_LIST_ID = 'arena-leaderboard-modal-list';
 const ARENA_LEADERBOARD_TOP = 10;
 const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
 const ACTIVE_MISSION_TAB_ID_PREFIX = 'quests-mod-active-mission-tab-';
 const ACTIVE_MISSION_TAB_ATTR = 'data-quests-active-mission-id';
+const QUEST_ADMIN_DEV_MODAL_WIDTH = 640;
+const QUEST_ADMIN_DEV_MODAL_HEIGHT = 720;
+const QUEST_ADMIN_DEV_MODAL_MIN_HEIGHT = 420;
 
 // Story order for Quest Log / Mission Log lists. Keep in sync with modal mission list.
 const QUEST_LOG_MISSIONS = [
@@ -1434,30 +1579,9 @@ const QUEST_LOG_MISSIONS = [
   WEAKENED_ARCHDEMON_MISSION
 ];
 
-// Quest Log mission card icons — prefer the key quest item or objective over NPC portraits.
-const MISSION_QUEST_LOG_ICON_MAP = {
-  [KING_HONEYFLOWER_MISSION.id]: HONEYFLOWER_CONFIG.icon,
-  [KING_COPPER_KEY_MISSION.id]: COPPER_KEY_CONFIG.icon,
-  [KING_RED_DRAGON_MISSION.id]: 'Red_Dragon_Leather.PNG',
-  [KING_LETTER_MISSION.id]: 'Scroll.gif',
-  [AL_DEE_FISHING_MISSION.id]: 'Small_Axe.gif',
-  [AL_DEE_GOLDEN_ROPE_MISSION.id]: 'Elvenhair_Rope.gif',
-  [KING_MONKS_STUDY_MISSION.id]: 'Costello.gif',
-  [COSTELLO_QUEEN_BANSHEES_MISSION.id]: 'Book_(Black).gif',
-  [FOLLOWER_OF_ZATHROTH_MISSION.id]: 'Blessed_Ankh.gif',
-  [MOTHER_OF_ALL_SPIDERS_MISSION.id]: 'Spider_Silk.gif',
-  [KING_SCARAB_COIN_MISSION.id]: SCARAB_COIN_CONFIG.icon,
-  [SERPENTINE_TOWER_MISSION.id]: DESTROY_FIELD_RUNE_CONFIG.icon,
-  [APPRENTICE_SHENG_MISSION.id]: MINOTAUR_TROPHY_CONFIG.icon,
-  [CHRISTMAS_MIRACLE_MISSION.id]: WISHLIST_CONFIG.icon,
-  [SVENSON_LOVE_STORY_MISSION.id]: 'Spool_of_Yarn.gif',
-  [WEAKENED_ARCHDEMON_MISSION.id]: ORB_CONFIG.icon
-};
-
-// Game board sprite ids used as Quest Log mission card icons (preferred over GIF when set).
-const MISSION_QUEST_LOG_SPRITE_ICON_MAP = {
-  [KING_CROSSING_THE_LINE_MISSION.id]: 3538
-};
+// Quest Log icons — filled from assets/quests/items.json
+const MISSION_QUEST_LOG_ICON_MAP = {};
+const MISSION_QUEST_LOG_SPRITE_ICON_MAP = {};
 
 // =======================
 // 2. NPC Conversation Cooldown Manager
@@ -1553,11 +1677,9 @@ function createNPCCooldownManager() {
   // =======================
   let inventoryObserver = null;
   let buttonCheckInterval = null;
-  let lastButtonCheck = 0;
   let failedAttempts = 0;
   let cachedExtensionBaseUrl = null;
   let observerDebounceTimeout = null;
-  let lastObserverCheck = 0;
   let buttonRetryTimeout = null;
   let modalTimeout = null;
   let dialogTimeout = null;
@@ -1854,7 +1976,7 @@ function createNPCCooldownManager() {
       roomId: 'abwasp',
       floor: 15, // Set floor to 15 for Ab'Dendriel Hive
       villains,
-      allyLimit: spawn.allyLimit ?? 5,
+      allyLimit: spawn.allyLimit ?? 3,
       tileRestrictions: {
         allowedTiles: spawn.allowedTiles || [67, 81, 97],
         message: spawn.allowedTilesMessage || 'Ally creatures can only be placed on tiles 67, 81, and 97 in Mornenion!'
@@ -2701,6 +2823,42 @@ function createNPCCooldownManager() {
     return miningTileElements;
   }
 
+  // Visual helpers only — do not highlight every diggable sand tile.
+  function shouldHighlightScarabDesertDig() {
+    try {
+      if (!(miningState.enabled && hasLightShovelInInventory())) return false;
+      if (getCurrentMapName() !== DESERT_DIGGING_CONFIG.TARGET_MAP) return false;
+      const progress = getMissionProgress(KING_SCARAB_COIN_MISSION);
+      if (!progress?.accepted || progress.completed) return false;
+      const maxCount = SCARAB_COIN_CONFIG.maxCount || 1;
+      const count = getCachedQuestItemCount(SCARAB_COIN_CONFIG.productName);
+      return count < maxCount;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function getShovelHighlightTiles() {
+    const tiles = [];
+    const currentMapName = getCurrentMapName();
+
+    if (miningState.enabled && hasLightShovelInInventory() && currentMapName === MINING_CONFIG.TARGET_MAP) {
+      const targetTile = document.getElementById(`tile-index-${MINING_CONFIG.TARGET_TILE_ID}`);
+      if (targetTile?.querySelector(`.sprite.item.relative.id-${MINING_CONFIG.SPRITE_TRANSFORM.from}`)) {
+        tiles.push(targetTile);
+      }
+    }
+
+    if (shouldHighlightScarabDesertDig()) {
+      const scarabTile = document.getElementById(`tile-index-${DESERT_DIGGING_CONFIG.SCARAB_COIN_TILE}`);
+      if (scarabTile && isDesertDiggingTile(scarabTile)) {
+        tiles.push(scarabTile);
+      }
+    }
+
+    return tiles;
+  }
+
   // Enable right-clicking on digging tiles
   function enableMiningTileRightClick() {
     const miningTileElements = findMiningTiles();
@@ -2849,6 +3007,9 @@ function createNPCCooldownManager() {
             await capScarabCoinInventory();
             showQuestItemNotification(SCARAB_COIN_CONFIG.productName, 1);
             updateTeshaArrowState();
+            if (typeof refreshQuestTileHighlights === 'function') {
+              refreshQuestTileHighlights();
+            }
             console.log('[Quests Mod][Digging] Scarab Coin found on Darama Oasis tile', DESERT_DIGGING_CONFIG.SCARAB_COIN_TILE);
           } else {
             showToast({
@@ -2869,10 +3030,12 @@ function createNPCCooldownManager() {
       // Create the circular digging animation
       createMiningAnimation(animationX, animationY);
 
-      // Transform the sprite from id-355 to id-385
+      // Transform diggable ground into the Mornenion hole.
+      let openedMornenionHole = false;
       if (miningState.clickedTile) {
         const oldSprite = miningState.clickedTile.querySelector(`.sprite.item.relative.id-${MINING_CONFIG.SPRITE_TRANSFORM.from}`);
         if (oldSprite) {
+          openedMornenionHole = true;
           // Change the sprite ID by updating the class
           oldSprite.classList.remove(`id-${MINING_CONFIG.SPRITE_TRANSFORM.from}`);
           oldSprite.classList.add(`id-${MINING_CONFIG.SPRITE_TRANSFORM.to}`);
@@ -2942,7 +3105,7 @@ function createNPCCooldownManager() {
                             NotificationService.createBattleToastCallback(BATTLE_TOAST_LOG.mornenion)
                           );
                           setupMornenionTileRestrictions();
-                          showCustomBattleStatusToast({ battleName: 'Mornenion', allyLimit: 5, logPrefix: '[Quests Mod][Mornenion]' });
+                          showCustomBattleStatusToast({ battleName: 'Mornenion', allyLimit: 3, logPrefix: '[Quests Mod][Mornenion]' });
                           console.log('[Quests Mod][Mining] Mornenion battle initialized successfully');
                         } else {
                           console.error('[Quests Mod][Mining] Failed to initialize Mornenion battle after waiting');
@@ -2958,7 +3121,7 @@ function createNPCCooldownManager() {
                         NotificationService.createBattleToastCallback(BATTLE_TOAST_LOG.mornenion)
                       );
                       setupMornenionTileRestrictions();
-                      showCustomBattleStatusToast({ battleName: 'Mornenion', allyLimit: 5, logPrefix: '[Quests Mod][Mornenion]' });
+                      showCustomBattleStatusToast({ battleName: 'Mornenion', allyLimit: 3, logPrefix: '[Quests Mod][Mornenion]' });
                       console.log('[Quests Mod][Mining] Mornenion battle initialized successfully');
                     } else {
                       console.error('[Quests Mod][Mining] Failed to initialize Mornenion battle - CustomBattles not available');
@@ -2993,11 +3156,13 @@ function createNPCCooldownManager() {
         miningState.contextMenu.closeMenu();
       }
 
-      // Show success message
-      showToast({
-        message: TOAST_MESSAGES.minedOre,
-        logPrefix: '[Quests Mod][Digging]'
-      });
+      // Opening the Mornenion hole — not an ore find.
+      if (openedMornenionHole) {
+        showToast({
+          message: TOAST_MESSAGES.dugMornenionHole || 'You dig a hole into the depths.',
+          logPrefix: '[Quests Mod][Digging]'
+        });
+      }
           }
         }
       ]
@@ -3528,7 +3693,7 @@ function createNPCCooldownManager() {
         text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.8);
         box-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
       `;
-      textBubble.textContent = 'Found Copper Key!';
+      textBubble.textContent = TOAST_MESSAGES.copperKeyFound;
       
       corymElement.style.position = 'relative';
       corymElement.appendChild(textBubble);
@@ -3741,6 +3906,7 @@ function createNPCCooldownManager() {
 
   // Composes createRightClickTileSystem + a board subscription for a single-tile,
   // single-room right-click action (used by the seal systems).
+  // roomName / tileIndex may be values or getters so assets can hydrate after construction.
   function createRoomTileAction({
     id,
     roomName,
@@ -3749,6 +3915,9 @@ function createNPCCooldownManager() {
     shouldEnable,
     onActivate
   }) {
+    const resolveRoomName = () => (typeof roomName === 'function' ? roomName() : roomName);
+    const resolveTileIndex = () => (typeof tileIndex === 'function' ? tileIndex() : tileIndex);
+
     const state = {
       rightClickEnabled: false,
       tiles: new Set(),
@@ -3759,7 +3928,7 @@ function createNPCCooldownManager() {
       id,
       state,
       getTiles: () => {
-        const el = getTileElement(tileIndex);
+        const el = getTileElement(resolveTileIndex());
         return el ? [el] : [];
       },
       shouldEnableListener: (boardContext) => !!shouldEnable(boardContext),
@@ -3768,6 +3937,13 @@ function createNPCCooldownManager() {
         const boardContext = globalThis.state?.board?.getSnapshot()?.context ?? null;
         if (!shouldEnable(boardContext)) return;
         onActivate(event, tile);
+        // Seal completion flips shouldEnable off — refresh right-click + highlights immediately.
+        try {
+          system.update(boardContext);
+        } catch (_) {}
+        if (typeof refreshQuestTileHighlights === 'function') {
+          refreshQuestTileHighlights(boardContext);
+        }
       }
     });
 
@@ -3788,7 +3964,7 @@ function createNPCCooldownManager() {
         update(boardContext);
       });
       update(globalThis.state?.board?.getSnapshot()?.context);
-      console.log(`[Quests Mod][${id}] Board observer set up for ${roomName}`);
+      console.log(`[Quests Mod][${id}] Board observer set up for ${resolveRoomName() || '(room pending)'}`);
     }
 
     function cleanup() {
@@ -5539,6 +5715,13 @@ function createNPCCooldownManager() {
     result.costelloVisited = !!kingChatState.costelloVisited;
     result.mornenion = { defeated: !!kingChatState.mornenionDefeated };
     result.sevenSealsCompleted = normalizeSevenSealsCompleted(kingChatState.sevenSealsCompleted);
+    result.starterCoinThanked = !!kingChatState.starterCoinThanked;
+    // ironOre lives in fishingState, not kingChatState — always include so saves don't wipe it.
+    result.ironOre = {
+      active: !!fishingState.ironOreQuestActive,
+      startTime: fishingState.ironOreQuestStartTime || null,
+      completed: !!(fishingState.ironOreQuestCompleted || kingChatState.progressAlDeeFishing?.completed)
+    };
     return result;
   }
 
@@ -5561,6 +5744,10 @@ function createNPCCooldownManager() {
       kingChatState.sevenSealsCompleted = getDefaultSevenSealsCompleted().slice();
     }
     kingChatState.sevenSealsCompleted[sealIndex] = !!completed;
+    // Drop seal lever/rune glows as soon as the seal is done (e.g. second seal tile 34).
+    if (typeof refreshQuestTileHighlights === 'function') {
+      refreshQuestTileHighlights();
+    }
     const playerName = getCurrentPlayerName();
     if (playerName) {
       const allProgress = getAllMissionProgress();
@@ -5623,7 +5810,7 @@ function createNPCCooldownManager() {
     }
     // New shape preferred: nested format with all missions from registry
     // Check if any registered mission field exists in data
-    const hasAnyMissionField = Object.values(MISSION_FIREBASE_KEY_MAP).some(key => data[key]) || data.ironOre || data.mornenion || data.costelloVisited || Array.isArray(data.sevenSealsCompleted) || Array.isArray(data.sevenSealsVisited);
+    const hasAnyMissionField = Object.values(MISSION_FIREBASE_KEY_MAP).some(key => data[key]) || data.ironOre || data.mornenion || data.costelloVisited || data.starterCoinThanked === true || Array.isArray(data.sevenSealsCompleted) || Array.isArray(data.sevenSealsVisited);
     
     if (hasAnyMissionField) {
       const result = {};
@@ -5659,6 +5846,7 @@ function createNPCCooldownManager() {
       };
       
       result.costelloVisited = !!data.costelloVisited;
+      result.starterCoinThanked = !!data.starterCoinThanked;
       if (Array.isArray(data.sevenSealsCompleted) && data.sevenSealsCompleted.length === SEVEN_SEALS_COUNT) {
         result.sevenSealsCompleted = data.sevenSealsCompleted.slice(0, SEVEN_SEALS_COUNT).map(Boolean);
       } else if (Array.isArray(data.sevenSealsVisited)) {
@@ -5680,15 +5868,38 @@ function createNPCCooldownManager() {
 
   async function saveKingTibianusProgress(playerName, progress) {
     if (!playerName) return;
+    if (!missionProgressHydratedFromFirebase) {
+      console.warn('[Quests Mod][King Tibianus] Blocked progress save until Firebase hydrate completes');
+      return;
+    }
     const hashedPlayer = await hashUsername(playerName);
+
+    // Always merge onto the full local snapshot so partial callers cannot wipe other missions.
+    const base = getAllMissionProgress();
+    const incoming = progress && typeof progress === 'object' ? progress : {};
+    const merged = { ...base };
+    for (const [key, value] of Object.entries(incoming)) {
+      if (value == null) continue;
+      if (
+        typeof value === 'object'
+        && !Array.isArray(value)
+        && merged[key]
+        && typeof merged[key] === 'object'
+        && !Array.isArray(merged[key])
+      ) {
+        merged[key] = { ...merged[key], ...value };
+      } else {
+        merged[key] = value;
+      }
+    }
     
     // Check if progress has any registered mission fields, ironOre, mornenion, or sevenSealsCompleted
-    const hasNestedFormat = progress && (
-      Object.values(MISSION_FIREBASE_KEY_MAP).some(key => progress[key]) || 
-      progress.ironOre ||
-      progress.mornenion ||
-      progress.costelloVisited ||
-      Array.isArray(progress.sevenSealsCompleted)
+    const hasNestedFormat = merged && (
+      Object.values(MISSION_FIREBASE_KEY_MAP).some(key => merged[key]) || 
+      merged.ironOre ||
+      merged.mornenion ||
+      merged.costelloVisited ||
+      Array.isArray(merged.sevenSealsCompleted)
     );
     
     const normalized = hasNestedFormat
@@ -5697,14 +5908,14 @@ function createNPCCooldownManager() {
           
           // Build normalized mission progress from registry
           for (const [missionId, firebaseKey] of Object.entries(MISSION_FIREBASE_KEY_MAP)) {
-            result[firebaseKey] = buildMissionProgressFromFirebaseEntry(firebaseKey, progress[firebaseKey]);
+            result[firebaseKey] = buildMissionProgressFromFirebaseEntry(firebaseKey, merged[firebaseKey]);
           }
           
           // Add ironOre (special case - not a regular mission)
-          result.ironOre = progress.ironOre ? {
-            active: !!progress.ironOre.active,
-            startTime: progress.ironOre.startTime || null,
-            completed: !!progress.ironOre.completed
+          result.ironOre = merged.ironOre ? {
+            active: !!merged.ironOre.active,
+            startTime: merged.ironOre.startTime || null,
+            completed: !!merged.ironOre.completed
           } : {
             active: false,
             startTime: null,
@@ -5712,19 +5923,20 @@ function createNPCCooldownManager() {
           };
           
           // Add mornenion (special case - not a regular mission)
-          result.mornenion = progress.mornenion ? {
-            defeated: !!progress.mornenion.defeated
+          result.mornenion = merged.mornenion ? {
+            defeated: !!merged.mornenion.defeated
           } : {
             defeated: false
           };
           
-          result.costelloVisited = !!progress.costelloVisited;
-          result.sevenSealsCompleted = normalizeSevenSealsCompleted(progress.sevenSealsCompleted);
+          result.costelloVisited = !!merged.costelloVisited;
+          result.starterCoinThanked = !!merged.starterCoinThanked;
+          result.sevenSealsCompleted = normalizeSevenSealsCompleted(merged.sevenSealsCompleted);
           return result;
         })()
       : {
-          accepted: !!progress?.accepted,
-          completed: !!progress?.completed
+          accepted: !!merged?.accepted,
+          completed: !!merged?.completed
         };
     await FirebaseService.put(
       `${getKingTibianusProgressPath()}/${hashedPlayer}`,
@@ -6516,9 +6728,29 @@ function createNPCCooldownManager() {
     }
   }
 
+  function inferStarterCoinThankedFromProgress(progress) {
+    if (!progress || progress.__isEmpty) return false;
+    if (progress.starterCoinThanked) return true;
+    for (const firebaseKey of Object.values(MISSION_FIREBASE_KEY_MAP)) {
+      const entry = progress[firebaseKey];
+      if (entry?.accepted || entry?.completed) return true;
+    }
+    if (progress.costelloVisited) return true;
+    if (progress.mornenion?.defeated) return true;
+    if (progress.ironOre?.completed || progress.ironOre?.active || progress.ironOre?.startTime) return true;
+    return false;
+  }
+
   async function grantStarterSilverTokenIfNeeded(progress, playerName) {
     try {
       if (!progress || !progress.__isEmpty || !playerName) {
+        return;
+      }
+      if (progress.starterCoinThanked || kingChatState.starterCoinThanked) {
+        return;
+      }
+      if (!missionProgressHydratedFromFirebase) {
+        console.warn('[Quests Mod] Skipping starter Silver Token until Firebase progress is hydrated');
         return;
       }
       const hasToken = await hasSilverToken();
@@ -6526,10 +6758,8 @@ function createNPCCooldownManager() {
         return;
       }
       await addQuestItem(SILVER_TOKEN_CONFIG.productName, 1);
-      await saveKingTibianusProgress(playerName, {
-        copper: { accepted: false, completed: false },
-        dragon: { accepted: false, completed: false }
-      });
+      // Persist current hydrated progress (defaults for a new player) — never a partial wipe.
+      await saveKingTibianusProgress(playerName, getAllMissionProgress());
       console.log('[Quests Mod] Granted starter Silver Token to new player (no King progress)');
     } catch (error) {
       console.error('[Quests Mod] Error granting starter Silver Token:', error);
@@ -7096,44 +7326,26 @@ function createNPCCooldownManager() {
   // Notification Service
   // =======================
 
-  const TOAST_MESSAGE_VARIANTS = {
-    [TOAST_MESSAGES.frightenedHole]: 'warning',
-    [TOAST_MESSAGES.fishingEnabled]: 'info',
-    [TOAST_MESSAGES.fishingDisabled]: 'info',
-    [TOAST_MESSAGES.shovelEnabled]: 'info',
-    [TOAST_MESSAGES.shovelDisabled]: 'info',
-    [TOAST_MESSAGES.minedOre]: 'found',
-    [TOAST_MESSAGES.travelingAbDendriel]: 'info',
-    [TOAST_MESSAGES.teleportedAlDee]: 'info',
-    [TOAST_MESSAGES.teleportAlDeeFailed]: 'warning',
-    [TOAST_MESSAGES.bansheeLastRoomNotFound]: 'nothing',
-    [TOAST_MESSAGES.travelingBansheeLastRoom]: 'info',
-    [TOAST_MESSAGES.bansheeLastRoomBattleHere]: 'info',
-    [TOAST_MESSAGES.spiderLairNotFound]: 'nothing',
-    [TOAST_MESSAGES.enteringSpiderLair]: 'info',
-    [TOAST_MESSAGES.spiderLairBattleHere]: 'info',
-    [TOAST_MESSAGES.putridChamberNotStrongEnough]: 'warning',
-    [TOAST_MESSAGES.travelingPutridChamber]: 'info',
-    [TOAST_MESSAGES.travelingWithSvenson]: 'info',
-    [TOAST_MESSAGES.travelingGhazHideout]: 'info',
-    [TOAST_MESSAGES.fishingFoundAxe]: 'found',
-    [TOAST_MESSAGES.fishingFoundNothingMagnet]: 'nothing',
-    [TOAST_MESSAGES.fishingFoundNothing]: 'nothing',
-    [TOAST_MESSAGES.fishingMagnetHint]: 'info',
-    [TOAST_MESSAGES.fishingError]: 'warning',
-    [TOAST_MESSAGES.desertDigNothing]: 'nothing',
-    [TOAST_MESSAGES.desertDigSandsEmpty]: 'nothing',
-    [TOAST_MESSAGES.desertDigNeedMission]: 'info',
-    [TOAST_MESSAGES.missingDestroyFieldRune]: 'nothing',
-    [TOAST_MESSAGES.alreadyHaveDestroyFieldRune]: 'nothing',
-    [TOAST_MESSAGES.crossingTheLineObjectiveComplete]: 'completed',
-    [TOAST_MESSAGES.copperKeyFound]: 'found',
-    [TOAST_MESSAGES.mapReceived]: 'found',
-    [TOAST_MESSAGES.navigatedToMines]: 'found',
-    [TOAST_MESSAGES.kingTookCoin]: 'warning',
-    [TOAST_MESSAGES.diaryReturned]: 'completed',
-    [MORNENION_DEFEATED_MESSAGE]: 'completed'
-  };
+  const TOAST_MESSAGE_VARIANTS = {};
+
+  function rebuildToastMessageVariantsMap() {
+    for (const key of Object.keys(TOAST_MESSAGE_VARIANTS)) {
+      delete TOAST_MESSAGE_VARIANTS[key];
+    }
+    for (const [key, variant] of Object.entries(TOAST_VARIANT_BY_KEY)) {
+      if (key === 'mornenionDefeated') {
+        TOAST_MESSAGE_VARIANTS[MORNENION_DEFEATED_MESSAGE] = variant;
+        continue;
+      }
+      const message = TOAST_MESSAGES[key];
+      if (typeof message === 'string' && message) {
+        TOAST_MESSAGE_VARIANTS[message] = variant;
+      }
+    }
+  }
+
+  rebuildToastMessageVariants = rebuildToastMessageVariantsMap;
+  rebuildToastMessageVariantsMap();
 
   function resolveToastVariant(message) {
     if (!message || typeof message !== 'string') return 'info';
@@ -7432,6 +7644,27 @@ function createNPCCooldownManager() {
     observerDebounceTimeout = null;
     modalTimeout = null;
     dialogTimeout = null;
+  }
+
+  function scheduleQuestItemsButtonRetry() {
+    if (buttonRetryTimeout) {
+      clearTimeout(buttonRetryTimeout);
+      buttonRetryTimeout = null;
+    }
+    clearCachesAndAddButton(0);
+  }
+
+  function inventoryNodeLooksRelevant(node) {
+    if (!node || node.nodeType !== Node.ELEMENT_NODE) return false;
+    if (node.classList?.contains('container-inventory-4')) return true;
+    if (node.classList?.contains('quest-items-inventory-button')) return true;
+    if (!node.querySelector) return false;
+    return !!(
+      node.querySelector('.container-inventory-4') ||
+      node.querySelector('.quest-items-inventory-button') ||
+      node.querySelector('button.focus-style-visible') ||
+      node.querySelector('img[alt="equipments"]')
+    );
   }
 
   // =======================
@@ -7794,6 +8027,13 @@ function createNPCCooldownManager() {
 
   function setMissionProgress(mission, progress) {
     MissionManager.setProgress(mission, progress);
+    if (questDialogueReady && progress?.accepted && !progress?.completed) {
+      setupProgressAwareQuestObservers();
+      refreshSystemsAfterMissionProgressLoaded();
+    }
+    if (progress?.completed) {
+      refreshBoardNpcsAfterQuestItemsChange();
+    }
   }
 
   /**
@@ -8084,35 +8324,51 @@ function createNPCCooldownManager() {
       inventoryObserver = null;
     }
     
-    clearAllTimeouts();
-    
-    lastButtonCheck = Date.now();
+    clearTimeoutOrInterval(buttonCheckInterval);
+    clearTimeoutOrInterval(buttonRetryTimeout);
+    clearTimeoutOrInterval(observerDebounceTimeout);
+    buttonCheckInterval = null;
+    buttonRetryTimeout = null;
+    observerDebounceTimeout = null;
+
+    // Keep a cheap poll while inventory can remount (React rebuilds wipe injected buttons).
     buttonCheckInterval = setInterval(() => {
-      const now = Date.now();
-      if (now - lastButtonCheck > BUTTON_CHECK_TIMEOUT) {
-        clearInterval(buttonCheckInterval);
-        buttonCheckInterval = null;
-        return;
+      if (document.querySelector('.container-inventory-4')) {
+        addQuestItemsButton();
       }
-      clearCachesAndAddButton();
     }, BUTTON_CHECK_INTERVAL);
     
     inventoryObserver = new MutationObserver((mutations) => {
-      const now = Date.now();
-      
-      // Debounce observer calls
-      if (now - lastObserverCheck < OBSERVER_MIN_INTERVAL) {
-        if (observerDebounceTimeout) {
-          clearTimeout(observerDebounceTimeout);
+      let shouldCheck = false;
+      for (const mutation of mutations) {
+        for (const node of mutation.addedNodes) {
+          if (inventoryNodeLooksRelevant(node)) {
+            shouldCheck = true;
+            break;
+          }
         }
-        observerDebounceTimeout = setTimeout(() => {
-          processInventoryMutations(mutations);
-        }, OBSERVER_DEBOUNCE_DELAY);
-        return;
+        if (shouldCheck) break;
+        // Inventory rebuilds sometimes replace children without a fresh container node.
+        if (
+          mutation.target?.nodeType === Node.ELEMENT_NODE &&
+          (mutation.target.classList?.contains('container-inventory-4') ||
+            mutation.target.closest?.('.container-inventory-4'))
+        ) {
+          shouldCheck = true;
+          break;
+        }
       }
-      
-      lastObserverCheck = now;
-      processInventoryMutations(mutations);
+
+      if (!shouldCheck) return;
+
+      if (observerDebounceTimeout) {
+        clearTimeout(observerDebounceTimeout);
+      }
+      // Always re-scan current DOM — do not process the stale mutations snapshot.
+      observerDebounceTimeout = setTimeout(() => {
+        observerDebounceTimeout = null;
+        scheduleQuestItemsButtonRetry();
+      }, OBSERVER_DEBOUNCE_DELAY);
     });
     
     inventoryObserver.observe(document.body, { 
@@ -8123,38 +8379,6 @@ function createNPCCooldownManager() {
     });
     
     addQuestItemsButton();
-  }
-
-  // Process inventory mutations with optimized filtering
-  function processInventoryMutations(mutations) {
-    let shouldCheck = false;
-    
-    // Use a more efficient mutation filter
-    for (const mutation of mutations) {
-      // Skip if no added nodes
-      if (mutation.addedNodes.length === 0) continue;
-      
-      // Check if any added node is relevant
-      for (const node of mutation.addedNodes) {
-        if (node.nodeType === Node.ELEMENT_NODE) {
-          // Use more specific checks to reduce false positives
-          if (node.classList?.contains('container-inventory-4') ||
-              (node.querySelector && (
-                node.querySelector('.container-inventory-4') ||
-                node.querySelector('button.focus-style-visible')
-              ))) {
-            shouldCheck = true;
-            break;
-          }
-        }
-      }
-      
-      if (shouldCheck) break;
-    }
-    
-    if (shouldCheck) {
-      clearCachesAndAddButton();
-    }
   }
 
   // Centralized cache clearing and button adding
@@ -8175,41 +8399,53 @@ function createNPCCooldownManager() {
   // Button Management
   // =======================
 
+  function removeQuestItemsButtonNode(button) {
+    if (!button) return;
+    try {
+      removeButtonEventListener(button);
+    } catch (_) {}
+    try {
+      if (button.isConnected) button.remove();
+    } catch (_) {}
+  }
+
+  function ensureQuestItemsButtonListener(button) {
+    if (!button || buttonEventListeners.has(button)) return;
+    const clickHandler = () => {
+      showQuestItemsModal();
+    };
+    button.addEventListener('click', clickHandler);
+    buttonEventListeners.set(button, clickHandler);
+  }
+
   function addQuestItemsButton() {
-    const existingButton = document.querySelector('.quest-items-inventory-button');
-    if (existingButton) {
-      // If button exists but listener is missing, re-add it
-      if (!buttonEventListeners.has(existingButton)) {
-        const clickHandler = () => {
-          showQuestItemsModal();
-        };
-        existingButton.addEventListener('click', clickHandler);
-        buttonEventListeners.set(existingButton, clickHandler);
-      }
-      failedAttempts = 0;
-      return true;
-    }
-    
-    // Clean up any orphaned listeners (buttons removed by framework)
-    for (const [button, listener] of buttonEventListeners.entries()) {
+    // Clean up listeners for buttons React already removed
+    for (const [button] of buttonEventListeners.entries()) {
       if (!document.contains(button)) {
         buttonEventListeners.delete(button);
       }
     }
-    
-    const isOnInventoryPage = document.querySelector('.container-inventory-4') || 
-                             document.querySelector('[data-page="inventory"]') ||
-                             window.location.pathname.includes('inventory');
-    
-    if (!isOnInventoryPage) {
-      return false;
-    }
-    
+
     const inventoryContainer = document.querySelector('.container-inventory-4');
     if (!inventoryContainer) {
-      failedAttempts++;
+      // Drop orphan backpacks left behind from a previous inventory mount.
+      document.querySelectorAll('.quest-items-inventory-button').forEach(removeQuestItemsButtonNode);
       return false;
     }
+
+    const existingInContainer = inventoryContainer.querySelector('.quest-items-inventory-button');
+    if (existingInContainer) {
+      // Remove duplicates / orphans outside the live inventory grid
+      document.querySelectorAll('.quest-items-inventory-button').forEach((btn) => {
+        if (btn !== existingInContainer) removeQuestItemsButtonNode(btn);
+      });
+      ensureQuestItemsButtonListener(existingInContainer);
+      failedAttempts = 0;
+      return true;
+    }
+
+    // Orphan button still in DOM but not in the live inventory → remove and re-add below
+    document.querySelectorAll('.quest-items-inventory-button').forEach(removeQuestItemsButtonNode);
     
     // Find the equipment container button
     const allButtons = Array.from(inventoryContainer.querySelectorAll('button.focus-style-visible.active\\:opacity-70'));
@@ -8245,24 +8481,21 @@ function createNPCCooldownManager() {
       </div>
     `;
     
-    // Store event listener reference for cleanup
-    const clickHandler = () => {
-      showQuestItemsModal();
-    };
-    questItemsButton.addEventListener('click', clickHandler);
-    buttonEventListeners.set(questItemsButton, clickHandler);
+    ensureQuestItemsButtonListener(questItemsButton);
     
     try {
       // Double-check target is still in DOM before inserting
-      if (isInDOM(equipmentContainerButton)) {
+      if (isInDOM(equipmentContainerButton) && inventoryContainer.contains(equipmentContainerButton)) {
         equipmentContainerButton.insertAdjacentElement('afterend', questItemsButton);
         failedAttempts = 0;
-        clearAllTimeouts();
+        // Do NOT clear the inventory poller here — React may remount the grid after we insert.
       } else {
+        removeQuestItemsButtonNode(questItemsButton);
         return false;
       }
     } catch (error) {
       console.error('[Quests Mod] Error adding quest items button:', error);
+      removeQuestItemsButtonNode(questItemsButton);
       return false;
     }
     
@@ -8840,12 +9073,10 @@ function createNPCCooldownManager() {
             console.log('[Quests Mod][King Tibianus] Refreshed quest items modal');
           }, 500);
 
-          // Save completed quest progress to Firebase
+          // Save completed quest progress to Firebase (merge preserves other missions)
           const currentPlayer = getCurrentPlayerName();
           if (currentPlayer) {
-            const currentProgress = await getKingTibianusProgress(currentPlayer);
             await saveKingTibianusProgress(currentPlayer, {
-              ...currentProgress,
               ironOre: {
                 active: false,
                 startTime: null,
@@ -8884,10 +9115,8 @@ function createNPCCooldownManager() {
           fishingState.ironOreQuestExpired = false; // Reset expired flag when starting new quest
           fishingState.ironOreQuestStartTime = Date.now();
 
-          // Save quest progress to Firebase
-          const currentProgress = await getKingTibianusProgress(currentPlayer);
+          // Save quest progress to Firebase (merge preserves other missions)
           await saveKingTibianusProgress(currentPlayer, {
-            ...currentProgress,
             ironOre: {
               active: true,
               startTime: fishingState.ironOreQuestStartTime,
@@ -8924,7 +9153,7 @@ function createNPCCooldownManager() {
       defaultResponse: null,
       resolveAsync: true,
       lowercaseKeys: true,
-      asyncErrorFallback: 'I greet thee, my loyal subject.'
+      asyncErrorFallback: 'I greet thee, my loyal subject Player.'
     });
   }
 
@@ -9010,11 +9239,11 @@ function createNPCCooldownManager() {
         try {
           const hasToken = await hasSilverToken();
           if (!hasToken) {
-            addMessageToConversation('King Tibianus', 'I greet thee, my loyal subject.', true);
+            addMessageToConversation('King Tibianus', applyPlayerNameSubstitution('I greet thee, my loyal subject Player.'), true);
           }
         } catch (err) {
           console.warn('[Quests Mod] Could not check token for initial greeting:', err);
-          addMessageToConversation('King Tibianus', 'I greet thee, my loyal subject.', true);
+          addMessageToConversation('King Tibianus', applyPlayerNameSubstitution('I greet thee, my loyal subject Player.'), true);
         }
       })();
       
@@ -9147,12 +9376,115 @@ function createNPCCooldownManager() {
         if (mission.id === KING_SCARAB_COIN_MISSION.id) {
           return await hasScarabCoinInInventory();
         }
+        if (mission.id === KING_MONKS_STUDY_MISSION.id) {
+          return !!kingChatState.costelloVisited;
+        }
+        return false;
+      }
+
+      function canKingStampAlDeeLetter(products = cachedQuestItems) {
+        const letterProgress = getMissionProgress(KING_LETTER_MISSION);
+        if (!letterProgress.accepted || letterProgress.completed) return false;
+        const { letterCount, stampedLetterCount } = getLetterMissionItemCounts(products);
+        return letterCount > 0 && stampedLetterCount === 0;
+      }
+
+      // Mid-mission step (stamp) or hand-in ready — used by "mission" / topic keywords.
+      async function getKingMissionProgressKind(mission) {
+        if (!mission) return null;
+        const progress = getMissionProgress(mission);
+        if (!progress.accepted || progress.completed) return null;
+
+        if (mission.id === KING_LETTER_MISSION.id) {
+          try {
+            const products = await getQuestItems(false);
+            if (canKingStampAlDeeLetter(products)) return 'stamp-letter';
+          } catch (error) {
+            console.error('[Quests Mod][King Tibianus] Error checking letter for progress:', error);
+          }
+          return null;
+        }
+
+        if (await isKingMissionReadyForHandIn(mission)) return 'hand-in';
+        return null;
+      }
+
+      async function stampAlDeeLetterForKing(reason = 'stamp Letter from Al Dee') {
+        const playerName = getCurrentPlayerName();
+        if (!playerName) return false;
+
+        const currentProducts = await getQuestItems(false);
+        if (!canKingStampAlDeeLetter(currentProducts)) return false;
+
+        const { letterCount } = getLetterMissionItemCounts(currentProducts);
+        const updatedProducts = {
+          ...currentProducts,
+          'Letter from Al Dee': Math.max(0, letterCount - 1),
+          'Stamped Letter': (currentProducts['Stamped Letter'] || 0) + 1
+        };
+
+        const encrypted = await encryptQuestItems(updatedProducts, playerName);
+        const hashedPlayer = await hashUsername(playerName);
+        await FirebaseService.put(
+          `${getQuestItemsApiUrl()}/${hashedPlayer}`,
+          { encrypted },
+          reason
+        );
+
+        cachedQuestItems = updatedProducts;
+        NotificationService.showItemReceived('Stamped Letter', '[Quests Mod][King Tibianus]');
+        console.log('[Quests Mod][King Tibianus] Exchanged Letter from Al Dee for Stamped Letter');
+
+        if (typeof updateTile79RightClickState === 'function') {
+          updateTile79RightClickState();
+        }
+        refreshBoardNpcsAfterQuestItemsChange();
+        renderKingQuestUI();
+        return true;
+      }
+
+      // Returns true if the king already replied / advanced the mission.
+      async function tryProgressKingMission(mission) {
+        const kind = await getKingMissionProgressKind(mission);
+        if (!kind) return false;
+
+        if (kind === 'stamp-letter') {
+          try {
+            const stamped = await stampAlDeeLetterForKing('exchange Letter from Al Dee for Stamped Letter (mission progress)');
+            if (!stamped) return false;
+            const stampMsg = KING_LETTER_MISSION.stampLetter
+              || 'Ah, you found the letter! I\'ve stamped it for you. Now take it to Al Dee in Rookgaard.';
+            queueKingReply(stampMsg, { onDone: () => { clearTextarea(); } });
+            kingChatState.missionOffered = false;
+            kingChatState.offeredMission = null;
+            kingChatState.awaitingKeyConfirm = false;
+            return true;
+          } catch (error) {
+            console.error('[Quests Mod][King Tibianus] Error stamping letter:', error);
+            return false;
+          }
+        }
+
+        if (kind === 'hand-in') {
+          setKingAwaitingKeyConfirm(mission);
+          queueKingReply(buildStrings(mission).keyQuestion);
+          clearTextarea();
+          return true;
+        }
+
+        return false;
+      }
+
+      async function tryProgressAnyActiveKingMission() {
+        for (const mission of getActiveKingMissions()) {
+          if (await tryProgressKingMission(mission)) return true;
+        }
         return false;
       }
 
       async function findProgressableActiveKingMission() {
         for (const mission of getActiveKingMissions()) {
-          if (await isKingMissionReadyForHandIn(mission)) {
+          if (await getKingMissionProgressKind(mission)) {
             return mission;
           }
         }
@@ -9204,15 +9536,18 @@ function createNPCCooldownManager() {
 
         return {
           missionPrompt: mission.prompt,
+          missionPromptWithLetter: mission.promptWithLetter || mission.prompt,
           thankYou: mission.accept,
           thankYouNoLetter: mission.acceptNoLetter || mission.accept,
-          keyQuestion: mission.askForKey || mission.askForItems || mission.askForItem || 'Have you found what I asked for?',
+          keyQuestion: mission.askForKey || mission.askForItems || mission.askForItem || mission.askForLetter || 'Have you found what I asked for?',
           keyComplete: mission.complete,
-          keyScoldNoKey: mission.missingKey || mission.missingItems || mission.missingItem || 'You claim yes but lack what I asked for.',
+          keyScoldNoKey: mission.missingKey || mission.missingItems || mission.missingItem || mission.missingLetter || 'You claim yes but lack what I asked for.',
           keyKeepSearching: mission.keepSearching,
           keyAnswerYesNo: mission.answerYesNo,
           missionCompleted: mission.alreadyCompleted,
-          missionActive: mission.alreadyActive
+          missionActive: mission.id === KING_LETTER_MISSION.id
+            ? getLetterMissionAlreadyActiveReply(mission)
+            : mission.alreadyActive
         };
       }
       let kingStrings = buildStrings(activeMission);
@@ -9540,70 +9875,22 @@ function createNPCCooldownManager() {
             descBlock.appendChild(line2);
           }
         } else {
-          // For letter mission, check if player has Stamped Letter to adjust objectives
+          // For letter mission, show the current stage objective
           if (selectedMission.id === KING_LETTER_MISSION.id) {
-            // Check cached items first (synchronous), then async if needed
-            let hasStampedLetter = false;
-            if (cachedQuestItems !== null) {
-              hasStampedLetter = (cachedQuestItems['Stamped Letter'] || 0) > 0;
-            }
-            
-            if (hasStampedLetter) {
-              // Player has Stamped Letter - only show delivery objective
-              const line1 = document.createElement('p');
-              line1.textContent = selectedMission.objectiveLine2;
-              descBlock.appendChild(line1);
-              
-              const line3 = document.createElement('p');
-              line3.style.color = '#b0b0b0';
-              line3.style.fontStyle = 'italic';
-              line3.style.marginTop = '6px';
-              line3.textContent = 'Take the stamped letter to Al Dee in Rookgaard to complete the mission.';
-              hintBlock.appendChild(line3);
-            } else {
-              // Player doesn't have Stamped Letter - show both objectives
-              const line1 = document.createElement('p');
-              line1.textContent = selectedMission.objectiveLine1;
-              descBlock.appendChild(line1);
-              
-              // If cache not available, check async and update if needed
-              (async () => {
-                try {
-                  const currentProducts = await getQuestItems(false);
-                  const hasStampedLetterAsync = (currentProducts['Stamped Letter'] || 0) > 0;
-                  
-                  if (hasStampedLetterAsync) {
-                    // Update objectives dynamically
-                    const existingLine1 = descBlock.querySelector('p:first-child');
-                    if (existingLine1) {
-                      existingLine1.textContent = selectedMission.objectiveLine2;
-                    }
-                    
-                    const existingHint = hintBlock.querySelector('p');
-                    if (existingHint) {
-                      existingHint.textContent = 'Take the stamped letter to Al Dee in Rookgaard to complete the mission.';
-                    }
-                  } else {
-                    // Add second objective if not present
-                    const existingLine2 = descBlock.querySelector('p:nth-child(2)');
-                    if (!existingLine2) {
-                      const line2 = document.createElement('p');
-                      line2.textContent = selectedMission.objectiveLine2;
-                      descBlock.appendChild(line2);
-                    }
-                  }
-                } catch (error) {
-                  console.error('[Quests Mod][King Tibianus] Error checking for Stamped Letter in objectives:', error);
-                }
-              })();
-              
-              const line3 = document.createElement('p');
-              line3.style.color = '#b0b0b0';
-              line3.style.fontStyle = 'italic';
-              line3.style.marginTop = '6px';
-              line3.textContent = selectedMission.hint;
-              hintBlock.appendChild(line3);
-            }
+            const objectiveText = getLetterMissionObjectiveText(selectedMission);
+            const line1 = document.createElement('p');
+            line1.textContent = objectiveText;
+            descBlock.appendChild(line1);
+
+            const line3 = document.createElement('p');
+            line3.style.color = '#b0b0b0';
+            line3.style.fontStyle = 'italic';
+            line3.style.marginTop = '6px';
+            const { stampedLetterCount } = getLetterMissionItemCounts();
+            line3.textContent = stampedLetterCount > 0
+              ? 'Take the stamped letter to Al Dee in Rookgaard to complete the mission.'
+              : selectedMission.hint;
+            hintBlock.appendChild(line3);
           } else if (selectedMission.id === KING_SCARAB_COIN_MISSION.id) {
             let hasScarabCoin = false;
             if (cachedQuestItems !== null) {
@@ -9674,11 +9961,21 @@ function createNPCCooldownManager() {
             if (serpentineProgress.putridChamberComplete) {
               line1.textContent = selectedMission.putridChamberReturnObjective;
               descBlock.appendChild(line1);
+            } else if (hasSerpentineDestroyFieldRune()) {
+              const doneLine = document.createElement('p');
+              doneLine.textContent = selectedMission.objectiveLine1;
+              doneLine.style.textDecoration = 'line-through';
+              doneLine.style.opacity = '0.7';
+              descBlock.appendChild(doneLine);
+
+              line1.textContent = selectedMission.objectiveLine2;
+              descBlock.appendChild(line1);
             } else {
               line1.textContent = selectedMission.objectiveLine1;
               descBlock.appendChild(line1);
               const line2 = document.createElement('p');
               line2.textContent = selectedMission.objectiveLine2;
+              line2.style.opacity = '0.7';
               descBlock.appendChild(line2);
             }
 
@@ -9688,7 +9985,9 @@ function createNPCCooldownManager() {
             line3.style.marginTop = '6px';
             line3.textContent = serpentineProgress.putridChamberComplete
               ? SCORPION_SCEPTRE_CONFIG.description
-              : selectedMission.hint;
+              : (hasSerpentineDestroyFieldRune()
+                ? (selectedMission.hintBasement || selectedMission.hint)
+                : selectedMission.hint);
             hintBlock.appendChild(line3);
           } else if (selectedMission.id === CHRISTMAS_MIRACLE_MISSION.id) {
             let hasPresent = false;
@@ -9799,9 +10098,7 @@ function createNPCCooldownManager() {
               kingChatState.progressAlDeeGoldenRope.accepted = true;
               const playerName = getCurrentPlayerName();
               if (playerName) {
-                const currentProgress = await getKingTibianusProgress(playerName);
                 await saveKingTibianusProgress(playerName, {
-                  ...currentProgress,
                   alDeeGoldenRope: {
                     accepted: true,
                     completed: false
@@ -9843,6 +10140,11 @@ function createNPCCooldownManager() {
             }
           }
           kingChatState.mornenionDefeated = !!(progress.mornenion && progress.mornenion.defeated);
+          if (progress.starterCoinThanked !== undefined) {
+            kingChatState.starterCoinThanked = !!progress.starterCoinThanked;
+          } else if (inferStarterCoinThankedFromProgress(progress)) {
+            kingChatState.starterCoinThanked = true;
+          }
         }
       }
 
@@ -9973,55 +10275,14 @@ function createNPCCooldownManager() {
             NotificationService.showQuestAccepted(KING_SCARAB_COIN_MISSION, '[Quests Mod][King Tibianus]');
           }
 
-          // Exchange Letter from Al Dee for Stamped Letter when letter mission is accepted
+          // Exchange Letter from Al Dee for Stamped Letter when letter mission is accepted with the letter
           if (mission.id === KING_LETTER_MISSION.id) {
             try {
-              // Get current quest items
-              const currentProducts = await getQuestItems(false);
-              console.log('[Quests Mod][Letter Exchange] Current products:', currentProducts);
-              const currentLetterCount = currentProducts['Letter from Al Dee'] || 0;
-              console.log('[Quests Mod][Letter Exchange] Letter count:', currentLetterCount);
-
-              // Remove one letter (if player has any)
-              if (currentLetterCount > 0) {
-                const updatedProducts = {
-                  ...currentProducts,
-                  'Letter from Al Dee': Math.max(0, currentLetterCount - 1),
-                  'Stamped Letter': (currentProducts['Stamped Letter'] || 0) + 1
-                };
-                console.log('[Quests Mod][Letter Exchange] Updated products:', updatedProducts);
-
-                // Save the updated products
-                const encrypted = await encryptQuestItems(updatedProducts, playerName);
-                const hashedPlayer = await hashUsername(playerName);
-
-                await FirebaseService.put(
-                  `${getQuestItemsApiUrl()}/${hashedPlayer}`,
-                  { encrypted },
-                  'exchange Letter from Al Dee for Stamped Letter'
-                );
-
-                // Update cache
-                cachedQuestItems = updatedProducts;
-
-                NotificationService.showItemReceived('Stamped Letter', '[Quests Mod][King Tibianus]');
-                console.log('[Quests Mod][King Tibianus] Exchanged Letter from Al Dee for Stamped Letter');
-
-                // Update tile 79 right-click state (will enable if player is in sewers)
-                // Always call this to ensure state is updated regardless of current location
+              const stamped = await stampAlDeeLetterForKing('exchange Letter from Al Dee for Stamped Letter');
+              if (!stamped) {
+                console.log('[Quests Mod][King Tibianus] Letter mission accepted — seek Al Dee / recover letter in Rookgaard');
                 if (typeof updateTile79RightClickState === 'function') {
                   updateTile79RightClickState();
-                  console.log('[Quests Mod][King Tibianus] Tile 79 state updated after letter exchange');
-                }
-                
-                // Refresh mission UI to show second objective
-                renderKingQuestUI();
-              } else {
-                console.warn('[Quests Mod][King Tibianus] Player has no Letter from Al Dee to exchange');
-                // Still update tile 79 state even without letter exchange (mission is now accepted)
-                if (typeof updateTile79RightClickState === 'function') {
-                  updateTile79RightClickState();
-                  console.log('[Quests Mod][King Tibianus] Tile 79 state updated after mission acceptance (no letter to exchange)');
                 }
               }
             } catch (err) {
@@ -10251,6 +10512,14 @@ function createNPCCooldownManager() {
         if (consumed) {
           kingChatState.starterCoinThanked = true;
           setRow2Disabled(false);
+          const playerName = getCurrentPlayerName();
+          if (playerName) {
+            try {
+              await saveKingTibianusProgress(playerName, getAllMissionProgress());
+            } catch (err) {
+              console.error('[Quests Mod][King Tibianus] Error saving starter coin thank-you:', err);
+            }
+          }
           return 'I thank thee for the coin.';
         }
         return null;
@@ -10407,6 +10676,18 @@ function createNPCCooldownManager() {
           return true;
         }
 
+        if (offeredMissionToStart.id === KING_SCARAB_COIN_MISSION.id && !(await hasLightShovelInInventory())) {
+          kingChatState.missionOffered = false;
+          kingChatState.offeredMission = null;
+          queueKingReply(
+            KING_SCARAB_COIN_MISSION.requiresLightShovel
+              || 'I have no task for thee at present. Come back later.',
+            { onDone: () => { clearTextarea(); } }
+          );
+          tibianusCooldown.reset();
+          return true;
+        }
+
         kingChatState.missionOffered = false;
         const offeredStrings = buildStrings(offeredMissionToStart);
         
@@ -10450,6 +10731,22 @@ function createNPCCooldownManager() {
         
         // Clear any pending response timeout
         tibianusCooldown.clearPendingResponse();
+
+        // Swearing at the king ends the audience angrily
+        if (messageContainsNpcSwear(lowerText)) {
+          kingChatState.missionOffered = false;
+          kingChatState.offeredMission = null;
+          kingChatState.awaitingKeyConfirm = false;
+          tibianusCooldown.queueResponse(
+            text,
+            KING_TIBIANUS_SWEAR_RESPONSE,
+            addMessageToConversation,
+            'King Tibianus',
+            () => ModalHelpers.closeModal(KING_TIBIANUS_SWEAR_CLOSE_DELAY_MS)
+          );
+          clearTextarea();
+          return;
+        }
         
         // If the king has not received the starter coin yet, only accept valid hail phrases
         const tokenHeld = await hasSilverToken();
@@ -10524,52 +10821,11 @@ function createNPCCooldownManager() {
           kingChatState.offeredMission = null;
             kingChatState.offeredMission = null;
           } else if (targetProgress.accepted) {
-            // Check if this is the letter mission and player has the letter but not the stamped letter
-            if (targetMission.id === KING_LETTER_MISSION.id) {
-              try {
-                const currentProducts = await getQuestItems(false);
-                const currentLetterCount = currentProducts['Letter from Al Dee'] || 0;
-                const currentStampedLetterCount = currentProducts['Stamped Letter'] || 0;
-                
-                // If player has the letter but not the stamped letter, exchange it
-                if (currentLetterCount > 0 && currentStampedLetterCount === 0) {
-                  const updatedProducts = {
-                    ...currentProducts,
-                    'Letter from Al Dee': Math.max(0, currentLetterCount - 1),
-                    'Stamped Letter': 1
-                  };
-                  
-                  const encrypted = await encryptQuestItems(updatedProducts, playerName);
-                  const hashedPlayer = await hashUsername(playerName);
-                  
-                  await FirebaseService.put(
-                    `${getQuestItemsApiUrl()}/${hashedPlayer}`,
-                    { encrypted },
-                    'exchange Letter from Al Dee for Stamped Letter (return visit)'
-                  );
-                  
-                  cachedQuestItems = updatedProducts;
-                  NotificationService.showItemReceived('Stamped Letter', '[Quests Mod][King Tibianus]');
-                  console.log('[Quests Mod][King Tibianus] Exchanged Letter from Al Dee for Stamped Letter (return visit)');
-                  
-                  // Update tile 79 right-click state
-                  if (typeof updateTile79RightClickState === 'function') {
-                    updateTile79RightClickState();
-                  }
-                  
-                  // Refresh mission UI to show second objective
-                  renderKingQuestUI();
-                  
-                  queueKingReply('Ah, you found the letter! I\'ve stamped it for you. Now take it to Al Dee in Rookgaard.', { onDone: () => {
-                    clearTextarea();
-                  } });
-                  return;
-                }
-              } catch (error) {
-                console.error('[Quests Mod][King Tibianus] Error checking/exchanging letter:', error);
-              }
+            // Prefer mid-mission progress (e.g. stamp letter) or hand-in prompt.
+            if (await tryProgressKingMission(targetMission)) {
+              return;
             }
-            
+
             setKingAwaitingKeyConfirm(targetMission);
             queueKingReply(targetStrings.keyQuestion);
             clearTextarea();
@@ -10578,8 +10834,18 @@ function createNPCCooldownManager() {
             kingResponse = KING_COPPER_KEY_MISSION.notExperiencedEnough;
             kingChatState.missionOffered = false;
             kingChatState.offeredMission = null;
+          } else if (targetMission.id === KING_SCARAB_COIN_MISSION.id && !(await hasLightShovelInInventory())) {
+            kingResponse = KING_SCARAB_COIN_MISSION.requiresLightShovel
+              || 'I have no task for thee at present. Come back later.';
+            kingChatState.missionOffered = false;
+            kingChatState.offeredMission = null;
           } else {
-            kingResponse = targetStrings.missionPrompt;
+            if (targetMission.id === KING_LETTER_MISSION.id) {
+              const products = await getQuestItems(false);
+              kingResponse = getLetterMissionOfferPrompt(targetMission, products);
+            } else {
+              kingResponse = targetStrings.missionPrompt;
+            }
             setKingMissionOffered(targetMission);
           }
         } else if (mentionsMissionKeyword) {
@@ -10588,12 +10854,8 @@ function createNPCCooldownManager() {
           const crossingProgress = getCrossingTheLineMissionProgress();
           const crossingStrings = buildStrings(KING_CROSSING_THE_LINE_MISSION);
 
-          // Prefer any already-accepted mission that is ready to hand in.
-          const progressableMission = await findProgressableActiveKingMission();
-          if (progressableMission) {
-            setKingAwaitingKeyConfirm(progressableMission);
-            queueKingReply(buildStrings(progressableMission).keyQuestion);
-            clearTextarea();
+          // Prefer any already-accepted mission that can progress (stamp letter, hand-in, etc.).
+          if (await tryProgressAnyActiveKingMission()) {
             return;
           }
 
@@ -10631,12 +10893,22 @@ function createNPCCooldownManager() {
             kingResponse = KING_COPPER_KEY_MISSION.notExperiencedEnough;
             kingChatState.missionOffered = false;
             kingChatState.offeredMission = null;
+          } else if (activeMission?.id === KING_SCARAB_COIN_MISSION.id && !(await hasLightShovelInInventory())) {
+            kingResponse = KING_SCARAB_COIN_MISSION.requiresLightShovel
+              || 'I have no task for thee at present. Come back later.';
+            kingChatState.missionOffered = false;
+            kingChatState.offeredMission = null;
           } else {
-            kingResponse = kingStrings.missionPrompt;
+            if (activeMission?.id === KING_LETTER_MISSION.id) {
+              const products = await getQuestItems(false);
+              kingResponse = getLetterMissionOfferPrompt(activeMission, products);
+            } else {
+              kingResponse = kingStrings.missionPrompt;
+            }
             setKingMissionOffered(activeMission);
           }
         } else if (/\b(hi|hello|hey|greetings|good day)\b/.test(lowerText)) {
-          kingResponse = 'I greet thee, my loyal subject.';
+          kingResponse = applyPlayerNameSubstitution('I greet thee, my loyal subject Player.');
           kingChatState.missionOffered = false;
           kingChatState.offeredMission = null;
         } else {
@@ -10872,8 +11144,21 @@ function createNPCCooldownManager() {
       // Al Dee mission chat state
       const alDeeChatState = {
         offeringFishingMission: false,
-        awaitingAxeConfirm: false
+        awaitingAxeConfirm: false,
+        offeringRopeMission: false,
+        awaitingRopeConfirm: false
       };
+
+      function isAlDeeLetterMissionCompleted() {
+        return !!getMissionProgress(KING_LETTER_MISSION).completed;
+      }
+
+      let fishingRodBuyButtonUpdater = null;
+      function refreshFishingRodShopAvailability() {
+        if (typeof fishingRodBuyButtonUpdater === 'function') {
+          fishingRodBuyButtonUpdater();
+        }
+      }
 
       // Create cooldown manager for Al Dee conversation
       const alDeeCooldown = createNPCCooldownManager();
@@ -10975,26 +11260,48 @@ function createNPCCooldownManager() {
           });
         }
 
+        const requiresLetterComplete = itemId === 'fishing_rod';
+
         function updateButtonState() {
           if (isPurchased) {
             buyButton.textContent = 'Bought';
             buyButton.disabled = true;
             buyButton.style.filter = 'grayscale(100%)';
             buyButton.style.opacity = '0.6';
-          } else {
-            buyButton.textContent = 'Buy';
-            buyButton.disabled = false;
-            buyButton.style.filter = '';
-            buyButton.style.opacity = '';
+            return;
           }
+          if (requiresLetterComplete && !isAlDeeLetterMissionCompleted()) {
+            buyButton.textContent = 'Locked';
+            buyButton.disabled = true;
+            buyButton.style.filter = 'grayscale(100%)';
+            buyButton.style.opacity = '0.6';
+            return;
+          }
+          buyButton.textContent = 'Buy';
+          buyButton.disabled = false;
+          buyButton.style.filter = '';
+          buyButton.style.opacity = '';
         }
 
         // Initialize button state
         updateButtonState();
+        if (requiresLetterComplete) {
+          fishingRodBuyButtonUpdater = updateButtonState;
+        }
 
         // Buy button click handler
         buyButton.addEventListener('click', async () => {
           try {
+            if (requiresLetterComplete && !isAlDeeLetterMissionCompleted()) {
+              addMessageToConversation(
+                'Al Dee',
+                AL_DEE_FISHING_MISSION.requiresLetterForFishingRod
+                  || 'I only sell fishing rods to those who\'ve finished delivering the king\'s stamped letter to me.',
+                true
+              );
+              return;
+            }
+
             // Check if player has enough guild coins
             const coinsGetter = globalThis.getGuildCoins ||
               (globalThis.Guilds && globalThis.Guilds.getGuildCoins) ||
@@ -11200,91 +11507,86 @@ function createNPCCooldownManager() {
           }
         }
 
-        // Check for stamped letter delivery mission
-        let missionCompleted = false;
-        if (lowerText.includes('letter') || lowerText.includes('deliver') || lowerText.includes('king') || lowerText.includes('tibianus')) {
+        // Prefer handing in the stamped letter before any other Al Dee progress.
+        async function tryDeliverStampedLetterToAlDee(playerNameForMsg, sourceText) {
           try {
+            if (isAlDeeLetterMissionCompleted()) return false;
             const currentProducts = await getQuestItems();
             const hasStampedLetter = (currentProducts['Stamped Letter'] || 0) > 0;
+            if (!hasStampedLetter) return false;
 
-            if (hasStampedLetter) {
-              // Remove the stamped letter from inventory
-              await consumeQuestItem('Stamped Letter', 1);
-              console.log('[Quests Mod][Al Dee] Stamped Letter delivered, consuming from inventory');
+            await consumeQuestItem('Stamped Letter', 1);
+            console.log('[Quests Mod][Al Dee] Stamped Letter delivered, consuming from inventory');
+            NotificationService.showItemReceived('Stamped Letter', '[Quests Mod][Al Dee]', TOAST_MESSAGES.deliveredTo('Al Dee'));
 
-              // Show delivery toast
-              NotificationService.showItemReceived('Stamped Letter', '[Quests Mod][Al Dee]', TOAST_MESSAGES.deliveredTo('Al Dee'));
+            const coinsAdder = globalThis.addGuildCoins ||
+              (globalThis.Guilds && globalThis.Guilds.addGuildCoins) ||
+              (globalThis.BestiaryModAPI && globalThis.BestiaryModAPI.guilds && globalThis.BestiaryModAPI.guilds.addGuildCoins) ||
+              (typeof addGuildCoins === 'function' ? addGuildCoins : null);
 
-              // Award guild coins
-              const coinsAdder = globalThis.addGuildCoins ||
-                (globalThis.Guilds && globalThis.Guilds.addGuildCoins) ||
-                (globalThis.BestiaryModAPI && globalThis.BestiaryModAPI.guilds && globalThis.BestiaryModAPI.guilds.addGuildCoins) ||
-                (typeof addGuildCoins === 'function' ? addGuildCoins : null);
-
-              if (coinsAdder) {
-                await coinsAdder(50);
-                console.log('[Quests Mod][Al Dee] Awarded 50 guild coins for letter delivery');
-              } else {
-                console.warn('[Quests Mod][Al Dee] addGuildCoins not available, skipping guild coin reward');
-              }
-
-              // Mark the letter mission as completed
-              setMissionProgress(KING_LETTER_MISSION, { accepted: true, completed: true });
-              console.log('[Quests Mod][Al Dee] Letter delivery mission completed');
-
-              // Remove Letter from Al Dee from inventory if it still exists (unique item, shouldn't remain after quest completion)
-              try {
-                const currentProducts = await getQuestItems(false);
-                const letterCount = currentProducts['Letter from Al Dee'] || 0;
-                if (letterCount > 0) {
-                  await consumeQuestItem('Letter from Al Dee', letterCount);
-                  console.log('[Quests Mod][Al Dee] Removed Letter from Al Dee from inventory (unique item, quest completed)');
-                }
-              } catch (error) {
-                console.error('[Quests Mod][Al Dee] Error removing Letter from Al Dee:', error);
-              }
-
-              // Save progress to Firebase
-              const playerName = getCurrentPlayerName();
-              if (playerName) {
-                await saveKingTibianusProgress(playerName, {
-                  copper: kingChatState.progressCopper,
-                  dragon: kingChatState.progressDragon,
-                  letter: kingChatState.progressLetter
-                });
-                console.log('[Quests Mod][Al Dee] Letter mission progress saved to Firebase');
-              }
-
-              // Update tile 79 right-click state (mission completed, tile 79 should work even without Stamped Letter)
-              if (typeof updateTile79RightClickState === 'function') {
-                updateTile79RightClickState();
-                console.log('[Quests Mod][Al Dee] Tile 79 state updated after mission completion');
-              }
-
-              // Update guild coin display
-              updateGuildCoinDisplay();
-
-              // Mark mission as completed
-              missionCompleted = true;
-
-              // Queue response with cooldown
-              alDeeCooldown.queueResponse(
-                text,
-                'Ah, finally! The king\'s stamped letter. Thank you for delivering it, ' + playerName + '. Here\'s 50 guild coins as a reward for your service.',
-                addMessageToConversation,
-                'Al Dee'
-              );
-
-              return; // Exit early, don't show regular transcript response
+            if (coinsAdder) {
+              await coinsAdder(50);
+              console.log('[Quests Mod][Al Dee] Awarded 50 guild coins for letter delivery');
+            } else {
+              console.warn('[Quests Mod][Al Dee] addGuildCoins not available, skipping guild coin reward');
             }
+
+            setMissionProgress(KING_LETTER_MISSION, { accepted: true, completed: true });
+            console.log('[Quests Mod][Al Dee] Letter delivery mission completed');
+
+            try {
+              const afterProducts = await getQuestItems(false);
+              const letterCount = afterProducts['Letter from Al Dee'] || 0;
+              if (letterCount > 0) {
+                await consumeQuestItem('Letter from Al Dee', letterCount);
+                console.log('[Quests Mod][Al Dee] Removed Letter from Al Dee from inventory (unique item, quest completed)');
+              }
+            } catch (error) {
+              console.error('[Quests Mod][Al Dee] Error removing Letter from Al Dee:', error);
+            }
+
+            const saveName = getCurrentPlayerName();
+            if (saveName) {
+              await saveKingTibianusProgress(saveName, getAllMissionProgress());
+              console.log('[Quests Mod][Al Dee] Letter mission progress saved to Firebase');
+            }
+
+            if (typeof updateTile79RightClickState === 'function') {
+              updateTile79RightClickState();
+              console.log('[Quests Mod][Al Dee] Tile 79 state updated after mission completion');
+            }
+
+            updateGuildCoinDisplay();
+            refreshFishingRodShopAvailability();
+            refreshBoardNpcsAfterQuestItemsChange();
+
+            alDeeCooldown.queueResponse(
+              sourceText,
+              'Ah, finally! The king\'s stamped letter. Thank you for delivering it, ' + playerNameForMsg + '. Here\'s 50 guild coins as a reward for your service.',
+              addMessageToConversation,
+              'Al Dee'
+            );
+            return true;
           } catch (error) {
             console.error('[Quests Mod][Al Dee] Error checking/delivering stamped letter:', error);
+            return false;
+          }
+        }
+
+        // Check for stamped letter delivery mission
+        if (lowerText.includes('letter') || lowerText.includes('deliver') || lowerText.includes('king') || lowerText.includes('tibianus')) {
+          if (await tryDeliverStampedLetterToAlDee(playerName, text)) {
+            return;
           }
         }
 
         // Check for fishing mission keywords and Small Axe return
-        if (lowerText.includes('small axe') || lowerText.includes('axe') ||
-            (lowerText.includes('yes') && alDeeChatState.awaitingAxeConfirm)) {
+        // Mission acceptance ("yes" to a new offer) must win over a stale axe hand-in confirm.
+        const acceptingNewAlDeeMission = lowerText.includes('yes')
+          && (alDeeChatState.offeringFishingMission || alDeeChatState.offeringRopeMission);
+        if (!acceptingNewAlDeeMission && (
+            lowerText.includes('small axe') || lowerText.includes('axe') ||
+            (lowerText.includes('yes') && alDeeChatState.awaitingAxeConfirm))) {
           try {
             const currentProducts = await getQuestItems();
             const hasSmallAxe = (currentProducts['Small Axe'] || 0) > 0;
@@ -11294,6 +11596,7 @@ function createNPCCooldownManager() {
               await consumeQuestItem('Small Axe', 1);
               NotificationService.showItemReceived('Small Axe', '[Quests Mod][Al Dee]', TOAST_MESSAGES.returnedTo('Al Dee'));
               console.log('[Quests Mod][Al Dee] Small Axe returned, consuming from inventory');
+              alDeeChatState.awaitingAxeConfirm = false;
 
               // Award Light Shovel
               try {
@@ -11310,15 +11613,7 @@ function createNPCCooldownManager() {
 
               // Save progress to Firebase
               if (playerName) {
-                // Fetch existing progress to preserve mornenion field
-                const existingProgress = await getKingTibianusProgress(playerName);
-                await saveKingTibianusProgress(playerName, {
-                  copper: kingChatState.progressCopper,
-                  dragon: kingChatState.progressDragon,
-                  letter: kingChatState.progressLetter,
-                  alDeeFishing: kingChatState.progressAlDeeFishing,
-                  mornenion: existingProgress.mornenion || { defeated: false } // Preserve Mornenion defeat status
-                });
+                await saveKingTibianusProgress(playerName, getAllMissionProgress());
                 console.log('[Quests Mod][Al Dee] Fishing mission progress saved to Firebase');
               }
 
@@ -11454,6 +11749,18 @@ function createNPCCooldownManager() {
 
         // Check for mission acceptance
         if (lowerText.includes('yes') && alDeeChatState.offeringFishingMission) {
+          if (!isAlDeeLetterMissionCompleted()) {
+            alDeeChatState.offeringFishingMission = false;
+            alDeeCooldown.queueResponse(
+              text,
+              AL_DEE_FISHING_MISSION.requiresLetterComplete
+                || 'Before I set you another task, bring me the king\'s stamped letter. Deliver that first, then we can talk.',
+              addMessageToConversation,
+              'Al Dee'
+            );
+            return;
+          }
+
           // Start the fishing mission
           setMissionProgress(AL_DEE_FISHING_MISSION, { accepted: true, completed: false });
           
@@ -11469,13 +11776,7 @@ function createNPCCooldownManager() {
 
           // Save progress
           if (playerName) {
-            await saveKingTibianusProgress(playerName, {
-              copper: kingChatState.progressCopper,
-              dragon: kingChatState.progressDragon,
-              letter: kingChatState.progressLetter,
-              alDeeFishing: kingChatState.progressAlDeeFishing,
-              alDeeGoldenRope: kingChatState.progressAlDeeGoldenRope
-            });
+            await saveKingTibianusProgress(playerName, getAllMissionProgress());
             console.log('[Quests Mod][Al Dee] Fishing mission accepted, progress saved to Firebase');
           }
 
@@ -11496,24 +11797,15 @@ function createNPCCooldownManager() {
           );
 
           alDeeChatState.offeringRopeMission = false;
+          alDeeChatState.awaitingAxeConfirm = false;
+          alDeeChatState.awaitingRopeConfirm = false;
 
-          // Save progress - fetch current progress first to preserve all fields, then merge
+          // Save progress — always persist the full local snapshot
           if (playerName) {
             try {
-              const currentProgress = await getKingTibianusProgress(playerName);
-              await saveKingTibianusProgress(playerName, {
-                copper: kingChatState.progressCopper,
-                dragon: kingChatState.progressDragon,
-                letter: kingChatState.progressLetter,
-                alDeeFishing: kingChatState.progressAlDeeFishing,
-                alDeeGoldenRope: kingChatState.progressAlDeeGoldenRope, // This should now have accepted: true
-                mornenion: currentProgress.mornenion || { defeated: false } // Preserve Mornenion defeat status
-              });
+              await saveKingTibianusProgress(playerName, getAllMissionProgress());
               console.log('[Quests Mod][Al Dee] Golden rope mission accepted, progress saved to Firebase', {
-                saved: {
-                  alDeeGoldenRope: kingChatState.progressAlDeeGoldenRope
-                },
-                currentProgress: currentProgress
+                alDeeGoldenRope: kingChatState.progressAlDeeGoldenRope
               });
             } catch (error) {
               console.error('[Quests Mod][Al Dee] Error saving golden rope mission progress:', error);
@@ -11589,6 +11881,22 @@ function createNPCCooldownManager() {
         // Check for mission offer trigger
         if (lowerText.includes('mission') || lowerText.includes('missions') ||
             lowerText.includes('task') || lowerText.includes('quest') || lowerText.includes('help')) {
+          // Deliver stamped letter first if the player still has it.
+          if (await tryDeliverStampedLetterToAlDee(playerName, text)) {
+            return;
+          }
+
+          if (!isAlDeeLetterMissionCompleted()) {
+            alDeeCooldown.queueResponse(
+              text,
+              AL_DEE_FISHING_MISSION.requiresLetterComplete
+                || 'Before I set you another task, bring me the king\'s stamped letter. Deliver that first, then we can talk.',
+              addMessageToConversation,
+              'Al Dee'
+            );
+            return;
+          }
+
           // Al Dee's missions only (can be expanded in the future)
           const AL_DEE_MISSIONS = [AL_DEE_FISHING_MISSION, AL_DEE_GOLDEN_ROPE_MISSION];
 
@@ -11655,16 +11963,44 @@ function createNPCCooldownManager() {
             const missionProgress = getMissionProgress(activeMission);
 
             if (missionProgress.accepted) {
-              responseText = strings.missionActive;
+              // Prefer continuing progress when the player already holds the turn-in item.
+              let readyToHandIn = false;
+              try {
+                const products = await getQuestItems(false);
+                if (activeMission.id === AL_DEE_FISHING_MISSION.id && (products['Small Axe'] || 0) > 0) {
+                  alDeeChatState.awaitingAxeConfirm = true;
+                  alDeeChatState.awaitingRopeConfirm = false;
+                  alDeeChatState.offeringFishingMission = false;
+                  alDeeChatState.offeringRopeMission = false;
+                  readyToHandIn = true;
+                } else if (activeMission.id === AL_DEE_GOLDEN_ROPE_MISSION.id && (products['Elvenhair Rope'] || 0) > 0) {
+                  const mornenionDefeated = await isMornenionDefeated();
+                  if (mornenionDefeated) {
+                    alDeeChatState.awaitingRopeConfirm = true;
+                    alDeeChatState.awaitingAxeConfirm = false;
+                    alDeeChatState.offeringFishingMission = false;
+                    alDeeChatState.offeringRopeMission = false;
+                    readyToHandIn = true;
+                  }
+                }
+              } catch (error) {
+                console.error('[Quests Mod][Al Dee] Error checking mission hand-in items:', error);
+              }
+
+              responseText = readyToHandIn ? strings.keyQuestion : strings.missionActive;
             } else {
               // Offer the mission
               responseText = strings.missionPrompt;
+              alDeeChatState.awaitingAxeConfirm = false;
+              alDeeChatState.awaitingRopeConfirm = false;
 
               // Set appropriate offering flag based on mission
               if (activeMission.id === AL_DEE_FISHING_MISSION.id) {
                 alDeeChatState.offeringFishingMission = true;
+                alDeeChatState.offeringRopeMission = false;
               } else if (activeMission.id === AL_DEE_GOLDEN_ROPE_MISSION.id) {
                 alDeeChatState.offeringRopeMission = true;
+                alDeeChatState.offeringFishingMission = false;
               }
             }
           }
@@ -12078,7 +12414,8 @@ function createNPCCooldownManager() {
             costelloCooldown.queueResponse(text, COSTELLO_QUEEN_BANSHEES_MISSION.prompt, addMessageToConversation, 'Costello');
           } else if (queenBansheesProgress.accepted && !queenBansheesProgress.completed) {
             const hasAllSeven = areAllSevenSealsCompleted();
-            if (hasAllSeven && (lowerText.includes('done') || lowerText.includes('return') || lowerText.includes('finished') || lowerText.includes('completed') || lowerText.includes('yes'))) {
+            if (hasAllSeven) {
+              // Player is already with Costello and reporting the mission — finish the hand-in now.
               try {
                 await addQuestItem(COSTELLO_QUEEN_BANSHEES_MISSION.rewardItemName, 1);
                 await consumeQuestItem(COSTELLO_QUEEN_BANSHEES_MISSION.diaryItemName, 1);
@@ -12090,9 +12427,7 @@ function createNPCCooldownManager() {
                 costelloCooldown.queueResponse(text, getMissionCommonLine('errorGeneric', 'Something went wrong. Please try again.'), addMessageToConversation, 'Costello');
               }
             } else {
-              costelloCooldown.queueResponse(text, hasAllSeven
-                ? getMissionDialogueLine(COSTELLO_QUEEN_BANSHEES_MISSION, 'allSealsDoneHandIn', 'You have completed all seven seals. Return to me and say you are done when you wish to complete this task.')
-                : COSTELLO_QUEEN_BANSHEES_MISSION.alreadyActive, addMessageToConversation, 'Costello');
+              costelloCooldown.queueResponse(text, COSTELLO_QUEEN_BANSHEES_MISSION.alreadyActive, addMessageToConversation, 'Costello');
             }
           } else if (queenBansheesProgress.completed && !followerOfZathrothProgress.accepted) {
             costelloOfferingBloodProtector = true;
@@ -12578,6 +12913,33 @@ function createNPCCooldownManager() {
         return;
       }
 
+      const askingMagicElf =
+        lowerText.includes('magic elf') ||
+        lowerText.includes('magic elves');
+      if (askingMagicElf) {
+        const serpentineProgress = getMissionProgress(SERPENTINE_TOWER_MISSION);
+        if (serpentineProgress.accepted && !serpentineProgress.completed) {
+          try {
+            const questItems = await getQuestItems(false);
+            const hasRune = (questItems?.[DESTROY_FIELD_RUNE_CONFIG.productName] || 0) >= 1;
+            teshaCooldown.queueResponse(
+              text,
+              (hasRune
+                ? SERPENTINE_TOWER_MISSION.destroyFieldRuneAlreadyHave
+                : (SERPENTINE_TOWER_MISSION.magicElfHint
+                  || 'Search Shadowthorn near Venore for the remains of a magic elf. The destroy field rune rests upon that corpse, Player.')
+              ).replace(/Player/g, teshaPlayerName),
+              addMessage,
+              'Tesha'
+            );
+          } catch (err) {
+            console.error('[Quests Mod][Tesha] Error responding about magic elf:', err);
+            teshaCooldown.queueResponse(text, getMissionCommonLine('errorGeneric', 'Something went wrong. Please try again.'), addMessage, 'Tesha');
+          }
+          return;
+        }
+      }
+
       const askingDestroyFieldRune =
         lowerText.includes('destroy field rune') ||
         lowerText.includes('destroy field') ||
@@ -12728,8 +13090,35 @@ function createNPCCooldownManager() {
     return tab && isInDOM(tab) ? tab : null;
   }
 
-  function getActiveMissionTabId(missionId) {
-    return `${ACTIVE_MISSION_TAB_ID_PREFIX}${missionId}`;
+  function getQuestAdminDevTabElement() {
+    const tab = document.getElementById(QUEST_ADMIN_DEV_TAB_ID);
+    return tab && isInDOM(tab) ? tab : null;
+  }
+
+  async function isCurrentPlayerQuestAdminAsync() {
+    try {
+      const playerName = getCurrentPlayerName();
+      if (!playerName) return false;
+      const adminApi = globalThis.FirebaseAdminsAPI || (typeof window !== 'undefined' ? window.FirebaseAdminsAPI : null);
+      if (!adminApi) return false;
+      if (typeof adminApi.isPlayerAdminAsync === 'function') {
+        return Boolean(await adminApi.isPlayerAdminAsync(playerName));
+      }
+      if (typeof adminApi.isPlayerAdmin === 'function') {
+        if (typeof adminApi.refreshAdminList === 'function') {
+          await adminApi.refreshAdminList();
+        }
+        return Boolean(adminApi.isPlayerAdmin(playerName));
+      }
+      return false;
+    } catch (error) {
+      console.warn('[Quests Mod] Admin check failed:', error);
+      return false;
+    }
+  }
+
+  function getActiveMissionTabId(tabKey) {
+    return `${ACTIVE_MISSION_TAB_ID_PREFIX}${tabKey}`;
   }
 
   function getActiveMissionTabElements() {
@@ -12739,6 +13128,46 @@ function createNPCCooldownManager() {
 
   function getActiveQuestLogMissions() {
     return QUEST_LOG_MISSIONS.filter((mission) => MissionManager.isActive(mission));
+  }
+
+  /**
+   * Expand active missions into Quest Log tab entries.
+   * Most missions map 1:1; red dragon materials get one tab per material.
+   */
+  function getActiveMissionTabEntries(activeMissions = getActiveQuestLogMissions()) {
+    const entries = [];
+    for (const mission of activeMissions) {
+      if (mission.id === KING_RED_DRAGON_MISSION.id) {
+        const scales = Math.min(getCachedQuestItemCount('Red Dragon Scale'), 30);
+        const leathers = Math.min(getCachedQuestItemCount('Red Dragon Leather'), 30);
+        entries.push({
+          key: `${mission.id}:scales`,
+          missionId: mission.id,
+          mission,
+          objective: mission.objectiveLine1 || 'Gather 30 red dragon scales.',
+          progress: makeActiveMissionCountProgress(scales, 30),
+          iconFilename: 'Red_Dragon_Scale.PNG'
+        });
+        entries.push({
+          key: `${mission.id}:leathers`,
+          missionId: mission.id,
+          mission,
+          objective: mission.objectiveLine2 || 'Gather 30 red dragon leathers.',
+          progress: makeActiveMissionCountProgress(leathers, 30),
+          iconFilename: 'Red_Dragon_Leather.PNG'
+        });
+        continue;
+      }
+      entries.push({
+        key: mission.id,
+        missionId: mission.id,
+        mission,
+        objective: null,
+        progress: null,
+        iconFilename: null
+      });
+    }
+    return entries;
   }
 
   function getMissionQuestLogIconFilename(mission) {
@@ -12752,14 +13181,16 @@ function createNPCCooldownManager() {
     return Number.isFinite(spriteId) ? spriteId : null;
   }
 
-  function createActiveMissionIconElement(mission) {
-    const spriteId = getMissionQuestLogSpriteId(mission);
-    if (spriteId != null) {
-      const wrap = document.createElement('div');
-      wrap.className = `sprite item relative id-${spriteId}`;
-      wrap.style.zIndex = '1000';
-      wrap.innerHTML = `<div class="viewport"><img alt="${spriteId}" data-cropped="false" class="spritesheet" style="--cropX: 0; --cropY: 0;"></div>`;
-      return wrap;
+  function createActiveMissionIconElement(mission, iconFilenameOverride = null) {
+    if (!iconFilenameOverride) {
+      const spriteId = getMissionQuestLogSpriteId(mission);
+      if (spriteId != null) {
+        const wrap = document.createElement('div');
+        wrap.className = `sprite item relative id-${spriteId}`;
+        wrap.style.zIndex = '1000';
+        wrap.innerHTML = `<div class="viewport"><img alt="${spriteId}" data-cropped="false" class="spritesheet" style="--cropX: 0; --cropY: 0;"></div>`;
+        return wrap;
+      }
     }
 
     const iconImg = document.createElement('img');
@@ -12767,13 +13198,54 @@ function createNPCCooldownManager() {
     iconImg.className = 'pixelated';
     iconImg.width = 32;
     iconImg.height = 32;
-    iconImg.src = getQuestItemsAssetUrl(getMissionQuestLogIconFilename(mission));
+    iconImg.src = getQuestItemsAssetUrl(iconFilenameOverride || getMissionQuestLogIconFilename(mission));
     iconImg.style.imageRendering = 'pixelated';
     return iconImg;
   }
 
   function getCachedQuestItemCount(itemName) {
     return cachedQuestItems?.[itemName] || 0;
+  }
+
+  function getLetterMissionItemCounts(products = cachedQuestItems) {
+    const items = products && typeof products === 'object' ? products : {};
+    return {
+      letterCount: items['Letter from Al Dee'] || 0,
+      stampedLetterCount: items['Stamped Letter'] || 0
+    };
+  }
+
+  function getLetterMissionOfferPrompt(mission, products = cachedQuestItems) {
+    const { letterCount } = getLetterMissionItemCounts(products);
+    if (letterCount > 0) {
+      return mission?.promptWithLetter || mission?.prompt || '';
+    }
+    return mission?.prompt || '';
+  }
+
+  function getLetterMissionObjectiveText(mission = KING_LETTER_MISSION, products = cachedQuestItems) {
+    const { letterCount, stampedLetterCount } = getLetterMissionItemCounts(products);
+    if (stampedLetterCount > 0) {
+      return mission?.objectiveLine2 || 'Return the stamped letter to Al Dee.';
+    }
+    if (letterCount > 0) {
+      return mission?.objectiveLineBringLetter || 'Bring the letter to King Tibianus to be stamped.';
+    }
+    return mission?.objectiveLine1 || 'Find Al Dee.';
+  }
+
+  function getLetterMissionAlreadyActiveReply(mission = KING_LETTER_MISSION, products = cachedQuestItems) {
+    const { letterCount, stampedLetterCount } = getLetterMissionItemCounts(products);
+    if (stampedLetterCount > 0) {
+      return mission?.alreadyActiveStamped
+        || 'You already have my stamp on that letter. Deliver it to Al Dee in Rookgaard to finish this task.';
+    }
+    if (letterCount > 0) {
+      return mission?.alreadyActiveWithLetter
+        || 'You already have Al Dee\'s letter. Hand it to me and I shall stamp it for delivery.';
+    }
+    return mission?.alreadyActive
+      || 'You are already on this task. Seek Al Dee in Rookgaard — and bring me any letter of his you find so I may stamp it.';
   }
 
   function makeActiveMissionCountProgress(current, total) {
@@ -12784,20 +13256,30 @@ function createNPCCooldownManager() {
     };
   }
 
+  function hasSerpentineDestroyFieldRune() {
+    return getCachedQuestItemCount(DESTROY_FIELD_RUNE_CONFIG.productName) > 0
+      || !!getMissionProgress(SERPENTINE_TOWER_MISSION)?.destroyFieldRuneTaken;
+  }
+
   function getActiveMissionObjectiveLine(mission) {
     if (!mission) return 'In progress';
     const progress = getMissionProgress(mission);
 
     if (mission.id === SERPENTINE_TOWER_MISSION.id) {
       if (progress?.putridChamberComplete) {
-        return mission.putridChamberReturnObjective || mission.objectiveLine2 || mission.objectiveLine1;
+        return mission.putridChamberReturnObjective
+          || 'Return to Tesha in Darama Oasis to receive your reward.';
       }
-      return mission.objectiveLine1;
+      if (hasSerpentineDestroyFieldRune()) {
+        return mission.objectiveLine2
+          || 'Clear the energy fields and use the lever in the Serpentine Tower basement.';
+      }
+      return mission.objectiveLine1
+        || 'Find a Destroy Field Rune in Shadowthorn near Venore.';
     }
 
     if (mission.id === KING_LETTER_MISSION.id) {
-      if (getCachedQuestItemCount('Stamped Letter') > 0) return mission.objectiveLine2;
-      return mission.objectiveLine1;
+      return getLetterMissionObjectiveText(mission);
     }
 
     if (mission.id === KING_SCARAB_COIN_MISSION.id) {
@@ -12903,6 +13385,14 @@ function createNPCCooldownManager() {
     if (!mission) return '';
     const progress = getMissionProgress(mission);
 
+    if (mission.id === SERPENTINE_TOWER_MISSION.id) {
+      if (progress?.putridChamberComplete) return '';
+      if (hasSerpentineDestroyFieldRune()) {
+        return mission.hintBasement || mission.hint || '';
+      }
+      return mission.hint || '';
+    }
+
     if (mission.id === SVENSON_LOVE_STORY_MISSION.id) {
       if (progress?.strandedAtWhiteWave && !progress?.whiteWaveSlippersDelivered) {
         return mission.hintWhiteWave || mission.hint || '';
@@ -12938,6 +13428,7 @@ function createNPCCooldownManager() {
     if (mission.id === KING_RED_DRAGON_MISSION.id) {
       const scales = Math.min(getCachedQuestItemCount('Red Dragon Scale'), 30);
       const leathers = Math.min(getCachedQuestItemCount('Red Dragon Leather'), 30);
+      // Combined fallback if a single tab path is used; Quest Log uses split tabs.
       return makeActiveMissionCountProgress(scales + leathers, 60);
     }
 
@@ -12966,11 +13457,12 @@ function createNPCCooldownManager() {
     }
 
     if (mission.id === KING_LETTER_MISSION.id) {
-      if (getCachedQuestItemCount('Stamped Letter') > 0) {
+      const { letterCount, stampedLetterCount } = getLetterMissionItemCounts();
+      if (stampedLetterCount > 0) {
         return makeActiveMissionCountProgress(1, 1);
       }
-      const hasLetter = getCachedQuestItemCount('Letter from Al Dee') > 0;
-      return makeActiveMissionCountProgress(hasLetter ? 1 : 0, 1);
+      // Find Al Dee / bring letter for stamping — ready when the unstamped letter is held
+      return makeActiveMissionCountProgress(letterCount > 0 ? 1 : 0, 1);
     }
 
     if (mission.id === AL_DEE_FISHING_MISSION.id) {
@@ -13042,8 +13534,8 @@ function createNPCCooldownManager() {
       if (progress?.putridChamberComplete) {
         return makeActiveMissionCountProgress(1, 1);
       }
-      const hasRune = getCachedQuestItemCount(DESTROY_FIELD_RUNE_CONFIG.productName) > 0;
-      return makeActiveMissionCountProgress(hasRune ? 1 : 0, 1);
+      // 0/2 = still need the rune; 1/2 = rune found, basement/lever remains.
+      return makeActiveMissionCountProgress(hasSerpentineDestroyFieldRune() ? 1 : 0, 2);
     }
 
     return null;
@@ -13081,7 +13573,11 @@ function createNPCCooldownManager() {
     return wrap;
   }
 
-  function renderActiveMissionTabContent(tab, mission) {
+  function renderActiveMissionTabContent(tab, entryOrMission) {
+    const entry = entryOrMission?.mission
+      ? entryOrMission
+      : { mission: entryOrMission, objective: null, progress: null, iconFilename: null };
+    const mission = entry.mission;
     tab.replaceChildren();
 
     const row = document.createElement('div');
@@ -13089,7 +13585,7 @@ function createNPCCooldownManager() {
 
     const iconSlot = document.createElement('div');
     iconSlot.className = 'container-slot surface-darker grid place-items-center px-3.5 py-0.5 relative';
-    iconSlot.appendChild(createActiveMissionIconElement(mission));
+    iconSlot.appendChild(createActiveMissionIconElement(mission, entry.iconFilename));
 
     const info = document.createElement('div');
     info.className = 'flex w-full flex-col justify-center';
@@ -13099,8 +13595,8 @@ function createNPCCooldownManager() {
     title.textContent = mission.title;
     info.appendChild(title);
 
-    const objectiveLine = getActiveMissionObjectiveLine(mission);
-    const progressDisplay = getActiveMissionProgressDisplay(mission);
+    const objectiveLine = entry.objective || getActiveMissionObjectiveLine(mission);
+    const progressDisplay = entry.progress || getActiveMissionProgressDisplay(mission);
 
     const statusLine = document.createElement('p');
     statusLine.className = 'pixel-font-14 mt-1';
@@ -13127,24 +13623,28 @@ function createNPCCooldownManager() {
     }
 
     const activeMissions = getActiveQuestLogMissions();
-    const activeIds = new Set(activeMissions.map((mission) => mission.id));
+    const activeMissionIds = new Set(activeMissions.map((mission) => mission.id));
+    const tabEntries = getActiveMissionTabEntries(activeMissions);
+    const activeTabKeys = new Set(tabEntries.map((entry) => entry.key));
 
     existingTabs.forEach((tab) => {
       const missionId = tab.getAttribute(ACTIVE_MISSION_TAB_ATTR);
-      if (!activeIds.has(missionId)) {
+      const tabKey = tab.getAttribute('data-quests-active-mission-tab-key') || missionId;
+      if (!activeMissionIds.has(missionId) || !activeTabKeys.has(tabKey)) {
         tab.remove();
       }
     });
 
     let insertAfter = kingTab;
-    activeMissions.forEach((mission, index) => {
-      const tabId = getActiveMissionTabId(mission.id);
+    tabEntries.forEach((entry, index) => {
+      const tabId = getActiveMissionTabId(entry.key);
       let tab = document.getElementById(tabId);
 
       if (!tab) {
         tab = document.createElement('div');
         tab.id = tabId;
-        tab.setAttribute(ACTIVE_MISSION_TAB_ATTR, mission.id);
+        tab.setAttribute(ACTIVE_MISSION_TAB_ATTR, entry.missionId);
+        tab.setAttribute('data-quests-active-mission-tab-key', entry.key);
         tab.setAttribute('data-highlighted', 'false');
         tab.setAttribute('data-disabled', 'false');
         tab.dataset.questsOriginalDisplay = '';
@@ -13153,7 +13653,7 @@ function createNPCCooldownManager() {
 
       tab.className = getActiveMissionTabClassName();
       tab.style.order = String(-1 + index);
-      renderActiveMissionTabContent(tab, mission);
+      renderActiveMissionTabContent(tab, entry);
 
       const desiredNext = insertAfter.nextElementSibling;
       if (tab.parentNode !== questLogContainer || desiredNext !== tab) {
@@ -13172,6 +13672,7 @@ function createNPCCooldownManager() {
 
   function getArenaQuestLogCards() {
     return [
+      getQuestAdminDevTabElement(),
       getKingTabElement(),
       getArenaLeaderboardTabElement(),
       ...getActiveMissionTabElements()
@@ -13403,6 +13904,7 @@ function createNPCCooldownManager() {
       }
       verifyKingTibianusTabPosition();
       verifyArenaLeaderboardTabPosition();
+      syncQuestAdminDevTab().catch(() => {});
       const kingTab = getKingTabElement();
       if (kingTab) {
         syncActiveMissionTabs();
@@ -13611,6 +14113,7 @@ function createNPCCooldownManager() {
   function resetQuestLogView(questLogContainer = findQuestLogContainer()) {
     const kingTab = getKingTabElement();
     const leaderboardTab = getArenaLeaderboardTabElement();
+    const adminDevTab = getQuestAdminDevTabElement();
     const activeMissionTabs = getActiveMissionTabElements();
     if (!questLogContainer) {
       kingModeActive = false;
@@ -13620,6 +14123,9 @@ function createNPCCooldownManager() {
       }
       if (leaderboardTab) {
         leaderboardTab.style.display = 'none';
+      }
+      if (adminDevTab) {
+        adminDevTab.style.display = 'none';
       }
       activeMissionTabs.forEach((tab) => {
         tab.style.display = 'none';
@@ -13634,6 +14140,9 @@ function createNPCCooldownManager() {
     }
     if (leaderboardTab) {
       leaderboardTab.style.display = 'none';
+    }
+    if (adminDevTab) {
+      adminDevTab.style.display = 'none';
     }
     activeMissionTabs.forEach((tab) => {
       tab.style.display = 'none';
@@ -13722,6 +14231,7 @@ function createNPCCooldownManager() {
       createArenaLeaderboardTab();
     }
     if (kingTab) {
+      syncQuestAdminDevTab().catch(() => {});
       syncActiveMissionTabs();
     }
 
@@ -13734,6 +14244,10 @@ function createNPCCooldownManager() {
         }
         if (leaderboardTab) {
           leaderboardTab.style.display = 'none';
+        }
+        const adminDevTab = getQuestAdminDevTabElement();
+        if (adminDevTab) {
+          adminDevTab.style.display = 'none';
         }
         getActiveMissionTabElements().forEach((tab) => {
           tab.style.display = 'none';
@@ -13783,6 +14297,375 @@ function createNPCCooldownManager() {
     return 'frame-1 surface-regular relative grid gap-2 p-1.5 text-center data-[disabled=\'true\']:order-last md:data-[highlighted=\'true\']:brightness-[1.2]';
   }
 
+  function getQuestAdminDevTabHtml() {
+    return `
+      <div class="flex w-full flex-col items-center text-center">
+        <p class="w-full text-whiteHighlight">Quest Dev Tools</p>
+        <p class="pixel-font-14 mt-0.5" style="color:#888;">Admin only</p>
+        <div class="flex gap-1 mt-1 w-full">
+          <button class="focus-style-visible flex items-center justify-center tracking-wide disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-blue active:frame-pressed-1-blue surface-blue gap-1 px-2 py-0.5 pb-[3px] pixel-font-16 flex-1 text-whiteHighlight" id="${QUEST_ADMIN_DEV_OPEN_BTN_ID}">
+            Open Tools
+          </button>
+        </div>
+      </div>
+    `;
+  }
+
+  function createQuestAdminDevButtonStyle() {
+    return `
+      focus-style-visible flex items-center justify-center tracking-wide disabled:cursor-not-allowed
+      disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-blue active:frame-pressed-1-blue
+      surface-blue gap-1 px-2 py-0.5 pb-[3px] pixel-font-14 text-whiteHighlight
+    `.replace(/\s+/g, ' ').trim();
+  }
+
+  function createQuestAdminDevDangerButtonStyle() {
+    return `
+      focus-style-visible flex items-center justify-center tracking-wide disabled:cursor-not-allowed
+      disabled:text-whiteDark/60 disabled:grayscale-50 frame-1 active:frame-pressed-1
+      surface-regular gap-1 px-2 py-0.5 pb-[3px] pixel-font-14
+    `.replace(/\s+/g, ' ').trim();
+  }
+
+  function bindQuestAdminDevOpenButton(tabElement) {
+    const btn = tabElement?.querySelector(`#${QUEST_ADMIN_DEV_OPEN_BTN_ID}`);
+    if (!btn || btn.dataset.questsBound === '1') return;
+    btn.dataset.questsBound = '1';
+    btn.addEventListener('click', () => {
+      showQuestAdminDevModal().catch((err) => {
+        console.error('[Quests Mod][Dev] Failed to open admin tools modal:', err);
+      });
+    });
+  }
+
+  async function syncQuestAdminDevTab() {
+    const allowed = await isCurrentPlayerQuestAdminAsync();
+    if (!allowed) {
+      getQuestAdminDevTabElement()?.remove();
+      return null;
+    }
+    return createQuestAdminDevTab();
+  }
+
+  function createQuestAdminDevTab() {
+    const questLogContainer = findQuestLogContainer();
+    const leaderboardTab = getArenaLeaderboardTabElement();
+    const kingTab = getKingTabElement();
+    if (!questLogContainer || !kingTab) return null;
+
+    let tabElement = getQuestAdminDevTabElement();
+    if (tabElement) {
+      tabElement.className = getArenaLeaderboardTabClassName();
+      tabElement.style.order = '-4';
+      tabElement.innerHTML = getQuestAdminDevTabHtml();
+      bindQuestAdminDevOpenButton(tabElement);
+      verifyQuestAdminDevTabPosition();
+      if (kingModeActive) {
+        tabElement.style.display = '';
+      }
+      return tabElement;
+    }
+
+    tabElement = document.createElement('div');
+    tabElement.id = QUEST_ADMIN_DEV_TAB_ID;
+    tabElement.className = getArenaLeaderboardTabClassName();
+    tabElement.setAttribute('data-highlighted', 'false');
+    tabElement.setAttribute('data-disabled', 'false');
+    tabElement.style.order = '-4';
+    tabElement.innerHTML = getQuestAdminDevTabHtml();
+    tabElement.dataset.questsOriginalDisplay = tabElement.style.display || '';
+    tabElement.style.display = kingModeActive ? '' : 'none';
+
+    const insertBefore = leaderboardTab || kingTab;
+    questLogContainer.insertBefore(tabElement, insertBefore);
+    bindQuestAdminDevOpenButton(tabElement);
+    verifyQuestAdminDevTabPosition();
+    return tabElement;
+  }
+
+  function verifyQuestAdminDevTabPosition() {
+    const adminTab = getQuestAdminDevTabElement();
+    const leaderboardTab = getArenaLeaderboardTabElement();
+    const kingTab = getKingTabElement();
+    const questLogContainer = findQuestLogContainer();
+    if (!adminTab || !kingTab || !questLogContainer) return;
+    if (adminTab.parentNode !== questLogContainer) return;
+
+    if (adminTab.style.order !== '-4') {
+      adminTab.style.order = '-4';
+    }
+
+    const insertBefore = leaderboardTab || kingTab;
+    if (adminTab.nextElementSibling !== insertBefore) {
+      questLogContainer.insertBefore(adminTab, insertBefore);
+    }
+  }
+
+  async function showQuestAdminDevModal() {
+    const allowed = await isCurrentPlayerQuestAdminAsync();
+    if (!allowed) {
+      console.warn('[Quests Mod][Dev] Quest Dev Tools are restricted to Firebase admins');
+      getQuestAdminDevTabElement()?.remove();
+      return;
+    }
+
+    const contentDiv = document.createElement('div');
+    applyModalContentStyles(contentDiv, QUEST_ADMIN_DEV_MODAL_WIDTH, QUEST_ADMIN_DEV_MODAL_HEIGHT);
+    contentDiv.classList.add('quests-king-chat-content');
+    contentDiv.style.flexDirection = 'column';
+    contentDiv.style.gap = '10px';
+    contentDiv.style.overflowY = 'auto';
+
+    const statusEl = document.createElement('p');
+    statusEl.className = 'pixel-font-14';
+    statusEl.style.cssText = 'margin:0;color:#888;min-height:18px;';
+    statusEl.textContent = 'Ready.';
+
+    const setStatus = (text, isError = false) => {
+      statusEl.textContent = text;
+      statusEl.style.color = isError ? '#ff8a80' : '#888';
+    };
+
+    let refreshItemCounts = () => {};
+    let refreshMissionStatuses = () => {};
+    let refreshSealStatuses = () => {};
+
+    const runGuarded = async (label, fn) => {
+      try {
+        setStatus(`Running: ${label}...`);
+        await fn();
+        if (typeof syncActiveMissionTabs === 'function') syncActiveMissionTabs();
+        refreshItemCounts();
+        refreshMissionStatuses();
+        refreshSealStatuses();
+        setStatus(`Done: ${label}`);
+      } catch (error) {
+        console.error('[Quests Mod][Dev]', label, error);
+        setStatus(`${label} failed: ${error?.message || error}`, true);
+      }
+    };
+
+    const PROGRESS_GREEN = 'rgba(76, 175, 80, 0.28)';
+    const PROGRESS_RED = 'rgba(244, 67, 54, 0.22)';
+    const PROGRESS_ACTIVE = 'rgba(230, 215, 176, 0.22)';
+    const TEXT_GREEN = 'rgb(96, 192, 96)';
+    const TEXT_RED = 'rgb(255, 138, 128)';
+    const TEXT_ACTIVE = 'rgb(230, 215, 176)';
+
+    const applyRowProgressStyle = (row, state) => {
+      if (state === 'done') {
+        row.style.background = PROGRESS_GREEN;
+        row.style.outline = '1px solid rgba(96, 192, 96, 0.55)';
+      } else if (state === 'active') {
+        row.style.background = PROGRESS_ACTIVE;
+        row.style.outline = '1px solid rgba(230, 215, 176, 0.45)';
+      } else {
+        row.style.background = PROGRESS_RED;
+        row.style.outline = '1px solid rgba(255, 138, 128, 0.45)';
+      }
+    };
+
+    const section = (titleText) => {
+      const wrap = document.createElement('div');
+      wrap.style.cssText = 'display:flex;flex-direction:column;gap:6px;';
+      const title = document.createElement('p');
+      title.className = 'text-whiteHighlight';
+      title.style.margin = '0';
+      title.textContent = titleText;
+      wrap.appendChild(title);
+      return wrap;
+    };
+
+    const buttonRow = (parent) => {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;';
+      parent.appendChild(row);
+      return row;
+    };
+
+    const makeBtn = (label, onClick, { danger = false } = {}) => {
+      const btn = document.createElement('button');
+      btn.textContent = label;
+      btn.className = danger ? createQuestAdminDevDangerButtonStyle() : createQuestAdminDevButtonStyle();
+      if (danger) btn.style.color = '#ff8a80';
+      btn.addEventListener('click', onClick);
+      return btn;
+    };
+
+    // Quick actions
+    const quick = section('Quick actions');
+    const quickRow = buttonRow(quick);
+    quickRow.appendChild(makeBtn('Log state', () => runGuarded('Log state', () => QuestsDev.check())));
+    quickRow.appendChild(makeBtn('Complete all', () => runGuarded('Complete all', () => QuestsDev.completeAll())));
+    quickRow.appendChild(makeBtn('Reset all', () => runGuarded('Reset all', () => QuestsDev.resetAll()), { danger: true }));
+    quickRow.appendChild(makeBtn('Reset Santa', () => runGuarded('Reset Santa', () => QuestsDev.resetSanta())));
+    quickRow.appendChild(makeBtn('Reset Iron Ore flag', () => runGuarded('Reset Iron Ore flag', () => QuestsDev.resetIronOreReceived())));
+    quickRow.appendChild(makeBtn('Reset Love Story + items', () => runGuarded('Reset Love Story + items', () => QuestsDev.resetLoveStoryWithItems())));
+    contentDiv.appendChild(quick);
+
+    const listWrapStyle = 'display:flex;flex-direction:column;gap:4px;max-height:220px;overflow-y:auto;padding-right:2px;';
+    const rowStyle = 'display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;padding:4px 6px;border-radius:2px;';
+
+    // All items in story order
+    const itemsSection = section('Items (story order)');
+    const itemsList = document.createElement('div');
+    itemsList.style.cssText = listWrapStyle;
+    const itemRows = new Map();
+
+    refreshItemCounts = () => {
+      for (const [key, { row, countEl, nameEl }] of itemRows.entries()) {
+        const itemName = resolveQuestDevItemName(key);
+        nameEl.textContent = itemName;
+        const count = cachedQuestItems?.[itemName] || 0;
+        countEl.textContent = String(count);
+        const owned = count > 0;
+        countEl.style.color = owned ? TEXT_GREEN : TEXT_RED;
+        nameEl.style.color = owned ? TEXT_GREEN : TEXT_RED;
+        applyRowProgressStyle(row, owned ? 'done' : 'missing');
+      }
+    };
+
+    for (const key of getQuestDevItemKeysInProgressOrder()) {
+      const itemName = resolveQuestDevItemName(key);
+      const row = document.createElement('div');
+      row.style.cssText = rowStyle;
+
+      const left = document.createElement('div');
+      left.style.cssText = 'display:flex;align-items:center;gap:8px;min-width:0;flex:1;';
+      const nameEl = document.createElement('span');
+      nameEl.className = 'pixel-font-14';
+      nameEl.style.cssText = 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+      nameEl.textContent = itemName;
+      nameEl.title = key;
+      const countEl = document.createElement('span');
+      countEl.className = 'pixel-font-14';
+      countEl.style.cssText = 'min-width:28px;text-align:right;';
+      itemRows.set(key, { row, countEl, nameEl });
+      left.appendChild(nameEl);
+      left.appendChild(countEl);
+
+      const actions = document.createElement('div');
+      actions.style.cssText = 'display:flex;gap:4px;flex-shrink:0;';
+      const grantAmount = (key === 'scale' || key === 'leather') ? 30 : 1;
+      actions.appendChild(makeBtn(`+${grantAmount}`, () => runGuarded(`Grant ${resolveQuestDevItemName(key)} +${grantAmount}`, () => QuestsDev.grant({ [key]: grantAmount }))));
+      actions.appendChild(makeBtn('-1', () => runGuarded(`Remove ${resolveQuestDevItemName(key)} -1`, () => QuestsDev.grant({ [key]: -1 })), { danger: true }));
+
+      row.appendChild(left);
+      row.appendChild(actions);
+      itemsList.appendChild(row);
+    }
+    refreshItemCounts();
+    itemsSection.appendChild(itemsList);
+    contentDiv.appendChild(itemsSection);
+
+    // All missions in story order
+    const missionSection = section('Missions (story order)');
+    const missionsList = document.createElement('div');
+    missionsList.style.cssText = listWrapStyle;
+    const missionRows = new Map();
+
+    refreshMissionStatuses = () => {
+      for (const [missionId, { row, statusEl, nameEl }] of missionRows.entries()) {
+        const mission = QUESTS_DEV_MISSIONS_BY_ID[missionId];
+        const status = getQuestDevMissionStatusLabel(mission);
+        statusEl.textContent = status;
+        if (status === 'completed') {
+          statusEl.style.color = TEXT_GREEN;
+          nameEl.style.color = TEXT_GREEN;
+          applyRowProgressStyle(row, 'done');
+        } else if (status === 'accepted') {
+          statusEl.style.color = TEXT_ACTIVE;
+          nameEl.style.color = TEXT_ACTIVE;
+          applyRowProgressStyle(row, 'active');
+        } else {
+          statusEl.style.color = TEXT_RED;
+          nameEl.style.color = TEXT_RED;
+          applyRowProgressStyle(row, 'missing');
+        }
+      }
+    };
+
+    for (const mission of getQuestDevMissionsInProgressOrder()) {
+      const row = document.createElement('div');
+      row.style.cssText = rowStyle;
+
+      const left = document.createElement('div');
+      left.style.cssText = 'display:flex;align-items:center;gap:8px;min-width:0;flex:1;';
+      const nameEl = document.createElement('span');
+      nameEl.className = 'pixel-font-14';
+      nameEl.style.cssText = 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+      nameEl.textContent = mission.title || mission.id;
+      nameEl.title = mission.id;
+      const missionStatusEl = document.createElement('span');
+      missionStatusEl.className = 'pixel-font-14';
+      missionStatusEl.style.cssText = 'min-width:72px;text-align:right;text-transform:lowercase;';
+      missionRows.set(mission.id, { row, statusEl: missionStatusEl, nameEl });
+      left.appendChild(nameEl);
+      left.appendChild(missionStatusEl);
+
+      const actions = document.createElement('div');
+      actions.style.cssText = 'display:flex;gap:4px;flex-shrink:0;';
+      actions.appendChild(makeBtn('Accept', () => runGuarded(`Accept ${mission.id}`, () => QuestsDev.setAccepted(mission.id))));
+      actions.appendChild(makeBtn('Complete', () => runGuarded(`Complete ${mission.id}`, () => QuestsDev.complete(mission.id))));
+      actions.appendChild(makeBtn('Reset', () => runGuarded(`Reset ${mission.id}`, () => QuestsDev.reset(mission.id)), { danger: true }));
+
+      row.appendChild(left);
+      row.appendChild(actions);
+      missionsList.appendChild(row);
+    }
+    refreshMissionStatuses();
+    missionSection.appendChild(missionsList);
+    contentDiv.appendChild(missionSection);
+
+    // Seals
+    const sealsSection = section('Seven seals');
+    const sealsRow = buttonRow(sealsSection);
+    const sealButtons = [];
+    for (let i = 0; i < SEVEN_SEALS_COUNT; i++) {
+      const btn = makeBtn(`Seal ${i + 1}`, () => runGuarded(`Complete seal ${i + 1}`, async () => {
+        await QuestsDev.setSealCompleted(i, true);
+      }));
+      sealButtons.push({ index: i, btn });
+      sealsRow.appendChild(btn);
+    }
+    sealsRow.appendChild(makeBtn('All seals', () => runGuarded('Complete all seals', () => QuestsDev.grant({
+      firstSeal: 1, secondSeal: 1, thirdSeal: 1, fourthSeal: 1, fifthSeal: 1, sixthSeal: 1, seventhSeal: 1
+    }))));
+    sealsRow.appendChild(makeBtn('Clear seals', () => runGuarded('Clear seals', () => QuestsDev.grant({ resetAllSeals: true })), { danger: true }));
+    contentDiv.appendChild(sealsSection);
+
+    refreshSealStatuses = () => {
+      for (const { index, btn } of sealButtons) {
+        const done = typeof QuestsDev.getSealCompleted === 'function'
+          ? QuestsDev.getSealCompleted(index)
+          : getSealCompleted(index);
+        btn.style.background = done ? PROGRESS_GREEN : PROGRESS_RED;
+        btn.style.color = done ? TEXT_GREEN : TEXT_RED;
+        btn.style.outline = done
+          ? '1px solid rgba(96, 192, 96, 0.55)'
+          : '1px solid rgba(255, 138, 128, 0.45)';
+      }
+    };
+    refreshSealStatuses();
+
+    contentDiv.appendChild(statusEl);
+
+    const help = document.createElement('p');
+    help.className = 'pixel-font-14';
+    help.style.cssText = 'margin:0;color:#666;';
+    help.textContent = 'Console: QuestsDev.help() — same API as this panel.';
+    contentDiv.appendChild(help);
+
+    openQuestsModal({
+      title: 'Quest Dev Tools',
+      content: contentDiv,
+      maxWidth: QUEST_ADMIN_DEV_MODAL_WIDTH,
+      maxHeight: QUEST_ADMIN_DEV_MODAL_HEIGHT,
+      minHeight: QUEST_ADMIN_DEV_MODAL_MIN_HEIGHT,
+      buttons: [{ text: 'Close', primary: false }]
+    });
+  }
+
   function createArenaLeaderboardTab() {
     const questLogContainer = findQuestLogContainer();
     const kingTab = getKingTabElement();
@@ -13795,6 +14678,7 @@ function createNPCCooldownManager() {
       tabElement.innerHTML = getArenaLeaderboardTabHtml();
       bindArenaRankingsOpenButton(tabElement);
       verifyArenaLeaderboardTabPosition();
+      verifyQuestAdminDevTabPosition();
       return;
     }
 
@@ -13811,6 +14695,7 @@ function createNPCCooldownManager() {
     questLogContainer.insertBefore(tabElement, kingTab);
 
     bindArenaRankingsOpenButton(tabElement);
+    verifyQuestAdminDevTabPosition();
   }
 
   function verifyArenaLeaderboardTabPosition() {
@@ -13840,6 +14725,7 @@ function createNPCCooldownManager() {
       console.log('[Quests Mod] King Tibianus tab already exists, skipping');
       createArenaLeaderboardTab();
       verifyArenaLeaderboardTabPosition();
+      syncQuestAdminDevTab().catch(() => {});
       syncActiveMissionTabs();
       return;
     }
@@ -13938,6 +14824,9 @@ function createNPCCooldownManager() {
     scheduleArenaRankDisplayUpdate(0);
     createArenaLeaderboardTab();
     verifyArenaLeaderboardTabPosition();
+    syncQuestAdminDevTab().catch((err) => {
+      console.warn('[Quests Mod] Could not sync Quest Dev admin tab:', err);
+    });
     syncActiveMissionTabs();
 
     console.log('[Quests Mod] King Tibianus tab created successfully!');
@@ -14614,7 +15503,7 @@ function createNPCCooldownManager() {
                       NotificationService.createBattleToastCallback(BATTLE_TOAST_LOG.mornenion)
                     );
                     setupMornenionTileRestrictions();
-                    showCustomBattleStatusToast({ battleName: 'Mornenion', allyLimit: 5, logPrefix: '[Quests Mod][Mornenion]' });
+                    showCustomBattleStatusToast({ battleName: 'Mornenion', allyLimit: 3, logPrefix: '[Quests Mod][Mornenion]' });
                     console.log('[Quests Mod][Overlay Hider] Mornenion battle initialized successfully');
                   } else {
                     console.error('[Quests Mod][Overlay Hider] Failed to initialize Mornenion battle after waiting');
@@ -14630,7 +15519,7 @@ function createNPCCooldownManager() {
                   NotificationService.createBattleToastCallback(BATTLE_TOAST_LOG.mornenion)
                 );
                 setupMornenionTileRestrictions();
-                showCustomBattleStatusToast({ battleName: 'Mornenion', allyLimit: 5, logPrefix: '[Quests Mod][Mornenion]' });
+                showCustomBattleStatusToast({ battleName: 'Mornenion', allyLimit: 3, logPrefix: '[Quests Mod][Mornenion]' });
                 console.log('[Quests Mod][Overlay Hider] Mornenion battle initialized successfully');
               } else {
                 console.error('[Quests Mod][Overlay Hider] Failed to initialize Mornenion battle - CustomBattles not available');
@@ -16131,12 +17020,43 @@ function createNPCCooldownManager() {
     return labels;
   }
 
+  function isQuestTileHighlightOverlay(el) {
+    return !!(el?.closest?.('.quests-tile-highlight-hitbox') || el?.closest?.(`.${TILE_HIGHLIGHT_CLASS}`));
+  }
+
   function resolveSerpentineFieldTileFromEvent(event) {
-    const fieldSprite = event.target.closest?.(SERPENTINE_FIELD_SPRITE_SELECTOR);
-    if (!fieldSprite) return null;
-    const tile = fieldSprite.closest('[id^="tile-index-"]');
-    if (!tile || !serpentineFieldState.tiles.has(tile)) return null;
-    return { tile, fieldSprite };
+    // Prefer a direct click on the field sprite.
+    const directSprite = event.target.closest?.(SERPENTINE_FIELD_SPRITE_SELECTOR);
+    if (directSprite) {
+      const tile = directSprite.closest('[id^="tile-index-"]');
+      if (tile && serpentineFieldState.tiles.has(tile)) {
+        return { tile, fieldSprite: directSprite };
+      }
+    }
+
+    // Highlight hitbox sits above the field sprite (z-index 10001) and blocks sprite targets.
+    // Any right-click on a tracked field tile / its quest overlay still counts.
+    const tileFromTarget = event.target.closest?.('[id^="tile-index-"]');
+    if (tileFromTarget && serpentineFieldState.tiles.has(tileFromTarget)) {
+      const fieldSprite = tileFromTarget.querySelector(SERPENTINE_FIELD_SPRITE_SELECTOR);
+      if (fieldSprite) return { tile: tileFromTarget, fieldSprite };
+    }
+
+    // Isometric overflow: visible field may sit under a neighboring tile's overlay.
+    if (isQuestTileHighlightOverlay(event.target)) {
+      for (const el of document.elementsFromPoint(event.clientX, event.clientY)) {
+        const sprite = el.matches?.(SERPENTINE_FIELD_SPRITE_SELECTOR)
+          ? el
+          : el.closest?.(SERPENTINE_FIELD_SPRITE_SELECTOR);
+        if (!sprite) continue;
+        const tile = sprite.closest('[id^="tile-index-"]');
+        if (tile && serpentineFieldState.tiles.has(tile)) {
+          return { tile, fieldSprite: sprite };
+        }
+      }
+    }
+
+    return null;
   }
 
   function handleSerpentineDestroyFieldRightClickDocument(event) {
@@ -16216,6 +17136,9 @@ function createNPCCooldownManager() {
               }
 
               enableSerpentineFieldTileRightClick();
+              if (typeof refreshQuestTileHighlights === 'function') {
+                refreshQuestTileHighlights();
+              }
             } catch (err) {
               console.error('[Quests Mod][Serpentine Field] Error using Destroy Field Rune:', err);
             } finally {
@@ -16292,6 +17215,9 @@ function createNPCCooldownManager() {
   async function markSerpentineRunePickupTaken({ saveProgress = true } = {}) {
     kingChatState.progressSerpentineTower.destroyFieldRuneTaken = true;
     serpentineRunePickupRightClickSystem.cleanup();
+    if (typeof refreshQuestTileHighlights === 'function') {
+      refreshQuestTileHighlights();
+    }
     if (saveProgress) {
       const playerName = getCurrentPlayerName();
       if (playerName) {
@@ -16310,6 +17236,9 @@ function createNPCCooldownManager() {
         await markSerpentineRunePickupTaken({ saveProgress: !isSerpentineRunePickupConsumed() });
       } else if (isSerpentineRunePickupConsumed()) {
         serpentineRunePickupRightClickSystem.cleanup();
+        if (typeof refreshQuestTileHighlights === 'function') {
+          refreshQuestTileHighlights();
+        }
       }
     } catch (error) {
       console.error('[Quests Mod][Serpentine Rune] Error syncing pickup state:', error);
@@ -16327,14 +17256,35 @@ function createNPCCooldownManager() {
           message: TOAST_MESSAGES.alreadyHaveDestroyFieldRune,
           logPrefix: '[Quests Mod][Serpentine Rune]'
         });
+        // Clear any leftover pickup glow if the rune is already owned.
+        serpentineRunePickupRightClickSystem.cleanup();
+        if (typeof refreshQuestTileHighlights === 'function') {
+          refreshQuestTileHighlights();
+        }
         return;
       }
 
-      await addQuestItem(DESTROY_FIELD_RUNE_CONFIG.productName, 1);
-      await capDestroyFieldRuneInventory();
-      playRightClickLootEffect(tile);
-      showQuestItemNotification(DESTROY_FIELD_RUNE_CONFIG.productName, 1);
-      await markSerpentineRunePickupTaken();
+      // Mark taken before inventory/board updates so loot effects cannot re-paint the pickup glow.
+      kingChatState.progressSerpentineTower.destroyFieldRuneTaken = true;
+      serpentineRunePickupRightClickSystem.cleanup();
+      if (typeof refreshQuestTileHighlights === 'function') {
+        refreshQuestTileHighlights();
+      }
+
+      try {
+        await addQuestItem(DESTROY_FIELD_RUNE_CONFIG.productName, 1);
+        await capDestroyFieldRuneInventory();
+        playRightClickLootEffect(tile);
+        showQuestItemNotification(DESTROY_FIELD_RUNE_CONFIG.productName, 1);
+
+        const playerName = getCurrentPlayerName();
+        if (playerName) {
+          await saveKingTibianusProgress(playerName, getAllMissionProgress());
+        }
+      } catch (err) {
+        kingChatState.progressSerpentineTower.destroyFieldRuneTaken = false;
+        throw err;
+      }
     } catch (err) {
       console.error('[Quests Mod][Serpentine Rune] Error picking up Destroy Field Rune:', err);
     } finally {
@@ -16400,17 +17350,25 @@ function createNPCCooldownManager() {
     const tile64El = getSerpentineBasementLeverTileElement();
     if (!tile64El || !tile64El.contains(event.target)) return;
 
+    // While a destroyable field still covers tile 64, Destroy Field owns the right-click.
+    if (serpentineFieldState.tiles.has(tile64El) && tile64El.querySelector(SERPENTINE_FIELD_SPRITE_SELECTOR)) {
+      return;
+    }
+
     const leverSprite = tile64El.querySelector(`.sprite.item.relative.id-${SERPENTINE_LEVER_SPRITE.from}`);
     const pulledLeverSprite = tile64El.querySelector(`.sprite.item.relative.id-${SERPENTINE_LEVER_SPRITE.to}`);
-    const clickedUnpulled = leverSprite && leverSprite.contains(event.target);
-    const clickedPulled = pulledLeverSprite && pulledLeverSprite.contains(event.target);
+    if (!leverSprite && !pulledLeverSprite) return;
+
+    const clickedOverlay = isQuestTileHighlightOverlay(event.target);
+    const clickedUnpulled = !!(leverSprite && (leverSprite.contains(event.target) || clickedOverlay || event.target === tile64El));
+    const clickedPulled = !!(pulledLeverSprite && (pulledLeverSprite.contains(event.target) || clickedOverlay || event.target === tile64El));
     if (!clickedUnpulled && !clickedPulled) return;
 
     event.preventDefault();
     event.stopImmediatePropagation();
     event.stopPropagation();
 
-    if (clickedUnpulled) {
+    if (clickedUnpulled && leverSprite) {
       leverSprite.classList.remove(`id-${SERPENTINE_LEVER_SPRITE.from}`);
       leverSprite.classList.add(`id-${SERPENTINE_LEVER_SPRITE.to}`);
       const img = leverSprite.querySelector('img');
@@ -16571,7 +17529,7 @@ function createNPCCooldownManager() {
     }
   }
 
-  // Rat Plague Al Dee should follow the same letter progression gate as normal Al Dee access.
+  // Rat Plague Al Dee appears once the player can deliver (or already delivered) the stamped letter.
   function shouldEnableRatPlagueAlDee() {
     return canAccessAlDeeByLetterProgression();
   }
@@ -17698,7 +18656,7 @@ function createNPCCooldownManager() {
       showSealCompletedToast('First', '[Quests Mod][First Seal]');
       setTimeout(() => playFirstSealTileCelebration(), 100);
     });
-    console.log('[Quests Mod][First Seal] Board observer set up for Ghostlands Surface (poison tiles)');
+    console.log(`[Quests Mod][First Seal] Board observer set up for ${FIRST_SEAL_GHOSTLANDS_SURFACE_ROOM || '(room pending)'} (poison tiles)`);
   }
 
   function cleanupFirstSealBoardObserver() {
@@ -17750,7 +18708,7 @@ function createNPCCooldownManager() {
       console.log('[Quests Mod][Fourth Seal] Completed: victory on Demon Skeleton Hell with', gameTicks, 'ticks (< ' + FOURTH_SEAL_MAX_TICKS + ')');
       showSealCompletedToast('Fourth', '[Quests Mod][Fourth Seal]');
     });
-    console.log('[Quests Mod][Fourth Seal] Board observer set up for Demon Skeleton Hell (victory with ticks < ' + FOURTH_SEAL_MAX_TICKS + ')');
+    console.log('[Quests Mod][Fourth Seal] Board observer set up for ' + (FOURTH_SEAL_ROOM || '(room pending)') + ' (victory with ticks < ' + FOURTH_SEAL_MAX_TICKS + ')');
   }
 
   function cleanupFourthSealBoardObserver() {
@@ -18122,7 +19080,7 @@ function createNPCCooldownManager() {
       updateTile77SpiderLairState(boardContext);
     });
     updateTile77SpiderLairState(globalThis.state?.board?.getSnapshot()?.context);
-    console.log('[Quests Mod][Tile 77 Spider Lair] Board observer set up for A Secluded Herb');
+    console.log(`[Quests Mod][Tile 77 Spider Lair] Board observer set up for ${SECLUDED_HERB_ROOM_NAME || '(room pending)'}`);
   }
 
   function cleanupTile77SpiderLairObserver() {
@@ -18253,8 +19211,8 @@ function createNPCCooldownManager() {
 
   const secondSealTileAction = createRoomTileAction({
     id: 'Second Seal',
-    roomName: SECOND_SEAL_ROOM,
-    tileIndex: SECOND_SEAL_TILE_34,
+    roomName: () => SECOND_SEAL_ROOM,
+    tileIndex: () => SECOND_SEAL_TILE_34,
     getTileElement: getSixthSealTileElement,
     shouldEnable: shouldEnableSecondSealTile34,
     onActivate: () => {
@@ -18303,8 +19261,8 @@ function createNPCCooldownManager() {
 
   const thirdSealTileAction = createRoomTileAction({
     id: 'Third Seal',
-    roomName: THIRD_SEAL_ROOM,
-    tileIndex: THIRD_SEAL_TILE_52,
+    roomName: () => THIRD_SEAL_ROOM,
+    tileIndex: () => THIRD_SEAL_TILE_52,
     getTileElement: getSixthSealTileElement,
     shouldEnable: shouldEnableThirdSealTile52,
     onActivate: () => {
@@ -18324,8 +19282,8 @@ function createNPCCooldownManager() {
 
   const fifthSealTileAction = createRoomTileAction({
     id: 'Fifth Seal',
-    roomName: FIFTH_SEAL_ROOM,
-    tileIndex: FIFTH_SEAL_TILE_41,
+    roomName: () => FIFTH_SEAL_ROOM,
+    tileIndex: () => FIFTH_SEAL_TILE_41,
     getTileElement: getSixthSealTileElement,
     shouldEnable: shouldEnableFifthSealTile41,
     onActivate: (event, tile) => {
@@ -18359,7 +19317,7 @@ function createNPCCooldownManager() {
     setTimeout(replaceSeventhSealTile127SpriteIfNeeded, 400);
     revertSeventhSealTile127WhenCompleted();
     setTimeout(revertSeventhSealTile127WhenCompleted, 400);
-    console.log('[Quests Mod][Sixth Seal] Board observer set up for Demonrage Seal');
+    console.log(`[Quests Mod][Sixth Seal] Board observer set up for ${SIXTH_SEAL_ROOM || '(room pending)'}`);
   }
 
   function cleanupSixthSealLeverSystem() {
@@ -18848,7 +19806,9 @@ function createNPCCooldownManager() {
     registerQuestTileHighlightSource({
       getTiles: () => {
         const tile = getSerpentineBasementLeverTileElement();
-        return tile ? [tile] : [];
+        // Don't show the lever glow while a destroyable field still covers tile 64.
+        if (!tile || serpentineFieldState.tiles.has(tile)) return [];
+        return [tile];
       },
       isAccessActive: (boardContext) => shouldEnableSerpentineLeverTile64(boardContext) && !isSerpentineLeverPulled(),
       alt: 'Lever'
@@ -18867,8 +19827,8 @@ function createNPCCooldownManager() {
     });
 
     registerQuestTileHighlightSource({
-      getTiles: () => [...miningState.tiles],
-      isAccessActive: () => miningState.tiles.size > 0 && !!(miningState.enabled && hasLightShovelInInventory()),
+      getTiles: () => getShovelHighlightTiles(),
+      isAccessActive: () => getShovelHighlightTiles().length > 0,
       alt: 'Dig'
     });
   }
@@ -19027,7 +19987,7 @@ function createNPCCooldownManager() {
     }
 
     updateTeshaArrowState(globalThis.state?.board?.getSnapshot()?.context);
-    console.log('[Quests Mod][Tesha] Arrow observer set up for Darama Oasis tile 157');
+    console.log(`[Quests Mod][Tesha] Arrow observer set up for Darama Oasis tile ${TESHA_TILE_INDEX ?? '(pending)'}`);
   }
 
   function cleanupTeshaArrowObserver() {
@@ -19503,9 +20463,44 @@ function createNPCCooldownManager() {
     return { ok: true, already: false };
   }
 
+  function syncRookstayerBoardPlacement() {
+    const rookConfig = BOARD_NPC_CONFIGS.find((c) => c.overlayClass === APPRENTICE_SHENG_OVERLAY_CLASS)
+      || BOARD_NPC_CONFIGS.find((c) => c.id === BOARD_NPC_ROOKSTAYER_ID);
+    if (!rookConfig) return;
+    rookConfig.id = BOARD_NPC_ROOKSTAYER_ID;
+    if (APPRENTICE_SHENG_ROOM_NAME) rookConfig.roomName = APPRENTICE_SHENG_ROOM_NAME;
+    if (APPRENTICE_SHENG_TILE_INDEX != null) rookConfig.tileIndex = APPRENTICE_SHENG_TILE_INDEX;
+    if (APPRENTICE_SHENG_FIGHT_ICON_URL) rookConfig.dialogueIconUrl = APPRENTICE_SHENG_FIGHT_ICON_URL;
+    if (ROOKSTAYER_OUTFIT_SPRITE_ID) rookConfig.outfitSpriteId = ROOKSTAYER_OUTFIT_SPRITE_ID;
+    rookConfig.facing = rookConfig.facing || 'west';
+  }
+
+  function syncAlDeeRatPlagueBoardPlacement() {
+    const alDeeConfig = BOARD_NPC_CONFIGS.find((c) => c.overlayClass === RAT_PLAGUE_AL_DEE_OVERLAY_CLASS);
+    if (!alDeeConfig) return;
+    if (BOARD_NPC_AL_DEE_RAT_PLAGUE_ID) alDeeConfig.id = BOARD_NPC_AL_DEE_RAT_PLAGUE_ID;
+    if (RAT_PLAGUE_ROOM_NAME) alDeeConfig.roomName = RAT_PLAGUE_ROOM_NAME;
+    if (RAT_PLAGUE_ROOM_ID) alDeeConfig.roomId = RAT_PLAGUE_ROOM_ID;
+    if (RAT_PLAGUE_AL_DEE_TILE_INDEX != null) alDeeConfig.tileIndex = RAT_PLAGUE_AL_DEE_TILE_INDEX;
+    if (RAT_PLAGUE_AL_DEE_DIALOGUE_ICON_URL) alDeeConfig.dialogueIconUrl = RAT_PLAGUE_AL_DEE_DIALOGUE_ICON_URL;
+    // BOARD_NPC_CONFIGS snapshots these before rooms.json hydrates — refresh every update.
+    if (ROOKSTAYER_OUTFIT_SPRITE_ID) alDeeConfig.outfitSpriteId = ROOKSTAYER_OUTFIT_SPRITE_ID;
+    alDeeConfig.outfitSpritesheetUrl = getQuestItemsAssetUrl('Al_DeeIdle.png');
+    alDeeConfig.imageUrl = getQuestItemsAssetUrl('Al_Dee.gif');
+    alDeeConfig.outfitSheetFrameCount = 1;
+    alDeeConfig.facing = alDeeConfig.facing || 'south';
+  }
+
   function syncSvensonBoardPlacement() {
-    const svensonConfig = BOARD_NPC_CONFIGS.find((c) => c.id === BOARD_NPC_SVENSON_ID);
+    const svensonConfig = BOARD_NPC_CONFIGS.find((c) => c.overlayClass === SVENSON_OVERLAY_CLASS)
+      || BOARD_NPC_CONFIGS.find((c) => c.id === BOARD_NPC_SVENSON_ID);
     if (!svensonConfig) return;
+    if (BOARD_NPC_SVENSON_ID) svensonConfig.id = BOARD_NPC_SVENSON_ID;
+    if (SVENSON_OUTFIT_SPRITE_ID) svensonConfig.outfitSpriteId = SVENSON_OUTFIT_SPRITE_ID;
+    if (SVENSON_DIALOGUE_ICON_URL) svensonConfig.dialogueIconUrl = SVENSON_DIALOGUE_ICON_URL;
+    svensonConfig.outfitSpritesheetUrl = getQuestItemsAssetUrl('SvensonIdle.png');
+    svensonConfig.imageUrl = getQuestItemsAssetUrl('Svenson.gif');
+    svensonConfig.outfitSheetFrameCount = 1;
     const progress = getMissionProgress(SVENSON_LOVE_STORY_MISSION);
     const missionDone = !!progress?.completed;
     const atWhiteWave = !!progress?.strandedAtWhiteWave;
@@ -19528,6 +20523,33 @@ function createNPCCooldownManager() {
     }
     svensonConfig.roomName = atAwash ? SVENSON_AWASH_ROOM_NAME : SVENSON_ROOM_NAME;
     svensonConfig.tileIndex = atAwash ? SVENSON_AWASH_TILE_INDEX : SVENSON_TILE_INDEX;
+  }
+
+  function syncSantaBoardPlacement() {
+    const santaConfig = BOARD_NPC_CONFIGS.find((c) => c.overlayClass === SANTA_CLAUS_OVERLAY_CLASS)
+      || BOARD_NPC_CONFIGS.find((c) => c.id === BOARD_NPC_SANTA_ID);
+    if (!santaConfig) return;
+    if (BOARD_NPC_SANTA_ID) santaConfig.id = BOARD_NPC_SANTA_ID;
+    if (SANTA_CLAUS_ROOM_NAME) santaConfig.roomName = SANTA_CLAUS_ROOM_NAME;
+    if (SANTA_CLAUS_TILE_INDEX != null) santaConfig.tileIndex = SANTA_CLAUS_TILE_INDEX;
+    if (SANTA_OUTFIT_SPRITE_ID) santaConfig.outfitSpriteId = SANTA_OUTFIT_SPRITE_ID;
+    if (SANTA_DIALOGUE_ICON_URL) santaConfig.dialogueIconUrl = SANTA_DIALOGUE_ICON_URL;
+    santaConfig.outfitSpritesheetUrl = getQuestItemsAssetUrl('Santa_ClausIdle.png');
+    santaConfig.imageUrl = getQuestItemsAssetUrl('Santa_Claus.gif');
+  }
+
+  function syncDaneBoardPlacement() {
+    const daneConfig = BOARD_NPC_CONFIGS.find((c) => c.overlayClass === DANE_OVERLAY_CLASS)
+      || BOARD_NPC_CONFIGS.find((c) => c.id === BOARD_NPC_DANE_ID);
+    if (!daneConfig) return;
+    if (BOARD_NPC_DANE_ID) daneConfig.id = BOARD_NPC_DANE_ID;
+    if (DANE_OUTFIT_SPRITE_ID) daneConfig.outfitSpriteId = DANE_OUTFIT_SPRITE_ID;
+    if (DANE_WHITE_WAVE_TILE_INDEX != null) daneConfig.tileIndex = DANE_WHITE_WAVE_TILE_INDEX;
+    if (SVENSON_WHITE_WAVE_ROOM_NAME) daneConfig.roomName = SVENSON_WHITE_WAVE_ROOM_NAME;
+    if (DANE_DIALOGUE_ICON_URL) daneConfig.dialogueIconUrl = DANE_DIALOGUE_ICON_URL;
+    daneConfig.outfitSpritesheetUrl = getQuestItemsAssetUrl('DaneIdle.png');
+    daneConfig.imageUrl = getQuestItemsAssetUrl('Dane.gif');
+    daneConfig.outfitSheetFrameCount = 1;
   }
 
   function clearAllSvensonOverlays() {
@@ -23168,8 +24190,8 @@ function createNPCCooldownManager() {
     // Remove older blanking stylesheet from a previous approach (it forced background:none).
     document.getElementById('quests-board-npc-custom-outfit-sheet-style')?.remove();
 
-    if (!npcConfig?.outfitSpritesheetUrl || !npcConfig?.overlayClass || !npcConfig?.outfitSpriteId) return;
-    const styleId = `quests-board-npc-outfit-sheet-${npcConfig.id}`;
+    if (!npcConfig?.outfitSpritesheetUrl || !npcConfig?.overlayClass) return;
+    const styleId = `quests-board-npc-outfit-sheet-${npcConfig.id || npcConfig.overlayClass}`;
     let style = document.getElementById(styleId);
     if (!style) {
       style = document.createElement('style');
@@ -23194,7 +24216,8 @@ function createNPCCooldownManager() {
           south: '66.666% 0%',
           west: '100% 0%'
         };
-    style.textContent = `
+    const outfitHideCss = npcConfig.outfitSpriteId
+      ? `
       .${npcConfig.overlayClass} .sprite.outfit.id-${npcConfig.outfitSpriteId} .actor.spritesheet {
         display: none !important;
         background-image: none !important;
@@ -23205,7 +24228,10 @@ function createNPCCooldownManager() {
         height: 100% !important;
         max-width: none !important;
         max-height: none !important;
-      }
+      }`
+      : '';
+    style.textContent = `
+      ${outfitHideCss}
       .${npcConfig.overlayClass} .quests-custom-outfit-sheet {
         position: absolute;
         inset: 0;
@@ -23250,10 +24276,15 @@ function createNPCCooldownManager() {
       ensureBoardNpcCustomOutfitSheetStyles(npcConfig);
       const hasOutfit = !!existingOverlay.querySelector('.sprite.outfit');
       const wantsOutfit = !!npcConfig.outfitSpriteId;
-      const hasCustomSheet = existingOverlay.getAttribute('data-quests-outfit-sheet') === '1'
-        && !!existingOverlay.querySelector('.quests-custom-outfit-sheet');
+      const hasCustomSheet = !!existingOverlay.querySelector('.quests-custom-outfit-sheet');
       const wantsCustomSheet = !!npcConfig.outfitSpritesheetUrl;
-      if (hasOutfit === wantsOutfit && hasCustomSheet === wantsCustomSheet) {
+      const hasImage = !!existingOverlay.querySelector('img.pixelated, img[alt]');
+      const wantsImageFallback = !wantsOutfit && !!npcConfig.imageUrl;
+      const isEmptyOverlay = !hasOutfit && !hasCustomSheet && !hasImage;
+      if (!isEmptyOverlay
+          && hasOutfit === wantsOutfit
+          && hasCustomSheet === wantsCustomSheet
+          && (!wantsImageFallback || hasImage)) {
         tileElement.removeAttribute('title');
         existingOverlay.removeAttribute('title');
         return;
@@ -23302,6 +24333,15 @@ function createNPCCooldownManager() {
       }
       outfit.appendChild(viewport);
       overlay.appendChild(outfit);
+    } else if (npcConfig.outfitSpritesheetUrl) {
+      // Custom sheet without an outfit shell id (assets hydrated late).
+      const facing = npcConfig.facing || 'south';
+      const sheet = document.createElement('div');
+      sheet.className = 'quests-custom-outfit-sheet';
+      sheet.setAttribute('data-facing', facing);
+      sheet.setAttribute('aria-label', npcConfig.name || facing);
+      sheet.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;';
+      overlay.appendChild(sheet);
     } else if (npcConfig.imageUrl) {
       const gif = document.createElement('img');
       gif.src = npcConfig.imageUrl;
@@ -23328,7 +24368,13 @@ function createNPCCooldownManager() {
   function shouldPlaceBoardNpc(npcConfig, boardContext = null) {
     if (!areQuestHelpersEnabled()) return false;
     if (typeof npcConfig.isUnlocked === 'function' && !npcConfig.isUnlocked()) return false;
-    if (!isOnRoomByName(npcConfig.roomName)) return false;
+    if (npcConfig.roomId) {
+      const context = boardContext || globalThis.state?.board?.getSnapshot?.()?.context;
+      const currentRoomId = context?.selectedMap?.selectedRoom?.id;
+      if (!currentRoomId || currentRoomId !== npcConfig.roomId) return false;
+    } else if (!isOnRoomByName(npcConfig.roomName)) {
+      return false;
+    }
     if (isBoardBattleActive(boardContext)) return false;
     if (countAllyPiecesOnBoard(boardContext) > 0) return false;
     return true;
@@ -23374,7 +24420,11 @@ function createNPCCooldownManager() {
   }
 
   function updateAllBoardNpcStates(boardContext = null) {
+    syncRookstayerBoardPlacement();
+    syncAlDeeRatPlagueBoardPlacement();
     syncSvensonBoardPlacement();
+    syncSantaBoardPlacement();
+    syncDaneBoardPlacement();
     BOARD_NPC_CONFIGS.forEach((npcConfig) => updateBoardNpcState(npcConfig, boardContext));
   }
 
@@ -23496,32 +24546,35 @@ function createNPCCooldownManager() {
 
       let toastMessage = TOAST_MESSAGES.fishingFoundNothing;
 
-      // Special handling for Al Dee Fishing Mission in Goblin Bridge
-      if (isOnAlDeeMission && isInGoblinBridge) {
-        fishingState.alDeeMissionAttempts++;
-        if (fishingState.alDeeMissionAttempts > 3) {
-          toastMessage = TOAST_MESSAGES.fishingMagnetHint;
-        }
-      } else {
-        // Reset attempt counter when not on mission or not in Goblin Bridge
-        fishingState.alDeeMissionAttempts = 0;
-      }
-
       // Implement fishing logic here
       try {
-        // Check if player has Magnet and is in Goblin Bridge
         const currentProducts = await getQuestItems();
         const hasMagnet = (currentProducts['Magnet'] || 0) > 0;
+        const hasSmallAxe = (currentProducts['Small Axe'] || 0) > 0;
+        // Magnet hint / axe catch only while the fishing mission still needs the axe.
+        const needsSmallAxe = isOnAlDeeMission && !hasSmallAxe;
 
-        if (hasMagnet && isInGoblinBridge) {
+        if (needsSmallAxe && isInGoblinBridge) {
+          fishingState.alDeeMissionAttempts++;
+          if (!hasMagnet && fishingState.alDeeMissionAttempts > 3) {
+            toastMessage = TOAST_MESSAGES.fishingMagnetHint;
+          }
+        } else {
+          fishingState.alDeeMissionAttempts = 0;
+        }
+
+        if (needsSmallAxe && hasMagnet && isInGoblinBridge) {
           // Consume Magnet and add Small Axe
           await consumeQuestItem('Magnet', 1);
           playRightClickLootEffect(fishingState.clickedTile);
           await addQuestItem('Small Axe', 1);
 
           toastMessage = TOAST_MESSAGES.fishingFoundAxe;
-        } else if (isInGoblinBridge && !hasMagnet) {
-          toastMessage = TOAST_MESSAGES.fishingFoundNothingMagnet;
+          fishingState.alDeeMissionAttempts = 0;
+        } else if (needsSmallAxe && isInGoblinBridge && !hasMagnet) {
+          toastMessage = fishingState.alDeeMissionAttempts > 3
+            ? TOAST_MESSAGES.fishingMagnetHint
+            : TOAST_MESSAGES.fishingFoundNothingMagnet;
         } else {
           toastMessage = TOAST_MESSAGES.fishingFoundNothing;
         }
@@ -23990,38 +25043,82 @@ function createNPCCooldownManager() {
     console.log('[Quests Mod][Digging] System cleaned up');
   }
 
-  // Initialize
+  function isMissionAcceptedIncomplete(progress) {
+    return !!(progress?.accepted && !progress?.completed);
+  }
+
+  function needsQueenBansheesSealObservers() {
+    return isMissionAcceptedIncomplete(kingChatState.progressQueenBanshees);
+  }
+
+  function needsHoneyflowerObserver() {
+    return isMissionAcceptedIncomplete(kingChatState.progressHoneyflower);
+  }
+
+  function needsSpiderLairObserver() {
+    return isMissionAcceptedIncomplete(kingChatState.progressMotherOfAllSpiders);
+  }
+
+  function needsSerpentineTeshaObservers() {
+    return isMissionAcceptedIncomplete(kingChatState.progressScarabHunt)
+      || isMissionAcceptedIncomplete(kingChatState.progressSerpentineTower)
+      || isMissionAcceptedIncomplete(kingChatState.progressMeetingWithTesha);
+  }
+
+  function needsApprenticeShengObserver() {
+    return isMissionAcceptedIncomplete(kingChatState.progressApprenticeSheng);
+  }
+
+  function needsCopperKeySystems() {
+    return isMissionAcceptedIncomplete(kingChatState.progressCopper);
+  }
+
+  function needsCrossingTheLineSystems() {
+    return isMissionAcceptedIncomplete(kingChatState.progressCrossingTheLine);
+  }
+
+  /** Board/room observers that need assets + mission progress. Call once after both are ready. */
+  function setupProgressAwareQuestObservers() {
+    setupTile53CostelloObserver();
+    setupTile83WydaObserver();
+    setupTileHighlightObserver();
+    // Shared board NPC overlays (Al Dee Rat Plague, Santa, Svenson, Rookstayer, Dane).
+    // Must always run — unlock checks are per-NPC inside updateAllBoardNpcStates.
+    setupApprenticeShengNpcObserver();
+
+    if (needsHoneyflowerObserver()) {
+      setupHoneyflowerTileObserver();
+    }
+    if (needsSerpentineTeshaObservers()) {
+      setupTeshaArrowObserver();
+      setupSerpentineDestroyFieldObserver();
+    }
+    if (needsSpiderLairObserver()) {
+      setupTile77SpiderLairObserver();
+    }
+    if (needsQueenBansheesSealObservers()) {
+      setupSevenSealsRoomObserver();
+      setupFirstSealBoardObserver();
+      setupFourthSealBoardObserver();
+      secondSealTileAction.setupObserver();
+      thirdSealTileAction.setupObserver();
+      fifthSealTileAction.setupObserver();
+      setupSixthSealLeverObserver();
+    }
+  }
+
+  // Initialize (board/quest observers wait for assets + mission progress)
   observeInventory();
   setupQuestItemsDropSystem();
-  setupCopperKeySystem();
-  setupCrossingTheLineSystem();
   setupEquipmentSlotObserver();
-    setupTile53CostelloObserver();
-    setupHoneyflowerTileObserver();
-    setupTile83WydaObserver();
-    setupTeshaArrowObserver();
-    setupApprenticeShengNpcObserver();
-    setupTileHighlightObserver();
-    window.addEventListener('betterUIQuestHelpersChanged', () => {
-      removeQuestHelperVisuals();
-      refreshQuestTileHighlights(globalThis.state?.board?.getSnapshot()?.context);
-      updateTeshaArrowState(globalThis.state?.board?.getSnapshot()?.context);
-    });
-    setupTile77SpiderLairObserver();
-    setupSevenSealsRoomObserver();
-    setupFirstSealBoardObserver();
-    setupFourthSealBoardObserver();
-    secondSealTileAction.setupObserver();
-    thirdSealTileAction.setupObserver();
-    fifthSealTileAction.setupObserver();
-    setupSixthSealLeverObserver();
-    setupSerpentineDestroyFieldObserver();
+  window.addEventListener('betterUIQuestHelpersChanged', () => {
+    removeQuestHelperVisuals();
+    refreshQuestTileHighlights(globalThis.state?.board?.getSnapshot()?.context);
+    updateTeshaArrowState(globalThis.state?.board?.getSnapshot()?.context);
+  });
 
-  // Load quest items from Firebase on initialization
-  loadQuestItemsOnInit();
-
-  // Load mission progress from Firebase on initialization
-  loadMissionProgressOnInit();
+  // Load quest items after mission progress (never race Firebase progress writes)
+  // loadQuestItemsOnInit is invoked from bootstrap after hydrate
 
   // Cleanup function to remove items that shouldn't exist if missions aren't completed
   async function cleanupInvalidQuestItems(progress) {
@@ -24137,8 +25234,12 @@ function createNPCCooldownManager() {
     updateHoneyflowerTileRightClickState();
     updateWaterFishingState();
     updateMiningState();
-    setupCopperKeySystem();
-    setupCrossingTheLineSystem();
+    if (needsCopperKeySystems()) {
+      setupCopperKeySystem();
+    }
+    if (needsCrossingTheLineSystems()) {
+      setupCrossingTheLineSystem();
+    }
     refreshQuestTileHighlights();
   }
 
@@ -24148,7 +25249,11 @@ function createNPCCooldownManager() {
     syncArenaLeaderboardForCurrentPlayer().catch((err) => {
       console.warn('[Quests Mod][Arena Leaderboard] Failed to sync after mission progress hydration:', err);
     });
-    refreshSystemsAfterMissionProgressLoaded();
+    // Board observers / item systems need assets/quests first (see runPostMissionProgressInitSetup).
+    if (questDialogueReady) {
+      setupProgressAwareQuestObservers();
+      refreshSystemsAfterMissionProgressLoaded();
+    }
     syncActiveMissionTabs();
     reloadQuestItemsFromFirebase().catch((err) => {
       console.warn('[Quests Mod] Failed to reload quest items after mission progress sync:', err);
@@ -24181,6 +25286,11 @@ function createNPCCooldownManager() {
       missionProgressPlayerSubscription = null;
 
       try {
+        try {
+          await loadQuestDialogueAssets();
+        } catch (dialogueError) {
+          console.warn('[Quests Mod] Quest dialogue assets unavailable before delayed mission hydrate.', dialogueError);
+        }
         await hydrateMissionProgressFromFirebase(playerName);
         finishMissionProgressHydration();
         console.log('[Quests Mod] Mission progress loaded from Firebase after player became ready');
@@ -24230,6 +25340,35 @@ function createNPCCooldownManager() {
         kingChatState.sevenSealsCompleted = SEVEN_SEALS_GHOSTLANDS_ROOM_NAMES.map(roomName => progress.sevenSealsVisited.includes(roomName));
       }
 
+      kingChatState.starterCoinThanked = inferStarterCoinThankedFromProgress(progress);
+    }
+
+    // Apply Firebase → local first; only then allow writes (migrations below may save).
+    missionProgressHydratedFromFirebase = true;
+
+    if (progress && kingChatState.starterCoinThanked && !progress.starterCoinThanked && !progress.__isEmpty) {
+      // Backfill flag for players who already progressed before it was persisted.
+      try {
+        await saveKingTibianusProgress(playerName, getAllMissionProgress());
+        console.log('[Quests Mod] Backfilled starterCoinThanked from existing progress');
+      } catch (err) {
+        console.error('[Quests Mod] Error backfilling starterCoinThanked:', err);
+      }
+    }
+
+    {
+      const loggedProgress = getAllMissionProgress();
+      if (progress?.ironOre) {
+        loggedProgress.ironOre = {
+          active: fishingState.ironOreQuestActive,
+          expired: fishingState.ironOreQuestExpired,
+          completed: fishingState.ironOreQuestCompleted
+        };
+      }
+      console.log('[Quests Mod] Mission progress loaded from Firebase:', loggedProgress);
+    }
+
+    if (progress) {
       const honeyProgress = kingChatState.progressHoneyflower;
       if (honeyProgress?.accepted && !honeyProgress.honeyflowerPicked) {
         const questItems = await getQuestItems(false);
@@ -24263,30 +25402,53 @@ function createNPCCooldownManager() {
       }
 
       if (kingChatState.progressAlDeeFishing.completed) {
+        const ironOreAlreadyComplete = !!progress.ironOre?.completed && !progress.ironOre?.active;
+        const ironOreNeedsSync = !ironOreAlreadyComplete
+          || fishingState.ironOreQuestActive
+          || !fishingState.ironOreQuestCompleted;
+
         if (fishingState.ironOreQuestActive) {
           console.log('[Quests Mod] Al Dee fishing mission completed - marking active Iron Ore quest as completed');
-          fishingState.ironOreQuestActive = false;
-          fishingState.ironOreQuestExpired = false;
-          fishingState.ironOreQuestCompleted = true;
-          fishingState.ironOreQuestStartTime = null;
         } else if (!fishingState.ironOreQuestCompleted) {
           console.log('[Quests Mod] Al Dee fishing mission completed - marking Iron Ore quest as completed');
-          fishingState.ironOreQuestCompleted = true;
         }
 
-        const currentPlayer = getCurrentPlayerName();
-        if (currentPlayer) {
-          try {
-            const allProgress = getAllMissionProgress();
-            allProgress.ironOre = {
-              active: false,
-              startTime: null,
-              completed: true
-            };
-            await saveKingTibianusProgress(currentPlayer, allProgress);
-            console.log('[Quests Mod] Iron Ore quest marked as completed and saved to Firebase');
-          } catch (err) {
-            console.error('[Quests Mod] Error marking Iron Ore quest as completed:', err);
+        fishingState.ironOreQuestActive = false;
+        fishingState.ironOreQuestExpired = false;
+        fishingState.ironOreQuestCompleted = true;
+        fishingState.ironOreQuestStartTime = null;
+
+        if (ironOreNeedsSync) {
+          const currentPlayer = getCurrentPlayerName();
+          if (currentPlayer) {
+            try {
+              const allProgress = getAllMissionProgress();
+              allProgress.ironOre = {
+                active: false,
+                startTime: null,
+                completed: true
+              };
+              await saveKingTibianusProgress(currentPlayer, allProgress);
+              console.log('[Quests Mod] Iron Ore quest marked as completed and saved to Firebase');
+            } catch (err) {
+              console.error('[Quests Mod] Error marking Iron Ore quest as completed:', err);
+            }
+          }
+        }
+      }
+
+      // Golden rope completed implies Mornenion was defeated; backfill older progress missing the flag.
+      if (kingChatState.progressAlDeeGoldenRope?.completed && !kingChatState.mornenionDefeated) {
+        kingChatState.mornenionDefeated = true;
+        if (!progress.mornenion?.defeated) {
+          const currentPlayer = getCurrentPlayerName();
+          if (currentPlayer) {
+            try {
+              await saveKingTibianusProgress(currentPlayer, getAllMissionProgress());
+              console.log('[Quests Mod] Backfilled mornenion.defeated from completed golden rope mission');
+            } catch (err) {
+              console.error('[Quests Mod] Error backfilling mornenion.defeated:', err);
+            }
           }
         }
       }
@@ -24354,16 +25516,6 @@ function createNPCCooldownManager() {
       } catch (err) {
         console.error('[Quests Mod] Error syncing mission state from diary:', err);
       }
-
-      const loggedProgress = getAllMissionProgress();
-      if (progress.ironOre) {
-        loggedProgress.ironOre = {
-          active: fishingState.ironOreQuestActive,
-          expired: fishingState.ironOreQuestExpired,
-          completed: fishingState.ironOreQuestCompleted
-        };
-      }
-      console.log('[Quests Mod] Mission progress loaded from Firebase:', loggedProgress);
     }
   }
 
@@ -24374,6 +25526,12 @@ function createNPCCooldownManager() {
 
     missionProgressLoadPromise = (async () => {
       try {
+        try {
+          await loadQuestDialogueAssets();
+        } catch (dialogueError) {
+          console.warn('[Quests Mod] Quest dialogue assets unavailable before mission hydrate; shells may stay empty.', dialogueError);
+        }
+
         const playerName = await waitForCurrentPlayerName();
         if (!playerName) {
           console.warn('[Quests Mod] Player name not available yet — will retry when player state is ready');
@@ -24417,13 +25575,18 @@ function createNPCCooldownManager() {
             fishingState.ironOreQuestExpired = true; // New state: ready for reward
             fishingState.ironOreQuestStartTime = null;
 
-            // Save progress to Firebase (active: false, but not completed yet)
+            showToast({
+              message: TOAST_MESSAGES.ironOreRewardReady
+                || 'A while has passed. King Tibianus should have something for you now.',
+              logPrefix: '[Quests Mod][Iron Ore Quest]',
+              variant: 'info'
+            });
+
+            // Save progress to Firebase (active: false, but not completed yet; merge preserves other missions)
             const currentPlayer = getCurrentPlayerName();
             if (currentPlayer) {
               try {
-                const currentProgress = await getKingTibianusProgress(currentPlayer);
                 await saveKingTibianusProgress(currentPlayer, {
-                  ...currentProgress,
                   ironOre: {
                     active: false,
                     startTime: null,
@@ -24449,7 +25612,7 @@ function createNPCCooldownManager() {
     try {
       await loadQuestDialogueAssets();
     } catch (dialogueError) {
-      console.warn('[Quests Mod] Quest dialogue assets unavailable; using mission shells only.', dialogueError);
+      console.warn('[Quests Mod] Quest dialogue assets unavailable; quest data shells will stay empty until reload.', dialogueError);
     }
     registerQuestsDevHelpers();
 
@@ -24458,16 +25621,19 @@ function createNPCCooldownManager() {
     fishingState.manuallyDisabled = true;
     updateWaterFishingState(true);
 
+    setupProgressAwareQuestObservers();
     setupQuestOverlayHider();
     refreshSystemsAfterMissionProgressLoaded();
     trackCreaturePlacements();
   }
 
-  // Load mission progress from Firebase on initialization and then setup systems
+  // Load Firebase mission progress first, then quest items, then board systems
   loadMissionProgressOnInit().then(async () => {
+    await loadQuestItemsOnInit();
     await runPostMissionProgressInitSetup();
   }).catch(async (error) => {
     console.error('[Quests Mod] Failed to load mission progress, setting up systems anyway:', error);
+    await loadQuestItemsOnInit();
     await runPostMissionProgressInitSetup();
   });
 
@@ -24488,31 +25654,73 @@ function createNPCCooldownManager() {
   // =======================
   // Console QA helpers. Prefer QuestsDev.*; legacy global names are aliases.
 
-  const QUESTS_DEV_ITEM_KEYS = {
-    leather: 'Red Dragon Leather',
-    scale: 'Red Dragon Scale',
-    letter: 'Letter from Al Dee',
-    ironOre: 'Iron Ore',
-    smallAxe: 'Small Axe',
-    copperKey: 'Copper Key',
-    stampedLetter: 'Stamped Letter',
-    elvenhairRope: 'Elvenhair Rope',
-    holyTible: 'The Holy Tible',
-    blessedAnkh: 'Blessed Ankh',
-    honeyflower: HONEYFLOWER_CONFIG.productName,
-    scarabCoin: SCARAB_COIN_CONFIG.productName,
-    destroyFieldRune: DESTROY_FIELD_RUNE_ITEM_NAME,
-    diary: "Costello's diary",
-    spoolOfYarn: 'Spool of Yarn',
-    woodenPlank: 'Wooden Plank',
-    compass: 'Compass',
-    dragonClaw: 'Dragon Claw',
-    lightShovel: 'Light Shovel',
-    silverToken: SILVER_TOKEN_CONFIG.productName,
-    wishlist: WISHLIST_CONFIG.productName,
-    present: PRESENT_CONFIG.productName,
-    bunnySlippers: BUNNY_SLIPPERS_CONFIG.productName
-  };
+  // Resolve at use-time so asset-hydrated productNames are never snapshotted as empty.
+  const QUESTS_DEV_ITEM_KEY_IDS = [
+    'leather', 'scale', 'letter', 'ironOre', 'smallAxe', 'copperKey', 'stampedLetter',
+    'elvenhairRope', 'holyTible', 'blessedAnkh', 'honeyflower', 'scarabCoin',
+    'destroyFieldRune', 'diary', 'spoolOfYarn', 'woodenPlank', 'compass', 'dragonClaw',
+    'lightShovel', 'silverToken', 'wishlist', 'present', 'bunnySlippers'
+  ];
+
+  function resolveQuestDevItemName(key) {
+    switch (key) {
+      case 'leather': return 'Red Dragon Leather';
+      case 'scale': return 'Red Dragon Scale';
+      case 'letter': return 'Letter from Al Dee';
+      case 'ironOre': return 'Iron Ore';
+      case 'smallAxe': return 'Small Axe';
+      case 'copperKey': return 'Copper Key';
+      case 'stampedLetter': return 'Stamped Letter';
+      case 'elvenhairRope': return 'Elvenhair Rope';
+      case 'holyTible': return 'The Holy Tible';
+      case 'blessedAnkh': return 'Blessed Ankh';
+      case 'honeyflower': return HONEYFLOWER_CONFIG.productName || 'Honeyflower';
+      case 'scarabCoin': return SCARAB_COIN_CONFIG.productName || 'Scarab Coin';
+      case 'destroyFieldRune':
+        return DESTROY_FIELD_RUNE_CONFIG.productName || DESTROY_FIELD_RUNE_ITEM_NAME || 'Destroy Field Rune';
+      case 'diary': return "Costello's diary";
+      case 'spoolOfYarn': return 'Spool of Yarn';
+      case 'woodenPlank': return 'Wooden Plank';
+      case 'compass': return 'Compass';
+      case 'dragonClaw': return 'Dragon Claw';
+      case 'lightShovel': return 'Light Shovel';
+      case 'silverToken': return SILVER_TOKEN_CONFIG.productName || 'Silver Token';
+      case 'wishlist': return WISHLIST_CONFIG.productName || 'Wishlist';
+      case 'present': return PRESENT_CONFIG.productName || 'Present';
+      case 'bunnySlippers': return BUNNY_SLIPPERS_CONFIG.productName || 'Bunny Slippers';
+      default: return key;
+    }
+  }
+
+  function getQuestsDevItemKeys() {
+    const map = {};
+    for (const key of QUESTS_DEV_ITEM_KEY_IDS) {
+      map[key] = resolveQuestDevItemName(key);
+    }
+    return map;
+  }
+
+  // Backward-compatible live map (reads current config names on each access).
+  const QUESTS_DEV_ITEM_KEYS = new Proxy({}, {
+    get(_target, prop) {
+      if (prop === Symbol.toStringTag) return 'Object';
+      if (typeof prop !== 'string') return undefined;
+      if (!QUESTS_DEV_ITEM_KEY_IDS.includes(prop)) return undefined;
+      return resolveQuestDevItemName(prop);
+    },
+    ownKeys() {
+      return [...QUESTS_DEV_ITEM_KEY_IDS];
+    },
+    getOwnPropertyDescriptor(_target, prop) {
+      if (typeof prop === 'string' && QUESTS_DEV_ITEM_KEY_IDS.includes(prop)) {
+        return { configurable: true, enumerable: true, writable: false, value: resolveQuestDevItemName(prop) };
+      }
+      return undefined;
+    },
+    has(_target, prop) {
+      return typeof prop === 'string' && QUESTS_DEV_ITEM_KEY_IDS.includes(prop);
+    }
+  });
 
   const QUESTS_DEV_MISSIONS_BY_ID = {
     [KING_HONEYFLOWER_MISSION.id]: KING_HONEYFLOWER_MISSION,
@@ -24533,6 +25741,70 @@ function createNPCCooldownManager() {
     [SVENSON_LOVE_STORY_MISSION.id]: SVENSON_LOVE_STORY_MISSION,
     [WEAKENED_ARCHDEMON_MISSION.id]: WEAKENED_ARCHDEMON_MISSION
   };
+
+  // Item grant buttons follow story progression (starter → late-game).
+  const QUESTS_DEV_ITEM_PROGRESS_ORDER = [
+    'silverToken',
+    'honeyflower',
+    'copperKey',
+    'scale',
+    'leather',
+    'dragonClaw',
+    'letter',
+    'stampedLetter',
+    'ironOre',
+    'smallAxe',
+    'lightShovel',
+    'elvenhairRope',
+    'holyTible',
+    'diary',
+    'blessedAnkh',
+    'spoolOfYarn',
+    'scarabCoin',
+    'destroyFieldRune',
+    'compass',
+    'woodenPlank',
+    'wishlist',
+    'present',
+    'bunnySlippers'
+  ];
+
+  function getQuestDevItemKeysInProgressOrder() {
+    const ordered = [];
+    const seen = new Set();
+    for (const key of QUESTS_DEV_ITEM_PROGRESS_ORDER) {
+      if (QUESTS_DEV_ITEM_KEY_IDS.includes(key)) {
+        ordered.push(key);
+        seen.add(key);
+      }
+    }
+    for (const key of QUESTS_DEV_ITEM_KEY_IDS) {
+      if (!seen.has(key)) ordered.push(key);
+    }
+    return ordered;
+  }
+
+  function getQuestDevMissionsInProgressOrder() {
+    const ordered = [];
+    const seen = new Set();
+    for (const mission of QUEST_LOG_MISSIONS) {
+      if (mission?.id && QUESTS_DEV_MISSIONS_BY_ID[mission.id]) {
+        ordered.push(QUESTS_DEV_MISSIONS_BY_ID[mission.id]);
+        seen.add(mission.id);
+      }
+    }
+    for (const [id, mission] of Object.entries(QUESTS_DEV_MISSIONS_BY_ID)) {
+      if (!seen.has(id)) ordered.push(mission);
+    }
+    return ordered;
+  }
+
+  function getQuestDevMissionStatusLabel(mission) {
+    const progress = getMissionProgress(mission);
+    if (progress?.completed) return 'completed';
+    if (progress?.accepted) return 'accepted';
+    return 'inactive';
+  }
 
   const QUESTS_DEV_COMPLETE_REWARDS = {
     'Dragon Claw': 1,
@@ -24654,11 +25926,6 @@ function createNPCCooldownManager() {
 
   async function questsDevGrant(opts = {}) {
     const {
-      leather = 0, scale = 0, letter = 0, ironOre = 0, smallAxe = 0, copperKey = 0,
-      stampedLetter = 0, elvenhairRope = 0, holyTible = 0, blessedAnkh = 0,
-      honeyflower = 0, scarabCoin = 0, destroyFieldRune = 0, diary = 0,
-      spoolOfYarn = 0, woodenPlank = 0, compass = 0, dragonClaw = 0, lightShovel = 0, silverToken = 0,
-      wishlist = 0, present = 0, bunnySlippers = 0,
       monksStudy = 0, queenBanshees = 0, followerOfZathroth = 0, motherOfAllSpiders = 0,
       firstSeal = 0, secondSeal = 0, thirdSeal = 0, fourthSeal = 0,
       fifthSeal = 0, sixthSeal = 0, seventhSeal = 0,
@@ -24677,14 +25944,8 @@ function createNPCCooldownManager() {
         for (const key of QUESTS_DEV_SEAL_PARAM_KEYS) sealValues[key] = -1;
       }
 
-      const flatItemAmounts = {
-        leather, scale, letter, ironOre, smallAxe, copperKey, stampedLetter, elvenhairRope,
-        holyTible, blessedAnkh, honeyflower, scarabCoin, destroyFieldRune, diary,
-        spoolOfYarn, woodenPlank, compass, dragonClaw, lightShovel, silverToken,
-        wishlist, present, bunnySlippers
-      };
-      for (const [key, itemName] of Object.entries(QUESTS_DEV_ITEM_KEYS)) {
-        await devProcessItemDelta(itemName, flatItemAmounts[key] || 0, actions);
+      for (const [key, itemName] of Object.entries(getQuestsDevItemKeys())) {
+        await devProcessItemDelta(itemName, Number(opts[key]) || 0, actions);
       }
       if (items && typeof items === 'object') {
         for (const [itemName, amount] of Object.entries(items)) {
@@ -24790,6 +26051,28 @@ function createNPCCooldownManager() {
       return actions;
     } catch (err) {
       console.error('[Quests Mod][Dev] Operation failed:', err);
+    }
+  }
+
+  async function setMissionCompleted(missionId) {
+    console.log('[Quests Mod][Dev] Manually completing mission:', missionId);
+    try {
+      const mission = QUESTS_DEV_MISSIONS_BY_ID[missionId];
+      if (!mission) {
+        console.error('[Quests Mod][Dev] Unknown mission ID. Available IDs:', Object.keys(QUESTS_DEV_MISSIONS_BY_ID));
+        return;
+      }
+      const actions = [];
+      await setDevMissionLevel(mission, 2, { label: mission.title || missionId, actions });
+      if (missionId === COSTELLO_QUEEN_BANSHEES_MISSION.id) {
+        kingChatState.sevenSealsCompleted = getDefaultSevenSealsCompleted().map(() => true);
+      }
+      await devSaveAllProgress(actions, 'complete');
+      await refreshDevQuestUi();
+      console.log('[Quests Mod][Dev] Mission completed:', missionId, actions.join(', ') || '(saved)');
+    } catch (error) {
+      console.error('[Quests Mod][Dev] Error completing mission:', error);
+      throw error;
     }
   }
 
@@ -25075,8 +26358,26 @@ function createNPCCooldownManager() {
   function questsDevHelp() {
     console.log('[Quests Mod][Dev] QuestsDev API:', Object.keys(QuestsDev));
     console.log('[Quests Mod][Dev] Mission IDs:', Object.keys(MISSION_STATE_MAP));
-    console.log('[Quests Mod][Dev] Item keys for grant():', Object.keys(QUESTS_DEV_ITEM_KEYS));
-    console.log('[Quests Mod][Dev] Examples: QuestsDev.grant({ leather: 1, monksStudy: 1 }); QuestsDev.reset("king_copper_key"); QuestsDev.reset("svenson_love_story"); QuestsDev.reset("weakened_archdemon"); QuestsDev.resetLoveStoryWithItems(); QuestsDev.resetSanta(); QuestsDev.completeAll(); QuestsDev.resetAll();');
+    console.log('[Quests Mod][Dev] Item keys for grant():', QUESTS_DEV_ITEM_KEY_IDS);
+    console.log('[Quests Mod][Dev] Catalog:', QuestsDev.catalog());
+    console.log('[Quests Mod][Dev] Examples: QuestsDev.grant({ leather: 1, monksStudy: 1 }); QuestsDev.setAccepted("king_copper_key"); QuestsDev.complete("king_red_dragon"); QuestsDev.reset("svenson_love_story"); QuestsDev.resetLoveStoryWithItems(); QuestsDev.resetSanta(); QuestsDev.completeAll(); QuestsDev.resetAll();');
+  }
+
+  function questsDevCatalog() {
+    return {
+      items: getQuestsDevItemKeys(),
+      itemOrder: getQuestDevItemKeysInProgressOrder(),
+      missions: getQuestDevMissionsInProgressOrder().map((mission) => mission.id),
+      missionTitles: Object.fromEntries(
+        getQuestDevMissionsInProgressOrder().map((mission) => [mission.id, mission.title || mission.id])
+      ),
+      sealsCount: SEVEN_SEALS_COUNT,
+      actions: [
+        'grant', 'completeAll', 'check', 'setAccepted', 'complete', 'reset', 'resetAll',
+        'resetIronOreReceived', 'resetSanta', 'resetLoveStoryWithItems',
+        'setSealCompleted', 'getSealCompleted', 'areAllSevenSealsCompleted', 'help', 'catalog'
+      ]
+    };
   }
 
   const QuestsDev = {
@@ -25084,6 +26385,7 @@ function createNPCCooldownManager() {
     completeAll: questsDevCompleteAll,
     check: checkMissionState,
     setAccepted: setMissionAccepted,
+    complete: setMissionCompleted,
     reset: resetQuest,
     resetAll: resetAllQuests,
     resetIronOreReceived,
@@ -25096,8 +26398,9 @@ function createNPCCooldownManager() {
     areAllSevenSealsCompleted,
     sealIndices: { FIRST_SEAL, SECOND_SEAL, THIRD_SEAL, FOURTH_SEAL, FIFTH_SEAL, SIXTH_SEAL, SEVENTH_SEAL },
     sealsCount: SEVEN_SEALS_COUNT,
-    itemKeys: QUESTS_DEV_ITEM_KEYS,
+    get itemKeys() { return getQuestsDevItemKeys(); },
     missionIds: () => Object.keys(MISSION_STATE_MAP),
+    catalog: questsDevCatalog,
     help: questsDevHelp
   };
 
@@ -25105,36 +26408,26 @@ function createNPCCooldownManager() {
     globalThis.QuestsDev = QuestsDev;
     globalThis.questsDevGrant = questsDevGrant;
     globalThis.questsDevCompleteAll = questsDevCompleteAll;
-    window.checkMissionState = checkMissionState;
-    window.setMissionAccepted = setMissionAccepted;
-    window.debugTile79 = debugTile79;
-    window.updateTile79 = updateTile79;
-    window.resetQuest = resetQuest;
-    window.resetAlDeeFishing = async function() {
-      console.log('[Quests Mod][Dev] Resetting Al Dee fishing mission');
-      await resetQuest(AL_DEE_FISHING_MISSION.id);
-    };
-    window.resetMeetingWithTesha = async function() {
-      console.log('[Quests Mod][Dev] Resetting Lost in the Sands');
-      await resetQuest(KING_SCARAB_COIN_MISSION.id);
-    };
-    window.resetLoveStory = async function() {
-      console.log('[Quests Mod][Dev] Resetting A Love Story');
-      await resetQuest(SVENSON_LOVE_STORY_MISSION.id);
-    };
-    window.resetWeakenedArchdemon = async function() {
-      console.log('[Quests Mod][Dev] Resetting The Weakened Archdemon');
-      await resetQuest(WEAKENED_ARCHDEMON_MISSION.id);
-    };
-    window.resetLoveStoryWithItems = resetLoveStoryWithItems;
-    window.setSealCompleted = setSealCompleted;
-    window.getSealCompleted = getSealCompleted;
-    window.areAllSevenSealsCompleted = areAllSevenSealsCompleted;
+
+    // Legacy window aliases → QuestsDev (kept for old bookmarks / muscle memory)
+    window.checkMissionState = QuestsDev.check;
+    window.setMissionAccepted = QuestsDev.setAccepted;
+    window.debugTile79 = QuestsDev.debugTile79;
+    window.updateTile79 = QuestsDev.updateTile79;
+    window.resetQuest = QuestsDev.reset;
+    window.resetAlDeeFishing = async () => QuestsDev.reset(AL_DEE_FISHING_MISSION.id);
+    window.resetMeetingWithTesha = async () => QuestsDev.reset(KING_SCARAB_COIN_MISSION.id);
+    window.resetLoveStory = async () => QuestsDev.reset(SVENSON_LOVE_STORY_MISSION.id);
+    window.resetWeakenedArchdemon = async () => QuestsDev.reset(WEAKENED_ARCHDEMON_MISSION.id);
+    window.resetLoveStoryWithItems = QuestsDev.resetLoveStoryWithItems;
+    window.setSealCompleted = QuestsDev.setSealCompleted;
+    window.getSealCompleted = QuestsDev.getSealCompleted;
+    window.areAllSevenSealsCompleted = QuestsDev.areAllSevenSealsCompleted;
     window.QUESTS_SEAL_INDICES = QuestsDev.sealIndices;
     window.SEVEN_SEALS_COUNT = SEVEN_SEALS_COUNT;
-    window.resetAllQuests = resetAllQuests;
-    window.resetIronOreReceived = resetIronOreReceived;
-    window.resetSanta = resetSantaClaus;
+    window.resetAllQuests = QuestsDev.resetAll;
+    window.resetIronOreReceived = QuestsDev.resetIronOreReceived;
+    window.resetSanta = QuestsDev.resetSanta;
   }
 
 })();
