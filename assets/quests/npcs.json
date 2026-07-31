@@ -20,10 +20,10 @@
       "name": "Preposterous! You must know the name of your own king!",
       "enemies": "Our enemies are numerous. The evil minotaurs, Ferumbras, and the renegade city of Carlin to the north are just some of them.",
       "gods": "Honor the gods and pay your taxes.",
-      "job": "I am your sovereign, King Tibianus III, and its my duty to provide justice and guidance for my subjects.",
+      "job": "I am your sovereign, King Tibianus III, and it's my duty to provide justice and guidance for my subjects.",
       "king": "I am the king, so mind your words!",
       "sell": "Sell? Sell what? My kingdom isn't for sale!",
-      "tbi": "This organisation is important in holding our enemies in check. Its headquarter is located in the bastion in the northwall.",
+      "tbi": "This organisation is important in holding our enemies in check. Its headquarters is located in the bastion in the northwall.",
       "tibia": "Soon the whole land will be ruled by me once again!",
       "time": "It's a time for heroes, that's for sure!",
       "noodles": "The royal poodle Noodles is my greatest treasure!",
@@ -43,7 +43,7 @@
       "zathroth": "Please ask a priest about the gods.",
       "carlin": "They dare to reject my reign over the whole continent!",
       "eremo": "It is said that he lives on a small island near Edron. Maybe the people there know more about him.",
-      "thais": "Our beloved city has some fine shops, guildhouses, and a modern sytem of sewers.",
+      "thais": "Our beloved city has some fine shops, guildhouses, and a modern system of sewers.",
       "sewers": "What a disgusting topic!",
       "shops": "Visit the shops of our merchants and craftsmen.",
       "guilds": "The four major guilds are the knights, the paladins, the druids, and the sorcerers.",
@@ -53,9 +53,9 @@
       "general": "Harkath Bloodblade is the general of our glorious army.",
       "army": "Ask the soldiers about that topic.",
       "evil": "We need all strength we can muster to smite evil!",
-      "minotaurs": "Vile monsters, but I must admit they are strong and sometimes even cunning ... in their own bestial way.",
+      "minotaurs": "Vile monsters, but I must admit they are strong and sometimes even cunning... in their own bestial way.",
       "taxes": "To pay your taxes, visit the royal tax collector.",
-      "royal tax collector": "He has been lazy lately. I bet you have not payed any taxes at all.",
+      "royal tax collector": "He has been lazy lately. I bet you have not paid any taxes at all.",
       "reward": "Well, if you want a reward, go on a quest to bring me Excalibug!",
       "benjamin": "He was once my greatest general. Now he is very old and senile but we entrusted him with work for the Royal Tibia Mail.",
       "bozo": "He is my royal jester and cheers me up now and then.",
@@ -67,14 +67,14 @@
       "muriel": "The magic of the sorcerers is a powerful tool to smite our enemies.",
       "sam": "He is a skilled blacksmith and a loyal subject.",
       "al dee": "I haven't seen Al Dee for a while and don't know where he holds house. Let me know if you have any information about him!",
-      "bye": "Good bye, Player!"
+      "bye": "Goodbye, Player!"
     },
     "ironOre": {
-      "default": "Yes.. Iron Ore! Let me know if you find one!",
+      "default": "Yes... Iron Ore! Let me know if you find one!",
       "missionConcluded": "I appreciate your continued interest, but our business with iron ore is concluded.",
       "rewardGiven": "Thank you for giving me an Iron Ore! Here's a small gift for you.",
       "comeBackLater": "Come back in a minute.",
-      "fineRockNoMission": "Thats a fine looking rock you have there.",
+      "fineRockNoMission": "That's a fine looking rock you have there.",
       "fineRockMissionDone": "I appreciate the rock, but I have no further use for iron ore now that our business is concluded.",
       "oreAccepted": "Thank you! I'll give this to my guard... come back in a minute and I'll have something for you.",
       "repeatThankYou": "Another thank you for this ore, hope you enjoy the small gift I gave you!"
@@ -106,16 +106,16 @@
       "shield": "Armor and shields can be bought at Dixi's or at Lee'Delle's. Dixi runs that shop near Obi's.",
       "food": "Hmm, the best address to look for food might be Willie or Billy. Norma also has some snacks for sale.",
       "potions": "Sorry, I don't sell potions. You should visit Lily for that.",
-      "cookies": "I you want to find someone who may want to buy your cookies, you should meet Lily.",
+      "cookies": "If you want to find someone who may want to buy your cookies, you should meet Lily.",
       "fishing": "I sell fishing rods and worms if you want to fish. Simply ask me for a trade.",
-      "cooking": "I you want to find someone who may want to buy your cookies, you should meet Lily.",
+      "cooking": "If you want to find someone who may want to buy your cookies, you should meet Lily.",
       "fish": "No thanks. I don't like fish.",
       "torch": "No thank you. I can already overstock the market with torches.",
       "worms": "I have enough worms myself and don't want any more. Use them for fishing.",
       "bone": "You better put that bone back there where you dug it out.",
       "help": "I could use some help retrieving my Small Axe from the waters. Would you like to hear about it?",
       "information": "If you need general equipment, just ask me for a trade. I can also provide you with some general hints about the game.",
-      "iron ore": "Hmm.. King Tibianus might be interested in this Iron Ore...",
+      "iron ore": "Hmm... King Tibianus might be interested in this Iron Ore...",
       "job": "I'm a merchant. Just ask me for a trade to see my offers.",
       "name": "My name is Al Dee, but you can call me Al. Can I interest you in a trade?",
       "time": "It's about 0:00 am. I'm so sorry, I have no watches to sell. Do you want to buy something else?",
@@ -159,11 +159,11 @@
       "obi": "He sells weapons. His shop is south west of town, close to the temple.",
       "paulie": "He's the local bank clerk.",
       "santiago": "He dedicated his life to welcome newcomers to this island.",
-      "seymour": "Seymour is a teacher running the academy. He has many important information about Tibia.",
+      "seymour": "Seymour is a teacher running the academy. He has much important information about Tibia.",
       "tom": "He's the local tanner. You could try selling fresh corpses or leather to him.",
       "willie": "This is a local farmer. If you need fresh food to regain your health, it's a good place to go. However, many monsters also carry food such as meat or cheese. Or you could simply pick blueberries.",
       "zirella": "Poor old woman, her son Tom never visits her.",
-      "bye": "Bye, bye Player.",
+      "bye": "Bye, bye, Player.",
       "mission": "I have a task for you if you're willing to help. Would you like to hear about my lost Small Axe?",
       "missions": "I have a task for you if you're willing to help. Would you like to hear about my lost Small Axe?",
       "quest": "I have a task for you if you're willing to help. Would you like to hear about my lost Small Axe?",
@@ -196,9 +196,10 @@
       "king": "The deceased leaders of the Thaian empire rest beneath this monastery in tombs and crypts.",
       "caves": "Anselm, the first monk of our order, discovered them while looking for a suitable burial place for his king.",
       "anselm": "He was a humble and pious man, and he was chosen by the royal family of Thais to find a resting place for their dead.",
-      "bye": "Good bye, Player!",
-      "goodbye": "Good bye, Player!",
+      "bye": "Goodbye, Player!",
+      "goodbye": "Goodbye, Player!",
       "holy tible": "The Holy Tible! Show it to me when the king sends you on the monks' study.",
+      "costello's diary": "My diary tracks the seven seals of Ghostlands. Complete them and return to me.",
       "castello's diary": "My diary tracks the seven seals of Ghostlands. Complete them and return to me.",
       "blessed ankh": "The Blessed Ankh is earned when the seven seals are done. Then take it to Wyda in Venore."
     },
@@ -209,7 +210,7 @@
       "That remark puzzles me. Perhaps you meant to ask about one of the seven seals?",
       "I cannot follow you. You may ask about Anselm, our order, or the isle."
     ],
-    "sealGuidanceFallback": "The seven seals of Ghostlands must be completed one by one. I have given you my diary – it will show you which are done. Ask me about a specific seal, such as the first seal, if you wish guidance."
+    "sealGuidanceFallback": "The seven seals of Ghostlands must be completed one by one. I have given you my diary — it will show you which are done. Ask me about a specific seal, such as the first seal, if you wish guidance."
   },
   "wyda": {
     "keywords": {
@@ -249,11 +250,11 @@
       ],
       "blood herb": [
         "The blood herb is very rare. This plant would be very useful for me, but I don't know any accessible places to find it.",
-        "To be honest, I'm drowning in blood herbs by now. But if it helps you, well yes.. I guess I could use another blood herb..."
+        "To be honest, I'm drowning in blood herbs by now. But if it helps you, well yes... I guess I could use another blood herb..."
       ],
       "bloodherb": [
         "The blood herb is very rare. This plant would be very useful for me, but I don't know any accessible places to find it.",
-        "To be honest, I'm drowning in blood herbs by now. But if it helps you, well yes.. I guess I could use another blood herb..."
+        "To be honest, I'm drowning in blood herbs by now. But if it helps you, well yes... I guess I could use another blood herb..."
       ],
       "potion": [
         "The recipe of the potions is one of the witches' secrets!"
@@ -337,7 +338,7 @@
         "Many creatures live in, around, and beneath the swamp. Be careful!"
       ],
       "black knight": [
-        "A black knight? Black is the color of witches, why whould any knight carry black?",
+        "A black knight? Black is the color of witches, why would any knight carry black?",
         "Many creatures live in, around, and beneath the swamp. Be careful... MWIHIHIHIHIHI."
       ],
       "bonelords": [
@@ -491,7 +492,7 @@
         "Spider silk from the mother of all spiders — bring it when you accept my task."
       ],
       "spool of yarn": [
-        "I spin spider silk into yarn. Help me with the mother of all spiders first."
+        "I spin spider silk into yarn. Bring me the silk from the mother of all spiders, or if you already have a spool from me, a stranded sailor might need it more than I do."
       ]
     },
     "confusion": [
@@ -521,11 +522,11 @@
       ],
       "dwarves": "Dwarves have a strong Akh. This makes them arrogant and deaf to the true creed.",
       "dwarfes": "Dwarves have a strong Akh. This makes them arrogant and deaf to the true creed.",
-      "carlin": "Those citites are so far away. So far that the enlightened preachings of our divine pharaoh cannot reach those poor misguided souls.",
-      "thais": "Those citites are so far away. So far that the enlightened preachings of our divine pharaoh cannot reach those poor misguided souls.",
-      "edron": "Those citites are so far away. So far that the enlightened preachings of our divine pharaoh cannot reach those poor misguided souls.",
-      "venore": "Those citites are so far away. So far that the enlightened preachings of our divine pharaoh cannot reach those poor misguided souls.",
-      "scarab": "The priests say they are sacred beings, although ... <whispers>I find them scary!",
+      "carlin": "Those cities are so far away. So far that the enlightened preachings of our divine pharaoh cannot reach those poor misguided souls.",
+      "thais": "Those cities are so far away. So far that the enlightened preachings of our divine pharaoh cannot reach those poor misguided souls.",
+      "edron": "Those cities are so far away. So far that the enlightened preachings of our divine pharaoh cannot reach those poor misguided souls.",
+      "venore": "Those cities are so far away. So far that the enlightened preachings of our divine pharaoh cannot reach those poor misguided souls.",
+      "scarab": "The priests say they are sacred beings, although... <whispers>I find them scary!",
       "scarab coin": "A scarab coin from the desert sands! Show it to me if the king sent you.",
       "chosen": "I can only hope my humble work for our community and for the temple will make me worthy one day to be elevated to the rank of a chosen one. One to whom the path of ascension is opened up through undeath.",
       "temple": "The temple can offer us guidance and solace in our mortal existence.",
@@ -542,16 +543,16 @@
       "talon": "We don't trade with them.",
       "uthun": "The Uthun is all we learned in life.",
       "goodbye": "May enlightenment be your path, Player.",
-      "hello": "Be mourned pilgrim in flesh, Player. Welcome to the bank and jewel store.",
+      "hello": "Be mourned, pilgrim in flesh, Player. Welcome to the bank and jewel store.",
       "name": "I am the mourned Tesha.",
       "time": "Time is yet another burden that lies heavy on our mortal bodies.",
       "tesha": "I am the mourned Tesha.",
       "bye": "May enlightenment be your path, Player.",
       "gem": "You can buy and sell small diamonds, sapphires, rubies, emeralds and amethysts or sell topazes.",
       "job": "I sell and buy scarab coins, gems and jewelry. Also I can take care of your bank business.",
-      "rah": "The Rah is our essence. The spiritual bond that keep the other parts of the Akh'rah Uthun together.",
+      "rah": "The Rah is our essence. The spiritual bond that keeps the other parts of the Akh'rah Uthun together.",
       "akh": "Our body. The only physical part of the Akh'rah Uthun.",
-      "hi": "Be mourned pilgrim in flesh, Player. Welcome to the bank and jewel store.",
+      "hi": "Be mourned, pilgrim in flesh, Player. Welcome to the bank and jewel store.",
       "destroy field rune": "The destroy field rune you seek lies upon the corpse of a magic elf, Player.",
       "compass": "The Compass is your reward when you survive the Putrid Chamber."
     },
@@ -581,7 +582,7 @@
       "Yes, you should thank me! I ignored that evil thing you did last year and gave you a present anyway. You know what I mean.",
       "You've been so good during the last year that I was almost tempted to give you a Ferumbras' hat. But I didn't want to make the other children jealous.",
       "Keep up this friendliness and politeness and we shall see about a really cool present next year!",
-      "Oh - you absolutely deserve it! You've behaved really well this year. Almost no bad things about you in my book!",
+      "Oh — you absolutely deserve it! You've behaved really well this year. Almost no bad things about you in my book!",
       "Your good and bad deeds are pretty balanced. If you try and lean more towards the good side, I'll consider giving you a really nice present next year!",
       "May the coming year be full of joy, happiness and love for you! You don't always have to be on the tough side, you know.",
       "Thank you too, little Player, for coming to see me this year."
@@ -600,7 +601,7 @@
   },
   "rookstayer": {
     "boardChat": {
-      "welcomeMessage": "Adventurer… Apprentice Sheng has grown too dangerous. Will you help me defeat him?",
+      "welcomeMessage": "Adventurer... Apprentice Sheng has grown too dangerous. Will you help me defeat him?",
       "thankYouMessage": "Thank you for your help, adventurer. Please accept this Wooden Plank as a token of my gratitude.",
       "placeholder": "Type your message to Rookstayer...",
       "yesResponse": "Thank you! Prepare yourself — we face him now.",
@@ -616,47 +617,48 @@
   },
   "svenson": {
     "keywords": {
-      "hi": "Ahoi, young man Player and welcome to the Nordic Tibia Ferries. If you need a passage, let me know.",
-      "hello": "Ahoi, young man Player and welcome to the Nordic Tibia Ferries. If you need a passage, let me know.",
+      "hi": "Ahoi, Player! Welcome to the Nordic Tibia Ferries. If you need a passage, let me know.",
+      "hello": "Ahoi, Player! Welcome to the Nordic Tibia Ferries. If you need a passage, let me know.",
       "ferry": "Our ferries are strong enough to stand the high waves of the Nordic Ocean.",
       "ferries": "Our ferries are strong enough to stand the high waves of the Nordic Ocean.",
-      "ice islands": "We serve the routes to Senja, Folda, and Vega, and back to Tibia.",
-      "passage": "Where do you want to go today? We serve the routes to Senja, Folda, and Vega, and back to Tibia.",
-      "senja": "Do you want a passage to Senja for 10 gold?",
-      "folda": "This island is Folda.",
-      "vega": "Do you want a passage to Vega for 10 gold?",
-      "tibia": "Do you want a free passage back to Tibia?",
-      "yes": "Have a nice trip!",
-      "no": "You shouldn't miss the experience.",
+      "ice islands": "From Folda Boat I sail the northern routes — White Wave Cellar, and darker waters beyond when you are ready.",
+      "passage": "Ask me about a mission if the hull needs repair. Once we are seaworthy, I can take you to White Wave Cellar — or Ghazbaran's Hideout, if that hunt is yours.",
+      "travel": "Ask me about a mission if the hull needs repair. Once we are seaworthy, I can take you to White Wave Cellar — or Ghazbaran's Hideout, if that hunt is yours.",
+      "folda": "This is Folda Boat. Ask me for passage when you are ready to sail.",
+      "white wave": "White Wave Cellar is home for me and Dane. Ask for passage when you want to sail there.",
+      "white wave cellar": "White Wave Cellar is home for me and Dane. Ask for passage when you want to sail there.",
+      "ghazbaran": "Few who sail to Ghazbaran's Hideout return. Ask for passage when that hunt is yours.",
+      "hideout": "Few who sail to Ghazbaran's Hideout return. Ask for passage when that hunt is yours.",
       "name": "My name is Svenson from the Nordic Tibia Ferries.",
       "anderson": "The four of us are the captains of the Nordic Tibia Ferries.",
       "svenson": "The four of us are the captains of the Nordic Tibia Ferries.",
       "nielson": "The four of us are the captains of the Nordic Tibia Ferries.",
       "carlson": "The four of us are the captains of the Nordic Tibia Ferries.",
-      "captain": "We are ferrymen. We transport goods and passengers to the Ice Islands.",
-      "job": "We are ferrymen. We transport goods and passengers to the Ice Islands.",
+      "captain": "We are ferrymen. We transport goods and passengers along the northern routes.",
+      "job": "We are ferrymen. We transport goods and passengers along the northern routes.",
+      "dane": "Dane waits for me at White Wave Cellar. Help me get this ship seaworthy and we will see her again.",
       "goods": "We can transport everything you want.",
-      "bye": "Good bye. You are welcome.",
-      "goodbye": "Good bye. You are welcome."
+      "bye": "Goodbye. You are welcome.",
+      "goodbye": "Goodbye. You are welcome."
     },
     "confusion": [
-      "If you need passage, ask me about ferry routes.",
-      "I can take you to Senja, Folda, Vega, or back to Tibia.",
+      "If you need passage, ask me about ferry routes or a mission.",
+      "I sail to White Wave Cellar — and Ghazbaran's Hideout when that hunt is yours.",
       "Speak plainly, sailor. Ask me about passage, routes, or my job.",
       "The Nordic Ocean is rough, but my routes are simple to explain.",
-      "I do not follow. Ask me about ferries or the Ice Islands."
+      "I do not follow. Ask me about ferries, White Wave Cellar, or a mission."
     ],
     "boardChat": {
-      "welcomeMessage": "Ahoi, young man Player and welcome to the Nordic Tibia Ferries. If you need a passage, let me know.",
+      "welcomeMessage": "Ahoi, Player! Welcome to the Nordic Tibia Ferries. If you need a passage, let me know.",
       "placeholder": "Type your message to Svenson..."
     }
   },
   "dane": {
     "keywords": {
-      "hi": "Welcome to the Wave Cellar, Player. Have a drink.",
-      "hello": "Welcome to the Wave Cellar, Player. Have a drink.",
+      "hi": "Welcome to White Wave Cellar, Player. Have a drink.",
+      "hello": "Welcome to White Wave Cellar, Player. Have a drink.",
       "name": "I'm Dane.",
-      "time": "It's exactly horas.",
+      "time": "I lost track of the hours down here long ago.",
       "job": "I'm the owner of this place of relaxation.",
       "saloon": "I'm the owner of this place of relaxation.",
       "cellar": "It's pretty, isn't it?",
@@ -680,55 +682,55 @@
       "A sailor from Carlin swore the tribes in the far north pray to powers older than kings. He couldn't tell whether he meant gods... or the wind itself.",
       "Dock gossip says there are birds in the north that never take wing, yet rule the shoreline all the same. Sounds absurd, but sailors keep repeating it.",
       [
-        "They say northern folk dine on fish of every color and call it a feast fit for warriors. ...",
-        "... I still don't trust anything brighter than blue on a plate."
+        "They say northern folk dine on fish of every color and call it a feast fit for warriors...",
+        "...I still don't trust anything brighter than blue on a plate."
       ],
       "One miner came back from the far north shaking and sleepless, muttering about buried halls and things best left buried.",
       "A friend of mine, Captain Ogden Brewboiler, sailed beyond the known charts. Brave man... but I still watch the horizon for his return.",
       [
-        "The stories about northern clans never agree with each other. ...",
-        "... allies in one tavern tale, enemies in the next."
+        "The stories about northern clans never agree with each other...",
+        "...allies in one tavern tale, enemies in the next."
       ],
       "People speak of a towering ice crown in the heart of the northern isles, visible even through storm haze.",
       "Old sailors tell a creation-war legend: that mages chained winter itself in crystal, and the north never thawed again.",
       [
-        "For years, captains feared serpent-haunted waters around the northern passage. ...",
-        "... then, one season, the routes opened as if the sea had changed its mind."
+        "For years, captains feared serpent-haunted waters around the northern passage...",
+        "...then, one season, the routes opened as if the sea had changed its mind."
       ],
       [
-        "A sailor swore some northern raiders can command wolves and bears like trained hounds. ...",
-        "... tavern nonsense, perhaps — though he had the scars to support his tale."
+        "A sailor swore some northern raiders can command wolves and bears like trained hounds...",
+        "...tavern nonsense, perhaps — though he had the scars to support his tale."
       ],
       "Last week an old drunk muttered about tusked beasts with fur thick as winter cloaks. If half these stories are true, the north is wilder than maps admit.",
       "Rumours name a fierce northern tribe ruled by a shaman no storm or steel can bring down.",
       [
-        "Traders claim some northern settlements burn through timber faster than ships burn tar. ...",
-        "... where wood runs short, merchants smell profit."
+        "Traders claim some northern settlements burn through timber faster than ships burn tar...",
+        "...where wood runs short, merchants smell profit."
       ],
       "Word from the frontier says rival warbands contest the north, and each season redraws the lines.",
       [
-        "I received a letter from a friend stationed in the north. ...",
-        "... he mentioned trials, secretive locals, and rites for outsiders. The ink was shaking the whole way down the page."
+        "I received a letter from a friend stationed in the north...",
+        "...he mentioned trials, secretive locals, and rites for outsiders. The ink was shaking the whole way down the page."
       ],
       "A broker told me the Carlin Trading Syndicate is planting new banners in every northern port that stays open long enough.",
       "Venore hunters reportedly settled on one island and now ship back rare pelts, oils, and stranger things.",
       [
-        "Expedition after expedition goes north chasing ore and old workings beneath the ice. ...",
-        "... not all of them return on schedule."
+        "Expedition after expedition goes north chasing ore and old workings beneath the ice...",
+        "...not all of them return on schedule."
       ],
       [
-        "There are tales of horned cave-folk beneath one of the smaller ice islands — half traveler, half beast. ...",
-        "Witnesses claim their caverns grow green grass and flowers beneath frozen stone. That smells like old magic to me. ...",
+        "There are tales of horned cave-folk beneath one of the smaller ice islands — half traveler, half beast...",
+        "Witnesses claim their caverns grow green grass and flowers beneath frozen stone. That smells like old magic to me...",
         "Whether that magic is a blessing or a warning, no one agrees."
       ]
     ],
     "confusion": [
       "I don't follow. Ask me about drinks, rumours, or this cellar.",
       "Try asking me about my job, special drinks, or the latest rumour.",
-      "Welcome to the Wave Cellar, Player. Ask clearly and I'll answer."
+      "Welcome to White Wave Cellar, Player. Ask clearly and I'll answer."
     ],
     "boardChat": {
-      "welcomeMessage": "Welcome to the Wave Cellar, Player. Have a drink.",
+      "welcomeMessage": "Welcome to White Wave Cellar, Player. Have a drink.",
       "placeholder": "Type your message to Dane..."
     }
   },
@@ -758,11 +760,11 @@
       "wooden_plank": "A sturdy plank. Rookstayer in the Minotaur Mage Room may have sent you.",
       "destroy_field_rune": "I know nothing of desert runes. Seek wisdom in Darama.",
       "compass": "Tesha in the oasis may know more of desert relics like that compass.",
-      "castello_diary": "Costello keeps his diary at the White Raven Monastery.",
+      "costello_diary": "Costello keeps his diary at the White Raven Monastery.",
       "blessed_ankh": "Wyda in the swamps of Venore has need of such holy relics.",
       "spider_silk": "Spider silk is witch's business. Try Wyda in the Venore swamps.",
-      "spool_of_yarn": "Wyda spins spider silk into yarn. I have no use for it here.",
-      "yarn": "Wyda in the swamps may have spun that yarn from spider silk."
+      "spool_of_yarn": "Wyda spins spider silk into yarn. A northern sailor might put such thread to better use than I would.",
+      "yarn": "Wyda in the swamps may have spun that yarn from spider silk — or a ferry captain might need it for repairs."
     },
     "al-dee": {
       "small_axe": "Ah, my Small Axe! It fell into the cave waters while I fled minotaurs and goblins.",
@@ -771,7 +773,7 @@
       "holy_tible": "The Holy Tible is yours to keep. King Tibianus will send you to Costello when you are ready.",
       "stamped_letter": "The king's stamped letter! Thank you for delivering it, Player.",
       "letter_from_al_dee": "Take that letter to King Tibianus in Thais — he must stamp it first.",
-      "iron_ore": "Hmm.. King Tibianus might be interested in that Iron Ore.",
+      "iron_ore": "Hmm... King Tibianus might be interested in that Iron Ore.",
       "magnet": "I do not sell magnets. King Tibianus may reward you with one if you bring him iron ore.",
       "fishing_rod": "I sell fishing rods — ask me for a trade, or use one with worms in the cave waters.",
       "copper_key": "That key belongs to the king's mines errand. Take it to King Tibianus.",
@@ -781,7 +783,7 @@
       "map_to_mines": "The king gave you that map for his copper key mission.",
       "obsidian_knife": "A sharp knife for skinning dragons — the king's hunters use those.",
       "dragon_claw": "A dragon claw is a rare trophy. King Tibianus may appreciate the tale.",
-      "castello_diary": "Costello's diary? That monk on the Isle of the Kings keeps such things.",
+      "costello_diary": "Costello's diary? That monk on the Isle of the Kings keeps such things.",
       "blessed_ankh": "A Blessed Ankh is far above my wares. Wyda in Venore may want it.",
       "scarab_coin": "Scarab coins are Tesha's trade in the Darama desert.",
       "destroy_field_rune": "I've never seen a rune like that. Try Tesha in the oasis.",
@@ -798,7 +800,7 @@
     },
     "costello": {
       "holy_tible": "The Holy Tible! Show it to me when the king sends you on the monks' study.",
-      "castello_diary": "My diary tracks the seven seals of Ghostlands. Complete them and return to me.",
+      "costello_diary": "My diary tracks the seven seals of Ghostlands. Complete them and return to me.",
       "blessed_ankh": "The Blessed Ankh is earned when the seven seals are done. Then take it to Wyda in Venore.",
       "letter_from_al_dee": "A letter from a Rookgaard merchant? That is not our concern here.",
       "stamped_letter": "Al Dee's stamped letter was delivered in Rookgaard, not to our order.",
@@ -831,10 +833,10 @@
     "wyda": {
       "blessed_ankh": "The Blessed Ankh! Costello sent you? Give it to me when you are on that task.",
       "spider_silk": "Spider silk from the mother of all spiders — bring it when you accept my task.",
-      "spool_of_yarn": "I spin spider silk into yarn. Help me with the mother of all spiders first.",
-      "yarn": "Yarn spun from spider silk — complete my spider task and I may share more.",
+      "spool_of_yarn": "I spin spider silk into yarn. Bring me the silk first — or if you already have a spool from me, a stranded sailor might need it more.",
+      "yarn": "Yarn spun from spider silk — complete my spider task, or take a finished spool to someone at sea who needs repairs.",
       "holy_tible": "A holy book for Costello's monastery, not for a swamp witch.",
-      "castello_diary": "Costello's diary and his seven seals are his affair, not mine.",
+      "costello_diary": "Costello's diary and his seven seals are his affair, not mine.",
       "scarab_coin": "Scarab coins? Tesha trades those in the Darama desert.",
       "destroy_field_rune": "Desert runes are Tesha's concern in the Serpentine Tower.",
       "compass": "Tesha rewards a Compass to those who survive the Putrid Chamber.",
@@ -877,7 +879,7 @@
       "fishing_rod": "Al Dee sells fishing rods on the isle of Rookgaard.",
       "light_shovel": "Al Dee rewards a Light Shovel for returning his axe.",
       "holy_tible": "The Holy Tible belongs at Costello's monastery on the Isle of the Kings.",
-      "castello_diary": "Costello's diary guides the seven seals of Ghostlands.",
+      "costello_diary": "Costello's diary guides the seven seals of Ghostlands.",
       "blessed_ankh": "Take the Blessed Ankh to Wyda in the Venore swamps when Costello bids you.",
       "spider_silk": "Spider silk is Wyda's trade in the swamps of Venore.",
       "spool_of_yarn": "Wyda spins spider silk into yarn.",
@@ -910,7 +912,7 @@
       "fishing_rod": "Al Dee sells fishing rods if you want to catch something.",
       "light_shovel": "Al Dee gives a Light Shovel to helpful adventurers.",
       "holy_tible": "Holy books belong at Costello's monastery.",
-      "castello_diary": "Costello's diary tracks seven spooky seals — brr!",
+      "costello_diary": "Costello's diary tracks seven spooky seals — brr!",
       "blessed_ankh": "Blessed ankhs go to Wyda in the swamps, not under my tree.",
       "scarab_coin": "Scarab coins are Tesha's trade in the hot desert.",
       "destroy_field_rune": "Magic runes in the Serpentine Tower — ask Tesha.",
@@ -939,7 +941,7 @@
       "fishing_rod": "Al Dee sells rods for fishing in Rookgaard's waters.",
       "light_shovel": "Al Dee rewards a Light Shovel for finding his axe.",
       "holy_tible": "Costello at the White Raven Monastery studies such tomes.",
-      "castello_diary": "Costello's diary and the seven seals — a monk's burden.",
+      "costello_diary": "Costello's diary and the seven seals — a monk's burden.",
       "blessed_ankh": "Wyda in Venore needs the Blessed Ankh from Costello's task.",
       "scarab_coin": "Scarab coins are traded in the Darama desert by Tesha.",
       "destroy_field_rune": "Desert runes and towers — far from this minotaur room.",
@@ -960,7 +962,7 @@
       "wishlist": "Santa handles wishlists in Folda. I handle ferries.",
       "christmas_present": "Ask Santa in Folda about presents. I can get you there by sea.",
       "present": "Presents are Santa's concern. Ferries are mine.",
-      "bunny_slippers": "Warm slippers for cold decks. A sensible gift.",
+      "bunny_slippers": "Warm slippers for cold decks. If Dane is waiting, those are the gift I promised her.",
       "honeyflower": "A flower for the king? I only ship passengers and goods.",
       "copper_key": "A key for the king's mines? Best bring it to Thais.",
       "red_dragon_leather": "Dragon cargo sounds heavy, but that's a royal errand.",
@@ -974,19 +976,53 @@
       "fishing_rod": "A good rod is useful at sea. Al Dee sells them.",
       "light_shovel": "A light shovel is handy cargo.",
       "holy_tible": "A holy tome belongs with Costello at the monastery.",
-      "castello_diary": "A monk's diary is safer on land than at sea.",
+      "costello_diary": "A monk's diary is safer on land than at sea.",
       "blessed_ankh": "Wyda in Venore would know what to do with that relic.",
       "scarab_coin": "Scarab coin? Tesha in Darama trades those.",
       "destroy_field_rune": "A dangerous rune. Best ask Tesha about desert magic.",
-      "compass": "A desert relic fit for navigators, not sailors.",
-      "spider_silk": "Spider silk from Venore swamps is no cargo I enjoy.",
-      "spool_of_yarn": "Fine yarn. Wyda spins the best from spider silk.",
-      "yarn": "Yarn from Wyda? Good trade goods.",
+      "compass": "A fine navigator's tool. If we are lost below the waves, give it to me when I ask.",
+      "spider_silk": "Spider silk from Venore swamps is no cargo I enjoy — but yarn spun from it mends sails.",
+      "spool_of_yarn": "Fine yarn for patching hull seams. Give it to me when the ship needs a quick repair.",
+      "yarn": "Yarn for patching seams. Give it to me when I ask for a Spool of Yarn.",
       "obsidian_knife": "An obsidian blade should be handled with care aboard ship.",
       "dragon_claw": "A dragon claw trophy? That's a fine story to carry.",
-      "wooden_plank": "A wooden plank looks perfect for emergency hull repairs.",
+      "wooden_plank": "A wooden plank looks perfect for emergency hull repairs. Give it to me when I ask.",
       "map_to_mines": "A map to the mines points inland, not across the sea.",
-      "silver_token": "The king's silver token is for your first audience in Thais."
+      "silver_token": "The king's silver token is for your first audience in Thais.",
+      "orb": "A glowing orb from Dane's thanks — keep it safe ashore."
+    },
+    "dane": {
+      "orb": "That orb is yours for defeating Ghazbaran. May it serve you well.",
+      "bunny_slippers": "Svenson promised me bunny slippers. Warm feet for a cold cellar!",
+      "wishlist": "Wishlists belong with Santa Claus, not behind my bar.",
+      "christmas_present": "Ask Santa for presents — I pour drinks.",
+      "present": "Ask Santa for presents — I pour drinks.",
+      "wooden_plank": "A plank for Svenson's hull? Take it to him on Folda Boat.",
+      "spool_of_yarn": "Yarn for sail repairs? Svenson needs that more than I do.",
+      "yarn": "Yarn for sail repairs? Svenson needs that more than I do.",
+      "compass": "A compass for lost sailors — Svenson would know what to do with it.",
+      "honeyflower": "Honeyflowers are the king's tea, not my specialty.",
+      "copper_key": "The king's key belongs in Thais, not White Wave Cellar.",
+      "red_dragon_leather": "Dragon leather? Too rough for my tables.",
+      "red_dragon_scale": "Dragon scales belong at the royal forge.",
+      "letter_from_al_dee": "Letters from Rookgaard merchants are not my affair.",
+      "stamped_letter": "Deliver stamped letters to Al Dee.",
+      "iron_ore": "Iron ore is the king's interest.",
+      "small_axe": "Al Dee lost his axe in Rookgaard.",
+      "elvenhair_rope": "Al Dee's rope troubles are far from this cellar.",
+      "magnet": "Magnets and fishing are Al Dee's or the king's business.",
+      "fishing_rod": "Al Dee sells fishing rods on Rookgaard.",
+      "light_shovel": "Al Dee's shovel reward — not for serving drinks.",
+      "holy_tible": "Holy books belong at Costello's monastery.",
+      "costello_diary": "A monk's diary belongs with Costello.",
+      "blessed_ankh": "Wyda in Venore deals in such relics.",
+      "scarab_coin": "Scarab coins are Tesha's trade in Darama.",
+      "destroy_field_rune": "Desert runes — ask Tesha.",
+      "spider_silk": "Spider silk is Wyda's trade in the Venore swamps.",
+      "obsidian_knife": "A hunter's knife — keep it sheathed in my cellar.",
+      "dragon_claw": "A dragon claw trophy! Impressive, but I prefer quiet evenings.",
+      "map_to_mines": "That map leads to mines, not to my bar.",
+      "silver_token": "Show the king's silver token when you hail him in Thais."
     }
   },
   "questItemUninvolvedTemplates": {
@@ -997,6 +1033,7 @@
     "tesha": "I deal in jewels and scarab coins, not {item}.",
     "santa-claus": "Ho ho ho, {item} isn't on my Christmas list!",
     "rookstayer": "I can't worry about {item} — Apprentice Sheng is the danger here!",
-    "svenson": "I don't deal in {item}. I ferry passengers across the Nordic routes."
+    "svenson": "I don't deal in {item}. I ferry passengers across the Nordic routes.",
+    "dane": "I don't deal in {item}. Ask me about drinks, rumours, or this cellar."
   }
 }
