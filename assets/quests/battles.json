@@ -8,7 +8,7 @@
     "ghazbaran": "6. Weakened Ghazbaran"
   },
   "mornenion": {
-    "allyLimit": 5,
+    "allyLimit": 3,
     "hideVillainSprites": true,
     "allowedTiles": [67, 81, 97],
     "allowedTilesMessage": "Ally creatures can only be placed on tiles 67, 81, and 97 in Mornenion!",

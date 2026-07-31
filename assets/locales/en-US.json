@@ -444,6 +444,8 @@
       "tblLeagueGridShinies": "Shinies",
       "tblLeagueGridDrop": "Drop",
       "tblLeaguePlayerStandingShiny": "{count} shinies · {lastDropped}",
+      "tblLeagueWinnersTicksStats": "{ticks} ticks",
+      "tblLeagueWinnersRankStats": "{points} points",
       "tblLeagueWinnersShinyStats": "{count} shinies",
       "tblLeagueShinyNoneYet": "No shiny Football Elementals yet",
       "tblLeagueShinyLoadingProgress": "Loading… {processed}/{total}",

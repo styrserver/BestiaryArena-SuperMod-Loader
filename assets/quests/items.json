@@ -1,0 +1,197 @@
+{
+  "_sections": {
+    "products": "1. Quest product / item definitions",
+    "creatureDrops": "2. Creature gameId → quest item drops",
+    "rookgaardGlobal": "3. Rookgaard region shared drop pool",
+    "questItemChatEntries": "4. NPC chat keyword → quest item ids",
+    "questLogIcons": "5. Quest Log mission card icon filenames",
+    "questLogSpriteIcons": "6. Quest Log mission card board sprite ids"
+  },
+
+  "products": {
+    "silverToken": {
+      "productName": "Silver Token",
+      "icon": "Silver_Token.gif",
+      "description": "A small silver coin used to greet King Tibianus.",
+      "rarity": 4
+    },
+    "scarabCoin": {
+      "productName": "Scarab Coin",
+      "icon": "Scarab_Coin.gif",
+      "description": "You see a scarab coin.",
+      "rarity": 3,
+      "maxCount": 1
+    },
+    "destroyFieldRune": {
+      "productName": "Destroy Field Rune",
+      "icon": "Destroy_Field_Rune.gif",
+      "description": "You see a destroy field rune (\"adito grav\").",
+      "rarity": 3,
+      "maxCount": 1
+    },
+    "scorpionSceptre": {
+      "productName": "Compass",
+      "icon": "The_Time_Compass.gif",
+      "description": "It shows the cardinal directions and also many other symbols that you cannot decipher.",
+      "rarity": 5,
+      "maxCount": 1
+    },
+    "honeyflower": {
+      "productName": "Honeyflower",
+      "icon": "Honey_Flower.gif",
+      "description": "A fragrant honeyflower plucked fresh from the tower.",
+      "rarity": 2
+    },
+    "minotaurTrophy": {
+      "productName": "Wooden Plank",
+      "icon": "Wooden_Plank.gif",
+      "description": "A sturdy wooden plank from the battle wreckage.",
+      "rarity": 5,
+      "maxCount": 1
+    },
+    "orb": {
+      "productName": "Orb",
+      "icon": "Orb.gif",
+      "description": "A mysterious glowing orb pulsing with ancient power.",
+      "rarity": 5,
+      "maxCount": 1
+    },
+    "copperKey": {
+      "productName": "Copper Key",
+      "icon": "Copper_Key.PNG",
+      "targetRoomName": "Mine Hub",
+      "targetMonsterName": "Corym Charlatan",
+      "targetTileIndex": 69,
+      "description": "A very ornate key, made of solid copper.",
+      "rarity": 2
+    },
+    "mapColour": {
+      "productName": "Map to the Mines",
+      "icon": "Map_(Colour).PNG",
+      "description": "The map shows the way to the mines in Kazoordoon.",
+      "rarity": 1
+    },
+    "wishlist": {
+      "productName": "Wishlist",
+      "icon": "Wishlist.gif",
+      "dropChance": 0.01,
+      "description": "A crumpled wishlist. Someone in Folda might be interested.",
+      "rarity": 2
+    },
+    "present": {
+      "productName": "Present",
+      "spriteId": 6505,
+      "iconUrl": "https://bestiaryarena.com/assets/ITEM/6505.png",
+      "description": "A carefully wrapped Christmas present. Open it to see what is inside.",
+      "rarity": 3
+    },
+    "bunnySlippers": {
+      "productName": "Bunny Slippers",
+      "icon": "Bunnyslippers.gif",
+      "description": "Soft pink bunny slippers. A gift from Santa Claus.",
+      "rarity": 3
+    },
+    "lootEffect": {
+      "filename": "Loot_Effect.gif",
+      "size": 48,
+      "durationMs": 1000
+    }
+  },
+
+  "creatureDrops": {
+    "26": {
+      "creatureName": "Dragon Lord",
+      "products": [
+        {
+          "name": "Red Dragon Leather",
+          "icon": "Red_Dragon_Leather.PNG",
+          "dropChance": 0.25,
+          "description": "Obtained by defeating Dragon Lord",
+          "rarity": 4
+        },
+        {
+          "name": "Red Dragon Scale",
+          "icon": "Red_Dragon_Scale.PNG",
+          "dropChance": 0.25,
+          "description": "Obtained by defeating Dragon Lord",
+          "rarity": 4
+        }
+      ]
+    }
+  },
+
+  "rookgaardGlobal": {
+    "poolDropChance": 0.01,
+    "drops": [
+      {
+        "name": "Letter from Al Dee",
+        "icon": "Scroll.gif",
+        "description": "Feeling lost?\nWould you give all your gold for a rope now?\nAl Dee's shop - come to where the ropes are!",
+        "rarity": 1
+      },
+      {
+        "name": "Iron Ore",
+        "icon": "Iron_Ore.gif",
+        "description": "A chunk of iron ore, useful for crafting and forging.",
+        "rarity": 2
+      }
+    ]
+  },
+
+  "questItemChatEntries": [
+    { "id": "letter_from_al_dee", "productName": "Letter from Al Dee", "keywords": ["letter from al dee"] },
+    { "id": "stamped_letter", "productName": "Stamped Letter", "keywords": ["stamped letter"] },
+    { "id": "red_dragon_leather", "productName": "Red Dragon Leather", "keywords": ["red dragon leather", "dragon leather"] },
+    { "id": "red_dragon_scale", "productName": "Red Dragon Scale", "keywords": ["red dragon scale", "dragon scale"] },
+    { "id": "elvenhair_rope", "productName": "Elvenhair Rope", "keywords": ["elvenhair rope", "elven hair rope"] },
+    { "id": "destroy_field_rune", "productName": "Destroy Field Rune", "keywords": ["destroy field rune", "adito grav"] },
+    { "id": "compass", "productName": "Compass", "keywords": ["compass"] },
+    { "id": "scarab_coin", "productName": "Scarab Coin", "keywords": ["scarab coin"] },
+    { "id": "map_to_mines", "productName": "Map to the Mines", "keywords": ["map to the mines", "map to mines"] },
+    { "id": "obsidian_knife", "productName": "Obsidian Knife", "keywords": ["obsidian knife"] },
+    { "id": "light_shovel", "productName": "Light Shovel", "keywords": ["light shovel"] },
+    { "id": "holy_tible", "productName": "The Holy Tible", "keywords": ["holy tible", "the holy tible"] },
+    { "id": "costello_diary", "productName": "Costello's diary", "keywords": ["costello's diary", "costellos diary", "castello's diary", "castellos diary"] },
+    { "id": "blessed_ankh", "productName": "Blessed Ankh", "keywords": ["blessed ankh"] },
+    { "id": "spider_silk", "productName": "Spider Silk", "keywords": ["spider silk"] },
+    { "id": "spool_of_yarn", "productName": "Spool of Yarn", "keywords": ["spool of yarn"] },
+    { "id": "bunny_slippers", "productName": "Bunny Slippers", "keywords": ["bunny slippers", "bunnyslippers"] },
+    { "id": "wooden_plank", "productName": "Wooden Plank", "keywords": ["wooden plank", "plank"] },
+    { "id": "dragon_claw", "productName": "Dragon Claw", "keywords": ["dragon claw"] },
+    { "id": "fishing_rod", "productName": "Fishing Rod", "keywords": ["fishing rod"] },
+    { "id": "silver_token", "productName": "Silver Token", "keywords": ["silver token"] },
+    { "id": "copper_key", "productName": "Copper Key", "keywords": ["copper key"] },
+    { "id": "honeyflower", "productName": "Honeyflower", "keywords": ["honeyflower", "honey flower"] },
+    { "id": "iron_ore", "productName": "Iron Ore", "keywords": ["iron ore"] },
+    { "id": "small_axe", "productName": "Small Axe", "keywords": ["small axe"] },
+    { "id": "magnet", "productName": "Magnet", "keywords": ["magnet"] },
+    { "id": "wishlist", "productName": "Wishlist", "keywords": ["wishlist", "wish list"] },
+    { "id": "christmas_present", "productName": "Present", "keywords": ["christmas present", "wrapped present"] },
+    { "id": "present", "productName": "Present", "keywords": ["present"] },
+    { "id": "yarn", "productName": "Spool of Yarn", "keywords": ["yarn"] },
+    { "id": "orb", "productName": "Orb", "keywords": ["orb"] }
+  ],
+
+  "questLogIcons": {
+    "king_honeyflower": "Honey_Flower.gif",
+    "king_copper_key": "Copper_Key.PNG",
+    "king_red_dragon": "Red_Dragon_Leather.PNG",
+    "king_letter_al_dee": "Scroll.gif",
+    "al_dee_fishing_gold": "Small_Axe.gif",
+    "al_dee_golden_rope": "Elvenhair_Rope.gif",
+    "king_monks_study": "Costello.gif",
+    "costello_queen_banshees": "Book_(Black).gif",
+    "follower_of_zathroth": "Blessed_Ankh.gif",
+    "mother_of_all_spiders": "Spider_Silk.gif",
+    "king_scarab_coin": "Scarab_Coin.gif",
+    "serpentine_tower": "Destroy_Field_Rune.gif",
+    "apprentice_sheng": "Wooden_Plank.gif",
+    "christmas_miracle": "Wishlist.gif",
+    "svenson_love_story": "Spool_of_Yarn.gif",
+    "weakened_archdemon": "Orb.gif"
+  },
+
+  "questLogSpriteIcons": {
+    "king_crossing_the_line": 3538
+  }
+}
