@@ -374,9 +374,10 @@ function setupQuestsModalResponsiveLayout(modalRef, contentRoot, maxWidth, maxHe
 }
 
 const KING_GUILD_COIN_REWARD = 50;
-// Quest dialogue loaded from assets/quests/missions.json and assets/quests/npcs.json
+// Quest dialogue/battle data loaded from assets/quests/*.json
 let questMissionsDialogue = null;
 let questNpcsDialogue = null;
+let questBattlesConfig = null;
 let questDialogueLoadPromise = null;
 let questDialogueReady = false;
 let patchBoardNpcChatFromDialogue = null;
@@ -529,22 +530,32 @@ function applyQuestDialogueFromAssets(missionsData, npcsData) {
   questDialogueReady = true;
 }
 
+function applyQuestBattlesFromAssets(battlesData) {
+  questBattlesConfig = battlesData && typeof battlesData === 'object' ? battlesData : {};
+}
+
+function getQuestBattleConfig(battleId) {
+  return questBattlesConfig?.[battleId] || null;
+}
+
 async function loadQuestDialogueAssets() {
-  if (questDialogueReady && questMissionsDialogue && questNpcsDialogue) {
-    return { missions: questMissionsDialogue, npcs: questNpcsDialogue };
+  if (questDialogueReady && questMissionsDialogue && questNpcsDialogue && questBattlesConfig) {
+    return { missions: questMissionsDialogue, npcs: questNpcsDialogue, battles: questBattlesConfig };
   }
   if (!questDialogueLoadPromise) {
     questDialogueLoadPromise = (async () => {
-      const [missionsData, npcsData] = await Promise.all([
+      const [missionsData, npcsData, battlesData] = await Promise.all([
         fetchQuestJsonAsset('missions.json'),
-        fetchQuestJsonAsset('npcs.json')
+        fetchQuestJsonAsset('npcs.json'),
+        fetchQuestJsonAsset('battles.json')
       ]);
       applyQuestDialogueFromAssets(missionsData, npcsData);
+      applyQuestBattlesFromAssets(battlesData);
       if (typeof patchBoardNpcChatFromDialogue === 'function') {
         patchBoardNpcChatFromDialogue();
       }
-      console.log('[Quests Mod] Loaded quest dialogue from assets/quests');
-      return { missions: missionsData, npcs: npcsData };
+      console.log('[Quests Mod] Loaded quest dialogue and battles from assets/quests');
+      return { missions: missionsData, npcs: npcsData, battles: battlesData };
     })().catch((error) => {
       questDialogueLoadPromise = null;
       console.error('[Quests Mod] Failed to load quest dialogue assets:', error);
@@ -625,7 +636,7 @@ const TOAST_MESSAGES = {
   itemRemoved: (name) => `Removed ${name}.`,
   deliveredTo: (recipient) => `Delivered to ${recipient}!`,
   returnedTo: (recipient) => `Returned to ${recipient}!`,
-  diaryReturned: 'Castello\'s diary has been returned.',
+  diaryReturned: 'Costello\'s diary has been returned.',
   sealCompleted: (ordinal) => `${ordinal} seal completed`,
   copperKeyFound: 'Found Copper Key!',
   mapReceived: 'Received Map!',
@@ -922,7 +933,7 @@ const SEVEN_SEALS_GHOSTLANDS_ROOM_NAMES = [
 ];
 const SEVEN_SEALS_COUNT = SEVEN_SEALS_GHOSTLANDS_ROOM_NAMES.length;
 
-// Transcript text for Castello's diary: shown per seal (incomplete = hint, complete = sealed message).
+// Transcript text for Costello's diary: shown per seal (incomplete = hint, complete = sealed message).
 // Seal indices for completing seals separately (use with setSealCompleted(sealIndex, true)).
 const FIRST_SEAL = 0;
 const SECOND_SEAL = 1;
@@ -1026,7 +1037,7 @@ const QUEST_ITEM_CHAT_ENTRIES = [
   { id: 'obsidian_knife', productName: 'Obsidian Knife', keywords: ['obsidian knife'] },
   { id: 'light_shovel', productName: 'Light Shovel', keywords: ['light shovel'] },
   { id: 'holy_tible', productName: 'The Holy Tible', keywords: ['holy tible', 'the holy tible'] },
-  { id: 'castello_diary', productName: 'Castello\'s diary', keywords: ['castello\'s diary', 'castellos diary', 'costello\'s diary', 'costellos diary'] },
+  { id: 'costello_diary', productName: 'Costello\'s diary', keywords: ['costello\'s diary', 'costellos diary', 'castello\'s diary', 'castellos diary'] },
   { id: 'blessed_ankh', productName: 'Blessed Ankh', keywords: ['blessed ankh'] },
   { id: 'spider_silk', productName: 'Spider Silk', keywords: ['spider silk'] },
   { id: 'spool_of_yarn', productName: 'Spool of Yarn', keywords: ['spool of yarn'] },
@@ -1043,7 +1054,8 @@ const QUEST_ITEM_CHAT_ENTRIES = [
   { id: 'wishlist', productName: 'Wishlist', keywords: ['wishlist', 'wish list'] },
   { id: 'christmas_present', productName: 'Present', keywords: ['christmas present', 'wrapped present'] },
   { id: 'present', productName: 'Present', keywords: ['present'] },
-  { id: 'yarn', productName: 'Spool of Yarn', keywords: ['yarn'] }
+  { id: 'yarn', productName: 'Spool of Yarn', keywords: ['yarn'] },
+  { id: 'orb', productName: 'Orb', keywords: ['orb'] }
 ];
 
 function matchQuestItemInChatMessage(message) {
@@ -1593,7 +1605,7 @@ function createNPCCooldownManager() {
     progressSerpentineTower: { accepted: false, completed: false, destroyFieldRuneTaken: false, putridChamberComplete: false },
     progressApprenticeSheng: { accepted: false, completed: false, battleCompleted: false, rookstayerDismissed: false },
     progressChristmasMiracle: { accepted: false, completed: false },
-    progressSvensonLoveStory: { accepted: false, completed: false, plankDelivered: false, strandedAtAwash: false, awashYarnDelivered: false, awashYarnRequested: false, strandedAtUnderground: false, undergroundPlankDelivered: false, undergroundCompassRequested: false, strandedAtWhiteWave: false, whiteWaveSlippersDelivered: false },
+    progressSvensonLoveStory: { accepted: false, completed: false, plankDelivered: false, strandedAtAwash: false, awashYarnDelivered: false, awashYarnRequested: false, strandedAtUnderground: false, undergroundCompassDelivered: false, undergroundCompassRequested: false, strandedAtWhiteWave: false, whiteWaveSlippersDelivered: false },
     progressWeakenedArchdemon: { accepted: false, completed: false, battleCompleted: false },
     costelloVisited: false,
     mornenionDefeated: false, // Mornenion defeat flag (also stored in Firebase as progress.mornenion.defeated); keep in sync so getAllMissionProgress() includes it when saving
@@ -1833,113 +1845,21 @@ function createNPCCooldownManager() {
       console.error('[Quests Mod][Mornenion] CustomBattles still not available');
       return null;
     }
-    
 
-    // Verify Elf Scout ID exists
-    let elfScoutGameId = 40;
-    try {
-      const monster = globalThis.state.utils.getMonster(elfScoutGameId);
-      if (!monster || !monster.metadata) {
-        console.log('[Quests Mod][Mornenion] Elf Scout ID 40 not found, using fallback');
-        elfScoutGameId = 4; // Orc Spearman fallback
-      }
-    } catch (e) {
-      console.log('[Quests Mod][Mornenion] Error with Elf Scout ID 40, using fallback');
-      elfScoutGameId = 4;
-    }
+    const spawn = getHydratedQuestBattleSpawn('mornenion');
+    const villains = spawn.villains;
 
     const mornenionConfig = {
       name: 'Mornenion',
       roomId: 'abwasp',
       floor: 15, // Set floor to 15 for Ab'Dendriel Hive
-      villains: [
-        {
-          nickname: 'Mornenion',
-          keyPrefix: 'mornenion-tile-19-',
-          tileIndex: 19,
-          gameId: elfScoutGameId,
-          level: 100,
-          tier: 0,
-          direction: 'south',
-          genes: {
-            hp: 100,
-            ad: 50,
-            ap: 20,
-            armor: 50,
-            magicResist: 50
-          }
-        },
-        {
-          nickname: 'Elf',
-          keyPrefix: 'elf-tile-2-',
-          tileIndex: 2,
-          gameId: 39,
-          level: 1,
-          tier: 0,
-          direction: 'south',
-          genes: {
-            hp: 1,
-            ad: 1,
-            ap: 1,
-            armor: 1,
-            magicResist: 1
-          }
-        },
-        {
-          nickname: 'Elf',
-          keyPrefix: 'elf-tile-11-',
-          tileIndex: 11,
-          gameId: 39,
-          level: 1,
-          tier: 0,
-          direction: 'south',
-          genes: {
-            hp: 1,
-            ad: 1,
-            ap: 1,
-            armor: 1,
-            magicResist: 1
-          }
-        },
-        {
-          nickname: 'Elf',
-          keyPrefix: 'elf-tile-137-',
-          tileIndex: 137,
-          gameId: 39,
-          level: 1,
-          tier: 0,
-          direction: 'south',
-          genes: {
-            hp: 1,
-            ad: 1,
-            ap: 1,
-            armor: 1,
-            magicResist: 1
-          }
-        },
-        {
-          nickname: 'Elf',
-          keyPrefix: 'elf-tile-146-',
-          tileIndex: 146,
-          gameId: 39,
-          level: 1,
-          tier: 0,
-          direction: 'south',
-          genes: {
-            hp: 1,
-            ad: 1,
-            ap: 1,
-            armor: 1,
-            magicResist: 1
-          }
-        }
-      ],
-      allyLimit: 5,
+      villains,
+      allyLimit: spawn.allyLimit ?? 5,
       tileRestrictions: {
-        allowedTiles: [67, 81, 97],
-        message: 'Ally creatures can only be placed on tiles 67, 81, and 97 in Mornenion!'
+        allowedTiles: spawn.allowedTiles || [67, 81, 97],
+        message: spawn.allowedTilesMessage || 'Ally creatures can only be placed on tiles 67, 81, and 97 in Mornenion!'
       },
-      hideVillainSprites: true,
+      hideVillainSprites: spawn.hideVillainSprites !== false,
       activationCheck: (isSandbox, inBattleArea) => {
         return isSandbox && inBattleArea && playerUsedHoleToMornenion;
       },
@@ -1984,7 +1904,7 @@ function createNPCCooldownManager() {
         victoryTitle: 'Victory!',
         defeatTitle: 'Defeat',
         victoryMessage: getMissionDialogueLine(AL_DEE_GOLDEN_ROPE_MISSION, 'battleVictory', 'Mornenion was slain. You found Elvenhair Rope.'),
-        defeatMessage: getMissionDialogueLine(AL_DEE_GOLDEN_ROPE_MISSION, 'battleDefeat', 'Mornenions powers were too strong for you.'),
+        defeatMessage: getMissionDialogueLine(AL_DEE_GOLDEN_ROPE_MISSION, 'battleDefeat', 'Mornenion\'s powers were too strong for you.'),
         showItems: false,
         items: [{ name: 'Elvenhair Rope', amount: 1 }]
       }
@@ -2032,65 +1952,15 @@ function createNPCCooldownManager() {
       console.error('[Quests Mod][Apprentice Sheng] CustomBattles still not available');
       return null;
     }
-    // Combat identity: Dharalion. Visual outfit: Minotaur Mage (id-23).
-    // Minotaur villains: combat Demon Skeleton, visual Minotaur outfit.
-    const dharalionGameId = getGameIdByCreatureName('Dharalion', 63);
-    // Never fall back to 1 (Rat) — that spawned/restyled the wrong creatures when lookup failed.
-    const demonSkeletonGameId = getGameIdByCreatureName('Demon Skeleton', 74);
-    const orcGameId = getGameIdByCreatureName('Orc', 5);
-    const minotaurMageOutfitId = 23;
-    const minotaurOutfitId = 25;
-    const rookstayerFireAxeEquip = buildVillainEquip('Fire Axe', 'ad', 1);
-    const shengGenes = { hp: 20, ad: 20, ap: 20, armor: 20, magicResist: 20 };
-    const minotaurGenes = { hp: 20, ad: 20, ap: 20, armor: 20, magicResist: 20 };
-    const rookstayerGenes = { hp: 20, ad: 5, ap: 1, armor: 5, magicResist: 5 };
-
-    const villains = [
-      {
-        nickname: 'Apprentice Sheng',
-        keyPrefix: `apprentice-sheng-tile-${APPRENTICE_SHENG_BATTLE_TILE_INDEX}-`,
-        tileIndex: APPRENTICE_SHENG_BATTLE_TILE_INDEX,
-        gameId: dharalionGameId,
-        outfitSpriteId: minotaurMageOutfitId,
-        shiny: true,
-        level: 25,
-        tier: 0,
-        direction: 'south',
-        genes: shengGenes
-      },
-      ...APPRENTICE_SHENG_MINOTAUR_TILES.map((tileIndex) => ({
-        nickname: 'Minotaur',
-        keyPrefix: `apprentice-sheng-minotaur-tile-${tileIndex}-`,
-        tileIndex,
-        gameId: demonSkeletonGameId,
-        outfitSpriteId: minotaurOutfitId,
-        shiny: true,
-        level: 20,
-        tier: 0,
-        direction: 'south',
-        genes: minotaurGenes
-      }))
-    ];
-
-    const allies = APPRENTICE_SHENG_ALLY_TILES.map((tileIndex) => ({
-      nickname: 'Rookstayer',
-      keyPrefix: `apprentice-sheng-rookstayer-tile-${tileIndex}-`,
-      tileIndex,
-      gameId: orcGameId,
-      outfitSpriteId: ROOKSTAYER_OUTFIT_SPRITE_ID,
-      shiny: true,
-      level: 15,
-      tier: 0,
-      direction: 'east',
-      genes: rookstayerGenes,
-      ...(rookstayerFireAxeEquip && { equip: rookstayerFireAxeEquip })
-    }));
+    const spawn = getHydratedQuestBattleSpawn('apprentice_sheng');
+    const villains = spawn.villains;
+    const allies = spawn.allies;
+    const allowedTiles = spawn.allowedTiles || APPRENTICE_SHENG_PLAYER_TILES;
 
     console.log('[Quests Mod][Apprentice Sheng] Creating battle instance for roomId:', roomId, {
-      sheng: { gameId: dharalionGameId, outfitSpriteId: minotaurMageOutfitId, level: 25 },
-      minotaurs: APPRENTICE_SHENG_MINOTAUR_TILES,
-      rookstayers: { tiles: APPRENTICE_SHENG_ALLY_TILES, gameId: orcGameId, outfitSpriteId: ROOKSTAYER_OUTFIT_SPRITE_ID },
-      playerTiles: '95-128'
+      villains: villains.map((v) => ({ nickname: v.nickname, tileIndex: v.tileIndex, gameId: v.gameId })),
+      allies: allies.map((a) => ({ nickname: a.nickname, tileIndex: a.tileIndex, gameId: a.gameId })),
+      playerTiles: allowedTiles.length ? (allowedTiles[0] + '-' + allowedTiles[allowedTiles.length - 1]) : 'none'
     });
 
     return window.CustomBattles.create({
@@ -2098,11 +1968,11 @@ function createNPCCooldownManager() {
       roomId,
       villains,
       allies,
-      allyLimit: 5,
-      preventVillainMovement: true,
+      allyLimit: spawn.allyLimit ?? 5,
+      preventVillainMovement: spawn.preventVillainMovement !== false,
       tileRestrictions: {
-        allowedTiles: APPRENTICE_SHENG_PLAYER_TILES,
-        message: 'Ally creatures can only be placed on tiles 95-128!'
+        allowedTiles,
+        message: spawn.allowedTilesMessage || 'Ally creatures can only be placed on tiles 95-128!'
       },
       activationCheck: (isSandbox, inBattleArea) => {
         return isSandbox && inBattleArea && playerAcceptedApprenticeShengBattle;
@@ -2121,8 +1991,6 @@ function createNPCCooldownManager() {
           }
         },
         onDefeat: () => {},
-        // After Close: reload the room for a clean board. Never re-apply custom villains/allies —
-        // battle is fully cleaned up on both win and loss (retry via Rookstayer).
         reloadRoomOnClose: true,
         reapplyAfterReload: false,
         forceSameRoomRefresh: true,
@@ -2201,89 +2069,15 @@ function createNPCCooldownManager() {
       return null;
     }
     console.log('[Quests Mod][Banshee Last Room] Creating battle instance for roomId:', roomId);
-    const bansheeGameId = getGameIdByCreatureName('Banshee', 1);
-    const giantSpiderGameId = getGameIdByCreatureName('Giant Spider', 2);
-    const dragonLordGameId = getGameIdByCreatureName('Dragon Lord', 26);
-    const genesDefault = { hp: 30, ad: 30, ap: 30, armor: 30, magicResist: 30 };
-    const villains = [
-      {
-        nickname: 'Queen of the Banshee',
-        keyPrefix: 'banshee-queen-tile-95-',
-        tileIndex: 95,
-        gameId: bansheeGameId,
-        level: 100,
-        tier: 4,
-        direction: 'south',
-        genes: genesDefault
-      },
-      {
-        nickname: 'Banshee',
-        keyPrefix: 'banshee-tile-64-',
-        tileIndex: 64,
-        gameId: bansheeGameId,
-        level: 50,
-        tier: 4,
-        direction: 'south',
-        genes: genesDefault
-      },
-      {
-        nickname: 'Banshee',
-        keyPrefix: 'banshee-tile-66-',
-        tileIndex: 66,
-        gameId: bansheeGameId,
-        level: 50,
-        tier: 4,
-        direction: 'south',
-        genes: genesDefault
-      },
-      {
-        nickname: 'Giant Spider',
-        keyPrefix: 'banshee-giant-spider-tile-139-',
-        tileIndex: 139,
-        gameId: giantSpiderGameId,
-        level: 100,
-        tier: 4,
-        direction: 'south',
-        genes: genesDefault
-      },
-      {
-        nickname: 'Giant Spider',
-        keyPrefix: 'banshee-giant-spider-tile-17-',
-        tileIndex: 17,
-        gameId: giantSpiderGameId,
-        level: 100,
-        tier: 4,
-        direction: 'south',
-        genes: genesDefault
-      },
-      {
-        nickname: 'Dragon Lord',
-        keyPrefix: 'banshee-dragon-lord-tile-100-',
-        tileIndex: 100,
-        gameId: dragonLordGameId,
-        level: 50,
-        tier: 4,
-        direction: 'south',
-        genes: genesDefault
-      },
-      {
-        nickname: 'Dragon Lord',
-        keyPrefix: 'banshee-dragon-lord-tile-26-',
-        tileIndex: 26,
-        gameId: dragonLordGameId,
-        level: 50,
-        tier: 4,
-        direction: 'south',
-        genes: genesDefault
-      }
-    ];
+    const spawn = getHydratedQuestBattleSpawn('banshee_last_room');
+    const villains = spawn.villains;
     const bansheeConfig = {
       name: "Banshee's Last Room",
       roomId: roomId,
-      villains: villains,
-      allyLimit: 5,
-      preventVillainMovement: true,
-      hideVillainSprites: true,
+      villains,
+      allyLimit: spawn.allyLimit ?? 5,
+      preventVillainMovement: spawn.preventVillainMovement !== false,
+      hideVillainSprites: spawn.hideVillainSprites !== false,
       activationCheck: (isSandbox, inBattleArea) => {
         return isSandbox && inBattleArea && playerUsedPortalToBansheeLastRoom;
       },
@@ -2338,57 +2132,21 @@ function createNPCCooldownManager() {
       console.error('[Quests Mod][Spider Lair] CustomBattles still not available');
       return null;
     }
-    const giantSpiderGameId = getGameIdByCreatureName('Giant Spider', 1);
-    const genesDefault = { hp: 30, ad: 30, ap: 30, armor: 30, magicResist: 30 };
-    const bootsOfHasteGameId = getEquipmentGameIdByName('Boots of Haste');
-    const spiderEquip = bootsOfHasteGameId != null ? { gameId: bootsOfHasteGameId, tier: 5, stat: 'hp' } : null;
-    const villains = [
-      {
-        nickname: 'The Old Widow',
-        keyPrefix: 'spider-old-widow-tile-81-',
-        tileIndex: 81,
-        gameId: giantSpiderGameId,
-        level: 275,
-        tier: 4,
-        direction: 'east',
-        genes: genesDefault,
-        ...(spiderEquip && { equip: spiderEquip })
-      },
-      {
-        nickname: 'Giant Spider',
-        keyPrefix: 'spider-lair-giant-tile-64-',
-        tileIndex: 64,
-        gameId: giantSpiderGameId,
-        level: 225,
-        tier: 4,
-        direction: 'east',
-        genes: genesDefault,
-        ...(spiderEquip && { equip: spiderEquip })
-      },
-      {
-        nickname: 'Giant Spider',
-        keyPrefix: 'spider-lair-giant-tile-68-',
-        tileIndex: 68,
-        gameId: giantSpiderGameId,
-        level: 225,
-        tier: 4,
-        direction: 'east',
-        genes: genesDefault,
-        ...(spiderEquip && { equip: spiderEquip })
-      }
-    ];
-    if (spiderEquip) {
-      console.log('[Quests Mod][Spider Lair] Villains with Boots of Haste (T5 HP), equipment gameId:', bootsOfHasteGameId);
+    const spawn = getHydratedQuestBattleSpawn('spider_lair');
+    const villains = spawn.villains;
+    const hasEquip = villains.some((v) => !!v.equip);
+    if (hasEquip) {
+      console.log('[Quests Mod][Spider Lair] Villains hydrated with shared equip from battles.json');
     } else {
-      console.log('[Quests Mod][Spider Lair] Boots of Haste not found in dictionary; villains have no equip. Villains config:', JSON.parse(JSON.stringify(villains)));
+      console.log('[Quests Mod][Spider Lair] No equip resolved for villains. Config:', JSON.parse(JSON.stringify(villains)));
     }
     const spiderLairConfig = {
       name: SPIDER_LAIR_ROOM_NAME,
       roomId: roomId,
-      villains: villains,
-      allyLimit: 5,
-      preventVillainMovement: true,
-      hideVillainSprites: true,
+      villains,
+      allyLimit: spawn.allyLimit ?? 5,
+      preventVillainMovement: spawn.preventVillainMovement !== false,
+      hideVillainSprites: spawn.hideVillainSprites !== false,
       activationCheck: (isSandbox, inBattleArea) => {
         return isSandbox && inBattleArea && playerUsedTile77ToSpiderLair;
       },
@@ -2430,6 +2188,112 @@ function createNPCCooldownManager() {
     const gameId = getEquipmentGameIdByName(equipmentName);
     if (gameId == null) return null;
     return { gameId, stat, tier };
+  }
+
+  function expandBattleTileSpec(spec) {
+    if (spec == null) return null;
+    if (Array.isArray(spec)) return spec.slice();
+    if (typeof spec === 'object' && spec.from != null && spec.to != null) {
+      const from = Number(spec.from);
+      const to = Number(spec.to);
+      if (!Number.isFinite(from) || !Number.isFinite(to) || to < from) return null;
+      const tiles = [];
+      for (let i = from; i <= to; i++) tiles.push(i);
+      return tiles;
+    }
+    return null;
+  }
+
+  function resolveBattleUnitGameId(unitDef) {
+    const fallback = unitDef?.fallbackGameId != null ? unitDef.fallbackGameId : 1;
+    let gameId = unitDef?.creatureName
+      ? getGameIdByCreatureName(unitDef.creatureName, fallback)
+      : fallback;
+    if (unitDef?.validateMonster) {
+      try {
+        const monster = globalThis.state?.utils?.getMonster?.(gameId);
+        if (!monster || !monster.metadata) {
+          gameId = unitDef.invalidFallbackGameId != null ? unitDef.invalidFallbackGameId : fallback;
+        }
+      } catch (_) {
+        gameId = unitDef.invalidFallbackGameId != null ? unitDef.invalidFallbackGameId : fallback;
+      }
+    }
+    return gameId;
+  }
+
+  function resolveBattleUnitEquip(equipDef) {
+    if (!equipDef || typeof equipDef !== 'object') return null;
+    if (equipDef.gameId != null) {
+      return {
+        gameId: equipDef.gameId,
+        stat: equipDef.stat || 'ad',
+        tier: equipDef.tier != null ? equipDef.tier : 1
+      };
+    }
+    if (!equipDef.name) return null;
+    return buildVillainEquip(
+      equipDef.name,
+      equipDef.stat || 'ad',
+      equipDef.tier != null ? equipDef.tier : 1
+    );
+  }
+
+  function hydrateBattleUnitAtTile(unitDef, tileIndex, defaults = {}) {
+    const genes = unitDef.genes || defaults.defaultGenes || null;
+    const sharedEquip = unitDef.equip || defaults.sharedEquip || null;
+    const equip = resolveBattleUnitEquip(sharedEquip);
+    const keyPrefix = unitDef.keyPrefix
+      || (unitDef.keyPrefixBase ? `${unitDef.keyPrefixBase}-${tileIndex}-` : undefined)
+      || `${String(unitDef.nickname || 'unit').toLowerCase().replace(/\s+/g, '-')}-tile-${tileIndex}-`;
+    const unit = {
+      nickname: unitDef.nickname,
+      keyPrefix,
+      tileIndex,
+      gameId: resolveBattleUnitGameId(unitDef),
+      level: unitDef.level != null ? unitDef.level : 1,
+      tier: unitDef.tier != null ? unitDef.tier : 0,
+      direction: unitDef.direction || 'south'
+    };
+    if (genes) unit.genes = { ...genes };
+    if (unitDef.outfitSpriteId != null) unit.outfitSpriteId = unitDef.outfitSpriteId;
+    if (unitDef.shiny != null) unit.shiny = !!unitDef.shiny;
+    if (unitDef.awakened != null) unit.awakened = !!unitDef.awakened;
+    if (equip) unit.equip = equip;
+    return unit;
+  }
+
+  function hydrateBattleUnits(unitDefs, defaults = {}) {
+    if (!Array.isArray(unitDefs)) return [];
+    const units = [];
+    for (const unitDef of unitDefs) {
+      if (!unitDef || typeof unitDef !== 'object') continue;
+      const tiles = Array.isArray(unitDef.tiles)
+        ? unitDef.tiles
+        : (unitDef.tileIndex != null ? [unitDef.tileIndex] : []);
+      for (const tileIndex of tiles) {
+        units.push(hydrateBattleUnitAtTile(unitDef, tileIndex, defaults));
+      }
+    }
+    return units;
+  }
+
+  function getHydratedQuestBattleSpawn(battleId) {
+    const battleCfg = getQuestBattleConfig(battleId) || {};
+    const defaults = {
+      defaultGenes: battleCfg.defaultGenes || null,
+      sharedEquip: battleCfg.sharedEquip || null
+    };
+    return {
+      config: battleCfg,
+      villains: hydrateBattleUnits(battleCfg.villains || [], defaults),
+      allies: hydrateBattleUnits(battleCfg.allies || [], defaults),
+      allyLimit: battleCfg.allyLimit,
+      allowedTiles: expandBattleTileSpec(battleCfg.allowedTiles),
+      allowedTilesMessage: battleCfg.allowedTilesMessage || null,
+      preventVillainMovement: battleCfg.preventVillainMovement,
+      hideVillainSprites: battleCfg.hideVillainSprites
+    };
   }
 
   function buildSerpentineTowerProgress(patch = {}) {
@@ -2545,86 +2409,8 @@ function createNPCCooldownManager() {
   }
 
   function getPutridChamberVillains() {
-    const thalasGameId = getGameIdByCreatureName('Thalas', 1);
-    const cobraStatueGameId = getGameIdByCreatureName('Cobra Statue', 1);
-    const genesDefault = { hp: 30, ad: 30, ap: 30, armor: 30, magicResist: 30 };
-    const thalasGenes = { hp: 30, ad: 0, ap: 0, armor: 30, magicResist: 30 };
-    const steelBootsEquip = buildVillainEquip('Steel Boots', 'ap', 5);
-    const spellbookEquip = buildVillainEquip('Spellbook of Ancient Arcana', 'ap', 5);
-
-    const villains = [
-      {
-        nickname: 'Thalas',
-        keyPrefix: 'putrid-thalas-tile-20-',
-        tileIndex: 20,
-        gameId: thalasGameId,
-        shiny: true,
-        level: 200,
-        tier: 4,
-        direction: 'south',
-        genes: thalasGenes,
-        ...(steelBootsEquip && { equip: steelBootsEquip })
-      },
-      {
-        nickname: 'Thalas',
-        keyPrefix: 'putrid-thalas-tile-23-',
-        tileIndex: 23,
-        gameId: thalasGameId,
-        shiny: true,
-        level: 200,
-        tier: 4,
-        direction: 'south',
-        genes: thalasGenes,
-        ...(steelBootsEquip && { equip: steelBootsEquip })
-      },
-      {
-        nickname: 'Thalas',
-        keyPrefix: 'putrid-thalas-tile-108-',
-        tileIndex: 108,
-        gameId: thalasGameId,
-        shiny: true,
-        level: 200,
-        tier: 4,
-        direction: 'south',
-        genes: thalasGenes,
-        ...(steelBootsEquip && { equip: steelBootsEquip })
-      },
-      {
-        nickname: 'Thalas',
-        keyPrefix: 'putrid-thalas-tile-116-',
-        tileIndex: 116,
-        gameId: thalasGameId,
-        shiny: true,
-        level: 200,
-        tier: 4,
-        direction: 'south',
-        genes: thalasGenes,
-        ...(steelBootsEquip && { equip: steelBootsEquip })
-      },
-      {
-        nickname: 'Cobra Statue',
-        keyPrefix: 'putrid-cobra-statue-tile-4-',
-        tileIndex: 4,
-        gameId: cobraStatueGameId,
-        level: 100,
-        tier: 4,
-        direction: 'south',
-        genes: genesDefault,
-        ...(spellbookEquip && { equip: spellbookEquip })
-      },
-      {
-        nickname: 'Cobra Statue',
-        keyPrefix: 'putrid-cobra-statue-tile-9-',
-        tileIndex: 9,
-        gameId: cobraStatueGameId,
-        level: 100,
-        tier: 4,
-        direction: 'south',
-        genes: genesDefault,
-        ...(spellbookEquip && { equip: spellbookEquip })
-      }
-    ];
-
+    const spawn = getHydratedQuestBattleSpawn('putrid_chamber');
+    const villains = spawn.villains;
     console.log('[Quests Mod][Putrid Chamber] Villains:', villains.map(v => ({
       nickname: v.nickname,
       tileIndex: v.tileIndex,
@@ -2645,15 +2431,16 @@ function createNPCCooldownManager() {
       return null;
     }
 
-    const villains = getPutridChamberVillains();
+    const spawn = getHydratedQuestBattleSpawn('putrid_chamber');
+    const villains = spawn.villains.length ? spawn.villains : getPutridChamberVillains();
 
     const putridConfig = {
       name: PUTRID_CHAMBER_ROOM_NAME,
       roomId,
       villains,
-      allyLimit: 5,
-      preventVillainMovement: true,
-      hideVillainSprites: true,
+      allyLimit: spawn.allyLimit ?? 5,
+      preventVillainMovement: spawn.preventVillainMovement !== false,
+      hideVillainSprites: spawn.hideVillainSprites !== false,
       sceneSpriteReplacements: PUTRID_CHAMBER_SCENE_SPRITE_REPLACEMENTS,
       entrySetup: {
         attemptDelays: PUTRID_CHAMBER_VILLAIN_SETUP_ATTEMPT_DELAYS_MS,
@@ -4535,15 +4322,15 @@ function createNPCCooldownManager() {
       productDefinitions.push(holyTibleDef);
     }
 
-    // Add Castello's diary (from Queen Banshees mission). Description shows each seal green/red from sevenSealsCompleted; use setSealCompleted(sealIndex, true) to complete a seal.
-    const castelloDiaryDef = {
-      name: 'Castello\'s diary',
-      icon: 'Book_(Black).gif',
+    // Add Costello's diary (from Queen Banshees mission). Description shows each seal green/red from sevenSealsCompleted; use setSealCompleted(sealIndex, true) to complete a seal.
+    const costelloDiaryDef = {
+      name: COSTELLO_QUEEN_BANSHEES_MISSION.diaryItemName || 'Costello\'s diary',
+      icon: COSTELLO_QUEEN_BANSHEES_MISSION.diaryIcon || 'Book_(Black).gif',
       description: SEVEN_SEALS_GHOSTLANDS_ROOM_NAMES.join('\n'),
       rarity: 5
     };
-    if (!productDefinitions.find(p => p.name === castelloDiaryDef.name)) {
-      productDefinitions.push(castelloDiaryDef);
+    if (!productDefinitions.find(p => p.name === costelloDiaryDef.name)) {
+      productDefinitions.push(costelloDiaryDef);
     }
 
     // Add Blessed Ankh (reward for completing Queen Banshees / seven seals)
@@ -5367,7 +5154,14 @@ function createNPCCooldownManager() {
       'time compass': SCORPION_SCEPTRE_CONFIG.productName,
       'time_compass': SCORPION_SCEPTRE_CONFIG.productName,
       'minotaur trophy': MINOTAUR_TROPHY_CONFIG.productName,
-      'minotaur_trophy': MINOTAUR_TROPHY_CONFIG.productName
+      'minotaur_trophy': MINOTAUR_TROPHY_CONFIG.productName,
+      "castello's diary": "Costello's diary",
+      'castellos diary': "Costello's diary",
+      "castello diary": "Costello's diary",
+      'castello_diary': "Costello's diary",
+      "costello's diary": "Costello's diary",
+      'costellos diary': "Costello's diary",
+      'costello_diary': "Costello's diary"
     };
     const maxCountByCanonical = {
       [MINOTAUR_TROPHY_CONFIG.productName]: MINOTAUR_TROPHY_CONFIG.maxCount || 1,
@@ -5695,7 +5489,7 @@ function createNPCCooldownManager() {
         awashYarnDelivered: !!source?.awashYarnDelivered,
         awashYarnRequested: !!source?.awashYarnRequested,
         strandedAtUnderground: !!source?.strandedAtUnderground,
-        undergroundPlankDelivered: !!source?.undergroundPlankDelivered,
+        undergroundCompassDelivered: !!(source?.undergroundCompassDelivered || source?.undergroundPlankDelivered),
         undergroundCompassRequested: !!source?.undergroundCompassRequested,
         strandedAtWhiteWave: !!source?.strandedAtWhiteWave,
         whiteWaveSlippersDelivered: !!source?.whiteWaveSlippersDelivered
@@ -6527,6 +6321,7 @@ function createNPCCooldownManager() {
         'Light Shovel',
         'Elvenhair Rope',
         'The Holy Tible',
+        'Costello\'s diary',
         'Castello\'s diary',
         'Blessed Ankh',
         'Spider Silk',
@@ -8779,7 +8574,8 @@ function createNPCCooldownManager() {
             border-image: url('https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png') 6 fill stretch;
           `;
           const descDiv = document.createElement('div');
-          if (productDef.name === 'Castello\'s diary') {
+          if (productDef.name === (COSTELLO_QUEEN_BANSHEES_MISSION.diaryItemName || 'Costello\'s diary')
+            || productDef.name === 'Castello\'s diary') {
             descDiv.style.cssText = 'font-size: 11px; font-style: italic; text-align: center;';
             SEVEN_SEALS_GHOSTLANDS_ROOM_NAMES.forEach((label, i) => {
               const done = getSealCompleted(i);
@@ -9075,7 +8871,7 @@ function createNPCCooldownManager() {
       if (ironOreCount > 0) {
         // Check if Al Dee fishing mission is active and not completed - only take Iron Ore if mission is accepted but not finished
         if (!kingChatState.progressAlDeeFishing.accepted) {
-          return getKingIronOreLine('fineRockNoMission', 'Thats a fine looking rock you have there.');
+          return getKingIronOreLine('fineRockNoMission', 'That\'s a fine looking rock you have there.');
         }
         if (kingChatState.progressAlDeeFishing.completed) {
           return getKingIronOreLine('fineRockMissionDone', 'I appreciate the rock, but I have no further use for iron ore now that our business is concluded.');
@@ -12493,7 +12289,7 @@ function createNPCCooldownManager() {
             const coinMsg = FOLLOWER_OF_ZATHROTH_MISSION.rewardCoins
               ? formatDialogueLine(getMissionDialogueLine(FOLLOWER_OF_ZATHROTH_MISSION, 'wydaHandInCoinLine', ' Here are {coins} guild coins for your trouble.'), { coins: FOLLOWER_OF_ZATHROTH_MISSION.rewardCoins })
               : '';
-            wydaCooldown.queueResponse(text, getMissionDialogueLine(FOLLOWER_OF_ZATHROTH_MISSION, 'wydaHandInComplete', 'The Blessed Ankh! Yes, this is what I needed. You have done well. The matter Castello spoke of is complete.') + coinMsg, addMessage, 'Wyda');
+            wydaCooldown.queueResponse(text, getMissionDialogueLine(FOLLOWER_OF_ZATHROTH_MISSION, 'wydaHandInComplete', 'The Blessed Ankh! Yes, this is what I needed. You have done well. The matter Costello spoke of is complete.') + coinMsg, addMessage, 'Wyda');
             NotificationService.showTaskCompletedWithCoins(FOLLOWER_OF_ZATHROTH_MISSION, '[Quests Mod][Wyda]');
             return;
           }
@@ -13066,8 +12862,8 @@ function createNPCCooldownManager() {
 
     if (mission.id === SVENSON_LOVE_STORY_MISSION.id) {
       if (progress?.strandedAtWhiteWave && !progress?.whiteWaveSlippersDelivered) return mission.objectiveLine9 || mission.objectiveLine8 || mission.objectiveLine7;
-      if (progress?.strandedAtUnderground && progress?.undergroundPlankDelivered && !progress?.strandedAtWhiteWave) return mission.objectiveLine8 || mission.objectiveLine7;
-      if (progress?.strandedAtUnderground && !progress?.undergroundPlankDelivered) {
+      if (progress?.strandedAtUnderground && progress?.undergroundCompassDelivered && !progress?.strandedAtWhiteWave) return mission.objectiveLine8 || mission.objectiveLine7;
+      if (progress?.strandedAtUnderground && !progress?.undergroundCompassDelivered) {
         if (!progress?.undergroundCompassRequested) return mission.objectiveLine6 || mission.objectiveLine5;
         return mission.objectiveLine7 || mission.objectiveLine6 || mission.objectiveLine5;
       }
@@ -13111,10 +12907,10 @@ function createNPCCooldownManager() {
       if (progress?.strandedAtWhiteWave && !progress?.whiteWaveSlippersDelivered) {
         return mission.hintWhiteWave || mission.hint || '';
       }
-      if (progress?.strandedAtUnderground && progress?.undergroundPlankDelivered && !progress?.strandedAtWhiteWave) {
+      if (progress?.strandedAtUnderground && progress?.undergroundCompassDelivered && !progress?.strandedAtWhiteWave) {
         return '';
       }
-      if (progress?.strandedAtUnderground && !progress?.undergroundPlankDelivered) {
+      if (progress?.strandedAtUnderground && !progress?.undergroundCompassDelivered) {
         if (!progress?.undergroundCompassRequested) return '';
         return mission.hintUnderground || mission.hint || '';
       }
@@ -13222,13 +13018,13 @@ function createNPCCooldownManager() {
         return makeActiveMissionCountProgress(progress?.whiteWaveSlippersDelivered ? 1 : 0, 1);
       }
       if (progress?.strandedAtUnderground) {
-        if (progress?.undergroundPlankDelivered && !progress?.strandedAtWhiteWave) {
+        if (progress?.undergroundCompassDelivered && !progress?.strandedAtWhiteWave) {
           return makeActiveMissionCountProgress(0, 1);
         }
         if (!progress?.undergroundCompassRequested) {
           return makeActiveMissionCountProgress(0, 1);
         }
-        return makeActiveMissionCountProgress(progress?.undergroundPlankDelivered ? 1 : 0, 1);
+        return makeActiveMissionCountProgress(progress?.undergroundCompassDelivered ? 1 : 0, 1);
       }
       if (progress?.strandedAtAwash && progress?.awashYarnDelivered && !progress?.strandedAtUnderground) {
         return makeActiveMissionCountProgress(0, 1);
@@ -19756,7 +19552,7 @@ function createNPCCooldownManager() {
       awashYarnDelivered: false,
       awashYarnRequested: false,
       strandedAtUnderground: false,
-      undergroundPlankDelivered: false,
+      undergroundCompassDelivered: false,
       undergroundCompassRequested: false,
       strandedAtWhiteWave: false,
       whiteWaveSlippersDelivered: false
@@ -19778,7 +19574,7 @@ function createNPCCooldownManager() {
       awashYarnDelivered: false,
       awashYarnRequested: false,
       strandedAtUnderground: false,
-      undergroundPlankDelivered: false,
+      undergroundCompassDelivered: false,
       undergroundCompassRequested: false,
       strandedAtWhiteWave: false,
       whiteWaveSlippersDelivered: false
@@ -19799,7 +19595,7 @@ function createNPCCooldownManager() {
       awashYarnDelivered: true,
       awashYarnRequested: true,
       strandedAtUnderground: false,
-      undergroundPlankDelivered: false,
+      undergroundCompassDelivered: false,
       undergroundCompassRequested: false,
       strandedAtWhiteWave: false,
       whiteWaveSlippersDelivered: false
@@ -19807,7 +19603,7 @@ function createNPCCooldownManager() {
     return true;
   }
 
-  async function handInSvensonUndergroundPlank() {
+  async function handInSvensonUndergroundCompass() {
     const compassItemName = SERPENTINE_TOWER_MISSION.rewardItemName || SCORPION_SCEPTRE_CONFIG.productName;
     const consumed = await consumeQuestItem(compassItemName, 1);
     if (!consumed) return false;
@@ -19820,7 +19616,7 @@ function createNPCCooldownManager() {
       awashYarnDelivered: true,
       awashYarnRequested: true,
       strandedAtUnderground: true,
-      undergroundPlankDelivered: true,
+      undergroundCompassDelivered: true,
       undergroundCompassRequested: true,
       strandedAtWhiteWave: false,
       whiteWaveSlippersDelivered: false
@@ -19841,7 +19637,7 @@ function createNPCCooldownManager() {
       awashYarnDelivered: true,
       awashYarnRequested: true,
       strandedAtUnderground: true,
-      undergroundPlankDelivered: true,
+      undergroundCompassDelivered: true,
       undergroundCompassRequested: true,
       strandedAtWhiteWave: true,
       whiteWaveSlippersDelivered: true
@@ -19863,7 +19659,7 @@ function createNPCCooldownManager() {
       awashYarnDelivered: false,
       awashYarnRequested: false,
       strandedAtUnderground: false,
-      undergroundPlankDelivered: false,
+      undergroundCompassDelivered: false,
       undergroundCompassRequested: false,
       strandedAtWhiteWave: false,
       whiteWaveSlippersDelivered: false
@@ -19903,7 +19699,7 @@ function createNPCCooldownManager() {
       awashYarnDelivered: true,
       awashYarnRequested: true,
       strandedAtUnderground: true,
-      undergroundPlankDelivered: false,
+      undergroundCompassDelivered: false,
       undergroundCompassRequested: false,
       strandedAtWhiteWave: false,
       whiteWaveSlippersDelivered: false
@@ -19963,7 +19759,7 @@ function createNPCCooldownManager() {
       awashYarnDelivered: true,
       awashYarnRequested: true,
       strandedAtUnderground: true,
-      undergroundPlankDelivered: true,
+      undergroundCompassDelivered: true,
       undergroundCompassRequested: true,
       strandedAtWhiteWave: true,
       whiteWaveSlippersDelivered: false
@@ -20356,97 +20152,18 @@ function createNPCCooldownManager() {
       console.error('[Quests Mod][Weakened Archdemon] CustomBattles still not available');
       return null;
     }
-    const dragonGameId = getGameIdByCreatureName('Dragon', 35);
-    const rookstayerBodyGameId = getGameIdByCreatureName('Orc', 5);
-    const druidGameId = getGameIdByCreatureName('Druid', 33);
     ghazPseudoLavaholeGameId = getGameIdByCreatureName('Lavahole', 70);
-    const genes = { hp: 750, ad: 20, ap: 20, armor: 100, magicResist: 100 };
-    const ghazAllyGenes = { hp: 30, ad: 30, ap: 30, armor: 30, magicResist: 30 };
-    const druidGenes = { hp: 20, ad: 18, ap: 24, armor: 20, magicResist: 22 };
-    const spellbookOfAncientArcanaEquip = buildVillainEquip('Spellbook of Ancient Arcana', 'ap', 1);
-    const villains = [
-      {
-        nickname: GHAZBARAN_NICKNAME,
-        keyPrefix: `ghazbaran-tile-${GHAZBARAN_TILE_INDEX}-`,
-        tileIndex: GHAZBARAN_TILE_INDEX,
-        gameId: dragonGameId,
-        awakened: true,
-        level: 500,
-        tier: 2,
-        direction: 'south',
-        genes
-      }
-    ];
-    const allies = [
-      {
-        nickname: 'Eternal Oblivion',
-        keyPrefix: 'ghaz-ally-eternal-oblivion-tile-77-',
-        tileIndex: 77,
-        gameId: rookstayerBodyGameId,
-        outfitSpriteId: ROOKSTAYER_OUTFIT_SPRITE_ID,
-        shiny: true,
-        level: 300,
-        tier: 2,
-        direction: 'north',
-        genes: ghazAllyGenes
-      },
-      {
-        nickname: 'Druid I',
-        keyPrefix: 'ghaz-ally-druid-tile-10-',
-        tileIndex: 10,
-        gameId: druidGameId,
-        awakened: false,
-        level: 100,
-        tier: 1,
-        direction: 'south',
-        genes: druidGenes,
-        ...(spellbookOfAncientArcanaEquip && { equip: spellbookOfAncientArcanaEquip })
-      },
-      {
-        nickname: 'Druid II',
-        keyPrefix: 'ghaz-ally-druid-tile-11-',
-        tileIndex: 11,
-        gameId: druidGameId,
-        awakened: false,
-        level: 100,
-        tier: 2,
-        direction: 'south',
-        genes: druidGenes,
-        ...(spellbookOfAncientArcanaEquip && { equip: spellbookOfAncientArcanaEquip })
-      },
-      {
-        nickname: 'Druid III',
-        keyPrefix: 'ghaz-ally-druid-tile-25-',
-        tileIndex: 25,
-        gameId: druidGameId,
-        awakened: false,
-        level: 100,
-        tier: 3,
-        direction: 'south',
-        genes: druidGenes,
-        ...(spellbookOfAncientArcanaEquip && { equip: spellbookOfAncientArcanaEquip })
-      },
-      {
-        nickname: 'Druid IV',
-        keyPrefix: 'ghaz-ally-druid-tile-26-',
-        tileIndex: 26,
-        gameId: druidGameId,
-        awakened: false,
-        level: 100,
-        tier: 4,
-        direction: 'south',
-        genes: druidGenes,
-        ...(spellbookOfAncientArcanaEquip && { equip: spellbookOfAncientArcanaEquip })
-      }
-    ];
+    const spawn = getHydratedQuestBattleSpawn('ghazbaran');
+    const villains = spawn.villains;
+    const allies = spawn.allies;
     return window.CustomBattles.create({
       name: GHAZBARAN_HIDEOUT_DISPLAY_NAME,
       roomId,
       villains,
       allies,
-      allyLimit: 10,
-      preventVillainMovement: false,
-      hideVillainSprites: false,
+      allyLimit: spawn.allyLimit ?? 10,
+      preventVillainMovement: !!spawn.preventVillainMovement,
+      hideVillainSprites: !!spawn.hideVillainSprites,
       activationCheck: (isSandbox, inBattleArea) => {
         return isSandbox && inBattleArea && playerTraveledToGhazHideout && isWeakenedArchdemonQuestActive();
       },
@@ -22034,7 +21751,7 @@ function createNPCCooldownManager() {
           const awashYarnDelivered = !!svensonProgress.awashYarnDelivered;
           const awashYarnRequested = !!svensonProgress.awashYarnRequested;
           const strandedAtUnderground = !!svensonProgress.strandedAtUnderground;
-          const undergroundPlankDelivered = !!svensonProgress.undergroundPlankDelivered;
+          const undergroundCompassDelivered = !!svensonProgress.undergroundCompassDelivered;
           const undergroundCompassRequested = !!svensonProgress.undergroundCompassRequested;
           const askedMission = lower.includes('mission') || lower.includes('quest') || lower.includes('help');
           const inFoldaBoat = isOnRoomByName(SVENSON_ROOM_NAME);
@@ -22214,7 +21931,7 @@ function createNPCCooldownManager() {
                 awashYarnDelivered: false,
                 awashYarnRequested: true,
                 strandedAtUnderground: false,
-                undergroundPlankDelivered: false,
+                undergroundCompassDelivered: false,
                 undergroundCompassRequested: false,
                 strandedAtWhiteWave: false,
                 whiteWaveSlippersDelivered: false
@@ -22270,8 +21987,8 @@ function createNPCCooldownManager() {
                 )
                 : getMissionDialogueLine(
                   SVENSON_LOVE_STORY_MISSION,
-                  'svensonNeedYarn',
-                  'The ship broke again in the crash. I need a Spool of Yarn to patch the hull. Do you have one with you?'
+                  'svensonMissingYarn',
+                  'You do not have a Spool of Yarn. Find one — Wyda in the Venore swamps spins it from spider silk — and return.'
                 ),
               addMessageToConversation,
               npcConfig.name,
@@ -22290,8 +22007,8 @@ function createNPCCooldownManager() {
               text,
               getMissionDialogueLine(
                 SVENSON_LOVE_STORY_MISSION,
-                'svensonNeedYarn',
-                'The ship broke again in the crash. I need a Spool of Yarn to patch the hull. Do you have one with you?'
+                'svensonYarnDeclined',
+                'Then find a Spool of Yarn and return when you have it.'
               ),
               addMessageToConversation,
               npcConfig.name,
@@ -22330,8 +22047,8 @@ function createNPCCooldownManager() {
                 )
                 : getMissionDialogueLine(
                   SVENSON_LOVE_STORY_MISSION,
-                  'svensonNeedYarn',
-                  'The ship broke again in the crash. I need a Spool of Yarn to patch the hull. Do you have one with you?'
+                  'svensonMissingYarn',
+                  'You do not have a Spool of Yarn. Find one — Wyda in the Venore swamps spins it from spider silk — and return.'
                 ),
               addMessageToConversation,
               npcConfig.name,
@@ -22418,7 +22135,7 @@ function createNPCCooldownManager() {
             return;
           }
 
-          if (missionAccepted && strandedAtUnderground && !undergroundPlankDelivered && askedMission) {
+          if (missionAccepted && strandedAtUnderground && !undergroundCompassDelivered && askedMission) {
             if (!undergroundCompassRequested) {
               await persistMissionProgress(SVENSON_LOVE_STORY_MISSION, {
                 accepted: true,
@@ -22427,7 +22144,7 @@ function createNPCCooldownManager() {
                 strandedAtAwash: true,
                 awashYarnDelivered: true,
                 strandedAtUnderground: true,
-                undergroundPlankDelivered: false,
+                undergroundCompassDelivered: false,
                 undergroundCompassRequested: true,
                 strandedAtWhiteWave: false,
                 whiteWaveSlippersDelivered: false
@@ -22439,7 +22156,7 @@ function createNPCCooldownManager() {
               text,
               getMissionDialogueLine(
                 SVENSON_LOVE_STORY_MISSION,
-                'svensonNeedUndergroundPlank',
+                'svensonNeedCompass',
                 'We are lost down here. I need a Compass so I can find our way out. Do you have one with you?'
               ),
               addMessageToConversation,
@@ -22449,34 +22166,50 @@ function createNPCCooldownManager() {
             return;
           }
 
-          if (missionAccepted && strandedAtUnderground && !undergroundPlankDelivered && (lower.includes('compass') || lower.includes('yes'))) {
-            const plankGiven = await handInSvensonUndergroundPlank().catch((error) => {
+          if (missionAccepted && strandedAtUnderground && !undergroundCompassDelivered && (lower.includes('compass') || lower.includes('yes'))) {
+            const compassGiven = await handInSvensonUndergroundCompass().catch((error) => {
               console.error(`${npcConfig.logPrefix} Error handing in Underground Compass:`, error);
               return false;
             });
             cooldown.queueResponse(
               text,
-              plankGiven
+              compassGiven
                 ? getMissionDialogueLine(
                   SVENSON_LOVE_STORY_MISSION,
-                  'svensonUndergroundPlankAccepted',
+                  'svensonCompassAccepted',
                   'Excellent. With this Compass, I can chart our way again. Thank you.'
                 )
                 : getMissionDialogueLine(
                   SVENSON_LOVE_STORY_MISSION,
-                  'svensonNeedUndergroundPlank',
-                  'We are lost down here. I need a Compass so I can find our way out. Do you have one with you?'
+                  'svensonMissingCompass',
+                  'You do not have a Compass. Brave the desert dangers for one, then return.'
                 ),
               addMessageToConversation,
               npcConfig.name,
               () => {
-                awaitingSvensonUndergroundTravelConfirm = !!plankGiven;
+                awaitingSvensonUndergroundTravelConfirm = !!compassGiven;
               }
             );
             return;
           }
 
-          if (missionAccepted && strandedAtUnderground && undergroundPlankDelivered && !svensonProgress.strandedAtWhiteWave && askedMission) {
+          if (missionAccepted && strandedAtUnderground && !undergroundCompassDelivered && lower.includes('no')) {
+            awaitingSvensonUndergroundTravelConfirm = false;
+            cooldown.queueResponse(
+              text,
+              getMissionDialogueLine(
+                SVENSON_LOVE_STORY_MISSION,
+                'svensonCompassDeclined',
+                'Then find a Compass and return when you have it.'
+              ),
+              addMessageToConversation,
+              npcConfig.name,
+              ModalHelpers.getFarewellCloseCallback(text)
+            );
+            return;
+          }
+
+          if (missionAccepted && strandedAtUnderground && undergroundCompassDelivered && !svensonProgress.strandedAtWhiteWave && askedMission) {
             awaitingSvensonUndergroundTravelConfirm = true;
             cooldown.queueResponse(
               text,
@@ -22492,7 +22225,7 @@ function createNPCCooldownManager() {
             return;
           }
 
-          if (missionAccepted && strandedAtUnderground && undergroundPlankDelivered && !svensonProgress.strandedAtWhiteWave && awaitingSvensonUndergroundTravelConfirm && lower.includes('yes')) {
+          if (missionAccepted && strandedAtUnderground && undergroundCompassDelivered && !svensonProgress.strandedAtWhiteWave && awaitingSvensonUndergroundTravelConfirm && lower.includes('yes')) {
             awaitingSvensonUndergroundTravelConfirm = false;
             const whiteWaveUnlocked = isRoomUnlockedByName(SVENSON_WHITE_WAVE_ROOM_NAME);
             if (!whiteWaveUnlocked) {
@@ -22543,7 +22276,7 @@ function createNPCCooldownManager() {
             return;
           }
 
-          if (missionAccepted && strandedAtUnderground && undergroundPlankDelivered && !svensonProgress.strandedAtWhiteWave && awaitingSvensonUndergroundTravelConfirm && lower.includes('no')) {
+          if (missionAccepted && strandedAtUnderground && undergroundCompassDelivered && !svensonProgress.strandedAtWhiteWave && awaitingSvensonUndergroundTravelConfirm && lower.includes('no')) {
             awaitingSvensonUndergroundTravelConfirm = false;
             cooldown.queueResponse(
               text,
@@ -22589,9 +22322,24 @@ function createNPCCooldownManager() {
                 )
                 : getMissionDialogueLine(
                   SVENSON_LOVE_STORY_MISSION,
-                  'svensonNeedPresent',
-                  'I forgot Dane\'s present. I promised her Bunny Slippers. Do you have them with you?'
+                  'svensonMissingPresent',
+                  'You do not have Bunny Slippers. Ask Santa Claus in Folda for a present, unwrap it, then return.'
                 ),
+              addMessageToConversation,
+              npcConfig.name,
+              ModalHelpers.getFarewellCloseCallback(text)
+            );
+            return;
+          }
+
+          if (missionAccepted && svensonProgress.strandedAtWhiteWave && !svensonProgress.whiteWaveSlippersDelivered && lower.includes('no')) {
+            cooldown.queueResponse(
+              text,
+              getMissionDialogueLine(
+                SVENSON_LOVE_STORY_MISSION,
+                'svensonPresentDeclined',
+                'Then bring me Bunny Slippers when you have them.'
+              ),
               addMessageToConversation,
               npcConfig.name,
               ModalHelpers.getFarewellCloseCallback(text)
@@ -22880,13 +22628,13 @@ function createNPCCooldownManager() {
             return;
           }
 
-          if (missionAccepted && plankDelivered && strandedAtAwash && awashYarnDelivered && !strandedAtUnderground && askedMission) {
+          if (missionAccepted && !plankDelivered && (lower.includes('passage') || lower.includes('travel') || lower.includes('carlin'))) {
             cooldown.queueResponse(
               text,
               getMissionDialogueLine(
                 SVENSON_LOVE_STORY_MISSION,
-                'svensonYarnAcceptedAwash',
-                'Excellent, this yarn will hold for now. Thank you, Player.'
+                'svensonMissingPlank',
+                'I still cannot fix my boat. Please bring me a Wooden Plank, Player.'
               ),
               addMessageToConversation,
               npcConfig.name,
@@ -22895,13 +22643,13 @@ function createNPCCooldownManager() {
             return;
           }
 
-          if (missionAccepted && !plankDelivered && (lower.includes('passage') || lower.includes('travel') || lower.includes('carlin'))) {
+          if (missionAccepted && plankDelivered && !missionDone && !strandedAtAwash && (lower.includes('passage') || lower.includes('travel') || lower.includes('carlin'))) {
             cooldown.queueResponse(
               text,
               getMissionDialogueLine(
                 SVENSON_LOVE_STORY_MISSION,
-                'svensonMissingPlank',
-                'I still cannot fix my boat. Please bring me a Wooden Plank, Player.'
+                'svensonPlankAccepted',
+                'Well done! The hull will hold for now. Are you ready to cast off with me?'
               ),
               addMessageToConversation,
               npcConfig.name,
@@ -22976,7 +22724,7 @@ function createNPCCooldownManager() {
               getMissionDialogueLine(
                 SVENSON_LOVE_STORY_MISSION,
                 'alreadyCompleted',
-                'We made it as far as the Awash Steamship, though the voyage ended in wreckage. Thank you for helping me, Player.'
+                'Your help saved my voyage and my marriage. Thank you again.'
               ),
               addMessageToConversation,
               npcConfig.name,
@@ -24574,17 +24322,18 @@ function createNPCCooldownManager() {
 
       try {
         const questItems = await getQuestItems(false);
-        const diaryCount = questItems[COSTELLO_QUEEN_BANSHEES_MISSION.diaryItemName] || 0;
+        const diaryCount = (questItems[COSTELLO_QUEEN_BANSHEES_MISSION.diaryItemName] || 0)
+          + (questItems["Castello's diary"] || 0);
         let needsSave = false;
         if (diaryCount >= 1 && !kingChatState.progressMonksStudy.completed) {
-          console.log('[Quests Mod] Syncing Monks Study to completed (player has Castello\'s diary)');
+          console.log('[Quests Mod] Syncing Monks Study to completed (player has Costello\'s diary)');
           setMissionProgress(KING_MONKS_STUDY_MISSION, { accepted: true, completed: true });
           kingChatState.progressMonksStudy.accepted = true;
           kingChatState.progressMonksStudy.completed = true;
           needsSave = true;
         }
         if (diaryCount >= 1 && !kingChatState.progressQueenBanshees.accepted) {
-          console.log('[Quests Mod] Syncing Queen Banshees to accepted (player has Castello\'s diary)');
+          console.log('[Quests Mod] Syncing Queen Banshees to accepted (player has Costello\'s diary)');
           setMissionProgress(COSTELLO_QUEEN_BANSHEES_MISSION, { accepted: true, completed: !!kingChatState.progressQueenBanshees.completed });
           kingChatState.progressQueenBanshees.accepted = true;
           needsSave = true;
@@ -24753,7 +24502,7 @@ function createNPCCooldownManager() {
     honeyflower: HONEYFLOWER_CONFIG.productName,
     scarabCoin: SCARAB_COIN_CONFIG.productName,
     destroyFieldRune: DESTROY_FIELD_RUNE_ITEM_NAME,
-    diary: "Castello's diary",
+    diary: "Costello's diary",
     spoolOfYarn: 'Spool of Yarn',
     woodenPlank: 'Wooden Plank',
     compass: 'Compass',
@@ -24789,7 +24538,7 @@ function createNPCCooldownManager() {
     'Dragon Claw': 1,
     'Light Shovel': 1,
     'The Holy Tible': 1,
-    "Castello's diary": 1,
+    "Costello's diary": 1,
     'Blessed Ankh': 1,
     'Spool of Yarn': 1,
     [HONEYFLOWER_CONFIG.productName]: 1,

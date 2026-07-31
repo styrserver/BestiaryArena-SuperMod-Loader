@@ -3155,6 +3155,7 @@ let antiIdleAudioElement = null;
 const PLAYER_COUNT_POLL_MS = 60000;
 const PLAYER_ONLINE_RECORD_CHECK_MS = 15 * 60 * 1000;
 const PLAYER_ONLINE_RECORD_TOAST_COOLDOWN_MS = 2 * 60 * 1000;
+const PLAYER_ONLINE_RECORD_HISTORY_LIMIT = 5;
 
 const playercountState = {
   currentPlayerCount: null,
@@ -16349,7 +16350,11 @@ function getPlayerOnlineHighscorePath() {
   return `${FIREBASE_RUNS_CONFIG.firebaseUrl}/player-online-highscore`;
 }
 
-function normalizePlayerOnlineHighscore(data) {
+function getPlayerOnlineHighscoreHistoryPath() {
+  return `${FIREBASE_RUNS_CONFIG.firebaseUrl}/player-online-highscore-history`;
+}
+
+function normalizePlayerOnlineHighscoreEntry(data) {
   if (!data || typeof data !== 'object') {
     return null;
   }
@@ -16364,19 +16369,116 @@ function normalizePlayerOnlineHighscore(data) {
   };
 }
 
+function normalizePlayerOnlineHighscore(data) {
+  return normalizePlayerOnlineHighscoreEntry(data);
+}
+
+function normalizePlayerOnlineHighscoreHistory(data) {
+  const rawEntries = Array.isArray(data)
+    ? data
+    : (data && typeof data === 'object' ? Object.values(data) : []);
+
+  const byPeak = new Map();
+  for (const item of rawEntries) {
+    const entry = normalizePlayerOnlineHighscoreEntry(item);
+    if (!entry) continue;
+    const existing = byPeak.get(entry.peak);
+    if (!existing || (entry.achievedAt || 0) >= (existing.achievedAt || 0)) {
+      byPeak.set(entry.peak, entry);
+    }
+  }
+
+  return Array.from(byPeak.values())
+    .sort((a, b) => {
+      if (b.peak !== a.peak) return b.peak - a.peak;
+      return (b.achievedAt || 0) - (a.achievedAt || 0);
+    })
+    .slice(0, PLAYER_ONLINE_RECORD_HISTORY_LIMIT);
+}
+
+function getBestPlayerOnlineHighscore(record, history = []) {
+  let best = record ? { ...record } : null;
+  for (const entry of history) {
+    if (!best || entry.peak > best.peak) {
+      best = { ...entry };
+    }
+  }
+  return best;
+}
+
+function buildPlayerOnlineHighscoreHistory(nextRecord, previousHistory = []) {
+  const byPeak = new Map();
+  const candidates = [
+    nextRecord,
+    ...previousHistory
+  ];
+
+  for (const item of candidates) {
+    const entry = normalizePlayerOnlineHighscoreEntry(item);
+    if (!entry) continue;
+    const existing = byPeak.get(entry.peak);
+    if (!existing || (entry.achievedAt || 0) >= (existing.achievedAt || 0)) {
+      byPeak.set(entry.peak, entry);
+    }
+  }
+
+  return Array.from(byPeak.values())
+    .sort((a, b) => {
+      if (b.peak !== a.peak) return b.peak - a.peak;
+      return (b.achievedAt || 0) - (a.achievedAt || 0);
+    })
+    .slice(0, PLAYER_ONLINE_RECORD_HISTORY_LIMIT);
+}
+
+function playerOnlineHighscoreHistoryNeedsWrite(nextHistory, previousHistory = []) {
+  if (nextHistory.length !== previousHistory.length) {
+    return true;
+  }
+  return nextHistory.some((entry, index) => {
+    const prev = previousHistory[index];
+    return !prev || prev.peak !== entry.peak || prev.achievedAt !== entry.achievedAt;
+  });
+}
+
+async function fetchPlayerOnlineFirebaseJson(path, errorContext) {
+  const response = await fetch(`${path}.json`);
+  if (!response.ok) {
+    if (response.status === 404) {
+      return null;
+    }
+    throw new Error(`Failed to ${errorContext}: ${response.status}`);
+  }
+  return response.json();
+}
+
 async function fetchPlayerOnlineHighscore() {
   try {
-    const data = await FirebaseRunsService.get(
-      getPlayerOnlineHighscorePath(),
-      'fetch player online highscore',
-      null
-    );
+    const [recordData, historyData] = await Promise.all([
+      fetchPlayerOnlineFirebaseJson(
+        getPlayerOnlineHighscorePath(),
+        'fetch player online highscore'
+      ),
+      fetchPlayerOnlineFirebaseJson(
+        getPlayerOnlineHighscoreHistoryPath(),
+        'fetch player online highscore history'
+      )
+    ]);
+
     playercountState.onlineRecordFetchSucceeded = true;
-    const normalized = normalizePlayerOnlineHighscore(data);
-    if (normalized) {
-      playercountState.onlineRecord = normalized;
+    const record = normalizePlayerOnlineHighscore(recordData);
+    const history = normalizePlayerOnlineHighscoreHistory(historyData);
+    const best = getBestPlayerOnlineHighscore(record, history);
+
+    if (best) {
+      playercountState.onlineRecord = {
+        peak: best.peak,
+        achievedAt: best.achievedAt,
+        history
+      };
+      return playercountState.onlineRecord;
     }
-    return normalized;
+
+    return null;
   } catch (error) {
     playercountState.onlineRecordFetchSucceeded = false;
     console.error('[Mod Settings] Error fetching player online highscore:', error);
@@ -16389,39 +16491,108 @@ async function updatePlayerOnlineHighscoreIfHigher(count) {
     return playercountState.onlineRecord;
   }
 
-  const latestRecord = await fetchPlayerOnlineHighscore();
-  const fetchSucceeded = playercountState.onlineRecordFetchSucceeded;
-  if (!fetchSucceeded && latestRecord == null) {
+  let latestRecord;
+  try {
+    const [recordData, historyData] = await Promise.all([
+      fetchPlayerOnlineFirebaseJson(
+        getPlayerOnlineHighscorePath(),
+        'fetch player online highscore'
+      ),
+      fetchPlayerOnlineFirebaseJson(
+        getPlayerOnlineHighscoreHistoryPath(),
+        'fetch player online highscore history'
+      )
+    ]);
+    playercountState.onlineRecordFetchSucceeded = true;
+    const record = normalizePlayerOnlineHighscore(recordData);
+    const history = normalizePlayerOnlineHighscoreHistory(historyData);
+    const best = getBestPlayerOnlineHighscore(record, history);
+    latestRecord = best
+      ? { peak: best.peak, achievedAt: best.achievedAt, history, remotePeak: record?.peak ?? null }
+      : { peak: 0, achievedAt: null, history, remotePeak: null };
+  } catch (error) {
+    playercountState.onlineRecordFetchSucceeded = false;
     console.warn('[Mod Settings] Skipping player online highscore update because latest record could not be fetched');
+    console.error('[Mod Settings] Error fetching player online highscore:', error);
     return playercountState.onlineRecord;
   }
 
-  const newPeak = Math.max(count, latestRecord?.peak ?? 0);
-  if (latestRecord && newPeak <= latestRecord.peak) {
-    return latestRecord;
+  const protectedPeak = latestRecord.peak || 0;
+  const newPeak = Math.max(Math.floor(count), protectedPeak);
+  const isNewPeak = newPeak > protectedPeak;
+  const needsHeal =
+    latestRecord.remotePeak != null &&
+    Number.isFinite(latestRecord.remotePeak) &&
+    latestRecord.remotePeak < protectedPeak;
+
+  const achievedAt = isNewPeak
+    ? Date.now()
+    : (latestRecord.achievedAt || Date.now());
+  const nextRecord = { peak: newPeak, achievedAt };
+  const nextHistory = buildPlayerOnlineHighscoreHistory(nextRecord, latestRecord.history || []);
+  const needsHistoryWrite = playerOnlineHighscoreHistoryNeedsWrite(
+    nextHistory,
+    latestRecord.history || []
+  );
+
+  if (!isNewPeak && !needsHeal && !needsHistoryWrite) {
+    if (protectedPeak > 0) {
+      playercountState.onlineRecord = {
+        peak: protectedPeak,
+        achievedAt: latestRecord.achievedAt,
+        history: nextHistory
+      };
+    }
+    return playercountState.onlineRecord;
   }
 
-  const now = Date.now();
-  const nextRecord = { peak: Math.floor(newPeak), achievedAt: now };
-
   try {
-    await FirebaseRunsService.put(
-      getPlayerOnlineHighscorePath(),
-      nextRecord,
-      'update player online highscore'
-    );
-    playercountState.onlineRecord = nextRecord;
-    console.log(`[Mod Settings] Player online highscore updated: ${nextRecord.peak}`);
-    return nextRecord;
+    const writes = [];
+    if (isNewPeak || needsHeal) {
+      writes.push(
+        FirebaseRunsService.put(
+          getPlayerOnlineHighscorePath(),
+          nextRecord,
+          'update player online highscore'
+        )
+      );
+    }
+    if (needsHistoryWrite) {
+      writes.push(
+        FirebaseRunsService.put(
+          getPlayerOnlineHighscoreHistoryPath(),
+          nextHistory,
+          'update player online highscore history'
+        )
+      );
+    }
+    await Promise.all(writes);
+
+    playercountState.onlineRecord = {
+      peak: nextRecord.peak,
+      achievedAt: nextRecord.achievedAt,
+      history: nextHistory
+    };
+    if (isNewPeak) {
+      console.log(`[Mod Settings] Player online highscore updated: ${nextRecord.peak}`);
+    } else if (needsHeal) {
+      console.log(`[Mod Settings] Player online highscore restored from history: ${nextRecord.peak}`);
+    }
+    return playercountState.onlineRecord;
   } catch (error) {
     console.error('[Mod Settings] Error updating player online highscore:', error);
-    return latestRecord;
+    return playercountState.onlineRecord;
   }
 }
 
 function shouldSyncPlayerOnlineHighscore(count) {
   if (!Number.isFinite(count) || count < 0) {
     return false;
+  }
+  // Always sync until history exists so the backup is seeded even when live count is below peak.
+  const history = playercountState.onlineRecord?.history;
+  if (!Array.isArray(history) || history.length === 0) {
+    return true;
   }
   const cachedPeak = playercountState.onlineRecord?.peak;
   if (cachedPeak == null || !Number.isFinite(cachedPeak)) {
@@ -16481,7 +16652,8 @@ function maybeShowPlayerOnlineRecordToast(count) {
   playercountState.lastRecordToastAt = now;
   playercountState.onlineRecord = {
     peak: Math.floor(count),
-    achievedAt: now
+    achievedAt: now,
+    history: playercountState.onlineRecord?.history || []
   };
 
   try {
@@ -16508,7 +16680,9 @@ async function runPlayerOnlineRecordCheck() {
 
   // Toast before sync so a successful write does not raise the local peak first.
   maybeShowPlayerOnlineRecordToast(count);
-  await syncPlayerOnlineHighscore(count);
+  // Always run the full update path on the 15-minute check so history can seed
+  // and a corrupted lower main peak can be restored from history.
+  await updatePlayerOnlineHighscoreIfHigher(count);
   updatePlayerCountDisplay(count);
 }
 
@@ -16592,8 +16766,11 @@ function startPlayerCountUpdates() {
   fetchPlayerOnlineHighscore().finally(async () => {
     const count = await fetchLivePlayerCount();
     updatePlayerCountDisplay(count);
-    if (count !== null) {
-      await syncPlayerOnlineHighscore(count);
+    const syncCount = count ?? playercountState.onlineRecord?.peak ?? null;
+    if (syncCount !== null) {
+      // Full update path (not shouldSync) so history can seed and a lower
+      // corrupted main peak can be restored even when live count is below peak.
+      await updatePlayerOnlineHighscoreIfHigher(syncCount);
       updatePlayerCountDisplay(count);
     }
     // Enable toasts only after init so the first sync never notifies.

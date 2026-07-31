@@ -789,6 +789,7 @@
     logPrefix: '[Better Highscores][TBL]',
     prizeBeastCoins: 500,
     missingFloorTicks: 9600,
+    eventEnded: true,
     eventButtonIcon: 'https://bestiaryarena.com/assets/icons/wc-mini-icon.png',
     floorScaleColors: [
       '#97f7bc', '#65f19b', '#3acb71', '#4dcb7e', '#28d269',
@@ -796,6 +797,7 @@
       '#ae900a', '#b85151', '#c74848', '#cc2e2e', '#d01616', '#e80202'
     ],
     tabIcons: {
+      summary: { src: 'https://bestiaryarena.com/assets/icons/wc-mini-icon.png', alt: 'Winners' },
       rank: { src: '/assets/icons/star-tier.png', alt: 'Rank' },
       floor: { src: '/assets/icons/speed.png', alt: 'Ticks' },
       shiny: { src: '/assets/icons/star-tier-shiny.png', alt: 'Shiny' }

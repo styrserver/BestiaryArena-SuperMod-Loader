@@ -4,6 +4,41 @@
   },
   "notes": [
     {
+      "version": "4.7.1",
+      "changes": [
+        {
+          "mod": "Better Highscores",
+          "type": "added",
+          "text": "Tibia Ball League Event Competition post-event: shows Event has ended!, a Winners front tab with Ticks/Rank/Shiny columns (podiums side by side; shiny count only), Prize with beastcoin icon, and Firebase winners + full competition snapshots (admin write only). When a snapshot exists, boards and standings load from it instead of live scores."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "added",
+          "text": "Players Online highscore keeps a separate Firebase backup of the last 5 top peaks and auto-restores the main record if it drops below that history."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "fixed",
+          "text": "Players Online highscore no longer treats a failed Firebase read as an empty record (which could overwrite a higher peak such as 250 with a lower live count)."
+        },
+        {
+          "mod": "Quests",
+          "type": "added",
+          "text": "Custom battle spawn layouts (allies/villains, tiles, shared equip defaults) now load from a dedicated assets file alongside mission and NPC dialogue."
+        },
+        {
+          "mod": "Quests",
+          "type": "changed",
+          "text": "Polished quest dialogue formatting and trimmed misleading or off-topic replies across several conversations; travel destination prompts and item have/don't-have response branches were aligned with current progression."
+        },
+        {
+          "mod": "Quests",
+          "type": "fixed",
+          "text": "Corrected a mismatched quest-item display name and related inventory/progress keys, with automatic migration from older save aliases so existing progress still carries over."
+        }
+      ]
+    },
+    {
       "version": "4.7.0",
       "changes": [
         {

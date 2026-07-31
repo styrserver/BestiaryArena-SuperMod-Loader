@@ -71,6 +71,7 @@ if (window.EventCompetition) {
         highscoreRank: Array.isArray(floors.highscoreRank) ? floors.highscoreRank : [0]
       },
       shinyCompetition: config.shinyCompetition || null,
+      eventEnded: Boolean(config.eventEnded),
       countdownToast: config.countdownToast != null
         ? Object.assign({ maxDays: 10 }, config.countdownToast)
         : null,
@@ -117,7 +118,7 @@ if (window.EventCompetition) {
     const ascensionFormula = cfg.ascensionFormula;
     const highscoreFloorsSet = new Set(cfg.floors.highscore);
     const highscoreRankFloorsSet = new Set(cfg.floors.highscoreRank);
-    const COMPETITION_TAB = { RANK: 'rank', FLOOR: 'floor', SHINY: 'shiny' };
+    const COMPETITION_TAB = { SUMMARY: 'summary', RANK: 'rank', FLOOR: 'floor', SHINY: 'shiny' };
     const PROFILE_RATE_WINDOW_MS = 10000;
     const PROFILE_RATE_MAX = 28;
     const PROFILE_429_RETRY_AFTER_MS = 10500;
@@ -127,6 +128,9 @@ if (window.EventCompetition) {
     const participantsPath = `${cfg.firebaseBase}/participants`;
     const scoresPath = `${cfg.firebaseBase}/scores`;
     const rankScoresPath = `${cfg.firebaseBase}/rank-scores`;
+    const winnersPath = `${cfg.firebaseBase}/winners`;
+    const competitionSnapshotPath = `${cfg.firebaseBase}/snapshot`;
+    const WINNERS_TOP_LIMIT = 3;
 
     const tEvent = (suffix, params) => translate(`${cfg.i18nPrefix}${suffix}`, params);
 
@@ -160,13 +164,13 @@ if (window.EventCompetition) {
   shinyBarRows: null,
   shinyBarCacheAt: 0,
   shinyScoresByName: null,
-  activeModalTab: COMPETITION_TAB.FLOOR,
+  activeModalTab: cfg.eventEnded ? COMPETITION_TAB.SUMMARY : COMPETITION_TAB.FLOOR,
   lastBarFloor: null,
   trackedBattleSetup: null,
   playerTotalTicks: null,
   playerTotalRanks: null,
   playerTotalRankTicks: null,
-  eventWasActive: false,
+  eventWasActive: Boolean(cfg.eventEnded),
   participantCount: 0,
   fetchCache: new Map(),
   fetchInFlight: new Map(),
@@ -187,7 +191,10 @@ if (window.EventCompetition) {
   eligibilityByName: new Map(),
   purgeInFlight: null,
   lastIneligiblePurgeAt: 0,
-  modalLoadSession: 0
+  modalLoadSession: 0,
+  winnersSnapshot: null,
+  winnersLoadPromise: null,
+  competitionSnapshot: null
 };
 
 const firebaseClient = {
@@ -771,6 +778,570 @@ function getTblPlayerShinyDropLabel(player) {
     return tEvent('ShinyDropNone');
   }
   return formatTblShinyDropAgo(lastCreatedAt);
+}
+
+function isValidTblWinnersSnapshot(data) {
+  if (!data || typeof data !== 'object') {
+    return false;
+  }
+  return [COMPETITION_TAB.FLOOR, COMPETITION_TAB.RANK, COMPETITION_TAB.SHINY]
+    .some((key) => Array.isArray(data[key]));
+}
+
+function getTblStandingTicks(player, competitionMode = COMPETITION_TAB.FLOOR) {
+  if (Number.isFinite(Number(player?.ticks))) {
+    return Number(player.ticks);
+  }
+  if (!player?.name) {
+    return null;
+  }
+  return competitionMode === COMPETITION_TAB.RANK
+    ? getTblPlayerTotalRankTicks(player.name)
+    : getTblPlayerTotalTicks(player.name);
+}
+
+function getTblStandingPoints(player) {
+  if (Number.isFinite(Number(player?.points))) {
+    return Number(player.points);
+  }
+  if (!player?.name) {
+    return 0;
+  }
+  return getTblPlayerTotalRankPoints(player.name);
+}
+
+function getTblStandingRecords(player) {
+  if (Number.isFinite(Number(player?.records))) {
+    return Number(player.records);
+  }
+  return Number(player?.floorsLed) || 0;
+}
+
+function getTblStandingShinyCount(player) {
+  if (Number.isFinite(Number(player?.count))) {
+    return Number(player.count);
+  }
+  return getTblPlayerShinyCount(player?.name);
+}
+
+function buildTblWinnersCategoryEntries(competitionMode, rows, limit = WINNERS_TOP_LIMIT) {
+  const standings = buildTblOverallStandings(rows || [], null, competitionMode);
+  const capped = Number.isFinite(limit) && limit > 0
+    ? standings.slice(0, limit)
+    : standings;
+  return capped.map((player, index) => {
+    if (competitionMode === COMPETITION_TAB.SHINY) {
+      return {
+        rank: index + 1,
+        name: player.name,
+        count: getTblStandingShinyCount(player),
+        lastCreatedAt: Number(player.lastCreatedAt) || 0
+      };
+    }
+    if (competitionMode === COMPETITION_TAB.RANK) {
+      return {
+        rank: index + 1,
+        name: player.name,
+        points: getTblStandingPoints(player),
+        ticks: getTblStandingTicks(player, COMPETITION_TAB.RANK)
+      };
+    }
+    return {
+      rank: index + 1,
+      name: player.name,
+      ticks: getTblStandingTicks(player, COMPETITION_TAB.FLOOR),
+      records: getTblStandingRecords(player)
+    };
+  });
+}
+
+function serializeTblFloorBoardSnapshot(rows) {
+  return (rows || []).map((row) => ({
+    floor: row.floor,
+    ascension: row.ascension ?? tblFloorToAscensionPercent(row.floor),
+    leader: row.leader?.name || null,
+    ticks: Number.isFinite(Number(row.leaderTicks)) ? Number(row.leaderTicks) : null,
+    top: (row.entries || []).slice(0, cfg.leaderboardTop).map((entry, index) => ({
+      rank: index + 1,
+      name: entry?.name || '',
+      ticks: Number.isFinite(Number(entry?.ticks)) ? Number(entry.ticks) : null
+    })).filter((entry) => entry.name)
+  }));
+}
+
+function serializeTblRankBoardSnapshot(rows) {
+  return (rows || []).map((row) => ({
+    floor: row.floor,
+    ascension: row.ascension ?? tblFloorToAscensionPercent(row.floor),
+    leader: row.leader?.name || null,
+    points: Number.isFinite(Number(row.leaderRank)) ? Number(row.leaderRank) : null,
+    ticks: Number.isFinite(Number(row.leaderTicks)) ? Number(row.leaderTicks) : null,
+    top: (row.entries || []).slice(0, cfg.leaderboardTop).map((entry, index) => ({
+      rank: index + 1,
+      name: entry?.name || '',
+      points: Number.isFinite(Number(entry?.rank)) ? Number(entry.rank) : null,
+      ticks: Number.isFinite(Number(entry?.ticks)) ? Number(entry.ticks) : null
+    })).filter((entry) => entry.name)
+  }));
+}
+
+function serializeTblShinyBoardSnapshot(rows) {
+  return (rows || [])
+    .filter((row) => row?.name && Number(row.count) > 0)
+    .map((row, index) => ({
+      rank: Number(row.rank) || (index + 1),
+      name: row.name,
+      count: Number(row.count) || 0,
+      lastCreatedAt: Number(row.lastCreatedAt) || 0
+    }));
+}
+
+function buildTblCompetitionSnapshotFromCategoryRows(categoryRows = {}, participantCount = 0) {
+  const floorRows = categoryRows[COMPETITION_TAB.FLOOR] || [];
+  const rankRows = categoryRows[COMPETITION_TAB.RANK] || [];
+  const shinyRows = categoryRows[COMPETITION_TAB.SHINY] || [];
+
+  const snapshot = {
+    savedAt: Date.now(),
+    roomId: cfg.roomId,
+    participantCount: Number(participantCount) || 0,
+    prizeBeastCoins: cfg.prizeBeastCoins,
+    standings: {
+      [COMPETITION_TAB.FLOOR]: buildTblWinnersCategoryEntries(
+        COMPETITION_TAB.FLOOR,
+        floorRows,
+        null
+      ),
+      [COMPETITION_TAB.RANK]: buildTblWinnersCategoryEntries(
+        COMPETITION_TAB.RANK,
+        rankRows,
+        null
+      )
+    },
+    boards: {
+      [COMPETITION_TAB.FLOOR]: serializeTblFloorBoardSnapshot(floorRows),
+      [COMPETITION_TAB.RANK]: serializeTblRankBoardSnapshot(rankRows)
+    }
+  };
+
+  if (isTblShinyCompetitionEnabled()) {
+    snapshot.standings[COMPETITION_TAB.SHINY] = buildTblWinnersCategoryEntries(
+      COMPETITION_TAB.SHINY,
+      shinyRows,
+      null
+    );
+    snapshot.boards[COMPETITION_TAB.SHINY] = serializeTblShinyBoardSnapshot(shinyRows);
+  }
+
+  return snapshot;
+}
+
+function buildTblWinnersSnapshotFromCompetitionSnapshot(competitionSnapshot, participantCount = 0) {
+  const standings = competitionSnapshot?.standings || {};
+  const snapshot = {
+    savedAt: competitionSnapshot?.savedAt || Date.now(),
+    participantCount: Number(
+      competitionSnapshot?.participantCount ?? participantCount
+    ) || 0,
+    prizeBeastCoins: competitionSnapshot?.prizeBeastCoins ?? cfg.prizeBeastCoins,
+    [COMPETITION_TAB.FLOOR]: (standings[COMPETITION_TAB.FLOOR] || []).slice(0, WINNERS_TOP_LIMIT),
+    [COMPETITION_TAB.RANK]: (standings[COMPETITION_TAB.RANK] || []).slice(0, WINNERS_TOP_LIMIT)
+  };
+  if (isTblShinyCompetitionEnabled()) {
+    snapshot[COMPETITION_TAB.SHINY] = (standings[COMPETITION_TAB.SHINY] || []).slice(0, WINNERS_TOP_LIMIT);
+  }
+  return snapshot;
+}
+
+function buildTblWinnersSnapshotFromCategoryRows(categoryRows = {}, participantCount = 0) {
+  return buildTblWinnersSnapshotFromCompetitionSnapshot(
+    buildTblCompetitionSnapshotFromCategoryRows(categoryRows, participantCount),
+    participantCount
+  );
+}
+
+function isValidTblCompetitionSnapshot(data) {
+  if (!data || typeof data !== 'object') {
+    return false;
+  }
+  const standings = data.standings;
+  if (!standings || typeof standings !== 'object') {
+    return false;
+  }
+  return [COMPETITION_TAB.FLOOR, COMPETITION_TAB.RANK, COMPETITION_TAB.SHINY]
+    .some((key) => Array.isArray(standings[key]));
+}
+
+function hydrateTblFloorRowsFromCompetitionSnapshot(boardRows) {
+  return (Array.isArray(boardRows) ? boardRows : []).map((board) => {
+    const ticks = Number.isFinite(Number(board?.ticks)) ? Number(board.ticks) : null;
+    const leaderName = board?.leader || null;
+    const top = (Array.isArray(board?.top) ? board.top : [])
+      .map((entry) => ({
+        name: entry?.name || '',
+        ticks: Number.isFinite(Number(entry?.ticks)) ? Number(entry.ticks) : null
+      }))
+      .filter((entry) => entry.name);
+    return {
+      floor: board.floor,
+      ascension: board.ascension ?? tblFloorToAscensionPercent(board.floor),
+      yourTicks: null,
+      leader: leaderName ? { name: leaderName, ticks } : null,
+      leaderTicks: ticks,
+      entries: top.length
+        ? top
+        : (leaderName ? [{ name: leaderName, ticks }] : []),
+      youLead: false,
+      gap: null,
+      fromHighscores: isTblHighscoreFloor(board.floor),
+      unlocked: true
+    };
+  });
+}
+
+function hydrateTblRankRowsFromCompetitionSnapshot(boardRows) {
+  return (Array.isArray(boardRows) ? boardRows : []).map((board) => {
+    const points = Number.isFinite(Number(board?.points)) ? Number(board.points) : null;
+    const ticks = Number.isFinite(Number(board?.ticks)) ? Number(board.ticks) : null;
+    const leaderName = board?.leader || null;
+    const top = (Array.isArray(board?.top) ? board.top : [])
+      .map((entry) => ({
+        name: entry?.name || '',
+        rank: Number.isFinite(Number(entry?.points)) ? Number(entry.points) : null,
+        ticks: Number.isFinite(Number(entry?.ticks)) ? Number(entry.ticks) : null
+      }))
+      .filter((entry) => entry.name);
+    return {
+      floor: board.floor,
+      ascension: board.ascension ?? tblFloorToAscensionPercent(board.floor),
+      yourRank: null,
+      yourTicks: null,
+      leader: leaderName ? { name: leaderName, rank: points, ticks } : null,
+      leaderRank: points,
+      leaderTicks: ticks,
+      entries: top.length
+        ? top
+        : (leaderName ? [{ name: leaderName, rank: points, ticks }] : []),
+      youLead: false,
+      gap: null,
+      gapType: 'rank',
+      fromHighscores: isTblHighscoreRankFloor(board.floor),
+      unlocked: true
+    };
+  });
+}
+
+function hydrateTblShinyRowsFromCompetitionSnapshot(boardOrStandings) {
+  return (Array.isArray(boardOrStandings) ? boardOrStandings : [])
+    .filter((entry) => entry?.name && Number(entry.count) > 0)
+    .map((entry, index) => ({
+      rank: Number(entry.rank) || (index + 1),
+      name: entry.name,
+      count: Number(entry.count) || 0,
+      lastCreatedAt: Number(entry.lastCreatedAt) || 0
+    }));
+}
+
+function applyTblCompetitionSnapshotToState(snapshot) {
+  if (!isValidTblCompetitionSnapshot(snapshot)) {
+    return false;
+  }
+
+  state.competitionSnapshot = snapshot;
+  if (Number.isFinite(Number(snapshot.participantCount))) {
+    state.participantCount = Number(snapshot.participantCount);
+  }
+
+  const floorStandings = snapshot.standings?.[COMPETITION_TAB.FLOOR] || [];
+  const playerTotalTicks = new Map();
+  floorStandings.forEach((entry) => {
+    if (!entry?.name || !Number.isFinite(Number(entry.ticks))) {
+      return;
+    }
+    playerTotalTicks.set(entry.name, Number(entry.ticks));
+  });
+  state.playerTotalTicks = playerTotalTicks;
+
+  const rankStandings = snapshot.standings?.[COMPETITION_TAB.RANK] || [];
+  const playerTotalRanks = new Map();
+  const playerTotalRankTicks = new Map();
+  rankStandings.forEach((entry) => {
+    if (!entry?.name) {
+      return;
+    }
+    if (Number.isFinite(Number(entry.points))) {
+      playerTotalRanks.set(entry.name, Number(entry.points));
+    }
+    if (Number.isFinite(Number(entry.ticks))) {
+      playerTotalRankTicks.set(entry.name, Number(entry.ticks));
+    }
+  });
+  state.playerTotalRanks = playerTotalRanks;
+  state.playerTotalRankTicks = playerTotalRankTicks;
+
+  const shinySource = snapshot.boards?.[COMPETITION_TAB.SHINY]
+    || snapshot.standings?.[COMPETITION_TAB.SHINY]
+    || [];
+  const shinyScoresByName = new Map();
+  shinySource.forEach((entry) => {
+    if (!entry?.name) {
+      return;
+    }
+    shinyScoresByName.set(entry.name, {
+      count: Number(entry.count) || 0,
+      lastCreatedAt: Number(entry.lastCreatedAt) || 0
+    });
+  });
+  state.shinyScoresByName = shinyScoresByName;
+
+  const now = Date.now();
+  if (Array.isArray(snapshot.boards?.[COMPETITION_TAB.FLOOR])) {
+    state.floorBarRows = hydrateTblFloorRowsFromCompetitionSnapshot(
+      snapshot.boards[COMPETITION_TAB.FLOOR]
+    );
+    state.floorBarCacheAt = now;
+    state.lastFullLoadAt = now;
+  }
+  if (Array.isArray(snapshot.boards?.[COMPETITION_TAB.RANK])) {
+    state.rankBarRows = hydrateTblRankRowsFromCompetitionSnapshot(
+      snapshot.boards[COMPETITION_TAB.RANK]
+    );
+    state.rankBarCacheAt = now;
+    state.lastRankFullLoadAt = now;
+  }
+  if (isTblShinyCompetitionEnabled()) {
+    state.shinyBarRows = hydrateTblShinyRowsFromCompetitionSnapshot(shinySource);
+    state.shinyBarCacheAt = now;
+    state.lastShinyFullLoadAt = now;
+  }
+
+  if (!isValidTblWinnersSnapshot(state.winnersSnapshot)) {
+    state.winnersSnapshot = buildTblWinnersSnapshotFromCompetitionSnapshot(snapshot);
+  }
+
+  return true;
+}
+
+function getTblCategoryRowsFromAppliedSnapshot(tab) {
+  if (tab === COMPETITION_TAB.FLOOR) {
+    return state.floorBarRows || [];
+  }
+  if (tab === COMPETITION_TAB.RANK) {
+    return state.rankBarRows || [];
+  }
+  if (tab === COMPETITION_TAB.SHINY) {
+    return state.shinyBarRows || [];
+  }
+  return [];
+}
+
+function winnersSnapshotEntriesToGridRows(entries) {
+  return (Array.isArray(entries) ? entries : []).map((entry, index) => ({
+    rank: Number(entry?.rank) || (index + 1),
+    player: {
+      name: entry?.name || '',
+      floorsLed: Number(entry?.records) || 0,
+      records: Number.isFinite(Number(entry?.records)) ? Number(entry.records) : undefined,
+      ticks: Number.isFinite(Number(entry?.ticks)) ? Number(entry.ticks) : undefined,
+      points: Number.isFinite(Number(entry?.points)) ? Number(entry.points) : undefined,
+      count: Number.isFinite(Number(entry?.count)) ? Number(entry.count) : undefined,
+      lastCreatedAt: Number(entry?.lastCreatedAt) || 0
+    }
+  })).filter((entry) => entry.player.name);
+}
+
+async function fetchTblWinnersSnapshot(force = false) {
+  const data = await tblFirebaseGetCached(winnersPath, {
+    ttl: cfg.timers.fetchCacheTtlMs,
+    defaultReturn: null,
+    force
+  });
+  if (!isValidTblWinnersSnapshot(data)) {
+    return null;
+  }
+  state.winnersSnapshot = data;
+  return data;
+}
+
+async function isTblCurrentPlayerFirebaseAdmin() {
+  const playerName = getTblPlayerName();
+  if (!playerName) {
+    return false;
+  }
+  const adminApi = globalThis.FirebaseAdminsAPI || window.FirebaseAdminsAPI;
+  if (!adminApi) {
+    return false;
+  }
+  if (typeof adminApi.isPlayerAdminAsync === 'function') {
+    return Boolean(await adminApi.isPlayerAdminAsync(playerName));
+  }
+  if (typeof adminApi.isPlayerAdmin === 'function') {
+    return Boolean(adminApi.isPlayerAdmin(playerName));
+  }
+  return false;
+}
+
+async function fetchTblCompetitionSnapshot(force = false) {
+  const data = await tblFirebaseGetCached(competitionSnapshotPath, {
+    ttl: cfg.timers.fetchCacheTtlMs,
+    defaultReturn: null,
+    force
+  });
+  if (!isValidTblCompetitionSnapshot(data)) {
+    return null;
+  }
+  state.competitionSnapshot = data;
+  return data;
+}
+
+async function saveTblFirebaseSnapshotIfAbsent(path, snapshot, isValid, cacheKey) {
+  if (!isValid(snapshot)) {
+    return null;
+  }
+
+  const existing = await firebaseClient.get(path, null);
+  if (isValid(existing)) {
+    state.fetchCache.set(path, { data: existing, at: Date.now() });
+    if (cacheKey === 'winners') {
+      state.winnersSnapshot = existing;
+    } else if (cacheKey === 'competition') {
+      state.competitionSnapshot = existing;
+    }
+    return existing;
+  }
+
+  const canWrite = await isTblCurrentPlayerFirebaseAdmin();
+  if (!canWrite) {
+    if (cacheKey === 'winners') {
+      state.winnersSnapshot = snapshot;
+    } else if (cacheKey === 'competition') {
+      state.competitionSnapshot = snapshot;
+    }
+    console.log(`${logPrefix} ${cacheKey} snapshot not saved (Firebase admin only)`);
+    return snapshot;
+  }
+
+  try {
+    await firebaseClient.put(path, snapshot);
+    state.fetchCache.set(path, { data: snapshot, at: Date.now() });
+    if (cacheKey === 'winners') {
+      state.winnersSnapshot = snapshot;
+    } else if (cacheKey === 'competition') {
+      state.competitionSnapshot = snapshot;
+    }
+    console.log(`${logPrefix} Saved event ${cacheKey} snapshot to Firebase`);
+    return snapshot;
+  } catch (error) {
+    console.warn(`${logPrefix} Failed to save ${cacheKey} snapshot:`, error);
+    const raced = await firebaseClient.get(path, null);
+    if (isValid(raced)) {
+      state.fetchCache.set(path, { data: raced, at: Date.now() });
+      if (cacheKey === 'winners') {
+        state.winnersSnapshot = raced;
+      } else if (cacheKey === 'competition') {
+        state.competitionSnapshot = raced;
+      }
+      return raced;
+    }
+    if (cacheKey === 'winners') {
+      state.winnersSnapshot = snapshot;
+    } else if (cacheKey === 'competition') {
+      state.competitionSnapshot = snapshot;
+    }
+    return snapshot;
+  }
+}
+
+async function saveTblWinnersSnapshotIfAbsent(snapshot) {
+  return saveTblFirebaseSnapshotIfAbsent(
+    winnersPath,
+    snapshot,
+    isValidTblWinnersSnapshot,
+    'winners'
+  );
+}
+
+async function saveTblCompetitionSnapshotIfAbsent(snapshot) {
+  return saveTblFirebaseSnapshotIfAbsent(
+    competitionSnapshotPath,
+    snapshot,
+    isValidTblCompetitionSnapshot,
+    'competition'
+  );
+}
+
+async function ensureTblWinnersSnapshot(options = {}) {
+  const {
+    force = false,
+    categoryRows = null,
+    participantCount = state.participantCount || 0
+  } = options;
+
+  if (!hasTblEventEnded()) {
+    return null;
+  }
+
+  if (state.winnersLoadPromise && !force) {
+    return state.winnersLoadPromise;
+  }
+
+  if (!force && isValidTblCompetitionSnapshot(state.competitionSnapshot)) {
+    applyTblCompetitionSnapshotToState(state.competitionSnapshot);
+    return state.winnersSnapshot;
+  }
+
+  state.winnersLoadPromise = (async () => {
+    // Prefer the full competition snapshot when the event has ended.
+    const existingCompetition = await fetchTblCompetitionSnapshot(force);
+    if (isValidTblCompetitionSnapshot(existingCompetition)) {
+      applyTblCompetitionSnapshotToState(existingCompetition);
+
+      let winners = await fetchTblWinnersSnapshot(force);
+      if (!isValidTblWinnersSnapshot(winners)) {
+        winners = buildTblWinnersSnapshotFromCompetitionSnapshot(existingCompetition);
+        winners = await saveTblWinnersSnapshotIfAbsent(winners);
+      }
+      return state.winnersSnapshot || winners;
+    }
+
+    // No snapshot yet — compute from live data, then persist (admin only).
+    let rows = categoryRows;
+    if (!rows) {
+      const [floorRows, rankRows] = await Promise.all([
+        loadTblAllFloorData(force),
+        loadTblAllRankData(force)
+      ]);
+      rows = {
+        [COMPETITION_TAB.FLOOR]: floorRows || [],
+        [COMPETITION_TAB.RANK]: rankRows || []
+      };
+      if (isTblShinyCompetitionEnabled()) {
+        rows[COMPETITION_TAB.SHINY] = await loadTblAllShinyData(force);
+      }
+    }
+
+    const count = participantCount || state.participantCount || 0;
+    const competitionSnapshot = buildTblCompetitionSnapshotFromCategoryRows(rows, count);
+    applyTblCompetitionSnapshotToState(competitionSnapshot);
+
+    const existingWinners = await fetchTblWinnersSnapshot(force);
+    const winnersSnapshot = isValidTblWinnersSnapshot(existingWinners)
+      ? existingWinners
+      : buildTblWinnersSnapshotFromCompetitionSnapshot(competitionSnapshot, count);
+
+    const [savedWinners] = await Promise.all([
+      isValidTblWinnersSnapshot(existingWinners)
+        ? existingWinners
+        : saveTblWinnersSnapshotIfAbsent(winnersSnapshot),
+      saveTblCompetitionSnapshotIfAbsent(competitionSnapshot)
+    ]);
+
+    return savedWinners;
+  })().finally(() => {
+    state.winnersLoadPromise = null;
+  });
+
+  return state.winnersLoadPromise;
 }
 
 async function loadTblAllShinyData(force = false, onProgress = null) {
@@ -1673,6 +2244,21 @@ function isTblEventCompetitionActive() {
   return getTblEventTimerState().active;
 }
 
+function hasTblEventEnded() {
+  if (cfg.eventEnded) {
+    return true;
+  }
+  const raid = getTblEventRaidEntry();
+  if (raid?.expiresAt && Number(raid.expiresAt) <= Date.now()) {
+    return true;
+  }
+  return Boolean(state.eventWasActive) && !getTblEventTimerState().active;
+}
+
+function getTblDefaultModalTab() {
+  return hasTblEventEnded() ? COMPETITION_TAB.SUMMARY : COMPETITION_TAB.FLOOR;
+}
+
 function getTblEventTimerState() {
   const now = Date.now();
   const raid = getTblEventRaidEntry();
@@ -1929,7 +2515,7 @@ function updateTblEventTimerDisplay() {
       return;
     }
 
-    if (state.eventWasActive) {
+    if (hasTblEventEnded()) {
       valueEl.innerHTML = formatTblEventHighlightHtml(tEvent('EventEnded'));
       valueEl.style.color = '';
       return;
@@ -2087,6 +2673,12 @@ function invalidateTblFloorBarCache() {
 }
 
 async function ensureTblFloorBarData(force = false) {
+  if (hasTblEventEnded()) {
+    await ensureTblWinnersSnapshot({ force });
+    if (Array.isArray(state.floorBarRows) && state.floorBarRows.length) {
+      return state.floorBarRows;
+    }
+  }
   const rows = await loadTblAllFloorData(force);
   state.floorBarRows = rows;
   state.floorBarCacheAt = Date.now();
@@ -2094,6 +2686,12 @@ async function ensureTblFloorBarData(force = false) {
 }
 
 async function ensureTblRankBarData(force = false) {
+  if (hasTblEventEnded()) {
+    await ensureTblWinnersSnapshot({ force });
+    if (Array.isArray(state.rankBarRows) && state.rankBarRows.length) {
+      return state.rankBarRows;
+    }
+  }
   const rows = await loadTblAllRankData(force);
   state.rankBarRows = rows;
   state.rankBarCacheAt = Date.now();
@@ -2103,6 +2701,12 @@ async function ensureTblRankBarData(force = false) {
 async function ensureTblShinyBarData(force = false) {
   if (!isTblShinyCompetitionEnabled()) {
     return state.shinyBarRows || [];
+  }
+  if (hasTblEventEnded()) {
+    await ensureTblWinnersSnapshot({ force });
+    if (Array.isArray(state.shinyBarRows)) {
+      return state.shinyBarRows;
+    }
   }
   return loadTblAllShinyData(force);
 }
@@ -3750,6 +4354,79 @@ function ensureTblLeagueStyles() {
       min-height: 0;
       overflow: hidden;
     }
+    .tbl-league-winners {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+      padding: 4px 2px 8px;
+      align-items: start;
+    }
+    .tbl-league-winners-section {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      min-width: 0;
+      height: 100%;
+    }
+    .tbl-league-winners-section-title {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+      color: #ffd700;
+      text-align: center;
+    }
+    .tbl-league-winners-section-title-main {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+    }
+    .tbl-league-winners-section-title img {
+      width: 12px;
+      height: 12px;
+      object-fit: contain;
+      flex-shrink: 0;
+    }
+    .tbl-league-winners-section-prize {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 3px;
+      color: #ffd700;
+      font-weight: normal;
+    }
+    .tbl-league-winners-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      width: 100%;
+    }
+    .tbl-league-winners-entry {
+      display: flex;
+      align-items: flex-start;
+      gap: 6px;
+      min-width: 0;
+    }
+    .tbl-league-winners-entry-medal {
+      flex-shrink: 0;
+      line-height: 0;
+    }
+    .tbl-league-winners-entry-body {
+      min-width: 0;
+      flex: 1 1 auto;
+    }
+    .tbl-league-winners-entry-name {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .tbl-league-winners-entry-stats {
+      color: #ccc;
+      margin-top: 2px;
+      line-height: 1.25;
+      word-break: break-word;
+    }
   `;
   document.head.appendChild(style);
 }
@@ -4046,7 +4723,8 @@ function buildTblLeagueCurrentLeaderRowHtml(rows, competitionMode = COMPETITION_
   } else {
     nameHtml = formatTblProfileLink(leaderName);
   }
-  return `${escapeTblHtml(tEvent('CurrentLeaderLabel'))} ${nameHtml}`;
+  const labelKey = hasTblEventEnded() ? 'WinnerLabel' : 'CurrentLeaderLabel';
+  return `${escapeTblHtml(tEvent(labelKey))} ${nameHtml}`;
 }
 
 function getTblPlayerTotalTicks(playerName) {
@@ -4126,7 +4804,7 @@ function buildTblLeagueTopPlayersGridHtml(topThree, competitionMode, viewerName,
         html += '<td class="tbl-league-top-grid-cell">—</td>';
         return;
       }
-      const count = Number(entry.player.count ?? getTblPlayerShinyCount(entry.player.name)) || 0;
+      const count = getTblStandingShinyCount(entry.player);
       html += formatTblTopGridValueCell(count, viewerName, entry.player.name);
     });
     html += '</tr>';
@@ -4145,7 +4823,7 @@ function buildTblLeagueTopPlayersGridHtml(topThree, competitionMode, viewerName,
     slots.forEach((entry) => {
       html += entry
         ? formatTblTopGridValueCell(
-          getTblPlayerTotalRankPoints(entry.player.name),
+          getTblStandingPoints(entry.player),
           viewerName,
           entry.player.name
         )
@@ -4161,9 +4839,10 @@ function buildTblLeagueTopPlayersGridHtml(topThree, competitionMode, viewerName,
         html += '<td class="tbl-league-top-grid-cell">—</td>';
         return;
       }
-      const ticks = isRank
-        ? getTblPlayerTotalRankTicks(entry.player.name)
-        : getTblPlayerTotalTicks(entry.player.name);
+      const ticks = getTblStandingTicks(
+        entry.player,
+        isRank ? COMPETITION_TAB.RANK : COMPETITION_TAB.FLOOR
+      );
       html += formatTblTopGridValueCell(ticks, viewerName, entry.player.name);
     });
     html += '</tr>';
@@ -4173,7 +4852,7 @@ function buildTblLeagueTopPlayersGridHtml(topThree, competitionMode, viewerName,
     html += `<tr><th class="tbl-league-top-grid-label">${escapeTblHtml(tEvent('GridRecords'))}</th>`;
     slots.forEach((entry) => {
       html += entry
-        ? formatTblTopGridValueCell(entry.player.floorsLed, viewerName, entry.player.name)
+        ? formatTblTopGridValueCell(getTblStandingRecords(entry.player), viewerName, entry.player.name)
         : '<td class="tbl-league-top-grid-cell">—</td>';
     });
     html += '</tr>';
@@ -4207,18 +4886,18 @@ function formatTblOverallStandingGridFooterRow(player, rank, viewerName, competi
 
 function formatTblOverallStandingStats(player, competitionMode = COMPETITION_TAB.FLOOR) {
   if (competitionMode === COMPETITION_TAB.SHINY) {
-    const count = Number(player.count ?? getTblPlayerShinyCount(player.name)) || 0;
+    const count = getTblStandingShinyCount(player);
     const lastDropped = getTblPlayerShinyDropLabel(player);
     return tEvent('PlayerStandingShiny', { count, lastDropped });
   }
   return competitionMode === COMPETITION_TAB.RANK
     ? tEvent('PlayerStandingRank', {
-      points: getTblPlayerTotalRankPoints(player.name),
-      ticks: getTblPlayerTotalRankTicks(player.name)
+      points: getTblStandingPoints(player),
+      ticks: getTblStandingTicks(player, COMPETITION_TAB.RANK)
     })
     : tEvent('PlayerStanding', {
-      count: player.floorsLed,
-      ticks: getTblPlayerTotalTicks(player.name)
+      count: getTblStandingRecords(player),
+      ticks: getTblStandingTicks(player, COMPETITION_TAB.FLOOR)
     });
 }
 
@@ -4476,6 +5155,9 @@ function createTblLeagueSummaryPanel(rows, participantCount = 0, competitionMode
 }
 
 function getTblLeaguePrizeText(competitionMode = COMPETITION_TAB.FLOOR) {
+  if (competitionMode === COMPETITION_TAB.SUMMARY) {
+    return tEvent('Prize', { amount: cfg.prizeBeastCoins });
+  }
   if (competitionMode === COMPETITION_TAB.SHINY) {
     return tEvent('ShinyPrize', { amount: cfg.prizeBeastCoins });
   }
@@ -4490,6 +5172,7 @@ function buildTblLeagueSummaryLeftColHtml(participantCount = 0, competitionMode 
   leftCol += `<div class="tbl-event-prize-row pixel-font-14" style="margin-bottom:6px;display:flex;align-items:center;gap:4px;color:#ffd700;">
     <span class="tbl-league-prize-label">${escapeTblHtml(getTblLeaguePrizeText(competitionMode))}</span>
     <img src="/assets/icons/beastcoin.png" alt="Beast Coins" class="pixelated" style="width:12px;height:12px;object-fit:contain;flex-shrink:0;" />
+    <span class="tbl-league-prize-suffix" style="display:none;">${escapeTblHtml(tEvent('PrizePerCategory'))}</span>
   </div>`;
   leftCol += `<div class="tbl-league-current-leader-row pixel-font-14" style="margin-bottom:6px;">${buildTblLeagueCurrentLeaderRowHtml([], competitionMode)}</div>`;
   return leftCol;
@@ -4500,6 +5183,10 @@ function updateTblLeagueSummaryPrize(prizeEl, competitionMode) {
     return;
   }
   prizeEl.textContent = getTblLeaguePrizeText(competitionMode);
+  const suffixEl = prizeEl.parentElement?.querySelector?.('.tbl-league-prize-suffix');
+  if (suffixEl) {
+    suffixEl.style.display = competitionMode === COMPETITION_TAB.SUMMARY ? '' : 'none';
+  }
 }
 
 function updateTblLeagueSummaryCurrentLeader(leaderEl, rows, competitionMode) {
@@ -4576,6 +5263,168 @@ function updateTblLeagueSummaryStandings(standingsCol, rows, competitionMode) {
     return;
   }
   standingsCol.innerHTML = buildTblLeagueSummaryStandingsHtml(rows, competitionMode);
+}
+
+function getTblLeagueWinnersCategoryDefs() {
+  const defs = [
+    {
+      id: COMPETITION_TAB.FLOOR,
+      title: tEvent('TopFloorPlayers'),
+      prize: getTblLeaguePrizeText(COMPETITION_TAB.FLOOR),
+      icon: cfg.tabIcons.floor || { src: '/assets/icons/speed.png', alt: 'Ticks' }
+    },
+    {
+      id: COMPETITION_TAB.RANK,
+      title: tEvent('TopRankPlayers'),
+      prize: getTblLeaguePrizeText(COMPETITION_TAB.RANK),
+      icon: cfg.tabIcons.rank || { src: '/assets/icons/star-tier.png', alt: 'Rank' }
+    }
+  ];
+  if (isTblShinyCompetitionEnabled()) {
+    defs.push({
+      id: COMPETITION_TAB.SHINY,
+      title: tEvent('TopShinyPlayers'),
+      prize: getTblLeaguePrizeText(COMPETITION_TAB.SHINY),
+      icon: cfg.tabIcons.shiny || { src: '/assets/icons/star-tier-shiny.png', alt: 'Shiny' }
+    });
+  }
+  return defs;
+}
+
+function formatTblWinnersMedalHtml(position) {
+  const rank = Math.min(3, Math.max(1, Number(position) || 1));
+  const medalColor = getMedalColor(rank);
+  return `<span class="tbl-league-winners-entry-medal tbl-league-top-grid-medal" style="color:${medalColor};" title="#${rank}" aria-label="#${rank}">
+    <svg class="tbl-league-top-grid-medal-icon" viewBox="0 0 20 24" width="14" height="17" aria-hidden="true" focusable="false">
+      <path fill="currentColor" d="M5.5 1.5 7.8 9.2 10 2.2 12.2 9.2 14.5 1.5H5.5z"/>
+      <circle cx="10" cy="15.5" r="7" fill="currentColor"/>
+      <circle cx="10" cy="15.5" r="5.6" fill="none" stroke="rgba(0,0,0,0.35)" stroke-width="1"/>
+      <text x="10" y="17.1" text-anchor="middle" fill="rgba(0,0,0,0.55)" font-size="7" font-weight="bold" font-family="monospace">${rank}</text>
+    </svg>
+  </span>`;
+}
+
+function buildTblLeagueWinnersCategoryHtml(competitionMode, rowsOrSnapshotEntries, options = {}) {
+  const { fromSnapshot = false } = options;
+  const playerName = getTblPlayerName();
+  let standingsWithRank;
+
+  if (fromSnapshot) {
+    standingsWithRank = winnersSnapshotEntriesToGridRows(rowsOrSnapshotEntries);
+  } else {
+    const includeViewerInStandings = state.currentPlayerEligible !== false;
+    const standings = buildTblOverallStandings(
+      rowsOrSnapshotEntries || [],
+      includeViewerInStandings ? playerName : null,
+      competitionMode
+    );
+    const visibleStandings = includeViewerInStandings || !playerName
+      ? standings
+      : standings.filter((entry) => entry?.name !== playerName);
+    standingsWithRank = visibleStandings.map((player, index) => ({ player, rank: index + 1 }));
+  }
+
+  if (standingsWithRank.length === 0) {
+    const emptyText = competitionMode === COMPETITION_TAB.SHINY
+      ? tEvent('ShinyNoneYet')
+      : (competitionMode === COMPETITION_TAB.RANK
+        ? tEvent('RankNoRuns')
+        : tEvent('NoRuns', { ticks: cfg.missingFloorTicks }));
+    return `<div style="color:#888;text-align:center;padding:6px 0;">${escapeTblHtml(emptyText)}</div>`;
+  }
+
+  const entriesHtml = standingsWithRank.slice(0, WINNERS_TOP_LIMIT).map((entry) => {
+    const isYou = Boolean(playerName && entry.player?.name === playerName);
+    const nameHtml = isYou
+      ? `<span style="color:#8f8;">${escapeTblHtml(entry.player.name)}</span>`
+      : formatTblProfileLink(entry.player.name);
+    const statsLabel = competitionMode === COMPETITION_TAB.SHINY
+      ? escapeTblHtml(tEvent('WinnersShinyStats', {
+        count: getTblStandingShinyCount(entry.player)
+      }))
+      : escapeTblHtml(formatTblOverallStandingStats(entry.player, competitionMode));
+    return `<div class="tbl-league-winners-entry">
+      ${formatTblWinnersMedalHtml(entry.rank)}
+      <div class="tbl-league-winners-entry-body">
+        <div class="tbl-league-winners-entry-name">${nameHtml}</div>
+        <div class="tbl-league-winners-entry-stats pixel-font-14">${statsLabel}</div>
+      </div>
+    </div>`;
+  }).join('');
+
+  return `<div class="tbl-league-winners-list">${entriesHtml}</div>`;
+}
+
+function buildTblLeagueWinnersPanelHtml(source = {}, options = {}) {
+  const { fromSnapshot = false } = options;
+  const defs = getTblLeagueWinnersCategoryDefs();
+  const columnCount = Math.max(1, defs.length);
+  let html = `<div class="tbl-league-winners" style="grid-template-columns:repeat(${columnCount},minmax(0,1fr));">`;
+  defs.forEach((def) => {
+    const shortTitle = def.id === COMPETITION_TAB.SHINY
+      ? tEvent('TabShiny')
+      : (def.id === COMPETITION_TAB.RANK ? tEvent('TabRank') : tEvent('TabFloor'));
+    html += `<div class="tbl-league-winners-section frame-1 surface-regular p-2">
+      <div class="tbl-league-winners-section-title pixel-font-14">
+        <span class="tbl-league-winners-section-title-main">
+          <img src="${escapeTblHtml(def.icon.src)}" alt="${escapeTblHtml(def.icon.alt || shortTitle)}" class="pixelated" />
+          <span>${escapeTblHtml(shortTitle)}</span>
+        </span>
+        <span class="tbl-league-winners-section-prize">
+          <span>${escapeTblHtml(String(cfg.prizeBeastCoins))}</span>
+          <img src="/assets/icons/beastcoin.png" alt="Beast Coins" class="pixelated" style="width:12px;height:12px;object-fit:contain;flex-shrink:0;" />
+        </span>
+      </div>
+      ${buildTblLeagueWinnersCategoryHtml(
+        def.id,
+        source[def.id] || [],
+        { fromSnapshot }
+      )}
+    </div>`;
+  });
+  html += '</div>';
+  return html;
+}
+
+function buildTblLeagueWinnersScrollContainer(source = {}, options = {}) {
+  const scrollContainer = createTblScrollContainer();
+  const content = document.createElement('div');
+  content.innerHTML = buildTblLeagueWinnersPanelHtml(source, options);
+  scrollContainer.addContent(content);
+  return scrollContainer;
+}
+
+function updateTblLeagueSummaryWinnersHeader(standingsCol, source = null, options = {}) {
+  if (!standingsCol) {
+    return;
+  }
+  const { fromSnapshot = false } = options;
+  let body = '';
+  if (source) {
+    const defs = getTblLeagueWinnersCategoryDefs();
+    body = defs.map((def) => {
+      let winner = null;
+      if (fromSnapshot) {
+        const entries = winnersSnapshotEntriesToGridRows(source[def.id] || []);
+        winner = entries[0]?.player || null;
+      } else {
+        const standings = buildTblOverallStandings(source[def.id] || [], null, def.id);
+        winner = standings[0] || null;
+      }
+      const nameHtml = winner?.name
+        ? formatTblProfileLink(winner.name)
+        : `<span style="color:#888;">${escapeTblHtml(tEvent('NoCurrentLeader'))}</span>`;
+      const shortLabel = def.id === COMPETITION_TAB.SHINY
+        ? tEvent('TabShiny')
+        : (def.id === COMPETITION_TAB.RANK ? tEvent('TabRank') : tEvent('TabFloor'));
+      return `<div class="pixel-font-14" style="margin-top:4px;display:flex;align-items:center;gap:4px;min-width:0;">
+        <img src="${escapeTblHtml(def.icon.src)}" alt="" class="pixelated" style="width:12px;height:12px;object-fit:contain;flex-shrink:0;" />
+        <span style="color:#ccc;flex-shrink:0;">${escapeTblHtml(shortLabel)}:</span>
+        <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${nameHtml}</span>
+      </div>`;
+    }).join('');
+  }
+  standingsCol.innerHTML = `<div class="tbl-league-top-players"><div class="tbl-league-top-players-title">${escapeTblHtml(tEvent('WinnersTitle'))}</div>${body}</div>`;
 }
 
 function createTblLeagueSharedSummary(participantCount) {
@@ -4655,10 +5504,21 @@ function createTblLeagueTabBar(activeTab, onTabChange) {
   bar.className = 'flex mb-2';
   bar.style.flexShrink = '0';
 
-  const tabDefs = [
+  const tabDefs = [];
+  if (hasTblEventEnded()) {
+    tabDefs.push({
+      id: COMPETITION_TAB.SUMMARY,
+      label: tEvent('TabSummary'),
+      icon: cfg.tabIcons.summary || cfg.tabIcons.floor || {
+        src: cfg.eventButtonIcon || '/assets/icons/speed.png',
+        alt: 'Winners'
+      }
+    });
+  }
+  tabDefs.push(
     { id: COMPETITION_TAB.FLOOR, label: tEvent('TabFloor'), icon: cfg.tabIcons.floor },
     { id: COMPETITION_TAB.RANK, label: tEvent('TabRank'), icon: cfg.tabIcons.rank }
-  ];
+  );
   if (isTblShinyCompetitionEnabled()) {
     tabDefs.push({
       id: COMPETITION_TAB.SHINY,
@@ -5062,7 +5922,11 @@ function createTblLeagueModalContent(options = {}) {
     participantCount = 0,
     modalLoadSession = 0
   } = options;
-  const activeTab = state.activeModalTab || COMPETITION_TAB.FLOOR;
+  const showWinnersTab = hasTblEventEnded();
+  let activeTab = state.activeModalTab || getTblDefaultModalTab();
+  if (activeTab === COMPETITION_TAB.SUMMARY && !showWinnersTab) {
+    activeTab = COMPETITION_TAB.FLOOR;
+  }
   const {
     panel: summaryPanel,
     standingsCol,
@@ -5083,7 +5947,13 @@ function createTblLeagueModalContent(options = {}) {
       loadPromise: null
     };
   }
+  if (showWinnersTab) {
+    tabStore[COMPETITION_TAB.SUMMARY] = { rows: null, loadPromise: null };
+  }
 
+  const winnersListPanel = showWinnersTab
+    ? createTblLeagueListPanel(createTblLeagueTabLoadingScrollContainer())
+    : null;
   const floorListPanel = createTblLeagueListPanel(createTblLeagueTabLoadingScrollContainer());
   const rankListPanel = createTblLeagueListPanel(createTblLeagueTabLoadingScrollContainer());
   const shinyListPanel = isTblShinyCompetitionEnabled()
@@ -5104,6 +5974,9 @@ function createTblLeagueModalContent(options = {}) {
   let tabButtons = [];
 
   const getModeForTab = (tab) => {
+    if (tab === COMPETITION_TAB.SUMMARY) {
+      return COMPETITION_TAB.SUMMARY;
+    }
     if (tab === COMPETITION_TAB.RANK) {
       return COMPETITION_TAB.RANK;
     }
@@ -5114,6 +5987,9 @@ function createTblLeagueModalContent(options = {}) {
   };
 
   const getPanelForTab = (tab) => {
+    if (tab === COMPETITION_TAB.SUMMARY) {
+      return winnersListPanel;
+    }
     if (tab === COMPETITION_TAB.RANK) {
       return rankListPanel;
     }
@@ -5123,7 +5999,75 @@ function createTblLeagueModalContent(options = {}) {
     return floorListPanel;
   };
 
+  const getCategoryTabs = () => {
+    const tabs = [COMPETITION_TAB.FLOOR, COMPETITION_TAB.RANK];
+    if (isTblShinyCompetitionEnabled()) {
+      tabs.push(COMPETITION_TAB.SHINY);
+    }
+    return tabs;
+  };
+
+  const collectCategoryRows = () => {
+    const categoryRows = {};
+    getCategoryTabs().forEach((tab) => {
+      const entry = tabStore[tab];
+      categoryRows[tab] = entry?.rows
+        || (tab === COMPETITION_TAB.SHINY ? entry?.partialRows : null)
+        || [];
+    });
+    return categoryRows;
+  };
+
   const isModalSessionActive = () => modalLoadSession === state.modalLoadSession;
+
+  const setLeaderRowVisible = (visible) => {
+    if (!leaderRow) {
+      return;
+    }
+    leaderRow.style.display = visible ? '' : 'none';
+  };
+
+  const updateSummaryForTab = (tab, rows) => {
+    const mode = getModeForTab(tab);
+    updateTblLeagueSummaryPrize(prizeLabel, mode);
+    if (tab === COMPETITION_TAB.SUMMARY) {
+      setLeaderRowVisible(false);
+      const snapshot = state.winnersSnapshot;
+      if (isValidTblWinnersSnapshot(snapshot)) {
+        updateTblLeagueSummaryWinnersHeader(standingsCol, snapshot, { fromSnapshot: true });
+        if (Number.isFinite(Number(snapshot.participantCount))) {
+          updateTblLeagueSummaryParticipantCount(
+            participantCountEl,
+            Number(snapshot.participantCount)
+          );
+        }
+      } else {
+        updateTblLeagueSummaryWinnersHeader(standingsCol, null);
+      }
+      return;
+    }
+    setLeaderRowVisible(true);
+    updateTblLeagueSummaryStandings(standingsCol, rows, mode);
+    updateTblLeagueSummaryCurrentLeader(leaderRow, rows, mode);
+  };
+
+  const renderWinnersPanel = (snapshot = state.winnersSnapshot) => {
+    if (!winnersListPanel) {
+      return;
+    }
+    if (!isValidTblWinnersSnapshot(snapshot)) {
+      renderTabPanelLoading(COMPETITION_TAB.SUMMARY);
+      return;
+    }
+    setTblLeagueListPanelContent(
+      winnersListPanel,
+      buildTblLeagueWinnersScrollContainer(snapshot, { fromSnapshot: true })
+    );
+    const entry = tabStore[COMPETITION_TAB.SUMMARY];
+    if (entry) {
+      entry.rows = snapshot;
+    }
+  };
 
   const seedTabFromCache = (tab) => {
     if (forceRefresh) {
@@ -5134,8 +6078,18 @@ function createTblLeagueModalContent(options = {}) {
       return;
     }
 
+    if (tab === COMPETITION_TAB.SUMMARY) {
+      if (isValidTblWinnersSnapshot(state.winnersSnapshot)) {
+        entry.rows = state.winnersSnapshot;
+        renderWinnersPanel(state.winnersSnapshot);
+      }
+      return;
+    }
+
     let cachedRows = null;
-    if (tab === COMPETITION_TAB.FLOOR && state.floorBarRows) {
+    if (hasTblEventEnded() && isValidTblCompetitionSnapshot(state.competitionSnapshot)) {
+      cachedRows = getTblCategoryRowsFromAppliedSnapshot(tab);
+    } else if (tab === COMPETITION_TAB.FLOOR && state.floorBarRows) {
       cachedRows = state.floorBarRows;
     } else if (tab === COMPETITION_TAB.RANK && state.rankBarRows) {
       cachedRows = state.rankBarRows;
@@ -5159,16 +6113,23 @@ function createTblLeagueModalContent(options = {}) {
     });
   };
 
-  const updateSummaryForTab = (tab, rows) => {
-    const mode = getModeForTab(tab);
-    updateTblLeagueSummaryStandings(standingsCol, rows, mode);
-    updateTblLeagueSummaryPrize(prizeLabel, mode);
-    updateTblLeagueSummaryCurrentLeader(leaderRow, rows, mode);
-  };
-
   const renderTabPanelLoading = (tab) => {
     const panel = getPanelForTab(tab);
     if (!panel) {
+      return;
+    }
+    if (tab === COMPETITION_TAB.SUMMARY) {
+      const scrollContainer = createTblScrollContainer();
+      const loadingEl = document.createElement('div');
+      loadingEl.className = 'pixel-font-14';
+      Object.assign(loadingEl.style, {
+        color: '#888',
+        textAlign: 'center',
+        padding: '20px 8px'
+      });
+      loadingEl.textContent = tEvent('WinnersLoading');
+      scrollContainer.addContent(loadingEl);
+      setTblLeagueListPanelContent(panel, scrollContainer);
       return;
     }
     setTblLeagueListPanelContent(panel, createTblLeagueTabLoadingScrollContainer());
@@ -5177,6 +6138,10 @@ function createTblLeagueModalContent(options = {}) {
   const renderTabPanelLoaded = (tab, rows, options = {}) => {
     const panel = getPanelForTab(tab);
     if (!panel) {
+      return;
+    }
+    if (tab === COMPETITION_TAB.SUMMARY) {
+      renderWinnersPanel();
       return;
     }
     const scrollContainer = tab === COMPETITION_TAB.SHINY
@@ -5227,9 +6192,9 @@ function createTblLeagueModalContent(options = {}) {
     setTblLeagueListPanelContent(panel, scrollContainer);
   };
 
-  const loadTabData = (tab, force = false) => {
+  const loadCategoryTabData = (tab, force = false) => {
     const entry = tabStore[tab];
-    if (!entry) {
+    if (!entry || tab === COMPETITION_TAB.SUMMARY) {
       return Promise.resolve([]);
     }
     if (entry.rows && !force) {
@@ -5269,6 +6234,26 @@ function createTblLeagueModalContent(options = {}) {
     entry.loadPromise = (async () => {
       try {
         let rows = [];
+
+        if (hasTblEventEnded()) {
+          await ensureTblWinnersSnapshot({ force });
+          if (isValidTblCompetitionSnapshot(state.competitionSnapshot)) {
+            rows = getTblCategoryRowsFromAppliedSnapshot(tab);
+            if (!isModalSessionActive()) {
+              return rows;
+            }
+            entry.rows = rows;
+            entry.partialRows = rows;
+            entry.loadMeta = null;
+            renderTabPanelLoaded(tab, rows);
+            updateTblLeagueSummaryParticipantCount(participantCountEl, state.participantCount || 0);
+            if (state.activeModalTab === tab) {
+              updateSummaryForTab(tab, rows);
+            }
+            return rows;
+          }
+        }
+
         if (tab === COMPETITION_TAB.FLOOR) {
           rows = await loadTblAllFloorData(force);
           if (isModalSessionActive()) {
@@ -5325,13 +6310,104 @@ function createTblLeagueModalContent(options = {}) {
     return entry.loadPromise;
   };
 
+  const loadSummaryTabData = (force = false) => {
+    const entry = tabStore[COMPETITION_TAB.SUMMARY];
+    if (!entry) {
+      return Promise.resolve(null);
+    }
+    if (entry.loadPromise && !force) {
+      return entry.loadPromise;
+    }
+
+    if (!force && isValidTblCompetitionSnapshot(state.competitionSnapshot)) {
+      applyTblCompetitionSnapshotToState(state.competitionSnapshot);
+      const winners = state.winnersSnapshot;
+      if (isValidTblWinnersSnapshot(winners)) {
+        entry.rows = winners;
+        renderWinnersPanel(winners);
+        if (state.activeModalTab === COMPETITION_TAB.SUMMARY && isModalSessionActive()) {
+          updateSummaryForTab(COMPETITION_TAB.SUMMARY, null);
+        }
+        return Promise.resolve(winners);
+      }
+    }
+
+    renderTabPanelLoading(COMPETITION_TAB.SUMMARY);
+    entry.loadPromise = (async () => {
+      try {
+        const categoryRows = collectCategoryRows();
+        const hasLocalCategoryData = getCategoryTabs().every((tab) => {
+          const tabEntry = tabStore[tab];
+          return Array.isArray(tabEntry?.rows) || (
+            tab === COMPETITION_TAB.SHINY && Array.isArray(tabEntry?.partialRows)
+          );
+        });
+
+        const snapshot = await ensureTblWinnersSnapshot({
+          force,
+          categoryRows: hasLocalCategoryData ? categoryRows : null,
+          participantCount: state.participantCount || 0
+        });
+
+        if (!isModalSessionActive()) {
+          return snapshot;
+        }
+
+        if (!isValidTblWinnersSnapshot(snapshot)) {
+          renderTabPanelError(COMPETITION_TAB.SUMMARY);
+          return null;
+        }
+
+        entry.rows = snapshot;
+        renderWinnersPanel(snapshot);
+        updateTblLeagueSummaryParticipantCount(
+          participantCountEl,
+          Number(snapshot.participantCount) || state.participantCount || 0
+        );
+        if (state.activeModalTab === COMPETITION_TAB.SUMMARY) {
+          updateSummaryForTab(COMPETITION_TAB.SUMMARY, null);
+        }
+        return snapshot;
+      } catch (error) {
+        console.warn(`${logPrefix} Failed to load winners tab data:`, error);
+        if (isModalSessionActive()) {
+          renderTabPanelError(COMPETITION_TAB.SUMMARY);
+        }
+        return state.winnersSnapshot;
+      } finally {
+        entry.loadPromise = null;
+      }
+    })();
+
+    return entry.loadPromise;
+  };
+
+  const loadTabData = (tab, force = false) => {
+    if (tab === COMPETITION_TAB.SUMMARY) {
+      return loadSummaryTabData(force);
+    }
+    return loadCategoryTabData(tab, force);
+  };
+
   const setActiveTab = (tab) => {
     state.activeModalTab = tab;
     const mode = getModeForTab(tab);
     const entry = tabStore[tab];
     updateTblLeagueSummaryPrize(prizeLabel, mode);
 
-    if (entry?.rows) {
+    if (tab === COMPETITION_TAB.SUMMARY) {
+      setLeaderRowVisible(false);
+      if (isValidTblWinnersSnapshot(entry?.rows || state.winnersSnapshot)) {
+        const snapshot = entry?.rows || state.winnersSnapshot;
+        state.winnersSnapshot = snapshot;
+        renderWinnersPanel(snapshot);
+        updateSummaryForTab(COMPETITION_TAB.SUMMARY, null);
+      } else {
+        updateTblLeagueSummaryWinnersHeader(standingsCol, null);
+        renderTabPanelLoading(COMPETITION_TAB.SUMMARY);
+      }
+    } else if (entry?.rows) {
+      setLeaderRowVisible(true);
       renderTabPanelLoaded(tab, entry.rows);
       updateSummaryForTab(tab, entry.rows);
     } else if (
@@ -5339,6 +6415,7 @@ function createTblLeagueModalContent(options = {}) {
       entry?.loadMeta?.loading &&
       Array.isArray(entry.partialRows)
     ) {
+      setLeaderRowVisible(true);
       renderTabPanelLoaded(tab, entry.partialRows, entry.loadMeta);
       if (entry.partialRows.length > 0) {
         updateSummaryForTab(tab, entry.partialRows);
@@ -5347,10 +6424,14 @@ function createTblLeagueModalContent(options = {}) {
         updateTblLeagueSummaryLoading(standingsCol, mode);
       }
     } else {
+      setLeaderRowVisible(true);
       updateTblLeagueSummaryCurrentLeader(leaderRow, [], mode);
       updateTblLeagueSummaryLoading(standingsCol, mode);
     }
 
+    if (winnersListPanel) {
+      winnersListPanel.style.display = tab === COMPETITION_TAB.SUMMARY ? 'flex' : 'none';
+    }
     floorListPanel.style.display = tab === COMPETITION_TAB.FLOOR ? 'flex' : 'none';
     rankListPanel.style.display = tab === COMPETITION_TAB.RANK ? 'flex' : 'none';
     if (shinyListPanel) {
@@ -5369,6 +6450,9 @@ function createTblLeagueModalContent(options = {}) {
 
   container.appendChild(summaryPanel);
   container.appendChild(tabBar);
+  if (winnersListPanel) {
+    container.appendChild(winnersListPanel);
+  }
   container.appendChild(floorListPanel);
   container.appendChild(rankListPanel);
   if (shinyListPanel) {
@@ -5431,7 +6515,7 @@ async function openTblFloorLeagueModal(forceRefresh = false) {
         onClick: () => closeTblFloorLeagueModal()
       }
     ];
-    if (!state.joined && state.currentPlayerEligible !== false) {
+    if (!hasTblEventEnded() && !state.joined && state.currentPlayerEligible !== false) {
       modalButtons.unshift({
         text: tEvent('Join'),
         primary: false,
@@ -5637,6 +6721,11 @@ function initTblFloorLeague() {
   if (isTblMapActive()) {
     scheduleTblShinyDataWarm();
   }
+  if (hasTblEventEnded()) {
+    ensureTblWinnersSnapshot().catch((error) => {
+      console.warn(`${logPrefix} Failed to warm winners snapshot:`, error);
+    });
+  }
 }
 
 function cleanupTblFloorLeague() {
@@ -5665,7 +6754,7 @@ function cleanupTblFloorLeague() {
   state.eventNextCheckEndTime = null;
   state.lastCountdownToastBucket = null;
   state.lastCountdownToastLiveShown = false;
-  state.eventWasActive = false;
+  state.eventWasActive = Boolean(cfg.eventEnded);
   state.floorBarRows = null;
   state.floorBarCacheAt = 0;
   state.rankBarRows = null;
@@ -5673,7 +6762,10 @@ function cleanupTblFloorLeague() {
   state.shinyBarRows = null;
   state.shinyBarCacheAt = 0;
   state.shinyScoresByName = null;
-  state.activeModalTab = COMPETITION_TAB.FLOOR;
+  state.winnersSnapshot = null;
+  state.winnersLoadPromise = null;
+  state.competitionSnapshot = null;
+  state.activeModalTab = getTblDefaultModalTab();
   state.lastBarFloor = null;
   state.trackedBattleSetup = null;
   state.playerTotalTicks = null;
