@@ -177,6 +177,7 @@ const DEBUG = false; // Set to true for development
     
     // Create overlay to capture clicks outside the modal
     const overlay = document.createElement('div');
+    overlay.setAttribute('data-ba-mod-overlay', '1');
     overlay.style.cssText = `
       position: fixed;
       top: 0;
@@ -191,6 +192,7 @@ const DEBUG = false; // Set to true for development
     const modal = document.createElement('div');
     modal.setAttribute('role', 'dialog');
     modal.setAttribute('data-state', 'open');
+    modal.setAttribute('data-ba-mod-dialog', '1');
     modal.className = 'auto-centered fixed shadow-lg outline-none pixel-font';
     modal.style.cssText = `
       position: fixed;
