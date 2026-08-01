@@ -1088,13 +1088,14 @@ if (typeof browserAPI === 'undefined') {
   
   window.BestiaryModAPI = {
     showModal: function(options) {
-      // Remove all existing overlays and modals before creating a new one
-      document.querySelectorAll('div[style*="position: fixed"][style*="top: 0"][style*="left: 0"][style*="right: 0"][style*="bottom: 0"][style*="background: rgba(0, 0, 0, 0.5)"]').forEach(overlay => {
+      // Only remove prior *mod* overlays/dialogs. Never detach game React/Radix dialogs
+      // (e.g. Quest Log) — that causes Node.removeChild client-side crashes.
+      document.querySelectorAll('[data-ba-mod-overlay="1"]').forEach(overlay => {
         try {
           if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
         } catch (e) { /* Ignore removal errors */ }
       });
-      document.querySelectorAll('div[role="dialog"][data-state="open"]').forEach(dialog => {
+      document.querySelectorAll('[data-ba-mod-dialog="1"]').forEach(dialog => {
         try {
           if (dialog.parentNode) dialog.parentNode.removeChild(dialog);
         } catch (e) { /* Ignore removal errors */ }
@@ -1117,12 +1118,14 @@ if (typeof browserAPI === 'undefined') {
       const heightCss = typeof height === 'number' ? height + 'px' : (height || '');
       // Create overlay to capture clicks outside the modal
       const overlay = document.createElement('div');
+      overlay.setAttribute('data-ba-mod-overlay', '1');
       overlay.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: transparent; z-index: 9998;';
       document.body.appendChild(overlay);
       
       const modalEl = document.createElement('div');
       modalEl.setAttribute('role', 'dialog');
       modalEl.setAttribute('data-state', 'open');
+      modalEl.setAttribute('data-ba-mod-dialog', '1');
       // Use default small modal + zoom animation only when no custom size (avoids blur from resize-after-paint)
       const baseClass = 'auto-centered fixed z-modals w-full shadow-lg outline-none';
       const animationClass = hasCustomSize

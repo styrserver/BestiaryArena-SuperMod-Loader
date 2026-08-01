@@ -1209,6 +1209,8 @@
     const LOG_BODY_ID = 'mod-better-sandbox-log-body';
     const LOG_LIST_ID = 'mod-better-sandbox-log-list';
     const LOG_SUBTITLE_ID = 'mod-better-sandbox-log-subtitle';
+    const LOG_COPY_BTN_ID = 'mod-better-sandbox-log-copy';
+    const LOG_CLEAR_BTN_ID = 'mod-better-sandbox-log-clear';
     const LOG_SEARCH_INPUT_ID = 'mod-better-sandbox-log-search-input';
     const TITLE_ID = 'mod-better-sandbox-title';
     const STATUS_ID = 'mod-better-sandbox-status';
@@ -1389,6 +1391,14 @@
     const abilityCastLogDedupe = new Set();
     const deathLogDedupe = new Set();
     const pathLogDedupe = new Set();
+    const BATTLE_LOG_DEDUPE_SETS = [
+        statusLogDedupe,
+        statLogDedupe,
+        damageLogDedupe,
+        abilityCastLogDedupe,
+        deathLogDedupe,
+        pathLogDedupe
+    ];
     const lastActorTileByActor = new WeakMap();
     let logFilters = { ...LOG_FILTER_DEFAULTS };
     let logSearchQuery = '';
@@ -1563,7 +1573,12 @@
         const w = world ?? getActiveWorld();
         if (!w?.grid) return;
         if (activeWorld === w && worldEventSubs.length) {
-            if (isPanelOpen()) resumeBattleLogActorPatches();
+            if (isPanelOpen()) {
+                resumeBattleLogActorPatches();
+                if (!actorUnitsMechanicsSubs.size) {
+                    setupUnitsMechanicsSubscriptions(activeWorld);
+                }
+            }
             if (slowMotionEnabled && isSandboxMode()) applyTickIntervalToWorld(activeWorld);
             return;
         }
@@ -1571,7 +1586,7 @@
         activeWorld = w;
         registerFightActorCollapseKeys(activeWorld);
         setupWorldSubscriptions(activeWorld);
-        setupUnitsMechanicsSubscriptions(activeWorld);
+        if (isPanelOpen()) setupUnitsMechanicsSubscriptions(activeWorld);
         if (slowMotionEnabled && isSandboxMode()) applyTickIntervalToWorld(activeWorld);
     }
 
@@ -2354,7 +2369,7 @@
     }
 
     function scheduleUnitsMechanicsPatch() {
-        if (activeTab !== 'units' || !isFightActive()) return;
+        if (!isPanelOpen() || activeTab !== 'units' || !isFightActive()) return;
         if (unitsMechanicsPatchTimer != null) return;
         unitsMechanicsPatchTimer = setTimeout(() => {
             unitsMechanicsPatchTimer = null;
@@ -2369,7 +2384,7 @@
     }
 
     function scheduleUnitsLiveStatsPatch() {
-        if (activeTab !== 'units' || !isFightActive()) return;
+        if (!isPanelOpen() || activeTab !== 'units' || !isFightActive()) return;
         if (unitsStatsPatchTimer != null) return;
         unitsStatsPatchTimer = setTimeout(() => {
             unitsStatsPatchTimer = null;
@@ -2748,6 +2763,10 @@
         cachedVisibleBattleLogFilterSig = '';
     }
 
+    function clearBattleLogDedupeSets() {
+        for (const set of BATTLE_LOG_DEDUPE_SETS) set.clear();
+    }
+
     function resetBattleLogState() {
         battleLog = [];
         battleLogRevision = 0;
@@ -2768,12 +2787,7 @@
         battleLogTracking = false;
         battleLogSessionEnded = false;
         lastStatusPollTick = -1;
-        statusLogDedupe.clear();
-        damageLogDedupe.clear();
-        abilityCastLogDedupe.clear();
-        deathLogDedupe.clear();
-        pathLogDedupe.clear();
-        statLogDedupe.clear();
+        clearBattleLogDedupeSets();
         clearBreadcrumbTrails();
     }
 
@@ -2807,12 +2821,7 @@
         battleLogTracking = true;
         battleLogSessionEnded = false;
         lastStatusPollTick = -1;
-        statusLogDedupe.clear();
-        damageLogDedupe.clear();
-        abilityCastLogDedupe.clear();
-        deathLogDedupe.clear();
-        pathLogDedupe.clear();
-        statLogDedupe.clear();
+        clearBattleLogDedupeSets();
         syncGameTimerFightStateTracking();
         recordBattleMarker('start', { tick: getCurrentTick() ?? 0 });
         seedBattleLogStatusSnapshots();
@@ -2831,12 +2840,9 @@
         if (world) unpatchAllActors(world);
         lastUnitStatusByKey.clear();
         lastStatusPollTick = -1;
-        statusLogDedupe.clear();
-        damageLogDedupe.clear();
-        abilityCastLogDedupe.clear();
-        deathLogDedupe.clear();
-        pathLogDedupe.clear();
-        statLogDedupe.clear();
+        clearBattleLogDedupeSets();
+        invalidateVisibleBattleLogCache();
+        invalidatePreparedBattleLogSummaryCache();
     }
 
     function tryEndBattleLogSession() {
@@ -3061,9 +3067,11 @@
         return logFilters[key] === true;
     }
 
-    function isLogEntryVisible(entry) {
-        if (!isLogEntryFilterVisible(entry)) return false;
-        return battleLogEntryMatchesSearch(entry, logSearchQuery);
+    function buildDisplayBattleLogEntries(entries) {
+        const typeFiltered = (entries || []).filter(isLogEntryFilterVisible);
+        const consolidated = consolidateBattleLogEntries(typeFiltered);
+        if (!(logSearchQuery || '').trim()) return consolidated;
+        return consolidated.filter((entry) => battleLogEntryMatchesSearch(entry, logSearchQuery));
     }
 
     function getLogFiltersSignature() {
@@ -3334,7 +3342,7 @@
 
     function getBattleLogSubtitleText() {
         const total = battleLog.length;
-        const visible = battleLog.filter(isLogEntryVisible).length;
+        const visible = buildDisplayBattleLogEntries(battleLog).length;
         const showAll = isLogFilterShowAll();
         const parts = [];
 
@@ -3342,8 +3350,8 @@
             parts.push(t('mods.betterAnalytics.subtitleNoEvents'));
         } else if (showAll && !logSearchQuery) {
             parts.push(tReplace('mods.betterAnalytics.subtitleEventsCount', {
-                count: total,
-                plural: total === 1 ? '' : 's'
+                count: visible,
+                plural: visible === 1 ? '' : 's'
             }));
             parts.push(t('mods.betterAnalytics.subtitleAllEventTypes'));
         } else {
@@ -3370,6 +3378,17 @@
     function updateLogToolbarTitle() {
         const subtitle = document.getElementById(LOG_SUBTITLE_ID);
         if (subtitle) subtitle.textContent = getBattleLogSubtitleText();
+        updateLogActionButtons();
+    }
+
+    function updateLogActionButtons() {
+        const empty = !battleLog.length;
+        for (const id of [LOG_COPY_BTN_ID, LOG_CLEAR_BTN_ID]) {
+            const btn = document.getElementById(id);
+            if (!btn) continue;
+            btn.disabled = empty;
+            btn.classList.toggle('bs-log-action-disabled', empty);
+        }
     }
 
     function updateLogFilterUi() {
@@ -3402,6 +3421,106 @@
         resetBattleLogState();
         renderBattleLog();
         if (breadcrumbTrailsEnabled && isPanelOpen()) scheduleBreadcrumbRender();
+    }
+
+    function buildFilteredBattleLogText() {
+        const lines = [];
+        const entries = buildDisplayBattleLogEntries(battleLog);
+        lines.push(t('mods.betterAnalytics.battleLogTitle'));
+        const activeFilters = getActiveLogFilterLabels();
+        lines.push(tReplace('mods.betterAnalytics.exportTotalEntries', { count: entries.length }));
+        lines.push(tReplace('mods.betterAnalytics.copyLogFilters', {
+            filters: activeFilters.length ? activeFilters.join(', ') : t('mods.betterAnalytics.exportNoFilters')
+        }));
+        if ((logSearchQuery || '').trim()) {
+            lines.push(tReplace('mods.betterAnalytics.subtitleSearch', { query: logSearchQuery.trim() }));
+        }
+        lines.push('');
+        if (!entries.length) {
+            lines.push(
+                (logSearchQuery || '').trim()
+                    ? tReplace('mods.betterAnalytics.emptyNoSearchMatch', { query: logSearchQuery.trim() })
+                    : (!battleLog.length
+                        ? t('mods.betterAnalytics.emptyNoBattleEvents')
+                        : t('mods.betterAnalytics.emptyNoFilterMatch'))
+            );
+            return lines.join('\n');
+        }
+        getPreparedBattleLogSummary();
+        for (const entry of entries) {
+            lines.push(formatBattleLogEntryForExport(entry));
+        }
+        return lines.join('\n');
+    }
+
+    async function copyTextToClipboard(text) {
+        if (navigator.clipboard?.writeText && window.isSecureContext) {
+            try {
+                await navigator.clipboard.writeText(text);
+                return true;
+            } catch { /* fall through */ }
+        }
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.setAttribute('readonly', '');
+        textarea.style.position = 'fixed';
+        textarea.style.left = '-9999px';
+        textarea.style.top = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        textarea.setSelectionRange(0, textarea.value.length);
+        let success = false;
+        try {
+            success = document.execCommand('copy');
+        } catch {
+            success = false;
+        }
+        textarea.remove();
+        return success;
+    }
+
+    async function copyFilteredBattleLog(button) {
+        try {
+            const text = buildFilteredBattleLogText();
+            const ok = await copyTextToClipboard(text);
+            if (button) {
+                const original = button.textContent;
+                button.textContent = ok
+                    ? t('mods.betterAnalytics.logCopied')
+                    : t('mods.betterAnalytics.logCopyFailed');
+                setTimeout(() => {
+                    if (button.isConnected) button.textContent = original;
+                }, 1200);
+            }
+            if (!ok) console.error(`[${modName}] Failed to copy filtered battle log`);
+        } catch (error) {
+            console.error(`[${modName}] Failed to copy filtered battle log:`, error);
+            if (button) {
+                const original = button.textContent;
+                button.textContent = t('mods.betterAnalytics.logCopyFailed');
+                setTimeout(() => {
+                    if (button.isConnected) button.textContent = original;
+                }, 1200);
+            }
+        }
+    }
+
+    function getActiveLogFilterLabels() {
+        return LOG_FILTER_ORDER
+            .filter((key) => logFilters[key] === true)
+            .map((key) => getLogFilterLabel(key));
+    }
+
+    function getLogTeamTag(villain) {
+        return villain === true
+            ? t('mods.betterAnalytics.exportSummaryTeamEnemy')
+            : t('mods.betterAnalytics.exportSummaryTeamAlly');
+    }
+
+    function tryClaimLogDedupeKey(dedupeSet, dedupeKey) {
+        if (dedupeSet.has(dedupeKey)) return false;
+        dedupeSet.add(dedupeKey);
+        return true;
     }
 
     function formatLogDamageAmount(amount, rawAmount) {
@@ -3437,22 +3556,23 @@
         const tick = getBattleLogTick();
         const from = actorLabel(fromActor, isHeal ? '—' : 'Environment');
         const to = actorLabel(toActor, '—');
+        const fromKey = fromActor ? resolveFightCollapseKey(fromActor) : null;
+        const toKey = toActor ? resolveFightCollapseKey(toActor) : null;
         const amount = Math.abs(Math.round(points));
         const rawAmount = !isHeal && event.rawAmount != null
             ? Math.abs(Math.round(Number(event.rawAmount)))
             : null;
         const damageType = event.damageType || (isHeal ? 'heal' : 'physical');
-        const dedupeKey = `${tick ?? '?'}|${from}|${to}|${amount}|${rawAmount ?? ''}|${damageType}|${isHeal ? 'heal' : 'dmg'}`;
-        if (damageLogDedupe.has(dedupeKey)) return;
-        damageLogDedupe.add(dedupeKey);
+        const dedupeKey = `${tick ?? '?'}|${fromKey || from}|${toKey || to}|${amount}|${rawAmount ?? ''}|${damageType}|${isHeal ? 'heal' : 'dmg'}`;
+        if (!tryClaimLogDedupeKey(damageLogDedupe, dedupeKey)) return;
 
         battleLog.push({
             tick: tick != null ? tick : '?',
             kind: isHeal ? 'heal' : 'damage',
             from,
             to,
-            fromKey: fromActor ? resolveFightCollapseKey(fromActor) : null,
-            toKey: toActor ? resolveFightCollapseKey(toActor) : null,
+            fromKey,
+            toKey,
             fromTile: fromActor ? readActorTileIndex(fromActor) : null,
             toTile: toActor ? readActorTileIndex(toActor) : null,
             fromVillain: fromActor?.villain === true,
@@ -3475,8 +3595,7 @@
         const from = actorLabel(actor);
         const abilityName = resolveAbilityNameForLog(actor, {}, null) || 'Ability';
         const dedupeKey = `${tick ?? '?'}|${actor.id ?? from}|${abilityName}|cast`;
-        if (abilityCastLogDedupe.has(dedupeKey)) return;
-        abilityCastLogDedupe.add(dedupeKey);
+        if (!tryClaimLogDedupeKey(abilityCastLogDedupe, dedupeKey)) return;
 
         battleLog.push({
             tick: tick != null ? tick : '?',
@@ -3541,8 +3660,7 @@
         const killerActor = entityToActor(deathEvent.killedBy);
         const killedBy = killerActor ? actorLabel(killerActor) : null;
         const dedupeKey = `${tick ?? '?'}|${actor.id ?? unit}|death`;
-        if (deathLogDedupe.has(dedupeKey)) return;
-        deathLogDedupe.add(dedupeKey);
+        if (!tryClaimLogDedupeKey(deathLogDedupe, dedupeKey)) return;
 
         battleLog.push({
             tick: tick != null ? tick : '?',
@@ -3576,9 +3694,33 @@
         bleed: 'Bleeding',
         haste: 'Haste',
         attackspeedbuff: 'Attack speed',
+        'attack speed': 'Attack speed',
         skeleton: 'Skeleton',
         gooshell: 'Gooshell',
-        'crystalenergy': 'Crystal energy'
+        crystalenergy: 'Crystal energy',
+        effect: 'Stack',
+        distancelevel: 'Distance level',
+        distanceup: 'Distance up',
+        frontsweep: 'Front sweep',
+        greatfireball: 'Great Fireball',
+        fireball: 'Fireball',
+        feexplosion: 'FE Explosion',
+        soulfire: 'Soulfire',
+        bonefiddle: 'Bone Fiddle',
+        healreduction: 'Heal Reduction',
+        'heal reduction': 'Heal Reduction',
+        'heal-reduction': 'Heal Reduction',
+        lifesteal: 'Lifesteal',
+        redskull: 'Red Skull',
+        whiteskull: 'White Skull',
+        'warlock hat': 'Warlock Hat',
+        warlockhat: 'Warlock Hat',
+        enchantspear: 'Enchant Spear',
+        etherealspear: 'Ethereal Spear',
+        utanigranhur: 'Utanigranhur',
+        sentientrockoff: 'Sentient Rock',
+        'bonelord umbral': 'Bonelord Umbral',
+        bonelordumbral: 'Bonelord Umbral'
     };
 
     const SLOW_SRC_PATTERNS = ['slow', 'snowman', 'snowstorm', 'nunu', 'slowmud', 'icearrow'];
@@ -3623,13 +3765,15 @@
         let key = String(src).trim();
         if (!key) return null;
 
-        const urlMatch = key.match(/\/assets\/spells\/([^/?#]+)\.png/i);
-        if (urlMatch) return urlMatch[1].toLowerCase();
+        const urlMatch = key.match(/\/assets\/spells\/([^/?#]+)\.(?:png|webp|gif|jpe?g)/i);
+        if (urlMatch) {
+            return decodeURIComponent(urlMatch[1]).replace(/\+/g, ' ').trim().toLowerCase();
+        }
 
-        if (/[\\/]/.test(key)) {
-            const filename = key.replace(/^.*[\\/]/, '');
+        if (/[\\/]/.test(key) || /\.(?:png|webp|gif|jpe?g)(?:$|\?)/i.test(key)) {
+            const filename = key.replace(/^.*[\\/]/, '').replace(/\?.*$/, '');
             const base = filename.replace(/\.[^.]+$/i, '');
-            return base ? base.toLowerCase() : null;
+            return base ? decodeURIComponent(base).replace(/\+/g, ' ').trim().toLowerCase() : null;
         }
 
         return key.toLowerCase();
@@ -3644,7 +3788,9 @@
     function resolveSpellIconUrl(src) {
         const key = normalizeSpellSrc(src);
         if (!key || !isSpellAssetKey(key)) return null;
-        return `/assets/spells/${encodeURIComponent(key)}.png`;
+        // Icon files use the first token (e.g. lifesteal), not "lifesteal enchantspear".
+        const fileKey = key.split(/\s+/)[0];
+        return `/assets/spells/${encodeURIComponent(fileKey)}.png`;
     }
 
     function resolveSkillIcon(skill) {
@@ -3654,22 +3800,110 @@
         return resolveSpellIconUrl(skill.src);
     }
 
+    function looksLikeAssetPath(value) {
+        const s = String(value || '');
+        return /[\\/]/.test(s)
+            || /assets\/spells/i.test(s)
+            || /\.(?:png|webp|gif|jpe?g)(?:$|\?|\s)/i.test(s);
+    }
+
     function resolveResourceSpellSrc(resource) {
         if (!resource || typeof resource !== 'object') return null;
         for (const candidate of [resource.src, resource.name, resource.spriteId]) {
             const normalized = normalizeSpellSrc(candidate);
-            if (normalized) return normalized;
+            if (normalized) return normalized.split(/\s+/)[0];
         }
         return null;
     }
 
+    function resolveResourceLabelSrc(resource) {
+        if (!resource || typeof resource !== 'object') return null;
+        const candidates = [
+            resource.displayName,
+            resource.label,
+            resource.tooltipName,
+            resource.spell?.name,
+            resource.ability?.name,
+            resource.name,
+            resource.src,
+            resource.spriteId
+        ];
+        let numericFallback = null;
+        let pathFallback = null;
+        for (const candidate of candidates) {
+            if (candidate == null || candidate === '') continue;
+            const raw = String(candidate).trim();
+            if (!raw) continue;
+            if (/^\d+$/.test(raw)) {
+                if (!numericFallback) numericFallback = raw;
+                continue;
+            }
+            const normalized = normalizeSpellSrc(raw);
+            if (!normalized || normalized === 'effect') continue;
+            if (looksLikeAssetPath(raw)) {
+                if (!pathFallback) pathFallback = normalized;
+                continue;
+            }
+            // Prefer human names over raw spell keys when available.
+            return normalized;
+        }
+        return pathFallback || numericFallback;
+    }
+
+    function titleCaseEffectWords(text) {
+        return String(text || '')
+            .split(/\s+/)
+            .filter(Boolean)
+            .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+            .join(' ');
+    }
+
     function humanizeEffectSrc(src) {
-        if (!src) return 'Effect';
+        if (!src) return 'Stack';
         const key = normalizeSpellSrc(src) || String(src).trim().toLowerCase();
+        if (!key) return 'Stack';
         if (STATUS_EFFECT_LABELS[key]) return STATUS_EFFECT_LABELS[key];
-        return key
-            .replace(/-/g, ' ')
-            .replace(/\b\w/g, (c) => c.toUpperCase());
+        if (/^\d+$/.test(key)) return 'Buff';
+
+        // Always humanize from the normalized key — never from raw asset paths.
+        const spaced = key
+            .replace(/[_-]+/g, ' ')
+            .replace(/([a-z])([A-Z])/g, '$1 $2')
+            .replace(/([a-zA-Z])(\d)/g, '$1 $2')
+            .replace(/(\d)([a-zA-Z])/g, '$1 $2')
+            .trim()
+            .toLowerCase();
+        if (STATUS_EFFECT_LABELS[spaced]) return STATUS_EFFECT_LABELS[spaced];
+        const compact = spaced.replace(/\s+/g, '');
+        if (STATUS_EFFECT_LABELS[compact]) return STATUS_EFFECT_LABELS[compact];
+
+        // "lifesteal enchantspear" → prefer primary effect label when known.
+        const primary = spaced.split(/\s+/)[0];
+        if (primary && STATUS_EFFECT_LABELS[primary]) {
+            const rest = spaced.slice(primary.length).trim();
+            if (!rest) return STATUS_EFFECT_LABELS[primary];
+            const restLabel = STATUS_EFFECT_LABELS[rest.replace(/\s+/g, '')]
+                || STATUS_EFFECT_LABELS[rest]
+                || titleCaseEffectWords(rest);
+            return `${STATUS_EFFECT_LABELS[primary]} (${restLabel})`;
+        }
+
+        return titleCaseEffectWords(spaced);
+    }
+
+    function sanitizeEffectReadable(readable) {
+        if (readable == null) return null;
+        const text = String(readable).trim();
+        if (!text || text === '0') return null;
+        if (looksLikeAssetPath(text)) {
+            const key = normalizeSpellSrc(text);
+            return key ? humanizeEffectSrc(key) : null;
+        }
+        return text;
+    }
+
+    function isStackLikeReadable(text) {
+        return /^-?\d+(?:\.\d+)?%?$/.test(String(text).trim());
     }
 
     function buildStatusEffect(effectId) {
@@ -3701,12 +3935,26 @@
         );
     }
 
+    function isAbilityCooldownChrome(resource) {
+        if (!resource || typeof resource !== 'object') return false;
+        try {
+            if (typeof resource.isOnCooldown === 'function') return true;
+            if (resource.cooldownClock) return true;
+        } catch { /* ignore */ }
+        return false;
+    }
+
     function isActorOwnAbilityResource(actor, resource) {
         // Benign passives (e.g. Ultimate Healing on self) are real buffs, not ability-cooldown UI.
         if (resource?.benign === true) return false;
+        // Applied debuffs can share the unit's ability spell id (Dragon hit by Soulfire).
+        if (resource?.benign === false) return false;
         const spellSrc = resolveResourceSpellSrc(resource);
         const abilitySrc = resolveActorAbilitySpellSrc(actor);
-        return Boolean(spellSrc && abilitySrc && spellSrc === abilitySrc);
+        if (!spellSrc || !abilitySrc || spellSrc !== abilitySrc) return false;
+        // Same spell as the unit's ability, but a duration application rather than CD chrome.
+        if (hasActiveDurationTicks(resource) && !isAbilityCooldownChrome(resource)) return false;
+        return true;
     }
 
     function hasActiveDurationTicks(resource) {
@@ -3806,22 +4054,45 @@
     }
 
     function readResourceEffectLabel(resource) {
+        const labelSrc = resolveResourceLabelSrc(resource);
         const spellSrc = resolveResourceSpellSrc(resource);
-        const baseLabel = humanizeEffectSrc(spellSrc || resource?.src || resource?.name);
-        const readable = resource?.readableCurrent
+        const baseLabel = humanizeEffectSrc(labelSrc || spellSrc || resource?.src || resource?.name);
+        const readable = sanitizeEffectReadable(
+            resource?.readableCurrent
             ?? resource?.counter?.readableCurrent
             ?? (resource?.counter?.current != null && resource?.UI === 'discrete'
                 ? String(resource.counter.current)
-                : null);
-        if (readable && !baseLabel.includes(String(readable))) {
-            return `${baseLabel} ${readable}`.trim();
+                : null)
+        );
+        if (!readable) return baseLabel;
+        const readableLower = readable.toLowerCase();
+        const baseLower = baseLabel.toLowerCase();
+        if (baseLower.includes(readableLower) || readableLower === baseLower) return baseLabel;
+
+        // Counters / percents: "Stack 1", "Front sweep 1%", "Distance level 1"
+        if (isStackLikeReadable(readable)) {
+            return `${baseLabel} ${readable}`;
+        }
+
+        // Named extras (ability names): "Lifesteal (Enchant Spear)"
+        const readableHuman = humanizeEffectSrc(readable);
+        if (readableHuman && readableHuman.toLowerCase() !== baseLower
+            && !baseLower.includes(readableHuman.toLowerCase())
+            && readableHuman !== 'Buff'
+            && readableHuman !== 'Stack') {
+            return `${baseLabel} (${readableHuman})`;
         }
         return baseLabel;
     }
 
     function resourceEffectId(resource) {
         if (resource?.uuid) return `fx:${resource.uuid}`;
-        const src = resolveResourceSpellSrc(resource) || resource?.src || resource?.name || resource?.spriteId || 'effect';
+        const src = resolveResourceLabelSrc(resource)
+            || resolveResourceSpellSrc(resource)
+            || resource?.src
+            || resource?.name
+            || resource?.spriteId
+            || 'effect';
         const counter = resource?.counter?.current ?? resource?.readableCurrent ?? '';
         return `fx:${src}:${counter}`;
     }
@@ -3829,10 +4100,11 @@
     function collectResourceStatusEffect(actor, resource) {
         if (!resource || typeof resource !== 'object') return null;
         if (!isRenderResourceActive(actor, resource)) return null;
+        const labelSrc = resolveResourceLabelSrc(resource);
         const spellSrc = resolveResourceSpellSrc(resource);
-        const src = spellSrc || resource.src || resource.name || null;
+        const src = labelSrc || spellSrc || resource.src || resource.name || null;
         const type = resource.benign === true ? 'buff' : 'debuff';
-        const baseLabel = humanizeEffectSrc(spellSrc || src);
+        const baseLabel = humanizeEffectSrc(src);
         const label = readResourceEffectLabel(resource);
         return {
             id: resourceEffectId(resource),
@@ -3911,15 +4183,15 @@
         if (!unit || !effect || !shouldPatchBattleLogActors()) return;
         const tick = getBattleLogTick();
         const label = effect.label || humanizeEffectSrc(effect.id);
-        const dedupeKey = `${tick ?? '?'}|${unit.name}|${effect.id || label}|${applied ? 'a' : 'r'}`;
-        if (statusLogDedupe.has(dedupeKey)) return;
-        statusLogDedupe.add(dedupeKey);
+        const toKey = unit.collapseKey || null;
+        const dedupeKey = `${tick ?? '?'}|${toKey || unit.name}|${effect.id || label}|${applied ? 'a' : 'r'}`;
+        if (!tryClaimLogDedupeKey(statusLogDedupe, dedupeKey)) return;
 
         battleLog.push({
             tick: tick != null ? tick : '?',
             kind: 'status',
             to: unit.name || 'Unknown',
-            toKey: unit.collapseKey || null,
+            toKey,
             toVillain: unit.villain === true,
             effectLabel: label,
             effectType: effect.type || 'debuff',
@@ -3980,15 +4252,15 @@
 
         const tick = getBattleLogTick();
         const unit = actorLabel(actor);
-        const dedupeKey = `${tick ?? '?'}|${unit}|${statKey}|${fromVal}|${toVal}`;
-        if (statLogDedupe.has(dedupeKey)) return;
-        statLogDedupe.add(dedupeKey);
+        const unitKey = resolveFightCollapseKey(actor);
+        const dedupeKey = `${tick ?? '?'}|${unitKey || unit}|${statKey}|${fromVal}|${toVal}`;
+        if (!tryClaimLogDedupeKey(statLogDedupe, dedupeKey)) return;
 
         battleLog.push({
             tick: tick != null ? tick : '?',
             kind: 'statChange',
             unit,
-            unitKey: resolveFightCollapseKey(actor),
+            unitKey,
             unitVillain: actor.villain === true,
             statKey,
             statLabel,
@@ -4140,7 +4412,8 @@
     function actorStatusUnitSnapshot(actor) {
         return {
             name: actor.name || actor.nickname || 'Unknown',
-            villain: actor.villain === true
+            villain: actor.villain === true,
+            collapseKey: resolveFightCollapseKey(actor)
         };
     }
 
@@ -4173,11 +4446,10 @@
         if (!shouldPatchBattleLogActors()) return;
         const unit = actorStatusUnitSnapshot(actor);
         const tick = getBattleLogTick();
-        const dedupeKey = `${tick ?? '?'}|${unit.name}|${fromTile}|${toTile}`;
-        if (pathLogDedupe.has(dedupeKey)) return;
-        pathLogDedupe.add(dedupeKey);
-
         const unitKey = resolveFightCollapseKey(actor);
+        const dedupeKey = `${tick ?? '?'}|${unitKey || unit.name}|${fromTile}|${toTile}`;
+        if (!tryClaimLogDedupeKey(pathLogDedupe, dedupeKey)) return;
+
         battleLog.push({
             tick: tick != null ? tick : '?',
             kind: 'pathing',
@@ -4404,7 +4676,7 @@
         const onActorEnter = (actor) => {
             if (actor) resolveFightCollapseKey(actor);
             if (shouldPatchBattleLogActors()) patchActorBattleLog(actor);
-            subscribeActorUnitsMechanics(actor);
+            if (isPanelOpen()) subscribeActorUnitsMechanics(actor);
             // Summons/entries must rebuild the Units list, not only patch existing cards.
             scheduleUnitsRosterRefresh();
         };
@@ -12097,14 +12369,15 @@
 
     function formatUnitForExport(unit) {
         const lines = [];
-        const team = unit.villain ? 'Enemy' : 'Ally';
         const srcTag = unit.source === 'board'
             ? 'Board setup · scaled preview'
             : unit.source === 'map'
                 ? 'Map spawn · scaled preview'
                 : 'In fight';
 
-        lines.push(`${unit.name} [${team}]`);
+        const teamLabel = getLogTeamTag(unit.villain);
+        const displayName = getUnitDisplayName(unit) || unit.name;
+        lines.push(`${displayName} [${teamLabel}]`);
         lines.push(`  ${srcTag}${unit.awaken ? ' · Awakened' : ''}`);
         if (unit.level != null) lines.push(`  Level: ${unit.level}`);
         if (unit.tileIndex != null) lines.push(`  Tile: ${unit.tileIndex}`);
@@ -12233,6 +12506,343 @@
         return Boolean(entry.from && entry.from !== '—' && entry.from !== entry.to);
     }
 
+    function getLogEntryUnitIdentity(entry, role = 'self') {
+        if (entry.kind === 'status') {
+            return entry.toKey || `n:${entry.to}:${entry.toVillain ? 1 : 0}`;
+        }
+        if (entry.kind === 'statChange' || entry.kind === 'pathing') {
+            return entry.unitKey || `n:${entry.unit}:${entry.unitVillain ? 1 : 0}`;
+        }
+        if (entry.kind === 'abilityCast') {
+            return entry.fromKey || `n:${entry.from}:${entry.fromVillain ? 1 : 0}`;
+        }
+        if (entry.kind === 'death') {
+            if (role === 'killer') {
+                return entry.killedByKey || (entry.killedBy ? `n:${entry.killedBy}:${entry.killedByVillain ? 1 : 0}` : null);
+            }
+            return entry.unitKey || `n:${entry.unit}:${entry.unitVillain ? 1 : 0}`;
+        }
+        if (entry.kind === 'damage' || entry.kind === 'heal') {
+            if (role === 'from') return entry.fromKey || `n:${entry.from}:${entry.fromVillain ? 1 : 0}`;
+            if (role === 'to') return entry.toKey || `n:${entry.to}:${entry.toVillain ? 1 : 0}`;
+        }
+        return null;
+    }
+
+    function formatFoldedStatDelta(stat) {
+        if (!stat) return '';
+        if (isTickStatTrackKey(stat.statKey) || stat.statKey === 'level' || stat.statKey === 'hp' || stat.statKey === 'hpMax') {
+            const from = formatStatChangeValue(stat.statKey, stat.from);
+            const to = formatStatChangeValue(stat.statKey, stat.to);
+            return `${stat.statLabel} ${from} → ${to}`;
+        }
+        return `${formatStatChangeDelta(stat.statKey, stat.delta)} ${stat.statLabel}`;
+    }
+
+    function coalesceFoldedStats(foldedStats) {
+        if (!Array.isArray(foldedStats) || foldedStats.length < 2) return foldedStats || [];
+        const byKey = new Map();
+        const order = [];
+        for (const stat of foldedStats) {
+            if (!stat?.statKey) continue;
+            if (!byKey.has(stat.statKey)) {
+                byKey.set(stat.statKey, { ...stat });
+                order.push(stat.statKey);
+                continue;
+            }
+            const agg = byKey.get(stat.statKey);
+            agg.to = stat.to;
+            agg.delta = (Number(agg.delta) || 0) + (Number(stat.delta) || 0);
+        }
+        return order.map((key) => byKey.get(key)).filter((stat) => {
+            if (!stat) return false;
+            if (isTickStatTrackKey(stat.statKey) || stat.statKey === 'level') return true;
+            return Number(stat.delta) !== 0;
+        });
+    }
+
+    function formatFoldedStatsSuffix(foldedStats) {
+        const coalesced = coalesceFoldedStats(foldedStats);
+        if (!coalesced.length) return '';
+        return ` (${coalesced.map(formatFoldedStatDelta).filter(Boolean).join(', ')})`;
+    }
+
+    function isRedundantAbilityCastSource(actionSource) {
+        const src = String(actionSource || '').trim().toLowerCase();
+        return !src
+            || src === 'unknown'
+            || src === 'auto attack'
+            || src === 'heal'
+            || src === 'effect'
+            || src === 'ability';
+    }
+
+    function damageMatchesDeathVictim(dmg, death) {
+        if (death.unitKey && dmg.toKey) return death.unitKey === dmg.toKey;
+        return death.unit === dmg.to && death.unitVillain === dmg.toVillain;
+    }
+
+    function damageMatchesDeathKiller(dmg, death) {
+        if (!death.killedBy) return true;
+        if (dmg.from === 'Environment' || dmg.from === '—') return true;
+        if (death.killedByKey && dmg.fromKey) return death.killedByKey === dmg.fromKey;
+        return death.killedBy === dmg.from;
+    }
+
+    function scoreStatusForStatFold(statusEntry, statEntry) {
+        const label = String(statusEntry.effectLabel || '').toLowerCase();
+        const key = String(statEntry.statKey || '').toLowerCase();
+        let score = 0;
+        if (statusEntry.applied) score += 2;
+        else score += 1;
+        if (key === 'speed' || key === 'spd') {
+            if (/slow|haste|attack speed|red skull/.test(label)) score += 10;
+            // Named haste/mobility buffs (e.g. Utanigranhur) — allow SPD fold unless combat shred.
+            else if (!isSpeedFoldBlockedStatus(label)) score += 10;
+        }
+        if (isTickStatTrackKey(statEntry.statKey)) {
+            if (/attack speed|stack|red skull/.test(label)) score += 10;
+        }
+        if (key === 'level' || key === 'ad') {
+            if (/\bstack\b/.test(label)) score += 10;
+        }
+        if (key === 'ad' || key === 'ap' || key === 'armor' || key === 'magicresist' || key === 'mr') {
+            if (/soulfire|curse/.test(label)) score += 10;
+            if (statusEntry.effectType === 'debuff' && statusEntry.applied) score += 5;
+            if (/^buff\b/.test(label) && !statusEntry.applied) score -= 5;
+        }
+        // Distance / Front sweep rarely own combat stat lines
+        if (/\bfront sweep\b/.test(label) || /\bdistance\b/.test(label)) score -= 3;
+        return score;
+    }
+
+    function isSpeedFoldBlockedStatus(label) {
+        return /soulfire|curse|heal\s*reduction|poison|stun|silence|stack|front sweep|distance|lifesteal|^buff\b|great fireball|warlock hat/.test(
+            String(label || '').toLowerCase()
+        );
+    }
+
+    function isSlowStatusLabel(label) {
+        return /\bslow/.test(String(label || '').toLowerCase());
+    }
+
+    function isSpeedStatKey(statKey) {
+        const key = String(statKey || '').toLowerCase();
+        return key === 'speed' || key === 'spd';
+    }
+
+    function isCombatShredStatKey(statKey) {
+        const key = String(statKey || '').toLowerCase();
+        return key === 'ad' || key === 'ap' || key === 'armor' || key === 'magicresist' || key === 'mr';
+    }
+
+    function isShredDamageSource(actionSource) {
+        return /soulfire|curse/.test(String(actionSource || '').toLowerCase());
+    }
+
+    function extractFoldedSpeedDelta(foldedStats) {
+        if (!Array.isArray(foldedStats)) return null;
+        for (const stat of foldedStats) {
+            if (!isSpeedStatKey(stat?.statKey)) continue;
+            const delta = Number(stat.delta);
+            if (Number.isFinite(delta)) return delta;
+        }
+        return null;
+    }
+
+    function pickBestStatusForStatFold(statusItems, statEntry) {
+        let best = null;
+        let bestScore = -Infinity;
+        for (const item of statusItems) {
+            const score = scoreStatusForStatFold(item.entry, statEntry);
+            if (score > bestScore) {
+                bestScore = score;
+                best = item;
+            }
+        }
+        return best;
+    }
+
+    function consolidateBattleLogEntries(entries) {
+        if (!Array.isArray(entries) || !entries.length) return [];
+        const list = entries.map((entry) => ({ ...entry }));
+        const suppressed = new Set();
+
+        const castIndexByKey = new Map();
+        for (let i = 0; i < list.length; i++) {
+            const entry = list[i];
+            if (entry.kind !== 'abilityCast') continue;
+            const caster = getLogEntryUnitIdentity(entry);
+            const key = `${entry.tick}|${caster}|${String(entry.abilityName || '').toLowerCase()}`;
+            castIndexByKey.set(key, i);
+        }
+        for (let i = 0; i < list.length; i++) {
+            const entry = list[i];
+            if (entry.kind !== 'damage' && entry.kind !== 'heal') continue;
+            if (isRedundantAbilityCastSource(entry.actionSource)) continue;
+            const caster = getLogEntryUnitIdentity(entry, 'from');
+            const castKey = `${entry.tick}|${caster}|${String(entry.actionSource || '').toLowerCase()}`;
+            const castIdx = castIndexByKey.get(castKey);
+            if (castIdx != null) suppressed.add(castIdx);
+        }
+
+        for (let i = 0; i < list.length; i++) {
+            const death = list[i];
+            if (death.kind !== 'death') continue;
+            let bestIdx = -1;
+            for (let j = i - 1; j >= 0; j--) {
+                const dmg = list[j];
+                if (dmg.kind !== 'damage') continue;
+                const tickDiff = Number(death.tick) - Number(dmg.tick);
+                if (!Number.isFinite(tickDiff)) continue;
+                if (tickDiff > 1) break;
+                if (tickDiff < 0) continue;
+                if (!damageMatchesDeathVictim(dmg, death)) continue;
+                if (!damageMatchesDeathKiller(dmg, death)) continue;
+                bestIdx = j;
+                break;
+            }
+            if (bestIdx >= 0) {
+                list[bestIdx] = { ...list[bestIdx], defeated: true };
+                suppressed.add(i);
+            }
+        }
+
+        const statusesByUnit = new Map();
+        const statsByUnit = new Map();
+        for (let i = 0; i < list.length; i++) {
+            if (suppressed.has(i)) continue;
+            const entry = list[i];
+            if (entry.kind !== 'status' && entry.kind !== 'statChange') continue;
+            const unitId = getLogEntryUnitIdentity(entry);
+            if (!unitId) continue;
+            const tickNum = Number(entry.tick);
+            const item = { idx: i, tick: tickNum, entry };
+            if (entry.kind === 'status') {
+                if (!statusesByUnit.has(unitId)) statusesByUnit.set(unitId, []);
+                statusesByUnit.get(unitId).push(item);
+            } else {
+                if (!statsByUnit.has(unitId)) statsByUnit.set(unitId, []);
+                statsByUnit.get(unitId).push(item);
+            }
+        }
+
+        const folds = new Map();
+        for (const [unitId, stats] of statsByUnit) {
+            const statuses = statusesByUnit.get(unitId);
+            if (!statuses?.length) continue;
+            for (const stat of stats) {
+                const sameTick = statuses.filter((s) => (
+                    Number.isFinite(stat.tick) && Number.isFinite(s.tick)
+                        ? s.tick === stat.tick
+                        : s.entry.tick === stat.entry.tick
+                ));
+                let candidates = sameTick;
+                if (!candidates.length && Number.isFinite(stat.tick)) {
+                    // Status often lands 1 tick before the SPD/stat snapshot (e.g. +Slowed).
+                    candidates = statuses.filter((s) => Number.isFinite(s.tick) && s.tick === stat.tick - 1);
+                }
+                if (!candidates.length) continue;
+                const best = pickBestStatusForStatFold(candidates, stat.entry);
+                if (!best) continue;
+                const foldScore = scoreStatusForStatFold(best.entry, stat.entry);
+                const statKey = String(stat.entry.statKey || '').toLowerCase();
+                // SPD restores often land on the same tick as unrelated statuses (e.g. Soulfire);
+                // only fold speed into explicitly speed-related effects.
+                if ((statKey === 'speed' || statKey === 'spd') && foldScore < 10) continue;
+                if (!folds.has(best.idx)) folds.set(best.idx, []);
+                folds.get(best.idx).push(stat.idx);
+            }
+        }
+        for (const [anchorIdx, statIdxs] of folds) {
+            list[anchorIdx] = {
+                ...list[anchorIdx],
+                foldedStats: statIdxs.map((idx) => list[idx])
+            };
+            for (const idx of statIdxs) suppressed.add(idx);
+        }
+
+        // Mid-duration shred: orphan AD/AP on a Soulfire hit tick (debuff already active).
+        const damageByTickTo = new Map();
+        for (let i = 0; i < list.length; i++) {
+            if (suppressed.has(i)) continue;
+            const entry = list[i];
+            if (entry.kind !== 'damage' || !isShredDamageSource(entry.actionSource)) continue;
+            const toId = getLogEntryUnitIdentity(entry, 'to');
+            if (!toId) continue;
+            const key = `${entry.tick}|${toId}`;
+            if (!damageByTickTo.has(key)) damageByTickTo.set(key, []);
+            damageByTickTo.get(key).push(i);
+        }
+        for (let i = 0; i < list.length; i++) {
+            if (suppressed.has(i)) continue;
+            const entry = list[i];
+            if (entry.kind !== 'statChange' || !isCombatShredStatKey(entry.statKey)) continue;
+            const unitId = getLogEntryUnitIdentity(entry);
+            if (!unitId) continue;
+            const dmgIdxs = damageByTickTo.get(`${entry.tick}|${unitId}`);
+            if (!dmgIdxs?.length) continue;
+            const anchorIdx = dmgIdxs[0];
+            const prev = list[anchorIdx].foldedStats || [];
+            list[anchorIdx] = {
+                ...list[anchorIdx],
+                foldedStats: [...prev, entry]
+            };
+            suppressed.add(i);
+        }
+
+        // Slow expiry often omits -Slowed; synthesize it from the SPD restore.
+        const activeSlowByUnit = new Map();
+        for (let i = 0; i < list.length; i++) {
+            if (suppressed.has(i)) continue;
+            const entry = list[i];
+            if (entry.kind === 'status' && isSlowStatusLabel(entry.effectLabel)) {
+                const unitId = getLogEntryUnitIdentity(entry);
+                if (!unitId) continue;
+                if (entry.applied) {
+                    activeSlowByUnit.set(unitId, {
+                        label: entry.effectLabel || 'Slowed',
+                        spdDelta: extractFoldedSpeedDelta(entry.foldedStats)
+                    });
+                } else {
+                    activeSlowByUnit.delete(unitId);
+                }
+                continue;
+            }
+            if (entry.kind !== 'statChange' || !isSpeedStatKey(entry.statKey)) continue;
+            const unitId = getLogEntryUnitIdentity(entry);
+            if (!unitId) continue;
+            const active = activeSlowByUnit.get(unitId);
+            if (!active) continue;
+            const delta = Number(entry.delta);
+            if (!Number.isFinite(delta) || delta <= 0) continue;
+            if (active.spdDelta != null && Number.isFinite(active.spdDelta)) {
+                if (Math.abs(delta + active.spdDelta) > 2) continue;
+            }
+            list[i] = {
+                tick: entry.tick,
+                kind: 'status',
+                to: entry.unit,
+                toKey: entry.unitKey,
+                toVillain: entry.unitVillain === true,
+                effectLabel: active.label,
+                effectType: 'debuff',
+                applied: false,
+                foldedStats: [entry],
+                synthetic: true
+            };
+            activeSlowByUnit.delete(unitId);
+        }
+
+        return list.filter((_, index) => !suppressed.has(index));
+    }
+
+    function formatLogUnitNameForExport(name, villain, key) {
+        if (!isNamedLogCreature(name)) return name || '—';
+        const display = lookupLogDisplayName(key, name, villain) || name;
+        return `${display} [${getLogTeamTag(villain)}]`;
+    }
+
     function formatBattleLogEntryForExport(entry) {
         if (entry.kind === 'marker') {
             if (entry.marker === 'start') {
@@ -12242,37 +12852,49 @@
         }
         if (entry.kind === 'status') {
             const sign = entry.applied ? '+' : '-';
-            return `[tick ${entry.tick}] ${entry.to}: ${sign}${entry.effectLabel}`;
+            const who = formatLogUnitNameForExport(entry.to, entry.toVillain, entry.toKey);
+            return `[tick ${entry.tick}] ${who}: ${sign}${entry.effectLabel}${formatFoldedStatsSuffix(entry.foldedStats)}`;
         }
         if (entry.kind === 'pathing') {
-            return `[tick ${entry.tick}] ${entry.unit}: tile ${entry.fromTile} → tile ${entry.toTile}`;
+            const who = formatLogUnitNameForExport(entry.unit, entry.unitVillain, entry.unitKey);
+            return `[tick ${entry.tick}] ${who}: tile ${entry.fromTile} → tile ${entry.toTile}`;
         }
         if (entry.kind === 'statChange') {
+            const who = formatLogUnitNameForExport(entry.unit, entry.unitVillain, entry.unitKey);
             const from = formatStatChangeValue(entry.statKey, entry.from);
             const to = formatStatChangeValue(entry.statKey, entry.to);
             const delta = formatStatChangeDelta(entry.statKey, entry.delta);
-            return `[tick ${entry.tick}] ${entry.unit}: ${entry.statLabel} ${from} → ${to} (${delta})`;
+            return `[tick ${entry.tick}] ${who}: ${entry.statLabel} ${from} → ${to} (${delta})`;
         }
         if (entry.kind === 'abilityCast') {
-            return `[tick ${entry.tick}] ${entry.from}: ${t('mods.betterAnalytics.logCast')} ${entry.abilityName}`;
+            const who = formatLogUnitNameForExport(entry.from, entry.fromVillain, entry.fromKey);
+            return `[tick ${entry.tick}] ${who}: ${t('mods.betterAnalytics.logCast')} ${entry.abilityName}`;
         }
         if (entry.kind === 'death') {
             const defeated = t('mods.betterAnalytics.logDefeated');
+            const unit = formatLogUnitNameForExport(entry.unit, entry.unitVillain, entry.unitKey);
             if (entry.killedBy) {
-                return `[tick ${entry.tick}] ${entry.killedBy} → ${entry.unit}: ${defeated}`;
+                const killer = formatLogUnitNameForExport(entry.killedBy, entry.killedByVillain, entry.killedByKey);
+                return `[tick ${entry.tick}] ${killer} → ${unit}: ${defeated}`;
             }
-            return `[tick ${entry.tick}] ${entry.unit}: ${defeated}`;
+            return `[tick ${entry.tick}] ${unit}: ${defeated}`;
         }
         const source = entry.actionSource && entry.actionSource !== 'unknown'
             ? ` [${entry.actionSource}]`
             : '';
         const type = `${entry.damageType}${entry.crit ? t('mods.betterAnalytics.logCritSuffix') : ''}`;
+        const defeatedSuffix = entry.defeated ? ` → ${t('mods.betterAnalytics.logDefeated')}` : '';
         if (entry.kind === 'heal') {
-            const who = isCrossUnitHealEntry(entry) ? `${entry.from} → ${entry.to}` : entry.to;
-            return `[tick ${entry.tick}] ${who}: +${entry.amount}${source} (${type})`;
+            const to = formatLogUnitNameForExport(entry.to, entry.toVillain, entry.toKey);
+            const who = isCrossUnitHealEntry(entry)
+                ? `${formatLogUnitNameForExport(entry.from, entry.fromVillain, entry.fromKey)} → ${to}`
+                : to;
+            return `[tick ${entry.tick}] ${who}: +${entry.amount}${source} (${type})${defeatedSuffix}`;
         }
+        const from = formatLogUnitNameForExport(entry.from, entry.fromVillain, entry.fromKey);
+        const to = formatLogUnitNameForExport(entry.to, entry.toVillain, entry.toKey);
         const dmg = formatLogDamageAmount(entry.amount, entry.rawAmount);
-        return `[tick ${entry.tick}] ${entry.from} → ${entry.to}: ${dmg}${source} (${type})`;
+        return `[tick ${entry.tick}] ${from} → ${to}: ${dmg}${source} (${type})${formatFoldedStatsSuffix(entry.foldedStats)}${defeatedSuffix}`;
     }
 
     function isNamedLogCreature(name) {
@@ -12636,9 +13258,7 @@
 
     function formatBattleLogCreatureSummaryForExport(stats, fightTicks, teamDamageTotal) {
         const model = buildBattleLogCreatureSummaryModel(stats, fightTicks, teamDamageTotal);
-        const team = model.villain
-            ? t('mods.betterAnalytics.exportSummaryTeamEnemy')
-            : t('mods.betterAnalytics.exportSummaryTeamAlly');
+        const team = getLogTeamTag(model.villain);
         const summon = model.isSummon ? ` ${t('mods.betterAnalytics.exportSummarySummon')}` : '';
         const died = formatBattleLogDeathsLabel(model.deaths);
         const lines = [`${model.label} [${team}]${summon}${died}${model.share}`];
@@ -12778,9 +13398,17 @@
             }
         }
         if (matches.length === 1) return matches[0];
-        if (matches.length > 1 && unit.tileIndex != null) {
-            const tileMatch = matches.find((s) => s.spawnTile === unit.tileIndex);
-            if (tileMatch) return tileMatch;
+        if (matches.length > 1) {
+            const unitSpawn = unit.spawnTile
+                ?? parseTileFromCollapseKey(unit.collapseKey || getUnitCollapseKey(unit));
+            if (unitSpawn != null) {
+                const spawnMatch = matches.find((s) => s.spawnTile === unitSpawn);
+                if (spawnMatch) return spawnMatch;
+            }
+            if (unit.tileIndex != null) {
+                const tileMatch = matches.find((s) => s.spawnTile === unit.tileIndex);
+                if (tileMatch) return tileMatch;
+            }
         }
         return null;
     }
@@ -12994,6 +13622,8 @@
         const fighting = isFightActive();
         const units = fighting ? (collectActorSnapshots() || []) : getBoardPreviewUnits();
         const { allies, enemies } = splitByTeam(units);
+        // Warm summary before unit blocks so summon display names (#1 · tile) resolve.
+        if (battleLog.length) getPreparedBattleLogSummary();
 
         lines.push(`${t('mods.betterAnalytics.sectionAllies')} (${allies.length})`);
         if (!allies.length) {
@@ -13018,18 +13648,18 @@
 
         lines.push('');
         lines.push(t('mods.betterAnalytics.exportBattleLogSection'));
-        lines.push(tReplace('mods.betterAnalytics.exportTotalEntries', { count: battleLog.length }));
-        const activeFilters = LOG_FILTER_ORDER
-            .filter((key) => logFilters[key] === true)
-            .map((key) => getLogFilterLabel(key));
+        const activeFilters = getActiveLogFilterLabels();
         lines.push(tReplace('mods.betterAnalytics.exportPanelFilters', {
             filters: activeFilters.length ? activeFilters.join(', ') : t('mods.betterAnalytics.exportNoFilters')
         }));
 
         if (!battleLog.length) {
+            lines.push(tReplace('mods.betterAnalytics.exportTotalEntries', { count: 0 }));
             lines.push(t('mods.betterAnalytics.emptyNoBattleEvents'));
         } else {
-            for (const entry of battleLog) {
+            const displayEntries = consolidateBattleLogEntries(battleLog);
+            lines.push(tReplace('mods.betterAnalytics.exportTotalEntries', { count: displayEntries.length }));
+            for (const entry of displayEntries) {
                 lines.push(formatBattleLogEntryForExport(entry));
             }
             lines.push('');
@@ -13412,6 +14042,7 @@
                 align-items: flex-start;
             }
             #${PANEL_ID} .bs-log-clear,
+            #${PANEL_ID} .bs-log-copy,
             #${PANEL_ID} .bs-log-toolbar-actions .bs-log-filter {
                 border: 3px solid transparent;
                 border-image: var(--bs-frame-1);
@@ -13422,6 +14053,13 @@
                 cursor: pointer;
                 line-height: 1.2;
                 white-space: nowrap;
+            }
+            #${PANEL_ID} .bs-log-clear:disabled,
+            #${PANEL_ID} .bs-log-copy:disabled,
+            #${PANEL_ID} .bs-log-action-disabled {
+                color: #666;
+                cursor: default;
+                opacity: 0.55;
             }
             #${PANEL_ID} .bs-log-filters {
                 display: flex;
@@ -13500,6 +14138,7 @@
             #${PANEL_ID} .bs-log-stat-delta.negative { color: #f0a0a0; }
             #${PANEL_ID} .bs-log-ability { color: #C678DD; font-weight: 600; }
             #${PANEL_ID} .bs-log-death { color: #E06C75; font-weight: 600; }
+            #${PANEL_ID} .bs-log-folded-stats { color: #d4b896; font-weight: 400; }
             #${PANEL_ID} .bs-log-source {
                 color: #b8a0d0;
                 font-size: 9px;
@@ -14861,16 +15500,30 @@
             && cachedVisibleBattleLog) {
             return cachedVisibleBattleLog;
         }
-        cachedVisibleBattleLog = battleLog.filter(isLogEntryVisible);
+        cachedVisibleBattleLog = buildDisplayBattleLogEntries(battleLog);
         cachedVisibleBattleLogRevision = battleLogRevision;
         cachedVisibleBattleLogFilterSig = filterSig;
         return cachedVisibleBattleLog;
+    }
+
+    function renderFoldedStatsHtml(foldedStats) {
+        const coalesced = coalesceFoldedStats(foldedStats);
+        if (!coalesced.length) return '';
+        const parts = coalesced.map((stat) => {
+            const text = escapeHtml(formatFoldedStatDelta(stat));
+            const deltaCls = statChangeDeltaClass(stat.statKey, stat.delta);
+            return `<span class="bs-log-stat-delta ${deltaCls}">${text}</span>`;
+        });
+        return ` <span class="bs-log-folded-stats">(${parts.join(', ')})</span>`;
     }
 
     function buildBattleLogEntryHtml(entry) {
         const tickLabel = `<span class="bs-log-tick">[tick ${entry.tick}]</span>`;
         const sourceLabel = renderActionSourceLabel(entry);
         const typeLabel = `<span class="bs-log-type">${escapeHtml(entry.damageType)}${entry.crit ? escapeHtml(t('mods.betterAnalytics.logCritSuffix')) : ''}</span>`;
+        const defeatedHtml = entry.defeated
+            ? ` <span class="bs-log-death">→ ${escapeHtml(t('mods.betterAnalytics.logDefeated'))}</span>`
+            : '';
         if (entry.kind === 'marker') {
             const markerText = getLogMarkerText(entry);
             return `<div class="bs-log-line bs-log-marker">${tickLabel} ${escapeHtml(markerText)}</div>`;
@@ -14879,7 +15532,8 @@
             const statusCls = `${entry.applied ? 'applied' : 'removed'} ${entry.effectType || 'debuff'}`;
             const sign = entry.applied ? '+' : '−';
             return `<div class="bs-log-line">${tickLabel} ${renderLogName(entry.to, entry.toVillain, entry.toKey)}: ` +
-                `<span class="bs-log-status ${statusCls}">${sign}${escapeHtml(entry.effectLabel)}</span></div>`;
+                `<span class="bs-log-status ${statusCls}">${sign}${escapeHtml(entry.effectLabel)}</span>` +
+                `${renderFoldedStatsHtml(entry.foldedStats)}</div>`;
         }
         if (entry.kind === 'pathing') {
             return `<div class="bs-log-line">${tickLabel} ${renderLogName(entry.unit, entry.unitVillain, entry.unitKey)}: ` +
@@ -14910,11 +15564,11 @@
         }
         if (entry.kind === 'heal') {
             return `<div class="bs-log-line">${tickLabel} ${renderHealLogSubject(entry)}: ` +
-                `<span class="bs-log-heal">+${entry.amount}</span> ${sourceLabel}${typeLabel}</div>`;
+                `<span class="bs-log-heal">+${entry.amount}</span> ${sourceLabel}${typeLabel}${defeatedHtml}</div>`;
         }
         return `<div class="bs-log-line">${tickLabel} ${renderLogName(entry.from, entry.fromVillain, entry.fromKey)} → ` +
             `${renderLogName(entry.to, entry.toVillain, entry.toKey)}: ` +
-            `${renderLogDamageAmount(entry)} ${sourceLabel}${typeLabel}</div>`;
+            `${renderLogDamageAmount(entry)} ${sourceLabel}${typeLabel}${renderFoldedStatsHtml(entry.foldedStats)}${defeatedHtml}</div>`;
     }
 
     function scheduleBattleLogRender() {
@@ -14957,26 +15611,16 @@
         const filterSig = getLogViewSignature();
         const shouldScroll = battleLogRevision > lastScrolledBattleLogRevision;
         const visible = getVisibleBattleLogEntries();
-        const signature = `${battleLogRevision}:${filterSig}:${battleLog.length}`;
-
-        if (!force
-            && filterSig === lastRenderedFilterSig
-            && list.querySelector('.bs-log-line')
-            && visible.length === lastRenderedVisibleCount) {
-            if (shouldScroll) scrollBattleLogToEnd(body);
-            return;
+        let consolExtra = 0;
+        for (const entry of visible) {
+            if (entry.defeated) consolExtra++;
+            if (entry.foldedStats) consolExtra += entry.foldedStats.length;
         }
+        const signature = `${battleLogRevision}:${filterSig}:${visible.length}:${consolExtra}`;
 
         if (!force
-            && filterSig === lastRenderedFilterSig
-            && list.querySelector('.bs-log-line')
-            && visible.length > lastRenderedVisibleCount) {
-            const newHtml = visible.slice(lastRenderedVisibleCount).map(buildBattleLogEntryHtml).join('');
-            list.insertAdjacentHTML('beforeend', newHtml);
-            lastRenderedVisibleCount = visible.length;
-            lastRenderedLogSignature = signature;
-            lastRenderedBattleLogRevision = battleLogRevision;
-            updateLogToolbarTitle();
+            && signature === lastRenderedLogSignature
+            && list.querySelector('.bs-log-line')) {
             if (shouldScroll) scrollBattleLogToEnd(body);
             return;
         }
@@ -14989,6 +15633,7 @@
             lastRenderedFilterSig = filterSig;
             lastRenderedLogSignature = signature;
             lastRenderedBattleLogRevision = battleLogRevision;
+            updateLogToolbarTitle();
             return;
         }
 
@@ -15001,14 +15646,17 @@
             lastRenderedFilterSig = filterSig;
             lastRenderedLogSignature = signature;
             lastRenderedBattleLogRevision = battleLogRevision;
+            updateLogToolbarTitle();
             return;
         }
 
+        // Full re-render: consolidation may rewrite earlier lines (death → prior hit).
         list.innerHTML = visible.map(buildBattleLogEntryHtml).join('');
         lastRenderedVisibleCount = visible.length;
         lastRenderedFilterSig = filterSig;
         lastRenderedLogSignature = signature;
         lastRenderedBattleLogRevision = battleLogRevision;
+        updateLogToolbarTitle();
         if (shouldScroll) scrollBattleLogToEnd(body);
     }
 
@@ -15384,13 +16032,31 @@
             toggleAllLogFilters();
         });
         toolbarActions.appendChild(allFilterBtn);
+        const copyBtn = document.createElement('button');
+        copyBtn.type = 'button';
+        copyBtn.id = LOG_COPY_BTN_ID;
+        copyBtn.className = 'bs-log-clear bs-log-copy';
+        copyBtn.textContent = t('mods.betterAnalytics.copyLog');
+        copyBtn.title = t('mods.betterAnalytics.copyLogTitle');
+        copyBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (copyBtn.disabled) return;
+            copyFilteredBattleLog(copyBtn);
+        });
+        toolbarActions.appendChild(copyBtn);
         const clearBtn = document.createElement('button');
         clearBtn.type = 'button';
+        clearBtn.id = LOG_CLEAR_BTN_ID;
         clearBtn.className = 'bs-log-clear';
         clearBtn.textContent = t('mods.betterAnalytics.clearLog');
-        clearBtn.addEventListener('click', clearBattleLog);
+        clearBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (clearBtn.disabled) return;
+            clearBattleLog();
+        });
         toolbarActions.appendChild(clearBtn);
         logToolbar.appendChild(toolbarActions);
+        updateLogActionButtons();
         logStickyHeader.appendChild(logToolbar);
 
         const logFiltersWrap = document.createElement('div');
@@ -15494,6 +16160,7 @@
         if (panel) panel.style.display = 'none';
         savePanelSettings({ isOpen: false });
         pauseBattleLogActorPatches();
+        teardownActorUnitsMechanicsSubs();
         teardownAllAbilityTooltipsInBody(document.getElementById(UNITS_BODY_ID));
         clearSummaryUpdateTimer();
         teardownPanelGameTimerSub();

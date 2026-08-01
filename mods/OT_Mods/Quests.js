@@ -2958,6 +2958,7 @@ function createNPCCooldownManager() {
       x,
       y,
       layout: 'center',
+      anchorElement: miningState.clickedTile || null,
       buttons: [
         {
           text: 'Use Shovel',
@@ -5667,6 +5668,21 @@ function createNPCCooldownManager() {
       };
     }
     if (firebaseKey === 'svensonLoveStory') {
+      // Completed Love Story implies every stage finished. Older Dev complete/completeAll
+      // saves could leave mid-stage flags false and re-trigger Compass/Yarn prompts.
+      if (source?.completed) {
+        return {
+          plankDelivered: true,
+          strandedAtAwash: true,
+          awashYarnDelivered: true,
+          awashYarnRequested: true,
+          strandedAtUnderground: true,
+          undergroundCompassDelivered: true,
+          undergroundCompassRequested: true,
+          strandedAtWhiteWave: true,
+          whiteWaveSlippersDelivered: true
+        };
+      }
       return {
         plankDelivered: !!source?.plankDelivered,
         strandedAtAwash: !!source?.strandedAtAwash,
@@ -7921,11 +7937,12 @@ function createNPCCooldownManager() {
   /**
    * Create a generic game-styled context menu
    * @param {Object} options - Context menu options
-   * @param {number} options.x - X position
-   * @param {number} options.y - Y position
+   * @param {number} options.x - X position (client)
+   * @param {number} options.y - Y position (client)
    * @param {Array<Object>} options.buttons - Array of button configs: {text, onClick, style?, hoverStyle?}
    * @param {Function} [options.onClose] - Callback when menu closes
    * @param {string} [options.logPrefix='[Quests Mod]'] - Log prefix
+   * @param {Element|null} [options.anchorElement] - Optional element to keep the menu pinned to on resize
    * @returns {Object} Menu object with {overlay, menu, closeMenu}
    */
   function createContextMenu({
@@ -7936,7 +7953,8 @@ function createNPCCooldownManager() {
     logPrefix = '[Quests Mod]',
     minWidth = '120px',
     layout = 'column', // 'column' | 'center'
-    gap = '4px'
+    gap = '4px',
+    anchorElement = null
   }) {
     const MENU_Z_OVERLAY = '200000';
     const MENU_Z_PANEL = '200001';
@@ -7954,8 +7972,9 @@ function createNPCCooldownManager() {
     overlay.style.pointerEvents = 'auto';
     overlay.style.cursor = 'default';
 
-    // Create menu container
+    // Create menu container (game pixel font)
     const menu = document.createElement('div');
+    menu.className = 'pixel-font-14';
     menu.style.position = 'fixed';
     menu.style.left = `${x}px`;
     menu.style.top = `${y}px`;
@@ -7967,7 +7986,6 @@ function createNPCCooldownManager() {
     menu.style.borderRadius = '6px';
     menu.style.padding = '8px';
     menu.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.5)';
-    menu.style.fontFamily = 'Arial, Helvetica, sans-serif';
 
     // Button container
     const buttonContainer = document.createElement('div');
@@ -7983,12 +8001,11 @@ function createNPCCooldownManager() {
     buttons.forEach((buttonConfig) => {
       const button = document.createElement('button');
       button.type = 'button';
+      button.className = 'pixel-font-14';
       button.textContent = buttonConfig.text;
       button.style.width = buttonConfig.width || '140px';
       button.style.height = buttonConfig.height || '30px';
-      button.style.fontFamily = 'Arial, Helvetica, sans-serif';
-      button.style.fontSize = buttonConfig.fontSize || '13px';
-      button.style.letterSpacing = '0.02em';
+      button.style.fontSize = buttonConfig.fontSize || '14px';
       button.style.lineHeight = '1.2';
       button.style.backgroundColor = buttonConfig.backgroundColor || '#2a4a7a';
       button.style.color = buttonConfig.color || '#E8F4FC';
@@ -7996,7 +8013,7 @@ function createNPCCooldownManager() {
       button.style.borderRadius = '4px';
       button.style.cursor = 'pointer';
       button.style.textShadow = '1px 1px 0px rgba(0,0,0,0.8)';
-      button.style.fontWeight = '600';
+      button.style.fontWeight = 'normal';
       button.style.padding = '0 8px';
 
       // Add hover effects
@@ -8027,11 +8044,64 @@ function createNPCCooldownManager() {
 
     menu.appendChild(buttonContainer);
 
+    // Pin to clicked tile/element on resize when possible; otherwise keep viewport-relative spot
+    let useAnchor = false;
+    let anchorOffsetX = 0;
+    let anchorOffsetY = 0;
+    if (anchorElement && typeof anchorElement.getBoundingClientRect === 'function') {
+      const ar = anchorElement.getBoundingClientRect();
+      if (ar.width > 0 || ar.height > 0) {
+        anchorOffsetX = x - ar.left;
+        anchorOffsetY = y - ar.top;
+        useAnchor = true;
+      }
+    }
+    const viewportRatioX = window.innerWidth > 0 ? x / window.innerWidth : 0;
+    const viewportRatioY = window.innerHeight > 0 ? y / window.innerHeight : 0;
+
+    const clampMenuToViewport = () => {
+      const rect = menu.getBoundingClientRect();
+      let left = parseFloat(menu.style.left) || 0;
+      let top = parseFloat(menu.style.top) || 0;
+      if (rect.right > window.innerWidth - 8) {
+        left = Math.max(8, window.innerWidth - rect.width - 8);
+      }
+      if (rect.bottom > window.innerHeight - 8) {
+        top = Math.max(8, window.innerHeight - rect.height - 8);
+      }
+      if (left < 8) left = 8;
+      if (top < 8) top = 8;
+      menu.style.left = `${left}px`;
+      menu.style.top = `${top}px`;
+    };
+
+    const repositionMenu = () => {
+      if (closed) return;
+      let nextX;
+      let nextY;
+      if (useAnchor && anchorElement?.isConnected) {
+        const ar = anchorElement.getBoundingClientRect();
+        nextX = ar.left + anchorOffsetX;
+        nextY = ar.top + anchorOffsetY;
+      } else {
+        nextX = viewportRatioX * window.innerWidth;
+        nextY = viewportRatioY * window.innerHeight;
+      }
+      menu.style.left = `${nextX}px`;
+      menu.style.top = `${nextY}px`;
+      clampMenuToViewport();
+    };
+
     const cleanupListeners = () => {
       document.removeEventListener('keydown', escHandler, true);
       document.removeEventListener('pointerdown', outsidePointerHandler, true);
       document.removeEventListener('mousedown', outsidePointerHandler, true);
       document.removeEventListener('contextmenu', outsidePointerHandler, true);
+      window.removeEventListener('resize', repositionMenu);
+      if (window.visualViewport) {
+        window.visualViewport.removeEventListener('resize', repositionMenu);
+        window.visualViewport.removeEventListener('scroll', repositionMenu);
+      }
     };
 
     // Close menu function
@@ -8070,17 +8140,16 @@ function createNPCCooldownManager() {
     document.addEventListener('mousedown', outsidePointerHandler, true);
     document.addEventListener('contextmenu', outsidePointerHandler, true);
     document.addEventListener('keydown', escHandler, true);
+    window.addEventListener('resize', repositionMenu);
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', repositionMenu);
+      window.visualViewport.addEventListener('scroll', repositionMenu);
+    }
 
     // Keep menu inside viewport
     document.body.appendChild(overlay);
     document.body.appendChild(menu);
-    const rect = menu.getBoundingClientRect();
-    if (rect.right > window.innerWidth - 8) {
-      menu.style.left = `${Math.max(8, window.innerWidth - rect.width - 8)}px`;
-    }
-    if (rect.bottom > window.innerHeight - 8) {
-      menu.style.top = `${Math.max(8, window.innerHeight - rect.height - 8)}px`;
-    }
+    clampMenuToViewport();
 
     // Return menu object with cleanup
     return {
@@ -13147,6 +13216,20 @@ function createNPCCooldownManager() {
   // 7. Quest Log
   // =======================
 
+  function isNativeQuestLogDialog(dialog) {
+    if (!dialog || dialog.getAttribute('data-ba-mod-dialog') === '1') return false;
+    if (dialog.querySelector('.quests-modal-content')) return false;
+    const titleEl = dialog.querySelector('h2.widget-top p, .widget-top-text p, .widget-top p');
+    return !!(titleEl && titleEl.textContent?.trim() === 'Quest Log');
+  }
+
+  function isQuestsModDialogOpen() {
+    return !!(
+      document.querySelector('[data-ba-mod-dialog="1"]') ||
+      document.querySelector('.quests-modal-content')
+    );
+  }
+
   function findQuestLogContainer() {
     const selectors = [
       '.widget-bottom .grid.h-\\[260px\\].items-start.gap-1', // Most specific
@@ -13159,9 +13242,12 @@ function createNPCCooldownManager() {
     
     for (let i = 0; i < selectors.length; i++) {
       const selector = selectors[i];
-      const container = document.querySelector(selector);
-      
-      if (container) {
+      const candidates = document.querySelectorAll(selector);
+
+      for (const container of candidates) {
+        const dialog = container.closest('div[role="dialog"]');
+        if (!isNativeQuestLogDialog(dialog)) continue;
+
         // Only log on first successful find to reduce spam
         if (!window.questsModLoggedContainer) {
           console.log(`[Quests Mod] Found quest log container with selector: ${selector}`);
@@ -13181,9 +13267,12 @@ function createNPCCooldownManager() {
     ];
 
     for (const selector of selectors) {
-      const footer = document.querySelector(selector);
-      if (footer && footer.closest('div[role="dialog"]')) {
-        return footer;
+      const footers = document.querySelectorAll(selector);
+      for (const footer of footers) {
+        const dialog = footer.closest('div[role="dialog"]');
+        if (isNativeQuestLogDialog(dialog)) {
+          return footer;
+        }
       }
     }
 
@@ -14167,7 +14256,9 @@ function createNPCCooldownManager() {
     const openButton = tabElement?.querySelector(`#${ARENA_RANKINGS_OPEN_BTN_ID}`);
     if (!openButton || openButton.dataset.questsBound === '1') return;
     openButton.dataset.questsBound = '1';
-    openButton.addEventListener('click', () => {
+    openButton.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
       showArenaRankingsModal();
     });
   }
@@ -14348,7 +14439,11 @@ function createNPCCooldownManager() {
       missionsButton.className = 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-blue active:frame-pressed-1-blue surface-blue gap-1 px-2 py-0.5 pb-[3px] pixel-font-14';
       missionsButton.style.cssText = 'cursor: pointer; white-space: nowrap; box-sizing: border-box; max-height: 21px; height: 21px; font-size: 14px;';
       missionsButton.textContent = 'Missions';
-      missionsButton.addEventListener('click', toggleKingQuestLogView);
+      missionsButton.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        toggleKingQuestLogView();
+      });
 
       const closeButton = Array.from(footer.querySelectorAll('button')).find(btn => btn.textContent?.trim() === 'Close');
       if (closeButton) {
@@ -14473,7 +14568,9 @@ function createNPCCooldownManager() {
     const btn = tabElement?.querySelector(`#${QUEST_ADMIN_DEV_OPEN_BTN_ID}`);
     if (!btn || btn.dataset.questsBound === '1') return;
     btn.dataset.questsBound = '1';
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
       showQuestAdminDevModal().catch((err) => {
         console.error('[Quests Mod][Dev] Failed to open admin tools modal:', err);
       });
@@ -14780,6 +14877,7 @@ function createNPCCooldownManager() {
         layout: 'column',
         minWidth: '160px',
         gap: '4px',
+        anchorElement: event.target instanceof Element ? event.target : null,
         buttons: wrapped,
         onClose: () => { openDevContextMenu = null; }
       });
@@ -15146,7 +15244,7 @@ function createNPCCooldownManager() {
     const kingIndex = Array.from(questLogContainer.children).indexOf(kingTab);
     const leaderboardIndex = Array.from(questLogContainer.children).indexOf(leaderboardTab);
     if (leaderboardIndex >= kingIndex) {
-      leaderboardTab.remove();
+      // insertBefore moves an already-attached node; avoid remove()+insert races with React
       questLogContainer.insertBefore(leaderboardTab, kingTab);
     }
   }
@@ -15208,47 +15306,19 @@ function createNPCCooldownManager() {
     // Find Raid Hunter tab and place before it (at the top)
     const raidHunterTab = findRaidHunterTab();
     if (raidHunterTab) {
-      // Check if tab is already in the DOM and in wrong position
-      const existingTab = document.getElementById(KING_TIBIANUS_TAB_ID);
-      if (existingTab && existingTab.parentNode === questLogContainer) {
-        // Remove from current position if it exists
-        existingTab.remove();
-      }
-      
-      // Insert before Raid Hunter tab (at the top)
       questLogContainer.insertBefore(tabElement, raidHunterTab);
-      // Tab placed at top
-    } else {
-      // If Raid Hunter not found, try to find it again after a short delay
-      setTimeout(() => {
-        const retryRaidHunter = findRaidHunterTab();
-        if (retryRaidHunter) {
-          // Remove from current position if already in DOM
-          if (tabElement.parentNode) {
-            tabElement.remove();
-          }
-          
-          // Insert before Raid Hunter tab
-          questLogContainer.insertBefore(tabElement, retryRaidHunter);
-          // Repositioned tab on retry
-        } else if (!tabElement.parentNode) {
-          // If still not found and tab not in DOM, insert at the beginning
-          questLogContainer.insertBefore(tabElement, questLogContainer.firstChild);
-          console.log('[Quests Mod] King Tibianus tab placed at top (Raid Hunter not found after retry)');
-        }
-      }, 100);
-      
-      // Initial placement if Raid Hunter not found immediately - place at top
-      if (!tabElement.parentNode) {
-        questLogContainer.insertBefore(tabElement, questLogContainer.firstChild);
-        console.log('[Quests Mod] King Tibianus tab placed at top (Raid Hunter not found, will retry)');
-      }
+    } else if (!tabElement.parentNode) {
+      // No Raid Hunter yet — CSS order handles visual position; append once without thrashing
+      questLogContainer.appendChild(tabElement);
+      console.log('[Quests Mod] King Tibianus tab placed (Raid Hunter not found; using CSS order)');
     }
 
     // Add event listener for Open button
     const openButton = tabElement.querySelector('#king-tibianus-open-btn');
     if (openButton) {
-      openButton.addEventListener('click', () => {
+      openButton.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
         console.log('[Quests Mod] King Tibianus button clicked');
         showKingTibianusModal();
       });
@@ -15281,37 +15351,26 @@ function createNPCCooldownManager() {
     const raidHunterTab = findRaidHunterTab();
     const questLogContainer = findQuestLogContainer();
     if (!questLogContainer || tabElement.parentNode !== questLogContainer) return;
+
+    // Avoid DOM surgery while a Quests/mod modal is open — React may still own the Quest Log
+    if (isQuestsModDialogOpen()) return;
     
-    // Ensure order style is set
+    // Ensure order style is set (visual ordering without remove/insert thrash)
     if (tabElement.style.order !== '-2') {
       tabElement.style.order = '-2';
     }
     
-    if (raidHunterTab) {
-      // Check if tab is positioned correctly (before Raid Hunter)
+    if (raidHunterTab && raidHunterTab.parentNode === questLogContainer) {
       const tabIndex = Array.from(questLogContainer.children).indexOf(tabElement);
       const raidHunterIndex = Array.from(questLogContainer.children).indexOf(raidHunterTab);
       
       if (tabIndex >= raidHunterIndex) {
-        // Tab is not before Raid Hunter, fix it
-        console.log('[Quests Mod] King Tibianus tab is in wrong position, repositioning...');
-        console.log('[Quests Mod] Current tab position:', tabIndex);
-        console.log('[Quests Mod] Raid Hunter position:', raidHunterIndex);
-        
-        tabElement.remove();
+        // insertBefore moves an already-attached node; do not remove() first
         questLogContainer.insertBefore(tabElement, raidHunterTab);
-        // Repositioned tab to top
-      }
-    } else {
-      // If Raid Hunter not found, place at the beginning
-      const firstChild = questLogContainer.firstElementChild;
-      if (firstChild !== tabElement) {
-        console.log('[Quests Mod] Raid Hunter not found, placing King Tibianus at top...');
-        tabElement.remove();
-        questLogContainer.insertBefore(tabElement, questLogContainer.firstChild);
-        console.log('[Quests Mod] King Tibianus tab placed at top');
       }
     }
+    // When Raid Hunter is absent: rely on CSS order only. Forcing firstChild fights
+    // Arena Leaderboard / mission tabs and triggers React removeChild crashes.
 
     syncActiveMissionTabs();
   }
@@ -17152,7 +17211,7 @@ function createNPCCooldownManager() {
     event.stopPropagation();
 
     // Create our custom context menu
-    createTile79ContextMenu(event.clientX, event.clientY);
+    createTile79ContextMenu(event.clientX, event.clientY, getTileElement(79));
 
     return false;
   }
@@ -17172,7 +17231,7 @@ function createNPCCooldownManager() {
       event.stopPropagation();
 
       // Create our custom context menu
-      createTile79ContextMenu(event.clientX, event.clientY);
+      createTile79ContextMenu(event.clientX, event.clientY, tile79Element);
 
       return false;
     }
@@ -17536,6 +17595,7 @@ function createNPCCooldownManager() {
       x,
       y,
       layout: 'center',
+      anchorElement: serpentineFieldState.clickedTile || null,
       buttons: [
         {
           text: 'Use Destroy Field Rune',
@@ -17969,13 +18029,14 @@ function createNPCCooldownManager() {
   }
 
   // Create context menu for Tile 79 with "Visit Al Dee" button
-  function createTile79ContextMenu(x, y) {
+  function createTile79ContextMenu(x, y, anchorElement = null) {
     if (tile79ContextMenu && tile79ContextMenu.closeMenu) tile79ContextMenu.closeMenu();
 
     tile79ContextMenu = createContextMenu({
       x,
       y,
       layout: 'center',
+      anchorElement: anchorElement || getTileElement(79),
       buttons: [
         {
           text: 'Visit Al Dee',
@@ -18073,6 +18134,7 @@ function createNPCCooldownManager() {
       y,
       layout: 'center',
       logPrefix: '[Quests Mod][Honeyflower]',
+      anchorElement: getTileElement(HONEYFLOWER_TILE_INDEX),
       buttons: [
         {
           text: t('mods.quests.takeHoneyflower'),
@@ -19843,6 +19905,7 @@ function createNPCCooldownManager() {
       x,
       y,
       layout: 'center',
+      anchorElement: getTileElement(53),
       buttons: [
         {
           text: 'Visit Costello',
@@ -19927,6 +19990,7 @@ function createNPCCooldownManager() {
       x,
       y,
       layout: 'center',
+      anchorElement: getTileElement(83),
       buttons: [
         {
           text: 'Visit Wyda',
@@ -23212,6 +23276,22 @@ function createNPCCooldownManager() {
           const askedMission = lower.includes('mission') || lower.includes('quest') || lower.includes('help');
           const inFoldaBoat = isOnRoomByName(SVENSON_ROOM_NAME);
 
+          // Completed Love Story: never re-enter mid-voyage item prompts (Compass/Yarn/etc).
+          if (missionDone && askedMission) {
+            cooldown.queueResponse(
+              text,
+              getMissionDialogueLine(
+                SVENSON_LOVE_STORY_MISSION,
+                'alreadyCompleted',
+                'Your help saved my voyage and my marriage. Thank you again.'
+              ),
+              addMessageToConversation,
+              npcConfig.name,
+              ModalHelpers.getFarewellCloseCallback(text)
+            );
+            return;
+          }
+
           if (!missionAccepted && askedMission) {
             awaitingSvensonMissionConfirm = true;
             awaitingSvensonPlankConfirm = false;
@@ -23377,7 +23457,7 @@ function createNPCCooldownManager() {
             return;
           }
 
-          if (missionAccepted && plankDelivered && strandedAtAwash && !awashYarnDelivered && !strandedAtUnderground && askedMission) {
+          if (missionAccepted && plankDelivered && strandedAtAwash && !missionDone && !awashYarnDelivered && !strandedAtUnderground && askedMission) {
             if (!awashYarnRequested) {
               await persistMissionProgress(SVENSON_LOVE_STORY_MISSION, {
                 accepted: true,
@@ -23412,7 +23492,7 @@ function createNPCCooldownManager() {
             return;
           }
 
-          if (missionAccepted && plankDelivered && strandedAtAwash && !awashYarnDelivered && !strandedAtUnderground && awaitingSvensonAwashYarnConfirm && lower.includes('yes')) {
+          if (missionAccepted && plankDelivered && strandedAtAwash && !missionDone && !awashYarnDelivered && !strandedAtUnderground && awaitingSvensonAwashYarnConfirm && lower.includes('yes')) {
             awaitingSvensonAwashYarnConfirm = false;
             const undergroundUnlocked = isRoomUnlockedByName(SVENSON_UNDERGROUND_ROOM_NAME);
             if (!undergroundUnlocked) {
@@ -23515,7 +23595,7 @@ function createNPCCooldownManager() {
             return;
           }
 
-          if (missionAccepted && plankDelivered && strandedAtAwash && awashYarnDelivered && !strandedAtUnderground && askedMission) {
+          if (missionAccepted && plankDelivered && strandedAtAwash && !missionDone && awashYarnDelivered && !strandedAtUnderground && askedMission) {
             awaitingSvensonAwashTravelConfirm = true;
             cooldown.queueResponse(
               text,
@@ -23591,7 +23671,7 @@ function createNPCCooldownManager() {
             return;
           }
 
-          if (missionAccepted && strandedAtUnderground && !undergroundCompassDelivered && askedMission) {
+          if (missionAccepted && strandedAtUnderground && !missionDone && !undergroundCompassDelivered && askedMission) {
             if (!undergroundCompassRequested) {
               await persistMissionProgress(SVENSON_LOVE_STORY_MISSION, {
                 accepted: true,
@@ -23622,7 +23702,7 @@ function createNPCCooldownManager() {
             return;
           }
 
-          if (missionAccepted && strandedAtUnderground && !undergroundCompassDelivered && (lower.includes('compass') || lower.includes('yes'))) {
+          if (missionAccepted && strandedAtUnderground && !missionDone && !undergroundCompassDelivered && (lower.includes('compass') || lower.includes('yes'))) {
             const compassGiven = await handInSvensonUndergroundCompass().catch((error) => {
               console.error(`${npcConfig.logPrefix} Error handing in Underground Compass:`, error);
               return false;
@@ -23649,7 +23729,7 @@ function createNPCCooldownManager() {
             return;
           }
 
-          if (missionAccepted && strandedAtUnderground && !undergroundCompassDelivered && lower.includes('no')) {
+          if (missionAccepted && strandedAtUnderground && !missionDone && !undergroundCompassDelivered && lower.includes('no')) {
             awaitingSvensonUndergroundTravelConfirm = false;
             cooldown.queueResponse(
               text,
@@ -23665,7 +23745,7 @@ function createNPCCooldownManager() {
             return;
           }
 
-          if (missionAccepted && strandedAtUnderground && undergroundCompassDelivered && !svensonProgress.strandedAtWhiteWave && askedMission) {
+          if (missionAccepted && strandedAtUnderground && !missionDone && undergroundCompassDelivered && !svensonProgress.strandedAtWhiteWave && askedMission) {
             awaitingSvensonUndergroundTravelConfirm = true;
             cooldown.queueResponse(
               text,
@@ -23681,7 +23761,7 @@ function createNPCCooldownManager() {
             return;
           }
 
-          if (missionAccepted && strandedAtUnderground && undergroundCompassDelivered && !svensonProgress.strandedAtWhiteWave && awaitingSvensonUndergroundTravelConfirm && lower.includes('yes')) {
+          if (missionAccepted && strandedAtUnderground && !missionDone && undergroundCompassDelivered && !svensonProgress.strandedAtWhiteWave && awaitingSvensonUndergroundTravelConfirm && lower.includes('yes')) {
             awaitingSvensonUndergroundTravelConfirm = false;
             const whiteWaveUnlocked = isRoomUnlockedByName(SVENSON_WHITE_WAVE_ROOM_NAME);
             if (!whiteWaveUnlocked) {
@@ -23748,7 +23828,7 @@ function createNPCCooldownManager() {
             return;
           }
 
-          if (missionAccepted && svensonProgress.strandedAtWhiteWave && !svensonProgress.whiteWaveSlippersDelivered && askedMission) {
+          if (missionAccepted && svensonProgress.strandedAtWhiteWave && !missionDone && !svensonProgress.whiteWaveSlippersDelivered && askedMission) {
             cooldown.queueResponse(
               text,
               getMissionDialogueLine(
@@ -23763,7 +23843,7 @@ function createNPCCooldownManager() {
             return;
           }
 
-          if (missionAccepted && svensonProgress.strandedAtWhiteWave && !svensonProgress.whiteWaveSlippersDelivered && (lower.includes('bunny slippers') || /\bslippers\b/.test(lower) || lower.includes('yes'))) {
+          if (missionAccepted && svensonProgress.strandedAtWhiteWave && !missionDone && !svensonProgress.whiteWaveSlippersDelivered && (lower.includes('bunny slippers') || /\bslippers\b/.test(lower) || lower.includes('yes'))) {
             const presentGiven = await handInSvensonWhiteWavePresent().catch((error) => {
               console.error(`${npcConfig.logPrefix} Error handing in Bunny Slippers:`, error);
               return false;
@@ -24174,21 +24254,6 @@ function createNPCCooldownManager() {
             return;
           }
 
-          if (missionDone && askedMission) {
-            cooldown.queueResponse(
-              text,
-              getMissionDialogueLine(
-                SVENSON_LOVE_STORY_MISSION,
-                'alreadyCompleted',
-                'Your help saved my voyage and my marriage. Thank you again.'
-              ),
-              addMessageToConversation,
-              npcConfig.name,
-              ModalHelpers.getFarewellCloseCallback(text)
-            );
-            return;
-          }
-
           let response = getSvensonKeywordResponse(text, playerName);
           if (response == null) {
             response = getNpcQuestItemChatResponse(BOARD_NPC_SVENSON_ID, text, playerName);
@@ -24514,7 +24579,7 @@ function createNPCCooldownManager() {
     }
   }
 
-  function openBoardNpcDialogueMenu(npcConfig, clientX, clientY) {
+  function openBoardNpcDialogueMenu(npcConfig, clientX, clientY, anchorElement = null) {
     if (!isBoardNpcInteractable(npcConfig)) return;
     closeBoardNpcContextMenu(npcConfig.id);
     const menuObj = createContextMenu({
@@ -24522,6 +24587,10 @@ function createNPCCooldownManager() {
       y: clientY,
       layout: 'center',
       logPrefix: npcConfig.logPrefix,
+      anchorElement: anchorElement
+        || getBoardNpcOverlayElement(npcConfig)
+        || getBoardNpcNameTagElement(npcConfig)
+        || null,
       buttons: [
         {
           text: 'Talk',
@@ -24610,7 +24679,8 @@ function createNPCCooldownManager() {
       event.preventDefault();
       event.stopPropagation();
       event.stopImmediatePropagation();
-      openBoardNpcDialogueMenu(npcConfig, event.clientX, event.clientY);
+      const anchor = event.currentTarget instanceof Element ? event.currentTarget : null;
+      openBoardNpcDialogueMenu(npcConfig, event.clientX, event.clientY, anchor);
       return false;
     };
     elements.forEach((element) => {
@@ -24940,6 +25010,7 @@ function createNPCCooldownManager() {
       x,
       y,
       layout: 'center',
+      anchorElement: fishingState.clickedTile || null,
       buttons: [
         {
           text: 'Use Fishing Rod',
@@ -25807,6 +25878,32 @@ function createNPCCooldownManager() {
       }
     }
 
+    // Love Story completed without full stage flags (e.g. older Dev complete) — persist normalized stages.
+    if (progress && !progress.__isEmpty) {
+      const rawLove = progress.svensonLoveStory;
+      const localLove = kingChatState.progressSvensonLoveStory;
+      if (
+        rawLove?.completed &&
+        localLove?.completed &&
+        (
+          !rawLove.plankDelivered ||
+          !rawLove.strandedAtAwash ||
+          !rawLove.awashYarnDelivered ||
+          !rawLove.strandedAtUnderground ||
+          !(rawLove.undergroundCompassDelivered || rawLove.undergroundPlankDelivered) ||
+          !rawLove.strandedAtWhiteWave ||
+          !rawLove.whiteWaveSlippersDelivered
+        )
+      ) {
+        try {
+          await persistMissionProgress(SVENSON_LOVE_STORY_MISSION, localLove, { playerName });
+          console.log('[Quests Mod] Backfilled A Love Story stage flags for completed mission');
+        } catch (err) {
+          console.error('[Quests Mod] Error backfilling A Love Story stage flags:', err);
+        }
+      }
+    }
+
     {
       const loggedProgress = getAllMissionProgress();
       if (progress?.ironOre) {
@@ -26422,6 +26519,7 @@ function createNPCCooldownManager() {
       accepted: true,
       completed: true,
       ...getExtraMissionProgressFields(firebaseKey, {
+        completed: true,
         destroyFieldRuneTaken: true,
         putridChamberComplete: true,
         honeyflowerPicked: true,
@@ -26464,6 +26562,7 @@ function createNPCCooldownManager() {
       };
       if (completed) {
         Object.assign(progress, getExtraMissionProgressFields(firebaseKey, {
+          completed: true,
           destroyFieldRuneTaken: true,
           putridChamberComplete: true,
           honeyflowerPicked: true,

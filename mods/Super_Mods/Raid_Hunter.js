@@ -2696,6 +2696,13 @@ function processNextRaid(allowInterrupt = false) {
 // ============================================================================
 
 // Helper function to find quest log container with optimized selectors
+function isNativeQuestLogDialog(dialog) {
+    if (!dialog || dialog.getAttribute('data-ba-mod-dialog') === '1') return false;
+    if (dialog.querySelector('.quests-modal-content')) return false;
+    const titleEl = dialog.querySelector('h2.widget-top p, .widget-top-text p, .widget-top p');
+    return !!(titleEl && titleEl.textContent?.trim() === 'Quest Log');
+}
+
 function findQuestLogContainer() {
     const selectors = [
         '.widget-bottom .grid.h-\\[260px\\].items-start.gap-1', // Most specific
@@ -2708,10 +2715,16 @@ function findQuestLogContainer() {
     
     for (let i = 0; i < selectors.length; i++) {
         const selector = selectors[i];
-        const container = document.querySelector(selector);
-        
-        if (container) {
-            console.log(`[Raid Hunter] Found potential quest log container with selector ${i + 1}: ${selector}`);
+        const candidates = document.querySelectorAll(selector);
+
+        for (const container of candidates) {
+            const dialog = container.closest('div[role="dialog"]');
+            if (!isNativeQuestLogDialog(dialog)) continue;
+
+            if (!window.raidHunterLoggedQuestLogContainer) {
+                console.log(`[Raid Hunter] Found potential quest log container with selector ${i + 1}: ${selector}`);
+                window.raidHunterLoggedQuestLogContainer = true;
+            }
             return container;
         }
     }

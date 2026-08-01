@@ -4,6 +4,46 @@
   },
   "notes": [
     {
+      "version": "4.7.4",
+      "changes": [
+        {
+          "mod": "Better Analytics",
+          "type": "added",
+          "text": "Battle Log Copy Log copies the currently filtered and searched entries. Log/export lines tag units as Ally/Enemy; fold status with related stat changes (including Slowed expiry and mid-Soulfire shred on hits); drop redundant ability casts when hits already name the ability; and attach defeats to the killing blow."
+        },
+        {
+          "mod": "Better Analytics",
+          "type": "changed",
+          "text": "Status labels are clearer (stacks, Lifesteal, common abilities). Copy/Clear grey out when the log is empty. Export Units use the same summon display names as the summary (#n · tile). Log dedupe tracking is shared and cleared consistently; unit mechanics subscriptions stop when the panel closes and resume on reopen."
+        },
+        {
+          "mod": "Better Analytics",
+          "type": "fixed",
+          "text": "Soulfire on Dragons is logged again (no longer treated as their own ability CD). Slowed folds with SPD across ticks; stack counters no longer mislabel as Buff; duplicate AD/AP folds coalesce; multi-status ticks attribute stats to the matching effect."
+        },
+        {
+          "mod": "Core",
+          "type": "fixed",
+          "text": "Opening a mod modal no longer force-removes the game’s open dialogs (e.g. Quest Log), which caused React removeChild client-side crashes when UI Components fell back to showModal."
+        },
+        {
+          "mod": "Quests",
+          "type": "changed",
+          "text": "Board right-click context menus use the in-game pixel font."
+        },
+        {
+          "mod": "Quests",
+          "type": "fixed",
+          "text": "Quest Log card placement no longer thrash-removes/reinserts tabs when Raid Monitor is missing, and container/footer lookups ignore mod modals. Missions and chat open clicks stop propagating to the game UI to avoid removeChild crashes while navigating quest commands. Context menus stay pinned to the clicked tile/NPC when the window is resized. Completed multi-stage board NPC voyages no longer re-prompt mid-journey item hand-ins when completion flags were incomplete (including older Dev Complete saves); completed stage flags are backfilled on load."
+        },
+        {
+          "mod": "Raid Hunter",
+          "type": "fixed",
+          "text": "Quest Log detection only matches the native Quest Log dialog, so Raid Monitor sync does not treat mod modal grids as the quest log."
+        }
+      ]
+    },
+    {
       "version": "4.7.3",
       "changes": [
         {
