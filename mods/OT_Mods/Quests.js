@@ -1554,11 +1554,12 @@ const ARENA_LEADERBOARD_TOP = 10;
 const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
 const ACTIVE_MISSION_TAB_ID_PREFIX = 'quests-mod-active-mission-tab-';
 const ACTIVE_MISSION_TAB_ATTR = 'data-quests-active-mission-id';
-const QUEST_ADMIN_DEV_MODAL_WIDTH = 640;
+const QUEST_ADMIN_DEV_MODAL_WIDTH = 800;
 const QUEST_ADMIN_DEV_MODAL_HEIGHT = 720;
 const QUEST_ADMIN_DEV_MODAL_MIN_HEIGHT = 420;
 
-// Story order for Quest Log / Mission Log lists. Keep in sync with modal mission list.
+// Story order for Quest Log / Mission Log / Quest Dev Tools.
+// New missions: append here after registering in MISSION_STATE_MAP.
 const QUEST_LOG_MISSIONS = [
   KING_HONEYFLOWER_MISSION,
   KING_CROSSING_THE_LINE_MISSION,
@@ -5582,18 +5583,25 @@ function createNPCCooldownManager() {
   // Centralized mapping of mission IDs to state properties and Firebase keys
   // 
   // HOW TO ADD A NEW MISSION:
-  // 1. Define the mission constant at the top of the file (e.g., const NEW_MISSION = {...})
-  // 2. Add to kingChatState object: progressNewMission: { accepted: false, completed: false }
-  // 3. Add to MISSIONS array in showKingTibianusModal() function
-  // 4. Add entries to these two maps below:
-  //    - MISSION_STATE_MAP: maps mission.id to kingChatState property name
-  //    - MISSION_FIREBASE_KEY_MAP: maps mission.id to Firebase property name
+  // 1. Mission constant + registerMissionForDialogue(mission) near the top
+  // 2. missions.json entry (title/dialogue) under that mission id
+  // 3. kingChatState.progressX: { accepted: false, completed: false }
+  // 4. MISSION_STATE_MAP + MISSION_FIREBASE_KEY_MAP below
+  // 5. QUEST_LOG_MISSIONS (story order for Quest Log + Quest Dev Tools)
+  // 6. Quest logic / NPC handlers as needed
   //
-  // That's it! The registry automatically handles:
+  // Quest Dev Tools missions are derived from MISSION_STATE_MAP + MISSION_BY_ID —
+  // no separate Dev Tools mission list to update.
+  //
+  // Quest Dev Tools items are separate: QUESTS_DEV_ITEM_KEY_IDS +
+  // resolveQuestDevItemName() (+ optional progress order / received-before map).
+  //
+  // Registry automatically handles:
   // - MissionManager.getProgress() and setProgress()
   // - getKingTibianusProgress() loading
   // - saveKingTibianusProgress() saving
   // - loadMissionProgressOnInit() initialization
+  // - QuestsDev Accept / Complete / Reset / completeAll / resetAll
   //
   // Example for a new mission with id 'new_mission':
   //   MISSION_STATE_MAP: { 'new_mission': 'progressNewMission' }
@@ -6368,6 +6376,7 @@ function createNPCCooldownManager() {
         console.warn('[Quests Mod][Arena Leaderboard] Failed to sync on init:', err);
       });
       await reloadQuestItemsFromFirebase();
+      await cleanupStaleQuestItemsAfterCompletedMissions();
     } catch (error) {
       console.error('[Quests Mod] Error loading quest items on init:', error);
     }
@@ -6640,6 +6649,108 @@ function createNPCCooldownManager() {
     } catch (error) {
       console.error('[Quests Mod][Quest Items] Error consuming quest item:', error);
       return false;
+    }
+  }
+
+  async function consumeAllOfQuestItem(productName) {
+    const items = await getQuestItems(false);
+    const count = items?.[productName] || 0;
+    if (count <= 0) return 0;
+    const removed = await consumeQuestItem(productName, count);
+    return removed ? count : 0;
+  }
+
+  /** Remove hand-in items when completing a king mission (keeps Firebase in sync with the bag UI). */
+  async function consumeKingMissionHandInItems(mission) {
+    if (!mission?.id) return;
+    try {
+      if (mission.id === KING_COPPER_KEY_MISSION.id) {
+        const keyRemoved = await consumeAllOfQuestItem(COPPER_KEY_CONFIG.productName);
+        const mapRemoved = await consumeAllOfQuestItem(MAP_COLOUR_CONFIG.productName);
+        if (keyRemoved > 0) {
+          NotificationService.showItemRemoved(COPPER_KEY_CONFIG.productName, '[Quests Mod][King Tibianus]');
+        }
+        if (mapRemoved > 0) {
+          console.log('[Quests Mod][King Tibianus] Removed Map to the Mines after copper key turn-in');
+        }
+        return;
+      }
+      if (mission.id === KING_RED_DRAGON_MISSION.id) {
+        // Bag UI hides materials and the skinning knife after completion — clear inventory fully.
+        const scales = await consumeAllOfQuestItem('Red Dragon Scale');
+        const leathers = await consumeAllOfQuestItem('Red Dragon Leather');
+        const knife = await consumeAllOfQuestItem('Obsidian Knife');
+        if (scales > 0) NotificationService.showItemRemoved('Red Dragon Scale', '[Quests Mod][King Tibianus]');
+        if (leathers > 0) NotificationService.showItemRemoved('Red Dragon Leather', '[Quests Mod][King Tibianus]');
+        if (knife > 0) NotificationService.showItemRemoved('Obsidian Knife', '[Quests Mod][King Tibianus]');
+        console.log('[Quests Mod][King Tibianus] Consumed red dragon hand-in items on turn-in', {
+          scales, leathers, knife
+        });
+        return;
+      }
+      if (mission.id === KING_HONEYFLOWER_MISSION.id) {
+        await consumeAllOfQuestItem(HONEYFLOWER_CONFIG.productName);
+      }
+    } catch (error) {
+      console.error('[Quests Mod][King Tibianus] Error consuming hand-in items:', error);
+    }
+  }
+
+  /**
+   * Repair leftovers the backpack UI already hides after missions complete.
+   * Mirrors cleanupInvalidQuestItems removeWhenCompleted rules for the common stale set.
+   */
+  async function cleanupStaleQuestItemsAfterCompletedMissions() {
+    try {
+      const removed = [];
+      const maybeRemove = async (done, itemName) => {
+        if (!done) return;
+        const n = await consumeAllOfQuestItem(itemName);
+        if (n > 0) removed.push(`${itemName} x${n}`);
+      };
+
+      const copperDone = !!getMissionProgress(KING_COPPER_KEY_MISSION)?.completed;
+      const dragonDone = !!getMissionProgress(KING_RED_DRAGON_MISSION)?.completed;
+      const fishingDone = !!getMissionProgress(AL_DEE_FISHING_MISSION)?.completed;
+      const ropeDone = !!getMissionProgress(AL_DEE_GOLDEN_ROPE_MISSION)?.completed;
+      const letterDone = !!getMissionProgress(KING_LETTER_MISSION)?.completed;
+      const spidersDone = !!getMissionProgress(MOTHER_OF_ALL_SPIDERS_MISSION)?.completed;
+      const bansheesDone = !!getMissionProgress(COSTELLO_QUEEN_BANSHEES_MISSION)?.completed;
+      const christmasDone = !!getMissionProgress(CHRISTMAS_MIRACLE_MISSION)?.completed;
+      const scarabDone = !!getMissionProgress(KING_SCARAB_COIN_MISSION)?.completed;
+      const serpentineDone = !!getMissionProgress(SERPENTINE_TOWER_MISSION)?.completed;
+      const honeyDone = !!getMissionProgress(KING_HONEYFLOWER_MISSION)?.completed;
+      const loveDone = !!getMissionProgress(SVENSON_LOVE_STORY_MISSION)?.completed;
+
+      await maybeRemove(copperDone, COPPER_KEY_CONFIG.productName);
+      await maybeRemove(copperDone, MAP_COLOUR_CONFIG.productName);
+      await maybeRemove(dragonDone, 'Red Dragon Scale');
+      await maybeRemove(dragonDone, 'Red Dragon Leather');
+      await maybeRemove(dragonDone, 'Obsidian Knife');
+      await maybeRemove(honeyDone, HONEYFLOWER_CONFIG.productName);
+      await maybeRemove(letterDone, 'Letter from Al Dee');
+      await maybeRemove(letterDone, 'Stamped Letter');
+      await maybeRemove(fishingDone, 'Magnet');
+      await maybeRemove(fishingDone, 'Small Axe');
+      await maybeRemove(fishingDone, 'Iron Ore');
+      await maybeRemove(ropeDone, 'Elvenhair Rope');
+      await maybeRemove(spidersDone, 'Spider Silk');
+      await maybeRemove(bansheesDone, COSTELLO_QUEEN_BANSHEES_MISSION.diaryItemName || "Costello's diary");
+      await maybeRemove(scarabDone, SCARAB_COIN_CONFIG.productName);
+      await maybeRemove(serpentineDone, DESTROY_FIELD_RUNE_CONFIG.productName);
+      await maybeRemove(christmasDone, WISHLIST_CONFIG.productName);
+      await maybeRemove(christmasDone, PRESENT_CONFIG.productName);
+      // Love Story consumes these on hand-in; clear leftovers if the mission is already done.
+      await maybeRemove(loveDone, MINOTAUR_TROPHY_CONFIG.productName);
+      await maybeRemove(loveDone, MOTHER_OF_ALL_SPIDERS_MISSION.rewardItemName || 'Spool of Yarn');
+      await maybeRemove(loveDone, SCORPION_SCEPTRE_CONFIG.productName);
+      await maybeRemove(loveDone, BUNNY_SLIPPERS_CONFIG.productName);
+
+      if (removed.length) {
+        console.log('[Quests Mod][Quest Items] Cleaned stale items after completed missions:', removed.join(', '));
+      }
+    } catch (error) {
+      console.warn('[Quests Mod][Quest Items] Stale item cleanup failed:', error);
     }
   }
 
@@ -7827,14 +7938,18 @@ function createNPCCooldownManager() {
     layout = 'column', // 'column' | 'center'
     gap = '4px'
   }) {
-    // Create overlay to close menu on outside click
+    const MENU_Z_OVERLAY = '200000';
+    const MENU_Z_PANEL = '200001';
+    let closed = false;
+
+    // Full-screen overlay above game modals so any click closes the menu
     const overlay = document.createElement('div');
     overlay.style.position = 'fixed';
     overlay.style.top = '0';
     overlay.style.left = '0';
     overlay.style.width = '100%';
     overlay.style.height = '100%';
-    overlay.style.zIndex = '9998';
+    overlay.style.zIndex = MENU_Z_OVERLAY;
     overlay.style.backgroundColor = 'transparent';
     overlay.style.pointerEvents = 'auto';
     overlay.style.cursor = 'default';
@@ -7844,7 +7959,7 @@ function createNPCCooldownManager() {
     menu.style.position = 'fixed';
     menu.style.left = `${x}px`;
     menu.style.top = `${y}px`;
-    menu.style.zIndex = '9999';
+    menu.style.zIndex = MENU_Z_PANEL;
     menu.style.minWidth = minWidth;
     menu.style.background = "url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat";
     menu.style.border = '4px solid transparent';
@@ -7852,6 +7967,7 @@ function createNPCCooldownManager() {
     menu.style.borderRadius = '6px';
     menu.style.padding = '8px';
     menu.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.5)';
+    menu.style.fontFamily = 'Arial, Helvetica, sans-serif';
 
     // Button container
     const buttonContainer = document.createElement('div');
@@ -7866,18 +7982,22 @@ function createNPCCooldownManager() {
     // Create buttons
     buttons.forEach((buttonConfig) => {
       const button = document.createElement('button');
-      button.className = 'pixel-font-14';
+      button.type = 'button';
       button.textContent = buttonConfig.text;
       button.style.width = buttonConfig.width || '140px';
-      button.style.height = buttonConfig.height || '28px';
-      button.style.fontSize = buttonConfig.fontSize || '12px';
+      button.style.height = buttonConfig.height || '30px';
+      button.style.fontFamily = 'Arial, Helvetica, sans-serif';
+      button.style.fontSize = buttonConfig.fontSize || '13px';
+      button.style.letterSpacing = '0.02em';
+      button.style.lineHeight = '1.2';
       button.style.backgroundColor = buttonConfig.backgroundColor || '#2a4a7a';
-      button.style.color = buttonConfig.color || '#4FC3F7';
+      button.style.color = buttonConfig.color || '#E8F4FC';
       button.style.border = buttonConfig.border || '1px solid #4FC3F7';
       button.style.borderRadius = '4px';
       button.style.cursor = 'pointer';
       button.style.textShadow = '1px 1px 0px rgba(0,0,0,0.8)';
-      button.style.fontWeight = 'bold';
+      button.style.fontWeight = '600';
+      button.style.padding = '0 8px';
 
       // Add hover effects
       const hoverBg = buttonConfig.hoverBackgroundColor || '#1a2a4a';
@@ -7895,7 +8015,8 @@ function createNPCCooldownManager() {
       });
 
       // Add click handler
-      button.addEventListener('click', () => {
+      button.addEventListener('click', (event) => {
+        event.stopPropagation();
         if (buttonConfig.onClick) {
           buttonConfig.onClick();
         }
@@ -7906,8 +8027,18 @@ function createNPCCooldownManager() {
 
     menu.appendChild(buttonContainer);
 
+    const cleanupListeners = () => {
+      document.removeEventListener('keydown', escHandler, true);
+      document.removeEventListener('pointerdown', outsidePointerHandler, true);
+      document.removeEventListener('mousedown', outsidePointerHandler, true);
+      document.removeEventListener('contextmenu', outsidePointerHandler, true);
+    };
+
     // Close menu function
     const closeMenu = () => {
+      if (closed) return;
+      closed = true;
+      cleanupListeners();
       if (overlay.parentNode) {
         overlay.parentNode.removeChild(overlay);
       }
@@ -7919,35 +8050,43 @@ function createNPCCooldownManager() {
       }
     };
 
-    // Add event listeners
-    overlay.addEventListener('mousedown', closeMenu);
-    overlay.addEventListener('click', closeMenu);
-    
-    // ESC key handler (consistent with other mods)
+    const outsidePointerHandler = (event) => {
+      if (menu.contains(event.target)) return;
+      closeMenu();
+    };
+
     const escHandler = (e) => {
       if (e.key === 'Escape') {
+        e.preventDefault();
         closeMenu();
       }
     };
-    document.addEventListener('keydown', escHandler);
 
-    // Store cleanup function for ESC handler
-    const cleanupEsc = () => {
-      document.removeEventListener('keydown', escHandler);
-    };
+    overlay.addEventListener('pointerdown', closeMenu);
+    overlay.addEventListener('mousedown', closeMenu);
+    overlay.addEventListener('click', closeMenu);
+    // Capture on document so clicks on high z-index modals still dismiss the menu
+    document.addEventListener('pointerdown', outsidePointerHandler, true);
+    document.addEventListener('mousedown', outsidePointerHandler, true);
+    document.addEventListener('contextmenu', outsidePointerHandler, true);
+    document.addEventListener('keydown', escHandler, true);
 
-    // Add to DOM
+    // Keep menu inside viewport
     document.body.appendChild(overlay);
     document.body.appendChild(menu);
+    const rect = menu.getBoundingClientRect();
+    if (rect.right > window.innerWidth - 8) {
+      menu.style.left = `${Math.max(8, window.innerWidth - rect.width - 8)}px`;
+    }
+    if (rect.bottom > window.innerHeight - 8) {
+      menu.style.top = `${Math.max(8, window.innerHeight - rect.height - 8)}px`;
+    }
 
     // Return menu object with cleanup
     return {
       overlay,
       menu,
-      closeMenu: () => {
-        closeMenu();
-        cleanupEsc();
-      }
+      closeMenu
     };
   }
 
@@ -8635,6 +8774,7 @@ function createNPCCooldownManager() {
           if (redDragonCompleted) {
             delete displayProducts['Red Dragon Leather'];
             delete displayProducts['Red Dragon Scale'];
+            delete displayProducts['Obsidian Knife'];
           }
         
         // Clear loading message
@@ -10313,6 +10453,9 @@ function createNPCCooldownManager() {
           const currentProgress = getMissionProgress(mission);
           const shouldAwardDragonClaw =
             mission.id === KING_RED_DRAGON_MISSION.id && !currentProgress.completed;
+          if (!currentProgress.completed) {
+            await consumeKingMissionHandInItems(mission);
+          }
           const nextProgress = mission.id === KING_HONEYFLOWER_MISSION.id
             ? buildHoneyflowerProgress({ accepted: true, completed: true })
             : mission.id === KING_CROSSING_THE_LINE_MISSION.id
@@ -10604,7 +10747,6 @@ function createNPCCooldownManager() {
                 renderKingQuestUI();
               } else {
                 if (missionToComplete.id === KING_HONEYFLOWER_MISSION.id) {
-                  await consumeQuestItem(HONEYFLOWER_CONFIG.productName, 1);
                   if (typeof updateHoneyflowerTileRightClickState === 'function') {
                     updateHoneyflowerTileRightClickState();
                   }
@@ -14417,8 +14559,8 @@ function createNPCCooldownManager() {
     contentDiv.style.overflowY = 'auto';
 
     const statusEl = document.createElement('p');
-    statusEl.className = 'pixel-font-14';
-    statusEl.style.cssText = 'margin:0;color:#888;min-height:18px;';
+    statusEl.className = 'pixel-font-14 frame-pressed-1 surface-darker';
+    statusEl.style.cssText = 'margin:0;color:#888;min-height:18px;padding:4px 6px;';
     statusEl.textContent = 'Ready.';
 
     const setStatus = (text, isError = false) => {
@@ -14429,12 +14571,20 @@ function createNPCCooldownManager() {
     let refreshItemCounts = () => {};
     let refreshMissionStatuses = () => {};
     let refreshSealStatuses = () => {};
+    let receivedFlagsCache = {
+      copperKey: false,
+      letter: false,
+      ironOre: false,
+      wishlist: false,
+      present: false
+    };
 
     const runGuarded = async (label, fn) => {
       try {
         setStatus(`Running: ${label}...`);
         await fn();
         if (typeof syncActiveMissionTabs === 'function') syncActiveMissionTabs();
+        receivedFlagsCache = await loadQuestDevItemReceivedFlags(getCurrentPlayerName());
         refreshItemCounts();
         refreshMissionStatuses();
         refreshSealStatuses();
@@ -14445,12 +14595,42 @@ function createNPCCooldownManager() {
       }
     };
 
+    const copyCommand = async (command) => {
+      const text = String(command || '').trim();
+      if (!text) return;
+      try {
+        if (navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(text);
+        } else {
+          const ta = document.createElement('textarea');
+          ta.value = text;
+          ta.style.cssText = 'position:fixed;left:-9999px;top:0;';
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand('copy');
+          ta.remove();
+        }
+        setStatus(`Copied: ${text.length > 72 ? `${text.slice(0, 72)}…` : text}`);
+      } catch (error) {
+        console.error('[Quests Mod][Dev] Copy failed:', error);
+        setStatus(`Copy failed: ${error?.message || error}`, true);
+      }
+    };
+
     const PROGRESS_GREEN = 'rgba(76, 175, 80, 0.28)';
     const PROGRESS_RED = 'rgba(244, 67, 54, 0.22)';
     const PROGRESS_ACTIVE = 'rgba(230, 215, 176, 0.22)';
     const TEXT_GREEN = 'rgb(96, 192, 96)';
     const TEXT_RED = 'rgb(255, 138, 128)';
     const TEXT_ACTIVE = 'rgb(230, 215, 176)';
+    const FRAME_BORDER = `4px solid transparent`;
+    const FRAME_BORDER_IMAGE = GAME_FRAME_BORDER_IMAGE;
+    const FRAME_BG = `${GAME_FRAME_BACKGROUND} repeat`;
+
+    const productDefsByName = new Map();
+    for (const def of buildProductDefinitions({ includeDragonClaw: true })) {
+      if (def?.name) productDefsByName.set(def.name, def);
+    }
 
     const applyRowProgressStyle = (row, state) => {
       if (state === 'done') {
@@ -14466,11 +14646,20 @@ function createNPCCooldownManager() {
     };
 
     const section = (titleText) => {
-      const wrap = document.createElement('div');
-      wrap.style.cssText = 'display:flex;flex-direction:column;gap:6px;';
+      const wrap = ModalHelpers.createFramedBox({
+        background: FRAME_BG,
+        borderImage: FRAME_BORDER_IMAGE,
+        padding: '6px 8px',
+        minHeight: '0'
+      });
+      wrap.style.display = 'flex';
+      wrap.style.flexDirection = 'column';
+      wrap.style.gap = '6px';
+      wrap.style.boxSizing = 'border-box';
+      wrap.style.border = FRAME_BORDER;
       const title = document.createElement('p');
-      title.className = 'text-whiteHighlight';
-      title.style.margin = '0';
+      title.className = 'widget-top widget-top-text pixel-font-14 text-whiteHighlight';
+      title.style.cssText = 'margin:0;padding:2px 4px;text-align:left;';
       title.textContent = titleText;
       wrap.appendChild(title);
       return wrap;
@@ -14483,33 +14672,160 @@ function createNPCCooldownManager() {
       return row;
     };
 
-    const makeBtn = (label, onClick, { danger = false } = {}) => {
+    const makeBtn = (label, onClick, { danger = false, command = null } = {}) => {
       const btn = document.createElement('button');
+      btn.type = 'button';
       btn.textContent = label;
       btn.className = danger ? createQuestAdminDevDangerButtonStyle() : createQuestAdminDevButtonStyle();
       if (danger) btn.style.color = '#ff8a80';
-      btn.addEventListener('click', onClick);
+      if (command) {
+        btn.title = `${command}\nRight-click or Ctrl+click to copy`;
+        btn.dataset.questsDevCommand = command;
+        btn.addEventListener('contextmenu', (event) => {
+          event.preventDefault();
+          copyCommand(command);
+        });
+        btn.addEventListener('click', (event) => {
+          if (event.ctrlKey || event.metaKey) {
+            event.preventDefault();
+            copyCommand(command);
+            return;
+          }
+          onClick(event);
+        });
+      } else {
+        btn.addEventListener('click', onClick);
+      }
       return btn;
+    };
+
+    const makeCopyBtn = (command, label = 'Copy') => {
+      const btn = makeBtn(label, () => copyCommand(command));
+      btn.title = command;
+      return btn;
+    };
+
+    const createDevIconSlot = (child) => {
+      const slot = document.createElement('div');
+      slot.className = 'container-slot surface-darker grid place-items-center overflow-hidden';
+      slot.style.cssText = 'width:28px;height:28px;flex-shrink:0;';
+      if (child) {
+        if (child.style) {
+          child.style.width = '24px';
+          child.style.height = '24px';
+          child.style.maxWidth = '24px';
+          child.style.maxHeight = '24px';
+        }
+        if (child.tagName === 'IMG') {
+          child.width = 24;
+          child.height = 24;
+        }
+        slot.appendChild(child);
+      }
+      return slot;
     };
 
     // Quick actions
     const quick = section('Quick actions');
     const quickRow = buttonRow(quick);
-    quickRow.appendChild(makeBtn('Log state', () => runGuarded('Log state', () => QuestsDev.check())));
-    quickRow.appendChild(makeBtn('Complete all', () => runGuarded('Complete all', () => QuestsDev.completeAll())));
-    quickRow.appendChild(makeBtn('Reset all', () => runGuarded('Reset all', () => QuestsDev.resetAll()), { danger: true }));
-    quickRow.appendChild(makeBtn('Reset Santa', () => runGuarded('Reset Santa', () => QuestsDev.resetSanta())));
-    quickRow.appendChild(makeBtn('Reset Iron Ore flag', () => runGuarded('Reset Iron Ore flag', () => QuestsDev.resetIronOreReceived())));
-    quickRow.appendChild(makeBtn('Reset Love Story + items', () => runGuarded('Reset Love Story + items', () => QuestsDev.resetLoveStoryWithItems())));
+    const quickActions = [
+      { label: 'Log state', command: 'QuestsDev.check()', run: () => QuestsDev.check() },
+      { label: 'Complete all', command: 'QuestsDev.completeAll()', run: () => QuestsDev.completeAll() },
+      { label: 'Reset all', command: 'QuestsDev.resetAll()', run: () => QuestsDev.resetAll(), danger: true },
+      { label: 'Reset Santa', command: 'QuestsDev.resetSanta()', run: () => QuestsDev.resetSanta() },
+      { label: 'Reset Iron Ore flag', command: 'QuestsDev.resetIronOreReceived()', run: () => QuestsDev.resetIronOreReceived() },
+      { label: 'Reset Love Story + items', command: 'QuestsDev.resetLoveStoryWithItems()', run: () => QuestsDev.resetLoveStoryWithItems() }
+    ];
+    for (const action of quickActions) {
+      const group = document.createElement('div');
+      group.style.cssText = 'display:flex;gap:2px;';
+      group.appendChild(makeBtn(action.label, () => runGuarded(action.label, action.run), {
+        danger: !!action.danger,
+        command: action.command
+      }));
+      group.appendChild(makeCopyBtn(action.command));
+      quickRow.appendChild(group);
+    }
     contentDiv.appendChild(quick);
 
-    const listWrapStyle = 'display:flex;flex-direction:column;gap:4px;max-height:220px;overflow-y:auto;padding-right:2px;';
-    const rowStyle = 'display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;padding:4px 6px;border-radius:2px;';
+    const listWrapStyle = 'display:flex;flex-direction:column;gap:3px;max-height:320px;overflow-y:auto;padding:4px;flex:1 1 auto;min-height:0;';
+    const rowGridStyle = 'display:grid;grid-template-columns:28px minmax(0,1fr) auto;gap:4px 8px;align-items:center;padding:3px 4px;border-radius:2px;cursor:context-menu;';
+    const readableFont = 'font-family:Arial, Helvetica, sans-serif;font-size:12px;letter-spacing:0.01em;';
+    const cellNameStyle = `${readableFont}overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;`;
+    const cellStatusStyle = `${readableFont}text-align:right;white-space:nowrap;`;
+    let openDevContextMenu = null;
+
+    const closeDevContextMenu = () => {
+      if (openDevContextMenu?.closeMenu) openDevContextMenu.closeMenu();
+      openDevContextMenu = null;
+    };
+
+    const openDevMenu = (event, buttons) => {
+      event.preventDefault();
+      event.stopPropagation();
+      closeDevContextMenu();
+      let menuObj = null;
+      const wrapped = buttons.map((btn) => ({
+        ...btn,
+        width: btn.width || '160px',
+        onClick: () => {
+          menuObj?.closeMenu();
+          openDevContextMenu = null;
+          if (btn.onClick) btn.onClick();
+        }
+      }));
+      menuObj = createContextMenu({
+        x: event.clientX,
+        y: event.clientY,
+        layout: 'column',
+        minWidth: '160px',
+        gap: '4px',
+        buttons: wrapped,
+        onClose: () => { openDevContextMenu = null; }
+      });
+      openDevContextMenu = menuObj;
+    };
+
+    const appendGridHeader = (list, nameLabel, statusLabel) => {
+      const header = document.createElement('div');
+      header.style.cssText = [
+        rowGridStyle,
+        'cursor:default',
+        'opacity:1',
+        'position:sticky',
+        'top:0',
+        'z-index:2',
+        'margin:0 -4px',
+        'padding:4px 8px',
+        'background:url("https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png") repeat',
+        'box-shadow:0 1px 0 rgba(0,0,0,0.45)'
+      ].join(';');
+      header.appendChild(document.createElement('div'));
+      const name = document.createElement('span');
+      name.className = 'text-whiteHighlight';
+      name.style.cssText = cellNameStyle;
+      name.textContent = nameLabel;
+      const status = document.createElement('span');
+      status.className = 'text-whiteHighlight';
+      status.style.cssText = `${cellStatusStyle}font-weight:600;`;
+      status.textContent = statusLabel;
+      header.appendChild(name);
+      header.appendChild(status);
+      list.appendChild(header);
+    };
+
+    const itemsMissionsRow = document.createElement('div');
+    itemsMissionsRow.style.cssText = 'display:flex;flex-direction:row;align-items:stretch;gap:8px;width:100%;min-width:0;box-sizing:border-box;';
 
     // All items in story order
     const itemsSection = section('Items (story order)');
+    itemsSection.style.flex = '1 1 0';
+    itemsSection.style.minWidth = '0';
+    itemsSection.style.height = '100%';
     const itemsList = document.createElement('div');
+    itemsList.className = 'frame-pressed-1 surface-dark';
     itemsList.style.cssText = listWrapStyle;
+    appendGridHeader(itemsList, 'Item', 'Qty');
     const itemRows = new Map();
 
     refreshItemCounts = () => {
@@ -14517,51 +14833,111 @@ function createNPCCooldownManager() {
         const itemName = resolveQuestDevItemName(key);
         nameEl.textContent = itemName;
         const count = cachedQuestItems?.[itemName] || 0;
-        countEl.textContent = String(count);
         const owned = count > 0;
-        countEl.style.color = owned ? TEXT_GREEN : TEXT_RED;
-        nameEl.style.color = owned ? TEXT_GREEN : TEXT_RED;
-        applyRowProgressStyle(row, owned ? 'done' : 'missing');
+        const receivedBefore = owned || wasQuestDevItemReceivedBefore(key, receivedFlagsCache);
+        if (owned) {
+          countEl.textContent = String(count);
+          countEl.title = `${itemName}: ${count} in inventory — right-click for actions`;
+          countEl.style.color = TEXT_GREEN;
+          nameEl.style.color = TEXT_GREEN;
+          applyRowProgressStyle(row, 'done');
+        } else if (receivedBefore) {
+          countEl.textContent = 'had';
+          countEl.title = `${itemName}: received before (0 in inventory) — right-click for actions`;
+          countEl.style.color = TEXT_ACTIVE;
+          nameEl.style.color = TEXT_ACTIVE;
+          applyRowProgressStyle(row, 'active');
+        } else {
+          countEl.textContent = '0';
+          countEl.title = `${itemName}: never received — right-click for actions`;
+          countEl.style.color = TEXT_RED;
+          nameEl.style.color = TEXT_RED;
+          applyRowProgressStyle(row, 'missing');
+        }
       }
     };
 
     for (const key of getQuestDevItemKeysInProgressOrder()) {
       const itemName = resolveQuestDevItemName(key);
-      const row = document.createElement('div');
-      row.style.cssText = rowStyle;
-
-      const left = document.createElement('div');
-      left.style.cssText = 'display:flex;align-items:center;gap:8px;min-width:0;flex:1;';
-      const nameEl = document.createElement('span');
-      nameEl.className = 'pixel-font-14';
-      nameEl.style.cssText = 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
-      nameEl.textContent = itemName;
-      nameEl.title = key;
-      const countEl = document.createElement('span');
-      countEl.className = 'pixel-font-14';
-      countEl.style.cssText = 'min-width:28px;text-align:right;';
-      itemRows.set(key, { row, countEl, nameEl });
-      left.appendChild(nameEl);
-      left.appendChild(countEl);
-
-      const actions = document.createElement('div');
-      actions.style.cssText = 'display:flex;gap:4px;flex-shrink:0;';
       const grantAmount = (key === 'scale' || key === 'leather') ? 30 : 1;
-      actions.appendChild(makeBtn(`+${grantAmount}`, () => runGuarded(`Grant ${resolveQuestDevItemName(key)} +${grantAmount}`, () => QuestsDev.grant({ [key]: grantAmount }))));
-      actions.appendChild(makeBtn('-1', () => runGuarded(`Remove ${resolveQuestDevItemName(key)} -1`, () => QuestsDev.grant({ [key]: -1 })), { danger: true }));
+      const grantCmd = `QuestsDev.grant({ ${key}: ${grantAmount} })`;
+      const removeCmd = `QuestsDev.grant({ ${key}: -1 })`;
 
-      row.appendChild(left);
-      row.appendChild(actions);
-      itemsList.appendChild(row);
+      const iconCell = document.createElement('div');
+      const productDef = productDefsByName.get(itemName);
+      iconCell.appendChild(productDef
+        ? createDevIconSlot(createProductIcon(productDef, 24))
+        : createDevIconSlot(null));
+
+      const nameEl = document.createElement('span');
+      nameEl.style.cssText = cellNameStyle;
+      nameEl.textContent = itemName;
+      nameEl.title = `${key} — right-click for actions`;
+
+      const countEl = document.createElement('span');
+      countEl.style.cssText = cellStatusStyle;
+
+      const rowWrap = document.createElement('div');
+      rowWrap.style.cssText = rowGridStyle;
+      rowWrap.title = 'Right-click for actions';
+      rowWrap.appendChild(iconCell);
+      rowWrap.appendChild(nameEl);
+      rowWrap.appendChild(countEl);
+      itemRows.set(key, { row: rowWrap, countEl, nameEl });
+
+      rowWrap.addEventListener('contextmenu', (event) => {
+        openDevMenu(event, [
+          {
+            text: `Grant +${grantAmount}`,
+            backgroundColor: '#2a4a7a',
+            color: '#4FC3F7',
+            border: '1px solid #4FC3F7',
+            onClick: () => runGuarded(`Grant ${resolveQuestDevItemName(key)} +${grantAmount}`, () => QuestsDev.grant({ [key]: grantAmount }))
+          },
+          {
+            text: 'Remove -1',
+            backgroundColor: '#4a2a2a',
+            color: '#ff8a80',
+            border: '1px solid #ff8a80',
+            hoverBackgroundColor: '#2a1a1a',
+            hoverBorderColor: '#ffcdd2',
+            onClick: () => runGuarded(`Remove ${resolveQuestDevItemName(key)} -1`, () => QuestsDev.grant({ [key]: -1 }))
+          },
+          {
+            text: 'Copy grant cmd',
+            onClick: () => copyCommand(grantCmd)
+          },
+          {
+            text: 'Copy remove cmd',
+            onClick: () => copyCommand(removeCmd)
+          },
+          {
+            text: 'Copy all cmds',
+            onClick: () => copyCommand(`${grantCmd}\n${removeCmd}`)
+          }
+        ]);
+      });
+
+      itemsList.appendChild(rowWrap);
     }
     refreshItemCounts();
     itemsSection.appendChild(itemsList);
-    contentDiv.appendChild(itemsSection);
+    itemsMissionsRow.appendChild(itemsSection);
+
+    loadQuestDevItemReceivedFlags(getCurrentPlayerName()).then((flags) => {
+      receivedFlagsCache = flags;
+      refreshItemCounts();
+    }).catch(() => {});
 
     // All missions in story order
     const missionSection = section('Missions (story order)');
+    missionSection.style.flex = '1 1 0';
+    missionSection.style.minWidth = '0';
+    missionSection.style.height = '100%';
     const missionsList = document.createElement('div');
+    missionsList.className = 'frame-pressed-1 surface-dark';
     missionsList.style.cssText = listWrapStyle;
+    appendGridHeader(missionsList, 'Mission', 'Status');
     const missionRows = new Map();
 
     refreshMissionStatuses = () => {
@@ -14586,52 +14962,110 @@ function createNPCCooldownManager() {
     };
 
     for (const mission of getQuestDevMissionsInProgressOrder()) {
-      const row = document.createElement('div');
-      row.style.cssText = rowStyle;
+      const acceptCmd = `QuestsDev.setAccepted(${JSON.stringify(mission.id)})`;
+      const completeCmd = `QuestsDev.complete(${JSON.stringify(mission.id)})`;
+      const resetCmd = `QuestsDev.reset(${JSON.stringify(mission.id)})`;
 
-      const left = document.createElement('div');
-      left.style.cssText = 'display:flex;align-items:center;gap:8px;min-width:0;flex:1;';
+      const iconCell = document.createElement('div');
+      iconCell.appendChild(createDevIconSlot(createActiveMissionIconElement(mission)));
+
       const nameEl = document.createElement('span');
-      nameEl.className = 'pixel-font-14';
-      nameEl.style.cssText = 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+      nameEl.style.cssText = cellNameStyle;
       nameEl.textContent = mission.title || mission.id;
-      nameEl.title = mission.id;
+      nameEl.title = `${mission.id} — right-click for actions`;
+
       const missionStatusEl = document.createElement('span');
-      missionStatusEl.className = 'pixel-font-14';
-      missionStatusEl.style.cssText = 'min-width:72px;text-align:right;text-transform:lowercase;';
-      missionRows.set(mission.id, { row, statusEl: missionStatusEl, nameEl });
-      left.appendChild(nameEl);
-      left.appendChild(missionStatusEl);
+      missionStatusEl.style.cssText = `${cellStatusStyle};text-transform:lowercase;`;
 
-      const actions = document.createElement('div');
-      actions.style.cssText = 'display:flex;gap:4px;flex-shrink:0;';
-      actions.appendChild(makeBtn('Accept', () => runGuarded(`Accept ${mission.id}`, () => QuestsDev.setAccepted(mission.id))));
-      actions.appendChild(makeBtn('Complete', () => runGuarded(`Complete ${mission.id}`, () => QuestsDev.complete(mission.id))));
-      actions.appendChild(makeBtn('Reset', () => runGuarded(`Reset ${mission.id}`, () => QuestsDev.reset(mission.id)), { danger: true }));
+      const rowWrap = document.createElement('div');
+      rowWrap.style.cssText = rowGridStyle;
+      rowWrap.title = 'Right-click for actions';
+      rowWrap.appendChild(iconCell);
+      rowWrap.appendChild(nameEl);
+      rowWrap.appendChild(missionStatusEl);
+      missionRows.set(mission.id, { row: rowWrap, statusEl: missionStatusEl, nameEl });
 
-      row.appendChild(left);
-      row.appendChild(actions);
-      missionsList.appendChild(row);
+      rowWrap.addEventListener('contextmenu', (event) => {
+        openDevMenu(event, [
+          {
+            text: 'Accept',
+            backgroundColor: '#2a4a7a',
+            color: '#4FC3F7',
+            border: '1px solid #4FC3F7',
+            onClick: () => runGuarded(`Accept ${mission.id}`, () => QuestsDev.setAccepted(mission.id))
+          },
+          {
+            text: 'Complete',
+            backgroundColor: '#2a4a7a',
+            color: '#4FC3F7',
+            border: '1px solid #4FC3F7',
+            onClick: () => runGuarded(`Complete ${mission.id}`, () => QuestsDev.complete(mission.id))
+          },
+          {
+            text: 'Reset',
+            backgroundColor: '#4a2a2a',
+            color: '#ff8a80',
+            border: '1px solid #ff8a80',
+            hoverBackgroundColor: '#2a1a1a',
+            hoverBorderColor: '#ffcdd2',
+            onClick: () => runGuarded(`Reset ${mission.id}`, () => QuestsDev.reset(mission.id))
+          },
+          {
+            text: 'Copy accept cmd',
+            onClick: () => copyCommand(acceptCmd)
+          },
+          {
+            text: 'Copy complete cmd',
+            onClick: () => copyCommand(completeCmd)
+          },
+          {
+            text: 'Copy reset cmd',
+            onClick: () => copyCommand(resetCmd)
+          },
+          {
+            text: 'Copy all cmds',
+            onClick: () => copyCommand(`${acceptCmd}\n${completeCmd}\n${resetCmd}`)
+          }
+        ]);
+      });
+
+      missionsList.appendChild(rowWrap);
     }
     refreshMissionStatuses();
     missionSection.appendChild(missionsList);
-    contentDiv.appendChild(missionSection);
+    itemsMissionsRow.appendChild(missionSection);
+    contentDiv.appendChild(itemsMissionsRow);
 
     // Seals
     const sealsSection = section('Seven seals');
     const sealsRow = buttonRow(sealsSection);
     const sealButtons = [];
     for (let i = 0; i < SEVEN_SEALS_COUNT; i++) {
+      const command = `QuestsDev.setSealCompleted(${i}, true)`;
+      const group = document.createElement('div');
+      group.style.cssText = 'display:flex;gap:2px;';
       const btn = makeBtn(`Seal ${i + 1}`, () => runGuarded(`Complete seal ${i + 1}`, async () => {
         await QuestsDev.setSealCompleted(i, true);
-      }));
+      }), { command });
       sealButtons.push({ index: i, btn });
-      sealsRow.appendChild(btn);
+      group.appendChild(btn);
+      group.appendChild(makeCopyBtn(command));
+      sealsRow.appendChild(group);
     }
-    sealsRow.appendChild(makeBtn('All seals', () => runGuarded('Complete all seals', () => QuestsDev.grant({
+    const allSealsCmd = 'QuestsDev.grant({ firstSeal: 1, secondSeal: 1, thirdSeal: 1, fourthSeal: 1, fifthSeal: 1, sixthSeal: 1, seventhSeal: 1 })';
+    const clearSealsCmd = 'QuestsDev.grant({ resetAllSeals: true })';
+    const allSealsGroup = document.createElement('div');
+    allSealsGroup.style.cssText = 'display:flex;gap:2px;';
+    allSealsGroup.appendChild(makeBtn('All seals', () => runGuarded('Complete all seals', () => QuestsDev.grant({
       firstSeal: 1, secondSeal: 1, thirdSeal: 1, fourthSeal: 1, fifthSeal: 1, sixthSeal: 1, seventhSeal: 1
-    }))));
-    sealsRow.appendChild(makeBtn('Clear seals', () => runGuarded('Clear seals', () => QuestsDev.grant({ resetAllSeals: true })), { danger: true }));
+    })), { command: allSealsCmd }));
+    allSealsGroup.appendChild(makeCopyBtn(allSealsCmd));
+    sealsRow.appendChild(allSealsGroup);
+    const clearSealsGroup = document.createElement('div');
+    clearSealsGroup.style.cssText = 'display:flex;gap:2px;';
+    clearSealsGroup.appendChild(makeBtn('Clear seals', () => runGuarded('Clear seals', () => QuestsDev.grant({ resetAllSeals: true })), { danger: true, command: clearSealsCmd }));
+    clearSealsGroup.appendChild(makeCopyBtn(clearSealsCmd));
+    sealsRow.appendChild(clearSealsGroup);
     contentDiv.appendChild(sealsSection);
 
     refreshSealStatuses = () => {
@@ -14653,7 +15087,7 @@ function createNPCCooldownManager() {
     const help = document.createElement('p');
     help.className = 'pixel-font-14';
     help.style.cssText = 'margin:0;color:#666;';
-    help.textContent = 'Console: QuestsDev.help() — same API as this panel.';
+    help.textContent = 'Console: QuestsDev.help() — Right-click items/missions for actions. Copy / Ctrl+click quick actions.';
     contentDiv.appendChild(help);
 
     openQuestsModal({
@@ -25130,16 +25564,29 @@ function createNPCCooldownManager() {
 
       // Map items to their required mission completion status
       // Format: { itemName: { missionId, requiredStatus: 'accepted' | 'completed', removeWhenCompleted?: boolean, removeWhenPutridChamberComplete?: boolean } }
-      // removeWhenCompleted: if true, item is removed when quest is completed (for unique items)
+      // removeWhenCompleted: if true, item is removed when quest is completed (for unique / mid-mission tools)
       const itemMissionMap = {
-        'Map to the Mines': { missionId: KING_COPPER_KEY_MISSION.id, requiredStatus: 'accepted' },
+        'Map to the Mines': { missionId: KING_COPPER_KEY_MISSION.id, requiredStatus: 'accepted', removeWhenCompleted: true },
+        [COPPER_KEY_CONFIG.productName]: { missionId: KING_COPPER_KEY_MISSION.id, requiredStatus: 'accepted', removeWhenCompleted: true },
         [HONEYFLOWER_CONFIG.productName]: { missionId: KING_HONEYFLOWER_MISSION.id, requiredStatus: 'accepted', removeWhenCompleted: true },
-        'Obsidian Knife': { missionId: KING_RED_DRAGON_MISSION.id, requiredStatus: 'accepted' },
-        'Stamped Letter': { missionId: KING_LETTER_MISSION.id, requiredStatus: 'accepted' },
+        'Obsidian Knife': { missionId: KING_RED_DRAGON_MISSION.id, requiredStatus: 'accepted', removeWhenCompleted: true },
+        'Red Dragon Scale': { missionId: KING_RED_DRAGON_MISSION.id, requiredStatus: 'accepted', removeWhenCompleted: true },
+        'Red Dragon Leather': { missionId: KING_RED_DRAGON_MISSION.id, requiredStatus: 'accepted', removeWhenCompleted: true },
+        'Stamped Letter': { missionId: KING_LETTER_MISSION.id, requiredStatus: 'accepted', removeWhenCompleted: true },
         'Letter from Al Dee': { missionId: KING_LETTER_MISSION.id, requiredStatus: 'accepted', removeWhenCompleted: true },
         'Dragon Claw': { missionId: KING_RED_DRAGON_MISSION.id, requiredStatus: 'completed' },
+        'Magnet': { missionId: AL_DEE_FISHING_MISSION.id, requiredStatus: 'accepted', removeWhenCompleted: true },
+        'Small Axe': { missionId: AL_DEE_FISHING_MISSION.id, requiredStatus: 'accepted', removeWhenCompleted: true },
+        'Iron Ore': { missionId: AL_DEE_FISHING_MISSION.id, requiredStatus: 'accepted', removeWhenCompleted: true },
         'Light Shovel': { missionId: AL_DEE_FISHING_MISSION.id, requiredStatus: 'completed' },
+        'Elvenhair Rope': { missionId: AL_DEE_GOLDEN_ROPE_MISSION.id, requiredStatus: 'accepted', removeWhenCompleted: true },
         'The Holy Tible': { missionId: AL_DEE_GOLDEN_ROPE_MISSION.id, requiredStatus: 'completed' },
+        [COSTELLO_QUEEN_BANSHEES_MISSION.diaryItemName || "Costello's diary"]: {
+          missionId: COSTELLO_QUEEN_BANSHEES_MISSION.id,
+          requiredStatus: 'accepted',
+          removeWhenCompleted: true
+        },
+        'Spider Silk': { missionId: MOTHER_OF_ALL_SPIDERS_MISSION.id, requiredStatus: 'accepted', removeWhenCompleted: true },
         [SCARAB_COIN_CONFIG.productName]: { missionId: KING_SCARAB_COIN_MISSION.id, requiredStatus: 'accepted', removeWhenCompleted: true },
         [DESTROY_FIELD_RUNE_CONFIG.productName]: {
           missionId: SERPENTINE_TOWER_MISSION.id,
@@ -25150,7 +25597,11 @@ function createNPCCooldownManager() {
         [SCORPION_SCEPTRE_CONFIG.productName]: {
           missionId: SERPENTINE_TOWER_MISSION.id,
           requiredStatus: 'completed'
-        }
+        },
+        [WISHLIST_CONFIG.productName]: { missionId: CHRISTMAS_MIRACLE_MISSION.id, requiredStatus: 'accepted', removeWhenCompleted: true },
+        [PRESENT_CONFIG.productName]: { missionId: CHRISTMAS_MIRACLE_MISSION.id, requiredStatus: 'accepted', removeWhenCompleted: true },
+        [MINOTAUR_TROPHY_CONFIG.productName]: { missionId: APPRENTICE_SHENG_MISSION.id, requiredStatus: 'completed' },
+        [ORB_CONFIG.productName]: { missionId: WEAKENED_ARCHDEMON_MISSION.id, requiredStatus: 'completed' }
       };
 
       let serpentineRunePickupFlagNeedsSave = false;
@@ -25655,6 +26106,8 @@ function createNPCCooldownManager() {
   // Console QA helpers. Prefer QuestsDev.*; legacy global names are aliases.
 
   // Resolve at use-time so asset-hydrated productNames are never snapshotted as empty.
+  // New Dev Tools item: add key here, map it in resolveQuestDevItemName(), and optionally
+  // QUESTS_DEV_ITEM_PROGRESS_ORDER + wasQuestDevItemReceivedBefore().
   const QUESTS_DEV_ITEM_KEY_IDS = [
     'leather', 'scale', 'letter', 'ironOre', 'smallAxe', 'copperKey', 'stampedLetter',
     'elvenhairRope', 'holyTible', 'blessedAnkh', 'honeyflower', 'scarabCoin',
@@ -25722,27 +26175,34 @@ function createNPCCooldownManager() {
     }
   });
 
-  const QUESTS_DEV_MISSIONS_BY_ID = {
-    [KING_HONEYFLOWER_MISSION.id]: KING_HONEYFLOWER_MISSION,
-    [KING_CROSSING_THE_LINE_MISSION.id]: KING_CROSSING_THE_LINE_MISSION,
-    [KING_COPPER_KEY_MISSION.id]: KING_COPPER_KEY_MISSION,
-    [KING_RED_DRAGON_MISSION.id]: KING_RED_DRAGON_MISSION,
-    [KING_LETTER_MISSION.id]: KING_LETTER_MISSION,
-    [KING_MONKS_STUDY_MISSION.id]: KING_MONKS_STUDY_MISSION,
-    [COSTELLO_QUEEN_BANSHEES_MISSION.id]: COSTELLO_QUEEN_BANSHEES_MISSION,
-    [FOLLOWER_OF_ZATHROTH_MISSION.id]: FOLLOWER_OF_ZATHROTH_MISSION,
-    [MOTHER_OF_ALL_SPIDERS_MISSION.id]: MOTHER_OF_ALL_SPIDERS_MISSION,
-    [AL_DEE_FISHING_MISSION.id]: AL_DEE_FISHING_MISSION,
-    [AL_DEE_GOLDEN_ROPE_MISSION.id]: AL_DEE_GOLDEN_ROPE_MISSION,
-    [KING_SCARAB_COIN_MISSION.id]: KING_SCARAB_COIN_MISSION,
-    [SERPENTINE_TOWER_MISSION.id]: SERPENTINE_TOWER_MISSION,
-    [APPRENTICE_SHENG_MISSION.id]: APPRENTICE_SHENG_MISSION,
-    [CHRISTMAS_MIRACLE_MISSION.id]: CHRISTMAS_MIRACLE_MISSION,
-    [SVENSON_LOVE_STORY_MISSION.id]: SVENSON_LOVE_STORY_MISSION,
-    [WEAKENED_ARCHDEMON_MISSION.id]: WEAKENED_ARCHDEMON_MISSION
-  };
+  // Live mission map for Dev Tools / QuestsDev — derived from the mission registry.
+  // Adding a mission to MISSION_STATE_MAP + registerMissionForDialogue() includes it here.
+  function resolveQuestsDevMission(missionId) {
+    if (!missionId || !MISSION_STATE_MAP[missionId]) return null;
+    return MISSION_BY_ID[missionId] || { id: missionId, title: missionId };
+  }
+
+  const QUESTS_DEV_MISSIONS_BY_ID = new Proxy({}, {
+    get(_target, prop) {
+      if (prop === Symbol.toStringTag) return 'Object';
+      if (typeof prop !== 'string') return undefined;
+      return resolveQuestsDevMission(prop) || undefined;
+    },
+    ownKeys() {
+      return Object.keys(MISSION_STATE_MAP);
+    },
+    getOwnPropertyDescriptor(_target, prop) {
+      const mission = typeof prop === 'string' ? resolveQuestsDevMission(prop) : null;
+      if (!mission) return undefined;
+      return { configurable: true, enumerable: true, writable: false, value: mission };
+    },
+    has(_target, prop) {
+      return typeof prop === 'string' && !!MISSION_STATE_MAP[prop];
+    }
+  });
 
   // Item grant buttons follow story progression (starter → late-game).
+  // New grantable items: add key here (and to QUESTS_DEV_ITEM_KEY_IDS + resolveQuestDevItemName).
   const QUESTS_DEV_ITEM_PROGRESS_ORDER = [
     'silverToken',
     'honeyflower',
@@ -25788,15 +26248,15 @@ function createNPCCooldownManager() {
     const ordered = [];
     const seen = new Set();
     for (const mission of QUEST_LOG_MISSIONS) {
-      if (mission?.id && QUESTS_DEV_MISSIONS_BY_ID[mission.id]) {
-        ordered.push(QUESTS_DEV_MISSIONS_BY_ID[mission.id]);
+      if (mission?.id && MISSION_STATE_MAP[mission.id]) {
+        ordered.push(resolveQuestsDevMission(mission.id));
         seen.add(mission.id);
       }
     }
-    for (const [id, mission] of Object.entries(QUESTS_DEV_MISSIONS_BY_ID)) {
-      if (!seen.has(id)) ordered.push(mission);
+    for (const missionId of Object.keys(MISSION_STATE_MAP)) {
+      if (!seen.has(missionId)) ordered.push(resolveQuestsDevMission(missionId));
     }
-    return ordered;
+    return ordered.filter(Boolean);
   }
 
   function getQuestDevMissionStatusLabel(mission) {
@@ -25804,6 +26264,110 @@ function createNPCCooldownManager() {
     if (progress?.completed) return 'completed';
     if (progress?.accepted) return 'accepted';
     return 'inactive';
+  }
+
+  function isQuestDevMissionCompleted(missionId) {
+    const mission = QUESTS_DEV_MISSIONS_BY_ID[missionId];
+    return !!getMissionProgress(mission)?.completed;
+  }
+
+  function isQuestDevMissionAcceptedOrCompleted(missionId) {
+    const progress = getMissionProgress(QUESTS_DEV_MISSIONS_BY_ID[missionId]);
+    return !!(progress?.accepted || progress?.completed);
+  }
+
+  /** True if this account has obtained the item before (inventory, received flag, or mission progress). */
+  function wasQuestDevItemReceivedBefore(key, receivedFlags = {}) {
+    switch (key) {
+      case 'silverToken':
+        return getQuestDevMissionsInProgressOrder().some((mission) => {
+          const progress = getMissionProgress(mission);
+          return !!(progress?.accepted || progress?.completed);
+        });
+      case 'honeyflower': {
+        const progress = getMissionProgress(KING_HONEYFLOWER_MISSION);
+        return !!(progress?.honeyflowerPicked || progress?.completed);
+      }
+      case 'copperKey':
+        return !!receivedFlags.copperKey || isQuestDevMissionCompleted(KING_COPPER_KEY_MISSION.id);
+      case 'scale':
+      case 'leather':
+      case 'dragonClaw':
+        return isQuestDevMissionCompleted(KING_RED_DRAGON_MISSION.id);
+      case 'letter':
+        return !!receivedFlags.letter || isQuestDevMissionAcceptedOrCompleted(KING_LETTER_MISSION.id);
+      case 'stampedLetter':
+        return isQuestDevMissionCompleted(KING_LETTER_MISSION.id);
+      case 'ironOre':
+        return !!receivedFlags.ironOre || isQuestDevMissionAcceptedOrCompleted(AL_DEE_FISHING_MISSION.id);
+      case 'smallAxe':
+        return isQuestDevMissionAcceptedOrCompleted(AL_DEE_FISHING_MISSION.id);
+      case 'lightShovel':
+        return isQuestDevMissionCompleted(AL_DEE_FISHING_MISSION.id);
+      case 'elvenhairRope':
+        return isQuestDevMissionAcceptedOrCompleted(AL_DEE_GOLDEN_ROPE_MISSION.id);
+      case 'holyTible':
+        return isQuestDevMissionCompleted(AL_DEE_GOLDEN_ROPE_MISSION.id);
+      case 'diary':
+        return isQuestDevMissionAcceptedOrCompleted(COSTELLO_QUEEN_BANSHEES_MISSION.id);
+      case 'blessedAnkh':
+        return isQuestDevMissionCompleted(COSTELLO_QUEEN_BANSHEES_MISSION.id);
+      case 'spoolOfYarn': {
+        const love = getMissionProgress(SVENSON_LOVE_STORY_MISSION);
+        return isQuestDevMissionCompleted(MOTHER_OF_ALL_SPIDERS_MISSION.id)
+          || !!(love?.awashYarnDelivered || love?.awashYarnRequested || love?.strandedAtUnderground);
+      }
+      case 'scarabCoin':
+        return isQuestDevMissionAcceptedOrCompleted(KING_SCARAB_COIN_MISSION.id);
+      case 'destroyFieldRune': {
+        const progress = getMissionProgress(SERPENTINE_TOWER_MISSION);
+        return !!(progress?.destroyFieldRuneTaken || progress?.completed);
+      }
+      case 'compass': {
+        const love = getMissionProgress(SVENSON_LOVE_STORY_MISSION);
+        return isQuestDevMissionCompleted(SERPENTINE_TOWER_MISSION.id)
+          || !!(love?.undergroundCompassDelivered || love?.undergroundCompassRequested || love?.strandedAtWhiteWave);
+      }
+      case 'woodenPlank': {
+        const love = getMissionProgress(SVENSON_LOVE_STORY_MISSION);
+        return isQuestDevMissionCompleted(APPRENTICE_SHENG_MISSION.id)
+          || !!(love?.plankDelivered || love?.accepted || love?.completed);
+      }
+      case 'wishlist':
+        return !!receivedFlags.wishlist || isQuestDevMissionAcceptedOrCompleted(CHRISTMAS_MIRACLE_MISSION.id);
+      case 'present':
+        return !!receivedFlags.present || isQuestDevMissionCompleted(CHRISTMAS_MIRACLE_MISSION.id);
+      case 'bunnySlippers': {
+        const love = getMissionProgress(SVENSON_LOVE_STORY_MISSION);
+        return !!(love?.whiteWaveSlippersDelivered || love?.completed);
+      }
+      default:
+        return false;
+    }
+  }
+
+  async function loadQuestDevItemReceivedFlags(playerName) {
+    const flags = {
+      copperKey: false,
+      letter: false,
+      ironOre: false,
+      wishlist: false,
+      present: false
+    };
+    if (!playerName) return flags;
+    const [copperKey, letter, ironOre, wishlist, present] = await Promise.all([
+      hasReceivedCopperKey(playerName).catch(() => false),
+      hasReceivedLetterFromAlDee(playerName).catch(() => false),
+      hasReceivedIronOre(playerName).catch(() => false),
+      hasReceivedWishlist(playerName).catch(() => false),
+      hasSantaPresentClaimed(playerName).catch(() => false)
+    ]);
+    flags.copperKey = !!copperKey;
+    flags.letter = !!letter;
+    flags.ironOre = !!ironOre;
+    flags.wishlist = !!wishlist;
+    flags.present = !!present;
+    return flags;
   }
 
   const QUESTS_DEV_COMPLETE_REWARDS = {

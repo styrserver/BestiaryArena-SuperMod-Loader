@@ -4,6 +4,41 @@
   },
   "notes": [
     {
+      "version": "4.7.3",
+      "changes": [
+        {
+          "mod": "Bestiary Automator",
+          "type": "fixed",
+          "text": "Stamina auto-refill still runs while Manual Runner is active (other Automator tasks stay paused). Returning to the tab triggers an immediate refill so Start is not left disabled after background farming."
+        },
+        {
+          "mod": "Manual Runner",
+          "type": "fixed",
+          "text": "Background farming is more reliable: Start-button waits extend while the tab is hidden (with reward/mode recovery), Start detection ignores zeroed layout metrics, and auto-refill waits for Automator potions (including on tab focus) instead of ending the batch. Runs no longer abort from a stray stamina tooltip; stop conditions stay frozen for the batch; max-floor mode no longer falls through into a generic victory stop; brief board-idle and post-refill settle retries reduce false “board busy” / out-of-stamina stops. Auto-aborts show the reason in the results modal (stamina, Start button, board busy, or error)."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "changed",
+          "text": "Gameplay option Anti-Idle Sounds replaced with Mute all game sounds, which mutes the browser tab to silence in-game audio."
+        },
+        {
+          "mod": "Quests",
+          "type": "added",
+          "text": "Quest Dev Tools: side-by-side item/mission grids with sticky column headers, right-click context menus for actions and copyable console commands, clearer readable fonts, and wider layout."
+        },
+        {
+          "mod": "Quests",
+          "type": "changed",
+          "text": "Quest Dev Tools mission list is derived from the main mission registry so new registered missions appear automatically. Item rows show whether an item was obtained before even when inventory is empty."
+        },
+        {
+          "mod": "Quests",
+          "type": "fixed",
+          "text": "Hand-in completion now removes turned-in quest items and mid-mission tools/maps from cloud inventory instead of only hiding them in the backpack UI. On load, leftovers after completed missions are cleaned up so inventory matches what the backpack should show (permanent tools and trophies kept). Context menus dismiss reliably when clicking outside (including over open modals)."
+        }
+      ]
+    },
+    {
       "version": "4.7.2",
       "changes": [
         {

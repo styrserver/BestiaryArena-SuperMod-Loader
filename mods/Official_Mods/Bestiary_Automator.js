@@ -4131,6 +4131,17 @@ const startAutomation = () => {
       console.log('[Bestiary Automator] Tab became hidden - switching to background mode (10s interval)');
     } else {
       console.log('[Bestiary Automator] Tab became visible - switching to foreground mode (5s interval)');
+      // Kick stamina refill immediately when returning to a Manual Runner farm (Start is
+      // often disabled until potions land; the next interval tick can be several seconds away).
+      if (
+        config.autoRefillStamina &&
+        window.ModCoordination?.isModActive('Manual Runner') &&
+        !isBoardAnalyzerRunning()
+      ) {
+        refillStaminaIfNeeded().catch((error) => {
+          console.error('[Bestiary Automator] Error refilling stamina on visibility restore:', error);
+        });
+      }
     }
   };
   
@@ -4212,8 +4223,17 @@ const stopAutomation = () => {
 
 const runAutomationTasks = async () => {
   try {
-    // Check if Board Analyzer / Manual Runner is running - if so, skip all automation tasks
+    // Board Analyzer / Manual Runner: skip rewards/daycare/cubes/autoplay, but keep stamina
+    // refill when Manual Runner enabled it — otherwise Start stays disabled mid-farm.
     if (isAnalysisCoordinationActive()) {
+      if (
+        config.autoRefillStamina &&
+        window.ModCoordination?.isModActive('Manual Runner') &&
+        !isBoardAnalyzerRunning()
+      ) {
+        updateRequiredStamina();
+        await refillStaminaIfNeeded();
+      }
       return;
     }
     
@@ -5412,6 +5432,8 @@ context.exports = {
   },
   // Manual seashell collection for testing
   collectSeashell: collectSeashellIfReady,
+  // Used by Manual Runner to refill mid-farm when Automator's tick is paused for analysis
+  refillStaminaIfNeeded,
   // Manual rewards collection for testing
   collectRewards: takeRewardsIfAvailable,
   openSurpriseCubes: openAllSurpriseCubesFromInventory,

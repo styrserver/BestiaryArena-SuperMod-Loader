@@ -28,7 +28,7 @@ const defaultConfig = {
   autoplayRefreshTimerMode: 'autoplay', // 'autoplay', 'internal', or 'both'
   disableAutoReload: false,
   disableQuestHelpers: false,
-  enableAntiIdleSounds: false,
+  muteAllGameSounds: false,
   removeWebsiteFooter: false,
   hideStopAfterDefeat: false,
   hidePowerSavingMode: false,
@@ -120,6 +120,7 @@ try {
 window.betterUIConfig = config;
 delete config.enableFavorites;
 delete config.favoriteSymbol;
+delete config.enableAntiIdleSounds;
 config.hotkeyOpenInventory = sanitizeStoredHotkey(config.hotkeyOpenInventory, '');
 if (config.hotkeyOpenQuestLog === undefined) config.hotkeyOpenQuestLog = 'q';
 if (config.hotkeyOpenStore === undefined) config.hotkeyOpenStore = 's';
@@ -250,7 +251,6 @@ let replayMaxFloorGuardUntil = 0;
 let programmaticNavFloorGuardUntil = 0;
 let replayFloorGuardHookInstalled = false;
 let autoHideMonstersInProgress = false;
-let antiIdlePlayPromise = null;
 const initState = {
   inProgress: false,
   initialized: false
@@ -3148,8 +3148,6 @@ const subscriptions = {
   autoplayRefreshSetPlayMode: null
 };
 
-// Anti-idle sounds state
-let antiIdleAudioElement = null;
 
 // Playercount state
 const PLAYER_COUNT_POLL_MS = 60000;
@@ -7899,8 +7897,8 @@ function showSettingsModal() {
           </div>
           <div style="margin-bottom: 15px;">
             <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-              <input type="checkbox" id="anti-idle-sounds-toggle" style="transform: scale(1.2);">
-              ${warningLabelSpanHtml(t('mods.betterUI.antiIdleLabel'), { title: t('mods.betterUI.antiIdleTooltip') })}
+              <input type="checkbox" id="mute-all-game-sounds-toggle" style="transform: scale(1.2);">
+              ${warningLabelSpanHtml(t('mods.betterUI.muteAllGameSoundsLabel'), { title: t('mods.betterUI.muteAllGameSoundsTooltip') })}
             </label>
           </div>
           <div style="margin-bottom: 15px;">
@@ -8851,18 +8849,18 @@ function showSettingsModal() {
         });
       }
       
-      const antiIdleSoundsCheckbox = content.querySelector('#anti-idle-sounds-toggle');
-      if (antiIdleSoundsCheckbox) {
-        antiIdleSoundsCheckbox.checked = config.enableAntiIdleSounds;
-        
-        antiIdleSoundsCheckbox.addEventListener('change', () => {
-          config.enableAntiIdleSounds = antiIdleSoundsCheckbox.checked;
+      const muteAllGameSoundsCheckbox = content.querySelector('#mute-all-game-sounds-toggle');
+      if (muteAllGameSoundsCheckbox) {
+        muteAllGameSoundsCheckbox.checked = config.muteAllGameSounds;
+
+        muteAllGameSoundsCheckbox.addEventListener('change', () => {
+          config.muteAllGameSounds = muteAllGameSoundsCheckbox.checked;
           saveConfig();
-          
-          if (antiIdleSoundsCheckbox.checked) {
-            enableAntiIdleSounds();
+
+          if (muteAllGameSoundsCheckbox.checked) {
+            enableMuteAllGameSounds();
           } else {
-            disableAntiIdleSounds();
+            disableMuteAllGameSounds();
           }
         });
       }
@@ -16288,58 +16286,68 @@ function stopAutoplayRefreshMonitor(options = {}) {
   }
 }
 
-// Enable anti-idle sounds
-function enableAntiIdleSounds() {
-  try {
-    // Clear any existing audio element
-    disableAntiIdleSounds();
-    
-    const el = document.createElement("audio");
-    document.body.append(el);
-    el.loop = true;
-    el.src = '/swoosh.mp3';
-    
-    const playPromise = el.play();
-    antiIdlePlayPromise = playPromise;
-    if (playPromise && typeof playPromise.catch === 'function') {
-      playPromise
-        .catch((error) => {
-          // Expected when quickly re-initializing and pausing/removing the element.
-          if (error?.name === 'AbortError') {
-            console.log('[Mod Settings] Anti-idle sounds play interrupted during lifecycle change');
-            return;
-          }
-          console.warn('[Mod Settings] Anti-idle sounds play failed (may require user interaction):', error);
-        })
-        .finally(() => {
-          if (antiIdlePlayPromise === playPromise) {
-            antiIdlePlayPromise = null;
-          }
-        });
-    }
-    
-    antiIdleAudioElement = el;
-    console.log('[Mod Settings] Anti-idle sounds enabled - tab should show speaker icon');
-  } catch (error) {
-    console.error('[Mod Settings] Error enabling anti-idle sounds:', error);
-  }
+function requestTabMuted(muted) {
+  return new Promise((resolve) => {
+    const messageId = 'setTabMuted_' + Date.now() + '_' + Math.random();
+    let responseHandler = null;
+    let timeoutId = null;
+
+    responseHandler = (event) => {
+      if (event.source !== window) return;
+      if (event.data && event.data.from === 'BESTIARY_EXTENSION' && event.data.id === messageId) {
+        clearTimeout(timeoutId);
+        window.removeEventListener('message', responseHandler);
+        resolve(event.data.response || { success: false, error: 'No response' });
+      }
+    };
+
+    timeoutId = setTimeout(() => {
+      window.removeEventListener('message', responseHandler);
+      resolve({ success: false, error: 'Timed out waiting for tab mute response' });
+    }, 3000);
+
+    window.addEventListener('message', responseHandler);
+    window.postMessage({
+      from: 'BESTIARY_CLIENT',
+      id: messageId,
+      message: {
+        action: 'setTabMuted',
+        muted: !!muted
+      }
+    }, '*');
+  });
 }
 
-// Disable anti-idle sounds
-function disableAntiIdleSounds() {
-  try {
-    if (antiIdleAudioElement) {
-      antiIdleAudioElement.pause();
-      if (antiIdleAudioElement.parentNode) {
-        antiIdleAudioElement.parentNode.removeChild(antiIdleAudioElement);
+function enableMuteAllGameSounds() {
+  requestTabMuted(true)
+    .then((response) => {
+      if (response && response.success) {
+        console.log('[Mod Settings] Mute all game sounds enabled (browser tab muted)');
+      } else {
+        console.warn('[Mod Settings] Failed to mute tab:', response?.error || response);
       }
-      antiIdleAudioElement = null;
-      console.log('[Mod Settings] Anti-idle sounds disabled');
-    }
-    antiIdlePlayPromise = null;
-  } catch (error) {
-    console.error('[Mod Settings] Error disabling anti-idle sounds:', error);
-  }
+    })
+    .catch((error) => {
+      console.error('[Mod Settings] Error enabling mute all game sounds:', error);
+    });
+}
+
+function disableMuteAllGameSounds() {
+  requestTabMuted(false)
+    .then((response) => {
+      if (response && response.success) {
+        if (response.skipped) {
+          console.log('[Mod Settings] Mute all game sounds disabled (left manual tab mute alone)');
+        } else {
+          console.log('[Mod Settings] Mute all game sounds disabled (browser tab unmuted)');
+        }
+      } else {
+        console.warn('[Mod Settings] Failed to unmute tab:', response?.error || response);
+      }
+    })
+    .catch((error) => {
+      console.error('[Mod Settings] Error disabling mute all game sounds:', error);
+    });
 }
 
 // =======================
@@ -17408,11 +17416,11 @@ function initBetterUI() {
       console.log('[Mod Settings] Autoplay refresh disabled in config');
     }
     
-    if (config.enableAntiIdleSounds) {
-      console.log('[Mod Settings] Anti-idle sounds enabled in config, starting audio');
-      enableAntiIdleSounds();
+    if (config.muteAllGameSounds) {
+      console.log('[Mod Settings] Mute all game sounds enabled in config, muting tab');
+      enableMuteAllGameSounds();
     } else {
-      console.log('[Mod Settings] Anti-idle sounds disabled in config');
+      console.log('[Mod Settings] Mute all game sounds disabled in config');
     }
 
     if (config.autoHideNonShinyNonAwakenedMonsters) {
@@ -17616,7 +17624,7 @@ function cleanupBetterUI() {
     }
     
     stopAutoplayRefreshMonitor();
-    disableAntiIdleSounds();
+    disableMuteAllGameSounds();
     unsubscribeFromMapChanges();
     removeLastMapNavButton();
     cleanupHotkeys();
@@ -17770,9 +17778,6 @@ function cleanupBetterUI() {
     // Reset subscriptions
     subscriptions.autoplayRefreshGame = null;
     subscriptions.autoplayRefreshSetPlayMode = null;
-    
-    // Reset anti-idle sounds
-    antiIdleAudioElement = null;
     
     // Reset playercount state
     playercountState.currentPlayerCount = null;

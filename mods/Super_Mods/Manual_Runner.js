@@ -88,6 +88,15 @@ const UI_UPDATE_DELAY_MS = 600;
 const GAME_RESTART_DELAY_MS = 400;
 const BOARD_IDLE_MAX_WAIT_MS = 10000;
 const BOARD_IDLE_RECHECK_DELAY_MS = 100;
+/** Foreground Start-button wait; background tabs use START_BUTTON_BACKGROUND_MAX_WAIT_MS. */
+const START_BUTTON_MAX_WAIT_MS = 10000;
+/** Background tabs throttle timers/paint — allow a long recovery window instead of aborting. */
+const START_BUTTON_BACKGROUND_MAX_WAIT_MS = 180000;
+const START_BUTTON_RECHECK_DELAY_MS = 1000;
+/** How long to wait for Automator potions when auto-refill is enabled. */
+const STAMINA_REFILL_WAIT_MS = 120000;
+const STAMINA_REFILL_BACKGROUND_WAIT_MS = 300000;
+const STAMINA_REFILL_TRIGGER_INTERVAL_MS = 2500;
 const NOTIFICATION_DISPLAY_MS = 3000;
 const STAMINA_SKIP_COST = 2;
 
@@ -651,7 +660,17 @@ class AnalysisState {
   constructor() {
     this.state = ANALYSIS_STATES.IDLE;
     this.currentId = null;
-    this.forceStop = false;
+    // Named forceStopFlag so it does not shadow requestForceStop() (Boolean own-props hide class methods).
+    this.forceStopFlag = false;
+  }
+
+  /** @deprecated use forceStopFlag — kept as accessor for older call sites */
+  get forceStop() {
+    return this.forceStopFlag;
+  }
+
+  set forceStop(value) {
+    this.forceStopFlag = !!value;
   }
   
   canStart() {
@@ -664,18 +683,18 @@ class AnalysisState {
     }
     this.state = ANALYSIS_STATES.RUNNING;
     this.currentId = Date.now();
-    this.forceStop = false;
+    this.forceStopFlag = false;
     return this.currentId;
   }
   
   stop() {
     this.state = ANALYSIS_STATES.STOPPING;
-    this.forceStop = true;
+    this.forceStopFlag = true;
   }
   
-  forceStop() {
+  requestForceStop() {
     this.state = ANALYSIS_STATES.STOPPING;
-    this.forceStop = true;
+    this.forceStopFlag = true;
     // Force stop immediately - don't wait for current run to finish
     console.log('[Manual Runner] Force stop requested - aborting immediately');
   }
@@ -683,7 +702,7 @@ class AnalysisState {
   reset() {
     this.state = ANALYSIS_STATES.IDLE;
     this.currentId = null;
-    this.forceStop = false;
+    this.forceStopFlag = false;
   }
   
   setError() {
@@ -1007,9 +1026,30 @@ function normalizeBoardButtonText(button) {
   return (button?.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
 }
 
+function isDocumentHidden() {
+  return typeof document !== 'undefined' &&
+    (document.hidden === true || document.visibilityState === 'hidden');
+}
+
 function isBoardButtonVisible(button) {
   if (!button) return false;
-  return !!(button.offsetWidth || button.offsetHeight || button.getClientRects().length);
+  if (button.offsetWidth || button.offsetHeight || button.getClientRects().length) return true;
+
+  // Background tabs often report 0×0 layout metrics even when the control is present.
+  // Fall back to computed styles and reject only when an ancestor is display:none
+  // (e.g. hide-game-board), which still correctly blocks hidden controls.
+  if (!isDocumentHidden()) return false;
+  try {
+    let el = button;
+    while (el && el.nodeType === 1) {
+      const style = window.getComputedStyle(el);
+      if (!style || style.display === 'none' || style.visibility === 'hidden') return false;
+      el = el.parentElement;
+    }
+    return true;
+  } catch (_) {
+    return false;
+  }
 }
 
 function hasBoardOrderAncestor(node) {
@@ -1205,30 +1245,141 @@ function getCurrentStaminaForRun() {
   return null;
 }
 
-/** Game tooltip or stamina below map cost — refill may run at pre-start but cannot create stamina from nothing. */
+/**
+ * True only when numeric stamina is known and below the map cost.
+ * Do NOT treat a visible stamina tooltip alone as out-of-stamina — hover/refill UI
+ * tooltips are a common false positive that aborted runs mid-farm.
+ */
 function hasInsufficientStaminaForNextRun() {
   const cost = getCurrentRunStaminaCost();
   const stamina = getCurrentStaminaForRun();
-  const tooltip = document.querySelector(
-    '[role="tooltip"] img[alt="stamina"], [data-state="instant-open"] img[alt="stamina"]'
-  );
-  if (tooltip) return { insufficient: true, cost, stamina };
   if (stamina != null && stamina < cost) return { insufficient: true, cost, stamina };
   return { insufficient: false, cost, stamina };
 }
 
+async function triggerAutomatorStaminaRefill() {
+  try {
+    if (typeof window.bestiaryAutomator?.refillStaminaIfNeeded === 'function') {
+      await window.bestiaryAutomator.refillStaminaIfNeeded();
+      return true;
+    }
+  } catch (e) {
+    console.warn('[Manual Runner] Automator refill trigger failed:', e);
+  }
+  return false;
+}
+
+/**
+ * When auto-refill is on, keep requesting Automator potions until stamina covers the
+ * next run, the user stops, or the wait window expires (longer while the tab is hidden).
+ * @returns {'ready'|'aborted'|'out_of_stamina'}
+ */
+async function ensureStaminaForNextRun(analysisId, options = {}) {
+  let check = hasInsufficientStaminaForNextRun();
+  if (!check.insufficient) return 'ready';
+
+  if (!config.enableAutoRefillStamina) {
+    console.warn(
+      `[Manual Runner] Stopping run: insufficient stamina (${check.stamina ?? '?'} / ${check.cost} required)`
+    );
+    return 'out_of_stamina';
+  }
+
+  const foregroundMaxWaitMs = Math.max(2000, Number(options.maxWaitMs) || STAMINA_REFILL_WAIT_MS);
+  const backgroundMaxWaitMs = Math.max(
+    foregroundMaxWaitMs,
+    Number(options.backgroundMaxWaitMs) || STAMINA_REFILL_BACKGROUND_WAIT_MS
+  );
+  const startTs = performance.now();
+  let allowBackgroundDeadline = isDocumentHidden();
+  let loggedWaiting = false;
+  let lastTriggerAt = 0;
+  let wasHidden = isDocumentHidden();
+
+  const getDeadline = () => {
+    if (isDocumentHidden()) allowBackgroundDeadline = true;
+    return startTs + (allowBackgroundDeadline ? backgroundMaxWaitMs : foregroundMaxWaitMs);
+  };
+
+  while (performance.now() < getDeadline()) {
+    if (analysisId != null && shouldAbortAnalysisLoop(analysisId)) {
+      return 'aborted';
+    }
+
+    check = hasInsufficientStaminaForNextRun();
+    if (!check.insufficient) {
+      if (loggedWaiting) {
+        console.log(
+          `[Manual Runner] Stamina recovered (${check.stamina ?? '?'} / ${check.cost}) after ${Math.round(performance.now() - startTs)}ms`
+        );
+      }
+      return 'ready';
+    }
+
+    if (!loggedWaiting) {
+      loggedWaiting = true;
+      console.log(
+        `[Manual Runner] Waiting for stamina refill (${check.stamina ?? '?'} / ${check.cost} required)${isDocumentHidden() ? ' [tab hidden]' : ''}...`
+      );
+    }
+
+    const nowHidden = isDocumentHidden();
+    const becameVisible = wasHidden && !nowHidden;
+    wasHidden = nowHidden;
+
+    const elapsed = performance.now() - startTs;
+    if (becameVisible || elapsed - lastTriggerAt >= STAMINA_REFILL_TRIGGER_INTERVAL_MS) {
+      lastTriggerAt = elapsed;
+      await triggerAutomatorStaminaRefill();
+      await waitForModCoordinationTasks({
+        maxWaitMs: becameVisible ? 20000 : 8000,
+        delayMs: 250,
+        context: becameVisible ? 'stamina refill after tab focus' : 'stamina refill'
+      });
+      continue;
+    }
+
+    await sleep(nowHidden ? 1000 : 400);
+  }
+
+  check = hasInsufficientStaminaForNextRun();
+  if (!check.insufficient) return 'ready';
+
+  console.warn(
+    `[Manual Runner] Stopping run: insufficient stamina after refill wait (${check.stamina ?? '?'} / ${check.cost} required; auto-refill needs potions)`
+  );
+  return 'out_of_stamina';
+}
+
 /**
  * Robust start click for transient UI states.
- * Retries for a short window with ESC nudge + coordination wait before giving up.
+ * Retries with ESC / pause / reward-close nudges. Background tabs get a much longer
+ * window because Chrome throttles timers and can delay board control paint.
  */
 async function clickStartButtonRobust(options = {}) {
-  const maxWaitMs = Math.max(200, Number(options.maxWaitMs) || 10000);
-  const recheckDelayMs = Math.max(40, Number(options.recheckDelayMs) || 1000);
+  const foregroundMaxWaitMs = Math.max(200, Number(options.maxWaitMs) || START_BUTTON_MAX_WAIT_MS);
+  const backgroundMaxWaitMs = Math.max(
+    foregroundMaxWaitMs,
+    Number(options.backgroundMaxWaitMs) || START_BUTTON_BACKGROUND_MAX_WAIT_MS
+  );
+  const recheckDelayMs = Math.max(40, Number(options.recheckDelayMs) || START_BUTTON_RECHECK_DELAY_MS);
+  const analysisId = options.analysisId;
   const startTs = performance.now();
-  const deadline = startTs + maxWaitMs;
   let attempts = 0;
+  let loggedBackgroundWait = false;
+  let lastRecoveryAt = 0;
+  let allowBackgroundDeadline = isDocumentHidden();
 
-  while (performance.now() < deadline) {
+  const getDeadline = () => {
+    if (isDocumentHidden()) allowBackgroundDeadline = true;
+    return startTs + (allowBackgroundDeadline ? backgroundMaxWaitMs : foregroundMaxWaitMs);
+  };
+
+  while (performance.now() < getDeadline()) {
+    if (analysisId != null && shouldAbortAnalysisLoop(analysisId)) {
+      return false;
+    }
+
     attempts++;
     if (clickStartButton()) {
       if (attempts > 1) {
@@ -1238,14 +1389,38 @@ async function clickStartButtonRobust(options = {}) {
       return true;
     }
 
+    const elapsed = performance.now() - startTs;
+    if (isDocumentHidden() && elapsed >= foregroundMaxWaitMs && !loggedBackgroundWait) {
+      loggedBackgroundWait = true;
+      console.warn(
+        `[Manual Runner] Start button not ready after ${Math.round(elapsed)}ms while tab is hidden — extending wait (background max ${backgroundMaxWaitMs}ms)`
+      );
+    }
+
+    // Periodically clear leftover reward UI / mode drift that blocks Start between runs.
+    // Also refill if Start is missing because stamina ran out mid-farm (common after background).
+    if (elapsed - lastRecoveryAt >= 2000) {
+      lastRecoveryAt = elapsed;
+      if (getOpenRewardsStateWithFallback()) {
+        closeRewardScreen();
+      }
+      if (isBoardGameRunning() && findBoardPauseButton()) {
+        clickBoardPauseButton();
+      }
+      ensureManualMode();
+      if (config.enableAutoRefillStamina && hasInsufficientStaminaForNextRun().insufficient) {
+        await triggerAutomatorStaminaRefill();
+      }
+    }
+
     // Autoplay pause can block Start/Iniciar — stop the session and re-lock manual mode.
     if (findBoardPauseButton()) {
       clickBoardPauseButton();
       ensureManualMode();
       await sleep(200);
       if (clickStartButton()) {
-        const elapsed = Math.round(performance.now() - startTs);
-        console.log(`[Manual Runner] Start button found after pause (${attempts} checks, ${elapsed}ms)`);
+        const recoveredMs = Math.round(performance.now() - startTs);
+        console.log(`[Manual Runner] Start button found after pause (${attempts} checks, ${recoveredMs}ms)`);
         return true;
       }
     }
@@ -1253,6 +1428,7 @@ async function clickStartButtonRobust(options = {}) {
     // Close transient overlays/modals that may block board controls.
     dispatchEsc();
 
+    const deadline = getDeadline();
     const remaining = deadline - performance.now();
     if (remaining <= 0) {
       break;
@@ -1265,13 +1441,15 @@ async function clickStartButtonRobust(options = {}) {
       context: 'start-button recovery'
     });
 
-    if (performance.now() >= deadline) {
+    if (performance.now() >= getDeadline()) {
       break;
     }
-    await sleep(Math.min(recheckDelayMs, Math.max(40, deadline - performance.now())));
+    await sleep(Math.min(recheckDelayMs, Math.max(40, getDeadline() - performance.now())));
   }
 
-  console.error(`[Manual Runner] Failed to find start button after ${attempts} checks (${Math.round(performance.now() - startTs)}ms)`);
+  console.error(
+    `[Manual Runner] Failed to find start button after ${attempts} checks (${Math.round(performance.now() - startTs)}ms${isDocumentHidden() ? ', tab hidden' : ''})`
+  );
   return false;
 }
 
@@ -2081,11 +2259,31 @@ function cleanupBoardSubscription() {
 }
 
 function shouldAbortAnalysisLoop(analysisId) {
-  if (!analysisState.isValidId(analysisId) || !analysisState.isRunning() || analysisState.forceStop) {
-    console.log('[Manual Runner] Stopping analysis');
+  if (!analysisState.isValidId(analysisId)) {
+    console.log(
+      `[Manual Runner] Stopping analysis: id mismatch (current=${analysisState.currentId}, loop=${analysisId})`
+    );
+    return true;
+  }
+  if (analysisState.forceStopFlag) {
+    console.log('[Manual Runner] Stopping analysis: stop requested');
+    return true;
+  }
+  if (!analysisState.isRunning()) {
+    console.log(`[Manual Runner] Stopping analysis: state=${analysisState.state}`);
     return true;
   }
   return false;
+}
+
+/** Freeze stop-condition knobs for the duration of a batch so panel reloads cannot change them mid-run. */
+function snapshotRunStopConfig() {
+  return {
+    stopCondition: config.stopCondition,
+    stopWhenTicksReached: config.stopWhenTicksReached,
+    stopAfterRounds: config.stopAfterRounds,
+    maxFloor: config.maxFloor
+  };
 }
 
 async function waitForModCoordinationTasks(options = {}) {
@@ -3419,12 +3617,43 @@ function formatRoundsProgress(roundsPlayed, roundsLimit) {
   return limit > 0 ? `${played}/${limit}` : `${played}/∞`;
 }
 
+function getManualRunnerAbortMessage(results) {
+  if (!results || results.success) return null;
+
+  if (results.forceStopped) {
+    return t('mods.manualRunner.stoppedByUser');
+  }
+
+  const reason = results.abortReason
+    || (results.stoppedOutOfStamina ? 'out_of_stamina' : null)
+    || (results.error ? 'error' : null);
+
+  switch (reason) {
+    case 'out_of_stamina':
+      return t('mods.manualRunner.abortedOutOfStamina');
+    case 'start_button_unavailable':
+      return t('mods.manualRunner.abortedStartButtonUnavailable');
+    case 'board_busy':
+      return t('mods.manualRunner.abortedBoardBusy');
+    case 'error': {
+      const message = results.error || 'unknown error';
+      return (t('mods.manualRunner.abortedError') || 'Stopped due to an error: {message}').replace('{message}', message);
+    }
+    case 'user':
+      return t('mods.manualRunner.stoppedByUser');
+    default:
+      return t('mods.manualRunner.abortedUnknown');
+  }
+}
+
 // Main function to run until victory
 async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
   const thisAnalysisId = analysisState.start();
+  const runStop = snapshotRunStopConfig();
   let startTime = null;
   let userForceStopped = false;
   let stoppedOutOfStamina = false;
+  let abortReason = null;
   
   try {
     // Reset attempts array and tracking variables
@@ -3462,7 +3691,8 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
     
     while (true) {
       if (shouldAbortAnalysisLoop(thisAnalysisId)) {
-        userForceStopped = true;
+        userForceStopped = analysisState.forceStopFlag;
+        abortReason = 'user';
         break;
       }
 
@@ -3485,19 +3715,32 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
 
       await waitForModCoordinationTasks({ context: `pre-start attempt ${attemptCount}` });
 
-      const staminaCheck = hasInsufficientStaminaForNextRun();
-      if (staminaCheck.insufficient) {
+      const staminaOutcome = await ensureStaminaForNextRun(thisAnalysisId);
+      if (staminaOutcome === 'aborted') {
+        userForceStopped = analysisState.forceStopFlag;
+        abortReason = 'user';
+        break;
+      }
+      if (staminaOutcome === 'out_of_stamina') {
         stoppedOutOfStamina = true;
-        console.warn(
-          `[Manual Runner] Stopping run: insufficient stamina (${staminaCheck.stamina ?? '?'} / ${staminaCheck.cost} required; auto-refill needs potions)`
-        );
+        abortReason = 'out_of_stamina';
         break;
       }
 
       prepareAttemptState(attemptCount + 1);
 
-      if (!await clickStartButtonRobust({ maxWaitMs: 10000, recheckDelayMs: 1000 })) {
+      if (!await clickStartButtonRobust({
+        maxWaitMs: START_BUTTON_MAX_WAIT_MS,
+        recheckDelayMs: START_BUTTON_RECHECK_DELAY_MS,
+        analysisId: thisAnalysisId
+      })) {
+        if (analysisState.forceStopFlag || !analysisState.isRunning() || !analysisState.isValidId(thisAnalysisId)) {
+          userForceStopped = analysisState.forceStopFlag;
+          abortReason = 'user';
+          break;
+        }
         console.warn('[Manual Runner] Stopping run: Start button unavailable (not a user stop)');
+        abortReason = 'start_button_unavailable';
         break;
       }
 
@@ -3529,6 +3772,7 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
 
       if (result.forceStopped) {
         userForceStopped = true;
+        abortReason = 'user';
         console.log('[Manual Runner] Analysis stopped');
         break;
       }
@@ -3598,12 +3842,14 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
       // Check if stop was requested during this run (after recording attempt data)
       if (!analysisState.isRunning()) {
         console.log('[Manual Runner] Stop requested - current run finished and recorded, stopping now');
+        userForceStopped = analysisState.forceStopFlag;
+        abortReason = 'user';
         break;
       }
 
-      if (config.stopCondition === 'rounds' && config.stopAfterRounds > 0 && attemptCount >= config.stopAfterRounds) {
+      if (runStop.stopCondition === 'rounds' && runStop.stopAfterRounds > 0 && attemptCount >= runStop.stopAfterRounds) {
         const totalTime = performance.now() - startTime;
-        console.log(`[Manual Runner] ✓ Stop: reached round limit ${attemptCount}/${config.stopAfterRounds} — ${formatMilliseconds(totalTime)}`);
+        console.log(`[Manual Runner] ✓ Stop: reached round limit ${attemptCount}/${runStop.stopAfterRounds} — ${formatMilliseconds(totalTime)}`);
         return {
           success: true,
           attempts: attemptCount,
@@ -3630,18 +3876,18 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
       }
 
       // Handle maxFloor mode separately
-      if (config.stopCondition === 'maxFloor' && isVictory) {
-        const currentFloor = getCurrentFloor();
-        if (currentFloor >= config.maxFloor) {
+      if (runStop.stopCondition === 'maxFloor' && isVictory) {
+        const currentFloorForStop = getCurrentFloor();
+        if (currentFloorForStop >= runStop.maxFloor) {
           // Reached or exceeded max floor, stop
           const totalTime = performance.now() - startTime;
-          console.log(`[Manual Runner] ✓ Max floor ${currentFloor}/${config.maxFloor} — stopping (${attemptCount} attempts, ${formatMilliseconds(totalTime)})`);
+          console.log(`[Manual Runner] ✓ Max floor ${currentFloorForStop}/${runStop.maxFloor} — stopping (${attemptCount} attempts, ${formatMilliseconds(totalTime)})`);
           
           const finalResult = {
             ...result,
             completed: true,
             victory: true,
-            floor: currentFloor
+            floor: currentFloorForStop
           };
 
           return {
@@ -3653,7 +3899,7 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
           };
         } else {
           // Advance to next floor and continue
-          console.log(`[Manual Runner] Victory floor ${currentFloor} → ${currentFloor + 1}`);
+          console.log(`[Manual Runner] Victory floor ${currentFloorForStop} → ${currentFloorForStop + 1}`);
           advanceToNextFloor();
           await sleep(300); // Wait for floor change to take effect
           
@@ -3661,8 +3907,12 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
           const cleanupStart = performance.now();
           
           if (!await ensureGameStopped({ context: `post-victory cleanup ${attemptCount}` })) {
-            console.warn('[Manual Runner] Stopping run: board still busy after idle wait (not a user stop)');
-            break;
+            // One longer retry — gameStarted can briefly stick true after inject/sell.
+            if (!await ensureGameStopped({ context: `post-victory cleanup retry ${attemptCount}`, maxWaitMs: 8000 })) {
+              console.warn('[Manual Runner] Stopping run: board still busy after idle wait (not a user stop)');
+              abortReason = 'board_busy';
+              break;
+            }
           }
           
           if (rewardScreenOpen) {
@@ -3679,7 +3929,7 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
           await sleep(GAME_RESTART_DELAY_MS);
           
           const cleanupElapsed = Math.round(performance.now() - cleanupStart);
-          console.log(`[Manual Runner] Next attempt on floor ${currentFloor + 1} after ${cleanupElapsed}ms`);
+          console.log(`[Manual Runner] Next attempt on floor ${currentFloorForStop + 1} after ${cleanupElapsed}ms`);
           
           // Continue to next iteration
           continue;
@@ -3688,20 +3938,21 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
 
       const victoryConditionMet =
         isVictory &&
-        config.stopCondition !== 'rounds' &&
-        (config.stopCondition === 'any' ||
+        runStop.stopCondition !== 'rounds' &&
+        runStop.stopCondition !== 'maxFloor' &&
+        (runStop.stopCondition === 'any' ||
           targetRankPoints == null ||
           (typeof result.rankPoints === 'number' && result.rankPoints >= targetRankPoints));
 
       let victoryContinueDueToTicks = false;
 
       if (victoryConditionMet) {
-        if (config.stopWhenTicksReached > 0) {
+        if (runStop.stopWhenTicksReached > 0) {
           // ticks === 0 is never a real fast win here (skip stub / stale read); require a positive count.
-          if (result.ticks > 0 && result.ticks <= config.stopWhenTicksReached) {
+          if (result.ticks > 0 && result.ticks <= runStop.stopWhenTicksReached) {
             const totalTime = performance.now() - startTime;
             const rankSuffix = targetRankPoints != null ? `rank ${result.rankPoints} (S+${targetRankPoints})` : `rank ${result.rankPoints}`;
-            console.log(`[Manual Runner] ✓ Stop: victory, ${rankSuffix}, ticks ${result.ticks} ≤ ${config.stopWhenTicksReached} — ${formatMilliseconds(totalTime)} (${attemptCount} attempts)`);
+            console.log(`[Manual Runner] ✓ Stop: victory, ${rankSuffix}, ticks ${result.ticks} ≤ ${runStop.stopWhenTicksReached} — ${formatMilliseconds(totalTime)} (${attemptCount} attempts)`);
 
             const finalResult = {
               ...result,
@@ -3723,7 +3974,7 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
             if (result.ticks === 0) {
               console.warn(`[Manual Runner] ✓ Victory but ticks still 0 after server merge — cannot evaluate tick target; retrying`);
             } else {
-              console.log(`[Manual Runner] ✓ Victory but ticks ${result.ticks} > ${config.stopWhenTicksReached} — searching for better run`);
+              console.log(`[Manual Runner] ✓ Victory but ticks ${result.ticks} > ${runStop.stopWhenTicksReached} — searching for better run`);
             }
           }
         } else {
@@ -3754,16 +4005,20 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
       }
       
       if (!await ensureGameStopped({ context: `post-attempt cleanup ${attemptCount}` })) {
-        const staminaAfter = hasInsufficientStaminaForNextRun();
-        if (staminaAfter.insufficient) {
-          stoppedOutOfStamina = true;
-          console.warn(
-            `[Manual Runner] Stopping run: out of stamina after attempt ${attemptCount} (board stuck with gameStarted=true)`
-          );
-        } else {
-          console.warn('[Manual Runner] Stopping run: board still busy after idle wait (not a user stop)');
+        if (!await ensureGameStopped({ context: `post-attempt cleanup retry ${attemptCount}`, maxWaitMs: 8000 })) {
+          const staminaAfter = hasInsufficientStaminaForNextRun();
+          if (staminaAfter.insufficient) {
+            stoppedOutOfStamina = true;
+            abortReason = 'out_of_stamina';
+            console.warn(
+              `[Manual Runner] Stopping run: out of stamina after attempt ${attemptCount} (board stuck with gameStarted=true)`
+            );
+          } else {
+            abortReason = 'board_busy';
+            console.warn('[Manual Runner] Stopping run: board still busy after idle wait (not a user stop)');
+          }
+          break;
         }
-        break;
       }
 
       if (rewardScreenOpen) {
@@ -3781,11 +4036,14 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
     }
     
     const totalTime = performance.now() - startTime;
+    if (userForceStopped) abortReason = 'user';
+    else if (stoppedOutOfStamina) abortReason = abortReason || 'out_of_stamina';
     return {
       success: false,
       attempts: attemptCount,
       forceStopped: userForceStopped,
       stoppedOutOfStamina,
+      abortReason,
       totalTimeMs: totalTime,
       allAttempts: allAttempts
     };
@@ -3797,6 +4055,7 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
       success: false,
       attempts: attemptCount,
       error: error.message,
+      abortReason: 'error',
       totalTimeMs: totalTime,
       allAttempts: allAttempts
     };
@@ -3980,10 +4239,12 @@ function hasAllyCreaturesOnBoard() {
 
 // Create the configuration panel UI
 function createConfigPanel() {
-  // Reload config from localStorage to ensure we have the latest values
-  // This ensures the config is always current, even if the mod was reloaded
-  const currentConfig = loadConfig({ silent: true });
-  Object.assign(config, currentConfig);
+  // Prefer localStorage for the panel form. Never overwrite the live `config` object while a
+  // batch is running — that used to change stopCondition/rounds mid-loop (e.g. reopening the button).
+  const panelConfig = loadConfig({ silent: true });
+  if (analysisState.isIdle()) {
+    Object.assign(config, panelConfig);
+  }
   
   const content = document.createElement('div');
   content.style.cssText = 'display: flex; flex-direction: column; gap: 12px;';
@@ -4012,7 +4273,7 @@ function createConfigPanel() {
   stopSelect.appendChild(optMax);
   stopSelect.appendChild(optMaxFloor);
   stopSelect.appendChild(optRounds);
-  stopSelect.value = config.stopCondition || 'max';
+  stopSelect.value = panelConfig.stopCondition || 'max';
   stopContainer.appendChild(stopLabel);
   stopContainer.appendChild(stopSelect);
   content.appendChild(stopContainer);
@@ -4022,7 +4283,7 @@ function createConfigPanel() {
   stopWhenTicksContainer.id = `${CONFIG_PANEL_ID}-stop-when-ticks-container`;
   stopWhenTicksContainer.style.cssText = 'display: flex; justify-content: space-between; align-items: center;';
   stopWhenTicksContainer.style.display =
-    (config.stopCondition === 'maxFloor' || config.stopCondition === 'rounds') ? 'none' : 'flex';
+    (panelConfig.stopCondition === 'maxFloor' || panelConfig.stopCondition === 'rounds') ? 'none' : 'flex';
   
   const stopWhenTicksLabel = document.createElement('label');
   stopWhenTicksLabel.textContent = t('mods.manualRunner.stopWhenTicksReachedLabel');
@@ -4032,10 +4293,10 @@ function createConfigPanel() {
   stopWhenTicksInput.id = `${CONFIG_PANEL_ID}-stop-when-ticks-input`;
   stopWhenTicksInput.min = '0';
   stopWhenTicksInput.max = '3840'; // 4 minutes (240,000ms / 62.5ms per tick = 3,840 ticks)
-  stopWhenTicksInput.value = config.stopWhenTicksReached || 0;
+  stopWhenTicksInput.value = panelConfig.stopWhenTicksReached || 0;
   stopWhenTicksInput.style.cssText = 'width: 80px; text-align: center; background-color: #333; color: #fff; border: 1px solid #555; padding: 4px 8px; border-radius: 4px;';
   stopWhenTicksInput.disabled =
-    (config.stopCondition === 'maxFloor' || config.stopCondition === 'rounds');
+    (panelConfig.stopCondition === 'maxFloor' || panelConfig.stopCondition === 'rounds');
   
   stopWhenTicksContainer.appendChild(stopWhenTicksLabel);
   stopWhenTicksContainer.appendChild(stopWhenTicksInput);
@@ -4045,7 +4306,7 @@ function createConfigPanel() {
   const maxFloorContainer = document.createElement('div');
   maxFloorContainer.id = `${CONFIG_PANEL_ID}-max-floor-container`;
   maxFloorContainer.style.cssText = 'display: flex; justify-content: space-between; align-items: center;';
-  maxFloorContainer.style.display = config.stopCondition === 'maxFloor' ? 'flex' : 'none';
+  maxFloorContainer.style.display = panelConfig.stopCondition === 'maxFloor' ? 'flex' : 'none';
   
   const maxFloorLabel = document.createElement('label');
   maxFloorLabel.textContent = t('mods.manualRunner.maxFloorLabel') || 'Maximum Floor:';
@@ -4055,7 +4316,7 @@ function createConfigPanel() {
   maxFloorInput.id = `${CONFIG_PANEL_ID}-max-floor-input`;
   maxFloorInput.min = '0';
   maxFloorInput.max = '15';
-  maxFloorInput.value = config.maxFloor !== undefined ? config.maxFloor : 10;
+  maxFloorInput.value = panelConfig.maxFloor !== undefined ? panelConfig.maxFloor : 10;
   maxFloorInput.style.cssText = 'width: 80px; text-align: center; background-color: #333; color: #fff; border: 1px solid #555; padding: 4px 8px; border-radius: 4px;';
   
   maxFloorContainer.appendChild(maxFloorLabel);
@@ -4066,7 +4327,7 @@ function createConfigPanel() {
   const roundsContainer = document.createElement('div');
   roundsContainer.id = `${CONFIG_PANEL_ID}-rounds-container`;
   roundsContainer.style.cssText = 'display: flex; justify-content: space-between; align-items: center;';
-  roundsContainer.style.display = config.stopCondition === 'rounds' ? 'flex' : 'none';
+  roundsContainer.style.display = panelConfig.stopCondition === 'rounds' ? 'flex' : 'none';
 
   const roundsLabel = document.createElement('label');
   roundsLabel.textContent = t('mods.manualRunner.stopAfterRoundsLabel') || 'Stop after rounds (0 = endless):';
@@ -4076,7 +4337,7 @@ function createConfigPanel() {
   roundsInput.id = `${CONFIG_PANEL_ID}-rounds-input`;
   roundsInput.min = '0';
   roundsInput.max = '9999';
-  roundsInput.value = config.stopAfterRounds || 0;
+  roundsInput.value = panelConfig.stopAfterRounds || 0;
   roundsInput.style.cssText = 'width: 80px; text-align: center; background-color: #333; color: #fff; border: 1px solid #555; padding: 4px 8px; border-radius: 4px;';
 
   roundsContainer.appendChild(roundsLabel);
@@ -4100,7 +4361,7 @@ function createConfigPanel() {
   const hideInput = document.createElement('input');
   hideInput.type = 'checkbox';
   hideInput.id = `${CONFIG_PANEL_ID}-hide-input`; // Make ID unique to this panel
-  hideInput.checked = Boolean(config.hideGameBoard); // Explicit boolean conversion
+  hideInput.checked = Boolean(panelConfig.hideGameBoard); // Explicit boolean conversion
   
   const hideLabel = document.createElement('label');
   hideLabel.htmlFor = hideInput.id;
@@ -4116,7 +4377,7 @@ function createConfigPanel() {
   const refillInput = document.createElement('input');
   refillInput.type = 'checkbox';
   refillInput.id = `${CONFIG_PANEL_ID}-refill-input`;
-  refillInput.checked = Boolean(config.enableAutoRefillStamina);
+  refillInput.checked = Boolean(panelConfig.enableAutoRefillStamina);
   const refillLabel = document.createElement('label');
   refillLabel.htmlFor = refillInput.id;
   refillLabel.textContent = t('mods.manualRunner.enableAutoRefill');
@@ -4130,7 +4391,7 @@ function createConfigPanel() {
   const sellInput = document.createElement('input');
   sellInput.type = 'checkbox';
   sellInput.id = `${CONFIG_PANEL_ID}-sell-input`;
-  sellInput.checked = Boolean(config.enableAutoSellCreatures);
+  sellInput.checked = Boolean(panelConfig.enableAutoSellCreatures);
   const sellLabel = document.createElement('label');
   sellLabel.htmlFor = sellInput.id;
   sellLabel.textContent = t('mods.manualRunner.enableAutoSell');
@@ -4161,7 +4422,7 @@ function createConfigPanel() {
   const injectInput = document.createElement('input');
   injectInput.type = 'checkbox';
   injectInput.id = `${CONFIG_PANEL_ID}-inject-input`;
-  injectInput.checked = Boolean(config.enableAutoInjectSealedCreatures);
+  injectInput.checked = Boolean(panelConfig.enableAutoInjectSealedCreatures);
   const injectLabel = document.createElement('label');
   injectLabel.htmlFor = injectInput.id;
   injectLabel.textContent = t('mods.manualRunner.enableAutoInjectSealed') || 'Auto-inject sealed creatures';
@@ -4193,7 +4454,7 @@ function createConfigPanel() {
   const staminaSkipInput = document.createElement('input');
   staminaSkipInput.type = 'checkbox';
   staminaSkipInput.id = `${CONFIG_PANEL_ID}-stamina-skip-input`;
-  staminaSkipInput.checked = Boolean(config.enableStaminaSkip);
+  staminaSkipInput.checked = Boolean(panelConfig.enableStaminaSkip);
   const staminaSkipLabel = document.createElement('label');
   staminaSkipLabel.htmlFor = staminaSkipInput.id;
   staminaSkipLabel.textContent = t('mods.manualRunner.enableStaminaSkip');
@@ -4469,7 +4730,7 @@ function showRunningAnalysisModal(
       // If already stopping, force-stop everything immediately
       if (analysisState.isStopping()) {
         console.log('[Manual Runner] Stop — force (already stopping)');
-        analysisState.forceStop();
+        analysisState.requestForceStop();
         
         // Force cleanup immediately
         if (window.ModCoordination) {
@@ -4647,10 +4908,11 @@ async function showResultsModal(results) {
     const content = document.createElement('div');
     content.className = 'manual-runner-results-modal-root';
     
-    // Add a note if stopped by user
-    if (results.forceStopped && !results.success) {
+    // Explain why the batch ended when it did not meet the run condition
+    const abortMessage = getManualRunnerAbortMessage(results);
+    if (abortMessage) {
       content.appendChild(createTextElement('div', {
-        text: t('mods.manualRunner.stoppedByUser'),
+        text: abortMessage,
         style: 'text-align: center; color: #e74c3c; margin-bottom: 15px;'
       }));
     }
@@ -5146,6 +5408,7 @@ async function runAnalysis() {
       attempts: results?.attempts,
       forceStopped: results?.forceStopped,
       stoppedOutOfStamina: results?.stoppedOutOfStamina,
+      abortReason: results?.abortReason,
       allAttempts: results?.allAttempts?.length
     });
     

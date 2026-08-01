@@ -1216,6 +1216,43 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
       });
     return true;
   }
+
+  if (message.action === 'setTabMuted') {
+    const tabId = resolveMessageTabId(message, sender);
+    if (tabId == null) {
+      sendResponse({ success: false, error: 'No tab context for setTabMuted' });
+      return false;
+    }
+
+    const muted = !!message.muted;
+    const applyMute = () => {
+      browserAPI.tabs.update(tabId, { muted }, () => {
+        if (browserAPI.runtime.lastError) {
+          sendResponse({ success: false, error: browserAPI.runtime.lastError.message });
+          return;
+        }
+        sendResponse({ success: true, muted });
+      });
+    };
+
+    if (!muted) {
+      // Don't clear a mute the user set manually from the browser UI.
+      browserAPI.tabs.get(tabId, (tab) => {
+        if (browserAPI.runtime.lastError) {
+          sendResponse({ success: false, error: browserAPI.runtime.lastError.message });
+          return;
+        }
+        if (tab?.mutedInfo?.reason === 'user') {
+          sendResponse({ success: true, skipped: true, muted: true });
+          return;
+        }
+        applyMute();
+      });
+    } else {
+      applyMute();
+    }
+    return true;
+  }
   
   if (message.action === 'contentScriptReady') {
     console.log('Content script reported ready in tab:', sender.tab.id);
