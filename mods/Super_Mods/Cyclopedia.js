@@ -3379,7 +3379,97 @@ function createStatsWorldRecordPlayerLink(playerName, truncateStyle) {
 }
 
 // RunTracker integration functions
-// Helper function to resolve map ID to map name (same as RunTracker)
+function toRunTrackerMapKey(nameOrId) {
+  if (nameOrId === undefined || nameOrId === null || nameOrId === '') return null;
+  return `map_${String(nameOrId).toLowerCase().replace(/\s+/g, '_')}`;
+}
+
+function resolveMapNameFromEventMapping(mapId) {
+  const eventMap = globalThis.mapsDatabase?.EVENT_TO_ROOM_MAPPING;
+  if (!eventMap || typeof eventMap !== 'object' || !mapId) return null;
+  for (const [name, id] of Object.entries(eventMap)) {
+    if (id === mapId) return name;
+  }
+  return null;
+}
+
+/** All RunTracker storage keys that may hold runs for a map id or display name. */
+function getRunTrackerMapKeysForMap(mapIdOrName) {
+  const keys = new Set();
+  if (!mapIdOrName) return [];
+  const raw = String(mapIdOrName);
+  const eventMap = globalThis.mapsDatabase?.EVENT_TO_ROOM_MAPPING;
+
+  const addNameOrId = (value) => {
+    if (!value) return;
+    keys.add(toRunTrackerMapKey(value));
+    if (eventMap && typeof eventMap === 'object') {
+      if (eventMap[value]) keys.add(toRunTrackerMapKey(eventMap[value]));
+      const eventName = resolveMapNameFromEventMapping(value);
+      if (eventName) keys.add(toRunTrackerMapKey(eventName));
+    }
+  };
+
+  if (raw.startsWith('map_')) {
+    keys.add(raw);
+    const stripped = raw.slice(4).replace(/_/g, ' ');
+    addNameOrId(stripped);
+    addNameOrId(resolveMapName(stripped));
+  } else {
+    addNameOrId(raw);
+    addNameOrId(resolveMapName(raw));
+  }
+
+  return [...keys].filter(Boolean);
+}
+
+function mergeLocalRunLists(...lists) {
+  const merged = [];
+  const seen = new Set();
+  for (const list of lists) {
+    if (!Array.isArray(list)) continue;
+    for (const run of list) {
+      if (!run) continue;
+      const key = [
+        run.seed ?? '',
+        run.timestamp ?? '',
+        run.time ?? '',
+        run.points ?? '',
+        run.floor ?? '',
+        run.date ?? ''
+      ].join('|');
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(run);
+    }
+  }
+  return merged;
+}
+
+function readLocalRunsFromRunTracker(mapKeys, category) {
+  if (!window.RunTrackerAPI) return category ? [] : { speedrun: [], rank: [], floor: [] };
+  if (category) {
+    return mergeLocalRunLists(
+      ...mapKeys.map((key) => {
+        const data = window.RunTrackerAPI.getRuns(key, category);
+        return Array.isArray(data) ? data : [];
+      })
+    );
+  }
+  return {
+    speedrun: mergeLocalRunLists(
+      ...mapKeys.map((key) => window.RunTrackerAPI.getRuns(key, 'speedrun') || [])
+    ),
+    rank: mergeLocalRunLists(
+      ...mapKeys.map((key) => window.RunTrackerAPI.getRuns(key, 'rank') || [])
+    ),
+    floor: mergeLocalRunLists(
+      ...mapKeys.map((key) => window.RunTrackerAPI.getRuns(key, 'floor') || [])
+    )
+  };
+}
+
+// Helper function to resolve map ID to map name (same as RunTracker, plus raid/event fallbacks)
 function resolveMapName(mapId) {
   try {
     if (!mapId) return null;
@@ -3393,6 +3483,12 @@ function resolveMapName(mapId) {
     if (globalThis.state?.utils?.ROOM_NAME && globalThis.state.utils.ROOM_NAME[mapId]) {
       return globalThis.state.utils.ROOM_NAME[mapId];
     }
+
+    const eventName = resolveMapNameFromEventMapping(mapId);
+    if (eventName) return eventName;
+
+    const fromDb = globalThis.mapsDatabase?.getMapById?.(mapId);
+    if (fromDb?.name) return fromDb.name;
     
     // If all else fails, return the ID
     return mapId;
@@ -3473,7 +3569,7 @@ function getCyclopediaRunWarningReasons(run, options = {}) {
   const reasons = [];
   if (options.isTimeInvalid) reasons.push('faster than your best time');
   if (options.isWorldRecordInvalid) reasons.push('faster than world record');
-  if (options.isRankInvalid) reasons.push('worse rank than your best');
+  if (options.isRankInvalid) reasons.push('higher than your profile best');
   if (options.isFloorTimeInvalid) reasons.push('faster than your best floor time');
   if (options.isFloorWorldRecordInvalid) reasons.push('faster than floor world record');
   if (runSetupHasLevel1Creature(run)) reasons.push('has level 1 creatures');
@@ -3509,10 +3605,11 @@ function decorateCyclopediaRunWarningCell(cell, textElement, row, warningState) 
 
 function getLocalRunsForMap(mapKey, category = null) {
   try {
-    
+    const mapKeys = getRunTrackerMapKeysForMap(mapKey);
+    if (mapKey && !mapKeys.includes(mapKey)) mapKeys.unshift(mapKey);
+
     if (window.RunTrackerAPI) {
-      
-      const data = window.RunTrackerAPI.getRuns(mapKey, category);
+      const data = readLocalRunsFromRunTracker(mapKeys, category);
       if (category) {
         return Promise.resolve(filterLocalRunsByActiveSeason(Array.isArray(data) ? data : []));
       }
@@ -3526,23 +3623,28 @@ function getLocalRunsForMap(mapKey, category = null) {
     
     return getLocalRunData().then(runData => {
       
-      if (!runData || !runData.runs || !runData.runs[mapKey]) {
+      if (!runData || !runData.runs) {
         
         return category ? [] : { speedrun: [], rank: [] };
       }
-      
+
       if (category) {
-        const categoryData = runData.runs[mapKey][category] || [];
-        
+        const categoryData = mergeLocalRunLists(
+          ...mapKeys.map((key) => runData.runs[key]?.[category] || [])
+        );
         return filterLocalRunsByActiveSeason(categoryData);
       }
       
-      const mapData = runData.runs[mapKey];
-      
       return {
-        speedrun: filterLocalRunsByActiveSeason(mapData?.speedrun || []),
-        rank: filterLocalRunsByActiveSeason(mapData?.rank || []),
-        floor: filterLocalRunsByActiveSeason(mapData?.floor || [])
+        speedrun: filterLocalRunsByActiveSeason(mergeLocalRunLists(
+          ...mapKeys.map((key) => runData.runs[key]?.speedrun || [])
+        )),
+        rank: filterLocalRunsByActiveSeason(mergeLocalRunLists(
+          ...mapKeys.map((key) => runData.runs[key]?.rank || [])
+        )),
+        floor: filterLocalRunsByActiveSeason(mergeLocalRunLists(
+          ...mapKeys.map((key) => runData.runs[key]?.floor || [])
+        ))
       };
     });
   } catch (error) {
@@ -11436,10 +11538,10 @@ function createStatisticsSection(selectedMap, leaderboardData) {
       
       // Resolve the map name to ensure consistency with RunTracker
       const resolvedMapName = resolveMapName(selectedMap);
-      const mapKey = `map_${resolvedMapName.toLowerCase().replace(/\s+/g, '_')}`;
+      const mapKey = toRunTrackerMapKey(resolvedMapName) || toRunTrackerMapKey(selectedMap);
       
       
-      let localRuns = await getLocalRunsForMap(mapKey, 'speedrun');
+      let localRuns = await getLocalRunsForMap(selectedMap || mapKey, 'speedrun');
       if (gen !== speedrunPopulateGen) return;
       
       
@@ -11923,10 +12025,10 @@ function createStatisticsSection(selectedMap, leaderboardData) {
       
       // Resolve the map name to ensure consistency with RunTracker
       const resolvedMapName = resolveMapName(selectedMap);
-      const mapKey = `map_${resolvedMapName.toLowerCase().replace(/\s+/g, '_')}`;
+      const mapKey = toRunTrackerMapKey(resolvedMapName) || toRunTrackerMapKey(selectedMap);
       
       
-      let localRuns = await getLocalRunsForMap(mapKey, 'floor');
+      let localRuns = await getLocalRunsForMap(selectedMap || mapKey, 'floor');
       if (gen !== floorsPopulateGen) return;
       
       
@@ -12460,20 +12562,19 @@ function createStatisticsSection(selectedMap, leaderboardData) {
         ranksTable.removeChild(ranksTable.lastChild);
       }
       
-      // Resolve the map name to ensure consistency with RunTracker
-      const resolvedMapName = resolveMapName(selectedMap);
-      const mapKey = `map_${resolvedMapName.toLowerCase().replace(/\s+/g, '_')}`;
-      
-      
-      let localRuns = await getLocalRunsForMap(mapKey, 'rank');
-      if (gen !== ranksPopulateGen) return;
-      
-      
       // Ensure currentYourRooms is populated for warning icon comparisons
       if (!currentYourRooms) {
         const playerState = globalThis.state?.player?.getSnapshot?.()?.context;
         currentYourRooms = getYourRoomsForCyclopediaSeason(playerState?.rooms || {});
       }
+      
+      // Resolve the map name to ensure consistency with RunTracker
+      const resolvedMapName = resolveMapName(selectedMap);
+      const mapKey = toRunTrackerMapKey(resolvedMapName) || toRunTrackerMapKey(selectedMap);
+      
+      
+      let localRuns = await getLocalRunsForMap(selectedMap || mapKey, 'rank');
+      if (gen !== ranksPopulateGen) return;
       
       // Filter out defeated runs with 0 rank points and ascension-floor rank entries
       if (localRuns && localRuns.length > 0) {
@@ -13185,6 +13286,10 @@ function createStatisticsSection(selectedMap, leaderboardData) {
   }
   
   cyclopediaState.refreshLocalRunTables = async () => {
+    try {
+      const playerState = globalThis.state?.player?.getSnapshot?.()?.context;
+      currentYourRooms = getYourRoomsForCyclopediaSeason(playerState?.rooms || {});
+    } catch (_) { /* keep previous yourRooms */ }
     await populateSpeedrunTable();
     await populateRankPointsTable();
     await populateFloorsTable();
@@ -21245,10 +21350,15 @@ function setupEventHandlers() {
     const detail = e.detail || {};
     if (typeof cyclopediaState.refreshLocalRunTables !== 'function') return;
     const activeMapId = cyclopediaState.mapsLastSelectedMapId;
-    if (detail.mapKey && activeMapId) {
-      const resolvedMapName = resolveMapName(activeMapId);
-      const currentMapKey = `map_${String(resolvedMapName).toLowerCase().replace(/\s+/g, '_')}`;
-      if (detail.mapKey !== currentMapKey) return;
+    if ((detail.mapKey || detail.mapId || detail.mapName) && activeMapId) {
+      const activeKeys = new Set(getRunTrackerMapKeysForMap(activeMapId));
+      const detailKeys = new Set([
+        ...(detail.mapKey ? [detail.mapKey] : []),
+        ...getRunTrackerMapKeysForMap(detail.mapId),
+        ...getRunTrackerMapKeysForMap(detail.mapName)
+      ]);
+      const overlaps = [...detailKeys].some((key) => activeKeys.has(key));
+      if (!overlaps) return;
     }
     cyclopediaState.refreshLocalRunTables();
   };

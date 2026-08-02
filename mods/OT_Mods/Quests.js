@@ -542,6 +542,8 @@ function applyQuestDialogueFromAssets(missionsData, npcsData) {
 
   Object.assign(NPC_QUEST_ITEM_UNINVOLVED_TEMPLATES, npcsData.questItemUninvolvedTemplates || {});
 
+  applyMissionRegistryFromAssets(missionsData);
+
   questMissionsDialogue = missionsData;
   questNpcsDialogue = npcsData;
   questDialogueReady = true;
@@ -572,19 +574,9 @@ function replaceArrayContents(target, source) {
 function applyQuestItemsFromAssets(itemsData) {
   if (!itemsData || typeof itemsData !== 'object') return;
   const products = itemsData.products || {};
-  if (products.silverToken) Object.assign(SILVER_TOKEN_CONFIG, products.silverToken);
-  if (products.scarabCoin) Object.assign(SCARAB_COIN_CONFIG, products.scarabCoin);
-  if (products.destroyFieldRune) Object.assign(DESTROY_FIELD_RUNE_CONFIG, products.destroyFieldRune);
-  if (products.scorpionSceptre) Object.assign(SCORPION_SCEPTRE_CONFIG, products.scorpionSceptre);
-  if (products.honeyflower) Object.assign(HONEYFLOWER_CONFIG, products.honeyflower);
-  if (products.minotaurTrophy) Object.assign(MINOTAUR_TROPHY_CONFIG, products.minotaurTrophy);
-  if (products.orb) Object.assign(ORB_CONFIG, products.orb);
-  if (products.copperKey) Object.assign(COPPER_KEY_CONFIG, products.copperKey);
-  if (products.mapColour) Object.assign(MAP_COLOUR_CONFIG, products.mapColour);
-  if (products.wishlist) Object.assign(WISHLIST_CONFIG, products.wishlist);
-  if (products.present) Object.assign(PRESENT_CONFIG, products.present);
-  if (products.bunnySlippers) Object.assign(BUNNY_SLIPPERS_CONFIG, products.bunnySlippers);
-  if (products.lootEffect) Object.assign(LOOT_EFFECT_CONFIG, products.lootEffect);
+  for (const [productId, config] of Object.entries(PRODUCT_CONFIG_BY_ID)) {
+    if (products[productId]) Object.assign(config, products[productId]);
+  }
 
   DESTROY_FIELD_RUNE_ITEM_NAME = DESTROY_FIELD_RUNE_CONFIG.productName || DESTROY_FIELD_RUNE_ITEM_NAME;
 
@@ -607,6 +599,19 @@ function applyQuestItemsFromAssets(itemsData) {
   }
   if (itemsData.questLogSpriteIcons) {
     replaceObjectContents(MISSION_QUEST_LOG_SPRITE_ICON_MAP, itemsData.questLogSpriteIcons);
+  }
+  if (Array.isArray(itemsData.devTools?.items)) {
+    replaceArrayContents(QUESTS_DEV_ITEM_CATALOG, itemsData.devTools.items);
+  }
+  const lifecycle = itemsData.itemLifecycle || {};
+  if (Array.isArray(lifecycle.cleanupRules)) {
+    replaceArrayContents(QUEST_ITEM_CLEANUP_RULES, lifecycle.cleanupRules);
+  }
+  if (Array.isArray(lifecycle.staleCleanupOnComplete)) {
+    replaceArrayContents(QUEST_ITEM_STALE_CLEANUP_RULES, lifecycle.staleCleanupOnComplete);
+  }
+  if (Array.isArray(lifecycle.devCompleteRewards)) {
+    replaceArrayContents(QUEST_DEV_COMPLETE_REWARD_RULES, lifecycle.devCompleteRewards);
   }
   questItemsConfigData = itemsData;
 }
@@ -1162,6 +1167,123 @@ registerMissionForDialogue(WEAKENED_ARCHDEMON_MISSION);
 const MINOTAUR_TROPHY_CONFIG = {};
 const ORB_CONFIG = {};
 
+// Mission registry maps — seeded below, overwritten from missions.json → registry.
+const MISSION_STATE_MAP = {};
+const MISSION_FIREBASE_KEY_MAP = {};
+const MISSION_EXTRA_FIELD_SCHEMAS = {};
+
+const DEFAULT_QUEST_LOG_MISSION_ORDER = [
+  KING_HONEYFLOWER_MISSION,
+  KING_CROSSING_THE_LINE_MISSION,
+  KING_COPPER_KEY_MISSION,
+  KING_RED_DRAGON_MISSION,
+  KING_LETTER_MISSION,
+  AL_DEE_FISHING_MISSION,
+  AL_DEE_GOLDEN_ROPE_MISSION,
+  KING_MONKS_STUDY_MISSION,
+  COSTELLO_QUEEN_BANSHEES_MISSION,
+  FOLLOWER_OF_ZATHROTH_MISSION,
+  MOTHER_OF_ALL_SPIDERS_MISSION,
+  KING_SCARAB_COIN_MISSION,
+  SERPENTINE_TOWER_MISSION,
+  APPRENTICE_SHENG_MISSION,
+  CHRISTMAS_MIRACLE_MISSION,
+  SVENSON_LOVE_STORY_MISSION,
+  WEAKENED_ARCHDEMON_MISSION
+];
+
+const DEFAULT_MISSION_REGISTRY = {
+  king_honeyflower: { stateKey: 'progressHoneyflower', firebaseKey: 'honeyflower', extraFields: ['honeyflowerPicked'] },
+  king_crossing_the_line: { stateKey: 'progressCrossingTheLine', firebaseKey: 'crossingTheLine', extraFields: ['crossingObjectiveComplete'] },
+  king_copper_key: { stateKey: 'progressCopper', firebaseKey: 'copper' },
+  king_red_dragon: { stateKey: 'progressDragon', firebaseKey: 'dragon' },
+  king_letter_al_dee: { stateKey: 'progressLetter', firebaseKey: 'letter' },
+  al_dee_fishing_gold: { stateKey: 'progressAlDeeFishing', firebaseKey: 'alDeeFishing' },
+  al_dee_golden_rope: { stateKey: 'progressAlDeeGoldenRope', firebaseKey: 'alDeeGoldenRope' },
+  king_monks_study: { stateKey: 'progressMonksStudy', firebaseKey: 'monksStudy' },
+  costello_queen_banshees: { stateKey: 'progressQueenBanshees', firebaseKey: 'queenBanshees' },
+  follower_of_zathroth: { stateKey: 'progressFollowerOfZathroth', firebaseKey: 'followerOfZathroth' },
+  mother_of_all_spiders: { stateKey: 'progressMotherOfAllSpiders', firebaseKey: 'motherOfAllSpiders' },
+  king_scarab_coin: { stateKey: 'progressScarabHunt', firebaseKey: 'scarabHunt' },
+  serpentine_tower: {
+    stateKey: 'progressSerpentineTower',
+    firebaseKey: 'serpentineTower',
+    extraFields: ['destroyFieldRuneTaken', 'putridChamberComplete']
+  },
+  apprentice_sheng: {
+    stateKey: 'progressApprenticeSheng',
+    firebaseKey: 'apprenticeSheng',
+    extraFields: ['battleCompleted', 'rookstayerDismissed']
+  },
+  christmas_miracle: { stateKey: 'progressChristmasMiracle', firebaseKey: 'christmasMiracle' },
+  svenson_love_story: {
+    stateKey: 'progressSvensonLoveStory',
+    firebaseKey: 'svensonLoveStory',
+    extraFields: [
+      'plankDelivered', 'strandedAtAwash', 'awashYarnDelivered', 'awashYarnRequested',
+      'strandedAtUnderground', 'undergroundCompassDelivered', 'undergroundCompassRequested',
+      'strandedAtWhiteWave', 'whiteWaveSlippersDelivered'
+    ],
+    forceExtraFieldsWhenCompleted: true,
+    extraFieldAliases: { undergroundCompassDelivered: ['undergroundPlankDelivered'] }
+  },
+  weakened_archdemon: {
+    stateKey: 'progressWeakenedArchdemon',
+    firebaseKey: 'weakenedArchdemon',
+    extraFields: ['battleCompleted']
+  }
+};
+
+function applyMissionRegistryMaps(registryMissions) {
+  for (const key of Object.keys(MISSION_STATE_MAP)) delete MISSION_STATE_MAP[key];
+  for (const key of Object.keys(MISSION_FIREBASE_KEY_MAP)) delete MISSION_FIREBASE_KEY_MAP[key];
+  for (const key of Object.keys(MISSION_EXTRA_FIELD_SCHEMAS)) delete MISSION_EXTRA_FIELD_SCHEMAS[key];
+  for (const [missionId, entry] of Object.entries(registryMissions || {})) {
+    if (!entry?.stateKey || !entry?.firebaseKey) continue;
+    MISSION_STATE_MAP[missionId] = entry.stateKey;
+    MISSION_FIREBASE_KEY_MAP[missionId] = entry.firebaseKey;
+    if (Array.isArray(entry.extraFields) && entry.extraFields.length) {
+      MISSION_EXTRA_FIELD_SCHEMAS[entry.firebaseKey] = {
+        fields: entry.extraFields.slice(),
+        forceExtraFieldsWhenCompleted: !!entry.forceExtraFieldsWhenCompleted,
+        aliases: entry.extraFieldAliases && typeof entry.extraFieldAliases === 'object'
+          ? entry.extraFieldAliases
+          : {}
+      };
+    }
+  }
+}
+
+function rebuildQuestLogMissions(storyOrder) {
+  QUEST_LOG_MISSIONS.length = 0;
+  const order = Array.isArray(storyOrder) && storyOrder.length
+    ? storyOrder
+    : DEFAULT_QUEST_LOG_MISSION_ORDER.map((m) => m.id);
+  const seen = new Set();
+  for (const missionId of order) {
+    const mission = MISSION_BY_ID[missionId];
+    if (mission && !seen.has(missionId)) {
+      QUEST_LOG_MISSIONS.push(mission);
+      seen.add(missionId);
+    }
+  }
+  for (const mission of DEFAULT_QUEST_LOG_MISSION_ORDER) {
+    if (!seen.has(mission.id)) QUEST_LOG_MISSIONS.push(mission);
+  }
+}
+
+function applyMissionRegistryFromAssets(missionsData) {
+  const registry = missionsData?.registry;
+  applyMissionRegistryMaps(registry?.missions || DEFAULT_MISSION_REGISTRY);
+  rebuildQuestLogMissions(registry?.storyOrder);
+}
+
+applyMissionRegistryMaps(DEFAULT_MISSION_REGISTRY);
+
+// Story order for Quest Log / Mission Log / Quest Dev Tools — rebuilt from missions.json → registry.storyOrder.
+const QUEST_LOG_MISSIONS = [];
+rebuildQuestLogMissions();
+
 function getMissionCompletionSummary(mission) {
   if (!mission) return '';
   return MISSION_COMPLETION_SUMMARIES[mission.id] || mission.objectiveLine2 || `Completed ${mission.title}.`;
@@ -1500,12 +1622,55 @@ function messageContainsNpcSwear(message, swearWords = KING_TIBIANUS_SWEAR_WORDS
 const QUEST_ITEMS_CONFIG = {};
 let ROOKGAARD_GLOBAL_POOL_DROP_CHANCE = 0;
 const ROOKGAARD_GLOBAL_DROPS = [];
+// Quest Dev Tools grantable catalog — filled from assets/quests/items.json → devTools.items
+const QUESTS_DEV_ITEM_CATALOG = [];
+// Item lifecycle rules — filled from assets/quests/items.json → itemLifecycle
+const QUEST_ITEM_CLEANUP_RULES = [];
+const QUEST_ITEM_STALE_CLEANUP_RULES = [];
+const QUEST_DEV_COMPLETE_REWARD_RULES = [];
 
 const COPPER_KEY_CONFIG = {};
 const MAP_COLOUR_CONFIG = {};
 const WISHLIST_CONFIG = {};
 const PRESENT_CONFIG = {};
 const BUNNY_SLIPPERS_CONFIG = {};
+
+const PRODUCT_CONFIG_BY_ID = {
+  silverToken: SILVER_TOKEN_CONFIG,
+  scarabCoin: SCARAB_COIN_CONFIG,
+  destroyFieldRune: DESTROY_FIELD_RUNE_CONFIG,
+  scorpionSceptre: SCORPION_SCEPTRE_CONFIG,
+  honeyflower: HONEYFLOWER_CONFIG,
+  minotaurTrophy: MINOTAUR_TROPHY_CONFIG,
+  orb: ORB_CONFIG,
+  copperKey: COPPER_KEY_CONFIG,
+  mapColour: MAP_COLOUR_CONFIG,
+  wishlist: WISHLIST_CONFIG,
+  present: PRESENT_CONFIG,
+  bunnySlippers: BUNNY_SLIPPERS_CONFIG,
+  lootEffect: LOOT_EFFECT_CONFIG
+};
+
+function resolveQuestProductName(productId) {
+  const product = questItemsConfigData?.products?.[productId];
+  if (product?.productName) return product.productName;
+  if (productId === 'costelloDiary') {
+    return COSTELLO_QUEEN_BANSHEES_MISSION.diaryItemName || "Costello's diary";
+  }
+  if (productId === 'blessedAnkh') {
+    return COSTELLO_QUEEN_BANSHEES_MISSION.rewardItemName || 'Blessed Ankh';
+  }
+  if (productId === 'spoolOfYarn') {
+    return MOTHER_OF_ALL_SPIDERS_MISSION.rewardItemName || 'Spool of Yarn';
+  }
+  if (productId === 'scorpionSceptre') {
+    return SCORPION_SCEPTRE_CONFIG.productName || 'Compass';
+  }
+  if (productId === 'minotaurTrophy') {
+    return MINOTAUR_TROPHY_CONFIG.productName || 'Wooden Plank';
+  }
+  return productId;
+}
 
 let SANTA_CLAUS_ROOM_NAME = '';
 let SANTA_CLAUS_TILE_INDEX = null;
@@ -1557,28 +1722,6 @@ const ACTIVE_MISSION_TAB_ATTR = 'data-quests-active-mission-id';
 const QUEST_ADMIN_DEV_MODAL_WIDTH = 800;
 const QUEST_ADMIN_DEV_MODAL_HEIGHT = 720;
 const QUEST_ADMIN_DEV_MODAL_MIN_HEIGHT = 420;
-
-// Story order for Quest Log / Mission Log / Quest Dev Tools.
-// New missions: append here after registering in MISSION_STATE_MAP.
-const QUEST_LOG_MISSIONS = [
-  KING_HONEYFLOWER_MISSION,
-  KING_CROSSING_THE_LINE_MISSION,
-  KING_COPPER_KEY_MISSION,
-  KING_RED_DRAGON_MISSION,
-  KING_LETTER_MISSION,
-  AL_DEE_FISHING_MISSION,
-  AL_DEE_GOLDEN_ROPE_MISSION,
-  KING_MONKS_STUDY_MISSION,
-  COSTELLO_QUEEN_BANSHEES_MISSION,
-  FOLLOWER_OF_ZATHROTH_MISSION,
-  MOTHER_OF_ALL_SPIDERS_MISSION,
-  KING_SCARAB_COIN_MISSION,
-  SERPENTINE_TOWER_MISSION,
-  APPRENTICE_SHENG_MISSION,
-  CHRISTMAS_MIRACLE_MISSION,
-  SVENSON_LOVE_STORY_MISSION,
-  WEAKENED_ARCHDEMON_MISSION
-];
 
 // Quest Log icons — filled from assets/quests/items.json
 const MISSION_QUEST_LOG_ICON_MAP = {};
@@ -4276,300 +4419,67 @@ function createNPCCooldownManager() {
     return containerSlot;
   }
 
-  // Helper to build product definitions from config
+  // Helper to build product definitions from assets/quests/items.json → products
   function buildProductDefinitions(options = {}) {
     const {
       includeCopperKey = true,
       includeObsidianKnife = false,
       includeDragonClaw = false
     } = options;
+    const products = questItemsConfigData?.products || {};
     const productDefinitions = [];
-    for (const [creatureGameId, creatureConfig] of Object.entries(QUEST_ITEMS_CONFIG)) {
-      for (const product of creatureConfig.products) {
-        if (!productDefinitions.find(p => p.name === product.name)) {
-          productDefinitions.push(product);
+    const seen = new Set();
+
+    const pushDef = (def) => {
+      if (!def?.name || seen.has(def.name)) return;
+      seen.add(def.name);
+      productDefinitions.push(def);
+    };
+
+    for (const [productId, product] of Object.entries(products)) {
+      if (!product?.productName) continue;
+      if (productId === 'copperKey' && !includeCopperKey) continue;
+      if (productId === 'obsidianKnife' && !includeObsidianKnife) continue;
+      if (productId === 'dragonClaw' && !includeDragonClaw) continue;
+
+      const def = {
+        name: product.productName,
+        icon: product.icon,
+        iconUrl: product.iconUrl,
+        spriteId: product.spriteId,
+        description: product.description,
+        rarity: product.rarity
+      };
+
+      if (productId === 'costelloDiary') {
+        def.name = COSTELLO_QUEEN_BANSHEES_MISSION.diaryItemName || def.name;
+        def.icon = COSTELLO_QUEEN_BANSHEES_MISSION.diaryIcon || def.icon;
+        if (SEVEN_SEALS_GHOSTLANDS_ROOM_NAMES.length) {
+          def.description = SEVEN_SEALS_GHOSTLANDS_ROOM_NAMES.join('\n');
         }
+      } else if (productId === 'blessedAnkh') {
+        def.name = COSTELLO_QUEEN_BANSHEES_MISSION.rewardItemName || def.name;
+        def.icon = COSTELLO_QUEEN_BANSHEES_MISSION.rewardIcon || def.icon;
+        def.description = COSTELLO_QUEEN_BANSHEES_MISSION.rewardDescription || def.description;
+      } else if (productId === 'spoolOfYarn') {
+        def.name = MOTHER_OF_ALL_SPIDERS_MISSION.rewardItemName || def.name;
+        def.icon = MOTHER_OF_ALL_SPIDERS_MISSION.rewardIcon || def.icon;
+        def.description = MOTHER_OF_ALL_SPIDERS_MISSION.rewardDescription || def.description;
+      }
+
+      pushDef(def);
+    }
+
+    // Safety: include creature / Rookgaard drop defs not yet listed in products{}
+    for (const creatureConfig of Object.values(QUEST_ITEMS_CONFIG)) {
+      for (const product of creatureConfig.products || []) {
+        pushDef(product);
       }
     }
-    
-    // Add Copper Key to product definitions (optional)
-    if (includeCopperKey) {
-      const copperKeyDef = {
-        name: COPPER_KEY_CONFIG.productName,
-        icon: COPPER_KEY_CONFIG.icon,
-        description: COPPER_KEY_CONFIG.description,
-        rarity: COPPER_KEY_CONFIG.rarity
-      };
-      if (!productDefinitions.find(p => p.name === copperKeyDef.name)) {
-        productDefinitions.push(copperKeyDef);
-      }
-    }
-
-    // Add Silver Token (starter coin)
-    const silverTokenDef = {
-      name: SILVER_TOKEN_CONFIG.productName,
-      icon: SILVER_TOKEN_CONFIG.icon,
-      description: SILVER_TOKEN_CONFIG.description,
-      rarity: SILVER_TOKEN_CONFIG.rarity
-    };
-    if (!productDefinitions.find(p => p.name === silverTokenDef.name)) {
-      productDefinitions.push(silverTokenDef);
-    }
-
-    const honeyflowerDef = {
-      name: HONEYFLOWER_CONFIG.productName,
-      icon: HONEYFLOWER_CONFIG.icon,
-      description: HONEYFLOWER_CONFIG.description,
-      rarity: HONEYFLOWER_CONFIG.rarity
-    };
-    if (!productDefinitions.find(p => p.name === honeyflowerDef.name)) {
-      productDefinitions.push(honeyflowerDef);
-    }
-
-    // Add Map (Colour) to product definitions
-    const mapColourDef = {
-      name: MAP_COLOUR_CONFIG.productName,
-      icon: MAP_COLOUR_CONFIG.icon,
-      description: MAP_COLOUR_CONFIG.description,
-      rarity: MAP_COLOUR_CONFIG.rarity
-    };
-    if (!productDefinitions.find(p => p.name === mapColourDef.name)) {
-      productDefinitions.push(mapColourDef);
-    }
-
-    // Add Fishing Rod (shop item)
-    const fishingRodDef = {
-      name: 'Fishing Rod',
-      icon: 'Fishing_Rod.gif',
-      description: 'A sturdy fishing rod perfect for catching fish in local waters.',
-      rarity: 2
-    };
-    if (!productDefinitions.find(p => p.name === fishingRodDef.name)) {
-      productDefinitions.push(fishingRodDef);
-    }
-
-    const wishlistDef = {
-      name: WISHLIST_CONFIG.productName,
-      icon: WISHLIST_CONFIG.icon,
-      description: WISHLIST_CONFIG.description,
-      rarity: WISHLIST_CONFIG.rarity
-    };
-    if (!productDefinitions.find(p => p.name === wishlistDef.name)) {
-      productDefinitions.push(wishlistDef);
-    }
-
-    const presentDef = {
-      name: PRESENT_CONFIG.productName,
-      spriteId: PRESENT_CONFIG.spriteId,
-      iconUrl: PRESENT_CONFIG.iconUrl,
-      description: PRESENT_CONFIG.description,
-      rarity: PRESENT_CONFIG.rarity
-    };
-    if (!productDefinitions.find(p => p.name === presentDef.name)) {
-      productDefinitions.push(presentDef);
-    }
-
-    const bunnySlippersDef = {
-      name: BUNNY_SLIPPERS_CONFIG.productName,
-      icon: BUNNY_SLIPPERS_CONFIG.icon,
-      description: BUNNY_SLIPPERS_CONFIG.description,
-      rarity: BUNNY_SLIPPERS_CONFIG.rarity
-    };
-    if (!productDefinitions.find(p => p.name === bunnySlippersDef.name)) {
-      productDefinitions.push(bunnySlippersDef);
-    }
-
-    // Add Obsidian Knife (for active red dragon mission only)
-    if (includeObsidianKnife) {
-      const obsidianKnifeDef = {
-        name: 'Obsidian Knife',
-        icon: 'Obsidian_Knife.gif',
-        description: 'Sharp and light, this is a useful tool for tanners, doctors and assassins.',
-        rarity: 3
-      };
-      if (!productDefinitions.find(p => p.name === obsidianKnifeDef.name)) {
-        productDefinitions.push(obsidianKnifeDef);
-      }
-    }
-
-    if (includeDragonClaw) {
-      const dragonClawDef = {
-        name: 'Dragon Claw',
-        icon: 'Dragon_Claw.gif',
-        description: 'It is the claw of Demodras.',
-        rarity: 5
-      };
-      if (!productDefinitions.find(p => p.name === dragonClawDef.name)) {
-        productDefinitions.push(dragonClawDef);
-      }
-    }
-
-    // Add Stamped Letter (reward for letter mission)
-    const stampedLetterDef = {
-      name: 'Stamped Letter',
-      icon: 'Stamped_Letter.gif',
-      description: 'A letter stamped by King Tibianus himself, ready for delivery.',
-      rarity: 1
-    };
-    if (!productDefinitions.find(p => p.name === stampedLetterDef.name)) {
-      productDefinitions.push(stampedLetterDef);
-    }
-
-    // Add Small Axe (for Al Dee fishing mission)
-    const smallAxeDef = {
-      name: 'Small Axe',
-      icon: 'Small_Axe.gif',
-      description: 'A small but sturdy axe, useful for chopping wood and combat.',
-      rarity: 2
-    };
-    if (!productDefinitions.find(p => p.name === smallAxeDef.name)) {
-      productDefinitions.push(smallAxeDef);
-    }
-
-    // Add Magnet (reward for Iron Ore quest)
-    const magnetDef = {
-      name: 'Magnet',
-      icon: 'Magnet.gif',
-      description: 'A powerful magnet that can attract metal objects from afar.',
-      rarity: 3
-    };
-    if (!productDefinitions.find(p => p.name === magnetDef.name)) {
-      productDefinitions.push(magnetDef);
-    }
-
-    // Add Light Shovel (reward for returning Small Axe to Al Dee)
-    const lightShovelDef = {
-      name: 'Light Shovel',
-      icon: 'Light_Shovel.gif',
-      description: 'Lighter than a shovel.',
-      rarity: 4
-    };
-
-    // Add Elvenhair Rope (quest item for Al Dee's golden rope mission)
-    const elvenhairRopeDef = {
-      name: 'Elvenhair Rope',
-      icon: 'Elvenhair_Rope.gif',
-      description: 'A magical rope made from elven hair, said to lead to great treasures.',
-      rarity: 5
-    };
-    if (!productDefinitions.find(p => p.name === lightShovelDef.name)) {
-      productDefinitions.push(lightShovelDef);
-    }
-    if (!productDefinitions.find(p => p.name === elvenhairRopeDef.name)) {
-      productDefinitions.push(elvenhairRopeDef);
-    }
-
-    const scarabCoinDef = {
-      name: SCARAB_COIN_CONFIG.productName,
-      icon: SCARAB_COIN_CONFIG.icon,
-      description: SCARAB_COIN_CONFIG.description,
-      rarity: SCARAB_COIN_CONFIG.rarity
-    };
-    if (!productDefinitions.find(p => p.name === scarabCoinDef.name)) {
-      productDefinitions.push(scarabCoinDef);
-    }
-
-    const destroyFieldRuneDef = {
-      name: DESTROY_FIELD_RUNE_CONFIG.productName,
-      icon: DESTROY_FIELD_RUNE_CONFIG.icon,
-      description: DESTROY_FIELD_RUNE_CONFIG.description,
-      rarity: DESTROY_FIELD_RUNE_CONFIG.rarity
-    };
-    if (!productDefinitions.find(p => p.name === destroyFieldRuneDef.name)) {
-      productDefinitions.push(destroyFieldRuneDef);
-    }
-
-    const scorpionSceptreDef = {
-      name: SCORPION_SCEPTRE_CONFIG.productName,
-      icon: SCORPION_SCEPTRE_CONFIG.icon,
-      description: SCORPION_SCEPTRE_CONFIG.description,
-      rarity: SCORPION_SCEPTRE_CONFIG.rarity
-    };
-    if (!productDefinitions.find(p => p.name === scorpionSceptreDef.name)) {
-      productDefinitions.push(scorpionSceptreDef);
-    }
-
-    // Add The Holy Tible (reward for completing Al Dee's golden rope mission)
-    const holyTibleDef = {
-      name: 'The Holy Tible',
-      icon: 'The_Holy_Tible.png',
-      description: 'A sacred tome containing ancient wisdom and divine knowledge.',
-      rarity: 5
-    };
-    if (!productDefinitions.find(p => p.name === holyTibleDef.name)) {
-      productDefinitions.push(holyTibleDef);
-    }
-
-    // Add Costello's diary (from Queen Banshees mission). Description shows each seal green/red from sevenSealsCompleted; use setSealCompleted(sealIndex, true) to complete a seal.
-    const costelloDiaryDef = {
-      name: COSTELLO_QUEEN_BANSHEES_MISSION.diaryItemName || 'Costello\'s diary',
-      icon: COSTELLO_QUEEN_BANSHEES_MISSION.diaryIcon || 'Book_(Black).gif',
-      description: SEVEN_SEALS_GHOSTLANDS_ROOM_NAMES.join('\n'),
-      rarity: 5
-    };
-    if (!productDefinitions.find(p => p.name === costelloDiaryDef.name)) {
-      productDefinitions.push(costelloDiaryDef);
-    }
-
-    // Add Blessed Ankh (reward for completing Queen Banshees / seven seals)
-    const blessedAnkhDef = {
-      name: COSTELLO_QUEEN_BANSHEES_MISSION.rewardItemName,
-      icon: COSTELLO_QUEEN_BANSHEES_MISSION.rewardIcon,
-      description: COSTELLO_QUEEN_BANSHEES_MISSION.rewardDescription,
-      rarity: 5
-    };
-    if (!productDefinitions.find(p => p.name === blessedAnkhDef.name)) {
-      productDefinitions.push(blessedAnkhDef);
-    }
-
-    // Add Spider Silk (drop from Mother of All Spiders boss; hand in to Wyda for Spool of Yarn)
-    const spiderSilkDef = {
-      name: 'Spider Silk',
-      icon: 'Spider_Silk.gif',
-      description: 'Fine silk from the mother of all spiders.',
-      rarity: 2
-    };
-    if (!productDefinitions.find(p => p.name === spiderSilkDef.name)) {
-      productDefinitions.push(spiderSilkDef);
-    }
-    // Add Spool of Yarn (reward for completing Mother of All Spiders)
-    const spoolOfYarnDef = {
-      name: MOTHER_OF_ALL_SPIDERS_MISSION.rewardItemName,
-      icon: MOTHER_OF_ALL_SPIDERS_MISSION.rewardIcon,
-      description: MOTHER_OF_ALL_SPIDERS_MISSION.rewardDescription,
-      rarity: 5
-    };
-    if (!productDefinitions.find(p => p.name === spoolOfYarnDef.name)) {
-      productDefinitions.push(spoolOfYarnDef);
-    }
-
-    const minotaurTrophyDef = {
-      name: MINOTAUR_TROPHY_CONFIG.productName,
-      icon: MINOTAUR_TROPHY_CONFIG.icon,
-      description: MINOTAUR_TROPHY_CONFIG.description,
-      rarity: MINOTAUR_TROPHY_CONFIG.rarity
-    };
-    if (!productDefinitions.find(p => p.name === minotaurTrophyDef.name)) {
-      productDefinitions.push(minotaurTrophyDef);
-    }
-
-    const orbDef = {
-      name: ORB_CONFIG.productName,
-      icon: ORB_CONFIG.icon,
-      description: ORB_CONFIG.description,
-      rarity: ORB_CONFIG.rarity
-    };
-    if (!productDefinitions.find(p => p.name === orbDef.name)) {
-      productDefinitions.push(orbDef);
-    }
-
-    // Add global Rookgaard drops to product definitions
     for (const globalDrop of ROOKGAARD_GLOBAL_DROPS) {
-      if (!productDefinitions.find(p => p.name === globalDrop.name)) {
-        productDefinitions.push(globalDrop);
-      }
+      pushDef(globalDrop);
     }
-    
+
     productDefinitions.sort((a, b) => a.name.localeCompare(b.name));
     return productDefinitions;
   }
@@ -5586,16 +5496,15 @@ function createNPCCooldownManager() {
   // HOW TO ADD A NEW MISSION:
   // 1. Mission constant + registerMissionForDialogue(mission) near the top
   // 2. missions.json entry (title/dialogue) under that mission id
-  // 3. kingChatState.progressX: { accepted: false, completed: false }
-  // 4. MISSION_STATE_MAP + MISSION_FIREBASE_KEY_MAP below
-  // 5. QUEST_LOG_MISSIONS (story order for Quest Log + Quest Dev Tools)
-  // 6. Quest logic / NPC handlers as needed
+  // 3. missions.json → registry.storyOrder + registry.missions (stateKey/firebaseKey/extraFields)
+  // 4. kingChatState.progressX: { accepted: false, completed: false }
+  // 5. Quest logic / NPC handlers as needed
   //
   // Quest Dev Tools missions are derived from MISSION_STATE_MAP + MISSION_BY_ID —
   // no separate Dev Tools mission list to update.
   //
-  // Quest Dev Tools items are separate: QUESTS_DEV_ITEM_KEY_IDS +
-  // resolveQuestDevItemName() (+ optional progress order / received-before map).
+  // Quest Dev Tools items come from assets/quests/items.json → devTools.items
+  // (story order + productId + receivedBefore). Add new grantables there.
   //
   // Registry automatically handles:
   // - MissionManager.getProgress() and setProgress()
@@ -5604,103 +5513,32 @@ function createNPCCooldownManager() {
   // - loadMissionProgressOnInit() initialization
   // - QuestsDev Accept / Complete / Reset / completeAll / resetAll
   //
-  // Example for a new mission with id 'new_mission':
-  //   MISSION_STATE_MAP: { 'new_mission': 'progressNewMission' }
-  //   MISSION_FIREBASE_KEY_MAP: { 'new_mission': 'newMission' }
+  // MISSION_STATE_MAP / MISSION_FIREBASE_KEY_MAP / QUEST_LOG_MISSIONS are filled from
+  // assets/quests/missions.json → registry (with DEFAULT_MISSION_REGISTRY fallback).
   //
-  const MISSION_STATE_MAP = {
-    [KING_HONEYFLOWER_MISSION.id]: 'progressHoneyflower',
-    [KING_CROSSING_THE_LINE_MISSION.id]: 'progressCrossingTheLine',
-    [KING_COPPER_KEY_MISSION.id]: 'progressCopper',
-    [KING_RED_DRAGON_MISSION.id]: 'progressDragon',
-    [KING_LETTER_MISSION.id]: 'progressLetter',
-    [KING_MONKS_STUDY_MISSION.id]: 'progressMonksStudy',
-    [COSTELLO_QUEEN_BANSHEES_MISSION.id]: 'progressQueenBanshees',
-    [FOLLOWER_OF_ZATHROTH_MISSION.id]: 'progressFollowerOfZathroth',
-    [MOTHER_OF_ALL_SPIDERS_MISSION.id]: 'progressMotherOfAllSpiders',
-    [AL_DEE_FISHING_MISSION.id]: 'progressAlDeeFishing',
-    [AL_DEE_GOLDEN_ROPE_MISSION.id]: 'progressAlDeeGoldenRope',
-    [KING_SCARAB_COIN_MISSION.id]: 'progressScarabHunt',
-    [SERPENTINE_TOWER_MISSION.id]: 'progressSerpentineTower',
-    [APPRENTICE_SHENG_MISSION.id]: 'progressApprenticeSheng',
-    [CHRISTMAS_MIRACLE_MISSION.id]: 'progressChristmasMiracle',
-    [SVENSON_LOVE_STORY_MISSION.id]: 'progressSvensonLoveStory',
-    [WEAKENED_ARCHDEMON_MISSION.id]: 'progressWeakenedArchdemon'
-  };
-
-  const MISSION_FIREBASE_KEY_MAP = {
-    [KING_HONEYFLOWER_MISSION.id]: 'honeyflower',
-    [KING_CROSSING_THE_LINE_MISSION.id]: 'crossingTheLine',
-    [KING_COPPER_KEY_MISSION.id]: 'copper',
-    [KING_RED_DRAGON_MISSION.id]: 'dragon',
-    [KING_LETTER_MISSION.id]: 'letter',
-    [KING_MONKS_STUDY_MISSION.id]: 'monksStudy',
-    [COSTELLO_QUEEN_BANSHEES_MISSION.id]: 'queenBanshees',
-    [FOLLOWER_OF_ZATHROTH_MISSION.id]: 'followerOfZathroth',
-    [MOTHER_OF_ALL_SPIDERS_MISSION.id]: 'motherOfAllSpiders',
-    [AL_DEE_FISHING_MISSION.id]: 'alDeeFishing',
-    [AL_DEE_GOLDEN_ROPE_MISSION.id]: 'alDeeGoldenRope',
-    [KING_SCARAB_COIN_MISSION.id]: 'scarabHunt',
-    [SERPENTINE_TOWER_MISSION.id]: 'serpentineTower',
-    [APPRENTICE_SHENG_MISSION.id]: 'apprenticeSheng',
-    [CHRISTMAS_MIRACLE_MISSION.id]: 'christmasMiracle',
-    [SVENSON_LOVE_STORY_MISSION.id]: 'svensonLoveStory',
-    [WEAKENED_ARCHDEMON_MISSION.id]: 'weakenedArchdemon'
-  };
-
   function getExtraMissionProgressFields(firebaseKey, source = null) {
-    if (firebaseKey === 'serpentineTower') {
-      return {
-        destroyFieldRuneTaken: !!source?.destroyFieldRuneTaken,
-        putridChamberComplete: !!source?.putridChamberComplete
-      };
+    const schema = MISSION_EXTRA_FIELD_SCHEMAS[firebaseKey];
+    if (!schema) return {};
+    const fields = schema.fields || [];
+    if (schema.forceExtraFieldsWhenCompleted && source?.completed) {
+      const forced = {};
+      for (const field of fields) forced[field] = true;
+      return forced;
     }
-    if (firebaseKey === 'honeyflower') {
-      return { honeyflowerPicked: !!source?.honeyflowerPicked };
-    }
-    if (firebaseKey === 'crossingTheLine') {
-      return { crossingObjectiveComplete: !!source?.crossingObjectiveComplete };
-    }
-    if (firebaseKey === 'apprenticeSheng') {
-      return {
-        battleCompleted: !!source?.battleCompleted,
-        rookstayerDismissed: !!source?.rookstayerDismissed
-      };
-    }
-    if (firebaseKey === 'svensonLoveStory') {
-      // Completed Love Story implies every stage finished. Older Dev complete/completeAll
-      // saves could leave mid-stage flags false and re-trigger Compass/Yarn prompts.
-      if (source?.completed) {
-        return {
-          plankDelivered: true,
-          strandedAtAwash: true,
-          awashYarnDelivered: true,
-          awashYarnRequested: true,
-          strandedAtUnderground: true,
-          undergroundCompassDelivered: true,
-          undergroundCompassRequested: true,
-          strandedAtWhiteWave: true,
-          whiteWaveSlippersDelivered: true
-        };
+    const out = {};
+    for (const field of fields) {
+      let value = !!source?.[field];
+      if (!value && schema.aliases?.[field]) {
+        for (const alias of schema.aliases[field]) {
+          if (source?.[alias]) {
+            value = true;
+            break;
+          }
+        }
       }
-      return {
-        plankDelivered: !!source?.plankDelivered,
-        strandedAtAwash: !!source?.strandedAtAwash,
-        awashYarnDelivered: !!source?.awashYarnDelivered,
-        awashYarnRequested: !!source?.awashYarnRequested,
-        strandedAtUnderground: !!source?.strandedAtUnderground,
-        undergroundCompassDelivered: !!(source?.undergroundCompassDelivered || source?.undergroundPlankDelivered),
-        undergroundCompassRequested: !!source?.undergroundCompassRequested,
-        strandedAtWhiteWave: !!source?.strandedAtWhiteWave,
-        whiteWaveSlippersDelivered: !!source?.whiteWaveSlippersDelivered
-      };
+      out[field] = value;
     }
-    if (firebaseKey === 'weakenedArchdemon') {
-      return {
-        battleCompleted: !!source?.battleCompleted
-      };
-    }
-    return {};
+    return out;
   }
 
   function buildMissionProgressFromFirebaseEntry(firebaseKey, entry = null) {
@@ -6714,7 +6552,7 @@ function createNPCCooldownManager() {
 
   /**
    * Repair leftovers the backpack UI already hides after missions complete.
-   * Mirrors cleanupInvalidQuestItems removeWhenCompleted rules for the common stale set.
+   * Rules from assets/quests/items.json → itemLifecycle.staleCleanupOnComplete.
    */
   async function cleanupStaleQuestItemsAfterCompletedMissions() {
     try {
@@ -6725,42 +6563,12 @@ function createNPCCooldownManager() {
         if (n > 0) removed.push(`${itemName} x${n}`);
       };
 
-      const copperDone = !!getMissionProgress(KING_COPPER_KEY_MISSION)?.completed;
-      const dragonDone = !!getMissionProgress(KING_RED_DRAGON_MISSION)?.completed;
-      const fishingDone = !!getMissionProgress(AL_DEE_FISHING_MISSION)?.completed;
-      const ropeDone = !!getMissionProgress(AL_DEE_GOLDEN_ROPE_MISSION)?.completed;
-      const letterDone = !!getMissionProgress(KING_LETTER_MISSION)?.completed;
-      const spidersDone = !!getMissionProgress(MOTHER_OF_ALL_SPIDERS_MISSION)?.completed;
-      const bansheesDone = !!getMissionProgress(COSTELLO_QUEEN_BANSHEES_MISSION)?.completed;
-      const christmasDone = !!getMissionProgress(CHRISTMAS_MIRACLE_MISSION)?.completed;
-      const scarabDone = !!getMissionProgress(KING_SCARAB_COIN_MISSION)?.completed;
-      const serpentineDone = !!getMissionProgress(SERPENTINE_TOWER_MISSION)?.completed;
-      const honeyDone = !!getMissionProgress(KING_HONEYFLOWER_MISSION)?.completed;
-      const loveDone = !!getMissionProgress(SVENSON_LOVE_STORY_MISSION)?.completed;
-
-      await maybeRemove(copperDone, COPPER_KEY_CONFIG.productName);
-      await maybeRemove(copperDone, MAP_COLOUR_CONFIG.productName);
-      await maybeRemove(dragonDone, 'Red Dragon Scale');
-      await maybeRemove(dragonDone, 'Red Dragon Leather');
-      await maybeRemove(dragonDone, 'Obsidian Knife');
-      await maybeRemove(honeyDone, HONEYFLOWER_CONFIG.productName);
-      await maybeRemove(letterDone, 'Letter from Al Dee');
-      await maybeRemove(letterDone, 'Stamped Letter');
-      await maybeRemove(fishingDone, 'Magnet');
-      await maybeRemove(fishingDone, 'Small Axe');
-      await maybeRemove(fishingDone, 'Iron Ore');
-      await maybeRemove(ropeDone, 'Elvenhair Rope');
-      await maybeRemove(spidersDone, 'Spider Silk');
-      await maybeRemove(bansheesDone, COSTELLO_QUEEN_BANSHEES_MISSION.diaryItemName || "Costello's diary");
-      await maybeRemove(scarabDone, SCARAB_COIN_CONFIG.productName);
-      await maybeRemove(serpentineDone, DESTROY_FIELD_RUNE_CONFIG.productName);
-      await maybeRemove(christmasDone, WISHLIST_CONFIG.productName);
-      await maybeRemove(christmasDone, PRESENT_CONFIG.productName);
-      // Love Story consumes these on hand-in; clear leftovers if the mission is already done.
-      await maybeRemove(loveDone, MINOTAUR_TROPHY_CONFIG.productName);
-      await maybeRemove(loveDone, MOTHER_OF_ALL_SPIDERS_MISSION.rewardItemName || 'Spool of Yarn');
-      await maybeRemove(loveDone, SCORPION_SCEPTRE_CONFIG.productName);
-      await maybeRemove(loveDone, BUNNY_SLIPPERS_CONFIG.productName);
+      for (const rule of QUEST_ITEM_STALE_CLEANUP_RULES) {
+        if (!rule?.productId || !rule?.missionId) continue;
+        const mission = MISSION_BY_ID[rule.missionId];
+        const done = !!getMissionProgress(mission)?.completed;
+        await maybeRemove(done, resolveQuestProductName(rule.productId));
+      }
 
       if (removed.length) {
         console.log('[Quests Mod][Quest Items] Cleaned stale items after completed missions:', removed.join(', '));
@@ -14957,7 +14765,7 @@ function createNPCCooldownManager() {
 
     for (const key of getQuestDevItemKeysInProgressOrder()) {
       const itemName = resolveQuestDevItemName(key);
-      const grantAmount = (key === 'scale' || key === 'leather') ? 30 : 1;
+      const grantAmount = getQuestDevItemGrantAmount(key);
       const grantCmd = `QuestsDev.grant({ ${key}: ${grantAmount} })`;
       const removeCmd = `QuestsDev.grant({ ${key}: -1 })`;
 
@@ -25633,47 +25441,18 @@ function createNPCCooldownManager() {
         return;
       }
 
-      // Map items to their required mission completion status
-      // Format: { itemName: { missionId, requiredStatus: 'accepted' | 'completed', removeWhenCompleted?: boolean, removeWhenPutridChamberComplete?: boolean } }
-      // removeWhenCompleted: if true, item is removed when quest is completed (for unique / mid-mission tools)
-      const itemMissionMap = {
-        'Map to the Mines': { missionId: KING_COPPER_KEY_MISSION.id, requiredStatus: 'accepted', removeWhenCompleted: true },
-        [COPPER_KEY_CONFIG.productName]: { missionId: KING_COPPER_KEY_MISSION.id, requiredStatus: 'accepted', removeWhenCompleted: true },
-        [HONEYFLOWER_CONFIG.productName]: { missionId: KING_HONEYFLOWER_MISSION.id, requiredStatus: 'accepted', removeWhenCompleted: true },
-        'Obsidian Knife': { missionId: KING_RED_DRAGON_MISSION.id, requiredStatus: 'accepted', removeWhenCompleted: true },
-        'Red Dragon Scale': { missionId: KING_RED_DRAGON_MISSION.id, requiredStatus: 'accepted', removeWhenCompleted: true },
-        'Red Dragon Leather': { missionId: KING_RED_DRAGON_MISSION.id, requiredStatus: 'accepted', removeWhenCompleted: true },
-        'Stamped Letter': { missionId: KING_LETTER_MISSION.id, requiredStatus: 'accepted', removeWhenCompleted: true },
-        'Letter from Al Dee': { missionId: KING_LETTER_MISSION.id, requiredStatus: 'accepted', removeWhenCompleted: true },
-        'Dragon Claw': { missionId: KING_RED_DRAGON_MISSION.id, requiredStatus: 'completed' },
-        'Magnet': { missionId: AL_DEE_FISHING_MISSION.id, requiredStatus: 'accepted', removeWhenCompleted: true },
-        'Small Axe': { missionId: AL_DEE_FISHING_MISSION.id, requiredStatus: 'accepted', removeWhenCompleted: true },
-        'Iron Ore': { missionId: AL_DEE_FISHING_MISSION.id, requiredStatus: 'accepted', removeWhenCompleted: true },
-        'Light Shovel': { missionId: AL_DEE_FISHING_MISSION.id, requiredStatus: 'completed' },
-        'Elvenhair Rope': { missionId: AL_DEE_GOLDEN_ROPE_MISSION.id, requiredStatus: 'accepted', removeWhenCompleted: true },
-        'The Holy Tible': { missionId: AL_DEE_GOLDEN_ROPE_MISSION.id, requiredStatus: 'completed' },
-        [COSTELLO_QUEEN_BANSHEES_MISSION.diaryItemName || "Costello's diary"]: {
-          missionId: COSTELLO_QUEEN_BANSHEES_MISSION.id,
-          requiredStatus: 'accepted',
-          removeWhenCompleted: true
-        },
-        'Spider Silk': { missionId: MOTHER_OF_ALL_SPIDERS_MISSION.id, requiredStatus: 'accepted', removeWhenCompleted: true },
-        [SCARAB_COIN_CONFIG.productName]: { missionId: KING_SCARAB_COIN_MISSION.id, requiredStatus: 'accepted', removeWhenCompleted: true },
-        [DESTROY_FIELD_RUNE_CONFIG.productName]: {
-          missionId: SERPENTINE_TOWER_MISSION.id,
-          requiredStatus: 'accepted',
-          removeWhenCompleted: true,
-          removeWhenPutridChamberComplete: true
-        },
-        [SCORPION_SCEPTRE_CONFIG.productName]: {
-          missionId: SERPENTINE_TOWER_MISSION.id,
-          requiredStatus: 'completed'
-        },
-        [WISHLIST_CONFIG.productName]: { missionId: CHRISTMAS_MIRACLE_MISSION.id, requiredStatus: 'accepted', removeWhenCompleted: true },
-        [PRESENT_CONFIG.productName]: { missionId: CHRISTMAS_MIRACLE_MISSION.id, requiredStatus: 'accepted', removeWhenCompleted: true },
-        [MINOTAUR_TROPHY_CONFIG.productName]: { missionId: APPRENTICE_SHENG_MISSION.id, requiredStatus: 'completed' },
-        [ORB_CONFIG.productName]: { missionId: WEAKENED_ARCHDEMON_MISSION.id, requiredStatus: 'completed' }
-      };
+      // Rules from assets/quests/items.json → itemLifecycle.cleanupRules
+      const itemMissionMap = {};
+      for (const rule of QUEST_ITEM_CLEANUP_RULES) {
+        if (!rule?.productId || !rule?.missionId) continue;
+        const itemName = resolveQuestProductName(rule.productId);
+        itemMissionMap[itemName] = {
+          missionId: rule.missionId,
+          requiredStatus: rule.requiredStatus || 'accepted',
+          removeWhenCompleted: !!rule.removeWhenCompleted,
+          removeWhenPutridChamberComplete: !!rule.removeWhenPutridChamberComplete
+        };
+      }
 
       let serpentineRunePickupFlagNeedsSave = false;
 
@@ -25777,9 +25556,7 @@ function createNPCCooldownManager() {
       refreshSystemsAfterMissionProgressLoaded();
     }
     syncActiveMissionTabs();
-    reloadQuestItemsFromFirebase().catch((err) => {
-      console.warn('[Quests Mod] Failed to reload quest items after mission progress sync:', err);
-    });
+    // Quest items load once via loadQuestItemsOnInit() after mission hydrate (bootstrap / player-ready retry).
   }
 
   function setupMissionProgressRetryOnPlayerReady() {
@@ -25815,6 +25592,7 @@ function createNPCCooldownManager() {
         }
         await hydrateMissionProgressFromFirebase(playerName);
         finishMissionProgressHydration();
+        await loadQuestItemsOnInit();
         console.log('[Quests Mod] Mission progress loaded from Firebase after player became ready');
       } catch (error) {
         console.error('[Quests Mod] Error loading mission progress after player became ready:', error);
@@ -26153,7 +25931,9 @@ function createNPCCooldownManager() {
       }
     }, 5000); // Check every 5 seconds
 
-    console.log('[Quests Mod][Iron Ore Quest] Timer started');
+    if (fishingState.ironOreQuestActive) {
+      console.log('[Quests Mod][Iron Ore Quest] Timer started (quest active)');
+    }
   }
 
   async function runPostMissionProgressInitSetup() {
@@ -26203,48 +25983,34 @@ function createNPCCooldownManager() {
   // Console QA helpers. Prefer QuestsDev.*; legacy global names are aliases.
 
   // Resolve at use-time so asset-hydrated productNames are never snapshotted as empty.
-  // New Dev Tools item: add key here, map it in resolveQuestDevItemName(), and optionally
-  // QUESTS_DEV_ITEM_PROGRESS_ORDER + wasQuestDevItemReceivedBefore().
-  const QUESTS_DEV_ITEM_KEY_IDS = [
-    'leather', 'scale', 'letter', 'ironOre', 'smallAxe', 'copperKey', 'stampedLetter',
-    'elvenhairRope', 'holyTible', 'blessedAnkh', 'honeyflower', 'scarabCoin',
-    'destroyFieldRune', 'diary', 'spoolOfYarn', 'woodenPlank', 'compass', 'dragonClaw',
-    'lightShovel', 'silverToken', 'wishlist', 'present', 'bunnySlippers'
-  ];
+  // New Dev Tools item: add an entry to assets/quests/items.json → products + devTools.items.
+  function getQuestsDevItemCatalogEntry(key) {
+    return QUESTS_DEV_ITEM_CATALOG.find((entry) => entry?.key === key) || null;
+  }
+
+  function getQuestsDevItemKeyIds() {
+    return QUESTS_DEV_ITEM_CATALOG.map((entry) => entry?.key).filter(Boolean);
+  }
 
   function resolveQuestDevItemName(key) {
-    switch (key) {
-      case 'leather': return 'Red Dragon Leather';
-      case 'scale': return 'Red Dragon Scale';
-      case 'letter': return 'Letter from Al Dee';
-      case 'ironOre': return 'Iron Ore';
-      case 'smallAxe': return 'Small Axe';
-      case 'copperKey': return 'Copper Key';
-      case 'stampedLetter': return 'Stamped Letter';
-      case 'elvenhairRope': return 'Elvenhair Rope';
-      case 'holyTible': return 'The Holy Tible';
-      case 'blessedAnkh': return 'Blessed Ankh';
-      case 'honeyflower': return HONEYFLOWER_CONFIG.productName || 'Honeyflower';
-      case 'scarabCoin': return SCARAB_COIN_CONFIG.productName || 'Scarab Coin';
-      case 'destroyFieldRune':
-        return DESTROY_FIELD_RUNE_CONFIG.productName || DESTROY_FIELD_RUNE_ITEM_NAME || 'Destroy Field Rune';
-      case 'diary': return "Costello's diary";
-      case 'spoolOfYarn': return 'Spool of Yarn';
-      case 'woodenPlank': return 'Wooden Plank';
-      case 'compass': return 'Compass';
-      case 'dragonClaw': return 'Dragon Claw';
-      case 'lightShovel': return 'Light Shovel';
-      case 'silverToken': return SILVER_TOKEN_CONFIG.productName || 'Silver Token';
-      case 'wishlist': return WISHLIST_CONFIG.productName || 'Wishlist';
-      case 'present': return PRESENT_CONFIG.productName || 'Present';
-      case 'bunnySlippers': return BUNNY_SLIPPERS_CONFIG.productName || 'Bunny Slippers';
-      default: return key;
+    const entry = getQuestsDevItemCatalogEntry(key);
+    if (entry) {
+      if (entry.productId && questItemsConfigData?.products?.[entry.productId]?.productName) {
+        return questItemsConfigData.products[entry.productId].productName;
+      }
+      if (entry.productName) return entry.productName;
     }
+    return key;
+  }
+
+  function getQuestDevItemGrantAmount(key) {
+    const amount = Number(getQuestsDevItemCatalogEntry(key)?.grantAmount);
+    return Number.isFinite(amount) && amount > 0 ? amount : 1;
   }
 
   function getQuestsDevItemKeys() {
     const map = {};
-    for (const key of QUESTS_DEV_ITEM_KEY_IDS) {
+    for (const key of getQuestsDevItemKeyIds()) {
       map[key] = resolveQuestDevItemName(key);
     }
     return map;
@@ -26255,20 +26021,20 @@ function createNPCCooldownManager() {
     get(_target, prop) {
       if (prop === Symbol.toStringTag) return 'Object';
       if (typeof prop !== 'string') return undefined;
-      if (!QUESTS_DEV_ITEM_KEY_IDS.includes(prop)) return undefined;
+      if (!getQuestsDevItemKeyIds().includes(prop)) return undefined;
       return resolveQuestDevItemName(prop);
     },
     ownKeys() {
-      return [...QUESTS_DEV_ITEM_KEY_IDS];
+      return getQuestsDevItemKeyIds();
     },
     getOwnPropertyDescriptor(_target, prop) {
-      if (typeof prop === 'string' && QUESTS_DEV_ITEM_KEY_IDS.includes(prop)) {
+      if (typeof prop === 'string' && getQuestsDevItemKeyIds().includes(prop)) {
         return { configurable: true, enumerable: true, writable: false, value: resolveQuestDevItemName(prop) };
       }
       return undefined;
     },
     has(_target, prop) {
-      return typeof prop === 'string' && QUESTS_DEV_ITEM_KEY_IDS.includes(prop);
+      return typeof prop === 'string' && getQuestsDevItemKeyIds().includes(prop);
     }
   });
 
@@ -26298,47 +26064,9 @@ function createNPCCooldownManager() {
     }
   });
 
-  // Item grant buttons follow story progression (starter → late-game).
-  // New grantable items: add key here (and to QUESTS_DEV_ITEM_KEY_IDS + resolveQuestDevItemName).
-  const QUESTS_DEV_ITEM_PROGRESS_ORDER = [
-    'silverToken',
-    'honeyflower',
-    'copperKey',
-    'scale',
-    'leather',
-    'dragonClaw',
-    'letter',
-    'stampedLetter',
-    'ironOre',
-    'smallAxe',
-    'lightShovel',
-    'elvenhairRope',
-    'holyTible',
-    'diary',
-    'blessedAnkh',
-    'spoolOfYarn',
-    'scarabCoin',
-    'destroyFieldRune',
-    'compass',
-    'woodenPlank',
-    'wishlist',
-    'present',
-    'bunnySlippers'
-  ];
-
+  // Item grant buttons follow story order from items.json → devTools.items.
   function getQuestDevItemKeysInProgressOrder() {
-    const ordered = [];
-    const seen = new Set();
-    for (const key of QUESTS_DEV_ITEM_PROGRESS_ORDER) {
-      if (QUESTS_DEV_ITEM_KEY_IDS.includes(key)) {
-        ordered.push(key);
-        seen.add(key);
-      }
-    }
-    for (const key of QUESTS_DEV_ITEM_KEY_IDS) {
-      if (!seen.has(key)) ordered.push(key);
-    }
-    return ordered;
+    return getQuestsDevItemKeyIds();
   }
 
   function getQuestDevMissionsInProgressOrder() {
@@ -26373,74 +26101,45 @@ function createNPCCooldownManager() {
     return !!(progress?.accepted || progress?.completed);
   }
 
-  /** True if this account has obtained the item before (inventory, received flag, or mission progress). */
-  function wasQuestDevItemReceivedBefore(key, receivedFlags = {}) {
-    switch (key) {
-      case 'silverToken':
+  function evalQuestDevReceivedBeforeRule(rule, receivedFlags = {}) {
+    if (!rule || typeof rule !== 'object') return false;
+    switch (rule.type) {
+      case 'anyMissionAcceptedOrCompleted':
         return getQuestDevMissionsInProgressOrder().some((mission) => {
           const progress = getMissionProgress(mission);
           return !!(progress?.accepted || progress?.completed);
         });
-      case 'honeyflower': {
-        const progress = getMissionProgress(KING_HONEYFLOWER_MISSION);
-        return !!(progress?.honeyflowerPicked || progress?.completed);
+      case 'missionCompleted':
+        return isQuestDevMissionCompleted(rule.missionId);
+      case 'missionAcceptedOrCompleted':
+        return isQuestDevMissionAcceptedOrCompleted(rule.missionId);
+      case 'receivedFlagOrMissionCompleted':
+        return !!receivedFlags[rule.flag] || isQuestDevMissionCompleted(rule.missionId);
+      case 'receivedFlagOrMissionAcceptedOrCompleted':
+        return !!receivedFlags[rule.flag] || isQuestDevMissionAcceptedOrCompleted(rule.missionId);
+      case 'missionFieldOrCompleted': {
+        const progress = getMissionProgress(QUESTS_DEV_MISSIONS_BY_ID[rule.missionId]);
+        return !!(progress?.[rule.field] || progress?.completed);
       }
-      case 'copperKey':
-        return !!receivedFlags.copperKey || isQuestDevMissionCompleted(KING_COPPER_KEY_MISSION.id);
-      case 'scale':
-      case 'leather':
-      case 'dragonClaw':
-        return isQuestDevMissionCompleted(KING_RED_DRAGON_MISSION.id);
-      case 'letter':
-        return !!receivedFlags.letter || isQuestDevMissionAcceptedOrCompleted(KING_LETTER_MISSION.id);
-      case 'stampedLetter':
-        return isQuestDevMissionCompleted(KING_LETTER_MISSION.id);
-      case 'ironOre':
-        return !!receivedFlags.ironOre || isQuestDevMissionAcceptedOrCompleted(AL_DEE_FISHING_MISSION.id);
-      case 'smallAxe':
-        return isQuestDevMissionAcceptedOrCompleted(AL_DEE_FISHING_MISSION.id);
-      case 'lightShovel':
-        return isQuestDevMissionCompleted(AL_DEE_FISHING_MISSION.id);
-      case 'elvenhairRope':
-        return isQuestDevMissionAcceptedOrCompleted(AL_DEE_GOLDEN_ROPE_MISSION.id);
-      case 'holyTible':
-        return isQuestDevMissionCompleted(AL_DEE_GOLDEN_ROPE_MISSION.id);
-      case 'diary':
-        return isQuestDevMissionAcceptedOrCompleted(COSTELLO_QUEEN_BANSHEES_MISSION.id);
-      case 'blessedAnkh':
-        return isQuestDevMissionCompleted(COSTELLO_QUEEN_BANSHEES_MISSION.id);
-      case 'spoolOfYarn': {
-        const love = getMissionProgress(SVENSON_LOVE_STORY_MISSION);
-        return isQuestDevMissionCompleted(MOTHER_OF_ALL_SPIDERS_MISSION.id)
-          || !!(love?.awashYarnDelivered || love?.awashYarnRequested || love?.strandedAtUnderground);
+      case 'missionAnyField': {
+        const progress = getMissionProgress(QUESTS_DEV_MISSIONS_BY_ID[rule.missionId]);
+        if (!progress) return false;
+        return (rule.fields || []).some((field) => !!progress[field]);
       }
-      case 'scarabCoin':
-        return isQuestDevMissionAcceptedOrCompleted(KING_SCARAB_COIN_MISSION.id);
-      case 'destroyFieldRune': {
-        const progress = getMissionProgress(SERPENTINE_TOWER_MISSION);
-        return !!(progress?.destroyFieldRuneTaken || progress?.completed);
-      }
-      case 'compass': {
-        const love = getMissionProgress(SVENSON_LOVE_STORY_MISSION);
-        return isQuestDevMissionCompleted(SERPENTINE_TOWER_MISSION.id)
-          || !!(love?.undergroundCompassDelivered || love?.undergroundCompassRequested || love?.strandedAtWhiteWave);
-      }
-      case 'woodenPlank': {
-        const love = getMissionProgress(SVENSON_LOVE_STORY_MISSION);
-        return isQuestDevMissionCompleted(APPRENTICE_SHENG_MISSION.id)
-          || !!(love?.plankDelivered || love?.accepted || love?.completed);
-      }
-      case 'wishlist':
-        return !!receivedFlags.wishlist || isQuestDevMissionAcceptedOrCompleted(CHRISTMAS_MIRACLE_MISSION.id);
-      case 'present':
-        return !!receivedFlags.present || isQuestDevMissionCompleted(CHRISTMAS_MIRACLE_MISSION.id);
-      case 'bunnySlippers': {
-        const love = getMissionProgress(SVENSON_LOVE_STORY_MISSION);
-        return !!(love?.whiteWaveSlippersDelivered || love?.completed);
-      }
+      case 'anyOf':
+        return (rule.rules || []).some((nested) => evalQuestDevReceivedBeforeRule(nested, receivedFlags));
       default:
         return false;
     }
+  }
+
+  /** True if this account has obtained the item before (inventory, received flag, or mission progress). */
+  function wasQuestDevItemReceivedBefore(key, receivedFlags = {}) {
+    const entry = getQuestsDevItemCatalogEntry(key);
+    if (entry?.receivedBefore) {
+      return evalQuestDevReceivedBeforeRule(entry.receivedBefore, receivedFlags);
+    }
+    return false;
   }
 
   async function loadQuestDevItemReceivedFlags(playerName) {
@@ -26467,17 +26166,16 @@ function createNPCCooldownManager() {
     return flags;
   }
 
-  const QUESTS_DEV_COMPLETE_REWARDS = {
-    'Dragon Claw': 1,
-    'Light Shovel': 1,
-    'The Holy Tible': 1,
-    "Costello's diary": 1,
-    'Blessed Ankh': 1,
-    'Spool of Yarn': 1,
-    [HONEYFLOWER_CONFIG.productName]: 1,
-    'Wooden Plank': 1,
-    [BUNNY_SLIPPERS_CONFIG.productName]: 1
-  };
+  function getQuestsDevCompleteRewards() {
+    const rewards = {};
+    for (const rule of QUEST_DEV_COMPLETE_REWARD_RULES) {
+      if (!rule?.productId) continue;
+      const name = resolveQuestProductName(rule.productId);
+      const amount = Number(rule.amount);
+      rewards[name] = Number.isFinite(amount) && amount > 0 ? amount : 1;
+    }
+    return rewards;
+  }
 
   const QUESTS_DEV_SEAL_PARAM_KEYS = [
     'firstSeal', 'secondSeal', 'thirdSeal', 'fourthSeal', 'fifthSeal', 'sixthSeal', 'seventhSeal'
@@ -26766,7 +26464,7 @@ function createNPCCooldownManager() {
       console.log('[Quests Mod][Dev] Completed missions:', Object.keys(MISSION_FIREBASE_KEY_MAP));
 
       const granted = [];
-      for (const [itemName, count] of Object.entries(QUESTS_DEV_COMPLETE_REWARDS)) {
+      for (const [itemName, count] of Object.entries(getQuestsDevCompleteRewards())) {
         await addQuestItem(itemName, count);
         granted.push(`${itemName} (${count})`);
       }
@@ -27021,7 +26719,7 @@ function createNPCCooldownManager() {
   function questsDevHelp() {
     console.log('[Quests Mod][Dev] QuestsDev API:', Object.keys(QuestsDev));
     console.log('[Quests Mod][Dev] Mission IDs:', Object.keys(MISSION_STATE_MAP));
-    console.log('[Quests Mod][Dev] Item keys for grant():', QUESTS_DEV_ITEM_KEY_IDS);
+    console.log('[Quests Mod][Dev] Item keys for grant():', getQuestsDevItemKeyIds());
     console.log('[Quests Mod][Dev] Catalog:', QuestsDev.catalog());
     console.log('[Quests Mod][Dev] Examples: QuestsDev.grant({ leather: 1, monksStudy: 1 }); QuestsDev.setAccepted("king_copper_key"); QuestsDev.complete("king_red_dragon"); QuestsDev.reset("svenson_love_story"); QuestsDev.resetLoveStoryWithItems(); QuestsDev.resetSanta(); QuestsDev.completeAll(); QuestsDev.resetAll();');
   }

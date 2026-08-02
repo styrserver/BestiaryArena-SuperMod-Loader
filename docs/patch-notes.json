@@ -4,6 +4,51 @@
   },
   "notes": [
     {
+      "version": "4.7.5",
+      "changes": [
+        {
+          "mod": "Awaken Tracker",
+          "type": "changed",
+          "text": "No longer pauses while Manual Runner is active (still pauses during Board Analyzer)."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "fixed",
+          "text": "Maps tab local Top 5 tables resolve raid/event map IDs to the same RunTracker keys (e.g. Esuph IV), merge alternate key spellings, and refresh after saves with mapId-aware matching. Rank warnings now say \"higher than your profile best\" when a local run beats the profile highscore."
+        },
+        {
+          "mod": "Hunt Analyzer",
+          "type": "changed",
+          "text": "No longer pauses while Manual Runner is active (still pauses during Board Analyzer)."
+        },
+        {
+          "mod": "Manual Runner",
+          "type": "fixed",
+          "text": "Victories during a Manual Runner session are forwarded to RunTracker again (network capture stays paused during analysis), so new PBs still appear in Cyclopedia."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "changed",
+          "text": "Rank-run invalid reason text now says \"higher than your profile best\" (same check as Cyclopedia)."
+        },
+        {
+          "mod": "Quests",
+          "type": "changed",
+          "text": "Quest catalogs are asset-driven from the quest JSON files: bag products, Dev Tools grant list, and item cleanup/stale/complete-all rewards from items.json; mission story order and progress-field registry from missions.json. Quest Dev Tools now lists every grantable quest inventory item. Init loads quest items once after mission hydrate (no double fetch); the Iron Ore timer only logs when that quest is active."
+        },
+        {
+          "mod": "RunTracker",
+          "type": "added",
+          "text": "Added ingestServerResults so Manual Runner can submit victories while analysis network capture is paused."
+        },
+        {
+          "mod": "RunTracker",
+          "type": "changed",
+          "text": "Map name resolution falls back to static raid/event mappings; runsUpdated events include mapId for Cyclopedia refresh matching."
+        }
+      ]
+    },
+    {
       "version": "4.7.4",
       "changes": [
         {

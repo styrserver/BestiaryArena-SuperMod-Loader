@@ -4749,7 +4749,7 @@ function getRunMightBeInvalidReasons(run, {
     if (wrTicks > 0 && run.time < wrTicks) reasons.push('faster than world record');
   }
   if (category === 'rank' && yourBestRank > 0 && run.points > yourBestRank) {
-    reasons.push('worse rank than your best');
+    reasons.push('higher than your profile best');
   }
   if (category === 'floor') {
     const runTicks = getRunFloorCompareTicksForUploadValidation(run);

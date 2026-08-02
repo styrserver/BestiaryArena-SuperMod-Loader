@@ -1844,7 +1844,7 @@ let mapDebugLastLogTime = 0;
 let mapDebugLogCount = 0;
 let timeoutIds = [];
 
-const HUNT_ANALYZER_ANALYSIS_BLOCKING_MODS = ['Board Analyzer', 'Manual Runner'];
+const HUNT_ANALYZER_ANALYSIS_BLOCKING_MODS = ['Board Analyzer'];
 const HUNT_ANALYZER_ANALYSIS_HIDDEN_ATTR = 'data-ba-analysis-panel-hidden';
 let huntAnalyzerPausedForAnalysis = false;
 let huntAnalyzerAnalysisCoordinationUnsubscribe = null;
@@ -1860,7 +1860,7 @@ function isHuntAnalyzerAnalysisBlockingActive() {
 function pauseHuntAnalyzerForAnalysis() {
   if (huntAnalyzerPausedForAnalysis) return;
   huntAnalyzerPausedForAnalysis = true;
-  console.log('[Hunt Analyzer] Board Analyzer/Manual Runner active - pausing panel updates and tracking');
+  console.log('[Hunt Analyzer] Board Analyzer active - pausing panel updates and tracking');
 
   huntAnalyzerPausedUpdateInterval = !!updateIntervalId;
   if (updateIntervalId) {

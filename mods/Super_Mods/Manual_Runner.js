@@ -3837,6 +3837,16 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
         attemptMs: runTime
       });
       logManualRunnerPerfCheckpoint(attemptCount, runTime);
+
+      // Network capture is paused while Manual Runner is active; forward victories explicitly.
+      if (isVictory && serverResults?.rewardScreen && window.RunTrackerAPI?.ingestServerResults) {
+        try {
+          await window.RunTrackerAPI.ingestServerResults(serverResults);
+        } catch (ingestError) {
+          console.warn('[Manual Runner] RunTracker ingest failed:', ingestError);
+        }
+      }
+
       pruneRunTransientMemoryAfterAttempt();
       
       // Check if stop was requested during this run (after recording attempt data)

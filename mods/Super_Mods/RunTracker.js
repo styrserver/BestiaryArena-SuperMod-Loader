@@ -211,6 +211,16 @@ function resolveMapName(mapId) {
     if (globalThis.state?.utils?.ROOM_NAME && globalThis.state.utils.ROOM_NAME[mapId]) {
       return globalThis.state.utils.ROOM_NAME[mapId];
     }
+
+    const eventMap = globalThis.mapsDatabase?.EVENT_TO_ROOM_MAPPING;
+    if (eventMap && typeof eventMap === 'object') {
+      for (const [name, id] of Object.entries(eventMap)) {
+        if (id === mapId) return name;
+      }
+    }
+
+    const fromDb = globalThis.mapsDatabase?.getMapById?.(mapId);
+    if (fromDb?.name) return fromDb.name;
     
     // If all else fails, return the ID
     return mapId;
@@ -1260,7 +1270,7 @@ async function addRun(runData) {
       // Queue save instead of immediate save
       StorageManager.queueSave();
       window.dispatchEvent(new CustomEvent('runtracker:runsUpdated', {
-        detail: { mapKey: runData.mapKey, mapName: runData.mapName }
+        detail: { mapKey: runData.mapKey, mapName: runData.mapName, mapId: runData.mapId }
       }));
     }
     
@@ -1888,12 +1898,30 @@ async function hashReplayPayload(config) {
 // =======================
 // 9. Public API
 // =======================
+/** Parse and store a victory from analysis mods (Manual Runner) when network capture is blocked. */
+async function ingestServerResults(serverResults) {
+  try {
+    if (!window.RunTrackerAPI || !window.RunTrackerAPI._initialized) {
+      return false;
+    }
+    const runData = parseServerResults(serverResults);
+    if (!runData) {
+      return false;
+    }
+    return await addRun(runData);
+  } catch (error) {
+    console.error('[RunTracker] Error ingesting server results:', error);
+    return false;
+  }
+}
+
 // Make RunTracker API available globally immediately
 if (!window.RunTrackerAPI) {
   window.RunTrackerAPI = {
   _initialized: false, // Track initialization state
   // Core functions
   addRun,
+  ingestServerResults,
   addReplayData,
   getRuns: (mapKey, category = null) => {
     try {

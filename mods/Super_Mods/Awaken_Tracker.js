@@ -147,7 +147,7 @@
     let boardSubscription = null;
     let lastSeenRoomId = null;
 
-    const AWAKEN_ANALYSIS_BLOCKING_MODS = ['Board Analyzer', 'Manual Runner'];
+    const AWAKEN_ANALYSIS_BLOCKING_MODS = ['Board Analyzer'];
     const AWAKEN_ANALYSIS_HIDDEN_ATTR = 'data-ba-analysis-panel-hidden';
     let awakenPausedForAnalysis = false;
     let awakenAnalysisCoordinationUnsubscribe = null;
@@ -161,7 +161,7 @@
     function pauseAwakenTrackerForAnalysis() {
         if (awakenPausedForAnalysis) return;
         awakenPausedForAnalysis = true;
-        console.log('[Awaken Tracker] Board Analyzer/Manual Runner active - pausing subscriptions');
+        console.log('[Awaken Tracker] Board Analyzer active - pausing subscriptions');
         teardownListeners();
         teardownBoardSub();
         teardownPlayerSub();
