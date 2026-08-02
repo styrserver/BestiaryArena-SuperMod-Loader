@@ -3,14 +3,14 @@
     "common": "1. Shared mission dialogue (used across multiple NPC handlers)",
     "missions": "2. Mission definitions",
     "completionSummaries": "3. Quest log completion summaries",
-    "sealTranscripts": "4. Costello diary seal transcripts"
+    "sealTranscripts": "4. Costello diary seal transcripts",
+    "registry": "5. Mission registry (story order, stateKey, firebaseKey, extra progress fields)"
   },
   "common": {
     "errorGeneric": "Something went wrong. Please try again.",
     "notReady": "Return when you are ready for this task.",
     "costelloNoFurtherMissions": "I have no further mission for you. Perhaps the King has work for you."
   },
-
   "missions": {
     "serpentine_tower": {
       "id": "serpentine_tower",
@@ -387,7 +387,6 @@
       "daneMissionAccepted": "Then go. Svenson knows the northern routes — ask him for passage to the hideout."
     }
   },
-
   "completionSummaries": {
     "king_honeyflower": "Retrieved a honeyflower from Honeyflower Tower for King Tibianus.",
     "king_crossing_the_line": "Won a City Boardgames chess battle with mages stationed on the marked tiles for King Tibianus.",
@@ -407,7 +406,6 @@
     "svenson_love_story": "Guided Svenson through storms and misnavigation, then delivered Bunny Slippers so he could bring Dane her present.",
     "weakened_archdemon": "Defeated the weakened archdemon and received an Orb from Dane."
   },
-
   "sealTranscripts": [
     {
       "incomplete": "Wander to the surface and fill the cracks with the green blood to seal the first.",
@@ -437,5 +435,131 @@
       "incomplete": "When the sixth seal is sealed, a portal opens in the Demonrage. Step through to face the last.",
       "complete": "Seal VII has been sealed."
     }
-  ]
+  ],
+  "registry": {
+    "_comment": "storyOrder drives Quest Log / Dev Tools. stateKey → kingChatState property. firebaseKey → Firebase progress blob. extraFields schema drives getExtraMissionProgressFields.",
+    "storyOrder": [
+      "king_honeyflower",
+      "king_crossing_the_line",
+      "king_copper_key",
+      "king_red_dragon",
+      "king_letter_al_dee",
+      "al_dee_fishing_gold",
+      "al_dee_golden_rope",
+      "king_monks_study",
+      "costello_queen_banshees",
+      "follower_of_zathroth",
+      "mother_of_all_spiders",
+      "king_scarab_coin",
+      "serpentine_tower",
+      "apprentice_sheng",
+      "christmas_miracle",
+      "svenson_love_story",
+      "weakened_archdemon"
+    ],
+    "missions": {
+      "king_honeyflower": {
+        "stateKey": "progressHoneyflower",
+        "firebaseKey": "honeyflower",
+        "extraFields": [
+          "honeyflowerPicked"
+        ]
+      },
+      "king_crossing_the_line": {
+        "stateKey": "progressCrossingTheLine",
+        "firebaseKey": "crossingTheLine",
+        "extraFields": [
+          "crossingObjectiveComplete"
+        ]
+      },
+      "king_copper_key": {
+        "stateKey": "progressCopper",
+        "firebaseKey": "copper"
+      },
+      "king_red_dragon": {
+        "stateKey": "progressDragon",
+        "firebaseKey": "dragon"
+      },
+      "king_letter_al_dee": {
+        "stateKey": "progressLetter",
+        "firebaseKey": "letter"
+      },
+      "al_dee_fishing_gold": {
+        "stateKey": "progressAlDeeFishing",
+        "firebaseKey": "alDeeFishing"
+      },
+      "al_dee_golden_rope": {
+        "stateKey": "progressAlDeeGoldenRope",
+        "firebaseKey": "alDeeGoldenRope"
+      },
+      "king_monks_study": {
+        "stateKey": "progressMonksStudy",
+        "firebaseKey": "monksStudy"
+      },
+      "costello_queen_banshees": {
+        "stateKey": "progressQueenBanshees",
+        "firebaseKey": "queenBanshees"
+      },
+      "follower_of_zathroth": {
+        "stateKey": "progressFollowerOfZathroth",
+        "firebaseKey": "followerOfZathroth"
+      },
+      "mother_of_all_spiders": {
+        "stateKey": "progressMotherOfAllSpiders",
+        "firebaseKey": "motherOfAllSpiders"
+      },
+      "king_scarab_coin": {
+        "stateKey": "progressScarabHunt",
+        "firebaseKey": "scarabHunt"
+      },
+      "serpentine_tower": {
+        "stateKey": "progressSerpentineTower",
+        "firebaseKey": "serpentineTower",
+        "extraFields": [
+          "destroyFieldRuneTaken",
+          "putridChamberComplete"
+        ]
+      },
+      "apprentice_sheng": {
+        "stateKey": "progressApprenticeSheng",
+        "firebaseKey": "apprenticeSheng",
+        "extraFields": [
+          "battleCompleted",
+          "rookstayerDismissed"
+        ]
+      },
+      "christmas_miracle": {
+        "stateKey": "progressChristmasMiracle",
+        "firebaseKey": "christmasMiracle"
+      },
+      "svenson_love_story": {
+        "stateKey": "progressSvensonLoveStory",
+        "firebaseKey": "svensonLoveStory",
+        "extraFields": [
+          "plankDelivered",
+          "strandedAtAwash",
+          "awashYarnDelivered",
+          "awashYarnRequested",
+          "strandedAtUnderground",
+          "undergroundCompassDelivered",
+          "undergroundCompassRequested",
+          "strandedAtWhiteWave",
+          "whiteWaveSlippersDelivered"
+        ],
+        "forceExtraFieldsWhenCompleted": true,
+        "extraFieldAliases": {
+          "undergroundCompassDelivered": [
+            "undergroundPlankDelivered"
+          ]
+        }
+      },
+      "weakened_archdemon": {
+        "stateKey": "progressWeakenedArchdemon",
+        "firebaseKey": "weakenedArchdemon",
+        "extraFields": [
+          "battleCompleted"
+        ]
+      }
+    }
+  }
 }
