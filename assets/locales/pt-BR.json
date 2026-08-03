@@ -1310,7 +1310,24 @@
       "monthSeptember": "Setembro",
       "monthOctober": "Outubro",
       "monthNovember": "Novembro",
-      "monthDecember": "Dezembro"
+      "monthDecember": "Dezembro",
+      "adminDeleteMessage": "Excluir Mensagem",
+      "adminDeleteMessageConfirm": "Excluir esta mensagem de {name}?",
+      "adminMute1h": "Silenciar 1 hora",
+      "adminMute24h": "Silenciar 24 horas",
+      "adminMute7d": "Silenciar 7 dias",
+      "adminMutePermanent": "Silenciar permanentemente",
+      "adminUnmutePlayer": "Remover Silêncio",
+      "adminBanPlayer": "Banir do Chat",
+      "adminBanPlayerConfirm": "Banir {name} de todo o chat da VIP List (Global, Guilda, privado)?",
+      "adminUnbanPlayer": "Desbanir Jogador",
+      "adminDeleteAllFromPlayer": "Excluir Tudo do Jogador",
+      "adminDeleteAllFromPlayerConfirm": "Excluir TODAS as mensagens do Chat Global de {name}? Isso não pode ser desfeito.",
+      "adminDeletedCount": "{count} mensagem(ns) excluída(s).",
+      "adminActionFailed": "Ação de administrador falhou.",
+      "adminModerationRulesRequired": "Mute/ban precisam de regras Firebase para /chat-moderation (leitura + escrita). Excluir ainda funciona. Veja a documentação do chat.",
+      "adminYouAreMuted": "Você está silenciado e não pode enviar mensagens no Chat Global ou da Guilda.",
+      "adminYouAreBanned": "Você está banido do chat da VIP List."
     },
     "guilds": {
       "menuItem": "Guildas",
@@ -1451,7 +1468,9 @@
         "menuItem": "Equipamento",
         "equipmentPoints": "Pontos de Equipamento",
         "floorPoints": "Pontos de Andar",
-        "floorPointsDescription": "{floors} andares, 1 andar = 1 pt"
+        "floorPointsDescription": "{floors} andares, 1 andar = 1 pt",
+        "loadingArsenal": "Carregando arsenal...",
+        "loadingSkills": "Carregando habilidades..."
       }
     },
     "staminaOptimizer": {

@@ -158,6 +158,13 @@
       "description": "It is the claw of Demodras.",
       "rarity": 5
     },
+    "goldenMug": {
+      "productName": "Golden Mug",
+      "icon": "Golden_Mug.gif",
+      "description": "A golden mug — spoils of Demodras.",
+      "rarity": 5,
+      "maxCount": 1
+    },
     "elvenhairRope": {
       "productName": "Elvenhair Rope",
       "icon": "Elvenhair_Rope.gif",
@@ -384,6 +391,14 @@
       ]
     },
     {
+      "id": "golden_mug",
+      "productName": "Golden Mug",
+      "keywords": [
+        "golden mug",
+        "gold mug"
+      ]
+    },
+    {
       "id": "fishing_rod",
       "productName": "Fishing Rod",
       "keywords": [
@@ -475,10 +490,11 @@
     "king_honeyflower": "Honey_Flower.gif",
     "king_copper_key": "Copper_Key.PNG",
     "king_red_dragon": "Red_Dragon_Leather.PNG",
+    "dragonmother": "Golden_Mug.gif",
     "king_letter_al_dee": "Scroll.gif",
     "al_dee_fishing_gold": "Small_Axe.gif",
     "al_dee_golden_rope": "Elvenhair_Rope.gif",
-    "king_monks_study": "Costello.gif",
+    "king_monks_study": "The_Holy_Tible.png",
     "costello_queen_banshees": "Book_(Black).gif",
     "follower_of_zathroth": "Blessed_Ankh.gif",
     "mother_of_all_spiders": "Spider_Silk.gif",
@@ -560,6 +576,14 @@
         "receivedBefore": {
           "type": "missionCompleted",
           "missionId": "king_red_dragon"
+        }
+      },
+      {
+        "key": "goldenMug",
+        "productId": "goldenMug",
+        "receivedBefore": {
+          "type": "missionCompleted",
+          "missionId": "dragonmother"
         }
       },
       {
@@ -789,7 +813,7 @@
     ]
   },
   "itemLifecycle": {
-    "_comment": "cleanupRules drive cleanupInvalidQuestItems. staleCleanupOnComplete drives cleanupStaleQuestItemsAfterCompletedMissions. devCompleteRewards drive QuestsDev.completeAll item grants.",
+    "_comment": "cleanupRules drive cleanupInvalidQuestItems. staleCleanupOnComplete drives cleanupStaleQuestItemsAfterCompletedMissions. devCompleteRewards drive QuestsDev.completeAll item grants. independentDrop: true = Rookgaard/global drops that must NOT be deleted when the linked mission is not yet accepted (only removeWhenCompleted / staleCleanup apply).",
     "cleanupRules": [
       {
         "productId": "mapColour",
@@ -836,7 +860,7 @@
       {
         "productId": "letterFromAlDee",
         "missionId": "king_letter_al_dee",
-        "requiredStatus": "accepted",
+        "independentDrop": true,
         "removeWhenCompleted": true
       },
       {
@@ -852,12 +876,6 @@
       },
       {
         "productId": "smallAxe",
-        "missionId": "al_dee_fishing_gold",
-        "requiredStatus": "accepted",
-        "removeWhenCompleted": true
-      },
-      {
-        "productId": "ironOre",
         "missionId": "al_dee_fishing_gold",
         "requiredStatus": "accepted",
         "removeWhenCompleted": true
@@ -911,7 +929,7 @@
       {
         "productId": "wishlist",
         "missionId": "christmas_miracle",
-        "requiredStatus": "accepted",
+        "independentDrop": true,
         "removeWhenCompleted": true
       },
       {
@@ -928,6 +946,11 @@
       {
         "productId": "orb",
         "missionId": "weakened_archdemon",
+        "requiredStatus": "completed"
+      },
+      {
+        "productId": "goldenMug",
+        "missionId": "dragonmother",
         "requiredStatus": "completed"
       }
     ],
@@ -953,6 +976,10 @@
         "missionId": "king_red_dragon"
       },
       {
+        "productId": "dragonClaw",
+        "missionId": "dragonmother"
+      },
+      {
         "productId": "honeyflower",
         "missionId": "king_honeyflower"
       },
@@ -970,10 +997,6 @@
       },
       {
         "productId": "smallAxe",
-        "missionId": "al_dee_fishing_gold"
-      },
-      {
-        "productId": "ironOre",
         "missionId": "al_dee_fishing_gold"
       },
       {
@@ -1060,6 +1083,10 @@
       },
       {
         "productId": "orb",
+        "amount": 1
+      },
+      {
+        "productId": "goldenMug",
         "amount": 1
       }
     ]

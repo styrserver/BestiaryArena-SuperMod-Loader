@@ -385,6 +385,24 @@
       "svensonGhazTravelStart": "Then may the gods watch over you. Once we land, there is no turning back until the fight is done.",
       "svensonGhazTravelLocked": "You are not ready for that route yet. Come back when you are stronger.",
       "daneMissionAccepted": "Then go. Svenson knows the northern routes — ask him for passage to the hideout."
+    },
+    "dragonmother": {
+      "id": "dragonmother",
+      "title": "The Dragonmother",
+      "prompt": "",
+      "accept": "",
+      "alreadyCompleted": "You have already slain Demodras.",
+      "alreadyActive": "Descend the stairs in Dragon Lair with Demodras' claw and defeat him.",
+      "objectiveLine1": "Use Demodras' claw to descend the stairs in Dragon Lair.",
+      "objectiveLine2": "Defeat Demodras in Lonesome Dragon.",
+      "hint": "Only those who carry the Dragon Claw may descend the stairs in Dragon Lair.",
+      "rewardItemName": "Golden Mug",
+      "rewardIcon": "Golden_Mug.gif",
+      "rewardDescription": "A golden mug — spoils of Demodras.",
+      "rewardCoins": 0,
+      "rewardSummary": "Reward: Golden Mug.",
+      "battleVictory": "Demodras has fallen. You found a Golden Mug.",
+      "battleDefeat": "Demodras was too strong."
     }
   },
   "completionSummaries": {
@@ -404,7 +422,8 @@
     "apprentice_sheng": "Helped Rookstayer defeat Apprentice Sheng in the Minotaur Mage Room and claimed a Wooden Plank.",
     "christmas_miracle": "Received a Christmas present from Santa Claus.",
     "svenson_love_story": "Guided Svenson through storms and misnavigation, then delivered Bunny Slippers so he could bring Dane her present.",
-    "weakened_archdemon": "Defeated the weakened archdemon and received an Orb from Dane."
+    "weakened_archdemon": "Defeated the weakened archdemon and received an Orb from Dane.",
+    "dragonmother": "Descended into Lonesome Dragon with Demodras' claw and slew Demodras."
   },
   "sealTranscripts": [
     {
@@ -443,6 +462,7 @@
       "king_crossing_the_line",
       "king_copper_key",
       "king_red_dragon",
+      "dragonmother",
       "king_letter_al_dee",
       "al_dee_fishing_gold",
       "al_dee_golden_rope",
@@ -479,6 +499,10 @@
       "king_red_dragon": {
         "stateKey": "progressDragon",
         "firebaseKey": "dragon"
+      },
+      "dragonmother": {
+        "stateKey": "progressDragonmother",
+        "firebaseKey": "dragonmother"
       },
       "king_letter_al_dee": {
         "stateKey": "progressLetter",

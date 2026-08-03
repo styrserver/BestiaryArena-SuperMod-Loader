@@ -5,7 +5,8 @@
     "banshee_last_room": "3. Banshee's Last Room (Seal VII)",
     "spider_lair": "4. Spider Lair (Mother of All Spiders)",
     "putrid_chamber": "5. Putrid Chamber / Cursed Chamber",
-    "ghazbaran": "6. Weakened Ghazbaran"
+    "ghazbaran": "6. Weakened Ghazbaran",
+    "lonesome_dragon": "7. Lonesome Dragon (The Dragonmother / Demodras)"
   },
   "mornenion": {
     "allyLimit": 3,
@@ -264,6 +265,53 @@
         "tier": 4,
         "direction": "south",
         "equip": { "name": "Spellbook of Ancient Arcana", "stat": "ap", "tier": 5 }
+      }
+    ]
+  },
+  "lonesome_dragon": {
+    "allyLimit": 6,
+    "preventVillainMovement": true,
+    "hideVillainSprites": true,
+    "defaultGenes": { "hp": 50, "ad": 20, "ap": 20, "armor": 20, "magicResist": 20 },
+    "sharedEquip": { "name": "Vile Axe", "stat": "ap", "tier": 5 },
+    "blockedTiles": [82, 83, 68, 53, 38, 23, 8, 54],
+    "blockedTilesMessage": "That path is sealed — Demodras has trapped you!",
+    "villains": [
+      {
+        "nickname": "Demodras",
+        "tileIndex": 81,
+        "keyPrefix": "demodras-tile-81-",
+        "creatureName": "Dragon Lord",
+        "fallbackGameId": 26,
+        "shiny": true,
+        "awakened": true,
+        "level": 200,
+        "tier": 0,
+        "direction": "south"
+      },
+      {
+        "nickname": "Dragon",
+        "tileIndex": 93,
+        "keyPrefix": "lonesome-dragon-tile-93-",
+        "creatureName": "Dragon",
+        "fallbackGameId": 35,
+        "shiny": true,
+        "awakened": true,
+        "level": 150,
+        "tier": 0,
+        "direction": "south"
+      },
+      {
+        "nickname": "Dragon",
+        "tileIndex": 126,
+        "keyPrefix": "lonesome-dragon-tile-126-",
+        "creatureName": "Dragon",
+        "fallbackGameId": 35,
+        "shiny": true,
+        "awakened": true,
+        "level": 150,
+        "tier": 0,
+        "direction": "south"
       }
     ]
   },

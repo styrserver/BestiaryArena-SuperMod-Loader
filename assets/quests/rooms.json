@@ -9,9 +9,10 @@
     "apprenticeSheng": "7. Minotaur Mage Room / Rookstayer",
     "sevenSeals": "8. Ghostlands seven seals",
     "spiderLair": "9. Mother of All Spiders / Spider Lair",
-    "boardNpcs": "10. Board NPC room/tile placements",
-    "ghazbaran": "11. Weakened Archdemon hideout",
-    "kingArenaRanks": "12. Arena rank titles by mission count"
+    "dragonmother": "10. The Dragonmother / Dragon Lair → Lonesome Dragon",
+    "boardNpcs": "11. Board NPC room/tile placements",
+    "ghazbaran": "12. Weakened Archdemon hideout",
+    "kingArenaRanks": "13. Arena rank titles by mission count"
   },
 
   "fishing": {
@@ -139,6 +140,12 @@
     "addSprite2127Id": "2127",
     "tilesAddSprite4312": [37, 32, 96, 84],
     "addSprite4312Id": "4312"
+  },
+
+  "dragonmother": {
+    "dragonLairRoomName": "Dragon Lair",
+    "lonesomeDragonRoomName": "Lonesome Dragon",
+    "dragonLairStairsTile": 47
   },
 
   "boardNpcs": {

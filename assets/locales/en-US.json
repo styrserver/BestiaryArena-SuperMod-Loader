@@ -1310,7 +1310,24 @@
       "monthSeptember": "September",
       "monthOctober": "October",
       "monthNovember": "November",
-      "monthDecember": "December"
+      "monthDecember": "December",
+      "adminDeleteMessage": "Delete Message",
+      "adminDeleteMessageConfirm": "Delete this message from {name}?",
+      "adminMute1h": "Mute 1 hour",
+      "adminMute24h": "Mute 24 hours",
+      "adminMute7d": "Mute 7 days",
+      "adminMutePermanent": "Mute permanently",
+      "adminUnmutePlayer": "Unmute Player",
+      "adminBanPlayer": "Ban from Chat",
+      "adminBanPlayerConfirm": "Ban {name} from all VIP List chat (All Chat, Guild, private)?",
+      "adminUnbanPlayer": "Unban Player",
+      "adminDeleteAllFromPlayer": "Delete All From Player",
+      "adminDeleteAllFromPlayerConfirm": "Delete ALL All Chat messages from {name}? This cannot be undone.",
+      "adminDeletedCount": "Deleted {count} message(s).",
+      "adminActionFailed": "Admin action failed.",
+      "adminModerationRulesRequired": "Mute/ban need Firebase rules for /chat-moderation (read + write). Delete still works. See chat documentation.",
+      "adminYouAreMuted": "You are muted and cannot send messages to All Chat or Guild Chat.",
+      "adminYouAreBanned": "You are banned from VIP List chat."
     },
     "guilds": {
       "menuItem": "Guilds",
@@ -1451,7 +1468,9 @@
         "menuItem": "Equipment",
         "equipmentPoints": "Equipment Points",
         "floorPoints": "Floor Points",
-        "floorPointsDescription": "{floors} floors, 1 floor = 1 pt"
+        "floorPointsDescription": "{floors} floors, 1 floor = 1 pt",
+        "loadingArsenal": "Loading arsenal...",
+        "loadingSkills": "Loading skills..."
       }
     },
     "staminaOptimizer": {
