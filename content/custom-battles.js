@@ -2465,6 +2465,12 @@ if (window.CustomBattles) {
                 return new Set(allowed.map((tileIndex) => Number(tileIndex)).filter((tileIndex) => Number.isFinite(tileIndex)));
             }
 
+            getBlockedPlayerTiles() {
+                const blocked = this.config.tileRestrictions?.blockedTiles;
+                if (!Array.isArray(blocked) || !blocked.length) return null;
+                return new Set(blocked.map((tileIndex) => Number(tileIndex)).filter((tileIndex) => Number.isFinite(tileIndex)));
+            }
+
             filterSetupPreventAllyOutsideAllowedTiles(setup, showToastCallback) {
                 if (!Array.isArray(setup)) return setup;
                 const allowedTiles = this.getAllowedPlayerTiles();
@@ -2485,6 +2491,37 @@ if (window.CustomBattles) {
                     if (showToastCallback) {
                         showToastCallback({
                             message: this.config.tileRestrictions.message || 'Ally creatures can only be placed on specific tiles!',
+                            type: 'warning',
+                            duration: 3000
+                        });
+                    }
+                }
+
+                return filtered;
+            }
+
+            filterSetupPreventAllyOnBlockedTiles(setup, showToastCallback) {
+                if (!Array.isArray(setup)) return setup;
+                const blockedTiles = this.getBlockedPlayerTiles();
+                if (!blockedTiles) return setup;
+
+                let blocked = 0;
+                const filtered = setup.filter((piece) => {
+                    if (piece?.villain) return true;
+                    if (this.isForcedAllyEntity(piece)) return true;
+                    if (!this.isAllyPiece(piece)) return true;
+                    if (!blockedTiles.has(Number(piece.tileIndex))) return true;
+                    blocked++;
+                    return false;
+                });
+
+                if (blocked > 0) {
+                    console.log(`[Custom Battles][${this.config.name || 'Battle'}] Blocked ${blocked} ally placement(s) on blocked tiles`);
+                    if (showToastCallback) {
+                        showToastCallback({
+                            message: this.config.tileRestrictions.blockedMessage
+                                || this.config.tileRestrictions.message
+                                || 'Ally creatures cannot be placed on those tiles!',
                             type: 'warning',
                             duration: 3000
                         });
@@ -2689,6 +2726,51 @@ if (window.CustomBattles) {
                 return false;
             }
 
+            removeAlliesOnBlockedTiles(showToastCallback) {
+                if (this.isBoardBattleActive()) return false;
+                const blockedTiles = this.getBlockedPlayerTiles();
+                if (!blockedTiles) return false;
+
+                try {
+                    const boardConfig = globalThis.state.board.getSnapshot()?.context?.boardConfig || [];
+                    let removed = 0;
+                    const newBoardConfig = boardConfig.filter((piece) => {
+                        if (this.isForcedAllyEntity(piece)) return true;
+                        if (!this.isAllyPiece(piece)) return true;
+                        if (!blockedTiles.has(Number(piece.tileIndex))) return true;
+                        removed++;
+                        return false;
+                    });
+
+                    if (removed > 0) {
+                        this.runLockedBoardSetup(() => {
+                            globalThis.state.board.send({
+                                type: 'setState',
+                                fn: (prev) => ({
+                                    ...prev,
+                                    boardConfig: newBoardConfig
+                                })
+                            });
+                        });
+                        console.log(`[Custom Battles][${this.config.name || 'Battle'}] Removed ${removed} ally creature(s) on blocked tiles`);
+                        if (showToastCallback) {
+                            showToastCallback({
+                                message: this.config.tileRestrictions.blockedMessage
+                                    || this.config.tileRestrictions.message
+                                    || 'Ally creatures cannot be placed on those tiles!',
+                                type: 'warning',
+                                duration: 3000
+                            });
+                        }
+                        return true;
+                    }
+                } catch (error) {
+                    console.error('[Custom Battles] Error removing allies on blocked tiles:', error);
+                }
+
+                return false;
+            }
+
             setupAllyVillainOverlapPrevention(activationCallback, showToastCallback) {
                 if (!this.config.villains?.length) return;
 
@@ -2733,6 +2815,7 @@ if (window.CustomBattles) {
                     event.setup = this.filterSetupPreventAllyOnVillainTiles(event.setup, showToastCallback);
                     event.setup = this.filterSetupPreventAllyOnForcedAllyTiles(event.setup, showToastCallback);
                     event.setup = this.filterSetupPreventAllyOutsideAllowedTiles(event.setup, showToastCallback);
+                    event.setup = this.filterSetupPreventAllyOnBlockedTiles(event.setup, showToastCallback);
                     event.setup = filterSetupPreventDuplicateAllies(
                         event.setup,
                         globalThis.state.board.getSnapshot()?.context?.boardConfig || [],
@@ -2769,6 +2852,7 @@ if (window.CustomBattles) {
                     if (this.tileRestrictionActive) {
                         this.preventVillainMovement();
                         this.removeAlliesOutsideAllowedTiles(showToastCallback);
+                        this.removeAlliesOnBlockedTiles(showToastCallback);
                     }
                 });
 

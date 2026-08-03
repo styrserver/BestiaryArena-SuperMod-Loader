@@ -86,6 +86,14 @@ function sendMessageToResolvedTab(message, sender, payload) {
   return true;
 }
 
+/** Allow a fresh delivery for this tab (new navigation / content-script inject). */
+function clearTabModDelivery(tabId) {
+  if (tabId == null) return;
+  if (registeredTabs.delete(tabId)) {
+    console.log(`Cleared mod loader delivery state for tab ${tabId}`);
+  }
+}
+
 /** Push remote scripts + stored local mod states to a tab (once per page load). */
 function deliverModLoaderToTab(tabId, enabledScripts) {
   if (registeredTabs.has(tabId)) {
@@ -1257,6 +1265,11 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'contentScriptReady') {
     console.log('Content script reported ready in tab:', sender.tab.id);
 
+    // New content-script inject = new page load. Tab IDs survive reload, so clear the
+    // once-per-load guard; otherwise iOS/Orion (and desktop) never re-deliver until the
+    // browser process restarts and wipes the in-memory Set.
+    clearTabModDelivery(sender.tab.id);
+
     getActiveScripts().then((scripts) => {
       const enabledScripts = scripts.filter((s) => s.enabled);
       deliverModLoaderToTab(sender.tab.id, enabledScripts);
@@ -1330,7 +1343,7 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 // Clean up registered tabs when they're closed
 browserAPI.tabs.onRemoved.addListener((tabId) => {
-  registeredTabs.delete(tabId);
+  clearTabModDelivery(tabId);
 });
 
 // Mirrors content_scripts matches in the manifest — only inject on allowlisted game URLs
@@ -1423,9 +1436,11 @@ function isBestiaryAllowedForModInjectionUrl(url) {
 }
 
 browserAPI.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  if (tab.url && tab.url.match(/bestiaryarena\.com/) && !isBestiaryAllowedForModInjectionUrl(tab.url)) {
-    if (changeInfo.status === 'loading') {
-      registeredTabs.delete(tabId);
+  // Same-tab reload keeps the tabId. Clear delivery state as soon as a game (or
+  // non-game) navigation starts so contentScriptReady / complete can deliver again.
+  if (changeInfo.status === 'loading' && tab.url && tab.url.match(/bestiaryarena\.com/)) {
+    clearTabModDelivery(tabId);
+    if (!isBestiaryAllowedForModInjectionUrl(tab.url)) {
       return;
     }
   }

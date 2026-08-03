@@ -798,6 +798,13 @@ function applyQuestRoomsFromAssets(roomsData) {
     if (spider.addSprite4312Id) SPIDER_LAIR_ADD_SPRITE_4312_ID = spider.addSprite4312Id;
   }
 
+  const dragonmother = roomsData.dragonmother;
+  if (dragonmother) {
+    if (dragonmother.dragonLairRoomName) DRAGON_LAIR_ROOM_NAME = dragonmother.dragonLairRoomName;
+    if (dragonmother.lonesomeDragonRoomName) LONESOME_DRAGON_ROOM_NAME = dragonmother.lonesomeDragonRoomName;
+    if (dragonmother.dragonLairStairsTile != null) DRAGON_LAIR_STAIRS_TILE_47 = dragonmother.dragonLairStairsTile;
+  }
+
   const board = roomsData.boardNpcs;
   if (board) {
     if (board.santa) {
@@ -1013,6 +1020,9 @@ function rebuildToastMessagesFromTemplates() {
   TOAST_MESSAGES.spiderLairNotFound = t.spiderLairNotFound || '';
   TOAST_MESSAGES.enteringSpiderLair = t.enteringSpiderLair || '';
   TOAST_MESSAGES.spiderLairBattleHere = t.spiderLairBattleHere || '';
+  TOAST_MESSAGES.lonesomeDragonNotFound = t.lonesomeDragonNotFound || '';
+  TOAST_MESSAGES.enteringLonesomeDragon = t.enteringLonesomeDragon || '';
+  TOAST_MESSAGES.needDragonClawForStairs = t.needDragonClawForStairs || '';
   TOAST_MESSAGES.putridChamberNotStrongEnough = t.putridChamberNotStrongEnough || '';
   TOAST_MESSAGES.travelingPutridChamber = t.travelingPutridChamber || '';
   TOAST_MESSAGES.travelingWithSvenson = t.travelingWithSvenson || '';
@@ -1139,6 +1149,8 @@ const FOLLOWER_OF_ZATHROTH_MISSION = { id: 'follower_of_zathroth' };
 
 const MOTHER_OF_ALL_SPIDERS_MISSION = { id: 'mother_of_all_spiders' };
 
+const DRAGONMOTHER_MISSION = { id: 'dragonmother' };
+
 const APPRENTICE_SHENG_MISSION = { id: 'apprentice_sheng' };
 
 const CHRISTMAS_MIRACLE_MISSION = { id: 'christmas_miracle' };
@@ -1159,6 +1171,7 @@ registerMissionForDialogue(AL_DEE_GOLDEN_ROPE_MISSION);
 registerMissionForDialogue(COSTELLO_QUEEN_BANSHEES_MISSION);
 registerMissionForDialogue(FOLLOWER_OF_ZATHROTH_MISSION);
 registerMissionForDialogue(MOTHER_OF_ALL_SPIDERS_MISSION);
+registerMissionForDialogue(DRAGONMOTHER_MISSION);
 registerMissionForDialogue(APPRENTICE_SHENG_MISSION);
 registerMissionForDialogue(CHRISTMAS_MIRACLE_MISSION);
 registerMissionForDialogue(SVENSON_LOVE_STORY_MISSION);
@@ -1177,6 +1190,7 @@ const DEFAULT_QUEST_LOG_MISSION_ORDER = [
   KING_CROSSING_THE_LINE_MISSION,
   KING_COPPER_KEY_MISSION,
   KING_RED_DRAGON_MISSION,
+  DRAGONMOTHER_MISSION,
   KING_LETTER_MISSION,
   AL_DEE_FISHING_MISSION,
   AL_DEE_GOLDEN_ROPE_MISSION,
@@ -1197,6 +1211,7 @@ const DEFAULT_MISSION_REGISTRY = {
   king_crossing_the_line: { stateKey: 'progressCrossingTheLine', firebaseKey: 'crossingTheLine', extraFields: ['crossingObjectiveComplete'] },
   king_copper_key: { stateKey: 'progressCopper', firebaseKey: 'copper' },
   king_red_dragon: { stateKey: 'progressDragon', firebaseKey: 'dragon' },
+  dragonmother: { stateKey: 'progressDragonmother', firebaseKey: 'dragonmother' },
   king_letter_al_dee: { stateKey: 'progressLetter', firebaseKey: 'letter' },
   al_dee_fishing_gold: { stateKey: 'progressAlDeeFishing', firebaseKey: 'alDeeFishing' },
   al_dee_golden_rope: { stateKey: 'progressAlDeeGoldenRope', firebaseKey: 'alDeeGoldenRope' },
@@ -1304,6 +1319,8 @@ function getMissionCompletionRewardText(mission) {
       return 'Reward: Blessed Ankh.';
     case MOTHER_OF_ALL_SPIDERS_MISSION.id:
       return 'Reward: Spool of Yarn.';
+    case DRAGONMOTHER_MISSION.id:
+      return 'Reward: Golden Mug.';
     case SERPENTINE_TOWER_MISSION.id:
       return `Reward: ${SCORPION_SCEPTRE_CONFIG.productName}.`;
     case KING_SCARAB_COIN_MISSION.id:
@@ -1374,6 +1391,10 @@ const SPIDER_LAIR_TILES_ADD_SPRITE_2127 = [];
 let SPIDER_LAIR_ADD_SPRITE_2127_ID = '';
 const SPIDER_LAIR_TILES_ADD_SPRITE_4312 = [];
 let SPIDER_LAIR_ADD_SPRITE_4312_ID = '';
+
+let DRAGON_LAIR_ROOM_NAME = '';
+let LONESOME_DRAGON_ROOM_NAME = '';
+let DRAGON_LAIR_STAIRS_TILE_47 = null;
 
 const KING_ARENA_RANKS = [];
 
@@ -1663,6 +1684,9 @@ function resolveQuestProductName(productId) {
   if (productId === 'spoolOfYarn') {
     return MOTHER_OF_ALL_SPIDERS_MISSION.rewardItemName || 'Spool of Yarn';
   }
+  if (productId === 'goldenMug') {
+    return DRAGONMOTHER_MISSION.rewardItemName || 'Golden Mug';
+  }
   if (productId === 'scorpionSceptre') {
     return SCORPION_SCEPTRE_CONFIG.productName || 'Compass';
   }
@@ -1864,6 +1888,7 @@ function createNPCCooldownManager() {
     progressQueenBanshees: { accepted: false, completed: false },
     progressFollowerOfZathroth: { accepted: false, completed: false },
     progressMotherOfAllSpiders: { accepted: false, completed: false },
+    progressDragonmother: { accepted: false, completed: false },
     progressAlDeeFishing: { accepted: false, completed: false },
     progressAlDeeGoldenRope: { accepted: false, completed: false },
     progressMeetingWithTesha: { accepted: false, completed: false },
@@ -1983,6 +2008,19 @@ function createNPCCooldownManager() {
   let lastOverlayHiderRoomName = null; // track previous room so we only remove originals when entering Spider Lair via quest
   let tile77SpiderLairRightClickEnabled = false;
   let tile77SpiderLairBoardSubscription = null;
+
+  // Lonesome Dragon (The Dragonmother: tile 47 in Dragon Lair → Lonesome Dragon custom battle)
+  let playerUsedTile47ToLonesomeDragon = false;
+  let lonesomeDragonBattle = null;
+  let lonesomeDragonReinitTriggered = false;
+  let lonesomeDragonRetryWithoutTile47 = false;
+  let tile47LonesomeDragonRightClickEnabled = false;
+  let tile47LonesomeDragonBoardSubscription = null;
+  let tile47LonesomeDragonContextMenu = null;
+  let demodrasBattleWorld = null;
+  let demodrasNewGameUnsub = null;
+  let demodrasCooldownPatchTimers = [];
+  let demodrasCooldownPatchedLogged = false;
 
   // Putrid Chamber (Serpentine Tower Quest: basement lever → custom battle)
   let playerUsedSerpentineLeverToPutridChamber = false;
@@ -2450,6 +2488,118 @@ function createNPCCooldownManager() {
     });
   }
 
+  // Lonesome Dragon (The Dragonmother): custom battle when descending tile 47 in Dragon Lair with Dragon Claw.
+  function createLonesomeDragonBattleInstance(roomId) {
+    if (!window.CustomBattles) {
+      console.error('[Quests Mod][Lonesome Dragon] CustomBattles still not available');
+      return null;
+    }
+    const spawn = getHydratedQuestBattleSpawn('lonesome_dragon');
+    const villains = spawn.villains;
+    const tileRestrictions = {};
+    if (spawn.allowedTiles?.length) {
+      tileRestrictions.allowedTiles = spawn.allowedTiles;
+      tileRestrictions.message = spawn.allowedTilesMessage || 'Ally creatures can only be placed on specific tiles!';
+    }
+    if (spawn.blockedTiles?.length) {
+      tileRestrictions.blockedTiles = spawn.blockedTiles;
+      tileRestrictions.blockedMessage = spawn.blockedTilesMessage
+        || 'That path is sealed — Demodras has trapped you!';
+      if (!tileRestrictions.message) {
+        tileRestrictions.message = tileRestrictions.blockedMessage;
+      }
+    }
+    const lonesomeDragonConfig = {
+      name: LONESOME_DRAGON_ROOM_NAME,
+      roomId: roomId,
+      villains,
+      allyLimit: spawn.allyLimit ?? 6,
+      preventVillainMovement: spawn.preventVillainMovement !== false,
+      hideVillainSprites: spawn.hideVillainSprites !== false,
+      ...(Object.keys(tileRestrictions).length ? { tileRestrictions } : {}),
+      activationCheck: (isSandbox, inBattleArea) => {
+        return isSandbox && inBattleArea && playerUsedTile47ToLonesomeDragon;
+      },
+      victoryDefeat: {
+        onVictory: async () => {
+          console.log('[Quests Mod][Lonesome Dragon] Demodras defeated! Completing The Dragonmother');
+          const rewardName = DRAGONMOTHER_MISSION.rewardItemName || 'Golden Mug';
+          try {
+            await persistMissionProgress(DRAGONMOTHER_MISSION, { accepted: true, completed: true });
+            NotificationService.showQuestCompleted(DRAGONMOTHER_MISSION, BATTLE_TOAST_LOG.lonesomeDragon || '[Quests Mod][Lonesome Dragon]');
+          } catch (error) {
+            console.error('[Quests Mod][Lonesome Dragon] Error completing The Dragonmother:', error);
+          }
+          try {
+            const clawCount = getCachedQuestItemCount('Dragon Claw') || 0;
+            let toRemove = clawCount;
+            if (toRemove <= 0) {
+              const questItems = await getQuestItems(false);
+              toRemove = questItems?.['Dragon Claw'] || 0;
+            }
+            if (toRemove > 0) {
+              await consumeQuestItem('Dragon Claw', toRemove);
+              NotificationService.showItemRemoved('Dragon Claw', BATTLE_TOAST_LOG.lonesomeDragon || '[Quests Mod][Lonesome Dragon]');
+            }
+          } catch (error) {
+            console.error('[Quests Mod][Lonesome Dragon] Error removing Dragon Claw:', error);
+          }
+          await addQuestItem(rewardName, 1).catch(error => {
+            console.error('[Quests Mod][Lonesome Dragon] Error adding Golden Mug:', error);
+          });
+          NotificationService.showItemReceived(rewardName, BATTLE_TOAST_LOG.lonesomeDragon || '[Quests Mod][Lonesome Dragon]');
+        },
+        onDefeat: () => {},
+        onClose: (isVictory) => {
+          cleanupLonesomeDragonQuest();
+          lonesomeDragonRetryWithoutTile47 = !isVictory;
+          setTimeout(() => navigateToDragonLair(), 100);
+        },
+        victoryTitle: 'Victory!',
+        defeatTitle: 'Defeat',
+        victoryMessage: getMissionDialogueLine(DRAGONMOTHER_MISSION, 'battleVictory', 'Demodras has fallen. You found a Golden Mug.'),
+        defeatMessage: getMissionDialogueLine(DRAGONMOTHER_MISSION, 'battleDefeat', 'Demodras was too strong.'),
+        showItems: false,
+        items: [{ name: DRAGONMOTHER_MISSION.rewardItemName || 'Golden Mug', amount: 1 }]
+      }
+    };
+    return window.CustomBattles.create(lonesomeDragonConfig);
+  }
+
+  function initializeLonesomeDragonBattle(roomId) {
+    if (window.CustomBattles) {
+      return createLonesomeDragonBattleInstance(roomId);
+    }
+    return waitForCustomBattles({ logPrefix: '[Quests Mod][Lonesome Dragon]' }).then((api) => {
+      if (!api) return null;
+      return createLonesomeDragonBattleInstance(roomId);
+    });
+  }
+
+  function setupLonesomeDragonBattleInstance(battle) {
+    if (!battle) return false;
+    lonesomeDragonBattle = battle;
+    lonesomeDragonBattle.setup(
+      () => playerUsedTile47ToLonesomeDragon,
+      NotificationService.createBattleToastCallback(BATTLE_TOAST_LOG.lonesomeDragon)
+    );
+    lonesomeDragonBattle.resetSandboxBattleState();
+    setupLonesomeDragonTileRestrictions();
+    showCustomBattleStatusToast({ battleName: 'Demodras', allyLimit: battle.config?.allyLimit ?? 6, logPrefix: '[Quests Mod][Lonesome Dragon]' });
+    startDemodrasAbilityCooldownHooks();
+    lonesomeDragonBattle.scheduleEntryVillainSetup({
+      attemptDelays: [0, 100, 250, 500, 800, 1200],
+      isActiveCheck: () => playerUsedTile47ToLonesomeDragon,
+      onComplete: () => {
+        hideQuestOverlays();
+        hideHeroEditorButton();
+        lonesomeDragonRetryWithoutTile47 = false;
+        lonesomeDragonReinitTriggered = false;
+      }
+    });
+    return true;
+  }
+
   function buildVillainEquip(equipmentName, stat, tier) {
     const gameId = getEquipmentGameIdByName(equipmentName);
     if (gameId == null) return null;
@@ -2557,6 +2707,8 @@ function createNPCCooldownManager() {
       allyLimit: battleCfg.allyLimit,
       allowedTiles: expandBattleTileSpec(battleCfg.allowedTiles),
       allowedTilesMessage: battleCfg.allowedTilesMessage || null,
+      blockedTiles: expandBattleTileSpec(battleCfg.blockedTiles),
+      blockedTilesMessage: battleCfg.blockedTilesMessage || null,
       preventVillainMovement: battleCfg.preventVillainMovement,
       hideVillainSprites: battleCfg.hideVillainSprites
     };
@@ -4465,6 +4617,10 @@ function createNPCCooldownManager() {
         def.name = MOTHER_OF_ALL_SPIDERS_MISSION.rewardItemName || def.name;
         def.icon = MOTHER_OF_ALL_SPIDERS_MISSION.rewardIcon || def.icon;
         def.description = MOTHER_OF_ALL_SPIDERS_MISSION.rewardDescription || def.description;
+      } else if (productId === 'goldenMug') {
+        def.name = DRAGONMOTHER_MISSION.rewardItemName || def.name;
+        def.icon = DRAGONMOTHER_MISSION.rewardIcon || def.icon;
+        def.description = DRAGONMOTHER_MISSION.rewardDescription || def.description;
       }
 
       pushDef(def);
@@ -5226,6 +5382,8 @@ function createNPCCooldownManager() {
       'obsidian knife': 'Obsidian Knife',
       'dragon claw': 'Dragon Claw',
       'dragon_claw': 'Dragon Claw',
+      'golden mug': 'Golden Mug',
+      'golden_mug': 'Golden Mug',
       'letter from al dee': 'Letter from Al Dee',
       'letter_from_al_dee': 'Letter from Al Dee',
       'letter': 'Letter from Al Dee',
@@ -5253,7 +5411,8 @@ function createNPCCooldownManager() {
     };
     const maxCountByCanonical = {
       [MINOTAUR_TROPHY_CONFIG.productName]: MINOTAUR_TROPHY_CONFIG.maxCount || 1,
-      [ORB_CONFIG.productName]: ORB_CONFIG.maxCount || 1
+      [ORB_CONFIG.productName]: ORB_CONFIG.maxCount || 1,
+      'Golden Mug': 1
     };
     const normalized = {};
     for (const [key, value] of Object.entries(products)) {
@@ -6401,6 +6560,7 @@ function createNPCCooldownManager() {
         'Blessed Ankh',
         'Spider Silk',
         'Spool of Yarn',
+        'Golden Mug',
         SCARAB_COIN_CONFIG.productName,
         DESTROY_FIELD_RUNE_CONFIG.productName,
         SCORPION_SCEPTRE_CONFIG.productName,
@@ -13570,11 +13730,15 @@ function createNPCCooldownManager() {
     }
 
     if (mission.id === SERPENTINE_TOWER_MISSION.id) {
+      // One binary bar per active stage (never 1/2):
+      // rune hunt → basement/lever → return to Tesha.
       if (progress?.putridChamberComplete) {
         return makeActiveMissionCountProgress(1, 1);
       }
-      // 0/2 = still need the rune; 1/2 = rune found, basement/lever remains.
-      return makeActiveMissionCountProgress(hasSerpentineDestroyFieldRune() ? 1 : 0, 2);
+      if (hasSerpentineDestroyFieldRune()) {
+        return makeActiveMissionCountProgress(0, 1);
+      }
+      return makeActiveMissionCountProgress(0, 1);
     }
 
     return null;
@@ -15647,6 +15811,20 @@ function createNPCCooldownManager() {
             }
           }
 
+          // Lonesome Dragon: leaving room — cleanup unless returning to Dragon Lair after defeat for stairs retry
+          if (lastOverlayHiderRoomName === LONESOME_DRAGON_ROOM_NAME && currentRoomName && currentRoomName !== LONESOME_DRAGON_ROOM_NAME) {
+            if (lonesomeDragonBattle?.isEntryVillainSetupDone()) {
+              console.log('[Quests Mod][Overlay Hider] Leaving Lonesome Dragon - resetting villain setup flag');
+              lonesomeDragonBattle.resetEntryVillainSetup();
+            }
+            lonesomeDragonReinitTriggered = false;
+            const postDefeatDragonLair = lonesomeDragonRetryWithoutTile47 && currentRoomName === DRAGON_LAIR_ROOM_NAME;
+            if (!postDefeatDragonLair && (playerUsedTile47ToLonesomeDragon || lonesomeDragonBattle)) {
+              console.log('[Quests Mod][Overlay Hider] Leaving Lonesome Dragon - clearing quest/tile-47 state');
+              cleanupLonesomeDragonQuest();
+            }
+          }
+
           // Putrid Chamber: leaving room — cleanup unless returning to basement after defeat for lever retry
           if (lastOverlayHiderRoomName === PUTRID_CHAMBER_ROOM_NAME && currentRoomName && currentRoomName !== PUTRID_CHAMBER_ROOM_NAME) {
             if (putridChamberBattle?.isEntryVillainSetupDone()) {
@@ -15769,6 +15947,40 @@ function createNPCCooldownManager() {
             }
             spiderLairBattle.ensureCustomVillainsPresent();
             replaceSpiderLairTileSprites();
+          }
+
+          // Lonesome Dragon: re-init battle after defeat so player can retry without tile 47
+          const dragonmotherProgress = kingChatState.progressDragonmother;
+          const canRetryLonesomeDragon = !dragonmotherProgress?.completed;
+          if (currentRoomName === LONESOME_DRAGON_ROOM_NAME && canRetryLonesomeDragon && lonesomeDragonRetryWithoutTile47 && !lonesomeDragonBattle && currentRoomId && !lonesomeDragonReinitTriggered) {
+            lonesomeDragonReinitTriggered = true;
+            console.log('[Quests Mod][Overlay Hider] Lonesome Dragon: re-initializing battle after defeat so player can retry');
+            playerUsedTile47ToLonesomeDragon = true;
+            const initResult = initializeLonesomeDragonBattle(currentRoomId);
+            if (initResult && initResult.then) {
+              initResult.then((battle) => {
+                if (setupLonesomeDragonBattleInstance(battle)) {
+                  lonesomeDragonRetryWithoutTile47 = false;
+                }
+              }).catch((err) => console.error('[Quests Mod][Lonesome Dragon] Error re-initializing battle:', err));
+            } else if (setupLonesomeDragonBattleInstance(initResult)) {
+              lonesomeDragonRetryWithoutTile47 = false;
+            }
+          }
+
+          // Lonesome Dragon (Demodras + Dragons): tile 47 entry or re-init after defeat
+          if (currentRoomName === LONESOME_DRAGON_ROOM_NAME && playerUsedTile47ToLonesomeDragon && lonesomeDragonBattle) {
+            const justEnteredLonesomeDragonViaQuest = lastOverlayHiderRoomName !== LONESOME_DRAGON_ROOM_NAME;
+            if (justEnteredLonesomeDragonViaQuest) {
+              lonesomeDragonBattle.runEntryVillainSetupIfNeeded({
+                isActiveCheck: () => playerUsedTile47ToLonesomeDragon,
+                onComplete: () => {
+                  hideQuestOverlays();
+                  hideHeroEditorButton();
+                }
+              });
+            }
+            lonesomeDragonBattle.ensureCustomVillainsPresent();
           }
 
           // Putrid Chamber (Serpentine Tower Quest): lever warp → Thalas + Cobra Statues custom battle
@@ -16510,6 +16722,24 @@ function createNPCCooldownManager() {
     }
   }
 
+  // Navigate to Dragon Lair (e.g. after Lonesome Dragon / Demodras battle)
+  function navigateToDragonLair() {
+    try {
+      const roomId = getRoomIdByRoomName(DRAGON_LAIR_ROOM_NAME);
+      if (!roomId) {
+        console.warn('[Quests Mod][Lonesome Dragon] Dragon Lair room not found');
+        return;
+      }
+      console.log('[Quests Mod][Lonesome Dragon] Navigating to Dragon Lair');
+      globalThis.state.board.send({
+        type: 'selectRoomById',
+        roomId: roomId
+      });
+    } catch (error) {
+      console.error('[Quests Mod][Lonesome Dragon] Error navigating to Dragon Lair:', error);
+    }
+  }
+
   // Navigate to Demonrage Seal (e.g. after Banshee's Last Room battle)
   function navigateToDemonrageSeal() {
     try {
@@ -16677,6 +16907,135 @@ function createNPCCooldownManager() {
       spiderLairBattle.setupAllyLimit(
         () => playerUsedTile77ToSpiderLair,
         NotificationService.createBattleToastCallback(BATTLE_TOAST_LOG.spiderLair)
+      );
+    }
+  }
+
+  function restoreBoardSetupLonesomeDragon() {
+    if (lonesomeDragonBattle) {
+      lonesomeDragonBattle.restoreBoardSetup();
+    } else {
+      console.warn('[Quests Mod][Lonesome Dragon] Battle not initialized');
+    }
+  }
+
+  function findDemodrasBattleActor(world = demodrasBattleWorld) {
+    const actors = typeof getBattleWorldActors === 'function' ? getBattleWorldActors(world) : [];
+    if (!actors.length) return null;
+    const matchName = (actor) => String(actor?.name || actor?.metadata?.name || actor?.nickname || '').toLowerCase();
+    return actors.find((actor) => actor?.villain === true && matchName(actor) === 'demodras')
+      || actors.find((actor) => actor?.villain === true && matchName(actor).includes('demodras'))
+      || null;
+  }
+
+  function patchDemodrasAbilityCooldownTo3s(world = null) {
+    const actor = findDemodrasBattleActor(world || demodrasBattleWorld);
+    const abilityCd = actor?.abilityCooldown;
+    if (!abilityCd || typeof abilityCd !== 'object') return false;
+
+    // Match Ghazbaran patch pattern: 16 ticks/s → 3s = 48 ticks
+    const TARGET_TICKS = 48;
+    const TARGET_MS = 3000;
+    let changed = false;
+    const setBase = (key, value) => {
+      if (!(key in abilityCd) || typeof abilityCd[key] !== 'number') return;
+      if (abilityCd[key] === value) return;
+      abilityCd[key] = value;
+      changed = true;
+    };
+    setBase('baseCooldownTicks', TARGET_TICKS);
+    setBase('baseCooldown', TARGET_TICKS);
+    setBase('_baseCooldown', TARGET_TICKS);
+    setBase('baseCooldownMs', TARGET_MS);
+    setBase('baseCooldownMilliseconds', TARGET_MS);
+    setBase('baseDuration', TARGET_MS);
+
+    if (changed && !demodrasCooldownPatchedLogged) {
+      demodrasCooldownPatchedLogged = true;
+      console.log('[Quests Mod][Lonesome Dragon] Patched Demodras ability base cooldown to 3s');
+    }
+    return changed;
+  }
+
+  function clearDemodrasCooldownPatchTimers() {
+    for (const timer of demodrasCooldownPatchTimers) {
+      try { clearTimeout(timer); } catch (_) { /* ignore */ }
+    }
+    demodrasCooldownPatchTimers = [];
+  }
+
+  function scheduleDemodrasAbilityCooldownPatches(world = null) {
+    if (world) demodrasBattleWorld = world;
+    clearDemodrasCooldownPatchTimers();
+    const delays = [0, 100, 250, 500, 1000, 2000];
+    for (const delay of delays) {
+      const timer = setTimeout(() => {
+        if (!playerUsedTile47ToLonesomeDragon || !lonesomeDragonBattle) return;
+        patchDemodrasAbilityCooldownTo3s(demodrasBattleWorld);
+      }, delay);
+      demodrasCooldownPatchTimers.push(timer);
+    }
+  }
+
+  function stopDemodrasAbilityCooldownHooks() {
+    clearDemodrasCooldownPatchTimers();
+    if (demodrasNewGameUnsub) {
+      try { demodrasNewGameUnsub(); } catch (_) { /* ignore */ }
+      demodrasNewGameUnsub = null;
+    }
+    demodrasBattleWorld = null;
+    demodrasCooldownPatchedLogged = false;
+  }
+
+  function startDemodrasAbilityCooldownHooks() {
+    stopDemodrasAbilityCooldownHooks();
+    const board = globalThis.state?.board;
+    if (!board || typeof board.on !== 'function') return;
+    try {
+      demodrasNewGameUnsub = board.on('newGame', (event) => {
+        if (!playerUsedTile47ToLonesomeDragon || !lonesomeDragonBattle) return;
+        demodrasCooldownPatchedLogged = false;
+        scheduleDemodrasAbilityCooldownPatches(event?.world || null);
+      });
+    } catch (error) {
+      console.warn('[Quests Mod][Lonesome Dragon] Could not subscribe newGame for Demodras cooldown:', error);
+    }
+  }
+
+  function cleanupLonesomeDragonQuest() {
+    try {
+      removeCustomBattleStatusToast();
+      stopDemodrasAbilityCooldownHooks();
+      playerUsedTile47ToLonesomeDragon = false;
+      lonesomeDragonReinitTriggered = false;
+      lonesomeDragonRetryWithoutTile47 = false;
+      if (lonesomeDragonBattle) {
+        lonesomeDragonBattle.cleanup(restoreBoardSetupLonesomeDragon, showQuestOverlays);
+        lonesomeDragonBattle = null;
+        console.log('[Quests Mod][Lonesome Dragon] Battle cleaned up');
+      }
+    } catch (error) {
+      console.error('[Quests Mod][Lonesome Dragon] Error cleaning up:', error);
+    }
+  }
+
+  function setupLonesomeDragonTileRestrictions() {
+    if (lonesomeDragonBattle) {
+      lonesomeDragonBattle.setupTileRestrictions(
+        () => playerUsedTile47ToLonesomeDragon,
+        NotificationService.createBattleToastCallback(BATTLE_TOAST_LOG.lonesomeDragon)
+      );
+      setupLonesomeDragonAllyLimit();
+    } else {
+      console.warn('[Quests Mod][Lonesome Dragon] Battle not initialized');
+    }
+  }
+
+  function setupLonesomeDragonAllyLimit() {
+    if (lonesomeDragonBattle) {
+      lonesomeDragonBattle.setupAllyLimit(
+        () => playerUsedTile47ToLonesomeDragon,
+        NotificationService.createBattleToastCallback(BATTLE_TOAST_LOG.lonesomeDragon)
       );
     }
   }
@@ -19414,6 +19773,192 @@ function createNPCCooldownManager() {
     console.log('[Quests Mod][Tile 77 Spider Lair] System cleaned up');
   }
 
+  // Tile 47 in Dragon Lair (The Dragonmother) — right-click menu with Descend (requires Dragon Claw)
+  function hasDragonClawForStairs() {
+    return getCachedQuestItemCount('Dragon Claw') > 0;
+  }
+
+  function closeTile47LonesomeDragonContextMenu() {
+    if (tile47LonesomeDragonContextMenu && tile47LonesomeDragonContextMenu.closeMenu) {
+      tile47LonesomeDragonContextMenu.closeMenu();
+    }
+    tile47LonesomeDragonContextMenu = null;
+  }
+
+  function enterLonesomeDragonFromStairs() {
+    const roomId = getRoomIdByRoomName(LONESOME_DRAGON_ROOM_NAME);
+    if (!roomId) {
+      showToast({ message: TOAST_MESSAGES.lonesomeDragonNotFound, logPrefix: BATTLE_TOAST_LOG.lonesomeDragon });
+      return;
+    }
+    console.log('[Quests Mod][Lonesome Dragon] Descending stairs — roomId:', roomId);
+
+    playerUsedTile47ToLonesomeDragon = true;
+    if (lonesomeDragonBattle) {
+      lonesomeDragonBattle.cleanup(restoreBoardSetupLonesomeDragon, showQuestOverlays);
+      lonesomeDragonBattle = null;
+    }
+
+    const initResult = initializeLonesomeDragonBattle(roomId);
+    if (initResult && initResult.then) {
+      initResult.then((battle) => {
+        if (setupLonesomeDragonBattleInstance(battle)) {
+          console.log('[Quests Mod][Lonesome Dragon] Battle initialized (async); scheduling Demodras entry setup', roomId);
+        } else {
+          console.error('[Quests Mod][Lonesome Dragon] Failed to initialize battle after waiting');
+        }
+      }).catch((err) => console.error('[Quests Mod][Lonesome Dragon] Error initializing battle:', err));
+    } else if (setupLonesomeDragonBattleInstance(initResult)) {
+      console.log('[Quests Mod][Lonesome Dragon] Battle initialized (sync); scheduling Demodras entry setup', roomId);
+    } else {
+      console.error('[Quests Mod][Lonesome Dragon] CustomBattles not available');
+    }
+
+    globalThis.state.board.send({ type: 'selectRoomById', roomId: roomId });
+    showToast({ message: TOAST_MESSAGES.enteringLonesomeDragon, logPrefix: BATTLE_TOAST_LOG.lonesomeDragon });
+  }
+
+  function createTile47LonesomeDragonContextMenu(x, y, anchorElement = null) {
+    closeTile47LonesomeDragonContextMenu();
+
+    tile47LonesomeDragonContextMenu = createContextMenu({
+      x,
+      y,
+      layout: 'center',
+      logPrefix: '[Quests Mod][Lonesome Dragon]',
+      anchorElement: anchorElement || getTileElement(DRAGON_LAIR_STAIRS_TILE_47),
+      buttons: [
+        {
+          text: 'Descend',
+          width: '120px',
+          backgroundColor: '#2a4a2a',
+          color: '#4CAF50',
+          border: '1px solid #4CAF50',
+          hoverBackgroundColor: '#1a2a1a',
+          hoverBorderColor: '#66BB6A',
+          onClick: () => {
+            closeTile47LonesomeDragonContextMenu();
+            enterLonesomeDragonFromStairs();
+          }
+        }
+      ],
+      onClose: () => {
+        tile47LonesomeDragonContextMenu = null;
+      }
+    });
+
+    return tile47LonesomeDragonContextMenu;
+  }
+
+  async function handleTile47LonesomeDragonRightClickDocument(event) {
+    const progress = kingChatState.progressDragonmother;
+    if (progress?.completed) return;
+    if (!isOnRoomByName(DRAGON_LAIR_ROOM_NAME)) return;
+
+    const tile47El = getTileElement(DRAGON_LAIR_STAIRS_TILE_47);
+    if (!tile47El || !tile47El.contains(event.target)) return;
+
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    event.stopPropagation();
+
+    let hasClaw = hasDragonClawForStairs();
+    if (!hasClaw) {
+      try {
+        const questItems = await getQuestItems(false);
+        hasClaw = (questItems?.['Dragon Claw'] || 0) > 0;
+      } catch (_) { /* ignore */ }
+    }
+    if (!hasClaw) {
+      showToast({ message: TOAST_MESSAGES.needDragonClawForStairs, logPrefix: BATTLE_TOAST_LOG.lonesomeDragon });
+      return;
+    }
+
+    createTile47LonesomeDragonContextMenu(event.clientX, event.clientY, tile47El);
+  }
+
+  function shouldEnableTile47LonesomeDragon(boardContext = null) {
+    const progress = kingChatState.progressDragonmother;
+    if (progress?.completed) return false;
+    if (!hasDragonClawForStairs()) return false;
+    return isOnRoomByName(DRAGON_LAIR_ROOM_NAME);
+  }
+
+  function shouldEnableTile47LonesomeDragonListener(boardContext = null) {
+    const progress = kingChatState.progressDragonmother;
+    if (progress?.completed) return false;
+    return !isOnRoomByName(LONESOME_DRAGON_ROOM_NAME);
+  }
+
+  function updateTile47LonesomeDragonState(boardContext = null, retryCount = 0) {
+    try {
+      const listenerShouldBeOn = shouldEnableTile47LonesomeDragonListener(boardContext);
+      const pointerEventsShouldBeOn = shouldEnableTile47LonesomeDragon(boardContext);
+      const tile47El = getTileElement(DRAGON_LAIR_STAIRS_TILE_47);
+      if (listenerShouldBeOn && !tile47LonesomeDragonRightClickEnabled) {
+        document.addEventListener('contextmenu', handleTile47LonesomeDragonRightClickDocument, true);
+        tile47LonesomeDragonRightClickEnabled = true;
+      }
+      if (!listenerShouldBeOn && tile47LonesomeDragonRightClickEnabled) {
+        document.removeEventListener('contextmenu', handleTile47LonesomeDragonRightClickDocument, true);
+        const el = getTileElement(DRAGON_LAIR_STAIRS_TILE_47);
+        if (el) el.style.pointerEvents = '';
+        tile47LonesomeDragonRightClickEnabled = false;
+        closeTile47LonesomeDragonContextMenu();
+        console.log('[Quests Mod][Tile 47 Lonesome Dragon] Right-click disabled');
+        return;
+      }
+      if (pointerEventsShouldBeOn && tile47El) {
+        tile47El.style.pointerEvents = 'auto';
+        if (retryCount === 0) console.log('[Quests Mod][Tile 47 Lonesome Dragon] Right-click enabled on Dragon Lair');
+      } else if (pointerEventsShouldBeOn && !tile47El && retryCount < 5) {
+        setTimeout(() => updateTile47LonesomeDragonState(boardContext || globalThis.state?.board?.getSnapshot?.()?.context, retryCount + 1), 200);
+      } else if (!pointerEventsShouldBeOn && tile47El) {
+        tile47El.style.pointerEvents = '';
+      }
+    } catch (e) {
+      console.error('[Quests Mod][Tile 47 Lonesome Dragon] Error updating right-click state:', e);
+    }
+  }
+
+  function setupTile47LonesomeDragonObserver() {
+    if (tile47LonesomeDragonBoardSubscription) return;
+    if (typeof globalThis === 'undefined' || !globalThis.state?.board?.subscribe) return;
+    tile47LonesomeDragonBoardSubscription = globalThis.state.board.subscribe(({ context: boardContext }) => {
+      updateTile47LonesomeDragonState(boardContext);
+    });
+    updateTile47LonesomeDragonState(globalThis.state?.board?.getSnapshot()?.context);
+    console.log(`[Quests Mod][Tile 47 Lonesome Dragon] Board observer set up for ${DRAGON_LAIR_ROOM_NAME || '(room pending)'}`);
+  }
+
+  function cleanupTile47LonesomeDragonObserver() {
+    if (tile47LonesomeDragonBoardSubscription) {
+      try {
+        tile47LonesomeDragonBoardSubscription.unsubscribe();
+      } catch (e) {
+        console.warn('[Quests Mod][Tile 47 Lonesome Dragon] Error unsubscribing from board:', e);
+      }
+      tile47LonesomeDragonBoardSubscription = null;
+    }
+  }
+
+  function cleanupTile47LonesomeDragonSystem() {
+    closeTile47LonesomeDragonContextMenu();
+    if (tile47LonesomeDragonRightClickEnabled) {
+      document.removeEventListener('contextmenu', handleTile47LonesomeDragonRightClickDocument, true);
+      const tile47El = getTileElement(DRAGON_LAIR_STAIRS_TILE_47);
+      if (tile47El) tile47El.style.pointerEvents = '';
+      tile47LonesomeDragonRightClickEnabled = false;
+    }
+    cleanupTile47LonesomeDragonObserver();
+    try {
+      cleanupLonesomeDragonQuest();
+    } catch (e) {
+      console.warn('[Quests Mod][Tile 47 Lonesome Dragon] cleanupLonesomeDragonQuest during teardown:', e);
+    }
+    console.log('[Quests Mod][Tile 47 Lonesome Dragon] System cleaned up');
+  }
+
   function shouldEnableSixthSealLevers(boardContext = null) {
     const progress = kingChatState.progressQueenBanshees;
     if (!progress?.accepted || progress.completed) return false;
@@ -20065,6 +20610,15 @@ function createNPCCooldownManager() {
       },
       isAccessActive: shouldEnableTile77SpiderLair,
       alt: 'Spider Lair'
+    });
+
+    registerQuestTileHighlightSource({
+      getTiles: () => {
+        const tile = getTileElement(DRAGON_LAIR_STAIRS_TILE_47);
+        return tile ? [tile] : [];
+      },
+      isAccessActive: shouldEnableTile47LonesomeDragon,
+      alt: 'Lonesome Dragon'
     });
 
     registerQuestTileHighlightSource({
@@ -25118,6 +25672,8 @@ function createNPCCooldownManager() {
     cleanupTileHighlightSystem();
     // Cleanup Tile 77 Spider Lair system
     cleanupTile77SpiderLairSystem();
+    // Cleanup Tile 47 Lonesome Dragon system
+    cleanupTile47LonesomeDragonSystem();
 
     // Cleanup water fishing system
     cleanupWaterFishingSystem();
@@ -25372,6 +25928,10 @@ function createNPCCooldownManager() {
     return isMissionAcceptedIncomplete(kingChatState.progressMotherOfAllSpiders);
   }
 
+  function needsDragonmotherObserver() {
+    return !kingChatState.progressDragonmother?.completed;
+  }
+
   function needsSerpentineTeshaObservers() {
     return isMissionAcceptedIncomplete(kingChatState.progressScarabHunt)
       || isMissionAcceptedIncomplete(kingChatState.progressSerpentineTower)
@@ -25409,6 +25969,9 @@ function createNPCCooldownManager() {
     if (needsSpiderLairObserver()) {
       setupTile77SpiderLairObserver();
     }
+    if (needsDragonmotherObserver()) {
+      setupTile47LonesomeDragonObserver();
+    }
     if (needsQueenBansheesSealObservers()) {
       setupSevenSealsRoomObserver();
       setupFirstSealBoardObserver();
@@ -25442,6 +26005,8 @@ function createNPCCooldownManager() {
       }
 
       // Rules from assets/quests/items.json → itemLifecycle.cleanupRules
+      // independentDrop items (e.g. Rookgaard Letter / Iron Ore) must not be wiped when the
+      // linked mission is not yet accepted — only removeWhenCompleted / putridChamber apply.
       const itemMissionMap = {};
       for (const rule of QUEST_ITEM_CLEANUP_RULES) {
         if (!rule?.productId || !rule?.missionId) continue;
@@ -25450,13 +26015,14 @@ function createNPCCooldownManager() {
           missionId: rule.missionId,
           requiredStatus: rule.requiredStatus || 'accepted',
           removeWhenCompleted: !!rule.removeWhenCompleted,
-          removeWhenPutridChamberComplete: !!rule.removeWhenPutridChamberComplete
+          removeWhenPutridChamberComplete: !!rule.removeWhenPutridChamberComplete,
+          independentDrop: !!rule.independentDrop
         };
       }
 
       let serpentineRunePickupFlagNeedsSave = false;
 
-      for (const [itemName, { missionId, requiredStatus, removeWhenCompleted, removeWhenPutridChamberComplete }] of Object.entries(itemMissionMap)) {
+      for (const [itemName, { missionId, requiredStatus, removeWhenCompleted, removeWhenPutridChamberComplete, independentDrop }] of Object.entries(itemMissionMap)) {
         const itemCount = questItems[itemName] || 0;
         if (itemCount > 0) {
           // Get mission progress from registry
@@ -25486,6 +26052,11 @@ function createNPCCooldownManager() {
               kingChatState.progressSerpentineTower.destroyFieldRuneTaken = false;
               serpentineRunePickupFlagNeedsSave = true;
             }
+            continue;
+          }
+
+          // Global / Rookgaard drops can exist before any mission is accepted.
+          if (independentDrop) {
             continue;
           }
           
@@ -25779,17 +26350,8 @@ function createNPCCooldownManager() {
         }
       }
 
-      if (fishingState.ironOreQuestCompleted) {
-        try {
-          const questItems = await getQuestItems(false);
-          if (questItems['Iron Ore'] && questItems['Iron Ore'] > 0) {
-            console.log('[Quests Mod] Removing leftover Iron Ore from inventory (quest completed)');
-            await consumeQuestItem('Iron Ore', questItems['Iron Ore']);
-          }
-        } catch (err) {
-          console.error('[Quests Mod] Error cleaning up Iron Ore on init:', err);
-        }
-      }
+      // Iron Ore is a Rookgaard independent drop — do not wipe inventory leftovers when the
+      // King iron-ore timer / Al Dee fishing progress is marked completed.
 
       await syncLostInTheSandsQuestFromInventory();
       const serpentinePrereqReset = syncSerpentineTowerQuestPrerequisites();
@@ -25805,9 +26367,9 @@ function createNPCCooldownManager() {
         await persistMissionProgress(SERPENTINE_TOWER_MISSION, syncedProgress);
       }
       updateTeshaArrowState();
-      await cleanupInvalidQuestItems(progress);
-      updateSerpentineBasementRightClickState(globalThis.state?.board?.getSnapshot?.()?.context);
 
+      // Sync inventory-derived mission acceptance before mission-gated item cleanup so
+      // independent drops (Wishlist, diary, etc.) are not deleted as "mission not started".
       try {
         const questItems = await getQuestItems(false);
         const diaryCount = (questItems[COSTELLO_QUEEN_BANSHEES_MISSION.diaryItemName] || 0)
@@ -25842,6 +26404,9 @@ function createNPCCooldownManager() {
       } catch (err) {
         console.error('[Quests Mod] Error syncing mission state from diary:', err);
       }
+
+      await cleanupInvalidQuestItems(getAllMissionProgress());
+      updateSerpentineBasementRightClickState(globalThis.state?.board?.getSnapshot?.()?.context);
     }
   }
 

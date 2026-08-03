@@ -126,6 +126,43 @@ Use **lowercase** in-game names as keys. Values must be `true` (or `1`).
 
 The mod caches the list for 5 minutes (`database/firebase-admins.js`).
 
+### Chat moderation (`chat-moderation`)
+
+Firebase admins (names in `config/admins`) can **right-click** a chat message to open a moderation menu:
+
+- **Delete Message** — removes that message from All Chat or Guild Chat
+- **Mute** — 1h / 24h / 7d / permanent; muted players cannot send All Chat or Guild Chat
+- **Ban** — blocks All Chat, Guild Chat, and private VIP List chat
+- **Delete All From Player** — removes every All Chat message from that player (All Chat tab only)
+
+Stored under Realtime Database:
+
+```json
+{
+  "chat-moderation": {
+    "muted": {
+      "playername": { "muted": true, "name": "PlayerName", "by": "Admin", "at": 0, "until": null }
+    },
+    "banned": {
+      "playername": { "banned": true, "name": "PlayerName", "by": "Admin", "at": 0 }
+    }
+  }
+}
+```
+
+Mute/ban checks are enforced client-side when sending (same trust model as other admin tools).
+
+**Required Realtime Database rules** (Firebase Console → Realtime Database → Rules). Add this sibling under the root `"rules"` object (alongside `all-chat`, `messages`, etc.):
+
+```json
+"chat-moderation": {
+  ".read": true,
+  ".write": true
+}
+```
+
+Without these rules, mute/ban return **401** and the admin menu only offers delete actions. Harden writes later if you add authenticated admin claims.
+
 ## Troubleshooting
 
 ### 401 Unauthorized Errors

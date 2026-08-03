@@ -4,6 +4,61 @@
   },
   "notes": [
     {
+      "version": "4.7.6",
+      "changes": [
+        {
+          "mod": "Custom Battles",
+          "type": "added",
+          "text": "Battle configs can mark player tiles as blocked so allies cannot be placed on them."
+        },
+        {
+          "mod": "Guilds",
+          "type": "added",
+          "text": "Empty equipment slots auto-equip the best owned item for that slot on load and when opening Equipment (highest tier, prefer skill-bonus gear; never replaces already-equipped items)."
+        },
+        {
+          "mod": "Guilds",
+          "type": "changed",
+          "text": "Skill progression uses one Firebase path (player-skills/{player}) with lifetime XP only; levels are derived in code. Season (s2) paths and skill-progress are removed. Equipment modal opens immediately with loading placeholders, then fills arsenal/skills; equipped-item fetches share a short cache so slots no longer spam Firebase. No longer pauses while Manual Runner is active (still pauses during Board Analyzer)."
+        },
+        {
+          "mod": "Guilds",
+          "type": "fixed",
+          "text": "Skills no longer stick at level 10 after excess battle progress: XP is never zeroed on level-up, and level-ups apply from total XP. Background sync no longer re-writes skills/equipment (avoids cross-browser overwrites). Admin global reset only deletes player-skills and player-equipment. Added missing Equipment modal loading translations (loadingArsenal, loadingSkills)."
+        },
+        {
+          "mod": "Mod Loader",
+          "type": "fixed",
+          "text": "Same-tab page reload now clears the once-per-load delivery guard so loadScripts/registerLocalMods run again (Orion iOS / mobile WebExtensions no longer stuck until a full browser restart after a failed load)."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "changed",
+          "text": "Guild skill admin reset wording matches the new wipe targets (player-skills and player-equipment only)."
+        },
+        {
+          "mod": "Quests",
+          "type": "added",
+          "text": "Added The Dragonmother, a new optional quest with a custom boss encounter."
+        },
+        {
+          "mod": "Quests",
+          "type": "changed",
+          "text": "Updated the Quest Log icon for The Monk's Study."
+        },
+        {
+          "mod": "Quests",
+          "type": "fixed",
+          "text": "Quest inventory cleanup no longer deletes once-per-player independent drops on load/update when linked mission progress is not yet accepted. Those items stay until the related mission is completed; drop limits are unchanged. The multi-step tower mission Quest Log progress bar now shows one stage at a time (0/1 or 1/1) instead of combining stages into a single fraction. A custom boss encounter no longer races ahead of overlay setup on first entry."
+        },
+        {
+          "mod": "VIP List",
+          "type": "added",
+          "text": "Firebase admins (config/admins) can right-click chat messages for moderation: delete message, mute (1h/24h/7d/permanent), ban/unban, and delete all All Chat messages from a player. Mute blocks All Chat and Guild Chat; ban also blocks private VIP chat. Mute/ban use Firebase /chat-moderation (needs read+write rules); if that path is blocked, delete actions still work and mute/ban are hidden after one probe."
+        }
+      ]
+    },
+    {
       "version": "4.7.5",
       "changes": [
         {

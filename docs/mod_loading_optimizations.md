@@ -76,6 +76,8 @@ On **mobile WebExtensions** (e.g. Orion iOS), `content/platform.js` enables a **
 
 **Override (testing):** in the game tab console, `sessionStorage.setItem('ba-relaxed-loader', '1')` then reload (use `'0'` or remove the key to restore strict behavior).
 
+Background delivery uses a once-per-page-load guard (`registeredTabs`). That guard must reset on same-tab reload / `contentScriptReady` (see [Orion iOS Compatibility — Page refresh / re-delivery](orion_ios_compatibility.md#page-refresh--re-delivery-critical)); otherwise a failed load can stick until the browser process restarts.
+
 See also [`content/platform.js`](../content/platform.js) and [`content/local_mods.js`](../content/local_mods.js). For Orion/WebKit platform constraints and extension URL encoding, see [Orion iOS Compatibility](orion_ios_compatibility.md).
 
 ## Error Log (popup Debug)

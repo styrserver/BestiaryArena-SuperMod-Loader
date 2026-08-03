@@ -7988,9 +7988,9 @@ function showSettingsModal() {
           </div>
           <div id="guild-skill-admin-section" style="margin-top: 20px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.1); display: none;">
             <h4 style="margin: 0 0 10px 0; color: #ff6b6b; font-size: 14px;">Guild skill admin</h4>
-            <p style="margin: 0 0 12px 0; font-size: 11px; color: #888;">Only names in Firebase <code>config/admins</code>. Deletes <strong>skill-progress</strong>, <strong>player-skills</strong>, and <strong>player-equipment</strong> for <strong>all players</strong>.</p>
+            <p style="margin: 0 0 12px 0; font-size: 11px; color: #888;">Only names in Firebase <code>config/admins</code>. Deletes <strong>player-skills</strong> and <strong>player-equipment</strong> for <strong>all players</strong>.</p>
             <div style="margin-bottom: 12px;">
-              <button type="button" id="guild-skill-reset-btn" class="btn btn-secondary" style="width: 100%; pointer-events: auto; color: #ffb4b4;">Reset all players — skills, progress &amp; equipment</button>
+              <button type="button" id="guild-skill-reset-btn" class="btn btn-secondary" style="width: 100%; pointer-events: auto; color: #ffb4b4;">Reset all players — skills &amp; equipment</button>
             </div>
             <div id="guild-skill-reset-status" style="font-size: 12px; color: #7f8fa4; min-height: 18px;"></div>
           </div>
@@ -9380,7 +9380,7 @@ function showSettingsModal() {
             if (guildSkillResetStatus) guildSkillResetStatus.textContent = 'Guilds mod not loaded.';
             return;
           }
-          const label = 'DELETE skill-progress, player-skills, and player-equipment for ALL players';
+          const label = 'DELETE player-skills and player-equipment for ALL players';
           if (!confirm(`${label}?\n\nThis cannot be undone.`)) return;
           const typed = prompt('Type RESET to confirm:');
           if (typed !== 'RESET') {
@@ -9394,7 +9394,7 @@ function showSettingsModal() {
             if (guildSkillResetStatus) {
               guildSkillResetStatus.textContent = result.error
                 ? `Reset failed: ${result.error}`
-                : `Reset OK (${result.deleted}/3 Firebase trees deleted). Reload the game.`;
+                : `Reset OK (${result.deleted}/2 Firebase trees deleted). Reload the game.`;
             }
           } catch (err) {
             if (guildSkillResetStatus) guildSkillResetStatus.textContent = `Reset error: ${err.message}`;

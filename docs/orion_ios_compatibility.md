@@ -162,8 +162,21 @@ These rules apply to this extension and other WebKit-based mobile WebExtensions.
 - On mobile, the **content script** fetches bundled mod text first (via the injector bridge), then page fetch, then background `getModContent`. See [Orion iOS Compatibility](orion_ios_compatibility.md#loader-fallbacks).
 - Both page and background fetch require encoded extension URLs on WebKit; failures in one often indicate the same encoding issue in the other.
 
+### Page refresh / re-delivery (critical)
+
+Symptom: mods fail once; a normal tab refresh does nothing useful; only force-quitting Orion restores loading.
+
+Two separate behaviors interact:
+
+1. **Relaxed loader skips auto-refresh** — On mobile, `handleLoaderLoadFailure` shows the error toast but does **not** call `location.reload()` (avoids refresh loops when hydration/game-state warnings are non-fatal). Desktop still retries up to 3 times. See [`assets/js/ui_components.js`](../assets/js/ui_components.js) and [Mod Loading System](mod_loading_optimizations.md).
+
+2. **Same-tab reload must clear background delivery state** — Background keeps an in-memory `registeredTabs` Set so `loadScripts` / `registerLocalMods` run once per page load. Tab IDs survive reload. If the Set is not cleared on navigation / `contentScriptReady`, delivery is skipped until the extension process restarts (matches “only a full browser restart works”). Implementation: `clearTabModDelivery()` in [`background.js`](../background.js) on `contentScriptReady`, `tabs.onUpdated` `loading`, and `tabs.onRemoved`.
+
+**AI audit:** Flag any “deliver once per tab” guard that is not reset on same-URL reload. Prefer clearing on content-script ready rather than relying on browser process death.
+
 ### Diagnostics
 
 - Script `onerror` `Event` objects serialize as `{"isTrusted":true}`; log the script URL instead.
 - Extension URL prefixes vary by browser; use `new URL(url)` rather than string prefix checks.
 - Use the popup **Debug → Error Log** when DevTools is unavailable on device.
+- If refresh still fails after a load error, check Error Log for bridge/`getModContent` failures and confirm the extension was updated so `registeredTabs` clears on reload.

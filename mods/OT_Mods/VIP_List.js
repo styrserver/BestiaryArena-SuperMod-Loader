@@ -163,6 +163,7 @@ const getChatPrivilegesApiUrl = () => getApiUrl('chat-privileges');
 const getChatRequestsApiUrl = () => getApiUrl('chat-requests');
 const getBlockedPlayersApiUrl = () => getApiUrl('blocked-players');
 const getAllChatApiUrl = () => getApiUrl('all-chat');
+const getChatModerationApiUrl = () => getApiUrl('chat-moderation');
 
 // =======================
 // Chat State Manager
@@ -1679,6 +1680,8 @@ async function sendGuildChatMessage(guildId, text) {
     if (text.length > 1000) {
       throw new Error('Message must be 1000 characters or less');
     }
+
+    await assertCurrentPlayerCanSendChat('guild');
 
     const messageText = text.trim();
     const encryptedText = await encryptGuildMessage(messageText, guildId);
@@ -3483,6 +3486,8 @@ async function sendMessage(toPlayer, text) {
     if (!currentPlayer) {
       throw new Error('Could not get current player name');
     }
+
+    await assertCurrentPlayerCanSendChat('private');
     
     // Check if recipient is blocked
     const isBlocked = await isPlayerBlocked(toPlayer);
@@ -3546,6 +3551,10 @@ async function sendMessage(toPlayer, text) {
     
     return true;
   } catch (error) {
+    if (error?.code === 'CHAT_MUTED' || error?.code === 'CHAT_BANNED' ||
+        error?.message === 'CHAT_MUTED' || error?.message === 'CHAT_BANNED') {
+      throw error;
+    }
     console.error('[VIP List] Error sending message:', error);
     return false;
   }
@@ -3589,6 +3598,8 @@ async function sendAllChatMessage(text) {
     if (!currentPlayer) {
       throw new Error('Could not get current player name');
     }
+
+    await assertCurrentPlayerCanSendChat('all-chat');
     
     // Check if current player has chat enabled (verify with Firebase)
     const hasChatEnabled = await checkRecipientChatEnabled(currentPlayer);
@@ -3630,7 +3641,9 @@ async function sendAllChatMessage(text) {
     
     return true;
   } catch (error) {
-    if (error.message === 'FIREBASE_401') {
+    if (error.message === 'FIREBASE_401' ||
+        error?.code === 'CHAT_MUTED' || error?.code === 'CHAT_BANNED' ||
+        error?.message === 'CHAT_MUTED' || error?.message === 'CHAT_BANNED') {
       // Re-throw with special code for UI handling
       throw error;
     }
@@ -3983,6 +3996,551 @@ async function scheduleAllChatCleanupOnInit() {
   }).catch((err) => {
     console.warn('[VIP List] All Chat cleanup on init failed:', err);
   });
+}
+
+// =======================
+// Chat moderation (Firebase admins only)
+// =======================
+
+const CHAT_MODERATION_CACHE_TTL_MS = 60 * 1000;
+const chatMuteStatusCache = new Map(); // playerLower -> { muted, until, expiresAt }
+const chatBanStatusCache = new Map(); // playerLower -> { banned, expiresAt }
+let currentPlayerIsChatAdmin = false;
+let chatAdminContextMenuEl = null;
+let chatAdminContextMenuCloser = null;
+/** 'unknown' | 'ok' | 'denied' — Firebase rules must allow /chat-moderation */
+let chatModerationAccess = 'unknown';
+
+const CHAT_MUTE_DURATION_OPTIONS = [
+  { labelKey: 'adminMute1h', ms: 60 * 60 * 1000 },
+  { labelKey: 'adminMute24h', ms: 24 * 60 * 60 * 1000 },
+  { labelKey: 'adminMute7d', ms: 7 * 24 * 60 * 60 * 1000 },
+  { labelKey: 'adminMutePermanent', ms: null }
+];
+
+async function refreshCurrentPlayerChatAdminCache() {
+  try {
+    currentPlayerIsChatAdmin = await canCurrentPlayerRunAllChatCleanup();
+  } catch (error) {
+    currentPlayerIsChatAdmin = false;
+  }
+  if (currentPlayerIsChatAdmin) {
+    void probeChatModerationAccess();
+  }
+  return currentPlayerIsChatAdmin;
+}
+
+function invalidateChatModerationCache(playerName = null) {
+  if (!playerName) {
+    chatMuteStatusCache.clear();
+    chatBanStatusCache.clear();
+    return;
+  }
+  const key = playerName.toLowerCase();
+  chatMuteStatusCache.delete(key);
+  chatBanStatusCache.delete(key);
+}
+
+function markChatModerationDenied(status) {
+  if (status === 401 || status === 403) {
+    if (chatModerationAccess !== 'denied') {
+      console.warn(
+        '[VIP List] /chat-moderation is blocked by Firebase rules (HTTP ' + status + '). ' +
+        'Add read/write rules for chat-moderation in Firebase Console (see docs/chat_documentation.md). ' +
+        'Delete Message still works; mute/ban need that path.'
+      );
+    }
+    chatModerationAccess = 'denied';
+    return true;
+  }
+  return false;
+}
+
+async function probeChatModerationAccess() {
+  if (chatModerationAccess === 'ok') return true;
+  if (chatModerationAccess === 'denied') return false;
+  const base = getChatModerationApiUrl();
+  if (!base || !MESSAGING_CONFIG.enabled) {
+    chatModerationAccess = 'denied';
+    return false;
+  }
+  try {
+    const response = await fetch(`${base}.json`);
+    if (markChatModerationDenied(response.status)) return false;
+    if (!response.ok) {
+      chatModerationAccess = 'denied';
+      return false;
+    }
+    chatModerationAccess = 'ok';
+    return true;
+  } catch (error) {
+    console.warn('[VIP List] chat-moderation probe failed:', error);
+    chatModerationAccess = 'denied';
+    return false;
+  }
+}
+
+function getChatModerationPlayerPath(kind, playerName) {
+  const base = getChatModerationApiUrl();
+  if (!base || !playerName) return null;
+  return `${base}/${kind}/${sanitizeFirebaseKey(playerName)}`;
+}
+
+async function fetchChatModerationRecord(kind, playerName) {
+  if (chatModerationAccess === 'denied') return null;
+  const path = getChatModerationPlayerPath(kind, playerName);
+  if (!path) return null;
+  try {
+    const response = await fetch(`${path}.json`);
+    if (markChatModerationDenied(response.status)) return null;
+    if (!response.ok) return null;
+    if (chatModerationAccess === 'unknown') chatModerationAccess = 'ok';
+    return await response.json();
+  } catch (error) {
+    console.warn(`[VIP List] Error fetching chat moderation (${kind}):`, error);
+    return null;
+  }
+}
+
+async function isPlayerChatMuted(playerName) {
+  if (!playerName || !getChatModerationApiUrl() || !MESSAGING_CONFIG.enabled) return false;
+  const key = playerName.toLowerCase();
+  const cached = chatMuteStatusCache.get(key);
+  const now = Date.now();
+  if (cached && cached.expiresAt > now) {
+    if (!cached.muted) return false;
+    if (cached.until && cached.until <= now) return false;
+    return true;
+  }
+
+  const data = await fetchChatModerationRecord('muted', playerName);
+  const muted = !!(data && data.muted === true);
+  const until = data && typeof data.until === 'number' ? data.until : null;
+  const stillMuted = muted && (!until || until > now);
+  chatMuteStatusCache.set(key, {
+    muted: stillMuted,
+    until,
+    expiresAt: now + CHAT_MODERATION_CACHE_TTL_MS
+  });
+
+  // Best-effort cleanup of expired mute records
+  if (muted && until && until <= now && currentPlayerIsChatAdmin) {
+    void unmuteChatPlayer(playerName, { skipAdminCheck: true, silent: true });
+  }
+  return stillMuted;
+}
+
+async function isPlayerChatBanned(playerName) {
+  if (!playerName || !getChatModerationApiUrl() || !MESSAGING_CONFIG.enabled) return false;
+  const key = playerName.toLowerCase();
+  const cached = chatBanStatusCache.get(key);
+  const now = Date.now();
+  if (cached && cached.expiresAt > now) {
+    return !!cached.banned;
+  }
+
+  const data = await fetchChatModerationRecord('banned', playerName);
+  const banned = !!(data && data.banned === true);
+  chatBanStatusCache.set(key, {
+    banned,
+    expiresAt: now + CHAT_MODERATION_CACHE_TTL_MS
+  });
+  return banned;
+}
+
+async function assertCurrentPlayerCanSendChat(channel) {
+  const player = getCurrentPlayerName();
+  if (!player) return;
+  if (await isPlayerChatBanned(player)) {
+    const err = new Error('CHAT_BANNED');
+    err.code = 'CHAT_BANNED';
+    throw err;
+  }
+  if ((channel === 'all-chat' || channel === 'guild') && await isPlayerChatMuted(player)) {
+    const err = new Error('CHAT_MUTED');
+    err.code = 'CHAT_MUTED';
+    throw err;
+  }
+}
+
+async function muteChatPlayer(playerName, durationMs = null) {
+  if (!(await canCurrentPlayerRunAllChatCleanup())) {
+    return { success: false, error: 'Not authorized' };
+  }
+  if (!(await probeChatModerationAccess())) {
+    return { success: false, error: t('mods.vipList.adminModerationRulesRequired') };
+  }
+  const path = getChatModerationPlayerPath('muted', playerName);
+  if (!path) return { success: false, error: 'Moderation API unavailable' };
+  const admin = getCurrentPlayerName();
+  const until = typeof durationMs === 'number' && durationMs > 0 ? Date.now() + durationMs : null;
+  try {
+    const response = await fetch(`${path}.json`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        muted: true,
+        name: playerName,
+        by: admin,
+        at: Date.now(),
+        until
+      })
+    });
+    if (markChatModerationDenied(response.status)) {
+      return { success: false, error: t('mods.vipList.adminModerationRulesRequired') };
+    }
+    if (!response.ok) return { success: false, error: `HTTP ${response.status}` };
+    invalidateChatModerationCache(playerName);
+    return { success: true, until };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+
+async function unmuteChatPlayer(playerName, options = {}) {
+  const { skipAdminCheck = false, silent = false } = options;
+  if (!skipAdminCheck && !(await canCurrentPlayerRunAllChatCleanup())) {
+    return { success: false, error: 'Not authorized' };
+  }
+  if (chatModerationAccess === 'denied') {
+    return { success: false, error: t('mods.vipList.adminModerationRulesRequired') };
+  }
+  const path = getChatModerationPlayerPath('muted', playerName);
+  if (!path) return { success: false, error: 'Moderation API unavailable' };
+  try {
+    const response = await fetch(`${path}.json`, { method: 'DELETE' });
+    if (markChatModerationDenied(response.status)) {
+      return { success: false, error: t('mods.vipList.adminModerationRulesRequired') };
+    }
+    if (!response.ok && response.status !== 404) {
+      return { success: false, error: `HTTP ${response.status}` };
+    }
+    invalidateChatModerationCache(playerName);
+    if (!silent) console.log('[VIP List] Unmuted chat player:', playerName);
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+
+async function banChatPlayer(playerName) {
+  if (!(await canCurrentPlayerRunAllChatCleanup())) {
+    return { success: false, error: 'Not authorized' };
+  }
+  if (!(await probeChatModerationAccess())) {
+    return { success: false, error: t('mods.vipList.adminModerationRulesRequired') };
+  }
+  const path = getChatModerationPlayerPath('banned', playerName);
+  if (!path) return { success: false, error: 'Moderation API unavailable' };
+  const admin = getCurrentPlayerName();
+  try {
+    const response = await fetch(`${path}.json`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        banned: true,
+        name: playerName,
+        by: admin,
+        at: Date.now()
+      })
+    });
+    if (markChatModerationDenied(response.status)) {
+      return { success: false, error: t('mods.vipList.adminModerationRulesRequired') };
+    }
+    if (!response.ok) return { success: false, error: `HTTP ${response.status}` };
+    invalidateChatModerationCache(playerName);
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+
+async function unbanChatPlayer(playerName) {
+  if (!(await canCurrentPlayerRunAllChatCleanup())) {
+    return { success: false, error: 'Not authorized' };
+  }
+  if (!(await probeChatModerationAccess())) {
+    return { success: false, error: t('mods.vipList.adminModerationRulesRequired') };
+  }
+  const path = getChatModerationPlayerPath('banned', playerName);
+  if (!path) return { success: false, error: 'Moderation API unavailable' };
+  try {
+    const response = await fetch(`${path}.json`, { method: 'DELETE' });
+    if (markChatModerationDenied(response.status)) {
+      return { success: false, error: t('mods.vipList.adminModerationRulesRequired') };
+    }
+    if (!response.ok && response.status !== 404) {
+      return { success: false, error: `HTTP ${response.status}` };
+    }
+    invalidateChatModerationCache(playerName);
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+
+function resolveChatMessageDeleteTarget() {
+  const active = activeAllChatTab || chatStateManager.getActiveChatType();
+  if (active === 'all-chat') {
+    return { type: 'all-chat', url: getAllChatApiUrl() };
+  }
+  if (active && active.startsWith('guild-')) {
+    const guildId = active.replace('guild-', '');
+    return { type: 'guild', guildId, url: getVipListGuildChatApiUrl(guildId) };
+  }
+  return { type: 'unsupported', url: null };
+}
+
+async function deleteModeratedChatMessage(messageId) {
+  if (!(await canCurrentPlayerRunAllChatCleanup())) {
+    return { success: false, error: 'Not authorized' };
+  }
+  if (!messageId) return { success: false, error: 'Missing message id' };
+  const target = resolveChatMessageDeleteTarget();
+  if (!target.url || target.type === 'unsupported') {
+    return { success: false, error: 'Delete is only available in All Chat and Guild Chat' };
+  }
+  try {
+    const response = await fetch(`${target.url}/${messageId}.json`, { method: 'DELETE' });
+    if (!response.ok && response.status !== 404) {
+      return { success: false, error: `HTTP ${response.status}` };
+    }
+    if (target.type === 'all-chat' && allChatCache.messages) {
+      allChatCache.messages = allChatCache.messages.filter((msg) => msg.id !== messageId);
+    }
+    const el = document.querySelector(`[data-message-id="${messageId}"]`);
+    if (el) el.remove();
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+
+async function deleteAllChatMessagesFromPlayer(playerName) {
+  if (!(await canCurrentPlayerRunAllChatCleanup())) {
+    return { deleted: 0, error: 'Not authorized' };
+  }
+  const allChatUrl = getAllChatApiUrl();
+  if (!allChatUrl || !playerName) {
+    return { deleted: 0, error: 'All Chat unavailable' };
+  }
+  const playerLower = playerName.toLowerCase();
+  try {
+    const response = await fetch(`${allChatUrl}.json`);
+    if (!response.ok) return { deleted: 0, error: `HTTP ${response.status}` };
+    const data = await response.json();
+    if (!data || typeof data !== 'object') return { deleted: 0, error: null };
+
+    const ids = Object.entries(data)
+      .filter(([, msg]) => msg && typeof msg.from === 'string' && msg.from.toLowerCase() === playerLower)
+      .map(([id]) => id);
+
+    let deleted = 0;
+    const BATCH_SIZE = 25;
+    for (let i = 0; i < ids.length; i += BATCH_SIZE) {
+      const batch = ids.slice(i, i + BATCH_SIZE);
+      const results = await Promise.all(
+        batch.map(async (id) => {
+          const res = await fetch(`${allChatUrl}/${id}.json`, { method: 'DELETE' });
+          if (res.ok || res.status === 404) {
+            const el = document.querySelector(`[data-message-id="${id}"]`);
+            if (el) el.remove();
+            return 1;
+          }
+          return 0;
+        })
+      );
+      deleted += results.reduce((sum, n) => sum + n, 0);
+    }
+
+    if (allChatCache.messages) {
+      allChatCache.messages = allChatCache.messages.filter(
+        (msg) => !(msg.from && msg.from.toLowerCase() === playerLower)
+      );
+    }
+    return { deleted, error: null };
+  } catch (error) {
+    return { deleted: 0, error: error.message };
+  }
+}
+
+function closeChatAdminContextMenu() {
+  if (chatAdminContextMenuEl) {
+    chatAdminContextMenuEl.remove();
+    chatAdminContextMenuEl = null;
+  }
+  if (chatAdminContextMenuCloser) {
+    document.removeEventListener('click', chatAdminContextMenuCloser, true);
+    document.removeEventListener('contextmenu', chatAdminContextMenuCloser, true);
+    document.removeEventListener('keydown', chatAdminContextMenuCloser, true);
+    chatAdminContextMenuCloser = null;
+  }
+}
+
+function createChatAdminMenuItem(text, onClick, color = CSS_CONSTANTS.COLORS.TEXT_PRIMARY) {
+  const item = document.createElement('div');
+  item.textContent = text;
+  item.style.cssText = `
+    padding: 6px 12px;
+    color: ${color};
+    cursor: pointer;
+    font-size: 13px;
+    text-align: left;
+    white-space: nowrap;
+  `;
+  addHoverEffect(item);
+  item.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    closeChatAdminContextMenu();
+    void onClick();
+  });
+  return item;
+}
+
+function createChatAdminMenuSeparator() {
+  const sep = document.createElement('div');
+  sep.style.cssText = `
+    height: 1px;
+    margin: 4px 6px;
+    background: ${CSS_CONSTANTS.COLORS.WHITE_20};
+  `;
+  return sep;
+}
+
+async function showChatAdminContextMenu(clientX, clientY, messageEl, username) {
+  closeChatAdminContextMenu();
+  closeAllDropdownsExcept(null);
+
+  if (!username || username.toLowerCase() === 'system') return;
+  if (!(await refreshCurrentPlayerChatAdminCache())) return;
+
+  const messageId = messageEl?.getAttribute('data-message-id') || null;
+  const currentPlayer = getCurrentPlayerName();
+  const isSelf = currentPlayer && username.toLowerCase() === currentPlayer.toLowerCase();
+  const targetIsAdmin = typeof window.FirebaseAdminsAPI?.isPlayerAdminAsync === 'function'
+    ? await window.FirebaseAdminsAPI.isPlayerAdminAsync(username)
+    : false;
+  const moderationOk = await probeChatModerationAccess();
+  let muted = false;
+  let banned = false;
+  if (moderationOk) {
+    [muted, banned] = await Promise.all([
+      isPlayerChatMuted(username),
+      isPlayerChatBanned(username)
+    ]);
+  }
+  const deleteTarget = resolveChatMessageDeleteTarget();
+
+  const menu = document.createElement('div');
+  menu.className = 'vip-admin-context-menu';
+  menu.style.cssText = `
+    position: fixed;
+    left: ${clientX}px;
+    top: ${clientY}px;
+    z-index: 10050;
+    min-width: 160px;
+    background: url('${CSS_CONSTANTS.BACKGROUND_URL}') repeat;
+    border: 4px solid transparent;
+    border-image: ${CSS_CONSTANTS.BORDER_1_FRAME};
+    padding: 4px;
+    pointer-events: auto;
+  `;
+
+  if (messageId && deleteTarget.type !== 'unsupported') {
+    menu.appendChild(createChatAdminMenuItem(t('mods.vipList.adminDeleteMessage'), async () => {
+      if (!confirm(tReplace('mods.vipList.adminDeleteMessageConfirm', { name: username }))) return;
+      const result = await deleteModeratedChatMessage(messageId);
+      if (!result.success) {
+        alert(result.error || t('mods.vipList.adminActionFailed'));
+      }
+    }, CSS_CONSTANTS.COLORS.ERROR));
+  }
+
+  if (!isSelf && !targetIsAdmin && moderationOk) {
+    menu.appendChild(createChatAdminMenuSeparator());
+
+    if (muted) {
+      menu.appendChild(createChatAdminMenuItem(t('mods.vipList.adminUnmutePlayer'), async () => {
+        const result = await unmuteChatPlayer(username);
+        if (!result.success) alert(result.error || t('mods.vipList.adminActionFailed'));
+      }, CSS_CONSTANTS.COLORS.SUCCESS));
+    } else {
+      for (const option of CHAT_MUTE_DURATION_OPTIONS) {
+        menu.appendChild(createChatAdminMenuItem(t(`mods.vipList.${option.labelKey}`), async () => {
+          const result = await muteChatPlayer(username, option.ms);
+          if (!result.success) alert(result.error || t('mods.vipList.adminActionFailed'));
+        }));
+      }
+    }
+
+    menu.appendChild(createChatAdminMenuSeparator());
+
+    if (banned) {
+      menu.appendChild(createChatAdminMenuItem(t('mods.vipList.adminUnbanPlayer'), async () => {
+        const result = await unbanChatPlayer(username);
+        if (!result.success) alert(result.error || t('mods.vipList.adminActionFailed'));
+      }, CSS_CONSTANTS.COLORS.SUCCESS));
+    } else {
+      menu.appendChild(createChatAdminMenuItem(t('mods.vipList.adminBanPlayer'), async () => {
+        if (!confirm(tReplace('mods.vipList.adminBanPlayerConfirm', { name: username }))) return;
+        const result = await banChatPlayer(username);
+        if (!result.success) alert(result.error || t('mods.vipList.adminActionFailed'));
+      }, CSS_CONSTANTS.COLORS.ERROR));
+    }
+
+    if (deleteTarget.type === 'all-chat') {
+      menu.appendChild(createChatAdminMenuSeparator());
+      menu.appendChild(createChatAdminMenuItem(t('mods.vipList.adminDeleteAllFromPlayer'), async () => {
+        if (!confirm(tReplace('mods.vipList.adminDeleteAllFromPlayerConfirm', { name: username }))) return;
+        const result = await deleteAllChatMessagesFromPlayer(username);
+        if (result.error) {
+          alert(result.error);
+          return;
+        }
+        alert(tReplace('mods.vipList.adminDeletedCount', { count: String(result.deleted) }));
+      }, CSS_CONSTANTS.COLORS.ERROR));
+    }
+  } else if (!isSelf && !targetIsAdmin && !moderationOk && deleteTarget.type === 'all-chat') {
+    menu.appendChild(createChatAdminMenuSeparator());
+    menu.appendChild(createChatAdminMenuItem(t('mods.vipList.adminDeleteAllFromPlayer'), async () => {
+      if (!confirm(tReplace('mods.vipList.adminDeleteAllFromPlayerConfirm', { name: username }))) return;
+      const result = await deleteAllChatMessagesFromPlayer(username);
+      if (result.error) {
+        alert(result.error);
+        return;
+      }
+      alert(tReplace('mods.vipList.adminDeletedCount', { count: String(result.deleted) }));
+    }, CSS_CONSTANTS.COLORS.ERROR));
+  }
+
+  if (!menu.childElementCount) return;
+
+  document.body.appendChild(menu);
+  chatAdminContextMenuEl = menu;
+
+  // Keep menu inside viewport
+  const rect = menu.getBoundingClientRect();
+  let left = clientX;
+  let top = clientY;
+  if (left + rect.width > window.innerWidth - 8) left = Math.max(8, window.innerWidth - rect.width - 8);
+  if (top + rect.height > window.innerHeight - 8) top = Math.max(8, window.innerHeight - rect.height - 8);
+  menu.style.left = `${left}px`;
+  menu.style.top = `${top}px`;
+
+  chatAdminContextMenuCloser = (event) => {
+    if (event.type === 'keydown' && event.key !== 'Escape') return;
+    if (menu.contains(event.target)) return;
+    closeChatAdminContextMenu();
+  };
+  // Defer so the opening contextmenu event does not immediately close the menu
+  const timeoutId = setTimeout(() => {
+    pendingTimeouts.delete(timeoutId);
+    document.addEventListener('click', chatAdminContextMenuCloser, true);
+    document.addEventListener('contextmenu', chatAdminContextMenuCloser, true);
+    document.addEventListener('keydown', chatAdminContextMenuCloser, true);
+  }, 0);
+  trackTimeout(timeoutId);
 }
 
 // =======================
@@ -4577,6 +5135,16 @@ async function createChatMessageElement(msg, container, messageId = null, cached
   messageDiv.appendChild(nameButton);
   messageDiv.appendChild(colonSpan);
   messageDiv.appendChild(messageSpan);
+
+  if (username && username.toLowerCase() !== 'system' && username.toLowerCase() !== 'unknown') {
+    messageDiv.setAttribute('data-from-player', username);
+    messageDiv.addEventListener('contextmenu', (e) => {
+      if (!currentPlayerIsChatAdmin) return;
+      e.preventDefault();
+      e.stopPropagation();
+      void showChatAdminContextMenu(e.clientX, e.clientY, messageDiv, username);
+    });
+  }
   
   return messageDiv;
 }
@@ -8744,6 +9312,8 @@ async function openAllChatPanel() {
   if (!MESSAGING_CONFIG.enabled) {
     return;
   }
+
+  void refreshCurrentPlayerChatAdminCache();
   
   const currentPlayer = getCurrentPlayerName();
   if (!currentPlayer) {
@@ -9229,6 +9799,7 @@ async function openAllChatPanel() {
     try {
       let success = false;
       if (activeAllChatTab === 'all-chat') {
+        await assertCurrentPlayerCanSendChat('all-chat');
         const currentPlayer = getCurrentPlayerName();
         const messageId = Date.now().toString();
         const timestamp = Date.now();
@@ -9270,6 +9841,7 @@ async function openAllChatPanel() {
         // If success, message is already displayed optimistically, no reload needed
       } else if (activeAllChatTab && activeAllChatTab.startsWith('guild-')) {
         // Guild chat
+        await assertCurrentPlayerCanSendChat('guild');
         const guildId = activeAllChatTab.replace('guild-', '');
         success = await sendGuildChatMessage(guildId, text);
         if (success) {
@@ -9277,6 +9849,7 @@ async function openAllChatPanel() {
         }
       } else {
         // Private message - use optimistic update
+        await assertCurrentPlayerCanSendChat('private');
         const currentPlayer = getCurrentPlayerName();
         const messageId = Date.now().toString();
         const timestamp = Date.now();
@@ -9350,6 +9923,12 @@ async function openAllChatPanel() {
           pendingTimeouts.delete(timeoutId);
         }, 5000);
         trackTimeout(timeoutId);
+      } else if (error?.code === 'CHAT_BANNED' || error?.message === 'CHAT_BANNED') {
+        textarea.value = text;
+        alert(t('mods.vipList.adminYouAreBanned'));
+      } else if (error?.code === 'CHAT_MUTED' || error?.message === 'CHAT_MUTED') {
+        textarea.value = text;
+        alert(t('mods.vipList.adminYouAreMuted'));
       } else {
         // Restore text on other errors
         textarea.value = text;
@@ -12361,6 +12940,7 @@ exports = {
       // Setup message checking if messaging is enabled
       if (MESSAGING_CONFIG.enabled) {
         setupMessageChecking();
+        refreshCurrentPlayerChatAdminCache();
         scheduleAllChatCleanupOnInit();
         
         // Sync chat enabled status to Firebase
@@ -12384,6 +12964,10 @@ exports = {
       
       // 2. Remove global click handler (memory leak prevention)
       removeVIPDropdownClickHandler();
+      closeChatAdminContextMenu();
+      currentPlayerIsChatAdmin = false;
+      chatModerationAccess = 'unknown';
+      invalidateChatModerationCache();
       
       // 3. Clear all pending timeouts (memory leak prevention)
       clearAllPendingTimeouts();
