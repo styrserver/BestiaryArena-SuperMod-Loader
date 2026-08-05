@@ -4,6 +4,41 @@
   },
   "notes": [
     {
+      "version": "4.7.7",
+      "changes": [
+        {
+          "mod": "Battle Helper",
+          "type": "added",
+          "text": "Help board: post map help requests (ticks/rank/floor + optional note), browse open requests via Firebase, load a requester's public arsenal in sandbox, and publish a seedless $replay setup for them to copy. Helpers can remove their own published setups. Closing or expiring a request deletes it from Firebase (including leftover closed entries on refresh). Fixed 600×920 modal with 30%/35%/35% columns; help status messages use the shared Status box. Max 3 open requests per player; one open request per map + goal type; 7-day expiry. Map picker lists unlocked maps with thumbnails in game order (current map preselected). Mod button shows open-request count; selecting a request navigates to that map and shows Helping / Publish setup toasts. Publish setup stays greyed out until creatures are on the board; helper names in replies show in green. Restore Original Profile also clears the selected help request and cancels in-flight profile loads."
+        },
+        {
+          "mod": "Challenges",
+          "type": "changed",
+          "text": "Persistent \"Creatures allowed\" toast now shows placed/maximum and updates as allies are placed on the board."
+        },
+        {
+          "mod": "Custom Battles",
+          "type": "changed",
+          "text": "Scene sprite replacements can preserve crop framing. Custom pieces can use map item sprites (itemSpriteId), including setup-time tile overlays that match native map-item DOM. Ally drops on custom villain tiles are blocked and missing villains are restored. Added countPlayerAllyCreatures (excludes forced allies) for status toasts aligned with allyLimit."
+        },
+        {
+          "mod": "Custom Battles",
+          "type": "fixed",
+          "text": "Item-sprite custom villains no longer lose their visual override when combat outfit ids differ from gameId. Player allies on those tiles keep their name and level instead of being treated as the custom piece."
+        },
+        {
+          "mod": "Quests",
+          "type": "added",
+          "text": "Added a new interactive board NPC with multi-step destiny dialogue and a new multi-step quest: item transforms, NPC inquiries, a custom battle finale with map visuals, and a guild-coin reward after speaking with the board NPC."
+        },
+        {
+          "mod": "Quests",
+          "type": "changed",
+          "text": "While the new multi-step quest is active, most NPCs wonder aloud what befell the lost figure when asked about it; after completion they respond with gratitude. The royal NPC still advances the quest as before. The finale battle is tougher (higher level, shorter ability cooldown that starts ready), and victory thanks come from talking to the board NPC rather than an automatic modal. Custom battle status toast now shows ally creatures as placed/maximum and updates live while placing."
+        }
+      ]
+    },
+    {
       "version": "4.7.6",
       "changes": [
         {

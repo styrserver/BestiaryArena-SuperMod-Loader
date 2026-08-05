@@ -397,6 +397,8 @@ let SANTA_RESPONSES = {};
 let SVENSON_RESPONSES = {};
 let DANE_RESPONSES = {};
 let DANE_RUMOUR_LINES = [];
+let ORACLE_RESPONSES = {};
+let ORACLE_DESTINY_DIALOGUE = {};
 let KING_TIBIANUS_CONFUSION_RESPONSES = [];
 let KING_TIBIANUS_SWEAR_WORDS = [];
 let KING_TIBIANUS_SWEAR_RESPONSE = 'How dare you! Guards, remove this insolent subject!';
@@ -408,6 +410,7 @@ let TESHA_CONFUSION_RESPONSES = [];
 let SANTA_CONFUSION_RESPONSES = [];
 let SVENSON_CONFUSION_RESPONSES = [];
 let DANE_CONFUSION_RESPONSES = [];
+let ORACLE_CONFUSION_RESPONSES = [];
 let NPC_QUEST_ITEM_CHAT_RESPONSES = {};
 const NPC_QUEST_ITEM_UNINVOLVED_TEMPLATES = {};
 
@@ -516,6 +519,7 @@ function applyQuestDialogueFromAssets(missionsData, npcsData) {
   const santa = npcsData.santa || {};
   const svenson = npcsData.svenson || {};
   const dane = npcsData.dane || {};
+  const oracle = npcsData.oracle || {};
   const king = npcsData['king-tibianus'] || {};
 
   AL_DEE_RESPONSES = { ...(alDee.keywords || {}) };
@@ -526,6 +530,8 @@ function applyQuestDialogueFromAssets(missionsData, npcsData) {
   SVENSON_RESPONSES = { ...(svenson.keywords || {}) };
   DANE_RESPONSES = { ...(dane.keywords || {}) };
   DANE_RUMOUR_LINES = Array.isArray(dane.rumourLines) ? [...dane.rumourLines] : [];
+  ORACLE_RESPONSES = { ...(oracle.keywords || {}) };
+  ORACLE_DESTINY_DIALOGUE = { ...(oracle.destiny || {}) };
   SANTA_THANK_YOU_LINES = [...(santa.thankYouLines || [])];
   KING_TIBIANUS_CONFUSION_RESPONSES = [...(king.confusion || [])];
   KING_TIBIANUS_SWEAR_WORDS = Array.isArray(king.swear?.words) ? [...king.swear.words] : [];
@@ -537,6 +543,7 @@ function applyQuestDialogueFromAssets(missionsData, npcsData) {
   SANTA_CONFUSION_RESPONSES = [...(santa.confusion || [])];
   SVENSON_CONFUSION_RESPONSES = [...(svenson.confusion || [])];
   DANE_CONFUSION_RESPONSES = [...(dane.confusion || [])];
+  ORACLE_CONFUSION_RESPONSES = [...(oracle.confusion || [])];
   COSTELLO_SEAL_GUIDANCE_FALLBACK = costello.sealGuidanceFallback || COSTELLO_SEAL_GUIDANCE_FALLBACK;
   NPC_QUEST_ITEM_CHAT_RESPONSES = JSON.parse(JSON.stringify(npcsData.questItems || {}));
 
@@ -837,6 +844,27 @@ function applyQuestRoomsFromAssets(roomsData) {
       if (board.dane.id) BOARD_NPC_DANE_ID = board.dane.id;
       if (board.dane.whiteWaveTileIndex != null) DANE_WHITE_WAVE_TILE_INDEX = board.dane.whiteWaveTileIndex;
       if (board.dane.dialogueIconUrl) DANE_DIALOGUE_ICON_URL = board.dane.dialogueIconUrl;
+    }
+    if (board.oracle) {
+      if (board.oracle.id) BOARD_NPC_ORACLE_ID = board.oracle.id;
+      if (board.oracle.name) BOARD_NPC_ORACLE_NAME = board.oracle.name;
+      if (board.oracle.roomName) ORACLE_ROOM_NAME = board.oracle.roomName;
+      if (board.oracle.roomId) ORACLE_ROOM_ID = board.oracle.roomId;
+      if (board.oracle.tileIndex != null) ORACLE_TILE_INDEX = board.oracle.tileIndex;
+      if (board.oracle.hideBoardVisual != null) ORACLE_HIDE_BOARD_VISUAL = !!board.oracle.hideBoardVisual;
+      if (board.oracle.imageFilename) ORACLE_IMAGE_FILENAME = board.oracle.imageFilename;
+      if (board.oracle.dialogueIconUrl) ORACLE_DIALOGUE_ICON_URL = board.oracle.dialogueIconUrl;
+      ORACLE_SCENE_SPRITE_REPLACEMENTS.rootId = board.oracle.backgroundSceneId || 'background-scene';
+      if (Array.isArray(board.oracle.sceneSpriteReplacements?.rules)) {
+        ORACLE_SCENE_SPRITE_REPLACEMENTS.rules = board.oracle.sceneSpriteReplacements.rules.slice();
+      } else {
+        ORACLE_SCENE_SPRITE_REPLACEMENTS.rules = [
+          { sourceIds: [429], replacementId: 410, preserveCrop: true, scope: 'tile' }
+        ];
+      }
+      if (Array.isArray(board.oracle.sceneSpriteAttemptDelaysMs)) {
+        replaceArrayContents(ORACLE_SCENE_SPRITE_ATTEMPT_DELAYS_MS, board.oracle.sceneSpriteAttemptDelaysMs);
+      }
     }
   }
 
@@ -1156,6 +1184,7 @@ const APPRENTICE_SHENG_MISSION = { id: 'apprentice_sheng' };
 const CHRISTMAS_MIRACLE_MISSION = { id: 'christmas_miracle' };
 const SVENSON_LOVE_STORY_MISSION = { id: 'svenson_love_story' };
 const WEAKENED_ARCHDEMON_MISSION = { id: 'weakened_archdemon' };
+const LOST_ORACLE_MISSION = { id: 'lost_oracle' };
 
 
 registerMissionForDialogue(SERPENTINE_TOWER_MISSION);
@@ -1176,9 +1205,12 @@ registerMissionForDialogue(APPRENTICE_SHENG_MISSION);
 registerMissionForDialogue(CHRISTMAS_MIRACLE_MISSION);
 registerMissionForDialogue(SVENSON_LOVE_STORY_MISSION);
 registerMissionForDialogue(WEAKENED_ARCHDEMON_MISSION);
+registerMissionForDialogue(LOST_ORACLE_MISSION);
 
 const MINOTAUR_TROPHY_CONFIG = {};
 const ORB_CONFIG = {};
+const LUMINOUS_ORB_CONFIG = {};
+const SPECTRAL_STONE_CONFIG = {};
 
 // Mission registry maps — seeded below, overwritten from missions.json → registry.
 const MISSION_STATE_MAP = {};
@@ -1203,7 +1235,8 @@ const DEFAULT_QUEST_LOG_MISSION_ORDER = [
   APPRENTICE_SHENG_MISSION,
   CHRISTMAS_MIRACLE_MISSION,
   SVENSON_LOVE_STORY_MISSION,
-  WEAKENED_ARCHDEMON_MISSION
+  WEAKENED_ARCHDEMON_MISSION,
+  LOST_ORACLE_MISSION
 ];
 
 const DEFAULT_MISSION_REGISTRY = {
@@ -1246,6 +1279,11 @@ const DEFAULT_MISSION_REGISTRY = {
     stateKey: 'progressWeakenedArchdemon',
     firebaseKey: 'weakenedArchdemon',
     extraFields: ['battleCompleted']
+  },
+  lost_oracle: {
+    stateKey: 'progressLostOracle',
+    firebaseKey: 'lostOracle',
+    extraFields: ['askedNpcs', 'kingInformed', 'orbExchanged', 'spectralStoneReceived', 'oracleEnraged', 'battleCompleted', 'oracleDismissed']
   }
 };
 
@@ -1664,6 +1702,8 @@ const PRODUCT_CONFIG_BY_ID = {
   honeyflower: HONEYFLOWER_CONFIG,
   minotaurTrophy: MINOTAUR_TROPHY_CONFIG,
   orb: ORB_CONFIG,
+  luminousOrb: LUMINOUS_ORB_CONFIG,
+  spectralStone: SPECTRAL_STONE_CONFIG,
   copperKey: COPPER_KEY_CONFIG,
   mapColour: MAP_COLOUR_CONFIG,
   wishlist: WISHLIST_CONFIG,
@@ -1692,6 +1732,12 @@ function resolveQuestProductName(productId) {
   }
   if (productId === 'minotaurTrophy') {
     return MINOTAUR_TROPHY_CONFIG.productName || 'Wooden Plank';
+  }
+  if (productId === 'luminousOrb') {
+    return LUMINOUS_ORB_CONFIG.productName || 'Luminous Orb';
+  }
+  if (productId === 'spectralStone') {
+    return SPECTRAL_STONE_CONFIG.productName || 'Spectral Stone';
   }
   return productId;
 }
@@ -1725,6 +1771,20 @@ let DANE_WHITE_WAVE_TILE_INDEX = null;
 const DANE_OVERLAY_CLASS = 'quests-dane-overlay';
 let DANE_OUTFIT_SPRITE_ID = '';
 let DANE_DIALOGUE_ICON_URL = '';
+let BOARD_NPC_ORACLE_ID = '';
+let BOARD_NPC_ORACLE_NAME = 'The Oracle';
+let ORACLE_ROOM_NAME = '';
+let ORACLE_ROOM_ID = '';
+let ORACLE_TILE_INDEX = null;
+const ORACLE_OVERLAY_CLASS = 'quests-oracle-overlay';
+let ORACLE_HIDE_BOARD_VISUAL = true;
+let ORACLE_IMAGE_FILENAME = 'The_Oracle.gif';
+let ORACLE_DIALOGUE_ICON_URL = '';
+const ORACLE_SCENE_SPRITE_REPLACEMENTS = {
+  rootId: 'background-scene',
+  rules: [{ sourceIds: [429], replacementId: 410, preserveCrop: true, scope: 'tile' }]
+};
+const ORACLE_SCENE_SPRITE_ATTEMPT_DELAYS_MS = [0, 100, 250, 500, 800, 1200];
 let GHAZBARAN_HIDEOUT_ROOM_NAME = '';
 let GHAZBARAN_HIDEOUT_DISPLAY_NAME = '';
 let GHAZBARAN_TILE_INDEX = null;
@@ -1898,6 +1958,7 @@ function createNPCCooldownManager() {
     progressChristmasMiracle: { accepted: false, completed: false },
     progressSvensonLoveStory: { accepted: false, completed: false, plankDelivered: false, strandedAtAwash: false, awashYarnDelivered: false, awashYarnRequested: false, strandedAtUnderground: false, undergroundCompassDelivered: false, undergroundCompassRequested: false, strandedAtWhiteWave: false, whiteWaveSlippersDelivered: false },
     progressWeakenedArchdemon: { accepted: false, completed: false, battleCompleted: false },
+    progressLostOracle: { accepted: false, completed: false, askedNpcs: false, kingInformed: false, orbExchanged: false, spectralStoneReceived: false, oracleEnraged: false, battleCompleted: false, oracleDismissed: false },
     costelloVisited: false,
     mornenionDefeated: false, // Mornenion defeat flag (also stored in Firebase as progress.mornenion.defeated); keep in sync so getAllMissionProgress() includes it when saving
     sevenSealsCompleted: getDefaultSevenSealsCompleted(), // one boolean per seal (index 0 = First Seal … 6 = Seventh Seal); complete each seal separately via setSealCompleted(sealIndex, true)
@@ -2031,6 +2092,15 @@ function createNPCCooldownManager() {
   // Apprentice Sheng (Minotaur Mage Room: talk to Rookstayer → custom battle)
   let playerAcceptedApprenticeShengBattle = false;
   let apprenticeShengBattle = null;
+
+  // The Lost Oracle (Monastery Catacombs: Spectral Stone → Oracle rage battle)
+  let playerAcceptedOracleRageBattle = false;
+  let oracleRageBattle = null;
+  let oracleRageBattleWorld = null;
+  let oracleRageNewGameUnsub = null;
+  let oracleRageCooldownPatchTimers = [];
+  let oracleRageCooldownPatchedLogged = false;
+  let oracleRageAbilityForceReadyDone = false;
 
   // Weakened Archdemon (Ruprecht's Hut via Svenson → Ghazbaran)
   let playerTraveledToGhazHideout = false;
@@ -2354,6 +2424,7 @@ function createNPCCooldownManager() {
     showCustomBattleStatusToast({
       battleName: 'Apprentice Sheng',
       allyLimit: 5,
+      battle,
       logPrefix: '[Quests Mod][Apprentice Sheng]'
     });
     apprenticeShengBattle.scheduleEntryVillainSetup({
@@ -2365,6 +2436,357 @@ function createNPCCooldownManager() {
       }
     });
     return true;
+  }
+
+  function createOracleRageBattleInstance(roomId) {
+    if (!window.CustomBattles) {
+      console.error('[Quests Mod][The Lost Oracle] CustomBattles still not available');
+      return null;
+    }
+    if (!roomId) {
+      console.error('[Quests Mod][The Lost Oracle] Missing roomId for Oracle rage battle');
+      return null;
+    }
+    const spawn = getHydratedQuestBattleSpawn('lost_oracle');
+    const villains = spawn.villains;
+    console.log('[Quests Mod][The Lost Oracle] Creating rage battle for roomId:', roomId, {
+      villains: villains.map((v) => ({
+        nickname: v.nickname,
+        tileIndex: v.tileIndex,
+        gameId: v.gameId,
+        outfitSpriteId: v.outfitSpriteId
+      }))
+    });
+    return window.CustomBattles.create({
+      name: BOARD_NPC_ORACLE_NAME || 'The Oracle',
+      roomId,
+      villains,
+      allyLimit: spawn.allyLimit ?? 6,
+      preventVillainMovement: !!spawn.preventVillainMovement,
+      hideVillainSprites: !!spawn.hideVillainSprites,
+      sceneSpriteReplacements: ORACLE_SCENE_SPRITE_REPLACEMENTS,
+      entrySetup: {
+        sceneSpriteAttemptDelays: ORACLE_SCENE_SPRITE_ATTEMPT_DELAYS_MS
+      },
+      activationCheck: (isSandbox, inBattleArea) => {
+        return isSandbox && inBattleArea && playerAcceptedOracleRageBattle;
+      },
+      victoryDefeat: {
+        onVictory: async () => {
+          console.log('[Quests Mod][The Lost Oracle] Victory — awaiting Oracle thanks');
+          try {
+            await persistMissionProgress(LOST_ORACLE_MISSION, buildLostOracleProgress({
+              accepted: true,
+              completed: false,
+              askedNpcs: true,
+              kingInformed: true,
+              orbExchanged: true,
+              spectralStoneReceived: true,
+              oracleEnraged: true,
+              battleCompleted: true,
+              oracleDismissed: false
+            }));
+          } catch (error) {
+            console.error('[Quests Mod][The Lost Oracle] Error saving battleCompleted flag:', error);
+          }
+        },
+        onDefeat: () => {},
+        reloadRoomOnClose: true,
+        reapplyAfterReload: false,
+        forceSameRoomRefresh: true,
+        bounceDelayMs: 16,
+        navigateDelayMs: 100,
+        onClose: (isVictory) => {
+          cleanupOracleRageBattle();
+          updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+          if (isVictory) {
+            console.log('[Quests Mod][The Lost Oracle] Victory closed — speak with The Oracle for thanks');
+          }
+        },
+        victoryTitle: 'Victory!',
+        defeatTitle: 'Defeat',
+        victoryMessage: getMissionDialogueLine(
+          LOST_ORACLE_MISSION,
+          'battleVictory',
+          "The Oracle's rage is broken. The catacombs fall silent."
+        ),
+        defeatMessage: getMissionDialogueLine(
+          LOST_ORACLE_MISSION,
+          'battleDefeat',
+          "The Oracle's wrath was too great."
+        ),
+        showItems: false,
+        items: []
+      }
+    });
+  }
+
+  function initializeOracleRageBattle(roomId) {
+    if (window.CustomBattles) {
+      return createOracleRageBattleInstance(roomId);
+    }
+    return waitForCustomBattles({
+      logPrefix: BATTLE_TOAST_LOG.lostOracle || '[Quests Mod][The Lost Oracle]'
+    }).then((api) => {
+      if (!api) return null;
+      return createOracleRageBattleInstance(roomId);
+    });
+  }
+
+  function restoreBoardSetupOracleRage() {
+    if (oracleRageBattle) {
+      oracleRageBattle.restoreBoardSetup();
+    }
+  }
+
+  function findOracleRageBattleActors(world = oracleRageBattleWorld) {
+    const actors = typeof getBattleWorldActors === 'function' ? getBattleWorldActors(world) : [];
+    if (!actors.length) return [];
+    const matchName = (actor) => String(actor?.name || actor?.metadata?.name || actor?.nickname || '').toLowerCase();
+    return actors.filter((actor) => {
+      if (actor?.villain !== true) return false;
+      const name = matchName(actor);
+      return name === 'the oracle' || name.includes('oracle');
+    });
+  }
+
+  function patchOracleRageAbilityCooldownTo2s(world = null, { forceReady = false } = {}) {
+    const actors = findOracleRageBattleActors(world || oracleRageBattleWorld);
+    if (!actors.length) return false;
+
+    // Match Demodras/Ghaz pattern: 16 ticks/s → 2s = 32 ticks
+    const TARGET_TICKS = 32;
+    const TARGET_MS = 2000;
+    let anyChanged = false;
+    let anyForcedReady = false;
+    const shouldForceReady = forceReady && !oracleRageAbilityForceReadyDone;
+
+    for (const actor of actors) {
+      const abilityCd = actor?.abilityCooldown;
+      if (!abilityCd || typeof abilityCd !== 'object') continue;
+      let changed = false;
+      const setBase = (key, value) => {
+        if (!(key in abilityCd) || typeof abilityCd[key] !== 'number') return;
+        if (abilityCd[key] === value) return;
+        abilityCd[key] = value;
+        changed = true;
+      };
+      setBase('baseCooldownTicks', TARGET_TICKS);
+      setBase('baseCooldown', TARGET_TICKS);
+      setBase('_baseCooldown', TARGET_TICKS);
+      setBase('baseCooldownMs', TARGET_MS);
+      setBase('baseCooldownMilliseconds', TARGET_MS);
+      setBase('baseDuration', TARGET_MS);
+
+      // Once per fight: clear remaining CD so the ability starts ready.
+      if (shouldForceReady) {
+        const zeroKeys = [
+          'currentCooldown',
+          '_currentCooldown',
+          'remainingTicks',
+          'cooldownRemainingTicks',
+          'ticksLeft',
+          'remainingMs',
+          'remainingMilliseconds'
+        ];
+        for (const key of zeroKeys) {
+          if (!(key in abilityCd) || typeof abilityCd[key] !== 'number') continue;
+          if (abilityCd[key] === 0) continue;
+          abilityCd[key] = 0;
+          changed = true;
+          anyForcedReady = true;
+        }
+        if (abilityCd.isOnCooldown === true) {
+          abilityCd.isOnCooldown = false;
+          changed = true;
+          anyForcedReady = true;
+        }
+        if (typeof abilityCd.setCooldown === 'function') {
+          try {
+            abilityCd.setCooldown(0);
+            changed = true;
+            anyForcedReady = true;
+          } catch (_) { /* ignore */ }
+        }
+      }
+
+      if (changed) anyChanged = true;
+    }
+
+    if (shouldForceReady) {
+      const hadCooldownComponent = actors.some((actor) => actor?.abilityCooldown
+        && typeof actor.abilityCooldown === 'object');
+      if (hadCooldownComponent) {
+        oracleRageAbilityForceReadyDone = true;
+      }
+    }
+
+    if (anyChanged && !oracleRageCooldownPatchedLogged) {
+      oracleRageCooldownPatchedLogged = true;
+      console.log('[Quests Mod][The Lost Oracle] Patched Oracle ability base cooldown to 2s', {
+        actors: actors.length,
+        forceReady: anyForcedReady
+      });
+    }
+    return anyChanged;
+  }
+
+  function clearOracleRageCooldownPatchTimers() {
+    for (const timer of oracleRageCooldownPatchTimers) {
+      try { clearTimeout(timer); } catch (_) { /* ignore */ }
+    }
+    oracleRageCooldownPatchTimers = [];
+  }
+
+  function scheduleOracleRageAbilityCooldownPatches(world = null) {
+    if (world) oracleRageBattleWorld = world;
+    clearOracleRageCooldownPatchTimers();
+    const delays = [
+      { delay: 0, forceReady: true },
+      { delay: 100, forceReady: true },
+      { delay: 250, forceReady: true },
+      { delay: 500, forceReady: false },
+      { delay: 1000, forceReady: false },
+      { delay: 2000, forceReady: false }
+    ];
+    for (const { delay, forceReady } of delays) {
+      const timer = setTimeout(() => {
+        if (!playerAcceptedOracleRageBattle || !oracleRageBattle) return;
+        patchOracleRageAbilityCooldownTo2s(oracleRageBattleWorld, { forceReady });
+      }, delay);
+      oracleRageCooldownPatchTimers.push(timer);
+    }
+  }
+
+  function stopOracleRageAbilityCooldownHooks() {
+    clearOracleRageCooldownPatchTimers();
+    if (oracleRageNewGameUnsub) {
+      try { oracleRageNewGameUnsub(); } catch (_) { /* ignore */ }
+      oracleRageNewGameUnsub = null;
+    }
+    oracleRageBattleWorld = null;
+    oracleRageCooldownPatchedLogged = false;
+    oracleRageAbilityForceReadyDone = false;
+  }
+
+  function startOracleRageAbilityCooldownHooks() {
+    stopOracleRageAbilityCooldownHooks();
+    const board = globalThis.state?.board;
+    if (!board || typeof board.on !== 'function') return;
+    try {
+      oracleRageNewGameUnsub = board.on('newGame', (event) => {
+        if (!playerAcceptedOracleRageBattle || !oracleRageBattle) return;
+        oracleRageCooldownPatchedLogged = false;
+        oracleRageAbilityForceReadyDone = false;
+        scheduleOracleRageAbilityCooldownPatches(event?.world || null);
+      });
+    } catch (error) {
+      console.warn('[Quests Mod][The Lost Oracle] Could not subscribe newGame for Oracle cooldown:', error);
+    }
+  }
+
+  function cleanupOracleRageBattle() {
+    try {
+      removeCustomBattleStatusToast();
+      stopOracleRageAbilityCooldownHooks();
+      if (oracleRageBattle) {
+        oracleRageBattle.cleanup(restoreBoardSetupOracleRage, showQuestOverlays);
+        oracleRageBattle = null;
+      }
+      playerAcceptedOracleRageBattle = false;
+      console.log('[Quests Mod][The Lost Oracle] Rage battle cleaned up');
+    } catch (error) {
+      console.error('[Quests Mod][The Lost Oracle] Error cleaning up rage battle:', error);
+    }
+  }
+
+  function setupOracleRageBattleInstance(battle) {
+    if (!battle) return false;
+    oracleRageBattle = battle;
+    oracleRageBattle.setup(
+      () => playerAcceptedOracleRageBattle,
+      NotificationService.createBattleToastCallback(
+        BATTLE_TOAST_LOG.lostOracle || '[Quests Mod][The Lost Oracle]'
+      )
+    );
+    oracleRageBattle.resetSandboxBattleState();
+    showCustomBattleStatusToast({
+      battleName: BOARD_NPC_ORACLE_NAME || 'The Oracle',
+      allyLimit: battle.config?.allyLimit ?? 6,
+      battle,
+      logPrefix: BATTLE_TOAST_LOG.lostOracle || '[Quests Mod][The Lost Oracle]'
+    });
+    startOracleRageAbilityCooldownHooks();
+    oracleRageBattle.scheduleEntryVillainSetup({
+      isActiveCheck: () => playerAcceptedOracleRageBattle,
+      onComplete: () => {
+        hideQuestOverlays();
+        hideHeroEditorButton();
+        updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+        oracleRageBattle.scheduleSceneSpriteReplacementsForEntry({ force: true });
+        scheduleOracleRageAbilityCooldownPatches();
+      }
+    });
+    return true;
+  }
+
+  function startOracleRageCustomBattle(npcConfig = null) {
+    const config = npcConfig
+      || BOARD_NPC_CONFIGS.find((c) => c.overlayClass === ORACLE_OVERLAY_CLASS)
+      || BOARD_NPC_CONFIGS.find((c) => c.id === BOARD_NPC_ORACLE_ID);
+    const progress = getMissionProgress(LOST_ORACLE_MISSION) || {};
+    if (progress.completed || progress.battleCompleted) {
+      console.log('[Quests Mod][The Lost Oracle] Mission already finished — not starting rage battle');
+      return;
+    }
+
+    try {
+      const roomId = getRoomIdByRoomName(ORACLE_ROOM_NAME) || ORACLE_ROOM_ID || 'crcat';
+      if (!roomId) {
+        console.error('[Quests Mod][The Lost Oracle] Monastery Catacombs roomId not found');
+        showToast({
+          message: 'Could not start the battle — room not found.',
+          logPrefix: BATTLE_TOAST_LOG.lostOracle || '[Quests Mod][The Lost Oracle]'
+        });
+        return;
+      }
+
+      if (oracleRageBattle) {
+        cleanupOracleRageBattle();
+      }
+
+      playerAcceptedOracleRageBattle = true;
+      if (config) {
+        removeBoardNpcOverlay(config);
+      }
+      updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+
+      const initResult = initializeOracleRageBattle(roomId);
+      if (initResult && typeof initResult.then === 'function') {
+        initResult.then((battle) => {
+          if (!setupOracleRageBattleInstance(battle)) {
+            playerAcceptedOracleRageBattle = false;
+            console.error('[Quests Mod][The Lost Oracle] Failed to set up rage battle after waiting');
+            updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+          }
+        }).catch((error) => {
+          playerAcceptedOracleRageBattle = false;
+          console.error('[Quests Mod][The Lost Oracle] Error initializing rage battle:', error);
+          updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+        });
+        return;
+      }
+
+      if (!setupOracleRageBattleInstance(initResult)) {
+        playerAcceptedOracleRageBattle = false;
+        console.error('[Quests Mod][The Lost Oracle] CustomBattles not available');
+        updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+      }
+    } catch (error) {
+      playerAcceptedOracleRageBattle = false;
+      console.error('[Quests Mod][The Lost Oracle] Error starting rage battle:', error);
+      updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+    }
   }
 
   function createBansheeLastRoomBattleInstance(roomId) {
@@ -2585,7 +3007,7 @@ function createNPCCooldownManager() {
     );
     lonesomeDragonBattle.resetSandboxBattleState();
     setupLonesomeDragonTileRestrictions();
-    showCustomBattleStatusToast({ battleName: 'Demodras', allyLimit: battle.config?.allyLimit ?? 6, logPrefix: '[Quests Mod][Lonesome Dragon]' });
+    showCustomBattleStatusToast({ battleName: 'Demodras', allyLimit: battle.config?.allyLimit ?? 6, battle, logPrefix: '[Quests Mod][Lonesome Dragon]' });
     startDemodrasAbilityCooldownHooks();
     lonesomeDragonBattle.scheduleEntryVillainSetup({
       attemptDelays: [0, 100, 250, 500, 800, 1200],
@@ -2673,6 +3095,7 @@ function createNPCCooldownManager() {
     };
     if (genes) unit.genes = { ...genes };
     if (unitDef.outfitSpriteId != null) unit.outfitSpriteId = unitDef.outfitSpriteId;
+    if (unitDef.itemSpriteId != null) unit.itemSpriteId = unitDef.itemSpriteId;
     if (unitDef.shiny != null) unit.shiny = !!unitDef.shiny;
     if (unitDef.awakened != null) unit.awakened = !!unitDef.awakened;
     if (equip) unit.equip = equip;
@@ -2916,7 +3339,7 @@ function createNPCCooldownManager() {
       NotificationService.createBattleToastCallback(BATTLE_TOAST_LOG.putridChamber)
     );
     putridChamberBattle.resetSandboxBattleState();
-    showCustomBattleStatusToast({ battleName: 'The Cursed Chamber', allyLimit: 5, logPrefix: BATTLE_TOAST_LOG.putridChamber });
+    showCustomBattleStatusToast({ battleName: 'The Cursed Chamber', allyLimit: 5, battle, logPrefix: BATTLE_TOAST_LOG.putridChamber });
     putridChamberBattle.scheduleEntryVillainSetup({
       isActiveCheck: () => playerUsedSerpentineLeverToPutridChamber,
       onComplete: () => {
@@ -3402,7 +3825,7 @@ function createNPCCooldownManager() {
                             NotificationService.createBattleToastCallback(BATTLE_TOAST_LOG.mornenion)
                           );
                           setupMornenionTileRestrictions();
-                          showCustomBattleStatusToast({ battleName: 'Mornenion', allyLimit: 3, logPrefix: '[Quests Mod][Mornenion]' });
+                          showCustomBattleStatusToast({ battleName: 'Mornenion', allyLimit: 3, battle, logPrefix: '[Quests Mod][Mornenion]' });
                           console.log('[Quests Mod][Mining] Mornenion battle initialized successfully');
                         } else {
                           console.error('[Quests Mod][Mining] Failed to initialize Mornenion battle after waiting');
@@ -3418,7 +3841,7 @@ function createNPCCooldownManager() {
                         NotificationService.createBattleToastCallback(BATTLE_TOAST_LOG.mornenion)
                       );
                       setupMornenionTileRestrictions();
-                      showCustomBattleStatusToast({ battleName: 'Mornenion', allyLimit: 3, logPrefix: '[Quests Mod][Mornenion]' });
+                      showCustomBattleStatusToast({ battleName: 'Mornenion', allyLimit: 3, battle: initResult, logPrefix: '[Quests Mod][Mornenion]' });
                       console.log('[Quests Mod][Mining] Mornenion battle initialized successfully');
                     } else {
                       console.error('[Quests Mod][Mining] Failed to initialize Mornenion battle - CustomBattles not available');
@@ -7679,8 +8102,65 @@ function createNPCCooldownManager() {
   }
 
   let customBattleStatusToastHandle = null;
+  let customBattleStatusToastBoardUnsub = null;
+  let customBattleStatusToastState = null;
+
+  function countPlayerPlacedAlliesForStatusToast(battle) {
+    try {
+      if (battle && typeof battle.countPlayerAllyCreatures === 'function') {
+        return battle.countPlayerAllyCreatures();
+      }
+      const boardConfig = globalThis.state?.board?.getSnapshot()?.context?.boardConfig || [];
+      return boardConfig.filter((piece) => {
+        if (piece?.customForcedAlly) return false;
+        if (battle && typeof battle.isForcedAllyEntity === 'function' && battle.isForcedAllyEntity(piece)) {
+          return false;
+        }
+        return piece?.type === 'player' || (piece?.type === 'custom' && piece?.villain === false);
+      }).length;
+    } catch (error) {
+      console.error('[Quests Mod][Battle] Error counting placed allies for status toast:', error);
+      return 0;
+    }
+  }
+
+  function buildCustomBattleStatusToastText({ battleName, allyLimit, battle }) {
+    if (typeof allyLimit === 'number') {
+      const placed = countPlayerPlacedAlliesForStatusToast(battle);
+      return `Battling ${battleName}\nCreatures allowed: ${placed}/${allyLimit}`;
+    }
+    return `Battling ${battleName}\nCreatures allowed: N/A`;
+  }
+
+  function stopCustomBattleStatusToastBoardWatch() {
+    if (!customBattleStatusToastBoardUnsub) return;
+    try {
+      if (typeof customBattleStatusToastBoardUnsub.unsubscribe === 'function') {
+        customBattleStatusToastBoardUnsub.unsubscribe();
+      } else if (typeof customBattleStatusToastBoardUnsub === 'function') {
+        customBattleStatusToastBoardUnsub();
+      }
+    } catch (error) {
+      console.warn('[Quests Mod][Battle] Error unsubscribing status toast board watch:', error);
+    }
+    customBattleStatusToastBoardUnsub = null;
+  }
+
+  function ensureCustomBattleStatusToastBoardWatch() {
+    if (customBattleStatusToastBoardUnsub) return;
+    if (!globalThis.state?.board?.subscribe) return;
+    customBattleStatusToastBoardUnsub = globalThis.state.board.subscribe(() => {
+      if (!customBattleStatusToastHandle || !customBattleStatusToastState) return;
+      if (typeof customBattleStatusToastHandle.updateMessage !== 'function') return;
+      customBattleStatusToastHandle.updateMessage(
+        buildCustomBattleStatusToastText(customBattleStatusToastState)
+      );
+    });
+  }
 
   function removeCustomBattleStatusToast() {
+    stopCustomBattleStatusToastBoardWatch();
+    customBattleStatusToastState = null;
     if (customBattleStatusToastHandle && typeof customBattleStatusToastHandle.remove === 'function') {
       customBattleStatusToastHandle.remove();
     }
@@ -7688,17 +8168,18 @@ function createNPCCooldownManager() {
     NotificationService.updatePositions();
   }
 
-  function showCustomBattleStatusToast({ battleName, allyLimit, logPrefix = '[Quests Mod][Battle]' }) {
+  function showCustomBattleStatusToast({ battleName, allyLimit, battle = null, logPrefix = '[Quests Mod][Battle]' }) {
     if (!battleName) return;
     const mainContainer = NotificationService.getContainer();
     if (!mainContainer) return;
 
-    const creaturesAllowed = typeof allyLimit === 'number' ? allyLimit : 'N/A';
-    const text = `Battling ${battleName}\nCreatures allowed: ${creaturesAllowed}`;
+    customBattleStatusToastState = { battleName, allyLimit, battle, logPrefix };
+    const text = buildCustomBattleStatusToastText(customBattleStatusToastState);
     const variant = resolveToastVariant(text);
 
     if (customBattleStatusToastHandle && typeof customBattleStatusToastHandle.updateMessage === 'function') {
       customBattleStatusToastHandle.updateMessage(text);
+      ensureCustomBattleStatusToastBoardWatch();
       requestAnimationFrame(() => NotificationService.updatePositions(mainContainer));
       return;
     }
@@ -7723,6 +8204,7 @@ function createNPCCooldownManager() {
       }
     };
 
+    ensureCustomBattleStatusToastBoardWatch();
     requestAnimationFrame(() => NotificationService.updatePositions(mainContainer));
     console.log(`${logPrefix} Battle status toast shown: ${text}`);
   }
@@ -9344,6 +9826,7 @@ function createNPCCooldownManager() {
     kingChatState.awaitingKeyConfirm = false;
     kingChatState.missionOffered = false;
     kingChatState.offeredMission = null;
+    let awaitingLostOracleOrbConfirm = false;
     
     // Close any existing modals first (like Autoscroller does)
     for (let i = 0; i < 2; i++) {
@@ -10208,6 +10691,62 @@ function createNPCCooldownManager() {
               line3.textContent = hintText;
               hintBlock.appendChild(line3);
             }
+          } else if (selectedMission.id === LOST_ORACLE_MISSION.id) {
+            const lostProgress = getMissionProgress(LOST_ORACLE_MISSION) || {};
+            const stages = [
+              {
+                done: !!(lostProgress.kingInformed || lostProgress.orbExchanged || lostProgress.spectralStoneReceived || lostProgress.oracleEnraged || lostProgress.battleCompleted || lostProgress.completed || lostProgress.oracleDismissed),
+                text: selectedMission.objectiveLine1
+              },
+              {
+                done: !!(lostProgress.orbExchanged || lostProgress.spectralStoneReceived || lostProgress.oracleEnraged || lostProgress.battleCompleted || lostProgress.completed || lostProgress.oracleDismissed),
+                text: selectedMission.objectiveLine2
+              },
+              {
+                done: !!(lostProgress.spectralStoneReceived || lostProgress.oracleEnraged || lostProgress.battleCompleted || lostProgress.completed || lostProgress.oracleDismissed),
+                text: selectedMission.objectiveLine3
+              },
+              {
+                done: !!(lostProgress.oracleEnraged || lostProgress.battleCompleted || lostProgress.completed || lostProgress.oracleDismissed),
+                text: selectedMission.objectiveLine4
+              },
+              {
+                done: !!(lostProgress.battleCompleted || lostProgress.completed || lostProgress.oracleDismissed),
+                text: selectedMission.objectiveLine5
+              },
+              {
+                done: !!(lostProgress.completed || lostProgress.oracleDismissed),
+                text: selectedMission.objectiveLine6
+              }
+            ].filter((stage) => !!stage.text);
+
+            let shownCurrent = false;
+            for (const stage of stages) {
+              if (stage.done) {
+                const doneLine = document.createElement('p');
+                doneLine.textContent = stage.text;
+                doneLine.style.textDecoration = 'line-through';
+                doneLine.style.opacity = '0.7';
+                descBlock.appendChild(doneLine);
+                continue;
+              }
+              if (!shownCurrent) {
+                const line1 = document.createElement('p');
+                line1.textContent = getActiveMissionObjectiveLine(selectedMission) || stage.text;
+                descBlock.appendChild(line1);
+                shownCurrent = true;
+              }
+            }
+
+            const hintText = getActiveMissionHintLine(selectedMission) || selectedMission.hint;
+            if (hintText) {
+              const line3 = document.createElement('p');
+              line3.style.color = '#b0b0b0';
+              line3.style.fontStyle = 'italic';
+              line3.style.marginTop = '6px';
+              line3.textContent = hintText;
+              hintBlock.appendChild(line3);
+            }
           } else {
             // For other missions, always show both objectives
             const line1 = document.createElement('p');
@@ -10959,6 +11498,107 @@ function createNPCCooldownManager() {
         // Handle pending key confirmation (yes/no after "Have you found my key?")
         if (await handleKeyConfirmation(lowerText)) {
           return;
+        }
+
+        // The Lost Oracle — ask about oracle / exchange Orb for Luminous Orb
+        const lostOracleProgress = getMissionProgress(LOST_ORACLE_MISSION) || {};
+        const mentionsOracle = lowerText.includes('oracle');
+        const mentionsOrb = /\borb\b/.test(lowerText) && !lowerText.includes('luminous');
+        if ((lostOracleProgress.completed || lostOracleProgress.oracleDismissed) && mentionsOracle) {
+          clearTextarea();
+          queueKingReply(
+            getLostOracleNpcRestoredLine('king', getCurrentPlayerName() || 'Player')
+          );
+          return;
+        }
+        if (lostOracleProgress.accepted && !lostOracleProgress.completed) {
+          if (awaitingLostOracleOrbConfirm) {
+            if (isAffirmativeReply(lowerText)) {
+              awaitingLostOracleOrbConfirm = false;
+              clearTextarea();
+              try {
+                const ok = await exchangeOrbForLuminousOrb();
+                queueKingReply(
+                  ok
+                    ? getMissionDialogueLine(LOST_ORACLE_MISSION, 'kingOracleExchanged', 'Behold — a Luminous Orb. Guard it well; destiny is seldom gentle.')
+                    : getMissionDialogueLine(LOST_ORACLE_MISSION, 'kingOracleNoOrb', 'Return when you have an Orb to offer.')
+                );
+              } catch (error) {
+                console.error('[Quests Mod][King Tibianus] Error exchanging Orb for Luminous Orb:', error);
+                queueKingReply(getMissionCommonLine('errorGeneric', 'Something went wrong. Please try again.'));
+              }
+              return;
+            }
+            if (isNegativeReply(lowerText)) {
+              awaitingLostOracleOrbConfirm = false;
+              clearTextarea();
+              queueKingReply(
+                getMissionDialogueLine(LOST_ORACLE_MISSION, 'kingOracleDecline', 'Very well. Return when you are prepared to offer the Orb.')
+              );
+              return;
+            }
+          }
+
+          if (mentionsOracle || mentionsOrb) {
+            clearTextarea();
+            try {
+              await noteLostOracleInquiry({ fromKing: true });
+              const freshProgress = getMissionProgress(LOST_ORACLE_MISSION) || {};
+              if (freshProgress.oracleEnraged || freshProgress.battleCompleted) {
+                queueKingReply(
+                  getMissionDialogueLine(
+                    LOST_ORACLE_MISSION,
+                    'kingOracleReturnStone',
+                    'The Spectral Stone belongs with The Oracle. Return it whence such light was born.'
+                  )
+                );
+                return;
+              }
+              if (freshProgress.spectralStoneReceived || hasSpectralStoneInInventory()) {
+                queueKingReply(
+                  getMissionDialogueLine(
+                    LOST_ORACLE_MISSION,
+                    'kingOracleReturnStone',
+                    'The Spectral Stone belongs with The Oracle. Return it whence such light was born.'
+                  )
+                );
+                return;
+              }
+              if (freshProgress.orbExchanged || hasLuminousOrbInInventory()) {
+                queueKingReply(
+                  getMissionDialogueLine(LOST_ORACLE_MISSION, 'kingOracleAlreadyExchanged', 'You already hold the Luminous Orb I fashioned. Take it to Wyda in the Venore swamps.')
+                );
+                return;
+              }
+              const hasOrb = hasOrbInInventory() || ((await getQuestItems(false))?.[ORB_CONFIG.productName] || 0) > 0;
+              if (hasOrb && (mentionsOrb || mentionsOracle)) {
+                if (mentionsOrb || isAffirmativeReply(lowerText)) {
+                  // Asking with orb in inventory — prompt confirm, or exchange on orb keyword
+                  if (mentionsOrb && !mentionsOracle) {
+                    awaitingLostOracleOrbConfirm = false;
+                    const ok = await exchangeOrbForLuminousOrb();
+                    queueKingReply(
+                      ok
+                        ? getMissionDialogueLine(LOST_ORACLE_MISSION, 'kingOracleExchanged', 'Behold — a Luminous Orb. Guard it well; destiny is seldom gentle.')
+                        : getMissionDialogueLine(LOST_ORACLE_MISSION, 'kingOracleNoOrb', 'Return when you have an Orb to offer.')
+                    );
+                    return;
+                  }
+                  awaitingLostOracleOrbConfirm = true;
+                  queueKingReply(
+                    getMissionDialogueLine(LOST_ORACLE_MISSION, 'kingOracleHasOrb', 'You carry an Orb. Shall I transform it into a Luminous Orb?')
+                  );
+                  return;
+                }
+              }
+              queueKingReply(
+                getMissionDialogueLine(LOST_ORACLE_MISSION, 'kingOracleAsk', 'An Oracle? Strange visions haunt my dreams of such a being. Bring me an Orb — I may yet unveil its true light.')
+              );
+              return;
+            } catch (error) {
+              console.error('[Quests Mod][King Tibianus] Error handling Lost Oracle dialogue:', error);
+            }
+          }
         }
 
         // Mission acceptance handler
@@ -12195,6 +12835,18 @@ function createNPCCooldownManager() {
           return;
         }
 
+        const lostOracleWonder = tryLostOracleNpcWonderResponse(text, playerName, 'al-dee', 'Al Dee');
+        if (lostOracleWonder != null) {
+          alDeeCooldown.queueResponse(
+            text,
+            lostOracleWonder,
+            addMessageToConversation,
+            'Al Dee',
+            ModalHelpers.getFarewellCloseCallback(text)
+          );
+          return;
+        }
+
         // Get transcript response (handles all standard Al Dee dialogue)
         let alDeeResponse = getAlDeeResponse(text, playerName);
         if (alDeeResponse == null) {
@@ -12418,6 +13070,7 @@ function createNPCCooldownManager() {
       outfitFacing = 'south',
       outfitShiny = false,
       outfitPortraitTranslate = '-12px -12px',
+      itemSpriteId,
       welcomeMessage,
       placeholder,
       modalWidth,
@@ -12448,6 +13101,22 @@ function createNPCCooldownManager() {
         outfitPortraitTranslate,
         outfitName: npcName
       }));
+    } else if (itemSpriteId) {
+      const itemPortrait = document.createElement('div');
+      itemPortrait.style.cssText = 'width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:10px;box-sizing:border-box;gap:6px;';
+      if (npcName) {
+        const nameLabel = document.createElement('div');
+        nameLabel.className = 'pixel-font-16 text-whiteHighlight relative z-3 text-center';
+        nameLabel.style.cssText = 'color:rgb(96, 192, 96);text-shadow:-1px 0 #000,1px 0 #000,0 -1px #000,0 1px #000;line-height:1;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+        nameLabel.textContent = npcName;
+        itemPortrait.appendChild(nameLabel);
+      }
+      const spriteWrap = document.createElement('div');
+      spriteWrap.className = `sprite item relative id-${itemSpriteId}`;
+      spriteWrap.style.cssText = 'z-index:1000;transform:scale(2);transform-origin:center center;';
+      spriteWrap.innerHTML = `<div class="viewport"><img alt="${itemSpriteId}" data-cropped="false" class="spritesheet" style="--cropX: 0; --cropY: 0;"></div>`;
+      itemPortrait.appendChild(spriteWrap);
+      imageContainer.appendChild(itemPortrait);
     } else {
       const imgWrapper = document.createElement('div');
       imgWrapper.style.cssText = 'width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; padding: 10px; box-sizing: border-box;';
@@ -12696,6 +13365,18 @@ function createNPCCooldownManager() {
           return;
         }
 
+        const lostOracleWonder = tryLostOracleNpcWonderResponse(text, costelloPlayerName, 'costello', 'Costello');
+        if (lostOracleWonder != null) {
+          costelloCooldown.queueResponse(
+            text,
+            lostOracleWonder,
+            addMessageToConversation,
+            'Costello',
+            ModalHelpers.getFarewellCloseCallback(text)
+          );
+          return;
+        }
+
         let response = getCostelloResponse(text, costelloPlayerName);
         if (response == null) {
           response = getNpcQuestItemChatResponse('costello', text, costelloPlayerName);
@@ -12745,6 +13426,7 @@ function createNPCCooldownManager() {
 
     const wydaCooldown = createNPCCooldownManager();
     let wydaOfferingMotherOfAllSpiders = false;
+    let awaitingLostOracleLuminousConfirm = false;
 
     async function sendMessageToWyda() {
       const text = (textarea.value || '').trim();
@@ -12756,6 +13438,99 @@ function createNPCCooldownManager() {
 
       const followerOfZathrothProgress = getMissionProgress(FOLLOWER_OF_ZATHROTH_MISSION);
       const motherProgress = getMissionProgress(MOTHER_OF_ALL_SPIDERS_MISSION);
+      const lostOracleProgress = getMissionProgress(LOST_ORACLE_MISSION) || {};
+
+      // The Lost Oracle: Luminous Orb → Spectral Stone
+      const mentionsLuminous = lowerText.includes('luminous') || lowerText.includes('orb');
+      const mentionsSpectral = lowerText.includes('spectral');
+      const giveLuminousKeywords = ['luminous', 'orb', 'spectral', 'give', 'here', 'take', 'offer', 'mission', 'quest'];
+      const wantsToGiveLuminous = giveLuminousKeywords.some(kw => lowerText.includes(kw));
+
+      if (awaitingLostOracleLuminousConfirm) {
+        if (/\byes\b/i.test(text.trim())) {
+          awaitingLostOracleLuminousConfirm = false;
+          try {
+            const ok = await exchangeLuminousOrbForSpectralStone();
+            wydaCooldown.queueResponse(
+              text,
+              ok
+                ? getMissionDialogueLine(LOST_ORACLE_MISSION, 'wydaLuminousExchanged', 'There. A Spectral Stone — pulsating with spectral energy. Do not lose it.')
+                : getMissionDialogueLine(LOST_ORACLE_MISSION, 'wydaLuminousMissing', 'You do not have a Luminous Orb. Ask the King to unveil an Orb first.'),
+              addMessage,
+              'Wyda'
+            );
+          } catch (err) {
+            console.error('[Quests Mod][Wyda] Error exchanging Luminous Orb:', err);
+            wydaCooldown.queueResponse(text, getMissionCommonLine('errorGeneric', 'Something went wrong. Please try again.'), addMessage, 'Wyda');
+          }
+          return;
+        }
+        if (/\bno\b/i.test(text.trim())) {
+          awaitingLostOracleLuminousConfirm = false;
+          wydaCooldown.queueResponse(
+            text,
+            getMissionDialogueLine(LOST_ORACLE_MISSION, 'wydaLuminousDecline', 'Then keep your glowing toy. Return when you are ready.'),
+            addMessage,
+            'Wyda'
+          );
+          return;
+        }
+      }
+
+      if (
+        lostOracleProgress.accepted
+        && !lostOracleProgress.completed
+        && lostOracleProgress.orbExchanged
+        && (mentionsLuminous || mentionsSpectral || wantsToGiveLuminous || messageMentionsOracle(text))
+      ) {
+        try {
+          if (lostOracleProgress.spectralStoneReceived || hasSpectralStoneInInventory()) {
+            wydaCooldown.queueResponse(
+              text,
+              getMissionDialogueLine(LOST_ORACLE_MISSION, 'wydaLuminousAlready', 'You already carry the Spectral Stone I forged. Keep it close.'),
+              addMessage,
+              'Wyda'
+            );
+            return;
+          }
+          const items = await getQuestItems(false);
+          const luminousName = LUMINOUS_ORB_CONFIG.productName || 'Luminous Orb';
+          const hasLuminous = (items?.[luminousName] || 0) >= 1 || hasLuminousOrbInInventory();
+          if (!hasLuminous) {
+            wydaCooldown.queueResponse(
+              text,
+              getMissionDialogueLine(LOST_ORACLE_MISSION, 'wydaLuminousMissing', 'You do not have a Luminous Orb. Ask the King to unveil an Orb first.'),
+              addMessage,
+              'Wyda'
+            );
+            return;
+          }
+          if (mentionsLuminous || mentionsSpectral) {
+            const ok = await exchangeLuminousOrbForSpectralStone();
+            wydaCooldown.queueResponse(
+              text,
+              ok
+                ? getMissionDialogueLine(LOST_ORACLE_MISSION, 'wydaLuminousExchanged', 'There. A Spectral Stone — pulsating with spectral energy. Do not lose it.')
+                : getMissionDialogueLine(LOST_ORACLE_MISSION, 'wydaLuminousMissing', 'You do not have a Luminous Orb. Ask the King to unveil an Orb first.'),
+              addMessage,
+              'Wyda'
+            );
+            return;
+          }
+          awaitingLostOracleLuminousConfirm = true;
+          wydaCooldown.queueResponse(
+            text,
+            getMissionDialogueLine(LOST_ORACLE_MISSION, 'wydaLuminousAsk', 'A Luminous Orb... yes. I can bind its light into a Spectral Stone. Will you give it to me?'),
+            addMessage,
+            'Wyda'
+          );
+          return;
+        } catch (err) {
+          console.error('[Quests Mod][Wyda] Error handling Lost Oracle luminous orb:', err);
+          wydaCooldown.queueResponse(text, getMissionCommonLine('errorGeneric', 'Something went wrong. Please try again.'), addMessage, 'Wyda');
+          return;
+        }
+      }
 
       // The Mother of All Spiders: give Spider Silk to Wyda to complete (check before mission/quest so "silk" / "spider silk" complete the hand-in)
       const giveSilkKeywords = ['silk', 'spider silk', 'give', 'here', 'take', 'offer', 'mission', 'quest'];
@@ -12844,6 +13619,12 @@ function createNPCCooldownManager() {
       if (wydaOfferingMotherOfAllSpiders && (lowerText.includes('no') || lowerText.includes('not'))) {
         wydaOfferingMotherOfAllSpiders = false;
         wydaCooldown.queueResponse(text, getMissionCommonLine('notReady', 'Return when you are ready for this task.'), addMessage, 'Wyda');
+        return;
+      }
+
+      const lostOracleWonder = tryLostOracleNpcWonderResponse(text, wydaPlayerName, 'wyda', 'Wyda');
+      if (lostOracleWonder != null) {
+        wydaCooldown.queueResponse(text, lostOracleWonder, addMessage, 'Wyda', ModalHelpers.getFarewellCloseCallback(text));
         return;
       }
 
@@ -13145,6 +13926,12 @@ function createNPCCooldownManager() {
           }
           return;
         }
+      }
+
+      const lostOracleWonder = tryLostOracleNpcWonderResponse(text, teshaPlayerName, 'tesha', 'Tesha');
+      if (lostOracleWonder != null) {
+        teshaCooldown.queueResponse(text, [lostOracleWonder], addMessage, 'Tesha', ModalHelpers.getFarewellCloseCallback(text));
+        return;
       }
 
       let teshaLines = getTeshaResponse(text, teshaPlayerName);
@@ -13567,6 +14354,28 @@ function createNPCCooldownManager() {
       return mission.objectiveLine1;
     }
 
+    if (mission.id === LOST_ORACLE_MISSION.id) {
+      if (progress?.completed || progress?.oracleDismissed) {
+        return mission.objectiveLine6 || mission.objectiveLine5 || "Survive The Oracle's wrath.";
+      }
+      if (progress?.battleCompleted) {
+        return mission.objectiveLine6 || 'Speak with The Oracle.';
+      }
+      if (progress?.oracleEnraged || playerAcceptedOracleRageBattle) {
+        return mission.objectiveLine5 || "Survive The Oracle's wrath.";
+      }
+      if (progress?.spectralStoneReceived || hasSpectralStoneInInventory()) {
+        return mission.objectiveLine4 || 'Return the Spectral Stone to The Oracle.';
+      }
+      if (progress?.orbExchanged || hasLuminousOrbInInventory()) {
+        return mission.objectiveLine3 || 'Bring the Luminous Orb to Wyda in the Venore swamps.';
+      }
+      if (progress?.kingInformed) {
+        return mission.objectiveLine2 || 'Bring an Orb to King Tibianus.';
+      }
+      return mission.objectiveLine1 || 'Ask other NPCs about the Oracle.';
+    }
+
     if (mission.id === KING_CROSSING_THE_LINE_MISSION.id) {
       if (progress?.crossingObjectiveComplete) return mission.objectiveLine2;
       return mission.objectiveLine1;
@@ -13613,6 +14422,19 @@ function createNPCCooldownManager() {
       if (progress?.plankDelivered) {
         // Travel step ("Talk to Svenson and set sail") should not display item-finding hints.
         return '';
+      }
+      return mission.hint || '';
+    }
+
+    if (mission.id === LOST_ORACLE_MISSION.id) {
+      if (progress?.battleCompleted && !progress?.completed && !progress?.oracleDismissed) {
+        return mission.hintThanks || 'The Oracle awaits your return in the Monastery Catacombs.';
+      }
+      if (progress?.oracleEnraged || playerAcceptedOracleRageBattle) {
+        return mission.hintBattle || '';
+      }
+      if (progress?.spectralStoneReceived || hasSpectralStoneInInventory()) {
+        return mission.hintSpectral || mission.hint || '';
       }
       return mission.hint || '';
     }
@@ -15854,6 +16676,18 @@ function createNPCCooldownManager() {
             updateAllBoardNpcStates(boardContext);
           }
 
+          // The Lost Oracle: leaving Monastery Catacombs cancels the rage battle
+          if (
+            (playerAcceptedOracleRageBattle || oracleRageBattle)
+            && currentRoomName
+            && currentRoomName !== ORACLE_ROOM_NAME
+            && !oracleRageBattle?.isRoomReloadInProgress?.()
+          ) {
+            console.log('[Quests Mod][The Lost Oracle] Left Monastery Catacombs — cancelling rage battle');
+            cleanupOracleRageBattle();
+            updateAllBoardNpcStates(boardContext);
+          }
+
           // Weakened Archdemon: leaving Ruprecht's Hut cancels the Ghazbaran battle
           if (
             (playerTraveledToGhazHideout || ghazbaranBattle)
@@ -15910,7 +16744,7 @@ function createNPCCooldownManager() {
                     NotificationService.createBattleToastCallback(BATTLE_TOAST_LOG.spiderLair)
                   );
                   setupSpiderLairTileRestrictions();
-                  showCustomBattleStatusToast({ battleName: 'Old Widow', allyLimit: 5, logPrefix: '[Quests Mod][Spider Lair]' });
+                  showCustomBattleStatusToast({ battleName: 'Old Widow', allyLimit: 5, battle, logPrefix: '[Quests Mod][Spider Lair]' });
                 } else {
                   spiderLairReinitTriggered = false;
                   console.warn('[Quests Mod][Spider Lair] Re-init returned no battle instance');
@@ -15927,7 +16761,7 @@ function createNPCCooldownManager() {
                 NotificationService.createBattleToastCallback(BATTLE_TOAST_LOG.spiderLair)
               );
               setupSpiderLairTileRestrictions();
-              showCustomBattleStatusToast({ battleName: 'Old Widow', allyLimit: 5, logPrefix: '[Quests Mod][Spider Lair]' });
+              showCustomBattleStatusToast({ battleName: 'Old Widow', allyLimit: 5, battle: initResult, logPrefix: '[Quests Mod][Spider Lair]' });
             }
           }
 
@@ -16016,7 +16850,7 @@ function createNPCCooldownManager() {
                       NotificationService.createBattleToastCallback(BATTLE_TOAST_LOG.mornenion)
                     );
                     setupMornenionTileRestrictions();
-                    showCustomBattleStatusToast({ battleName: 'Mornenion', allyLimit: 3, logPrefix: '[Quests Mod][Mornenion]' });
+                    showCustomBattleStatusToast({ battleName: 'Mornenion', allyLimit: 3, battle, logPrefix: '[Quests Mod][Mornenion]' });
                     console.log('[Quests Mod][Overlay Hider] Mornenion battle initialized successfully');
                   } else {
                     console.error('[Quests Mod][Overlay Hider] Failed to initialize Mornenion battle after waiting');
@@ -16032,7 +16866,7 @@ function createNPCCooldownManager() {
                   NotificationService.createBattleToastCallback(BATTLE_TOAST_LOG.mornenion)
                 );
                 setupMornenionTileRestrictions();
-                showCustomBattleStatusToast({ battleName: 'Mornenion', allyLimit: 3, logPrefix: '[Quests Mod][Mornenion]' });
+                showCustomBattleStatusToast({ battleName: 'Mornenion', allyLimit: 3, battle: initResult, logPrefix: '[Quests Mod][Mornenion]' });
                 console.log('[Quests Mod][Overlay Hider] Mornenion battle initialized successfully');
               } else {
                 console.error('[Quests Mod][Overlay Hider] Failed to initialize Mornenion battle - CustomBattles not available');
@@ -19554,7 +20388,7 @@ function createNPCCooldownManager() {
             NotificationService.createBattleToastCallback(BATTLE_TOAST_LOG.bansheeLastRoom)
           );
           setupBansheeTileRestrictions();
-          showCustomBattleStatusToast({ battleName: 'Queen of the Banshee', allyLimit: 5, logPrefix: '[Quests Mod][Banshee Last Room]' });
+          showCustomBattleStatusToast({ battleName: 'Queen of the Banshee', allyLimit: 5, battle, logPrefix: '[Quests Mod][Banshee Last Room]' });
           console.log('[Quests Mod][Banshee Last Room] Battle initialized successfully (async); villains will be added when overlay hider sees room', roomId);
         } else {
           console.error('[Quests Mod][Banshee Last Room] Failed to initialize battle after waiting');
@@ -19567,7 +20401,7 @@ function createNPCCooldownManager() {
         NotificationService.createBattleToastCallback(BATTLE_TOAST_LOG.bansheeLastRoom)
       );
       setupBansheeTileRestrictions();
-      showCustomBattleStatusToast({ battleName: 'Queen of the Banshee', allyLimit: 5, logPrefix: '[Quests Mod][Banshee Last Room]' });
+      showCustomBattleStatusToast({ battleName: 'Queen of the Banshee', allyLimit: 5, battle: initResult, logPrefix: '[Quests Mod][Banshee Last Room]' });
       console.log('[Quests Mod][Banshee Last Room] Battle initialized successfully (sync); villains will be added when overlay hider sees room', roomId);
     } else {
       console.error('[Quests Mod][Banshee Last Room] CustomBattles not available');
@@ -19668,7 +20502,7 @@ function createNPCCooldownManager() {
             NotificationService.createBattleToastCallback(BATTLE_TOAST_LOG.spiderLair)
           );
           setupSpiderLairTileRestrictions();
-          showCustomBattleStatusToast({ battleName: 'Old Widow', allyLimit: 5, logPrefix: '[Quests Mod][Spider Lair]' });
+          showCustomBattleStatusToast({ battleName: 'Old Widow', allyLimit: 5, battle, logPrefix: '[Quests Mod][Spider Lair]' });
           console.log('[Quests Mod][Spider Lair] Battle initialized (async); villains added when overlay hider sees room', roomId);
         } else {
           console.error('[Quests Mod][Spider Lair] Failed to initialize battle after waiting');
@@ -19681,7 +20515,7 @@ function createNPCCooldownManager() {
         NotificationService.createBattleToastCallback(BATTLE_TOAST_LOG.spiderLair)
       );
       setupSpiderLairTileRestrictions();
-      showCustomBattleStatusToast({ battleName: 'Old Widow', allyLimit: 5, logPrefix: '[Quests Mod][Spider Lair]' });
+      showCustomBattleStatusToast({ battleName: 'Old Widow', allyLimit: 5, battle: initResult, logPrefix: '[Quests Mod][Spider Lair]' });
       console.log('[Quests Mod][Spider Lair] Battle initialized (sync); villains added when overlay hider sees room', roomId);
     } else {
       console.error('[Quests Mod][Spider Lair] CustomBattles not available');
@@ -20998,6 +21832,30 @@ function createNPCCooldownManager() {
       chat: {},
       hpBarColor: 'rgb(96, 192, 96)',
       nameColor: 'rgb(96, 192, 96)'
+    },
+    {
+      id: BOARD_NPC_ORACLE_ID,
+      name: BOARD_NPC_ORACLE_NAME || 'The Oracle',
+      hideLevel: true,
+      tileIndex: ORACLE_TILE_INDEX,
+      roomName: ORACLE_ROOM_NAME,
+      roomId: ORACLE_ROOM_ID,
+      overlayClass: ORACLE_OVERLAY_CLASS,
+      // Tile already has the statue sprite — board overlay is an invisible hitbox + name tag only.
+      hideBoardVisual: ORACLE_HIDE_BOARD_VISUAL,
+      imageUrl: getQuestItemsAssetUrl(ORACLE_IMAGE_FILENAME || 'The_Oracle.gif'),
+      dialogueIconUrl: ORACLE_DIALOGUE_ICON_URL,
+      logPrefix: '[Quests Mod][Board NPC][The Oracle]',
+      chatMode: 'keywords',
+      isUnlocked: () => {
+        const progress = getMissionProgress(LOST_ORACLE_MISSION) || {};
+        return !playerAcceptedOracleRageBattle
+          && !progress.completed
+          && !progress.oracleDismissed;
+      },
+      chat: {},
+      hpBarColor: 'rgb(96, 192, 96)',
+      nameColor: 'rgb(96, 192, 96)'
     }
   ];
 
@@ -21016,11 +21874,20 @@ function createNPCCooldownManager() {
     const daneChat = questNpcsDialogue.dane?.boardChat;
     const daneConfig = BOARD_NPC_CONFIGS.find((c) => c.id === BOARD_NPC_DANE_ID);
     if (daneChat && daneConfig?.chat) Object.assign(daneConfig.chat, daneChat);
+    const oracleChat = questNpcsDialogue.oracle?.boardChat;
+    const oracleConfig = BOARD_NPC_CONFIGS.find((c) => c.id === BOARD_NPC_ORACLE_ID)
+      || BOARD_NPC_CONFIGS.find((c) => c.overlayClass === ORACLE_OVERLAY_CLASS);
+    if (oracleChat && oracleConfig?.chat) Object.assign(oracleConfig.chat, oracleChat);
   };
 
   function isApprenticeShengBattleCompletedPendingReward() {
     const progress = getMissionProgress(APPRENTICE_SHENG_MISSION);
     return !!progress?.battleCompleted && !progress?.completed;
+  }
+
+  function isLostOracleBattleCompletedPendingThanks() {
+    const progress = getMissionProgress(LOST_ORACLE_MISSION) || {};
+    return !!progress.battleCompleted && !progress.completed && !progress.oracleDismissed;
   }
 
   async function completeApprenticeShengMissionWithTrophy() {
@@ -21121,6 +21988,182 @@ function createNPCCooldownManager() {
       }, ROOKSTAYER_THANK_YOU_CLOSE_MS);
     } catch (error) {
       console.error(`${npcConfig.logPrefix} Error showing thank-you modal:`, error);
+    }
+  }
+
+  const ORACLE_STATUE_HIDE_STYLE_ID = 'quests-oracle-statue-dismissed-style';
+
+  /**
+   * After mission complete: remove the interactive board NPC (hitbox / name tag)
+   * but keep the native map statue sprite (id-2031 viewport) on the tile.
+   */
+  function updateOracleStatueVisibility() {
+    try {
+      const progress = getMissionProgress(LOST_ORACLE_MISSION) || {};
+      const dismissed = !!(progress.completed || progress.oracleDismissed);
+      // Clear any older hide-statue CSS from previous builds.
+      document.body.classList.remove('quests-oracle-dismissed');
+      document.getElementById(ORACLE_STATUE_HIDE_STYLE_ID)?.remove();
+      if (dismissed) {
+        const oracleConfig = BOARD_NPC_CONFIGS.find((c) => c.overlayClass === ORACLE_OVERLAY_CLASS)
+          || BOARD_NPC_CONFIGS.find((c) => c.id === BOARD_NPC_ORACLE_ID);
+        if (oracleConfig) removeBoardNpcOverlay(oracleConfig);
+      }
+    } catch (error) {
+      console.warn('[Quests Mod][The Lost Oracle] Error updating Oracle NPC visibility:', error);
+    }
+  }
+
+  async function awardLostOracleGuildCoins() {
+    const amount = Number(LOST_ORACLE_MISSION.rewardCoins) || 100;
+    if (amount <= 0) return;
+    try {
+      const coinsAdder =
+        globalThis.addGuildCoins ||
+        (globalThis.Guilds && globalThis.Guilds.addGuildCoins) ||
+        (globalThis.BestiaryModAPI?.guilds?.addGuildCoins) ||
+        (typeof questsAddGuildCoins === 'function' ? questsAddGuildCoins : null);
+      if (!coinsAdder) {
+        console.warn('[Quests Mod][The Lost Oracle] addGuildCoins not available, skipping guild coin reward');
+        return;
+      }
+      await coinsAdder(amount);
+      console.log('[Quests Mod][The Lost Oracle] Awarded guild coins:', amount);
+    } catch (error) {
+      console.error('[Quests Mod][The Lost Oracle] Error awarding guild coins:', error);
+    }
+  }
+
+  async function completeLostOracleMissionAfterVictory() {
+    const progress = getMissionProgress(LOST_ORACLE_MISSION) || {};
+    if (progress.completed && progress.oracleDismissed) {
+      updateOracleStatueVisibility();
+      return false;
+    }
+    const rewardCoins = Number(LOST_ORACLE_MISSION.rewardCoins) || 100;
+    try {
+      await persistMissionProgress(LOST_ORACLE_MISSION, buildLostOracleProgress({
+        accepted: true,
+        completed: true,
+        askedNpcs: true,
+        kingInformed: true,
+        orbExchanged: true,
+        spectralStoneReceived: true,
+        oracleEnraged: true,
+        battleCompleted: true,
+        oracleDismissed: true
+      }));
+      await awardLostOracleGuildCoins();
+      NotificationService.showQuestCompleted(
+        LOST_ORACLE_MISSION,
+        BATTLE_TOAST_LOG.lostOracle || '[Quests Mod][The Lost Oracle]',
+        { rewardCoins }
+      );
+      const oracleConfig = BOARD_NPC_CONFIGS.find((c) => c.overlayClass === ORACLE_OVERLAY_CLASS)
+        || BOARD_NPC_CONFIGS.find((c) => c.id === BOARD_NPC_ORACLE_ID);
+      if (oracleConfig) removeBoardNpcOverlay(oracleConfig);
+      updateOracleStatueVisibility();
+      updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+      console.log('[Quests Mod][The Lost Oracle] Mission completed — Oracle NPC dismissed (statue remains)');
+      return true;
+    } catch (error) {
+      console.error('[Quests Mod][The Lost Oracle] Error completing mission after victory:', error);
+      return false;
+    }
+  }
+
+  function showOracleVictoryThankYouModal() {
+    try {
+      clearTimeoutOrInterval(modalTimeout);
+      clearTimeoutOrInterval(dialogTimeout);
+
+      const npcConfig = BOARD_NPC_CONFIGS.find((c) => c.overlayClass === ORACLE_OVERLAY_CLASS)
+        || BOARD_NPC_CONFIGS.find((c) => c.id === BOARD_NPC_ORACLE_ID)
+        || {
+          id: BOARD_NPC_ORACLE_ID || 'the-oracle',
+          name: BOARD_NPC_ORACLE_NAME || 'The Oracle',
+          imageUrl: getQuestItemsAssetUrl(ORACLE_IMAGE_FILENAME || 'The_Oracle.gif'),
+          logPrefix: '[Quests Mod][Board NPC][The Oracle]'
+        };
+      const playerName = getCurrentPlayerName() || 'Player';
+      const thankYouMessage = (
+        getOracleDestinyLine(
+          'victoryThanks',
+          getMissionDialogueLine(
+            LOST_ORACLE_MISSION,
+            'oracleVictoryThanks',
+            'THANK YOU, PLAYER! YOUR DESTINY IS FULFILLED!'
+          )
+        ) || 'THANK YOU, PLAYER! YOUR DESTINY IS FULFILLED!'
+      ).replace(/Player/g, playerName).toUpperCase();
+
+      const modalOpts = {
+        npcName: npcConfig.name || 'The Oracle',
+        playerName,
+        imageAlt: npcConfig.name || 'The Oracle',
+        welcomeMessage: thankYouMessage,
+        placeholder: '',
+        modalWidth: KING_TIBI_MODAL_WIDTH,
+        modalHeight: COSTELLO_MODAL_HEIGHT,
+        messageContainerId: `${npcConfig.id || 'the-oracle'}-victory-thank-you-messages`
+      };
+      if (npcConfig.imageUrl) {
+        modalOpts.imageUrl = npcConfig.imageUrl;
+      } else {
+        modalOpts.imageUrl = getQuestItemsAssetUrl(ORACLE_IMAGE_FILENAME || 'The_Oracle.gif');
+      }
+
+      const { contentDiv, textarea, sendBtn } = createNPCChatModalContent(modalOpts);
+      if (textarea) {
+        textarea.disabled = true;
+        textarea.style.opacity = '0.45';
+        textarea.style.pointerEvents = 'none';
+      }
+      if (sendBtn) {
+        sendBtn.disabled = true;
+        sendBtn.style.opacity = '0.45';
+        sendBtn.style.pointerEvents = 'none';
+      }
+
+      const modalDims = getQuestsModalDimensions(
+        KING_TIBI_MODAL_WIDTH,
+        COSTELLO_MODAL_HEIGHT,
+        QUESTS_MODAL_CONFIG.npcChat.minHeight
+      );
+      const modalRef = api.ui.components.createModal({
+        title: npcConfig.name || 'The Oracle',
+        width: modalDims.width,
+        height: modalDims.height,
+        content: contentDiv,
+        buttons: []
+      });
+      boardNpcRuntimeState.modalRefById.set(npcConfig.id || 'the-oracle', modalRef);
+      setupQuestsModalResponsiveLayout(
+        modalRef,
+        contentDiv,
+        KING_TIBI_MODAL_WIDTH,
+        COSTELLO_MODAL_HEIGHT,
+        QUESTS_MODAL_CONFIG.npcChat.minHeight
+      );
+
+      const ORACLE_THANK_YOU_CLOSE_MS = 3500;
+      let rewardStarted = false;
+      const finishThankYou = async () => {
+        if (rewardStarted) return;
+        rewardStarted = true;
+        ModalHelpers.closeModal(0);
+        boardNpcRuntimeState.modalRefById.delete(npcConfig.id || 'the-oracle');
+        await completeLostOracleMissionAfterVictory();
+      };
+
+      setTimeout(() => {
+        finishThankYou();
+      }, ORACLE_THANK_YOU_CLOSE_MS);
+    } catch (error) {
+      console.error('[Quests Mod][The Lost Oracle] Error showing victory thank-you modal:', error);
+      completeLostOracleMissionAfterVictory().catch((err) => {
+        console.error('[Quests Mod][The Lost Oracle] Error completing after thank-you failure:', err);
+      });
     }
   }
 
@@ -21292,6 +22335,11 @@ function createNPCCooldownManager() {
     });
   }
 
+  function getOracleDestinyLine(key, fallback) {
+    const line = ORACLE_DESTINY_DIALOGUE?.[key] || ORACLE_RESPONSES?.[key] || fallback;
+    return sanitizeDialogueText(line, fallback);
+  }
+
   let daneRumourIndex = 0;
   function getNextDaneRumour(playerName) {
     if (!Array.isArray(DANE_RUMOUR_LINES) || DANE_RUMOUR_LINES.length === 0) return null;
@@ -21410,6 +22458,247 @@ function createNPCCooldownManager() {
     daneConfig.outfitSpritesheetUrl = getQuestItemsAssetUrl('DaneIdle.png');
     daneConfig.imageUrl = getQuestItemsAssetUrl('Dane.gif');
     daneConfig.outfitSheetFrameCount = 1;
+  }
+
+  function syncOracleBoardPlacement() {
+    const oracleConfig = BOARD_NPC_CONFIGS.find((c) => c.overlayClass === ORACLE_OVERLAY_CLASS)
+      || BOARD_NPC_CONFIGS.find((c) => c.id === BOARD_NPC_ORACLE_ID);
+    if (!oracleConfig) return;
+    if (BOARD_NPC_ORACLE_ID) oracleConfig.id = BOARD_NPC_ORACLE_ID;
+    if (BOARD_NPC_ORACLE_NAME) oracleConfig.name = BOARD_NPC_ORACLE_NAME;
+    if (ORACLE_ROOM_NAME) oracleConfig.roomName = ORACLE_ROOM_NAME;
+    if (ORACLE_ROOM_ID) oracleConfig.roomId = ORACLE_ROOM_ID;
+    if (ORACLE_TILE_INDEX != null) oracleConfig.tileIndex = ORACLE_TILE_INDEX;
+    oracleConfig.hideBoardVisual = ORACLE_HIDE_BOARD_VISUAL;
+    delete oracleConfig.itemSpriteId;
+    oracleConfig.imageUrl = getQuestItemsAssetUrl(ORACLE_IMAGE_FILENAME || 'The_Oracle.gif');
+    if (ORACLE_DIALOGUE_ICON_URL) oracleConfig.dialogueIconUrl = ORACLE_DIALOGUE_ICON_URL;
+  }
+
+  function navigateToOracleDestinyRoom() {
+    try {
+      const roomId = getRoomIdByRoomName(ORACLE_ROOM_NAME) || ORACLE_ROOM_ID || 'crcat';
+      if (!roomId) {
+        console.warn('[Quests Mod][The Oracle] Destiny room not found');
+        return;
+      }
+      globalThis.state.board.send({
+        type: 'selectRoomById',
+        roomId
+      });
+    } catch (error) {
+      console.error('[Quests Mod][The Oracle] Error navigating to destiny room:', error);
+    }
+  }
+
+  async function startLostOracleMission() {
+    const progress = getMissionProgress(LOST_ORACLE_MISSION) || {};
+    if (progress.accepted || progress.completed) return false;
+    await persistMissionProgress(LOST_ORACLE_MISSION, {
+      accepted: true,
+      completed: false,
+      askedNpcs: false,
+      kingInformed: false,
+      orbExchanged: false,
+      spectralStoneReceived: false,
+      oracleEnraged: false,
+      battleCompleted: false,
+      oracleDismissed: false
+    });
+    NotificationService.showQuestAccepted(LOST_ORACLE_MISSION, '[Quests Mod][The Lost Oracle]');
+    return true;
+  }
+
+  function buildLostOracleProgress(patch = {}) {
+    const current = getMissionProgress(LOST_ORACLE_MISSION) || {};
+    return {
+      accepted: patch.accepted ?? current.accepted ?? false,
+      completed: patch.completed ?? current.completed ?? false,
+      askedNpcs: patch.askedNpcs ?? current.askedNpcs ?? false,
+      kingInformed: patch.kingInformed ?? current.kingInformed ?? false,
+      orbExchanged: patch.orbExchanged ?? current.orbExchanged ?? false,
+      spectralStoneReceived: patch.spectralStoneReceived ?? current.spectralStoneReceived ?? false,
+      oracleEnraged: patch.oracleEnraged ?? current.oracleEnraged ?? false,
+      battleCompleted: patch.battleCompleted ?? current.battleCompleted ?? false,
+      oracleDismissed: patch.oracleDismissed ?? current.oracleDismissed ?? false
+    };
+  }
+
+  function messageMentionsOracle(text) {
+    const lower = String(text ?? '').toLowerCase();
+    return lower.includes('oracle');
+  }
+
+  function isLostOracleMissionInProgress() {
+    const progress = getMissionProgress(LOST_ORACLE_MISSION) || {};
+    return !!(progress.accepted && !progress.completed && !progress.oracleDismissed);
+  }
+
+  function isLostOracleMissionRestored() {
+    const progress = getMissionProgress(LOST_ORACLE_MISSION) || {};
+    return !!(progress.completed || progress.oracleDismissed);
+  }
+
+  function getLostOracleNpcWonderLine(npcId, playerName = 'Player') {
+    const keyByNpc = {
+      'al-dee': 'npcOracleWonderAlDee',
+      costello: 'npcOracleWonderCostello',
+      wyda: 'npcOracleWonderWyda',
+      tesha: 'npcOracleWonderTesha',
+      svenson: 'npcOracleWonderSvenson',
+      dane: 'npcOracleWonderDane'
+    };
+    const key = keyByNpc[npcId] || 'npcOracleWonder';
+    const defaults = {
+      npcOracleWonder: 'The Oracle... lost? I wonder what caused it. Was it cursed? Something dark must have claimed it.',
+      npcOracleWonderAlDee: 'The Oracle got lost? Strange... was it cursed? What could twist a thing like that?',
+      npcOracleWonderCostello: 'A lost Oracle... I wonder what befell it. A curse? Some darker force beneath the stones?',
+      npcOracleWonderWyda: "Lost? Cursed? Ha! Something awful must have happened to it. Tell me if you learn more — I'm bored enough.",
+      npcOracleWonderTesha: 'The Oracle is lost? I wonder whether a curse claimed it... mortality and madness walk hand in hand.',
+      npcOracleWonderSvenson: 'Lost Oracle, eh? Makes you wonder — cursed, abandoned, or worse? Sailors tell darker tales than that.',
+      npcOracleWonderDane: 'A lost Oracle... what caused it? A curse? The sea swallows secrets; land does the same.'
+    };
+    return getMissionDialogueLine(
+      LOST_ORACLE_MISSION,
+      key,
+      defaults[key] || defaults.npcOracleWonder,
+      playerName
+    );
+  }
+
+  function getLostOracleNpcRestoredLine(npcId, playerName = 'Player') {
+    const keyByNpc = {
+      'al-dee': 'npcOracleRestoredAlDee',
+      costello: 'npcOracleRestoredCostello',
+      wyda: 'npcOracleRestoredWyda',
+      tesha: 'npcOracleRestoredTesha',
+      svenson: 'npcOracleRestoredSvenson',
+      dane: 'npcOracleRestoredDane',
+      king: 'kingOracleRestored'
+    };
+    const key = keyByNpc[npcId] || 'npcOracleRestored';
+    const defaults = {
+      npcOracleRestored: 'The Oracle has been restored! Thank you, Player — the world feels steadier for it.',
+      npcOracleRestoredAlDee: 'You restored The Oracle? Amazing work, Player! Folk will sleep easier knowing that.',
+      npcOracleRestoredCostello: 'Bless you, Player. The Oracle is restored — a light returns beneath our monastery.',
+      npcOracleRestoredWyda: "So you fixed The Oracle? Ha! Not so boring after all. Grateful, I suppose.",
+      npcOracleRestoredTesha: 'Be mourned no longer for that fate, Player. The Oracle is restored — thank you.',
+      npcOracleRestoredSvenson: 'Word travels fast at sea, Player. The Oracle restored? Grateful we are for that.',
+      npcOracleRestoredDane: "Sailors toast you, Player. The Oracle restored — that's rare good news.",
+      kingOracleRestored: 'You have my gratitude, Player. The Oracle is restored — may destiny smile upon you.'
+    };
+    return applyPlayerNameSubstitution(
+      getMissionDialogueLine(
+        LOST_ORACLE_MISSION,
+        key,
+        defaults[key] || defaults.npcOracleRestored
+      ),
+      playerName
+    );
+  }
+
+  function tryLostOracleNpcWonderResponse(text, playerName, npcId, logLabel) {
+    if (!messageMentionsOracle(text)) return null;
+    if (isLostOracleMissionRestored()) {
+      return getLostOracleNpcRestoredLine(npcId, playerName);
+    }
+    if (!isLostOracleMissionInProgress()) return null;
+    noteLostOracleInquiry().catch((error) => {
+      console.error(`[Quests Mod][${logLabel || npcId}] Error noting Lost Oracle inquiry:`, error);
+    });
+    return getLostOracleNpcWonderLine(npcId, playerName);
+  }
+
+  async function noteLostOracleInquiry(options = {}) {
+    const { fromKing = false } = options;
+    const progress = getMissionProgress(LOST_ORACLE_MISSION) || {};
+    if (!progress.accepted || progress.completed || progress.spectralStoneReceived || progress.oracleEnraged) {
+      return progress;
+    }
+    const patch = buildLostOracleProgress({
+      accepted: true,
+      completed: false,
+      askedNpcs: true,
+      kingInformed: !!(progress.kingInformed || fromKing)
+    });
+    if (patch.askedNpcs === progress.askedNpcs && patch.kingInformed === progress.kingInformed) {
+      return progress;
+    }
+    await persistMissionProgress(LOST_ORACLE_MISSION, patch);
+    return patch;
+  }
+
+  function hasOrbInInventory() {
+    return (cachedQuestItems?.[ORB_CONFIG.productName] || 0) > 0
+      || getCachedQuestItemCount(ORB_CONFIG.productName) > 0;
+  }
+
+  function hasLuminousOrbInInventory() {
+    const name = LUMINOUS_ORB_CONFIG.productName || 'Luminous Orb';
+    return (cachedQuestItems?.[name] || 0) > 0 || getCachedQuestItemCount(name) > 0;
+  }
+
+  function hasSpectralStoneInInventory() {
+    const name = SPECTRAL_STONE_CONFIG.productName || 'Spectral Stone';
+    return (cachedQuestItems?.[name] || 0) > 0 || getCachedQuestItemCount(name) > 0;
+  }
+
+  async function exchangeOrbForLuminousOrb() {
+    const orbName = ORB_CONFIG.productName || 'Orb';
+    const luminousName = LUMINOUS_ORB_CONFIG.productName || 'Luminous Orb';
+    const items = await getQuestItems(false);
+    if ((items?.[orbName] || 0) < 1) return false;
+    const consumed = await consumeQuestItem(orbName, 1);
+    if (!consumed) return false;
+    await addQuestItem(luminousName, 1);
+    showQuestItemNotification(luminousName, 1);
+    await persistMissionProgress(LOST_ORACLE_MISSION, buildLostOracleProgress({
+      accepted: true,
+      completed: false,
+      askedNpcs: true,
+      kingInformed: true,
+      orbExchanged: true
+    }));
+    return true;
+  }
+
+  async function exchangeLuminousOrbForSpectralStone() {
+    const luminousName = LUMINOUS_ORB_CONFIG.productName || 'Luminous Orb';
+    const spectralName = SPECTRAL_STONE_CONFIG.productName || 'Spectral Stone';
+    const items = await getQuestItems(false);
+    if ((items?.[luminousName] || 0) < 1) return false;
+    const consumed = await consumeQuestItem(luminousName, 1);
+    if (!consumed) return false;
+    await addQuestItem(spectralName, 1);
+    showQuestItemNotification(spectralName, 1);
+    await persistMissionProgress(LOST_ORACLE_MISSION, buildLostOracleProgress({
+      accepted: true,
+      completed: false,
+      askedNpcs: true,
+      kingInformed: true,
+      orbExchanged: true,
+      spectralStoneReceived: true
+    }));
+    return true;
+  }
+
+  async function offerSpectralStoneToOracle() {
+    const spectralName = SPECTRAL_STONE_CONFIG.productName || 'Spectral Stone';
+    const items = await getQuestItems(false);
+    if ((items?.[spectralName] || 0) < 1 && !hasSpectralStoneInInventory()) return false;
+    const consumed = await consumeQuestItem(spectralName, 1);
+    if (!consumed) return false;
+    await persistMissionProgress(LOST_ORACLE_MISSION, buildLostOracleProgress({
+      accepted: true,
+      completed: false,
+      askedNpcs: true,
+      kingInformed: true,
+      orbExchanged: true,
+      spectralStoneReceived: true,
+      oracleEnraged: true,
+      battleCompleted: false
+    }));
+    return true;
   }
 
   function clearAllSvensonOverlays() {
@@ -22137,6 +23426,7 @@ function createNPCCooldownManager() {
     showCustomBattleStatusToast({
       battleName: GHAZBARAN_NICKNAME,
       allyLimit: 10,
+      battle,
       logPrefix: BATTLE_TOAST_LOG.weakenedArchdemon
     });
     const logGhazPlacementDebug = (phase) => {
@@ -23560,6 +24850,8 @@ function createNPCCooldownManager() {
       };
       if (npcConfig.imageUrl) {
         modalOpts.imageUrl = npcConfig.imageUrl;
+      } else if (npcConfig.itemSpriteId) {
+        modalOpts.itemSpriteId = npcConfig.itemSpriteId;
       } else {
         modalOpts.outfitSpriteId = npcConfig.outfitSpriteId;
         modalOpts.outfitFacing = npcConfig.modalOutfitFacing || 'south';
@@ -23579,6 +24871,8 @@ function createNPCCooldownManager() {
       let awaitingSvensonDestinationChoice = false;
       let awaitingSvensonGhazTravelConfirm = false;
       let awaitingDaneWeakenedConfirm = false;
+      // Oracle destiny tree: prepared → sure → yes teleports after SO BE IT!
+      let oracleDestinyStage = npcConfig.overlayClass === ORACLE_OVERLAY_CLASS ? 'prepared' : null;
 
       const reply = async () => {
         const text = (textarea.value || '').trim();
@@ -23588,6 +24882,252 @@ function createNPCCooldownManager() {
         cooldown.clearPendingResponse();
 
         const lower = text.toLowerCase();
+
+        if (npcConfig.overlayClass === ORACLE_OVERLAY_CLASS) {
+          const lostOracleProgress = getMissionProgress(LOST_ORACLE_MISSION) || {};
+          if (
+            lostOracleProgress.battleCompleted
+            && !lostOracleProgress.completed
+            && !lostOracleProgress.oracleDismissed
+          ) {
+            ModalHelpers.closeModal(0);
+            setTimeout(() => showOracleVictoryThankYouModal(), 80);
+            return;
+          }
+          const preparedLine = getOracleDestinyLine(
+            'prepared',
+            'Player,@ R@3 Y£U0 {P3R}P@RD3 T€ [F4C3] Y€RU D3$TN1Y\\?'
+          ).replace(/Player/g, playerName);
+          const confirmLine = getOracleDestinyLine(
+            'confirm',
+            '1 W1££ B[R1NG] Y£U0 T€ [TH3] 1$£@ND €F D3$TN1Y @ND Y£U0 W1££ B3 UN@B£3 T€ R3T{URN} H3R3\\! R@3 Y£U0 $£R3\\?'
+          );
+          const tooYoungLine = getOracleDestinyLine(
+            'tooYoung',
+            'CH1£D{\\}! C€M3 B@[CK] WH3N Y£U0 H@V3 GR€WN UP\\!'
+          );
+          const soBeItLine = getOracleDestinyLine('soBeIt', '$€ B3 1T{\\}!');
+          const farewellLine = getOracleDestinyLine(
+            'farewell',
+            'C€M3 B@[CK] WH3N Y£U0 @R3 {P3R}P@RD3 T€ [F4C3] Y€RU D3$TN1Y\\!'
+          );
+          const spectralRageLine = getOracleDestinyLine(
+            'spectralRage',
+            getMissionDialogueLine(
+              LOST_ORACLE_MISSION,
+              'oracleSpectralRage',
+              'Y£U0 D@R3 {€FF3R} M3 TH@T {C{UR$}3D} $T€N3{\\}?! 1 W1££ {UNM@K3} Y£U0{\\}! 1 W1££ {D3$TR€Y} 3V3RYTH1NG{\\}!'
+            )
+          );
+          const rageAgainLine = getOracleDestinyLine(
+            'rageAgain',
+            getMissionDialogueLine(
+              LOST_ORACLE_MISSION,
+              'oracleRageAgain',
+              'Y£U0 @G@1N{\\}?! TH3N D1£{\\}!'
+            )
+          );
+          const isYes = /\byes\b/i.test(text.trim());
+          const isHi = /^(hi|hello|hey)\b/i.test(text.trim()) || lower === 'hi' || lower === 'hello';
+          const mentionsSpectralStone = lower.includes('spectral')
+            || lower.includes('spectral stone')
+            || /\bstone\b/.test(lower);
+          const wantsToGiveSpectral = mentionsSpectralStone
+            || lower.includes('give')
+            || lower.includes('offer');
+          const canOfferSpectral = !lostOracleProgress.completed
+            && !lostOracleProgress.oracleEnraged
+            && !lostOracleProgress.battleCompleted
+            && !lostOracleProgress.oracleDismissed
+            && (lostOracleProgress.spectralStoneReceived || hasSpectralStoneInInventory());
+          const canRetryRage = lostOracleProgress.accepted
+            && !lostOracleProgress.completed
+            && !!lostOracleProgress.oracleEnraged
+            && !lostOracleProgress.battleCompleted
+            && !lostOracleProgress.oracleDismissed;
+
+          const ORACLE_RAGE_BATTLE_DELAY_MS = 2000;
+          const beginOracleRageBattle = () => {
+            setTimeout(() => {
+              ModalHelpers.closeModal(0);
+              setTimeout(() => startOracleRageCustomBattle(npcConfig), 120);
+            }, ORACLE_RAGE_BATTLE_DELAY_MS);
+          };
+
+          const triggerSpectralStoneRage = async () => {
+            oracleDestinyStage = null;
+            try {
+              const hasStone = hasSpectralStoneInInventory()
+                || ((await getQuestItems(false))?.[SPECTRAL_STONE_CONFIG.productName || 'Spectral Stone'] || 0) >= 1;
+              if (!hasStone) {
+                cooldown.queueResponse(
+                  text,
+                  getMissionDialogueLine(
+                    LOST_ORACLE_MISSION,
+                    'oracleSpectralMissing',
+                    'Y£U0 BR1NG N€TH1NG. R3T{URN} W1TH TH3 $P3CTR@£ $T€N3{\\}!'
+                  ),
+                  addMessageToConversation,
+                  npcConfig.name
+                );
+                return false;
+              }
+              const ok = await offerSpectralStoneToOracle();
+              if (!ok) {
+                cooldown.queueResponse(
+                  text,
+                  getMissionDialogueLine(
+                    LOST_ORACLE_MISSION,
+                    'oracleSpectralMissing',
+                    'Y£U0 BR1NG N€TH1NG. R3T{URN} W1TH TH3 $P3CTR@£ $T€N3{\\}!'
+                  ),
+                  addMessageToConversation,
+                  npcConfig.name
+                );
+                return false;
+              }
+              cooldown.queueResponse(
+                text,
+                spectralRageLine,
+                addMessageToConversation,
+                npcConfig.name,
+                beginOracleRageBattle
+              );
+              return true;
+            } catch (error) {
+              console.error(`${npcConfig.logPrefix} Error offering Spectral Stone:`, error);
+              cooldown.queueResponse(
+                text,
+                getMissionCommonLine('errorGeneric', 'Something went wrong. Please try again.'),
+                addMessageToConversation,
+                npcConfig.name
+              );
+              return false;
+            }
+          };
+
+          if (isNpcFarewellMessage(text)) {
+            oracleDestinyStage = null;
+            cooldown.queueResponse(
+              text,
+              farewellLine,
+              addMessageToConversation,
+              npcConfig.name,
+              ModalHelpers.getFarewellCloseCallback(text)
+            );
+            return;
+          }
+
+          if (canRetryRage) {
+            oracleDestinyStage = null;
+            cooldown.queueResponse(
+              text,
+              rageAgainLine,
+              addMessageToConversation,
+              npcConfig.name,
+              beginOracleRageBattle
+            );
+            return;
+          }
+
+          if (canOfferSpectral && (mentionsSpectralStone || wantsToGiveSpectral)) {
+            await triggerSpectralStoneRage();
+            return;
+          }
+
+          if (isHi) {
+            oracleDestinyStage = 'prepared';
+            cooldown.queueResponse(
+              text,
+              preparedLine,
+              addMessageToConversation,
+              npcConfig.name
+            );
+            return;
+          }
+
+          if (oracleDestinyStage === 'prepared') {
+            if (isYes) {
+              if (canOfferSpectral && hasSpectralStoneInInventory()) {
+                await triggerSpectralStoneRage();
+                return;
+              }
+              oracleDestinyStage = 'sure';
+              cooldown.queueResponse(
+                text,
+                confirmLine,
+                addMessageToConversation,
+                npcConfig.name
+              );
+              return;
+            }
+            oracleDestinyStage = null;
+            cooldown.queueResponse(
+              text,
+              tooYoungLine,
+              addMessageToConversation,
+              npcConfig.name
+            );
+            return;
+          }
+
+          if (oracleDestinyStage === 'sure') {
+            if (isYes) {
+              if (canOfferSpectral && hasSpectralStoneInInventory()) {
+                await triggerSpectralStoneRage();
+                return;
+              }
+              oracleDestinyStage = null;
+              const ORACLE_DESTINY_TELEPORT_DELAY_MS = 2000;
+              cooldown.queueResponse(
+                text,
+                soBeItLine,
+                addMessageToConversation,
+                npcConfig.name,
+                () => {
+                  startLostOracleMission().catch((error) => {
+                    console.error(`${npcConfig.logPrefix} Error starting The Lost Oracle:`, error);
+                  });
+                  setTimeout(() => {
+                    ModalHelpers.closeModal(0);
+                    setTimeout(() => navigateToOracleDestinyRoom(), 120);
+                  }, ORACLE_DESTINY_TELEPORT_DELAY_MS);
+                }
+              );
+              return;
+            }
+            oracleDestinyStage = null;
+            cooldown.queueResponse(
+              text,
+              tooYoungLine,
+              addMessageToConversation,
+              npcConfig.name
+            );
+            return;
+          }
+
+          let response = matchKeywordResponsesSync(ORACLE_RESPONSES, text, playerName, {
+            defaultResponse: null,
+            lowercaseKeys: true
+          });
+          if (response == null) {
+            response = getNpcQuestItemChatResponse(BOARD_NPC_ORACLE_ID || 'the-oracle', text, playerName);
+          }
+          if (response == null) {
+            response = getRandomNpcConfusionResponse(ORACLE_CONFUSION_RESPONSES, playerName);
+          }
+          if (/\$TN1Y|\$T1NY|\$TINY|DESTINY|P@RD3|PR3PAR3D/i.test(String(response || ''))) {
+            oracleDestinyStage = 'prepared';
+          }
+          cooldown.queueResponse(
+            text,
+            response,
+            addMessageToConversation,
+            npcConfig.name,
+            ModalHelpers.getFarewellCloseCallback(text)
+          );
+          return;
+        }
 
         if (lower.includes('present') && npcConfig.id === BOARD_NPC_SANTA_ID) {
           const claimed = await hasSantaPresentClaimed(playerName);
@@ -24616,6 +26156,18 @@ function createNPCCooldownManager() {
             return;
           }
 
+          const lostOracleWonder = tryLostOracleNpcWonderResponse(text, playerName, 'svenson', 'Svenson');
+          if (lostOracleWonder != null) {
+            cooldown.queueResponse(
+              text,
+              lostOracleWonder,
+              addMessageToConversation,
+              npcConfig.name,
+              ModalHelpers.getFarewellCloseCallback(text)
+            );
+            return;
+          }
+
           let response = getSvensonKeywordResponse(text, playerName);
           if (response == null) {
             response = getNpcQuestItemChatResponse(BOARD_NPC_SVENSON_ID, text, playerName);
@@ -24767,6 +26319,18 @@ function createNPCCooldownManager() {
             return;
           }
 
+          const lostOracleWonder = tryLostOracleNpcWonderResponse(text, playerName, 'dane', 'Dane');
+          if (lostOracleWonder != null) {
+            cooldown.queueResponse(
+              text,
+              lostOracleWonder,
+              addMessageToConversation,
+              npcConfig.name,
+              ModalHelpers.getFarewellCloseCallback(text)
+            );
+            return;
+          }
+
           let response = getDaneKeywordResponse(text, playerName);
           if (response == null) {
             response = getNpcQuestItemChatResponse(BOARD_NPC_DANE_ID, text, playerName);
@@ -24835,6 +26399,14 @@ function createNPCCooldownManager() {
 
       if (npcConfig.id === BOARD_NPC_ROOKSTAYER_ID && isApprenticeShengBattleCompletedPendingReward()) {
         showRookstayerThankYouModal(npcConfig);
+        return;
+      }
+
+      if (
+        (npcConfig.id === BOARD_NPC_ORACLE_ID || npcConfig.overlayClass === ORACLE_OVERLAY_CLASS)
+        && isLostOracleBattleCompletedPendingThanks()
+      ) {
+        showOracleVictoryThankYouModal();
         return;
       }
 
@@ -25140,22 +26712,34 @@ function createNPCCooldownManager() {
     const existingOverlay = getBoardNpcOverlayElement(npcConfig, tileElement);
     if (existingOverlay) {
       ensureBoardNpcCustomOutfitSheetStyles(npcConfig);
+      const hideBoardVisual = !!npcConfig.hideBoardVisual;
       const hasOutfit = !!existingOverlay.querySelector('.sprite.outfit');
-      const wantsOutfit = !!npcConfig.outfitSpriteId;
+      const wantsOutfit = !hideBoardVisual && !!npcConfig.outfitSpriteId;
       const hasCustomSheet = !!existingOverlay.querySelector('.quests-custom-outfit-sheet');
-      const wantsCustomSheet = !!npcConfig.outfitSpritesheetUrl;
+      const wantsCustomSheet = !hideBoardVisual && !!npcConfig.outfitSpritesheetUrl;
+      const hasItemSprite = !!existingOverlay.querySelector('.sprite.item');
+      const wantsItemSprite = !hideBoardVisual && !!npcConfig.itemSpriteId;
       const hasImage = !!existingOverlay.querySelector('img.pixelated, img[alt]');
-      const wantsImageFallback = !wantsOutfit && !!npcConfig.imageUrl;
-      const isEmptyOverlay = !hasOutfit && !hasCustomSheet && !hasImage;
-      if (!isEmptyOverlay
+      const wantsImageFallback = !hideBoardVisual && !wantsOutfit && !wantsItemSprite && !!npcConfig.imageUrl;
+      const isEmptyOverlay = !hasOutfit && !hasCustomSheet && !hasItemSprite && !hasImage;
+      if (hideBoardVisual) {
+        if (isEmptyOverlay) {
+          tileElement.removeAttribute('title');
+          existingOverlay.removeAttribute('title');
+          return;
+        }
+        existingOverlay.remove();
+      } else if (!isEmptyOverlay
           && hasOutfit === wantsOutfit
           && hasCustomSheet === wantsCustomSheet
+          && hasItemSprite === wantsItemSprite
           && (!wantsImageFallback || hasImage)) {
         tileElement.removeAttribute('title');
         existingOverlay.removeAttribute('title');
         return;
+      } else {
+        existingOverlay.remove();
       }
-      existingOverlay.remove();
     }
     ensureBoardNpcTileOverflowVisible(tileElement);
     ensureBoardNpcCustomOutfitSheetStyles(npcConfig);
@@ -25174,53 +26758,62 @@ function createNPCCooldownManager() {
       'justify-content:center'
     ]);
 
-    // Prefer outfit shell (Rookstayer-style) when outfitSpriteId is set — even if imageUrl exists for modal.
-    if (npcConfig.outfitSpriteId) {
-      const facing = npcConfig.facing || 'south';
-      const outfit = document.createElement('div');
-      outfit.className = `sprite outfit id-${npcConfig.outfitSpriteId} idle ${facing} pointer-events-none absolute bottom-0 right-0 select-none`;
-      const viewport = document.createElement('div');
-      viewport.className = 'viewport';
+    // Invisible hitbox + name tag only — existing map tile already shows the NPC sprite.
+    if (!npcConfig.hideBoardVisual) {
+      // Prefer outfit shell (Rookstayer-style) when outfitSpriteId is set — even if imageUrl exists for modal.
+      if (npcConfig.outfitSpriteId) {
+        const facing = npcConfig.facing || 'south';
+        const outfit = document.createElement('div');
+        outfit.className = `sprite outfit id-${npcConfig.outfitSpriteId} idle ${facing} pointer-events-none absolute bottom-0 right-0 select-none`;
+        const viewport = document.createElement('div');
+        viewport.className = 'viewport';
 
-      if (npcConfig.outfitSpritesheetUrl) {
-        // Do not use .actor.spritesheet — game CSS binds that to OUTFIT-shiny/{id}-idle.png.
+        if (npcConfig.outfitSpritesheetUrl) {
+          // Do not use .actor.spritesheet — game CSS binds that to OUTFIT-shiny/{id}-idle.png.
+          const sheet = document.createElement('div');
+          sheet.className = 'quests-custom-outfit-sheet';
+          sheet.setAttribute('data-facing', facing);
+          sheet.setAttribute('aria-label', npcConfig.name || facing);
+          viewport.appendChild(sheet);
+        } else {
+          const img = document.createElement('img');
+          img.alt = facing;
+          img.className = 'actor spritesheet';
+          img.setAttribute('data-shiny', 'true');
+          img.style.cssText = 'animation-play-state:running;';
+          viewport.appendChild(img);
+        }
+        outfit.appendChild(viewport);
+        overlay.appendChild(outfit);
+      } else if (npcConfig.itemSpriteId) {
+        const itemSprite = document.createElement('div');
+        itemSprite.className = `sprite item relative id-${npcConfig.itemSpriteId}`;
+        itemSprite.style.cssText = 'z-index:1000;pointer-events:none;';
+        itemSprite.innerHTML = `<div class="viewport"><img alt="${npcConfig.itemSpriteId}" data-cropped="false" class="spritesheet" style="--cropX: 0; --cropY: 0;"></div>`;
+        overlay.appendChild(itemSprite);
+      } else if (npcConfig.outfitSpritesheetUrl) {
+        // Custom sheet without an outfit shell id (assets hydrated late).
+        const facing = npcConfig.facing || 'south';
         const sheet = document.createElement('div');
         sheet.className = 'quests-custom-outfit-sheet';
         sheet.setAttribute('data-facing', facing);
         sheet.setAttribute('aria-label', npcConfig.name || facing);
-        viewport.appendChild(sheet);
-      } else {
-        const img = document.createElement('img');
-        img.alt = facing;
-        img.className = 'actor spritesheet';
-        img.setAttribute('data-shiny', 'true');
-        img.style.cssText = 'animation-play-state:running;';
-        viewport.appendChild(img);
+        sheet.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;';
+        overlay.appendChild(sheet);
+      } else if (npcConfig.imageUrl) {
+        const gif = document.createElement('img');
+        gif.src = npcConfig.imageUrl;
+        gif.alt = npcConfig.name;
+        gif.className = 'pixelated';
+        gif.style.cssText = [
+          'width:32px',
+          'height:32px',
+          'image-rendering:pixelated',
+          'pointer-events:none',
+          'object-fit:contain'
+        ].join(';');
+        overlay.appendChild(gif);
       }
-      outfit.appendChild(viewport);
-      overlay.appendChild(outfit);
-    } else if (npcConfig.outfitSpritesheetUrl) {
-      // Custom sheet without an outfit shell id (assets hydrated late).
-      const facing = npcConfig.facing || 'south';
-      const sheet = document.createElement('div');
-      sheet.className = 'quests-custom-outfit-sheet';
-      sheet.setAttribute('data-facing', facing);
-      sheet.setAttribute('aria-label', npcConfig.name || facing);
-      sheet.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;';
-      overlay.appendChild(sheet);
-    } else if (npcConfig.imageUrl) {
-      const gif = document.createElement('img');
-      gif.src = npcConfig.imageUrl;
-      gif.alt = npcConfig.name;
-      gif.className = 'pixelated';
-      gif.style.cssText = [
-        'width:32px',
-        'height:32px',
-        'image-rendering:pixelated',
-        'pointer-events:none',
-        'object-fit:contain'
-      ].join(';');
-      overlay.appendChild(gif);
     }
     if (isInteractable) {
       bindBoardNpcContextMenuHandlers(npcConfig, [overlay]);
@@ -25291,7 +26884,9 @@ function createNPCCooldownManager() {
     syncSvensonBoardPlacement();
     syncSantaBoardPlacement();
     syncDaneBoardPlacement();
+    syncOracleBoardPlacement();
     BOARD_NPC_CONFIGS.forEach((npcConfig) => updateBoardNpcState(npcConfig, boardContext));
+    updateOracleStatueVisibility();
   }
 
   function setupApprenticeShengNpcObserver() {
@@ -27157,6 +28752,16 @@ function createNPCCooldownManager() {
           console.warn('[Quests Mod][Dev] Could not remove Wooden Plank:', trophyError);
         }
       }
+      if (missionId === LOST_ORACLE_MISSION.id) {
+        playerAcceptedOracleRageBattle = false;
+        if (typeof cleanupOracleRageBattle === 'function') cleanupOracleRageBattle();
+        try {
+          await devConsumeAllOfItem(SPECTRAL_STONE_CONFIG.productName || 'Spectral Stone', null);
+          await devConsumeAllOfItem(LUMINOUS_ORB_CONFIG.productName || 'Luminous Orb', null);
+        } catch (oracleItemError) {
+          console.warn('[Quests Mod][Dev] Could not remove Lost Oracle items:', oracleItemError);
+        }
+      }
 
       await refreshDevQuestUi();
       console.log('[Quests Mod][Dev] UI state updated');
@@ -27184,6 +28789,8 @@ function createNPCCooldownManager() {
       kingChatState.sevenSealsCompleted = getDefaultSevenSealsCompleted().slice();
       playerAcceptedApprenticeShengBattle = false;
       if (typeof cleanupApprenticeShengBattle === 'function') cleanupApprenticeShengBattle();
+      playerAcceptedOracleRageBattle = false;
+      if (typeof cleanupOracleRageBattle === 'function') cleanupOracleRageBattle();
       console.log('[Quests Mod][Dev] Local quest state reset via mission registry');
 
       await deleteKingTibianusProgress(playerName);

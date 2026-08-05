@@ -43,6 +43,7 @@ if (window.CustomBattles) {
                     replacements.set(sourceId, {
                         replacementId: rule.replacementId,
                         makeRelative: !!rule.makeRelative,
+                        preserveCrop: !!rule.preserveCrop,
                         scope: rule.scope || 'any'
                     });
                 }
@@ -207,17 +208,22 @@ if (window.CustomBattles) {
                     if (battle.isBoardBattleActive()) continue;
                     const toast = showToastCallback || battle._overlapToastCallback || null;
                     if (battle.removeDuplicateAlliesFromBoard(toast)) {
+                        battle.syncCustomVillainsIfNeeded?.();
                         break;
                     }
                     if (battle.removeAlliesOverlappingVillains(toast)) {
                         break;
                     }
                     if (battle.removeAlliesOverlappingForcedAllies(toast)) {
+                        battle.syncCustomVillainsIfNeeded?.();
                         break;
                     }
                     if (battle.removeAlliesOutsideAllowedTiles(toast)) {
                         break;
                     }
+                    // Even without ally removals, restore missing custom villains
+                    // (e.g. game replaced a villain when dropping an ally on its tile).
+                    battle.syncCustomVillainsIfNeeded?.();
                 } catch (_) {}
             }
         }
@@ -526,6 +532,7 @@ if (window.CustomBattles) {
                 this.cancelEntryVillainSetupTimer();
                 this.cancelSceneSpriteReplacementTimer();
                 this.cancelOutfitSpriteOverrideWatch();
+                this.removeItemSpriteTileOverlays();
                 this.entryVillainSetupDone = false;
                 this.resetSceneSpriteReplacements();
                 this.markCustomVillainPlacementReady(false);
@@ -864,7 +871,7 @@ if (window.CustomBattles) {
             }
 
             /**
-             * Count ally creatures on board
+             * Count ally creatures on board (includes forced custom allies).
              */
             countAllyCreatures() {
                 try {
@@ -878,6 +885,24 @@ if (window.CustomBattles) {
                     return boardConfig.filter(isAlly).length;
                 } catch (error) {
                     console.error('[Custom Battles] Error counting allies:', error);
+                    return 0;
+                }
+            }
+
+            /**
+             * Count player-placed allies only (excludes forced custom allies).
+             * Matches allyLimit / max-creature enforcement.
+             */
+            countPlayerAllyCreatures() {
+                try {
+                    const boardContext = globalThis.state?.board?.getSnapshot()?.context;
+                    const boardConfig = boardContext?.boardConfig || [];
+                    return boardConfig.filter((piece) => {
+                        if (!this.isAllyPiece(piece)) return false;
+                        return !this.isForcedAllyEntity(piece);
+                    }).length;
+                } catch (error) {
+                    console.error('[Custom Battles] Error counting player allies:', error);
                     return 0;
                 }
             }
@@ -908,6 +933,7 @@ if (window.CustomBattles) {
                     equip: villainConfig.equip || null,
                     ...(villainConfig.shiny === true ? { shiny: true } : {}),
                     ...(villainConfig.outfitSpriteId != null ? { outfitSpriteId: villainConfig.outfitSpriteId } : {}),
+                    ...(villainConfig.itemSpriteId != null ? { itemSpriteId: villainConfig.itemSpriteId } : {}),
                     genes: villainConfig.genes || {
                         hp: 1,
                         ad: 1,
@@ -943,6 +969,7 @@ if (window.CustomBattles) {
                     equip: allyConfig.equip || null,
                     ...(allyConfig.shiny === true ? { shiny: true } : {}),
                     ...(allyConfig.outfitSpriteId != null ? { outfitSpriteId: allyConfig.outfitSpriteId } : {}),
+                    ...(allyConfig.itemSpriteId != null ? { itemSpriteId: allyConfig.itemSpriteId } : {}),
                     genes: allyConfig.genes || {
                         hp: 1,
                         ad: 1,
@@ -1267,6 +1294,77 @@ if (window.CustomBattles) {
                 return true;
             }
 
+            unlockCustomPieceButton(button) {
+                if (!button || button.dataset.customBattleLocked !== '1') return false;
+                button.disabled = false;
+                button.removeAttribute('disabled');
+                button.removeAttribute('aria-disabled');
+                button.removeAttribute('tabindex');
+                button.style.pointerEvents = '';
+                button.style.cursor = '';
+                delete button.dataset.customBattleLocked;
+                if (button._customBattleLockHandler) {
+                    const blockEvent = button._customBattleLockHandler;
+                    ['pointerdown', 'mousedown', 'mouseup', 'touchstart', 'touchend', 'dragstart', 'click', 'contextmenu', 'keydown'].forEach((eventName) => {
+                        button.removeEventListener(eventName, blockEvent, true);
+                    });
+                    delete button._customBattleLockHandler;
+                }
+                return true;
+            }
+
+            /**
+             * Undo accidental locks / opacity hides when a player ally lands on a
+             * custom villain spawn tile (Oracle statues, etc.).
+             */
+            restoreForeignPiecesOnCustomTiles() {
+                if (this.isBoardBattleActive()) return 0;
+                const pieces = this.getConfiguredCustomPieces();
+                if (!pieces.length) return 0;
+
+                let restored = 0;
+                pieces.forEach((piece) => {
+                    const tileIndex = Number(piece.tileIndex);
+                    if (!Number.isFinite(tileIndex)) return;
+                    if (!this.tileHasForeignPlayerPiece(tileIndex, piece)) return;
+
+                    this.removeItemSpriteTileOverlays(tileIndex);
+
+                    this.findBoardPieceButtonsForTile(tileIndex).forEach((button) => {
+                        if (this.buttonBelongsToCustomPiece(button, piece)) return;
+                        if (this.unlockCustomPieceButton(button)) restored++;
+
+                        button.querySelectorAll?.('.sprite.outfit, .sprite.item').forEach((sprite) => {
+                            if (sprite.dataset.customBattleItemOverlay === '1') return;
+                            if (this.spriteBelongsToCustomPiece(sprite, piece)) return;
+
+                            if (sprite.dataset.customBattlePiece === '1'
+                                && sprite.dataset.customBattleCombatId === String(piece.gameId)) {
+                                delete sprite.dataset.customBattlePiece;
+                                delete sprite.dataset.customBattleCombatId;
+                                delete sprite.dataset.customBattleItemId;
+                                delete sprite.dataset.customBattleOutfitId;
+                                delete sprite.dataset.customBattleNickname;
+                                restored++;
+                            }
+                            if (sprite.style.opacity === '0') {
+                                sprite.style.opacity = '';
+                                sprite.style.pointerEvents = '';
+                                restored++;
+                            }
+                            sprite.querySelectorAll('img.actor, .actor.spritesheet, .quests-custom-outfit-sheet').forEach((node) => {
+                                if (node.style.visibility === 'hidden' || node.style.opacity === '0') {
+                                    node.style.visibility = '';
+                                    node.style.opacity = '';
+                                    restored++;
+                                }
+                            });
+                        });
+                    });
+                });
+                return restored;
+            }
+
             getConfiguredCustomPieces() {
                 return [...(this.config.villains || []), ...(this.config.allies || [])]
                     .filter((piece) => piece && piece.gameId != null && Number.isFinite(Number(piece.tileIndex)));
@@ -1281,7 +1379,10 @@ if (window.CustomBattles) {
                 if (!sprite || !piece || piece.gameId == null) return;
                 sprite.dataset.customBattlePiece = '1';
                 sprite.dataset.customBattleCombatId = String(piece.gameId);
-                if (piece.outfitSpriteId != null) {
+                if (piece.itemSpriteId != null) {
+                    sprite.dataset.customBattleItemId = String(piece.itemSpriteId);
+                    sprite.dataset.customBattleOutfitId = String(piece.itemSpriteId);
+                } else if (piece.outfitSpriteId != null) {
                     sprite.dataset.customBattleOutfitId = String(piece.outfitSpriteId);
                 }
                 if (piece.nickname) {
@@ -1294,6 +1395,7 @@ if (window.CustomBattles) {
                 if (!nick) return true;
                 // Multi-word or custom high sprite ids are unique enough (Sheng, Rookstayer).
                 if (/\s/.test(nick)) return false;
+                if (piece?.itemSpriteId != null) return false;
                 if (piece?.outfitSpriteId != null && Number(piece.outfitSpriteId) >= 1000) return false;
                 // Short species-like names (e.g. "Minotaur") can collide with player creatures.
                 return piece?.outfitSpriteId != null
@@ -1302,12 +1404,20 @@ if (window.CustomBattles) {
 
             spriteBelongsToCustomPiece(sprite, piece) {
                 if (!sprite?.classList || !piece || piece.gameId == null) return false;
+                // Tile statue overlays are display-only; never treat them as the outfit shell.
+                if (sprite.dataset.customBattleItemOverlay === '1') return false;
 
                 if (sprite.dataset.customBattlePiece === '1') {
                     if (sprite.dataset.customBattleCombatId !== String(piece.gameId)) {
                         return false;
                     }
+                    if (piece.itemSpriteId != null
+                        && sprite.dataset.customBattleItemId
+                        && sprite.dataset.customBattleItemId !== String(piece.itemSpriteId)) {
+                        return false;
+                    }
                     if (piece.outfitSpriteId != null
+                        && !piece.itemSpriteId
                         && sprite.dataset.customBattleOutfitId
                         && sprite.dataset.customBattleOutfitId !== String(piece.outfitSpriteId)) {
                         return false;
@@ -1333,9 +1443,9 @@ if (window.CustomBattles) {
                     return !!nickname && name === nickname;
                 }
 
-                // Empty name is only valid during setup (spawn tiles are reserved).
+                // Empty name during setup: spawn tiles are reserved for configured pieces.
+                // (Outfit visual id often differs from combat gameId — do not require id-class.)
                 if (this.isBoardBattleActive()) return false;
-
                 return true;
             }
 
@@ -1363,17 +1473,48 @@ if (window.CustomBattles) {
                 return translate === expectedTranslate || translate.startsWith(expectedTranslate);
             }
 
+            getButtonDisplayName(button) {
+                if (!button) return '';
+                const root = button.closest?.('[data-name]') || button;
+                return (root.getAttribute?.('data-name') || button.getAttribute?.('data-name') || '').trim();
+            }
+
+            /**
+             * True when a differently-named player piece sits on this spawn tile.
+             * Do not use outfit id-class vs combat gameId — those often differ (e.g. Stalker).
+             */
+            tileHasForeignPlayerPiece(tileIndex, piece) {
+                const nickname = piece?.nickname && String(piece.nickname).trim();
+                if (!nickname) return false;
+                const buttons = this.findBoardPieceButtonsForTile(tileIndex);
+                for (const button of buttons) {
+                    const name = this.getButtonDisplayName(button);
+                    if (name && name !== nickname) return true;
+                }
+                return false;
+            }
+
             buttonBelongsToCustomPiece(button, piece) {
                 if (!button || !piece) return false;
-                // Spawn tiles are reserved for configured pieces — lock by tile during setup.
-                if (this.spriteIsOnConfiguredTile(button, piece.tileIndex)
-                    || (button.querySelector?.('.sprite.outfit')
-                        && [...button.querySelectorAll('.sprite.outfit')]
-                            .some((sprite) => this.spriteIsOnConfiguredTile(sprite, piece.tileIndex)))) {
+
+                const name = this.getButtonDisplayName(button);
+                const nickname = piece.nickname && String(piece.nickname).trim();
+                // Never lock a differently-named player ally that shares the spawn tile.
+                if (name && nickname && name !== nickname) return false;
+
+                const outfits = [...(button.querySelectorAll?.('.sprite.outfit') || [])];
+                if (outfits.some((sprite) => this.spriteBelongsToCustomPiece(sprite, piece))) {
                     return true;
                 }
-                return [...button.querySelectorAll('.sprite.outfit')]
-                    .some((sprite) => this.spriteBelongsToCustomPiece(sprite, piece));
+
+                // Spawn tiles are reserved for configured pieces — lock by tile during setup
+                // unless a foreign-named ally is present (handled above).
+                if (this.spriteIsOnConfiguredTile(button, piece.tileIndex)
+                    || outfits.some((sprite) => this.spriteIsOnConfiguredTile(sprite, piece.tileIndex))) {
+                    return true;
+                }
+
+                return false;
             }
 
             applyCustomPieceInteractionLocks() {
@@ -1636,6 +1777,7 @@ if (window.CustomBattles) {
                 if (this.isBoardBattleActive()) {
                     this.applyConfiguredActorDisplayNames();
                 }
+                this.restoreForeignPiecesOnCustomTiles();
                 this.applyVillainOutfitSpriteOverrides();
                 this.applyCustomPieceInteractionLocks();
                 this.hideCustomPieceBattleControls();
@@ -1652,14 +1794,14 @@ if (window.CustomBattles) {
             }
 
             getOutfitSpriteOverrides() {
-                const villains = (this.config.villains || []).filter((villainConfig) => {
-                    const outfitSpriteId = villainConfig.outfitSpriteId;
-                    return outfitSpriteId != null && String(outfitSpriteId) !== String(villainConfig.gameId);
-                });
-                const allies = (this.config.allies || []).filter((allyConfig) => {
-                    const outfitSpriteId = allyConfig.outfitSpriteId;
-                    return outfitSpriteId != null && String(outfitSpriteId) !== String(allyConfig.gameId);
-                });
+                const hasVisualOverride = (pieceConfig) => {
+                    if (!pieceConfig) return false;
+                    if (pieceConfig.itemSpriteId != null) return true;
+                    const outfitSpriteId = pieceConfig.outfitSpriteId;
+                    return outfitSpriteId != null && String(outfitSpriteId) !== String(pieceConfig.gameId);
+                };
+                const villains = (this.config.villains || []).filter(hasVisualOverride);
+                const allies = (this.config.allies || []).filter(hasVisualOverride);
                 return [...villains, ...allies];
             }
 
@@ -1672,6 +1814,7 @@ if (window.CustomBattles) {
                 return [
                     String(piece?.gameId ?? ''),
                     String(piece?.outfitSpriteId ?? ''),
+                    String(piece?.itemSpriteId ?? ''),
                     piece?.shiny === true ? '1' : '0'
                 ].join('|');
             }
@@ -1702,19 +1845,36 @@ if (window.CustomBattles) {
              */
             findOutfitSpritesForPiece(piece) {
                 const matched = new Set();
-                if (!piece || piece.gameId == null || piece.outfitSpriteId == null) return matched;
+                if (!piece || piece.gameId == null) return matched;
+                if (piece.outfitSpriteId == null && piece.itemSpriteId == null) return matched;
 
                 const combatGameId = String(piece.gameId);
-                const toId = String(piece.outfitSpriteId);
+                const visualId = String(piece.itemSpriteId ?? piece.outfitSpriteId);
+                const useItemVisual = piece.itemSpriteId != null;
 
                 document.querySelectorAll(
-                    `.sprite.outfit[data-custom-battle-piece="1"][data-custom-battle-combat-id="${combatGameId}"][data-custom-battle-outfit-id="${toId}"]`
-                ).forEach((sprite) => matched.add(sprite));
+                    `.sprite[data-custom-battle-piece="1"][data-custom-battle-combat-id="${combatGameId}"]`
+                ).forEach((sprite) => {
+                    if (useItemVisual) {
+                        if (sprite.dataset.customBattleItemId === visualId
+                            || sprite.classList.contains(`id-${visualId}`)) {
+                            matched.add(sprite);
+                        }
+                        return;
+                    }
+                    if (sprite.classList.contains('outfit')
+                        && sprite.dataset.customBattleOutfitId === visualId) {
+                        matched.add(sprite);
+                    }
+                });
 
                 const nickname = piece.nickname && String(piece.nickname).trim();
                 if (nickname) {
                     const safeName = this.escapeCssAttrValue(nickname);
-                    document.querySelectorAll(`[data-name="${safeName}"] .sprite.outfit`).forEach((sprite) => {
+                    const nameSelector = useItemVisual
+                        ? `[data-name="${safeName}"] .sprite.outfit, [data-name="${safeName}"] .sprite.item.id-${visualId}`
+                        : `[data-name="${safeName}"] .sprite.outfit`;
+                    document.querySelectorAll(nameSelector).forEach((sprite) => {
                         matched.add(sprite);
                     });
                 }
@@ -1725,6 +1885,15 @@ if (window.CustomBattles) {
                 const tile = document.getElementById(`tile-index-${tileIndex}`);
                 if (tile) {
                     tile.querySelectorAll('.sprite.outfit').forEach((sprite) => matched.add(sprite));
+                    if (useItemVisual) {
+                        tile.querySelectorAll(
+                            `.sprite.item.id-${visualId}[data-custom-battle-piece="1"], ` +
+                            `.sprite.item[data-custom-battle-item-id="${visualId}"]`
+                        ).forEach((sprite) => {
+                            if (sprite.dataset.customBattleItemOverlay === '1') return;
+                            matched.add(sprite);
+                        });
+                    }
                 }
 
                 const tileBottom = tile?.style?.bottom || '';
@@ -1754,9 +1923,14 @@ if (window.CustomBattles) {
             /**
              * Apply outfit id + shiny only. Never sets moving sheet URLs — the game
              * picks idle/moving from classes. Facing/idle locked only during setup.
+             * When piece.itemSpriteId is set, use map-item visuals (statue look).
              */
             applyOutfitVisualToSprite(sprite, piece) {
-                if (!sprite?.classList || !piece || piece.outfitSpriteId == null) return false;
+                if (!sprite?.classList || !piece) return false;
+                if (piece.itemSpriteId != null) {
+                    return this.applyItemSpriteVisualToSprite(sprite, piece);
+                }
+                if (piece.outfitSpriteId == null) return false;
 
                 let changed = false;
                 const toId = String(piece.outfitSpriteId);
@@ -1817,6 +1991,177 @@ if (window.CustomBattles) {
                 return changed;
             }
 
+            ensureItemSpriteTileOverlay(piece) {
+                if (!piece || piece.itemSpriteId == null) return false;
+                const tileIndex = Number(piece.tileIndex);
+                if (!Number.isFinite(tileIndex)) return false;
+
+                // Player ally on this tile: keep their outfit/name/level visible.
+                if (this.tileHasForeignPlayerPiece(tileIndex, piece)) {
+                    this.removeItemSpriteTileOverlays(tileIndex);
+                    return false;
+                }
+
+                const tile = document.getElementById(`tile-index-${tileIndex}`);
+                if (!tile) return false;
+
+                const toId = String(piece.itemSpriteId);
+                const selector = `.sprite.item.id-${toId}[data-custom-battle-item-overlay="1"][data-custom-battle-combat-id="${piece.gameId}"]`;
+                let item = tile.querySelector(selector);
+                if (item) return false;
+
+                item = document.createElement('div');
+                item.className = `sprite item relative id-${toId}`;
+                item.style.zIndex = '1000';
+                item.dataset.customBattleItemOverlay = '1';
+                item.dataset.customBattlePiece = '1';
+                item.dataset.customBattleCombatId = String(piece.gameId);
+                item.dataset.customBattleItemId = toId;
+                if (piece.nickname) {
+                    item.dataset.customBattleNickname = String(piece.nickname).trim();
+                }
+                item.innerHTML = `<div class="viewport"><img alt="${toId}" data-cropped="false" class="spritesheet" style="--cropX: 0; --cropY: 0;"></div>`;
+                tile.appendChild(item);
+                tile.style.overflow = 'visible';
+                return true;
+            }
+
+            removeItemSpriteTileOverlays(tileIndex = null) {
+                const root = tileIndex == null
+                    ? document
+                    : document.getElementById(`tile-index-${tileIndex}`);
+                if (!root) return 0;
+                const nodes = root.querySelectorAll?.('[data-custom-battle-item-overlay="1"]')
+                    || [];
+                let removed = 0;
+                nodes.forEach((node) => {
+                    node.remove();
+                    removed++;
+                });
+                return removed;
+            }
+
+            applyItemSpriteVisualToSprite(sprite, piece) {
+                if (!sprite?.classList || !piece || piece.itemSpriteId == null) return false;
+                if (sprite.dataset.customBattleItemOverlay === '1') return false;
+
+                let changed = false;
+                const toId = String(piece.itemSpriteId);
+                this.tagCustomPieceSprite(sprite, piece);
+                if (sprite.dataset.customBattleItemId !== toId) {
+                    sprite.dataset.customBattleItemId = toId;
+                    changed = true;
+                }
+
+                // Setup: hide the creature outfit and place a map-item statue on the tile
+                // (same structure as the native Oracle on tile 115). Converting the outfit
+                // shell in-place looks wrong before battle because button/outfit CSS differs.
+                if (!this.isBoardBattleActive()) {
+                    if (this.tileHasForeignPlayerPiece(piece.tileIndex, piece)) {
+                        if (sprite.style.opacity === '0') {
+                            sprite.style.opacity = '';
+                            sprite.style.pointerEvents = '';
+                            changed = true;
+                        }
+                        this.removeItemSpriteTileOverlays(piece.tileIndex);
+                        return changed;
+                    }
+                    sprite.querySelectorAll('img.actor, .actor.spritesheet, .quests-custom-outfit-sheet').forEach((node) => {
+                        if (node.style.visibility !== 'hidden' || node.style.opacity !== '0') {
+                            node.style.visibility = 'hidden';
+                            node.style.opacity = '0';
+                            changed = true;
+                        }
+                    });
+                    if (sprite.style.opacity !== '0') {
+                        sprite.style.opacity = '0';
+                        sprite.style.pointerEvents = 'none';
+                        changed = true;
+                    }
+                    if (this.ensureItemSpriteTileOverlay(piece)) changed = true;
+                    return changed;
+                }
+
+                // Battle: convert the moving outfit shell into an item sprite (works in combat).
+                if (sprite.style.opacity === '0') {
+                    sprite.style.opacity = '';
+                    changed = true;
+                }
+                if (sprite.style.pointerEvents === 'none') {
+                    sprite.style.pointerEvents = '';
+                    changed = true;
+                }
+
+                ['outfit', 'idle', 'moving', 'north', 'south', 'east', 'west'].forEach((cls) => {
+                    if (sprite.classList.contains(cls)) {
+                        sprite.classList.remove(cls);
+                        changed = true;
+                    }
+                });
+                if (!sprite.classList.contains('item')) {
+                    sprite.classList.add('item');
+                    changed = true;
+                }
+                if (!sprite.classList.contains('relative')) {
+                    sprite.classList.add('relative');
+                    changed = true;
+                }
+
+                const previousIdClass = Array.from(sprite.classList).find((cls) => /^id-\d+$/.test(cls));
+                if (!sprite.classList.contains(`id-${toId}`)) {
+                    if (previousIdClass) sprite.classList.remove(previousIdClass);
+                    sprite.classList.add(`id-${toId}`);
+                    changed = true;
+                }
+
+                let viewport = sprite.querySelector(':scope > .viewport') || sprite.querySelector('.viewport');
+                if (!viewport) {
+                    viewport = document.createElement('div');
+                    viewport.className = 'viewport';
+                    sprite.appendChild(viewport);
+                    changed = true;
+                }
+
+                viewport.querySelectorAll('.actor, .quests-custom-outfit-sheet').forEach((node) => {
+                    node.remove();
+                    changed = true;
+                });
+
+                let img = viewport.querySelector(':scope > img.spritesheet') || viewport.querySelector('img.spritesheet');
+                if (!img) {
+                    img = document.createElement('img');
+                    img.className = 'spritesheet';
+                    viewport.appendChild(img);
+                    changed = true;
+                }
+                if (img.classList.contains('actor')) {
+                    img.classList.remove('actor');
+                    changed = true;
+                }
+                if (img.getAttribute('alt') !== toId) {
+                    img.alt = toId;
+                    changed = true;
+                }
+                if (img.getAttribute('data-cropped') !== 'false') {
+                    img.setAttribute('data-cropped', 'false');
+                    changed = true;
+                }
+                if (img.getAttribute('data-shiny') != null) {
+                    img.removeAttribute('data-shiny');
+                    changed = true;
+                }
+                if (img.style.getPropertyValue('--cropX') !== '0') {
+                    img.style.setProperty('--cropX', '0');
+                    changed = true;
+                }
+                if (img.style.getPropertyValue('--cropY') !== '0') {
+                    img.style.setProperty('--cropY', '0');
+                    changed = true;
+                }
+
+                return changed;
+            }
+
             applyVillainOutfitSpriteOverrides() {
                 const overrides = this.getOutfitSpriteOverrides();
                 if (!overrides.length) return 0;
@@ -1830,14 +2175,30 @@ if (window.CustomBattles) {
                 });
 
                 let patched = 0;
+                const battleActive = this.isBoardBattleActive();
+                if (battleActive) {
+                    this.removeItemSpriteTileOverlays();
+                }
                 groups.forEach((group) => {
                     const primary = group[0];
                     const combatGameId = String(primary.gameId);
-                    const toId = String(primary.outfitSpriteId);
+                    const toId = String(primary.itemSpriteId ?? primary.outfitSpriteId);
                     const matched = new Set();
                     group.forEach((piece) => {
                         this.findOutfitSpritesForPiece(piece).forEach((sprite) => matched.add(sprite));
                     });
+
+                    // Setup + itemSpriteId: place map-item statues on tiles even before the
+                    // outfit shell exists (setup villains live on draggable buttons).
+                    if (!battleActive && primary.itemSpriteId != null) {
+                        group.forEach((piece) => {
+                            if (this.tileHasForeignPlayerPiece(piece.tileIndex, piece)) {
+                                this.removeItemSpriteTileOverlays(piece.tileIndex);
+                                return;
+                            }
+                            if (this.ensureItemSpriteTileOverlay(piece)) patched++;
+                        });
+                    }
 
                     let claimed = 0;
                     matched.forEach((sprite) => {
@@ -1852,14 +2213,15 @@ if (window.CustomBattles) {
                                 {
                                     tileIndex: owner.tileIndex,
                                     combatGameId,
-                                    to: `id-${toId}`,
+                                    to: owner.itemSpriteId != null ? `item.id-${toId}` : `id-${toId}`,
+                                    itemSprite: owner.itemSpriteId != null,
                                     shiny: owner.shiny === true
                                 }
                             );
                         }
                     });
 
-                    if (!claimed) {
+                    if (!claimed && !(primary.itemSpriteId != null && !battleActive)) {
                         const key = `${primary.tileIndex}|${combatGameId}|${toId}`;
                         if (this.shouldLogOutfitOverrideMiss(key)) {
                             console.log(
@@ -1867,7 +2229,8 @@ if (window.CustomBattles) {
                                 {
                                     tileIndex: primary.tileIndex,
                                     combatGameId,
-                                    outfitSpriteId: toId,
+                                    outfitSpriteId: primary.outfitSpriteId,
+                                    itemSpriteId: primary.itemSpriteId,
                                     groupSize: group.length
                                 }
                             );
@@ -1913,7 +2276,8 @@ if (window.CustomBattles) {
                         this.getOutfitSpriteOverrides().map((v) => ({
                             tileIndex: v.tileIndex,
                             gameId: v.gameId,
-                            outfitSpriteId: v.outfitSpriteId
+                            outfitSpriteId: v.outfitSpriteId,
+                            itemSpriteId: v.itemSpriteId
                         }))
                     );
                 }
@@ -2628,6 +2992,8 @@ if (window.CustomBattles) {
                                 duration: 3000
                             });
                         }
+                        // Game may have replaced the villain with the ally — restore custom villains.
+                        this.syncCustomVillainsIfNeeded();
                         return true;
                     }
                 } catch (error) {
@@ -3542,7 +3908,7 @@ if (window.CustomBattles) {
                 const rule = state?.replacements.get(sourceId);
                 if (!rule || !sprite || sprite.dataset[state.datasetKey] === '1') return false;
 
-                const { replacementId, makeRelative } = rule;
+                const { replacementId, makeRelative, preserveCrop } = rule;
                 if (sprite.classList.contains(`id-${replacementId}`)) {
                     sprite.dataset[state.datasetKey] = '1';
                     return false;
@@ -3563,9 +3929,11 @@ if (window.CustomBattles) {
                 const img = sprite.querySelector('img');
                 if (img) {
                     img.alt = String(replacementId);
-                    img.setAttribute('data-cropped', 'false');
-                    img.style.setProperty('--cropX', '0');
-                    img.style.setProperty('--cropY', '0');
+                    if (!preserveCrop) {
+                        img.setAttribute('data-cropped', 'false');
+                        img.style.setProperty('--cropX', '0');
+                        img.style.setProperty('--cropY', '0');
+                    }
                 }
 
                 sprite.dataset[state.datasetKey] = '1';
@@ -3760,17 +4128,24 @@ if (window.CustomBattles) {
             }
 
             syncCustomVillainsIfNeeded() {
-                if (!this.customVillainPlacementReady || this.boardSetupLock || this.isBoardBattleActive()) return;
+                if (!this.customVillainPlacementReady || this.isBoardBattleActive()) return;
                 if (this.isCustomVillainBoardStateValid()) return;
                 if (this.pendingVillainSyncTimer) return;
 
+                const delayMs = this.boardSetupLock ? 120 : 150;
                 this.pendingVillainSyncTimer = setTimeout(() => {
                     this.pendingVillainSyncTimer = null;
-                    if (!this.customVillainPlacementReady || this.boardSetupLock || this.isBoardBattleActive()) return;
+                    if (!this.customVillainPlacementReady || this.boardSetupLock || this.isBoardBattleActive()) {
+                        // Lock still held — try once more shortly.
+                        if (this.customVillainPlacementReady && !this.isBoardBattleActive()) {
+                            this.syncCustomVillainsIfNeeded();
+                        }
+                        return;
+                    }
                     if (this.isCustomVillainBoardStateValid()) return;
                     console.log(`[Custom Battles][${this.config.name || 'Battle'}] Board villain state invalid - re-running villain swap`);
                     this.removeOriginalVillains();
-                }, 150);
+                }, delayMs);
             }
 
             hasCustomVillainsOnBoard() {
@@ -4015,6 +4390,7 @@ if (window.CustomBattles) {
                 this.entryVillainSetupDone = false;
                 this.cancelSceneSpriteReplacementTimer();
                 this.cancelOutfitSpriteOverrideWatch();
+                this.removeItemSpriteTileOverlays();
                 this.clearGeneIntegrityTimers();
                 this.preBattleGeneTamperCount = 0;
                 this.lastPreBattleGeneIntegrityCheckAt = 0;
@@ -4137,6 +4513,7 @@ if (window.CustomBattles) {
         // Sprites inside #actors (board creatures) are always excluded.
         // Optional rule.scope: "background" (absolute floor layers / #floor-below) or "tile" (tile-index decorations).
         // Optional villain.outfitSpriteId / allies[].outfitSpriteId overrides the rendered outfit sprite class while keeping gameId combat identity.
+        // Optional villain.itemSpriteId / allies[].itemSpriteId converts the outfit shell into a map item sprite look (e.g. statue id-2031).
         // Optional config.allies places non-removable custom allies (customForcedAlly) during entry setup.
         // Forced allies are excluded from allyLimit / max-creature counts and from creature-duplicate checks;
         // their tiles still block player ally placement.

@@ -764,7 +764,22 @@ function buildMultiplayerLiveToastMessage(ctx) {
   var name2 = getMatchPlayerNameForKey(ctx.cachedMatch, keys[1]);
   var s1 = (ctx.cachedMatch && ctx.cachedMatch.scores && typeof ctx.cachedMatch.scores[keys[0]] === 'number') ? ctx.cachedMatch.scores[keys[0]] : '—';
   var s2 = (ctx.cachedMatch && ctx.cachedMatch.scores && typeof ctx.cachedMatch.scores[keys[1]] === 'number') ? ctx.cachedMatch.scores[keys[1]] : '—';
-  var alliesAllowedText = (ctx && typeof ctx.alliesAllowed === 'number') ? String(ctx.alliesAllowed) : '—';
+  var alliesAllowedText = (ctx && typeof ctx.alliesAllowed === 'number')
+    ? (function() {
+        var placed = 0;
+        try {
+          if (challengeBattle && typeof challengeBattle.countPlayerAllyCreatures === 'function') {
+            placed = challengeBattle.countPlayerAllyCreatures();
+          } else {
+            var fromBoard = getCreaturesAliveFromBoardState();
+            placed = typeof fromBoard === 'number' ? fromBoard : 0;
+          }
+        } catch (e) {
+          placed = 0;
+        }
+        return placed + '/' + ctx.alliesAllowed;
+      })()
+    : '—';
   var wrap = document.createElement('div');
   wrap.style.whiteSpace = 'pre-line';
   wrap.appendChild(document.createTextNode(
@@ -779,17 +794,53 @@ function buildMultiplayerLiveToastMessage(ctx) {
 }
 
 function buildSoloCreaturesAllowedToastMessage(alliesAllowed) {
-  var n = typeof alliesAllowed === 'number' ? alliesAllowed : 0;
-  return challengesText('mods.challenges.creaturesAllowed').replace('{n}', String(n));
+  var max = typeof alliesAllowed === 'number' ? alliesAllowed : 0;
+  var placed = 0;
+  try {
+    if (challengeBattle && typeof challengeBattle.countPlayerAllyCreatures === 'function') {
+      placed = challengeBattle.countPlayerAllyCreatures();
+    } else {
+      var fromBoard = getCreaturesAliveFromBoardState();
+      placed = typeof fromBoard === 'number' ? fromBoard : 0;
+    }
+  } catch (e) {
+    placed = 0;
+  }
+  return challengesText('mods.challenges.creaturesAllowed').replace('{n}', placed + '/' + max);
 }
+
+var soloChallengeAlliesAllowed = null;
+var soloChallengeToastBoardUnsub = null;
 
 function startSoloChallengeLiveToast(alliesAllowed) {
   if (challengeMultiplayerContext) return;
   stopSoloChallengeToast();
+  soloChallengeAlliesAllowed = alliesAllowed;
   showChallengesToast(buildSoloCreaturesAllowedToastMessage(alliesAllowed));
+  var state = getState();
+  if (state && state.board && typeof state.board.subscribe === 'function') {
+    soloChallengeToastBoardUnsub = state.board.subscribe(function() {
+      if (challengeMultiplayerContext || !challengesPersistentToastHandle) return;
+      if (typeof challengesPersistentToastHandle.updateMessage !== 'function') return;
+      challengesPersistentToastHandle.updateMessage(
+        buildSoloCreaturesAllowedToastMessage(soloChallengeAlliesAllowed)
+      );
+    });
+  }
 }
 
 function stopSoloChallengeToast() {
+  if (soloChallengeToastBoardUnsub) {
+    try {
+      if (typeof soloChallengeToastBoardUnsub.unsubscribe === 'function') {
+        soloChallengeToastBoardUnsub.unsubscribe();
+      } else if (typeof soloChallengeToastBoardUnsub === 'function') {
+        soloChallengeToastBoardUnsub();
+      }
+    } catch (e) {}
+    soloChallengeToastBoardUnsub = null;
+  }
+  soloChallengeAlliesAllowed = null;
   removeChallengesPersistentToast();
 }
 
