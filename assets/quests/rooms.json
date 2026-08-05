@@ -10,7 +10,7 @@
     "sevenSeals": "8. Ghostlands seven seals",
     "spiderLair": "9. Mother of All Spiders / Spider Lair",
     "dragonmother": "10. The Dragonmother / Dragon Lair → Lonesome Dragon",
-    "boardNpcs": "11. Board NPC room/tile placements",
+    "boardNpcs": "11. Board NPC room/tile placements (Santa, Al Dee, Svenson, Dane, Oracle)",
     "ghazbaran": "12. Weakened Archdemon hideout",
     "kingArenaRanks": "13. Arena rank titles by mission count"
   },
@@ -179,6 +179,28 @@
       "id": "dane",
       "whiteWaveTileIndex": 80,
       "dialogueIconUrl": "https://bestiaryarena.com/assets/icons/fight.png"
+    },
+    "oracle": {
+      "id": "the-oracle",
+      "name": "The Oracle",
+      "roomName": "Monastery Catacombs",
+      "roomId": "crcat",
+      "tileIndex": 115,
+      "hideBoardVisual": true,
+      "imageFilename": "The_Oracle.gif",
+      "dialogueIconUrl": "https://bestiaryarena.com/assets/icons/fight.png",
+      "backgroundSceneId": "background-scene",
+      "sceneSpriteAttemptDelaysMs": [0, 100, 250, 500, 800, 1200],
+      "sceneSpriteReplacements": {
+        "rules": [
+          {
+            "sourceIds": [429],
+            "replacementId": 410,
+            "preserveCrop": true,
+            "scope": "tile"
+          }
+        ]
+      }
     }
   },
 

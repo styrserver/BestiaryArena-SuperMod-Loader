@@ -57,6 +57,20 @@
       "rarity": 5,
       "maxCount": 1
     },
+    "luminousOrb": {
+      "productName": "Luminous Orb",
+      "icon": "Luminous_Orb.gif",
+      "description": "An orb transformed by royal rite — it glows with strange, restless light.",
+      "rarity": 5,
+      "maxCount": 1
+    },
+    "spectralStone": {
+      "productName": "Spectral Stone",
+      "icon": "Life_Crystal.gif",
+      "description": "It is pulsating with spectral energy.",
+      "rarity": 5,
+      "maxCount": 1
+    },
     "copperKey": {
       "productName": "Copper Key",
       "icon": "Copper_Key.PNG",
@@ -484,6 +498,22 @@
       "keywords": [
         "orb"
       ]
+    },
+    {
+      "id": "luminous_orb",
+      "productName": "Luminous Orb",
+      "keywords": [
+        "luminous orb",
+        "luminous"
+      ]
+    },
+    {
+      "id": "spectral_stone",
+      "productName": "Spectral Stone",
+      "keywords": [
+        "spectral stone",
+        "spectral"
+      ]
     }
   ],
   "questLogIcons": {
@@ -503,7 +533,8 @@
     "apprentice_sheng": "Wooden_Plank.gif",
     "christmas_miracle": "Wishlist.gif",
     "svenson_love_story": "Spool_of_Yarn.gif",
-    "weakened_archdemon": "Orb.gif"
+    "weakened_archdemon": "Orb.gif",
+    "lost_oracle": "Life_Crystal.gif"
   },
   "questLogSpriteIcons": {
     "king_crossing_the_line": 3538
@@ -808,6 +839,24 @@
         "receivedBefore": {
           "type": "missionCompleted",
           "missionId": "weakened_archdemon"
+        }
+      },
+      {
+        "key": "luminousOrb",
+        "productId": "luminousOrb",
+        "receivedBefore": {
+          "type": "missionFieldOrCompleted",
+          "missionId": "lost_oracle",
+          "field": "orbExchanged"
+        }
+      },
+      {
+        "key": "spectralStone",
+        "productId": "spectralStone",
+        "receivedBefore": {
+          "type": "missionFieldOrCompleted",
+          "missionId": "lost_oracle",
+          "field": "spectralStoneReceived"
         }
       }
     ]

@@ -6,7 +6,8 @@
     "spider_lair": "4. Spider Lair (Mother of All Spiders)",
     "putrid_chamber": "5. Putrid Chamber / Cursed Chamber",
     "ghazbaran": "6. Weakened Ghazbaran",
-    "lonesome_dragon": "7. Lonesome Dragon (The Dragonmother / Demodras)"
+    "lonesome_dragon": "7. Lonesome Dragon (The Dragonmother / Demodras)",
+    "lost_oracle": "8. The Lost Oracle (Monastery Catacombs)"
   },
   "mornenion": {
     "allyLimit": 3,
@@ -398,6 +399,25 @@
         "direction": "south",
         "genes": { "hp": 20, "ad": 18, "ap": 24, "armor": 20, "magicResist": 22 },
         "equip": { "name": "Spellbook of Ancient Arcana", "stat": "ap", "tier": 1 }
+      }
+    ]
+  },
+  "lost_oracle": {
+    "allyLimit": 6,
+    "preventVillainMovement": false,
+    "hideVillainSprites": false,
+    "villains": [
+      {
+        "nickname": "The Oracle",
+        "tiles": [37, 51, 96, 112, 69, 86],
+        "keyPrefixBase": "lost-oracle-stalker-tile",
+        "creatureName": "Stalker",
+        "fallbackGameId": 88,
+        "itemSpriteId": 2031,
+        "level": 150,
+        "tier": 0,
+        "direction": "south",
+        "genes": { "hp": 20, "ad": 20, "ap": 20, "armor": 20, "magicResist": 20 }
       }
     ]
   }

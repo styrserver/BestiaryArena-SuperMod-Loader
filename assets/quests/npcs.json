@@ -9,8 +9,9 @@
     "rookstayer": "7. Board NPCs (Rookstayer)",
     "svenson": "8. Board NPCs (Svenson)",
     "dane": "9. Board NPCs (Dane)",
-    "questItems": "10. Quest item chat responses (involved vs uninvolved NPC lines)",
-    "questItemUninvolvedTemplates": "11. Uninvolved quest item templates ({item} placeholder)"
+    "oracle": "10. Board NPCs (The Oracle)",
+    "questItems": "11. Quest item chat responses (involved vs uninvolved NPC lines)",
+    "questItemUninvolvedTemplates": "12. Uninvolved quest item templates ({item} placeholder)"
   },
   "king-tibianus": {
     "keywords": {
@@ -108,7 +109,9 @@
       "bye": "Good bye, Player!",
       "farewell": "Good bye, Player!",
       "goodbye": "Good bye, Player!",
-      "al dee": "I haven't seen Al Dee for a while and don't know where he holds house. Let me know if you have any information about him!"
+      "al dee": "I haven't seen Al Dee for a while and don't know where he holds house. Let me know if you have any information about him!",
+      "oracle": "An Oracle? Strange visions haunt my dreams of such a being. Bring me an Orb — I may yet unveil its true light.",
+      "lost oracle": "An Oracle? Strange visions haunt my dreams of such a being. Bring me an Orb — I may yet unveil its true light."
     },
     "ironOre": {
       "default": "Yes... Iron Ore! Let me know if you find one!",
@@ -204,7 +207,8 @@
       "thais": "Thais is a crowded town.",
       "academy": "The big building in the centre of Rookgaard. They have a library, a training centre, a bank and the room of the oracle. Seymour is the teacher there.",
       "bank": "A bank is quite useful. You can deposit your money safely there. This way you don't have to carry it around with you all the time. You could also invest your money in my wares!",
-      "oracle": "You can find the oracle on the top floor of the academy, just above Seymour. Go there when you are level 8.",
+      "oracle": "The room of the oracle is in the academy. Seymour is the teacher there.",
+      "lost oracle": "The room of the oracle is in the academy. Seymour is the teacher there.",
       "temple": "The monk Cipfried takes care of our temple. He can heal you if you're badly injured or poisoned.",
       "citizen": "If you tell me the name of a citizen, I'll tell you what I know about him or her.",
       "dallheim": "Some call him a hero. He protects the town from monsters.",
@@ -264,7 +268,9 @@
       "holy tible": "The Holy Tible! Show it to me when the king sends you on the monks' study.",
       "costello's diary": "My diary tracks the seven seals of Ghostlands. Complete them and return to me.",
       "castello's diary": "My diary tracks the seven seals of Ghostlands. Complete them and return to me.",
-      "blessed ankh": "The Blessed Ankh is earned when the seven seals are done. Then take it to Wyda in Venore."
+      "blessed ankh": "The Blessed Ankh is earned when the seven seals are done. Then take it to Wyda in Venore.",
+      "oracle": "The Oracle once spoke beneath our monastery. Seek the catacombs if you dare.",
+      "lost oracle": "The Oracle once spoke beneath our monastery. Seek the catacombs if you dare."
     },
     "confusion": [
       "I fear I do not grasp your meaning, Player. Speak of the monastery, the seals, or your mission.",
@@ -554,6 +560,24 @@
       "spider silk": [
         "Spider silk from the mother of all spiders — bring it when you accept my task."
       ],
+      "oracle": [
+        "Oracles, statues, destinies... all the same to me. Bored!"
+      ],
+      "lost oracle": [
+        "Oracles, statues, destinies... all the same to me. Bored!"
+      ],
+      "luminous orb": [
+        "A Luminous Orb? Give it to me and I will bind its light into a Spectral Stone."
+      ],
+      "luminous": [
+        "A Luminous Orb? Give it to me and I will bind its light into a Spectral Stone."
+      ],
+      "spectral stone": [
+        "Spectral Stones hold restless energy. Guard yours carefully."
+      ],
+      "spectral": [
+        "Spectral Stones hold restless energy. Guard yours carefully."
+      ],
       "spool of yarn": [
         "I spin spider silk into yarn. Bring me the silk from the mother of all spiders, or if you already have a spool from me, a stranded sailor might need it more than I do."
       ]
@@ -612,6 +636,8 @@
       "tesha": "I am the mourned Tesha.",
       "bye": "May enlightenment be your path, Player.",
       "gem": "You can buy and sell small diamonds, sapphires, rubies, emeralds and amethysts or sell topazes.",
+      "oracle": "I have heard whispers of an Oracle beneath the White Raven grounds. What became of it, I do not know.",
+      "lost oracle": "I have heard whispers of an Oracle beneath the White Raven grounds. What became of it, I do not know.",
       "job": "I sell and buy scarab coins, gems and jewelry. Also I can take care of your bank business.",
       "rah": "The Rah is our essence. The spiritual bond that keeps the other parts of the Akh'rah Uthun together.",
       "akh": "Our body. The only physical part of the Akh'rah Uthun.",
@@ -704,7 +730,9 @@
       "dane": "Dane waits for me at White Wave Cellar. Help me get this ship seaworthy and we will see her again.",
       "goods": "We can transport everything you want.",
       "bye": "Goodbye. You are welcome.",
-      "goodbye": "Goodbye. You are welcome."
+      "goodbye": "Goodbye. You are welcome.",
+      "oracle": "I've ferried pilgrims seeking oracles. What became of theirs, I never learned.",
+      "lost oracle": "I've ferried pilgrims seeking oracles. What became of theirs, I never learned."
     },
     "confusion": [
       "If you need passage, ask me about ferry routes or a mission.",
@@ -741,7 +769,9 @@
       "ghazbaran": "They say the archdemon Ghazbaran has been weakened. Ask me about a mission if you dare face him.",
       "archdemon": "They say the archdemon Ghazbaran has been weakened. Ask me about a mission if you dare face him.",
       "bye": "Please come back from time to time.",
-      "goodbye": "Please come back from time to time."
+      "goodbye": "Please come back from time to time.",
+      "oracle": "Sailors speak of a lost Oracle. What caused it to vanish, none of them could say.",
+      "lost oracle": "Sailors speak of a lost Oracle. What caused it to vanish, none of them could say."
     },
     "rumourLines": [
       "A sailor from Carlin swore the tribes in the far north pray to powers older than kings. He couldn't tell whether he meant gods... or the wind itself.",
@@ -797,6 +827,36 @@
     "boardChat": {
       "welcomeMessage": "Welcome to White Wave Cellar, Player. Have a drink.",
       "placeholder": "Type your message to Dane..."
+    }
+  },
+  "oracle": {
+    "keywords": {
+      "hi": "Player,@ R@3 Y£U0 {P3R}P@RD3 T€ [F4C3] Y€RU D3$TN1Y\\?",
+      "hello": "Player,@ R@3 Y£U0 {P3R}P@RD3 T€ [F4C3] Y€RU D3$TN1Y\\?",
+      "bye": "C€M3 B@[CK] WH3N Y£U0 @R3 {P3R}P@RD3 T€ [F4C3] Y€RU D3$TN1Y\\!",
+      "goodbye": "C€M3 B@[CK] WH3N Y£U0 @R3 {P3R}P@RD3 T€ [F4C3] Y€RU D3$TN1Y\\!",
+      "farewell": "C€M3 B@[CK] WH3N Y£U0 @R3 {P3R}P@RD3 T€ [F4C3] Y€RU D3$TN1Y\\!",
+      "spectral stone": "Y£U0 D@R3 {€FF3R} M3 TH@T {C{UR$}3D} $T€N3{\\}?! 1 W1££ {UNM@K3} Y£U0{\\}! 1 W1££ {D3$TR€Y} 3V3RYTH1NG{\\}!",
+      "spectral": "Y£U0 D@R3 {€FF3R} M3 TH@T {C{UR$}3D} $T€N3{\\}?! 1 W1££ {UNM@K3} Y£U0{\\}! 1 W1££ {D3$TR€Y} 3V3RYTH1NG{\\}!"
+    },
+    "destiny": {
+      "prepared": "Player,@ R@3 Y£U0 {P3R}P@RD3 T€ [F4C3] Y€RU D3$TN1Y\\?",
+      "confirm": "1 W1££ B[R1NG] Y£U0 T€ [TH3] 1$£@ND €F D3$TN1Y @ND Y£U0 W1££ B3 UN@B£3 T€ R3T{URN} H3R3\\! R@3 Y£U0 $£R3\\?",
+      "soBeIt": "$€ B3 1T{\\}!",
+      "tooYoung": "CH1£D{\\}! C€M3 B@[CK] WH3N Y£U0 H@V3 GR€WN UP\\!",
+      "farewell": "C€M3 B@[CK] WH3N Y£U0 @R3 {P3R}P@RD3 T€ [F4C3] Y€RU D3$TN1Y\\!",
+      "spectralRage": "Y£U0 D@R3 {€FF3R} M3 TH@T {C{UR$}3D} $T€N3{\\}?! 1 W1££ {UNM@K3} Y£U0{\\}! 1 W1££ {D3$TR€Y} 3V3RYTH1NG{\\}!",
+      "rageAgain": "Y£U0 @G@1N{\\}?! TH3N D1£{\\}!",
+      "victoryThanks": "THANK YOU, PLAYER! YOUR DESTINY IS FULFILLED!"
+    },
+    "confusion": [
+      "$P3@K €F Y€RU D3$TN1Y, CH1£D\\!",
+      "1 D€ N€T UND3R$T@ND. R@3 Y£U0 {P3R}P@RD3 T€ [F4C3] Y€RU D3$TN1Y\\?",
+      "W€RD$ W1TH€UT P{URP}€$3 M3@N N€TH1NG H3R3{\\}."
+    ],
+    "boardChat": {
+      "welcomeMessage": "Player,@ R@3 Y£U0 {P3R}P@RD3 T€ [F4C3] Y€RU D3$TN1Y\\?",
+      "placeholder": "Type your message to The Oracle..."
     }
   },
   "questItems": {
@@ -1101,6 +1161,7 @@
     "santa-claus": "Ho ho ho, {item} isn't on my Christmas list!",
     "rookstayer": "I can't worry about {item} — Apprentice Sheng is the danger here!",
     "svenson": "I don't deal in {item}. I ferry passengers across the Nordic routes.",
-    "dane": "I don't deal in {item}. Ask me about drinks, rumours, or this cellar."
+    "dane": "I don't deal in {item}. Ask me about drinks, rumours, or this cellar.",
+    "the-oracle": "{item} has no bearing on your destiny, child."
   }
 }

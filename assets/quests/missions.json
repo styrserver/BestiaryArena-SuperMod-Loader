@@ -403,6 +403,63 @@
       "rewardSummary": "Reward: Golden Mug.",
       "battleVictory": "Demodras has fallen. You found a Golden Mug.",
       "battleDefeat": "Demodras was too strong."
+    },
+    "lost_oracle": {
+      "id": "lost_oracle",
+      "title": "The Lost Oracle",
+      "prompt": "",
+      "accept": "",
+      "alreadyActive": "Ask others about the Oracle, then bring an Orb to King Tibianus.",
+      "alreadyCompleted": "You have already walked the path the Oracle set before you.",
+      "objectiveLine1": "Ask other NPCs about the Oracle.",
+      "objectiveLine2": "Bring an Orb to King Tibianus.",
+      "objectiveLine3": "Bring the Luminous Orb to Wyda in the Venore swamps.",
+      "objectiveLine4": "Return the Spectral Stone to The Oracle.",
+      "objectiveLine5": "Survive The Oracle's wrath.",
+      "objectiveLine6": "Speak with The Oracle.",
+      "hint": "Speak of the Oracle to those you trust. The King may know how to unveil an Orb's light.",
+      "hintSpectral": "The Spectral Stone belongs with The Oracle in the Monastery Catacombs.",
+      "hintBattle": "The Oracle's rage fills the catacombs. Stand your ground.",
+      "hintThanks": "The Oracle awaits your return in the Monastery Catacombs.",
+      "rewardCoins": 100,
+      "rewardItemName": "Spectral Stone",
+      "rewardIcon": "Life_Crystal.gif",
+      "rewardDescription": "It is pulsating with spectral energy.",
+      "rewardSummary": "Reward: 100 guild coins.",
+      "oracleVictoryThanks": "THANK YOU, PLAYER! YOUR DESTINY IS FULFILLED!",
+      "kingOracleAsk": "An Oracle? Strange visions haunt my dreams of such a being. Bring me an Orb — I may yet unveil its true light.",
+      "kingOracleHasOrb": "You carry an Orb. Shall I transform it into a Luminous Orb?",
+      "kingOracleExchanged": "Behold — a Luminous Orb. Take it to Wyda in the Venore swamps; she alone can bind its light into a Spectral Stone.",
+      "kingOracleNoOrb": "Return when you have an Orb to offer.",
+      "kingOracleAlreadyExchanged": "You already hold the Luminous Orb I fashioned. Take it to Wyda in the Venore swamps.",
+      "kingOracleDecline": "Very well. Return when you are prepared to offer the Orb.",
+      "kingOracleSentToWyda": "Wyda waits in the swamps of Venore. Give her the Luminous Orb.",
+      "kingOracleReturnStone": "The Spectral Stone belongs with The Oracle. Return it whence such light was born.",
+      "wydaLuminousAsk": "A Luminous Orb... yes. I can bind its light into a Spectral Stone. Will you give it to me?",
+      "wydaLuminousExchanged": "There. A Spectral Stone — pulsating with spectral energy. Do not lose it.",
+      "wydaLuminousMissing": "You do not have a Luminous Orb. Ask the King to unveil an Orb first.",
+      "wydaLuminousAlready": "You already carry the Spectral Stone I forged. Keep it close.",
+      "wydaLuminousDecline": "Then keep your glowing toy. Return when you are ready.",
+      "npcOracleWonder": "The Oracle... lost? I wonder what caused it. Was it cursed? Something dark must have claimed it.",
+      "npcOracleWonderAlDee": "The Oracle got lost? Strange... was it cursed? What could twist a thing like that?",
+      "npcOracleWonderCostello": "A lost Oracle... I wonder what befell it. A curse? Some darker force beneath the stones?",
+      "npcOracleWonderWyda": "Lost? Cursed? Ha! Something awful must have happened to it. Tell me if you learn more — I'm bored enough.",
+      "npcOracleWonderTesha": "The Oracle is lost? I wonder whether a curse claimed it... mortality and madness walk hand in hand.",
+      "npcOracleWonderSvenson": "Lost Oracle, eh? Makes you wonder — cursed, abandoned, or worse? Sailors tell darker tales than that.",
+      "npcOracleWonderDane": "A lost Oracle... what caused it? A curse? The sea swallows secrets; land does the same.",
+      "npcOracleRestored": "The Oracle has been restored! Thank you, Player — the world feels steadier for it.",
+      "npcOracleRestoredAlDee": "You restored The Oracle? Amazing work, Player! Folk will sleep easier knowing that.",
+      "npcOracleRestoredCostello": "Bless you, Player. The Oracle is restored — a light returns beneath our monastery.",
+      "npcOracleRestoredWyda": "So you fixed The Oracle? Ha! Not so boring after all. Grateful, I suppose.",
+      "npcOracleRestoredTesha": "Be mourned no longer for that fate, Player. The Oracle is restored — thank you.",
+      "npcOracleRestoredSvenson": "Word travels fast at sea, Player. The Oracle restored? Grateful we are for that.",
+      "npcOracleRestoredDane": "Sailors toast you, Player. The Oracle restored — that's rare good news.",
+      "kingOracleRestored": "You have my gratitude, Player. The Oracle is restored — may destiny smile upon you.",
+      "oracleSpectralRage": "Y£U0 D@R3 {€FF3R} M3 TH@T {C{UR$}3D} $T€N3{\\}?! 1 W1££ {UNM@K3} Y£U0{\\}! 1 W1££ {D3$TR€Y} 3V3RYTH1NG{\\}!",
+      "oracleSpectralMissing": "Y£U0 BR1NG N€TH1NG. R3T{URN} W1TH TH3 $P3CTR@£ $T€N3{\\}!",
+      "oracleRageAgain": "Y£U0 @G@1N{\\}?! TH3N D1£{\\}!",
+      "battleVictory": "The Oracle's rage is broken. The catacombs fall silent.",
+      "battleDefeat": "The Oracle's wrath was too great."
     }
   },
   "completionSummaries": {
@@ -423,7 +480,8 @@
     "christmas_miracle": "Received a Christmas present from Santa Claus.",
     "svenson_love_story": "Guided Svenson through storms and misnavigation, then delivered Bunny Slippers so he could bring Dane her present.",
     "weakened_archdemon": "Defeated the weakened archdemon and received an Orb from Dane.",
-    "dragonmother": "Descended into Lonesome Dragon with Demodras' claw and slew Demodras."
+    "dragonmother": "Descended into Lonesome Dragon with Demodras' claw and slew Demodras.",
+    "lost_oracle": "Returned the Spectral Stone to The Oracle, survived its wrath, and received its thanks."
   },
   "sealTranscripts": [
     {
@@ -475,7 +533,8 @@
       "apprentice_sheng",
       "christmas_miracle",
       "svenson_love_story",
-      "weakened_archdemon"
+      "weakened_archdemon",
+      "lost_oracle"
     ],
     "missions": {
       "king_honeyflower": {
@@ -582,6 +641,19 @@
         "firebaseKey": "weakenedArchdemon",
         "extraFields": [
           "battleCompleted"
+        ]
+      },
+      "lost_oracle": {
+        "stateKey": "progressLostOracle",
+        "firebaseKey": "lostOracle",
+        "extraFields": [
+          "askedNpcs",
+          "kingInformed",
+          "orbExchanged",
+          "spectralStoneReceived",
+          "oracleEnraged",
+          "battleCompleted",
+          "oracleDismissed"
         ]
       }
     }
