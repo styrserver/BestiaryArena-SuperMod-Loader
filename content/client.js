@@ -1464,6 +1464,101 @@ if (typeof browserAPI === 'undefined') {
     },
     
     ui: {
+      /**
+       * Collapsible fieldset section for mod config panels (Custom Display style).
+       * Remembers expand/collapse per modId+sectionId. Default: only the first section open.
+       * @returns {{ section: HTMLElement, body: HTMLElement, setExpanded: Function, isExpanded: Function }}
+       */
+      createConfigSection: function(options = {}) {
+        const {
+          title = '',
+          modId = 'mod',
+          sectionId = 'section',
+          defaultExpanded = false,
+          parent = null
+        } = options;
+
+        const STORAGE_KEY = 'bestiary-config-section-state';
+        const stateKey = `${modId}:${sectionId}`;
+
+        const readStates = () => {
+          try {
+            const raw = localStorage.getItem(STORAGE_KEY);
+            if (!raw) return {};
+            const parsed = JSON.parse(raw);
+            return parsed && typeof parsed === 'object' ? parsed : {};
+          } catch (_) {
+            return {};
+          }
+        };
+
+        const writeExpanded = (expanded) => {
+          try {
+            const states = readStates();
+            states[stateKey] = !!expanded;
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(states));
+          } catch (_) { /* ignore */ }
+        };
+
+        const states = readStates();
+        const hasStored = Object.prototype.hasOwnProperty.call(states, stateKey);
+        let expanded = hasStored ? !!states[stateKey] : !!defaultExpanded;
+
+        const section = document.createElement('fieldset');
+        section.className = 'bestiary-config-section';
+        section.setAttribute('data-section-id', sectionId);
+        section.style.cssText = 'border: 1px solid #666; border-radius: 4px; padding: 4px 8px 6px; margin: 0;';
+
+        const legend = document.createElement('legend');
+        legend.style.cssText = 'font-weight: bold; color: #0c6; cursor: pointer; user-select: none; display: inline-flex; align-items: center; gap: 4px; padding: 0 2px; font-size: 13px; line-height: 1.2;';
+        legend.title = 'Click to expand/collapse';
+
+        const chevron = document.createElement('span');
+        chevron.className = 'bestiary-config-section-chevron';
+        chevron.style.cssText = 'font-size: 9px; line-height: 1; display: inline-block; width: 9px;';
+
+        const titleSpan = document.createElement('span');
+        titleSpan.textContent = title;
+
+        legend.appendChild(chevron);
+        legend.appendChild(titleSpan);
+        section.appendChild(legend);
+
+        const body = document.createElement('div');
+        body.className = 'bestiary-config-section-body';
+        body.style.cssText = 'display: flex; flex-direction: column; gap: 6px;';
+        section.appendChild(body);
+
+        const applyExpanded = (next) => {
+          expanded = !!next;
+          body.style.display = expanded ? 'flex' : 'none';
+          chevron.textContent = expanded ? '▼' : '▶';
+          section.setAttribute('data-expanded', expanded ? 'true' : 'false');
+        };
+
+        applyExpanded(expanded);
+
+        legend.addEventListener('click', (e) => {
+          e.preventDefault();
+          applyExpanded(!expanded);
+          writeExpanded(expanded);
+        });
+
+        if (parent instanceof HTMLElement) {
+          parent.appendChild(section);
+        }
+
+        return {
+          section,
+          body,
+          setExpanded: (value) => {
+            applyExpanded(value);
+            writeExpanded(expanded);
+          },
+          isExpanded: () => expanded
+        };
+      },
+
       addButton: function(options) {
         const {
           id,
@@ -1694,7 +1789,7 @@ if (typeof browserAPI === 'undefined') {
           background: rgba(0, 0, 0, 0.9);
           border: 1px solid #444;
           border-radius: 8px;
-          padding: 15px;
+          padding: 10px;
           box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
           display: none;
           z-index: ${MOD_CONFIG_PANEL_Z_INDEX};
@@ -1713,7 +1808,7 @@ if (typeof browserAPI === 'undefined') {
         
         const contentEl = document.createElement('div');
         contentEl.className = 'bestiary-config-panel-scroll';
-        contentEl.style.cssText = 'margin: 15px 0; color: white; flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch;';
+        contentEl.style.cssText = 'margin: 8px 0; color: white; flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch;';
         populateConfigPanelScrollContent(contentEl, content);
         
         panel.appendChild(contentEl);

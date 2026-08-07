@@ -913,6 +913,12 @@
         "removeWhenCompleted": true
       },
       {
+        "productId": "ironOre",
+        "missionId": "al_dee_fishing_gold",
+        "independentDrop": true,
+        "removeWhenCompleted": true
+      },
+      {
         "productId": "dragonClaw",
         "missionId": "king_red_dragon",
         "requiredStatus": "completed"
@@ -1042,6 +1048,10 @@
       },
       {
         "productId": "magnet",
+        "missionId": "al_dee_fishing_gold"
+      },
+      {
+        "productId": "ironOre",
         "missionId": "al_dee_fishing_gold"
       },
       {
