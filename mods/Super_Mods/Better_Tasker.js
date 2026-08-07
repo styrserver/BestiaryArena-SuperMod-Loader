@@ -31,9 +31,6 @@ const tReplace = (key, replacements) => {
     return text;
 };
 
-// Default settings constants
-const DEFAULT_TASK_START_DELAY = 3;
-
 // Unobtainable creatures shown disabled in settings (cannot appear in Paw and Fur tasks)
 const UNSELECTABLE_CREATURES = [
     'Firestarter',
@@ -91,9 +88,11 @@ const BESTIARY_INTEGRATION_DELAY = 300;
 const BESTIARY_RETRY_DELAY = 1500;
 const BESTIARY_INIT_WAIT = 2000;
 
-// User-configurable delays
-const DEFAULT_START_DELAY = 3;         // 3 seconds default (user-configurable 1-10)
-const MAX_START_DELAY = 10;            // 10 seconds maximum
+// User-configurable start delay — same contract as BBM / Raid Hunter / Awaken Farmer / Stamina Optimizer
+const DEFAULT_START_DELAY = 3;         // seconds (range: 1–MAX_START_DELAY)
+const MAX_START_DELAY = 10;
+const MODS_LOADING_GRACE_PERIOD = 5000;
+const MAX_WAIT_FOR_SIGNAL = 15000;
 const ESC_KEY_DELAY = 50;
 const TASK_START_DELAY = 200;
 const MANUAL_PLAY_PAUSE_MS = 180000; // 3 minutes — back off after user changes map manually
@@ -4418,7 +4417,7 @@ function createGeneralSettings() {
     `;
     taskDelayDiv.appendChild(taskDelayLabel);
     
-    const taskDelayInput = createStyledInput('number', 'taskStartDelay', 3, `
+    const taskDelayInput = createStyledInput('number', 'taskStartDelay', DEFAULT_START_DELAY, `
         width: 100%;
         padding: 6px;
         background: #333;
@@ -4428,8 +4427,8 @@ function createGeneralSettings() {
         box-sizing: border-box;
         font-size: 14px;
     `, { 
-        min: 0, 
-        max: 10, 
+        min: 1, 
+        max: MAX_START_DELAY, 
         className: 'pixel-font-16' 
     });
     // Add auto-save listener with tracking
@@ -7069,7 +7068,10 @@ async function handleTaskFinishing() {
                 // The task might need to be activated even if killCount is 0
                 
                 // Apply task start delay if configured (only for active tasks)
-                const taskStartDelay = settings.taskStartDelay || DEFAULT_TASK_START_DELAY;
+                const rawDelay = Number(settings.taskStartDelay);
+                const taskStartDelay = Number.isFinite(rawDelay)
+                    ? Math.max(1, Math.min(MAX_START_DELAY, Math.round(rawDelay)))
+                    : DEFAULT_START_DELAY;
                 
                 if (taskStartDelay > 0) {
                     // Wait for the specified delay before proceeding
@@ -8621,17 +8623,72 @@ function init() {
     // Always start UI monitoring to insert buttons (needed to enable/disable mod)
     startUIMonitoring();
     
-    // Start automation if enabled (startAutomation also schedules task checks)
-    if (taskerState === TASKER_STATES.ENABLED) {
-        startAutomation();
-    }
+    // Defer automation until allModsLoaded + boot grace (manual toggle still starts immediately)
+    setupBootGrace(() => {
+        if (taskerState === TASKER_STATES.ENABLED) {
+            startAutomation();
+        }
+        if (taskerState === TASKER_STATES.NEW_TASK_ONLY) {
+            scheduleTaskCheck();
+        }
+    });
     
-    // Start scheduler if in New Task+ mode (uses same logic as Enabled mode for task acceptance)
-    if (taskerState === TASKER_STATES.NEW_TASK_ONLY) {
-        scheduleTaskCheck();
+    console.log('[Better Tasker] Better Tasker Mod initialized - waiting for allModsLoaded + boot grace');
+}
+
+let allModsLoaded = false;
+let bootGraceDone = false;
+let bootGraceTimer = null;
+let bootFallbackTimer = null;
+let bootMessageHandler = null;
+
+function setupBootGrace(onReady) {
+    if (bootMessageHandler) return;
+
+    const beginGrace = () => {
+        if (bootGraceDone || bootGraceTimer) return;
+        console.log(`[Better Tasker] Boot grace started — waiting ${MODS_LOADING_GRACE_PERIOD / 1000}s`);
+        bootGraceTimer = setTimeout(() => {
+            bootGraceTimer = null;
+            bootGraceDone = true;
+            if (typeof onReady === 'function') onReady();
+        }, MODS_LOADING_GRACE_PERIOD);
+    };
+
+    bootMessageHandler = (event) => {
+        if (event.source !== window) return;
+        if (event.data?.from === 'LOCAL_MODS_LOADER' && event.data?.action === 'allModsLoaded') {
+            if (allModsLoaded) return;
+            allModsLoaded = true;
+            console.log('[Better Tasker] Received allModsLoaded signal');
+            beginGrace();
+        }
+    };
+    window.addEventListener('message', bootMessageHandler);
+
+    bootFallbackTimer = setTimeout(() => {
+        bootFallbackTimer = null;
+        if (!allModsLoaded) {
+            console.warn('[Better Tasker] allModsLoaded not received — starting boot grace anyway');
+            allModsLoaded = true;
+            beginGrace();
+        }
+    }, MAX_WAIT_FOR_SIGNAL);
+}
+
+function teardownBootGrace() {
+    if (bootMessageHandler) {
+        try { window.removeEventListener('message', bootMessageHandler); } catch (_) {}
+        bootMessageHandler = null;
     }
-    
-    console.log('[Better Tasker] Better Tasker Mod initialized.');
+    if (bootGraceTimer) {
+        clearTimeout(bootGraceTimer);
+        bootGraceTimer = null;
+    }
+    if (bootFallbackTimer) {
+        clearTimeout(bootFallbackTimer);
+        bootFallbackTimer = null;
+    }
 }
 
 init();
@@ -8643,6 +8700,7 @@ init();
 // Cleanup function for when mod is disabled
 function cleanupBetterTasker() {
     try {
+        teardownBootGrace();
         clearPendingAutomationTimeouts();
         stopNextTaskTimerUpdates();
 

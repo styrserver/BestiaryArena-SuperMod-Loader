@@ -3246,7 +3246,34 @@ function createCopyReplayButton(replayData) {
 // Create the configuration panel UI
 function createConfigPanel(startAnalysisCallback) {
   const content = document.createElement('div');
-  content.style.cssText = 'display: flex; flex-direction: column; gap: 12px;';
+  content.style.cssText = 'display: flex; flex-direction: column; gap: 8px;';
+
+  const createSection = (title, sectionId, defaultExpanded) => {
+    if (api?.ui?.createConfigSection) {
+      return api.ui.createConfigSection({
+        title,
+        modId: MOD_ID,
+        sectionId,
+        defaultExpanded,
+        parent: content
+      }).body;
+    }
+    const section = document.createElement('fieldset');
+    section.style.cssText = 'border: 1px solid #666; border-radius: 4px; padding: 4px 8px 6px; margin: 0;';
+    const legend = document.createElement('legend');
+    legend.textContent = title;
+    legend.style.cssText = 'font-weight: bold; color: #0c6;';
+    section.appendChild(legend);
+    const body = document.createElement('div');
+    body.style.cssText = 'display: flex; flex-direction: column; gap: 6px;';
+    section.appendChild(body);
+    content.appendChild(section);
+    return body;
+  };
+
+  const analysisBody = createSection(t('mods.boardAnalyzer.sectionAnalysis'), 'analysis', true);
+  const displayBody = createSection(t('mods.boardAnalyzer.sectionDisplay'), 'display', false);
+  const stopBody = createSection(t('mods.boardAnalyzer.sectionStopConditions'), 'stop-conditions', false);
 
   // Runs input
   const runsContainer = document.createElement('div');
@@ -3265,7 +3292,7 @@ function createConfigPanel(startAnalysisCallback) {
   
   runsContainer.appendChild(runsLabel);
   runsContainer.appendChild(runsInput);
-  content.appendChild(runsContainer); 
+  analysisBody.appendChild(runsContainer); 
 
   // Speed factor input
   const speedContainer = document.createElement('div');
@@ -3284,7 +3311,7 @@ function createConfigPanel(startAnalysisCallback) {
   
   speedContainer.appendChild(speedLabel);
   speedContainer.appendChild(speedInput);
-  content.appendChild(speedContainer);
+  analysisBody.appendChild(speedContainer);
 
   // Hide game board checkbox
   const hideContainer = document.createElement('div');
@@ -3301,7 +3328,7 @@ function createConfigPanel(startAnalysisCallback) {
   
   hideContainer.appendChild(hideInput);
   hideContainer.appendChild(hideLabel);
-  content.appendChild(hideContainer);
+  displayBody.appendChild(hideContainer);
 
   // Auto-turbo checkbox
   const turboContainer = document.createElement('div');
@@ -3318,7 +3345,7 @@ function createConfigPanel(startAnalysisCallback) {
   
   turboContainer.appendChild(turboInput);
   turboContainer.appendChild(turboLabel);
-  content.appendChild(turboContainer);
+  displayBody.appendChild(turboContainer);
 
   // Estimate experience checkbox
   const estimateExpContainer = document.createElement('div');
@@ -3335,7 +3362,7 @@ function createConfigPanel(startAnalysisCallback) {
 
   estimateExpContainer.appendChild(estimateExpInput);
   estimateExpContainer.appendChild(estimateExpLabel);
-  content.appendChild(estimateExpContainer);
+  displayBody.appendChild(estimateExpContainer);
 
   // Advanced live stats checkbox
   const advancedLiveStatsContainer = document.createElement('div');
@@ -3352,7 +3379,7 @@ function createConfigPanel(startAnalysisCallback) {
 
   advancedLiveStatsContainer.appendChild(advancedLiveStatsInput);
   advancedLiveStatsContainer.appendChild(advancedLiveStatsLabel);
-  content.appendChild(advancedLiveStatsContainer);
+  displayBody.appendChild(advancedLiveStatsContainer);
 
   // Stop on S+ checkbox
   const stopSPlusContainer = document.createElement('div');
@@ -3369,7 +3396,7 @@ function createConfigPanel(startAnalysisCallback) {
   
   stopSPlusContainer.appendChild(stopSPlusInput);
   stopSPlusContainer.appendChild(stopSPlusLabel);
-  content.appendChild(stopSPlusContainer);
+  stopBody.appendChild(stopSPlusContainer);
 
   // Stop on any victory/defeat checkbox
   const stopVictoryContainer = document.createElement('div');
@@ -3417,7 +3444,7 @@ function createConfigPanel(startAnalysisCallback) {
   stopVictoryContainer.appendChild(stopVictoryInput);
   stopVictoryContainer.appendChild(stopVictoryLabel);
   stopVictoryContainer.appendChild(stopOutcomeToggle);
-  content.appendChild(stopVictoryContainer);
+  stopBody.appendChild(stopVictoryContainer);
 
   stopSPlusInput.addEventListener('change', () => {
     if (stopSPlusInput.checked) {
@@ -3449,7 +3476,7 @@ function createConfigPanel(startAnalysisCallback) {
   
   stopTicksContainer.appendChild(stopTicksLabel);
   stopTicksContainer.appendChild(stopTicksInput);
-  content.appendChild(stopTicksContainer);
+  stopBody.appendChild(stopTicksContainer);
 
   // Stop when ticks reached input
   const stopWhenTicksContainer = document.createElement('div');
@@ -3468,7 +3495,7 @@ function createConfigPanel(startAnalysisCallback) {
 
   stopWhenTicksContainer.appendChild(stopWhenTicksLabel);
   stopWhenTicksContainer.appendChild(stopWhenTicksInput);
-  content.appendChild(stopWhenTicksContainer);
+  stopBody.appendChild(stopWhenTicksContainer);
 
   // Warning if no ally creatures on board (parity with Manual Runner)
   const hasAlly = hasAllyCreaturesOnBoard();

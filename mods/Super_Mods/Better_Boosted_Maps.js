@@ -44,9 +44,12 @@ const DOM_ACTION_MAX_ATTEMPTS = 5;
 const DOM_ACTION_MAX_ATTEMPTS_HIDDEN = 40;
 const STAMINA_REGEN_MS = 60000;
 
-// User-configurable delays
-const DEFAULT_START_DELAY = 3;         // 3 seconds default (user-configurable 1-10)
-const MAX_START_DELAY = 10;            // 10 seconds maximum
+// User-configurable start delay — same contract as Raid Hunter / Better Tasker / Awaken Farmer / Stamina Optimizer
+const DEFAULT_START_DELAY = 3;         // seconds (range: 1–MAX_START_DELAY)
+const MAX_START_DELAY = 10;
+const COORDINATION_RESUME_DELAY_MS = 1000; // after a higher-priority mod yields
+const MODS_LOADING_GRACE_PERIOD = 5000;
+const MAX_WAIT_FOR_SIGNAL = 15000;
 
 // Stamina constants
 const DEFAULT_STAMINA_COST = 30;
@@ -1116,9 +1119,34 @@ function isAnyRaidBlockingBoostedMaps() {
             return true;
         }
 
-        const raidHunterEnabled = localStorage.getItem('raidHunterAutomationEnabled');
-        if (raidHunterEnabled !== 'true') {
+        const raidHunterEnabled = (() => {
+            try {
+                const raw = localStorage.getItem('raidHunterAutomationEnabled');
+                if (raw !== null) {
+                    try {
+                        const parsed = JSON.parse(raw);
+                        return parsed === true || parsed === 'true';
+                    } catch (_) {
+                        return String(raw).toLowerCase() === 'true';
+                    }
+                }
+            } catch (_) { /* ignore */ }
+            return !!window.ModCoordination?.isModEnabled?.('Raid Hunter');
+        })();
+        if (!raidHunterEnabled) {
             return false;
+        }
+
+        // Raid Hunter is enabled and has claimable (enabled-map) live raids — let it claim first.
+        if (typeof window.raidHunterHasClaimableRaids === 'function') {
+            if (window.raidHunterHasClaimableRaids()) return true;
+        } else {
+            try {
+                const list = globalThis.state?.raids?.getSnapshot?.()?.context?.list || [];
+                if (Array.isArray(list) && list.length > 0) {
+                    return true;
+                }
+            } catch (_) { /* ignore */ }
         }
 
         return window.QuestButtonManager?.getCurrentOwner?.() === 'Raid Hunter';
@@ -1468,6 +1496,12 @@ function canRunBoostedMaps() {
     if (!modState.enabled) {
         return false;
     }
+
+    // Pending/live raids with Raid Hunter enabled must win even before RH marks itself active.
+    if (isAnyRaidBlockingBoostedMaps()) {
+        console.log('[Better Boosted Maps] Cannot run - Raid Hunter is active or has live raids');
+        return false;
+    }
     
     // Use coordination system if available
     if (window.ModCoordination) {
@@ -1494,12 +1528,6 @@ function canRunBoostedMaps() {
     // Board Analyzer always blocks (highest priority system task)
     if (window.ModCoordination?.isModActive('Board Analyzer')) {
         console.log('[Better Boosted Maps] Board Analyzer running - skipping boosted maps');
-        return false;
-    }
-    
-    // Priority check: check status directly to avoid race conditions
-    if (isAnyRaidBlockingBoostedMaps()) {
-        console.log('[Better Boosted Maps] Cannot run - Raid Hunter is actively raiding');
         return false;
     }
     
@@ -4846,6 +4874,11 @@ async function startBoostedMapFarming(force = false) {
         
         // Check automation status after initial delay
         if (!checkAutomationEnabled('during navigation delay')) return;
+        if (!force && !canRunBoostedMaps()) {
+            console.log('[Better Boosted Maps] Aborting before navigate — higher-priority mod claimed control');
+            cancelBoostedMapFarming('Blocked by higher priority mod during start delay');
+            return;
+        }
         
         // Navigate to boosted map
         console.log('[Better Boosted Maps] Navigating to map...');
@@ -5267,7 +5300,8 @@ function validateSettingsAfterNavigation() {
     }
 }
 
-// Check and start boosted map farming if conditions are met
+// Check and start boosted map farming if conditions are met.
+// Start delay is applied once inside startBoostedMapFarming (before navigate), not here.
 function checkAndStartBoostedMapFarming(force = false) {
     // Don't start if already farming
     if (modState.farming.isActive) {
@@ -5275,34 +5309,19 @@ function checkAndStartBoostedMapFarming(force = false) {
     }
     
     if (force) {
-        // When forced, bypass all checks and start immediately
         console.log('[Better Boosted Maps] Forced start - bypassing conditions check');
-        const settings = loadSettings();
-        const startDelay = (settings.startDelay || 3) * 1000;
-        
-        setTimeout(() => {
-            if (!modState.farming.isActive) {
-                startBoostedMapFarming(true);
-            }
-        }, startDelay);
+        if (!modState.farming.isActive) {
+            startBoostedMapFarming(true);
+        }
         return;
     }
     
-    // Check if we should farm
     const farmCheck = shouldFarmBoostedMap();
     if (farmCheck.shouldFarm) {
         console.log('[Better Boosted Maps] Conditions met - starting boosted map farming');
-        
-        // Get settings for delay
-        const settings = loadSettings();
-        const startDelay = (settings.startDelay || 3) * 1000;
-        
-        setTimeout(() => {
-            // Double-check conditions before starting
-            if (canRunBoostedMaps() && !modState.farming.isActive) {
-                startBoostedMapFarming(false);
-            }
-        }, startDelay);
+        if (canRunBoostedMaps() && !modState.farming.isActive) {
+            startBoostedMapFarming(false);
+        }
     }
 }
 
@@ -5370,7 +5389,7 @@ function init() {
                     console.log('[Better Boosted Maps] Raid Hunter became inactive - checking if we should start boosted map farming');
                     setTimeout(() => {
                         checkAndStartBoostedMapFarming();
-                    }, 1000); // Small delay to ensure Raid Hunter has fully cleaned up
+                    }, COORDINATION_RESUME_DELAY_MS);
                 }
             } else if (data.modName === 'Better Tasker') {
                 const wasActive = modState.coordination.isBetterTaskerActive;
@@ -5382,7 +5401,7 @@ function init() {
                     console.log('[Better Boosted Maps] Better Tasker became inactive - checking if we should start boosted map farming');
                     setTimeout(() => {
                         checkAndStartBoostedMapFarming();
-                    }, 1000); // Small delay to ensure Better Tasker has fully cleaned up
+                    }, COORDINATION_RESUME_DELAY_MS);
                 }
             } else if (data.modName === 'Board Analyzer' || data.modName === 'Manual Runner') {
                 // Check if we can run when these mods change state
@@ -5393,7 +5412,7 @@ function init() {
                     console.log(`[Better Boosted Maps] ${data.modName} became inactive - checking if we should start boosted map farming`);
                     setTimeout(() => {
                         checkAndStartBoostedMapFarming();
-                    }, 1000); // Small delay to ensure the mod has fully cleaned up
+                    }, COORDINATION_RESUME_DELAY_MS);
                 }
             }
         });
@@ -5412,14 +5431,71 @@ function init() {
         console.log('[Better Boosted Maps] Mod is enabled - setting up daily state monitoring');
         setupDailyStateMonitoring();
         setupPageVisibilityMonitoring();
-        
-        // Check and start boosted map farming after delay
-        setTimeout(() => {
-            checkAndStartBoostedMapFarming();
-        }, 5000); // 5 second delay to let other mods initialize
     }
+
+    setupBootGrace(() => {
+        if (modState.enabled) {
+            console.log('[Better Boosted Maps] Boot grace ended — checking if farming should start');
+            checkAndStartBoostedMapFarming();
+        }
+    });
     
-    console.log('[Better Boosted Maps] Initialized');
+    console.log('[Better Boosted Maps] Initialized - waiting for allModsLoaded + boot grace');
+}
+
+let allModsLoaded = false;
+let bootGraceDone = false;
+let bootGraceTimer = null;
+let bootFallbackTimer = null;
+let bootMessageHandler = null;
+
+function setupBootGrace(onReady) {
+    if (bootMessageHandler) return;
+
+    const beginGrace = () => {
+        if (bootGraceDone || bootGraceTimer) return;
+        console.log(`[Better Boosted Maps] Boot grace started — waiting ${MODS_LOADING_GRACE_PERIOD / 1000}s`);
+        bootGraceTimer = setTimeout(() => {
+            bootGraceTimer = null;
+            bootGraceDone = true;
+            if (typeof onReady === 'function') onReady();
+        }, MODS_LOADING_GRACE_PERIOD);
+    };
+
+    bootMessageHandler = (event) => {
+        if (event.source !== window) return;
+        if (event.data?.from === 'LOCAL_MODS_LOADER' && event.data?.action === 'allModsLoaded') {
+            if (allModsLoaded) return;
+            allModsLoaded = true;
+            console.log('[Better Boosted Maps] Received allModsLoaded signal');
+            beginGrace();
+        }
+    };
+    window.addEventListener('message', bootMessageHandler);
+
+    bootFallbackTimer = setTimeout(() => {
+        bootFallbackTimer = null;
+        if (!allModsLoaded) {
+            console.warn('[Better Boosted Maps] allModsLoaded not received — starting boot grace anyway');
+            allModsLoaded = true;
+            beginGrace();
+        }
+    }, MAX_WAIT_FOR_SIGNAL);
+}
+
+function teardownBootGrace() {
+    if (bootMessageHandler) {
+        try { window.removeEventListener('message', bootMessageHandler); } catch (_) {}
+        bootMessageHandler = null;
+    }
+    if (bootGraceTimer) {
+        clearTimeout(bootGraceTimer);
+        bootGraceTimer = null;
+    }
+    if (bootFallbackTimer) {
+        clearTimeout(bootFallbackTimer);
+        bootFallbackTimer = null;
+    }
 }
 
 init();
@@ -5520,6 +5596,7 @@ context.exports = {
     getEquipmentRuleAutomationSettingsForBoostedMap: getEquipmentRuleAutomationSettingsForBoostedMap,
     cleanup: () => {
         console.log('[Better Boosted Maps] Cleaning up...');
+        teardownBootGrace();
         
         // Cleanup daily subscription
         if (modState.dailySubscription) {

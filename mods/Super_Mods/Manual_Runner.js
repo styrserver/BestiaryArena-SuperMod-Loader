@@ -4257,7 +4257,33 @@ function createConfigPanel() {
   }
   
   const content = document.createElement('div');
-  content.style.cssText = 'display: flex; flex-direction: column; gap: 12px;';
+  content.style.cssText = 'display: flex; flex-direction: column; gap: 8px;';
+
+  const createSection = (title, sectionId, defaultExpanded) => {
+    if (api?.ui?.createConfigSection) {
+      return api.ui.createConfigSection({
+        title,
+        modId: MOD_ID,
+        sectionId,
+        defaultExpanded,
+        parent: content
+      }).body;
+    }
+    const section = document.createElement('fieldset');
+    section.style.cssText = 'border: 1px solid #666; border-radius: 4px; padding: 4px 8px 6px; margin: 0;';
+    const legend = document.createElement('legend');
+    legend.textContent = title;
+    legend.style.cssText = 'font-weight: bold; color: #0c6;';
+    section.appendChild(legend);
+    const body = document.createElement('div');
+    body.style.cssText = 'display: flex; flex-direction: column; gap: 6px;';
+    section.appendChild(body);
+    content.appendChild(section);
+    return body;
+  };
+
+  const runBody = createSection(t('mods.manualRunner.sectionRunConditions'), 'run-conditions', true);
+  const optionsBody = createSection(t('mods.manualRunner.sectionOptions'), 'options', false);
 
   // Stop condition dropdown
   const stopContainer = document.createElement('div');
@@ -4286,7 +4312,7 @@ function createConfigPanel() {
   stopSelect.value = panelConfig.stopCondition || 'max';
   stopContainer.appendChild(stopLabel);
   stopContainer.appendChild(stopSelect);
-  content.appendChild(stopContainer);
+  runBody.appendChild(stopContainer);
 
   // Stop when ticks reached input (hidden and disabled when maxFloor is selected)
   const stopWhenTicksContainer = document.createElement('div');
@@ -4310,7 +4336,7 @@ function createConfigPanel() {
   
   stopWhenTicksContainer.appendChild(stopWhenTicksLabel);
   stopWhenTicksContainer.appendChild(stopWhenTicksInput);
-  content.appendChild(stopWhenTicksContainer);
+  runBody.appendChild(stopWhenTicksContainer);
 
   // Maximum floor input (only shown when maxFloor mode is selected)
   const maxFloorContainer = document.createElement('div');
@@ -4331,7 +4357,7 @@ function createConfigPanel() {
   
   maxFloorContainer.appendChild(maxFloorLabel);
   maxFloorContainer.appendChild(maxFloorInput);
-  content.appendChild(maxFloorContainer);
+  runBody.appendChild(maxFloorContainer);
 
   // Stop after rounds input (0 = endless)
   const roundsContainer = document.createElement('div');
@@ -4352,7 +4378,7 @@ function createConfigPanel() {
 
   roundsContainer.appendChild(roundsLabel);
   roundsContainer.appendChild(roundsInput);
-  content.appendChild(roundsContainer);
+  runBody.appendChild(roundsContainer);
 
   // Show/hide max floor input and stop when ticks input based on stop condition selection
   stopSelect.addEventListener('change', () => {
@@ -4379,7 +4405,7 @@ function createConfigPanel() {
   
   hideContainer.appendChild(hideInput);
   hideContainer.appendChild(hideLabel);
-  content.appendChild(hideContainer);
+  optionsBody.appendChild(hideContainer);
 
   // Enable auto-refill stamina (Bestiary Automator integration)
   const refillContainer = document.createElement('div');
@@ -4393,7 +4419,7 @@ function createConfigPanel() {
   refillLabel.textContent = t('mods.manualRunner.enableAutoRefill');
   refillContainer.appendChild(refillInput);
   refillContainer.appendChild(refillLabel);
-  content.appendChild(refillContainer);
+  optionsBody.appendChild(refillContainer);
 
   // Enable auto-sell creatures
   const sellContainer = document.createElement('div');
@@ -4424,7 +4450,7 @@ function createConfigPanel() {
   sellContainer.appendChild(sellInput);
   sellContainer.appendChild(sellWarningIcon);
   sellContainer.appendChild(sellLabel);
-  content.appendChild(sellContainer);
+  optionsBody.appendChild(sellContainer);
 
   // Auto-inject sealed creatures (manual-mode drops via serverResults)
   const injectContainer = document.createElement('div');
@@ -4456,7 +4482,7 @@ function createConfigPanel() {
   injectContainer.appendChild(injectInput);
   injectContainer.appendChild(injectWarningIcon);
   injectContainer.appendChild(injectLabel);
-  content.appendChild(injectContainer);
+  optionsBody.appendChild(injectContainer);
 
   // Auto-skip when skip costs stamina (toggleable; normal free skips are always auto-clicked)
   const staminaSkipContainer = document.createElement('div');
@@ -4470,7 +4496,7 @@ function createConfigPanel() {
   staminaSkipLabel.textContent = t('mods.manualRunner.enableStaminaSkip');
   staminaSkipContainer.appendChild(staminaSkipInput);
   staminaSkipContainer.appendChild(staminaSkipLabel);
-  content.appendChild(staminaSkipContainer);
+  optionsBody.appendChild(staminaSkipContainer);
 
   sellInput.addEventListener('change', updateAutoSellWarning);
   injectInput.addEventListener('change', updateAutoInjectWarning);

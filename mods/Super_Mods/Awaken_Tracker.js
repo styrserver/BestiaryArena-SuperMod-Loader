@@ -53,11 +53,37 @@
 
     const STORAGE_KEY_DATA = 'awakenTrackerData';
     const STORAGE_KEY_PANEL = 'awakenTrackerPanel';
+    const STORAGE_KEY_FARMER = 'awakenTrackerFarmer';
 
     const LOG_LIMIT = 50;
     const CAP_VALUE = 20;
     const RENDER_DEBOUNCE_MS = 250;
     const PAUSE_DEBOUNCE_MS = 1500;
+    const FARMER_MOD_NAME = 'Awaken Farmer';
+    const FARMER_TICK_MS = 8000;
+    // Same start-delay / boot-grace contract as BBM / Raid Hunter / Better Tasker / Stamina Optimizer
+    const DEFAULT_START_DELAY = 3;         // seconds (range: 1–MAX_START_DELAY)
+    const MAX_START_DELAY = 10;
+    const COORDINATION_RESUME_DELAY_MS = 1000;
+    const MODS_LOADING_GRACE_PERIOD = 5000;
+    const MAX_WAIT_FOR_SIGNAL = 15000;
+    /** Sealed drops (gene injects) require red floors. */
+    const AWAKEN_FARM_MIN_FLOOR = 11;
+    const AWAKEN_FARM_MAX_FLOOR = 15;
+    /** Just above Stamina Optimizer (5): lowest farming priority except SO is last. */
+    const FARMER_PRIORITY = 6;
+    const FARMER_YIELD_MODS = [
+        'Manual Runner', 'Board Analyzer', 'Better Boosted Maps',
+        'Raid Hunter', 'Better Tasker', 'Autoscroller'
+    ];
+    const FARMER_DEFAULTS = {
+        enabled: false,
+        autoRefillStamina: false,
+        setupLabel: '',
+        floor: 0,
+        startDelay: DEFAULT_START_DELAY,
+        mapSettings: {} // roomId -> { floor?: 11-15, setupLabel?: string, autoRefillStamina?: boolean }
+    };
 
     function getUnobtainableNames() {
         const db = window.creatureDatabase?.UNOBTAINABLE_CREATURES;
@@ -107,14 +133,64 @@
         magicResist: '/assets/icons/magicresist.png'
     };
     const BADGE_ICONS = {
-        awakened: 'https://bestiaryarena.com/assets/icons/star-tier-awaken.png',
-        capped: 'https://bestiaryarena.com/assets/icons/star-tier-5.png',
+        awakened: '/assets/icons/star-tier-awaken.png',
+        capped: '/assets/icons/star-tier-5.png',
         // Shiny perfect: awakened + capped + lvl 99 AND shiny.
-        perfect: 'https://bestiaryarena.com/assets/icons/star-tier-shiny.png',
+        perfect: '/assets/icons/star-tier-shiny.png',
         // Hundo perfect: awakened + capped + lvl 99 AND NOT shiny.
-        perfectHundo: 'https://bestiaryarena.com/assets/icons/star-tier-hundo.png',
-        shiny: 'https://bestiaryarena.com/assets/icons/shiny-star.png'
+        perfectHundo: '/assets/icons/star-tier-hundo.png',
+        shiny: '/assets/icons/shiny-star.png'
     };
+    // UI chrome — game assets (aligned with Cyclopedia / Automator)
+    const UI_ICONS = {
+        pauseOnCap: '/assets/icons/autoplay.png',
+        customSettings: '/assets/spells/smith.png',
+        drag: '/assets/icons/into.png',
+        success: '/assets/icons/yes.png',
+        fail: '/assets/icons/no.png',
+        info: '/assets/icons/info.png',
+        stamina: '/assets/icons/stamina.png',
+        map: '/assets/icons/map.png'
+    };
+
+    function createUiIcon(src, size = 12, extraStyle = '') {
+        const img = document.createElement('img');
+        img.src = src;
+        img.alt = '';
+        img.width = size;
+        img.height = size;
+        img.className = 'pixelated';
+        img.style.cssText = `image-rendering:pixelated;width:${size}px;height:${size}px;display:block;flex-shrink:0;${extraStyle}`;
+        return img;
+    }
+
+    function uiIconHtml(src, size = 12, extraStyle = '') {
+        return `<img src="${src}" alt="" width="${size}" height="${size}" class="pixelated" style="image-rendering:pixelated;width:${size}px;height:${size}px;display:inline-block;vertical-align:middle;${extraStyle}" />`;
+    }
+
+    function escapeAttr(value) {
+        return String(value ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/"/g, '&quot;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+    }
+
+    function createHelpTip(tooltipText) {
+        const tip = document.createElement('span');
+        tip.className = 'at-help-tip';
+        tip.title = String(tooltipText ?? '');
+        tip.appendChild(createUiIcon(UI_ICONS.info, 12));
+        return tip;
+    }
+
+    function helpTipHtml(tooltipText) {
+        return `<span class="at-help-tip" title="${escapeAttr(tooltipText)}">${uiIconHtml(UI_ICONS.info, 12)}</span>`;
+    }
+
+    function staminaIconHtml(size = 12) {
+        return uiIconHtml(UI_ICONS.stamina, size, 'vertical-align:-2px;');
+    }
 
     // =======================
     // 2. State
@@ -125,22 +201,55 @@
         baselineByMap: new Map(),  // roomId -> Map<String(monsterId), stats> (per-map baseline for +N delta display)
         currentMapEnemies: [],     // [{ gameId, name }]
         currentRoomId: null,
-        pauseOnCapByMap: new Map(), // roomId -> Set<gameId> (pause-on-cap marks, scoped per map)
+        /**
+         * Global pause-on-cap opt-outs (shared by Tracker + Overview).
+         * Default is ON for every awakened, non-pre-capped species; unchecking
+         * adds the gameId here. Successful pause-on-cap also opts out so it
+         * does not re-trigger until the user checks again / Clear resets.
+         */
+        pauseOnCapOptOut: new Set(), // Set<gameId>
         collapsedOverrides: new Map(), // gameId -> boolean (user override of auto-collapse)
         orderByMap: new Map()      // roomId -> Array<gameId> (custom order per map)
     };
 
-    function getPauseSetForMap(roomId) {
-        if (!roomId) return null;
-        if (!state.pauseOnCapByMap.has(roomId)) {
-            state.pauseOnCapByMap.set(roomId, new Set());
-        }
-        return state.pauseOnCapByMap.get(roomId);
+    function isPauseOnCapOptedOut(gameId) {
+        return state.pauseOnCapOptOut.has(Number(gameId));
     }
 
-    function isPausedOnCapInCurrentMap(gameId) {
-        const set = state.currentRoomId ? state.pauseOnCapByMap.get(state.currentRoomId) : null;
-        return set ? set.has(Number(gameId)) : false;
+    /** Checkbox / pause logic: default ON unless opted out (or ineligible). */
+    function isPausedOnCap(gameId, awakened = null) {
+        const id = Number(gameId);
+        if (!Number.isFinite(id) || isPauseOnCapOptedOut(id)) return false;
+        const mon = awakened || findAwakenedTargetForGameId(id);
+        if (!mon) return false;
+        if (getCreatureState(mon) === 'pre-capped') return false;
+        return true;
+    }
+
+    function setPauseOnCap(gameId, enabled) {
+        const id = Number(gameId);
+        if (!Number.isFinite(id)) return;
+        if (enabled) state.pauseOnCapOptOut.delete(id);
+        else state.pauseOnCapOptOut.add(id);
+    }
+
+    function clearPauseOnCapOptOutsForGameIds(gameIds) {
+        let changed = false;
+        for (const raw of gameIds || []) {
+            const id = Number(raw);
+            if (!Number.isFinite(id)) continue;
+            if (state.pauseOnCapOptOut.delete(id)) changed = true;
+        }
+        return changed;
+    }
+
+    /** Drop stale opt-ins for pre-capped creatures (pause-on-cap never applies). */
+    function ensurePreCappedOptOut(gameId, awakened) {
+        if (!awakened || getCreatureState(awakened) !== 'pre-capped') return false;
+        const id = Number(gameId);
+        if (!Number.isFinite(id) || state.pauseOnCapOptOut.has(id)) return false;
+        state.pauseOnCapOptOut.add(id);
+        return true;
     }
 
     let renderDebounceId = null;
@@ -162,6 +271,7 @@
         if (awakenPausedForAnalysis) return;
         awakenPausedForAnalysis = true;
         console.log('[Awaken Tracker] Board Analyzer active - pausing subscriptions');
+        stopFarmerLoop(true);
         teardownListeners();
         teardownBoardSub();
         teardownPlayerSub();
@@ -184,6 +294,8 @@
         setupListeners();
         setupBoardSub();
         setupPlayerSub();
+        // Only auto-resume farmer after boot grace (or if user already enabled mid-session).
+        if (loadFarmerSettings().enabled && farmerBootGraceDone) startFarmerLoop();
         if (panel) {
             try { scheduleRender(); } catch (_) { /* ignore */ }
         }
@@ -413,17 +525,13 @@
                 rid,
                 inner instanceof Map ? Array.from(inner.entries()) : []
             ]);
-            const serializedPauseByMap = Array.from(state.pauseOnCapByMap.entries()).map(([rid, set]) => [
-                rid,
-                set instanceof Set ? Array.from(set) : []
-            ]);
             const payload = {
                 byMap: serializedByMap,
                 baselineStats: Array.from(state.baselineStats.entries()),
                 baselineByMap: serializedBaselineByMap,
                 currentMapEnemies: state.currentMapEnemies,
                 currentRoomId: state.currentRoomId,
-                pauseOnCapByMap: serializedPauseByMap,
+                pauseOnCapOptOut: Array.from(state.pauseOnCapOptOut),
                 collapsedOverrides: Array.from(state.collapsedOverrides.entries()),
                 orderByMap: Array.from(state.orderByMap.entries())
             };
@@ -459,15 +567,22 @@
             if (typeof parsed.currentRoomId === 'string' || parsed.currentRoomId === null) {
                 state.currentRoomId = parsed.currentRoomId;
             }
-            if (Array.isArray(parsed.pauseOnCapByMap)) {
-                state.pauseOnCapByMap = new Map();
-                for (const [rid, arr] of parsed.pauseOnCapByMap) {
-                    state.pauseOnCapByMap.set(rid, new Set(Array.isArray(arr) ? arr.map(Number) : []));
+            // Pause-on-cap is global default-ON with opt-outs (shared Tracker + Overview).
+            if (Array.isArray(parsed.pauseOnCapOptOut)) {
+                state.pauseOnCapOptOut = new Set(parsed.pauseOnCapOptOut.map(Number).filter(Number.isFinite));
+            } else if (Array.isArray(parsed.pauseOnCapOptOutByMap)) {
+                // Migrate per-map opt-outs → union into global opt-out set
+                const merged = new Set();
+                for (const [, arr] of parsed.pauseOnCapOptOutByMap) {
+                    if (!Array.isArray(arr)) continue;
+                    for (const id of arr) {
+                        const n = Number(id);
+                        if (Number.isFinite(n)) merged.add(n);
+                    }
                 }
-            } else if (Array.isArray(parsed.pauseOnCap) && typeof parsed.currentRoomId === 'string') {
-                // Legacy migration: old global marks → marks for the map the user was on
-                const set = new Set(parsed.pauseOnCap.map(Number));
-                if (set.size > 0) state.pauseOnCapByMap.set(parsed.currentRoomId, set);
+                state.pauseOnCapOptOut = merged;
+            } else {
+                state.pauseOnCapOptOut = new Set();
             }
             if (Array.isArray(parsed.collapsedOverrides)) {
                 state.collapsedOverrides = new Map(parsed.collapsedOverrides);
@@ -500,7 +615,7 @@
                 width: Number.isFinite(Number(p.width)) ? Number(p.width) : PANEL_DEFAULTS.width,
                 height: Number.isFinite(Number(p.height)) ? Number(p.height) : PANEL_DEFAULTS.height,
                 isOpen: p.isOpen === true,
-                activeTab: (p.activeTab === 'overview') ? 'overview' : 'tracker',
+                activeTab: ['tracker', 'overview', 'farmer'].includes(p.activeTab) ? p.activeTab : 'tracker',
                 hideRaids: p.hideRaids === true
             };
         } catch (e) {
@@ -713,6 +828,7 @@
             if (roomId !== lastSeenRoomId) {
                 lastSeenRoomId = roomId;
                 updateCurrentMapEnemies();
+                if (typeof farmerRuntime.uiRefresh === 'function') farmerRuntime.uiRefresh();
             }
         });
         lastSeenRoomId = resolveCurrentRoomId();
@@ -741,8 +857,22 @@
             if (playerRenderDebounceId) clearTimeout(playerRenderDebounceId);
             playerRenderDebounceId = setTimeout(() => {
                 playerRenderDebounceId = null;
+                // Inventory caught up after an inject: retry pause-on-cap in case the
+                // earlier event ran before stats were visible or the pause button was missing.
+                try {
+                    for (const enemy of state.currentMapEnemies || []) {
+                        const gid = Number(enemy?.gameId);
+                        if (!Number.isFinite(gid) || !isPausedOnCap(gid)) continue;
+                        checkAndPauseIfCapped(gid, null);
+                        if (!isPausedOnCap(gid)) break; // opted out after successful pause
+                    }
+                } catch (_) { /* ignore */ }
+                if (loadFarmerSettings().enabled && farmerBootGraceDone) {
+                    try { farmerRunTick(); } catch (_) { /* ignore */ }
+                }
                 const panel = document.getElementById(PANEL_ID);
                 if (panel && panel.style.display !== 'none') render();
+                if (typeof farmerRuntime.uiRefresh === 'function') farmerRuntime.uiRefresh();
             }, 1500);
         });
     }
@@ -796,22 +926,30 @@
         }
     }
 
+    function resolveTriggeredCapStats(gameId, statsFromEvent) {
+        const triggeredAwaken = findAwakenedTargetForGameId(gameId);
+        const liveStats = triggeredAwaken ? getMonsterGeneStatsLocal(triggeredAwaken) : null;
+        // Prefer whichever source already shows a full cap. Live inventory can lag the
+        // inject event's `after` payload (and vice versa after a local optimistic sync).
+        if (isAwakenedCappedStats(liveStats)) return liveStats;
+        if (isAwakenedCappedStats(statsFromEvent)) return statsFromEvent;
+        return liveStats || statsFromEvent || null;
+    }
+
     function checkAndPauseIfCapped(gameId, statsFromEvent) {
         try {
-            const mapSet = state.currentRoomId ? state.pauseOnCapByMap.get(state.currentRoomId) : null;
-            if (!mapSet || mapSet.size === 0) return;
             const triggeredId = Number(gameId);
-            if (!mapSet.has(triggeredId)) return;
-            const triggeredAwaken = findAwakenedTargetForGameId(triggeredId);
-            const triggeredStats = triggeredAwaken ? getMonsterGeneStatsLocal(triggeredAwaken) : (statsFromEvent || null);
+            if (!isPausedOnCap(triggeredId)) return;
+            const triggeredStats = resolveTriggeredCapStats(triggeredId, statsFromEvent);
             if (!isAwakenedCappedStats(triggeredStats)) return;
 
             const markedOnMap = (state.currentMapEnemies || [])
                 .map(e => Number(e?.gameId))
-                .filter(g => Number.isFinite(g) && mapSet.has(g));
+                .filter(g => Number.isFinite(g) && isPausedOnCap(g));
             if (markedOnMap.length === 0) return;
 
             const allCapped = markedOnMap.every(g => {
+                if (g === triggeredId) return true; // already verified via resolveTriggeredCapStats
                 const aw = findAwakenedTargetForGameId(g);
                 return aw && isAwakenedCappedStats(getMonsterGeneStatsLocal(aw));
             });
@@ -821,12 +959,14 @@
             if (now - lastPauseAttemptMs < PAUSE_DEBOUNCE_MS) return;
             lastPauseAttemptMs = now;
             console.log('[Awaken Tracker] All marked creatures on map are capped — pausing. Marked:', markedOnMap);
-            tryPauseGameAutoplay();
-            // Consume the fulfilled marks: the creature is capped and the pause was delivered.
-            // Without this, every subsequent autoseller event re-triggers the pause (infinite loop).
-            // Marks for creatures not on the current map are preserved (not yet fulfilled).
-            markedOnMap.forEach(g => mapSet.delete(g));
+            const paused = tryPauseGameAutoplay();
+            // Only consume marks after a successful pause click. If the pause button was
+            // missing (e.g. between runs), keep the marks so a later inject/skip can retry.
+            // Without consume-on-success, every subsequent autoseller event re-triggers pause.
+            if (!paused) return;
+            markedOnMap.forEach(g => setPauseOnCap(g, false)); // opt out = consume mark
             scheduleSave();
+            scheduleRender();
         } catch (e) {
             console.warn('[Awaken Tracker] checkAndPauseIfCapped failed:', e);
         }
@@ -865,7 +1005,7 @@
         return `<img src="${src}" alt="${alt}" title="${alt}" style="display:inline !important;width:${size}px;height:${size}px;image-rendering:pixelated;vertical-align:-2px;opacity:${opacity};" />`;
     }
 
-    // Minimal badge: just an X/5 counter + ⏸ N suffix when waiting for peers
+    // Minimal badge: just an X/5 counter
     function buildStateBadge(gameId, stats) {
         const badge = document.createElement('span');
         if (!stats) {
@@ -885,13 +1025,15 @@
 
     function buildDragHandle(slot) {
         const handle = document.createElement('span');
-        handle.textContent = '⋮⋮';
         handle.title = t('mods.awakenTracker.dragToReorder');
-        handle.style.cssText = 'cursor:grab;color:#777;font-size:14px;line-height:1;padding:0 2px;user-select:none;letter-spacing:-3px;flex:0 0 auto;';
+        handle.style.cssText = 'cursor:grab;padding:0 2px;user-select:none;flex:0 0 auto;display:inline-flex;flex-direction:column;gap:1px;align-items:center;opacity:0.55;';
+        handle.appendChild(createUiIcon(UI_ICONS.drag, 5, 'transform:rotate(90deg);'));
+        handle.appendChild(createUiIcon(UI_ICONS.drag, 5, 'transform:rotate(90deg);'));
+        handle.appendChild(createUiIcon(UI_ICONS.drag, 5, 'transform:rotate(90deg);'));
         handle.addEventListener('mousedown', () => { slot.draggable = true; });
         handle.addEventListener('mouseup', () => { setTimeout(() => { slot.draggable = false; }, 50); });
-        handle.addEventListener('mouseenter', () => { handle.style.color = '#bbb'; });
-        handle.addEventListener('mouseleave', () => { handle.style.color = '#777'; });
+        handle.addEventListener('mouseenter', () => { handle.style.opacity = '1'; });
+        handle.addEventListener('mouseleave', () => { handle.style.opacity = '0.55'; });
         return handle;
     }
 
@@ -910,7 +1052,7 @@
     }
 
     function buildCapToggleLabel(gameId, awakened, alreadyCapped) {
-        const isMarked = isPausedOnCapInCurrentMap(gameId);
+        const isMarked = isPausedOnCap(gameId, awakened);
         const capToggleLabel = document.createElement('label');
         capToggleLabel.style.cssText = 'display:inline-flex;align-items:center;gap:3px;font-size:11px;flex:0 0 auto;';
         const capToggleInput = document.createElement('input');
@@ -918,22 +1060,25 @@
         capToggleInput.checked = isMarked;
         capToggleInput.style.cssText = 'margin:0;';
         if (!awakened) {
+            capToggleInput.checked = false;
             capToggleInput.disabled = true;
             capToggleLabel.title = t('mods.awakenTracker.awakenFirst');
             capToggleLabel.style.opacity = '0.4';
             capToggleLabel.style.cursor = 'not-allowed';
             capToggleInput.style.cursor = 'not-allowed';
         } else if (alreadyCapped) {
-            // Creature already 5/5: pause-on-cap no longer makes sense. Automatically
-            // remove any stale mark and keep the checkbox disabled and unchecked.
-            if (isMarked) {
-                const set = state.currentRoomId ? state.pauseOnCapByMap.get(state.currentRoomId) : null;
-                if (set && set.delete(Number(gameId))) scheduleSave();
-            }
-            capToggleInput.checked = false;
+            // Pre-capped (already 5/5 at session baseline): opt out — pause-on-cap
+            // was never going to fire for these. Do NOT opt out creatures that capped
+            // during this run; that could beat checkAndPauseIfCapped (or wipe the mark
+            // after a failed pause click), so autoplay never stopped.
+            if (ensurePreCappedOptOut(gameId, awakened)) scheduleSave();
+            const stillMarked = isPausedOnCap(gameId, awakened);
+            capToggleInput.checked = stillMarked;
             capToggleInput.disabled = true;
-            capToggleLabel.title = t('mods.awakenTracker.alreadyFullyCapped');
-            capToggleLabel.style.opacity = '0.4';
+            capToggleLabel.title = stillMarked
+                ? t('mods.awakenTracker.pauseOnCap')
+                : t('mods.awakenTracker.alreadyFullyCapped');
+            capToggleLabel.style.opacity = stillMarked ? '1' : '0.4';
             capToggleLabel.style.cursor = 'not-allowed';
             capToggleInput.style.cursor = 'not-allowed';
         } else {
@@ -942,19 +1087,13 @@
             capToggleLabel.style.cursor = 'pointer';
             capToggleInput.style.cursor = 'pointer';
             capToggleInput.addEventListener('change', (e) => {
-                const k = Number(gameId);
-                const set = getPauseSetForMap(state.currentRoomId);
-                if (!set) return;
-                if (e.target.checked) set.add(k);
-                else set.delete(k);
+                setPauseOnCap(gameId, e.target.checked);
                 capToggleLabel.style.opacity = e.target.checked ? '1' : '0.6';
                 scheduleSave();
             });
         }
         capToggleLabel.appendChild(capToggleInput);
-        const capIconSpan = document.createElement('span');
-        capIconSpan.textContent = '🎯';
-        capToggleLabel.appendChild(capIconSpan);
+        capToggleLabel.appendChild(createUiIcon(UI_ICONS.pauseOnCap, 12));
         return capToggleLabel;
     }
 
@@ -1143,12 +1282,12 @@
                         .map(([k, v]) => `<span style="display:inline-flex;align-items:center;gap:1px;">${renderStatIconHtml(k, 10)}<span style="color:#7fde7f;font-weight:bold;">+${v}</span></span>`)
                         .join(' ');
                     row.innerHTML =
-                        `<div><span style="opacity:0.5;">${hh}:${mm}:${ss}</span> <span style="color:#7fde7f;">✓</span> ${gainPairs || `<span style="opacity:0.6;">${t('mods.awakenTracker.noGain')}</span>`}</div>` +
+                        `<div><span style="opacity:0.5;">${hh}:${mm}:${ss}</span> ${uiIconHtml(UI_ICONS.success, 10)} ${gainPairs || `<span style="opacity:0.6;">${t('mods.awakenTracker.noGain')}</span>`}</div>` +
                         `<div style="opacity:0.7;padding-left:6px;">${t('mods.awakenTracker.sealed')} ${sealedHtml}</div>`;
                 } else {
                     const reasonLabel = getSkipReasonLabel(logEv.reason);
                     row.innerHTML =
-                        `<div><span style="opacity:0.5;">${hh}:${mm}:${ss}</span> <span style="color:#ff9966;">✗</span> ${reasonLabel}</div>` +
+                        `<div><span style="opacity:0.5;">${hh}:${mm}:${ss}</span> ${uiIconHtml(UI_ICONS.fail, 10)} ${reasonLabel}</div>` +
                         `<div style="opacity:0.7;padding-left:6px;">${t('mods.awakenTracker.sealed')} ${sealedHtml}</div>`;
                 }
                 logList.appendChild(row);
@@ -1158,6 +1297,1185 @@
         }
 
         return slot;
+    }
+
+    // =======================
+    // 9b. Awaken Farmer — gene-cap automation for awakened creatures
+    // =======================
+    function sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    function clampStartDelay(value) {
+        const n = Number(value);
+        if (!Number.isFinite(n)) return DEFAULT_START_DELAY;
+        return Math.max(1, Math.min(MAX_START_DELAY, Math.round(n)));
+    }
+
+    function loadFarmerSettings() {
+        try {
+            const raw = localStorage.getItem(STORAGE_KEY_FARMER);
+            if (!raw) return { ...FARMER_DEFAULTS, mapSettings: {} };
+            const p = JSON.parse(raw);
+            const mapSettings = (p.mapSettings && typeof p.mapSettings === 'object' && !Array.isArray(p.mapSettings))
+                ? p.mapSettings
+                : {};
+            return {
+                enabled: p.enabled === true,
+                autoRefillStamina: p.autoRefillStamina === true,
+                setupLabel: typeof p.setupLabel === 'string' ? p.setupLabel : '',
+                floor: Number.isFinite(Number(p.floor)) ? Number(p.floor) : 0,
+                startDelay: clampStartDelay(p.startDelay ?? DEFAULT_START_DELAY),
+                mapSettings
+            };
+        } catch (_) {
+            return { ...FARMER_DEFAULTS, mapSettings: {} };
+        }
+    }
+
+    function saveFarmerSettings(partial) {
+        try {
+            const merged = { ...loadFarmerSettings(), ...partial };
+            if (partial && Object.prototype.hasOwnProperty.call(partial, 'startDelay')) {
+                merged.startDelay = clampStartDelay(partial.startDelay);
+            }
+            if (partial && Object.prototype.hasOwnProperty.call(partial, 'mapSettings')) {
+                merged.mapSettings = (partial.mapSettings && typeof partial.mapSettings === 'object')
+                    ? partial.mapSettings
+                    : {};
+            }
+            localStorage.setItem(STORAGE_KEY_FARMER, JSON.stringify(merged));
+            return merged;
+        } catch (_) {
+            return loadFarmerSettings();
+        }
+    }
+
+    function getFarmerMapSettings(roomId) {
+        if (!roomId) return null;
+        const all = loadFarmerSettings().mapSettings || {};
+        const entry = all[String(roomId)];
+        return entry && typeof entry === 'object' ? entry : null;
+    }
+
+    function hasFarmerMapCustomSettings(roomId) {
+        const entry = getFarmerMapSettings(roomId);
+        if (!entry) return false;
+        if (entry.floor != null && Number.isFinite(Number(entry.floor))) return true;
+        if (Object.prototype.hasOwnProperty.call(entry, 'setupLabel')) return true;
+        if (Object.prototype.hasOwnProperty.call(entry, 'autoRefillStamina')) return true;
+        return false;
+    }
+
+    function setFarmerMapSettings(roomId, nextEntry) {
+        if (!roomId) return loadFarmerSettings();
+        const settings = loadFarmerSettings();
+        const mapSettings = { ...(settings.mapSettings || {}) };
+        const key = String(roomId);
+        if (!nextEntry || Object.keys(nextEntry).length === 0) {
+            delete mapSettings[key];
+        } else {
+            mapSettings[key] = nextEntry;
+        }
+        return saveFarmerSettings({ mapSettings });
+    }
+
+    function clearFarmerMapSettings(roomId) {
+        return setFarmerMapSettings(roomId, null);
+    }
+
+    function getEffectiveFarmerSetupLabel(roomId) {
+        const entry = getFarmerMapSettings(roomId);
+        if (entry && Object.prototype.hasOwnProperty.call(entry, 'setupLabel')) {
+            return typeof entry.setupLabel === 'string' ? entry.setupLabel : '';
+        }
+        return loadFarmerSettings().setupLabel || '';
+    }
+
+    function getEffectiveFarmerAutoRefill(roomId) {
+        const entry = getFarmerMapSettings(roomId);
+        if (entry && Object.prototype.hasOwnProperty.call(entry, 'autoRefillStamina')) {
+            return entry.autoRefillStamina === true;
+        }
+        return loadFarmerSettings().autoRefillStamina === true;
+    }
+
+    /** Species with at least one awaken that is not fully gene-capped (20×5). */
+    function collectAwakenedNotCappedTargets() {
+        const monsters = globalThis.state?.player?.getSnapshot?.()?.context?.monsters || [];
+        const byGameId = new Map();
+        for (const m of monsters) {
+            if (!m || m.gameId == null || !isAwakenedCreatureLocal(m)) continue;
+            const gameId = Number(m.gameId);
+            if (!Number.isFinite(gameId)) continue;
+            const name = resolveName(gameId);
+            const lname = String(name).toLowerCase();
+            if (getUnobtainableNames().has(lname) || isNonAwakenableName(lname)) continue;
+            const stats = getMonsterGeneStatsLocal(m);
+            const capped = isAwakenedCappedStats(stats);
+            let g = byGameId.get(gameId);
+            if (!g) {
+                g = { gameId, name, anyCapped: false, bestUncapped: null };
+                byGameId.set(gameId, g);
+            }
+            if (capped) g.anyCapped = true;
+            else {
+                const sum = STATS.reduce((a, k) => a + (Number(stats[k]) || 0), 0);
+                if (!g.bestUncapped || sum > g.bestUncapped.sum) {
+                    g.bestUncapped = { stats, sum, cappedCount: STATS.filter(k => Number(stats[k]) >= CAP_VALUE).length };
+                }
+            }
+        }
+        const targets = [];
+        const namesById = new Map();
+        for (const g of byGameId.values()) {
+            // Injects target the best awaken; once any copy is fully capped, gene farming is done.
+            if (g.anyCapped || !g.bestUncapped) continue;
+            targets.push(g);
+            namesById.set(g.gameId, g.name);
+        }
+        targets.sort((a, b) => (b.bestUncapped?.sum || 0) - (a.bestUncapped?.sum || 0) || a.name.localeCompare(b.name));
+        return { targets, wantedIds: new Set(targets.map(t => t.gameId)), namesById };
+    }
+
+    function isRaidRoomId(roomId, room) {
+        try {
+            if (typeof window.mapsDatabase?.isRaid === 'function') {
+                return window.mapsDatabase.isRaid(roomId) === true;
+            }
+        } catch (_) {}
+        return room?.raid === true;
+    }
+
+    /** True when this raid room is in the live active-raids list (currently spawnable). */
+    function isRaidCurrentlyActive(roomId) {
+        if (!roomId) return false;
+        try {
+            const activeRaids = globalThis.state?.raids?.getSnapshot?.()?.context?.list || [];
+            return activeRaids.some((raid) => String(raid?.roomId) === String(roomId));
+        } catch (_) {
+            return false;
+        }
+    }
+
+    /** Best completed ascension floor for a room (−1 if never recorded). */
+    function getBestCompletedFloorForRoom(roomId) {
+        try {
+            const roomStats = globalThis.state?.player?.getSnapshot?.()?.context?.rooms?.[roomId];
+            const floor = roomStats?.floor;
+            if (typeof floor !== 'number' || Number.isNaN(floor)) return -1;
+            return Math.max(0, Math.min(AWAKEN_FARM_MAX_FLOOR, Math.floor(floor)));
+        } catch (_) {
+            return -1;
+        }
+    }
+
+    /** Highest selectable floor (best completed + 1, capped at 15). */
+    function getMaxUnlockedFloorForRoom(roomId) {
+        const best = getBestCompletedFloorForRoom(roomId);
+        if (best < 0) return 0;
+        return Math.min(AWAKEN_FARM_MAX_FLOOR, best + 1);
+    }
+
+    function hasAwakenFarmFloorUnlocked(roomId) {
+        return getMaxUnlockedFloorForRoom(roomId) >= AWAKEN_FARM_MIN_FLOOR;
+    }
+
+    /** Pick a farmable sealed floor in 11–15, or null if none unlocked. Honors per-map override. */
+    function pickAwakenFarmFloor(roomId) {
+        const maxUnlocked = getMaxUnlockedFloorForRoom(roomId);
+        if (maxUnlocked < AWAKEN_FARM_MIN_FLOOR) return null;
+        const entry = getFarmerMapSettings(roomId);
+        if (entry?.floor != null) {
+            const custom = Number(entry.floor);
+            if (Number.isFinite(custom)
+                && custom >= AWAKEN_FARM_MIN_FLOOR
+                && custom <= maxUnlocked) {
+                return Math.min(AWAKEN_FARM_MAX_FLOOR, custom);
+            }
+        }
+        return Math.min(AWAKEN_FARM_MAX_FLOOR, maxUnlocked);
+    }
+
+    function rankMapsForWantedIds(wantedIds, namesById = new Map()) {
+        const utils = globalThis.state?.utils;
+        if (!utils?.REGIONS || typeof utils.getBoardMonstersFromRoomId !== 'function') {
+            return { results: [], error: 'utils' };
+        }
+        if (!wantedIds || wantedIds.size === 0) {
+            return { results: [], error: null };
+        }
+        const ROOM_NAME = utils.ROOM_NAME || {};
+        const regionIdsToNames = utils.regionIdsToNames || {};
+        const results = [];
+        let orderIdx = 0;
+        for (const region of utils.REGIONS) {
+            if (!region?.id) continue;
+            const regionName = regionIdsToNames[region.id] || region.id;
+            for (const room of (region.rooms || [])) {
+                if (!room?.id) continue;
+                const isRaid = isRaidRoomId(room.id, room);
+                // Inactive raids are not farmable — only include them while active.
+                if (isRaid && !isRaidCurrentlyActive(room.id)) continue;
+                // Sealed / awaken gene farming needs at least one unlocked floor in 11–15.
+                if (!hasAwakenFarmFloorUnlocked(room.id)) continue;
+
+                let board;
+                try { board = utils.getBoardMonstersFromRoomId(room.id); } catch (_) { continue; }
+                if (!Array.isArray(board)) continue;
+                const villains = board.filter(p => p?.villain === true);
+                if (!villains.length) continue;
+
+                const wantedByCreature = new Map();
+                const otherByCreature = new Map();
+                for (const v of villains) {
+                    const id = Number(v.gameId);
+                    if (!Number.isFinite(id)) continue;
+                    if (wantedIds.has(id)) {
+                        const entry = wantedByCreature.get(id) || { count: 0, totalLevel: 0 };
+                        entry.count += 1;
+                        entry.totalLevel += Number(v.level || 0);
+                        wantedByCreature.set(id, entry);
+                    } else {
+                        const entry = otherByCreature.get(id) || { count: 0, totalLevel: 0 };
+                        entry.count += 1;
+                        entry.totalLevel += Number(v.level || 0);
+                        otherByCreature.set(id, entry);
+                    }
+                }
+                if (wantedByCreature.size === 0) continue;
+
+                const wantedTotal = Array.from(wantedByCreature.values()).reduce((a, b) => a + b.count, 0);
+                const uniqueWanted = wantedByCreature.size;
+                const totalVillains = villains.length;
+                const density = wantedTotal / totalVillains;
+                const stamina = Number(room.staminaCost ?? 0);
+                const wantedPerStamina = stamina > 0 ? wantedTotal / stamina : wantedTotal;
+                const farmFloor = pickAwakenFarmFloor(room.id);
+
+                results.push({
+                    roomId: room.id,
+                    mapName: ROOM_NAME[room.id] || room.id,
+                    regionName, stamina, totalVillains, wantedTotal, uniqueWanted,
+                    density, wantedPerStamina, defaultOrder: orderIdx++,
+                    isRaid,
+                    farmFloor,
+                    maxUnlockedFloor: getMaxUnlockedFloorForRoom(room.id),
+                    wantedDetails: Array.from(wantedByCreature.entries()).map(([id, info]) => ({
+                        id, name: namesById.get(id) || resolveName(id) || `#${id}`,
+                        count: info.count, avgLevel: info.totalLevel / info.count
+                    })).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)),
+                    otherDetails: Array.from(otherByCreature.entries()).map(([id, info]) => ({
+                        id, name: resolveName(id),
+                        count: info.count, avgLevel: info.totalLevel / info.count
+                    })).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
+                });
+            }
+        }
+        results.sort((a, b) =>
+            b.uniqueWanted - a.uniqueWanted
+            || b.wantedPerStamina - a.wantedPerStamina
+            || a.defaultOrder - b.defaultOrder
+        );
+        return { results, raidCount: results.filter(r => r.isRaid).length, error: null };
+    }
+
+    const farmerRuntime = {
+        tickTimer: null,
+        resumeTimer: null,
+        busy: false,
+        wasInitiatedByMod: false,
+        currentRoomId: null,
+        enabledRefill: false,
+        status: 'idle',
+        lastBlockReason: null,
+        uiRefresh: null
+    };
+
+    let farmerAllModsLoaded = false;
+    let farmerBootGraceDone = false;
+    let farmerBootGraceTimer = null;
+    let farmerBootFallbackTimer = null;
+    let farmerBootMessageHandler = null;
+
+    function farmerSleep(ms) { return sleep(ms); }
+
+    function getFarmerSetupLabels() {
+        try {
+            const labelsStr = localStorage.getItem('stored-setup-labels');
+            if (labelsStr) {
+                const labels = JSON.parse(labelsStr);
+                if (Array.isArray(labels) && labels.length) return labels;
+            }
+        } catch (_) {}
+        return ['Farm', 'Speedrun', 'Rank Points', 'Boosted Map', 'Other'];
+    }
+
+    let openFarmerMapContextMenu = null;
+
+    function closeFarmerMapContextMenu() {
+        if (openFarmerMapContextMenu?.closeMenu) {
+            try { openFarmerMapContextMenu.closeMenu(); } catch (_) {}
+        }
+        openFarmerMapContextMenu = null;
+    }
+
+    /**
+     * Per-map Awaken Farmer settings (floor 11–15, setup, auto-refill). Raid Hunter-style smith icon + context menu.
+     */
+    function createFarmerMapContextMenu(roomId, mapName, x, y, onClose) {
+        closeFarmerMapContextMenu();
+
+        const entry = getFarmerMapSettings(roomId) || {};
+        const maxUnlocked = getMaxUnlockedFloorForRoom(roomId);
+        const currentFloor = (entry.floor != null && Number.isFinite(Number(entry.floor)))
+            ? String(Math.round(Number(entry.floor)))
+            : 'auto';
+        const currentSetup = Object.prototype.hasOwnProperty.call(entry, 'setupLabel')
+            ? entry.setupLabel
+            : 'default';
+        const currentRefill = Object.prototype.hasOwnProperty.call(entry, 'autoRefillStamina')
+            ? (entry.autoRefillStamina === true ? 'on' : 'off')
+            : 'default';
+
+        const selectCss = [
+            'width:100%',
+            'padding:4px 6px',
+            'box-sizing:border-box',
+            'background:#1a1a1a',
+            'color:#f0f0f0',
+            'border:1px solid #666',
+            'border-radius:3px',
+            'font-size:11px',
+            'cursor:pointer',
+            'outline:none',
+            'color-scheme:dark'
+        ].join(';');
+
+        const optionCss = 'background:#1a1a1a;color:#f0f0f0;';
+
+        function styleSelectOptions(selectEl) {
+            for (const opt of selectEl.options) {
+                opt.style.cssText = optionCss;
+                if (opt.disabled) opt.style.color = '#777';
+            }
+        }
+
+        function makeField(labelText, control) {
+            const wrap = document.createElement('div');
+            wrap.style.cssText = 'display:flex;flex-direction:column;gap:3px;margin-bottom:8px;';
+            const lab = document.createElement('label');
+            lab.textContent = labelText;
+            lab.style.cssText = 'color:#ccc;font-size:10px;font-weight:bold;';
+            wrap.appendChild(lab);
+            wrap.appendChild(control);
+            return wrap;
+        }
+
+        const overlay = document.createElement('div');
+        overlay.style.cssText = 'position:fixed;inset:0;z-index:9998;background:transparent;cursor:default;';
+
+        const menu = document.createElement('div');
+        menu.style.cssText = [
+            'position:fixed',
+            `left:${x}px`,
+            `top:${y}px`,
+            'z-index:9999',
+            'min-width:220px',
+            'max-width:260px',
+            "background:url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat",
+            'border:4px solid transparent',
+            'border-image:url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch',
+            'border-radius:4px',
+            'padding:8px 10px',
+            'box-shadow:0 4px 12px rgba(0,0,0,0.5)',
+            'color-scheme:dark'
+        ].join(';');
+
+        const title = document.createElement('div');
+        title.textContent = mapName || roomId;
+        title.style.cssText = 'color:#ffe066;font-weight:bold;margin-bottom:8px;text-align:center;font-size:12px;';
+        menu.appendChild(title);
+
+        const floorSelect = document.createElement('select');
+        floorSelect.style.cssText = selectCss;
+        const autoOpt = document.createElement('option');
+        autoOpt.value = 'auto';
+        autoOpt.textContent = t('mods.awakenTracker.farmerMapFloorAuto');
+        floorSelect.appendChild(autoOpt);
+        for (let f = AWAKEN_FARM_MIN_FLOOR; f <= AWAKEN_FARM_MAX_FLOOR; f++) {
+            const opt = document.createElement('option');
+            opt.value = String(f);
+            opt.textContent = `${t('mods.awakenTracker.farmerFloor')} ${f}`;
+            if (f > maxUnlocked) {
+                opt.disabled = true;
+                opt.textContent += ` (${t('mods.awakenTracker.farmerFloorLocked')})`;
+            }
+            floorSelect.appendChild(opt);
+        }
+        floorSelect.value = (currentFloor !== 'auto' && Number(currentFloor) > maxUnlocked) ? 'auto' : currentFloor;
+        styleSelectOptions(floorSelect);
+        menu.appendChild(makeField(t('mods.awakenTracker.farmerMapFloor'), floorSelect));
+
+        const setupSelect = document.createElement('select');
+        setupSelect.style.cssText = selectCss;
+        const defaultSetup = document.createElement('option');
+        defaultSetup.value = 'default';
+        defaultSetup.textContent = t('mods.awakenTracker.farmerMapSetupDefault');
+        setupSelect.appendChild(defaultSetup);
+        const autoSetup = document.createElement('option');
+        autoSetup.value = '';
+        autoSetup.textContent = t('mods.awakenTracker.farmerAutoSetup');
+        setupSelect.appendChild(autoSetup);
+        for (const label of getFarmerSetupLabels()) {
+            const opt = document.createElement('option');
+            opt.value = label;
+            opt.textContent = label;
+            setupSelect.appendChild(opt);
+        }
+        if (currentSetup === 'default') {
+            setupSelect.value = 'default';
+        } else if (currentSetup === '') {
+            setupSelect.value = '';
+        } else {
+            setupSelect.value = currentSetup;
+            if (setupSelect.value !== currentSetup) {
+                const custom = document.createElement('option');
+                custom.value = currentSetup;
+                custom.textContent = currentSetup;
+                setupSelect.appendChild(custom);
+                setupSelect.value = currentSetup;
+            }
+        }
+        styleSelectOptions(setupSelect);
+        menu.appendChild(makeField(t('mods.awakenTracker.farmerSetupLabel'), setupSelect));
+
+        const refillSelect = document.createElement('select');
+        refillSelect.style.cssText = selectCss;
+        [
+            ['default', t('mods.awakenTracker.farmerMapRefillDefault')],
+            ['on', t('mods.awakenTracker.farmerMapRefillOn')],
+            ['off', t('mods.awakenTracker.farmerMapRefillOff')]
+        ].forEach(([value, text]) => {
+            const opt = document.createElement('option');
+            opt.value = value;
+            opt.textContent = text;
+            refillSelect.appendChild(opt);
+        });
+        refillSelect.value = currentRefill;
+        styleSelectOptions(refillSelect);
+        menu.appendChild(makeField(t('mods.awakenTracker.farmerMapRefill'), refillSelect));
+
+        const hint = document.createElement('div');
+        hint.textContent = t('mods.awakenTracker.farmerMapSettingsHint');
+        hint.style.cssText = 'color:#777;font-size:9px;line-height:1.3;margin:0 0 8px;';
+        menu.appendChild(hint);
+
+        const buttons = document.createElement('div');
+        buttons.style.cssText = 'display:flex;gap:4px;justify-content:center;flex-wrap:wrap;';
+
+        function closeMenu() {
+            try { overlay.remove(); } catch (_) {}
+            try { menu.remove(); } catch (_) {}
+            if (openFarmerMapContextMenu?.menu === menu) openFarmerMapContextMenu = null;
+            document.removeEventListener('keydown', onKey);
+        }
+
+        function onKey(e) {
+            if (e.key === 'Escape') closeMenu();
+        }
+
+        const btnBase = 'min-width:58px;height:24px;border:1px solid #555;border-radius:3px;cursor:pointer;font-size:11px;font-weight:bold;';
+
+        const saveBtn = document.createElement('button');
+        saveBtn.type = 'button';
+        saveBtn.textContent = t('mods.awakenTracker.farmerMapSave');
+        saveBtn.style.cssText = `${btnBase}background:#1a3a1a;color:#4CAF50;`;
+        saveBtn.addEventListener('click', () => {
+            const next = {};
+            if (floorSelect.value !== 'auto') {
+                const f = Number(floorSelect.value);
+                if (Number.isFinite(f) && f >= AWAKEN_FARM_MIN_FLOOR && f <= maxUnlocked) {
+                    next.floor = f;
+                }
+            }
+            if (setupSelect.value !== 'default') {
+                next.setupLabel = setupSelect.value;
+            }
+            if (refillSelect.value === 'on') next.autoRefillStamina = true;
+            else if (refillSelect.value === 'off') next.autoRefillStamina = false;
+            setFarmerMapSettings(roomId, Object.keys(next).length ? next : null);
+            console.log(`[Awaken Farmer] Saved map settings for ${roomId}:`, next);
+            if (typeof onClose === 'function') onClose();
+            closeMenu();
+        });
+
+        const cancelBtn = document.createElement('button');
+        cancelBtn.type = 'button';
+        cancelBtn.textContent = t('mods.awakenTracker.farmerMapCancel');
+        cancelBtn.style.cssText = `${btnBase}background:#1a1a1a;color:#888;`;
+        cancelBtn.addEventListener('click', closeMenu);
+
+        buttons.appendChild(saveBtn);
+        if (hasFarmerMapCustomSettings(roomId)) {
+            const clearBtn = document.createElement('button');
+            clearBtn.type = 'button';
+            clearBtn.textContent = t('mods.awakenTracker.farmerMapClear');
+            clearBtn.style.cssText = `${btnBase}background:#1a1a1a;color:#888;`;
+            clearBtn.addEventListener('mouseenter', () => { clearBtn.style.color = '#ff6b6b'; });
+            clearBtn.addEventListener('mouseleave', () => { clearBtn.style.color = '#888'; });
+            clearBtn.addEventListener('click', () => {
+                clearFarmerMapSettings(roomId);
+                console.log(`[Awaken Farmer] Cleared map settings for ${roomId}`);
+                if (typeof onClose === 'function') onClose();
+                closeMenu();
+            });
+            buttons.appendChild(clearBtn);
+        }
+        buttons.appendChild(cancelBtn);
+        menu.appendChild(buttons);
+
+        overlay.addEventListener('mousedown', (e) => {
+            if (e.target === overlay) closeMenu();
+        });
+        document.addEventListener('keydown', onKey);
+
+        document.body.appendChild(overlay);
+        document.body.appendChild(menu);
+
+        requestAnimationFrame(() => {
+            const rect = menu.getBoundingClientRect();
+            let left = x;
+            let top = y;
+            if (rect.right > window.innerWidth - 8) left = Math.max(8, window.innerWidth - rect.width - 8);
+            if (rect.bottom > window.innerHeight - 8) top = Math.max(8, window.innerHeight - rect.height - 8);
+            menu.style.left = `${left}px`;
+            menu.style.top = `${top}px`;
+        });
+
+        openFarmerMapContextMenu = { menu, closeMenu };
+        return menu;
+    }
+
+    function farmerHasSetupForMap(setupLabel, mapId) {
+        if (!setupLabel || !mapId) return false;
+        try { return localStorage.getItem(`${setupLabel}-${mapId}`) !== null; } catch (_) { return false; }
+    }
+
+    function farmerFindBestiaryAutomator() {
+        try {
+            if (window.bestiaryAutomator?.updateConfig) return window.bestiaryAutomator;
+            if (window.BestiaryAutomatorAPI?.updateConfig) return window.BestiaryAutomatorAPI;
+            if (typeof context !== 'undefined' && context.exports?.updateConfig) return context.exports;
+            const viaLoader = window.modLoader?.getModContext?.('bestiary-automator');
+            if (viaLoader?.exports?.updateConfig) return viaLoader.exports;
+        } catch (_) {}
+        return null;
+    }
+
+    function farmerApplyAutomatorRefill(enabled) {
+        try {
+            const automator = farmerFindBestiaryAutomator();
+            if (!automator?.updateConfig) return false;
+            automator.updateConfig({ autoRefillStamina: !!enabled });
+            farmerRuntime.enabledRefill = !!enabled;
+            return true;
+        } catch (e) {
+            console.warn('[Awaken Farmer] Automator refill toggle failed:', e);
+            return false;
+        }
+    }
+
+    let farmerModRegistered = false;
+
+    function ensureFarmerModRegistered() {
+        if (farmerModRegistered) {
+            try { window.ModCoordination?.updateModPriority?.(FARMER_MOD_NAME, FARMER_PRIORITY); } catch (_) {}
+            return true;
+        }
+        if (!window.ModCoordination?.registerMod) return false;
+        try {
+            window.ModCoordination.registerMod(FARMER_MOD_NAME, {
+                priority: FARMER_PRIORITY,
+                metadata: { description: 'Farms maps to gene-cap awakened creatures' }
+            });
+            // Override any stale localStorage priority so we stay just above Stamina Optimizer.
+            window.ModCoordination.updateModPriority?.(FARMER_MOD_NAME, FARMER_PRIORITY);
+            farmerModRegistered = true;
+            return true;
+        } catch (e) {
+            console.warn('[Awaken Farmer] registerMod failed:', e);
+            return false;
+        }
+    }
+
+    function syncFarmerModCoordination() {
+        if (!window.ModCoordination) return;
+        if (!ensureFarmerModRegistered()) return;
+        const s = loadFarmerSettings();
+        window.ModCoordination.updateModState(FARMER_MOD_NAME, {
+            enabled: s.enabled === true,
+            active: farmerRuntime.wasInitiatedByMod === true
+        });
+    }
+
+    function isRaidHunterEnabled() {
+        try {
+            // Prefer Raid Hunter's real automation flag. ModCoordination used to stay
+            // enabled:true after RH init even when automation was off, which made
+            // Awaken Farmer yield forever whenever any live raids existed.
+            const raw = localStorage.getItem('raidHunterAutomationEnabled');
+            if (raw !== null) {
+                try {
+                    const parsed = JSON.parse(raw);
+                    return parsed === true || parsed === 'true';
+                } catch (_) {
+                    return String(raw).toLowerCase() === 'true';
+                }
+            }
+            return window.ModCoordination?.isModEnabled?.('Raid Hunter') === true;
+        } catch (_) {
+            return false;
+        }
+    }
+
+    /** True when Raid Hunter is active or has live raids it may claim (do not steal the map first). */
+    function isRaidHunterPendingOrActive() {
+        try {
+            if (window.ModCoordination?.isModActive?.('Raid Hunter')) return true;
+            if (typeof window.raidHunterIsCurrentlyRaiding === 'function' && window.raidHunterIsCurrentlyRaiding()) {
+                return true;
+            }
+            // Prefer RH's own filter (enabled maps only). Any live raid used to block forever
+            // when RH skipped disabled maps (e.g. Monastery Catacombs) while SO still ran.
+            if (typeof window.raidHunterHasClaimableRaids === 'function') {
+                return window.raidHunterHasClaimableRaids() === true;
+            }
+            if (!isRaidHunterEnabled()) return false;
+            const list = globalThis.state?.raids?.getSnapshot?.()?.context?.list || [];
+            return Array.isArray(list) && list.length > 0;
+        } catch (_) {
+            return false;
+        }
+    }
+
+    /** True when farmer loop is armed and still has / may have work (SO / others should yield). */
+    function awakenFarmerShouldHoldBoard() {
+        try {
+            if (!loadFarmerSettings().enabled) return false;
+            if (!farmerBootGraceDone) return true; // about to auto-start
+            if (!farmerRuntime.tickTimer) return false;
+            if (farmerRuntime.status === 'done' || farmerRuntime.status === 'no-maps') return false;
+            return true;
+        } catch (_) {
+            return false;
+        }
+    }
+    window.awakenFarmerShouldHoldBoard = awakenFarmerShouldHoldBoard;
+
+    function farmerBlockedReason() {
+        if (!farmerBootGraceDone) return 'boot-grace';
+        if (awakenPausedForAnalysis || isAwakenAnalysisBlockingActive()) return 'board-analyzer';
+        if (window.ModCoordination?.isModActive?.('Manual Runner')) return 'manual-runner';
+        if (window.ModCoordination?.isModActive?.('Board Analyzer')) return 'board-analyzer';
+        if (window.ModCoordination?.isModActive?.('Better Boosted Maps')) return 'better-boosted-maps';
+        if (isRaidHunterPendingOrActive()) return 'raid-hunter';
+        if (window.ModCoordination?.canModRun
+            && !window.ModCoordination.canModRun(FARMER_MOD_NAME, FARMER_YIELD_MODS)) {
+            return 'mod-coordination';
+        }
+        return null;
+    }
+
+    function farmerCanRun() {
+        return farmerBlockedReason() === null;
+    }
+
+    let farmerCoordinationUnsubscribe = null;
+
+    function setupFarmerBootGrace() {
+        if (farmerBootMessageHandler) return;
+
+        const beginGrace = () => {
+            if (farmerBootGraceDone || farmerBootGraceTimer) return;
+            console.log(`[Awaken Farmer] Boot grace started — waiting ${MODS_LOADING_GRACE_PERIOD / 1000}s before auto-start`);
+            farmerBootGraceTimer = setTimeout(() => {
+                farmerBootGraceTimer = null;
+                farmerBootGraceDone = true;
+                console.log('[Awaken Farmer] Boot grace ended');
+                if (loadFarmerSettings().enabled) startFarmerLoop();
+            }, MODS_LOADING_GRACE_PERIOD);
+        };
+
+        farmerBootMessageHandler = (event) => {
+            if (event.source !== window) return;
+            if (event.data?.from === 'LOCAL_MODS_LOADER' && event.data?.action === 'allModsLoaded') {
+                if (farmerAllModsLoaded) return;
+                farmerAllModsLoaded = true;
+                console.log('[Awaken Farmer] Received allModsLoaded signal');
+                beginGrace();
+            }
+        };
+        window.addEventListener('message', farmerBootMessageHandler);
+
+        farmerBootFallbackTimer = setTimeout(() => {
+            farmerBootFallbackTimer = null;
+            if (!farmerAllModsLoaded) {
+                console.warn('[Awaken Farmer] allModsLoaded not received — starting boot grace anyway');
+                farmerAllModsLoaded = true;
+                beginGrace();
+            }
+        }, MAX_WAIT_FOR_SIGNAL);
+    }
+
+    function teardownFarmerBootGrace() {
+        if (farmerBootMessageHandler) {
+            try { window.removeEventListener('message', farmerBootMessageHandler); } catch (_) {}
+            farmerBootMessageHandler = null;
+        }
+        if (farmerBootGraceTimer) {
+            clearTimeout(farmerBootGraceTimer);
+            farmerBootGraceTimer = null;
+        }
+        if (farmerBootFallbackTimer) {
+            clearTimeout(farmerBootFallbackTimer);
+            farmerBootFallbackTimer = null;
+        }
+    }
+
+    function setupFarmerCoordination() {
+        if (farmerCoordinationUnsubscribe || !window.ModCoordination?.on) return;
+        farmerCoordinationUnsubscribe = window.ModCoordination.on('modActiveChanged', (data) => {
+            if (!data || data.active) return;
+            if (!FARMER_YIELD_MODS.includes(data.modName)) return;
+            if (!loadFarmerSettings().enabled) return;
+            if (farmerRuntime.resumeTimer) {
+                clearTimeout(farmerRuntime.resumeTimer);
+                farmerRuntime.resumeTimer = null;
+            }
+            console.log(`[Awaken Farmer] ${data.modName} became inactive — resuming after coordination delay`);
+            farmerRuntime.resumeTimer = setTimeout(() => {
+                farmerRuntime.resumeTimer = null;
+                if (!loadFarmerSettings().enabled || !farmerCanRun()) return;
+                farmerRunTick();
+            }, COORDINATION_RESUME_DELAY_MS);
+        });
+    }
+
+    function farmerGetCurrentMapId() {
+        try {
+            return globalThis.state?.board?.getSnapshot?.()?.context?.selectedMap?.selectedRoom?.id || null;
+        } catch (_) { return null; }
+    }
+
+    function farmerFindButtonByText(...texts) {
+        const wanted = texts.map(t => String(t || '').trim().toLowerCase()).filter(Boolean);
+        for (const button of document.querySelectorAll('button')) {
+            const label = button.textContent.trim().toLowerCase();
+            if (wanted.includes(label)) return button;
+        }
+        return null;
+    }
+
+    async function farmerNavigateToMap(mapId) {
+        if (!mapId || !globalThis.state?.board?.send) return false;
+        if (String(farmerGetCurrentMapId()) === String(mapId)) return true;
+        try {
+            if (typeof window.markModSettingsProgrammaticNavFloorGuard === 'function') {
+                window.markModSettingsProgrammaticNavFloorGuard('awaken-farmer');
+            }
+            globalThis.state.board.send({ type: 'selectRoomById', roomId: mapId });
+            for (let i = 0; i < 20; i++) {
+                await farmerSleep(100);
+                if (String(farmerGetCurrentMapId()) === String(mapId)) return true;
+            }
+            return String(farmerGetCurrentMapId()) === String(mapId);
+        } catch (e) {
+            console.warn('[Awaken Farmer] navigate failed:', e);
+            return false;
+        }
+    }
+
+    async function farmerSetFloor(floor) {
+        try {
+            globalThis.state?.board?.trigger?.setState?.({
+                fn: (prev) => ({ ...prev, floor: Number(floor) || 0 })
+            });
+            await farmerSleep(100);
+            return true;
+        } catch (_) { return false; }
+    }
+
+    function farmerHasCreaturesOnBoard() {
+        try {
+            const cfg = globalThis.state?.board?.getSnapshot?.()?.context?.boardConfig;
+            if (!Array.isArray(cfg)) return false;
+            return cfg.some(p => p?.type === 'player' || (p?.type === 'custom' && p?.villain === false));
+        } catch (_) { return false; }
+    }
+
+    async function farmerLoadSetup(setupLabel, mapId) {
+        if (!setupLabel) {
+            const autoBtn = farmerFindButtonByText('Auto-setup', 'Auto setup', 'Autosetup', 'Autoconfigurar')
+                || Array.from(document.querySelectorAll('button')).find(b => b.querySelector('svg.lucide-wand-sparkles'));
+            if (!autoBtn) return false;
+            autoBtn.click();
+            await farmerSleep(1000);
+            return farmerHasCreaturesOnBoard();
+        }
+        if (!farmerHasSetupForMap(setupLabel, mapId)) return false;
+        const wanted = String(setupLabel).trim().toLowerCase();
+        let setupBtn = null;
+        for (const button of document.querySelectorAll('button')) {
+            const text = button.textContent.trim();
+            const m = text.match(/^Setup\s*\((.+)\)$/i);
+            if (!m) continue;
+            if (m[1].trim().toLowerCase() !== wanted) continue;
+            setupBtn = button;
+            break;
+        }
+        if (!setupBtn) {
+            // Already applied: disabled Save (label)
+            for (const button of document.querySelectorAll('button')) {
+                const text = button.textContent.trim();
+                const m = text.match(/^Save\s*\((.+)\)$/i);
+                if (m && m[1].trim().toLowerCase() === wanted && button.disabled) return true;
+            }
+            return false;
+        }
+        setupBtn.click();
+        await farmerSleep(1200);
+        return farmerHasCreaturesOnBoard();
+    }
+
+    async function farmerEnsureAutoplayMode() {
+        try {
+            const ctx = globalThis.state?.board?.getSnapshot?.()?.context;
+            if (!ctx) return false;
+            if (ctx.mode === 'autoplay') return true;
+            globalThis.state.board.send({ type: 'setPlayMode', mode: 'autoplay' });
+            await farmerSleep(300);
+            return globalThis.state.board.getSnapshot()?.context?.mode === 'autoplay';
+        } catch (_) { return false; }
+    }
+
+    async function farmerStartAutoplay() {
+        if (!window.AutoplayManager?.requestControl(FARMER_MOD_NAME)) {
+            console.log('[Awaken Farmer] Autoplay control denied');
+            return false;
+        }
+        farmerRuntime.wasInitiatedByMod = true;
+        syncFarmerModCoordination();
+        if (!(await farmerEnsureAutoplayMode())) {
+            window.AutoplayManager?.releaseControl(FARMER_MOD_NAME);
+            farmerRuntime.wasInitiatedByMod = false;
+            syncFarmerModCoordination();
+            return false;
+        }
+        await farmerSleep(200);
+        const startBtn = farmerFindButtonByText('Start', 'Iniciar');
+        if (!startBtn) {
+            window.AutoplayManager?.releaseControl(FARMER_MOD_NAME);
+            farmerRuntime.wasInitiatedByMod = false;
+            syncFarmerModCoordination();
+            return false;
+        }
+        startBtn.click();
+        farmerRuntime.status = 'farming';
+        syncFarmerModCoordination();
+        showFarmerStartingToast();
+        return true;
+    }
+
+    function farmerStopAutoplay() {
+        try {
+            const pauseBtn = document.querySelector('button:has(svg.lucide-pause)');
+            if (pauseBtn) pauseBtn.click();
+        } catch (_) {}
+        farmerRuntime.wasInitiatedByMod = false;
+        farmerRuntime.currentRoomId = null;
+        farmerRuntime.status = 'idle';
+        window.AutoplayManager?.releaseControl(FARMER_MOD_NAME);
+        syncFarmerModCoordination();
+    }
+
+    function farmerMapStillHasTargets(roomId, wantedIds) {
+        if (!roomId || !wantedIds?.size) return false;
+        try {
+            const board = globalThis.state?.utils?.getBoardMonstersFromRoomId?.(roomId) || [];
+            return board.some(p => p?.villain === true && wantedIds.has(Number(p.gameId)));
+        } catch (_) { return false; }
+    }
+
+    async function farmerRunTick() {
+        if (farmerRuntime.busy) return;
+        if (!farmerBootGraceDone) return;
+        const settings = loadFarmerSettings();
+        if (!settings.enabled) return;
+        const blocked = farmerBlockedReason();
+        if (blocked) {
+            if (farmerRuntime.status !== 'blocked' || farmerRuntime.lastBlockReason !== blocked) {
+                console.log(`[Awaken Farmer] Waiting — blocked by ${blocked}`);
+                farmerRuntime.lastBlockReason = blocked;
+            }
+            farmerRuntime.status = 'blocked';
+            if (typeof farmerRuntime.uiRefresh === 'function') farmerRuntime.uiRefresh();
+            return;
+        }
+        farmerRuntime.lastBlockReason = null;
+
+        farmerRuntime.busy = true;
+        try {
+            const { wantedIds, namesById, targets } = collectAwakenedNotCappedTargets();
+            if (wantedIds.size === 0) {
+                if (farmerRuntime.status !== 'done') {
+                    console.log('[Awaken Farmer] Done — all awakened creatures are gene-capped');
+                }
+                farmerRuntime.status = 'done';
+                if (farmerRuntime.wasInitiatedByMod) farmerStopAutoplay();
+                if (typeof farmerRuntime.uiRefresh === 'function') farmerRuntime.uiRefresh();
+                return;
+            }
+
+            const ranked = rankMapsForWantedIds(wantedIds, namesById);
+            const queue = ranked.results || [];
+            if (queue.length === 0) {
+                if (farmerRuntime.status !== 'no-maps') {
+                    console.log('[Awaken Farmer] No eligible maps (need unlocked floor 11–15)');
+                }
+                farmerRuntime.status = 'no-maps';
+                if (farmerRuntime.wasInitiatedByMod) farmerStopAutoplay();
+                if (typeof farmerRuntime.uiRefresh === 'function') farmerRuntime.uiRefresh();
+                return;
+            }
+
+            const currentId = farmerRuntime.currentRoomId || farmerGetCurrentMapId();
+            let next = null;
+            if (currentId && farmerMapStillHasTargets(currentId, wantedIds)) {
+                next = queue.find(r => String(r.roomId) === String(currentId)) || null;
+            }
+            if (!next) next = queue[0];
+
+            const needSwitch = String(farmerRuntime.currentRoomId || '') !== String(next.roomId)
+                || String(farmerGetCurrentMapId() || '') !== String(next.roomId)
+                || !farmerRuntime.wasInitiatedByMod;
+
+            if (needSwitch) {
+                const startDelaySec = clampStartDelay(settings.startDelay);
+                farmerRuntime.status = 'starting';
+                if (typeof farmerRuntime.uiRefresh === 'function') farmerRuntime.uiRefresh();
+                console.log(`[Awaken Farmer] Waiting ${startDelaySec}s before navigation...`);
+                await farmerSleep(startDelaySec * 1000);
+                if (!loadFarmerSettings().enabled || !farmerCanRun()) {
+                    farmerRuntime.status = loadFarmerSettings().enabled ? 'blocked' : 'idle';
+                    return;
+                }
+
+                farmerRuntime.status = 'switching';
+                if (typeof farmerRuntime.uiRefresh === 'function') farmerRuntime.uiRefresh();
+                if (farmerRuntime.wasInitiatedByMod) {
+                    try {
+                        const pauseBtn = document.querySelector('button:has(svg.lucide-pause)');
+                        if (pauseBtn) pauseBtn.click();
+                    } catch (_) {}
+                    await farmerSleep(400);
+                }
+
+                const navigated = await farmerNavigateToMap(next.roomId);
+                if (!navigated) {
+                    farmerRuntime.status = 'nav-failed';
+                    return;
+                }
+                await farmerSetFloor(pickAwakenFarmFloor(next.roomId) ?? AWAKEN_FARM_MIN_FLOOR);
+                await farmerSleep(400);
+
+                if (getEffectiveFarmerAutoRefill(next.roomId)) farmerApplyAutomatorRefill(true);
+                else farmerApplyAutomatorRefill(false);
+
+                const setupOk = await farmerLoadSetup(getEffectiveFarmerSetupLabel(next.roomId), next.roomId);
+                if (!setupOk && !farmerHasCreaturesOnBoard()) {
+                    console.warn('[Awaken Farmer] Setup/board empty for', next.mapName);
+                    farmerRuntime.status = 'setup-failed';
+                    farmerRuntime.currentRoomId = next.roomId;
+                    return;
+                }
+
+                const started = await farmerStartAutoplay();
+                if (started) {
+                    farmerRuntime.currentRoomId = next.roomId;
+                    farmerRuntime.status = 'farming';
+                    console.log(`[Awaken Farmer] Farming ${next.mapName} (${targets.length} species left)`);
+                } else {
+                    farmerRuntime.status = 'start-failed';
+                }
+            } else {
+                farmerRuntime.status = 'farming';
+                farmerRuntime.currentRoomId = next.roomId;
+            }
+        } catch (e) {
+            console.warn('[Awaken Farmer] tick failed:', e);
+            farmerRuntime.status = 'error';
+        } finally {
+            farmerRuntime.busy = false;
+            if (typeof farmerRuntime.uiRefresh === 'function') farmerRuntime.uiRefresh();
+        }
+    }
+
+    let farmerLastStartToastAt = 0;
+    const FARMER_START_TOAST_COOLDOWN_MS = 4000;
+
+    function showFarmerToast(message, duration = 5000) {
+        try {
+            let mainContainer = document.getElementById('awaken-farmer-toast-container');
+            if (!mainContainer) {
+                mainContainer = document.createElement('div');
+                mainContainer.id = 'awaken-farmer-toast-container';
+                mainContainer.style.cssText = `
+                    position: fixed;
+                    z-index: 9999;
+                    inset: 16px 16px 64px;
+                    pointer-events: none;
+                `;
+                document.body.appendChild(mainContainer);
+            }
+
+            const existingToasts = mainContainer.querySelectorAll('.toast-item');
+            const stackOffset = existingToasts.length * 46;
+
+            const flexContainer = document.createElement('div');
+            flexContainer.className = 'toast-item';
+            flexContainer.style.cssText = `
+                left: 0px;
+                right: 0px;
+                display: flex;
+                position: absolute;
+                transition: 230ms cubic-bezier(0.21, 1.02, 0.73, 1);
+                transform: translateY(-${stackOffset}px);
+                bottom: 0px;
+                justify-content: flex-end;
+            `;
+
+            const toast = document.createElement('button');
+            toast.className = 'non-dismissable-dialogs shadow-lg animate-in fade-in zoom-in-95 slide-in-from-top lg:slide-in-from-bottom';
+
+            const widgetTop = document.createElement('div');
+            widgetTop.className = 'widget-top h-2.5';
+
+            const widgetBottom = document.createElement('div');
+            widgetBottom.className = 'widget-bottom pixel-font-16 flex items-center gap-2 px-2 py-1 text-whiteHighlight';
+
+            const iconImg = document.createElement('img');
+            iconImg.alt = 'awaken';
+            iconImg.src = BADGE_ICONS.awakened;
+            iconImg.className = 'pixelated';
+            iconImg.style.cssText = 'width: 16px; height: 16px; image-rendering: pixelated;';
+            widgetBottom.appendChild(iconImg);
+
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'text-left';
+            messageDiv.textContent = message;
+            widgetBottom.appendChild(messageDiv);
+
+            toast.appendChild(widgetTop);
+            toast.appendChild(widgetBottom);
+            flexContainer.appendChild(toast);
+            mainContainer.appendChild(flexContainer);
+
+            setTimeout(() => {
+                if (flexContainer && flexContainer.parentNode) {
+                    flexContainer.parentNode.removeChild(flexContainer);
+                    const toasts = mainContainer.querySelectorAll('.toast-item');
+                    toasts.forEach((item, index) => {
+                        item.style.transform = `translateY(-${index * 46}px)`;
+                    });
+                }
+            }, duration);
+        } catch (error) {
+            console.warn('[Awaken Farmer] Error showing toast:', error);
+        }
+    }
+
+    function showFarmerStartingToast() {
+        const now = Date.now();
+        if (now - farmerLastStartToastAt < FARMER_START_TOAST_COOLDOWN_MS) return;
+        farmerLastStartToastAt = now;
+        showFarmerToast(t('mods.awakenTracker.farmerStartingToast'));
+    }
+
+    function startFarmerLoop() {
+        if (!farmerBootGraceDone) {
+            console.log('[Awaken Farmer] Deferring start until boot grace ends');
+            return;
+        }
+        stopFarmerLoop(false);
+        const settings = loadFarmerSettings();
+        if (!settings.enabled) return;
+        syncFarmerModCoordination();
+        if (settings.autoRefillStamina) farmerApplyAutomatorRefill(true);
+        farmerRuntime.status = 'starting';
+        farmerRuntime.lastBlockReason = null;
+        console.log('[Awaken Farmer] Starting farm loop');
+        if (typeof farmerRuntime.uiRefresh === 'function') farmerRuntime.uiRefresh();
+        // Start delay is applied once inside farmerRunTick before each navigate
+        farmerRunTick();
+        farmerRuntime.tickTimer = setInterval(() => { farmerRunTick(); }, FARMER_TICK_MS);
+    }
+
+    function stopFarmerLoop(releaseControl = true) {
+        if (farmerRuntime.resumeTimer) {
+            clearTimeout(farmerRuntime.resumeTimer);
+            farmerRuntime.resumeTimer = null;
+        }
+        if (farmerRuntime.tickTimer) {
+            clearInterval(farmerRuntime.tickTimer);
+            farmerRuntime.tickTimer = null;
+        }
+        if (releaseControl && farmerRuntime.wasInitiatedByMod) {
+            farmerStopAutoplay();
+        }
+        if (farmerRuntime.enabledRefill) {
+            // Leave Automator refill as-is if user may want it; only clear our tracking flag.
+            farmerRuntime.enabledRefill = false;
+        }
+        farmerRuntime.status = 'idle';
+        syncFarmerModCoordination();
+        if (typeof farmerRuntime.uiRefresh === 'function') farmerRuntime.uiRefresh();
+    }
+
+    function setFarmerEnabled(enabled) {
+        const next = saveFarmerSettings({ enabled: !!enabled });
+        if (next.enabled) {
+            // Manual enable skips remaining boot wait so the user can start immediately.
+            farmerBootGraceDone = true;
+            startFarmerLoop();
+        } else {
+            stopFarmerLoop(true);
+        }
+        updateAwakenTrackerButton();
+        return next;
+    }
+
+    function toggleFarmerEnabled() {
+        return setFarmerEnabled(!loadFarmerSettings().enabled);
+    }
+
+    function applyAwakenTrackerButtonStyling(btn) {
+        if (!btn) return;
+        const regularBgUrl = 'https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png';
+        const greenBgUrl = 'https://bestiaryarena.com/_next/static/media/background-green.be515334.png';
+        btn.style.background = '';
+        btn.style.backgroundColor = '';
+        if (loadFarmerSettings().enabled) {
+            btn.style.background = `url('${greenBgUrl}') repeat`;
+            btn.style.backgroundSize = 'auto';
+        } else {
+            btn.style.background = `url('${regularBgUrl}') repeat`;
+        }
+    }
+
+    function updateAwakenTrackerButton() {
+        const btn = document.getElementById(BUTTON_ID);
+        if (btn) applyAwakenTrackerButtonStyling(btn);
     }
 
     // =======================
@@ -1375,7 +2693,21 @@
                 color: #888;
             }
             #${PANEL_ID} .at-footer.overview-only {
-                justify-content: flex-end;
+                justify-content: flex-start;
+            }
+            #${PANEL_ID} .at-footer-farmer {
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                flex: 0 0 auto;
+                min-width: 0;
+            }
+            #${PANEL_ID} .at-footer-farmer .at-farmer-toggle {
+                width: auto;
+                flex: 0 1 auto;
+                padding: 3px 8px;
+                font-size: 11px;
+                white-space: nowrap;
             }
             #${PANEL_ID} .at-footer-credits {
                 flex: 0 0 auto;
@@ -1431,6 +2763,99 @@
             }
             #${PANEL_ID} .awaken-farm-row.is-raid {
                 box-shadow: inset 3px 0 0 #7a1f1f;
+            }
+            #${PANEL_ID} .awaken-farm-row.is-current {
+                outline: 1px solid rgba(127,222,127,0.45);
+            }
+            #${PANEL_ID} .awaken-farm-custom-indicator {
+                margin-left: 4px;
+                cursor: help;
+                vertical-align: middle;
+                display: inline-flex;
+                align-items: center;
+            }
+            #${PANEL_ID} .awaken-farm-custom-indicator img {
+                image-rendering: pixelated;
+                filter: drop-shadow(0 0 1px #ff4444);
+            }
+            #${PANEL_ID} .at-farmer-body {
+                display: none;
+                flex-direction: column;
+                flex: 1 1 auto;
+                min-height: 0;
+                overflow: hidden;
+                background-image: var(--at-bg-panel);
+                background-repeat: repeat;
+                border: 6px solid transparent;
+                border-image: var(--at-frame-4);
+                margin: 0 2px;
+            }
+            #${PANEL_ID} .at-farmer-controls {
+                display: flex;
+                flex-direction: column;
+                gap: 6px;
+                padding: 8px;
+                flex: 0 0 auto;
+            }
+            #${PANEL_ID} .at-farmer-controls label.at-check {
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                font-size: 11px;
+                cursor: pointer;
+                user-select: none;
+            }
+            #${PANEL_ID} .at-farmer-toggle {
+                width: 100%;
+                flex: 1 1 auto;
+                padding: 6px 10px;
+                border: 4px solid transparent;
+                border-image: var(--at-frame-1);
+                font-size: 12px;
+                font-weight: bold;
+                font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif;
+                color: #fff;
+                cursor: pointer;
+                text-align: center;
+                background-repeat: repeat;
+                background-size: auto;
+            }
+            #${PANEL_ID} .at-farmer-toggle.is-on {
+                background-image: url('https://bestiaryarena.com/_next/static/media/background-green.be515334.png');
+            }
+            #${PANEL_ID} .at-farmer-toggle.is-off {
+                background-image: url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png');
+                color: var(--at-text);
+            }
+            #${PANEL_ID} .at-farmer-toggle:hover {
+                filter: brightness(1.08);
+            }
+            #${PANEL_ID} .at-farmer-toggle:active {
+                border-image: var(--at-frame-1-pressed);
+            }
+            #${PANEL_ID} .at-help-tip {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                cursor: help;
+                flex: 0 0 auto;
+                user-select: none;
+                opacity: 0.85;
+            }
+            #${PANEL_ID} .at-help-tip:hover {
+                opacity: 1;
+            }
+            #${PANEL_ID} .at-help-tip img {
+                image-rendering: pixelated;
+                display: block;
+            }
+            #${PANEL_ID} .at-farmer-list {
+                flex: 1 1 auto;
+                overflow-y: auto;
+                padding: 6px;
+                display: flex;
+                flex-direction: column;
+                gap: 6px;
             }
         `;
         document.head.appendChild(style);
@@ -1692,7 +3117,7 @@
             if (!state.currentRoomId) return;
             state.byMap.delete(state.currentRoomId);
             state.baselineByMap.delete(state.currentRoomId);
-            state.pauseOnCapByMap.delete(state.currentRoomId);
+            clearPauseOnCapOptOutsForGameIds((state.currentMapEnemies || []).map(e => e.gameId));
             ensureMapBaseline(state.currentRoomId);
             render();
             scheduleSave();
@@ -1706,18 +3131,32 @@
             () => {
             state.byMap.clear();
             state.baselineByMap.clear();
-            state.pauseOnCapByMap.clear();
+            state.pauseOnCapOptOut.clear();
             snapshotBaseline();
-            if (state.currentRoomId) ensureMapBaseline(state.currentRoomId);
+            if (state.currentRoomId) {
+                ensureMapBaseline(state.currentRoomId);
+            }
             render();
             scheduleSave();
         });
         footerActions.appendChild(clearAllBtn);
 
+        const farmerToggleBtn = document.createElement('button');
+        farmerToggleBtn.type = 'button';
+        farmerToggleBtn.className = 'at-farmer-toggle is-off';
+        farmerToggleBtn.title = t('mods.awakenTracker.farmerEnableAutomation');
+
+        const farmerHelpTip = createHelpTip(t('mods.awakenTracker.farmerHint'));
+        const footerFarmer = document.createElement('div');
+        footerFarmer.className = 'at-footer-farmer';
+        footerFarmer.appendChild(farmerToggleBtn);
+        footerFarmer.appendChild(farmerHelpTip);
+
         const footerCredits = document.createElement('span');
         footerCredits.className = 'at-footer-credits';
         footerCredits.innerHTML = t('mods.awakenTracker.creditsHtml');
 
+        footer.appendChild(footerFarmer);
         footer.appendChild(footerActions);
         footer.appendChild(footerCredits);
 
@@ -1729,11 +3168,14 @@
 
         const tabTrackerBtn = document.createElement('button');
         const tabOverviewBtn = document.createElement('button');
+        const tabFarmerBtn = document.createElement('button');
         tabTrackerBtn.className = 'at-tab-btn';
         tabOverviewBtn.className = 'at-tab-btn';
+        tabFarmerBtn.className = 'at-tab-btn';
 
         tabTrackerBtn.textContent = t('mods.awakenTracker.tabTracker');
         tabOverviewBtn.textContent = t('mods.awakenTracker.tabOverview');
+        tabFarmerBtn.textContent = t('mods.awakenTracker.tabFarmer');
 
         const trackerBody = document.createElement('div');
         trackerBody.className = 'at-body';
@@ -1745,31 +3187,34 @@
         const overviewBody = document.createElement('div');
         overviewBody.className = 'at-overview-body';
 
+        const farmerBody = document.createElement('div');
+        farmerBody.className = 'at-farmer-body';
+
         function switchTab(tab) {
-            if (tab === 'tracker') {
-                trackerBody.style.display = 'block';
-                overviewBody.style.display = 'none';
-                footerActions.style.display = 'flex';
-                footer.classList.remove('overview-only');
-                tabTrackerBtn.classList.add('active');
-                tabOverviewBtn.classList.remove('active');
-            } else {
-                trackerBody.style.display = 'none';
-                overviewBody.style.display = 'flex';
-                footerActions.style.display = 'none';
-                footer.classList.add('overview-only');
-                tabTrackerBtn.classList.remove('active');
-                tabOverviewBtn.classList.add('active');
-                renderOverview();
-            }
+            const isTracker = tab === 'tracker';
+            const isOverview = tab === 'overview';
+            const isFarmer = tab === 'farmer';
+            trackerBody.style.display = isTracker ? 'block' : 'none';
+            overviewBody.style.display = isOverview ? 'flex' : 'none';
+            farmerBody.style.display = isFarmer ? 'flex' : 'none';
+            footerActions.style.display = isTracker ? 'flex' : 'none';
+            footer.classList.toggle('overview-only', !isTracker);
+            tabTrackerBtn.classList.toggle('active', isTracker);
+            tabOverviewBtn.classList.toggle('active', isOverview);
+            tabFarmerBtn.classList.toggle('active', isFarmer);
+            if (isTracker) render();
+            if (isOverview) renderOverview();
+            if (isFarmer) renderFarmerTab();
             savePanelSettings({ activeTab: tab });
         }
 
         tabTrackerBtn.addEventListener('click', () => switchTab('tracker'));
         tabOverviewBtn.addEventListener('click', () => switchTab('overview'));
+        tabFarmerBtn.addEventListener('click', () => switchTab('farmer'));
 
         tabBar.appendChild(tabTrackerBtn);
         tabBar.appendChild(tabOverviewBtn);
+        tabBar.appendChild(tabFarmerBtn);
         frame.appendChild(tabBar);
         frame.appendChild(trackerBody);
 
@@ -1800,10 +3245,13 @@
         }
 
         const farmToggleBtn = document.createElement('button');
-        farmToggleBtn.textContent = t('mods.awakenTracker.farmMaps');
         farmToggleBtn.title = t('mods.awakenTracker.farmMapsToggle');
         farmToggleBtn.className = 'at-styled-btn';
-        farmToggleBtn.style.cssText = 'flex-basis:100%;';
+        farmToggleBtn.style.cssText = 'flex-basis:100%;display:inline-flex;align-items:center;justify-content:center;gap:6px;';
+        farmToggleBtn.appendChild(createUiIcon(UI_ICONS.map, 14));
+        const farmToggleLabel = document.createElement('span');
+        farmToggleLabel.textContent = t('mods.awakenTracker.farmMaps');
+        farmToggleBtn.appendChild(farmToggleLabel);
 
         overviewFilterBar.appendChild(overviewFilterInput);
         overviewFilterBar.appendChild(overviewViewSelect);
@@ -1818,7 +3266,7 @@
         const farmHeader = document.createElement('div');
         farmHeader.className = 'at-section';
         farmHeader.style.cssText = 'display:flex;align-items:center;gap:6px;';
-        farmHeader.innerHTML = `<strong style="color:var(--at-text-gold);font-size:12px;">${t('mods.awakenTracker.farmMapsTitle')}</strong>`;
+        farmHeader.innerHTML = `<strong style="color:var(--at-text-gold);font-size:12px;display:inline-flex;align-items:center;gap:6px;">${uiIconHtml(UI_ICONS.map, 14)}${t('mods.awakenTracker.farmMapsTitle')}</strong>`;
 
         const hideRaidsLabel = document.createElement('label');
         hideRaidsLabel.style.cssText = 'display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#b8b8b8;cursor:pointer;margin-left:auto;';
@@ -1874,6 +3322,227 @@
         overviewBody.appendChild(overviewFilterBar);
         overviewBody.appendChild(overviewMainArea);
         frame.appendChild(overviewBody);
+
+        // =======================
+        // Farmer tab content
+        // =======================
+        const farmerControls = document.createElement('div');
+        farmerControls.className = 'at-section at-farmer-controls';
+
+        const farmerRefillLabel = document.createElement('label');
+        farmerRefillLabel.className = 'at-check';
+        const farmerRefillInput = document.createElement('input');
+        farmerRefillInput.type = 'checkbox';
+        farmerRefillLabel.appendChild(farmerRefillInput);
+        farmerRefillLabel.appendChild(document.createTextNode(t('mods.awakenTracker.farmerAutoRefill')));
+
+        const farmerSetupRow = document.createElement('div');
+        farmerSetupRow.style.cssText = 'display:flex;align-items:center;gap:8px;flex-wrap:wrap;';
+        const farmerSetupLabelEl = document.createElement('span');
+        farmerSetupLabelEl.textContent = t('mods.awakenTracker.farmerSetupLabel');
+        farmerSetupLabelEl.style.cssText = 'font-size:11px;color:#b8b8b8;';
+        const farmerSetupSelect = document.createElement('select');
+        farmerSetupSelect.className = 'at-input';
+        farmerSetupSelect.style.cssText = 'flex:1;min-width:140px;';
+        farmerSetupRow.appendChild(farmerSetupLabelEl);
+        farmerSetupRow.appendChild(farmerSetupSelect);
+
+        const farmerDelayRow = document.createElement('div');
+        farmerDelayRow.style.cssText = 'display:flex;align-items:center;gap:8px;flex-wrap:wrap;';
+        const farmerDelayLabelEl = document.createElement('span');
+        farmerDelayLabelEl.textContent = t('mods.awakenTracker.farmerStartDelay');
+        farmerDelayLabelEl.style.cssText = 'font-size:11px;color:#b8b8b8;';
+        const farmerDelayInput = document.createElement('input');
+        farmerDelayInput.type = 'number';
+        farmerDelayInput.className = 'at-input';
+        farmerDelayInput.min = '1';
+        farmerDelayInput.max = String(MAX_START_DELAY);
+        farmerDelayInput.step = '1';
+        farmerDelayInput.style.cssText = 'width:64px;';
+        farmerDelayRow.appendChild(farmerDelayLabelEl);
+        farmerDelayRow.appendChild(farmerDelayInput);
+
+        farmerControls.appendChild(farmerRefillLabel);
+        farmerControls.appendChild(farmerSetupRow);
+        farmerControls.appendChild(farmerDelayRow);
+
+        const farmerSummaryEl = document.createElement('div');
+        farmerSummaryEl.className = 'at-section';
+        farmerSummaryEl.style.cssText = 'font-size:10px;color:#b8b8b8;';
+
+        const farmerListEl = document.createElement('div');
+        farmerListEl.className = 'at-farmer-list';
+
+        farmerBody.appendChild(farmerControls);
+        farmerBody.appendChild(farmerSummaryEl);
+        farmerBody.appendChild(farmerListEl);
+        frame.appendChild(farmerBody);
+
+        function populateFarmerSetupOptions(selected) {
+            const labels = getFarmerSetupLabels();
+            farmerSetupSelect.innerHTML = '';
+            const autoOpt = document.createElement('option');
+            autoOpt.value = '';
+            autoOpt.textContent = t('mods.awakenTracker.farmerAutoSetup');
+            farmerSetupSelect.appendChild(autoOpt);
+            for (const label of labels) {
+                const opt = document.createElement('option');
+                opt.value = label;
+                opt.textContent = label;
+                farmerSetupSelect.appendChild(opt);
+            }
+            farmerSetupSelect.value = selected || '';
+            if (selected && farmerSetupSelect.value !== selected) {
+                const custom = document.createElement('option');
+                custom.value = selected;
+                custom.textContent = selected;
+                farmerSetupSelect.appendChild(custom);
+                farmerSetupSelect.value = selected;
+            }
+        }
+
+        function updateFarmerToggleButton(enabled) {
+            const on = enabled === true;
+            farmerToggleBtn.classList.toggle('is-on', on);
+            farmerToggleBtn.classList.toggle('is-off', !on);
+            farmerToggleBtn.textContent = on
+                ? t('mods.awakenTracker.farmerAutomationOn')
+                : t('mods.awakenTracker.farmerAutomationOff');
+        }
+
+        function renderFarmerTab() {
+            const settings = loadFarmerSettings();
+            updateFarmerToggleButton(settings.enabled);
+            farmerRefillInput.checked = settings.autoRefillStamina;
+            farmerDelayInput.value = String(settings.startDelay);
+            populateFarmerSetupOptions(settings.setupLabel);
+
+            const { targets, wantedIds, namesById } = collectAwakenedNotCappedTargets();
+            const ranked = rankMapsForWantedIds(wantedIds, namesById);
+            const queue = ranked.results || [];
+
+            const targetSummary = targets.slice(0, 8).map(x => x.name).join(', ')
+                + (targets.length > 8 ? ` … +${targets.length - 8}` : '');
+            const farmerDetailsTip = [
+                t('mods.awakenTracker.farmTargets', { summary: targetSummary || '—' }),
+                t('mods.awakenTracker.farmerSortHint')
+            ].join(' · ');
+            farmerSummaryEl.innerHTML =
+                `<div style="display:flex;align-items:center;gap:6px;">` +
+                    `<div style="flex:1;min-width:0;">${t('mods.awakenTracker.farmerSearchingHtml', { creatureCount: targets.length, mapCount: queue.length })}</div>` +
+                    helpTipHtml(farmerDetailsTip) +
+                `</div>`;
+
+            if (ranked.error === 'utils') {
+                farmerListEl.innerHTML = `<div style="padding:12px;color:#d87d7d;text-align:center;">${t('mods.awakenTracker.utilsUnavailable')}</div>`;
+                return;
+            }
+            if (targets.length === 0) {
+                farmerListEl.innerHTML = `<div style="padding:12px;color:#888;text-align:center;">${t('mods.awakenTracker.farmerNoTargets')}</div>`;
+                return;
+            }
+            if (queue.length === 0) {
+                farmerListEl.innerHTML = `<div style="padding:12px;color:#888;text-align:center;">${t('mods.awakenTracker.noMapsWithCreatures')}</div>`;
+                return;
+            }
+
+            const currentId = farmerGetCurrentMapId();
+            const genesById = new Map(targets.map(t => [Number(t.gameId), t]));
+            farmerListEl.innerHTML = queue.slice(0, 40).map((r, idx) => {
+                const creatureChips = r.wantedDetails.map(d => {
+                    const target = genesById.get(Number(d.id));
+                    const stats = target?.bestUncapped?.stats;
+                    const cappedCount = target?.bestUncapped?.cappedCount ?? 0;
+                    const genesHtml = stats
+                        ? STATS.map(s => {
+                            const v = Number(stats[s]) || 0;
+                            const color = v >= CAP_VALUE ? '#7dd87d' : '#d87d7d';
+                            return `<span style="color:${color};display:inline-flex;align-items:center;gap:1px;">${renderStatIconHtml(s, 11, '-2px')}${v}</span>`;
+                        }).join('<span style="color:#444;margin:0 2px;">·</span>')
+                        : '';
+                    return `<span style="display:inline-flex;align-items:center;flex-wrap:wrap;gap:4px;padding:1px 0;">` +
+                        `<span style="color:#88c8ff;font-weight:bold;">${d.name}</span>` +
+                        `<span style="color:#888;">×${d.count}</span>` +
+                        `<span style="color:#aaa;font-family:monospace;font-size:10px;">${cappedCount}/5</span>` +
+                        (genesHtml ? `<span style="display:inline-flex;align-items:center;gap:0;font-size:10px;">${genesHtml}</span>` : '') +
+                    `</span>`;
+                }).join('<span style="color:#555;margin:0 6px;">|</span>');
+                const densityPct = Math.round(r.density * 100);
+                const densityColor = densityPct >= 70 ? '#7dd87d' : densityPct >= 40 ? '#e0c060' : '#d87d7d';
+                const effStr = r.wantedPerStamina.toFixed(2);
+                const isCurrent = currentId != null && String(r.roomId) === String(currentId);
+                const hasCustom = hasFarmerMapCustomSettings(r.roomId);
+                const customIcon = hasCustom
+                    ? `<span class="awaken-farm-custom-indicator" title="${t('mods.awakenTracker.farmerCustomSettingsTooltip')}">${uiIconHtml(UI_ICONS.customSettings, 12)}</span>`
+                    : '';
+                const raidBadge = r.isRaid
+                    ? ` <span style="display:inline-block;background:#7a1f1f;color:#ffd6d6;font-size:9px;font-weight:bold;padding:1px 5px;border-radius:3px;">${t('mods.awakenTracker.raidBadge')}</span>`
+                    : '';
+                return `<div class="at-row awaken-farm-row${r.isRaid ? ' is-raid' : ''}${isCurrent ? ' is-current' : ''}" data-room-id="${r.roomId}" data-map-name="${String(r.mapName).replace(/"/g, '&quot;')}" title="${t('mods.awakenTracker.farmerRowTooltip')}">` +
+                    `<div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;font-size:10px;line-height:1.45;">` +
+                        `<span style="white-space:nowrap;">` +
+                            `<span style="color:#777;">#${idx + 1}</span> ` +
+                            `<b style="color:#f0c060;">${r.mapName}</b>${customIcon}${raidBadge}` +
+                        `</span>` +
+                        `<span style="color:#999;display:inline-flex;align-items:center;gap:4px;flex-wrap:nowrap;white-space:nowrap;">` +
+                            `<span style="color:${densityColor};">${r.uniqueWanted} ${t('mods.awakenTracker.creaturesAbbrev')}</span>` +
+                            `<span>·</span>` +
+                            `<span style="color:${densityColor};">${densityPct}%</span>` +
+                            `<span>·</span>` +
+                            `<span style="display:inline-flex;align-items:center;gap:1px;">${effStr}/${staminaIconHtml(11)}</span>` +
+                            `<span>·</span>` +
+                            `<span style="display:inline-flex;align-items:center;gap:1px;">${staminaIconHtml(11)}${r.stamina}</span>` +
+                            (r.farmFloor != null ? `<span>·</span><span>F${r.farmFloor}</span>` : '') +
+                        `</span>` +
+                        `<span style="display:inline-flex;flex-wrap:wrap;align-items:center;gap:4px 0;min-width:0;">${creatureChips}</span>` +
+                    `</div>` +
+                `</div>`;
+            }).join('');
+
+            farmerListEl.querySelectorAll('.awaken-farm-row').forEach(row => {
+                row.addEventListener('click', () => {
+                    const roomId = row.dataset.roomId;
+                    if (roomId) navigateToMapByRoomId(roomId);
+                });
+                row.addEventListener('contextmenu', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const roomId = row.dataset.roomId;
+                    if (!roomId) return;
+                    createFarmerMapContextMenu(
+                        roomId,
+                        row.dataset.mapName || roomId,
+                        e.clientX,
+                        e.clientY,
+                        () => { renderFarmerTab(); }
+                    );
+                });
+            });
+        }
+
+        farmerRuntime.uiRefresh = () => {
+            if (farmerBody.style.display !== 'none') renderFarmerTab();
+        };
+
+        farmerToggleBtn.addEventListener('click', () => {
+            const next = toggleFarmerEnabled();
+            updateFarmerToggleButton(next.enabled);
+            if (farmerBody.style.display !== 'none') renderFarmerTab();
+        });
+        farmerRefillInput.addEventListener('change', () => {
+            saveFarmerSettings({ autoRefillStamina: farmerRefillInput.checked });
+            if (loadFarmerSettings().enabled && farmerRefillInput.checked) {
+                farmerApplyAutomatorRefill(true);
+            }
+        });
+        farmerSetupSelect.addEventListener('change', () => {
+            saveFarmerSettings({ setupLabel: farmerSetupSelect.value });
+        });
+        farmerDelayInput.addEventListener('change', () => {
+            const next = clampStartDelay(farmerDelayInput.value);
+            saveFarmerSettings({ startDelay: next });
+            farmerDelayInput.value = String(next);
+        });
 
         // =======================
         // Overview: render inventory scan
@@ -1991,10 +3660,21 @@
                 `<div style="color:#888;margin-top:2px;">${t('mods.awakenTracker.overviewFooter', { total: counts.total, monsters: counts.monsters, skipped: skippedSuffix })}</div>`;
 
             overviewGrid.innerHTML = groups.map(renderOverviewCard).join('');
+            attachOverviewCapToggles(groups);
             applyOverviewFilter();
         }
 
-
+        function attachOverviewCapToggles(groups) {
+            for (const g of groups) {
+                const row = overviewGrid.querySelector(`.awaken-overview-row[data-gameid="${g.gameId}"]`);
+                const mount = row?.querySelector('.overview-cap-toggle-mount');
+                if (!mount) continue;
+                mount.replaceChildren();
+                const awakened = findAwakenedTargetForGameId(g.gameId);
+                const alreadyCapped = !!g.anyCapped;
+                mount.appendChild(buildCapToggleLabel(g.gameId, awakened, alreadyCapped));
+            }
+        }
 
         function renderOverviewCard(g) {
             const portraitUrl = `/assets/portraits/${g.gameId}${g.best.shiny ? '-shiny' : ''}.png`;
@@ -2061,6 +3741,7 @@
                         `${statsHtml}` +
                     `</div>` +
                 `</div>` +
+                `<div class="overview-cap-toggle-mount" style="flex:0 0 auto;margin-left:auto;"></div>` +
             `</div>`;
         }
 
@@ -2112,6 +3793,12 @@
             const closeBtn = Array.from(document.querySelectorAll('button.pixel-font-14'))
                 .find(btn => btn.textContent.trim() === t('common.close'));
             if (closeBtn) closeBtn.click();
+            // Board subscribe refreshes the farmer highlight; also nudge immediately for snappy UI.
+            if (typeof farmerRuntime.uiRefresh === 'function') {
+                setTimeout(() => {
+                    try { farmerRuntime.uiRefresh(); } catch (_) { /* ignore */ }
+                }, 50);
+            }
             return true;
         }
 
@@ -2227,9 +3914,13 @@
                 : '';
 
             farmSummaryEl.innerHTML =
-                `<div>${t('mods.awakenTracker.farmSearchingHtml', { creatureCount: wantedIds.size, mapCount: visibleResults.length, raidNote })}</div>` +
-                `<div style="color:#777;margin-top:2px;">${t('mods.awakenTracker.farmTargets', { summary: wantedSummary })}</div>` +
-                `<div style="color:#777;margin-top:2px;">${t('mods.awakenTracker.farmSortHint')}</div>`;
+                `<div style="display:flex;align-items:center;gap:6px;">` +
+                    `<div style="flex:1;min-width:0;">${t('mods.awakenTracker.farmSearchingHtml', { creatureCount: wantedIds.size, mapCount: visibleResults.length, raidNote })}</div>` +
+                    helpTipHtml([
+                        t('mods.awakenTracker.farmTargets', { summary: wantedSummary }),
+                        t('mods.awakenTracker.farmSortHint')
+                    ].join(' · ')) +
+                `</div>`;
 
             if (visibleResults.length === 0) {
                 farmListEl.innerHTML = `<div style="grid-column:1/-1;padding:16px;color:#888;text-align:center;">${t('mods.awakenTracker.noMapsWithCreatures')}</div>`;
@@ -2259,9 +3950,12 @@
                             `<b style="color:#f0c060;text-decoration:underline;text-decoration-color:#5a4a2a;">${r.mapName}</b>${raidBadge} ` +
                             `<span style="color:#666;font-size:10px;">· ${r.regionName}</span>` +
                         `</div>` +
-                        `<div style="font-size:10px;color:#999;white-space:nowrap;">` +
+                        `<div style="font-size:10px;color:#999;display:inline-flex;align-items:center;gap:4px;flex-wrap:nowrap;white-space:nowrap;">` +
                             `<span style="color:${densityColor};">${r.uniqueWanted} ${t('mods.awakenTracker.creaturesAbbrev')} · ${r.wantedTotal}/${r.totalVillains} (${densityPct}%)</span>` +
-                            ` · <span style="color:#88c8ff;">${effStr}/⚡</span> · ⚡${r.stamina}` +
+                            `<span>·</span>` +
+                            `<span style="color:#88c8ff;display:inline-flex;align-items:center;gap:1px;">${effStr}/${staminaIconHtml(11)}</span>` +
+                            `<span>·</span>` +
+                            `<span style="display:inline-flex;align-items:center;gap:1px;">${staminaIconHtml(11)}${r.stamina}</span>` +
                         `</div>` +
                     `</div>` +
                     `<div style="font-size:10px;margin-top:2px;line-height:1.5;">${details}</div>` +
@@ -2328,6 +4022,7 @@
 
         // Set initial tab from persisted settings
         switchTab(s.activeTab || 'tracker');
+        updateFarmerToggleButton(loadFarmerSettings().enabled);
 
         frame.appendChild(footer);
 
@@ -2461,6 +4156,7 @@
                 primary: false,
                 onClick: togglePanel
             });
+            setTimeout(() => updateAwakenTrackerButton(), 100);
             console.log('[Awaken Tracker] Toolbar button created');
         } else {
             console.warn('[Awaken Tracker] api.ui.addButton not available');
@@ -2472,6 +4168,18 @@
     // =======================
     function cleanup() {
         try {
+            stopFarmerLoop(true);
+            closeFarmerMapContextMenu();
+            teardownFarmerBootGrace();
+            if (farmerCoordinationUnsubscribe) {
+                try { farmerCoordinationUnsubscribe(); } catch (_) { /* ignore */ }
+                farmerCoordinationUnsubscribe = null;
+            }
+            if (window.ModCoordination?.unregisterMod) {
+                try { window.ModCoordination.unregisterMod(FARMER_MOD_NAME); } catch (_) { /* ignore */ }
+                farmerModRegistered = false;
+            }
+            try { delete window.awakenFarmerShouldHoldBoard; } catch (_) { /* ignore */ }
             teardownAwakenAnalysisCoordination({ restore: false });
             detachPanelViewportListener();
             teardownPanelResizeListeners();
@@ -2520,6 +4228,11 @@
         setupPlayerSub();
         createToolbarButton();
         setupAwakenAnalysisCoordination();
+        ensureFarmerModRegistered();
+        setupFarmerCoordination();
+        syncFarmerModCoordination();
+        // Auto-resume after allModsLoaded + 5s boot grace (manual Enable still starts immediately).
+        setupFarmerBootGrace();
 
         // Reopen panel if it was open before reload
         const panelSettings = loadPanelSettings();

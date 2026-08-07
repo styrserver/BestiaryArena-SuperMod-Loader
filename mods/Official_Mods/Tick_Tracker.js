@@ -516,7 +516,32 @@ function removeWidget() {
 // Create the configuration panel
 function createConfigPanel() {
   const content = document.createElement('div');
-  content.style.cssText = 'display: flex; flex-direction: column; gap: 12px;';
+  content.style.cssText = 'display: flex; flex-direction: column; gap: 8px;';
+
+  const createSection = (title, sectionId, defaultExpanded) => {
+    if (api?.ui?.createConfigSection) {
+      return api.ui.createConfigSection({
+        title,
+        modId: MOD_ID,
+        sectionId,
+        defaultExpanded,
+        parent: content
+      }).body;
+    }
+    const section = document.createElement('fieldset');
+    section.style.cssText = 'border: 1px solid #666; border-radius: 4px; padding: 4px 8px 6px; margin: 0;';
+    const legend = document.createElement('legend');
+    legend.textContent = title;
+    legend.style.cssText = 'font-weight: bold; color: #0c6;';
+    section.appendChild(legend);
+    const body = document.createElement('div');
+    body.style.cssText = 'display: flex; flex-direction: column; gap: 6px;';
+    section.appendChild(body);
+    content.appendChild(section);
+    return body;
+  };
+
+  const generalBody = createSection(t('mods.tickTracker.sectionGeneral'), 'general', true);
 
   // Enabled checkbox
   const enabledContainer = document.createElement('div');
@@ -533,7 +558,26 @@ function createConfigPanel() {
   
   enabledContainer.appendChild(enabledInput);
   enabledContainer.appendChild(enabledLabel);
-  content.appendChild(enabledContainer);
+  generalBody.appendChild(enabledContainer);
+
+  // Show milliseconds checkbox
+  const msContainer = document.createElement('div');
+  msContainer.style.cssText = 'display: flex; align-items: center; gap: 8px;';
+  
+  const msInput = document.createElement('input');
+  msInput.type = 'checkbox';
+  msInput.id = 'ms-input';
+  msInput.checked = config.showMilliseconds;
+  
+  const msLabel = document.createElement('label');
+  msLabel.htmlFor = 'ms-input';
+  msLabel.textContent = t('mods.tickTracker.showMillisecondsLabel');
+  
+  msContainer.appendChild(msInput);
+  msContainer.appendChild(msLabel);
+  generalBody.appendChild(msContainer);
+
+  const historyBody = createSection(t('mods.tickTracker.sectionHistory'), 'history', false);
 
   // Max entries input
   const maxEntriesContainer = document.createElement('div');
@@ -552,24 +596,7 @@ function createConfigPanel() {
   
   maxEntriesContainer.appendChild(maxEntriesLabel);
   maxEntriesContainer.appendChild(maxEntriesInput);
-  content.appendChild(maxEntriesContainer);
-
-  // Show milliseconds checkbox
-  const msContainer = document.createElement('div');
-  msContainer.style.cssText = 'display: flex; align-items: center; gap: 8px;';
-  
-  const msInput = document.createElement('input');
-  msInput.type = 'checkbox';
-  msInput.id = 'ms-input';
-  msInput.checked = config.showMilliseconds;
-  
-  const msLabel = document.createElement('label');
-  msLabel.htmlFor = 'ms-input';
-  msLabel.textContent = t('mods.tickTracker.showMillisecondsLabel');
-  
-  msContainer.appendChild(msInput);
-  msContainer.appendChild(msLabel);
-  content.appendChild(msContainer);
+  historyBody.appendChild(maxEntriesContainer);
 
   // Create the config panel
   return api.ui.createConfigPanel({

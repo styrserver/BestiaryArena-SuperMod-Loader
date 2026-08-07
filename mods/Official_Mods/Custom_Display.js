@@ -677,23 +677,41 @@ function cleanupGrid() {
 // Create the configuration panel UI
 function createConfigPanel() {
   const content = document.createElement('div');
-  content.style.cssText = 'display: flex; flex-direction: column; gap: 20px;';
+  content.style.cssText = 'display: flex; flex-direction: column; gap: 6px;';
+
+  const createSection = (title, sectionId, defaultExpanded) => {
+    if (api?.ui?.createConfigSection) {
+      return api.ui.createConfigSection({
+        title,
+        modId: MOD_ID,
+        sectionId,
+        defaultExpanded,
+        parent: content
+      });
+    }
+    const section = document.createElement('fieldset');
+    section.style.cssText = 'border: 1px solid #666; border-radius: 4px; padding: 4px 8px 6px; margin: 0;';
+    const legend = document.createElement('legend');
+    legend.textContent = title;
+    legend.style.cssText = 'font-weight: bold; color: #0c6;';
+    section.appendChild(legend);
+    const body = document.createElement('div');
+    body.style.cssText = 'display: flex; flex-direction: column; gap: 6px;';
+    section.appendChild(body);
+    content.appendChild(section);
+    return { section, body };
+  };
 
   // Create Performance Mode section
-  const perfSection = document.createElement('fieldset');
-  perfSection.style.cssText = 'border: 1px solid #666; border-radius: 5px; padding: 10px; margin: 0;';
-  
-  const perfLegend = document.createElement('legend');
-  perfLegend.textContent = t('mods.customDisplay.perfSectionTitle');
-  perfLegend.style.cssText = 'font-weight: bold; color: #0c6;';
-  perfSection.appendChild(perfLegend);
-  
-  const perfContent = document.createElement('div');
-  perfContent.style.cssText = 'display: flex; flex-direction: column; gap: 12px;';
+  const { section: perfSection, body: perfContent } = createSection(
+    t('mods.customDisplay.perfSectionTitle'),
+    'performance',
+    true
+  );
   
   // Show names checkbox
   const namesContainer = document.createElement('div');
-  namesContainer.style.cssText = 'display: flex; align-items: center; gap: 8px;';
+  namesContainer.style.cssText = 'display: flex; align-items: center; gap: 6px;';
   
   const namesInput = document.createElement('input');
   namesInput.type = 'checkbox';
@@ -710,7 +728,7 @@ function createConfigPanel() {
 
   // Show HP bars checkbox
   const hpContainer = document.createElement('div');
-  hpContainer.style.cssText = 'display: flex; align-items: center; gap: 8px;';
+  hpContainer.style.cssText = 'display: flex; align-items: center; gap: 6px;';
   
   const hpInput = document.createElement('input');
   hpInput.type = 'checkbox';
@@ -727,7 +745,7 @@ function createConfigPanel() {
   
   // Show hitboxes checkbox
   const hitboxContainer = document.createElement('div');
-  hitboxContainer.style.cssText = 'display: flex; align-items: center; gap: 8px;';
+  hitboxContainer.style.cssText = 'display: flex; align-items: center; gap: 6px;';
   
   const hitboxInput = document.createElement('input');
   hitboxInput.type = 'checkbox';
@@ -744,7 +762,7 @@ function createConfigPanel() {
   
   // Show walkable paths checkbox
   const walkableContainer = document.createElement('div');
-  walkableContainer.style.cssText = 'display: flex; align-items: center; gap: 8px;';
+  walkableContainer.style.cssText = 'display: flex; align-items: center; gap: 6px;';
   
   const walkableInput = document.createElement('input');
   walkableInput.type = 'checkbox';
@@ -761,7 +779,7 @@ function createConfigPanel() {
 
   // Tile color input
   const colorContainer = document.createElement('div');
-  colorContainer.style.cssText = 'display: flex; align-items: center; gap: 8px;';
+  colorContainer.style.cssText = 'display: flex; align-items: center; gap: 6px;';
   
   const colorLabel = document.createElement('label');
   colorLabel.htmlFor = 'color-input';
@@ -778,7 +796,7 @@ function createConfigPanel() {
   
   // Hitbox color input (simplified - can't use rgba with input type="color")
   const hitboxColorContainer = document.createElement('div');
-  hitboxColorContainer.style.cssText = 'display: flex; align-items: center; gap: 8px;';
+  hitboxColorContainer.style.cssText = 'display: flex; align-items: center; gap: 6px;';
   
   const hitboxColorLabel = document.createElement('label');
   hitboxColorLabel.htmlFor = 'hitbox-color-input';
@@ -795,7 +813,7 @@ function createConfigPanel() {
   
   // Walkable color input (simplified - can't use rgba with input type="color")
   const walkableColorContainer = document.createElement('div');
-  walkableColorContainer.style.cssText = 'display: flex; align-items: center; gap: 8px;';
+  walkableColorContainer.style.cssText = 'display: flex; align-items: center; gap: 6px;';
   
   const walkableColorLabel = document.createElement('label');
   walkableColorLabel.htmlFor = 'walkable-color-input';
@@ -810,24 +828,16 @@ function createConfigPanel() {
   walkableColorContainer.appendChild(walkableColorInput);
   perfContent.appendChild(walkableColorContainer);
   
-  perfSection.appendChild(perfContent);
-  content.appendChild(perfSection);
-  
   // Create Grid section
-  const gridSection = document.createElement('fieldset');
-  gridSection.style.cssText = 'border: 1px solid #666; border-radius: 5px; padding: 10px; margin: 0;';
-  
-  const gridLegend = document.createElement('legend');
-  gridLegend.textContent = t('mods.customDisplay.gridSectionTitle');
-  gridLegend.style.cssText = 'font-weight: bold; color: #0c6;';
-  gridSection.appendChild(gridLegend);
-  
-  const gridContent = document.createElement('div');
-  gridContent.style.cssText = 'display: flex; flex-direction: column; gap: 12px;';
+  const { section: gridSection, body: gridContent } = createSection(
+    t('mods.customDisplay.gridSectionTitle'),
+    'map-grid',
+    false
+  );
   
   // Label color picker
   const labelColorRow = document.createElement('div');
-  labelColorRow.style.cssText = 'display: flex; align-items: center; gap: 8px;';
+  labelColorRow.style.cssText = 'display: flex; align-items: center; gap: 6px;';
 
   const labelColorLabel = document.createElement('label');
   labelColorLabel.textContent = t('mods.customDisplay.labelColorLabel');
@@ -844,7 +854,7 @@ function createConfigPanel() {
 
   // Grid color picker
   const gridColorRow = document.createElement('div');
-  gridColorRow.style.cssText = 'display: flex; align-items: center; gap: 8px;';
+  gridColorRow.style.cssText = 'display: flex; align-items: center; gap: 6px;';
 
   const gridColorLabel = document.createElement('label');
   gridColorLabel.textContent = t('mods.customDisplay.gridColorLabel');
@@ -861,7 +871,7 @@ function createConfigPanel() {
 
   // Font size slider
   const fontSizeRow = document.createElement('div');
-  fontSizeRow.style.cssText = 'display: flex; align-items: center; gap: 8px; margin-top: 8px;';
+  fontSizeRow.style.cssText = 'display: flex; align-items: center; gap: 6px; margin-top: 2px;';
 
   const fontSizeLabel = document.createElement('label');
   fontSizeLabel.textContent = t('mods.customDisplay.fontSizeLabel');
@@ -890,9 +900,6 @@ function createConfigPanel() {
   fontSizeRow.appendChild(fontSizeInput);
   fontSizeRow.appendChild(fontSizeValue);
   gridContent.appendChild(fontSizeRow);
-  
-  gridSection.appendChild(gridContent);
-  content.appendChild(gridSection);
 
   // Custom CSS for inputs to ensure better readability
   const styleElement = document.createElement('style');

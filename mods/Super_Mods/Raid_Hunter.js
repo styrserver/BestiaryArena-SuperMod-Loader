@@ -22,7 +22,11 @@ function dispatchEsc() {
 }
 
 // Default settings
-const DEFAULT_RAID_START_DELAY = 3; // Default delay in seconds
+// User-configurable start delay — same contract as BBM / Better Tasker / Awaken Farmer / Stamina Optimizer
+const DEFAULT_START_DELAY = 3;         // seconds (range: 1–MAX_START_DELAY)
+const MAX_START_DELAY = 10;
+const MODS_LOADING_GRACE_PERIOD = 5000;
+const MAX_WAIT_FOR_SIGNAL = 15000;
 
 // Automation state
 const AUTOMATION_ENABLED = true;
@@ -44,9 +48,7 @@ const NEXT_RAID_DELAY = 2000;
 const QUEST_BUTTON_VALIDATION_INTERVAL = 30000;
 const MODAL_OPEN_DELAY = 1000;
 
-// User-configurable delays
-const DEFAULT_START_DELAY = 3;         // 3 seconds default (user-configurable 1-10)
-const MAX_START_DELAY = 10;            // 10 seconds maximum
+// User-configurable delays (start delay constants declared above)
 const STAMINA_MONITOR_INTERVAL = 5000;
 const DEFAULT_STAMINA_COST = 30;
 const STAMINA_REGEN_MS = 60000;
@@ -2159,23 +2161,8 @@ function handleFightToast() {
         
         if (raidQueue.length > 0) {
             console.log('[Raid Hunter] Processing raid');
-            
-            // Apply raid start delay if configured
-            const settings = loadSettings();
-            const raidStartDelay = settings.raidDelay || DEFAULT_RAID_START_DELAY;
-            
-            if (raidStartDelay > 0) {
-                
-                setTimeout(() => {
-                    // Check if raid processing can proceed
-                    if (canProcessRaid('fight toast delay') && raidQueue.length > 0) {
-                        processNextRaid();
-                    }
-                }, raidStartDelay * 1000);
-            } else {
-                // No delay, process immediately
-                processNextRaid();
-            }
+            // Start delay is applied once before navigation inside the raid start path
+            processNextRaid();
         } else if (isCurrentlyRaiding) {
             console.log('[Raid Hunter] Already raiding');
         }
@@ -3319,8 +3306,8 @@ function validateSettingsAfterNavigation() {
             }
         }
         
-        // Validate raid delay settings
-        if (settings.raidDelay < 1 || settings.raidDelay > 30) {
+        // Validate raid delay settings (1–MAX_START_DELAY seconds)
+        if (settings.raidDelay < 1 || settings.raidDelay > MAX_START_DELAY) {
             validationIssues.push('Invalid raid delay setting');
         }
         
@@ -3603,30 +3590,12 @@ function toggleAutomation() {
     if (isAutomationActive()) {
         console.log('[Raid Hunter] Automation enabled');
         
-        // Get raid start delay from settings
-        const settings = loadSettings();
-        const raidStartDelay = settings.raidDelay || DEFAULT_RAID_START_DELAY;
-        
-        console.log(`[Raid Hunter] Raid start delay: ${raidStartDelay} seconds`);
-        
         // Re-enable monitoring
         setupRaidMonitoring();
         
-        // Wait for the specified delay before checking for raids
-        if (raidStartDelay > 0) {
-            console.log(`[Raid Hunter] Waiting ${raidStartDelay} seconds before checking for raids...`);
-            
-            setTimeout(() => {
-                // Check if raid processing can proceed
-                if (canProcessRaid('start delay')) {
-                    console.log('[Raid Hunter] Raid start delay completed - checking for raids');
-                    checkForExistingRaids();
-                }
-            }, raidStartDelay * 1000);
-        } else {
-            // No delay, check immediately
-            checkForExistingRaids();
-        }
+        // Start delay is applied once before navigation when a raid starts
+        console.log('[Raid Hunter] Checking for raids (start delay applies before navigate)');
+        checkForExistingRaids();
     } else {
         console.log('[Raid Hunter] Automation disabled');
         
@@ -4921,30 +4890,8 @@ async function checkForExistingRaids() {
                 console.log('[Raid Hunter] Currently autoplaying on non-raid map - raids have priority, switching to raid');
             }
             
-            // Apply raid start delay if configured
-            const settings = loadSettings();
-            const raidStartDelay = settings.raidDelay || DEFAULT_RAID_START_DELAY;
-            
-            if (raidStartDelay > 0) {
-                console.log(`[Raid Hunter] Applying raid start delay: ${raidStartDelay} seconds`);
-                
-                // Clear any existing timeout to prevent duplicates
-                if (raidProcessingTimeout) {
-                    clearTimeout(raidProcessingTimeout);
-                }
-                
-                raidProcessingTimeout = setTimeout(() => {
-                    raidProcessingTimeout = null;
-                    // Check if raid processing can proceed
-                    if (canProcessRaid('existing raid delay') && raidQueue.length > 0 && !isProcessingRaid) {
-                        console.log('[Raid Hunter] Raid start delay completed - processing raid (raid priority)');
-                        processNextRaid();
-                    }
-                }, raidStartDelay * 1000);
-            } else {
-                // No delay, process immediately
-                processNextRaid();
-            }
+            // Start delay is applied once before navigation inside the raid start path
+            processNextRaid();
         } else {
             const settings = loadSettings();
             const enabledMaps = settings.enabledRaidMaps || [];
@@ -5031,24 +4978,8 @@ async function handleNewRaid(raid) {
         updateRaidState();
         if (raidQueue.length > 0) {
             console.log(`[Raid Hunter] New raids detected - processing next raid (raid priority)`);
-            
-            // Apply raid start delay if configured
-            const raidStartDelay = settings.raidDelay || DEFAULT_RAID_START_DELAY;
-            
-            if (raidStartDelay > 0) {
-                console.log(`[Raid Hunter] Applying raid start delay: ${raidStartDelay} seconds`);
-                
-                setTimeout(() => {
-                    // Check if raid processing can proceed
-                    if (canProcessRaid('new raid delay') && raidQueue.length > 0) {
-                        console.log('[Raid Hunter] Raid start delay completed - processing raid (raid priority)');
-                        processNextRaid();
-                    }
-                }, raidStartDelay * 1000);
-            } else {
-                // No delay, process immediately
-                processNextRaid();
-            }
+            // Start delay is applied once before navigation inside the raid start path
+            processNextRaid();
         }
     } catch (error) {
         console.error("[Raid Hunter] Error handling raid:", error);
@@ -5494,7 +5425,7 @@ function createAutoRaidSettings() {
     `;
     delayDiv.appendChild(delayLabel);
     
-    const delayInput = createStyledInput('number', 'raidDelay', 3, `
+    const delayInput = createStyledInput('number', 'raidDelay', DEFAULT_START_DELAY, `
         width: 100%;
         padding: 6px;
         background: ${COLOR_DARK_GRAY};
@@ -5504,8 +5435,8 @@ function createAutoRaidSettings() {
         box-sizing: border-box;
         font-size: 14px;
     `, {
-        min: 0,
-        max: 10,
+        min: 1,
+        max: MAX_START_DELAY,
         className: 'pixel-font-16'
     });
     delayDiv.appendChild(delayInput);
@@ -6571,7 +6502,7 @@ function createRaidContextMenu(raidName, x, y, onClose) {
 
 // Default settings with validation
 const DEFAULT_SETTINGS = {
-    raidDelay: DEFAULT_RAID_START_DELAY,
+    raidDelay: DEFAULT_START_DELAY,
     autoRefillStamina: false,
     fasterAutoplay: false,
     enableDragonPlant: false,
@@ -6584,8 +6515,8 @@ const DEFAULT_SETTINGS = {
 
 // Settings validation functions
 function validateRaidDelay(value) {
-    const num = parseInt(value);
-    return !isNaN(num) && num >= 0 && num <= 60;
+    const num = parseInt(value, 10);
+    return !isNaN(num) && num >= 1 && num <= MAX_START_DELAY;
 }
 
 function validateRaidMaps(maps) {
@@ -6616,8 +6547,8 @@ function sanitizeSettings(settings) {
     if (validateRaidDelay(settings.raidDelay)) {
         sanitized.raidDelay = parseInt(settings.raidDelay);
     } else {
-        sanitized.raidDelay = DEFAULT_RAID_START_DELAY;
-        console.warn('[Raid Hunter] Invalid raid delay, using default:', DEFAULT_RAID_START_DELAY);
+        sanitized.raidDelay = DEFAULT_START_DELAY;
+        console.warn('[Raid Hunter] Invalid raid delay, using default:', DEFAULT_START_DELAY);
     }
     
     // Validate and sanitize boolean settings
@@ -6740,8 +6671,8 @@ function autoSaveSettings() {
                     const value = parseInt(input.value);
                     if (input.id === 'raidDelay' && !validateRaidDelay(value)) {
                         console.warn('[Raid Hunter] Invalid raid delay value:', value);
-                        input.value = DEFAULT_RAID_START_DELAY;
-                        settings[input.id] = DEFAULT_RAID_START_DELAY;
+                        input.value = DEFAULT_START_DELAY;
+                        settings[input.id] = DEFAULT_START_DELAY;
                     } else {
                         settings[input.id] = value || 0;
                     }
@@ -7060,7 +6991,6 @@ function init() {
             priority: 100,
             metadata: { description: 'Automated raid hunting system' }
         });
-        window.ModCoordination.updateModState('Raid Hunter', { enabled: true });
         
         // Subscribe to mod state changes instead of polling
         window.ModCoordination.on('modActiveChanged', (data) => {
@@ -7074,6 +7004,12 @@ function init() {
     
     // Load automation state from localStorage first
     loadAutomationState();
+
+    // Sync coordination enabled to the real automation flag (register above defaults enabled:false;
+    // do not leave a stale enabled:true that blocks lower-priority farmers while RH is off).
+    if (window.ModCoordination) {
+        window.ModCoordination.updateModState('Raid Hunter', { enabled: isAutomationActive() });
+    }
     
     // Set up fight toast monitoring immediately (independent of automation state)
     setupFightToastMonitoring();
@@ -7109,21 +7045,40 @@ function startRaidAutomation() {
     }
 }
 
-// Listen for allModsLoaded signal and start automation
+// Listen for allModsLoaded signal and start automation after shared boot grace
 // Store handler reference for cleanup (prevents memory leaks per mod development guide)
+let raidHunterBootGraceTimer = null;
+let raidHunterBootFallbackTimer = null;
 windowMessageHandler = (event) => {
     if (event.source !== window) return;
     if (event.data?.from === 'LOCAL_MODS_LOADER' && event.data?.action === 'allModsLoaded') {
+        if (allModsLoaded) return;
         console.log('[Raid Hunter] Received allModsLoaded signal');
         allModsLoaded = true;
-        
-        // Delay to ensure Better Tasker has fully set up its state
-        setTimeout(() => {
+        if (raidHunterBootFallbackTimer) {
+            clearTimeout(raidHunterBootFallbackTimer);
+            raidHunterBootFallbackTimer = null;
+        }
+        console.log(`[Raid Hunter] Boot grace started — waiting ${MODS_LOADING_GRACE_PERIOD / 1000}s`);
+        raidHunterBootGraceTimer = setTimeout(() => {
+            raidHunterBootGraceTimer = null;
             startRaidAutomation();
-        }, 1500);
+        }, MODS_LOADING_GRACE_PERIOD);
     }
 };
 window.addEventListener('message', windowMessageHandler);
+
+raidHunterBootFallbackTimer = setTimeout(() => {
+    raidHunterBootFallbackTimer = null;
+    if (!allModsLoaded) {
+        console.warn('[Raid Hunter] allModsLoaded not received — starting boot grace anyway');
+        allModsLoaded = true;
+        raidHunterBootGraceTimer = setTimeout(() => {
+            raidHunterBootGraceTimer = null;
+            startRaidAutomation();
+        }, MODS_LOADING_GRACE_PERIOD);
+    }
+}, MAX_WAIT_FOR_SIGNAL);
 
 // Run initialization immediately when file loads
 init();
@@ -7970,6 +7925,14 @@ function cleanupRaidHunter() {
             window.removeEventListener('message', windowMessageHandler);
             windowMessageHandler = null;
         }
+        if (raidHunterBootGraceTimer) {
+            clearTimeout(raidHunterBootGraceTimer);
+            raidHunterBootGraceTimer = null;
+        }
+        if (raidHunterBootFallbackTimer) {
+            clearTimeout(raidHunterBootFallbackTimer);
+            raidHunterBootFallbackTimer = null;
+        }
         
         // Note: Control release is handled automatically by withControl functions
         
@@ -8000,6 +7963,30 @@ context.exports = {
 // Shared coordination API for Better Tasker and Better Boosted Maps (prefer these over duplicating checks)
 window.raidHunterIsCurrentlyRaiding = () => isCurrentlyRaiding;
 window.raidHunterTryYieldToBetterTasker = (reason) => tryYieldLowPriorityRaidToBetterTasker(reason);
+
+// True when automation is on and at least one live raid is in enabledRaidMaps (same filter as the raid queue).
+// Lower-priority farmers should wait for these; ignore disabled raids that RH will never claim.
+window.raidHunterHasClaimableRaids = () => {
+    try {
+        if (!isAutomationActive()) return false;
+        const settings = loadSettings();
+        const enabledMaps = settings.enabledRaidMaps || [];
+        if (!enabledMaps.length) return false;
+        const list = globalThis.state?.raids?.getSnapshot?.()?.context?.list || [];
+        if (!Array.isArray(list) || !list.length) return false;
+        const now = Date.now();
+        for (const raid of list) {
+            if (raid?.expiresAt && raid.expiresAt < now) continue;
+            const raidName = getEventNameForRoomId(raid.roomId);
+            if (!raidName || raidName.startsWith('Unknown')) continue;
+            if (enabledMaps.includes(raidName)) return true;
+        }
+        return false;
+    } catch (error) {
+        console.error('[Raid Hunter] Error checking claimable raids:', error);
+        return false;
+    }
+};
 
 // Expose function to check if Raid Hunter is raiding a HIGH priority raid
 // Better Tasker should yield ONLY for HIGH priority raids

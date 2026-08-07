@@ -4,6 +4,96 @@
   },
   "notes": [
     {
+      "version": "4.8.0",
+      "changes": [
+        {
+          "mod": "Awaken Tracker",
+          "type": "added",
+          "text": "Awaken Farmer tab: farms maps for awakened creatures that are not gene-capped, ranked most efficient → least. Enable Awaken Farmer toggle (toolbar button turns green while on), auto-refill stamina, setup label, and configurable start delay (default 3s, 1–10; applied once before each navigate). Skips maps without an unlocked floor 11–15 and farms the highest unlocked sealed floor (or per-map floor/setup/auto-refill from the right-click menu; smith icon marks custom settings). Map rows show target creature gene stats and farm floor. Raid maps appear only while active. Advances to the next map when a map’s targets are gene-capped. Registers with Mod Coordination just above Stamina Optimizer (second-to-last); yields to Manual Runner, Board Analyzer, Better Boosted Maps, Raid Hunter, Better Tasker, and Autoscroller; resumes 1s after a higher-priority mod yields. Auto-resume on reload waits for allModsLoaded + 5s boot grace and will not navigate while Raid Hunter still has claimable (enabled-map) live raids. Overview rows include the same pause-on-cap checkbox as the Tracker. UI chrome (pause-on-cap, expand/collapse, drag handle, close, success/fail, custom settings) uses game assets instead of emoji. Farmer/Overview map help text is behind a ? tooltip; the Idle status line was removed. Shows a widget toast (“Starting Awaken Farmer”) when autoplay control is taken successfully."
+        },
+        {
+          "mod": "Awaken Tracker",
+          "type": "fixed",
+          "text": "Pause-on-cap no longer drops marks when a creature hits 5/5 without pausing: marks stay until the pause button is clicked successfully, event after-stats are trusted when inventory lags, and inventory updates retry the pause if the earlier attempt missed. Awaken Farmer no longer starts from inventory updates during boot grace (which raced ahead of Raid Hunter). Pause-on-cap defaults to checked globally for all awakened (non-pre-capped) species and is shared across Tracker and Overview; unchecks are remembered as a global opt-out. Awaken Farmer no longer treats Raid Hunter as enabled when RH automation is off (false Mod Coordination enabled flag) — that previously blocked farming whenever any live raids existed. Awaken Farmer only yields to Raid Hunter for claimable (enabled-map) live raids, not disabled raids RH will skip."
+        },
+        {
+          "mod": "Bestiary Automator",
+          "type": "changed",
+          "text": "Settings panel grouped into collapsible sections (Stamina, Rewards, Autoplay, Advanced) matching Custom Display; Autohandle Daycare under Rewards; Delay (ms) under Autoplay. Top section open by default, expand/collapse remembered."
+        },
+        {
+          "mod": "Better Boosted Maps",
+          "type": "changed",
+          "text": "Boot start now waits for allModsLoaded + 5s grace (same contract as other farming mods) instead of a blind 5s timer. Yields while Raid Hunter is enabled and live raids are available, not only after Raid Hunter is already marked active."
+        },
+        {
+          "mod": "Better Boosted Maps",
+          "type": "fixed",
+          "text": "Start delay is applied once before navigate (no longer stacked with the pre-start wait). Coordination resume still waits 1s after a higher-priority mod yields. Raid Hunter enabled checks now prefer the real automation localStorage flag so a stale Mod Coordination enabled:true no longer blocks boosted farming. Raid yield only waits for claimable (enabled-map) live raids, matching Raid Hunter’s queue filter."
+        },
+        {
+          "mod": "Better Tasker",
+          "type": "changed",
+          "text": "Auto-start on reload waits for allModsLoaded + 5s boot grace (same contract as other farming mods)."
+        },
+        {
+          "mod": "Battle Helper",
+          "type": "changed",
+          "text": "Ask for help: mandatory targets by goal — ticks (≥1), S+ rank (1–map max via Better Highscores (2×maxTeamSize)−1), or floor (1–15); values clamp on blur/map/goal change; validation shows red border + error under the failing field. Notes capped at 80 characters with a live counter. Selecting a request no longer auto-navigates; Load their profile / Open map navigates (and loads profile for others) — floor goals open that floor, ticks/rank open floor 0. Viewing/helping toast includes a blue Restore button; restoring shows “Original profile restored”. Publish setup toast returns to Publish after 5s; blocks duplicate setups and caps 3 setups per username per request. Restore Original Profile button uses the blue Load Setup style."
+        },
+        {
+          "mod": "Board Analyzer",
+          "type": "changed",
+          "text": "Settings panel grouped into collapsible sections (Analysis, Display, Stop Conditions) matching Custom Display; top section open by default, expand/collapse remembered."
+        },
+        {
+          "mod": "Custom Display",
+          "type": "changed",
+          "text": "Performance Mode and Map Grid settings sections are collapsible (top open by default); expand/collapse state is remembered."
+        },
+        {
+          "mod": "Manual Runner",
+          "type": "changed",
+          "text": "Settings panel grouped into collapsible sections (Run Conditions, Options) matching Custom Display; top section open by default, expand/collapse remembered."
+        },
+        {
+          "mod": "Mod Loader",
+          "type": "added",
+          "text": "Shared api.ui.createConfigSection helper for mod settings panels: green fieldset sections with click-to-collapse, default top section open, remembered expand/collapse state, and compact spacing."
+        },
+        {
+          "mod": "Quests",
+          "type": "changed",
+          "text": "Once-ever unique quest items now share one eligibility path: further awards are blocked by the received flag, inventory ownership, or quest completion, and a missing received flag is backfilled when ownership or completion already apply."
+        },
+        {
+          "mod": "Quests",
+          "type": "fixed",
+          "text": "Once-ever unique quest items could drop again after their quest was already finished (including when a received flag failed to save). Leftover once-ever items are now removed from inventory when the related quest is completed. Victory thank-you dialogue now substitutes the player's name when the template uses an all-caps PLAYER placeholder."
+        },
+        {
+          "mod": "Raid Hunter",
+          "type": "changed",
+          "text": "Raid start delay (default 3s, 1–10) is applied once before navigate only; enable/queue paths no longer add a second wait. Boot start waits for allModsLoaded + 5s grace (was 1.5s)."
+        },
+        {
+          "mod": "Raid Hunter",
+          "type": "fixed",
+          "text": "Mod Coordination enabled state now matches the real automation toggle after load (was left enabled:true even when automation was off, which blocked Awaken Farmer / Better Boosted Maps when live raids existed). Exposes raidHunterHasClaimableRaids so other farming mods only wait for enabled-map live raids."
+        },
+        {
+          "mod": "Stamina Optimizer",
+          "type": "changed",
+          "text": "Action start delay aligned to the shared 3s farming-mod default (was 1s). Boot grace remains allModsLoaded + 5s. Yields while Awaken Farmer’s loop is armed (higher priority) instead of starting a specific-map session over it."
+        },
+        {
+          "mod": "Tick Tracker",
+          "type": "changed",
+          "text": "Settings panel grouped into collapsible sections (General, History) matching Custom Display; top section open by default, expand/collapse remembered."
+        }
+      ]
+    },
+    {
       "version": "4.7.7",
       "changes": [
         {
@@ -34,7 +124,7 @@
         {
           "mod": "Quests",
           "type": "changed",
-          "text": "While the new multi-step quest is active, most NPCs wonder aloud what befell the lost figure when asked about it; after completion they respond with gratitude. The royal NPC still advances the quest as before. The finale battle is tougher (higher level, shorter ability cooldown that starts ready), and victory thanks come from talking to the board NPC rather than an automatic modal. Custom battle status toast now shows ally creatures as placed/maximum and updates live while placing."
+          "text": "While the new multi-step quest is active, most NPCs wonder aloud what befell the lost figure when asked about it; after completion they respond with gratitude. The royal NPC still advances the quest as before. The finale battle is tougher (higher level, shorter ability cooldown that starts ready), and victory thanks come from talking to the board NPC rather than an automatic modal. After completion, the interactive board NPC is removed but the existing map statue sprite stays visible. Custom battle status toast now shows ally creatures as placed/maximum and updates live while placing."
         }
       ]
     },

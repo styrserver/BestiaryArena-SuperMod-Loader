@@ -53,7 +53,9 @@ const AUTO_SETUP_DELAY = 800;
 const PAUSE_BUTTON_CLICK_DELAY = 100;
 const PAUSE_BUTTON_UPDATE_DELAY = 300;
 const MODS_LOADING_GRACE_PERIOD = 5000; // 5 seconds after allModsLoaded before allowing actions
-const ACTION_START_DELAY = 1000;
+// Same start-delay contract as other farming mods (3s default; SO uses fixed default, not a settings slider)
+const DEFAULT_START_DELAY = 3;
+const ACTION_START_DELAY = DEFAULT_START_DELAY * 1000;
 const ACTION_START_TOAST_COOLDOWN_MS = 10000;
 const MAX_WAIT_FOR_SIGNAL = 15000; // Maximum time to wait for allModsLoaded signal (15 seconds)
 const ROOM_NAV_POLL_MS = 100;
@@ -979,6 +981,21 @@ function isRaidHunterActive() {
     }
 }
 
+// Awaken Farmer outranks SO (priority 6 > 5). Yield while its loop is armed / holding the board.
+function isAwakenFarmerHoldingBoard() {
+    try {
+        if (window.ModCoordination?.isModActive?.('Awaken Farmer')) return true;
+        if (hasAutoplayControl('Awaken Farmer')) return true;
+        if (typeof window.awakenFarmerShouldHoldBoard === 'function' && window.awakenFarmerShouldHoldBoard()) {
+            return true;
+        }
+        return false;
+    } catch (error) {
+        console.error('[Stamina Optimizer] Error checking Awaken Farmer status:', error);
+        return false;
+    }
+}
+
 // Check if Better Boosted Maps is currently active - Returns: True if active (boolean)
 function isBoostedMapsActive() {
     try {
@@ -1163,6 +1180,7 @@ function getCannotProceedReason() {
     if (isRaidHunterActive()) return 'Raid Hunter is active';
     if (isBetterTaskerActive()) return 'Better Tasker is active';
     if (isBoostedMapsActive()) return 'Better Boosted Maps is active';
+    if (isAwakenFarmerHoldingBoard()) return 'Awaken Farmer is holding the board';
     return null;
 }
 

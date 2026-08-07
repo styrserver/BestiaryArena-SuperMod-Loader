@@ -21,8 +21,16 @@ const MODAL_CONFIG = {
 const BATTLE_HELPER_MODAL_ID = 'battle-helper-modal';
 const BATTLE_HELPER_BUTTON_CLASS = {
   primary: 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular frame-1-green active:frame-pressed-1-green surface-green gap-1 px-2 py-0.5 pb-[3px] pixel-font-14',
-  secondary: 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular frame-1 active:frame-pressed-1 surface-regular gap-1 px-2 py-0.5 pb-[3px] pixel-font-14'
+  secondary: 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular frame-1 active:frame-pressed-1 surface-regular gap-1 px-2 py-0.5 pb-[3px] pixel-font-14',
+  blue: 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular frame-1-blue active:frame-pressed-1-blue surface-blue gap-1 px-2 py-0.5 pb-[3px] pixel-font-14'
 };
+const BATTLE_HELPER_BLUE_BUTTON_STYLE = [
+  'width: 100%; cursor: pointer; color: rgb(255, 255, 255);',
+  'background-image: url("https://bestiaryarena.com/_next/static/media/background-blue.7259c4ed.png"), url("https://bestiaryarena.com/_next/static/media/1-frame-blue.cf300a6a.png");',
+  'background-size: auto, 100% 100%;',
+  'background-position: left top, center center;',
+  'background-repeat: repeat, no-repeat;'
+].join(' ');
 
 const BATTLE_HELPER_BUTTON_IMPORTED_CLASS = 'battle-helper-button-imported';
 const BATTLE_HELPER_BUTTON_STYLE_ID = 'battle-helper-button-styles';
@@ -38,8 +46,9 @@ const FIREBASE_URL = 'https://vip-list-messages-default-rtdb.europe-west1.fireba
 const BATTLE_HELP_REQUESTS_PATH = `${FIREBASE_URL}/battle-help/requests`;
 const BATTLE_HELP_REQUEST_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const BATTLE_HELP_MAX_OPEN_PER_USER = 3;
+const BATTLE_HELP_MAX_REPLIES_PER_USER = 3;
 const BATTLE_HELP_GOAL_TYPES = ['ticks', 'rank', 'floor'];
-const BATTLE_HELP_NOTE_MAX_LENGTH = 120;
+const BATTLE_HELP_NOTE_MAX_LENGTH = 80;
 const BATTLE_HELP_BUTTON_POLL_MS = 60000;
 
 const DEFAULT_MONSTER_STAT = 1;
@@ -484,6 +493,54 @@ function navigateToRoomId(roomId) {
   }
 }
 
+function setBoardFloor(floor) {
+  const target = Math.trunc(Number(floor));
+  if (!Number.isFinite(target)) return false;
+  const clamped = Math.max(0, Math.min(15, target));
+  try {
+    globalThis.state?.board?.trigger?.setState?.({
+      fn: (prev) => ({ ...prev, floor: clamped })
+    });
+    return true;
+  } catch (error) {
+    console.warn('[Battle Helper] setBoardFloor:', error);
+    return false;
+  }
+}
+
+function sleepMs(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Navigate to the request map; set floor from goal (floor target, else floor 0 for ticks/rank). */
+async function navigateToHelpRequest(request) {
+  const roomId = resolveRoomIdForRequest(request);
+  if (!roomId) return false;
+
+  const alreadyOnMap = (() => {
+    const current = getCurrentRoomId();
+    return !!(current && String(current) === String(roomId));
+  })();
+
+  const navigated = navigateToRoomId(roomId);
+  if (!navigated) return false;
+
+  // Wait for room change to settle before applying floor (same pattern as other mods).
+  await sleepMs(alreadyOnMap ? 80 : 350);
+
+  if (request?.goalType === 'floor' && request.goalValue != null) {
+    const floor = Number(request.goalValue);
+    if (Number.isFinite(floor) && floor >= 1 && floor <= 15) {
+      setBoardFloor(floor);
+      return true;
+    }
+  }
+
+  // Ticks / rank (and invalid floor targets): always use floor 0
+  setBoardFloor(0);
+  return true;
+}
+
 function resolveRoomIdForRequest(request) {
   if (!request) return null;
   const stored = String(request.roomId || '').trim();
@@ -505,9 +562,128 @@ function findMapOptionForCurrentRoom(mapOptions = getHelpMapOptions()) {
 function formatHelpGoalLabel(goalType, goalValue) {
   const typeLabel = t(`mods.battleHelper.help.goalTypes.${goalType}`) || goalType;
   if (goalValue != null && goalValue !== '' && Number.isFinite(Number(goalValue))) {
+    if (goalType === 'rank') {
+      return `S+${Number(goalValue)}`;
+    }
     return `${typeLabel}: ${goalValue}`;
   }
   return typeLabel;
+}
+
+function getRoomMaxTeamSize(roomId) {
+  try {
+    const id = String(roomId || '').trim();
+    if (!id || !globalThis.state?.utils?.ROOMS) return 5;
+    const rooms = globalThis.state.utils.ROOMS;
+    const roomData = rooms.find((room) =>
+      room.id === id
+      || room.id === Number(id)
+      || String(room.id) === id
+    );
+    if (roomData && typeof roomData.maxTeamSize === 'number' && roomData.maxTeamSize > 0) {
+      return roomData.maxTeamSize;
+    }
+  } catch (_) { /* ignore */ }
+  return 5;
+}
+
+/** Max S+# for a map — same formula as Better Highscores: (2 * maxTeamSize) - 1. */
+function getMapMaxSPlusRank(roomId) {
+  const maxTeamSize = getRoomMaxTeamSize(roomId);
+  return Math.max(1, (2 * maxTeamSize) - 1);
+}
+
+function getHelpGoalValueBounds(goalType, roomId) {
+  if (goalType === 'floor') {
+    return { min: 1, max: 15 };
+  }
+  if (goalType === 'rank') {
+    return { min: 1, max: getMapMaxSPlusRank(roomId) };
+  }
+  // ticks: required ≥ 1, no hard upper clamp
+  return { min: 1, max: null };
+}
+
+function helpFormFieldError(field, message) {
+  const error = new Error(message);
+  error.helpField = field;
+  return error;
+}
+
+function clampHelpGoalValue(goalType, goalValueRaw, roomId) {
+  const raw = String(goalValueRaw ?? '').trim();
+  if (!raw) return '';
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) return raw;
+  const { min, max } = getHelpGoalValueBounds(goalType, roomId);
+  let value = Math.trunc(parsed);
+  if (Number.isFinite(min)) value = Math.max(min, value);
+  if (Number.isFinite(max)) value = Math.min(max, value);
+  return String(value);
+}
+
+function validateHelpGoalValue(goalType, goalValueRaw, roomId) {
+  const raw = String(goalValueRaw ?? '').trim();
+  if (!raw) {
+    throw helpFormFieldError('goalValue', t('mods.battleHelper.help.errors.goalValueRequired'));
+  }
+  const value = Number(raw);
+  if (!Number.isFinite(value) || !Number.isInteger(value)) {
+    throw helpFormFieldError('goalValue', t('mods.battleHelper.help.errors.goalValueInvalid'));
+  }
+
+  if (goalType === 'ticks') {
+    if (value < 1) {
+      throw helpFormFieldError('goalValue', t('mods.battleHelper.help.errors.ticksRequired'));
+    }
+    return value;
+  }
+
+  if (goalType === 'floor') {
+    if (value < 1 || value > 15) {
+      throw helpFormFieldError('goalValue', t('mods.battleHelper.help.errors.floorRange'));
+    }
+    return value;
+  }
+
+  if (goalType === 'rank') {
+    const maxRank = getMapMaxSPlusRank(roomId);
+    if (value < 1 || value > maxRank) {
+      throw helpFormFieldError('goalValue', tReplace('mods.battleHelper.help.errors.rankRange', {
+        max: String(maxRank)
+      }));
+    }
+    return value;
+  }
+
+  throw helpFormFieldError('goalType', t('mods.battleHelper.help.errors.goalRequired'));
+}
+
+function getHelpGoalValuePlaceholder(goalType, roomId) {
+  if (goalType === 'rank') {
+    const maxRank = getMapMaxSPlusRank(roomId);
+    return tReplace('mods.battleHelper.help.goalValuePlaceholderRank', {
+      max: String(maxRank)
+    });
+  }
+  if (goalType === 'floor') {
+    return t('mods.battleHelper.help.goalValuePlaceholderFloor');
+  }
+  return t('mods.battleHelper.help.goalValuePlaceholderTicks');
+}
+
+function sanitizeHelpNote(note) {
+  return String(note || '').replace(/\s+/g, ' ').trim().slice(0, BATTLE_HELP_NOTE_MAX_LENGTH);
+}
+
+function validateHelpNote(noteRaw) {
+  const raw = String(noteRaw ?? '');
+  if (raw.length > BATTLE_HELP_NOTE_MAX_LENGTH) {
+    throw helpFormFieldError('note', tReplace('mods.battleHelper.help.errors.noteTooLong', {
+      max: String(BATTLE_HELP_NOTE_MAX_LENGTH)
+    }));
+  }
+  return sanitizeHelpNote(raw);
 }
 
 function formatHelpAge(createdAt) {
@@ -546,7 +722,7 @@ function normalizeHelpRequest(id, raw) {
     regionName: String(raw.regionName || '').trim(),
     goalType,
     goalValue: Number.isFinite(goalValue) ? goalValue : null,
-    note: String(raw.note || '').trim().slice(0, BATTLE_HELP_NOTE_MAX_LENGTH),
+    note: sanitizeHelpNote(raw.note),
     createdAt: Number(raw.createdAt) || 0,
     expiresAt: Number(raw.expiresAt) || 0,
     status: raw.status === 'closed' ? 'closed' : 'open',
@@ -561,7 +737,7 @@ function getHelpRepliesList(request) {
       id,
       helperName: String(reply?.helperName || '').trim(),
       replayLink: String(reply?.replayLink || '').trim(),
-      note: String(reply?.note || '').trim().slice(0, BATTLE_HELP_NOTE_MAX_LENGTH),
+      note: sanitizeHelpNote(reply?.note),
       createdAt: Number(reply?.createdAt) || 0
     }))
     .filter((r) => r.replayLink)
@@ -616,10 +792,7 @@ async function createHelpRequest({ mapName, mapKey, regionName, roomId, goalType
   }
 
   const resolvedRoomId = String(roomId || '').trim() || getCurrentRoomId() || '';
-  const normalizedGoalValue = goalValue == null || goalValue === ''
-    ? null
-    : Number(goalValue);
-  const safeGoalValue = Number.isFinite(normalizedGoalValue) ? normalizedGoalValue : null;
+  const safeGoalValue = validateHelpGoalValue(goalType, goalValue, resolvedRoomId);
 
   const duplicate = myOpen.find((r) => {
     const sameMap = (resolvedRoomId && r.roomId && String(r.roomId) === resolvedRoomId)
@@ -642,7 +815,7 @@ async function createHelpRequest({ mapName, mapKey, regionName, roomId, goalType
     regionName: regionName || '',
     goalType,
     goalValue: safeGoalValue,
-    note: String(note || '').trim().slice(0, BATTLE_HELP_NOTE_MAX_LENGTH),
+    note: sanitizeHelpNote(note),
     createdAt: now,
     expiresAt: now + BATTLE_HELP_REQUEST_TTL_MS,
     status: 'open',
@@ -747,6 +920,46 @@ function stripSeedFromReplayLink(replayLink) {
   }
 }
 
+/** Stable replay fingerprint for duplicate detection (ignores seed / key order noise). */
+function normalizeReplayForCompare(replayLink) {
+  const stripped = stripSeedFromReplayLink(replayLink);
+  if (!stripped) return '';
+  try {
+    const match = stripped.match(/^\$replay\((\{.*\})\)$/s);
+    if (!match) return stripped;
+    const data = JSON.parse(match[1]);
+    if (!data || typeof data !== 'object') return stripped;
+    return `$replay(${JSON.stringify({
+      region: data.region || undefined,
+      map: String(data.map || ''),
+      floor: data.floor !== undefined && data.floor !== null ? data.floor : 0,
+      board: Array.isArray(data.board) ? data.board : []
+    })})`;
+  } catch (_) {
+    return stripped;
+  }
+}
+
+async function fetchHelpRequestById(requestId) {
+  const id = String(requestId || '').trim();
+  if (!id) return null;
+  const raw = await BattleHelpFirebase.get(
+    `${BATTLE_HELP_REQUESTS_PATH}/${id}`,
+    'load help request',
+    null
+  );
+  if (!raw || typeof raw !== 'object') return null;
+  return normalizeHelpRequest(id, raw);
+}
+
+function findDuplicateHelpReply(request, replayLink) {
+  const fingerprint = normalizeReplayForCompare(replayLink);
+  if (!fingerprint) return null;
+  return getHelpRepliesList(request).find(
+    (reply) => normalizeReplayForCompare(reply.replayLink) === fingerprint
+  ) || null;
+}
+
 async function publishHelpReply(requestId, note = '') {
   const helperName = getCurrentPlayerName();
   if (!helperName) {
@@ -761,11 +974,34 @@ async function publishHelpReply(requestId, note = '') {
     throw new Error(t('mods.battleHelper.help.errors.noBoardSetup'));
   }
 
+  let request = await fetchHelpRequestById(requestId);
+  if (!request) {
+    request = helpBoardState.requests.find((r) => r.id === requestId) || null;
+  }
+  if (!request) {
+    throw new Error(t('mods.battleHelper.help.errors.selectRequestFirst'));
+  }
+
+  const duplicate = findDuplicateHelpReply(request, replayLink);
+  if (duplicate) {
+    throw new Error(t('mods.battleHelper.help.errors.duplicateSetup'));
+  }
+
+  const helperNameLower = helperName.toLowerCase();
+  const myReplyCount = getHelpRepliesList(request).filter(
+    (reply) => reply.helperName.toLowerCase() === helperNameLower
+  ).length;
+  if (myReplyCount >= BATTLE_HELP_MAX_REPLIES_PER_USER) {
+    throw new Error(tReplace('mods.battleHelper.help.errors.tooManyReplies', {
+      max: String(BATTLE_HELP_MAX_REPLIES_PER_USER)
+    }));
+  }
+
   const replyId = createClientId();
   const reply = {
     helperName,
     replayLink,
-    note: String(note || '').trim().slice(0, BATTLE_HELP_NOTE_MAX_LENGTH),
+    note: sanitizeHelpNote(note),
     createdAt: Date.now()
   };
 
@@ -820,6 +1056,7 @@ let battleHelperModalLayoutCleanup = null;
 let battleHelperPersistentToastHandle = null;
 let battleHelperPublishToastHandle = null;
 let battleHelperPublishToastBtn = null;
+let battleHelperPublishToastResetTimer = null;
 let battleHelperModalPublishBtn = null;
 let battleHelperModalPublishBaseDisabled = true;
 let battleHelperPublishBoardUnsub = null;
@@ -991,6 +1228,7 @@ function restoreOriginalArsenal() {
   syncBattleHelperButtonState();
   stopBattleHelperViewingProfileToast();
   stopBattleHelperPublishSetupToast();
+  showBattleHelperTransientToast(t('mods.battleHelper.toast.originalProfileRestored'));
 }
 
 // =======================
@@ -1002,9 +1240,9 @@ function getBattleHelperToastContainer() {
   if (!container) {
     container = document.createElement('div');
     container.id = BATTLE_HELPER_TOAST_CONTAINER_ID;
-    container.style.cssText = 'position: fixed; z-index: 9999; inset: 16px 16px 64px; pointer-events: none;';
     document.body.appendChild(container);
   }
+  container.style.cssText = 'position: fixed; z-index: 10050; inset: 16px 16px 64px; pointer-events: none;';
   return container;
 }
 
@@ -1014,6 +1252,49 @@ function updateBattleHelperToastPositions(container) {
   toasts.forEach((toast, index) => {
     toast.style.transform = `translateY(-${index * 46}px)`;
   });
+}
+
+function showBattleHelperTransientToast(message, duration = 5000) {
+  try {
+    const container = getBattleHelperToastContainer();
+    if (!container || !message) return;
+
+    const existingToasts = container.querySelectorAll('.battle-helper-toast-item');
+    const stackOffset = existingToasts.length * 46;
+    const flexContainer = document.createElement('div');
+    flexContainer.className = 'battle-helper-toast-item';
+    flexContainer.style.cssText = `display: flex; position: absolute; transition: 230ms cubic-bezier(0.21, 1.02, 0.73, 1); transform: translateY(-${stackOffset}px); bottom: 0px; left: 0px; right: 0px; justify-content: flex-end; pointer-events: none;`;
+
+    const toast = document.createElement('div');
+    toast.className = 'non-dismissable-dialogs shadow-lg animate-in fade-in zoom-in-95 slide-in-from-top lg:slide-in-from-bottom';
+    toast.setAttribute('role', 'status');
+
+    const widgetTop = document.createElement('div');
+    widgetTop.className = 'widget-top h-2.5';
+
+    const widgetBottom = document.createElement('div');
+    widgetBottom.className = 'widget-bottom pixel-font-16 flex items-center gap-2 px-2 py-1 text-whiteHighlight';
+
+    const messageDiv = document.createElement('div');
+    messageDiv.className = 'text-left';
+    messageDiv.textContent = message;
+    widgetBottom.appendChild(messageDiv);
+
+    toast.appendChild(widgetTop);
+    toast.appendChild(widgetBottom);
+    flexContainer.appendChild(toast);
+    container.appendChild(flexContainer);
+    updateBattleHelperToastPositions(container);
+
+    setTimeout(() => {
+      if (flexContainer.parentNode) {
+        flexContainer.parentNode.removeChild(flexContainer);
+        updateBattleHelperToastPositions(container);
+      }
+    }, duration);
+  } catch (error) {
+    console.warn('[Battle Helper] showBattleHelperTransientToast:', error);
+  }
 }
 
 function buildBattleHelperProfileUrl(username) {
@@ -1092,7 +1373,7 @@ function showBattleHelperPersistentToast(profileName, username, options = {}) {
     const stackOffset = existingToasts.length * 46;
     const flexContainer = document.createElement('div');
     flexContainer.className = 'battle-helper-toast-item';
-    flexContainer.style.cssText = `display: flex; position: absolute; transition: 230ms cubic-bezier(0.21, 1.02, 0.73, 1); transform: translateY(-${stackOffset}px); bottom: 0px; right: 0px; justify-content: flex-end; pointer-events: none; width: max-content; max-width: 100%;`;
+    flexContainer.style.cssText = `display: flex; position: absolute; transition: 230ms cubic-bezier(0.21, 1.02, 0.73, 1); transform: translateY(-${stackOffset}px); bottom: 0px; left: 0px; right: 0px; justify-content: flex-end; pointer-events: none;`;
 
     const toast = document.createElement('div');
     toast.className = 'non-dismissable-dialogs shadow-lg animate-in fade-in zoom-in-95 slide-in-from-top lg:slide-in-from-bottom';
@@ -1111,7 +1392,25 @@ function showBattleHelperPersistentToast(profileName, username, options = {}) {
     messageDiv.style.flex = '1 1 auto';
     populateBattleHelperToastMessage(messageDiv, profileName, username, options);
 
+    const restoreBtn = document.createElement('button');
+    restoreBtn.type = 'button';
+    restoreBtn.className = `${BATTLE_HELPER_BUTTON_CLASS.blue} disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50`;
+    restoreBtn.style.cssText = `${BATTLE_HELPER_BLUE_BUTTON_STYLE} width: auto; cursor: pointer; flex: 0 0 auto; pointer-events: auto;`;
+    restoreBtn.textContent = t('mods.battleHelper.toast.restore');
+    restoreBtn.title = t('mods.battleHelper.restoreOriginalProfile');
+    restoreBtn.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (restoreBtn.disabled) return;
+      try {
+        restoreOriginalArsenal();
+      } catch (error) {
+        showBattleHelperTransientToast(String(error?.message || error));
+      }
+    });
+
     widgetBottom.appendChild(messageDiv);
+    widgetBottom.appendChild(restoreBtn);
     toast.appendChild(widgetTop);
     toast.appendChild(widgetBottom);
     flexContainer.appendChild(toast);
@@ -1153,6 +1452,10 @@ function stopBattleHelperViewingProfileToast() {
 }
 
 function removeBattleHelperPublishSetupToast() {
+  if (battleHelperPublishToastResetTimer) {
+    clearTimeout(battleHelperPublishToastResetTimer);
+    battleHelperPublishToastResetTimer = null;
+  }
   if (battleHelperPublishToastHandle?.remove) {
     battleHelperPublishToastHandle.remove();
   }
@@ -1186,7 +1489,7 @@ function showBattleHelperPublishSetupToast() {
     const stackOffset = existingToasts.length * 46;
     const flexContainer = document.createElement('div');
     flexContainer.className = 'battle-helper-toast-item battle-helper-publish-toast';
-    flexContainer.style.cssText = `display: flex; position: absolute; transition: 230ms cubic-bezier(0.21, 1.02, 0.73, 1); transform: translateY(-${stackOffset}px); bottom: 0px; right: 0px; justify-content: flex-end; pointer-events: none; width: max-content; max-width: 100%;`;
+    flexContainer.style.cssText = `display: flex; position: absolute; transition: 230ms cubic-bezier(0.21, 1.02, 0.73, 1); transform: translateY(-${stackOffset}px); bottom: 0px; left: 0px; right: 0px; justify-content: flex-end; pointer-events: none;`;
 
     const toast = document.createElement('div');
     toast.className = 'non-dismissable-dialogs shadow-lg animate-in fade-in zoom-in-95 slide-in-from-top lg:slide-in-from-bottom';
@@ -1212,6 +1515,10 @@ function showBattleHelperPublishSetupToast() {
     publishBtn.textContent = t('mods.battleHelper.toast.publishSetup');
     publishBtn.addEventListener('click', async () => {
       if (publishBtn.disabled || !hasCreaturesOnBoard()) return;
+      if (battleHelperPublishToastResetTimer) {
+        clearTimeout(battleHelperPublishToastResetTimer);
+        battleHelperPublishToastResetTimer = null;
+      }
       publishBtn.dataset.busy = '1';
       publishBtn.disabled = true;
       const previousLabel = publishBtn.textContent;
@@ -1220,6 +1527,14 @@ function showBattleHelperPublishSetupToast() {
         await publishHelpSetupFromToast();
         messageDiv.textContent = t('mods.battleHelper.help.published');
         publishBtn.textContent = t('mods.battleHelper.toast.publishSetupDone');
+        battleHelperPublishToastResetTimer = setTimeout(() => {
+          battleHelperPublishToastResetTimer = null;
+          if (!publishBtn.isConnected) return;
+          messageDiv.textContent = t('mods.battleHelper.toast.publishSetupHint');
+          publishBtn.textContent = t('mods.battleHelper.toast.publishSetup');
+          publishBtn.dataset.busy = '';
+          syncPublishSetupButtons();
+        }, 5000);
       } catch (error) {
         messageDiv.textContent = String(error?.message || error);
         publishBtn.textContent = previousLabel;
@@ -1272,8 +1587,13 @@ function startBattleHelperPublishSetupToast() {
 function createActionButton(label, onClick, options = {}) {
   const button = document.createElement('button');
   button.type = 'button';
-  button.className = `${options.primary ? BATTLE_HELPER_BUTTON_CLASS.primary : BATTLE_HELPER_BUTTON_CLASS.secondary} disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50`;
-  button.style.cssText = 'width: 100%; cursor: pointer;';
+  const variantClass = options.blue
+    ? BATTLE_HELPER_BUTTON_CLASS.blue
+    : (options.primary ? BATTLE_HELPER_BUTTON_CLASS.primary : BATTLE_HELPER_BUTTON_CLASS.secondary);
+  button.className = `${variantClass} disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50`;
+  button.style.cssText = options.blue
+    ? BATTLE_HELPER_BLUE_BUTTON_STYLE
+    : 'width: 100%; cursor: pointer;';
   const textSpan = document.createElement('span');
   textSpan.textContent = label;
   button.appendChild(textSpan);
@@ -1474,6 +1794,49 @@ function createCompactInput(placeholder = '', initialValue = '') {
   return input;
 }
 
+function wrapHelpFormField(controlEl) {
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'display: flex; flex-direction: column; gap: 2px; width: 100%; box-sizing: border-box;';
+  wrap.appendChild(controlEl);
+
+  const errorEl = document.createElement('p');
+  errorEl.className = 'pixel-font-12 m-0';
+  errorEl.style.cssText = 'color: #f87171; display: none; line-height: 1.25; word-break: break-word;';
+  wrap.appendChild(errorEl);
+
+  const target = controlEl.selectElement || controlEl;
+  wrap._errorEl = errorEl;
+  wrap._controlEl = target;
+  wrap._baseBorder = target.style.border || '';
+  wrap._baseOutline = target.style.outline || '';
+  wrap._baseColor = target.style.color || '';
+  return wrap;
+}
+
+function clearHelpFormFieldError(fieldWrap) {
+  if (!fieldWrap?._errorEl || !fieldWrap?._controlEl) return;
+  fieldWrap._errorEl.textContent = '';
+  fieldWrap._errorEl.style.display = 'none';
+  fieldWrap._controlEl.style.border = fieldWrap._baseBorder;
+  fieldWrap._controlEl.style.outline = fieldWrap._baseOutline;
+  fieldWrap._controlEl.style.color = fieldWrap._baseColor;
+  fieldWrap._controlEl.style.boxShadow = '';
+}
+
+function setHelpFormFieldError(fieldWrap, message) {
+  if (!fieldWrap?._errorEl || !fieldWrap?._controlEl) return;
+  fieldWrap._errorEl.textContent = message || '';
+  fieldWrap._errorEl.style.display = message ? 'block' : 'none';
+  if (message) {
+    fieldWrap._controlEl.style.border = '1px solid #f87171';
+    fieldWrap._controlEl.style.outline = '1px solid #f87171';
+    fieldWrap._controlEl.style.color = '#f87171';
+    fieldWrap._controlEl.style.boxShadow = '0 0 0 1px rgba(248, 113, 113, 0.35)';
+  } else {
+    clearHelpFormFieldError(fieldWrap);
+  }
+}
+
 function buildImportPanel(onContentChange, shared) {
   const panel = document.createElement('div');
   panel.className = 'battle-helper-col battle-helper-col-profile';
@@ -1586,7 +1949,7 @@ function buildImportPanel(onContentChange, shared) {
         error: String(error?.message || error)
       }));
     }
-  }, { disabled: true });
+  }, { disabled: true, blue: true });
 
   profileCard.appendChild(replaceButton);
   profileCard.appendChild(restoreButton);
@@ -1633,28 +1996,118 @@ function buildHelpBoardColumns(onContentChange, shared) {
     'ticks'
   );
 
-  const goalValueInput = createCompactInput(t('mods.battleHelper.help.goalValuePlaceholder'));
+  const goalValueInput = createCompactInput(t('mods.battleHelper.help.goalValuePlaceholderTicks'));
   goalValueInput.inputMode = 'numeric';
+  goalValueInput.required = true;
 
-  const noteInput = createCompactInput(t('mods.battleHelper.help.notePlaceholder'));
+  const noteInput = createCompactInput(
+    tReplace('mods.battleHelper.help.notePlaceholder', {
+      max: String(BATTLE_HELP_NOTE_MAX_LENGTH)
+    })
+  );
   noteInput.maxLength = BATTLE_HELP_NOTE_MAX_LENGTH;
 
-  formCard.appendChild(mapPicker);
-  formCard.appendChild(goalSelect);
-  formCard.appendChild(goalValueInput);
-  formCard.appendChild(noteInput);
+  const mapField = wrapHelpFormField(mapPicker);
+  const goalTypeField = wrapHelpFormField(goalSelect);
+  const goalValueField = wrapHelpFormField(goalValueInput);
+  const noteField = wrapHelpFormField(noteInput);
+
+  const noteCounter = document.createElement('span');
+  noteCounter.className = 'pixel-font-12 m-0';
+  noteCounter.style.cssText = 'align-self: flex-end; color: rgba(255,255,255,0.55); line-height: 1.2;';
+  noteField.insertBefore(noteCounter, noteField._errorEl);
+
+  function getSelectedMapOption() {
+    return mapOptions.find((m) => m.mapKey === mapPicker.getValue()) || null;
+  }
+
+  function clearAskFormFieldErrors() {
+    clearHelpFormFieldError(mapField);
+    clearHelpFormFieldError(goalTypeField);
+    clearHelpFormFieldError(goalValueField);
+    clearHelpFormFieldError(noteField);
+  }
+
+  function syncNoteLimit() {
+    let value = String(noteInput.value || '');
+    if (value.length > BATTLE_HELP_NOTE_MAX_LENGTH) {
+      value = value.slice(0, BATTLE_HELP_NOTE_MAX_LENGTH);
+      noteInput.value = value;
+    }
+    noteCounter.textContent = `${value.length}/${BATTLE_HELP_NOTE_MAX_LENGTH}`;
+    noteCounter.style.color = value.length >= BATTLE_HELP_NOTE_MAX_LENGTH
+      ? '#f87171'
+      : 'rgba(255,255,255,0.55)';
+    clearHelpFormFieldError(noteField);
+  }
+  noteInput.addEventListener('input', syncNoteLimit);
+  noteInput.addEventListener('paste', () => {
+    requestAnimationFrame(syncNoteLimit);
+  });
+  syncNoteLimit();
+
+  function clampGoalValueField() {
+    const selected = getSelectedMapOption();
+    const clamped = clampHelpGoalValue(
+      goalSelect.value,
+      goalValueInput.value,
+      selected?.id || ''
+    );
+    if (clamped !== '') {
+      goalValueInput.value = clamped;
+    }
+  }
+
+  function syncGoalValuePlaceholder() {
+    const selected = getSelectedMapOption();
+    goalValueInput.placeholder = getHelpGoalValuePlaceholder(
+      goalSelect.value,
+      selected?.id || ''
+    );
+    clampGoalValueField();
+    clearHelpFormFieldError(goalValueField);
+  }
+  goalSelect.addEventListener('change', () => {
+    clearHelpFormFieldError(goalTypeField);
+    syncGoalValuePlaceholder();
+  });
+  mapPicker.selectElement.addEventListener('change', () => {
+    clearHelpFormFieldError(mapField);
+    syncGoalValuePlaceholder();
+  });
+  goalValueInput.addEventListener('blur', () => {
+    clampGoalValueField();
+  });
+  goalValueInput.addEventListener('input', () => {
+    clearHelpFormFieldError(goalValueField);
+    // Keep digits only while typing; clamp on blur / goal-map change
+    const cleaned = String(goalValueInput.value || '').replace(/[^\d]/g, '');
+    if (cleaned !== goalValueInput.value) {
+      goalValueInput.value = cleaned;
+    }
+  });
+  syncGoalValuePlaceholder();
+
+  formCard.appendChild(mapField);
+  formCard.appendChild(goalTypeField);
+  formCard.appendChild(goalValueField);
+  formCard.appendChild(noteField);
 
   const postButton = createActionButton(t('mods.battleHelper.help.postRequest'), async () => {
+    clearAskFormFieldErrors();
     try {
-      const selected = mapOptions.find((m) => m.mapKey === mapPicker.getValue());
+      const selected = getSelectedMapOption();
       if (!selected) {
-        throw new Error(t('mods.battleHelper.help.errors.mapRequired'));
+        throw helpFormFieldError('map', t('mods.battleHelper.help.errors.mapRequired'));
       }
-      const goalValueRaw = String(goalValueInput.value || '').trim();
-      const goalValue = goalValueRaw === '' ? null : Number(goalValueRaw);
-      if (goalValueRaw !== '' && !Number.isFinite(goalValue)) {
-        throw new Error(t('mods.battleHelper.help.errors.goalValueInvalid'));
-      }
+      clampGoalValueField();
+      const goalValue = validateHelpGoalValue(
+        goalSelect.value,
+        goalValueInput.value,
+        selected.id
+      );
+      syncNoteLimit();
+      const note = validateHelpNote(noteInput.value);
       setHelpStatus(t('mods.battleHelper.help.posting'));
       await createHelpRequest({
         mapName: selected.name,
@@ -1663,14 +2116,22 @@ function buildHelpBoardColumns(onContentChange, shared) {
         roomId: selected.id,
         goalType: goalSelect.value,
         goalValue,
-        note: noteInput.value
+        note
       });
       noteInput.value = '';
+      syncNoteLimit();
       goalValueInput.value = '';
+      clearAskFormFieldErrors();
       setHelpStatus(t('mods.battleHelper.help.posted'));
       await refreshList({ preserveStatus: true });
     } catch (error) {
-      setHelpStatus(String(error?.message || error));
+      const message = String(error?.message || error);
+      const field = error?.helpField;
+      if (field === 'map') setHelpFormFieldError(mapField, message);
+      else if (field === 'goalType') setHelpFormFieldError(goalTypeField, message);
+      else if (field === 'goalValue') setHelpFormFieldError(goalValueField, message);
+      else if (field === 'note') setHelpFormFieldError(noteField, message);
+      setHelpStatus(message);
     }
   }, { primary: true });
   formCard.appendChild(postButton);
@@ -1732,14 +2193,19 @@ function buildHelpBoardColumns(onContentChange, shared) {
 
   let selectRequestSeq = 0;
 
+  function selectHelpRequest(request) {
+    if (!request) return;
+    helpBoardState.selectedId = request.id;
+    renderList();
+  }
+
   async function activateHelpRequest(request) {
     if (!request) return;
     const seq = ++selectRequestSeq;
     helpBoardState.selectedId = request.id;
     renderList();
 
-    const roomId = resolveRoomIdForRequest(request);
-    const navigated = navigateToRoomId(roomId);
+    const navigated = await navigateToHelpRequest(request);
     ensureSandboxPlayMode();
 
     const me = getCurrentPlayerName().toLowerCase();
@@ -1750,6 +2216,12 @@ function buildHelpBoardColumns(onContentChange, shared) {
       setHelpStatus(navigated
         ? tReplace('mods.battleHelper.help.navigatedOwn', { map: request.mapName })
         : t('mods.battleHelper.help.errors.navigateFailed'));
+      return;
+    }
+
+    if (!navigated) {
+      if (seq !== selectRequestSeq) return;
+      setHelpStatus(t('mods.battleHelper.help.errors.navigateFailed'));
       return;
     }
 
@@ -1919,6 +2391,7 @@ function buildHelpBoardColumns(onContentChange, shared) {
       detailIconSlot.textContent = '';
       detailText.textContent = t('mods.battleHelper.help.noSelection');
       loadProfileButton.disabled = true;
+      loadProfileButton.textContent = t('mods.battleHelper.help.loadProfile');
       battleHelperModalPublishBaseDisabled = true;
       syncPublishSetupButtons();
       closeButton.disabled = true;
@@ -1949,7 +2422,10 @@ function buildHelpBoardColumns(onContentChange, shared) {
 
     const me = getCurrentPlayerName().toLowerCase();
     const isOwn = request.requesterName.toLowerCase() === me;
-    loadProfileButton.disabled = isOwn;
+    loadProfileButton.disabled = false;
+    loadProfileButton.textContent = isOwn
+      ? t('mods.battleHelper.help.openMap')
+      : t('mods.battleHelper.help.loadProfile');
     battleHelperModalPublishBaseDisabled = isOwn;
     syncPublishSetupButtons();
     closeButton.disabled = !isOwn;
@@ -2009,7 +2485,7 @@ function buildHelpBoardColumns(onContentChange, shared) {
       row.appendChild(textCol);
 
       row.addEventListener('click', () => {
-        activateHelpRequest(request);
+        selectHelpRequest(request);
       });
       listBody.appendChild(row);
     });

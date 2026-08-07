@@ -4370,9 +4370,8 @@ function createNPCCooldownManager() {
         return;
       }
       
-      const hasReceived = await hasReceivedCopperKey(currentPlayer);
-      if (hasReceived) {
-        console.log('[Quests Mod][Copper Key] Player already received key, skipping text bubble');
+      if (!(await canAwardCopperKeyDrop(currentPlayer))) {
+        console.log('[Quests Mod][Copper Key] Player already received/owned key or quest concluded, skipping text bubble');
         return;
       }
       
@@ -5616,7 +5615,7 @@ function createNPCCooldownManager() {
   const ironOreReceivedStore = createReceivedFlagStore({
     pathFn: getIronOreFirebasePath,
     label: 'Iron Ore',
-    rethrowOnMarkError: false // preserve current swallow-on-mark behavior
+    rethrowOnMarkError: true
   });
   const wishlistReceivedStore = createReceivedFlagStore({
     pathFn: getWishlistFirebasePath,
@@ -5649,19 +5648,6 @@ function createNPCCooldownManager() {
     return letterFromAlDeeReceivedStore.remove(playerName);
   }
 
-  /** Iron Ore never drops until the player has obtained Letter from Al Dee first. */
-  async function canDropIronOre(playerName) {
-    if (!playerName) return false;
-    if (await hasReceivedLetterFromAlDee(playerName)) return true;
-
-    const items = await getQuestItems(true);
-    if ((items['Letter from Al Dee'] || 0) > 0) return true;
-    if ((items['Stamped Letter'] || 0) > 0) return true;
-
-    const letterProgress = getMissionProgress(KING_LETTER_MISSION);
-    return !!(letterProgress?.accepted || letterProgress?.completed);
-  }
-
   async function hasReceivedIronOre(playerName) {
     return ironOreReceivedStore.has(playerName);
   }
@@ -5690,6 +5676,139 @@ function createNPCCooldownManager() {
   }
   async function deleteSantaPresentClaimed(playerName) {
     return santaPresentClaimedStore.remove(playerName);
+  }
+
+  /**
+   * Shared once-ever unique-item eligibility.
+   * Blocks when Firebase received flag, inventory ownership, or quest conclusion applies.
+   * Backfills the received flag when ownership/completion outran a failed mark.
+   *
+   * @param {{
+   *   playerName: string,
+   *   productNames: string|string[],
+   *   hasReceived: (name: string) => Promise<boolean>,
+   *   markReceived: (name: string) => Promise<void>,
+   *   isConcluded?: () => boolean,
+   *   canUnlock?: (name: string) => Promise<boolean>|boolean
+   * }} options
+   */
+  async function canAwardUniqueItem({
+    playerName,
+    productNames,
+    hasReceived,
+    markReceived,
+    isConcluded,
+    canUnlock
+  }) {
+    if (!playerName) return false;
+
+    const names = Array.isArray(productNames) ? productNames : [productNames];
+    const concluded = typeof isConcluded === 'function' ? !!isConcluded() : false;
+    const alreadyReceived = await hasReceived(playerName);
+    const items = await getQuestItems(true);
+    const ownedCount = names.reduce((sum, name) => sum + (items?.[name] || 0), 0);
+
+    if (concluded || alreadyReceived || ownedCount > 0) {
+      if (!alreadyReceived && (concluded || ownedCount > 0)) {
+        try {
+          await markReceived(playerName);
+        } catch (error) {
+          console.error('[Quests Mod] Error backfilling unique-item received flag:', error);
+        }
+      }
+      return false;
+    }
+
+    if (typeof canUnlock === 'function') {
+      return !!(await canUnlock(playerName));
+    }
+    return true;
+  }
+
+  function isCopperKeyQuestConcluded() {
+    return !!kingChatState.progressCopper?.completed;
+  }
+
+  function isLetterFromAlDeeQuestConcluded() {
+    const letterProgress = getMissionProgress(KING_LETTER_MISSION);
+    return !!(letterProgress?.accepted || letterProgress?.completed);
+  }
+
+  /** True when King/Al Dee iron-ore business is finished — no further ore drops. */
+  function isIronOreQuestConcluded() {
+    return !!(kingChatState.progressAlDeeFishing?.completed || fishingState.ironOreQuestCompleted);
+  }
+
+  function isWishlistQuestConcluded() {
+    const progress = getMissionProgress(CHRISTMAS_MIRACLE_MISSION);
+    return !!(progress?.accepted || progress?.completed);
+  }
+
+  function isSantaPresentQuestConcluded() {
+    return !!getMissionProgress(CHRISTMAS_MIRACLE_MISSION)?.completed;
+  }
+
+  /** Letter / stamped letter / letter-mission progress unlocks Iron Ore drops. */
+  async function canUnlockIronOreDrop(playerName) {
+    if (!playerName) return false;
+    if (await hasReceivedLetterFromAlDee(playerName)) return true;
+
+    const items = await getQuestItems(true);
+    if ((items['Letter from Al Dee'] || 0) > 0) return true;
+    if ((items['Stamped Letter'] || 0) > 0) return true;
+
+    return isLetterFromAlDeeQuestConcluded();
+  }
+
+  async function canAwardCopperKeyDrop(playerName) {
+    return canAwardUniqueItem({
+      playerName,
+      productNames: COPPER_KEY_CONFIG.productName,
+      hasReceived: hasReceivedCopperKey,
+      markReceived: markCopperKeyReceived,
+      isConcluded: isCopperKeyQuestConcluded
+    });
+  }
+
+  async function canAwardLetterFromAlDeeDrop(playerName) {
+    return canAwardUniqueItem({
+      playerName,
+      productNames: ['Letter from Al Dee', 'Stamped Letter'],
+      hasReceived: hasReceivedLetterFromAlDee,
+      markReceived: markLetterFromAlDeeReceived,
+      isConcluded: isLetterFromAlDeeQuestConcluded
+    });
+  }
+
+  async function canAwardIronOreDrop(playerName) {
+    return canAwardUniqueItem({
+      playerName,
+      productNames: 'Iron Ore',
+      hasReceived: hasReceivedIronOre,
+      markReceived: markIronOreReceived,
+      isConcluded: isIronOreQuestConcluded,
+      canUnlock: canUnlockIronOreDrop
+    });
+  }
+
+  async function canAwardWishlistDrop(playerName) {
+    return canAwardUniqueItem({
+      playerName,
+      productNames: WISHLIST_CONFIG.productName,
+      hasReceived: hasReceivedWishlist,
+      markReceived: markWishlistReceived,
+      isConcluded: isWishlistQuestConcluded
+    });
+  }
+
+  async function canAwardSantaPresent(playerName) {
+    return canAwardUniqueItem({
+      playerName,
+      productNames: PRESENT_CONFIG.productName,
+      hasReceived: hasSantaPresentClaimed,
+      markReceived: markSantaPresentClaimed,
+      isConcluded: isSantaPresentQuestConcluded
+    });
   }
 
   // =======================
@@ -7133,6 +7252,17 @@ function createNPCCooldownManager() {
     }
   }
 
+  /** True when a cleanup rule's linked mission (or Iron Ore's own progress) is completed. */
+  function isCleanupRuleCompleted(progress, missionId, productId) {
+    const firebaseKey = MISSION_FIREBASE_KEY_MAP[missionId];
+    if (firebaseKey && progress?.[firebaseKey]?.completed) return true;
+    // King magnet path sets progress.ironOre.completed before Al Dee fishing finishes.
+    if (productId === 'ironOre' && (progress?.ironOre?.completed || fishingState.ironOreQuestCompleted)) {
+      return true;
+    }
+    return false;
+  }
+
   /**
    * Repair leftovers the backpack UI already hides after missions complete.
    * Rules from assets/quests/items.json → itemLifecycle.staleCleanupOnComplete.
@@ -7146,10 +7276,10 @@ function createNPCCooldownManager() {
         if (n > 0) removed.push(`${itemName} x${n}`);
       };
 
+      const progress = getAllMissionProgress();
       for (const rule of QUEST_ITEM_STALE_CLEANUP_RULES) {
         if (!rule?.productId || !rule?.missionId) continue;
-        const mission = MISSION_BY_ID[rule.missionId];
-        const done = !!getMissionProgress(mission)?.completed;
+        const done = isCleanupRuleCompleted(progress, rule.missionId, rule.productId);
         await maybeRemove(done, resolveQuestProductName(rule.productId));
       }
 
@@ -7494,43 +7624,36 @@ function createNPCCooldownManager() {
           // Process Al Dee fishing Iron Ore drops from dwarves
           if (isAlDeeDwarfLoot) {
             const currentPlayer = getCurrentPlayerName();
-            if (!(await canDropIronOre(currentPlayer))) {
-              console.log('[Quests Mod][Quest Items] Iron Ore dwarf drop skipped; Letter from Al Dee not obtained yet');
+            if (!(await canAwardIronOreDrop(currentPlayer))) {
+              console.log('[Quests Mod][Quest Items] Iron Ore dwarf drop skipped (received, owned, concluded, or letter not obtained)');
             } else {
               console.log(`[Quests Mod][Quest Items] Processing Al Dee fishing Iron Ore drop from ${creatureName} (gameId: ${creatureGameId}), seed:`, seed);
 
-              const hasReceived = await hasReceivedIronOre(currentPlayer);
-              if (hasReceived) {
-                console.log('[Quests Mod][Quest Items] Iron Ore already received by this account, skipping drop');
-              } else {
-                const ironOreBaseChance = ROOKGAARD_GLOBAL_POOL_DROP_CHANCE;
-                const actualDropChance = getStaminaScaledDropChance(staminaSpent, ironOreBaseChance);
-                const roll = deterministicRandom(seed, creatureGameId, 9999);
-                console.log(`[Quests Mod][Quest Items] Iron Ore roll: ${(roll * 100).toFixed(1)}% (need ≤ ${(actualDropChance * 100).toFixed(1)}% | ${formatStaminaDropChanceLog(staminaSpent, ironOreBaseChance, actualDropChance)} | creature: ${creatureName})`);
-                if (roll <= actualDropChance) {
-                  try {
-                    await addQuestItem('Iron Ore', 1);
-                    showQuestItemNotification('Iron Ore', 1);
-                    console.log(`[Quests Mod][Quest Items] Iron Ore awarded from ${creatureName} (Al Dee fishing mission)`);
+              const ironOreBaseChance = ROOKGAARD_GLOBAL_POOL_DROP_CHANCE;
+              const actualDropChance = getStaminaScaledDropChance(staminaSpent, ironOreBaseChance);
+              const roll = deterministicRandom(seed, creatureGameId, 9999);
+              console.log(`[Quests Mod][Quest Items] Iron Ore roll: ${(roll * 100).toFixed(1)}% (need ≤ ${(actualDropChance * 100).toFixed(1)}% | ${formatStaminaDropChanceLog(staminaSpent, ironOreBaseChance, actualDropChance)} | creature: ${creatureName})`);
+              if (roll <= actualDropChance) {
+                try {
+                  await addQuestItem('Iron Ore', 1);
+                  showQuestItemNotification('Iron Ore', 1);
+                  console.log(`[Quests Mod][Quest Items] Iron Ore awarded from ${creatureName} (Al Dee fishing mission)`);
 
-                    await markIronOreReceived(currentPlayer);
-                  } catch (error) {
-                    console.error(`[Quests Mod][Quest Items] Error adding Iron Ore:`, error);
-                  }
+                  await markIronOreReceived(currentPlayer);
+                } catch (error) {
+                  console.error(`[Quests Mod][Quest Items] Error adding Iron Ore:`, error);
                 }
               }
             }
           }
 
-          // Wishlist: 1% from any Goblin-named creature, once-ever
+          // Wishlist: stamina-scaled from any Goblin-named creature, once-ever
           {
             const goblinName = getCreatureDisplayNameByGameId(creatureGameId) || creatureName;
             if (isGoblinCreatureName(goblinName)) {
               const currentPlayer = getCurrentPlayerName();
-              const alreadyFlagged = await hasReceivedWishlist(currentPlayer);
-              const ownedCount = (await getQuestItems(true))?.[WISHLIST_CONFIG.productName] || 0;
-              if (alreadyFlagged || ownedCount > 0) {
-                console.log('[Quests Mod][Wishlist] Already received or owned — skip drop');
+              if (!(await canAwardWishlistDrop(currentPlayer))) {
+                console.log('[Quests Mod][Wishlist] Already received, owned, or quest concluded — skip drop');
               } else {
                 const actualDropChance = getStaminaScaledDropChance(staminaSpent, WISHLIST_CONFIG.dropChance);
                 const roll = deterministicRandom(seed, creatureGameId, 8801);
@@ -7560,10 +7683,8 @@ function createNPCCooldownManager() {
             const letterDrop = ROOKGAARD_GLOBAL_DROPS.find((drop) => drop.name === 'Letter from Al Dee');
             const ironOreDrop = ROOKGAARD_GLOBAL_DROPS.find((drop) => drop.name === 'Iron Ore');
 
-            const hasLetter = await hasReceivedLetterFromAlDee(currentPlayer);
-            const hasIronOre = await hasReceivedIronOre(currentPlayer);
-            const canAwardLetter = !hasLetter;
-            const canAwardIronOre = !hasIronOre && (await canDropIronOre(currentPlayer));
+            const canAwardLetter = await canAwardLetterFromAlDeeDrop(currentPlayer);
+            const canAwardIronOre = await canAwardIronOreDrop(currentPlayer);
 
             if (!canAwardLetter && !canAwardIronOre) {
               console.log('[Quests Mod][Quest Items] Rookgaard global drops complete for this account, skipping');
@@ -7611,12 +7732,11 @@ function createNPCCooldownManager() {
         return;
       }
       
-      // Check if player already owns the Copper Key
+      // Check if player can still be awarded the Copper Key
       const currentPlayer = getCurrentPlayerName();
       if (currentPlayer) {
-        const hasReceived = await hasReceivedCopperKey(currentPlayer);
-        if (hasReceived) {
-          console.log('[Quests Mod][Copper Key] Player already owns Copper Key, skipping tracking');
+        if (!(await canAwardCopperKeyDrop(currentPlayer))) {
+          console.log('[Quests Mod][Copper Key] Player already owns Copper Key or quest concluded, skipping tracking');
           trackedBoardConfig = null;
           return;
         }
@@ -7785,16 +7905,15 @@ function createNPCCooldownManager() {
             return; // Corym Charlatan was not on tile 69
           }
           
-          // 3. Check if player has already received the key
+          // 3. Check unique-item eligibility (received flag, ownership, or quest concluded)
           const currentPlayer = getCurrentPlayerName();
           if (!currentPlayer) {
             logCopper('[Quests Mod][Copper Key] Player name not available, skipping');
             return;
           }
           
-          const hasReceived = await hasReceivedCopperKey(currentPlayer);
-          if (hasReceived) {
-            return; // Already received
+          if (!(await canAwardCopperKeyDrop(currentPlayer))) {
+            return; // Already received, owned, or quest concluded
           }
           
           // All conditions met! Award the key
@@ -9709,7 +9828,13 @@ function createNPCCooldownManager() {
       const ironOreCount = currentProducts['Iron Ore'] || 0;
 
       // Check if Al Dee fishing mission is completed - if so, Iron Ore quests shouldn't be claimable
-      if (kingChatState.progressAlDeeFishing.completed) {
+      if (kingChatState.progressAlDeeFishing.completed || fishingState.ironOreQuestCompleted) {
+        try {
+          await consumeAllOfQuestItem('Iron Ore');
+          await refreshQuestItemsModal();
+        } catch (err) {
+          console.error('[Quests Mod][King Tibianus] Error removing leftover Iron Ore:', err);
+        }
         return getKingIronOreLine('missionConcluded', 'I appreciate your continued interest, but our business with iron ore is concluded.');
       }
 
@@ -9744,6 +9869,8 @@ function createNPCCooldownManager() {
             });
           }
 
+          await cleanupInvalidQuestItems(getAllMissionProgress());
+
           return getKingIronOreLine('rewardGiven', 'Thank you for giving me an Iron Ore! Here\'s a small gift for you.');
         } catch (err) {
           console.error('[Quests Mod][King Tibianus] Error awarding Magnet:', err);
@@ -9764,6 +9891,13 @@ function createNPCCooldownManager() {
           return getKingIronOreLine('fineRockNoMission', 'That\'s a fine looking rock you have there.');
         }
         if (kingChatState.progressAlDeeFishing.completed) {
+          // Business concluded — strip leftover ore so it cannot be turned in again.
+          try {
+            await consumeAllOfQuestItem('Iron Ore');
+            await refreshQuestItemsModal();
+          } catch (err) {
+            console.error('[Quests Mod][King Tibianus] Error removing leftover Iron Ore:', err);
+          }
           return getKingIronOreLine('fineRockMissionDone', 'I appreciate the rock, but I have no further use for iron ore now that our business is concluded.');
         }
 
@@ -12428,6 +12562,10 @@ function createNPCCooldownManager() {
 
               // Mark mission as completed
               setMissionProgress(AL_DEE_FISHING_MISSION, { accepted: true, completed: true });
+              fishingState.ironOreQuestActive = false;
+              fishingState.ironOreQuestExpired = false;
+              fishingState.ironOreQuestCompleted = true;
+              fishingState.ironOreQuestStartTime = null;
               console.log('[Quests Mod][Al Dee] Fishing mission completed');
 
               // Save progress to Firebase
@@ -12435,6 +12573,9 @@ function createNPCCooldownManager() {
                 await saveKingTibianusProgress(playerName, getAllMissionProgress());
                 console.log('[Quests Mod][Al Dee] Fishing mission progress saved to Firebase');
               }
+
+              await cleanupInvalidQuestItems(getAllMissionProgress());
+              await refreshQuestItemsModal();
 
               // Update guild coin display
               updateGuildCoinDisplay();
@@ -22086,6 +22227,7 @@ function createNPCCooldownManager() {
           logPrefix: '[Quests Mod][Board NPC][The Oracle]'
         };
       const playerName = getCurrentPlayerName() || 'Player';
+      // Template uses PLAYER (all caps); replace case-insensitively before uppercasing.
       const thankYouMessage = (
         getOracleDestinyLine(
           'victoryThanks',
@@ -22095,7 +22237,7 @@ function createNPCCooldownManager() {
             'THANK YOU, PLAYER! YOUR DESTINY IS FULFILLED!'
           )
         ) || 'THANK YOU, PLAYER! YOUR DESTINY IS FULFILLED!'
-      ).replace(/Player/g, playerName).toUpperCase();
+      ).replace(/Player/gi, playerName).toUpperCase();
 
       const modalOpts = {
         npcName: npcConfig.name || 'The Oracle',
@@ -22349,7 +22491,7 @@ function createNPCCooldownManager() {
   }
 
   async function grantSantaPresentIfEligible(playerName) {
-    if (await hasSantaPresentClaimed(playerName)) {
+    if (!(await canAwardSantaPresent(playerName))) {
       return { ok: false, already: true };
     }
     await addQuestItem(PRESENT_CONFIG.productName, 1);
@@ -25130,8 +25272,7 @@ function createNPCCooldownManager() {
         }
 
         if (lower.includes('present') && npcConfig.id === BOARD_NPC_SANTA_ID) {
-          const claimed = await hasSantaPresentClaimed(playerName);
-          if (claimed) {
+          if (!(await canAwardSantaPresent(playerName))) {
             cooldown.queueResponse(
               text,
               'You already got your present! Don\'t be greedy!',
@@ -27607,6 +27748,7 @@ function createNPCCooldownManager() {
         if (!rule?.productId || !rule?.missionId) continue;
         const itemName = resolveQuestProductName(rule.productId);
         itemMissionMap[itemName] = {
+          productId: rule.productId,
           missionId: rule.missionId,
           requiredStatus: rule.requiredStatus || 'accepted',
           removeWhenCompleted: !!rule.removeWhenCompleted,
@@ -27617,20 +27759,20 @@ function createNPCCooldownManager() {
 
       let serpentineRunePickupFlagNeedsSave = false;
 
-      for (const [itemName, { missionId, requiredStatus, removeWhenCompleted, removeWhenPutridChamberComplete, independentDrop }] of Object.entries(itemMissionMap)) {
+      for (const [itemName, { productId, missionId, requiredStatus, removeWhenCompleted, removeWhenPutridChamberComplete, independentDrop }] of Object.entries(itemMissionMap)) {
         const itemCount = questItems[itemName] || 0;
         if (itemCount > 0) {
           // Get mission progress from registry
           const firebaseKey = MISSION_FIREBASE_KEY_MAP[missionId];
-          if (!firebaseKey) {
+          if (!firebaseKey && productId !== 'ironOre') {
             console.warn(`[Quests Mod] No Firebase key found for mission ${missionId}`);
             continue;
           }
 
-          const missionProgress = progress?.[firebaseKey];
+          const missionProgress = firebaseKey ? progress?.[firebaseKey] : null;
           
           // Special handling for items that should be removed when quest is completed (unique items)
-          if (removeWhenCompleted && missionProgress?.completed) {
+          if (removeWhenCompleted && isCleanupRuleCompleted(progress, missionId, productId)) {
             console.log(`[Quests Mod] Removing ${itemName} (unique item, quest completed)`);
             await consumeQuestItem(itemName, itemCount);
             if (itemName === DESTROY_FIELD_RUNE_CONFIG.productName) {
@@ -27945,8 +28087,8 @@ function createNPCCooldownManager() {
         }
       }
 
-      // Iron Ore is a Rookgaard independent drop — do not wipe inventory leftovers when the
-      // King iron-ore timer / Al Dee fishing progress is marked completed.
+      // Leftover Iron Ore is stripped by cleanupInvalidQuestItems when ironOre /
+      // Al Dee fishing progress is marked completed (removeWhenCompleted rule).
 
       await syncLostInTheSandsQuestFromInventory();
       const serpentinePrereqReset = syncSerpentineTowerQuestPrerequisites();

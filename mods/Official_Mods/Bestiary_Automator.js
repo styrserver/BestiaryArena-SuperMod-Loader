@@ -4488,9 +4488,32 @@ const setupPotionThresholdAutoSave = (input, potionType) => {
 
 // Create the configuration panel
 const createConfigPanel = () => {
-  const rowGap = '12px';
+  const rowGap = '6px';
   const content = document.createElement('div');
-  content.style.cssText = `display: flex; flex-direction: column; gap: ${rowGap};`;
+  content.style.cssText = `display: flex; flex-direction: column; gap: 8px;`;
+
+  const createSection = (title, sectionId, defaultExpanded) => {
+    if (api?.ui?.createConfigSection) {
+      return api.ui.createConfigSection({
+        title,
+        modId: MOD_ID,
+        sectionId,
+        defaultExpanded,
+        parent: content
+      }).body;
+    }
+    const section = document.createElement('fieldset');
+    section.style.cssText = 'border: 1px solid #666; border-radius: 4px; padding: 4px 8px 6px; margin: 0;';
+    const legend = document.createElement('legend');
+    legend.textContent = title;
+    legend.style.cssText = 'font-weight: bold; color: #0c6;';
+    section.appendChild(legend);
+    const body = document.createElement('div');
+    body.style.cssText = `display: flex; flex-direction: column; gap: ${rowGap};`;
+    section.appendChild(body);
+    content.appendChild(section);
+    return body;
+  };
   
   // Auto refill stamina checkbox
   const refillContainer = createCheckboxContainer('auto-refill-checkbox', t('mods.automator.autoRefillStamina'), config.autoRefillStamina);
@@ -4514,14 +4537,8 @@ const createConfigPanel = () => {
     t('mods.automator.autoCollectLevelUpRewardsTooltip')
   );
   
-  const rewardsSection = document.createElement('div');
-  rewardsSection.style.cssText = `display: flex; flex-direction: column; gap: ${rowGap};`;
-  rewardsSection.appendChild(autoCollectSeashellContainer);
-  rewardsSection.appendChild(autoCollectLevelUpRewardsContainer);
-  
   const autoOpenCubesContainer = createCheckboxContainerWithInfo('auto-open-cubes-checkbox', t('mods.automator.autoOpenCubes'), config.autoOpenCubes,
     t('mods.automator.autoOpenCubesTooltip'));
-  rewardsSection.appendChild(autoOpenCubesContainer);
   
   // Auto day care checkbox
   const dayCareContainer = createCheckboxContainer('auto-daycare-checkbox', t('mods.automator.autoDayCare'), config.autoDayCare);
@@ -4601,32 +4618,13 @@ const createConfigPanel = () => {
   potionHeaderRow.appendChild(thresholdToggleButton);
   potionHeaderRow.appendChild(thresholdInfoIcon);
   
-  // Create container for items above Advanced section
-  const mainItemsContainer = document.createElement('div');
-  mainItemsContainer.id = 'main-items-container';
-  mainItemsContainer.style.cssText = `display: flex; flex-direction: column; gap: ${rowGap};`;
-  mainItemsContainer.appendChild(refillContainer);
-  mainItemsContainer.appendChild(staminaContainer);
-  
   // Warning if autorefillstamina is enabled but no potions are selected
   const warningMsg = document.createElement('div');
   warningMsg.id = 'potion-warning-message';
   warningMsg.textContent = t('mods.automator.noPotionWarning');
-  warningMsg.style.cssText = 'color: #e74c3c; margin: 0; padding: 8px; background-color: rgba(231, 76, 60, 0.1); border-radius: 4px; font-size: 0.9em;';
+  warningMsg.style.cssText = 'color: #e74c3c; margin: 0; padding: 4px 6px; background-color: rgba(231, 76, 60, 0.1); border-radius: 4px; font-size: 0.85em;';
   warningMsg.style.display = (config.autoRefillStamina && !hasAnyPotionSelected()) ? 'block' : 'none';
-  mainItemsContainer.appendChild(warningMsg);
   
-  mainItemsContainer.appendChild(rewardsSection);
-  
-  mainItemsContainer.appendChild(dayCareContainer);
-  mainItemsContainer.appendChild(autoPlayContainer);
-  mainItemsContainer.appendChild(fasterAutoplayContainer);
-  
-  // Create separator between potion thresholds and faster autoplay delay
-  const separator = document.createElement('div');
-  separator.style.cssText = 'height: 1px; background-color: #555; margin: 0; width: 100%;';
-  
-  // Faster autoplay delay input
   const fasterAutoplayDelayContainer = createNumberInputContainer('faster-autoplay-input', t('mods.automator.autoplayDelay'), config.fasterAutoplayMs, FASTER_AUTOPLAY_DELAY_MIN_MS, FASTER_AUTOPLAY_DELAY_MAX_MS);
   
   // Separator and credit footer for advanced section
@@ -4642,24 +4640,33 @@ const createConfigPanel = () => {
   autoSaveFooter.style.cssText = 'font-size: 11px; font-style: italic; color: rgb(74, 222, 128); text-align: left;';
   autoSaveFooter.textContent = t('mods.automator.settingsAutoSave');
   
-  // Create collapsible advanced section with potion thresholds and faster autoplay delay
-  const advancedSection = createCollapsibleSection('advanced-section', t('mods.automator.advanced'), [
-    potionHeaderRow,
-    miniThresholdContainer,
-    strongThresholdContainer,
-    greatThresholdContainer,
-    ultimateThresholdContainer,
-    supremeThresholdContainer,
-    separator,
-    fasterAutoplayDelayContainer,
-    creditSeparator,
-    credit
-  ], mainItemsContainer);
-  
-  // Add all elements to content
-  content.appendChild(autoSaveFooter);
-  content.appendChild(mainItemsContainer);
-  content.appendChild(advancedSection);
+  const staminaBody = createSection(t('mods.automator.sectionStamina'), 'stamina', true);
+  staminaBody.appendChild(refillContainer);
+  staminaBody.appendChild(staminaContainer);
+  staminaBody.appendChild(warningMsg);
+
+  const rewardsBody = createSection(t('mods.automator.sectionRewards'), 'rewards', false);
+  rewardsBody.appendChild(autoCollectSeashellContainer);
+  rewardsBody.appendChild(autoCollectLevelUpRewardsContainer);
+  rewardsBody.appendChild(autoOpenCubesContainer);
+  rewardsBody.appendChild(dayCareContainer);
+
+  const autoplayBody = createSection(t('mods.automator.sectionAutoplay'), 'autoplay', false);
+  autoplayBody.appendChild(autoPlayContainer);
+  autoplayBody.appendChild(fasterAutoplayContainer);
+  autoplayBody.appendChild(fasterAutoplayDelayContainer);
+
+  const advancedBody = createSection(t('mods.automator.advanced'), 'advanced', false);
+  advancedBody.appendChild(potionHeaderRow);
+  advancedBody.appendChild(miniThresholdContainer);
+  advancedBody.appendChild(strongThresholdContainer);
+  advancedBody.appendChild(greatThresholdContainer);
+  advancedBody.appendChild(ultimateThresholdContainer);
+  advancedBody.appendChild(supremeThresholdContainer);
+  advancedBody.appendChild(creditSeparator);
+  advancedBody.appendChild(credit);
+
+  content.insertBefore(autoSaveFooter, content.firstChild);
   
   // Update checkboxes with current config values after creation
   setTimeout(() => {
@@ -4702,87 +4709,6 @@ const createConfigPanel = () => {
       }
     ]
   });
-  
-  // Helper to create a collapsible section
-  function createCollapsibleSection(id, title, children, mainItemsContainer = null) {
-    const container = document.createElement('div');
-    container.id = id;
-    container.style.cssText = `display: flex; flex-direction: column; gap: ${rowGap};`;
-    
-    // Create the toggle button
-    const toggleButton = document.createElement('button');
-    toggleButton.type = 'button';
-    toggleButton.style.cssText = `
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      width: 100%;
-      padding: 8px 12px;
-      background-color: #333;
-      color: #fff;
-      border: 1px solid #555;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 14px;
-      font-weight: 500;
-      transition: background-color 0.2s;
-    `;
-    toggleButton.onmouseover = () => toggleButton.style.backgroundColor = '#444';
-    toggleButton.onmouseout = () => toggleButton.style.backgroundColor = '#333';
-    
-    // Create title text
-    const titleText = document.createElement('span');
-    titleText.textContent = title;
-    
-    // Create arrow icon
-    const arrow = document.createElement('span');
-    arrow.textContent = '▼';
-    arrow.style.cssText = 'transition: transform 0.2s; font-size: 12px;';
-    
-    toggleButton.appendChild(titleText);
-    toggleButton.appendChild(arrow);
-    
-    // Create the collapsible content container
-    const contentContainer = document.createElement('div');
-    contentContainer.id = `${id}-content`;
-    contentContainer.style.cssText = `
-      display: none;
-      flex-direction: column;
-      gap: ${rowGap};
-      margin-top: 0;
-    `;
-    
-    // Add children to content container
-    children.forEach(child => {
-      contentContainer.appendChild(child);
-    });
-    
-    // Toggle functionality
-    let isExpanded = false;
-    toggleButton.addEventListener('click', () => {
-      isExpanded = !isExpanded;
-      if (isExpanded) {
-        contentContainer.style.display = 'flex';
-        arrow.style.transform = 'rotate(180deg)';
-        // Hide main items container when Advanced is expanded
-        if (mainItemsContainer) {
-          mainItemsContainer.style.display = 'none';
-        }
-      } else {
-        contentContainer.style.display = 'none';
-        arrow.style.transform = 'rotate(0deg)';
-        // Show main items container when Advanced is collapsed
-        if (mainItemsContainer) {
-          mainItemsContainer.style.display = 'flex';
-        }
-      }
-    });
-    
-    container.appendChild(toggleButton);
-    container.appendChild(contentContainer);
-    
-    return container;
-  }
   
   // Helper to create a checkbox container
   function createCheckboxContainer(id, label, checked) {
