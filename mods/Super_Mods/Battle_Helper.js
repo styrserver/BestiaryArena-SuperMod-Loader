@@ -39,6 +39,8 @@ const BATTLE_HELPER_OUTPUT_HEIGHT_PX = 170;
 const BATTLE_HELPER_HELP_LIST_HEIGHT_PX = 210;
 const BATTLE_HELPER_SCROLLBAR_GUTTER_PX = 12;
 const BATTLE_HELPER_FETCH_MIN_INTERVAL_MS = 400;
+const BATTLE_HELPER_TOAST_STACK_OFFSET_PX = 46;
+const BATTLE_HELPER_TOAST_TRANSITION = '230ms cubic-bezier(0.21, 1.02, 0.73, 1)';
 const BATTLE_HELPER_TOAST_CONTAINER_ID = 'battle-helper-toast-container';
 const BATTLE_HELPER_PROFILE_URL_BASE = 'https://bestiaryarena.com/profile/';
 
@@ -476,6 +478,16 @@ function getCurrentRoomId() {
   }
 }
 
+function getCurrentBoardFloor() {
+  try {
+    const floor = globalThis.state?.board?.getSnapshot?.()?.context?.floor;
+    const value = Number(floor);
+    return Number.isFinite(value) ? Math.trunc(value) : null;
+  } catch (_) {
+    return null;
+  }
+}
+
 function navigateToRoomId(roomId) {
   const target = String(roomId || '').trim();
   if (!target) return false;
@@ -504,6 +516,25 @@ function setBoardFloor(floor) {
     return true;
   } catch (error) {
     console.warn('[Battle Helper] setBoardFloor:', error);
+    return false;
+  }
+}
+
+function reloadCurrentMap() {
+  const roomId = getCurrentRoomId();
+  if (!roomId) return false;
+  const floor = getCurrentBoardFloor();
+  try {
+    globalThis.state?.board?.send?.({
+      type: 'selectRoomById',
+      roomId: String(roomId)
+    });
+    if (floor !== null) {
+      scheduleBattleHelperTimeout(() => setBoardFloor(floor), 80);
+    }
+    return true;
+  } catch (error) {
+    console.warn('[Battle Helper] reloadCurrentMap:', error);
     return false;
   }
 }
@@ -551,6 +582,14 @@ function resolveRoomIdForRequest(request) {
     || (request.mapName && m.name === request.mapName)
   );
   return hit?.id || null;
+}
+
+function getHelpMapContextForRequest(request) {
+  const roomId = resolveRoomIdForRequest(request);
+  const mapLabel = roomId
+    ? (getRoomDisplayName(roomId) || request?.mapName || '')
+    : String(request?.mapName || '');
+  return { roomId, mapLabel };
 }
 
 function findMapOptionForCurrentRoom(mapOptions = getHelpMapOptions()) {
@@ -905,39 +944,62 @@ function getBoardReplayString() {
   }
 }
 
-function stripSeedFromReplayLink(replayLink) {
+function parseReplayLinkJson(replayLink, { requireBoard = false } = {}) {
   const raw = String(replayLink || '').trim();
-  if (!raw) return '';
+  if (!raw) return null;
   try {
     const match = raw.match(/^\$replay\((\{.*\})\)$/s);
-    if (!match) return raw;
+    if (!match) return null;
     const data = JSON.parse(match[1]);
-    if (!data || typeof data !== 'object') return raw;
-    delete data.seed;
-    return `$replay(${JSON.stringify(data)})`;
+    if (!data || typeof data !== 'object') return null;
+    if (requireBoard && (!Array.isArray(data.board) || data.board.length === 0)) return null;
+    return data;
   } catch (_) {
-    return raw;
+    return null;
   }
+}
+
+function stripSeedFromReplayLink(replayLink) {
+  const data = parseReplayLinkJson(replayLink);
+  if (!data) return String(replayLink || '').trim();
+  delete data.seed;
+  return `$replay(${JSON.stringify(data)})`;
+}
+
+function parseReplayLinkToBoardData(replayLink) {
+  const data = parseReplayLinkJson(replayLink, { requireBoard: true });
+  if (!data) return null;
+  delete data.seed;
+  return data;
+}
+
+function applyHelpReplySetup(replayLink) {
+  const boardData = parseReplayLinkToBoardData(replayLink);
+  if (!boardData) return false;
+  try {
+    if (typeof window.$configureBoard === 'function') {
+      return window.$configureBoard(boardData) !== false;
+    }
+    if (window.BestiaryModAPI?.utility?.configureBoard) {
+      window.BestiaryModAPI.utility.configureBoard(boardData);
+      return true;
+    }
+  } catch (error) {
+    console.warn('[Battle Helper] applyHelpReplySetup:', error);
+  }
+  return false;
 }
 
 /** Stable replay fingerprint for duplicate detection (ignores seed / key order noise). */
 function normalizeReplayForCompare(replayLink) {
-  const stripped = stripSeedFromReplayLink(replayLink);
-  if (!stripped) return '';
-  try {
-    const match = stripped.match(/^\$replay\((\{.*\})\)$/s);
-    if (!match) return stripped;
-    const data = JSON.parse(match[1]);
-    if (!data || typeof data !== 'object') return stripped;
-    return `$replay(${JSON.stringify({
-      region: data.region || undefined,
-      map: String(data.map || ''),
-      floor: data.floor !== undefined && data.floor !== null ? data.floor : 0,
-      board: Array.isArray(data.board) ? data.board : []
-    })})`;
-  } catch (_) {
-    return stripped;
-  }
+  const data = parseReplayLinkJson(stripSeedFromReplayLink(replayLink));
+  if (!data) return stripSeedFromReplayLink(replayLink);
+  return `$replay(${JSON.stringify({
+    region: data.region || undefined,
+    map: String(data.map || ''),
+    floor: data.floor !== undefined && data.floor !== null ? data.floor : 0,
+    board: Array.isArray(data.board) ? data.board : []
+  })})`;
 }
 
 async function fetchHelpRequestById(requestId) {
@@ -1013,27 +1075,6 @@ async function publishHelpReply(requestId, note = '') {
   return reply;
 }
 
-function copyTextToClipboard(text) {
-  try {
-    if (navigator?.clipboard?.writeText) {
-      navigator.clipboard.writeText(text);
-      return true;
-    }
-  } catch (_) { /* fall through */ }
-  try {
-    const ta = document.createElement('textarea');
-    ta.value = text;
-    ta.style.cssText = 'position:fixed;left:-9999px;top:-9999px;';
-    document.body.appendChild(ta);
-    ta.select();
-    const ok = document.execCommand('copy');
-    document.body.removeChild(ta);
-    return ok;
-  } catch (_) {
-    return false;
-  }
-}
-
 // =======================
 // 3. State & Session Backup
 // =======================
@@ -1061,6 +1102,35 @@ let battleHelperModalPublishBtn = null;
 let battleHelperModalPublishBaseDisabled = true;
 let battleHelperPublishBoardUnsub = null;
 let battleHelpButtonPollTimer = null;
+let helpRequestActivateSeq = 0;
+let helpViewSetupSeq = 0;
+let clearHelpSelectionRef = null;
+const battleHelperPendingTimers = new Set();
+
+function scheduleBattleHelperTimeout(fn, ms) {
+  const id = setTimeout(() => {
+    battleHelperPendingTimers.delete(id);
+    fn();
+  }, ms);
+  battleHelperPendingTimers.add(id);
+  return id;
+}
+
+function clearBattleHelperPendingTimers() {
+  battleHelperPendingTimers.forEach((id) => clearTimeout(id));
+  battleHelperPendingTimers.clear();
+}
+
+function abortHelpBoardInFlightOperations() {
+  helpRequestActivateSeq += 1;
+  helpViewSetupSeq += 1;
+}
+
+function removeBattleHelperToastContainer() {
+  try {
+    document.getElementById(BATTLE_HELPER_TOAST_CONTAINER_ID)?.remove();
+  } catch (_) { /* ignore */ }
+}
 
 function syncPublishSetupButtons() {
   const hasCreatures = hasCreaturesOnBoard();
@@ -1225,10 +1295,19 @@ function restoreOriginalArsenal() {
   sessionState.replaced = false;
   sessionState.helpMapName = '';
   sessionState.helpRequestId = '';
+  abortHelpBoardInFlightOperations();
+  if (typeof clearHelpSelectionRef === 'function') {
+    clearHelpSelectionRef();
+  }
   syncBattleHelperButtonState();
   stopBattleHelperViewingProfileToast();
   stopBattleHelperPublishSetupToast();
   showBattleHelperTransientToast(t('mods.battleHelper.toast.originalProfileRestored'));
+
+  const roomId = getCurrentRoomId();
+  if (roomId) {
+    scheduleBattleHelperTimeout(() => reloadCurrentMap(), 150);
+  }
 }
 
 // =======================
@@ -1250,8 +1329,40 @@ function updateBattleHelperToastPositions(container) {
   if (!container) return;
   const toasts = container.querySelectorAll('.battle-helper-toast-item');
   toasts.forEach((toast, index) => {
-    toast.style.transform = `translateY(-${index * 46}px)`;
+    toast.style.transform = `translateY(-${index * BATTLE_HELPER_TOAST_STACK_OFFSET_PX}px)`;
   });
+}
+
+function createBattleHelperToastFlexContainer(container, extraClass = '') {
+  const stackOffset = container.querySelectorAll('.battle-helper-toast-item').length
+    * BATTLE_HELPER_TOAST_STACK_OFFSET_PX;
+  const flexContainer = document.createElement('div');
+  flexContainer.className = `battle-helper-toast-item${extraClass ? ` ${extraClass}` : ''}`;
+  flexContainer.style.cssText = `display: flex; position: absolute; transition: ${BATTLE_HELPER_TOAST_TRANSITION}; transform: translateY(-${stackOffset}px); bottom: 0px; left: 0px; right: 0px; justify-content: flex-end; pointer-events: none;`;
+  return flexContainer;
+}
+
+function createBattleHelperToastChrome(options = {}) {
+  const { role = 'status', interactive = false } = options;
+  const toast = document.createElement('div');
+  toast.className = 'non-dismissable-dialogs shadow-lg animate-in fade-in zoom-in-95 slide-in-from-top lg:slide-in-from-bottom';
+  toast.setAttribute('role', role);
+  if (interactive) {
+    toast.style.pointerEvents = 'auto';
+    toast.style.cursor = 'default';
+  }
+  const widgetTop = document.createElement('div');
+  widgetTop.className = 'widget-top h-2.5';
+  const widgetBottom = document.createElement('div');
+  widgetBottom.className = 'widget-bottom pixel-font-16 flex items-center gap-2 px-2 py-1 text-whiteHighlight';
+  toast.appendChild(widgetTop);
+  toast.appendChild(widgetBottom);
+  return { toast, widgetBottom };
+}
+
+function mountBattleHelperToast(flexContainer, container) {
+  container.appendChild(flexContainer);
+  updateBattleHelperToastPositions(container);
 }
 
 function showBattleHelperTransientToast(message, duration = 5000) {
@@ -1259,34 +1370,18 @@ function showBattleHelperTransientToast(message, duration = 5000) {
     const container = getBattleHelperToastContainer();
     if (!container || !message) return;
 
-    const existingToasts = container.querySelectorAll('.battle-helper-toast-item');
-    const stackOffset = existingToasts.length * 46;
-    const flexContainer = document.createElement('div');
-    flexContainer.className = 'battle-helper-toast-item';
-    flexContainer.style.cssText = `display: flex; position: absolute; transition: 230ms cubic-bezier(0.21, 1.02, 0.73, 1); transform: translateY(-${stackOffset}px); bottom: 0px; left: 0px; right: 0px; justify-content: flex-end; pointer-events: none;`;
-
-    const toast = document.createElement('div');
-    toast.className = 'non-dismissable-dialogs shadow-lg animate-in fade-in zoom-in-95 slide-in-from-top lg:slide-in-from-bottom';
-    toast.setAttribute('role', 'status');
-
-    const widgetTop = document.createElement('div');
-    widgetTop.className = 'widget-top h-2.5';
-
-    const widgetBottom = document.createElement('div');
-    widgetBottom.className = 'widget-bottom pixel-font-16 flex items-center gap-2 px-2 py-1 text-whiteHighlight';
+    const flexContainer = createBattleHelperToastFlexContainer(container);
+    const { toast, widgetBottom } = createBattleHelperToastChrome();
 
     const messageDiv = document.createElement('div');
     messageDiv.className = 'text-left';
     messageDiv.textContent = message;
     widgetBottom.appendChild(messageDiv);
 
-    toast.appendChild(widgetTop);
-    toast.appendChild(widgetBottom);
     flexContainer.appendChild(toast);
-    container.appendChild(flexContainer);
-    updateBattleHelperToastPositions(container);
+    mountBattleHelperToast(flexContainer, container);
 
-    setTimeout(() => {
+    scheduleBattleHelperTimeout(() => {
       if (flexContainer.parentNode) {
         flexContainer.parentNode.removeChild(flexContainer);
         updateBattleHelperToastPositions(container);
@@ -1369,23 +1464,8 @@ function showBattleHelperPersistentToast(profileName, username, options = {}) {
 
     removeBattleHelperPersistentToast();
 
-    const existingToasts = container.querySelectorAll('.battle-helper-toast-item');
-    const stackOffset = existingToasts.length * 46;
-    const flexContainer = document.createElement('div');
-    flexContainer.className = 'battle-helper-toast-item';
-    flexContainer.style.cssText = `display: flex; position: absolute; transition: 230ms cubic-bezier(0.21, 1.02, 0.73, 1); transform: translateY(-${stackOffset}px); bottom: 0px; left: 0px; right: 0px; justify-content: flex-end; pointer-events: none;`;
-
-    const toast = document.createElement('div');
-    toast.className = 'non-dismissable-dialogs shadow-lg animate-in fade-in zoom-in-95 slide-in-from-top lg:slide-in-from-bottom';
-    toast.setAttribute('role', 'presentation');
-    toast.style.pointerEvents = 'auto';
-    toast.style.cursor = 'default';
-
-    const widgetTop = document.createElement('div');
-    widgetTop.className = 'widget-top h-2.5';
-
-    const widgetBottom = document.createElement('div');
-    widgetBottom.className = 'widget-bottom pixel-font-16 flex items-center gap-2 px-2 py-1 text-whiteHighlight';
+    const flexContainer = createBattleHelperToastFlexContainer(container);
+    const { toast, widgetBottom } = createBattleHelperToastChrome({ role: 'presentation', interactive: true });
 
     const messageDiv = document.createElement('div');
     messageDiv.className = 'text-left';
@@ -1411,11 +1491,8 @@ function showBattleHelperPersistentToast(profileName, username, options = {}) {
 
     widgetBottom.appendChild(messageDiv);
     widgetBottom.appendChild(restoreBtn);
-    toast.appendChild(widgetTop);
-    toast.appendChild(widgetBottom);
     flexContainer.appendChild(toast);
-    container.appendChild(flexContainer);
-    updateBattleHelperToastPositions(container);
+    mountBattleHelperToast(flexContainer, container);
 
     const handle = {
       updateProfile(nextProfileName, nextUsername, nextOptions = {}) {
@@ -1454,6 +1531,7 @@ function stopBattleHelperViewingProfileToast() {
 function removeBattleHelperPublishSetupToast() {
   if (battleHelperPublishToastResetTimer) {
     clearTimeout(battleHelperPublishToastResetTimer);
+    battleHelperPendingTimers.delete(battleHelperPublishToastResetTimer);
     battleHelperPublishToastResetTimer = null;
   }
   if (battleHelperPublishToastHandle?.remove) {
@@ -1485,23 +1563,8 @@ function showBattleHelperPublishSetupToast() {
 
     removeBattleHelperPublishSetupToast();
 
-    const existingToasts = container.querySelectorAll('.battle-helper-toast-item');
-    const stackOffset = existingToasts.length * 46;
-    const flexContainer = document.createElement('div');
-    flexContainer.className = 'battle-helper-toast-item battle-helper-publish-toast';
-    flexContainer.style.cssText = `display: flex; position: absolute; transition: 230ms cubic-bezier(0.21, 1.02, 0.73, 1); transform: translateY(-${stackOffset}px); bottom: 0px; left: 0px; right: 0px; justify-content: flex-end; pointer-events: none;`;
-
-    const toast = document.createElement('div');
-    toast.className = 'non-dismissable-dialogs shadow-lg animate-in fade-in zoom-in-95 slide-in-from-top lg:slide-in-from-bottom';
-    toast.setAttribute('role', 'presentation');
-    toast.style.pointerEvents = 'auto';
-    toast.style.cursor = 'default';
-
-    const widgetTop = document.createElement('div');
-    widgetTop.className = 'widget-top h-2.5';
-
-    const widgetBottom = document.createElement('div');
-    widgetBottom.className = 'widget-bottom pixel-font-16 flex items-center gap-2 px-2 py-1 text-whiteHighlight';
+    const flexContainer = createBattleHelperToastFlexContainer(container, 'battle-helper-publish-toast');
+    const { toast, widgetBottom } = createBattleHelperToastChrome({ role: 'presentation', interactive: true });
 
     const messageDiv = document.createElement('div');
     messageDiv.className = 'text-left';
@@ -1517,6 +1580,7 @@ function showBattleHelperPublishSetupToast() {
       if (publishBtn.disabled || !hasCreaturesOnBoard()) return;
       if (battleHelperPublishToastResetTimer) {
         clearTimeout(battleHelperPublishToastResetTimer);
+        battleHelperPendingTimers.delete(battleHelperPublishToastResetTimer);
         battleHelperPublishToastResetTimer = null;
       }
       publishBtn.dataset.busy = '1';
@@ -1527,7 +1591,7 @@ function showBattleHelperPublishSetupToast() {
         await publishHelpSetupFromToast();
         messageDiv.textContent = t('mods.battleHelper.help.published');
         publishBtn.textContent = t('mods.battleHelper.toast.publishSetupDone');
-        battleHelperPublishToastResetTimer = setTimeout(() => {
+        battleHelperPublishToastResetTimer = scheduleBattleHelperTimeout(() => {
           battleHelperPublishToastResetTimer = null;
           if (!publishBtn.isConnected) return;
           messageDiv.textContent = t('mods.battleHelper.toast.publishSetupHint');
@@ -1548,11 +1612,8 @@ function showBattleHelperPublishSetupToast() {
 
     widgetBottom.appendChild(messageDiv);
     widgetBottom.appendChild(publishBtn);
-    toast.appendChild(widgetTop);
-    toast.appendChild(widgetBottom);
     flexContainer.appendChild(toast);
-    container.appendChild(flexContainer);
-    updateBattleHelperToastPositions(container);
+    mountBattleHelperToast(flexContainer, container);
 
     const handle = {
       remove() {
@@ -1939,9 +2000,6 @@ function buildImportPanel(onContentChange, shared) {
   restoreButton = createActionButton(t('mods.battleHelper.restoreOriginalProfile'), () => {
     try {
       restoreOriginalArsenal();
-      if (typeof shared.clearHelpSelection === 'function') {
-        shared.clearHelpSelection();
-      }
       setOutput(t('mods.battleHelper.output.originalProfileRestored'));
       syncButtons();
     } catch (error) {
@@ -2199,9 +2257,26 @@ function buildHelpBoardColumns(onContentChange, shared) {
     renderList();
   }
 
+  async function replaceRequesterProfileForHelp(request, seq, seqRef, setStatus) {
+    const { mapLabel } = getHelpMapContextForRequest(request);
+    setStatus(tReplace('mods.battleHelper.output.fetchingProfile', {
+      username: request.requesterName
+    }));
+    if (typeof shared.fetchAndOptionallyReplace === 'function') {
+      await shared.fetchAndOptionallyReplace(request.requesterName, {
+        replace: true,
+        helpMapName: mapLabel,
+        helpRequestId: request.id,
+        shouldAbort: () => seq !== seqRef
+      });
+    }
+    return mapLabel;
+  }
+
   async function activateHelpRequest(request) {
     if (!request) return;
-    const seq = ++selectRequestSeq;
+    const seq = ++helpRequestActivateSeq;
+    selectRequestSeq = seq;
     helpBoardState.selectedId = request.id;
     renderList();
 
@@ -2212,37 +2287,28 @@ function buildHelpBoardColumns(onContentChange, shared) {
     const isOwn = request.requesterName.toLowerCase() === me;
 
     if (isOwn) {
-      if (seq !== selectRequestSeq) return;
+      if (seq !== helpRequestActivateSeq) return;
+      const { mapLabel } = getHelpMapContextForRequest(request);
       setHelpStatus(navigated
-        ? tReplace('mods.battleHelper.help.navigatedOwn', { map: request.mapName })
+        ? tReplace('mods.battleHelper.help.navigatedOwn', { map: mapLabel || request.mapName })
         : t('mods.battleHelper.help.errors.navigateFailed'));
       return;
     }
 
     if (!navigated) {
-      if (seq !== selectRequestSeq) return;
+      if (seq !== helpRequestActivateSeq) return;
       setHelpStatus(t('mods.battleHelper.help.errors.navigateFailed'));
       return;
     }
 
     try {
-      setHelpStatus(tReplace('mods.battleHelper.output.fetchingProfile', {
-        username: request.requesterName
-      }));
-      const roomIdForLabel = resolveRoomIdForRequest(request);
-      const helpMapName = roomIdForLabel
-        ? (getRoomDisplayName(roomIdForLabel) || request.mapName)
-        : request.mapName;
-      if (seq !== selectRequestSeq) return;
-      if (typeof shared.fetchAndOptionallyReplace === 'function') {
-        await shared.fetchAndOptionallyReplace(request.requesterName, {
-          replace: true,
-          helpMapName,
-          helpRequestId: request.id,
-          shouldAbort: () => seq !== selectRequestSeq
-        });
-      }
-      if (seq !== selectRequestSeq) return;
+      const helpMapName = await replaceRequesterProfileForHelp(
+        request,
+        seq,
+        helpRequestActivateSeq,
+        setHelpStatus
+      );
+      if (seq !== helpRequestActivateSeq) return;
       setHelpStatus(tReplace('mods.battleHelper.help.profileLoadedOnMap', {
         name: request.requesterName,
         map: helpMapName
@@ -2251,8 +2317,37 @@ function buildHelpBoardColumns(onContentChange, shared) {
         openBattleHelperModal();
       }
     } catch (error) {
-      if (seq !== selectRequestSeq) return;
+      if (seq !== helpRequestActivateSeq) return;
       setHelpStatus(String(error?.message || error));
+    }
+  }
+
+  async function activateViewHelpReplySetup(request, replayLink) {
+    if (!request || !replayLink) return false;
+    const seq = ++helpViewSetupSeq;
+
+    ensureSandboxPlayMode();
+
+    try {
+      await replaceRequesterProfileForHelp(
+        request,
+        seq,
+        helpViewSetupSeq,
+        setHelpStatus
+      );
+      if (seq !== helpViewSetupSeq) return false;
+
+      setHelpStatus(t('mods.battleHelper.help.applyingSetup'));
+      const ok = applyHelpReplySetup(replayLink);
+      if (seq !== helpViewSetupSeq) return false;
+      setHelpStatus(ok
+        ? t('mods.battleHelper.help.setupApplied')
+        : t('mods.battleHelper.help.setupApplyFailed'));
+      return ok;
+    } catch (error) {
+      if (seq !== helpViewSetupSeq) return false;
+      setHelpStatus(String(error?.message || error));
+      return false;
     }
   }
 
@@ -2344,18 +2439,21 @@ function buildHelpBoardColumns(onContentChange, shared) {
       }
       row.appendChild(info);
 
-      const copyBtn = document.createElement('button');
-      copyBtn.type = 'button';
-      copyBtn.className = BATTLE_HELPER_BUTTON_CLASS.secondary;
-      copyBtn.style.cssText = 'cursor: pointer; flex: 0 0 auto;';
-      copyBtn.textContent = t('mods.battleHelper.help.copyReplay');
-      copyBtn.addEventListener('click', () => {
-        const ok = copyTextToClipboard(stripSeedFromReplayLink(reply.replayLink));
-        setHelpStatus(ok
-          ? t('mods.battleHelper.help.copiedReplay')
-          : t('mods.battleHelper.help.copyFailed'));
+      const viewSetupBtn = document.createElement('button');
+      viewSetupBtn.type = 'button';
+      viewSetupBtn.className = BATTLE_HELPER_BUTTON_CLASS.secondary;
+      viewSetupBtn.style.cssText = 'cursor: pointer; flex: 0 0 auto;';
+      viewSetupBtn.textContent = t('mods.battleHelper.help.viewSetup');
+      viewSetupBtn.addEventListener('click', async () => {
+        if (viewSetupBtn.disabled) return;
+        viewSetupBtn.disabled = true;
+        try {
+          await activateViewHelpReplySetup(request, reply.replayLink);
+        } finally {
+          viewSetupBtn.disabled = false;
+        }
       });
-      row.appendChild(copyBtn);
+      row.appendChild(viewSetupBtn);
 
       const me = getCurrentPlayerName().toLowerCase();
       const isOwnReply = me && reply.helperName.toLowerCase() === me;
@@ -2399,10 +2497,7 @@ function buildHelpBoardColumns(onContentChange, shared) {
       return;
     }
 
-    const roomId = resolveRoomIdForRequest(request);
-    const mapLabel = roomId
-      ? (getRoomDisplayName(roomId) || request.mapName)
-      : request.mapName;
+    const { roomId, mapLabel } = getHelpMapContextForRequest(request);
     detailIconSlot.textContent = '';
     if (roomId) {
       detailIconSlot.appendChild(createMapThumbnailImg(roomId, 28));
@@ -2454,17 +2549,13 @@ function buildHelpBoardColumns(onContentChange, shared) {
         : 'frame-1 surface-regular p-1';
       row.style.cssText = 'display: flex; flex-direction: row; gap: 6px; align-items: center; width: 100%; text-align: left; cursor: pointer; box-sizing: border-box;';
 
-      const roomId = resolveRoomIdForRequest(request);
+      const { roomId, mapLabel } = getHelpMapContextForRequest(request);
       if (roomId) {
         row.appendChild(createMapThumbnailImg(roomId, 22));
       }
 
       const textCol = document.createElement('div');
       textCol.style.cssText = 'flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px;';
-
-      const mapLabel = roomId
-        ? (getRoomDisplayName(roomId) || request.mapName)
-        : request.mapName;
 
       const title = document.createElement('div');
       title.className = 'pixel-font-14 text-whiteRegular';
@@ -2526,9 +2617,11 @@ function buildHelpBoardColumns(onContentChange, shared) {
 
   function clearHelpSelection() {
     selectRequestSeq += 1;
+    abortHelpBoardInFlightOperations();
     helpBoardState.selectedId = null;
     renderList();
   }
+  clearHelpSelectionRef = clearHelpSelection;
   shared.clearHelpSelection = clearHelpSelection;
 
   return {
@@ -2679,6 +2772,7 @@ function clearBattleHelperModalLayoutCleanup() {
 }
 
 function clearBattleHelperModalCleanup() {
+  abortHelpBoardInFlightOperations();
   clearBattleHelperModalLayoutCleanup();
   clearModalPublishSetupButton();
 }
@@ -2916,6 +3010,8 @@ context.exports = {
   hideButton,
   showButton,
   cleanup: () => {
+    abortHelpBoardInFlightOperations();
+    clearBattleHelperPendingTimers();
     sessionState.lastProfileRaw = null;
     sessionState.lastNormalized = null;
     sessionState.lastUsername = '';
@@ -2926,9 +3022,11 @@ context.exports = {
     helpBoardState.selectedId = null;
     helpBoardState.requests = [];
     helpBoardState.openCount = 0;
+    clearHelpSelectionRef = null;
     stopHelpBoardButtonPolling();
     stopBattleHelperViewingProfileToast();
     stopBattleHelperPublishSetupToast();
+    removeBattleHelperToastContainer();
     clearBattleHelperModalCleanup();
     if (typeof battleHelperPublishBoardUnsub === 'function') {
       try { battleHelperPublishBoardUnsub(); } catch (_) { /* ignore */ }
@@ -2938,6 +3036,9 @@ context.exports = {
     battleHelperModalPublishBtn = null;
     battleHelperModalPublishBaseDisabled = true;
     syncBattleHelperButtonState();
+    if (typeof window !== 'undefined' && window.battleHelper) {
+      delete window.battleHelper;
+    }
   }
 };
 

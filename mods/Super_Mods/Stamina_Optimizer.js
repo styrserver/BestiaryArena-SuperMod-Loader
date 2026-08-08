@@ -56,7 +56,7 @@ const MODS_LOADING_GRACE_PERIOD = 5000; // 5 seconds after allModsLoaded before 
 // Fixed start delay — same contract as other farming mods (3s, not user-configurable)
 const DEFAULT_START_DELAY = 3;
 const ACTION_START_DELAY = DEFAULT_START_DELAY * 1000;
-const ACTION_START_TOAST_COOLDOWN_MS = 10000;
+const START_TOAST_COOLDOWN_MS = 10000;
 const MAX_WAIT_FOR_SIGNAL = 15000; // Maximum time to wait for allModsLoaded signal (15 seconds)
 const ROOM_NAV_POLL_MS = 100;
 const ROOM_NAV_TIMEOUT_MS = 8000;
@@ -145,7 +145,7 @@ let lastMissingFunctionLog = 0;
 let functionRetryAttempts = 0;
 const MAX_FUNCTION_RETRY_ATTEMPTS = 3;
 const FUNCTION_RETRY_DELAY = 2000; // 2 seconds
-let lastActionStartToastAt = 0;
+let lastStartToastAt = 0;
 let isActionPending = false;
 let isLifecycleActive = true;
 
@@ -946,12 +946,12 @@ function showToast(message, duration = 5000) {
     }
 }
 
-function showActionStartToast() {
+function showStaminaOptimizerStartToast() {
     const now = Date.now();
-    if (now - lastActionStartToastAt < ACTION_START_TOAST_COOLDOWN_MS) {
+    if (now - lastStartToastAt < START_TOAST_COOLDOWN_MS) {
         return;
     }
-    lastActionStartToastAt = now;
+    lastStartToastAt = now;
     showToast('Starting Stamina Optimizer');
 }
 
@@ -1925,7 +1925,7 @@ async function executeAction() {
         
         console.log(`[Stamina Optimizer] Executing action: ${action}`);
 
-        showActionStartToast();
+        showStaminaOptimizerStartToast();
         clearModalsWithEsc(3);
         await sleep(100);
 

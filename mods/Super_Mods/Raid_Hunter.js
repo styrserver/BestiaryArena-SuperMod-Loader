@@ -60,6 +60,7 @@ const DOM_ACTION_MAX_ATTEMPTS = 5;
 const DOM_ACTION_MAX_ATTEMPTS_HIDDEN = 40;
 const RAID_STATUS_UPDATE_INTERVAL = 600000; // 10 minutes
 const RAID_END_CHECK_INTERVAL = 30000;
+const START_TOAST_COOLDOWN_MS = 10000;
 
 // Count
 const MAX_RETRY_ATTEMPTS = 3;
@@ -227,6 +228,7 @@ function hasRaidCustomSettings(raidName) {
 
 // Track if all mods have finished loading
 let allModsLoaded = false;
+let lastStartToastAt = 0;
 
 /**
  * Checks if Better Tasker is currently active and performing tasks
@@ -986,93 +988,6 @@ function stopStaminaTooltipMonitoring() {
     console.log('[Raid Hunter] Stamina monitoring stopped');
 }
 
-function showToast(message, duration = 5000) {
-    try {
-        // Use custom toast implementation (same as Better Boosted Maps)
-        // Get or create the main toast container
-        let mainContainer = document.getElementById('raid-hunter-toast-container');
-        if (!mainContainer) {
-            mainContainer = document.createElement('div');
-            mainContainer.id = 'raid-hunter-toast-container';
-            mainContainer.style.cssText = `
-                position: fixed;
-                z-index: 9999;
-                inset: 16px 16px 64px;
-                pointer-events: none;
-            `;
-            document.body.appendChild(mainContainer);
-        }
-
-        // Count existing toasts to calculate stacking position
-        const existingToasts = mainContainer.querySelectorAll('.toast-item');
-        const stackOffset = existingToasts.length * 46;
-
-        // Create the flex container for this specific toast
-        const flexContainer = document.createElement('div');
-        flexContainer.className = 'toast-item';
-        flexContainer.style.cssText = `
-            left: 0px;
-            right: 0px;
-            display: flex;
-            position: absolute;
-            transition: 230ms cubic-bezier(0.21, 1.02, 0.73, 1);
-            transform: translateY(-${stackOffset}px);
-            bottom: 0px;
-            justify-content: flex-end;
-        `;
-
-        // Create toast button
-        const toast = document.createElement('button');
-        toast.className = 'non-dismissable-dialogs shadow-lg animate-in fade-in zoom-in-95 slide-in-from-top lg:slide-in-from-bottom';
-
-        // Create widget structure
-        const widgetTop = document.createElement('div');
-        widgetTop.className = 'widget-top h-2.5';
-
-        const widgetBottom = document.createElement('div');
-        widgetBottom.className = 'widget-bottom pixel-font-16 flex items-center gap-2 px-2 py-1 text-whiteHighlight';
-
-        // Add icon (raid icon for raids)
-        const iconImg = document.createElement('img');
-        iconImg.alt = 'raid';
-        iconImg.src = 'https://bestiaryarena.com/assets/icons/raid.png';
-        iconImg.className = 'pixelated';
-        iconImg.style.cssText = 'width: 16px; height: 16px;';
-        widgetBottom.appendChild(iconImg);
-
-        // Add message
-        const messageDiv = document.createElement('div');
-        messageDiv.className = 'text-left';
-        messageDiv.textContent = message;
-        widgetBottom.appendChild(messageDiv);
-
-        // Assemble toast
-        toast.appendChild(widgetTop);
-        toast.appendChild(widgetBottom);
-        flexContainer.appendChild(toast);
-        mainContainer.appendChild(flexContainer);
-
-        console.log(`[Raid Hunter] Toast shown: ${message}`);
-
-        // Auto-remove after duration
-        setTimeout(() => {
-            if (flexContainer && flexContainer.parentNode) {
-                flexContainer.parentNode.removeChild(flexContainer);
-
-                // Update positions of remaining toasts
-                const toasts = mainContainer.querySelectorAll('.toast-item');
-                toasts.forEach((toast, index) => {
-                    const offset = index * 46;
-                    toast.style.transform = `translateY(-${offset}px)`;
-                });
-            }
-        }, duration);
-
-    } catch (error) {
-        console.error('[Raid Hunter] Error showing toast:', error);
-    }
-}
-
 // Create continuous stamina monitoring callback
 function createStaminaMonitoringCallback(logPrefix, successMessage) {
     return () => {
@@ -1526,10 +1441,10 @@ function showToast(message, duration = 5000) {
     try {
         // Use custom toast implementation (same as welcome.js)
         // Get or create the main toast container
-        let mainContainer = document.getElementById('rh-toast-container');
+        let mainContainer = document.getElementById('raid-hunter-toast-container');
         if (!mainContainer) {
             mainContainer = document.createElement('div');
-            mainContainer.id = 'rh-toast-container';
+            mainContainer.id = 'raid-hunter-toast-container';
             mainContainer.style.cssText = `
                 position: fixed;
                 z-index: 9999;
@@ -1568,10 +1483,10 @@ function showToast(message, duration = 5000) {
         const widgetBottom = document.createElement('div');
         widgetBottom.className = 'widget-bottom pixel-font-16 flex items-center gap-2 px-2 py-1 text-whiteHighlight';
         
-        // Add icon (enemy icon for raids)
+        // Add icon (raid icon for raids)
         const iconImg = document.createElement('img');
         iconImg.alt = 'raid';
-        iconImg.src = 'https://bestiaryarena.com/assets/icons/enemy.png';
+        iconImg.src = 'https://bestiaryarena.com/assets/icons/raid.png';
         iconImg.className = 'pixelated';
         iconImg.style.cssText = 'width: 16px; height: 16px;';
         widgetBottom.appendChild(iconImg);
@@ -1607,6 +1522,15 @@ function showToast(message, duration = 5000) {
     } catch (error) {
         console.error('[Raid Hunter] Error showing toast:', error);
     }
+}
+
+function showRaidStartToast() {
+    const now = Date.now();
+    if (now - lastStartToastAt < START_TOAST_COOLDOWN_MS) {
+        return;
+    }
+    lastStartToastAt = now;
+    showToast('Starting Raid Hunter');
 }
 
 // ============================================================================
@@ -4169,7 +4093,7 @@ async function handleEventOrRaid(roomId) {
     console.log(`[Raid Hunter] Starting raid automation for room ID: ${roomId}`);
     
     // Show toast notification
-    showToast('Starting Raid Hunter');
+    showRaidStartToast();
 
     // Load settings once at the beginning (used throughout the function)
     const settings = loadSettings();

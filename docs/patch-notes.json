@@ -4,6 +4,46 @@
   },
   "notes": [
     {
+      "version": "4.8.2",
+      "changes": [
+        {
+          "mod": "Awaken Tracker",
+          "type": "fixed",
+          "text": "Awaken Farmer resumes in autoplay mode after stamina recovery instead of clicking Start in manual mode."
+        },
+        {
+          "mod": "Awaken Tracker",
+          "type": "changed",
+          "text": "Awaken Farmer startup toast shows before the navigate delay (same timing as Raid Hunter) instead of after Start is clicked; 10s cooldown prevents spam on rapid restarts."
+        },
+        {
+          "mod": "Battle Helper",
+          "type": "changed",
+          "text": "Help board replies use View setup instead of Copy $replay: loads the requester's public arsenal, then navigates and applies the helper's published setup. Restore from the viewing/helping toast reloads the current map and clears the help-board selection. Refactored shared help-map/profile/replay/toast helpers; cleanup now clears pending timers, removes the toast container, aborts in-flight help-board work on modal close/mod disable, and drops window.battleHelper to prevent leaks."
+        },
+        {
+          "mod": "Better Boosted Maps",
+          "type": "changed",
+          "text": "Startup widget toast standardized: shows before the navigate delay with a 10s cooldown (same contract as other farming mods)."
+        },
+        {
+          "mod": "Better Tasker",
+          "type": "changed",
+          "text": "Startup widget toast consolidated to a single call before navigation begins, with a 10s cooldown."
+        },
+        {
+          "mod": "Raid Hunter",
+          "type": "changed",
+          "text": "Startup widget toast uses a 10s cooldown; duplicate toast helper removed and toast container unified."
+        },
+        {
+          "mod": "Stamina Optimizer",
+          "type": "changed",
+          "text": "Startup widget toast aligned with other farming mods: shown before the action delay with a 10s cooldown."
+        }
+      ]
+    },
+    {
       "version": "4.8.1",
       "changes": [
         {

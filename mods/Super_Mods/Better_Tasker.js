@@ -1040,10 +1040,10 @@ function teardownManualPlayDetection() {
 
 function showTaskStartToast() {
     const now = Date.now();
-    if (now - lastTaskStartToastAt < TASK_START_TOAST_COOLDOWN_MS) {
+    if (now - lastStartToastAt < START_TOAST_COOLDOWN_MS) {
         return;
     }
-    lastTaskStartToastAt = now;
+    lastStartToastAt = now;
     showToast('Starting Better Tasker');
 }
 
@@ -2013,11 +2013,11 @@ let manualPlayPauseUntil = 0;
 let programmaticNavigationUntil = 0;
 let manualPlayBoardUnsubscribe = null;
 let lastTrackedRoomIdForManualPlay = null;
-let lastTaskStartToastAt = 0;
+let lastStartToastAt = 0;
 let taskCompletionInProgress = false;
 let taskCompletionRetryTimeout = null;
 let lastFailsafeTriggerAt = 0;
-const TASK_START_TOAST_COOLDOWN_MS = 10000;
+const START_TOAST_COOLDOWN_MS = 10000;
 const FINISH_BUTTON_INITIAL_WAIT_MS = 1500;
 const FINISH_BUTTON_POLL_INTERVAL_MS = 200;
 const FINISH_BUTTON_MAX_ATTEMPTS = 20;
@@ -5151,6 +5151,8 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
             console.log('[Better Tasker] LOW priority raid still active - deferring navigation');
             return false;
         }
+
+        showTaskStartToast();
         
         const settings = loadSettings();
         const activeCreatureName = preferredCreatureName || getActiveTaskCreatureNameFromGameState() || extractCreatureFromTask();
@@ -5195,9 +5197,6 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                     setupMethod: roomAutomation.setupMethod,
                     autoRefillStamina: roomAutomation.autoRefillStamina
                 };
-                
-                // Show toast notification
-                showTaskStartToast();
                 
                 // Handle quest log state and navigation
                 const navigationCompleted = await handleQuestLogState(roomId, roomAutomation.floor);
@@ -5378,8 +5377,6 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                     setupMethod: roomAutomation.setupMethod,
                     autoRefillStamina: roomAutomation.autoRefillStamina
                 };
-                showTaskStartToast();
-                
                 // Handle quest log state and navigation
                 const navigationCompleted = await handleQuestLogState(roomId, roomAutomation.floor);
                 if (!navigationCompleted) {

@@ -49,6 +49,7 @@ const DEFAULT_START_DELAY = 3; // seconds
 const COORDINATION_RESUME_DELAY_MS = 1000; // after a higher-priority mod yields
 const MODS_LOADING_GRACE_PERIOD = 5000;
 const MAX_WAIT_FOR_SIGNAL = 15000;
+const START_TOAST_COOLDOWN_MS = 10000;
 
 // Stamina constants
 const DEFAULT_STAMINA_COST = 30;
@@ -1059,6 +1060,15 @@ function showToast(message, duration = 5000) {
     } catch (error) {
         console.error('[Better Boosted Maps] Error showing toast:', error);
     }
+}
+
+function showBoostedMapStartToast() {
+    const now = Date.now();
+    if (now - lastStartToastAt < START_TOAST_COOLDOWN_MS) {
+        return;
+    }
+    lastStartToastAt = now;
+    showToast('Starting Boosted Map');
 }
 
 function createSelectAllNoneButtons(idPrefix, scrollContainer) {
@@ -4847,7 +4857,7 @@ async function startBoostedMapFarming(force = false) {
         console.log(`[Better Boosted Maps] Starting boosted map farming: ${farmCheck.roomName}`);
         
         // Show toast notification
-        showToast('Starting Boosted Map');
+        showBoostedMapStartToast();
         
         // Close any open modals (3 ESC presses for consistency)
         console.log('[Better Boosted Maps] Clearing modals before navigation...');
@@ -5431,6 +5441,7 @@ function init() {
 }
 
 let allModsLoaded = false;
+let lastStartToastAt = 0;
 let bootGraceDone = false;
 let bootGraceTimer = null;
 let bootFallbackTimer = null;

@@ -63,6 +63,7 @@
     const FARMER_TICK_MS = 8000;
     // Fixed start delay — same contract as BBM / Raid Hunter / Better Tasker / Stamina Optimizer
     const DEFAULT_START_DELAY = 3; // seconds
+    const START_TOAST_COOLDOWN_MS = 10000;
     const DEFAULT_STAMINA_COST = 30;
     const STAMINA_REGEN_MS = 60000;
     const STAMINA_MONITOR_INTERVAL = 5000;
@@ -1848,33 +1849,13 @@
                 return;
             }
 
-            if (!window.AutoplayManager?.requestControl(FARMER_MOD_NAME)) {
-                console.log('[Awaken Farmer] Autoplay control denied after stamina recovery');
-                return;
-            }
-            farmerRuntime.wasInitiatedByMod = true;
-            syncFarmerModCoordination();
-
-            const startBtn = farmerFindButtonByText('Start', 'Iniciar');
-            if (!startBtn) {
-                console.log('[Awaken Farmer] Start button not found after stamina recovery - resuming monitoring');
-                window.AutoplayManager?.releaseControl(FARMER_MOD_NAME);
-                farmerRuntime.wasInitiatedByMod = false;
-                syncFarmerModCoordination();
-                farmerStartStaminaRecoveryMonitoring(
-                    farmerCreateStaminaRecoveryCallback(roomId),
-                    farmerGetCurrentMapStaminaCost()
-                );
-                return;
-            }
-
-            startBtn.click();
-            farmerRuntime.status = 'farming';
-            farmerRuntime.currentRoomId = roomId;
-            syncFarmerModCoordination();
-            showFarmerStartingToast();
-            farmerSetupStaminaDepletionWatch(roomId);
-            if (typeof farmerRuntime.uiRefresh === 'function') farmerRuntime.uiRefresh();
+            // Reuse farmerBeginAutoplay so we setPlayMode('autoplay') before Start
+            // (clicking Start alone resumes whatever mode the board was left in — often manual).
+            void (async () => {
+                const started = await farmerBeginAutoplay(roomId);
+                if (started) farmerRuntime.currentRoomId = roomId;
+                if (typeof farmerRuntime.uiRefresh === 'function') farmerRuntime.uiRefresh();
+            })();
         };
     }
 
@@ -2502,7 +2483,6 @@
         startBtn.click();
         farmerRuntime.status = 'farming';
         syncFarmerModCoordination();
-        showFarmerStartingToast();
         return true;
     }
 
@@ -2585,6 +2565,7 @@
             if (needSwitch) {
                 farmerRuntime.status = 'starting';
                 if (typeof farmerRuntime.uiRefresh === 'function') farmerRuntime.uiRefresh();
+                showFarmerStartingToast();
                 console.log(`[Awaken Farmer] Waiting ${DEFAULT_START_DELAY}s before navigation...`);
                 await farmerSleep(DEFAULT_START_DELAY * 1000);
                 if (!loadFarmerSettings().enabled || !farmerCanRun()) {
@@ -2642,8 +2623,7 @@
         }
     }
 
-    let farmerLastStartToastAt = 0;
-    const FARMER_START_TOAST_COOLDOWN_MS = 4000;
+    let lastStartToastAt = 0;
 
     function showFarmerToast(message, duration = 5000) {
         try {
@@ -2718,8 +2698,8 @@
 
     function showFarmerStartingToast() {
         const now = Date.now();
-        if (now - farmerLastStartToastAt < FARMER_START_TOAST_COOLDOWN_MS) return;
-        farmerLastStartToastAt = now;
+        if (now - lastStartToastAt < START_TOAST_COOLDOWN_MS) return;
+        lastStartToastAt = now;
         showFarmerToast(t('mods.awakenTracker.farmerStartingToast'));
     }
 
