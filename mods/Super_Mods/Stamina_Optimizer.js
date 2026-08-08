@@ -53,7 +53,7 @@ const AUTO_SETUP_DELAY = 800;
 const PAUSE_BUTTON_CLICK_DELAY = 100;
 const PAUSE_BUTTON_UPDATE_DELAY = 300;
 const MODS_LOADING_GRACE_PERIOD = 5000; // 5 seconds after allModsLoaded before allowing actions
-// Same start-delay contract as other farming mods (3s default; SO uses fixed default, not a settings slider)
+// Fixed start delay — same contract as other farming mods (3s, not user-configurable)
 const DEFAULT_START_DELAY = 3;
 const ACTION_START_DELAY = DEFAULT_START_DELAY * 1000;
 const ACTION_START_TOAST_COOLDOWN_MS = 10000;

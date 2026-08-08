@@ -61,9 +61,11 @@
     const PAUSE_DEBOUNCE_MS = 1500;
     const FARMER_MOD_NAME = 'Awaken Farmer';
     const FARMER_TICK_MS = 8000;
-    // Same start-delay / boot-grace contract as BBM / Raid Hunter / Better Tasker / Stamina Optimizer
-    const DEFAULT_START_DELAY = 3;         // seconds (range: 1–MAX_START_DELAY)
-    const MAX_START_DELAY = 10;
+    // Fixed start delay — same contract as BBM / Raid Hunter / Better Tasker / Stamina Optimizer
+    const DEFAULT_START_DELAY = 3; // seconds
+    const DEFAULT_STAMINA_COST = 30;
+    const STAMINA_REGEN_MS = 60000;
+    const STAMINA_MONITOR_INTERVAL = 5000;
     const COORDINATION_RESUME_DELAY_MS = 1000;
     const MODS_LOADING_GRACE_PERIOD = 5000;
     const MAX_WAIT_FOR_SIGNAL = 15000;
@@ -81,7 +83,6 @@
         autoRefillStamina: false,
         setupLabel: '',
         floor: 0,
-        startDelay: DEFAULT_START_DELAY,
         mapSettings: {} // roomId -> { floor?: 11-15, setupLabel?: string, autoRefillStamina?: boolean }
     };
 
@@ -97,6 +98,12 @@
 
     function isNonAwakenableName(lname) {
         return getNonAwakenableNames().has(lname) || lname.includes('gazer');
+    }
+
+    function isCreatureEligibleForAwaken(name) {
+        if (!name) return false;
+        const lname = String(name).toLowerCase();
+        return !getUnobtainableNames().has(lname) && !isNonAwakenableName(lname);
     }
 
     const AWAKEN_TIER = 6;
@@ -118,7 +125,8 @@
 
     const PANEL_DEFAULTS = { left: 100, top: 100, width: 380, height: 500, isOpen: false, activeTab: 'tracker', hideRaids: false };
     const PANEL_LAYOUT = {
-        minWidth: 280,
+        // Floor until tabs render; syncPanelMinWidthFromTabs() raises this to fit labels.
+        minWidth: 200,
         maxWidth: 1200,
         minHeight: 230,
         maxHeight: 900
@@ -376,8 +384,58 @@
         }
     };
 
+    const activeConfirmButtonResets = new Set();
+
     function clampPanelSize(val, min, max) {
         return Math.max(min, Math.min(max, val));
+    }
+
+    /** Raise panel min-width so tab labels are never clipped (locale-aware). */
+    function syncPanelMinWidthFromTabs(panel) {
+        if (!panel) return PANEL_LAYOUT.minWidth;
+        const tabBar = panel.querySelector('.at-tab-bar');
+        if (!tabBar) return PANEL_LAYOUT.minWidth;
+
+        const buttons = [...tabBar.querySelectorAll('.at-tab-btn')];
+        const restores = buttons.map((btn) => ({
+            flex: btn.style.flex,
+            width: btn.style.width,
+            minWidth: btn.style.minWidth
+        }));
+        for (const btn of buttons) {
+            btn.style.flex = '0 0 auto';
+            btn.style.width = 'max-content';
+            btn.style.minWidth = 'max-content';
+        }
+
+        let tabsWidth = 0;
+        for (const btn of buttons) {
+            tabsWidth += btn.offsetWidth;
+        }
+
+        buttons.forEach((btn, i) => {
+            btn.style.flex = restores[i].flex;
+            btn.style.width = restores[i].width;
+            btn.style.minWidth = restores[i].minWidth;
+        });
+
+        const frame = panel.querySelector('.at-panel-frame');
+        const frameStyle = frame ? getComputedStyle(frame) : null;
+        const borderX = frameStyle
+            ? (parseFloat(frameStyle.borderLeftWidth) || 0) + (parseFloat(frameStyle.borderRightWidth) || 0)
+            : 12;
+        const tabBarStyle = getComputedStyle(tabBar);
+        const marginX = (parseFloat(tabBarStyle.marginLeft) || 0) + (parseFloat(tabBarStyle.marginRight) || 0);
+
+        const measured = Math.ceil(tabsWidth + borderX + marginX);
+        PANEL_LAYOUT.minWidth = Math.max(measured, 1);
+        panel.style.minWidth = PANEL_LAYOUT.minWidth + 'px';
+
+        const currentWidth = parseInt(panel.style.width, 10) || panel.offsetWidth || 0;
+        if (currentWidth < PANEL_LAYOUT.minWidth) {
+            panel.style.width = PANEL_LAYOUT.minWidth + 'px';
+        }
+        return PANEL_LAYOUT.minWidth;
     }
 
     // Expose for debugging
@@ -804,7 +862,7 @@
                 if (!Number.isFinite(gameId)) continue;
                 if (!dedup.has(gameId)) {
                     const name = resolveName(gameId);
-                    if (getUnobtainableNames().has(String(name).toLowerCase())) continue;
+                    if (!isCreatureEligibleForAwaken(name)) continue;
                     dedup.set(gameId, { gameId, name });
                 }
             }
@@ -979,21 +1037,17 @@
     // 80+ Legendary, 70+ Epic, 60+ Rare, 50+ Uncommon, 5+ Common.
     // Palette is tuned for this dark panel: blue/purple are brighter than the
     // One Dark defaults so they stay readable as text on a darker background.
-    function getStatTotalColor(total) {
+    function getGeneSumRarity(total) {
         const t = Number(total) || 0;
-        let tierLevel;
-        if (t >= 80) tierLevel = 5;
-        else if (t >= 70) tierLevel = 4;
-        else if (t >= 60) tierLevel = 3;
-        else if (t >= 50) tierLevel = 2;
-        else tierLevel = 1; // Common (readable gray) also covers total < 5
-        switch (tierLevel) {
-            case 5: return '#E5C07B'; // Legendary - gold
-            case 4: return '#C77DFF'; // Epic - bright violet
-            case 3: return '#54B9FF'; // Rare - bright sky blue
-            case 2: return '#98C379'; // Uncommon - green
-            default: return '#ABB2BF'; // Common - light gray
-        }
+        if (t >= 80) return { rarity: 5, color: '#E5C07B' }; // Legendary - gold
+        if (t >= 70) return { rarity: 4, color: '#C77DFF' }; // Epic - bright violet
+        if (t >= 60) return { rarity: 3, color: '#54B9FF' }; // Rare - bright sky blue
+        if (t >= 50) return { rarity: 2, color: '#98C379' }; // Uncommon - green
+        return { rarity: 1, color: '#ABB2BF' };              // Common - light gray
+    }
+
+    function getStatTotalColor(total) {
+        return getGeneSumRarity(total).color;
     }
 
     function renderStatIconHtml(key, size = 12, verticalAlign = 'middle') {
@@ -1306,12 +1360,6 @@
         return new Promise(resolve => setTimeout(resolve, ms));
     }
 
-    function clampStartDelay(value) {
-        const n = Number(value);
-        if (!Number.isFinite(n)) return DEFAULT_START_DELAY;
-        return Math.max(1, Math.min(MAX_START_DELAY, Math.round(n)));
-    }
-
     function loadFarmerSettings() {
         try {
             const raw = localStorage.getItem(STORAGE_KEY_FARMER);
@@ -1325,7 +1373,6 @@
                 autoRefillStamina: p.autoRefillStamina === true,
                 setupLabel: typeof p.setupLabel === 'string' ? p.setupLabel : '',
                 floor: Number.isFinite(Number(p.floor)) ? Number(p.floor) : 0,
-                startDelay: clampStartDelay(p.startDelay ?? DEFAULT_START_DELAY),
                 mapSettings
             };
         } catch (_) {
@@ -1336,14 +1383,12 @@
     function saveFarmerSettings(partial) {
         try {
             const merged = { ...loadFarmerSettings(), ...partial };
-            if (partial && Object.prototype.hasOwnProperty.call(partial, 'startDelay')) {
-                merged.startDelay = clampStartDelay(partial.startDelay);
-            }
             if (partial && Object.prototype.hasOwnProperty.call(partial, 'mapSettings')) {
                 merged.mapSettings = (partial.mapSettings && typeof partial.mapSettings === 'object')
                     ? partial.mapSettings
                     : {};
             }
+            delete merged.startDelay;
             localStorage.setItem(STORAGE_KEY_FARMER, JSON.stringify(merged));
             return merged;
         } catch (_) {
@@ -1409,8 +1454,7 @@
             const gameId = Number(m.gameId);
             if (!Number.isFinite(gameId)) continue;
             const name = resolveName(gameId);
-            const lname = String(name).toLowerCase();
-            if (getUnobtainableNames().has(lname) || isNonAwakenableName(lname)) continue;
+            if (!isCreatureEligibleForAwaken(name)) continue;
             const stats = getMonsterGeneStatsLocal(m);
             const capped = isAwakenedCappedStats(stats);
             let g = byGameId.get(gameId);
@@ -1497,7 +1541,7 @@
         return Math.min(AWAKEN_FARM_MAX_FLOOR, maxUnlocked);
     }
 
-    function rankMapsForWantedIds(wantedIds, namesById = new Map()) {
+    function rankMapsForWantedIds(wantedIds, namesById = new Map(), options = {}) {
         const utils = globalThis.state?.utils;
         if (!utils?.REGIONS || typeof utils.getBoardMonstersFromRoomId !== 'function') {
             return { results: [], error: 'utils' };
@@ -1509,16 +1553,17 @@
         const regionIdsToNames = utils.regionIdsToNames || {};
         const results = [];
         let orderIdx = 0;
+        const requireFarmFloor = options.requireFarmFloor !== false;
         for (const region of utils.REGIONS) {
             if (!region?.id) continue;
             const regionName = regionIdsToNames[region.id] || region.id;
             for (const room of (region.rooms || [])) {
                 if (!room?.id) continue;
                 const isRaid = isRaidRoomId(room.id, room);
-                // Inactive raids are not farmable — only include them while active.
-                if (isRaid && !isRaidCurrentlyActive(room.id)) continue;
+                // Inactive raids are not farmable — only include them while active when farming.
+                if (requireFarmFloor && isRaid && !isRaidCurrentlyActive(room.id)) continue;
                 // Sealed / awaken gene farming needs at least one unlocked floor in 11–15.
-                if (!hasAwakenFarmFloorUnlocked(room.id)) continue;
+                if (requireFarmFloor && !hasAwakenFarmFloorUnlocked(room.id)) continue;
 
                 let board;
                 try { board = utils.getBoardMonstersFromRoomId(room.id); } catch (_) { continue; }
@@ -1591,6 +1636,280 @@
         lastBlockReason: null,
         uiRefresh: null
     };
+
+    let farmerStaminaTooltipObserver = null;
+    let farmerStaminaRecoveryCallback = null;
+
+    function farmerIsDocumentHidden() {
+        return typeof document !== 'undefined' &&
+            (document.hidden === true || document.visibilityState === 'hidden');
+    }
+
+    function farmerGetStaminaFromGameState() {
+        try {
+            if (typeof globalThis.state?.utils?.getCurrentStamina === 'function') {
+                const fromUtils = Number(globalThis.state.utils.getCurrentStamina());
+                if (Number.isFinite(fromUtils)) return fromUtils;
+            }
+            const playerContext = globalThis.state?.player?.getSnapshot?.()?.context;
+            if (!playerContext) return null;
+            for (const key of ['stamina', 'currentStamina']) {
+                const value = Number(playerContext[key]);
+                if (Number.isFinite(value)) return value;
+            }
+            const willBeFullAt = playerContext.staminaWillBeFullAt;
+            const regenMax = Number(playerContext.maxStamina ?? playerContext.staminaMax);
+            if (willBeFullAt != null && Number.isFinite(regenMax) && regenMax > 0) {
+                const missing = Math.ceil((willBeFullAt - Date.now()) / STAMINA_REGEN_MS);
+                const regenStamina = Math.max(0, regenMax - missing);
+                const excessMs = Math.max(0, Number(playerContext.staminaExcessMs) || 0);
+                return Math.floor(regenStamina + excessMs / STAMINA_REGEN_MS);
+            }
+        } catch (_) { /* fall through */ }
+        return null;
+    }
+
+    function farmerGetCurrentStamina() {
+        try {
+            const fromApi = farmerGetStaminaFromGameState();
+            if (fromApi !== null) return fromApi;
+            const elStamina = document.querySelector('[title="Stamina"]');
+            if (!elStamina) return 0;
+            const staminaElement = elStamina.querySelector('span span');
+            if (!staminaElement) return 0;
+            const stamina = Number(staminaElement.textContent);
+            return Number.isFinite(stamina) ? stamina : 0;
+        } catch (_) {
+            return 0;
+        }
+    }
+
+    function farmerGetCurrentMapStaminaCost() {
+        try {
+            const boardContext = globalThis.state?.board?.getSnapshot()?.context;
+            const selectedRoom = boardContext?.selectedMap?.selectedRoom;
+            if (selectedRoom?.staminaCost) return selectedRoom.staminaCost;
+            return DEFAULT_STAMINA_COST;
+        } catch (_) {
+            return DEFAULT_STAMINA_COST;
+        }
+    }
+
+    function farmerHasInsufficientStamina() {
+        const cost = farmerGetCurrentMapStaminaCost();
+        if (farmerIsDocumentHidden()) {
+            const current = farmerGetCurrentStamina();
+            return { insufficient: current < cost, cost };
+        }
+        const staminaTooltip = document.querySelector(
+            '[role="tooltip"] img[alt="stamina"], [data-state="instant-open"] img[alt="stamina"]'
+        );
+        if (staminaTooltip) {
+            return { insufficient: true, cost };
+        }
+        return { insufficient: false, cost };
+    }
+
+    function farmerIsStaminaRecoveryActive() {
+        return !!(window.awakenFarmerStaminaInterval || farmerStaminaTooltipObserver);
+    }
+
+    function farmerStopStaminaMonitoring() {
+        if (window.awakenFarmerStaminaInterval) {
+            clearInterval(window.awakenFarmerStaminaInterval);
+            window.awakenFarmerStaminaInterval = null;
+        }
+        if (window.awakenFarmerDepletionInterval) {
+            clearInterval(window.awakenFarmerDepletionInterval);
+            window.awakenFarmerDepletionInterval = null;
+        }
+        if (farmerStaminaTooltipObserver) {
+            farmerStaminaTooltipObserver.disconnect();
+            farmerStaminaTooltipObserver = null;
+            farmerStaminaRecoveryCallback = null;
+        }
+    }
+
+    function farmerStartStaminaRecoveryMonitoring(onRecovered, requiredStamina) {
+        if (farmerStaminaTooltipObserver) farmerStopStaminaMonitoring();
+
+        const staminaCheck = farmerHasInsufficientStamina();
+        if (!staminaCheck.insufficient) {
+            console.log('[Awaken Farmer] Stamina sufficient - skipping recovery monitoring');
+            return;
+        }
+
+        console.log('[Awaken Farmer] Starting stamina recovery monitoring...');
+        farmerStaminaRecoveryCallback = onRecovered;
+        let hasStaminaIssue = true;
+        const needed = requiredStamina || DEFAULT_STAMINA_COST;
+
+        const staminaCheckInterval = setInterval(() => {
+            const currentStamina = farmerGetCurrentStamina();
+            const tooltipStillExists = document.querySelector(
+                '[role="tooltip"] img[alt="stamina"], [data-state="instant-open"] img[alt="stamina"]'
+            );
+            const recovered = farmerIsDocumentHidden()
+                ? (currentStamina >= needed)
+                : (!tooltipStillExists && hasStaminaIssue);
+
+            if (!recovered) {
+                if (hasStaminaIssue) {
+                    const timeRemaining = Math.max(0, needed - currentStamina);
+                    console.log(`[Awaken Farmer] Waiting for stamina (${currentStamina}/${needed}) - ~${timeRemaining} min remaining`);
+                }
+                return;
+            }
+
+            console.log(`[Awaken Farmer] Stamina recovered (${currentStamina}/${needed})`);
+            hasStaminaIssue = false;
+            const callback = farmerStaminaRecoveryCallback;
+            clearInterval(staminaCheckInterval);
+            farmerStopStaminaMonitoring();
+            if (typeof callback === 'function') callback();
+        }, STAMINA_MONITOR_INTERVAL);
+
+        window.awakenFarmerStaminaInterval = staminaCheckInterval;
+
+        farmerStaminaTooltipObserver = new MutationObserver((mutations) => {
+            for (const mutation of mutations) {
+                mutation.removedNodes.forEach((node) => {
+                    if (node.nodeType !== Node.ELEMENT_NODE) return;
+                    const wasStaminaTooltip =
+                        (node.matches?.('[role="tooltip"]') || node.matches?.('[data-state="instant-open"]')) &&
+                        node.querySelector?.('img[alt="stamina"]');
+                    if (!wasStaminaTooltip || !hasStaminaIssue) return;
+
+                    const currentStamina = farmerGetCurrentStamina();
+                    console.log(`[Awaken Farmer] Stamina recovered (tooltip removed) - current: ${currentStamina}`);
+                    hasStaminaIssue = false;
+                    const callback = farmerStaminaRecoveryCallback;
+                    clearInterval(staminaCheckInterval);
+                    farmerStopStaminaMonitoring();
+                    if (typeof callback === 'function') callback();
+                });
+            }
+        });
+
+        farmerStaminaTooltipObserver.observe(document.body, { childList: true, subtree: true });
+    }
+
+    function farmerWatchStaminaDepletion(onDepleted) {
+        const staminaCheck = farmerHasInsufficientStamina();
+        if (staminaCheck.insufficient) {
+            console.log('[Awaken Farmer] Stamina already depleted - starting recovery monitoring');
+            onDepleted();
+            return;
+        }
+
+        if (window.awakenFarmerDepletionInterval) {
+            clearInterval(window.awakenFarmerDepletionInterval);
+            window.awakenFarmerDepletionInterval = null;
+        }
+
+        window.awakenFarmerDepletionInterval = setInterval(() => {
+            const currentCheck = farmerHasInsufficientStamina();
+            if (currentCheck.insufficient) {
+                console.log('[Awaken Farmer] Stamina depleted during autoplay - starting recovery monitoring');
+                clearInterval(window.awakenFarmerDepletionInterval);
+                window.awakenFarmerDepletionInterval = null;
+                onDepleted();
+            }
+        }, STAMINA_MONITOR_INTERVAL);
+    }
+
+    function farmerCreateStaminaRecoveryCallback(roomId) {
+        return () => {
+            console.log('[Awaken Farmer] Stamina recovered - resuming farming');
+
+            if (!loadFarmerSettings().enabled) {
+                farmerStopStaminaMonitoring();
+                return;
+            }
+            if (!farmerCanRun()) {
+                farmerStopStaminaMonitoring();
+                return;
+            }
+            if (String(farmerGetCurrentMapId() || '') !== String(roomId)) {
+                console.log('[Awaken Farmer] Map changed during stamina wait - re-evaluating');
+                farmerStopStaminaMonitoring();
+                farmerRunTick();
+                return;
+            }
+
+            const ctx = globalThis.state?.board?.getSnapshot?.()?.context;
+            const isAutoplayRunning = ctx?.mode === 'autoplay' && (ctx?.isRunning || ctx?.autoplayRunning);
+
+            if (isAutoplayRunning) {
+                farmerRuntime.status = 'farming';
+                farmerRuntime.currentRoomId = roomId;
+                farmerSetupStaminaDepletionWatch(roomId);
+                if (typeof farmerRuntime.uiRefresh === 'function') farmerRuntime.uiRefresh();
+                return;
+            }
+
+            if (!window.AutoplayManager?.requestControl(FARMER_MOD_NAME)) {
+                console.log('[Awaken Farmer] Autoplay control denied after stamina recovery');
+                return;
+            }
+            farmerRuntime.wasInitiatedByMod = true;
+            syncFarmerModCoordination();
+
+            const startBtn = farmerFindButtonByText('Start', 'Iniciar');
+            if (!startBtn) {
+                console.log('[Awaken Farmer] Start button not found after stamina recovery - resuming monitoring');
+                window.AutoplayManager?.releaseControl(FARMER_MOD_NAME);
+                farmerRuntime.wasInitiatedByMod = false;
+                syncFarmerModCoordination();
+                farmerStartStaminaRecoveryMonitoring(
+                    farmerCreateStaminaRecoveryCallback(roomId),
+                    farmerGetCurrentMapStaminaCost()
+                );
+                return;
+            }
+
+            startBtn.click();
+            farmerRuntime.status = 'farming';
+            farmerRuntime.currentRoomId = roomId;
+            syncFarmerModCoordination();
+            showFarmerStartingToast();
+            farmerSetupStaminaDepletionWatch(roomId);
+            if (typeof farmerRuntime.uiRefresh === 'function') farmerRuntime.uiRefresh();
+        };
+    }
+
+    function farmerSetupStaminaDepletionWatch(roomId) {
+        farmerWatchStaminaDepletion(() => {
+            const requiredStamina = farmerGetCurrentMapStaminaCost();
+            farmerRuntime.status = 'waiting-stamina';
+            if (typeof farmerRuntime.uiRefresh === 'function') farmerRuntime.uiRefresh();
+            farmerStartStaminaRecoveryMonitoring(
+                farmerCreateStaminaRecoveryCallback(roomId),
+                requiredStamina
+            );
+        });
+    }
+
+    async function farmerBeginAutoplay(roomId) {
+        const staminaCheck = farmerHasInsufficientStamina();
+        if (staminaCheck.insufficient) {
+            console.log(`[Awaken Farmer] Insufficient stamina (needs ${staminaCheck.cost}) - monitoring recovery`);
+            farmerRuntime.status = 'waiting-stamina';
+            farmerRuntime.currentRoomId = roomId;
+            farmerStartStaminaRecoveryMonitoring(
+                farmerCreateStaminaRecoveryCallback(roomId),
+                staminaCheck.cost
+            );
+            if (typeof farmerRuntime.uiRefresh === 'function') farmerRuntime.uiRefresh();
+            return false;
+        }
+
+        const started = await farmerStartAutoplay();
+        if (started) {
+            farmerSetupStaminaDepletionWatch(roomId);
+        }
+        return started;
+    }
 
     let farmerAllModsLoaded = false;
     let farmerBootGraceDone = false;
@@ -2188,10 +2507,8 @@
     }
 
     function farmerStopAutoplay() {
-        try {
-            const pauseBtn = document.querySelector('button:has(svg.lucide-pause)');
-            if (pauseBtn) pauseBtn.click();
-        } catch (_) {}
+        farmerStopStaminaMonitoring();
+        tryPauseGameAutoplay();
         farmerRuntime.wasInitiatedByMod = false;
         farmerRuntime.currentRoomId = null;
         farmerRuntime.status = 'idle';
@@ -2214,6 +2531,7 @@
         if (!settings.enabled) return;
         const blocked = farmerBlockedReason();
         if (blocked) {
+            farmerStopStaminaMonitoring();
             if (farmerRuntime.status !== 'blocked' || farmerRuntime.lastBlockReason !== blocked) {
                 console.log(`[Awaken Farmer] Waiting — blocked by ${blocked}`);
                 farmerRuntime.lastBlockReason = blocked;
@@ -2223,6 +2541,10 @@
             return;
         }
         farmerRuntime.lastBlockReason = null;
+
+        if (farmerRuntime.status === 'waiting-stamina' && farmerIsStaminaRecoveryActive()) {
+            return;
+        }
 
         farmerRuntime.busy = true;
         try {
@@ -2261,11 +2583,10 @@
                 || !farmerRuntime.wasInitiatedByMod;
 
             if (needSwitch) {
-                const startDelaySec = clampStartDelay(settings.startDelay);
                 farmerRuntime.status = 'starting';
                 if (typeof farmerRuntime.uiRefresh === 'function') farmerRuntime.uiRefresh();
-                console.log(`[Awaken Farmer] Waiting ${startDelaySec}s before navigation...`);
-                await farmerSleep(startDelaySec * 1000);
+                console.log(`[Awaken Farmer] Waiting ${DEFAULT_START_DELAY}s before navigation...`);
+                await farmerSleep(DEFAULT_START_DELAY * 1000);
                 if (!loadFarmerSettings().enabled || !farmerCanRun()) {
                     farmerRuntime.status = loadFarmerSettings().enabled ? 'blocked' : 'idle';
                     return;
@@ -2274,10 +2595,7 @@
                 farmerRuntime.status = 'switching';
                 if (typeof farmerRuntime.uiRefresh === 'function') farmerRuntime.uiRefresh();
                 if (farmerRuntime.wasInitiatedByMod) {
-                    try {
-                        const pauseBtn = document.querySelector('button:has(svg.lucide-pause)');
-                        if (pauseBtn) pauseBtn.click();
-                    } catch (_) {}
+                    tryPauseGameAutoplay();
                     await farmerSleep(400);
                 }
 
@@ -2300,17 +2618,20 @@
                     return;
                 }
 
-                const started = await farmerStartAutoplay();
+                const started = await farmerBeginAutoplay(next.roomId);
                 if (started) {
                     farmerRuntime.currentRoomId = next.roomId;
                     farmerRuntime.status = 'farming';
                     console.log(`[Awaken Farmer] Farming ${next.mapName} (${targets.length} species left)`);
-                } else {
+                } else if (farmerRuntime.status !== 'waiting-stamina') {
                     farmerRuntime.status = 'start-failed';
                 }
             } else {
                 farmerRuntime.status = 'farming';
                 farmerRuntime.currentRoomId = next.roomId;
+                if (!farmerIsStaminaRecoveryActive()) {
+                    farmerSetupStaminaDepletionWatch(next.roomId);
+                }
             }
         } catch (e) {
             console.warn('[Awaken Farmer] tick failed:', e);
@@ -2430,6 +2751,7 @@
             clearInterval(farmerRuntime.tickTimer);
             farmerRuntime.tickTimer = null;
         }
+        farmerStopStaminaMonitoring();
         if (releaseControl && farmerRuntime.wasInitiatedByMod) {
             farmerStopAutoplay();
         }
@@ -2562,8 +2884,11 @@
             #${PANEL_ID} .at-footer-actions {
                 display: flex;
                 align-items: center;
+                flex-wrap: wrap;
                 gap: 6px;
-                flex: 0 0 auto;
+                flex: 1 1 auto;
+                min-width: 0;
+                max-width: 100%;
             }
             #${PANEL_ID} .at-styled-btn {
                 padding: 2px 10px;
@@ -2583,6 +2908,12 @@
                 min-height: 24px;
                 line-height: 1.1;
                 transition: color 0.2s, filter 0.15s;
+                flex: 0 1 auto;
+                min-width: 0;
+                max-width: 100%;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                box-sizing: border-box;
             }
             #${PANEL_ID} .at-styled-btn:hover {
                 filter: brightness(1.12);
@@ -2624,10 +2955,12 @@
                 display: flex;
                 margin: 0 2px;
                 flex: 0 0 auto;
+                min-width: 0;
             }
             #${PANEL_ID} .at-tab-btn {
-                flex: 1;
-                padding: 5px 0;
+                flex: 1 1 auto;
+                min-width: max-content;
+                padding: 5px 8px;
                 border: 4px solid transparent;
                 border-image: var(--at-frame-1);
                 background-image: var(--at-bg-header);
@@ -2639,6 +2972,8 @@
                 font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif;
                 cursor: pointer;
                 transition: color 0.15s, filter 0.15s;
+                white-space: nowrap;
+                box-sizing: border-box;
             }
             #${PANEL_ID} .at-tab-btn:hover {
                 filter: brightness(1.1);
@@ -2679,9 +3014,10 @@
             #${PANEL_ID} .at-footer {
                 flex: 0 0 auto;
                 display: flex;
+                flex-wrap: wrap;
                 align-items: center;
                 justify-content: space-between;
-                gap: 8px;
+                gap: 6px 8px;
                 padding: 4px 8px;
                 background-image: var(--at-bg-header);
                 background-repeat: repeat;
@@ -2691,6 +3027,9 @@
                 margin: 0 2px 2px;
                 font-size: 10px;
                 color: #888;
+                min-width: 0;
+                box-sizing: border-box;
+                overflow: hidden;
             }
             #${PANEL_ID} .at-footer.overview-only {
                 justify-content: flex-start;
@@ -2699,8 +3038,9 @@
                 display: flex;
                 align-items: center;
                 gap: 6px;
-                flex: 0 0 auto;
+                flex: 1 1 auto;
                 min-width: 0;
+                max-width: 100%;
             }
             #${PANEL_ID} .at-footer-farmer .at-farmer-toggle {
                 width: auto;
@@ -2708,11 +3048,19 @@
                 padding: 3px 8px;
                 font-size: 11px;
                 white-space: nowrap;
+                min-width: 0;
+                max-width: 100%;
+                overflow: hidden;
+                text-overflow: ellipsis;
             }
             #${PANEL_ID} .at-footer-credits {
-                flex: 0 0 auto;
+                flex: 0 1 auto;
                 margin-left: auto;
                 white-space: nowrap;
+                min-width: 0;
+                max-width: 100%;
+                overflow: hidden;
+                text-overflow: ellipsis;
             }
             #${PANEL_ID} .at-footer a {
                 color: var(--at-text-gold);
@@ -3067,6 +3415,7 @@
             let timeoutId = null;
             let outsideHandler = null;
             const reset = () => {
+                activeConfirmButtonResets.delete(reset);
                 armed = false;
                 b.textContent = baseLabel;
                 b.classList.remove('at-confirm');
@@ -3082,6 +3431,7 @@
                     armed = true;
                     b.textContent = confirmLabel;
                     b.classList.add('at-confirm');
+                    activeConfirmButtonResets.add(reset);
                     timeoutId = setTimeout(reset, 4000);
                     outsideHandler = (event) => {
                         if (event.target !== b) reset();
@@ -3347,24 +3697,8 @@
         farmerSetupRow.appendChild(farmerSetupLabelEl);
         farmerSetupRow.appendChild(farmerSetupSelect);
 
-        const farmerDelayRow = document.createElement('div');
-        farmerDelayRow.style.cssText = 'display:flex;align-items:center;gap:8px;flex-wrap:wrap;';
-        const farmerDelayLabelEl = document.createElement('span');
-        farmerDelayLabelEl.textContent = t('mods.awakenTracker.farmerStartDelay');
-        farmerDelayLabelEl.style.cssText = 'font-size:11px;color:#b8b8b8;';
-        const farmerDelayInput = document.createElement('input');
-        farmerDelayInput.type = 'number';
-        farmerDelayInput.className = 'at-input';
-        farmerDelayInput.min = '1';
-        farmerDelayInput.max = String(MAX_START_DELAY);
-        farmerDelayInput.step = '1';
-        farmerDelayInput.style.cssText = 'width:64px;';
-        farmerDelayRow.appendChild(farmerDelayLabelEl);
-        farmerDelayRow.appendChild(farmerDelayInput);
-
         farmerControls.appendChild(farmerRefillLabel);
         farmerControls.appendChild(farmerSetupRow);
-        farmerControls.appendChild(farmerDelayRow);
 
         const farmerSummaryEl = document.createElement('div');
         farmerSummaryEl.className = 'at-section';
@@ -3414,7 +3748,6 @@
             const settings = loadFarmerSettings();
             updateFarmerToggleButton(settings.enabled);
             farmerRefillInput.checked = settings.autoRefillStamina;
-            farmerDelayInput.value = String(settings.startDelay);
             populateFarmerSetupOptions(settings.setupLabel);
 
             const { targets, wantedIds, namesById } = collectAwakenedNotCappedTargets();
@@ -3537,11 +3870,6 @@
         });
         farmerSetupSelect.addEventListener('change', () => {
             saveFarmerSettings({ setupLabel: farmerSetupSelect.value });
-        });
-        farmerDelayInput.addEventListener('change', () => {
-            const next = clampStartDelay(farmerDelayInput.value);
-            saveFarmerSettings({ startDelay: next });
-            farmerDelayInput.value = String(next);
         });
 
         // =======================
@@ -3720,11 +4048,7 @@
                 borderHtml = `<div role="none" class="rarity-awaken absolute inset-0 z-1 opacity-80"></div>`;
             } else {
                 const geneSum = Number(g.best?.sum) || 0;
-                let rarity = 1;
-                if (geneSum >= 80) rarity = 5;
-                else if (geneSum >= 70) rarity = 4;
-                else if (geneSum >= 60) rarity = 3;
-                else if (geneSum >= 50) rarity = 2;
+                const rarity = getGeneSumRarity(geneSum).rarity;
                 borderHtml = `<div role="none" class="has-rarity absolute inset-0 z-1 opacity-80" data-rarity="${rarity}"></div>`;
             }
             return `<div class="at-row awaken-overview-row" data-gameid="${g.gameId}" data-name="${g.name.toLowerCase().replace(/"/g, '&quot;')}" data-awakened="${g.anyAwakened}" data-capped="${g.anyCapped}" data-perfect="${g.anyPerfect}">` +
@@ -3820,85 +4144,14 @@
                 return;
             }
 
-            const utils = globalThis.state?.utils;
-            if (!utils?.REGIONS || typeof utils.getBoardMonstersFromRoomId !== 'function') {
+            const ranked = rankMapsForWantedIds(wantedIds, wantedNamesById, { requireFarmFloor: false });
+            if (ranked.error === 'utils') {
                 farmSummaryEl.innerHTML = `<span style="color:#d87d7d;">${t('mods.awakenTracker.utilsUnavailable')}</span>`;
                 farmListEl.innerHTML = '';
                 return;
             }
-            const ROOM_NAME = utils.ROOM_NAME || {};
-            const regionIdsToNames = utils.regionIdsToNames || {};
 
-            const results = [];
-            let orderIdx = 0;
-            for (const region of utils.REGIONS) {
-                if (!region?.id) continue;
-                const regionName = regionIdsToNames[region.id] || region.id;
-                for (const room of (region.rooms || [])) {
-                    if (!room?.id) continue;
-                    let board;
-                    try { board = utils.getBoardMonstersFromRoomId(room.id); } catch (_) { continue; }
-                    if (!Array.isArray(board)) continue;
-                    const villains = board.filter(p => p?.villain === true);
-                    if (!villains.length) continue;
-
-                    const wantedByCreature = new Map();
-                    const otherByCreature = new Map();
-                    for (const v of villains) {
-                        const id = Number(v.gameId);
-                        if (!Number.isFinite(id)) continue;
-                        if (wantedIds.has(id)) {
-                            const entry = wantedByCreature.get(id) || { count: 0, totalLevel: 0 };
-                            entry.count += 1;
-                            entry.totalLevel += Number(v.level || 0);
-                            wantedByCreature.set(id, entry);
-                        } else {
-                            const entry = otherByCreature.get(id) || { count: 0, totalLevel: 0 };
-                            entry.count += 1;
-                            entry.totalLevel += Number(v.level || 0);
-                            otherByCreature.set(id, entry);
-                        }
-                    }
-                    if (wantedByCreature.size === 0) continue;
-
-                    const wantedTotal = Array.from(wantedByCreature.values()).reduce((a, b) => a + b.count, 0);
-                    const uniqueWanted = wantedByCreature.size;
-                    const totalVillains = villains.length;
-                    const density = wantedTotal / totalVillains;
-                    const stamina = Number(room.staminaCost ?? 0);
-                    const wantedPerStamina = stamina > 0 ? wantedTotal / stamina : wantedTotal;
-
-                    const isRaidRoom = (() => {
-                        try {
-                            if (typeof window.mapsDatabase?.isRaid === 'function') {
-                                return window.mapsDatabase.isRaid(room.id) === true;
-                            }
-                        } catch (_) {}
-                        return room.raid === true;
-                    })();
-
-                    results.push({
-                        roomId: room.id, mapName: ROOM_NAME[room.id] || room.id,
-                        regionName, stamina, totalVillains, wantedTotal, uniqueWanted,
-                        density, wantedPerStamina, defaultOrder: orderIdx++,
-                        isRaid: isRaidRoom,
-                        wantedDetails: Array.from(wantedByCreature.entries()).map(([id, info]) => ({
-                            id, name: wantedNamesById.get(id) || `#${id}`,
-                            count: info.count, avgLevel: info.totalLevel / info.count
-                        })).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)),
-                        otherDetails: Array.from(otherByCreature.entries()).map(([id, info]) => ({
-                            id, name: resolveName(id),
-                            count: info.count, avgLevel: info.totalLevel / info.count
-                        })).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
-                    });
-                }
-            }
-
-            results.sort((a, b) =>
-                b.uniqueWanted - a.uniqueWanted
-                || b.wantedPerStamina - a.wantedPerStamina
-                || a.defaultOrder - b.defaultOrder
-            );
+            const results = ranked.results || [];
 
             const hideRaids = hideRaidsInput.checked;
             const raidCount = results.filter(r => r.isRaid).length;
@@ -4081,10 +4334,11 @@
             panel = createPanel();
             document.body.appendChild(panel);
         } else {
-            updatePanelPosition();
             attachPanelViewportListener();
         }
         panel.style.display = 'flex';
+        syncPanelMinWidthFromTabs(panel);
+        updatePanelPosition();
         savePanelSettings({ isOpen: true });
         render();
     }
@@ -4171,6 +4425,10 @@
             stopFarmerLoop(true);
             closeFarmerMapContextMenu();
             teardownFarmerBootGrace();
+            for (const resetFn of activeConfirmButtonResets) {
+                try { resetFn(); } catch (_) {}
+            }
+            activeConfirmButtonResets.clear();
             if (farmerCoordinationUnsubscribe) {
                 try { farmerCoordinationUnsubscribe(); } catch (_) { /* ignore */ }
                 farmerCoordinationUnsubscribe = null;
@@ -4180,6 +4438,11 @@
                 farmerModRegistered = false;
             }
             try { delete window.awakenFarmerShouldHoldBoard; } catch (_) { /* ignore */ }
+            try { delete window.AwakenTrackerState; } catch (_) { /* ignore */ }
+            try { delete window.__awakenTrackerLoaded; } catch (_) { window.__awakenTrackerLoaded = false; }
+            if (modDisableHandler) {
+                try { window.removeEventListener('message', modDisableHandler); } catch (_) {}
+            }
             teardownAwakenAnalysisCoordination({ restore: false });
             detachPanelViewportListener();
             teardownPanelResizeListeners();
@@ -4193,6 +4456,10 @@
             if (saveDebounceId) {
                 clearTimeout(saveDebounceId);
                 saveDebounceId = null;
+            }
+            const toastContainer = document.getElementById('awaken-farmer-toast-container');
+            if (toastContainer) {
+                try { toastContainer.remove(); } catch (_) {}
             }
             const panel = document.getElementById(PANEL_ID);
             if (panel) panel.remove();

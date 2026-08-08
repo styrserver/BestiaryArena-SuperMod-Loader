@@ -23,6 +23,9 @@ const COL1_WIDTH = COLUMN_WIDTH - 30;
 const COL3_WIDTH = COLUMN_WIDTH + 30;
 // UI theming (reference: Cyclopedia.js COLOR_CONSTANTS)
 const CHALLENGE_COLORS = { TEXT: '#fff', PRIMARY: '#ffe066', SECONDARY: '#e6d7b0', BORDER: '#444' };
+const CHALLENGE_GREEN_BG = 'https://bestiaryarena.com/_next/static/media/background-green.be515334.png';
+const CHALLENGE_BLUE_BG = 'https://bestiaryarena.com/_next/static/media/background-blue.7259c4ed.png';
+const CHALLENGE_RED_BG = 'https://bestiaryarena.com/_next/static/media/background-red.21d3f4bd.png';
 
 /** Shared styles for framed widget boxes (placeholder box, matchmaking panel, etc.) */
 const CHALLENGES_FRAME_BOX_STYLE = 'display: flex; flex-direction: column; flex: 1 1 0; min-height: 0; border: 4px solid transparent; border-image: url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch; border-radius: 6px; overflow: hidden;';
@@ -125,6 +128,7 @@ function getCurrentPlayerName() {
 /** English fallbacks when locale JSON is unavailable (mirrors en-US). */
 var CHALLENGES_I18N_FALLBACK = {
   'mods.challenges.alliesVsEnemiesTitle': "Allies v Enemies (allies allowed vs number of enemy creatures)",
+  'mods.challenges.cancel': "Cancel",
   'mods.challenges.close': "Close",
   'mods.challenges.comingSoon': "Coming soon.",
   'mods.challenges.creatures': "Creatures",
@@ -811,12 +815,40 @@ function buildSoloCreaturesAllowedToastMessage(alliesAllowed) {
 
 var soloChallengeAlliesAllowed = null;
 var soloChallengeToastBoardUnsub = null;
+var soloChallengeOriginalRoomId = null;
+
+function cancelSoloChallenge() {
+  var origRoomId = soloChallengeOriginalRoomId;
+  soloChallengeOriginalRoomId = null;
+  cleanupChallengeBattle();
+  restoreChallengePlayerArsenal();
+  showChallengesOverlaysAndButtons();
+  setTimeout(function() {
+    triggerChallengeStopButton();
+    if (origRoomId) {
+      try {
+        var state = getState();
+        if (state && state.board && typeof state.board.send === 'function') {
+          state.board.send({ type: 'selectRoomById', roomId: origRoomId });
+        }
+      } catch (e) {
+        console.warn('[Challenges Mod] cancelSoloChallenge room restore:', e);
+      }
+    }
+  }, 150);
+}
 
 function startSoloChallengeLiveToast(alliesAllowed) {
   if (challengeMultiplayerContext) return;
   stopSoloChallengeToast();
   soloChallengeAlliesAllowed = alliesAllowed;
-  showChallengesToast(buildSoloCreaturesAllowedToastMessage(alliesAllowed));
+  showChallengesToast(buildSoloCreaturesAllowedToastMessage(alliesAllowed), {
+    showCancel: true,
+    cancelLabel: challengesText('mods.challenges.cancel'),
+    onCancel: function() {
+      cancelSoloChallenge();
+    }
+  });
   var state = getState();
   if (state && state.board && typeof state.board.subscribe === 'function') {
     soloChallengeToastBoardUnsub = state.board.subscribe(function() {
@@ -6007,6 +6039,22 @@ function showChallengesToast(message, options) {
       });
       widgetBottom.appendChild(acceptToastBtn);
     }
+    var cancelToastBtn = null;
+    if (options.showCancel === true || typeof options.onCancel === 'function') {
+      cancelToastBtn = document.createElement('button');
+      cancelToastBtn.type = 'button';
+      cancelToastBtn.setAttribute('aria-label', 'Cancel challenge');
+      cancelToastBtn.className = 'challenges-btn';
+      cancelToastBtn.style.cssText = 'flex-shrink: 0; padding: 4px 10px; font-size: 12px; cursor: pointer; background: url("' + CHALLENGE_RED_BG + '") repeat !important; border: 3px solid transparent !important; border-image: url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 4 fill stretch !important; color: #fff !important; font-weight: bold;';
+      cancelToastBtn.textContent = typeof options.cancelLabel === 'string' ? options.cancelLabel : challengesText('mods.challenges.cancel');
+      cancelToastBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        if (typeof options.onCancel === 'function') {
+          options.onCancel();
+        }
+      });
+      widgetBottom.appendChild(cancelToastBtn);
+    }
     if (typeof options.onClose === 'function') {
       var closeBtn = document.createElement('button');
       closeBtn.type = 'button';
@@ -6101,6 +6149,7 @@ function copyReplayToClipboard(text) {
 }
 
 function cleanupChallengeBattle() {
+  hasNavigatedWithCurrentRoll = false;
   clearChallengePlayerArsenalNavigationHook();
   if (challengeBoardUnsubscribe && typeof challengeBoardUnsubscribe === 'function') {
     try { challengeBoardUnsubscribe(); } catch (e) {}
@@ -6317,6 +6366,18 @@ function startChallenge() {
       return;
     }
     console.log('[Challenges Mod] startChallenge: state OK');
+    if (!challengeBattle) {
+      try {
+        var stateForOrig = getState();
+        if (stateForOrig && stateForOrig.board && typeof stateForOrig.board.getSnapshot === 'function') {
+          var boardCtx = stateForOrig.board.getSnapshot().context;
+          var currentRoom = boardCtx && (boardCtx.selectedMap && (boardCtx.selectedMap.selectedRoom && boardCtx.selectedMap.selectedRoom.id || boardCtx.selectedMap.roomId));
+          if (currentRoom && currentRoom !== rolledRoomId) {
+            soloChallengeOriginalRoomId = currentRoom;
+          }
+        }
+      } catch (e) {}
+    }
     hasNavigatedWithCurrentRoll = true;
 
     setSandboxAndHideChallengeUI();
@@ -6471,6 +6532,18 @@ function startChallengeWithVillainConfig(config) {
     console.log('[Challenges Mod] startChallengeWithVillainConfig: no state/board, aborting');
     showChallengeToast('Game state not available.');
     return;
+  }
+  if (!challengeBattle) {
+    try {
+      var stateForOrigConfig = getState();
+      if (stateForOrigConfig && stateForOrigConfig.board && typeof stateForOrigConfig.board.getSnapshot === 'function') {
+        var boardCtxConfig = stateForOrigConfig.board.getSnapshot().context;
+        var currentRoomConfig = boardCtxConfig && (boardCtxConfig.selectedMap && (boardCtxConfig.selectedMap.selectedRoom && boardCtxConfig.selectedMap.selectedRoom.id || boardCtxConfig.selectedMap.roomId));
+        if (currentRoomConfig && currentRoomConfig !== config.roomId) {
+          soloChallengeOriginalRoomId = currentRoomConfig;
+        }
+      }
+    } catch (e) {}
   }
   console.log('[Challenges Mod] startChallengeWithVillainConfig: closing modal, hiding UI');
   closeChallengesModalIfOpen();

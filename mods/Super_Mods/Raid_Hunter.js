@@ -22,9 +22,8 @@ function dispatchEsc() {
 }
 
 // Default settings
-// User-configurable start delay — same contract as BBM / Better Tasker / Awaken Farmer / Stamina Optimizer
-const DEFAULT_START_DELAY = 3;         // seconds (range: 1–MAX_START_DELAY)
-const MAX_START_DELAY = 10;
+// Fixed start delay — same contract as BBM / Better Tasker / Awaken Farmer / Stamina Optimizer
+const DEFAULT_START_DELAY = 3; // seconds
 const MODS_LOADING_GRACE_PERIOD = 5000;
 const MAX_WAIT_FOR_SIGNAL = 15000;
 
@@ -3306,11 +3305,6 @@ function validateSettingsAfterNavigation() {
             }
         }
         
-        // Validate raid delay settings (1–MAX_START_DELAY seconds)
-        if (settings.raidDelay < 1 || settings.raidDelay > MAX_START_DELAY) {
-            validationIssues.push('Invalid raid delay setting');
-        }
-        
         // Log validation results and attempt recovery
         if (validationIssues.length > 0) {
             console.warn('[Raid Hunter] Settings validation issues:', validationIssues);
@@ -4184,9 +4178,9 @@ async function handleEventOrRaid(roomId) {
     const raidName = getEventNameForRoomId(roomId);
 
     try {
-        // User-configurable initial delay (standardized timing)
-        const startDelay = (settings.raidDelay || DEFAULT_START_DELAY) * 1000;
-        console.log(`[Raid Hunter] Waiting ${startDelay/1000}s before navigation...`);
+        // Fixed initial delay before navigation
+        const startDelay = DEFAULT_START_DELAY * 1000;
+        console.log(`[Raid Hunter] Waiting ${DEFAULT_START_DELAY}s before navigation...`);
         await new Promise(resolve => setTimeout(resolve, startDelay));
         
         // Check automation status after initial delay
@@ -5406,43 +5400,6 @@ function createAutoRaidSettings() {
         gap: 12px;
     `;
     
-    // Raid Delay setting
-    const delayDiv = document.createElement('div');
-    delayDiv.style.cssText = `
-        margin-bottom: 8px;
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-    `;
-    
-    const delayLabel = document.createElement('label');
-    delayLabel.textContent = t('mods.raidHunter.raidStartDelay');
-    delayLabel.className = 'pixel-font-16';
-    delayLabel.style.cssText = `
-        font-weight: bold;
-        color: ${COLOR_WHITE};
-        margin-bottom: 4px;
-    `;
-    delayDiv.appendChild(delayLabel);
-    
-    const delayInput = createStyledInput('number', 'raidDelay', DEFAULT_START_DELAY, `
-        width: 100%;
-        padding: 6px;
-        background: ${COLOR_DARK_GRAY};
-        border: 1px solid ${COLOR_ACCENT};
-        color: ${COLOR_WHITE};
-        border-radius: 3px;
-        box-sizing: border-box;
-        font-size: 14px;
-    `, {
-        min: 1,
-        max: MAX_START_DELAY,
-        className: 'pixel-font-16'
-    });
-    delayDiv.appendChild(delayInput);
-    
-    settingsWrapper.appendChild(delayDiv);
-    
     // Setup method selection
     const setupMethodDiv = createDropdownSetting(
         'setupMethod',
@@ -6502,7 +6459,6 @@ function createRaidContextMenu(raidName, x, y, onClose) {
 
 // Default settings with validation
 const DEFAULT_SETTINGS = {
-    raidDelay: DEFAULT_START_DELAY,
     autoRefillStamina: false,
     fasterAutoplay: false,
     enableDragonPlant: false,
@@ -6514,11 +6470,6 @@ const DEFAULT_SETTINGS = {
 };
 
 // Settings validation functions
-function validateRaidDelay(value) {
-    const num = parseInt(value, 10);
-    return !isNaN(num) && num >= 1 && num <= MAX_START_DELAY;
-}
-
 function validateRaidMaps(maps) {
     if (!Array.isArray(maps)) return false;
     // Allow static raids (maps-database mapping) OR events that exist in game state API
@@ -6542,14 +6493,6 @@ function validateBoolean(value) {
 
 function sanitizeSettings(settings) {
     const sanitized = {};
-    
-    // Validate and sanitize raid delay
-    if (validateRaidDelay(settings.raidDelay)) {
-        sanitized.raidDelay = parseInt(settings.raidDelay);
-    } else {
-        sanitized.raidDelay = DEFAULT_START_DELAY;
-        console.warn('[Raid Hunter] Invalid raid delay, using default:', DEFAULT_START_DELAY);
-    }
     
     // Validate and sanitize boolean settings
     sanitized.autoRefillStamina = validateBoolean(settings.autoRefillStamina) ? settings.autoRefillStamina : false;
@@ -6661,7 +6604,7 @@ function autoSaveSettings() {
         
         inputs.forEach(input => {
             // Only process inputs that belong to Raid Hunter settings
-            if (input.id === 'raidDelay' || input.id === 'autoRefillStamina' || input.id === 'fasterAutoplay' || input.id === 'enableDragonPlant' || input.id === 'setupMethod' || input.id.startsWith('raid-') || input.id.startsWith('priority-') || input.id.startsWith('floor-')) {
+            if (input.id === 'autoRefillStamina' || input.id === 'fasterAutoplay' || input.id === 'enableDragonPlant' || input.id === 'setupMethod' || input.id.startsWith('raid-') || input.id.startsWith('priority-') || input.id.startsWith('floor-')) {
                 if (input.type === 'checkbox') {
                     // Skip individual raid checkboxes since we process them separately
                     if (!input.id.startsWith('raid-')) {
@@ -6669,13 +6612,7 @@ function autoSaveSettings() {
                     }
                 } else if (input.type === 'number') {
                     const value = parseInt(input.value);
-                    if (input.id === 'raidDelay' && !validateRaidDelay(value)) {
-                        console.warn('[Raid Hunter] Invalid raid delay value:', value);
-                        input.value = DEFAULT_START_DELAY;
-                        settings[input.id] = DEFAULT_START_DELAY;
-                    } else {
-                        settings[input.id] = value || 0;
-                    }
+                    settings[input.id] = value || 0;
                 } else {
                     settings[input.id] = input.value;
                 }
@@ -6798,11 +6735,6 @@ function autoSaveSettings() {
         localStorage.setItem('raidHunterSettings', JSON.stringify(sanitizedSettings));
         console.log('[Raid Hunter] Settings saved');
         
-        // Show validation feedback if needed
-        if (sanitizedSettings.raidDelay !== settings.raidDelay) {
-            showValidationMessage('Raid delay must be between 0-60 seconds', 'warning');
-        }
-        
     } catch (error) {
         console.error('[Raid Hunter] Error auto-saving settings:', error);
         showValidationMessage('Failed to save settings. Please try again.', 'error');
@@ -6814,23 +6746,6 @@ function loadAndApplySettings() {
     try {
         const settings = loadSettings();
         
-        
-        // Apply raid delay with validation
-        const raidDelayInput = document.getElementById('raidDelay');
-        if (raidDelayInput) {
-            raidDelayInput.value = settings.raidDelay;
-            // Add auto-save listener with validation
-            raidDelayInput.addEventListener('input', (e) => {
-                const value = parseInt(e.target.value);
-                if (!validateRaidDelay(value)) {
-                    e.target.style.borderColor = COLOR_RED;
-                    showValidationMessage('Raid delay must be between 0-60 seconds', 'warning');
-                } else {
-                    e.target.style.borderColor = '';
-                }
-                autoSaveSettings();
-            });
-        }
         
         if (settings.autoRefillStamina !== undefined) {
             const checkbox = document.getElementById('autoRefillStamina');

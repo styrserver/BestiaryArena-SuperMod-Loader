@@ -88,9 +88,8 @@ const BESTIARY_INTEGRATION_DELAY = 300;
 const BESTIARY_RETRY_DELAY = 1500;
 const BESTIARY_INIT_WAIT = 2000;
 
-// User-configurable start delay — same contract as BBM / Raid Hunter / Awaken Farmer / Stamina Optimizer
-const DEFAULT_START_DELAY = 3;         // seconds (range: 1–MAX_START_DELAY)
-const MAX_START_DELAY = 10;
+// Fixed start delay — same contract as BBM / Raid Hunter / Awaken Farmer / Stamina Optimizer
+const DEFAULT_START_DELAY = 3; // seconds
 const MODS_LOADING_GRACE_PERIOD = 5000;
 const MAX_WAIT_FOR_SIGNAL = 15000;
 const ESC_KEY_DELAY = 50;
@@ -4398,45 +4397,6 @@ function createGeneralSettings() {
         justify-content: center;
     `;
     
-    // Task Start Delay setting
-    const taskDelayDiv = document.createElement('div');
-    taskDelayDiv.style.cssText = `
-        margin-bottom: 8px;
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-    `;
-    
-    const taskDelayLabel = document.createElement('label');
-    taskDelayLabel.textContent = t('mods.betterTasker.taskStartDelay');
-    taskDelayLabel.className = 'pixel-font-16';
-    taskDelayLabel.style.cssText = `
-        font-weight: bold;
-        color: #fff;
-        margin-bottom: 4px;
-    `;
-    taskDelayDiv.appendChild(taskDelayLabel);
-    
-    const taskDelayInput = createStyledInput('number', 'taskStartDelay', DEFAULT_START_DELAY, `
-        width: 100%;
-        padding: 6px;
-        background: #333;
-        border: 1px solid #ffe066;
-        color: #fff;
-        border-radius: 3px;
-        box-sizing: border-box;
-        font-size: 14px;
-    `, { 
-        min: 1, 
-        max: MAX_START_DELAY, 
-        className: 'pixel-font-16' 
-    });
-    // Add auto-save listener with tracking
-    addTrackedListener(taskDelayInput, 'input', autoSaveSettings);
-    taskDelayDiv.appendChild(taskDelayInput);
-    
-    settingsWrapper.appendChild(taskDelayDiv);
-    
     // Setup method selection
     const setupMethodDiv = createDropdownSetting(
         'setupMethod',
@@ -4816,7 +4776,7 @@ function autoSaveSettings() {
         
         inputs.forEach(input => {
             // Only process inputs that belong to Better Tasker settings
-            if (input.id === 'autoCompleteTasks' || input.id === 'autoRefillStamina' || input.id === 'fasterAutoplay' || input.id === 'enableDragonPlant' || input.id === 'taskStartDelay' || input.id === 'setupMethod' || input.id.startsWith('creature-')) {
+            if (input.id === 'autoCompleteTasks' || input.id === 'autoRefillStamina' || input.id === 'fasterAutoplay' || input.id === 'enableDragonPlant' || input.id === 'setupMethod' || input.id.startsWith('creature-')) {
                 // Skip disabled checkboxes (unselectable creatures)
                 if (input.disabled) return;
                 
@@ -4871,15 +4831,6 @@ function loadAndApplySettings() {
             if (checkbox) {
                 checkbox.checked = settings.enableDragonPlant;
                 // Event listener already added by createCheckboxSetting
-            }
-        }
-        
-        if (settings.taskStartDelay !== undefined) {
-            const input = document.getElementById('taskStartDelay');
-            if (input) {
-                input.value = settings.taskStartDelay;
-                // Add auto-save listener with tracking
-                addTrackedListener(input, 'input', autoSaveSettings);
             }
         }
         
@@ -7067,33 +7018,26 @@ async function handleTaskFinishing() {
                 // If we have an active task (gameId exists), we should proceed to check quest log
                 // The task might need to be activated even if killCount is 0
                 
-                // Apply task start delay if configured (only for active tasks)
-                const rawDelay = Number(settings.taskStartDelay);
-                const taskStartDelay = Number.isFinite(rawDelay)
-                    ? Math.max(1, Math.min(MAX_START_DELAY, Math.round(rawDelay)))
-                    : DEFAULT_START_DELAY;
+                // Apply fixed task start delay (only for active tasks)
+                console.log(`[Better Tasker] Waiting ${DEFAULT_START_DELAY}s before task start...`);
+                await new Promise(resolve => setTimeout(resolve, DEFAULT_START_DELAY * 1000));
                 
-                if (taskStartDelay > 0) {
-                    // Wait for the specified delay before proceeding
-                    await new Promise(resolve => setTimeout(resolve, taskStartDelay * 1000));
-                    
-                    // Check if Board Analyzer started during delay
-                    if (isBoardAnalyzerActive()) {
-                        console.log('[Better Tasker] Board Analyzer started during task start delay - aborting task operation');
-                        return;
-                    }
-                    
-                    // Check if Raid Hunter started raiding during delay (HIGH priority raids take precedence)
-                    if (shouldBetterTaskerYieldToRaidHunter()) {
-                        console.log('[Better Tasker] Raid Hunter started raiding HIGH priority raid during task start delay - aborting task operation');
-                        return;
-                    }
-                    
-                    // Check if tasker is still enabled after delay
-                    if (taskerState !== TASKER_STATES.ENABLED) {
-                        console.log('[Better Tasker] Tasker disabled during task start delay');
-                        return;
-                    }
+                // Check if Board Analyzer started during delay
+                if (isBoardAnalyzerActive()) {
+                    console.log('[Better Tasker] Board Analyzer started during task start delay - aborting task operation');
+                    return;
+                }
+                
+                // Check if Raid Hunter started raiding during delay (HIGH priority raids take precedence)
+                if (shouldBetterTaskerYieldToRaidHunter()) {
+                    console.log('[Better Tasker] Raid Hunter started raiding HIGH priority raid during task start delay - aborting task operation');
+                    return;
+                }
+                
+                // Check if tasker is still enabled after delay
+                if (taskerState !== TASKER_STATES.ENABLED) {
+                    console.log('[Better Tasker] Tasker disabled during task start delay');
+                    return;
                 }
             }
             

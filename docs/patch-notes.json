@@ -4,6 +4,51 @@
   },
   "notes": [
     {
+      "version": "4.8.1",
+      "changes": [
+        {
+          "mod": "Awaken Tracker",
+          "type": "added",
+          "text": "Awaken Farmer watches for insufficient stamina and resumes when you can afford the map again (same contract as Better Boosted Maps / Raid Hunter), including during autoplay."
+        },
+        {
+          "mod": "Awaken Tracker",
+          "type": "changed",
+          "text": "Awaken Farmer start delay is fixed at 3s before each navigate (removed the 1–10s setting). Refactored map ranking logic for code deduplication."
+        },
+        {
+          "mod": "Awaken Tracker",
+          "type": "fixed",
+          "text": "Footer actions stay inside the panel when resizing (wrap/shrink instead of overflowing). Panel min-width is derived from tab label widths so Tracker / Overview / Awaken Farmer text is never clipped. Cleaned up event listeners, toast containers, and reload guards on mod disable to prevent memory leaks."
+        },
+        {
+          "mod": "Challenges",
+          "type": "added",
+          "text": "Solo live toast now includes a Cancel button: clicking it restores the player's original creatures and equipment, exits sandbox, and navigates back to the map they were on before joining."
+        },
+        {
+          "mod": "Challenges",
+          "type": "fixed",
+          "text": "Start button is no longer greyed out after canceling or finishing a solo challenge and re-opening the modal."
+        },
+        {
+          "mod": "Better Boosted Maps",
+          "type": "changed",
+          "text": "Start delay is fixed at 3s before navigate (removed the 1–10s setting)."
+        },
+        {
+          "mod": "Better Tasker",
+          "type": "changed",
+          "text": "Task start delay is fixed at 3s (removed the 1–10s setting)."
+        },
+        {
+          "mod": "Raid Hunter",
+          "type": "changed",
+          "text": "Raid start delay is fixed at 3s before navigate (removed the 1–10s setting)."
+        }
+      ]
+    },
+    {
       "version": "4.8.0",
       "changes": [
         {

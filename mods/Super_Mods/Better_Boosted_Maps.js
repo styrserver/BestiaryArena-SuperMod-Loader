@@ -44,9 +44,8 @@ const DOM_ACTION_MAX_ATTEMPTS = 5;
 const DOM_ACTION_MAX_ATTEMPTS_HIDDEN = 40;
 const STAMINA_REGEN_MS = 60000;
 
-// User-configurable start delay — same contract as Raid Hunter / Better Tasker / Awaken Farmer / Stamina Optimizer
-const DEFAULT_START_DELAY = 3;         // seconds (range: 1–MAX_START_DELAY)
-const MAX_START_DELAY = 10;
+// Fixed start delay — same contract as Raid Hunter / Better Tasker / Awaken Farmer / Stamina Optimizer
+const DEFAULT_START_DELAY = 3; // seconds
 const COORDINATION_RESUME_DELAY_MS = 1000; // after a higher-priority mod yields
 const MODS_LOADING_GRACE_PERIOD = 5000;
 const MAX_WAIT_FOR_SIGNAL = 15000;
@@ -1941,7 +1940,6 @@ function loadSettings() {
         autoRefillStamina: false,
         fasterAutoplay: false,
         enableAutoplant: false,
-        startDelay: DEFAULT_START_DELAY,  // Use standardized default
         setupMethod: 'Auto-setup',  // Default to Auto-setup (translation applied at display time)
         showNotification: true,
         maps: {},
@@ -3949,16 +3947,6 @@ function createBoostedMapSettings(settings) {
         justify-content: center;
     `;
     
-    // Start delay setting
-    const startDelayDiv = createNumberSetting(
-        'boosted-maps-startDelay',
-        t('mods.betterBoostedMaps.startDelay'),
-        '',
-        settings.startDelay,
-        1, MAX_START_DELAY
-    );
-    settingsWrapper.appendChild(startDelayDiv);
-    
     // Setup method selection
     const setupMethodDiv = createDropdownSetting(
         'boosted-maps-setupMethod',
@@ -4866,10 +4854,9 @@ async function startBoostedMapFarming(force = false) {
         clearModalsWithEsc(3);
         await new Promise(resolve => setTimeout(resolve, 100));
         
-        // User-configurable initial delay
-        const initialSettings = loadSettings();
-        const startDelay = (initialSettings.startDelay || DEFAULT_START_DELAY) * 1000;
-        console.log(`[Better Boosted Maps] Waiting ${startDelay/1000}s before navigation...`);
+        // Fixed initial delay before navigation
+        const startDelay = DEFAULT_START_DELAY * 1000;
+        console.log(`[Better Boosted Maps] Waiting ${DEFAULT_START_DELAY}s before navigation...`);
         await new Promise(resolve => setTimeout(resolve, startDelay));
         
         // Check automation status after initial delay
