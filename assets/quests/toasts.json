@@ -1,9 +1,11 @@
 {
   "_sections": {
     "messages": "1. Toast copy (use {title}, {coins}, {name}, {recipient}, {ordinal} placeholders)",
-    "variants": "2. Variant ids for static toast messages (keyed by message id)",
-    "battleLog": "3. Battle toast console log prefixes",
-    "mornenionDefeated": "4. Mornenion cave sealed message"
+    "messageBuilders": "2. Builder metadata — non-empty array = interpolated params; [] = static string",
+    "variants": "3. Variant ids for static toast messages (keyed by message id)",
+    "styling": "4. Toast colors and durations by variant",
+    "battleLog": "5. Battle toast console log prefixes",
+    "mornenionDefeated": "6. Mornenion cave sealed message"
   },
 
   "messages": {
@@ -59,6 +61,59 @@
     "ironOreRewardReady": "A while has passed. King Tibianus should have something for you now."
   },
 
+  "messageBuilders": {
+    "questDiscovered": ["title"],
+    "questAccepted": ["title"],
+    "questCompleted": ["title"],
+    "questCompletedWithCoins": ["title", "coins"],
+    "taskCompletedWithCoins": ["title", "coins"],
+    "itemReceived": ["name"],
+    "itemRemoved": ["name"],
+    "deliveredTo": ["recipient"],
+    "returnedTo": ["recipient"],
+    "diaryReturned": [],
+    "sealCompleted": ["ordinal"],
+    "copperKeyFound": [],
+    "mapReceived": [],
+    "navigatedToMines": [],
+    "kingTookCoin": [],
+    "frightenedHole": [],
+    "fishingEnabled": [],
+    "fishingDisabled": [],
+    "shovelEnabled": [],
+    "shovelDisabled": [],
+    "minedOre": [],
+    "dugMornenionHole": [],
+    "travelingAbDendriel": [],
+    "teleportedAlDee": [],
+    "teleportAlDeeFailed": [],
+    "bansheeLastRoomNotFound": [],
+    "travelingBansheeLastRoom": [],
+    "bansheeLastRoomBattleHere": [],
+    "spiderLairNotFound": [],
+    "enteringSpiderLair": [],
+    "spiderLairBattleHere": [],
+    "lonesomeDragonNotFound": [],
+    "enteringLonesomeDragon": [],
+    "needDragonClawForStairs": [],
+    "putridChamberNotStrongEnough": [],
+    "travelingPutridChamber": [],
+    "travelingWithSvenson": [],
+    "travelingGhazHideout": [],
+    "fishingFoundAxe": [],
+    "fishingFoundNothingMagnet": [],
+    "fishingFoundNothing": [],
+    "fishingMagnetHint": [],
+    "fishingError": [],
+    "desertDigNothing": [],
+    "desertDigSandsEmpty": [],
+    "desertDigNeedMission": [],
+    "missingDestroyFieldRune": [],
+    "alreadyHaveDestroyFieldRune": [],
+    "crossingTheLineObjectiveComplete": [],
+    "ironOreRewardReady": []
+  },
+
   "variants": {
     "frightenedHole": "warning",
     "fishingEnabled": "info",
@@ -101,6 +156,26 @@
     "kingTookCoin": "warning",
     "diaryReturned": "completed",
     "mornenionDefeated": "completed"
+  },
+
+  "styling": {
+    "defaultDuration": 5000,
+    "variantColors": {
+      "nothing": "#b0b0b0",
+      "quest": "#6ee07a",
+      "found": "#7eb8ff",
+      "completed": "#e8c060",
+      "warning": "#ffb070",
+      "info": "#c8c8ff"
+    },
+    "variantDurations": {
+      "nothing": 2000,
+      "info": 3000,
+      "warning": 4000,
+      "found": 5000,
+      "quest": 8000,
+      "completed": 10000
+    }
   },
 
   "battleLog": {

@@ -279,7 +279,16 @@
       "That remark puzzles me. Perhaps you meant to ask about one of the seven seals?",
       "I cannot follow you. You may ask about Anselm, our order, or the isle."
     ],
-    "sealGuidanceFallback": "The seven seals of Ghostlands must be completed one by one. I have given you my diary — it will show you which are done. Ask me about a specific seal, such as the first seal, if you wish guidance."
+    "sealGuidanceFallback": "The seven seals of Ghostlands must be completed one by one. I have given you my diary — it will show you which are done. Ask me about a specific seal, such as the first seal, if you wish guidance.",
+    "sealPatterns": [
+      ["seventh seal", 6], ["seal vii", 6], ["seal 7", 6],
+      ["sixth seal", 5], ["seal vi", 5], ["seal 6", 5],
+      ["fifth seal", 4], ["seal v", 4], ["seal 5", 4],
+      ["fourth seal", 3], ["seal iv", 3], ["seal 4", 3],
+      ["third seal", 2], ["seal iii", 2], ["seal 3", 2],
+      ["second seal", 1], ["seal ii", 1], ["seal 2", 1],
+      ["first seal", 0], ["seal i", 0], ["seal 1", 0]
+    ]
   },
   "wyda": {
     "keywords": {
