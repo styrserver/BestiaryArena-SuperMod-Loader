@@ -2939,6 +2939,15 @@ function cleanupModal() {
 // Open settings modal
 function openSettingsModal() {
     try {
+        if (activeModal) {
+            if (typeof activeModal.close === 'function') {
+                activeModal.close();
+            } else {
+                cleanupModal();
+            }
+            return;
+        }
+
         const now = Date.now();
         if (modalInProgress) return;
         if (now - lastModalCall < 1000) return;

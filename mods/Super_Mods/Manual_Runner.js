@@ -4663,6 +4663,32 @@ function createConfigPanel() {
   return panel;
 }
 
+function isConfigPanelOpen() {
+  const panelEl = document.getElementById(CONFIG_PANEL_ID);
+  if (!panelEl || !document.body.contains(panelEl)) return false;
+  if (panelEl.getAttribute('data-state') === 'open') return true;
+  return panelEl.style.display === 'flex';
+}
+
+function toggleManualRunnerConfigPanel() {
+  if (isConfigPanelOpen()) {
+    if (activeConfigPanel?.close) {
+      activeConfigPanel.close();
+    } else {
+      api.ui.toggleConfigPanel(CONFIG_PANEL_ID);
+    }
+    activeConfigPanel = null;
+    return;
+  }
+
+  activeConfigPanel = createConfigPanel();
+
+  const panelEl = document.getElementById(CONFIG_PANEL_ID);
+  if (panelEl && panelEl.getAttribute('data-state') !== 'open') {
+    api.ui.toggleConfigPanel(CONFIG_PANEL_ID);
+  }
+}
+
 // Show running analysis modal
 function showRunningAnalysisModal(
   attempts,
@@ -5510,10 +5536,7 @@ function init() {
     modId: MOD_ID,
     tooltip: t('mods.manualRunner.buttonTooltip'),
     primary: false,
-    onClick: () => {
-      createConfigPanel();
-      api.ui.toggleConfigPanel(CONFIG_PANEL_ID);
-    },
+    onClick: toggleManualRunnerConfigPanel,
     style: {
       background: "url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat",
       backgroundSize: 'auto'
@@ -5524,9 +5547,6 @@ function init() {
     clearInterval(mainButtonWarningInterval);
   }
   mainButtonWarningInterval = setInterval(updateMainButtonSealedWarning, 1000);
-  
-  // Create the configuration panel
-  createConfigPanel();
   
   console.log('[Manual Runner] UI initialized');
 }

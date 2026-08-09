@@ -48,7 +48,7 @@ User scripts stored in localStorage are automatically integrated:
 6. **`content/event-competition.js`**
 7. **`content/local_mods.js`** — mod discovery, batch execution, completion signal
 
-`utility_injector.js` (at `document_idle`) also loads `ba-sandbox-utils.mjs` (same IIFE / non-module rule) and may inject `custom-battles.js` and `event-competition.js` again.
+`utility_injector.js` (at `document_idle`) loads `ba-sandbox-utils.mjs` (same IIFE / non-module rule). `custom-battles.js` and `event-competition.js` are injected once by `injector.js` to avoid double-loading.
 
 ### Mod execution
 

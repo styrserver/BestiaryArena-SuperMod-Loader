@@ -7,10 +7,10 @@ console.log('[Quests Mod] Initializing...');
 // 1. Constants & Config
 // =======================
 
-const BUTTON_CHECK_INTERVAL = 1000;
-const BUTTON_RETRY_MAX = 8;
-const BUTTON_RETRY_DELAY = 200;
-const OBSERVER_DEBOUNCE_DELAY = 100;
+let BUTTON_CHECK_INTERVAL = 1000;
+let BUTTON_RETRY_MAX = 8;
+let BUTTON_RETRY_DELAY = 200;
+let OBSERVER_DEBOUNCE_DELAY = 100;
 const QUESTS_MODAL_CONFIG = {
   viewportPadding: 16,
   minWidth: 280,
@@ -246,7 +246,7 @@ function applyQuestsNpcChatContentLayout(contentRoot, dialogHeight, dialogWidth,
   }
 }
 
-const QUESTS_KING_CHAT_ROW_HEIGHT = 90;
+let QUESTS_KING_CHAT_ROW_HEIGHT = 90;
 
 function applyQuestsKingChatContentLayout(contentRoot, dialogWidth, dialog) {
   if (!contentRoot?.classList.contains('quests-king-chat-content')) return;
@@ -371,14 +371,14 @@ function setupQuestsModalResponsiveLayout(modalRef, contentRoot, maxWidth, maxHe
   questsModalLayoutCleanup = cleanup;
 }
 
-const KING_GUILD_COIN_REWARD = 50;
-// Quest dialogue/battle/item/toast/room data loaded from assets/quests/*.json
+// Quest dialogue/battle/item/toast/room/config data loaded from assets/quests/*.json
 let questMissionsDialogue = null;
 let questNpcsDialogue = null;
 let questBattlesConfig = null;
 let questItemsConfigData = null;
 let questToastsConfigData = null;
 let questRoomsConfigData = null;
+let questConfigData = null;
 let questDialogueLoadPromise = null;
 let questDialogueReady = false;
 let patchBoardNpcChatFromDialogue = null;
@@ -387,6 +387,14 @@ let rebuildToastMessageVariants = null;
 let MISSION_COMPLETION_SUMMARIES = {};
 let SEAL_TRANSCRIPTS = [];
 let COSTELLO_SEAL_GUIDANCE_FALLBACK = '';
+let COSTELLO_SEAL_PATTERNS = [];
+
+function rebuildCostelloSealPatterns(patternSource) {
+  if (!Array.isArray(patternSource) || patternSource.length === 0) return;
+  COSTELLO_SEAL_PATTERNS = patternSource
+    .map(([phrase, sealIndex]) => [String(phrase), Number(sealIndex)])
+    .sort((a, b) => b[0].length - a[0].length);
+}
 
 let AL_DEE_RESPONSES = {};
 let COSTELLO_RESPONSES = {};
@@ -402,7 +410,7 @@ let ORACLE_DESTINY_DIALOGUE = {};
 let KING_TIBIANUS_CONFUSION_RESPONSES = [];
 let KING_TIBIANUS_SWEAR_WORDS = [];
 let KING_TIBIANUS_SWEAR_RESPONSE = 'How dare you! Guards, remove this insolent subject!';
-const KING_TIBIANUS_SWEAR_CLOSE_DELAY_MS = 2000;
+let KING_TIBIANUS_SWEAR_CLOSE_DELAY_MS = 2000;
 let AL_DEE_CONFUSION_RESPONSES = [];
 let COSTELLO_CONFUSION_RESPONSES = [];
 let WYDA_CONFUSION_RESPONSES = [];
@@ -474,6 +482,38 @@ function getMissionDialogueLine(mission, key, fallback = '') {
   return applyPlayerNameSubstitution(line);
 }
 
+function getMissionCompleteLine(mission, fallback = '') {
+  const template = mission?.complete || fallback;
+  if (!template) return '';
+  const vars = {};
+  if (mission?.rewardCoins > 0) vars.coins = mission.rewardCoins;
+  return formatDialogueLine(template, vars);
+}
+
+function getMissionRewardItemName(mission, productIdFallback = null) {
+  const productId = mission?.rewardProductId || productIdFallback;
+  if (productId) {
+    const productName = questItemsConfigData?.products?.[productId]?.productName;
+    if (productName) return productName;
+  }
+  if (mission?.rewardItemName) return mission.rewardItemName;
+  return '';
+}
+
+function getDragonClawProductName() {
+  return getMissionRewardItemName(KING_RED_DRAGON_MISSION, 'dragonClaw') || 'Dragon Claw';
+}
+
+function buildMissionRewardSummary(mission) {
+  if (!mission) return '';
+  if (mission.rewardSummary) return mission.rewardSummary;
+  const parts = [];
+  if (mission.rewardItemName) parts.push(mission.rewardItemName);
+  if (mission.rewardCoins > 0) parts.push(`${mission.rewardCoins} guild coins`);
+  if (parts.length === 0) return '';
+  return `Reward: ${parts.join(', ')}.`;
+}
+
 function getQuestJsonAssetUrl(filename) {
   const assetPath = '/assets/quests/' + filename;
   try {
@@ -495,6 +535,36 @@ function registerMissionForDialogue(mission) {
   if (mission?.id) MISSION_BY_ID[mission.id] = mission;
 }
 
+function applyQuestConfigFromAssets(configData) {
+  if (!configData || typeof configData !== 'object') return;
+  const timing = configData.timing;
+  if (timing) {
+    if (timing.buttonCheckInterval != null) BUTTON_CHECK_INTERVAL = timing.buttonCheckInterval;
+    if (timing.buttonRetryMax != null) BUTTON_RETRY_MAX = timing.buttonRetryMax;
+    if (timing.buttonRetryDelay != null) BUTTON_RETRY_DELAY = timing.buttonRetryDelay;
+    if (timing.observerDebounceDelay != null) OBSERVER_DEBOUNCE_DELAY = timing.observerDebounceDelay;
+    if (timing.npcChatResponseDelayMs != null) NPC_CHAT_RESPONSE_DELAY_MS = timing.npcChatResponseDelayMs;
+    if (timing.npcChatMultiLineDelayMs != null) NPC_CHAT_MULTI_LINE_DELAY_MS = timing.npcChatMultiLineDelayMs;
+    if (timing.npcModalCloseDelayMs != null) NPC_MODAL_CLOSE_DELAY_MS = timing.npcModalCloseDelayMs;
+    if (timing.kingTibianusSwearCloseDelayMs != null) {
+      KING_TIBIANUS_SWEAR_CLOSE_DELAY_MS = timing.kingTibianusSwearCloseDelayMs;
+    }
+  }
+  if (configData.modal) Object.assign(QUESTS_MODAL_CONFIG, configData.modal);
+  const ui = configData.ui;
+  if (ui) {
+    if (ui.kingChatRowHeight != null) QUESTS_KING_CHAT_ROW_HEIGHT = ui.kingChatRowHeight;
+    if (ui.questAccessCursor) QUEST_ACCESS_CURSOR = ui.questAccessCursor;
+    if (ui.questAccessTileTitle) QUEST_ACCESS_TILE_TITLE = ui.questAccessTileTitle;
+    if (ui.gameFrameBorderImage) GAME_FRAME_BORDER_IMAGE = ui.gameFrameBorderImage;
+    if (ui.gameFrameBackground) GAME_FRAME_BACKGROUND = ui.gameFrameBackground;
+  }
+  if (configData.firebase?.firebaseUrl) {
+    FIREBASE_CONFIG.firebaseUrl = configData.firebase.firebaseUrl;
+  }
+  questConfigData = configData;
+}
+
 function applyQuestDialogueFromAssets(missionsData, npcsData) {
   if (missionsData?.common) {
     MISSION_COMMON_DIALOGUE = { ...missionsData.common };
@@ -512,41 +582,55 @@ function applyQuestDialogueFromAssets(missionsData, npcsData) {
     SEAL_TRANSCRIPTS = missionsData.sealTranscripts.map((entry) => ({ ...entry }));
   }
 
-  const alDee = npcsData['al-dee'] || {};
-  const costello = npcsData.costello || {};
-  const wyda = npcsData.wyda || {};
-  const tesha = npcsData.tesha || {};
-  const santa = npcsData.santa || {};
-  const svenson = npcsData.svenson || {};
-  const dane = npcsData.dane || {};
-  const oracle = npcsData.oracle || {};
-  const king = npcsData['king-tibianus'] || {};
+  const npcBindings = [
+    ['al-dee', (npc) => {
+      AL_DEE_RESPONSES = { ...(npc.keywords || {}) };
+      AL_DEE_CONFUSION_RESPONSES = [...(npc.confusion || [])];
+    }],
+    ['costello', (npc) => {
+      COSTELLO_RESPONSES = { ...(npc.keywords || {}) };
+      COSTELLO_CONFUSION_RESPONSES = [...(npc.confusion || [])];
+      COSTELLO_SEAL_GUIDANCE_FALLBACK = npc.sealGuidanceFallback || COSTELLO_SEAL_GUIDANCE_FALLBACK;
+      rebuildCostelloSealPatterns(npc.sealPatterns);
+    }],
+    ['wyda', (npc) => {
+      WYDA_RESPONSES = { ...(npc.keywords || {}) };
+      WYDA_CONFUSION_RESPONSES = [...(npc.confusion || [])];
+    }],
+    ['tesha', (npc) => {
+      TESHA_RESPONSES = { ...(npc.keywords || {}) };
+      TESHA_CONFUSION_RESPONSES = [...(npc.confusion || [])];
+    }],
+    ['santa', (npc) => {
+      SANTA_RESPONSES = { ...(npc.keywords || {}) };
+      SANTA_CONFUSION_RESPONSES = [...(npc.confusion || [])];
+      SANTA_THANK_YOU_LINES = [...(npc.thankYouLines || [])];
+    }],
+    ['svenson', (npc) => {
+      SVENSON_RESPONSES = { ...(npc.keywords || {}) };
+      SVENSON_CONFUSION_RESPONSES = [...(npc.confusion || [])];
+    }],
+    ['dane', (npc) => {
+      DANE_RESPONSES = { ...(npc.keywords || {}) };
+      DANE_CONFUSION_RESPONSES = [...(npc.confusion || [])];
+      DANE_RUMOUR_LINES = Array.isArray(npc.rumourLines) ? [...npc.rumourLines] : [];
+    }],
+    ['oracle', (npc) => {
+      ORACLE_RESPONSES = { ...(npc.keywords || {}) };
+      ORACLE_CONFUSION_RESPONSES = [...(npc.confusion || [])];
+      ORACLE_DESTINY_DIALOGUE = { ...(npc.destiny || {}) };
+    }],
+    ['king-tibianus', (npc) => {
+      KING_TIBIANUS_CONFUSION_RESPONSES = [...(npc.confusion || [])];
+      KING_TIBIANUS_SWEAR_WORDS = Array.isArray(npc.swear?.words) ? [...npc.swear.words] : [];
+      KING_TIBIANUS_SWEAR_RESPONSE = npc.swear?.response || KING_TIBIANUS_SWEAR_RESPONSE;
+    }]
+  ];
+  for (const [npcKey, applyNpc] of npcBindings) {
+    applyNpc(npcsData[npcKey] || {});
+  }
 
-  AL_DEE_RESPONSES = { ...(alDee.keywords || {}) };
-  COSTELLO_RESPONSES = { ...(costello.keywords || {}) };
-  WYDA_RESPONSES = { ...(wyda.keywords || {}) };
-  TESHA_RESPONSES = { ...(tesha.keywords || {}) };
-  SANTA_RESPONSES = { ...(santa.keywords || {}) };
-  SVENSON_RESPONSES = { ...(svenson.keywords || {}) };
-  DANE_RESPONSES = { ...(dane.keywords || {}) };
-  DANE_RUMOUR_LINES = Array.isArray(dane.rumourLines) ? [...dane.rumourLines] : [];
-  ORACLE_RESPONSES = { ...(oracle.keywords || {}) };
-  ORACLE_DESTINY_DIALOGUE = { ...(oracle.destiny || {}) };
-  SANTA_THANK_YOU_LINES = [...(santa.thankYouLines || [])];
-  KING_TIBIANUS_CONFUSION_RESPONSES = [...(king.confusion || [])];
-  KING_TIBIANUS_SWEAR_WORDS = Array.isArray(king.swear?.words) ? [...king.swear.words] : [];
-  KING_TIBIANUS_SWEAR_RESPONSE = king.swear?.response || KING_TIBIANUS_SWEAR_RESPONSE;
-  AL_DEE_CONFUSION_RESPONSES = [...(alDee.confusion || [])];
-  COSTELLO_CONFUSION_RESPONSES = [...(costello.confusion || [])];
-  WYDA_CONFUSION_RESPONSES = [...(wyda.confusion || [])];
-  TESHA_CONFUSION_RESPONSES = [...(tesha.confusion || [])];
-  SANTA_CONFUSION_RESPONSES = [...(santa.confusion || [])];
-  SVENSON_CONFUSION_RESPONSES = [...(svenson.confusion || [])];
-  DANE_CONFUSION_RESPONSES = [...(dane.confusion || [])];
-  ORACLE_CONFUSION_RESPONSES = [...(oracle.confusion || [])];
-  COSTELLO_SEAL_GUIDANCE_FALLBACK = costello.sealGuidanceFallback || COSTELLO_SEAL_GUIDANCE_FALLBACK;
   NPC_QUEST_ITEM_CHAT_RESPONSES = JSON.parse(JSON.stringify(npcsData.questItems || {}));
-
   Object.assign(NPC_QUEST_ITEM_UNINVOLVED_TEMPLATES, npcsData.questItemUninvolvedTemplates || {});
 
   applyMissionRegistryFromAssets(missionsData);
@@ -627,7 +711,7 @@ function applyQuestToastsFromAssets(toastsData) {
   if (!toastsData || typeof toastsData !== 'object') return;
   if (toastsData.messages && typeof toastsData.messages === 'object') {
     replaceObjectContents(TOAST_MESSAGE_TEMPLATES, toastsData.messages);
-    rebuildToastMessagesFromTemplates();
+    rebuildToastMessagesFromTemplates(toastsData.messageBuilders);
   }
   if (toastsData.variants && typeof toastsData.variants === 'object') {
     replaceObjectContents(TOAST_VARIANT_BY_KEY, toastsData.variants);
@@ -637,6 +721,12 @@ function applyQuestToastsFromAssets(toastsData) {
   }
   if (typeof toastsData.mornenionDefeated === 'string' && toastsData.mornenionDefeated) {
     MORNENION_DEFEATED_MESSAGE = toastsData.mornenionDefeated;
+  }
+  const styling = toastsData.styling;
+  if (styling) {
+    if (styling.defaultDuration != null) TOAST_DURATION_DEFAULT = styling.defaultDuration;
+    if (styling.variantColors) replaceObjectContents(TOAST_VARIANT_COLORS, styling.variantColors);
+    if (styling.variantDurations) replaceObjectContents(TOAST_VARIANT_DURATIONS, styling.variantDurations);
   }
   if (typeof rebuildToastMessageVariants === 'function') {
     rebuildToastMessageVariants();
@@ -903,7 +993,8 @@ async function loadQuestDialogueAssets() {
     questBattlesConfig &&
     questItemsConfigData &&
     questToastsConfigData &&
-    questRoomsConfigData
+    questRoomsConfigData &&
+    questConfigData
   ) {
     return {
       missions: questMissionsDialogue,
@@ -911,19 +1002,22 @@ async function loadQuestDialogueAssets() {
       battles: questBattlesConfig,
       items: questItemsConfigData,
       toasts: questToastsConfigData,
-      rooms: questRoomsConfigData
+      rooms: questRoomsConfigData,
+      config: questConfigData
     };
   }
   if (!questDialogueLoadPromise) {
     questDialogueLoadPromise = (async () => {
-      const [missionsData, npcsData, battlesData, itemsData, toastsData, roomsData] = await Promise.all([
+      const [missionsData, npcsData, battlesData, itemsData, toastsData, roomsData, configData] = await Promise.all([
         fetchQuestJsonAsset('missions.json'),
         fetchQuestJsonAsset('npcs.json'),
         fetchQuestJsonAsset('battles.json'),
         fetchQuestJsonAsset('items.json'),
         fetchQuestJsonAsset('toasts.json'),
-        fetchQuestJsonAsset('rooms.json')
+        fetchQuestJsonAsset('rooms.json'),
+        fetchQuestJsonAsset('config.json')
       ]);
+      applyQuestConfigFromAssets(configData);
       applyQuestDialogueFromAssets(missionsData, npcsData);
       applyQuestBattlesFromAssets(battlesData);
       applyQuestItemsFromAssets(itemsData);
@@ -932,14 +1026,15 @@ async function loadQuestDialogueAssets() {
       if (typeof patchBoardNpcChatFromDialogue === 'function') {
         patchBoardNpcChatFromDialogue();
       }
-      console.log('[Quests Mod] Loaded quest dialogue, battles, items, toasts, and rooms from assets/quests');
+      console.log('[Quests Mod] Loaded quest config, dialogue, battles, items, toasts, and rooms from assets/quests');
       return {
         missions: missionsData,
         npcs: npcsData,
         battles: battlesData,
         items: itemsData,
         toasts: toastsData,
-        rooms: roomsData
+        rooms: roomsData,
+        config: configData
       };
     })().catch((error) => {
       questDialogueLoadPromise = null;
@@ -991,82 +1086,98 @@ async function ensureNpcDialogueAssetsReady(logPrefix = '[Quests Mod][NPC]') {
 
 
 // Toast duration constants (in milliseconds)
-const TOAST_DURATION_DEFAULT = 5000; // fallback when variant is unknown
+let TOAST_DURATION_DEFAULT = 5000; // fallback when variant is unknown
 
 const TOAST_VARIANT_COLORS = {
-  nothing: '#b0b0b0',   // grey — empty, not found, missing
-  quest: '#6ee07a',     // green — new quest discovered / accepted
-  found: '#7eb8ff',     // blue — found or received something
-  completed: '#e8c060', // gold — mission, task, or seal completed
-  warning: '#ffb070',   // orange — blocked, error, danger
-  info: '#c8c8ff'       // lavender — travel, toggles, hints, battle status
+  nothing: '#b0b0b0',
+  quest: '#6ee07a',
+  found: '#7eb8ff',
+  completed: '#e8c060',
+  warning: '#ffb070',
+  info: '#c8c8ff'
 };
 
 const TOAST_VARIANT_DURATIONS = {
-  nothing: 2000,   // shortest — found nothing, not found, missing
-  info: 3000,      // travel, toggles, battle status
-  warning: 4000,   // blocked, errors
-  found: 5000,     // received/found items
-  quest: 8000,     // new quest discovered/accepted
-  completed: 10000 // longest — mission/task/seal completed
+  nothing: 2000,
+  info: 3000,
+  warning: 4000,
+  found: 5000,
+  quest: 8000,
+  completed: 10000
 };
 
 const TOAST_MESSAGE_TEMPLATES = {};
 const TOAST_VARIANT_BY_KEY = {};
 const TOAST_MESSAGES = {};
 
-function rebuildToastMessagesFromTemplates() {
+const DEFAULT_TOAST_MESSAGE_BUILDERS = {
+  questDiscovered: ['title'],
+  questAccepted: ['title'],
+  questCompleted: ['title'],
+  questCompletedWithCoins: ['title', 'coins'],
+  taskCompletedWithCoins: ['title', 'coins'],
+  itemReceived: ['name'],
+  itemRemoved: ['name'],
+  deliveredTo: ['recipient'],
+  returnedTo: ['recipient'],
+  diaryReturned: [],
+  sealCompleted: ['ordinal'],
+  copperKeyFound: [],
+  mapReceived: [],
+  navigatedToMines: [],
+  kingTookCoin: [],
+  frightenedHole: [],
+  fishingEnabled: [],
+  fishingDisabled: [],
+  shovelEnabled: [],
+  shovelDisabled: [],
+  minedOre: [],
+  dugMornenionHole: [],
+  travelingAbDendriel: [],
+  teleportedAlDee: [],
+  teleportAlDeeFailed: [],
+  bansheeLastRoomNotFound: [],
+  travelingBansheeLastRoom: [],
+  bansheeLastRoomBattleHere: [],
+  spiderLairNotFound: [],
+  enteringSpiderLair: [],
+  spiderLairBattleHere: [],
+  lonesomeDragonNotFound: [],
+  enteringLonesomeDragon: [],
+  needDragonClawForStairs: [],
+  putridChamberNotStrongEnough: [],
+  travelingPutridChamber: [],
+  travelingWithSvenson: [],
+  travelingGhazHideout: [],
+  fishingFoundAxe: [],
+  fishingFoundNothingMagnet: [],
+  fishingFoundNothing: [],
+  fishingMagnetHint: [],
+  fishingError: [],
+  desertDigNothing: [],
+  desertDigSandsEmpty: [],
+  desertDigNeedMission: [],
+  missingDestroyFieldRune: [],
+  alreadyHaveDestroyFieldRune: [],
+  crossingTheLineObjectiveComplete: [],
+  ironOreRewardReady: []
+};
+
+function rebuildToastMessagesFromTemplates(builderSpec = DEFAULT_TOAST_MESSAGE_BUILDERS) {
   const t = TOAST_MESSAGE_TEMPLATES;
-  TOAST_MESSAGES.questDiscovered = (title) => formatDialogueLine(t.questDiscovered, { title });
-  TOAST_MESSAGES.questAccepted = (title) => formatDialogueLine(t.questAccepted, { title });
-  TOAST_MESSAGES.questCompleted = (title) => formatDialogueLine(t.questCompleted, { title });
-  TOAST_MESSAGES.questCompletedWithCoins = (title, coins) => formatDialogueLine(t.questCompletedWithCoins, { title, coins });
-  TOAST_MESSAGES.taskCompletedWithCoins = (title, coins) => formatDialogueLine(t.taskCompletedWithCoins, { title, coins });
-  TOAST_MESSAGES.itemReceived = (name) => formatDialogueLine(t.itemReceived, { name });
-  TOAST_MESSAGES.itemRemoved = (name) => formatDialogueLine(t.itemRemoved, { name });
-  TOAST_MESSAGES.deliveredTo = (recipient) => formatDialogueLine(t.deliveredTo, { recipient });
-  TOAST_MESSAGES.returnedTo = (recipient) => formatDialogueLine(t.returnedTo, { recipient });
-  TOAST_MESSAGES.diaryReturned = t.diaryReturned || '';
-  TOAST_MESSAGES.sealCompleted = (ordinal) => formatDialogueLine(t.sealCompleted, { ordinal });
-  TOAST_MESSAGES.copperKeyFound = t.copperKeyFound || '';
-  TOAST_MESSAGES.mapReceived = t.mapReceived || '';
-  TOAST_MESSAGES.navigatedToMines = t.navigatedToMines || '';
-  TOAST_MESSAGES.kingTookCoin = t.kingTookCoin || '';
-  TOAST_MESSAGES.frightenedHole = t.frightenedHole || '';
-  TOAST_MESSAGES.fishingEnabled = t.fishingEnabled || '';
-  TOAST_MESSAGES.fishingDisabled = t.fishingDisabled || '';
-  TOAST_MESSAGES.shovelEnabled = t.shovelEnabled || '';
-  TOAST_MESSAGES.shovelDisabled = t.shovelDisabled || '';
-  TOAST_MESSAGES.minedOre = t.minedOre || '';
-  TOAST_MESSAGES.dugMornenionHole = t.dugMornenionHole || '';
-  TOAST_MESSAGES.travelingAbDendriel = t.travelingAbDendriel || '';
-  TOAST_MESSAGES.teleportedAlDee = t.teleportedAlDee || '';
-  TOAST_MESSAGES.teleportAlDeeFailed = t.teleportAlDeeFailed || '';
-  TOAST_MESSAGES.bansheeLastRoomNotFound = t.bansheeLastRoomNotFound || '';
-  TOAST_MESSAGES.travelingBansheeLastRoom = t.travelingBansheeLastRoom || '';
-  TOAST_MESSAGES.bansheeLastRoomBattleHere = t.bansheeLastRoomBattleHere || '';
-  TOAST_MESSAGES.spiderLairNotFound = t.spiderLairNotFound || '';
-  TOAST_MESSAGES.enteringSpiderLair = t.enteringSpiderLair || '';
-  TOAST_MESSAGES.spiderLairBattleHere = t.spiderLairBattleHere || '';
-  TOAST_MESSAGES.lonesomeDragonNotFound = t.lonesomeDragonNotFound || '';
-  TOAST_MESSAGES.enteringLonesomeDragon = t.enteringLonesomeDragon || '';
-  TOAST_MESSAGES.needDragonClawForStairs = t.needDragonClawForStairs || '';
-  TOAST_MESSAGES.putridChamberNotStrongEnough = t.putridChamberNotStrongEnough || '';
-  TOAST_MESSAGES.travelingPutridChamber = t.travelingPutridChamber || '';
-  TOAST_MESSAGES.travelingWithSvenson = t.travelingWithSvenson || '';
-  TOAST_MESSAGES.travelingGhazHideout = t.travelingGhazHideout || '';
-  TOAST_MESSAGES.fishingFoundAxe = t.fishingFoundAxe || '';
-  TOAST_MESSAGES.fishingFoundNothingMagnet = t.fishingFoundNothingMagnet || '';
-  TOAST_MESSAGES.fishingFoundNothing = t.fishingFoundNothing || '';
-  TOAST_MESSAGES.fishingMagnetHint = t.fishingMagnetHint || '';
-  TOAST_MESSAGES.fishingError = t.fishingError || '';
-  TOAST_MESSAGES.desertDigNothing = t.desertDigNothing || '';
-  TOAST_MESSAGES.desertDigSandsEmpty = t.desertDigSandsEmpty || '';
-  TOAST_MESSAGES.desertDigNeedMission = t.desertDigNeedMission || '';
-  TOAST_MESSAGES.missingDestroyFieldRune = t.missingDestroyFieldRune || '';
-  TOAST_MESSAGES.alreadyHaveDestroyFieldRune = t.alreadyHaveDestroyFieldRune || '';
-  TOAST_MESSAGES.crossingTheLineObjectiveComplete = t.crossingTheLineObjectiveComplete || '';
-  TOAST_MESSAGES.ironOreRewardReady = t.ironOreRewardReady || '';
+  const builders = builderSpec && typeof builderSpec === 'object'
+    ? builderSpec
+    : DEFAULT_TOAST_MESSAGE_BUILDERS;
+  for (const [key, params] of Object.entries(builders)) {
+    if (Array.isArray(params) && params.length > 0) {
+      TOAST_MESSAGES[key] = (...args) => {
+        const vars = Object.fromEntries(params.map((name, index) => [name, args[index]]));
+        return formatDialogueLine(t[key], vars);
+      };
+    } else {
+      TOAST_MESSAGES[key] = t[key] || '';
+    }
+  }
 }
 
 rebuildToastMessagesFromTemplates();
@@ -1074,10 +1185,10 @@ rebuildToastMessagesFromTemplates();
 const BATTLE_TOAST_LOG = {};
 
 // NPC chat: 1s before a single-line reply; 2s before each line of a multi-line reply.
-const NPC_CHAT_RESPONSE_DELAY_MS = 1000;
-const NPC_CHAT_MULTI_LINE_DELAY_MS = 2000;
+let NPC_CHAT_RESPONSE_DELAY_MS = 1000;
+let NPC_CHAT_MULTI_LINE_DELAY_MS = 2000;
 // Delay (ms) after the final farewell line before closing an NPC chat modal.
-const NPC_MODAL_CLOSE_DELAY_MS = 1000;
+let NPC_MODAL_CLOSE_DELAY_MS = 1000;
 
 // Hydrated from assets/quests/toasts.json
 let MORNENION_DEFEATED_MESSAGE = '';
@@ -1089,16 +1200,14 @@ const MINING_CONFIG = {};
 const DESERT_DIGGING_CONFIG = {};
 const LOOT_EFFECT_CONFIG = {};
 
-const SERPENTINE_TOWER_MISSION = { id: 'serpentine_tower' };
-
 const SCARAB_COIN_CONFIG = {};
 
 let TESHA_TILE_INDEX = null;
 const TESHA_ARROW_CLASS = 'quests-tesha-arrow';
 const TILE_HIGHLIGHT_CLASS = 'quests-tile-highlight';
 const TILE_HIGHLIGHT_TILE_ATTR = 'data-quests-tile-highlight';
-const QUEST_ACCESS_CURSOR = 'pointer';
-const QUEST_ACCESS_TILE_TITLE = 'Right-click';
+let QUEST_ACCESS_CURSOR = 'pointer';
+let QUEST_ACCESS_TILE_TITLE = 'Right-click';
 
 let SERPENTINE_TOWER_BASEMENT_ROOM_NAME = '';
 let DESTROY_FIELD_RUNE_ITEM_NAME = '';
@@ -1133,8 +1242,8 @@ let CROSSING_THE_LINE_ORC_SUCCESS_FRAME_MS = 0;
 const CROSSING_THE_LINE_OK_BORDER_CLASS = 'quests-crossing-tile-ok-border';
 let CROSSING_THE_LINE_OK_BORDER_COLOR = '';
 const COPPER_KEY_CORYM_SUCCESS_EFFECT_CLASS = QUEST_TILE_SUCCESS_EFFECT_CLASS;
-const GAME_FRAME_BORDER_IMAGE = 'url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 4 stretch';
-const GAME_FRAME_BACKGROUND = 'url("https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png")';
+let GAME_FRAME_BORDER_IMAGE = 'url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 4 stretch';
+let GAME_FRAME_BACKGROUND = 'url("https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png")';
 let HONEYFLOWER_TOWER_ROOM_NAME = '';
 let APPRENTICE_SHENG_ROOM_NAME = '';
 let APPRENTICE_SHENG_TILE_INDEX = null;
@@ -1150,142 +1259,65 @@ const BOARD_NPC_ROOKSTAYER_ID = 'rookstayer';
 const BOARD_NPC_NAME_TAG_DATA_ATTR = 'data-quests-board-npc-id';
 const HONEYFLOWER_CONFIG = {};
 
-const KING_HONEYFLOWER_MISSION = { id: 'king_honeyflower' };
-
 let CITY_BOARDGAMES_ROOM_NAME = '';
 const CROSSING_THE_LINE_TILES = [];
 
-const KING_CROSSING_THE_LINE_MISSION = { id: 'king_crossing_the_line' };
+// Fallback story order until missions.json → registry hydrates.
+const QUEST_MISSION_IDS = [
+  'king_honeyflower',
+  'king_crossing_the_line',
+  'king_copper_key',
+  'king_red_dragon',
+  'dragonmother',
+  'king_letter_al_dee',
+  'al_dee_fishing_gold',
+  'al_dee_golden_rope',
+  'king_monks_study',
+  'costello_queen_banshees',
+  'follower_of_zathroth',
+  'mother_of_all_spiders',
+  'king_scarab_coin',
+  'serpentine_tower',
+  'apprentice_sheng',
+  'christmas_miracle',
+  'svenson_love_story',
+  'weakened_archdemon',
+  'lost_oracle'
+];
 
-const KING_COPPER_KEY_MISSION = { id: 'king_copper_key' };
+for (const missionId of QUEST_MISSION_IDS) {
+  registerMissionForDialogue({ id: missionId });
+}
 
-const KING_RED_DRAGON_MISSION = { id: 'king_red_dragon' };
-
-const KING_LETTER_MISSION = { id: 'king_letter_al_dee' };
-
-const KING_MONKS_STUDY_MISSION = { id: 'king_monks_study' };
-
-const KING_SCARAB_COIN_MISSION = { id: 'king_scarab_coin' };
-
-const AL_DEE_FISHING_MISSION = { id: 'al_dee_fishing_gold' };
-
-const AL_DEE_GOLDEN_ROPE_MISSION = { id: 'al_dee_golden_rope' };
-
-const COSTELLO_QUEEN_BANSHEES_MISSION = { id: 'costello_queen_banshees' };
-
-const FOLLOWER_OF_ZATHROTH_MISSION = { id: 'follower_of_zathroth' };
-
-const MOTHER_OF_ALL_SPIDERS_MISSION = { id: 'mother_of_all_spiders' };
-
-const DRAGONMOTHER_MISSION = { id: 'dragonmother' };
-
-const APPRENTICE_SHENG_MISSION = { id: 'apprentice_sheng' };
-
-const CHRISTMAS_MIRACLE_MISSION = { id: 'christmas_miracle' };
-const SVENSON_LOVE_STORY_MISSION = { id: 'svenson_love_story' };
-const WEAKENED_ARCHDEMON_MISSION = { id: 'weakened_archdemon' };
-const LOST_ORACLE_MISSION = { id: 'lost_oracle' };
-
-
-registerMissionForDialogue(SERPENTINE_TOWER_MISSION);
-registerMissionForDialogue(KING_HONEYFLOWER_MISSION);
-registerMissionForDialogue(KING_CROSSING_THE_LINE_MISSION);
-registerMissionForDialogue(KING_COPPER_KEY_MISSION);
-registerMissionForDialogue(KING_RED_DRAGON_MISSION);
-registerMissionForDialogue(KING_LETTER_MISSION);
-registerMissionForDialogue(KING_MONKS_STUDY_MISSION);
-registerMissionForDialogue(KING_SCARAB_COIN_MISSION);
-registerMissionForDialogue(AL_DEE_FISHING_MISSION);
-registerMissionForDialogue(AL_DEE_GOLDEN_ROPE_MISSION);
-registerMissionForDialogue(COSTELLO_QUEEN_BANSHEES_MISSION);
-registerMissionForDialogue(FOLLOWER_OF_ZATHROTH_MISSION);
-registerMissionForDialogue(MOTHER_OF_ALL_SPIDERS_MISSION);
-registerMissionForDialogue(DRAGONMOTHER_MISSION);
-registerMissionForDialogue(APPRENTICE_SHENG_MISSION);
-registerMissionForDialogue(CHRISTMAS_MIRACLE_MISSION);
-registerMissionForDialogue(SVENSON_LOVE_STORY_MISSION);
-registerMissionForDialogue(WEAKENED_ARCHDEMON_MISSION);
-registerMissionForDialogue(LOST_ORACLE_MISSION);
+const SERPENTINE_TOWER_MISSION = MISSION_BY_ID.serpentine_tower;
+const KING_HONEYFLOWER_MISSION = MISSION_BY_ID.king_honeyflower;
+const KING_CROSSING_THE_LINE_MISSION = MISSION_BY_ID.king_crossing_the_line;
+const KING_COPPER_KEY_MISSION = MISSION_BY_ID.king_copper_key;
+const KING_RED_DRAGON_MISSION = MISSION_BY_ID.king_red_dragon;
+const KING_LETTER_MISSION = MISSION_BY_ID.king_letter_al_dee;
+const KING_MONKS_STUDY_MISSION = MISSION_BY_ID.king_monks_study;
+const KING_SCARAB_COIN_MISSION = MISSION_BY_ID.king_scarab_coin;
+const AL_DEE_FISHING_MISSION = MISSION_BY_ID.al_dee_fishing_gold;
+const AL_DEE_GOLDEN_ROPE_MISSION = MISSION_BY_ID.al_dee_golden_rope;
+const COSTELLO_QUEEN_BANSHEES_MISSION = MISSION_BY_ID.costello_queen_banshees;
+const FOLLOWER_OF_ZATHROTH_MISSION = MISSION_BY_ID.follower_of_zathroth;
+const MOTHER_OF_ALL_SPIDERS_MISSION = MISSION_BY_ID.mother_of_all_spiders;
+const DRAGONMOTHER_MISSION = MISSION_BY_ID.dragonmother;
+const APPRENTICE_SHENG_MISSION = MISSION_BY_ID.apprentice_sheng;
+const CHRISTMAS_MIRACLE_MISSION = MISSION_BY_ID.christmas_miracle;
+const SVENSON_LOVE_STORY_MISSION = MISSION_BY_ID.svenson_love_story;
+const WEAKENED_ARCHDEMON_MISSION = MISSION_BY_ID.weakened_archdemon;
+const LOST_ORACLE_MISSION = MISSION_BY_ID.lost_oracle;
 
 const MINOTAUR_TROPHY_CONFIG = {};
 const ORB_CONFIG = {};
 const LUMINOUS_ORB_CONFIG = {};
 const SPECTRAL_STONE_CONFIG = {};
 
-// Mission registry maps — seeded below, overwritten from missions.json → registry.
+// Mission registry maps — filled from missions.json → registry on asset load.
 const MISSION_STATE_MAP = {};
 const MISSION_FIREBASE_KEY_MAP = {};
 const MISSION_EXTRA_FIELD_SCHEMAS = {};
-
-const DEFAULT_QUEST_LOG_MISSION_ORDER = [
-  KING_HONEYFLOWER_MISSION,
-  KING_CROSSING_THE_LINE_MISSION,
-  KING_COPPER_KEY_MISSION,
-  KING_RED_DRAGON_MISSION,
-  DRAGONMOTHER_MISSION,
-  KING_LETTER_MISSION,
-  AL_DEE_FISHING_MISSION,
-  AL_DEE_GOLDEN_ROPE_MISSION,
-  KING_MONKS_STUDY_MISSION,
-  COSTELLO_QUEEN_BANSHEES_MISSION,
-  FOLLOWER_OF_ZATHROTH_MISSION,
-  MOTHER_OF_ALL_SPIDERS_MISSION,
-  KING_SCARAB_COIN_MISSION,
-  SERPENTINE_TOWER_MISSION,
-  APPRENTICE_SHENG_MISSION,
-  CHRISTMAS_MIRACLE_MISSION,
-  SVENSON_LOVE_STORY_MISSION,
-  WEAKENED_ARCHDEMON_MISSION,
-  LOST_ORACLE_MISSION
-];
-
-const DEFAULT_MISSION_REGISTRY = {
-  king_honeyflower: { stateKey: 'progressHoneyflower', firebaseKey: 'honeyflower', extraFields: ['honeyflowerPicked'] },
-  king_crossing_the_line: { stateKey: 'progressCrossingTheLine', firebaseKey: 'crossingTheLine', extraFields: ['crossingObjectiveComplete'] },
-  king_copper_key: { stateKey: 'progressCopper', firebaseKey: 'copper' },
-  king_red_dragon: { stateKey: 'progressDragon', firebaseKey: 'dragon' },
-  dragonmother: { stateKey: 'progressDragonmother', firebaseKey: 'dragonmother' },
-  king_letter_al_dee: { stateKey: 'progressLetter', firebaseKey: 'letter' },
-  al_dee_fishing_gold: { stateKey: 'progressAlDeeFishing', firebaseKey: 'alDeeFishing' },
-  al_dee_golden_rope: { stateKey: 'progressAlDeeGoldenRope', firebaseKey: 'alDeeGoldenRope' },
-  king_monks_study: { stateKey: 'progressMonksStudy', firebaseKey: 'monksStudy' },
-  costello_queen_banshees: { stateKey: 'progressQueenBanshees', firebaseKey: 'queenBanshees' },
-  follower_of_zathroth: { stateKey: 'progressFollowerOfZathroth', firebaseKey: 'followerOfZathroth' },
-  mother_of_all_spiders: { stateKey: 'progressMotherOfAllSpiders', firebaseKey: 'motherOfAllSpiders' },
-  king_scarab_coin: { stateKey: 'progressScarabHunt', firebaseKey: 'scarabHunt' },
-  serpentine_tower: {
-    stateKey: 'progressSerpentineTower',
-    firebaseKey: 'serpentineTower',
-    extraFields: ['destroyFieldRuneTaken', 'putridChamberComplete']
-  },
-  apprentice_sheng: {
-    stateKey: 'progressApprenticeSheng',
-    firebaseKey: 'apprenticeSheng',
-    extraFields: ['battleCompleted', 'rookstayerDismissed']
-  },
-  christmas_miracle: { stateKey: 'progressChristmasMiracle', firebaseKey: 'christmasMiracle' },
-  svenson_love_story: {
-    stateKey: 'progressSvensonLoveStory',
-    firebaseKey: 'svensonLoveStory',
-    extraFields: [
-      'plankDelivered', 'strandedAtAwash', 'awashYarnDelivered', 'awashYarnRequested',
-      'strandedAtUnderground', 'undergroundCompassDelivered', 'undergroundCompassRequested',
-      'strandedAtWhiteWave', 'whiteWaveSlippersDelivered'
-    ],
-    forceExtraFieldsWhenCompleted: true,
-    extraFieldAliases: { undergroundCompassDelivered: ['undergroundPlankDelivered'] }
-  },
-  weakened_archdemon: {
-    stateKey: 'progressWeakenedArchdemon',
-    firebaseKey: 'weakenedArchdemon',
-    extraFields: ['battleCompleted']
-  },
-  lost_oracle: {
-    stateKey: 'progressLostOracle',
-    firebaseKey: 'lostOracle',
-    extraFields: ['askedNpcs', 'kingInformed', 'orbExchanged', 'spectralStoneReceived', 'oracleEnraged', 'battleCompleted', 'oracleDismissed']
-  }
-};
 
 function applyMissionRegistryMaps(registryMissions) {
   for (const key of Object.keys(MISSION_STATE_MAP)) delete MISSION_STATE_MAP[key];
@@ -1309,9 +1341,7 @@ function applyMissionRegistryMaps(registryMissions) {
 
 function rebuildQuestLogMissions(storyOrder) {
   QUEST_LOG_MISSIONS.length = 0;
-  const order = Array.isArray(storyOrder) && storyOrder.length
-    ? storyOrder
-    : DEFAULT_QUEST_LOG_MISSION_ORDER.map((m) => m.id);
+  const order = Array.isArray(storyOrder) && storyOrder.length ? storyOrder : QUEST_MISSION_IDS;
   const seen = new Set();
   for (const missionId of order) {
     const mission = MISSION_BY_ID[missionId];
@@ -1320,18 +1350,19 @@ function rebuildQuestLogMissions(storyOrder) {
       seen.add(missionId);
     }
   }
-  for (const mission of DEFAULT_QUEST_LOG_MISSION_ORDER) {
-    if (!seen.has(mission.id)) QUEST_LOG_MISSIONS.push(mission);
+  for (const missionId of QUEST_MISSION_IDS) {
+    if (!seen.has(missionId)) {
+      const mission = MISSION_BY_ID[missionId];
+      if (mission) QUEST_LOG_MISSIONS.push(mission);
+    }
   }
 }
 
 function applyMissionRegistryFromAssets(missionsData) {
   const registry = missionsData?.registry;
-  applyMissionRegistryMaps(registry?.missions || DEFAULT_MISSION_REGISTRY);
+  if (registry?.missions) applyMissionRegistryMaps(registry.missions);
   rebuildQuestLogMissions(registry?.storyOrder);
 }
-
-applyMissionRegistryMaps(DEFAULT_MISSION_REGISTRY);
 
 // Story order for Quest Log / Mission Log / Quest Dev Tools — rebuilt from missions.json → registry.storyOrder.
 const QUEST_LOG_MISSIONS = [];
@@ -1343,35 +1374,7 @@ function getMissionCompletionSummary(mission) {
 }
 
 function getMissionCompletionRewardText(mission) {
-  if (!mission) return '';
-  if (mission.rewardSummary) return mission.rewardSummary;
-
-  switch (mission.id) {
-    case KING_RED_DRAGON_MISSION.id:
-      return 'Reward: Dragon Claw.';
-    case AL_DEE_FISHING_MISSION.id:
-      return 'Reward: Light Shovel.';
-    case AL_DEE_GOLDEN_ROPE_MISSION.id:
-      return 'Reward: The Holy Tible.';
-    case COSTELLO_QUEEN_BANSHEES_MISSION.id:
-      return 'Reward: Blessed Ankh.';
-    case MOTHER_OF_ALL_SPIDERS_MISSION.id:
-      return 'Reward: Spool of Yarn.';
-    case DRAGONMOTHER_MISSION.id:
-      return 'Reward: Golden Mug.';
-    case SERPENTINE_TOWER_MISSION.id:
-      return `Reward: ${SCORPION_SCEPTRE_CONFIG.productName}.`;
-    case KING_SCARAB_COIN_MISSION.id:
-      return `Reward: ${SCARAB_COIN_CONFIG.productName}, ${KING_SCARAB_COIN_MISSION.rewardCoins} guild coins.`;
-    default:
-      if (mission.rewardItemName) {
-        return `Reward: ${mission.rewardItemName}.`;
-      }
-      if (mission.rewardCoins) {
-        return `Reward: ${mission.rewardCoins} guild coins.`;
-      }
-      return '';
-  }
+  return buildMissionRewardSummary(mission);
 }
 
 // Seal room/tile data — filled from assets/quests/rooms.json
@@ -1591,32 +1594,23 @@ async function matchKeywordResponses(map, message, playerName = 'Player', option
   return defaultResponse;
 }
 
-function getTeshaResponse(message, playerName = 'Player') {
-  const result = matchKeywordResponsesSync(TESHA_RESPONSES, message, playerName, {
+function getNpcKeywordResponse(responses, message, playerName = 'Player', options = {}) {
+  return matchKeywordResponsesSync(responses, message, playerName, {
     defaultResponse: null,
-    lowercaseKeys: true
+    lowercaseKeys: true,
+    ...options
   });
+}
+
+function getTeshaResponse(message, playerName = 'Player') {
+  const result = getNpcKeywordResponse(TESHA_RESPONSES, message, playerName);
   if (result == null) return null;
   return Array.isArray(result) ? result : [result];
 }
 
 function getWydaResponse(message, playerName = 'Player') {
-  return matchKeywordResponsesSync(WYDA_RESPONSES, message, playerName, {
-    defaultResponse: null,
-    lowercaseKeys: true
-  });
+  return getNpcKeywordResponse(WYDA_RESPONSES, message, playerName);
 }
-
-// Seal phrase patterns. Matching uses longest phrase first so "seal vii" does not hit "seal v".
-const COSTELLO_SEAL_PATTERNS = [
-  ['seventh seal', 6], ['seal vii', 6], ['seal 7', 6],
-  ['sixth seal', 5], ['seal vi', 5], ['seal 6', 5],
-  ['fifth seal', 4], ['seal v', 4], ['seal 5', 4],
-  ['fourth seal', 3], ['seal iv', 3], ['seal 4', 3],
-  ['third seal', 2], ['seal iii', 2], ['seal 3', 2],
-  ['second seal', 1], ['seal ii', 1], ['seal 2', 1],
-  ['first seal', 0], ['seal i', 0], ['seal 1', 0]
-].slice().sort((a, b) => b[0].length - a[0].length);
 
 function getCostelloResponse(message, playerName = 'Player') {
   const lowerMessage = message.toLowerCase().trim();
@@ -1640,17 +1634,11 @@ function getCostelloResponse(message, playerName = 'Player') {
     return COSTELLO_SEAL_GUIDANCE_FALLBACK || "The seven seals of Ghostlands must be completed one by one.";
   }
 
-  return matchKeywordResponsesSync(COSTELLO_RESPONSES, message, playerName, {
-    defaultResponse: null,
-    lowercaseKeys: true
-  });
+  return getNpcKeywordResponse(COSTELLO_RESPONSES, message, playerName);
 }
 
 function getAlDeeResponse(message, playerName = 'Player') {
-  return matchKeywordResponsesSync(AL_DEE_RESPONSES, message, playerName, {
-    defaultResponse: null,
-    lowercaseKeys: true
-  });
+  return getNpcKeywordResponse(AL_DEE_RESPONSES, message, playerName);
 }
 
 function isNpcFarewellMessage(message) {
@@ -1726,6 +1714,9 @@ function resolveQuestProductName(productId) {
   }
   if (productId === 'goldenMug') {
     return DRAGONMOTHER_MISSION.rewardItemName || 'Golden Mug';
+  }
+  if (productId === 'dragonClaw') {
+    return getMissionRewardItemName(KING_RED_DRAGON_MISSION, 'dragonClaw');
   }
   if (productId === 'scorpionSceptre') {
     return SCORPION_SCEPTRE_CONFIG.productName || 'Compass';
@@ -2953,15 +2944,16 @@ function createNPCCooldownManager() {
             console.error('[Quests Mod][Lonesome Dragon] Error completing The Dragonmother:', error);
           }
           try {
-            const clawCount = getCachedQuestItemCount('Dragon Claw') || 0;
+            const clawName = getDragonClawProductName();
+            const clawCount = getCachedQuestItemCount(clawName) || 0;
             let toRemove = clawCount;
             if (toRemove <= 0) {
               const questItems = await getQuestItems(false);
-              toRemove = questItems?.['Dragon Claw'] || 0;
+              toRemove = questItems?.[clawName] || 0;
             }
             if (toRemove > 0) {
-              await consumeQuestItem('Dragon Claw', toRemove);
-              NotificationService.showItemRemoved('Dragon Claw', BATTLE_TOAST_LOG.lonesomeDragon || '[Quests Mod][Lonesome Dragon]');
+              await consumeQuestItem(clawName, toRemove);
+              NotificationService.showItemRemoved(clawName, BATTLE_TOAST_LOG.lonesomeDragon || '[Quests Mod][Lonesome Dragon]');
             }
           } catch (error) {
             console.error('[Quests Mod][Lonesome Dragon] Error removing Dragon Claw:', error);
@@ -5043,6 +5035,9 @@ function createNPCCooldownManager() {
         def.name = DRAGONMOTHER_MISSION.rewardItemName || def.name;
         def.icon = DRAGONMOTHER_MISSION.rewardIcon || def.icon;
         def.description = DRAGONMOTHER_MISSION.rewardDescription || def.description;
+      } else if (productId === 'dragonClaw') {
+        def.name = getMissionRewardItemName(KING_RED_DRAGON_MISSION, 'dragonClaw') || def.name;
+        def.icon = KING_RED_DRAGON_MISSION.rewardIcon || def.icon;
       }
 
       pushDef(def);
@@ -5922,8 +5917,8 @@ function createNPCCooldownManager() {
       'red_dragon_scale': 'Red Dragon Scale',
       'copper key': COPPER_KEY_CONFIG.productName,
       'obsidian knife': 'Obsidian Knife',
-      'dragon claw': 'Dragon Claw',
-      'dragon_claw': 'Dragon Claw',
+      'dragon claw': getDragonClawProductName(),
+      'dragon_claw': getDragonClawProductName(),
       'golden mug': 'Golden Mug',
       'golden_mug': 'Golden Mug',
       'letter from al dee': 'Letter from Al Dee',
@@ -6215,7 +6210,7 @@ function createNPCCooldownManager() {
   // - QuestsDev Accept / Complete / Reset / completeAll / resetAll
   //
   // MISSION_STATE_MAP / MISSION_FIREBASE_KEY_MAP / QUEST_LOG_MISSIONS are filled from
-  // assets/quests/missions.json → registry (with DEFAULT_MISSION_REGISTRY fallback).
+  // assets/quests/missions.json → registry.
   //
   function getExtraMissionProgressFields(firebaseKey, source = null) {
     const schema = MISSION_EXTRA_FIELD_SCHEMAS[firebaseKey];
@@ -7087,7 +7082,7 @@ function createNPCCooldownManager() {
         'Copper Key',
         'Map to the Mines',
         'Silver Token',
-        'Dragon Claw',
+        getDragonClawProductName(),
         'Obsidian Knife',
         'Letter from Al Dee',
         'Honeyflower',
@@ -9423,7 +9418,7 @@ function createNPCCooldownManager() {
           const productDefinitions = buildProductDefinitions({
             includeCopperKey: !hideCopperKey,
             includeObsidianKnife: redDragonActive,
-            includeDragonClaw: redDragonCompleted || (displayProducts['Dragon Claw'] > 0)
+            includeDragonClaw: redDragonCompleted || (displayProducts[getDragonClawProductName()] > 0)
           });
         
         // Left column: Product list container
@@ -10334,7 +10329,7 @@ function createNPCCooldownManager() {
           thankYou: mission.accept,
           thankYouNoLetter: mission.acceptNoLetter || mission.accept,
           keyQuestion: mission.askForKey || mission.askForItems || mission.askForItem || mission.askForLetter || 'Have you found what I asked for?',
-          keyComplete: mission.complete,
+          keyComplete: getMissionCompleteLine(mission),
           keyScoldNoKey: mission.missingKey || mission.missingItems || mission.missingItem || mission.missingLetter || 'You claim yes but lack what I asked for.',
           keyKeepSearching: mission.keepSearching,
           keyAnswerYesNo: mission.answerYesNo,
@@ -11188,9 +11183,10 @@ function createNPCCooldownManager() {
           await saveKingTibianusProgress(playerName, allProgress);
           if (shouldAwardDragonClaw) {
             try {
-              await addQuestItem('Dragon Claw', 1);
-              NotificationService.showItemReceived('Dragon Claw', '[Quests Mod][King Tibianus]');
-              console.log('[Quests Mod][King Tibianus] Awarded Dragon Claw for dragon mission completion');
+              const clawName = getDragonClawProductName();
+              await addQuestItem(clawName, 1);
+              NotificationService.showItemReceived(clawName, '[Quests Mod][King Tibianus]');
+              console.log(`[Quests Mod][King Tibianus] Awarded ${clawName} for dragon mission completion`);
             } catch (err) {
               console.error('[Quests Mod][King Tibianus] Error awarding Dragon Claw:', err);
             }
@@ -12477,9 +12473,9 @@ function createNPCCooldownManager() {
               (globalThis.BestiaryModAPI && globalThis.BestiaryModAPI.guilds && globalThis.BestiaryModAPI.guilds.addGuildCoins) ||
               (typeof addGuildCoins === 'function' ? addGuildCoins : null);
 
-            if (coinsAdder) {
-              await coinsAdder(50);
-              console.log('[Quests Mod][Al Dee] Awarded 50 guild coins for letter delivery');
+            if (coinsAdder && KING_LETTER_MISSION.rewardCoins > 0) {
+              await coinsAdder(KING_LETTER_MISSION.rewardCoins);
+              console.log(`[Quests Mod][Al Dee] Awarded ${KING_LETTER_MISSION.rewardCoins} guild coins for letter delivery`);
             } else {
               console.warn('[Quests Mod][Al Dee] addGuildCoins not available, skipping guild coin reward');
             }
@@ -12903,7 +12899,7 @@ function createNPCCooldownManager() {
               missionPrompt: mission.prompt,
               thankYou: mission.accept,
               keyQuestion: mission.askForItem || 'Have you found what I asked for?',
-              keyComplete: mission.complete,
+              keyComplete: getMissionCompleteLine(mission),
               keyScoldNoKey: mission.missingItem || 'You claim yes but lack what I asked for.',
               keyKeepSearching: mission.keepSearching,
               keyAnswerYesNo: mission.answerYesNo,
@@ -13485,11 +13481,12 @@ function createNPCCooldownManager() {
                 (globalThis.Guilds && globalThis.Guilds.addGuildCoins) ||
                 (globalThis.BestiaryModAPI && globalThis.BestiaryModAPI.guilds && globalThis.BestiaryModAPI.guilds.addGuildCoins) ||
                 (typeof addGuildCoins === 'function' ? addGuildCoins : null);
-              if (coinsAdder) {
-                await coinsAdder(KING_GUILD_COIN_REWARD);
+              const monksStudyCoins = KING_MONKS_STUDY_MISSION.rewardCoins || 0;
+              if (coinsAdder && monksStudyCoins > 0) {
+                await coinsAdder(monksStudyCoins);
               }
               costelloAwaitingHolyTible = false;
-              costelloCooldown.queueResponse(text, formatDialogueLine(getMissionDialogueLine(KING_MONKS_STUDY_MISSION, 'costelloStudyComplete', 'Thank you. Your study here is complete. Here are {coins} guild coins as a reward.'), { coins: KING_GUILD_COIN_REWARD }), addMessageToConversation, 'Costello');
+              costelloCooldown.queueResponse(text, formatDialogueLine(getMissionDialogueLine(KING_MONKS_STUDY_MISSION, 'costelloStudyComplete', 'Thank you. Your study here is complete. Here are {coins} guild coins as a reward.'), { coins: monksStudyCoins }), addMessageToConversation, 'Costello');
             } else {
               costelloCooldown.queueResponse(text, getMissionDialogueLine(KING_MONKS_STUDY_MISSION, 'costelloHolyTibleMissing', 'You do not have the Holy Tible. Return when you have it.'), addMessageToConversation, 'Costello');
             }
@@ -20750,7 +20747,7 @@ function createNPCCooldownManager() {
 
   // Tile 47 in Dragon Lair (The Dragonmother) — right-click menu with Descend (requires Dragon Claw)
   function hasDragonClawForStairs() {
-    return getCachedQuestItemCount('Dragon Claw') > 0;
+    return getCachedQuestItemCount(getDragonClawProductName()) > 0;
   }
 
   function closeTile47LonesomeDragonContextMenu() {
@@ -20841,7 +20838,7 @@ function createNPCCooldownManager() {
     if (!hasClaw) {
       try {
         const questItems = await getQuestItems(false);
-        hasClaw = (questItems?.['Dragon Claw'] || 0) > 0;
+        hasClaw = (questItems?.[getDragonClawProductName()] || 0) > 0;
       } catch (_) { /* ignore */ }
     }
     if (!hasClaw) {

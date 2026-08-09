@@ -4682,15 +4682,32 @@ function showCopyNotification(message, isError = false) {
 }
 
 // Show the configuration modal and prepare for analysis
+function isConfigPanelOpen() {
+  const panelEl = document.getElementById(CONFIG_PANEL_ID);
+  if (!panelEl || !document.body.contains(panelEl)) return false;
+  if (panelEl.getAttribute('data-state') === 'open') return true;
+  return panelEl.style.display === 'flex';
+}
+
 function showConfigAndPrepareAnalysis() {
-  // Create the configuration panel with a callback
-  createConfigPanel(() => {
-    // This function will be called when the Start Analysis button is clicked
+  if (isConfigPanelOpen()) {
+    if (activeConfigPanel?.close) {
+      activeConfigPanel.close();
+    } else {
+      api.ui.toggleConfigPanel(CONFIG_PANEL_ID);
+    }
+    activeConfigPanel = null;
+    return;
+  }
+
+  activeConfigPanel = createConfigPanel(() => {
     runAnalysis();
   });
-  
-  // Show the configuration panel
-  api.ui.toggleConfigPanel(CONFIG_PANEL_ID);
+
+  const panelEl = document.getElementById(CONFIG_PANEL_ID);
+  if (panelEl && panelEl.getAttribute('data-state') !== 'open') {
+    api.ui.toggleConfigPanel(CONFIG_PANEL_ID);
+  }
 }
 
 // =======================
@@ -4870,9 +4887,6 @@ function init() {
     }
   });
   
-  
-  // Create the configuration panel (without analysis callback)
-  createConfigPanel();
   
   // Inject custom CSS to fix input styles
   injectCustomStyles();

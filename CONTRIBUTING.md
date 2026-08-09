@@ -126,6 +126,7 @@ If you're adding new features or changing existing ones, please update the docum
 3. Add screenshots if they help explain the feature
 4. Follow the existing documentation style
 5. If you add or change extension permissions or network hosts, update [`privacy_policy.md`](privacy_policy.md), [`README.md`](README.md), and [`Wikitext.wikitext`](Wikitext.wikitext) so store/wiki copy stays accurate
+6. If you change Quest mod content under `assets/quests/`, see [Quest mod data](docs/quests_data.md) for the JSON layout, reward field conventions, and new-mission checklist
 
 ## Creating Mods
 

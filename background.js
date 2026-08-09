@@ -229,7 +229,7 @@ const HARDCODED_MOD_COUNTS = {
   database: 9,
   official: 11,
   super: 27,
-  ot: 4
+  ot: 5
 };
 
 async function loadDefaultEnabledMods() {

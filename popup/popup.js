@@ -1530,7 +1530,8 @@ const modDescriptions = {
   'Stamina Optimizer': 'Starts or stops gameplay at min/max stamina; coordinates with other farming mods.',
   'Awaken Tracker': 'Tracks per-map awaken gene progress with live stat deltas, event logs, and pause-on-cap.',
   'Quests': 'Quest tracking, NPC dialogs, quest items, and Firebase-backed progress.',
-  'VIP List': 'Track favorite players with profiles, sortable stats, and Cyclopedia links.'
+  'VIP List': 'Track favorite players with profiles, sortable stats, and Cyclopedia links.',
+  'Map Editor': 'Experimental — battlefield tile inspector: replace sprites, hitbox overlay, export JSON for quest config.'
 };
 
 const modAuthorProfileUrls = {
@@ -1573,7 +1574,8 @@ const otModNames = [
   'Challenges.js',
   'Quests.js',
   'Guilds.js',
-  'VIP List.js'
+  'VIP List.js',
+  'Map_Editor.js'
 ];
 
 const hiddenMods = [

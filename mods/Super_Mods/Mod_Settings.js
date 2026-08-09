@@ -7246,7 +7246,12 @@ function createSettingsDropdownHandler(configKey, onChangeCallback) {
 // Show settings modal
 function showSettingsModal() {
   try {
-    if (document.querySelector('.mod-settings-modal-root')) {
+    if (modSettingsModalInstance || document.querySelector('.mod-settings-modal-root')) {
+      if (modSettingsModalInstance && typeof modSettingsModalInstance.close === 'function') {
+        modSettingsModalInstance.close();
+      } else {
+        teardownSettingsModal();
+      }
       return;
     }
 

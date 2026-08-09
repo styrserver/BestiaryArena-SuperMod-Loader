@@ -4177,6 +4177,15 @@ function setupTaskerModalResponsiveLayout(modalRef, contentRoot) {
 // Open Tasker Settings Modal
 function openTaskerSettingsModal() {
     try {
+        if (activeTaskerModal) {
+            if (typeof activeTaskerModal.close === 'function') {
+                activeTaskerModal.close();
+            } else {
+                cleanupTaskerModal();
+            }
+            return;
+        }
+
         const now = Date.now();
         if (taskerModalInProgress) return;
         if (now - lastModalCall < 1000) return;

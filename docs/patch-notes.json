@@ -4,17 +4,97 @@
   },
   "notes": [
     {
-      "version": "4.8.2",
+      "version": "4.8.3",
       "changes": [
         {
-          "mod": "Awaken Tracker",
+          "mod": "Autoseller",
           "type": "fixed",
-          "text": "Awaken Farmer resumes in autoplay mode after stamina recovery instead of clicking Start in manual mode."
+          "text": "Settings button closes the panel on a second click; inventory auto badges still switch tabs when a different category is selected."
         },
         {
           "mod": "Awaken Tracker",
           "type": "changed",
+          "text": "Awaken Farmer and Overview farm-map lists rank maps by spawn % → variety → stamina efficiency → closest to cap (gene sum), then region order. Map rows still show target gene stats; sort hints updated."
+        },
+        {
+          "mod": "Battle Helper",
+          "type": "changed",
+          "text": "Help board requests expire after 3 days instead of 7. Close my request uses a red button."
+        },
+        {
+          "mod": "Battle Helper",
+          "type": "fixed",
+          "text": "Cannot publish a setup unless you are on the requested map."
+        },
+        {
+          "mod": "Better Boosted Maps",
+          "type": "fixed",
+          "text": "Settings button closes the panel on a second click."
+        },
+        {
+          "mod": "Better Setups",
+          "type": "fixed",
+          "text": "Settings button closes the panel on a second click."
+        },
+        {
+          "mod": "Better Tasker",
+          "type": "fixed",
+          "text": "Settings button closes the panel on a second click."
+        },
+        {
+          "mod": "Board Analyzer",
+          "type": "fixed",
+          "text": "Mod button closes the config panel on a second click instead of reopening it."
+        },
+        {
+          "mod": "Manual Runner",
+          "type": "fixed",
+          "text": "Mod button closes the config panel on a second click instead of reopening it."
+        },
+        {
+          "mod": "Map Editor",
+          "type": "added",
+          "text": "Experimental battlefield tile editor: add, hide, or replace sprites; browse assets from all maps; per-map named saves; hitbox overlay; JSON export."
+        },
+        {
+          "mod": "Mod Loader",
+          "type": "changed",
+          "text": "Documentation corrections: README and Wikitext now list 5 OT Mods (Map Editor added) and link quests_data.md and item_finder.md; mod_development_guide and mod_loading_optimizations clarify that custom-battles.js and event-competition.js are injected once by injector.js (content_injector.js is not loaded) and utility_injector.js only loads ba-sandbox-utils.mjs."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "fixed",
+          "text": "Better UI settings button closes the panel on a second click instead of doing nothing while open."
+        },
+        {
+          "mod": "Quests",
+          "type": "changed",
+          "text": "Quest data refactored for smaller Quests.js and less duplication: new assets/quests/config.json (timing, modal layout, UI chrome); toast builder metadata and variant styling in toasts.json; seal phrase patterns in npcs.json; mission registry and story order load only from missions.json; shared helpers for completion dialogue and reward summaries; coin payouts and hand-in lines read rewardCoins from mission data; reward metadata consolidated in missions.json (item rewards use rewardItemName/rewardProductId). Contributor guide: docs/quests_data.md (linked from CONTRIBUTING.md and the Mod Development Guide)."
+        },
+        {
+          "mod": "Raid Hunter",
+          "type": "fixed",
+          "text": "Settings button closes the panel on a second click."
+        },
+        {
+          "mod": "Stamina Optimizer",
+          "type": "fixed",
+          "text": "Mod button closes the settings panel on a second click."
+        }
+      ]
+    },
+    {
+      "version": "4.8.2",
+      "changes": [
+        {
+          "mod": "Awaken Tracker",
+          "type": "changed",
           "text": "Awaken Farmer startup toast shows before the navigate delay (same timing as Raid Hunter) instead of after Start is clicked; 10s cooldown prevents spam on rapid restarts."
+        },
+        {
+          "mod": "Awaken Tracker",
+          "type": "fixed",
+          "text": "Awaken Farmer resumes in autoplay mode after stamina recovery instead of clicking Start in manual mode."
         },
         {
           "mod": "Battle Helper",
@@ -62,16 +142,6 @@
           "text": "Footer actions stay inside the panel when resizing (wrap/shrink instead of overflowing). Panel min-width is derived from tab label widths so Tracker / Overview / Awaken Farmer text is never clipped. Cleaned up event listeners, toast containers, and reload guards on mod disable to prevent memory leaks."
         },
         {
-          "mod": "Challenges",
-          "type": "added",
-          "text": "Solo live toast now includes a Cancel button: clicking it restores the player's original creatures and equipment, exits sandbox, and navigates back to the map they were on before joining."
-        },
-        {
-          "mod": "Challenges",
-          "type": "fixed",
-          "text": "Start button is no longer greyed out after canceling or finishing a solo challenge and re-opening the modal."
-        },
-        {
           "mod": "Better Boosted Maps",
           "type": "changed",
           "text": "Start delay is fixed at 3s before navigate (removed the 1–10s setting)."
@@ -80,6 +150,16 @@
           "mod": "Better Tasker",
           "type": "changed",
           "text": "Task start delay is fixed at 3s (removed the 1–10s setting)."
+        },
+        {
+          "mod": "Challenges",
+          "type": "added",
+          "text": "Solo live toast now includes a Cancel button: clicking it restores the player's original creatures and equipment, exits sandbox, and navigates back to the map they were on before joining."
+        },
+        {
+          "mod": "Challenges",
+          "type": "fixed",
+          "text": "Start button is no longer greyed out after canceling or finishing a solo challenge and re-opening the modal."
         },
         {
           "mod": "Raid Hunter",
@@ -102,6 +182,11 @@
           "text": "Pause-on-cap no longer drops marks when a creature hits 5/5 without pausing: marks stay until the pause button is clicked successfully, event after-stats are trusted when inventory lags, and inventory updates retry the pause if the earlier attempt missed. Awaken Farmer no longer starts from inventory updates during boot grace (which raced ahead of Raid Hunter). Pause-on-cap defaults to checked globally for all awakened (non-pre-capped) species and is shared across Tracker and Overview; unchecks are remembered as a global opt-out. Awaken Farmer no longer treats Raid Hunter as enabled when RH automation is off (false Mod Coordination enabled flag) — that previously blocked farming whenever any live raids existed. Awaken Farmer only yields to Raid Hunter for claimable (enabled-map) live raids, not disabled raids RH will skip."
         },
         {
+          "mod": "Battle Helper",
+          "type": "changed",
+          "text": "Ask for help: mandatory targets by goal — ticks (≥1), S+ rank (1–map max via Better Highscores (2×maxTeamSize)−1), or floor (1–15); values clamp on blur/map/goal change; validation shows red border + error under the failing field. Notes capped at 80 characters with a live counter. Selecting a request no longer auto-navigates; Load their profile / Open map navigates (and loads profile for others) — floor goals open that floor, ticks/rank open floor 0. Viewing/helping toast includes a blue Restore button; restoring shows “Original profile restored”. Publish setup toast returns to Publish after 5s; blocks duplicate setups and caps 3 setups per username per request. Restore Original Profile button uses the blue Load Setup style."
+        },
+        {
           "mod": "Bestiary Automator",
           "type": "changed",
           "text": "Settings panel grouped into collapsible sections (Stamina, Rewards, Autoplay, Advanced) matching Custom Display; Autohandle Daycare under Rewards; Delay (ms) under Autoplay. Top section open by default, expand/collapse remembered."
@@ -120,11 +205,6 @@
           "mod": "Better Tasker",
           "type": "changed",
           "text": "Auto-start on reload waits for allModsLoaded + 5s boot grace (same contract as other farming mods)."
-        },
-        {
-          "mod": "Battle Helper",
-          "type": "changed",
-          "text": "Ask for help: mandatory targets by goal — ticks (≥1), S+ rank (1–map max via Better Highscores (2×maxTeamSize)−1), or floor (1–15); values clamp on blur/map/goal change; validation shows red border + error under the failing field. Notes capped at 80 characters with a live counter. Selecting a request no longer auto-navigates; Load their profile / Open map navigates (and loads profile for others) — floor goals open that floor, ticks/rank open floor 0. Viewing/helping toast includes a blue Restore button; restoring shows “Original profile restored”. Publish setup toast returns to Publish after 5s; blocks duplicate setups and caps 3 setups per username per request. Restore Original Profile button uses the blue Load Setup style."
         },
         {
           "mod": "Board Analyzer",
@@ -657,14 +737,14 @@
           "text": "Overview portrait, level, and border layout aligned with game inventory slots."
         },
         {
-          "mod": "Cyclopedia",
-          "type": "changed",
-          "text": "Perfect/Shiny progress max comes only from creature-database (removed hardcoded 76 floor)."
-        },
-        {
           "mod": "creature-database.js",
           "type": "changed",
           "text": "Football Elemental re-added to EVENT_CREATURES (excluded from awakening, Autoscroller/Autoseller pickers, and Perfect/Shiny progress)."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "changed",
+          "text": "Perfect/Shiny progress max comes only from creature-database (removed hardcoded 76 floor)."
         },
         {
           "mod": "Quests",

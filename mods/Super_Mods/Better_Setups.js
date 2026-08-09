@@ -78,6 +78,7 @@ let globalClickHandler = null;
 
 // Track pending label remove confirmation in settings (one at a time)
 let activeLabelRemoveConfirmation = null;
+let activeSettingsModal = null;
 let missingEquipmentAuditBadgeCache = {
   timestamp: 0,
   count: 0
@@ -2604,6 +2605,13 @@ function showMissingEquipmentAuditModal() {
 
 function showSettingsModal() {
   try {
+    if (activeSettingsModal || document.getElementById('better-setups-settings-panel')) {
+      closeModalInstance(activeSettingsModal);
+      activeSettingsModal = null;
+      clearBetterSetupsModalLayoutCleanup();
+      return;
+    }
+
     clearBetterSetupsModalLayoutCleanup();
     clearLabelRemoveConfirmationListener();
     console.log('[Better Setups] showSettingsModal() called');
@@ -2660,9 +2668,21 @@ function showSettingsModal() {
         }
       ],
       onClose: () => {
+        activeSettingsModal = null;
         clearBetterSetupsModalLayoutCleanup();
       }
     });
+
+    activeSettingsModal = modalRef;
+
+    const originalClose = modalRef?.close?.bind(modalRef);
+    if (originalClose) {
+      modalRef.close = () => {
+        activeSettingsModal = null;
+        clearBetterSetupsModalLayoutCleanup();
+        originalClose();
+      };
+    }
 
     setupBetterSetupsModalResponsiveLayout(modalRef, content);
     injectSettingsModalAutosaveFooter();

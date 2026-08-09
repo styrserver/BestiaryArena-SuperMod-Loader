@@ -45,7 +45,7 @@ const FALLBACK_SUPER_MODS = [
   'Mod Settings.js', 'Outfiter.js', 'Raid_Hunter.js', 'Manual Runner.js',
   'RunTracker.js', 'Stamina Optimizer.js', 'Awaken Tracker.js'
 ];
-const FALLBACK_OT_MODS = ['Challenges.js', 'Quests.js', 'Guilds.js', 'VIP List.js'];
+const FALLBACK_OT_MODS = ['Challenges.js', 'Quests.js', 'Guilds.js', 'VIP List.js', 'Map_Editor.js'];
 const WELCOME_MOD_PATH = 'database/welcome.js';
 const LEGACY_WELCOME_MOD_PATH = 'database/Welcome.js';
 

@@ -1480,7 +1480,26 @@
             namesById.set(g.gameId, g.name);
         }
         targets.sort((a, b) => (b.bestUncapped?.sum || 0) - (a.bestUncapped?.sum || 0) || a.name.localeCompare(b.name));
-        return { targets, wantedIds: new Set(targets.map(t => t.gameId)), namesById };
+        const progressById = new Map(targets.map(t => [t.gameId, t.bestUncapped.sum]));
+        return { targets, wantedIds: new Set(targets.map(t => t.gameId)), namesById, progressById };
+    }
+
+    /** Best uncapped gene-sum per species (highest awaken copy), for map-rank tiebreaks. */
+    function buildBestUncappedSumByGameId(wantedIds) {
+        const map = new Map();
+        if (!wantedIds?.size) return map;
+        const monsters = globalThis.state?.player?.getSnapshot?.()?.context?.monsters || [];
+        for (const m of monsters) {
+            if (!m || m.gameId == null || !isAwakenedCreatureLocal(m)) continue;
+            const gameId = Number(m.gameId);
+            if (!Number.isFinite(gameId) || !wantedIds.has(gameId)) continue;
+            const stats = getMonsterGeneStatsLocal(m);
+            if (isAwakenedCappedStats(stats)) continue;
+            const sum = STATS.reduce((a, k) => a + (Number(stats[k]) || 0), 0);
+            const prev = map.get(gameId);
+            if (prev == null || sum > prev) map.set(gameId, sum);
+        }
+        return map;
     }
 
     function isRaidRoomId(roomId, room) {
@@ -1552,6 +1571,7 @@
         }
         const ROOM_NAME = utils.ROOM_NAME || {};
         const regionIdsToNames = utils.regionIdsToNames || {};
+        const progressById = options.progressById || buildBestUncappedSumByGameId(wantedIds);
         const results = [];
         let orderIdx = 0;
         const requireFarmFloor = options.requireFarmFloor !== false;
@@ -1598,12 +1618,17 @@
                 const stamina = Number(room.staminaCost ?? 0);
                 const wantedPerStamina = stamina > 0 ? wantedTotal / stamina : wantedTotal;
                 const farmFloor = pickAwakenFarmFloor(room.id);
+                let bestWantedSum = 0;
+                for (const id of wantedByCreature.keys()) {
+                    const sum = progressById.get(id);
+                    if (sum != null && sum > bestWantedSum) bestWantedSum = sum;
+                }
 
                 results.push({
                     roomId: room.id,
                     mapName: ROOM_NAME[room.id] || room.id,
                     regionName, stamina, totalVillains, wantedTotal, uniqueWanted,
-                    density, wantedPerStamina, defaultOrder: orderIdx++,
+                    density, wantedPerStamina, bestWantedSum, defaultOrder: orderIdx++,
                     isRaid,
                     farmFloor,
                     maxUnlockedFloor: getMaxUnlockedFloorForRoom(room.id),
@@ -1621,6 +1646,8 @@
         results.sort((a, b) =>
             b.uniqueWanted - a.uniqueWanted
             || b.wantedPerStamina - a.wantedPerStamina
+            || b.density - a.density
+            || b.bestWantedSum - a.bestWantedSum
             || a.defaultOrder - b.defaultOrder
         );
         return { results, raidCount: results.filter(r => r.isRaid).length, error: null };
@@ -2528,7 +2555,7 @@
 
         farmerRuntime.busy = true;
         try {
-            const { wantedIds, namesById, targets } = collectAwakenedNotCappedTargets();
+            const { wantedIds, namesById, targets, progressById } = collectAwakenedNotCappedTargets();
             if (wantedIds.size === 0) {
                 if (farmerRuntime.status !== 'done') {
                     console.log('[Awaken Farmer] Done — all awakened creatures are gene-capped');
@@ -2539,7 +2566,7 @@
                 return;
             }
 
-            const ranked = rankMapsForWantedIds(wantedIds, namesById);
+            const ranked = rankMapsForWantedIds(wantedIds, namesById, { progressById });
             const queue = ranked.results || [];
             if (queue.length === 0) {
                 if (farmerRuntime.status !== 'no-maps') {
@@ -3730,8 +3757,8 @@
             farmerRefillInput.checked = settings.autoRefillStamina;
             populateFarmerSetupOptions(settings.setupLabel);
 
-            const { targets, wantedIds, namesById } = collectAwakenedNotCappedTargets();
-            const ranked = rankMapsForWantedIds(wantedIds, namesById);
+            const { targets, wantedIds, namesById, progressById } = collectAwakenedNotCappedTargets();
+            const ranked = rankMapsForWantedIds(wantedIds, namesById, { progressById });
             const queue = ranked.results || [];
 
             const targetSummary = targets.slice(0, 8).map(x => x.name).join(', ')

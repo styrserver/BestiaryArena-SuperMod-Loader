@@ -164,6 +164,8 @@
     let messageListener = null;
     let menuColorObserver = null; // MutationObserver for menu color updates
     let autosellerModalLayoutCleanup = null;
+    let autosellerModalInstance = null;
+    let autosellerActiveCategoryId = null;
     let checkboxListeners = []; // Track checkbox event listeners for cleanup
     let dragonPlantDebounceTimer = null; // Debounce timer for dragon plant observer
     const AUTO_BADGE_SLOTS = {
@@ -8139,6 +8141,7 @@
         const menuItem = document.querySelector(`.autoseller-modal-root [data-category="${resolvedCategoryId}"]`);
         if (!menuItem) return false;
         menuItem.click();
+        autosellerActiveCategoryId = resolvedCategoryId;
         return true;
     }
 
@@ -8146,8 +8149,18 @@
         const validCategoryIds = ['autoplant', 'autosqueeze', 'autoduster'];
         const categoryId = validCategoryIds.includes(initialCategoryId) ? initialCategoryId : 'autoplant';
 
-        if (selectAutosellerModalCategory(categoryId)) {
-            return;
+        if (document.querySelector('.autoseller-modal-root') && autosellerActiveCategoryId !== null) {
+            if (autosellerActiveCategoryId === categoryId) {
+                if (autosellerModalInstance?.close) {
+                    autosellerModalInstance.close();
+                }
+                autosellerModalInstance = null;
+                autosellerActiveCategoryId = null;
+                return;
+            }
+            if (selectAutosellerModalCategory(categoryId)) {
+                return;
+            }
         }
 
         if (typeof api !== 'undefined' && api && api.ui && api.ui.components && api.ui.components.createModal) {
@@ -8444,6 +8457,7 @@
                     
                     // Update right column content
                     updateRightColumn(item.id);
+                    autosellerActiveCategoryId = item.id;
                 });
                 
                 // Add hover effect
@@ -8575,8 +8589,13 @@
                 ]
             });
             
+            autosellerModalInstance = modalInstance;
+            autosellerActiveCategoryId = categoryId;
+
             if (modalInstance && typeof modalInstance.onClose === 'function') {
                 modalInstance.onClose(() => {
+                    autosellerModalInstance = null;
+                    autosellerActiveCategoryId = null;
                     clearAutosellerModalLayoutCleanup();
                 });
             }
@@ -8584,6 +8603,8 @@
             const originalClose = modalInstance?.close?.bind(modalInstance);
             if (originalClose) {
                 modalInstance.close = () => {
+                    autosellerModalInstance = null;
+                    autosellerActiveCategoryId = null;
                     clearAutosellerModalLayoutCleanup();
                     originalClose();
                 };

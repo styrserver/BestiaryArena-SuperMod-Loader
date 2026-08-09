@@ -48,6 +48,7 @@ This guide provides comprehensive documentation on creating mods for Bestiary Ar
     - [Simple Mod: Show Current Monster Count](#simple-mod-show-current-monster-count)
     - [Advanced Mod: Map Analysis Tool](#advanced-mod-map-analysis-tool)
   - [Further Resources](#further-resources)
+    - [Quest mod data (`assets/quests`)](#quest-mod-data-assetsquests)
 
 ## Introduction
 
@@ -810,7 +811,7 @@ For more details on the game state API, see the [Game State API Documentation](g
 
 ### Community event competitions
 
-`content/event-competition.js` exposes `window.EventCompetition`, a config-driven framework for Firebase-backed floor/rank leaderboards (join flow, modal UI, auto-submit on victory, raid timer). Better Highscores registers Tibia Ball League via a thin adapter; future timed events can call `EventCompetition.register(config, deps)` with their own `roomId`, Firebase paths, floor ranges, and `i18nPrefix`. The script is injected after `custom-battles.js` by `injector.js`, `utility_injector.js`, and `content_injector.js`. Wait for `window.EventCompetition` if your mod loads before the framework (same pattern as `window.CustomBattles` in Quests). When a known event room is live in `state.raids` but no adapter is registered (e.g. Better Highscores disabled), the framework shows a one-shot nudge toast telling the player to enable Better Highscores.
+`content/event-competition.js` exposes `window.EventCompetition`, a config-driven framework for Firebase-backed floor/rank leaderboards (join flow, modal UI, auto-submit on victory, raid timer). Better Highscores registers Tibia Ball League via a thin adapter; future timed events can call `EventCompetition.register(config, deps)` with their own `roomId`, Firebase paths, floor ranges, and `i18nPrefix`. The script is injected after `custom-battles.js` by `injector.js` (before `local_mods.js`), so it is available to all bundled mods. Wait for `window.EventCompetition` if your mod loads before the framework (same pattern as `window.CustomBattles` in Quests). When a known event room is live in `state.raids` but no adapter is registered (e.g. Better Highscores disabled), the framework shows a one-shot nudge toast telling the player to enable Better Highscores.
 
 ## Best Practices
 
@@ -1320,6 +1321,10 @@ exports = {
 For more examples, check out the existing mods in the `mods` directory.
 
 ## Further Resources
+
+### Quest mod data (`assets/quests`)
+
+The bundled **Quests** mod (`mods/OT_Mods/Quests.js`) loads copy, items, battles, placements, and tuning from JSON under `assets/quests/`. See **[Quest mod data](quests_data.md)** for the file map, reward field conventions (`rewardCoins`, `{coins}` in dialogue, `rewardProductId`), what stays in JavaScript, and the checklist for adding a mission.
 
 - [Mod Loading System](mod_loading_optimizations.md) - Loader order, mobile/relaxed path, and popup Error Log
 - [Orion iOS Compatibility](orion_ios_compatibility.md) - WebKit/Orion platform constraints and extension resource loading

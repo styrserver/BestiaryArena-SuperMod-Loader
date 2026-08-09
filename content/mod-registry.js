@@ -84,7 +84,8 @@ export const OT_MODS = [
   'Challenges.js',
   'Quests.js',
   'Guilds.js',
-  'VIP List.js'
+  'VIP List.js',
+  'Map_Editor.js'
 ];
 
 // Mods that are enabled by default for new users

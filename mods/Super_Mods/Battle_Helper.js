@@ -22,7 +22,8 @@ const BATTLE_HELPER_MODAL_ID = 'battle-helper-modal';
 const BATTLE_HELPER_BUTTON_CLASS = {
   primary: 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular frame-1-green active:frame-pressed-1-green surface-green gap-1 px-2 py-0.5 pb-[3px] pixel-font-14',
   secondary: 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular frame-1 active:frame-pressed-1 surface-regular gap-1 px-2 py-0.5 pb-[3px] pixel-font-14',
-  blue: 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular frame-1-blue active:frame-pressed-1-blue surface-blue gap-1 px-2 py-0.5 pb-[3px] pixel-font-14'
+  blue: 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular frame-1-blue active:frame-pressed-1-blue surface-blue gap-1 px-2 py-0.5 pb-[3px] pixel-font-14',
+  danger: 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular frame-1-red active:frame-pressed-1-red surface-red gap-1 px-2 py-0.5 pb-[3px] pixel-font-14'
 };
 const BATTLE_HELPER_BLUE_BUTTON_STYLE = [
   'width: 100%; cursor: pointer; color: rgb(255, 255, 255);',
@@ -46,7 +47,7 @@ const BATTLE_HELPER_PROFILE_URL_BASE = 'https://bestiaryarena.com/profile/';
 
 const FIREBASE_URL = 'https://vip-list-messages-default-rtdb.europe-west1.firebasedatabase.app';
 const BATTLE_HELP_REQUESTS_PATH = `${FIREBASE_URL}/battle-help/requests`;
-const BATTLE_HELP_REQUEST_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const BATTLE_HELP_REQUEST_TTL_MS = 3 * 24 * 60 * 60 * 1000;
 const BATTLE_HELP_MAX_OPEN_PER_USER = 3;
 const BATTLE_HELP_MAX_REPLIES_PER_USER = 3;
 const BATTLE_HELP_GOAL_TYPES = ['ticks', 'rank', 'floor'];
@@ -598,6 +599,42 @@ function findMapOptionForCurrentRoom(mapOptions = getHelpMapOptions()) {
   return mapOptions.find((m) => String(m.id) === String(roomId)) || null;
 }
 
+/** True when the player is on the map the help request is for. */
+function isOnHelpRequestMap(request) {
+  if (!request) return false;
+  const expectedRoomId = resolveRoomIdForRequest(request);
+  const currentRoomId = getCurrentRoomId();
+  if (expectedRoomId && currentRoomId) {
+    return String(currentRoomId) === String(expectedRoomId);
+  }
+  const current = findMapOptionForCurrentRoom();
+  if (!current) return false;
+  if (request.mapKey && current.mapKey) {
+    return request.mapKey === current.mapKey;
+  }
+  if (request.mapName && current.name) {
+    return request.mapName === current.name;
+  }
+  return false;
+}
+
+function isOnSessionHelpMap() {
+  const expectedRoomId = String(sessionState.helpRoomId || '').trim();
+  if (!expectedRoomId) return false;
+  const currentRoomId = getCurrentRoomId();
+  return !!(currentRoomId && String(currentRoomId) === expectedRoomId);
+}
+
+function resolveHelpRequestForPublishGate(requestId) {
+  const id = String(requestId || '').trim();
+  if (!id) return null;
+  return helpBoardState.requests.find((r) => r.id === id) || null;
+}
+
+function canPublishHelpSetupForRequest(request) {
+  return Boolean(request) && hasCreaturesOnBoard() && isOnHelpRequestMap(request);
+}
+
 function formatHelpGoalLabel(goalType, goalValue) {
   const typeLabel = t(`mods.battleHelper.help.goalTypes.${goalType}`) || goalType;
   if (goalValue != null && goalValue !== '' && Number.isFinite(Number(goalValue))) {
@@ -1044,6 +1081,13 @@ async function publishHelpReply(requestId, note = '') {
     throw new Error(t('mods.battleHelper.help.errors.selectRequestFirst'));
   }
 
+  if (!isOnHelpRequestMap(request)) {
+    const { mapLabel } = getHelpMapContextForRequest(request);
+    throw new Error(tReplace('mods.battleHelper.help.errors.wrongMap', {
+      map: mapLabel || request.mapName || t('mods.battleHelper.unknown')
+    }));
+  }
+
   const duplicate = findDuplicateHelpReply(request, replayLink);
   if (duplicate) {
     throw new Error(t('mods.battleHelper.help.errors.duplicateSetup'));
@@ -1085,7 +1129,8 @@ const sessionState = {
   lastUsername: '',
   replaced: false,
   helpMapName: '',
-  helpRequestId: ''
+  helpRequestId: '',
+  helpRoomId: ''
 };
 const helpBoardState = {
   selectedId: null,
@@ -1134,14 +1179,23 @@ function removeBattleHelperToastContainer() {
 
 function syncPublishSetupButtons() {
   const hasCreatures = hasCreaturesOnBoard();
+  const toastRequest = resolveHelpRequestForPublishGate(
+    sessionState.helpRequestId || helpBoardState.selectedId
+  );
+  const toastOnMap = toastRequest
+    ? isOnHelpRequestMap(toastRequest)
+    : (sessionState.helpRequestId ? isOnSessionHelpMap() : false);
+  const modalRequest = resolveHelpRequestForPublishGate(helpBoardState.selectedId);
+  const modalAllowed = canPublishHelpSetupForRequest(modalRequest);
+
   if (battleHelperPublishToastBtn) {
     const busy = battleHelperPublishToastBtn.dataset.busy === '1';
     if (!busy) {
-      battleHelperPublishToastBtn.disabled = !hasCreatures;
+      battleHelperPublishToastBtn.disabled = !(hasCreatures && toastOnMap);
     }
   }
   if (battleHelperModalPublishBtn) {
-    battleHelperModalPublishBtn.disabled = battleHelperModalPublishBaseDisabled || !hasCreatures;
+    battleHelperModalPublishBtn.disabled = battleHelperModalPublishBaseDisabled || !modalAllowed;
   }
 }
 
@@ -1265,6 +1319,7 @@ function applyArsenalReplacement(normalized, options = {}) {
   sessionState.replaced = true;
   sessionState.helpMapName = String(options.helpMapName || '').trim();
   sessionState.helpRequestId = String(options.helpRequestId || '').trim();
+  sessionState.helpRoomId = String(options.helpRoomId || '').trim();
   syncBattleHelperButtonState();
   startBattleHelperViewingProfileToast(
     normalized.profileName,
@@ -1295,6 +1350,7 @@ function restoreOriginalArsenal() {
   sessionState.replaced = false;
   sessionState.helpMapName = '';
   sessionState.helpRequestId = '';
+  sessionState.helpRoomId = '';
   abortHelpBoardInFlightOperations();
   if (typeof clearHelpSelectionRef === 'function') {
     clearHelpSelectionRef();
@@ -1578,6 +1634,11 @@ function showBattleHelperPublishSetupToast() {
     publishBtn.textContent = t('mods.battleHelper.toast.publishSetup');
     publishBtn.addEventListener('click', async () => {
       if (publishBtn.disabled || !hasCreaturesOnBoard()) return;
+      const gateRequest = resolveHelpRequestForPublishGate(
+        sessionState.helpRequestId || helpBoardState.selectedId
+      );
+      const onMap = gateRequest ? isOnHelpRequestMap(gateRequest) : isOnSessionHelpMap();
+      if (!onMap) return;
       if (battleHelperPublishToastResetTimer) {
         clearTimeout(battleHelperPublishToastResetTimer);
         battleHelperPendingTimers.delete(battleHelperPublishToastResetTimer);
@@ -1648,9 +1709,11 @@ function startBattleHelperPublishSetupToast() {
 function createActionButton(label, onClick, options = {}) {
   const button = document.createElement('button');
   button.type = 'button';
-  const variantClass = options.blue
-    ? BATTLE_HELPER_BUTTON_CLASS.blue
-    : (options.primary ? BATTLE_HELPER_BUTTON_CLASS.primary : BATTLE_HELPER_BUTTON_CLASS.secondary);
+  const variantClass = options.danger
+    ? BATTLE_HELPER_BUTTON_CLASS.danger
+    : (options.blue
+      ? BATTLE_HELPER_BUTTON_CLASS.blue
+      : (options.primary ? BATTLE_HELPER_BUTTON_CLASS.primary : BATTLE_HELPER_BUTTON_CLASS.secondary));
   button.className = `${variantClass} disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50`;
   button.style.cssText = options.blue
     ? BATTLE_HELPER_BLUE_BUTTON_STYLE
@@ -1932,7 +1995,7 @@ function buildImportPanel(onContentChange, shared) {
   }
   shared.syncImportButtons = syncButtons;
 
-  async function fetchAndOptionallyReplace(username, { replace = false, helpMapName = '', helpRequestId = '', shouldAbort = null } = {}) {
+  async function fetchAndOptionallyReplace(username, { replace = false, helpMapName = '', helpRequestId = '', helpRoomId = '', shouldAbort = null } = {}) {
     const normalizedName = normalizeUsername(username);
     if (!normalizedName) {
       setOutput(getEnterUsernameFirstOutput());
@@ -1954,11 +2017,12 @@ function buildImportPanel(onContentChange, shared) {
       if (!isSandboxEnabled()) {
         throw new Error(t('mods.battleHelper.errors.sandboxRequired'));
       }
-      applyArsenalReplacement(normalized, { helpMapName, helpRequestId });
+      applyArsenalReplacement(normalized, { helpMapName, helpRequestId, helpRoomId });
       setOutput(getProfileReplacedOutput());
     } else {
       sessionState.helpMapName = '';
       sessionState.helpRequestId = '';
+      sessionState.helpRoomId = '';
       stopBattleHelperPublishSetupToast();
       setOutput(formatFetchedProfileOutput(normalized, { includeSandboxNote: switchedToSandbox }));
     }
@@ -1987,7 +2051,7 @@ function buildImportPanel(onContentChange, shared) {
       if (!sessionState.lastNormalized) {
         throw new Error(t('mods.battleHelper.errors.fetchValidProfileFirst'));
       }
-      applyArsenalReplacement(sessionState.lastNormalized, { helpMapName: '', helpRequestId: '' });
+      applyArsenalReplacement(sessionState.lastNormalized, { helpMapName: '', helpRequestId: '', helpRoomId: '' });
       setOutput(getProfileReplacedOutput());
       syncButtons();
     } catch (error) {
@@ -2258,7 +2322,7 @@ function buildHelpBoardColumns(onContentChange, shared) {
   }
 
   async function replaceRequesterProfileForHelp(request, seq, seqRef, setStatus) {
-    const { mapLabel } = getHelpMapContextForRequest(request);
+    const { roomId, mapLabel } = getHelpMapContextForRequest(request);
     setStatus(tReplace('mods.battleHelper.output.fetchingProfile', {
       username: request.requesterName
     }));
@@ -2267,6 +2331,7 @@ function buildHelpBoardColumns(onContentChange, shared) {
         replace: true,
         helpMapName: mapLabel,
         helpRequestId: request.id,
+        helpRoomId: roomId || '',
         shouldAbort: () => seq !== seqRef
       });
     }
@@ -2389,7 +2454,7 @@ function buildHelpBoardColumns(onContentChange, shared) {
     } catch (error) {
       setHelpStatus(String(error?.message || error));
     }
-  });
+  }, { danger: true });
 
   detailActions.appendChild(loadProfileButton);
   detailActions.appendChild(publishButton);
@@ -3019,6 +3084,7 @@ context.exports = {
     sessionState.backup = null;
     sessionState.helpMapName = '';
     sessionState.helpRequestId = '';
+    sessionState.helpRoomId = '';
     helpBoardState.selectedId = null;
     helpBoardState.requests = [];
     helpBoardState.openCount = 0;

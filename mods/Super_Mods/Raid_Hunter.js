@@ -5080,6 +5080,15 @@ function setupRaidHunterModalResponsiveLayout(modalRef, contentRoot) {
 // Open Raid Hunter Settings Modal (Cyclopedia-style robust implementation)
 function openRaidHunterSettingsModal() {
     try {
+        if (activeRaidHunterModal) {
+            if (typeof activeRaidHunterModal.close === 'function') {
+                activeRaidHunterModal.close();
+            } else {
+                cleanupRaidHunterModal();
+            }
+            return;
+        }
+
         const now = Date.now();
         if (raidHunterModalInProgress) return;
         if (now - lastModalCall < 1000) return;

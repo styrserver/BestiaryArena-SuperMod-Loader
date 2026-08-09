@@ -224,6 +224,8 @@ Mods have access to the game's state through `globalThis.state`, which provides 
 - [Firebase Best Runs API](docs/firebase_runs_api.md) - Fetch and decrypt Mod Settings best-runs uploads
 - [Fetch Best Runs (HTML tool)](docs/fetch-best-runs.html) - Browser UI for fetching and decrypting uploaded runs
 - [VIP List Chat](docs/chat_documentation.md) - Private and All Chat via Firebase
+- [Quest mod data](docs/quests_data.md) - Layout of the Quests mod's JSON assets
+- [Item API discovery notes](docs/item_finder.md) - Internal console snippets for maintainers
 - [Patch notes (JSON)](docs/patch-notes.json) - Machine-readable changelog consumed by the in-loader patch notes feature
 
 ### Wiki Lua export helpers
@@ -475,7 +477,7 @@ Automatically manages stamina levels by starting/stopping gameplay (by [btlucas]
 
 ### OT Mods
 
-These are community and social mods that enhance player interaction and community features. All 4 OT Mods listed below are included by default in this loader:
+These are community and social mods that enhance player interaction and community features. All 5 OT Mods listed below are included by default in this loader:
 
 #### Challenges
 Randomized challenge runs with leaderboards and replay sharing:
@@ -500,6 +502,13 @@ Comprehensive quest system that enhances the game's quest mechanics and NPC inte
 - Quest item management and trading system with proper UI integration
 - Firebase integration for mission progress tracking across sessions
 - Interactive quest dialogs with completion tracking
+
+#### Map Editor
+Experimental battlefield tile editor for inspecting and customizing map layouts:
+- Add, hide, or replace sprites on the battlefield grid
+- Browse assets across all maps with hitbox overlay
+- Per-map named saves and JSON export for quest config
+- Integrated via the mod loader's button bar (addButton)
 
 #### VIP List
 Player management system for tracking favorite players:

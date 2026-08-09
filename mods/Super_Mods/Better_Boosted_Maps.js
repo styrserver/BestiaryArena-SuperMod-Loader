@@ -4657,6 +4657,15 @@ function cleanupModal() {
 
 function openSettingsModal() {
     try {
+        if (modState.activeModal) {
+            if (typeof modState.activeModal.close === 'function') {
+                modState.activeModal.close();
+            } else {
+                cleanupModal();
+            }
+            return;
+        }
+
         const now = Date.now();
         if (modState.modalInProgress) return;
         if (now - modState.lastModalCall < 1000) return;
