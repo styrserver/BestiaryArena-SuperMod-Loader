@@ -4,6 +4,16 @@
   },
   "notes": [
     {
+      "version": "4.8.4",
+      "changes": [
+        {
+          "mod": "Better Boosted Maps",
+          "type": "fixed",
+          "text": "Boosted map farming no longer fails during navigation with an undefined settings error."
+        }
+      ]
+    },
+    {
       "version": "4.8.3",
       "changes": [
         {

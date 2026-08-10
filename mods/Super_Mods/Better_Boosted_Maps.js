@@ -4841,11 +4841,13 @@ async function startBoostedMapFarming(force = false) {
             }
         }
 
+        const farmingSettings = loadSettings();
+
         if (!bbmBoostedEquipmentMatchesMapRules(
             farmCheck.roomId,
             farmCheck.equipId,
             farmCheck.equipStat,
-            loadSettings()
+            farmingSettings
         )) {
             console.log('[Better Boosted Maps] Not farming: boost equipment does not match map equipment rule(s)');
             return;
@@ -4906,7 +4908,7 @@ async function startBoostedMapFarming(force = false) {
             
             const { floor } = getEffectiveMapAutomationSettings(
                 farmCheck.roomId,
-                initialSettings,
+                farmingSettings,
                 farmCheck.equipId,
                 farmCheck.equipStat
             );
@@ -4925,10 +4927,9 @@ async function startBoostedMapFarming(force = false) {
         if (!checkAutomationEnabled('after navigation')) return;
         
         // Get user's selected setup method (per-map override when set)
-        const setupSettings = loadSettings();
         const { setupMethod, autoRefillStamina: effectiveAutoRefill } = getEffectiveMapAutomationSettings(
             farmCheck.roomId,
-            setupSettings,
+            farmingSettings,
             farmCheck.equipId,
             farmCheck.equipStat
         );
