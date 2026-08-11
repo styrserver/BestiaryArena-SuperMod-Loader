@@ -5048,6 +5048,24 @@ function isQuestBlipAvailable() {
     }
 }
 
+async function checkAndAcceptNewTaskIfAvailable() {
+    try {
+        if (taskerState !== TASKER_STATES.ENABLED && taskerState !== TASKER_STATES.NEW_TASK_ONLY) {
+            return;
+        }
+        if (taskOperationInProgress) {
+            return;
+        }
+        if (!isQuestBlipAvailable()) {
+            return;
+        }
+        console.log('[Better Tasker] New task available - accepting task');
+        await openQuestLogAndAcceptTask();
+    } catch (error) {
+        console.error('[Better Tasker] Error checking/accepting new task:', error);
+    }
+}
+
 function getCurrentTaskGameId() {
     try {
         return globalThis.state?.player?.getSnapshot?.()?.context?.questLog?.task?.gameId
@@ -7410,6 +7428,8 @@ function subscribeToGameState() {
                 // Use cached flag for reliability during game transitions
                 if (isRaidHunterBlockingBetterTasker || shouldBetterTaskerYieldToRaidHunter()) {
                     console.log('[Better Tasker] Raid Hunter is actively raiding - skipping session reset to avoid control conflicts');
+                    // emitEndGame is unreliable during fast raid autoplay; check here too.
+                    await checkAndAcceptNewTaskIfAvailable();
                     return;
                 }
                 
@@ -7495,9 +7515,7 @@ function subscribeToGameState() {
                 console.log('[Better Tasker] New task available check result:', newTaskAvailable);
                 
                 if (newTaskAvailable) {
-                    // openQuestLogAndAcceptTask() handles raids internally - accepts tasks but blocks navigation
-                    console.log('[Better Tasker] New task available - accepting task');
-                    await openQuestLogAndAcceptTask();
+                    await checkAndAcceptNewTaskIfAvailable();
                     return;
                 }
                 
@@ -7580,6 +7598,8 @@ function startAutomation() {
     // Check if Raid Hunter is actively raiding
     if (shouldBetterTaskerYieldToRaidHunter()) {
         console.log('[Better Tasker] Raid Hunter is actively raiding - game state monitoring active for new tasks, waiting for raid to end for full automation');
+        scheduleTaskCheck();
+        void checkAndAcceptNewTaskIfAvailable();
         return;
     }
     
@@ -7633,13 +7653,13 @@ function startAutomation() {
 
 // Pause automation during raids (keeps game state monitoring AND scheduler for new tasks)
 function pauseAutomationDuringRaid() {
-    if (!automationInterval) return;
-    
-    console.log('[Better Tasker] Pausing automation during raid (keeping game state monitoring and scheduler for new task acceptance)');
-    
-    // Clear main automation intervals (but keep game state monitoring)
-    clearInterval(automationInterval);
-    automationInterval = null;
+    if (automationInterval) {
+        console.log('[Better Tasker] Pausing automation during raid (keeping game state monitoring and scheduler for new task acceptance)');
+        clearInterval(automationInterval);
+        automationInterval = null;
+    }
+
+    scheduleTaskCheck();
 
     // DON'T clear task check timeout - we need it to wake up for new tasks during raids
     // DON'T unsubscribe from game state - we need it to accept new tasks during raids

@@ -4,6 +4,16 @@
   },
   "notes": [
     {
+      "version": "4.8.5",
+      "changes": [
+        {
+          "mod": "Better Tasker",
+          "type": "fixed",
+          "text": "New tasks are accepted again while Raid Hunter is raiding; task checks now run on raid game starts and when automation starts or pauses during raids."
+        }
+      ]
+    },
+    {
       "version": "4.8.4",
       "changes": [
         {
