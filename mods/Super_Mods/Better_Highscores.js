@@ -1506,6 +1506,39 @@
            document.body;
   }
 
+  function isLeaderboardContainerMounted() {
+    if (!leaderboardContainer) {
+      return false;
+    }
+    const mainContainer = getMainContainer();
+    return Boolean(mainContainer && mainContainer.contains(leaderboardContainer));
+  }
+
+  function normalizeLeaderboardContainerReference() {
+    if (!leaderboardContainer) {
+      return false;
+    }
+
+    if (!document.contains(leaderboardContainer)) {
+      leaderboardContainer = null;
+      return false;
+    }
+
+    const mainContainer = getMainContainer();
+    if (!mainContainer) {
+      return false;
+    }
+
+    if (!mainContainer.contains(leaderboardContainer)) {
+      mainContainer.appendChild(leaderboardContainer);
+      applyContainerStyles(leaderboardContainer);
+      console.log('[Better Highscores] Re-attached orphaned leaderboard container');
+      return true;
+    }
+
+    return true;
+  }
+
   function getMapName(mapCode) {
     // Use the proper game state API to get room names
     if (!roomNames) {
@@ -2532,6 +2565,8 @@
 
     try {
       BetterHighscoresState.isUpdating = true;
+
+      normalizeLeaderboardContainerReference();
       
       const mapCode = getCurrentMapCode();
       console.log('[Better Highscores] Detected map code:', mapCode);
@@ -2544,9 +2579,10 @@
       const shouldForceRefresh =
         Date.now() - BetterHighscoresState.lastBattleCompletionAt < DELAYS.POST_BATTLE_FRESH_WINDOW;
       
-      // Throttle updates to prevent spam, but never skip when fresh world-record data is needed.
+      // Throttle updates to prevent spam, but never skip when fresh world-record data is needed
+      // or when the leaderboard is not mounted in the current main container.
       if (mapCode === currentMapCode && 
-          leaderboardContainer && 
+          isLeaderboardContainerMounted() && 
           !shouldForceRefresh &&
           shouldThrottle(BetterHighscoresState.lastUpdateTime, DELAYS.UPDATE_THROTTLE)) {
         console.log('[Better Highscores] Skipping update - same map and recent data');
@@ -2570,9 +2606,7 @@
       
       // Check if we can update in place (same map, container exists in DOM)
       const mapChanged = mapCode !== currentMapCode;
-      const canUpdateInPlace = !mapChanged && 
-                                leaderboardContainer && 
-                                document.contains(leaderboardContainer);
+      const canUpdateInPlace = !mapChanged && isLeaderboardContainerMounted();
       
       if (canUpdateInPlace) {
         // Update existing container in place (no flickering)
@@ -2805,12 +2839,22 @@
           } else if (!isInSandbox && wasInSandbox) {
             // Just exited sandbox mode
             console.log('[Better Highscores] Exited sandbox mode');
-            
-            // Always update leaderboards when exiting sandbox mode
-            console.log('[Better Highscores] Exiting sandbox mode, updating leaderboards with current map');
-            BetterHighscoresState.preservedContainer = null;
             BetterHighscoresState.wasInSandboxMode = false;
-            updateLeaderboards();
+
+            if (!isLeaderboardContainerMounted()) {
+              if (BetterHighscoresState.preservedContainer) {
+                console.log('[Better Highscores] Exiting sandbox mode, restoring preserved leaderboard');
+                restoreContainer();
+              } else {
+                console.log('[Better Highscores] Exiting sandbox mode, recreating leaderboard');
+                leaderboardContainer = null;
+                updateLeaderboards();
+              }
+            } else {
+              BetterHighscoresState.preservedContainer = null;
+              console.log('[Better Highscores] Exiting sandbox mode, refreshing leaderboard');
+              updateLeaderboards();
+            }
           }
         });
          

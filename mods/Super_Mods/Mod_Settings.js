@@ -12060,16 +12060,53 @@ function removeAdvancedStatsOnHover() {
 // 10. Shiny Enemies
 // =======================
 
+// Helper: Resolve combat/database id from a board entity (native + custom villains).
+function resolveBoardEntityGameId(entity) {
+  if (!entity || typeof entity !== 'object') return null;
+  const raw = entity.gameId ?? entity.monsterId ?? entity.databaseId
+    ?? entity.metadata?.gameId ?? entity.metadata?.id;
+  const gameId = Number(raw);
+  return Number.isFinite(gameId) ? gameId : null;
+}
+
+function safeGetMonster(gameId) {
+  if (gameId == null || !globalThis.state?.utils?.getMonster) return null;
+  try {
+    return globalThis.state.utils.getMonster(gameId);
+  } catch (_) {
+    return null;
+  }
+}
+
+function isBoardVillainEntity(entity) {
+  return !!entity && entity.villain === true;
+}
+
 // Helper: Get sprite ID from monster metadata (handles item-type monsters)
 function getSpriteIdForEnemy(enemy) {
-  let spriteId = enemy.gameId;
-  if (globalThis.state?.utils?.getMonster) {
-    const monster = globalThis.state.utils.getMonster(enemy.gameId);
-    if (monster?.metadata?.spriteId) {
-      spriteId = monster.metadata.spriteId;
-    }
+  if (!enemy || typeof enemy !== 'object') return null;
+
+  if (enemy.outfitSpriteId != null) {
+    const outfitSpriteId = Number(enemy.outfitSpriteId);
+    if (Number.isFinite(outfitSpriteId)) return outfitSpriteId;
+  }
+
+  const gameId = resolveBoardEntityGameId(enemy);
+  if (gameId == null) return null;
+
+  let spriteId = gameId;
+  const monster = safeGetMonster(gameId);
+  if (monster?.metadata?.spriteId != null) {
+    spriteId = monster.metadata.spriteId;
   }
   return spriteId;
+}
+
+function getEnemyCreatureName(enemy) {
+  if (!enemy || typeof enemy !== 'object') return null;
+  const gameId = resolveBoardEntityGameId(enemy);
+  const monster = gameId != null ? safeGetMonster(gameId) : null;
+  return monster?.metadata?.name ?? enemy.nickname ?? enemy.name ?? null;
 }
 
 // Helper: Extract sprite ID from DOM element's class list
@@ -12125,8 +12162,8 @@ function applyShinyEnemies() {
     }
     
     
-    // Filter for enemies (villain: true)
-    const enemies = boardConfig.filter(entity => entity.villain === true);
+    // Filter for enemies (villain: true); skip null holes from transitional board state.
+    const enemies = boardConfig.filter(isBoardVillainEntity);
     
     if (enemies.length === 0) {
       console.log('[Mod Settings] No enemies found on board - start a battle to see shiny enemies!');
@@ -12140,18 +12177,15 @@ function applyShinyEnemies() {
     const enemySpriteCount = new Map();
     enemies.forEach(enemy => {
       const spriteId = getSpriteIdForEnemy(enemy);
+      if (spriteId == null) return;
       enemySpriteCount.set(spriteId, (enemySpriteCount.get(spriteId) || 0) + 1);
     });
     
     enemies.forEach(enemy => {
-      // Get monster metadata and sprite ID
-      let creatureName = null;
-      let spriteId = getSpriteIdForEnemy(enemy);
-      
-      if (globalThis.state?.utils?.getMonster) {
-        const monster = globalThis.state.utils.getMonster(enemy.gameId);
-        creatureName = monster?.metadata?.name;
-      }
+      const spriteId = getSpriteIdForEnemy(enemy);
+      if (spriteId == null) return;
+
+      const creatureName = getEnemyCreatureName(enemy);
       
       if (shouldSkipShinyEnemy(creatureName)) {
         skippedCount++;
@@ -15647,9 +15681,9 @@ function startBattleBoardObserver(options = {}) {
                   
                   if (boardConfig && spriteId) {
                     isEnemy = boardConfig.some(entity => {
-                      if (!entity.villain) return false;
+                      if (!isBoardVillainEntity(entity)) return false;
                       const entitySpriteId = getSpriteIdForEnemy(entity);
-                      return entitySpriteId === spriteId;
+                      return entitySpriteId != null && entitySpriteId === spriteId;
                     });
                   }
                   
@@ -15711,17 +15745,11 @@ function startBattleBoardObserver(options = {}) {
             // Find the enemy entity that matches this spriteId
             let matchedEnemy = null;
             for (const entity of boardConfig) {
-              if (!entity.villain) continue;
-              
-              // Get spriteId from monster metadata
-              let entitySpriteId = entity.gameId;
-              if (globalThis.state?.utils?.getMonster) {
-                const monster = globalThis.state.utils.getMonster(entity.gameId);
-                if (monster?.metadata?.spriteId) {
-                  entitySpriteId = monster.metadata.spriteId;
-                }
-              }
-              
+              if (!isBoardVillainEntity(entity)) continue;
+
+              const entitySpriteId = getSpriteIdForEnemy(entity);
+              if (entitySpriteId == null) continue;
+
               if (entitySpriteId === spriteId) {
                 matchedEnemy = entity;
                 break;
@@ -15729,12 +15757,7 @@ function startBattleBoardObserver(options = {}) {
             }
             
             if (matchedEnemy) {
-              let creatureName = null;
-              
-              if (globalThis.state?.utils?.getMonster) {
-                const monster = globalThis.state.utils.getMonster(matchedEnemy.gameId);
-                creatureName = monster?.metadata?.name;
-              }
+              const creatureName = getEnemyCreatureName(matchedEnemy);
               
               if (!shouldSkipShinyEnemy(creatureName)) {
                 // Re-apply shiny immediately to enemy
@@ -15848,7 +15871,7 @@ function startBattleBoardObserver(options = {}) {
         const boardConfig = state.context?.boardConfig;
         if (!boardConfig || !Array.isArray(boardConfig)) return;
         
-        const enemies = boardConfig.filter(entity => entity.villain === true);
+        const enemies = boardConfig.filter(isBoardVillainEntity);
         const currentEnemyCount = enemies.length;
         
         // Detect when new enemies are added (e.g., summoned by Trolls or Orc Riders)

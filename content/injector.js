@@ -166,6 +166,121 @@ if (IS_TOP_FRAME && !window.__BA_HYDRATION_ERROR_LISTENER__) {
   });
 }
 
+// Recover from Next.js runtime error pages ("Application error: a client-side exception…").
+if (IS_TOP_FRAME && !window.__BA_RUNTIME_CRASH_RECOVERY__) {
+  window.__BA_RUNTIME_CRASH_RECOVERY__ = true;
+
+  const CRASH_RECOVERY_RETRY_KEY = 'ba-runtime-crash-retry-count';
+  const MAX_CRASH_RECOVERY_RETRIES = 3;
+  const CRASH_RECOVERY_DELAY_MS = 2500;
+  let crashRecoveryScheduled = false;
+
+  function getCrashRecoveryRetryCount() {
+    try {
+      return parseInt(sessionStorage.getItem(CRASH_RECOVERY_RETRY_KEY) || '0', 10) || 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  function incrementCrashRecoveryRetryCount() {
+    const next = getCrashRecoveryRetryCount() + 1;
+    try {
+      sessionStorage.setItem(CRASH_RECOVERY_RETRY_KEY, String(next));
+    } catch {
+      // ignore storage failures
+    }
+    return next;
+  }
+
+  function resetCrashRecoveryRetryCount() {
+    try {
+      sessionStorage.removeItem(CRASH_RECOVERY_RETRY_KEY);
+    } catch {
+      // ignore storage failures
+    }
+  }
+
+  window.__BA_RESET_CRASH_RECOVERY_RETRY__ = resetCrashRecoveryRetryCount;
+
+  function isRuntimeAutoReloadDisabled() {
+    try {
+      return window.betterUIConfig?.disableAutoReload === true;
+    } catch {
+      return false;
+    }
+  }
+
+  function isNextJsClientErrorPage() {
+    if (document.querySelector('.next-error-h1')) return true;
+
+    const bodyText = document.body?.innerText || '';
+    if (/application error:\s*a client-side exception/i.test(bodyText)) return true;
+
+    const headings = document.querySelectorAll('h1, h2');
+    for (const heading of headings) {
+      const text = (heading.textContent || '').toLowerCase();
+      if (text.includes('client-side exception') || text.includes('application error')) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function scheduleCrashRecoveryReload() {
+    if (!isNextJsClientErrorPage() || crashRecoveryScheduled) return;
+
+    if (isRuntimeAutoReloadDisabled()) {
+      console.warn('[Injector] Runtime crash detected but auto-reload is disabled in Mod Settings');
+      return;
+    }
+
+    if (window.BestiaryPlatform?.prefersRelaxedLoader?.()) {
+      console.warn('[Injector] Runtime crash detected (relaxed loader: no auto-refresh)');
+      return;
+    }
+
+    const retryCount = getCrashRecoveryRetryCount();
+    if (retryCount >= MAX_CRASH_RECOVERY_RETRIES) {
+      console.warn('[Injector] Runtime crash detected — auto-refresh retry limit reached');
+      return;
+    }
+
+    crashRecoveryScheduled = true;
+    const attempt = incrementCrashRecoveryRetryCount();
+    console.warn(
+      `[Injector] Next.js client error page detected — refreshing in ${Math.round(CRASH_RECOVERY_DELAY_MS / 1000)}s (${attempt}/${MAX_CRASH_RECOVERY_RETRIES})`
+    );
+    setTimeout(() => {
+      window.location.reload();
+    }, CRASH_RECOVERY_DELAY_MS);
+  }
+
+  function onPossibleCrashDomChange() {
+    scheduleCrashRecoveryReload();
+  }
+
+  const crashObserver = new MutationObserver(() => onPossibleCrashDomChange());
+  const startCrashRecoveryObserver = () => {
+    if (!document.documentElement) return;
+    crashObserver.observe(document.documentElement, {
+      childList: true,
+      subtree: true,
+      characterData: true
+    });
+    onPossibleCrashDomChange();
+  };
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', startCrashRecoveryObserver, { once: true });
+  } else {
+    startCrashRecoveryObserver();
+  }
+
+  // Fallback poll in case React unmounts without a mutation the observer catches.
+  setInterval(onPossibleCrashDomChange, 3000);
+}
+
 function getExtensionUrlApi() {
   return typeof BestiaryExtensionUrl !== 'undefined' ? BestiaryExtensionUrl : null;
 }

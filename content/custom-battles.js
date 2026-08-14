@@ -228,6 +228,66 @@ if (window.CustomBattles) {
             }
         }
 
+        let globalBoardConfigSanitizeLock = false;
+
+        function sendBoardSetState(fn) {
+            if (!globalThis.state?.board) return false;
+            const run = (prev) => {
+                const next = typeof fn === 'function' ? fn(prev) : fn;
+                if (!next || next === prev) return next;
+                if ('boardConfig' in next) {
+                    return {
+                        ...next,
+                        boardConfig: compactBoardConfigEntries(next.boardConfig)
+                    };
+                }
+                return next;
+            };
+            try {
+                if (globalThis.state.board.trigger?.setState) {
+                    globalThis.state.board.trigger.setState({ fn: run });
+                    return true;
+                }
+                if (globalThis.state.board.send) {
+                    globalThis.state.board.send({ type: 'setState', fn: run });
+                    return true;
+                }
+            } catch (_) {}
+            return false;
+        }
+
+        function compactBoardConfigEntries(boardConfig) {
+            if (!Array.isArray(boardConfig)) return [];
+            return boardConfig.filter((entity) => {
+                return entity != null
+                    && typeof entity === 'object'
+                    && Number.isFinite(Number(entity.tileIndex));
+            });
+        }
+
+        function sanitizeBoardConfigNullEntries() {
+            if (globalBoardConfigSanitizeLock || !globalThis.state?.board) return false;
+            let raw = null;
+            try {
+                raw = globalThis.state.board.getSnapshot()?.context?.boardConfig;
+            } catch (_) {
+                return false;
+            }
+            if (!Array.isArray(raw) || !raw.some((entity) => entity == null)) return false;
+            globalBoardConfigSanitizeLock = true;
+            try {
+                sendBoardSetState((prev) => ({
+                    ...prev,
+                    boardConfig: compactBoardConfigEntries(prev?.boardConfig)
+                }));
+                return true;
+            } catch (_) {
+                return false;
+            } finally {
+                globalBoardConfigSanitizeLock = false;
+            }
+        }
+
         function installGlobalAllyVillainOverlapGuard() {
             if (globalAllyVillainGuardInstalled || !globalThis.state?.board) return;
             globalAllyVillainGuardInstalled = true;
@@ -240,6 +300,7 @@ if (window.CustomBattles) {
 
             try {
                 globalThis.state.board.subscribe(() => {
+                    sanitizeBoardConfigNullEntries();
                     if (globalAllyVillainBoardTimer) {
                         clearTimeout(globalAllyVillainBoardTimer);
                     }
@@ -2355,7 +2416,8 @@ if (window.CustomBattles) {
                     }
 
                     const boardContext = globalThis.state.board.getSnapshot().context;
-                    const currentBoardConfig = boardContext.boardConfig || [];
+                    const currentBoardConfig = (boardContext.boardConfig || [])
+                        .filter((entity) => entity != null);
 
                     // Check if all villains already exist (check each villain individually)
                     const allVillainsExist = this.config.villains.every(villainConfig => {
@@ -2379,7 +2441,7 @@ if (window.CustomBattles) {
 
                     console.log(`[Custom Battles][${this.config.name || 'Battle'}] Adding custom villains to board`);
 
-                    let updatedBoardConfig = [...currentBoardConfig];
+                    let updatedBoardConfig = currentBoardConfig.filter((entity) => entity != null);
                     let addedAny = false;
 
                     // Add each villain if not present
@@ -2407,13 +2469,10 @@ if (window.CustomBattles) {
 
                     // Update board if any villains were added
                     if (addedAny) {
-                        globalThis.state.board.send({
-                            type: 'setState',
-                            fn: (prev) => ({
-                                ...prev,
-                                boardConfig: updatedBoardConfig
-                            })
-                        });
+                        sendBoardSetState((prev) => ({
+                            ...prev,
+                            boardConfig: updatedBoardConfig
+                        }));
                         console.log(`[Custom Battles][${this.config.name || 'Battle'}] Board configuration updated with new villains`);
                         this.scheduleVillainOutfitSpriteOverrides({ force: true });
                         
@@ -2442,27 +2501,28 @@ if (window.CustomBattles) {
                         console.log(`[Custom Battles][${this.config.name || 'Battle'}] Removing original villains from board`);
 
                         const boardContext = globalThis.state.board.getSnapshot().context;
-                        const boardConfig = boardContext.boardConfig || [];
+                        const boardConfig = compactBoardConfigEntries(boardContext.boardConfig);
                         const configWithoutVillains = boardConfig.filter((entity) => !entity.villain && !this.isForcedAllyEntity(entity));
                         const customVillains = this.config.villains.map((villainConfig) => {
                             console.log(`[Custom Battles][${this.config.name || 'Battle'}] Adding ${villainConfig.nickname || 'villain'} to tile ${villainConfig.tileIndex}`);
                             return this.createCustomVillainEntity(villainConfig);
                         });
                         const forcedAllies = this.buildForcedAllyEntities();
-                        const updatedBoardConfig = [...configWithoutVillains, ...customVillains, ...forcedAllies];
+                        const updatedBoardConfig = compactBoardConfigEntries([
+                            ...configWithoutVillains,
+                            ...customVillains,
+                            ...forcedAllies
+                        ]);
 
                         if (
                             updatedBoardConfig.length !== boardConfig.length
                             || boardConfig.some((entity) => entity.villain)
                             || !this.hasAllForcedAlliesOnBoard(boardConfig)
                         ) {
-                            globalThis.state.board.send({
-                                type: 'setState',
-                                fn: (prev) => ({
-                                    ...prev,
-                                    boardConfig: updatedBoardConfig
-                                })
-                            });
+                            sendBoardSetState((prev) => ({
+                                ...prev,
+                                boardConfig: updatedBoardConfig
+                            }));
 
                             console.log(`[Custom Battles][${this.config.name || 'Battle'}] Original villains removed from board`);
                             console.log(`[Custom Battles][${this.config.name || 'Battle'}] Board configuration updated with new villains` + (forcedAllies.length ? ` and ${forcedAllies.length} forced allies` : ''));
@@ -2530,8 +2590,8 @@ if (window.CustomBattles) {
                     const boardContext = globalThis.state.board.getSnapshot().context;
                     const boardConfig = boardContext.boardConfig || [];
 
-                    // Remove custom villains
                     const restoredConfig = boardConfig.filter(entity => {
+                        if (!entity || typeof entity !== 'object') return false;
                         if (entity.key) {
                             const isCustomVillain = this.villainKeyPrefixes.some(({ prefix }) =>
                                 entity.key.startsWith(prefix)
@@ -2541,17 +2601,15 @@ if (window.CustomBattles) {
                                 return false;
                             }
                         }
-                        return true;
+                        return Number.isFinite(Number(entity.tileIndex));
                     });
 
-                    if (restoredConfig.length !== boardConfig.length) {
-                        globalThis.state.board.send({
-                            type: 'setState',
-                            fn: (prev) => ({
-                                ...prev,
-                                boardConfig: restoredConfig
-                            })
-                        });
+                    if (restoredConfig.length !== boardConfig.length
+                        || boardConfig.some((entity) => entity == null)) {
+                        sendBoardSetState((prev) => ({
+                            ...prev,
+                            boardConfig: restoredConfig
+                        }));
                         console.log(`[Custom Battles][${this.config.name || 'Battle'}] Original board setup restored`);
                     }
                 } catch (error) {
@@ -3269,6 +3327,7 @@ if (window.CustomBattles) {
              * Disable and grey out stop button
              */
             disableStopButton() {
+                if (this.config.allowStopButton === true) return;
                 try {
                     const selectors = [
                         'button.frame-1-red.surface-red[data-state="closed"]',
@@ -4233,8 +4292,10 @@ if (window.CustomBattles) {
                 this._overlapToastCallback = showToastCallback || null;
                 console.log('[Custom Battles][' + (this.config.name || 'Battle') + '] Setting up battle system');
 
-                // Setup stop button disabler (always enabled)
-                this.setupStopButtonDisabler();
+                // Setup stop button disabler (unless battle config allows Stop)
+                if (this.config.allowStopButton !== true) {
+                    this.setupStopButtonDisabler();
+                }
 
                 // Setup ally limit if configured
                 if (this.config.allyLimit) {

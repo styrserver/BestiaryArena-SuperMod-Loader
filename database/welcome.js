@@ -459,6 +459,7 @@ async function handleModLoadingFinished(errors = []) {
 
   modsLoaded = true;
   window.BestiaryUIComponents?.resetModLoadRetryCount?.();
+  window.__BA_RESET_CRASH_RECOVERY_RETRY__?.();
 
   try {
     createToast({

@@ -4,6 +4,46 @@
   },
   "notes": [
     {
+      "version": "4.8.6",
+      "changes": [
+        {
+          "mod": "Battle Helper",
+          "type": "fixed",
+          "text": "Expired help requests are removed again when stored expiry was missing, wrong, or longer than 3 days."
+        },
+        {
+          "mod": "Better Highscores",
+          "type": "fixed",
+          "text": "Leaderboard no longer stays invisible after closing Map Editor until you change maps."
+        },
+        {
+          "mod": "Custom Battles",
+          "type": "changed",
+          "text": "allowStopButton config keeps the Stop button enabled for battles that need it (Map Editor sandbox editing)."
+        },
+        {
+          "mod": "Map Editor",
+          "type": "added",
+          "text": "Sandbox edit session starts when you open the editor. Auto-save per map on close. Unified map export (map-editor-v2, room, Custom Battle stub, sprite rules). Creature catalog to place villains, with a live-apply edit panel. Arrow keys move the selected tile. Drag-and-drop for added sprite layers. Reset tile, Clean map, and Restore map. Loading a local save or workshop map opens the target map if needed."
+        },
+        {
+          "mod": "Map Editor",
+          "type": "changed",
+          "text": "Creature editor is a form (level, facing, shiny/awakened, genes, equipment, visuals, cooldown) instead of raw JSON. Game mode locks to sandbox while the editor is open. Closing the panel keeps edits until Restore map. Native sprites stay below added sprites (Hide/Restore only). Combined offset stepper for placed sprites. Local save and workshop load share one apply pipeline."
+        },
+        {
+          "mod": "Map Editor",
+          "type": "fixed",
+          "text": "Restore, workshop/local load, and changing maps no longer crash React (including after closing the editor or leaving a workshop map). Equipment and creature edits persist through sandbox reapply. Sprite previews animate; native sprites keep their stack positions. Tile pick overlays no longer cause lag. Hitbox and hidden-sprite edits persist through fights. Play mode unlocks when the editor closes."
+        },
+        {
+          "mod": "Mod Loader",
+          "type": "fixed",
+          "text": "Page auto-refreshes after a Next.js client-side crash (up to 3 times) when mod auto-reload is enabled."
+        }
+      ]
+    },
+    {
       "version": "4.8.5",
       "changes": [
         {

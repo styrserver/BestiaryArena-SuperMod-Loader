@@ -1301,6 +1301,7 @@ function sendCompletionSignal(results = []) {
     window.BestiaryUIComponents?.handleLoaderLoadFailure?.(errors);
   } else {
     window.BestiaryUIComponents?.resetModLoadRetryCount?.();
+    window.__BA_RESET_CRASH_RECOVERY_RETRY__?.();
   }
   
   window.postMessage({

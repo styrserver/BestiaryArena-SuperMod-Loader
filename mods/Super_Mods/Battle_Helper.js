@@ -774,10 +774,23 @@ function formatHelpAge(createdAt) {
   return tReplace('mods.battleHelper.help.ageDays', { n: String(days) });
 }
 
+function getHelpRequestExpiresAt(request) {
+  const createdAt = Number(request?.createdAt || 0);
+  const ttlExpiry = Number.isFinite(createdAt) && createdAt > 0
+    ? createdAt + BATTLE_HELP_REQUEST_TTL_MS
+    : 0;
+  const explicit = Number(request?.expiresAt || 0);
+  if (Number.isFinite(explicit) && explicit > 0) {
+    if (ttlExpiry > 0) return Math.min(explicit, ttlExpiry);
+    return explicit;
+  }
+  return ttlExpiry;
+}
+
 function isHelpRequestOpen(request) {
   if (!request || request.status !== 'open') return false;
-  const expiresAt = Number(request.expiresAt || 0);
-  if (Number.isFinite(expiresAt) && expiresAt > 0 && expiresAt < Date.now()) return false;
+  const expiresAt = getHelpRequestExpiresAt(request);
+  if (expiresAt > 0 && expiresAt < Date.now()) return false;
   return true;
 }
 
@@ -834,7 +847,7 @@ async function fetchHelpRequests() {
     if (!normalized) continue;
     if (!isHelpRequestOpen(normalized)) {
       // Closed or expired requests are deleted so Firebase does not keep growing.
-      deleteStaleHelpRequest(id);
+      await deleteStaleHelpRequest(id);
       continue;
     }
     requests.push(normalized);
