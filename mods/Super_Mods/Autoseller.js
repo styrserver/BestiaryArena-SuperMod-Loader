@@ -4195,57 +4195,235 @@
             });
         }
 
-        function showHoverTooltip(text, x, y) {
+        function showHoverTooltip(content, x, y) {
             bindHoverTooltipCleanupHandlers();
             hideHoverTooltip();
             const tooltip = document.createElement('div');
             tooltip.className = 'pixel-font-14';
-            tooltip.textContent = text;
             tooltip.style.position = 'fixed';
             tooltip.style.left = `${x + 12}px`;
             tooltip.style.top = `${y + 12}px`;
             tooltip.style.zIndex = '10020';
-            tooltip.style.maxWidth = '250px';
+            tooltip.style.maxWidth = '300px';
             tooltip.style.padding = '8px';
             tooltip.style.borderRadius = '4px';
             tooltip.style.border = '1px solid #ffe066';
             tooltip.style.background = 'rgba(20, 20, 20, 0.95)';
             tooltip.style.color = '#e6d7b0';
             tooltip.style.fontSize = '12px';
-            tooltip.style.lineHeight = '1.35';
+            tooltip.style.lineHeight = '1.4';
             tooltip.style.whiteSpace = 'normal';
             tooltip.style.pointerEvents = 'none';
             tooltip.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.45)';
+            if (typeof content === 'string') {
+                tooltip.style.whiteSpace = 'pre-line';
+                tooltip.textContent = content;
+            } else if (content instanceof Node) {
+                tooltip.appendChild(content);
+            }
             document.body.appendChild(tooltip);
             activeHoverTooltip = tooltip;
+        }
+
+        function createTooltipRoot() {
+            const root = document.createElement('div');
+            root.style.display = 'flex';
+            root.style.flexDirection = 'column';
+            root.style.gap = '4px';
+            return root;
+        }
+
+        const TOOLTIP_TONE_COLORS = {
+            keep: 'rgb(100, 255, 100)',
+            action: 'rgb(255, 100, 100)',
+            neutral: '#e6d7b0'
+        };
+
+        function appendTooltipIconLine(root, { iconUrl = null, iconActive = true, text, tone = 'neutral' }) {
+            const line = document.createElement('div');
+            line.style.display = 'flex';
+            line.style.alignItems = 'center';
+            line.style.gap = '6px';
+
+            if (iconUrl) {
+                const icon = document.createElement('img');
+                icon.src = iconUrl;
+                icon.className = 'pixelated';
+                icon.width = 12;
+                icon.height = 12;
+                icon.draggable = false;
+                icon.style.flexShrink = '0';
+                icon.style.opacity = iconActive ? '1' : '0.35';
+                icon.style.filter = iconActive ? 'none' : 'grayscale(100%)';
+                line.appendChild(icon);
+            }
+
+            const label = document.createElement('span');
+            label.textContent = text;
+            label.style.color = TOOLTIP_TONE_COLORS[tone] || TOOLTIP_TONE_COLORS.neutral;
+            line.appendChild(label);
+            root.appendChild(line);
+            return line;
         }
 
         function buildCreatureBehaviorTooltip(creatureName, isSqueezeContextForList) {
             const settings = getSettings();
             const inKeep = isIgnoreList === true;
             const keepRange = getCreatureKeepRange(creatureName);
-
-            // Sealed-specific summary (uses global + per-creature rules)
             const sellBlocked = isSealedTier5SellBlocked(creatureName);
             const sellEnabled = isSealedTier5SellAllowed(creatureName);
             const injectEnabled = isSealedTier5InjectAllowed(creatureName);
+            const ladderOn = isCreatureKeepUpgradeLadderEnabled(creatureName);
             const onText = t('mods.autoseller.tooltipStateOn') || 'ON';
             const offText = t('mods.autoseller.tooltipStateOff') || 'OFF';
-            const blockedText = t('mods.autoseller.tooltipBlockedForCreature') || 'blocked for this creature';
-            const actionSummary = inKeep
-                ? (t('mods.autoseller.tooltipHumanKeep') || 'In Keep, this creature is left alone.')
-                : (isSqueezeContextForList
-                    ? (t('mods.autoseller.tooltipHumanSqueeze') || 'This creature can be auto-squeezed if your squeeze rules match.')
-                    : (t('mods.autoseller.tooltipHumanSell') || 'This creature can be sold/devoured if your sell rules match.'));
-            const keepRangeText = keepRange
-                ? ` ${(t('mods.autoseller.tooltipHumanKeepRange') || 'Keep range')}: ${keepRange.min}-${keepRange.max}%.`
-                : '';
-            const upgradeLadderText = isCreatureKeepUpgradeLadderEnabled(creatureName)
-                ? ` ${t('mods.autoseller.tooltipUpgradeLadder') || 'Upgrade ladder: keeps 5/4/3/2 per gene band (50–59 / 60–69 / 70–79 / 80–100) from full inventory; excess is sold/squeezed.'}`
-                : '';
-            const sealedStatus = `${t('mods.autoseller.tooltipHumanSealedStatusPrefix') || 'Sealed'}: ${(t('mods.autoseller.tooltipHumanSellLabel') || 'sell/devour')} ${sellEnabled ? onText : offText}${sellBlocked ? ` (${blockedText})` : ''}, ${(t('mods.autoseller.tooltipHumanInjectLabel') || 'inject')} ${injectEnabled ? onText : offText}.`;
-            const priorityText = t('mods.autoseller.tooltipInjectPriority') || 'Priority: auto-inject runs first, then sell/devour only if genes do not improve the awakened target.';
-            return `${actionSummary}${keepRangeText}${upgradeLadderText} ${sealedStatus} ${priorityText}`.replace(/\s+/g, ' ').trim();
+            const blockedText = t('mods.autoseller.tooltipBlockedForCreature') || 'blocked';
+            const root = createTooltipRoot();
+
+            if (inKeep) {
+                if (keepRange) {
+                    appendTooltipIconLine(root, {
+                        text: tReplace('mods.autoseller.tooltipStatusKeepRange', {
+                            min: keepRange.min,
+                            max: keepRange.max
+                        }) || `KEEP · ${keepRange.min}–${keepRange.max}%`,
+                        tone: 'keep'
+                    });
+                    appendTooltipIconLine(root, {
+                        iconUrl: LOOT_TABLE_ICON_URLS.sell,
+                        iconActive: true,
+                        text: t('mods.autoseller.tooltipStatusKeepOutside') || 'Outside range → sold/devoured',
+                        tone: 'action'
+                    });
+                } else {
+                    appendTooltipIconLine(root, {
+                        text: t('mods.autoseller.tooltipStatusKeepAll') || 'KEEP · all genes',
+                        tone: 'keep'
+                    });
+                }
+            } else if (isSqueezeContextForList) {
+                const squeezeMin = settings.autosqueezeGenesMin ?? UI_CONSTANTS.SQUEEZE_GENE_MIN;
+                const squeezeMax = settings.autosqueezeGenesMax ?? UI_CONSTANTS.SQUEEZE_GENE_MAX;
+                appendTooltipIconLine(root, {
+                    iconUrl: LOOT_TABLE_ICON_URLS.squeeze,
+                    iconActive: true,
+                    text: tReplace('mods.autoseller.tooltipStatusSqueeze', {
+                        min: squeezeMin,
+                        max: squeezeMax
+                    }) || `SQUEEZE · ${squeezeMin}–${squeezeMax}%`,
+                    tone: 'action'
+                });
+            } else {
+                const sellMinGenes = settings.autoplantGenesMin ?? 80;
+                appendTooltipIconLine(root, {
+                    iconUrl: LOOT_TABLE_ICON_URLS.sell,
+                    iconActive: true,
+                    text: tReplace('mods.autoseller.tooltipStatusSell', {
+                        min: sellMinGenes
+                    }) || `SELL/DEVOUR · below ${sellMinGenes}%`,
+                    tone: 'action'
+                });
+            }
+
+            if (keepRange && !inKeep) {
+                appendTooltipIconLine(root, {
+                    iconActive: false,
+                    text: tReplace('mods.autoseller.tooltipKeepRangeInactiveLine', {
+                        min: keepRange.min,
+                        max: keepRange.max
+                    }) || `Keep range ${keepRange.min}–${keepRange.max}% · inactive here`,
+                    tone: 'keep'
+                });
+            }
+
+            if (ladderOn) {
+                appendTooltipIconLine(root, {
+                    iconActive: !inKeep,
+                    text: inKeep
+                        ? (t('mods.autoseller.tooltipLadderInactiveLine') || 'Upgrade ladder · inactive in Keep')
+                        : (t('mods.autoseller.tooltipLadderActiveLine') || 'Upgrade ladder · ON (excess sold/squeezed)'),
+                    tone: inKeep ? 'neutral' : 'action'
+                });
+            }
+
+            if (!inKeep) {
+                const sealedSellActive = sellEnabled && !sellBlocked;
+                const sealedSellValue = sellBlocked
+                    ? `${offText} (${blockedText})`
+                    : (sellEnabled ? onText : offText);
+                appendTooltipIconLine(root, {
+                    iconUrl: LOOT_TABLE_ICON_URLS.sealedSell,
+                    iconActive: sealedSellActive,
+                    text: `${t('mods.autoseller.tooltipSealedSellShort') || 'Sealed sell'}: ${sealedSellValue}`,
+                    tone: sealedSellActive ? 'action' : 'keep'
+                });
+                appendTooltipIconLine(root, {
+                    iconUrl: LOOT_TABLE_ICON_URLS.sealedInject,
+                    iconActive: injectEnabled,
+                    text: `${t('mods.autoseller.tooltipSealedInjectShort') || 'Sealed inject'}: ${
+                        injectEnabled
+                            ? `${onText} (${t('mods.autoseller.tooltipInjectRunsFirst') || 'runs first'})`
+                            : offText
+                    }`,
+                    tone: injectEnabled ? 'action' : 'keep'
+                });
+            }
+
+            return root;
+        }
+
+        function buildEquipmentBehaviorTooltip(equipmentName) {
+            const inKeep = isIgnoreList === true;
+            const keepStats = getAutodusterKeepStats(equipmentName);
+            const hasCustom = hasCustomAutodusterStats(equipmentName);
+            const dustLabel = t('mods.autoseller.tooltipEquipDustLabel') || 'dust';
+            const keepStatLabel = t('mods.autoseller.tooltipEquipKeepStatLabel') || 'keep';
+            const root = createTooltipRoot();
+            const statRows = [
+                { key: 'ad', iconUrl: LOOT_TABLE_ICON_URLS.equipAd, label: 'AD' },
+                { key: 'ap', iconUrl: LOOT_TABLE_ICON_URLS.equipAp, label: 'AP' },
+                { key: 'hp', iconUrl: LOOT_TABLE_ICON_URLS.equipHp, label: 'HP' }
+            ];
+
+            if (inKeep) {
+                appendTooltipIconLine(root, {
+                    text: t('mods.autoseller.tooltipStatusEquipKeep') || 'KEEP · not disenchanted',
+                    tone: 'keep'
+                });
+                if (hasCustom) {
+                    appendTooltipIconLine(root, {
+                        iconUrl: LOOT_TABLE_ICON_URLS.squeeze,
+                        iconActive: false,
+                        text: t('mods.autoseller.tooltipEquipCustomInactive') || 'Custom AD/AP/HP rules · inactive here',
+                        tone: 'neutral'
+                    });
+                }
+                return root;
+            }
+
+            const dustCount = statRows.filter((row) => keepStats[row.key] !== true).length;
+            const statusText = dustCount === 3
+                ? (t('mods.autoseller.tooltipStatusEquipDustAll') || 'DISENCHANT · all stats')
+                : dustCount === 0
+                    ? (t('mods.autoseller.tooltipStatusEquipDustNone') || 'DISENCHANT · all stats kept')
+                    : (t('mods.autoseller.tooltipStatusEquipDustPartial') || 'DISENCHANT · partial');
+            appendTooltipIconLine(root, {
+                iconUrl: LOOT_TABLE_ICON_URLS.squeeze,
+                iconActive: dustCount > 0,
+                text: statusText,
+                tone: dustCount > 0 ? 'action' : 'keep'
+            });
+
+            for (const row of statRows) {
+                const dustActive = keepStats[row.key] !== true;
+                appendTooltipIconLine(root, {
+                    iconUrl: row.iconUrl,
+                    iconActive: dustActive,
+                    text: `${row.label}: ${dustActive ? dustLabel : keepStatLabel}`,
+                    tone: dustActive ? 'action' : 'keep'
+                });
+            }
+
+            return root;
         }
         
         const normalizedPriorityNames = new Set(
@@ -4471,17 +4649,18 @@
 
             const handleMouseEnter = () => {
                 item.style.background = 'rgba(255,255,255,0.08)';
-                if (contextMenuType === 'creature') {
-                    const rect = item.getBoundingClientRect();
-                    const tooltipText = buildCreatureBehaviorTooltip(name, isSqueezeContextForList);
-                    if (hoverTooltipTimer) {
-                        clearTimeout(hoverTooltipTimer);
-                    }
-                    hoverTooltipTimer = setTimeout(() => {
-                        showHoverTooltip(tooltipText, rect.right, rect.top);
-                        hoverTooltipTimer = null;
-                    }, 320);
+                if (contextMenuType !== 'creature' && contextMenuType !== 'autoduster') return;
+                const rect = item.getBoundingClientRect();
+                if (hoverTooltipTimer) {
+                    clearTimeout(hoverTooltipTimer);
                 }
+                hoverTooltipTimer = setTimeout(() => {
+                    const tooltipContent = contextMenuType === 'creature'
+                        ? buildCreatureBehaviorTooltip(name, isSqueezeContextForList)
+                        : buildEquipmentBehaviorTooltip(name);
+                    showHoverTooltip(tooltipContent, rect.right, rect.top);
+                    hoverTooltipTimer = null;
+                }, 320);
             };
             
             const handleMouseLeave = () => {

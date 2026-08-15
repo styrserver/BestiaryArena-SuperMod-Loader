@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html data-color-mode="light">
 <head>
   <meta charset="UTF-8">
   <title>BestiaryArena SuperMod Loader</title>
@@ -8,13 +8,18 @@
 <body>
   <header>
     <h1>BestiaryArena SuperMod Loader</h1>
-    <div class="language-toggle">
-      <button id="lang-en" class="lang-btn active" title="English">
-        🇺🇸
+    <div class="header-actions">
+      <button id="show-patch-notes-btn" class="welcome-btn" data-localize="popup.viewPatchNotes">
+        View Patch Notes
       </button>
-      <button id="lang-pt" class="lang-btn" title="Português">
-        🇧🇷
-      </button>
+      <div class="language-toggle">
+        <button id="lang-en" class="lang-btn active" title="English" aria-label="English">
+          <img class="lang-flag" src="../assets/ui/flag-us.svg" alt="English" width="20" height="14">
+        </button>
+        <button id="lang-pt" class="lang-btn" title="Português" aria-label="Português">
+          <img class="lang-flag" src="../assets/ui/flag-br.svg" alt="Português" width="20" height="14">
+        </button>
+      </div>
     </div>
   </header>
   
@@ -122,19 +127,6 @@
             Enable the welcome page to show on next page load.
           </p>
         </div>
-
-        <!-- Patch Notes -->
-        <div class="setting-item">
-          <div class="setting-header">
-            <label data-localize="popup.patchNotes">Patch Notes</label>
-            <button id="show-patch-notes-btn" class="welcome-btn" data-localize="popup.viewPatchNotes">
-              View Patch Notes
-            </button>
-          </div>
-          <p class="setting-description" data-localize="popup.patchNotesDescription">
-            View the latest changes and updates to the mod loader.
-          </p>
-        </div>
       </div>
     </details>
 
@@ -183,6 +175,13 @@
   
   <footer>
     <div class="footer-content">
+      <div class="footer-theme-toggle" title="Switch between light and dark appearance">
+        <label for="dark-mode-toggle" id="color-mode-label">Light Mode</label>
+        <label class="toggle-switch footer-toggle">
+          <input type="checkbox" id="dark-mode-toggle">
+          <span class="slider"></span>
+        </label>
+      </div>
       <p id="version-display">Version loading...</p>
     </div>
   </footer>

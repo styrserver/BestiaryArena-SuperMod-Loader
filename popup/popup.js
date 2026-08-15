@@ -8,6 +8,10 @@
  * Search for "kept in sync with mod-registry.js" to find the lists to update.
  */
 
+// =============================================================================
+// 1. Configuration & Constants
+// =============================================================================
+
 // Polyfill for Chrome and Firefox WebExtensions
 if (typeof window.browser === 'undefined') {
   window.browser = window.chrome;
@@ -15,10 +19,7 @@ if (typeof window.browser === 'undefined') {
 
 window.browserAPI = window.browserAPI || (typeof browser !== 'undefined' ? browser : (typeof chrome !== 'undefined' ? chrome : null));
 
-async function getActiveTabId() {
-  const [tab] = await window.browserAPI.tabs.query({ active: true, currentWindow: true });
-  return tab && tab.id != null ? tab.id : null;
-}
+const originalConsoleLog = console.log;
 
 const GITHUB_OPTIONAL_ORIGINS = [
   '*://*.gist.githubusercontent.com/*',
@@ -26,6 +27,167 @@ const GITHUB_OPTIONAL_ORIGINS = [
   '*://*.raw.githubusercontent.com/*',
   '*://raw.githubusercontent.com/*'
 ];
+
+// Feature / storage keys
+const DEBUG_STORAGE_KEY = 'bestiary-debug';
+const LOADER_ERROR_STORAGE_KEY = 'ba-loader-errors';
+const OUTFITER_STORAGE_KEY = 'outfiter-enabled';
+const WELCOME_STORAGE_KEY = 'welcome-enabled';
+const COLOR_MODE_STORAGE_KEY = 'popup-color-mode-v2';
+const PATCH_NOTES_STORAGE_KEY = 'last-viewed-version';
+const MANUAL_MODS_KEY = 'manualMods';
+const LANGUAGE_STORAGE_KEY = 'popup-language';
+
+// NOTE: Keep patch notes simple and concise. Consolidate similar changes into single entries.
+// Only show patch notes for the current version in the popup.
+
+const POPUP_LAYOUT_CONFIG = {
+  width: 600,
+  maxHeight: 600,
+  minWidth: 280,
+  minHeightCap: 280,
+  patchNotesHeaderHeight: 49,
+  patchNotesContentMinHeight: 100,
+  patchNotesMaxHeight: 360,
+  patchNotesReservedHeight: 120
+};
+
+const POPUP_LAYOUT_MAX_RETRIES = 12;
+
+// Fallback descriptions for mods (aligned with README.md; keys must match getModDisplayName() exactly)
+const modDescriptions = {
+  'Bestiary Automator': 'Automates stamina, rewards, Day Care, and other routine gameplay.',
+  'Board Analyzer': 'Simulates board setups to compare strategies and performance.',
+  'Custom Display': 'Performance Mode and map grid overlay for clearer planning.',
+  'Hero Editor': 'Edit monster stats and gear in-game; save and load test setups.',
+  'Highscores': 'Richer highscores with extra stats, sorting, and room breakdowns.',
+  'Item tier list': 'Equipment rankings to compare items and loadouts by tier.',
+  'Monster tier list': 'Monster rankings with usage stats and sortable performance tiers.',
+  'Setup Manager': 'Save, load, and manage named team setups per map.',
+  'Team Copier': 'Share setups as JSON or links, with seeds and recent history.',
+  'Tick Tracker': 'Tracks session ticks (optional ms) with history and copy tools.',
+  'Turbo Mode': 'Speeds up gameplay with custom multipliers and tick display.',
+  'Battle Helper': 'Load another player\'s arsenal into sandbox; restore in one click.',
+  'Autoseller': 'Sells or squeezes creatures by gene thresholds with session stats.',
+  'Autoscroller': 'Auto-uses summon scrolls to hunt targets with tiers and stop rules.',
+  'Better Analytics': 'Impact DPS plus sandbox units, battle log, filters, and fight speed.',
+  'Better Bestiary': 'Bulk-sell duplicates for species you already keep shiny or awakened.',
+  'Better Boosted Maps': 'Farms daily boosted maps with mod coordination and setups.',
+  'Better Cauldron': 'Search and filter Monstrous Cauldron monsters, including by rarity.',
+  'Better Exaltation Chest': 'Auto-open chests, filter gear, and disenchant with dust tracking.',
+  'Better Forge': 'Arsenal tools with batch disenchant, search, filters, and dust stats.',
+  'Better Highscores': 'Live tick and rank boards for the current map with medal styling.',
+  'Better Hy\'genie': 'Smarter Hy\'genie fusion UI with quantity inputs and ratios.',
+  'Better Rune Recycler': 'Batch-recycles runes with validation and gold/stat tracking.',
+  'Better Setups': 'Labeled setups (Farm, Speedrun, etc.) with UI and Configurator support.',
+  'Better Tasker': 'Auto-accepts quests and navigates maps; pauses when rewards are ready.',
+  'Better Teleporter': 'Improves the in-game teleporter map selection dialog.',
+  'Better Yasir': 'Bulk buy and sell at Yasir with live prices and confirmations.',
+  'Cyclopedia': 'Monster and gear databases, profiles, season ranks, and RunTracker.',
+  'Dice Roller': 'Auto-rolls dice until your target stats are reached.',
+  'Depot Manager': 'Depot rows, favorites, and quick send-to-depot from the bestiary.',
+  'Challenges': 'Random challenge runs with scoring, leaderboards, and replay sharing.',
+  'Guilds': 'Guilds with roles, encrypted chat, invites, and a browser.',
+  'Hunt Analyzer': 'Autoplay session stats for gold, dust, drops, and export.',
+  'Raid Hunter': 'Detects and joins raids with setup, autoplay, stamina, and queues.',
+  'Manual Runner': 'Repeats manual runs until win, S+, or max floor; stats and replays.',
+  'Stamina Optimizer': 'Starts or stops play at stamina limits; works with farming mods.',
+  'Awaken Tracker': 'Tracks awaken gene progress per map with live deltas and pause-on-cap.',
+  'Quests': 'Quest tracking, NPC dialogs, items, and synced progress.',
+  'VIP List': 'Favorite players with profiles, sortable stats, and Cyclopedia links.',
+  'Map Editor': 'Experimental tile editor: swap sprites, hitboxes, and export quest JSON.'
+};
+
+const modAuthorProfileUrls = {
+  'Better Bestiary': 'https://bestiaryarena.com/profile/megafuji',
+};
+
+// Super Mods list - kept in sync with mod-registry.js
+const superModNames = [
+  'Autoseller.js',
+  'Autoscroller.js',
+  'Battle_Helper.js',
+  'Better Analytics.js',
+  'Better Bestiary.js',
+  'Better Boosted Maps.js',
+  'Better Cauldron.js',
+  'Better Exaltation Chest.js',
+  'Better Forge.js',
+  'Better Highscores.js',
+  'Better Hy\'genie.js',
+  'Better Rune Recycler.js',
+  'Better Setups.js',
+  'Better Tasker.js',
+  'Better Teleporter.js',
+  'Better Yasir.js',
+  'Cyclopedia.js',
+  'Dice_Roller.js',
+  'Depot Manager.js',
+  'Hunt Analyzer.js',
+  'Mod Settings.js',
+  'Outfiter.js',
+  'Raid_Hunter.js',
+  'Manual Runner.js',
+  'RunTracker.js',
+  'Stamina Optimizer.js',
+  'Awaken Tracker.js'
+];
+
+// OT Mods list - kept in sync with mod-registry.js
+const otModNames = [
+  'Challenges.js',
+  'Quests.js',
+  'Guilds.js',
+  'VIP List.js',
+  'Map_Editor.js'
+];
+
+const hiddenMods = [
+  'inventory-database.js',
+  'creature-database.js',
+  'welcome.js',
+  'equipment-database.js',
+  'maps-database.js',
+  'equipment-lua-export.js',
+  'creature-lua-export.js',
+  'playereq-database.js',
+  'firebase-admins.js',
+  'Mod Settings.js',
+  'RunTracker.js',
+  'Outfiter.js'
+];
+
+
+// =============================================================================
+// 2. Runtime State
+// =============================================================================
+
+let DEBUG_MODE = false;
+let OUTFITER_ENABLED = false;
+let WELCOME_ENABLED = true;
+let COLOR_MODE = 'light';
+let PATCH_NOTES = [];
+let popupLayoutResizeHandler = null;
+let popupLayoutRetryRafId = null;
+let currentTranslations = null;
+let allMods = [];
+let isLoadingMods = false;
+let loadLocalModsGeneration = 0;
+
+let currentSearchTerm = '';
+let currentCategory = 'all';
+
+let popupStorageChangeHandler = null;
+let popupFocusHandler = null;
+
+// =============================================================================
+// 3. Browser & Permissions Helpers
+// =============================================================================
+
+async function getActiveTabId() {
+  const [tab] = await window.browserAPI.tabs.query({ active: true, currentWindow: true });
+  return tab && tab.id != null ? tab.id : null;
+}
 
 async function hasGitHubHostAccess() {
   if (!window.browserAPI || !window.browserAPI.permissions) {
@@ -54,39 +216,66 @@ async function ensureGitHubHostAccess() {
   }
 }
 
-// Global Debug System for Mod Console Logs
-const DEBUG_STORAGE_KEY = 'bestiary-debug';
-const LOADER_ERROR_STORAGE_KEY = 'ba-loader-errors';
-let DEBUG_MODE = false;
 
-// Global Outfiter System
-const OUTFITER_STORAGE_KEY = 'outfiter-enabled';
-let OUTFITER_ENABLED = false;
+// =============================================================================
+// 4. Color Mode & Theme
+// =============================================================================
 
-// Global Welcome Page System
-const WELCOME_STORAGE_KEY = 'welcome-enabled';
-let WELCOME_ENABLED = true;
+function getStoredColorMode() {
+  try {
+    const stored = localStorage.getItem(COLOR_MODE_STORAGE_KEY);
+    if (stored === 'dark' || stored === 'light') return stored;
+  } catch (_) {}
+  return 'light'; // default when unset
+}
 
-// Patch Notes System
-// NOTE: Keep patch notes simple and concise. Consolidate similar changes into single entries.
-// Only show patch notes for the current version in the popup.
-const PATCH_NOTES_STORAGE_KEY = 'last-viewed-version';
-let PATCH_NOTES = [];
+function applyColorMode(mode, { persist = true } = {}) {
+  COLOR_MODE = mode === 'dark' ? 'dark' : 'light';
+  document.documentElement.setAttribute('data-color-mode', COLOR_MODE);
+  if (persist) {
+    try {
+      localStorage.setItem(COLOR_MODE_STORAGE_KEY, COLOR_MODE);
+    } catch (_) {}
+  }
+  const darkModeToggle = document.getElementById('dark-mode-toggle');
+  if (darkModeToggle) {
+    darkModeToggle.checked = COLOR_MODE === 'dark';
+  }
+  updateColorModeLabel();
+}
 
-const POPUP_LAYOUT_CONFIG = {
-  width: 600,
-  maxHeight: 600,
-  minWidth: 280,
-  minHeightCap: 280,
-  patchNotesHeaderHeight: 49,
-  patchNotesContentMinHeight: 100,
-  patchNotesMaxHeight: 360,
-  patchNotesReservedHeight: 120
-};
+function updateColorModeLabel() {
+  const label = document.getElementById('color-mode-label');
+  if (!label) return;
+  const lightText = label.dataset.lightText || 'Light Mode';
+  const darkText = label.dataset.darkText || 'Dark Mode';
+  label.textContent = COLOR_MODE === 'dark' ? darkText : lightText;
+}
 
-let popupLayoutResizeHandler = null;
-let popupLayoutRetryRafId = null;
-const POPUP_LAYOUT_MAX_RETRIES = 12;
+async function refreshToggleStatusLabels() {
+  const { onText, offText } = await getOnOffLabels();
+  setToggleUi('debug-toggle', 'debug-status', DEBUG_MODE, onText, offText);
+  setToggleUi('outfiter-toggle', 'outfiter-status', OUTFITER_ENABLED, onText, offText);
+
+  const label = document.getElementById('color-mode-label');
+  if (label) {
+    label.dataset.lightText = (await getTranslation('popup.lightMode')) || 'Light Mode';
+    label.dataset.darkText = (await getTranslation('popup.darkMode')) || 'Dark Mode';
+    updateColorModeLabel();
+  }
+}
+
+function applyPopupTheme(themeName) {
+  document.documentElement.setAttribute('data-theme', themeName || 'default');
+}
+
+// Apply stored mode ASAP to avoid a dark flash (light is default)
+applyColorMode(getStoredColorMode(), { persist: false });
+
+
+// =============================================================================
+// 5. Layout & Responsive
+// =============================================================================
 
 function isLikelyMobilePopupHost() {
   return (
@@ -175,21 +364,27 @@ function applyPopupResponsiveLayout(retryAttempt = 0) {
   root.style.setProperty('--popup-width', `${width}px`);
   root.style.setProperty('--popup-height', `${height}px`);
   applyPopupPatchNotesLayout(height);
+  fitCategoryFilterLabels();
 }
 
-function setupPopupResponsiveLayout() {
+function teardownPopupResponsiveLayout() {
   if (popupLayoutRetryRafId != null) {
     cancelAnimationFrame(popupLayoutRetryRafId);
     popupLayoutRetryRafId = null;
   }
-  applyPopupResponsiveLayout();
-  requestAnimationFrame(() => applyPopupResponsiveLayout());
-
   if (popupLayoutResizeHandler) {
     window.removeEventListener('resize', popupLayoutResizeHandler);
     window.visualViewport?.removeEventListener('resize', popupLayoutResizeHandler);
     window.visualViewport?.removeEventListener('scroll', popupLayoutResizeHandler);
+    popupLayoutResizeHandler = null;
   }
+}
+
+function setupPopupResponsiveLayout() {
+  teardownPopupResponsiveLayout();
+  applyPopupResponsiveLayout();
+  requestAnimationFrame(() => applyPopupResponsiveLayout());
+
   popupLayoutResizeHandler = () => applyPopupResponsiveLayout();
   window.addEventListener('resize', popupLayoutResizeHandler);
   if (window.visualViewport) {
@@ -204,251 +399,105 @@ function setPatchNotesVisible(container, visible) {
 }
 
 // Load patch notes from JSON file
-async function loadPatchNotes() {
-  try {
-    const response = await fetch(chrome.runtime.getURL('docs/patch-notes.json'));
-    if (response.ok) {
-      const data = await response.json();
-      // Handle both old array format and new object format with metadata
-      PATCH_NOTES = Array.isArray(data) ? data : (data.notes || []);
-      return PATCH_NOTES;
-    }
-  } catch (error) {
-    originalConsoleLog('Error loading patch notes:', error);
-  }
-  return [];
+
+
+// =============================================================================
+// 6. Feature Flags (Debug / Outfiter / Welcome)
+// =============================================================================
+
+async function getOnOffLabels() {
+  const onText = (await getTranslation('popup.on')) || 'ON';
+  const offText = (await getTranslation('popup.off')) || 'OFF';
+  return { onText, offText };
 }
 
-// Keep original console.log for popup use
-const originalConsoleLog = console.log;
+function setToggleUi(toggleId, statusId, enabled, onText, offText) {
+  const toggle = document.getElementById(toggleId);
+  const status = document.getElementById(statusId);
+  if (toggle) toggle.checked = enabled;
+  if (status) status.textContent = enabled ? onText : offText;
+}
 
-// Function to update debug mode
-async function updateDebugMode(enabled) {
-  DEBUG_MODE = enabled;
-  
-  // Save to localStorage (shared with content script)
-  localStorage.setItem(DEBUG_STORAGE_KEY, enabled.toString());
-  
-  // Update UI
-  const debugToggle = document.getElementById('debug-toggle');
-  const debugStatus = document.getElementById('debug-status');
-  if (debugToggle) {
-    debugToggle.checked = enabled;
-  }
-  if (debugStatus) {
-    const onText = await getTranslation('popup.on', 'ON');
-    const offText = await getTranslation('popup.off', 'OFF');
-    debugStatus.textContent = enabled ? onText : offText;
-  }
-  
-  // Send message to content script to update debug flag
+async function syncBooleanFlagToGameTab({ action, windowKey, storageKey, enabled }) {
   try {
     const [tab] = await window.browserAPI.tabs.query({ active: true, currentWindow: true });
-    if (tab && tab.url && tab.url.includes('bestiaryarena.com')) {
-      // Send to content script
-      await window.browserAPI.tabs.sendMessage(tab.id, {
-        action: 'updateDebugMode',
-        enabled: enabled
+    if (!tab?.id || !tab.url?.includes('bestiaryarena.com')) return;
+
+    await window.browserAPI.tabs.sendMessage(tab.id, { action, enabled }).catch(() => null);
+
+    if (window.browserAPI.scripting?.executeScript) {
+      await window.browserAPI.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: (windowKey, storageKey, action, enabled) => {
+          window[windowKey] = enabled;
+          localStorage.setItem(storageKey, String(enabled));
+          window.postMessage({ from: 'BESTIARY_EXTENSION', action, enabled }, '*');
+        },
+        args: [windowKey, storageKey, action, enabled]
       });
-      
-      // Also send to page context
-      if (window.browserAPI.scripting && window.browserAPI.scripting.executeScript) {
-        // Chrome Manifest V3 - use scripting API
-        await window.browserAPI.scripting.executeScript({
-          target: { tabId: tab.id },
-          func: (enabled) => {
-            window.BESTIARY_DEBUG = enabled;
-            localStorage.setItem('bestiary-debug', enabled.toString());
-            window.postMessage({
-              from: 'BESTIARY_EXTENSION',
-              action: 'updateDebugMode',
-              enabled: enabled
-            }, '*');
-          },
-          args: [enabled]
-        });
-      } else if (window.browserAPI.tabs && window.browserAPI.tabs.executeScript) {
-        // Firefox fallback - use tabs API
-        await window.browserAPI.tabs.executeScript(tab.id, {
-          code: `
-            window.BESTIARY_DEBUG = ${enabled};
-            localStorage.setItem('bestiary-debug', '${enabled}');
-            window.postMessage({
-              from: 'BESTIARY_EXTENSION',
-              action: 'updateDebugMode',
-              enabled: ${enabled}
-            }, '*');
-          `
-        });
-      }
+    } else if (window.browserAPI.tabs?.executeScript) {
+      const code = [
+        `window[${JSON.stringify(windowKey)}] = ${enabled};`,
+        `localStorage.setItem(${JSON.stringify(storageKey)}, ${JSON.stringify(String(enabled))});`,
+        `window.postMessage({ from: 'BESTIARY_EXTENSION', action: ${JSON.stringify(action)}, enabled: ${enabled} }, '*');`
+      ].join('\n');
+      await window.browserAPI.tabs.executeScript(tab.id, { code });
     }
   } catch (error) {
-    originalConsoleLog('Could not send debug mode to content script:', error);
+    originalConsoleLog(`Could not send ${action} to content script:`, error);
   }
-  
-  // Always show debug mode changes
+}
+
+async function updateDebugMode(enabled) {
+  DEBUG_MODE = enabled;
+  localStorage.setItem(DEBUG_STORAGE_KEY, enabled.toString());
+  const { onText, offText } = await getOnOffLabels();
+  setToggleUi('debug-toggle', 'debug-status', enabled, onText, offText);
+  await syncBooleanFlagToGameTab({
+    action: 'updateDebugMode',
+    windowKey: 'BESTIARY_DEBUG',
+    storageKey: DEBUG_STORAGE_KEY,
+    enabled
+  });
   originalConsoleLog('Mod debug mode:', enabled ? 'enabled' : 'disabled');
 }
 
-// Function to update outfiter mode
 async function updateOutfiterMode(enabled) {
   OUTFITER_ENABLED = enabled;
-  
-  // Save to localStorage (shared with content script)
   localStorage.setItem(OUTFITER_STORAGE_KEY, enabled.toString());
-  
-  // Update UI
-  const outfiterToggle = document.getElementById('outfiter-toggle');
-  const outfiterStatus = document.getElementById('outfiter-status');
-  if (outfiterToggle) {
-    outfiterToggle.checked = enabled;
-  }
-  if (outfiterStatus) {
-    const onText = await getTranslation('popup.on', 'ON');
-    const offText = await getTranslation('popup.off', 'OFF');
-    outfiterStatus.textContent = enabled ? onText : offText;
-  }
-  
-  // Send message to content script to update outfiter flag
-  try {
-    const [tab] = await window.browserAPI.tabs.query({ active: true, currentWindow: true });
-    if (tab && tab.url && tab.url.includes('bestiaryarena.com')) {
-      // Send to content script
-      await window.browserAPI.tabs.sendMessage(tab.id, {
-        action: 'updateOutfiterMode',
-        enabled: enabled
-      });
-      
-      // Also send to page context
-      if (window.browserAPI.scripting && window.browserAPI.scripting.executeScript) {
-        // Chrome Manifest V3 - use scripting API
-        await window.browserAPI.scripting.executeScript({
-          target: { tabId: tab.id },
-          func: (enabled) => {
-            window.OUTFITER_ENABLED = enabled;
-            localStorage.setItem('outfiter-enabled', enabled.toString());
-            window.postMessage({
-              from: 'BESTIARY_EXTENSION',
-              action: 'updateOutfiterMode',
-              enabled: enabled
-            }, '*');
-          },
-          args: [enabled]
-        });
-      } else if (window.browserAPI.tabs && window.browserAPI.tabs.executeScript) {
-        // Firefox fallback - use tabs API
-        await window.browserAPI.tabs.executeScript(tab.id, {
-          code: `
-            window.OUTFITER_ENABLED = ${enabled};
-            localStorage.setItem('outfiter-enabled', '${enabled}');
-            window.postMessage({
-              from: 'BESTIARY_EXTENSION',
-              action: 'updateOutfiterMode',
-              enabled: ${enabled}
-            }, '*');
-          `
-        });
-      }
-    }
-  } catch (error) {
-    originalConsoleLog('Could not send outfiter mode to content script:', error);
-  }
-  
-  // Always show outfiter mode changes
+  const { onText, offText } = await getOnOffLabels();
+  setToggleUi('outfiter-toggle', 'outfiter-status', enabled, onText, offText);
+  await syncBooleanFlagToGameTab({
+    action: 'updateOutfiterMode',
+    windowKey: 'OUTFITER_ENABLED',
+    storageKey: OUTFITER_STORAGE_KEY,
+    enabled
+  });
   originalConsoleLog('Outfiter mode:', enabled ? 'enabled' : 'disabled');
 }
 
-// Function to enable welcome page
 async function enableWelcomePage() {
   WELCOME_ENABLED = true;
-  
-  // Save to localStorage (shared with content script)
   localStorage.setItem(WELCOME_STORAGE_KEY, 'true');
-  
-  // Send message to content script to update welcome flag
-  try {
-    const [tab] = await window.browserAPI.tabs.query({ active: true, currentWindow: true });
-    if (tab && tab.url && tab.url.includes('bestiaryarena.com')) {
-      // Send to content script
-      await window.browserAPI.tabs.sendMessage(tab.id, {
-        action: 'updateWelcomeMode',
-        enabled: true
-      });
-      
-      // Also send to page context
-      if (window.browserAPI.scripting && window.browserAPI.scripting.executeScript) {
-        // Chrome Manifest V3 - use scripting API
-        await window.browserAPI.scripting.executeScript({
-          target: { tabId: tab.id },
-          func: () => {
-            window.WELCOME_ENABLED = true;
-            localStorage.setItem('welcome-enabled', 'true');
-            window.postMessage({
-              from: 'BESTIARY_EXTENSION',
-              action: 'updateWelcomeMode',
-              enabled: true
-            }, '*');
-          }
-        });
-      } else if (window.browserAPI.tabs && window.browserAPI.tabs.executeScript) {
-        // Firefox fallback - use tabs API
-        await window.browserAPI.tabs.executeScript(tab.id, {
-          code: `
-            window.WELCOME_ENABLED = true;
-            localStorage.setItem('welcome-enabled', 'true');
-            window.postMessage({
-              from: 'BESTIARY_EXTENSION',
-              action: 'updateWelcomeMode',
-              enabled: true
-            }, '*');
-          `
-        });
-      }
-    }
-  } catch (error) {
-    originalConsoleLog('Could not send welcome mode to content script:', error);
-  }
-  
-  // Always show welcome mode changes
+  await syncBooleanFlagToGameTab({
+    action: 'updateWelcomeMode',
+    windowKey: 'WELCOME_ENABLED',
+    storageKey: WELCOME_STORAGE_KEY,
+    enabled: true
+  });
   originalConsoleLog('Welcome page enabled');
 }
 
 // Function to extract Gist hash from input (supports hash or full URL)
-function extractGistHash(input) {
-  // Gist hash (at least 8 hex chars)
-  if (/^[a-f0-9]{8,}$/i.test(input)) {
-    return input;
-  }
-  // Gist URL
-  const match = input.match(/gist\.github\.com\/(?:[\w-]+\/)?([a-f0-9]{8,})/i);
-  if (match) {
-    return match[1];
-  }
-  return null;
-}
 
-
-// Function to load debug mode from storage
 async function loadDebugMode() {
   try {
     DEBUG_MODE = localStorage.getItem(DEBUG_STORAGE_KEY) === 'true';
-    
-    // Update UI
-    const debugToggle = document.getElementById('debug-toggle');
-    const debugStatus = document.getElementById('debug-status');
-    if (debugToggle) {
-      debugToggle.checked = DEBUG_MODE;
-    }
-    if (debugStatus) {
-      const onText = await getTranslation('popup.on', 'ON');
-      const offText = await getTranslation('popup.off', 'OFF');
-      debugStatus.textContent = DEBUG_MODE ? onText : offText;
-    }
-    
-    // Always show debug mode loading
+    const { onText, offText } = await getOnOffLabels();
+    setToggleUi('debug-toggle', 'debug-status', DEBUG_MODE, onText, offText);
     originalConsoleLog('Mod debug mode loaded:', DEBUG_MODE ? 'enabled' : 'disabled');
   } catch (error) {
-    originalConsoleLog.error('Failed to load debug mode:', error);
+    console.error('Failed to load debug mode:', error);
     DEBUG_MODE = false;
   }
 }
@@ -457,23 +506,11 @@ async function loadDebugMode() {
 async function loadOutfiterMode() {
   try {
     OUTFITER_ENABLED = localStorage.getItem(OUTFITER_STORAGE_KEY) === 'true';
-    
-    // Update UI
-    const outfiterToggle = document.getElementById('outfiter-toggle');
-    const outfiterStatus = document.getElementById('outfiter-status');
-    if (outfiterToggle) {
-      outfiterToggle.checked = OUTFITER_ENABLED;
-    }
-    if (outfiterStatus) {
-      const onText = await getTranslation('popup.on', 'ON');
-      const offText = await getTranslation('popup.off', 'OFF');
-      outfiterStatus.textContent = OUTFITER_ENABLED ? onText : offText;
-    }
-    
-    // Always show outfiter mode loading
+    const { onText, offText } = await getOnOffLabels();
+    setToggleUi('outfiter-toggle', 'outfiter-status', OUTFITER_ENABLED, onText, offText);
     originalConsoleLog('Outfiter mode loaded:', OUTFITER_ENABLED ? 'enabled' : 'disabled');
   } catch (error) {
-    originalConsoleLog.error('Failed to load outfiter mode:', error);
+    console.error('Failed to load outfiter mode:', error);
     OUTFITER_ENABLED = false;
   }
 }
@@ -487,120 +524,47 @@ async function loadWelcomeMode() {
     // Always show welcome mode loading
     originalConsoleLog('Welcome page mode loaded:', WELCOME_ENABLED ? 'enabled' : 'disabled');
   } catch (error) {
-    originalConsoleLog.error('Failed to load welcome page mode:', error);
+    console.error('Failed to load welcome page mode:', error);
     WELCOME_ENABLED = true; // Default to enabled on error
   }
 }
 
-const i18n = window.i18n;
 
-const localModsContainer = document.getElementById('local-mods-container');
+// =============================================================================
+// 7. Localization
+// =============================================================================
 
-const MANUAL_MODS_KEY = 'manualMods';
-
-// Translation cache
-let translations = null;
-
-// Load and apply translations
 async function loadAndApplyTranslations() {
   try {
-    translations = await window.LocalizationUtils.loadTranslations();
+    currentTranslations = await window.LocalizationUtils.loadTranslations();
     await applyTranslations();
   } catch (error) {
     originalConsoleLog('Error loading translations:', error);
   }
 }
 
-// Apply translations to DOM elements
+// Apply translations to DOM elements (data-localize + a few special cases)
 async function applyTranslations() {
-  if (!translations) {
-    translations = await window.LocalizationUtils.loadTranslations();
+  if (!currentTranslations) {
+    currentTranslations = await window.LocalizationUtils.loadTranslations();
   }
-  
-  const t = async (path) => {
-    return await window.LocalizationUtils.getLocalizedTextWithFallback('', path);
-  };
-  
-  // Helper to get translation
-  const getT = async (path, fallback) => {
-    const translation = await window.LocalizationUtils.getTranslation(path);
-    return translation || fallback;
-  };
-  
-  // Apply translations
-  const applyT = async (selector, path, attribute = 'textContent') => {
-    const element = document.querySelector(selector);
-    if (element) {
-      const translation = await getT(path, element[attribute]);
-      element[attribute] = translation;
-    }
-  };
-  
-  // Apply all translations
-  await applyT('#mod-search', 'popup.searchPlaceholder', 'placeholder');
-  await applyT('.category-filter[data-category="all"]', 'popup.categoryAll');
-  await applyT('.category-filter[data-category="official"]', 'popup.categoryOfficial');
-  await applyT('.category-filter[data-category="super"]', 'popup.categorySuper');
-  await applyT('.category-filter[data-category="custom"]', 'popup.categoryCustom');
-  await applyT('#empty-state p', 'popup.noModsFound');
-  await applyT('.collapsible-header span:first-child', 'popup.addScript');
-  await applyT('label[for="hash-input"]', 'popup.gistHashLabel');
-  await applyT('#hash-input', 'popup.gistHashPlaceholder', 'placeholder');
-  await applyT('.form-hint', 'popup.gistHashHelp');
-  await applyT('label[for="name-input"]', 'popup.scriptNameLabel');
-  await applyT('#name-input', 'popup.scriptNamePlaceholder', 'placeholder');
-  await applyT('#hash-form button[type="submit"]', 'popup.addButton');
-  await applyT('.external-link a', 'popup.findMoreMods');
-  const extrasHeader = document.querySelector('[data-section="extras"] .collapsible-header span:first-child');
-  if (extrasHeader) {
-    extrasHeader.textContent = await getT('popup.extras', 'Extras');
+
+  applyLocalization();
+
+  const patchTitle = document.querySelector('.patch-notes-title');
+  if (patchTitle) {
+    patchTitle.textContent = getTranslationSync('popup.patchNotesTitle', patchTitle.textContent);
   }
-  const debugHeader = document.querySelector('[data-section="debug"] .collapsible-header span:first-child');
-  if (debugHeader) {
-    debugHeader.textContent = await getT('popup.debug', 'Debug');
+  const patchClose = document.querySelector('.patch-notes-close');
+  if (patchClose) {
+    patchClose.setAttribute(
+      'aria-label',
+      getTranslationSync('popup.closePatchNotes', patchClose.getAttribute('aria-label') || 'Close patch notes')
+    );
   }
-  await applyT('label[for="debug-toggle"]', 'popup.debugMode');
-  await applyT('#debug-status', 'popup.off');
-  await applyT('.setting-item:has(#debug-toggle) .setting-description', 'popup.debugModeDescription');
-  await applyT('#storage-usage', 'popup.storageCalculating');
-  await applyT('label[for="outfiter-toggle"]', 'popup.outfiter');
-  await applyT('#outfiter-status', 'popup.off');
-  await applyT('.setting-item:has(#outfiter-toggle) .setting-description', 'popup.outfiterDescription');
-  await applyT('.setting-item:has(#enable-welcome-btn) .setting-header label', 'popup.welcomePage');
-  await applyT('#enable-welcome-btn', 'popup.enableWelcomePage');
-  await applyT('.setting-item:has(#enable-welcome-btn) .setting-description', 'popup.welcomePageDescription');
-  await applyT('.setting-item:has(#show-patch-notes-btn) .setting-header label', 'popup.patchNotes');
-  await applyT('#show-patch-notes-btn', 'popup.viewPatchNotes');
-  await applyT('.setting-item:has(#show-patch-notes-btn) .setting-description', 'popup.patchNotesDescription');
-  await applyT('.setting-item:has(#error-log-panel) .setting-header label', 'popup.errorLog');
-  await applyT('#copy-error-log-btn', 'popup.copyErrorLog');
-  await applyT('#clear-error-log-btn', 'popup.clearErrorLog');
-  await applyT('.setting-item:has(#error-log-panel) .setting-description', 'popup.errorLogDescription');
-  await applyT('.patch-notes-title', 'popup.patchNotesTitle');
-  await applyT('.patch-notes-close', 'popup.closePatchNotes', 'aria-label');
-  
-  // Update version display
-  const versionElement = document.getElementById('version-display');
-  if (versionElement && versionElement.textContent.includes('loading')) {
-    const versionText = await getT('popup.versionLoading', 'Version loading...');
-    versionElement.textContent = versionText;
-  }
-  
-  // Update ON/OFF statuses (will be updated dynamically, but set initial)
-  const debugStatus = document.getElementById('debug-status');
-  const outfiterStatus = document.getElementById('outfiter-status');
-  if (debugStatus) {
-    const onText = await getT('popup.on', 'ON');
-    const offText = await getT('popup.off', 'OFF');
-    if (debugStatus.textContent === 'ON') debugStatus.textContent = onText;
-    if (debugStatus.textContent === 'OFF') debugStatus.textContent = offText;
-  }
-  if (outfiterStatus) {
-    const onText = await getT('popup.on', 'ON');
-    const offText = await getT('popup.off', 'OFF');
-    if (outfiterStatus.textContent === 'ON') outfiterStatus.textContent = onText;
-    if (outfiterStatus.textContent === 'OFF') outfiterStatus.textContent = offText;
-  }
+
+  await refreshToggleStatusLabels();
+  fitCategoryFilterLabels();
 }
 
 // Helper function to get translation (for use in other functions)
@@ -622,6 +586,102 @@ function getTranslationSync(path, fallback = '') {
 
   return result || fallback;
 }
+
+function applyLocalization() {
+  // Apply text localization
+  const localizeElements = document.querySelectorAll('[data-localize]');
+  for (const element of localizeElements) {
+    const key = element.getAttribute('data-localize');
+    const translation = getTranslationSync(key);
+    if (translation) {
+      element.textContent = translation;
+    }
+  }
+
+  // Apply placeholder localization
+  const placeholderElements = document.querySelectorAll('[data-localize-placeholder]');
+  for (const element of placeholderElements) {
+    const key = element.getAttribute('data-localize-placeholder');
+    const translation = getTranslationSync(key);
+    if (translation) {
+      element.placeholder = translation;
+    }
+  }
+}
+
+function initializeLanguageToggle() {
+  const langEnBtn = document.getElementById('lang-en');
+  const langPtBtn = document.getElementById('lang-pt');
+
+  if (!langEnBtn || !langPtBtn) return;
+
+  // Get stored language or default to browser language
+  const storedLang = localStorage.getItem(LANGUAGE_STORAGE_KEY);
+  const currentLang = storedLang || (navigator.language.toLowerCase().startsWith('pt') ? 'pt-BR' : 'en-US');
+
+  // Update button states
+  updateLanguageButtons(currentLang);
+
+  // Add event listeners
+  langEnBtn.addEventListener('click', () => switchLanguage('en-US'));
+  langPtBtn.addEventListener('click', () => switchLanguage('pt-BR'));
+}
+
+function updateLanguageButtons(activeLang) {
+  const langEnBtn = document.getElementById('lang-en');
+  const langPtBtn = document.getElementById('lang-pt');
+
+  if (!langEnBtn || !langPtBtn) return;
+
+  // Remove active class from both buttons
+  langEnBtn.classList.remove('active');
+  langPtBtn.classList.remove('active');
+
+  // Add active class to the current language button
+  if (activeLang === 'en-US') {
+    langEnBtn.classList.add('active');
+  } else if (activeLang === 'pt-BR') {
+    langPtBtn.classList.add('active');
+  }
+}
+
+async function switchLanguage(locale) {
+  // Store the selected language
+  localStorage.setItem(LANGUAGE_STORAGE_KEY, locale);
+
+  // Update button states
+  updateLanguageButtons(locale);
+
+  // Clear the global translation cache to force reload with new language
+  if (window.LocalizationUtils) {
+    window.LocalizationUtils.translationsCache = null;
+    window.LocalizationUtils.translationsLocale = null;
+  }
+
+  // Load translations for the new language using global system
+  currentTranslations = await window.LocalizationUtils.loadTranslations();
+
+  // Update version display with new language
+  await updateVersionDisplay();
+
+  // Reapply chrome UI localizations (data-localize, toggles, etc.)
+  await applyTranslations();
+
+  // Mod cards bake in translated strings at create time — rebuild them
+  if (allMods.length) {
+    await renderLocalMods(allMods);
+  } else {
+    fitCategoryFilterLabels();
+  }
+}
+
+
+// Apply localization to elements with data attributes
+
+
+// =============================================================================
+// 8. Storage & Lifecycle
+// =============================================================================
 
 async function getManualMods() {
   return new Promise(resolve => {
@@ -657,7 +717,6 @@ async function saveManualMods(mods) {
   });
 }
 
-// === STORAGE USAGE DISPLAY ===
 async function updateStorageUsage() {
   try {
     const storageElement = document.getElementById('storage-usage');
@@ -737,6 +796,66 @@ async function updateStorageUsage() {
     }
   }
 }
+
+function setupPopupStorageAndLifecycle() {
+  const storage = window.browserAPI?.storage;
+
+  if (storage?.local?.get) {
+    storage.local.get(['dashboard-theme'], (result) => {
+      applyPopupTheme(result?.['dashboard-theme'] || 'default');
+    });
+  } else {
+    applyPopupTheme(localStorage.getItem('dashboard-theme') || 'default');
+  }
+
+  if (popupStorageChangeHandler && storage?.onChanged?.removeListener) {
+    storage.onChanged.removeListener(popupStorageChangeHandler);
+  }
+
+  popupStorageChangeHandler = (changes, area) => {
+    if (area !== 'local') return;
+    if (changes['dashboard-theme']) {
+      applyPopupTheme(changes['dashboard-theme'].newValue || 'default');
+    }
+    if ((changes[MANUAL_MODS_KEY] || changes.localMods) && !isLoadingMods) {
+      loadLocalMods();
+    }
+    updateStorageUsage();
+  };
+
+  if (storage?.onChanged?.addListener) {
+    storage.onChanged.addListener(popupStorageChangeHandler);
+  }
+
+  if (popupFocusHandler) {
+    window.removeEventListener('focus', popupFocusHandler);
+  }
+  popupFocusHandler = () => {
+    loadLocalMods();
+    updateStorageUsage();
+  };
+  window.addEventListener('focus', popupFocusHandler);
+
+  window.addEventListener('pagehide', () => {
+    teardownPopupResponsiveLayout();
+    if (popupStorageChangeHandler && window.browserAPI?.storage?.onChanged?.removeListener) {
+      window.browserAPI.storage.onChanged.removeListener(popupStorageChangeHandler);
+      popupStorageChangeHandler = null;
+    }
+    if (popupFocusHandler) {
+      window.removeEventListener('focus', popupFocusHandler);
+      popupFocusHandler = null;
+    }
+  }, { once: true });
+}
+
+
+// Track whether we're currently loading mods to prevent loops / stale renders
+
+
+// =============================================================================
+// 9. Error Log
+// =============================================================================
 
 function isLoaderErrorEntry(entry) {
   return (entry?.level || 'error') === 'error';
@@ -885,6 +1004,443 @@ async function clearErrorLog() {
   await refreshErrorLogPanel();
 }
 
+
+// =============================================================================
+// 10. Version & Patch Notes Data
+// =============================================================================
+
+async function updateVersionDisplay() {
+  const versionElement = document.getElementById('version-display');
+  if (!versionElement) return null;
+
+  // Set loading text first
+  const loadingText = getTranslationSync('popup.versionLoading', 'Version loading...');
+  versionElement.textContent = loadingText;
+
+  try {
+    const manifest = await window.browserAPI.runtime.getManifest();
+    const versionText = getTranslationSync('popup.version', 'Version');
+    versionElement.textContent = `${versionText} ${manifest.version}`;
+    return manifest.version;
+  } catch (error) {
+    console.error('Failed to load manifest version:', error);
+    const versionText = getTranslationSync('popup.version', 'Version');
+    versionElement.textContent = `${versionText} unknown`;
+    return null;
+  }
+}
+
+async function loadPatchNotes() {
+  try {
+    const response = await fetch(chrome.runtime.getURL('docs/patch-notes.json'));
+    if (response.ok) {
+      const data = await response.json();
+      // Handle both old array format and new object format with metadata
+      PATCH_NOTES = Array.isArray(data) ? data : (data.notes || []);
+      return PATCH_NOTES;
+    }
+  } catch (error) {
+    originalConsoleLog('Error loading patch notes:', error);
+  }
+  return [];
+}
+
+// Keep original console.log for popup use
+
+
+// =============================================================================
+// 11. Mods (Load / Render / Filter)
+// =============================================================================
+
+function extractGistHash(input) {
+  // Gist hash (at least 8 hex chars)
+  if (/^[a-f0-9]{8,}$/i.test(input)) {
+    return input;
+  }
+  // Gist URL
+  const match = input.match(/gist\.github\.com\/(?:[\w-]+\/)?([a-f0-9]{8,})/i);
+  if (match) {
+    return match[1];
+  }
+  return null;
+}
+
+
+// Function to load debug mode from storage
+
+async function loadLocalMods() {
+  const generation = ++loadLocalModsGeneration;
+  isLoadingMods = true;
+  try {
+    const response = await window.browserAPI.runtime.sendMessage({ action: 'getLocalMods' });
+    if (generation !== loadLocalModsGeneration) return;
+    const mods = response && response.success ? response.mods : [];
+    await renderLocalMods(mods);
+  } catch (error) {
+    if (generation === loadLocalModsGeneration) {
+      showError('Error loading local mods: ' + error.message);
+    }
+  } finally {
+    if (generation === loadLocalModsGeneration) {
+      isLoadingMods = false;
+    }
+  }
+}
+
+// Store all mods for filtering
+
+function normalizeModName(name) {
+  return name.replace(/\s+/g, '').toLowerCase();
+}
+
+function getModCategory(mod) {
+  const modFileName = mod.name.split('/').pop();
+  if (mod.type === 'manual') return 'custom';
+  if (otModNames.some(n => normalizeModName(n) === normalizeModName(modFileName))) return 'ot';
+  if (superModNames.some(n => normalizeModName(n) === normalizeModName(modFileName))) return 'super';
+  return 'official';
+}
+
+const CATEGORY_FILTER_LABELS = {
+  official: { key: 'popup.categoryOfficial', fallback: 'Original Mods' },
+  super: { key: 'popup.categorySuper', fallback: 'SuperMods' },
+  ot: { key: 'popup.categoryOt', fallback: 'OT Mods' },
+  custom: { key: 'popup.categoryCustom', fallback: 'Custom Mods' }
+};
+
+function getModDisplayName(mod) {
+  const modFileName = mod.name.split('/').pop();
+  if (mod.displayName && !mod.displayName.includes('/')) {
+    return mod.displayName;
+  }
+  return modFileName.replace('.js', '').replace(/_/g, ' ');
+}
+
+async function getModDescription(mod) {
+  const displayName = getModDisplayName(mod);
+  // Try to get translation first
+  const translationKey = `popup.modDescriptions.${displayName}`;
+  const translatedDescription = await getTranslation(translationKey);
+  if (translatedDescription) {
+    return translatedDescription;
+  }
+  // Fallback to hardcoded English descriptions
+  if (modDescriptions[displayName]) {
+    return modDescriptions[displayName];
+  }
+  // Final fallback with translation
+  const defaultDesc = await getTranslation('popup.modDescriptions.defaultDescription', `Enhance your Bestiary Arena experience with ${displayName}.`);
+  return defaultDesc.replace('{name}', displayName);
+}
+
+async function getCategoryDisplayName(category) {
+  const meta = CATEGORY_FILTER_LABELS[category];
+  if (!meta) return category;
+  return (await getTranslation(meta.key)) || meta.fallback;
+}
+
+async function createModCard(mod) {
+  const modCard = document.createElement('div');
+  modCard.className = 'mod-card';
+  if (mod.enabled) {
+    modCard.classList.add('enabled');
+  }
+  modCard.dataset.name = mod.name;
+  modCard.dataset.category = getModCategory(mod);
+
+  const category = getModCategory(mod);
+  const displayName = getModDisplayName(mod);
+  const description = await getModDescription(mod);
+
+  // Header with title and category badge
+  const header = document.createElement('div');
+  header.className = 'mod-card-header';
+
+  const title = document.createElement('h3');
+  title.className = 'mod-card-title';
+  title.textContent = displayName;
+
+  const categoryBadge = document.createElement('span');
+  categoryBadge.className = `mod-card-category ${category}`;
+  categoryBadge.textContent = await getCategoryDisplayName(category);
+
+  header.appendChild(title);
+  header.appendChild(categoryBadge);
+
+  // Description
+  const desc = document.createElement('p');
+  desc.className = 'mod-card-description';
+  desc.textContent = description;
+
+  const authorProfileUrl = modAuthorProfileUrls[displayName];
+  let authorCredit = null;
+  if (authorProfileUrl) {
+    authorCredit = document.createElement('a');
+    authorCredit.className = 'mod-card-author-credit';
+    authorCredit.href = authorProfileUrl;
+    authorCredit.target = '_blank';
+    authorCredit.rel = 'noopener noreferrer';
+    authorCredit.textContent = await getTranslation('mods.betterBestiary.authorCredit', 'by megafuji');
+  }
+
+  // Footer with toggle and delete
+  const footer = document.createElement('div');
+  footer.className = 'mod-card-footer';
+
+  const toggleContainer = document.createElement('div');
+  toggleContainer.className = 'mod-card-toggle';
+
+  const toggleLabel = document.createElement('span');
+  toggleLabel.className = 'mod-card-toggle-label';
+  const onText = await getTranslation('popup.on', 'ON');
+  const offText = await getTranslation('popup.off', 'OFF');
+  toggleLabel.textContent = mod.enabled ? onText : offText;
+
+  const toggleSwitch = document.createElement('label');
+  toggleSwitch.className = 'toggle-switch';
+
+  const toggleInput = document.createElement('input');
+  toggleInput.type = 'checkbox';
+  toggleInput.checked = mod.enabled;
+  toggleInput.addEventListener('change', async () => {
+    await toggleLocalMod(mod.name, toggleInput.checked);
+    const onText = await getTranslation('popup.on', 'ON');
+    const offText = await getTranslation('popup.off', 'OFF');
+    toggleLabel.textContent = toggleInput.checked ? onText : offText;
+    if (toggleInput.checked) {
+      modCard.classList.add('enabled');
+    } else {
+      modCard.classList.remove('enabled');
+    }
+    // Update mod enabled state for counts
+    mod.enabled = toggleInput.checked;
+    await updateCategoryCounts(allMods);
+  });
+
+  const slider = document.createElement('span');
+  slider.className = 'slider';
+
+  toggleSwitch.appendChild(toggleInput);
+  toggleSwitch.appendChild(slider);
+  toggleContainer.appendChild(toggleLabel);
+  toggleContainer.appendChild(toggleSwitch);
+
+  footer.appendChild(toggleContainer);
+
+  // Add delete button for user-generated mods
+  if (mod.type === 'manual') {
+    const deleteButton = document.createElement('button');
+    deleteButton.className = 'mod-card-delete';
+    deleteButton.innerHTML = '×';
+    const deleteText = await getTranslation('popup.deleteMod', 'Delete mod');
+    deleteButton.setAttribute('aria-label', deleteText);
+    deleteButton.setAttribute('title', deleteText);
+    deleteButton.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const modName = mod.originalName || mod.displayName || mod.name.split('/').pop().replace('.js', '');
+      const confirmMsg = await getTranslation('popup.messages.deleteConfirm', `Are you sure you want to delete "${modName}"?`);
+      if (confirm(confirmMsg.replace('{name}', modName))) {
+        await deleteManualMod(mod.originalName || mod.displayName || mod.name.split('/').pop().replace('.js', ''));
+      }
+    });
+    footer.appendChild(deleteButton);
+  }
+
+  modCard.appendChild(header);
+  modCard.appendChild(desc);
+  if (authorCredit) {
+    modCard.appendChild(authorCredit);
+  }
+  modCard.appendChild(footer);
+
+  return modCard;
+}
+
+async function updateCategoryCounts(mods) {
+  if (!mods || mods.length === 0) {
+    fitCategoryFilterLabels();
+    return;
+  }
+
+  const visibleMods = mods.filter(mod => {
+    const modFileName = mod.name.split('/').pop();
+    return !hiddenMods.some(hidden =>
+      normalizeModName(hidden) === normalizeModName(modFileName)
+    );
+  });
+
+  const counts = {
+    official: { total: 0, enabled: 0 },
+    super: { total: 0, enabled: 0 },
+    ot: { total: 0, enabled: 0 },
+    custom: { total: 0, enabled: 0 }
+  };
+
+  visibleMods.forEach(mod => {
+    const category = getModCategory(mod);
+    if (counts[category] !== undefined) {
+      counts[category].total++;
+      if (mod.enabled) counts[category].enabled++;
+    }
+  });
+
+  for (const [category, meta] of Object.entries(CATEGORY_FILTER_LABELS)) {
+    const filter = document.querySelector(`.category-filter[data-category="${category}"]`);
+    if (!filter) continue;
+    const categoryText = (await getTranslation(meta.key)) || meta.fallback;
+    const { total, enabled } = counts[category];
+    filter.textContent = total > 0 ? `${categoryText} (${enabled}/${total})` : categoryText;
+  }
+
+  fitCategoryFilterLabels();
+}
+
+function fitCategoryFilterLabels() {
+  const buttons = document.querySelectorAll('.category-filter');
+  if (!buttons.length) return;
+
+  const applyFit = () => {
+    buttons.forEach((btn) => {
+      if (btn.offsetParent === null && btn.clientWidth === 0) return;
+      const maxSize = 11;
+      const minSize = 7;
+      let size = maxSize;
+      btn.style.fontSize = `${size}px`;
+      // Shrink until the label fits the equal-width tab
+      while (size > minSize && btn.scrollWidth > btn.clientWidth + 1) {
+        size -= 0.5;
+        btn.style.fontSize = `${size}px`;
+      }
+    });
+  };
+
+  requestAnimationFrame(() => requestAnimationFrame(applyFit));
+}
+
+async function renderLocalMods(mods) {
+  const modsGrid = document.getElementById('mods-grid');
+  const emptyState = document.getElementById('empty-state');
+
+  if (!modsGrid) return;
+
+  modsGrid.innerHTML = '';
+
+  if (!mods || mods.length === 0) {
+    emptyState.style.display = 'block';
+    await updateCategoryCounts([]);
+    return;
+  }
+
+  // Filter out hidden mods
+  const visibleMods = mods.filter(mod => {
+    const modFileName = mod.name.split('/').pop();
+    return !hiddenMods.some(hidden => 
+      normalizeModName(hidden) === normalizeModName(modFileName)
+    );
+  });
+
+  // Store all mods for filtering
+  allMods = visibleMods;
+
+  // Update category counts
+  await updateCategoryCounts(visibleMods);
+
+  // Render all mods
+  for (const mod of visibleMods) {
+    const modCard = await createModCard(mod);
+    modsGrid.appendChild(modCard);
+  }
+
+  emptyState.style.display = visibleMods.length === 0 ? 'block' : 'none';
+  
+  // Apply current filters
+  applyFilters();
+}
+
+// Filter functionality
+
+function applyFilters() {
+  const modsGrid = document.getElementById('mods-grid');
+  const emptyState = document.getElementById('empty-state');
+  
+  if (!modsGrid) return;
+
+  const searchTerm = currentSearchTerm.toLowerCase();
+  const category = currentCategory;
+
+  const cards = modsGrid.querySelectorAll('.mod-card');
+  let visibleCount = 0;
+
+  cards.forEach(card => {
+    const modName = card.querySelector('.mod-card-title').textContent.toLowerCase();
+    const cardCategory = card.dataset.category;
+    
+    const matchesSearch = !searchTerm || modName.includes(searchTerm);
+    const matchesCategory = category === 'all' || cardCategory === category;
+
+    if (matchesSearch && matchesCategory) {
+      card.style.display = 'flex';
+      visibleCount++;
+    } else {
+      card.style.display = 'none';
+    }
+  });
+
+  emptyState.style.display = visibleCount === 0 ? 'block' : 'none';
+}
+
+async function toggleLocalMod(name, enabled) {
+  try {
+    const tabId = await getActiveTabId();
+    const response = await window.browserAPI.runtime.sendMessage({
+      action: 'toggleLocalMod',
+      name,
+      enabled,
+      tabId
+    });
+    
+    if (!response.success) {
+      showError(response.error || 'Unknown error occurred');
+      loadLocalMods();
+    }
+  } catch (error) {
+    showError(`Communication error: ${error.message}`);
+    loadLocalMods();
+  }
+}
+
+async function deleteManualMod(modName) {
+  try {
+    let mods = await getManualMods();
+    // Manual mods are stored with just the name (not the full path)
+    // The modName passed here is the originalName from the mod object
+    const initialLength = mods.length;
+    mods = mods.filter(mod => mod.name !== modName);
+    
+    if (mods.length === initialLength) {
+      // If no match found, the mod might have been deleted already
+      originalConsoleLog('Mod not found in storage, may have been already deleted');
+    }
+    
+    await saveManualMods(mods);
+    originalConsoleLog('Manual mod deleted successfully');
+    await loadLocalMods();
+    await updateStorageUsage();
+  } catch (error) {
+    originalConsoleLog('Error deleting manual mod:', error);
+    showError(`Failed to delete mod: ${error.message}`);
+  }
+}
+
+function showError(message) {
+  alert(message);
+}
+
+
+// =============================================================================
+// 12. Initialization
+// =============================================================================
+
 document.addEventListener('DOMContentLoaded', async () => {
   setupPopupResponsiveLayout();
 
@@ -894,28 +1450,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Load patch notes
   await loadPatchNotes();
   
-  // === VERSION DISPLAY ===
-  async function updateVersionDisplay() {
-    const versionElement = document.getElementById('version-display');
-    if (!versionElement) return null;
-
-    // Set loading text first
-    const loadingText = getTranslationSync('popup.versionLoading', 'Version loading...');
-    versionElement.textContent = loadingText;
-
-    try {
-      const manifest = await window.browserAPI.runtime.getManifest();
-      const versionText = getTranslationSync('popup.version', 'Version');
-      versionElement.textContent = `${versionText} ${manifest.version}`;
-      return manifest.version;
-    } catch (error) {
-      console.error('Failed to load manifest version:', error);
-      const versionText = getTranslationSync('popup.version', 'Version');
-      versionElement.textContent = `${versionText} unknown`;
-      return null;
-    }
-  }
-
   // === PATCH NOTES ===
   async function getLastViewedVersion() {
     try {
@@ -1188,36 +1722,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
 
-  // === THEME SYNC (uses dashboard-theme storage key for compatibility) ===
-  function applyPopupTheme(themeName) {
-    document.documentElement.setAttribute('data-theme', themeName || 'default');
-  }
+  setupPopupStorageAndLifecycle();
 
-  // On load, apply theme from storage
-  if (window.browser && window.browser.storage && window.browser.storage.local) {
-    window.browser.storage.local.get(['dashboard-theme'], (result) => {
-      applyPopupTheme(result['dashboard-theme'] || 'default');
-    });
-    // Listen for theme changes
-    window.browser.storage.onChanged.addListener((changes, area) => {
-      if (area === 'local' && changes['dashboard-theme']) {
-        applyPopupTheme(changes['dashboard-theme'].newValue || 'default');
-      }
-    });
-  } else if (window.chrome && window.chrome.storage && window.chrome.storage.local) {
-    window.chrome.storage.local.get(['dashboard-theme'], (result) => {
-      applyPopupTheme(result['dashboard-theme'] || 'default');
-    });
-    window.chrome.storage.onChanged.addListener((changes, area) => {
-      if (area === 'local' && changes['dashboard-theme']) {
-        applyPopupTheme(changes['dashboard-theme'].newValue || 'default');
-      }
-    });
-  } else {
-    // fallback to localStorage
-    applyPopupTheme(localStorage.getItem('dashboard-theme') || 'default');
-  }
-  
   // Load debug mode and set up toggle
   await loadDebugMode();
   
@@ -1247,6 +1753,16 @@ document.addEventListener('DOMContentLoaded', async () => {
   } else {
     originalConsoleLog('Outfiter toggle not found in DOM');
   }
+
+  // Color mode (light default)
+  applyColorMode(getStoredColorMode());
+  await refreshToggleStatusLabels();
+  const darkModeToggle = document.getElementById('dark-mode-toggle');
+  if (darkModeToggle) {
+    darkModeToggle.addEventListener('change', (e) => {
+      applyColorMode(e.target.checked ? 'dark' : 'light');
+    });
+  }
   
   // Load welcome page mode and set up button
   await loadWelcomeMode();
@@ -1258,18 +1774,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     // Add click animation
     enableWelcomeBtn.addEventListener('mousedown', () => {
-      enableWelcomeBtn.style.transform = 'scale(0.95)';
-      enableWelcomeBtn.style.background = '#e6d15c';
+      enableWelcomeBtn.style.filter = 'brightness(0.95)';
     });
     
     enableWelcomeBtn.addEventListener('mouseup', () => {
-      enableWelcomeBtn.style.transform = 'scale(1)';
-      enableWelcomeBtn.style.background = 'var(--theme-accent, #ffe066)';
+      enableWelcomeBtn.style.filter = '';
     });
     
     enableWelcomeBtn.addEventListener('mouseleave', () => {
-      enableWelcomeBtn.style.transform = 'scale(1)';
-      enableWelcomeBtn.style.background = 'var(--theme-accent, #ffe066)';
+      enableWelcomeBtn.style.filter = '';
     });
     
     enableWelcomeBtn.addEventListener('click', () => {
@@ -1439,705 +1952,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   });
   
-  // Listen for changes to manualMods in storage and update the popup in real time
-  if (window.browser && window.browser.storage && window.browser.storage.onChanged) {
-    window.browser.storage.onChanged.addListener((changes, area) => {
-      if (area === 'local' && changes[MANUAL_MODS_KEY]) {
-        loadLocalMods();
-      }
-      // Update storage usage when any storage changes
-      if (area === 'local') {
-        updateStorageUsage();
-      }
-    });
-  } else if (window.chrome && window.chrome.storage && window.chrome.storage.onChanged) {
-    window.chrome.storage.onChanged.addListener((changes, area) => {
-      if (area === 'local' && changes[MANUAL_MODS_KEY]) {
-        loadLocalMods();
-      }
-      // Update storage usage when any storage changes
-      if (area === 'local') {
-        updateStorageUsage();
-      }
-    });
-  }
-
-  // Also reload mods when the popup gains focus (e.g., when the extension icon is clicked)
-  window.addEventListener('focus', () => {
-    loadLocalMods();
-    updateStorageUsage();
-  });
-  
-});
-
-// Track whether we're currently loading mods to prevent loops
-let isLoadingMods = false;
-
-async function loadLocalMods() {
-  isLoadingMods = true;
-  try {
-    // Fetch all mods (including manual mods) from background script
-    const response = await window.browserAPI.runtime.sendMessage({ action: 'getLocalMods' });
-    const mods = response && response.success ? response.mods : [];
-
-    await renderLocalMods(mods);
-  } catch (error) {
-    showError('Error loading local mods: ' + error.message);
-  }
-  isLoadingMods = false;
-}
-
-// Store all mods for filtering
-let allMods = [];
-
-// Fallback descriptions for mods (aligned with README.md; keys must match getModDisplayName() exactly)
-const modDescriptions = {
-  'Bestiary Automator': 'Automates routine gameplay: stamina refill, rewards, Day Care, and configurable automation.',
-  'Board Analyzer': 'Simulates and analyzes board setups to evaluate strategies and performance.',
-  'Custom Display': 'Performance Mode and map grid overlay; tune visuals for speed and planning.',
-  'Hero Editor': 'Edit monster stats and equipment in-game; save and load custom setups for testing.',
-  'Highscores': 'Richer highscores with extra stats, sorting, and room-by-room breakdown.',
-  'Item tier list': 'Equipment stats and rankings; compare items and loadouts by tier and effectiveness.',
-  'Monster tier list': 'Monster rankings and usage stats; sortable tiers and performance metrics.',
-  'Setup Manager': 'Save, load, and manage multiple team setups per map with custom names.',
-  'Team Copier': 'Share setups as JSON or links; optional seeds for replays; recent history.',
-  'Tick Tracker': 'Tracks ticks per session (optional ms), with history and copy for speedruns.',
-  'Turbo Mode': 'Speed up gameplay with customizable multipliers and tick display for testing and grinding.',
-  'Battle Helper': 'Fetch another player profile arsenal and temporarily replace your sandbox creatures/equipment with one-click restore.',
-  'Autoseller': 'Sells or squeezes creatures by gene thresholds; session widget for gold, dust, and counts.',
-  'Autoscroller': 'Automates summon scroll usage to hunt target creatures; tiers, stop conditions, and rate-limited speed.',
-  'Better Analytics': 'DPS in the impact analyzer plus sandbox panel: units, battle log, filters, and fight speed control.',
-  'Better Bestiary': 'Bestiary sell modal: Creature Selector presets and temporary Overlays (Maxed, Sealed, Shinies) for duplicate bulk-sell when you already have shiny and/or awaken keepers per species.',
-  'Better Boosted Maps': 'Automates daily boosted map farming with mod coordination and configurable setups.',
-  'Better Cauldron': 'Search and filter monsters in the Monstrous Cauldron, including by rarity.',
-  'Better Exaltation Chest': 'Auto-open chests, filter equipment, disenchant unwanted gear, with dust stats.',
-  'Better Forge': 'Arsenal management, batch disenchant, search, and type/tier filters with live dust tracking.',
-  'Better Highscores': 'Live tick and rank leaderboards for the current map with medal styling.',
-  'Better Hy\'genie': 'Quantity inputs, smart fusion ratios, and improved fusion UI for Hy\'genie.',
-  'Better Rune Recycler': 'Automates rune recycling with batch cycles, validation, and gold/stat tracking.',
-  'Better Setups': 'Setup labels (Farm, Speedrun, etc.), edit from the setup UI, Configurator integration.',
-  'Better Tasker': 'Quest automation: open log, accept tasks, navigate maps; pauses when claims are ready.',
-  'Better Teleporter': 'Enhances the in-game teleporter map selection dialog.',
-  'Better Yasir': 'Bulk buy and sell at Yasir with live pricing and confirmation prompts.',
-  'Cyclopedia': 'Monster and equipment databases, player profiles, season rankings, and RunTracker integration.',
-  'Dice Roller': 'Auto-rolls dice for stat rerolls until your target stats are reached.',
-  'Depot Manager': 'Creature and equipment depot rows, favorites, and quick send-to-depot from the bestiary.',
-  'Challenges': 'Random challenge runs with map/creature rolls, scoring, leaderboards, and replay sharing.',
-  'Guilds': 'Create guilds with roles, encrypted chat, invites, and a guild browser.',
-  'Hunt Analyzer': 'Autoplay session stats: gold, dust, drops, summaries, and export.',
-  'Raid Hunter': 'Raid automation: detect and join raids, setup, autoplay, stamina, and queues.',
-  'Manual Runner': 'Repeats manual runs until victory, target S+ rank, or max floor; stats and replay copy.',
-  'Stamina Optimizer': 'Starts or stops gameplay at min/max stamina; coordinates with other farming mods.',
-  'Awaken Tracker': 'Tracks per-map awaken gene progress with live stat deltas, event logs, and pause-on-cap.',
-  'Quests': 'Quest tracking, NPC dialogs, quest items, and Firebase-backed progress.',
-  'VIP List': 'Track favorite players with profiles, sortable stats, and Cyclopedia links.',
-  'Map Editor': 'Experimental — battlefield tile inspector: replace sprites, hitbox overlay, export JSON for quest config.'
-};
-
-const modAuthorProfileUrls = {
-  'Better Bestiary': 'https://bestiaryarena.com/profile/megafuji',
-};
-
-// Super Mods list - kept in sync with mod-registry.js
-const superModNames = [
-  'Autoseller.js',
-  'Autoscroller.js',
-  'Battle_Helper.js',
-  'Better Analytics.js',
-  'Better Bestiary.js',
-  'Better Boosted Maps.js',
-  'Better Cauldron.js',
-  'Better Exaltation Chest.js',
-  'Better Forge.js',
-  'Better Highscores.js',
-  'Better Hy\'genie.js',
-  'Better Rune Recycler.js',
-  'Better Setups.js',
-  'Better Tasker.js',
-  'Better Teleporter.js',
-  'Better Yasir.js',
-  'Cyclopedia.js',
-  'Dice_Roller.js',
-  'Depot Manager.js',
-  'Hunt Analyzer.js',
-  'Mod Settings.js',
-  'Outfiter.js',
-  'Raid_Hunter.js',
-  'Manual Runner.js',
-  'RunTracker.js',
-  'Stamina Optimizer.js',
-  'Awaken Tracker.js'
-];
-
-// OT Mods list - kept in sync with mod-registry.js
-const otModNames = [
-  'Challenges.js',
-  'Quests.js',
-  'Guilds.js',
-  'VIP List.js',
-  'Map_Editor.js'
-];
-
-const hiddenMods = [
-  'inventory-database.js',
-  'creature-database.js',
-  'welcome.js',
-  'equipment-database.js',
-  'maps-database.js',
-  'equipment-lua-export.js',
-  'creature-lua-export.js',
-  'playereq-database.js',
-  'firebase-admins.js',
-  'Mod Settings.js',
-  'RunTracker.js',
-  'Outfiter.js'
-];
-
-function normalizeModName(name) {
-  return name.replace(/\s+/g, '').toLowerCase();
-}
-
-function getModCategory(mod) {
-  const modFileName = mod.name.split('/').pop();
-  if (mod.type === 'manual') return 'custom';
-  if (otModNames.some(n => normalizeModName(n) === normalizeModName(modFileName))) return 'ot';
-  if (superModNames.some(n => normalizeModName(n) === normalizeModName(modFileName))) return 'super';
-  return 'official';
-}
-
-function getModDisplayName(mod) {
-  const modFileName = mod.name.split('/').pop();
-  if (mod.displayName && !mod.displayName.includes('/')) {
-    return mod.displayName;
-  }
-  return modFileName.replace('.js', '').replace(/_/g, ' ');
-}
-
-async function getModDescription(mod) {
-  const displayName = getModDisplayName(mod);
-  // Try to get translation first
-  const translationKey = `popup.modDescriptions.${displayName}`;
-  const translatedDescription = await getTranslation(translationKey);
-  if (translatedDescription) {
-    return translatedDescription;
-  }
-  // Fallback to hardcoded English descriptions
-  if (modDescriptions[displayName]) {
-    return modDescriptions[displayName];
-  }
-  // Final fallback with translation
-  const defaultDesc = await getTranslation('popup.modDescriptions.defaultDescription', `Enhance your Bestiary Arena experience with ${displayName}.`);
-  return defaultDesc.replace('{name}', displayName);
-}
-
-async function getCategoryDisplayName(category) {
-  const categoryNames = {
-    'official': await getTranslation('popup.categoryOfficial', 'Original Mods'),
-    'super': await getTranslation('popup.categorySuper', 'SuperMods'),
-    'ot': await getTranslation('popup.categoryOt', 'OT Mods'),
-    'custom': await getTranslation('popup.categoryCustom', 'Custom Mods')
-  };
-  return categoryNames[category] || category;
-}
-
-async function createModCard(mod) {
-  const modCard = document.createElement('div');
-  modCard.className = 'mod-card';
-  if (mod.enabled) {
-    modCard.classList.add('enabled');
-  }
-  modCard.dataset.name = mod.name;
-  modCard.dataset.category = getModCategory(mod);
-
-  const category = getModCategory(mod);
-  const displayName = getModDisplayName(mod);
-  const description = await getModDescription(mod);
-
-  // Header with title and category badge
-  const header = document.createElement('div');
-  header.className = 'mod-card-header';
-
-  const title = document.createElement('h3');
-  title.className = 'mod-card-title';
-  title.textContent = displayName;
-
-  const categoryBadge = document.createElement('span');
-  categoryBadge.className = `mod-card-category ${category}`;
-  categoryBadge.textContent = await getCategoryDisplayName(category);
-
-  header.appendChild(title);
-  header.appendChild(categoryBadge);
-
-  // Description
-  const desc = document.createElement('p');
-  desc.className = 'mod-card-description';
-  desc.textContent = description;
-
-  const authorProfileUrl = modAuthorProfileUrls[displayName];
-  let authorCredit = null;
-  if (authorProfileUrl) {
-    authorCredit = document.createElement('a');
-    authorCredit.className = 'mod-card-author-credit';
-    authorCredit.href = authorProfileUrl;
-    authorCredit.target = '_blank';
-    authorCredit.rel = 'noopener noreferrer';
-    authorCredit.textContent = await getTranslation('mods.betterBestiary.authorCredit', 'by megafuji');
-  }
-
-  // Footer with toggle and delete
-  const footer = document.createElement('div');
-  footer.className = 'mod-card-footer';
-
-  const toggleContainer = document.createElement('div');
-  toggleContainer.className = 'mod-card-toggle';
-
-  const toggleLabel = document.createElement('span');
-  toggleLabel.className = 'mod-card-toggle-label';
-  const onText = await getTranslation('popup.on', 'ON');
-  const offText = await getTranslation('popup.off', 'OFF');
-  toggleLabel.textContent = mod.enabled ? onText : offText;
-
-  const toggleSwitch = document.createElement('label');
-  toggleSwitch.className = 'toggle-switch';
-
-  const toggleInput = document.createElement('input');
-  toggleInput.type = 'checkbox';
-  toggleInput.checked = mod.enabled;
-  toggleInput.addEventListener('change', async () => {
-    await toggleLocalMod(mod.name, toggleInput.checked);
-    const onText = await getTranslation('popup.on', 'ON');
-    const offText = await getTranslation('popup.off', 'OFF');
-    toggleLabel.textContent = toggleInput.checked ? onText : offText;
-    if (toggleInput.checked) {
-      modCard.classList.add('enabled');
-    } else {
-      modCard.classList.remove('enabled');
-    }
-    // Update mod enabled state for counts
-    mod.enabled = toggleInput.checked;
-    await updateCategoryCounts(allMods);
-  });
-
-  const slider = document.createElement('span');
-  slider.className = 'slider';
-
-  toggleSwitch.appendChild(toggleInput);
-  toggleSwitch.appendChild(slider);
-  toggleContainer.appendChild(toggleLabel);
-  toggleContainer.appendChild(toggleSwitch);
-
-  footer.appendChild(toggleContainer);
-
-  // Add delete button for user-generated mods
-  if (mod.type === 'manual') {
-    const deleteButton = document.createElement('button');
-    deleteButton.className = 'mod-card-delete';
-    deleteButton.innerHTML = '×';
-    const deleteText = await getTranslation('popup.deleteMod', 'Delete mod');
-    deleteButton.setAttribute('aria-label', deleteText);
-    deleteButton.setAttribute('title', deleteText);
-    deleteButton.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      const modName = mod.originalName || mod.displayName || mod.name.split('/').pop().replace('.js', '');
-      const confirmMsg = await getTranslation('popup.messages.deleteConfirm', `Are you sure you want to delete "${modName}"?`);
-      if (confirm(confirmMsg.replace('{name}', modName))) {
-        await deleteManualMod(mod.originalName || mod.displayName || mod.name.split('/').pop().replace('.js', ''));
-      }
-    });
-    footer.appendChild(deleteButton);
-  }
-
-  modCard.appendChild(header);
-  modCard.appendChild(desc);
-  if (authorCredit) {
-    modCard.appendChild(authorCredit);
-  }
-  modCard.appendChild(footer);
-
-  return modCard;
-}
-
-async function updateCategoryCounts(mods) {
-  if (!mods || mods.length === 0) return;
-
-  // Filter out hidden mods
-  const visibleMods = mods.filter(mod => {
-    const modFileName = mod.name.split('/').pop();
-    return !hiddenMods.some(hidden => 
-      normalizeModName(hidden) === normalizeModName(modFileName)
-    );
-  });
-
-  // Count mods by category
-  const counts = {
-    official: { total: 0, enabled: 0 },
-    super: { total: 0, enabled: 0 },
-    ot: { total: 0, enabled: 0 },
-    custom: { total: 0, enabled: 0 }
-  };
-
-  visibleMods.forEach(mod => {
-    const category = getModCategory(mod);
-    if (counts[category] !== undefined) {
-      counts[category].total++;
-      if (mod.enabled) {
-        counts[category].enabled++;
-      }
-    }
-  });
-
-  // Update filter button labels
-  const officialFilter = document.querySelector('.category-filter[data-category="official"]');
-  const superFilter = document.querySelector('.category-filter[data-category="super"]');
-  const otFilter = document.querySelector('.category-filter[data-category="ot"]');
-  const customFilter = document.querySelector('.category-filter[data-category="custom"]');
-
-  if (officialFilter) {
-    if (counts.official.total > 0) {
-      const categoryText = await getTranslation('popup.categoryOfficial', 'Original Mods');
-      officialFilter.textContent = `${categoryText} (${counts.official.enabled}/${counts.official.total})`;
-    } else {
-      officialFilter.textContent = await getTranslation('popup.categoryOfficial', 'Original Mods');
-    }
-  }
-  if (superFilter) {
-    if (counts.super.total > 0) {
-      const categoryText = await getTranslation('popup.categorySuper', 'SuperMods');
-      superFilter.textContent = `${categoryText} (${counts.super.enabled}/${counts.super.total})`;
-    } else {
-      superFilter.textContent = await getTranslation('popup.categorySuper', 'SuperMods');
-    }
-  }
-  if (otFilter) {
-    if (counts.ot.total > 0) {
-      const categoryText = await getTranslation('popup.categoryOt', 'OT Mods');
-      otFilter.textContent = `${categoryText} (${counts.ot.enabled}/${counts.ot.total})`;
-    } else {
-      otFilter.textContent = await getTranslation('popup.categoryOt', 'OT Mods');
-    }
-  }
-  if (customFilter) {
-    if (counts.custom.total > 0) {
-      const categoryText = await getTranslation('popup.categoryCustom', 'Custom Mods');
-      customFilter.textContent = `${categoryText} (${counts.custom.enabled}/${counts.custom.total})`;
-    } else {
-      customFilter.textContent = await getTranslation('popup.categoryCustom', 'Custom Mods');
-    }
-  }
-}
-
-async function renderLocalMods(mods) {
-  const modsGrid = document.getElementById('mods-grid');
-  const emptyState = document.getElementById('empty-state');
-
-  if (!modsGrid) return;
-
-  modsGrid.innerHTML = '';
-
-  if (!mods || mods.length === 0) {
-    emptyState.style.display = 'block';
-    await updateCategoryCounts([]);
-    return;
-  }
-
-  // Filter out hidden mods
-  const visibleMods = mods.filter(mod => {
-    const modFileName = mod.name.split('/').pop();
-    return !hiddenMods.some(hidden => 
-      normalizeModName(hidden) === normalizeModName(modFileName)
-    );
-  });
-
-  // Store all mods for filtering
-  allMods = visibleMods;
-
-  // Update category counts
-  await updateCategoryCounts(visibleMods);
-
-  // Render all mods
-  for (const mod of visibleMods) {
-    const modCard = await createModCard(mod);
-    modsGrid.appendChild(modCard);
-  }
-
-  emptyState.style.display = visibleMods.length === 0 ? 'block' : 'none';
-  
-  // Apply current filters
-  applyFilters();
-}
-
-// Filter functionality
-let currentSearchTerm = '';
-let currentCategory = 'all';
-
-function applyFilters() {
-  const modsGrid = document.getElementById('mods-grid');
-  const emptyState = document.getElementById('empty-state');
-  
-  if (!modsGrid) return;
-
-  const searchTerm = currentSearchTerm.toLowerCase();
-  const category = currentCategory;
-
-  const cards = modsGrid.querySelectorAll('.mod-card');
-  let visibleCount = 0;
-
-  cards.forEach(card => {
-    const modName = card.querySelector('.mod-card-title').textContent.toLowerCase();
-    const cardCategory = card.dataset.category;
-    
-    const matchesSearch = !searchTerm || modName.includes(searchTerm);
-    const matchesCategory = category === 'all' || cardCategory === category;
-
-    if (matchesSearch && matchesCategory) {
-      card.style.display = 'flex';
-      visibleCount++;
-    } else {
-      card.style.display = 'none';
-    }
-  });
-
-  emptyState.style.display = visibleCount === 0 ? 'block' : 'none';
-}
-
-async function toggleLocalMod(name, enabled) {
-  try {
-    const tabId = await getActiveTabId();
-    const response = await window.browserAPI.runtime.sendMessage({
-      action: 'toggleLocalMod',
-      name,
-      enabled,
-      tabId
-    });
-    
-    if (!response.success) {
-      showError(response.error || 'Unknown error occurred');
-      loadLocalMods();
-    }
-  } catch (error) {
-    showError(`Communication error: ${error.message}`);
-    loadLocalMods();
-  }
-}
-
-async function deleteManualMod(modName) {
-  try {
-    let mods = await getManualMods();
-    // Manual mods are stored with just the name (not the full path)
-    // The modName passed here is the originalName from the mod object
-    const initialLength = mods.length;
-    mods = mods.filter(mod => mod.name !== modName);
-    
-    if (mods.length === initialLength) {
-      // If no match found, the mod might have been deleted already
-      originalConsoleLog('Mod not found in storage, may have been already deleted');
-    }
-    
-    await saveManualMods(mods);
-    originalConsoleLog('Manual mod deleted successfully');
-    await loadLocalMods();
-    await updateStorageUsage();
-  } catch (error) {
-    originalConsoleLog('Error deleting manual mod:', error);
-    showError(`Failed to delete mod: ${error.message}`);
-  }
-}
-
-async function executeLocalMod(name) {
-  try {
-    const tabId = await getActiveTabId();
-    const response = await window.browserAPI.runtime.sendMessage({
-      action: 'executeLocalMod',
-      name,
-      tabId
-    });
-    
-    if (!response.success) {
-      showError(response.error || 'Unknown error occurred');
-    }
-  } catch (error) {
-    showError(`Communication error: ${error.message}`);
-  }
-}
-
-function showError(message) {
-  alert(message);
-}
-
-window.browserAPI.storage.onChanged.addListener((changes, area) => {
-  if (area === 'local') {
-    if (changes.localMods && !isLoadingMods) {
-      // Only reload local mods if we're not already in the process of loading them
-      loadLocalMods();
-    }
-    if (changes.locale) {
-      // Locale change handling removed - no i18n support
-    }
-    // Update storage usage on any local storage change
-    updateStorageUsage();
-  }
-});
-
-document.getElementById('reload-mods-btn')?.addEventListener('click', async () => {
-  const confirmMsg = await getTranslation('popup.messages.resetLocalModsConfirm', 'Are you sure you want to reset local mods? This will remove all official and super mods from storage and reload from disk. User-generated mods will not be affected.');
-  if (!confirm(confirmMsg)) return;
-  try {
-    if (window.browser && window.browser.storage && window.browser.storage.local) {
-      await window.browser.storage.local.remove(['localMods', 'activeScripts']);
-      if (window.browser.storage.sync) {
-        await window.browser.storage.sync.remove(['localMods', 'activeScripts']);
-      }
-    } else if (window.localStorage) {
-      window.localStorage.removeItem('localMods');
-      window.localStorage.removeItem('activeScripts');
-    }
-    await new Promise(res => setTimeout(res, 50));
-    await loadLocalMods();
-    await updateStorageUsage();
-    const successMsg = await getTranslation('popup.messages.localModsReset', 'Local mods reset!');
-    alert(successMsg);
-  } catch (e) {
-    const errorMsg = await getTranslation('popup.messages.failedToResetLocalMods', 'Failed to reset local mods.');
-    alert(errorMsg);
-  }
-});
-
-
-
-document.getElementById('reset-all-btn')?.addEventListener('click', async () => {
-  const confirmMsg = await getTranslation('popup.messages.resetAllConfirm', 'Are you sure you want to reset the entire mod loader? This will remove ALL settings, mods, and data.');
-  if (!confirm(confirmMsg)) return;
-  try {
-    if (window.browser && window.browser.storage && window.browser.storage.local) {
-      await new Promise(res => window.browser.storage.local.clear(res));
-      if (window.browser.storage.sync) {
-        await new Promise(res => window.browser.storage.sync.clear(res));
-      }
-    }
-    if (window.localStorage) {
-      window.localStorage.clear();
-    }
-    await loadLocalMods();
-    await updateStorageUsage();
-    const successMsg = await getTranslation('popup.messages.allDataReset', 'All mod loader data reset!');
-    alert(successMsg);
-    window.location.reload();
-  } catch (e) {
-    const errorMsg = await getTranslation('popup.messages.failedToResetAll', 'Failed to reset all data.');
-    alert(errorMsg);
-  }
-});
-
-// Example: Show warning when loading remote mod
-function showModSourceWarningIfNeeded(source) {
-  if (isRemoteSource(source)) {
-    showModal({
-      title: 'Security Warning',
-      content: 'You are about to load a mod from an external or untrusted source. This can be dangerous. Only proceed if you trust the source.',
-      buttons: [{ text: 'OK', onClick: () => {} }]
-    });
-  }
-}
-
-// Language switching functionality
-const LANGUAGE_STORAGE_KEY = 'popup-language';
-let currentTranslations = null;
-
-function initializeLanguageToggle() {
-  const langEnBtn = document.getElementById('lang-en');
-  const langPtBtn = document.getElementById('lang-pt');
-
-  if (!langEnBtn || !langPtBtn) return;
-
-  // Get stored language or default to browser language
-  const storedLang = localStorage.getItem(LANGUAGE_STORAGE_KEY);
-  const currentLang = storedLang || (navigator.language.toLowerCase().startsWith('pt') ? 'pt-BR' : 'en-US');
-
-  // Update button states
-  updateLanguageButtons(currentLang);
-
-  // Add event listeners
-  langEnBtn.addEventListener('click', () => switchLanguage('en-US'));
-  langPtBtn.addEventListener('click', () => switchLanguage('pt-BR'));
-}
-
-function updateLanguageButtons(activeLang) {
-  const langEnBtn = document.getElementById('lang-en');
-  const langPtBtn = document.getElementById('lang-pt');
-
-  if (!langEnBtn || !langPtBtn) return;
-
-  // Remove active class from both buttons
-  langEnBtn.classList.remove('active');
-  langPtBtn.classList.remove('active');
-
-  // Add active class to the current language button
-  if (activeLang === 'en-US') {
-    langEnBtn.classList.add('active');
-  } else if (activeLang === 'pt-BR') {
-    langPtBtn.classList.add('active');
-  }
-}
-
-async function switchLanguage(locale) {
-  // Store the selected language
-  localStorage.setItem(LANGUAGE_STORAGE_KEY, locale);
-
-  // Update button states
-  updateLanguageButtons(locale);
-
-  // Clear the global translation cache to force reload with new language
-  if (window.LocalizationUtils) {
-    window.LocalizationUtils.translationsCache = null;
-    window.LocalizationUtils.translationsLocale = null;
-  }
-
-  // Load translations for the new language using global system
-  currentTranslations = await window.LocalizationUtils.loadTranslations();
-
-  // Update version display with new language
-  await updateVersionDisplay();
-
-  // Reapply other localizations
-  applyLocalization();
-}
-
-
-// Apply localization to elements with data attributes
-function applyLocalization() {
-  // Apply text localization
-  const localizeElements = document.querySelectorAll('[data-localize]');
-  for (const element of localizeElements) {
-    const key = element.getAttribute('data-localize');
-    const translation = getTranslationSync(key);
-    if (translation) {
-      element.textContent = translation;
-    }
-  }
-
-  // Apply placeholder localization
-  const placeholderElements = document.querySelectorAll('[data-localize-placeholder]');
-  for (const element of placeholderElements) {
-    const key = element.getAttribute('data-localize-placeholder');
-    const translation = getTranslationSync(key);
-    if (translation) {
-      element.placeholder = translation;
-    }
-  }
-}
-
-// Initialize language toggle when DOM is ready
-document.addEventListener('DOMContentLoaded', async () => {
+  // Language / permissions (former second DOMContentLoaded)
   initializeLanguageToggle();
   ensureGitHubHostAccess().catch(error => {
     originalConsoleLog('GitHub optional permission prompt skipped:', error);
   });
-  // Load initial translations using global system
-  currentTranslations = await window.LocalizationUtils.loadTranslations();
-
-  // Update version display (will set loading text then actual version)
-  await updateVersionDisplay();
-
-  // Apply other localizations
-  applyLocalization();
 });

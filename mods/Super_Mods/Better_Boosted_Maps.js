@@ -43,6 +43,12 @@ const DOM_ACTION_RETRY_DELAY_HIDDEN_MS = 1000;
 const DOM_ACTION_MAX_ATTEMPTS = 5;
 const DOM_ACTION_MAX_ATTEMPTS_HIDDEN = 40;
 const STAMINA_REGEN_MS = 60000;
+const STAMINA_TOOLTIP_SELECTOR =
+    '[role="tooltip"] img[alt="stamina"], [data-state="instant-open"] img[alt="stamina"]';
+/** Cap each ready-timer so we reschedule periodically (clock drift / state skew). */
+const STAMINA_READY_TIMER_MAX_MS = 5 * 60 * 1000;
+/** Slow fallback only — natural regen is 1/min; potions use player.subscribe. */
+const STAMINA_SAFETY_POLL_MS = STAMINA_REGEN_MS;
 
 // Fixed start delay — same contract as Raid Hunter / Better Tasker / Awaken Farmer / Stamina Optimizer
 const DEFAULT_START_DELAY = 3; // seconds
@@ -201,6 +207,14 @@ function bbmIsHardcodedBoostedMapDisabled(name) {
 // Stamina tooltip monitoring state
 let staminaTooltipObserver = null;
 let staminaRecoveryCallback = null;
+let staminaRecoveryReadyTimer = null;
+let staminaRecoverySafetyTimer = null;
+let staminaRecoveryPlayerUnsub = null;
+let staminaRecoveryVisibilityHandler = null;
+let staminaDepletionObserver = null;
+let staminaDepletionPlayerUnsub = null;
+let staminaDepletionSafetyTimer = null;
+let staminaDepletionWatchGen = 0;
 
 /**
  * Calculate current stamina using game state API
@@ -238,39 +252,90 @@ function isDocumentHidden() {
         (document.hidden === true || document.visibilityState === 'hidden');
 }
 
+/**
+ * Prefer Game State when Mod Settings "Use Game State for Stamina Refill" is effectively on
+ * (checked, or locked on because potion thresholds are enabled).
+ */
+function shouldPreferGameStateStamina() {
+    try {
+        let cfg = window.bestiaryAutomator?.config || null;
+        if (!cfg) {
+            const raw = localStorage.getItem('bestiary-automator-config');
+            cfg = raw ? JSON.parse(raw) : null;
+        }
+        if (!cfg) return false;
+        // Thresholds force the Mod Settings checkbox on (locked checked).
+        if (cfg.thresholdsEnabled !== false) return true;
+        return !!cfg.useApiForStaminaRefill;
+    } catch (_) {
+        return false;
+    }
+}
+
 function getStaminaFromGameState() {
     try {
+        const playerContext = globalThis.state?.player?.getSnapshot?.()?.context;
+        if (playerContext) {
+            for (const key of ['stamina', 'currentStamina']) {
+                const value = Number(playerContext[key]);
+                if (Number.isFinite(value)) {
+                    return value;
+                }
+            }
+
+            // Timestamp supports overflow above regen cap; prefer over utils.getCurrentStamina
+            const willBeFullAt = playerContext.staminaWillBeFullAt;
+            const regenMax = Number(playerContext.maxStamina ?? playerContext.staminaMax);
+            if (willBeFullAt != null && Number.isFinite(regenMax) && regenMax > 0) {
+                const missing = Math.ceil((willBeFullAt - Date.now()) / STAMINA_REGEN_MS);
+                const regenStamina = Math.max(0, regenMax - missing);
+                const excessMs = Math.max(0, Number(playerContext.staminaExcessMs) || 0);
+                return Math.floor(regenStamina + excessMs / STAMINA_REGEN_MS);
+            }
+        }
+
         if (typeof globalThis.state?.utils?.getCurrentStamina === 'function') {
             const fromUtils = Number(globalThis.state.utils.getCurrentStamina());
             if (Number.isFinite(fromUtils)) {
                 return fromUtils;
             }
         }
-
-        const playerContext = globalThis.state?.player?.getSnapshot?.()?.context;
-        if (!playerContext) {
-            return null;
-        }
-
-        for (const key of ['stamina', 'currentStamina']) {
-            const value = Number(playerContext[key]);
-            if (Number.isFinite(value)) {
-                return value;
-            }
-        }
-
-        const willBeFullAt = playerContext.staminaWillBeFullAt;
-        const regenMax = Number(playerContext.maxStamina ?? playerContext.staminaMax);
-        if (willBeFullAt != null && Number.isFinite(regenMax) && regenMax > 0) {
-            const missing = Math.ceil((willBeFullAt - Date.now()) / STAMINA_REGEN_MS);
-            const regenStamina = Math.max(0, regenMax - missing);
-            const excessMs = Math.max(0, Number(playerContext.staminaExcessMs) || 0);
-            return Math.floor(regenStamina + excessMs / STAMINA_REGEN_MS);
-        }
     } catch (_) {
         // fall through
     }
     return null;
+}
+
+/**
+ * Estimate ms until natural regen reaches `needed` using staminaWillBeFullAt.
+ * Potions are detected via player.subscribe (not this timer).
+ */
+function estimateMsUntilStamina(needed) {
+    const target = Number(needed);
+    if (!Number.isFinite(target) || target <= 0) return 0;
+
+    const current = getCurrentStamina();
+    if (current >= target) return 0;
+
+    try {
+        const playerContext = globalThis.state?.player?.getSnapshot?.()?.context;
+        const willBeFullAt = playerContext?.staminaWillBeFullAt;
+        const regenMax = Number(playerContext?.maxStamina ?? playerContext?.staminaMax);
+        if (willBeFullAt != null && Number.isFinite(regenMax) && regenMax > 0) {
+            if (target > regenMax) {
+                const timeUntilFull = willBeFullAt - Date.now();
+                const missing = Math.ceil(timeUntilFull / STAMINA_REGEN_MS);
+                if (missing <= 0) return STAMINA_REGEN_MS;
+                return Math.max(250, timeUntilFull - (missing - 1) * STAMINA_REGEN_MS);
+            }
+            const readyAt = willBeFullAt - (regenMax - target) * STAMINA_REGEN_MS;
+            return Math.max(0, readyAt - Date.now());
+        }
+    } catch (_) {
+        // fall through
+    }
+
+    return Math.max(0, target - current) * STAMINA_REGEN_MS;
 }
 
 function sleep(ms) {
@@ -367,19 +432,20 @@ function getCurrentRoomId() {
 function hasInsufficientStamina() {
     const cost = getCurrentMapStaminaCost();
 
-    if (isDocumentHidden()) {
+    // Background tabs omit tooltips; Game State mode (Mod Settings) also prefers API vs cost.
+    if (isDocumentHidden() || shouldPreferGameStateStamina()) {
         const current = getCurrentStamina();
         const insufficient = current < cost;
         if (insufficient) {
-            console.log(`[Better Boosted Maps] Background stamina check: Insufficient (${current}/${cost})`);
+            console.log(
+                `[Better Boosted Maps] ${isDocumentHidden() ? 'Background' : 'Game State'} stamina check: Insufficient (${current}/${cost})`
+            );
         }
         return { insufficient, cost };
     }
 
     // Look for stamina tooltip (icon-based, language-independent)
-    const staminaTooltip = document.querySelector(
-        '[role="tooltip"] img[alt="stamina"], [data-state="instant-open"] img[alt="stamina"]'
-    );
+    const staminaTooltip = document.querySelector(STAMINA_TOOLTIP_SELECTOR);
     
     if (staminaTooltip) {
         // Found stamina icon in tooltip = insufficient stamina
@@ -417,154 +483,247 @@ function getStaminaCost() {
     return cost;
 }
 
+function clearStaminaDepletionWatchers() {
+    staminaDepletionWatchGen += 1;
+    if (staminaDepletionObserver) {
+        staminaDepletionObserver.disconnect();
+        staminaDepletionObserver = null;
+    }
+    if (typeof staminaDepletionPlayerUnsub === 'function') {
+        try { staminaDepletionPlayerUnsub(); } catch (_) { /* ignore */ }
+        staminaDepletionPlayerUnsub = null;
+    }
+    if (staminaDepletionSafetyTimer) {
+        clearInterval(staminaDepletionSafetyTimer);
+        staminaDepletionSafetyTimer = null;
+    }
+    if (window.betterBoostedMapsDepletionInterval) {
+        clearInterval(window.betterBoostedMapsDepletionInterval);
+        window.betterBoostedMapsDepletionInterval = null;
+    }
+}
+
 /**
- * Watch for stamina depletion (tooltip appears)
+ * Watch for stamina depletion (tooltip / player state) without frequent polling.
  * @param {Function} onDepleted - Callback when stamina depletes
  */
 function watchStaminaDepletion(onDepleted) {
-    // Check immediately if already depleted
+    clearStaminaDepletionWatchers();
+    const watchGen = staminaDepletionWatchGen;
+
     const staminaCheck = hasInsufficientStamina();
     if (staminaCheck.insufficient) {
         console.log('[Better Boosted Maps] Stamina already depleted - starting recovery monitoring');
         onDepleted();
         return;
     }
-    
+
     console.log('[Better Boosted Maps] Watching for stamina depletion...');
-    
-    // Watch for tooltip appearance (stamina depletes)
-    const depletionCheckInterval = setInterval(() => {
-        const currentCheck = hasInsufficientStamina();
-        if (currentCheck.insufficient) {
-            console.log('[Better Boosted Maps] Stamina depleted - starting recovery monitoring');
-            clearInterval(depletionCheckInterval);
-            onDepleted();
+    let depleted = false;
+    const cost = staminaCheck.cost || DEFAULT_STAMINA_COST;
+    const isCurrentWatch = () => watchGen === staminaDepletionWatchGen;
+
+    const triggerDepleted = () => {
+        if (!isCurrentWatch() || depleted) return;
+        depleted = true;
+        clearStaminaDepletionWatchers();
+        console.log('[Better Boosted Maps] Stamina depleted - starting recovery monitoring');
+        onDepleted();
+    };
+
+    const checkDepleted = () => {
+        if (!isCurrentWatch()) return;
+        if (hasInsufficientStamina().insufficient) {
+            triggerDepleted();
+            return;
         }
-    }, 5000); // Check every 5 seconds
-    
-    // Store for cleanup
-    window.betterBoostedMapsDepletionInterval = depletionCheckInterval;
+        if (isDocumentHidden() && getCurrentStamina() < cost) {
+            triggerDepleted();
+        }
+    };
+
+    staminaDepletionObserver = new MutationObserver((mutations) => {
+        if (!isCurrentWatch()) return;
+        for (const mutation of mutations) {
+            for (const node of mutation.addedNodes) {
+                if (node.nodeType !== Node.ELEMENT_NODE) continue;
+                const hasTooltip =
+                    (node.matches?.(STAMINA_TOOLTIP_SELECTOR) || node.querySelector?.(STAMINA_TOOLTIP_SELECTOR));
+                if (hasTooltip) {
+                    triggerDepleted();
+                    return;
+                }
+            }
+        }
+    });
+    staminaDepletionObserver.observe(document.body, { childList: true, subtree: true });
+
+    try {
+        const player = globalThis.state?.player;
+        if (player && typeof player.subscribe === 'function') {
+            staminaDepletionPlayerUnsub = player.subscribe(() => checkDepleted());
+        }
+    } catch (_) { /* ignore */ }
+
+    staminaDepletionSafetyTimer = setInterval(checkDepleted, STAMINA_SAFETY_POLL_MS);
+    window.betterBoostedMapsDepletionInterval = staminaDepletionSafetyTimer;
 }
 
 /**
- * Set up hybrid stamina monitoring (API polling + tooltip watching)
- * Uses tooltip as truth for recovery, API for progress tracking
+ * Schedule/subscribe stamina recovery monitoring.
+ * Natural regen: one timeout from staminaWillBeFullAt. Potions: player.subscribe.
+ * Tooltip removal remains an instant UI signal when visible.
  * @param {Function} onRecovered - Callback when stamina recovers
  * @param {number} requiredStamina - Stamina cost for this map
  */
 function startStaminaTooltipMonitoring(onRecovered, requiredStamina) {
-    // Clean up any existing monitoring
-    if (staminaTooltipObserver) {
-        stopStaminaTooltipMonitoring();
-    }
-    
-    // Only start if stamina is actually insufficient
+    stopStaminaTooltipMonitoring();
+
     const staminaCheck = hasInsufficientStamina();
     if (!staminaCheck.insufficient) {
         console.log('[Better Boosted Maps] Stamina sufficient - skipping recovery monitoring');
         return;
     }
-    
+
+    const needed = requiredStamina || DEFAULT_STAMINA_COST;
     console.log('[Better Boosted Maps] Starting stamina recovery monitoring...');
-    
     staminaRecoveryCallback = onRecovered;
     let hasStaminaIssue = true;
-    
-    // PRIMARY METHOD: Interval-based API checking for progress tracking (every 5 seconds)
-    const staminaCheckInterval = setInterval(() => {
-        const currentStamina = getCurrentStamina();
-        const timeRemaining = Math.max(0, (requiredStamina || DEFAULT_STAMINA_COST) - currentStamina);
-        console.log(`[Better Boosted Maps] Waiting for stamina (${currentStamina}/${requiredStamina || DEFAULT_STAMINA_COST}) - ~${timeRemaining} min remaining`);
-        
-        const tooltipStillExists = document.querySelector(
-            '[role="tooltip"] img[alt="stamina"], [data-state="instant-open"] img[alt="stamina"]'
-        );
-        const needed = requiredStamina || DEFAULT_STAMINA_COST;
-        const recovered = isDocumentHidden()
-            ? (currentStamina >= needed)
-            : (!tooltipStillExists && hasStaminaIssue);
-        
-        if (recovered && hasStaminaIssue) {
-            console.log(`[Better Boosted Maps] ✅ STAMINA RECOVERED${isDocumentHidden() ? ' (API, background)' : ' (tooltip gone)'} - current: ${currentStamina}`);
-            hasStaminaIssue = false;
-            
-            // Save callback before cleanup (cleanup clears the callback)
-            const callback = staminaRecoveryCallback;
-            
-            clearInterval(staminaCheckInterval);
-            stopStaminaTooltipMonitoring();
-            
-            // Execute saved callback
-            if (typeof callback === 'function') {
-                callback();
-            }
+    let lastLoggedStamina = null;
+
+    const finishRecovered = (reason) => {
+        if (!hasStaminaIssue) return;
+        if (isPageVisibilityTransitioning) {
+            console.log('[Better Boosted Maps] Skipping stamina recovery callback - page visibility transition in progress');
+            return;
         }
-    }, 15000); // Check every 15 seconds (stamina regenerates 1 per minute)
-    
-    // Store interval for cleanup
-    window.betterBoostedMapsStaminaInterval = staminaCheckInterval;
-    
-    // BACKUP METHOD: MutationObserver for tooltip removal (instant detection)
+        hasStaminaIssue = false;
+        const currentStamina = getCurrentStamina();
+        console.log(`[Better Boosted Maps] ✅ STAMINA RECOVERED (${reason}) - current: ${currentStamina}`);
+        const callback = staminaRecoveryCallback;
+        stopStaminaTooltipMonitoring();
+        if (typeof callback === 'function') callback();
+    };
+
+    const isRecovered = () => {
+        if (isPageVisibilityTransitioning) return false;
+        const currentStamina = getCurrentStamina();
+        if (isDocumentHidden() || shouldPreferGameStateStamina()) {
+            return currentStamina >= needed;
+        }
+        const tooltipStillExists = document.querySelector(STAMINA_TOOLTIP_SELECTOR);
+        return !tooltipStillExists && hasStaminaIssue;
+    };
+
+    const logProgress = (force = false) => {
+        const currentStamina = getCurrentStamina();
+        if (!force && currentStamina === lastLoggedStamina) return;
+        lastLoggedStamina = currentStamina;
+        const timeRemaining = Math.max(0, needed - currentStamina);
+        console.log(
+            `[Better Boosted Maps] Waiting for stamina (${currentStamina}/${needed}) - ~${timeRemaining} min remaining`
+        );
+    };
+
+    const scheduleReadyTimeout = () => {
+        if (staminaRecoveryReadyTimer) {
+            clearTimeout(staminaRecoveryReadyTimer);
+            staminaRecoveryReadyTimer = null;
+        }
+        const msUntilReady = estimateMsUntilStamina(needed);
+        const delay = Math.min(Math.max(msUntilReady + 500, 250), STAMINA_READY_TIMER_MAX_MS);
+        staminaRecoveryReadyTimer = setTimeout(() => {
+            staminaRecoveryReadyTimer = null;
+            if (isRecovered()) {
+                finishRecovered(
+                    isDocumentHidden() || shouldPreferGameStateStamina() ? 'schedule, game state' : 'schedule'
+                );
+                return;
+            }
+            logProgress(true);
+            scheduleReadyTimeout();
+        }, delay);
+    };
+
+    const onPlayerOrSafety = (reason) => {
+        if (!hasStaminaIssue || isPageVisibilityTransitioning) return;
+        if (isRecovered()) {
+            finishRecovered(reason);
+            return;
+        }
+        logProgress(false);
+        scheduleReadyTimeout();
+    };
+
+    logProgress(true);
+    scheduleReadyTimeout();
+
+    try {
+        const player = globalThis.state?.player;
+        if (player && typeof player.subscribe === 'function') {
+            staminaRecoveryPlayerUnsub = player.subscribe(() => onPlayerOrSafety('player state / potion'));
+        }
+    } catch (_) { /* ignore */ }
+
+    staminaRecoverySafetyTimer = setInterval(() => onPlayerOrSafety('safety'), STAMINA_SAFETY_POLL_MS);
+
+    staminaRecoveryVisibilityHandler = () => {
+        if (!document.hidden) onPlayerOrSafety('visibility');
+    };
+    document.addEventListener('visibilitychange', staminaRecoveryVisibilityHandler);
+
     staminaTooltipObserver = new MutationObserver((mutations) => {
+        if (isPageVisibilityTransitioning) return;
         for (const mutation of mutations) {
             mutation.removedNodes.forEach((node) => {
-                if (node.nodeType === Node.ELEMENT_NODE) {
-                    const wasStaminaTooltip = 
-                        (node.matches?.('[role="tooltip"]') || node.matches?.('[data-state="instant-open"]')) &&
-                        node.querySelector?.('img[alt="stamina"]');
-                    
-                    if (wasStaminaTooltip && hasStaminaIssue) {
-                        const currentStamina = getCurrentStamina();
-                        console.log(`[Better Boosted Maps] ✅ STAMINA RECOVERED (tooltip removed) - current: ${currentStamina}`);
-                        hasStaminaIssue = false;
-                        
-                        // Save callback before cleanup (cleanup clears the callback)
-                        const callback = staminaRecoveryCallback;
-                        
-                        clearInterval(staminaCheckInterval);
-                        stopStaminaTooltipMonitoring();
-                        
-                        // Execute saved callback
-                        if (typeof callback === 'function') {
-                            callback();
-                        }
-                    }
+                if (node.nodeType !== Node.ELEMENT_NODE) return;
+                const wasStaminaTooltip =
+                    (node.matches?.('[role="tooltip"]') || node.matches?.('[data-state="instant-open"]')) &&
+                    node.querySelector?.('img[alt="stamina"]');
+                if (wasStaminaTooltip && hasStaminaIssue) {
+                    finishRecovered('tooltip removed');
                 }
             });
         }
     });
-    
-    staminaTooltipObserver.observe(document.body, {
-        childList: true,
-        subtree: true
-    });
-    
-    console.log('[Better Boosted Maps] Stamina monitoring active (tooltip watching + API progress)');
+    staminaTooltipObserver.observe(document.body, { childList: true, subtree: true });
+
+    console.log('[Better Boosted Maps] Stamina monitoring active (schedule + player subscribe + tooltip)');
 }
 
 /**
- * Stop stamina tooltip monitoring
+ * Stop stamina recovery / depletion monitoring
  */
 function stopStaminaTooltipMonitoring() {
-    // Clear interval-based API checking
+    if (staminaRecoveryReadyTimer) {
+        clearTimeout(staminaRecoveryReadyTimer);
+        staminaRecoveryReadyTimer = null;
+    }
+    if (staminaRecoverySafetyTimer) {
+        clearInterval(staminaRecoverySafetyTimer);
+        staminaRecoverySafetyTimer = null;
+    }
+    if (typeof staminaRecoveryPlayerUnsub === 'function') {
+        try { staminaRecoveryPlayerUnsub(); } catch (_) { /* ignore */ }
+        staminaRecoveryPlayerUnsub = null;
+    }
+    if (staminaRecoveryVisibilityHandler) {
+        document.removeEventListener('visibilitychange', staminaRecoveryVisibilityHandler);
+        staminaRecoveryVisibilityHandler = null;
+    }
     if (window.betterBoostedMapsStaminaInterval) {
         clearInterval(window.betterBoostedMapsStaminaInterval);
         window.betterBoostedMapsStaminaInterval = null;
     }
-    
-    // Clear depletion watching interval
-    if (window.betterBoostedMapsDepletionInterval) {
-        clearInterval(window.betterBoostedMapsDepletionInterval);
-        window.betterBoostedMapsDepletionInterval = null;
-    }
-    
-    // Disconnect MutationObserver
+
+    clearStaminaDepletionWatchers();
+
     if (staminaTooltipObserver) {
         staminaTooltipObserver.disconnect();
         staminaTooltipObserver = null;
-        staminaRecoveryCallback = null;
     }
-    
+    staminaRecoveryCallback = null;
+
     console.log('[Better Boosted Maps] Stamina monitoring stopped');
 }
 
@@ -630,6 +789,7 @@ const modState = {
 let betterBoostedMapsOpenContextMenu = null;
 let pageVisibilityHandler = null;
 let lastPageVisibilityChange = 0;
+let isPageVisibilityTransitioning = false;
 
 const BBM_CTX_COLOR_ACCENT = '#ffe066';
 const BBM_CTX_COLOR_WHITE = '#ffffff';
@@ -5548,6 +5708,12 @@ function handlePageVisibilityChange() {
             console.log('[Better Boosted Maps] Page became hidden - maintaining farming state');
             return;
         }
+
+        // Prevent stamina recovery callbacks from racing reclaim while DOM stabilizes
+        isPageVisibilityTransitioning = true;
+        setTimeout(() => {
+            isPageVisibilityTransitioning = false;
+        }, 2000);
 
         if (!modState.enabled || !modState.farming.isActive) {
             return;

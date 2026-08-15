@@ -66,7 +66,10 @@
     const START_TOAST_COOLDOWN_MS = 10000;
     const DEFAULT_STAMINA_COST = 30;
     const STAMINA_REGEN_MS = 60000;
-    const STAMINA_MONITOR_INTERVAL = 5000;
+    const STAMINA_TOOLTIP_SELECTOR =
+        '[role="tooltip"] img[alt="stamina"], [data-state="instant-open"] img[alt="stamina"]';
+    const STAMINA_READY_TIMER_MAX_MS = 5 * 60 * 1000;
+    const STAMINA_SAFETY_POLL_MS = STAMINA_REGEN_MS;
     const COORDINATION_RESUME_DELAY_MS = 1000;
     const MODS_LOADING_GRACE_PERIOD = 5000;
     const MAX_WAIT_FOR_SIGNAL = 15000;
@@ -1667,31 +1670,57 @@
 
     let farmerStaminaTooltipObserver = null;
     let farmerStaminaRecoveryCallback = null;
+    let farmerStaminaReadyTimer = null;
+    let farmerStaminaSafetyTimer = null;
+    let farmerStaminaPlayerUnsub = null;
+    let farmerStaminaVisibilityHandler = null;
+    let farmerDepletionObserver = null;
+    let farmerDepletionPlayerUnsub = null;
+    let farmerDepletionSafetyTimer = null;
+    let farmerPageVisibilityTransitioning = false;
+    /** Bumped on clear so in-flight depletion callbacks cannot double-start recovery. */
+    let farmerDepletionWatchGen = 0;
 
     function farmerIsDocumentHidden() {
         return typeof document !== 'undefined' &&
             (document.hidden === true || document.visibilityState === 'hidden');
     }
 
+    function farmerShouldPreferGameStateStamina() {
+        try {
+            let cfg = window.bestiaryAutomator?.config || null;
+            if (!cfg) {
+                const raw = localStorage.getItem('bestiary-automator-config');
+                cfg = raw ? JSON.parse(raw) : null;
+            }
+            if (!cfg) return false;
+            if (cfg.thresholdsEnabled !== false) return true;
+            return !!cfg.useApiForStaminaRefill;
+        } catch (_) {
+            return false;
+        }
+    }
+
     function farmerGetStaminaFromGameState() {
         try {
+            const playerContext = globalThis.state?.player?.getSnapshot?.()?.context;
+            if (playerContext) {
+                for (const key of ['stamina', 'currentStamina']) {
+                    const value = Number(playerContext[key]);
+                    if (Number.isFinite(value)) return value;
+                }
+                const willBeFullAt = playerContext.staminaWillBeFullAt;
+                const regenMax = Number(playerContext.maxStamina ?? playerContext.staminaMax);
+                if (willBeFullAt != null && Number.isFinite(regenMax) && regenMax > 0) {
+                    const missing = Math.ceil((willBeFullAt - Date.now()) / STAMINA_REGEN_MS);
+                    const regenStamina = Math.max(0, regenMax - missing);
+                    const excessMs = Math.max(0, Number(playerContext.staminaExcessMs) || 0);
+                    return Math.floor(regenStamina + excessMs / STAMINA_REGEN_MS);
+                }
+            }
             if (typeof globalThis.state?.utils?.getCurrentStamina === 'function') {
                 const fromUtils = Number(globalThis.state.utils.getCurrentStamina());
                 if (Number.isFinite(fromUtils)) return fromUtils;
-            }
-            const playerContext = globalThis.state?.player?.getSnapshot?.()?.context;
-            if (!playerContext) return null;
-            for (const key of ['stamina', 'currentStamina']) {
-                const value = Number(playerContext[key]);
-                if (Number.isFinite(value)) return value;
-            }
-            const willBeFullAt = playerContext.staminaWillBeFullAt;
-            const regenMax = Number(playerContext.maxStamina ?? playerContext.staminaMax);
-            if (willBeFullAt != null && Number.isFinite(regenMax) && regenMax > 0) {
-                const missing = Math.ceil((willBeFullAt - Date.now()) / STAMINA_REGEN_MS);
-                const regenStamina = Math.max(0, regenMax - missing);
-                const excessMs = Math.max(0, Number(playerContext.staminaExcessMs) || 0);
-                return Math.floor(regenStamina + excessMs / STAMINA_REGEN_MS);
             }
         } catch (_) { /* fall through */ }
         return null;
@@ -1712,6 +1741,29 @@
         }
     }
 
+    function farmerEstimateMsUntilStamina(needed) {
+        const target = Number(needed);
+        if (!Number.isFinite(target) || target <= 0) return 0;
+        const current = farmerGetCurrentStamina();
+        if (current >= target) return 0;
+        try {
+            const playerContext = globalThis.state?.player?.getSnapshot?.()?.context;
+            const willBeFullAt = playerContext?.staminaWillBeFullAt;
+            const regenMax = Number(playerContext?.maxStamina ?? playerContext?.staminaMax);
+            if (willBeFullAt != null && Number.isFinite(regenMax) && regenMax > 0) {
+                if (target > regenMax) {
+                    const timeUntilFull = willBeFullAt - Date.now();
+                    const missing = Math.ceil(timeUntilFull / STAMINA_REGEN_MS);
+                    if (missing <= 0) return STAMINA_REGEN_MS;
+                    return Math.max(250, timeUntilFull - (missing - 1) * STAMINA_REGEN_MS);
+                }
+                const readyAt = willBeFullAt - (regenMax - target) * STAMINA_REGEN_MS;
+                return Math.max(0, readyAt - Date.now());
+            }
+        } catch (_) { /* fall through */ }
+        return Math.max(0, target - current) * STAMINA_REGEN_MS;
+    }
+
     function farmerGetCurrentMapStaminaCost() {
         try {
             const boardContext = globalThis.state?.board?.getSnapshot()?.context;
@@ -1725,13 +1777,11 @@
 
     function farmerHasInsufficientStamina() {
         const cost = farmerGetCurrentMapStaminaCost();
-        if (farmerIsDocumentHidden()) {
+        if (farmerIsDocumentHidden() || farmerShouldPreferGameStateStamina()) {
             const current = farmerGetCurrentStamina();
             return { insufficient: current < cost, cost };
         }
-        const staminaTooltip = document.querySelector(
-            '[role="tooltip"] img[alt="stamina"], [data-state="instant-open"] img[alt="stamina"]'
-        );
+        const staminaTooltip = document.querySelector(STAMINA_TOOLTIP_SELECTOR);
         if (staminaTooltip) {
             return { insufficient: true, cost };
         }
@@ -1739,27 +1789,71 @@
     }
 
     function farmerIsStaminaRecoveryActive() {
-        return !!(window.awakenFarmerStaminaInterval || farmerStaminaTooltipObserver);
+        return !!(
+            farmerStaminaReadyTimer ||
+            farmerStaminaSafetyTimer ||
+            farmerStaminaPlayerUnsub ||
+            farmerStaminaTooltipObserver ||
+            window.awakenFarmerStaminaInterval
+        );
     }
 
-    function farmerStopStaminaMonitoring() {
-        if (window.awakenFarmerStaminaInterval) {
-            clearInterval(window.awakenFarmerStaminaInterval);
-            window.awakenFarmerStaminaInterval = null;
+    function farmerClearDepletionWatchers() {
+        farmerDepletionWatchGen += 1;
+        if (farmerDepletionObserver) {
+            farmerDepletionObserver.disconnect();
+            farmerDepletionObserver = null;
+        }
+        if (typeof farmerDepletionPlayerUnsub === 'function') {
+            try { farmerDepletionPlayerUnsub(); } catch (_) { /* ignore */ }
+            farmerDepletionPlayerUnsub = null;
+        }
+        if (farmerDepletionSafetyTimer) {
+            clearInterval(farmerDepletionSafetyTimer);
+            farmerDepletionSafetyTimer = null;
         }
         if (window.awakenFarmerDepletionInterval) {
             clearInterval(window.awakenFarmerDepletionInterval);
             window.awakenFarmerDepletionInterval = null;
         }
+    }
+
+    function farmerStopStaminaMonitoring() {
+        if (farmerStaminaReadyTimer) {
+            clearTimeout(farmerStaminaReadyTimer);
+            farmerStaminaReadyTimer = null;
+        }
+        if (farmerStaminaSafetyTimer) {
+            clearInterval(farmerStaminaSafetyTimer);
+            farmerStaminaSafetyTimer = null;
+        }
+        if (typeof farmerStaminaPlayerUnsub === 'function') {
+            try { farmerStaminaPlayerUnsub(); } catch (_) { /* ignore */ }
+            farmerStaminaPlayerUnsub = null;
+        }
+        if (farmerStaminaVisibilityHandler) {
+            document.removeEventListener('visibilitychange', farmerStaminaVisibilityHandler);
+            farmerStaminaVisibilityHandler = null;
+        }
+        if (window.awakenFarmerStaminaInterval) {
+            clearInterval(window.awakenFarmerStaminaInterval);
+            window.awakenFarmerStaminaInterval = null;
+        }
+        farmerClearDepletionWatchers();
         if (farmerStaminaTooltipObserver) {
             farmerStaminaTooltipObserver.disconnect();
             farmerStaminaTooltipObserver = null;
-            farmerStaminaRecoveryCallback = null;
         }
+        farmerStaminaRecoveryCallback = null;
     }
 
     function farmerStartStaminaRecoveryMonitoring(onRecovered, requiredStamina) {
-        if (farmerStaminaTooltipObserver) farmerStopStaminaMonitoring();
+        if (farmerRuntime.status === 'waiting-stamina' && farmerIsStaminaRecoveryActive()) {
+            console.log('[Awaken Farmer] Recovery monitoring already active - skipping duplicate start');
+            return;
+        }
+
+        farmerStopStaminaMonitoring();
 
         const staminaCheck = farmerHasInsufficientStamina();
         if (!staminaCheck.insufficient) {
@@ -1768,38 +1862,101 @@
         }
 
         console.log('[Awaken Farmer] Starting stamina recovery monitoring...');
+        farmerRuntime.status = 'waiting-stamina';
         farmerStaminaRecoveryCallback = onRecovered;
         let hasStaminaIssue = true;
         const needed = requiredStamina || DEFAULT_STAMINA_COST;
+        let lastLoggedStamina = null;
 
-        const staminaCheckInterval = setInterval(() => {
-            const currentStamina = farmerGetCurrentStamina();
-            const tooltipStillExists = document.querySelector(
-                '[role="tooltip"] img[alt="stamina"], [data-state="instant-open"] img[alt="stamina"]'
-            );
-            const recovered = farmerIsDocumentHidden()
-                ? (currentStamina >= needed)
-                : (!tooltipStillExists && hasStaminaIssue);
-
-            if (!recovered) {
-                if (hasStaminaIssue) {
-                    const timeRemaining = Math.max(0, needed - currentStamina);
-                    console.log(`[Awaken Farmer] Waiting for stamina (${currentStamina}/${needed}) - ~${timeRemaining} min remaining`);
-                }
+        const finishRecovered = (reason) => {
+            if (!hasStaminaIssue) return;
+            if (farmerPageVisibilityTransitioning) {
+                console.log('[Awaken Farmer] Skipping stamina recovery callback - page visibility transition in progress');
                 return;
             }
-
-            console.log(`[Awaken Farmer] Stamina recovered (${currentStamina}/${needed})`);
             hasStaminaIssue = false;
+            const currentStamina = farmerGetCurrentStamina();
+            console.log(`[Awaken Farmer] Stamina recovered (${reason}) (${currentStamina}/${needed})`);
             const callback = farmerStaminaRecoveryCallback;
-            clearInterval(staminaCheckInterval);
             farmerStopStaminaMonitoring();
             if (typeof callback === 'function') callback();
-        }, STAMINA_MONITOR_INTERVAL);
+        };
 
-        window.awakenFarmerStaminaInterval = staminaCheckInterval;
+        const isRecovered = () => {
+            if (farmerPageVisibilityTransitioning) return false;
+            const currentStamina = farmerGetCurrentStamina();
+            if (farmerIsDocumentHidden() || farmerShouldPreferGameStateStamina()) {
+                return currentStamina >= needed;
+            }
+            return !document.querySelector(STAMINA_TOOLTIP_SELECTOR) && hasStaminaIssue;
+        };
+
+        const logProgress = (force = false) => {
+            const currentStamina = farmerGetCurrentStamina();
+            if (!force && currentStamina === lastLoggedStamina) return;
+            lastLoggedStamina = currentStamina;
+            const timeRemaining = Math.max(0, needed - currentStamina);
+            console.log(
+                `[Awaken Farmer] Waiting for stamina (${currentStamina}/${needed}) - ~${timeRemaining} min remaining`
+            );
+        };
+
+        const scheduleReadyTimeout = () => {
+            if (farmerStaminaReadyTimer) {
+                clearTimeout(farmerStaminaReadyTimer);
+                farmerStaminaReadyTimer = null;
+            }
+            const msUntilReady = farmerEstimateMsUntilStamina(needed);
+            const delay = Math.min(Math.max(msUntilReady + 500, 250), STAMINA_READY_TIMER_MAX_MS);
+            farmerStaminaReadyTimer = setTimeout(() => {
+                farmerStaminaReadyTimer = null;
+                if (isRecovered()) {
+                    finishRecovered(
+                        farmerIsDocumentHidden() || farmerShouldPreferGameStateStamina()
+                            ? 'schedule, game state'
+                            : 'schedule'
+                    );
+                    return;
+                }
+                logProgress(true);
+                scheduleReadyTimeout();
+            }, delay);
+        };
+
+        const onPlayerOrSafety = (reason) => {
+            if (!hasStaminaIssue || farmerPageVisibilityTransitioning) return;
+            if (isRecovered()) {
+                finishRecovered(reason);
+                return;
+            }
+            logProgress(false);
+            scheduleReadyTimeout();
+        };
+
+        logProgress(true);
+        scheduleReadyTimeout();
+
+        try {
+            const player = globalThis.state?.player;
+            if (player && typeof player.subscribe === 'function') {
+                farmerStaminaPlayerUnsub = player.subscribe(() => onPlayerOrSafety('player state / potion'));
+            }
+        } catch (_) { /* ignore */ }
+
+        farmerStaminaSafetyTimer = setInterval(() => onPlayerOrSafety('safety'), STAMINA_SAFETY_POLL_MS);
+
+        farmerStaminaVisibilityHandler = () => {
+            if (document.hidden) return;
+            farmerPageVisibilityTransitioning = true;
+            setTimeout(() => {
+                farmerPageVisibilityTransitioning = false;
+                onPlayerOrSafety('visibility');
+            }, 2000);
+        };
+        document.addEventListener('visibilitychange', farmerStaminaVisibilityHandler);
 
         farmerStaminaTooltipObserver = new MutationObserver((mutations) => {
+            if (farmerPageVisibilityTransitioning) return;
             for (const mutation of mutations) {
                 mutation.removedNodes.forEach((node) => {
                     if (node.nodeType !== Node.ELEMENT_NODE) return;
@@ -1807,22 +1964,17 @@
                         (node.matches?.('[role="tooltip"]') || node.matches?.('[data-state="instant-open"]')) &&
                         node.querySelector?.('img[alt="stamina"]');
                     if (!wasStaminaTooltip || !hasStaminaIssue) return;
-
-                    const currentStamina = farmerGetCurrentStamina();
-                    console.log(`[Awaken Farmer] Stamina recovered (tooltip removed) - current: ${currentStamina}`);
-                    hasStaminaIssue = false;
-                    const callback = farmerStaminaRecoveryCallback;
-                    clearInterval(staminaCheckInterval);
-                    farmerStopStaminaMonitoring();
-                    if (typeof callback === 'function') callback();
+                    finishRecovered('tooltip removed');
                 });
             }
         });
-
         farmerStaminaTooltipObserver.observe(document.body, { childList: true, subtree: true });
     }
 
     function farmerWatchStaminaDepletion(onDepleted) {
+        farmerClearDepletionWatchers();
+        const watchGen = farmerDepletionWatchGen;
+
         const staminaCheck = farmerHasInsufficientStamina();
         if (staminaCheck.insufficient) {
             console.log('[Awaken Farmer] Stamina already depleted - starting recovery monitoring');
@@ -1830,20 +1982,57 @@
             return;
         }
 
-        if (window.awakenFarmerDepletionInterval) {
-            clearInterval(window.awakenFarmerDepletionInterval);
-            window.awakenFarmerDepletionInterval = null;
-        }
+        let depleted = false;
+        const cost = staminaCheck.cost || DEFAULT_STAMINA_COST;
 
-        window.awakenFarmerDepletionInterval = setInterval(() => {
-            const currentCheck = farmerHasInsufficientStamina();
-            if (currentCheck.insufficient) {
-                console.log('[Awaken Farmer] Stamina depleted during autoplay - starting recovery monitoring');
-                clearInterval(window.awakenFarmerDepletionInterval);
-                window.awakenFarmerDepletionInterval = null;
-                onDepleted();
+        const isCurrentWatch = () => watchGen === farmerDepletionWatchGen;
+
+        const triggerDepleted = () => {
+            if (!isCurrentWatch() || depleted) return;
+            depleted = true;
+            farmerClearDepletionWatchers();
+            console.log('[Awaken Farmer] Stamina depleted during autoplay - starting recovery monitoring');
+            onDepleted();
+        };
+
+        const checkDepleted = () => {
+            if (!isCurrentWatch()) return;
+            if (farmerRuntime.status === 'waiting-stamina' || farmerIsStaminaRecoveryActive()) {
+                farmerClearDepletionWatchers();
+                return;
             }
-        }, STAMINA_MONITOR_INTERVAL);
+            if (farmerHasInsufficientStamina().insufficient) {
+                triggerDepleted();
+                return;
+            }
+            if (farmerIsDocumentHidden() && farmerGetCurrentStamina() < cost) {
+                triggerDepleted();
+            }
+        };
+
+        farmerDepletionObserver = new MutationObserver((mutations) => {
+            if (!isCurrentWatch()) return;
+            for (const mutation of mutations) {
+                for (const node of mutation.addedNodes) {
+                    if (node.nodeType !== Node.ELEMENT_NODE) continue;
+                    if (node.matches?.(STAMINA_TOOLTIP_SELECTOR) || node.querySelector?.(STAMINA_TOOLTIP_SELECTOR)) {
+                        triggerDepleted();
+                        return;
+                    }
+                }
+            }
+        });
+        farmerDepletionObserver.observe(document.body, { childList: true, subtree: true });
+
+        try {
+            const player = globalThis.state?.player;
+            if (player && typeof player.subscribe === 'function') {
+                farmerDepletionPlayerUnsub = player.subscribe(() => checkDepleted());
+            }
+        } catch (_) { /* ignore */ }
+
+        farmerDepletionSafetyTimer = setInterval(checkDepleted, STAMINA_SAFETY_POLL_MS);
+        window.awakenFarmerDepletionInterval = farmerDepletionSafetyTimer;
     }
 
     function farmerCreateStaminaRecoveryCallback(roomId) {
@@ -1887,7 +2076,13 @@
     }
 
     function farmerSetupStaminaDepletionWatch(roomId) {
+        if (farmerRuntime.status === 'waiting-stamina' || farmerIsStaminaRecoveryActive()) {
+            return;
+        }
         farmerWatchStaminaDepletion(() => {
+            if (farmerRuntime.status === 'waiting-stamina' || farmerIsStaminaRecoveryActive()) {
+                return;
+            }
             const requiredStamina = farmerGetCurrentMapStaminaCost();
             farmerRuntime.status = 'waiting-stamina';
             if (typeof farmerRuntime.uiRefresh === 'function') farmerRuntime.uiRefresh();

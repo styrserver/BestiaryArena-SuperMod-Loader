@@ -4,6 +4,66 @@
   },
   "notes": [
     {
+      "version": "4.8.7",
+      "changes": [
+        {
+          "mod": "Autoseller",
+          "type": "changed",
+          "text": "Creature and equipment list hover tooltips are short multi-line status summaries with loot-table icons and green/red keep vs sell-dust coloring (KEEP / SQUEEZE / SELL/DEVOUR / DISENCHANT, sealed sell/inject, AD/AP/HP dust vs keep)."
+        },
+        {
+          "mod": "Awaken Tracker",
+          "type": "changed",
+          "text": "Awaken Farmer stamina wait uses a ready timeout from Game State regen timing plus player updates for potions (no frequent polling). Prefers Game State when Use Game State for Stamina Refill is on. Skips recovery callbacks during tab visibility transitions."
+        },
+        {
+          "mod": "Awaken Tracker",
+          "type": "fixed",
+          "text": "Awaken Farmer no longer double-starts stamina recovery when a stale depletion callback races the first wait."
+        },
+        {
+          "mod": "Better Boosted Maps",
+          "type": "changed",
+          "text": "Stamina recovery waits on Game State regen timing and potion updates instead of frequent polling. Prefers Game State when Use Game State for Stamina Refill is on. Skips recovery callbacks during tab visibility transitions."
+        },
+        {
+          "mod": "Better Tasker",
+          "type": "changed",
+          "text": "Stamina recovery waits on Game State regen timing and potion updates instead of frequent polling. Prefers Game State when Use Game State for Stamina Refill is on. Skips recovery callbacks during tab visibility transitions."
+        },
+        {
+          "mod": "Hero Editor",
+          "type": "changed",
+          "text": "Right-click creature menu and Edit Heroes modal are view-only outside sandbox. Fields are greyed out with a hover hint; editing and live apply only work in sandbox game mode."
+        },
+        {
+          "mod": "Popup",
+          "type": "added",
+          "text": "Light/Dark appearance toggle in the footer (labels Light Mode / Dark Mode; light is default and preference is remembered)."
+        },
+        {
+          "mod": "Popup",
+          "type": "changed",
+          "text": "Solid HTML UI aligned with in-game Super Mod colors (no frame textures). Compact green/red on/off mod cards; taller category tabs with fixed All width and game-tint badges; SVG flag language buttons; View Patch Notes in the header; mobile 2-column mod grid; shorter mod descriptions. Switching language now refreshes mod card text."
+        },
+        {
+          "mod": "Popup",
+          "type": "fixed",
+          "text": "Language toggle now updates mod card descriptions, category badges, and ON/OFF labels (not only chrome UI)."
+        },
+        {
+          "mod": "Raid Hunter",
+          "type": "changed",
+          "text": "Stamina recovery waits on Game State regen timing and potion updates instead of frequent polling. Prefers Game State when Use Game State for Stamina Refill is on. Visibility-transition guards kept for recovery callbacks."
+        },
+        {
+          "mod": "Stamina Optimizer",
+          "type": "changed",
+          "text": "Stamina monitoring uses player state updates and regen-timed wakeups instead of a 5s poll. Game State timestamp reading matches Automator (including overflow above regen cap)."
+        }
+      ]
+    },
+    {
       "version": "4.8.6",
       "changes": [
         {

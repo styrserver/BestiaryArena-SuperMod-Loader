@@ -164,6 +164,7 @@ const HERO_EDITOR_MODAL_CONFIG = {
 
 let activeHeroEditorModal = null;
 let heroEditorModalLayoutCleanup = null;
+let heroEditorLockedHintsCleanup = null;
 
 function getHeroEditorModalDimensions() {
   const pad = HERO_EDITOR_MODAL_CONFIG.viewportPadding * 2;
@@ -205,9 +206,13 @@ function clearHeroEditorModalLayoutCleanup() {
     heroEditorModalLayoutCleanup();
     heroEditorModalLayoutCleanup = null;
   }
+  if (typeof heroEditorLockedHintsCleanup === 'function') {
+    heroEditorLockedHintsCleanup();
+    heroEditorLockedHintsCleanup = null;
+  }
 }
 
-function injectHeroEditorModalAutosaveFooter(dialog) {
+function injectHeroEditorModalAutosaveFooter(dialog, locked = false) {
   if (!dialog) return;
 
   const footer = dialog.querySelector('.flex.justify-end.gap-2');
@@ -217,11 +222,13 @@ function injectHeroEditorModalAutosaveFooter(dialog) {
   autoSaveIndicator.className = 'hero-editor-auto-save-indicator pixel-font-16';
   autoSaveIndicator.style.cssText = `
     font-size: 11px;
-    color: rgb(74, 222, 128);
-    font-style: italic;
+    color: ${locked ? '#e5c07b' : 'rgb(74, 222, 128)'};
+    font-style: ${locked ? 'normal' : 'italic'};
     margin-right: auto;
   `;
-  autoSaveIndicator.textContent = t('mods.heroEditor.settingsAutoSave');
+  autoSaveIndicator.textContent = locked
+    ? t('mods.heroEditor.contextMenuSandboxRequiredToEdit')
+    : t('mods.heroEditor.settingsAutoSave');
 
   footer.style.cssText = `
     display: flex;
@@ -277,7 +284,7 @@ function applyHeroEditorModalLayout(modalRef, contentRoot, dimensions) {
     });
   }
 
-  injectHeroEditorModalAutosaveFooter(dialog);
+  injectHeroEditorModalAutosaveFooter(dialog, contentRoot?.dataset?.heroEditorLocked === 'true');
 
   if (contentRoot) {
     Object.assign(contentRoot.style, {
@@ -436,6 +443,32 @@ function injectHeroEditorDropdownStyles() {
     .hero-editor-floating-panel select.${HERO_EDITOR_DROPDOWN_CLASS},
     .hero-editor-floating-panel select.${HERO_EDITOR_DROPDOWN_CLASS} option {
       font-size: ${HERO_EDITOR_FLOATING_UI.fontSize} !important;
+    }
+    .hero-editor-floating-panel input:disabled,
+    .hero-editor-floating-panel select:disabled,
+    .hero-editor-floating-panel button:disabled,
+    .hero-editor-detail-host input:disabled,
+    .hero-editor-detail-host select:disabled,
+    .hero-editor-detail-host button:disabled {
+      opacity: 0.5 !important;
+      filter: grayscale(50%);
+      cursor: not-allowed !important;
+      pointer-events: none;
+    }
+    .hero-editor-locked-hint {
+      position: fixed;
+      z-index: 10000002;
+      pointer-events: none;
+      background: #1a1a1a;
+      color: #e5c07b;
+      border: 1px solid #555;
+      border-radius: 3px;
+      padding: 4px 6px;
+      font-size: 11px;
+      max-width: 240px;
+      line-height: 1.3;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+      white-space: nowrap;
     }
   `;
   document.head.appendChild(style);
@@ -673,14 +706,100 @@ const HERO_EDITOR_CONTEXT_MENU_COLORS = {
 
 let heroEditorOpenContextMenu = null;
 
-function isSandboxModeEnabled() {
+function isSandboxGameMode() {
   try {
-    const flags = new globalThis.state.utils.Flags(getPlayerSnapshot().flags);
-    return flags.isSet('sandbox');
+    return getBoardSnapshot()?.mode === 'sandbox';
   } catch (error) {
-    console.warn('[Hero Editor] Failed to check sandbox mode:', error);
+    console.warn('[Hero Editor] Failed to check sandbox game mode:', error);
     return false;
   }
+}
+
+function lockHeroEditorControl(element) {
+  if (!element) return;
+  const message = t('mods.heroEditor.contextMenuSandboxRequiredToEdit');
+  element.disabled = true;
+  element.setAttribute('aria-disabled', 'true');
+  element.tabIndex = -1;
+  element.style.opacity = '0.5';
+  element.style.filter = 'grayscale(50%)';
+  element.style.cursor = 'not-allowed';
+  element.style.pointerEvents = 'none';
+  element.removeAttribute('title');
+
+  const hitTarget = element.parentElement || element;
+  hitTarget.dataset.heroEditorLockedHint = message;
+  hitTarget.style.cursor = 'not-allowed';
+}
+
+function attachHeroEditorLockedHints(root) {
+  if (!root) return () => {};
+
+  let tooltipEl = null;
+
+  const hideHint = () => {
+    tooltipEl?.remove();
+    tooltipEl = null;
+  };
+
+  const positionHint = (event) => {
+    if (!tooltipEl) return;
+    const padding = 8;
+    const offset = 12;
+    const rect = tooltipEl.getBoundingClientRect();
+    let left = event.clientX + offset;
+    let top = event.clientY + offset;
+    if (left + rect.width > window.innerWidth - padding) {
+      left = event.clientX - rect.width - offset;
+    }
+    if (top + rect.height > window.innerHeight - padding) {
+      top = event.clientY - rect.height - offset;
+    }
+    tooltipEl.style.left = `${Math.max(padding, left)}px`;
+    tooltipEl.style.top = `${Math.max(padding, top)}px`;
+  };
+
+  const moveHint = (event) => {
+    const locked = event.target.closest?.('[data-hero-editor-locked-hint]');
+    if (!locked || !root.contains(locked)) {
+      hideHint();
+      return;
+    }
+
+    if (!tooltipEl) {
+      tooltipEl = document.createElement('div');
+      tooltipEl.className = 'hero-editor-locked-hint pixel-font-16';
+      tooltipEl.textContent = locked.dataset.heroEditorLockedHint ||
+        t('mods.heroEditor.contextMenuSandboxRequiredToEdit');
+      tooltipEl.style.cssText = `
+        position: fixed;
+        z-index: 10000002;
+        pointer-events: none;
+        background: #1a1a1a;
+        color: #e5c07b;
+        border: 1px solid #555;
+        border-radius: 3px;
+        padding: 4px 6px;
+        font-size: 11px;
+        max-width: 240px;
+        line-height: 1.3;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+        white-space: nowrap;
+      `;
+      document.body.appendChild(tooltipEl);
+    }
+
+    positionHint(event);
+  };
+
+  root.addEventListener('mousemove', moveHint);
+  root.addEventListener('mouseleave', hideHint);
+
+  return () => {
+    root.removeEventListener('mousemove', moveHint);
+    root.removeEventListener('mouseleave', hideHint);
+    hideHint();
+  };
 }
 
 function isBoardAllyCreatureButton(button) {
@@ -892,7 +1011,7 @@ function handleHeroEditorBoardContextMenu(event) {
 
   const button = event.target.closest?.('button');
   if (!isBoardAllyCreatureButton(button)) return;
-  if (!isSandboxModeEnabled() || !hasHeroesOnBoard()) return;
+  if (!hasHeroesOnBoard()) return;
 
   let tileIndex = getTileIndexFromBoardButton(button);
   if (tileIndex != null && !getAllyPieceAtTile(tileIndex)) {
@@ -1474,8 +1593,9 @@ function createHeroEditorLiveApplyContext(preparedBoard) {
   return { originalBoardData, boardContext, equipMap, monsterMap, controls, scheduleLiveApply, clearLiveApplyTimer };
 }
 
-function mountHeroEditorFloatingPanel(detailContent, clientX, clientY, clearLiveApplyTimer) {
+function mountHeroEditorFloatingPanel(detailContent, clientX, clientY, clearLiveApplyTimer, options = {}) {
   closeHeroEditorBoardContextMenu();
+  const locked = options.locked === true;
 
   const overlay = document.createElement('div');
   overlay.style.cssText = 'position: fixed; inset: 0; z-index: 10000000; background: transparent; pointer-events: auto;';
@@ -1528,7 +1648,10 @@ function mountHeroEditorFloatingPanel(detailContent, clientX, clientY, clearLive
   `;
   menu.appendChild(closeButton);
 
+  const detachLockedHints = locked ? attachHeroEditorLockedHints(scrollWrap) : () => {};
+
   function closeMenu() {
+    detachLockedHints();
     clearLiveApplyTimer?.();
     overlay.removeEventListener('mousedown', overlayClickHandler);
     overlay.removeEventListener('click', overlayClickHandler);
@@ -1592,20 +1715,7 @@ function showHeroEditorModal(options) {
       return;
     }
 
-    // Check if sandbox mode is enabled
-    const playerContext = getPlayerSnapshot();
-    const playerFlags = playerContext.flags;
-    
-    // Create Flags object to check sandbox mode
-    const flags = new globalThis.state.utils.Flags(playerFlags);
-    if (!flags.isSet("sandbox")) {
-      api.ui.components.createModal({
-        title: 'Sandbox Mode Required',
-        content: 'Hero Editor requires Sandbox Mode to be enabled.',
-        buttons: [{ text: 'OK', primary: true }]
-      });
-      return;
-    }
+    const canEditFields = isSandboxGameMode();
     
     const preparedBoard = prepareHeroBoardData();
     if (!preparedBoard) {
@@ -1632,6 +1742,8 @@ function showHeroEditorModal(options) {
     const LIVE_APPLY_DELAY_MS = 250;
 
     const scheduleLiveApply = (immediate = false) => {
+      if (!canEditFields) return;
+
       if (liveApplyTimer) {
         clearTimeout(liveApplyTimer);
         liveApplyTimer = null;
@@ -2386,8 +2498,10 @@ function showHeroEditorModal(options) {
           }
           
           // Re-enable controls in case they were disabled
-          statControl.select.disabled = false;
-          tierControl.input.disabled = false;
+          if (canEditFields) {
+            statControl.select.disabled = false;
+            tierControl.input.disabled = false;
+          }
           
           const equipId = equipMap.get(newEquipName.toLowerCase());
           
@@ -2544,6 +2658,15 @@ function showHeroEditorModal(options) {
         statSelect.disabled = true;
         tierInput.disabled = true;
       }
+
+      if (!canEditFields) {
+        lockHeroEditorControl(awakenButton);
+        lockHeroEditorControl(maxGenesButton);
+        Object.values(statInputs).forEach(lockHeroEditorControl);
+        lockHeroEditorControl(nameSelect);
+        lockHeroEditorControl(statSelect);
+        lockHeroEditorControl(tierInput);
+      }
       
       statTierContainer.appendChild(statSelect);
       statTierContainer.appendChild(tierWrapper);
@@ -2577,7 +2700,8 @@ function showHeroEditorModal(options) {
         floatingDetailPanel,
         floatingPosition.x,
         floatingPosition.y,
-        clearTimer
+        clearTimer,
+        { locked: !canEditFields }
       );
       return;
     }
@@ -2602,6 +2726,9 @@ function showHeroEditorModal(options) {
     columnsContainer.appendChild(col1);
     columnsContainer.appendChild(col2);
     contentContainer.appendChild(columnsContainer);
+    if (!canEditFields) {
+      contentContainer.dataset.heroEditorLocked = 'true';
+    }
     
     const modalRef = api.ui.components.createModal({
       title: 'Edit Heroes',
@@ -2624,6 +2751,9 @@ function showHeroEditorModal(options) {
     });
 
     setupHeroEditorModalResponsiveLayout(modalRef, contentContainer);
+    if (!canEditFields) {
+      heroEditorLockedHintsCleanup = attachHeroEditorLockedHints(detailHost);
+    }
 
   } catch (error) {
     console.error('Error showing hero editor:', error);

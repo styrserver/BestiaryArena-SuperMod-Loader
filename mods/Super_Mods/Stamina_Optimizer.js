@@ -43,7 +43,9 @@ const t = (key) => {
     return key;
 };
 
-const STAMINA_CHECK_INTERVAL = 5000;
+const STAMINA_REGEN_MS = 60000;
+const STAMINA_READY_TIMER_MAX_MS = 5 * 60 * 1000;
+const STAMINA_SAFETY_POLL_MS = STAMINA_REGEN_MS;
 const BESTIARY_REFILL_COOLDOWN = 10000;
 const STATE_FLAG_CLEAR_DELAY = 500;
 const AUTOPLAY_STOP_CHECK_DELAY = 3000;
@@ -65,7 +67,6 @@ const DOM_ACTION_RETRY_DELAY_MS = 500;
 const DOM_ACTION_RETRY_DELAY_HIDDEN_MS = 1000;
 const DOM_ACTION_MAX_ATTEMPTS = 5;
 const DOM_ACTION_MAX_ATTEMPTS_HIDDEN = 40;
-const STAMINA_REGEN_MS = 60000;
 
 const COLOR_ACCENT = '#ffe066';
 const COLOR_WHITE = '#fff';
@@ -132,6 +133,9 @@ let isStartingAutoplay = false;
 let isStoppingAutoplay = false;
 let lastBestiaryRefillTime = 0;
 let staminaCheckInterval = null;
+let staminaReadyTimer = null;
+let staminaPlayerUnsub = null;
+let lastMonitoredStamina = null;
 let boardStateUnsubscribe = null;
 let autoplayStopCheckTimeout = null;
 let stateFlagTimeouts = [];
@@ -196,39 +200,87 @@ function isDocumentHidden() {
         (document.hidden === true || document.visibilityState === 'hidden');
 }
 
+/**
+ * Prefer Game State when Mod Settings "Use Game State for Stamina Refill" is effectively on
+ * (checked, or locked on because potion thresholds are enabled).
+ */
+function shouldPreferGameStateStamina() {
+    try {
+        let cfg = window.bestiaryAutomator?.config || null;
+        if (!cfg) {
+            const raw = localStorage.getItem('bestiary-automator-config');
+            cfg = raw ? JSON.parse(raw) : null;
+        }
+        if (!cfg) return false;
+        if (cfg.thresholdsEnabled !== false) return true;
+        return !!cfg.useApiForStaminaRefill;
+    } catch (_) {
+        return false;
+    }
+}
+
 function getStaminaFromGameState() {
     try {
+        const playerContext = globalThis.state?.player?.getSnapshot?.()?.context;
+        if (playerContext) {
+            for (const key of ['stamina', 'currentStamina']) {
+                const value = Number(playerContext[key]);
+                if (Number.isFinite(value)) {
+                    return value;
+                }
+            }
+
+            const willBeFullAt = playerContext.staminaWillBeFullAt;
+            const regenMax = Number(playerContext.maxStamina ?? playerContext.staminaMax);
+            if (willBeFullAt != null && Number.isFinite(regenMax) && regenMax > 0) {
+                const missing = Math.ceil((willBeFullAt - Date.now()) / STAMINA_REGEN_MS);
+                const regenStamina = Math.max(0, regenMax - missing);
+                const excessMs = Math.max(0, Number(playerContext.staminaExcessMs) || 0);
+                return Math.floor(regenStamina + excessMs / STAMINA_REGEN_MS);
+            }
+        }
+
         if (typeof globalThis.state?.utils?.getCurrentStamina === 'function') {
             const fromUtils = Number(globalThis.state.utils.getCurrentStamina());
             if (Number.isFinite(fromUtils)) {
                 return fromUtils;
             }
         }
-
-        const playerContext = globalThis.state?.player?.getSnapshot?.()?.context;
-        if (!playerContext) {
-            return null;
-        }
-
-        for (const key of ['stamina', 'currentStamina']) {
-            const value = Number(playerContext[key]);
-            if (Number.isFinite(value)) {
-                return value;
-            }
-        }
-
-        const willBeFullAt = playerContext.staminaWillBeFullAt;
-        const regenMax = Number(playerContext.maxStamina ?? playerContext.staminaMax);
-        if (willBeFullAt != null && Number.isFinite(regenMax) && regenMax > 0) {
-            const missing = Math.ceil((willBeFullAt - Date.now()) / STAMINA_REGEN_MS);
-            const regenStamina = Math.max(0, regenMax - missing);
-            const excessMs = Math.max(0, Number(playerContext.staminaExcessMs) || 0);
-            return Math.floor(regenStamina + excessMs / STAMINA_REGEN_MS);
-        }
     } catch (_) {
         // fall through
     }
     return null;
+}
+
+/**
+ * Estimate ms until natural regen reaches `needed` using staminaWillBeFullAt.
+ */
+function estimateMsUntilStamina(needed) {
+    const target = Number(needed);
+    if (!Number.isFinite(target) || target <= 0) return 0;
+
+    const current = getCurrentStamina();
+    if (current >= target) return 0;
+
+    try {
+        const playerContext = globalThis.state?.player?.getSnapshot?.()?.context;
+        const willBeFullAt = playerContext?.staminaWillBeFullAt;
+        const regenMax = Number(playerContext?.maxStamina ?? playerContext?.staminaMax);
+        if (willBeFullAt != null && Number.isFinite(regenMax) && regenMax > 0) {
+            if (target > regenMax) {
+                const timeUntilFull = willBeFullAt - Date.now();
+                const missing = Math.ceil(timeUntilFull / STAMINA_REGEN_MS);
+                if (missing <= 0) return STAMINA_REGEN_MS;
+                return Math.max(250, timeUntilFull - (missing - 1) * STAMINA_REGEN_MS);
+            }
+            const readyAt = willBeFullAt - (regenMax - target) * STAMINA_REGEN_MS;
+            return Math.max(0, readyAt - Date.now());
+        }
+    } catch (_) {
+        // fall through
+    }
+
+    return Math.max(0, target - current) * STAMINA_REGEN_MS;
 }
 
 async function waitForRoomSelection(roomId) {
@@ -288,34 +340,22 @@ function wasBestiaryRefillRecent() {
     return timeSinceRefill < BESTIARY_REFILL_COOLDOWN;
 }
 
-// Monitor Bestiary Automator for stamina refills by detecting increases > 1 in 5 seconds (natural regen is 1/min)
+// Monitor Bestiary Automator for stamina refills via player state (jump > 1 = potion, not natural regen)
 function setupBestiaryRefillMonitoring() {
+    // Folded into startStaminaMonitoring player.subscribe — kept as no-op for call-site compatibility.
+}
+
+function notePossibleBestiaryRefill(previousStamina, currentStamina) {
     try {
-        if (window.staminaOptimizerRefillInterval) {
-            clearInterval(window.staminaOptimizerRefillInterval);
-            window.staminaOptimizerRefillInterval = null;
+        const automator = findBestiaryAutomator();
+        if (!automator?.config?.autoRefillStamina) return;
+        const staminaIncrease = currentStamina - previousStamina;
+        if (staminaIncrease > 1) {
+            console.log('[Stamina Optimizer] Detected Bestiary Automator stamina refill');
+            lastBestiaryRefillTime = Date.now();
         }
-        let lastStamina = getCurrentStamina();
-        const refillCheckInterval = setInterval(() => {
-            if (!isLifecycleActive) return;
-            try {
-                const currentStamina = getCurrentStamina();
-                const automator = findBestiaryAutomator();
-                if (automator && automator.config && automator.config.autoRefillStamina) {
-                    const staminaIncrease = currentStamina - lastStamina;
-                    if (staminaIncrease > 1) {
-                        console.log('[Stamina Optimizer] Detected Bestiary Automator stamina refill');
-                        lastBestiaryRefillTime = Date.now();
-                    }
-                }
-                lastStamina = currentStamina;
-            } catch (error) {
-                console.error('[Stamina Optimizer] Error monitoring Bestiary refill:', error);
-            }
-        }, 5000);
-        window.staminaOptimizerRefillInterval = refillCheckInterval;
     } catch (error) {
-        console.error('[Stamina Optimizer] Error setting up Bestiary refill monitoring:', error);
+        console.error('[Stamina Optimizer] Error monitoring Bestiary refill:', error);
     }
 }
 
@@ -1982,12 +2022,19 @@ async function monitorStamina() {
     const minStamina = settings.minStamina || DEFAULT_MIN_STAMINA;
     
     const currentStamina = getCurrentStamina();
+    if (lastMonitoredStamina != null) {
+        notePossibleBestiaryRefill(lastMonitoredStamina, currentStamina);
+    }
+    const staminaChanged = lastMonitoredStamina !== currentStamina;
+    lastMonitoredStamina = currentStamina;
     const runningTag = isCurrentlyActive
         ? (wasInitiatedByMod ? ', running (mod)' : ', running')
         : '';
-    console.log(
-        `[Stamina Optimizer] Checking stamina: ${currentStamina} (min: ${minStamina}, max: ${maxStamina}${runningTag})`
-    );
+    if (staminaChanged) {
+        console.log(
+            `[Stamina Optimizer] Checking stamina: ${currentStamina} (min: ${minStamina}, max: ${maxStamina}${runningTag})`
+        );
+    }
     updateButton();
     if (currentStamina >= maxStamina) {
         if (!isCurrentlyActive && !isActionPending) {
@@ -2036,19 +2083,47 @@ async function monitorStamina() {
     }
 }
 
-// Start stamina monitoring
+// Start stamina monitoring (player.subscribe + scheduled ready timeout; 1/min safety)
 function startStaminaMonitoring() {
-    if (staminaCheckInterval) {
-        clearInterval(staminaCheckInterval);
-    }
-    
-    monitorStamina();
-    staminaCheckInterval = setInterval(() => {
+    stopStaminaMonitoring();
+
+    const runCheck = () => {
         if (!isLifecycleActive) return;
-        monitorStamina();
-    }, STAMINA_CHECK_INTERVAL);
-    
-    console.log('[Stamina Optimizer] Stamina monitoring started');
+        void monitorStamina();
+        scheduleStaminaReadyTimeout();
+    };
+
+    const scheduleStaminaReadyTimeout = () => {
+        if (staminaReadyTimer) {
+            clearTimeout(staminaReadyTimer);
+            staminaReadyTimer = null;
+        }
+        if (!isLifecycleActive || !isAutomationEnabled) return;
+
+        const settings = loadSettings();
+        const maxStamina = settings.maxStamina || DEFAULT_MAX_STAMINA;
+        const currentStamina = getCurrentStamina();
+
+        // While idle below max, wake near the expected regen tick; while running, rely on subscribe + safety.
+        if (!isCurrentlyActive && currentStamina < maxStamina) {
+            const msUntilReady = estimateMsUntilStamina(maxStamina);
+            const delay = Math.min(Math.max(msUntilReady + 500, 250), STAMINA_READY_TIMER_MAX_MS);
+            staminaReadyTimer = setTimeout(runCheck, delay);
+        }
+    };
+
+    runCheck();
+
+    try {
+        const player = globalThis.state?.player;
+        if (player && typeof player.subscribe === 'function') {
+            staminaPlayerUnsub = player.subscribe(() => runCheck());
+        }
+    } catch (_) { /* ignore */ }
+
+    staminaCheckInterval = setInterval(runCheck, STAMINA_SAFETY_POLL_MS);
+
+    console.log('[Stamina Optimizer] Stamina monitoring started (schedule + player subscribe)');
 }
 
 // Stop stamina monitoring
@@ -2057,7 +2132,19 @@ function stopStaminaMonitoring() {
         clearInterval(staminaCheckInterval);
         staminaCheckInterval = null;
     }
-    
+    if (staminaReadyTimer) {
+        clearTimeout(staminaReadyTimer);
+        staminaReadyTimer = null;
+    }
+    if (typeof staminaPlayerUnsub === 'function') {
+        try { staminaPlayerUnsub(); } catch (_) { /* ignore */ }
+        staminaPlayerUnsub = null;
+    }
+    if (window.staminaOptimizerRefillInterval) {
+        clearInterval(window.staminaOptimizerRefillInterval);
+        window.staminaOptimizerRefillInterval = null;
+    }
+
     console.log('[Stamina Optimizer] Stamina monitoring stopped');
 }
 

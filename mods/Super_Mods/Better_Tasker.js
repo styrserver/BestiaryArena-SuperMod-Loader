@@ -107,6 +107,10 @@ const DOM_ACTION_MAX_ATTEMPTS_HIDDEN = 40;
 // Stamina constants
 const DEFAULT_STAMINA_COST = 30;
 const STAMINA_REGEN_MS = 60000;
+const STAMINA_TOOLTIP_SELECTOR =
+    '[role="tooltip"] img[alt="stamina"], [data-state="instant-open"] img[alt="stamina"]';
+const STAMINA_READY_TIMER_MAX_MS = 5 * 60 * 1000;
+const STAMINA_SAFETY_POLL_MS = STAMINA_REGEN_MS;
 
 // Paw and Fur-style tasks: default kill quota when API does not expose a goal field
 const DEFAULT_TASK_KILL_TARGET = 60;
@@ -732,43 +736,96 @@ function isDocumentHidden() {
         (document.hidden === true || document.visibilityState === 'hidden');
 }
 
+/**
+ * Prefer Game State when Mod Settings "Use Game State for Stamina Refill" is effectively on
+ * (checked, or locked on because potion thresholds are enabled).
+ */
+function shouldPreferGameStateStamina() {
+    try {
+        let cfg = window.bestiaryAutomator?.config || null;
+        if (!cfg) {
+            const raw = localStorage.getItem('bestiary-automator-config');
+            cfg = raw ? JSON.parse(raw) : null;
+        }
+        if (!cfg) return false;
+        if (cfg.thresholdsEnabled !== false) return true;
+        return !!cfg.useApiForStaminaRefill;
+    } catch (_) {
+        return false;
+    }
+}
+
 function getStaminaFromGameState() {
     try {
+        const playerContext = globalThis.state?.player?.getSnapshot?.()?.context;
+        if (playerContext) {
+            for (const key of ['stamina', 'currentStamina']) {
+                const value = Number(playerContext[key]);
+                if (Number.isFinite(value)) {
+                    return value;
+                }
+            }
+
+            const willBeFullAt = playerContext.staminaWillBeFullAt;
+            const regenMax = Number(
+                playerContext.maxStamina ??
+                playerContext.staminaMax ??
+                document.querySelector('[title="Stamina"] span[data-full]')?.getAttribute?.('data-max')
+            );
+            if (willBeFullAt != null && Number.isFinite(regenMax) && regenMax > 0) {
+                const missing = Math.ceil((willBeFullAt - Date.now()) / STAMINA_REGEN_MS);
+                const regenStamina = Math.max(0, regenMax - missing);
+                const excessMs = Math.max(0, Number(playerContext.staminaExcessMs) || 0);
+                return Math.floor(regenStamina + excessMs / STAMINA_REGEN_MS);
+            }
+        }
+
         if (typeof globalThis.state?.utils?.getCurrentStamina === 'function') {
             const fromUtils = Number(globalThis.state.utils.getCurrentStamina());
             if (Number.isFinite(fromUtils)) {
                 return fromUtils;
             }
         }
-
-        const playerContext = globalThis.state?.player?.getSnapshot?.()?.context;
-        if (!playerContext) {
-            return null;
-        }
-
-        for (const key of ['stamina', 'currentStamina']) {
-            const value = Number(playerContext[key]);
-            if (Number.isFinite(value)) {
-                return value;
-            }
-        }
-
-        const willBeFullAt = playerContext.staminaWillBeFullAt;
-        const regenMax = Number(
-            playerContext.maxStamina ??
-            playerContext.staminaMax ??
-            document.querySelector('[title="Stamina"] span[data-full]')?.getAttribute?.('data-max')
-        );
-        if (willBeFullAt != null && Number.isFinite(regenMax) && regenMax > 0) {
-            const missing = Math.ceil((willBeFullAt - Date.now()) / STAMINA_REGEN_MS);
-            const regenStamina = Math.max(0, regenMax - missing);
-            const excessMs = Math.max(0, Number(playerContext.staminaExcessMs) || 0);
-            return Math.floor(regenStamina + excessMs / STAMINA_REGEN_MS);
-        }
     } catch (_) {
         // fall through
     }
     return null;
+}
+
+/**
+ * Estimate ms until natural regen reaches `needed` using staminaWillBeFullAt.
+ * Potions are detected via player.subscribe (not this timer).
+ */
+function estimateMsUntilStamina(needed) {
+    const target = Number(needed);
+    if (!Number.isFinite(target) || target <= 0) return 0;
+
+    const current = getCurrentStamina();
+    if (current >= target) return 0;
+
+    try {
+        const playerContext = globalThis.state?.player?.getSnapshot?.()?.context;
+        const willBeFullAt = playerContext?.staminaWillBeFullAt;
+        const regenMax = Number(
+            playerContext?.maxStamina ??
+            playerContext?.staminaMax ??
+            document.querySelector('[title="Stamina"] span[data-full]')?.getAttribute?.('data-max')
+        );
+        if (willBeFullAt != null && Number.isFinite(regenMax) && regenMax > 0) {
+            if (target > regenMax) {
+                const timeUntilFull = willBeFullAt - Date.now();
+                const missing = Math.ceil(timeUntilFull / STAMINA_REGEN_MS);
+                if (missing <= 0) return STAMINA_REGEN_MS;
+                return Math.max(250, timeUntilFull - (missing - 1) * STAMINA_REGEN_MS);
+            }
+            const readyAt = willBeFullAt - (regenMax - target) * STAMINA_REGEN_MS;
+            return Math.max(0, readyAt - Date.now());
+        }
+    } catch (_) {
+        // fall through
+    }
+
+    return Math.max(0, target - current) * STAMINA_REGEN_MS;
 }
 
 async function waitForRoomSelection(roomId) {
@@ -1118,6 +1175,14 @@ function scheduleTaskCompletionRetry(reason) {
 // Stamina tooltip monitoring state
 let staminaTooltipObserver = null;
 let staminaRecoveryCallback = null;
+let staminaRecoveryReadyTimer = null;
+let staminaRecoverySafetyTimer = null;
+let staminaRecoveryPlayerUnsub = null;
+let staminaRecoveryVisibilityHandler = null;
+let staminaDepletionObserver = null;
+let staminaDepletionPlayerUnsub = null;
+let staminaDepletionSafetyTimer = null;
+let staminaDepletionWatchGen = 0;
 
 /**
  * Calculate current stamina using game state API
@@ -1178,20 +1243,20 @@ function getCurrentMapStaminaCost() {
 function hasInsufficientStamina() {
     const cost = getCurrentMapStaminaCost();
 
-    // Background tabs often omit tooltips; compare Game State stamina vs map cost.
-    if (isDocumentHidden()) {
+    // Background tabs often omit tooltips; Game State mode (Mod Settings) also prefers API vs cost.
+    if (isDocumentHidden() || shouldPreferGameStateStamina()) {
         const current = getCurrentStamina();
         const insufficient = current < cost;
         if (insufficient) {
-            console.log(`[Better Tasker] Background stamina check: Insufficient (${current}/${cost})`);
+            console.log(
+                `[Better Tasker] ${isDocumentHidden() ? 'Background' : 'Game State'} stamina check: Insufficient (${current}/${cost})`
+            );
         }
         return { insufficient, cost };
     }
 
     // Look for stamina tooltip (icon-based, language-independent)
-    const staminaTooltip = document.querySelector(
-        '[role="tooltip"] img[alt="stamina"], [data-state="instant-open"] img[alt="stamina"]'
-    );
+    const staminaTooltip = document.querySelector(STAMINA_TOOLTIP_SELECTOR);
     
     if (staminaTooltip) {
         // Found stamina icon in tooltip = insufficient stamina
@@ -1203,147 +1268,242 @@ function hasInsufficientStamina() {
     return { insufficient: false, cost };
 }
 
+function clearStaminaDepletionWatchers() {
+    staminaDepletionWatchGen += 1;
+    if (staminaDepletionObserver) {
+        staminaDepletionObserver.disconnect();
+        staminaDepletionObserver = null;
+    }
+    if (typeof staminaDepletionPlayerUnsub === 'function') {
+        try { staminaDepletionPlayerUnsub(); } catch (_) { /* ignore */ }
+        staminaDepletionPlayerUnsub = null;
+    }
+    if (staminaDepletionSafetyTimer) {
+        clearInterval(staminaDepletionSafetyTimer);
+        staminaDepletionSafetyTimer = null;
+    }
+    if (window.betterTaskerDepletionInterval) {
+        clearInterval(window.betterTaskerDepletionInterval);
+        window.betterTaskerDepletionInterval = null;
+    }
+}
+
 /**
- * Set up hybrid stamina monitoring (tooltip watching + API for progress)
- * Uses tooltip as truth for recovery, API for progress tracking
+ * Set up schedule/subscribe stamina monitoring (tooltip + player state + ready timeout).
  * @param {Function} onRecovered - Callback when stamina recovers
  * @param {number} requiredStamina - Stamina cost for this map (optional for continuous monitoring)
  */
 function startStaminaTooltipMonitoring(onRecovered, requiredStamina = null) {
-    // Clean up any existing monitoring
-    if (staminaTooltipObserver) {
-        stopStaminaTooltipMonitoring();
-    }
-    
-    staminaRecoveryCallback = onRecovered;
-    const staminaTooltipSel =
-        '[role="tooltip"] img[alt="stamina"], [data-state="instant-open"] img[alt="stamina"]';
-    // Only treat "recovered" after we have actually seen insufficient stamina (tooltip or API).
-    // Default true caused false recoveries when stamina was already fine (no tooltip) → bogus Start click + navigation reset.
-    let hasStaminaIssue = hasInsufficientStamina().insufficient || !!document.querySelector(staminaTooltipSel);
-    
-    // PRIMARY METHOD: Interval-based API checking for progress tracking (every 5 seconds)
-    const staminaCheckInterval = setInterval(() => {
-        const currentStamina = getCurrentStamina();
-        
-        const tooltipStillExists = !!document.querySelector(staminaTooltipSel);
-        const hidden = isDocumentHidden();
-        const apiRecovered = requiredStamina != null && currentStamina >= requiredStamina;
+    stopStaminaTooltipMonitoring();
 
-        if (hidden) {
-            if (!apiRecovered) {
-                hasStaminaIssue = true;
-                if (requiredStamina) {
-                    const timeRemaining = Math.max(0, requiredStamina - currentStamina);
-                    console.log(`[Better Tasker] Waiting for stamina (${currentStamina}/${requiredStamina}) - ~${timeRemaining} min remaining`);
-                }
-                return;
-            }
-            if (!hasStaminaIssue) {
-                return;
-            }
-            console.log(`[Better Tasker] ✅ STAMINA RECOVERED (API, background) - current: ${currentStamina}`);
-            hasStaminaIssue = false;
-            const callback = staminaRecoveryCallback;
-            clearInterval(staminaCheckInterval);
-            stopStaminaTooltipMonitoring();
-            if (typeof callback === 'function') {
-                callback();
-            }
+    staminaRecoveryCallback = onRecovered;
+    let hasStaminaIssue =
+        hasInsufficientStamina().insufficient || !!document.querySelector(STAMINA_TOOLTIP_SELECTOR);
+    const needed = requiredStamina != null ? requiredStamina : null;
+    let lastLoggedStamina = null;
+
+    const finishRecovered = (reason) => {
+        if (!hasStaminaIssue) return;
+        if (isPageVisibilityTransitioning) {
+            console.log('[Better Tasker] Skipping stamina recovery callback - page visibility transition in progress');
             return;
         }
-        
+        hasStaminaIssue = false;
+        const currentStamina = getCurrentStamina();
+        console.log(`[Better Tasker] ✅ STAMINA RECOVERED (${reason}) - current: ${currentStamina}`);
+        const callback = staminaRecoveryCallback;
+        stopStaminaTooltipMonitoring();
+        if (typeof callback === 'function') callback();
+    };
+
+    const isRecovered = () => {
+        if (isPageVisibilityTransitioning) return false;
+        const currentStamina = getCurrentStamina();
+        const preferApi = isDocumentHidden() || shouldPreferGameStateStamina();
+        const apiRecovered = needed != null && currentStamina >= needed;
+        if (preferApi) return apiRecovered;
+        const tooltipStillExists = !!document.querySelector(STAMINA_TOOLTIP_SELECTOR);
         if (tooltipStillExists) {
             hasStaminaIssue = true;
-            if (requiredStamina) {
-                const timeRemaining = Math.max(0, requiredStamina - currentStamina);
-                console.log(`[Better Tasker] Waiting for stamina (${currentStamina}/${requiredStamina}) - ~${timeRemaining} min remaining`);
-            }
-        } else if (hasStaminaIssue) {
-            console.log(`[Better Tasker] ✅ STAMINA RECOVERED (tooltip gone) - current: ${currentStamina}`);
-            hasStaminaIssue = false;
-            
-            // Save callback before cleanup (cleanup clears the callback)
-            const callback = staminaRecoveryCallback;
-            
-            clearInterval(staminaCheckInterval);
-            stopStaminaTooltipMonitoring();
-            
-            // Execute saved callback
-            if (typeof callback === 'function') {
-                callback();
-            }
+            return false;
         }
-    }, STAMINA_CHECK_INTERVAL_MS);
-    
-    // Store interval for cleanup
-    window.betterTaskerStaminaInterval = staminaCheckInterval;
-    
-    // BACKUP METHOD: MutationObserver for tooltip removal (instant detection) + appearance (arm recovery)
+        return hasStaminaIssue;
+    };
+
+    const logProgress = (force = false) => {
+        if (needed == null) return;
+        const currentStamina = getCurrentStamina();
+        if (!force && currentStamina === lastLoggedStamina) return;
+        lastLoggedStamina = currentStamina;
+        const timeRemaining = Math.max(0, needed - currentStamina);
+        console.log(
+            `[Better Tasker] Waiting for stamina (${currentStamina}/${needed}) - ~${timeRemaining} min remaining`
+        );
+    };
+
+    const scheduleReadyTimeout = () => {
+        if (needed == null) return;
+        if (staminaRecoveryReadyTimer) {
+            clearTimeout(staminaRecoveryReadyTimer);
+            staminaRecoveryReadyTimer = null;
+        }
+        const msUntilReady = estimateMsUntilStamina(needed);
+        const delay = Math.min(Math.max(msUntilReady + 500, 250), STAMINA_READY_TIMER_MAX_MS);
+        staminaRecoveryReadyTimer = setTimeout(() => {
+            staminaRecoveryReadyTimer = null;
+            if (isRecovered()) {
+                finishRecovered(
+                    isDocumentHidden() || shouldPreferGameStateStamina() ? 'schedule, game state' : 'schedule'
+                );
+                return;
+            }
+            logProgress(true);
+            scheduleReadyTimeout();
+        }, delay);
+    };
+
+    const onPlayerOrSafety = (reason) => {
+        if (isPageVisibilityTransitioning) return;
+        if (isRecovered()) {
+            finishRecovered(reason);
+            return;
+        }
+        logProgress(false);
+        scheduleReadyTimeout();
+    };
+
+    if (hasStaminaIssue) logProgress(true);
+    scheduleReadyTimeout();
+
+    try {
+        const player = globalThis.state?.player;
+        if (player && typeof player.subscribe === 'function') {
+            staminaRecoveryPlayerUnsub = player.subscribe(() => onPlayerOrSafety('player state / potion'));
+        }
+    } catch (_) { /* ignore */ }
+
+    staminaRecoverySafetyTimer = setInterval(() => onPlayerOrSafety('safety'), STAMINA_SAFETY_POLL_MS);
+
+    staminaRecoveryVisibilityHandler = () => {
+        if (!document.hidden) onPlayerOrSafety('visibility');
+    };
+    document.addEventListener('visibilitychange', staminaRecoveryVisibilityHandler);
+
     staminaTooltipObserver = new MutationObserver((mutations) => {
+        if (isPageVisibilityTransitioning) return;
         for (const mutation of mutations) {
             mutation.addedNodes.forEach((node) => {
-                if (node.nodeType === Node.ELEMENT_NODE && node.querySelector?.(staminaTooltipSel)) {
+                if (node.nodeType === Node.ELEMENT_NODE && node.querySelector?.(STAMINA_TOOLTIP_SELECTOR)) {
                     hasStaminaIssue = true;
                 }
             });
             mutation.removedNodes.forEach((node) => {
-                if (node.nodeType === Node.ELEMENT_NODE) {
-                    const wasStaminaTooltip = 
-                        (node.matches?.('[role="tooltip"]') || node.matches?.('[data-state="instant-open"]')) &&
-                        node.querySelector?.('img[alt="stamina"]');
-                    
-                    if (wasStaminaTooltip && hasStaminaIssue) {
-                        const currentStamina = getCurrentStamina();
-                        console.log(`[Better Tasker] ✅ STAMINA RECOVERED (tooltip removed) - current: ${currentStamina}`);
-                        hasStaminaIssue = false;
-                        
-                        // Save callback before cleanup (cleanup clears the callback)
-                        const callback = staminaRecoveryCallback;
-                        
-                        clearInterval(staminaCheckInterval);
-                        stopStaminaTooltipMonitoring();
-                        
-                        // Execute saved callback
-                        if (typeof callback === 'function') {
-                            callback();
-                        }
-                    }
+                if (node.nodeType !== Node.ELEMENT_NODE) return;
+                const wasStaminaTooltip =
+                    (node.matches?.('[role="tooltip"]') || node.matches?.('[data-state="instant-open"]')) &&
+                    node.querySelector?.('img[alt="stamina"]');
+                if (wasStaminaTooltip && hasStaminaIssue) {
+                    finishRecovered('tooltip removed');
                 }
             });
         }
     });
-    
-    staminaTooltipObserver.observe(document.body, {
-        childList: true,
-        subtree: true
-    });
-    
+    staminaTooltipObserver.observe(document.body, { childList: true, subtree: true });
 }
 
 /**
- * Stop stamina tooltip monitoring
+ * Stop stamina recovery / depletion monitoring
  */
 function stopStaminaTooltipMonitoring() {
-    // Clear interval-based API checking
+    if (staminaRecoveryReadyTimer) {
+        clearTimeout(staminaRecoveryReadyTimer);
+        staminaRecoveryReadyTimer = null;
+    }
+    if (staminaRecoverySafetyTimer) {
+        clearInterval(staminaRecoverySafetyTimer);
+        staminaRecoverySafetyTimer = null;
+    }
+    if (typeof staminaRecoveryPlayerUnsub === 'function') {
+        try { staminaRecoveryPlayerUnsub(); } catch (_) { /* ignore */ }
+        staminaRecoveryPlayerUnsub = null;
+    }
+    if (staminaRecoveryVisibilityHandler) {
+        document.removeEventListener('visibilitychange', staminaRecoveryVisibilityHandler);
+        staminaRecoveryVisibilityHandler = null;
+    }
     if (window.betterTaskerStaminaInterval) {
         clearInterval(window.betterTaskerStaminaInterval);
         window.betterTaskerStaminaInterval = null;
     }
 
-    if (window.betterTaskerDepletionInterval) {
-        clearInterval(window.betterTaskerDepletionInterval);
-        window.betterTaskerDepletionInterval = null;
-    }
+    clearStaminaDepletionWatchers();
 
-    // Disconnect MutationObserver
     if (staminaTooltipObserver) {
         staminaTooltipObserver.disconnect();
         staminaTooltipObserver = null;
-        staminaRecoveryCallback = null;
     }
+    staminaRecoveryCallback = null;
 
     console.log('[Better Tasker] Stamina monitoring stopped');
+}
+
+function watchStaminaDepletion(onDepleted) {
+    clearStaminaDepletionWatchers();
+    const watchGen = staminaDepletionWatchGen;
+
+    const staminaCheck = hasInsufficientStamina();
+    if (staminaCheck.insufficient) {
+        console.log('[Better Tasker] Stamina already depleted - starting recovery monitoring');
+        onDepleted();
+        return;
+    }
+
+    let depleted = false;
+    const cost = staminaCheck.cost || DEFAULT_STAMINA_COST;
+    const isCurrentWatch = () => watchGen === staminaDepletionWatchGen;
+
+    const triggerDepleted = () => {
+        if (!isCurrentWatch() || depleted) return;
+        depleted = true;
+        clearStaminaDepletionWatchers();
+        console.log('[Better Tasker] Stamina depleted during autoplay - starting recovery monitoring');
+        onDepleted();
+    };
+
+    const checkDepleted = () => {
+        if (!isCurrentWatch()) return;
+        if (hasInsufficientStamina().insufficient) {
+            triggerDepleted();
+            return;
+        }
+        if (isDocumentHidden() && getCurrentStamina() < cost) {
+            triggerDepleted();
+        }
+    };
+
+    staminaDepletionObserver = new MutationObserver((mutations) => {
+        if (!isCurrentWatch()) return;
+        for (const mutation of mutations) {
+            for (const node of mutation.addedNodes) {
+                if (node.nodeType !== Node.ELEMENT_NODE) continue;
+                if (node.matches?.(STAMINA_TOOLTIP_SELECTOR) || node.querySelector?.(STAMINA_TOOLTIP_SELECTOR)) {
+                    triggerDepleted();
+                    return;
+                }
+            }
+        }
+    });
+    staminaDepletionObserver.observe(document.body, { childList: true, subtree: true });
+
+    try {
+        const player = globalThis.state?.player;
+        if (player && typeof player.subscribe === 'function') {
+            staminaDepletionPlayerUnsub = player.subscribe(() => checkDepleted());
+        }
+    } catch (_) { /* ignore */ }
+
+    staminaDepletionSafetyTimer = setInterval(checkDepleted, STAMINA_SAFETY_POLL_MS);
+    window.betterTaskerDepletionInterval = staminaDepletionSafetyTimer;
 }
 
 function showToast(message, duration = 5000) {
@@ -1817,15 +1977,7 @@ async function resumeTaskAutoplayAfterStaminaRecovery(logPrefix, successMessage)
         startStaminaTooltipMonitoring(continuousStaminaMonitoring, requiredStamina);
     };
 
-    const depletionCheckInterval = setInterval(() => {
-        const currentCheck = hasInsufficientStamina();
-        if (currentCheck.insufficient) {
-            console.log('[Better Tasker] Stamina depleted during autoplay - starting recovery monitoring');
-            clearInterval(depletionCheckInterval);
-            handleStaminaDepletion();
-        }
-    }, 5000);
-    window.betterTaskerDepletionInterval = depletionCheckInterval;
+    watchStaminaDepletion(handleStaminaDepletion);
     console.log('[Better Tasker] Autoplay started after stamina recovery');
 }
 
@@ -1977,6 +2129,7 @@ let escKeyListener = null;
 let taskerModalLayoutCleanup = null;
 let pageVisibilityHandler = null;
 let lastPageVisibilityChange = 0;
+let isPageVisibilityTransitioning = false;
 let lastForegroundTaskRecheck = 0;
 
 // Timeout tracking for cleanup
@@ -2029,7 +2182,6 @@ const PAUSE_BUTTON_RETRY_DELAY_MS = 500;
 const PAUSE_BUTTON_CLICK_DELAY_MS = 100;
 const PAUSE_BUTTON_UPDATE_DELAY_MS = 300;
 const NO_TASK_CHECK_DELAY = 30000;
-const STAMINA_CHECK_INTERVAL_MS = 10000;
 const BACKUP_POLL_INTERVAL_MS = 20000;
 const AUTOPLAY_TRANSITION_MAX_ATTEMPTS = 200; // 20s at 100ms intervals
 const SCHEDULER_COOLDOWN_CAP_MS = 600000;
@@ -2676,6 +2828,12 @@ function handlePageVisibilityChange() {
         lastPageVisibilityChange = now;
         
         if (document.visibilityState === 'visible') {
+            // Prevent stamina recovery callbacks from racing reclaim while DOM stabilizes
+            isPageVisibilityTransitioning = true;
+            setTimeout(() => {
+                isPageVisibilityTransitioning = false;
+            }, 2000);
+
             console.log('[Better Tasker] Page became visible - immediately checking Raid Hunter state');
             syncRaidHunterBlockingState();
             void scheduleForegroundTaskRecheck();

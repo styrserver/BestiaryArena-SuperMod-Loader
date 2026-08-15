@@ -48,9 +48,12 @@ const QUEST_BUTTON_VALIDATION_INTERVAL = 30000;
 const MODAL_OPEN_DELAY = 1000;
 
 // User-configurable delays (start delay constants declared above)
-const STAMINA_MONITOR_INTERVAL = 5000;
 const DEFAULT_STAMINA_COST = 30;
 const STAMINA_REGEN_MS = 60000;
+const STAMINA_TOOLTIP_SELECTOR =
+    '[role="tooltip"] img[alt="stamina"], [data-state="instant-open"] img[alt="stamina"]';
+const STAMINA_READY_TIMER_MAX_MS = 5 * 60 * 1000;
+const STAMINA_SAFETY_POLL_MS = STAMINA_REGEN_MS;
 const ROOM_NAV_POLL_MS = 100;
 const ROOM_NAV_TIMEOUT_MS = 8000;
 const ROOM_NAV_TIMEOUT_HIDDEN_MS = 20000;
@@ -659,6 +662,14 @@ function isStaticRaidEventName(raidName) {
 // Stamina tooltip monitoring state
 let staminaTooltipObserver = null;
 let staminaRecoveryCallback = null;
+let staminaRecoveryReadyTimer = null;
+let staminaRecoverySafetyTimer = null;
+let staminaRecoveryPlayerUnsub = null;
+let staminaRecoveryVisibilityHandler = null;
+let staminaDepletionObserver = null;
+let staminaDepletionPlayerUnsub = null;
+let staminaDepletionSafetyTimer = null;
+let staminaDepletionWatchGen = 0;
 
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
@@ -669,39 +680,88 @@ function isDocumentHidden() {
         (document.hidden === true || document.visibilityState === 'hidden');
 }
 
+/**
+ * Prefer Game State when Mod Settings "Use Game State for Stamina Refill" is effectively on
+ * (checked, or locked on because potion thresholds are enabled).
+ */
+function shouldPreferGameStateStamina() {
+    try {
+        let cfg = window.bestiaryAutomator?.config || null;
+        if (!cfg) {
+            const raw = localStorage.getItem('bestiary-automator-config');
+            cfg = raw ? JSON.parse(raw) : null;
+        }
+        if (!cfg) return false;
+        if (cfg.thresholdsEnabled !== false) return true;
+        return !!cfg.useApiForStaminaRefill;
+    } catch (_) {
+        return false;
+    }
+}
+
 function getStaminaFromGameState() {
     try {
+        const playerContext = globalThis.state?.player?.getSnapshot?.()?.context;
+        if (playerContext) {
+            for (const key of ['stamina', 'currentStamina']) {
+                const value = Number(playerContext[key]);
+                if (Number.isFinite(value)) {
+                    return value;
+                }
+            }
+
+            const willBeFullAt = playerContext.staminaWillBeFullAt;
+            const regenMax = Number(playerContext.maxStamina ?? playerContext.staminaMax);
+            if (willBeFullAt != null && Number.isFinite(regenMax) && regenMax > 0) {
+                const missing = Math.ceil((willBeFullAt - Date.now()) / STAMINA_REGEN_MS);
+                const regenStamina = Math.max(0, regenMax - missing);
+                const excessMs = Math.max(0, Number(playerContext.staminaExcessMs) || 0);
+                return Math.floor(regenStamina + excessMs / STAMINA_REGEN_MS);
+            }
+        }
+
         if (typeof globalThis.state?.utils?.getCurrentStamina === 'function') {
             const fromUtils = Number(globalThis.state.utils.getCurrentStamina());
             if (Number.isFinite(fromUtils)) {
                 return fromUtils;
             }
         }
-
-        const playerContext = globalThis.state?.player?.getSnapshot?.()?.context;
-        if (!playerContext) {
-            return null;
-        }
-
-        for (const key of ['stamina', 'currentStamina']) {
-            const value = Number(playerContext[key]);
-            if (Number.isFinite(value)) {
-                return value;
-            }
-        }
-
-        const willBeFullAt = playerContext.staminaWillBeFullAt;
-        const regenMax = Number(playerContext.maxStamina ?? playerContext.staminaMax);
-        if (willBeFullAt != null && Number.isFinite(regenMax) && regenMax > 0) {
-            const missing = Math.ceil((willBeFullAt - Date.now()) / STAMINA_REGEN_MS);
-            const regenStamina = Math.max(0, regenMax - missing);
-            const excessMs = Math.max(0, Number(playerContext.staminaExcessMs) || 0);
-            return Math.floor(regenStamina + excessMs / STAMINA_REGEN_MS);
-        }
     } catch (_) {
         // fall through
     }
     return null;
+}
+
+/**
+ * Estimate ms until natural regen reaches `needed` using staminaWillBeFullAt.
+ * Potions are detected via player.subscribe (not this timer).
+ */
+function estimateMsUntilStamina(needed) {
+    const target = Number(needed);
+    if (!Number.isFinite(target) || target <= 0) return 0;
+
+    const current = getCurrentStamina();
+    if (current >= target) return 0;
+
+    try {
+        const playerContext = globalThis.state?.player?.getSnapshot?.()?.context;
+        const willBeFullAt = playerContext?.staminaWillBeFullAt;
+        const regenMax = Number(playerContext?.maxStamina ?? playerContext?.staminaMax);
+        if (willBeFullAt != null && Number.isFinite(regenMax) && regenMax > 0) {
+            if (target > regenMax) {
+                const timeUntilFull = willBeFullAt - Date.now();
+                const missing = Math.ceil(timeUntilFull / STAMINA_REGEN_MS);
+                if (missing <= 0) return STAMINA_REGEN_MS;
+                return Math.max(250, timeUntilFull - (missing - 1) * STAMINA_REGEN_MS);
+            }
+            const readyAt = willBeFullAt - (regenMax - target) * STAMINA_REGEN_MS;
+            return Math.max(0, readyAt - Date.now());
+        }
+    } catch (_) {
+        // fall through
+    }
+
+    return Math.max(0, target - current) * STAMINA_REGEN_MS;
 }
 
 async function waitForRoomSelection(roomId) {
@@ -812,19 +872,19 @@ function getCurrentMapStaminaCost() {
 function hasInsufficientStamina() {
     const cost = getCurrentMapStaminaCost();
 
-    if (isDocumentHidden()) {
+    if (isDocumentHidden() || shouldPreferGameStateStamina()) {
         const current = getCurrentStamina();
         const insufficient = current < cost;
         if (insufficient) {
-            console.log(`[Raid Hunter] Background stamina check: Insufficient (${current}/${cost})`);
+            console.log(
+                `[Raid Hunter] ${isDocumentHidden() ? 'Background' : 'Game State'} stamina check: Insufficient (${current}/${cost})`
+            );
         }
         return { insufficient, cost };
     }
 
     // Look for stamina tooltip (icon-based, language-independent)
-    const staminaTooltip = document.querySelector(
-        '[role="tooltip"] img[alt="stamina"], [data-state="instant-open"] img[alt="stamina"]'
-    );
+    const staminaTooltip = document.querySelector(STAMINA_TOOLTIP_SELECTOR);
     
     if (staminaTooltip) {
         // Found stamina icon in tooltip = insufficient stamina
@@ -836,156 +896,256 @@ function hasInsufficientStamina() {
     return { insufficient: false, cost };
 }
 
+function clearStaminaDepletionWatchers() {
+    staminaDepletionWatchGen += 1;
+    if (staminaDepletionObserver) {
+        staminaDepletionObserver.disconnect();
+        staminaDepletionObserver = null;
+    }
+    if (typeof staminaDepletionPlayerUnsub === 'function') {
+        try { staminaDepletionPlayerUnsub(); } catch (_) { /* ignore */ }
+        staminaDepletionPlayerUnsub = null;
+    }
+    if (staminaDepletionSafetyTimer) {
+        clearInterval(staminaDepletionSafetyTimer);
+        staminaDepletionSafetyTimer = null;
+    }
+    if (window.raidHunterDepletionInterval) {
+        clearInterval(window.raidHunterDepletionInterval);
+        window.raidHunterDepletionInterval = null;
+    }
+}
+
 /**
- * Set up hybrid stamina monitoring (tooltip watching + API for progress)
- * Uses tooltip as truth for recovery, API for progress tracking
+ * Schedule/subscribe stamina recovery monitoring.
  * @param {Function} onRecovered - Callback when stamina recovers
  * @param {number} requiredStamina - Stamina cost for this map (optional for continuous monitoring)
  */
 function startStaminaTooltipMonitoring(onRecovered, requiredStamina = null) {
-    // Clean up any existing monitoring
-    if (staminaTooltipObserver) {
-        stopStaminaTooltipMonitoring();
-    }
-    
+    stopStaminaTooltipMonitoring();
+
     console.log('[Raid Hunter] Starting stamina recovery monitoring...');
-    
     staminaRecoveryCallback = onRecovered;
     let hasStaminaIssue = true;
-    
-        // PRIMARY METHOD: Interval-based API checking for progress tracking (every 5 seconds)
-    const staminaCheckInterval = setInterval(() => {
-        // Skip if page is transitioning (visibility change in progress)
+    const needed = requiredStamina != null ? requiredStamina : null;
+    let lastLoggedStamina = null;
+
+    const invokeCallback = (callback) => {
+        if (typeof callback !== 'function') return;
         if (isPageVisibilityTransitioning) {
+            console.log('[Raid Hunter] Skipping stamina recovery callback - page visibility transition in progress');
+            startStaminaTooltipMonitoring(callback, requiredStamina);
             return;
         }
-        
-        const currentStamina = getCurrentStamina();
-        const tooltipStillExists = document.querySelector(
-            '[role="tooltip"] img[alt="stamina"], [data-state="instant-open"] img[alt="stamina"]'
-        );
-        const hidden = isDocumentHidden();
-        const apiRecovered = requiredStamina != null && currentStamina >= requiredStamina;
+        callback();
+    };
 
-        if (hidden) {
+    const finishRecovered = (reason) => {
+        if (!hasStaminaIssue) return;
+        if (isPageVisibilityTransitioning) return;
+        hasStaminaIssue = false;
+        const currentStamina = getCurrentStamina();
+        console.log(`[Raid Hunter] ✅ STAMINA RECOVERED (${reason}) - current: ${currentStamina}`);
+        const callback = staminaRecoveryCallback;
+        stopStaminaTooltipMonitoring();
+        invokeCallback(callback);
+    };
+
+    const isRecovered = () => {
+        if (isPageVisibilityTransitioning) return false;
+        const currentStamina = getCurrentStamina();
+        const preferApi = isDocumentHidden() || shouldPreferGameStateStamina();
+        const apiRecovered = needed != null && currentStamina >= needed;
+        if (preferApi) {
             if (!apiRecovered) {
                 hasStaminaIssue = true;
-                if (requiredStamina) {
-                    const timeRemaining = Math.max(0, requiredStamina - currentStamina);
-                    console.log(`[Raid Hunter] Waiting for stamina (${currentStamina}/${requiredStamina}) - ~${timeRemaining} min remaining`);
-                }
+                return false;
+            }
+            return hasStaminaIssue;
+        }
+        const tooltipStillExists = document.querySelector(STAMINA_TOOLTIP_SELECTOR);
+        return !tooltipStillExists && hasStaminaIssue;
+    };
+
+    const logProgress = (force = false) => {
+        if (needed == null) return;
+        const currentStamina = getCurrentStamina();
+        if (!force && currentStamina === lastLoggedStamina) return;
+        lastLoggedStamina = currentStamina;
+        const timeRemaining = Math.max(0, needed - currentStamina);
+        console.log(
+            `[Raid Hunter] Waiting for stamina (${currentStamina}/${needed}) - ~${timeRemaining} min remaining`
+        );
+    };
+
+    const scheduleReadyTimeout = () => {
+        if (needed == null) return;
+        if (staminaRecoveryReadyTimer) {
+            clearTimeout(staminaRecoveryReadyTimer);
+            staminaRecoveryReadyTimer = null;
+        }
+        const msUntilReady = estimateMsUntilStamina(needed);
+        const delay = Math.min(Math.max(msUntilReady + 500, 250), STAMINA_READY_TIMER_MAX_MS);
+        staminaRecoveryReadyTimer = setTimeout(() => {
+            staminaRecoveryReadyTimer = null;
+            if (isRecovered()) {
+                finishRecovered(
+                    isDocumentHidden() || shouldPreferGameStateStamina() ? 'schedule, game state' : 'schedule'
+                );
                 return;
             }
-            if (!hasStaminaIssue) {
-                return;
-            }
-            console.log(`[Raid Hunter] ✅ STAMINA RECOVERED (API, background) - current: ${currentStamina}`);
-            hasStaminaIssue = false;
-            const callback = staminaRecoveryCallback;
-            clearInterval(staminaCheckInterval);
-            stopStaminaTooltipMonitoring();
-            if (typeof callback === 'function' && !isPageVisibilityTransitioning) {
-                callback();
-            } else if (isPageVisibilityTransitioning) {
-                console.log('[Raid Hunter] Skipping stamina recovery callback - page visibility transition in progress');
-                startStaminaTooltipMonitoring(callback, requiredStamina);
-            }
+            logProgress(true);
+            scheduleReadyTimeout();
+        }, delay);
+    };
+
+    const onPlayerOrSafety = (reason) => {
+        if (isPageVisibilityTransitioning) return;
+        if (isRecovered()) {
+            finishRecovered(reason);
             return;
         }
-        
-        if (!tooltipStillExists && hasStaminaIssue) {
-            console.log(`[Raid Hunter] ✅ STAMINA RECOVERED - current: ${currentStamina}`);
-            hasStaminaIssue = false;
-            
-            // Save callback before cleanup (cleanup clears the callback)
-            const callback = staminaRecoveryCallback;
-            
-            clearInterval(staminaCheckInterval);
-            stopStaminaTooltipMonitoring();
-            
-            // Execute saved callback (only if not transitioning)
-            if (typeof callback === 'function' && !isPageVisibilityTransitioning) {
-                callback();
-            } else if (isPageVisibilityTransitioning) {
-                console.log('[Raid Hunter] Skipping stamina recovery callback - page visibility transition in progress');
-                // Restart monitoring since we skipped the callback
-                startStaminaTooltipMonitoring(callback, requiredStamina);
-            }
-        } else if (tooltipStillExists && requiredStamina) {
-            // Show progress if we know required stamina
-            const timeRemaining = Math.max(0, requiredStamina - currentStamina);
-            console.log(`[Raid Hunter] Waiting for stamina (${currentStamina}/${requiredStamina}) - ~${timeRemaining} min remaining`);
+        logProgress(false);
+        scheduleReadyTimeout();
+    };
+
+    logProgress(true);
+    scheduleReadyTimeout();
+
+    try {
+        const player = globalThis.state?.player;
+        if (player && typeof player.subscribe === 'function') {
+            staminaRecoveryPlayerUnsub = player.subscribe(() => onPlayerOrSafety('player state / potion'));
         }
-    }, STAMINA_MONITOR_INTERVAL); // Check every 5 seconds (stamina regenerates 1 per minute)
-    
-    // Store interval for cleanup
-    window.raidHunterStaminaInterval = staminaCheckInterval;
-    
-    // BACKUP METHOD: MutationObserver for tooltip removal (instant detection)
+    } catch (_) { /* ignore */ }
+
+    staminaRecoverySafetyTimer = setInterval(() => onPlayerOrSafety('safety'), STAMINA_SAFETY_POLL_MS);
+
+    staminaRecoveryVisibilityHandler = () => {
+        if (!document.hidden) onPlayerOrSafety('visibility');
+    };
+    document.addEventListener('visibilitychange', staminaRecoveryVisibilityHandler);
+
     staminaTooltipObserver = new MutationObserver((mutations) => {
-        // Skip if page is transitioning (visibility change in progress)
-        if (isPageVisibilityTransitioning) {
-            return;
-        }
-        
+        if (isPageVisibilityTransitioning) return;
         for (const mutation of mutations) {
             mutation.removedNodes.forEach((node) => {
-                if (node.nodeType === Node.ELEMENT_NODE) {
-                    const wasStaminaTooltip = 
-                        (node.matches?.('[role="tooltip"]') || node.matches?.('[data-state="instant-open"]')) &&
-                        node.querySelector?.('img[alt="stamina"]');
-                    
-                    if (wasStaminaTooltip && hasStaminaIssue) {
-                        const currentStamina = getCurrentStamina();
-                        console.log(`[Raid Hunter] ✅ STAMINA RECOVERED - current: ${currentStamina}`);
-                        hasStaminaIssue = false;
-                        
-                        // Save callback before cleanup (cleanup clears the callback)
-                        const callback = staminaRecoveryCallback;
-                        
-                        clearInterval(staminaCheckInterval);
-                        stopStaminaTooltipMonitoring();
-                        
-                        // Execute saved callback (only if not transitioning)
-                        if (typeof callback === 'function' && !isPageVisibilityTransitioning) {
-                            callback();
-                        } else if (isPageVisibilityTransitioning) {
-                            console.log('[Raid Hunter] Skipping stamina recovery callback - page visibility transition in progress');
-                            // Restart monitoring since we skipped the callback
-                            startStaminaTooltipMonitoring(callback, requiredStamina);
-                        }
-                    }
+                if (node.nodeType !== Node.ELEMENT_NODE) return;
+                const wasStaminaTooltip =
+                    (node.matches?.('[role="tooltip"]') || node.matches?.('[data-state="instant-open"]')) &&
+                    node.querySelector?.('img[alt="stamina"]');
+                if (wasStaminaTooltip && hasStaminaIssue) {
+                    finishRecovered('tooltip removed');
                 }
             });
         }
     });
-    
-    staminaTooltipObserver.observe(document.body, {
-        childList: true,
-        subtree: true
-    });
-    
-    console.log('[Raid Hunter] Stamina monitoring active (tooltip watching + API progress)');
+    staminaTooltipObserver.observe(document.body, { childList: true, subtree: true });
+
+    console.log('[Raid Hunter] Stamina monitoring active (schedule + player subscribe + tooltip)');
 }
 
 /**
- * Stop stamina tooltip monitoring
+ * Stop stamina recovery / depletion monitoring
  */
 function stopStaminaTooltipMonitoring() {
-    // Clear interval-based API checking
+    if (staminaRecoveryReadyTimer) {
+        clearTimeout(staminaRecoveryReadyTimer);
+        staminaRecoveryReadyTimer = null;
+    }
+    if (staminaRecoverySafetyTimer) {
+        clearInterval(staminaRecoverySafetyTimer);
+        staminaRecoverySafetyTimer = null;
+    }
+    if (typeof staminaRecoveryPlayerUnsub === 'function') {
+        try { staminaRecoveryPlayerUnsub(); } catch (_) { /* ignore */ }
+        staminaRecoveryPlayerUnsub = null;
+    }
+    if (staminaRecoveryVisibilityHandler) {
+        document.removeEventListener('visibilitychange', staminaRecoveryVisibilityHandler);
+        staminaRecoveryVisibilityHandler = null;
+    }
     if (window.raidHunterStaminaInterval) {
         clearInterval(window.raidHunterStaminaInterval);
         window.raidHunterStaminaInterval = null;
     }
 
-    // Disconnect MutationObserver
+    clearStaminaDepletionWatchers();
+
     if (staminaTooltipObserver) {
         staminaTooltipObserver.disconnect();
         staminaTooltipObserver = null;
-        staminaRecoveryCallback = null;
     }
+    staminaRecoveryCallback = null;
 
     console.log('[Raid Hunter] Stamina monitoring stopped');
+}
+
+function watchStaminaDepletion(onDepleted) {
+    clearStaminaDepletionWatchers();
+    const watchGen = staminaDepletionWatchGen;
+
+    const staminaCheck = hasInsufficientStamina();
+    if (staminaCheck.insufficient) {
+        console.log('[Raid Hunter] Stamina already depleted - starting recovery monitoring');
+        onDepleted();
+        return;
+    }
+
+    let depleted = false;
+    const cost = staminaCheck.cost || DEFAULT_STAMINA_COST;
+    const isCurrentWatch = () => watchGen === staminaDepletionWatchGen;
+
+    const triggerDepleted = () => {
+        if (!isCurrentWatch() || depleted) return;
+        if (!isAutomationActive() || !isCurrentlyRaiding) {
+            clearStaminaDepletionWatchers();
+            return;
+        }
+        depleted = true;
+        clearStaminaDepletionWatchers();
+        console.log('[Raid Hunter] Stamina depleted during autoplay - starting recovery monitoring');
+        onDepleted();
+    };
+
+    const checkDepleted = () => {
+        if (!isCurrentWatch()) return;
+        if (!isAutomationActive() || !isCurrentlyRaiding) {
+            clearStaminaDepletionWatchers();
+            return;
+        }
+        if (hasInsufficientStamina().insufficient) {
+            triggerDepleted();
+            return;
+        }
+        if (isDocumentHidden() && getCurrentStamina() < cost) {
+            triggerDepleted();
+        }
+    };
+
+    staminaDepletionObserver = new MutationObserver((mutations) => {
+        if (!isCurrentWatch()) return;
+        for (const mutation of mutations) {
+            for (const node of mutation.addedNodes) {
+                if (node.nodeType !== Node.ELEMENT_NODE) continue;
+                if (node.matches?.(STAMINA_TOOLTIP_SELECTOR) || node.querySelector?.(STAMINA_TOOLTIP_SELECTOR)) {
+                    triggerDepleted();
+                    return;
+                }
+            }
+        }
+    });
+    staminaDepletionObserver.observe(document.body, { childList: true, subtree: true });
+
+    try {
+        const player = globalThis.state?.player;
+        if (player && typeof player.subscribe === 'function') {
+            staminaDepletionPlayerUnsub = player.subscribe(() => checkDepleted());
+        }
+    } catch (_) { /* ignore */ }
+
+    staminaDepletionSafetyTimer = setInterval(checkDepleted, STAMINA_SAFETY_POLL_MS);
+    window.raidHunterDepletionInterval = staminaDepletionSafetyTimer;
 }
 
 // Create continuous stamina monitoring callback
@@ -1073,22 +1233,7 @@ function createStaminaMonitoringCallback(logPrefix, successMessage) {
                 startStaminaTooltipMonitoring(continuousStaminaMonitoring, requiredStamina);
             };
 
-            // Watch for stamina depletion during autoplay
-            const watchStaminaDepletion = () => {
-                const depletionCheckInterval = setInterval(() => {
-                    const currentCheck = hasInsufficientStamina();
-                    if (currentCheck.insufficient) {
-                        console.log('[Raid Hunter] Stamina depleted during autoplay - starting recovery monitoring');
-                        clearInterval(depletionCheckInterval);
-                        handleStaminaDepletion();
-                    }
-                }, STAMINA_MONITOR_INTERVAL); // Check every 5 seconds
-
-                // Store for cleanup
-                window.raidHunterDepletionInterval = depletionCheckInterval;
-            };
-
-            watchStaminaDepletion();
+            watchStaminaDepletion(handleStaminaDepletion);
 
             console.log('[Raid Hunter] Autoplay started after stamina recovery');
         }
@@ -4379,29 +4524,9 @@ async function handleEventOrRaid(roomId) {
             } else {
                 // Stamina is sufficient and autoplay is running - monitor for depletion instead
                 console.log('[Raid Hunter] Autoplay running with sufficient stamina - monitoring for depletion');
-                // Clear any existing depletion interval
-                if (window.raidHunterDepletionInterval) {
-                    clearInterval(window.raidHunterDepletionInterval);
-                }
-                // Set up depletion watcher
-                const watchStaminaDepletion = () => {
-                    const depletionCheckInterval = setInterval(() => {
-                        if (!isAutomationActive() || !isCurrentlyRaiding) {
-                            clearInterval(depletionCheckInterval);
-                            window.raidHunterDepletionInterval = null;
-                            return;
-                        }
-                        const currentCheck = hasInsufficientStamina();
-                        if (currentCheck.insufficient) {
-                            console.log('[Raid Hunter] Stamina depleted during autoplay - starting recovery monitoring');
-                            clearInterval(depletionCheckInterval);
-                            window.raidHunterDepletionInterval = null;
-                            startStaminaTooltipMonitoring(continuousStaminaMonitoring);
-                        }
-                    }, STAMINA_MONITOR_INTERVAL);
-                    window.raidHunterDepletionInterval = depletionCheckInterval;
-                };
-                watchStaminaDepletion();
+                watchStaminaDepletion(() => {
+                    startStaminaTooltipMonitoring(continuousStaminaMonitoring);
+                });
             }
         } else {
             // Autoplay session is not running and no battle in progress - need to click Start button

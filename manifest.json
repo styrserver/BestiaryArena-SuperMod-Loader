@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "BestiaryArena SuperMod Loader",
-  "version": "4.8.6",
+  "version": "4.8.7",
   "description": "SuperMod loader for Bestiary Arena - Advanced mod management system with enhanced features and custom mods.",
   "icons": {
     "16": "assets/icons/icon-16.png",
@@ -90,6 +90,7 @@
         "content/event-competition.js",
         "assets/icons/*",
         "assets/depot/*",
+        "assets/ui/*",
         "assets/js/*",
         "assets/fonts/*",
         "assets/locales/*",
