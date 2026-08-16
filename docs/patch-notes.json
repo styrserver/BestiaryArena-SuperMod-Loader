@@ -12,19 +12,29 @@
           "text": "Tick help goals capped at 9600. Mod button count only includes open requests you have not published a setup for. Player names link to their public profiles."
         },
         {
+          "mod": "Custom Battles",
+          "type": "added",
+          "text": "Pre-battle placement hitbox mask for allow-spawn tiles: idle keeps spawn and villain tiles walkable so fights can start; ally drag highlights only allow-spawn tiles; combat hitboxes restore when the fight starts."
+        },
+        {
+          "mod": "Custom Battles",
+          "type": "fixed",
+          "text": "Placement mask mutates hitboxes in place (no orphaned room refs). Ally-drag remask survives board subscribe races and delayed remask after drop."
+        },
+        {
           "mod": "Map Editor",
           "type": "added",
-          "text": "Ally spawn tiles: paint allowed initial placement (blue overlay) for Custom Battles tileRestrictions, including sandbox test, export, and local/workshop save-load."
+          "text": "Ally spawn tiles: paint allowed initial placement (blue overlay) for Custom Battles tileRestrictions, including sandbox test, export, and local/workshop save-load. Quest-room Copy Export JSON includes tileMutations and a CustomBattles.create-ready stub."
         },
         {
           "mod": "Map Editor",
           "type": "changed",
-          "text": "Creature equipment dropdown uses black-on-white for readability. Selecting equipment defaults tier to 5. Local saves store the full creature layer (including removals)."
+          "text": "Creature equipment dropdown uses black-on-white for readability; selecting equipment defaults tier to 5. Local saves store the full creature layer (including removals). Ally limit and placement rules sync to the live sandbox test battle. Floor locks to 0 and floor UI hides while the editor/session is active. Closing the panel keeps sandbox mode. My Saves: click selects; Load/Save are explicit (double-click still loads)."
         },
         {
           "mod": "Map Editor",
           "type": "fixed",
-          "text": "Removed native creatures and duplicate hidden original sprites now persist on save/load. Live creature edits (level, facing, shiny, etc.) update on the board immediately. Quest helper overlays no longer cover the board while the editor is open."
+          "text": "Removed native creatures and duplicate hidden original sprites now persist on save/load. Live creature edits (level, facing, shiny, etc.) update on the board immediately. Quest helper overlays no longer cover the board while the editor is open. Opening/closing no longer wipes ally limit or placement tiles. Allow-spawn placement highlights apply during ally drag. Missing placement locale keys added."
         },
         {
           "mod": "Mod Loader",
@@ -33,8 +43,18 @@
         },
         {
           "mod": "Quests",
+          "type": "added",
+          "text": "New follow-up mission with a custom battle and item reward after reporting back."
+        },
+        {
+          "mod": "Quests",
           "type": "changed",
-          "text": "Quest tile highlights, arrows, and board NPC helpers hide while Map Editor is open, then restore when it closes."
+          "text": "Quest tile highlights, arrows, and board NPC helpers hide while Map Editor is open, then restore when it closes. Some custom-battle missions grant the reward only after you report back to the quest giver. Fight indicators on NPCs and tiles show only for new quests or active progression. Updated walkable tiles on that custom-battle map. Arena mission leaderboard ties at the same completion count rank by who reached it first."
+        },
+        {
+          "mod": "Quests",
+          "type": "fixed",
+          "text": "Custom-battle tile mutations and scene sprites retry until the board remount finishes so entry visuals apply reliably. Once-ever follow-up reward is capped at one per account."
         }
       ]
     },

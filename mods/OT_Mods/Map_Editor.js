@@ -840,8 +840,8 @@ function resetMapEditorUiState() {
   editorState.selectedWorkshopMapId = null;
   editorState.workshopUploadTitle = '';
   editorState.workshopUploadDescription = '';
-  editorBattleRules.allyLimit = null;
-  editorBattleRules.allowedPlacementTiles = [];
+  // Keep allyLimit / allowedPlacementTiles across panel open/close — the edit
+  // session (and live CustomBattle) stays active in sandbox.
   cancelAssetListWork();
   cancelCreatureListWork();
   removeHitboxOverlay();
@@ -976,6 +976,8 @@ function hasActorEditsFromSnapshot() {
 }
 
 function hasPendingEditorEdits() {
+  const hasCustomAllyLimit = editorBattleRules.allyLimit != null
+    && Number(editorBattleRules.allyLimit) > 0;
   return editorEdits.addedSprites.length > 0
     || Object.keys(editorEdits.addedSpriteConfigs).length > 0
     || editorEdits.hiddenSprites.length > 0
@@ -983,7 +985,8 @@ function hasPendingEditorEdits() {
     || Object.keys(editorEdits.hitboxOverrides).length > 0
     || editorPlacedVillains.size > 0
     || hasActorEditsFromSnapshot()
-    || getAllowedPlacementTiles().length > 0;
+    || getAllowedPlacementTiles().length > 0
+    || hasCustomAllyLimit;
 }
 
 function scheduleBoardConfigSanitize() {
@@ -1074,7 +1077,8 @@ function resetEditorEditsTracking() {
   editorEdits.hitboxOverrides = {};
   editorEdits.mapCleaned = false;
   editorPlacedVillains.clear();
-  editorBattleRules.allowedPlacementTiles = [];
+  // Do not clear allyLimit / allowedPlacementTiles here — those are workshop
+  // battle rules and survive DOM edit resets while the sandbox session lives.
   clearEditorTileDomCache();
   if (typeof removePlacementOverlay === 'function') removePlacementOverlay();
 }
@@ -1794,6 +1798,122 @@ function setBoardFloor(floor) {
   }
 }
 
+let mapEditorSavedFloor = null;
+let mapEditorFloorEnforceUnsubscribe = null;
+let mapEditorFloorUiObserver = null;
+let mapEditorFloorUiHideTimers = [];
+const MAP_EDITOR_FLOOR_UI_HIDDEN_ATTR = 'data-map-editor-floor-ui-hidden';
+
+function shouldKeepMapEditorFloorLocked() {
+  return editorState.open === true || editorState.sandboxTestActive === true;
+}
+
+function forceMapEditorFloorZero() {
+  if (!shouldKeepMapEditorFloorLocked()) return false;
+  if (getBoardFloor() === 0) return true;
+  return setBoardFloor(0);
+}
+
+function findMapEditorFloorUiHosts() {
+  const hosts = [];
+  document.querySelectorAll('[data-maxfloorenabled], [data-floor]').forEach((el) => {
+    const host = el.closest('.absolute') || el.parentElement || el;
+    if (host && !hosts.includes(host)) hosts.push(host);
+  });
+  return hosts;
+}
+
+function hideMapEditorFloorUi() {
+  findMapEditorFloorUiHosts().forEach((host) => {
+    if (!host.hasAttribute(MAP_EDITOR_FLOOR_UI_HIDDEN_ATTR)) {
+      host.setAttribute(MAP_EDITOR_FLOOR_UI_HIDDEN_ATTR, '1');
+      host.dataset.mapEditorPrevDisplay = host.style.display || '';
+    }
+    host.style.display = 'none';
+  });
+}
+
+function showMapEditorFloorUi() {
+  document.querySelectorAll(`[${MAP_EDITOR_FLOOR_UI_HIDDEN_ATTR}="1"]`).forEach((host) => {
+    host.style.display = host.dataset.mapEditorPrevDisplay || '';
+    host.removeAttribute(MAP_EDITOR_FLOOR_UI_HIDDEN_ATTR);
+    delete host.dataset.mapEditorPrevDisplay;
+  });
+}
+
+function clearMapEditorFloorUiHideTimers() {
+  mapEditorFloorUiHideTimers.forEach((id) => clearTimeout(id));
+  mapEditorFloorUiHideTimers = [];
+}
+
+function scheduleMapEditorFloorUiHideRetries() {
+  clearMapEditorFloorUiHideTimers();
+  [0, 50, 150, 400, 900].forEach((delay) => {
+    const id = setTimeout(() => {
+      mapEditorFloorUiHideTimers = mapEditorFloorUiHideTimers.filter((timerId) => timerId !== id);
+      if (!shouldKeepMapEditorFloorLocked()) return;
+      hideMapEditorFloorUi();
+      forceMapEditorFloorZero();
+    }, delay);
+    mapEditorFloorUiHideTimers.push(id);
+  });
+}
+
+function attachMapEditorFloorUiObserver() {
+  if (mapEditorFloorUiObserver || typeof MutationObserver === 'undefined') return;
+  mapEditorFloorUiObserver = new MutationObserver(() => {
+    if (!shouldKeepMapEditorFloorLocked()) return;
+    hideMapEditorFloorUi();
+  });
+  mapEditorFloorUiObserver.observe(document.body, { childList: true, subtree: true });
+}
+
+function detachMapEditorFloorUiObserver() {
+  if (!mapEditorFloorUiObserver) return;
+  try { mapEditorFloorUiObserver.disconnect(); } catch (_) {}
+  mapEditorFloorUiObserver = null;
+}
+
+function attachMapEditorFloorEnforceListener() {
+  if (mapEditorFloorEnforceUnsubscribe || !globalThis.state?.board?.subscribe) return;
+  mapEditorFloorEnforceUnsubscribe = globalThis.state.board.subscribe((state) => {
+    if (!shouldKeepMapEditorFloorLocked()) return;
+    if (Number(state?.context?.floor) !== 0) setBoardFloor(0);
+  });
+}
+
+function detachMapEditorFloorEnforceListener() {
+  if (!mapEditorFloorEnforceUnsubscribe) return;
+  try { mapEditorFloorEnforceUnsubscribe(); } catch (_) {}
+  mapEditorFloorEnforceUnsubscribe = null;
+}
+
+function enterMapEditorFloorLock() {
+  if (mapEditorSavedFloor == null) {
+    mapEditorSavedFloor = getBoardFloor();
+  }
+  forceMapEditorFloorZero();
+  hideMapEditorFloorUi();
+  attachMapEditorFloorEnforceListener();
+  attachMapEditorFloorUiObserver();
+  scheduleMapEditorFloorUiHideRetries();
+  logMapEditor('floorLocked', { savedFloor: mapEditorSavedFloor });
+}
+
+function exitMapEditorFloorLock() {
+  clearMapEditorFloorUiHideTimers();
+  detachMapEditorFloorUiObserver();
+  detachMapEditorFloorEnforceListener();
+  showMapEditorFloorUi();
+
+  const restoreFloor = mapEditorSavedFloor;
+  mapEditorSavedFloor = null;
+  if (restoreFloor != null && getBoardFloor() !== restoreFloor) {
+    setBoardFloor(restoreFloor);
+  }
+  logMapEditor('floorUnlocked', { restoredFloor: restoreFloor });
+}
+
 function getRoomDisplayName(room) {
   if (!room) return 'Unknown room';
   const utils = globalThis.state?.utils;
@@ -2267,6 +2387,7 @@ function cleanMapFromEditor() {
   if (editorState.sandboxTestActive) {
     finalizeSandboxRoomDomState('clean-map');
     syncMapEditorTestNativeRoomSnapshot();
+    syncMapEditorPlacementAllowSpawnMask();
   } else if (editorState.hitboxOverlay) {
     updateHitboxOverlay();
   }
@@ -2331,10 +2452,21 @@ function setHitboxValue(tileIndex, value) {
   if (editorState.hitboxOverlay) updateHitboxOverlay();
   refreshInspector();
   notifyMapEditorEditsChanged();
+  syncMapEditorPlacementAllowSpawnMask();
 }
 
 function getHitboxes() {
-  const source = getCurrentRoom()?.file?.data?.hitboxes;
+  // While the allow-spawn mask is active, live room.hitboxes are placement-only.
+  // Prefer the combat snapshot / base so editor pushes and overlays don't bake the mask in.
+  let source = null;
+  if (mapEditorTestBattle?._placementHitboxMaskActive
+    && Array.isArray(mapEditorTestBattle._placementHitboxSnapshot)) {
+    source = mapEditorTestBattle._placementHitboxSnapshot;
+  } else if (baseHitboxesSnapshot) {
+    source = baseHitboxesSnapshot;
+  } else {
+    source = getCurrentRoom()?.file?.data?.hitboxes;
+  }
   const tileCount = getMapTileCount();
   const overrideKeys = Object.keys(editorEdits.hitboxOverrides);
   if (!source && !overrideKeys.length) return null;
@@ -2349,6 +2481,42 @@ function getHitboxes() {
     }
   }
   return hitboxes;
+}
+
+/** Mutate hitboxes in place so game drag UI refs stay in sync. */
+function writeLiveRoomHitboxesInPlace(nextHitboxes) {
+  if (!Array.isArray(nextHitboxes)) return false;
+  const roomId = getCurrentRoom()?.id;
+  const seen = new Set();
+  let changed = false;
+  const visit = (data) => {
+    if (!data || typeof data !== 'object' || seen.has(data)) return;
+    seen.add(data);
+    let target = data.hitboxes;
+    if (!Array.isArray(target)) {
+      data.hitboxes = nextHitboxes.slice();
+      changed = true;
+      return;
+    }
+    for (let i = 0; i < nextHitboxes.length; i += 1) {
+      if (target[i] !== nextHitboxes[i]) {
+        target[i] = nextHitboxes[i];
+        changed = true;
+      }
+    }
+    if (target.length > nextHitboxes.length) {
+      target.length = nextHitboxes.length;
+      changed = true;
+    }
+  };
+  visit(getCurrentRoom()?.file?.data);
+  if (roomId) {
+    for (const ref of collectRoomReferences(roomId)) {
+      visit(ref?.file?.data);
+    }
+  }
+  if (changed) mapEditorTestBattle?.bumpSelectedRoomFileIdentity?.();
+  return seen.size > 0;
 }
 
 function normalizeAllowedPlacementTiles(tiles) {
@@ -2372,12 +2540,20 @@ function getAllowedPlacementTiles() {
 function setAllowedPlacementTiles(tiles, options = {}) {
   const next = normalizeAllowedPlacementTiles(tiles);
   editorBattleRules.allowedPlacementTiles = next;
+  // Keep allow-spawn overlay on while tiles are marked so placement intent is visible
+  // even if the native drag UI still caches walkable tiles.
+  if (next.length && editorState.sandboxTestActive && !editorState.placementOverlay) {
+    editorState.placementOverlay = true;
+    const toggle = document.getElementById('map-editor-placement-toggle');
+    if (toggle) toggle.checked = true;
+  }
   if (editorState.placementOverlay) updatePlacementOverlay();
   if (options.skipNotify !== true) {
     updateWorkshopBattleRulesControls();
     refreshInspector();
     notifyMapEditorEditsChanged({ skipVillainBoardResync: true });
   }
+  syncMapEditorPlacementAllowSpawnMask();
   return next;
 }
 
@@ -2428,6 +2604,220 @@ function buildTileRestrictionsForExport() {
       'Ally creatures can only be placed on the marked tiles!'
     )
   };
+}
+
+/**
+ * Same pre-battle placement mask as Custom Battles / Quests:
+ * idle = allow-spawn ∪ villain tiles (battle can start);
+ * ally drag = allow-spawn only (no villain highlights).
+ */
+function pushCombatHitboxesToLiveRoom() {
+  const hitboxes = getHitboxes();
+  if (!Array.isArray(hitboxes)) return false;
+  return writeLiveRoomHitboxesInPlace(hitboxes);
+}
+
+function logMapEditorPlacementMaskDiagnostics(reason = 'sync') {
+  try {
+    const allowed = getAllowedPlacementTiles();
+    const live = getCurrentRoom()?.file?.data?.hitboxes;
+    const walkable = Array.isArray(live)
+      ? live.reduce((count, value, index) => (value === false ? count + 1 : count), 0)
+      : 0;
+    const battle = mapEditorTestBattle;
+    console.log('[Map Editor][PlacementMask]', {
+      reason,
+      sandboxActive: editorState.sandboxTestActive,
+      allowedCount: allowed.length,
+      allowedTiles: allowed.slice(0, 40),
+      liveWalkableCount: walkable,
+      allyDragMask: battle?._placementHitboxAllyDrag === true,
+      battleMaskActive: battle?._placementHitboxMaskActive === true,
+      ownsBoard: battle?.ownsBoardRestrictions?.(() => editorState.sandboxTestActive) === true,
+      hasTileRestrictions: !!battle?.config?.tileRestrictions?.allowedTiles?.length,
+      gameStarted: globalThis.state?.board?.getSnapshot?.()?.context?.gameStarted === true
+    });
+  } catch (error) {
+    console.warn('[Map Editor][PlacementMask] diagnostics failed', error);
+  }
+}
+
+function syncMapEditorPlacementAllowSpawnMask(options = {}) {
+  const { reason = 'sync', log = false, allyDrag = false } = options;
+  if (!editorState.sandboxTestActive || !mapEditorTestBattle) {
+    if (log) logMapEditorPlacementMaskDiagnostics(`${reason}:inactive`);
+    return false;
+  }
+
+  const battle = mapEditorTestBattle;
+  let gameStarted = false;
+  try {
+    gameStarted = globalThis.state?.board?.getSnapshot?.()?.context?.gameStarted === true;
+  } catch (_) {}
+
+  if (gameStarted) {
+    battle.restorePlacementHitboxes?.();
+    if (log) logMapEditorPlacementMaskDiagnostics(`${reason}:game-started`);
+    return false;
+  }
+
+  const restrictions = buildTileRestrictionsForExport();
+  const activationCb = () => editorState.sandboxTestActive;
+  const toastCb = (toastData) => {
+    if (toastData?.message) setStatusMessage(toastData.message, !!toastData.isError);
+  };
+
+  if (!restrictions) {
+    if (battle.config) delete battle.config.tileRestrictions;
+    battle.restorePlacementHitboxes?.();
+    if (log) logMapEditorPlacementMaskDiagnostics(`${reason}:no-allowed-tiles`);
+    return false;
+  }
+
+  battle.config.tileRestrictions = cloneJson(restrictions);
+
+  // Fast path while dragging: remask in place (keep combat snapshot) so villain tiles
+  // drop out of walkable highlights without a full restore cycle.
+  if (allyDrag === true && battle._placementHitboxMaskActive === true) {
+    battle.applyPlacementHitboxMask?.({ allyDrag: true });
+    if (log || reason === 'ally-drag') logMapEditorPlacementMaskDiagnostics(reason);
+    return battle._placementHitboxAllyDrag === true;
+  }
+
+  // Restore any active mask, push current combat hitboxes to all room refs, then remask.
+  battle.restorePlacementHitboxes?.();
+  pushCombatHitboxesToLiveRoom();
+
+  if (!battle.subscriptions?.tileRestriction) {
+    battle.setupTileRestrictions?.(activationCb, toastCb);
+  } else {
+    battle.setupPlacementHitboxMaskHooks?.();
+    battle.syncPlacementHitboxMask?.(activationCb, { allyDrag });
+  }
+
+  // Always re-apply with the requested mode — setupTileRestrictions defaults to idle
+  // (villains walkable) and would otherwise leave villain highlights during ally drag.
+  battle.config.tileRestrictions = cloneJson(restrictions);
+  const applied = battle.applyPlacementHitboxMask?.({ allyDrag });
+  if (!applied) {
+    const walkable = battle.getPlacementMaskWalkableTiles?.({ allyDrag })
+      || new Set(restrictions.allowedTiles);
+    const combat = getHitboxes()?.slice() || [];
+    let maxIndex = Math.max(combat.length - 1, 0);
+    walkable.forEach((tileIndex) => {
+      if (tileIndex > maxIndex) maxIndex = tileIndex;
+    });
+    const masked = combat.slice();
+    while (masked.length <= maxIndex) masked.push(null);
+    for (let i = 0; i < masked.length; i += 1) {
+      masked[i] = walkable.has(i) ? false : true;
+    }
+    writeLiveRoomHitboxesInPlace(masked);
+    battle._placementHitboxSnapshot = combat.slice();
+    battle._placementHitboxMaskActive = true;
+    battle._placementHitboxAllyDrag = allyDrag === true;
+  }
+
+  if (log || reason === 'ally-drag' || reason === 'ally-drag-end') {
+    logMapEditorPlacementMaskDiagnostics(reason);
+  }
+  return battle._placementHitboxMaskActive === true
+    || getAllowedPlacementTiles().every((tileIndex) => getCurrentRoom()?.file?.data?.hitboxes?.[tileIndex] === false);
+}
+
+let mapEditorAllyDragHooksAttached = false;
+let mapEditorAllyDragPlacementOverlayWasOn = false;
+let mapEditorAllyDragMaskLogAt = 0;
+let mapEditorAllyDragEndTimer = null;
+
+function isLikelyAllyDragSource(target) {
+  if (!target || typeof target.closest !== 'function') return false;
+  if (target.closest('button[aria-roledescription="draggable"]')) return true;
+  if (target.closest('[class*="bestiary"]')) return true;
+  if (target.closest('#bestiary, .bestiary, [data-bestiary]')) return true;
+  // Creature portrait / slot in side panel (not board viewport)
+  if (target.closest('.outfit') && !target.closest('#viewport, #board, #background-scene, #tile-index-')) {
+    return true;
+  }
+  return false;
+}
+
+function handleMapEditorAllyDragStart(event) {
+  if (!editorState.sandboxTestActive) return;
+  if (!isLikelyAllyDragSource(event.target)) return;
+
+  if (mapEditorAllyDragEndTimer) {
+    clearTimeout(mapEditorAllyDragEndTimer);
+    mapEditorAllyDragEndTimer = null;
+  }
+
+  const allowed = getAllowedPlacementTiles();
+  const now = Date.now();
+  const shouldLog = now - mapEditorAllyDragMaskLogAt > 400;
+  if (shouldLog) {
+    mapEditorAllyDragMaskLogAt = now;
+    console.log('[Map Editor] Ally drag/pointer — remasking allow-spawn only (hide villain highlights)', {
+      type: event.type,
+      allowedCount: allowed.length,
+      allowedTiles: allowed.slice()
+    });
+  }
+
+  syncMapEditorPlacementAllowSpawnMask({ reason: 'ally-drag', allyDrag: true, log: shouldLog });
+
+  // Visual fallback: show allow-spawn overlay while dragging so placement intent is obvious
+  // even if the native game ignores live hitbox mutations.
+  if (event.type === 'dragstart' || event.type === 'pointerdown') {
+    mapEditorAllyDragPlacementOverlayWasOn = editorState.placementOverlay === true;
+    if (allowed.length && !editorState.placementOverlay) {
+      editorState.placementOverlay = true;
+      updatePlacementOverlay();
+    } else if (editorState.placementOverlay) {
+      updatePlacementOverlay();
+    }
+  }
+}
+
+function handleMapEditorAllyDragEnd() {
+  if (!editorState.sandboxTestActive) return;
+  // Restore villain tiles as walkable only after drop settles (avoid accepting villain tiles).
+  if (mapEditorTestBattle?._placementHitboxAllyDrag) {
+    if (mapEditorAllyDragEndTimer) clearTimeout(mapEditorAllyDragEndTimer);
+    mapEditorAllyDragEndTimer = setTimeout(() => {
+      mapEditorAllyDragEndTimer = null;
+      if (!editorState.sandboxTestActive) return;
+      if (!mapEditorTestBattle?._placementHitboxAllyDrag) return;
+      syncMapEditorPlacementAllowSpawnMask({ reason: 'ally-drag-end', allyDrag: false });
+    }, 120);
+  }
+  if (!mapEditorAllyDragPlacementOverlayWasOn && editorState.placementOverlay) {
+    // Only auto-hide if we turned it on for this drag.
+    const toggle = document.getElementById('map-editor-placement-toggle');
+    if (!toggle?.checked) {
+      editorState.placementOverlay = false;
+      removePlacementOverlay();
+    }
+  }
+  mapEditorAllyDragPlacementOverlayWasOn = false;
+}
+
+function attachMapEditorAllyDragHooks() {
+  if (mapEditorAllyDragHooksAttached) return;
+  mapEditorAllyDragHooksAttached = true;
+  document.addEventListener('dragstart', handleMapEditorAllyDragStart, true);
+  document.addEventListener('pointerdown', handleMapEditorAllyDragStart, true);
+  document.addEventListener('dragend', handleMapEditorAllyDragEnd, true);
+  document.addEventListener('pointerup', handleMapEditorAllyDragEnd, true);
+  console.log('[Map Editor] Ally drag placement-mask hooks attached');
+}
+
+function detachMapEditorAllyDragHooks() {
+  if (!mapEditorAllyDragHooksAttached) return;
+  mapEditorAllyDragHooksAttached = false;
+  document.removeEventListener('dragstart', handleMapEditorAllyDragStart, true);
+  document.removeEventListener('pointerdown', handleMapEditorAllyDragStart, true);
+  document.removeEventListener('dragend', handleMapEditorAllyDragEnd, true);
+  document.removeEventListener('pointerup', handleMapEditorAllyDragEnd, true);
 }
 
 function getConfiguredTileLayer(tileIndex) {
@@ -5521,6 +5911,7 @@ function applyDomSessionEdits(options = {}) {
   if (allowedPlacementTiles != null) {
     setAllowedPlacementTiles(allowedPlacementTiles, { skipNotify: true });
   }
+  syncMapEditorTestBattleConfigFromRules();
 
   if ((Array.isArray(actors) || villains != null) && editorState.sandboxTestActive) {
     applyEditorVillainsToBoard({ allowDuringRestore: true });
@@ -5707,6 +6098,14 @@ async function ensureDomSessionRoom(payload) {
   if (!roomId) return null;
 
   const mapLabel = payload?.roomName || getRoomDisplayName({ id: roomId });
+
+  // Map loads always run in sandbox so allies can be placed immediately after navigate.
+  if (editorState.open) {
+    enterMapEditorPlayModeLock();
+  } else {
+    ensureMapEditorSandboxPlayMode();
+  }
+
   if (isOnDomSessionRoom(roomId)) {
     return getCurrentRoom();
   }
@@ -5760,6 +6159,14 @@ async function ensureDomSessionRoom(payload) {
   }
 
   await waitForMapBoardReady(roomId);
+
+  // Room changes can reset play mode — lock sandbox again after arrival.
+  if (editorState.open) {
+    enterMapEditorPlayModeLock();
+  } else {
+    ensureMapEditorSandboxPlayMode();
+  }
+
   return room;
 }
 
@@ -5845,8 +6252,18 @@ async function loadDomSession(payload) {
       externalId: payload.externalId,
       name: label,
       applied,
-      villainCount
+      villainCount,
+      playMode: getBoardPlayMode()
     });
+
+    // Keep sandbox locked and edit session alive so placement/test works right after load.
+    if (editorState.open) {
+      enterMapEditorPlayModeLock();
+      void ensureMapEditorEditSession({ skipInitialVillainSync: false });
+    } else {
+      ensureMapEditorSandboxPlayMode();
+    }
+
     return true;
   } finally {
     scopeHandlingSuspended = false;
@@ -5977,6 +6394,23 @@ function getMapEditorBattleRules() {
     allowedPlacementTiles,
     tileRestrictions
   };
+}
+
+/** Push current workshop battle rules onto the live Map Editor test CustomBattle. */
+function syncMapEditorTestBattleConfigFromRules() {
+  if (!mapEditorTestBattle?.config || !editorState.sandboxTestActive) return false;
+  const rules = getMapEditorBattleRules();
+  const prevLimit = mapEditorTestBattle.config.allyLimit;
+  mapEditorTestBattle.config.allyLimit = rules.allyLimit;
+  if (rules.tileRestrictions) {
+    mapEditorTestBattle.config.tileRestrictions = cloneJson(rules.tileRestrictions);
+  } else if (mapEditorTestBattle.config.tileRestrictions) {
+    delete mapEditorTestBattle.config.tileRestrictions;
+  }
+  if (prevLimit !== rules.allyLimit) {
+    logMapEditor('syncTestBattleAllyLimit', { from: prevLimit, to: rules.allyLimit });
+  }
+  return true;
 }
 
 function listAllLocalMapSaves() {
@@ -6934,7 +7368,8 @@ function createWorkshopLocalSaveCard(entry, nameInput = null) {
   card.className = 'me-asset-card me-workshop-card me-workshop-save-card' + (isActive ? ' me-workshop-card-active' : '');
   card.setAttribute('role', 'button');
   card.tabIndex = 0;
-  card.title = t('mods.mapEditor.loadSaveTooltip', 'Load "{name}"').replace('{name}', displayName);
+  card.title = t('mods.mapEditor.selectSaveTooltip', 'Select "{name}" — then Load or Save')
+    .replace('{name}', displayName);
 
   card.appendChild(createWorkshopMapPreview(roomId));
 
@@ -6957,26 +7392,28 @@ function createWorkshopLocalSaveCard(entry, nameInput = null) {
 
   const selectSave = (e) => {
     e?.stopPropagation?.();
-      editorState.selectedSaveId = save.id;
+    editorState.selectedSaveId = save.id;
     editorState.selectedSaveRoomId = roomId;
-      if (nameInput) nameInput.value = save.name;
-    refreshWorkshopLocalSavesList();
-      updateSessionControls();
+    if (nameInput) nameInput.value = save.name;
+    updateSessionControls();
   };
 
-  card.addEventListener('click', selectSave);
-  card.addEventListener('dblclick', (e) => {
-      e.stopPropagation();
-      editorState.selectedSaveId = save.id;
+  const loadSave = (e) => {
+    e?.stopPropagation?.();
+    e?.preventDefault?.();
+    editorState.selectedSaveId = save.id;
     editorState.selectedSaveRoomId = roomId;
-    loadSelectedLocalSave();
-  });
+    if (nameInput) nameInput.value = save.name;
+    void loadSelectedLocalSave();
+  };
+
+  // Click selects; Load/Save buttons apply the action. Double-click still loads.
+  card.addEventListener('click', selectSave);
+  card.addEventListener('dblclick', loadSave);
   card.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
+    if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
-      editorState.selectedSaveId = save.id;
-      editorState.selectedSaveRoomId = roomId;
-      loadSelectedLocalSave();
+      selectSave(e);
     }
   });
 
@@ -7057,6 +7494,7 @@ function updateWorkshopBattleRulesControls() {
   const allyInput = root.querySelector('#map-editor-ally-limit');
   const rulesHint = root.querySelector('#map-editor-battle-rules-hint');
   const rules = getMapEditorBattleRules();
+  syncMapEditorTestBattleConfigFromRules();
 
   if (allyInput && document.activeElement !== allyInput) {
     allyInput.value = String(rules.allyLimit);
@@ -7108,7 +7546,7 @@ function updateSessionControls() {
 
   const selectedEntry = getSelectedLocalSaveEntry();
   const selected = selectedEntry?.save || null;
-  const canLoadSelected = Boolean(
+  const onSelectedMap = Boolean(
     selected
     && room?.id
     && selectedEntry.roomId === room.id
@@ -7116,7 +7554,7 @@ function updateSessionControls() {
 
   if (loadBtn) {
     loadBtn.style.display = selected ? '' : 'none';
-    loadBtn.disabled = selected && !canLoadSelected;
+    loadBtn.disabled = !selected;
     loadBtn.title = selected?.savedAt
       ? t('mods.mapEditor.loadTooltip', 'Load "{name}" from {time}')
           .replace('{name}', selected.name)
@@ -7135,14 +7573,17 @@ function updateSessionControls() {
 
     if (!selected?.savedAt) {
       sessionHint.textContent = listAllLocalMapSaves().length
-        ? t('mods.mapEditor.saveListHint', 'Click a save to select it. Double-click to load.')
+        ? t(
+          'mods.mapEditor.saveListHint',
+          'Click a save to select it, then Load or Save. Double-click to load.'
+        )
         : t('mods.mapEditor.saveNameHint', 'Name your save, then click Save.');
-    } else if (!canLoadSelected) {
+    } else if (!onSelectedMap) {
       sessionHint.classList.add('me-session-hint-warning');
       sessionHint.textContent = tReplace(
-        'mods.mapEditor.workshopSaveOtherMap',
+        'mods.mapEditor.workshopSaveLoadWillOpenMap',
         { map: selectedEntry.roomName || selectedEntry.roomId },
-        'Open {map} to load this save.'
+        'Selected save is on {map}. Click Load to open that map and apply it.'
       );
     } else {
       sessionHint.classList.add('me-session-hint-selected');
@@ -7777,30 +8218,41 @@ function buildQuestCustomBattleCreateConfig({
 }
 
 /**
- * Diff live Map Editor tiles vs the base room snapshot into rooms.json-style mutations
- * (same role as spiderLair tilesAddSprite* / spriteToRemoveId — aggregated add/remove/hitbox).
+ * Diff live Map Editor tiles vs the base room snapshot into rooms.json-style mutations.
+ * Tile-keyed: { "<tileIndex>": { add?: [...], remove?: [spriteId], hitbox?: boolean } }
  */
 function buildQuestTileMutationsFromEditor() {
   const tileCount = getMapTileCount();
   if (!tileCount) return null;
 
-  const addGroups = new Map();
-  const removeGroups = new Map();
-  const hitboxes = [];
+  const byTile = new Map();
+
+  const ensureTile = (tileIndex) => {
+    const key = String(tileIndex);
+    if (!byTile.has(key)) byTile.set(key, {});
+    return byTile.get(key);
+  };
 
   const pushAdd = (tileIndex, compact) => {
     if (!compact?.id) return;
-    const key = JSON.stringify(compact);
-    if (!addGroups.has(key)) addGroups.set(key, { ...compact, tiles: [] });
-    addGroups.get(key).tiles.push(tileIndex);
+    const entry = { spriteId: compact.id };
+    if (compact.cropX != null) entry.cropX = compact.cropX;
+    if (compact.cropY != null) entry.cropY = compact.cropY;
+    if (compact.cropped) entry.cropped = true;
+    if (compact.bank != null) entry.bank = compact.bank;
+    if (compact.offsetX != null) entry.offsetX = compact.offsetX;
+    if (compact.offsetY != null) entry.offsetY = compact.offsetY;
+    const tile = ensureTile(tileIndex);
+    if (!tile.add) tile.add = [];
+    tile.add.push(entry);
   };
 
   const pushRemove = (tileIndex, spriteId) => {
     if (spriteId == null) return;
     const id = Number(spriteId);
-    const key = String(id);
-    if (!removeGroups.has(key)) removeGroups.set(key, { spriteId: id, tiles: [] });
-    removeGroups.get(key).tiles.push(tileIndex);
+    const tile = ensureTile(tileIndex);
+    if (!tile.remove) tile.remove = [];
+    if (!tile.remove.includes(id)) tile.remove.push(id);
   };
 
   for (let tileIndex = 0; tileIndex < tileCount; tileIndex += 1) {
@@ -7841,41 +8293,21 @@ function buildQuestTileMutationsFromEditor() {
     }
 
     if (Object.prototype.hasOwnProperty.call(editorEdits.hitboxOverrides, tileIndex)) {
-      hitboxes.push({
-        tileIndex,
-        hitbox: !!editorEdits.hitboxOverrides[tileIndex]
-      });
+      ensureTile(tileIndex).hitbox = !!editorEdits.hitboxOverrides[tileIndex];
     }
   }
 
-  const add = Array.from(addGroups.values()).map((group) => {
-    const entry = {
-      spriteId: group.id,
-      tiles: [...new Set(group.tiles)].sort((a, b) => a - b)
-    };
-    if (group.cropX != null) entry.cropX = group.cropX;
-    if (group.cropY != null) entry.cropY = group.cropY;
-    if (group.cropped) entry.cropped = true;
-    if (group.bank != null) entry.bank = group.bank;
-    if (group.offsetX != null) entry.offsetX = group.offsetX;
-    if (group.offsetY != null) entry.offsetY = group.offsetY;
-    return entry;
-  }).sort((a, b) => Number(a.spriteId) - Number(b.spriteId));
-
-  const remove = Array.from(removeGroups.values()).map((group) => ({
-    spriteId: group.spriteId,
-    tiles: [...new Set(group.tiles)].sort((a, b) => a - b)
-  })).sort((a, b) => Number(a.spriteId) - Number(b.spriteId));
-
-  hitboxes.sort((a, b) => a.tileIndex - b.tileIndex);
-
-  if (!add.length && !remove.length && !hitboxes.length) return null;
+  if (!byTile.size) return null;
 
   const mutations = {};
-  if (add.length) mutations.add = add;
-  if (remove.length) mutations.remove = remove;
-  if (hitboxes.length) mutations.hitboxes = hitboxes;
-  return mutations;
+  for (const key of [...byTile.keys()].sort((a, b) => Number(a) - Number(b))) {
+    const tile = byTile.get(key);
+    if (tile.remove?.length) tile.remove.sort((a, b) => a - b);
+    else delete tile.remove;
+    if (!tile.add?.length) delete tile.add;
+    mutations[key] = tile;
+  }
+  return Object.keys(mutations).length ? mutations : null;
 }
 
 /**
@@ -7929,7 +8361,7 @@ function buildQuestRoomExport(options = {}) {
     _howto: [
       `1. Merge battles.${battleId} into assets/quests/battles.json (same shape as spider_lair).`,
       `2. Merge rooms.${roomKey} into assets/quests/rooms.json (roomName/roomId/battleId[+tileMutations][+sceneSpriteReplacements]).`,
-      '3. In Quests.js, apply rooms.tileMutations like Spider Lair sprite add/remove, then mirror createSpiderLairBattleInstance with customBattle + spawn.villains.',
+      '3. In Quests.js, apply rooms.tileMutations (tile-keyed add/remove/hitbox), then mirror createSpiderLairBattleInstance with customBattle + spawn.villains.',
       '4. Wire activationCheck / victoryDefeat (mission flags, rewards, navigate-on-close). customBattle._wireInQuests has the stubs.'
     ],
     rooms: {
@@ -8424,6 +8856,7 @@ function detachSandboxTestBoardHook() {
     clearTimeout(sandboxTestReapplyTimer);
     sandboxTestReapplyTimer = null;
   }
+  detachMapEditorAllyDragHooks();
 }
 
 function clearSandboxTestPersistence() {
@@ -8457,15 +8890,18 @@ function completeSandboxReapplyTail(reason = 'unknown', options = {}) {
   scheduleDeferredNativeSpritePlacementRestore();
   if (options.skipVillainBoardResync === true) {
     logMapEditor('villainApplySkipped', { reason, skip: 'skipVillainBoardResync' });
+    syncMapEditorPlacementAllowSpawnMask();
     return;
   }
   if (restoreMapInProgress) {
     logMapEditor('villainApplySkipped', { reason, skip: 'restore-in-progress' });
+    syncMapEditorPlacementAllowSpawnMask();
     return;
   }
   logBoardStateSnapshot('beforeVillainApply', { reason });
   applyEditorVillainsToBoard();
   logBoardStateSnapshot('afterVillainApply', { reason });
+  syncMapEditorPlacementAllowSpawnMask();
 }
 
 function reapplySandboxEditorState(reason = 'unknown', options = {}) {
@@ -8495,6 +8931,9 @@ function scheduleSandboxBattleRestoreBurst(reason = 'battle-end') {
   removeEphemeralSpritesFromTiles();
   logMapEditor('sandboxBattleRestoreBurst', { reason });
   scheduleSandboxTestReapplyBurst([50, 150, 400, 800, 1500, 2500]);
+  // Remask allow-spawn tiles after combat ends (CustomBattle also remasks; this covers editor hitbox reapply).
+  setTimeout(() => syncMapEditorPlacementAllowSpawnMask(), 100);
+  setTimeout(() => syncMapEditorPlacementAllowSpawnMask(), 500);
   if (editorState.open) refreshInspector();
 }
 
@@ -8543,6 +8982,8 @@ function notifyMapEditorEditsChanged(options = {}) {
 function attachSandboxTestBoardHook() {
   detachSandboxTestBoardHook();
   if (!globalThis.state?.board?.on) return;
+
+  attachMapEditorAllyDragHooks();
 
   sandboxTestAutoSetupHandler = () => {
     if (!editorState.sandboxTestActive) return;
@@ -8599,7 +9040,36 @@ function buildMapEditorTestBattleConfig(room) {
     villains: rules.villains,
     allyLimit: rules.allyLimit,
     allowStopButton: true,
-    activationCheck: (isSandbox, inBattleArea) => editorState.sandboxTestActive && isSandbox && inBattleArea
+    // Yield board authority to quest/custom battles on the same room (ally limit, placement).
+    activationCheck: (isSandbox, inBattleArea) => {
+      if (!editorState.sandboxTestActive || !isSandbox || !inBattleArea) return false;
+      try {
+        const battles = window.CustomBattles?.getActiveBattles?.();
+        if (Array.isArray(battles)) {
+          const self = mapEditorTestBattle;
+          const contested = battles.some((battle) => {
+            if (!battle || battle === self || !battle.isActive) return false;
+            if (battle.config?.roomId !== room.id) return false;
+            if (typeof battle.getRestrictionPriority !== 'function') return false;
+            if (typeof battle.shouldRestrictionsBeActive !== 'function') return false;
+            // Other battle is "trying" to be active if its activationCallback/check passes
+            // without Map Editor — prefer any battle that has victoryDefeat / higher priority.
+            const otherPriority = battle.getRestrictionPriority();
+            const selfPriority = self?.getRestrictionPriority?.() ?? -999;
+            if (otherPriority <= selfPriority) return false;
+            const boardContext = globalThis.state?.board?.getSnapshot?.()?.context;
+            const otherSandbox = boardContext?.mode === 'sandbox';
+            const otherInArea = battle.isInBattleArea?.() === true;
+            if (battle.config.activationCheck) {
+              return battle.config.activationCheck(otherSandbox, otherInArea);
+            }
+            return otherSandbox && otherInArea && (battle.activationCallback ? battle.activationCallback() : true);
+          });
+          if (contested) return false;
+        }
+      } catch (_) {}
+      return true;
+    }
   };
   if (rules.tileRestrictions) {
     config.tileRestrictions = cloneJson(rules.tileRestrictions);
@@ -8628,6 +9098,7 @@ function stopMapEditorSandboxTest(options = {}) {
   }
 
   editorState.sandboxTestActive = false;
+  if (!shouldKeepMapEditorFloorLocked()) exitMapEditorFloorLock();
   clearSandboxTestPersistence();
   clearEditorPlacedVillains({ skipBoardPatch: skipBoardRestore === true });
   const room = getCurrentRoom();
@@ -8661,13 +9132,9 @@ function stopMapEditorSandboxTest(options = {}) {
 
   if (!skipPlayModeChanges) {
     try {
-      if (editorState.open) {
-        ensureMapEditorSandboxPlayMode();
-      } else if (mapEditorSavedPlayMode) {
-        setBoardPlayMode(mapEditorSavedPlayMode);
-      } else if (!silent) {
-        globalThis.state?.board?.send?.({ type: 'setPlayMode', mode: 'normal' });
-      }
+      // Always remain in sandbox after Map Editor sessions — never snap back to manual/normal.
+      ensureMapEditorSandboxPlayMode();
+      mapEditorSavedPlayMode = null;
     } catch (e) {
       // ignore
     }
@@ -8755,6 +9222,9 @@ async function ensureMapEditorEditSession(options = {}) {
   ensureSandboxTestRoomApplied('edit-session-start', {
     skipVillainBoardResync: skipInitialVillainSync
   });
+  syncMapEditorTestBattleConfigFromRules();
+  syncMapEditorPlacementAllowSpawnMask({ reason: 'edit-session-start', log: true });
+  enterMapEditorFloorLock();
   updateMapEditorSessionControls();
   logMapEditor('editSessionStarted', { roomId: room.id, skipInitialVillainSync });
   return true;
@@ -12179,6 +12649,7 @@ function buildInspectorContent() {
     e.stopPropagation();
     const parsed = Number(allyLimitInput.value);
     editorBattleRules.allyLimit = Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+    syncMapEditorTestBattleConfigFromRules();
     updateWorkshopBattleRulesControls();
   });
   battleRulesRow.appendChild(allyLimitInput);
@@ -12515,7 +12986,7 @@ function buildInspectorContent() {
   localHint.className = 'me-section-hint';
   localHint.textContent = t(
     'mods.mapEditor.workshopMySavesHint',
-    'Local saves for all maps. Open the matching map before loading.'
+    'Click a save to select it, then Load or Save. Double-click a save to load it.'
   );
   localSection.appendChild(localHint);
 
@@ -12803,6 +13274,7 @@ function detachBattlefieldPickListener() {
 function enableMapEditorBoardTools() {
   captureAllNativeSpritePlacements();
   document.body.classList.add('map-editor-board-active');
+  enterMapEditorFloorLock();
   refreshTilePickOverlays();
   attachTilePickObserver();
   attachBattlefieldPickListener();
@@ -12813,6 +13285,7 @@ function enableMapEditorBoardTools() {
 
 function disableMapEditorBoardTools() {
   document.body.classList.remove('map-editor-board-active');
+  if (!shouldKeepMapEditorFloorLocked()) exitMapEditorFloorLock();
   removeTilePickOverlays();
   applyBoardPiecePassThrough(false);
   detachBattlefieldPickListener();
@@ -13180,12 +13653,10 @@ function exitMapEditorPlayModeLock() {
   detachPlayModeEnforceListener();
   unlockPlayModeSelector();
 
-  const restoreMode = mapEditorSavedPlayMode;
+  // Stay in sandbox after closing Map Editor — do not restore prior mode (e.g. manual).
   mapEditorSavedPlayMode = null;
-  if (restoreMode && restoreMode !== getBoardPlayMode()) {
-    setBoardPlayMode(restoreMode);
-  }
-  logMapEditor('playModeUnlocked', { restoredMode: restoreMode || null });
+  ensureMapEditorSandboxPlayMode();
+  logMapEditor('playModeUnlocked', { restoredMode: 'sandbox' });
 
   schedulePlayModeUnlockRetries();
 }
@@ -13346,6 +13817,10 @@ function injectStyles() {
     body.map-editor-board-active .${PICK_OVERLAY_CLASS} {
       pointer-events: auto !important;
       cursor: crosshair !important;
+    }
+    body.map-editor-board-active [${MAP_EDITOR_FLOOR_UI_HIDDEN_ATTR}="1"],
+    body.map-editor-board-active [data-maxfloorenabled] {
+      display: none !important;
     }
     button.${PLAY_MODE_LOCKED_BTN_CLASS},
     button[${MAP_SELECTOR_LOCK_ATTR}="1"] {
@@ -14869,6 +15344,7 @@ function closeMapEditor() {
 
   editorState.open = false;
   exitMapEditorPlayModeLock();
+  if (!shouldKeepMapEditorFloorLocked()) exitMapEditorFloorLock();
   notifyMapEditorOpenChanged();
 
   try {

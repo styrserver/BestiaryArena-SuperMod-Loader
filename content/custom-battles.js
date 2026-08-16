@@ -64,6 +64,7 @@ if (window.CustomBattles) {
         }
 
         const activeCustomBattles = new Set();
+        let customBattleSetupSeq = 0;
         let globalAllyVillainGuardInstalled = false;
         let globalAllyVillainBoardTimer = null;
         let roomInfoOverlayObserver = null;
@@ -189,7 +190,7 @@ if (window.CustomBattles) {
             for (const battle of activeCustomBattles) {
                 if (!battle.isActive) continue;
                 try {
-                    if (!battle.shouldRestrictionsBeActive(battle.activationCallback)) continue;
+                    if (!battle.ownsBoardRestrictions(battle.activationCallback)) continue;
                     const toast = battle._overlapToastCallback || null;
                     setup = battle.filterSetupPreventAllyOnVillainTiles(setup, toast);
                     setup = battle.filterSetupPreventAllyOnForcedAllyTiles(setup, toast);
@@ -204,7 +205,7 @@ if (window.CustomBattles) {
             for (const battle of activeCustomBattles) {
                 if (!battle.isActive) continue;
                 try {
-                    if (!battle.shouldRestrictionsBeActive(battle.activationCallback)) continue;
+                    if (!battle.ownsBoardRestrictions(battle.activationCallback)) continue;
                     if (battle.isBoardBattleActive()) continue;
                     const toast = showToastCallback || battle._overlapToastCallback || null;
                     if (battle.removeDuplicateAlliesFromBoard(toast)) {
@@ -540,6 +541,10 @@ if (window.CustomBattles) {
                     };
                 });
                 this.forcedAllyWatchUnsub = null;
+                this._setupSeq = 0;
+                this._placementHitboxSnapshot = null;
+                this._placementHitboxMaskActive = false;
+                this._placementHitboxHooks = null;
             }
 
             /**
@@ -929,6 +934,375 @@ if (window.CustomBattles) {
                     console.error('[Custom Battles] Error checking restriction activation:', error);
                     return false;
                 }
+            }
+
+            /**
+             * Priority when multiple CustomBattles are active on the same room
+             * (e.g. Map Editor test + Quests Sewers). Higher wins board authority.
+             */
+            getRestrictionPriority() {
+                let score = Number(this._setupSeq) || 0;
+                if (this.config.victoryDefeat) score += 1000;
+                if (this.config.tileRestrictions?.allowedTiles?.length) score += 100;
+                if (this.config.tileRestrictions?.blockedTiles?.length) score += 50;
+                const name = String(this.config.name || '');
+                if (/map editor test/i.test(name)) score -= 500;
+                return score;
+            }
+
+            /**
+             * Only one active battle per room should enforce ally limits / placement masks.
+             */
+            ownsBoardRestrictions(activationCallback) {
+                if (!this.isActive) return false;
+                if (!this.shouldRestrictionsBeActive(activationCallback ?? this.activationCallback)) return false;
+                const roomId = this.config.roomId;
+                let best = this;
+                let bestScore = this.getRestrictionPriority();
+                for (const battle of activeCustomBattles) {
+                    if (battle === this || !battle.isActive) continue;
+                    if (battle.config?.roomId !== roomId) continue;
+                    if (!battle.shouldRestrictionsBeActive(battle.activationCallback)) continue;
+                    const score = battle.getRestrictionPriority();
+                    if (score > bestScore) {
+                        best = battle;
+                        bestScore = score;
+                    }
+                }
+                return best === this;
+            }
+
+            getRoomHitboxesArray() {
+                try {
+                    const roomId = this.config?.roomId;
+                    // Prefer this battle's room graph — selectedRoom may still be the entry
+                    // map (e.g. Wyda) when restrictions are set up before navigation.
+                    if (roomId) {
+                        try {
+                            const utils = globalThis.state?.utils;
+                            if (Array.isArray(utils?.ROOMS)) {
+                                const fromRooms = utils.ROOMS.find((room) => room?.id === roomId);
+                                if (fromRooms?.file?.data) {
+                                    if (!Array.isArray(fromRooms.file.data.hitboxes)) {
+                                        fromRooms.file.data.hitboxes = [];
+                                    }
+                                    return fromRooms.file.data.hitboxes;
+                                }
+                            }
+                            if (Array.isArray(utils?.REGIONS)) {
+                                for (const region of utils.REGIONS) {
+                                    const match = (region?.rooms || []).find((room) => room?.id === roomId);
+                                    if (match?.file?.data) {
+                                        if (!Array.isArray(match.file.data.hitboxes)) {
+                                            match.file.data.hitboxes = [];
+                                        }
+                                        return match.file.data.hitboxes;
+                                    }
+                                }
+                            }
+                        } catch (_) {}
+                    }
+                    const room = globalThis.state?.board?.getSnapshot?.()?.context?.selectedMap?.selectedRoom
+                        || globalThis.state?.selectedMap?.selectedRoom;
+                    if (roomId && room?.id && room.id !== roomId) return null;
+                    const data = room?.file?.data;
+                    if (!data) return null;
+                    if (!Array.isArray(data.hitboxes)) data.hitboxes = [];
+                    return data.hitboxes;
+                } catch (_) {
+                    return null;
+                }
+            }
+
+            /**
+             * selectedRoom + utils.ROOMS/REGIONS can be different object graphs — patch all.
+             */
+            forEachRoomDataWithHitboxes(callback) {
+                if (typeof callback !== 'function' || !this.config?.roomId) return;
+                const seen = new Set();
+                const visit = (data) => {
+                    if (!data || typeof data !== 'object' || seen.has(data)) return;
+                    seen.add(data);
+                    if (!Array.isArray(data.hitboxes)) data.hitboxes = [];
+                    callback(data);
+                };
+                try {
+                    const selected = globalThis.state?.board?.getSnapshot?.()?.context?.selectedMap?.selectedRoom
+                        || globalThis.state?.selectedMap?.selectedRoom;
+                    if (selected?.id === this.config.roomId) visit(selected.file?.data);
+                } catch (_) {}
+                try {
+                    const utils = globalThis.state?.utils;
+                    if (Array.isArray(utils?.ROOMS)) {
+                        utils.ROOMS.forEach((room) => {
+                            if (room?.id === this.config.roomId) visit(room.file?.data);
+                        });
+                    }
+                    if (Array.isArray(utils?.REGIONS)) {
+                        utils.REGIONS.forEach((region) => {
+                            (region?.rooms || []).forEach((room) => {
+                                if (room?.id === this.config.roomId) visit(room.file?.data);
+                            });
+                        });
+                    }
+                } catch (_) {}
+            }
+
+            /**
+             * Mutate hitboxes in place. Replacing the array orphans any game/React refs
+             * captured at room load — drag-placement highlights keep the old walkable set.
+             * @param {unknown[]} nextHitboxes
+             * @param {{ bump?: boolean }} [options] bump=false skips board setState (ally-drag remasks)
+             */
+            writeHitboxesInPlace(nextHitboxes, options = {}) {
+                if (!Array.isArray(nextHitboxes)) return false;
+                let changed = false;
+                this.forEachRoomDataWithHitboxes((data) => {
+                    let target = data.hitboxes;
+                    if (!Array.isArray(target)) {
+                        data.hitboxes = nextHitboxes.slice();
+                        changed = true;
+                        return;
+                    }
+                    for (let i = 0; i < nextHitboxes.length; i += 1) {
+                        if (target[i] !== nextHitboxes[i]) {
+                            target[i] = nextHitboxes[i];
+                            changed = true;
+                        }
+                    }
+                    if (target.length > nextHitboxes.length) {
+                        target.length = nextHitboxes.length;
+                        changed = true;
+                    }
+                });
+                if (changed && options.bump !== false) this.bumpSelectedRoomFileIdentity();
+                return true;
+            }
+
+            /**
+             * Nudge board/React to re-read room.file.data while keeping the same hitboxes array.
+             */
+            bumpSelectedRoomFileIdentity() {
+                try {
+                    const room = globalThis.state?.board?.getSnapshot?.()?.context?.selectedMap?.selectedRoom
+                        || globalThis.state?.selectedMap?.selectedRoom;
+                    if (!room?.file?.data || room.id !== this.config?.roomId) return false;
+                    const data = room.file.data;
+                    room.file = { ...room.file, data: { ...data, hitboxes: data.hitboxes } };
+                    const board = globalThis.state?.board;
+                    if (board?.trigger?.setState) {
+                        board.trigger.setState({
+                            fn: (prev) => {
+                                const selected = prev?.selectedMap?.selectedRoom;
+                                if (!selected || selected.id !== this.config.roomId) return prev;
+                                const fileData = selected.file?.data;
+                                if (!fileData) return prev;
+                                return {
+                                    ...prev,
+                                    selectedMap: {
+                                        ...prev.selectedMap,
+                                        selectedRoom: {
+                                            ...selected,
+                                            file: {
+                                                ...selected.file,
+                                                data: { ...fileData, hitboxes: fileData.hitboxes }
+                                            }
+                                        }
+                                    }
+                                };
+                            }
+                        });
+                    }
+                    return true;
+                } catch (_) {
+                    return false;
+                }
+            }
+
+            /**
+             * Walkable tiles for the pre-battle hitbox mask.
+             * - Default: allow-spawn ∪ villain (and forced-ally) tiles — villains stay
+             *   unblocked so the fight can start.
+             * - allyDrag: allow-spawn only — villain tiles stay blocked so ally drag
+             *   highlights do not light them up. Ally drops still use allowedTiles filters.
+             */
+            getPlacementMaskWalkableTiles(options = {}) {
+                const allowed = this.getAllowedPlayerTiles?.();
+                if (!allowed?.size) return null;
+                const walkable = new Set(allowed);
+                if (options.allyDrag === true) return walkable;
+                this.getVillainOccupiedTiles?.()?.forEach((tileIndex) => {
+                    const index = Number(tileIndex);
+                    if (Number.isFinite(index)) walkable.add(index);
+                });
+                this.getForcedAllyOccupiedTiles?.()?.forEach((tileIndex) => {
+                    const index = Number(tileIndex);
+                    if (Number.isFinite(index)) walkable.add(index);
+                });
+                return walkable;
+            }
+
+            /**
+             * Pre-battle placement mask. Combat hitboxes restore when the fight starts.
+             * @param {{ allyDrag?: boolean }} [options]
+             */
+            applyPlacementHitboxMask(options = {}) {
+                const walkable = this.getPlacementMaskWalkableTiles?.(options);
+                if (!walkable?.size) return false;
+                if (this.isBoardBattleActive()) return false;
+
+                if (!this._placementHitboxMaskActive) {
+                    const hitboxes = this.getRoomHitboxesArray();
+                    if (!hitboxes) return false;
+                    this._placementHitboxSnapshot = hitboxes.slice();
+                }
+                const snapshot = this._placementHitboxSnapshot;
+                if (!Array.isArray(snapshot)) return false;
+
+                let maxIndex = Math.max(snapshot.length - 1, 0);
+                walkable.forEach((tileIndex) => {
+                    if (tileIndex > maxIndex) maxIndex = tileIndex;
+                });
+
+                const masked = snapshot.slice();
+                while (masked.length <= maxIndex) masked.push(null);
+                for (let i = 0; i < masked.length; i += 1) {
+                    masked[i] = walkable.has(i) ? false : true;
+                }
+
+                this.writeHitboxesInPlace(masked, {
+                    // Avoid board setState during ally-drag remasks — subscribe would
+                    // race and re-apply the idle (villain-walkable) mask.
+                    bump: options.allyDrag !== true
+                });
+                this._placementHitboxMaskActive = true;
+                this._placementHitboxAllyDrag = options.allyDrag === true;
+                return true;
+            }
+
+            restorePlacementHitboxes() {
+                if (!this._placementHitboxMaskActive) {
+                    this._placementHitboxSnapshot = null;
+                    this._placementHitboxAllyDrag = false;
+                    return false;
+                }
+                const snapshot = this._placementHitboxSnapshot;
+                if (Array.isArray(snapshot)) {
+                    this.writeHitboxesInPlace(snapshot);
+                }
+                this._placementHitboxMaskActive = false;
+                this._placementHitboxSnapshot = null;
+                this._placementHitboxAllyDrag = false;
+                return true;
+            }
+
+            syncPlacementHitboxMask(activationCallback = this.activationCallback, options = {}) {
+                if (!this.config.tileRestrictions?.allowedTiles?.length) {
+                    this.restorePlacementHitboxes();
+                    return false;
+                }
+                const shouldMask = this.ownsBoardRestrictions(activationCallback) && !this.isBoardBattleActive();
+                if (shouldMask) return this.applyPlacementHitboxMask(options);
+                this.restorePlacementHitboxes();
+                return false;
+            }
+
+            /**
+             * Drop any active mask, then remask from current live combat hitboxes.
+             * Use after quest tile/hitbox mutations so the combat snapshot includes them.
+             */
+            refreshPlacementHitboxMaskFromLive(activationCallback = this.activationCallback, options = {}) {
+                this.restorePlacementHitboxes();
+                return this.syncPlacementHitboxMask(activationCallback, options);
+            }
+
+            isLikelyAllyDragSource(target) {
+                if (!target || typeof target.closest !== 'function') return false;
+                if (target.closest('button[aria-roledescription="draggable"]')) return true;
+                if (target.closest('[class*="bestiary"]')) return true;
+                if (target.closest('#bestiary, .bestiary, [data-bestiary]')) return true;
+                if (target.closest('.outfit') && !target.closest('#viewport, #board, #background-scene, [id^="tile-index-"]')) {
+                    return true;
+                }
+                return false;
+            }
+
+            setupPlacementHitboxMaskHooks() {
+                if (this._placementHitboxHooks || !this.config.tileRestrictions?.allowedTiles?.length) return;
+                if (!globalThis.state?.board?.on) return;
+
+                const onBattleStart = () => {
+                    if (this._placementHitboxMaskActive) {
+                        console.log(`[Custom Battles][${this.config.name || 'Battle'}] Restoring combat hitboxes for battle start`);
+                    }
+                    this.restorePlacementHitboxes();
+                };
+                const onBattleEnd = () => {
+                    setTimeout(() => this.syncPlacementHitboxMask(this.activationCallback), 0);
+                };
+
+                this._placementHitboxHooks = [
+                    globalThis.state.board.on('before-game-start', onBattleStart),
+                    globalThis.state.board.on('emitNewGame', onBattleStart),
+                    globalThis.state.board.on('emitEndGame', onBattleEnd)
+                ].filter((unsub) => typeof unsub === 'function');
+
+                // While dragging allies: hide villain tiles from walkable highlights.
+                // Idle / ready-to-start: keep villain tiles walkable.
+                if (!this._allyDragMaskHandlers) {
+                    const onDragStart = (event) => {
+                        if (!this._placementHitboxMaskActive && !this.config.tileRestrictions?.allowedTiles?.length) return;
+                        if (this.isBoardBattleActive()) return;
+                        if (!this.ownsBoardRestrictions(this.activationCallback)) return;
+                        if (!this.isLikelyAllyDragSource(event.target)) return;
+                        if (this._allyDragEndTimer) {
+                            clearTimeout(this._allyDragEndTimer);
+                            this._allyDragEndTimer = null;
+                        }
+                        this.applyPlacementHitboxMask({ allyDrag: true });
+                    };
+                    const onDragEnd = () => {
+                        if (!this._placementHitboxAllyDrag) return;
+                        if (this.isBoardBattleActive()) return;
+                        if (!this.config.tileRestrictions?.allowedTiles?.length) return;
+                        // Delay remasking villains walkable until after drop/autoSetupBoard settles,
+                        // otherwise the game can accept a drop onto a villain tile mid-release.
+                        if (this._allyDragEndTimer) clearTimeout(this._allyDragEndTimer);
+                        this._allyDragEndTimer = setTimeout(() => {
+                            this._allyDragEndTimer = null;
+                            if (!this._placementHitboxAllyDrag) return;
+                            if (this.isBoardBattleActive()) return;
+                            this.syncPlacementHitboxMask(this.activationCallback, { allyDrag: false });
+                        }, 120);
+                    };
+                    this._allyDragMaskHandlers = { onDragStart, onDragEnd };
+                    document.addEventListener('dragstart', onDragStart, true);
+                    document.addEventListener('pointerdown', onDragStart, true);
+                    document.addEventListener('dragend', onDragEnd, true);
+                    document.addEventListener('pointerup', onDragEnd, true);
+                }
+            }
+
+            cleanupPlacementHitboxMaskHooks() {
+                if (this._placementHitboxHooks?.length) {
+                    this._placementHitboxHooks.forEach((unsub) => {
+                        try { unsub(); } catch (_) {}
+                    });
+                }
+                this._placementHitboxHooks = null;
+                if (this._allyDragEndTimer) {
+                    clearTimeout(this._allyDragEndTimer);
+                    this._allyDragEndTimer = null;
+                }
+                if (this._allyDragMaskHandlers) {
+                    const { onDragStart, onDragEnd } = this._allyDragMaskHandlers;
+                    document.removeEventListener('dragstart', onDragStart, true);
+                    document.removeEventListener('pointerdown', onDragStart, true);
+                    document.removeEventListener('dragend', onDragEnd, true);
+                    document.removeEventListener('pointerup', onDragEnd, true);
+                    this._allyDragMaskHandlers = null;
+                }
+                this.restorePlacementHitboxes();
             }
 
             /**
@@ -2622,7 +2996,7 @@ if (window.CustomBattles) {
              */
             enforceAllyLimit(activationCallback, showToastCallback) {
                 if (!this.config.allyLimit) return;
-                if (!this.shouldRestrictionsBeActive(activationCallback)) return;
+                if (!this.ownsBoardRestrictions(activationCallback)) return;
                 if (this.boardSetupLock || this.isBoardBattleActive()) return;
                 
                 try {
@@ -2687,7 +3061,7 @@ if (window.CustomBattles) {
                 }
                 
                 this.subscriptions.allyLimit = globalThis.state.board.subscribe((state) => {
-                    if (this.shouldRestrictionsBeActive(activationCallback)) {
+                    if (this.ownsBoardRestrictions(activationCallback)) {
                         this.enforceAllyLimit(activationCallback, showToastCallback);
                     }
                 });
@@ -3232,7 +3606,7 @@ if (window.CustomBattles) {
                 
                 // Listen for autoSetupBoard events to filter placements
                 const autoSetupBoardHandler = (event) => {
-                    if (!this.tileRestrictionActive) return;
+                    if (!this.ownsBoardRestrictions(activationCallback)) return;
 
                     console.log(`[Custom Battles][${this.config.name || 'Battle'}] Intercepting board setup for tile restrictions`);
 
@@ -3264,6 +3638,7 @@ if (window.CustomBattles) {
                 this.subscriptions.tileRestriction = globalThis.state.board.subscribe((state) => {
                     const shouldBeActive = this.shouldRestrictionsBeActive(activationCallback);
                     const wasActive = this.tileRestrictionActive;
+                    const ownsBoard = this.ownsBoardRestrictions(activationCallback);
 
                     this.tileRestrictionActive = shouldBeActive;
 
@@ -3273,12 +3648,21 @@ if (window.CustomBattles) {
                         console.log(`[Custom Battles][${this.config.name || 'Battle'}] Tile restrictions deactivated`);
                     }
                     
-                    if (this.tileRestrictionActive) {
+                    if (ownsBoard) {
                         this.preventVillainMovement();
                         this.removeAlliesOutsideAllowedTiles(showToastCallback);
                         this.removeAlliesOnBlockedTiles(showToastCallback);
+                        // Preserve ally-drag mode so board setState bumps don't re-light villain tiles mid-drag.
+                        this.syncPlacementHitboxMask(activationCallback, {
+                            allyDrag: this._placementHitboxAllyDrag === true
+                        });
+                    } else if (this._placementHitboxMaskActive) {
+                        this.restorePlacementHitboxes();
                     }
                 });
+
+                this.setupPlacementHitboxMaskHooks();
+                this.syncPlacementHitboxMask(activationCallback);
 
                 console.log(`[Custom Battles][${this.config.name || 'Battle'}] Tile restriction system set up`);
             }
@@ -4284,6 +4668,7 @@ if (window.CustomBattles) {
                 }
 
                 this.isActive = true;
+                this._setupSeq = ++customBattleSetupSeq;
                 activeCustomBattles.add(this);
                 hideBetterHighscoresForCustomBattle();
                 hideRoomInfoOverlayForCustomBattle();
@@ -4365,6 +4750,8 @@ if (window.CustomBattles) {
                 if (!this.isActive) return;
 
                 console.log('[Custom Battles][' + (this.config.name || 'Battle') + '] Cleaning up battle system');
+
+                this.cleanupPlacementHitboxMaskHooks();
 
                 // Unsubscribe from all subscriptions
                 if (this.subscriptions.allyLimit) {
@@ -4727,6 +5114,7 @@ if (window.CustomBattles) {
             try {
                 window.CustomBattles = {
                     create: (config) => new CustomBattle(config),
+                    getActiveBattles: () => [...activeCustomBattles],
                     isAllyContextMenuBlocked: shouldBlockAllyContextMenu,
                     playEffectOnWalkableTiles,
                     navigateToRoom: (roomId) => {

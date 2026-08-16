@@ -823,7 +823,10 @@ function applyQuestRoomsFromAssets(roomsData) {
     if (Array.isArray(sheng.allyTiles)) replaceArrayContents(APPRENTICE_SHENG_ALLY_TILES, sheng.allyTiles);
     if (sheng.playerTiles) fillPlayerTileRange(APPRENTICE_SHENG_PLAYER_TILES, sheng.playerTiles);
     if (sheng.villainGameIdFallback != null) APPRENTICE_SHENG_VILLAIN_GAME_ID_FALLBACK = sheng.villainGameIdFallback;
-    if (sheng.fightIconUrl) APPRENTICE_SHENG_FIGHT_ICON_URL = sheng.fightIconUrl;
+    if (sheng.fightIconUrl) {
+      APPRENTICE_SHENG_FIGHT_ICON_URL = sheng.fightIconUrl;
+      QUEST_FIGHT_ICON_URL = sheng.fightIconUrl;
+    }
     if (sheng.rookstayerOutfitSpriteId) {
       ROOKSTAYER_OUTFIT_SPRITE_ID = sheng.rookstayerOutfitSpriteId;
       SVENSON_OUTFIT_SPRITE_ID = ROOKSTAYER_OUTFIT_SPRITE_ID;
@@ -906,6 +909,7 @@ function applyQuestRoomsFromAssets(roomsData) {
     if (jakundaf.contextMenuLabel) JAKUNDAF_DESERT_CONTEXT_MENU_LABEL = jakundaf.contextMenuLabel;
     if (jakundaf.battleRoomName) JAKUNDAF_BATTLE_ROOM_NAME = jakundaf.battleRoomName;
     if (jakundaf.battleRoomId) JAKUNDAF_BATTLE_ROOM_ID = jakundaf.battleRoomId;
+    if (jakundaf.battleDisplayName) JAKUNDAF_BATTLE_DISPLAY_NAME = jakundaf.battleDisplayName;
     if (jakundaf.battleId) JAKUNDAF_BATTLE_ID = jakundaf.battleId;
     if (jakundaf.tileMutations && typeof jakundaf.tileMutations === 'object') {
       JAKUNDAF_TILE_MUTATIONS = jakundaf.tileMutations;
@@ -930,7 +934,10 @@ function applyQuestRoomsFromAssets(roomsData) {
       if (board.santa.tileIndex != null) SANTA_CLAUS_TILE_INDEX = board.santa.tileIndex;
       if (board.santa.id) BOARD_NPC_SANTA_ID = board.santa.id;
       if (board.santa.outfitSpriteId) SANTA_OUTFIT_SPRITE_ID = board.santa.outfitSpriteId;
-      if (board.santa.dialogueIconUrl) SANTA_DIALOGUE_ICON_URL = board.santa.dialogueIconUrl;
+      if (board.santa.dialogueIconUrl) {
+        SANTA_DIALOGUE_ICON_URL = board.santa.dialogueIconUrl;
+        QUEST_FIGHT_ICON_URL = board.santa.dialogueIconUrl;
+      }
     }
     if (board.alDeeRatPlague) {
       if (board.alDeeRatPlague.id) BOARD_NPC_AL_DEE_RAT_PLAGUE_ID = board.alDeeRatPlague.id;
@@ -1228,6 +1235,11 @@ const TESHA_ARROW_CLASS = 'quests-tesha-arrow';
 const JAKUNDAF_ARROW_CLASS = 'quests-jakundaf-arrow';
 const TILE_HIGHLIGHT_CLASS = 'quests-tile-highlight';
 const TILE_HIGHLIGHT_TILE_ATTR = 'data-quests-tile-highlight';
+const QUEST_FIGHT_ICON_CLASS = 'quests-fight-icon';
+const QUEST_FIGHT_ICON_ATTR = 'data-quests-fight-icon-id';
+/** Above tile highlights (10002), board NPC overlays (10002), and name tags (20001). */
+const QUEST_FIGHT_ICON_Z_INDEX = 30000;
+let QUEST_FIGHT_ICON_URL = 'https://bestiaryarena.com/assets/icons/fight.png';
 let QUEST_ACCESS_CURSOR = 'pointer';
 let QUEST_ACCESS_TILE_TITLE = 'Right-click';
 
@@ -1462,6 +1474,7 @@ let JAKUNDAF_DESERT_TILE_INDEX = 76;
 let JAKUNDAF_DESERT_CONTEXT_MENU_LABEL = 'Enter Jakundaf Desert';
 let JAKUNDAF_BATTLE_ROOM_NAME = 'Sewers';
 let JAKUNDAF_BATTLE_ROOM_ID = 'rkswrs';
+let JAKUNDAF_BATTLE_DISPLAY_NAME = 'Jakundaf Desert';
 let JAKUNDAF_BATTLE_ID = 'jakundaf_desert';
 let JAKUNDAF_TILE_MUTATIONS = null;
 const JAKUNDAF_SCENE_SPRITE_REPLACEMENTS = { rootId: 'background-scene', rules: [] };
@@ -1975,7 +1988,7 @@ function createNPCCooldownManager() {
     progressQueenBanshees: { accepted: false, completed: false },
     progressFollowerOfZathroth: { accepted: false, completed: false },
     progressMotherOfAllSpiders: { accepted: false, completed: false },
-    progressJakundafDesert: { accepted: false, completed: false },
+    progressJakundafDesert: { accepted: false, completed: false, pathCleared: false },
     progressDragonmother: { accepted: false, completed: false },
     progressAlDeeFishing: { accepted: false, completed: false },
     progressAlDeeGoldenRope: { accepted: false, completed: false },
@@ -2107,6 +2120,7 @@ function createNPCCooldownManager() {
   let jakundafDesertBattle = null;
   let jakundafDesertReinitTriggered = false;
   let jakundafDesertRetryWithoutTile76 = false;
+  let jakundafDesertHitboxesApplied = false;
 
   // Lonesome Dragon (The Dragonmother: tile 47 in Dragon Lair → Lonesome Dragon custom battle)
   let playerUsedTile47ToLonesomeDragon = false;
@@ -2960,52 +2974,115 @@ function createNPCCooldownManager() {
 
   function applyJakundafDesertTileMutations() {
     const mutations = JAKUNDAF_TILE_MUTATIONS;
-    if (!mutations) return;
+    if (!mutations || typeof mutations !== 'object') return;
 
-    (mutations.remove || []).forEach((group) => {
-      const spriteId = group?.spriteId;
-      if (spriteId == null || !Array.isArray(group.tiles)) return;
-      group.tiles.forEach((tileIndex) => {
-        const tile = getTileElement(tileIndex);
-        if (!tile) return;
+    const battle = jakundafDesertBattle;
+    // Placement mask must not be active while writing combat hitboxes, or a stale
+    // snapshot (often taken before navigation/mutations) will overwrite them.
+    const hadMask = battle?._placementHitboxMaskActive === true;
+    if (hadMask) battle.restorePlacementHitboxes?.();
+
+    let wroteHitboxes = false;
+    Object.entries(mutations).forEach(([tileKey, entry]) => {
+      const tileIndex = Number(tileKey);
+      if (!Number.isFinite(tileIndex) || !entry || typeof entry !== 'object') return;
+      const tile = getTileElement(tileIndex);
+
+      (entry.remove || []).forEach((spriteId) => {
+        if (spriteId == null || !tile) return;
         tile.querySelectorAll(`.sprite.item.relative.id-${spriteId}`).forEach((sprite) => {
           hideQuestBoardElement(sprite, { tag: QUEST_BOARD_HIDDEN_TAG_JAKUNDAF });
         });
       });
-    });
 
-    (mutations.add || []).forEach((group) => {
-      const spriteId = group?.spriteId;
-      if (spriteId == null || !Array.isArray(group.tiles)) return;
-      group.tiles.forEach((tileIndex) => {
-        const tile = getTileElement(tileIndex);
-        if (!tile) return;
-        const already = Array.from(tile.querySelectorAll(`.id-${spriteId}[${QUEST_BOARD_ADDED_ATTR_JAKUNDAF}="1"]`));
+      (entry.add || []).forEach((spriteEntry) => {
+        const spriteId = spriteEntry?.spriteId;
+        if (spriteId == null || !tile) return;
+        const already = tile.querySelectorAll(`.id-${spriteId}[${QUEST_BOARD_ADDED_ATTR_JAKUNDAF}="1"]`);
         if (already.length) return;
         const wrap = document.createElement('div');
-        wrap.innerHTML = buildJakundafMutationSpriteHTML(group);
+        wrap.innerHTML = buildJakundafMutationSpriteHTML(spriteEntry);
         if (wrap.firstElementChild) tile.appendChild(wrap.firstElementChild);
       });
+
+      if (Object.prototype.hasOwnProperty.call(entry, 'hitbox')) {
+        try {
+          const roomId = JAKUNDAF_BATTLE_ROOM_ID;
+          const selected = globalThis.state?.board?.getSnapshot?.()?.context?.selectedMap?.selectedRoom
+            || globalThis.state?.selectedMap?.selectedRoom;
+          const utils = globalThis.state?.utils;
+          const roomRefs = [];
+          if (selected?.id === roomId) roomRefs.push(selected);
+          if (Array.isArray(utils?.ROOMS)) {
+            utils.ROOMS.forEach((room) => {
+              if (room?.id === roomId) roomRefs.push(room);
+            });
+          }
+          if (Array.isArray(utils?.REGIONS)) {
+            utils.REGIONS.forEach((region) => {
+              (region?.rooms || []).forEach((room) => {
+                if (room?.id === roomId) roomRefs.push(room);
+              });
+            });
+          }
+          roomRefs.forEach((room) => {
+            const data = room?.file?.data;
+            if (!data) return;
+            if (!Array.isArray(data.hitboxes)) data.hitboxes = [];
+            data.hitboxes[tileIndex] = entry.hitbox === true;
+            wroteHitboxes = true;
+          });
+        } catch (_) {}
+      }
     });
 
-    (mutations.hitboxes || []).forEach((entry) => {
-      const tileIndex = entry?.tileIndex;
-      if (!Number.isFinite(tileIndex)) return;
-      try {
-        const room = globalThis.state?.board?.getSnapshot?.()?.context?.selectedMap?.selectedRoom
-          || globalThis.state?.selectedMap?.selectedRoom;
-        const data = room?.file?.data;
-        if (!data) return;
-        if (!Array.isArray(data.hitboxes)) data.hitboxes = [];
-        data.hitboxes[tileIndex] = !!entry.hitbox;
-      } catch (_) {}
-    });
+    if (wroteHitboxes) jakundafDesertHitboxesApplied = true;
+
+    // Remask from post-mutation combat hitboxes so allow-spawn + battle-start restore are correct.
+    if (battle?.refreshPlacementHitboxMaskFromLive) {
+      battle.refreshPlacementHitboxMaskFromLive(
+        () => playerUsedTile76ToJakundafDesert
+      );
+    } else if (battle?.syncPlacementHitboxMask) {
+      battle.syncPlacementHitboxMask(() => playerUsedTile76ToJakundafDesert);
+    }
   }
 
   function restoreJakundafDesertTileMutations() {
     restoreQuestBoardElementsByTag(QUEST_BOARD_HIDDEN_TAG_JAKUNDAF);
     document.querySelectorAll(`[${QUEST_BOARD_ADDED_ATTR_JAKUNDAF}="1"]`).forEach((el) => {
       try { el.remove(); } catch (_) {}
+    });
+    jakundafDesertHitboxesApplied = false;
+  }
+
+  /** Room remounts (navigation / Map Editor scope / Select Map) often wipe DOM after the first apply. */
+  const JAKUNDAF_VISUAL_RETRY_DELAYS_MS = [0, 50, 150, 300, 500, 800, 1200, 2000];
+  let jakundafVisualRetryTimers = [];
+
+  function clearJakundafDesertVisualRetries() {
+    jakundafVisualRetryTimers.forEach((id) => clearTimeout(id));
+    jakundafVisualRetryTimers = [];
+  }
+
+  function applyJakundafDesertBattlefieldVisuals({ forceSceneSprites = false } = {}) {
+    if (!playerUsedTile76ToJakundafDesert || !jakundafDesertBattle) return;
+    applyJakundafDesertTileMutations();
+    if (typeof jakundafDesertBattle.scheduleSceneSpriteReplacementsForEntry === 'function') {
+      if (forceSceneSprites || !jakundafDesertBattle.isSceneSpriteReplacementsComplete?.()) {
+        jakundafDesertBattle.scheduleSceneSpriteReplacementsForEntry({ force: forceSceneSprites });
+      }
+    }
+  }
+
+  function scheduleJakundafDesertBattlefieldVisuals({ forceSceneSprites = true } = {}) {
+    clearJakundafDesertVisualRetries();
+    applyJakundafDesertBattlefieldVisuals({ forceSceneSprites });
+    JAKUNDAF_VISUAL_RETRY_DELAYS_MS.forEach((delay) => {
+      if (delay <= 0) return;
+      jakundafVisualRetryTimers.push(setTimeout(() => {
+        applyJakundafDesertBattlefieldVisuals({ forceSceneSprites: false });
+      }, delay));
     });
   }
 
@@ -3022,7 +3099,7 @@ function createNPCCooldownManager() {
       tileRestrictions.message = spawn.allowedTilesMessage || 'Ally creatures can only be placed on the marked tiles!';
     }
     const config = {
-      name: JAKUNDAF_BATTLE_ROOM_NAME || 'Sewers',
+      name: JAKUNDAF_BATTLE_DISPLAY_NAME || 'Jakundaf Desert',
       roomId,
       villains,
       allyLimit: spawn.allyLimit ?? 10,
@@ -3032,23 +3109,26 @@ function createNPCCooldownManager() {
       ...(JAKUNDAF_SCENE_SPRITE_REPLACEMENTS.rules.length
         ? { sceneSpriteReplacements: JAKUNDAF_SCENE_SPRITE_REPLACEMENTS }
         : {}),
+      entrySetup: {
+        sceneSpriteAttemptDelays: JAKUNDAF_VISUAL_RETRY_DELAYS_MS.slice()
+      },
       activationCheck: (isSandbox, inBattleArea) => {
         return isSandbox && inBattleArea && playerUsedTile76ToJakundafDesert;
       },
       victoryDefeat: {
         onVictory: async () => {
-          console.log('[Quests Mod][Jakundaf Desert] Path cleared — completing mission');
-          const rewardName = JAKUNDAF_DESERT_MISSION.rewardItemName || 'Stuffed Toad';
+          console.log('[Quests Mod][Jakundaf Desert] Path cleared — return to Wyda for reward');
           try {
-            await persistMissionProgress(JAKUNDAF_DESERT_MISSION, { accepted: true, completed: true });
-            NotificationService.showQuestCompleted(JAKUNDAF_DESERT_MISSION, BATTLE_TOAST_LOG.jakundafDesert || '[Quests Mod][Jakundaf Desert]');
+            await persistMissionProgress(JAKUNDAF_DESERT_MISSION, {
+              accepted: true,
+              completed: false,
+              pathCleared: true
+            });
+            if (typeof updateTile76JakundafState === 'function') updateTile76JakundafState();
+            if (typeof refreshQuestTileHighlights === 'function') refreshQuestTileHighlights();
           } catch (error) {
-            console.error('[Quests Mod][Jakundaf Desert] Error completing mission:', error);
+            console.error('[Quests Mod][Jakundaf Desert] Error saving pathCleared flag:', error);
           }
-          await addQuestItem(rewardName, 1).catch((error) => {
-            console.error('[Quests Mod][Jakundaf Desert] Error adding reward:', error);
-          });
-          NotificationService.showItemReceived(rewardName, BATTLE_TOAST_LOG.jakundafDesert || '[Quests Mod][Jakundaf Desert]');
         },
         onDefeat: () => {},
         onClose: (isVictory) => {
@@ -3058,10 +3138,14 @@ function createNPCCooldownManager() {
         },
         victoryTitle: 'Victory!',
         defeatTitle: 'Defeat',
-        victoryMessage: getMissionDialogueLine(JAKUNDAF_DESERT_MISSION, 'battleVictory', 'The desert path is clear. You found a Stuffed Toad.'),
+        victoryMessage: getMissionDialogueLine(
+          JAKUNDAF_DESERT_MISSION,
+          'battleVictory',
+          'The desert path is clear. Return to Wyda for your reward.'
+        ),
         defeatMessage: getMissionDialogueLine(JAKUNDAF_DESERT_MISSION, 'battleDefeat', 'The villains blocking the desert were too strong.'),
         showItems: false,
-        items: [{ name: JAKUNDAF_DESERT_MISSION.rewardItemName || 'Stuffed Toad', amount: 1 }]
+        items: []
       }
     };
     return window.CustomBattles.create(config);
@@ -3087,6 +3171,7 @@ function createNPCCooldownManager() {
   function cleanupJakundafDesertQuest() {
     try {
       removeCustomBattleStatusToast();
+      clearJakundafDesertVisualRetries();
       playerUsedTile76ToJakundafDesert = false;
       jakundafDesertReinitTriggered = false;
       jakundafDesertRetryWithoutTile76 = false;
@@ -6167,6 +6252,8 @@ function createNPCCooldownManager() {
       'dragon_claw': getDragonClawProductName(),
       'golden mug': 'Golden Mug',
       'golden_mug': 'Golden Mug',
+      'stuffed toad': 'Stuffed Toad',
+      'stuffed_toad': 'Stuffed Toad',
       'letter from al dee': 'Letter from Al Dee',
       'letter_from_al_dee': 'Letter from Al Dee',
       'letter': 'Letter from Al Dee',
@@ -6195,7 +6282,8 @@ function createNPCCooldownManager() {
     const maxCountByCanonical = {
       [MINOTAUR_TROPHY_CONFIG.productName]: MINOTAUR_TROPHY_CONFIG.maxCount || 1,
       [ORB_CONFIG.productName]: ORB_CONFIG.maxCount || 1,
-      'Golden Mug': 1
+      'Golden Mug': 1,
+      [JAKUNDAF_DESERT_MISSION.rewardItemName || 'Stuffed Toad']: 1
     };
     const normalized = {};
     for (const [key, value] of Object.entries(products)) {
@@ -6764,12 +6852,30 @@ function createNPCCooldownManager() {
     }
 
     const hashedPlayer = await hashUsername(playerName);
+    const entryPath = `${getArenaLeaderboardPath()}/${hashedPlayer}`;
+    let updatedAt = Date.now();
+    try {
+      const existing = await FirebaseService.get(entryPath, 'fetch arena leaderboard entry', null);
+      // Keep the first time this completedCount was reached (do not refresh on re-sync).
+      if (
+        existing
+        && typeof existing.completedCount === 'number'
+        && existing.completedCount === completedCount
+        && typeof existing.updatedAt === 'number'
+        && existing.updatedAt > 0
+      ) {
+        updatedAt = existing.updatedAt;
+      }
+    } catch (_) {
+      // Fall through and write a fresh timestamp.
+    }
+
     await FirebaseService.put(
-      `${getArenaLeaderboardPath()}/${hashedPlayer}`,
+      entryPath,
       {
         playerName,
         completedCount,
-        updatedAt: Date.now()
+        updatedAt
       },
       'save arena leaderboard entry'
     );
@@ -6815,6 +6921,13 @@ function createNPCCooldownManager() {
       .filter((entry) => entry && typeof entry.completedCount === 'number' && entry.completedCount > 0)
       .sort((a, b) => {
         if (b.completedCount !== a.completedCount) return b.completedCount - a.completedCount;
+        // Same mission count: first to reach it (earlier updatedAt), then name.
+        const aAt = Number(a.updatedAt);
+        const bAt = Number(b.updatedAt);
+        const aHasDate = Number.isFinite(aAt) && aAt > 0;
+        const bHasDate = Number.isFinite(bAt) && bAt > 0;
+        if (aHasDate && bHasDate && aAt !== bAt) return aAt - bAt;
+        if (aHasDate !== bHasDate) return aHasDate ? -1 : 1;
         return String(a.playerName || '').localeCompare(String(b.playerName || ''));
       })
       .slice(0, ARENA_LEADERBOARD_TOP);
@@ -7344,6 +7457,8 @@ function createNPCCooldownManager() {
         'Spider Silk',
         'Spool of Yarn',
         'Golden Mug',
+        JAKUNDAF_DESERT_MISSION.rewardItemName || 'Stuffed Toad',
+        'Stuffed Toad',
         SCARAB_COIN_CONFIG.productName,
         DESTROY_FIELD_RUNE_CONFIG.productName,
         SCORPION_SCEPTRE_CONFIG.productName,
@@ -13973,6 +14088,54 @@ function createNPCCooldownManager() {
         }
       }
 
+      // The Jakundaf Desert: report cleared path to Wyda for Stuffed Toad
+      const jakundafReportKeywords = [
+        'mission', 'quest', 'desert', 'jakundaf', 'path', 'done', 'finished',
+        'cleared', 'report', 'reward', 'toad', 'complete', 'victory'
+      ];
+      const wantsJakundafReport = jakundafReportKeywords.some((kw) => lowerText.includes(kw));
+      if (
+        jakundafProgress.accepted
+        && !jakundafProgress.completed
+        && jakundafProgress.pathCleared
+        && wantsJakundafReport
+      ) {
+        try {
+          const rewardName = JAKUNDAF_DESERT_MISSION.rewardItemName || 'Stuffed Toad';
+          const alreadyOwned = (await getQuestItems(true))?.[rewardName] > 0;
+          await persistMissionProgress(JAKUNDAF_DESERT_MISSION, {
+            accepted: true,
+            completed: true,
+            pathCleared: true
+          });
+          if (!alreadyOwned) {
+            await addQuestItem(rewardName, 1).catch((error) => {
+              console.error('[Quests Mod][Wyda] Error adding Jakundaf reward:', error);
+            });
+          }
+          if (typeof updateTile76JakundafState === 'function') updateTile76JakundafState();
+          if (typeof refreshQuestTileHighlights === 'function') refreshQuestTileHighlights();
+          NotificationService.showQuestCompleted(JAKUNDAF_DESERT_MISSION, '[Quests Mod][Wyda]');
+          if (!alreadyOwned) {
+            NotificationService.showItemReceived(rewardName, '[Quests Mod][Wyda]');
+          }
+          wydaCooldown.queueResponse(
+            text,
+            getMissionDialogueLine(
+              JAKUNDAF_DESERT_MISSION,
+              'wydaHandInComplete',
+              'You cleared the desert path? Good. Take this Stuffed Toad — and leave me to my boredom.'
+            ),
+            addMessage,
+            'Wyda'
+          );
+        } catch (err) {
+          console.error('[Quests Mod][Wyda] Error completing Jakundaf Desert:', err);
+          wydaCooldown.queueResponse(text, getMissionCommonLine('errorGeneric', 'Something went wrong. Please try again.'), addMessage, 'Wyda');
+        }
+        return;
+      }
+
       // The Mother of All Spiders / The Jakundaf Desert: offer next available Wyda task
       if (lowerText.includes('mission') || lowerText.includes('quest')) {
         if (followerOfZathrothProgress.completed && !motherProgress.accepted) {
@@ -13992,7 +14155,18 @@ function createNPCCooldownManager() {
           return;
         }
         if (jakundafProgress.accepted && !jakundafProgress.completed) {
-          wydaCooldown.queueResponse(text, JAKUNDAF_DESERT_MISSION.alreadyActive, addMessage, 'Wyda');
+          wydaCooldown.queueResponse(
+            text,
+            jakundafProgress.pathCleared
+              ? getMissionDialogueLine(
+                JAKUNDAF_DESERT_MISSION,
+                'reportBack',
+                'The desert path is clear. Return to Wyda for your reward.'
+              )
+              : JAKUNDAF_DESERT_MISSION.alreadyActive,
+            addMessage,
+            'Wyda'
+          );
           return;
         }
         if (jakundafProgress.completed) {
@@ -14025,7 +14199,11 @@ function createNPCCooldownManager() {
       if (wydaOfferingJakundafDesert && (lowerText.includes('yes') || lowerText.includes('accept'))) {
         wydaOfferingJakundafDesert = false;
         try {
-          await persistMissionProgress(JAKUNDAF_DESERT_MISSION, { accepted: true, completed: false });
+          await persistMissionProgress(JAKUNDAF_DESERT_MISSION, {
+            accepted: true,
+            completed: false,
+            pathCleared: false
+          });
           if (typeof setupTile76JakundafObserver === 'function') setupTile76JakundafObserver();
           if (typeof updateTile76JakundafState === 'function') updateTile76JakundafState();
           if (typeof refreshQuestTileHighlights === 'function') refreshQuestTileHighlights();
@@ -14740,6 +14918,7 @@ function createNPCCooldownManager() {
     }
 
     if (mission.id === JAKUNDAF_DESERT_MISSION.id) {
+      if (progress?.pathCleared) return mission.objectiveLine3 || mission.objectiveLine2;
       return mission.objectiveLine1;
     }
 
@@ -14928,6 +15107,10 @@ function createNPCCooldownManager() {
 
     if (mission.id === MOTHER_OF_ALL_SPIDERS_MISSION.id) {
       return makeActiveMissionCountProgress(getCachedQuestItemCount('Spider Silk') > 0 ? 1 : 0, 1);
+    }
+
+    if (mission.id === JAKUNDAF_DESERT_MISSION.id) {
+      return makeActiveMissionCountProgress(progress?.pathCleared ? 1 : 0, 1);
     }
 
     if (mission.id === KING_MONKS_STUDY_MISSION.id) {
@@ -17250,7 +17433,7 @@ function createNPCCooldownManager() {
                   );
                   setupJakundafDesertTileRestrictions();
                   showCustomBattleStatusToast({
-                    battleName: JAKUNDAF_BATTLE_ROOM_NAME || 'Sewers',
+                    battleName: JAKUNDAF_BATTLE_DISPLAY_NAME || 'Jakundaf Desert',
                     allyLimit: battle.config?.allyLimit ?? 10,
                     battle,
                     logPrefix
@@ -17272,7 +17455,7 @@ function createNPCCooldownManager() {
               );
               setupJakundafDesertTileRestrictions();
               showCustomBattleStatusToast({
-                battleName: JAKUNDAF_BATTLE_ROOM_NAME || 'Sewers',
+                battleName: JAKUNDAF_BATTLE_DISPLAY_NAME || 'Jakundaf Desert',
                 allyLimit: initResult.config?.allyLimit ?? 10,
                 battle: initResult,
                 logPrefix
@@ -17282,7 +17465,8 @@ function createNPCCooldownManager() {
             }
           }
 
-          // Jakundaf Desert battle room: apply villains + tile mutations
+          // Jakundaf Desert battle room: apply villains + desert visuals (tile mutations + scene sprites).
+          // Navigation / Map Editor scope changes remount #tiles after the first apply — retry like Putrid Chamber.
           if (onJakundafBattleRoom && playerUsedTile76ToJakundafDesert && jakundafDesertBattle) {
             const justEntered = lastOverlayHiderRoomName !== JAKUNDAF_BATTLE_ROOM_NAME;
             if (justEntered) {
@@ -17291,13 +17475,14 @@ function createNPCCooldownManager() {
                 onComplete: () => {
                   hideQuestOverlays();
                   hideHeroEditorButton();
-                  applyJakundafDesertTileMutations();
-                  [0, 50, 150].forEach((delay) => setTimeout(() => applyJakundafDesertTileMutations(), delay));
+                  scheduleJakundafDesertBattlefieldVisuals({ forceSceneSprites: true });
                 }
               });
+              scheduleJakundafDesertBattlefieldVisuals({ forceSceneSprites: true });
+            } else {
+              applyJakundafDesertBattlefieldVisuals({ forceSceneSprites: false });
             }
             jakundafDesertBattle.ensureCustomVillainsPresent();
-            applyJakundafDesertTileMutations();
           }
 
           // Lonesome Dragon: re-init battle after defeat so player can retry without tile 47
@@ -19965,9 +20150,12 @@ function createNPCCooldownManager() {
 
     const hitbox = tileElement.querySelector('.quests-tile-highlight-hitbox');
     const highlight = tileElement.querySelector(`.${TILE_HIGHLIGHT_CLASS}`);
+    const fightIcons = [...tileElement.querySelectorAll(`.${QUEST_FIGHT_ICON_CLASS}`)];
 
     if (hitbox) tileElement.appendChild(hitbox);
     if (highlight) tileElement.appendChild(highlight);
+    // Fight icons last so they paint above highlights / arrows / NPC overlays.
+    fightIcons.forEach((icon) => tileElement.appendChild(icon));
 
     bindHoneyflowerTileHitbox(tileElement);
   }
@@ -21183,7 +21371,7 @@ function createNPCCooldownManager() {
 
   async function enterJakundafDesertBattle() {
     const progress = kingChatState.progressJakundafDesert;
-    if (!progress?.accepted || progress.completed) return;
+    if (!progress?.accepted || progress.completed || progress.pathCleared) return;
 
     let roomId = JAKUNDAF_BATTLE_ROOM_ID || getRoomIdByRoomName(JAKUNDAF_BATTLE_ROOM_NAME);
     if (!roomId) roomId = getRoomIdByRoomName(JAKUNDAF_BATTLE_ROOM_NAME);
@@ -21214,7 +21402,7 @@ function createNPCCooldownManager() {
           );
           setupJakundafDesertTileRestrictions();
           showCustomBattleStatusToast({
-            battleName: JAKUNDAF_BATTLE_ROOM_NAME || 'Sewers',
+            battleName: JAKUNDAF_BATTLE_DISPLAY_NAME || 'Jakundaf Desert',
             allyLimit: battle.config?.allyLimit ?? 10,
             battle,
             logPrefix
@@ -21229,7 +21417,7 @@ function createNPCCooldownManager() {
       );
       setupJakundafDesertTileRestrictions();
       showCustomBattleStatusToast({
-        battleName: JAKUNDAF_BATTLE_ROOM_NAME || 'Sewers',
+        battleName: JAKUNDAF_BATTLE_DISPLAY_NAME || 'Jakundaf Desert',
         allyLimit: initResult.config?.allyLimit ?? 10,
         battle: initResult,
         logPrefix
@@ -21304,13 +21492,13 @@ function createNPCCooldownManager() {
 
   function shouldEnableTile76Jakundaf(boardContext = null) {
     const progress = kingChatState.progressJakundafDesert;
-    if (!progress?.accepted || progress.completed) return false;
+    if (!progress?.accepted || progress.completed || progress.pathCleared) return false;
     return isOnJakundafEntryRoom(boardContext);
   }
 
   function shouldEnableTile76JakundafListener(boardContext = null) {
     const progress = kingChatState.progressJakundafDesert;
-    if (!progress?.accepted || progress.completed) return false;
+    if (!progress?.accepted || progress.completed || progress.pathCleared) return false;
     return true;
   }
 
@@ -22000,8 +22188,159 @@ function createNPCCooldownManager() {
   }
 
   const questTileHighlightSources = [];
+  const questFightIconSources = [];
   let tileHighlightBoardSubscription = null;
   let tileHighlightGameTimerSubscription = null;
+
+  function getQuestFightIconUrl() {
+    return QUEST_FIGHT_ICON_URL
+      || APPRENTICE_SHENG_FIGHT_ICON_URL
+      || 'https://bestiaryarena.com/assets/icons/fight.png';
+  }
+
+  function removeQuestFightIcon(id) {
+    document.querySelectorAll(`.${QUEST_FIGHT_ICON_CLASS}[${QUEST_FIGHT_ICON_ATTR}="${id}"]`).forEach((el) => el.remove());
+  }
+
+  function removeAllQuestFightIcons() {
+    document.querySelectorAll(`.${QUEST_FIGHT_ICON_CLASS}`).forEach((el) => el.remove());
+  }
+
+  function placeQuestFightIconOnTile(tileElement, id, alt = 'Quest') {
+    if (!tileElement || !id) return;
+    removeQuestFightIcon(id);
+    if (!areQuestHelpersEnabled()) return;
+
+    const icon = document.createElement('img');
+    icon.className = `${QUEST_FIGHT_ICON_CLASS} pixelated`;
+    icon.setAttribute(QUEST_FIGHT_ICON_ATTR, id);
+    icon.src = getQuestFightIconUrl();
+    icon.alt = alt;
+    icon.title = QUEST_ACCESS_TILE_TITLE;
+    icon.draggable = false;
+    icon.style.cssText = [
+      'position:absolute',
+      'right:2px',
+      'top:2px',
+      'width:16px',
+      'height:16px',
+      'pointer-events:none',
+      `z-index:${QUEST_FIGHT_ICON_Z_INDEX}`,
+      'image-rendering:pixelated'
+    ].join(';');
+    ensureBoardNpcTileOverflowVisible(tileElement);
+    tileElement.appendChild(icon);
+    bringQuestTileOverlaysToFront(tileElement);
+  }
+
+  function registerQuestFightIconSource(source) {
+    questFightIconSources.push(source);
+  }
+
+  /** New quest available or a hand-in / talk step is ready at Wyda. */
+  function hasWydaQuestAction() {
+    const follower = getMissionProgress(FOLLOWER_OF_ZATHROTH_MISSION) || {};
+    const mother = getMissionProgress(MOTHER_OF_ALL_SPIDERS_MISSION) || {};
+    const jakundaf = getMissionProgress(JAKUNDAF_DESERT_MISSION) || {};
+    const ankhName = COSTELLO_QUEEN_BANSHEES_MISSION.rewardItemName || 'Blessed Ankh';
+    if (follower.accepted && !follower.completed && getCachedQuestItemCount(ankhName) > 0) return true;
+    if (follower.completed && !mother.accepted) return true;
+    if (mother.accepted && !mother.completed && getCachedQuestItemCount('Spider Silk') > 0) return true;
+    if (mother.completed && !jakundaf.accepted) return true;
+    if (jakundaf.accepted && !jakundaf.completed && jakundaf.pathCleared) return true;
+    return false;
+  }
+
+  /** New quest available or Costello talk / hand-in is needed. */
+  function hasCostelloQuestAction() {
+    const monks = getMissionProgress(KING_MONKS_STUDY_MISSION) || {};
+    if (monks.accepted && !monks.completed) return true;
+    const queen = getMissionProgress(COSTELLO_QUEEN_BANSHEES_MISSION) || {};
+    if (queen.accepted && !queen.completed) return true;
+    if (queen.completed) {
+      const follower = getMissionProgress(FOLLOWER_OF_ZATHROTH_MISSION) || {};
+      if (!follower.accepted) return true;
+    }
+    return false;
+  }
+
+  /** Stamped letter / axe / rope hand-in, or a new Al Dee quest to accept. */
+  function hasAlDeeQuestAction() {
+    const items = cachedQuestItems || {};
+    if ((items['Stamped Letter'] || 0) > 0) return true;
+    if ((items['Small Axe'] || 0) > 0) return true;
+    if ((items['Elvenhair Rope'] || 0) > 0) return true;
+    const letter = getMissionProgress(KING_LETTER_MISSION) || {};
+    const fishing = getMissionProgress(AL_DEE_FISHING_MISSION) || {};
+    const rope = getMissionProgress(AL_DEE_GOLDEN_ROPE_MISSION) || {};
+    if (letter.completed && !fishing.accepted) return true;
+    if (fishing.completed && !rope.accepted) return true;
+    return false;
+  }
+
+  function hasTeshaQuestAction() {
+    const scarab = getMissionProgress(KING_SCARAB_COIN_MISSION) || {};
+    if (scarab.accepted && !scarab.completed && getCachedQuestItemCount(SCARAB_COIN_CONFIG.productName) > 0) return true;
+    if (!scarab.completed) return false;
+    const serpentine = getMissionProgress(SERPENTINE_TOWER_MISSION) || {};
+    if (serpentine.completed) return false;
+    if (!serpentine.accepted) return true;
+    return !!serpentine.putridChamberComplete;
+  }
+
+  function shouldShowWydaFightIcon(boardContext = null) {
+    return shouldEnableTile83WydaRightClick(boardContext) && hasWydaQuestAction();
+  }
+
+  function shouldShowCostelloFightIcon(boardContext = null) {
+    return shouldEnableTile53CostelloRightClick(boardContext) && hasCostelloQuestAction();
+  }
+
+  function shouldShowAlDeeFightIcon(boardContext = null) {
+    return shouldEnableTile79RightClick(boardContext) && hasAlDeeQuestAction();
+  }
+
+  function shouldShowTeshaFightIcon(boardContext = null) {
+    try {
+      if (!isOnRoomByName(DESERT_DIGGING_CONFIG.TARGET_MAP)) return false;
+      if (isBoardBattleActive(boardContext) || countAllyPiecesOnBoard(boardContext) > 0) return false;
+      return hasTeshaQuestAction();
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function updateAllQuestFightIcons(boardContext = null) {
+    if (isMapEditorOpen() || !areQuestHelpersEnabled()) {
+      removeAllQuestFightIcons();
+      return;
+    }
+    const ctx = boardContext || globalThis.state?.board?.getSnapshot()?.context;
+    for (const source of questFightIconSources) {
+      try {
+        const id = source.id;
+        if (!source.isActive(ctx)) {
+          removeQuestFightIcon(id);
+          continue;
+        }
+        const tile = typeof source.getTile === 'function' ? source.getTile(ctx) : null;
+        if (!tile?.isConnected) {
+          removeQuestFightIcon(id);
+          continue;
+        }
+        // Board NPCs already render fight.png on their name tag — skip duplicate tile icons.
+        if (tile.querySelector('img[alt="Dialogue"]')) {
+          removeQuestFightIcon(id);
+          continue;
+        }
+        if (!tile.querySelector(`.${QUEST_FIGHT_ICON_CLASS}[${QUEST_FIGHT_ICON_ATTR}="${id}"]`)) {
+          placeQuestFightIconOnTile(tile, id, source.alt || 'Quest');
+        }
+      } catch (error) {
+        console.error('[Quests Mod][Fight Icon] Error updating source:', error);
+      }
+    }
+  }
 
   function isMapEditorOpen() {
     try {
@@ -22034,6 +22373,7 @@ function createNPCCooldownManager() {
       unmarkQuestAccessTile(tile);
     });
     removeTeshaArrow();
+    removeAllQuestFightIcons();
   }
 
   function refreshQuestHelpersForExternalToggle() {
@@ -22205,14 +22545,49 @@ function createNPCCooldownManager() {
 
   function refreshQuestTileHighlights(boardContext = null) {
     if (typeof updateAllQuestTileHighlights !== 'function') return;
-    updateAllQuestTileHighlights(boardContext || globalThis.state?.board?.getSnapshot()?.context);
+    const ctx = boardContext || globalThis.state?.board?.getSnapshot()?.context;
+    updateAllQuestTileHighlights(ctx);
     if (typeof updateJakundafDesertArrow === 'function') {
-      updateJakundafDesertArrow(boardContext || globalThis.state?.board?.getSnapshot()?.context);
+      updateJakundafDesertArrow(ctx);
     }
+    if (typeof updateAllQuestFightIcons === 'function') {
+      updateAllQuestFightIcons(ctx);
+    }
+  }
+
+  function initializeQuestFightIconSources() {
+    if (questFightIconSources.length > 0) return;
+
+    registerQuestFightIconSource({
+      id: 'wyda',
+      alt: 'Visit Wyda',
+      getTile: () => getTileElement(WYDA_TILE_INDEX),
+      isActive: shouldShowWydaFightIcon
+    });
+    registerQuestFightIconSource({
+      id: 'costello',
+      alt: 'Visit Costello',
+      getTile: () => getTileElement(COSTELLO_TILE_INDEX),
+      isActive: shouldShowCostelloFightIcon
+    });
+    registerQuestFightIconSource({
+      id: 'al-dee',
+      alt: 'Visit Al Dee',
+      getTile: () => getTileElement(79),
+      isActive: shouldShowAlDeeFightIcon
+    });
+    registerQuestFightIconSource({
+      id: 'tesha',
+      alt: 'Talk to Tesha',
+      getTile: () => getTileElement(TESHA_TILE_INDEX),
+      isActive: shouldShowTeshaFightIcon
+    });
   }
 
   function initializeQuestTileHighlightSources() {
     if (questTileHighlightSources.length > 0) return;
+
+    initializeQuestFightIconSources();
 
     registerQuestTileHighlightSource({
       getTiles: () => {
@@ -22235,7 +22610,7 @@ function createNPCCooldownManager() {
         const tile = getTileElement(COSTELLO_TILE_INDEX);
         return tile ? [tile] : [];
       },
-      isAccessActive: shouldEnableTile53CostelloRightClick,
+      isAccessActive: shouldShowCostelloFightIcon,
       alt: 'Visit Costello'
     });
 
@@ -22244,7 +22619,7 @@ function createNPCCooldownManager() {
         const tile = getTileElement(WYDA_TILE_INDEX);
         return tile ? [tile] : [];
       },
-      isAccessActive: shouldEnableTile83WydaRightClick,
+      isAccessActive: shouldShowWydaFightIcon,
       alt: 'Visit Wyda'
     });
 
@@ -22253,7 +22628,7 @@ function createNPCCooldownManager() {
         const tile = getTileElement(79);
         return tile ? [tile] : [];
       },
-      isAccessActive: shouldEnableTile79RightClick,
+      isAccessActive: shouldShowAlDeeFightIcon,
       alt: 'Visit Al Dee'
     });
 
@@ -22364,16 +22739,20 @@ function createNPCCooldownManager() {
     if (typeof globalThis !== 'undefined' && globalThis.state?.board?.subscribe) {
       tileHighlightBoardSubscription = globalThis.state.board.subscribe(({ context: boardContext }) => {
         updateAllQuestTileHighlights(boardContext);
+        updateAllQuestFightIcons(boardContext);
       });
     }
 
     if (typeof globalThis !== 'undefined' && globalThis.state?.gameTimer?.subscribe) {
       tileHighlightGameTimerSubscription = globalThis.state.gameTimer.subscribe(() => {
-        updateAllQuestTileHighlights(globalThis.state?.board?.getSnapshot()?.context);
+        const ctx = globalThis.state?.board?.getSnapshot()?.context;
+        updateAllQuestTileHighlights(ctx);
+        updateAllQuestFightIcons(ctx);
       });
     }
 
     updateAllQuestTileHighlights(globalThis.state?.board?.getSnapshot()?.context);
+    updateAllQuestFightIcons(globalThis.state?.board?.getSnapshot()?.context);
     console.log('[Quests Mod][Tile Highlight] Observer set up for quest access tiles');
   }
 
@@ -22394,12 +22773,15 @@ function createNPCCooldownManager() {
       }
       tileHighlightGameTimerSubscription = null;
     }
+    removeAllQuestFightIcons();
   }
 
   function cleanupTileHighlightSystem() {
     removeAllTileHighlightEffects();
     cleanupTileHighlightObserver();
     questTileHighlightSources.length = 0;
+    questFightIconSources.length = 0;
+    removeAllQuestFightIcons();
     console.log('[Quests Mod][Tile Highlight] System cleaned up');
   }
 
@@ -22562,6 +22944,11 @@ function createNPCCooldownManager() {
           && !progress?.rookstayerDismissed
           && !playerAcceptedApprenticeShengBattle;
       },
+      isInteractable: () => {
+        const progress = getMissionProgress(APPRENTICE_SHENG_MISSION) || {};
+        if (isApprenticeShengBattleCompletedPendingReward()) return true;
+        return !progress.battleCompleted && !progress.completed;
+      },
       chat: {},
       hpBarColor: 'rgb(96, 192, 96)',
       nameColor: 'rgb(96, 192, 96)'
@@ -22582,6 +22969,7 @@ function createNPCCooldownManager() {
       dialogueIconUrl: RAT_PLAGUE_AL_DEE_DIALOGUE_ICON_URL,
       logPrefix: '[Quests Mod][Board NPC][Al Dee Rat Plague]',
       isUnlocked: () => shouldEnableRatPlagueAlDee(),
+      isInteractable: () => hasAlDeeQuestAction(),
       chat: {},
       hpBarColor: 'rgb(96, 192, 96)',
       nameColor: 'rgb(96, 192, 96)'
@@ -22604,6 +22992,12 @@ function createNPCCooldownManager() {
       isUnlocked: () => {
         const count = cachedQuestItems?.[WISHLIST_CONFIG.productName] || 0;
         return count >= 1;
+      },
+      isInteractable: () => {
+        const progress = getMissionProgress(CHRISTMAS_MIRACLE_MISSION) || {};
+        if (progress.completed) return false;
+        return (cachedQuestItems?.[WISHLIST_CONFIG.productName] || 0) >= 1
+          || (cachedQuestItems?.[PRESENT_CONFIG.productName] || 0) > 0;
       },
       chat: {},
       hpBarColor: 'rgb(96, 192, 96)',
@@ -22628,6 +23022,14 @@ function createNPCCooldownManager() {
       logPrefix: '[Quests Mod][Board NPC][Svenson]',
       chatMode: 'keywords',
       isUnlocked: () => MissionManager.isCompleted(KING_CROSSING_THE_LINE_MISSION),
+      isInteractable: () => {
+        const love = getMissionProgress(SVENSON_LOVE_STORY_MISSION) || {};
+        if (!love.accepted || !love.completed) return true;
+        const arch = getMissionProgress(WEAKENED_ARCHDEMON_MISSION) || {};
+        if (!arch.accepted) return true;
+        if (arch.accepted && !arch.completed && !arch.battleCompleted) return true;
+        return false;
+      },
       chat: {},
       hpBarColor: 'rgb(96, 192, 96)',
       nameColor: 'rgb(96, 192, 96)'
@@ -22655,8 +23057,11 @@ function createNPCCooldownManager() {
         return !!progress.strandedAtWhiteWave;
       },
       isInteractable: () => {
-        const progress = getMissionProgress(SVENSON_LOVE_STORY_MISSION) || {};
-        return !!progress.completed;
+        const love = getMissionProgress(SVENSON_LOVE_STORY_MISSION) || {};
+        const arch = getMissionProgress(WEAKENED_ARCHDEMON_MISSION) || {};
+        if (love.completed && !arch.accepted) return true;
+        if (arch.accepted && !arch.completed) return true;
+        return false;
       },
       chat: {},
       hpBarColor: 'rgb(96, 192, 96)',
@@ -22681,6 +23086,11 @@ function createNPCCooldownManager() {
         return !playerAcceptedOracleRageBattle
           && !progress.completed
           && !progress.oracleDismissed;
+      },
+      isInteractable: () => {
+        const progress = getMissionProgress(LOST_ORACLE_MISSION) || {};
+        if (progress.completed || progress.oracleDismissed) return false;
+        return true;
       },
       chat: {},
       hpBarColor: 'rgb(96, 192, 96)',
@@ -27382,7 +27792,7 @@ function createNPCCooldownManager() {
     nameTag.style.cssText = [
       'position:absolute',
       'user-select:none',
-      'z-index:20001',
+      `z-index:${QUEST_FIGHT_ICON_Z_INDEX}`,
       'pointer-events:none',
       'line-height:1'
     ].join(';');
@@ -27420,11 +27830,11 @@ function createNPCCooldownManager() {
 
   function createBoardNpcDialogueIcon(npcConfig) {
     const dialogueIcon = document.createElement('img');
-    dialogueIcon.src = npcConfig.dialogueIconUrl;
+    dialogueIcon.src = npcConfig.dialogueIconUrl || getQuestFightIconUrl();
     dialogueIcon.alt = 'Dialogue';
     dialogueIcon.className = 'pixelated inline-block';
     dialogueIcon.style.cssText = [
-      'position:static',
+      'position:relative',
       'width:16px',
       'height:16px',
       'pointer-events:auto',
@@ -27432,7 +27842,8 @@ function createNPCCooldownManager() {
       'margin-left:3px',
       'margin-top:-7px',
       'vertical-align:middle',
-      'image-rendering:pixelated'
+      'image-rendering:pixelated',
+      `z-index:${QUEST_FIGHT_ICON_Z_INDEX}`
     ].join(';');
     return dialogueIcon;
   }
@@ -27673,7 +28084,8 @@ function createNPCCooldownManager() {
     if (typeof npcConfig.isInteractable === 'function') {
       return !!npcConfig.isInteractable();
     }
-    return true;
+    // Default: only show fight.png when the NPC is placed for an active/new quest step.
+    return typeof npcConfig.isUnlocked === 'function' ? !!npcConfig.isUnlocked() : true;
   }
 
   function updateBoardNpcState(npcConfig, boardContext = null) {
@@ -27716,6 +28128,9 @@ function createNPCCooldownManager() {
     syncOracleBoardPlacement();
     BOARD_NPC_CONFIGS.forEach((npcConfig) => updateBoardNpcState(npcConfig, boardContext));
     updateOracleStatueVisibility();
+    if (typeof updateAllQuestFightIcons === 'function') {
+      updateAllQuestFightIcons(boardContext);
+    }
   }
 
   function setupApprenticeShengNpcObserver() {
