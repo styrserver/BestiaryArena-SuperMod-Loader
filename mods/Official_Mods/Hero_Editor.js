@@ -1392,7 +1392,7 @@ function resolveHeroMonsterInfo(hero, boardContext, monsterMap) {
 
   if (boardContext.boardConfig) {
     const boardPiece = boardContext.boardConfig.find(p =>
-      p.tileIndex === hero.tile && (p.type === 'player' || p.type === 'custom'));
+      p.tileIndex === hero.tile && isAllyBoardPiece(p));
 
     if (boardPiece) {
       if (boardPiece.type === 'player') {

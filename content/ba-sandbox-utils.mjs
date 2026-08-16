@@ -683,10 +683,13 @@
 				
 				const board = [];
 				for (const piece of boardConfig) {
+					if (!piece || piece.villain === true) continue;
 					if (piece.type === 'player') {
 						const serialized = serializePlayerPiece(piece);
 						if (serialized) board.push(serialized);
 					} else if (piece.type === 'custom') {
+						// Custom villains (e.g. Map Editor / Custom Battles) must not
+						// be treated as player-side allies by Hero Editor and friends.
 						const serialized = serializeCustomPiece(piece);
 						if (serialized) board.push(serialized);
 					}

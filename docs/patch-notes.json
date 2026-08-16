@@ -4,6 +4,26 @@
   },
   "notes": [
     {
+      "version": "4.8.9",
+      "changes": [
+        {
+          "mod": "Board Analyzer",
+          "type": "fixed",
+          "text": "Fallback board serialization skips custom villains so they are not treated as player-side pieces."
+        },
+        {
+          "mod": "Hero Editor",
+          "type": "fixed",
+          "text": "Custom villains from Map Editor / Custom Battles no longer appear under Allies."
+        },
+        {
+          "mod": "Mod Loader",
+          "type": "fixed",
+          "text": "serializeBoard no longer includes custom villains (type custom with villain true) as ally board pieces."
+        }
+      ]
+    },
+    {
       "version": "4.8.8",
       "changes": [
         {

@@ -1419,6 +1419,7 @@ const serializeBoard = () => {
   const boardConfig = boardContext.boardConfig;
   const board = [];
   for (const piece of boardConfig) {
+    if (!piece || piece.villain === true) continue;
     if (piece.type === 'player') {
       board.push(serializePlayerPiece(piece));
     } else if (piece.type === 'custom') {
