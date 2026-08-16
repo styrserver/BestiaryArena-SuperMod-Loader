@@ -148,12 +148,12 @@ Mods have access to the game's state through <code>globalThis.state</code>, whic
 * Game settings
 
 == Project Structure ==
-* <code>assets/</code> - Static assets such as fonts, icons, and scripts
-** <code>fonts/</code> - Custom fonts used by the UI components
-** <code>icons/</code> - Icons used by the extension and mods
-** <code>js/</code> - JavaScript libraries, including UI components
-** <code>locales/</code> - Internationalization files
-** Additional folders under <code>assets/</code> (for example <code>depot/</code>, <code>equipment/</code>, <code>guild/</code>, <code>quests/</code>, <code>skills/</code>) hold mod-specific images and data; they are exposed via <code>web_accessible_resources</code> in the manifest as needed—not every folder is listed here.
+* <code>assets/</code> - Extension-bundled static assets (see <code>assets/README.md</code>). Do not confuse with game-site <code>/assets/</code> URLs on bestiaryarena.com.
+** <code>icons/</code> - Extension toolbar icons and language flags
+** <code>js/</code> - Shared scripts (<code>localization.js</code>, <code>ui_components.js</code>)
+** <code>locales/</code> - Internationalization JSON
+** <code>ot/</code> - Guilds / Depot / equipment / skill images for OT mods
+** <code>quests/</code> - Quest mod JSON data and item/NPC images
 * <code>content/</code> - Content scripts that are injected into the game page
 ** <code>extension-url.js</code> - Encodes extension resource URLs and maps logical mod paths to on-disk paths (Orion iOS / WebKit); injected into page context first
 ** <code>platform.js</code> - Desktop vs mobile loader detection (<code>window.BestiaryPlatform</code>); injected into page context before <code>client.js</code>
