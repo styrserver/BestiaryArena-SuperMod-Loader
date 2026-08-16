@@ -218,7 +218,7 @@
     "stuffedToad": {
       "productName": "Stuffed Toad",
       "icon": "Stuffed_Toad.gif",
-      "description": "A stuffed toad. Somehow still slightly damp.",
+      "description": "You see a stuffed toad.",
       "rarity": 5,
       "maxCount": 1
     },

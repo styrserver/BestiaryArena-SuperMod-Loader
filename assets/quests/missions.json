@@ -289,19 +289,23 @@
       "id": "jakundaf_desert",
       "title": "The Jakundaf Desert",
       "prompt": "Bored again already? Good. Evil things block the way into the Jakundaf Desert from the Plains of Havoc. Clear them out for me. Will you do this?",
-      "accept": "Use the marked tile here to reach the path into the Jakundaf Desert. Defeat the villains blocking the way.",
+      "accept": "Use the marked tile here to reach the path into the Jakundaf Desert. Defeat the villains blocking the way, then return to me.",
       "alreadyCompleted": "You already cleared that desert path for me. Leave me to my boredom.",
       "alreadyActive": "The path into the Jakundaf Desert is still blocked. Use the marked tile in my house.",
+      "alreadyCleared": "You cleared the desert path? Good. Take this Stuffed Toad — and leave me to my boredom.",
+      "reportBack": "The desert path is clear. Return to Wyda for your reward.",
       "objectiveLine1": "Use the marked tile in Wyda's house to reach the desert path.",
       "objectiveLine2": "Defeat the villains blocking the Jakundaf Desert.",
+      "objectiveLine3": "Return to Wyda for your reward.",
       "hint": "After helping Wyda with the mother of all spiders, ask her for another task.",
       "rewardItemName": "Stuffed Toad",
       "rewardIcon": "Stuffed_Toad.gif",
-      "rewardDescription": "A stuffed toad. Somehow still slightly damp.",
+      "rewardDescription": "You see a stuffed toad.",
       "rewardCoins": 0,
       "rewardSummary": "Reward: Stuffed Toad.",
       "battleVictory": "The desert path is clear. Return to Wyda for your reward.",
-      "battleDefeat": "The villains blocking the desert were too strong."
+      "battleDefeat": "The villains blocking the desert were too strong.",
+      "wydaHandInComplete": "You cleared the desert path? Good. Take this Stuffed Toad — and leave me to my boredom."
     },
     "apprentice_sheng": {
       "id": "apprentice_sheng",
@@ -616,7 +620,10 @@
       },
       "jakundaf_desert": {
         "stateKey": "progressJakundafDesert",
-        "firebaseKey": "jakundafDesert"
+        "firebaseKey": "jakundafDesert",
+        "extraFields": [
+          "pathCleared"
+        ]
       },
       "king_scarab_coin": {
         "stateKey": "progressScarabHunt",
