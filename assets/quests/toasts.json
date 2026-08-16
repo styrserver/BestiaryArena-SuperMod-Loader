@@ -1,0 +1,222 @@
+{
+  "_sections": {
+    "messages": "1. Toast copy (use {title}, {coins}, {name}, {recipient}, {ordinal} placeholders)",
+    "messageBuilders": "2. Builder metadata — non-empty array = interpolated params; [] = static string",
+    "variants": "3. Variant ids for static toast messages (keyed by message id)",
+    "styling": "4. Toast colors and durations by variant",
+    "battleLog": "5. Battle toast console log prefixes",
+    "mornenionDefeated": "6. Mornenion cave sealed message"
+  },
+  "messages": {
+    "questDiscovered": "New quest discovered: {title}",
+    "questAccepted": "New quest: {title}",
+    "questCompleted": "Mission completed: {title}",
+    "questCompletedWithCoins": "Mission completed: {title}. Received {coins} guild coins!",
+    "taskCompletedWithCoins": "The {title} task is complete. Received {coins} guild coins!",
+    "itemReceived": "Received {name}!",
+    "itemRemoved": "Removed {name}.",
+    "deliveredTo": "Delivered to {recipient}!",
+    "returnedTo": "Returned to {recipient}!",
+    "diaryReturned": "Costello's diary has been returned.",
+    "sealCompleted": "{ordinal} seal completed",
+    "copperKeyFound": "Found Copper Key!",
+    "mapReceived": "Received Map!",
+    "navigatedToMines": "Navigated to the mines!",
+    "kingTookCoin": "King Tibianus took your coin!",
+    "frightenedHole": "You feel frightened and unprepared to go down the hole.",
+    "fishingEnabled": "Fishing enabled!",
+    "fishingDisabled": "Fishing disabled!",
+    "shovelEnabled": "Shovel enabled!",
+    "shovelDisabled": "Shovel disabled!",
+    "minedOre": "You mined some ore!",
+    "dugMornenionHole": "You dig a hole into the depths.",
+    "travelingAbDendriel": "Traveling to Ab'Dendriel Hive...",
+    "teleportedAlDee": "Teleported to Al Dee!",
+    "teleportAlDeeFailed": "Failed to teleport to Al Dee",
+    "bansheeLastRoomNotFound": "Banshee's Last Room not found.",
+    "travelingBansheeLastRoom": "Traveling to Banshee's Last Room...",
+    "bansheeLastRoomBattleHere": "Banshee's Last Room battle starting here.",
+    "spiderLairNotFound": "Spider Lair not found.",
+    "enteringSpiderLair": "Entering Old Widow's Lair...",
+    "spiderLairBattleHere": "Spider Lair battle starting here.",
+    "jakundafDesertPathStub": "The path into the Jakundaf Desert is not yet open.",
+    "lonesomeDragonNotFound": "Lonesome Dragon not found.",
+    "enteringLonesomeDragon": "The stairs seal behind you — Demodras has you trapped!",
+    "needDragonClawForStairs": "You need Demodras' claw to descend these stairs.",
+    "putridChamberNotStrongEnough": "You are not strong enough.",
+    "travelingPutridChamber": "The floor gives way — you are pulled into the Putrid Chamber!",
+    "travelingWithSvenson": "Traveling with Svenson...",
+    "travelingGhazHideout": "Traveling to Ghazbaran's Hideout...",
+    "fishingFoundAxe": "You found a Small Axe with your Magnet!",
+    "fishingFoundNothingMagnet": "You found nothing. Maybe a magnet would help?",
+    "fishingFoundNothing": "You found nothing.",
+    "fishingMagnetHint": "Seems as a magnet will help here.",
+    "fishingError": "Something went wrong while fishing.",
+    "desertDigNothing": "You dig in the sand but find nothing.",
+    "desertDigSandsEmpty": "The sands feel empty.",
+    "desertDigNeedMission": "The sands yield nothing. Perhaps the king knows what to seek here.",
+    "missingDestroyFieldRune": "You are missing a Destroy Field Rune.",
+    "alreadyHaveDestroyFieldRune": "You already carry a destroy field rune.",
+    "crossingTheLineObjectiveComplete": "Fastest Bishop in Carlin completed! Return to the king to claim your reward.",
+    "ironOreRewardReady": "A while has passed. King Tibianus should have something for you now.",
+    "enteringJakundafDesert": "Entering the Jakundaf Desert path...",
+    "jakundafDesertNotFound": "Sewers battle room not found."
+  },
+  "messageBuilders": {
+    "questDiscovered": [
+      "title"
+    ],
+    "questAccepted": [
+      "title"
+    ],
+    "questCompleted": [
+      "title"
+    ],
+    "questCompletedWithCoins": [
+      "title",
+      "coins"
+    ],
+    "taskCompletedWithCoins": [
+      "title",
+      "coins"
+    ],
+    "itemReceived": [
+      "name"
+    ],
+    "itemRemoved": [
+      "name"
+    ],
+    "deliveredTo": [
+      "recipient"
+    ],
+    "returnedTo": [
+      "recipient"
+    ],
+    "diaryReturned": [],
+    "sealCompleted": [
+      "ordinal"
+    ],
+    "copperKeyFound": [],
+    "mapReceived": [],
+    "navigatedToMines": [],
+    "kingTookCoin": [],
+    "frightenedHole": [],
+    "fishingEnabled": [],
+    "fishingDisabled": [],
+    "shovelEnabled": [],
+    "shovelDisabled": [],
+    "minedOre": [],
+    "dugMornenionHole": [],
+    "travelingAbDendriel": [],
+    "teleportedAlDee": [],
+    "teleportAlDeeFailed": [],
+    "bansheeLastRoomNotFound": [],
+    "travelingBansheeLastRoom": [],
+    "bansheeLastRoomBattleHere": [],
+    "spiderLairNotFound": [],
+    "enteringSpiderLair": [],
+    "spiderLairBattleHere": [],
+    "jakundafDesertPathStub": [],
+    "lonesomeDragonNotFound": [],
+    "enteringLonesomeDragon": [],
+    "needDragonClawForStairs": [],
+    "putridChamberNotStrongEnough": [],
+    "travelingPutridChamber": [],
+    "travelingWithSvenson": [],
+    "travelingGhazHideout": [],
+    "fishingFoundAxe": [],
+    "fishingFoundNothingMagnet": [],
+    "fishingFoundNothing": [],
+    "fishingMagnetHint": [],
+    "fishingError": [],
+    "desertDigNothing": [],
+    "desertDigSandsEmpty": [],
+    "desertDigNeedMission": [],
+    "missingDestroyFieldRune": [],
+    "alreadyHaveDestroyFieldRune": [],
+    "crossingTheLineObjectiveComplete": [],
+    "ironOreRewardReady": []
+  },
+  "variants": {
+    "frightenedHole": "warning",
+    "fishingEnabled": "info",
+    "fishingDisabled": "info",
+    "shovelEnabled": "info",
+    "shovelDisabled": "info",
+    "minedOre": "found",
+    "dugMornenionHole": "info",
+    "travelingAbDendriel": "info",
+    "teleportedAlDee": "info",
+    "teleportAlDeeFailed": "warning",
+    "bansheeLastRoomNotFound": "nothing",
+    "travelingBansheeLastRoom": "info",
+    "bansheeLastRoomBattleHere": "info",
+    "spiderLairNotFound": "nothing",
+    "enteringSpiderLair": "info",
+    "spiderLairBattleHere": "info",
+    "jakundafDesertPathStub": "info",
+    "lonesomeDragonNotFound": "nothing",
+    "enteringLonesomeDragon": "warning",
+    "needDragonClawForStairs": "warning",
+    "putridChamberNotStrongEnough": "warning",
+    "travelingPutridChamber": "info",
+    "travelingWithSvenson": "info",
+    "travelingGhazHideout": "info",
+    "fishingFoundAxe": "found",
+    "fishingFoundNothingMagnet": "nothing",
+    "fishingFoundNothing": "nothing",
+    "fishingMagnetHint": "info",
+    "fishingError": "warning",
+    "desertDigNothing": "nothing",
+    "desertDigSandsEmpty": "nothing",
+    "desertDigNeedMission": "info",
+    "missingDestroyFieldRune": "nothing",
+    "alreadyHaveDestroyFieldRune": "nothing",
+    "crossingTheLineObjectiveComplete": "completed",
+    "ironOreRewardReady": "info",
+    "copperKeyFound": "found",
+    "mapReceived": "found",
+    "navigatedToMines": "found",
+    "kingTookCoin": "warning",
+    "diaryReturned": "completed",
+    "mornenionDefeated": "completed"
+  },
+  "styling": {
+    "defaultDuration": 5000,
+    "variantColors": {
+      "nothing": "#b0b0b0",
+      "quest": "#6ee07a",
+      "found": "#7eb8ff",
+      "completed": "#e8c060",
+      "warning": "#ffb070",
+      "info": "#c8c8ff"
+    },
+    "variantDurations": {
+      "nothing": 2000,
+      "info": 3000,
+      "warning": 4000,
+      "found": 5000,
+      "quest": 8000,
+      "completed": 10000
+    }
+  },
+  "battleLog": {
+    "mornenion": "[Quests Mod][Mornenion]",
+    "bansheeLastRoom": "[Quests Mod][Banshee Last Room]",
+    "spiderLair": "[Quests Mod][Spider Lair]",
+    "lonesomeDragon": "[Quests Mod][Lonesome Dragon]",
+    "putridChamber": "[Quests Mod][Putrid Chamber]",
+    "weakenedArchdemon": "[Quests Mod][Weakened Archdemon]",
+    "lostOracle": "[Quests Mod][The Lost Oracle]",
+    "jakundafDesert": "[Quests Mod][Jakundaf Desert]"
+  },
+  "mornenionDefeated": "The cave entrance is sealed. Mornenion has been defeated.",
+  "durations": {
+    "enteringJakundafDesert": [],
+    "jakundafDesertNotFound": []
+  },
+  "types": {
+    "enteringJakundafDesert": "info",
+    "jakundafDesertNotFound": "nothing"
+  }
+}

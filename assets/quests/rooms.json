@@ -1,0 +1,259 @@
+{
+  "_sections": {
+    "fishing": "1. Water fishing config",
+    "mining": "2. Mining tile config",
+    "desertDigging": "3. Desert dig config",
+    "serpentine": "4. Tower / chamber placement",
+    "honeyflower": "5. Flower pickup placement",
+    "crossingTheLine": "6. Boardgames tile drill",
+    "apprenticeSheng": "7. Apprentice battle room tiles",
+    "sevenSeals": "8. Seal room / tile config",
+    "spiderLair": "9. Spider encounter room tiles",
+    "jakundafDesert": "10. Desert path entry tile",
+    "dragonmother": "11. Dragon encounter stairs tile",
+    "boardNpcs": "12. Board NPC placements",
+    "ghazbaran": "13. Archdemon hideout tile",
+    "kingArenaRanks": "14. Arena rank titles by mission count"
+  },
+
+  "fishing": {
+    "SPRITE_IDS": ["12706", "622", "4597", "4609", "4598"],
+    "ANIMATION_SIZE": 64,
+    "ANIMATION_DURATION": 500,
+    "MAP_SWITCH_DELAY": 500
+  },
+
+  "mining": {
+    "TARGET_TILE_ID": "82",
+    "TARGET_MAP": "Hedge Maze",
+    "SPRITE_TRANSFORM": { "from": "1822", "to": "385" },
+    "ANIMATION_SIZE": 64,
+    "ANIMATION_DURATION": 500
+  },
+
+  "desertDigging": {
+    "TARGET_MAP": "Darama Oasis",
+    "DESERT_SPRITE_ID": "231",
+    "SCARAB_COIN_TILE": 46,
+    "POOF_EFFECT_URL": "https://bestiaryarena.com/assets/EFFECT/3.png",
+    "POOF_FRAME_COUNT": 7,
+    "POOF_FRAME_MS": 60
+  },
+
+  "serpentine": {
+    "teshaTileIndex": 157,
+    "basementRoomName": "Serpentine Tower Basement",
+    "fieldSpriteId": 2122,
+    "runePickupSpriteIds": [6011, 2886],
+    "leverTile": 64,
+    "leverSprite": { "from": "2772", "to": "2773" },
+    "leverWarpNavDelayMs": 200,
+    "putridChamber": {
+      "roomName": "Putrid Chamber",
+      "backgroundSceneId": "background-scene",
+      "floorBelowSpriteIds": [4680, 4683, 4684, 4686, 4687, 4688, 4689, 4690, 4738, 4739, 4740, 4743, 4744],
+      "floorBelowReplacementSpriteId": 838,
+      "floorBelow4394ReplacementSpriteId": 410,
+      "sprite2127ReplacementId": 2137,
+      "villainSetupAttemptDelaysMs": [0, 100, 250],
+      "sceneSpriteAttemptDelaysMs": [0, 100, 250, 500, 800, 1200]
+    }
+  },
+
+  "honeyflower": {
+    "tileIndex": 84,
+    "pickupSpriteId": 2984,
+    "roomName": "Honeyflower Tower"
+  },
+
+  "crossingTheLine": {
+    "roomName": "City Boardgames",
+    "tiles": [18, 25, 123, 130],
+    "okBorderColor": "#98C379"
+  },
+
+  "apprenticeSheng": {
+    "roomName": "Minotaur Mage Room",
+    "tileIndex": 43,
+    "battleTileIndex": 50,
+    "minotaurTiles": [35, 81, 94, 113],
+    "allyTiles": [34, 49],
+    "playerTiles": { "from": 95, "to": 128 },
+    "villainGameIdFallback": 23,
+    "fightIconUrl": "https://bestiaryarena.com/assets/icons/fight.png",
+    "rookstayerOutfitSpriteId": "500002"
+  },
+
+  "sevenSeals": {
+    "roomNames": ["Seal I", "Seal II", "Seal III", "Seal IV", "Seal V", "Seal VI", "Seal VII"],
+    "first": {
+      "room": "Ghostlands Surface",
+      "poisonTiles": [21, 49, 56, 68, 77, 124],
+      "minPoisonTiles": 3,
+      "celebrationDurationMs": 5000
+    },
+    "second": {
+      "room": "Ghostlands Library",
+      "tile": 34,
+      "leverAnimationMs": 1500
+    },
+    "third": {
+      "room": "Ghostlands Ritual Site",
+      "tile": 52,
+      "spellAnimationMs": 2000
+    },
+    "fourth": {
+      "room": "Demon Skeleton Hell",
+      "maxTicks": 150
+    },
+    "fifth": {
+      "room": "Zathroth's Throne",
+      "tile": 41,
+      "leverSprite": { "from": "2772", "to": "2773" }
+    },
+    "sixth": {
+      "room": "Demonrage Seal",
+      "leverTiles": [55, 70, 85, 100, 115],
+      "leverOrder": [70, 100, 85, 55, 115],
+      "leverSprite": { "from": "2773", "to": "2772" }
+    },
+    "seventh": {
+      "tile126": 126,
+      "tile127": 127,
+      "tile126Sprite": { "from": "1959", "to": "1949" },
+      "tile127Sprite": { "from": "1959", "to": "1949" },
+      "bansheeLastRoomName": "Banshee's Last Room",
+      "useDemonrageIfMissing": true
+    }
+  },
+
+  "spiderLair": {
+    "secludedHerbRoomName": "A Secluded Herb",
+    "spiderLairRoomName": "Spider Lair",
+    "useSecludedHerbIfMissing": true,
+    "secludedHerbTile": 77,
+    "tile86": 85,
+    "tile87": 86,
+    "tile86SpriteId": "1951",
+    "tile87SpriteId": "1950",
+    "spriteToRemoveId": "233",
+    "tilesAddSprite2127": [82, 52, 98, 95, 78, 111],
+    "addSprite2127Id": "2127",
+    "tilesAddSprite4312": [37, 32, 96, 84],
+    "addSprite4312Id": "4312"
+  },
+
+  "jakundafDesert": {
+    "roomNames": ["Wyda's House", "Wyda's House in Venore"],
+    "tileIndex": 76,
+    "contextMenuLabel": "Enter Jakundaf Desert",
+    "battleRoomName": "Sewers",
+    "battleRoomId": "rkswrs",
+    "battleId": "jakundaf_desert",
+    "tileMutationsFile": "jakundaf-desert-tile-mutations.json",
+    "sceneSpriteReplacements": {
+      "rootId": "background-scene",
+      "rules": [
+        {
+          "sourceIds": [351],
+          "replacementId": 409,
+          "scope": "tile"
+        },
+        {
+          "sourceIds": [352],
+          "replacementId": 429,
+          "scope": "tile"
+        }
+      ]
+    }
+  },
+
+  "dragonmother": {
+    "dragonLairRoomName": "Dragon Lair",
+    "lonesomeDragonRoomName": "Lonesome Dragon",
+    "dragonLairStairsTile": 47
+  },
+
+  "boardNpcs": {
+    "santa": {
+      "roomName": "Santa Claus Home",
+      "tileIndex": 34,
+      "id": "santa-claus",
+      "outfitSpriteId": "69",
+      "dialogueIconUrl": "https://bestiaryarena.com/assets/icons/fight.png"
+    },
+    "alDeeRatPlague": {
+      "id": "al-dee-rat-plague",
+      "roomName": "Rat Plague",
+      "roomId": "rkcent",
+      "tileIndex": 30,
+      "dialogueIconUrl": "https://bestiaryarena.com/assets/icons/fight.png"
+    },
+    "svenson": {
+      "id": "svenson",
+      "roomName": "Folda Boat",
+      "tileIndex": 109,
+      "awashRoomName": "Awash Steamship",
+      "awashTileIndex": 33,
+      "undergroundRoomName": "Underground Lake",
+      "undergroundTileIndex": 69,
+      "whiteWaveRoomName": "White Wave Cellar",
+      "whiteWaveTileIndex": 84,
+      "dialogueIconUrl": "https://bestiaryarena.com/assets/icons/fight.png"
+    },
+    "dane": {
+      "id": "dane",
+      "whiteWaveTileIndex": 80,
+      "dialogueIconUrl": "https://bestiaryarena.com/assets/icons/fight.png"
+    },
+    "oracle": {
+      "id": "the-oracle",
+      "name": "The Oracle",
+      "roomName": "Monastery Catacombs",
+      "roomId": "crcat",
+      "tileIndex": 115,
+      "hideBoardVisual": true,
+      "imageFilename": "The_Oracle.gif",
+      "dialogueIconUrl": "https://bestiaryarena.com/assets/icons/fight.png",
+      "backgroundSceneId": "background-scene",
+      "sceneSpriteAttemptDelaysMs": [0, 100, 250, 500, 800, 1200],
+      "sceneSpriteReplacements": {
+        "rules": [
+          {
+            "sourceIds": [429],
+            "replacementId": 410,
+            "preserveCrop": true,
+            "scope": "tile"
+          }
+        ]
+      }
+    }
+  },
+
+  "ghazbaran": {
+    "hideoutRoomName": "Ruprecht's Hut",
+    "hideoutDisplayName": "Ghazbaran's Hideout",
+    "tileIndex": 62,
+    "nickname": "Weakened Ghazbaran",
+    "auraNickname": "Ghazbaran's Aura"
+  },
+
+  "effects": {
+    "tileSuccessEffectUrl": "https://bestiaryarena.com/assets/EFFECT/32.png",
+    "tileSuccessFrameMs": 80
+  },
+
+  "kingArenaRanks": [
+    "Scout of the Arena",
+    "Sentinel of the Arena",
+    "Steward of the Arena",
+    "Warden of the Arena",
+    "Squire of the Arena",
+    "Warrior of the Arena",
+    "Keeper of the Arena",
+    "Guardian of the Arena",
+    "Sage of the Arena",
+    "Savant of the Arena",
+    "Enlightened of the Arena"
+  ]
+}
