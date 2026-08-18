@@ -172,12 +172,37 @@
       "description": "It is the claw of Demodras.",
       "rarity": 5
     },
+    "bosstiary": {
+      "productName": "Bosstiary",
+      "icon": "Bosstiary_Icon.gif",
+      "description": "You see a bosstiary. It holds soul cores from bosses you have defeated.",
+      "rarity": 0,
+      "maxCount": 1,
+      "opensContainer": "soulCores"
+    },
     "goldenMug": {
-      "productName": "Golden Mug",
-      "icon": "Golden_Mug.gif",
-      "description": "A golden mug — spoils of Demodras.",
-      "rarity": 5,
-      "maxCount": 1
+      "productName": "Demodras Soul Core",
+      "icon": "Demodras_Soul_Core.gif",
+      "description": "Obtained by defeating Demodras.",
+      "rarity": 0,
+      "maxCount": 1,
+      "soulCore": true
+    },
+    "oldWidowSoulCore": {
+      "productName": "The Old Widow Soul Core",
+      "icon": "The_Old_Widow_Soul_Core.gif",
+      "description": "Obtained by defeating The Old Widow.",
+      "rarity": 0,
+      "maxCount": 1,
+      "soulCore": true
+    },
+    "ekatrixSoulCore": {
+      "productName": "Ekatrix Soul Core",
+      "icon": "Ekatrix_Soul_Core.gif",
+      "description": "Obtained by defeating Ekatrix.",
+      "rarity": 0,
+      "maxCount": 1,
+      "soulCore": true
     },
     "elvenhairRope": {
       "productName": "Elvenhair Rope",
@@ -420,10 +445,36 @@
     },
     {
       "id": "golden_mug",
-      "productName": "Golden Mug",
+      "productName": "Demodras Soul Core",
       "keywords": [
+        "demodras soul core",
+        "soul core",
         "golden mug",
         "gold mug"
+      ]
+    },
+    {
+      "id": "old_widow_soul_core",
+      "productName": "The Old Widow Soul Core",
+      "keywords": [
+        "old widow soul core",
+        "widow soul core",
+        "the old widow soul core"
+      ]
+    },
+    {
+      "id": "ekatrix_soul_core",
+      "productName": "Ekatrix Soul Core",
+      "keywords": [
+        "ekatrix soul core",
+        "witch soul core"
+      ]
+    },
+    {
+      "id": "bosstiary",
+      "productName": "Bosstiary",
+      "keywords": [
+        "bosstiary"
       ]
     },
     {
@@ -534,7 +585,7 @@
     "king_honeyflower": "Honey_Flower.gif",
     "king_copper_key": "Copper_Key.png",
     "king_red_dragon": "Red_Dragon_Leather.png",
-    "dragonmother": "Golden_Mug.gif",
+    "dragonmother": "Demodras_Soul_Core.gif",
     "king_letter_al_dee": "Scroll.gif",
     "al_dee_fishing_gold": "Small_Axe.gif",
     "al_dee_golden_rope": "Elvenhair_Rope.gif",
@@ -543,6 +594,7 @@
     "follower_of_zathroth": "Blessed_Ankh.gif",
     "mother_of_all_spiders": "Spider_Silk.gif",
     "jakundaf_desert": "Stuffed_Toad.gif",
+    "tainted_souls": "Ekatrix_Soul_Core.gif",
     "king_scarab_coin": "Scarab_Coin.gif",
     "serpentine_tower": "Destroy_Field_Rune.gif",
     "apprentice_sheng": "Wooden_Plank.gif",
@@ -630,6 +682,43 @@
         "receivedBefore": {
           "type": "missionCompleted",
           "missionId": "dragonmother"
+        }
+      },
+      {
+        "key": "oldWidowSoulCore",
+        "productId": "oldWidowSoulCore",
+        "receivedBefore": {
+          "type": "missionCompleted",
+          "missionId": "mother_of_all_spiders"
+        }
+      },
+      {
+        "key": "ekatrixSoulCore",
+        "productId": "ekatrixSoulCore",
+        "receivedBefore": {
+          "type": "missionCompleted",
+          "missionId": "tainted_souls"
+        }
+      },
+      {
+        "key": "bosstiary",
+        "productId": "bosstiary",
+        "receivedBefore": {
+          "type": "anyOf",
+          "rules": [
+            {
+              "type": "missionCompleted",
+              "missionId": "dragonmother"
+            },
+            {
+              "type": "missionCompleted",
+              "missionId": "mother_of_all_spiders"
+            },
+            {
+              "type": "missionCompleted",
+              "missionId": "tainted_souls"
+            }
+          ]
         }
       },
       {
@@ -1030,6 +1119,11 @@
         "productId": "goldenMug",
         "missionId": "dragonmother",
         "requiredStatus": "completed"
+      },
+      {
+        "productId": "ekatrixSoulCore",
+        "missionId": "tainted_souls",
+        "requiredStatus": "completed"
       }
     ],
     "staleCleanupOnComplete": [
@@ -1173,6 +1267,18 @@
       },
       {
         "productId": "goldenMug",
+        "amount": 1
+      },
+      {
+        "productId": "oldWidowSoulCore",
+        "amount": 1
+      },
+      {
+        "productId": "ekatrixSoulCore",
+        "amount": 1
+      },
+      {
+        "productId": "bosstiary",
         "amount": 1
       }
     ]

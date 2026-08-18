@@ -8,7 +8,8 @@
     "ghazbaran": "6. Weakened Ghazbaran",
     "lonesome_dragon": "7. Lonesome Dragon (The Dragonmother / Demodras)",
     "lost_oracle": "8. The Lost Oracle (Monastery Catacombs)",
-    "jakundaf_desert": "9. Jakundaf Desert (Sewers path battle)"
+    "jakundaf_desert": "9. Jakundaf Desert (Sewers path battle)",
+    "ekatrix": "10. Ekatrix (The Tainted Souls / Sewers via Eclipse portal)"
   },
   "mornenion": {
     "allyLimit": 3,
@@ -937,6 +938,248 @@
       144,
       145,
       146
+    ],
+    "allowedTilesMessage": "Ally creatures can only be placed on the marked tiles!"
+  },
+  "ekatrix": {
+    "allyLimit": 6,
+    "preventVillainMovement": true,
+    "hideVillainSprites": true,
+    "villains": [
+      {
+        "nickname": "Ekatrix",
+        "tileIndex": 20,
+        "keyPrefix": "ekatrix-tile-20-",
+        "fallbackGameId": 66,
+        "level": 300,
+        "direction": "south",
+        "creatureName": "Witch",
+        "shiny": true,
+        "awakened": true,
+        "genes": {
+          "hp": 1,
+          "ad": 1,
+          "ap": 1,
+          "armor": 1,
+          "magicResist": 1
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Spellbook of Ancient Arcana",
+          "gameId": 41
+        }
+      },
+      {
+        "nickname": "Poison Spider",
+        "tileIndex": 23,
+        "keyPrefix": "poison-spider-tile-23-",
+        "fallbackGameId": 15,
+        "level": 120,
+        "direction": "south",
+        "creatureName": "Poison Spider",
+        "shiny": true,
+        "awakened": true,
+        "genes": {
+          "hp": 1,
+          "ad": 1,
+          "ap": 1,
+          "armor": 1,
+          "magicResist": 1
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Boots of Haste",
+          "gameId": 1
+        }
+      },
+      {
+        "nickname": "Slime",
+        "tileIndex": 40,
+        "keyPrefix": "slime-tile-40-",
+        "fallbackGameId": 18,
+        "level": 150,
+        "direction": "south",
+        "creatureName": "Slime",
+        "shiny": true,
+        "awakened": true,
+        "genes": {
+          "hp": 1,
+          "ad": 1,
+          "ap": 1,
+          "armor": 1,
+          "magicResist": 1
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Boots of Haste",
+          "gameId": 1
+        }
+      },
+      {
+        "nickname": "Poison Spider",
+        "tileIndex": 48,
+        "keyPrefix": "poison-spider-tile-48-",
+        "fallbackGameId": 15,
+        "level": 120,
+        "direction": "south",
+        "creatureName": "Poison Spider",
+        "shiny": true,
+        "awakened": true,
+        "genes": {
+          "hp": 1,
+          "ad": 1,
+          "ap": 1,
+          "armor": 1,
+          "magicResist": 1
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Boots of Haste",
+          "gameId": 1
+        }
+      },
+      {
+        "nickname": "Giant Spider",
+        "tileIndex": 51,
+        "keyPrefix": "giant-spider-tile-51-",
+        "fallbackGameId": 76,
+        "level": 250,
+        "direction": "south",
+        "creatureName": "Giant Spider",
+        "shiny": true,
+        "awakened": true,
+        "genes": {
+          "hp": 1,
+          "ad": 1,
+          "ap": 1,
+          "armor": 1,
+          "magicResist": 1
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Boots of Haste",
+          "gameId": 1
+        }
+      },
+      {
+        "nickname": "Slime",
+        "tileIndex": 68,
+        "keyPrefix": "slime-tile-68-",
+        "fallbackGameId": 18,
+        "level": 150,
+        "direction": "south",
+        "creatureName": "Slime",
+        "shiny": true,
+        "awakened": true,
+        "genes": {
+          "hp": 1,
+          "ad": 1,
+          "ap": 1,
+          "armor": 1,
+          "magicResist": 1
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Boots of Haste",
+          "gameId": 1
+        }
+      },
+      {
+        "nickname": "Bog Raider",
+        "tileIndex": 71,
+        "keyPrefix": "bog-raider-tile-71-",
+        "fallbackGameId": 62,
+        "level": 120,
+        "direction": "south",
+        "creatureName": "Bog Raider",
+        "shiny": true,
+        "awakened": true,
+        "genes": {
+          "hp": 1,
+          "ad": 1,
+          "ap": 1,
+          "armor": 1,
+          "magicResist": 1
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Boots of Haste",
+          "gameId": 1
+        }
+      },
+      {
+        "nickname": "Bog Raider",
+        "tileIndex": 94,
+        "keyPrefix": "bog-raider-tile-94-",
+        "fallbackGameId": 62,
+        "level": 120,
+        "direction": "south",
+        "creatureName": "Bog Raider",
+        "shiny": true,
+        "awakened": true,
+        "genes": {
+          "hp": 1,
+          "ad": 1,
+          "ap": 1,
+          "armor": 1,
+          "magicResist": 1
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Boots of Haste",
+          "gameId": 1
+        }
+      },
+      {
+        "nickname": "Bog Raider",
+        "tileIndex": 128,
+        "keyPrefix": "bog-raider-tile-128-",
+        "fallbackGameId": 62,
+        "level": 120,
+        "direction": "west",
+        "creatureName": "Bog Raider",
+        "shiny": true,
+        "genes": {
+          "hp": 1,
+          "ad": 1,
+          "ap": 1,
+          "armor": 1,
+          "magicResist": 1
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Boots of Haste",
+          "gameId": 1
+        }
+      }
+    ],
+    "allowedTiles": [
+      77,
+      78,
+      79,
+      92,
+      93,
+      95,
+      107,
+      108,
+      109,
+      110,
+      123,
+      124,
+      125,
+      137,
+      138,
+      139,
+      140
     ],
     "allowedTilesMessage": "Ally creatures can only be placed on the marked tiles!"
   }

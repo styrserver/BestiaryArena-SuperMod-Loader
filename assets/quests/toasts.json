@@ -60,7 +60,15 @@
     "crossingTheLineObjectiveComplete": "Fastest Bishop in Carlin completed! Return to the king to claim your reward.",
     "ironOreRewardReady": "A while has passed. King Tibianus should have something for you now.",
     "enteringJakundafDesert": "Entering the Jakundaf Desert path...",
-    "jakundafDesertNotFound": "Sewers battle room not found."
+    "jakundafDesertNotFound": "Sewers battle room not found.",
+    "taintedSoulsNeedToad": "You need the Stuffed Toad to use this cauldron.",
+    "taintedSoulsNeedMission": "The cauldron does not stir. Wyda may know more.",
+    "taintedSoulsCauldronStub": "The Eclipse Cauldron is not yet ready.",
+    "taintedSoulsPortalStub": "The portal to Ekatrix is not yet open.",
+    "taintedSoulsPortalOpened": "A portal opens from the cauldron.",
+    "enteringEkatrixPortal": "Stepping through the portal...",
+    "ekatrixNotFound": "Ekatrix's domain was not found.",
+    "taintedSoulsReportBack": "Ekatrix has fallen. Return to Wyda for your reward."
   },
   "messageBuilders": {
     "questDiscovered": [
@@ -135,7 +143,17 @@
     "missingDestroyFieldRune": [],
     "alreadyHaveDestroyFieldRune": [],
     "crossingTheLineObjectiveComplete": [],
-    "ironOreRewardReady": []
+    "ironOreRewardReady": [],
+    "enteringJakundafDesert": [],
+    "jakundafDesertNotFound": [],
+    "taintedSoulsNeedToad": [],
+    "taintedSoulsNeedMission": [],
+    "taintedSoulsCauldronStub": [],
+    "taintedSoulsPortalStub": [],
+    "taintedSoulsPortalOpened": [],
+    "enteringEkatrixPortal": [],
+    "ekatrixNotFound": [],
+    "taintedSoulsReportBack": []
   },
   "variants": {
     "frightenedHole": "warning",
@@ -179,7 +197,15 @@
     "navigatedToMines": "found",
     "kingTookCoin": "warning",
     "diaryReturned": "completed",
-    "mornenionDefeated": "completed"
+    "mornenionDefeated": "completed",
+    "taintedSoulsNeedToad": "warning",
+    "taintedSoulsNeedMission": "info",
+    "taintedSoulsCauldronStub": "info",
+    "taintedSoulsPortalStub": "info",
+    "taintedSoulsPortalOpened": "info",
+    "enteringEkatrixPortal": "info",
+    "ekatrixNotFound": "nothing",
+    "taintedSoulsReportBack": "info"
   },
   "styling": {
     "defaultDuration": 5000,
@@ -208,15 +234,32 @@
     "putridChamber": "[Quests Mod][Putrid Chamber]",
     "weakenedArchdemon": "[Quests Mod][Weakened Archdemon]",
     "lostOracle": "[Quests Mod][The Lost Oracle]",
-    "jakundafDesert": "[Quests Mod][Jakundaf Desert]"
+    "jakundafDesert": "[Quests Mod][Jakundaf Desert]",
+    "taintedSouls": "[Quests Mod][The Tainted Souls]"
   },
   "mornenionDefeated": "The cave entrance is sealed. Mornenion has been defeated.",
   "durations": {
     "enteringJakundafDesert": [],
-    "jakundafDesertNotFound": []
+    "jakundafDesertNotFound": [],
+    "taintedSoulsNeedToad": [],
+    "taintedSoulsNeedMission": [],
+    "taintedSoulsCauldronStub": [],
+    "taintedSoulsPortalStub": [],
+    "taintedSoulsPortalOpened": [],
+    "enteringEkatrixPortal": [],
+    "ekatrixNotFound": [],
+    "taintedSoulsReportBack": []
   },
   "types": {
     "enteringJakundafDesert": "info",
-    "jakundafDesertNotFound": "nothing"
+    "jakundafDesertNotFound": "nothing",
+    "taintedSoulsNeedToad": "warning",
+    "taintedSoulsNeedMission": "info",
+    "taintedSoulsCauldronStub": "info",
+    "taintedSoulsPortalStub": "info",
+    "taintedSoulsPortalOpened": "info",
+    "enteringEkatrixPortal": "info",
+    "ekatrixNotFound": "nothing",
+    "taintedSoulsReportBack": "info"
   }
 }

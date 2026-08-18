@@ -282,7 +282,10 @@
       "rewardSummary": "Reward: Spool of Yarn.",
       "wydaSilkComplete": "The silk! Excellent. I can make good use of this. Here, take this Spool of Yarn as thanks.",
       "wydaMissingSilk": "You don't have the spider silk. Defeat the mother of all spiders in the secluded herb and return with the silk.",
-      "battleVictory": "The Old Widow was slain. You found Spider Silk.",
+      "soulCoreItemName": "The Old Widow Soul Core",
+      "soulCoreIcon": "The_Old_Widow_Soul_Core.gif",
+      "soulCoreDescription": "Obtained by defeating The Old Widow.",
+      "battleVictory": "The Old Widow was slain. You found Spider Silk and a soul core.",
       "battleDefeat": "The Old Widow was too strong."
     },
     "jakundaf_desert": {
@@ -306,6 +309,34 @@
       "battleVictory": "The desert path is clear. Return to Wyda for your reward.",
       "battleDefeat": "The villains blocking the desert were too strong.",
       "wydaHandInComplete": "You cleared the desert path? Good. Take this Stuffed Toad — and leave me to my boredom."
+    },
+    "tainted_souls": {
+      "id": "tainted_souls",
+      "title": "The Tainted Souls",
+      "prompt": "Bored again? Fine. There is a witch named Ekatrix whose soul is... tainted. Take that stuffed toad of yours to Eclipse and drop it in the Cauldron. That should open a way to her. Kill her for me. Will you do this?",
+      "accept": "Go to Eclipse. Use the Stuffed Toad in the Cauldron. When the portal opens, step through and slay Ekatrix.",
+      "alreadyCompleted": "You already dealt with Ekatrix. One less boring soul in the world.",
+      "alreadyActive": "Ekatrix still lives. Eclipse. Cauldron. Stuffed Toad. Portal. Try to keep up.",
+      "alreadyPortalOpen": "The portal is open at Eclipse. Step through and kill Ekatrix.",
+      "alreadyCleared": "Ekatrix is dead, then? Good. Take this Ekatrix Soul Core — and leave me to my boredom.",
+      "reportBack": "Ekatrix has fallen. Return to Wyda for your reward.",
+      "objectiveLine1": "Go to Eclipse and use the Stuffed Toad in the Cauldron.",
+      "objectiveLine2": "Enter the portal and defeat Ekatrix.",
+      "objectiveLine3": "Return to Wyda for the Ekatrix Soul Core.",
+      "hint": "After clearing the Jakundaf Desert for Wyda, ask her for another task.",
+      "hintPortal": "The portal at Eclipse leads to Ekatrix. Step through when you are ready.",
+      "hintReport": "Ekatrix is slain. Return to Wyda in the Venore swamps.",
+      "rewardItemName": "Ekatrix Soul Core",
+      "rewardIcon": "Ekatrix_Soul_Core.gif",
+      "rewardDescription": "Obtained by defeating Ekatrix.",
+      "rewardCoins": 0,
+      "rewardSummary": "Reward: Ekatrix Soul Core.",
+      "soulCoreItemName": "Ekatrix Soul Core",
+      "soulCoreIcon": "Ekatrix_Soul_Core.gif",
+      "soulCoreDescription": "Obtained by defeating Ekatrix.",
+      "battleVictory": "Ekatrix has fallen. Return to Wyda for your reward.",
+      "battleDefeat": "Ekatrix was too strong.",
+      "wydaHandInComplete": "Ekatrix is dead, then? Good. Take this Ekatrix Soul Core — and leave me to my boredom."
     },
     "apprentice_sheng": {
       "id": "apprentice_sheng",
@@ -421,12 +452,12 @@
       "objectiveLine1": "Use Demodras' claw to descend the stairs in Dragon Lair.",
       "objectiveLine2": "Defeat Demodras in Lonesome Dragon.",
       "hint": "Only those who carry the Dragon Claw may descend the stairs in Dragon Lair.",
-      "rewardItemName": "Golden Mug",
-      "rewardIcon": "Golden_Mug.gif",
-      "rewardDescription": "A golden mug — spoils of Demodras.",
+      "rewardItemName": "Demodras Soul Core",
+      "rewardIcon": "Demodras_Soul_Core.gif",
+      "rewardDescription": "Obtained by defeating Demodras.",
       "rewardCoins": 0,
-      "rewardSummary": "Reward: Golden Mug.",
-      "battleVictory": "Demodras has fallen. You found a Golden Mug.",
+      "rewardSummary": "Reward: Demodras Soul Core.",
+      "battleVictory": "Demodras has fallen. You found a Demodras Soul Core.",
       "battleDefeat": "Demodras was too strong."
     },
     "lost_oracle": {
@@ -501,6 +532,7 @@
     "follower_of_zathroth": "Brought the Blessed Ankh to Wyda in the swamps of Venore.",
     "mother_of_all_spiders": "Descended the secluded herb, defeated the mother of all spiders, and returned the silk to Wyda.",
     "jakundaf_desert": "Cleared the villains blocking the Jakundaf Desert from the Plains of Havoc and returned to Wyda.",
+    "tainted_souls": "Used the Stuffed Toad in the Eclipse Cauldron, slew Ekatrix, and returned to Wyda.",
     "serpentine_tower": "Used the lever in the Serpentine Tower basement and survived The Cursed Chamber.",
     "apprentice_sheng": "Helped Rookstayer defeat Apprentice Sheng in the Minotaur Mage Room and claimed a Wooden Plank.",
     "christmas_miracle": "Received a Christmas present from Santa Claus.",
@@ -555,6 +587,7 @@
       "follower_of_zathroth",
       "mother_of_all_spiders",
       "jakundaf_desert",
+      "tainted_souls",
       "king_scarab_coin",
       "serpentine_tower",
       "apprentice_sheng",
@@ -623,6 +656,14 @@
         "firebaseKey": "jakundafDesert",
         "extraFields": [
           "pathCleared"
+        ]
+      },
+      "tainted_souls": {
+        "stateKey": "progressTaintedSouls",
+        "firebaseKey": "taintedSouls",
+        "extraFields": [
+          "portalOpened",
+          "battleCompleted"
         ]
       },
       "king_scarab_coin": {

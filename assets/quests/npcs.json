@@ -600,6 +600,21 @@
       ],
       "spool of yarn": [
         "I spin spider silk into yarn. Bring me the silk from the mother of all spiders, or if you already have a spool from me, a stranded sailor might need it more than I do."
+      ],
+      "ekatrix": [
+        "A sister of mine, if you can call her that. Her soul is tainted. Find her through Eclipse if you have the toad."
+      ],
+      "eclipse": [
+        "A dark little corner with a cauldron that still remembers old recipes. Take a stuffed toad there if you want something interesting to happen."
+      ],
+      "cauldron": [
+        "Not my cauldron. The one at Eclipse. Drop the stuffed toad in and see what crawls out."
+      ],
+      "tainted souls": [
+        "Tainted souls... Ekatrix among them. Ask me about a mission if you want the full tale."
+      ],
+      "tainted": [
+        "Tainted souls... Ekatrix among them. Ask me about a mission if you want the full tale."
       ]
     },
     "confusion": [
@@ -892,7 +907,11 @@
       "scarab_coin": "Show the scarab coin to Tesha in the Darama Oasis.",
       "obsidian_knife": "Keep that knife — you will need it to skin dragons for my errand.",
       "dragon_claw": "Demodras' claw! A worthy trophy from the red dragon hunt.",
-      "golden_mug": "A golden mug from Demodras himself! You must have faced the dragonmother.",
+      "golden_mug": "A Demodras soul core! You must have faced the dragonmother.",
+      "old_widow_soul_core": "A soul core from the old widow. A grim trophy from the swamps.",
+      "witch_soul_core": "A witch's soul core. Wyda in the Venore swamps may know more of such things.",
+      "ekatrix_soul_core": "An Ekatrix Soul Core. Wyda in the Venore swamps may know more of such things.",
+      "bosstiary": "A bosstiary records the bosses you have overcome. Keep it close.",
       "silver_token": "Present your silver token when you first hail me, loyal subject.",
       "small_axe": "Al Dee lost his Small Axe in Rookgaard. Speak with him, not me.",
       "elvenhair_rope": "Al Dee mourns his elvenhair rope. The rope merchant in Rookgaard may need your help.",
@@ -979,9 +998,13 @@
     "wyda": {
       "blessed_ankh": "The Blessed Ankh! Costello sent you? Give it to me when you are on that task.",
       "spider_silk": "Spider silk from the mother of all spiders — bring it when you accept my task.",
+      "old_widow_soul_core": "A soul core from the mother of all spiders. Keep it — I only needed the silk.",
+      "bosstiary": "A book of bosses? I prefer live entertainment, but keep your trophies.",
       "spool_of_yarn": "I spin spider silk into yarn. Bring me the silk first — or if you already have a spool from me, a stranded sailor might need it more.",
       "yarn": "Yarn spun from spider silk — complete my spider task, or take a finished spool to someone at sea who needs repairs.",
-      "stuffed_toad": "A stuffed toad from clearing the Jakundaf Desert path — keep it if you earned it.",
+      "stuffed_toad": "That stuffed toad... take it to Eclipse and drop it in the Cauldron. I have a feeling it will stir something.",
+      "witch_soul_core": "A soul core from Ekatrix. Keep it — I only needed her gone.",
+      "ekatrix_soul_core": "A soul core from Ekatrix. Keep it — I only needed her gone.",
       "holy_tible": "A holy book for Costello's monastery, not for a swamp witch.",
       "costello_diary": "Costello's diary and his seven seals are his affair, not mine.",
       "scarab_coin": "Scarab coins? Tesha trades those in the Darama desert.",
