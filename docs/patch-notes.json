@@ -4,6 +4,31 @@
   },
   "notes": [
     {
+      "version": "4.8.10",
+      "changes": [
+        {
+          "mod": "Better Highscores",
+          "type": "fixed",
+          "text": "Leaderboard overlay is positioned over the board from document.body instead of being inserted into React's DOM, so autoplay game-end no longer crashes the client."
+        },
+        {
+          "mod": "Mod Loader",
+          "type": "fixed",
+          "text": "Client-crash auto-refresh uses a 1-minute retry window instead of a sticky per-tab cap, so a later in-game crash can still reload after earlier recoveries."
+        },
+        {
+          "mod": "Quests",
+          "type": "added",
+          "text": "Quest backpack can show a book after you collect your first core from a boss hunt. Selecting the book lists cores in Details instead of the main item grid."
+        },
+        {
+          "mod": "Quests",
+          "type": "changed",
+          "text": "Soul cores in the bosstiary details list are always shown in alphabetical order."
+        }
+      ]
+    },
+    {
       "version": "4.8.9",
       "changes": [
         {

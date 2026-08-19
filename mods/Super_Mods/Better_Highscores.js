@@ -105,6 +105,8 @@
   let openContextMenu = null;
   let restoreButton = null;
   let modDisposed = false;
+  let overlayPositionHandler = null;
+  const OVERLAY_EDGE_GAP_PX = 9;
 
   function saveSettings() {
     modSettings = normalizeSettings(modSettings);
@@ -220,21 +222,14 @@
   }
 
   function getContainerPositionStyles() {
-    const placement = getBetterHighscoresPlacement();
-    const base = {
-      position: 'absolute',
-      left: '50%',
-      right: 'auto',
+    return {
+      position: 'fixed',
       display: 'inline-block',
       width: 'fit-content',
-      height: 'fit-content'
+      height: 'fit-content',
+      zIndex: '999999',
+      pointerEvents: 'auto'
     };
-
-    if (placement === 'bottom') {
-      return Object.assign({}, base, { bottom: '9px', top: 'auto' });
-    }
-
-    return Object.assign({}, base, { top: '9px', bottom: 'auto' });
   }
 
   function getContainerTransform(scale = getBetterHighscoresScale()) {
@@ -256,6 +251,95 @@
     });
     applyContentContainerStyles(container._contentDiv);
     resetBackgroundSizing(container);
+    syncOverlayPosition(container);
+  }
+
+  function getBoardAnchor() {
+    return document.querySelector('.relative.z-0.select-none');
+  }
+
+  function syncOverlayPosition(container = leaderboardContainer) {
+    if (!container) {
+      return;
+    }
+
+    const anchor = getBoardAnchor();
+    if (!anchor) {
+      container.style.visibility = 'hidden';
+      return;
+    }
+
+    const rect = anchor.getBoundingClientRect();
+    if (rect.width < 8 || rect.height < 8) {
+      container.style.visibility = 'hidden';
+      return;
+    }
+
+    const gap = OVERLAY_EDGE_GAP_PX;
+    const placement = getBetterHighscoresPlacement();
+    const styles = {
+      position: 'fixed',
+      left: `${rect.left + (rect.width / 2)}px`,
+      right: 'auto',
+      visibility: '',
+      transform: getContainerTransform(),
+      transformOrigin: getContainerTransformOrigin(),
+      zIndex: '999999',
+      pointerEvents: 'auto'
+    };
+
+    if (placement === 'bottom') {
+      styles.top = 'auto';
+      styles.bottom = `${Math.max(gap, window.innerHeight - rect.bottom + gap)}px`;
+    } else {
+      styles.top = `${rect.top + gap}px`;
+      styles.bottom = 'auto';
+    }
+
+    Object.assign(container.style, styles);
+  }
+
+  function ensureOverlayPositionListener() {
+    if (overlayPositionHandler) {
+      return;
+    }
+
+    overlayPositionHandler = () => {
+      if (leaderboardContainer) {
+        syncOverlayPosition(leaderboardContainer);
+      }
+      if (restoreButton) {
+        syncOverlayPosition(restoreButton);
+      }
+    };
+
+    window.addEventListener('resize', overlayPositionHandler);
+    window.addEventListener('scroll', overlayPositionHandler, true);
+  }
+
+  function removeOverlayPositionListener() {
+    if (!overlayPositionHandler) {
+      return;
+    }
+
+    window.removeEventListener('resize', overlayPositionHandler);
+    window.removeEventListener('scroll', overlayPositionHandler, true);
+    overlayPositionHandler = null;
+  }
+
+  function mountOverlay(container) {
+    if (!container) {
+      return false;
+    }
+
+    if (container.parentElement !== document.body) {
+      document.body.appendChild(container);
+    }
+
+    ensureOverlayPositionListener();
+    applyContainerStyles(container);
+    requestAnimationFrame(() => syncOverlayPosition(container));
+    return true;
   }
 
   function resetBackgroundSizing(container) {
@@ -628,19 +712,12 @@
       return;
     }
 
-    const mainContainer = getMainContainer();
-    if (!mainContainer) {
-      return;
-    }
-
     restoreButton = document.createElement('button');
     restoreButton.type = 'button';
     restoreButton.className = 'better-highscores-restore-btn';
     restoreButton.title = t('mods.betterUI.betterHighscoresShowPanel');
     restoreButton.innerHTML = `<img src="https://bestiaryarena.com/assets/icons/achievement.png" alt="${t('mods.betterUI.betterHighscoresButton')}" width="12" height="12" class="pixelated"><span>${t('mods.betterUI.betterHighscoresShowPanel')}</span>`;
     Object.assign(restoreButton.style, {
-      position: 'absolute',
-      zIndex: '999999',
       cursor: 'pointer',
       padding: '4px 8px',
       background: 'url("https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png")',
@@ -656,12 +733,11 @@
       alignItems: 'center',
       gap: '4px'
     });
-    applyContainerStyles(restoreButton);
     restoreButton.addEventListener('click', (e) => {
       e.stopPropagation();
       setHighscoresHidden(false);
     });
-    mainContainer.appendChild(restoreButton);
+    mountOverlay(restoreButton);
   }
   
   const DELAYS = {
@@ -1339,15 +1415,11 @@
 
       const mapName = getMapName(mapCode);
       const newContainer = createLeaderboardDisplay(tickData, rankData, floorData, mapName);
-      if (leaderboardContainer && document.contains(leaderboardContainer)) {
+      if (leaderboardContainer && document.body.contains(leaderboardContainer)) {
         leaderboardContainer.replaceWith(newContainer);
-      } else {
-        const mainContainer = getMainContainer();
-        if (mainContainer) {
-          mainContainer.appendChild(newContainer);
-        }
       }
       leaderboardContainer = newContainer;
+      mountOverlay(leaderboardContainer);
       currentMapCode = mapCode;
       BetterHighscoresState.lastUpdateTime = Date.now();
       console.log('[Better Highscores] Leaderboard refreshed with fresh data');
@@ -1464,10 +1536,6 @@
     if (isAnalysisCoordinationActiveNow() || BetterHighscoresState.isBoardAnalyzing) {
       return;
     }
-    if (isSandboxMode()) {
-      console.log('[Better Highscores] Main container changed in sandbox mode, skipping leaderboard re-application');
-      return;
-    }
 
     const debounceDelay = isAutoplayMode()
       ? DELAYS.CONTAINER_DEBOUNCE_AUTOPLAY
@@ -1478,40 +1546,46 @@
     BetterHighscoresState.containerDebounceTimeout = scheduleTimeout(() => {
       BetterHighscoresState.containerDebounceTimeout = null;
 
-      const mainContainer = getMainContainer();
-      if (!mainContainer || (leaderboardContainer && mainContainer.contains(leaderboardContainer))) {
+      if (isBetterHighscoresHidden() || isLeaderboardSuppressed()) {
         return;
       }
 
-      console.log('[Better Highscores] Main container changed, re-applying leaderboard');
+      if (leaderboardContainer && document.body.contains(leaderboardContainer)) {
+        syncOverlayPosition(leaderboardContainer);
+        return;
+      }
+
+      if (isSandboxMode()) {
+        return;
+      }
+
       updateLeaderboards();
     }, debounceDelay);
   }
 
-  // Shared handler for map changes and container updates
-  function handleStateUpdate(detectedMapCode, mainContainer) {
+  // Shared handler for map changes and overlay position updates
+  function handleStateUpdate(detectedMapCode) {
     if (detectedMapCode && detectedMapCode !== currentMapCode) {
       scheduleMapChangeUpdate(detectedMapCode);
       return;
     }
 
-    if (mainContainer && (!leaderboardContainer || !mainContainer.contains(leaderboardContainer))) {
-      scheduleContainerUpdate();
+    if (leaderboardContainer && document.body.contains(leaderboardContainer)) {
+      if (!BetterHighscoresState.containerDebounceTimeout) {
+        scheduleContainerUpdate();
+      }
+      return;
     }
+
+    scheduleContainerUpdate();
   }
 
   function getMainContainer() {
-    return document.querySelector('.relative.z-0.select-none') || 
-           document.querySelector('[class*="relative"]') ||
-           document.body;
+    return getBoardAnchor();
   }
 
   function isLeaderboardContainerMounted() {
-    if (!leaderboardContainer) {
-      return false;
-    }
-    const mainContainer = getMainContainer();
-    return Boolean(mainContainer && mainContainer.contains(leaderboardContainer));
+    return Boolean(leaderboardContainer && document.body.contains(leaderboardContainer));
   }
 
   function normalizeLeaderboardContainerReference() {
@@ -1524,16 +1598,11 @@
       return false;
     }
 
-    const mainContainer = getMainContainer();
-    if (!mainContainer) {
-      return false;
-    }
-
-    if (!mainContainer.contains(leaderboardContainer)) {
-      mainContainer.appendChild(leaderboardContainer);
-      applyContainerStyles(leaderboardContainer);
+    if (leaderboardContainer.parentElement !== document.body) {
+      mountOverlay(leaderboardContainer);
       console.log('[Better Highscores] Re-attached orphaned leaderboard container');
-      return true;
+    } else {
+      syncOverlayPosition(leaderboardContainer);
     }
 
     return true;
@@ -1735,16 +1804,9 @@
     
     // Restore the preserved container
     const restoredContainer = BetterHighscoresState.preservedContainer.cloneNode(true);
-    const mainContainer = getMainContainer();
-    
-    if (mainContainer) {
-      mainContainer.appendChild(restoredContainer);
-      leaderboardContainer = restoredContainer;
-      applyContainerStyles(leaderboardContainer);
-      console.log('[Better Highscores] Container restored successfully');
-    } else {
-      console.log('[Better Highscores] Could not find main container for restoration');
-    }
+    leaderboardContainer = restoredContainer;
+    mountOverlay(leaderboardContainer);
+    console.log('[Better Highscores] Container restored successfully');
     
     // Clear preserved snapshot; keep sandbox flag if still in sandbox so we don't re-preserve.
     BetterHighscoresState.preservedContainer = null;
@@ -2645,18 +2707,8 @@
       // Create new container
       leaderboardContainer = createLeaderboardDisplay(tickData, rankData, floorData, mapName);
       console.log('[Better Highscores] Created leaderboard container:', leaderboardContainer);
-      
-      // Find the main game container and append
-      const mainContainer = getMainContainer();
-      console.log('[Better Highscores] Main container found:', mainContainer);
-      
-      if (mainContainer) {
-        console.log('[Better Highscores] Appending leaderboard container to main container');
-        mainContainer.appendChild(leaderboardContainer);
-        console.log('[Better Highscores] Leaderboard container appended successfully');
-      } else {
-        console.error('[Better Highscores] Could not find main container for leaderboard injection');
-      }
+      mountOverlay(leaderboardContainer);
+      console.log('[Better Highscores] Leaderboard overlay mounted on document.body');
       
       console.log(`[Better Highscores] Updated leaderboards for map: ${mapName} (${mapCode})`);
       
@@ -2820,8 +2872,7 @@
           
           // Handle map changes and container updates
           const detectedMapCode = getCurrentMapCode();
-          const mainContainer = getMainContainer();
-          handleStateUpdate(detectedMapCode, mainContainer);
+          handleStateUpdate(detectedMapCode);
           
           // Check for sandbox mode changes
           const currentMode = state.context?.mode;
@@ -2871,8 +2922,7 @@
             
             // Handle map changes and container updates
             const detectedMapCode = getCurrentMapCode();
-            const mainContainer = getMainContainer();
-            handleStateUpdate(detectedMapCode, mainContainer);
+            handleStateUpdate(detectedMapCode);
           });
           
           // Store subscription for cleanup
@@ -2914,37 +2964,8 @@
           resetTrackedUserScores(getCurrentMapCode());
         }
         
-        // Set up MutationObserver to detect when leaderboard gets removed from DOM
-        window.BetterHighscoresInternals = window.BetterHighscoresInternals || {};
-        window.BetterHighscoresInternals.observer = new MutationObserver((mutations) => {
-          if (isAnalysisCoordinationActiveNow() || BetterHighscoresState.isBoardAnalyzing) {
-            return;
-          }
-          if (!isAutoplayMode()) return;
-          
-          for (const mutation of mutations) {
-            if (mutation.type === 'childList') {
-              for (const removedNode of mutation.removedNodes) {
-                if (removedNode === leaderboardContainer || 
-                    (removedNode.nodeType === Node.ELEMENT_NODE && 
-                     removedNode.contains && removedNode.contains(leaderboardContainer))) {
-                  console.log('[Better Highscores] Leaderboard removed from DOM during autoplay, restoring');
-                  scheduleTimeout(() => {
-                    updateLeaderboards();
-                  }, DELAYS.MUTATION_RESTORE);
-                  break;
-                }
-              }
-            }
-          }
-        });
-        
-        // Observe the document body for leaderboard removal
-        window.BetterHighscoresInternals.observer.observe(document.body, { 
-          childList: true, 
-          subtree: true 
-        });
-        
+        ensureOverlayPositionListener();
+
         console.log('[Better Highscores] Initialization complete');
         initTblFloorLeague();
       } else {
@@ -2987,6 +3008,7 @@
     modDisposed = true;
 
     window.removeEventListener('ba-power-saving-mode-changed', onPowerSavingModeChanged);
+    removeOverlayPositionListener();
     cleanupTblFloorLeague();
     closeBetterHighscoresContextMenu();
     removeRestoreButton();

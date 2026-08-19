@@ -927,6 +927,28 @@ function applyQuestRoomsFromAssets(roomsData) {
     if (dragonmother.dragonLairStairsTile != null) DRAGON_LAIR_STAIRS_TILE_47 = dragonmother.dragonLairStairsTile;
   }
 
+  const taintedSouls = roomsData.taintedSouls;
+  if (taintedSouls) {
+    if (taintedSouls.roomName) ECLIPSE_ROOM_NAME = taintedSouls.roomName;
+    if (Array.isArray(taintedSouls.cauldronTileIndices) && taintedSouls.cauldronTileIndices.length) {
+      replaceArrayContents(ECLIPSE_CAULDRON_TILE_INDICES, taintedSouls.cauldronTileIndices);
+    } else if (taintedSouls.cauldronTileIndex != null) {
+      replaceArrayContents(ECLIPSE_CAULDRON_TILE_INDICES, [taintedSouls.cauldronTileIndex]);
+    }
+    if (taintedSouls.cauldronContextMenuLabel) ECLIPSE_CAULDRON_CONTEXT_MENU_LABEL = taintedSouls.cauldronContextMenuLabel;
+    if (taintedSouls.portalTileIndex != null) ECLIPSE_PORTAL_TILE_INDEX = taintedSouls.portalTileIndex;
+    if (taintedSouls.portalSpriteId != null) ECLIPSE_PORTAL_SPRITE_ID = taintedSouls.portalSpriteId;
+    if (taintedSouls.portalContextMenuLabel) ECLIPSE_PORTAL_CONTEXT_MENU_LABEL = taintedSouls.portalContextMenuLabel;
+    if (taintedSouls.battleRoomName) EKATRIX_BATTLE_ROOM_NAME = taintedSouls.battleRoomName;
+    if (taintedSouls.battleRoomId) EKATRIX_BATTLE_ROOM_ID = taintedSouls.battleRoomId;
+    if (taintedSouls.battleDisplayName) EKATRIX_BATTLE_DISPLAY_NAME = taintedSouls.battleDisplayName;
+    if (taintedSouls.battleId) EKATRIX_BATTLE_ID = taintedSouls.battleId;
+    if (taintedSouls.requiredItemName) EKATRIX_REQUIRED_ITEM_NAME = taintedSouls.requiredItemName;
+    if (taintedSouls.tileMutations && typeof taintedSouls.tileMutations === 'object') {
+      EKATRIX_TILE_MUTATIONS = taintedSouls.tileMutations;
+    }
+  }
+
   const board = roomsData.boardNpcs;
   if (board) {
     if (board.santa) {
@@ -1311,6 +1333,7 @@ const QUEST_MISSION_IDS = [
   'follower_of_zathroth',
   'mother_of_all_spiders',
   'jakundaf_desert',
+  'tainted_souls',
   'king_scarab_coin',
   'serpentine_tower',
   'apprentice_sheng',
@@ -1338,6 +1361,7 @@ const COSTELLO_QUEEN_BANSHEES_MISSION = MISSION_BY_ID.costello_queen_banshees;
 const FOLLOWER_OF_ZATHROTH_MISSION = MISSION_BY_ID.follower_of_zathroth;
 const MOTHER_OF_ALL_SPIDERS_MISSION = MISSION_BY_ID.mother_of_all_spiders;
 const JAKUNDAF_DESERT_MISSION = MISSION_BY_ID.jakundaf_desert;
+const TAINTED_SOULS_MISSION = MISSION_BY_ID.tainted_souls;
 const DRAGONMOTHER_MISSION = MISSION_BY_ID.dragonmother;
 const APPRENTICE_SHENG_MISSION = MISSION_BY_ID.apprentice_sheng;
 const CHRISTMAS_MIRACLE_MISSION = MISSION_BY_ID.christmas_miracle;
@@ -1482,6 +1506,19 @@ const JAKUNDAF_SCENE_SPRITE_REPLACEMENTS = { rootId: 'background-scene', rules: 
 let DRAGON_LAIR_ROOM_NAME = '';
 let LONESOME_DRAGON_ROOM_NAME = '';
 let DRAGON_LAIR_STAIRS_TILE_47 = null;
+
+let ECLIPSE_ROOM_NAME = 'Eclipse';
+const ECLIPSE_CAULDRON_TILE_INDICES = [20, 21, 35, 36];
+let ECLIPSE_CAULDRON_CONTEXT_MENU_LABEL = 'Use Stuffed Toad';
+let ECLIPSE_PORTAL_TILE_INDEX = 81;
+let ECLIPSE_PORTAL_SPRITE_ID = 1959;
+let ECLIPSE_PORTAL_CONTEXT_MENU_LABEL = 'Enter the portal';
+let EKATRIX_BATTLE_ROOM_NAME = 'Sewers';
+let EKATRIX_BATTLE_ROOM_ID = 'rkswrs';
+let EKATRIX_BATTLE_DISPLAY_NAME = 'Ekatrix';
+let EKATRIX_BATTLE_ID = 'ekatrix';
+let EKATRIX_REQUIRED_ITEM_NAME = 'Stuffed Toad';
+let EKATRIX_TILE_MUTATIONS = null;
 
 const KING_ARENA_RANKS = [];
 
@@ -1762,7 +1799,16 @@ function resolveQuestProductName(productId) {
     return JAKUNDAF_DESERT_MISSION.rewardItemName || 'Stuffed Toad';
   }
   if (productId === 'goldenMug') {
-    return DRAGONMOTHER_MISSION.rewardItemName || 'Golden Mug';
+    return DRAGONMOTHER_MISSION.rewardItemName || 'Demodras Soul Core';
+  }
+  if (productId === 'oldWidowSoulCore') {
+    return MOTHER_OF_ALL_SPIDERS_MISSION.soulCoreItemName || 'The Old Widow Soul Core';
+  }
+  if (productId === 'ekatrixSoulCore' || productId === 'witchSoulCore') {
+    return TAINTED_SOULS_MISSION.soulCoreItemName || TAINTED_SOULS_MISSION.rewardItemName || 'Ekatrix Soul Core';
+  }
+  if (productId === 'bosstiary') {
+    return 'Bosstiary';
   }
   if (productId === 'dragonClaw') {
     return getMissionRewardItemName(KING_RED_DRAGON_MISSION, 'dragonClaw');
@@ -1989,6 +2035,7 @@ function createNPCCooldownManager() {
     progressFollowerOfZathroth: { accepted: false, completed: false },
     progressMotherOfAllSpiders: { accepted: false, completed: false },
     progressJakundafDesert: { accepted: false, completed: false, pathCleared: false },
+    progressTaintedSouls: { accepted: false, completed: false, portalOpened: false, battleCompleted: false },
     progressDragonmother: { accepted: false, completed: false },
     progressAlDeeFishing: { accepted: false, completed: false },
     progressAlDeeGoldenRope: { accepted: false, completed: false },
@@ -2121,6 +2168,18 @@ function createNPCCooldownManager() {
   let jakundafDesertReinitTriggered = false;
   let jakundafDesertRetryWithoutTile76 = false;
   let jakundafDesertHitboxesApplied = false;
+
+  // The Tainted Souls (Eclipse cauldron → teleporter on tile 81 → Ekatrix)
+  let eclipseCauldronRightClickEnabled = false;
+  let eclipsePortalRightClickEnabled = false;
+  let eclipseBoardSubscription = null;
+  let eclipseCauldronContextMenu = null;
+  let eclipsePortalContextMenu = null;
+  let playerEnteredEkatrixPortal = false;
+  let ekatrixBattle = null;
+  let ekatrixReinitTriggered = false;
+  let ekatrixRetryWithoutPortal = false;
+  let ekatrixHitboxesApplied = false;
 
   // Lonesome Dragon (The Dragonmother: tile 47 in Dragon Lair → Lonesome Dragon custom battle)
   let playerUsedTile47ToLonesomeDragon = false;
@@ -2934,6 +2993,11 @@ function createNPCCooldownManager() {
           await addQuestItem('Spider Silk', 1).catch(error => {
             console.error('[Quests Mod][Spider Lair] Error adding Spider Silk:', error);
           });
+          const soulCoreName = getOldWidowSoulCoreName();
+          await addQuestItem(soulCoreName, 1).catch(error => {
+            console.error('[Quests Mod][Spider Lair] Error adding soul core:', error);
+          });
+          NotificationService.showItemReceived(soulCoreName, BATTLE_TOAST_LOG.spiderLair || '[Quests Mod][Spider Lair]');
         },
         onDefeat: () => {},
         onClose: (isVictory) => {
@@ -2943,10 +3007,13 @@ function createNPCCooldownManager() {
         },
         victoryTitle: 'Victory!',
         defeatTitle: 'Defeat',
-        victoryMessage: getMissionDialogueLine(MOTHER_OF_ALL_SPIDERS_MISSION, 'battleVictory', 'The Old Widow was slain. You found Spider Silk.'),
+        victoryMessage: getMissionDialogueLine(MOTHER_OF_ALL_SPIDERS_MISSION, 'battleVictory', 'The Old Widow was slain. You found Spider Silk and a soul core.'),
         defeatMessage: getMissionDialogueLine(MOTHER_OF_ALL_SPIDERS_MISSION, 'battleDefeat', 'The Old Widow was too strong.'),
         showItems: false,
-        items: [{ name: 'Spider Silk', amount: 1 }]
+        items: [
+          { name: 'Spider Silk', amount: 1 },
+          { name: getOldWidowSoulCoreName(), amount: 1 }
+        ]
       }
     };
     return window.CustomBattles.create(spiderLairConfig);
@@ -3258,7 +3325,7 @@ function createNPCCooldownManager() {
       victoryDefeat: {
         onVictory: async () => {
           console.log('[Quests Mod][Lonesome Dragon] Demodras defeated! Completing The Dragonmother');
-          const rewardName = DRAGONMOTHER_MISSION.rewardItemName || 'Golden Mug';
+          const rewardName = DRAGONMOTHER_MISSION.rewardItemName || 'Demodras Soul Core';
           try {
             await persistMissionProgress(DRAGONMOTHER_MISSION, { accepted: true, completed: true });
             NotificationService.showQuestCompleted(DRAGONMOTHER_MISSION, BATTLE_TOAST_LOG.lonesomeDragon || '[Quests Mod][Lonesome Dragon]');
@@ -3281,7 +3348,7 @@ function createNPCCooldownManager() {
             console.error('[Quests Mod][Lonesome Dragon] Error removing Dragon Claw:', error);
           }
           await addQuestItem(rewardName, 1).catch(error => {
-            console.error('[Quests Mod][Lonesome Dragon] Error adding Golden Mug:', error);
+            console.error('[Quests Mod][Lonesome Dragon] Error adding Demodras Soul Core:', error);
           });
           NotificationService.showItemReceived(rewardName, BATTLE_TOAST_LOG.lonesomeDragon || '[Quests Mod][Lonesome Dragon]');
         },
@@ -3293,10 +3360,10 @@ function createNPCCooldownManager() {
         },
         victoryTitle: 'Victory!',
         defeatTitle: 'Defeat',
-        victoryMessage: getMissionDialogueLine(DRAGONMOTHER_MISSION, 'battleVictory', 'Demodras has fallen. You found a Golden Mug.'),
+        victoryMessage: getMissionDialogueLine(DRAGONMOTHER_MISSION, 'battleVictory', 'Demodras has fallen. You found a Demodras Soul Core.'),
         defeatMessage: getMissionDialogueLine(DRAGONMOTHER_MISSION, 'battleDefeat', 'Demodras was too strong.'),
         showItems: false,
-        items: [{ name: DRAGONMOTHER_MISSION.rewardItemName || 'Golden Mug', amount: 1 }]
+        items: [{ name: DRAGONMOTHER_MISSION.rewardItemName || 'Demodras Soul Core', amount: 1 }]
       }
     };
     return window.CustomBattles.create(lonesomeDragonConfig);
@@ -4210,12 +4277,13 @@ function createNPCCooldownManager() {
   }
 
   // Create poof sprite animation sized to match the clicked tile (Darama Oasis desert digging)
-  function createPoofAnimation(tileElement, { scale = 1 } = {}) {
+  function createPoofAnimation(tileElement, { scale = 1, frameMs } = {}) {
     if (!tileElement) return;
 
     const tileRect = tileElement.getBoundingClientRect();
     const frameCount = DESERT_DIGGING_CONFIG.POOF_FRAME_COUNT;
-    const duration = DESERT_DIGGING_CONFIG.POOF_FRAME_MS * frameCount;
+    const frameDuration = Math.max(16, Number(frameMs) || DESERT_DIGGING_CONFIG.POOF_FRAME_MS || 60);
+    const duration = frameDuration * frameCount;
     const tileWidth = tileRect.width;
     const tileHeight = tileRect.height;
     const poofScale = Math.max(1, Number(scale) || 1);
@@ -4472,6 +4540,9 @@ function createNPCCooldownManager() {
   const QUEST_BOARD_HIDDEN_TAG_SPIDER_LAIR = 'spider-lair-removal';
   const QUEST_BOARD_HIDDEN_TAG_JAKUNDAF = 'jakundaf-desert-removal';
   const QUEST_BOARD_ADDED_ATTR_JAKUNDAF = 'data-quests-jakundaf-added';
+  const QUEST_BOARD_ADDED_ATTR_EKATRIX = 'data-quests-ekatrix-portal';
+  const QUEST_BOARD_ADDED_ATTR_EKATRIX_BATTLE = 'data-quests-ekatrix-added';
+  const QUEST_BOARD_HIDDEN_TAG_EKATRIX = 'ekatrix-sewers';
 
   function hideQuestBoardElement(element, options = {}) {
     const { tag = '1', clearDatasetKeys = [] } = options;
@@ -5290,6 +5361,159 @@ function createNPCCooldownManager() {
   }
 
   // Helper to create product slot container
+  function isSoulCoreProduct(productDef) {
+    if (productDef?.soulCore) return true;
+    const icon = String(productDef?.icon || '');
+    const name = String(productDef?.name || productDef?.productName || '');
+    return /Soul_Core/i.test(icon) || /\bsoul\s*core\b/i.test(name);
+  }
+
+  function isBosstiaryProduct(productDef) {
+    if (productDef?.opensContainer === 'soulCores') return true;
+    const name = String(productDef?.name || productDef?.productName || '');
+    return /^bosstiary$/i.test(name);
+  }
+
+  function getBosstiaryProductName() {
+    return resolveQuestProductName('bosstiary');
+  }
+
+  function getOldWidowSoulCoreName() {
+    return resolveQuestProductName('oldWidowSoulCore');
+  }
+
+  function getEkatrixSoulCoreName() {
+    return resolveQuestProductName('ekatrixSoulCore');
+  }
+
+  function getSoulCoreProductNames() {
+    const products = questItemsConfigData?.products || {};
+    const names = [];
+    for (const [productId, product] of Object.entries(products)) {
+      if (!product?.soulCore) continue;
+      const name = resolveQuestProductName(productId);
+      if (name && !names.includes(name)) names.push(name);
+    }
+    names.sort((a, b) => String(a).localeCompare(String(b), undefined, { sensitivity: 'base' }));
+    return names;
+  }
+
+  function isBosstiaryCollectionItemName(productName) {
+    return productName === getBosstiaryProductName() || getSoulCoreProductNames().includes(productName);
+  }
+
+  function inventoryHasSoulCore(products) {
+    if (!products || typeof products !== 'object') return false;
+    return getSoulCoreProductNames().some((name) => (Number(products[name]) || 0) > 0);
+  }
+
+  function addCanonicalNameAliases(map, canonical, extraKeys = []) {
+    if (!canonical || !map) return;
+    const lower = String(canonical).toLowerCase();
+    map[lower] = canonical;
+    map[lower.replace(/\s+/g, '_')] = canonical;
+    for (const key of extraKeys) {
+      if (key) map[key] = canonical;
+    }
+  }
+
+  function splitQuestItemDefinitions(productDefinitions) {
+    const soulCoreDefs = (productDefinitions || [])
+      .filter((def) => isSoulCoreProduct(def))
+      .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' }));
+    const backpackDefs = (productDefinitions || []).filter((def) => !isSoulCoreProduct(def));
+    return { soulCoreDefs, backpackDefs };
+  }
+
+  function syncBosstiaryInDisplay(displayProducts) {
+    const name = getBosstiaryProductName();
+    if (!inventoryHasSoulCore(displayProducts)) {
+      delete displayProducts[name];
+      return;
+    }
+    if (!(displayProducts[name] > 0)) {
+      displayProducts[name] = 1;
+    }
+  }
+
+  function setQuestItemSlotHighlighted(slot, highlighted) {
+    if (!slot) return;
+    slot.setAttribute('data-highlighted', highlighted ? 'true' : 'false');
+    slot.style.border = highlighted ? '1px solid white' : '';
+    if (highlighted) slot.style.boxSizing = 'border-box';
+  }
+
+  function createQuestItemDescFrame() {
+    const descFrame = document.createElement('div');
+    descFrame.style.cssText = `
+      min-height: 80px;
+      padding: 2px 4px;
+      width: 100%;
+      box-sizing: border-box;
+      background: url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat;
+      border: 4px solid transparent;
+      border-image: url('https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png') 6 fill stretch;
+    `;
+    return descFrame;
+  }
+
+  function createQuestItemSlotButton(productDef, count, { dimUnowned = false } = {}) {
+    const productItem = document.createElement('button');
+    productItem.style.cssText = 'padding: 0; border: none; background: none; cursor: pointer; width: 34px; height: 34px;';
+    const containerSlot = createProductSlot(productDef, count, false, productDef.rarity != null ? productDef.rarity : 5);
+    if (dimUnowned && count <= 0) containerSlot.style.opacity = '0.4';
+    productItem.appendChild(containerSlot);
+    return { productItem, containerSlot };
+  }
+
+  function renderBosstiaryDetails(detailsContainer, { bookDef, soulCoreDefs, displayProducts, setTitle }) {
+    const bookName = bookDef?.name || getBosstiaryProductName();
+    const bookDescription = bookDef?.description || '';
+    setTitle?.(bookName);
+    detailsContainer.innerHTML = '';
+
+    const coresRow = document.createElement('div');
+    coresRow.style.cssText = 'display: flex; flex-wrap: wrap; align-items: center; gap: 2px; margin-bottom: 8px; width: 100%;';
+
+    const descFrame = createQuestItemDescFrame();
+    const coreInfo = document.createElement('div');
+    coreInfo.style.cssText = 'font-size: 11px; color: rgb(150, 150, 150); font-style: italic; text-align: center;';
+    const showBookDescription = () => {
+      coreInfo.textContent = bookDescription;
+      coreInfo.style.whiteSpace = bookDescription.includes('\n') ? 'pre-line' : '';
+    };
+    showBookDescription();
+
+    let selectedCoreElement = null;
+    for (const coreDef of soulCoreDefs || []) {
+      const count = displayProducts?.[coreDef.name] || 0;
+      const { productItem, containerSlot } = createQuestItemSlotButton(coreDef, count, { dimUnowned: true });
+      productItem.addEventListener('click', () => {
+        if (selectedCoreElement === productItem) {
+          setQuestItemSlotHighlighted(containerSlot, false);
+          selectedCoreElement = null;
+          showBookDescription();
+          return;
+        }
+        if (selectedCoreElement) {
+          setQuestItemSlotHighlighted(selectedCoreElement.querySelector('[data-highlighted]'), false);
+        }
+        selectedCoreElement = productItem;
+        setQuestItemSlotHighlighted(containerSlot, true);
+        const lines = [coreDef.name];
+        if (coreDef.description) lines.push(coreDef.description);
+        if (count <= 0) lines.push('Not yet obtained.');
+        coreInfo.textContent = lines.join('\n');
+        coreInfo.style.whiteSpace = 'pre-line';
+      });
+      coresRow.appendChild(productItem);
+    }
+
+    detailsContainer.appendChild(coresRow);
+    descFrame.appendChild(coreInfo);
+    detailsContainer.appendChild(descFrame);
+  }
+
   function createProductSlot(productDef, count, isSelected = false, rarity = 5) {
     const containerSlot = document.createElement('div');
     containerSlot.className = 'container-slot surface-darker';
@@ -5300,13 +5524,16 @@ function createNPCCooldownManager() {
     
     const rarityDiv = document.createElement('div');
     rarityDiv.className = 'has-rarity relative grid h-full place-items-center';
-    rarityDiv.setAttribute('data-rarity', String(rarity));
+    if (!isSoulCoreProduct(productDef) && rarity != null && Number(rarity) > 0) {
+      rarityDiv.setAttribute('data-rarity', String(rarity));
+    }
     
     const iconImg = createProductIcon(productDef, 32);
     rarityDiv.appendChild(iconImg);
-    
-    const countOverlay = createCountOverlay(count);
-    rarityDiv.appendChild(countOverlay);
+
+    if (!isBosstiaryProduct(productDef) && !isSoulCoreProduct(productDef)) {
+      rarityDiv.appendChild(createCountOverlay(count));
+    }
     
     containerSlot.appendChild(rarityDiv);
     return containerSlot;
@@ -5341,7 +5568,9 @@ function createNPCCooldownManager() {
         iconUrl: product.iconUrl,
         spriteId: product.spriteId,
         description: product.description,
-        rarity: product.rarity
+        rarity: product.rarity,
+        soulCore: !!product.soulCore,
+        opensContainer: product.opensContainer || null
       };
 
       if (productId === 'costelloDiary') {
@@ -5366,6 +5595,14 @@ function createNPCCooldownManager() {
         def.name = DRAGONMOTHER_MISSION.rewardItemName || def.name;
         def.icon = DRAGONMOTHER_MISSION.rewardIcon || def.icon;
         def.description = DRAGONMOTHER_MISSION.rewardDescription || def.description;
+      } else if (productId === 'oldWidowSoulCore') {
+        def.name = MOTHER_OF_ALL_SPIDERS_MISSION.soulCoreItemName || def.name;
+        def.icon = MOTHER_OF_ALL_SPIDERS_MISSION.soulCoreIcon || def.icon;
+        def.description = MOTHER_OF_ALL_SPIDERS_MISSION.soulCoreDescription || def.description;
+      } else if (productId === 'ekatrixSoulCore' || productId === 'witchSoulCore') {
+        def.name = TAINTED_SOULS_MISSION.soulCoreItemName || TAINTED_SOULS_MISSION.rewardItemName || def.name;
+        def.icon = TAINTED_SOULS_MISSION.soulCoreIcon || TAINTED_SOULS_MISSION.rewardIcon || def.icon;
+        def.description = TAINTED_SOULS_MISSION.soulCoreDescription || TAINTED_SOULS_MISSION.rewardDescription || def.description;
       } else if (productId === 'dragonClaw') {
         def.name = getMissionRewardItemName(KING_RED_DRAGON_MISSION, 'dragonClaw') || def.name;
         def.icon = KING_RED_DRAGON_MISSION.rewardIcon || def.icon;
@@ -5384,7 +5621,12 @@ function createNPCCooldownManager() {
       pushDef(globalDrop);
     }
 
-    productDefinitions.sort((a, b) => a.name.localeCompare(b.name));
+    productDefinitions.sort((a, b) => {
+      const rarityA = Number(a.rarity) || 0;
+      const rarityB = Number(b.rarity) || 0;
+      if (rarityB !== rarityA) return rarityB - rarityA;
+      return a.name.localeCompare(b.name);
+    });
     return productDefinitions;
   }
 
@@ -6250,8 +6492,8 @@ function createNPCCooldownManager() {
       'obsidian knife': 'Obsidian Knife',
       'dragon claw': getDragonClawProductName(),
       'dragon_claw': getDragonClawProductName(),
-      'golden mug': 'Golden Mug',
-      'golden_mug': 'Golden Mug',
+      'golden mug': 'Demodras Soul Core',
+      'golden_mug': 'Demodras Soul Core',
       'stuffed toad': 'Stuffed Toad',
       'stuffed_toad': 'Stuffed Toad',
       'letter from al dee': 'Letter from Al Dee',
@@ -6279,12 +6521,28 @@ function createNPCCooldownManager() {
       'costellos diary': "Costello's diary",
       'costello_diary': "Costello's diary"
     };
+    addCanonicalNameAliases(canonicalMap, resolveQuestProductName('goldenMug'), ['golden mug', 'golden_mug']);
+    addCanonicalNameAliases(canonicalMap, resolveQuestProductName('oldWidowSoulCore'), [
+      'old widow soul core',
+      'old_widow_soul_core'
+    ]);
+    addCanonicalNameAliases(canonicalMap, resolveQuestProductName('ekatrixSoulCore'), [
+      'ekatrix soul core',
+      'ekatrix_soul_core',
+      'witch soul core',
+      'witch_soul_core'
+    ]);
+    addCanonicalNameAliases(canonicalMap, getBosstiaryProductName());
     const maxCountByCanonical = {
       [MINOTAUR_TROPHY_CONFIG.productName]: MINOTAUR_TROPHY_CONFIG.maxCount || 1,
       [ORB_CONFIG.productName]: ORB_CONFIG.maxCount || 1,
       'Golden Mug': 1,
       [JAKUNDAF_DESERT_MISSION.rewardItemName || 'Stuffed Toad']: 1
     };
+    for (const [productId, product] of Object.entries(questItemsConfigData?.products || {})) {
+      if (product?.maxCount == null) continue;
+      maxCountByCanonical[resolveQuestProductName(productId)] = Number(product.maxCount) || 1;
+    }
     const normalized = {};
     for (const [key, value] of Object.entries(products)) {
       const trimmedKey = String(key ?? '').trim();
@@ -7286,6 +7544,7 @@ function createNPCCooldownManager() {
       });
       await reloadQuestItemsFromFirebase();
       await cleanupStaleQuestItemsAfterCompletedMissions();
+      await syncBosstiaryCollectionFromProgress();
     } catch (error) {
       console.error('[Quests Mod] Error loading quest items on init:', error);
     }
@@ -7466,7 +7725,7 @@ function createNPCCooldownManager() {
         WISHLIST_CONFIG.productName,
         PRESENT_CONFIG.productName,
         BUNNY_SLIPPERS_CONFIG.productName
-      ].includes(productName);
+      ].includes(productName) || isBosstiaryCollectionItemName(productName);
 
       const newCount = isRedDragonMaterial ? Math.min(30, currentCount + amount) :
                       isIronOre ? Math.min(1, currentCount + amount) :
@@ -7502,12 +7761,43 @@ function createNPCCooldownManager() {
       if (typeof syncActiveMissionTabs === 'function') {
         syncActiveMissionTabs();
       }
+
+      if (getSoulCoreProductNames().includes(productName)) {
+        await ensureBosstiaryOwned({ showToast: true });
+      }
       
       // Quest item added to inventory
       return updatedProducts;
     } catch (error) {
       console.error('[Quests Mod][Quest Items] Error adding quest item:', error);
       throw error;
+    }
+  }
+
+  async function ensureBosstiaryOwned({ showToast = false } = {}) {
+    const name = getBosstiaryProductName();
+    const items = cachedQuestItems || await getQuestItems(true);
+    if ((items[name] || 0) > 0) return false;
+    if (!inventoryHasSoulCore(items)) return false;
+    await addQuestItem(name, 1);
+    if (showToast) {
+      NotificationService.showItemReceived(name, '[Quests Mod][Bosstiary]');
+    }
+    return true;
+  }
+
+  async function syncBosstiaryCollectionFromProgress() {
+    try {
+      const items = await getQuestItems(false);
+      const mother = getMissionProgress(MOTHER_OF_ALL_SPIDERS_MISSION) || {};
+      const widowCore = getOldWidowSoulCoreName();
+      const hasSilk = (items['Spider Silk'] || 0) > 0;
+      if ((mother.completed || hasSilk) && !(items[widowCore] > 0)) {
+        await addQuestItem(widowCore, 1);
+      }
+      await ensureBosstiaryOwned({ showToast: true });
+    } catch (error) {
+      console.warn('[Quests Mod][Bosstiary] Failed to sync collection:', error);
     }
   }
 
@@ -9781,6 +10071,9 @@ function createNPCCooldownManager() {
             includeObsidianKnife: redDragonActive,
             includeDragonClaw: redDragonCompleted || (displayProducts[getDragonClawProductName()] > 0)
           });
+        const { soulCoreDefs, backpackDefs } = splitQuestItemDefinitions(productDefinitions);
+        syncBosstiaryInDisplay(displayProducts);
+        const bosstiaryDef = backpackDefs.find((def) => isBosstiaryProduct(def));
         
         // Left column: Product list container
         const productsListContainer = document.createElement('div');
@@ -9808,9 +10101,25 @@ function createNPCCooldownManager() {
         
         let selectedProduct = null;
         let selectedProductElement = null;
+        let detailsBox = null;
+
+        const setDetailsTitle = (title) => {
+          const titleP = detailsBox?.querySelector('h2 p');
+          if (titleP) titleP.textContent = title;
+        };
+
+        const showBosstiaryDetails = () => {
+          renderBosstiaryDetails(detailsContainer, {
+            bookDef: bosstiaryDef,
+            soulCoreDefs,
+            displayProducts,
+            setTitle: setDetailsTitle
+          });
+        };
         
         // Function to show placeholder
         const showPlaceholder = () => {
+          setDetailsTitle('Details');
           detailsContainer.innerHTML = '';
           
           // Icon and name in horizontal layout (same structure as selected product)
@@ -9827,23 +10136,16 @@ function createNPCCooldownManager() {
           iconNameContainer.appendChild(emptySpace);
           
           detailsContainer.appendChild(iconNameContainer);
-          
-          // Empty description frame (same structure as selected product)
-          const descFrame = document.createElement('div');
-          descFrame.style.cssText = `
-            min-height: 80px;
-            padding: 2px 4px;
-            width: 100%;
-            box-sizing: border-box;
-            background: url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat;
-            border: 4px solid transparent;
-            border-image: url('https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png') 6 fill stretch;
-          `;
-          detailsContainer.appendChild(descFrame);
+          detailsContainer.appendChild(createQuestItemDescFrame());
         };
 
         // Function to update details panel
         const updateDetailsPanel = (productDef) => {
+          if (isBosstiaryProduct(productDef)) {
+            showBosstiaryDetails();
+            return;
+          }
+          setDetailsTitle('Details');
           const count = displayProducts[productDef.name] || 0;
           
           detailsContainer.innerHTML = '';
@@ -9918,7 +10220,7 @@ function createNPCCooldownManager() {
           }
 
           // Icon on the left
-          const productSlot = createProductSlot(productDef, count, false, productDef.rarity || 5);
+          const productSlot = createProductSlot(productDef, count, false, productDef.rarity != null ? productDef.rarity : 5);
           iconNameContainer.appendChild(productSlot);
 
           // Name on the right
@@ -9930,16 +10232,7 @@ function createNPCCooldownManager() {
           detailsContainer.appendChild(iconNameContainer);
           
           // Description in frame
-          const descFrame = document.createElement('div');
-          descFrame.style.cssText = `
-            min-height: 80px;
-            padding: 2px 4px;
-            width: 100%;
-            box-sizing: border-box;
-            background: url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat;
-            border: 4px solid transparent;
-            border-image: url('https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png') 6 fill stretch;
-          `;
+          const descFrame = createQuestItemDescFrame();
           const descDiv = document.createElement('div');
           if (productDef.name === (COSTELLO_QUEEN_BANSHEES_MISSION.diaryItemName || 'Costello\'s diary')
             || productDef.name === 'Castello\'s diary') {
@@ -10040,117 +10333,65 @@ function createNPCCooldownManager() {
           detailsContainer.appendChild(descFrame);
         };
         
-        // Create product items for left column
-        let hasAnyProducts = false;
-        
-        for (const productDef of productDefinitions) {
-          const count = displayProducts[productDef.name] || 0;
-          
-          // Skip products the user doesn't own
-          if (count <= 0) {
-            continue;
-          }
-          
-          // Create clickable product item button
-          const productItem = document.createElement('button');
-          productItem.style.cssText = `
-            padding: 0;
-            border: none;
-            background: none;
-            cursor: pointer;
-            width: 34px;
-            height: 34px;
-          `;
-          
-          // Create container-slot structure like item portraits
-          const containerSlot = createProductSlot(productDef, count, selectedProductElement === productItem, productDef.rarity || 5);
-          productItem.appendChild(containerSlot);
-          
-          // Click handler
-          productItem.addEventListener('click', () => {
-            // If clicking the already selected product, deselect it
-            if (selectedProductElement === productItem) {
-              containerSlot.setAttribute('data-highlighted', 'false');
-              containerSlot.style.border = '';
-              selectedProduct = null;
-              selectedProductElement = null;
-              showPlaceholder();
-              return;
-            }
-            
-            // Update selected state - clear white border from previous selection
-            if (selectedProductElement) {
-              const prevSlot = selectedProductElement.querySelector('[data-highlighted]');
-              if (prevSlot) {
-                prevSlot.setAttribute('data-highlighted', 'false');
-                prevSlot.style.border = '';
+        const renderProductGrid = () => {
+          productsListContainer.innerHTML = '';
+          selectedProduct = null;
+          selectedProductElement = null;
+
+          for (const productDef of backpackDefs) {
+            const count = displayProducts[productDef.name] || 0;
+            if (count <= 0) continue;
+
+            const { productItem, containerSlot } = createQuestItemSlotButton(productDef, count);
+
+            productItem.addEventListener('click', () => {
+              if (selectedProductElement === productItem) {
+                setQuestItemSlotHighlighted(containerSlot, false);
+                selectedProduct = null;
+                selectedProductElement = null;
+                showPlaceholder();
+                return;
               }
-            }
-            
-            selectedProduct = productDef;
-            selectedProductElement = productItem;
-            containerSlot.setAttribute('data-highlighted', 'true');
-            containerSlot.style.border = '1px solid white';
-            containerSlot.style.boxSizing = 'border-box';
-            
-            // Update details panel
-            updateDetailsPanel(productDef);
-          });
-          
-          // Hover effects
-          productItem.addEventListener('mouseenter', () => {
-            if (productItem !== selectedProductElement) {
-              containerSlot.setAttribute('data-hoverable', 'true');
-            }
-          });
-          
-          productsListContainer.appendChild(productItem);
-          hasAnyProducts = true;
-        }
-        
-        // Create boxes with titles and backgrounds
-        if (hasAnyProducts) {
-          const productsBox = createBox({
-            title: 'Quest Items',
-            content: productsListContainer
-          });
-          productsBox.style.width = '180px';
-          productsBox.style.flexShrink = '0';
-          
-          const detailsBox = createBox({
-            title: 'Details',
-            content: detailsContainer
-          });
-          detailsBox.style.width = '280px';
-          detailsBox.style.flexShrink = '0';
-          
-          contentDiv.appendChild(productsBox);
-          contentDiv.appendChild(detailsBox);
-          
-          // Show initial placeholder
-          showPlaceholder();
-        } else {
-          // Show placeholder instead of empty state message
-          const detailsBox = createBox({
-            title: 'Details',
-            content: detailsContainer
-          });
-          detailsBox.style.width = '280px';
-          detailsBox.style.flexShrink = '0';
-          
-          const productsBox = createBox({
-            title: 'Quest Items',
-            content: productsListContainer
-          });
-          productsBox.style.width = '180px';
-          productsBox.style.flexShrink = '0';
-          
-          contentDiv.appendChild(productsBox);
-          contentDiv.appendChild(detailsBox);
-          
-          // Show placeholder
-          showPlaceholder();
-        }
+
+              if (selectedProductElement) {
+                setQuestItemSlotHighlighted(selectedProductElement.querySelector('[data-highlighted]'), false);
+              }
+
+              selectedProduct = productDef;
+              selectedProductElement = productItem;
+              setQuestItemSlotHighlighted(containerSlot, true);
+              updateDetailsPanel(productDef);
+            });
+
+            productItem.addEventListener('mouseenter', () => {
+              if (productItem !== selectedProductElement) {
+                containerSlot.setAttribute('data-hoverable', 'true');
+              }
+            });
+
+            productsListContainer.appendChild(productItem);
+          }
+        };
+
+        const productsBox = createBox({
+          title: 'Quest Items',
+          content: productsListContainer
+        });
+        productsBox.style.width = '180px';
+        productsBox.style.flexShrink = '0';
+
+        detailsBox = createBox({
+          title: 'Details',
+          content: detailsContainer
+        });
+        detailsBox.style.width = '280px';
+        detailsBox.style.flexShrink = '0';
+
+        contentDiv.appendChild(productsBox);
+        contentDiv.appendChild(detailsBox);
+
+        renderProductGrid();
+        showPlaceholder();
         
       } catch (error) {
         console.error('[Quests Mod] Error loading quest items:', error);
@@ -13926,6 +14167,7 @@ function createNPCCooldownManager() {
     const wydaCooldown = createNPCCooldownManager();
     let wydaOfferingMotherOfAllSpiders = false;
     let wydaOfferingJakundafDesert = false;
+    let wydaOfferingTaintedSouls = false;
     let awaitingLostOracleLuminousConfirm = false;
 
     async function sendMessageToWyda() {
@@ -13939,6 +14181,7 @@ function createNPCCooldownManager() {
       const followerOfZathrothProgress = getMissionProgress(FOLLOWER_OF_ZATHROTH_MISSION);
       const motherProgress = getMissionProgress(MOTHER_OF_ALL_SPIDERS_MISSION);
       const jakundafProgress = getMissionProgress(JAKUNDAF_DESERT_MISSION);
+      const taintedSoulsProgress = getMissionProgress(TAINTED_SOULS_MISSION);
       const lostOracleProgress = getMissionProgress(LOST_ORACLE_MISSION) || {};
 
       // The Lost Oracle: Luminous Orb → Spectral Stone
@@ -14136,11 +14379,62 @@ function createNPCCooldownManager() {
         return;
       }
 
-      // The Mother of All Spiders / The Jakundaf Desert: offer next available Wyda task
+      // The Tainted Souls: report Ekatrix slain to Wyda for Ekatrix Soul Core
+      const taintedSoulsReportKeywords = [
+        'mission', 'quest', 'ekatrix', 'eclipse', 'portal', 'witch', 'soul', 'core',
+        'done', 'finished', 'report', 'reward', 'complete', 'victory', 'killed',
+        'dead', 'defeat', 'toad', 'cauldron'
+      ];
+      const wantsTaintedSoulsReport = taintedSoulsReportKeywords.some((kw) => lowerText.includes(kw));
+      if (
+        taintedSoulsProgress.accepted
+        && !taintedSoulsProgress.completed
+        && taintedSoulsProgress.battleCompleted
+        && wantsTaintedSoulsReport
+      ) {
+        try {
+          const rewardName = getEkatrixSoulCoreName();
+          const alreadyOwned = (await getQuestItems(true))?.[rewardName] > 0;
+          await persistMissionProgress(TAINTED_SOULS_MISSION, buildTaintedSoulsProgress({
+            accepted: true,
+            completed: true,
+            portalOpened: true,
+            battleCompleted: true
+          }));
+          if (!alreadyOwned) {
+            await addQuestItem(rewardName, 1).catch((error) => {
+              console.error('[Quests Mod][Wyda] Error adding Ekatrix Soul Core:', error);
+            });
+          }
+          if (typeof updateEclipseTaintedSoulsState === 'function') updateEclipseTaintedSoulsState();
+          if (typeof refreshQuestTileHighlights === 'function') refreshQuestTileHighlights();
+          NotificationService.showQuestCompleted(TAINTED_SOULS_MISSION, '[Quests Mod][Wyda]');
+          if (!alreadyOwned) {
+            NotificationService.showItemReceived(rewardName, '[Quests Mod][Wyda]');
+          }
+          wydaCooldown.queueResponse(
+            text,
+            getMissionDialogueLine(
+              TAINTED_SOULS_MISSION,
+              'wydaHandInComplete',
+              'Ekatrix is dead, then? Good. Take this Ekatrix Soul Core — and leave me to my boredom.'
+            ),
+            addMessage,
+            'Wyda'
+          );
+        } catch (err) {
+          console.error('[Quests Mod][Wyda] Error completing The Tainted Souls:', err);
+          wydaCooldown.queueResponse(text, getMissionCommonLine('errorGeneric', 'Something went wrong. Please try again.'), addMessage, 'Wyda');
+        }
+        return;
+      }
+
+      // The Mother of All Spiders / The Jakundaf Desert / The Tainted Souls: offer next available Wyda task
       if (lowerText.includes('mission') || lowerText.includes('quest')) {
         if (followerOfZathrothProgress.completed && !motherProgress.accepted) {
           wydaOfferingMotherOfAllSpiders = true;
           wydaOfferingJakundafDesert = false;
+          wydaOfferingTaintedSouls = false;
           wydaCooldown.queueResponse(text, MOTHER_OF_ALL_SPIDERS_MISSION.prompt, addMessage, 'Wyda');
           return;
         }
@@ -14151,6 +14445,7 @@ function createNPCCooldownManager() {
         if (motherProgress.completed && !jakundafProgress.accepted) {
           wydaOfferingJakundafDesert = true;
           wydaOfferingMotherOfAllSpiders = false;
+          wydaOfferingTaintedSouls = false;
           wydaCooldown.queueResponse(text, JAKUNDAF_DESERT_MISSION.prompt, addMessage, 'Wyda');
           return;
         }
@@ -14167,6 +14462,38 @@ function createNPCCooldownManager() {
             addMessage,
             'Wyda'
           );
+          return;
+        }
+        if (jakundafProgress.completed && !taintedSoulsProgress.accepted) {
+          wydaOfferingTaintedSouls = true;
+          wydaOfferingJakundafDesert = false;
+          wydaOfferingMotherOfAllSpiders = false;
+          wydaCooldown.queueResponse(text, TAINTED_SOULS_MISSION.prompt, addMessage, 'Wyda');
+          return;
+        }
+        if (taintedSoulsProgress.accepted && !taintedSoulsProgress.completed) {
+          wydaCooldown.queueResponse(
+            text,
+            taintedSoulsProgress.battleCompleted
+              ? getMissionDialogueLine(
+                TAINTED_SOULS_MISSION,
+                'reportBack',
+                'Ekatrix has fallen. Return to Wyda for your reward.'
+              )
+              : taintedSoulsProgress.portalOpened
+                ? getMissionDialogueLine(
+                  TAINTED_SOULS_MISSION,
+                  'alreadyPortalOpen',
+                  'The portal is open at Eclipse. Step through and kill Ekatrix.'
+                )
+                : TAINTED_SOULS_MISSION.alreadyActive,
+            addMessage,
+            'Wyda'
+          );
+          return;
+        }
+        if (taintedSoulsProgress.completed) {
+          wydaCooldown.queueResponse(text, TAINTED_SOULS_MISSION.alreadyCompleted, addMessage, 'Wyda');
           return;
         }
         if (jakundafProgress.completed) {
@@ -14217,6 +14544,36 @@ function createNPCCooldownManager() {
       }
       if (wydaOfferingJakundafDesert && (lowerText.includes('no') || lowerText.includes('not'))) {
         wydaOfferingJakundafDesert = false;
+        wydaCooldown.queueResponse(text, getMissionCommonLine('notReady', 'Return when you are ready for this task.'), addMessage, 'Wyda');
+        return;
+      }
+
+      if (wydaOfferingTaintedSouls && (lowerText.includes('yes') || lowerText.includes('accept'))) {
+        wydaOfferingTaintedSouls = false;
+        try {
+          const jakundafDone = getMissionProgress(JAKUNDAF_DESERT_MISSION) || {};
+          if (!jakundafDone.completed) {
+            wydaCooldown.queueResponse(text, JAKUNDAF_DESERT_MISSION.alreadyActive, addMessage, 'Wyda');
+            return;
+          }
+          await persistMissionProgress(TAINTED_SOULS_MISSION, {
+            accepted: true,
+            completed: false,
+            portalOpened: false,
+            battleCompleted: false
+          });
+          if (typeof setupEkatrixEclipseObserver === 'function') setupEkatrixEclipseObserver();
+          if (typeof refreshQuestTileHighlights === 'function') refreshQuestTileHighlights();
+          NotificationService.showQuestAccepted(TAINTED_SOULS_MISSION, '[Quests Mod][Wyda]');
+          wydaCooldown.queueResponse(text, TAINTED_SOULS_MISSION.accept, addMessage, 'Wyda');
+        } catch (err) {
+          console.error('[Quests Mod][Wyda] Error accepting The Tainted Souls:', err);
+          wydaCooldown.queueResponse(text, getMissionCommonLine('errorGeneric', 'Something went wrong. Please try again.'), addMessage, 'Wyda');
+        }
+        return;
+      }
+      if (wydaOfferingTaintedSouls && (lowerText.includes('no') || lowerText.includes('not'))) {
+        wydaOfferingTaintedSouls = false;
         wydaCooldown.queueResponse(text, getMissionCommonLine('notReady', 'Return when you are ready for this task.'), addMessage, 'Wyda');
         return;
       }
@@ -14663,6 +15020,90 @@ function createNPCCooldownManager() {
       widgetBottom.style.removeProperty('min-height');
       widgetBottom.style.removeProperty('overflow');
     }
+
+    lockNativeQuestLogListSize(findQuestLogContainer());
+  }
+
+  const QUEST_LOG_LIST_HEIGHT_PX = 260;
+
+  function getQuestLogScrollAreaRoot(questLogContainer) {
+    if (!questLogContainer) return null;
+    const viewport = questLogContainer.closest('[data-radix-scroll-area-viewport]');
+    if (viewport?.parentElement) return viewport.parentElement;
+    return questLogContainer.closest('.relative.overflow-hidden.frame-pressed-1');
+  }
+
+  function lockNativeQuestLogListSize(questLogContainer = findQuestLogContainer()) {
+    const container = questLogContainer || findQuestLogContainer();
+    const scrollRoot = getQuestLogScrollAreaRoot(container);
+    if (!scrollRoot) return;
+
+    const height = `${QUEST_LOG_LIST_HEIGHT_PX}px`;
+    scrollRoot.style.height = height;
+    scrollRoot.style.minHeight = height;
+    scrollRoot.style.maxHeight = height;
+    scrollRoot.style.overflow = 'hidden';
+    scrollRoot.style.boxSizing = 'border-box';
+    scrollRoot.style.flex = '0 0 auto';
+
+    if (container) {
+      container.style.height = 'auto';
+      container.style.minHeight = '0';
+      container.style.maxHeight = 'none';
+    }
+
+    const viewport = scrollRoot.querySelector('[data-radix-scroll-area-viewport]');
+    if (viewport) {
+      viewport.style.height = '100%';
+      viewport.style.maxHeight = '100%';
+      bindNativeQuestLogScrollbar(scrollRoot, viewport);
+    }
+    syncNativeQuestLogScrollbar(scrollRoot);
+    requestAnimationFrame(() => syncNativeQuestLogScrollbar(scrollRoot));
+  }
+
+  function getQuestLogScrollbarParts(scrollRoot) {
+    if (!scrollRoot) return {};
+    const viewport = scrollRoot.querySelector('[data-radix-scroll-area-viewport]');
+    const scrollbar = scrollRoot.querySelector('[data-orientation="vertical"]');
+    const thumb = scrollbar?.querySelector('[data-orientation="vertical"]') || scrollbar?.firstElementChild;
+    return { viewport, scrollbar, thumb };
+  }
+
+  function syncNativeQuestLogScrollbar(scrollRoot) {
+    const { viewport, scrollbar, thumb } = getQuestLogScrollbarParts(scrollRoot);
+    if (!viewport || !scrollbar || !thumb) return;
+
+    const viewportHeight = viewport.clientHeight;
+    const scrollHeight = viewport.scrollHeight;
+    if (viewportHeight <= 0) return;
+
+    if (scrollHeight <= viewportHeight + 1) {
+      scrollbar.style.setProperty('--radix-scroll-area-thumb-height', `${viewportHeight}px`);
+      thumb.style.height = 'var(--radix-scroll-area-thumb-height)';
+      thumb.style.transform = 'translate3d(0px, 0px, 0px)';
+      return;
+    }
+
+    const thumbHeight = Math.max(24, (viewportHeight / scrollHeight) * viewportHeight);
+    const maxOffset = Math.max(0, viewportHeight - thumbHeight);
+    const range = scrollHeight - viewportHeight;
+    const offset = range > 0 ? (viewport.scrollTop / range) * maxOffset : 0;
+    scrollbar.style.setProperty('--radix-scroll-area-thumb-height', `${thumbHeight}px`);
+    thumb.style.height = 'var(--radix-scroll-area-thumb-height)';
+    thumb.style.transform = `translate3d(0px, ${offset}px, 0px)`;
+  }
+
+  function bindNativeQuestLogScrollbar(scrollRoot, viewport) {
+    if (!viewport || viewport.dataset.questsScrollBound === '1') return;
+    viewport.dataset.questsScrollBound = '1';
+    const update = () => syncNativeQuestLogScrollbar(scrollRoot);
+    viewport.addEventListener('scroll', update, { passive: true });
+    if (typeof ResizeObserver === 'function') {
+      const observer = new ResizeObserver(update);
+      observer.observe(viewport);
+      if (viewport.firstElementChild) observer.observe(viewport.firstElementChild);
+    }
   }
 
   function getKingTabElement() {
@@ -14922,6 +15363,12 @@ function createNPCCooldownManager() {
       return mission.objectiveLine1;
     }
 
+    if (mission.id === TAINTED_SOULS_MISSION.id) {
+      if (progress?.battleCompleted) return mission.objectiveLine3 || mission.objectiveLine2;
+      if (progress?.portalOpened) return mission.objectiveLine2 || mission.objectiveLine1;
+      return mission.objectiveLine1;
+    }
+
     if (mission.id === APPRENTICE_SHENG_MISSION.id) {
       if (progress?.battleCompleted) return mission.objectiveLine2;
       return mission.objectiveLine1;
@@ -15043,6 +15490,12 @@ function createNPCCooldownManager() {
       return mission.hint || '';
     }
 
+    if (mission.id === TAINTED_SOULS_MISSION.id) {
+      if (progress?.battleCompleted) return mission.hintReport || mission.hint || '';
+      if (progress?.portalOpened) return mission.hintPortal || mission.hint || '';
+      return mission.hint || '';
+    }
+
     return mission.hint || '';
   }
 
@@ -15111,6 +15564,10 @@ function createNPCCooldownManager() {
 
     if (mission.id === JAKUNDAF_DESERT_MISSION.id) {
       return makeActiveMissionCountProgress(progress?.pathCleared ? 1 : 0, 1);
+    }
+
+    if (mission.id === TAINTED_SOULS_MISSION.id) {
+      return makeActiveMissionCountProgress(progress?.battleCompleted ? 1 : 0, 1);
     }
 
     if (mission.id === KING_MONKS_STUDY_MISSION.id) {
@@ -15301,6 +15758,7 @@ function createNPCCooldownManager() {
 
       insertAfter = tab;
     });
+    lockNativeQuestLogListSize(questLogContainer);
   }
 
   function getArenaQuestLogCards() {
@@ -15682,6 +16140,7 @@ function createNPCCooldownManager() {
     // Fixed-height quest log stretches few Missions cards apart; pack them to the top.
     questLogContainer.style.alignContent = 'start';
     questLogContainer.style.gridAutoRows = 'max-content';
+    lockNativeQuestLogListSize(questLogContainer);
   }
 
   function restoreQuestLogGridPacking(questLogContainer) {
@@ -15698,6 +16157,7 @@ function createNPCCooldownManager() {
     } else {
       questLogContainer.style.removeProperty('grid-auto-rows');
     }
+    lockNativeQuestLogListSize(questLogContainer);
   }
 
   function showAllQuestLogWidgets(questLogContainer, kingTab) {
@@ -17334,6 +17794,80 @@ function createNPCCooldownManager() {
             refreshGhazOutfitSprites();
           }
 
+          // The Tainted Souls: leave Sewers battle room unless warping back to Eclipse after defeat
+          if (
+            lastOverlayHiderRoomName === EKATRIX_BATTLE_ROOM_NAME
+            && currentRoomName
+            && currentRoomName !== EKATRIX_BATTLE_ROOM_NAME
+          ) {
+            if (ekatrixBattle?.isEntryVillainSetupDone?.()) {
+              ekatrixBattle.resetEntryVillainSetup();
+            }
+            ekatrixReinitTriggered = false;
+            const postDefeatEclipse = ekatrixRetryWithoutPortal
+              && (currentRoomName === ECLIPSE_ROOM_NAME || String(currentRoomName).includes(ECLIPSE_ROOM_NAME));
+            if (!postDefeatEclipse && (playerEnteredEkatrixPortal || ekatrixBattle)) {
+              cleanupEkatrixQuest();
+            }
+          }
+
+          // The Tainted Souls: re-init after defeat if the player returns to Sewers
+          const taintedSoulsProgress = kingChatState.progressTaintedSouls;
+          const canRetryEkatrix = taintedSoulsProgress?.accepted && !taintedSoulsProgress?.completed && taintedSoulsProgress?.portalOpened && !taintedSoulsProgress?.battleCompleted;
+          const onEkatrixBattleRoom = currentRoomName === EKATRIX_BATTLE_ROOM_NAME
+            || (EKATRIX_BATTLE_ROOM_ID && currentRoomId === EKATRIX_BATTLE_ROOM_ID);
+          if (
+            onEkatrixBattleRoom
+            && canRetryEkatrix
+            && ekatrixRetryWithoutPortal
+            && !ekatrixBattle
+            && currentRoomId
+            && !ekatrixReinitTriggered
+            && !playerUsedTile76ToJakundafDesert
+            && !jakundafDesertBattle
+          ) {
+            ekatrixReinitTriggered = true;
+            playerEnteredEkatrixPortal = true;
+            const initResult = initializeEkatrixBattle(currentRoomId);
+            if (initResult && initResult.then) {
+              initResult.then((battle) => {
+                if (battle) {
+                  ekatrixRetryWithoutPortal = false;
+                  setupEkatrixBattleInstance(battle);
+                } else {
+                  ekatrixReinitTriggered = false;
+                }
+              }).catch((err) => {
+                console.error('[Quests Mod][The Tainted Souls] Re-init error:', err);
+                ekatrixReinitTriggered = false;
+              });
+            } else if (initResult) {
+              ekatrixRetryWithoutPortal = false;
+              setupEkatrixBattleInstance(initResult);
+            } else {
+              ekatrixReinitTriggered = false;
+            }
+          }
+
+          // The Tainted Souls battle room: villains + Sewers tile mutations
+          if (onEkatrixBattleRoom && playerEnteredEkatrixPortal && ekatrixBattle) {
+            const justEnteredEkatrix = lastOverlayHiderRoomName !== EKATRIX_BATTLE_ROOM_NAME;
+            if (justEnteredEkatrix) {
+              ekatrixBattle.runEntryVillainSetupIfNeeded({
+                isActiveCheck: () => playerEnteredEkatrixPortal,
+                onComplete: () => {
+                  hideQuestOverlays();
+                  hideHeroEditorButton();
+                  scheduleEkatrixBattlefieldVisuals({ forceSceneSprites: true });
+                }
+              });
+              scheduleEkatrixBattlefieldVisuals({ forceSceneSprites: true });
+            } else {
+              applyEkatrixBattlefieldVisuals({ forceSceneSprites: false });
+            }
+            ekatrixBattle.ensureCustomVillainsPresent();
+          }
+
           // Spider Lair: re-init battle after defeat (cleanup cleared battle) so player can retry without tile 77 — only when spiderLairRetryWithoutTile77 (set in onClose on defeat)
           const motherProgress = kingChatState.progressMotherOfAllSpiders;
           const canRetrySpiderLair = motherProgress?.accepted && !motherProgress?.completed;
@@ -17416,7 +17950,16 @@ function createNPCCooldownManager() {
           const canRetryJakundaf = jakundafProgress?.accepted && !jakundafProgress?.completed;
           const onJakundafBattleRoom = currentRoomName === JAKUNDAF_BATTLE_ROOM_NAME
             || (JAKUNDAF_BATTLE_ROOM_ID && currentRoomId === JAKUNDAF_BATTLE_ROOM_ID);
-          if (onJakundafBattleRoom && canRetryJakundaf && jakundafDesertRetryWithoutTile76 && !jakundafDesertBattle && currentRoomId && !jakundafDesertReinitTriggered) {
+          if (
+            onJakundafBattleRoom
+            && canRetryJakundaf
+            && jakundafDesertRetryWithoutTile76
+            && !jakundafDesertBattle
+            && currentRoomId
+            && !jakundafDesertReinitTriggered
+            && !playerEnteredEkatrixPortal
+            && !ekatrixBattle
+          ) {
             jakundafDesertReinitTriggered = true;
             console.log('[Quests Mod][Overlay Hider] Jakundaf Desert: re-initializing battle after defeat so player can retry');
             playerUsedTile76ToJakundafDesert = true;
@@ -17467,7 +18010,7 @@ function createNPCCooldownManager() {
 
           // Jakundaf Desert battle room: apply villains + desert visuals (tile mutations + scene sprites).
           // Navigation / Map Editor scope changes remount #tiles after the first apply — retry like Putrid Chamber.
-          if (onJakundafBattleRoom && playerUsedTile76ToJakundafDesert && jakundafDesertBattle) {
+          if (onJakundafBattleRoom && playerUsedTile76ToJakundafDesert && jakundafDesertBattle && !playerEnteredEkatrixPortal) {
             const justEntered = lastOverlayHiderRoomName !== JAKUNDAF_BATTLE_ROOM_NAME;
             if (justEntered) {
               jakundafDesertBattle.runEntryVillainSetupIfNeeded({
@@ -21568,6 +22111,640 @@ function createNPCCooldownManager() {
     console.log('[Quests Mod][Jakundaf Desert] System cleaned up');
   }
 
+  // The Tainted Souls — Eclipse cauldron (tiles 20/21/35/36) → teleporter on tile 81 → Ekatrix
+  function getTaintedSoulsRequiredItemName() {
+    return EKATRIX_REQUIRED_ITEM_NAME || JAKUNDAF_DESERT_MISSION.rewardItemName || 'Stuffed Toad';
+  }
+
+  function getTaintedSoulsLogPrefix() {
+    return BATTLE_TOAST_LOG.taintedSouls || '[Quests Mod][The Tainted Souls]';
+  }
+
+  function buildTaintedSoulsProgress(patch = {}) {
+    const current = getMissionProgress(TAINTED_SOULS_MISSION) || {};
+    return {
+      accepted: patch.accepted ?? current.accepted ?? false,
+      completed: patch.completed ?? current.completed ?? false,
+      portalOpened: patch.portalOpened ?? current.portalOpened ?? false,
+      battleCompleted: patch.battleCompleted ?? current.battleCompleted ?? false
+    };
+  }
+
+  function hasStuffedToadForEclipseCauldron() {
+    return getCachedQuestItemCount(getTaintedSoulsRequiredItemName()) > 0;
+  }
+
+  function isTaintedSoulsEclipseReady() {
+    const progress = getMissionProgress(TAINTED_SOULS_MISSION) || {};
+    return !!(progress.accepted && !progress.completed && !progress.battleCompleted);
+  }
+
+  function isOnEclipseRoom(boardContext = null) {
+    try {
+      const context = boardContext || globalThis.state?.board?.getSnapshot?.()?.context;
+      const currentRoomId = context?.selectedMap?.selectedRoom?.id;
+      if (!currentRoomId) return false;
+      return isOnRoomByName(ECLIPSE_ROOM_NAME);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function navigateToEclipseRoom() {
+    try {
+      const roomId = getRoomIdByRoomName(ECLIPSE_ROOM_NAME);
+      if (!roomId) {
+        console.warn('[Quests Mod][The Tainted Souls] Eclipse room not found');
+        return;
+      }
+      globalThis.state.board.send({ type: 'selectRoomById', roomId });
+    } catch (error) {
+      console.error('[Quests Mod][The Tainted Souls] Error navigating to Eclipse:', error);
+    }
+  }
+
+  function getEclipseCauldronTileIndexFromEvent(event) {
+    for (const tileIndex of ECLIPSE_CAULDRON_TILE_INDICES) {
+      const tileEl = getTileElement(tileIndex);
+      if (tileEl && tileEl.contains(event.target)) return tileIndex;
+    }
+    return null;
+  }
+
+  function showTaintedSoulsToast(messageKey, fallback) {
+    showToast({
+      message: TOAST_MESSAGES[messageKey] || fallback,
+      logPrefix: getTaintedSoulsLogPrefix()
+    });
+  }
+
+  function getEkatrixPortalSpriteHTML() {
+    const spriteId = ECLIPSE_PORTAL_SPRITE_ID || 1959;
+    return `<div class="sprite item relative id-${spriteId}" ${QUEST_BOARD_ADDED_ATTR_EKATRIX}="1" style="z-index: 1000;"><div class="viewport"><img alt="${spriteId}" data-cropped="false" class="spritesheet" style="--cropX: 0; --cropY: 0;"></div></div>`;
+  }
+
+  function shouldShowEkatrixPortal(boardContext = null) {
+    const progress = getMissionProgress(TAINTED_SOULS_MISSION) || {};
+    if (!progress.accepted || progress.completed || progress.battleCompleted || !progress.portalOpened) return false;
+    if (playerEnteredEkatrixPortal) return false;
+    return isOnEclipseRoom(boardContext);
+  }
+
+  function removeEkatrixPortalSprite() {
+    document.querySelectorAll(`[${QUEST_BOARD_ADDED_ATTR_EKATRIX}="1"]`).forEach((el) => el.remove());
+  }
+
+  function applyEkatrixPortalSprite(boardContext = null) {
+    if (!shouldShowEkatrixPortal(boardContext)) {
+      removeEkatrixPortalSprite();
+      return;
+    }
+    const tile = getTileElement(ECLIPSE_PORTAL_TILE_INDEX);
+    if (!tile) return;
+    if (tile.querySelector(`[${QUEST_BOARD_ADDED_ATTR_EKATRIX}="1"]`)) return;
+    const wrap = document.createElement('div');
+    wrap.innerHTML = getEkatrixPortalSpriteHTML();
+    if (wrap.firstElementChild) tile.appendChild(wrap.firstElementChild);
+  }
+
+  function closeEclipseCauldronContextMenu() {
+    if (eclipseCauldronContextMenu && eclipseCauldronContextMenu.closeMenu) {
+      eclipseCauldronContextMenu.closeMenu();
+    }
+    eclipseCauldronContextMenu = null;
+  }
+
+  function closeEclipsePortalContextMenu() {
+    if (eclipsePortalContextMenu && eclipsePortalContextMenu.closeMenu) {
+      eclipsePortalContextMenu.closeMenu();
+    }
+    eclipsePortalContextMenu = null;
+  }
+
+  async function useStuffedToadInEclipseCauldron() {
+    const jakundaf = getMissionProgress(JAKUNDAF_DESERT_MISSION) || {};
+    if (!jakundaf.completed) {
+      showTaintedSoulsToast('taintedSoulsNeedMission', 'The cauldron does not stir. Wyda may know more.');
+      return false;
+    }
+    const progress = getMissionProgress(TAINTED_SOULS_MISSION) || {};
+    if (!progress.accepted || progress.completed) {
+      showTaintedSoulsToast('taintedSoulsNeedMission', 'The cauldron does not stir. Wyda may know more.');
+      return false;
+    }
+    if (progress.portalOpened) {
+      showTaintedSoulsToast('taintedSoulsPortalOpened', 'A portal opens from the cauldron.');
+      applyEkatrixPortalSprite();
+      return true;
+    }
+    if (!hasStuffedToadForEclipseCauldron()) {
+      showTaintedSoulsToast('taintedSoulsNeedToad', 'You need the Stuffed Toad to use this cauldron.');
+      return false;
+    }
+
+    const toadName = getTaintedSoulsRequiredItemName();
+    const consumed = await consumeQuestItem(toadName, 1);
+    if (!consumed) {
+      showTaintedSoulsToast('taintedSoulsNeedToad', 'You need the Stuffed Toad to use this cauldron.');
+      return false;
+    }
+    NotificationService.showItemRemoved(toadName, getTaintedSoulsLogPrefix());
+
+    await persistMissionProgress(TAINTED_SOULS_MISSION, buildTaintedSoulsProgress({
+      accepted: true,
+      completed: false,
+      portalOpened: true,
+      battleCompleted: false
+    }));
+    const portalTile = getTileElement(ECLIPSE_PORTAL_TILE_INDEX);
+    if (portalTile) createPoofAnimation(portalTile, { scale: 1.5, frameMs: 32 });
+    applyEkatrixPortalSprite();
+    updateEclipseTaintedSoulsState();
+    if (typeof refreshQuestTileHighlights === 'function') refreshQuestTileHighlights();
+    showTaintedSoulsToast('taintedSoulsPortalOpened', 'A portal opens from the cauldron.');
+    return true;
+  }
+
+  function buildEkatrixMutationSpriteHTML(entry) {
+    const spriteId = entry?.spriteId;
+    if (spriteId == null) return '';
+    const cropX = entry.cropX != null ? entry.cropX : 0;
+    const cropY = entry.cropY != null ? entry.cropY : 0;
+    const cropped = entry.cropped ? 'true' : 'false';
+    const bankStyle = entry.bank != null ? ` --bank: ${entry.bank};` : '';
+    return `<div class="sprite item relative id-${spriteId}" ${QUEST_BOARD_ADDED_ATTR_EKATRIX_BATTLE}="1" style="z-index: 1000;${bankStyle}"><div class="viewport"><img alt="${spriteId}" data-cropped="${cropped}" class="spritesheet" style="--cropX: ${cropX}; --cropY: ${cropY};"></div></div>`;
+  }
+
+  function applyEkatrixTileMutations() {
+    const mutations = EKATRIX_TILE_MUTATIONS;
+    if (!mutations || typeof mutations !== 'object') return;
+
+    const battle = ekatrixBattle;
+    const hadMask = battle?._placementHitboxMaskActive === true;
+    if (hadMask) battle.restorePlacementHitboxes?.();
+
+    let wroteHitboxes = false;
+    Object.entries(mutations).forEach(([tileKey, entry]) => {
+      const tileIndex = Number(tileKey);
+      if (!Number.isFinite(tileIndex) || !entry || typeof entry !== 'object') return;
+      const tile = getTileElement(tileIndex);
+
+      (entry.remove || []).forEach((spriteId) => {
+        if (spriteId == null || !tile) return;
+        tile.querySelectorAll(`.sprite.item.relative.id-${spriteId}`).forEach((sprite) => {
+          hideQuestBoardElement(sprite, { tag: QUEST_BOARD_HIDDEN_TAG_EKATRIX });
+        });
+      });
+
+      (entry.add || []).forEach((spriteEntry) => {
+        const spriteId = spriteEntry?.spriteId;
+        if (spriteId == null || !tile) return;
+        const already = tile.querySelectorAll(`.id-${spriteId}[${QUEST_BOARD_ADDED_ATTR_EKATRIX_BATTLE}="1"]`);
+        if (already.length) return;
+        const wrap = document.createElement('div');
+        wrap.innerHTML = buildEkatrixMutationSpriteHTML(spriteEntry);
+        if (wrap.firstElementChild) tile.appendChild(wrap.firstElementChild);
+      });
+
+      if (Object.prototype.hasOwnProperty.call(entry, 'hitbox')) {
+        try {
+          const roomId = EKATRIX_BATTLE_ROOM_ID;
+          const selected = globalThis.state?.board?.getSnapshot?.()?.context?.selectedMap?.selectedRoom
+            || globalThis.state?.selectedMap?.selectedRoom;
+          const utils = globalThis.state?.utils;
+          const roomRefs = [];
+          if (selected?.id === roomId) roomRefs.push(selected);
+          if (Array.isArray(utils?.ROOMS)) {
+            utils.ROOMS.forEach((room) => {
+              if (room?.id === roomId) roomRefs.push(room);
+            });
+          }
+          if (Array.isArray(utils?.REGIONS)) {
+            utils.REGIONS.forEach((region) => {
+              (region?.rooms || []).forEach((room) => {
+                if (room?.id === roomId) roomRefs.push(room);
+              });
+            });
+          }
+          roomRefs.forEach((room) => {
+            const data = room?.file?.data;
+            if (!data) return;
+            if (!Array.isArray(data.hitboxes)) data.hitboxes = [];
+            data.hitboxes[tileIndex] = entry.hitbox === true;
+            wroteHitboxes = true;
+          });
+        } catch (_) {}
+      }
+    });
+
+    if (wroteHitboxes) ekatrixHitboxesApplied = true;
+
+    if (battle?.refreshPlacementHitboxMaskFromLive) {
+      battle.refreshPlacementHitboxMaskFromLive(
+        () => playerEnteredEkatrixPortal
+      );
+    } else if (battle?.syncPlacementHitboxMask) {
+      battle.syncPlacementHitboxMask(() => playerEnteredEkatrixPortal);
+    }
+  }
+
+  function restoreEkatrixTileMutations() {
+    restoreQuestBoardElementsByTag(QUEST_BOARD_HIDDEN_TAG_EKATRIX);
+    document.querySelectorAll(`[${QUEST_BOARD_ADDED_ATTR_EKATRIX_BATTLE}="1"]`).forEach((el) => {
+      try { el.remove(); } catch (_) {}
+    });
+    ekatrixHitboxesApplied = false;
+  }
+
+  const EKATRIX_VISUAL_RETRY_DELAYS_MS = [0, 50, 150, 300, 500, 800, 1200, 2000];
+  let ekatrixVisualRetryTimers = [];
+
+  function clearEkatrixVisualRetries() {
+    ekatrixVisualRetryTimers.forEach((id) => clearTimeout(id));
+    ekatrixVisualRetryTimers = [];
+  }
+
+  function applyEkatrixBattlefieldVisuals({ forceSceneSprites = false } = {}) {
+    if (!playerEnteredEkatrixPortal || !ekatrixBattle) return;
+    applyEkatrixTileMutations();
+    if (typeof ekatrixBattle.scheduleSceneSpriteReplacementsForEntry === 'function') {
+      if (forceSceneSprites || !ekatrixBattle.isSceneSpriteReplacementsComplete?.()) {
+        ekatrixBattle.scheduleSceneSpriteReplacementsForEntry({ force: forceSceneSprites });
+      }
+    }
+  }
+
+  function scheduleEkatrixBattlefieldVisuals({ forceSceneSprites = true } = {}) {
+    clearEkatrixVisualRetries();
+    applyEkatrixBattlefieldVisuals({ forceSceneSprites });
+    EKATRIX_VISUAL_RETRY_DELAYS_MS.forEach((delay) => {
+      if (delay <= 0) return;
+      ekatrixVisualRetryTimers.push(setTimeout(() => {
+        applyEkatrixBattlefieldVisuals({ forceSceneSprites: false });
+      }, delay));
+    });
+  }
+
+  function restoreBoardSetupEkatrix() {
+    if (ekatrixBattle) {
+      ekatrixBattle.restoreBoardSetup();
+    }
+    restoreEkatrixTileMutations();
+  }
+
+  function cleanupEkatrixQuest() {
+    try {
+      removeCustomBattleStatusToast();
+      clearEkatrixVisualRetries();
+      playerEnteredEkatrixPortal = false;
+      ekatrixReinitTriggered = false;
+      ekatrixRetryWithoutPortal = false;
+      restoreEkatrixTileMutations();
+      if (ekatrixBattle) {
+        ekatrixBattle.cleanup(restoreBoardSetupEkatrix, showQuestOverlays);
+        ekatrixBattle = null;
+      }
+      applyEkatrixPortalSprite();
+      updateEclipseTaintedSoulsState();
+      if (typeof refreshQuestTileHighlights === 'function') refreshQuestTileHighlights();
+    } catch (error) {
+      console.error('[Quests Mod][The Tainted Souls] Error cleaning up:', error);
+    }
+  }
+
+  function setupEkatrixTileRestrictions() {
+    if (!ekatrixBattle) return;
+    ekatrixBattle.setupTileRestrictions(
+      () => playerEnteredEkatrixPortal,
+      NotificationService.createBattleToastCallback(getTaintedSoulsLogPrefix())
+    );
+    ekatrixBattle.setupAllyLimit?.(
+      () => playerEnteredEkatrixPortal,
+      NotificationService.createBattleToastCallback(getTaintedSoulsLogPrefix())
+    );
+  }
+
+  function createEkatrixBattleInstance(roomId) {
+    if (!window.CustomBattles) {
+      console.error('[Quests Mod][The Tainted Souls] CustomBattles still not available');
+      return null;
+    }
+    const spawn = getHydratedQuestBattleSpawn(EKATRIX_BATTLE_ID || 'ekatrix');
+    const villains = spawn.villains;
+    const tileRestrictions = {};
+    if (spawn.allowedTiles?.length) {
+      tileRestrictions.allowedTiles = spawn.allowedTiles;
+      tileRestrictions.message = spawn.allowedTilesMessage || 'Ally creatures can only be placed on the marked tiles!';
+    }
+    const config = {
+      name: EKATRIX_BATTLE_DISPLAY_NAME || 'Ekatrix',
+      roomId,
+      villains,
+      allyLimit: spawn.allyLimit ?? 6,
+      preventVillainMovement: spawn.preventVillainMovement !== false,
+      hideVillainSprites: spawn.hideVillainSprites !== false,
+      ...(Object.keys(tileRestrictions).length ? { tileRestrictions } : {}),
+      entrySetup: {
+        sceneSpriteAttemptDelays: EKATRIX_VISUAL_RETRY_DELAYS_MS.slice()
+      },
+      activationCheck: (isSandbox, inBattleArea) => {
+        return isSandbox && inBattleArea && playerEnteredEkatrixPortal;
+      },
+      victoryDefeat: {
+        onVictory: async () => {
+          try {
+            await persistMissionProgress(TAINTED_SOULS_MISSION, buildTaintedSoulsProgress({
+              accepted: true,
+              completed: false,
+              portalOpened: true,
+              battleCompleted: true
+            }));
+            if (typeof updateEclipseTaintedSoulsState === 'function') updateEclipseTaintedSoulsState();
+            if (typeof refreshQuestTileHighlights === 'function') refreshQuestTileHighlights();
+          } catch (error) {
+            console.error('[Quests Mod][The Tainted Souls] Error saving battleCompleted flag:', error);
+          }
+          removeEkatrixPortalSprite();
+        },
+        onDefeat: () => {},
+        onClose: (isVictory) => {
+          cleanupEkatrixQuest();
+          ekatrixRetryWithoutPortal = !isVictory;
+          setTimeout(() => {
+            if (isVictory) navigateToJakundafEntryRoom();
+            else navigateToEclipseRoom();
+          }, 100);
+        },
+        victoryTitle: 'Victory!',
+        defeatTitle: 'Defeat',
+        victoryMessage: getMissionDialogueLine(
+          TAINTED_SOULS_MISSION,
+          'battleVictory',
+          'Ekatrix has fallen. Return to Wyda for your reward.'
+        ),
+        defeatMessage: getMissionDialogueLine(
+          TAINTED_SOULS_MISSION,
+          'battleDefeat',
+          'Ekatrix was too strong.'
+        ),
+        showItems: false,
+        items: []
+      }
+    };
+    return window.CustomBattles.create(config);
+  }
+
+  function initializeEkatrixBattle(roomId) {
+    if (window.CustomBattles) {
+      return createEkatrixBattleInstance(roomId);
+    }
+    return waitForCustomBattles({ logPrefix: getTaintedSoulsLogPrefix() }).then((api) => {
+      if (!api) return null;
+      return createEkatrixBattleInstance(roomId);
+    });
+  }
+
+  function setupEkatrixBattleInstance(battle) {
+    if (!battle) return false;
+    ekatrixBattle = battle;
+    ekatrixBattle.setup(
+      () => playerEnteredEkatrixPortal,
+      NotificationService.createBattleToastCallback(getTaintedSoulsLogPrefix())
+    );
+    setupEkatrixTileRestrictions();
+    showCustomBattleStatusToast({
+      battleName: EKATRIX_BATTLE_DISPLAY_NAME || 'Ekatrix',
+      allyLimit: battle.config?.allyLimit ?? 6,
+      battle,
+      logPrefix: getTaintedSoulsLogPrefix()
+    });
+    return true;
+  }
+
+  function enterEkatrixPortal() {
+    const progress = getMissionProgress(TAINTED_SOULS_MISSION) || {};
+    if (progress.battleCompleted || progress.completed) {
+      showTaintedSoulsToast('taintedSoulsReportBack', 'Ekatrix has fallen. Return to Wyda for your reward.');
+      return false;
+    }
+    if (!progress.accepted || !progress.portalOpened) {
+      showTaintedSoulsToast('taintedSoulsPortalStub', 'The portal to Ekatrix is not yet open.');
+      return false;
+    }
+
+    let roomId = EKATRIX_BATTLE_ROOM_ID || getRoomIdByRoomName(EKATRIX_BATTLE_ROOM_NAME);
+    if (!roomId) roomId = getRoomIdByRoomName(EKATRIX_BATTLE_ROOM_NAME);
+    if (!roomId) {
+      showTaintedSoulsToast('ekatrixNotFound', "Ekatrix's domain was not found.");
+      return false;
+    }
+
+    playerEnteredEkatrixPortal = true;
+    ekatrixReinitTriggered = false;
+    removeEkatrixPortalSprite();
+    if (ekatrixBattle) {
+      ekatrixBattle.cleanup(restoreBoardSetupEkatrix, showQuestOverlays);
+      ekatrixBattle = null;
+    }
+
+    const initResult = initializeEkatrixBattle(roomId);
+    if (initResult && initResult.then) {
+      initResult.then((battle) => {
+        if (battle) setupEkatrixBattleInstance(battle);
+      }).catch((err) => console.error('[Quests Mod][The Tainted Souls] Error initializing battle:', err));
+    } else if (initResult) {
+      setupEkatrixBattleInstance(initResult);
+    }
+
+    globalThis.state.board.send({ type: 'selectRoomById', roomId });
+    showTaintedSoulsToast('enteringEkatrixPortal', 'Stepping through the portal...');
+    return true;
+  }
+
+  function createEclipseCauldronContextMenu(x, y, anchorElement = null) {
+    closeEclipseCauldronContextMenu();
+    eclipseCauldronContextMenu = createContextMenu({
+      x,
+      y,
+      layout: 'center',
+      logPrefix: getTaintedSoulsLogPrefix(),
+      anchorElement,
+      buttons: [
+        {
+          text: ECLIPSE_CAULDRON_CONTEXT_MENU_LABEL,
+          width: '180px',
+          backgroundColor: '#2a4a2a',
+          color: '#4CAF50',
+          border: '1px solid #4CAF50',
+          hoverBackgroundColor: '#1a2a1a',
+          hoverBorderColor: '#66BB6A',
+          onClick: () => {
+            closeEclipseCauldronContextMenu();
+            useStuffedToadInEclipseCauldron();
+          }
+        }
+      ],
+      onClose: () => {
+        eclipseCauldronContextMenu = null;
+      }
+    });
+    return eclipseCauldronContextMenu;
+  }
+
+  function createEclipsePortalContextMenu(x, y, anchorElement = null) {
+    closeEclipsePortalContextMenu();
+    eclipsePortalContextMenu = createContextMenu({
+      x,
+      y,
+      layout: 'center',
+      logPrefix: getTaintedSoulsLogPrefix(),
+      anchorElement,
+      buttons: [
+        {
+          text: ECLIPSE_PORTAL_CONTEXT_MENU_LABEL,
+          width: '180px',
+          backgroundColor: '#2a4a2a',
+          color: '#4CAF50',
+          border: '1px solid #4CAF50',
+          hoverBackgroundColor: '#1a2a1a',
+          hoverBorderColor: '#66BB6A',
+          onClick: () => {
+            closeEclipsePortalContextMenu();
+            enterEkatrixPortal();
+          }
+        }
+      ],
+      onClose: () => {
+        eclipsePortalContextMenu = null;
+      }
+    });
+    return eclipsePortalContextMenu;
+  }
+
+  function shouldEnableEclipseCauldron(boardContext = null) {
+    const progress = getMissionProgress(TAINTED_SOULS_MISSION) || {};
+    if (!progress.accepted || progress.completed || progress.portalOpened) return false;
+    if (!hasStuffedToadForEclipseCauldron()) return false;
+    return isOnEclipseRoom(boardContext);
+  }
+
+  function shouldEnableEclipsePortal(boardContext = null) {
+    return shouldShowEkatrixPortal(boardContext);
+  }
+
+  function shouldEnableEclipseTaintedSoulsListener() {
+    return isTaintedSoulsEclipseReady();
+  }
+
+  function handleEclipseCauldronRightClickDocument(event) {
+    if (!shouldEnableEclipseCauldron()) return;
+    const tileIndex = getEclipseCauldronTileIndexFromEvent(event);
+    if (tileIndex == null) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    event.stopPropagation();
+    createEclipseCauldronContextMenu(event.clientX, event.clientY, getTileElement(tileIndex));
+  }
+
+  function handleEclipsePortalRightClickDocument(event) {
+    if (!shouldEnableEclipsePortal()) return;
+    const tileEl = getTileElement(ECLIPSE_PORTAL_TILE_INDEX);
+    if (!tileEl || !tileEl.contains(event.target)) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    event.stopPropagation();
+    createEclipsePortalContextMenu(event.clientX, event.clientY, tileEl);
+  }
+
+  function setEclipseCauldronPointerEvents(enabled) {
+    for (const tileIndex of ECLIPSE_CAULDRON_TILE_INDICES) {
+      const tileEl = getTileElement(tileIndex);
+      if (tileEl) tileEl.style.pointerEvents = enabled ? 'auto' : '';
+    }
+  }
+
+  function updateEclipseTaintedSoulsState(boardContext = null, retryCount = 0) {
+    try {
+      const listenerShouldBeOn = shouldEnableEclipseTaintedSoulsListener();
+      const cauldronActive = shouldEnableEclipseCauldron(boardContext);
+      const portalActive = shouldEnableEclipsePortal(boardContext);
+
+      if (listenerShouldBeOn && !eclipseCauldronRightClickEnabled) {
+        document.addEventListener('contextmenu', handleEclipseCauldronRightClickDocument, true);
+        eclipseCauldronRightClickEnabled = true;
+      }
+      if (listenerShouldBeOn && !eclipsePortalRightClickEnabled) {
+        document.addEventListener('contextmenu', handleEclipsePortalRightClickDocument, true);
+        eclipsePortalRightClickEnabled = true;
+      }
+      if (!listenerShouldBeOn) {
+        if (eclipseCauldronRightClickEnabled) {
+          document.removeEventListener('contextmenu', handleEclipseCauldronRightClickDocument, true);
+          eclipseCauldronRightClickEnabled = false;
+          closeEclipseCauldronContextMenu();
+        }
+        if (eclipsePortalRightClickEnabled) {
+          document.removeEventListener('contextmenu', handleEclipsePortalRightClickDocument, true);
+          eclipsePortalRightClickEnabled = false;
+          closeEclipsePortalContextMenu();
+        }
+        setEclipseCauldronPointerEvents(false);
+        const portalTile = getTileElement(ECLIPSE_PORTAL_TILE_INDEX);
+        if (portalTile) portalTile.style.pointerEvents = '';
+        removeEkatrixPortalSprite();
+        return;
+      }
+
+      setEclipseCauldronPointerEvents(cauldronActive);
+      const portalTile = getTileElement(ECLIPSE_PORTAL_TILE_INDEX);
+      if (portalTile) portalTile.style.pointerEvents = portalActive ? 'auto' : '';
+
+      applyEkatrixPortalSprite(boardContext);
+
+      if ((cauldronActive || portalActive) && retryCount < 5) {
+        const missingCauldron = cauldronActive && ECLIPSE_CAULDRON_TILE_INDICES.some((idx) => !getTileElement(idx));
+        const missingPortal = portalActive && !getTileElement(ECLIPSE_PORTAL_TILE_INDEX);
+        if (missingCauldron || missingPortal) {
+          setTimeout(() => {
+            updateEclipseTaintedSoulsState(
+              boardContext || globalThis.state?.board?.getSnapshot?.()?.context,
+              retryCount + 1
+            );
+          }, 200);
+        }
+      }
+    } catch (e) {
+      console.error('[Quests Mod][The Tainted Souls] Error updating Eclipse state:', e);
+    }
+  }
+
+  function setupEkatrixEclipseObserver() {
+    if (eclipseBoardSubscription) {
+      updateEclipseTaintedSoulsState();
+      return;
+    }
+    if (typeof globalThis === 'undefined' || !globalThis.state?.board?.subscribe) return;
+    eclipseBoardSubscription = globalThis.state.board.subscribe(({ context: boardContext }) => {
+      updateEclipseTaintedSoulsState(boardContext);
+    });
+    updateEclipseTaintedSoulsState(globalThis.state?.board?.getSnapshot()?.context);
+  }
+
+  function cleanupEkatrixEclipseObserver() {
+    if (eclipseBoardSubscription) {
+      try {
+        eclipseBoardSubscription.unsubscribe();
+      } catch (e) {
+        console.warn('[Quests Mod][The Tainted Souls] Error unsubscribing Eclipse observer:', e);
+      }
+      eclipseBoardSubscription = null;
+    }
+  }
+
+  function needsTaintedSoulsObserver() {
+    return isMissionAcceptedIncomplete(kingChatState.progressTaintedSouls);
+  }
+
   // Tile 47 in Dragon Lair (The Dragonmother) — right-click menu with Descend (requires Dragon Claw)
   function hasDragonClawForStairs() {
     return getCachedQuestItemCount(getDragonClawProductName()) > 0;
@@ -22242,12 +23419,15 @@ function createNPCCooldownManager() {
     const follower = getMissionProgress(FOLLOWER_OF_ZATHROTH_MISSION) || {};
     const mother = getMissionProgress(MOTHER_OF_ALL_SPIDERS_MISSION) || {};
     const jakundaf = getMissionProgress(JAKUNDAF_DESERT_MISSION) || {};
+    const taintedSouls = getMissionProgress(TAINTED_SOULS_MISSION) || {};
     const ankhName = COSTELLO_QUEEN_BANSHEES_MISSION.rewardItemName || 'Blessed Ankh';
     if (follower.accepted && !follower.completed && getCachedQuestItemCount(ankhName) > 0) return true;
     if (follower.completed && !mother.accepted) return true;
     if (mother.accepted && !mother.completed && getCachedQuestItemCount('Spider Silk') > 0) return true;
     if (mother.completed && !jakundaf.accepted) return true;
     if (jakundaf.accepted && !jakundaf.completed && jakundaf.pathCleared) return true;
+    if (jakundaf.completed && !taintedSouls.accepted) return true;
+    if (taintedSouls.accepted && !taintedSouls.completed && taintedSouls.battleCompleted) return true;
     return false;
   }
 
@@ -22610,7 +23790,8 @@ function createNPCCooldownManager() {
         const tile = getTileElement(COSTELLO_TILE_INDEX);
         return tile ? [tile] : [];
       },
-      isAccessActive: shouldShowCostelloFightIcon,
+      // Glow whenever the NPC is unlocked; fight icons still use shouldShow*FightIcon.
+      isAccessActive: shouldEnableTile53CostelloRightClick,
       alt: 'Visit Costello'
     });
 
@@ -22619,7 +23800,7 @@ function createNPCCooldownManager() {
         const tile = getTileElement(WYDA_TILE_INDEX);
         return tile ? [tile] : [];
       },
-      isAccessActive: shouldShowWydaFightIcon,
+      isAccessActive: shouldEnableTile83WydaRightClick,
       alt: 'Visit Wyda'
     });
 
@@ -22628,7 +23809,7 @@ function createNPCCooldownManager() {
         const tile = getTileElement(79);
         return tile ? [tile] : [];
       },
-      isAccessActive: shouldShowAlDeeFightIcon,
+      isAccessActive: shouldEnableTile79RightClick,
       alt: 'Visit Al Dee'
     });
 
@@ -22648,6 +23829,21 @@ function createNPCCooldownManager() {
       },
       isAccessActive: shouldEnableTile76Jakundaf,
       alt: JAKUNDAF_DESERT_CONTEXT_MENU_LABEL
+    });
+
+    registerQuestTileHighlightSource({
+      getTiles: () => ECLIPSE_CAULDRON_TILE_INDICES.map((tileIndex) => getTileElement(tileIndex)).filter(Boolean),
+      isAccessActive: shouldEnableEclipseCauldron,
+      alt: ECLIPSE_CAULDRON_CONTEXT_MENU_LABEL
+    });
+
+    registerQuestTileHighlightSource({
+      getTiles: () => {
+        const tile = getTileElement(ECLIPSE_PORTAL_TILE_INDEX);
+        return tile ? [tile] : [];
+      },
+      isAccessActive: shouldEnableEclipsePortal,
+      alt: ECLIPSE_PORTAL_CONTEXT_MENU_LABEL
     });
 
     registerQuestTileHighlightSource({
@@ -28815,6 +30011,9 @@ function createNPCCooldownManager() {
     }
     if (needsJakundafDesertObserver()) {
       setupTile76JakundafObserver();
+    }
+    if (needsTaintedSoulsObserver()) {
+      setupEkatrixEclipseObserver();
     }
     if (needsDragonmotherObserver()) {
       setupTile47LonesomeDragonObserver();

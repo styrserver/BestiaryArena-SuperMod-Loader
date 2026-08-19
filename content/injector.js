@@ -170,32 +170,57 @@ if (IS_TOP_FRAME && !window.__BA_HYDRATION_ERROR_LISTENER__) {
 if (IS_TOP_FRAME && !window.__BA_RUNTIME_CRASH_RECOVERY__) {
   window.__BA_RUNTIME_CRASH_RECOVERY__ = true;
 
-  const CRASH_RECOVERY_RETRY_KEY = 'ba-runtime-crash-retry-count';
+  const CRASH_RECOVERY_RETRY_KEY = 'ba-runtime-crash-retry-times';
+  const CRASH_RECOVERY_RETRY_COUNT_LEGACY_KEY = 'ba-runtime-crash-retry-count';
   const MAX_CRASH_RECOVERY_RETRIES = 3;
+  const CRASH_RECOVERY_WINDOW_MS = 60 * 1000;
   const CRASH_RECOVERY_DELAY_MS = 2500;
   let crashRecoveryScheduled = false;
+  let crashRecoveryLimitLogged = false;
+  let crashRecoveryDisabledLogged = false;
+  let crashRecoveryRelaxedLogged = false;
 
-  function getCrashRecoveryRetryCount() {
+  function readCrashRecoveryRetryTimes() {
     try {
-      return parseInt(sessionStorage.getItem(CRASH_RECOVERY_RETRY_KEY) || '0', 10) || 0;
+      const raw = sessionStorage.getItem(CRASH_RECOVERY_RETRY_KEY);
+      if (!raw) {
+        return [];
+      }
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) {
+        return [];
+      }
+      const cutoff = Date.now() - CRASH_RECOVERY_WINDOW_MS;
+      return parsed.filter((stamp) => typeof stamp === 'number' && stamp > cutoff);
     } catch {
-      return 0;
+      return [];
     }
   }
 
-  function incrementCrashRecoveryRetryCount() {
-    const next = getCrashRecoveryRetryCount() + 1;
+  function writeCrashRecoveryRetryTimes(stamps) {
     try {
-      sessionStorage.setItem(CRASH_RECOVERY_RETRY_KEY, String(next));
+      sessionStorage.setItem(CRASH_RECOVERY_RETRY_KEY, JSON.stringify(stamps));
+      sessionStorage.removeItem(CRASH_RECOVERY_RETRY_COUNT_LEGACY_KEY);
     } catch {
       // ignore storage failures
     }
-    return next;
+  }
+
+  function getCrashRecoveryRetryCount() {
+    return readCrashRecoveryRetryTimes().length;
+  }
+
+  function incrementCrashRecoveryRetryCount() {
+    const nextStamps = readCrashRecoveryRetryTimes();
+    nextStamps.push(Date.now());
+    writeCrashRecoveryRetryTimes(nextStamps);
+    return nextStamps.length;
   }
 
   function resetCrashRecoveryRetryCount() {
     try {
       sessionStorage.removeItem(CRASH_RECOVERY_RETRY_KEY);
+      sessionStorage.removeItem(CRASH_RECOVERY_RETRY_COUNT_LEGACY_KEY);
     } catch {
       // ignore storage failures
     }
@@ -231,18 +256,27 @@ if (IS_TOP_FRAME && !window.__BA_RUNTIME_CRASH_RECOVERY__) {
     if (!isNextJsClientErrorPage() || crashRecoveryScheduled) return;
 
     if (isRuntimeAutoReloadDisabled()) {
-      console.warn('[Injector] Runtime crash detected but auto-reload is disabled in Mod Settings');
+      if (!crashRecoveryDisabledLogged) {
+        crashRecoveryDisabledLogged = true;
+        console.warn('[Injector] Runtime crash detected but auto-reload is disabled in Mod Settings');
+      }
       return;
     }
 
     if (window.BestiaryPlatform?.prefersRelaxedLoader?.()) {
-      console.warn('[Injector] Runtime crash detected (relaxed loader: no auto-refresh)');
+      if (!crashRecoveryRelaxedLogged) {
+        crashRecoveryRelaxedLogged = true;
+        console.warn('[Injector] Runtime crash detected (relaxed loader: no auto-refresh)');
+      }
       return;
     }
 
     const retryCount = getCrashRecoveryRetryCount();
     if (retryCount >= MAX_CRASH_RECOVERY_RETRIES) {
-      console.warn('[Injector] Runtime crash detected — auto-refresh retry limit reached');
+      if (!crashRecoveryLimitLogged) {
+        crashRecoveryLimitLogged = true;
+        console.warn('[Injector] Runtime crash detected — auto-refresh retry limit reached');
+      }
       return;
     }
 
@@ -257,6 +291,13 @@ if (IS_TOP_FRAME && !window.__BA_RUNTIME_CRASH_RECOVERY__) {
   }
 
   function onPossibleCrashDomChange() {
+    if (!isNextJsClientErrorPage()) {
+      crashRecoveryLimitLogged = false;
+      crashRecoveryDisabledLogged = false;
+      crashRecoveryRelaxedLogged = false;
+      return;
+    }
+
     scheduleCrashRecoveryReload();
   }
 
