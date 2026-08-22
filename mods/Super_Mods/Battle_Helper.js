@@ -39,6 +39,11 @@ const BATTLE_HELPER_FIELD_HEIGHT_PX = 25;
 const BATTLE_HELPER_OUTPUT_HEIGHT_PX = 170;
 const BATTLE_HELPER_HELP_LIST_HEIGHT_PX = 210;
 const BATTLE_HELPER_SCROLLBAR_GUTTER_PX = 12;
+const BATTLE_HELPER_STATUS_COLORS = {
+  success: '#6ee07a',
+  error: '#f87171',
+  progress: '#fbbf24'
+};
 const BATTLE_HELPER_FETCH_MIN_INTERVAL_MS = 400;
 const BATTLE_HELPER_TOAST_STACK_OFFSET_PX = 46;
 const BATTLE_HELPER_TOAST_TRANSITION = '230ms cubic-bezier(0.21, 1.02, 0.73, 1)';
@@ -362,6 +367,23 @@ function createMapThumbnailImg(roomId, sizePx = 18) {
   return img;
 }
 
+function createMapIconPlaceholder(sizePx = 80) {
+  const box = document.createElement('div');
+  const boxPx = `${sizePx}px`;
+  box.style.cssText = `width: ${boxPx}; height: ${boxPx}; background: rgba(68, 68, 68, 0.5); border: 1px solid #555; border-radius: 4px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;`;
+
+  const icon = document.createElement('img');
+  icon.src = 'https://bestiaryarena.com/assets/icons/minotaurstatue.png';
+  icon.alt = '';
+  icon.className = 'pixelated';
+  icon.draggable = false;
+  const iconPx = `${Math.round(sizePx * 0.625)}px`;
+  icon.style.cssText = `width: ${iconPx}; height: ${iconPx}; object-fit: contain; opacity: 0.7;`;
+  box.appendChild(icon);
+
+  return box;
+}
+
 function normalizeRoomList(rawMaps) {
   if (Array.isArray(rawMaps)) return rawMaps.filter((m) => m && m.id);
   if (rawMaps && typeof rawMaps === 'object') {
@@ -437,7 +459,7 @@ function createMapPicker(mapOptions, initialMapKey = '') {
   wrap.style.cssText = 'display: flex; flex-direction: row; gap: 4px; align-items: center; width: 100%; box-sizing: border-box;';
 
   const iconSlot = document.createElement('div');
-  iconSlot.style.cssText = 'width: 22px; height: 22px; flex: 0 0 auto; display: flex; align-items: center; justify-content: center;';
+  iconSlot.style.cssText = 'width: 50px; height: 50px; flex: 0 0 auto; display: flex; align-items: center; justify-content: center;';
 
   const select = createFieldSelect([
     { value: '', label: t('mods.battleHelper.help.mapPlaceholder') },
@@ -453,7 +475,7 @@ function createMapPicker(mapOptions, initialMapKey = '') {
     iconSlot.textContent = '';
     const selected = mapOptions.find((m) => m.mapKey === select.value);
     if (!selected?.id) return;
-    iconSlot.appendChild(createMapThumbnailImg(selected.id, 20));
+    iconSlot.appendChild(createMapThumbnailImg(selected.id, 46));
   }
 
   select.addEventListener('change', syncIcon);
@@ -1815,13 +1837,11 @@ function createActionButton(label, onClick, options = {}) {
   return button;
 }
 
-function createSectionLabel(title, options = {}) {
+function createSectionLabel(title) {
   const label = document.createElement('div');
   label.className = 'pixel-font-12 text-whiteRegular mb-1 shrink-0';
-  if (options.centered) {
-    label.style.textAlign = 'center';
-    label.style.width = '100%';
-  }
+  label.style.textAlign = 'center';
+  label.style.width = '100%';
   label.textContent = title;
   return label;
 }
@@ -1852,22 +1872,6 @@ function createUsernameInput(initialValue = '') {
   input.setAttribute('autocomplete', 'off');
   input.setAttribute('spellcheck', 'false');
   return input;
-}
-
-function createInfoNote(text, options = {}) {
-  const notesBlock = document.createElement('div');
-  notesBlock.className = 'frame-pressed-1 surface-dark w-full min-w-0 shrink-0 p-1';
-
-  const notesText = document.createElement('p');
-  notesText.className = options.yellow ? 'pixel-font-14 italic m-0' : 'pixel-font-14 text-whiteRegular italic m-0';
-  notesText.style.cssText = 'line-height: 1.35; word-break: break-word; white-space: pre-line;';
-  if (options.yellow) {
-    notesText.style.color = '#ffe066';
-  }
-  notesText.textContent = text;
-  notesBlock.appendChild(notesText);
-
-  return notesBlock;
 }
 
 function applyBattleHelperScrollViewportGutter(scrollContainer) {
@@ -1908,6 +1912,10 @@ function createBattleHelperScrollContainer({ height = BATTLE_HELPER_OUTPUT_HEIGH
     padding: true,
     content: ''
   });
+  // Status areas always sit at their full configured height (expanded to the bottom of
+  // their slot) rather than shrinking to fit sparse content, so `refit` is a no-op kept
+  // around for call-site compatibility.
+  scrollContainer.refit = () => {};
   Object.assign(scrollContainer.element.style, grow
     ? {
         flex: '1 1 0',
@@ -2062,7 +2070,7 @@ function buildImportPanel(onContentChange, shared) {
   panel.className = 'battle-helper-col battle-helper-col-profile';
   panel.style.cssText = 'display: flex; flex-direction: column; gap: 4px; flex: 6 1 0; width: 30%; min-width: 0; min-height: 0; height: 100%; box-sizing: border-box;';
 
-  const profileCard = createSectionCard({ flex: true });
+  const profileCard = createSectionCard();
   const usernameInput = createUsernameInput(sessionState.lastUsername);
   profileCard.appendChild(usernameInput);
   shared.usernameInput = usernameInput;
@@ -2070,24 +2078,66 @@ function buildImportPanel(onContentChange, shared) {
   let replaceButton;
   let restoreButton;
 
-  const outputScroll = createBattleHelperScrollContainer({ grow: true });
-  const outputBox = document.createElement('p');
-  outputBox.className = 'pixel-font-14 text-whiteRegular m-0';
-  outputBox.style.cssText = 'white-space: pre-wrap; line-height: 1.35; word-break: break-word;';
-  outputScroll.addContent(outputBox);
+  const logScroll = createBattleHelperScrollContainer({
+    height: BATTLE_HELPER_HELP_LIST_HEIGHT_PX,
+    grow: true
+  });
 
-  function setOutput(content) {
-    outputBox.textContent = '';
-    if (content == null) {
-      // leave empty
-    } else if (typeof content === 'string') {
-      outputBox.textContent = content;
-    } else if (content instanceof Node) {
-      outputBox.appendChild(content);
+  let lastOutputKey = null;
+  let lastOutputEntry = null;
+  let lastOutputCount = 1;
+
+  function setOutput(content, type = null) {
+    if (content == null || content === '') return;
+    const key = `${type || ''} ${typeof content === 'string' ? content : (content.textContent || '')}`;
+
+    if (lastOutputEntry && key === lastOutputKey) {
+      lastOutputCount += 1;
+      lastOutputEntry._badge.textContent = ` ×${lastOutputCount}`;
+      logScroll.refit();
+      requestAnimationFrame(() => {
+        logScroll.scrollView.scrollTop = logScroll.scrollView.scrollHeight;
+      });
+      if (typeof onContentChange === 'function') {
+        requestAnimationFrame(() => onContentChange());
+      }
+      return;
     }
+
+    const entry = document.createElement('p');
+    entry.className = 'pixel-font-14 text-whiteRegular m-0';
+    entry.style.cssText = 'white-space: pre-wrap; line-height: 1.35; word-break: break-word;';
+    const statusColor = BATTLE_HELPER_STATUS_COLORS[type];
+    if (statusColor) {
+      entry.style.color = statusColor;
+    }
+    if (typeof content === 'string') {
+      entry.textContent = content;
+    } else if (content instanceof Node) {
+      entry.appendChild(content);
+    }
+    const badge = document.createElement('span');
+    badge.style.cssText = 'opacity: 0.7; font-style: italic;';
+    entry.appendChild(badge);
+    entry._badge = badge;
+
+    if (logScroll.contentContainer.childElementCount > 0) {
+      const divider = document.createElement('div');
+      divider.style.cssText = 'height: 1px; background: rgba(255,255,255,0.12); margin: 2px 0;';
+      logScroll.addContent(divider);
+    }
+    logScroll.addContent(entry);
+    logScroll.refit();
+    requestAnimationFrame(() => {
+      logScroll.scrollView.scrollTop = logScroll.scrollView.scrollHeight;
+    });
     if (typeof onContentChange === 'function') {
       requestAnimationFrame(() => onContentChange());
     }
+
+    lastOutputKey = key;
+    lastOutputEntry = entry;
+    lastOutputCount = 1;
   }
   shared.setOutput = setOutput;
   setOutput(getInitialModalOutputContent());
@@ -2101,10 +2151,10 @@ function buildImportPanel(onContentChange, shared) {
   async function fetchAndOptionallyReplace(username, { replace = false, helpMapName = '', helpRequestId = '', helpRoomId = '', shouldAbort = null } = {}) {
     const normalizedName = normalizeUsername(username);
     if (!normalizedName) {
-      setOutput(getEnterUsernameFirstOutput());
+      setOutput(getEnterUsernameFirstOutput(), 'error');
       return false;
     }
-    setOutput(tReplace('mods.battleHelper.output.fetchingProfile', { username: normalizedName }));
+    setOutput(tReplace('mods.battleHelper.output.fetchingProfile', { username: normalizedName }), 'progress');
     const profile = await fetchProfileByUsername(normalizedName);
     if (typeof shouldAbort === 'function' && shouldAbort()) return false;
     sessionState.lastProfileRaw = profile;
@@ -2121,13 +2171,13 @@ function buildImportPanel(onContentChange, shared) {
         throw new Error(t('mods.battleHelper.errors.sandboxRequired'));
       }
       applyArsenalReplacement(normalized, { helpMapName, helpRequestId, helpRoomId });
-      setOutput(getProfileReplacedOutput());
+      setOutput(getProfileReplacedOutput(), 'success');
     } else {
       sessionState.helpMapName = '';
       sessionState.helpRequestId = '';
       sessionState.helpRoomId = '';
       stopBattleHelperPublishSetupToast();
-      setOutput(buildFetchedProfileOutputNodes(normalized, { includeSandboxNote: switchedToSandbox }));
+      setOutput(buildFetchedProfileOutputNodes(normalized, { includeSandboxNote: switchedToSandbox }), 'success');
     }
     syncButtons();
     return true;
@@ -2140,7 +2190,7 @@ function buildImportPanel(onContentChange, shared) {
     } catch (error) {
       sessionState.lastProfileRaw = null;
       sessionState.lastNormalized = null;
-      setOutput(getFetchFailedOutput(error));
+      setOutput(getFetchFailedOutput(error), 'error');
       syncButtons();
     }
   });
@@ -2155,33 +2205,35 @@ function buildImportPanel(onContentChange, shared) {
         throw new Error(t('mods.battleHelper.errors.fetchValidProfileFirst'));
       }
       applyArsenalReplacement(sessionState.lastNormalized, { helpMapName: '', helpRequestId: '', helpRoomId: '' });
-      setOutput(getProfileReplacedOutput());
+      setOutput(getProfileReplacedOutput(), 'success');
       syncButtons();
     } catch (error) {
       setOutput(tReplace('mods.battleHelper.output.replaceFailed', {
         error: String(error?.message || error)
-      }));
+      }), 'error');
     }
   }, { disabled: true, primary: true });
 
   restoreButton = createActionButton(t('mods.battleHelper.restoreOriginalProfile'), () => {
     try {
       restoreOriginalArsenal();
-      setOutput(t('mods.battleHelper.output.originalProfileRestored'));
+      setOutput(t('mods.battleHelper.output.originalProfileRestored'), 'success');
       syncButtons();
     } catch (error) {
       setOutput(tReplace('mods.battleHelper.output.restoreFailed', {
         error: String(error?.message || error)
-      }));
+      }), 'error');
     }
   }, { disabled: true, blue: true });
 
   profileCard.appendChild(replaceButton);
   profileCard.appendChild(restoreButton);
   panel.appendChild(profileCard);
-  panel.appendChild(createInfoNote(t('mods.battleHelper.hiddenCreaturesNote'), { yellow: true }));
-  panel.appendChild(createSectionLabel(t('mods.battleHelper.statusLabel'), { centered: true }));
-  panel.appendChild(outputScroll.element);
+
+  const statusCard = createSectionCard({ flex: true });
+  statusCard.appendChild(createSectionLabel(t('mods.battleHelper.statusLabel')));
+  statusCard.appendChild(logScroll.element);
+  panel.appendChild(statusCard);
 
   syncButtons();
   return panel;
@@ -2196,9 +2248,9 @@ function buildHelpBoardColumns(onContentChange, shared) {
   detailColumn.className = 'battle-helper-col battle-helper-col-selected';
   detailColumn.style.cssText = 'display: flex; flex-direction: column; gap: 4px; flex: 7 1 0; width: 35%; min-width: 0; min-height: 0; height: 100%; box-sizing: border-box;';
 
-  function setHelpStatus(text) {
+  function setHelpStatus(text, type = null) {
     if (typeof shared.setOutput === 'function') {
-      shared.setOutput(text || '');
+      shared.setOutput(text || '', type);
       return;
     }
     if (typeof onContentChange === 'function') {
@@ -2206,7 +2258,7 @@ function buildHelpBoardColumns(onContentChange, shared) {
     }
   }
 
-  const formCard = createSectionCard({ flex: true });
+  const formCard = createSectionCard();
   formCard.appendChild(createSectionLabel(t('mods.battleHelper.help.askTitle')));
 
   const mapOptions = getHelpMapOptions();
@@ -2333,7 +2385,7 @@ function buildHelpBoardColumns(onContentChange, shared) {
       );
       syncNoteLimit();
       const note = validateHelpNote(noteInput.value);
-      setHelpStatus(t('mods.battleHelper.help.posting'));
+      setHelpStatus(t('mods.battleHelper.help.posting'), 'progress');
       await createHelpRequest({
         mapName: selected.name,
         mapKey: selected.mapKey,
@@ -2347,7 +2399,7 @@ function buildHelpBoardColumns(onContentChange, shared) {
       syncNoteLimit();
       goalValueInput.value = '';
       clearAskFormFieldErrors();
-      setHelpStatus(t('mods.battleHelper.help.posted'));
+      setHelpStatus(t('mods.battleHelper.help.posted'), 'success');
       await refreshList({ preserveStatus: true });
     } catch (error) {
       const message = String(error?.message || error);
@@ -2356,7 +2408,7 @@ function buildHelpBoardColumns(onContentChange, shared) {
       else if (field === 'goalType') setHelpFormFieldError(goalTypeField, message);
       else if (field === 'goalValue') setHelpFormFieldError(goalValueField, message);
       else if (field === 'note') setHelpFormFieldError(noteField, message);
-      setHelpStatus(message);
+      setHelpStatus(message, 'error');
     }
   }, { primary: true });
   formCard.appendChild(postButton);
@@ -2402,9 +2454,9 @@ function buildHelpBoardColumns(onContentChange, shared) {
   detailCard.appendChild(createSectionLabel(t('mods.battleHelper.help.selectedTitle')));
 
   const detailHeader = document.createElement('div');
-  detailHeader.style.cssText = 'display: flex; flex-direction: row; gap: 6px; align-items: flex-start; width: 100%;';
+  detailHeader.style.cssText = 'display: flex; flex-direction: row; gap: 6px; align-items: center; width: 100%;';
   const detailIconSlot = document.createElement('div');
-  detailIconSlot.style.cssText = 'width: 28px; height: 28px; flex: 0 0 auto; display: flex; align-items: center; justify-content: center;';
+  detailIconSlot.style.cssText = 'width: 50px; height: 50px; flex: 0 0 auto; display: flex; align-items: center; justify-content: center;';
   const detailText = document.createElement('p');
   detailText.className = 'pixel-font-14 text-whiteRegular m-0';
   detailText.style.cssText = 'flex: 1 1 auto; min-width: 0; line-height: 1.35; word-break: break-word; white-space: pre-wrap;';
@@ -2428,7 +2480,7 @@ function buildHelpBoardColumns(onContentChange, shared) {
     const { roomId, mapLabel } = getHelpMapContextForRequest(request);
     setStatus(tReplace('mods.battleHelper.output.fetchingProfile', {
       username: request.requesterName
-    }));
+    }), 'progress');
     if (typeof shared.fetchAndOptionallyReplace === 'function') {
       await shared.fetchAndOptionallyReplace(request.requesterName, {
         replace: true,
@@ -2457,15 +2509,18 @@ function buildHelpBoardColumns(onContentChange, shared) {
     if (isOwn) {
       if (seq !== helpRequestActivateSeq) return;
       const { mapLabel } = getHelpMapContextForRequest(request);
-      setHelpStatus(navigated
-        ? tReplace('mods.battleHelper.help.navigatedOwn', { map: mapLabel || request.mapName })
-        : t('mods.battleHelper.help.errors.navigateFailed'));
+      setHelpStatus(
+        navigated
+          ? tReplace('mods.battleHelper.help.navigatedOwn', { map: mapLabel || request.mapName })
+          : t('mods.battleHelper.help.errors.navigateFailed'),
+        navigated ? 'success' : 'error'
+      );
       return;
     }
 
     if (!navigated) {
       if (seq !== helpRequestActivateSeq) return;
-      setHelpStatus(t('mods.battleHelper.help.errors.navigateFailed'));
+      setHelpStatus(t('mods.battleHelper.help.errors.navigateFailed'), 'error');
       return;
     }
 
@@ -2480,13 +2535,13 @@ function buildHelpBoardColumns(onContentChange, shared) {
       setHelpStatus(tReplace('mods.battleHelper.help.profileLoadedOnMap', {
         name: request.requesterName,
         map: helpMapName
-      }));
+      }), 'success');
       if (!activeBattleHelperModal && !document.getElementById(BATTLE_HELPER_MODAL_ID)) {
         openBattleHelperModal();
       }
     } catch (error) {
       if (seq !== helpRequestActivateSeq) return;
-      setHelpStatus(String(error?.message || error));
+      setHelpStatus(String(error?.message || error), 'error');
     }
   }
 
@@ -2505,16 +2560,19 @@ function buildHelpBoardColumns(onContentChange, shared) {
       );
       if (seq !== helpViewSetupSeq) return false;
 
-      setHelpStatus(t('mods.battleHelper.help.applyingSetup'));
+      setHelpStatus(t('mods.battleHelper.help.applyingSetup'), 'progress');
       const ok = applyHelpReplySetup(replayLink);
       if (seq !== helpViewSetupSeq) return false;
-      setHelpStatus(ok
-        ? t('mods.battleHelper.help.setupApplied')
-        : t('mods.battleHelper.help.setupApplyFailed'));
+      setHelpStatus(
+        ok
+          ? t('mods.battleHelper.help.setupApplied')
+          : t('mods.battleHelper.help.setupApplyFailed'),
+        ok ? 'success' : 'error'
+      );
       return ok;
     } catch (error) {
       if (seq !== helpViewSetupSeq) return false;
-      setHelpStatus(String(error?.message || error));
+      setHelpStatus(String(error?.message || error), 'error');
       return false;
     }
   }
@@ -2522,7 +2580,7 @@ function buildHelpBoardColumns(onContentChange, shared) {
   const loadProfileButton = createActionButton(t('mods.battleHelper.help.loadProfile'), async () => {
     const request = helpBoardState.requests.find((r) => r.id === helpBoardState.selectedId);
     if (!request) {
-      setHelpStatus(t('mods.battleHelper.help.errors.selectRequestFirst'));
+      setHelpStatus(t('mods.battleHelper.help.errors.selectRequestFirst'), 'error');
       return;
     }
     await activateHelpRequest(request);
@@ -2533,12 +2591,12 @@ function buildHelpBoardColumns(onContentChange, shared) {
       if (!helpBoardState.selectedId) {
         throw new Error(t('mods.battleHelper.help.errors.selectRequestFirst'));
       }
-      setHelpStatus(t('mods.battleHelper.help.publishing'));
+      setHelpStatus(t('mods.battleHelper.help.publishing'), 'progress');
       await publishHelpReply(helpBoardState.selectedId);
-      setHelpStatus(t('mods.battleHelper.help.published'));
+      setHelpStatus(t('mods.battleHelper.help.published'), 'success');
       await refreshList({ preserveStatus: true });
     } catch (error) {
-      setHelpStatus(String(error?.message || error));
+      setHelpStatus(String(error?.message || error), 'error');
     }
   });
 
@@ -2546,16 +2604,16 @@ function buildHelpBoardColumns(onContentChange, shared) {
     const request = helpBoardState.requests.find((r) => r.id === helpBoardState.selectedId);
     const me = getCurrentPlayerName().toLowerCase();
     if (!request || request.requesterName.toLowerCase() !== me) {
-      setHelpStatus(t('mods.battleHelper.help.errors.onlyOwnClose'));
+      setHelpStatus(t('mods.battleHelper.help.errors.onlyOwnClose'), 'error');
       return;
     }
     try {
       await closeHelpRequest(request.id);
       helpBoardState.selectedId = null;
-      setHelpStatus(t('mods.battleHelper.help.closed'));
+      setHelpStatus(t('mods.battleHelper.help.closed'), 'success');
       await refreshList({ preserveStatus: true });
     } catch (error) {
-      setHelpStatus(String(error?.message || error));
+      setHelpStatus(String(error?.message || error), 'error');
     }
   }, { danger: true });
 
@@ -2573,7 +2631,6 @@ function buildHelpBoardColumns(onContentChange, shared) {
   detailCard.appendChild(createSectionLabel(t('mods.battleHelper.help.repliesTitle')));
   detailCard.appendChild(repliesScroll.element);
   detailColumn.appendChild(detailCard);
-  detailColumn.appendChild(createInfoNote(t('mods.battleHelper.help.boardNote'), { yellow: true }));
 
   function renderReplies(request) {
     repliesBody.textContent = '';
@@ -2636,12 +2693,12 @@ function buildHelpBoardColumns(onContentChange, shared) {
           if (removeBtn.disabled) return;
           removeBtn.disabled = true;
           try {
-            setHelpStatus(t('mods.battleHelper.help.removingReply'));
+            setHelpStatus(t('mods.battleHelper.help.removingReply'), 'progress');
             await deleteHelpReply(request.id, reply.id, reply.helperName);
-            setHelpStatus(t('mods.battleHelper.help.removedReply'));
+            setHelpStatus(t('mods.battleHelper.help.removedReply'), 'success');
             await refreshList({ preserveStatus: true });
           } catch (error) {
-            setHelpStatus(String(error?.message || error));
+            setHelpStatus(String(error?.message || error), 'error');
             removeBtn.disabled = false;
           }
         });
@@ -2656,6 +2713,7 @@ function buildHelpBoardColumns(onContentChange, shared) {
     const request = helpBoardState.requests.find((r) => r.id === helpBoardState.selectedId);
     if (!request) {
       detailIconSlot.textContent = '';
+      detailIconSlot.appendChild(createMapIconPlaceholder(50));
       detailText.textContent = t('mods.battleHelper.help.noSelection');
       loadProfileButton.disabled = true;
       loadProfileButton.textContent = t('mods.battleHelper.help.loadProfile');
@@ -2669,7 +2727,9 @@ function buildHelpBoardColumns(onContentChange, shared) {
     const { roomId, mapLabel } = getHelpMapContextForRequest(request);
     detailIconSlot.textContent = '';
     if (roomId) {
-      detailIconSlot.appendChild(createMapThumbnailImg(roomId, 28));
+      detailIconSlot.appendChild(createMapThumbnailImg(roomId, 50));
+    } else {
+      detailIconSlot.appendChild(createMapIconPlaceholder(50));
     }
 
     detailText.textContent = '';
@@ -2716,6 +2776,7 @@ function buildHelpBoardColumns(onContentChange, shared) {
       empty.className = 'pixel-font-14 text-whiteRegular m-0 italic';
       empty.textContent = t('mods.battleHelper.help.noOpenRequests');
       listBody.appendChild(empty);
+      listScroll.refit();
       renderDetail();
       if (typeof onContentChange === 'function') {
         requestAnimationFrame(() => onContentChange());
@@ -2772,6 +2833,7 @@ function buildHelpBoardColumns(onContentChange, shared) {
       listBody.appendChild(row);
     });
 
+    listScroll.refit();
     renderDetail();
     if (typeof onContentChange === 'function') {
       requestAnimationFrame(() => onContentChange());
@@ -2780,9 +2842,6 @@ function buildHelpBoardColumns(onContentChange, shared) {
 
   async function refreshList({ preserveStatus = false } = {}) {
     updateOpenRequestsTitle();
-    if (!preserveStatus) {
-      setHelpStatus(t('mods.battleHelper.help.loading'));
-    }
     try {
       const requests = await fetchHelpRequests();
       helpBoardState.requests = requests;
@@ -2799,7 +2858,7 @@ function buildHelpBoardColumns(onContentChange, shared) {
       }
     } catch (error) {
       updateOpenRequestsTitle();
-      setHelpStatus(String(error?.message || error));
+      setHelpStatus(String(error?.message || error), 'error');
     }
   }
 

@@ -81,6 +81,7 @@ const editorState = {
   creatureTabScrollTop: 0,
   editingSprite: null,
   editingCreatureTileIndex: null,
+  creatureEditFocusPending: false,
   selectedSaveId: null,
   selectedSaveRoomId: null,
   sandboxTestActive: false,
@@ -230,6 +231,7 @@ function sendBoardSetState(updater) {
   return false;
 }
 
+
 /** Bypass restore guard — only for compacting/clearing boardConfig during native reload. */
 function patchBoardStateDirect(updater) {
   if (!globalThis.state?.board) return false;
@@ -347,6 +349,15 @@ let mapEditorEditSessionRefreshTimer = null;
 let workshopCatalogRenderToken = 0;
 let workshopUploadInFlight = false;
 let suppressSandboxAutoSetupReapplyUntil = 0;
+/** Skip the board-subscription's full refreshInspector() right after our own sendBoardSetState
+ *  writes (e.g. live creature-field edits) — it just rebuilds the panel and steals focus/scroll
+ *  back to the top of the form; the live-apply path already keeps the visible summary in sync. */
+let suppressBoardListenerRefreshUntil = 0;
+/** Count of edit notifications since the last save/load — gates auto-save so merely opening
+ *  a map that already has creatures/hitboxes (nothing new touched) doesn't silently write a
+ *  save. Reset on load, on save (auto or manual), and when the tracked room/session changes. */
+let editorSessionChangeCount = 0;
+const AUTO_SAVE_MIN_CHANGES = 5;
 let restoreMapInProgress = false;
 let restoreMapSettleUntil = 0;
 let restoreBoardGuardHandler = null;
@@ -389,6 +400,7 @@ const PLAY_MODE_LOCK_ATTR = 'data-map-editor-play-mode-locked';
 const PLAY_MODE_LOCK_OVERLAY_CLASS = 'map-editor-play-mode-lock-overlay';
 const PLAY_MODE_LOCKED_BTN_CLASS = 'map-editor-play-mode-locked-btn';
 const MAP_EDITOR_VILLAIN_KEY_PREFIX = 'map-editor-villain-tile-';
+const MAP_EDITOR_ALLY_KEY_PREFIX = 'map-editor-ally-tile-';
 const CREATURE_GENE_KEYS = [
   { key: 'hp', label: 'HP' },
   { key: 'ad', label: 'AD' },
@@ -400,7 +412,9 @@ const CREATURE_GENE_UI_MIN = 0;
 const CREATURE_GENE_UI_MAX = 100;
 const CREATURE_GENE_ENGINE_MIN = 1;
 const CREATURE_GENE_ENGINE_MAX = 20;
-const CREATURE_GENE_UI_DEFAULT = 20;
+// UI-scale (0-100 by 5), not engine-scale — 100 here maps to engine gene 20 (max),
+// matching the board's own default genes for a freshly placed villain/ally.
+const CREATURE_GENE_UI_DEFAULT = 100;
 const CREATURE_DIRECTIONS = ['south', 'north', 'east', 'west'];
 const CREATURE_EQUIP_STATS = ['hp', 'ad', 'ap', 'armor', 'magicResist'];
 const CREATURE_EQUIP_TIER_DEFAULT = 5;
@@ -418,6 +432,19 @@ const CREATURE_LIVE_APPLY_MS = 500;
 
 /** @type {Map<number, object>} tileIndex → Custom Battles villain config */
 const editorPlacedVillains = new Map();
+/** @type {Set<number>} tileIndexes among editorPlacedVillains that fight as forced allies, not villains */
+let editorAlliedTiles = new Set();
+
+/** Split a list of placed-creature configs into { villains, allies } by editorAlliedTiles membership. */
+function splitVillainsAndAllies(list) {
+  const villains = [];
+  const allies = [];
+  (list || []).forEach((entry) => {
+    if (editorAlliedTiles.has(Number(entry?.tileIndex))) allies.push(entry);
+    else villains.push(entry);
+  });
+  return { villains, allies };
+}
 
 let assetListLoadingMore = false;
 
@@ -723,6 +750,58 @@ function createPanelButton(text, onClick, className = 'me-btn') {
   return btn;
 }
 
+/**
+ * Two-click inline "arm then confirm" pattern for destructive buttons — first click swaps the
+ * button to a red confirm state (auto-reverts after timeoutMs, or on any click elsewhere);
+ * clicking it again while armed actually runs onConfirm(). baseText/confirmText may be plain
+ * strings or functions (resolved fresh each time) so the label can reflect current selection.
+ */
+function attachInlineConfirm(button, { baseText, confirmText, onConfirm, timeoutMs = 4000 }) {
+  if (!button || typeof onConfirm !== 'function') return;
+  let confirmTimeoutId = null;
+  let outsideClickHandler = null;
+  const resolveText = (value) => (typeof value === 'function' ? value() : value);
+  const originalBackgroundColor = button.style.backgroundColor || '';
+  const originalColor = button.style.color || '';
+
+  const resetState = () => {
+    button.dataset.confirmArmed = 'false';
+    button.textContent = resolveText(baseText);
+    button.style.backgroundColor = originalBackgroundColor;
+    button.style.color = originalColor;
+    if (confirmTimeoutId) {
+      clearTimeout(confirmTimeoutId);
+      confirmTimeoutId = null;
+    }
+    if (outsideClickHandler) {
+      document.removeEventListener('mousedown', outsideClickHandler, true);
+      outsideClickHandler = null;
+    }
+  };
+
+  button.textContent = resolveText(baseText);
+  button.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (button.dataset.confirmArmed !== 'true') {
+      button.dataset.confirmArmed = 'true';
+      button.textContent = resolveText(confirmText);
+      button.style.backgroundColor = '#8b0000';
+      button.style.color = '#ffffff';
+      if (confirmTimeoutId) clearTimeout(confirmTimeoutId);
+      confirmTimeoutId = setTimeout(resetState, timeoutMs);
+
+      outsideClickHandler = (event) => {
+        if (event.target !== button) resetState();
+      };
+      document.addEventListener('mousedown', outsideClickHandler, true);
+      return;
+    }
+
+    resetState();
+    onConfirm();
+  });
+}
+
 function setCollapsibleExpanded(target, trigger, expanded, options = {}) {
   const { expandedClass } = options;
   target.hidden = !expanded;
@@ -850,10 +929,6 @@ function resetMapEditorUiState() {
 
 function logMapEditor(...args) {
   console.log('[Map Editor]', ...args);
-}
-
-function logBoardConfigDiagnostics(tag, extra = {}) {
-  logBoardStateSnapshot(tag, extra);
 }
 
 function detachRestoreBoardGuard() {
@@ -1015,14 +1090,6 @@ function removeOrphanedEditorAddedSprites() {
   return removed;
 }
 
-function stripEditorDomArtifactsFromBoard() {
-  const removed = removeOrphanedEditorAddedSprites();
-  const unhidden = clearEditorHiddenSpritesFromDom();
-  const ephemeral = removeEphemeralSpritesFromTiles();
-  logMapEditor('stripEditorDomArtifacts', { removed, unhidden, ephemeral });
-  return { removed, unhidden, ephemeral };
-}
-
 function refreshEditorAddedSpritesFromDom() {
   for (const tileEl of getActiveTileElements()) {
     const tileIndex = getTileIndexFromElement(tileEl);
@@ -1047,7 +1114,7 @@ function purgeAllEditorDomEdits(options = {}) {
   if (options.skipDomRestore !== true) {
     for (const entry of [...editorEdits.hiddenSprites].reverse()) {
       if (!entry.sprite?.isConnected || isEphemeralBattleSprite(entry.sprite)) continue;
-      if (restoreSpriteElement(entry.sprite, { skipThrottle: true })) reverted += 1;
+      if (restoreSpriteElement(entry.sprite, { skipThrottle: true, silent: true })) reverted += 1;
     }
   }
   for (const entry of [...editorEdits.addedSprites].reverse()) {
@@ -1077,6 +1144,7 @@ function resetEditorEditsTracking() {
   editorEdits.hitboxOverrides = {};
   editorEdits.mapCleaned = false;
   editorPlacedVillains.clear();
+  editorAlliedTiles.clear();
   // Do not clear allyLimit / allowedPlacementTiles here — those are workshop
   // battle rules and survive DOM edit resets while the sandbox session lives.
   clearEditorTileDomCache();
@@ -1099,7 +1167,7 @@ function restoreDomEditsFromTrace(restorePlan) {
         || findSpriteOnTileByIds(entry.tileIndex, entry.spriteIds);
     }
     if (!sprite || isEphemeralBattleSprite(sprite)) continue;
-    if (restoreSpriteElement(sprite, { skipThrottle: true })) reverted += 1;
+    if (restoreSpriteElement(sprite, { skipThrottle: true, silent: true })) reverted += 1;
   }
   for (const entry of [...editorEdits.addedSprites].reverse()) {
     if (removeEditorAddedSprite(entry.sprite)) reverted += 1;
@@ -1292,15 +1360,6 @@ function buildEditedTileLayerForRoom(tileIndex) {
   const nativeConfigs = buildNativeVisibleConfigs(tileIndex, original);
   const addedConfigs = (editorEdits.addedSpriteConfigs[tileIndex] || []).map((entry) => cloneJson(entry));
   return compactTileLayer([...nativeConfigs, ...addedConfigs]);
-}
-
-function getTileSpriteConfigs(tileIndex, { includeHidden = false } = {}) {
-  const tileEl = getTileElement(tileIndex);
-  if (!tileEl) return [];
-  const sprites = includeHidden ? getAllSpritesOnTile(tileEl) : getSpritesOnTile(tileEl);
-  return sprites
-    .map((sprite) => compactSpriteConfig(extractSpriteConfig(sprite)))
-    .filter(Boolean);
 }
 
 function tileHasTrackedAddedSpriteConfig(tileIndex, config) {
@@ -1889,13 +1948,19 @@ function detachMapEditorFloorEnforceListener() {
 }
 
 function enterMapEditorFloorLock() {
+  // enableMapEditorBoardTools() calls this on every board-state notification while
+  // the panel is open, and a single tile action can fire several in a row — the
+  // enforce listener/UI observer already keep the lock correct reactively, so once
+  // attached, re-doing the force-zero/hide-UI/log work here is pure redundant cost.
+  const alreadyLocked = mapEditorFloorEnforceUnsubscribe != null;
   if (mapEditorSavedFloor == null) {
     mapEditorSavedFloor = getBoardFloor();
   }
-  forceMapEditorFloorZero();
-  hideMapEditorFloorUi();
   attachMapEditorFloorEnforceListener();
   attachMapEditorFloorUiObserver();
+  if (alreadyLocked) return;
+  forceMapEditorFloorZero();
+  hideMapEditorFloorUi();
   scheduleMapEditorFloorUiHideRetries();
   logMapEditor('floorLocked', { savedFloor: mapEditorSavedFloor });
 }
@@ -1998,16 +2063,6 @@ function refreshEditorTileDomCache() {
   }
 }
 
-function reapplyEditorTileDomCache() {
-  if (!editorTileDomCache.size) return 0;
-  let applied = 0;
-  for (const tileState of editorTileDomCache.values()) {
-    if (applyTileSessionEntry(tileState, { fromCache: true })) applied += 1;
-  }
-  if (applied) logMapEditor('reapplyEditorTileDom', { tiles: applied });
-  return applied;
-}
-
 function refreshAddedSpritesTrackingForTile(tileIndex) {
   if (tileIndex == null) return;
   editorEdits.addedSprites = editorEdits.addedSprites.filter(
@@ -2057,10 +2112,6 @@ function finalizeSandboxRoomDomState(reason = 'unknown') {
 function pruneGhostAddedSprites() {
   // Never remove React-owned native sprites. Duplicate editor clones are
   // handled by pruneDuplicateSpritesOnTile.
-}
-
-function countEditorAddedSpritesMatching(tileEl, config) {
-  return countAddedSpritesMatchingConfigOnTile(tileEl, getTileIndexFromElement(tileEl), config);
 }
 
 function reapplyAddedSpriteDomFromConfigs() {
@@ -2191,36 +2242,6 @@ function restoreDomEditsViaResetTiles(restorePlan) {
     hadSpriteEdits: restorePlan?.hadSpriteEdits || restorePlan?.wasMapCleaned === true,
     hadHitboxEdits: restorePlan?.hadHitboxEdits || restorePlan?.wasMapCleaned === true
   });
-}
-
-/** Push open-session tile/hitbox/actor snapshots onto every live room ref (sanitized). */
-function applyOpenSessionSnapshotsToLiveRoom(roomId) {
-  if (!roomId) return false;
-  const refs = collectRoomReferences(roomId);
-  if (!refs.length) return false;
-  const liveData = refs[0]?.file?.data;
-  const tileCount = getRoomDataTileCount(liveData) || getMapTileCount();
-  if (!tileCount) return false;
-
-  const patch = {};
-  if (baseTilesSnapshot) patch.tiles = cloneJson(baseTilesSnapshot);
-  if (baseHitboxesSnapshot) patch.hitboxes = baseHitboxesSnapshot.slice();
-  if (baseActorsSnapshot) patch.actors = cloneJson(baseActorsSnapshot);
-  if (baseFloorBelowSnapshot) patch.floorBelowTiles = cloneJson(baseFloorBelowSnapshot);
-  if (!Object.keys(patch).length) return false;
-
-  const mergedData = sanitizeRoomFileDataForRuntime(
-    { ...(liveData ? cloneJson(liveData) : {}), ...patch },
-    liveData
-  );
-  applySparseActorsToRoomData(mergedData);
-  sandboxTestApplying = true;
-  try {
-    applyMergedRoomDataToLiveRefs(roomId, mergedData);
-  } finally {
-    sandboxTestApplying = false;
-  }
-  return true;
 }
 
 function resetTileEdits(tileIndex, options = {}) {
@@ -2547,11 +2568,20 @@ function setAllowedPlacementTiles(tiles, options = {}) {
     const toggle = document.getElementById('map-editor-placement-toggle');
     if (toggle) toggle.checked = true;
   }
-  if (editorState.placementOverlay) updatePlacementOverlay();
+  if (editorState.placementOverlay) {
+    const updatedInPlace = options.singleTileIndex != null
+      && updatePlacementOverlayTile(options.singleTileIndex);
+    if (!updatedInPlace) updatePlacementOverlay();
+  }
   if (options.skipNotify !== true) {
     updateWorkshopBattleRulesControls();
     refreshInspector();
-    notifyMapEditorEditsChanged({ skipVillainBoardResync: true });
+    // Deliberately not calling notifyMapEditorEditsChanged() here: allowedPlacementTiles
+    // is separate from editorEdits (sprites/actors/tiles) and syncMapEditorPlacementAllowSpawnMask()
+    // below already applies the mask synchronously. notifyMapEditorEditsChanged's deferred
+    // rAF (completeSandboxReapplyTail) unconditionally re-runs a full-map sprite reapply
+    // AND this exact mask sync a second time regardless of its skipVillainBoardResync flag —
+    // measured at ~400ms of pure duplicate work per tile toggle for zero behavioral benefit.
   }
   syncMapEditorPlacementAllowSpawnMask();
   return next;
@@ -2570,7 +2600,7 @@ function toggleTileAllowedPlacement(tileIndex) {
   const adding = !current.has(index);
   if (adding) current.add(index);
   else current.delete(index);
-  setAllowedPlacementTiles([...current]);
+  setAllowedPlacementTiles([...current], { singleTileIndex: index });
   logMapEditor('togglePlacementTile', { tileIndex: index, allowed: adding });
   setStatusMessage(
     adding
@@ -2589,7 +2619,7 @@ function setTileAllowedPlacement(tileIndex, allowed) {
   const current = new Set(getAllowedPlacementTiles());
   if (allowed) current.add(index);
   else current.delete(index);
-  setAllowedPlacementTiles([...current]);
+  setAllowedPlacementTiles([...current], { singleTileIndex: index });
   logMapEditor('setPlacementTile', { tileIndex: index, allowed: !!allowed });
   return true;
 }
@@ -2804,10 +2834,12 @@ function handleMapEditorAllyDragEnd() {
 function attachMapEditorAllyDragHooks() {
   if (mapEditorAllyDragHooksAttached) return;
   mapEditorAllyDragHooksAttached = true;
-  document.addEventListener('dragstart', handleMapEditorAllyDragStart, true);
-  document.addEventListener('pointerdown', handleMapEditorAllyDragStart, true);
-  document.addEventListener('dragend', handleMapEditorAllyDragEnd, true);
-  document.addEventListener('pointerup', handleMapEditorAllyDragEnd, true);
+  // Never call preventDefault() here — passive avoids Chrome's non-passive-listener
+  // violation warning for these scroll/touch-blocking-capable event types.
+  document.addEventListener('dragstart', handleMapEditorAllyDragStart, { capture: true, passive: true });
+  document.addEventListener('pointerdown', handleMapEditorAllyDragStart, { capture: true, passive: true });
+  document.addEventListener('dragend', handleMapEditorAllyDragEnd, { capture: true, passive: true });
+  document.addEventListener('pointerup', handleMapEditorAllyDragEnd, { capture: true, passive: true });
   console.log('[Map Editor] Ally drag placement-mask hooks attached');
 }
 
@@ -2929,10 +2961,6 @@ function getAllSpritesOnTile(tileEl) {
 
 function isSpriteHidden(spriteEl) {
   return spriteEl?.hasAttribute(HIDDEN_ATTR) ?? false;
-}
-
-function normalizeEditorAddedSpritePlacement(spriteEl) {
-  applyEditorAddedSpritePlacement(spriteEl);
 }
 
 function parseSpriteOffsetPx(expression) {
@@ -3761,10 +3789,6 @@ function sanitizePreviewSpriteLayout(spriteNode, options = {}) {
   }
 }
 
-function copySpriteSheetVisual(sourceEl, targetEl) {
-  copySpritePreviewVisual(sourceEl, targetEl);
-}
-
 function hasVisibleSpritePreview(spriteNode, requirePaint = false) {
   if (!spriteNode) return false;
   const img = spriteNode.querySelector('img.spritesheet');
@@ -3811,14 +3835,6 @@ function applyNativeItemSpriteMarkup(spriteNode, spriteId) {
   if (viewport) {
     viewport.className = 'viewport';
   }
-}
-
-function isSpritePreviewActuallyBlank(spriteNode) {
-  if (!spriteNode) return true;
-  if (hasVisibleSpritePreview(spriteNode, true)) return false;
-  // Class-driven sprites (e.g. id-101) paint via global CSS in the panel.
-  if (hasVisibleSpritePreview(spriteNode, false)) return false;
-  return true;
 }
 
 function getViewportProbeTile() {
@@ -3922,12 +3938,6 @@ function copySpritePaintState(sourceSprite, targetSprite, configEntry = null, op
 
   sanitizePreviewSpriteLayout(targetSprite, { fromLiveReference });
   if (configEntry) applySpriteConfigToElement(targetSprite, configEntry);
-}
-
-function copyProbePaintToTarget(probeSprite, targetSprite, configEntry = null, options = {}) {
-  copySpritePaintState(probeSprite, targetSprite, configEntry, {
-    allowAnimation: usesPanelSpritePreview(targetSprite, options)
-  });
 }
 
 function hydrateFromViewportProbe(targetSprite, probeSource, options = {}) {
@@ -4187,7 +4197,9 @@ function restoreSpriteElement(spriteEl, options = {}) {
   target.style.pointerEvents = '';
   target.removeAttribute(HIDDEN_ATTR);
   editorEdits.hiddenSprites = editorEdits.hiddenSprites.filter((entry) => entry.sprite !== target);
-  logMapEditor('restoreSprite', { spriteIds: getSpriteIdsFromElement(target) });
+  if (!options.silent) {
+    logMapEditor('restoreSprite', { spriteIds: getSpriteIdsFromElement(target) });
+  }
   return true;
 }
 
@@ -4456,10 +4468,6 @@ function getFloorBelowContainer() {
     if (inRoot) return inRoot;
   }
   return document.getElementById('floor-below');
-}
-
-function isFloorBelowSprite(spriteEl) {
-  return !!spriteEl?.closest?.('#floor-below');
 }
 
 function resolveTileIndexFromPositionedSprite(spriteEl) {
@@ -4856,6 +4864,42 @@ function updatePlacementOverlay() {
   );
 }
 
+/**
+ * Incremental version of updatePlacementOverlay() for a single tile toggle — the
+ * full rebuild tears down and recreates an overlay <div> for every tile on the map
+ * (100+ DOM nodes) when only one tile's allowed state actually changed, which was
+ * a meaningful chunk of the ~300ms per-click cost. Falls back (returns false) if
+ * the overlay isn't already built for this tile, e.g. it was just turned on.
+ */
+function updatePlacementOverlayTile(tileIndex) {
+  if (!editorState.open || !editorState.placementOverlay) return false;
+  const tileElement = getTileElement(tileIndex);
+  const overlay = tileElement?.querySelector(`.${PLACEMENT_OVERLAY_TILE_CLASS}`);
+  if (!overlay) return false;
+
+  const allowed = new Set(getAllowedPlacementTiles());
+  const isAllowed = allowed.has(tileIndex);
+  overlay.title = isAllowed
+    ? `Tile ${tileIndex}: ally placement allowed`
+    : `Tile ${tileIndex}: click to allow ally placement`;
+  const bg = isAllowed ? 'rgba(64,160,255,0.45)' : 'rgba(20,20,30,0.18)';
+  overlay.style.cssText = getTileOverlayBoxStyle([
+    'pointer-events:none',
+    `background:${bg}`,
+    'z-index:9999',
+    isAllowed ? 'box-shadow:inset 0 0 0 1px rgba(120,200,255,0.8)' : ''
+  ].filter(Boolean));
+
+  setStatusMessage(
+    tReplace(
+      'mods.mapEditor.placementOverlayEnabled',
+      { count: allowed.size },
+      'Ally placement overlay on — {count} allowed tile(s). Click tiles to toggle.'
+    )
+  );
+  return true;
+}
+
 function updateHitboxOverlay() {
   removeHitboxOverlay();
   if (!editorState.open || !editorState.hitboxOverlay) return;
@@ -5130,9 +5174,19 @@ function roomActorsHaveEntries(actors, tileCount) {
 }
 
 function serializeActorsForGameRuntime(normalizedArray) {
+  return serializeIndexedLayerForGameRuntime(normalizedArray);
+}
+
+/**
+ * Any tileIndex-keyed room layer (actors, floorBelowTiles, blocked, ...) must reach
+ * the live game state as a sparse array (holes), never dense with literal nulls —
+ * native rendering code does `layer.map(entry => ... entry.tileIndex ...)` with no
+ * null guard (confirmed against the game's own "floor-below" sprite layer, which
+ * crashes exactly this way when floorBelowTiles is dense-null-padded).
+ */
+function serializeIndexedLayerForGameRuntime(normalizedArray) {
   if (!Array.isArray(normalizedArray)) return undefined;
   if (!normalizedArray.some((entry) => entry != null)) return undefined;
-  // Holes only — dense null entries break React (.map reads null.tileIndex).
   const sparse = [];
   normalizedArray.forEach((entry, tileIndex) => {
     if (entry != null) sparse[tileIndex] = cloneJson(entry);
@@ -5141,12 +5195,19 @@ function serializeActorsForGameRuntime(normalizedArray) {
 }
 
 function applySparseActorsToRoomData(data) {
-  if (!data || data.actors == null) return;
+  if (!data) return;
+  // A room with zero actors must still end up with actors: [] here, never left
+  // missing/deleted — native code (e.g. the loot-drop-rate tooltip) does an
+  // unconditional `for (const a of room.file.data.actors)` and throws "not
+  // iterable" the instant it renders for a room where this property is absent.
+  if (data.actors == null) {
+    data.actors = [];
+    return;
+  }
   const tileCount = getRoomDataTileCount(data);
   const normalized = normalizeRoomActorsForGame(data.actors, tileCount);
   const runtime = serializeActorsForGameRuntime(normalized);
-  if (runtime !== undefined) data.actors = runtime;
-  else delete data.actors;
+  data.actors = runtime !== undefined ? runtime : [];
 }
 
 function applyActorsSparseToAllRoomRefs(roomId) {
@@ -5257,29 +5318,37 @@ function sanitizeRoomFileDataForRuntime(fileData, liveData = null) {
     if (data.hitboxes.length > tileCount) data.hitboxes.length = tileCount;
   }
 
+  let normalizedFloorBelow = null;
   if (!Array.isArray(data.floorBelowTiles)) {
     const liveFloorBelow = liveData
       ? normalizeIndexedRoomLayer(liveData.floorBelowTiles, tileCount)
       : null;
     if (liveFloorBelow?.some((entry) => entry != null)) {
-      data.floorBelowTiles = liveFloorBelow;
+      normalizedFloorBelow = liveFloorBelow;
     }
   } else {
-    while (data.floorBelowTiles.length < tileCount) data.floorBelowTiles.push(null);
-    if (data.floorBelowTiles.length > tileCount) data.floorBelowTiles.length = tileCount;
+    normalizedFloorBelow = normalizeIndexedRoomLayer(data.floorBelowTiles, tileCount);
   }
+  const runtimeFloorBelow = serializeIndexedLayerForGameRuntime(normalizedFloorBelow);
+  // Always present as an array — never delete. Native code reads this both via
+  // .map() (needs sparse, not dense-null — see serializeIndexedLayerForGameRuntime)
+  // and via for-of (needs *something* iterable; a missing property throws
+  // "not iterable", same failure class as the null-entry crash, opposite cause).
+  data.floorBelowTiles = runtimeFloorBelow !== undefined ? runtimeFloorBelow : [];
 
+  let normalizedBlocked = null;
   if (!Array.isArray(data.blocked)) {
     const liveBlocked = liveData
       ? normalizeIndexedRoomLayer(liveData.blocked, tileCount)
       : null;
     if (liveBlocked?.some((entry) => entry != null)) {
-      data.blocked = liveBlocked;
+      normalizedBlocked = liveBlocked;
     }
   } else {
-    while (data.blocked.length < tileCount) data.blocked.push(null);
-    if (data.blocked.length > tileCount) data.blocked.length = tileCount;
+    normalizedBlocked = normalizeIndexedRoomLayer(data.blocked, tileCount);
   }
+  const runtimeBlocked = serializeIndexedLayerForGameRuntime(normalizedBlocked);
+  data.blocked = runtimeBlocked !== undefined ? runtimeBlocked : [];
 
   const fromFile = normalizeRoomActorsForGame(data.actors, tileCount);
   const fromLive = liveData ? normalizeRoomActorsForGame(liveData.actors, tileCount) : null;
@@ -5293,8 +5362,11 @@ function sanitizeRoomFileDataForRuntime(fileData, liveData = null) {
   }
 
   const runtimeActors = serializeActorsForGameRuntime(normalizedActors);
-  if (runtimeActors !== undefined) data.actors = runtimeActors;
-  else delete data.actors;
+  // Same rule as floorBelowTiles/blocked above: room.file.data.actors must always
+  // be an array. Native code (e.g. the loot-rate tooltip) does `for (e of
+  // room.file.data.actors)` unconditionally — deleting the property when a room
+  // has no actors throws "actors is not iterable" the moment that component reads it.
+  data.actors = runtimeActors !== undefined ? runtimeActors : [];
 
   return data;
 }
@@ -5476,6 +5548,8 @@ function buildMapSessionSave() {
     // Full actor layer (includes removals of native creatures).
     actors: buildMapSessionActorsEntries(),
     villains: getEditorPlacedVillainsList().map((entry) => cloneJson(entry)),
+    // tileIndexes among `villains` above that fight as forced allies instead of villains.
+    allyTiles: Array.from(editorAlliedTiles),
     allyLimit: battleRules.allyLimit,
     allowedPlacementTiles: battleRules.allowedPlacementTiles
   };
@@ -5540,17 +5614,6 @@ function writeMapSessionStore(store) {
   }
 }
 
-function getMapSession(roomId, saveId = null) {
-  const store = getMapSessionStore(roomId);
-  if (!store?.saves?.length) return null;
-  if (saveId) return store.saves.find((save) => save.id === saveId) || null;
-  return store.saves[0];
-}
-
-function hasMapSession(roomId) {
-  return (getMapSessionStore(roomId)?.saves?.length || 0) > 0;
-}
-
 function getAutoSaveName() {
   return t('mods.mapEditor.autoSaveName', 'Auto save');
 }
@@ -5575,6 +5638,8 @@ function buildMapSessionSaveEntry(payload, saveName, options = {}) {
       ? payload.actors.map((entry) => cloneJson(entry)).filter(Boolean)
       : [],
     villains: Array.isArray(payload.villains) ? payload.villains.map((entry) => cloneJson(entry)) : [],
+    // tileIndexes among `villains` above that fight as forced allies instead of villains.
+    allyTiles: Array.isArray(payload.allyTiles) ? payload.allyTiles.slice() : [],
     allyLimit: payload.allyLimit ?? null,
     allowedPlacementTiles: Array.isArray(payload.allowedPlacementTiles)
       ? normalizeAllowedPlacementTiles(payload.allowedPlacementTiles)
@@ -5625,6 +5690,17 @@ function upsertMapSessionSave(payload, saveName, options = {}) {
 
 function autoSaveMapSessionOnClose() {
   if (!hasPendingEditorEdits()) return false;
+  // Merely opening a map that already has creatures/hitboxes (nothing new touched this
+  // session) satisfies hasPendingEditorEdits() too — require a handful of actual edits
+  // before auto-saving so closing the panel right after opening it doesn't write a save.
+  if (editorSessionChangeCount < AUTO_SAVE_MIN_CHANGES) {
+    logMapEditor('autoSaveSessionSkipped', {
+      reason: 'too-few-changes',
+      changeCount: editorSessionChangeCount,
+      required: AUTO_SAVE_MIN_CHANGES
+    });
+    return false;
+  }
 
   const room = getCurrentRoom();
   if (!room?.id) return false;
@@ -5642,6 +5718,11 @@ function autoSaveMapSessionOnClose() {
     logMapEditor('autoSaveSessionFailed', { roomId: room.id });
     return false;
   }
+  // Do NOT reset editorSessionChangeCount here. Auto-save fires on every panel
+  // close once the session has crossed the threshold; resetting it would require
+  // a fresh batch of AUTO_SAVE_MIN_CHANGES edits before the *next* close would
+  // auto-save again, silently dropping small trailing edits (e.g. toggling a
+  // creature's ally status right before closing) that never get persisted.
 
   logMapEditor('autoSaveSession', {
     roomId: room.id,
@@ -5676,6 +5757,7 @@ function saveMapSession() {
     setMapEditorFeedback(t('mods.mapEditor.saveFailed', 'Save failed — storage may be full.'), { isError: true });
     return false;
   }
+  editorSessionChangeCount = 0;
 
   editorState.selectedSaveId = saveEntry.id;
   editorState.selectedSaveRoomId = room.id;
@@ -5876,6 +5958,7 @@ function applyDomSessionEdits(options = {}) {
     mapEditorV2 = null,
     actors = null,
     villains = null,
+    allyTileIndexes = null,
     allyLimit = null,
     allowedPlacementTiles = null,
     selectedTileIndex = null,
@@ -5906,6 +5989,13 @@ function applyDomSessionEdits(options = {}) {
     applyDomSessionVillains(villains, {
       replaceActors: replaceActors === true || source === 'workshop'
     });
+  }
+  if (Array.isArray(actors) || villains != null) {
+    editorAlliedTiles = new Set(
+      (Array.isArray(allyTileIndexes) ? allyTileIndexes : [])
+        .map((tileIndex) => Number(tileIndex))
+        .filter((tileIndex) => Number.isFinite(tileIndex))
+    );
   }
   if (allyLimit != null) editorBattleRules.allyLimit = allyLimit;
   if (allowedPlacementTiles != null) {
@@ -5974,6 +6064,8 @@ function buildDomSessionPayload(fields = {}) {
     tiles,
     actors: fields.actors ?? null,
     villains: fields.villains ?? null,
+    // tileIndexes among `villains` above that fight as forced allies instead of villains.
+    allyTileIndexes: Array.isArray(fields.allyTileIndexes) ? fields.allyTileIndexes.slice() : [],
     allyLimit: fields.allyLimit ?? null,
     allowedPlacementTiles: fields.allowedPlacementTiles ?? null,
     selectedTileIndex: fields.selectedTileIndex ?? null,
@@ -6020,6 +6112,7 @@ function domSessionPayloadFromLocalSave(session) {
     actors: Array.isArray(session.actors) ? session.actors : null,
     // null = legacy save without creature tracking
     villains: Array.isArray(session.villains) ? session.villains : null,
+    allyTileIndexes: Array.isArray(session.allyTiles) ? session.allyTiles : [],
     allyLimit: session.allyLimit ?? null,
     allowedPlacementTiles: Array.isArray(session.allowedPlacementTiles)
       ? session.allowedPlacementTiles
@@ -6036,13 +6129,18 @@ function domSessionPayloadFromWorkshopBundle(bundle, catalogEntry) {
   if (!sessionData) return null;
 
   const battleRules = catalogEntry?.battleRules || bundle?.customBattle;
+  const forcedAllies = Array.isArray(bundle?.customBattle?.allies) ? bundle.customBattle.allies : [];
+  const hasVillainData = bundle?.customBattle?.villains != null || forcedAllies.length > 0;
   return buildDomSessionPayload({
     source: 'workshop',
     roomId: catalogEntry?.baseRoomId || bundle?.roomId,
     roomName: catalogEntry?.baseRoomName || bundle?.roomName,
     hitboxOverrides: sessionData.hitboxOverrides,
     tiles: sessionData.tiles,
-    villains: bundle?.customBattle?.villains ?? null,
+    villains: hasVillainData
+      ? [...(Array.isArray(bundle?.customBattle?.villains) ? bundle.customBattle.villains : []), ...forcedAllies]
+      : null,
+    allyTileIndexes: forcedAllies.map((a) => Number(a?.tileIndex)).filter(Number.isFinite),
     allyLimit: battleRules?.allyLimit ?? null,
     allowedPlacementTiles: bundle?.customBattle?.tileRestrictions?.allowedTiles
       ?? battleRules?.tileRestrictions?.allowedTiles
@@ -6050,6 +6148,89 @@ function domSessionPayloadFromWorkshopBundle(bundle, catalogEntry) {
     label: catalogEntry?.title || bundle?.roomName,
     externalId: catalogEntry?.id
   });
+}
+
+/**
+ * Converts a quest-room-export-v1 payload (buildQuestRoomExport's "Copy export JSON" output —
+ * a tile-diff format meant for hand-merging into assets/quests/*.json) into a loadable DOM
+ * session, so pasting that same export back into Import works too. Unlike the full
+ * map-editor-bundle-v1 format, this one only stores tileMutations (remove/add diffs against
+ * the room's native tiles), so the final per-tile sprite list has to be rebuilt here from the
+ * room's live native data (globalThis.state.utils.ROOMS) plus those diffs.
+ */
+function domSessionPayloadFromQuestRoomExport(exportPayload) {
+  const roomKey = exportPayload?.roomKey;
+  const roomEntry = roomKey ? exportPayload?.rooms?.[roomKey] : null;
+  const roomId = roomEntry?.roomId;
+  if (!roomId) return null;
+
+  const roomsList = globalThis.state?.utils?.ROOMS;
+  const nativeRoom = Array.isArray(roomsList) ? roomsList.find((r) => r?.id === roomId) : null;
+  const nativeTiles = nativeRoom?.file?.data?.tiles;
+  if (!Array.isArray(nativeTiles)) return null;
+
+  const battleId = exportPayload?.battleId || roomEntry.battleId;
+  const customBattle = exportPayload?.customBattle || (battleId ? exportPayload?.battles?.[battleId] : null);
+  const tileMutations = roomEntry.tileMutations || {};
+  const hitboxOverrides = {};
+  const tiles = [];
+
+  Object.keys(tileMutations).forEach((key) => {
+    const tileIndex = Number(key);
+    const mutation = tileMutations[key] || {};
+    const originalLayer = Array.isArray(nativeTiles[tileIndex]) ? nativeTiles[tileIndex] : [];
+    const sprites = [];
+
+    (mutation.remove || []).forEach((spriteId) => {
+      const stillNative = originalLayer.some((entry) => entry && entry.id === spriteId);
+      if (stillNative) sprites.push({ id: spriteId, hidden: true, added: false });
+    });
+
+    (mutation.add || []).forEach((entry) => {
+      const config = { id: entry.spriteId, added: true, hidden: false };
+      if (entry.cropX != null) config.cropX = entry.cropX;
+      if (entry.cropY != null) config.cropY = entry.cropY;
+      if (entry.cropped) config.cropped = true;
+      if (entry.bank != null) config.bank = entry.bank;
+      if (entry.offsetX != null) config.offsetX = entry.offsetX;
+      if (entry.offsetY != null) config.offsetY = entry.offsetY;
+      sprites.push(config);
+    });
+
+    if (sprites.length) tiles.push({ tileIndex, sprites });
+    if (mutation.hitbox === true || mutation.hitbox === false) {
+      hitboxOverrides[tileIndex] = mutation.hitbox;
+    }
+  });
+
+  const villains = Array.isArray(customBattle?.villains) ? customBattle.villains : [];
+  const allowedPlacementTiles = customBattle?.tileRestrictions?.allowedTiles
+    ?? exportPayload?.battles?.[battleId]?.allowedTiles
+    ?? null;
+
+  return buildDomSessionPayload({
+    source: 'workshop',
+    roomId,
+    roomName: roomEntry.roomName || nativeRoom?.name || roomId,
+    hitboxOverrides,
+    tiles,
+    villains: villains.length ? villains : null,
+    allyLimit: customBattle?.allyLimit ?? null,
+    allowedPlacementTiles,
+    label: roomEntry.roomName || roomId
+  });
+}
+
+/** Tries every map-export format Import understands; returns a loadDomSession-ready payload or null. */
+function resolveMapImportPayload(bundle) {
+  if (!bundle || typeof bundle !== 'object') return null;
+  if (bundle.format === 'map-editor-bundle-v1') {
+    return domSessionPayloadFromWorkshopBundle(bundle, null);
+  }
+  if (bundle.format === 'quest-room-export-v1') {
+    return domSessionPayloadFromQuestRoomExport(bundle);
+  }
+  return null;
 }
 
 function isOnDomSessionRoom(roomId) {
@@ -6212,16 +6393,28 @@ async function loadDomSession(payload) {
       tiles: payload.tiles,
       actors: payload.actors,
       villains: payload.villains,
+      allyTileIndexes: payload.allyTileIndexes,
       allyLimit: payload.allyLimit,
       allowedPlacementTiles: payload.allowedPlacementTiles,
       selectedTileIndex: payload.selectedTileIndex
     });
+
+    // A freshly loaded local-save/workshop map should never inherit the Hitbox or Spawn
+    // Tiles overlays from whatever was on screen before — including the allow-spawn mask
+    // auto-enabling placementOverlay for maps that ship their own allowedPlacementTiles.
+    editorState.hitboxOverlay = false;
+    editorState.placementOverlay = false;
+    removeHitboxOverlay();
+    removePlacementOverlay();
 
     finalizeDomSessionAfterApply(room.id);
     finalizeDomSessionBoardScope(room.id);
     refreshInspector();
     updateSessionControls();
     notifyMapEditorEditsChanged();
+    // Loading a save/workshop map isn't a user edit — don't count it toward the auto-save threshold.
+    editorSessionChangeCount = 0;
+    notifyMapEditorOpenChanged();
 
     const label = payload.label || t('mods.mapEditor.defaultSaveName', 'Untitled');
     const savedAt = payload.savedAt
@@ -6268,21 +6461,6 @@ async function loadDomSession(payload) {
   } finally {
     scopeHandlingSuspended = false;
   }
-}
-
-function applyMapSessionSave(session, room) {
-  const payload = domSessionPayloadFromLocalSave({
-    ...session,
-    roomId: session?.roomId,
-    roomName: session?.roomName
-  });
-  if (!payload) return false;
-  if (room?.id) payload.roomName = payload.roomName || room.id;
-  return loadDomSession(payload);
-}
-
-function loadMapSession() {
-  return loadSelectedLocalSave();
 }
 
 function clearMapSession(roomId, saveId = null) {
@@ -6385,12 +6563,15 @@ function getMapEditorBattleRules() {
   const allyLimit = Number.isFinite(parsedLimit) && parsedLimit > 0
     ? Math.min(20, Math.floor(parsedLimit))
     : (room?.maxTeamSize ?? 6);
-  const villains = collectMapVillainConfigs().map((entry) => cloneJson(entry));
+  const { villains, allies } = splitVillainsAndAllies(
+    collectMapVillainConfigs().map((entry) => cloneJson(entry))
+  );
   const allowedPlacementTiles = getAllowedPlacementTiles();
   const tileRestrictions = buildTileRestrictionsForExport();
   return {
     allyLimit,
     villains,
+    allies,
     allowedPlacementTiles,
     tileRestrictions
   };
@@ -6616,6 +6797,7 @@ async function uploadMapToWorkshop() {
     battleRules: {
       allyLimit: rules.allyLimit,
       villainCount: rules.villains.length,
+      forcedAllyCount: rules.allies.length || undefined,
       allowedPlacementTiles: rules.allowedPlacementTiles.length
         ? rules.allowedPlacementTiles.slice()
         : undefined
@@ -6994,7 +7176,6 @@ function nativeReloadRoomForRestore(roomId, floor, options = {}) {
 /** Finish DOM-only restore without navigation — mirrors Reset Tile's sandbox tail. */
 function completeDomRestoreInPlace(roomId, options = {}) {
   const { strategy = 'reset-tiles-in-place' } = options;
-  const isCleanMapRestore = strategy === 'clean-map-in-place';
 
   const runSandboxVillainSync = () => {
     forceCompactBoardConfigInGameState();
@@ -7021,15 +7202,12 @@ function completeDomRestoreInPlace(roomId, options = {}) {
     }
 
     if (editorState.sandboxTestActive) {
-      if (isCleanMapRestore) {
-        // Bulk unhide runs first — defer villain board patch until DOM/sprites settle.
-        scheduleReloadRoomTimer(() => {
-          runSandboxVillainSync();
-          restoreMapSettleUntil = Date.now() + RESTORE_MAP_SETTLE_COOLDOWN_MS;
-        }, ROOM_RELOAD_SETTLE_MS);
-      } else {
+      // Bulk DOM/sprite restore runs first — defer villain board patch until it settles,
+      // otherwise the native board re-render can race a mid-restore boardConfig write.
+      scheduleReloadRoomTimer(() => {
         runSandboxVillainSync();
-      }
+        restoreMapSettleUntil = Date.now() + RESTORE_MAP_SETTLE_COOLDOWN_MS;
+      }, ROOM_RELOAD_SETTLE_MS);
     } else if (editorState.hitboxOverlay) {
       updateHitboxOverlay();
     }
@@ -7041,10 +7219,11 @@ function completeDomRestoreInPlace(roomId, options = {}) {
 
     scopeHandlingSuspended = false;
     restoreMapSettleUntil = Date.now() + RESTORE_MAP_SETTLE_COOLDOWN_MS
-      + (isCleanMapRestore && editorState.sandboxTestActive ? ROOM_RELOAD_SETTLE_MS : 0);
+      + (editorState.sandboxTestActive ? ROOM_RELOAD_SETTLE_MS : 0);
 
     mapEditorDomSessionSource = null;
     endWorkshopMapSession();
+    notifyMapEditorOpenChanged();
     setMapEditorFeedback(
       tReplace(
         'mods.mapEditor.restoreMapOk',
@@ -7187,6 +7366,7 @@ function restoreMapFromGame() {
       detachRestoreBoardGuard();
       mapEditorDomSessionSource = null;
       endWorkshopMapSession();
+      notifyMapEditorOpenChanged();
       logBoardStateSnapshot('afterNativeRestore');
     }
   });
@@ -7199,10 +7379,6 @@ function restoreMapFromGame() {
   }
 
   return reloaded;
-}
-
-function refreshSaveList() {
-  refreshWorkshopLocalSavesList();
 }
 
 function refreshWorkshopLocalSavesList() {
@@ -7308,11 +7484,13 @@ function createWorkshopCatalogCard(entry, authorHash) {
     deleteBtn.className = 'me-workshop-card-delete';
     deleteBtn.title = t('mods.mapEditor.workshopDelete', 'Delete');
     deleteBtn.setAttribute('aria-label', t('mods.mapEditor.workshopDelete', 'Delete'));
-    deleteBtn.textContent = '×';
-    deleteBtn.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      deleteOwnWorkshopMap(entry.id, entry);
+    attachInlineConfirm(deleteBtn, {
+      baseText: '×',
+      confirmText: '✓',
+      timeoutMs: 3000,
+      onConfirm: () => {
+        deleteOwnWorkshopMap(entry.id, entry);
+      }
     });
     card.appendChild(deleteBtn);
   }
@@ -7501,7 +7679,7 @@ function updateWorkshopBattleRulesControls() {
   }
   if (rulesHint) {
     const placementCount = rules.allowedPlacementTiles.length;
-    rulesHint.textContent = placementCount
+    let hint = placementCount
       ? tReplace(
         'mods.mapEditor.battleRulesHintWithPlacement',
         {
@@ -7519,6 +7697,14 @@ function updateWorkshopBattleRulesControls() {
         },
         '{villains} villains on map · ally limit {allies}'
       );
+    if (rules.allies.length) {
+      hint += ' · ' + tReplace(
+        'mods.mapEditor.battleRulesHintForcedAllies',
+        { count: rules.allies.length },
+        '{count} forced ally creatures'
+      );
+    }
+    rulesHint.textContent = hint;
   }
 }
 
@@ -7732,25 +7918,6 @@ function applyMapEditorV2Export(exportPayload) {
 
   if (applied) refreshEditorTileDomCache();
   return applied;
-}
-
-function resolveWorkshopNativeRoom(bundle, roomId) {
-  let nativeRoom = bundle?.nativeRoom;
-  if ((!nativeRoom?.file?.data || !nativeRoom?.id) && bundle?.mapEditorV2) {
-    nativeRoom = convertMapEditorV2ToNativeRoom(bundle.mapEditorV2);
-  }
-  if (!nativeRoom?.file?.data) return null;
-
-  const resolved = cloneJson(nativeRoom) || {};
-  resolved.id = resolved.id || roomId;
-  resolved.file = resolved.file || {};
-  resolved.file.data = sanitizeRoomFileDataForRuntime(resolved.file.data);
-  return resolved;
-}
-
-function hydrateEditorVillainsFromBundle(bundle) {
-  // Workshop villains are the full intended creature set (not an overlay).
-  applyDomSessionVillains(bundle?.customBattle?.villains || [], { replaceActors: true });
 }
 
 function convertMapEditorV2ToNativeRoom(exportPayload) {
@@ -7999,6 +8166,7 @@ function buildCustomBattleStubFromExport(exportPayload, options = {}) {
     name: options.name || payload.roomName || payload.id,
     roomId: options.roomId || payload.id,
     villains: sanitizeVillainListForExport(options.villains),
+    allies: sanitizeVillainListForExport(options.allies),
     allyLimit: options.allyLimit ?? payload.maxTeamSize ?? 6,
     preventVillainMovement: options.preventVillainMovement ?? false,
     victoryDefeat: {
@@ -8078,6 +8246,7 @@ function convertEditorVillainToQuestBattleVillain(villain) {
   if (villain.awakened != null) entry.awakened = !!villain.awakened;
   if (villain.outfitSpriteId != null) entry.outfitSpriteId = villain.outfitSpriteId;
   if (villain.itemSpriteId != null) entry.itemSpriteId = villain.itemSpriteId;
+  if (villain.customSpriteKey != null) entry.customSpriteKey = villain.customSpriteKey;
   if (villain.genes && typeof villain.genes === 'object') entry.genes = cloneJson(villain.genes);
   const equip = convertEditorEquipToQuestBattleEquip(villain.equip);
   if (equip) entry.equip = equip;
@@ -8104,6 +8273,7 @@ function convertEditorVillainToCustomBattleVillain(villain) {
   if (questVillain.genes) entry.genes = cloneJson(questVillain.genes);
   if (questVillain.outfitSpriteId != null) entry.outfitSpriteId = questVillain.outfitSpriteId;
   if (questVillain.itemSpriteId != null) entry.itemSpriteId = questVillain.itemSpriteId;
+  if (questVillain.customSpriteKey != null) entry.customSpriteKey = questVillain.customSpriteKey;
   if (questVillain.shiny != null) entry.shiny = !!questVillain.shiny;
   if (questVillain.awakened != null) entry.awakened = !!questVillain.awakened;
   if (questVillain.equip?.gameId != null) {
@@ -8353,17 +8523,25 @@ function buildQuestRoomExport(options = {}) {
     sceneSpriteReplacements
   });
 
+  const howto = [
+    `1. Merge battles.${battleId} into assets/quests/battles.json (same shape as spider_lair).`,
+    `2. Merge rooms.${roomKey} into assets/quests/rooms.json (roomName/roomId/battleId[+tileMutations][+sceneSpriteReplacements]).`,
+    '3. In Quests.js, apply rooms.tileMutations (tile-keyed add/remove/hitbox), then mirror createSpiderLairBattleInstance with customBattle + spawn.villains.',
+    '4. Wire activationCheck / victoryDefeat (mission flags, rewards, navigate-on-close). customBattle._wireInQuests has the stubs.'
+  ];
+  if (battleRules.allies.length) {
+    howto.push(
+      `NOTE: ${battleRules.allies.length} tile(s) marked "Fights as ally" in Map Editor were NOT `
+      + 'included — this quest-JSON format has no forced-ally field yet. Add them manually if needed.'
+    );
+  }
+
   return {
     format: 'quest-room-export-v1',
     exportedAt: bundle.exportedAt || new Date().toISOString(),
     roomKey,
     battleId,
-    _howto: [
-      `1. Merge battles.${battleId} into assets/quests/battles.json (same shape as spider_lair).`,
-      `2. Merge rooms.${roomKey} into assets/quests/rooms.json (roomName/roomId/battleId[+tileMutations][+sceneSpriteReplacements]).`,
-      '3. In Quests.js, apply rooms.tileMutations (tile-keyed add/remove/hitbox), then mirror createSpiderLairBattleInstance with customBattle + spawn.villains.',
-      '4. Wire activationCheck / victoryDefeat (mission flags, rewards, navigate-on-close). customBattle._wireInQuests has the stubs.'
-    ],
+    _howto: howto,
     rooms: {
       [roomKey]: roomsEntry
     },
@@ -8372,6 +8550,70 @@ function buildQuestRoomExport(options = {}) {
     },
     customBattle
   };
+}
+
+/**
+ * The single "Export Map (JSON)" payload — a full map-editor-bundle-v1 (everything Import
+ * needs to round-trip the map) with a `questExport` side-car carrying the same paste-ready
+ * fields buildQuestRoomExport() produces (rooms.json/battles.json shapes, tileMutations,
+ * _wireInQuests stub) for hand-merging the room into this mod's own quest content. Import
+ * only reads mapEditorV2/customBattle/roomId/roomName, so questExport is inert baggage to it.
+ */
+function buildFullMapExport(options = {}) {
+  const bundle = buildUnifiedMapExport({ includeNativeRoom: !!options.includeNativeRoom });
+  if (!bundle?.roomId) return null;
+
+  const roomKey = options.roomKey || slugifyQuestRoomKey(bundle.roomName, bundle.roomId);
+  const battleId = options.battleId || roomKey;
+  const battleRules = getMapEditorBattleRules();
+  const battle = buildQuestBattleFromEditorRules(battleRules, {
+    maxTeamSize: bundle.mapEditorV2?.maxTeamSize
+  });
+  const sceneSpriteReplacements = bundle.sceneSpriteReplacements?.rules?.length
+    ? cloneJson(bundle.sceneSpriteReplacements)
+    : null;
+  const tileMutations = buildQuestTileMutationsFromEditor();
+
+  const roomsEntry = {
+    roomName: bundle.roomName || roomKey,
+    roomId: bundle.roomId,
+    battleId
+  };
+  if (tileMutations) roomsEntry.tileMutations = tileMutations;
+  if (sceneSpriteReplacements) roomsEntry.sceneSpriteReplacements = sceneSpriteReplacements;
+
+  const questCustomBattle = buildQuestCustomBattleCreateConfig({
+    roomName: roomsEntry.roomName,
+    roomId: bundle.roomId,
+    battleId,
+    battleJson: battle,
+    editorVillains: battleRules.villains,
+    sceneSpriteReplacements
+  });
+
+  const howto = [
+    `1. Merge battles.${battleId} into assets/quests/battles.json (same shape as spider_lair).`,
+    `2. Merge rooms.${roomKey} into assets/quests/rooms.json (roomName/roomId/battleId[+tileMutations][+sceneSpriteReplacements]).`,
+    '3. In Quests.js, apply rooms.tileMutations (tile-keyed add/remove/hitbox), then mirror createSpiderLairBattleInstance with customBattle + spawn.villains.',
+    '4. Wire activationCheck / victoryDefeat (mission flags, rewards, navigate-on-close). customBattle._wireInQuests has the stubs.'
+  ];
+  if (battleRules.allies.length) {
+    howto.push(
+      `NOTE: ${battleRules.allies.length} tile(s) marked "Fights as ally" in Map Editor were NOT `
+      + 'included — this quest-JSON format has no forced-ally field yet. Add them manually if needed.'
+    );
+  }
+
+  bundle.questExport = {
+    roomKey,
+    battleId,
+    _howto: howto,
+    rooms: { [roomKey]: roomsEntry },
+    battles: { [battleId]: battle },
+    customBattle: questCustomBattle
+  };
+
+  return bundle;
 }
 
 function buildUnifiedMapExport(options = {}) {
@@ -8383,6 +8625,7 @@ function buildUnifiedMapExport(options = {}) {
   const battleRules = getMapEditorBattleRules();
   const battleBase = buildCustomBattleStubFromExport(mapEditorV2, {
     villains: battleRules.villains,
+    allies: battleRules.allies,
     allyLimit: battleRules.allyLimit,
     tileRestrictions: battleRules.tileRestrictions
   });
@@ -8390,6 +8633,7 @@ function buildUnifiedMapExport(options = {}) {
     name: battleBase.name,
     roomId: battleBase.roomId,
     villains: battleBase.villains || [],
+    allies: battleBase.allies || [],
     allyLimit: battleBase.allyLimit,
     tileRestrictions: battleBase.tileRestrictions,
     sceneSpriteReplacements: battleBase.sceneSpriteReplacements,
@@ -8398,6 +8642,8 @@ function buildUnifiedMapExport(options = {}) {
   } : null;
 
   const villainTileIndexes = getCustomBattleVillainTileIndexes(customBattle?.villains);
+  const allyTileIndexes = getCustomBattleVillainTileIndexes(customBattle?.allies);
+  allyTileIndexes.forEach((tileIndex) => villainTileIndexes.add(tileIndex));
   if (villainTileIndexes.size) {
     const strippedActors = stripMapEditorV2ActorsForVillainTiles(mapEditorV2, villainTileIndexes);
     if (strippedActors) {
@@ -8495,108 +8741,6 @@ function collectRoomReferences(roomId) {
   return [...new Set(refs)];
 }
 
-function syncEditorRoomFileRefs(roomId, fileData, meta = {}) {
-  const refs = collectRoomReferences(roomId);
-  if (!refs.length || !fileData) return false;
-  for (const room of refs) {
-    room.file = cloneJson(fileData);
-    if ('difficulty' in meta) room.difficulty = meta.difficulty;
-    if ('maxTeamSize' in meta) room.maxTeamSize = meta.maxTeamSize;
-    if ('staminaCost' in meta) room.staminaCost = meta.staminaCost;
-  }
-  return true;
-}
-
-function applyDomTilesToLiveRefs(roomId, tiles, floorBelowTiles) {
-  const refs = collectRoomReferences(roomId);
-  if (!refs.length) return false;
-  for (const refRoom of refs) {
-    refRoom.file = refRoom.file || { data: {} };
-    refRoom.file.data = refRoom.file.data || {};
-    if (tiles) refRoom.file.data.tiles = cloneJson(tiles);
-    if (floorBelowTiles) refRoom.file.data.floorBelowTiles = cloneJson(floorBelowTiles);
-  }
-  return true;
-}
-
-function applyActorsToLiveRefs(roomId, actors) {
-  if (!actors) return false;
-  const refs = collectRoomReferences(roomId);
-  if (!refs.length) return false;
-  const nextActors = cloneJson(actors);
-  for (const refRoom of refs) {
-    refRoom.file = refRoom.file || { data: {} };
-    refRoom.file.data = refRoom.file.data || {};
-    refRoom.file.data.actors = cloneJson(nextActors);
-  }
-  for (const tileIndex of [...editorPlacedVillains.keys()]) {
-    if (getOriginalActorOnTile(tileIndex) == null) editorPlacedVillains.delete(tileIndex);
-  }
-  return true;
-}
-
-function applyRestoreBackupToLiveRefs(backup, plan) {
-  if (!backup?.roomId || !plan) return false;
-  let patched = false;
-  if (plan.hadActorEdits) {
-    patched = applyActorsToLiveRefs(backup.roomId, backup.actors) || patched;
-  }
-  if (plan.hadSpriteEdits || plan.hadHiddenSprites) {
-    patched = applyDomTilesToLiveRefs(backup.roomId, backup.tiles, backup.floorBelowTiles) || patched;
-  }
-  if (patched) {
-    clearEditorTileDomCache();
-    restoreAllNativeSpritePlacements();
-    logMapEditor('restoreBackupLiveRefsApplied', { roomId: backup.roomId });
-  }
-  return patched;
-}
-
-function restoreDomTilesFromBackup(backup, onSynced = null) {
-  if (!backup?.roomId) return false;
-  const tiles = backup.tiles ? cloneJson(backup.tiles) : null;
-  const floorBelowTiles = backup.floorBelowTiles ? cloneJson(backup.floorBelowTiles) : null;
-  if (!tiles && !floorBelowTiles) {
-    logMapEditor('restoreDomTilesSkip', { roomId: backup.roomId, reason: 'no-layer-backup' });
-    return false;
-  }
-
-  logBoardConfigDiagnostics('beforeDomTilesPatch', { roomId: backup.roomId });
-  logMapEditor('restoreDomTilesDeferred', {
-    roomId: backup.roomId,
-    hasTiles: !!tiles,
-    hasFloorBelow: !!floorBelowTiles
-  });
-
-  scheduleReloadRoomTimer(() => {
-    applyDomTilesToLiveRefs(backup.roomId, tiles, floorBelowTiles);
-    clearEditorTileDomCache();
-    restoreAllNativeSpritePlacements();
-    logBoardConfigDiagnostics('afterDomTilesPatch', { roomId: backup.roomId });
-    logMapEditor('restoreDomTilesRefsSynced', { roomId: backup.roomId });
-    if (typeof onSynced === 'function') onSynced();
-  }, ROOM_RELOAD_SETTLE_MS);
-  return true;
-}
-
-function restoreActorsFromBackup(backup, onSynced = null) {
-  if (!backup?.roomId || !backup.actors) return false;
-  const actors = cloneJson(backup.actors);
-  const tileCount = actors.length;
-
-  logBoardConfigDiagnostics('beforeActorsPatch', { roomId: backup.roomId });
-  logMapEditor('restoreActorsDeferred', { roomId: backup.roomId, tileCount });
-
-  scheduleReloadRoomTimer(() => {
-    applyActorsToLiveRefs(backup.roomId, actors);
-    clearEditorTileDomCache();
-    logBoardConfigDiagnostics('afterActorsPatch', { roomId: backup.roomId });
-    logMapEditor('restoreActorsRefsSynced', { roomId: backup.roomId });
-    if (typeof onSynced === 'function') onSynced();
-  }, ROOM_RELOAD_SETTLE_MS);
-  return true;
-}
-
 function snapshotRoomDataForTest(roomId) {
   const refs = collectRoomReferences(roomId);
   if (!refs.length) return false;
@@ -8631,44 +8775,6 @@ function applyMergedRoomDataToLiveRefs(roomId, mergedData, meta = {}) {
     if (meta.staminaCost != null) room.staminaCost = meta.staminaCost;
   }
   return true;
-}
-
-function applyNativeRoomToGameState(nativeRoom) {
-  if (!nativeRoom?.id || !nativeRoom.file?.data) return false;
-  if (sandboxTestApplying) return false;
-
-  const refs = collectRoomReferences(nativeRoom.id);
-  if (!refs.length) return false;
-
-  const patch = cloneJson(nativeRoom.file.data);
-  const primaryRoom = refs[0];
-  const existingData = primaryRoom?.file?.data && typeof primaryRoom.file.data === 'object'
-    ? primaryRoom.file.data
-    : {};
-  const tileCount = getRoomDataTileCount(existingData) || getRoomDataTileCount(patch);
-  let mergedData = sanitizeRoomFileDataForRuntime(
-    mergeNativeRoomDataPatch(existingData, patch, tileCount),
-    existingData
-  );
-  if (!editorPlacedVillains.size && existingData.actors != null) {
-    mergedData = { ...mergedData, actors: existingData.actors };
-  }
-
-  sandboxTestApplying = true;
-  try {
-    compactBoardConfigInGameState();
-    applyMergedRoomDataToLiveRefs(nativeRoom.id, mergedData, {
-      difficulty: nativeRoom.difficulty,
-      maxTeamSize: nativeRoom.maxTeamSize,
-      staminaCost: nativeRoom.staminaCost
-    });
-    return true;
-  } catch (e) {
-    logMapEditor('applyNativeRoomFailed', e);
-    return false;
-  } finally {
-    sandboxTestApplying = false;
-  }
 }
 
 function restoreRoomDataFromTestSnapshot() {
@@ -8967,6 +9073,7 @@ function refreshMapEditorEditSession(options = {}) {
 }
 
 function notifyMapEditorEditsChanged(options = {}) {
+  editorSessionChangeCount += 1;
   refreshEditorTileDomCache();
   if (!editorEdits.mapCleaned) {
     syncMapEditorTestNativeRoomSnapshot();
@@ -9038,6 +9145,12 @@ function buildMapEditorTestBattleConfig(room) {
     name: t('mods.mapEditor.sandboxTestBattleName', 'Map Editor test'),
     roomId: room.id,
     villains: rules.villains,
+    // keyPrefix corrected here (villain config default) so this matches what
+    // applyEditorVillainsToBoard() writes once the sandbox test's first apply runs.
+    allies: rules.allies.map((entry) => ({
+      ...entry,
+      keyPrefix: `${MAP_EDITOR_ALLY_KEY_PREFIX}${entry.tileIndex}-`
+    })),
     allyLimit: rules.allyLimit,
     allowStopButton: true,
     // Yield board authority to quest/custom battles on the same room (ally limit, placement).
@@ -9098,6 +9211,7 @@ function stopMapEditorSandboxTest(options = {}) {
   }
 
   editorState.sandboxTestActive = false;
+  notifyMapEditorOpenChanged();
   if (!shouldKeepMapEditorFloorLocked()) exitMapEditorFloorLock();
   clearSandboxTestPersistence();
   clearEditorPlacedVillains({ skipBoardPatch: skipBoardRestore === true });
@@ -9203,6 +9317,7 @@ async function ensureMapEditorEditSession(options = {}) {
     const config = battleConfig || buildMapEditorTestBattleConfig(room);
     mapEditorTestBattle = CustomBattles.create(config);
     editorState.sandboxTestActive = true;
+    notifyMapEditorOpenChanged();
     mapEditorTestBattle.setup(
       () => editorState.sandboxTestActive,
       (toastData) => {
@@ -9214,6 +9329,7 @@ async function ensureMapEditorEditSession(options = {}) {
     mapEditorTestBattle = null;
     clearSandboxTestPersistence();
     restoreRoomDataFromTestSnapshot();
+    notifyMapEditorOpenChanged();
     logMapEditor('editSessionCreateFailed', e);
     return false;
   }
@@ -9233,14 +9349,6 @@ async function ensureMapEditorEditSession(options = {}) {
 /** @deprecated Use ensureMapEditorEditSession */
 async function startMapEditorSandboxTest() {
   return ensureMapEditorEditSession();
-}
-
-function toggleMapEditorSandboxTest() {
-  if (editorState.sandboxTestActive) {
-    return stopMapEditorSandboxTest();
-  }
-  ensureMapEditorEditSession();
-  return true;
 }
 
 function buildSceneReplacementRules() {
@@ -9279,6 +9387,25 @@ async function copyTextToClipboard(text) {
   }
 }
 
+function downloadJsonFile(filename, data) {
+  try {
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    return true;
+  } catch (e) {
+    console.warn('[Map Editor] JSON file download failed:', e);
+    return false;
+  }
+}
+
+/** Paste-JSON import dialog for map-editor-bundle-v1 exports — mirrors Better Setups' "Load setup". */
 function setStatusMessage(message, isError) {
   const status = queryInspector('#map-editor-status');
   if (!status) return;
@@ -10153,10 +10280,106 @@ function getCreatureDisplayName(gameId) {
   return `Creature #${gameId}`;
 }
 
+// A placed custom-sprite creature carries its display name as a nickname (see
+// applyCustomSpriteToSelection), so prefer the nickname over the base species name
+// wherever an actor's name is shown — otherwise "Kraknaknork's Demon" would read as
+// "Orc Shaman" everywhere despite the custom art actually rendering correctly.
+function getActorDisplayName(actor, actorId) {
+  const nickname = String(actor?.nickname || '').trim();
+  if (nickname) return nickname;
+  return actorId != null ? getCreatureDisplayName(actorId) : 'actor';
+}
+
+// Custom-sprite pieces should show their own art in inspector rows/portraits instead of
+// the base creature's portrait. A registry entry can supply a dedicated portraitUrl (a
+// single icon-sized image, e.g. Weakened Ghazbaran's ghaz-icon.gif) for exactly this; absent
+// that, fall back to the idle sheet only when it has no movingUrl (a decent signal it's a
+// single static pose) — a multi-frame directional sheet would otherwise show the whole
+// strip squished into the box.
+function getActorPortraitUrl(actor, actorId, shiny = false) {
+  const spriteDef = actor?.customSpriteKey != null
+    ? window.CustomBattles?.getCustomSpriteDef?.(actor.customSpriteKey)
+    : null;
+  if (spriteDef?.portraitUrl) {
+    const url = window.CustomBattles?.getCustomSpriteAssetUrl?.(spriteDef.portraitUrl);
+    if (url) return url;
+  }
+  if (spriteDef && !spriteDef.movingUrl) {
+    const url = window.CustomBattles?.getCustomSpriteAssetUrl?.(spriteDef.idleUrl);
+    if (url) return url;
+  }
+  return actorId != null ? getCreaturePortraitUrl(actorId, shiny) : null;
+}
+
 function getCreaturePortraitUrl(gameId, shiny = false) {
   const db = getCreatureDatabase();
   if (db?.getMonsterPortraitUrl) return db.getMonsterPortraitUrl(gameId, shiny);
   return shiny ? `/assets/portraits/${gameId}-shiny.png` : `/assets/portraits/${gameId}.png`;
+}
+
+/**
+ * The rendered outfit/sprite ID for a creature's gameId — usually identical to gameId itself
+ * (the native game falls back to gameId when a monster has no explicit metadata.spriteId
+ * override), so typing a normal creature ID into the Outfit sprite field works for almost
+ * every creature. This resolves the rare exceptions correctly, same lookup the native board
+ * uses (globalThis.state.utils.getMonster(gameId)?.metadata?.spriteId ?? gameId).
+ */
+function resolveOutfitSpriteIdForCreature(gameId) {
+  const id = Number(gameId);
+  if (!Number.isFinite(id)) return null;
+  const db = getCreatureDatabase();
+  const fromDb = db?.findMonsterByGameId?.(id);
+  if (fromDb?.metadata?.spriteId != null) return Number(fromDb.metadata.spriteId);
+  try {
+    const monster = globalThis.state?.utils?.getMonster?.(id);
+    if (monster?.metadata?.spriteId != null) return Number(monster.metadata.spriteId);
+  } catch (e) {
+    // ignore
+  }
+  return id;
+}
+
+/**
+ * Resolves a creature gameId from either a numeric ID or a creature name (e.g. "Druid"),
+ * case-insensitive. Exact name matches win; an ambiguous partial match (multiple creatures
+ * contain the text) is rejected rather than guessing.
+ */
+function resolveCreatureIdByGameIdOrName(input) {
+  const trimmed = String(input ?? '').trim();
+  if (!trimmed) return null;
+  if (/^\d+$/.test(trimmed)) {
+    const id = Number(trimmed);
+    return Number.isFinite(id) && id > 0 ? id : null;
+  }
+  const db = getCreatureDatabase();
+  const monsters = db?.getAllMonstersWithPortraits?.() || [];
+  if (!monsters.length) return null;
+  const lower = trimmed.toLowerCase();
+  const exact = monsters.find((m) => (m.metadata?.name || '').toLowerCase() === lower);
+  if (exact) return exact.gameId;
+  const partialMatches = monsters.filter((m) => (m.metadata?.name || '').toLowerCase().includes(lower));
+  return partialMatches.length === 1 ? partialMatches[0].gameId : null;
+}
+
+/** Outfit sprite field accepts a creature name or ID — resolve straight through to the sprite ID. */
+function resolveOutfitSpriteIdFromInput(input) {
+  const gameId = resolveCreatureIdByGameIdOrName(input);
+  return gameId == null ? null : resolveOutfitSpriteIdForCreature(gameId);
+}
+
+/**
+ * Reverse of resolveOutfitSpriteIdForCreature: given a resolved outfit sprite ID, find the
+ * creature whose own sprite ID resolves to it, so the field can display a name (e.g. "Orc
+ * Shaman") instead of a bare number. Returns null when no unique creature matches, in which
+ * case callers should fall back to showing the numeric ID.
+ */
+function resolveCreatureNameFromOutfitSpriteId(spriteId) {
+  const id = Number(spriteId);
+  if (!Number.isFinite(id)) return null;
+  const db = getCreatureDatabase();
+  const monsters = db?.getAllMonstersWithPortraits?.() || [];
+  const match = monsters.find((m) => resolveOutfitSpriteIdForCreature(m.gameId) === id);
+  return match?.metadata?.name || null;
 }
 
 function getEquipmentDatabase() {
@@ -10274,6 +10497,9 @@ function buildMapEditorVillainConfig(tileIndex, gameId, actorConfig = null) {
     nickname: actorConfig?.nickname || name,
     level: Number.isFinite(level) && level > 0 ? Math.floor(level) : 1,
     direction: actorConfig?.direction || 'south',
+    // keyPrefix intentionally omitted here — assigned per villain/ally board-entity builder in
+    // applyEditorVillainsToBoard() so ally status doesn't leak into actor-config equality checks
+    // (e.g. isUserPlacedEditorVillain()), which compare this object verbatim via JSON.stringify.
     keyPrefix: `${MAP_EDITOR_VILLAIN_KEY_PREFIX}${tileIndex}-`
   };
 
@@ -10281,6 +10507,7 @@ function buildMapEditorVillainConfig(tileIndex, gameId, actorConfig = null) {
   if (actorConfig?.shiny === true) config.shiny = true;
   if (actorConfig?.outfitSpriteId != null) config.outfitSpriteId = actorConfig.outfitSpriteId;
   if (actorConfig?.itemSpriteId != null) config.itemSpriteId = actorConfig.itemSpriteId;
+  if (actorConfig?.customSpriteKey != null) config.customSpriteKey = actorConfig.customSpriteKey;
   if (actorConfig?.genes && typeof actorConfig.genes === 'object') {
     config.genes = cloneJson(actorConfig.genes);
   }
@@ -10304,6 +10531,7 @@ function buildActorConfigFromVillainConfig(villain) {
     equip: villain.equip,
     outfitSpriteId: villain.outfitSpriteId,
     itemSpriteId: villain.itemSpriteId,
+    customSpriteKey: villain.customSpriteKey,
     abilityCooldownTicks: villain.abilityCooldownTicks
   });
 }
@@ -10423,11 +10651,6 @@ function readEngineGeneValueFromContainer(container, key) {
     if (Number.isFinite(mr)) return clampCreatureEngineGene(mr);
   }
   return null;
-}
-
-function readGeneValueFromContainer(container, key) {
-  const engine = readEngineGeneValueFromContainer(container, key);
-  return engine != null ? engineGeneToUiGene(engine) : null;
 }
 
 function engineGenesToUiGenes(engineGenes) {
@@ -10633,7 +10856,7 @@ function buildActorConfigFromCreatureForm(baseActor, formState) {
     delete merged.equip;
   }
 
-  const outfitSpriteId = Number(formState.outfitSpriteId);
+  const outfitSpriteId = resolveOutfitSpriteIdFromInput(formState.outfitSpriteId);
   if (Number.isFinite(outfitSpriteId) && outfitSpriteId > 0) merged.outfitSpriteId = outfitSpriteId;
   else delete merged.outfitSpriteId;
 
@@ -10721,11 +10944,12 @@ function updateCreatureActorRowSummary(tileIndex, actor) {
   if (!actorRow) return;
 
   const actorId = resolveCreatureGameId(actor);
-  const actorName = actorId != null ? getCreatureDisplayName(actorId) : 'actor';
+  const actorName = getActorDisplayName(actor, actorId);
   const level = actor.level != null ? ` · Lv.${actor.level}` : '';
   const portrait = actorRow.querySelector('.me-actor-portrait');
-  if (portrait && actorId != null) {
-    portrait.src = getCreaturePortraitUrl(actorId, !!actor.shiny);
+  const portraitUrl = getActorPortraitUrl(actor, actorId, !!actor.shiny);
+  if (portrait && portraitUrl) {
+    portrait.src = portraitUrl;
   }
   const nameSpan = actorRow.querySelector('.me-sprite-id');
   if (nameSpan) nameSpan.textContent = `${actorName}${level}`;
@@ -10753,6 +10977,15 @@ function attachCreatureFormLiveApply(formRoot, tileIndex, getActorBase, gameId) 
   formRoot.querySelectorAll('input, select, textarea').forEach((el) => {
     const type = String(el.type || '').toLowerCase();
     if (type === 'checkbox' || type === 'radio') {
+      el.addEventListener('change', schedule);
+      return;
+    }
+    // Outfit sprite resolves free text (a creature name) to a sprite ID. Live-applying
+    // on every keystroke can transiently match the WRONG creature mid-typing (e.g. a
+    // paused prefix that happens to uniquely match some other name) and briefly flash
+    // it on the board before the full name resolves. Only apply once the value settles
+    // (blur normalizes it and dispatches 'change' below), not on every 'input'.
+    if (el.dataset.creatureOutfitId) {
       el.addEventListener('change', schedule);
       return;
     }
@@ -10812,6 +11045,10 @@ function startCreatureEdit(tileIndex) {
   clearCreatureLiveApplyTimer();
   editorState.editingCreatureTileIndex = tileIndex;
   editorState.editingSprite = null;
+  // Only steal focus to the Level field on this very first render — later re-renders of
+  // the same edit session (live-apply commits, board updates) must not yank focus/scroll
+  // away from whatever field the user is actually typing in.
+  editorState.creatureEditFocusPending = true;
   refreshInspector();
 }
 
@@ -10831,6 +11068,32 @@ function createCreatureEditorPanel(tileIndex, actor) {
     'Changes apply automatically while you edit. Ability cooldown is saved for native maps/quests only.'
   );
   panel.appendChild(hint);
+
+  const allyRow = document.createElement('label');
+  allyRow.className = 'me-check-row';
+  const allyCheckbox = document.createElement('input');
+  allyCheckbox.type = 'checkbox';
+  allyCheckbox.checked = editorAlliedTiles.has(tileIndex);
+  allyCheckbox.addEventListener('change', (e) => {
+    e.stopPropagation();
+    const isAlly = allyCheckbox.checked;
+    const ok = setCreatureAllyOnTile(tileIndex, isAlly);
+    if (ok) {
+      setStatusMessage(
+        isAlly
+          ? t('mods.mapEditor.creatureMadeAlly', 'Tile {tile} creature will fight as a forced ally.').replace('{tile}', String(tileIndex))
+          : t('mods.mapEditor.creatureMadeVillain', 'Tile {tile} creature will fight as a villain.').replace('{tile}', String(tileIndex))
+      );
+      refreshInspector();
+    } else {
+      allyCheckbox.checked = !isAlly;
+    }
+  });
+  allyRow.append(
+    allyCheckbox,
+    document.createTextNode(t('mods.mapEditor.creatureAllyToggle', 'Fights as ally (forced teammate, not a villain)'))
+  );
+  panel.appendChild(allyRow);
 
   const form = document.createElement('div');
   form.className = 'me-creature-form-grid';
@@ -10980,11 +11243,49 @@ function createCreatureEditorPanel(tileIndex, actor) {
   nicknameInput.placeholder = t('mods.mapEditor.creatureNicknamePlaceholder', 'Nickname (optional)');
   appendCreatureFormRow(form, t('mods.mapEditor.creatureNickname', 'Nickname'), nicknameInput);
 
-  const outfitInput = createCreatureNumberInput(formState.outfitSpriteId, { min: 1 });
+  const outfitInput = document.createElement('input');
+  outfitInput.type = 'text';
+  outfitInput.className = 'me-input me-creature-input-compact';
+  outfitInput.value = formState.outfitSpriteId === '' || formState.outfitSpriteId == null
+    ? ''
+    : (resolveCreatureNameFromOutfitSpriteId(formState.outfitSpriteId) || String(formState.outfitSpriteId));
   outfitInput.dataset.creatureOutfitId = '1';
-  outfitInput.classList.add('me-creature-input-compact');
-  outfitInput.placeholder = t('mods.mapEditor.creatureSpriteIdPlaceholder', 'Sprite ID');
-  appendCreatureFormRow(form, t('mods.mapEditor.creatureOutfitId', 'Outfit sprite'), outfitInput);
+  outfitInput.placeholder = t('mods.mapEditor.creatureOutfitIdPlaceholder', 'Name or ID (e.g. Druid)');
+  outfitInput.title = t(
+    'mods.mapEditor.creatureOutfitIdHint',
+    'Overrides how this creature looks while keeping its own combat stats. Type another creature\'s name (e.g. "Druid") or its ID — resolved to that creature\'s sprite automatically.'
+  );
+  // Normalize the field to the creature's canonical display name once it settles (e.g.
+  // typing "orc shaman" becomes "Orc Shaman", and a typed numeric ID becomes that
+  // creature's name too), instead of collapsing free text down to a bare sprite ID. The
+  // resolved numeric ID is still what actually gets stored — see mergeActorConfigFromForm,
+  // which re-resolves this field's text at save time regardless of what it displays.
+  outfitInput.addEventListener('blur', () => {
+    const resolved = resolveOutfitSpriteIdFromInput(outfitInput.value);
+    if (resolved != null) {
+      const display = resolveCreatureNameFromOutfitSpriteId(resolved) || String(resolved);
+      if (display !== outfitInput.value.trim()) {
+        outfitInput.value = display;
+      }
+    }
+    outfitInput.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  const outfitRow = document.createElement('div');
+  outfitRow.className = 'me-row';
+  outfitRow.appendChild(outfitInput);
+  const outfitOwnIdBtn = createPanelButton(
+    t('mods.mapEditor.creatureOutfitUseOwnId', 'Use this creature’s ID'),
+    () => {
+      const ownGameId = resolveCreatureGameId(actor);
+      const resolved = resolveOutfitSpriteIdForCreature(ownGameId);
+      if (resolved == null) return;
+      outfitInput.value = resolveCreatureNameFromOutfitSpriteId(resolved) || String(resolved);
+      outfitInput.dispatchEvent(new Event('change', { bubbles: true }));
+    },
+    'me-btn me-btn-compact'
+  );
+  outfitRow.appendChild(outfitOwnIdBtn);
+  appendCreatureFormRow(form, t('mods.mapEditor.creatureOutfitId', 'Outfit sprite'), outfitRow);
 
   const itemInput = createCreatureNumberInput(formState.itemSpriteId, { min: 1 });
   itemInput.dataset.creatureItemId = '1';
@@ -11013,21 +11314,6 @@ function createCreatureEditorPanel(tileIndex, actor) {
   const getActorBase = () => getActorOnTile(tileIndex) || actor;
   attachCreatureFormLiveApply(panel, tileIndex, getActorBase, gameId);
 
-  const actions = document.createElement('div');
-  actions.className = 'me-row me-creature-form-actions';
-
-  const doneBtn = document.createElement('button');
-  doneBtn.type = 'button';
-  doneBtn.className = 'me-btn me-btn-compact';
-  doneBtn.textContent = t('mods.mapEditor.creatureDone', 'Done');
-  doneBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    finishCreatureEdit();
-  });
-
-  actions.appendChild(doneBtn);
-  panel.appendChild(actions);
-
   panel.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       e.preventDefault();
@@ -11035,7 +11321,10 @@ function createCreatureEditorPanel(tileIndex, actor) {
     }
   });
 
-  requestAnimationFrame(() => levelInput.focus());
+  if (editorState.creatureEditFocusPending) {
+    editorState.creatureEditFocusPending = false;
+    requestAnimationFrame(() => levelInput.focus());
+  }
   return panel;
 }
 
@@ -11079,12 +11368,16 @@ function isMapEditorVillainEntity(entity) {
   return typeof entity?.key === 'string' && entity.key.startsWith(MAP_EDITOR_VILLAIN_KEY_PREFIX);
 }
 
+function isMapEditorAllyEntity(entity) {
+  return typeof entity?.key === 'string' && entity.key.startsWith(MAP_EDITOR_ALLY_KEY_PREFIX);
+}
+
 function removeAllMapEditorVillainsFromBoard() {
   if (!globalThis.state?.board) return false;
   try {
     const raw = globalThis.state.board.getSnapshot()?.context?.boardConfig;
     const boardConfig = compactBoardConfigEntries(raw);
-    const filtered = boardConfig.filter((entity) => !isMapEditorVillainEntity(entity));
+    const filtered = boardConfig.filter((entity) => !isMapEditorVillainEntity(entity) && !isMapEditorAllyEntity(entity));
     const hadNulls = Array.isArray(raw) && raw.some((entity) => entity == null);
     if (!hadNulls && filtered.length === boardConfig.length) return false;
     sendBoardSetState((prev) => ({ ...prev, boardConfig: filtered }));
@@ -11100,7 +11393,7 @@ function removeAllVillainsFromBoard() {
   try {
     const raw = globalThis.state.board.getSnapshot()?.context?.boardConfig;
     const boardConfig = compactBoardConfigEntries(raw);
-    const filtered = boardConfig.filter((entity) => entity && !entity.villain);
+    const filtered = boardConfig.filter((entity) => entity && !entity.villain && !isMapEditorAllyEntity(entity));
     const hadNulls = Array.isArray(raw) && raw.some((entity) => entity == null);
     if (!hadNulls && filtered.length === boardConfig.length) return false;
     sendBoardSetState((prev) => ({ ...prev, boardConfig: filtered }));
@@ -11123,8 +11416,9 @@ function clearAllActorsFromMap(options = {}) {
       if (data.actors[tileIndex] != null) cleared += 1;
     }
   }
-  delete data.actors;
+  data.actors = [];
   editorPlacedVillains.clear();
+  editorAlliedTiles.clear();
   if (!skipBoardSync) removeAllVillainsFromBoard();
   if (!skipNotify) {
     notifyMapEditorEditsChanged({ skipVillainBoardResync: !skipBoardSync });
@@ -11132,19 +11426,29 @@ function clearAllActorsFromMap(options = {}) {
   return cleared;
 }
 
-function syncMapEditorVillainKeyPrefixes() {
-  if (!mapEditorTestBattle?.config) return;
-  const villains = mapEditorTestBattle.config.villains || [];
-  mapEditorTestBattle.villainKeyPrefixes = villains.map((v) => {
-    const prefix = v.keyPrefix || `${v.nickname?.toLowerCase() || 'villain'}-tile-${v.tileIndex}-`;
-    const hasTileInPrefix = prefix.includes(`${v.tileIndex}-`);
+function buildEntityKeyPrefixes(entities, fallbackNoun) {
+  return (entities || []).map((entry) => {
+    const prefix = entry.keyPrefix || `${entry.nickname?.toLowerCase() || fallbackNoun}-tile-${entry.tileIndex}-`;
+    const hasTileInPrefix = prefix.includes(`${entry.tileIndex}-`);
     return {
       prefix,
-      tileIndex: v.tileIndex,
-      nickname: v.nickname,
-      hasTileInPrefix: hasTileInPrefix || prefix.endsWith(`-${v.tileIndex}-`) || prefix.includes(`tile-${v.tileIndex}-`)
+      tileIndex: entry.tileIndex,
+      nickname: entry.nickname,
+      hasTileInPrefix: hasTileInPrefix
+        || prefix.endsWith(`-${entry.tileIndex}-`)
+        || prefix.includes(`tile-${entry.tileIndex}-`)
     };
   });
+}
+
+function syncMapEditorVillainKeyPrefixes() {
+  if (!mapEditorTestBattle?.config) return;
+  mapEditorTestBattle.villainKeyPrefixes = buildEntityKeyPrefixes(mapEditorTestBattle.config.villains, 'villain');
+}
+
+function syncMapEditorAllyKeyPrefixes() {
+  if (!mapEditorTestBattle?.config) return;
+  mapEditorTestBattle.allyKeyPrefixes = buildEntityKeyPrefixes(mapEditorTestBattle.config.allies, 'ally');
 }
 
 function isUserPlacedEditorVillain(tileIndex, villainConfig = null) {
@@ -11161,17 +11465,21 @@ function hydrateEditorPlacedVillainsFromRoom() {
   if (!globalThis.state?.board?.getSnapshot) return;
 
   editorPlacedVillains.clear();
+  editorAlliedTiles.clear();
   const boardConfig = globalThis.state.board.getSnapshot()?.context?.boardConfig || [];
   boardConfig.forEach((entity) => {
-    if (!entity || !isMapEditorVillainEntity(entity)) return;
+    if (!entity) return;
+    const isAllyEntity = isMapEditorAllyEntity(entity);
+    if (!isAllyEntity && !isMapEditorVillainEntity(entity)) return;
     const tileIndex = Number(entity.tileIndex);
     if (!Number.isFinite(tileIndex)) return;
+    if (isAllyEntity) editorAlliedTiles.add(tileIndex);
     const villainConfig = buildMapEditorVillainConfig(
       tileIndex,
       entity.gameId ?? entity.id,
       entity
     );
-    if (villainConfig && isUserPlacedEditorVillain(tileIndex, villainConfig)) {
+    if (villainConfig && (isAllyEntity || isUserPlacedEditorVillain(tileIndex, villainConfig))) {
       editorPlacedVillains.set(tileIndex, villainConfig);
     }
   });
@@ -11232,26 +11540,18 @@ function compactBoardConfigInGameState() {
   }
 }
 
-function syncRoomActorsToSandboxBoard() {
-  if (!editorState.sandboxTestActive || !mapEditorTestBattle) return false;
-  hydrateEditorPlacedVillainsFromRoom();
-  return applyEditorVillainsToBoard();
-}
-
 function clearEditorPlacedVillains(options = {}) {
   editorPlacedVillains.clear();
+  editorAlliedTiles.clear();
   if (options.skipBoardPatch !== true) {
     removeAllMapEditorVillainsFromBoard();
   }
 }
 
-function getMapEditorVillainsForBoardApply() {
-  return collectMapVillainConfigs();
-}
-
 function summarizeEditorVillainEntities(boardConfig) {
   return compactBoardConfigEntries(boardConfig)
-    .filter((entity) => entity && (entity.villain || isMapEditorVillainEntity(entity)))
+    .filter((entity) => entity
+      && (entity.villain || isMapEditorVillainEntity(entity) || isMapEditorAllyEntity(entity)))
     .map((entity) => ({
       tileIndex: Number(entity.tileIndex),
       gameId: resolveCreatureGameId(entity),
@@ -11262,9 +11562,10 @@ function summarizeEditorVillainEntities(boardConfig) {
       nickname: entity.nickname || '',
       outfitSpriteId: entity.outfitSpriteId ?? null,
       itemSpriteId: entity.itemSpriteId ?? null,
+      customSpriteKey: entity.customSpriteKey ?? null,
       equip: entity.equip ?? null,
       genes: entity.genes ?? null,
-      key: entity.key || null
+      villain: entity.villain === true
     }))
     .sort((a, b) => a.tileIndex - b.tileIndex);
 }
@@ -11286,9 +11587,14 @@ function applyEditorVillainsToBoard(options = {}) {
     return false;
   }
 
-  const villains = getMapEditorVillainsForBoardApply().map((entry) => cloneJson(entry));
-  mapEditorTestBattle.config.villains = villains;
+  const { villains, allies } = splitVillainsAndAllies(collectMapVillainConfigs());
+  mapEditorTestBattle.config.villains = villains.map((entry) => cloneJson(entry));
+  mapEditorTestBattle.config.allies = allies.map((entry) => ({
+    ...cloneJson(entry),
+    keyPrefix: `${MAP_EDITOR_ALLY_KEY_PREFIX}${entry.tileIndex}-`
+  }));
   syncMapEditorVillainKeyPrefixes();
+  syncMapEditorAllyKeyPrefixes();
 
   try {
     const boardContext = globalThis.state.board.getSnapshot().context;
@@ -11296,44 +11602,59 @@ function applyEditorVillainsToBoard(options = {}) {
     let updatedBoardConfig = currentBoardConfig.filter((entity) => {
       if (!entity) return false;
       if (isMapEditorVillainEntity(entity)) return false;
+      if (isMapEditorAllyEntity(entity)) return false;
       if (entity.villain) return false;
       return true;
     });
 
-    const villainTiles = [];
-    villains.forEach((villainConfig) => {
-      const villain = mapEditorTestBattle.createCustomVillainEntity(villainConfig);
-      if (!villain || !Number.isFinite(Number(villain.tileIndex))) {
-        logMapEditor('applyEditorVillainsBadEntity', {
-          tileIndex: villainConfig?.tileIndex ?? null,
-          hasEntity: !!villain
-        });
-        return;
-      }
-      updatedBoardConfig.push(villain);
-      villainTiles.push(villain.tileIndex);
-    });
+    const appendBoardEntities = (configs, createFn, badEntityLogTag) => {
+      const tiles = [];
+      configs.forEach((config) => {
+        const entity = createFn(config);
+        if (!entity || !Number.isFinite(Number(entity.tileIndex))) {
+          logMapEditor(badEntityLogTag, { tileIndex: config?.tileIndex ?? null, hasEntity: !!entity });
+          return;
+        }
+        updatedBoardConfig.push(entity);
+        tiles.push(entity.tileIndex);
+      });
+      return tiles;
+    };
+
+    const villainTiles = appendBoardEntities(
+      mapEditorTestBattle.config.villains,
+      (config) => mapEditorTestBattle.createCustomVillainEntity(config),
+      'applyEditorVillainsBadEntity'
+    );
+    const allyTiles = appendBoardEntities(
+      mapEditorTestBattle.config.allies,
+      (config) => mapEditorTestBattle.createCustomAllyEntity(config),
+      'applyEditorAlliesBadEntity'
+    );
 
     updatedBoardConfig = compactBoardConfigEntries(updatedBoardConfig);
-    // Compare villain content (level/dir/shiny/etc), not just counts — live edits keep count stable.
+    // Compare content (level/dir/shiny/side/etc), not just counts — live edits keep count stable.
     if (options.force !== true
       && updatedBoardConfig.length === currentBoardConfig.length
       && editorVillainBoardStatesEqual(currentBoardConfig, updatedBoardConfig)) {
-      logMapEditor('applyEditorVillainsSkipped', { reason: 'no-change', count: villains.length });
+      logMapEditor('applyEditorVillainsSkipped', { reason: 'no-change', count: villains.length + allies.length });
       return true;
     }
 
     logMapEditor('applyEditorVillainsPending', {
       count: villainTiles.length,
+      allyCount: allyTiles.length,
       tiles: villainTiles,
+      allyTiles,
       boardBefore: summarizeBoardConfig(boardContext.boardConfig)
     });
     sendBoardSetState((prev) => ({ ...prev, boardConfig: updatedBoardConfig }));
     suppressSandboxAutoSetupReapplyUntil = Date.now() + 800;
+    suppressBoardListenerRefreshUntil = Date.now() + 800;
     if (typeof mapEditorTestBattle.scheduleVillainOutfitSpriteOverrides === 'function') {
       mapEditorTestBattle.scheduleVillainOutfitSpriteOverrides({ force: true });
     }
-    logMapEditor('applyEditorVillains', { count: villains.length });
+    logMapEditor('applyEditorVillains', { count: villains.length, allyCount: allies.length });
     return true;
   } catch (e) {
     logMapEditor('applyEditorVillainsFailed', e);
@@ -11367,6 +11688,7 @@ function clearActorOnTile(tileIndex, options = {}) {
   delete data.actors[tileIndex];
   applySparseActorsToRoomData(data);
   editorPlacedVillains.delete(tileIndex);
+  editorAlliedTiles.delete(tileIndex);
 
   if (!skipBoardSync) {
     if (editorState.sandboxTestActive) {
@@ -11403,6 +11725,32 @@ function setActorOnTile(tileIndex, actorConfig, options = {}) {
     notifyMapEditorEditsChanged({ skipVillainBoardResync: !skipBoardSync });
   }
   logMapEditor('setActor', { tileIndex, gameId: actorConfig.id, onBoard: !skipBoardSync });
+  return true;
+}
+
+/** Flip a placed creature between fighting as a villain (default) or a forced ally teammate. */
+function setCreatureAllyOnTile(tileIndex, isAlly, options = {}) {
+  const { skipNotify = false, skipBoardSync = false } = options;
+  if (tileIndex == null) return false;
+
+  if (!editorPlacedVillains.has(tileIndex)) {
+    // Claim this tile's still-native (unedited) actor as editor-placed, same as setActorOnTile.
+    const actorConfig = getActorOnTile(tileIndex);
+    const villainConfig = actorConfig
+      ? buildMapEditorVillainConfig(tileIndex, actorConfig.id, actorConfig)
+      : null;
+    if (!villainConfig) return false;
+    editorPlacedVillains.set(tileIndex, villainConfig);
+  }
+
+  if (isAlly) editorAlliedTiles.add(tileIndex);
+  else editorAlliedTiles.delete(tileIndex);
+
+  if (!skipBoardSync) applyEditorVillainsToBoard();
+  if (!skipNotify) {
+    notifyMapEditorEditsChanged({ skipVillainBoardResync: !skipBoardSync });
+  }
+  logMapEditor('setCreatureAlly', { tileIndex, isAlly: !!isAlly });
   return true;
 }
 
@@ -11634,6 +11982,127 @@ function createCreatureCard(creature) {
     applyCreatureToSelection(creature);
   });
   return card;
+}
+
+// Registry-driven custom-PNG sprites (window.CustomBattles.CUSTOM_SPRITES) — placed the
+// same way as a normal creature, but with a customSpriteKey visual override baked in.
+function getCustomSpriteRegistry() {
+  return Array.isArray(window.CustomBattles?.CUSTOM_SPRITES) ? window.CustomBattles.CUSTOM_SPRITES : [];
+}
+
+function filterCustomSpriteList(searchQuery) {
+  const all = getCustomSpriteRegistry();
+  const query = String(searchQuery || '').trim().toLowerCase();
+  if (!query) return all;
+  return all.filter((def) => String(def?.name || def?.key || '').toLowerCase().includes(query));
+}
+
+function createCustomSpriteCard(spriteDef) {
+  const displayName = spriteDef.name || spriteDef.key;
+  const card = document.createElement('button');
+  card.type = 'button';
+  card.className = 'me-asset-card me-creature-card';
+  card.title = t('mods.mapEditor.customSpriteUse', 'Use custom sprite {name}').replace('{name}', displayName);
+
+  const preview = document.createElement('div');
+  preview.className = 'me-creature-preview';
+
+  const img = document.createElement('img');
+  img.className = 'me-creature-portrait';
+  img.alt = displayName;
+  img.loading = 'lazy';
+  img.decoding = 'async';
+  const assetUrl = window.CustomBattles?.getCustomSpriteAssetUrl?.(spriteDef.portraitUrl || spriteDef.idleUrl);
+  if (assetUrl) img.src = assetUrl;
+  img.addEventListener('error', () => {
+    preview.classList.add('me-creature-preview-fallback');
+    preview.textContent = displayName;
+    img.remove();
+  }, { once: true });
+  preview.appendChild(img);
+  card.appendChild(preview);
+
+  const meta = document.createElement('div');
+  meta.className = 'me-asset-meta';
+
+  const nameLine = document.createElement('div');
+  nameLine.className = 'me-creature-name';
+  nameLine.textContent = displayName;
+
+  meta.append(nameLine);
+  card.appendChild(meta);
+
+  card.addEventListener('click', (e) => {
+    e.stopPropagation();
+    applyCustomSpriteToSelection(spriteDef);
+  });
+  return card;
+}
+
+async function applyCustomSpriteToSelection(spriteDef) {
+  const displayName = spriteDef.name || spriteDef.key;
+  const gameId = Number(spriteDef.baseGameId);
+  if (!Number.isFinite(gameId)) {
+    setStatusMessage(
+      t('mods.mapEditor.customSpriteMissingBase', '"{name}" has no base creature configured (baseGameId) in the registry.')
+        .replace('{name}', displayName),
+      true
+    );
+    return;
+  }
+  const actorConfig = buildDefaultActorConfig(gameId);
+  if (!actorConfig) return;
+  actorConfig.customSpriteKey = spriteDef.key;
+  actorConfig.nickname = spriteDef.nickname || displayName;
+  actorConfig.level = Number(spriteDef.level) || 50;
+
+  const tileIndex = editorState.selectedTileIndex;
+  if (tileIndex != null) {
+    const ok = setActorOnTile(tileIndex, actorConfig);
+    const onBoard = ok && editorState.sandboxTestActive;
+    setStatusMessage(
+      ok
+        ? onBoard
+          ? t('mods.mapEditor.creaturePlaced', 'Placed {name} on tile {tile}.')
+              .replace('{name}', displayName)
+              .replace('{tile}', String(tileIndex))
+          : t('mods.mapEditor.creaturePlacedDataOnly',
+            'Saved {name} to map data on tile {tile} — open edit session to preview on board.')
+              .replace('{name}', displayName)
+              .replace('{tile}', String(tileIndex))
+        : t('mods.mapEditor.creaturePlaceFailed', 'Could not place {name}.')
+            .replace('{name}', displayName),
+      !ok
+    );
+    refreshInspector();
+    return;
+  }
+
+  const ok = await copyTextToClipboard(JSON.stringify(actorConfig, null, 2));
+  setStatusMessage(
+    ok
+      ? t('mods.mapEditor.creatureCopied', 'Copied actor JSON for {name} — select a tile to place.')
+          .replace('{name}', displayName)
+      : t('mods.mapEditor.clipboardFail', 'Clipboard failed.'),
+    !ok
+  );
+}
+
+function appendCustomSpriteSection(grid, searchQuery) {
+  grid.querySelectorAll('.me-custom-sprite-separator, .me-custom-sprite-card').forEach((el) => el.remove());
+  const entries = filterCustomSpriteList(searchQuery);
+  if (!entries.length) return;
+
+  const separator = document.createElement('div');
+  separator.className = 'me-custom-sprite-separator';
+  separator.textContent = t('mods.mapEditor.customSpritesSeparator', 'Custom sprites');
+  grid.appendChild(separator);
+
+  entries.forEach((def) => {
+    const card = createCustomSpriteCard(def);
+    card.classList.add('me-custom-sprite-card');
+    grid.appendChild(card);
+  });
 }
 
 function appendCreatureCardFragment(grid, fragment) {
@@ -11879,6 +12348,7 @@ function refreshCreatureList() {
         if (loadId !== creatureListLoadId) return;
         grid.dataset.renderedCount = String(display.items.length);
         updateCreatureListSentinel(grid, display.capped);
+        appendCustomSpriteSection(grid, searchQuery);
         const body = queryInspector('.me-creature-grid-body');
         if (body) body.scrollTop = 0;
         editorState.creatureTabScrollTop = 0;
@@ -12069,7 +12539,7 @@ function refreshEditTab() {
         const actor = getActorOnTile(tileIndex);
         if (actor) {
           const actorId = resolveCreatureGameId(actor);
-          const actorName = actorId != null ? getCreatureDisplayName(actorId) : 'actor';
+          const actorName = getActorDisplayName(actor, actorId);
           const level = actor.level != null ? ` Lv.${actor.level}` : '';
           parts.push(`actor: ${actorName}${level}`);
         }
@@ -12127,7 +12597,7 @@ function refreshEditTab() {
     const actor = editorEdits.mapCleaned ? null : getActorOnTile(tileIndex);
     if (actor) {
       const actorId = resolveCreatureGameId(actor);
-      const actorName = actorId != null ? getCreatureDisplayName(actorId) : 'actor';
+      const actorName = getActorDisplayName(actor, actorId);
       const level = actor.level != null ? ` · Lv.${actor.level}` : '';
       const canRemoveActor = editorState.sandboxTestActive
         && (editorPlacedVillains.has(tileIndex) || actorId != null);
@@ -12138,7 +12608,8 @@ function refreshEditTab() {
       const portrait = document.createElement('img');
       portrait.className = 'me-creature-portrait me-actor-portrait';
       portrait.alt = actorName;
-      if (actorId != null) portrait.src = getCreaturePortraitUrl(actorId, !!actor.shiny);
+      const actorPortraitUrl = getActorPortraitUrl(actor, actorId, !!actor.shiny);
+      if (actorPortraitUrl) portrait.src = actorPortraitUrl;
       actorRow.appendChild(portrait);
 
       const meta = document.createElement('span');
@@ -12152,6 +12623,12 @@ function refreshEditTab() {
         ? t('mods.mapEditor.placedCreatureTag', 'placed creature')
         : t('mods.mapEditor.mapActorTag', 'map actor');
       meta.append(nameSpan, tagSpan);
+      if (editorAlliedTiles.has(tileIndex)) {
+        const allyTag = document.createElement('span');
+        allyTag.className = 'me-sprite-added-tag me-ally-tag';
+        allyTag.textContent = t('mods.mapEditor.allyCreatureTag', 'ally');
+        meta.appendChild(allyTag);
+      }
       actorRow.appendChild(meta);
 
       const isEditingCreature = editorState.editingCreatureTileIndex === tileIndex;
@@ -12917,52 +13394,129 @@ function buildInspectorContent() {
 
   const exportTitle = document.createElement('div');
   exportTitle.className = 'me-section-title';
-  exportTitle.textContent = t('mods.mapEditor.exportTitle', 'Export JSON');
+  exportTitle.textContent = t('mods.mapEditor.fileManagementTitle', 'File Management');
   exportSection.appendChild(exportTitle);
 
-  const exportQuestRow = document.createElement('div');
-  exportQuestRow.className = 'me-row';
-  const exportQuestBtn = createPanelButton(
-    t('mods.mapEditor.exportQuest', 'Copy export JSON'),
+  const exportMapRow = document.createElement('div');
+  exportMapRow.className = 'me-row';
+  const exportMapBtn = createPanelButton(
+    t('mods.mapEditor.exportMapJson', 'Export Map (JSON)'),
     async () => {
-      const payload = buildQuestRoomExport();
-      if (!payload) {
+      const bundle = buildFullMapExport();
+      if (!bundle) {
         setStatusMessage(t('mods.mapEditor.noRoom', 'No room loaded — open a map first.'), true);
         return;
       }
-      const ok = await copyTextToClipboard(JSON.stringify(payload, null, 2));
-      const villainCount = payload.battles?.[payload.roomKey]?.villains?.length || 0;
+      const json = JSON.stringify(bundle, null, 2);
+      const filename = `${bundle.roomId || 'map'}-${Date.now()}.json`;
+      const downloaded = downloadJsonFile(filename, bundle);
+      const copied = await copyTextToClipboard(json);
       setStatusMessage(
-        ok
+        downloaded || copied
           ? t(
-            'mods.mapEditor.exportQuestOk',
-            'Export copied ({roomKey}: battles + rooms + customBattle, {villains} villains).'
-          )
-            .replace('{roomKey}', String(payload.roomKey || ''))
-            .replace('{villains}', String(villainCount))
-          : t('mods.mapEditor.clipboardFail', 'Clipboard failed.'),
-        !ok
+            'mods.mapEditor.exportMapJsonOk',
+            'Map exported — downloaded{copiedSuffix}. Others can Import it, or merge questExport into assets/quests/*.json.'
+          ).replace('{copiedSuffix}', copied ? t('mods.mapEditor.exportMapJsonCopiedSuffix', ' and copied to clipboard') : '')
+          : t('mods.mapEditor.exportMapJsonFail', 'Could not export map JSON.'),
+        !downloaded && !copied
       );
-      logMapEditor('exportQuest', {
-        ok,
-        roomKey: payload.roomKey,
-        battleId: payload.battleId,
-        roomId: payload.rooms?.[payload.roomKey]?.roomId,
-        villains: villainCount
-      });
+      logMapEditor('exportMapJson', { downloaded, copied, roomId: bundle.roomId, hasQuestExport: !!bundle.questExport });
     },
     'me-btn me-btn-wide'
   );
-  exportQuestRow.appendChild(exportQuestBtn);
-  exportSection.appendChild(exportQuestRow);
+  exportMapRow.appendChild(exportMapBtn);
+  exportSection.appendChild(exportMapRow);
 
-  const exportQuestHint = document.createElement('div');
-  exportQuestHint.className = 'me-section-hint';
-  exportQuestHint.textContent = t(
-    'mods.mapEditor.exportQuestHint',
-    'Paste-ready like Spider Lair: battles.<id> → battles.json, rooms.<key> → rooms.json (incl. tileMutations), customBattle → Quests create() fields.'
+  const exportMapHint = document.createElement('div');
+  exportMapHint.className = 'me-section-hint';
+  exportMapHint.textContent = t(
+    'mods.mapEditor.exportMapHint',
+    'Downloads a full map JSON file and copies it to your clipboard. Others Import it below to load the exact same map; '
+    + 'or, to ship it as real quest content, merge its questExport.rooms/questExport.battles into assets/quests/*.json '
+    + '(see questExport._howto and questExport.customBattle._wireInQuests).'
   );
-  exportSection.appendChild(exportQuestHint);
+  exportSection.appendChild(exportMapHint);
+
+  const importMapPanel = document.createElement('div');
+  importMapPanel.className = 'me-import-map-panel';
+  importMapPanel.style.display = 'none';
+
+  const importMapTextarea = document.createElement('textarea');
+  importMapTextarea.className = 'me-input me-input-wide me-textarea';
+  importMapTextarea.placeholder = t('mods.mapEditor.importMapPlaceholder', 'Paste map JSON here…');
+  importMapPanel.appendChild(importMapTextarea);
+
+  const importMapActionsRow = document.createElement('div');
+  importMapActionsRow.className = 'me-row';
+
+  const importMapConfirmBtn = createPanelButton(
+    t('mods.mapEditor.importMapConfirm', 'Import'),
+    async () => {
+      const text = importMapTextarea.value.trim();
+      if (!text) {
+        setStatusMessage(t('mods.mapEditor.importMapJsonInvalid', 'Could not read that — not valid JSON.'), true);
+        return;
+      }
+      let bundle;
+      try {
+        bundle = JSON.parse(text);
+      } catch (e) {
+        setStatusMessage(t('mods.mapEditor.importMapJsonInvalid', 'Could not read that — not valid JSON.'), true);
+        return;
+      }
+      const payload = resolveMapImportPayload(bundle);
+      if (!payload) {
+        setStatusMessage(
+          t(
+            'mods.mapEditor.importMapJsonWrongFormat',
+            'That isn’t a map export Map Editor can import — paste the JSON from someone else’s "Export Map (JSON)".'
+          ),
+          true
+        );
+        return;
+      }
+      logMapEditor('importMapJson', { format: bundle.format, roomId: payload.roomId });
+      importMapPanel.style.display = 'none';
+      importMapTextarea.value = '';
+      await loadDomSession(payload);
+    },
+    'me-btn'
+  );
+
+  const importMapCancelBtn = createPanelButton(
+    t('mods.mapEditor.importMapCancel', 'Cancel'),
+    () => {
+      importMapPanel.style.display = 'none';
+      importMapTextarea.value = '';
+    },
+    'me-btn me-btn-muted'
+  );
+
+  importMapActionsRow.append(importMapConfirmBtn, importMapCancelBtn);
+  importMapPanel.appendChild(importMapActionsRow);
+
+  const importMapRow = document.createElement('div');
+  importMapRow.className = 'me-row';
+  const importMapToggleBtn = createPanelButton(
+    t('mods.mapEditor.importMapJson', 'Import Map (JSON)'),
+    () => {
+      const opening = importMapPanel.style.display === 'none';
+      importMapPanel.style.display = opening ? 'flex' : 'none';
+      if (opening) requestAnimationFrame(() => importMapTextarea.focus());
+    },
+    'me-btn me-btn-wide'
+  );
+  importMapRow.appendChild(importMapToggleBtn);
+  exportSection.appendChild(importMapRow);
+
+  const importMapHint = document.createElement('div');
+  importMapHint.className = 'me-section-hint';
+  importMapHint.textContent = t(
+    'mods.mapEditor.importMapHint',
+    'Paste a map JSON someone shared with you (from their "Export Map (JSON)" above) to load their exact map.'
+  );
+  exportSection.appendChild(importMapHint);
+  exportSection.appendChild(importMapPanel);
 
   mapPanel.appendChild(exportSection);
 
@@ -13032,13 +13586,21 @@ function buildInspectorContent() {
   loadBtn.id = 'map-editor-load-btn';
   loadBtn.style.display = 'none';
 
-  const clearSaveBtn = createPanelButton(
-    t('mods.mapEditor.clearSave', 'Clear save'),
-    () => {
+  const clearSaveBtn = document.createElement('button');
+  clearSaveBtn.type = 'button';
+  clearSaveBtn.className = 'me-btn me-btn-muted';
+  clearSaveBtn.id = 'map-editor-clear-save-btn';
+  clearSaveBtn.style.display = 'none';
+  attachInlineConfirm(clearSaveBtn, {
+    baseText: t('mods.mapEditor.clearSave', 'Clear save'),
+    confirmText: () => (getSelectedLocalSaveEntry()
+      ? t('mods.mapEditor.clearSaveConfirmInline', 'Confirm delete?')
+      : t('mods.mapEditor.clearSaveConfirmAllInline', 'Confirm delete ALL?')),
+    onConfirm: () => {
       const selectedEntry = getSelectedLocalSaveEntry();
       if (selectedEntry) {
         clearMapSession(selectedEntry.roomId, selectedEntry.save.id);
-      setStatusMessage(
+        setStatusMessage(
           tReplace(
             'mods.mapEditor.clearSaveNamedSuccess',
             { name: selectedEntry.save.name },
@@ -13051,11 +13613,8 @@ function buildInspectorContent() {
       if (!room?.id) return;
       clearMapSession(room.id);
       setStatusMessage(t('mods.mapEditor.clearSaveSuccess', 'Cleared all saves for this map.'));
-    },
-    'me-btn me-btn-muted'
-  );
-  clearSaveBtn.id = 'map-editor-clear-save-btn';
-  clearSaveBtn.style.display = 'none';
+    }
+  });
 
   sessionRow.append(saveBtn, loadBtn, clearSaveBtn);
   localSection.appendChild(sessionRow);
@@ -13368,17 +13927,17 @@ function handleBoardScopeChange() {
 }
 
 function abandonEditorBoardScope() {
-  discardEphemeralEditorDomState();
-  resetEditorEditsTracking();
-  clearEditorTileDomCache();
+  // Actually revert injected/hidden/replaced sprites and hitboxes in the live DOM before
+  // dropping tracking state — discardEphemeralEditorDomState()/resetEditorEditsTracking()
+  // alone only clear the *tracking arrays*, leaving stray editor DOM edits from the old
+  // room's tiles behind to mix with the newly loaded room's native sprites.
+  purgeAllEditorDomEdits();
   clearMapEditorCaches();
   mapEditorTestRoomSnapshot = null;
-  mapEditorTestNativeRoom = null;
-  mapEditorDomSessionSource = null;
-  endWorkshopMapSession();
   nativeSpritePlacementCache.clear();
   clearHitboxSnapshot();
-  clearBaseTilesSnapshot();
+  editorSessionChangeCount = 0;
+  notifyMapEditorOpenChanged();
   logMapEditor('abandonEditorBoardScope');
 }
 
@@ -13779,7 +14338,12 @@ function attachBoardListener() {
           markTileSelected(editorState.selectedTileIndex);
         }
       }
-      refreshInspector();
+      // Skip the full rebuild right after our own edit-triggered board write — it just
+      // happened and already reflects the change; rebuilding here only steals focus/scroll
+      // out from under whatever field the user is still typing in.
+      if (Date.now() >= suppressBoardListenerRefreshUntil) {
+        refreshInspector();
+      }
     }
   });
 }
@@ -14218,6 +14782,17 @@ function injectStyles() {
       height: 1px;
       pointer-events: none;
     }
+    #${PANEL_ID} .me-custom-sprite-separator {
+      grid-column: 1 / -1;
+      margin-top: 4px;
+      padding-top: 6px;
+      border-top: 1px solid rgba(255,255,255,0.15);
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--me-gold);
+    }
     #${PANEL_ID} .me-creature-preview {
       display: flex;
       align-items: center;
@@ -14603,9 +15178,6 @@ function injectStyles() {
       background: #f0f0f0;
       color: #666;
     }
-    #${PANEL_ID} .me-creature-form-actions {
-      margin-top: 2px;
-    }
     #${PANEL_ID} .me-sprite-meta {
       display: flex;
       flex-wrap: wrap;
@@ -14634,6 +15206,10 @@ function injectStyles() {
     #${PANEL_ID} .me-sprite-added-tag {
       font-size: 11px;
       color: #7EC699;
+    }
+    #${PANEL_ID} .me-ally-tag {
+      color: #61AFEF;
+      font-weight: 700;
     }
     #${PANEL_ID} .me-btn-danger {
       color: #E06C75;
@@ -14689,6 +15265,19 @@ function injectStyles() {
       width: 100%;
       min-width: 0;
       max-width: 100%;
+    }
+    #${PANEL_ID} .me-textarea {
+      min-height: 140px;
+      max-height: 320px;
+      font-family: monospace;
+      resize: vertical;
+      white-space: pre;
+    }
+    #${PANEL_ID} .me-import-map-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-top: 6px;
     }
     #${PANEL_ID} .me-row-full {
       width: 100%;
@@ -15086,8 +15675,8 @@ function ensurePanelDragListeners() {
     panelDragState.reset();
     document.body.style.userSelect = '';
   };
-  document.addEventListener('mousemove', panelDragMouseMoveHandler);
-  document.addEventListener('mouseup', panelDragMouseUpHandler);
+  document.addEventListener('mousemove', panelDragMouseMoveHandler, { passive: true });
+  document.addEventListener('mouseup', panelDragMouseUpHandler, { passive: true });
 }
 
 function ensurePanelResizeListeners() {
@@ -15142,10 +15731,10 @@ function ensurePanelResizeListeners() {
     document.body.style.userSelect = '';
     panelResizeState.reset();
   };
-  document.addEventListener('mousemove', panelResizeMouseMoveHandler);
-  document.addEventListener('mouseup', panelResizeMouseUpHandler);
-  document.addEventListener('pointermove', panelResizeMouseMoveHandler);
-  document.addEventListener('pointerup', panelResizeMouseUpHandler);
+  document.addEventListener('mousemove', panelResizeMouseMoveHandler, { passive: true });
+  document.addEventListener('mouseup', panelResizeMouseUpHandler, { passive: true });
+  document.addEventListener('pointermove', panelResizeMouseMoveHandler, { passive: true });
+  document.addEventListener('pointerup', panelResizeMouseUpHandler, { passive: true });
 }
 
 function teardownPanelDragListeners() {
@@ -15293,7 +15882,12 @@ function notifyMapEditorOpenChanged() {
 }
 
 function isMapEditorOpen() {
-  return editorState.open === true;
+  // Sandbox test (custom map test-play) and a loaded workshop/local-save map DOM session
+  // commonly run with the panel closed — callers like Quests.js's helper-suppression gate
+  // need all of these treated as "open" since the board is showing edited/custom content.
+  return editorState.open === true
+    || editorState.sandboxTestActive === true
+    || mapEditorDomSessionSource != null;
 }
 
 function openMapEditor() {
@@ -15443,6 +16037,7 @@ function refreshMapEditorPublicApi() {
     buildWholeMapExport,
     buildUnifiedMapExport,
     buildQuestRoomExport,
+    buildFullMapExport,
     buildNativeRoomExport,
     convertMapEditorV2ToNativeRoom,
     buildCustomBattleStubFromExport,
@@ -15467,6 +16062,7 @@ exports = {
   buildWholeMapExport,
   buildUnifiedMapExport,
   buildQuestRoomExport,
+  buildFullMapExport,
   buildNativeRoomExport,
   convertMapEditorV2ToNativeRoom,
   buildCustomBattleStubFromExport,

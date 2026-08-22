@@ -4,6 +4,61 @@
   },
   "notes": [
     {
+      "version": "4.8.11",
+      "changes": [
+        {
+          "mod": "Battle Helper",
+          "type": "changed",
+          "text": "Status log, help request list, and replies panels always expand to fill their card instead of shrinking to content. Status messages are colored green/orange/red for success/in-progress/error, and repeated consecutive messages stack into one line with a ×N counter. Map thumbnail icons enlarged to 50x50."
+        },
+        {
+          "mod": "Better Highscores",
+          "type": "fixed",
+          "text": "Leaderboard overlay no longer renders in front of the inventory and quest log icons in the top bar; it now only stacks above the battle board."
+        },
+        {
+          "mod": "Custom Battles",
+          "type": "added",
+          "text": "A registry of custom-PNG sprite reskins can now be placed as a villain or ally. The image swap reuses the base creature's own native sizing, facing, and idle/moving animation CSS, so movement animations render correctly without any custom positioning math."
+        },
+        {
+          "mod": "Custom Battles",
+          "type": "fixed",
+          "text": "Outfit/item sprite overrides no longer occasionally attach to the wrong element (a tile's own floor/wall decoration) when the underlying creature renders as a plain map-item instead of a normal creature outfit. Repeatedly re-applying a visual override could also feed back into itself and flood the console; it now only touches the DOM when something actually changed. Forced allies (non-removable custom allies) are now kept pinned to their assigned tile the same way villains already were, so dragging your own ally onto one no longer displaces it. A forced ally's nickname could briefly get misapplied to your own same-species creature during battle; it now only ever applies to the ally itself."
+        },
+        {
+          "mod": "Map Editor",
+          "type": "added",
+          "text": "Placed creatures can be marked to fight as an ally alongside the player instead of as a villain. Outfit ID field also accepts a creature name (e.g. \"Druid\") instead of just the numeric sprite ID. Import Map (JSON) lets you paste another map's export to load it directly, and Export Map (JSON) now produces one unified file (downloaded and copied to clipboard) covering both round-tripping and quest authoring. Creature picker has a \"Custom sprites\" section (separator at the bottom) for placing registry-defined custom reskins."
+        },
+        {
+          "mod": "Map Editor",
+          "type": "changed",
+          "text": "Toggling ally-placement tiles (allow-spawn overlay) is noticeably faster — it no longer redundantly re-runs the full sandbox reapply and hitbox mask sync a second time per click, and the overlay updates only the clicked tile instead of rebuilding every tile's overlay. Redundant \"Done\" button removed from creature editing. Deleting a local save now asks for inline confirmation instead of deleting immediately. Auto-save only fires after a handful of real edits, not on every panel close. Outfit sprite field only resolves a typed creature name once you finish typing instead of on every keystroke, so it can no longer briefly flash the wrong creature. Newly placed villains/allies default to maximum genes, and custom sprites default to level 50. Actor summary rows (portrait, name, and the tile-context line) show a custom-sprite creature's own name and art instead of its base species."
+        },
+        {
+          "mod": "Map Editor",
+          "type": "fixed",
+          "text": "Leaving a loaded workshop map, and toggling the allow-spawn overlay on rooms with no native actors, no longer crash the client. Room data layers (actors, floor-below decorations, blocked tiles) are now always sent to the game as sparse, present arrays instead of null-padded or missing ones. Loading a workshop map and then navigating to a different map no longer leaves a mix of old and new tiles on screen. Hitbox and Spawn Tile overlay checkboxes reset correctly when a new local/workshop map is loaded. Typing in the Outfit ID or Item ID field no longer scrolls the panel back to the top. Creatures marked to fight as an ally now stay allies after saving and reloading instead of reverting to villains. Quest helper markers (e.g. shopping reminders) no longer appear while testing a custom map. A random per-placement identifier was being included in the sandbox's \"did anything change\" check, causing constant unnecessary full board rebuilds during testing; that identifier is no longer considered."
+        },
+        {
+          "mod": "Quests",
+          "type": "added",
+          "text": "Added a new optional follow-up mission with a hidden custom battle encounter. Also added a couple of small hidden easter eggs scattered in the world."
+        },
+        {
+          "mod": "Quests",
+          "type": "changed",
+          "text": "Quest Log's Missions tab keeps a small gap below the last card instead of the list ending flush against the scroll area."
+        },
+        {
+          "mod": "Quests",
+          "type": "fixed",
+          "text": "Right-click Talk menu on board NPCs is now available whenever they are unlocked, not just when they have a pending quest action; the quest-action indicator icon still only appears when relevant. Water fishing now recognizes several additional water-tile sprite variants it previously missed."
+        }
+      ]
+    },
+    {
       "version": "4.8.10",
       "changes": [
         {

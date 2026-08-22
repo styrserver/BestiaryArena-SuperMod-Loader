@@ -148,6 +148,69 @@ function measureQuestsModalChromeHeight(dialog) {
   return chrome;
 }
 
+// ============================================================
+// Generic dialogue chunking: long NPC lines are split into separate chat
+// messages of 2-3 complete sentences each, sent one at a time with a short
+// delay between them, instead of dumping the whole paragraph at once.
+// ============================================================
+const DIALOGUE_CHUNK_DELAY_MS = 2000;
+
+function splitDialogueIntoSentences(text) {
+  if (!text) return [];
+  const trimmed = String(text).trim();
+  if (!trimmed) return [];
+  // Sentence end = ./!/? optionally followed by a closing quote, then whitespace.
+  const matches = trimmed.match(/[^.!?]+[.!?]+['"’”]?(?:\s+|$)/g);
+  if (!matches) return [trimmed];
+  return matches.map((s) => s.trim()).filter(Boolean);
+}
+
+function chunkDialogueSentences(sentences) {
+  const n = sentences.length;
+  if (n === 0) return [];
+  if (n <= 3) return [sentences.join(' ')];
+
+  // Group into chunks of 2-3 sentences, never leaving a lone 1-sentence chunk.
+  const full = Math.floor(n / 3);
+  const remainder = n % 3;
+  let sizes;
+  if (remainder === 0) {
+    sizes = new Array(full).fill(3);
+  } else if (remainder === 1) {
+    sizes = new Array(Math.max(full - 1, 0)).fill(3);
+    sizes.push(2, 2);
+  } else {
+    sizes = new Array(full).fill(3);
+    sizes.push(2);
+  }
+
+  const chunks = [];
+  let idx = 0;
+  sizes.forEach((size) => {
+    chunks.push(sentences.slice(idx, idx + size).join(' '));
+    idx += size;
+  });
+  return chunks;
+}
+
+function splitDialogueIntoChunks(text) {
+  return chunkDialogueSentences(splitDialogueIntoSentences(text));
+}
+
+// appendChunk(text) does the actual one-line DOM append. If the text splits
+// into multiple 2-3 sentence chunks, each later chunk is appended after an
+// additional DIALOGUE_CHUNK_DELAY_MS delay instead of all at once.
+function scheduleChunkedDialogue(appendChunk, text, delayMs = DIALOGUE_CHUNK_DELAY_MS) {
+  const chunks = splitDialogueIntoChunks(text);
+  if (chunks.length <= 1) {
+    appendChunk(text);
+    return;
+  }
+  chunks.forEach((chunk, i) => {
+    setTimeout(() => appendChunk(chunk), i * delayMs);
+  });
+}
+
 function getQuestsNpcChatContentWidth(dialog, dialogWidth) {
   const widgetBottom = dialog?.querySelector('.widget-bottom');
   if (widgetBottom) {
@@ -949,6 +1012,20 @@ function applyQuestRoomsFromAssets(roomsData) {
     }
   }
 
+  const rookieGuard = roomsData.alDeeRookieGuard;
+  if (rookieGuard) {
+    if (rookieGuard.portalRoomName) KATANA_QUEST_ROOM_NAME = rookieGuard.portalRoomName;
+    if (rookieGuard.portalTileIndex != null) KATANA_QUEST_PORTAL_TILE = rookieGuard.portalTileIndex;
+    if (rookieGuard.portalContextMenuLabel) KATANA_QUEST_PORTAL_CONTEXT_MENU_LABEL = rookieGuard.portalContextMenuLabel;
+    if (rookieGuard.battleRoomName) SEWERS_BATTLE_ROOM_NAME = rookieGuard.battleRoomName;
+    if (rookieGuard.battleRoomId) SEWERS_BATTLE_ROOM_ID = rookieGuard.battleRoomId;
+    if (rookieGuard.battleDisplayName) SEWERS_BATTLE_DISPLAY_NAME = rookieGuard.battleDisplayName;
+    if (rookieGuard.battleId) SEWERS_BATTLE_ID = rookieGuard.battleId;
+    if (rookieGuard.tileMutations && typeof rookieGuard.tileMutations === 'object') {
+      SEWERS_TILE_MUTATIONS = rookieGuard.tileMutations;
+    }
+  }
+
   const board = roomsData.boardNpcs;
   if (board) {
     if (board.santa) {
@@ -1328,6 +1405,7 @@ const QUEST_MISSION_IDS = [
   'king_letter_al_dee',
   'al_dee_fishing_gold',
   'al_dee_golden_rope',
+  'al_dee_rookie_guard',
   'king_monks_study',
   'costello_queen_banshees',
   'follower_of_zathroth',
@@ -1357,6 +1435,7 @@ const KING_MONKS_STUDY_MISSION = MISSION_BY_ID.king_monks_study;
 const KING_SCARAB_COIN_MISSION = MISSION_BY_ID.king_scarab_coin;
 const AL_DEE_FISHING_MISSION = MISSION_BY_ID.al_dee_fishing_gold;
 const AL_DEE_GOLDEN_ROPE_MISSION = MISSION_BY_ID.al_dee_golden_rope;
+const AL_DEE_ROOKIE_GUARD_MISSION = MISSION_BY_ID.al_dee_rookie_guard;
 const COSTELLO_QUEEN_BANSHEES_MISSION = MISSION_BY_ID.costello_queen_banshees;
 const FOLLOWER_OF_ZATHROTH_MISSION = MISSION_BY_ID.follower_of_zathroth;
 const MOTHER_OF_ALL_SPIDERS_MISSION = MISSION_BY_ID.mother_of_all_spiders;
@@ -1519,6 +1598,16 @@ let EKATRIX_BATTLE_DISPLAY_NAME = 'Ekatrix';
 let EKATRIX_BATTLE_ID = 'ekatrix';
 let EKATRIX_REQUIRED_ITEM_NAME = 'Stuffed Toad';
 let EKATRIX_TILE_MUTATIONS = null;
+
+// The Rookie Guard: portal on tile 109 in Katana Quest → Knarknaknork battle in Sewers.
+let KATANA_QUEST_ROOM_NAME = 'Katana Quest';
+let KATANA_QUEST_PORTAL_TILE = 109;
+let KATANA_QUEST_PORTAL_CONTEXT_MENU_LABEL = 'Teleport';
+let SEWERS_BATTLE_ROOM_NAME = 'Sewers';
+let SEWERS_BATTLE_ROOM_ID = 'rkswrs';
+let SEWERS_BATTLE_DISPLAY_NAME = 'Knarknaknork';
+let SEWERS_BATTLE_ID = 'sewers';
+let SEWERS_TILE_MUTATIONS = null;
 
 const KING_ARENA_RANKS = [];
 
@@ -2039,6 +2128,7 @@ function createNPCCooldownManager() {
     progressDragonmother: { accepted: false, completed: false },
     progressAlDeeFishing: { accepted: false, completed: false },
     progressAlDeeGoldenRope: { accepted: false, completed: false },
+    progressAlDeeRookieGuard: { accepted: false, completed: false, battleCompleted: false },
     progressMeetingWithTesha: { accepted: false, completed: false },
     progressScarabHunt: { accepted: false, completed: false },
     progressSerpentineTower: { accepted: false, completed: false, destroyFieldRuneTaken: false, putridChamberComplete: false },
@@ -2193,6 +2283,15 @@ function createNPCCooldownManager() {
   let demodrasNewGameUnsub = null;
   let demodrasCooldownPatchTimers = [];
   let demodrasCooldownPatchedLogged = false;
+
+  // The Rookie Guard (Al Dee: portal on tile 109 in Katana Quest → Sewers Knarknaknork battle)
+  let sewersPortalRightClickEnabled = false;
+  let sewersPortalBoardSubscription = null;
+  let sewersPortalContextMenu = null;
+  let playerEnteredSewersPortal = false;
+  let sewersBattle = null;
+  let sewersHitboxesApplied = false;
+  let sewersVisualRetryTimers = [];
 
   // Putrid Chamber (Serpentine Tower Quest: basement lever → custom battle)
   let playerUsedSerpentineLeverToPutridChamber = false;
@@ -3482,6 +3581,7 @@ function createNPCCooldownManager() {
     if (unitDef.itemSpriteId != null) unit.itemSpriteId = unitDef.itemSpriteId;
     if (unitDef.shiny != null) unit.shiny = !!unitDef.shiny;
     if (unitDef.awakened != null) unit.awakened = !!unitDef.awakened;
+    if (unitDef.customSpriteKey != null) unit.customSpriteKey = unitDef.customSpriteKey;
     if (equip) unit.equip = equip;
     return unit;
   }
@@ -4543,6 +4643,8 @@ function createNPCCooldownManager() {
   const QUEST_BOARD_ADDED_ATTR_EKATRIX = 'data-quests-ekatrix-portal';
   const QUEST_BOARD_ADDED_ATTR_EKATRIX_BATTLE = 'data-quests-ekatrix-added';
   const QUEST_BOARD_HIDDEN_TAG_EKATRIX = 'ekatrix-sewers';
+  const QUEST_BOARD_ADDED_ATTR_SEWERS = 'data-quests-sewers-added';
+  const QUEST_BOARD_HIDDEN_TAG_SEWERS = 'sewers-rookie-guard';
 
   function hideQuestBoardElement(element, options = {}) {
     const { tag = '1', clearDatasetKeys = [] } = options;
@@ -5500,7 +5602,7 @@ function createNPCCooldownManager() {
         }
         selectedCoreElement = productItem;
         setQuestItemSlotHighlighted(containerSlot, true);
-        const lines = [coreDef.name];
+        const lines = [/[.!?]$/.test(coreDef.name) ? coreDef.name : `${coreDef.name}.`];
         if (coreDef.description) lines.push(coreDef.description);
         if (count <= 0) lines.push('Not yet obtained.');
         coreInfo.textContent = lines.join('\n');
@@ -10603,26 +10705,27 @@ function createNPCCooldownManager() {
       
       // Function to add message to conversation
       function addMessageToConversation(sender, text, isKing = false) {
-        const messageP = document.createElement('p');
-        
+        const appendOne = (chunkText) => {
+          const messageP = document.createElement('p');
+          messageP.className = 'inline text-monster';
+          // King Tibianus messages use the same style as initial greeting;
+          // player messages use a lavender/purple color instead.
+          messageP.style.color = isKing ? 'rgb(135, 206, 250)' : 'rgb(200, 180, 255)';
+          messageP.textContent = sender + ': ' + chunkText;
+
+          messageContainer.appendChild(messageP);
+
+          // Scroll to bottom
+          setTimeout(() => {
+            messageContainer.scrollTop = messageContainer.scrollHeight;
+          }, 0);
+        };
+
         if (isKing) {
-          // King Tibianus messages use the same style as initial greeting
-          messageP.className = 'inline text-monster';
-          messageP.style.color = 'rgb(135, 206, 250)';
-          messageP.textContent = sender + ': ' + text;
+          scheduleChunkedDialogue(appendOne, text);
         } else {
-          // Player messages - same font style as King Tibianus, lavender/purple color
-          messageP.className = 'inline text-monster';
-          messageP.style.color = 'rgb(200, 180, 255)'; // Lavender/light purple color
-          messageP.textContent = sender + ': ' + text;
+          appendOne(text);
         }
-        
-        messageContainer.appendChild(messageP);
-        
-        // Scroll to bottom
-        setTimeout(() => {
-          messageContainer.scrollTop = messageContainer.scrollHeight;
-        }, 0);
       }
       
       // If the starter coin was already spent (no token in inventory), greet normally
@@ -12697,7 +12800,9 @@ function createNPCCooldownManager() {
         offeringFishingMission: false,
         awaitingAxeConfirm: false,
         offeringRopeMission: false,
-        awaitingRopeConfirm: false
+        awaitingRopeConfirm: false,
+        offeringRookieGuardMission: false,
+        awaitingRookieGuardConfirm: false
       };
 
       function isAlDeeLetterMissionCompleted() {
@@ -12716,26 +12821,27 @@ function createNPCCooldownManager() {
 
       // Function to add message to conversation
       function addMessageToConversation(sender, text, isAlDee = false) {
-        const messageP = document.createElement('p');
+        const appendOne = (chunkText) => {
+          const messageP = document.createElement('p');
+          messageP.className = 'inline text-monster';
+          // Al Dee messages use the same style as initial greeting;
+          // player messages use a lavender/purple color instead.
+          messageP.style.color = isAlDee ? 'rgb(135, 206, 250)' : 'rgb(200, 180, 255)';
+          messageP.textContent = sender + ': ' + chunkText;
+
+          messageContainer.appendChild(messageP);
+
+          // Scroll to bottom
+          setTimeout(() => {
+            messageContainer.scrollTop = messageContainer.scrollHeight;
+          }, 0);
+        };
 
         if (isAlDee) {
-          // Al Dee messages use the same style as initial greeting
-          messageP.className = 'inline text-monster';
-          messageP.style.color = 'rgb(135, 206, 250)';
-          messageP.textContent = sender + ': ' + text;
+          scheduleChunkedDialogue(appendOne, text);
         } else {
-          // Player messages - same font style as Al Dee, lavender/purple color
-          messageP.className = 'inline text-monster';
-          messageP.style.color = 'rgb(200, 180, 255)'; // Lavender/light purple color
-          messageP.textContent = sender + ': ' + text;
+          appendOne(text);
         }
-
-        messageContainer.appendChild(messageP);
-
-        // Scroll to bottom
-        setTimeout(() => {
-          messageContainer.scrollTop = messageContainer.scrollHeight;
-        }, 0);
       }
 
       // Add welcome message
@@ -13305,6 +13411,53 @@ function createNPCCooldownManager() {
             }
           }
 
+        // Handle Rookie Guard mission report-in (must be checked before other "yes" handlers)
+        if (lowerText.includes('yes') && alDeeChatState.awaitingRookieGuardConfirm) {
+          try {
+            const rookieGuardProgress = getMissionProgress(AL_DEE_ROOKIE_GUARD_MISSION);
+            if (rookieGuardProgress.battleCompleted) {
+              try {
+                await addQuestItem('Knarknaknork Soul Core', 1);
+                showQuestItemNotification('Knarknaknork Soul Core', 1);
+                console.log('[Quests Mod][Al Dee] Awarded Knarknaknork Soul Core for Rookie Guard mission completion');
+              } catch (error) {
+                console.error('[Quests Mod][Al Dee] Error awarding Knarknaknork Soul Core:', error);
+              }
+
+              setMissionProgress(AL_DEE_ROOKIE_GUARD_MISSION, { accepted: true, completed: true, battleCompleted: true });
+              console.log('[Quests Mod][Al Dee] Rookie Guard mission completed');
+
+              if (playerName) {
+                await saveKingTibianusProgress(playerName, getAllMissionProgress());
+                console.log('[Quests Mod][Al Dee] Rookie Guard mission progress saved to Firebase');
+              }
+
+              alDeeCooldown.queueResponse(
+                text,
+                AL_DEE_ROOKIE_GUARD_MISSION.complete.replace('Player', playerName),
+                addMessageToConversation,
+                'Al Dee'
+              );
+
+              alDeeChatState.awaitingRookieGuardConfirm = false;
+              return; // Exit early, don't show regular transcript response
+            } else {
+              // Player said yes but hasn't defeated Knarknaknork yet
+              alDeeCooldown.queueResponse(
+                text,
+                AL_DEE_ROOKIE_GUARD_MISSION.missingItem,
+                addMessageToConversation,
+                'Al Dee'
+              );
+
+              alDeeChatState.awaitingRookieGuardConfirm = false;
+              return;
+            }
+          } catch (error) {
+            console.error('[Quests Mod][Al Dee] Error handling Rookie Guard mission:', error);
+          }
+        }
+
         // Check for mission acceptance
         if (lowerText.includes('yes') && alDeeChatState.offeringFishingMission) {
           if (!isAlDeeLetterMissionCompleted()) {
@@ -13369,6 +13522,36 @@ function createNPCCooldownManager() {
               console.error('[Quests Mod][Al Dee] Error saving golden rope mission progress:', error);
             }
           }
+
+          return;
+        }
+
+        // Check for Rookie Guard mission acceptance
+        if (lowerText.includes('yes') && alDeeChatState.offeringRookieGuardMission) {
+          // Start the Rookie Guard mission
+          setMissionProgress(AL_DEE_ROOKIE_GUARD_MISSION, { accepted: true, completed: false, battleCompleted: false });
+
+          // Queue response with cooldown
+          alDeeCooldown.queueResponse(
+            text,
+            AL_DEE_ROOKIE_GUARD_MISSION.accept,
+            addMessageToConversation,
+            'Al Dee'
+          );
+
+          alDeeChatState.offeringRookieGuardMission = false;
+          alDeeChatState.awaitingRookieGuardConfirm = false;
+
+          if (playerName) {
+            try {
+              await saveKingTibianusProgress(playerName, getAllMissionProgress());
+              console.log('[Quests Mod][Al Dee] Rookie Guard mission accepted, progress saved to Firebase');
+            } catch (error) {
+              console.error('[Quests Mod][Al Dee] Error saving Rookie Guard mission progress:', error);
+            }
+          }
+
+          if (typeof updateSewersPortalState === 'function') updateSewersPortalState();
 
           return;
         }
@@ -13456,7 +13639,7 @@ function createNPCCooldownManager() {
           }
 
           // Al Dee's missions only (can be expanded in the future)
-          const AL_DEE_MISSIONS = [AL_DEE_FISHING_MISSION, AL_DEE_GOLDEN_ROPE_MISSION];
+          const AL_DEE_MISSIONS = [AL_DEE_FISHING_MISSION, AL_DEE_GOLDEN_ROPE_MISSION, AL_DEE_ROOKIE_GUARD_MISSION];
 
           async function currentAlDeeMission() {
             // Return the first incomplete mission, or null if all are completed
@@ -13471,6 +13654,11 @@ function createNPCCooldownManager() {
                 if (!hasShovel) {
                   continue; // Skip this mission if no Light Shovel
                 }
+              }
+
+              // Rookie Guard only opens up once the golden rope task is done
+              if (mission.id === AL_DEE_ROOKIE_GUARD_MISSION.id && !kingChatState.progressAlDeeGoldenRope.completed) {
+                continue;
               }
 
               if (!getMissionProgress(mission).completed) {
@@ -13540,6 +13728,17 @@ function createNPCCooldownManager() {
                     alDeeChatState.offeringRopeMission = false;
                     readyToHandIn = true;
                   }
+                } else if (activeMission.id === AL_DEE_ROOKIE_GUARD_MISSION.id) {
+                  const rookieGuardProgress = getMissionProgress(AL_DEE_ROOKIE_GUARD_MISSION);
+                  if (rookieGuardProgress.battleCompleted) {
+                    alDeeChatState.awaitingRookieGuardConfirm = true;
+                    alDeeChatState.awaitingAxeConfirm = false;
+                    alDeeChatState.awaitingRopeConfirm = false;
+                    alDeeChatState.offeringFishingMission = false;
+                    alDeeChatState.offeringRopeMission = false;
+                    alDeeChatState.offeringRookieGuardMission = false;
+                    readyToHandIn = true;
+                  }
                 }
               } catch (error) {
                 console.error('[Quests Mod][Al Dee] Error checking mission hand-in items:', error);
@@ -13551,14 +13750,21 @@ function createNPCCooldownManager() {
               responseText = strings.missionPrompt;
               alDeeChatState.awaitingAxeConfirm = false;
               alDeeChatState.awaitingRopeConfirm = false;
+              alDeeChatState.awaitingRookieGuardConfirm = false;
 
               // Set appropriate offering flag based on mission
               if (activeMission.id === AL_DEE_FISHING_MISSION.id) {
                 alDeeChatState.offeringFishingMission = true;
                 alDeeChatState.offeringRopeMission = false;
+                alDeeChatState.offeringRookieGuardMission = false;
               } else if (activeMission.id === AL_DEE_GOLDEN_ROPE_MISSION.id) {
                 alDeeChatState.offeringRopeMission = true;
                 alDeeChatState.offeringFishingMission = false;
+                alDeeChatState.offeringRookieGuardMission = false;
+              } else if (activeMission.id === AL_DEE_ROOKIE_GUARD_MISSION.id) {
+                alDeeChatState.offeringRookieGuardMission = true;
+                alDeeChatState.offeringFishingMission = false;
+                alDeeChatState.offeringRopeMission = false;
               }
             }
           }
@@ -13875,12 +14081,20 @@ function createNPCCooldownManager() {
     if (messageContainerId) messageContainer.id = messageContainerId;
 
     function addMessage(sender, text, isNpc) {
-      const messageP = document.createElement('p');
-      messageP.className = 'inline text-monster';
-      messageP.style.color = isNpc ? 'rgb(135, 206, 250)' : 'rgb(200, 180, 255)';
-      messageP.textContent = sender + ': ' + text;
-      messageContainer.appendChild(messageP);
-      setTimeout(() => { messageContainer.scrollTop = messageContainer.scrollHeight; }, 0);
+      const appendOne = (chunkText) => {
+        const messageP = document.createElement('p');
+        messageP.className = 'inline text-monster';
+        messageP.style.color = isNpc ? 'rgb(135, 206, 250)' : 'rgb(200, 180, 255)';
+        messageP.textContent = sender + ': ' + chunkText;
+        messageContainer.appendChild(messageP);
+        setTimeout(() => { messageContainer.scrollTop = messageContainer.scrollHeight; }, 0);
+      };
+
+      if (isNpc) {
+        scheduleChunkedDialogue(appendOne, text);
+      } else {
+        appendOne(text);
+      }
     }
 
     addMessage(npcName, welcomeMessage, true);
@@ -16137,9 +16351,15 @@ function createNPCCooldownManager() {
     if (questLogContainer.dataset.questsGridAutoRows === undefined) {
       questLogContainer.dataset.questsGridAutoRows = questLogContainer.style.gridAutoRows || '';
     }
+    if (questLogContainer.dataset.questsGridPaddingBottom === undefined) {
+      questLogContainer.dataset.questsGridPaddingBottom = questLogContainer.style.paddingBottom || '';
+    }
     // Fixed-height quest log stretches few Missions cards apart; pack them to the top.
     questLogContainer.style.alignContent = 'start';
     questLogContainer.style.gridAutoRows = 'max-content';
+    // Match the inter-card gap (gap-1 = 4px) below the last card too, so it doesn't
+    // sit flush against the scroll area's bottom edge.
+    questLogContainer.style.paddingBottom = '4px';
     lockNativeQuestLogListSize(questLogContainer);
   }
 
@@ -16156,6 +16376,12 @@ function createNPCCooldownManager() {
       delete questLogContainer.dataset.questsGridAutoRows;
     } else {
       questLogContainer.style.removeProperty('grid-auto-rows');
+    }
+    if (questLogContainer.dataset.questsGridPaddingBottom !== undefined) {
+      questLogContainer.style.paddingBottom = questLogContainer.dataset.questsGridPaddingBottom;
+      delete questLogContainer.dataset.questsGridPaddingBottom;
+    } else {
+      questLogContainer.style.removeProperty('padding-bottom');
     }
     lockNativeQuestLogListSize(questLogContainer);
   }
@@ -22931,6 +23157,806 @@ function createNPCCooldownManager() {
     console.log('[Quests Mod][Tile 47 Lonesome Dragon] System cleaned up');
   }
 
+  // ============================================================
+  // The Rookie Guard (Al Dee): portal on tile 109 in Katana Quest → Sewers (Knarknaknork)
+  // ============================================================
+  function getRookieGuardLogPrefix() {
+    return '[Quests Mod][The Rookie Guard]';
+  }
+
+  function createSewersBattleInstance(roomId) {
+    if (!window.CustomBattles) {
+      console.error(`${getRookieGuardLogPrefix()} CustomBattles still not available`);
+      return null;
+    }
+    const spawn = getHydratedQuestBattleSpawn(SEWERS_BATTLE_ID || 'sewers');
+    const villains = spawn.villains;
+    const tileRestrictions = {};
+    if (spawn.allowedTiles?.length) {
+      tileRestrictions.allowedTiles = spawn.allowedTiles;
+      tileRestrictions.message = spawn.allowedTilesMessage || 'Ally creatures can only be placed on the marked tiles!';
+    }
+    const config = {
+      name: SEWERS_BATTLE_DISPLAY_NAME || 'Knarknaknork',
+      roomId,
+      villains,
+      // Non-removable custom ally auto-placed during entry setup (e.g. Rookstayer).
+      allies: spawn.allies,
+      allyLimit: spawn.allyLimit ?? 3,
+      preventVillainMovement: spawn.preventVillainMovement !== false,
+      hideVillainSprites: spawn.hideVillainSprites !== false,
+      ...(Object.keys(tileRestrictions).length ? { tileRestrictions } : {}),
+      activationCheck: (isSandbox, inBattleArea) => {
+        return isSandbox && inBattleArea && playerEnteredSewersPortal;
+      },
+      victoryDefeat: {
+        onVictory: async () => {
+          console.log(`${getRookieGuardLogPrefix()} Knarknaknork defeated!`);
+          try {
+            await persistMissionProgress(AL_DEE_ROOKIE_GUARD_MISSION, {
+              accepted: true,
+              completed: false,
+              battleCompleted: true
+            });
+          } catch (error) {
+            console.error(`${getRookieGuardLogPrefix()} Error saving battleCompleted flag:`, error);
+          }
+        },
+        onDefeat: () => {},
+        onClose: () => {
+          cleanupSewersQuest();
+          setTimeout(() => navigateToKatanaQuest(), 100);
+        },
+        victoryTitle: 'Victory!',
+        defeatTitle: 'Defeat',
+        victoryMessage: getMissionDialogueLine(
+          AL_DEE_ROOKIE_GUARD_MISSION,
+          'battleVictory',
+          "Whatever it was, it's dead now. No Sword of Fury out there after all — but return to Al Dee with the news."
+        ),
+        defeatMessage: getMissionDialogueLine(
+          AL_DEE_ROOKIE_GUARD_MISSION,
+          'battleDefeat',
+          "Knarknaknork proved you weren't humble enough today."
+        ),
+        showItems: false,
+        items: []
+      }
+    };
+    return window.CustomBattles.create(config);
+  }
+
+  function initializeSewersBattle(roomId) {
+    if (window.CustomBattles) {
+      return createSewersBattleInstance(roomId);
+    }
+    return waitForCustomBattles({ logPrefix: getRookieGuardLogPrefix() }).then((api) => {
+      if (!api) return null;
+      return createSewersBattleInstance(roomId);
+    });
+  }
+
+  function formatSewersMutationOffsetCalc(px) {
+    const value = Number(px);
+    if (!Number.isFinite(value) || value === 0) return '';
+    const sign = value < 0 ? '-' : '';
+    return `calc(${sign}${Math.abs(value)}px * var(--zoomFactor))`;
+  }
+
+  function buildSewersMutationSpriteHTML(entry, mutationKey) {
+    const spriteId = entry?.spriteId;
+    if (spriteId == null) return '';
+    const cropX = entry.cropX != null ? entry.cropX : 0;
+    const cropY = entry.cropY != null ? entry.cropY : 0;
+    const cropped = entry.cropped ? 'true' : 'false';
+    const bankStyle = entry.bank != null ? ` --bank: ${entry.bank};` : '';
+    // Map Editor layer offsets (e.g. a torch flame nudged off its base sprite) — same
+    // right/bottom calc() the editor itself uses (Map_Editor.js applySpritePlacementToElement).
+    const rightCalc = formatSewersMutationOffsetCalc(entry.offsetX);
+    const bottomCalc = formatSewersMutationOffsetCalc(entry.offsetY);
+    const offsetStyle = `${rightCalc ? ` right: ${rightCalc};` : ''}${bottomCalc ? ` bottom: ${bottomCalc};` : ''}`;
+    return `<div class="sprite item relative id-${spriteId}" ${QUEST_BOARD_ADDED_ATTR_SEWERS}="1" data-quests-sewers-mutation-key="${mutationKey}" style="z-index: 1000;${bankStyle}${offsetStyle}"><div class="viewport"><img alt="${spriteId}" data-cropped="${cropped}" class="spritesheet" style="--cropX: ${cropX}; --cropY: ${cropY};"></div></div>`;
+  }
+
+  function applySewersTileMutations() {
+    const mutations = SEWERS_TILE_MUTATIONS;
+    if (!mutations || typeof mutations !== 'object') return;
+
+    const battle = sewersBattle;
+    const hadMask = battle?._placementHitboxMaskActive === true;
+    if (hadMask) battle.restorePlacementHitboxes?.();
+
+    let wroteHitboxes = false;
+    Object.entries(mutations).forEach(([tileKey, entry]) => {
+      const tileIndex = Number(tileKey);
+      if (!Number.isFinite(tileIndex) || !entry || typeof entry !== 'object') return;
+      const tile = getTileElement(tileIndex);
+
+      (entry.remove || []).forEach((spriteId) => {
+        if (spriteId == null || !tile) return;
+        tile.querySelectorAll(`.sprite.item.relative.id-${spriteId}`).forEach((sprite) => {
+          hideQuestBoardElement(sprite, { tag: QUEST_BOARD_HIDDEN_TAG_SEWERS });
+        });
+      });
+
+      // Keyed by tile+position (not by sprite id class), so a retry pass can't mistake
+      // an already-placed sprite for missing and stack a duplicate on top of it.
+      (entry.add || []).forEach((spriteEntry, spriteIndex) => {
+        const spriteId = spriteEntry?.spriteId;
+        if (spriteId == null || !tile) return;
+        const mutationKey = `${tileIndex}-${spriteIndex}`;
+        if (tile.querySelector(`[data-quests-sewers-mutation-key="${mutationKey}"]`)) return;
+        const wrap = document.createElement('div');
+        wrap.innerHTML = buildSewersMutationSpriteHTML(spriteEntry, mutationKey);
+        if (wrap.firstElementChild) tile.appendChild(wrap.firstElementChild);
+      });
+
+      if (Object.prototype.hasOwnProperty.call(entry, 'hitbox')) {
+        try {
+          const roomId = SEWERS_BATTLE_ROOM_ID;
+          const selected = globalThis.state?.board?.getSnapshot?.()?.context?.selectedMap?.selectedRoom
+            || globalThis.state?.selectedMap?.selectedRoom;
+          const utils = globalThis.state?.utils;
+          const roomRefs = [];
+          if (selected?.id === roomId) roomRefs.push(selected);
+          if (Array.isArray(utils?.ROOMS)) {
+            utils.ROOMS.forEach((room) => {
+              if (room?.id === roomId) roomRefs.push(room);
+            });
+          }
+          if (Array.isArray(utils?.REGIONS)) {
+            utils.REGIONS.forEach((region) => {
+              (region?.rooms || []).forEach((room) => {
+                if (room?.id === roomId) roomRefs.push(room);
+              });
+            });
+          }
+          roomRefs.forEach((room) => {
+            const data = room?.file?.data;
+            if (!data) return;
+            if (!Array.isArray(data.hitboxes)) data.hitboxes = [];
+            data.hitboxes[tileIndex] = entry.hitbox === true;
+            wroteHitboxes = true;
+          });
+        } catch (_) {}
+      }
+    });
+
+    if (wroteHitboxes) sewersHitboxesApplied = true;
+
+    if (battle?.refreshPlacementHitboxMaskFromLive) {
+      battle.refreshPlacementHitboxMaskFromLive(
+        () => playerEnteredSewersPortal
+      );
+    } else if (battle?.syncPlacementHitboxMask) {
+      battle.syncPlacementHitboxMask(() => playerEnteredSewersPortal);
+    }
+  }
+
+  function restoreSewersTileMutations() {
+    restoreQuestBoardElementsByTag(QUEST_BOARD_HIDDEN_TAG_SEWERS);
+    document.querySelectorAll(`[${QUEST_BOARD_ADDED_ATTR_SEWERS}="1"]`).forEach((el) => {
+      try { el.remove(); } catch (_) {}
+    });
+    sewersHitboxesApplied = false;
+  }
+
+  const SEWERS_VISUAL_RETRY_DELAYS_MS = [0, 50, 150, 300, 500, 800, 1200, 2000];
+
+  function clearSewersVisualRetries() {
+    sewersVisualRetryTimers.forEach((id) => clearTimeout(id));
+    sewersVisualRetryTimers = [];
+  }
+
+  // No live recolor pass needed — tileMutations bake the final sprite (e.g. 4609)
+  // directly, same as Ekatrix's own tile mutations do. Just place them.
+  function applySewersBattlefieldVisuals() {
+    if (!playerEnteredSewersPortal || !sewersBattle) return;
+    applySewersTileMutations();
+  }
+
+  function scheduleSewersBattlefieldVisuals() {
+    clearSewersVisualRetries();
+    applySewersBattlefieldVisuals();
+    SEWERS_VISUAL_RETRY_DELAYS_MS.forEach((delay) => {
+      if (delay <= 0) return;
+      sewersVisualRetryTimers.push(setTimeout(() => {
+        applySewersBattlefieldVisuals();
+      }, delay));
+    });
+  }
+
+  function restoreBoardSetupSewers() {
+    if (sewersBattle) {
+      sewersBattle.restoreBoardSetup();
+    }
+    restoreSewersTileMutations();
+  }
+
+  function cleanupSewersQuest() {
+    try {
+      removeCustomBattleStatusToast();
+      clearSewersVisualRetries();
+      playerEnteredSewersPortal = false;
+      restoreSewersTileMutations();
+      if (sewersBattle) {
+        sewersBattle.cleanup(restoreBoardSetupSewers, showQuestOverlays);
+        sewersBattle = null;
+        console.log(`${getRookieGuardLogPrefix()} Battle cleaned up`);
+      }
+    } catch (error) {
+      console.error(`${getRookieGuardLogPrefix()} Error cleaning up:`, error);
+    }
+  }
+
+  function setupSewersTileRestrictions() {
+    if (!sewersBattle) return;
+    sewersBattle.setupTileRestrictions(
+      () => playerEnteredSewersPortal,
+      NotificationService.createBattleToastCallback(getRookieGuardLogPrefix())
+    );
+    sewersBattle.setupAllyLimit?.(
+      () => playerEnteredSewersPortal,
+      NotificationService.createBattleToastCallback(getRookieGuardLogPrefix())
+    );
+  }
+
+  function navigateToKatanaQuest() {
+    try {
+      const roomId = getRoomIdByRoomName(KATANA_QUEST_ROOM_NAME);
+      if (!roomId) {
+        console.warn(`${getRookieGuardLogPrefix()} Katana Quest room not found`);
+        return;
+      }
+      globalThis.state.board.send({ type: 'selectRoomById', roomId });
+    } catch (error) {
+      console.error(`${getRookieGuardLogPrefix()} Error navigating to Katana Quest:`, error);
+    }
+  }
+
+  function setupSewersBattleInstance(battle) {
+    if (!battle) return false;
+    sewersBattle = battle;
+    sewersBattle.setup(
+      () => playerEnteredSewersPortal,
+      NotificationService.createBattleToastCallback(getRookieGuardLogPrefix())
+    );
+    sewersBattle.resetSandboxBattleState();
+    setupSewersTileRestrictions();
+    showCustomBattleStatusToast({
+      battleName: SEWERS_BATTLE_DISPLAY_NAME || 'Knarknaknork',
+      allyLimit: battle.config?.allyLimit ?? 3,
+      battle,
+      logPrefix: getRookieGuardLogPrefix()
+    });
+    // Puts the board into sandbox mode (required for activationCheck's isSandbox check)
+    // and spawns the custom villains onto the room tiles, with retries for remounts.
+    sewersBattle.scheduleEntryVillainSetup({
+      attemptDelays: [0, 100, 250, 500, 800, 1200],
+      isActiveCheck: () => playerEnteredSewersPortal,
+      onComplete: () => {
+        hideQuestOverlays();
+        hideHeroEditorButton();
+        // Tile mutations (decor swap) are a separate system from villain placement —
+        // they don't apply automatically from the create() config alone, so trigger
+        // them explicitly here, with retries in case the room DOM remounts right
+        // after navigation.
+        scheduleSewersBattlefieldVisuals();
+      }
+    });
+    return true;
+  }
+
+  function enterSewersPortal() {
+    let roomId = SEWERS_BATTLE_ROOM_ID || getRoomIdByRoomName(SEWERS_BATTLE_ROOM_NAME);
+    if (!roomId) roomId = getRoomIdByRoomName(SEWERS_BATTLE_ROOM_NAME);
+    if (!roomId) {
+      showToast({ message: 'The sewers could not be found.', logPrefix: getRookieGuardLogPrefix() });
+      return;
+    }
+
+    playerEnteredSewersPortal = true;
+    swordOfFurySignReader.resetRead();
+    if (sewersBattle) {
+      sewersBattle.cleanup(restoreBoardSetupSewers, showQuestOverlays);
+      sewersBattle = null;
+    }
+
+    const initResult = initializeSewersBattle(roomId);
+    if (initResult && initResult.then) {
+      initResult.then((battle) => {
+        if (!setupSewersBattleInstance(battle)) {
+          console.error(`${getRookieGuardLogPrefix()} Failed to initialize battle after waiting`);
+        }
+      }).catch((err) => console.error(`${getRookieGuardLogPrefix()} Error initializing battle:`, err));
+    } else if (!setupSewersBattleInstance(initResult)) {
+      console.error(`${getRookieGuardLogPrefix()} CustomBattles not available`);
+    }
+
+    globalThis.state.board.send({ type: 'selectRoomById', roomId });
+    showToast({ message: 'Stepping through the portal...', logPrefix: getRookieGuardLogPrefix() });
+  }
+
+  function closeSewersPortalContextMenu() {
+    if (sewersPortalContextMenu && sewersPortalContextMenu.closeMenu) {
+      sewersPortalContextMenu.closeMenu();
+    }
+    sewersPortalContextMenu = null;
+  }
+
+  function createSewersPortalContextMenu(x, y, anchorElement = null) {
+    closeSewersPortalContextMenu();
+    sewersPortalContextMenu = createContextMenu({
+      x,
+      y,
+      layout: 'center',
+      logPrefix: getRookieGuardLogPrefix(),
+      anchorElement: anchorElement || getTileElement(KATANA_QUEST_PORTAL_TILE),
+      buttons: [
+        {
+          text: KATANA_QUEST_PORTAL_CONTEXT_MENU_LABEL || 'Teleport',
+          width: '120px',
+          backgroundColor: '#2a4a2a',
+          color: '#4CAF50',
+          border: '1px solid #4CAF50',
+          hoverBackgroundColor: '#1a2a1a',
+          hoverBorderColor: '#66BB6A',
+          onClick: () => {
+            closeSewersPortalContextMenu();
+            enterSewersPortal();
+          }
+        }
+      ],
+      onClose: () => {
+        sewersPortalContextMenu = null;
+      }
+    });
+    return sewersPortalContextMenu;
+  }
+
+  function handleSewersPortalRightClickDocument(event) {
+    if (!shouldEnableSewersPortal()) return;
+    const tileEl = getTileElement(KATANA_QUEST_PORTAL_TILE);
+    if (!tileEl || !tileEl.contains(event.target)) return;
+
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    event.stopPropagation();
+
+    createSewersPortalContextMenu(event.clientX, event.clientY, tileEl);
+  }
+
+  function shouldEnableSewersPortal(boardContext = null) {
+    const progress = getMissionProgress(AL_DEE_ROOKIE_GUARD_MISSION);
+    if (!progress?.accepted || progress.completed || progress.battleCompleted) return false;
+    return isOnRoomByName(KATANA_QUEST_ROOM_NAME);
+  }
+
+  function updateSewersPortalState(boardContext = null, retryCount = 0) {
+    try {
+      // Piggyback on this same board subscription to keep the battle's tile decor
+      // alive across later remounts, not just the initial entry window.
+      if (playerEnteredSewersPortal && sewersBattle && isOnRoomByName(SEWERS_BATTLE_ROOM_NAME)) {
+        applySewersBattlefieldVisuals();
+      }
+
+      const shouldBeEnabled = shouldEnableSewersPortal(boardContext);
+      const tileEl = getTileElement(KATANA_QUEST_PORTAL_TILE);
+      if (shouldBeEnabled && !sewersPortalRightClickEnabled) {
+        document.addEventListener('contextmenu', handleSewersPortalRightClickDocument, true);
+        sewersPortalRightClickEnabled = true;
+      }
+      if (!shouldBeEnabled && sewersPortalRightClickEnabled) {
+        document.removeEventListener('contextmenu', handleSewersPortalRightClickDocument, true);
+        sewersPortalRightClickEnabled = false;
+        const el = getTileElement(KATANA_QUEST_PORTAL_TILE);
+        if (el) el.style.pointerEvents = '';
+        closeSewersPortalContextMenu();
+        return;
+      }
+      if (shouldBeEnabled && tileEl) {
+        tileEl.style.pointerEvents = 'auto';
+      } else if (shouldBeEnabled && !tileEl && retryCount < 5) {
+        setTimeout(() => updateSewersPortalState(
+          boardContext || globalThis.state?.board?.getSnapshot?.()?.context,
+          retryCount + 1
+        ), 200);
+      } else if (!shouldBeEnabled && tileEl) {
+        tileEl.style.pointerEvents = '';
+      }
+    } catch (e) {
+      console.error(`${getRookieGuardLogPrefix()} Error updating portal state:`, e);
+    }
+  }
+
+  function setupSewersPortalObserver() {
+    if (sewersPortalBoardSubscription) {
+      updateSewersPortalState();
+      return;
+    }
+    if (typeof globalThis === 'undefined' || !globalThis.state?.board?.subscribe) return;
+    sewersPortalBoardSubscription = globalThis.state.board.subscribe(({ context: boardContext }) => {
+      updateSewersPortalState(boardContext);
+    });
+    updateSewersPortalState(globalThis.state?.board?.getSnapshot()?.context);
+    console.log(`${getRookieGuardLogPrefix()} Board observer set up for ${KATANA_QUEST_ROOM_NAME || '(room pending)'}`);
+  }
+
+  function cleanupSewersPortalObserver() {
+    if (sewersPortalBoardSubscription) {
+      try {
+        sewersPortalBoardSubscription.unsubscribe();
+      } catch (e) {
+        console.warn(`${getRookieGuardLogPrefix()} Error unsubscribing from board:`, e);
+      }
+      sewersPortalBoardSubscription = null;
+    }
+  }
+
+  function cleanupSewersPortalSystem() {
+    closeSewersPortalContextMenu();
+    if (sewersPortalRightClickEnabled) {
+      document.removeEventListener('contextmenu', handleSewersPortalRightClickDocument, true);
+      const tileEl = getTileElement(KATANA_QUEST_PORTAL_TILE);
+      if (tileEl) tileEl.style.pointerEvents = '';
+      sewersPortalRightClickEnabled = false;
+    }
+    cleanupSewersPortalObserver();
+    try {
+      cleanupSewersQuest();
+    } catch (e) {
+      console.warn(`${getRookieGuardLogPrefix()} cleanupSewersQuest during teardown:`, e);
+    }
+    console.log(`${getRookieGuardLogPrefix()} System cleaned up`);
+  }
+
+  function needsAlDeeRookieGuardObserver() {
+    return isMissionAcceptedIncomplete(getMissionProgress(AL_DEE_ROOKIE_GUARD_MISSION));
+  }
+
+  // ============================================================
+  // Easter egg: right-clicking the Spike Sword prop in the Sewers (tile 42) makes it
+  // vanish in a puff of red sparkles — a nod to the real Sword of Fury's "disappearing" trick.
+  // ============================================================
+  const SPIKE_SWORD_TILE_INDEX = 42;
+  const SPIKE_SWORD_SPRITE_CLASS = 'id-3271';
+  const SPIKE_SWORD_VANISH_EFFECT_URL = 'https://bestiaryarena.com/assets/EFFECT/13.png';
+  const SPIKE_SWORD_VANISH_EFFECT_CLASS = 'quests-spike-sword-vanish-effect';
+  const SPIKE_SWORD_VANISH_FRAME_MS = 45;
+  let spikeSwordEasterEggRightClickEnabled = false;
+  let spikeSwordEasterEggBoardSubscription = null;
+
+  function getSpikeSwordSpriteElement() {
+    const tileEl = getTileElement(SPIKE_SWORD_TILE_INDEX);
+    if (!tileEl) return null;
+    return tileEl.querySelector(`.sprite.item.relative.${SPIKE_SWORD_SPRITE_CLASS}`);
+  }
+
+  function ensureSpikeSwordVanishEffectStyles() {
+    ensureQuestTileSuccessEffectStyles();
+    if (document.getElementById('quests-spike-sword-vanish-effect-styles')) return;
+    const style = document.createElement('style');
+    style.id = 'quests-spike-sword-vanish-effect-styles';
+    style.textContent = `
+      .${SPIKE_SWORD_VANISH_EFFECT_CLASS} {
+        position: absolute;
+        right: 0;
+        bottom: 0;
+        width: calc(32px * var(--zoomFactor, 1));
+        height: calc(32px * var(--zoomFactor, 1));
+        pointer-events: none;
+        z-index: 10005;
+        overflow: hidden;
+      }
+      .${SPIKE_SWORD_VANISH_EFFECT_CLASS} > img {
+        display: block;
+        width: 100%;
+        height: auto;
+        image-rendering: pixelated;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  function playSpikeSwordVanishEffect(tileElement) {
+    if (!tileElement) return;
+    ensureSpikeSwordVanishEffectStyles();
+
+    const viewport = document.createElement('div');
+    viewport.className = SPIKE_SWORD_VANISH_EFFECT_CLASS;
+
+    const img = document.createElement('img');
+    img.alt = '';
+    img.draggable = false;
+    img.className = 'pixelated';
+
+    const armAnimation = () => {
+      const frameWidth = img.naturalWidth || 32;
+      const frameCount = Math.max(1, Math.round((img.naturalHeight || frameWidth) / frameWidth));
+      const durationMs = frameCount * SPIKE_SWORD_VANISH_FRAME_MS;
+      // steps() does not accept CSS variables — set a literal step count inline
+      img.style.height = `calc(100% * ${frameCount})`;
+      img.style.animation = `quests-tile-success-effect-play ${durationMs}ms steps(${frameCount}, end) 1 forwards`;
+      setTimeout(() => {
+        if (viewport.parentNode) viewport.remove();
+      }, durationMs + 60);
+    };
+
+    if (img.complete && img.naturalHeight > 0) {
+      armAnimation();
+    } else {
+      img.addEventListener('load', armAnimation, { once: true });
+      img.addEventListener('error', () => {
+        console.warn('[Quests Mod][Spike Sword] Vanish effect image failed to load');
+        if (viewport.parentNode) viewport.remove();
+      }, { once: true });
+    }
+
+    img.src = SPIKE_SWORD_VANISH_EFFECT_URL;
+    viewport.appendChild(img);
+    tileElement.appendChild(viewport);
+  }
+
+  function handleSpikeSwordVanishRightClick(event) {
+    if (!areQuestHelpersEnabled() || !isOnRoomByName(SEWERS_BATTLE_ROOM_NAME)) return;
+    const swordEl = getSpikeSwordSpriteElement();
+    if (!swordEl || !swordEl.contains(event.target)) return;
+
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    event.stopPropagation();
+
+    const tileEl = getTileElement(SPIKE_SWORD_TILE_INDEX);
+    playSpikeSwordVanishEffect(tileEl);
+    swordEl.remove();
+    console.log('[Quests Mod][Spike Sword] The sword vanishes in a puff of red sparkles...');
+  }
+
+  function shouldEnableSpikeSwordEasterEgg(boardContext = null) {
+    return areQuestHelpersEnabled() && isOnRoomByName(SEWERS_BATTLE_ROOM_NAME);
+  }
+
+  function updateSpikeSwordEasterEggState(boardContext = null, retryCount = 0) {
+    try {
+      const shouldBeEnabled = shouldEnableSpikeSwordEasterEgg(boardContext);
+      if (shouldBeEnabled && !spikeSwordEasterEggRightClickEnabled) {
+        document.addEventListener('contextmenu', handleSpikeSwordVanishRightClick, true);
+        spikeSwordEasterEggRightClickEnabled = true;
+      }
+      if (!shouldBeEnabled && spikeSwordEasterEggRightClickEnabled) {
+        document.removeEventListener('contextmenu', handleSpikeSwordVanishRightClick, true);
+        spikeSwordEasterEggRightClickEnabled = false;
+        const swordEl = getSpikeSwordSpriteElement();
+        if (swordEl) swordEl.style.pointerEvents = '';
+        return;
+      }
+      const swordEl = getSpikeSwordSpriteElement();
+      if (shouldBeEnabled && swordEl) {
+        swordEl.style.pointerEvents = 'auto';
+      } else if (shouldBeEnabled && !swordEl && retryCount < 5) {
+        setTimeout(() => updateSpikeSwordEasterEggState(
+          boardContext || globalThis.state?.board?.getSnapshot?.()?.context,
+          retryCount + 1
+        ), 300);
+      }
+    } catch (e) {
+      console.error('[Quests Mod][Spike Sword] Error updating easter egg state:', e);
+    }
+  }
+
+  function setupSpikeSwordEasterEggObserver() {
+    if (spikeSwordEasterEggBoardSubscription) {
+      updateSpikeSwordEasterEggState();
+      return;
+    }
+    if (typeof globalThis === 'undefined' || !globalThis.state?.board?.subscribe) return;
+    spikeSwordEasterEggBoardSubscription = globalThis.state.board.subscribe(({ context: boardContext }) => {
+      updateSpikeSwordEasterEggState(boardContext);
+    });
+    updateSpikeSwordEasterEggState(globalThis.state?.board?.getSnapshot()?.context);
+  }
+
+  function cleanupSpikeSwordEasterEggSystem() {
+    if (spikeSwordEasterEggRightClickEnabled) {
+      document.removeEventListener('contextmenu', handleSpikeSwordVanishRightClick, true);
+      spikeSwordEasterEggRightClickEnabled = false;
+      const swordEl = getSpikeSwordSpriteElement();
+      if (swordEl) swordEl.style.pointerEvents = '';
+    }
+    if (spikeSwordEasterEggBoardSubscription) {
+      try {
+        spikeSwordEasterEggBoardSubscription.unsubscribe();
+      } catch (e) {
+        console.warn('[Quests Mod][Spike Sword] Error unsubscribing from board:', e);
+      }
+      spikeSwordEasterEggBoardSubscription = null;
+    }
+  }
+
+  // ============================================================
+  // Reusable factory: right-click a tile's decorative sprite to show a floating,
+  // classic-Tibia-style "You see a sign / You read: ..." text above it.
+  // Call createSignReaderSystem() once per sign, wire the returned handle's
+  // setupObserver/cleanupSystem into the usual observer lifecycle, resetRead()
+  // whenever the surrounding encounter is re-entered, and shouldEnable/getTiles
+  // into registerQuestTileHighlightSource for a "there's something to read here" glow.
+  // ============================================================
+  function createSignReaderSystem({ id, tileIndex, spriteSelector, lines, isRoomActive, durationMs = 4000 }) {
+    const logPrefix = `[Quests Mod][${id}]`;
+    const slug = String(id).toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    const textClass = `quests-sign-reader-${slug}-text`;
+    const styleId = `${textClass}-styles`;
+    let rightClickEnabled = false;
+    let boardSubscription = null;
+    let read = false;
+
+    function getSpriteElement() {
+      const tileEl = getTileElement(tileIndex);
+      if (!tileEl) return null;
+      return tileEl.querySelector(spriteSelector);
+    }
+
+    function ensureStyles() {
+      if (document.getElementById(styleId)) return;
+      const style = document.createElement('style');
+      style.id = styleId;
+      style.textContent = `
+        .${textClass} {
+          position: fixed;
+          transform: translate(-50%, -100%);
+          width: max-content;
+          max-width: none;
+          pointer-events: none;
+          z-index: 2147483647;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 2px;
+          user-select: none;
+        }
+        .${textClass} .quests-sign-reader-line {
+          display: block;
+          white-space: nowrap;
+          text-align: center;
+          font-size: 16px;
+          line-height: 1;
+          color: #66ff66;
+          text-shadow: -1px 0 #000, 1px 0 #000, 0 -1px #000, 0 1px #000;
+        }
+      `;
+      document.head.appendChild(style);
+    }
+
+    function showText(tileElement) {
+      if (!tileElement) return;
+      ensureStyles();
+      if (document.querySelector(`.${textClass}`)) return;
+
+      // Each tile div carries its own explicit z-index for the isometric layout, so a
+      // child positioned outside the tile's box can get visually covered by a neighboring
+      // tile with a higher z-index (its stacking context, not this element's own z-index,
+      // decides that). Mounting to document.body — same as the context-menu system does —
+      // escapes per-tile stacking entirely, positioned from the tile's actual screen rect.
+      const rect = tileElement.getBoundingClientRect();
+
+      const bubble = document.createElement('div');
+      bubble.className = `${textClass} pixel-font-16 revert-pixel-font-spacing`;
+      bubble.style.left = `${rect.left + rect.width / 2}px`;
+      bubble.style.top = `${rect.top - 6}px`;
+      bubble.innerHTML = lines.map((line) => `<span class="quests-sign-reader-line">${line}</span>`).join('');
+      document.body.appendChild(bubble);
+      setTimeout(() => {
+        if (bubble.parentNode) bubble.remove();
+      }, durationMs + 60);
+    }
+
+    function shouldEnable(boardContext = null) {
+      if (!areQuestHelpersEnabled()) return false;
+      if (typeof isRoomActive === 'function' && !isRoomActive(boardContext)) return false;
+      return true;
+    }
+
+    function handleRightClick(event) {
+      if (!shouldEnable()) return;
+      const spriteEl = getSpriteElement();
+      if (!spriteEl) return;
+      // The tile-highlight hitbox/overlay sits above the sprite (z-index 10001+) whenever
+      // the highlight glow is showing, so it — not the sprite — is the real event.target.
+      // Accept either a direct hit on the sprite, or any click on this same tile's own
+      // highlight overlay (never a neighboring tile's, hence the tileIndex match).
+      const clickedSprite = spriteEl.contains(event.target);
+      const clickedOwnHighlightOverlay = isQuestTileHighlightOverlay(event.target)
+        && event.target.closest('[id^="tile-index-"]') === getTileElement(tileIndex);
+      if (!clickedSprite && !clickedOwnHighlightOverlay) return;
+
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      event.stopPropagation();
+
+      showText(getTileElement(tileIndex));
+      console.log(`${logPrefix} ${lines.join(' / ')}`);
+
+      if (!read) {
+        read = true;
+        if (typeof refreshQuestTileHighlights === 'function') refreshQuestTileHighlights();
+      }
+    }
+
+    function updateState(boardContext = null, retryCount = 0) {
+      try {
+        const enabled = shouldEnable(boardContext);
+        if (enabled && !rightClickEnabled) {
+          document.addEventListener('contextmenu', handleRightClick, true);
+          rightClickEnabled = true;
+        }
+        if (!enabled && rightClickEnabled) {
+          document.removeEventListener('contextmenu', handleRightClick, true);
+          rightClickEnabled = false;
+          const spriteEl = getSpriteElement();
+          if (spriteEl) spriteEl.style.pointerEvents = '';
+          return;
+        }
+        const spriteEl = getSpriteElement();
+        if (enabled && spriteEl) {
+          spriteEl.style.pointerEvents = 'auto';
+        } else if (enabled && !spriteEl && retryCount < 5) {
+          setTimeout(() => updateState(
+            boardContext || globalThis.state?.board?.getSnapshot?.()?.context,
+            retryCount + 1
+          ), 300);
+        }
+      } catch (e) {
+        console.error(`${logPrefix} Error updating state:`, e);
+      }
+    }
+
+    function setupObserver() {
+      if (boardSubscription) {
+        updateState();
+        return;
+      }
+      if (typeof globalThis === 'undefined' || !globalThis.state?.board?.subscribe) return;
+      boardSubscription = globalThis.state.board.subscribe(({ context: boardContext }) => {
+        updateState(boardContext);
+      });
+      updateState(globalThis.state?.board?.getSnapshot()?.context);
+    }
+
+    function cleanupSystem() {
+      if (rightClickEnabled) {
+        document.removeEventListener('contextmenu', handleRightClick, true);
+        rightClickEnabled = false;
+        const spriteEl = getSpriteElement();
+        if (spriteEl) spriteEl.style.pointerEvents = '';
+      }
+      if (boardSubscription) {
+        try {
+          boardSubscription.unsubscribe();
+        } catch (e) {
+          console.warn(`${logPrefix} Error unsubscribing from board:`, e);
+        }
+        boardSubscription = null;
+      }
+    }
+
+    return {
+      tileIndex,
+      setupObserver,
+      cleanupSystem,
+      resetRead: () => { read = false; },
+      // Tile-highlight source active whenever the sign is right-clickable and unread.
+      shouldEnable: (boardContext) => shouldEnable(boardContext) && !read
+    };
+  }
+
+  const swordOfFurySignReader = createSignReaderSystem({
+    id: 'Sign',
+    tileIndex: 81,
+    spriteSelector: '.sprite.item.relative.id-2012',
+    lines: ['You see a sign.', 'You read: Only the humble may touch the Sword of Fury'],
+    isRoomActive: () => playerEnteredSewersPortal && !!sewersBattle && isOnRoomByName(SEWERS_BATTLE_ROOM_NAME)
+  });
+
   function shouldEnableSixthSealLevers(boardContext = null) {
     const progress = kingChatState.progressQueenBanshees;
     if (!progress?.accepted || progress.completed) return false;
@@ -23453,8 +24479,11 @@ function createNPCCooldownManager() {
     const letter = getMissionProgress(KING_LETTER_MISSION) || {};
     const fishing = getMissionProgress(AL_DEE_FISHING_MISSION) || {};
     const rope = getMissionProgress(AL_DEE_GOLDEN_ROPE_MISSION) || {};
+    const rookieGuard = getMissionProgress(AL_DEE_ROOKIE_GUARD_MISSION) || {};
     if (letter.completed && !fishing.accepted) return true;
     if (fishing.completed && !rope.accepted) return true;
+    if (rope.completed && !rookieGuard.accepted) return true;
+    if (rookieGuard.accepted && !rookieGuard.completed && rookieGuard.battleCompleted) return true;
     return false;
   }
 
@@ -23573,13 +24602,11 @@ function createNPCCooldownManager() {
   function markQuestAccessTile(tileElement) {
     if (!tileElement) return;
     tileElement.setAttribute(TILE_HIGHLIGHT_TILE_ATTR, '1');
-    tileElement.title = QUEST_ACCESS_TILE_TITLE;
   }
 
   function unmarkQuestAccessTile(tileElement) {
     if (!tileElement) return;
     tileElement.removeAttribute(TILE_HIGHLIGHT_TILE_ATTR);
-    tileElement.removeAttribute('title');
   }
 
   function ensureQuestTileHighlightStyles() {
@@ -23641,7 +24668,6 @@ function createNPCCooldownManager() {
     if (!tileElement.querySelector('.quests-tile-highlight-hitbox')) {
       const hitbox = document.createElement('div');
       hitbox.className = 'quests-tile-highlight-hitbox';
-      hitbox.title = QUEST_ACCESS_TILE_TITLE;
       hitbox.style.cssText = getQuestTileOverlayBoxStyle([
         'pointer-events:auto',
         'cursor:' + QUEST_ACCESS_CURSOR,
@@ -23660,7 +24686,6 @@ function createNPCCooldownManager() {
     highlight.className = `${TILE_HIGHLIGHT_CLASS} pixelated`;
     highlight.src = getQuestItemsAssetUrl('Tile_Highlight_Effect.gif');
     highlight.alt = alt;
-    highlight.title = QUEST_ACCESS_TILE_TITLE;
     highlight.draggable = false;
     highlight.style.cssText = getQuestTileOverlayBoxStyle([
       'pointer-events:none',
@@ -23924,6 +24949,25 @@ function createNPCCooldownManager() {
       getTiles: () => getShovelHighlightTiles(),
       isAccessActive: () => getShovelHighlightTiles().length > 0,
       alt: 'Dig'
+    });
+
+    registerQuestTileHighlightSource({
+      getTiles: () => {
+        const tile = getTileElement(KATANA_QUEST_PORTAL_TILE);
+        return tile ? [tile] : [];
+      },
+      isAccessActive: shouldEnableSewersPortal,
+      alt: KATANA_QUEST_PORTAL_CONTEXT_MENU_LABEL
+    });
+
+    registerQuestTileHighlightSource({
+      getTiles: () => {
+        const tile = getTileElement(swordOfFurySignReader.tileIndex);
+        return tile ? [tile] : [];
+      },
+      isAccessActive: (boardContext) => swordOfFurySignReader.shouldEnable(boardContext),
+      alt: 'Read the sign',
+      showDuringPlacement: true
     });
   }
 
@@ -28949,7 +29993,6 @@ function createNPCCooldownManager() {
   }
 
   function openBoardNpcDialogueMenu(npcConfig, clientX, clientY, anchorElement = null) {
-    if (!isBoardNpcInteractable(npcConfig)) return;
     closeBoardNpcContextMenu(npcConfig.id);
     const menuObj = createContextMenu({
       x: clientX,
@@ -29141,9 +30184,9 @@ function createNPCCooldownManager() {
       dialogueIcon.style.display = isInteractable ? '' : 'none';
     }
     positionBoardNpcNameTag(nameTag, tileElement);
-    if (isInteractable) {
-      bindBoardNpcContextMenuHandlers(npcConfig, [nameTag, dialogueIcon]);
-    }
+    // Right-click menu is available on any placed (unlocked) NPC; isInteractable
+    // only controls whether the fight.png quest-action icon is shown.
+    bindBoardNpcContextMenuHandlers(npcConfig, [nameTag, dialogueIcon]);
 
     const existingOverlay = getBoardNpcOverlayElement(npcConfig, tileElement);
     if (existingOverlay) {
@@ -29251,9 +30294,7 @@ function createNPCCooldownManager() {
         overlay.appendChild(gif);
       }
     }
-    if (isInteractable) {
-      bindBoardNpcContextMenuHandlers(npcConfig, [overlay]);
-    }
+    bindBoardNpcContextMenuHandlers(npcConfig, [overlay]);
 
     tileElement.setAttribute(TILE_HIGHLIGHT_TILE_ATTR, '1');
     tileElement.removeAttribute('title');
@@ -29710,6 +30751,12 @@ function createNPCCooldownManager() {
     cleanupTile76JakundafSystem();
     // Cleanup Tile 47 Lonesome Dragon system
     cleanupTile47LonesomeDragonSystem();
+    // Cleanup Rookie Guard Sewers portal system
+    cleanupSewersPortalSystem();
+    // Cleanup Spike Sword easter egg system
+    cleanupSpikeSwordEasterEggSystem();
+    // Cleanup Sign easter egg system
+    swordOfFurySignReader.cleanupSystem();
 
     // Cleanup water fishing system
     cleanupWaterFishingSystem();
@@ -29998,6 +31045,10 @@ function createNPCCooldownManager() {
     // Shared board NPC overlays (Al Dee Rat Plague, Santa, Svenson, Rookstayer, Dane).
     // Must always run — unlock checks are per-NPC inside updateAllBoardNpcStates.
     setupApprenticeShengNpcObserver();
+    // Spike Sword easter egg — not tied to any mission's accept state, must always run.
+    setupSpikeSwordEasterEggObserver();
+    // Sign easter egg — not tied to any mission's accept state, must always run.
+    swordOfFurySignReader.setupObserver();
 
     if (needsHoneyflowerObserver()) {
       setupHoneyflowerTileObserver();
@@ -30017,6 +31068,9 @@ function createNPCCooldownManager() {
     }
     if (needsDragonmotherObserver()) {
       setupTile47LonesomeDragonObserver();
+    }
+    if (needsAlDeeRookieGuardObserver()) {
+      setupSewersPortalObserver();
     }
     if (needsQueenBansheesSealObservers()) {
       setupSevenSealsRoomObserver();

@@ -107,6 +107,10 @@
   let modDisposed = false;
   let overlayPositionHandler = null;
   const OVERLAY_EDGE_GAP_PX = 9;
+  // Native board layers use z-index 0-99 and the floating HUD navbar (inventory,
+  // quest log) is .z-floatingHud at z-index 120. Stay above the board but below
+  // that navbar so this overlay never covers inventory/quest-log icons.
+  const BETTER_HIGHSCORES_Z_INDEX = 100;
 
   function saveSettings() {
     modSettings = normalizeSettings(modSettings);
@@ -227,7 +231,7 @@
       display: 'inline-block',
       width: 'fit-content',
       height: 'fit-content',
-      zIndex: '999999',
+      zIndex: String(BETTER_HIGHSCORES_Z_INDEX),
       pointerEvents: 'auto'
     };
   }
@@ -284,7 +288,7 @@
       visibility: '',
       transform: getContainerTransform(),
       transformOrigin: getContainerTransformOrigin(),
-      zIndex: '999999',
+      zIndex: String(BETTER_HIGHSCORES_Z_INDEX),
       pointerEvents: 'auto'
     };
 
@@ -773,7 +777,7 @@
       color: 'white',
       fontFamily: "'Courier New', monospace",
       fontSize: '11px',
-      zIndex: '999999',
+      zIndex: String(BETTER_HIGHSCORES_Z_INDEX),
       display: 'inline-flex',
       alignItems: 'center',
       justifyContent: 'flex-start',
@@ -2525,8 +2529,10 @@
     const wrapper = document.createElement('div');
     wrapper.className = 'better-highscores-container';
     applyContainerStyles(wrapper);
-    // Ensure wrapper has highest z-index to always be on top
-    wrapper.style.zIndex = UI_CONFIG.CONTAINER_STYLE.zIndex || '999999';
+    // Stay above the board (native board layers top out at z-99) but below the
+    // native floating HUD navbar (.z-floatingHud, z-index 120) so this never
+    // covers the inventory/quest-log icons in the top bar.
+    wrapper.style.zIndex = UI_CONFIG.CONTAINER_STYLE.zIndex || String(BETTER_HIGHSCORES_Z_INDEX);
     
     // Create background div with opacity
     const backgroundDiv = document.createElement('div');

@@ -63,6 +63,125 @@ if (window.CustomBattles) {
             };
         }
 
+        // Custom-PNG sprites placeable as a piece's visual (like Quests.js's Weakened
+        // Ghazbaran, generalized). Add an entry here to make it selectable in the Map
+        // Editor's creature picker under the "Custom sprites" separator — no other
+        // wiring needed. Files live under /assets/quests/.
+        //
+        // The native game renders outfit/item art via CSS `content: url(...)` on the
+        // .spritesheet element, sized/positioned entirely through --size/--sWidth/--sHeight
+        // custom properties and a shared `homogeneous-transition` keyframe (just
+        // `transform: translateY(-100%)`, which — because percentages are relative to the
+        // element's OWN box, not the viewport — lands exactly on each row once combined
+        // with steps(N)). We don't reimplement any of that: we only override which image
+        // `content: url()` loads, reusing 100% of the native sizing/facing/animation
+        // machinery untouched. That means idleUrl/movingUrl MUST be laid out exactly like
+        // the base creature's own OUTFIT/ITEM asset (same column count = facings, same row
+        // count = movingFrameRows) or the reused native CSS will crop/step it wrong.
+        let cachedCustomSpriteExtensionBaseUrl = null;
+        const CUSTOM_MAP_SPRITES = [
+            {
+                key: 'weakened-ghazbaran',
+                name: 'Weakened Ghazbaran',
+                baseGameId: 65, // Dragon — same base creature Quests.js uses for this fight
+                idleUrl: 'ghaz-idle.png',
+                portraitUrl: 'ghaz-icon.gif', // dedicated single-frame icon for portraits/picker cards
+                movingUrl: 'ghaz-moving.png',
+                movingFrameRows: 8,
+                movingFrameDurationMs: 2400 // matches Dragon's own native .outfit.id-34.moving timing
+            },
+            {
+                key: 'kraknaknorks-demon',
+                name: "Kraknaknork's Demon",
+                baseGameId: 92, // Beer Barrel
+                idleUrl: "Kraknaknork's Demon.png"
+            }
+        ];
+
+        function getCustomSpriteAssetUrl(filename) {
+            const imagePath = '/assets/quests/' + filename;
+            const constructUrl = (base, path) => {
+                const normalizedBase = base.endsWith('/') ? base : base + '/';
+                const normalizedPath = path.startsWith('/') ? path.substring(1) : path;
+                return normalizedBase + normalizedPath;
+            };
+            if (cachedCustomSpriteExtensionBaseUrl) {
+                return constructUrl(cachedCustomSpriteExtensionBaseUrl, imagePath);
+            }
+            try {
+                const api = window.browserAPI || window.chrome || window.browser;
+                if (api?.runtime?.id && api.runtime.id !== 'invalid' && api.runtime.getURL) {
+                    const url = api.runtime.getURL(imagePath);
+                    if (url?.includes('://') && !url.includes('://invalid')) {
+                        const baseUrlMatch = url.match(/^(chrome-extension|moz-extension):\/\/[^/]+\//);
+                        if (baseUrlMatch) cachedCustomSpriteExtensionBaseUrl = baseUrlMatch[0];
+                        return url;
+                    }
+                }
+            } catch (error) {
+                console.warn('[Custom Battles] Error getting URL from browser API:', error);
+            }
+            if (typeof window !== 'undefined' && window.BESTIARY_EXTENSION_BASE_URL) {
+                cachedCustomSpriteExtensionBaseUrl = window.BESTIARY_EXTENSION_BASE_URL;
+                return constructUrl(cachedCustomSpriteExtensionBaseUrl, imagePath);
+            }
+            return imagePath;
+        }
+
+        function getCustomSpriteDef(key) {
+            if (key == null) return null;
+            return CUSTOM_MAP_SPRITES.find((def) => def.key === key) || null;
+        }
+
+        function getCustomSpriteOverlayClass(key) {
+            return `custom-battles-sprite-${key}`;
+        }
+
+        const customSpriteStylesInjected = new Set();
+
+        // Overrides ONLY which image `content: url()` loads for this piece's real .spritesheet
+        // element — everything else (--size/--sWidth/--sHeight, facing translate, the
+        // homogeneous-transition keyframe that drives steps()) is the base creature's own
+        // native CSS, completely untouched. idleUrl/movingUrl must match that creature's own
+        // asset layout (see the big comment on CUSTOM_MAP_SPRITES above).
+        function ensureCustomSpriteStyles(spriteDef) {
+            if (!spriteDef || customSpriteStylesInjected.has(spriteDef.key)) return;
+            const styleId = `custom-battles-sprite-style-${spriteDef.key}`;
+            let style = document.getElementById(styleId);
+            if (!style) {
+                style = document.createElement('style');
+                style.id = styleId;
+                document.head.appendChild(style);
+            }
+            const overlayClass = getCustomSpriteOverlayClass(spriteDef.key);
+            const idleUrl = getCustomSpriteAssetUrl(spriteDef.idleUrl).replace(/"/g, '\\"');
+
+            let movingRule = '';
+            if (spriteDef.movingUrl) {
+                const movingUrl = getCustomSpriteAssetUrl(spriteDef.movingUrl).replace(/"/g, '\\"');
+                const movingRows = Number(spriteDef.movingFrameRows) || 1;
+                const durationMs = Number(spriteDef.movingFrameDurationMs) || 900;
+                movingRule = movingRows > 1
+                    ? `
+      .${overlayClass}.moving .spritesheet {
+        content: url("${movingUrl}") !important;
+        animation: homogeneous-transition ${durationMs}ms steps(${movingRows}) infinite !important;
+      }`
+                    : `
+      .${overlayClass}.moving .spritesheet {
+        content: url("${movingUrl}") !important;
+      }`;
+            }
+
+            style.textContent = `
+      .${overlayClass} .spritesheet {
+        content: url("${idleUrl}") !important;
+      }
+      ${movingRule}
+    `;
+            customSpriteStylesInjected.add(spriteDef.key);
+        }
+
         const activeCustomBattles = new Set();
         let customBattleSetupSeq = 0;
         let globalAllyVillainGuardInstalled = false;
@@ -505,6 +624,7 @@ if (window.CustomBattles) {
                 this.outfitSpriteOverrideIntervalStopTimer = null;
                 this._outfitOverrideMissLogCount = 0;
                 this._outfitOverrideMissLogByKey = new Map();
+                this._namedPieceMissLogByKey = new Map();
                 this.geneIntegrityTimerIds = [];
                 this.preBattleGeneTamperCount = 0;
                 this.lastPreBattleGeneIntegrityCheckAt = 0;
@@ -1369,12 +1489,13 @@ if (window.CustomBattles) {
                     ...(villainConfig.shiny === true ? { shiny: true } : {}),
                     ...(villainConfig.outfitSpriteId != null ? { outfitSpriteId: villainConfig.outfitSpriteId } : {}),
                     ...(villainConfig.itemSpriteId != null ? { itemSpriteId: villainConfig.itemSpriteId } : {}),
+                    ...(villainConfig.customSpriteKey != null ? { customSpriteKey: villainConfig.customSpriteKey } : {}),
                     genes: villainConfig.genes || {
-                        hp: 1,
-                        ad: 1,
-                        ap: 1,
-                        armor: 1,
-                        magicResist: 1
+                        hp: 20,
+                        ad: 20,
+                        ap: 20,
+                        armor: 20,
+                        magicResist: 20
                     }
                 }, villainConfig);
             }
@@ -1405,12 +1526,13 @@ if (window.CustomBattles) {
                     ...(allyConfig.shiny === true ? { shiny: true } : {}),
                     ...(allyConfig.outfitSpriteId != null ? { outfitSpriteId: allyConfig.outfitSpriteId } : {}),
                     ...(allyConfig.itemSpriteId != null ? { itemSpriteId: allyConfig.itemSpriteId } : {}),
+                    ...(allyConfig.customSpriteKey != null ? { customSpriteKey: allyConfig.customSpriteKey } : {}),
                     genes: allyConfig.genes || {
-                        hp: 1,
-                        ad: 1,
-                        ap: 1,
-                        armor: 1,
-                        magicResist: 1
+                        hp: 20,
+                        ad: 20,
+                        ap: 20,
+                        armor: 20,
+                        magicResist: 20
                     }
                 };
             }
@@ -1451,7 +1573,12 @@ if (window.CustomBattles) {
                     try {
                         const boardContext = globalThis.state.board.getSnapshot().context;
                         const boardConfig = boardContext.boardConfig || [];
-                        const withoutForced = boardConfig.filter((entity) => !this.isForcedAllyEntity(entity));
+                        // Same eviction as removeOriginalVillains(): don't let a player piece
+                        // that landed on a forced ally's tile coexist with the forced ally there.
+                        const reservedTiles = new Set(this.getConfiguredCustomPieceTiles());
+                        const withoutForced = boardConfig.filter((entity) =>
+                            !this.isForcedAllyEntity(entity) && !reservedTiles.has(Number(entity.tileIndex))
+                        );
                         const forcedAllies = this.buildForcedAllyEntities();
                         globalThis.state.board.send({
                             type: 'setState',
@@ -1842,10 +1969,31 @@ if (window.CustomBattles) {
                 // Tile statue overlays are display-only; never treat them as the outfit shell.
                 if (sprite.dataset.customBattleItemOverlay === '1') return false;
 
-                if (sprite.dataset.customBattlePiece === '1') {
-                    if (sprite.dataset.customBattleCombatId !== String(piece.gameId)) {
-                        return false;
-                    }
+                // Only trust our own tagging as authoritative when it actually matches this
+                // piece. A tag for a DIFFERENT combat id is not proof this sprite belongs to
+                // someone else right now — React can reuse the same DOM node across different
+                // creatures (e.g. piece A dies on a tile, piece B steps onto that same tile
+                // next tick and gets the same node), leaving a stale tag behind. Falling
+                // through to the live nickname/data-name check below — instead of vetoing on
+                // the stale tag — is what lets a piece reclaim a node after a tile handoff
+                // like that.
+                //
+                // Still require the sprite to currently sit on THIS piece's configured tile,
+                // though: without that, a same-gameId player creature (e.g. a real Thalas,
+                // sharing Rookstayer's fallback gameId) that happens to land on a DOM node the
+                // game previously used for the custom ally elsewhere would inherit its stale
+                // tag and get skinned as the ally purely by coincidence of gameId, never having
+                // been anywhere near the ally's actual tile.
+                //
+                // CSS translate/position matching alone isn't enough mid-battle: creatures walk,
+                // so a player's own same-species unit can transiently pass through the exact
+                // screen coordinates of the ally's tile. Cross-check against the live boardConfig
+                // — the authoritative source of who actually occupies that tile right now — so a
+                // passer-by never gets claimed just for being in the right place for one tick.
+                if (sprite.dataset.customBattlePiece === '1'
+                    && sprite.dataset.customBattleCombatId === String(piece.gameId)
+                    && this.spriteIsOnConfiguredTile(sprite, piece.tileIndex)
+                    && this.tileConfigMatchesPiece(piece.tileIndex, piece)) {
                     if (piece.itemSpriteId != null
                         && sprite.dataset.customBattleItemId
                         && sprite.dataset.customBattleItemId !== String(piece.itemSpriteId)) {
@@ -1882,6 +2030,24 @@ if (window.CustomBattles) {
                 // (Outfit visual id often differs from combat gameId — do not require id-class.)
                 if (this.isBoardBattleActive()) return false;
                 return true;
+            }
+
+            // Authoritative alternative to DOM/CSS position matching: is the entity the game
+            // actually has assigned to this tile (per boardConfig) really this configured piece?
+            // A player's own same-species creature walking through the tile's screen position
+            // still won't have this piece's nickname in boardConfig, so it can't pass this check.
+            tileConfigMatchesPiece(tileIndex, piece) {
+                try {
+                    const tile = Number(tileIndex);
+                    if (!Number.isFinite(tile)) return false;
+                    const nickname = piece?.nickname && String(piece.nickname).trim();
+                    if (!nickname) return false;
+                    const boardConfig = globalThis.state?.board?.getSnapshot?.()?.context?.boardConfig || [];
+                    const entity = boardConfig.find((e) => Number(e?.tileIndex) === tile);
+                    return !!entity && String(entity.nickname || '').trim() === nickname;
+                } catch (_) {
+                    return false;
+                }
             }
 
             spriteIsOnConfiguredTile(sprite, tileIndex) {
@@ -2127,10 +2293,19 @@ if (window.CustomBattles) {
                 if (!isVillain) {
                     const expectedPrefix = String(pieceConfig.keyPrefix || '').trim();
                     const actorKey = String(actor?.key || actor?.entityTag || '').trim();
-                    if (expectedPrefix && actorKey) {
-                        return actorKey.startsWith(expectedPrefix);
+                    if (expectedPrefix && actorKey && actorKey.startsWith(expectedPrefix)) {
+                        return true;
                     }
-                    return this.isForcedAllyEntity(actor);
+                    if (this.isForcedAllyEntity(actor)) return true;
+
+                    // The species-fallback (resurrection recovery) is applied by the CALLER,
+                    // one level up, across the whole actor list at once — never here per-actor.
+                    // Doing it here would let this same fallback independently say "yes" for
+                    // BOTH the real ally actor and an unrelated same-species player actor in
+                    // the same pass, since neither actor's own strict identity is consulted by
+                    // the other's check. The caller can see the whole board and only adopts by
+                    // species when there is truly a single unclaimed candidate.
+                    return false;
                 }
 
                 // Setup: bind each piece to its spawn tile. Mid-battle actors move / revive
@@ -2164,8 +2339,34 @@ if (window.CustomBattles) {
                 let patched = 0;
                 namedPieces.forEach(({ piece, isVillain }) => {
                     const displayName = String(piece.nickname).trim();
-                    actors.forEach((actor) => {
-                        if (!this.actorMatchesNamedPiece(actor, piece, isVillain)) return;
+                    const expectedGameId = Number(piece.gameId);
+
+                    // Strict identity pass first (keyPrefix / forced-ally tag / setup tile
+                    // binding). If it finds our actor, that's the only one eligible — the
+                    // species fallback below never runs, so a player's own same-species
+                    // creature standing right next to our ally is never touched by it.
+                    let targets = actors.filter((actor) => this.actorMatchesNamedPiece(actor, piece, isVillain));
+
+                    if (!targets.length && !isVillain && this.isBoardBattleActive()) {
+                        // Resurrection can hand the revived actor a brand-new key/entityTag
+                        // that no longer matches our tagging, so the strict pass above misses
+                        // it — the nickname would otherwise never reapply and it reverts to
+                        // showing its raw species. Recover by species, but only when exactly
+                        // ONE actor of that species exists on the whole board right now: if a
+                        // player's own same-species creature (e.g. a real Thalas sharing this
+                        // ally's fallback gameId) is also present, this is ambiguous and must
+                        // be left alone rather than guessed.
+                        const sameSpeciesActors = actors.filter((a) =>
+                            a.villain !== true && this.getActorGameId(a) === expectedGameId
+                        );
+                        if (sameSpeciesActors.length === 1) {
+                            targets = sameSpeciesActors;
+                        }
+                    }
+
+                    let matchedAny = false;
+                    targets.forEach((actor) => {
+                        matchedAny = true;
                         const current = String(actor.name || actor.nickname || '').trim();
                         if (current === displayName) return;
 
@@ -2183,6 +2384,38 @@ if (window.CustomBattles) {
                             );
                         }
                     });
+
+                    // Auto-diagnostic (no manual console command needed): if this named piece
+                    // couldn't be matched to ANY actor despite same-species actors existing on
+                    // the board, it's the exact "resurrection dropped our identity tags"
+                    // failure mode — log everything needed to see why, throttled per piece.
+                    if (!matchedAny) {
+                        const sameSpecies = actors.filter((a) => this.getActorGameId(a) === Number(piece.gameId));
+                        if (sameSpecies.length) {
+                            const missKey = `${piece.gameId}|${piece.tileIndex}|${displayName}`;
+                            const now = Date.now();
+                            const lastAt = this._namedPieceMissLogByKey.get(missKey) || 0;
+                            if (now - lastAt > 3000) {
+                                this._namedPieceMissLogByKey.set(missKey, now);
+                                console.warn(
+                                    `[Custom Battles][${this.config.name || 'Battle'}] Named ${isVillain ? 'villain' : 'ally'} "${displayName}" has no matching actor right now — it will show its raw species instead until re-matched`,
+                                    {
+                                        gameId: piece.gameId,
+                                        keyPrefix: piece.keyPrefix,
+                                        isBoardBattleActive: this.isBoardBattleActive(),
+                                        candidateActors: sameSpecies.map((a) => ({
+                                            key: a?.key,
+                                            entityTag: a?.entityTag,
+                                            name: a?.name,
+                                            nickname: a?.nickname,
+                                            villain: a?.villain,
+                                            tileIndex: this.getActorTileIndex(a)
+                                        }))
+                                    }
+                                );
+                            }
+                        }
+                    }
                 });
 
                 if (patched) {
@@ -2231,6 +2464,7 @@ if (window.CustomBattles) {
             getOutfitSpriteOverrides() {
                 const hasVisualOverride = (pieceConfig) => {
                     if (!pieceConfig) return false;
+                    if (pieceConfig.customSpriteKey != null) return true;
                     if (pieceConfig.itemSpriteId != null) return true;
                     const outfitSpriteId = pieceConfig.outfitSpriteId;
                     return outfitSpriteId != null && String(outfitSpriteId) !== String(pieceConfig.gameId);
@@ -2250,6 +2484,7 @@ if (window.CustomBattles) {
                     String(piece?.gameId ?? ''),
                     String(piece?.outfitSpriteId ?? ''),
                     String(piece?.itemSpriteId ?? ''),
+                    String(piece?.customSpriteKey ?? ''),
                     piece?.shiny === true ? '1' : '0'
                 ].join('|');
             }
@@ -2281,15 +2516,24 @@ if (window.CustomBattles) {
             findOutfitSpritesForPiece(piece) {
                 const matched = new Set();
                 if (!piece || piece.gameId == null) return matched;
-                if (piece.outfitSpriteId == null && piece.itemSpriteId == null) return matched;
+                if (piece.outfitSpriteId == null && piece.itemSpriteId == null && piece.customSpriteKey == null) {
+                    return matched;
+                }
 
                 const combatGameId = String(piece.gameId);
-                const visualId = String(piece.itemSpriteId ?? piece.outfitSpriteId);
+                const visualId = String(piece.itemSpriteId ?? piece.outfitSpriteId ?? '');
                 const useItemVisual = piece.itemSpriteId != null;
+                const useCustomVisual = piece.customSpriteKey != null;
 
                 document.querySelectorAll(
                     `.sprite[data-custom-battle-piece="1"][data-custom-battle-combat-id="${combatGameId}"]`
                 ).forEach((sprite) => {
+                    if (useCustomVisual) {
+                        if (sprite.classList.contains(getCustomSpriteOverlayClass(piece.customSpriteKey))) {
+                            matched.add(sprite);
+                        }
+                        return;
+                    }
                     if (useItemVisual) {
                         if (sprite.dataset.customBattleItemId === visualId
                             || sprite.classList.contains(`id-${visualId}`)) {
@@ -2303,12 +2547,31 @@ if (window.CustomBattles) {
                     }
                 });
 
+                // Most creatures render on a .sprite.outfit shell. A few (Beer Barrel, Obelisk,
+                // Dead Tree, ...) render as a plain .sprite.item instead — matching ANY
+                // .sprite.item would also catch an unrelated native tile-decoration sprite
+                // sharing the same tile (e.g. the floor texture), so only widen the selector
+                // to the SPECIFIC native item-sprite id this creature is known to render as
+                // (looked up from the game's own monster metadata), never a blanket .sprite.item.
+                let customVisualNativeItemId = null;
+                if (useCustomVisual) {
+                    try {
+                        const spriteId = globalThis.state?.utils?.getMonster?.(piece.gameId)?.metadata?.spriteId;
+                        if (spriteId != null) customVisualNativeItemId = String(spriteId);
+                    } catch (_) {
+                        // noop
+                    }
+                }
+                const genericSelector = customVisualNativeItemId
+                    ? `.sprite.outfit, .sprite.item.id-${customVisualNativeItemId}:not([data-custom-battle-item-overlay="1"])`
+                    : '.sprite.outfit';
+
                 const nickname = piece.nickname && String(piece.nickname).trim();
                 if (nickname) {
                     const safeName = this.escapeCssAttrValue(nickname);
                     const nameSelector = useItemVisual
                         ? `[data-name="${safeName}"] .sprite.outfit, [data-name="${safeName}"] .sprite.item.id-${visualId}`
-                        : `[data-name="${safeName}"] .sprite.outfit`;
+                        : `[data-name="${safeName}"] ${genericSelector}`;
                     document.querySelectorAll(nameSelector).forEach((sprite) => {
                         matched.add(sprite);
                     });
@@ -2319,7 +2582,7 @@ if (window.CustomBattles) {
 
                 const tile = document.getElementById(`tile-index-${tileIndex}`);
                 if (tile) {
-                    tile.querySelectorAll('.sprite.outfit').forEach((sprite) => matched.add(sprite));
+                    tile.querySelectorAll(genericSelector).forEach((sprite) => matched.add(sprite));
                     if (useItemVisual) {
                         tile.querySelectorAll(
                             `.sprite.item.id-${visualId}[data-custom-battle-piece="1"], ` +
@@ -2331,25 +2594,27 @@ if (window.CustomBattles) {
                     }
                 }
 
-                const tileBottom = tile?.style?.bottom || '';
-                const tileRight = tile?.style?.right || '';
-                if (tileBottom && tileRight) {
-                    document.querySelectorAll('button[aria-roledescription="draggable"]').forEach((button) => {
-                        if (button.style.bottom !== tileBottom || button.style.right !== tileRight) return;
-                        button.querySelectorAll('.sprite.outfit').forEach((sprite) => matched.add(sprite));
-                    });
-                }
-
                 const col = tileIndex % 15;
                 const row = Math.floor(tileIndex / 15);
                 const expectedTranslate = `calc(${col * 32}px * var(--zoomFactor)) calc(${row * 32}px * var(--zoomFactor))`;
+
+                const tileBottom = tile?.style?.bottom || '';
+                const tileRight = tile?.style?.right || '';
+                document.querySelectorAll('button[aria-roledescription="draggable"]').forEach((button) => {
+                    const positionMatches = (tileBottom && tileRight
+                        && button.style.bottom === tileBottom && button.style.right === tileRight)
+                        || (button.style.translate || '').startsWith(expectedTranslate);
+                    if (!positionMatches) return;
+                    button.querySelectorAll(genericSelector).forEach((sprite) => matched.add(sprite));
+                });
+
                 document.querySelectorAll('.size-scaled-sprite').forEach((node) => {
                     if (node.id && node.id.startsWith('tile-index-') && node.id !== `tile-index-${tileIndex}`) {
                         return;
                     }
                     const translate = node.style.translate || '';
                     if (translate !== expectedTranslate && !translate.startsWith(expectedTranslate)) return;
-                    node.querySelectorAll('.sprite.outfit').forEach((sprite) => matched.add(sprite));
+                    node.querySelectorAll(genericSelector).forEach((sprite) => matched.add(sprite));
                 });
 
                 return matched;
@@ -2362,6 +2627,9 @@ if (window.CustomBattles) {
              */
             applyOutfitVisualToSprite(sprite, piece) {
                 if (!sprite?.classList || !piece) return false;
+                if (piece.customSpriteKey != null) {
+                    return this.applyCustomSpriteVisualToSprite(sprite, piece);
+                }
                 if (piece.itemSpriteId != null) {
                     return this.applyItemSpriteVisualToSprite(sprite, piece);
                 }
@@ -2474,6 +2742,50 @@ if (window.CustomBattles) {
                     removed++;
                 });
                 return removed;
+            }
+
+            /**
+             * Reverts any custom-sprite overlay (class + injected sheet div) whose piece is
+             * no longer configured — e.g. the creature was removed from the tile, or its
+             * customSpriteKey changed. Without this, an overlay tagged onto a sprite element
+             * stays there forever once added (mirrors Quests.js's removeWrongGhazOutfitOverlays).
+             */
+            removeStaleCustomSpriteOverlays(activeOverrides) {
+                const activePieces = activeOverrides || this.getOutfitSpriteOverrides();
+                CUSTOM_MAP_SPRITES.forEach((spriteDef) => {
+                    const overlayClass = getCustomSpriteOverlayClass(spriteDef.key);
+                    document.querySelectorAll(`.${overlayClass}`).forEach((sprite) => {
+                        const combatId = sprite.dataset.customBattleCombatId;
+                        const stillConfigured = activePieces.some((piece) => piece.customSpriteKey === spriteDef.key
+                            && String(piece.gameId) === combatId);
+                        if (stillConfigured) return;
+                        sprite.classList.remove(overlayClass);
+                    });
+                });
+            }
+
+            /**
+             * Swaps a registry custom-PNG sprite (CUSTOM_MAP_SPRITES) in for the native outfit
+             * image. Adds a scoped class that makes the injected CSS override `content: url()`
+             * on the piece's own .spritesheet element — sizing, facing, and the idle/moving
+             * animation are all still driven by the base creature's own native CSS, untouched.
+             */
+            applyCustomSpriteVisualToSprite(sprite, piece) {
+                if (!sprite?.classList || !piece || piece.customSpriteKey == null) return false;
+                const spriteDef = getCustomSpriteDef(piece.customSpriteKey);
+                if (!spriteDef) return false;
+
+                ensureCustomSpriteStyles(spriteDef);
+                this.tagCustomPieceSprite(sprite, piece);
+
+                // classList.add() re-serializes and re-sets the whole class attribute even when
+                // the token is already present (per spec, its "update steps" always run) — that
+                // fires a 'class' mutation record on every call, which is exactly the attribute
+                // the loop-causing MutationObserver watches. Only call it when actually needed.
+                const overlayClass = getCustomSpriteOverlayClass(spriteDef.key);
+                if (sprite.classList.contains(overlayClass)) return false;
+                sprite.classList.add(overlayClass);
+                return true;
             }
 
             applyItemSpriteVisualToSprite(sprite, piece) {
@@ -2599,6 +2911,7 @@ if (window.CustomBattles) {
 
             applyVillainOutfitSpriteOverrides() {
                 const overrides = this.getOutfitSpriteOverrides();
+                this.removeStaleCustomSpriteOverlays(overrides);
                 if (!overrides.length) return 0;
 
                 // Same combat+outfit+shiny group (e.g. 4 Minotaurs) → patch once.
@@ -2617,7 +2930,7 @@ if (window.CustomBattles) {
                 groups.forEach((group) => {
                     const primary = group[0];
                     const combatGameId = String(primary.gameId);
-                    const toId = String(primary.itemSpriteId ?? primary.outfitSpriteId);
+                    const toId = String(primary.customSpriteKey ?? primary.itemSpriteId ?? primary.outfitSpriteId);
                     const matched = new Set();
                     group.forEach((piece) => {
                         this.findOutfitSpritesForPiece(piece).forEach((sprite) => matched.add(sprite));
@@ -2648,8 +2961,11 @@ if (window.CustomBattles) {
                                 {
                                     tileIndex: owner.tileIndex,
                                     combatGameId,
-                                    to: owner.itemSpriteId != null ? `item.id-${toId}` : `id-${toId}`,
+                                    to: owner.customSpriteKey != null
+                                        ? `custom.${toId}`
+                                        : owner.itemSpriteId != null ? `item.id-${toId}` : `id-${toId}`,
                                     itemSprite: owner.itemSpriteId != null,
+                                    customSprite: owner.customSpriteKey != null,
                                     shiny: owner.shiny === true
                                 }
                             );
@@ -2666,6 +2982,7 @@ if (window.CustomBattles) {
                                     combatGameId,
                                     outfitSpriteId: primary.outfitSpriteId,
                                     itemSpriteId: primary.itemSpriteId,
+                                    customSpriteKey: primary.customSpriteKey,
                                     groupSize: group.length
                                 }
                             );
@@ -2698,6 +3015,7 @@ if (window.CustomBattles) {
                 }
                 this._outfitOverrideMissLogByKey.clear();
                 this._outfitOverrideMissLogCount = 0;
+                this._namedPieceMissLogByKey.clear();
             }
 
             scheduleVillainOutfitSpriteOverrides({ force = false } = {}) {
@@ -2876,7 +3194,20 @@ if (window.CustomBattles) {
 
                         const boardContext = globalThis.state.board.getSnapshot().context;
                         const boardConfig = compactBoardConfigEntries(boardContext.boardConfig);
-                        const configWithoutVillains = boardConfig.filter((entity) => !entity.villain && !this.isForcedAllyEntity(entity));
+                        // Also evict any player-placed piece already squatting on a tile reserved
+                        // for a configured villain/ally (e.g. tile restrictions failed to stop a
+                        // drop there before setup ran, or the piece was there from an earlier
+                        // board). Without this, both entities end up in boardConfig on the same
+                        // tile — the player's own creature and the forced piece coexisting there —
+                        // and the outfit-override system then paints the forced piece's look over
+                        // whichever DOM node wins, making the player's creature appear to "become"
+                        // the ally/villain even though it's still their own piece underneath.
+                        const reservedTiles = new Set(this.getConfiguredCustomPieceTiles());
+                        const configWithoutVillains = boardConfig.filter((entity) =>
+                            !entity.villain
+                            && !this.isForcedAllyEntity(entity)
+                            && !reservedTiles.has(Number(entity.tileIndex))
+                        );
                         const customVillains = this.config.villains.map((villainConfig) => {
                             console.log(`[Custom Battles][${this.config.name || 'Battle'}] Adding ${villainConfig.nickname || 'villain'} to tile ${villainConfig.tileIndex}`);
                             return this.createCustomVillainEntity(villainConfig);
@@ -3070,7 +3401,41 @@ if (window.CustomBattles) {
             }
 
             /**
-             * Prevent villain movement (keep them on their assigned tiles).
+             * Restore one displaced villain/forced-ally entity to its assigned tile + equip,
+             * given the key-prefix table and piece configs for its kind. Shared by
+             * preventVillainMovement() so villains and forced allies (e.g. Rookstayer) get
+             * identical pinning instead of only villains being protected from drag-swaps.
+             */
+            restorePinnedEntityIfMoved(entity, keyPrefixes, pieceConfigs, kindLabel) {
+                if (!entity.key) return { entity, changed: false };
+                for (let i = 0; i < keyPrefixes.length; i++) {
+                    const { prefix, tileIndex, hasTileInPrefix } = keyPrefixes[i];
+                    const matches = hasTileInPrefix
+                        ? entity.key.startsWith(prefix)
+                        : entity.key.startsWith(prefix) && entity.tileIndex === tileIndex;
+                    if (!matches) continue;
+
+                    const pieceConfig = pieceConfigs[i];
+                    const expectedEquip = pieceConfig.equip || null;
+                    const currentEquip = entity.equip !== undefined ? entity.equip : null;
+                    const equipRemovedOrChanged = (expectedEquip != null && currentEquip === null) ||
+                        (expectedEquip != null && (currentEquip?.gameId !== expectedEquip?.gameId || currentEquip?.tier !== expectedEquip?.tier || currentEquip?.stat !== expectedEquip?.stat));
+
+                    if (entity.tileIndex !== tileIndex) {
+                        console.log(`[Custom Battles][${this.config.name || 'Battle'}] ${kindLabel} moved from tile ${tileIndex} to ${entity.tileIndex} - restoring`);
+                        return { entity: { ...entity, tileIndex: tileIndex, equip: expectedEquip }, changed: true };
+                    }
+                    if (equipRemovedOrChanged) {
+                        console.log(`[Custom Battles][${this.config.name || 'Battle'}] ${kindLabel} equipment removed or changed - restoring`);
+                        return { entity: { ...entity, equip: expectedEquip }, changed: true };
+                    }
+                    break;
+                }
+                return { entity, changed: false };
+            }
+
+            /**
+             * Prevent villain (and forced-ally) movement — keep them on their assigned tiles.
              * If the board has vanilla or duplicate villains, run a full villain swap instead of stacking extras.
              */
             preventVillainMovement() {
@@ -3081,43 +3446,22 @@ if (window.CustomBattles) {
                     this.syncCustomVillainsIfNeeded();
                     return;
                 }
-                
+
                 try {
                     const boardContext = globalThis.state.board.getSnapshot().context;
                     const boardConfig = boardContext.boardConfig || [];
-                    
+
                     let needsRestore = false;
                     let restoredConfig = boardConfig.map(entity => {
-                        if (entity.key && entity.villain) {
-                            // Check each villain's expected tile and equipment
-                            for (let i = 0; i < this.villainKeyPrefixes.length; i++) {
-                                const { prefix, tileIndex, hasTileInPrefix } = this.villainKeyPrefixes[i];
-                                let matches = false;
-                                if (hasTileInPrefix) {
-                                    matches = entity.key.startsWith(prefix);
-                                } else {
-                                    matches = entity.key.startsWith(prefix) && entity.tileIndex === tileIndex;
-                                }
-                                
-                                if (matches) {
-                                    const villainConfig = this.config.villains[i];
-                                    const expectedEquip = villainConfig.equip || null;
-                                    const currentEquip = entity.equip !== undefined ? entity.equip : null;
-                                    const equipRemovedOrChanged = (expectedEquip != null && currentEquip === null) ||
-                                        (expectedEquip != null && (currentEquip?.gameId !== expectedEquip?.gameId || currentEquip?.tier !== expectedEquip?.tier || currentEquip?.stat !== expectedEquip?.stat));
-                                    if (entity.tileIndex !== tileIndex) {
-                                        console.log(`[Custom Battles][${this.config.name || 'Battle'}] Villain moved from tile ${tileIndex} to ${entity.tileIndex} - restoring`);
-                                        needsRestore = true;
-                                        return { ...entity, tileIndex: tileIndex, equip: expectedEquip };
-                                    }
-                                    if (equipRemovedOrChanged) {
-                                        console.log(`[Custom Battles][${this.config.name || 'Battle'}] Villain equipment removed or changed - restoring`);
-                                        needsRestore = true;
-                                        return { ...entity, equip: expectedEquip };
-                                    }
-                                    break;
-                                }
-                            }
+                        if (entity.villain) {
+                            const result = this.restorePinnedEntityIfMoved(entity, this.villainKeyPrefixes, this.config.villains, 'Villain');
+                            if (result.changed) needsRestore = true;
+                            return result.entity;
+                        }
+                        if (this.isForcedAllyEntity(entity)) {
+                            const result = this.restorePinnedEntityIfMoved(entity, this.allyKeyPrefixes, this.config.allies || [], 'Forced ally');
+                            if (result.changed) needsRestore = true;
+                            return result.entity;
                         }
                         return entity;
                     });
@@ -4712,7 +5056,7 @@ if (window.CustomBattles) {
                 }
 
                 this.setupForcedAllyWatch(activationCallback);
-                
+
                 // Set floor if configured (with delay to ensure board is ready)
                 if (this.config.floor !== undefined) {
                     setTimeout(() => {
@@ -5110,6 +5454,93 @@ if (window.CustomBattles) {
             return true;
         }
 
+        // Debug helper: inspect how the native game itself animates a creature's outfit
+        // sprite (background-image/size/position, @keyframes, --cropX/--cropY) so a custom
+        // sprite can reuse that exact mechanism instead of a hand-rolled one.
+        function logNativeOutfitSpriteDebugInfo(img, source) {
+            const outfitIdClass = [...img.classList].find((c) => /^id-\d+$/.test(c));
+            const outfitId = outfitIdClass ? outfitIdClass.replace('id-', '') : null;
+            const sprite = img.closest('.sprite.outfit') || img.closest('.sprite');
+            const cs = getComputedStyle(img);
+            const info = {
+                source,
+                outfitId,
+                backgroundImage: cs.backgroundImage,
+                backgroundSize: cs.backgroundSize,
+                backgroundPosition: cs.backgroundPosition,
+                animationName: cs.animationName,
+                animationDuration: cs.animationDuration,
+                animationTimingFunction: cs.animationTimingFunction,
+                cropXVar: img.style.getPropertyValue('--cropX'),
+                cropYVar: img.style.getPropertyValue('--cropY'),
+                dataCropped: img.getAttribute('data-cropped'),
+                spriteClasses: sprite ? sprite.className : null,
+                imgOuterHTML: img.outerHTML
+            };
+            console.log('[Custom Battles][AUTO-DEBUG] native outfit sprite info', info);
+
+            const matchedRules = [];
+            for (const sheet of document.styleSheets) {
+                let rules;
+                try {
+                    rules = sheet.cssRules;
+                } catch (e) {
+                    continue;
+                }
+                for (const rule of rules) {
+                    if (outfitId && rule.selectorText && rule.selectorText.includes(`id-${outfitId}`)) {
+                        matchedRules.push(rule.cssText);
+                    }
+                    if (rule.cssText && rule.cssText.startsWith('@keyframes') && cs.animationName !== 'none'
+                        && rule.cssText.includes(cs.animationName)) {
+                        matchedRules.push(rule.cssText);
+                    }
+                }
+            }
+            console.log('[Custom Battles][AUTO-DEBUG] matched CSS rules:', matchedRules);
+            return info;
+        }
+
+        function debugNativeOutfitSprite(outfitId) {
+            const selector = `img.spritesheet.id-${outfitId}`;
+            const img = document.querySelector(selector);
+            if (!img) {
+                console.log(`[Custom Battles] No element matched "${selector}" — is a creature with outfit id ${outfitId} currently rendered on screen?`);
+                return null;
+            }
+            return logNativeOutfitSpriteDebugInfo(img, 'manual');
+        }
+
+        // Fires automatically the first time ANY native creature is actually animating its
+        // walk cycle (.moving on the outfit shell) — no console command needed. Logs once,
+        // then stops watching. Only looks at NATIVE sprites (skips our own custom-sprite
+        // overlays, which hide the real img and wouldn't show a real running animation).
+        let autoNativeAnimDebugDone = false;
+        function tryAutoDebugNativeAnimation() {
+            if (autoNativeAnimDebugDone) return true;
+            const candidates = document.querySelectorAll('.sprite.outfit.moving img.spritesheet, img.spritesheet.moving');
+            for (const img of candidates) {
+                if (img.closest('[class*="custom-battles-sprite-"]')) continue;
+                // Skip effects that merely happen to carry a .moving class (loot pickups,
+                // despawn animations, etc.) — a real creature outfit always has an id-N class.
+                if (![...img.classList].some((c) => /^id-\d+$/.test(c))) continue;
+                autoNativeAnimDebugDone = true;
+                logNativeOutfitSpriteDebugInfo(img, 'auto');
+                return true;
+            }
+            return false;
+        }
+        (function startAutoNativeAnimDebugWatch() {
+            if (tryAutoDebugNativeAnimation()) return;
+            const observer = new MutationObserver(() => {
+                if (tryAutoDebugNativeAnimation()) observer.disconnect();
+            });
+            const root = document.body || document.documentElement;
+            if (!root) return;
+            observer.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+            setTimeout(() => observer.disconnect(), 10 * 60 * 1000);
+        })();
+
         // Expose globally
             try {
                 window.CustomBattles = {
@@ -5117,6 +5548,10 @@ if (window.CustomBattles) {
                     getActiveBattles: () => [...activeCustomBattles],
                     isAllyContextMenuBlocked: shouldBlockAllyContextMenu,
                     playEffectOnWalkableTiles,
+                    CUSTOM_SPRITES: CUSTOM_MAP_SPRITES,
+                    getCustomSpriteDef,
+                    getCustomSpriteAssetUrl,
+                    debugNativeOutfitSprite,
                     navigateToRoom: (roomId) => {
                         if (!roomId || !globalThis.state?.board?.send) return false;
                         try {
