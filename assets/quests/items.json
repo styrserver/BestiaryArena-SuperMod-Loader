@@ -175,7 +175,7 @@
     "bosstiary": {
       "productName": "Bosstiary",
       "icon": "Bosstiary_Icon.gif",
-      "description": "You see a bosstiary. It holds soul cores from bosses you have defeated.",
+      "description": "You see a bosstiary.\nIt holds soul cores from bosses you have defeated.",
       "rarity": 0,
       "maxCount": 1,
       "opensContainer": "soulCores"
@@ -192,6 +192,14 @@
       "productName": "The Old Widow Soul Core",
       "icon": "The_Old_Widow_Soul_Core.gif",
       "description": "Obtained by defeating The Old Widow.",
+      "rarity": 0,
+      "maxCount": 1,
+      "soulCore": true
+    },
+    "knarknaknorkSoulCore": {
+      "productName": "Knarknaknork Soul Core",
+      "icon": "Knarknaknork_Soul_Core.gif",
+      "description": "Obtained by defeating Knarknaknork.",
       "rarity": 0,
       "maxCount": 1,
       "soulCore": true
@@ -589,6 +597,7 @@
     "king_letter_al_dee": "Scroll.gif",
     "al_dee_fishing_gold": "Small_Axe.gif",
     "al_dee_golden_rope": "Elvenhair_Rope.gif",
+    "al_dee_rookie_guard": "Knarknaknork_Soul_Core.gif",
     "king_monks_study": "The_Holy_Tible.png",
     "costello_queen_banshees": "Book_(Black).gif",
     "follower_of_zathroth": "Blessed_Ankh.gif",
@@ -793,6 +802,14 @@
         "receivedBefore": {
           "type": "missionCompleted",
           "missionId": "al_dee_golden_rope"
+        }
+      },
+      {
+        "key": "knarknaknorkSoulCore",
+        "productId": "knarknaknorkSoulCore",
+        "receivedBefore": {
+          "type": "missionCompleted",
+          "missionId": "al_dee_rookie_guard"
         }
       },
       {

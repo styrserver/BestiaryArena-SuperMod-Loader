@@ -232,6 +232,28 @@
       "battleVictory": "Mornenion was slain. You found Elvenhair Rope.",
       "battleDefeat": "Mornenion's powers were too strong for you."
     },
+    "al_dee_rookie_guard": {
+      "id": "al_dee_rookie_guard",
+      "title": "The Sword of Fury",
+      "prompt": "Rookie, have you heard the old tale? Off the northwest shore there's a lonely isle, ringed in fire, with a blade called the Sword of Fury standing in the rock. A sign beside it reads: 'Only the humble may touch the Sword of Fury.' Many have tried to reach it. All have failed. But I've heard another rumor — something stirring at that northwest shore, below the Rotworm Dungeon, that might be connected. Will you go take a humble look?",
+      "accept": "Good. Keep your head down and your pride in check — the northwest shore is no place for boasting. Whatever's out there, come tell me what you find.",
+      "askForItem": "Well? Did you find anything out at that northwest shore — some sign of the Sword of Fury?",
+      "complete": "So it's true — there was something out there after all, and you put it down too! Take this Knarknaknork Soul Core as your reward for the kill. Doesn't look like much of a sword, but you kept humble and came back in one piece. That's worth more than the blade itself, rookie.",
+      "missingItem": "You haven't even been out there yet, have you? The northwest shore, below the Rotworm Dungeon — go on, humbly now.",
+      "keepSearching": "Then get back out there and finish the job. Humility first, rookie.",
+      "answerYesNo": "Answer yes or no: did you brave the northwest shore and find what's out there?",
+      "alreadyCompleted": "Ah, the northwest shore job. You handled that with more humility than most who go chasing the Sword of Fury ever manage.",
+      "alreadyActive": "Still waiting to hear from the northwest shore, below the Rotworm Dungeon. Go on, then — humbly.",
+      "objectiveLine1": "Go to the Rotworm Dungeon and step through the portal toward the northwest shore.",
+      "objectiveLine2": "Defeat whatever guards it out there and report back to Al Dee.",
+      "hint": "The sign by the Sword of Fury says only the humble may touch it. Maybe that's the real trick.",
+      "rewardCoins": 0,
+      "rewardItemName": "Knarknaknork Soul Core",
+      "rewardIcon": "Knarknaknork_Soul_Core.gif",
+      "rewardSummary": "Reward: Knarknaknork Soul Core.",
+      "battleVictory": "Whatever it was, it's dead now. No Sword of Fury out there after all — but return to Al Dee with the news.",
+      "battleDefeat": "Knarknaknork proved you weren't humble enough today."
+    },
     "costello_queen_banshees": {
       "id": "costello_queen_banshees",
       "title": "The Queen of the Banshees",
@@ -528,6 +550,7 @@
     "king_scarab_coin": "Unearthed the scarab coin in the desert sands and showed it to Tesha in Darama Oasis.",
     "al_dee_fishing_gold": "Retrieved Al Dee's Small Axe from the cave waters.",
     "al_dee_golden_rope": "Returned Al Dee's elvenhair rope.",
+    "al_dee_rookie_guard": "Chased a rumor of the Sword of Fury out to the northwest shore below the Rotworm Dungeon, defeated Knarknaknork, and reported back to Al Dee.",
     "costello_queen_banshees": "Completed the seven seals of Ghostlands and returned to Costello.",
     "follower_of_zathroth": "Brought the Blessed Ankh to Wyda in the swamps of Venore.",
     "mother_of_all_spiders": "Descended the secluded herb, defeated the mother of all spiders, and returned the silk to Wyda.",
@@ -582,6 +605,7 @@
       "king_letter_al_dee",
       "al_dee_fishing_gold",
       "al_dee_golden_rope",
+      "al_dee_rookie_guard",
       "king_monks_study",
       "costello_queen_banshees",
       "follower_of_zathroth",
@@ -634,6 +658,13 @@
       "al_dee_golden_rope": {
         "stateKey": "progressAlDeeGoldenRope",
         "firebaseKey": "alDeeGoldenRope"
+      },
+      "al_dee_rookie_guard": {
+        "stateKey": "progressAlDeeRookieGuard",
+        "firebaseKey": "alDeeRookieGuard",
+        "extraFields": [
+          "battleCompleted"
+        ]
       },
       "king_monks_study": {
         "stateKey": "progressMonksStudy",

@@ -1182,5 +1182,159 @@
       140
     ],
     "allowedTilesMessage": "Ally creatures can only be placed on the marked tiles!"
+  },
+  "sewers": {
+    "allyLimit": 3,
+    "preventVillainMovement": true,
+    "hideVillainSprites": true,
+    "allies": [
+      {
+        "nickname": "Rookstayer",
+        "tileIndex": 96,
+        "keyPrefix": "rookstayer-tile-96-",
+        "fallbackGameId": 101,
+        "level": 12,
+        "direction": "north",
+        "creatureName": "Rookstayer",
+        "shiny": true,
+        "outfitSpriteId": 500002,
+        "genes": {
+          "hp": 20,
+          "ad": 4,
+          "ap": 4,
+          "armor": 4,
+          "magicResist": 4
+        }
+      }
+    ],
+    "villains": [
+      {
+        "nickname": "Wolf",
+        "tileIndex": 18,
+        "keyPrefix": "wolf-tile-18-",
+        "fallbackGameId": 13,
+        "level": 50,
+        "direction": "south",
+        "creatureName": "Wolf",
+        "shiny": true,
+        "awakened": true,
+        "genes": {
+          "hp": 20,
+          "ad": 1,
+          "ap": 1,
+          "armor": 1,
+          "magicResist": 1
+        }
+      },
+      {
+        "nickname": "Wolf",
+        "tileIndex": 32,
+        "keyPrefix": "wolf-tile-32-",
+        "fallbackGameId": 13,
+        "level": 50,
+        "direction": "south",
+        "creatureName": "Wolf",
+        "shiny": true,
+        "awakened": true,
+        "genes": {
+          "hp": 20,
+          "ad": 1,
+          "ap": 1,
+          "armor": 1,
+          "magicResist": 1
+        }
+      },
+      {
+        "nickname": "Knarknaknork",
+        "tileIndex": 40,
+        "keyPrefix": "knarknaknork-tile-40-",
+        "fallbackGameId": 30,
+        "level": 180,
+        "direction": "west",
+        "creatureName": "Fire Elemental",
+        "shiny": true,
+        "awakened": true,
+        "outfitSpriteId": 6,
+        "genes": {
+          "hp": 20,
+          "ad": 1,
+          "ap": 1,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Spellbook of Ancient Arcana",
+          "gameId": 41
+        }
+      },
+      {
+        "nickname": "Wolf",
+        "tileIndex": 49,
+        "keyPrefix": "wolf-tile-49-",
+        "fallbackGameId": 13,
+        "level": 50,
+        "direction": "south",
+        "creatureName": "Wolf",
+        "shiny": true,
+        "awakened": true,
+        "genes": {
+          "hp": 20,
+          "ad": 1,
+          "ap": 1,
+          "armor": 1,
+          "magicResist": 1
+        }
+      },
+      {
+        "nickname": "Kraknaknork's Demon",
+        "tileIndex": 95,
+        "keyPrefix": "kraknaknork-s-demon-tile-95-",
+        "fallbackGameId": 92,
+        "level": 500,
+        "direction": "south",
+        "creatureName": "Beer Barrel",
+        "customSpriteKey": "kraknaknorks-demon",
+        "genes": {
+          "hp": 1,
+          "ad": 1,
+          "ap": 1,
+          "armor": 1,
+          "magicResist": 1
+        }
+      }
+    ],
+    "allowedTiles": [
+      17,
+      18,
+      19,
+      32,
+      33,
+      34,
+      47,
+      48,
+      49,
+      62,
+      63,
+      64,
+      77,
+      78,
+      79,
+      92,
+      93,
+      94,
+      95,
+      107,
+      108,
+      109,
+      110,
+      122,
+      123,
+      124,
+      137,
+      138
+    ],
+    "allowedTilesMessage": "Ally creatures can only be placed on the marked tiles!"
   }
 }
