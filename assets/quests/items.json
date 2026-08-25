@@ -183,7 +183,6 @@
     "goldenMug": {
       "productName": "Demodras Soul Core",
       "icon": "Demodras_Soul_Core.gif",
-      "description": "Obtained by defeating Demodras.",
       "rarity": 0,
       "maxCount": 1,
       "soulCore": true
@@ -191,7 +190,6 @@
     "oldWidowSoulCore": {
       "productName": "The Old Widow Soul Core",
       "icon": "The_Old_Widow_Soul_Core.gif",
-      "description": "Obtained by defeating The Old Widow.",
       "rarity": 0,
       "maxCount": 1,
       "soulCore": true
@@ -199,7 +197,6 @@
     "knarknaknorkSoulCore": {
       "productName": "Knarknaknork Soul Core",
       "icon": "Knarknaknork_Soul_Core.gif",
-      "description": "Obtained by defeating Knarknaknork.",
       "rarity": 0,
       "maxCount": 1,
       "soulCore": true
@@ -207,7 +204,27 @@
     "ekatrixSoulCore": {
       "productName": "Ekatrix Soul Core",
       "icon": "Ekatrix_Soul_Core.gif",
-      "description": "Obtained by defeating Ekatrix.",
+      "rarity": 0,
+      "maxCount": 1,
+      "soulCore": true
+    },
+    "ghazbaranSoulCore": {
+      "productName": "Weakened Ghazbaran Soul Core",
+      "icon": "Weakened_Ghazbaran_Soul_Core.gif",
+      "rarity": 0,
+      "maxCount": 1,
+      "soulCore": true
+    },
+    "mornenionSoulCore": {
+      "productName": "Mornenion Soul Core",
+      "icon": "Mornenion_Soul_Core.gif",
+      "rarity": 0,
+      "maxCount": 1,
+      "soulCore": true
+    },
+    "apprenticeShengSoulCore": {
+      "productName": "Apprentice Sheng Soul Core",
+      "icon": "Apprentice_Sheng_Soul_Core.gif",
       "rarity": 0,
       "maxCount": 1,
       "soulCore": true
@@ -253,6 +270,22 @@
       "icon": "Stuffed_Toad.gif",
       "description": "You see a stuffed toad.",
       "rarity": 5,
+      "maxCount": 1
+    },
+    "key3012": {
+      "productName": "Key 3012",
+      "spriteId": 2970,
+      "iconUrl": "https://bestiaryarena.com/assets/ITEM/2970.png",
+      "description": "Used for locking and unlocking the main doors to Hellgate.",
+      "rarity": 2,
+      "maxCount": 1
+    },
+    "bewareOfTheBonelordsBook": {
+      "productName": "Beware of the Bonelords (Book)",
+      "spriteId": 2821,
+      "iconUrl": "https://bestiaryarena.com/assets/ITEM/2821.png",
+      "description": "Exposition on Bonelord, their location, their language, and their motives.",
+      "rarity": 3,
       "maxCount": 1
     },
     "lootEffect": {
@@ -805,6 +838,14 @@
         }
       },
       {
+        "key": "mornenionSoulCore",
+        "productId": "mornenionSoulCore",
+        "receivedBefore": {
+          "type": "missionCompleted",
+          "missionId": "al_dee_golden_rope"
+        }
+      },
+      {
         "key": "knarknaknorkSoulCore",
         "productId": "knarknaknorkSoulCore",
         "receivedBefore": {
@@ -928,6 +969,14 @@
         }
       },
       {
+        "key": "apprenticeShengSoulCore",
+        "productId": "apprenticeShengSoulCore",
+        "receivedBefore": {
+          "type": "missionCompleted",
+          "missionId": "apprentice_sheng"
+        }
+      },
+      {
         "key": "wishlist",
         "productId": "wishlist",
         "receivedBefore": {
@@ -971,6 +1020,14 @@
         }
       },
       {
+        "key": "ghazbaranSoulCore",
+        "productId": "ghazbaranSoulCore",
+        "receivedBefore": {
+          "type": "missionCompleted",
+          "missionId": "weakened_archdemon"
+        }
+      },
+      {
         "key": "luminousOrb",
         "productId": "luminousOrb",
         "receivedBefore": {
@@ -986,6 +1043,22 @@
           "type": "missionFieldOrCompleted",
           "missionId": "lost_oracle",
           "field": "spectralStoneReceived"
+        }
+      },
+      {
+        "key": "key3012",
+        "productId": "key3012",
+        "receivedBefore": {
+          "type": "missionAcceptedOrCompleted",
+          "missionId": "hellgate_part_1"
+        }
+      },
+      {
+        "key": "bewareOfTheBonelordsBook",
+        "productId": "bewareOfTheBonelordsBook",
+        "receivedBefore": {
+          "type": "missionCompleted",
+          "missionId": "hellgate_part_1"
         }
       }
     ]

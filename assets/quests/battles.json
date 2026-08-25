@@ -3,16 +3,18 @@
     "mornenion": "1. Mornenion (Elvenhair Rope)",
     "apprentice_sheng": "2. Apprentice Sheng",
     "banshee_last_room": "3. Banshee's Last Room (Seal VII)",
-    "spider_lair": "4. Spider Lair (Mother of All Spiders)",
+    "spider_lair": "4. Spider Lair (Mother of All Spiders / Sewers via tile 77 in A Secluded Herb)",
     "putrid_chamber": "5. Putrid Chamber / Cursed Chamber",
     "ghazbaran": "6. Weakened Ghazbaran",
     "lonesome_dragon": "7. Lonesome Dragon (The Dragonmother / Demodras)",
     "lost_oracle": "8. The Lost Oracle (Monastery Catacombs)",
     "jakundaf_desert": "9. Jakundaf Desert (Sewers path battle)",
-    "ekatrix": "10. Ekatrix (The Tainted Souls / Sewers via Eclipse portal)"
+    "ekatrix": "10. Ekatrix (The Tainted Souls / Sewers via Eclipse portal)",
+    "hellgate_treasure_room": "11. Hellgate Treasure Room (Elathriel's Hellgate Part 1, Sewers reskin)"
   },
   "mornenion": {
     "allyLimit": 3,
+    "preventVillainMovement": true,
     "hideVillainSprites": true,
     "allowedTiles": [
       67,
@@ -32,76 +34,145 @@
         "level": 100,
         "tier": 0,
         "direction": "south",
+        "shiny": true,
+        "awakened": true,
         "genes": {
-          "hp": 100,
-          "ad": 50,
+          "hp": 20,
+          "ad": 20,
           "ap": 20,
-          "armor": 50,
-          "magicResist": 50
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "gameId": 20,
+          "stat": "ad",
+          "tier": 5,
+          "name": "Fire Axe"
+        }
+      },
+      {
+        "nickname": "Firestarter",
+        "tileIndex": 41,
+        "keyPrefix": "firestarter-tile-41-",
+        "creatureName": "Firestarter",
+        "fallbackGameId": 49,
+        "level": 25,
+        "tier": 0,
+        "direction": "west",
+        "shiny": true,
+        "awakened": true,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "gameId": 1,
+          "stat": "ap",
+          "tier": 5,
+          "name": "Boots of Haste"
+        }
+      },
+      {
+        "nickname": "Firestarter",
+        "tileIndex": 47,
+        "keyPrefix": "firestarter-tile-47-",
+        "creatureName": "Firestarter",
+        "fallbackGameId": 49,
+        "level": 25,
+        "tier": 0,
+        "direction": "south",
+        "shiny": true,
+        "awakened": true,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "gameId": 1,
+          "stat": "ap",
+          "tier": 5,
+          "name": "Boots of Haste"
+        }
+      },
+      {
+        "nickname": "Firestarter",
+        "tileIndex": 115,
+        "keyPrefix": "firestarter-tile-115-",
+        "creatureName": "Firestarter",
+        "fallbackGameId": 49,
+        "level": 25,
+        "tier": 0,
+        "direction": "north",
+        "shiny": true,
+        "awakened": true,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "gameId": 1,
+          "stat": "ap",
+          "tier": 5,
+          "name": "Boots of Haste"
+        }
+      },
+      {
+        "nickname": "Firestarter",
+        "tileIndex": 123,
+        "keyPrefix": "firestarter-tile-123-",
+        "creatureName": "Firestarter",
+        "fallbackGameId": 49,
+        "level": 25,
+        "tier": 0,
+        "direction": "north",
+        "shiny": true,
+        "awakened": true,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "gameId": 1,
+          "stat": "ap",
+          "tier": 5,
+          "name": "Boots of Haste"
         }
       },
       {
         "nickname": "Elf",
-        "tileIndex": 2,
-        "keyPrefix": "elf-tile-2-",
+        "tileIndex": 142,
+        "keyPrefix": "elf-tile-142-",
+        "creatureName": "Elf",
         "fallbackGameId": 39,
-        "level": 1,
+        "level": 75,
         "tier": 0,
-        "direction": "south",
+        "direction": "north",
+        "shiny": true,
+        "awakened": true,
         "genes": {
-          "hp": 1,
-          "ad": 1,
-          "ap": 1,
-          "armor": 1,
-          "magicResist": 1
-        }
-      },
-      {
-        "nickname": "Elf",
-        "tileIndex": 11,
-        "keyPrefix": "elf-tile-11-",
-        "fallbackGameId": 39,
-        "level": 1,
-        "tier": 0,
-        "direction": "south",
-        "genes": {
-          "hp": 1,
-          "ad": 1,
-          "ap": 1,
-          "armor": 1,
-          "magicResist": 1
-        }
-      },
-      {
-        "nickname": "Elf",
-        "tileIndex": 137,
-        "keyPrefix": "elf-tile-137-",
-        "fallbackGameId": 39,
-        "level": 1,
-        "tier": 0,
-        "direction": "south",
-        "genes": {
-          "hp": 1,
-          "ad": 1,
-          "ap": 1,
-          "armor": 1,
-          "magicResist": 1
-        }
-      },
-      {
-        "nickname": "Elf",
-        "tileIndex": 146,
-        "keyPrefix": "elf-tile-146-",
-        "fallbackGameId": 39,
-        "level": 1,
-        "tier": 0,
-        "direction": "south",
-        "genes": {
-          "hp": 1,
-          "ad": 1,
-          "ap": 1,
-          "armor": 1,
-          "magicResist": 1
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "gameId": 31,
+          "stat": "hp",
+          "tier": 5,
+          "name": "Amazon Helmet"
         }
       }
     ]
@@ -109,11 +180,8 @@
   "apprentice_sheng": {
     "allyLimit": 5,
     "preventVillainMovement": true,
-    "allowedTiles": {
-      "from": 95,
-      "to": 128
-    },
-    "allowedTilesMessage": "Ally creatures can only be placed on tiles 95-128!",
+    "allowedTiles": [95, 96, 97, 98, 111, 112, 127, 128],
+    "allowedTilesMessage": "Ally creatures can only be placed on the marked tiles!",
     "villains": [
       {
         "nickname": "Apprentice Sheng",
@@ -277,48 +345,89 @@
     "allyLimit": 5,
     "preventVillainMovement": true,
     "hideVillainSprites": true,
-    "defaultGenes": {
-      "hp": 30,
-      "ad": 30,
-      "ap": 30,
-      "armor": 30,
-      "magicResist": 30
-    },
-    "sharedEquip": {
-      "name": "Boots of Haste",
-      "stat": "hp",
-      "tier": 5
-    },
+    "allowedTiles": [
+      21,
+      34,
+      35,
+      50,
+      51,
+      64,
+      65,
+      66,
+      80,
+      81
+    ],
+    "allowedTilesMessage": "Ally creatures can only be placed on the marked tiles!",
     "villains": [
       {
+        "nickname": "Giant Spider",
+        "tileIndex": 97,
+        "keyPrefix": "giant-spider-tile-97-",
+        "fallbackGameId": 76,
+        "level": 250,
+        "direction": "north",
+        "creatureName": "Giant Spider",
+        "awakened": true,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "hp",
+          "tier": 5,
+          "name": "Vile Axe",
+          "gameId": 48
+        }
+      },
+      {
+        "nickname": "Giant Spider",
+        "tileIndex": 114,
+        "keyPrefix": "giant-spider-tile-114-",
+        "fallbackGameId": 76,
+        "level": 250,
+        "direction": "west",
+        "creatureName": "Giant Spider",
+        "awakened": true,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "hp",
+          "tier": 5,
+          "name": "Vile Axe",
+          "gameId": 48
+        }
+      },
+      {
         "nickname": "The Old Widow",
-        "tileIndex": 81,
-        "keyPrefix": "spider-old-widow-tile-81-",
+        "tileIndex": 128,
+        "keyPrefix": "the-old-widow-tile-128-",
+        "fallbackGameId": 76,
+        "level": 350,
+        "direction": "north",
         "creatureName": "Giant Spider",
-        "fallbackGameId": 1,
-        "level": 275,
-        "tier": 4,
-        "direction": "east"
-      },
-      {
-        "nickname": "Giant Spider",
-        "tileIndex": 64,
-        "keyPrefix": "spider-lair-giant-tile-64-",
-        "creatureName": "Giant Spider",
-        "fallbackGameId": 1,
-        "level": 225,
-        "tier": 4,
-        "direction": "east"
-      },
-      {
-        "nickname": "Giant Spider",
-        "tileIndex": 68,
-        "keyPrefix": "spider-lair-giant-tile-68-",
-        "creatureName": "Giant Spider",
-        "fallbackGameId": 1,
-        "level": 225,
-        "tier": 4,
-        "direction": "east"
+        "shiny": true,
+        "awakened": true,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "hp",
+          "tier": 5,
+          "name": "Vile Axe",
+          "gameId": 48
+        }
       }
     ]
   },
@@ -1334,6 +1443,129 @@
       124,
       137,
       138
+    ],
+    "allowedTilesMessage": "Ally creatures can only be placed on the marked tiles!"
+  },
+  "hellgate_treasure_room": {
+    "allyLimit": 5,
+    "preventVillainMovement": true,
+    "hideVillainSprites": true,
+    "villains": [
+      {
+        "nickname": "Furious Fire Elemental",
+        "tileIndex": 34,
+        "keyPrefix": "fire-elemental-tile-34-",
+        "fallbackGameId": 30,
+        "level": 75,
+        "direction": "south",
+        "creatureName": "Fire Elemental",
+        "shiny": true,
+        "awakened": true,
+        "genes": { "hp": 20, "ad": 20, "ap": 20, "armor": 20, "magicResist": 20 },
+        "equip": { "stat": "ap", "tier": 5, "name": "Spellbook of Ancient Arcana", "gameId": 41 }
+      },
+      {
+        "nickname": "Furious Fire Elemental",
+        "tileIndex": 37,
+        "keyPrefix": "fire-elemental-tile-37-",
+        "fallbackGameId": 30,
+        "level": 75,
+        "direction": "south",
+        "creatureName": "Fire Elemental",
+        "shiny": true,
+        "awakened": true,
+        "genes": { "hp": 20, "ad": 20, "ap": 20, "armor": 20, "magicResist": 20 },
+        "equip": { "stat": "ap", "tier": 5, "name": "Spellbook of Ancient Arcana", "gameId": 41 }
+      },
+      {
+        "nickname": "Furious Fire Elemental",
+        "tileIndex": 40,
+        "keyPrefix": "fire-elemental-tile-40-",
+        "fallbackGameId": 30,
+        "level": 75,
+        "direction": "south",
+        "creatureName": "Fire Elemental",
+        "shiny": true,
+        "awakened": true,
+        "genes": { "hp": 20, "ad": 20, "ap": 20, "armor": 20, "magicResist": 20 },
+        "equip": { "stat": "ap", "tier": 5, "name": "Spellbook of Ancient Arcana", "gameId": 41 }
+      },
+      {
+        "nickname": "Demon Skeleton",
+        "tileIndex": 96,
+        "keyPrefix": "demon-skeleton-tile-96-",
+        "fallbackGameId": 21,
+        "level": 60,
+        "direction": "south",
+        "creatureName": "Demon Skeleton",
+        "shiny": true,
+        "awakened": true,
+        "genes": { "hp": 20, "ad": 20, "ap": 20, "armor": 20, "magicResist": 20 }
+      },
+      {
+        "nickname": "Demon Skeleton",
+        "tileIndex": 112,
+        "keyPrefix": "demon-skeleton-tile-112-",
+        "fallbackGameId": 21,
+        "level": 60,
+        "direction": "south",
+        "creatureName": "Demon Skeleton",
+        "shiny": true,
+        "awakened": true,
+        "genes": { "hp": 20, "ad": 20, "ap": 20, "armor": 20, "magicResist": 20 }
+      },
+      {
+        "nickname": "Ghoul",
+        "tileIndex": 124,
+        "keyPrefix": "ghoul-tile-124-",
+        "fallbackGameId": 19,
+        "level": 75,
+        "direction": "east",
+        "creatureName": "Ghoul",
+        "shiny": true,
+        "awakened": true,
+        "genes": { "hp": 20, "ad": 20, "ap": 20, "armor": 20, "magicResist": 20 }
+      },
+      {
+        "nickname": "Skeleton",
+        "tileIndex": 130,
+        "keyPrefix": "skeleton-tile-130-",
+        "fallbackGameId": 7,
+        "level": 50,
+        "direction": "west",
+        "creatureName": "Skeleton",
+        "shiny": true,
+        "awakened": true,
+        "genes": { "hp": 20, "ad": 20, "ap": 20, "armor": 20, "magicResist": 20 }
+      }
+    ],
+    "allowedTiles": [
+      94,
+      95,
+      97,
+      98,
+      99,
+      100,
+      108,
+      109,
+      110,
+      111,
+      113,
+      114,
+      115,
+      116,
+      123,
+      125,
+      128,
+      129,
+      131,
+      138,
+      139,
+      140,
+      143,
+      144,
+      145,
+      146
     ],
     "allowedTilesMessage": "Ally creatures can only be placed on the marked tiles!"
   }

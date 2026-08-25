@@ -235,7 +235,7 @@
     "al_dee_rookie_guard": {
       "id": "al_dee_rookie_guard",
       "title": "The Sword of Fury",
-      "prompt": "Rookie, have you heard the old tale? Off the northwest shore there's a lonely isle, ringed in fire, with a blade called the Sword of Fury standing in the rock. A sign beside it reads: 'Only the humble may touch the Sword of Fury.' Many have tried to reach it. All have failed. But I've heard another rumor — something stirring at that northwest shore, below the Rotworm Dungeon, that might be connected. Will you go take a humble look?",
+      "prompt": "Rookie, have you heard the old tale? Off the northwest shore there's a lonely isle, ringed in fire, with a blade called the Sword of Fury standing in the rock. A sign beside it reads: 'Only the humble may touch the Sword of Fury.' Many have tried to reach it. All have failed. But I've heard another rumor — something stirring at that northwest shore, below the Rotworm Dungeon, that might be connected.",
       "accept": "Good. Keep your head down and your pride in check — the northwest shore is no place for boasting. Whatever's out there, come tell me what you find.",
       "askForItem": "Well? Did you find anything out at that northwest shore — some sign of the Sword of Fury?",
       "complete": "So it's true — there was something out there after all, and you put it down too! Take this Knarknaknork Soul Core as your reward for the kill. Doesn't look like much of a sword, but you kept humble and came back in one piece. That's worth more than the blade itself, rookie.",
@@ -306,7 +306,6 @@
       "wydaMissingSilk": "You don't have the spider silk. Defeat the mother of all spiders in the secluded herb and return with the silk.",
       "soulCoreItemName": "The Old Widow Soul Core",
       "soulCoreIcon": "The_Old_Widow_Soul_Core.gif",
-      "soulCoreDescription": "Obtained by defeating The Old Widow.",
       "battleVictory": "The Old Widow was slain. You found Spider Silk and a soul core.",
       "battleDefeat": "The Old Widow was too strong."
     },
@@ -350,12 +349,10 @@
       "hintReport": "Ekatrix is slain. Return to Wyda in the Venore swamps.",
       "rewardItemName": "Ekatrix Soul Core",
       "rewardIcon": "Ekatrix_Soul_Core.gif",
-      "rewardDescription": "Obtained by defeating Ekatrix.",
       "rewardCoins": 0,
       "rewardSummary": "Reward: Ekatrix Soul Core.",
       "soulCoreItemName": "Ekatrix Soul Core",
       "soulCoreIcon": "Ekatrix_Soul_Core.gif",
-      "soulCoreDescription": "Obtained by defeating Ekatrix.",
       "battleVictory": "Ekatrix has fallen. Return to Wyda for your reward.",
       "battleDefeat": "Ekatrix was too strong.",
       "wydaHandInComplete": "Ekatrix is dead, then? Good. Take this Ekatrix Soul Core — and leave me to my boredom."
@@ -375,7 +372,8 @@
       "rewardDescription": "A sturdy wooden plank from the battle wreckage.",
       "rewardSummary": "Reward: Wooden Plank.",
       "battleVictory": "Apprentice Sheng has been defeated.",
-      "battleDefeat": "Apprentice Sheng was too strong."
+      "battleDefeat": "Apprentice Sheng was too strong.",
+      "soulCoreItemName": "Apprentice Sheng Soul Core"
     },
     "christmas_miracle": {
       "id": "christmas_miracle",
@@ -476,7 +474,6 @@
       "hint": "Only those who carry the Dragon Claw may descend the stairs in Dragon Lair.",
       "rewardItemName": "Demodras Soul Core",
       "rewardIcon": "Demodras_Soul_Core.gif",
-      "rewardDescription": "Obtained by defeating Demodras.",
       "rewardCoins": 0,
       "rewardSummary": "Reward: Demodras Soul Core.",
       "battleVictory": "Demodras has fallen. You found a Demodras Soul Core.",
@@ -538,6 +535,27 @@
       "oracleRageAgain": "Y£U0 @G@1N{\\}?! TH3N D1£{\\}!",
       "battleVictory": "The Oracle's rage is broken. The catacombs fall silent.",
       "battleDefeat": "The Oracle's wrath was too great."
+    },
+    "hellgate_part_1": {
+      "id": "hellgate_part_1",
+      "title": "Hellgate Part 1",
+      "offer": "There is a task I would ask of you, human — will you accept it?",
+      "offerDecline": "Then keep away from what does not concern you.",
+      "prompt": [
+        "The gate to the hellgate has stood locked longer than your kind can count. Take this — Key 3012, forged by my people.",
+        "It unlocks the gate. Speak to me again when you wish to use it."
+      ],
+      "accept": "Then follow. Stay close, human.",
+      "alreadyCompleted": "The treasure room is behind us now. There is nothing more to show you there.",
+      "alreadyActive": "You already carry the key. Are you ready to follow me to the treasure room in Hellgate?",
+      "decline": "Believe me, it's better for you that way. Return when you've found your courage.",
+      "objectiveLine1": "Follow Elathriel into the Hellgate Treasure Room.",
+      "objectiveLine2": "Survive what guards it.",
+      "hint": "Speak with Elathriel in Hedge Maze about a mission — he holds the key to the hellgate.",
+      "rewardSummary": "Reward: Beware of the Bonelords (Book).",
+      "battleVictory": "The treasure room is cleared. Return to Elathriel.",
+      "battleDefeat": "Whatever guards that treasure was not so easily bested.",
+      "battleReward": "You have done well, human. Take this — knowledge the Bonelords would rather stay buried."
     }
   },
   "completionSummaries": {
@@ -562,7 +580,8 @@
     "svenson_love_story": "Guided Svenson through storms and misnavigation, then delivered Bunny Slippers so he could bring Dane her present.",
     "weakened_archdemon": "Defeated the weakened archdemon and received an Orb from Dane.",
     "dragonmother": "Descended into Lonesome Dragon with Demodras' claw and slew Demodras.",
-    "lost_oracle": "Returned the Spectral Stone to The Oracle, survived its wrath, and received its thanks."
+    "lost_oracle": "Returned the Spectral Stone to The Oracle, survived its wrath, and received its thanks.",
+    "hellgate_part_1": "Received Key 3012 from Elathriel and cleared the Hellgate Treasure Room with him."
   },
   "sealTranscripts": [
     {
@@ -618,7 +637,8 @@
       "christmas_miracle",
       "svenson_love_story",
       "weakened_archdemon",
-      "lost_oracle"
+      "lost_oracle",
+      "hellgate_part_1"
     ],
     "missions": {
       "king_honeyflower": {
@@ -760,6 +780,13 @@
           "oracleEnraged",
           "battleCompleted",
           "oracleDismissed"
+        ]
+      },
+      "hellgate_part_1": {
+        "stateKey": "progressHellgatePart1",
+        "firebaseKey": "hellgatePart1",
+        "extraFields": [
+          "battleCompleted"
         ]
       }
     }

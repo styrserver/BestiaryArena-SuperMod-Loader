@@ -140,6 +140,7 @@
       "Better Bestiary": "Bulk-sell duplicates for species you already keep shiny or awakened.",
       "Better Boosted Maps": "Farms daily boosted maps with mod coordination and setups.",
       "Better Cauldron": "Search and filter Monstrous Cauldron monsters, including by rarity.",
+      "Better Daycare": "Autohandles Daycare level-ups/ejections and fills slots from a queue.",
       "Better Exaltation Chest": "Auto-open chests, filter gear, and disenchant with dust tracking.",
       "Better Forge": "Arsenal tools with batch disenchant, search, filters, and dust stats.",
       "Better Highscores": "Live tick and rank boards for the current map with medal styling.",
@@ -220,6 +221,22 @@
       "sendCreaturesToDepotTooltip": "Send selected creatures that are not in the depot",
       "removeCreaturesFromDepot": "Remove {count} creatures from depot",
       "removeCreaturesFromDepotTooltip": "Return selected depot creatures to the bestiary"
+    },
+    "betterDaycare": {
+      "activated": "Better Daycare Activated!",
+      "autohandleLabel": "Autohandle: ",
+      "statusActive": "Active",
+      "statusInactive": "Inactive",
+      "statusButtonTitle": "Click to toggle Autohandle Daycare",
+      "creaturesInDaycareLabel": "Creatures in daycare: ",
+      "inQueueLabel": "In queue: ",
+      "selectCreatureLabel": "Select a creature:",
+      "queueOrderLabel": "Queue order:",
+      "noEligibleCreatures": "No eligible creatures.",
+      "queueEmpty": "Queue is empty.",
+      "queueButton": "Queue",
+      "backButton": "Back",
+      "removeUnavailableTitle": "Creature no longer available — click to remove"
     },
     "betterUI": {
       "settingsTitle": "Mod Settings",
@@ -594,7 +611,6 @@
       "autoRefillStamina": "Autorefill Stamina",
       "minimumStaminaLabel": "Minimum Stamina Without Refill",
       "autoCollectRewards": "Autocollect Rewards",
-      "autoDayCare": "Autohandle Daycare",
       "autoPlayAfterDefeat": "Autoplay after Defeat and Network Issues",
       "fasterAutoplay": "Autoplay delay",
       "fasterAutoplayWarning": "⚠️ Allows configuring the delay between autoplay actions. May cause unexpected behavior or conflicts with other mods.",

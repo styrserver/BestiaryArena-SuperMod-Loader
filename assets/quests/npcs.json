@@ -9,9 +9,10 @@
     "rookstayer": "7. Board NPCs (Rookstayer)",
     "svenson": "8. Board NPCs (Svenson)",
     "dane": "9. Board NPCs (Dane)",
-    "oracle": "10. Board NPCs (The Oracle)",
-    "questItems": "11. Quest item chat responses (involved vs uninvolved NPC lines)",
-    "questItemUninvolvedTemplates": "12. Uninvolved quest item templates ({item} placeholder)"
+    "elathriel": "10. Board NPCs (Elathriel)",
+    "oracle": "11. Board NPCs (The Oracle)",
+    "questItems": "12. Quest item chat responses (involved vs uninvolved NPC lines)",
+    "questItemUninvolvedTemplates": "13. Uninvolved quest item templates ({item} placeholder)"
   },
   "king-tibianus": {
     "keywords": {
@@ -862,6 +863,48 @@
     "boardChat": {
       "welcomeMessage": "Welcome to White Wave Cellar, Player. Have a drink.",
       "placeholder": "Type your message to Dane..."
+    }
+  },
+  "elathriel": {
+    "keywords": {
+      "elves": "My people are divided in castes in these times, until they comprehend that only the way of the Kuridai can save us all.",
+      "cenath": "Arrogant bastards, but they wield quite powerful magics.",
+      "teshial": "Dreamers are of no practical use. I don't mourn their demise.",
+      "deraisim": "Confused cowards. With all their skill they still tend to hide and run. What a waste.",
+      "kuridai": "We are the heart of the elven society. We forge, we build, and we don't allow our people to be pushed around.",
+      "hi": "Be greeted Player.",
+      "hello": "Be greeted Player.",
+      "army": "It's one of the more useful concepts we can learn from the other races.",
+      "door": "For safety we keep the door to the hellgate locked all times. I have the keys to open it when needed.",
+      "hellgate": "It was here among other structures, like the depot tower, before our people came here. It's secured by a sealed door.",
+      "key": "If you are that curious, do you want to buy a key for 5000 gold? Don't blame me if you get sucked in.",
+      "no": "Believe me, it's better for you that way.",
+      "king": "It's hard for some of my people to grasp the true concept of a strong leader.",
+      "magic": "I mastered some spells of battle.",
+      "name": "Not that I like to talk to you, but I am Elathriel Shadowslayer.",
+      "tibianus": "A human weakling, not much more.",
+      "eloise": "A human weakling, not much more.",
+      "time": "I couldn't care less.",
+      "druids": "Druids' magic is to peaceful for my taste.",
+      "sorcerers": "I have seen human sorcerers doing some impressive things ... before they died.",
+      "dwarfs": "We might use the shelter earth and hills provide us, but their obsession for metal is a waste of time.",
+      "trolls": "Like all inferior races they can be at least used for something good. The other castes are just jealous about our use of them.",
+      "excalibug": "I still doubt it exists.",
+      "ferumbras": "Even if he'd walk through the town above the other castes won't see the necessity to follow OUR way.",
+      "bye": "Asha Thrazi, stranger.",
+      "goodbye": "Asha Thrazi, stranger.",
+      "farewell": "Asha Thrazi, stranger."
+    },
+    "confusion": [
+      "Speak plainly, human. I have no patience for riddles.",
+      "I do not understand your meaning. Ask of the castes, or leave me be.",
+      "Your words mean nothing to me.",
+      "I have no interest in guessing at your meaning.",
+      "Say what you mean, or don't waste my time."
+    ],
+    "boardChat": {
+      "welcomeMessage": "Be greeted Player.",
+      "placeholder": "Type your message to Elathriel..."
     }
   },
   "oracle": {
