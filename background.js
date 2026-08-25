@@ -228,7 +228,7 @@ const HARDCODED_DEFAULT_ENABLED_MODS = [
 const HARDCODED_MOD_COUNTS = {
   database: 9,
   official: 11,
-  super: 27,
+  super: 28,
   ot: 5
 };
 

@@ -1267,6 +1267,14 @@ if (window.CustomBattles) {
              * @param {{ allyDrag?: boolean }} [options]
              */
             applyPlacementHitboxMask(options = {}) {
+                // Opt-out (config.tileRestrictions.noHitboxMask: true): allowedTiles still
+                // drives the setup-time filter (reject/toast on invalid drops via
+                // filterSetupPreventAllyOutsideAllowedTiles etc.) and getAllowedPlayerTiles(),
+                // but this function — the ONLY place that ever writes to
+                // room.file.data.hitboxes for placement purposes — becomes a hard no-op. Single
+                // choke point so no caller (drag hooks, syncPlacementHitboxMask, etc.) can ever
+                // touch hitboxes for this battle, regardless of how it got invoked.
+                if (this.config.tileRestrictions?.noHitboxMask === true) return false;
                 const walkable = this.getPlacementMaskWalkableTiles?.(options);
                 if (!walkable?.size) return false;
                 if (this.isBoardBattleActive()) return false;
@@ -1297,16 +1305,55 @@ if (window.CustomBattles) {
                 });
                 this._placementHitboxMaskActive = true;
                 this._placementHitboxAllyDrag = options.allyDrag === true;
+
+                // Generic, opt-in diagnostic (config.debugPlacementMask: true) — logs the
+                // COMPLETE allowed/blocked tile list for every tile actually present in the
+                // live `masked` array (the exact thing just written to room.file.data.hitboxes),
+                // as plain joined strings rather than console object previews, so pasting the
+                // log elsewhere carries the full list instead of a collapsed "Array(N)". Also
+                // logs which villain/forced-ally tiles fed into the walkable set. Available to
+                // any battle, not just one.
+                if (this.config.debugPlacementMask === true) {
+                    const villainTiles = [...(this.getVillainOccupiedTiles?.() || [])].sort((a, b) => a - b);
+                    const forcedAllyTiles = [...(this.getForcedAllyOccupiedTiles?.() || [])].sort((a, b) => a - b);
+                    const allowedList = [];
+                    const blockedList = [];
+                    for (let i = 0; i < masked.length; i += 1) {
+                        if (masked[i] === true) blockedList.push(i);
+                        else allowedList.push(i);
+                    }
+                    const battleName = this.config.name || 'Battle';
+                    console.log(`[Custom Battles][${battleName}][debug-mask] applyPlacementHitboxMask (allyDrag: ${options.allyDrag === true}) — tileCount: ${masked.length}`);
+                    console.log(`[Custom Battles][${battleName}][debug-mask] ALLOWED (${allowedList.length}): ${allowedList.join(', ')}`);
+                    console.log(`[Custom Battles][${battleName}][debug-mask] BLOCKED (${blockedList.length}): ${blockedList.join(', ')}`);
+                    console.log(`[Custom Battles][${battleName}][debug-mask] configAllowedTiles: ${(this.config.tileRestrictions?.allowedTiles || []).join(', ')} | villainOccupiedTiles: ${villainTiles.join(', ')} | forcedAllyOccupiedTiles: ${forcedAllyTiles.join(', ')}`);
+                    // allyDrag passes deliberately exclude villain tiles from walkable (see
+                    // getPlacementMaskWalkableTiles above) so ally-drop highlights don't light
+                    // them up — that's correct, expected behavior, not a bug. Only warn when
+                    // villain tiles are missing OUTSIDE that intentional window, since that's
+                    // the only case that would actually mean something's wrong.
+                    if (options.allyDrag !== true) {
+                        const missingVillain = villainTiles.filter((t) => masked[t] === true);
+                        if (missingVillain.length) {
+                            console.warn(`[Custom Battles][${battleName}][debug-mask] villain tile(s) reading BLOCKED: ${missingVillain.join(', ')}`);
+                        }
+                    }
+                }
                 return true;
             }
 
             restorePlacementHitboxes() {
-                if (!this._placementHitboxMaskActive) {
-                    this._placementHitboxSnapshot = null;
+                // Gating purely on _placementHitboxMaskActive is unsafe: that flag has been
+                // observed to flip false (e.g. mid drag-start/drag-end/sync churn) without the
+                // hitbox array actually being written back yet, leaving the board stuck on the
+                // narrow masked set. If a snapshot is still sitting here, restore it regardless
+                // of what the flag currently says — a redundant write is harmless, a skipped
+                // one leaves real gameplay hitboxes corrupted.
+                const snapshot = this._placementHitboxSnapshot;
+                if (!this._placementHitboxMaskActive && !Array.isArray(snapshot)) {
                     this._placementHitboxAllyDrag = false;
                     return false;
                 }
-                const snapshot = this._placementHitboxSnapshot;
                 if (Array.isArray(snapshot)) {
                     this.writeHitboxesInPlace(snapshot);
                 }
@@ -1336,6 +1383,135 @@ if (window.CustomBattles) {
                 return this.syncPlacementHitboxMask(activationCallback, options);
             }
 
+            /**
+             * Single source of truth for "keep re-applying quest tile mutations / re-syncing
+             * the placement hitbox mask for as long as this battle is active." Every quest
+             * used to hand-roll its own copy of this (a fixed short retry burst after entry,
+             * e.g. scheduleSewersBattlefieldVisuals/scheduleHellgateBattlefieldVisuals) plus,
+             * separately, its own persistent board subscription to keep it going afterward
+             * (e.g. setupSewersPortalObserver). Hellgate Part 1 shipped with only the retry
+             * burst and no persistent subscription — nothing re-synced the hitbox mask after
+             * the initial ~2s window closed, so any later ally placement/drag could leave
+             * allowed/blocked tiles stuck wrong for the rest of the battle with no way to
+             * self-correct. Centralizing both halves here means every quest (present and
+             * future, including anything wired from a Map Editor export) gets the same
+             * battle-tested behavior for free instead of re-deriving it per quest.
+             *
+             * @param {() => void} applyFn - Quest-specific: writes this room's tile-mutation
+             *   sprites/hitboxes, then typically calls this.refreshPlacementHitboxMaskFromLive
+             *   (or syncPlacementHitboxMask) to fold them into the live mask.
+             * @param {{ isActiveCheck?: () => boolean, retryDelaysMs?: number[] }} [options]
+             *   isActiveCheck: quest-specific "is the player actually in this quest right now"
+             *   flag (e.g. playerFollowedElathrielToHellgate) — checked alongside this.isActive
+             *   before every call, including ones from the persistent subscription.
+             */
+            startPersistentVisualSync(applyFn, options = {}) {
+                if (typeof applyFn !== 'function') return;
+                this.stopPersistentVisualSync();
+
+                const isActiveCheck = typeof options.isActiveCheck === 'function' ? options.isActiveCheck : () => true;
+                const retryDelaysMs = Array.isArray(options.retryDelaysMs)
+                    ? options.retryDelaysMs
+                    : [0, 50, 150, 300, 500, 800, 1200, 2000];
+
+                const guardedApply = () => {
+                    if (!this.isActive || !isActiveCheck()) return;
+                    try {
+                        applyFn();
+                    } catch (error) {
+                        console.error(`[Custom Battles][${this.config.name || 'Battle'}] Error in persistent visual sync:`, error);
+                    }
+                };
+
+                this._visualSyncRetryTimers = [];
+                guardedApply();
+                retryDelaysMs.forEach((delay) => {
+                    if (delay <= 0) return;
+                    this._visualSyncRetryTimers.push(setTimeout(guardedApply, delay));
+                });
+
+                if (globalThis.state?.board?.subscribe) {
+                    this._visualSyncSubscription = globalThis.state.board.subscribe(guardedApply);
+                }
+            }
+
+            /**
+             * Torn down automatically by cleanup() — quest code does not need to call this
+             * itself unless it wants to stop the sync early while the battle stays active.
+             */
+            stopPersistentVisualSync() {
+                if (this._visualSyncRetryTimers?.length) {
+                    this._visualSyncRetryTimers.forEach((id) => clearTimeout(id));
+                }
+                this._visualSyncRetryTimers = [];
+                if (this._visualSyncSubscription) {
+                    try {
+                        this._visualSyncSubscription.unsubscribe();
+                    } catch (error) {
+                        console.warn(`[Custom Battles][${this.config.name || 'Battle'}] Error unsubscribing persistent visual sync:`, error);
+                    }
+                    this._visualSyncSubscription = null;
+                }
+            }
+
+            /**
+             * Drag-time spawn-tile overlay for noHitboxMask battles (config.tileRestrictions.
+             * noHitboxMask === true). applyPlacementHitboxMask() is a hard no-op under that
+             * flag — room.file.data.hitboxes is never touched — so the native walkable-tile
+             * highlight can't be used to show spawn tiles.
+             *
+             * Same technique/styling as Map Editor's own updatePlacementOverlay() (Map_Editor.
+             * js) for its allowed tiles: a CSS <div> painted directly onto each spawn tile
+             * (blue, non-destructive DOM overlay) rather than real hitbox mutation — Map
+             * Editor's own code does the same thing for the same reason (see its "Visual
+             * fallback... even if the native game ignores live hitbox mutations" comment).
+             * Unlike Map Editor's persistent toggle, this only paints spawn tiles (no dimming
+             * of blocked ones) and only while actively dragging an ally — see the
+             * onDragStart/onDragEnd wiring in setupPlacementHitboxMaskHooks() below.
+             */
+            getAllTileElementsWithIndex() {
+                const nodes = document.querySelectorAll('[id^="tile-index-"]');
+                const out = [];
+                nodes.forEach((element) => {
+                    const match = /^tile-index-(\d+)$/.exec(element.id || '');
+                    if (!match) return;
+                    out.push({ tileIndex: Number(match[1]), element });
+                });
+                return out;
+            }
+
+            showSpawnTileHighlights() {
+                if (this.isBoardBattleActive()) return false;
+                if (!this.ownsBoardRestrictions(this.activationCallback)) return false;
+                const allowedTiles = this.config.tileRestrictions?.allowedTiles;
+                if (!Array.isArray(allowedTiles) || !allowedTiles.length) return false;
+                const allowed = new Set(allowedTiles.map((tileIndex) => Number(tileIndex)));
+                const tiles = this.getAllTileElementsWithIndex();
+                if (!tiles.length) return false;
+                const marker = `data-custom-battle-spawn-overlay-${this._setupSeq}`;
+                tiles.forEach(({ tileIndex, element }) => {
+                    if (!allowed.has(tileIndex)) return;
+                    // Per-tile dedup, not a whole-battle flag — safe (and necessary) to call
+                    // this repeatedly to top up any overlay tiles a native re-render wiped out.
+                    if (element.querySelector(`[${marker}]`)) return;
+                    const overlay = document.createElement('div');
+                    overlay.setAttribute(marker, '1');
+                    overlay.style.cssText = 'position:absolute;right:0;bottom:0;'
+                        + 'width:calc(32px * var(--zoomFactor));height:calc(32px * var(--zoomFactor));'
+                        + 'pointer-events:none;z-index:9999;background:rgba(64,160,255,.45);'
+                        + 'box-shadow:inset 0 0 0 1px rgba(120,200,255,.8);';
+                    element.appendChild(overlay);
+                });
+                this._spawnTileHighlightActive = true;
+                return true;
+            }
+
+            hideSpawnTileHighlights() {
+                if (!this._spawnTileHighlightActive) return;
+                document.querySelectorAll(`[data-custom-battle-spawn-overlay-${this._setupSeq}]`).forEach((el) => el.remove());
+                this._spawnTileHighlightActive = false;
+            }
+
             isLikelyAllyDragSource(target) {
                 if (!target || typeof target.closest !== 'function') return false;
                 if (target.closest('button[aria-roledescription="draggable"]')) return true;
@@ -1351,27 +1527,45 @@ if (window.CustomBattles) {
                 if (this._placementHitboxHooks || !this.config.tileRestrictions?.allowedTiles?.length) return;
                 if (!globalThis.state?.board?.on) return;
 
-                const onBattleStart = () => {
-                    if (this._placementHitboxMaskActive) {
-                        console.log(`[Custom Battles][${this.config.name || 'Battle'}] Restoring combat hitboxes for battle start`);
-                    }
-                    this.restorePlacementHitboxes();
-                };
-                const onBattleEnd = () => {
-                    setTimeout(() => this.syncPlacementHitboxMask(this.activationCallback), 0);
-                };
+                const noHitboxMask = this.config.tileRestrictions?.noHitboxMask === true;
 
-                this._placementHitboxHooks = [
-                    globalThis.state.board.on('before-game-start', onBattleStart),
-                    globalThis.state.board.on('emitNewGame', onBattleStart),
-                    globalThis.state.board.on('emitEndGame', onBattleEnd)
-                ].filter((unsub) => typeof unsub === 'function');
+                if (noHitboxMask) {
+                    // Nothing in room.file.data.hitboxes ever changes for this battle, so battle
+                    // start/end has no combat-hitbox restore/remask to do — just make sure a
+                    // leftover drag overlay never survives into combat. autoSetupBoard only tops
+                    // the overlay up (doesn't turn it on) so a native re-render mid-drag can't
+                    // wipe its <div>s out from under an in-progress drag without this noticing —
+                    // it stays a no-op while idle, since showSpawnTileHighlights() is drag-scoped.
+                    this._placementHitboxHooks = [
+                        globalThis.state.board.on('before-game-start', () => this.hideSpawnTileHighlights()),
+                        globalThis.state.board.on('emitNewGame', () => this.hideSpawnTileHighlights()),
+                        globalThis.state.board.on('autoSetupBoard', () => {
+                            if (this._spawnTileHighlightActive) this.showSpawnTileHighlights();
+                        })
+                    ].filter((unsub) => typeof unsub === 'function');
+                } else {
+                    const onBattleStart = () => {
+                        if (this._placementHitboxMaskActive) {
+                            console.log(`[Custom Battles][${this.config.name || 'Battle'}] Restoring combat hitboxes for battle start`);
+                        }
+                        this.restorePlacementHitboxes();
+                    };
+                    const onBattleEnd = () => {
+                        setTimeout(() => this.syncPlacementHitboxMask(this.activationCallback), 0);
+                    };
 
-                // While dragging allies: hide villain tiles from walkable highlights.
-                // Idle / ready-to-start: keep villain tiles walkable.
+                    this._placementHitboxHooks = [
+                        globalThis.state.board.on('before-game-start', onBattleStart),
+                        globalThis.state.board.on('emitNewGame', onBattleStart),
+                        globalThis.state.board.on('emitEndGame', onBattleEnd)
+                    ].filter((unsub) => typeof unsub === 'function');
+                }
+
+                // While dragging allies: hide villain tiles from walkable highlights (hitbox-mask
+                // battles), or paint the spawn-tile overlay (noHitboxMask battles).
+                // Idle / ready-to-start: keep villain tiles walkable / hide the overlay.
                 if (!this._allyDragMaskHandlers) {
                     const onDragStart = (event) => {
-                        if (!this._placementHitboxMaskActive && !this.config.tileRestrictions?.allowedTiles?.length) return;
                         if (this.isBoardBattleActive()) return;
                         if (!this.ownsBoardRestrictions(this.activationCallback)) return;
                         if (!this.isLikelyAllyDragSource(event.target)) return;
@@ -1379,9 +1573,25 @@ if (window.CustomBattles) {
                             clearTimeout(this._allyDragEndTimer);
                             this._allyDragEndTimer = null;
                         }
+                        if (noHitboxMask) {
+                            this.showSpawnTileHighlights();
+                            return;
+                        }
+                        if (!this._placementHitboxMaskActive && !this.config.tileRestrictions?.allowedTiles?.length) return;
                         this.applyPlacementHitboxMask({ allyDrag: true });
                     };
                     const onDragEnd = () => {
+                        if (noHitboxMask) {
+                            if (!this._spawnTileHighlightActive) return;
+                            // Same settle delay as the hitbox-mask path below, so a drop isn't
+                            // still resolving when the overlay disappears out from under it.
+                            if (this._allyDragEndTimer) clearTimeout(this._allyDragEndTimer);
+                            this._allyDragEndTimer = setTimeout(() => {
+                                this._allyDragEndTimer = null;
+                                this.hideSpawnTileHighlights();
+                            }, 120);
+                            return;
+                        }
                         if (!this._placementHitboxAllyDrag) return;
                         if (this.isBoardBattleActive()) return;
                         if (!this.config.tileRestrictions?.allowedTiles?.length) return;
@@ -1423,6 +1633,7 @@ if (window.CustomBattles) {
                     this._allyDragMaskHandlers = null;
                 }
                 this.restorePlacementHitboxes();
+                this.hideSpawnTileHighlights();
             }
 
             /**
@@ -2288,39 +2499,38 @@ if (window.CustomBattles) {
                 const actorGameId = this.getActorGameId(actor);
                 if (Number.isFinite(expectedGameId) && actorGameId !== expectedGameId) return false;
 
-                // Allies must stay bound to forced-ally identity so player-placed
-                // creatures of the same species are never renamed by custom nicknames.
-                if (!isVillain) {
-                    const expectedPrefix = String(pieceConfig.keyPrefix || '').trim();
-                    const actorKey = String(actor?.key || actor?.entityTag || '').trim();
-                    if (expectedPrefix && actorKey && actorKey.startsWith(expectedPrefix)) {
-                        return true;
-                    }
-                    if (this.isForcedAllyEntity(actor)) return true;
-
-                    // The species-fallback (resurrection recovery) is applied by the CALLER,
-                    // one level up, across the whole actor list at once — never here per-actor.
-                    // Doing it here would let this same fallback independently say "yes" for
-                    // BOTH the real ally actor and an unrelated same-species player actor in
-                    // the same pass, since neither actor's own strict identity is consulted by
-                    // the other's check. The caller can see the whole board and only adopts by
-                    // species when there is truly a single unclaimed candidate.
-                    return false;
+                // actor.key is the custom identity string we stamp on boardConfig entries
+                // in createCustomAllyEntity/createCustomVillainEntity. Only trust it as a
+                // real string here — actor.entityTag on a LIVE combat actor is a Set (an
+                // internal ECS tag set, not our identity string), and String(aSet) silently
+                // stringifies to "[object Set]", a non-empty value that used to force a
+                // false "no match" (villains) or get treated as a genuine miss (allies).
+                const expectedPrefix = String(pieceConfig.keyPrefix || '').trim();
+                const actorKey = typeof actor?.key === 'string' ? actor.key.trim() : '';
+                if (expectedPrefix && actorKey) {
+                    return actorKey.startsWith(expectedPrefix);
                 }
 
-                // Setup: bind each piece to its spawn tile. Mid-battle actors move / revive
-                // off-tile — match by combat identity only so nicknames stay applied.
-                if (!this.isBoardBattleActive()) {
-                    const expectedTile = Number(pieceConfig.tileIndex);
-                    const actorTile = this.getActorTileIndex(actor);
-                    if (Number.isFinite(expectedTile)
-                        && Number.isFinite(actorTile)
-                        && actorTile !== expectedTile) {
-                        return false;
-                    }
+                if (!isVillain && this.isForcedAllyEntity(actor)) return true;
+
+                // The native engine doesn't carry actor.key forward onto the live actors it
+                // builds once `newGame` fires — actorKey above is always empty mid-battle —
+                // so keyPrefix/isForcedAllyEntity can only ever match during setup. Fall back
+                // to spawn tileIndex, which is what actually disambiguates multiple pieces
+                // sharing a gameId (e.g. 4 Minotaurs, 2 Rookstayers) once combat starts. This
+                // is safe because gameId + the villain/ally flag already narrowed the
+                // candidates above; it only risks mis-tagging if another same-species,
+                // same-role actor has since moved onto this piece's now-vacated spawn tile.
+                const expectedTile = Number(pieceConfig.tileIndex);
+                const actorTile = this.getActorTileIndex(actor);
+                if (Number.isFinite(expectedTile) && Number.isFinite(actorTile)) {
+                    return actorTile === expectedTile;
                 }
 
-                return true;
+                // No tile to bind to. Allies stay unclaimed rather than risk renaming an
+                // unrelated same-species player actor; villains default to matching since
+                // gameId (and keyPrefix, when present) already narrowed the field.
+                return isVillain;
             }
 
             /**
@@ -2397,8 +2607,9 @@ if (window.CustomBattles) {
                             const lastAt = this._namedPieceMissLogByKey.get(missKey) || 0;
                             if (now - lastAt > 3000) {
                                 this._namedPieceMissLogByKey.set(missKey, now);
+                                const battleNameForLog = this.config.name || 'Battle';
                                 console.warn(
-                                    `[Custom Battles][${this.config.name || 'Battle'}] Named ${isVillain ? 'villain' : 'ally'} "${displayName}" has no matching actor right now — it will show its raw species instead until re-matched`,
+                                    `[Custom Battles][${battleNameForLog}] Named ${isVillain ? 'villain' : 'ally'} "${displayName}" has no matching actor right now — it will show its raw species instead until re-matched`,
                                     {
                                         gameId: piece.gameId,
                                         keyPrefix: piece.keyPrefix,
@@ -2413,6 +2624,14 @@ if (window.CustomBattles) {
                                         }))
                                     }
                                 );
+                                // Same console-collapse problem as the hitbox diagnostic: the
+                                // object preview above shows "Array(N)" and doesn't survive
+                                // copy-paste unless manually expanded. Print each candidate as
+                                // plain text too so a pasted log carries the actual key/entityTag
+                                // that failed to match `keyPrefix`.
+                                sameSpecies.forEach((a, idx) => {
+                                    console.warn(`[Custom Battles][${battleNameForLog}] candidate[${idx}] key="${a?.key ?? ''}" entityTag="${a?.entityTag ?? ''}" name="${a?.name ?? ''}" nickname="${a?.nickname ?? ''}" villain=${a?.villain === true} tileIndex=${this.getActorTileIndex(a)} — expectedKeyPrefix="${piece.keyPrefix || ''}"`);
+                                });
                             }
                         }
                     }
@@ -5011,6 +5230,32 @@ if (window.CustomBattles) {
                     return;
                 }
 
+                // Enforce single ownership per room. Native rooms get reused across many
+                // quests (e.g. "rkswrs" backs five separate quest battles plus every Map
+                // Editor test session for that room), and only one CustomBattle should ever
+                // govern a room's placement-hitbox mask / allowedTiles at a time. Previously
+                // that was left to ownsBoardRestrictions()'s score heuristic, which only
+                // resolves correctly if every battle's cleanup() reliably fires — but nothing
+                // calls cleanup() when a player abandons a battle mid-fight (navigates away,
+                // reloads into another room, etc.), so that instance's isActive flag never
+                // resets and it lingers in activeCustomBattles indefinitely, silently
+                // contending for (and sometimes winning) board ownership of a room it no
+                // longer represents. Retiring any other still-active claimant on this exact
+                // roomId up front removes the race outright instead of hoping the score wins.
+                const roomId = this.config?.roomId;
+                if (roomId) {
+                    Array.from(activeCustomBattles).forEach((battle) => {
+                        if (battle === this || !battle.isActive) return;
+                        if (battle.config?.roomId !== roomId) return;
+                        console.warn(`[Custom Battles][${this.config.name || 'Battle'}] Evicting stale battle "${battle.config?.name || 'Battle'}" still active on room ${roomId} before taking over`);
+                        try {
+                            battle.cleanup();
+                        } catch (error) {
+                            console.error(`[Custom Battles][${this.config.name || 'Battle'}] Error evicting stale battle on room ${roomId}:`, error);
+                        }
+                    });
+                }
+
                 this.isActive = true;
                 this._setupSeq = ++customBattleSetupSeq;
                 activeCustomBattles.add(this);
@@ -5095,6 +5340,7 @@ if (window.CustomBattles) {
 
                 console.log('[Custom Battles][' + (this.config.name || 'Battle') + '] Cleaning up battle system');
 
+                this.stopPersistentVisualSync();
                 this.cleanupPlacementHitboxMaskHooks();
 
                 // Unsubscribe from all subscriptions

@@ -39,7 +39,7 @@ const FALLBACK_OFFICIAL_MODS = [
 ];
 const FALLBACK_SUPER_MODS = [
   'Autoseller.js', 'Autoscroller.js', 'Battle_Helper.js', 'Better Analytics.js', 'Better Bestiary.js', 'Better Boosted Maps.js',
-  'Better Cauldron.js', 'Better Exaltation Chest.js', 'Better Forge.js', 'Better Highscores.js',
+  'Better Cauldron.js', 'Better Daycare.js', 'Better Exaltation Chest.js', 'Better Forge.js', 'Better Highscores.js',
   'Better Hy\'genie.js', 'Better Rune Recycler.js', 'Better Setups.js', 'Better Tasker.js',
   'Better Teleporter.js', 'Better Yasir.js', 'Cyclopedia.js', 'Dice_Roller.js', 'Depot Manager.js', 'Hunt Analyzer.js',
   'Mod Settings.js', 'Outfiter.js', 'Raid_Hunter.js', 'Manual Runner.js',

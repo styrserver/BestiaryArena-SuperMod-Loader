@@ -8374,7 +8374,18 @@ function buildQuestCustomBattleCreateConfig({
       hydrate: `const spawn = getHydratedQuestBattleSpawn('${battleId}');`,
       create: 'window.CustomBattles.create({ name, roomId, villains: spawn.villains, allyLimit: spawn.allyLimit, preventVillainMovement, hideVillainSprites, tileRestrictions, sceneSpriteReplacements, activationCheck, victoryDefeat })',
       activationCheck: '(isSandbox, inBattleArea) => isSandbox && inBattleArea && <questEntryFlag>',
-      note: 'Copy battles.<battleId> into assets/quests/battles.json, then mirror createSpiderLairBattleInstance / createPutridChamberBattleInstance in Quests.js using customBattle fields + spawn.villains.'
+      // If this room has any rooms.tileMutations (decorative sprites and/or per-tile hitbox
+      // overrides), call battle.startPersistentVisualSync(applyYourTileMutations, { isActiveCheck })
+      // ONCE, right inside scheduleEntryVillainSetup's onComplete callback — see
+      // setupHellgateBattleInstance() in Quests.js for the reference implementation. Do NOT
+      // hand-roll your own fixed retry-timer burst or your own board.subscribe() for this;
+      // CustomBattle now owns that lifecycle (including automatic teardown in cleanup()) as a
+      // single shared implementation. Skipping this was exactly the bug Hellgate Part 1 shipped
+      // with: it only had a fixed ~2s retry burst after entry, so nothing ever re-applied tile
+      // mutations or re-synced the placement hitbox mask again after that — any ally placed
+      // later in the fight could leave allowed/blocked tiles stuck wrong for good.
+      visualSync: 'battle.startPersistentVisualSync(applyYourTileMutations, { isActiveCheck: () => <questEntryFlag> })',
+      note: 'Copy battles.<battleId> into assets/quests/battles.json, then mirror createHellgateBattleInstance in Quests.js using customBattle fields + spawn.villains + the visualSync call above (skip it only if this quest has no rooms.tileMutations at all).'
     }
   };
 
@@ -8527,7 +8538,8 @@ function buildQuestRoomExport(options = {}) {
     `1. Merge battles.${battleId} into assets/quests/battles.json (same shape as spider_lair).`,
     `2. Merge rooms.${roomKey} into assets/quests/rooms.json (roomName/roomId/battleId[+tileMutations][+sceneSpriteReplacements]).`,
     '3. In Quests.js, apply rooms.tileMutations (tile-keyed add/remove/hitbox), then mirror createSpiderLairBattleInstance with customBattle + spawn.villains.',
-    '4. Wire activationCheck / victoryDefeat (mission flags, rewards, navigate-on-close). customBattle._wireInQuests has the stubs.'
+    '4. Wire activationCheck / victoryDefeat (mission flags, rewards, navigate-on-close). customBattle._wireInQuests has the stubs.',
+    '5. If this room has tileMutations, call battle.startPersistentVisualSync(applyYourTileMutations, { isActiveCheck }) once in scheduleEntryVillainSetup\'s onComplete — see customBattle._wireInQuests.visualSync and createHellgateBattleInstance in Quests.js. Do not hand-roll a fixed retry burst or your own board.subscribe() for this.'
   ];
   if (battleRules.allies.length) {
     howto.push(
@@ -8595,7 +8607,8 @@ function buildFullMapExport(options = {}) {
     `1. Merge battles.${battleId} into assets/quests/battles.json (same shape as spider_lair).`,
     `2. Merge rooms.${roomKey} into assets/quests/rooms.json (roomName/roomId/battleId[+tileMutations][+sceneSpriteReplacements]).`,
     '3. In Quests.js, apply rooms.tileMutations (tile-keyed add/remove/hitbox), then mirror createSpiderLairBattleInstance with customBattle + spawn.villains.',
-    '4. Wire activationCheck / victoryDefeat (mission flags, rewards, navigate-on-close). customBattle._wireInQuests has the stubs.'
+    '4. Wire activationCheck / victoryDefeat (mission flags, rewards, navigate-on-close). customBattle._wireInQuests has the stubs.',
+    '5. If this room has tileMutations, call battle.startPersistentVisualSync(applyYourTileMutations, { isActiveCheck }) once in scheduleEntryVillainSetup\'s onComplete — see customBattle._wireInQuests.visualSync and createHellgateBattleInstance in Quests.js. Do not hand-roll a fixed retry burst or your own board.subscribe() for this.'
   ];
   if (battleRules.allies.length) {
     howto.push(

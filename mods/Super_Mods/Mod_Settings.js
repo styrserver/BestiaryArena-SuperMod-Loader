@@ -12194,11 +12194,19 @@ function applyShinyEnemies() {
       
       // Find the DOM element for this enemy using spriteId
       const selector = `.sprite.id-${spriteId}`;
-      const allSprites = document.querySelectorAll(selector);
-      
+      // Document-wide by class only, so this can also match non-battle sprites that happen
+      // to reuse the same outfit/spriteId — e.g. the Quests mod's board-NPC decorations
+      // (data-quests-board-npc-menu-bound, set on every one of them regardless of which
+      // NPC) rendered with a real creature's outfit id for their board sprite. Filtering
+      // those out BEFORE slicing to N (not just skipping them during the forEach below)
+      // matters: otherwise a decoration occupying an early DOM position steals one of the
+      // N slots meant for actual enemies, silently leaving a real enemy un-shined too.
+      const allSprites = Array.from(document.querySelectorAll(selector))
+        .filter((spriteDiv) => !spriteDiv.closest('[data-quests-board-npc-menu-bound]'));
+
       // Only apply to the first N sprites where N = number of enemies with this spriteId
       const numEnemiesWithThisSprite = enemySpriteCount.get(spriteId) || 0;
-      const spritesToMakeShiny = Array.from(allSprites).slice(0, numEnemiesWithThisSprite);
+      const spritesToMakeShiny = allSprites.slice(0, numEnemiesWithThisSprite);
       
       spritesToMakeShiny.forEach(spriteDiv => {
         // Skip sprites inside modals/dialogs (e.g., Bestiary)

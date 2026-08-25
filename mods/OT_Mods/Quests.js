@@ -200,15 +200,17 @@ function splitDialogueIntoChunks(text) {
 // appendChunk(text) does the actual one-line DOM append. If the text splits
 // into multiple 2-3 sentence chunks, each later chunk is appended after an
 // additional DIALOGUE_CHUNK_DELAY_MS delay instead of all at once.
+// Returns the setTimeout ids for any delayed chunks (empty array if none), so a
+// caller can cancel them if a newer message supersedes this one before they fire —
+// otherwise a stale trailing chunk (often ending in a question) can land in the
+// transcript after a reply that already moved the conversation past it.
 function scheduleChunkedDialogue(appendChunk, text, delayMs = DIALOGUE_CHUNK_DELAY_MS) {
   const chunks = splitDialogueIntoChunks(text);
   if (chunks.length <= 1) {
     appendChunk(text);
-    return;
+    return [];
   }
-  chunks.forEach((chunk, i) => {
-    setTimeout(() => appendChunk(chunk), i * delayMs);
-  });
+  return chunks.map((chunk, i) => setTimeout(() => appendChunk(chunk), i * delayMs));
 }
 
 function getQuestsNpcChatContentWidth(dialog, dialogWidth) {
@@ -470,6 +472,7 @@ let DANE_RESPONSES = {};
 let DANE_RUMOUR_LINES = [];
 let ORACLE_RESPONSES = {};
 let ORACLE_DESTINY_DIALOGUE = {};
+let ELATHRIEL_RESPONSES = {};
 let KING_TIBIANUS_CONFUSION_RESPONSES = [];
 let KING_TIBIANUS_SWEAR_WORDS = [];
 let KING_TIBIANUS_SWEAR_RESPONSE = 'How dare you! Guards, remove this insolent subject!';
@@ -482,6 +485,7 @@ let SANTA_CONFUSION_RESPONSES = [];
 let SVENSON_CONFUSION_RESPONSES = [];
 let DANE_CONFUSION_RESPONSES = [];
 let ORACLE_CONFUSION_RESPONSES = [];
+let ELATHRIEL_CONFUSION_RESPONSES = [];
 let NPC_QUEST_ITEM_CHAT_RESPONSES = {};
 const NPC_QUEST_ITEM_UNINVOLVED_TEMPLATES = {};
 
@@ -683,6 +687,10 @@ function applyQuestDialogueFromAssets(missionsData, npcsData) {
       ORACLE_CONFUSION_RESPONSES = [...(npc.confusion || [])];
       ORACLE_DESTINY_DIALOGUE = { ...(npc.destiny || {}) };
     }],
+    ['elathriel', (npc) => {
+      ELATHRIEL_RESPONSES = { ...(npc.keywords || {}) };
+      ELATHRIEL_CONFUSION_RESPONSES = [...(npc.confusion || [])];
+    }],
     ['king-tibianus', (npc) => {
       KING_TIBIANUS_CONFUSION_RESPONSES = [...(npc.confusion || [])];
       KING_TIBIANUS_SWEAR_WORDS = Array.isArray(npc.swear?.words) ? [...npc.swear.words] : [];
@@ -797,15 +805,6 @@ function applyQuestToastsFromAssets(toastsData) {
   questToastsConfigData = toastsData;
 }
 
-function fillPlayerTileRange(target, range) {
-  if (!Array.isArray(target) || !range || typeof range !== 'object') return;
-  const from = Number(range.from);
-  const to = Number(range.to);
-  if (!Number.isFinite(from) || !Number.isFinite(to) || to < from) return;
-  target.length = 0;
-  for (let i = from; i <= to; i++) target.push(i);
-}
-
 function applyQuestRoomsFromAssets(roomsData) {
   if (!roomsData || typeof roomsData !== 'object') return;
 
@@ -884,7 +883,6 @@ function applyQuestRoomsFromAssets(roomsData) {
     if (sheng.battleTileIndex != null) APPRENTICE_SHENG_BATTLE_TILE_INDEX = sheng.battleTileIndex;
     if (Array.isArray(sheng.minotaurTiles)) replaceArrayContents(APPRENTICE_SHENG_MINOTAUR_TILES, sheng.minotaurTiles);
     if (Array.isArray(sheng.allyTiles)) replaceArrayContents(APPRENTICE_SHENG_ALLY_TILES, sheng.allyTiles);
-    if (sheng.playerTiles) fillPlayerTileRange(APPRENTICE_SHENG_PLAYER_TILES, sheng.playerTiles);
     if (sheng.villainGameIdFallback != null) APPRENTICE_SHENG_VILLAIN_GAME_ID_FALLBACK = sheng.villainGameIdFallback;
     if (sheng.fightIconUrl) {
       APPRENTICE_SHENG_FIGHT_ICON_URL = sheng.fightIconUrl;
@@ -947,18 +945,18 @@ function applyQuestRoomsFromAssets(roomsData) {
   const spider = roomsData.spiderLair;
   if (spider) {
     if (spider.secludedHerbRoomName) SECLUDED_HERB_ROOM_NAME = spider.secludedHerbRoomName;
-    if (spider.spiderLairRoomName) SPIDER_LAIR_ROOM_NAME = spider.spiderLairRoomName;
-    if (spider.useSecludedHerbIfMissing != null) SPIDER_LAIR_USE_SECLUDED_HERB_IF_MISSING = !!spider.useSecludedHerbIfMissing;
     if (spider.secludedHerbTile != null) SECLUDED_HERB_TILE_77 = spider.secludedHerbTile;
-    if (spider.tile86 != null) SPIDER_LAIR_TILE_86 = spider.tile86;
-    if (spider.tile87 != null) SPIDER_LAIR_TILE_87 = spider.tile87;
-    if (spider.tile86SpriteId) SPIDER_LAIR_TILE_86_SPRITE_ID = spider.tile86SpriteId;
-    if (spider.tile87SpriteId) SPIDER_LAIR_TILE_87_SPRITE_ID = spider.tile87SpriteId;
-    if (spider.spriteToRemoveId) SPIDER_LAIR_SPRITE_TO_REMOVE_ID = spider.spriteToRemoveId;
-    if (Array.isArray(spider.tilesAddSprite2127)) replaceArrayContents(SPIDER_LAIR_TILES_ADD_SPRITE_2127, spider.tilesAddSprite2127);
-    if (spider.addSprite2127Id) SPIDER_LAIR_ADD_SPRITE_2127_ID = spider.addSprite2127Id;
-    if (Array.isArray(spider.tilesAddSprite4312)) replaceArrayContents(SPIDER_LAIR_TILES_ADD_SPRITE_4312, spider.tilesAddSprite4312);
-    if (spider.addSprite4312Id) SPIDER_LAIR_ADD_SPRITE_4312_ID = spider.addSprite4312Id;
+    if (spider.battleRoomName) SPIDER_LAIR_BATTLE_ROOM_NAME = spider.battleRoomName;
+    if (spider.battleRoomId) SPIDER_LAIR_BATTLE_ROOM_ID = spider.battleRoomId;
+    if (spider.battleDisplayName) SPIDER_LAIR_BATTLE_DISPLAY_NAME = spider.battleDisplayName;
+    if (spider.battleId) SPIDER_LAIR_BATTLE_ID = spider.battleId;
+    if (spider.tileMutations && typeof spider.tileMutations === 'object') {
+      SPIDER_LAIR_TILE_MUTATIONS = spider.tileMutations;
+    }
+    if (spider.sceneSpriteReplacements?.rules?.length) {
+      SPIDER_LAIR_SCENE_SPRITE_REPLACEMENTS.rootId = spider.sceneSpriteReplacements.rootId || 'background-scene';
+      SPIDER_LAIR_SCENE_SPRITE_REPLACEMENTS.rules = spider.sceneSpriteReplacements.rules.slice();
+    }
   }
 
   const jakundaf = roomsData.jakundafDesert;
@@ -1026,6 +1024,24 @@ function applyQuestRoomsFromAssets(roomsData) {
     }
   }
 
+  const hellgateRoom = roomsData.hellgateTreasureRoom;
+  if (hellgateRoom) {
+    if (hellgateRoom.battleRoomName) HELLGATE_BATTLE_ROOM_NAME = hellgateRoom.battleRoomName;
+    if (hellgateRoom.battleRoomId) HELLGATE_BATTLE_ROOM_ID = hellgateRoom.battleRoomId;
+    if (hellgateRoom.battleDisplayName) HELLGATE_BATTLE_DISPLAY_NAME = hellgateRoom.battleDisplayName;
+    if (hellgateRoom.battleId) HELLGATE_BATTLE_ID = hellgateRoom.battleId;
+    if (hellgateRoom.tileMutations && typeof hellgateRoom.tileMutations === 'object') {
+      HELLGATE_TILE_MUTATIONS = hellgateRoom.tileMutations;
+    }
+  }
+
+  const mornenionRoom = roomsData.mornenion;
+  if (mornenionRoom) {
+    if (mornenionRoom.tileMutations && typeof mornenionRoom.tileMutations === 'object') {
+      MORNENION_TILE_MUTATIONS = mornenionRoom.tileMutations;
+    }
+  }
+
   const board = roomsData.boardNpcs;
   if (board) {
     if (board.santa) {
@@ -1061,6 +1077,13 @@ function applyQuestRoomsFromAssets(roomsData) {
       if (board.dane.id) BOARD_NPC_DANE_ID = board.dane.id;
       if (board.dane.whiteWaveTileIndex != null) DANE_WHITE_WAVE_TILE_INDEX = board.dane.whiteWaveTileIndex;
       if (board.dane.dialogueIconUrl) DANE_DIALOGUE_ICON_URL = board.dane.dialogueIconUrl;
+    }
+    if (board.elathriel) {
+      if (board.elathriel.id) BOARD_NPC_ELATHRIEL_ID = board.elathriel.id;
+      if (board.elathriel.roomName) ELATHRIEL_ROOM_NAME = board.elathriel.roomName;
+      if (board.elathriel.tileIndex != null) ELATHRIEL_TILE_INDEX = board.elathriel.tileIndex;
+      if (board.elathriel.outfitSpriteId) ELATHRIEL_OUTFIT_SPRITE_ID = board.elathriel.outfitSpriteId;
+      if (board.elathriel.dialogueIconUrl) ELATHRIEL_DIALOGUE_ICON_URL = board.elathriel.dialogueIconUrl;
     }
     if (board.oracle) {
       if (board.oracle.id) BOARD_NPC_ORACLE_ID = board.oracle.id;
@@ -1383,7 +1406,6 @@ let APPRENTICE_SHENG_TILE_INDEX = null;
 let APPRENTICE_SHENG_BATTLE_TILE_INDEX = null;
 const APPRENTICE_SHENG_MINOTAUR_TILES = [];
 const APPRENTICE_SHENG_ALLY_TILES = [];
-const APPRENTICE_SHENG_PLAYER_TILES = [];
 let APPRENTICE_SHENG_VILLAIN_GAME_ID_FALLBACK = null;
 const APPRENTICE_SHENG_OVERLAY_CLASS = 'quests-rookstayer-overlay';
 let APPRENTICE_SHENG_FIGHT_ICON_URL = '';
@@ -1418,7 +1440,8 @@ const QUEST_MISSION_IDS = [
   'christmas_miracle',
   'svenson_love_story',
   'weakened_archdemon',
-  'lost_oracle'
+  'lost_oracle',
+  'hellgate_part_1'
 ];
 
 for (const missionId of QUEST_MISSION_IDS) {
@@ -1447,9 +1470,11 @@ const CHRISTMAS_MIRACLE_MISSION = MISSION_BY_ID.christmas_miracle;
 const SVENSON_LOVE_STORY_MISSION = MISSION_BY_ID.svenson_love_story;
 const WEAKENED_ARCHDEMON_MISSION = MISSION_BY_ID.weakened_archdemon;
 const LOST_ORACLE_MISSION = MISSION_BY_ID.lost_oracle;
+const HELLGATE_PART_1_MISSION = MISSION_BY_ID.hellgate_part_1;
 
 const MINOTAUR_TROPHY_CONFIG = {};
 const ORB_CONFIG = {};
+const GHAZBARAN_SOUL_CORE_CONFIG = {};
 const LUMINOUS_ORB_CONFIG = {};
 const SPECTRAL_STONE_CONFIG = {};
 
@@ -1559,18 +1584,17 @@ let BANSHEE_LAST_ROOM_NAME = '';
 let BANSHEE_LAST_ROOM_USE_DEMONRAGE_IF_MISSING = false;
 
 let SECLUDED_HERB_ROOM_NAME = '';
-let SPIDER_LAIR_ROOM_NAME = '';
-let SPIDER_LAIR_USE_SECLUDED_HERB_IF_MISSING = false;
 let SECLUDED_HERB_TILE_77 = null;
-let SPIDER_LAIR_TILE_86 = null;
-let SPIDER_LAIR_TILE_87 = null;
-let SPIDER_LAIR_TILE_86_SPRITE_ID = '';
-let SPIDER_LAIR_TILE_87_SPRITE_ID = '';
-let SPIDER_LAIR_SPRITE_TO_REMOVE_ID = '';
-const SPIDER_LAIR_TILES_ADD_SPRITE_2127 = [];
-let SPIDER_LAIR_ADD_SPRITE_2127_ID = '';
-const SPIDER_LAIR_TILES_ADD_SPRITE_4312 = [];
-let SPIDER_LAIR_ADD_SPRITE_4312_ID = '';
+// Mother of All Spiders: tile 77 in A Secluded Herb starts the Old Widow battle in
+// Sewers, following the same shared-room tileMutations pattern as Knarknaknork
+// (SEWERS_*), Ekatrix (EKATRIX_*), and Jakundaf Desert (JAKUNDAF_*) below — the
+// entry trigger is still A Secluded Herb, only the destination room changed.
+let SPIDER_LAIR_BATTLE_ROOM_NAME = 'Sewers';
+let SPIDER_LAIR_BATTLE_ROOM_ID = 'rkswrs';
+let SPIDER_LAIR_BATTLE_DISPLAY_NAME = 'Spider Lair';
+let SPIDER_LAIR_BATTLE_ID = 'spider_lair';
+let SPIDER_LAIR_TILE_MUTATIONS = null;
+const SPIDER_LAIR_SCENE_SPRITE_REPLACEMENTS = { rootId: 'background-scene', rules: [] };
 
 let JAKUNDAF_ENTRY_ROOM_NAMES = ["Wyda's House", "Wyda's House in Venore"];
 let JAKUNDAF_DESERT_TILE_INDEX = 76;
@@ -1608,6 +1632,20 @@ let SEWERS_BATTLE_ROOM_ID = 'rkswrs';
 let SEWERS_BATTLE_DISPLAY_NAME = 'Knarknaknork';
 let SEWERS_BATTLE_ID = 'sewers';
 let SEWERS_TILE_MUTATIONS = null;
+let HELLGATE_BATTLE_ROOM_NAME = 'Sewers';
+let HELLGATE_BATTLE_ROOM_ID = 'rkswrs';
+let HELLGATE_BATTLE_DISPLAY_NAME = 'Hellgate Treasure Room';
+let HELLGATE_BATTLE_ID = 'hellgate_treasure_room';
+let HELLGATE_TILE_MUTATIONS = null;
+
+// Ab'Dendriel Hive (Mornenion) reskin. NOTE: this was originally implemented via
+// CustomBattles' native sceneSpriteReplacements (a global sprite-id swap), but that
+// replaces EVERY instance of a source id anywhere in the room — losing per-tile
+// crop/bank variants and stripping unrelated co-located decor. Uses the same
+// tile-scoped, additive tileMutations mechanism as Sewers/Ekatrix instead (see
+// applyMornenionTileMutations()) — bakes the exact final sprite onto each specific
+// tile rather than a room-wide find/replace.
+let MORNENION_TILE_MUTATIONS = null;
 
 const KING_ARENA_RANKS = [];
 
@@ -1863,6 +1901,7 @@ const PRODUCT_CONFIG_BY_ID = {
   minotaurTrophy: MINOTAUR_TROPHY_CONFIG,
   orb: ORB_CONFIG,
   luminousOrb: LUMINOUS_ORB_CONFIG,
+  ghazbaranSoulCore: GHAZBARAN_SOUL_CORE_CONFIG,
   spectralStone: SPECTRAL_STONE_CONFIG,
   copperKey: COPPER_KEY_CONFIG,
   mapColour: MAP_COLOUR_CONFIG,
@@ -1960,6 +1999,12 @@ const ORACLE_SCENE_SPRITE_REPLACEMENTS = {
   rules: [{ sourceIds: [429], replacementId: 410, preserveCrop: true, scope: 'tile' }]
 };
 const ORACLE_SCENE_SPRITE_ATTEMPT_DELAYS_MS = [0, 100, 250, 500, 800, 1200];
+let BOARD_NPC_ELATHRIEL_ID = '';
+let ELATHRIEL_ROOM_NAME = '';
+let ELATHRIEL_TILE_INDEX = null;
+const ELATHRIEL_OVERLAY_CLASS = 'quests-elathriel-overlay';
+let ELATHRIEL_OUTFIT_SPRITE_ID = '';
+let ELATHRIEL_DIALOGUE_ICON_URL = '';
 let GHAZBARAN_HIDEOUT_ROOM_NAME = '';
 let GHAZBARAN_HIDEOUT_DISPLAY_NAME = '';
 let GHAZBARAN_TILE_INDEX = null;
@@ -2133,6 +2178,7 @@ function createNPCCooldownManager() {
     progressScarabHunt: { accepted: false, completed: false },
     progressSerpentineTower: { accepted: false, completed: false, destroyFieldRuneTaken: false, putridChamberComplete: false },
     progressApprenticeSheng: { accepted: false, completed: false, battleCompleted: false, rookstayerDismissed: false },
+    progressHellgatePart1: { accepted: false, completed: false, battleCompleted: false },
     progressChristmasMiracle: { accepted: false, completed: false },
     progressSvensonLoveStory: { accepted: false, completed: false, plankDelivered: false, strandedAtAwash: false, awashYarnDelivered: false, awashYarnRequested: false, strandedAtUnderground: false, undergroundCompassDelivered: false, undergroundCompassRequested: false, strandedAtWhiteWave: false, whiteWaveSlippersDelivered: false },
     progressWeakenedArchdemon: { accepted: false, completed: false, battleCompleted: false },
@@ -2247,6 +2293,13 @@ function createNPCCooldownManager() {
   let lastOverlayHiderRoomName = null; // track previous room so we only remove originals when entering Spider Lair via quest
   let tile77SpiderLairRightClickEnabled = false;
   let tile77SpiderLairBoardSubscription = null;
+  let spiderLairHitboxesApplied = false;
+  // Set true right as Start is clicked (see triggerSpiderLairBattleStart), mirroring
+  // mornenionBattleStarting: tells applySpiderLairTileMutations' retry burst to skip
+  // re-masking with the placement-hitbox mask while combat is starting/active, so it
+  // doesn't clobber the forced raw combat-hitbox write below it.
+  let spiderLairBattleStarting = false;
+  let spiderLairVisualRetryTimers = [];
 
   // Jakundaf Desert (after Mother of All Spiders: tile 76 in Wyda's house → Sewers custom battle)
   let tile76JakundafRightClickEnabled = false;
@@ -2293,6 +2346,11 @@ function createNPCCooldownManager() {
   let sewersHitboxesApplied = false;
   let sewersVisualRetryTimers = [];
 
+  // Hellgate Part 1 (Elathriel: chat-triggered teleport into the Fire Elemental battle in Sewers)
+  let playerFollowedElathrielToHellgate = false;
+  let hellgateBattle = null;
+  let hellgateHitboxesApplied = false;
+
   // Putrid Chamber (Serpentine Tower Quest: basement lever → custom battle)
   let playerUsedSerpentineLeverToPutridChamber = false;
   let putridChamberBattle = null;
@@ -2335,13 +2393,6 @@ function createNPCCooldownManager() {
   let ghazNativeDamageActorEnterUnsub = null;
   let ghazNativeSpellDamageSample = null;
   let ghazAnimLastStateByKey = new Map();
-  let ghazBossHpBarEl = null;
-  let ghazBossHpBarFillEl = null;
-  let ghazBossHpBarValueEl = null;
-  let ghazBossHpBarInterval = null;
-  let ghazBossHpBarLastKey = null;
-  const GHAZ_BOSS_HP_BAR_ID = 'quests-ghaz-boss-hp-bar';
-  const GHAZ_BOSS_HP_BAR_STYLE_ID = 'quests-ghaz-boss-hp-bar-styles';
   const GHAZ_NATIVE_DAMAGE_LOG_LIMIT = 60;
   const GHAZ_NATIVE_DAMAGE_DOM_LOG_LIMIT = 40;
 
@@ -2378,6 +2429,12 @@ function createNPCCooldownManager() {
   // =======================
   let playerUsedHoleToMornenion = false; // Track if player used hole to enter Mornenion
   let mornenionBattle = null; // CustomBattle instance for Mornenion
+  // Set true the instant Start is detected (click handler / before-game-start hook),
+  // before CustomBattles' own isBoardBattleActive() has necessarily flipped true yet.
+  // Lets applyMornenionTileMutations() know to skip placement-phase mask logic even
+  // during that brief window — see the guard where it's read, below. Reset on cleanup so
+  // the next hole-entry's placement phase behaves normally again.
+  let mornenionBattleStarting = false;
 
 
   function waitForCustomBattles({
@@ -2443,6 +2500,7 @@ function createNPCCooldownManager() {
         allowedTiles: spawn.allowedTiles || [67, 81, 97],
         message: spawn.allowedTilesMessage || 'Ally creatures can only be placed on tiles 67, 81, and 97 in Mornenion!'
       },
+      preventVillainMovement: spawn.preventVillainMovement !== false,
       hideVillainSprites: spawn.hideVillainSprites !== false,
       activationCheck: (isSandbox, inBattleArea) => {
         return isSandbox && inBattleArea && playerUsedHoleToMornenion;
@@ -2453,7 +2511,13 @@ function createNPCCooldownManager() {
           await addQuestItem('Elvenhair Rope', 1).catch(error => {
             console.error('[Quests Mod][Mornenion] Error adding Elvenhair Rope:', error);
           });
-          
+
+          const mornenionSoulCoreName = AL_DEE_GOLDEN_ROPE_MISSION.soulCoreItemName || 'Mornenion Soul Core';
+          await addQuestItem(mornenionSoulCoreName, 1).catch(error => {
+            console.error('[Quests Mod][Mornenion] Error adding soul core:', error);
+          });
+          NotificationService.showItemReceived(mornenionSoulCoreName, '[Quests Mod][Mornenion]');
+
           // Set Mornenion defeated flag
           try {
             const playerName = getCurrentPlayerName();
@@ -2487,10 +2551,13 @@ function createNPCCooldownManager() {
         },
         victoryTitle: 'Victory!',
         defeatTitle: 'Defeat',
-        victoryMessage: getMissionDialogueLine(AL_DEE_GOLDEN_ROPE_MISSION, 'battleVictory', 'Mornenion was slain. You found Elvenhair Rope.'),
+        victoryMessage: getMissionDialogueLine(AL_DEE_GOLDEN_ROPE_MISSION, 'battleVictory', 'Mornenion was slain. You found Elvenhair Rope and a soul core.'),
         defeatMessage: getMissionDialogueLine(AL_DEE_GOLDEN_ROPE_MISSION, 'battleDefeat', 'Mornenion\'s powers were too strong for you.'),
         showItems: false,
-        items: [{ name: 'Elvenhair Rope', amount: 1 }]
+        items: [
+          { name: 'Elvenhair Rope', amount: 1 },
+          { name: AL_DEE_GOLDEN_ROPE_MISSION.soulCoreItemName || 'Mornenion Soul Core', amount: 1 }
+        ]
       }
     };
 
@@ -2512,6 +2579,10 @@ function createNPCCooldownManager() {
   function getGameIdByCreatureName(name, fallback) {
     if (!name) return fallback != null ? fallback : 1;
     try {
+      if (window.BestiaryModAPI?.utility?.maps?.monsterNamesToGameIds) {
+        const gameId = window.BestiaryModAPI.utility.maps.monsterNamesToGameIds.get(name.toLowerCase());
+        if (gameId) return gameId;
+      }
       if (window.creatureDatabase?.findMonsterByName) {
         const m = window.creatureDatabase.findMonsterByName(name);
         if (m?.gameId) return m.gameId;
@@ -2526,9 +2597,394 @@ function createNPCCooldownManager() {
         }
       }
     } catch (e) {
-      console.warn('[Quests Mod][Banshee Last Room] getGameIdByCreatureName failed for', name, e);
+      console.warn('[Quests Mod] getGameIdByCreatureName failed for', name, e);
     }
     return fallback != null ? fallback : 1;
+  }
+
+  /**
+   * Reusable "is a specific ally monster placed on a specific tile" check, for missions
+   * that need the player to position a creature on a tile to trigger something (e.g. the
+   * Copper Key mission's Corym Charlatan on Mine Hub tile 69). Ally detection and piece->gameId
+   * resolution are shared with the Fastest Bishop role-matching code (isAllyPieceOnBoard,
+   * getPieceGameId below) rather than duplicated here — this just adds the "match a specific
+   * gameId" identity check on top of those.
+   */
+  function isAllyMonsterOnTile(boardConfig, tileIndex, targetGameId, { serverResults = null } = {}) {
+    try {
+      if (!boardConfig || !Array.isArray(boardConfig) || tileIndex == null || !targetGameId) {
+        return false;
+      }
+
+      return boardConfig.some(piece => {
+        if (!piece || !isAllyPieceOnBoard(piece)) return false;
+        if (piece.tileIndex !== tileIndex) return false;
+        return getPieceGameId(piece, serverResults) === targetGameId;
+      });
+    } catch (error) {
+      console.error('[Quests Mod] Error checking ally monster on tile', tileIndex, ':', error);
+      return false;
+    }
+  }
+
+  const bossHpBarFactoryRegistry = [];
+
+  /**
+   * Reusable on-screen boss HP bar (fixed top-center, pixel-art frame, color-banded fill,
+   * "current / max" readout, ~200ms polling). Originally built one-off for Ghazbaran
+   * (Weakened Archdemon); factored out here so any boss fight can get one the same way —
+   * see ghazBossHpBar / ekatrixBossHpBar / oldWidowBossHpBar / mornenionBossHpBar below
+   * for how each boss instance is wired up.
+   *
+   * Each instance is fully self-contained: it tracks its own battle-world reference (via
+   * its own board.on('newGame'/'emitNewGame') subscription, set up by setupObserver()),
+   * polls for HP changes while active, and mounts/unmounts its own DOM + <style> tag.
+   *
+   * @param {string} id - short slug, namespaces this bar's DOM id/classes (e.g. 'ghaz')
+   * @param {() => string} getName - display name shown in the bar's title
+   * @param {() => string} getIconUrl - icon image URL for the 28x28 portrait
+   * @param {() => boolean} isActive - is this boss's fight the one currently in progress
+   * @param {(world: any) => any} findActor - resolve this boss's live battle actor from a
+   *   battle-world object (the `event.world` payload from board.on('newGame'/'emitNewGame'))
+   */
+  function createBossHpBar({ id, getName, getIconUrl, isActive, findActor, debug = false }) {
+    const barId = `quests-boss-hp-bar-${id}`;
+    const styleId = `${barId}-styles`;
+    let barEl = null;
+    let fillEl = null;
+    let valueEl = null;
+    let pollInterval = null;
+    let lastKey = null;
+    let battleWorld = null;
+    let worldUnsubs = [];
+
+    function getMountRoot() {
+      return document.querySelector('.relative.z-0.select-none')
+        || document.querySelector('[class*="relative"]')
+        || document.body;
+    }
+
+    function ensureStyles() {
+      if (document.getElementById(styleId)) return;
+      const style = document.createElement('style');
+      style.id = styleId;
+      style.textContent = `
+        #${barId} {
+          position: absolute;
+          top: 9px;
+          left: 50%;
+          transform: translateX(-50%);
+          z-index: 999999;
+          pointer-events: none;
+          width: fit-content;
+          max-width: min(420px, calc(100vw - 24px));
+        }
+        #${barId} .quests-boss-hp-bg {
+          position: absolute;
+          inset: 0;
+          background: url("https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png");
+          background-size: auto;
+          background-repeat: repeat;
+          opacity: 0.92;
+          border-radius: 4px;
+          pointer-events: none;
+          z-index: 0;
+        }
+        #${barId} .quests-boss-hp-content {
+          position: relative;
+          z-index: 1;
+          box-sizing: border-box;
+          border: 4px solid transparent;
+          border-image: url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 4 stretch;
+          border-radius: 4px;
+          padding: 6px 10px;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          min-width: 280px;
+          color: #fff;
+        }
+        #${barId} .quests-boss-hp-icon {
+          width: 28px;
+          height: 28px;
+          image-rendering: pixelated;
+          flex: 0 0 auto;
+        }
+        #${barId} .quests-boss-hp-main {
+          flex: 1 1 auto;
+          min-width: 0;
+          display: flex;
+          flex-direction: column;
+          gap: 3px;
+        }
+        #${barId} .quests-boss-hp-title {
+          font-size: 12px;
+          line-height: 1.2;
+          color: #ffcc66;
+          text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        #${barId} .quests-boss-hp-row {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+        #${barId} .quests-boss-hp-track {
+          flex: 1 1 auto;
+          height: 12px;
+          background: rgba(0, 0, 0, 0.55);
+          border: 1px solid #111;
+          box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+          overflow: hidden;
+        }
+        #${barId} .quests-boss-hp-fill {
+          height: 100%;
+          width: 100%;
+          transform-origin: left center;
+          transform: scaleX(1);
+          background: linear-gradient(180deg, #e85a4f 0%, #b42828 55%, #7a1515 100%);
+          transition: transform 120ms linear, background 180ms ease;
+        }
+        #${barId} .quests-boss-hp-fill[data-pct="low"] {
+          background: linear-gradient(180deg, #ff7a3a 0%, #d44518 55%, #8a2208 100%);
+        }
+        #${barId} .quests-boss-hp-fill[data-pct="critical"] {
+          background: linear-gradient(180deg, #ff4444 0%, #aa1010 55%, #5a0000 100%);
+        }
+        #${barId} .quests-boss-hp-value {
+          font-size: 11px;
+          line-height: 1;
+          color: #ffffff;
+          text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;
+          white-space: nowrap;
+          min-width: 72px;
+          text-align: right;
+        }
+      `;
+      document.head.appendChild(style);
+    }
+
+    function readHpValues(actor) {
+      const hpComp = actor?.hp || actor?.getComponent?.('hp') || null;
+      let current = null;
+      let max = null;
+      if (hpComp) {
+        if (Number.isFinite(Number(hpComp._hp))) current = Number(hpComp._hp);
+        else if (Number.isFinite(Number(hpComp.currentHP))) current = Number(hpComp.currentHP);
+        if (Number.isFinite(Number(hpComp.max))) max = Number(hpComp.max);
+        else if (Number.isFinite(Number(hpComp.maxHp))) max = Number(hpComp.maxHp);
+      }
+      if (!Number.isFinite(current)) {
+        const snap = getActorHpSnapshot(actor);
+        if (Number.isFinite(snap.hp)) current = snap.hp;
+        if (!Number.isFinite(max) && Number.isFinite(snap.maxHp)) max = snap.maxHp;
+      }
+      if (!Number.isFinite(max) || max <= 0) max = Number.isFinite(current) ? current : 0;
+      if (!Number.isFinite(current)) current = max;
+      current = Math.max(0, Math.min(max, Math.floor(current)));
+      max = Math.max(0, Math.floor(max));
+      const alive = !(hpComp?._isAlive === false || actor?.dead || actor?.isDead || current <= 0);
+      return { current, max, alive, ratio: max > 0 ? current / max : 0 };
+    }
+
+    function stopPolling() {
+      if (pollInterval) {
+        clearInterval(pollInterval);
+        pollInterval = null;
+      }
+    }
+
+    function remove() {
+      stopPolling();
+      barEl?.remove?.();
+      barEl = null;
+      fillEl = null;
+      valueEl = null;
+      lastKey = null;
+      document.getElementById(barId)?.remove();
+    }
+
+    function update(force = false) {
+      if (!barEl || !document.contains(barEl)) {
+        if (isActive() && findActor(battleWorld)) show();
+        return;
+      }
+      if (!isActive()) {
+        remove();
+        return;
+      }
+
+      const actor = findActor(battleWorld);
+      if (!actor) {
+        // Battle world exists but actor not ready yet — keep placeholder, never show 0/0.
+        if (force || lastKey !== 'pending') {
+          lastKey = 'pending';
+          if (fillEl) {
+            fillEl.style.transform = 'scaleX(1)';
+            fillEl.setAttribute('data-pct', 'full');
+          }
+          if (valueEl) valueEl.textContent = '— / —';
+        }
+        return;
+      }
+
+      const { current, max, ratio, alive } = readHpValues(actor);
+      if (!Number.isFinite(max) || max <= 0) {
+        if (valueEl) valueEl.textContent = '— / —';
+        return;
+      }
+
+      const pct = Math.max(0, Math.min(1, ratio));
+      const key = `${current}/${max}:${alive ? 1 : 0}`;
+      if (!force && key === lastKey) return;
+      lastKey = key;
+
+      if (debug) {
+        const hpComp = actor?.hp || actor?.getComponent?.('hp') || null;
+        console.log(`[Quests Mod][BossHpBar][${id}] resolved actor`, {
+          matchedName: actor?.name ?? actor?.metadata?.name ?? actor?.entityTag ?? null,
+          tileIndex: actor?.tileIndex ?? actor?.position?.tileIndex ?? null,
+          gameId: actor?.gameId ?? actor?.metadata?.gameId ?? null,
+          hpComponentFields: hpComp ? Object.keys(hpComp) : null,
+          current, max, ratio, alive
+        });
+      }
+
+      if (fillEl) {
+        fillEl.style.transform = `scaleX(${pct})`;
+        let band = 'full';
+        if (pct <= 0.25) band = 'critical';
+        else if (pct <= 0.5) band = 'low';
+        fillEl.setAttribute('data-pct', band);
+      }
+      if (valueEl) {
+        valueEl.textContent = alive ? `${current} / ${max}` : 'Defeated';
+      }
+    }
+
+    function startPolling() {
+      stopPolling();
+      update(true);
+      pollInterval = setInterval(() => {
+        if (!isActive()) {
+          remove();
+          return;
+        }
+        update(false);
+      }, 200);
+    }
+
+    function show() {
+      if (!isActive()) return;
+      // Wait until a fight world exists so we don't flash 0/0 on board setup.
+      if (!battleWorld && !findActor(null)) return;
+      ensureStyles();
+
+      let wrapper = document.getElementById(barId);
+      if (!wrapper) {
+        wrapper = document.createElement('div');
+        wrapper.id = barId;
+        wrapper.setAttribute('aria-label', `${getName()} health`);
+
+        const bg = document.createElement('div');
+        bg.className = 'quests-boss-hp-bg';
+        wrapper.appendChild(bg);
+
+        const content = document.createElement('div');
+        content.className = 'quests-boss-hp-content';
+
+        const icon = document.createElement('img');
+        icon.className = 'quests-boss-hp-icon';
+        icon.alt = '';
+        icon.src = getIconUrl();
+        icon.draggable = false;
+        content.appendChild(icon);
+
+        const main = document.createElement('div');
+        main.className = 'quests-boss-hp-main';
+
+        const title = document.createElement('div');
+        title.className = 'quests-boss-hp-title pixel-font-14';
+        title.textContent = getName();
+        main.appendChild(title);
+
+        const row = document.createElement('div');
+        row.className = 'quests-boss-hp-row';
+
+        const track = document.createElement('div');
+        track.className = 'quests-boss-hp-track';
+        const fill = document.createElement('div');
+        fill.className = 'quests-boss-hp-fill';
+        fill.setAttribute('data-pct', 'full');
+        track.appendChild(fill);
+        row.appendChild(track);
+
+        const value = document.createElement('div');
+        value.className = 'quests-boss-hp-value pixel-font-14';
+        value.textContent = '— / —';
+        row.appendChild(value);
+
+        main.appendChild(row);
+        content.appendChild(main);
+        wrapper.appendChild(content);
+
+        fillEl = fill;
+        valueEl = value;
+      } else {
+        fillEl = wrapper.querySelector('.quests-boss-hp-fill');
+        valueEl = wrapper.querySelector('.quests-boss-hp-value');
+      }
+
+      const mountRoot = getMountRoot();
+      if (wrapper.parentNode !== mountRoot) {
+        mountRoot.appendChild(wrapper);
+      }
+      barEl = wrapper;
+      startPolling();
+    }
+
+    function handleWorldEvent(world) {
+      if (world) battleWorld = world;
+      if (isActive()) show();
+    }
+
+    function setupObserver() {
+      if (worldUnsubs.length) return;
+      const board = globalThis.state?.board;
+      if (!board?.on) return;
+      const unsubNew = board.on('newGame', (event) => handleWorldEvent(event?.world || null));
+      const unsubEmit = board.on('emitNewGame', (event) => handleWorldEvent(event?.world || null));
+      worldUnsubs = [unsubNew, unsubEmit].filter(Boolean);
+    }
+
+    function cleanupSystem() {
+      remove();
+      worldUnsubs.forEach((u) => {
+        try {
+          if (typeof u === 'function') u();
+          else if (u && typeof u.unsubscribe === 'function') u.unsubscribe();
+        } catch (e) { /* noop */ }
+      });
+      worldUnsubs = [];
+      battleWorld = null;
+    }
+
+    const handle = { show, update, remove, setupObserver, cleanupSystem };
+    bossHpBarFactoryRegistry.push(handle);
+    return handle;
+  }
+
+  // Generic "find this boss's live battle actor by display name" resolver, for bosses
+  // without their own gameId-based board-entity lookup (see getGhazbaranBoardEntity for
+  // the gameId-based alternative used by findGhazBattleActor).
+  function findBattleActorByName(world, name) {
+    const actors = getBattleWorldActors(world);
+    if (!actors.length || !name) return null;
+    const needle = String(name).toLowerCase();
+    return actors.find((actor) => actor?.villain === true
+      && String(actor?.name || actor?.metadata?.name || actor?.entityTag || '').toLowerCase().includes(needle)) || null;
   }
 
   function createApprenticeShengBattleInstance(roomId) {
@@ -2539,12 +2995,10 @@ function createNPCCooldownManager() {
     const spawn = getHydratedQuestBattleSpawn('apprentice_sheng');
     const villains = spawn.villains;
     const allies = spawn.allies;
-    const allowedTiles = spawn.allowedTiles || APPRENTICE_SHENG_PLAYER_TILES;
 
     console.log('[Quests Mod][Apprentice Sheng] Creating battle instance for roomId:', roomId, {
       villains: villains.map((v) => ({ nickname: v.nickname, tileIndex: v.tileIndex, gameId: v.gameId })),
-      allies: allies.map((a) => ({ nickname: a.nickname, tileIndex: a.tileIndex, gameId: a.gameId })),
-      playerTiles: allowedTiles.length ? (allowedTiles[0] + '-' + allowedTiles[allowedTiles.length - 1]) : 'none'
+      allies: allies.map((a) => ({ nickname: a.nickname, tileIndex: a.tileIndex, gameId: a.gameId }))
     });
 
     return window.CustomBattles.create({
@@ -2554,10 +3008,15 @@ function createNPCCooldownManager() {
       allies,
       allyLimit: spawn.allyLimit ?? 5,
       preventVillainMovement: spawn.preventVillainMovement !== false,
-      tileRestrictions: {
-        allowedTiles,
-        message: spawn.allowedTilesMessage || 'Ally creatures can only be placed on tiles 95-128!'
-      },
+      // noHitboxMask: true — these are spawn/placement marker tiles, not a hitbox
+      // restriction. allowedTiles still drives the setup-time filter (reject + toast on
+      // an invalid drop), but custom-battles.js's applyPlacementHitboxMask() is a hard
+      // no-op for this flag, so room.file.data.hitboxes is never touched for placement
+      // purposes — avoids the hitbox-mask desync bug this quest hit before.
+      ...(spawn.allowedTiles?.length
+        ? { tileRestrictions: { allowedTiles: spawn.allowedTiles, message: spawn.allowedTilesMessage || 'Ally creatures can only be placed on the marked tiles!', noHitboxMask: true } }
+        : {}),
+      debugPlacementMask: true,
       activationCheck: (isSandbox, inBattleArea) => {
         return isSandbox && inBattleArea && playerAcceptedApprenticeShengBattle;
       },
@@ -3062,7 +3521,9 @@ function createNPCCooldownManager() {
     return null;
   }
 
-  // Spider Lair (Mother of All Spiders): custom battle when entering from tile 77 in A Secluded Herb. roomId from getRoomIdByRoomName(SPIDER_LAIR_ROOM_NAME) or fallback to A Secluded Herb.
+  // Spider Lair (Mother of All Spiders): custom battle when entering from tile 77 in A Secluded Herb.
+  // roomId resolves to Sewers (SPIDER_LAIR_BATTLE_ROOM_ID/NAME) — same shared room as
+  // Knarknaknork/Ekatrix/Jakundaf; entry trigger stays A Secluded Herb tile 77.
   function createSpiderLairBattleInstance(roomId) {
     if (!window.CustomBattles) {
       console.error('[Quests Mod][Spider Lair] CustomBattles still not available');
@@ -3076,13 +3537,22 @@ function createNPCCooldownManager() {
     } else {
       console.log('[Quests Mod][Spider Lair] No equip resolved for villains. Config:', JSON.parse(JSON.stringify(villains)));
     }
+    const spiderLairTileRestrictions = {};
+    if (spawn.allowedTiles?.length) {
+      spiderLairTileRestrictions.allowedTiles = spawn.allowedTiles;
+      spiderLairTileRestrictions.message = spawn.allowedTilesMessage || 'Ally creatures can only be placed on the marked tiles!';
+    }
     const spiderLairConfig = {
-      name: SPIDER_LAIR_ROOM_NAME,
+      name: SPIDER_LAIR_BATTLE_DISPLAY_NAME || 'Spider Lair',
       roomId: roomId,
       villains,
       allyLimit: spawn.allyLimit ?? 5,
       preventVillainMovement: spawn.preventVillainMovement !== false,
       hideVillainSprites: spawn.hideVillainSprites !== false,
+      ...(Object.keys(spiderLairTileRestrictions).length ? { tileRestrictions: spiderLairTileRestrictions } : {}),
+      ...(SPIDER_LAIR_SCENE_SPRITE_REPLACEMENTS.rules.length
+        ? { sceneSpriteReplacements: SPIDER_LAIR_SCENE_SPRITE_REPLACEMENTS }
+        : {}),
       activationCheck: (isSandbox, inBattleArea) => {
         return isSandbox && inBattleArea && playerUsedTile77ToSpiderLair;
       },
@@ -4097,6 +4567,155 @@ function createNPCCooldownManager() {
     onTileRightClick: (event) => createMiningContextMenu(event.clientX, event.clientY)
   });
 
+  // Once dug, the Mornenion hole (Hedge Maze tile 82) stays open, but re-entering the room
+  // rebuilds its tile DOM from scratch — any contextmenu listener attached directly to the
+  // transformed sprite element is destroyed along with it. Track it the same way the
+  // pre-dig tile is tracked above: a document-level listener (survives re-renders) gated
+  // by re-checking the live DOM each time update() runs, rather than a one-shot listener
+  // bound to a specific sprite node.
+  const mornenionHoleRightClickState = { tiles: new Set(), rightClickEnabled: false, clickedTile: null };
+
+  function isMornenionHoleOpenInHedgeMaze() {
+    if (getCurrentMapName() !== MINING_CONFIG.TARGET_MAP) return false;
+    const tile = document.getElementById(`tile-index-${MINING_CONFIG.TARGET_TILE_ID}`);
+    return !!tile?.querySelector(`.sprite.item.relative.id-${MINING_CONFIG.SPRITE_TRANSFORM.to}`);
+  }
+
+  function findMornenionHoleTiles() {
+    if (!isMornenionHoleOpenInHedgeMaze()) return [];
+    const tile = document.getElementById(`tile-index-${MINING_CONFIG.TARGET_TILE_ID}`);
+    return tile ? [tile] : [];
+  }
+
+  // Shared by both entry points for the already-dug hole: the one-shot listener attached
+  // directly to the transformed sprite right after digging (destroyed by any DOM rebuild),
+  // and mornenionHoleRightClickSystem's document-level listener (survives rebuilds).
+  async function enterMornenionHoleFromHedgeMaze() {
+    // Check if golden rope mission is accepted - if not, prevent navigation
+    const playerName = getCurrentPlayerName();
+    if (playerName) {
+      const progress = await getKingTibianusProgress(playerName);
+      const goldenRopeAccepted = progress?.alDeeGoldenRope?.accepted;
+      if (!goldenRopeAccepted) {
+        console.log('[Quests Mod][Digging] Golden rope mission not accepted - hole access disabled');
+        showToast({ message: TOAST_MESSAGES.frightenedHole, logPrefix: '[Quests Mod][Digging]' });
+        return;
+      }
+    }
+
+    // Check if Mornenion has been defeated - if so, prevent navigation
+    const mornenionDefeated = await isMornenionDefeated();
+    if (mornenionDefeated) {
+      showToast({ message: MORNENION_DEFEATED_MESSAGE, logPrefix: '[Quests Mod][Digging]' });
+      return;
+    }
+
+    // Find Ab'Dendriel Hive room ID
+    const roomNames = globalThis.state?.utils?.ROOM_NAME;
+    if (!roomNames) return;
+
+    for (const [roomId, name] of Object.entries(roomNames)) {
+      if (name !== "Ab'Dendriel Hive") continue;
+
+      // Set flag to indicate player used hole to enter Ab'Dendriel Hive BEFORE navigation
+      playerUsedHoleToAbDendriel = true;
+      // Also set Mornenion flag since abwasp is repurposed as Mornenion quest area
+      playerUsedHoleToMornenion = true;
+
+      // Clean up any existing battle instance to ensure fresh state
+      if (mornenionBattle) {
+        console.log('[Quests Mod][Mining] Cleaning up existing Mornenion battle before creating new instance');
+        mornenionBattle.cleanup(restoreBoardSetup, showQuestOverlays);
+        mornenionBattle = null;
+      }
+
+      // Initialize Mornenion battle (always create fresh instance)
+      const initResult = initializeMornenionBattle();
+      if (initResult && initResult.then) {
+        // Async initialization - CustomBattles not ready yet, wait for it
+        initResult.then((battle) => {
+          if (battle) {
+            mornenionBattle = battle;
+            mornenionBattle.setup(
+              () => playerUsedHoleToMornenion,
+              NotificationService.createBattleToastCallback(BATTLE_TOAST_LOG.mornenion)
+            );
+            setupMornenionTileRestrictions();
+            showCustomBattleStatusToast({ battleName: 'Mornenion', allyLimit: 3, battle, logPrefix: '[Quests Mod][Mornenion]' });
+            console.log('[Quests Mod][Mining] Mornenion battle initialized successfully');
+          } else {
+            console.error('[Quests Mod][Mining] Failed to initialize Mornenion battle after waiting');
+          }
+        }).catch((error) => {
+          console.error('[Quests Mod][Mining] Error initializing Mornenion battle:', error);
+        });
+      } else if (initResult) {
+        // Synchronous initialization - CustomBattles was ready immediately
+        mornenionBattle = initResult;
+        mornenionBattle.setup(
+          () => playerUsedHoleToMornenion,
+          NotificationService.createBattleToastCallback(BATTLE_TOAST_LOG.mornenion)
+        );
+        setupMornenionTileRestrictions();
+        showCustomBattleStatusToast({ battleName: 'Mornenion', allyLimit: 3, battle: initResult, logPrefix: '[Quests Mod][Mornenion]' });
+        console.log('[Quests Mod][Mining] Mornenion battle initialized successfully');
+      } else {
+        console.error('[Quests Mod][Mining] Failed to initialize Mornenion battle - CustomBattles not available');
+      }
+
+      globalThis.state.board.send({
+        type: 'selectRoomById',
+        roomId: roomId
+      });
+
+      // Show navigation message
+      showToast({
+        message: TOAST_MESSAGES.travelingAbDendriel,
+        logPrefix: '[Quests Mod][Digging]'
+      });
+      break;
+    }
+  }
+
+  const mornenionHoleRightClickSystem = createRightClickTileSystem({
+    id: 'Mornenion Hole',
+    state: mornenionHoleRightClickState,
+    getTiles: findMornenionHoleTiles,
+    shouldEnableListener: isMornenionHoleOpenInHedgeMaze,
+    shouldEnablePointerEvents: isMornenionHoleOpenInHedgeMaze,
+    onTileRightClick: () => { enterMornenionHoleFromHedgeMaze(); }
+  });
+
+  // Diagnostic-only listener, registered once at load (before the conditional handler
+  // above ever attaches), so it always sees every right-click on the target tile even
+  // when the main system's gating rejects it. Explains "right-click does nothing" reports
+  // without needing the user to run console commands by hand.
+  if (typeof document !== 'undefined') {
+    document.addEventListener('contextmenu', (event) => {
+      try {
+        if (getCurrentMapName() !== MINING_CONFIG.TARGET_MAP) return;
+        const tile = document.getElementById(`tile-index-${MINING_CONFIG.TARGET_TILE_ID}`);
+        if (!tile || !tile.contains(event.target)) return;
+        console.log(`[Quests Mod][Mornenion Hole][debug] right-click on tile-index-${MINING_CONFIG.TARGET_TILE_ID}`, {
+          mapName: getCurrentMapName(),
+          fromSpriteId: MINING_CONFIG.SPRITE_TRANSFORM?.from,
+          toSpriteId: MINING_CONFIG.SPRITE_TRANSFORM?.to,
+          hasFromSprite: !!tile.querySelector(`.sprite.item.relative.id-${MINING_CONFIG.SPRITE_TRANSFORM?.from}`),
+          hasToSprite: !!tile.querySelector(`.sprite.item.relative.id-${MINING_CONFIG.SPRITE_TRANSFORM?.to}`),
+          tileSpriteClasses: Array.from(tile.querySelectorAll('.sprite.item.relative')).map((el) =>
+            Array.from(el.classList).find((c) => /^id-\d+$/.test(c))
+          ),
+          isHoleOpen: isMornenionHoleOpenInHedgeMaze(),
+          listenerEnabled: mornenionHoleRightClickState.rightClickEnabled,
+          tileTracked: mornenionHoleRightClickState.tiles.has(tile),
+          trackedTileCount: mornenionHoleRightClickState.tiles.size
+        });
+      } catch (e) {
+        console.error('[Quests Mod][Mornenion Hole][debug] error', e);
+      }
+    }, true);
+  }
+
   // Update digging functionality based on state
   async function updateMiningState(manualToggle = false) {
     try {
@@ -4129,6 +4748,14 @@ function createNPCCooldownManager() {
       } else {
         miningRightClickSystem.cleanup();
         if (miningState.contextMenu && miningState.contextMenu.closeMenu) miningState.contextMenu.closeMenu();
+      }
+
+      // The already-dug hole's right-click-to-enter listener needs the same re-evaluation
+      // (room changes, Light Shovel state) as the pre-dig tile above.
+      if (hasLightShovel) {
+        mornenionHoleRightClickSystem.update(globalThis.state?.board?.getSnapshot?.()?.context);
+      } else {
+        mornenionHoleRightClickSystem.cleanup();
       }
     } catch (error) {
       console.error('[Quests Mod][Digging] Error in updateMiningState:', error);
@@ -4260,98 +4887,24 @@ function createNPCCooldownManager() {
             transformedSprite.addEventListener('contextmenu', async (event) => {
               event.preventDefault();
               event.stopPropagation();
-
-              // Check if golden rope mission is accepted - if not, prevent navigation
-              const playerName = getCurrentPlayerName();
-              if (playerName) {
-                const progress = await getKingTibianusProgress(playerName);
-                const goldenRopeAccepted = progress?.alDeeGoldenRope?.accepted;
-                if (!goldenRopeAccepted) {
-                  console.log('[Quests Mod][Digging] Golden rope mission not accepted - hole access disabled');
-                  showToast({ message: TOAST_MESSAGES.frightenedHole, logPrefix: '[Quests Mod][Digging]' });
-                  return;
-                }
-              }
-
-              // Check if Mornenion has been defeated - if so, prevent navigation
-              const mornenionDefeated = await isMornenionDefeated();
-              if (mornenionDefeated) {
-                showToast({ message: MORNENION_DEFEATED_MESSAGE, logPrefix: '[Quests Mod][Digging]' });
-                return;
-              }
-
-              // Find Ab'Dendriel Hive room ID
-              const roomNames = globalThis.state?.utils?.ROOM_NAME;
-              if (roomNames) {
-                for (const [roomId, name] of Object.entries(roomNames)) {
-                  if (name === "Ab'Dendriel Hive") {
-                    // Set flag to indicate player used hole to enter Ab'Dendriel Hive BEFORE navigation
-                    playerUsedHoleToAbDendriel = true;
-                    // Also set Mornenion flag since abwasp is repurposed as Mornenion quest area
-                    playerUsedHoleToMornenion = true;
-                    
-                    // Clean up any existing battle instance to ensure fresh state
-                    if (mornenionBattle) {
-                      console.log('[Quests Mod][Mining] Cleaning up existing Mornenion battle before creating new instance');
-                      mornenionBattle.cleanup(restoreBoardSetup, showQuestOverlays);
-                      mornenionBattle = null;
-                    }
-                    
-                    // Initialize Mornenion battle (always create fresh instance)
-                    const initResult = initializeMornenionBattle();
-                    if (initResult && initResult.then) {
-                      // Async initialization - CustomBattles not ready yet, wait for it
-                      initResult.then((battle) => {
-                        if (battle) {
-                          mornenionBattle = battle;
-                          mornenionBattle.setup(
-                            () => playerUsedHoleToMornenion,
-                            NotificationService.createBattleToastCallback(BATTLE_TOAST_LOG.mornenion)
-                          );
-                          setupMornenionTileRestrictions();
-                          showCustomBattleStatusToast({ battleName: 'Mornenion', allyLimit: 3, battle, logPrefix: '[Quests Mod][Mornenion]' });
-                          console.log('[Quests Mod][Mining] Mornenion battle initialized successfully');
-                        } else {
-                          console.error('[Quests Mod][Mining] Failed to initialize Mornenion battle after waiting');
-                        }
-                      }).catch((error) => {
-                        console.error('[Quests Mod][Mining] Error initializing Mornenion battle:', error);
-                      });
-                    } else if (initResult) {
-                      // Synchronous initialization - CustomBattles was ready immediately
-                      mornenionBattle = initResult;
-                      mornenionBattle.setup(
-                        () => playerUsedHoleToMornenion,
-                        NotificationService.createBattleToastCallback(BATTLE_TOAST_LOG.mornenion)
-                      );
-                      setupMornenionTileRestrictions();
-                      showCustomBattleStatusToast({ battleName: 'Mornenion', allyLimit: 3, battle: initResult, logPrefix: '[Quests Mod][Mornenion]' });
-                      console.log('[Quests Mod][Mining] Mornenion battle initialized successfully');
-                    } else {
-                      console.error('[Quests Mod][Mining] Failed to initialize Mornenion battle - CustomBattles not available');
-                    }
-
-                    globalThis.state.board.send({
-                      type: 'selectRoomById',
-                      roomId: roomId
-                    });
-
-                    // Show navigation message
-                    showToast({
-                      message: TOAST_MESSAGES.travelingAbDendriel,
-                      logPrefix: '[Quests Mod][Digging]'
-                    });
-                    break;
-                  }
-                }
-              }
-
+              await enterMornenionHoleFromHedgeMaze();
               return false;
             });
           }
 
           // Remove this tile from the mining tiles set so it can't be clicked again
           miningState.tiles.delete(miningState.clickedTile);
+
+          // mornenionHoleRightClickSystem (the DOM-rebuild-resistant "already dug"
+          // listener) only activates via updateMiningState(), which is otherwise only
+          // triggered by a room change or Light Shovel ownership change — neither of
+          // which happens here, since digging transforms the sprite in place without
+          // leaving Hedge Maze. Without this, the freshly-dug tile has no working
+          // right-click-to-enter until the player leaves and re-enters the room (the
+          // per-sprite listener attached above is a fallback for the same click, but is
+          // destroyed the moment anything re-renders this tile's DOM). Trigger the
+          // refresh immediately so entering works right away.
+          updateMiningState();
         }
       }
 
@@ -4645,6 +5198,9 @@ function createNPCCooldownManager() {
   const QUEST_BOARD_HIDDEN_TAG_EKATRIX = 'ekatrix-sewers';
   const QUEST_BOARD_ADDED_ATTR_SEWERS = 'data-quests-sewers-added';
   const QUEST_BOARD_HIDDEN_TAG_SEWERS = 'sewers-rookie-guard';
+  const QUEST_BOARD_ADDED_ATTR_HELLGATE = 'data-quests-hellgate-added';
+  const QUEST_BOARD_HIDDEN_TAG_HELLGATE = 'hellgate-treasure-room';
+  const QUEST_BOARD_ADDED_ATTR_SPIDER_LAIR = 'data-quests-spider-lair-added';
 
   function hideQuestBoardElement(element, options = {}) {
     const { tag = '1', clearDatasetKeys = [] } = options;
@@ -5548,7 +6104,7 @@ function createNPCCooldownManager() {
   function createQuestItemDescFrame() {
     const descFrame = document.createElement('div');
     descFrame.style.cssText = `
-      min-height: 80px;
+      min-height: 50px;
       padding: 2px 4px;
       width: 100%;
       box-sizing: border-box;
@@ -5586,8 +6142,18 @@ function createNPCCooldownManager() {
     };
     showBookDescription();
 
+    const sortedSoulCoreDefs = (soulCoreDefs || [])
+      .map((coreDef, index) => ({ coreDef, index }))
+      .sort((a, b) => {
+        const aObtained = (displayProducts?.[a.coreDef.name] || 0) > 0;
+        const bObtained = (displayProducts?.[b.coreDef.name] || 0) > 0;
+        if (aObtained !== bObtained) return aObtained ? -1 : 1;
+        return a.index - b.index;
+      })
+      .map(({ coreDef }) => coreDef);
+
     let selectedCoreElement = null;
-    for (const coreDef of soulCoreDefs || []) {
+    for (const coreDef of sortedSoulCoreDefs) {
       const count = displayProducts?.[coreDef.name] || 0;
       const { productItem, containerSlot } = createQuestItemSlotButton(coreDef, count, { dimUnowned: true });
       productItem.addEventListener('click', () => {
@@ -5847,46 +6413,14 @@ function createNPCCooldownManager() {
 
   // Get Corym Charlatan gameId
   function getCorymCharlatanGameId() {
-    try {
-      const monsterName = COPPER_KEY_CONFIG.targetMonsterName.toLowerCase();
-      
-      // Try BestiaryModAPI utility first
-      if (window.BestiaryModAPI?.utility?.maps?.monsterNamesToGameIds) {
-        const gameId = window.BestiaryModAPI.utility.maps.monsterNamesToGameIds.get(monsterName);
-        if (gameId) {
-          return gameId;
-        }
-      }
-      
-      // Try creature database
-      if (window.creatureDatabase?.findMonsterByName) {
-        const monster = window.creatureDatabase.findMonsterByName(COPPER_KEY_CONFIG.targetMonsterName);
-        if (monster?.gameId) {
-          return monster.gameId;
-        }
-      }
-      
-      // Try searching through all monsters using game state API
-      if (globalThis.state?.utils?.getMonster) {
-        // Try common gameIds first (Corym Charlatan is likely in a specific range)
-        for (let gameId = 1; gameId <= 200; gameId++) {
-          try {
-            const monsterData = globalThis.state.utils.getMonster(gameId);
-            if (monsterData?.metadata?.name?.toLowerCase() === monsterName) {
-              return gameId;
-            }
-          } catch (e) {
-            // Continue searching
-          }
-        }
-      }
-      
+    // fallback: 0 (never a real gameId) so a lookup failure is distinguishable from a
+    // legitimate result — getGameIdByCreatureName otherwise defaults to gameId 1 (Rat).
+    const gameId = getGameIdByCreatureName(COPPER_KEY_CONFIG.targetMonsterName, 0);
+    if (!gameId) {
       console.warn('[Quests Mod][Copper Key] Could not find Corym Charlatan gameId');
       return null;
-    } catch (error) {
-      console.error('[Quests Mod][Copper Key] Error getting Corym Charlatan gameId:', error);
-      return null;
     }
+    return gameId;
   }
 
   // Get Mine Hub room ID
@@ -6166,63 +6700,7 @@ function createNPCCooldownManager() {
 
   // Check if Corym Charlatan (ally) is on tile 69 in boardConfig
   function hasCorymCharlatanOnTile69(boardConfig, serverResults = null) {
-    try {
-      if (!boardConfig || !Array.isArray(boardConfig)) {
-        return false;
-      }
-      
-      const corymGameId = getCorymCharlatanGameId();
-      if (!corymGameId) {
-        return false;
-      }
-      
-      const targetTileIndex = COPPER_KEY_CONFIG.targetTileIndex;
-      
-      // Check for ally pieces (type: 'player' or type: 'custom' with villain: false)
-      return boardConfig.some(piece => {
-        if (!piece) return false;
-        
-        // Must be an ally (not villain)
-        const isAlly = piece.type === 'player' || (piece.type === 'custom' && piece.villain === false);
-        if (!isAlly) return false;
-        
-        // Must be on tile 69
-        if (piece.tileIndex !== targetTileIndex) return false;
-        
-        // Check gameId directly first
-        let pieceGameId = piece.gameId || piece.monsterId;
-        
-        // If no gameId but has databaseId, try to look it up
-        if (!pieceGameId && piece.databaseId) {
-          // Try to get gameId from player's monsters
-          try {
-            const playerContext = globalThis.state?.player?.getSnapshot?.()?.context;
-            if (playerContext?.monsters) {
-              const monster = playerContext.monsters.find(m => m.id === piece.databaseId);
-              if (monster?.gameId) {
-                pieceGameId = monster.gameId;
-              }
-            }
-          } catch (e) {
-            // Ignore errors
-          }
-          
-          // Also try serverResults.party if available
-          if (!pieceGameId && serverResults?.rewardScreen?.party) {
-            const partyMember = serverResults.rewardScreen.party.find(p => p.id === piece.databaseId);
-            if (partyMember?.gameId) {
-              pieceGameId = partyMember.gameId;
-            }
-          }
-        }
-        
-        // Must be Corym Charlatan
-        return pieceGameId === corymGameId;
-      });
-    } catch (error) {
-      console.error('[Quests Mod][Copper Key] Error checking Corym Charlatan on tile 69:', error);
-      return false;
-    }
+    return isAllyMonsterOnTile(boardConfig, COPPER_KEY_CONFIG.targetTileIndex, getCorymCharlatanGameId(), { serverResults });
   }
 
   /**
@@ -7517,8 +7995,17 @@ function createNPCCooldownManager() {
     }, delayMs);
   }
 
+  function refreshKingTibianusTabPendingBadge() {
+    const portrait = document.getElementById('king-tibianus-tab-portrait');
+    if (!portrait) return;
+    hasKingTibianusQuestAction()
+      .then((isPending) => setNpcModalPendingBadge(portrait, isPending))
+      .catch((err) => console.warn('[Quests Mod] Error refreshing King Tibianus tab badge:', err));
+  }
+
   async function updateArenaRankDisplay(options = {}) {
     const { forceFirebase = false } = options;
+    refreshKingTibianusTabPendingBadge();
     const rankElement = document.getElementById('king-tibianus-rank-display');
     if (!rankElement) return;
 
@@ -7615,6 +8102,13 @@ function createNPCCooldownManager() {
   function refreshBoardNpcsAfterQuestItemsChange() {
     if (typeof updateAllBoardNpcStates === 'function') {
       updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+    }
+    // Tile highlights/hints (e.g. the Copper Key rubble glow) can depend on quest item
+    // counts (isRoomActive checks like "do I already hold the key?"), so they need the
+    // same refresh — otherwise a highlight computed before items finished loading from
+    // Firebase never gets re-evaluated until some unrelated board event fires.
+    if (typeof refreshQuestTileHighlights === 'function') {
+      refreshQuestTileHighlights();
     }
   }
   
@@ -7826,7 +8320,9 @@ function createNPCCooldownManager() {
         MINOTAUR_TROPHY_CONFIG.productName,
         WISHLIST_CONFIG.productName,
         PRESENT_CONFIG.productName,
-        BUNNY_SLIPPERS_CONFIG.productName
+        BUNNY_SLIPPERS_CONFIG.productName,
+        'Key 3012',
+        'Beware of the Bonelords (Book)'
       ].includes(productName) || isBosstiaryCollectionItemName(productName);
 
       const newCount = isRedDragonMaterial ? Math.min(30, currentCount + amount) :
@@ -9332,6 +9828,7 @@ function createNPCCooldownManager() {
       button.style.textShadow = '1px 1px 0px rgba(0,0,0,0.8)';
       button.style.fontWeight = 'normal';
       button.style.padding = '0 8px';
+      button.style.whiteSpace = 'nowrap';
 
       // Add hover effects
       const hoverBg = buttonConfig.hoverBackgroundColor || '#1a2a4a';
@@ -10347,7 +10844,7 @@ function createNPCCooldownManager() {
               descDiv.appendChild(line);
             });
           } else {
-            descDiv.textContent = productDef.description;
+            descDiv.textContent = productDef.description || '';
             descDiv.style.cssText = 'font-size: 11px; color: rgb(150, 150, 150); font-style: italic; text-align: center;';
             if (productDef.description && productDef.description.includes('\n')) {
               descDiv.style.whiteSpace = 'pre-line';
@@ -10398,6 +10895,13 @@ function createNPCCooldownManager() {
                 miningState.manuallyDisabled = !miningState.enabled;
                 updateButtonState();
                 updateMiningState(true);
+                // Tile highlights otherwise only refresh on the next board-state change
+                // or game-timer tick, so toggling the shovel while already standing on
+                // the diggable tile wouldn't show the "Dig" highlight until one of those
+                // happened to fire. Refresh immediately so it appears right away.
+                if (typeof refreshQuestTileHighlights === 'function') {
+                  refreshQuestTileHighlights();
+                }
                 toastMessage = miningState.enabled ? TOAST_MESSAGES.shovelEnabled : TOAST_MESSAGES.shovelDisabled;
               }
 
@@ -10704,6 +11208,7 @@ function createNPCCooldownManager() {
       messageContainer.id = 'king-tibianus-messages';
       
       // Function to add message to conversation
+      let pendingKingChunkTimeouts = [];
       function addMessageToConversation(sender, text, isKing = false) {
         const appendOne = (chunkText) => {
           const messageP = document.createElement('p');
@@ -10721,13 +11226,35 @@ function createNPCCooldownManager() {
           }, 0);
         };
 
+        // A newer message (the player's reply, or the next queued NPC line) supersedes
+        // whatever this modal was still mid-way through printing — cancel any chunk of
+        // a previous long message that hasn't appeared yet, so it can't land in the
+        // transcript after a reply that already moved the conversation past it.
+        pendingKingChunkTimeouts.forEach((id) => clearTimeout(id));
+        pendingKingChunkTimeouts = [];
+
         if (isKing) {
-          scheduleChunkedDialogue(appendOne, text);
+          pendingKingChunkTimeouts = scheduleChunkedDialogue(appendOne, text);
         } else {
           appendOne(text);
         }
       }
-      
+
+      // Grey, italic hint line — distinct from King/player dialogue —
+      // used when the King is deliberately not responding (e.g. awaiting a proper greeting).
+      function addHintToConversation(text) {
+        const hintP = document.createElement('p');
+        hintP.className = 'inline text-monster';
+        hintP.style.cssText = 'color: rgb(150, 150, 150); font-style: italic;';
+        hintP.textContent = text;
+
+        messageContainer.appendChild(hintP);
+
+        setTimeout(() => {
+          messageContainer.scrollTop = messageContainer.scrollHeight;
+        }, 0);
+      }
+
       // If the starter coin was already spent (no token in inventory), greet normally
       (async () => {
         try {
@@ -10901,6 +11428,16 @@ function createNPCCooldownManager() {
 
         if (await isKingMissionReadyForHandIn(mission)) return 'hand-in';
         return null;
+      }
+
+      // hasKingTibianusQuestAction() is defined at module scope (shared with the Quest Log tab badge).
+      async function refreshKingTibianusPendingBadge() {
+        try {
+          const isPending = await hasKingTibianusQuestAction();
+          setNpcModalPendingBadge(imageContainer, isPending);
+        } catch (error) {
+          console.error('[Quests Mod][King Tibianus] Error refreshing pending quest badge:', error);
+        }
       }
 
       async function stampAlDeeLetterForKing(reason = 'stamp Letter from Al Dee') {
@@ -11133,6 +11670,8 @@ function createNPCCooldownManager() {
 
       function renderKingQuestUI() {
         if (!col1 || !col2) return;
+
+        refreshKingTibianusPendingBadge();
 
         const existingMissionListScroll = col1.querySelector('.king-mission-list-scroll-body');
         if (existingMissionListScroll) {
@@ -12305,6 +12844,7 @@ function createNPCCooldownManager() {
         const tokenHeld = await hasSilverToken();
         if (tokenHeld && !kingChatState.starterCoinThanked) {
           if (!isValidHailPhrase(lowerText)) {
+            addHintToConversation('King Tibianus is ignoring you. Perhaps a proper greeting would get his attention.');
             clearTextarea();
             return;
           }
@@ -12784,6 +13324,7 @@ function createNPCCooldownManager() {
       alDeeImg.style.cssText = 'max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; image-rendering: pixelated;';
       alDeeImgWrapper.appendChild(alDeeImg);
       imageContainer.appendChild(alDeeImgWrapper);
+      setNpcModalPendingBadge(imageContainer, hasAlDeeQuestAction());
 
       const messageContainer = document.createElement('div');
       messageContainer.className = 'tooltip-prose pixel-font-16 frame-pressed-1 surface-dark flex w-full flex-col gap-1 p-2 text-whiteRegular quests-king-chat-messages';
@@ -12820,6 +13361,7 @@ function createNPCCooldownManager() {
       const alDeeCooldown = createNPCCooldownManager();
 
       // Function to add message to conversation
+      let pendingAlDeeChunkTimeouts = [];
       function addMessageToConversation(sender, text, isAlDee = false) {
         const appendOne = (chunkText) => {
           const messageP = document.createElement('p');
@@ -12837,8 +13379,15 @@ function createNPCCooldownManager() {
           }, 0);
         };
 
+        // See King Tibianus' addMessageToConversation above for why this matters: cancel
+        // any not-yet-delivered chunk of a previous long message before scheduling new
+        // ones, so a stale trailing sentence can't appear after a reply that already
+        // moved the conversation past it.
+        pendingAlDeeChunkTimeouts.forEach((id) => clearTimeout(id));
+        pendingAlDeeChunkTimeouts = [];
+
         if (isAlDee) {
-          scheduleChunkedDialogue(appendOne, text);
+          pendingAlDeeChunkTimeouts = scheduleChunkedDialogue(appendOne, text);
         } else {
           appendOne(text);
         }
@@ -14080,6 +14629,7 @@ function createNPCCooldownManager() {
     messageContainer.style.cssText = 'flex: 1 1 0; min-width: 0; width: auto; height: 150px; min-height: 150px; max-height: 150px; overflow-y: auto; box-sizing: border-box;';
     if (messageContainerId) messageContainer.id = messageContainerId;
 
+    let pendingNpcChunkTimeouts = [];
     function addMessage(sender, text, isNpc) {
       const appendOne = (chunkText) => {
         const messageP = document.createElement('p');
@@ -14090,8 +14640,14 @@ function createNPCCooldownManager() {
         setTimeout(() => { messageContainer.scrollTop = messageContainer.scrollHeight; }, 0);
       };
 
+      // A newer message supersedes whatever this modal was still mid-way through
+      // printing — cancel any not-yet-delivered chunk of a previous long message so it
+      // can't land in the transcript after a reply that already moved past it.
+      pendingNpcChunkTimeouts.forEach((id) => clearTimeout(id));
+      pendingNpcChunkTimeouts = [];
+
       if (isNpc) {
-        scheduleChunkedDialogue(appendOne, text);
+        pendingNpcChunkTimeouts = scheduleChunkedDialogue(appendOne, text);
       } else {
         appendOne(text);
       }
@@ -14136,7 +14692,7 @@ function createNPCCooldownManager() {
     modalContent.appendChild(inputRow);
     contentDiv.appendChild(modalContent);
 
-    return { contentDiv, addMessage, messageContainer, textarea, sendBtn };
+    return { contentDiv, addMessage, messageContainer, imageContainer, textarea, sendBtn };
   }
 
   // Costello Modal (Isle of Kings, Carlin) – uses shared NPC chat layout
@@ -14153,7 +14709,7 @@ function createNPCCooldownManager() {
 
     const costelloPlayerName = getCurrentPlayerName() || 'Player';
     const costelloIconUrl = getQuestItemsAssetUrl('Costello.gif');
-    const { contentDiv, addMessage: addMessageToConversation, textarea: costelloTextarea, sendBtn: costelloSendBtn } = createNPCChatModalContent({
+    const { contentDiv, addMessage: addMessageToConversation, imageContainer: costelloImageContainer, textarea: costelloTextarea, sendBtn: costelloSendBtn } = createNPCChatModalContent({
       npcName: 'Costello',
       playerName: costelloPlayerName,
       imageUrl: costelloIconUrl,
@@ -14164,6 +14720,7 @@ function createNPCCooldownManager() {
       modalHeight: COSTELLO_MODAL_HEIGHT,
       messageContainerId: 'costello-messages'
     });
+    setNpcModalPendingBadge(costelloImageContainer, hasCostelloQuestAction());
 
     costelloTextarea.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) {
@@ -14366,7 +14923,7 @@ function createNPCCooldownManager() {
     await ensureQuestDialogueLoaded();
     const wydaPlayerName = getCurrentPlayerName() || 'Player';
     const wydaIconUrl = getQuestItemsAssetUrl('Wyda.gif');
-    const { contentDiv, addMessage, textarea, sendBtn } = createNPCChatModalContent({
+    const { contentDiv, addMessage, imageContainer: wydaImageContainer, textarea, sendBtn } = createNPCChatModalContent({
       npcName: 'Wyda',
       playerName: wydaPlayerName,
       imageUrl: wydaIconUrl,
@@ -14377,6 +14934,7 @@ function createNPCCooldownManager() {
       modalHeight: COSTELLO_MODAL_HEIGHT,
       messageContainerId: 'wyda-messages'
     });
+    setNpcModalPendingBadge(wydaImageContainer, hasWydaQuestAction());
 
     const wydaCooldown = createNPCCooldownManager();
     let wydaOfferingMotherOfAllSpiders = false;
@@ -14835,7 +15393,7 @@ function createNPCCooldownManager() {
     await ensureQuestDialogueLoaded();
     const teshaPlayerName = getCurrentPlayerName() || 'Player';
     const teshaIconUrl = getQuestItemsAssetUrl('Tesha.gif');
-    const { contentDiv, addMessage, textarea, sendBtn } = createNPCChatModalContent({
+    const { contentDiv, addMessage, imageContainer: teshaImageContainer, textarea, sendBtn } = createNPCChatModalContent({
       npcName: 'Tesha',
       playerName: teshaPlayerName,
       imageUrl: teshaIconUrl,
@@ -14846,6 +15404,7 @@ function createNPCCooldownManager() {
       modalHeight: COSTELLO_MODAL_HEIGHT,
       messageContainerId: 'tesha-messages'
     });
+    setNpcModalPendingBadge(teshaImageContainer, hasTeshaQuestAction());
 
     const teshaCooldown = createNPCCooldownManager();
     let teshaOfferingSerpentineTower = false;
@@ -17370,7 +17929,7 @@ function createNPCCooldownManager() {
     
     tabElement.innerHTML = `
       <div class="flex justify-between gap-2">
-        <div class="container-slot surface-darker grid place-items-center relative" style="width: 106px; height: 64px; min-width: 106px; min-height: 64px; padding: 0;">
+        <div id="king-tibianus-tab-portrait" class="container-slot surface-darker grid place-items-center relative" style="width: 106px; height: 64px; min-width: 106px; min-height: 64px; padding: 0;">
           <div class="relative flex items-center justify-center" style="width: 106px; height: 64px;">
             <img alt="King Tibianus" class="pixelated" src="${kingTibianusIconUrl}" style="width: 106px; height: 64px; object-fit: contain; image-rendering: pixelated;">
           </div>
@@ -17912,9 +18471,10 @@ function createNPCCooldownManager() {
             removeCustomBattleStatusToast();
           }
 
-          // Spider Lair: leaving room — full cleanup like Mornenion leaving Ab'Dendriel (restore vanilla Spider Lair).
+          // Spider Lair: leave Sewers battle room — cleanup like Ekatrix/Jakundaf (own flags gate it so this
+          // coexists with the other Sewers-based quests sharing this room-name check).
           // Exception: warp to A Secluded Herb after defeat keeps spiderLairRetryWithoutTile77 so map re-entry can re-init without tile 77.
-          if (lastOverlayHiderRoomName === SPIDER_LAIR_ROOM_NAME && currentRoomName && currentRoomName !== SPIDER_LAIR_ROOM_NAME) {
+          if (lastOverlayHiderRoomName === SPIDER_LAIR_BATTLE_ROOM_NAME && currentRoomName && currentRoomName !== SPIDER_LAIR_BATTLE_ROOM_NAME) {
             if (spiderLairBattle?.isEntryVillainSetupDone()) {
               console.log('[Quests Mod][Overlay Hider] Leaving Spider Lair - resetting villain setup flag');
               spiderLairBattle.resetEntryVillainSetup();
@@ -18097,7 +18657,9 @@ function createNPCCooldownManager() {
           // Spider Lair: re-init battle after defeat (cleanup cleared battle) so player can retry without tile 77 — only when spiderLairRetryWithoutTile77 (set in onClose on defeat)
           const motherProgress = kingChatState.progressMotherOfAllSpiders;
           const canRetrySpiderLair = motherProgress?.accepted && !motherProgress?.completed;
-          if (currentRoomName === SPIDER_LAIR_ROOM_NAME && canRetrySpiderLair && spiderLairRetryWithoutTile77 && !spiderLairBattle && currentRoomId && !spiderLairReinitTriggered) {
+          const onSpiderLairBattleRoom = currentRoomName === SPIDER_LAIR_BATTLE_ROOM_NAME
+            || (SPIDER_LAIR_BATTLE_ROOM_ID && currentRoomId === SPIDER_LAIR_BATTLE_ROOM_ID);
+          if (onSpiderLairBattleRoom && canRetrySpiderLair && spiderLairRetryWithoutTile77 && !spiderLairBattle && currentRoomId && !spiderLairReinitTriggered) {
             spiderLairReinitTriggered = true;
             console.log('[Quests Mod][Overlay Hider] Spider Lair: re-initializing battle after defeat so player can retry');
             playerUsedTile77ToSpiderLair = true;
@@ -18134,21 +18696,30 @@ function createNPCCooldownManager() {
           }
 
           // Spider Lair (The Old Widow + Giant Spiders): tile 77 entry or re-init after defeat (spiderLairRetryWithoutTile77)
-          if (currentRoomName === SPIDER_LAIR_ROOM_NAME && playerUsedTile77ToSpiderLair && spiderLairBattle) {
-            const justEnteredSpiderLairViaQuest = lastOverlayHiderRoomName !== SPIDER_LAIR_ROOM_NAME;
-            if (justEnteredSpiderLairViaQuest) {
-              spiderLairBattle.runEntryVillainSetupIfNeeded({
-                isActiveCheck: () => playerUsedTile77ToSpiderLair,
-                onComplete: () => {
-                  hideQuestOverlays();
-                  hideHeroEditorButton();
-                  replaceSpiderLairTileSprites();
-                  [0, 50, 150].forEach(delay => setTimeout(() => replaceSpiderLairTileSprites(), delay));
-                }
-              });
+          if (onSpiderLairBattleRoom && playerUsedTile77ToSpiderLair && spiderLairBattle) {
+            // runEntryVillainSetupIfNeeded is internally idempotent (self-gates on the
+            // battle instance's own entryVillainSetupDone flag — see custom-battles.js
+            // performEntryVillainSetup), so it's safe/cheap to call every tick. Don't gate
+            // it behind lastOverlayHiderRoomName: that variable is shared across every
+            // quest that also stages its battle in "Sewers" (Ekatrix/Knarknaknork/
+            // Jakundaf), so it can already read "Sewers" from one of THOSE quests' earlier
+            // visits and never flip to "just entered" for Spider Lair specifically —
+            // silently skipping entry setup (no villains added, no tile reskin) forever.
+            const entrySetupJustRan = spiderLairBattle.runEntryVillainSetupIfNeeded({
+              isActiveCheck: () => playerUsedTile77ToSpiderLair,
+              onComplete: () => {
+                hideQuestOverlays();
+                hideHeroEditorButton();
+                scheduleSpiderLairBattlefieldVisuals();
+              }
+            });
+            const justEnteredSpiderLairViaQuest = lastOverlayHiderRoomName !== SPIDER_LAIR_BATTLE_ROOM_NAME;
+            if (entrySetupJustRan || justEnteredSpiderLairViaQuest) {
+              scheduleSpiderLairBattlefieldVisuals();
+            } else {
+              applySpiderLairBattlefieldVisuals();
             }
             spiderLairBattle.ensureCustomVillainsPresent();
-            replaceSpiderLairTileSprites();
           }
 
           // Jakundaf Desert: leave Sewers battle room — cleanup like Spider Lair
@@ -18395,14 +18966,17 @@ function createNPCCooldownManager() {
             // Ensure Mornenion stays on the board and original villains stay removed throughout the session
             // Skip check immediately after removing villains to prevent refresh loop
             if (!justRemovedVillains && !isAddingVillains) {
-              // Check if Mornenion and Elves already exist BEFORE attempting to add
+              // Check if Mornenion and its escort already exist BEFORE attempting to add.
+              // Key prefixes must track battles.json's "mornenion" villain roster/tiles —
+              // stale entries here just mean this "already fully placed" fast path never
+              // fires, not a visible bug, but keep them in sync anyway.
               const mornenionExists = boardConfig.some(entity =>
                 entity.key && entity.key.startsWith('mornenion-tile-19-')
               );
-              
-              const elvesExist = [2, 11, 137, 146].every(tileIndex =>
+
+              const elvesExist = ['firestarter-tile-41-', 'firestarter-tile-47-', 'firestarter-tile-115-', 'firestarter-tile-123-', 'elf-tile-142-'].every(keyPrefix =>
                 boardConfig.some(entity =>
-                  entity.key && entity.key.startsWith(`elf-tile-${tileIndex}-`)
+                  entity.key && entity.key.startsWith(keyPrefix)
                 )
               );
               
@@ -18936,6 +19510,17 @@ function createNPCCooldownManager() {
           return true;
         });
 
+        // Find removed creatures (present a moment ago, gone now) — same exclusions as above.
+        const currentKeys = new Set(currentBoardConfig.map(piece => piece?.key).filter(Boolean));
+        const removedPieces = previousBoardConfig.filter(piece => {
+          if (!piece?.key) return false;
+          if (currentKeys.has(piece.key)) return false;
+          if (piece?.key?.startsWith('mornenion-tile-') || piece?.key?.startsWith('lavahole-tile-')) {
+            return false;
+          }
+          return true;
+        });
+
         // Log each newly placed creature
         if (newPieces.length > 0) {
           newPieces.forEach(piece => {
@@ -18944,9 +19529,28 @@ function createNPCCooldownManager() {
             const tileIndex = piece?.tileIndex ?? 'Unknown';
             const level = piece?.level ?? 'N/A';
             const tier = piece?.tier ?? 'N/A';
-            
+
             console.log(`[Quests Mod][Creature Placement] ${creatureType} placed: ${creatureName} on tile ${tileIndex} (Level: ${level}, Tier: ${tier})`, piece);
           });
+        }
+
+        if (removedPieces.length > 0) {
+          removedPieces.forEach(piece => {
+            const creatureName = getCreatureTypeName(piece);
+            const creatureType = piece?.villain ? 'Enemy' : 'Ally';
+            const tileIndex = piece?.tileIndex ?? 'Unknown';
+
+            console.log(`[Quests Mod][Creature Placement] ${creatureType} removed: ${creatureName} from tile ${tileIndex}`, piece);
+          });
+        }
+
+        // Placing OR removing an ally re-triggers CustomBattles' drag/board-config mask
+        // logic the same way, and its self-resync fails to restore villain tiles the same
+        // way in both directions once the board's ally tiles are all occupied/vacated
+        // (Mornenion is the only quest battle where allyLimit equals allowedTiles.length).
+        // Force a resync after either kind of change instead of only after placements.
+        if (newPieces.length > 0 || removedPieces.length > 0) {
+          scheduleMornenionHitboxResync(newPieces.length, removedPieces.length);
         }
 
         // Update previous config for next comparison
@@ -18965,10 +19569,14 @@ function createNPCCooldownManager() {
     try {
       console.log('[Quests Mod][Mornenion] Cleaning up Mornenion quest state');
       removeCustomBattleStatusToast();
-      
+      mornenionBossHpBar.remove();
+      clearMornenionVisualRetries();
+      restoreMornenionTileMutations();
+
       // Reset Mornenion flags
       playerUsedHoleToMornenion = false;
-      
+      mornenionBattleStarting = false;
+
       // Cleanup CustomBattle instance
       if (mornenionBattle) {
         mornenionBattle.cleanup(
@@ -19127,45 +19735,235 @@ function createNPCCooldownManager() {
     }
   }
 
-  // Build inner HTML for a single sprite (id-1950/1951 style) for Spider Lair tile replacement.
-  function getSpiderLairSpriteInnerHTML(spriteId) {
-    return `<div class="sprite item relative id-${spriteId}" style="z-index: 1000;"><div class="viewport"><img alt="${spriteId}" data-cropped="false" class="spritesheet" style="--cropX: 0; --cropY: 0;"></div></div>`;
+  // Spider Lair (The Old Widow) reskin of Sewers — same tile-scoped, additive
+  // tileMutations mechanism as Knarknaknork/Ekatrix/Jakundaf/Mornenion (see
+  // applyEkatrixTileMutations()/applySewersTileMutations()): bakes the exact final
+  // sprite onto each specific tile rather than swapping a fixed handful of tiles.
+  function buildSpiderLairMutationSpriteHTML(entry) {
+    const spriteId = entry?.spriteId;
+    if (spriteId == null) return '';
+    const cropX = entry.cropX != null ? entry.cropX : 0;
+    const cropY = entry.cropY != null ? entry.cropY : 0;
+    const cropped = entry.cropped ? 'true' : 'false';
+    const bankStyle = entry.bank != null ? ` --bank: ${entry.bank};` : '';
+    return `<div class="sprite item relative id-${spriteId}" ${QUEST_BOARD_ADDED_ATTR_SPIDER_LAIR}="1" style="z-index: 1000;${bankStyle}"><div class="viewport"><img alt="${spriteId}" data-cropped="${cropped}" class="spritesheet" style="--cropX: ${cropX}; --cropY: ${cropY};"></div></div>`;
   }
 
-  // Replace tile 85 content with sprite 1951 and tile 86 with sprite 1950 in Spider Lair. Remove sprite id-233 from tile 85 and tile 86. Append sprite 2127 to tile 82 (keeps existing sprites).
-  function replaceSpiderLairTileSprites() {
-    const tile85 = getTileElement(SPIDER_LAIR_TILE_86);
-    const tile86 = getTileElement(SPIDER_LAIR_TILE_87);
-    if (tile85) {
-      const sprite233on85 = tile85.querySelector('.sprite.item.relative.id-' + SPIDER_LAIR_SPRITE_TO_REMOVE_ID);
-      if (sprite233on85) hideQuestBoardElement(sprite233on85, { tag: QUEST_BOARD_HIDDEN_TAG_SPIDER_LAIR });
-      if (!tile85.querySelector('.id-' + SPIDER_LAIR_TILE_86_SPRITE_ID)) {
-        tile85.innerHTML = getSpiderLairSpriteInnerHTML(SPIDER_LAIR_TILE_86_SPRITE_ID);
-      }
+  // Shared by applySpiderLairTileMutations and the hitbox-safety-net helpers below, so
+  // both can look up/inspect the same live room.file.data ref for SPIDER_LAIR_BATTLE_ROOM_ID
+  // without duplicating the ROOMS/REGIONS/selectedRoom lookup boilerplate (mirrors
+  // getMornenionAbwaspRoomRefs()).
+  function getSpiderLairRoomRefs() {
+    const roomId = SPIDER_LAIR_BATTLE_ROOM_ID;
+    const selected = globalThis.state?.board?.getSnapshot?.()?.context?.selectedMap?.selectedRoom
+      || globalThis.state?.selectedMap?.selectedRoom;
+    const utils = globalThis.state?.utils;
+    const roomRefs = [];
+    if (selected?.id === roomId) roomRefs.push(selected);
+    if (Array.isArray(utils?.ROOMS)) {
+      utils.ROOMS.forEach((room) => {
+        if (room?.id === roomId) roomRefs.push(room);
+      });
     }
-    if (tile86) {
-      const sprite233on86 = tile86.querySelector('.sprite.item.relative.id-' + SPIDER_LAIR_SPRITE_TO_REMOVE_ID);
-      if (sprite233on86) hideQuestBoardElement(sprite233on86, { tag: QUEST_BOARD_HIDDEN_TAG_SPIDER_LAIR });
-      if (!tile86.querySelector('.id-' + SPIDER_LAIR_TILE_87_SPRITE_ID)) {
-        tile86.innerHTML = getSpiderLairSpriteInnerHTML(SPIDER_LAIR_TILE_87_SPRITE_ID);
-      }
+    if (Array.isArray(utils?.REGIONS)) {
+      utils.REGIONS.forEach((region) => {
+        (region?.rooms || []).forEach((room) => {
+          if (room?.id === roomId) roomRefs.push(room);
+        });
+      });
     }
-    for (const tileIndex of SPIDER_LAIR_TILES_ADD_SPRITE_2127) {
+    return roomRefs;
+  }
+
+  function applySpiderLairTileMutations() {
+    const mutations = SPIDER_LAIR_TILE_MUTATIONS;
+    if (!mutations || typeof mutations !== 'object') return;
+
+    const battle = spiderLairBattle;
+    const hadMask = battle?._placementHitboxMaskActive === true;
+    if (hadMask) battle.restorePlacementHitboxes?.();
+
+    let wroteHitboxes = false;
+    Object.entries(mutations).forEach(([tileKey, entry]) => {
+      const tileIndex = Number(tileKey);
+      if (!Number.isFinite(tileIndex) || !entry || typeof entry !== 'object') return;
       const tile = getTileElement(tileIndex);
-      if (tile && !tile.querySelector('.id-' + SPIDER_LAIR_ADD_SPRITE_2127_ID)) {
+
+      (entry.remove || []).forEach((spriteId) => {
+        if (spriteId == null || !tile) return;
+        tile.querySelectorAll(`.sprite.item.relative.id-${spriteId}`).forEach((sprite) => {
+          hideQuestBoardElement(sprite, { tag: QUEST_BOARD_HIDDEN_TAG_SPIDER_LAIR });
+        });
+      });
+
+      (entry.add || []).forEach((spriteEntry) => {
+        const spriteId = spriteEntry?.spriteId;
+        if (spriteId == null || !tile) return;
+        const already = tile.querySelectorAll(`.id-${spriteId}[${QUEST_BOARD_ADDED_ATTR_SPIDER_LAIR}="1"]`);
+        if (already.length) return;
         const wrap = document.createElement('div');
-        wrap.innerHTML = getSpiderLairSpriteInnerHTML(SPIDER_LAIR_ADD_SPRITE_2127_ID);
+        wrap.innerHTML = buildSpiderLairMutationSpriteHTML(spriteEntry);
         if (wrap.firstElementChild) tile.appendChild(wrap.firstElementChild);
+      });
+
+      if (Object.prototype.hasOwnProperty.call(entry, 'hitbox')) {
+        try {
+          getSpiderLairRoomRefs().forEach((room) => {
+            const data = room?.file?.data;
+            if (!data) return;
+            if (!Array.isArray(data.hitboxes)) data.hitboxes = [];
+            data.hitboxes[tileIndex] = entry.hitbox === true;
+            wroteHitboxes = true;
+          });
+        } catch (_) {}
+      }
+    });
+
+    if (wroteHitboxes) spiderLairHitboxesApplied = true;
+
+    // Placement-phase-only, same reasoning as applyMornenionTileMutations: once combat is
+    // active (or on its way there — this function is also called from the Start-click
+    // safety net's retry burst to reapply reskin decor a combat-scene re-render just
+    // wiped), re-masking here would clobber the forced raw combat-hitbox write that
+    // triggerSpiderLairBattleStart just made. Skip it while battle is starting/active.
+    if (!battle?.isBoardBattleActive?.() && !spiderLairBattleStarting) {
+      if (battle?.refreshPlacementHitboxMaskFromLive) {
+        battle.refreshPlacementHitboxMaskFromLive(
+          () => playerUsedTile77ToSpiderLair
+        );
+      } else if (battle?.syncPlacementHitboxMask) {
+        battle.syncPlacementHitboxMask(() => playerUsedTile77ToSpiderLair);
       }
     }
-    for (const tileIndex of SPIDER_LAIR_TILES_ADD_SPRITE_4312) {
-      const tile = getTileElement(tileIndex);
-      if (tile && !tile.querySelector('.id-' + SPIDER_LAIR_ADD_SPRITE_4312_ID)) {
-        const wrap = document.createElement('div');
-        wrap.innerHTML = getSpiderLairSpriteInnerHTML(SPIDER_LAIR_ADD_SPRITE_4312_ID);
-        if (wrap.firstElementChild) tile.appendChild(wrap.firstElementChild);
+
+    if (playerUsedTile77ToSpiderLair) checkSpiderLairHitboxIntegrity('applySpiderLairTileMutations');
+    if (playerUsedTile77ToSpiderLair) logSpiderLairHitboxTable('applySpiderLairTileMutations');
+    if (playerUsedTile77ToSpiderLair) logSpiderLairBoardOwnership('applySpiderLairTileMutations');
+  }
+
+  // Phase-aware: while CustomBattles' pre-battle placement mask is active
+  // (battle._placementHitboxMaskActive), custom-battles.js's applyPlacementHitboxMask()
+  // DELIBERATELY overwrites hitboxes so only tileRestrictions.allowedTiles + currently
+  // villain-occupied tiles read as open — that's the ally-placement-restriction feature
+  // working as intended, not corruption (confirmed by reading applyPlacementHitboxMask /
+  // getPlacementMaskWalkableTiles in custom-battles.js). Comparing against the raw combat
+  // hitbox values from SPIDER_LAIR_TILE_MUTATIONS during that phase produces false
+  // positives on every non-allowed walkable tile. So: while the mask is active, the
+  // expected value for each tile is derived the same way the mask itself derives it
+  // (allowedTiles ∪ villain-occupied ⇒ open, everything else ⇒ blocked); once the mask is
+  // lifted (real combat), expected reverts to the raw SPIDER_LAIR_TILE_MUTATIONS value —
+  // the only phase where a mismatch here is an actual bug.
+  function logSpiderLairHitboxTable(label) {
+    try {
+      const mutations = SPIDER_LAIR_TILE_MUTATIONS;
+      if (!mutations || typeof mutations !== 'object') return;
+      const roomRefs = getSpiderLairRoomRefs();
+      const liveHitboxes = roomRefs.find((room) => Array.isArray(room?.file?.data?.hitboxes))?.file?.data?.hitboxes || null;
+
+      const battle = spiderLairBattle;
+      const maskActive = battle?._placementHitboxMaskActive === true;
+      let maskWalkableTiles = null;
+      if (maskActive) {
+        maskWalkableTiles = new Set(battle?.config?.tileRestrictions?.allowedTiles || []);
+        (battle?.getVillainOccupiedTiles?.() || []).forEach((t) => {
+          const n = Number(t);
+          if (Number.isFinite(n)) maskWalkableTiles.add(n);
+        });
+        (battle?.getForcedAllyOccupiedTiles?.() || []).forEach((t) => {
+          const n = Number(t);
+          if (Number.isFinite(n)) maskWalkableTiles.add(n);
+        });
       }
+
+      const rows = [];
+      let mismatchCount = 0;
+      for (let tileIndex = 0; tileIndex <= 164; tileIndex += 1) {
+        const entry = mutations[String(tileIndex)];
+        const rawExpected = entry && Object.prototype.hasOwnProperty.call(entry, 'hitbox')
+          ? entry.hitbox === true
+          : null; // null = this tile's mutation entry has no explicit hitbox (shouldn't happen post-fix, but flagged if it does)
+        const expected = maskActive && maskWalkableTiles
+          ? !maskWalkableTiles.has(tileIndex) // mask phase: blocked unless allowedTiles/villain tile
+          : rawExpected;
+        const actual = Array.isArray(liveHitboxes) ? liveHitboxes[tileIndex] === true : null;
+        const match = expected === actual;
+        if (!match) mismatchCount += 1;
+        rows.push({ tile: tileIndex, expectedBlocked: expected, liveBlocked: actual, rawCombatExpected: rawExpected, match });
+      }
+
+      // Full allowed/blocked tile lists straight from the LIVE array, independent of the
+      // match/mismatch computation above — requested explicitly so every tile's actual
+      // current state is visible at a glance, not just the ones that disagree with what
+      // we expect.
+      const liveAllowedTiles = [];
+      const liveBlockedTiles = [];
+      if (Array.isArray(liveHitboxes)) {
+        for (let tileIndex = 0; tileIndex <= 164; tileIndex += 1) {
+          if (liveHitboxes[tileIndex] === true) liveBlockedTiles.push(tileIndex);
+          else liveAllowedTiles.push(tileIndex);
+        }
+      }
+
+      const context = {
+        placementHitboxMaskActive: maskActive,
+        isBoardBattleActive: battle?.isBoardBattleActive?.() === true,
+        spiderLairBattleStarting,
+        liveHitboxesArrayLength: Array.isArray(liveHitboxes) ? liveHitboxes.length : null,
+        roomRefsFound: roomRefs.length
+      };
+
+      const phaseLabel = maskActive ? 'PRE-BATTLE (placement mask active)' : (context.isBoardBattleActive ? 'BATTLE (combat active)' : 'PRE-BATTLE (no mask)');
+      console.log(`[Quests Mod][Spider Lair][hitbox-tiles] ${label} — phase: ${phaseLabel}`, context);
+      console.log(`[Quests Mod][Spider Lair][hitbox-tiles] ALLOWED (${liveAllowedTiles.length}):`, liveAllowedTiles);
+      console.log(`[Quests Mod][Spider Lair][hitbox-tiles] BLOCKED (${liveBlockedTiles.length}):`, liveBlockedTiles);
+
+      if (mismatchCount === 0) {
+        console.log(`[Quests Mod][Spider Lair][hitbox-table] ${label}: all 165 tiles match expected hitbox values for current phase`, context);
+        return;
+      }
+
+      console.warn(`[Quests Mod][Spider Lair][hitbox-table] ${label}: ${mismatchCount}/165 tile(s) mismatch expected hitbox values for current phase`, context);
+      if (typeof console.table === 'function') {
+        console.table(rows.filter((r) => !r.match));
+      } else {
+        console.log(rows.filter((r) => !r.match));
+      }
+    } catch (error) {
+      console.error('[Quests Mod][Spider Lair][hitbox-table] Error building hitbox comparison table:', error);
     }
+  }
+
+  function restoreSpiderLairTileMutations() {
+    restoreQuestBoardElementsByTag(QUEST_BOARD_HIDDEN_TAG_SPIDER_LAIR);
+    document.querySelectorAll(`[${QUEST_BOARD_ADDED_ATTR_SPIDER_LAIR}="1"]`).forEach((el) => {
+      try { el.remove(); } catch (_) {}
+    });
+    spiderLairHitboxesApplied = false;
+  }
+
+  const SPIDER_LAIR_VISUAL_RETRY_DELAYS_MS = [0, 50, 150, 300, 500, 800, 1200, 2000];
+
+  function clearSpiderLairVisualRetries() {
+    spiderLairVisualRetryTimers.forEach((id) => clearTimeout(id));
+    spiderLairVisualRetryTimers = [];
+  }
+
+  // No live recolor pass needed — tileMutations bake the final sprite directly,
+  // same as Sewers/Ekatrix's own tile mutations do. Just place them.
+  function applySpiderLairBattlefieldVisuals() {
+    if (!playerUsedTile77ToSpiderLair || !spiderLairBattle) return;
+    applySpiderLairTileMutations();
+  }
+
+  function scheduleSpiderLairBattlefieldVisuals() {
+    clearSpiderLairVisualRetries();
+    applySpiderLairBattlefieldVisuals();
+    SPIDER_LAIR_VISUAL_RETRY_DELAYS_MS.forEach((delay) => {
+      if (delay <= 0) return;
+      spiderLairVisualRetryTimers.push(setTimeout(() => {
+        applySpiderLairBattlefieldVisuals();
+      }, delay));
+    });
   }
 
   // Restore board setup for Spider Lair (delegates to CustomBattle)
@@ -19175,15 +19973,20 @@ function createNPCCooldownManager() {
     } else {
       console.warn('[Quests Mod][Spider Lair] Battle not initialized');
     }
+    restoreSpiderLairTileMutations();
   }
 
   // Clean up Spider Lair quest state and battle; call after victory/defeat modal close
   function cleanupSpiderLairQuest() {
     try {
       removeCustomBattleStatusToast();
+      oldWidowBossHpBar.remove();
+      clearSpiderLairVisualRetries();
       playerUsedTile77ToSpiderLair = false;
       spiderLairReinitTriggered = false;
       spiderLairRetryWithoutTile77 = false;
+      spiderLairBattleStarting = false;
+      restoreSpiderLairTileMutations();
       if (spiderLairBattle) {
         spiderLairBattle.cleanup(restoreBoardSetupSpiderLair, showQuestOverlays);
         spiderLairBattle = null;
@@ -19410,10 +20213,486 @@ function createNPCCooldownManager() {
     }
   }
 
-  // Add specific villains to the board (delegates to CustomBattle)
+  // Ab'Dendriel Hive decor mutations — same tile-scoped, additive mechanism as
+  // Sewers/Ekatrix (buildSewersMutationSpriteHTML/applySewersTileMutations): bakes the
+  // exact final sprite directly onto each specific tile, rather than a room-wide
+  // sceneSpriteReplacements find/replace (which was tried first and swapped every
+  // instance of a source sprite id everywhere in the room, wrecking unrelated tiles).
+  const QUEST_BOARD_ADDED_ATTR_MORNENION = 'data-quests-mornenion-added';
+  const QUEST_BOARD_HIDDEN_TAG_MORNENION = 'mornenion-hive';
+
+  function buildMornenionMutationSpriteHTML(entry, mutationKey, zIndex) {
+    const spriteId = entry?.spriteId;
+    if (spriteId == null) return '';
+    const cropX = entry.cropX != null ? entry.cropX : 0;
+    const cropY = entry.cropY != null ? entry.cropY : 0;
+    const cropped = entry.cropped ? 'true' : 'false';
+    const bankStyle = entry.bank != null ? ` --bank: ${entry.bank};` : '';
+    const rightCalc = formatSewersMutationOffsetCalc(entry.offsetX);
+    const bottomCalc = formatSewersMutationOffsetCalc(entry.offsetY);
+    const offsetStyle = `${rightCalc ? ` right: ${rightCalc};` : ''}${bottomCalc ? ` bottom: ${bottomCalc};` : ''}`;
+    const z = zIndex != null && zIndex !== '' ? zIndex : 1000;
+    return `<div class="sprite item relative id-${spriteId}" ${QUEST_BOARD_ADDED_ATTR_MORNENION}="1" data-quests-mornenion-mutation-key="${mutationKey}" style="z-index: ${z};${bankStyle}${offsetStyle}"><div class="viewport"><img alt="${spriteId}" data-cropped="${cropped}" class="spritesheet" style="--cropX: ${cropX}; --cropY: ${cropY};"></div></div>`;
+  }
+
+  // Shared by applyMornenionTileMutations and the creature-placement tracker below, so
+  // both can log/inspect the same live room.file.data ref for 'abwasp' without duplicating
+  // the ROOMS/REGIONS/selectedRoom lookup boilerplate.
+  function getMornenionAbwaspRoomRefs() {
+    const roomId = 'abwasp';
+    const selected = globalThis.state?.board?.getSnapshot?.()?.context?.selectedMap?.selectedRoom
+      || globalThis.state?.selectedMap?.selectedRoom;
+    const utils = globalThis.state?.utils;
+    const roomRefs = [];
+    if (selected?.id === roomId) roomRefs.push(selected);
+    if (Array.isArray(utils?.ROOMS)) {
+      utils.ROOMS.forEach((room) => {
+        if (room?.id === roomId) roomRefs.push(room);
+      });
+    }
+    if (Array.isArray(utils?.REGIONS)) {
+      utils.REGIONS.forEach((region) => {
+        (region?.rooms || []).forEach((room) => {
+          if (room?.id === roomId) roomRefs.push(room);
+        });
+      });
+    }
+    return roomRefs;
+  }
+
+  const MORNENION_ALLOWED_ALLY_TILES = [67, 81, 97];
+  const MORNENION_VILLAIN_TILES = [19, 41, 47, 115, 123, 142];
+  // The full set of 165 tiles' intended-walkable ("hitbox: false") state per
+  // rooms.json's mornenion.tileMutations — the maze corridor plus the dig-hole tiles.
+  // Anything in this list that reads `true` at runtime has been flipped from its
+  // intended value, regardless of whether it's an ally tile, a villain tile, or just
+  // a corridor tile the placement mask incorrectly swept up.
+  const MORNENION_WALKABLE_TILES = [
+    2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 17, 18, 19, 24, 25, 26, 32, 41, 47, 56, 62, 67, 69,
+    70, 71, 77, 78, 81, 86, 92, 97, 101, 107, 115, 116, 122, 123, 130, 131, 137, 138,
+    139, 140, 141, 142, 143, 144, 145, 146
+  ];
+
+  // Safety net, not a debug trace: only prints when a maze tile that's supposed to be
+  // walkable is actually reading as blocked. Kept wired in permanently (rather than
+  // deleted now that Start works) because the failure mode it catches lives in
+  // CustomBattles' shared placement-mask code, which this file doesn't own and could
+  // regress there without any change on our side. Silent on every normal pass.
+  function checkMornenionHitboxIntegrity(label) {
+    try {
+      const roomRefs = getMornenionAbwaspRoomRefs();
+      const hitboxes = roomRefs.find((room) => Array.isArray(room?.file?.data?.hitboxes))?.file?.data?.hitboxes || null;
+      if (!Array.isArray(hitboxes)) return;
+
+      const corruptedWalkableTiles = MORNENION_WALKABLE_TILES.filter((i) => hitboxes[i] === true);
+      if (!corruptedWalkableTiles.length) return;
+
+      console.warn(`[Quests Mod][Mornenion][hitbox-check] ${label}: ${corruptedWalkableTiles.length} walkable tile(s) reading as blocked`, {
+        corruptedWalkableTiles,
+        blockedCount: hitboxes.filter((v) => v === true).length,
+        placementHitboxMaskActive: mornenionBattle?._placementHitboxMaskActive === true
+      });
+    } catch (error) {
+      console.error('[Quests Mod][Mornenion][hitbox-check] Error checking hitbox integrity:', error);
+    }
+  }
+
+  // CustomBattles' own drag-end handler restores villain tiles to walkable ~120ms after
+  // a board-config change, but that self-resync doesn't reliably fire once every
+  // ally-placement tile is occupied or freed up (Mornenion is the only quest battle
+  // where allyLimit equals allowedTiles.length, so it's the only one that ever hits this
+  // — confirmed via checkMornenionHitboxIntegrity). Force our own resync shortly after
+  // *any* board-config change (placement or removal) instead of trusting that self-heal.
+  // 200ms clears their 120ms window with a little margin while staying snappy.
+  const MORNENION_HITBOX_RESYNC_DELAY_MS = 200;
+  let mornenionHitboxResyncTimer = null;
+
+  function scheduleMornenionHitboxResync(placedCount = 0, removedCount = 0) {
+    if (!isInMornenionArea()) return;
+    // Once the fight is actually running, board-config changes are creatures moving and
+    // dying, not placement/removal — this mechanism exists only for the pre-battle setup
+    // phase and must never touch hitboxes once combat is live, or it can make real
+    // walkable maze tiles look blocked to pathfinding mid-fight.
+    if (mornenionBattle?.isBoardBattleActive?.()) return;
+
+    // Debounce: a burst of placements/removals (e.g. clearing the board) should only
+    // trigger one resync once things settle, not one per change.
+    if (mornenionHitboxResyncTimer) clearTimeout(mornenionHitboxResyncTimer);
+    mornenionHitboxResyncTimer = setTimeout(() => {
+      mornenionHitboxResyncTimer = null;
+      if (!isInMornenionArea() || !mornenionBattle?.refreshPlacementHitboxMaskFromLive) return;
+      // Re-check here too — the battle may have started during the debounce window.
+      if (mornenionBattle?.isBoardBattleActive?.()) return;
+      mornenionBattle.refreshPlacementHitboxMaskFromLive(() => playerUsedHoleToMornenion);
+      checkMornenionHitboxIntegrity(`creature placement resync (${placedCount} placed, ${removedCount} removed)`);
+    }, MORNENION_HITBOX_RESYNC_DELAY_MS);
+  }
+
+  // CustomBattles is supposed to lift the placement mask itself the instant Start is
+  // clicked (it listens for the native 'before-game-start'/'emitNewGame' events and calls
+  // restorePlacementHitboxes()), restoring the real combat hitboxes before the fight
+  // begins. That self-heal has already been shown to silently fail for Mornenion at the
+  // ally-drag-end transition (see scheduleMornenionHitboxResync above) — same shared
+  // library, same "board fully occupied" state, so don't assume it works here either.
+  //
+  // Registered once, globally, rather than per-battle-instance: mornenionBattle gets torn
+  // down and recreated on every hole entry, but this only needs to always act on whichever
+  // instance is current when the event actually fires. Deliberately NOT registered inline
+  // at module load — globalThis.state.board isn't guaranteed to exist yet at that point
+  // (the game's state initializes after the page loads), and a one-shot `if` guard there
+  // would silently and permanently no-op if it wasn't ready, with no retry. Retry instead,
+  // same pattern as trackCreaturePlacements below.
+  // Shared by both Start-detection mechanisms below. Don't gate on
+  // _placementHitboxMaskActive and don't rely on restorePlacementHitboxes' internal
+  // snapshot round-trip — it's been observed to flip the flag off while leaving the
+  // array itself unchanged (still masked). Write the known-correct combat hitboxes
+  // ourselves unconditionally; harmless no-op if they were already correct.
+  //
+  // Also re-runs the decor retry burst: entering combat rebuilds the #tiles DOM for the
+  // fight scene, which throws away our manually-injected reskin sprites and hidden-tags
+  // (plain appended DOM nodes, not something the native re-render knows to preserve).
+  // The entry-time retry burst is long finished by the time Start is actually clicked,
+  // so nothing else reapplies the decor after this specific re-render.
+  function triggerMornenionBattleStart(source) {
+    if (!isInMornenionArea() || !mornenionBattle) return;
+    mornenionBattleStarting = true;
+    writeMornenionRawHitboxes();
+    mornenionBattle._placementHitboxMaskActive = false;
+    checkMornenionHitboxIntegrity(`${source}: after forced write`);
+    if (typeof scheduleMornenionBattlefieldVisuals === 'function') scheduleMornenionBattlefieldVisuals();
+  }
+
+  // The full set of 165 tiles' intended-walkable ("hitbox: false") state per rooms.json's
+  // spiderLair.tileMutations (26 tiles — the 10-tile allowedTiles ally-placement list plus
+  // extra walkable-but-not-ally-placeable floor tiles: the entry/exit corridor and the
+  // Old Widow's own reachable-but-not-placeable tile). Anything in this list that reads
+  // `true` at runtime has been flipped from its intended value. Computed directly from
+  // rooms.json (`spiderLair.tileMutations`), same derivation as MORNENION_WALKABLE_TILES.
+  const SPIDER_LAIR_WALKABLE_TILES = [
+    21, 34, 35, 50, 51, 64, 65, 66, 67, 80, 81, 82, 97, 98, 113, 114, 115, 116, 117,
+    118, 128, 142, 143
+  ];
+
+  // Diagnostic for a specific suspected failure mode: Spider Lair, Ekatrix, Sewers
+  // (Knarknaknork), and Jakundaf all target the same native roomId ("rkswrs"). custom-
+  // battles.js's ownsBoardRestrictions()/getRestrictionPriority() pick exactly ONE
+  // currently-active battle instance to govern the placement-hitbox mask/ally-tile
+  // restrictions for that shared room — if a battle object from one of the OTHER three
+  // quests is still isActive (e.g. its own quest flow was abandoned mid-battle earlier in
+  // this session without its onClose ever firing, so it never cleaned up), it can outscore
+  // and silently govern the room using ITS OWN allowedTiles instead of Spider Lair's,
+  // blocking every tile Spider Lair actually needs for ally placement — 0 allies can ever
+  // land, and Start never enables. This would look completely normal from
+  // checkSpiderLairHitboxIntegrity's perspective (the array is internally consistent, just
+  // wrong-quest-owned), so it needs its own explicit check.
+  function logSpiderLairBoardOwnership(label) {
+    try {
+      const getActive = globalThis.CustomBattles?.getActiveBattles;
+      if (typeof getActive !== 'function') {
+        console.log(`[Quests Mod][Spider Lair][board-ownership] ${label}: window.CustomBattles.getActiveBattles not available yet`);
+        return;
+      }
+      const roomId = SPIDER_LAIR_BATTLE_ROOM_ID;
+      const sharingRoom = getActive().filter((b) => b?.config?.roomId === roomId);
+
+      if (sharingRoom.length <= 1) {
+        console.log(`[Quests Mod][Spider Lair][board-ownership] ${label}: only ${sharingRoom.length} active battle instance(s) for room ${roomId} — no competition`, {
+          names: sharingRoom.map((b) => b?.config?.name)
+        });
+        return;
+      }
+
+      const rows = sharingRoom.map((b) => {
+        let ownsBoard = false;
+        try { ownsBoard = b.ownsBoardRestrictions?.() === true; } catch (_) {}
+        return {
+          name: b?.config?.name,
+          isSpiderLairInstance: b === spiderLairBattle,
+          isActive: b?.isActive === true,
+          ownsBoardRestrictions: ownsBoard,
+          allowedTiles: b?.config?.tileRestrictions?.allowedTiles || null,
+          setupSeq: b?._setupSeq
+        };
+      });
+
+      const spiderLairOwns = rows.find((r) => r.isSpiderLairInstance)?.ownsBoardRestrictions === true;
+      const logFn = spiderLairOwns ? console.log : console.warn;
+      logFn(`[Quests Mod][Spider Lair][board-ownership] ${label}: ${sharingRoom.length} active battle instances share room ${roomId}${spiderLairOwns ? '' : ' — SPIDER LAIR DOES NOT OWN BOARD RESTRICTIONS, another quest\'s allowedTiles are governing ally placement right now'}`);
+      if (typeof console.table === 'function') {
+        console.table(rows);
+      } else {
+        console.log(rows);
+      }
+    } catch (error) {
+      console.error('[Quests Mod][Spider Lair][board-ownership] Error checking board ownership:', error);
+    }
+  }
+
+  // Safety net, not a debug trace — same reasoning as checkMornenionHitboxIntegrity: only
+  // prints when a tile that's supposed to be walkable is actually reading as blocked. Kept
+  // wired in permanently since the failure mode it catches lives in CustomBattles' shared
+  // placement-mask code, which this file doesn't own.
+  function checkSpiderLairHitboxIntegrity(label) {
+    try {
+      // Spider Lair (unlike Mornenion) has a real tileRestrictions.allowedTiles set that's
+      // a strict subset of SPIDER_LAIR_WALKABLE_TILES. While the pre-battle placement mask
+      // is active, CustomBattles' own applyPlacementHitboxMask() (custom-battles.js) is
+      // SUPPOSED to mark every walkable tile outside allowedTiles (+ villain tiles) as
+      // blocked — that's the ally-placement-restriction feature working as intended, not
+      // corruption. Only compare against the full walkable set once that mask is lifted
+      // (real combat hitboxes), or false positives fire on every setup-phase mutation pass.
+      if (spiderLairBattle?._placementHitboxMaskActive === true) return;
+
+      const roomRefs = getSpiderLairRoomRefs();
+      const hitboxes = roomRefs.find((room) => Array.isArray(room?.file?.data?.hitboxes))?.file?.data?.hitboxes || null;
+      if (!Array.isArray(hitboxes)) return;
+
+      const corruptedWalkableTiles = SPIDER_LAIR_WALKABLE_TILES.filter((i) => hitboxes[i] === true);
+      if (!corruptedWalkableTiles.length) return;
+
+      console.warn(`[Quests Mod][Spider Lair][hitbox-check] ${label}: ${corruptedWalkableTiles.length} walkable tile(s) reading as blocked`, {
+        corruptedWalkableTiles,
+        blockedCount: hitboxes.filter((v) => v === true).length,
+        placementHitboxMaskActive: spiderLairBattle?._placementHitboxMaskActive === true
+      });
+    } catch (error) {
+      console.error('[Quests Mod][Spider Lair][hitbox-check] Error checking hitbox integrity:', error);
+    }
+  }
+
+  // Raw combat-hitbox write, mirroring writeMornenionRawHitboxes: bypasses CustomBattles'
+  // internal placement-mask snapshot (and applySpiderLairTileMutations' DOM sprite work)
+  // entirely, writing the known-correct hitbox value for every tile straight from
+  // SPIDER_LAIR_TILE_MUTATIONS. Used by triggerSpiderLairBattleStart below to guarantee
+  // correct hitboxes at the moment Start is clicked, independent of whether the DOM decor
+  // pass or CustomBattles' own mask restore actually ran.
+  function writeSpiderLairRawHitboxes() {
+    const mutations = SPIDER_LAIR_TILE_MUTATIONS;
+    if (!mutations || typeof mutations !== 'object') return false;
+    const roomRefs = getSpiderLairRoomRefs();
+    if (!roomRefs.length) return false;
+    Object.entries(mutations).forEach(([tileKey, entry]) => {
+      const tileIndex = Number(tileKey);
+      if (!Number.isFinite(tileIndex) || !entry || !Object.prototype.hasOwnProperty.call(entry, 'hitbox')) return;
+      roomRefs.forEach((room) => {
+        const data = room?.file?.data;
+        if (!data) return;
+        if (!Array.isArray(data.hitboxes)) data.hitboxes = [];
+        data.hitboxes[tileIndex] = entry.hitbox === true;
+      });
+    });
+    return true;
+  }
+
+  // Same "make sure real combat hitboxes are correct at the moment battle starts"
+  // precaution as triggerMornenionBattleStart, for Spider Lair — same shared CustomBattles
+  // library, same class of Start-click race, so don't assume its self-heal works here
+  // either even though Spider Lair doesn't hit the allyLimit===allowedTiles.length resync
+  // gap Mornenion does (see scheduleMornenionHitboxResync's comment — Spider Lair is
+  // allyLimit:5 vs 10 allowedTiles, never fully occupied/vacated the same way).
+  function triggerSpiderLairBattleStart(source) {
+    if (!playerUsedTile77ToSpiderLair || !spiderLairBattle) return;
+    logSpiderLairHitboxTable(`${source}: before forced write`);
+    logSpiderLairBoardOwnership(`${source}: before forced write`);
+    spiderLairBattleStarting = true;
+    writeSpiderLairRawHitboxes();
+    spiderLairBattle._placementHitboxMaskActive = false;
+    checkSpiderLairHitboxIntegrity(`${source}: after forced write`);
+    logSpiderLairHitboxTable(`${source}: after forced write`);
+    logSpiderLairBoardOwnership(`${source}: after forced write`);
+    if (typeof scheduleSpiderLairBattlefieldVisuals === 'function') scheduleSpiderLairBattlefieldVisuals();
+  }
+
+  // Backup mechanism: registered once, globally, rather than per-battle-instance —
+  // mornenionBattle gets torn down and recreated on every hole entry, but this only
+  // needs to always act on whichever instance is current when the event actually fires.
+  // Deliberately NOT registered inline at module load — globalThis.state.board isn't
+  // guaranteed to exist yet at that point — so retry instead, same pattern as
+  // trackCreaturePlacements below.
+  // Single shared dispatcher rather than one board.on('before-game-start', ...) listener
+  // per quest — registering multiple raw board.on listeners for the same native event is
+  // more fragile to get right (ordering, cleanup) than one listener that calls each
+  // quest's trigger function, each of which already self-guards on its own
+  // playerUsed*/battle-instance state, so at most one of them actually does anything for
+  // any given battle start.
+  let questBattleStartHookRegistered = false;
+  function registerQuestBattleStartHitboxSafetyNet(retryCount = 0) {
+    if (questBattleStartHookRegistered) return;
+    if (!globalThis.state?.board?.on) {
+      if (retryCount < 40) {
+        setTimeout(() => registerQuestBattleStartHitboxSafetyNet(retryCount + 1), 250);
+      } else {
+        console.warn('[Quests Mod] state.board.on never became available — before-game-start hitbox safety net not installed');
+      }
+      return;
+    }
+    globalThis.state.board.on('before-game-start', () => {
+      triggerMornenionBattleStart('before-game-start');
+      triggerSpiderLairBattleStart('before-game-start');
+    });
+    questBattleStartHookRegistered = true;
+    console.log('[Quests Mod] before-game-start hitbox safety net installed');
+  }
+  registerQuestBattleStartHitboxSafetyNet();
+
+  // Primary mechanism, not just backup: 'before-game-start'/'emitNewGame' never fired at
+  // all when testing Start in sandbox mode (no log line, from us or from
+  // "[Custom Battles]"'s own handler for the same event). custom-battles.js's own
+  // setupStopButtonDisabler() hits the same gap — its comment literally calls the event
+  // listener "a backup" to a document-level click(capture) handler that matches the
+  // Start/Play button by its text content, which is the one mechanism actually confirmed
+  // to fire in sandbox mode. Mirror that approach here instead of trusting the event.
+  if (typeof document !== 'undefined') {
+    document.addEventListener('click', (event) => {
+      const button = event.target?.closest?.('button');
+      if (!button) return;
+      const text = button.textContent?.trim();
+      if (text !== 'Start' && text !== 'Iniciar' && text !== 'Play' && text !== 'Jogar') return;
+      triggerMornenionBattleStart('Start button click');
+      triggerSpiderLairBattleStart('Start button click');
+    }, true);
+  }
+
+  // The one source of truth for "is tile N supposed to be walkable" — every tile in
+  // MORNENION_TILE_MUTATIONS carries a `hitbox`. Writes it directly, bypassing
+  // CustomBattles' internal placement-mask snapshot entirely. That snapshot round-trip
+  // (applyPlacementHitboxMask/restorePlacementHitboxes) has been shown to silently fail
+  // to actually change the live array in at least one observed case (mask flag flipped
+  // off, hitboxes array unchanged) — rather than debug that further, anywhere we need a
+  // guaranteed-correct board state, just write it ourselves from data we already own.
+  function writeMornenionRawHitboxes() {
+    const mutations = MORNENION_TILE_MUTATIONS;
+    if (!mutations || typeof mutations !== 'object') return false;
+    const roomRefs = getMornenionAbwaspRoomRefs();
+    if (!roomRefs.length) return false;
+    Object.entries(mutations).forEach(([tileKey, entry]) => {
+      const tileIndex = Number(tileKey);
+      if (!Number.isFinite(tileIndex) || !entry || !Object.prototype.hasOwnProperty.call(entry, 'hitbox')) return;
+      roomRefs.forEach((room) => {
+        const data = room?.file?.data;
+        if (!data) return;
+        if (!Array.isArray(data.hitboxes)) data.hitboxes = [];
+        data.hitboxes[tileIndex] = entry.hitbox === true;
+      });
+    });
+    return true;
+  }
+
+  function applyMornenionTileMutations() {
+    const mutations = MORNENION_TILE_MUTATIONS;
+    if (!mutations || typeof mutations !== 'object') return;
+
+    // CustomBattles overlays its own "placement hitbox mask" onto room.file.data.hitboxes
+    // while the player is placing allies (to compute which tiles are valid drop spots /
+    // whether Start should be enabled). Every tile mutation here now carries a `hitbox`
+    // (see rooms.json comment), so every retry pass rewrites the ENTIRE hitboxes array —
+    // if that happens while the mask is active, it clobbers the mask with the maze's raw
+    // hitboxes instead of the mask's placement-validity values, which can leave Start
+    // stuck thinking a tile is blocked. Mirror Sewers/Ekatrix: drop the mask first so our
+    // writes land on the true board data, then ask CustomBattles to recompute the mask
+    // from the now-current hitboxes.
+    const battle = mornenionBattle;
+    const hadMask = battle?._placementHitboxMaskActive === true;
+    if (hadMask) battle.restorePlacementHitboxes?.();
+
+    Object.entries(mutations).forEach(([tileKey, entry]) => {
+      const tileIndex = Number(tileKey);
+      if (!Number.isFinite(tileIndex) || !entry || typeof entry !== 'object') return;
+      const tile = getTileElement(tileIndex);
+
+      // Many entries here reuse the same sprite id for remove+add (a crop-variant swap,
+      // e.g. remove:[351] / add:[{spriteId:351,cropX:1}]) rather than a different id —
+      // unlike Sewers/Ekatrix's mutations, which never collide. Since DOM elements are
+      // matched by class (`.id-351`), excluding our own previously-added sprites here is
+      // required, or a retry pass re-hides the very sprite it just placed.
+      //
+      // Several hive tiles also carry an untouched native decoration (comb accents,
+      // torch glows — ids like 4785-4796/1854-1867) sitting at z-index 1000 on top of
+      // the z-index:0 base floor sprite; that decoration is never in `remove` since we
+      // want it to stay visible. Recording each removed sprite's original z-index here
+      // lets the matching `add` entry (the base-tile re-add) restore that same z-index
+      // instead of defaulting to 1000, so it doesn't get appended on top of — and hide —
+      // the decoration it's supposed to render underneath.
+      const removedZIndexBySpriteId = {};
+      (entry.remove || []).forEach((spriteId) => {
+        if (spriteId == null || !tile) return;
+        tile.querySelectorAll(`.sprite.item.relative.id-${spriteId}:not([${QUEST_BOARD_ADDED_ATTR_MORNENION}])`).forEach((sprite) => {
+          removedZIndexBySpriteId[spriteId] = sprite.style.zIndex;
+          hideQuestBoardElement(sprite, { tag: QUEST_BOARD_HIDDEN_TAG_MORNENION });
+        });
+      });
+
+      // Keyed by tile+position (not by sprite id class), so a retry pass can't mistake
+      // an already-placed sprite for missing and stack a duplicate on top of it.
+      (entry.add || []).forEach((spriteEntry, spriteIndex) => {
+        const spriteId = spriteEntry?.spriteId;
+        if (spriteId == null || !tile) return;
+        const mutationKey = `${tileIndex}-${spriteIndex}`;
+        if (tile.querySelector(`[data-quests-mornenion-mutation-key="${mutationKey}"]`)) return;
+        const wrap = document.createElement('div');
+        wrap.innerHTML = buildMornenionMutationSpriteHTML(spriteEntry, mutationKey, removedZIndexBySpriteId[spriteId]);
+        if (wrap.firstElementChild) tile.appendChild(wrap.firstElementChild);
+      });
+
+    });
+
+    writeMornenionRawHitboxes();
+
+    // Placement-phase-only: masking exists to steer where allies can be dropped before
+    // the fight starts. Once the battle is active (or on its way there — this function is
+    // now also called from the Start-click/before-game-start hooks to reapply the DOM
+    // decor a combat-scene re-render just wiped), re-masking is not just unnecessary but
+    // actively harmful — isBoardBattleActive() can still read false for a brief instant
+    // right after Start is clicked (native gameStarted hasn't flipped yet), so calling
+    // this unconditionally reintroduced the exact "villain tiles blocked" bug from
+    // earlier for one retry pass before it self-corrected. Skip it entirely once we're no
+    // longer in the pure pre-battle setup phase.
+    if (!battle?.isBoardBattleActive?.() && !mornenionBattleStarting) {
+      if (battle?.refreshPlacementHitboxMaskFromLive) {
+        battle.refreshPlacementHitboxMaskFromLive(() => playerUsedHoleToMornenion);
+      } else if (battle?.syncPlacementHitboxMask) {
+        battle.syncPlacementHitboxMask(() => playerUsedHoleToMornenion);
+      }
+    }
+
+    if (playerUsedHoleToMornenion) checkMornenionHitboxIntegrity('applyMornenionTileMutations');
+  }
+
+  function restoreMornenionTileMutations() {
+    restoreQuestBoardElementsByTag(QUEST_BOARD_HIDDEN_TAG_MORNENION);
+    document.querySelectorAll(`[${QUEST_BOARD_ADDED_ATTR_MORNENION}="1"]`).forEach((el) => {
+      try { el.remove(); } catch (_) { /* noop */ }
+    });
+  }
+
+  const MORNENION_VISUAL_RETRY_DELAYS_MS = [0, 50, 150, 300, 500, 800, 1200, 2000];
+  let mornenionVisualRetryTimers = [];
+
+  function clearMornenionVisualRetries() {
+    mornenionVisualRetryTimers.forEach((id) => clearTimeout(id));
+    mornenionVisualRetryTimers = [];
+  }
+
+  function applyMornenionBattlefieldVisuals() {
+    if (!playerUsedHoleToMornenion || !mornenionBattle) return;
+    applyMornenionTileMutations();
+  }
+
+  function scheduleMornenionBattlefieldVisuals() {
+    clearMornenionVisualRetries();
+    applyMornenionBattlefieldVisuals();
+    MORNENION_VISUAL_RETRY_DELAYS_MS.forEach((delay) => {
+      if (delay <= 0) return;
+      mornenionVisualRetryTimers.push(setTimeout(() => {
+        applyMornenionBattlefieldVisuals();
+      }, delay));
+    });
+  }
+
   function addSpecificVillains() {
     if (mornenionBattle) {
       mornenionBattle.addVillains();
+      scheduleMornenionBattlefieldVisuals();
     } else {
       console.warn('[Quests Mod][Villain Adder] Mornenion battle not initialized');
     }
@@ -20071,6 +21350,7 @@ function createNPCCooldownManager() {
       buttons: [
         {
           text: 'Use Destroy Field Rune',
+          width: '190px',
           backgroundColor: '#6b6b6b',
           color: '#d0d0d0',
           border: '1px solid #9a9a9a',
@@ -20452,6 +21732,25 @@ function createNPCCooldownManager() {
     }
   }
 
+  // Single source of truth for "is any custom battle — from any quest, present or future —
+  // currently active for this native roomId." Reuses CustomBattles' own activeCustomBattles
+  // registry (custom-battles.js, exposed via getActiveBattles()) instead of hand-maintaining
+  // a list of every quest's own battle variable at each call site. A room shared by several
+  // quests (e.g. "rkswrs"/Sewers, currently hosting Knarknaknork/Rookie Guard, Spider Lair,
+  // Ekatrix, Jakundaf Desert, and Hellgate Part 1) is covered automatically the moment a new
+  // quest's battle calls .setup() — no call site referencing this ever needs to be touched
+  // again when the next quest is added to that room.
+  function isAnyCustomBattleActiveForRoom(roomId) {
+    if (!roomId) return false;
+    try {
+      const battles = globalThis.CustomBattles?.getActiveBattles?.();
+      if (!Array.isArray(battles)) return false;
+      return battles.some((battle) => battle?.isActive && battle.config?.roomId === roomId);
+    } catch (_) {
+      return false;
+    }
+  }
+
   // Check if Tile 79 should be right-clickable
   function shouldEnableTile79RightClick(boardContext = null) {
     try {
@@ -20462,6 +21761,19 @@ function createNPCCooldownManager() {
       const isInSewers = roomNames && currentRoomId && roomNames[currentRoomId] === 'Sewers';
 
       if (!isInSewers) return false;
+
+      // Sewers hosts several custom battles (Knarknaknork/Rookie Guard, Spider Lair,
+      // Ekatrix, Jakundaf Desert, Hellgate Part 1, and whatever quest gets added to this
+      // room next) that all reskin the same physical room. Tile 79's own interactive
+      // wrapper gets `pointer-events: auto` whenever this returns true, which sits
+      // directly on top of the board and blocks ally drag/drop for whichever battle is
+      // actually running. Suppress it while ANY of them is active — checked generically
+      // (see isAnyCustomBattleActiveForRoom above) instead of a hand-maintained list of
+      // battle variables. That list previously omitted hellgateBattle simply because
+      // Hellgate Part 1 was added after this function was written — tile 79's "Visit Al
+      // Dee" highlight and blocking pointer-events wrapper stayed live for that entire
+      // battle as a result, exactly the class of bug a generic check prevents going forward.
+      if (isAnyCustomBattleActiveForRoom(currentRoomId)) return false;
 
       return canAccessAlDeeByLetterProgression();
     } catch (error) {
@@ -21945,20 +23257,13 @@ function createNPCCooldownManager() {
     event.stopImmediatePropagation();
     event.stopPropagation();
 
-    let roomId = getRoomIdByRoomName(SPIDER_LAIR_ROOM_NAME);
-    let usedFallback = false;
-    if (!roomId && SPIDER_LAIR_USE_SECLUDED_HERB_IF_MISSING) {
-      roomId = getRoomIdByRoomName(SECLUDED_HERB_ROOM_NAME);
-      usedFallback = !!roomId;
-      if (usedFallback) {
-        console.log('[Quests Mod][Spider Lair] "Spider Lair" not in game — running battle on A Secluded Herb (roomId:', roomId, ')');
-      }
-    }
+    let roomId = SPIDER_LAIR_BATTLE_ROOM_ID || getRoomIdByRoomName(SPIDER_LAIR_BATTLE_ROOM_NAME);
+    if (!roomId) roomId = getRoomIdByRoomName(SPIDER_LAIR_BATTLE_ROOM_NAME);
     if (!roomId) {
       showToast({ message: TOAST_MESSAGES.spiderLairNotFound, logPrefix: BATTLE_TOAST_LOG.spiderLair });
       return;
     }
-    console.log('[Quests Mod][Spider Lair] Tile 77 clicked — roomId:', roomId, usedFallback ? '(fallback: A Secluded Herb)' : '');
+    console.log('[Quests Mod][Spider Lair] Tile 77 clicked — roomId:', roomId);
 
     playerUsedTile77ToSpiderLair = true;
     if (spiderLairBattle) {
@@ -21995,12 +23300,8 @@ function createNPCCooldownManager() {
       console.error('[Quests Mod][Spider Lair] CustomBattles not available');
     }
 
-    if (!usedFallback) {
-      globalThis.state.board.send({ type: 'selectRoomById', roomId: roomId });
-      showToast({ message: TOAST_MESSAGES.enteringSpiderLair, logPrefix: BATTLE_TOAST_LOG.spiderLair });
-    } else {
-      showToast({ message: TOAST_MESSAGES.spiderLairBattleHere, logPrefix: BATTLE_TOAST_LOG.spiderLair });
-    }
+    globalThis.state.board.send({ type: 'selectRoomById', roomId: roomId });
+    showToast({ message: TOAST_MESSAGES.enteringSpiderLair, logPrefix: BATTLE_TOAST_LOG.spiderLair });
   }
 
   function shouldEnableTile77SpiderLair(boardContext = null) {
@@ -22009,11 +23310,11 @@ function createNPCCooldownManager() {
     return isOnRoomByName(SECLUDED_HERB_ROOM_NAME);
   }
 
-  // Listener is on whenever we're not in Spider Lair (so we don't disable on map view or other rooms); pointer-events only when on A Secluded Herb
+  // Listener is on whenever we're not in the Sewers battle room (so we don't disable on map view or other rooms); pointer-events only when on A Secluded Herb
   function shouldEnableTile77SpiderLairListener(boardContext = null) {
     const progress = kingChatState.progressMotherOfAllSpiders;
     if (!progress?.accepted || progress.completed) return false;
-    return !isOnRoomByName(SPIDER_LAIR_ROOM_NAME);
+    return !isOnRoomByName(SPIDER_LAIR_BATTLE_ROOM_NAME);
   }
 
   function updateTile77SpiderLairState(boardContext = null, retryCount = 0) {
@@ -22621,6 +23922,7 @@ function createNPCCooldownManager() {
   function cleanupEkatrixQuest() {
     try {
       removeCustomBattleStatusToast();
+      ekatrixBossHpBar.remove();
       clearEkatrixVisualRetries();
       playerEnteredEkatrixPortal = false;
       ekatrixReinitTriggered = false;
@@ -23376,6 +24678,7 @@ function createNPCCooldownManager() {
   function cleanupSewersQuest() {
     try {
       removeCustomBattleStatusToast();
+      knarknaknorkBossHpBar.remove();
       clearSewersVisualRetries();
       playerEnteredSewersPortal = false;
       restoreSewersTileMutations();
@@ -23610,6 +24913,582 @@ function createNPCCooldownManager() {
     console.log(`${getRookieGuardLogPrefix()} System cleaned up`);
   }
 
+  // =======================
+  // Hellgate Part 1 (Elathriel — chat-triggered teleport into the Fire Elemental
+  // battle in Sewers. Reuses the same room as Knarknaknork/Ekatrix/Spider Lair;
+  // each battle's own activationCheck flag keeps them from colliding.)
+  // =======================
+
+  function getHellgateLogPrefix() {
+    return '[Quests Mod][Hellgate Part 1]';
+  }
+
+  function createHellgateBattleInstance(roomId) {
+    if (!window.CustomBattles) {
+      console.error(`${getHellgateLogPrefix()} CustomBattles still not available`);
+      return null;
+    }
+    const spawn = getHydratedQuestBattleSpawn(HELLGATE_BATTLE_ID || 'hellgate_treasure_room');
+    const villains = spawn.villains;
+    const tileRestrictions = {};
+    if (spawn.allowedTiles?.length) {
+      tileRestrictions.allowedTiles = spawn.allowedTiles;
+      tileRestrictions.message = spawn.allowedTilesMessage || 'Ally creatures can only be placed on the marked tiles!';
+    }
+    const config = {
+      name: HELLGATE_BATTLE_DISPLAY_NAME || 'Hellgate Treasure Room',
+      roomId,
+      villains,
+      allyLimit: spawn.allyLimit ?? 5,
+      preventVillainMovement: spawn.preventVillainMovement !== false,
+      hideVillainSprites: spawn.hideVillainSprites !== false,
+      ...(Object.keys(tileRestrictions).length ? { tileRestrictions } : {}),
+      activationCheck: (isSandbox, inBattleArea) => {
+        return isSandbox && inBattleArea && playerFollowedElathrielToHellgate;
+      },
+      victoryDefeat: {
+        onVictory: async () => {
+          console.log(`${getHellgateLogPrefix()} Fire Elementals defeated!`);
+          // Reward (Beware of the Bonelords (Book)) is handed over by Elathriel in person,
+          // not granted automatically here — see isHellgateBattleCompletedPendingReward()/
+          // completeHellgatePart1MissionWithBook(), delivered from the Elathriel chat handler
+          // once the player speaks to him again. Only the battleCompleted flag is persisted now.
+          try {
+            await persistMissionProgress(HELLGATE_PART_1_MISSION, {
+              accepted: true,
+              completed: false,
+              battleCompleted: true
+            });
+          } catch (error) {
+            console.error(`${getHellgateLogPrefix()} Error saving battleCompleted flag:`, error);
+          }
+        },
+        onDefeat: () => {},
+        onClose: () => {
+          cleanupHellgateTreasureRoomQuest();
+          setTimeout(() => navigateToHedgeMazeFromHellgate(), 100);
+        },
+        victoryTitle: 'Victory!',
+        defeatTitle: 'Defeat',
+        victoryMessage: getMissionDialogueLine(
+          HELLGATE_PART_1_MISSION,
+          'battleVictory',
+          'The treasure room is cleared. Return to Elathriel.'
+        ),
+        defeatMessage: getMissionDialogueLine(
+          HELLGATE_PART_1_MISSION,
+          'battleDefeat',
+          'Whatever guards that treasure was not so easily bested.'
+        ),
+        showItems: false,
+        items: []
+      }
+    };
+    return window.CustomBattles.create(config);
+  }
+
+  // Same pattern as isApprenticeShengBattleCompletedPendingReward/isLostOracleBattleCompletedPendingThanks:
+  // victory only sets battleCompleted, the actual reward is handed over on the next
+  // conversation with the quest's own NPC.
+  function isHellgateBattleCompletedPendingReward() {
+    const progress = getMissionProgress(HELLGATE_PART_1_MISSION);
+    return !!progress?.battleCompleted && !progress?.completed;
+  }
+
+  async function completeHellgatePart1MissionWithBook() {
+    const progress = getMissionProgress(HELLGATE_PART_1_MISSION);
+    if (progress?.completed) return false;
+    try {
+      await addQuestItem('Beware of the Bonelords (Book)', 1);
+      showQuestItemNotification('Beware of the Bonelords (Book)', 1);
+      await persistMissionProgress(HELLGATE_PART_1_MISSION, {
+        accepted: true,
+        completed: true,
+        battleCompleted: true
+      });
+      NotificationService.showQuestCompleted(HELLGATE_PART_1_MISSION, getHellgateLogPrefix(), {
+        productName: 'Beware of the Bonelords (Book)'
+      });
+      console.log(`${getHellgateLogPrefix()} Mission completed — Beware of the Bonelords (Book) awarded`);
+      return true;
+    } catch (error) {
+      console.error(`${getHellgateLogPrefix()} Error completing mission with book reward:`, error);
+      return false;
+    }
+  }
+
+  function initializeHellgateBattle(roomId) {
+    if (window.CustomBattles) {
+      return createHellgateBattleInstance(roomId);
+    }
+    return waitForCustomBattles({ logPrefix: getHellgateLogPrefix() }).then((api) => {
+      if (!api) return null;
+      return createHellgateBattleInstance(roomId);
+    });
+  }
+
+  function formatHellgateMutationOffsetCalc(px) {
+    const value = Number(px);
+    if (!Number.isFinite(value) || value === 0) return '';
+    const sign = value < 0 ? '-' : '';
+    return `calc(${sign}${Math.abs(value)}px * var(--zoomFactor))`;
+  }
+
+  const HELLGATE_ELATHRIEL_DUMMY_TILE_INDEX = 157;
+  const HELLGATE_ELATHRIEL_DUMMY_ATTR = 'data-quests-hellgate-elathriel-dummy';
+
+  // Elathriel "follows" the player into the treasure room narratively, so a purely
+  // decorative (non-interactive) copy of him stands on tile 157 for the whole battle.
+  // Deliberately NOT a real Board NPC placement (shouldPlaceBoardNpc refuses to place
+  // any Board NPC while a battle is active) and NOT a forced combat ally (no fight/death
+  // interaction wanted — just a visual). Reuses the same outfit-sprite markup
+  // placeBoardNpcOverlay renders for him on the map, minus every interactive bit, and is
+  // tagged with QUEST_BOARD_ADDED_ATTR_HELLGATE so restoreHellgateTileMutations() tears
+  // it down automatically along with every other decorative sprite in this room.
+  const HELLGATE_ELATHRIEL_DUMMY_NAME_TAG_CLASS = 'quests-hellgate-elathriel-dummy-name-tag';
+
+  // Name label above the dummy — same nameplate positioning trick as the real Board NPC
+  // system (positionBoardNpcNameTag): parented onto the tile's own parent (not the tile
+  // itself) and offset up by one tile height off the tile's *live* right/bottom, since
+  // that's what keeps it correctly aligned across zoom/board re-renders. Built once and
+  // repositioned on every call rather than rebuilt, so remounts don't stack duplicates.
+  function ensureHellgateElathrielDummyNameTag(tileElement) {
+    let nameTag = document.querySelector(`.${HELLGATE_ELATHRIEL_DUMMY_NAME_TAG_CLASS}`);
+    if (!nameTag) {
+      nameTag = document.createElement('span');
+      nameTag.className = `${HELLGATE_ELATHRIEL_DUMMY_NAME_TAG_CLASS} revert-pixel-font-spacing pointer-events-none absolute flex w-[192px] flex-col items-center`;
+      nameTag.style.cssText = [
+        'position:absolute',
+        'user-select:none',
+        `z-index:${QUEST_FIGHT_ICON_Z_INDEX}`,
+        'pointer-events:none',
+        'line-height:1'
+      ].join(';');
+      nameTag.setAttribute(QUEST_BOARD_ADDED_ATTR_HELLGATE, '1');
+
+      const nameLine = document.createElement('span');
+      nameLine.setAttribute('translate', 'no');
+      nameLine.className = 'select-none text-center pixel-font-16 text-whiteHighlight';
+      nameLine.style.cssText = 'line-height:1;font-size:16px;display:inline-flex;align-items:center;';
+
+      const nameText = document.createElement('span');
+      nameText.className = 'text-whiteHighlight';
+      nameText.style.cssText = 'color:rgb(96, 192, 96);text-shadow:-1px 0 #000,1px 0 #000,0 -1px #000,0 1px #000;';
+      nameText.textContent = 'Elathriel';
+
+      nameLine.appendChild(nameText);
+      nameTag.appendChild(nameLine);
+    }
+    positionBoardNpcNameTag(nameTag, tileElement);
+  }
+
+  function ensureHellgateElathrielDummy() {
+    const tile = getTileElement(HELLGATE_ELATHRIEL_DUMMY_TILE_INDEX);
+    if (!tile) return;
+    if (!tile.querySelector(`[${HELLGATE_ELATHRIEL_DUMMY_ATTR}="1"]`)) {
+      const outfitSpriteId = ELATHRIEL_OUTFIT_SPRITE_ID || '64';
+      const wrap = document.createElement('div');
+      wrap.innerHTML = `<div class="sprite outfit id-${outfitSpriteId} idle north pointer-events-none absolute bottom-0 right-0 select-none" ${QUEST_BOARD_ADDED_ATTR_HELLGATE}="1" ${HELLGATE_ELATHRIEL_DUMMY_ATTR}="1" style="z-index: 1000;"><div class="viewport"><img alt="north" class="actor spritesheet" data-shiny="false" style="animation-play-state: running;"></div></div>`;
+      if (wrap.firstElementChild) tile.appendChild(wrap.firstElementChild);
+    }
+    ensureHellgateElathrielDummyNameTag(tile);
+  }
+
+  function buildHellgateMutationSpriteHTML(entry, mutationKey) {
+    const spriteId = entry?.spriteId;
+    if (spriteId == null) return '';
+    const cropX = entry.cropX != null ? entry.cropX : 0;
+    const cropY = entry.cropY != null ? entry.cropY : 0;
+    const cropped = entry.cropped ? 'true' : 'false';
+    const bankStyle = entry.bank != null ? ` --bank: ${entry.bank};` : '';
+    const rightCalc = formatHellgateMutationOffsetCalc(entry.offsetX);
+    const bottomCalc = formatHellgateMutationOffsetCalc(entry.offsetY);
+    const offsetStyle = `${rightCalc ? ` right: ${rightCalc};` : ''}${bottomCalc ? ` bottom: ${bottomCalc};` : ''}`;
+    return `<div class="sprite item relative id-${spriteId}" ${QUEST_BOARD_ADDED_ATTR_HELLGATE}="1" data-quests-hellgate-mutation-key="${mutationKey}" style="z-index: 1000;${bankStyle}${offsetStyle}"><div class="viewport"><img alt="${spriteId}" data-cropped="${cropped}" class="spritesheet" style="--cropX: ${cropX}; --cropY: ${cropY};"></div></div>`;
+  }
+
+  // rkswrs (native "Sewers") is shared by Sewers/Knarknaknork, Spider Lair, Ekatrix,
+  // Jakundaf, and now this quest — five separate battle instances can all target the
+  // same room. Extracted (mirrors getSpiderLairRoomRefs) so the hitbox-mutation writer
+  // and every diagnostic below look up the live room object the same way.
+  function getHellgateRoomRefs() {
+    const roomId = HELLGATE_BATTLE_ROOM_ID;
+    const selected = globalThis.state?.board?.getSnapshot?.()?.context?.selectedMap?.selectedRoom
+      || globalThis.state?.selectedMap?.selectedRoom;
+    const utils = globalThis.state?.utils;
+    const roomRefs = [];
+    if (selected?.id === roomId) roomRefs.push(selected);
+    if (Array.isArray(utils?.ROOMS)) {
+      utils.ROOMS.forEach((room) => {
+        if (room?.id === roomId) roomRefs.push(room);
+      });
+    }
+    if (Array.isArray(utils?.REGIONS)) {
+      utils.REGIONS.forEach((region) => {
+        (region?.rooms || []).forEach((room) => {
+          if (room?.id === roomId) roomRefs.push(room);
+        });
+      });
+    }
+    return roomRefs;
+  }
+
+  // The full set of 165 tiles' intended-walkable ("hitbox: false") state per rooms.json's
+  // hellgateTreasureRoom.tileMutations (48 tiles — the 7 villain-spawn tiles plus the
+  // 30-tile allowedTiles ally-placement zone plus a handful of extra walkable-but-not-
+  // placeable floor tiles). Anything in this list that reads `true` at runtime has been
+  // flipped from its intended value. Computed directly from rooms.json, same derivation as
+  // SPIDER_LAIR_WALKABLE_TILES/MORNENION_WALKABLE_TILES.
+  const HELLGATE_WALKABLE_TILES = [
+    34, 37, 40, 49, 52, 55, 94, 95, 96, 97, 98, 99, 100, 106, 107, 108, 109, 110, 111, 112,
+    113, 114, 115, 116, 117, 118, 121, 122, 123, 124, 125, 128, 129, 130, 131, 132, 133,
+    136, 137, 138, 139, 140, 143, 144, 145, 146, 147, 148
+  ];
+
+  // Safety net, not a debug trace — same reasoning as checkSpiderLairHitboxIntegrity: only
+  // prints when a tile that's supposed to be walkable is actually reading as blocked.
+  function checkHellgateHitboxIntegrity(label) {
+    try {
+      // While the pre-battle placement mask is active, CustomBattles' own
+      // applyPlacementHitboxMask() deliberately blocks every walkable tile outside
+      // allowedTiles (+ villain tiles) — that's the ally-placement-restriction feature
+      // working as intended, not corruption. Only compare once the mask is lifted.
+      if (hellgateBattle?._placementHitboxMaskActive === true) return;
+
+      const roomRefs = getHellgateRoomRefs();
+      const hitboxes = roomRefs.find((room) => Array.isArray(room?.file?.data?.hitboxes))?.file?.data?.hitboxes || null;
+      if (!Array.isArray(hitboxes)) return;
+
+      const corruptedWalkableTiles = HELLGATE_WALKABLE_TILES.filter((i) => hitboxes[i] === true);
+      if (!corruptedWalkableTiles.length) return;
+
+      console.warn(`[Quests Mod][Hellgate Part 1][hitbox-check] ${label}: ${corruptedWalkableTiles.length} walkable tile(s) reading as blocked`, {
+        corruptedWalkableTiles,
+        blockedCount: hitboxes.filter((v) => v === true).length,
+        placementHitboxMaskActive: hellgateBattle?._placementHitboxMaskActive === true
+      });
+    } catch (error) {
+      console.error('[Quests Mod][Hellgate Part 1][hitbox-check] Error checking hitbox integrity:', error);
+    }
+  }
+
+  // Prints every tile's live hitbox state (ALLOWED = walkable, BLOCKED = blocked) plus a
+  // phase-aware mismatch table against HELLGATE_TILE_MUTATIONS — mirrors
+  // logSpiderLairHitboxTable. While the placement mask is active the expected value is
+  // derived the same way the mask itself derives it (allowedTiles ∪ villain-occupied ⇒
+  // open, everything else ⇒ blocked); once combat starts, expected reverts to the raw
+  // tileMutations value.
+  function logHellgateHitboxTable(label) {
+    try {
+      const mutations = HELLGATE_TILE_MUTATIONS;
+      if (!mutations || typeof mutations !== 'object') return;
+      const roomRefs = getHellgateRoomRefs();
+      const liveHitboxes = roomRefs.find((room) => Array.isArray(room?.file?.data?.hitboxes))?.file?.data?.hitboxes || null;
+
+      const battle = hellgateBattle;
+      const maskActive = battle?._placementHitboxMaskActive === true;
+      let maskWalkableTiles = null;
+      if (maskActive) {
+        maskWalkableTiles = new Set(battle?.config?.tileRestrictions?.allowedTiles || []);
+        (battle?.getVillainOccupiedTiles?.() || []).forEach((t) => {
+          const n = Number(t);
+          if (Number.isFinite(n)) maskWalkableTiles.add(n);
+        });
+        (battle?.getForcedAllyOccupiedTiles?.() || []).forEach((t) => {
+          const n = Number(t);
+          if (Number.isFinite(n)) maskWalkableTiles.add(n);
+        });
+      }
+
+      const rows = [];
+      let mismatchCount = 0;
+      for (let tileIndex = 0; tileIndex <= 164; tileIndex += 1) {
+        const entry = mutations[String(tileIndex)];
+        const rawExpected = entry && Object.prototype.hasOwnProperty.call(entry, 'hitbox')
+          ? entry.hitbox === true
+          : null;
+        const expected = maskActive && maskWalkableTiles
+          ? !maskWalkableTiles.has(tileIndex)
+          : rawExpected;
+        const actual = Array.isArray(liveHitboxes) ? liveHitboxes[tileIndex] === true : null;
+        const match = expected === actual;
+        if (!match) mismatchCount += 1;
+        rows.push({ tile: tileIndex, expectedBlocked: expected, liveBlocked: actual, rawCombatExpected: rawExpected, match });
+      }
+
+      const liveAllowedTiles = [];
+      const liveBlockedTiles = [];
+      if (Array.isArray(liveHitboxes)) {
+        for (let tileIndex = 0; tileIndex <= 164; tileIndex += 1) {
+          if (liveHitboxes[tileIndex] === true) liveBlockedTiles.push(tileIndex);
+          else liveAllowedTiles.push(tileIndex);
+        }
+      }
+
+      const context = {
+        placementHitboxMaskActive: maskActive,
+        isBoardBattleActive: battle?.isBoardBattleActive?.() === true,
+        liveHitboxesArrayLength: Array.isArray(liveHitboxes) ? liveHitboxes.length : null,
+        roomRefsFound: roomRefs.length
+      };
+
+      const phaseLabel = maskActive ? 'PRE-BATTLE (placement mask active)' : (context.isBoardBattleActive ? 'BATTLE (combat active)' : 'PRE-BATTLE (no mask)');
+      console.log(`[Quests Mod][Hellgate Part 1][hitbox-tiles] ${label} — phase: ${phaseLabel}`, context);
+      console.log(`[Quests Mod][Hellgate Part 1][hitbox-tiles] ALLOWED (${liveAllowedTiles.length}):`, liveAllowedTiles);
+      console.log(`[Quests Mod][Hellgate Part 1][hitbox-tiles] BLOCKED (${liveBlockedTiles.length}):`, liveBlockedTiles);
+
+      if (mismatchCount === 0) {
+        console.log(`[Quests Mod][Hellgate Part 1][hitbox-table] ${label}: all 165 tiles match expected hitbox values for current phase`, context);
+        return;
+      }
+
+      console.warn(`[Quests Mod][Hellgate Part 1][hitbox-table] ${label}: ${mismatchCount}/165 tile(s) mismatch expected hitbox values for current phase`, context);
+      if (typeof console.table === 'function') {
+        console.table(rows.filter((r) => !r.match));
+      } else {
+        console.log(rows.filter((r) => !r.match));
+      }
+    } catch (error) {
+      console.error('[Quests Mod][Hellgate Part 1][hitbox-table] Error building hitbox comparison table:', error);
+    }
+  }
+
+  // rkswrs is shared by 5 quests now (Sewers/Knarknaknork, Spider Lair, Ekatrix, Jakundaf,
+  // this one) — custom-battles.js's ownsBoardRestrictions()/getRestrictionPriority() pick
+  // exactly ONE currently-active battle instance to govern the placement-hitbox mask/
+  // ally-tile restrictions for the room. If a battle object from one of the OTHER four
+  // quests is still isActive (e.g. abandoned mid-battle earlier this session without its
+  // onClose ever firing), it can outscore and silently govern the room using ITS OWN
+  // allowedTiles instead of this quest's — every tile this quest needs reads as blocked,
+  // 0 allies can ever land. Mirrors logSpiderLairBoardOwnership.
+  function logHellgateBoardOwnership(label) {
+    try {
+      const getActive = globalThis.CustomBattles?.getActiveBattles;
+      if (typeof getActive !== 'function') {
+        console.log(`[Quests Mod][Hellgate Part 1][board-ownership] ${label}: window.CustomBattles.getActiveBattles not available yet`);
+        return;
+      }
+      const roomId = HELLGATE_BATTLE_ROOM_ID;
+      const sharingRoom = getActive().filter((b) => b?.config?.roomId === roomId);
+
+      if (sharingRoom.length <= 1) {
+        console.log(`[Quests Mod][Hellgate Part 1][board-ownership] ${label}: only ${sharingRoom.length} active battle instance(s) for room ${roomId} — no competition`, {
+          names: sharingRoom.map((b) => b?.config?.name)
+        });
+        return;
+      }
+
+      const rows = sharingRoom.map((b) => {
+        let ownsBoard = false;
+        try { ownsBoard = b.ownsBoardRestrictions?.() === true; } catch (_) {}
+        return {
+          name: b?.config?.name,
+          isHellgateInstance: b === hellgateBattle,
+          isActive: b?.isActive === true,
+          ownsBoardRestrictions: ownsBoard,
+          allowedTiles: b?.config?.tileRestrictions?.allowedTiles || null,
+          setupSeq: b?._setupSeq
+        };
+      });
+
+      const hellgateOwns = rows.find((r) => r.isHellgateInstance)?.ownsBoardRestrictions === true;
+      const logFn = hellgateOwns ? console.log : console.warn;
+      logFn(`[Quests Mod][Hellgate Part 1][board-ownership] ${label}: ${sharingRoom.length} active battle instances share room ${roomId}${hellgateOwns ? '' : ' — HELLGATE DOES NOT OWN BOARD RESTRICTIONS, another quest\'s allowedTiles are governing ally placement right now'}`);
+      if (typeof console.table === 'function') {
+        console.table(rows);
+      } else {
+        console.log(rows);
+      }
+    } catch (error) {
+      console.error('[Quests Mod][Hellgate Part 1][board-ownership] Error checking board ownership:', error);
+    }
+  }
+
+  function applyHellgateTileMutations() {
+    const mutations = HELLGATE_TILE_MUTATIONS;
+    if (!mutations || typeof mutations !== 'object') return;
+
+    const battle = hellgateBattle;
+
+    let wroteHitboxes = false;
+    Object.entries(mutations).forEach(([tileKey, entry]) => {
+      const tileIndex = Number(tileKey);
+      if (!Number.isFinite(tileIndex) || !entry || typeof entry !== 'object') return;
+      const tile = getTileElement(tileIndex);
+
+      (entry.remove || []).forEach((spriteId) => {
+        if (spriteId == null || !tile) return;
+        tile.querySelectorAll(`.sprite.item.relative.id-${spriteId}`).forEach((sprite) => {
+          hideQuestBoardElement(sprite, { tag: QUEST_BOARD_HIDDEN_TAG_HELLGATE });
+        });
+      });
+
+      // Keyed by tile+position (not by sprite id class), so a retry pass can't mistake
+      // an already-placed sprite for missing and stack a duplicate on top of it.
+      (entry.add || []).forEach((spriteEntry, spriteIndex) => {
+        const spriteId = spriteEntry?.spriteId;
+        if (spriteId == null || !tile) return;
+        const mutationKey = `${tileIndex}-${spriteIndex}`;
+        if (tile.querySelector(`[data-quests-hellgate-mutation-key="${mutationKey}"]`)) return;
+        const wrap = document.createElement('div');
+        wrap.innerHTML = buildHellgateMutationSpriteHTML(spriteEntry, mutationKey);
+        if (wrap.firstElementChild) tile.appendChild(wrap.firstElementChild);
+      });
+
+      if (Object.prototype.hasOwnProperty.call(entry, 'hitbox')) {
+        try {
+          getHellgateRoomRefs().forEach((room) => {
+            const data = room?.file?.data;
+            if (!data) return;
+            if (!Array.isArray(data.hitboxes)) data.hitboxes = [];
+            data.hitboxes[tileIndex] = entry.hitbox === true;
+            wroteHitboxes = true;
+          });
+        } catch (_) {}
+      }
+    });
+
+    if (wroteHitboxes) hellgateHitboxesApplied = true;
+
+    ensureHellgateElathrielDummy();
+
+    if (battle?.refreshPlacementHitboxMaskFromLive) {
+      battle.refreshPlacementHitboxMaskFromLive(
+        () => playerFollowedElathrielToHellgate
+      );
+    } else if (battle?.syncPlacementHitboxMask) {
+      battle.syncPlacementHitboxMask(() => playerFollowedElathrielToHellgate);
+    }
+
+    if (playerFollowedElathrielToHellgate) checkHellgateHitboxIntegrity('applyHellgateTileMutations');
+    if (playerFollowedElathrielToHellgate) logHellgateHitboxTable('applyHellgateTileMutations');
+    if (playerFollowedElathrielToHellgate) logHellgateBoardOwnership('applyHellgateTileMutations');
+  }
+
+  function restoreHellgateTileMutations() {
+    restoreQuestBoardElementsByTag(QUEST_BOARD_HIDDEN_TAG_HELLGATE);
+    document.querySelectorAll(`[${QUEST_BOARD_ADDED_ATTR_HELLGATE}="1"]`).forEach((el) => {
+      try { el.remove(); } catch (_) {}
+    });
+    hellgateHitboxesApplied = false;
+  }
+
+  // Keeping hitboxes synced beyond the initial entry window is now CustomBattle's own
+  // startPersistentVisualSync() (custom-battles.js) — a single source of truth shared by
+  // every quest instead of each one hand-rolling its own retry-burst + board-subscription
+  // pair (which is exactly how Hellgate Part 1 shipped broken: it only had the retry burst,
+  // so nothing re-synced the placement hitbox mask once that ~2s window closed). See
+  // setupHellgateBattleInstance() for where this gets wired up, and cleanup() in
+  // custom-battles.js for the automatic teardown — no separate stop call needed here.
+
+  function restoreBoardSetupHellgate() {
+    if (hellgateBattle) {
+      hellgateBattle.restoreBoardSetup();
+    }
+    restoreHellgateTileMutations();
+  }
+
+  function cleanupHellgateTreasureRoomQuest() {
+    try {
+      removeCustomBattleStatusToast();
+      playerFollowedElathrielToHellgate = false;
+      restoreHellgateTileMutations();
+      if (hellgateBattle) {
+        hellgateBattle.cleanup(restoreBoardSetupHellgate, showQuestOverlays);
+        hellgateBattle = null;
+        console.log(`${getHellgateLogPrefix()} Battle cleaned up`);
+      }
+    } catch (error) {
+      console.error(`${getHellgateLogPrefix()} Error cleaning up:`, error);
+    }
+  }
+
+  function setupHellgateTileRestrictions() {
+    if (!hellgateBattle) return;
+    hellgateBattle.setupTileRestrictions(
+      () => playerFollowedElathrielToHellgate,
+      NotificationService.createBattleToastCallback(getHellgateLogPrefix())
+    );
+    hellgateBattle.setupAllyLimit?.(
+      () => playerFollowedElathrielToHellgate,
+      NotificationService.createBattleToastCallback(getHellgateLogPrefix())
+    );
+  }
+
+  function navigateToHedgeMazeFromHellgate() {
+    try {
+      const roomId = getRoomIdByRoomName(ELATHRIEL_ROOM_NAME);
+      if (!roomId) {
+        console.warn(`${getHellgateLogPrefix()} Hedge Maze room not found`);
+        return;
+      }
+      globalThis.state.board.send({ type: 'selectRoomById', roomId });
+    } catch (error) {
+      console.error(`${getHellgateLogPrefix()} Error navigating to Hedge Maze:`, error);
+    }
+  }
+
+  function setupHellgateBattleInstance(battle) {
+    if (!battle) return false;
+    hellgateBattle = battle;
+    hellgateBattle.setup(
+      () => playerFollowedElathrielToHellgate,
+      NotificationService.createBattleToastCallback(getHellgateLogPrefix())
+    );
+    hellgateBattle.resetSandboxBattleState();
+    setupHellgateTileRestrictions();
+    showCustomBattleStatusToast({
+      battleName: HELLGATE_BATTLE_DISPLAY_NAME || 'Hellgate Treasure Room',
+      allyLimit: battle.config?.allyLimit ?? 5,
+      battle,
+      logPrefix: getHellgateLogPrefix()
+    });
+    // Puts the board into sandbox mode (required for activationCheck's isSandbox check)
+    // and spawns the custom villains onto the room tiles, with retries for remounts.
+    hellgateBattle.scheduleEntryVillainSetup({
+      attemptDelays: [0, 100, 250, 500, 800, 1200],
+      isActiveCheck: () => playerFollowedElathrielToHellgate,
+      onComplete: () => {
+        hideQuestOverlays();
+        hideHeroEditorButton();
+        hellgateBattle.startPersistentVisualSync(applyHellgateTileMutations, {
+          isActiveCheck: () => playerFollowedElathrielToHellgate
+        });
+      }
+    });
+    return true;
+  }
+
+  function enterHellgateTreasureRoom() {
+    let roomId = HELLGATE_BATTLE_ROOM_ID || getRoomIdByRoomName(HELLGATE_BATTLE_ROOM_NAME);
+    if (!roomId) roomId = getRoomIdByRoomName(HELLGATE_BATTLE_ROOM_NAME);
+    if (!roomId) {
+      showToast({ message: 'The Hellgate treasure room could not be found.', logPrefix: getHellgateLogPrefix() });
+      return;
+    }
+
+    playerFollowedElathrielToHellgate = true;
+    hellgateElathrielSignReader.resetRead();
+    if (hellgateBattle) {
+      hellgateBattle.cleanup(restoreBoardSetupHellgate, showQuestOverlays);
+      hellgateBattle = null;
+    }
+
+    const initResult = initializeHellgateBattle(roomId);
+    if (initResult && initResult.then) {
+      initResult.then((battle) => {
+        if (!setupHellgateBattleInstance(battle)) {
+          console.error(`${getHellgateLogPrefix()} Failed to initialize battle after waiting`);
+        }
+      }).catch((err) => console.error(`${getHellgateLogPrefix()} Error initializing battle:`, err));
+    } else if (!setupHellgateBattleInstance(initResult)) {
+      console.error(`${getHellgateLogPrefix()} CustomBattles not available`);
+    }
+
+    globalThis.state.board.send({ type: 'selectRoomById', roomId });
+    showToast({ message: 'Following Elathriel into the treasure room...', logPrefix: getHellgateLogPrefix() });
+  }
+
   function needsAlDeeRookieGuardObserver() {
     return isMissionAcceptedIncomplete(getMissionProgress(AL_DEE_ROOKIE_GUARD_MISSION));
   }
@@ -23805,7 +25684,7 @@ function createNPCCooldownManager() {
           position: fixed;
           transform: translate(-50%, -100%);
           width: max-content;
-          max-width: none;
+          max-width: 300px;
           pointer-events: none;
           z-index: 2147483647;
           display: flex;
@@ -23816,10 +25695,11 @@ function createNPCCooldownManager() {
         }
         .${textClass} .quests-sign-reader-line {
           display: block;
-          white-space: nowrap;
+          white-space: normal;
+          overflow-wrap: break-word;
           text-align: center;
           font-size: 16px;
-          line-height: 1;
+          line-height: 1.2;
           color: #66ff66;
           text-shadow: -1px 0 #000, 1px 0 #000, 0 -1px #000, 0 1px #000;
         }
@@ -23955,6 +25835,49 @@ function createNPCCooldownManager() {
     spriteSelector: '.sprite.item.relative.id-2012',
     lines: ['You see a sign.', 'You read: Only the humble may touch the Sword of Fury'],
     isRoomActive: () => playerEnteredSewersPortal && !!sewersBattle && isOnRoomByName(SEWERS_BATTLE_ROOM_NAME)
+  });
+
+  // Shared by copperKeySignReader's isRoomActive below AND the separate "Copper Key quest
+  // tile" highlight source registered in initializeQuestTileHighlightSources() — both need
+  // to stop the instant the key is actually in hand, since the remaining step (handing it
+  // to the King) has nothing left on tile 69 to point the player at.
+  function isCopperKeyRubbleTileActive() {
+    const progress = getMissionProgress(KING_COPPER_KEY_MISSION);
+    if (!progress.accepted || progress.completed) return false;
+    if (getCachedQuestItemCount(COPPER_KEY_CONFIG.productName) > 0) return false;
+    return isOnMineHub();
+  }
+
+  // Right-click the rubble on Mine Hub's tile 69 (COPPER_KEY_CONFIG.targetTileIndex — hardcoded
+  // here, same as swordOfFurySignReader above, since createSignReaderSystem() runs at module init
+  // before the async-loaded quest config populates) for a vague spoiler while the Copper Key
+  // mission is active. Text mirrors KING_COPPER_KEY_MISSION's own "hint" line (missions.json)
+  // rather than reading it live, for the same reason.
+  const copperKeySignReader = createSignReaderSystem({
+    id: 'Copper Key Rubble',
+    tileIndex: 69,
+    spriteSelector: '.sprite.item.relative.id-355',
+    lines: [
+      'You sift through the rubble.',
+      'You recall the King\'s words: "It seems I must steal it from the angry dwarfs — they probably won\'t let me have it without resistance."'
+    ],
+    isRoomActive: isCopperKeyRubbleTileActive
+  });
+
+  // Right-click Elathriel's dummy (tile 157) during the Hellgate Part 1 battle for a
+  // reminder of why he's standing there — same green-text sign mechanism as
+  // swordOfFurySignReader above, targeted at the dummy sprite instead of a sign.
+  const hellgateElathrielSignReader = createSignReaderSystem({
+    id: 'Hellgate Elathriel',
+    tileIndex: HELLGATE_ELATHRIEL_DUMMY_TILE_INDEX,
+    spriteSelector: `[${HELLGATE_ELATHRIEL_DUMMY_ATTR}="1"]`,
+    lines: [
+      'You look to Elathriel.',
+      'He says: "Defeat the creatures that guard this room — only then may we go further."'
+    ],
+    isRoomActive: () => playerFollowedElathrielToHellgate
+      && !!hellgateBattle
+      && isOnRoomByName(HELLGATE_BATTLE_ROOM_NAME)
   });
 
   function shouldEnableSixthSealLevers(boardContext = null) {
@@ -24401,6 +26324,45 @@ function createNPCCooldownManager() {
       || 'https://bestiaryarena.com/assets/icons/fight.png';
   }
 
+  const NPC_MODAL_PENDING_BADGE_CLASS = 'quests-npc-modal-pending-badge';
+
+  // Same fight.png badge shown on board NPCs with a pending quest action, but
+  // overlaid on an NPC's portrait inside their own chat modal.
+  function createNpcModalPendingBadge() {
+    const icon = document.createElement('img');
+    icon.className = `${NPC_MODAL_PENDING_BADGE_CLASS} pixelated`;
+    icon.src = getQuestFightIconUrl();
+    icon.alt = 'Quest pending';
+    icon.title = 'A quest is pending';
+    icon.draggable = false;
+    icon.style.cssText = [
+      'position:absolute',
+      'right:16px',
+      'top:10px',
+      'width:16px',
+      'height:16px',
+      'pointer-events:none',
+      'z-index:5',
+      'image-rendering:pixelated'
+    ].join(';');
+    return icon;
+  }
+
+  function setNpcModalPendingBadge(portraitContainer, isPending) {
+    if (!portraitContainer) return;
+    const existing = portraitContainer.querySelector(`.${NPC_MODAL_PENDING_BADGE_CLASS}`);
+    if (isPending) {
+      if (!existing) {
+        if (!portraitContainer.style.position) {
+          portraitContainer.style.position = 'relative';
+        }
+        portraitContainer.appendChild(createNpcModalPendingBadge());
+      }
+    } else if (existing) {
+      existing.remove();
+    }
+  }
+
   function removeQuestFightIcon(id) {
     document.querySelectorAll(`.${QUEST_FIGHT_ICON_CLASS}[${QUEST_FIGHT_ICON_ATTR}="${id}"]`).forEach((el) => el.remove());
   }
@@ -24495,6 +26457,99 @@ function createNPCCooldownManager() {
     if (serpentine.completed) return false;
     if (!serpentine.accepted) return true;
     return !!serpentine.putridChamberComplete;
+  }
+
+  // King Tibianus isn't a board NPC, so unlike hasWydaQuestAction/hasAlDeeQuestAction/hasTeshaQuestAction
+  // above, this has to be reachable both from his Quest Log tab (no modal open yet) and from inside his
+  // chat modal, so it only relies on top-level helpers/constants rather than the modal's local closures.
+  async function hasKingTibianusQuestAction() {
+    const DEBUG_TAG = '[Quests Mod][King Tibianus][Pending Badge]';
+    try {
+      const honeyflowerProgress = getMissionProgress(KING_HONEYFLOWER_MISSION);
+      const crossingProgress = getMissionProgress(KING_CROSSING_THE_LINE_MISSION);
+      const copperKeyProgress = getMissionProgress(KING_COPPER_KEY_MISSION);
+      const scarabProgress = getMissionProgress(KING_SCARAB_COIN_MISSION);
+      const monksProgress = getMissionProgress(KING_MONKS_STUDY_MISSION);
+      const redDragonProgress = getMissionProgress(KING_RED_DRAGON_MISSION);
+      const letterProgress = getMissionProgress(KING_LETTER_MISSION);
+      const oracleProgress = getMissionProgress(LOST_ORACLE_MISSION);
+
+      const reasons = [];
+
+      // Any already-accepted King mission ready to hand in / progress — mirrors
+      // tryProgressAnyActiveKingMission(), which the King checks first regardless
+      // of which mission is currently "focal" in his story sequence.
+      if (copperKeyProgress.accepted && !copperKeyProgress.completed && getCachedQuestItemCount(COPPER_KEY_CONFIG.productName) > 0) reasons.push('hand-in:copper-key');
+      if (honeyflowerProgress.accepted && !honeyflowerProgress.completed && getCachedQuestItemCount(HONEYFLOWER_CONFIG.productName) > 0) reasons.push('hand-in:honeyflower');
+      if (crossingProgress.accepted && !crossingProgress.completed && hasCrossingTheLineObjectiveComplete()) reasons.push('hand-in:crossing-the-line');
+      if (redDragonProgress.accepted && !redDragonProgress.completed
+        && getCachedQuestItemCount('Red Dragon Scale') >= 30 && getCachedQuestItemCount('Red Dragon Leather') >= 30) reasons.push('hand-in:red-dragon');
+      const scarabReady = (scarabProgress.accepted && !scarabProgress.completed) ? await hasScarabCoinInInventory() : false;
+      if (scarabReady) reasons.push('hand-in:scarab-coin');
+      if (monksProgress.accepted && !monksProgress.completed && kingChatState.costelloVisited) reasons.push('hand-in:monks-study');
+      if (letterProgress.accepted && !letterProgress.completed
+        && getCachedQuestItemCount('Letter from Al Dee') > 0 && getCachedQuestItemCount('Stamped Letter') === 0) reasons.push('stamp-letter');
+
+      // Lost Oracle: ready to exchange Orb for Luminous Orb
+      if (oracleProgress.accepted && !oracleProgress.completed && !oracleProgress.orbExchanged) {
+        const hasOrb = getCachedQuestItemCount(ORB_CONFIG.productName) > 0
+          || ((await getQuestItems(false))?.[ORB_CONFIG.productName] || 0) > 0;
+        if (hasOrb && getCachedQuestItemCount(LUMINOUS_ORB_CONFIG.productName) === 0) reasons.push('hand-in:lost-oracle-orb');
+      }
+
+      // New mission offer — the King only ever discusses ONE "focal" mission at a
+      // time via generic conversation ("mission"/greeting), following the same
+      // honeyflower -> crossing-the-line -> chain sequence as currentMission() /
+      // canOfferHoneyflowerMission() inside showKingTibianusModal. A mission further
+      // down the chain (e.g. Copper Key) is NOT naturally offerable while an earlier
+      // one is still incomplete, even if its own prerequisite (Mine Hub unlocked,
+      // Light Shovel held, etc.) is already met.
+      let mineHubUnlocked = false;
+      let hasLightShovel = false;
+      let hasHolyTibleForMonks = false;
+      let focalChainMissionId = null;
+      if (reasons.length === 0) {
+        if (!honeyflowerProgress.completed) {
+          if (!honeyflowerProgress.accepted) reasons.push('offer:honeyflower');
+        } else if (!crossingProgress.completed) {
+          if (!crossingProgress.accepted) reasons.push('offer:crossing-the-line');
+        } else {
+          hasHolyTibleForMonks = (cachedQuestItems && (cachedQuestItems['The Holy Tible'] || 0) > 0);
+          const chain = [
+            KING_COPPER_KEY_MISSION,
+            KING_RED_DRAGON_MISSION,
+            KING_LETTER_MISSION,
+            ...(hasHolyTibleForMonks ? [KING_MONKS_STUDY_MISSION] : []),
+            KING_SCARAB_COIN_MISSION
+          ];
+          const focal = chain.find((mission) => !getMissionProgress(mission).completed) || null;
+          focalChainMissionId = focal?.id || null;
+          if (focal && !getMissionProgress(focal).accepted) {
+            if (focal.id === KING_COPPER_KEY_MISSION.id) {
+              mineHubUnlocked = isMineHubUnlocked();
+              if (mineHubUnlocked) reasons.push('offer:copper-key');
+            } else if (focal.id === KING_SCARAB_COIN_MISSION.id) {
+              hasLightShovel = await hasLightShovelInInventory();
+              if (hasLightShovel) reasons.push('offer:scarab-coin');
+            } else {
+              reasons.push(`offer:${focal.id}`);
+            }
+          }
+        }
+      }
+
+      const isPending = reasons.length > 0;
+      console.log(`${DEBUG_TAG} isPending=${isPending}`, {
+        reasons,
+        honeyflowerProgress, crossingProgress, copperKeyProgress, scarabProgress,
+        monksProgress, redDragonProgress, letterProgress, oracleProgress,
+        focalChainMissionId, mineHubUnlocked, hasLightShovel, hasHolyTibleForMonks
+      });
+      return isPending;
+    } catch (error) {
+      console.error(`${DEBUG_TAG} Error checking pending quest action:`, error);
+      return false;
+    }
   }
 
   function shouldShowWydaFightIcon(boardContext = null) {
@@ -24969,6 +27024,39 @@ function createNPCCooldownManager() {
       alt: 'Read the sign',
       showDuringPlacement: true
     });
+
+    registerQuestTileHighlightSource({
+      getTiles: () => {
+        const tile = getTileElement(hellgateElathrielSignReader.tileIndex);
+        return tile ? [tile] : [];
+      },
+      isAccessActive: (boardContext) => hellgateElathrielSignReader.shouldEnable(boardContext),
+      alt: 'Speak with Elathriel',
+      showDuringPlacement: true
+    });
+
+    registerQuestTileHighlightSource({
+      getTiles: () => {
+        const tile = getTileElement(copperKeySignReader.tileIndex);
+        return tile ? [tile] : [];
+      },
+      isAccessActive: (boardContext) => copperKeySignReader.shouldEnable(boardContext),
+      alt: 'Inspect the rubble',
+      showDuringPlacement: true
+    });
+
+    // Separate from the sign hint above (which stops glowing once read) — this one
+    // stays lit for the tile's whole role in the mission, so it doesn't stop just
+    // because the player already read the rubble hint once.
+    registerQuestTileHighlightSource({
+      getTiles: () => {
+        const tile = getTileElement(copperKeySignReader.tileIndex);
+        return tile ? [tile] : [];
+      },
+      isAccessActive: isCopperKeyRubbleTileActive,
+      alt: 'Copper Key quest tile',
+      showDuringPlacement: true
+    });
   }
 
   function setupTileHighlightObserver() {
@@ -25335,6 +27423,35 @@ function createNPCCooldownManager() {
       chat: {},
       hpBarColor: 'rgb(96, 192, 96)',
       nameColor: 'rgb(96, 192, 96)'
+    },
+    {
+      id: BOARD_NPC_ELATHRIEL_ID,
+      name: 'Elathriel',
+      hideLevel: true,
+      tileIndex: ELATHRIEL_TILE_INDEX,
+      roomName: ELATHRIEL_ROOM_NAME,
+      overlayClass: ELATHRIEL_OVERLAY_CLASS,
+      // Board visual: Elf Scout's native outfit-atlas sprite id (64) — note this differs from Elf Scout's
+      // battle gameId (40) used in battles.json; the board's .sprite.outfit.id-N class is keyed by the
+      // outfit atlas id, not the battle gameId. Modal portrait uses Elathriel.gif via imageUrl below.
+      outfitSpriteId: ELATHRIEL_OUTFIT_SPRITE_ID,
+      facing: 'west',
+      shiny: false,
+      imageUrl: getQuestItemsAssetUrl('Elathriel.gif'),
+      dialogueIconUrl: ELATHRIEL_DIALOGUE_ICON_URL,
+      logPrefix: '[Quests Mod][Board NPC][Elathriel]',
+      chatMode: 'keywords',
+      isUnlocked: () => {
+        const progress = getMissionProgress(KING_CROSSING_THE_LINE_MISSION) || {};
+        return !!progress.crossingObjectiveComplete;
+      },
+      isInteractable: () => {
+        const hellgateProgress = getMissionProgress(HELLGATE_PART_1_MISSION) || {};
+        return !hellgateProgress.completed;
+      },
+      chat: {},
+      hpBarColor: 'rgb(96, 192, 96)',
+      nameColor: 'rgb(96, 192, 96)'
     }
   ];
 
@@ -25357,6 +27474,9 @@ function createNPCCooldownManager() {
     const oracleConfig = BOARD_NPC_CONFIGS.find((c) => c.id === BOARD_NPC_ORACLE_ID)
       || BOARD_NPC_CONFIGS.find((c) => c.overlayClass === ORACLE_OVERLAY_CLASS);
     if (oracleChat && oracleConfig?.chat) Object.assign(oracleConfig.chat, oracleChat);
+    const elathrielChat = questNpcsDialogue.elathriel?.boardChat;
+    const elathrielConfig = BOARD_NPC_CONFIGS.find((c) => c.id === BOARD_NPC_ELATHRIEL_ID);
+    if (elathrielChat && elathrielConfig?.chat) Object.assign(elathrielConfig.chat, elathrielChat);
   };
 
   function isApprenticeShengBattleCompletedPendingReward() {
@@ -25376,6 +27496,13 @@ function createNPCCooldownManager() {
     try {
       await addQuestItem(MINOTAUR_TROPHY_CONFIG.productName, 1);
       showQuestItemNotification(MINOTAUR_TROPHY_CONFIG.productName, 1);
+
+      const apprenticeShengSoulCoreName = APPRENTICE_SHENG_MISSION.soulCoreItemName || 'Apprentice Sheng Soul Core';
+      await addQuestItem(apprenticeShengSoulCoreName, 1).catch((error) => {
+        console.error('[Quests Mod][Apprentice Sheng] Error adding soul core:', error);
+      });
+      showQuestItemNotification(apprenticeShengSoulCoreName, 1);
+
       await persistMissionProgress(APPRENTICE_SHENG_MISSION, {
         accepted: true,
         completed: true,
@@ -25389,7 +27516,7 @@ function createNPCCooldownManager() {
         removeBoardNpcOverlay(rookstayerConfig);
       }
       updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
-      console.log('[Quests Mod][Apprentice Sheng] Mission completed — Wooden Plank awarded; Rookstayer dismissed');
+      console.log('[Quests Mod][Apprentice Sheng] Mission completed — Wooden Plank and soul core awarded; Rookstayer dismissed');
       return true;
     } catch (error) {
       console.error('[Quests Mod][Apprentice Sheng] Error completing mission with Wooden Plank reward:', error);
@@ -25815,6 +27942,13 @@ function createNPCCooldownManager() {
     });
   }
 
+  function getElathrielKeywordResponse(message, playerName) {
+    return matchKeywordResponsesSync(ELATHRIEL_RESPONSES, message, playerName, {
+      defaultResponse: null,
+      lowercaseKeys: true
+    });
+  }
+
   function getOracleDestinyLine(key, fallback) {
     const line = ORACLE_DESTINY_DIALOGUE?.[key] || ORACLE_RESPONSES?.[key] || fallback;
     return sanitizeDialogueText(line, fallback);
@@ -25938,6 +28072,18 @@ function createNPCCooldownManager() {
     daneConfig.outfitSpritesheetUrl = getQuestItemsAssetUrl('DaneIdle.png');
     daneConfig.imageUrl = getQuestItemsAssetUrl('Dane.gif');
     daneConfig.outfitSheetFrameCount = 1;
+  }
+
+  function syncElathrielBoardPlacement() {
+    const elathrielConfig = BOARD_NPC_CONFIGS.find((c) => c.overlayClass === ELATHRIEL_OVERLAY_CLASS)
+      || BOARD_NPC_CONFIGS.find((c) => c.id === BOARD_NPC_ELATHRIEL_ID);
+    if (!elathrielConfig) return;
+    // BOARD_NPC_CONFIGS snapshots these before rooms.json hydrates — refresh every update.
+    if (BOARD_NPC_ELATHRIEL_ID) elathrielConfig.id = BOARD_NPC_ELATHRIEL_ID;
+    if (ELATHRIEL_ROOM_NAME) elathrielConfig.roomName = ELATHRIEL_ROOM_NAME;
+    if (ELATHRIEL_TILE_INDEX != null) elathrielConfig.tileIndex = ELATHRIEL_TILE_INDEX;
+    if (ELATHRIEL_OUTFIT_SPRITE_ID) elathrielConfig.outfitSpriteId = ELATHRIEL_OUTFIT_SPRITE_ID;
+    if (ELATHRIEL_DIALOGUE_ICON_URL) elathrielConfig.dialogueIconUrl = ELATHRIEL_DIALOGUE_ICON_URL;
   }
 
   function syncOracleBoardPlacement() {
@@ -26482,6 +28628,8 @@ function createNPCCooldownManager() {
     try {
       await addQuestItem(ORB_CONFIG.productName, 1);
       showQuestItemNotification(ORB_CONFIG.productName, 1);
+      await addQuestItem(GHAZBARAN_SOUL_CORE_CONFIG.productName, 1);
+      showQuestItemNotification(GHAZBARAN_SOUL_CORE_CONFIG.productName, 1);
       await persistMissionProgress(WEAKENED_ARCHDEMON_MISSION, {
         accepted: true,
         completed: true,
@@ -26887,7 +29035,7 @@ function createNPCCooldownManager() {
       ghazNativeDamageDomEventCount = 0;
       ghazNativeSpellDamageSample = null;
       if (ghazLavaholeInterval) { clearInterval(ghazLavaholeInterval); ghazLavaholeInterval = null; }
-      removeGhazBossHpBar();
+      ghazBossHpBar.remove();
       document.getElementById(GHAZ_OUTFIT_STYLE_ID)?.remove();
       console.log('[Quests Mod][Weakened Archdemon] Battle cleaned up');
     } catch (error) {
@@ -27235,115 +29383,7 @@ function createNPCCooldownManager() {
       ghazNativeDamageDomObserver = null;
     }
     if (ghazLavaholeInterval) { clearInterval(ghazLavaholeInterval); ghazLavaholeInterval = null; }
-    stopGhazBossHpBarPolling();
-  }
-
-  function getGhazBossHpBarMountRoot() {
-    return document.querySelector('.relative.z-0.select-none')
-      || document.querySelector('[class*="relative"]')
-      || document.body;
-  }
-
-  function ensureGhazBossHpBarStyles() {
-    if (document.getElementById(GHAZ_BOSS_HP_BAR_STYLE_ID)) return;
-    const style = document.createElement('style');
-    style.id = GHAZ_BOSS_HP_BAR_STYLE_ID;
-    style.textContent = `
-      #${GHAZ_BOSS_HP_BAR_ID} {
-        position: absolute;
-        top: 9px;
-        left: 50%;
-        transform: translateX(-50%);
-        z-index: 999999;
-        pointer-events: none;
-        width: fit-content;
-        max-width: min(420px, calc(100vw - 24px));
-      }
-      #${GHAZ_BOSS_HP_BAR_ID} .quests-ghaz-hp-bg {
-        position: absolute;
-        inset: 0;
-        background: url("https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png");
-        background-size: auto;
-        background-repeat: repeat;
-        opacity: 0.92;
-        border-radius: 4px;
-        pointer-events: none;
-        z-index: 0;
-      }
-      #${GHAZ_BOSS_HP_BAR_ID} .quests-ghaz-hp-content {
-        position: relative;
-        z-index: 1;
-        box-sizing: border-box;
-        border: 4px solid transparent;
-        border-image: url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 4 stretch;
-        border-radius: 4px;
-        padding: 6px 10px;
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        min-width: 280px;
-        color: #fff;
-      }
-      #${GHAZ_BOSS_HP_BAR_ID} .quests-ghaz-hp-icon {
-        width: 28px;
-        height: 28px;
-        image-rendering: pixelated;
-        flex: 0 0 auto;
-      }
-      #${GHAZ_BOSS_HP_BAR_ID} .quests-ghaz-hp-main {
-        flex: 1 1 auto;
-        min-width: 0;
-        display: flex;
-        flex-direction: column;
-        gap: 3px;
-      }
-      #${GHAZ_BOSS_HP_BAR_ID} .quests-ghaz-hp-title {
-        font-size: 12px;
-        line-height: 1.2;
-        color: #ffcc66;
-        text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-      #${GHAZ_BOSS_HP_BAR_ID} .quests-ghaz-hp-row {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-      }
-      #${GHAZ_BOSS_HP_BAR_ID} .quests-ghaz-hp-track {
-        flex: 1 1 auto;
-        height: 12px;
-        background: rgba(0, 0, 0, 0.55);
-        border: 1px solid #111;
-        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
-        overflow: hidden;
-      }
-      #${GHAZ_BOSS_HP_BAR_ID} .quests-ghaz-hp-fill {
-        height: 100%;
-        width: 100%;
-        transform-origin: left center;
-        transform: scaleX(1);
-        background: linear-gradient(180deg, #e85a4f 0%, #b42828 55%, #7a1515 100%);
-        transition: transform 120ms linear, background 180ms ease;
-      }
-      #${GHAZ_BOSS_HP_BAR_ID} .quests-ghaz-hp-fill[data-pct="low"] {
-        background: linear-gradient(180deg, #ff7a3a 0%, #d44518 55%, #8a2208 100%);
-      }
-      #${GHAZ_BOSS_HP_BAR_ID} .quests-ghaz-hp-fill[data-pct="critical"] {
-        background: linear-gradient(180deg, #ff4444 0%, #aa1010 55%, #5a0000 100%);
-      }
-      #${GHAZ_BOSS_HP_BAR_ID} .quests-ghaz-hp-value {
-        font-size: 11px;
-        line-height: 1;
-        color: #ffffff;
-        text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;
-        white-space: nowrap;
-        min-width: 72px;
-        text-align: right;
-      }
-    `;
-    document.head.appendChild(style);
+    ghazBossHpBar.remove();
   }
 
   function findGhazBattleActor(world = ghazBattleWorld) {
@@ -27357,176 +29397,72 @@ function createNPCCooldownManager() {
       || null;
   }
 
-  function readGhazBossHpValues(actor) {
-    const hpComp = actor?.hp || actor?.getComponent?.('hp') || null;
-    let current = null;
-    let max = null;
-    if (hpComp) {
-      if (Number.isFinite(Number(hpComp._hp))) current = Number(hpComp._hp);
-      else if (Number.isFinite(Number(hpComp.currentHP))) current = Number(hpComp.currentHP);
-      if (Number.isFinite(Number(hpComp.max))) max = Number(hpComp.max);
-      else if (Number.isFinite(Number(hpComp.maxHp))) max = Number(hpComp.maxHp);
-    }
-    if (!Number.isFinite(current)) {
-      const snap = getActorHpSnapshot(actor);
-      if (Number.isFinite(snap.hp)) current = snap.hp;
-      if (!Number.isFinite(max) && Number.isFinite(snap.maxHp)) max = snap.maxHp;
-    }
-    if (!Number.isFinite(max) || max <= 0) max = Number.isFinite(current) ? current : 0;
-    if (!Number.isFinite(current)) current = max;
-    current = Math.max(0, Math.min(max, Math.floor(current)));
-    max = Math.max(0, Math.floor(max));
-    const alive = !(hpComp?._isAlive === false || actor?.dead || actor?.isDead || current <= 0);
-    return { current, max, alive, ratio: max > 0 ? current / max : 0 };
-  }
+  // Ghazbaran's own boss HP bar — first caller of the generic createBossHpBar() factory.
+  const ghazBossHpBar = createBossHpBar({
+    id: 'ghaz',
+    getName: () => GHAZBARAN_NICKNAME,
+    getIconUrl: () => getQuestItemsAssetUrl('Weakened_Ghazbaran_Soul_Core.gif'),
+    isActive: () => playerTraveledToGhazHideout && !!ghazbaranBattle,
+    findActor: (world) => findGhazBattleActor(world || ghazBattleWorld)
+  });
 
-  function stopGhazBossHpBarPolling() {
-    if (ghazBossHpBarInterval) {
-      clearInterval(ghazBossHpBarInterval);
-      ghazBossHpBarInterval = null;
-    }
-  }
+  // Ekatrix (Tainted Souls), The Old Widow (Mother of All Spiders / Spider Lair), and
+  // Mornenion (Al Dee's Golden Rope) have no gameId-based board-entity lookup the way
+  // Ghazbaran does, so these match purely by display name via findBattleActorByName().
+  const ekatrixBossHpBar = createBossHpBar({
+    id: 'ekatrix',
+    getName: () => EKATRIX_BATTLE_DISPLAY_NAME,
+    getIconUrl: () => getQuestItemsAssetUrl('Ekatrix_Soul_Core.gif'),
+    isActive: () => playerEnteredEkatrixPortal && !!ekatrixBattle,
+    findActor: (world) => findBattleActorByName(world, EKATRIX_BATTLE_DISPLAY_NAME)
+  });
 
-  function removeGhazBossHpBar() {
-    stopGhazBossHpBarPolling();
-    ghazBossHpBarEl?.remove?.();
-    ghazBossHpBarEl = null;
-    ghazBossHpBarFillEl = null;
-    ghazBossHpBarValueEl = null;
-    ghazBossHpBarLastKey = null;
-    document.getElementById(GHAZ_BOSS_HP_BAR_ID)?.remove();
-    document.getElementById(GHAZ_BOSS_HP_BAR_STYLE_ID)?.remove();
-  }
+  const OLD_WIDOW_BOSS_NAME = 'The Old Widow';
+  const oldWidowBossHpBar = createBossHpBar({
+    id: 'old-widow',
+    getName: () => OLD_WIDOW_BOSS_NAME,
+    getIconUrl: () => getQuestItemsAssetUrl('The_Old_Widow_Soul_Core.gif'),
+    isActive: () => playerUsedTile77ToSpiderLair && !!spiderLairBattle,
+    findActor: (world) => findBattleActorByName(world, OLD_WIDOW_BOSS_NAME),
+    debug: true
+  });
 
-  function updateGhazBossHpBar(force = false) {
-    if (!ghazBossHpBarEl || !document.contains(ghazBossHpBarEl)) {
-      if (playerTraveledToGhazHideout && ghazbaranBattle && ghazBattleWorld) showGhazBossHpBar();
-      return;
-    }
-    if (!playerTraveledToGhazHideout || !ghazbaranBattle) {
-      removeGhazBossHpBar();
-      return;
-    }
+  const MORNENION_BOSS_NAME = 'Mornenion';
+  const mornenionBossHpBar = createBossHpBar({
+    id: 'mornenion',
+    getName: () => MORNENION_BOSS_NAME,
+    getIconUrl: () => getQuestItemsAssetUrl('Mornenion_Soul_Core.gif'),
+    isActive: () => playerUsedHoleToMornenion && !!mornenionBattle,
+    findActor: (world) => findBattleActorByName(world, MORNENION_BOSS_NAME)
+  });
 
-    const actor = findGhazBattleActor();
-    if (!actor) {
-      // Battle world exists but actor not ready yet — keep placeholder, never show 0/0.
-      if (force || ghazBossHpBarLastKey !== 'pending') {
-        ghazBossHpBarLastKey = 'pending';
-        if (ghazBossHpBarFillEl) {
-          ghazBossHpBarFillEl.style.transform = 'scaleX(1)';
-          ghazBossHpBarFillEl.setAttribute('data-pct', 'full');
-        }
-        if (ghazBossHpBarValueEl) ghazBossHpBarValueEl.textContent = '— / —';
-      }
-      return;
-    }
+  // Knarknaknork (The Rookie Guard: Al Dee's portal on tile 109 in Katana Quest → Sewers).
+  const knarknaknorkBossHpBar = createBossHpBar({
+    id: 'knarknaknork',
+    getName: () => SEWERS_BATTLE_DISPLAY_NAME || 'Knarknaknork',
+    getIconUrl: () => getQuestItemsAssetUrl('Knarknaknork_Soul_Core.gif'),
+    isActive: () => playerEnteredSewersPortal && !!sewersBattle,
+    findActor: (world) => findBattleActorByName(world, SEWERS_BATTLE_DISPLAY_NAME || 'Knarknaknork')
+  });
 
-    const { current, max, ratio, alive } = readGhazBossHpValues(actor);
-    if (!Number.isFinite(max) || max <= 0) {
-      if (ghazBossHpBarValueEl) ghazBossHpBarValueEl.textContent = '— / —';
-      return;
-    }
+  const APPRENTICE_SHENG_BOSS_NAME = 'Apprentice Sheng';
+  const apprenticeShengBossHpBar = createBossHpBar({
+    id: 'apprentice-sheng',
+    getName: () => APPRENTICE_SHENG_BOSS_NAME,
+    getIconUrl: () => getQuestItemsAssetUrl('Apprentice_Sheng_Soul_Core.gif'),
+    isActive: () => playerAcceptedApprenticeShengBattle && !!apprenticeShengBattle,
+    findActor: (world) => findBattleActorByName(world, APPRENTICE_SHENG_BOSS_NAME)
+  });
 
-    const pct = Math.max(0, Math.min(1, ratio));
-    const key = `${current}/${max}:${alive ? 1 : 0}`;
-    if (!force && key === ghazBossHpBarLastKey) return;
-    ghazBossHpBarLastKey = key;
-
-    if (ghazBossHpBarFillEl) {
-      ghazBossHpBarFillEl.style.transform = `scaleX(${pct})`;
-      let band = 'full';
-      if (pct <= 0.25) band = 'critical';
-      else if (pct <= 0.5) band = 'low';
-      ghazBossHpBarFillEl.setAttribute('data-pct', band);
-    }
-    if (ghazBossHpBarValueEl) {
-      ghazBossHpBarValueEl.textContent = alive
-        ? `${current} / ${max}`
-        : 'Defeated';
-    }
-  }
-
-  function startGhazBossHpBarPolling() {
-    stopGhazBossHpBarPolling();
-    updateGhazBossHpBar(true);
-    ghazBossHpBarInterval = setInterval(() => {
-      if (!playerTraveledToGhazHideout || !ghazbaranBattle) {
-        removeGhazBossHpBar();
-        return;
-      }
-      updateGhazBossHpBar(false);
-    }, 200);
-  }
-
-  function showGhazBossHpBar() {
-    if (!playerTraveledToGhazHideout || !ghazbaranBattle) return;
-    // Wait until a fight world exists so we don't flash 0/0 on board setup.
-    if (!ghazBattleWorld && !findGhazBattleActor()) return;
-    ensureGhazBossHpBarStyles();
-
-    let wrapper = document.getElementById(GHAZ_BOSS_HP_BAR_ID);
-    if (!wrapper) {
-      wrapper = document.createElement('div');
-      wrapper.id = GHAZ_BOSS_HP_BAR_ID;
-      wrapper.setAttribute('aria-label', `${GHAZBARAN_NICKNAME} health`);
-
-      const bg = document.createElement('div');
-      bg.className = 'quests-ghaz-hp-bg';
-      wrapper.appendChild(bg);
-
-      const content = document.createElement('div');
-      content.className = 'quests-ghaz-hp-content';
-
-      const icon = document.createElement('img');
-      icon.className = 'quests-ghaz-hp-icon';
-      icon.alt = '';
-      icon.src = getQuestItemsAssetUrl('ghaz-icon.gif');
-      icon.draggable = false;
-      content.appendChild(icon);
-
-      const main = document.createElement('div');
-      main.className = 'quests-ghaz-hp-main';
-
-      const title = document.createElement('div');
-      title.className = 'quests-ghaz-hp-title pixel-font-14';
-      title.textContent = GHAZBARAN_NICKNAME;
-      main.appendChild(title);
-
-      const row = document.createElement('div');
-      row.className = 'quests-ghaz-hp-row';
-
-      const track = document.createElement('div');
-      track.className = 'quests-ghaz-hp-track';
-      const fill = document.createElement('div');
-      fill.className = 'quests-ghaz-hp-fill';
-      fill.setAttribute('data-pct', 'full');
-      track.appendChild(fill);
-      row.appendChild(track);
-
-      const value = document.createElement('div');
-      value.className = 'quests-ghaz-hp-value pixel-font-14';
-      value.textContent = '— / —';
-      row.appendChild(value);
-
-      main.appendChild(row);
-      content.appendChild(main);
-      wrapper.appendChild(content);
-
-      ghazBossHpBarFillEl = fill;
-      ghazBossHpBarValueEl = value;
-    } else {
-      ghazBossHpBarFillEl = wrapper.querySelector('.quests-ghaz-hp-fill');
-      ghazBossHpBarValueEl = wrapper.querySelector('.quests-ghaz-hp-value');
-    }
-
-    const mountRoot = getGhazBossHpBarMountRoot();
-    if (wrapper.parentNode !== mountRoot) {
-      mountRoot.appendChild(wrapper);
-    }
-    ghazBossHpBarEl = wrapper;
-    startGhazBossHpBarPolling();
-  }
+  // Demodras (The Dragonmother: Dragon Claw → tile 47 in Dragon Lair → Lonesome Dragon).
+  const DEMODRAS_BOSS_NAME = 'Demodras';
+  const demodrasBossHpBar = createBossHpBar({
+    id: 'demodras',
+    getName: () => DEMODRAS_BOSS_NAME,
+    getIconUrl: () => getQuestItemsAssetUrl('Demodras_Soul_Core.gif'),
+    isActive: () => playerUsedTile47ToLonesomeDragon && !!lonesomeDragonBattle,
+    findActor: (world) => findBattleActorByName(world, DEMODRAS_BOSS_NAME)
+  });
 
   function getBattleWorldActors(world) {
     if (!world?.grid) return [];
@@ -27748,7 +29684,7 @@ function createNPCCooldownManager() {
           payload: sanitizeGhazHpChangePayload(payload)
         });
         if (getGhazActorDisplayLabel(actor).toLowerCase().includes(String(GHAZBARAN_NICKNAME).toLowerCase())) {
-          updateGhazBossHpBar(true);
+          ghazBossHpBar.update(true);
         }
         requestAnimationFrame(() => {
           const domNodes = collectGhazFloatingDamageDomCandidates();
@@ -27827,7 +29763,7 @@ function createNPCCooldownManager() {
             }
             console.log('[Quests Mod][Weakened Archdemon][Debug][nativeDamage] applyDamage', logPayload);
             if (targetLabel.toLowerCase().includes(String(GHAZBARAN_NICKNAME).toLowerCase())) {
-              updateGhazBossHpBar(true);
+              ghazBossHpBar.update(true);
             }
             requestAnimationFrame(() => {
               const domAfter = collectGhazFloatingDamageDomCandidates();
@@ -28236,7 +30172,7 @@ function createNPCCooldownManager() {
         ghazNativeDamageDomEventCount = 0;
         ghazNativeSpellDamageSample = null;
         if (ghazLavaholeInterval) { clearInterval(ghazLavaholeInterval); ghazLavaholeInterval = null; }
-        showGhazBossHpBar();
+        // ghazBossHpBar shows/updates itself via its own newGame/emitNewGame subscription.
         patchGhazAbilityCooldownTo3s(event?.world || null);
         const LAVAHOLE_POLL_MS = 1000;
         let internalTick = 0;
@@ -28256,7 +30192,6 @@ function createNPCCooldownManager() {
       }));
       pushUnsub(board?.on?.('emitNewGame', (event) => {
         if (event?.world) ghazBattleWorld = event.world;
-        showGhazBossHpBar();
       }));
       ghazNewGameDebugUnsub = () => {
         unsubs.forEach((u) => {
@@ -28351,6 +30286,8 @@ function createNPCCooldownManager() {
       let awaitingSvensonDestinationChoice = false;
       let awaitingSvensonGhazTravelConfirm = false;
       let awaitingDaneWeakenedConfirm = false;
+      let awaitingElathrielAcceptConfirm = false;
+      let awaitingElathrielHellgateConfirm = false;
       // Oracle destiny tree: prepared → sure → yes teleports after SO BE IT!
       let oracleDestinyStage = npcConfig.overlayClass === ORACLE_OVERLAY_CLASS ? 'prepared' : null;
 
@@ -29827,6 +31764,141 @@ function createNPCCooldownManager() {
           return;
         }
 
+        if (npcConfig.id === BOARD_NPC_ELATHRIEL_ID) {
+          const hellgateProgress = getMissionProgress(HELLGATE_PART_1_MISSION) || {};
+
+          if (awaitingElathrielAcceptConfirm && lower.includes('yes')) {
+            awaitingElathrielAcceptConfirm = false;
+            persistMissionProgress(HELLGATE_PART_1_MISSION, { accepted: true, completed: false }).catch((error) => {
+              console.error('[Quests Mod][Elathriel] Error saving Hellgate Part 1 progress:', error);
+            });
+            addQuestItem('Key 3012', 1).then(() => {
+              showQuestItemNotification('Key 3012', 1);
+            }).catch((error) => {
+              console.error('[Quests Mod][Elathriel] Error granting Key 3012:', error);
+            });
+            cooldown.queueResponse(text, HELLGATE_PART_1_MISSION.prompt, addMessageToConversation, npcConfig.name);
+            return;
+          }
+
+          if (awaitingElathrielAcceptConfirm && lower.includes('no')) {
+            awaitingElathrielAcceptConfirm = false;
+            cooldown.queueResponse(
+              text,
+              getMissionDialogueLine(HELLGATE_PART_1_MISSION, 'offerDecline', 'Then keep away from what does not concern you.'),
+              addMessageToConversation,
+              npcConfig.name,
+              ModalHelpers.getFarewellCloseCallback(text)
+            );
+            return;
+          }
+
+          if (awaitingElathrielHellgateConfirm && lower.includes('yes')) {
+            awaitingElathrielHellgateConfirm = false;
+            cooldown.queueResponse(
+              text,
+              getMissionDialogueLine(HELLGATE_PART_1_MISSION, 'accept', 'Then follow. Stay close, human.'),
+              addMessageToConversation,
+              npcConfig.name,
+              () => {
+                setTimeout(() => {
+                  ModalHelpers.closeModal(0);
+                  enterHellgateTreasureRoom();
+                }, 2000);
+              }
+            );
+            return;
+          }
+
+          if (awaitingElathrielHellgateConfirm && lower.includes('no')) {
+            awaitingElathrielHellgateConfirm = false;
+            cooldown.queueResponse(
+              text,
+              getMissionDialogueLine(HELLGATE_PART_1_MISSION, 'decline', "Believe me, it's better for you that way."),
+              addMessageToConversation,
+              npcConfig.name,
+              ModalHelpers.getFarewellCloseCallback(text)
+            );
+            return;
+          }
+
+          const askedElathrielMission = lower.includes('mission') || lower.includes('quest')
+            || lower.includes('help') || lower.includes('hellgate');
+          if (askedElathrielMission) {
+            if (hellgateProgress.completed) {
+              cooldown.queueResponse(
+                text,
+                getMissionDialogueLine(HELLGATE_PART_1_MISSION, 'alreadyCompleted', 'The treasure room is behind us now.'),
+                addMessageToConversation,
+                npcConfig.name,
+                ModalHelpers.getFarewellCloseCallback(text)
+              );
+              return;
+            }
+
+            if (isHellgateBattleCompletedPendingReward()) {
+              completeHellgatePart1MissionWithBook().catch((error) => {
+                console.error('[Quests Mod][Elathriel] Error completing Hellgate Part 1 with book reward:', error);
+              });
+              cooldown.queueResponse(
+                text,
+                getMissionDialogueLine(
+                  HELLGATE_PART_1_MISSION,
+                  'battleReward',
+                  'You have done well, human. Take this — knowledge the Bonelords would rather stay buried.'
+                ),
+                addMessageToConversation,
+                npcConfig.name,
+                ModalHelpers.getFarewellCloseCallback(text)
+              );
+              return;
+            }
+
+            if (!hellgateProgress.accepted) {
+              // Part 1: ask whether the player wants to accept at all. Accepting +
+              // handing over the key happens only after they say "yes" to this.
+              awaitingElathrielAcceptConfirm = true;
+              cooldown.queueResponse(
+                text,
+                getMissionDialogueLine(HELLGATE_PART_1_MISSION, 'offer', 'There is a task I would ask of you, human — will you accept it?'),
+                addMessageToConversation,
+                npcConfig.name
+              );
+              return;
+            }
+
+            // Part 2: player already has the key — ask if they're ready to follow.
+            awaitingElathrielHellgateConfirm = true;
+            cooldown.queueResponse(
+              text,
+              getMissionDialogueLine(
+                HELLGATE_PART_1_MISSION,
+                'alreadyActive',
+                'You already carry the key. Are you ready to follow me to the treasure room in Hellgate?'
+              ),
+              addMessageToConversation,
+              npcConfig.name
+            );
+            return;
+          }
+
+          let elathrielResponse = getElathrielKeywordResponse(text, playerName);
+          if (elathrielResponse == null) {
+            elathrielResponse = getNpcQuestItemChatResponse(BOARD_NPC_ELATHRIEL_ID, text, playerName);
+          }
+          if (elathrielResponse == null) {
+            elathrielResponse = getRandomNpcConfusionResponse(ELATHRIEL_CONFUSION_RESPONSES, playerName);
+          }
+          cooldown.queueResponse(
+            text,
+            elathrielResponse,
+            addMessageToConversation,
+            npcConfig.name,
+            ModalHelpers.getFarewellCloseCallback(text)
+          );
+          return;
+        }
+
         let response = getSantaKeywordResponse(text, playerName);
         if (response == null) {
           response = getNpcQuestItemChatResponse('santa-claus', text, playerName);
@@ -30201,6 +32273,14 @@ function createNPCCooldownManager() {
       const hasImage = !!existingOverlay.querySelector('img.pixelated, img[alt]');
       const wantsImageFallback = !hideBoardVisual && !wantsOutfit && !wantsItemSprite && !!npcConfig.imageUrl;
       const isEmptyOverlay = !hasOutfit && !hasCustomSheet && !hasItemSprite && !hasImage;
+      // hasOutfit/wantsOutfit etc. only compare *shape* (which kind of visual is present),
+      // not its config — an existing outfit sprite whose baked-in data-shiny no longer
+      // matches npcConfig.shiny (e.g. a config change, or an overlay built before shiny
+      // became configurable per-NPC) would otherwise be treated as "still matches" forever
+      // and never get rebuilt with the corrected value.
+      const outfitImg = hasOutfit ? existingOverlay.querySelector('.sprite.outfit img.actor.spritesheet') : null;
+      const wantsShinyAttr = npcConfig.shiny === false ? 'false' : 'true';
+      const shinyMatches = !wantsOutfit || !outfitImg || outfitImg.getAttribute('data-shiny') === wantsShinyAttr;
       if (hideBoardVisual) {
         if (isEmptyOverlay) {
           tileElement.removeAttribute('title');
@@ -30212,7 +32292,8 @@ function createNPCCooldownManager() {
           && hasOutfit === wantsOutfit
           && hasCustomSheet === wantsCustomSheet
           && hasItemSprite === wantsItemSprite
-          && (!wantsImageFallback || hasImage)) {
+          && (!wantsImageFallback || hasImage)
+          && shinyMatches) {
         tileElement.removeAttribute('title');
         existingOverlay.removeAttribute('title');
         return;
@@ -30258,7 +32339,9 @@ function createNPCCooldownManager() {
           const img = document.createElement('img');
           img.alt = facing;
           img.className = 'actor spritesheet';
-          img.setAttribute('data-shiny', 'true');
+          // Default stays 'true' (unchanged behavior for every NPC that doesn't set this) —
+          // opt out per-NPC with `shiny: false` in its BOARD_NPC_CONFIGS entry.
+          img.setAttribute('data-shiny', npcConfig.shiny === false ? 'false' : 'true');
           img.style.cssText = 'animation-play-state:running;';
           viewport.appendChild(img);
         }
@@ -30302,17 +32385,40 @@ function createNPCCooldownManager() {
   }
 
   function shouldPlaceBoardNpc(npcConfig, boardContext = null) {
-    if (!areQuestHelpersEnabled()) return false;
-    if (typeof npcConfig.isUnlocked === 'function' && !npcConfig.isUnlocked()) return false;
+    const debug = npcConfig?.id === BOARD_NPC_ELATHRIEL_ID;
+    const logSkip = (reason) => {
+      if (debug) console.log(`${npcConfig.logPrefix || '[Quests Mod][Board NPC]'} not placed — ${reason}`);
+    };
+    if (!areQuestHelpersEnabled()) {
+      logSkip('quest helpers disabled');
+      return false;
+    }
+    if (typeof npcConfig.isUnlocked === 'function' && !npcConfig.isUnlocked()) {
+      logSkip('isUnlocked() returned false');
+      return false;
+    }
     if (npcConfig.roomId) {
       const context = boardContext || globalThis.state?.board?.getSnapshot?.()?.context;
       const currentRoomId = context?.selectedMap?.selectedRoom?.id;
-      if (!currentRoomId || currentRoomId !== npcConfig.roomId) return false;
+      if (!currentRoomId || currentRoomId !== npcConfig.roomId) {
+        logSkip(`not on roomId "${npcConfig.roomId}" (currently: ${currentRoomId ?? 'none'})`);
+        return false;
+      }
     } else if (!isOnRoomByName(npcConfig.roomName)) {
+      const context = boardContext || globalThis.state?.board?.getSnapshot?.()?.context;
+      const currentRoomId = context?.selectedMap?.selectedRoom?.id;
+      const currentRoomName = currentRoomId != null ? globalThis.state?.utils?.ROOM_NAME?.[currentRoomId] : null;
+      logSkip(`not on room "${npcConfig.roomName}" (currently: ${currentRoomName ?? currentRoomId ?? 'none'})`);
       return false;
     }
-    if (isBoardBattleActive(boardContext)) return false;
-    if (countAllyPiecesOnBoard(boardContext) > 0) return false;
+    if (isBoardBattleActive(boardContext)) {
+      logSkip('a battle is active');
+      return false;
+    }
+    if (countAllyPiecesOnBoard(boardContext) > 0) {
+      logSkip('ally pieces are already on the board');
+      return false;
+    }
     return true;
   }
 
@@ -30342,7 +32448,12 @@ function createNPCCooldownManager() {
       }
       boardNpcRuntimeState.lastRoomById.set(npcConfig.id, currentRoomName);
 
-      if (!tile) return;
+      if (!tile) {
+        if (npcConfig.id === BOARD_NPC_ELATHRIEL_ID) {
+          console.log(`${npcConfig.logPrefix || '[Quests Mod][Board NPC]'} not placed — tile-index-${npcConfig.tileIndex} not found in current DOM (currently on: ${currentRoomName ?? currentRoomId ?? 'none'})`);
+        }
+        return;
+      }
 
       if (!shouldPlaceBoardNpc(npcConfig, context)) {
         unmarkQuestAccessTile(tile);
@@ -30362,6 +32473,7 @@ function createNPCCooldownManager() {
     syncSvensonBoardPlacement();
     syncSantaBoardPlacement();
     syncDaneBoardPlacement();
+    syncElathrielBoardPlacement();
     syncOracleBoardPlacement();
     BOARD_NPC_CONFIGS.forEach((npcConfig) => updateBoardNpcState(npcConfig, boardContext));
     updateOracleStatueVisibility();
@@ -30753,10 +32865,27 @@ function createNPCCooldownManager() {
     cleanupTile47LonesomeDragonSystem();
     // Cleanup Rookie Guard Sewers portal system
     cleanupSewersPortalSystem();
+    // Cleanup Hellgate Part 1 (Elathriel) battle system
+    try {
+      cleanupHellgateTreasureRoomQuest();
+    } catch (e) {
+      console.warn('[Quests Mod][Hellgate Part 1] cleanupHellgateTreasureRoomQuest during teardown:', e);
+    }
     // Cleanup Spike Sword easter egg system
     cleanupSpikeSwordEasterEggSystem();
     // Cleanup Sign easter egg system
     swordOfFurySignReader.cleanupSystem();
+    copperKeySignReader.cleanupSystem();
+    hellgateElathrielSignReader.cleanupSystem();
+
+    // Cleanup boss HP bar systems
+    ghazBossHpBar.cleanupSystem();
+    ekatrixBossHpBar.cleanupSystem();
+    oldWidowBossHpBar.cleanupSystem();
+    mornenionBossHpBar.cleanupSystem();
+    knarknaknorkBossHpBar.cleanupSystem();
+    apprenticeShengBossHpBar.cleanupSystem();
+    demodrasBossHpBar.cleanupSystem();
 
     // Cleanup water fishing system
     cleanupWaterFishingSystem();
@@ -31049,6 +33178,21 @@ function createNPCCooldownManager() {
     setupSpikeSwordEasterEggObserver();
     // Sign easter egg — not tied to any mission's accept state, must always run.
     swordOfFurySignReader.setupObserver();
+    // Copper Key rubble hint — gates on mission state itself (isRoomActive), so it's
+    // also safe to always run.
+    copperKeySignReader.setupObserver();
+    // Elathriel dummy's own sign — gates on playerFollowedElathrielToHellgate/hellgateBattle
+    // (isRoomActive), so it's also safe to always run.
+    hellgateElathrielSignReader.setupObserver();
+
+    // Boss HP bars — each gates on its own isActive(), so always-on setup is safe.
+    ghazBossHpBar.setupObserver();
+    ekatrixBossHpBar.setupObserver();
+    oldWidowBossHpBar.setupObserver();
+    mornenionBossHpBar.setupObserver();
+    knarknaknorkBossHpBar.setupObserver();
+    apprenticeShengBossHpBar.setupObserver();
+    demodrasBossHpBar.setupObserver();
 
     if (needsHoneyflowerObserver()) {
       setupHoneyflowerTileObserver();
@@ -32238,6 +34382,15 @@ function createNPCCooldownManager() {
       setMissionProgress(mission, resetProgress);
       if (missionId === COSTELLO_QUEEN_BANSHEES_MISSION.id) {
         kingChatState.sevenSealsCompleted = getDefaultSevenSealsCompleted().slice();
+      }
+      // Mornenion's defeated flag isn't its own mission entry — it rides along in
+      // getAllMissionProgress() as result.mornenion.defeated, sourced from
+      // kingChatState.mornenionDefeated (see resetAllQuests, which already does this for
+      // the full reset). Resetting the golden rope quest without also clearing this left
+      // Mornenion permanently marked defeated even after re-accepting the mission, so
+      // the hole would never let you back in to re-fight him.
+      if (missionId === AL_DEE_GOLDEN_ROPE_MISSION.id) {
+        kingChatState.mornenionDefeated = false;
       }
       console.log('[Quests Mod][Dev] Local state reset for', missionId, kingChatState[stateKey]);
 

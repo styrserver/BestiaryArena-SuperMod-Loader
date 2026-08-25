@@ -258,7 +258,7 @@ The extension comes with several powerful mods that demonstrate different featur
 
 ### Super Mods
 
-These are advanced mods that provide comprehensive game enhancement features. All 27 Super Mods listed below are included by default in this loader:
+These are advanced mods that provide comprehensive game enhancement features. All 28 Super Mods listed below are included by default in this loader:
 
 #### Autoscroller
 Automates summon scroll usage to collect specific creatures:
@@ -321,6 +321,14 @@ Enhances the native Monstrous Cauldron interface with powerful search and filter
 - Game-styled UI controls that integrate seamlessly with the existing interface
 - Automatic detection and enhancement of the cauldron modal
 - Efficient filtering system for managing large monster collections
+
+#### Better Daycare
+Adds a Queue tab to the native Daycare dialog for automated level-ups, ejections, and queue-based slot filling:
+- **Autohandle Daycare**: toggle directly from the dialog's info tooltip; automatically levels up ready creatures, ejects maxed ones, and refills empty slots via the game's own API (no clicking through menus)
+- **Queue**: click or drag-and-drop any eligible creature into the queue, in your own order; drag a queued creature onto another to reorder, or drag it back onto the picker to remove it
+- Eligible creatures are sorted the same way Cyclopedia sorts owned creatures (level, then tier, then gene-stat rarity), and automatically exclude Gazers (can't be awakened) and creatures already in the Daycare or queue
+- "Maxed" follows the game's real level caps: 99 for awakened creatures, otherwise 30/35/40/45/50 by tier (1-5)
+- Queue tab swaps in place of the native Daycare view, matching the game's own dialog styling, with the dialog title rebranded "Better Daycare" while it's open
 
 #### Better Exaltation Chest
 Enhances the Exaltation Chest interface with automated opening and intelligent equipment management:
@@ -526,7 +534,6 @@ These are the core mods that provide essential gameplay enhancements. All 11 Off
 Automates routine gameplay actions to streamline your Bestiary Arena experience:
 - Automatic stamina refilling when low
 - Auto-collection of available rewards
-- Automatic handling of Day Care tasks
 - Customizable automation settings for safe and efficient play
 - Streamlined gameplay experience with minimal manual intervention
 

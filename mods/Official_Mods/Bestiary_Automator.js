@@ -21,7 +21,6 @@ const defaultConfig = {
   autoCollectSeashell: false,
   autoCollectLevelUpRewards: false,
   autoOpenCubes: false,
-  autoDayCare: false,
   autoPlayAfterDefeat: false,
   fasterAutoplay: false,
   fasterAutoplayMs: 100,
@@ -140,8 +139,6 @@ const TIMING = {
   CUBE_INVENTORY_SETTLE_MS: 50, // Wait after apply before snapshot (reward diff)
   CUBE_API_MAX_ATTEMPTS: 4,       // First try + retries for inventory.surpriseCube fetch
   CUBE_API_RETRY_BASE_DELAY_MS: 500, // Backoff: (httpTry - 1) * this before each retry
-  DAYCARE_LEVELUP_DELAY: 1000,   // Delay after daycare level up
-  DAYCARE_EJECTION_DELAY: 1000,  // Delay after daycare ejection
   SCROLL_LOCK_CHECK_DELAY: 150,  // Delay after ESC key for scroll lock check
   ESC_KEY_REPEAT_DELAY: 200      // Delay between repeated ESC key presses
 };
@@ -2929,235 +2926,6 @@ const closeQuestLog = async () => {
   }
 };
 
-// Handle day care
-const handleDayCare = async () => {
-  if (!config.autoDayCare) return;
-
-  if (shouldDeferUiAutomationForBattleRewards()) {
-    return;
-  }
-  
-  // Check if Board Analyzer is running - if so, skip daycare detection
-  if (isBoardAnalyzerRunning()) return;
-
-  const setHandlingDaycareCoordination = (busy) => {
-    try {
-      if (window.ModCoordination) {
-        window.ModCoordination.updateModState('Bestiary Automator', {
-          metadata: { handlingDaycare: busy }
-        });
-      }
-    } catch (_) {}
-  };
-
-  try {
-    // Signal to other mods that we're handling daycare (for coordination)
-    setHandlingDaycareCoordination(true);
-
-    // Single query with guarded early exit
-    const blipElements = document.querySelectorAll('[data-blip="true"]');
-    if (blipElements.length === 0) {
-      // Only skip when there is no daycare content at all.
-      // Some UI states may have daycare creatures without visible blips.
-      const anyDaycareImage = document.querySelector('img[alt="daycare"], img[alt="Daycare"]');
-      if (!anyDaycareImage) {
-        return;
-      }
-    }
-    
-    // Check for daycare button with visual indicator
-    const dayCareButton = document.querySelector('button:has(img[alt="daycare"]), button:has(img[alt="Daycare"])');
-    let hasDayCareButtonIndicator = false;
-    
-    if (dayCareButton) {
-      if (dayCareButton.classList.contains('focus-style-visible') && dayCareButton.classList.contains('active:opacity-70')) {
-        hasDayCareButtonIndicator = true;
-      }
-    }
-    
-    // Look for creatures that are actually in daycare slots (have both creature and daycare images)
-    const creatureAtDaycare = document.querySelector('div[data-blip="true"]:has(img[alt="creature"]):has(img[alt="daycare"]), div[data-blip="true"]:has(img[alt="creature"]):has(img[alt="Daycare"])');
-    
-    // Check if there are any elements that contain both a blip AND a daycare image
-    let foundBlipWithDaycare = false;
-    let foundReadyCreature = false;
-    let foundMaxedCreature = false;
-    
-    // Analyze blip elements for daycare creatures
-    for (let i = 0; i < blipElements.length; i++) {
-      const blipElement = blipElements[i];
-      
-      // Only check blip elements that have both creature and daycare images (actual daycare creatures)
-      const daycareImg = blipElement.querySelector('img[alt="daycare"], img[alt="Daycare"]');
-      const creatureImg = blipElement.querySelector('img[alt="creature"]');
-      
-      if (daycareImg && creatureImg) {
-        foundBlipWithDaycare = true;
-        
-        // Check if this creature is at max level (red blip = max level)
-        const isRedBlip = blipElement.querySelector('.text-invalid');
-        const isGreenBlip = blipElement.querySelector('.text-expBar');
-        const maxLevelText = blipElement.querySelector('span[data-state="closed"]');
-        
-        // Only consider it ready if it has a green blip (not red) and no "Max" text
-        if (isGreenBlip && !isRedBlip && !maxLevelText?.textContent?.includes('Max')) {
-          foundReadyCreature = true;
-        } else if (isRedBlip || maxLevelText?.textContent?.includes('Max')) {
-          foundMaxedCreature = true;
-        }
-      }
-    }
-    
-    // Check if there are any daycare images without blips that might be ready
-    const allDaycareImages = document.querySelectorAll('img[alt="daycare"], img[alt="Daycare"]');
-    for (let i = 0; i < allDaycareImages.length; i++) {
-      const daycareImg = allDaycareImages[i];
-      const parentElement = daycareImg.closest('[data-blip="true"]');
-      
-      if (!parentElement) {
-        // Check the parent container for level info
-        const container = daycareImg.closest('.container-slot');
-        if (container) {
-          // Only process if this is actually a creature, not a Dragon Plant or other item
-          const creatureImg = container.querySelector('img[alt="creature"]');
-          if (!creatureImg) continue;
-          
-          const maxLevelText = container.querySelector('span[data-state="closed"]');
-          
-          // For creatures without blips, check if they're not at max level
-          if (!maxLevelText?.textContent?.includes('Max')) {
-            foundReadyCreature = true;
-          } else {
-            foundMaxedCreature = true;
-          }
-        }
-      }
-    }
-    
-    // Check if any creatures need daycare attention (ready for level up OR maxed and need ejection)
-    
-    if (foundBlipWithDaycare && !foundReadyCreature && !foundMaxedCreature) {
-      console.log('[Bestiary Automator] Found daycare creatures but none ready for level up or maxed');
-    }
-    
-    // Only proceed if there are creatures that need daycare attention
-    if (!foundReadyCreature && !foundMaxedCreature) {
-      console.log('[Bestiary Automator] No creatures need daycare attention, skipping');
-      return;
-    }
-    
-    if (foundMaxedCreature) {
-      console.log('[Bestiary Automator] Found maxed creatures that need ejection from daycare');
-    }
-    
-    console.log('[Bestiary Automator] Handling day care');
-    
-    clickButtonWithText('mods.automator.inventory');
-    await sleep(TIMING.MODAL_CLOSE_DELAY);
-    
-    // Double-check after opening inventory
-    const dayCareButtonAfter = document.querySelector('button:has(img[alt="daycare"]), button:has(img[alt="Daycare"])');
-    if (!dayCareButtonAfter) return;
-    
-    dayCareButtonAfter.click();
-    await sleep(TIMING.MODAL_CLOSE_DELAY);
-    
-    // Handle all creatures that can level up in one session
-    let levelUpCount = 0;
-    const maxLevelUps = 4; // Maximum 4 creatures can be in daycare
-    
-    while (levelUpCount < maxLevelUps) {
-      // Check if there are any creatures ready to level up
-      const readyCreatures = document.querySelectorAll('[data-blip="true"]');
-      let foundReadyCreature = false;
-      let readyCreatureCount = 0;
-      
-      for (let i = 0; i < readyCreatures.length; i++) {
-        const creature = readyCreatures[i];
-        const daycareImg = creature.querySelector('img[alt="daycare"], img[alt="Daycare"]');
-        
-        if (daycareImg) {
-          const isRedBlip = creature.querySelector('.text-invalid');
-          const isGreenBlip = creature.querySelector('.text-expBar');
-          const maxLevelText = creature.querySelector('span[data-state="closed"]');
-          
-          if (isGreenBlip && !isRedBlip && !maxLevelText?.textContent?.includes('Max')) {
-            foundReadyCreature = true;
-            readyCreatureCount++;
-          }
-        }
-      }
-      
-      if (!foundReadyCreature) {
-        break;
-      }
-      
-      // Click level up
-      const levelUpClicked = clickButtonWithText('mods.automator.levelUp');
-      
-      if (!levelUpClicked) {
-        break;
-      }
-      
-      levelUpCount++;
-      
-      // Wait for the level up to process
-      await sleep(TIMING.DAYCARE_LEVELUP_DELAY);
-    }
-    
-    // Handle ejection of maxed creatures
-    if (foundMaxedCreature) {
-      let ejectionCount = 0;
-      const maxEjections = 4; // Maximum 4 creatures can be in daycare
-      
-      while (ejectionCount < maxEjections) {
-        // Check if there are any maxed creatures that need ejection
-        // Look for daycare slot containers that contain maxed creatures
-        const daycareSlots = document.querySelectorAll('div.relative.flex.items-center.gap-2');
-        let foundMaxedCreatureInModal = false;
-        let maxedCreatureWithdrawButton = null;
-        
-        for (let i = 0; i < daycareSlots.length; i++) {
-          const slot = daycareSlots[i];
-          // Check if this slot has a maxed creature (has "Max" text)
-          const maxLevelText = slot.querySelector('span[data-state="closed"]');
-          const withdrawButton = slot.querySelector('button[title="Withdraw"]');
-          
-          if (maxLevelText?.textContent?.includes('Max') && withdrawButton) {
-            foundMaxedCreatureInModal = true;
-            maxedCreatureWithdrawButton = withdrawButton;
-            break; // Found one to eject, break and process it
-          }
-        }
-        
-        if (!foundMaxedCreatureInModal || !maxedCreatureWithdrawButton) {
-          break;
-        }
-        
-        // Click the withdraw button for the specific maxed creature
-        maxedCreatureWithdrawButton.click();
-        
-        ejectionCount++;
-        
-        // Wait for the ejection to process
-        await sleep(TIMING.DAYCARE_EJECTION_DELAY);
-      }
-    }
-    
-    // Close the modal after handling all creatures
-    clickAllCloseButtons();
-    await sleep(TIMING.MODAL_CLOSE_DELAY);
-    
-    // Check for scroll lock after daycare operations
-    await handleScrollLock();
-  } catch (error) {
-    console.error('[Bestiary Automator] Error handling day care:', error);
-  } finally {
-    // Always clear so Manual Runner and other mods never see a stuck handlingDaycare flag
-    // (early returns used to skip this and block coordination for ~10s+).
-    setHandlingDaycareCoordination(false);
-  }
-};
 
 
 // Update minimum stamina if game shows a stamina requirement
@@ -4240,7 +4008,6 @@ const runAutomationTasks = async () => {
     // Core automation tasks that should always run
     await takeRewardsIfAvailable();
     await openCubesIfEnabled();
-    await handleDayCare();
     updateRequiredStamina();
     await refillStaminaIfNeeded();
     
@@ -4540,10 +4307,6 @@ const createConfigPanel = () => {
   const autoOpenCubesContainer = createCheckboxContainerWithInfo('auto-open-cubes-checkbox', t('mods.automator.autoOpenCubes'), config.autoOpenCubes,
     t('mods.automator.autoOpenCubesTooltip'));
   
-  // Auto day care checkbox
-  const dayCareContainer = createCheckboxContainer('auto-daycare-checkbox', t('mods.automator.autoDayCare'), config.autoDayCare);
-  
-  
   // Seamless autoplay checkbox with info icon
   const autoPlayContainer = createCheckboxContainerWithInfo(
     'auto-play-defeat-checkbox',
@@ -4649,7 +4412,6 @@ const createConfigPanel = () => {
   rewardsBody.appendChild(autoCollectSeashellContainer);
   rewardsBody.appendChild(autoCollectLevelUpRewardsContainer);
   rewardsBody.appendChild(autoOpenCubesContainer);
-  rewardsBody.appendChild(dayCareContainer);
 
   const autoplayBody = createSection(t('mods.automator.sectionAutoplay'), 'autoplay', false);
   autoplayBody.appendChild(autoPlayContainer);
@@ -4675,7 +4437,6 @@ const createConfigPanel = () => {
     setupCheckboxAutoSave(document.getElementById('auto-collect-seashell-checkbox'), 'autoCollectSeashell');
     setupCheckboxAutoSave(document.getElementById('auto-collect-levelup-rewards-checkbox'), 'autoCollectLevelUpRewards');
     setupCheckboxAutoSave(document.getElementById('auto-open-cubes-checkbox'), 'autoOpenCubes');
-    setupCheckboxAutoSave(document.getElementById('auto-daycare-checkbox'), 'autoDayCare');
     setupCheckboxAutoSave(document.getElementById('auto-play-defeat-checkbox'), 'autoPlayAfterDefeat');
     setupCheckboxAutoSave(document.getElementById('faster-autoplay-checkbox'), 'fasterAutoplay');
     
@@ -4938,7 +4699,6 @@ const applyButtonStyling = (btn) => {
     console.log('  - autoCollectSeashell:', config.autoCollectSeashell);
     console.log('  - autoCollectLevelUpRewards:', config.autoCollectLevelUpRewards);
     console.log('  - autoOpenCubes:', config.autoOpenCubes);
-    console.log('  - autoDayCare:', config.autoDayCare);
     console.log('  - autoPlayAfterDefeat:', config.autoPlayAfterDefeat);
     console.log('  - fasterAutoplay:', config.fasterAutoplay);
     console.log('  - fasterAutoplayRunning:', fasterAutoplayRunning);
@@ -4971,7 +4731,7 @@ const applyButtonStyling = (btn) => {
     console.log('[Bestiary Automator] Applying BLUE background for fasterAutoplayRunning');
     btn.style.background = `url('${blueBgUrl}') repeat`;
     btn.style.backgroundSize = "auto";
-  } else if (config.autoCollectSeashell || config.autoCollectLevelUpRewards || config.autoOpenCubes || config.autoDayCare || config.autoPlayAfterDefeat) {
+  } else if (config.autoCollectSeashell || config.autoCollectLevelUpRewards || config.autoOpenCubes || config.autoPlayAfterDefeat) {
     // Priority 3: Blue background for other auto features
     console.log('[Bestiary Automator] Applying BLUE background for other features');
     btn.style.background = `url('${blueBgUrl}') repeat`;
@@ -5037,7 +4797,6 @@ let lastButtonState = {
   autoCollectSeashell: config.autoCollectSeashell,
   autoCollectLevelUpRewards: config.autoCollectLevelUpRewards,
   autoOpenCubes: config.autoOpenCubes,
-  autoDayCare: config.autoDayCare,
   autoPlayAfterDefeat: config.autoPlayAfterDefeat,
   fasterAutoplay: config.fasterAutoplay,
   fasterAutoplayRunning: false,
@@ -5050,7 +4809,6 @@ lastButtonState = {
   autoCollectSeashell: config.autoCollectSeashell,
   autoCollectLevelUpRewards: config.autoCollectLevelUpRewards,
   autoOpenCubes: config.autoOpenCubes,
-  autoDayCare: config.autoDayCare,
   autoPlayAfterDefeat: config.autoPlayAfterDefeat,
   fasterAutoplay: config.fasterAutoplay,
   fasterAutoplayRunning: false,
@@ -5065,7 +4823,6 @@ function updateAutomatorButton() {
     autoCollectSeashell: config.autoCollectSeashell,
     autoCollectLevelUpRewards: config.autoCollectLevelUpRewards,
     autoOpenCubes: config.autoOpenCubes,
-    autoDayCare: config.autoDayCare,
     autoPlayAfterDefeat: config.autoPlayAfterDefeat,
     fasterAutoplay: config.fasterAutoplay,
     fasterAutoplayRunning: fasterAutoplayRunning,
@@ -5137,9 +4894,6 @@ function updateSettingsModalUI() {
     const autoCollectLevelUpRewardsCheckbox = document.getElementById('auto-collect-levelup-rewards-checkbox') || 
                                               document.querySelector('input[type="checkbox"][id*="levelup-rewards"]');
     
-    const dayCareCheckbox = document.getElementById('auto-daycare-checkbox') || 
-                           document.querySelector('input[type="checkbox"][id*="daycare"]');
-    
     const autoPlayCheckbox = document.getElementById('auto-play-defeat-checkbox') || 
                             document.querySelector('input[type="checkbox"][id*="defeat"]');
     
@@ -5155,7 +4909,6 @@ function updateSettingsModalUI() {
     console.log('  - autoCollectSeashellCheckbox:', !!autoCollectSeashellCheckbox);
     console.log('  - autoCollectLevelUpRewardsCheckbox:', !!autoCollectLevelUpRewardsCheckbox);
     console.log('  - autoOpenCubesCheckbox:', !!document.getElementById('auto-open-cubes-checkbox'));
-    console.log('  - dayCareCheckbox:', !!dayCareCheckbox);
     console.log('  - autoPlayCheckbox:', !!autoPlayCheckbox);
     console.log('  - fasterAutoplayCheckbox:', !!fasterAutoplayCheckbox);
     console.log('  - staminaInput:', !!staminaInput);
@@ -5200,11 +4953,6 @@ function updateSettingsModalUI() {
       }
     }
     
-    if (dayCareCheckbox && !dayCareCheckbox.hasAttribute('data-listener-added')) {
-      dayCareCheckbox.checked = config.autoDayCare;
-      setupCheckboxAutoSave(dayCareCheckbox, 'autoDayCare');
-      dayCareCheckbox.setAttribute('data-listener-added', 'true');
-    }
     if (autoPlayCheckbox && !autoPlayCheckbox.hasAttribute('data-listener-added')) {
       autoPlayCheckbox.checked = config.autoPlayAfterDefeat;
       setupCheckboxAutoSave(autoPlayCheckbox, 'autoPlayAfterDefeat');

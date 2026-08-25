@@ -4,6 +4,41 @@
   },
   "notes": [
     {
+      "version": "4.9.0",
+      "changes": [
+        {
+          "mod": "Better Daycare",
+          "type": "added",
+          "text": "New Super Mod. Adds a Queue tab to the native Daycare dialog: pick eligible creatures (click or drag-and-drop) into a fill queue, in your own order, with a live \"creatures in daycare / in queue\" readout. Autohandle Daycare toggles from the dialog's own tooltip and automatically levels up ready creatures, ejects maxed ones, and refills empty slots straight through the game's own API. Eligible creatures are sorted like Cyclopedia's owned-creature list and automatically exclude Gazers and creatures already placed."
+        },
+        {
+          "mod": "Custom Battles",
+          "type": "fixed",
+          "text": "When a boss fight had multiple enemies sharing the same base creature, their on-screen nameplates — and the boss health bar — could all collapse onto whichever one happened to be renamed last, instead of each staying attached to its own enemy; fixed. A custom nickname (enemy or ally) could also revert to its raw creature name partway through a fight and never come back — most noticeable when more than one of the same creature was on the field at once; fixed. A stale custom battle instance left active in a room shared by several encounters could keep governing that room's ally-placement rules after a different encounter started there instead of properly handing over control; fixed."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "fixed",
+          "text": "The \"shiny enemies\" cosmetic toggle could occasionally apply the shiny effect to unrelated on-screen quest decorations that happen to reuse a real enemy's appearance, instead of only actual enemies; fixed."
+        },
+        {
+          "mod": "Quests",
+          "type": "added",
+          "text": "Boss battles now show an on-screen health bar for the enemy, consistently across all current boss encounters (previously only some had it), each labeled with its own collectible-core icon. Right-click hint text was added for an additional map object, using the same fading sign-style hint already used elsewhere. A boss encounter that previously didn't drop a collectible core reward on defeat now does, matching the others. Added a new NPC offering a short mission chain that leads into a hidden custom battle encounter. A non-interactive companion character now appears on-screen during one encounter, with a name label and a right-click hint you can read for a bit of story flavor."
+        },
+        {
+          "mod": "Quests",
+          "type": "changed",
+          "text": "One boss encounter's creature roster and difficulty were reworked. The trophy collection book now lists already-obtained cores first, and its item descriptions no longer repeat the same line twice. One mission's reward now requires returning to the quest giver to collect it, instead of being granted immediately on defeating the encounter. A couple of quest items had their rarity and description text adjusted."
+        },
+        {
+          "mod": "Quests",
+          "type": "fixed",
+          "text": "A quest tile's glow and right-click hint no longer linger after its item has already been picked up, including when the item finishes loading after the tile was first drawn. Fixed a visual bug where a boss encounter's map decorations could be wiped out by its own retry logic shortly after being placed. One boss's collectible core wasn't being recognized as a valid trophy, so defeating it never unlocked the trophy collection book automatically; fixed. A long NPC reply could occasionally keep printing a delayed follow-up line after you had already replied and moved the conversation forward, making it look like an extra, unanswerable question appeared out of nowhere; fixed. Re-entering a boss encounter that shares its map with other boss encounters could silently skip its own setup (no enemies placed) if you'd recently been on that map for a different encounter; fixed. An unrelated interactive tile could block dragging allies across part of the board during one boss encounter; fixed. An encounter sharing its map with several others could get its ally-placement rules stuck in the wrong state after enough board activity during the fight, sometimes blocking valid tiles or allowing invalid ones for the rest of it; fixed. A persistent status readout shown during one encounter could stay on-screen after the fight had already ended instead of clearing; fixed."
+        }
+      ]
+    },
+    {
       "version": "4.8.11",
       "changes": [
         {

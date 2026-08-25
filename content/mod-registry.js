@@ -57,6 +57,7 @@ export const SUPER_MODS = [
   'Better Bestiary.js',
   'Better Boosted Maps.js',
   'Better Cauldron.js',
+  'Better Daycare.js',
   'Better Exaltation Chest.js',
   'Better Forge.js',
   'Better Highscores.js',
