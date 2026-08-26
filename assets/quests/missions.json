@@ -1,0 +1,790 @@
+{
+  "_sections": {
+    "common": "1. Shared mission dialogue (used across multiple NPC handlers)",
+    "missions": "2. Mission definitions",
+    "completionSummaries": "3. Quest log completion summaries",
+    "sealTranscripts": "4. Costello diary seal transcripts",
+    "registry": "5. Mission registry (story order, stateKey, firebaseKey, extra progress fields)"
+  },
+  "common": {
+    "errorGeneric": "Something went wrong. Please try again.",
+    "notReady": "Return when you are ready for this task.",
+    "costelloNoFurtherMissions": "I have no further mission for you. Perhaps the King has work for you."
+  },
+  "missions": {
+    "serpentine_tower": {
+      "id": "serpentine_tower",
+      "title": "Serpentine Basement Quest",
+      "requiresMeetingWithTesha": "First bring me the scarab coin from the desert sands. Then we may speak of other matters.",
+      "prompt": "There is a matter I would ask of you, Player. Beneath the Serpentine Tower, in the basement, there is a lever. I need someone to go and use it — but be prepared for danger. Will you undertake this task?",
+      "accept": "Descend to the Serpentine Tower basement and use the lever. Be warned — great peril awaits those who are not ready.",
+      "answerYesNo": "Answer yes or no: will you undertake this task?",
+      "alreadyActive": "You have already accepted this task. Go to the Serpentine Tower basement and use the lever — but be prepared for danger.",
+      "alreadyCompleted": "You have already braved what lies beneath the Serpentine Tower. My thanks.",
+      "putridChamberReturnObjective": "Return to Tesha in Darama Oasis to receive your reward.",
+      "putridChamberVictoryToast": "You survived The Cursed Chamber. Return to Tesha in Darama Oasis.",
+      "battleVictory": "You survived the horrors of The Cursed Chamber. Return to Tesha in Darama Oasis.",
+      "battleDefeat": "The creatures of The Cursed Chamber were too strong.",
+      "teshaRewardLines": [
+        "You have braved The Cursed Chamber. Take this Compass — may it guide your path, Player.",
+        "A hermit near Carlin might be able to tell you more about it."
+      ],
+      "destroyFieldRuneHint": "The destroy field rune you seek lies upon the corpse of a magic elf, Player.",
+      "destroyFieldRuneAlreadyHave": "You already carry the destroy field rune, Player. Use it upon the energy fields that block your path.",
+      "magicElfHint": "Search Shadowthorn near Venore for the remains of a magic elf. The destroy field rune rests upon that corpse, Player.",
+      "objectiveLine1": "Find a Destroy Field Rune in Shadowthorn near Venore.",
+      "objectiveLine2": "Clear the energy fields and use the lever in the Serpentine Tower basement.",
+      "hint": "Ask Tesha about the destroy field rune or a magic elf if you need a clue.",
+      "hintBasement": "Use the Destroy Field Rune on the energy fields, then pull the lever.",
+      "rewardItemName": "Compass",
+      "rewardIcon": "The_Time_Compass.gif",
+      "rewardDescription": "It shows the cardinal directions and also many other symbols that you cannot decipher.",
+      "rewardSummary": "Reward: Compass."
+    },
+    "king_honeyflower": {
+      "id": "king_honeyflower",
+      "title": "Retrieve the Honeyflower",
+      "prompt": "I require honey for my tea. Journey to Honeyflower Tower and retrieve a honeyflower for me. Will you help?",
+      "accept": "Go to Honeyflower Tower and pick the honeyflower. Return to me when you have it.",
+      "askForItem": "Have you brought the honeyflower?",
+      "complete": "Splendid! My tea shall be sweet once more. Here are {coins} guild coins for your trouble.",
+      "missingItem": "You claim yes but carry no honeyflower. Return when you have picked one from Honeyflower Tower.",
+      "keepSearching": "Then journey to Honeyflower Tower and retrieve the honeyflower.",
+      "answerYesNo": "Answer yes or no: have you brought the honeyflower?",
+      "alreadyCompleted": "You already brought me a honeyflower. My thanks.",
+      "alreadyActive": "You are already on this task. Retrieve the honeyflower from Honeyflower Tower and return to me.",
+      "objectiveLine1": "Travel to Honeyflower Tower.",
+      "objectiveLine2": "Pick the honeyflower and return it to King Tibianus.",
+      "hint": "Right-click the glowing flower tile in Honeyflower Tower.",
+      "rewardCoins": 50,
+      "rewardSummary": "Reward: 50 guild coins."
+    },
+    "king_crossing_the_line": {
+      "id": "king_crossing_the_line",
+      "title": "Fastest Bishop in Carlin",
+      "prompt": "Ah, a game of wits! Travel to City Boardgames and station mages upon the marked tiles of the board, then win a battle with them so placed. Will you prove the fastest bishop in Carlin?",
+      "accept": "Excellent. Go to City Boardgames, place mages on the glowing tiles, and win a match. Return to me when it is done.",
+      "askForItem": "Have you completed the chess drill at City Boardgames?",
+      "complete": "Splendid play! Truly the fastest bishop in Carlin. Here are {coins} guild coins for your trouble.",
+      "missingItem": "You claim yes, yet I see no proof of a proper victory. Station mages on the marked tiles, win the battle, then return.",
+      "keepSearching": "Then go to City Boardgames and complete the chess drill with mages on the marked tiles.",
+      "answerYesNo": "Answer yes or no: have you completed the chess drill?",
+      "alreadyCompleted": "You already proved yourself at the board. Well done.",
+      "alreadyActive": "You are already on this chess drill. Station mages on the marked tiles at City Boardgames, win, and return to me.",
+      "objectiveLine1": "Travel to City Boardgames and station mages on the marked tiles.",
+      "objectiveLine2": "Win a battle with mages on those tiles, then return to King Tibianus.",
+      "hint": "Only creatures with the Mage category count on the glowing tiles.",
+      "rewardCoins": 50,
+      "rewardSummary": "Reward: 50 guild coins."
+    },
+    "king_copper_key": {
+      "id": "king_copper_key",
+      "title": "Retrieve King Tibianus's Belongings",
+      "prompt": "Glad you asked! One of my guards lost my precious copper key down in the mines. Would you be able to help me get it back?",
+      "accept": "Thank you! Take this map to help guide you to the mines. Let me know when you've retrieved it!",
+      "askForKey": "Have you found my key?",
+      "complete": "Splendid! You found my key. The mission is complete.",
+      "missingKey": "You claim yes but carry no key? Begone!",
+      "keepSearching": "Then keep searching and return when you have it.",
+      "answerYesNo": "Answer yes or no: have you found my key?",
+      "alreadyCompleted": "You already completed this mission. Excellent work, my subject.",
+      "alreadyActive": "You are already on this mission. Bring me back the copper key!",
+      "notExperiencedEnough": "That task is beyond you for now. Come back when you are more experienced.",
+      "objectiveLine1": "A guard lost the king's copper key deep in the mines.",
+      "objectiveLine2": "Find the copper key and return it to King Tibianus.",
+      "hint": "It seems I must steal it from the angry dwarfs — they probably won't let me have it without resistance.",
+      "rewardCoins": 50,
+      "rewardSummary": "Reward: 50 guild coins."
+    },
+    "king_red_dragon": {
+      "id": "king_red_dragon",
+      "title": "Stock the Royal Forge",
+      "prompt": "Brave subject, I need supplies for my smiths: bring me 30 red dragon scales and 30 red dragon leathers. Will you help me?",
+      "accept": "Excellent. Return once you have the materials.",
+      "askForItems": "Have you brought the red dragon materials?",
+      "complete": "Well done! The royal forge will thrive with these materials.",
+      "missingItems": "You claim yes but lack the materials. Do not waste my time.",
+      "keepSearching": "Then keep hunting dragons and return when you have them.",
+      "answerYesNo": "Answer yes or no: have you brought the materials?",
+      "alreadyCompleted": "You already completed this task. Impressive work.",
+      "alreadyActive": "You are already on this task. Bring me the materials.",
+      "objectiveLine1": "Gather 30 red dragon scales.",
+      "objectiveLine2": "Gather 30 red dragon leathers.",
+      "hint": "Hunt red dragons and skin them for scales and leather.",
+      "rewardCoins": 0,
+      "rewardItemName": "Dragon Claw",
+      "rewardProductId": "dragonClaw",
+      "rewardIcon": "Dragon_Claw.gif",
+      "rewardSummary": "Reward: Dragon Claw."
+    },
+    "king_letter_al_dee": {
+      "id": "king_letter_al_dee",
+      "title": "Letter from Al Dee",
+      "prompt": "I haven't seen Al Dee, the rope merchant, for some time. Will you seek him out in Rookgaard and learn what became of him?",
+      "promptWithLetter": "Ah, a letter from Al Dee! That old rope merchant has been trying to get my attention for weeks. Can you return this letter to him when you visit him?",
+      "accept": "Take this stamped letter back to Al Dee. He usually hangs around somewhere in Rookgaard. Good luck on your adventure!",
+      "acceptNoLetter": "Seek Al Dee in Rookgaard. If you find a letter meant for him among the monsters there, bring it to me first and I shall stamp it for delivery.",
+      "askForLetter": "Have you returned the letter to Al Dee?",
+      "stampLetter": "Ah, you found the letter! I've stamped it for you. Now take it to Al Dee in Rookgaard.",
+      "complete": "Well done! Al Dee was most pleased. Perhaps you'll find him useful in your future adventures.",
+      "missingLetter": "You claim to have returned it but I see no proof. Find Al Dee and complete his task!",
+      "keepSearching": "Then find Al Dee in Rookgaard and return his letter.",
+      "answerYesNo": "Answer yes or no: have you returned the letter to Al Dee?",
+      "alreadyCompleted": "You already helped Al Dee. Perhaps you should visit his shop again.",
+      "alreadyActive": "You are already on this task. Seek Al Dee in Rookgaard — and bring me any letter of his you find so I may stamp it.",
+      "alreadyActiveStamped": "You already have my stamp on that letter. Deliver it to Al Dee in Rookgaard to finish this task.",
+      "alreadyActiveWithLetter": "You already have Al Dee's letter. Hand it to me and I shall stamp it for delivery.",
+      "objectiveLine1": "Find Al Dee.",
+      "objectiveLineBringLetter": "Bring the letter to King Tibianus to be stamped.",
+      "objectiveLine2": "Return the stamped letter to Al Dee.",
+      "hint": "Seek Al Dee in Rookgaard. Explore carefully — something of his may turn up along the way.",
+      "rewardCoins": 50,
+      "rewardSummary": "Reward: 50 guild coins."
+    },
+    "king_monks_study": {
+      "id": "king_monks_study",
+      "title": "The Monk's Study",
+      "prompt": "I see you carry the Holy Tible — you have proven yourself in the search for the Light. Now I ask you to seek out Costello within the White Raven Monastery. He is a learned man and may have wisdom that serves the crown. Will you undertake this task?",
+      "accept": "Go to the White Raven Monastery and seek out Costello. Return to me when you have news.",
+      "askForItem": "Have you found Costello?",
+      "complete": "Excellent work. Costello has long been a friend of the crown.",
+      "missingItem": "You claim yes but I have had no word from the monastery. Find Costello and speak with him.",
+      "keepSearching": "Then journey to the White Raven Monastery and search for Costello.",
+      "answerYesNo": "Answer yes or no: have you found Costello?",
+      "alreadyCompleted": "You have already completed this task. My thanks.",
+      "alreadyActive": "You are already on this task. Seek Costello in the White Raven Monastery.",
+      "objectiveLine1": "Travel to the White Raven Monastery.",
+      "objectiveLine2": "Search for Costello within the monastery.",
+      "hint": "The White Raven Monastery lies somewhere beyond the realm. Look for Costello there.",
+      "rewardCoins": 50,
+      "rewardSummary": "Reward: 50 guild coins.",
+      "costelloHolyTibleAsk": "The King has sent you. Do you have the Holy Tible with you? I need to see it to complete your study here.",
+      "costelloHolyTibleMissing": "You do not have the Holy Tible. Return when you have it.",
+      "costelloHolyTibleReturn": "Return when you have the Holy Tible.",
+      "costelloHolyTibleError": "Something went wrong. Return when you have the Holy Tible.",
+      "costelloStudyComplete": "Thank you. Your study here is complete. Here are {coins} guild coins as a reward."
+    },
+    "king_scarab_coin": {
+      "id": "king_scarab_coin",
+      "title": "Lost in the Sands",
+      "prompt": "Rumour speaks of a lost valuable buried somewhere in the desert sands of Darama. Journey to the oasis and search the dunes — will you undertake this hunt?",
+      "accept": "Search the desert sands of Darama Oasis for the lost valuable. Dig where the lone sand tiles lie.",
+      "askForCoin": "Have you found the lost valuable in the desert?",
+      "complete": "Splendid! You unearthed what was lost in the sands. Seek out Tesha in the oasis — she may know its worth.",
+      "missingCoin": "You claim yes but carry nothing from the sands. Return when you have dug up the valuable.",
+      "keepSearching": "Then keep searching the desert and return when you find it.",
+      "answerYesNo": "Answer yes or no: have you found the lost valuable?",
+      "alreadyCompleted": "You have already completed the hunt in the desert sands. My thanks.",
+      "alreadyActive": "You are already searching the desert sands of Darama Oasis for the lost valuable.",
+      "requiresLightShovel": "I have no task for thee at present. Come back later.",
+      "objectiveLine1": "Search the desert sands of Darama Oasis for a lost valuable.",
+      "objectiveLine2": "Show the scarab coin to Tesha in Darama Oasis.",
+      "hint": "Lore tells that the valuable was lost while fighting where the stairs are that lead to Port Hope.",
+      "teshaAskForCoin": "Have you brought me a scarab coin from the desert? Show it to me if you have one.",
+      "teshaNoCoin": "You do not have a scarab coin with you.",
+      "teshaAlreadyCompleted": "You have already shown me a scarab coin. May enlightenment guide you, Player.",
+      "teshaCompleteLines": [
+        "A scarab coin from the desert sands! The priests say they are sacred beings, although... <whispers>I find them scary!",
+        "They are not mere curios — these coins are offerings for the tomb warps. The priests use them to open the paths to ascension.",
+        "Thank you for bringing it to me, Player. I shall keep it safe."
+      ],
+      "teshaCompleteCoinLine": "Here are {coins} guild coins for your trouble, Player.",
+      "rewardCoins": 100,
+      "rewardSummary": "Reward: 100 guild coins."
+    },
+    "al_dee_fishing_gold": {
+      "id": "al_dee_fishing_gold",
+      "title": "Fishing for gold",
+      "prompt": "Ah, adventurer! I dropped my Small Axe in the waters of a cave while being hunted by minotaurs and goblins. Will you help me retrieve it?",
+      "accept": "Thank you! I'll be waiting here for my Small Axe.",
+      "askForItem": "Have you found my Small Axe?",
+      "complete": "My Small Axe! You found it! Here's a Light Shovel as a reward for your help.",
+      "missingItem": "You claim yes but I see no Small Axe. Return when you have it!",
+      "keepSearching": "Then keep searching for my axe and return when you find it.",
+      "answerYesNo": "Answer yes or no: have you found my Small Axe?",
+      "alreadyCompleted": "You already helped me find my Small Axe. Thank you again!",
+      "alreadyActive": "You're already helping me find my Small Axe. Bring it back when you find it!",
+      "requiresLetterComplete": "Before I set you another task, bring me the king's stamped letter. Deliver that first, then we can talk.",
+      "requiresLetterForFishingRod": "I only sell fishing rods to those who've finished delivering the king's stamped letter to me.",
+      "objectiveLine1": "Find Al Dee's Small Axe in the waters of a cave.",
+      "objectiveLine2": "Return the Small Axe to Al Dee.",
+      "hint": "Search underwater areas or caves where minotaurs and goblins roam.",
+      "rewardCoins": 0,
+      "rewardSummary": "Reward: Light Shovel."
+    },
+    "al_dee_golden_rope": {
+      "id": "al_dee_golden_rope",
+      "title": "The search for the Light",
+      "prompt": "Ah, adventurer! I've lost my precious elvenhair rope to those tricky elves. It's said to have magical properties that can lead one to great treasures. Will you help me find it?",
+      "accept": "Excellent! I'll be waiting here for my elvenhair rope. Please return it when you find it!",
+      "askForItem": "Have you found my elvenhair rope?",
+      "complete": "My elvenhair rope! You found it! Thank you for your help. Here, take this Holy Tible as a reward for your bravery!",
+      "missingItem": "You claim yes but I see no elvenhair rope. Return when you have it!",
+      "keepSearching": "Then keep searching for my rope and return when you find it.",
+      "answerYesNo": "Answer yes or no: have you found my elvenhair rope?",
+      "alreadyCompleted": "You already helped me find my elvenhair rope. Thank you again!",
+      "alreadyActive": "You're already helping me find my elvenhair rope. Bring it back when you find it!",
+      "objectiveLine1": "Find Al Dee's elvenhair rope that was taken by elves.",
+      "objectiveLine2": "Return the elvenhair rope to Al Dee.",
+      "hint": "Search areas where elves are known to roam.",
+      "rewardCoins": 0,
+      "rewardSummary": "Reward: The Holy Tible.",
+      "battleVictory": "Mornenion was slain. You found Elvenhair Rope.",
+      "battleDefeat": "Mornenion's powers were too strong for you."
+    },
+    "al_dee_rookie_guard": {
+      "id": "al_dee_rookie_guard",
+      "title": "The Sword of Fury",
+      "prompt": "Rookie, have you heard the old tale? Off the northwest shore there's a lonely isle, ringed in fire, with a blade called the Sword of Fury standing in the rock. A sign beside it reads: 'Only the humble may touch the Sword of Fury.' Many have tried to reach it. All have failed. But I've heard another rumor — something stirring at that northwest shore, below the Rotworm Dungeon, that might be connected.",
+      "accept": "Good. Keep your head down and your pride in check — the northwest shore is no place for boasting. Whatever's out there, come tell me what you find.",
+      "askForItem": "Well? Did you find anything out at that northwest shore — some sign of the Sword of Fury?",
+      "complete": "So it's true — there was something out there after all, and you put it down too! Take this Knarknaknork Soul Core as your reward for the kill. Doesn't look like much of a sword, but you kept humble and came back in one piece. That's worth more than the blade itself, rookie.",
+      "missingItem": "You haven't even been out there yet, have you? The northwest shore, below the Rotworm Dungeon — go on, humbly now.",
+      "keepSearching": "Then get back out there and finish the job. Humility first, rookie.",
+      "answerYesNo": "Answer yes or no: did you brave the northwest shore and find what's out there?",
+      "alreadyCompleted": "Ah, the northwest shore job. You handled that with more humility than most who go chasing the Sword of Fury ever manage.",
+      "alreadyActive": "Still waiting to hear from the northwest shore, below the Rotworm Dungeon. Go on, then — humbly.",
+      "objectiveLine1": "Go to the Rotworm Dungeon and step through the portal toward the northwest shore.",
+      "objectiveLine2": "Defeat whatever guards it out there and report back to Al Dee.",
+      "hint": "The sign by the Sword of Fury says only the humble may touch it. Maybe that's the real trick.",
+      "rewardCoins": 0,
+      "rewardItemName": "Knarknaknork Soul Core",
+      "rewardIcon": "Knarknaknork_Soul_Core.gif",
+      "rewardSummary": "Reward: Knarknaknork Soul Core.",
+      "battleVictory": "Whatever it was, it's dead now. No Sword of Fury out there after all — but return to Al Dee with the news.",
+      "battleDefeat": "Knarknaknork proved you weren't humble enough today."
+    },
+    "costello_queen_banshees": {
+      "id": "costello_queen_banshees",
+      "title": "The Queen of the Banshees",
+      "prompt": "There is a matter I would ask of you. The seven seals of Ghostlands — I need you to complete them and return to me when you have done so. I will give you my diary; it may guide you. Will you undertake this task?",
+      "accept": "Complete the seven seals of Ghostlands and return when you have done so.",
+      "acceptDiarySuffix": " You have received my diary.",
+      "complete": "You have completed the seven seals of Ghostlands. The Queen of the Banshees task is complete. You have received the Blessed Ankh. My thanks.",
+      "allSealsDoneHandIn": "You have completed all seven seals. Say yes if you wish to finish this task with me now.",
+      "alreadyCompleted": "You have already completed this task. My thanks.",
+      "alreadyActive": "You have accepted my task. Complete the seven seals of Ghostlands and return when you have done so.",
+      "objectiveLine1": "Complete the seven seals of Ghostlands.",
+      "objectiveLine2": "Speak with Costello when all seven seals are complete.",
+      "diaryItemName": "Costello's diary",
+      "rewardItemName": "Blessed Ankh",
+      "rewardDescription": "You see the engraving of a white raven on its surface.",
+      "rewardSummary": "Reward: Blessed Ankh."
+    },
+    "follower_of_zathroth": {
+      "id": "follower_of_zathroth",
+      "title": "The Follower of Zathroth",
+      "prompt": "I have another matter for you. Take the Blessed Ankh you earned and bring it to my friend Wyda in the swamps of Venore. She has need of it. Will you go?",
+      "accept": "Bring the Blessed Ankh to Wyda in the swamps of Venore. She will know what to do with it.",
+      "alreadyCompleted": "You have already brought the Blessed Ankh to Wyda. My thanks.",
+      "alreadyActive": "You must bring the Blessed Ankh to Wyda in the swamps of Venore.",
+      "objectiveLine1": "Bring the Blessed Ankh to Wyda in the swamps of Venore.",
+      "objectiveLine2": "Give the Blessed Ankh to Wyda to complete the task.",
+      "rewardCoins": 50,
+      "rewardSummary": "Reward: 50 guild coins.",
+      "notReadyDecline": "Return when you are ready to bring the Blessed Ankh to Wyda.",
+      "wydaHandInComplete": "The Blessed Ankh! Yes, this is what I needed. You have done well. The matter Costello spoke of is complete.",
+      "wydaHandInCoinLine": " Here are {coins} guild coins for your trouble."
+    },
+    "mother_of_all_spiders": {
+      "id": "mother_of_all_spiders",
+      "title": "The Mother of All Spiders",
+      "prompt": "A new task? Very well. You must descend the secluded herb to find the mother of all spiders. Defeat it and return to me with the silk. Will you do this?",
+      "accept": "Descend the secluded herb, find the mother of all spiders, defeat it and bring me the silk.",
+      "alreadyCompleted": "You have already completed that task. My thanks.",
+      "alreadyActive": "You must descend the secluded herb, defeat the mother of all spiders and return with the silk.",
+      "objectiveLine1": "Descend the secluded herb and find the mother of all spiders.",
+      "objectiveLine2": "Defeat the mother of all spiders and return with the silk to Wyda.",
+      "rewardItemName": "Spool of Yarn",
+      "rewardIcon": "Spool_of_Yarn.gif",
+      "rewardDescription": "It is made from fine spider silk.",
+      "rewardCoins": 0,
+      "rewardSummary": "Reward: Spool of Yarn.",
+      "wydaSilkComplete": "The silk! Excellent. I can make good use of this. Here, take this Spool of Yarn as thanks.",
+      "wydaMissingSilk": "You don't have the spider silk. Defeat the mother of all spiders in the secluded herb and return with the silk.",
+      "soulCoreItemName": "The Old Widow Soul Core",
+      "soulCoreIcon": "The_Old_Widow_Soul_Core.gif",
+      "battleVictory": "The Old Widow was slain. You found Spider Silk and a soul core.",
+      "battleDefeat": "The Old Widow was too strong."
+    },
+    "jakundaf_desert": {
+      "id": "jakundaf_desert",
+      "title": "The Jakundaf Desert",
+      "prompt": "Bored again already? Good. Evil things block the way into the Jakundaf Desert from the Plains of Havoc. Clear them out for me. Will you do this?",
+      "accept": "Use the marked tile here to reach the path into the Jakundaf Desert. Defeat the villains blocking the way, then return to me.",
+      "alreadyCompleted": "You already cleared that desert path for me. Leave me to my boredom.",
+      "alreadyActive": "The path into the Jakundaf Desert is still blocked. Use the marked tile in my house.",
+      "alreadyCleared": "You cleared the desert path? Good. Take this Stuffed Toad — and leave me to my boredom.",
+      "reportBack": "The desert path is clear. Return to Wyda for your reward.",
+      "objectiveLine1": "Use the marked tile in Wyda's house to reach the desert path.",
+      "objectiveLine2": "Defeat the villains blocking the Jakundaf Desert.",
+      "objectiveLine3": "Return to Wyda for your reward.",
+      "hint": "After helping Wyda with the mother of all spiders, ask her for another task.",
+      "rewardItemName": "Stuffed Toad",
+      "rewardDescription": "You see a stuffed toad.",
+      "rewardCoins": 0,
+      "rewardSummary": "Reward: Stuffed Toad.",
+      "battleVictory": "The desert path is clear. Return to Wyda for your reward.",
+      "battleDefeat": "The villains blocking the desert were too strong.",
+      "wydaHandInComplete": "You cleared the desert path? Good. Take this Stuffed Toad — and leave me to my boredom."
+    },
+    "tainted_souls": {
+      "id": "tainted_souls",
+      "title": "The Tainted Souls",
+      "prompt": "Bored again? Fine. There is a witch named Ekatrix whose soul is... tainted. Take that stuffed toad of yours to Eclipse and drop it in the Cauldron. That should open a way to her. Kill her for me. Will you do this?",
+      "accept": "Go to Eclipse. Use the Stuffed Toad in the Cauldron. When the portal opens, step through and slay Ekatrix.",
+      "alreadyCompleted": "You already dealt with Ekatrix. One less boring soul in the world.",
+      "alreadyActive": "Ekatrix still lives. Eclipse. Cauldron. Stuffed Toad. Portal. Try to keep up.",
+      "alreadyPortalOpen": "The portal is open at Eclipse. Step through and kill Ekatrix.",
+      "alreadyCleared": "Ekatrix is dead, then? Good. Take this Ekatrix Soul Core — and leave me to my boredom.",
+      "reportBack": "Ekatrix has fallen. Return to Wyda for your reward.",
+      "objectiveLine1": "Go to Eclipse and use the Stuffed Toad in the Cauldron.",
+      "objectiveLine2": "Enter the portal and defeat Ekatrix.",
+      "objectiveLine3": "Return to Wyda for the Ekatrix Soul Core.",
+      "hint": "After clearing the Jakundaf Desert for Wyda, ask her for another task.",
+      "hintPortal": "The portal at Eclipse leads to Ekatrix. Step through when you are ready.",
+      "hintReport": "Ekatrix is slain. Return to Wyda in the Venore swamps.",
+      "rewardItemName": "Ekatrix Soul Core",
+      "rewardIcon": "Ekatrix_Soul_Core.gif",
+      "rewardCoins": 0,
+      "rewardSummary": "Reward: Ekatrix Soul Core.",
+      "soulCoreItemName": "Ekatrix Soul Core",
+      "soulCoreIcon": "Ekatrix_Soul_Core.gif",
+      "battleVictory": "Ekatrix has fallen. Return to Wyda for your reward.",
+      "battleDefeat": "Ekatrix was too strong.",
+      "wydaHandInComplete": "Ekatrix is dead, then? Good. Take this Ekatrix Soul Core — and leave me to my boredom."
+    },
+    "apprentice_sheng": {
+      "id": "apprentice_sheng",
+      "title": "Apprentice Sheng",
+      "prompt": "Greetings, traveller. I am Apprentice Sheng. Will you hear me out?",
+      "accept": "Speak with Rookstayer in the Minotaur Mage Room.",
+      "alreadyCompleted": "You have already completed this task.",
+      "alreadyActive": "You have already spoken with Rookstayer.",
+      "objectiveLine1": "Help Rookstayer defeat Apprentice Sheng in the Minotaur Mage Room.",
+      "objectiveLine2": "Speak with Rookstayer after the battle for your reward.",
+      "hint": "After retrieving the honeyflower for King Tibianus, seek Rookstayer in the Minotaur Mage Room.",
+      "rewardItemName": "Wooden Plank",
+      "rewardDescription": "A sturdy wooden plank from the battle wreckage.",
+      "rewardSummary": "Reward: Wooden Plank.",
+      "battleVictory": "Apprentice Sheng has been defeated.",
+      "battleDefeat": "Apprentice Sheng was too strong.",
+      "soulCoreItemName": "Apprentice Sheng Soul Core"
+    },
+    "christmas_miracle": {
+      "id": "christmas_miracle",
+      "title": "A Christmas Miracle",
+      "prompt": "",
+      "accept": "Someone in Folda may be waiting for that list.",
+      "alreadyCompleted": "You have already received your Christmas present.",
+      "alreadyActive": "You are already on this Christmas quest.",
+      "objectiveLine1": "You've found a wishlist. Ask Santa about this.",
+      "objectiveLine2": "Unwrap whatever he gives you.",
+      "hint": "",
+      "rewardItemName": "Bunny Slippers",
+      "rewardIcon": "Bunnyslippers.gif",
+      "rewardDescription": "Soft pink bunny slippers. A gift from Santa Claus.",
+      "rewardSummary": "Reward: Bunny Slippers."
+    },
+    "svenson_love_story": {
+      "id": "svenson_love_story",
+      "title": "A Love Story",
+      "prompt": "The northern waters have not been kind, and my ship is barely holding together. Help me make her seaworthy again, and I'll show you routes few sailors dare to take. Will you help me?",
+      "accept": "Bring me a Wooden Plank so I can reinforce the hull.",
+      "alreadyCompleted": "Your help saved my voyage and my marriage. Thank you again.",
+      "alreadyActive": "Have you found the Wooden Plank?",
+      "objectiveLine1": "Bring Svenson a Wooden Plank on Folda Boat.",
+      "objectiveLine2": "Talk to Svenson and set sail.",
+      "objectiveLine3": "Find Svenson and hear what happened.",
+      "objectiveLine4": "Bring Svenson a Spool of Yarn.",
+      "objectiveLine5": "Talk to Svenson and continue the voyage.",
+      "objectiveLine6": "Find Svenson again and hear his next request.",
+      "objectiveLine7": "Bring Svenson a Compass.",
+      "objectiveLine8": "Talk to Svenson and continue the voyage.",
+      "objectiveLine9": "Bring Svenson Bunny Slippers for Dane.",
+      "hint": "Someone in the Minotaur Mage Room may carry what you need for repairs.",
+      "hintAwash": "Someone in the Venore swamps may know where such yarn can be found.",
+      "hintUnderground": "A mysterious compass may be found by those who brave ancient desert dangers.",
+      "hintWhiteWave": "A warm present from Folda may be just what Svenson needs.",
+      "rewardSummary": "Reward: Passage with Svenson.",
+      "svensonMissingPlank": "The hull still groans with every wave. I need a Wooden Plank before we sail.",
+      "svensonPlankAccepted": "Well done! The hull will hold for now. Are you ready to cast off with me?",
+      "svensonTravelDeclined": "Very well. Tell me when you are ready to sail.",
+      "svensonTravelComplete": "Then aboard with you! Hold fast.",
+      "svensonTravelLocked": "You are not ready for that route yet. Come back when you are stronger.",
+      "svensonAwashWelcome": "Storms and black waves nearly swallowed us whole. We're alive, and that's what matters.",
+      "svensonNeedYarn": "The seams split during the crossing. I need a Spool of Yarn for a quick patch. Do you have one?",
+      "svensonMissingYarn": "You do not have a Spool of Yarn. Find one — Wyda in the Venore swamps spins it from spider silk — and return.",
+      "svensonYarnDeclined": "Then find a Spool of Yarn and return when you have it.",
+      "svensonYarnAcceptedAwash": "Excellent. This patch might buy us one more bold voyage.",
+      "svensonAwashTravelPrompt": "Do you want to travel with me once more?",
+      "svensonUndergroundWelcome": "Cursed currents pulled us into shadowed waters below the world. We've drifted far from open sea.",
+      "svensonNeedCompass": "I can read no stars down here. Bring me a Compass, and I'll find us a way onward. Do you have one?",
+      "svensonMissingCompass": "You do not have a Compass. Brave the desert dangers for one, then return.",
+      "svensonCompassDeclined": "Then find a Compass and return when you have it.",
+      "svensonCompassAccepted": "A fine find. With this Compass, we have a fighting chance.",
+      "svensonUndergroundTravelPrompt": "The needle steadies... I see a route to safer docks. Sail on?",
+      "svensonWhiteWaveWelcome": "Ha! We made it through storm and darkness. White Wave Cellar at last!",
+      "svensonNeedPresent": "One last favor, friend. I promised Dane a gift but left it behind. Do you have Bunny Slippers?",
+      "svensonMissingPresent": "You do not have Bunny Slippers. Ask Santa Claus in Folda for a present, unwrap it, then return.",
+      "svensonPresentDeclined": "Then bring me Bunny Slippers when you have them.",
+      "svensonPresentAccepted": "You truly saw this voyage through. Dane will treasure these. My thanks, always.",
+      "svensonPostLoveTravelPrompt": "I can take you to White Wave Cellar. Do you want to travel now?",
+      "svensonPostLoveTravelStart": "Then aboard with you! White Wave awaits.",
+      "daneHomeThanksWelcome": "Thank you for bringing Svenson home, Player. White Wave Cellar owes you one.",
+      "daneHomeThanksMission": "Thanks again for bringing Svenson safely home. We won't forget it."
+    },
+    "weakened_archdemon": {
+      "id": "weakened_archdemon",
+      "title": "The Weakened Archdemon",
+      "prompt": "Player... word reaches me that Ghazbaran has been weakened. The archdemon hides in the north still, but this may be our only chance. Will you seek him out and defeat him?",
+      "accept": "Good. Speak with Svenson on Folda Boat — ask him for passage to Ghazbaran's Hideout.",
+      "answerYesNo": "Answer yes or no: will you hunt the weakened archdemon?",
+      "alreadyActive": "You already accepted this task. Ask Svenson for passage to Ghazbaran's Hideout, then defeat the archdemon.",
+      "alreadyCompleted": "You already struck down the weakened archdemon. White Wave Cellar sleeps easier for it.",
+      "objectiveLine1": "Talk to Svenson on Folda Boat and sail to Ghazbaran's Hideout.",
+      "objectiveLine2": "Defeat the weakened Ghazbaran.",
+      "objectiveLine3": "Return to Dane at White Wave Cellar.",
+      "hint": "Svenson can ferry you to White Wave Cellar or Ghazbaran's Hideout.",
+      "rewardSummary": "Reward: Orb.",
+      "rewardItemName": "Orb",
+      "battleVictory": "Ghazbaran has fallen. Return to Dane to claim your reward.",
+      "battleDefeat": "The weakened archdemon still proved too strong.",
+      "daneCompletion": "You did it, Player. The north is safer because of you. Take this orb — may it serve you well.",
+      "daneAwaitingReward": "Ghazbaran is fallen. Speak with me when you are ready to claim your reward.",
+      "svensonDestinationPrompt": "Where shall I take you — White Wave Cellar, or Ghazbaran's Hideout?",
+      "svensonGhazTravelPrompt": "Ghazbaran's Hideout... few who sail there return. The archdemon may be weakened, but his aura still kills. Are you certain you want to go?",
+      "svensonGhazTravelStart": "Then may the gods watch over you. Once we land, there is no turning back until the fight is done.",
+      "svensonGhazTravelLocked": "You are not ready for that route yet. Come back when you are stronger.",
+      "daneMissionAccepted": "Then go. Svenson knows the northern routes — ask him for passage to the hideout."
+    },
+    "dragonmother": {
+      "id": "dragonmother",
+      "title": "The Dragonmother",
+      "prompt": "",
+      "accept": "",
+      "alreadyCompleted": "You have already slain Demodras.",
+      "alreadyActive": "Descend the stairs in Dragon Lair with Demodras' claw and defeat him.",
+      "objectiveLine1": "Use Demodras' claw to descend the stairs in Dragon Lair.",
+      "objectiveLine2": "Defeat Demodras in Lonesome Dragon.",
+      "hint": "Only those who carry the Dragon Claw may descend the stairs in Dragon Lair.",
+      "rewardItemName": "Demodras Soul Core",
+      "rewardIcon": "Demodras_Soul_Core.gif",
+      "rewardCoins": 0,
+      "rewardSummary": "Reward: Demodras Soul Core.",
+      "battleVictory": "Demodras has fallen. You found a Demodras Soul Core.",
+      "battleDefeat": "Demodras was too strong."
+    },
+    "lost_oracle": {
+      "id": "lost_oracle",
+      "title": "The Lost Oracle",
+      "prompt": "",
+      "accept": "",
+      "alreadyActive": "Ask others about the Oracle, then bring an Orb to King Tibianus.",
+      "alreadyCompleted": "You have already walked the path the Oracle set before you.",
+      "objectiveLine1": "Ask other NPCs about the Oracle.",
+      "objectiveLine2": "Bring an Orb to King Tibianus.",
+      "objectiveLine3": "Bring the Luminous Orb to Wyda in the Venore swamps.",
+      "objectiveLine4": "Return the Spectral Stone to The Oracle.",
+      "objectiveLine5": "Survive The Oracle's wrath.",
+      "objectiveLine6": "Speak with The Oracle.",
+      "hint": "Speak of the Oracle to those you trust. The King may know how to unveil an Orb's light.",
+      "hintSpectral": "The Spectral Stone belongs with The Oracle in the Monastery Catacombs.",
+      "hintBattle": "The Oracle's rage fills the catacombs. Stand your ground.",
+      "hintThanks": "The Oracle awaits your return in the Monastery Catacombs.",
+      "questItemName": "Spectral Stone",
+      "questItemIcon": "Life_Crystal.gif",
+      "questItemDescription": "It is pulsating with spectral energy.",
+      "rewardCoins": 100,
+      "rewardSummary": "Reward: 100 guild coins.",
+      "oracleVictoryThanks": "THANK YOU, PLAYER! YOUR DESTINY IS FULFILLED!",
+      "kingOracleAsk": "An Oracle? Strange visions haunt my dreams of such a being. Bring me an Orb — I may yet unveil its true light.",
+      "kingOracleHasOrb": "You carry an Orb. Shall I transform it into a Luminous Orb?",
+      "kingOracleExchanged": "Behold — a Luminous Orb. Take it to Wyda in the Venore swamps; she alone can bind its light into a Spectral Stone.",
+      "kingOracleNoOrb": "Return when you have an Orb to offer.",
+      "kingOracleAlreadyExchanged": "You already hold the Luminous Orb I fashioned. Take it to Wyda in the Venore swamps.",
+      "kingOracleDecline": "Very well. Return when you are prepared to offer the Orb.",
+      "kingOracleSentToWyda": "Wyda waits in the swamps of Venore. Give her the Luminous Orb.",
+      "kingOracleReturnStone": "The Spectral Stone belongs with The Oracle. Return it whence such light was born.",
+      "wydaLuminousAsk": "A Luminous Orb... yes. I can bind its light into a Spectral Stone. Will you give it to me?",
+      "wydaLuminousExchanged": "There. A Spectral Stone — pulsating with spectral energy. Do not lose it.",
+      "wydaLuminousMissing": "You do not have a Luminous Orb. Ask the King to unveil an Orb first.",
+      "wydaLuminousAlready": "You already carry the Spectral Stone I forged. Keep it close.",
+      "wydaLuminousDecline": "Then keep your glowing toy. Return when you are ready.",
+      "npcOracleWonder": "The Oracle... lost? I wonder what caused it. Was it cursed? Something dark must have claimed it.",
+      "npcOracleWonderAlDee": "The Oracle got lost? Strange... was it cursed? What could twist a thing like that?",
+      "npcOracleWonderCostello": "A lost Oracle... I wonder what befell it. A curse? Some darker force beneath the stones?",
+      "npcOracleWonderWyda": "Lost? Cursed? Ha! Something awful must have happened to it. Tell me if you learn more — I'm bored enough.",
+      "npcOracleWonderTesha": "The Oracle is lost? I wonder whether a curse claimed it... mortality and madness walk hand in hand.",
+      "npcOracleWonderSvenson": "Lost Oracle, eh? Makes you wonder — cursed, abandoned, or worse? Sailors tell darker tales than that.",
+      "npcOracleWonderDane": "A lost Oracle... what caused it? A curse? The sea swallows secrets; land does the same.",
+      "npcOracleRestored": "The Oracle has been restored! Thank you, Player — the world feels steadier for it.",
+      "npcOracleRestoredAlDee": "You restored The Oracle? Amazing work, Player! Folk will sleep easier knowing that.",
+      "npcOracleRestoredCostello": "Bless you, Player. The Oracle is restored — a light returns beneath our monastery.",
+      "npcOracleRestoredWyda": "So you fixed The Oracle? Ha! Not so boring after all. Grateful, I suppose.",
+      "npcOracleRestoredTesha": "Be mourned no longer for that fate, Player. The Oracle is restored — thank you.",
+      "npcOracleRestoredSvenson": "Word travels fast at sea, Player. The Oracle restored? Grateful we are for that.",
+      "npcOracleRestoredDane": "Sailors toast you, Player. The Oracle restored — that's rare good news.",
+      "kingOracleRestored": "You have my gratitude, Player. The Oracle is restored — may destiny smile upon you.",
+      "oracleSpectralRage": "Y£U0 D@R3 {€FF3R} M3 TH@T {C{UR$}3D} $T€N3{\\}?! 1 W1££ {UNM@K3} Y£U0{\\}! 1 W1££ {D3$TR€Y} 3V3RYTH1NG{\\}!",
+      "oracleSpectralMissing": "Y£U0 BR1NG N€TH1NG. R3T{URN} W1TH TH3 $P3CTR@£ $T€N3{\\}!",
+      "oracleRageAgain": "Y£U0 @G@1N{\\}?! TH3N D1£{\\}!",
+      "battleVictory": "The Oracle's rage is broken. The catacombs fall silent.",
+      "battleDefeat": "The Oracle's wrath was too great."
+    },
+    "hellgate_part_1": {
+      "id": "hellgate_part_1",
+      "title": "Hellgate Part 1",
+      "offer": "There is a task I would ask of you, human — will you accept it?",
+      "offerDecline": "Then keep away from what does not concern you.",
+      "prompt": [
+        "The gate to the hellgate has stood locked longer than your kind can count. Take this — Key 3012, forged by my people.",
+        "It unlocks the gate. Speak to me again when you wish to use it."
+      ],
+      "accept": "Then follow. Stay close, human.",
+      "alreadyCompleted": "The treasure room is behind us now. There is nothing more to show you there.",
+      "alreadyActive": "You already carry the key. Are you ready to follow me to the treasure room in Hellgate?",
+      "decline": "Believe me, it's better for you that way. Return when you've found your courage.",
+      "objectiveLine1": "Follow Elathriel into the Hellgate Treasure Room.",
+      "objectiveLine2": "Survive what guards it.",
+      "hint": "Speak with Elathriel in Hedge Maze about a mission — he holds the key to the hellgate.",
+      "rewardSummary": "Reward: Beware of the Bonelords (Book).",
+      "battleVictory": "The treasure room is cleared. Return to Elathriel.",
+      "battleDefeat": "Whatever guards that treasure was not so easily bested.",
+      "battleReward": "You have done well, human. Take this — knowledge the Bonelords would rather stay buried."
+    }
+  },
+  "completionSummaries": {
+    "king_honeyflower": "Retrieved a honeyflower from Honeyflower Tower for King Tibianus.",
+    "king_crossing_the_line": "Won a City Boardgames chess battle with mages stationed on the marked tiles for King Tibianus.",
+    "king_copper_key": "Returned the copper key to King Tibianus.",
+    "king_red_dragon": "Delivered 30 red dragon scales and 30 red dragon leathers to the royal forge.",
+    "king_letter_al_dee": "Returned the stamped letter to Al Dee in Rookgaard.",
+    "king_monks_study": "Found Costello at the White Raven Monastery.",
+    "king_scarab_coin": "Unearthed the scarab coin in the desert sands and showed it to Tesha in Darama Oasis.",
+    "al_dee_fishing_gold": "Retrieved Al Dee's Small Axe from the cave waters.",
+    "al_dee_golden_rope": "Returned Al Dee's elvenhair rope.",
+    "al_dee_rookie_guard": "Chased a rumor of the Sword of Fury out to the northwest shore below the Rotworm Dungeon, defeated Knarknaknork, and reported back to Al Dee.",
+    "costello_queen_banshees": "Completed the seven seals of Ghostlands and returned to Costello.",
+    "follower_of_zathroth": "Brought the Blessed Ankh to Wyda in the swamps of Venore.",
+    "mother_of_all_spiders": "Descended the secluded herb, defeated the mother of all spiders, and returned the silk to Wyda.",
+    "jakundaf_desert": "Cleared the villains blocking the Jakundaf Desert from the Plains of Havoc and returned to Wyda.",
+    "tainted_souls": "Used the Stuffed Toad in the Eclipse Cauldron, slew Ekatrix, and returned to Wyda.",
+    "serpentine_tower": "Used the lever in the Serpentine Tower basement and survived The Cursed Chamber.",
+    "apprentice_sheng": "Helped Rookstayer defeat Apprentice Sheng in the Minotaur Mage Room and claimed a Wooden Plank.",
+    "christmas_miracle": "Received a Christmas present from Santa Claus.",
+    "svenson_love_story": "Guided Svenson through storms and misnavigation, then delivered Bunny Slippers so he could bring Dane her present.",
+    "weakened_archdemon": "Defeated the weakened archdemon and received an Orb from Dane.",
+    "dragonmother": "Descended into Lonesome Dragon with Demodras' claw and slew Demodras.",
+    "lost_oracle": "Returned the Spectral Stone to The Oracle, survived its wrath, and received its thanks.",
+    "hellgate_part_1": "Received Key 3012 from Elathriel and cleared the Hellgate Treasure Room with him."
+  },
+  "sealTranscripts": [
+    {
+      "incomplete": "Wander to the surface and fill the cracks with the green blood to seal the first.",
+      "complete": "Seal I has been sealed."
+    },
+    {
+      "incomplete": "A lever is hidden among the bookshelves.",
+      "complete": "Seal II has been sealed."
+    },
+    {
+      "incomplete": "You must activate the runewords in the ritual site.",
+      "complete": "Seal III has been sealed."
+    },
+    {
+      "incomplete": "You must defeat the hellish skeletons in a timely manner to complete the fourth seal.",
+      "complete": "Seal IV has been sealed."
+    },
+    {
+      "incomplete": "Find the lever in the Throne of the Destroyer to complete the seal.",
+      "complete": "Seal V has been sealed."
+    },
+    {
+      "incomplete": "Leverage yourself in the Seal of the Demonrage in the correct order.",
+      "complete": "Seal VI has been sealed."
+    },
+    {
+      "incomplete": "When the sixth seal is sealed, a portal opens in the Demonrage. Step through to face the last.",
+      "complete": "Seal VII has been sealed."
+    }
+  ],
+  "registry": {
+    "_comment": "storyOrder drives Quest Log / Dev Tools. stateKey → kingChatState property. firebaseKey → Firebase progress blob. extraFields schema drives getExtraMissionProgressFields.",
+    "storyOrder": [
+      "king_honeyflower",
+      "king_crossing_the_line",
+      "king_copper_key",
+      "king_red_dragon",
+      "dragonmother",
+      "king_letter_al_dee",
+      "al_dee_fishing_gold",
+      "al_dee_golden_rope",
+      "al_dee_rookie_guard",
+      "king_monks_study",
+      "costello_queen_banshees",
+      "follower_of_zathroth",
+      "mother_of_all_spiders",
+      "jakundaf_desert",
+      "tainted_souls",
+      "king_scarab_coin",
+      "serpentine_tower",
+      "apprentice_sheng",
+      "christmas_miracle",
+      "svenson_love_story",
+      "weakened_archdemon",
+      "lost_oracle",
+      "hellgate_part_1"
+    ],
+    "missions": {
+      "king_honeyflower": {
+        "stateKey": "progressHoneyflower",
+        "firebaseKey": "honeyflower",
+        "extraFields": [
+          "honeyflowerPicked"
+        ]
+      },
+      "king_crossing_the_line": {
+        "stateKey": "progressCrossingTheLine",
+        "firebaseKey": "crossingTheLine",
+        "extraFields": [
+          "crossingObjectiveComplete"
+        ]
+      },
+      "king_copper_key": {
+        "stateKey": "progressCopper",
+        "firebaseKey": "copper"
+      },
+      "king_red_dragon": {
+        "stateKey": "progressDragon",
+        "firebaseKey": "dragon"
+      },
+      "dragonmother": {
+        "stateKey": "progressDragonmother",
+        "firebaseKey": "dragonmother"
+      },
+      "king_letter_al_dee": {
+        "stateKey": "progressLetter",
+        "firebaseKey": "letter"
+      },
+      "al_dee_fishing_gold": {
+        "stateKey": "progressAlDeeFishing",
+        "firebaseKey": "alDeeFishing"
+      },
+      "al_dee_golden_rope": {
+        "stateKey": "progressAlDeeGoldenRope",
+        "firebaseKey": "alDeeGoldenRope"
+      },
+      "al_dee_rookie_guard": {
+        "stateKey": "progressAlDeeRookieGuard",
+        "firebaseKey": "alDeeRookieGuard",
+        "extraFields": [
+          "battleCompleted"
+        ]
+      },
+      "king_monks_study": {
+        "stateKey": "progressMonksStudy",
+        "firebaseKey": "monksStudy"
+      },
+      "costello_queen_banshees": {
+        "stateKey": "progressQueenBanshees",
+        "firebaseKey": "queenBanshees"
+      },
+      "follower_of_zathroth": {
+        "stateKey": "progressFollowerOfZathroth",
+        "firebaseKey": "followerOfZathroth"
+      },
+      "mother_of_all_spiders": {
+        "stateKey": "progressMotherOfAllSpiders",
+        "firebaseKey": "motherOfAllSpiders"
+      },
+      "jakundaf_desert": {
+        "stateKey": "progressJakundafDesert",
+        "firebaseKey": "jakundafDesert",
+        "extraFields": [
+          "pathCleared"
+        ]
+      },
+      "tainted_souls": {
+        "stateKey": "progressTaintedSouls",
+        "firebaseKey": "taintedSouls",
+        "extraFields": [
+          "portalOpened",
+          "battleCompleted"
+        ]
+      },
+      "king_scarab_coin": {
+        "stateKey": "progressScarabHunt",
+        "firebaseKey": "scarabHunt"
+      },
+      "serpentine_tower": {
+        "stateKey": "progressSerpentineTower",
+        "firebaseKey": "serpentineTower",
+        "extraFields": [
+          "destroyFieldRuneTaken",
+          "putridChamberComplete"
+        ]
+      },
+      "apprentice_sheng": {
+        "stateKey": "progressApprenticeSheng",
+        "firebaseKey": "apprenticeSheng",
+        "extraFields": [
+          "battleCompleted",
+          "rookstayerDismissed"
+        ]
+      },
+      "christmas_miracle": {
+        "stateKey": "progressChristmasMiracle",
+        "firebaseKey": "christmasMiracle"
+      },
+      "svenson_love_story": {
+        "stateKey": "progressSvensonLoveStory",
+        "firebaseKey": "svensonLoveStory",
+        "extraFields": [
+          "plankDelivered",
+          "strandedAtAwash",
+          "awashYarnDelivered",
+          "awashYarnRequested",
+          "strandedAtUnderground",
+          "undergroundCompassDelivered",
+          "undergroundCompassRequested",
+          "strandedAtWhiteWave",
+          "whiteWaveSlippersDelivered"
+        ],
+        "forceExtraFieldsWhenCompleted": true,
+        "extraFieldAliases": {
+          "undergroundCompassDelivered": [
+            "undergroundPlankDelivered"
+          ]
+        }
+      },
+      "weakened_archdemon": {
+        "stateKey": "progressWeakenedArchdemon",
+        "firebaseKey": "weakenedArchdemon",
+        "extraFields": [
+          "battleCompleted"
+        ]
+      },
+      "lost_oracle": {
+        "stateKey": "progressLostOracle",
+        "firebaseKey": "lostOracle",
+        "extraFields": [
+          "askedNpcs",
+          "kingInformed",
+          "orbExchanged",
+          "spectralStoneReceived",
+          "oracleEnraged",
+          "battleCompleted",
+          "oracleDismissed"
+        ]
+      },
+      "hellgate_part_1": {
+        "stateKey": "progressHellgatePart1",
+        "firebaseKey": "hellgatePart1",
+        "extraFields": [
+          "battleCompleted"
+        ]
+      }
+    }
+  }
+}

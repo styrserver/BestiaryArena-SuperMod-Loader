@@ -1,0 +1,1389 @@
+{
+  "_sections": {
+    "products": "1. Quest product / item definitions (canonical inventory names)",
+    "creatureDrops": "2. Creature gameId → quest item drops",
+    "rookgaardGlobal": "3. Rookgaard region shared drop pool",
+    "questItemChatEntries": "4. NPC chat keyword → quest item ids",
+    "questLogIcons": "5. Quest Log mission card icon filenames",
+    "questLogSpriteIcons": "6. Quest Log mission card board sprite ids",
+    "devTools": "7. Quest Dev Tools grantable items (story order). Add new grantables here — keys auto-wire into Dev Tools.",
+    "itemLifecycle": "8. Item cleanup / stale / Dev complete-all reward rules (productId → products{})"
+  },
+  "products": {
+    "silverToken": {
+      "productName": "Silver Token",
+      "icon": "Silver_Token.gif",
+      "description": "A small silver coin used to greet King Tibianus.",
+      "rarity": 4
+    },
+    "scarabCoin": {
+      "productName": "Scarab Coin",
+      "icon": "Scarab_Coin.gif",
+      "description": "You see a scarab coin.",
+      "rarity": 3,
+      "maxCount": 1
+    },
+    "destroyFieldRune": {
+      "productName": "Destroy Field Rune",
+      "spriteId": 3148,
+      "iconUrl": "https://bestiaryarena.com/assets/ITEM/3148.png",
+      "description": "You see a destroy field rune (\"adito grav\").",
+      "rarity": 3,
+      "maxCount": 1
+    },
+    "scorpionSceptre": {
+      "productName": "Compass",
+      "icon": "The_Time_Compass.gif",
+      "description": "It shows the cardinal directions and also many other symbols that you cannot decipher.",
+      "rarity": 5,
+      "maxCount": 1
+    },
+    "honeyflower": {
+      "productName": "Honeyflower",
+      "spriteId": 2984,
+      "iconUrl": "https://bestiaryarena.com/assets/ITEM/2984.png",
+      "description": "A fragrant honeyflower plucked fresh from the tower.",
+      "rarity": 2
+    },
+    "minotaurTrophy": {
+      "productName": "Wooden Plank",
+      "spriteId": 5300,
+      "iconUrl": "https://bestiaryarena.com/assets/ITEM/5300.png",
+      "description": "A sturdy wooden plank from the battle wreckage.",
+      "rarity": 5,
+      "maxCount": 1
+    },
+    "orb": {
+      "productName": "Orb",
+      "icon": "Orb.gif",
+      "description": "A mysterious glowing orb pulsing with ancient power.",
+      "rarity": 5,
+      "maxCount": 1
+    },
+    "luminousOrb": {
+      "productName": "Luminous Orb",
+      "icon": "Luminous_Orb.gif",
+      "description": "An orb transformed by royal rite — it glows with strange, restless light.",
+      "rarity": 5,
+      "maxCount": 1
+    },
+    "spectralStone": {
+      "productName": "Spectral Stone",
+      "icon": "Life_Crystal.gif",
+      "description": "It is pulsating with spectral energy.",
+      "rarity": 5,
+      "maxCount": 1
+    },
+    "copperKey": {
+      "productName": "Copper Key",
+      "icon": "Copper_Key.png",
+      "targetRoomName": "Mine Hub",
+      "targetMonsterName": "Corym Charlatan",
+      "targetTileIndex": 69,
+      "description": "A very ornate key, made of solid copper.",
+      "rarity": 2
+    },
+    "mapColour": {
+      "productName": "Map to the Mines",
+      "icon": "Map_(Colour).png",
+      "description": "The map shows the way to the mines in Kazoordoon.",
+      "rarity": 1
+    },
+    "wishlist": {
+      "productName": "Wishlist",
+      "icon": "Wishlist.gif",
+      "dropChance": 0.01,
+      "description": "A crumpled wishlist. Someone in Folda might be interested.",
+      "rarity": 2
+    },
+    "present": {
+      "productName": "Present",
+      "spriteId": 6505,
+      "iconUrl": "https://bestiaryarena.com/assets/ITEM/6505.png",
+      "description": "A carefully wrapped Christmas present. Open it to see what is inside.",
+      "rarity": 3
+    },
+    "bunnySlippers": {
+      "productName": "Bunny Slippers",
+      "icon": "Bunnyslippers.gif",
+      "description": "Soft pink bunny slippers. A gift from Santa Claus.",
+      "rarity": 3
+    },
+    "redDragonLeather": {
+      "productName": "Red Dragon Leather",
+      "icon": "Red_Dragon_Leather.png",
+      "description": "Obtained by defeating Dragon Lord",
+      "rarity": 4
+    },
+    "redDragonScale": {
+      "productName": "Red Dragon Scale",
+      "icon": "Red_Dragon_Scale.png",
+      "description": "Obtained by defeating Dragon Lord",
+      "rarity": 4
+    },
+    "letterFromAlDee": {
+      "productName": "Letter from Al Dee",
+      "spriteId": 2815,
+      "iconUrl": "https://bestiaryarena.com/assets/ITEM/2815.png",
+      "description": "Feeling lost?\nWould you give all your gold for a rope now?\nAl Dee's shop - come to where the ropes are!",
+      "rarity": 1
+    },
+    "stampedLetter": {
+      "productName": "Stamped Letter",
+      "spriteId": 3220,
+      "iconUrl": "https://bestiaryarena.com/assets/ITEM/3220.png",
+      "description": "A letter stamped by King Tibianus himself, ready for delivery.",
+      "rarity": 1
+    },
+    "ironOre": {
+      "productName": "Iron Ore",
+      "icon": "Iron_Ore.gif",
+      "description": "A chunk of iron ore, useful for crafting and forging.",
+      "rarity": 2
+    },
+    "smallAxe": {
+      "productName": "Small Axe",
+      "spriteId": 3462,
+      "iconUrl": "https://bestiaryarena.com/assets/ITEM/3462.png",
+      "description": "A small but sturdy axe, useful for chopping wood and combat.",
+      "rarity": 2
+    },
+    "magnet": {
+      "productName": "Magnet",
+      "icon": "Magnet.gif",
+      "description": "A powerful magnet that can attract metal objects from afar.",
+      "rarity": 3
+    },
+    "fishingRod": {
+      "productName": "Fishing Rod",
+      "spriteId": 3483,
+      "iconUrl": "https://bestiaryarena.com/assets/ITEM/3483.png",
+      "description": "A sturdy fishing rod perfect for catching fish in local waters.",
+      "rarity": 2
+    },
+    "lightShovel": {
+      "productName": "Light Shovel",
+      "spriteId": 5710,
+      "iconUrl": "https://bestiaryarena.com/assets/ITEM/5710.png",
+      "description": "Lighter than a shovel.",
+      "rarity": 4
+    },
+    "obsidianKnife": {
+      "productName": "Obsidian Knife",
+      "spriteId": 5908,
+      "iconUrl": "https://bestiaryarena.com/assets/ITEM/5908.png",
+      "description": "Sharp and light, this is a useful tool for tanners, doctors and assassins.",
+      "rarity": 3
+    },
+    "dragonClaw": {
+      "productName": "Dragon Claw",
+      "icon": "Dragon_Claw.gif",
+      "description": "It is the claw of Demodras.",
+      "rarity": 5
+    },
+    "bosstiary": {
+      "productName": "Bosstiary",
+      "icon": "Bosstiary_Icon.gif",
+      "description": "You see a bosstiary.\nIt holds soul cores from bosses you have defeated.",
+      "rarity": 0,
+      "maxCount": 1,
+      "opensContainer": "soulCores"
+    },
+    "goldenMug": {
+      "productName": "Demodras Soul Core",
+      "icon": "Demodras_Soul_Core.gif",
+      "rarity": 0,
+      "maxCount": 1,
+      "soulCore": true
+    },
+    "oldWidowSoulCore": {
+      "productName": "The Old Widow Soul Core",
+      "icon": "The_Old_Widow_Soul_Core.gif",
+      "rarity": 0,
+      "maxCount": 1,
+      "soulCore": true
+    },
+    "knarknaknorkSoulCore": {
+      "productName": "Knarknaknork Soul Core",
+      "icon": "Knarknaknork_Soul_Core.gif",
+      "rarity": 0,
+      "maxCount": 1,
+      "soulCore": true
+    },
+    "ekatrixSoulCore": {
+      "productName": "Ekatrix Soul Core",
+      "icon": "Ekatrix_Soul_Core.gif",
+      "rarity": 0,
+      "maxCount": 1,
+      "soulCore": true
+    },
+    "ghazbaranSoulCore": {
+      "productName": "Weakened Ghazbaran Soul Core",
+      "icon": "Weakened_Ghazbaran_Soul_Core.gif",
+      "rarity": 0,
+      "maxCount": 1,
+      "soulCore": true
+    },
+    "mornenionSoulCore": {
+      "productName": "Mornenion Soul Core",
+      "icon": "Mornenion_Soul_Core.gif",
+      "rarity": 0,
+      "maxCount": 1,
+      "soulCore": true
+    },
+    "apprenticeShengSoulCore": {
+      "productName": "Apprentice Sheng Soul Core",
+      "icon": "Apprentice_Sheng_Soul_Core.gif",
+      "rarity": 0,
+      "maxCount": 1,
+      "soulCore": true
+    },
+    "elvenhairRope": {
+      "productName": "Elvenhair Rope",
+      "icon": "Elvenhair_Rope.gif",
+      "description": "A magical rope made from elven hair, said to lead to great treasures.",
+      "rarity": 5
+    },
+    "holyTible": {
+      "productName": "The Holy Tible",
+      "icon": "The_Holy_Tible.png",
+      "description": "A sacred tome containing ancient wisdom and divine knowledge.",
+      "rarity": 5
+    },
+    "costelloDiary": {
+      "productName": "Costello's diary",
+      "spriteId": 2821,
+      "iconUrl": "https://bestiaryarena.com/assets/ITEM/2821.png",
+      "description": "A diary documenting the seven seals.",
+      "rarity": 5
+    },
+    "blessedAnkh": {
+      "productName": "Blessed Ankh",
+      "spriteId": 3214,
+      "iconUrl": "https://bestiaryarena.com/assets/ITEM/3214.png",
+      "description": "A blessed ankh radiating holy energy.",
+      "rarity": 5
+    },
+    "spiderSilk": {
+      "productName": "Spider Silk",
+      "icon": "Spider_Silk.gif",
+      "description": "Fine silk from the mother of all spiders.",
+      "rarity": 2
+    },
+    "spoolOfYarn": {
+      "productName": "Spool of Yarn",
+      "icon": "Spool_of_Yarn.gif",
+      "description": "A spool of yarn spun from spider silk.",
+      "rarity": 5
+    },
+    "stuffedToad": {
+      "productName": "Stuffed Toad",
+      "spriteId": 10294,
+      "iconUrl": "https://bestiaryarena.com/assets/ITEM/10294.png",
+      "description": "You see a stuffed toad.",
+      "rarity": 5,
+      "maxCount": 1
+    },
+    "key3012": {
+      "productName": "Key 3012",
+      "spriteId": 2970,
+      "iconUrl": "https://bestiaryarena.com/assets/ITEM/2970.png",
+      "description": "Used for locking and unlocking the main doors to Hellgate.",
+      "rarity": 2,
+      "maxCount": 1
+    },
+    "bewareOfTheBonelordsBook": {
+      "productName": "Beware of the Bonelords (Book)",
+      "spriteId": 2821,
+      "iconUrl": "https://bestiaryarena.com/assets/ITEM/2821.png",
+      "description": "Exposition on Bonelord, their location, their language, and their motives.",
+      "rarity": 3,
+      "maxCount": 1
+    },
+    "lootEffect": {
+      "filename": "Loot_Effect.gif",
+      "size": 48,
+      "durationMs": 1000
+    }
+  },
+  "creatureDrops": {
+    "26": {
+      "creatureName": "Dragon Lord",
+      "products": [
+        {
+          "name": "Red Dragon Leather",
+          "icon": "Red_Dragon_Leather.png",
+          "dropChance": 0.25,
+          "description": "Obtained by defeating Dragon Lord",
+          "rarity": 4
+        },
+        {
+          "name": "Red Dragon Scale",
+          "icon": "Red_Dragon_Scale.png",
+          "dropChance": 0.25,
+          "description": "Obtained by defeating Dragon Lord",
+          "rarity": 4
+        }
+      ]
+    }
+  },
+  "rookgaardGlobal": {
+    "poolDropChance": 0.01,
+    "drops": [
+      {
+        "name": "Letter from Al Dee",
+        "spriteId": 2815,
+        "iconUrl": "https://bestiaryarena.com/assets/ITEM/2815.png",
+        "description": "Feeling lost?\nWould you give all your gold for a rope now?\nAl Dee's shop - come to where the ropes are!",
+        "rarity": 1
+      },
+      {
+        "name": "Iron Ore",
+        "icon": "Iron_Ore.gif",
+        "description": "A chunk of iron ore, useful for crafting and forging.",
+        "rarity": 2
+      }
+    ]
+  },
+  "questItemChatEntries": [
+    {
+      "id": "letter_from_al_dee",
+      "productName": "Letter from Al Dee",
+      "keywords": [
+        "letter from al dee"
+      ]
+    },
+    {
+      "id": "stamped_letter",
+      "productName": "Stamped Letter",
+      "keywords": [
+        "stamped letter"
+      ]
+    },
+    {
+      "id": "red_dragon_leather",
+      "productName": "Red Dragon Leather",
+      "keywords": [
+        "red dragon leather",
+        "dragon leather"
+      ]
+    },
+    {
+      "id": "red_dragon_scale",
+      "productName": "Red Dragon Scale",
+      "keywords": [
+        "red dragon scale",
+        "dragon scale"
+      ]
+    },
+    {
+      "id": "elvenhair_rope",
+      "productName": "Elvenhair Rope",
+      "keywords": [
+        "elvenhair rope",
+        "elven hair rope"
+      ]
+    },
+    {
+      "id": "destroy_field_rune",
+      "productName": "Destroy Field Rune",
+      "keywords": [
+        "destroy field rune",
+        "adito grav"
+      ]
+    },
+    {
+      "id": "compass",
+      "productName": "Compass",
+      "keywords": [
+        "compass"
+      ]
+    },
+    {
+      "id": "scarab_coin",
+      "productName": "Scarab Coin",
+      "keywords": [
+        "scarab coin"
+      ]
+    },
+    {
+      "id": "map_to_mines",
+      "productName": "Map to the Mines",
+      "keywords": [
+        "map to the mines",
+        "map to mines"
+      ]
+    },
+    {
+      "id": "obsidian_knife",
+      "productName": "Obsidian Knife",
+      "keywords": [
+        "obsidian knife"
+      ]
+    },
+    {
+      "id": "light_shovel",
+      "productName": "Light Shovel",
+      "keywords": [
+        "light shovel"
+      ]
+    },
+    {
+      "id": "holy_tible",
+      "productName": "The Holy Tible",
+      "keywords": [
+        "holy tible",
+        "the holy tible"
+      ]
+    },
+    {
+      "id": "costello_diary",
+      "productName": "Costello's diary",
+      "keywords": [
+        "costello's diary",
+        "costellos diary",
+        "castello's diary",
+        "castellos diary"
+      ]
+    },
+    {
+      "id": "blessed_ankh",
+      "productName": "Blessed Ankh",
+      "keywords": [
+        "blessed ankh"
+      ]
+    },
+    {
+      "id": "spider_silk",
+      "productName": "Spider Silk",
+      "keywords": [
+        "spider silk"
+      ]
+    },
+    {
+      "id": "spool_of_yarn",
+      "productName": "Spool of Yarn",
+      "keywords": [
+        "spool of yarn"
+      ]
+    },
+    {
+      "id": "stuffed_toad",
+      "productName": "Stuffed Toad",
+      "keywords": [
+        "stuffed toad"
+      ]
+    },
+    {
+      "id": "bunny_slippers",
+      "productName": "Bunny Slippers",
+      "keywords": [
+        "bunny slippers",
+        "bunnyslippers"
+      ]
+    },
+    {
+      "id": "wooden_plank",
+      "productName": "Wooden Plank",
+      "keywords": [
+        "wooden plank",
+        "plank"
+      ]
+    },
+    {
+      "id": "dragon_claw",
+      "productName": "Dragon Claw",
+      "keywords": [
+        "dragon claw"
+      ]
+    },
+    {
+      "id": "golden_mug",
+      "productName": "Demodras Soul Core",
+      "keywords": [
+        "demodras soul core",
+        "soul core",
+        "golden mug",
+        "gold mug"
+      ]
+    },
+    {
+      "id": "old_widow_soul_core",
+      "productName": "The Old Widow Soul Core",
+      "keywords": [
+        "old widow soul core",
+        "widow soul core",
+        "the old widow soul core"
+      ]
+    },
+    {
+      "id": "ekatrix_soul_core",
+      "productName": "Ekatrix Soul Core",
+      "keywords": [
+        "ekatrix soul core",
+        "witch soul core"
+      ]
+    },
+    {
+      "id": "bosstiary",
+      "productName": "Bosstiary",
+      "keywords": [
+        "bosstiary"
+      ]
+    },
+    {
+      "id": "fishing_rod",
+      "productName": "Fishing Rod",
+      "keywords": [
+        "fishing rod"
+      ]
+    },
+    {
+      "id": "silver_token",
+      "productName": "Silver Token",
+      "keywords": [
+        "silver token"
+      ]
+    },
+    {
+      "id": "copper_key",
+      "productName": "Copper Key",
+      "keywords": [
+        "copper key"
+      ]
+    },
+    {
+      "id": "honeyflower",
+      "productName": "Honeyflower",
+      "keywords": [
+        "honeyflower",
+        "honey flower"
+      ]
+    },
+    {
+      "id": "iron_ore",
+      "productName": "Iron Ore",
+      "keywords": [
+        "iron ore"
+      ]
+    },
+    {
+      "id": "small_axe",
+      "productName": "Small Axe",
+      "keywords": [
+        "small axe"
+      ]
+    },
+    {
+      "id": "magnet",
+      "productName": "Magnet",
+      "keywords": [
+        "magnet"
+      ]
+    },
+    {
+      "id": "wishlist",
+      "productName": "Wishlist",
+      "keywords": [
+        "wishlist",
+        "wish list"
+      ]
+    },
+    {
+      "id": "christmas_present",
+      "productName": "Present",
+      "keywords": [
+        "christmas present",
+        "wrapped present"
+      ]
+    },
+    {
+      "id": "present",
+      "productName": "Present",
+      "keywords": [
+        "present"
+      ]
+    },
+    {
+      "id": "yarn",
+      "productName": "Spool of Yarn",
+      "keywords": [
+        "yarn"
+      ]
+    },
+    {
+      "id": "orb",
+      "productName": "Orb",
+      "keywords": [
+        "orb"
+      ]
+    },
+    {
+      "id": "luminous_orb",
+      "productName": "Luminous Orb",
+      "keywords": [
+        "luminous orb",
+        "luminous"
+      ]
+    },
+    {
+      "id": "spectral_stone",
+      "productName": "Spectral Stone",
+      "keywords": [
+        "spectral stone",
+        "spectral"
+      ]
+    }
+  ],
+  "questLogIcons": {
+    "king_copper_key": "Copper_Key.png",
+    "king_red_dragon": "Red_Dragon_Leather.png",
+    "dragonmother": "Demodras_Soul_Core.gif",
+    "al_dee_golden_rope": "Elvenhair_Rope.gif",
+    "al_dee_rookie_guard": "Knarknaknork_Soul_Core.gif",
+    "king_monks_study": "The_Holy_Tible.png",
+    "mother_of_all_spiders": "Spider_Silk.gif",
+    "tainted_souls": "Ekatrix_Soul_Core.gif",
+    "king_scarab_coin": "Scarab_Coin.gif",
+    "christmas_miracle": "Wishlist.gif",
+    "svenson_love_story": "Spool_of_Yarn.gif",
+    "weakened_archdemon": "Orb.gif",
+    "lost_oracle": "Life_Crystal.gif"
+  },
+  "questLogSpriteIcons": {
+    "king_crossing_the_line": 3538,
+    "king_honeyflower": 2984,
+    "serpentine_tower": 3148,
+    "costello_queen_banshees": 2821,
+    "king_letter_al_dee": 2815,
+    "al_dee_fishing_gold": 3462,
+    "follower_of_zathroth": 3214,
+    "jakundaf_desert": 10294,
+    "apprentice_sheng": 5300
+  },
+  "devTools": {
+    "_comment": "Story-ordered grantable items for Quest Dev Tools. productId links to products{} for live names. receivedBefore rules: anyMissionAcceptedOrCompleted | missionCompleted | missionAcceptedOrCompleted | receivedFlagOrMissionCompleted | receivedFlagOrMissionAcceptedOrCompleted | missionFieldOrCompleted | missionAnyField | anyOf.",
+    "items": [
+      {
+        "key": "silverToken",
+        "productId": "silverToken",
+        "receivedBefore": {
+          "type": "anyMissionAcceptedOrCompleted"
+        }
+      },
+      {
+        "key": "honeyflower",
+        "productId": "honeyflower",
+        "receivedBefore": {
+          "type": "missionFieldOrCompleted",
+          "missionId": "king_honeyflower",
+          "field": "honeyflowerPicked"
+        }
+      },
+      {
+        "key": "copperKey",
+        "productId": "copperKey",
+        "receivedBefore": {
+          "type": "receivedFlagOrMissionCompleted",
+          "flag": "copperKey",
+          "missionId": "king_copper_key"
+        }
+      },
+      {
+        "key": "mapToMines",
+        "productId": "mapColour",
+        "receivedBefore": {
+          "type": "missionAcceptedOrCompleted",
+          "missionId": "king_copper_key"
+        }
+      },
+      {
+        "key": "obsidianKnife",
+        "productId": "obsidianKnife",
+        "receivedBefore": {
+          "type": "missionAcceptedOrCompleted",
+          "missionId": "king_red_dragon"
+        }
+      },
+      {
+        "key": "scale",
+        "productId": "redDragonScale",
+        "grantAmount": 30,
+        "receivedBefore": {
+          "type": "missionCompleted",
+          "missionId": "king_red_dragon"
+        }
+      },
+      {
+        "key": "leather",
+        "productId": "redDragonLeather",
+        "grantAmount": 30,
+        "receivedBefore": {
+          "type": "missionCompleted",
+          "missionId": "king_red_dragon"
+        }
+      },
+      {
+        "key": "dragonClaw",
+        "productId": "dragonClaw",
+        "receivedBefore": {
+          "type": "missionCompleted",
+          "missionId": "king_red_dragon"
+        }
+      },
+      {
+        "key": "goldenMug",
+        "productId": "goldenMug",
+        "receivedBefore": {
+          "type": "missionCompleted",
+          "missionId": "dragonmother"
+        }
+      },
+      {
+        "key": "oldWidowSoulCore",
+        "productId": "oldWidowSoulCore",
+        "receivedBefore": {
+          "type": "missionCompleted",
+          "missionId": "mother_of_all_spiders"
+        }
+      },
+      {
+        "key": "ekatrixSoulCore",
+        "productId": "ekatrixSoulCore",
+        "receivedBefore": {
+          "type": "missionCompleted",
+          "missionId": "tainted_souls"
+        }
+      },
+      {
+        "key": "bosstiary",
+        "productId": "bosstiary",
+        "receivedBefore": {
+          "type": "anyOf",
+          "rules": [
+            {
+              "type": "missionCompleted",
+              "missionId": "dragonmother"
+            },
+            {
+              "type": "missionCompleted",
+              "missionId": "mother_of_all_spiders"
+            },
+            {
+              "type": "missionCompleted",
+              "missionId": "tainted_souls"
+            }
+          ]
+        }
+      },
+      {
+        "key": "letter",
+        "productId": "letterFromAlDee",
+        "receivedBefore": {
+          "type": "receivedFlagOrMissionAcceptedOrCompleted",
+          "flag": "letter",
+          "missionId": "king_letter_al_dee"
+        }
+      },
+      {
+        "key": "stampedLetter",
+        "productId": "stampedLetter",
+        "receivedBefore": {
+          "type": "missionCompleted",
+          "missionId": "king_letter_al_dee"
+        }
+      },
+      {
+        "key": "fishingRod",
+        "productId": "fishingRod",
+        "receivedBefore": {
+          "type": "missionAcceptedOrCompleted",
+          "missionId": "al_dee_fishing_gold"
+        }
+      },
+      {
+        "key": "ironOre",
+        "productId": "ironOre",
+        "receivedBefore": {
+          "type": "receivedFlagOrMissionAcceptedOrCompleted",
+          "flag": "ironOre",
+          "missionId": "al_dee_fishing_gold"
+        }
+      },
+      {
+        "key": "magnet",
+        "productId": "magnet",
+        "receivedBefore": {
+          "type": "missionAcceptedOrCompleted",
+          "missionId": "al_dee_fishing_gold"
+        }
+      },
+      {
+        "key": "smallAxe",
+        "productId": "smallAxe",
+        "receivedBefore": {
+          "type": "missionAcceptedOrCompleted",
+          "missionId": "al_dee_fishing_gold"
+        }
+      },
+      {
+        "key": "lightShovel",
+        "productId": "lightShovel",
+        "receivedBefore": {
+          "type": "missionCompleted",
+          "missionId": "al_dee_fishing_gold"
+        }
+      },
+      {
+        "key": "elvenhairRope",
+        "productId": "elvenhairRope",
+        "receivedBefore": {
+          "type": "missionAcceptedOrCompleted",
+          "missionId": "al_dee_golden_rope"
+        }
+      },
+      {
+        "key": "holyTible",
+        "productId": "holyTible",
+        "receivedBefore": {
+          "type": "missionCompleted",
+          "missionId": "al_dee_golden_rope"
+        }
+      },
+      {
+        "key": "mornenionSoulCore",
+        "productId": "mornenionSoulCore",
+        "receivedBefore": {
+          "type": "missionCompleted",
+          "missionId": "al_dee_golden_rope"
+        }
+      },
+      {
+        "key": "knarknaknorkSoulCore",
+        "productId": "knarknaknorkSoulCore",
+        "receivedBefore": {
+          "type": "missionCompleted",
+          "missionId": "al_dee_rookie_guard"
+        }
+      },
+      {
+        "key": "diary",
+        "productId": "costelloDiary",
+        "receivedBefore": {
+          "type": "missionAcceptedOrCompleted",
+          "missionId": "costello_queen_banshees"
+        }
+      },
+      {
+        "key": "blessedAnkh",
+        "productId": "blessedAnkh",
+        "receivedBefore": {
+          "type": "missionCompleted",
+          "missionId": "costello_queen_banshees"
+        }
+      },
+      {
+        "key": "spiderSilk",
+        "productId": "spiderSilk",
+        "receivedBefore": {
+          "type": "missionAcceptedOrCompleted",
+          "missionId": "mother_of_all_spiders"
+        }
+      },
+      {
+        "key": "spoolOfYarn",
+        "productId": "spoolOfYarn",
+        "receivedBefore": {
+          "type": "anyOf",
+          "rules": [
+            {
+              "type": "missionCompleted",
+              "missionId": "mother_of_all_spiders"
+            },
+            {
+              "type": "missionAnyField",
+              "missionId": "svenson_love_story",
+              "fields": [
+                "awashYarnDelivered",
+                "awashYarnRequested",
+                "strandedAtUnderground"
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "key": "stuffedToad",
+        "productId": "stuffedToad",
+        "receivedBefore": {
+          "type": "missionCompleted",
+          "missionId": "jakundaf_desert"
+        }
+      },
+      {
+        "key": "scarabCoin",
+        "productId": "scarabCoin",
+        "receivedBefore": {
+          "type": "missionAcceptedOrCompleted",
+          "missionId": "king_scarab_coin"
+        }
+      },
+      {
+        "key": "destroyFieldRune",
+        "productId": "destroyFieldRune",
+        "receivedBefore": {
+          "type": "missionFieldOrCompleted",
+          "missionId": "serpentine_tower",
+          "field": "destroyFieldRuneTaken"
+        }
+      },
+      {
+        "key": "compass",
+        "productId": "scorpionSceptre",
+        "receivedBefore": {
+          "type": "anyOf",
+          "rules": [
+            {
+              "type": "missionCompleted",
+              "missionId": "serpentine_tower"
+            },
+            {
+              "type": "missionAnyField",
+              "missionId": "svenson_love_story",
+              "fields": [
+                "undergroundCompassDelivered",
+                "undergroundCompassRequested",
+                "strandedAtWhiteWave"
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "key": "woodenPlank",
+        "productId": "minotaurTrophy",
+        "receivedBefore": {
+          "type": "anyOf",
+          "rules": [
+            {
+              "type": "missionCompleted",
+              "missionId": "apprentice_sheng"
+            },
+            {
+              "type": "missionAnyField",
+              "missionId": "svenson_love_story",
+              "fields": [
+                "plankDelivered",
+                "accepted",
+                "completed"
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "key": "apprenticeShengSoulCore",
+        "productId": "apprenticeShengSoulCore",
+        "receivedBefore": {
+          "type": "missionCompleted",
+          "missionId": "apprentice_sheng"
+        }
+      },
+      {
+        "key": "wishlist",
+        "productId": "wishlist",
+        "receivedBefore": {
+          "type": "receivedFlagOrMissionAcceptedOrCompleted",
+          "flag": "wishlist",
+          "missionId": "christmas_miracle"
+        }
+      },
+      {
+        "key": "present",
+        "productId": "present",
+        "receivedBefore": {
+          "type": "receivedFlagOrMissionCompleted",
+          "flag": "present",
+          "missionId": "christmas_miracle"
+        }
+      },
+      {
+        "key": "bunnySlippers",
+        "productId": "bunnySlippers",
+        "receivedBefore": {
+          "type": "anyOf",
+          "rules": [
+            {
+              "type": "missionAnyField",
+              "missionId": "svenson_love_story",
+              "fields": [
+                "whiteWaveSlippersDelivered",
+                "completed"
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "key": "orb",
+        "productId": "orb",
+        "receivedBefore": {
+          "type": "missionCompleted",
+          "missionId": "weakened_archdemon"
+        }
+      },
+      {
+        "key": "ghazbaranSoulCore",
+        "productId": "ghazbaranSoulCore",
+        "receivedBefore": {
+          "type": "missionCompleted",
+          "missionId": "weakened_archdemon"
+        }
+      },
+      {
+        "key": "luminousOrb",
+        "productId": "luminousOrb",
+        "receivedBefore": {
+          "type": "missionFieldOrCompleted",
+          "missionId": "lost_oracle",
+          "field": "orbExchanged"
+        }
+      },
+      {
+        "key": "spectralStone",
+        "productId": "spectralStone",
+        "receivedBefore": {
+          "type": "missionFieldOrCompleted",
+          "missionId": "lost_oracle",
+          "field": "spectralStoneReceived"
+        }
+      },
+      {
+        "key": "key3012",
+        "productId": "key3012",
+        "receivedBefore": {
+          "type": "missionAcceptedOrCompleted",
+          "missionId": "hellgate_part_1"
+        }
+      },
+      {
+        "key": "bewareOfTheBonelordsBook",
+        "productId": "bewareOfTheBonelordsBook",
+        "receivedBefore": {
+          "type": "missionCompleted",
+          "missionId": "hellgate_part_1"
+        }
+      }
+    ]
+  },
+  "itemLifecycle": {
+    "_comment": "cleanupRules drive cleanupInvalidQuestItems. staleCleanupOnComplete drives cleanupStaleQuestItemsAfterCompletedMissions. devCompleteRewards drive QuestsDev.completeAll item grants. independentDrop: true = Rookgaard/global drops that must NOT be deleted when the linked mission is not yet accepted (only removeWhenCompleted / staleCleanup apply).",
+    "cleanupRules": [
+      {
+        "productId": "mapColour",
+        "missionId": "king_copper_key",
+        "requiredStatus": "accepted",
+        "removeWhenCompleted": true
+      },
+      {
+        "productId": "copperKey",
+        "missionId": "king_copper_key",
+        "requiredStatus": "accepted",
+        "removeWhenCompleted": true
+      },
+      {
+        "productId": "honeyflower",
+        "missionId": "king_honeyflower",
+        "requiredStatus": "accepted",
+        "removeWhenCompleted": true
+      },
+      {
+        "productId": "obsidianKnife",
+        "missionId": "king_red_dragon",
+        "requiredStatus": "accepted",
+        "removeWhenCompleted": true
+      },
+      {
+        "productId": "redDragonScale",
+        "missionId": "king_red_dragon",
+        "requiredStatus": "accepted",
+        "removeWhenCompleted": true
+      },
+      {
+        "productId": "redDragonLeather",
+        "missionId": "king_red_dragon",
+        "requiredStatus": "accepted",
+        "removeWhenCompleted": true
+      },
+      {
+        "productId": "stampedLetter",
+        "missionId": "king_letter_al_dee",
+        "requiredStatus": "accepted",
+        "removeWhenCompleted": true
+      },
+      {
+        "productId": "letterFromAlDee",
+        "missionId": "king_letter_al_dee",
+        "independentDrop": true,
+        "removeWhenCompleted": true
+      },
+      {
+        "productId": "ironOre",
+        "missionId": "al_dee_fishing_gold",
+        "independentDrop": true,
+        "removeWhenCompleted": true
+      },
+      {
+        "productId": "dragonClaw",
+        "missionId": "king_red_dragon",
+        "requiredStatus": "completed"
+      },
+      {
+        "productId": "magnet",
+        "missionId": "al_dee_fishing_gold",
+        "requiredStatus": "accepted",
+        "removeWhenCompleted": true
+      },
+      {
+        "productId": "smallAxe",
+        "missionId": "al_dee_fishing_gold",
+        "requiredStatus": "accepted",
+        "removeWhenCompleted": true
+      },
+      {
+        "productId": "lightShovel",
+        "missionId": "al_dee_fishing_gold",
+        "requiredStatus": "completed"
+      },
+      {
+        "productId": "elvenhairRope",
+        "missionId": "al_dee_golden_rope",
+        "requiredStatus": "accepted",
+        "removeWhenCompleted": true
+      },
+      {
+        "productId": "holyTible",
+        "missionId": "al_dee_golden_rope",
+        "requiredStatus": "completed"
+      },
+      {
+        "productId": "costelloDiary",
+        "missionId": "costello_queen_banshees",
+        "requiredStatus": "accepted",
+        "removeWhenCompleted": true
+      },
+      {
+        "productId": "spiderSilk",
+        "missionId": "mother_of_all_spiders",
+        "requiredStatus": "accepted",
+        "removeWhenCompleted": true
+      },
+      {
+        "productId": "scarabCoin",
+        "missionId": "king_scarab_coin",
+        "requiredStatus": "accepted",
+        "removeWhenCompleted": true
+      },
+      {
+        "productId": "destroyFieldRune",
+        "missionId": "serpentine_tower",
+        "requiredStatus": "accepted",
+        "removeWhenCompleted": true,
+        "removeWhenPutridChamberComplete": true
+      },
+      {
+        "productId": "scorpionSceptre",
+        "missionId": "serpentine_tower",
+        "requiredStatus": "completed"
+      },
+      {
+        "productId": "wishlist",
+        "missionId": "christmas_miracle",
+        "independentDrop": true,
+        "removeWhenCompleted": true
+      },
+      {
+        "productId": "present",
+        "missionId": "christmas_miracle",
+        "requiredStatus": "accepted",
+        "removeWhenCompleted": true
+      },
+      {
+        "productId": "minotaurTrophy",
+        "missionId": "apprentice_sheng",
+        "requiredStatus": "completed"
+      },
+      {
+        "productId": "orb",
+        "missionId": "weakened_archdemon",
+        "requiredStatus": "completed"
+      },
+      {
+        "productId": "goldenMug",
+        "missionId": "dragonmother",
+        "requiredStatus": "completed"
+      },
+      {
+        "productId": "ekatrixSoulCore",
+        "missionId": "tainted_souls",
+        "requiredStatus": "completed"
+      }
+    ],
+    "staleCleanupOnComplete": [
+      {
+        "productId": "copperKey",
+        "missionId": "king_copper_key"
+      },
+      {
+        "productId": "mapColour",
+        "missionId": "king_copper_key"
+      },
+      {
+        "productId": "redDragonScale",
+        "missionId": "king_red_dragon"
+      },
+      {
+        "productId": "redDragonLeather",
+        "missionId": "king_red_dragon"
+      },
+      {
+        "productId": "obsidianKnife",
+        "missionId": "king_red_dragon"
+      },
+      {
+        "productId": "dragonClaw",
+        "missionId": "dragonmother"
+      },
+      {
+        "productId": "honeyflower",
+        "missionId": "king_honeyflower"
+      },
+      {
+        "productId": "letterFromAlDee",
+        "missionId": "king_letter_al_dee"
+      },
+      {
+        "productId": "stampedLetter",
+        "missionId": "king_letter_al_dee"
+      },
+      {
+        "productId": "magnet",
+        "missionId": "al_dee_fishing_gold"
+      },
+      {
+        "productId": "ironOre",
+        "missionId": "al_dee_fishing_gold"
+      },
+      {
+        "productId": "smallAxe",
+        "missionId": "al_dee_fishing_gold"
+      },
+      {
+        "productId": "elvenhairRope",
+        "missionId": "al_dee_golden_rope"
+      },
+      {
+        "productId": "spiderSilk",
+        "missionId": "mother_of_all_spiders"
+      },
+      {
+        "productId": "costelloDiary",
+        "missionId": "costello_queen_banshees"
+      },
+      {
+        "productId": "scarabCoin",
+        "missionId": "king_scarab_coin"
+      },
+      {
+        "productId": "destroyFieldRune",
+        "missionId": "serpentine_tower"
+      },
+      {
+        "productId": "wishlist",
+        "missionId": "christmas_miracle"
+      },
+      {
+        "productId": "present",
+        "missionId": "christmas_miracle"
+      },
+      {
+        "productId": "minotaurTrophy",
+        "missionId": "svenson_love_story"
+      },
+      {
+        "productId": "spoolOfYarn",
+        "missionId": "svenson_love_story"
+      },
+      {
+        "productId": "scorpionSceptre",
+        "missionId": "svenson_love_story"
+      },
+      {
+        "productId": "bunnySlippers",
+        "missionId": "svenson_love_story"
+      }
+    ],
+    "devCompleteRewards": [
+      {
+        "productId": "dragonClaw",
+        "amount": 1
+      },
+      {
+        "productId": "lightShovel",
+        "amount": 1
+      },
+      {
+        "productId": "holyTible",
+        "amount": 1
+      },
+      {
+        "productId": "costelloDiary",
+        "amount": 1
+      },
+      {
+        "productId": "blessedAnkh",
+        "amount": 1
+      },
+      {
+        "productId": "spoolOfYarn",
+        "amount": 1
+      },
+      {
+        "productId": "stuffedToad",
+        "amount": 1
+      },
+      {
+        "productId": "honeyflower",
+        "amount": 1
+      },
+      {
+        "productId": "minotaurTrophy",
+        "amount": 1
+      },
+      {
+        "productId": "bunnySlippers",
+        "amount": 1
+      },
+      {
+        "productId": "orb",
+        "amount": 1
+      },
+      {
+        "productId": "goldenMug",
+        "amount": 1
+      },
+      {
+        "productId": "oldWidowSoulCore",
+        "amount": 1
+      },
+      {
+        "productId": "ekatrixSoulCore",
+        "amount": 1
+      },
+      {
+        "productId": "bosstiary",
+        "amount": 1
+      }
+    ]
+  }
+}
