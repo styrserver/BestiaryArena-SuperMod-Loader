@@ -50,10 +50,15 @@
   // 2. Maxed-creature logic
   // =======================
 
-  // Non-awakened level cap by tier (game rule). Awakened creatures use tier 6 internally and cap at 99.
-  const TIER_LEVEL_CAP = { 1: 30, 2: 35, 3: 40, 4: 45, 5: 50 };
+  // Non-awakened level cap by star tier (game rule): a star-less creature caps at 30 and every star
+  // it earns raises that by 5, up to 50 at four stars. `monster.tier` IS that star count and it's
+  // 0-based (a 1-star creature is tier 1, capped at 35); tier 5 marks a sealed creature and tier 6
+  // an awakened one, which levels to 99.
+  const TIER_LEVEL_CAP = { 0: 30, 1: 35, 2: 40, 3: 45, 4: 50, 5: 50 };
+  const SEALED_TIER = 5;
   const AWAKENED_TIER = 6;
   const AWAKENED_MAX_LEVEL = 99;
+  const DEFAULT_LEVEL_CAP = 50;
 
   // context.monsters[].level isn't always populated directly — fall back to computing it from exp,
   // same as other bundled mods (e.g. Awaken Tracker) do.
@@ -85,15 +90,22 @@
     return getMonsterName(monster).toLowerCase().includes('gazer');
   }
 
+  // The game omits `tier` entirely for star-less creatures (saves payload space) — absent means zero
+  // stars, not one star. Reading it as 1-based shifted every cap down a tier, which is why starred
+  // creatures counted as maxed (and so vanished from the picker) five levels early.
+  function getMonsterTier(monster) {
+    const tier = Number(monster?.tier);
+    return Number.isFinite(tier) ? tier : 0;
+  }
+
   function isMonsterMaxed(monster) {
     if (!monster) return false;
     const level = getMonsterLevel(monster);
-    // The game omits `tier` entirely for tier-1 creatures (saves payload space) — default to 1, not 0.
-    const tier = Number(monster.tier) || 1;
+    const tier = getMonsterTier(monster);
     if (tier === AWAKENED_TIER) {
       return level >= AWAKENED_MAX_LEVEL;
     }
-    const cap = TIER_LEVEL_CAP[tier] || 50;
+    const cap = TIER_LEVEL_CAP[tier] ?? DEFAULT_LEVEL_CAP;
     return level >= cap;
   }
 
@@ -689,12 +701,16 @@
   // api.ui.components.createMonsterPortrait — which falls back to a crude gray-square placeholder
   // (wrong level, no sprite) whenever window.BestiaryUIComponents hasn't finished loading yet, and
   // since we only build this panel once and cache it, a bad render at that moment stuck permanently.
-  // Real rarity/tier coloring isn't `monster.tier` (that field tracks awaken state, not gene
-  // quality) — it's computed from the summed gene stats, same formula Cyclopedia.js uses for its
-  // owned-creature rarity borders.
-  function computeStatRarity(monster) {
-    const statSum = (Number(monster.hp) || 0) + (Number(monster.ad) || 0) + (Number(monster.ap) || 0)
+  // The rarity border isn't driven by `monster.tier` (that's the star count / awaken state) — it's
+  // computed from the summed gene stats, same formula Cyclopedia.js uses for its owned-creature
+  // rarity borders. The star count is drawn separately, as the corner overlay below.
+  function computeGeneSum(monster) {
+    return (Number(monster.hp) || 0) + (Number(monster.ad) || 0) + (Number(monster.ap) || 0)
       + (Number(monster.armor) || 0) + (Number(monster.magicResist) || 0);
+  }
+
+  function computeStatRarity(monster) {
+    const statSum = computeGeneSum(monster);
     if (statSum >= 80) return 5;
     if (statSum >= 70) return 4;
     if (statSum >= 60) return 3;
@@ -702,12 +718,27 @@
     return 1;
   }
 
+  // Star overlay for the slot's top-right corner, mirroring what the game draws there: `star-tier-N`
+  // for a tier-N creature (nothing at tier 0), the awaken star for awakened copies, and the
+  // shiny/hundo star for level-99 max-gene ones — same precedence Setup_Manager.js uses. Only shiny
+  // creatures used to get an overlay here, so a 4-star creature looked identical to a fresh one.
+  const MAX_GENE_SUM = 100;
+  function getStarTierIconSrc(monster, tier, level) {
+    if (level >= AWAKENED_MAX_LEVEL && computeGeneSum(monster) >= MAX_GENE_SUM) {
+      return monster.shiny === true ? '/assets/icons/star-tier-shiny.png' : '/assets/icons/star-tier-hundo.png';
+    }
+    if (tier === AWAKENED_TIER) return '/assets/icons/star-tier-awaken.png';
+    if (tier > 0) return `/assets/icons/star-tier-${Math.min(SEALED_TIER, tier)}.png`;
+    return null;
+  }
+
   // Small static-portrait style, matching the native inventory/creature-picker button markup
   // (container-slot + portrait image), rather than the larger animated full-monster sprite.
   function buildMonsterPortraitElement(monster, onClick, badgeNumber) {
     const level = getMonsterLevel(monster);
     const isShiny = monster.shiny === true;
-    const isAwakened = Number(monster.tier) === AWAKENED_TIER;
+    const tier = getMonsterTier(monster);
+    const isAwakened = tier === AWAKENED_TIER;
 
     const wrapper = document.createElement('div');
     wrapper.className = 'flex';
@@ -721,10 +752,11 @@
     slot.className = 'container-slot surface-darker relative flex items-center justify-center overflow-hidden pointer-events-none';
     button.appendChild(slot);
 
-    if (isShiny) {
+    const starIconSrc = getStarTierIconSrc(monster, tier, level);
+    if (starIconSrc) {
       const starIcon = document.createElement('img');
       starIcon.alt = 'star tier';
-      starIcon.src = '/assets/icons/star-tier-shiny.png';
+      starIcon.src = starIconSrc;
       starIcon.className = 'tier-stars pixelated absolute right-0 top-0 z-2 opacity-75';
       starIcon.style.cssText = 'filter: drop-shadow(black 0px 0px 1px);';
       slot.appendChild(starIcon);
@@ -823,7 +855,7 @@
       const levelDiff = getMonsterLevel(b) - getMonsterLevel(a);
       if (levelDiff !== 0) return levelDiff;
 
-      const tierDiff = (Number(b.tier) || 1) - (Number(a.tier) || 1);
+      const tierDiff = getMonsterTier(b) - getMonsterTier(a);
       if (tierDiff !== 0) return tierDiff;
 
       return computeStatRarity(b) - computeStatRarity(a);

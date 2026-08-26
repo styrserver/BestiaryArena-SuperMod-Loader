@@ -4,6 +4,16 @@
   },
   "notes": [
     {
+      "version": "4.9.1",
+      "changes": [
+        {
+          "mod": "Better Daycare",
+          "type": "fixed",
+          "text": "Creatures with stars counted as maxed five levels too early — a 1-star creature was treated as done at level 30 instead of 35, and a 4-star at 45 instead of 50 — so they vanished from the eligible list, were dropped from the queue, and got ejected from the Daycare before reaching their real cap; fixed. Queue and picker portraits now also draw the creature's star tier in the slot corner (plus the awakened and shiny/hundo stars), like the game's own creature slots, instead of marking only shinies."
+        }
+      ]
+    },
+    {
       "version": "4.9.0",
       "changes": [
         {

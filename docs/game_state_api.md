@@ -219,7 +219,7 @@ Key properties include:
       "hp": 20,                  // Health points
       "id": "6kAyyQEY",          // Unique ID
       "exp": 11214750,           // Experience
-      "tier": 4,                 // Monster tier
+      "tier": 4,                 // Star tier (see Star Tiers and Level Caps)
       "armor": 20,               // Armor value
       "gameId": 4,               // Game ID (monster type)
       "locked": true,            // Is locked (protected)
@@ -488,6 +488,35 @@ export const expAtLevel = (level: number) => {
   return result - (result % 250);
 };
 ```
+
+#### Star Tiers and Level Caps
+
+A creature's `tier` is its star count, and it is **0-based**: the field is omitted entirely for a star-less creature (treat absent as `0`), so `tier: 1` means one star and `tier: 4` means four stars. Two values above the star range are special: `5` marks a sealed creature and `6` an awakened one.
+
+Each star raises the level cap by 5 on top of the star-less cap of 30, and awakened creatures level to 99:
+
+| `tier` | Stars shown | Level cap |
+| --- | --- | --- |
+| absent / `0` | none | 30 |
+| `1` | ★ | 35 |
+| `2` | ★★ | 40 |
+| `3` | ★★★ | 45 |
+| `4` | ★★★★ | 50 |
+| `5` | sealed | 50 |
+| `6` | awakened | 99 |
+
+```javascript
+const TIER_LEVEL_CAP = { 0: 30, 1: 35, 2: 40, 3: 45, 4: 50, 5: 50 };
+const AWAKENED_TIER = 6;
+
+function getLevelCap(monster) {
+  const tier = Number(monster?.tier);
+  const starTier = Number.isFinite(tier) ? tier : 0;
+  return starTier === AWAKENED_TIER ? 99 : (TIER_LEVEL_CAP[starTier] ?? 50);
+}
+```
+
+Note that `tier` is unrelated to the rarity border on a creature slot — that one is computed from the summed gene stats (`hp + ad + ap + armor + magicResist`). The star overlay in a slot's top-right corner is `/assets/icons/star-tier-<tier>.png`, with `star-tier-awaken.png` for awakened creatures and `star-tier-shiny.png` / `star-tier-hundo.png` for level-99 max-gene copies.
 
 ### Player Flags
 
