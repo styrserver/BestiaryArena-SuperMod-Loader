@@ -304,6 +304,21 @@
       "filename": "Loot_Effect.gif",
       "size": 48,
       "durationMs": 1000
+    },
+    "whiteMushroom": {
+      "productName": "White Mushroom",
+      "spriteId": 3723,
+      "iconUrl": "https://bestiaryarena.com/assets/ITEM/3723.png",
+      "description": "A plain white mushroom, plucked from the floor of the Hellgate Library where the old librarian fell.",
+      "rarity": 1,
+      "maxCount": 1
+    },
+    "dragonfetish": {
+      "productName": "Dragonfetish",
+      "icon": "Dragonfetish.gif",
+      "description": "A charm of knotted dragon-bone and scale, pressed into your hand by the Old Dragonlord of Draconia. It still smells faintly of ash.",
+      "rarity": 4,
+      "maxCount": 1
     }
   },
   "creatureDrops": {
@@ -648,7 +663,8 @@
     "christmas_miracle": "Wishlist.gif",
     "svenson_love_story": "Spool_of_Yarn.gif",
     "weakened_archdemon": "Orb.gif",
-    "lost_oracle": "Life_Crystal.gif"
+    "lost_oracle": "Life_Crystal.gif",
+    "draconia_tower": "Dragonfetish.gif"
   },
   "questLogSpriteIcons": {
     "king_crossing_the_line": 3538,
@@ -659,7 +675,9 @@
     "al_dee_fishing_gold": 3462,
     "follower_of_zathroth": 3214,
     "jakundaf_desert": 10294,
-    "apprentice_sheng": 5300
+    "apprentice_sheng": 5300,
+    "hellgate_part_1": 2970,
+    "hellgate_library": 3723
   },
   "devTools": {
     "_comment": "Story-ordered grantable items for Quest Dev Tools. productId links to products{} for live names. receivedBefore rules: anyMissionAcceptedOrCompleted | missionCompleted | missionAcceptedOrCompleted | receivedFlagOrMissionCompleted | receivedFlagOrMissionAcceptedOrCompleted | missionFieldOrCompleted | missionAnyField | anyOf.",
@@ -1073,6 +1091,22 @@
           "type": "missionCompleted",
           "missionId": "hellgate_part_1"
         }
+      },
+      {
+        "key": "whiteMushroom",
+        "productId": "whiteMushroom",
+        "receivedBefore": {
+          "type": "missionCompleted",
+          "missionId": "hellgate_library"
+        }
+      },
+      {
+        "key": "dragonfetish",
+        "productId": "dragonfetish",
+        "receivedBefore": {
+          "type": "missionCompleted",
+          "missionId": "draconia_tower"
+        }
       }
     ]
   },
@@ -1382,6 +1416,14 @@
       },
       {
         "productId": "bosstiary",
+        "amount": 1
+      },
+      {
+        "productId": "whiteMushroom",
+        "amount": 1
+      },
+      {
+        "productId": "dragonfetish",
         "amount": 1
       }
     ]

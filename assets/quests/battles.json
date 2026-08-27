@@ -10,7 +10,9 @@
     "lost_oracle": "8. The Lost Oracle (Monastery Catacombs)",
     "jakundaf_desert": "9. Jakundaf Desert (Sewers path battle)",
     "ekatrix": "10. Ekatrix (The Tainted Souls / Sewers via Eclipse portal)",
-    "hellgate_treasure_room": "11. Hellgate Treasure Room (Elathriel's Hellgate Part 1, Sewers reskin)"
+    "hellgate_treasure_room": "11. Hellgate Treasure Room (Elathriel's Hellgate Part 1, Sewers reskin)",
+    "hellgate_library": "12. Hellgate Library (Elathriel's Hellgate Library, Sewers library reskin — battle starts when the Wrinkled Bonelord takes the book)",
+    "draconia_tower": "12. Draconia Tower (Elathriel’s dragon-cemetery battle, Sewers reskin)"
   },
   "mornenion": {
     "allyLimit": 3,
@@ -180,7 +182,16 @@
   "apprentice_sheng": {
     "allyLimit": 5,
     "preventVillainMovement": true,
-    "allowedTiles": [95, 96, 97, 98, 111, 112, 127, 128],
+    "allowedTiles": [
+      95,
+      96,
+      97,
+      98,
+      111,
+      112,
+      127,
+      128
+    ],
     "allowedTilesMessage": "Ally creatures can only be placed on the marked tiles!",
     "villains": [
       {
@@ -1461,8 +1472,19 @@
         "creatureName": "Fire Elemental",
         "shiny": true,
         "awakened": true,
-        "genes": { "hp": 20, "ad": 20, "ap": 20, "armor": 20, "magicResist": 20 },
-        "equip": { "stat": "ap", "tier": 5, "name": "Spellbook of Ancient Arcana", "gameId": 41 }
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Spellbook of Ancient Arcana",
+          "gameId": 41
+        }
       },
       {
         "nickname": "Furious Fire Elemental",
@@ -1474,8 +1496,19 @@
         "creatureName": "Fire Elemental",
         "shiny": true,
         "awakened": true,
-        "genes": { "hp": 20, "ad": 20, "ap": 20, "armor": 20, "magicResist": 20 },
-        "equip": { "stat": "ap", "tier": 5, "name": "Spellbook of Ancient Arcana", "gameId": 41 }
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Spellbook of Ancient Arcana",
+          "gameId": 41
+        }
       },
       {
         "nickname": "Furious Fire Elemental",
@@ -1487,8 +1520,19 @@
         "creatureName": "Fire Elemental",
         "shiny": true,
         "awakened": true,
-        "genes": { "hp": 20, "ad": 20, "ap": 20, "armor": 20, "magicResist": 20 },
-        "equip": { "stat": "ap", "tier": 5, "name": "Spellbook of Ancient Arcana", "gameId": 41 }
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Spellbook of Ancient Arcana",
+          "gameId": 41
+        }
       },
       {
         "nickname": "Demon Skeleton",
@@ -1500,7 +1544,13 @@
         "creatureName": "Demon Skeleton",
         "shiny": true,
         "awakened": true,
-        "genes": { "hp": 20, "ad": 20, "ap": 20, "armor": 20, "magicResist": 20 }
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        }
       },
       {
         "nickname": "Demon Skeleton",
@@ -1512,7 +1562,13 @@
         "creatureName": "Demon Skeleton",
         "shiny": true,
         "awakened": true,
-        "genes": { "hp": 20, "ad": 20, "ap": 20, "armor": 20, "magicResist": 20 }
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        }
       },
       {
         "nickname": "Ghoul",
@@ -1524,7 +1580,13 @@
         "creatureName": "Ghoul",
         "shiny": true,
         "awakened": true,
-        "genes": { "hp": 20, "ad": 20, "ap": 20, "armor": 20, "magicResist": 20 }
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        }
       },
       {
         "nickname": "Skeleton",
@@ -1536,7 +1598,13 @@
         "creatureName": "Skeleton",
         "shiny": true,
         "awakened": true,
-        "genes": { "hp": 20, "ad": 20, "ap": 20, "armor": 20, "magicResist": 20 }
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        }
       }
     ],
     "allowedTiles": [
@@ -1566,6 +1634,434 @@
       144,
       145,
       146
+    ],
+    "allowedTilesMessage": "Ally creatures can only be placed on the marked tiles!"
+  },
+  "hellgate_library": {
+    "allyLimit": 8,
+    "preventVillainMovement": true,
+    "hideVillainSprites": true,
+    "villains": [
+      {
+        "nickname": "Skeleton",
+        "tileIndex": 33,
+        "keyPrefix": "skeleton-tile-33-",
+        "fallbackGameId": 7,
+        "level": 45,
+        "direction": "south",
+        "creatureName": "Skeleton",
+        "shiny": true,
+        "awakened": true,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Skullcracker Armor",
+          "gameId": 19
+        }
+      },
+      {
+        "nickname": "Ghoul",
+        "tileIndex": 38,
+        "keyPrefix": "ghoul-tile-38-",
+        "fallbackGameId": 19,
+        "level": 55,
+        "direction": "west",
+        "creatureName": "Ghoul",
+        "shiny": true,
+        "awakened": true,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Boots of Haste",
+          "gameId": 1
+        }
+      },
+      {
+        "nickname": "Fire Elemental",
+        "tileIndex": 40,
+        "keyPrefix": "fire-elemental-tile-40-",
+        "fallbackGameId": 30,
+        "level": 60,
+        "direction": "west",
+        "creatureName": "Fire Elemental",
+        "shiny": true,
+        "awakened": true,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Bonelord Helmet",
+          "gameId": 4
+        }
+      },
+      {
+        "nickname": "Ghoul",
+        "tileIndex": 65,
+        "keyPrefix": "ghoul-tile-65-",
+        "fallbackGameId": 19,
+        "level": 55,
+        "direction": "west",
+        "creatureName": "Ghoul",
+        "shiny": true,
+        "awakened": true,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Boots of Haste",
+          "gameId": 1
+        }
+      },
+      {
+        "nickname": "A Wrinkled Bonelord",
+        "tileIndex": 68,
+        "keyPrefix": "a-wrinkled-bonelord-tile-68-",
+        "fallbackGameId": 105,
+        "level": 350,
+        "direction": "west",
+        "creatureName": "Bonelord",
+        "awakened": true,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Spellbook of Ancient Arcana",
+          "gameId": 41
+        }
+      },
+      {
+        "nickname": "Fire Elemental",
+        "tileIndex": 71,
+        "keyPrefix": "fire-elemental-tile-71-",
+        "fallbackGameId": 30,
+        "level": 60,
+        "direction": "west",
+        "creatureName": "Fire Elemental",
+        "shiny": true,
+        "awakened": true,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Bonelord Helmet",
+          "gameId": 4
+        }
+      },
+      {
+        "nickname": "Ghost",
+        "tileIndex": 83,
+        "keyPrefix": "ghost-tile-83-",
+        "fallbackGameId": 22,
+        "level": 120,
+        "direction": "west",
+        "creatureName": "Ghost",
+        "shiny": true,
+        "awakened": true,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Stealth Ring",
+          "gameId": 30
+        }
+      },
+      {
+        "nickname": "Skeleton",
+        "tileIndex": 85,
+        "keyPrefix": "skeleton-tile-85-",
+        "fallbackGameId": 7,
+        "level": 45,
+        "direction": "west",
+        "creatureName": "Skeleton",
+        "shiny": true,
+        "awakened": true,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Skullcracker Armor",
+          "gameId": 19
+        }
+      },
+      {
+        "nickname": "Ghoul",
+        "tileIndex": 107,
+        "keyPrefix": "ghoul-tile-107-",
+        "fallbackGameId": 19,
+        "level": 55,
+        "direction": "north",
+        "creatureName": "Ghoul",
+        "shiny": true,
+        "awakened": true,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Boots of Haste",
+          "gameId": 1
+        }
+      },
+      {
+        "nickname": "Skeleton",
+        "tileIndex": 111,
+        "keyPrefix": "skeleton-tile-111-",
+        "fallbackGameId": 7,
+        "level": 45,
+        "direction": "west",
+        "creatureName": "Skeleton",
+        "shiny": true,
+        "awakened": true,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Skullcracker Armor",
+          "gameId": 19
+        }
+      },
+      {
+        "nickname": "Ghost",
+        "tileIndex": 137,
+        "keyPrefix": "ghost-tile-137-",
+        "fallbackGameId": 22,
+        "level": 120,
+        "direction": "north",
+        "creatureName": "Ghost",
+        "shiny": true,
+        "awakened": true,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Stealth Ring",
+          "gameId": 30
+        }
+      },
+      {
+        "nickname": "Ghost",
+        "tileIndex": 140,
+        "keyPrefix": "ghost-tile-140-",
+        "fallbackGameId": 22,
+        "level": 120,
+        "direction": "north",
+        "creatureName": "Ghost",
+        "shiny": true,
+        "awakened": true,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Stealth Ring",
+          "gameId": 30
+        }
+      },
+      {
+        "nickname": "Fire Elemental",
+        "tileIndex": 145,
+        "keyPrefix": "fire-elemental-tile-145-",
+        "fallbackGameId": 30,
+        "level": 60,
+        "direction": "west",
+        "creatureName": "Fire Elemental",
+        "shiny": true,
+        "awakened": true,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Bonelord Helmet",
+          "gameId": 4
+        }
+      }
+    ],
+    "allowedTiles": [
+      31,
+      32,
+      33,
+      34,
+      35,
+      36,
+      37,
+      46,
+      48,
+      61,
+      62,
+      63,
+      64,
+      65,
+      66,
+      67,
+      77,
+      78,
+      79,
+      80,
+      81,
+      82,
+      92
+    ],
+    "allowedTilesMessage": "Ally creatures can only be placed on the marked tiles!"
+  },
+  "draconia_tower": {
+    "allyLimit": 6,
+    "preventVillainMovement": true,
+    "hideVillainSprites": true,
+    "villains": [
+      {
+        "nickname": "Dragon Lord",
+        "tileIndex": 50,
+        "keyPrefix": "dragon-lord-tile-50-",
+        "fallbackGameId": 26,
+        "level": 250,
+        "direction": "south",
+        "creatureName": "Dragon Lord",
+        "shiny": true,
+        "awakened": true,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        }
+      },
+      {
+        "nickname": "An Old Dragonlord",
+        "tileIndex": 80,
+        "keyPrefix": "an-old-dragonlord-tile-80-",
+        "fallbackGameId": 26,
+        "level": 350,
+        "direction": "south",
+        "creatureName": "Dragon Lord",
+        "awakened": true,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        }
+      },
+      {
+        "nickname": "Dragon",
+        "tileIndex": 127,
+        "keyPrefix": "dragon-tile-127-",
+        "fallbackGameId": 65,
+        "level": 200,
+        "direction": "east",
+        "creatureName": "Dragon",
+        "shiny": true,
+        "awakened": true,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        }
+      }
+    ],
+    "allowedTiles": [
+      94,
+      95,
+      96,
+      97,
+      98,
+      99,
+      100,
+      112,
+      115,
+      126,
+      127,
+      128,
+      129,
+      130,
+      138,
+      139,
+      140,
+      141,
+      142,
+      143,
+      144
     ],
     "allowedTilesMessage": "Ally creatures can only be placed on the marked tiles!"
   }

@@ -534,7 +534,7 @@
     },
     "hellgate_part_1": {
       "id": "hellgate_part_1",
-      "title": "Hellgate Part 1",
+      "title": "Hellgate Treasure Room",
       "offer": "There is a task I would ask of you, human — will you accept it?",
       "offerDecline": "Then keep away from what does not concern you.",
       "prompt": [
@@ -552,6 +552,56 @@
       "battleVictory": "The treasure room is cleared. Return to Elathriel.",
       "battleDefeat": "Whatever guards that treasure was not so easily bested.",
       "battleReward": "You have done well, human. Take this — knowledge the Bonelords would rather stay buried."
+    },
+    "hellgate_library": {
+      "id": "hellgate_library",
+      "title": "Hellgate Library",
+      "offer": "The book you carry was written by one who still guards its shelves. There is a library below the hellgate, and a Bonelord who never left it. Would you look upon it?",
+      "offerDecline": "Then leave the dust undisturbed.",
+      "prompt": [
+        "Good. The way down is mine to open — as the gate was.",
+        "The stair to the library still stands open. Are you ready to descend?"
+      ],
+      "accept": "Then follow. And do not let the librarian keep you.",
+      "alreadyCompleted": "The library is quiet again. There is nothing more for you on those shelves.",
+      "alreadyActive": "The stair to the library still stands open. Are you ready to descend?",
+      "decline": "As you wish. The shelves are patient.",
+      "objectiveLine1": "Follow Elathriel down into the Hellgate Library.",
+      "objectiveLine2": "Speak with the Wrinkled Bonelord — and survive what follows.",
+      "hint": "Speak with Elathriel in Hedge Maze about the library — he can open the way down.",
+      "rewardSummary": "Reward: White Mushroom.",
+      "battleVictory": "The library is silent now. Return to Elathriel.",
+      "battleDefeat": "The librarian's guardians proved the sharper scholars.",
+      "battleReward": "You walked out of that place. Few of my people did. Take this — it grew where the old librarian fell.",
+      "bonelordBookAsk": "A book, you say. You carry one of mine? Say it plainly — do you have the book?",
+      "bonelordBookDeclined": "Then we have nothing to discuss. The shelves do not lend to the empty-handed.",
+      "bonelordBookFraud": "You bring me a book you cannot read, and call it study? 469 has no solution, two-eyes — every mind that claimed one is dust on my shelves. You are a fraud. And frauds are filed under 'consumed'.",
+      "bonelordNoBook": "You come to my library empty-handed? Bring me the book, and perhaps I will let you look before you die."
+    },
+    "draconia_tower": {
+      "id": "draconia_tower",
+      "title": "Draconia Tower",
+      "offer": "One more errand, human, and the debt of my people is closed. Beneath the tower called Draconia lies a cemetery of dragons — and in it an Old Dragonlord who will not die and will not rest. Will you go down and end his watch?",
+      "offerDecline": "Then let the old one keep grieving. It is no concern of mine either.",
+      "prompt": [
+        "Good. The Dragon Lord and his beast guard the stair; the Old Dragonlord waits past them.",
+        "Speak to me again when you are ready to face the tower."
+      ],
+      "accept": "Then go. Cut through the guardians and do not let the old one’s sorrow slow your blade.",
+      "alreadyCompleted": "The cemetery is quiet. The old one troubles no one now.",
+      "alreadyActive": "The stair into Draconia Tower still stands open. Are you ready to face what guards it?",
+      "decline": "As you wish. The bones will keep.",
+      "objectiveLine1": "Follow Elathriel into Draconia Tower and defeat the Dragon Lord, his beast, and the Old Dragonlord.",
+      "objectiveLine2": "Speak with the Old Dragonlord among the bones — he will trade for a white mushroom.",
+      "hint": "Speak with Elathriel in Hedge Maze about Draconia Tower — he can open the way down.",
+      "rewardSummary": "Reward: Dragonfetish.",
+      "battleVictory": "The guardians are down and the Old Dragonlord kneels among the bones. Go and speak with him.",
+      "battleDefeat": "The dragons of Draconia are not so easily put to rest.",
+      "returnToDragonlord": "The guardians are already dead — you need not face them twice. The Old Dragonlord still kneels among the bones, waiting for his mushroom. Shall I send you back down to him?",
+      "dragonlordTrade": "AHHH MUSHRRROOOMSSS! NOW MY PAIN WILL BE EASSSED FOR A WHILE! TAKE THISS AND LEAVE THE DRAGONSSS’ CEMETERY AT ONCE!",
+      "dragonlordLeave": "LEAVE THE DRAGONS’ CEMETERY AT ONCE!",
+      "dragonlordNoMushroom": "You come to the dragonsss’ cemetery with empty handsss? Bring me white mushroomsss, two-legsss — nothing elssse dullsss the ache.",
+      "reward": "You carry the Dragonfetish out of that place — few of my kind ever did. The debt is closed, human. Go, and keep it."
     }
   },
   "completionSummaries": {
@@ -577,7 +627,9 @@
     "weakened_archdemon": "Defeated the weakened archdemon and received an Orb from Dane.",
     "dragonmother": "Descended into Lonesome Dragon with Demodras' claw and slew Demodras.",
     "lost_oracle": "Returned the Spectral Stone to The Oracle, survived its wrath, and received its thanks.",
-    "hellgate_part_1": "Received Key 3012 from Elathriel and cleared the Hellgate Treasure Room with him."
+    "hellgate_part_1": "Received Key 3012 from Elathriel and cleared the Hellgate Treasure Room with him.",
+    "hellgate_library": "Descended into the Hellgate Library, handed the Wrinkled Bonelord the book, survived the librarian's guardians, and received a White Mushroom from Elathriel.",
+    "draconia_tower": "Descended into Draconia Tower with Elathriel, put down the Dragon Lord and his beast, traded a white mushroom to the Old Dragonlord for the Dragonfetish, and returned to Elathriel."
   },
   "sealTranscripts": [
     {
@@ -634,7 +686,9 @@
       "svenson_love_story",
       "weakened_archdemon",
       "lost_oracle",
-      "hellgate_part_1"
+      "hellgate_part_1",
+      "hellgate_library",
+      "draconia_tower"
     ],
     "missions": {
       "king_honeyflower": {
@@ -783,6 +837,22 @@
         "firebaseKey": "hellgatePart1",
         "extraFields": [
           "battleCompleted"
+        ]
+      },
+      "hellgate_library": {
+        "stateKey": "progressHellgateLibrary",
+        "firebaseKey": "hellgateLibrary",
+        "extraFields": [
+          "battleCompleted",
+          "bookGiven"
+        ]
+      },
+      "draconia_tower": {
+        "stateKey": "progressDraconiaTower",
+        "firebaseKey": "draconiaTower",
+        "extraFields": [
+          "battleCompleted",
+          "dragonfetishReceived"
         ]
       }
     }

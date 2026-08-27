@@ -11,6 +11,8 @@
     "dane": "9. Board NPCs (Dane)",
     "elathriel": "10. Board NPCs (Elathriel)",
     "oracle": "11. Board NPCs (The Oracle)",
+    "bonelord": "11b. Board NPCs (A Wrinkled Bonelord — Hellgate Library)",
+    "oldDragonlord": "11c. Board NPCs (An Old Dragonlord — Draconia Tower)",
     "questItems": "12. Quest item chat responses (involved vs uninvolved NPC lines)",
     "questItemUninvolvedTemplates": "13. Uninvolved quest item templates ({item} placeholder)"
   },
@@ -905,6 +907,65 @@
     "boardChat": {
       "welcomeMessage": "Be greeted Player.",
       "placeholder": "Type your message to Elathriel..."
+    }
+  },
+  "bonelord": {
+    "keywords": {
+      "hi": "What is this? An optically challenged entity called Player. How fascinating!",
+      "hello": "What is this? An optically challenged entity called Player. How fascinating!",
+      "death": "Yes, yes, I will kill you soon enough, now let me continue my investigation on you.",
+      "god": "They will mourn the day they abandoned us.",
+      "gods": "They will mourn the day they abandoned us.",
+      "job": "I am the great librarian.",
+      "library": "It's a fine library, isn't it?",
+      "name": "I'm 486486 and NOT 'Blinky' as some people called me ... before they died. So don't ... confuse your numbers, as my kind says.",
+      "tibia": "It's 1, not 'Tibia', silly.",
+      "cyclops": "Uglyness incarnate. One eye! Imagine that! Horrible!",
+      "elves": "These fools and their superstitious life cult don't understand anything of importance.",
+      "excalibug": "Only inferior species need weapons.",
+      "ab'dendriel": "I heard that elves moved in upstairs.",
+      "abdendriel": "I heard that elves moved in upstairs.",
+      "numbers": "Numbers are essential. They are the secret behind the scenes. If you are a master of mathematics you are a master over life and death.",
+      "number": "Numbers are essential. They are the secret behind the scenes. If you are a master of mathematics you are a master over life and death.",
+      "books": "Our books are written in 469, of course you can't understand them.",
+      "0": "Go and wash your eyes for using this obscene number!",
+      "zero": "Go and wash your eyes for using this obscene number!",
+      "469": "The language of my kind. Superior to any other language and only to be spoken by entities with enough eyes to blink it.",
+      "species": "The world is full of inferior species. Once, our race ruled the whole world, but then the gods destroyed our empire ...\nBut our race is proficient in the return from death. One day we will rise again, that's for sure!",
+      "orcs": "Noisy pests.",
+      "orc": "Noisy pests.",
+      "minotaurs": "Their mages are so close to the truth. Closer then they know and closer then it's good for them.",
+      "minotaur": "Their mages are so close to the truth. Closer then they know and closer then it's good for them.",
+      "humans": "Good tools to work with ... After their death, that is.",
+      "human": "Good tools to work with ... After their death, that is.",
+      "eyes": "You pitiful two-eyed creatures. In our eyes, you look weird. It is pathetic how much you depend on hands and legs. Since we bonelords have more eyes than any creature in the world, it is obvious that you can determine the value of a species by the number of its eyes.",
+      "eye": "You pitiful two-eyed creatures. In our eyes, you look weird. It is pathetic how much you depend on hands and legs. Since we bonelords have more eyes than any creature in the world, it is obvious that you can determine the value of a species by the number of its eyes.",
+      "bonelord": "Our race is very old. Over the time, we have been given many different names by other races. The term bonelord sticks to us for quite a while now. In our language the name of our race is not fix but a complex formula, and as such it always changes for the subjective viewer.",
+      "bonelords": "Our race is very old. Over the time, we have been given many different names by other races. The term bonelord sticks to us for quite a while now. In our language the name of our race is not fix but a complex formula, and as such it always changes for the subjective viewer.",
+      "language": "Our language is beyond comprehension by your lesser beings. It heavily relies on mathemagic. Your brain is not suited for the mathemagical processing necessary to understand our language. To decipher even our most basic texts, it would need a genius that can calculate numbers within seconds in his brain.",
+      "bye": "Wait right there. I will eat you after writing down what I found out.",
+      "goodbye": "Wait right there. I will eat you after writing down what I found out.",
+      "farewell": "Wait right there. I will eat you after writing down what I found out."
+    },
+    "confusion": [
+      "Meaningless noise. Speak of numbers, or of your betters.",
+      "Your babble does not compute. Try again, two-eyes.",
+      "I have catalogued that word as 'nonsense'. Ask something worth my ink.",
+      "The equation of your sentence does not resolve.",
+      "Blink twice if you meant to say something. You cannot? Pitiful."
+    ],
+    "boardChat": {
+      "welcomeMessage": "What is this? An optically challenged entity called Player. How fascinating!",
+      "placeholder": "Type your message to the Bonelord..."
+    }
+  },
+  "oldDragonlord": {
+    "_comment": "Fixed two-line exchange handled entirely in Quests.js (Old Dragonlord reply branch): welcome line on open, then 'LEAVE THE DRAGONS' CEMETERY AT ONCE!' to anything + Dragonfetish trade + close. No keyword/confusion table.",
+    "keywords": {},
+    "confusion": [],
+    "boardChat": {
+      "welcomeMessage": "AHHH MUSHRRROOOMSSS! NOW MY PAIN WILL BE EASSSED FOR A WHILE! TAKE THISS AND LEAVE THE DRAGONSSS' CEMETERY AT ONCE!",
+      "placeholder": "Type your message to the Old Dragonlord..."
     }
   },
   "oracle": {
