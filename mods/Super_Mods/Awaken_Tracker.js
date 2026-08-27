@@ -503,6 +503,29 @@
         return STATS.every(k => Number(stats[k]) >= CAP_VALUE);
     }
 
+    const MAX_TOTAL_GENES = CAP_VALUE * STATS.length; // 100
+
+    /**
+     * True when this awakened creature has finished gene farming.
+     *
+     * `state.player.context.monsters` today stores flat per-gene fields (`m.hp`,
+     * `m.ad`, …), which `getMonsterGeneStatsLocal` reads. Those can read stale
+     * (pre-inject) for a short window after a gene inject done outside a battle,
+     * until the next exp gain / player-state resync corrects them — a symptom that
+     * self-heals within one run.
+     *
+     * `hundo` / `totalGenes` are a forward-compat hedge: the game computes them for
+     * display and a future store shape may expose them; both imply all five genes
+     * are at the cap of 20, so if either is present and set we trust it. When they
+     * are absent (the current shape) this falls through to the per-gene check.
+     */
+    function isMonsterGeneComplete(monster, stats) {
+        if (monster && monster.hundo === true) return true;
+        const total = Number(monster && monster.totalGenes);
+        if (Number.isFinite(total) && total >= MAX_TOTAL_GENES) return true;
+        return isAwakenedCappedStats(stats);
+    }
+
     // 'pre-capped' = came capped from the baseline (not earned in this run)
     // 'capped'     = current stats are capped, but the baseline was not (capped in this run)
     // 'active'     = current stats are not capped
@@ -510,7 +533,7 @@
     function getCreatureState(awakened) {
         if (!awakened) return 'no-awaken';
         const stats = getMonsterGeneStatsLocal(awakened);
-        if (!isAwakenedCappedStats(stats)) return 'active';
+        if (!isMonsterGeneComplete(awakened, stats)) return 'active';
         const baseline = state.baselineStats.get(String(awakened.id));
         if (baseline && isAwakenedCappedStats(baseline)) return 'pre-capped';
         return 'capped';
@@ -1194,7 +1217,7 @@
     function createSlot({ gameId, name }, options = {}) {
         const awakened = findAwakenedTargetForGameId(gameId);
         const stats = awakened ? getMonsterGeneStatsLocal(awakened) : null;
-        const alreadyCapped = stats ? isAwakenedCappedStats(stats) : false;
+        const alreadyCapped = stats ? isMonsterGeneComplete(awakened, stats) : false;
         const creatureState = getCreatureState(awakened);
         const collapsed = isSlotCollapsed(gameId, creatureState);
 
@@ -1449,18 +1472,25 @@
         return loadFarmerSettings().autoRefillStamina === true;
     }
 
+    /** Always-on trace of Awaken Farmer target collection (helps diagnose stale gene reads). */
+    function farmerDebugLog(...args) {
+        console.log('[Awaken Farmer]', ...args);
+    }
+
     /** Species with at least one awaken that is not fully gene-capped (20×5). */
     function collectAwakenedNotCappedTargets() {
         const monsters = globalThis.state?.player?.getSnapshot?.()?.context?.monsters || [];
         const byGameId = new Map();
+        let awakenedSeen = 0;
         for (const m of monsters) {
             if (!m || m.gameId == null || !isAwakenedCreatureLocal(m)) continue;
             const gameId = Number(m.gameId);
             if (!Number.isFinite(gameId)) continue;
             const name = resolveName(gameId);
             if (!isCreatureEligibleForAwaken(name)) continue;
+            awakenedSeen++;
             const stats = getMonsterGeneStatsLocal(m);
-            const capped = isAwakenedCappedStats(stats);
+            const capped = isMonsterGeneComplete(m, stats);
             let g = byGameId.get(gameId);
             if (!g) {
                 g = { gameId, name, anyCapped: false, bestUncapped: null };
@@ -1469,6 +1499,8 @@
             if (capped) g.anyCapped = true;
             else {
                 const sum = STATS.reduce((a, k) => a + (Number(stats[k]) || 0), 0);
+                // Log only the interesting rows (creatures that still need farming).
+                farmerDebugLog('incomplete', { id: m.id, gameId, name, stats, sum });
                 if (!g.bestUncapped || sum > g.bestUncapped.sum) {
                     g.bestUncapped = { stats, sum, cappedCount: STATS.filter(k => Number(stats[k]) >= CAP_VALUE).length };
                 }
@@ -1484,6 +1516,10 @@
         }
         targets.sort((a, b) => (b.bestUncapped?.sum || 0) - (a.bestUncapped?.sum || 0) || a.name.localeCompare(b.name));
         const progressById = new Map(targets.map(t => [t.gameId, t.bestUncapped.sum]));
+        farmerDebugLog(
+            `scan: ${awakenedSeen} awakened, ${targets.length} species queued`,
+            targets.map(t => `${t.name} ${t.bestUncapped.cappedCount}/5 (sum ${t.bestUncapped.sum})`)
+        );
         return { targets, wantedIds: new Set(targets.map(t => t.gameId)), namesById, progressById };
     }
 
@@ -1497,7 +1533,7 @@
             const gameId = Number(m.gameId);
             if (!Number.isFinite(gameId) || !wantedIds.has(gameId)) continue;
             const stats = getMonsterGeneStatsLocal(m);
-            if (isAwakenedCappedStats(stats)) continue;
+            if (isMonsterGeneComplete(m, stats)) continue;
             const sum = STATS.reduce((a, k) => a + (Number(stats[k]) || 0), 0);
             const prev = map.get(gameId);
             if (prev == null || sum > prev) map.set(gameId, sum);

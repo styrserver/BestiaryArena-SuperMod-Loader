@@ -1786,7 +1786,7 @@ if (typeof browserAPI === 'undefined') {
         panel.className = 'bestiary-mod-config-panel';
         panel.setAttribute('data-mod-id', modId || '');
         panel.style.cssText = `
-          background: rgba(0, 0, 0, 0.9);
+          background: rgba(0, 0, 0, 0.95);
           border: 1px solid #444;
           border-radius: 8px;
           padding: 10px;

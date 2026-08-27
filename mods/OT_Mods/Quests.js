@@ -473,6 +473,8 @@ let DANE_RUMOUR_LINES = [];
 let ORACLE_RESPONSES = {};
 let ORACLE_DESTINY_DIALOGUE = {};
 let ELATHRIEL_RESPONSES = {};
+let BONELORD_RESPONSES = {};
+let OLD_DRAGONLORD_RESPONSES = {};
 let KING_TIBIANUS_CONFUSION_RESPONSES = [];
 let KING_TIBIANUS_SWEAR_WORDS = [];
 let KING_TIBIANUS_SWEAR_RESPONSE = 'How dare you! Guards, remove this insolent subject!';
@@ -486,6 +488,8 @@ let SVENSON_CONFUSION_RESPONSES = [];
 let DANE_CONFUSION_RESPONSES = [];
 let ORACLE_CONFUSION_RESPONSES = [];
 let ELATHRIEL_CONFUSION_RESPONSES = [];
+let BONELORD_CONFUSION_RESPONSES = [];
+let OLD_DRAGONLORD_CONFUSION_RESPONSES = [];
 let NPC_QUEST_ITEM_CHAT_RESPONSES = {};
 const NPC_QUEST_ITEM_UNINVOLVED_TEMPLATES = {};
 
@@ -690,6 +694,14 @@ function applyQuestDialogueFromAssets(missionsData, npcsData) {
     ['elathriel', (npc) => {
       ELATHRIEL_RESPONSES = { ...(npc.keywords || {}) };
       ELATHRIEL_CONFUSION_RESPONSES = [...(npc.confusion || [])];
+    }],
+    ['bonelord', (npc) => {
+      BONELORD_RESPONSES = { ...(npc.keywords || {}) };
+      BONELORD_CONFUSION_RESPONSES = [...(npc.confusion || [])];
+    }],
+    ['oldDragonlord', (npc) => {
+      OLD_DRAGONLORD_RESPONSES = { ...(npc.keywords || {}) };
+      OLD_DRAGONLORD_CONFUSION_RESPONSES = [...(npc.confusion || [])];
     }],
     ['king-tibianus', (npc) => {
       KING_TIBIANUS_CONFUSION_RESPONSES = [...(npc.confusion || [])];
@@ -1035,6 +1047,28 @@ function applyQuestRoomsFromAssets(roomsData) {
     }
   }
 
+  const hellgateLibraryRoom = roomsData.hellgateLibrary;
+  if (hellgateLibraryRoom) {
+    if (hellgateLibraryRoom.battleRoomName) HELLGATE_LIBRARY_BATTLE_ROOM_NAME = hellgateLibraryRoom.battleRoomName;
+    if (hellgateLibraryRoom.battleRoomId) HELLGATE_LIBRARY_BATTLE_ROOM_ID = hellgateLibraryRoom.battleRoomId;
+    if (hellgateLibraryRoom.battleDisplayName) HELLGATE_LIBRARY_BATTLE_DISPLAY_NAME = hellgateLibraryRoom.battleDisplayName;
+    if (hellgateLibraryRoom.battleId) HELLGATE_LIBRARY_BATTLE_ID = hellgateLibraryRoom.battleId;
+    if (hellgateLibraryRoom.tileMutations && typeof hellgateLibraryRoom.tileMutations === 'object') {
+      HELLGATE_LIBRARY_TILE_MUTATIONS = hellgateLibraryRoom.tileMutations;
+    }
+  }
+
+  const draconiaTowerRoom = roomsData.draconiaTower;
+  if (draconiaTowerRoom) {
+    if (draconiaTowerRoom.battleRoomName) DRACONIA_BATTLE_ROOM_NAME = draconiaTowerRoom.battleRoomName;
+    if (draconiaTowerRoom.battleRoomId) DRACONIA_BATTLE_ROOM_ID = draconiaTowerRoom.battleRoomId;
+    if (draconiaTowerRoom.battleDisplayName) DRACONIA_BATTLE_DISPLAY_NAME = draconiaTowerRoom.battleDisplayName;
+    if (draconiaTowerRoom.battleId) DRACONIA_BATTLE_ID = draconiaTowerRoom.battleId;
+    if (draconiaTowerRoom.tileMutations && typeof draconiaTowerRoom.tileMutations === 'object') {
+      DRACONIA_TILE_MUTATIONS = draconiaTowerRoom.tileMutations;
+    }
+  }
+
   const mornenionRoom = roomsData.mornenion;
   if (mornenionRoom) {
     if (mornenionRoom.tileMutations && typeof mornenionRoom.tileMutations === 'object') {
@@ -1084,6 +1118,27 @@ function applyQuestRoomsFromAssets(roomsData) {
       if (board.elathriel.tileIndex != null) ELATHRIEL_TILE_INDEX = board.elathriel.tileIndex;
       if (board.elathriel.outfitSpriteId) ELATHRIEL_OUTFIT_SPRITE_ID = board.elathriel.outfitSpriteId;
       if (board.elathriel.dialogueIconUrl) ELATHRIEL_DIALOGUE_ICON_URL = board.elathriel.dialogueIconUrl;
+    }
+    if (board.bonelord) {
+      if (board.bonelord.id) BOARD_NPC_BONELORD_ID = board.bonelord.id;
+      if (board.bonelord.name) BONELORD_NPC_NAME = board.bonelord.name;
+      if (board.bonelord.roomName) BONELORD_ROOM_NAME = board.bonelord.roomName;
+      if (board.bonelord.roomId) BONELORD_ROOM_ID = board.bonelord.roomId;
+      if (board.bonelord.tileIndex != null) BONELORD_TILE_INDEX = board.bonelord.tileIndex;
+      if (board.bonelord.creatureGameId != null) BONELORD_CREATURE_GAME_ID = board.bonelord.creatureGameId;
+      if (board.bonelord.imageFilename) BONELORD_IMAGE_FILENAME = board.bonelord.imageFilename;
+      if (board.bonelord.dialogueIconUrl) BONELORD_DIALOGUE_ICON_URL = board.bonelord.dialogueIconUrl;
+      if (board.bonelord.outfitSpriteId != null) BONELORD_OUTFIT_SPRITE_ID = board.bonelord.outfitSpriteId;
+    }
+    if (board.oldDragonlord) {
+      if (board.oldDragonlord.id) BOARD_NPC_OLD_DRAGONLORD_ID = board.oldDragonlord.id;
+      if (board.oldDragonlord.name) OLD_DRAGONLORD_NPC_NAME = board.oldDragonlord.name;
+      if (board.oldDragonlord.roomName) OLD_DRAGONLORD_ROOM_NAME = board.oldDragonlord.roomName;
+      if (board.oldDragonlord.roomId) OLD_DRAGONLORD_ROOM_ID = board.oldDragonlord.roomId;
+      if (board.oldDragonlord.tileIndex != null) OLD_DRAGONLORD_TILE_INDEX = board.oldDragonlord.tileIndex;
+      if (board.oldDragonlord.imageFilename) OLD_DRAGONLORD_IMAGE_FILENAME = board.oldDragonlord.imageFilename;
+      if (board.oldDragonlord.dialogueIconUrl) OLD_DRAGONLORD_DIALOGUE_ICON_URL = board.oldDragonlord.dialogueIconUrl;
+      if (board.oldDragonlord.outfitSpriteId != null) OLD_DRAGONLORD_OUTFIT_SPRITE_ID = board.oldDragonlord.outfitSpriteId;
     }
     if (board.oracle) {
       if (board.oracle.id) BOARD_NPC_ORACLE_ID = board.oracle.id;
@@ -1441,7 +1496,9 @@ const QUEST_MISSION_IDS = [
   'svenson_love_story',
   'weakened_archdemon',
   'lost_oracle',
-  'hellgate_part_1'
+  'hellgate_part_1',
+  'hellgate_library',
+  'draconia_tower'
 ];
 
 for (const missionId of QUEST_MISSION_IDS) {
@@ -1471,6 +1528,8 @@ const SVENSON_LOVE_STORY_MISSION = MISSION_BY_ID.svenson_love_story;
 const WEAKENED_ARCHDEMON_MISSION = MISSION_BY_ID.weakened_archdemon;
 const LOST_ORACLE_MISSION = MISSION_BY_ID.lost_oracle;
 const HELLGATE_PART_1_MISSION = MISSION_BY_ID.hellgate_part_1;
+const HELLGATE_LIBRARY_MISSION = MISSION_BY_ID.hellgate_library;
+const DRACONIA_TOWER_MISSION = MISSION_BY_ID.draconia_tower;
 
 const MINOTAUR_TROPHY_CONFIG = {};
 const ORB_CONFIG = {};
@@ -1637,6 +1696,24 @@ let HELLGATE_BATTLE_ROOM_ID = 'rkswrs';
 let HELLGATE_BATTLE_DISPLAY_NAME = 'Hellgate Treasure Room';
 let HELLGATE_BATTLE_ID = 'hellgate_treasure_room';
 let HELLGATE_TILE_MUTATIONS = null;
+
+// Hellgate Library (Elathriel — chat-triggered teleport into the Sewers, re-skinned as a
+// library; the villain roster spawns only once the Wrinkled Bonelord takes the book).
+let HELLGATE_LIBRARY_BATTLE_ROOM_NAME = 'Sewers';
+let HELLGATE_LIBRARY_BATTLE_ROOM_ID = 'rkswrs';
+let HELLGATE_LIBRARY_BATTLE_DISPLAY_NAME = 'Hellgate Library';
+let HELLGATE_LIBRARY_BATTLE_ID = 'hellgate_library';
+let HELLGATE_LIBRARY_TILE_MUTATIONS = null;
+
+// Draconia Tower (Elathriel — after Hellgate Library, teleports the player into the Sewers
+// re-skinned as a dragon cemetery. Battle spawns on entry; on victory the Dragon Lord and
+// Dragon despawn and An Old Dragonlord places as a board NPC on tile 80 for the mushroom
+// trade).
+let DRACONIA_BATTLE_ROOM_NAME = 'Sewers';
+let DRACONIA_BATTLE_ROOM_ID = 'rkswrs';
+let DRACONIA_BATTLE_DISPLAY_NAME = 'Draconia Tower';
+let DRACONIA_BATTLE_ID = 'draconia_tower';
+let DRACONIA_TILE_MUTATIONS = null;
 
 // Ab'Dendriel Hive (Mornenion) reskin. NOTE: this was originally implemented via
 // CustomBattles' native sceneSpriteReplacements (a global sprite-id swap), but that
@@ -2005,6 +2082,27 @@ let ELATHRIEL_TILE_INDEX = null;
 const ELATHRIEL_OVERLAY_CLASS = 'quests-elathriel-overlay';
 let ELATHRIEL_OUTFIT_SPRITE_ID = '';
 let ELATHRIEL_DIALOGUE_ICON_URL = '';
+let BOARD_NPC_BONELORD_ID = '';
+let BONELORD_NPC_NAME = 'A Wrinkled Bonelord';
+let BONELORD_ROOM_NAME = 'Sewers';
+let BONELORD_ROOM_ID = 'rkswrs';
+let BONELORD_TILE_INDEX = 68;
+let BONELORD_CREATURE_GAME_ID = 105;
+let BONELORD_IMAGE_FILENAME = 'A_Wrinkled_Bonelord.gif';
+let BONELORD_DIALOGUE_ICON_URL = '';
+// Outfit-atlas id for the Bonelord creature sprite on the board (the game renders the
+// villain piece as `sprite outfit id-17`). Differs from the battle gameId (105).
+let BONELORD_OUTFIT_SPRITE_ID = 17;
+const BONELORD_OVERLAY_CLASS = 'quests-bonelord-overlay';
+let BOARD_NPC_OLD_DRAGONLORD_ID = '';
+let OLD_DRAGONLORD_NPC_NAME = 'An Old Dragonlord';
+let OLD_DRAGONLORD_ROOM_NAME = 'Sewers';
+let OLD_DRAGONLORD_ROOM_ID = 'rkswrs';
+let OLD_DRAGONLORD_TILE_INDEX = 80;
+let OLD_DRAGONLORD_IMAGE_FILENAME = 'An_Old_Dragonlord.gif';
+let OLD_DRAGONLORD_DIALOGUE_ICON_URL = '';
+let OLD_DRAGONLORD_OUTFIT_SPRITE_ID = 39;
+const OLD_DRAGONLORD_OVERLAY_CLASS = 'quests-old-dragonlord-overlay';
 let GHAZBARAN_HIDEOUT_ROOM_NAME = '';
 let GHAZBARAN_HIDEOUT_DISPLAY_NAME = '';
 let GHAZBARAN_TILE_INDEX = null;
@@ -2179,6 +2277,8 @@ function createNPCCooldownManager() {
     progressSerpentineTower: { accepted: false, completed: false, destroyFieldRuneTaken: false, putridChamberComplete: false },
     progressApprenticeSheng: { accepted: false, completed: false, battleCompleted: false, rookstayerDismissed: false },
     progressHellgatePart1: { accepted: false, completed: false, battleCompleted: false },
+    progressHellgateLibrary: { accepted: false, completed: false, battleCompleted: false, bookGiven: false },
+    progressDraconiaTower: { accepted: false, completed: false, battleCompleted: false, dragonfetishReceived: false },
     progressChristmasMiracle: { accepted: false, completed: false },
     progressSvensonLoveStory: { accepted: false, completed: false, plankDelivered: false, strandedAtAwash: false, awashYarnDelivered: false, awashYarnRequested: false, strandedAtUnderground: false, undergroundCompassDelivered: false, undergroundCompassRequested: false, strandedAtWhiteWave: false, whiteWaveSlippersDelivered: false },
     progressWeakenedArchdemon: { accepted: false, completed: false, battleCompleted: false },
@@ -2350,6 +2450,22 @@ function createNPCCooldownManager() {
   let playerFollowedElathrielToHellgate = false;
   let hellgateBattle = null;
   let hellgateHitboxesApplied = false;
+
+  // Hellgate Library (Elathriel: chat-triggered teleport into the Sewers library reskin;
+  // the villain roster only spawns once the Wrinkled Bonelord takes the book)
+  let playerEnteredHellgateLibrary = false;
+  let hellgateLibraryBattle = null;
+  let hellgateLibraryHitboxesApplied = false;
+  let hellgateLibraryBattleStarted = false;
+  let hellgateLibraryPreBattleSub = null;
+
+  // Draconia Tower (Elathriel: teleport into the Sewers dragon-cemetery reskin; battle on
+  // entry, then a post-battle talk with An Old Dragonlord to trade a White Mushroom).
+  let playerEnteredDraconiaTower = false;
+  let draconiaTowerBattle = null;
+  let draconiaTowerHitboxesApplied = false;
+  let draconiaTowerPostBattle = false;
+  let draconiaTowerSceneSub = null;
 
   // Putrid Chamber (Serpentine Tower Quest: basement lever → custom battle)
   let playerUsedSerpentineLeverToPutridChamber = false;
@@ -2704,12 +2820,6 @@ function createNPCCooldownManager() {
           min-width: 280px;
           color: #fff;
         }
-        #${barId} .quests-boss-hp-icon {
-          width: 28px;
-          height: 28px;
-          image-rendering: pixelated;
-          flex: 0 0 auto;
-        }
         #${barId} .quests-boss-hp-main {
           flex: 1 1 auto;
           min-width: 0;
@@ -2721,6 +2831,7 @@ function createNPCCooldownManager() {
           font-size: 12px;
           line-height: 1.2;
           color: #ffcc66;
+          text-align: center;
           text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;
           white-space: nowrap;
           overflow: hidden;
@@ -2728,11 +2839,18 @@ function createNPCCooldownManager() {
         }
         #${barId} .quests-boss-hp-row {
           display: flex;
-          align-items: center;
+          align-items: flex-end;
           gap: 8px;
         }
-        #${barId} .quests-boss-hp-track {
+        #${barId} .quests-boss-hp-track-col {
           flex: 1 1 auto;
+          min-width: 0;
+          display: flex;
+          flex-direction: column;
+          gap: 3px;
+        }
+        #${barId} .quests-boss-hp-track {
+          flex: 0 0 auto;
           height: 12px;
           background: rgba(0, 0, 0, 0.55);
           border: 1px solid #111;
@@ -2895,23 +3013,21 @@ function createNPCCooldownManager() {
         const content = document.createElement('div');
         content.className = 'quests-boss-hp-content';
 
-        const icon = document.createElement('img');
-        icon.className = 'quests-boss-hp-icon';
-        icon.alt = '';
-        icon.src = getIconUrl();
-        icon.draggable = false;
-        content.appendChild(icon);
-
         const main = document.createElement('div');
         main.className = 'quests-boss-hp-main';
+
+        const row = document.createElement('div');
+        row.className = 'quests-boss-hp-row';
+
+        // Title sits in its own column above the track only, so it centers over the HP
+        // bar rather than over the whole track + "current / max" readout.
+        const trackCol = document.createElement('div');
+        trackCol.className = 'quests-boss-hp-track-col';
 
         const title = document.createElement('div');
         title.className = 'quests-boss-hp-title pixel-font-14';
         title.textContent = getName();
-        main.appendChild(title);
-
-        const row = document.createElement('div');
-        row.className = 'quests-boss-hp-row';
+        trackCol.appendChild(title);
 
         const track = document.createElement('div');
         track.className = 'quests-boss-hp-track';
@@ -2919,7 +3035,8 @@ function createNPCCooldownManager() {
         fill.className = 'quests-boss-hp-fill';
         fill.setAttribute('data-pct', 'full');
         track.appendChild(fill);
-        row.appendChild(track);
+        trackCol.appendChild(track);
+        row.appendChild(trackCol);
 
         const value = document.createElement('div');
         value.className = 'quests-boss-hp-value pixel-font-14';
@@ -5200,6 +5317,10 @@ function createNPCCooldownManager() {
   const QUEST_BOARD_HIDDEN_TAG_SEWERS = 'sewers-rookie-guard';
   const QUEST_BOARD_ADDED_ATTR_HELLGATE = 'data-quests-hellgate-added';
   const QUEST_BOARD_HIDDEN_TAG_HELLGATE = 'hellgate-treasure-room';
+  const QUEST_BOARD_ADDED_ATTR_HELLGATE_LIBRARY = 'data-quests-hellgate-library-added';
+  const QUEST_BOARD_HIDDEN_TAG_HELLGATE_LIBRARY = 'hellgate-library';
+  const QUEST_BOARD_ADDED_ATTR_DRACONIA = 'data-quests-draconia-added';
+  const QUEST_BOARD_HIDDEN_TAG_DRACONIA = 'draconia-tower';
   const QUEST_BOARD_ADDED_ATTR_SPIDER_LAIR = 'data-quests-spider-lair-added';
 
   function hideQuestBoardElement(element, options = {}) {
@@ -7767,8 +7888,7 @@ function createNPCCooldownManager() {
         if (aHasDate && bHasDate && aAt !== bAt) return aAt - bAt;
         if (aHasDate !== bHasDate) return aHasDate ? -1 : 1;
         return String(a.playerName || '').localeCompare(String(b.playerName || ''));
-      })
-      .slice(0, ARENA_LEADERBOARD_TOP);
+      });
     arenaLeaderboardCacheTime = now;
     return arenaLeaderboardCache;
   }
@@ -16557,12 +16677,22 @@ function createNPCCooldownManager() {
 
   function appendArenaLeaderboardBox(listElement, content) {
     const box = createBox({ title: 'Rankings', content });
+    // Let the box fill the modal's list area so a long ranking list (more than ~10
+    // players) scrolls inside it instead of overflowing the modal.
+    box.style.flex = '1 1 auto';
+    box.style.minHeight = '0';
+    box.style.display = 'flex';
+    box.style.flexDirection = 'column';
     const wrapper = box.querySelector('.column-content-wrapper');
     if (wrapper) {
       wrapper.style.overflowX = 'hidden';
+      wrapper.style.overflowY = 'auto';
       wrapper.style.minWidth = '0';
       wrapper.style.maxWidth = '100%';
       wrapper.style.boxSizing = 'border-box';
+      wrapper.style.flex = '1 1 auto';
+      wrapper.style.minHeight = '0';
+      wrapper.style.maxHeight = '100%';
     }
     listElement.innerHTML = '';
     listElement.appendChild(box);
@@ -18493,6 +18623,29 @@ function createNPCCooldownManager() {
               console.log('[Quests Mod][Overlay Hider] Leaving Spider Lair - clearing quest/tile-77 state (CustomBattle cleanup)');
               cleanupSpiderLairQuest();
             }
+          }
+
+          // Hellgate Library: leave the Sewers (either during the pre-battle Bonelord talk
+          // or after the fight) — tear the whole quest state/scene down. The battle's own
+          // victory/defeat onClose already calls cleanupHellgateLibraryQuest(); this covers
+          // the player navigating away via the room picker before/instead of that.
+          if (lastOverlayHiderRoomName === HELLGATE_LIBRARY_BATTLE_ROOM_NAME
+            && currentRoomName && currentRoomName !== HELLGATE_LIBRARY_BATTLE_ROOM_NAME
+            && (playerEnteredHellgateLibrary || hellgateLibraryBattle)
+            && !hellgateLibraryBattle?.isRoomReloadInProgress?.()) {
+            console.log('[Quests Mod][Overlay Hider] Leaving Hellgate Library - clearing quest state (CustomBattle cleanup)');
+            cleanupHellgateLibraryQuest();
+          }
+
+          // Draconia Tower: leaving the Sewers during the fight or the post-battle talk —
+          // tear the whole quest scene down. The battle's own onClose handles victory
+          // (post-battle) / defeat (navigate away); this covers a manual room-picker exit.
+          if (lastOverlayHiderRoomName === DRACONIA_BATTLE_ROOM_NAME
+            && currentRoomName && currentRoomName !== DRACONIA_BATTLE_ROOM_NAME
+            && (playerEnteredDraconiaTower || draconiaTowerBattle)
+            && !draconiaTowerBattle?.isRoomReloadInProgress?.()) {
+            console.log('[Quests Mod][Overlay Hider] Leaving Draconia Tower - clearing quest state (CustomBattle cleanup)');
+            cleanupDraconiaTowerQuest();
           }
 
           // Lonesome Dragon: leaving room — cleanup unless returning to Dragon Lair after defeat for stairs retry
@@ -25497,6 +25650,955 @@ function createNPCCooldownManager() {
     showToast({ message: 'Following Elathriel into the treasure room...', logPrefix: getHellgateLogPrefix() });
   }
 
+  // =======================
+  // Hellgate Library (Elathriel — after Hellgate Part 1, teleports the player into the
+  // Sewers re-skinned as a library. The Wrinkled Bonelord stands on tile 68 as a board
+  // NPC; asking him for the "book" while holding "Beware of the Bonelords (Book)" makes
+  // him take it and spawn the full villain roster for a battle in place. Reward: White
+  // Mushroom, handed over by Elathriel on return. Mirrors createHellgateBattleInstance +
+  // the Lost Oracle rage-battle "keyword starts a battle in this room" pattern.)
+  // =======================
+
+  function getHellgateLibraryLogPrefix() {
+    return '[Quests Mod][Hellgate Library]';
+  }
+
+  function buildHellgateLibraryMutationSpriteHTML(entry, mutationKey) {
+    const spriteId = entry?.spriteId;
+    if (spriteId == null) return '';
+    const cropX = entry.cropX != null ? entry.cropX : 0;
+    const cropY = entry.cropY != null ? entry.cropY : 0;
+    const cropped = entry.cropped ? 'true' : 'false';
+    const bankStyle = entry.bank != null ? ` --bank: ${entry.bank};` : '';
+    const rightCalc = formatHellgateMutationOffsetCalc(entry.offsetX);
+    const bottomCalc = formatHellgateMutationOffsetCalc(entry.offsetY);
+    const offsetStyle = `${rightCalc ? ` right: ${rightCalc};` : ''}${bottomCalc ? ` bottom: ${bottomCalc};` : ''}`;
+    return `<div class="sprite item relative id-${spriteId}" ${QUEST_BOARD_ADDED_ATTR_HELLGATE_LIBRARY}="1" data-quests-hellgate-library-mutation-key="${mutationKey}" style="z-index: 1000;${bankStyle}${offsetStyle}"><div class="viewport"><img alt="${spriteId}" data-cropped="${cropped}" class="spritesheet" style="--cropX: ${cropX}; --cropY: ${cropY};"></div></div>`;
+  }
+
+  // Decorative "Elathriel followed me down" copy standing on tile 152, facing north — the
+  // same trick as ensureHellgateElathrielDummy() in the treasure room. Non-interactive,
+  // not a Board NPC, not a combat ally; tagged QUEST_BOARD_ADDED_ATTR_HELLGATE_LIBRARY so
+  // restoreHellgateLibraryTileMutations() tears it (and its name tag) down.
+  const HELLGATE_LIBRARY_ELATHRIEL_DUMMY_TILE_INDEX = 152;
+  const HELLGATE_LIBRARY_ELATHRIEL_DUMMY_ATTR = 'data-quests-hellgate-library-elathriel-dummy';
+  const HELLGATE_LIBRARY_ELATHRIEL_DUMMY_NAME_TAG_CLASS = 'quests-hellgate-library-elathriel-dummy-name-tag';
+
+  function ensureHellgateLibraryElathrielDummyNameTag(tileElement) {
+    let nameTag = document.querySelector(`.${HELLGATE_LIBRARY_ELATHRIEL_DUMMY_NAME_TAG_CLASS}`);
+    if (!nameTag) {
+      nameTag = document.createElement('span');
+      nameTag.className = `${HELLGATE_LIBRARY_ELATHRIEL_DUMMY_NAME_TAG_CLASS} revert-pixel-font-spacing pointer-events-none absolute flex w-[192px] flex-col items-center`;
+      nameTag.style.cssText = [
+        'position:absolute',
+        'user-select:none',
+        `z-index:${QUEST_FIGHT_ICON_Z_INDEX}`,
+        'pointer-events:none',
+        'line-height:1'
+      ].join(';');
+      nameTag.setAttribute(QUEST_BOARD_ADDED_ATTR_HELLGATE_LIBRARY, '1');
+
+      const nameLine = document.createElement('span');
+      nameLine.setAttribute('translate', 'no');
+      nameLine.className = 'select-none text-center pixel-font-16 text-whiteHighlight';
+      nameLine.style.cssText = 'line-height:1;font-size:16px;display:inline-flex;align-items:center;';
+
+      const nameText = document.createElement('span');
+      nameText.className = 'text-whiteHighlight';
+      nameText.style.cssText = 'color:rgb(96, 192, 96);text-shadow:-1px 0 #000,1px 0 #000,0 -1px #000,0 1px #000;';
+      nameText.textContent = 'Elathriel';
+
+      nameLine.appendChild(nameText);
+      nameTag.appendChild(nameLine);
+    }
+    positionBoardNpcNameTag(nameTag, tileElement);
+  }
+
+  function ensureHellgateLibraryElathrielDummy() {
+    const tile = getTileElement(HELLGATE_LIBRARY_ELATHRIEL_DUMMY_TILE_INDEX);
+    if (!tile) return;
+    if (!tile.querySelector(`[${HELLGATE_LIBRARY_ELATHRIEL_DUMMY_ATTR}="1"]`)) {
+      const outfitSpriteId = ELATHRIEL_OUTFIT_SPRITE_ID || '64';
+      const wrap = document.createElement('div');
+      wrap.innerHTML = `<div class="sprite outfit id-${outfitSpriteId} idle north pointer-events-none absolute bottom-0 right-0 select-none" ${QUEST_BOARD_ADDED_ATTR_HELLGATE_LIBRARY}="1" ${HELLGATE_LIBRARY_ELATHRIEL_DUMMY_ATTR}="1" style="z-index: 1000;"><div class="viewport"><img alt="north" class="actor spritesheet" data-shiny="false" style="animation-play-state: running;"></div></div>`;
+      if (wrap.firstElementChild) tile.appendChild(wrap.firstElementChild);
+    }
+    ensureHellgateLibraryElathrielDummyNameTag(tile);
+  }
+
+  function applyHellgateLibraryTileMutations() {
+    const mutations = HELLGATE_LIBRARY_TILE_MUTATIONS;
+    if (!mutations || typeof mutations !== 'object') return;
+    let wroteHitboxes = false;
+    Object.entries(mutations).forEach(([tileKey, entry]) => {
+      const tileIndex = Number(tileKey);
+      if (!Number.isFinite(tileIndex) || !entry || typeof entry !== 'object') return;
+      const tile = getTileElement(tileIndex);
+
+      (entry.remove || []).forEach((spriteId) => {
+        if (spriteId == null || !tile) return;
+        tile.querySelectorAll(`.sprite.item.relative.id-${spriteId}`).forEach((sprite) => {
+          hideQuestBoardElement(sprite, { tag: QUEST_BOARD_HIDDEN_TAG_HELLGATE_LIBRARY });
+        });
+      });
+
+      (entry.add || []).forEach((spriteEntry, spriteIndex) => {
+        const spriteId = spriteEntry?.spriteId;
+        if (spriteId == null || !tile) return;
+        const mutationKey = `${tileIndex}-${spriteIndex}`;
+        if (tile.querySelector(`[data-quests-hellgate-library-mutation-key="${mutationKey}"]`)) return;
+        const wrap = document.createElement('div');
+        wrap.innerHTML = buildHellgateLibraryMutationSpriteHTML(spriteEntry, mutationKey);
+        if (wrap.firstElementChild) tile.appendChild(wrap.firstElementChild);
+      });
+
+      if (Array.isArray(entry.floorBelow) && entry.floorBelow.length) {
+        applyQuestFloorBelowSprites(
+          tileIndex, entry.floorBelow, QUEST_BOARD_ADDED_ATTR_HELLGATE_LIBRARY, 'data-quests-hellgate-library-fb-key'
+        );
+      }
+
+      if (Object.prototype.hasOwnProperty.call(entry, 'hitbox')) {
+        try {
+          getHellgateRoomRefs().forEach((room) => {
+            const data = room?.file?.data;
+            if (!data) return;
+            if (!Array.isArray(data.hitboxes)) data.hitboxes = [];
+            data.hitboxes[tileIndex] = entry.hitbox === true;
+            wroteHitboxes = true;
+          });
+        } catch (_) {}
+      }
+    });
+
+    if (wroteHitboxes) hellgateLibraryHitboxesApplied = true;
+
+    ensureHellgateLibraryElathrielDummy();
+
+    const battle = hellgateLibraryBattle;
+    if (battle?.refreshPlacementHitboxMaskFromLive) {
+      battle.refreshPlacementHitboxMaskFromLive(() => playerEnteredHellgateLibrary);
+    } else if (battle?.syncPlacementHitboxMask) {
+      battle.syncPlacementHitboxMask(() => playerEnteredHellgateLibrary);
+    }
+  }
+
+  function restoreHellgateLibraryTileMutations() {
+    restoreQuestBoardElementsByTag(QUEST_BOARD_HIDDEN_TAG_HELLGATE_LIBRARY);
+    document.querySelectorAll(`[${QUEST_BOARD_ADDED_ATTR_HELLGATE_LIBRARY}="1"]`).forEach((el) => {
+      try { el.remove(); } catch (_) {}
+    });
+    hellgateLibraryHitboxesApplied = false;
+  }
+
+  function stopHellgateLibraryPreBattleSync() {
+    if (hellgateLibraryPreBattleSub) {
+      try { hellgateLibraryPreBattleSub.unsubscribe?.(); } catch (_) {}
+      hellgateLibraryPreBattleSub = null;
+    }
+  }
+
+  // Paint the library reskin on every animation frame for `durationMs` — used right after
+  // a room navigation so the plain Sewers is covered on the first frame its tiles mount,
+  // rather than waiting for a fixed retry tick or the battle's persistent visual sync.
+  function paintHellgateLibrarySceneBurst(durationMs = 600) {
+    const deadline = (typeof performance !== 'undefined' ? performance.now() : Date.now()) + durationMs;
+    const tick = () => {
+      if (!playerEnteredHellgateLibrary) return;
+      if (isOnRoomByName(HELLGATE_LIBRARY_BATTLE_ROOM_NAME)) applyHellgateLibraryTileMutations();
+      const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      if (now < deadline && typeof requestAnimationFrame === 'function') requestAnimationFrame(tick);
+    };
+    tick();
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(tick);
+    [120, 300, 600].forEach((d) => setTimeout(tick, d));
+  }
+
+  // During the talk-to-the-Bonelord window there is no battle yet, so navigating into the
+  // Sewers makes the game auto-place the player's saved autoplay team (and any native
+  // Sewers actors). Nobody should be on the board until "book" starts the fight — strip
+  // every piece back out. Stops running the instant the battle instance is created.
+  function clearHellgateLibraryBoardPieces() {
+    try {
+      const cfg = globalThis.state?.board?.getSnapshot?.()?.context?.boardConfig;
+      if (!Array.isArray(cfg) || cfg.length === 0) return;
+      globalThis.state.board.send({
+        type: 'setState',
+        fn: (prev) => ({ ...prev, boardConfig: [] })
+      });
+    } catch (_) {}
+  }
+
+  // Before the fight starts there is no CustomBattle instance to run startPersistentVisualSync,
+  // so keep the library scene painted until it hands off. The plain Sewers is visible for
+  // exactly as long as it takes React to mount the new room's tiles — so instead of a few
+  // spaced-out setTimeouts, paint on every animation frame for the first ~600ms (catches
+  // the room the instant its DOM exists) and keep a board subscription for anything after.
+  function startHellgateLibraryPreBattleSync() {
+    stopHellgateLibraryPreBattleSync();
+    const paint = () => {
+      if (playerEnteredHellgateLibrary
+        && !hellgateLibraryBattleStarted
+        && isOnRoomByName(HELLGATE_LIBRARY_BATTLE_ROOM_NAME)) {
+        clearHellgateLibraryBoardPieces();
+        applyHellgateLibraryTileMutations();
+      }
+    };
+    paint();
+    const rafDeadline = (typeof performance !== 'undefined' ? performance.now() : Date.now()) + 600;
+    const rafPaint = () => {
+      if (!playerEnteredHellgateLibrary || hellgateLibraryBattleStarted) return;
+      paint();
+      const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      if (now < rafDeadline && typeof requestAnimationFrame === 'function') requestAnimationFrame(rafPaint);
+    };
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(rafPaint);
+    [200, 500, 1000, 1600].forEach((d) => setTimeout(paint, d));
+    if (!globalThis.state?.board?.subscribe) return;
+    hellgateLibraryPreBattleSub = globalThis.state.board.subscribe(() => {
+      if (!playerEnteredHellgateLibrary || hellgateLibraryBattleStarted) {
+        stopHellgateLibraryPreBattleSync();
+        return;
+      }
+      paint();
+    });
+  }
+
+  function restoreBoardSetupHellgateLibrary() {
+    if (hellgateLibraryBattle) hellgateLibraryBattle.restoreBoardSetup();
+    restoreHellgateLibraryTileMutations();
+  }
+
+  function cleanupHellgateLibraryQuest() {
+    try {
+      removeCustomBattleStatusToast();
+      stopHellgateLibraryPreBattleSync();
+      wrinkledBonelordBossHpBar.remove();
+      playerEnteredHellgateLibrary = false;
+      hellgateLibraryBattleStarted = false;
+      restoreHellgateLibraryTileMutations();
+      if (hellgateLibraryBattle) {
+        hellgateLibraryBattle.cleanup(restoreBoardSetupHellgateLibrary, showQuestOverlays);
+        hellgateLibraryBattle = null;
+        console.log(`${getHellgateLibraryLogPrefix()} Battle cleaned up`);
+      }
+      updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+    } catch (error) {
+      console.error(`${getHellgateLibraryLogPrefix()} Error cleaning up:`, error);
+    }
+  }
+
+  function createHellgateLibraryBattleInstance(roomId) {
+    if (!window.CustomBattles) {
+      console.error(`${getHellgateLibraryLogPrefix()} CustomBattles still not available`);
+      return null;
+    }
+    const spawn = getHydratedQuestBattleSpawn(HELLGATE_LIBRARY_BATTLE_ID || 'hellgate_library');
+    const villains = spawn.villains;
+    const tileRestrictions = {};
+    if (spawn.allowedTiles?.length) {
+      tileRestrictions.allowedTiles = spawn.allowedTiles;
+      tileRestrictions.message = spawn.allowedTilesMessage || 'Ally creatures can only be placed on the marked tiles!';
+    }
+    const config = {
+      name: HELLGATE_LIBRARY_BATTLE_DISPLAY_NAME || 'Hellgate Library',
+      roomId,
+      villains,
+      allyLimit: spawn.allyLimit ?? 8,
+      preventVillainMovement: spawn.preventVillainMovement !== false,
+      hideVillainSprites: spawn.hideVillainSprites !== false,
+      ...(Object.keys(tileRestrictions).length ? { tileRestrictions } : {}),
+      activationCheck: (isSandbox, inBattleArea) => isSandbox && inBattleArea && playerEnteredHellgateLibrary,
+      victoryDefeat: {
+        onVictory: async () => {
+          console.log(`${getHellgateLibraryLogPrefix()} The librarian's guardians defeated!`);
+          try {
+            await persistMissionProgress(HELLGATE_LIBRARY_MISSION, {
+              accepted: true,
+              completed: false,
+              battleCompleted: true
+            });
+          } catch (error) {
+            console.error(`${getHellgateLibraryLogPrefix()} Error saving battleCompleted flag:`, error);
+          }
+        },
+        onDefeat: () => {},
+        onClose: () => {
+          cleanupHellgateLibraryQuest();
+          setTimeout(() => navigateToHedgeMazeFromHellgate(), 100);
+        },
+        victoryTitle: 'Victory!',
+        defeatTitle: 'Defeat',
+        victoryMessage: getMissionDialogueLine(
+          HELLGATE_LIBRARY_MISSION,
+          'battleVictory',
+          'The library is silent now. Return to Elathriel.'
+        ),
+        defeatMessage: getMissionDialogueLine(
+          HELLGATE_LIBRARY_MISSION,
+          'battleDefeat',
+          "The librarian's guardians proved the sharper scholars."
+        ),
+        showItems: false,
+        items: []
+      }
+    };
+    return window.CustomBattles.create(config);
+  }
+
+  function isHellgateLibraryBattleCompletedPendingReward() {
+    const progress = getMissionProgress(HELLGATE_LIBRARY_MISSION);
+    return !!progress?.battleCompleted && !progress?.completed;
+  }
+
+  async function completeHellgateLibraryMissionWithMushroom() {
+    const progress = getMissionProgress(HELLGATE_LIBRARY_MISSION);
+    if (progress?.completed) return false;
+    try {
+      await addQuestItem('White Mushroom', 1);
+      showQuestItemNotification('White Mushroom', 1);
+      await persistMissionProgress(HELLGATE_LIBRARY_MISSION, {
+        accepted: true,
+        completed: true,
+        battleCompleted: true
+      });
+      NotificationService.showQuestCompleted(HELLGATE_LIBRARY_MISSION, getHellgateLibraryLogPrefix(), {
+        productName: 'White Mushroom'
+      });
+      console.log(`${getHellgateLibraryLogPrefix()} Mission completed — White Mushroom awarded`);
+      return true;
+    } catch (error) {
+      console.error(`${getHellgateLibraryLogPrefix()} Error completing mission with mushroom reward:`, error);
+      return false;
+    }
+  }
+
+  function initializeHellgateLibraryBattle(roomId) {
+    if (window.CustomBattles) return createHellgateLibraryBattleInstance(roomId);
+    return waitForCustomBattles({ logPrefix: getHellgateLibraryLogPrefix() }).then((api) => {
+      if (!api) return null;
+      return createHellgateLibraryBattleInstance(roomId);
+    });
+  }
+
+  function setupHellgateLibraryTileRestrictions() {
+    if (!hellgateLibraryBattle) return;
+    hellgateLibraryBattle.setupTileRestrictions(
+      () => playerEnteredHellgateLibrary,
+      NotificationService.createBattleToastCallback(getHellgateLibraryLogPrefix())
+    );
+    hellgateLibraryBattle.setupAllyLimit?.(
+      () => playerEnteredHellgateLibrary,
+      NotificationService.createBattleToastCallback(getHellgateLibraryLogPrefix())
+    );
+  }
+
+  // Pre-battle: bring the CustomBattle instance up (setup() marks it active + adds it to
+  // activeCustomBattles, so isAnyCustomBattleActiveForRoom('rkswrs') is true and every
+  // Sewers quest helper — "Visit Al Dee" on tile 79, the Elathriel/Copper Key sign
+  // readers, the Sewers portal, Spider Lair / Jakundaf marks — suppresses itself the same
+  // way it does for every other custom battle in this room). Villains are NOT spawned yet;
+  // that waits for the Bonelord to take the book.
+  function setupHellgateLibraryPreBattle(battle) {
+    if (!battle) return false;
+    hellgateLibraryBattle = battle;
+    hellgateLibraryBattle.setup(
+      () => playerEnteredHellgateLibrary,
+      NotificationService.createBattleToastCallback(getHellgateLibraryLogPrefix())
+    );
+    hellgateLibraryBattle.resetSandboxBattleState();
+    setupHellgateLibraryTileRestrictions();
+    return true;
+  }
+
+  // Book taken — spawn the villain roster on the already-active instance and hand the
+  // scene painting over to the battle's persistent visual sync.
+  function spawnHellgateLibraryVillains() {
+    const battle = hellgateLibraryBattle;
+    if (!battle) return false;
+    stopHellgateLibraryPreBattleSync();
+    // Keep the library scene painted through the gap between the pre-battle sync stopping
+    // and startPersistentVisualSync() taking over in the villain-setup onComplete.
+    paintHellgateLibrarySceneBurst(1400);
+    showCustomBattleStatusToast({
+      battleName: HELLGATE_LIBRARY_BATTLE_DISPLAY_NAME || 'Hellgate Library',
+      allyLimit: battle.config?.allyLimit ?? 8,
+      battle,
+      logPrefix: getHellgateLibraryLogPrefix()
+    });
+    battle.scheduleEntryVillainSetup({
+      attemptDelays: [0, 100, 250, 500, 800, 1200],
+      isActiveCheck: () => playerEnteredHellgateLibrary,
+      onComplete: () => {
+        hideQuestOverlays();
+        hideHeroEditorButton();
+        battle.startPersistentVisualSync(applyHellgateLibraryTileMutations, {
+          isActiveCheck: () => playerEnteredHellgateLibrary
+        });
+      }
+    });
+    return true;
+  }
+
+  function startHellgateLibraryBattle(npcConfig = null) {
+    const progress = getMissionProgress(HELLGATE_LIBRARY_MISSION) || {};
+    if (progress.completed || progress.battleCompleted) {
+      console.log(`${getHellgateLibraryLogPrefix()} Mission already finished — not starting battle`);
+      return;
+    }
+    const roomId = HELLGATE_LIBRARY_BATTLE_ROOM_ID || getRoomIdByRoomName(HELLGATE_LIBRARY_BATTLE_ROOM_NAME);
+    if (!roomId) {
+      showToast({ message: 'The Hellgate Library could not be found.', logPrefix: getHellgateLibraryLogPrefix() });
+      return;
+    }
+    try {
+      hellgateLibraryBattleStarted = true;
+      const config = npcConfig || BOARD_NPC_CONFIGS.find((c) => c.id === BOARD_NPC_BONELORD_ID);
+      if (config) removeBoardNpcOverlay(config);
+      updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+
+      // The instance is normally already up from enterHellgateLibrary() — just spawn the
+      // villains. If entry's async create hasn't landed yet, build it now first.
+      if (hellgateLibraryBattle) {
+        spawnHellgateLibraryVillains();
+        return;
+      }
+      const initResult = initializeHellgateLibraryBattle(roomId);
+      const finish = (battle) => {
+        if (setupHellgateLibraryPreBattle(battle)) {
+          spawnHellgateLibraryVillains();
+        } else {
+          hellgateLibraryBattleStarted = false;
+          console.error(`${getHellgateLibraryLogPrefix()} Failed to set up battle`);
+        }
+      };
+      if (initResult && typeof initResult.then === 'function') {
+        initResult.then(finish).catch((error) => {
+          hellgateLibraryBattleStarted = false;
+          console.error(`${getHellgateLibraryLogPrefix()} Error initializing battle:`, error);
+        });
+        return;
+      }
+      finish(initResult);
+    } catch (error) {
+      hellgateLibraryBattleStarted = false;
+      console.error(`${getHellgateLibraryLogPrefix()} Error starting battle:`, error);
+    }
+  }
+
+  function enterHellgateLibrary() {
+    let roomId = HELLGATE_LIBRARY_BATTLE_ROOM_ID || getRoomIdByRoomName(HELLGATE_LIBRARY_BATTLE_ROOM_NAME);
+    if (!roomId) roomId = getRoomIdByRoomName(HELLGATE_LIBRARY_BATTLE_ROOM_NAME);
+    if (!roomId) {
+      showToast({ message: 'The Hellgate Library could not be found.', logPrefix: getHellgateLibraryLogPrefix() });
+      return;
+    }
+
+    playerEnteredHellgateLibrary = true;
+    hellgateLibraryBattleStarted = false;
+    hellgateLibraryElathrielSignReader.resetRead();
+    if (hellgateLibraryBattle) {
+      hellgateLibraryBattle.cleanup(restoreBoardSetupHellgateLibrary, showQuestOverlays);
+      hellgateLibraryBattle = null;
+    }
+
+    globalThis.state.board.send({ type: 'selectRoomById', roomId });
+
+    // Book already handed over on an earlier visit (fight abandoned / lost) — there's no
+    // talk step left, the Bonelord has nothing to take. Skip straight to the battle.
+    const libProgress = getMissionProgress(HELLGATE_LIBRARY_MISSION) || {};
+    const skipToBattle = libProgress.bookGiven && !libProgress.battleCompleted && !libProgress.completed;
+
+    // Bring the battle instance up now (no villains yet) so it registers as the active
+    // custom battle for rkswrs and the Sewers quest helpers hide — then paint the library
+    // scene / keep the board clear until the villains spawn.
+    const initResult = initializeHellgateLibraryBattle(roomId);
+    if (initResult && typeof initResult.then === 'function') {
+      initResult.then((battle) => {
+        // Bail if the player already left, or "book" beat this async create to it and
+        // started its own instance — never stand up a second battle for the same room.
+        if (playerEnteredHellgateLibrary && !hellgateLibraryBattleStarted && !hellgateLibraryBattle) {
+          setupHellgateLibraryPreBattle(battle);
+          if (skipToBattle) startHellgateLibraryBattle();
+        }
+      }).catch((error) => console.error(`${getHellgateLibraryLogPrefix()} Error initializing pre-battle instance:`, error));
+    } else if (initResult) {
+      setupHellgateLibraryPreBattle(initResult);
+    }
+    startHellgateLibraryPreBattleSync();
+    updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+
+    if (skipToBattle) {
+      showToast({ message: 'The librarian is still waiting. No more words.', logPrefix: getHellgateLibraryLogPrefix() });
+      // Instance is already up from the sync path above (unless CustomBattles was still
+      // loading, handled in the async branch) — spawn the villains straight away.
+      if (hellgateLibraryBattle && !hellgateLibraryBattleStarted) startHellgateLibraryBattle();
+      return;
+    }
+
+    showToast({ message: 'Following Elathriel down into the library...', logPrefix: getHellgateLibraryLogPrefix() });
+  }
+
+  // =======================
+  // Draconia Tower (Elathriel — after Hellgate Library, teleports the player into the
+  // Sewers re-skinned as a dragon cemetery. The battle spawns on entry (Dragon Lord,
+  // Dragon, An Old Dragonlord). On victory the fight is torn down and An Old Dragonlord
+  // places as a board NPC on tile 80; saying "hi" while holding a White Mushroom trades
+  // it for the Dragonfetish and teleports the player back to Hedge Maze, where Elathriel
+  // closes the quest. Mirrors the Lost Oracle rage-battle "win → talk to the NPC" flow.)
+  // =======================
+
+  function getDraconiaLogPrefix() {
+    return '[Quests Mod][Draconia Tower]';
+  }
+
+  // Decorative "Elathriel waits here" — his outfit sprite only, no name tag, west-facing.
+  // Rendered onto the main tile layer at tile 72 (the #floor-below layer only shows through
+  // real gaps in the floor, which the solid Sewers reskin doesn't have). Tagged
+  // QUEST_BOARD_ADDED_ATTR_DRACONIA so restoreDraconiaTileMutations() clears it with the
+  // rest of the reskin.
+  const DRACONIA_ELATHRIEL_DUMMY_TILE_INDEX = 72;
+  const DRACONIA_ELATHRIEL_DUMMY_ATTR = 'data-quests-draconia-elathriel-dummy';
+
+  function ensureDraconiaElathrielFloorBelowDummy() {
+    const tile = getTileElement(DRACONIA_ELATHRIEL_DUMMY_TILE_INDEX);
+    if (!tile) return;
+    if (tile.querySelector(`[${DRACONIA_ELATHRIEL_DUMMY_ATTR}="1"]`)) return;
+    const outfitSpriteId = ELATHRIEL_OUTFIT_SPRITE_ID || '64';
+    const wrap = document.createElement('div');
+    wrap.innerHTML = `<div class="sprite outfit id-${outfitSpriteId} idle west pointer-events-none absolute bottom-0 right-0 select-none" ${QUEST_BOARD_ADDED_ATTR_DRACONIA}="1" ${DRACONIA_ELATHRIEL_DUMMY_ATTR}="1" style="z-index: 1000;"><div class="viewport"><img alt="west" class="actor spritesheet" data-shiny="false" style="animation-play-state: running;"></div></div>`;
+    if (wrap.firstElementChild) tile.appendChild(wrap.firstElementChild);
+  }
+
+  // Renders editor-authored floor-below sprites (a mutation entry's `.floorBelow` array)
+  // as bare `.sprite.item` direct children of #floor-below — the same shape the native
+  // game uses, with z = floor*(-30000) + 10*tileIndex + stackIndex. Quest reskins that
+  // painted a lower floor in the Map Editor came through empty before this, because the
+  // export dropped addedFloorBelowConfigs and there was no render path here.
+  function applyQuestFloorBelowSprites(tileIndex, list, addedAttr, keyAttr) {
+    const floorBelow = document.getElementById('floor-below');
+    const tile = getTileElement(tileIndex);
+    if (!floorBelow || !tile || !Array.isArray(list) || !list.length) return;
+    const rightPx = parseInt(String(tile.style.right).replace(/[^0-9-]/g, ''), 10);
+    const bottomPx = parseInt(String(tile.style.bottom).replace(/[^0-9-]/g, ''), 10);
+    if (!Number.isFinite(rightPx) || !Number.isFinite(bottomPx)) return;
+    list.forEach((entry, idx) => {
+      const spriteId = entry?.spriteId;
+      if (spriteId == null) return;
+      const mkey = `${tileIndex}-${idx}`;
+      if (floorBelow.querySelector(`[${keyAttr}="${mkey}"]`)) return;
+      const floor = Math.max(1, Math.min(9, Math.floor(Number(entry.floor) || 1)));
+      const z = floor * -30000 + 10 * tileIndex + idx;
+      const r = rightPx + (Number(entry.offsetX) || 0);
+      const b = bottomPx + (Number(entry.offsetY) || 0);
+      const cropX = entry.cropX != null ? entry.cropX : 0;
+      const cropY = entry.cropY != null ? entry.cropY : 0;
+      const cropped = entry.cropped ? 'true' : 'false';
+      const bankStyle = entry.bank != null ? `--bank: ${entry.bank};` : '';
+      const wrap = document.createElement('div');
+      wrap.innerHTML = `<div class="sprite item id-${spriteId} pointer-events-none absolute size-scaled-sprite" ${addedAttr}="1" ${keyAttr}="${mkey}" style="z-index:${z};right:calc(${r}px * var(--zoomFactor));bottom:calc(${b}px * var(--zoomFactor));${bankStyle}"><div class="viewport"><img alt="${spriteId}" data-cropped="${cropped}" class="spritesheet" style="--cropX: ${cropX}; --cropY: ${cropY};"></div></div>`;
+      if (wrap.firstElementChild) floorBelow.appendChild(wrap.firstElementChild);
+    });
+  }
+
+  function buildDraconiaMutationSpriteHTML(entry, mutationKey) {
+    const spriteId = entry?.spriteId;
+    if (spriteId == null) return '';
+    const cropX = entry.cropX != null ? entry.cropX : 0;
+    const cropY = entry.cropY != null ? entry.cropY : 0;
+    const cropped = entry.cropped ? 'true' : 'false';
+    const bankStyle = entry.bank != null ? ` --bank: ${entry.bank};` : '';
+    const rightCalc = formatHellgateMutationOffsetCalc(entry.offsetX);
+    const bottomCalc = formatHellgateMutationOffsetCalc(entry.offsetY);
+    const offsetStyle = `${rightCalc ? ` right: ${rightCalc};` : ''}${bottomCalc ? ` bottom: ${bottomCalc};` : ''}`;
+    return `<div class="sprite item relative id-${spriteId}" ${QUEST_BOARD_ADDED_ATTR_DRACONIA}="1" data-quests-draconia-mutation-key="${mutationKey}" style="z-index: 1000;${bankStyle}${offsetStyle}"><div class="viewport"><img alt="${spriteId}" data-cropped="${cropped}" class="spritesheet" style="--cropX: ${cropX}; --cropY: ${cropY};"></div></div>`;
+  }
+
+  function applyDraconiaTileMutations() {
+    const mutations = DRACONIA_TILE_MUTATIONS;
+    if (!mutations || typeof mutations !== 'object') return;
+    let wroteHitboxes = false;
+    Object.entries(mutations).forEach(([tileKey, entry]) => {
+      const tileIndex = Number(tileKey);
+      if (!Number.isFinite(tileIndex) || !entry || typeof entry !== 'object') return;
+      const tile = getTileElement(tileIndex);
+
+      (entry.remove || []).forEach((spriteId) => {
+        if (spriteId == null || !tile) return;
+        tile.querySelectorAll(`.sprite.item.relative.id-${spriteId}`).forEach((sprite) => {
+          hideQuestBoardElement(sprite, { tag: QUEST_BOARD_HIDDEN_TAG_DRACONIA });
+        });
+      });
+
+      (entry.add || []).forEach((spriteEntry, spriteIndex) => {
+        const spriteId = spriteEntry?.spriteId;
+        if (spriteId == null || !tile) return;
+        const mutationKey = `${tileIndex}-${spriteIndex}`;
+        if (tile.querySelector(`[data-quests-draconia-mutation-key="${mutationKey}"]`)) return;
+        const wrap = document.createElement('div');
+        wrap.innerHTML = buildDraconiaMutationSpriteHTML(spriteEntry, mutationKey);
+        if (wrap.firstElementChild) tile.appendChild(wrap.firstElementChild);
+      });
+
+      if (Array.isArray(entry.floorBelow) && entry.floorBelow.length) {
+        applyQuestFloorBelowSprites(
+          tileIndex, entry.floorBelow, QUEST_BOARD_ADDED_ATTR_DRACONIA, 'data-quests-draconia-fb-key'
+        );
+      }
+
+      if (Object.prototype.hasOwnProperty.call(entry, 'hitbox')) {
+        try {
+          getHellgateRoomRefs().forEach((room) => {
+            const data = room?.file?.data;
+            if (!data) return;
+            if (!Array.isArray(data.hitboxes)) data.hitboxes = [];
+            data.hitboxes[tileIndex] = entry.hitbox === true;
+            wroteHitboxes = true;
+          });
+        } catch (_) {}
+      }
+    });
+
+    if (wroteHitboxes) draconiaTowerHitboxesApplied = true;
+
+    ensureDraconiaElathrielFloorBelowDummy();
+
+    const battle = draconiaTowerBattle;
+    if (battle?.refreshPlacementHitboxMaskFromLive) {
+      battle.refreshPlacementHitboxMaskFromLive(() => playerEnteredDraconiaTower);
+    } else if (battle?.syncPlacementHitboxMask) {
+      battle.syncPlacementHitboxMask(() => playerEnteredDraconiaTower);
+    }
+  }
+
+  function restoreDraconiaTileMutations() {
+    restoreQuestBoardElementsByTag(QUEST_BOARD_HIDDEN_TAG_DRACONIA);
+    document.querySelectorAll(`[${QUEST_BOARD_ADDED_ATTR_DRACONIA}="1"]`).forEach((el) => {
+      try { el.remove(); } catch (_) {}
+    });
+    draconiaTowerHitboxesApplied = false;
+  }
+
+  function stopDraconiaSceneSync() {
+    if (draconiaTowerSceneSub) {
+      try { draconiaTowerSceneSub.unsubscribe?.(); } catch (_) {}
+      draconiaTowerSceneSub = null;
+    }
+  }
+
+  // Keeps the dragon-cemetery reskin painted on room navigations / React remounts while
+  // there is no active battle instance to run startPersistentVisualSync — i.e. the brief
+  // window before the villains spawn on entry, and the whole post-battle talk window.
+  function startDraconiaSceneSync() {
+    stopDraconiaSceneSync();
+    const paint = () => {
+      if (playerEnteredDraconiaTower
+        && !draconiaTowerBattle
+        && isOnRoomByName(DRACONIA_BATTLE_ROOM_NAME)) {
+        applyDraconiaTileMutations();
+        if (draconiaTowerPostBattle) {
+          // Keep the board empty for the whole post-battle window — the only thing
+          // standing should be the Old Dragonlord NPC overlay. Guards against a room
+          // reload dropping the player's saved team back onto the tiles.
+          clearDraconiaBoardPieces();
+          updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+        }
+      }
+    };
+    paint();
+    const deadline = (typeof performance !== 'undefined' ? performance.now() : Date.now()) + 800;
+    const rafPaint = () => {
+      if (!playerEnteredDraconiaTower) return;
+      paint();
+      const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      if (now < deadline && typeof requestAnimationFrame === 'function') requestAnimationFrame(rafPaint);
+    };
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(rafPaint);
+    [150, 400, 900, 1600].forEach((d) => setTimeout(paint, d));
+    if (!globalThis.state?.board?.subscribe) return;
+    draconiaTowerSceneSub = globalThis.state.board.subscribe(() => {
+      if (!playerEnteredDraconiaTower) {
+        stopDraconiaSceneSync();
+        return;
+      }
+      paint();
+    });
+  }
+
+  function restoreBoardSetupDraconia() {
+    if (draconiaTowerBattle) draconiaTowerBattle.restoreBoardSetup();
+    restoreDraconiaTileMutations();
+  }
+
+  function cleanupDraconiaTowerQuest() {
+    try {
+      removeCustomBattleStatusToast();
+      stopDraconiaSceneSync();
+      oldDragonlordBossHpBar.remove();
+      playerEnteredDraconiaTower = false;
+      draconiaTowerPostBattle = false;
+      restoreDraconiaTileMutations();
+      if (draconiaTowerBattle) {
+        draconiaTowerBattle.cleanup(restoreBoardSetupDraconia, showQuestOverlays);
+        draconiaTowerBattle = null;
+        console.log(`${getDraconiaLogPrefix()} Battle cleaned up`);
+      }
+      updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+    } catch (error) {
+      console.error(`${getDraconiaLogPrefix()} Error cleaning up:`, error);
+    }
+  }
+
+  // Victory: tear down the fight but stay in the room. An Old Dragonlord places as a
+  // board NPC on tile 80 (post-battle talk); the dragon-cemetery reskin keeps painting
+  // via the scene sync. Deliberately does NOT restoreDraconiaTileMutations() — the reskin
+  // must stay up while the player talks to the old one.
+  // Wipe every piece (defeated villains + the player's surviving allies) off the board so
+  // the only thing left standing after victory is the Old Dragonlord board NPC.
+  function clearDraconiaBoardPieces() {
+    try {
+      const cfg = globalThis.state?.board?.getSnapshot?.()?.context?.boardConfig;
+      if (!Array.isArray(cfg) || cfg.length === 0) return;
+      globalThis.state.board.send({
+        type: 'setState',
+        fn: (prev) => ({ ...prev, boardConfig: [] })
+      });
+    } catch (_) {}
+  }
+
+  function enterDraconiaTowerPostBattle() {
+    draconiaTowerPostBattle = true;
+    oldDragonlordBossHpBar.remove();
+    if (draconiaTowerBattle) {
+      draconiaTowerBattle.cleanup(
+        () => { if (draconiaTowerBattle) draconiaTowerBattle.restoreBoardSetup(); },
+        showQuestOverlays
+      );
+      draconiaTowerBattle = null;
+    }
+    removeCustomBattleStatusToast();
+    // Order matters: clear ALL ally/villain pieces first, THEN place the ally NPC, so the
+    // NPC never has to fight the board framework re-adding pieces underneath it.
+    clearDraconiaBoardPieces();
+    startDraconiaSceneSync();
+    updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+    showToast({
+      message: getMissionDialogueLine(
+        DRACONIA_TOWER_MISSION,
+        'battleVictory',
+        'The guardians are down. Speak with the Old Dragonlord among the bones.'
+      ),
+      logPrefix: getDraconiaLogPrefix()
+    });
+  }
+
+  function createDraconiaTowerBattleInstance(roomId) {
+    if (!window.CustomBattles) {
+      console.error(`${getDraconiaLogPrefix()} CustomBattles still not available`);
+      return null;
+    }
+    const spawn = getHydratedQuestBattleSpawn(DRACONIA_BATTLE_ID || 'draconia_tower');
+    const villains = spawn.villains;
+    const tileRestrictions = {};
+    if (spawn.allowedTiles?.length) {
+      tileRestrictions.allowedTiles = spawn.allowedTiles;
+      tileRestrictions.message = spawn.allowedTilesMessage || 'Ally creatures can only be placed on the marked tiles!';
+    }
+    const config = {
+      name: DRACONIA_BATTLE_DISPLAY_NAME || 'Draconia Tower',
+      roomId,
+      villains,
+      allyLimit: spawn.allyLimit ?? 6,
+      preventVillainMovement: spawn.preventVillainMovement !== false,
+      hideVillainSprites: spawn.hideVillainSprites !== false,
+      ...(Object.keys(tileRestrictions).length ? { tileRestrictions } : {}),
+      activationCheck: (isSandbox, inBattleArea) => isSandbox && inBattleArea && playerEnteredDraconiaTower,
+      victoryDefeat: {
+        onVictory: async () => {
+          console.log(`${getDraconiaLogPrefix()} Dragon Lord and beast defeated`);
+          try {
+            await persistMissionProgress(DRACONIA_TOWER_MISSION, {
+              accepted: true,
+              completed: false,
+              battleCompleted: true
+            });
+          } catch (error) {
+            console.error(`${getDraconiaLogPrefix()} Error saving battleCompleted flag:`, error);
+          }
+        },
+        onDefeat: () => {},
+        // No reloadRoomOnClose — the room stays as-is (reskin already painted) and we
+        // just hand over to the post-battle talk. A reload/bounce would race the
+        // room-leave cleanup handler and drop the post-battle state.
+        onClose: (isVictory) => {
+          if (isVictory) {
+            // Stay in the cemetery — hand over to the post-battle talk with the old one.
+            enterDraconiaTowerPostBattle();
+          } else {
+            cleanupDraconiaTowerQuest();
+            setTimeout(() => navigateToHedgeMazeFromHellgate(), 100);
+          }
+        },
+        victoryTitle: 'Victory!',
+        defeatTitle: 'Defeat',
+        victoryMessage: getMissionDialogueLine(
+          DRACONIA_TOWER_MISSION,
+          'battleVictory',
+          'The guardians are down and the Old Dragonlord kneels among the bones. Go and speak with him.'
+        ),
+        defeatMessage: getMissionDialogueLine(
+          DRACONIA_TOWER_MISSION,
+          'battleDefeat',
+          'The dragons of Draconia are not so easily put to rest.'
+        ),
+        showItems: false,
+        items: []
+      }
+    };
+    return window.CustomBattles.create(config);
+  }
+
+  function isDraconiaTradePending() {
+    const progress = getMissionProgress(DRACONIA_TOWER_MISSION) || {};
+    return !!progress.battleCompleted && !progress.dragonfetishReceived && !progress.completed;
+  }
+
+  function isDraconiaCompletionPending() {
+    const progress = getMissionProgress(DRACONIA_TOWER_MISSION) || {};
+    return !!progress.dragonfetishReceived && !progress.completed;
+  }
+
+  async function completeDraconiaTowerMission() {
+    const progress = getMissionProgress(DRACONIA_TOWER_MISSION) || {};
+    if (progress.completed) return false;
+    try {
+      await persistMissionProgress(DRACONIA_TOWER_MISSION, {
+        accepted: true,
+        completed: true,
+        battleCompleted: true,
+        dragonfetishReceived: true
+      });
+      NotificationService.showQuestCompleted(DRACONIA_TOWER_MISSION, getDraconiaLogPrefix(), {
+        productName: 'Dragonfetish'
+      });
+      console.log(`${getDraconiaLogPrefix()} Mission completed`);
+      return true;
+    } catch (error) {
+      console.error(`${getDraconiaLogPrefix()} Error completing mission:`, error);
+      return false;
+    }
+  }
+
+  function initializeDraconiaTowerBattle(roomId) {
+    if (window.CustomBattles) return createDraconiaTowerBattleInstance(roomId);
+    return waitForCustomBattles({ logPrefix: getDraconiaLogPrefix() }).then((api) => {
+      if (!api) return null;
+      return createDraconiaTowerBattleInstance(roomId);
+    });
+  }
+
+  function setupDraconiaTowerBattleInstance(battle) {
+    if (!battle) return false;
+    draconiaTowerBattle = battle;
+    stopDraconiaSceneSync();
+    draconiaTowerBattle.setup(
+      () => playerEnteredDraconiaTower,
+      NotificationService.createBattleToastCallback(getDraconiaLogPrefix())
+    );
+    draconiaTowerBattle.resetSandboxBattleState();
+    draconiaTowerBattle.setupTileRestrictions(
+      () => playerEnteredDraconiaTower,
+      NotificationService.createBattleToastCallback(getDraconiaLogPrefix())
+    );
+    draconiaTowerBattle.setupAllyLimit?.(
+      () => playerEnteredDraconiaTower,
+      NotificationService.createBattleToastCallback(getDraconiaLogPrefix())
+    );
+    showCustomBattleStatusToast({
+      battleName: DRACONIA_BATTLE_DISPLAY_NAME || 'Draconia Tower',
+      allyLimit: battle.config?.allyLimit ?? 6,
+      battle,
+      logPrefix: getDraconiaLogPrefix()
+    });
+    draconiaTowerBattle.scheduleEntryVillainSetup({
+      attemptDelays: [0, 100, 250, 500, 800, 1200],
+      isActiveCheck: () => playerEnteredDraconiaTower,
+      onComplete: () => {
+        hideQuestOverlays();
+        hideHeroEditorButton();
+        draconiaTowerBattle.startPersistentVisualSync(applyDraconiaTileMutations, {
+          isActiveCheck: () => playerEnteredDraconiaTower
+        });
+      }
+    });
+    return true;
+  }
+
+  function enterDraconiaTower() {
+    let roomId = DRACONIA_BATTLE_ROOM_ID || getRoomIdByRoomName(DRACONIA_BATTLE_ROOM_NAME);
+    if (!roomId) roomId = getRoomIdByRoomName(DRACONIA_BATTLE_ROOM_NAME);
+    if (!roomId) {
+      showToast({ message: 'Draconia Tower could not be found.', logPrefix: getDraconiaLogPrefix() });
+      return;
+    }
+
+    playerEnteredDraconiaTower = true;
+    draconiaTowerPostBattle = false;
+    if (draconiaTowerBattle) {
+      draconiaTowerBattle.cleanup(restoreBoardSetupDraconia, showQuestOverlays);
+      draconiaTowerBattle = null;
+    }
+
+    globalThis.state.board.send({ type: 'selectRoomById', roomId });
+    startDraconiaSceneSync();
+
+    const initResult = initializeDraconiaTowerBattle(roomId);
+    if (initResult && typeof initResult.then === 'function') {
+      initResult.then((battle) => {
+        if (playerEnteredDraconiaTower && !draconiaTowerPostBattle && !draconiaTowerBattle) {
+          setupDraconiaTowerBattleInstance(battle);
+        }
+      }).catch((error) => console.error(`${getDraconiaLogPrefix()} Error initializing battle:`, error));
+    } else if (initResult) {
+      setupDraconiaTowerBattleInstance(initResult);
+    }
+
+    updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+    showToast({ message: 'Following Elathriel down into Draconia Tower...', logPrefix: getDraconiaLogPrefix() });
+  }
+
+  // Battle already won (progress.battleCompleted) but mission not finished — Elathriel
+  // sends the player straight back to the post-battle cemetery scene: reskin + the ally
+  // Old Dragonlord NPC, NO fight. The scene sync keeps the board clear and the NPC placed.
+  function enterDraconiaTowerPostBattleReturn() {
+    let roomId = DRACONIA_BATTLE_ROOM_ID || getRoomIdByRoomName(DRACONIA_BATTLE_ROOM_NAME);
+    if (!roomId) {
+      showToast({ message: 'Draconia Tower could not be found.', logPrefix: getDraconiaLogPrefix() });
+      return;
+    }
+    playerEnteredDraconiaTower = true;
+    draconiaTowerPostBattle = true;
+    oldDragonlordBossHpBar.remove();
+    if (draconiaTowerBattle) {
+      draconiaTowerBattle.cleanup(restoreBoardSetupDraconia, showQuestOverlays);
+      draconiaTowerBattle = null;
+    }
+    globalThis.state.board.send({ type: 'selectRoomById', roomId });
+    startDraconiaSceneSync();
+    clearDraconiaBoardPieces();
+    hideQuestOverlays();
+    hideHeroEditorButton();
+    updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+    showToast({ message: 'Following Elathriel back down into Draconia Tower...', logPrefix: getDraconiaLogPrefix() });
+  }
+
+  function getOldDragonlordKeywordResponse(message, playerName) {
+    return matchKeywordResponsesSync(OLD_DRAGONLORD_RESPONSES, message, playerName, {
+      defaultResponse: null,
+      lowercaseKeys: true
+    });
+  }
+
   function needsAlDeeRookieGuardObserver() {
     return isMissionAcceptedIncomplete(getMissionProgress(AL_DEE_ROOKIE_GUARD_MISSION));
   }
@@ -25886,6 +26988,22 @@ function createNPCCooldownManager() {
     isRoomActive: () => playerFollowedElathrielToHellgate
       && !!hellgateBattle
       && isOnRoomByName(HELLGATE_BATTLE_ROOM_NAME)
+  });
+
+  // Same idea in the Hellgate Library: right-click the Elathriel dummy on tile 152 (added
+  // by ensureHellgateLibraryElathrielDummy) before the fight for a nudge toward the
+  // Wrinkled Bonelord. Stops once "book" starts the battle — the Bonelord is gone by then.
+  const hellgateLibraryElathrielSignReader = createSignReaderSystem({
+    id: 'Hellgate Library Elathriel',
+    tileIndex: HELLGATE_LIBRARY_ELATHRIEL_DUMMY_TILE_INDEX,
+    spriteSelector: `[${HELLGATE_LIBRARY_ELATHRIEL_DUMMY_ATTR}="1"]`,
+    lines: [
+      'You look to Elathriel.',
+      'He says: "Speak with the Wrinkled Bonelord. Ask him about the book you carry."'
+    ],
+    isRoomActive: () => playerEnteredHellgateLibrary
+      && !hellgateLibraryBattleStarted
+      && isOnRoomByName(HELLGATE_LIBRARY_BATTLE_ROOM_NAME)
   });
 
   function shouldEnableSixthSealLevers(boardContext = null) {
@@ -26787,10 +27905,21 @@ function createNPCCooldownManager() {
     }
     const emptyBoardOk = canShowQuestTileHighlights(boardContext);
     const battleActive = isBoardBattleActive(boardContext);
+    // A custom battle owns this room (any of the quest battles that reskin the Sewers,
+    // including the Hellgate Library scene): its board layout is not the overworld, so
+    // overworld quest-access helpers like "Visit Al Dee" on tile 79 have no business
+    // showing. Sign-reader glows opt back in via showDuringPlacement.
+    const currentRoomId = boardContext?.selectedMap?.selectedRoom?.id
+      || globalThis.state?.board?.getSnapshot?.()?.context?.selectedMap?.selectedRoom?.id;
+    // Also treat the Draconia Tower post-battle talk as "owned" — there's no live battle
+    // instance then, but the room is still the dragon-cemetery reskin, not the overworld.
+    const customBattleOwnsRoom = (!!currentRoomId && isAnyCustomBattleActiveForRoom(currentRoomId))
+      || (playerEnteredDraconiaTower && draconiaTowerPostBattle && isOnRoomByName(DRACONIA_BATTLE_ROOM_NAME));
 
     for (const source of questTileHighlightSources) {
       try {
         const allowWithCreatures = !!source.showDuringPlacement;
+        if (customBattleOwnsRoom && !allowWithCreatures) continue;
         if (!allowWithCreatures && !emptyBoardOk) continue;
         if (allowWithCreatures && battleActive) continue;
         if (!source.isAccessActive(boardContext)) continue;
@@ -27039,6 +28168,16 @@ function createNPCCooldownManager() {
         return tile ? [tile] : [];
       },
       isAccessActive: (boardContext) => hellgateElathrielSignReader.shouldEnable(boardContext),
+      alt: 'Speak with Elathriel',
+      showDuringPlacement: true
+    });
+
+    registerQuestTileHighlightSource({
+      getTiles: () => {
+        const tile = getTileElement(hellgateLibraryElathrielSignReader.tileIndex);
+        return tile ? [tile] : [];
+      },
+      isAccessActive: (boardContext) => hellgateLibraryElathrielSignReader.shouldEnable(boardContext),
       alt: 'Speak with Elathriel',
       showDuringPlacement: true
     });
@@ -27454,10 +28593,94 @@ function createNPCCooldownManager() {
         return !!progress.crossingObjectiveComplete;
       },
       isInteractable: () => {
-        const hellgateProgress = getMissionProgress(HELLGATE_PART_1_MISSION) || {};
-        return !hellgateProgress.completed;
+        // Fight icon stays lit through the whole Hellgate → Library → Draconia Tower
+        // chain (each step's predecessor is its prerequisite, so an unfinished later
+        // step means Elathriel still has work to offer).
+        const draconiaProgress = getMissionProgress(DRACONIA_TOWER_MISSION) || {};
+        return !draconiaProgress.completed;
       },
       chat: {},
+      hpBarColor: 'rgb(96, 192, 96)',
+      nameColor: 'rgb(96, 192, 96)'
+    },
+    {
+      id: BOARD_NPC_BONELORD_ID,
+      name: BONELORD_NPC_NAME,
+      hideLevel: true,
+      tileIndex: BONELORD_TILE_INDEX,
+      roomId: BONELORD_ROOM_ID,
+      roomName: BONELORD_ROOM_NAME,
+      overlayClass: BONELORD_OVERLAY_CLASS,
+      // Board visual: the Bonelord's own creature outfit sprite (id-17), west-facing, not
+      // shiny — matches how the game draws the villain piece. imageUrl is still the modal
+      // portrait (A_Wrinkled_Bonelord.gif).
+      outfitSpriteId: BONELORD_OUTFIT_SPRITE_ID,
+      facing: 'west',
+      shiny: false,
+      imageUrl: getQuestItemsAssetUrl(BONELORD_IMAGE_FILENAME),
+      dialogueIconUrl: BONELORD_DIALOGUE_ICON_URL,
+      logPrefix: '[Quests Mod][Board NPC][Bonelord]',
+      chatMode: 'keywords',
+      // The library pre-battle window has no CustomBattle instance yet, so the player's
+      // saved Sewers team stays on the board (countAllyPiecesOnBoard > 0). That check is
+      // meant to keep Board NPCs out of an in-progress fight; here there is no fight until
+      // "book" is spoken, and isUnlocked() already drops this NPC the instant the battle
+      // starts (hellgateLibraryBattleStarted) — so opt out of the ally-piece guard.
+      allowWithAllyPieces: true,
+      // Only present in the library reskin, after the player descended, before the fight.
+      isUnlocked: () => {
+        const progress = getMissionProgress(HELLGATE_LIBRARY_MISSION) || {};
+        return playerEnteredHellgateLibrary
+          && !hellgateLibraryBattleStarted
+          && !!progress.accepted
+          && !progress.bookGiven
+          && !progress.completed
+          && !progress.battleCompleted;
+      },
+      isInteractable: () => {
+        const progress = getMissionProgress(HELLGATE_LIBRARY_MISSION) || {};
+        return !progress.completed && !progress.battleCompleted;
+      },
+      chat: {},
+      hpBarColor: 'rgb(96, 192, 96)',
+      nameColor: 'rgb(96, 192, 96)'
+    },
+    {
+      id: BOARD_NPC_OLD_DRAGONLORD_ID,
+      name: OLD_DRAGONLORD_NPC_NAME,
+      hideLevel: true,
+      tileIndex: OLD_DRAGONLORD_TILE_INDEX,
+      roomId: OLD_DRAGONLORD_ROOM_ID,
+      roomName: OLD_DRAGONLORD_ROOM_NAME,
+      overlayClass: OLD_DRAGONLORD_OVERLAY_CLASS,
+      // Render as a plain south-facing Dragon Lord creature piece (outfit atlas id 39),
+      // not shiny — reads as the calm guardian ally, not a boss. imageUrl stays for the
+      // chat modal portrait.
+      outfitSpriteId: OLD_DRAGONLORD_OUTFIT_SPRITE_ID,
+      facing: 'south',
+      shiny: false,
+      imageUrl: getQuestItemsAssetUrl(OLD_DRAGONLORD_IMAGE_FILENAME),
+      dialogueIconUrl: OLD_DRAGONLORD_DIALOGUE_ICON_URL,
+      logPrefix: '[Quests Mod][Board NPC][Old Dragonlord]',
+      chatMode: 'keywords',
+      // Post-battle the player's ally creature may still sit on the board — that guard is
+      // meant to keep Board NPCs out of an active fight, and the fight is over here.
+      allowWithAllyPieces: true,
+      // Only after the battle is won, before the trade / completion.
+      isUnlocked: () => {
+        const progress = getMissionProgress(DRACONIA_TOWER_MISSION) || {};
+        return playerEnteredDraconiaTower
+          && draconiaTowerPostBattle
+          && !!progress.battleCompleted
+          && !progress.dragonfetishReceived
+          && !progress.completed;
+      },
+      isInteractable: () => {
+        const progress = getMissionProgress(DRACONIA_TOWER_MISSION) || {};
+        return !progress.dragonfetishReceived && !progress.completed;
+      },
+      chat: {},
+      // Green — he's an ally now, not a foe (the fight is over by the time he's placed).
       hpBarColor: 'rgb(96, 192, 96)',
       nameColor: 'rgb(96, 192, 96)'
     }
@@ -27485,6 +28708,14 @@ function createNPCCooldownManager() {
     const elathrielChat = questNpcsDialogue.elathriel?.boardChat;
     const elathrielConfig = BOARD_NPC_CONFIGS.find((c) => c.id === BOARD_NPC_ELATHRIEL_ID);
     if (elathrielChat && elathrielConfig?.chat) Object.assign(elathrielConfig.chat, elathrielChat);
+    const bonelordChat = questNpcsDialogue.bonelord?.boardChat;
+    const bonelordConfig = BOARD_NPC_CONFIGS.find((c) => c.id === BOARD_NPC_BONELORD_ID)
+      || BOARD_NPC_CONFIGS.find((c) => c.overlayClass === BONELORD_OVERLAY_CLASS);
+    if (bonelordChat && bonelordConfig?.chat) Object.assign(bonelordConfig.chat, bonelordChat);
+    const oldDragonlordChat = questNpcsDialogue.oldDragonlord?.boardChat;
+    const oldDragonlordConfig = BOARD_NPC_CONFIGS.find((c) => c.id === BOARD_NPC_OLD_DRAGONLORD_ID)
+      || BOARD_NPC_CONFIGS.find((c) => c.overlayClass === OLD_DRAGONLORD_OVERLAY_CLASS);
+    if (oldDragonlordChat && oldDragonlordConfig?.chat) Object.assign(oldDragonlordConfig.chat, oldDragonlordChat);
   };
 
   function isApprenticeShengBattleCompletedPendingReward() {
@@ -27957,6 +29188,13 @@ function createNPCCooldownManager() {
     });
   }
 
+  function getBonelordKeywordResponse(message, playerName) {
+    return matchKeywordResponsesSync(BONELORD_RESPONSES, message, playerName, {
+      defaultResponse: null,
+      lowercaseKeys: true
+    });
+  }
+
   function getOracleDestinyLine(key, fallback) {
     const line = ORACLE_DESTINY_DIALOGUE?.[key] || ORACLE_RESPONSES?.[key] || fallback;
     return sanitizeDialogueText(line, fallback);
@@ -28092,6 +29330,40 @@ function createNPCCooldownManager() {
     if (ELATHRIEL_TILE_INDEX != null) elathrielConfig.tileIndex = ELATHRIEL_TILE_INDEX;
     if (ELATHRIEL_OUTFIT_SPRITE_ID) elathrielConfig.outfitSpriteId = ELATHRIEL_OUTFIT_SPRITE_ID;
     if (ELATHRIEL_DIALOGUE_ICON_URL) elathrielConfig.dialogueIconUrl = ELATHRIEL_DIALOGUE_ICON_URL;
+  }
+
+  function syncBonelordBoardPlacement() {
+    const bonelordConfig = BOARD_NPC_CONFIGS.find((c) => c.overlayClass === BONELORD_OVERLAY_CLASS)
+      || BOARD_NPC_CONFIGS.find((c) => c.id === BOARD_NPC_BONELORD_ID);
+    if (!bonelordConfig) return;
+    if (BOARD_NPC_BONELORD_ID) bonelordConfig.id = BOARD_NPC_BONELORD_ID;
+    if (BONELORD_NPC_NAME) bonelordConfig.name = BONELORD_NPC_NAME;
+    if (BONELORD_ROOM_NAME) bonelordConfig.roomName = BONELORD_ROOM_NAME;
+    if (BONELORD_ROOM_ID) bonelordConfig.roomId = BONELORD_ROOM_ID;
+    if (BONELORD_TILE_INDEX != null) bonelordConfig.tileIndex = BONELORD_TILE_INDEX;
+    if (BONELORD_DIALOGUE_ICON_URL) bonelordConfig.dialogueIconUrl = BONELORD_DIALOGUE_ICON_URL;
+    if (BONELORD_OUTFIT_SPRITE_ID != null) bonelordConfig.outfitSpriteId = BONELORD_OUTFIT_SPRITE_ID;
+    bonelordConfig.facing = 'west';
+    bonelordConfig.shiny = false;
+    delete bonelordConfig.itemSpriteId;
+    // imageUrl stays as the modal portrait; the board draws outfitSpriteId instead.
+    bonelordConfig.imageUrl = getQuestItemsAssetUrl(BONELORD_IMAGE_FILENAME || 'A_Wrinkled_Bonelord.gif');
+  }
+
+  function syncOldDragonlordBoardPlacement() {
+    const cfg = BOARD_NPC_CONFIGS.find((c) => c.overlayClass === OLD_DRAGONLORD_OVERLAY_CLASS)
+      || BOARD_NPC_CONFIGS.find((c) => c.id === BOARD_NPC_OLD_DRAGONLORD_ID);
+    if (!cfg) return;
+    if (BOARD_NPC_OLD_DRAGONLORD_ID) cfg.id = BOARD_NPC_OLD_DRAGONLORD_ID;
+    if (OLD_DRAGONLORD_NPC_NAME) cfg.name = OLD_DRAGONLORD_NPC_NAME;
+    if (OLD_DRAGONLORD_ROOM_NAME) cfg.roomName = OLD_DRAGONLORD_ROOM_NAME;
+    if (OLD_DRAGONLORD_ROOM_ID) cfg.roomId = OLD_DRAGONLORD_ROOM_ID;
+    if (OLD_DRAGONLORD_TILE_INDEX != null) cfg.tileIndex = OLD_DRAGONLORD_TILE_INDEX;
+    if (OLD_DRAGONLORD_DIALOGUE_ICON_URL) cfg.dialogueIconUrl = OLD_DRAGONLORD_DIALOGUE_ICON_URL;
+    if (OLD_DRAGONLORD_OUTFIT_SPRITE_ID != null) cfg.outfitSpriteId = OLD_DRAGONLORD_OUTFIT_SPRITE_ID;
+    else delete cfg.outfitSpriteId;
+    delete cfg.itemSpriteId;
+    cfg.imageUrl = getQuestItemsAssetUrl(OLD_DRAGONLORD_IMAGE_FILENAME || 'An_Old_Dragonlord.gif');
   }
 
   function syncOracleBoardPlacement() {
@@ -29472,6 +30744,26 @@ function createNPCCooldownManager() {
     findActor: (world) => findBattleActorByName(world, DEMODRAS_BOSS_NAME)
   });
 
+  // A Wrinkled Bonelord (Hellgate Library) — the fight only exists after the book handover.
+  const WRINKLED_BONELORD_BOSS_NAME = 'A Wrinkled Bonelord';
+  const wrinkledBonelordBossHpBar = createBossHpBar({
+    id: 'wrinkled-bonelord',
+    getName: () => WRINKLED_BONELORD_BOSS_NAME,
+    getIconUrl: () => getQuestItemsAssetUrl('A_Wrinkled_Bonelord.gif'),
+    isActive: () => playerEnteredHellgateLibrary && !!hellgateLibraryBattle,
+    findActor: (world) => findBattleActorByName(world, WRINKLED_BONELORD_BOSS_NAME)
+  });
+
+  // An Old Dragonlord (Draconia Tower) — sprite is hidden in-fight, but the actor is real.
+  const OLD_DRAGONLORD_BOSS_NAME = 'An Old Dragonlord';
+  const oldDragonlordBossHpBar = createBossHpBar({
+    id: 'old-dragonlord',
+    getName: () => OLD_DRAGONLORD_BOSS_NAME,
+    getIconUrl: () => getQuestItemsAssetUrl(OLD_DRAGONLORD_IMAGE_FILENAME || 'An_Old_Dragonlord.gif'),
+    isActive: () => playerEnteredDraconiaTower && !!draconiaTowerBattle,
+    findActor: (world) => findBattleActorByName(world, OLD_DRAGONLORD_BOSS_NAME)
+  });
+
   function getBattleWorldActors(world) {
     if (!world?.grid) return [];
     if (Array.isArray(world.grid.actors)) return world.grid.actors;
@@ -30296,6 +31588,12 @@ function createNPCCooldownManager() {
       let awaitingDaneWeakenedConfirm = false;
       let awaitingElathrielAcceptConfirm = false;
       let awaitingElathrielHellgateConfirm = false;
+      let awaitingElathrielLibraryAcceptConfirm = false;
+      let awaitingElathrielLibraryEnterConfirm = false;
+      let awaitingElathrielDraconiaAcceptConfirm = false;
+      let awaitingElathrielDraconiaEnterConfirm = false;
+      let awaitingElathrielDraconiaReturnConfirm = false;
+      let awaitingBonelordBookConfirm = false;
       // Oracle destiny tree: prepared → sure → yes teleports after SO BE IT!
       let oracleDestinyStage = npcConfig.overlayClass === ORACLE_OVERLAY_CLASS ? 'prepared' : null;
 
@@ -31774,6 +33072,156 @@ function createNPCCooldownManager() {
 
         if (npcConfig.id === BOARD_NPC_ELATHRIEL_ID) {
           const hellgateProgress = getMissionProgress(HELLGATE_PART_1_MISSION) || {};
+          const libraryProgress = getMissionProgress(HELLGATE_LIBRARY_MISSION) || {};
+
+          // ---- Hellgate Library (Part 1 completed) confirm branches ----
+          if (awaitingElathrielLibraryAcceptConfirm && lower.includes('yes')) {
+            awaitingElathrielLibraryAcceptConfirm = false;
+            persistMissionProgress(HELLGATE_LIBRARY_MISSION, { accepted: true, completed: false }).catch((error) => {
+              console.error('[Quests Mod][Elathriel] Error saving Hellgate Library progress:', error);
+            });
+            // Roll straight into the descend prompt — the second `prompt` line is
+            // itself the "Are you ready to descend?" question, so "yes" here can enter
+            // the library without reopening the dialogue.
+            awaitingElathrielLibraryEnterConfirm = true;
+            cooldown.queueResponse(
+              text,
+              getMissionDialogueLine(HELLGATE_LIBRARY_MISSION, 'prompt', 'Good. The stair to the library stands open. Are you ready to descend?'),
+              addMessageToConversation,
+              npcConfig.name
+            );
+            return;
+          }
+          if (awaitingElathrielLibraryAcceptConfirm && lower.includes('no')) {
+            awaitingElathrielLibraryAcceptConfirm = false;
+            cooldown.queueResponse(
+              text,
+              getMissionDialogueLine(HELLGATE_LIBRARY_MISSION, 'offerDecline', 'Then leave the dust undisturbed.'),
+              addMessageToConversation,
+              npcConfig.name,
+              ModalHelpers.getFarewellCloseCallback(text)
+            );
+            return;
+          }
+          if (awaitingElathrielLibraryEnterConfirm && lower.includes('yes')) {
+            awaitingElathrielLibraryEnterConfirm = false;
+            cooldown.queueResponse(
+              text,
+              getMissionDialogueLine(HELLGATE_LIBRARY_MISSION, 'accept', 'Then follow. And do not let the librarian keep you.'),
+              addMessageToConversation,
+              npcConfig.name,
+              () => {
+                setTimeout(() => {
+                  ModalHelpers.closeModal(0);
+                  enterHellgateLibrary();
+                }, 2000);
+              }
+            );
+            return;
+          }
+          if (awaitingElathrielLibraryEnterConfirm && lower.includes('no')) {
+            awaitingElathrielLibraryEnterConfirm = false;
+            cooldown.queueResponse(
+              text,
+              getMissionDialogueLine(HELLGATE_LIBRARY_MISSION, 'decline', 'As you wish. The shelves are patient.'),
+              addMessageToConversation,
+              npcConfig.name,
+              ModalHelpers.getFarewellCloseCallback(text)
+            );
+            return;
+          }
+
+          // ---- Draconia Tower (Hellgate Library completed) confirm branches ----
+          if (awaitingElathrielDraconiaAcceptConfirm && lower.includes('yes')) {
+            awaitingElathrielDraconiaAcceptConfirm = false;
+            persistMissionProgress(DRACONIA_TOWER_MISSION, { accepted: true, completed: false }).catch((error) => {
+              console.error('[Quests Mod][Elathriel] Error saving Draconia Tower progress:', error);
+            });
+            // Accepting and descending are one step — the first "yes" sends the player in.
+            cooldown.queueResponse(
+              text,
+              getMissionDialogueLine(
+                DRACONIA_TOWER_MISSION,
+                'accept',
+                'Then go. Cut through the guardians.'
+              ),
+              addMessageToConversation,
+              npcConfig.name,
+              () => {
+                setTimeout(() => {
+                  ModalHelpers.closeModal(0);
+                  enterDraconiaTower();
+                }, 2000);
+              }
+            );
+            return;
+          }
+          if (awaitingElathrielDraconiaAcceptConfirm && lower.includes('no')) {
+            awaitingElathrielDraconiaAcceptConfirm = false;
+            cooldown.queueResponse(
+              text,
+              getMissionDialogueLine(DRACONIA_TOWER_MISSION, 'offerDecline', 'Then let the old one keep grieving.'),
+              addMessageToConversation,
+              npcConfig.name,
+              ModalHelpers.getFarewellCloseCallback(text)
+            );
+            return;
+          }
+          if (awaitingElathrielDraconiaEnterConfirm && lower.includes('yes')) {
+            awaitingElathrielDraconiaEnterConfirm = false;
+            cooldown.queueResponse(
+              text,
+              getMissionDialogueLine(DRACONIA_TOWER_MISSION, 'accept', 'Then go. Cut through the guardians.'),
+              addMessageToConversation,
+              npcConfig.name,
+              () => {
+                setTimeout(() => {
+                  ModalHelpers.closeModal(0);
+                  enterDraconiaTower();
+                }, 2000);
+              }
+            );
+            return;
+          }
+          if (awaitingElathrielDraconiaEnterConfirm && lower.includes('no')) {
+            awaitingElathrielDraconiaEnterConfirm = false;
+            cooldown.queueResponse(
+              text,
+              getMissionDialogueLine(DRACONIA_TOWER_MISSION, 'decline', 'As you wish. The bones will keep.'),
+              addMessageToConversation,
+              npcConfig.name,
+              ModalHelpers.getFarewellCloseCallback(text)
+            );
+            return;
+          }
+          // Battle already won — send the player back to the post-battle cemetery, no re-fight.
+          if (awaitingElathrielDraconiaReturnConfirm && lower.includes('yes')) {
+            awaitingElathrielDraconiaReturnConfirm = false;
+            cooldown.queueResponse(
+              text,
+              getMissionDialogueLine(DRACONIA_TOWER_MISSION, 'accept', 'Then go. The old one is waiting.'),
+              addMessageToConversation,
+              npcConfig.name,
+              () => {
+                setTimeout(() => {
+                  ModalHelpers.closeModal(0);
+                  enterDraconiaTowerPostBattleReturn();
+                }, 2000);
+              }
+            );
+            return;
+          }
+          if (awaitingElathrielDraconiaReturnConfirm && lower.includes('no')) {
+            awaitingElathrielDraconiaReturnConfirm = false;
+            cooldown.queueResponse(
+              text,
+              getMissionDialogueLine(DRACONIA_TOWER_MISSION, 'decline', 'As you wish. The bones will keep.'),
+              addMessageToConversation,
+              npcConfig.name,
+              ModalHelpers.getFarewellCloseCallback(text)
+            );
+            return;
+          }
 
           if (awaitingElathrielAcceptConfirm && lower.includes('yes')) {
             awaitingElathrielAcceptConfirm = false;
@@ -31831,15 +33279,128 @@ function createNPCCooldownManager() {
           }
 
           const askedElathrielMission = lower.includes('mission') || lower.includes('quest')
-            || lower.includes('help') || lower.includes('hellgate');
+            || lower.includes('help') || lower.includes('hellgate') || lower.includes('library')
+            || lower.includes('book') || lower.includes('bonelord')
+            || lower.includes('draconia') || lower.includes('dragon') || lower.includes('tower');
           if (askedElathrielMission) {
+            // ---- Once Hellgate Part 1 is done, Elathriel offers Hellgate Library. ----
             if (hellgateProgress.completed) {
+              // ---- Hellgate Library completed → the Draconia Tower follow-up. ----
+              if (libraryProgress.completed) {
+                const draconiaProgress = getMissionProgress(DRACONIA_TOWER_MISSION) || {};
+                if (draconiaProgress.completed) {
+                  cooldown.queueResponse(
+                    text,
+                    getMissionDialogueLine(DRACONIA_TOWER_MISSION, 'alreadyCompleted', 'The cemetery is quiet. The old one troubles no one now.'),
+                    addMessageToConversation,
+                    npcConfig.name,
+                    ModalHelpers.getFarewellCloseCallback(text)
+                  );
+                  return;
+                }
+                if (isDraconiaCompletionPending()) {
+                  completeDraconiaTowerMission().catch((error) => {
+                    console.error('[Quests Mod][Elathriel] Error completing Draconia Tower:', error);
+                  });
+                  cooldown.queueResponse(
+                    text,
+                    getMissionDialogueLine(
+                      DRACONIA_TOWER_MISSION,
+                      'reward',
+                      'You carry the Dragonfetish out of that place. The debt is closed, human.'
+                    ),
+                    addMessageToConversation,
+                    npcConfig.name,
+                    ModalHelpers.getFarewellCloseCallback(text)
+                  );
+                  return;
+                }
+                if (!draconiaProgress.accepted) {
+                  awaitingElathrielDraconiaAcceptConfirm = true;
+                  cooldown.queueResponse(
+                    text,
+                    getMissionDialogueLine(
+                      DRACONIA_TOWER_MISSION,
+                      'offer',
+                      'Beneath the tower called Draconia lies a cemetery of dragons — and an Old Dragonlord who will not rest. Will you go down and end his watch?'
+                    ),
+                    addMessageToConversation,
+                    npcConfig.name
+                  );
+                  return;
+                }
+                // Battle already won but mission not finished — never re-fight; offer to
+                // send the player straight back to the post-battle cemetery scene.
+                if (draconiaProgress.battleCompleted) {
+                  awaitingElathrielDraconiaReturnConfirm = true;
+                  cooldown.queueResponse(
+                    text,
+                    getMissionDialogueLine(
+                      DRACONIA_TOWER_MISSION,
+                      'returnToDragonlord',
+                      'The guardians are already dead — you need not face them twice. The Old Dragonlord still waits among the bones. Shall I send you back down to him?'
+                    ),
+                    addMessageToConversation,
+                    npcConfig.name
+                  );
+                  return;
+                }
+                // Accepted — ask if ready to descend into the tower.
+                awaitingElathrielDraconiaEnterConfirm = true;
+                cooldown.queueResponse(
+                  text,
+                  getMissionDialogueLine(
+                    DRACONIA_TOWER_MISSION,
+                    'alreadyActive',
+                    'The stair into Draconia Tower still stands open. Are you ready to face what guards it?'
+                  ),
+                  addMessageToConversation,
+                  npcConfig.name
+                );
+                return;
+              }
+              if (isHellgateLibraryBattleCompletedPendingReward()) {
+                completeHellgateLibraryMissionWithMushroom().catch((error) => {
+                  console.error('[Quests Mod][Elathriel] Error completing Hellgate Library with mushroom reward:', error);
+                });
+                cooldown.queueResponse(
+                  text,
+                  getMissionDialogueLine(
+                    HELLGATE_LIBRARY_MISSION,
+                    'battleReward',
+                    'You walked out of that place. Few of my people did. Take this — it grew where the old librarian fell.'
+                  ),
+                  addMessageToConversation,
+                  npcConfig.name,
+                  ModalHelpers.getFarewellCloseCallback(text)
+                );
+                return;
+              }
+              if (!libraryProgress.accepted) {
+                awaitingElathrielLibraryAcceptConfirm = true;
+                cooldown.queueResponse(
+                  text,
+                  getMissionDialogueLine(
+                    HELLGATE_LIBRARY_MISSION,
+                    'offer',
+                    'There is a library below the hellgate, and a Bonelord who never left it. Would you look upon it?'
+                  ),
+                  addMessageToConversation,
+                  npcConfig.name
+                );
+                return;
+              }
+              // Accepted — ask if ready to descend.
+              awaitingElathrielLibraryEnterConfirm = true;
               cooldown.queueResponse(
                 text,
-                getMissionDialogueLine(HELLGATE_PART_1_MISSION, 'alreadyCompleted', 'The treasure room is behind us now.'),
+                getMissionDialogueLine(
+                  HELLGATE_LIBRARY_MISSION,
+                  'alreadyActive',
+                  'The stair to the library still stands open. Are you ready to descend?'
+                ),
                 addMessageToConversation,
-                npcConfig.name,
-                ModalHelpers.getFarewellCloseCallback(text)
+                npcConfig.name
               );
               return;
             }
@@ -31903,6 +33464,172 @@ function createNPCCooldownManager() {
             addMessageToConversation,
             npcConfig.name,
             ModalHelpers.getFarewellCloseCallback(text)
+          );
+          return;
+        }
+
+        if (npcConfig.id === BOARD_NPC_BONELORD_ID) {
+          const libProgress = getMissionProgress(HELLGATE_LIBRARY_MISSION) || {};
+          const trimmed = text.trim();
+          const lower = trimmed.toLowerCase();
+          const bookStepOpen = !libProgress.completed
+            && !libProgress.battleCompleted
+            && !hellgateLibraryBattleStarted;
+
+          // Two-step: asking for the "book" makes him ask whether you actually have it;
+          // answering "yes" is what makes him take it, call the player a fraud, and start
+          // the fight. "no" backs out.
+          if (awaitingBonelordBookConfirm && bookStepOpen) {
+            if (lower.includes('yes')) {
+              awaitingBonelordBookConfirm = false;
+              let hasBook = false;
+              try {
+                const items = await getQuestItems(false);
+                hasBook = ((items && items['Beware of the Bonelords (Book)']) || 0) >= 1;
+              } catch (_) {}
+              if (!hasBook) {
+                cooldown.queueResponse(
+                  text,
+                  getMissionDialogueLine(HELLGATE_LIBRARY_MISSION, 'bonelordNoBook', 'You come to my library empty-handed? Bring me the book.'),
+                  addMessageToConversation,
+                  npcConfig.name
+                );
+                return;
+              }
+              try {
+                await consumeQuestItem('Beware of the Bonelords (Book)', 1);
+              } catch (error) {
+                console.error('[Quests Mod][Bonelord] Error consuming the book:', error);
+              }
+              // Book is gone now — record it so a return trip (fight abandoned / lost)
+              // drops the player straight back into the battle, not this talk step.
+              try {
+                await persistMissionProgress(HELLGATE_LIBRARY_MISSION, { accepted: true, bookGiven: true });
+              } catch (error) {
+                console.error('[Quests Mod][Bonelord] Error saving bookGiven flag:', error);
+              }
+              cooldown.queueResponse(
+                text,
+                getMissionDialogueLine(HELLGATE_LIBRARY_MISSION, 'bonelordBookFraud', 'You are a fraud. 469 has no solution, two-eyes. And frauds are filed under "consumed".'),
+                addMessageToConversation,
+                npcConfig.name,
+                () => {
+                  // Give the player up to 5s to read the fraud line — but if they close
+                  // the modal first, jump straight into the fight. Whichever comes first.
+                  let fired = false;
+                  let observer = null;
+                  let timer = null;
+                  const fire = () => {
+                    if (fired) return;
+                    fired = true;
+                    if (timer) clearTimeout(timer);
+                    try { observer?.disconnect(); } catch (_) {}
+                    ModalHelpers.closeModal(0);
+                    setTimeout(() => startHellgateLibraryBattle(npcConfig), 120);
+                  };
+                  timer = setTimeout(fire, 5000);
+                  const modalGone = () => !document.querySelector('div[role="dialog"][data-state="open"]');
+                  try {
+                    observer = new MutationObserver(() => { if (modalGone()) fire(); });
+                    observer.observe(document.body, {
+                      childList: true,
+                      subtree: true,
+                      attributes: true,
+                      attributeFilter: ['data-state']
+                    });
+                  } catch (_) {}
+                  if (modalGone()) fire();
+                }
+              );
+              return;
+            }
+            if (lower.includes('no')) {
+              awaitingBonelordBookConfirm = false;
+              cooldown.queueResponse(
+                text,
+                getMissionDialogueLine(HELLGATE_LIBRARY_MISSION, 'bonelordBookDeclined', 'Then we have nothing to discuss.'),
+                addMessageToConversation,
+                npcConfig.name,
+                ModalHelpers.getFarewellCloseCallback(text)
+              );
+              return;
+            }
+            // Any other reply — keep waiting on a yes/no, fall through to the keyword flow.
+          }
+
+          // Exact "book" (singular, not "books") → he asks whether you have it.
+          const askedForBook = /(^|\W)book(\W|$)/i.test(trimmed) && !/books/i.test(trimmed);
+          if (askedForBook && bookStepOpen) {
+            awaitingBonelordBookConfirm = true;
+            cooldown.queueResponse(
+              text,
+              getMissionDialogueLine(HELLGATE_LIBRARY_MISSION, 'bonelordBookAsk', 'Do you have the book? (yes / no)'),
+              addMessageToConversation,
+              npcConfig.name
+            );
+            return;
+          }
+
+          let bonelordResponse = getBonelordKeywordResponse(text, playerName);
+          if (bonelordResponse == null) {
+            bonelordResponse = getNpcQuestItemChatResponse(BOARD_NPC_BONELORD_ID, text, playerName);
+          }
+          if (bonelordResponse == null) {
+            bonelordResponse = getRandomNpcConfusionResponse(BONELORD_CONFUSION_RESPONSES, playerName);
+          }
+          cooldown.queueResponse(
+            text,
+            bonelordResponse,
+            addMessageToConversation,
+            npcConfig.name,
+            ModalHelpers.getFarewellCloseCallback(text)
+          );
+          return;
+        }
+
+        if (npcConfig.id === BOARD_NPC_OLD_DRAGONLORD_ID) {
+          // The entire exchange is exactly two lines. His opening line (the welcome
+          // message) announces the trade; whatever the player types back, he only
+          // bellows at them to leave. On that reply he takes the white mushroom (if
+          // held), hands over the Dragonfetish, then after 2s closes the dialogue and
+          // sends the player back to Hedge Maze. No keywords, no other responses.
+          const dracoProgress = getMissionProgress(DRACONIA_TOWER_MISSION) || {};
+          if (!dracoProgress.dragonfetishReceived && !dracoProgress.completed) {
+            try { await consumeQuestItem('White Mushroom', 1); } catch (_) { /* fine if none */ }
+            try {
+              await addQuestItem('Dragonfetish', 1);
+              showQuestItemNotification('Dragonfetish', 1);
+            } catch (error) {
+              console.error('[Quests Mod][Old Dragonlord] Error granting the Dragonfetish:', error);
+            }
+            try {
+              await persistMissionProgress(DRACONIA_TOWER_MISSION, {
+                accepted: true,
+                battleCompleted: true,
+                dragonfetishReceived: true
+              });
+            } catch (error) {
+              console.error('[Quests Mod][Old Dragonlord] Error saving dragonfetishReceived flag:', error);
+            }
+          }
+          cooldown.queueResponse(
+            text,
+            getMissionDialogueLine(
+              DRACONIA_TOWER_MISSION,
+              'dragonlordLeave',
+              'LEAVE THE DRAGONS’ CEMETERY AT ONCE!'
+            ),
+            addMessageToConversation,
+            npcConfig.name,
+            () => {
+              setTimeout(() => {
+                ModalHelpers.closeModal(0);
+                setTimeout(() => {
+                  cleanupDraconiaTowerQuest();
+                  navigateToHedgeMazeFromHellgate();
+                }, 150);
+              }, 2000);
+            }
           );
           return;
         }
@@ -32423,7 +34150,7 @@ function createNPCCooldownManager() {
       logSkip('a battle is active');
       return false;
     }
-    if (countAllyPiecesOnBoard(boardContext) > 0) {
+    if (!npcConfig.allowWithAllyPieces && countAllyPiecesOnBoard(boardContext) > 0) {
       logSkip('ally pieces are already on the board');
       return false;
     }
@@ -32482,6 +34209,8 @@ function createNPCCooldownManager() {
     syncSantaBoardPlacement();
     syncDaneBoardPlacement();
     syncElathrielBoardPlacement();
+    syncBonelordBoardPlacement();
+    syncOldDragonlordBoardPlacement();
     syncOracleBoardPlacement();
     BOARD_NPC_CONFIGS.forEach((npcConfig) => updateBoardNpcState(npcConfig, boardContext));
     updateOracleStatueVisibility();
@@ -32879,12 +34608,25 @@ function createNPCCooldownManager() {
     } catch (e) {
       console.warn('[Quests Mod][Hellgate Part 1] cleanupHellgateTreasureRoomQuest during teardown:', e);
     }
+    // Cleanup Hellgate Library (Elathriel / Wrinkled Bonelord) battle system
+    try {
+      cleanupHellgateLibraryQuest();
+    } catch (e) {
+      console.warn('[Quests Mod][Hellgate Library] cleanupHellgateLibraryQuest during teardown:', e);
+    }
+    // Cleanup Draconia Tower (Elathriel / An Old Dragonlord) battle system
+    try {
+      cleanupDraconiaTowerQuest();
+    } catch (e) {
+      console.warn('[Quests Mod][Draconia Tower] cleanupDraconiaTowerQuest during teardown:', e);
+    }
     // Cleanup Spike Sword easter egg system
     cleanupSpikeSwordEasterEggSystem();
     // Cleanup Sign easter egg system
     swordOfFurySignReader.cleanupSystem();
     copperKeySignReader.cleanupSystem();
     hellgateElathrielSignReader.cleanupSystem();
+    hellgateLibraryElathrielSignReader.cleanupSystem();
 
     // Cleanup boss HP bar systems
     ghazBossHpBar.cleanupSystem();
@@ -32894,6 +34636,8 @@ function createNPCCooldownManager() {
     knarknaknorkBossHpBar.cleanupSystem();
     apprenticeShengBossHpBar.cleanupSystem();
     demodrasBossHpBar.cleanupSystem();
+    wrinkledBonelordBossHpBar.cleanupSystem();
+    oldDragonlordBossHpBar.cleanupSystem();
 
     // Cleanup water fishing system
     cleanupWaterFishingSystem();
@@ -33192,6 +34936,7 @@ function createNPCCooldownManager() {
     // Elathriel dummy's own sign — gates on playerFollowedElathrielToHellgate/hellgateBattle
     // (isRoomActive), so it's also safe to always run.
     hellgateElathrielSignReader.setupObserver();
+    hellgateLibraryElathrielSignReader.setupObserver();
 
     // Boss HP bars — each gates on its own isActive(), so always-on setup is safe.
     ghazBossHpBar.setupObserver();
@@ -33201,6 +34946,8 @@ function createNPCCooldownManager() {
     knarknaknorkBossHpBar.setupObserver();
     apprenticeShengBossHpBar.setupObserver();
     demodrasBossHpBar.setupObserver();
+    wrinkledBonelordBossHpBar.setupObserver();
+    oldDragonlordBossHpBar.setupObserver();
 
     if (needsHoneyflowerObserver()) {
       setupHoneyflowerTileObserver();

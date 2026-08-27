@@ -4,6 +4,61 @@
   },
   "notes": [
     {
+      "version": "4.9.2",
+      "changes": [
+        {
+          "mod": "Awaken Tracker",
+          "type": "changed",
+          "text": "Awaken Farmer empty-list text is now \"Nothing to farm right now.\" Added a console trace of each target scan to help diagnose a case where a creature whose genes were maxed outside a battle can briefly still show as needing farming until the game refreshes it (it clears on its own after the next run)."
+        },
+        {
+          "mod": "Battle Helper",
+          "type": "fixed",
+          "text": "Loading a help request no longer logs the \"Fetching profile…\" line twice (it was one fetch shown as \"×2\", not a duplicate request)."
+        },
+        {
+          "mod": "Better Daycare",
+          "type": "fixed",
+          "text": "Sealed creatures no longer appear in the eligible list or the fill queue — the game can't place them in the Daycare, so any that were already queued are now dropped automatically."
+        },
+        {
+          "mod": "Map Editor",
+          "type": "added",
+          "text": "Custom sprites can now be placed on the floor layers beneath a tile. Each added sprite has a Floor picker (Floor 0 = the main layer, down to Floor -9), so a single tile can stack sprites across several floors below the walkable ground. Reorder within a floor by drag-and-drop or the ▲/▼ buttons; move between floors (or back to the main layer) from the same picker. The sprite list shows each one's floor, and the placement is saved with the map on export (including the quest-room export side-car) and in saved editor sessions. Also added a \"Hide map sprites\" toggle in the Map tab that hides every original map sprite (tile layer and floors below) while leaving your custom sprites, hitboxes and creatures untouched — handy for building a scene on a blank map; toggle it again or use Restore map to bring the sprites back."
+        },
+        {
+          "mod": "Map Editor",
+          "type": "fixed",
+          "text": "The tile preview in the context card now shows what is actually visible on the tile — hidden sprites are left out, floor-below sprites are drawn underneath, and oversized sprite art is clipped to the preview box instead of spilling over the card. Floor-below rows in the sprite list also preview correctly and stay listed after cleaning the map. When a tile has floor-below sprites on more than one floor, the sprite list now pairs each row with the right sprite and orders them shallowest-floor first. The selected-tile highlight is now a standalone frame drawn over the tile instead of forcing that tile to a very high z-index, so selecting a tile no longer makes its sprites pop in front of neighbouring tiles."
+        },
+        {
+          "mod": "Quests",
+          "type": "added",
+          "text": "Two new missions that continue an existing questline, each following on from the one before. Between them they add: two new NPCs to talk to through keyword dialogue (one of them appearing only after a battle is won), custom battles staged in a reused room, an item trade, and non-interactive companion characters shown on-screen during encounters, sometimes with a name label and a readable right-click hint. Rewards are collected by returning to the quest giver afterwards."
+        },
+        {
+          "mod": "Quests",
+          "type": "changed",
+          "text": "On-screen boss health bars now appear for more encounters, drop the portrait icon, and centre the boss's name over the bar. The Mission Leaderboard lists every ranked player instead of only the top ten, and scrolls with the column headers pinned when the list is long."
+        },
+        {
+          "mod": "Quests",
+          "type": "fixed",
+          "text": "Quest scenes that reskin an existing room now also restore that room's lower background-floor decorations instead of leaving them blank. Returning to a quest whose battle you have already won no longer makes you fight it again — the quest giver sends you straight on to what comes next."
+        },
+        {
+          "mod": "Raid Hunter",
+          "type": "fixed",
+          "text": "Raids no longer throw an error when stamina runs out mid-run — the stamina-recovery restart now reads the map's stamina cost correctly instead of failing and leaving the raid stalled."
+        },
+        {
+          "mod": "Mod Loader",
+          "type": "changed",
+          "text": "Mod settings panels (Board Analyzer, Bestiary Automator, Manual Runner, Tick Tracker, Custom Display) now use a near-solid black background so the panel contents stay readable over the game board. The error log no longer records the same error over and over during a burst — an identical error is kept at most once every 10 seconds."
+        }
+      ]
+    },
+    {
       "version": "4.9.1",
       "changes": [
         {
@@ -34,12 +89,12 @@
         {
           "mod": "Quests",
           "type": "changed",
-          "text": "Many more quest item, quest log, and inventory icons now use the game's own sprites instead of custom images."
+          "text": "Many more quest item, quest log, and inventory icons now use the game's own sprites instead of custom images. One early mission was renamed for clarity and its quest-log entry now shows a matching sprite icon."
         },
         {
           "mod": "Quests",
           "type": "fixed",
-          "text": "One mission's reward summary listed an item that is handed over to the quest giver rather than kept; it now shows only what you actually receive."
+          "text": "One mission's reward summary listed an item that is handed over to the quest giver rather than kept; it now shows only what you actually receive. Overworld quest-access markers no longer appear while a custom battle has taken over that room, and the board is kept clear of your saved team during a conversation step that happens before a fight. Reduced the flash of the plain room when travelling into a reskinned quest scene. The Mission Leaderboard now scrolls when there are more players than fit, with the column headers staying pinned in place."
         }
       ]
     },

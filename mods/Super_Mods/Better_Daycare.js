@@ -53,8 +53,10 @@
   // Non-awakened level cap by star tier (game rule): a star-less creature caps at 30 and every star
   // it earns raises that by 5, up to 50 at four stars. `monster.tier` IS that star count and it's
   // 0-based (a 1-star creature is tier 1, capped at 35); tier 5 marks a sealed creature and tier 6
-  // an awakened one, which levels to 99.
-  const TIER_LEVEL_CAP = { 0: 30, 1: 35, 2: 40, 3: 45, 4: 50, 5: 50 };
+  // an awakened one, which levels to 99. Only the five real star tiers (0-4) are listed here —
+  // awakened (tier 6) is handled explicitly below, and sealed (tier 5) can't be sent to Daycare at
+  // all (see isSealed / their exclusion below), so both fall through to DEFAULT_LEVEL_CAP.
+  const TIER_LEVEL_CAP = { 0: 30, 1: 35, 2: 40, 3: 45, 4: 50 };
   const SEALED_TIER = 5;
   const AWAKENED_TIER = 6;
   const AWAKENED_MAX_LEVEL = 99;
@@ -88,6 +90,16 @@
   // isNonAwakenableName check).
   function isGazer(monster) {
     return getMonsterName(monster).toLowerCase().includes('gazer');
+  }
+
+  // Sealed creatures (tier 5) can't be placed in Daycare — the game rejects addToDaycare for them
+  // outright — so they must be excluded everywhere gazers are (picker, queue cleanup, auto-fill).
+  // tier 5 is the canonical marker (see docs/game_state_api.md); the `sealed` flag is a belt-and-
+  // braces fallback for payload variants, matching Autoscroller's isSealedCreature.
+  function isSealed(monster) {
+    if (!monster) return false;
+    if (monster.sealed === true) return true;
+    return getMonsterTier(monster) === SEALED_TIER;
   }
 
   // The game omits `tier` entirely for star-less creatures (saves payload space) — absent means zero
@@ -152,6 +164,7 @@
         if (!monster) return false;
         if (isMonsterMaxed(monster)) return false;
         if (isGazer(monster)) return false;
+        if (isSealed(monster)) return false;
         if (inDaycare.has(String(id))) return false;
         return true;
       });
@@ -353,8 +366,8 @@
 
       const queuedId = config.queue[0];
       const monster = byId.get(String(queuedId));
-      if (!monster || isMonsterMaxed(monster) || isGazer(monster) || getMonsterIdsCurrentlyInDaycare().has(String(queuedId))) {
-        console.log('[Better Daycare] Dropping stale/maxed/gazer/already-placed queue entry:', queuedId);
+      if (!monster || isMonsterMaxed(monster) || isGazer(monster) || isSealed(monster) || getMonsterIdsCurrentlyInDaycare().has(String(queuedId))) {
+        console.log('[Better Daycare] Dropping stale/maxed/gazer/sealed/already-placed queue entry:', queuedId);
         config.queue.shift();
         saveConfig();
         refreshPanelContent();
@@ -844,7 +857,7 @@
 
     const monsterIdsInDaycare = getMonsterIdsCurrentlyInDaycare();
     const monsters = getOwnedMonsters().filter(
-      (m) => !isMonsterMaxed(m) && !isGazer(m)
+      (m) => !isMonsterMaxed(m) && !isGazer(m) && !isSealed(m)
         && !monsterIdsInDaycare.has(String(m.id))
         && !config.queue.some((id) => String(id) === String(m.id))
     );

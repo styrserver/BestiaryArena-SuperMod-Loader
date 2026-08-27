@@ -11,6 +11,14 @@ const MOD_ID = 'battle-helper';
 const BUTTON_ID = 'battle-helper-button';
 const PROFILE_API_BASE = 'https://bestiaryarena.com/api/trpc/serverSide.profilePageData';
 
+// Debug logging — always on; silence with `window.__BATTLE_HELPER_DEBUG = false` in the console.
+const debugLog = (...args) => {
+  if (typeof window !== 'undefined' && window.__BATTLE_HELPER_DEBUG === false) return;
+  try {
+    console.log('[Battle Helper]', ...args);
+  } catch (_) { /* ignore */ }
+};
+
 const MODAL_CONFIG = {
   width: 920,
   height: 600,
@@ -1306,26 +1314,37 @@ function makePlayerBackup() {
 let lastProfileFetchStartedAt = 0;
 let profileFetchSlot = Promise.resolve();
 
+let profileFetchSeq = 0;
+
 function scheduleProfileFetch(task) {
+  const fetchId = ++profileFetchSeq;
+  const caller = (new Error().stack || '').split('\n').slice(2, 5).map((l) => l.trim()).join(' <- ');
+  debugLog(`scheduleProfileFetch #${fetchId}: queued (caller: ${caller})`);
   const scheduled = profileFetchSlot.then(async () => {
     const now = Date.now();
     const waitMs = Math.max(0, BATTLE_HELPER_FETCH_MIN_INTERVAL_MS - (now - lastProfileFetchStartedAt));
     if (waitMs > 0) {
+      debugLog(`scheduleProfileFetch #${fetchId}: throttling ${waitMs}ms (min interval ${BATTLE_HELPER_FETCH_MIN_INTERVAL_MS}ms)`);
       await new Promise((resolve) => setTimeout(resolve, waitMs));
     }
     lastProfileFetchStartedAt = Date.now();
-    return task();
+    debugLog(`scheduleProfileFetch #${fetchId}: firing task`);
+    return task(fetchId);
   });
   profileFetchSlot = scheduled.catch(() => {});
   return scheduled;
 }
 
 async function fetchProfileByUsername(username) {
-  return scheduleProfileFetch(async () => {
-    const response = await fetch(buildProfileRequestUrl(username), {
+  return scheduleProfileFetch(async (fetchId) => {
+    const url = buildProfileRequestUrl(username);
+    debugLog(`fetchProfileByUsername #${fetchId}: GET "${username}" ${url}`);
+    const startedAt = Date.now();
+    const response = await fetch(url, {
       method: 'GET',
       headers: { 'Accept': 'application/json' }
     });
+    debugLog(`fetchProfileByUsername #${fetchId}: HTTP ${response.status} in ${Date.now() - startedAt}ms`);
     if (!response.ok) {
       throw new Error(tReplace('mods.battleHelper.errors.profileRequestFailed', {
         status: String(response.status)
@@ -1334,6 +1353,9 @@ async function fetchProfileByUsername(username) {
 
     const payload = await response.json();
     const profile = payload?.[0]?.result?.data?.json ?? null;
+    debugLog(`fetchProfileByUsername #${fetchId}: parsed`, profile
+      ? { name: profile.name, monsters: profile.monsters?.length ?? 0, equips: profile.equips?.length ?? 0 }
+      : null);
     if (!profile) {
       throw new Error(t('mods.battleHelper.errors.profileNotFound'));
     }
@@ -1372,6 +1394,13 @@ function resumeDepotManagerAfterRestore() {
 }
 
 function applyArsenalReplacement(normalized, options = {}) {
+  debugLog('applyArsenalReplacement:', {
+    profileName: normalized.profileName,
+    monsters: normalized.monsters?.length ?? 0,
+    equips: normalized.equips?.length ?? 0,
+    hadBackup: !!sessionState.backup,
+    options
+  });
   if (!sessionState.backup) {
     sessionState.backup = makePlayerBackup();
   }
@@ -1404,6 +1433,7 @@ function applyArsenalReplacement(normalized, options = {}) {
 }
 
 function restoreOriginalArsenal() {
+  debugLog('restoreOriginalArsenal:', { hasBackup: !!sessionState.backup, replaced: sessionState.replaced });
   if (!sessionState.backup) {
     throw new Error(t('mods.battleHelper.errors.noBackupAvailable'));
   }
@@ -2166,13 +2196,17 @@ function buildImportPanel(onContentChange, shared) {
 
   async function fetchAndOptionallyReplace(username, { replace = false, helpMapName = '', helpRequestId = '', helpRoomId = '', shouldAbort = null } = {}) {
     const normalizedName = normalizeUsername(username);
+    debugLog('fetchAndOptionallyReplace:', { username: normalizedName, replace, helpMapName, helpRequestId, helpRoomId });
     if (!normalizedName) {
       setOutput(getEnterUsernameFirstOutput(), 'error');
       return false;
     }
     setOutput(tReplace('mods.battleHelper.output.fetchingProfile', { username: normalizedName }), 'progress');
     const profile = await fetchProfileByUsername(normalizedName);
-    if (typeof shouldAbort === 'function' && shouldAbort()) return false;
+    if (typeof shouldAbort === 'function' && shouldAbort()) {
+      debugLog('fetchAndOptionallyReplace: aborted after fetch (stale seq)');
+      return false;
+    }
     sessionState.lastProfileRaw = profile;
     const normalized = normalizeProfileArsenal(profile);
     validateNormalizedArsenal(normalized);
@@ -2202,6 +2236,7 @@ function buildImportPanel(onContentChange, shared) {
 
   const fetchButton = createActionButton(t('mods.battleHelper.fetchPlayer'), async () => {
     try {
+      debugLog('[click] Fetch player button:', usernameInput.value);
       await fetchAndOptionallyReplace(usernameInput.value, { replace: false });
     } catch (error) {
       sessionState.lastProfileRaw = null;
@@ -2494,9 +2529,9 @@ function buildHelpBoardColumns(onContentChange, shared) {
 
   async function replaceRequesterProfileForHelp(request, seq, seqRef, setStatus) {
     const { roomId, mapLabel } = getHelpMapContextForRequest(request);
-    setStatus(tReplace('mods.battleHelper.output.fetchingProfile', {
-      username: request.requesterName
-    }), 'progress');
+    // Note: fetchAndOptionallyReplace() emits its own "fetching profile" status line;
+    // don't duplicate it here or the log shows the same entry twice ("... ×2").
+    debugLog('replaceRequesterProfileForHelp:', { requester: request.requesterName, roomId, mapLabel, seq });
     if (typeof shared.fetchAndOptionallyReplace === 'function') {
       await shared.fetchAndOptionallyReplace(request.requesterName, {
         replace: true,
@@ -2512,6 +2547,7 @@ function buildHelpBoardColumns(onContentChange, shared) {
   async function activateHelpRequest(request) {
     if (!request) return;
     const seq = ++helpRequestActivateSeq;
+    debugLog(`activateHelpRequest #${seq}:`, { id: request.id, requester: request.requesterName, map: request.mapName, roomId: request.roomId });
     selectRequestSeq = seq;
     helpBoardState.selectedId = request.id;
     renderList();
@@ -2594,6 +2630,7 @@ function buildHelpBoardColumns(onContentChange, shared) {
   }
 
   const loadProfileButton = createActionButton(t('mods.battleHelper.help.loadProfile'), async () => {
+    debugLog('[click] Load profile button, selectedId:', helpBoardState.selectedId);
     const request = helpBoardState.requests.find((r) => r.id === helpBoardState.selectedId);
     if (!request) {
       setHelpStatus(t('mods.battleHelper.help.errors.selectRequestFirst'), 'error');

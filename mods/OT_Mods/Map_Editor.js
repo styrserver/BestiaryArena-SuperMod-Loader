@@ -35,8 +35,20 @@ const PLACEMENT_OVERLAY_TILE_CLASS = 'map-editor-placement-tile-overlay';
 const TILE_SELECT_ATTR = 'data-map-editor-selected';
 const HIDDEN_ATTR = 'data-map-editor-hidden';
 const EDITOR_ADDED_ATTR = 'data-map-editor-added';
+/** Set on editor-injected `#floor-below` sprite nodes; value is the owning tileIndex. */
+const EDITOR_FB_TILE_ATTR = 'data-map-editor-fb-tile';
 const TILE_BOX_SIZE = 'calc(32px * var(--zoomFactor))';
 const TILE_SELECT_BORDER = '2px solid #ffe066';
+/**
+ * The selection highlight is a standalone frame appended to the tiles container (a
+ * sibling of the tile elements, not a child) so it can float above neighbouring
+ * tiles' sprites via z-index without touching any tile's own z-index. Kept below
+ * the actor HUD (20000).
+ */
+const TILE_SELECT_FRAME_CLASS = 'map-editor-select-frame';
+const TILE_SELECT_FRAME_Z = 9000;
+/** Legacy: older builds stashed the tile's z-index here before forcing it high. */
+const TILE_SELECT_PREV_Z_ATTR = 'meSelPrevZ';
 const SPRITE_PREVIEW_SIZE = 32;
 const ASSET_CARD_PREVIEW_SIZE = 48;
 const WORKSHOP_CARD_PREVIEW_SIZE = 96;
@@ -104,6 +116,13 @@ const editorEdits = {
   addedSprites: [],
   /** @type {Record<number, object[]>} tileIndex → compact sprite configs added this session */
   addedSpriteConfigs: {},
+  /**
+   * @type {Record<number, object[]>} tileIndex → compact sprite configs the editor added
+   * to the tile's *floor-below* layer this session (rendered into `#floor-below`, exported
+   * as `room.file.data.floorBelowTiles`). Kept separate from `addedSpriteConfigs` so the
+   * tile-child DOM machinery (dedupe / prune / drag-drop / layer-order) never sees them.
+   */
+  addedFloorBelowConfigs: {},
   hiddenSprites: [],
   replacements: [],
   hitboxOverrides: {},
@@ -957,7 +976,8 @@ function buildEditorRestorePlan() {
   const hadSpriteEdits = editorEdits.addedSprites.length > 0
     || hadHiddenSprites
     || editorEdits.replacements.length > 0
-    || Object.keys(editorEdits.addedSpriteConfigs).length > 0;
+    || Object.keys(editorEdits.addedSpriteConfigs).length > 0
+    || Object.keys(editorEdits.addedFloorBelowConfigs).length > 0;
   const hadNativeRoomPatch = !!mapEditorTestNativeRoom;
   const hadEdits = hasPendingEditorEdits() || wasMapCleaned || hadActorEdits;
 
@@ -1055,6 +1075,7 @@ function hasPendingEditorEdits() {
     && Number(editorBattleRules.allyLimit) > 0;
   return editorEdits.addedSprites.length > 0
     || Object.keys(editorEdits.addedSpriteConfigs).length > 0
+    || Object.keys(editorEdits.addedFloorBelowConfigs).length > 0
     || editorEdits.hiddenSprites.length > 0
     || editorEdits.replacements.length > 0
     || Object.keys(editorEdits.hitboxOverrides).length > 0
@@ -1086,6 +1107,7 @@ function removeOrphanedEditorAddedSprites() {
       // ignore
     }
   });
+  removeSyntheticFloorBelowContainer();
   if (removed) logMapEditor('removeOrphanedAddedSprites', { removed });
   return removed;
 }
@@ -1121,6 +1143,7 @@ function purgeAllEditorDomEdits(options = {}) {
     if (removeEditorAddedSprite(entry.sprite)) reverted += 1;
   }
   reverted += removeOrphanedEditorAddedSprites();
+  reverted += removeAllEditorFloorBelowDom();
   removeAllMapEditorVillainsFromBoard();
   if (options.restoreHitboxes !== false) {
     restoreLiveHitboxesFromSnapshot();
@@ -1139,6 +1162,7 @@ function purgeAllEditorDomEdits(options = {}) {
 function resetEditorEditsTracking() {
   editorEdits.addedSprites = [];
   editorEdits.addedSpriteConfigs = {};
+  editorEdits.addedFloorBelowConfigs = {};
   editorEdits.hiddenSprites = [];
   editorEdits.replacements = [];
   editorEdits.hitboxOverrides = {};
@@ -1173,6 +1197,7 @@ function restoreDomEditsFromTrace(restorePlan) {
     if (removeEditorAddedSprite(entry.sprite)) reverted += 1;
   }
   reverted += removeOrphanedEditorAddedSprites();
+  reverted += removeAllEditorFloorBelowDom();
 
   let tilesRestored = false;
   if ((restorePlan?.hadSpriteEdits || restorePlan?.wasMapCleaned) && baseTilesSnapshot) {
@@ -2107,6 +2132,7 @@ function finalizeSandboxRoomDomState(reason = 'unknown') {
   reapplyAddedSpriteMarkersFromConfigs();
   reapplyAllTileSpriteStackOrders();
   reapplyAllAddedSpritePlacements();
+  reapplyAddedFloorBelowDomFromConfigs();
 }
 
 function pruneGhostAddedSprites() {
@@ -2212,6 +2238,7 @@ function tileHasPendingEdits(tileIndex) {
     return true;
   }
   if ((editorEdits.addedSpriteConfigs[tileIndex] || []).length) return true;
+  if ((editorEdits.addedFloorBelowConfigs[tileIndex] || []).length) return true;
   if (editorEdits.addedSprites.some((entry) => entry.tileIndex === tileIndex)) return true;
   if (editorEdits.hiddenSprites.some((entry) => entry.tileIndex === tileIndex)) return true;
   if (editorEdits.replacements.some((entry) => entry.tileIndex === tileIndex)) return true;
@@ -2430,6 +2457,88 @@ function cleanMapFromEditor() {
       'Map cleaned — {hidden} sprites hidden, {removed} added sprites removed, {actors} creatures removed; all tiles walkable.'
     ),
     { toastMessage: t('mods.mapEditor.toastCleanMapOk', 'Map cleaned.') }
+  );
+  return true;
+}
+
+/** True while the "Hide map sprites" bulk toggle is active. */
+function isNativeSpritesBulkHidden() {
+  return editorEdits.hiddenSprites.some((entry) => entry.bulk === true);
+}
+
+/**
+ * Toggle: hide every native (non editor-added) sprite on the map — tile layer and
+ * floor-below — while leaving custom/added sprites, hitboxes and creatures untouched.
+ * Pressing again restores exactly the sprites this action hid.
+ */
+function toggleHideNativeMapSprites() {
+  if (!getCurrentRoom()?.id) {
+    setMapEditorFeedback(t('mods.mapEditor.noRoom', 'No room loaded — open a map first.'), { isError: true });
+    return false;
+  }
+  if (!guardMapEditorManipulator('hide-native-sprites')) return false;
+
+  if (isNativeSpritesBulkHidden()) {
+    let restored = 0;
+    for (const entry of [...editorEdits.hiddenSprites].reverse()) {
+      if (entry.bulk !== true) continue;
+      const sprite = entry.sprite?.isConnected
+        ? entry.sprite
+        : (findSpriteOnTileByIds(entry.tileIndex, entry.spriteIds, { onlyHidden: true })
+          || findSpriteOnTileByIds(entry.tileIndex, entry.spriteIds));
+      if (sprite && restoreSpriteElement(sprite, { skipThrottle: true, silent: true })) restored += 1;
+    }
+    editorEdits.hiddenSprites = editorEdits.hiddenSprites.filter((entry) => entry.bulk !== true);
+    notifyMapEditorEditsChanged({ skipVillainBoardResync: true });
+    refreshInspector();
+    logMapEditor('showNativeMapSprites', { restored });
+    setMapEditorFeedback(
+      tReplace('mods.mapEditor.showNativeSpritesOk', { count: restored }, 'Restored {count} map sprites.'),
+      { toastMessage: t('mods.mapEditor.toastShowNativeSpritesOk', 'Map sprites restored.') }
+    );
+    return true;
+  }
+
+  const markBulk = (sprite) => {
+    const entry = editorEdits.hiddenSprites.find((e) => e.sprite === sprite);
+    if (entry) entry.bulk = true;
+  };
+
+  let hidden = 0;
+  const tileCount = getMapTileCount();
+  for (let tileIndex = 0; tileIndex < tileCount; tileIndex += 1) {
+    const tileEl = getTileElement(tileIndex);
+    if (!tileEl) continue;
+    const sprites = getAllSpritesOnTile(tileEl);
+    sprites.forEach((sprite) => {
+      if (isEphemeralBattleSprite(sprite) || isSpriteHidden(sprite)) return;
+      if (isEditorAddedSprite(sprite) || isSpriteAddedOnTile(tileIndex, sprite, sprites)) return;
+      if (hideSpriteElement(sprite, tileIndex, { silent: true })) {
+        markBulk(sprite);
+        hidden += 1;
+      }
+    });
+  }
+  for (const sprite of getFloorBelowSprites()) {
+    if (isEphemeralBattleSprite(sprite) || isSpriteHidden(sprite)) continue;
+    if (sprite.hasAttribute(EDITOR_FB_TILE_ATTR)) continue;
+    const floorTileIndex = resolveTileIndexFromPositionedSprite(sprite);
+    if (!applyHiddenSpriteVisual(sprite)) continue;
+    if (floorTileIndex != null) trackHiddenSprite(floorTileIndex, sprite);
+    markBulk(sprite);
+    hidden += 1;
+  }
+
+  if (editorState.sandboxTestActive) {
+    finalizeSandboxRoomDomState('hide-native-sprites');
+    syncMapEditorTestNativeRoomSnapshot();
+  }
+  notifyMapEditorEditsChanged({ skipVillainBoardResync: true });
+  refreshInspector();
+  logMapEditor('hideNativeMapSprites', { hidden });
+  setMapEditorFeedback(
+    tReplace('mods.mapEditor.hideNativeSpritesOk', { count: hidden }, 'Hid {count} map sprites (custom sprites kept).'),
+    { toastMessage: t('mods.mapEditor.toastHideNativeSpritesOk', 'Map sprites hidden.') }
   );
   return true;
 }
@@ -3124,7 +3233,9 @@ function applySpriteConfigToElement(spriteEl, configEntry) {
     spriteEl.setAttribute('data-bank', String(configEntry.bank));
     spriteEl.style.setProperty('--bank', String(configEntry.bank));
   }
-  if (isEditorAddedSprite(spriteEl)) {
+  if (isEditorAddedSprite(spriteEl) && !spriteEl.hasAttribute(EDITOR_FB_TILE_ATTR)) {
+    // Floor-below nodes are positioned by applyEditorFloorBelowSpritePlacement()
+    // (anchor calc + offset), not by the tile-relative offset scheme.
     applySpritePlacementToElement(spriteEl, configEntry);
   }
 }
@@ -3725,6 +3836,11 @@ function preparePanelSpritePreviewLayout(spriteNode) {
   releaseAnimatedSpriteTree(spriteNode);
   SPRITE_PREVIEW_LAYOUT_PROPS.forEach((prop) => spriteNode.style.removeProperty(prop));
   spriteNode.style.removeProperty('inset');
+  spriteNode.style.removeProperty('z-index');
+  // Editor floor-below nodes carry the game's own layout classes — neutralise them
+  // so the preview lays them out like any other panel sprite.
+  spriteNode.classList.remove('absolute', 'size-scaled-sprite', 'pointer-events-none');
+  spriteNode.classList.add('relative');
   if (img) {
     SPRITE_PREVIEW_LAYOUT_PROPS.forEach((prop) => img.style.removeProperty(prop));
     img.removeAttribute('src');
@@ -4071,16 +4187,20 @@ function createSpritePreviewBox(spriteEl, configEntry) {
 
 function refreshTilePreview(container, tileEl, sprites, configuredLayer, floorBelowSprites = null) {
   if (!container) return;
+  container.querySelectorAll('.me-sprite-preview').forEach((preview) => stopSpritePreviewHostSync(preview));
   container.replaceChildren();
 
-  let sources = sprites.length
-    ? sprites.map((sprite, index) => ({ sprite, configEntry: configuredLayer?.[index] || null }))
-    : (configuredLayer || []).map((configEntry) => ({ sprite: null, configEntry }));
-  if (!sources.length && floorBelowSprites?.length) {
-    sources = floorBelowSprites.map((sprite) => ({
-      sprite,
-      configEntry: compactSpriteConfig(extractSpriteConfig(sprite))
-    }));
+  // Mirror what is actually visible on the tile: floor-below layer first (painted
+  // under), then the tile sprites, with hidden sprites left out.
+  const visibleFloorBelow = (floorBelowSprites || []).filter((sprite) => !isSpriteHidden(sprite));
+  const visibleSprites = (sprites || []).filter((sprite) => !isSpriteHidden(sprite));
+
+  let sources = visibleFloorBelow.map((sprite) => ({ sprite, configEntry: null }));
+
+  if (visibleSprites.length) {
+    sources = sources.concat(visibleSprites.map((sprite) => ({ sprite, configEntry: null })));
+  } else if (!sources.length) {
+    sources = (configuredLayer || []).map((configEntry) => ({ sprite: null, configEntry }));
   }
 
   if (!tileEl || !sources.length) {
@@ -4096,17 +4216,13 @@ function refreshTilePreview(container, tileEl, sprites, configuredLayer, floorBe
   const stage = document.createElement('div');
   stage.className = 'me-tile-preview-stage';
 
+  // Reuse the same host-synced preview boxes the sprite list uses — reliable paint
+  // for added, native and floor-below sprites alike — stacked into the tile preview.
   sources.forEach(({ sprite, configEntry }, index) => {
-    const layer = document.createElement('div');
-    layer.className = 'me-tile-preview-layer';
-    layer.style.zIndex = String(index + 1);
-    let spriteNode = sprite ? normalizeSpritePreviewNode(sprite) : buildSpriteElementFromConfig(configEntry);
-    if (!spriteNode && configEntry) spriteNode = buildSpriteElementFromConfig(configEntry);
-    if (spriteNode) {
-      hydrateSpritePreviewVisual(spriteNode, configEntry, sprite || null, { panelPreview: true });
-      layer.appendChild(spriteNode);
-    }
-    stage.appendChild(layer);
+    const box = createSpritePreviewBox(sprite, configEntry);
+    box.classList.add('me-tile-preview-layer');
+    box.style.zIndex = String(index + 1);
+    stage.appendChild(box);
   });
 
   container.appendChild(stage);
@@ -4208,18 +4324,61 @@ function clearTileSelection() {
     tile.removeAttribute(TILE_SELECT_ATTR);
     tile.style.outline = '';
     tile.style.outlineOffset = '';
+    // Undo any z-index a previous build forced onto the tile itself.
+    if (tile.dataset[TILE_SELECT_PREV_Z_ATTR] !== undefined) {
+      tile.style.zIndex = tile.dataset[TILE_SELECT_PREV_Z_ATTR];
+      delete tile.dataset[TILE_SELECT_PREV_Z_ATTR];
+    }
   });
+  document.querySelectorAll(`.${TILE_SELECT_FRAME_CLASS}`).forEach((el) => el.remove());
   syncTileSelectionVisuals();
 }
 
+function getTileSelectFrameHost() {
+  return getTilesContainer() || getActiveBoardRoot();
+}
+
+/**
+ * Position (or remove) the single standalone selection frame over the selected
+ * tile. The frame is a sibling of the tile elements so its z-index alone lifts it
+ * above neighbouring tiles' sprites — no tile z-index is touched.
+ */
+function updateTileSelectFrame() {
+  let frame = document.querySelector(`.${TILE_SELECT_FRAME_CLASS}`);
+  const tileIndex = editorState.selectedTileIndex;
+  const tileEl = tileIndex == null ? null : getTileElement(tileIndex);
+  const host = getTileSelectFrameHost();
+  const calcs = tileEl ? getElementAnchorCalcs(tileEl) : null;
+
+  if (!host || !calcs) {
+    frame?.remove();
+    return;
+  }
+
+  if (!frame) {
+    frame = document.createElement('div');
+    frame.className = TILE_SELECT_FRAME_CLASS;
+    frame.style.cssText = [
+      'position:absolute',
+      `width:${TILE_BOX_SIZE}`,
+      `height:${TILE_BOX_SIZE}`,
+      `border:${TILE_SELECT_BORDER}`,
+      'box-sizing:border-box',
+      'pointer-events:none',
+      `z-index:${TILE_SELECT_FRAME_Z}`
+    ].join(';');
+  }
+  frame.style.right = `calc(${calcs.right})`;
+  frame.style.bottom = `calc(${calcs.bottom})`;
+  if (frame.parentElement !== host) host.appendChild(frame);
+}
+
 function syncTileSelectionVisuals() {
+  // Legacy cleanup: earlier builds drew the border on the pick overlay itself.
   document.querySelectorAll(`.${PICK_OVERLAY_CLASS}`).forEach((overlay) => {
-    const tileIndex = Number(overlay.dataset.tileIndex)
-      ?? getTileIndexFromElement(overlay.parentElement);
-    const selected = editorState.selectedTileIndex === tileIndex;
-    overlay.style.border = selected ? TILE_SELECT_BORDER : '';
-    overlay.style.boxSizing = selected ? 'border-box' : '';
+    if (overlay.style.border) overlay.style.border = '';
   });
+  updateTileSelectFrame();
 }
 
 function selectTile(tileIndex, options = {}) {
@@ -4344,6 +4503,44 @@ function createCombinedSpriteOffsetStepper(initialX, initialY, onStep) {
   return group;
 }
 
+/**
+ * Floor picker for an editor-added sprite: "Floor 0 (main)" plus "Floor -1" … "Floor -9".
+ * `currentDepth` is 0 for a main-layer sprite, or the floor-below depth (1..9). `onChange`
+ * receives the new depth (0 = main layer).
+ */
+function createFloorLevelSelect(currentDepth, onChange) {
+  const group = document.createElement('div');
+  group.className = 'me-sprite-offset-group me-floor-level-group';
+
+  const labelSpan = document.createElement('span');
+  labelSpan.className = 'me-sprite-offset-value';
+  labelSpan.textContent = t('mods.mapEditor.floorLevel', 'Floor');
+
+  const select = document.createElement('select');
+  select.className = 'me-input me-floor-level-select';
+  select.title = t(
+    'mods.mapEditor.floorLevelHint',
+    'Floor 0 is the tile’s main sprite layer. −1 to −9 render under the walkable floor, deeper each step.'
+  );
+  for (let depth = 0; depth <= 9; depth += 1) {
+    const opt = document.createElement('option');
+    opt.value = String(depth);
+    opt.textContent = depth === 0
+      ? t('mods.mapEditor.floorLevelMain', 'Floor 0 (main)')
+      : t('mods.mapEditor.floorLevelBelow', 'Floor -{n}').replace('{n}', String(depth));
+    if (depth === currentDepth) opt.selected = true;
+    select.appendChild(opt);
+  }
+  select.addEventListener('click', (e) => e.stopPropagation());
+  select.addEventListener('change', (e) => {
+    e.stopPropagation();
+    onChange(Number(select.value));
+  });
+
+  group.append(labelSpan, select);
+  return group;
+}
+
 function applyAddedSpriteEdit(tileIndex, layerIndex, patch = {}, options = {}) {
   const { keepEditing = false } = options;
   const resolved = resolveAddedSpriteAtLayer(tileIndex, layerIndex);
@@ -4442,6 +4639,212 @@ function applySpriteEdit(tileIndex, fromId, toId, layerIndex = null, offsetPatch
   refreshInspector();
 }
 
+// ---------------------------------------------------------------------------
+// Move editor-added sprites between a tile's main layer and its floor-below layer
+// ---------------------------------------------------------------------------
+
+function getAddedFloorBelowConfigs(tileIndex) {
+  return editorEdits.addedFloorBelowConfigs[tileIndex] || null;
+}
+
+function refreshFloorBelowTileCaches(tileIndex) {
+  refreshAddedSpritesTrackingForTile(tileIndex);
+  const entry = buildTileSessionEntry(tileIndex);
+  if (entry) editorTileDomCache.set(tileIndex, entry);
+  else editorTileDomCache.delete(tileIndex);
+}
+
+function startFloorBelowSpriteEdit(tileIndex, fromId, fbIndex) {
+  if (tileIndex == null || fbIndex == null) return;
+  flushCreatureEditIfOpen();
+  editorState.editingSprite = { tileIndex, fromId, fbIndex, floorBelow: true };
+  refreshInspector();
+}
+
+/** Main layer → floor-below. `layerIndex` is the editable-layer index of the added sprite. */
+/** Drop every editor floor-below node for a tile and rebuild from configs (1:1, ordered). */
+function rebuildEditorFloorBelowNodesForTile(tileIndex) {
+  getEditorFloorBelowNodesForTile(tileIndex).forEach((node) => safeRemoveSpriteElement(node));
+  const configs = getAddedFloorBelowConfigs(tileIndex) || [];
+  configs.forEach((config, i) => buildEditorFloorBelowSpriteNode(tileIndex, config, i));
+}
+
+function moveAddedSpriteToFloorBelow(tileIndex, layerIndex, floorDepth = 1) {
+  const resolved = resolveAddedSpriteAtLayer(tileIndex, layerIndex);
+  if (!resolved) return false;
+
+  const { sprite, configIndex } = resolved;
+  const configs = editorEdits.addedSpriteConfigs[tileIndex];
+  if (!configs || configIndex < 0 || configIndex >= configs.length) return false;
+
+  const [config] = configs.splice(configIndex, 1);
+  if (!configs.length) delete editorEdits.addedSpriteConfigs[tileIndex];
+
+  const compact = compactSpriteConfig(config)
+    || (getSpriteIdsFromElement(sprite)[0] != null ? { id: getSpriteIdsFromElement(sprite)[0] } : null);
+  safeRemoveSpriteElement(sprite);
+  untrackAddedSprite(sprite);
+  if (!compact) {
+    syncLiveTileLayerToRoom(tileIndex);
+    return false;
+  }
+
+  if (!editorEdits.addedFloorBelowConfigs[tileIndex]) {
+    editorEdits.addedFloorBelowConfigs[tileIndex] = [];
+  }
+  const placed = cloneJson(compact);
+  const depth = clampFloorDepth(floorDepth);
+  if (depth > 1) placed.floor = depth;
+  editorEdits.addedFloorBelowConfigs[tileIndex].push(placed);
+  rebuildEditorFloorBelowNodesForTile(tileIndex);
+
+  editorState.editingSprite = null;
+  editorState.editingCreatureTileIndex = null;
+
+  syncLiveTileLayerToRoom(tileIndex);
+  refreshFloorBelowTileCaches(tileIndex);
+  logMapEditor('moveAddedSpriteToFloorBelow', { tileIndex, spriteId: compact.id, floor: depth });
+  notifySpriteDomEditsChanged();
+  return true;
+}
+
+/** Floor-below → main layer. `fbIndex` indexes editorEdits.addedFloorBelowConfigs[tileIndex]. */
+function moveFloorBelowSpriteToMain(tileIndex, fbIndex) {
+  const configs = getAddedFloorBelowConfigs(tileIndex);
+  if (!configs || fbIndex < 0 || fbIndex >= configs.length) return false;
+
+  const [config] = configs.splice(fbIndex, 1);
+  if (!configs.length) delete editorEdits.addedFloorBelowConfigs[tileIndex];
+  rebuildEditorFloorBelowNodesForTile(tileIndex);
+
+  const compact = compactSpriteConfig(config);
+  editorState.editingSprite = null;
+  editorState.editingCreatureTileIndex = null;
+
+  if (compact) {
+    const tileEl = getTileElement(tileIndex);
+    const added = tileEl ? addSpriteToTile(tileEl, compact.id, tileIndex, compact) : false;
+    if (!added) {
+      trackAddedSpriteConfig(tileIndex, compact);
+      reapplyAddedSpriteDomFromConfigs();
+    }
+  }
+
+  syncLiveTileLayerToRoom(tileIndex);
+  refreshFloorBelowTileCaches(tileIndex);
+  logMapEditor('moveFloorBelowSpriteToMain', { tileIndex, spriteId: compact?.id });
+  notifySpriteDomEditsChanged();
+  return true;
+}
+
+/**
+ * Reorder within the tile's floor-below stack. Same (tileIndex, fromIndex, toIndex)
+ * contract as reorderTileSprites() so the shared row drag/drop can call it directly;
+ * the ▲/▼ buttons pass fbIndex ± 1.
+ */
+function reorderFloorBelowSprite(tileIndex, fromIndex, toIndex) {
+  const configs = getAddedFloorBelowConfigs(tileIndex);
+  if (!configs || fromIndex === toIndex) return false;
+  if (fromIndex < 0 || fromIndex >= configs.length) return false;
+  const target = Math.max(0, Math.min(toIndex, configs.length - 1));
+  if (target === fromIndex) return false;
+
+  const [moved] = configs.splice(fromIndex, 1);
+  configs.splice(target, 0, moved);
+  rebuildEditorFloorBelowNodesForTile(tileIndex);
+
+  if (editorState.editingSprite?.floorBelow && editorState.editingSprite.tileIndex === tileIndex) {
+    editorState.editingSprite.fbIndex = target;
+  }
+
+  refreshFloorBelowTileCaches(tileIndex);
+  logMapEditor('reorderFloorBelowSprite', { tileIndex, fromIndex, target });
+  notifySpriteDomEditsChanged();
+  return true;
+}
+
+function applyAddedFloorBelowSpriteEdit(tileIndex, fbIndex, patch = {}, options = {}) {
+  const { keepEditing = false } = options;
+  const configs = getAddedFloorBelowConfigs(tileIndex);
+  if (!configs || fbIndex < 0 || fbIndex >= configs.length) return false;
+
+  const current = configs[fbIndex] || {};
+  const nextPatch = { ...current };
+  if (patch.id != null && Number.isFinite(patch.id)) nextPatch.id = Math.floor(patch.id);
+  if (patch.offsetX != null && Number.isFinite(patch.offsetX)) {
+    const offsetX = Math.floor(patch.offsetX);
+    if (offsetX !== 0) nextPatch.offsetX = offsetX;
+    else delete nextPatch.offsetX;
+  }
+  if (patch.offsetY != null && Number.isFinite(patch.offsetY)) {
+    const offsetY = Math.floor(patch.offsetY);
+    if (offsetY !== 0) nextPatch.offsetY = offsetY;
+    else delete nextPatch.offsetY;
+  }
+
+  const nextConfig = compactSpriteConfig(nextPatch);
+  if (!nextConfig) return false;
+  configs[fbIndex] = nextConfig;
+
+  const node = getEditorFloorBelowNodesForTile(tileIndex)[fbIndex];
+  if (node) {
+    applySpriteConfigToElement(node, nextConfig);
+    applyEditorFloorBelowSpritePlacement(node, tileIndex, nextConfig, fbIndex);
+  }
+
+  refreshFloorBelowTileCaches(tileIndex);
+  notifyMapEditorEditsChanged({ skipVillainBoardResync: true });
+  if (!keepEditing) {
+    editorState.editingSprite = null;
+    editorState.editingCreatureTileIndex = null;
+  }
+  return true;
+}
+
+/**
+ * Set the floor-below depth (1..9) of an editor-added floor-below sprite. Depth 0 is
+ * handled by the caller (→ moveFloorBelowSpriteToMain). Rebuilds the node so its
+ * z-index lands on the new level.
+ */
+function setFloorBelowSpriteDepth(tileIndex, fbIndex, floorDepth) {
+  const configs = getAddedFloorBelowConfigs(tileIndex);
+  if (!configs || fbIndex < 0 || fbIndex >= configs.length) return false;
+
+  const depth = clampFloorDepth(floorDepth);
+  const next = { ...configs[fbIndex] };
+  if (depth > 1) next.floor = depth;
+  else delete next.floor;
+  configs[fbIndex] = compactSpriteConfig(next) || next;
+  rebuildEditorFloorBelowNodesForTile(tileIndex);
+
+  refreshFloorBelowTileCaches(tileIndex);
+  notifyMapEditorEditsChanged({ skipVillainBoardResync: true });
+  logMapEditor('setFloorBelowSpriteDepth', { tileIndex, fbIndex, depth });
+  notifySpriteDomEditsChanged();
+  return true;
+}
+
+function removeAddedFloorBelowSprite(tileIndex, fbIndex) {
+  const configs = getAddedFloorBelowConfigs(tileIndex);
+  if (!configs || fbIndex < 0 || fbIndex >= configs.length) return false;
+
+  const removedId = configs[fbIndex]?.id;
+  configs.splice(fbIndex, 1);
+  if (!configs.length) delete editorEdits.addedFloorBelowConfigs[tileIndex];
+  rebuildEditorFloorBelowNodesForTile(tileIndex);
+
+  if (editorState.editingSprite?.floorBelow
+    && editorState.editingSprite.tileIndex === tileIndex) {
+    editorState.editingSprite = null;
+    editorState.editingCreatureTileIndex = null;
+  }
+
+  refreshFloorBelowTileCaches(tileIndex);
+  logMapEditor('removeAddedFloorBelowSprite', { tileIndex, spriteId: removedId });
+  notifySpriteDomEditsChanged();
+  return true;
+}
+
 // =======================
 // 8. Battlefield overlays
 // =======================
@@ -4470,6 +4873,35 @@ function getFloorBelowContainer() {
   return document.getElementById('floor-below');
 }
 
+const EDITOR_FB_CONTAINER_ATTR = 'data-map-editor-fb-container';
+
+/**
+ * Like getFloorBelowContainer(), but if the game never rendered a `#floor-below`
+ * layer (room has no native floor-below sprites) create a lightweight stand-in so
+ * editor-added floor-below sprites still preview. Cleaned up by revert/purge paths.
+ */
+function ensureFloorBelowContainer() {
+  const existing = getFloorBelowContainer();
+  if (existing) return existing;
+  const tiles = getTilesContainer();
+  const parent = tiles?.parentElement || getActiveBoardRoot();
+  if (!parent) return null;
+  const container = document.createElement('div');
+  container.id = 'floor-below';
+  container.setAttribute(EDITOR_FB_CONTAINER_ATTR, '1');
+  if (tiles && tiles.parentElement === parent) parent.insertBefore(container, tiles);
+  else parent.appendChild(container);
+  return container;
+}
+
+function removeSyntheticFloorBelowContainer() {
+  document.querySelectorAll(`[${EDITOR_FB_CONTAINER_ATTR}]`).forEach((el) => {
+    if (!el.querySelector('.sprite')) {
+      try { el.remove(); } catch (e) { /* ignore */ }
+    }
+  });
+}
+
 function resolveTileIndexFromPositionedSprite(spriteEl) {
   const calcs = getElementAnchorCalcs(spriteEl);
   if (!calcs) return null;
@@ -4482,19 +4914,27 @@ function getFloorBelowSprites() {
   return Array.from(container.querySelectorAll('.sprite')).filter((el) => !isEphemeralBattleSprite(el));
 }
 
+function isEditorFloorBelowSpriteForTile(sprite, tileIndex) {
+  if (!sprite?.getAttribute) return false;
+  const owner = sprite.getAttribute(EDITOR_FB_TILE_ATTR);
+  return owner != null && Number(owner) === Number(tileIndex);
+}
+
 function getFloorBelowSpritesForTile(tileIndex) {
+  const editorOwned = getEditorFloorBelowNodesForTile(tileIndex);
   const tileEl = getTileElement(tileIndex);
-  if (!tileEl) return [];
-  const tileCalcs = getTileAnchorCalcs(tileEl);
-  if (!tileCalcs) return [];
+  const tileCalcs = tileEl ? getTileAnchorCalcs(tileEl) : null;
+  if (!tileCalcs) return editorOwned;
   const wantRight = normalizeAnchorCalc(tileCalcs.right);
   const wantBottom = normalizeAnchorCalc(tileCalcs.bottom);
-  return getFloorBelowSprites().filter((sprite) => {
+  const nativeMatched = getFloorBelowSprites().filter((sprite) => {
+    if (sprite.hasAttribute(EDITOR_FB_TILE_ATTR)) return false;
     const calcs = getElementAnchorCalcs(sprite);
     if (!calcs) return false;
     return normalizeAnchorCalc(calcs.right) === wantRight
       && normalizeAnchorCalc(calcs.bottom) === wantBottom;
   });
+  return [...nativeMatched, ...editorOwned];
 }
 
 function getEditableFloorBelowSprites(tileIndex) {
@@ -4548,6 +4988,117 @@ function resolveFloorBelowConfigForSprite(sprite, configLayer, usedIndices = nul
     }
   }
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// Editor-added floor-below sprites. Kept only in editorEdits.addedFloorBelowConfigs
+// and as #floor-below DOM nodes during a session — never written to live room data;
+// merged onto the native floorBelowTiles layer only at the export boundary
+// (buildTileExportEntry) and into saved sessions (buildTileSessionEntry).
+// ---------------------------------------------------------------------------
+
+/** Wrap an anchor-calc inner expression back in calc(), shifting its px term by deltaPx. */
+function bumpAnchorCalcPx(inner, deltaPx) {
+  const delta = Number(deltaPx) || 0;
+  const raw = String(inner || '').trim();
+  if (!raw) return delta ? `calc(${delta}px)` : '';
+  if (!delta) return `calc(${raw})`;
+  const match = /(-?\d+(?:\.\d+)?)\s*px/.exec(raw);
+  if (match) {
+    const next = parseFloat(match[1]) + delta;
+    return `calc(${raw.slice(0, match.index)}${next}px${raw.slice(match.index + match[0].length)})`;
+  }
+  return `calc((${raw}) + ${delta}px)`;
+}
+
+// The game stacks floor-below sprites at zIndex = z + 10*tileIndex + floor*(-30000)
+// (see the #floor-below map() in the background-scene chunk). `floor` is a positive
+// depth: 1 = one level under the main floor, 9 = deepest. `stackIndex` fills the role
+// of the game's per-sprite `z` for ordering within one tile+floor.
+const EDITOR_FLOOR_BELOW_Z_BASE = -30000;
+
+function editorFloorBelowZIndex(tileIndex, stackIndex, floorDepth = 1) {
+  return clampFloorDepth(floorDepth) * EDITOR_FLOOR_BELOW_Z_BASE
+    + 10 * (Number(tileIndex) || 0)
+    + (Number(stackIndex) || 0);
+}
+
+/**
+ * Position an editor floor-below sprite node exactly like the game does: a bare
+ * `.sprite` in #floor-below, `absolute size-scaled-sprite`, anchored by right/bottom
+ * calc copied from the owning tile (offset folded into the px term), negative zIndex.
+ */
+function applyEditorFloorBelowSpritePlacement(spriteEl, tileIndex, config, stackIndex = 0) {
+  if (!spriteEl) return;
+  spriteEl.classList.add('sprite', 'item', 'pointer-events-none', 'absolute', 'size-scaled-sprite');
+  spriteEl.classList.remove('relative');
+  spriteEl.style.setProperty('z-index', String(editorFloorBelowZIndex(tileIndex, stackIndex, config?.floor)));
+  spriteEl.style.removeProperty('position');
+  spriteEl.style.removeProperty('top');
+  spriteEl.style.removeProperty('left');
+  spriteEl.style.removeProperty('inset');
+  spriteEl.style.removeProperty('transform');
+
+  const tileEl = getTileElement(tileIndex);
+  const calcs = tileEl ? getElementAnchorCalcs(tileEl) : null;
+  if (!calcs) {
+    logMapEditor('floorBelowPlacementNoAnchor', { tileIndex, hasTileEl: !!tileEl });
+    return;
+  }
+  spriteEl.style.setProperty('right', bumpAnchorCalcPx(calcs.right, Number(config?.offsetX) || 0));
+  spriteEl.style.setProperty('bottom', bumpAnchorCalcPx(calcs.bottom, Number(config?.offsetY) || 0));
+}
+
+function buildEditorFloorBelowSpriteNode(tileIndex, config, stackIndex = 0) {
+  const compact = compactSpriteConfig(config);
+  if (!compact) return null;
+  const container = ensureFloorBelowContainer();
+  if (!container) return null;
+  const sprite = buildSpriteElementFromConfig(compact);
+  if (!sprite) return null;
+  sprite.setAttribute(EDITOR_ADDED_ATTR, '1');
+  sprite.setAttribute(EDITOR_FB_TILE_ATTR, String(tileIndex));
+  applyEditorFloorBelowSpritePlacement(sprite, tileIndex, compact, stackIndex);
+  container.appendChild(sprite);
+  return sprite;
+}
+
+function getAllEditorFloorBelowNodes() {
+  return Array.from(document.querySelectorAll(`[${EDITOR_FB_TILE_ATTR}]`));
+}
+
+function getEditorFloorBelowNodesForTile(tileIndex) {
+  return getAllEditorFloorBelowNodes()
+    .filter((sprite) => isEditorFloorBelowSpriteForTile(sprite, tileIndex));
+}
+
+/** Re-inject editor floor-below sprite nodes after React has re-owned #floor-below. */
+function reapplyAddedFloorBelowDomFromConfigs() {
+  let created = 0;
+  for (const [key, configs] of Object.entries(editorEdits.addedFloorBelowConfigs)) {
+    const tileIndex = Number(key);
+    if (!Number.isFinite(tileIndex) || !configs?.length) continue;
+    const existing = getEditorFloorBelowNodesForTile(tileIndex);
+    if (existing.length === configs.length) {
+      existing.forEach((node, i) => applyEditorFloorBelowSpritePlacement(node, tileIndex, configs[i], i));
+      continue;
+    }
+    existing.forEach((node) => safeRemoveSpriteElement(node));
+    configs.forEach((config, i) => {
+      if (buildEditorFloorBelowSpriteNode(tileIndex, config, i)) created += 1;
+    });
+  }
+  if (created) logMapEditor('reapplyAddedFloorBelowDom', { created });
+  return created;
+}
+
+function removeAllEditorFloorBelowDom() {
+  let removed = 0;
+  document.querySelectorAll(`[${EDITOR_FB_TILE_ATTR}]`).forEach((node) => {
+    if (safeRemoveSpriteElement(node)) removed += 1;
+  });
+  removeSyntheticFloorBelowContainer();
+  return removed;
 }
 
 function getZoomFactor() {
@@ -4769,6 +5320,7 @@ function scheduleTilePickRefresh() {
 function isMapEditorOverlayNode(node) {
   if (node.nodeType !== 1) return true;
   return node.classList?.contains(PICK_OVERLAY_CLASS)
+    || node.classList?.contains(TILE_SELECT_FRAME_CLASS)
     || node.classList?.contains(HITBOX_OVERLAY_TILE_CLASS)
     || node.classList?.contains(PLACEMENT_OVERLAY_TILE_CLASS)
     || node.classList?.contains('map-editor-asset-preview-host')
@@ -4961,7 +5513,17 @@ function compactSpriteConfig(entry) {
   const offsetY = Number(entry.offsetY);
   if (Number.isFinite(offsetX) && offsetX !== 0) compact.offsetX = Math.floor(offsetX);
   if (Number.isFinite(offsetY) && offsetY !== 0) compact.offsetY = Math.floor(offsetY);
+  // Floor-below depth (1 = one level under the main floor, matching the game's
+  // `zIndex = z + 10*tileIndex + floor*-30000`). Omitted for depth 1 / main-layer sprites.
+  const floor = Math.floor(Number(entry.floor));
+  if (Number.isFinite(floor) && floor > 1) compact.floor = Math.min(9, floor);
   return compact;
+}
+
+/** Clamp a floor-below depth to the editable 1..9 range. */
+function clampFloorDepth(depth) {
+  const d = Math.floor(Number(depth) || 1);
+  return Math.max(1, Math.min(9, d));
 }
 
 function compactTileLayer(layer) {
@@ -4996,7 +5558,17 @@ function buildTileExportEntry(tileIndex, sourceData) {
   }
 
   const floorBelow = normalizeIndexedRoomLayer(sourceData.floorBelowTiles, tileCount);
-  if (floorBelow?.[tileIndex] != null) {
+  const addedFloorBelow = (editorEdits.addedFloorBelowConfigs[tileIndex] || [])
+    .map((config) => compactSpriteConfig(config))
+    .filter(Boolean);
+  if (addedFloorBelow.length) {
+    // Editor-added floor-below sprites are never written to live room data (kept in
+    // editorEdits + DOM); merge them onto the native layer only at the export boundary.
+    entry.floorBelow = [
+      ...normalizeSpriteLayerConfig(floorBelow?.[tileIndex]),
+      ...addedFloorBelow
+    ];
+  } else if (floorBelow?.[tileIndex] != null) {
     entry.floorBelow = cloneJson(floorBelow[tileIndex]);
   }
 
@@ -5441,7 +6013,9 @@ function extractSpriteConfig(sprite) {
   const bank = sprite.getAttribute('data-bank')
     || sprite.style.getPropertyValue('--bank');
   if (bank !== '' && bank != null) entry.bank = Number(bank) || bank;
-  if (isEditorAddedSprite(sprite)) {
+  if (isEditorAddedSprite(sprite) && !sprite.hasAttribute(EDITOR_FB_TILE_ATTR)) {
+    // Floor-below nodes carry a full anchor calc in right/bottom, not an offset —
+    // their offset lives only in editorEdits.addedFloorBelowConfigs.
     const offsetX = parseSpriteOffsetPx(sprite.style.getPropertyValue('right'));
     const offsetY = parseSpriteOffsetPx(sprite.style.getPropertyValue('bottom'));
     if (offsetX !== 0) entry.offsetX = offsetX;
@@ -5459,6 +6033,7 @@ function spriteConfigEquals(a, b) {
   if ((a.bank ?? null) !== (b.bank ?? null)) return false;
   if ((a.offsetX ?? 0) !== (b.offsetX ?? 0)) return false;
   if ((a.offsetY ?? 0) !== (b.offsetY ?? 0)) return false;
+  if ((a.floor ?? 1) !== (b.floor ?? 1)) return false;
   return true;
 }
 
@@ -5503,11 +6078,20 @@ function buildTileSessionEntry(tileIndex) {
     })
     .filter(Boolean);
 
-  const original = getOriginalTileLayer(tileIndex) || [];
-  if (!sprites.length && !original.length) return null;
-  if (!tileSessionDiffersFromOriginal(tileIndex, sprites)) return null;
+  const floorBelowAdded = (editorEdits.addedFloorBelowConfigs[tileIndex] || [])
+    .map((entry) => compactSpriteConfig(entry))
+    .filter(Boolean);
 
-  return { tileIndex, sprites };
+  const original = getOriginalTileLayer(tileIndex) || [];
+  const spritesDiffer = (sprites.length || original.length)
+    && tileSessionDiffersFromOriginal(tileIndex, sprites);
+  if (!spritesDiffer && !floorBelowAdded.length) return null;
+
+  const entry = { tileIndex, sprites };
+  if (floorBelowAdded.length) {
+    entry.floorBelow = floorBelowAdded.map((config) => cloneJson(config));
+  }
+  return entry;
 }
 
 function buildMapSessionActorsEntries() {
@@ -5793,11 +6377,13 @@ function applyTileSessionEntry(tileState, options = {}) {
     (entry) => entry.tileIndex !== tileState.tileIndex
   );
   clearAddedSpriteConfigsForTile(tileState.tileIndex);
+  delete editorEdits.addedFloorBelowConfigs[tileState.tileIndex];
 
   const pickOverlay = tileEl.querySelector(`.${PICK_OVERLAY_CLASS}`);
   getAllSpritesOnTile(tileEl).forEach((sprite) => {
     if (isEditorAddedSprite(sprite)) safeRemoveSpriteElement(sprite);
   });
+  getEditorFloorBelowNodesForTile(tileState.tileIndex).forEach((node) => safeRemoveSpriteElement(node));
 
   const sessionSprites = tileState.sprites || [];
   sessionSprites.forEach((spriteState, spriteIndex) => {
@@ -5824,6 +6410,17 @@ function applyTileSessionEntry(tileState, options = {}) {
       }
     }
   });
+
+  const floorBelowStates = Array.isArray(tileState.floorBelow) ? tileState.floorBelow : [];
+  floorBelowStates.forEach((rawConfig) => {
+    const config = compactSpriteConfig(rawConfig);
+    if (!config) return;
+    if (!editorEdits.addedFloorBelowConfigs[tileState.tileIndex]) {
+      editorEdits.addedFloorBelowConfigs[tileState.tileIndex] = [];
+    }
+    editorEdits.addedFloorBelowConfigs[tileState.tileIndex].push(cloneJson(config));
+  });
+  if (floorBelowStates.length) rebuildEditorFloorBelowNodesForTile(tileState.tileIndex);
 
   syncLiveTileLayerToRoom(tileState.tileIndex);
   refreshAddedSpritesTrackingForTile(tileState.tileIndex);
@@ -7890,8 +8487,29 @@ function mapEditorV2TileToSessionEntry(tileIndex, resolved) {
     });
   });
 
-  if (!sessionSprites.length) return null;
-  return { tileIndex, sprites: sessionSprites };
+  // Floor-below: keep only entries not already in the tile's base floor-below layer —
+  // those are the editor-added ones applyTileSessionEntry() should re-track.
+  const baseFloorBelow = normalizeSpriteLayerConfig(getFloorBelowSpriteLayerForTile(tileIndex));
+  const baseFloorBelowKeys = new Map();
+  baseFloorBelow.forEach((config) => {
+    const key = JSON.stringify(config);
+    baseFloorBelowKeys.set(key, (baseFloorBelowKeys.get(key) || 0) + 1);
+  });
+  const addedFloorBelow = [];
+  normalizeSpriteLayerConfig(resolved.floorBelow).forEach((config) => {
+    const key = JSON.stringify(config);
+    const remaining = baseFloorBelowKeys.get(key) || 0;
+    if (remaining > 0) {
+      baseFloorBelowKeys.set(key, remaining - 1);
+      return;
+    }
+    addedFloorBelow.push(cloneJson(config));
+  });
+
+  if (!sessionSprites.length && !addedFloorBelow.length) return null;
+  const entry = { tileIndex, sprites: sessionSprites };
+  if (addedFloorBelow.length) entry.floorBelow = addedFloorBelow;
+  return entry;
 }
 
 function applyMapEditorV2Export(exportPayload) {
@@ -7986,7 +8604,7 @@ function buildNativeRoomExport(options = {}) {
     delete patch.actors;
   }
 
-  room.file.data = compactRoomFileDataForExport(
+  const builtData = compactRoomFileDataForExport(
     preserveNativeRoomLayersInExport(
       sanitizeRoomFileDataForRuntime(
         mergeNativeRoomDataPatch(sourceData, patch, tileCount),
@@ -7995,6 +8613,20 @@ function buildNativeRoomExport(options = {}) {
       tileCount
     )
   );
+
+  // Sandbox: keep floor-below native-only in the room React renders — editor-added
+  // floor-below sprites are re-injected into #floor-below by
+  // reapplyAddedFloorBelowDomFromConfigs(), so baking them into the patch too would
+  // render each one twice.
+  if (sandboxPatch && tileCount && Object.keys(editorEdits.addedFloorBelowConfigs).length) {
+    const nativeFloorBelow = serializeIndexedLayerForGameRuntime(
+      normalizeIndexedRoomLayer(baseFloorBelowSnapshot, tileCount)
+    );
+    if (nativeFloorBelow !== undefined) builtData.floorBelowTiles = nativeFloorBelow;
+    else delete builtData.floorBelowTiles;
+  }
+
+  room.file.data = builtData;
   return room;
 }
 
@@ -8478,6 +9110,31 @@ function buildQuestTileMutationsFromEditor() {
     }
   }
 
+  // Editor-added floor-below sprites (editorEdits.addedFloorBelowConfigs) — the export
+  // used to drop these entirely, so quest reskins that relied on a painted floor-below
+  // layer came through empty. Emit them per tile as `floorBelow: [{spriteId, ...floor}]`.
+  for (const [key, configs] of Object.entries(editorEdits.addedFloorBelowConfigs || {})) {
+    if (!Array.isArray(configs) || !configs.length) continue;
+    const tileIndex = Number(key);
+    if (!Number.isFinite(tileIndex)) continue;
+    const list = [];
+    configs.forEach((cfg) => {
+      const compact = compactSpriteConfig(cfg);
+      if (!compact?.id) return;
+      const entry = { spriteId: compact.id };
+      if (compact.cropX != null) entry.cropX = compact.cropX;
+      if (compact.cropY != null) entry.cropY = compact.cropY;
+      if (compact.cropped) entry.cropped = true;
+      if (compact.bank != null) entry.bank = compact.bank;
+      if (compact.offsetX != null) entry.offsetX = compact.offsetX;
+      if (compact.offsetY != null) entry.offsetY = compact.offsetY;
+      const floor = clampFloorDepth(cfg.floor ?? compact.floor ?? 1);
+      if (floor > 1) entry.floor = floor;
+      list.push(entry);
+    });
+    if (list.length) ensureTile(tileIndex).floorBelow = list;
+  }
+
   if (!byTile.size) return null;
 
   const mutations = {};
@@ -8486,6 +9143,7 @@ function buildQuestTileMutationsFromEditor() {
     if (tile.remove?.length) tile.remove.sort((a, b) => a - b);
     else delete tile.remove;
     if (!tile.add?.length) delete tile.add;
+    if (!tile.floorBelow?.length) delete tile.floorBelow;
     mutations[key] = tile;
   }
   return Object.keys(mutations).length ? mutations : null;
@@ -9204,6 +9862,14 @@ function buildMapEditorTestBattleConfig(room) {
 }
 
 function updateMapEditorSessionControls() {
+  const hideNativeBtn = document.getElementById('map-editor-hide-native-btn');
+  if (hideNativeBtn) {
+    const active = isNativeSpritesBulkHidden();
+    hideNativeBtn.textContent = active
+      ? t('mods.mapEditor.showNativeSprites', 'Show map sprites')
+      : t('mods.mapEditor.hideNativeSprites', 'Hide map sprites');
+    hideNativeBtn.classList.toggle('me-btn-active', active);
+  }
   const restoreBtn = document.getElementById('map-editor-restore-map-btn');
   if (!restoreBtn) return;
   restoreBtn.disabled = false;
@@ -9777,25 +10443,30 @@ function getConfiguredAssetsFromAllRooms() {
     }
   };
 
-  if (rooms.length) {
-    rooms.forEach((room) => {
-      const tiles = room?.file?.data?.tiles;
-      if (!Array.isArray(tiles)) return;
-      tiles.forEach((layer) => {
-        if (!Array.isArray(layer)) return;
-        layer.forEach((entry) => addEntry(entry, room));
-      });
-    });
-  } else {
-    const room = getCurrentRoom();
-    const tiles = room?.file?.data?.tiles;
-    if (room && Array.isArray(tiles)) {
-      tiles.forEach((layer) => {
+  // Scan BOTH the main tile layers and the floor-below layer. floorBelowTiles is a
+  // tile-indexed layer of sprite configs (array-or-single per tile, same shape as a
+  // tiles[] entry once normalized) — skipping it dropped every sprite that only
+  // appears beneath the floor, which on bridge/water maps is most of the art.
+  const scanRoom = (room) => {
+    const data = room?.file?.data;
+    if (!data) return;
+    if (Array.isArray(data.tiles)) {
+      data.tiles.forEach((layer) => {
         if (!Array.isArray(layer)) return;
         layer.forEach((entry) => addEntry(entry, room));
       });
     }
-  }
+    if (data.floorBelowTiles != null) {
+      const tileCount = getRoomDataTileCount(data) || getMapTileCount();
+      const floorBelow = normalizeIndexedRoomLayer(data.floorBelowTiles, tileCount);
+      floorBelow?.forEach((slot) => {
+        const layer = slot && !Array.isArray(slot) && Array.isArray(slot.sprites) ? slot.sprites : slot;
+        normalizeSpriteLayerConfig(layer).forEach((config) => addEntry(config, room));
+      });
+    }
+  };
+
+  (rooms.length ? rooms : [getCurrentRoom()].filter(Boolean)).forEach(scanRoom);
 
   allRoomsAssetsCache = {
     byId,
@@ -12333,7 +13004,11 @@ function refreshCreatureList() {
     const catalog = buildCreatureCatalogList(mapUsed);
     if (loadId !== creatureListLoadId) return;
 
-    const filtered = filterCreatureList(catalog, includedMapIds, searchQuery);
+    // Creatures are never filtered by the map-selection checkboxes — the catalog
+    // already spans every monster in the game, and hiding creatures that don't
+    // happen to appear on the selected maps is more confusing than useful. Only
+    // the text search narrows this list.
+    const filtered = filterCreatureList(catalog, null, searchQuery);
     creatureListFilteredCache = {
       filtered,
       grandTotal: catalog.length,
@@ -12348,7 +13023,7 @@ function refreshCreatureList() {
       filtered,
       catalog.length,
       ASSET_LIST_PAGE_SIZE,
-      includedMapIds instanceof Set
+      false
     );
     creatureListFilteredCache.display = display;
     updateCreatureListSummary(summary, display, allRooms, room, false);
@@ -12430,20 +13105,34 @@ function updateTileResetButton() {
   resetBtn.disabled = !visible || !tileHasPendingEdits(tileIndex);
 }
 
-function handleSpriteRowLayerDrop(event, row, spriteList, tileIndex, layerIndex) {
-  event.preventDefault();
-  row.classList.remove('me-sprite-row-drop-target');
-  const fromIndex = Number(event.dataTransfer.getData('text/plain'));
-  const toIndex = layerIndex;
-  if (!Number.isFinite(fromIndex) || fromIndex === toIndex) return;
-  const ok = reorderTileSprites(tileIndex, fromIndex, toIndex);
-  if (ok) refreshInspector();
+// Shared state for sprite-row drag/drop. `kind` keeps the tile layer and the
+// floor-below layer from accepting each other's drops.
+let spriteRowDragContext = null;
+
+function spriteRowDragKindMatches(tileIndex, kind) {
+  return spriteRowDragContext
+    && spriteRowDragContext.kind === kind
+    && spriteRowDragContext.tileIndex === tileIndex;
 }
 
-function attachSpriteRowDropTarget(row, spriteList, tileIndex, layerIndex) {
+function handleSpriteRowLayerDrop(event, row, spriteList, tileIndex, layerIndex, options = {}) {
+  event.preventDefault();
+  row.classList.remove('me-sprite-row-drop-target');
+  const kind = options.kind || 'tile';
+  if (!spriteRowDragKindMatches(tileIndex, kind)) return;
+  const fromIndex = spriteRowDragContext.index;
+  const toIndex = layerIndex;
+  if (!Number.isFinite(fromIndex) || fromIndex === toIndex) return;
+  const reorder = options.reorder || reorderTileSprites;
+  if (reorder(tileIndex, fromIndex, toIndex)) refreshInspector();
+}
+
+function attachSpriteRowDropTarget(row, spriteList, tileIndex, layerIndex, options = {}) {
   if (tileIndex == null || layerIndex == null) return;
+  const kind = options.kind || 'tile';
 
   row.addEventListener('dragover', (event) => {
+    if (!spriteRowDragKindMatches(tileIndex, kind)) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = 'move';
     row.classList.add('me-sprite-row-drop-target');
@@ -12456,12 +13145,13 @@ function attachSpriteRowDropTarget(row, spriteList, tileIndex, layerIndex) {
   });
 
   row.addEventListener('drop', (event) => {
-    handleSpriteRowLayerDrop(event, row, spriteList, tileIndex, layerIndex);
+    handleSpriteRowLayerDrop(event, row, spriteList, tileIndex, layerIndex, options);
   });
 }
 
-function attachSpriteRowDragDrop(row, spriteList, tileIndex, layerIndex) {
+function attachSpriteRowDragDrop(row, spriteList, tileIndex, layerIndex, options = {}) {
   if (tileIndex == null || layerIndex == null) return;
+  const kind = options.kind || 'tile';
 
   const dragHandle = document.createElement('span');
   dragHandle.className = 'me-sprite-drag-handle';
@@ -12478,19 +13168,21 @@ function attachSpriteRowDragDrop(row, spriteList, tileIndex, layerIndex) {
       event.preventDefault();
       return;
     }
+    spriteRowDragContext = { kind, tileIndex, index: layerIndex };
     event.dataTransfer.setData('text/plain', String(layerIndex));
     event.dataTransfer.effectAllowed = 'move';
     row.classList.add('me-sprite-row-dragging');
   });
 
   row.addEventListener('dragend', () => {
+    spriteRowDragContext = null;
     row.classList.remove('me-sprite-row-dragging');
     spriteList.querySelectorAll('.me-sprite-row-drop-target').forEach((el) => {
       el.classList.remove('me-sprite-row-drop-target');
     });
   });
 
-  attachSpriteRowDropTarget(row, spriteList, tileIndex, layerIndex);
+  attachSpriteRowDropTarget(row, spriteList, tileIndex, layerIndex, options);
 }
 
 function refreshEditTab() {
@@ -12511,9 +13203,11 @@ function refreshEditTab() {
   const floorBelowLayer = tileIndex == null || editorEdits.mapCleaned
     ? []
     : getFloorBelowSpriteLayerForTile(tileIndex);
-  const floorBelowDomSprites = tileIndex == null || editorEdits.mapCleaned
-    ? []
-    : getEditableFloorBelowSprites(tileIndex);
+  // getEditableFloorBelowSprites() already drops hidden native sprites on a cleaned map
+  // while keeping editor-added ones (moved down from the main layer, or placed via
+  // "Floor below → ＋ Add sprite"), so it's safe to call in both cases — the previous
+  // `mapCleaned ? []` short-circuit was what hid added floor-below sprites entirely.
+  const floorBelowDomSprites = tileIndex == null ? [] : getEditableFloorBelowSprites(tileIndex);
 
   updateHitboxEditRow();
   updatePlacementEditRow();
@@ -12557,6 +13251,16 @@ function refreshEditTab() {
           parts.push(`actor: ${actorName}${level}`);
         }
       }
+    }
+    if (tileIndex != null && !editorEdits.mapCleaned) {
+      const tileElForSummary = getTileElement(tileIndex);
+      const shownIds = tileElForSummary
+        ? getEditableTileSprites(tileIndex, tileElForSummary)
+            .filter((sprite) => !isSpriteHidden(sprite))
+            .map((sprite) => getSpriteIdsFromElement(sprite)[0])
+            .filter((id) => id != null)
+        : [];
+      if (shownIds.length) parts.push(`sprites: ${shownIds.join(', ')}`);
     }
     if (tileIndex != null && configuredLayer?.length) {
       const summary = configuredLayer.map((entry) => {
@@ -12694,10 +13398,16 @@ function refreshEditTab() {
         configOnly = false,
         hidden = false,
         isAdded: isAddedOption,
-        floorBelow = false
+        floorBelow = false,
+        fbIndex = null
       } = options;
       const ids = sprite ? getSpriteIdsFromElement(sprite) : [];
       const isAdded = isAddedOption ?? (sprite ? isEditorAddedSprite(sprite) : false);
+      const isFloorBelowAdded = floorBelow && fbIndex != null && isAdded;
+      const isEditingFloorBelow = isFloorBelowAdded
+        && editorState.editingSprite?.floorBelow === true
+        && editorState.editingSprite?.tileIndex === tileIndex
+        && editorState.editingSprite?.fbIndex === fbIndex;
       const row = document.createElement('div');
       row.className = 'me-sprite-row';
       if (hidden) row.classList.add('me-sprite-row-hidden');
@@ -12712,9 +13422,15 @@ function refreshEditTab() {
 
       const layerSpan = document.createElement('span');
       layerSpan.className = 'me-sprite-layer';
-      layerSpan.textContent = floorBelow
-        ? `↓${index + 1}`
-        : `#${index + 1}`;
+      if (floorBelow) {
+        const fbDepth = isFloorBelowAdded
+          ? clampFloorDepth(getAddedFloorBelowConfigs(tileIndex)?.[fbIndex]?.floor ?? 1)
+          : 1;
+        layerSpan.textContent = `↓${fbDepth}`;
+        layerSpan.title = t('mods.mapEditor.floorLevelBelow', 'Floor -{n}').replace('{n}', String(fbDepth));
+      } else {
+        layerSpan.textContent = `#${index + 1}`;
+      }
 
       const idSpan = document.createElement('span');
       idSpan.className = 'me-sprite-id';
@@ -12754,10 +13470,14 @@ function refreshEditTab() {
         addedSpan.className = 'me-sprite-added-tag';
         addedSpan.textContent = t('mods.mapEditor.addedTag', 'added');
         meta.appendChild(addedSpan);
-      } else if (floorBelow) {
+      }
+      if (floorBelow && (!isAdded || isFloorBelowAdded)) {
         const floorBelowSpan = document.createElement('span');
         floorBelowSpan.className = 'me-sprite-floor-below-tag';
-        floorBelowSpan.textContent = t('mods.mapEditor.floorBelowTag', 'floor below');
+        const fbTagDepth = isFloorBelowAdded
+          ? clampFloorDepth(getAddedFloorBelowConfigs(tileIndex)?.[fbIndex]?.floor ?? 1)
+          : 1;
+        floorBelowSpan.textContent = `${t('mods.mapEditor.floorBelowTag', 'floor below')} -${fbTagDepth}`;
         meta.appendChild(floorBelowSpan);
       }
 
@@ -12767,8 +13487,11 @@ function refreshEditTab() {
       actions.className = 'me-sprite-actions';
 
       if (!configOnly && sprite && liveId != null && isAdded) {
-        const isEditing = editorState.editingSprite?.tileIndex === tileIndex
-          && editorState.editingSprite?.layerIndex === index;
+        const isEditing = isFloorBelowAdded
+          ? isEditingFloorBelow
+          : (editorState.editingSprite?.tileIndex === tileIndex
+            && !editorState.editingSprite?.floorBelow
+            && editorState.editingSprite?.layerIndex === index);
 
         const editBtn = document.createElement('button');
         editBtn.type = 'button';
@@ -12780,6 +13503,8 @@ function refreshEditTab() {
           e.stopPropagation();
           if (isEditing) {
             cancelSpriteEdit();
+          } else if (isFloorBelowAdded) {
+            startFloorBelowSpriteEdit(tileIndex, liveId, fbIndex);
           } else {
             startSpriteEdit(tileIndex, liveId, index);
           }
@@ -12795,7 +13520,9 @@ function refreshEditTab() {
           removeBtn.textContent = t('mods.mapEditor.remove', 'Remove');
           removeBtn.addEventListener('click', (e) => {
             e.stopPropagation();
-            const ok = removeAddedSprite(sprite, tileIndex);
+            const ok = isFloorBelowAdded
+              ? removeAddedFloorBelowSprite(tileIndex, fbIndex)
+              : removeAddedSprite(sprite, tileIndex);
             setStatusMessage(
               ok
                 ? t('mods.mapEditor.removeOk', 'Custom sprite removed.')
@@ -12838,16 +13565,25 @@ function refreshEditTab() {
       if (actions.childElementCount) row.appendChild(actions);
 
       if (!configOnly && sprite) {
-        if (isAdded) {
+        if (isFloorBelowAdded) {
+          attachSpriteRowDragDrop(row, spriteList, tileIndex, fbIndex, {
+            kind: 'floor-below',
+            reorder: reorderFloorBelowSprite
+          });
+        } else if (isAdded && !floorBelow) {
           attachSpriteRowDragDrop(row, spriteList, tileIndex, index);
-        } else {
+        } else if (!isAdded) {
           attachSpriteRowDropTarget(row, spriteList, tileIndex, index);
         }
       }
 
-      if (!configOnly && sprite && liveId != null && isAdded
+      const showMainEditDrawer = !configOnly && sprite && liveId != null && isAdded
+        && !isFloorBelowAdded
         && editorState.editingSprite?.tileIndex === tileIndex
-        && editorState.editingSprite?.layerIndex === index) {
+        && !editorState.editingSprite?.floorBelow
+        && editorState.editingSprite?.layerIndex === index;
+
+      if (showMainEditDrawer) {
         const editRow = document.createElement('div');
         editRow.className = 'me-sprite-edit';
 
@@ -12872,6 +13608,110 @@ function refreshEditTab() {
             }, { keepEditing: true });
           })
         );
+
+        // Floor picker — main-layer sprite sits at "Floor 0"; choosing −1..−9 moves it
+        // straight onto that floor-below level.
+        const floorSelect = createFloorLevelSelect(0, (depth) => {
+          if (depth <= 0) return;
+          const ok = moveAddedSpriteToFloorBelow(tileIndex, index, depth);
+          setStatusMessage(
+            ok
+              ? t('mods.mapEditor.moveToFloorBelowOk', 'Moved sprite to the floor-below layer.')
+              : t('mods.mapEditor.moveToFloorBelowFail', 'Could not move sprite.'),
+            !ok
+          );
+          refreshInspector();
+        });
+        floorSelect.classList.add('me-sprite-move-layer-btn');
+        offsetRow.append(floorSelect);
+
+        editRow.append(offsetRow);
+        row.appendChild(editRow);
+      }
+
+      if (isEditingFloorBelow) {
+        const editRow = document.createElement('div');
+        editRow.className = 'me-sprite-edit';
+
+        const editConfig = getAddedFloorBelowConfigs(tileIndex)?.[fbIndex]
+          || configEntry
+          || compactSpriteConfig(extractSpriteConfig(sprite));
+
+        const offsetRow = document.createElement('div');
+        offsetRow.className = 'me-sprite-offset-row';
+
+        let offsetX = editConfig?.offsetX ?? 0;
+        let offsetY = editConfig?.offsetY ?? 0;
+
+        offsetRow.append(
+          createCombinedSpriteOffsetStepper(offsetX, offsetY, (nextX, nextY) => {
+            offsetX = nextX;
+            offsetY = nextY;
+            applyAddedFloorBelowSpriteEdit(tileIndex, fbIndex, {
+              id: liveId,
+              offsetX,
+              offsetY
+            }, { keepEditing: true });
+          })
+        );
+
+        const fbConfigs = getAddedFloorBelowConfigs(tileIndex) || [];
+        if (fbConfigs.length > 1) {
+          const orderGroup = document.createElement('div');
+          orderGroup.className = 'me-sprite-offset-group';
+          const orderLabel = document.createElement('span');
+          orderLabel.className = 'me-sprite-offset-value';
+          orderLabel.textContent = t('mods.mapEditor.floorBelowOrder', 'Order');
+          const upBtn = document.createElement('button');
+          upBtn.type = 'button';
+          upBtn.className = 'me-btn me-btn-compact';
+          upBtn.textContent = '▲';
+          upBtn.title = t('mods.mapEditor.floorBelowOrderUp', 'Render one step higher (over the sprite above it)');
+          upBtn.disabled = fbIndex >= fbConfigs.length - 1;
+          upBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (reorderFloorBelowSprite(tileIndex, fbIndex, fbIndex + 1)) refreshInspector();
+          });
+          const downBtn = document.createElement('button');
+          downBtn.type = 'button';
+          downBtn.className = 'me-btn me-btn-compact';
+          downBtn.textContent = '▼';
+          downBtn.title = t('mods.mapEditor.floorBelowOrderDown', 'Render one step lower (under the sprite below it)');
+          downBtn.disabled = fbIndex <= 0;
+          downBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (reorderFloorBelowSprite(tileIndex, fbIndex, fbIndex - 1)) refreshInspector();
+          });
+          orderGroup.append(downBtn, orderLabel, upBtn);
+          offsetRow.append(orderGroup);
+        }
+
+        // Floor picker — current level is the config's depth (default −1). "Floor 0"
+        // moves it back to the main layer; any other value re-levels it.
+        const currentDepth = clampFloorDepth(editConfig?.floor ?? 1);
+        const floorSelect = createFloorLevelSelect(currentDepth, (depth) => {
+          let ok;
+          if (depth <= 0) {
+            ok = moveFloorBelowSpriteToMain(tileIndex, fbIndex);
+            setStatusMessage(
+              ok
+                ? t('mods.mapEditor.moveToMainFloorOk', 'Moved sprite to the main layer.')
+                : t('mods.mapEditor.moveToMainFloorFail', 'Could not move sprite.'),
+              !ok
+            );
+          } else {
+            ok = setFloorBelowSpriteDepth(tileIndex, fbIndex, depth);
+            setStatusMessage(
+              ok
+                ? t('mods.mapEditor.floorLevelChanged', 'Sprite moved to floor -{n}.').replace('{n}', String(depth))
+                : t('mods.mapEditor.moveToMainFloorFail', 'Could not move sprite.'),
+              !ok
+            );
+          }
+          refreshInspector();
+        });
+        floorSelect.classList.add('me-sprite-move-layer-btn');
+        offsetRow.append(floorSelect);
 
         editRow.append(offsetRow);
         row.appendChild(editRow);
@@ -12911,17 +13751,31 @@ function refreshEditTab() {
       spriteList.appendChild(separator);
 
       const usedFloorBelowConfig = new Set();
-      const floorBelowRowEntries = floorBelowDomSprites.map((sprite, index) => ({
-        sprite,
-        index,
-        configEntry: resolveFloorBelowConfigForSprite(sprite, floorBelowLayer, usedFloorBelowConfig),
-        hidden: isSpriteHidden(sprite)
-      }));
+      // fbIndex MUST be the sprite's position in the addedFloorBelowConfigs array (that's
+      // what Edit / Remove / reorder / the "Floor -N" label all key off). getEditor…()
+      // returns the nodes in that array order; floorBelowDomSprites is z-sorted, so an
+      // enumeration counter would mis-pair them once floors differ — look each one up.
+      const editorFloorBelowNodes = getEditorFloorBelowNodesForTile(tileIndex);
+      const floorBelowRowEntries = floorBelowDomSprites.map((sprite, index) => {
+        const editorOwned = isEditorFloorBelowSpriteForTile(sprite, tileIndex);
+        const fbIndex = editorOwned ? editorFloorBelowNodes.indexOf(sprite) : null;
+        const configEntry = editorOwned
+          ? (fbIndex >= 0 ? getAddedFloorBelowConfigs(tileIndex)?.[fbIndex] || null : null)
+          : resolveFloorBelowConfigForSprite(sprite, floorBelowLayer, usedFloorBelowConfig);
+        const sortZ = editorOwned && fbIndex >= 0
+          ? editorFloorBelowZIndex(tileIndex, fbIndex, configEntry?.floor ?? 1)
+          : (Number(sprite.style.zIndex) || 0);
+        return { sprite, index, fbIndex, configEntry, hidden: isSpriteHidden(sprite), sortZ };
+      });
 
-      for (let i = floorBelowRowEntries.length - 1; i >= 0; i -= 1) {
-        const entry = floorBelowRowEntries[i];
-        appendSpriteRow(entry.sprite, entry.index, entry.configEntry, {
+      // Top of the list = renders on top: shallow floors above deep ones, and within a
+      // floor the later ("▲ one step higher") sprites first.
+      floorBelowRowEntries.sort((a, b) => b.sortZ - a.sortZ);
+
+      for (const entry of floorBelowRowEntries) {
+        appendSpriteRow(entry.sprite, entry.fbIndex ?? entry.index, entry.configEntry, {
           floorBelow: true,
+          fbIndex: entry.fbIndex,
           hidden: entry.hidden
         });
       }
@@ -13275,6 +14129,29 @@ function buildInspectorContent() {
     'Hides every sprite on the map, removes all creatures from the battlefield, and makes all tiles walkable. Use Restore map to undo everything.'
   );
   mapSection.appendChild(cleanMapHint);
+
+  const hideNativeRow = document.createElement('div');
+  hideNativeRow.className = 'me-row';
+  const hideNativeBtn = createPanelButton(
+    t('mods.mapEditor.hideNativeSprites', 'Hide map sprites'),
+    () => toggleHideNativeMapSprites(),
+    'me-btn me-btn-wide me-btn-muted'
+  );
+  hideNativeBtn.id = 'map-editor-hide-native-btn';
+  hideNativeBtn.title = t(
+    'mods.mapEditor.hideNativeSpritesTooltip',
+    'Hide every original map sprite (tile layer and floor below) while keeping your custom sprites, hitboxes and creatures. Toggle to restore.'
+  );
+  hideNativeRow.appendChild(hideNativeBtn);
+  mapSection.appendChild(hideNativeRow);
+
+  const hideNativeHint = document.createElement('div');
+  hideNativeHint.className = 'me-muted me-section-hint';
+  hideNativeHint.textContent = t(
+    'mods.mapEditor.hideNativeSpritesHint',
+    'Visual only — leaves custom sprites, hitboxes and creatures alone. Handy for building a scene on a blank map. Toggle again (or Restore map) to bring the sprites back.'
+  );
+  mapSection.appendChild(hideNativeHint);
   mapPanel.appendChild(mapSection);
 
   const assetsPanel = document.createElement('div');
@@ -14924,7 +15801,7 @@ function injectStyles() {
       position: relative;
       width: ${SPRITE_PREVIEW_SIZE}px;
       height: ${SPRITE_PREVIEW_SIZE}px;
-      overflow: visible;
+      overflow: hidden;
       image-rendering: pixelated;
     }
     #${PANEL_ID} .me-tile-preview-layer {
@@ -14933,8 +15810,16 @@ function injectStyles() {
       bottom: 0;
       width: ${SPRITE_PREVIEW_SIZE}px;
       height: ${SPRITE_PREVIEW_SIZE}px;
-      overflow: visible;
+      overflow: hidden;
       pointer-events: none;
+    }
+    #${PANEL_ID} .me-tile-preview-stage .me-sprite-preview {
+      position: absolute;
+      right: 0;
+      bottom: 0;
+      border: 0;
+      background: transparent;
+      overflow: hidden;
     }
     #${PANEL_ID} .me-tile-preview-layer .sprite,
     #${PANEL_ID} .me-sprite-preview .sprite {
@@ -15023,6 +15908,9 @@ function injectStyles() {
       font-size: 10px;
       color: rgba(255, 224, 102, 0.75);
     }
+    #${PANEL_ID} .me-sprite-move-layer-btn {
+      margin-left: auto;
+    }
     #${PANEL_ID} .me-sprite-row {
       display: flex;
       align-items: center;
@@ -15072,6 +15960,13 @@ function injectStyles() {
       display: inline-flex;
       align-items: center;
       gap: 4px;
+    }
+    #${PANEL_ID} .me-floor-level-group.me-sprite-move-layer-btn {
+      margin-left: auto;
+    }
+    #${PANEL_ID} .me-floor-level-select {
+      width: auto;
+      min-width: 0;
     }
     #${PANEL_ID} .me-sprite-offset-label {
       flex: 0 0 auto;
@@ -15301,6 +16196,11 @@ function injectStyles() {
     }
     #${PANEL_ID} .me-btn-muted {
       opacity: 0.85;
+    }
+    #${PANEL_ID} .me-btn.me-btn-active {
+      opacity: 1;
+      border-color: var(--me-gold, #ffe066);
+      color: var(--me-gold, #ffe066);
     }
     #${PANEL_ID} .me-session-hint {
       font-size: 11px;

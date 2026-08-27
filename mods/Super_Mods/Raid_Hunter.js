@@ -1176,7 +1176,7 @@ function createStaminaMonitoringCallback(logPrefix, successMessage) {
         if (isAutoplayMode && isAutoplaySessionRunning) {
             // Autoplay session is actually running - just continue monitoring
             console.log('[Raid Hunter] Autoplay session running - continuing stamina monitoring');
-            const requiredStamina = getStaminaCost();
+            const requiredStamina = getCurrentMapStaminaCost();
             const callback = createStaminaMonitoringCallback(logPrefix, successMessage);
             startStaminaTooltipMonitoring(callback, requiredStamina);
         } else {
@@ -1229,7 +1229,7 @@ function createStaminaMonitoringCallback(logPrefix, successMessage) {
                     'Raid restarted after stamina recovery'
                 );
 
-                const requiredStamina = getStaminaCost();
+                const requiredStamina = getCurrentMapStaminaCost();
                 startStaminaTooltipMonitoring(continuousStaminaMonitoring, requiredStamina);
             };
 
