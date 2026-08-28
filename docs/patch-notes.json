@@ -4,6 +4,46 @@
   },
   "notes": [
     {
+      "version": "4.9.4",
+      "changes": [
+        {
+          "mod": "Mod Loader",
+          "type": "added",
+          "text": "New Log Level control in the popup's Debug section — Silent, Errors, Warnings, Info, Verbose (default Errors) — sets console verbosity for every mod and loader script at once and applies to open game tabs immediately, no refresh. It replaces the old on/off Debug Mode toggle; anyone who had Debug Mode on is moved to Verbose."
+        },
+        {
+          "mod": "Mod Loader",
+          "type": "changed",
+          "text": "Errors are now always shown in the console and always saved to the popup Error Log with their full stack and details, whatever the Log Level is set to — including uncaught errors from the page, content script, and background. The Error Log keeps its last 300 entries (was 200), and every console line now shows its real source file and line in DevTools (mods appear as \"Mod_Name.js:123\" instead of \"VM123:456\")."
+        },
+        {
+          "mod": "Popup",
+          "type": "changed",
+          "text": "Debug section: the Debug Mode toggle is now the Log Level dropdown, and Error Log stack traces are indented for readability."
+        },
+        {
+          "mod": "Quests",
+          "type": "added",
+          "text": "Added a hidden place you can ask to be taken to — a quiet walk-around area with no battle. A right-click menu on a marked tile there sends you back to wherever you came from, and a decorative figure standing nearby says a short line when right-clicked. Leaving restores the room exactly as you found it."
+        },
+        {
+          "mod": "Quests",
+          "type": "changed",
+          "text": "Several NPCs will now answer if you ask them about Gamemasters."
+        },
+        {
+          "mod": "Quests",
+          "type": "fixed",
+          "text": "A one-of-a-kind item sold by a shop can no longer be bought again once you own one — the shop now checks your inventory, not only its record of past purchases, and corrects that record if it had fallen out of sync. Unique quest items are now capped at one per player, so any duplicates already in an inventory are trimmed back to a single copy on load. On load, any collectible reward you earned for finishing a mission but are missing from your inventory is now granted back to you."
+        },
+        {
+          "mod": "RunTracker",
+          "type": "changed",
+          "text": "No longer hooks the console to look for replay strings — that was making every later console line look like it came from RunTracker. Completed runs and their board setups are still recorded from the game's network responses, which is what the run list, Cyclopedia and Mod Settings use."
+        }
+      ]
+    },
+    {
       "version": "4.9.3",
       "changes": [
         {

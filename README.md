@@ -84,8 +84,8 @@ The extension provides a modern, store-like popup interface for managing your mo
   - **Welcome Page**: Enable/disable the welcome page on next load
   - **Patch Notes**: View latest changes and updates
 - **Debug Section**: Collapsible section (below Extras) containing:
-  - **Debug Mode**: Toggle `console.log` output from all mods (storage usage shown below the toggle)
-  - **Error Log**: Persisted loader and mod **errors only** (warnings are not recorded). Includes a sticky Device / Browser header (extension version, platform, URL, user-agent). Copy and Clear buttons; auto-refreshes when you expand Debug. Useful on mobile/iOS where DevTools is unavailable
+  - **Log Level**: Global console verbosity for every mod and loader script — Silent / Errors / Warnings / Info / Verbose (default **Errors**). Applies to open game tabs immediately, no refresh. `console.error` always prints regardless. Storage usage shown below
+  - **Error Log**: Persisted loader and mod errors, **always** recorded with full stack/detail regardless of the Log Level (last 300 entries). Includes a sticky Device / Browser header (extension version, platform, URL, user-agent). Copy and Clear buttons; auto-refreshes when you expand Debug. Useful on mobile/iOS where DevTools is unavailable
 - **Add Script Section**: Collapsible section for importing mods from GitHub Gists (supports both hash and full URL)
 - **External Links**: Quick access to find more user-generated mods on the wiki
 
@@ -644,7 +644,7 @@ Visit the [GitHub Issues page](https://github.com/styrserver/BestiaryArena-Super
 If you encounter any issues:
 
 - **Mods not appearing?** Make sure you're on the Bestiary Arena website and the extension is enabled.
-- **Mods not loading on mobile/iOS?** Open the popup → **Debug** → **Error Log** (expand Debug to refresh). Use **Copy** to share errors for debugging. Tap **Clear** to wipe stale entries. Enable **Debug Mode** and refresh the game tab if you need verbose `console.log` output in DevTools. See [Orion iOS Compatibility](docs/orion_ios_compatibility.md) for platform-specific loader notes.
+- **Mods not loading on mobile/iOS?** Open the popup → **Debug** → **Error Log** (expand Debug to refresh). Use **Copy** to share errors for debugging. Tap **Clear** to wipe stale entries. Set **Log Level** to **Verbose** (applies immediately) if you need full `console.log` output in DevTools. See [Orion iOS Compatibility](docs/orion_ios_compatibility.md) for platform-specific loader notes.
 - **Game performance issues?** Try using the Performance Mode mod to improve game speed.
 - **Extension not working after game update?** Check for extension updates on GitHub.
 - **Specific mod not working?** Disable and re-enable the mod, or refresh the page.

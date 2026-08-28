@@ -9,8 +9,7 @@ This guide provides comprehensive documentation on creating mods for Bestiary Ar
   - [Introduction](#introduction)
   - [Getting Started](#getting-started)
     - [Adding a New Built-in Mod to the Extension](#adding-a-new-built-in-mod-to-the-extension)
-    - [Debug System](#debug-system)
-    - [Error Log](#error-log-popup-debug)
+    - [Logging & Error Log](#logging--error-log-popup-debug)
     - [Basic Mod Template](#basic-mod-template)
   - [Mod Structure](#mod-structure)
     - [Context](#context)
@@ -54,7 +53,7 @@ This guide provides comprehensive documentation on creating mods for Bestiary Ar
 
 The Bestiary Arena Mod Loader allows you to create custom modifications for the game that can extend its functionality, add new features, or change the user experience. Mods are JavaScript files that run in the context of the game and have access to a powerful API that lets them interact with game state and UI.
 
-**Note**: The Mod Loader includes a global debug system controlled by the popup interface. All `console.log()` calls in your mods automatically respect the debug toggle - no manual debug wrappers needed!
+**Note**: The Mod Loader routes all console output through one controller. Just use `console.log()` / `console.warn()` / `console.error()` directly — verbosity is the popup's **Debug → Log Level** control, no manual debug wrappers needed.
 
 ## Getting Started
 
@@ -105,34 +104,38 @@ const superModNames = [
 - `local_mods.js` embeds the same lists for environments where dynamic import fails.
 - On Chrome, the background service worker cannot use `import()` for the registry in all code paths, so category totals use the hardcoded `modCounts` object until that limitation changes.
 
-### Debug System
+### Logging & Error Log (popup Debug)
 
-The Mod Loader includes a **global debug system** that automatically controls all console output from mods:
+Every `console.*` call in every context (page, content script, background) goes through
+one controller, `content/ba-logger.js`. Just call `console.log()` / `console.warn()` /
+`console.error()` directly — **do not** wrap them in `if (window.BESTIARY_DEBUG)` checks
+or reassign `console.*` yourself.
 
-- **Debug OFF**: All `console.log()` calls are automatically suppressed
-- **Debug ON**: All `console.log()` calls work normally
-- **No manual checks needed**: Just use `console.log()` directly - the system handles debug control automatically
+Verbosity is the popup **Debug → Log Level** control (`silent` / `errors` / `warnings` /
+`info` / `verbose`, default `errors`), applied live to open game tabs — no refresh:
 
-**Important**: You do NOT need to wrap your console.log calls in `if (window.BESTIARY_DEBUG)` checks. The popup's debug toggle controls all console output globally through the content scripts.
+- `console.log` / `console.info` print at `info` and above
+- `console.warn` prints at `warnings` and above
+- `console.error` **always** prints, at every level
 
-Toggle **Debug Mode** in popup **Debug** (below **Extras**). Changes require a game tab refresh.
+Mods run with a `//# sourceURL` trailer, so DevTools shows `Mod_Name.js:123` for their
+log lines (not `VM123:456`). `window.BESTIARY_DEBUG` still exists as a read-only
+back-compat alias (`true` only when the level is `verbose`).
 
-### Error Log (popup Debug)
+The popup **Error Log** works without DevTools (useful on mobile WebExtensions):
 
-Since **4.2.10**, the popup **Error Log** captures **errors only** for debugging without DevTools:
+| Always recorded (any log level) | Not recorded |
+|---------------------------------|--------------|
+| `console.error` (with stack/detail) | `console.warn` / `console.log` / `console.info` |
+| `console.assert` failures | |
+| Uncaught errors + unhandled rejections | |
+| Mod/loader load failures, background fetch failures | |
 
-| Captured | Not captured |
-|----------|----------------|
-| `console.error` | `console.warn` |
-| Uncaught errors | `console.log` (use Debug Mode) |
-| Unhandled promise rejections | |
-| Mod/loader load failures | |
-| Background mod fetch failures | |
-
-- Persists in extension storage (last 200 entries) until **Clear**
+- Persists in extension storage (last 300 entries) until **Clear**
 - Prepends a sticky Device / Browser header (survives **Clear**; included when copying)
 - Expand **Debug** to auto-refresh; use **Copy** to share logs (e.g. from iOS)
 - Report from mods: `window.BestiaryLoaderErrorLog?.report(source, message, detail)`
+- Inspect the level at runtime: `globalThis.BestiaryLogger.getLevel()`
 
 See [Mod Loading System — Error Log](mod_loading_optimizations.md#error-log-popup-debug) for architecture details.
 
@@ -1122,10 +1125,9 @@ The coordination system uses priorities to automatically resolve conflicts:
 
 ### Logging Best Practices
 
-- **Use `console.log()` directly** for all debug output
-- **No debug wrappers needed**: The popup's debug toggle controls all console output automatically
+- **Use `console.log()` directly** for all debug output — no `if (DEBUG)` wrappers, and never reassign `console.*` (the popup **Log Level** controls verbosity globally; a wrapper also breaks DevTools line attribution)
 - **Keep logs informative**: Include context like mod name, function name, or relevant data
-- **Use appropriate log levels**: `console.log()` for info, `console.warn()` for warnings, `console.error()` for errors
+- **Use appropriate log levels**: `console.log()` for info, `console.warn()` for warnings, `console.error()` for errors — `console.error()` always prints and is always saved to the popup Error Log
 - **Clean up sensitive data**: Don't log user credentials or sensitive game state information
 
 ## Examples

@@ -86,23 +86,51 @@ Since **4.2.10**, the extension popup includes an **Error Log** under the **Debu
 
 ### Debug section order
 
-**Debug Mode** → **Error Log**
+**Log Level** → **Error Log**
+
+### Log Level (global console controller)
+
+`content/ba-logger.js` is loaded first in every context (background worker, isolated
+content-script world, page/MAIN world) and installs one `console` proxy per context. Its
+verbosity is a single setting (`storage.local` key `ba-log-level`) chosen in the popup:
+
+| level      | console shows                                   |
+|------------|-------------------------------------------------|
+| `silent`   | nothing (`console.error` still prints)          |
+| `errors`   | `error` only — **default**                      |
+| `warnings` | `error`, `warn`                                 |
+| `info`     | `error`, `warn`, `log`, `info`                  |
+| `verbose`  | everything (`debug`, `trace`, `group*`, `table`, …) |
+
+Changing the level applies live to open game tabs (via `storage.onChanged` in the isolated
+world plus a `BESTIARY_EXTENSION`/`updateLogLevel` `postMessage` bridge to the MAIN world) —
+no page refresh. The old on/off **Debug Mode** toggle is gone; an existing
+`bestiary-debug === true` migrates to `verbose` on first popup open, and `bestiary-debug`
+is still written (`true` iff `verbose`) as a read-only back-compat alias.
+
+**Call-site attribution.** The gated methods are installed as accessor properties whose
+getter returns the *native* function, so DevTools still shows the real `file:line`. Mods
+run via `new Function` with a `//# sourceURL=bestiary-mod/<Mod_Name>.js` trailer, so their
+lines show as `<Mod_Name>.js:123` instead of `VM123:456`. Only `console.error` is a wrapper
+(for the Error Log side effect) — its DevTools line points at `ba-logger.js`, but the stored
+entry's `source` is recovered from the captured stack. Mods and loader files must **not**
+wrap `console` themselves — any wrapper becomes the attributed frame for every later log.
 
 ### What is captured
 
-- `console.error` from the game page, content script (`injector.js`), and background script
-- Uncaught errors and unhandled promise rejections
+- **`console.error`** — always, regardless of level, with a formatted stack / object dump in `detail`
+- `console.assert` failures (treated as errors)
+- Uncaught errors and unhandled promise rejections (page, isolated world, background) — with stack
 - Mod batch load failures and loader-level completion errors
 - Background `getModContent` fetch failures (includes failed resource URL in detail)
 
 ### What is not captured
 
-- `console.warn` — not stored or shown (avoids noisy fallback warnings during startup)
-- `console.log` — use **Debug Mode** in the Debug section instead
+- `console.warn` / `console.log` / `console.info` — printed per the **Log Level**, never stored
 
 ### Persistence and UI
 
-- Stored in `chrome.storage.local` under key `ba-loader-errors` (ring buffer, last **200** entries)
+- Stored in `chrome.storage.local` under key `ba-loader-errors` (ring buffer, last **300** entries)
 - Survives page reloads until you tap **Clear**
 - Prepends a sticky **Device / Browser** header (extension version, browser, platform, device type, language, URL, user-agent, timestamp) that survives **Clear** and is included when copying; uses live page context when a bestiaryarena.com tab is active
 - Expanding the **Debug** section auto-refreshes the panel (no separate Refresh button since **4.3.1**)

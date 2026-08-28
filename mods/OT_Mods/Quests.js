@@ -461,6 +461,9 @@ function rebuildCostelloSealPatterns(patternSource) {
     .sort((a, b) => b[0].length - a[0].length);
 }
 
+// Generic transcript keywords every NPC (and King Tibianus) falls back to — filled from
+// assets/quests/npcs.json -> shared.keywords. NPC-specific keywords override these.
+let NPC_SHARED_KEYWORDS = {};
 let AL_DEE_RESPONSES = {};
 let COSTELLO_RESPONSES = {};
 let WYDA_RESPONSES = {};
@@ -713,6 +716,21 @@ function applyQuestDialogueFromAssets(missionsData, npcsData) {
     applyNpc(npcsData[npcKey] || {});
   }
 
+  // Shared transcript keywords (gamemaster / isle of solitude / gm island ...) — merged
+  // under every NPC's own keyword map so any NPC can answer them. NPC-specific keys win.
+  NPC_SHARED_KEYWORDS = { ...((npcsData.shared && npcsData.shared.keywords) || {}) };
+  AL_DEE_RESPONSES = { ...NPC_SHARED_KEYWORDS, ...AL_DEE_RESPONSES };
+  COSTELLO_RESPONSES = { ...NPC_SHARED_KEYWORDS, ...COSTELLO_RESPONSES };
+  WYDA_RESPONSES = { ...NPC_SHARED_KEYWORDS, ...WYDA_RESPONSES };
+  TESHA_RESPONSES = { ...NPC_SHARED_KEYWORDS, ...TESHA_RESPONSES };
+  SANTA_RESPONSES = { ...NPC_SHARED_KEYWORDS, ...SANTA_RESPONSES };
+  SVENSON_RESPONSES = { ...NPC_SHARED_KEYWORDS, ...SVENSON_RESPONSES };
+  DANE_RESPONSES = { ...NPC_SHARED_KEYWORDS, ...DANE_RESPONSES };
+  ORACLE_RESPONSES = { ...NPC_SHARED_KEYWORDS, ...ORACLE_RESPONSES };
+  ELATHRIEL_RESPONSES = { ...NPC_SHARED_KEYWORDS, ...ELATHRIEL_RESPONSES };
+  BONELORD_RESPONSES = { ...NPC_SHARED_KEYWORDS, ...BONELORD_RESPONSES };
+  OLD_DRAGONLORD_RESPONSES = { ...NPC_SHARED_KEYWORDS, ...OLD_DRAGONLORD_RESPONSES };
+
   NPC_QUEST_ITEM_CHAT_RESPONSES = JSON.parse(JSON.stringify(npcsData.questItems || {}));
   Object.assign(NPC_QUEST_ITEM_UNINVOLVED_TEMPLATES, npcsData.questItemUninvolvedTemplates || {});
 
@@ -786,6 +804,9 @@ function applyQuestItemsFromAssets(itemsData) {
   }
   if (Array.isArray(lifecycle.devCompleteRewards)) {
     replaceArrayContents(QUEST_DEV_COMPLETE_REWARD_RULES, lifecycle.devCompleteRewards);
+  }
+  if (Array.isArray(lifecycle.soulCoreGrantOnComplete)) {
+    replaceArrayContents(QUEST_SOUL_CORE_GRANT_RULES, lifecycle.soulCoreGrantOnComplete);
   }
   questItemsConfigData = itemsData;
 }
@@ -1080,6 +1101,17 @@ function applyQuestRoomsFromAssets(roomsData) {
     }
   }
 
+  const isleOfSolitudeRoom = roomsData.isleOfSolitude;
+  if (isleOfSolitudeRoom) {
+    if (isleOfSolitudeRoom.battleRoomName) ISLE_BATTLE_ROOM_NAME = isleOfSolitudeRoom.battleRoomName;
+    if (isleOfSolitudeRoom.battleRoomId) ISLE_BATTLE_ROOM_ID = isleOfSolitudeRoom.battleRoomId;
+    if (isleOfSolitudeRoom.battleDisplayName) ISLE_BATTLE_DISPLAY_NAME = isleOfSolitudeRoom.battleDisplayName;
+    if (isleOfSolitudeRoom.battleId) ISLE_BATTLE_ID = isleOfSolitudeRoom.battleId;
+    if (isleOfSolitudeRoom.tileMutations && typeof isleOfSolitudeRoom.tileMutations === 'object') {
+      ISLE_TILE_MUTATIONS = isleOfSolitudeRoom.tileMutations;
+    }
+  }
+
   const mornenionRoom = roomsData.mornenion;
   if (mornenionRoom) {
     if (mornenionRoom.tileMutations && typeof mornenionRoom.tileMutations === 'object') {
@@ -1262,7 +1294,7 @@ async function loadQuestDialogueAssets() {
 }
 
 function getKingTibianusKeywordResponses() {
-  const keywords = { ...(questNpcsDialogue?.['king-tibianus']?.keywords || {}) };
+  const keywords = { ...NPC_SHARED_KEYWORDS, ...(questNpcsDialogue?.['king-tibianus']?.keywords || {}) };
   if (KING_LETTER_MISSION?.prompt) {
     keywords.letter = KING_LETTER_MISSION.prompt;
     keywords.scroll = KING_LETTER_MISSION.prompt;
@@ -1793,6 +1825,15 @@ let DRACONIA_QUEST_BATTLE_DISPLAY_NAME = 'Draconia Quest';
 let DRACONIA_QUEST_BATTLE_ID = 'draconia_quest';
 let DRACONIA_QUEST_TILE_MUTATIONS = null;
 
+// Isle of Solitude / GM Island (King Tibianus easter egg — chat-triggered teleport into
+// the Sewers re-skinned as the isle. No mission, no battle: a walk-around scene. An empty
+// CustomBattle keeps the board clear; right-click tile 37 returns to the prior room).
+let ISLE_BATTLE_ROOM_NAME = 'Sewers';
+let ISLE_BATTLE_ROOM_ID = 'rkswrs';
+let ISLE_BATTLE_DISPLAY_NAME = 'Isle of Solitude';
+let ISLE_BATTLE_ID = 'isle_of_solitude';
+let ISLE_TILE_MUTATIONS = null;
+
 // Ab'Dendriel Hive (Mornenion) reskin. NOTE: this was originally implemented via
 // CustomBattles' native sceneSpriteReplacements (a global sprite-id swap), but that
 // replaces EVERY instance of a source id anywhere in the room — losing per-tile
@@ -2040,6 +2081,9 @@ const QUESTS_DEV_ITEM_CATALOG = [];
 const QUEST_ITEM_CLEANUP_RULES = [];
 const QUEST_ITEM_STALE_CLEANUP_RULES = [];
 const QUEST_DEV_COMPLETE_REWARD_RULES = [];
+// { productId, missionId } — grant the soul core to anyone who completed the mission but
+// has none in inventory. Filled from items.json → itemLifecycle.soulCoreGrantOnComplete.
+const QUEST_SOUL_CORE_GRANT_RULES = [];
 
 const COPPER_KEY_CONFIG = {};
 const MAP_COLOUR_CONFIG = {};
@@ -2537,6 +2581,18 @@ function createNPCCooldownManager() {
   let hellgateLibraryHitboxesApplied = false;
   let hellgateLibraryBattleStarted = false;
   let hellgateLibraryPreBattleSub = null;
+
+  // Isle of Solitude / GM Island (King Tibianus easter egg: walk-around Sewers reskin,
+  // no mission, no battle. isleReturnRoomId is captured on entry so tile 37 can send the
+  // player back where they came from).
+  let playerEnteredIsleOfSolitude = false;
+  let isleOfSolitudeBattle = null;
+  let isleOfSolitudeHitboxesApplied = false;
+  let isleReturnRoomId = null;
+  let isleSceneSub = null;
+  let isleTeleporterContextMenu = null;
+  let isleTeleporterRightClickEnabled = false;
+  let isleHitboxSnapshot = null; // original rkswrs data.hitboxes, captured before the isle reskin mutates it
 
   // Draconia Tower (Elathriel: teleport into the Sewers dragon-cemetery reskin; battle on
   // entry, then a post-battle talk with An Old Dragonlord to trade a White Mushroom).
@@ -5405,6 +5461,8 @@ function createNPCCooldownManager() {
   const QUEST_BOARD_HIDDEN_TAG_HELLGATE = 'hellgate-treasure-room';
   const QUEST_BOARD_ADDED_ATTR_HELLGATE_LIBRARY = 'data-quests-hellgate-library-added';
   const QUEST_BOARD_HIDDEN_TAG_HELLGATE_LIBRARY = 'hellgate-library';
+  const QUEST_BOARD_ADDED_ATTR_ISLE = 'data-quests-isle-of-solitude-added';
+  const QUEST_BOARD_HIDDEN_TAG_ISLE = 'isle-of-solitude';
   const QUEST_BOARD_ADDED_ATTR_DRACONIA = 'data-quests-draconia-added';
   const QUEST_BOARD_HIDDEN_TAG_DRACONIA = 'draconia-tower';
   const QUEST_BOARD_ADDED_ATTR_DRACONIA_QUEST = 'data-quests-draconia-quest-added';
@@ -8364,6 +8422,7 @@ function createNPCCooldownManager() {
       });
       await reloadQuestItemsFromFirebase();
       await cleanupStaleQuestItemsAfterCompletedMissions();
+      await backfillSoulCoresFromCompletedMissions();
       await syncBosstiaryCollectionFromProgress();
     } catch (error) {
       console.error('[Quests Mod] Error loading quest items on init:', error);
@@ -8620,6 +8679,37 @@ function createNPCCooldownManager() {
       await ensureBosstiaryOwned({ showToast: true });
     } catch (error) {
       console.warn('[Quests Mod][Bosstiary] Failed to sync collection:', error);
+    }
+  }
+
+  // Grant any soul core whose mission is completed but that the player doesn't hold — covers
+  // players who finished the mission before the soul core reward existed, or lost it.
+  // Rules from items.json → itemLifecycle.soulCoreGrantOnComplete.
+  async function backfillSoulCoresFromCompletedMissions() {
+    try {
+      if (!QUEST_SOUL_CORE_GRANT_RULES.length) return;
+      await getQuestItems(false); // refresh cachedQuestItems
+      const granted = [];
+      for (const rule of QUEST_SOUL_CORE_GRANT_RULES) {
+        if (!rule?.productId || !rule?.missionId) continue;
+        const mission = MISSION_BY_ID[rule.missionId];
+        if (!mission) continue;
+        if (!(getMissionProgress(mission) || {}).completed) continue;
+        const name = resolveQuestProductName(rule.productId);
+        if (!name || getCachedQuestItemCount(name) > 0) continue;
+        try {
+          await addQuestItem(name, 1); // updates cachedQuestItems
+          granted.push(name);
+          NotificationService.showItemReceived(name, '[Quests Mod][Soul Cores]');
+        } catch (err) {
+          console.warn(`[Quests Mod][Soul Cores] Could not grant ${name}:`, err);
+        }
+      }
+      if (granted.length) {
+        console.log('[Quests Mod][Soul Cores] Backfilled missing soul cores for completed missions:', granted.join(', '));
+      }
+    } catch (error) {
+      console.warn('[Quests Mod][Soul Cores] Backfill failed:', error);
     }
   }
 
@@ -11386,6 +11476,7 @@ function createNPCCooldownManager() {
     kingChatState.missionOffered = false;
     kingChatState.offeredMission = null;
     let awaitingLostOracleOrbConfirm = false;
+    let awaitingIsleConfirm = false; // Isle of Solitude easter egg — pending "yes" to teleport
     
     // Close any existing modals first (like Autoscroller does)
     for (let i = 0; i < 2; i++) {
@@ -13076,6 +13167,56 @@ function createNPCCooldownManager() {
           }
         }
 
+        // Easter egg: ask the King about the "Isle of Solitude" / "GM Island". He offers
+        // passage and only teleports you (enterIsleOfSolitude) once you answer "yes".
+        if (awaitingIsleConfirm) {
+          if (isAffirmativeReply(lowerText)) {
+            awaitingIsleConfirm = false;
+            clearTextarea();
+            tibianusCooldown.queueResponse(
+              text,
+              'So be it. Do not speak of what you see there.',
+              addMessageToConversation,
+              'King Tibianus',
+              () => {
+                setTimeout(() => {
+                  ModalHelpers.closeModal(0);
+                  enterIsleOfSolitude();
+                }, 2000);
+              }
+            );
+            return;
+          }
+          if (isNegativeReply(lowerText)) {
+            awaitingIsleConfirm = false;
+            clearTextarea();
+            tibianusCooldown.queueResponse(
+              text,
+              'Wise. The isle keeps its secrets.',
+              addMessageToConversation,
+              'King Tibianus',
+              ModalHelpers.getFarewellCloseCallback(text)
+            );
+            return;
+          }
+          // Any other reply: drop the pending offer and fall through to normal handling.
+          awaitingIsleConfirm = false;
+        }
+        if (lowerText.includes('isle of solitude') || lowerText.includes('gm island')) {
+          clearTextarea();
+          const isleLine = getKingTibianusKeywordResponses()['isle of solitude']
+            || getKingTibianusKeywordResponses()['gm island']
+            || 'The Isle of Solitude does not officially exist.';
+          awaitingIsleConfirm = true;
+          tibianusCooldown.queueResponse(
+            text,
+            `${isleLine} Do you wish passage there now?`,
+            addMessageToConversation,
+            'King Tibianus'
+          );
+          return;
+        }
+
         // Refresh mission context (in case first mission just completed)
         activeMission = currentMission();
         kingStrings = buildStrings(activeMission);
@@ -13690,12 +13831,25 @@ function createNPCCooldownManager() {
         buyButton.className = 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1 active:frame-pressed-1 surface-regular gap-1 px-2 py-0.5 pixel-font-12';
         buyButton.style.cssText = 'cursor: pointer; white-space: nowrap; box-sizing: border-box; height: 24px; font-size: 12px; flex-shrink: 0;';
 
-        // Check if item has been purchased
+        // Check if item has been purchased. Every Al Dee shop item is a unique one-time
+        // buy (Fishing Rod etc.), so already OWNING one — from any source — must also block
+        // the purchase. When we detect that, back-fill the Firebase "bought" flag so it
+        // sticks even if the player later drops the item.
         const playerName = getCurrentPlayerName();
-        let isPurchased = false;
+        const ownsShopItem = () => getCachedQuestItemCount(displayName) > 0;
+        let isPurchased = ownsShopItem();
         if (playerName) {
-          getAlDeeShopPurchases(playerName).then(purchases => {
-            isPurchased = purchases[itemId] === true;
+          Promise.all([
+            getAlDeeShopPurchases(playerName).catch(() => ({})),
+            getQuestItems(false).catch(() => null)
+          ]).then(([purchases, freshItems]) => {
+            const owns = ownsShopItem() || !!(freshItems && (freshItems[displayName] || 0) > 0);
+            const flagged = purchases[itemId] === true;
+            isPurchased = flagged || owns;
+            if (owns && !flagged) {
+              saveAlDeeShopPurchase(playerName, itemId, true).catch((err) =>
+                console.warn('[Quests Mod][Al Dee Shop] Could not back-fill purchase flag:', err));
+            }
             updateButtonState();
           }).catch(() => {
             updateButtonState();
@@ -13739,6 +13893,23 @@ function createNPCCooldownManager() {
                 'Al Dee',
                 AL_DEE_FISHING_MISSION.requiresLetterForFishingRod
                   || 'I only sell fishing rods to those who\'ve finished delivering the king\'s stamped letter to me.',
+                true
+              );
+              return;
+            }
+
+            // Unique item — refuse (and heal the flag) if the player already owns one.
+            const ownedNow = await getQuestItems(false).catch(() => null);
+            if (isPurchased || ownsShopItem() || (ownedNow && (ownedNow[displayName] || 0) > 0)) {
+              isPurchased = true;
+              updateButtonState();
+              if (playerName) {
+                saveAlDeeShopPurchase(playerName, itemId, true).catch(() => {});
+              }
+              addMessageToConversation(
+                'Al Dee',
+                (itemId === 'fishing_rod' && AL_DEE_FISHING_MISSION.alreadyOwnsFishingRod)
+                  || `You already have a ${displayName.toLowerCase()} — I only sell one to a customer.`,
                 true
               );
               return;
@@ -18752,6 +18923,16 @@ function createNPCCooldownManager() {
             && !hellgateLibraryBattle?.isRoomReloadInProgress?.()) {
             console.log('[Quests Mod][Overlay Hider] Leaving Hellgate Library - clearing quest state (CustomBattle cleanup)');
             cleanupHellgateLibraryQuest();
+          }
+
+          // Isle of Solitude: player left the Sewers isle scene via the room picker
+          // instead of the tile-37 teleporter — tear the easter-egg scene down.
+          if (lastOverlayHiderRoomName === ISLE_BATTLE_ROOM_NAME
+            && currentRoomName && currentRoomName !== ISLE_BATTLE_ROOM_NAME
+            && (playerEnteredIsleOfSolitude || isleOfSolitudeBattle)
+            && !isleOfSolitudeBattle?.isRoomReloadInProgress?.()) {
+            console.log('[Quests Mod][Overlay Hider] Leaving Isle of Solitude - clearing easter-egg scene (CustomBattle cleanup)');
+            cleanupIsleOfSolitudeQuest();
           }
 
           // Draconia Tower: leaving the Sewers during the fight or the post-battle talk —
@@ -26268,6 +26449,453 @@ function createNPCCooldownManager() {
   }
 
   // =======================
+  // Isle of Solitude / GM Island (King Tibianus easter egg — chat-triggered teleport into
+  // the Sewers re-skinned as the isle. No mission, no villains, no rewards: a walk-around
+  // scene. An empty CustomBattle is stood up purely so the board clears and the Sewers
+  // quest overlays suppress themselves (same trick as Hellgate Library's pre-battle
+  // instance). Right-click the teleporter on tile 37 to return to the room the player was
+  // in when they asked the King. Mirrors enterHellgateLibrary() + the Draconia post-battle
+  // scene-sync helpers, stripped down.)
+  // =======================
+
+  function getIsleLogPrefix() {
+    return '[Quests Mod][Isle of Solitude]';
+  }
+
+  function buildIsleMutationSpriteHTML(entry, mutationKey) {
+    const spriteId = entry?.spriteId;
+    if (spriteId == null) return '';
+    const cropX = entry.cropX != null ? entry.cropX : 0;
+    const cropY = entry.cropY != null ? entry.cropY : 0;
+    const cropped = entry.cropped ? 'true' : 'false';
+    const bankStyle = entry.bank != null ? ` --bank: ${entry.bank};` : '';
+    const rightCalc = formatHellgateMutationOffsetCalc(entry.offsetX);
+    const bottomCalc = formatHellgateMutationOffsetCalc(entry.offsetY);
+    const offsetStyle = `${rightCalc ? ` right: ${rightCalc};` : ''}${bottomCalc ? ` bottom: ${bottomCalc};` : ''}`;
+    return `<div class="sprite item relative id-${spriteId}" ${QUEST_BOARD_ADDED_ATTR_ISLE}="1" data-quests-isle-mutation-key="${mutationKey}" style="z-index: 1000;${bankStyle}${offsetStyle}"><div class="viewport"><img alt="${spriteId}" data-cropped="${cropped}" class="spritesheet" style="--cropX: ${cropX}; --cropY: ${cropY};"></div></div>`;
+  }
+
+  // "Muhamad" — a purely decorative dummy standing on tile 38 wearing the GM outfit
+  // (assets/quests/GMOutfit.png, a single 64x64 frame). Not a Board NPC / combat ally.
+  // Tagged QUEST_BOARD_ADDED_ATTR_ISLE so restoreIsleTileMutations() removes it and its
+  // name tag. Right-clicking it shows green flavour text via muhamadSignReader.
+  const MUHAMAD_DUMMY_TILE_INDEX = 38;
+  const MUHAMAD_DUMMY_ATTR = 'data-quests-muhamad-dummy';
+  const MUHAMAD_DUMMY_NAME_TAG_CLASS = 'quests-muhamad-dummy-name-tag';
+
+  function ensureMuhamadDummyNameTag(tileElement) {
+    let nameTag = document.querySelector(`.${MUHAMAD_DUMMY_NAME_TAG_CLASS}`);
+    if (!nameTag) {
+      nameTag = document.createElement('span');
+      nameTag.className = `${MUHAMAD_DUMMY_NAME_TAG_CLASS} revert-pixel-font-spacing pointer-events-none absolute flex w-[192px] flex-col items-center`;
+      nameTag.style.cssText = [
+        'position:absolute',
+        'user-select:none',
+        `z-index:${QUEST_FIGHT_ICON_Z_INDEX}`,
+        'pointer-events:none',
+        'line-height:1'
+      ].join(';');
+      nameTag.setAttribute(QUEST_BOARD_ADDED_ATTR_ISLE, '1');
+
+      const nameLine = document.createElement('span');
+      nameLine.setAttribute('translate', 'no');
+      nameLine.className = 'select-none text-center pixel-font-16 text-whiteHighlight';
+      nameLine.style.cssText = 'line-height:1;font-size:16px;display:inline-flex;align-items:center;';
+
+      const nameText = document.createElement('span');
+      nameText.className = 'text-whiteHighlight';
+      nameText.style.cssText = 'color:rgb(96, 192, 96);text-shadow:-1px 0 #000,1px 0 #000,0 -1px #000,0 1px #000;';
+      nameText.textContent = 'Muhamad';
+
+      nameLine.appendChild(nameText);
+      nameTag.appendChild(nameLine);
+    }
+    positionBoardNpcNameTag(nameTag, tileElement);
+  }
+
+  function ensureMuhamadDummy() {
+    if (!playerEnteredIsleOfSolitude) return;
+    const tile = getTileElement(MUHAMAD_DUMMY_TILE_INDEX);
+    if (!tile) return;
+    if (!tile.querySelector(`[${MUHAMAD_DUMMY_ATTR}="1"]`)) {
+      const url = getQuestItemsAssetUrl('GMOutfit.png').replace(/['"\\]/g, '');
+      const node = document.createElement('div');
+      node.className = 'pointer-events-none absolute select-none';
+      node.setAttribute(QUEST_BOARD_ADDED_ATTR_ISLE, '1');
+      node.setAttribute(MUHAMAD_DUMMY_ATTR, '1');
+      // One tile (32x32) anchored to the tile's bottom-right. Kept click-through
+      // (pointer-events:none) so it can never steal right-clicks from tile 37 next door —
+      // Muhamad's line is wired to the tile-38 floor sprite via muhamadSignReader instead.
+      node.style.cssText = `right:0;bottom:0;width:calc(32px * var(--zoomFactor));height:calc(32px * var(--zoomFactor));background-image:url("${url}");background-repeat:no-repeat;background-position:center bottom;background-size:contain;image-rendering:pixelated;pointer-events:none;z-index:1000;`;
+      tile.appendChild(node);
+    }
+    ensureMuhamadDummyNameTag(tile);
+  }
+
+  // Live rkswrs data.hitboxes arrays (selected room + the canonical utils.ROOMS/REGIONS
+  // copies). Shares the room with Hellgate, so getHellgateRoomRefs() resolves them.
+  function getIsleHitboxDataRefs() {
+    return getHellgateRoomRefs()
+      .map((room) => room?.file?.data)
+      .filter((data) => data && Array.isArray(data.hitboxes));
+  }
+
+  function applyIsleTileMutations() {
+    const mutations = ISLE_TILE_MUTATIONS;
+    if (!mutations || typeof mutations !== 'object') return;
+
+    // Snapshot the room's real hitboxes ONCE, before the reskin overwrites them, so
+    // restoreIsleTileMutations() can put the map back exactly on leave (otherwise the
+    // isle's walkability carries over to rkswrs until a manual room change).
+    if (isleHitboxSnapshot == null) {
+      const live = isleOfSolitudeBattle?.getRoomHitboxesArray?.()
+        || getIsleHitboxDataRefs()[0]?.hitboxes;
+      if (Array.isArray(live) && live.length) isleHitboxSnapshot = live.slice();
+    }
+
+    let wroteHitboxes = false;
+    Object.entries(mutations).forEach(([tileKey, entry]) => {
+      const tileIndex = Number(tileKey);
+      if (!Number.isFinite(tileIndex) || !entry || typeof entry !== 'object') return;
+      const tile = getTileElement(tileIndex);
+
+      (entry.remove || []).forEach((spriteId) => {
+        if (spriteId == null || !tile) return;
+        tile.querySelectorAll(`.sprite.item.relative.id-${spriteId}`).forEach((sprite) => {
+          hideQuestBoardElement(sprite, { tag: QUEST_BOARD_HIDDEN_TAG_ISLE });
+        });
+      });
+
+      (entry.add || []).forEach((spriteEntry, spriteIndex) => {
+        const spriteId = spriteEntry?.spriteId;
+        if (spriteId == null || !tile) return;
+        const mutationKey = `${tileIndex}-${spriteIndex}`;
+        if (tile.querySelector(`[data-quests-isle-mutation-key="${mutationKey}"]`)) return;
+        const wrap = document.createElement('div');
+        wrap.innerHTML = buildIsleMutationSpriteHTML(spriteEntry, mutationKey);
+        if (wrap.firstElementChild) tile.appendChild(wrap.firstElementChild);
+      });
+
+      if (Array.isArray(entry.floorBelow) && entry.floorBelow.length) {
+        applyQuestFloorBelowSprites(
+          tileIndex, entry.floorBelow, QUEST_BOARD_ADDED_ATTR_ISLE, 'data-quests-isle-fb-key'
+        );
+      }
+
+      if (Object.prototype.hasOwnProperty.call(entry, 'hitbox')) {
+        try {
+          // hitboxes is boolean-shaped — assign, never delete (CLAUDE.md).
+          getIsleHitboxDataRefs().forEach((data) => {
+            data.hitboxes[tileIndex] = entry.hitbox === true;
+            wroteHitboxes = true;
+          });
+        } catch (_) {}
+      }
+    });
+
+    if (wroteHitboxes) {
+      isleOfSolitudeHitboxesApplied = true;
+      isleOfSolitudeBattle?.bumpSelectedRoomFileIdentity?.();
+    }
+
+    ensureMuhamadDummy();
+  }
+
+  function restoreIsleTileMutations() {
+    restoreQuestBoardElementsByTag(QUEST_BOARD_HIDDEN_TAG_ISLE);
+    document.querySelectorAll(`[${QUEST_BOARD_ADDED_ATTR_ISLE}="1"]`).forEach((el) => {
+      try { el.remove(); } catch (_) {}
+    });
+
+    // Put the room's real hitboxes back so the isle's walkability doesn't stick to rkswrs.
+    if (Array.isArray(isleHitboxSnapshot) && isleHitboxSnapshot.length) {
+      const snap = isleHitboxSnapshot;
+      if (isleOfSolitudeBattle?.writeHitboxesInPlace) {
+        isleOfSolitudeBattle.writeHitboxesInPlace(snap);
+      } else {
+        getIsleHitboxDataRefs().forEach((data) => {
+          const t = data.hitboxes;
+          for (let i = 0; i < snap.length; i += 1) t[i] = snap[i];
+          if (t.length > snap.length) t.length = snap.length;
+        });
+        isleOfSolitudeBattle?.bumpSelectedRoomFileIdentity?.();
+      }
+    }
+    isleHitboxSnapshot = null;
+    isleOfSolitudeHitboxesApplied = false;
+  }
+
+  // Wipe every piece off the board so the isle stays empty (mirrors clearDraconiaBoardPieces).
+  function clearIsleBoardPieces() {
+    try {
+      const cfg = globalThis.state?.board?.getSnapshot?.()?.context?.boardConfig;
+      if (!Array.isArray(cfg) || cfg.length === 0) return;
+      globalThis.state.board.send({
+        type: 'setState',
+        fn: (prev) => ({ ...prev, boardConfig: [] })
+      });
+    } catch (_) {}
+  }
+
+  function stopIsleSceneSync() {
+    if (isleSceneSub) {
+      try { isleSceneSub.unsubscribe?.(); } catch (_) {}
+      isleSceneSub = null;
+    }
+  }
+
+  // Keeps the isle reskin painted + the board empty across room navigations / React
+  // remounts. Runs alongside the CustomBattle's own startPersistentVisualSync, and covers
+  // the brief window before that instance comes up. Mirrors startDraconiaSceneSync().
+  function startIsleSceneSync() {
+    stopIsleSceneSync();
+    const paint = () => {
+      if (playerEnteredIsleOfSolitude && isOnRoomByName(ISLE_BATTLE_ROOM_NAME)) {
+        applyIsleTileMutations();
+        clearIsleBoardPieces();
+      }
+    };
+    paint();
+    const deadline = (typeof performance !== 'undefined' ? performance.now() : Date.now()) + 800;
+    const rafPaint = () => {
+      if (!playerEnteredIsleOfSolitude) return;
+      paint();
+      const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      if (now < deadline && typeof requestAnimationFrame === 'function') requestAnimationFrame(rafPaint);
+    };
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(rafPaint);
+    [150, 400, 900, 1600].forEach((d) => setTimeout(paint, d));
+    if (!globalThis.state?.board?.subscribe) return;
+    isleSceneSub = globalThis.state.board.subscribe(() => {
+      if (!playerEnteredIsleOfSolitude) {
+        stopIsleSceneSync();
+        return;
+      }
+      paint();
+    });
+  }
+
+  function restoreBoardSetupIsle() {
+    if (isleOfSolitudeBattle) isleOfSolitudeBattle.restoreBoardSetup();
+    restoreIsleTileMutations();
+  }
+
+  function cleanupIsleOfSolitudeQuest() {
+    try {
+      removeCustomBattleStatusToast();
+      stopIsleSceneSync();
+      disableIsleTeleporterRightClick();
+      playerEnteredIsleOfSolitude = false;
+      restoreIsleTileMutations();
+      if (isleOfSolitudeBattle) {
+        isleOfSolitudeBattle.cleanup(restoreBoardSetupIsle, showQuestOverlays);
+        isleOfSolitudeBattle = null;
+        console.log(`${getIsleLogPrefix()} Battle cleaned up`);
+      }
+      showQuestOverlays();
+      updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+    } catch (error) {
+      console.error(`${getIsleLogPrefix()} Error cleaning up:`, error);
+    }
+  }
+
+  function createIsleBattleInstance(roomId) {
+    if (!window.CustomBattles) {
+      console.error(`${getIsleLogPrefix()} CustomBattles still not available`);
+      return null;
+    }
+    const spawn = getHydratedQuestBattleSpawn(ISLE_BATTLE_ID || 'isle_of_solitude');
+    const config = {
+      name: ISLE_BATTLE_DISPLAY_NAME || 'Isle of Solitude',
+      roomId,
+      villains: [],
+      allyLimit: spawn.allyLimit ?? 1,
+      preventVillainMovement: spawn.preventVillainMovement !== false,
+      hideVillainSprites: spawn.hideVillainSprites !== false,
+      activationCheck: (isSandbox, inBattleArea) => isSandbox && inBattleArea && playerEnteredIsleOfSolitude
+    };
+    return window.CustomBattles.create(config);
+  }
+
+  function initializeIsleBattle(roomId) {
+    if (window.CustomBattles) return createIsleBattleInstance(roomId);
+    return waitForCustomBattles({ logPrefix: getIsleLogPrefix() }).then((api) => {
+      if (!api) return null;
+      return createIsleBattleInstance(roomId);
+    });
+  }
+
+  function setupIslePreBattle(battle) {
+    if (!battle) return false;
+    isleOfSolitudeBattle = battle;
+    isleOfSolitudeBattle.setup(
+      () => playerEnteredIsleOfSolitude,
+      NotificationService.createBattleToastCallback(getIsleLogPrefix())
+    );
+    isleOfSolitudeBattle.resetSandboxBattleState();
+    isleOfSolitudeBattle.setupAllyLimit?.(
+      () => playerEnteredIsleOfSolitude,
+      NotificationService.createBattleToastCallback(getIsleLogPrefix())
+    );
+    isleOfSolitudeBattle.startPersistentVisualSync(applyIsleTileMutations, {
+      isActiveCheck: () => playerEnteredIsleOfSolitude
+    });
+    return true;
+  }
+
+  function enterIsleOfSolitude() {
+    if (playerEnteredIsleOfSolitude) return;
+    let roomId = ISLE_BATTLE_ROOM_ID || getRoomIdByRoomName(ISLE_BATTLE_ROOM_NAME);
+    if (!roomId) roomId = getRoomIdByRoomName(ISLE_BATTLE_ROOM_NAME);
+    if (!roomId) {
+      showToast({ message: 'The Isle of Solitude could not be found.', logPrefix: getIsleLogPrefix() });
+      return;
+    }
+
+    // Capture where the player is now, BEFORE navigating — tile 37 sends them back here.
+    isleReturnRoomId = globalThis.state?.board?.getSnapshot?.()?.context?.selectedMap?.selectedRoom?.id
+      || globalThis.state?.board?.getSnapshot?.()?.context?.selectedRoomId
+      || getRoomIdByRoomName('Rookgaard')
+      || null;
+
+    playerEnteredIsleOfSolitude = true;
+    isleHitboxSnapshot = null; // fresh capture for this visit
+    if (isleOfSolitudeBattle) {
+      isleOfSolitudeBattle.cleanup(restoreBoardSetupIsle, showQuestOverlays);
+      isleOfSolitudeBattle = null;
+    }
+
+    globalThis.state.board.send({ type: 'selectRoomById', roomId });
+    startIsleSceneSync();
+
+    const initResult = initializeIsleBattle(roomId);
+    if (initResult && typeof initResult.then === 'function') {
+      initResult.then((battle) => {
+        if (playerEnteredIsleOfSolitude && !isleOfSolitudeBattle) {
+          setupIslePreBattle(battle);
+          hideQuestOverlays();
+          hideHeroEditorButton();
+          clearIsleBoardPieces();
+        }
+      }).catch((error) => console.error(`${getIsleLogPrefix()} Error initializing isle instance:`, error));
+    } else if (initResult) {
+      setupIslePreBattle(initResult);
+    }
+
+    muhamadSignReader.resetRead();
+    hideQuestOverlays();
+    hideHeroEditorButton();
+    clearIsleBoardPieces();
+    enableIsleTeleporterRightClick();
+    updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+    showToast({ message: 'You step onto the Isle of Solitude. Right-click the teleporter on the ladder to leave.', logPrefix: getIsleLogPrefix() });
+  }
+
+  // Leaves the isle and returns the player to the room they came from (captured on entry).
+  function leaveIsleOfSolitude() {
+    const back = isleReturnRoomId || getRoomIdByRoomName('Rookgaard');
+    console.log(`${getIsleLogPrefix()} Teleporter used on tile 37 — returning to room ${back || '(unknown)'}`);
+    cleanupIsleOfSolitudeQuest();
+    isleReturnRoomId = null;
+    if (back) {
+      setTimeout(() => {
+        try { globalThis.state.board.send({ type: 'selectRoomById', roomId: back }); } catch (_) {}
+      }, 60);
+    }
+  }
+
+  function isIsleTeleporterActive(boardContext = null) {
+    return playerEnteredIsleOfSolitude && isOnRoomByName(ISLE_BATTLE_ROOM_NAME);
+  }
+
+  // Return teleporter — right-click the ladder on tile 37 for a small context menu with a
+  // single "Use the teleporter" option. Same createContextMenu helper as the Jakundaf /
+  // Eclipse tile menus.
+  function closeIsleTeleporterContextMenu() {
+    if (isleTeleporterContextMenu && isleTeleporterContextMenu.closeMenu) {
+      isleTeleporterContextMenu.closeMenu();
+    }
+    isleTeleporterContextMenu = null;
+  }
+
+  function createIsleTeleporterContextMenu(x, y, anchorElement = null) {
+    closeIsleTeleporterContextMenu();
+    isleTeleporterContextMenu = createContextMenu({
+      x,
+      y,
+      layout: 'center',
+      logPrefix: getIsleLogPrefix(),
+      anchorElement: anchorElement || getTileElement(37),
+      buttons: [
+        {
+          text: 'Use the teleporter',
+          width: '180px',
+          backgroundColor: '#2a4a2a',
+          color: '#4CAF50',
+          border: '1px solid #4CAF50',
+          hoverBackgroundColor: '#1a2a1a',
+          hoverBorderColor: '#66BB6A',
+          onClick: () => {
+            closeIsleTeleporterContextMenu();
+            leaveIsleOfSolitude();
+          }
+        }
+      ],
+      onClose: () => { isleTeleporterContextMenu = null; }
+    });
+    return isleTeleporterContextMenu;
+  }
+
+  function handleIsleTeleporterRightClickDocument(event) {
+    if (!isIsleTeleporterActive()) return;
+    const tile37 = getTileElement(37);
+    if (!tile37) return;
+    const clickedTile = tile37.contains(event.target);
+    const clickedOwnHighlightOverlay = typeof isQuestTileHighlightOverlay === 'function'
+      && isQuestTileHighlightOverlay(event.target)
+      && event.target.closest('[id^="tile-index-"]') === tile37;
+    if (!clickedTile && !clickedOwnHighlightOverlay) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    event.stopPropagation();
+    createIsleTeleporterContextMenu(event.clientX, event.clientY, tile37);
+  }
+
+  function enableIsleTeleporterRightClick() {
+    if (isleTeleporterRightClickEnabled) return;
+    document.addEventListener('contextmenu', handleIsleTeleporterRightClickDocument, true);
+    isleTeleporterRightClickEnabled = true;
+    const tile37 = getTileElement(37);
+    if (tile37) tile37.style.pointerEvents = 'auto';
+  }
+
+  function disableIsleTeleporterRightClick() {
+    closeIsleTeleporterContextMenu();
+    if (!isleTeleporterRightClickEnabled) return;
+    document.removeEventListener('contextmenu', handleIsleTeleporterRightClickDocument, true);
+    isleTeleporterRightClickEnabled = false;
+    const tile37 = getTileElement(37);
+    if (tile37) tile37.style.pointerEvents = '';
+  }
+
+  // Right-click Muhamad (tile 38) for a green "thanks for trying the mod" line — same
+  // sign-reader mechanism the Elathriel dummies use.
+  const muhamadSignReader = createSignReaderSystem({
+    id: 'Muhamad',
+    tileIndex: MUHAMAD_DUMMY_TILE_INDEX,
+    // Target tile 38's own floor sprite (the reskin mutation), not the Muhamad image —
+    // the image is click-through so it can't block tile 37; right-clicking anywhere on
+    // tile 38 (or its highlight glow) opens Muhamad's line.
+    spriteSelector: '[data-quests-isle-mutation-key="38-0"]',
+    lines: [
+      'You look to Muhamad.',
+      'He says: "Thanks for trying out this mod! Enjoy your stay on the isle."'
+    ],
+    isRoomActive: () => playerEnteredIsleOfSolitude && isOnRoomByName(ISLE_BATTLE_ROOM_NAME),
+    durationMs: 5000
+  });
+
+  // =======================
   // Draconia Tower (Elathriel — after Hellgate Library, teleports the player into the
   // Sewers re-skinned as a dragon cemetery. The battle spawns on entry (Dragon Lord,
   // Dragon, An Old Dragonlord). On victory the fight is torn down and An Old Dragonlord
@@ -28775,6 +29403,26 @@ function createNPCCooldownManager() {
       },
       isAccessActive: isCopperKeyRubbleTileActive,
       alt: 'Copper Key quest tile',
+      showDuringPlacement: true
+    });
+
+    // Isle of Solitude easter egg — Muhamad (tile 38) and the return teleporter (tile 37).
+    registerQuestTileHighlightSource({
+      getTiles: () => {
+        const tile = getTileElement(muhamadSignReader.tileIndex);
+        return tile ? [tile] : [];
+      },
+      isAccessActive: (boardContext) => muhamadSignReader.shouldEnable(boardContext),
+      alt: 'Speak with Muhamad',
+      showDuringPlacement: true
+    });
+    registerQuestTileHighlightSource({
+      getTiles: () => {
+        const tile = getTileElement(37);
+        return tile ? [tile] : [];
+      },
+      isAccessActive: (boardContext) => isIsleTeleporterActive(boardContext),
+      alt: 'Use the teleporter',
       showDuringPlacement: true
     });
   }
@@ -35307,6 +35955,14 @@ function createNPCCooldownManager() {
     } catch (e) {
       console.warn('[Quests Mod][Hellgate Library] cleanupHellgateLibraryQuest during teardown:', e);
     }
+    // Cleanup Isle of Solitude easter-egg scene
+    try {
+      muhamadSignReader.cleanupSystem();
+      disableIsleTeleporterRightClick();
+      cleanupIsleOfSolitudeQuest();
+    } catch (e) {
+      console.warn('[Quests Mod][Isle of Solitude] cleanup during teardown:', e);
+    }
     // Cleanup Draconia Tower (Elathriel / An Old Dragonlord) battle system
     try {
       cleanupDraconiaTowerQuest();
@@ -35632,6 +36288,9 @@ function createNPCCooldownManager() {
     hellgateElathrielSignReader.setupObserver();
     hellgateLibraryElathrielSignReader.setupObserver();
     draconiaQuestElathrielSignReader.setupObserver();
+    // Isle of Solitude easter egg — Muhamad's right-click line; gates on
+    // playerEnteredIsleOfSolitude (isRoomActive), so always-on setup is safe.
+    muhamadSignReader.setupObserver();
 
     // Boss HP bars — each gates on its own isActive(), so always-on setup is safe.
     ghazBossHpBar.setupObserver();

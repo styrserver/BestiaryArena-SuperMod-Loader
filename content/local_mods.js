@@ -5,12 +5,18 @@ if (typeof window.browser === 'undefined') {
 
 window.browserAPI = window.browserAPI || (typeof browser !== 'undefined' ? browser : (typeof chrome !== 'undefined' ? chrome : null));
 
-// Initialize debug flag immediately at the top level
-if (typeof window !== 'undefined') {
-  window.BESTIARY_DEBUG = localStorage.getItem('bestiary-debug') === 'true';
+// `window.BESTIARY_DEBUG` (legacy back-compat flag, still read by a few mods) is
+// owned by content/ba-logger.js — it is kept in sync with the `verbose` log level,
+// including live changes. Only seed it here if ba-logger has not run yet.
+if (typeof window !== 'undefined' && typeof window.BESTIARY_DEBUG === 'undefined') {
+  window.BESTIARY_DEBUG = localStorage.getItem('ba-log-level') === 'verbose'
+    || (localStorage.getItem('bestiary-debug') === 'true' && !localStorage.getItem('ba-log-level'));
 }
 
 console.log('[Local Mods] Loader initializing');
+
+// Console verbosity and uncaught-error capture are handled globally by
+// content/ba-logger.js (injected into this MAIN world before this file).
 
 if (typeof window.localMods === 'undefined') {
   window.localMods = [];
@@ -967,6 +973,18 @@ async function executeLocalMod(modNameOrObject, forceExecution = false) {
   const isModObject = typeof modNameOrObject === 'object' && modNameOrObject !== null;
   const modName = isModObject ? modNameOrObject.name : modNameOrObject;
   const mod = isModObject ? modNameOrObject : window.localMods.find(m => m.name === modNameOrObject);
+
+  // Label the eval'd mod body so DevTools shows "<Mod Name>.js:123" instead of an
+  // anonymous "VM123:456", and so stack traces / the Error Log carry the mod name.
+  // The `//# sourceURL=` directive stops at the first whitespace, so the label must
+  // contain none — collapse spaces / apostrophes / other punctuation to "_".
+  const modSourceLabel = String(modName)
+    .replace(/^.*[\\/]/, '')      // drop any path prefix
+    .replace(/\.jsx?$/i, '')      // drop extension
+    .replace(/[^\w.-]+/g, '_')    // spaces & punctuation -> _
+    .replace(/^_+|_+$/g, '')      // trim leading/trailing _
+    || 'mod';
+  const modSourceUrl = `bestiary-mod/${modSourceLabel}.js`;
   
   // If already executed, log and exit (but allow a forced re-execution if needed)
   if (executedMods[modName] && !forceExecution) {
@@ -1081,20 +1099,13 @@ async function executeLocalMod(modNameOrObject, forceExecution = false) {
             };
             
             const scriptFunction = new Function('context', `
-              // Override console.log based on debug flag
-              const originalLog = console.log;
-              console.log = function(...args) {
-                const currentDebug = localStorage.getItem('bestiary-debug') === 'true' || window.BESTIARY_DEBUG === true;
-                if (currentDebug) {
-                  originalLog.apply(console, args);
-                }
-              };
-              
+              // Console verbosity is handled globally by content/ba-logger.js.
               with (context) {
                 ${content}
               }
               // Return any exports
               return context.exports;
+              //# sourceURL=${modSourceUrl}
             `);
             
             const scriptResult = scriptFunction(scriptContext);
@@ -1134,20 +1145,13 @@ async function executeLocalMod(modNameOrObject, forceExecution = false) {
       };
       
       const scriptFunction = new Function('context', `
-        // Override console.log based on debug flag
-        const originalLog = console.log;
-        console.log = function(...args) {
-          const currentDebug = localStorage.getItem('bestiary-debug') === 'true' || window.BESTIARY_DEBUG === true;
-          if (currentDebug) {
-            originalLog.apply(console, args);
-          }
-        };
-        
+        // Console verbosity is handled globally by content/ba-logger.js.
         with (context) {
           ${content}
         }
         // Return any exports
         return context.exports;
+        //# sourceURL=${modSourceUrl}
       `);
       
       const scriptResult = scriptFunction(scriptContext);

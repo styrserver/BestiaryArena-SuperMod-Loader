@@ -29,7 +29,10 @@ const GITHUB_OPTIONAL_ORIGINS = [
 ];
 
 // Feature / storage keys
-const DEBUG_STORAGE_KEY = 'bestiary-debug';
+const DEBUG_STORAGE_KEY = 'bestiary-debug'; // legacy alias, still written for back-compat
+const LOG_LEVEL_STORAGE_KEY = 'ba-log-level';
+const LOG_LEVELS = ['silent', 'errors', 'warnings', 'info', 'verbose'];
+const DEFAULT_LOG_LEVEL = 'errors';
 const LOADER_ERROR_STORAGE_KEY = 'ba-loader-errors';
 const OUTFITER_STORAGE_KEY = 'outfiter-enabled';
 const WELCOME_STORAGE_KEY = 'welcome-enabled';
@@ -164,7 +167,7 @@ const hiddenMods = [
 // 2. Runtime State
 // =============================================================================
 
-let DEBUG_MODE = false;
+let LOG_LEVEL = DEFAULT_LOG_LEVEL;
 let OUTFITER_ENABLED = false;
 let WELCOME_ENABLED = true;
 let COLOR_MODE = 'light';
@@ -256,7 +259,7 @@ function updateColorModeLabel() {
 
 async function refreshToggleStatusLabels() {
   const { onText, offText } = await getOnOffLabels();
-  setToggleUi('debug-toggle', 'debug-status', DEBUG_MODE, onText, offText);
+  await refreshLogLevelUi();
   setToggleUi('outfiter-toggle', 'outfiter-status', OUTFITER_ENABLED, onText, offText);
 
   const label = document.getElementById('color-mode-label');
@@ -450,18 +453,67 @@ async function syncBooleanFlagToGameTab({ action, windowKey, storageKey, enabled
   }
 }
 
-async function updateDebugMode(enabled) {
-  DEBUG_MODE = enabled;
-  localStorage.setItem(DEBUG_STORAGE_KEY, enabled.toString());
-  const { onText, offText } = await getOnOffLabels();
-  setToggleUi('debug-toggle', 'debug-status', enabled, onText, offText);
-  await syncBooleanFlagToGameTab({
-    action: 'updateDebugMode',
-    windowKey: 'BESTIARY_DEBUG',
-    storageKey: DEBUG_STORAGE_KEY,
-    enabled
+function normalizeLogLevel(value) {
+  return LOG_LEVELS.includes(value) ? value : DEFAULT_LOG_LEVEL;
+}
+
+async function refreshLogLevelUi() {
+  const select = document.getElementById('log-level-select');
+  if (select && select.value !== LOG_LEVEL) select.value = LOG_LEVEL;
+}
+
+// Generalised form of syncBooleanFlagToGameTab for non-boolean values.
+async function syncValueToGameTab({ action, windowKey, storageKey, value }) {
+  try {
+    const [tab] = await window.browserAPI.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.id || !tab.url?.includes('bestiaryarena.com')) return;
+
+    await window.browserAPI.tabs.sendMessage(tab.id, { action, level: value }).catch(() => null);
+
+    if (window.browserAPI.scripting?.executeScript) {
+      await window.browserAPI.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: (windowKey, storageKey, action, value) => {
+          try { window[windowKey] = value; } catch (e) {}
+          try { localStorage.setItem(storageKey, String(value)); } catch (e) {}
+          window.postMessage({ from: 'BESTIARY_EXTENSION', action, level: value }, '*');
+        },
+        args: [windowKey, storageKey, action, value]
+      });
+    } else if (window.browserAPI.tabs?.executeScript) {
+      const code = [
+        `try { window[${JSON.stringify(windowKey)}] = ${JSON.stringify(value)}; } catch (e) {}`,
+        `try { localStorage.setItem(${JSON.stringify(storageKey)}, ${JSON.stringify(String(value))}); } catch (e) {}`,
+        `window.postMessage({ from: 'BESTIARY_EXTENSION', action: ${JSON.stringify(action)}, level: ${JSON.stringify(value)} }, '*');`
+      ].join('\n');
+      await window.browserAPI.tabs.executeScript(tab.id, { code });
+    }
+  } catch (error) {
+    originalConsoleLog(`Could not send ${action} to content script:`, error);
+  }
+}
+
+async function updateLogLevel(level) {
+  LOG_LEVEL = normalizeLogLevel(level);
+  localStorage.setItem(LOG_LEVEL_STORAGE_KEY, LOG_LEVEL);
+  // Legacy alias so anything still reading `bestiary-debug` keeps working.
+  localStorage.setItem(DEBUG_STORAGE_KEY, String(LOG_LEVEL === 'verbose'));
+  // storage.local drives the background worker and every open game tab via
+  // ba-logger.js's storage.onChanged listener.
+  await new Promise((resolve) => {
+    window.browserAPI.storage.local.set({
+      [LOG_LEVEL_STORAGE_KEY]: LOG_LEVEL,
+      [DEBUG_STORAGE_KEY]: LOG_LEVEL === 'verbose'
+    }, resolve);
   });
-  originalConsoleLog('Mod debug mode:', enabled ? 'enabled' : 'disabled');
+  await refreshLogLevelUi();
+  await syncValueToGameTab({
+    action: 'updateLogLevel',
+    windowKey: '__BA_LOG_LEVEL__',
+    storageKey: LOG_LEVEL_STORAGE_KEY,
+    value: LOG_LEVEL
+  });
+  originalConsoleLog('Log level:', LOG_LEVEL);
 }
 
 async function updateOutfiterMode(enabled) {
@@ -492,15 +544,29 @@ async function enableWelcomePage() {
 
 // Function to extract Gist hash from input (supports hash or full URL)
 
-async function loadDebugMode() {
+async function loadLogLevel() {
   try {
-    DEBUG_MODE = localStorage.getItem(DEBUG_STORAGE_KEY) === 'true';
-    const { onText, offText } = await getOnOffLabels();
-    setToggleUi('debug-toggle', 'debug-status', DEBUG_MODE, onText, offText);
-    originalConsoleLog('Mod debug mode loaded:', DEBUG_MODE ? 'enabled' : 'disabled');
+    const stored = await new Promise((resolve) => {
+      window.browserAPI.storage.local.get([LOG_LEVEL_STORAGE_KEY, DEBUG_STORAGE_KEY], (res) => resolve(res || {}));
+    });
+    let level = stored[LOG_LEVEL_STORAGE_KEY] || localStorage.getItem(LOG_LEVEL_STORAGE_KEY);
+    if (!LOG_LEVELS.includes(level)) {
+      // One-time migration from the old on/off Debug Mode.
+      const legacyOn = stored[DEBUG_STORAGE_KEY] === true
+        || stored[DEBUG_STORAGE_KEY] === 'true'
+        || localStorage.getItem(DEBUG_STORAGE_KEY) === 'true';
+      level = legacyOn ? 'verbose' : DEFAULT_LOG_LEVEL;
+      await new Promise((resolve) => {
+        window.browserAPI.storage.local.set({ [LOG_LEVEL_STORAGE_KEY]: level }, resolve);
+      });
+    }
+    LOG_LEVEL = normalizeLogLevel(level);
+    localStorage.setItem(LOG_LEVEL_STORAGE_KEY, LOG_LEVEL);
+    await refreshLogLevelUi();
+    originalConsoleLog('Log level loaded:', LOG_LEVEL);
   } catch (error) {
-    console.error('Failed to load debug mode:', error);
-    DEBUG_MODE = false;
+    console.error('Failed to load log level:', error);
+    LOG_LEVEL = DEFAULT_LOG_LEVEL;
   }
 }
 
@@ -931,8 +997,13 @@ async function formatErrorLogEnvironmentHeader() {
 function formatLoaderErrorEntry(entry) {
   const time = new Date(entry.ts || Date.now()).toISOString();
   const mobile = entry.mobile ? ' [mobile]' : '';
-  const detail = entry.detail ? `\n  ${entry.detail}` : '';
-  return `[${time}] ${(entry.level || 'error').toUpperCase()}${mobile} [${entry.source || 'unknown'}] ${entry.message || ''}${detail}`;
+  const head = `[${time}] ${(entry.level || 'error').toUpperCase()}${mobile} [${entry.source || 'unknown'}] ${entry.message || ''}`;
+  if (!entry.detail) return head;
+  const detail = String(entry.detail)
+    .split('\n')
+    .map((line) => `    ${line}`)
+    .join('\n');
+  return `${head}\n${detail}`;
 }
 
 async function fetchLoaderErrors() {
@@ -1726,21 +1797,19 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   setupPopupStorageAndLifecycle();
 
-  // Load debug mode and set up toggle
-  await loadDebugMode();
-  
-  // Set up debug toggle event listener
-  const debugToggle = document.getElementById('debug-toggle');
-  if (debugToggle) {
-    originalConsoleLog('Debug toggle found, setting up event listener');
-    debugToggle.addEventListener('change', (e) => {
-      originalConsoleLog('Debug toggle changed to:', e.target.checked);
-      updateDebugMode(e.target.checked);
+  // Load the global log level and wire the controls
+  await loadLogLevel();
+
+  const logLevelSelect = document.getElementById('log-level-select');
+  if (logLevelSelect) {
+    logLevelSelect.addEventListener('change', (e) => {
+      updateLogLevel(e.target.value);
     });
   } else {
-    originalConsoleLog('Debug toggle not found in DOM');
+    originalConsoleLog('Log level select not found in DOM');
   }
-  
+
+
   // Load outfiter mode and set up toggle
   await loadOutfiterMode();
   

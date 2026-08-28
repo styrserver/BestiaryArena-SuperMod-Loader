@@ -12,24 +12,16 @@ if (typeof browserAPI === 'undefined') {
   if (window.__BA_LOADER_ERROR_HOOKS__) return;
   window.__BA_LOADER_ERROR_HOOKS__ = true;
 
-  function formatLoaderErrorArgs(args) {
-    return args.map((arg) => {
-      if (arg instanceof Error) {
-        return `${arg.name}: ${arg.message}${arg.stack ? `\n${arg.stack}` : ''}`;
-      }
-      if (typeof arg === 'object') {
-        try {
-          return JSON.stringify(arg);
-        } catch {
-          return String(arg);
-        }
-      }
-      return String(arg);
-    }).join(' ');
-  }
-
+  // Console proxying, uncaught-error capture and log-level handling all live in
+  // content/ba-logger.js, which is injected into this MAIN world before this
+  // file. Here we only expose the mod-facing reporting API on top of the same
+  // window postMessage channel that ba-logger.js and injector.js already use.
   function reportLoaderError(entry) {
     try {
+      if (globalThis.BestiaryLogger?.record) {
+        globalThis.BestiaryLogger.record(entry);
+        return;
+      }
       window.postMessage({
         from: 'BA_LOADER_ERROR',
         entry: {
@@ -55,31 +47,6 @@ if (typeof browserAPI === 'undefined') {
       });
     }
   };
-
-  const originalPageError = console.error;
-  console.error = function(...args) {
-    originalPageError.apply(console, args);
-    reportLoaderError({ level: 'error', source: 'page', message: formatLoaderErrorArgs(args) });
-  };
-
-  window.addEventListener('error', (event) => {
-    reportLoaderError({
-      level: 'error',
-      source: 'window.error',
-      message: event.message || 'Unknown error',
-      detail: event.filename ? `${event.filename}:${event.lineno}:${event.colno}` : undefined
-    });
-  });
-
-  window.addEventListener('unhandledrejection', (event) => {
-    const reason = event.reason;
-    reportLoaderError({
-      level: 'error',
-      source: 'unhandledrejection',
-      message: reason instanceof Error ? reason.message : String(reason),
-      detail: reason instanceof Error ? reason.stack : undefined
-    });
-  });
 })();
 
 (function() {

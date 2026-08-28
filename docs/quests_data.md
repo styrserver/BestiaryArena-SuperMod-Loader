@@ -103,6 +103,7 @@ Hydrated into `MISSION_BY_ID` via `applyQuestDialogueFromAssets()`. Registry dri
 | Section | Purpose |
 |---------|---------|
 | `king-tibianus`, `al-dee`, … | `keywords`, `confusion`, NPC-specific extras |
+| `shared` | `keywords` merged **under** every NPC's own map in `applyQuestDialogueFromAssets()` (`NPC_SHARED_KEYWORDS`) — generic transcript lines (gamemaster / isle of solitude / gm island). NPC-specific keys override. Keep keys distinctive (substring match, no bare `gm`). |
 | `costello` | Includes `sealPatterns` and `sealGuidanceFallback` |
 | `questItems` | Per-NPC lines when player mentions a quest item |
 | `questItemUninvolvedTemplates` | `{item}` template when NPC has no specific line |
@@ -138,6 +139,8 @@ World placement and minigame config: fishing, mining, desert dig, room names, ti
 Hydrated by `applyQuestRoomsFromAssets()` into module-level variables used by observers and tile handlers.
 
 Map Editor quest export may add a section with `roomName`, `roomId`, `mapFile`, `battleId`, and optional `sceneSpriteReplacements`. Keep full tile data in the `mapFile` bundle — not inline in `rooms.json`.
+
+Chat-triggered "teleport into a re-skinned room" scenes (`hellgateLibrary`, `draconiaTower`, `isleOfSolitude`) instead store the re-skin as an inline `tileMutations` map (tile-keyed `remove`/`add`/`hitbox`) applied at runtime via `startPersistentVisualSync`. `isleOfSolitude` is the **Isle of Solitude / GM Island** easter egg: ask King Tibianus about "isle of solitude" or "gm island" (`npcs.json` → `king-tibianus.keywords`; he asks for a "yes" before teleporting — wired in `sendMessageToKing()` via `awaitingIsleConfirm`), walk around the Sewers re-skin, right-click the ladder on tile 37 for a "Use the teleporter" context menu back to the room you came from. "Muhamad" stands on tile 38 wearing `GMOutfit.png` (decorative dummy + `createSignReaderSystem` green right-click line). No mission; `battles.json` → `isle_of_solitude` is an empty (villain-less) sandbox stub.
 
 ---
 

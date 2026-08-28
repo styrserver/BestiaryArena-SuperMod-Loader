@@ -1214,6 +1214,21 @@ footer {
   display: flex;
   gap: 4px;
   flex-wrap: wrap;
+  align-items: center;
+}
+
+.log-level-select {
+  font-size: 12px;
+  padding: 3px 6px;
+  border-radius: 4px;
+  background: var(--ba-button-bg, #2A2F3A);
+  color: var(--theme-text, #ABB2BF);
+  border: 1px solid var(--ba-border, #3A404A);
+}
+
+.log-level-select:focus {
+  outline: none;
+  border-color: var(--theme-accent, #61AFEF);
 }
 
 .welcome-btn.secondary-btn {

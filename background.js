@@ -15,6 +15,14 @@
  * See documentation below for each function.
  */
 try {
+  if (typeof importScripts === 'function') {
+    importScripts('content/ba-logger.js');
+  }
+} catch (error) {
+  console.error('Background: Failed to load ba-logger.js:', error);
+}
+
+try {
   if (typeof BestiaryExtensionUrl === 'undefined' && typeof importScripts === 'function') {
     importScripts('content/extension-url.js');
   }
@@ -42,13 +50,13 @@ let registeredTabs = new Set(); // Track which tabs have received local mods
 const DEBUG = false; // Set to true for development
 
 const LOADER_ERROR_STORAGE_KEY = 'ba-loader-errors';
-const MAX_LOADER_ERRORS = 200;
+const MAX_LOADER_ERRORS = 300;
 
 function appendBackgroundLoaderError(entry) {
   if (!browserAPI?.storage?.local) return;
   if ((entry.level || 'error') !== 'error') return;
   const fullEntry = {
-    ts: Date.now(),
+    ts: entry.ts || Date.now(),
     level: entry.level || 'error',
     source: entry.source || 'background',
     message: entry.message || '',
@@ -61,14 +69,12 @@ function appendBackgroundLoaderError(entry) {
   });
 }
 
-const originalBackgroundError = console.error;
-console.error = function(...args) {
-  originalBackgroundError.apply(console, args);
-  appendBackgroundLoaderError({
-    level: 'error',
-    message: args.map((arg) => (arg instanceof Error ? arg.message : String(arg))).join(' ')
-  });
-};
+// content/ba-logger.js (loaded via importScripts above) proxies console.* and
+// captures uncaught errors in the worker; route everything it produces here.
+globalThis.__BA_recordLoaderError = appendBackgroundLoaderError;
+if (Array.isArray(globalThis.__BA_LOGGER_PENDING__)) {
+  for (const entry of globalThis.__BA_LOGGER_PENDING__.splice(0)) appendBackgroundLoaderError(entry);
+}
 
 function resolveMessageTabId(message, sender) {
   if (message && message.tabId != null) return message.tabId;

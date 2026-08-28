@@ -73,7 +73,6 @@ const processedServerResultKeys = new Set();
 
 // Cleanup tracking for memory leak prevention
 let originalFetch = null;
-let originalConsoleLog = null;
 let latestKnownSeason = 2;
 let seasonLastFetchedAt = 0;
 let seasonFetchPromise = null;
@@ -90,12 +89,6 @@ async function performCleanup() {
       console.log('[RunTracker] Restoring original fetch function');
       window.fetch = originalFetch;
       originalFetch = null;
-    }
-    
-    if (originalConsoleLog) {
-      console.log('[RunTracker] Restoring original console.log function');
-      console.log = originalConsoleLog;
-      originalConsoleLog = null;
     }
     
     // Clear all pending debouncer timers
@@ -1753,50 +1746,16 @@ function setupNetworkListener() {
       return response;
     };
     
-    // Monitor console.log calls for replay data
-    originalConsoleLog = console.log;
-    console.log = function(...args) {
-      // Call original console.log
-      originalConsoleLog.apply(console, args);
-      
-      // Check if RunTracker is enabled before processing
-      if (!window.RunTrackerAPI || !window.RunTrackerAPI._initialized) {
-        return;
-      }
+    // NOTE: RunTracker used to also wrap console.log to scrape "$replay(...)"
+    // strings into a separate replay-snapshot store. That was removed because
+    // wrapping console.log mis-attributes every later log line (in DevTools) to
+    // this file. Completed runs — including their board setup — are captured by
+    // the fetch listener above (addRun -> runData.setup), which is what the
+    // RunTracker UI, Cyclopedia, and Mod Settings actually read.
+    // RunTrackerAPI.parseReplayData / addReplayData / getReplays stay exported for
+    // any external caller that wants to feed the replay-snapshot store manually.
 
-      if (isRunTrackerAnalysisBlockingActive()) {
-        return;
-      }
-      
-      // Check for replay data (but avoid recursive calls from RunTracker itself)
-      const message = args.join(' ');
-      if (message.includes('$replay(') && !message.includes('[RunTracker]')) {
-        try {
-          // Extract the replay data to create a unique key
-          const replayData = parseReplayData(message);
-          if (replayData) {
-            // Create a unique key for this replay
-            const replayKey = `replay_${replayData.seed}_${replayData.map}`;
-            
-            // Check if we've recently processed this replay
-            if (Utils.debouncer.isDebounced(replayKey)) {
-              console.log('[RunTracker] Skipping duplicate replay (debounced):', replayKey);
-              return;
-            }
-            
-            // Debounce this replay
-            Utils.debouncer.debounce(replayKey, RUN_DEBOUNCE_TIME, () => {});
-            
-            originalConsoleLog('[RunTracker] Detected replay data');
-            addReplayData(replayData);
-          }
-        } catch (error) {
-          originalConsoleLog('[RunTracker] Error parsing replay data:', error);
-        }
-      }
-    };
-    
-    console.log('[RunTracker] Network and replay listeners set up');
+    console.log('[RunTracker] Network listener set up');
   } catch (error) {
     console.error('[RunTracker] Error setting up network listener:', error);
   }
@@ -1922,6 +1881,7 @@ if (!window.RunTrackerAPI) {
   // Core functions
   addRun,
   ingestServerResults,
+  parseReplayData,
   addReplayData,
   getRuns: (mapKey, category = null) => {
     try {
