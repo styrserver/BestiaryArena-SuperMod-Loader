@@ -873,10 +873,19 @@ function savePanelLayout(patch) {
 function applyPanelLayoutToPanel(panel = document.getElementById(PANEL_ID)) {
   if (!panel) return;
   const layout = loadPanelLayout();
-  panel.style.left = `${layout.left}px`;
-  panel.style.top = `${layout.top}px`;
-  panel.style.width = `${clamp(layout.width, PANEL_LAYOUT.minWidth, PANEL_LAYOUT.maxWidth)}px`;
-  panel.style.height = `${clamp(layout.height, PANEL_LAYOUT.minHeight, PANEL_LAYOUT.maxHeight)}px`;
+  const width = clamp(layout.width, PANEL_LAYOUT.minWidth, PANEL_LAYOUT.maxWidth);
+  const height = clamp(layout.height, PANEL_LAYOUT.minHeight, PANEL_LAYOUT.maxHeight);
+  // Keep the stored position inside the current viewport — the window may have
+  // been resized since it was saved. updatePanelPosition() re-checks once the
+  // panel is visible and measurable; this guards the pre-display assignment.
+  const panelW = panel.offsetWidth || width;
+  const panelH = panel.offsetHeight || height;
+  const maxLeft = Math.max(0, window.innerWidth - panelW);
+  const maxTop = Math.max(0, window.innerHeight - panelH);
+  panel.style.left = `${clamp(layout.left, 0, maxLeft)}px`;
+  panel.style.top = `${clamp(layout.top, 0, maxTop)}px`;
+  panel.style.width = `${width}px`;
+  panel.style.height = `${height}px`;
 }
 
 function clearReloadRoomTimers() {
@@ -16821,9 +16830,10 @@ function openMapEditor() {
       resetMapEditorAssetFilterUi();
       applyPanelLayoutToPanel(panel);
     }
-    updatePanelPosition();
-    attachPanelViewportListener();
   }
+  // Always keep the viewport listener attached (idempotent) so a window resize
+  // while the panel is closed is still corrected on the next open.
+  attachPanelViewportListener();
 
   editorState.open = true;
   adoptTrackedBoardKey();
@@ -16834,6 +16844,9 @@ function openMapEditor() {
     captureAllNativeSpritePlacements();
   }
   panel.style.display = 'flex';
+  // Clamp back into the viewport now that the panel is measurable — the stored
+  // left/top may point off-screen if the window was resized while it was closed.
+  updatePanelPosition();
   enableMapEditorBoardTools();
   enterMapEditorPlayModeLock();
   refreshInspector();

@@ -1069,6 +1069,17 @@ function applyQuestRoomsFromAssets(roomsData) {
     }
   }
 
+  const draconiaQuestRoom = roomsData.draconiaQuest;
+  if (draconiaQuestRoom) {
+    if (draconiaQuestRoom.battleRoomName) DRACONIA_QUEST_BATTLE_ROOM_NAME = draconiaQuestRoom.battleRoomName;
+    if (draconiaQuestRoom.battleRoomId) DRACONIA_QUEST_BATTLE_ROOM_ID = draconiaQuestRoom.battleRoomId;
+    if (draconiaQuestRoom.battleDisplayName) DRACONIA_QUEST_BATTLE_DISPLAY_NAME = draconiaQuestRoom.battleDisplayName;
+    if (draconiaQuestRoom.battleId) DRACONIA_QUEST_BATTLE_ID = draconiaQuestRoom.battleId;
+    if (draconiaQuestRoom.tileMutations && typeof draconiaQuestRoom.tileMutations === 'object') {
+      DRACONIA_QUEST_TILE_MUTATIONS = draconiaQuestRoom.tileMutations;
+    }
+  }
+
   const mornenionRoom = roomsData.mornenion;
   if (mornenionRoom) {
     if (mornenionRoom.tileMutations && typeof mornenionRoom.tileMutations === 'object') {
@@ -1498,7 +1509,8 @@ const QUEST_MISSION_IDS = [
   'lost_oracle',
   'hellgate_part_1',
   'hellgate_library',
-  'draconia_tower'
+  'draconia_tower',
+  'draconia_quest'
 ];
 
 for (const missionId of QUEST_MISSION_IDS) {
@@ -1530,6 +1542,7 @@ const LOST_ORACLE_MISSION = MISSION_BY_ID.lost_oracle;
 const HELLGATE_PART_1_MISSION = MISSION_BY_ID.hellgate_part_1;
 const HELLGATE_LIBRARY_MISSION = MISSION_BY_ID.hellgate_library;
 const DRACONIA_TOWER_MISSION = MISSION_BY_ID.draconia_tower;
+const DRACONIA_QUEST_MISSION = MISSION_BY_ID.draconia_quest;
 
 const MINOTAUR_TROPHY_CONFIG = {};
 const ORB_CONFIG = {};
@@ -1590,6 +1603,62 @@ function applyMissionRegistryFromAssets(missionsData) {
 // Story order for Quest Log / Mission Log / Quest Dev Tools — rebuilt from missions.json → registry.storyOrder.
 const QUEST_LOG_MISSIONS = [];
 rebuildQuestLogMissions();
+
+// Quest-giver NPC per mission, for labelling missions that show up in the
+// King Tibianus mission list even though another NPC hands them out.
+// Missions given by King Tibianus are the default and get no prefix.
+const MISSION_NPC_LABELS = {
+  al_dee_fishing_gold: 'Al Dee',
+  al_dee_golden_rope: 'Al Dee',
+  al_dee_rookie_guard: 'Al Dee',
+  costello_queen_banshees: 'Costello',
+  follower_of_zathroth: 'Costello',
+  mother_of_all_spiders: 'Wyda',
+  jakundaf_desert: 'Wyda',
+  tainted_souls: 'Wyda',
+  serpentine_tower: 'Tesha',
+  apprentice_sheng: 'Rookstayer',
+  christmas_miracle: 'Santa Claus',
+  svenson_love_story: 'Svenson',
+  weakened_archdemon: 'Dane',
+  lost_oracle: 'The Oracle',
+  hellgate_part_1: 'Elathriel',
+  hellgate_library: 'Elathriel',
+  draconia_tower: 'Elathriel',
+  draconia_quest: 'Elathriel'
+};
+
+// One accent colour per quest-giver for the mission-list entry.
+const MISSION_NPC_COLORS = {
+  'King Tibianus': '#ffffff',
+  'Al Dee': '#5fd28a',
+  'Costello': '#c88bff',
+  'Wyda': '#6cc6b0',
+  'Tesha': '#e8c15a',
+  'Rookstayer': '#e5934d',
+  'Santa Claus': '#ef5a5a',
+  'Svenson': '#7fa8ff',
+  'Dane': '#d98cae',
+  'The Oracle': '#a0a0c8',
+  'Elathriel': '#b5d94f'
+};
+
+function getMissionNpcLabel(mission) {
+  if (!mission || !mission.id) return null;
+  return MISSION_NPC_LABELS[mission.id] || null;
+}
+
+function getMissionNpcColor(mission) {
+  const npc = getMissionNpcLabel(mission);
+  return (npc && MISSION_NPC_COLORS[npc]) || null;
+}
+
+// Prefixes the mission title with its quest-giver's name when the giver is not King Tibianus.
+function getMissionListDisplayTitle(mission) {
+  if (!mission) return '';
+  const npc = getMissionNpcLabel(mission);
+  return npc ? `${npc} - ${mission.title}` : mission.title;
+}
 
 function getMissionCompletionSummary(mission) {
   if (!mission) return '';
@@ -1714,6 +1783,15 @@ let DRACONIA_BATTLE_ROOM_ID = 'rkswrs';
 let DRACONIA_BATTLE_DISPLAY_NAME = 'Draconia Tower';
 let DRACONIA_BATTLE_ID = 'draconia_tower';
 let DRACONIA_TILE_MUTATIONS = null;
+
+// Draconia Quest (Elathriel — the final step after Draconia Tower. Chat-triggered teleport
+// into the Sewers for one last battle; on victory the player uses the Dragonfetish to
+// return to Hedge Maze, where Elathriel closes the quest for 200 guild coins).
+let DRACONIA_QUEST_BATTLE_ROOM_NAME = 'Sewers';
+let DRACONIA_QUEST_BATTLE_ROOM_ID = 'rkswrs';
+let DRACONIA_QUEST_BATTLE_DISPLAY_NAME = 'Draconia Quest';
+let DRACONIA_QUEST_BATTLE_ID = 'draconia_quest';
+let DRACONIA_QUEST_TILE_MUTATIONS = null;
 
 // Ab'Dendriel Hive (Mornenion) reskin. NOTE: this was originally implemented via
 // CustomBattles' native sceneSpriteReplacements (a global sprite-id swap), but that
@@ -2279,6 +2357,7 @@ function createNPCCooldownManager() {
     progressHellgatePart1: { accepted: false, completed: false, battleCompleted: false },
     progressHellgateLibrary: { accepted: false, completed: false, battleCompleted: false, bookGiven: false },
     progressDraconiaTower: { accepted: false, completed: false, battleCompleted: false, dragonfetishReceived: false },
+    progressDraconiaQuest: { accepted: false, completed: false, battleCompleted: false },
     progressChristmasMiracle: { accepted: false, completed: false },
     progressSvensonLoveStory: { accepted: false, completed: false, plankDelivered: false, strandedAtAwash: false, awashYarnDelivered: false, awashYarnRequested: false, strandedAtUnderground: false, undergroundCompassDelivered: false, undergroundCompassRequested: false, strandedAtWhiteWave: false, whiteWaveSlippersDelivered: false },
     progressWeakenedArchdemon: { accepted: false, completed: false, battleCompleted: false },
@@ -2466,6 +2545,13 @@ function createNPCCooldownManager() {
   let draconiaTowerHitboxesApplied = false;
   let draconiaTowerPostBattle = false;
   let draconiaTowerSceneSub = null;
+
+  // Draconia Quest (Elathriel: the final step after Draconia Tower — teleport into the
+  // Sewers reskin for one last battle, then use the Dragonfetish to return to Hedge Maze).
+  let playerEnteredDraconiaQuest = false;
+  let draconiaQuestBattle = null;
+  let draconiaQuestHitboxesApplied = false;
+  let draconiaQuestSceneSub = null;
 
   // Putrid Chamber (Serpentine Tower Quest: basement lever → custom battle)
   let playerUsedSerpentineLeverToPutridChamber = false;
@@ -5321,6 +5407,8 @@ function createNPCCooldownManager() {
   const QUEST_BOARD_HIDDEN_TAG_HELLGATE_LIBRARY = 'hellgate-library';
   const QUEST_BOARD_ADDED_ATTR_DRACONIA = 'data-quests-draconia-added';
   const QUEST_BOARD_HIDDEN_TAG_DRACONIA = 'draconia-tower';
+  const QUEST_BOARD_ADDED_ATTR_DRACONIA_QUEST = 'data-quests-draconia-quest-added';
+  const QUEST_BOARD_HIDDEN_TAG_DRACONIA_QUEST = 'draconia-quest';
   const QUEST_BOARD_ADDED_ATTR_SPIDER_LAIR = 'data-quests-spider-lair-added';
 
   function hideQuestBoardElement(element, options = {}) {
@@ -7980,11 +8068,27 @@ function createNPCCooldownManager() {
     return count;
   }
 
+  // Mission count at which the final (highest) arena rank is reached. The story
+  // has 25 missions today and is heading toward 30, so the ladder is tuned to
+  // span 30 rather than topping out early: with 11 rank titles that's ~3
+  // completed missions per rank. If titles are added/removed later this
+  // recomputes automatically (e.g. 16 titles → ~2 missions per rank).
+  const ARENA_RANK_TOP_AT_MISSIONS = 30;
+
+  function getArenaRankMissionsPerRank() {
+    const rankCount = KING_ARENA_RANKS.length;
+    if (rankCount <= 1) return 1;
+    return Math.max(1, Math.round(ARENA_RANK_TOP_AT_MISSIONS / (rankCount - 1)));
+  }
+
   function getArenaRankIndex(completedMissions) {
     const count = Math.max(0, Number(completedMissions) || 0);
     // Ranks start at 1 completed mission (0 is not shown on the leaderboard).
     if (count <= 0) return 0;
-    return Math.min(Math.floor((count - 1) / 2), KING_ARENA_RANKS.length - 1);
+    return Math.min(
+      Math.floor(count / getArenaRankMissionsPerRank()),
+      KING_ARENA_RANKS.length - 1
+    );
   }
 
   const KING_ARENA_RANK_COLORS = [
@@ -7993,7 +8097,7 @@ function createNPCCooldownManager() {
     'rgb(100, 150, 255)', // Blue — Steward
     'rgb(150, 100, 255)', // Purple — Warden
     'rgb(255, 215, 0)',   // Gold — Squire
-    'rgb(55, 55, 65)',    // Obsidian — Warrior
+    'rgb(120, 122, 140)', // Obsidian — Warrior
     'rgb(160, 195, 220)', // Mithril — Keeper
     'rgb(220, 230, 245)', // Platinum — Guardian
     'rgb(248, 248, 255)', // Pearl — Sage
@@ -11327,7 +11431,7 @@ function createNPCCooldownManager() {
       
       // Function to add message to conversation
       let pendingKingChunkTimeouts = [];
-      function addMessageToConversation(sender, text, isKing = false) {
+      function addMessageToConversation(sender, text, isKing = false, noChunk = false) {
         const appendOne = (chunkText) => {
           const messageP = document.createElement('p');
           messageP.className = 'inline text-monster';
@@ -11351,7 +11455,7 @@ function createNPCCooldownManager() {
         pendingKingChunkTimeouts.forEach((id) => clearTimeout(id));
         pendingKingChunkTimeouts = [];
 
-        if (isKing) {
+        if (isKing && !noChunk) {
           pendingKingChunkTimeouts = scheduleChunkedDialogue(appendOne, text);
         } else {
           appendOne(text);
@@ -11378,7 +11482,7 @@ function createNPCCooldownManager() {
         try {
           const hasToken = await hasSilverToken();
           if (!hasToken) {
-            addMessageToConversation('King Tibianus', applyPlayerNameSubstitution('I greet thee, my loyal subject Player.'), true);
+            addMessageToConversation('King Tibianus', applyPlayerNameSubstitution('I greet thee, my loyal subject Player.'), true, true);
           }
         } catch (err) {
           console.warn('[Quests Mod] Could not check token for initial greeting:', err);
@@ -11933,11 +12037,13 @@ function createNPCCooldownManager() {
           currentMissions.forEach(({ mission }) => {
             const missionEntry = document.createElement('p');
             missionEntry.className = 'text-whiteHighlight';
-            missionEntry.textContent = mission.title;
+            missionEntry.textContent = getMissionListDisplayTitle(mission);
             missionEntry.style.cursor = 'pointer';
             missionEntry.style.userSelect = 'none';
             missionEntry.style.margin = '0';
-            missionEntry.style.color = selectedMissionId === mission.id ? '#e6d7b0' : '#ffffff';
+            missionEntry.style.color = selectedMissionId === mission.id
+              ? '#e6d7b0'
+              : (getMissionNpcColor(mission) || '#ffffff');
             missionEntry.addEventListener('click', () => handleMissionClick(mission.id));
             missionsBody.appendChild(missionEntry);
           });
@@ -11956,8 +12062,10 @@ function createNPCCooldownManager() {
           completedMissions.forEach(({ mission }) => {
             const completedItem = document.createElement('p');
             completedItem.style.margin = '0';
-            completedItem.textContent = mission.title;
-            completedItem.style.color = selectedMissionId === mission.id ? '#e6d7b0' : '#ffffff';
+            completedItem.textContent = getMissionListDisplayTitle(mission);
+            completedItem.style.color = selectedMissionId === mission.id
+              ? '#e6d7b0'
+              : (getMissionNpcColor(mission) || '#ffffff');
             completedItem.style.fontStyle = 'normal';
             completedItem.style.cursor = 'pointer';
             completedItem.style.userSelect = 'none';
@@ -13480,7 +13588,7 @@ function createNPCCooldownManager() {
 
       // Function to add message to conversation
       let pendingAlDeeChunkTimeouts = [];
-      function addMessageToConversation(sender, text, isAlDee = false) {
+      function addMessageToConversation(sender, text, isAlDee = false, noChunk = false) {
         const appendOne = (chunkText) => {
           const messageP = document.createElement('p');
           messageP.className = 'inline text-monster';
@@ -13504,7 +13612,7 @@ function createNPCCooldownManager() {
         pendingAlDeeChunkTimeouts.forEach((id) => clearTimeout(id));
         pendingAlDeeChunkTimeouts = [];
 
-        if (isAlDee) {
+        if (isAlDee && !noChunk) {
           pendingAlDeeChunkTimeouts = scheduleChunkedDialogue(appendOne, text);
         } else {
           appendOne(text);
@@ -13514,7 +13622,7 @@ function createNPCCooldownManager() {
       // Add welcome message
       const playerName = getCurrentPlayerName() || 'Player';
       const welcomeMessage = 'Hello, hello, ' + playerName + '! Please come in, look, and buy! I\'m a specialist for all sorts of tools. Just ask me for a trade to see my offers!';
-      addMessageToConversation('Al Dee', welcomeMessage, true);
+      addMessageToConversation('Al Dee', welcomeMessage, true, true);
 
       row1.appendChild(imageContainer);
       row1.appendChild(messageContainer);
@@ -14758,7 +14866,7 @@ function createNPCCooldownManager() {
     if (messageContainerId) messageContainer.id = messageContainerId;
 
     let pendingNpcChunkTimeouts = [];
-    function addMessage(sender, text, isNpc) {
+    function addMessage(sender, text, isNpc, noChunk = false) {
       const appendOne = (chunkText) => {
         const messageP = document.createElement('p');
         messageP.className = 'inline text-monster';
@@ -14774,14 +14882,16 @@ function createNPCCooldownManager() {
       pendingNpcChunkTimeouts.forEach((id) => clearTimeout(id));
       pendingNpcChunkTimeouts = [];
 
-      if (isNpc) {
+      if (isNpc && !noChunk) {
         pendingNpcChunkTimeouts = scheduleChunkedDialogue(appendOne, text);
       } else {
         appendOne(text);
       }
     }
 
-    addMessage(npcName, welcomeMessage, true);
+    // Greetings/welcome lines are always delivered as a single message, never
+    // split into 2-3 sentence chunks.
+    addMessage(npcName, welcomeMessage, true, true);
 
     row1.appendChild(imageContainer);
     row1.appendChild(messageContainer);
@@ -16693,6 +16803,10 @@ function createNPCCooldownManager() {
       wrapper.style.flex = '1 1 auto';
       wrapper.style.minHeight = '0';
       wrapper.style.maxHeight = '100%';
+      // Drop the top padding so the sticky table header sits flush against the
+      // scroll viewport's top edge — otherwise rows scroll up into the padding
+      // strip and peek out above the pinned header.
+      wrapper.style.paddingTop = '0';
     }
     listElement.innerHTML = '';
     listElement.appendChild(box);
@@ -16715,7 +16829,10 @@ function createNPCCooldownManager() {
     const ellipsisCellStyle = 'min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
     const header = document.createElement('div');
     header.className = 'pixel-font-16 text-whiteRegular';
-    header.style.cssText = `${gridRowStyle}display:grid;grid-template-columns:${ARENA_LEADERBOARD_GRID_COLUMNS};gap:6px;padding:0 0 6px;border-bottom:1px solid rgba(255,255,255,0.18);align-items:end;position:sticky;top:0;z-index:1;background:url("https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png") repeat;color:rgb(255,255,255);`;
+    // Bleed 8px sideways to cover the scroll wrapper's horizontal padding, and
+    // back the tiled texture with a solid opaque colour + a shadow so scrolled
+    // rows are fully hidden behind the pinned header instead of showing through.
+    header.style.cssText = `${gridRowStyle}width:calc(100% + 16px);max-width:none;margin:0 -8px;display:grid;grid-template-columns:${ARENA_LEADERBOARD_GRID_COLUMNS};gap:6px;padding:8px 8px 6px;border-bottom:1px solid rgba(255,255,255,0.18);align-items:end;position:sticky;top:0;z-index:5;background-color:#191919;background-image:url("https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png");background-repeat:repeat;box-shadow:0 6px 8px -4px rgba(0,0,0,0.6);color:rgb(255,255,255);`;
 
     const headerLabels = ['#', 'Player', 'Rank', 'Missions\ncompleted'];
     headerLabels.forEach((label, colIndex) => {
@@ -18646,6 +18763,17 @@ function createNPCCooldownManager() {
             && !draconiaTowerBattle?.isRoomReloadInProgress?.()) {
             console.log('[Quests Mod][Overlay Hider] Leaving Draconia Tower - clearing quest state (CustomBattle cleanup)');
             cleanupDraconiaTowerQuest();
+          }
+
+          // Draconia Quest: leaving the Sewers during the final fight — tear the quest scene
+          // down. The battle's own onClose handles victory (Dragonfetish return) / defeat;
+          // this covers a manual room-picker exit.
+          if (lastOverlayHiderRoomName === DRACONIA_QUEST_BATTLE_ROOM_NAME
+            && currentRoomName && currentRoomName !== DRACONIA_QUEST_BATTLE_ROOM_NAME
+            && (playerEnteredDraconiaQuest || draconiaQuestBattle)
+            && !draconiaQuestBattle?.isRoomReloadInProgress?.()) {
+            console.log('[Quests Mod][Overlay Hider] Leaving Draconia Quest - clearing quest state (CustomBattle cleanup)');
+            cleanupDraconiaQuestQuest();
           }
 
           // Lonesome Dragon: leaving room — cleanup unless returning to Dragon Lair after defeat for stairs retry
@@ -26603,6 +26731,414 @@ function createNPCCooldownManager() {
     return isMissionAcceptedIncomplete(getMissionProgress(AL_DEE_ROOKIE_GUARD_MISSION));
   }
 
+  // =======================
+  // Draconia Quest (Elathriel — the final step after Draconia Tower. Chat-triggered
+  // teleport into the Sewers, re-skinned for one last battle. The full villain roster
+  // spawns on entry. On victory the player "uses" the Dragonfetish (consumed) and is
+  // returned to Hedge Maze, where Elathriel closes the mission for 200 guild coins.
+  // Mirrors the Draconia Tower flow minus the post-battle board NPC / trade.)
+  // =======================
+
+  function getDraconiaQuestLogPrefix() {
+    return '[Quests Mod][Draconia Quest]';
+  }
+
+  // Elathriel "follows" the player into the last room, so a purely decorative south-facing
+  // copy of him stands on tile 36 for the whole battle with a green name tag above him —
+  // same trick as ensureHellgateElathrielDummy(). Right-clicking him works through
+  // draconiaQuestElathrielSignReader (createSignReaderSystem), the same nudge mechanism the
+  // Hellgate Part 1 dummy uses. Tagged QUEST_BOARD_ADDED_ATTR_DRACONIA_QUEST so
+  // restoreDraconiaQuestTileMutations() tears it (and its name tag) down.
+  const DRACONIA_QUEST_ELATHRIEL_DUMMY_TILE_INDEX = 36;
+  const DRACONIA_QUEST_ELATHRIEL_DUMMY_ATTR = 'data-quests-draconia-quest-elathriel-dummy';
+  const DRACONIA_QUEST_ELATHRIEL_DUMMY_NAME_TAG_CLASS = 'quests-draconia-quest-elathriel-dummy-name-tag';
+
+  function ensureDraconiaQuestElathrielDummyNameTag(tileElement) {
+    let nameTag = document.querySelector(`.${DRACONIA_QUEST_ELATHRIEL_DUMMY_NAME_TAG_CLASS}`);
+    if (!nameTag) {
+      nameTag = document.createElement('span');
+      nameTag.className = `${DRACONIA_QUEST_ELATHRIEL_DUMMY_NAME_TAG_CLASS} revert-pixel-font-spacing pointer-events-none absolute flex w-[192px] flex-col items-center`;
+      nameTag.style.cssText = [
+        'position:absolute',
+        'user-select:none',
+        `z-index:${QUEST_FIGHT_ICON_Z_INDEX}`,
+        'pointer-events:none',
+        'line-height:1'
+      ].join(';');
+      nameTag.setAttribute(QUEST_BOARD_ADDED_ATTR_DRACONIA_QUEST, '1');
+
+      const nameLine = document.createElement('span');
+      nameLine.setAttribute('translate', 'no');
+      nameLine.className = 'select-none text-center pixel-font-16 text-whiteHighlight';
+      nameLine.style.cssText = 'line-height:1;font-size:16px;display:inline-flex;align-items:center;';
+      const nameText = document.createElement('span');
+      nameText.className = 'text-whiteHighlight';
+      nameText.style.cssText = 'color:rgb(96, 192, 96);text-shadow:-1px 0 #000,1px 0 #000,0 -1px #000,0 1px #000;';
+      nameText.textContent = getMissionDialogueLine(DRACONIA_QUEST_MISSION, 'companionName', 'Elathriel');
+      nameLine.appendChild(nameText);
+      nameTag.appendChild(nameLine);
+    }
+    positionBoardNpcNameTag(nameTag, tileElement);
+  }
+
+  function ensureDraconiaQuestElathrielDummy() {
+    const tile = getTileElement(DRACONIA_QUEST_ELATHRIEL_DUMMY_TILE_INDEX);
+    if (!tile) return;
+    if (!tile.querySelector(`[${DRACONIA_QUEST_ELATHRIEL_DUMMY_ATTR}="1"]`)) {
+      const outfitSpriteId = ELATHRIEL_OUTFIT_SPRITE_ID || '64';
+      const wrap = document.createElement('div');
+      wrap.innerHTML = `<div class="sprite outfit id-${outfitSpriteId} idle south pointer-events-none absolute bottom-0 right-0 select-none" ${QUEST_BOARD_ADDED_ATTR_DRACONIA_QUEST}="1" ${DRACONIA_QUEST_ELATHRIEL_DUMMY_ATTR}="1" style="z-index: 1000;"><div class="viewport"><img alt="south" class="actor spritesheet" data-shiny="false" style="animation-play-state: running;"></div></div>`;
+      if (wrap.firstElementChild) tile.appendChild(wrap.firstElementChild);
+    }
+    ensureDraconiaQuestElathrielDummyNameTag(tile);
+  }
+
+  function buildDraconiaQuestMutationSpriteHTML(entry, mutationKey) {
+    const spriteId = entry?.spriteId;
+    if (spriteId == null) return '';
+    const cropX = entry.cropX != null ? entry.cropX : 0;
+    const cropY = entry.cropY != null ? entry.cropY : 0;
+    const cropped = entry.cropped ? 'true' : 'false';
+    const bankStyle = entry.bank != null ? ` --bank: ${entry.bank};` : '';
+    const rightCalc = formatHellgateMutationOffsetCalc(entry.offsetX);
+    const bottomCalc = formatHellgateMutationOffsetCalc(entry.offsetY);
+    const offsetStyle = `${rightCalc ? ` right: ${rightCalc};` : ''}${bottomCalc ? ` bottom: ${bottomCalc};` : ''}`;
+    return `<div class="sprite item relative id-${spriteId}" ${QUEST_BOARD_ADDED_ATTR_DRACONIA_QUEST}="1" data-quests-draconia-quest-mutation-key="${mutationKey}" style="z-index: 1000;${bankStyle}${offsetStyle}"><div class="viewport"><img alt="${spriteId}" data-cropped="${cropped}" class="spritesheet" style="--cropX: ${cropX}; --cropY: ${cropY};"></div></div>`;
+  }
+
+  function applyDraconiaQuestTileMutations() {
+    const mutations = DRACONIA_QUEST_TILE_MUTATIONS;
+    if (!mutations || typeof mutations !== 'object') return;
+    let wroteHitboxes = false;
+    Object.entries(mutations).forEach(([tileKey, entry]) => {
+      const tileIndex = Number(tileKey);
+      if (!Number.isFinite(tileIndex) || !entry || typeof entry !== 'object') return;
+      const tile = getTileElement(tileIndex);
+
+      (entry.remove || []).forEach((spriteId) => {
+        if (spriteId == null || !tile) return;
+        tile.querySelectorAll(`.sprite.item.relative.id-${spriteId}`).forEach((sprite) => {
+          hideQuestBoardElement(sprite, { tag: QUEST_BOARD_HIDDEN_TAG_DRACONIA_QUEST });
+        });
+      });
+
+      (entry.add || []).forEach((spriteEntry, spriteIndex) => {
+        const spriteId = spriteEntry?.spriteId;
+        if (spriteId == null || !tile) return;
+        const mutationKey = `${tileIndex}-${spriteIndex}`;
+        if (tile.querySelector(`[data-quests-draconia-quest-mutation-key="${mutationKey}"]`)) return;
+        const wrap = document.createElement('div');
+        wrap.innerHTML = buildDraconiaQuestMutationSpriteHTML(spriteEntry, mutationKey);
+        if (wrap.firstElementChild) tile.appendChild(wrap.firstElementChild);
+      });
+
+      if (Array.isArray(entry.floorBelow) && entry.floorBelow.length) {
+        applyQuestFloorBelowSprites(
+          tileIndex, entry.floorBelow, QUEST_BOARD_ADDED_ATTR_DRACONIA_QUEST, 'data-quests-draconia-quest-fb-key'
+        );
+      }
+
+      if (Object.prototype.hasOwnProperty.call(entry, 'hitbox')) {
+        try {
+          getHellgateRoomRefs().forEach((room) => {
+            const data = room?.file?.data;
+            if (!data) return;
+            if (!Array.isArray(data.hitboxes)) data.hitboxes = [];
+            data.hitboxes[tileIndex] = entry.hitbox === true;
+            wroteHitboxes = true;
+          });
+        } catch (_) {}
+      }
+    });
+
+    if (wroteHitboxes) draconiaQuestHitboxesApplied = true;
+
+    ensureDraconiaQuestElathrielDummy();
+
+    const battle = draconiaQuestBattle;
+    if (battle?.refreshPlacementHitboxMaskFromLive) {
+      battle.refreshPlacementHitboxMaskFromLive(() => playerEnteredDraconiaQuest);
+    } else if (battle?.syncPlacementHitboxMask) {
+      battle.syncPlacementHitboxMask(() => playerEnteredDraconiaQuest);
+    }
+  }
+
+  function restoreDraconiaQuestTileMutations() {
+    restoreQuestBoardElementsByTag(QUEST_BOARD_HIDDEN_TAG_DRACONIA_QUEST);
+    document.querySelectorAll(`[${QUEST_BOARD_ADDED_ATTR_DRACONIA_QUEST}="1"]`).forEach((el) => {
+      try { el.remove(); } catch (_) {}
+    });
+    draconiaQuestHitboxesApplied = false;
+    draconiaQuestElathrielSignReader.resetRead();
+  }
+
+  function stopDraconiaQuestSceneSync() {
+    if (draconiaQuestSceneSub) {
+      try { draconiaQuestSceneSub.unsubscribe?.(); } catch (_) {}
+      draconiaQuestSceneSub = null;
+    }
+  }
+
+  function startDraconiaQuestSceneSync() {
+    stopDraconiaQuestSceneSync();
+    const paint = () => {
+      if (playerEnteredDraconiaQuest
+        && !draconiaQuestBattle
+        && isOnRoomByName(DRACONIA_QUEST_BATTLE_ROOM_NAME)) {
+        applyDraconiaQuestTileMutations();
+      }
+    };
+    paint();
+    const deadline = (typeof performance !== 'undefined' ? performance.now() : Date.now()) + 800;
+    const rafPaint = () => {
+      if (!playerEnteredDraconiaQuest) return;
+      paint();
+      const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      if (now < deadline && typeof requestAnimationFrame === 'function') requestAnimationFrame(rafPaint);
+    };
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(rafPaint);
+    [150, 400, 900, 1600].forEach((d) => setTimeout(paint, d));
+    if (!globalThis.state?.board?.subscribe) return;
+    draconiaQuestSceneSub = globalThis.state.board.subscribe(() => {
+      if (!playerEnteredDraconiaQuest) {
+        stopDraconiaQuestSceneSync();
+        return;
+      }
+      paint();
+    });
+  }
+
+  function restoreBoardSetupDraconiaQuest() {
+    if (draconiaQuestBattle) draconiaQuestBattle.restoreBoardSetup();
+    restoreDraconiaQuestTileMutations();
+  }
+
+  function cleanupDraconiaQuestQuest() {
+    try {
+      removeCustomBattleStatusToast();
+      stopDraconiaQuestSceneSync();
+      playerEnteredDraconiaQuest = false;
+      restoreDraconiaQuestTileMutations();
+      if (draconiaQuestBattle) {
+        draconiaQuestBattle.cleanup(restoreBoardSetupDraconiaQuest, showQuestOverlays);
+        draconiaQuestBattle = null;
+        console.log(`${getDraconiaQuestLogPrefix()} Battle cleaned up`);
+      }
+      updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+    } catch (error) {
+      console.error(`${getDraconiaQuestLogPrefix()} Error cleaning up:`, error);
+    }
+  }
+
+  function isDraconiaQuestCompletionPending() {
+    const progress = getMissionProgress(DRACONIA_QUEST_MISSION) || {};
+    return !!progress.battleCompleted && !progress.completed;
+  }
+
+  async function awardDraconiaQuestGuildCoins() {
+    const amount = Number(DRACONIA_QUEST_MISSION.rewardCoins) || 200;
+    if (amount <= 0) return;
+    try {
+      const coinsAdder =
+        globalThis.addGuildCoins ||
+        (globalThis.Guilds && globalThis.Guilds.addGuildCoins) ||
+        (globalThis.BestiaryModAPI?.guilds?.addGuildCoins) ||
+        (typeof questsAddGuildCoins === 'function' ? questsAddGuildCoins : null);
+      if (!coinsAdder) {
+        console.warn(`${getDraconiaQuestLogPrefix()} addGuildCoins not available, skipping guild coin reward`);
+        return;
+      }
+      await coinsAdder(amount);
+      console.log(`${getDraconiaQuestLogPrefix()} Awarded guild coins:`, amount);
+    } catch (error) {
+      console.error(`${getDraconiaQuestLogPrefix()} Error awarding guild coins:`, error);
+    }
+  }
+
+  async function completeDraconiaQuestMission() {
+    const progress = getMissionProgress(DRACONIA_QUEST_MISSION) || {};
+    if (progress.completed) return false;
+    const rewardCoins = Number(DRACONIA_QUEST_MISSION.rewardCoins) || 200;
+    try {
+      await persistMissionProgress(DRACONIA_QUEST_MISSION, {
+        accepted: true,
+        completed: true,
+        battleCompleted: true
+      });
+      await awardDraconiaQuestGuildCoins();
+      // Belt-and-suspenders: the Dragonfetish should already have been consumed on the
+      // victory return, but drop any leftover copy now that the quest is closed. Also
+      // clear Key 3012 — the whole Elathriel chain (Hellgate -> Library -> Draconia) is
+      // finished, so it has no further use (itemLifecycle.staleCleanupOnComplete covers
+      // this too, on the next inventory sync).
+      try { await consumeQuestItem('Dragonfetish', 1); } catch (_) {}
+      try { await consumeQuestItem('Key 3012', 1); } catch (_) {}
+      NotificationService.showQuestCompleted(DRACONIA_QUEST_MISSION, getDraconiaQuestLogPrefix(), { rewardCoins });
+      updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+      console.log(`${getDraconiaQuestLogPrefix()} Mission completed`);
+      return true;
+    } catch (error) {
+      console.error(`${getDraconiaQuestLogPrefix()} Error completing mission:`, error);
+      return false;
+    }
+  }
+
+  // Victory: the player "uses" the Dragonfetish — it is consumed and carries them back to
+  // Hedge Maze, where Elathriel closes the quest.
+  async function returnFromDraconiaQuestWithDragonfetish() {
+    try {
+      await consumeQuestItem('Dragonfetish', 1);
+    } catch (error) {
+      console.error(`${getDraconiaQuestLogPrefix()} Error consuming Dragonfetish:`, error);
+    }
+    showToast({
+      message: 'You raise the Dragonfetish — and Draconia falls away around you. Speak with Elathriel.',
+      logPrefix: getDraconiaQuestLogPrefix()
+    });
+    cleanupDraconiaQuestQuest();
+    setTimeout(() => navigateToHedgeMazeFromHellgate(), 100);
+  }
+
+  function createDraconiaQuestBattleInstance(roomId) {
+    if (!window.CustomBattles) {
+      console.error(`${getDraconiaQuestLogPrefix()} CustomBattles still not available`);
+      return null;
+    }
+    const spawn = getHydratedQuestBattleSpawn(DRACONIA_QUEST_BATTLE_ID || 'draconia_quest');
+    const villains = spawn.villains;
+    const tileRestrictions = {};
+    if (spawn.allowedTiles?.length) {
+      tileRestrictions.allowedTiles = spawn.allowedTiles;
+      tileRestrictions.message = spawn.allowedTilesMessage || 'Ally creatures can only be placed on the marked tiles!';
+    }
+    const config = {
+      name: DRACONIA_QUEST_BATTLE_DISPLAY_NAME || 'Draconia Quest',
+      roomId,
+      villains,
+      allyLimit: spawn.allyLimit ?? 5,
+      preventVillainMovement: spawn.preventVillainMovement !== false,
+      hideVillainSprites: spawn.hideVillainSprites !== false,
+      ...(Object.keys(tileRestrictions).length ? { tileRestrictions } : {}),
+      activationCheck: (isSandbox, inBattleArea) => isSandbox && inBattleArea && playerEnteredDraconiaQuest,
+      victoryDefeat: {
+        onVictory: async () => {
+          console.log(`${getDraconiaQuestLogPrefix()} Final room cleared`);
+          try {
+            await persistMissionProgress(DRACONIA_QUEST_MISSION, {
+              accepted: true,
+              completed: false,
+              battleCompleted: true
+            });
+          } catch (error) {
+            console.error(`${getDraconiaQuestLogPrefix()} Error saving battleCompleted flag:`, error);
+          }
+        },
+        onDefeat: () => {},
+        onClose: (isVictory) => {
+          if (isVictory) {
+            returnFromDraconiaQuestWithDragonfetish();
+          } else {
+            cleanupDraconiaQuestQuest();
+            setTimeout(() => navigateToHedgeMazeFromHellgate(), 100);
+          }
+        },
+        victoryTitle: 'Victory!',
+        defeatTitle: 'Defeat',
+        victoryMessage: getMissionDialogueLine(
+          DRACONIA_QUEST_MISSION,
+          'battleVictory',
+          'The last room is clear. Use the Dragonfetish — it will take you back to the maze.'
+        ),
+        defeatMessage: getMissionDialogueLine(
+          DRACONIA_QUEST_MISSION,
+          'battleDefeat',
+          'The deep room is not yet yours. Gather yourself and go down again.'
+        ),
+        showItems: false,
+        items: []
+      }
+    };
+    return window.CustomBattles.create(config);
+  }
+
+  function initializeDraconiaQuestBattle(roomId) {
+    if (window.CustomBattles) return createDraconiaQuestBattleInstance(roomId);
+    return waitForCustomBattles({ logPrefix: getDraconiaQuestLogPrefix() }).then((api) => {
+      if (!api) return null;
+      return createDraconiaQuestBattleInstance(roomId);
+    });
+  }
+
+  function setupDraconiaQuestBattleInstance(battle) {
+    if (!battle) return false;
+    draconiaQuestBattle = battle;
+    stopDraconiaQuestSceneSync();
+    draconiaQuestBattle.setup(
+      () => playerEnteredDraconiaQuest,
+      NotificationService.createBattleToastCallback(getDraconiaQuestLogPrefix())
+    );
+    draconiaQuestBattle.resetSandboxBattleState();
+    draconiaQuestBattle.setupTileRestrictions(
+      () => playerEnteredDraconiaQuest,
+      NotificationService.createBattleToastCallback(getDraconiaQuestLogPrefix())
+    );
+    draconiaQuestBattle.setupAllyLimit?.(
+      () => playerEnteredDraconiaQuest,
+      NotificationService.createBattleToastCallback(getDraconiaQuestLogPrefix())
+    );
+    showCustomBattleStatusToast({
+      battleName: DRACONIA_QUEST_BATTLE_DISPLAY_NAME || 'Draconia Quest',
+      allyLimit: battle.config?.allyLimit ?? 5,
+      battle,
+      logPrefix: getDraconiaQuestLogPrefix()
+    });
+    draconiaQuestBattle.scheduleEntryVillainSetup({
+      attemptDelays: [0, 100, 250, 500, 800, 1200],
+      isActiveCheck: () => playerEnteredDraconiaQuest,
+      onComplete: () => {
+        hideQuestOverlays();
+        hideHeroEditorButton();
+        draconiaQuestBattle.startPersistentVisualSync(applyDraconiaQuestTileMutations, {
+          isActiveCheck: () => playerEnteredDraconiaQuest
+        });
+      }
+    });
+    return true;
+  }
+
+  function enterDraconiaQuest() {
+    let roomId = DRACONIA_QUEST_BATTLE_ROOM_ID || getRoomIdByRoomName(DRACONIA_QUEST_BATTLE_ROOM_NAME);
+    if (!roomId) roomId = getRoomIdByRoomName(DRACONIA_QUEST_BATTLE_ROOM_NAME);
+    if (!roomId) {
+      showToast({ message: 'The final room in Draconia could not be found.', logPrefix: getDraconiaQuestLogPrefix() });
+      return;
+    }
+
+    playerEnteredDraconiaQuest = true;
+    draconiaQuestElathrielSignReader.resetRead();
+    if (draconiaQuestBattle) {
+      draconiaQuestBattle.cleanup(restoreBoardSetupDraconiaQuest, showQuestOverlays);
+      draconiaQuestBattle = null;
+    }
+
+    globalThis.state.board.send({ type: 'selectRoomById', roomId });
+    startDraconiaQuestSceneSync();
+
+    const initResult = initializeDraconiaQuestBattle(roomId);
+    if (initResult && typeof initResult.then === 'function') {
+      initResult.then((battle) => {
+        if (playerEnteredDraconiaQuest && !draconiaQuestBattle) {
+          setupDraconiaQuestBattleInstance(battle);
+        }
+      }).catch((error) => console.error(`${getDraconiaQuestLogPrefix()} Error initializing battle:`, error));
+    } else if (initResult) {
+      setupDraconiaQuestBattleInstance(initResult);
+    }
+
+    updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+    showToast({ message: 'Following Elathriel down into the last room of Draconia...', logPrefix: getDraconiaQuestLogPrefix() });
+  }
+
   // ============================================================
   // Easter egg: right-clicking the Spike Sword prop in the Sewers (tile 42) makes it
   // vanish in a puff of red sparkles — a nod to the real Sword of Fury's "disappearing" trick.
@@ -26772,6 +27308,12 @@ function createNPCCooldownManager() {
   // ============================================================
   function createSignReaderSystem({ id, tileIndex, spriteSelector, lines, isRoomActive, durationMs = 4000 }) {
     const logPrefix = `[Quests Mod][${id}]`;
+    // `lines` may be an array or a function returning one (so mission-dialogue-driven
+    // sign text can be resolved at read time, after assets have loaded).
+    const resolveLines = () => {
+      const value = typeof lines === 'function' ? lines() : lines;
+      return Array.isArray(value) ? value : [];
+    };
     const slug = String(id).toLowerCase().replace(/[^a-z0-9]+/g, '-');
     const textClass = `quests-sign-reader-${slug}-text`;
     const styleId = `${textClass}-styles`;
@@ -26829,11 +27371,14 @@ function createNPCCooldownManager() {
       // escapes per-tile stacking entirely, positioned from the tile's actual screen rect.
       const rect = tileElement.getBoundingClientRect();
 
+      const resolvedLines = resolveLines();
+      if (!resolvedLines.length) return;
+
       const bubble = document.createElement('div');
       bubble.className = `${textClass} pixel-font-16 revert-pixel-font-spacing`;
       bubble.style.left = `${rect.left + rect.width / 2}px`;
       bubble.style.top = `${rect.top - 6}px`;
-      bubble.innerHTML = lines.map((line) => `<span class="quests-sign-reader-line">${line}</span>`).join('');
+      bubble.innerHTML = resolvedLines.map((line) => `<span class="quests-sign-reader-line">${line}</span>`).join('');
       document.body.appendChild(bubble);
       setTimeout(() => {
         if (bubble.parentNode) bubble.remove();
@@ -26864,7 +27409,7 @@ function createNPCCooldownManager() {
       event.stopPropagation();
 
       showText(getTileElement(tileIndex));
-      console.log(`${logPrefix} ${lines.join(' / ')}`);
+      console.log(`${logPrefix} ${resolveLines().join(' / ')}`);
 
       if (!read) {
         read = true;
@@ -27004,6 +27549,24 @@ function createNPCCooldownManager() {
     isRoomActive: () => playerEnteredHellgateLibrary
       && !hellgateLibraryBattleStarted
       && isOnRoomByName(HELLGATE_LIBRARY_BATTLE_ROOM_NAME)
+  });
+
+  // Draconia Quest: right-click the Elathriel dummy on tile 36 (added by
+  // ensureDraconiaQuestElathrielDummy) during the final fight for a nudge. Same mechanism
+  // as the Hellgate Part 1 dummy above.
+  const draconiaQuestElathrielSignReader = createSignReaderSystem({
+    id: 'Draconia Quest Elathriel',
+    tileIndex: DRACONIA_QUEST_ELATHRIEL_DUMMY_TILE_INDEX,
+    spriteSelector: `[${DRACONIA_QUEST_ELATHRIEL_DUMMY_ATTR}="1"]`,
+    lines: () => (Array.isArray(DRACONIA_QUEST_MISSION?.companionSignLines) && DRACONIA_QUEST_MISSION.companionSignLines.length
+      ? DRACONIA_QUEST_MISSION.companionSignLines
+      : [
+          'You look to Elathriel.',
+          'He says: "Cut down everything in this room — then raise the Dragonfetish and I will meet you back in the maze."'
+        ]),
+    isRoomActive: () => playerEnteredDraconiaQuest
+      && !!draconiaQuestBattle
+      && isOnRoomByName(DRACONIA_QUEST_BATTLE_ROOM_NAME)
   });
 
   function shouldEnableSixthSealLevers(boardContext = null) {
@@ -28184,6 +28747,16 @@ function createNPCCooldownManager() {
 
     registerQuestTileHighlightSource({
       getTiles: () => {
+        const tile = getTileElement(draconiaQuestElathrielSignReader.tileIndex);
+        return tile ? [tile] : [];
+      },
+      isAccessActive: (boardContext) => draconiaQuestElathrielSignReader.shouldEnable(boardContext),
+      alt: 'Speak with Elathriel',
+      showDuringPlacement: true
+    });
+
+    registerQuestTileHighlightSource({
+      getTiles: () => {
         const tile = getTileElement(copperKeySignReader.tileIndex);
         return tile ? [tile] : [];
       },
@@ -28593,11 +29166,11 @@ function createNPCCooldownManager() {
         return !!progress.crossingObjectiveComplete;
       },
       isInteractable: () => {
-        // Fight icon stays lit through the whole Hellgate → Library → Draconia Tower
-        // chain (each step's predecessor is its prerequisite, so an unfinished later
-        // step means Elathriel still has work to offer).
-        const draconiaProgress = getMissionProgress(DRACONIA_TOWER_MISSION) || {};
-        return !draconiaProgress.completed;
+        // Fight icon stays lit through the whole Hellgate → Library → Draconia Tower →
+        // Draconia Quest chain (each step's predecessor is its prerequisite, so an
+        // unfinished later step means Elathriel still has work to offer).
+        const draconiaQuestProgress = getMissionProgress(DRACONIA_QUEST_MISSION) || {};
+        return !draconiaQuestProgress.completed;
       },
       chat: {},
       hpBarColor: 'rgb(96, 192, 96)',
@@ -31593,6 +32166,9 @@ function createNPCCooldownManager() {
       let awaitingElathrielDraconiaAcceptConfirm = false;
       let awaitingElathrielDraconiaEnterConfirm = false;
       let awaitingElathrielDraconiaReturnConfirm = false;
+      let awaitingElathrielDraconiaQuestAcceptConfirm = false;
+      let awaitingElathrielDraconiaQuestEnterConfirm = false;
+      let awaitingElathrielDraconiaQuestReturnConfirm = false;
       let awaitingBonelordBookConfirm = false;
       // Oracle destiny tree: prepared → sure → yes teleports after SO BE IT!
       let oracleDestinyStage = npcConfig.overlayClass === ORACLE_OVERLAY_CLASS ? 'prepared' : null;
@@ -33223,6 +33799,75 @@ function createNPCCooldownManager() {
             return;
           }
 
+          // ---- Draconia Quest (Draconia Tower completed) confirm branches ----
+          if ((awaitingElathrielDraconiaQuestAcceptConfirm || awaitingElathrielDraconiaQuestEnterConfirm) && lower.includes('yes')) {
+            const wasAccept = awaitingElathrielDraconiaQuestAcceptConfirm;
+            awaitingElathrielDraconiaQuestAcceptConfirm = false;
+            awaitingElathrielDraconiaQuestEnterConfirm = false;
+            if (wasAccept) {
+              persistMissionProgress(DRACONIA_QUEST_MISSION, { accepted: true, completed: false }).catch((error) => {
+                console.error('[Quests Mod][Elathriel] Error saving Draconia Quest progress:', error);
+              });
+            }
+            cooldown.queueResponse(
+              text,
+              getMissionDialogueLine(DRACONIA_QUEST_MISSION, 'accept', 'Then follow. This is the last of it.'),
+              addMessageToConversation,
+              npcConfig.name,
+              () => {
+                setTimeout(() => {
+                  ModalHelpers.closeModal(0);
+                  enterDraconiaQuest();
+                }, 2000);
+              }
+            );
+            return;
+          }
+          if ((awaitingElathrielDraconiaQuestAcceptConfirm || awaitingElathrielDraconiaQuestEnterConfirm) && lower.includes('no')) {
+            const wasAccept = awaitingElathrielDraconiaQuestAcceptConfirm;
+            awaitingElathrielDraconiaQuestAcceptConfirm = false;
+            awaitingElathrielDraconiaQuestEnterConfirm = false;
+            cooldown.queueResponse(
+              text,
+              getMissionDialogueLine(
+                DRACONIA_QUEST_MISSION,
+                wasAccept ? 'offerDecline' : 'decline',
+                'As you wish. The last door will keep.'
+              ),
+              addMessageToConversation,
+              npcConfig.name,
+              ModalHelpers.getFarewellCloseCallback(text)
+            );
+            return;
+          }
+          if (awaitingElathrielDraconiaQuestReturnConfirm && lower.includes('yes')) {
+            awaitingElathrielDraconiaQuestReturnConfirm = false;
+            cooldown.queueResponse(
+              text,
+              getMissionDialogueLine(DRACONIA_QUEST_MISSION, 'accept', 'Then follow. This is the last of it.'),
+              addMessageToConversation,
+              npcConfig.name,
+              () => {
+                setTimeout(() => {
+                  ModalHelpers.closeModal(0);
+                  enterDraconiaQuest();
+                }, 2000);
+              }
+            );
+            return;
+          }
+          if (awaitingElathrielDraconiaQuestReturnConfirm && lower.includes('no')) {
+            awaitingElathrielDraconiaQuestReturnConfirm = false;
+            cooldown.queueResponse(
+              text,
+              getMissionDialogueLine(DRACONIA_QUEST_MISSION, 'decline', 'As you wish. The last door will keep.'),
+              addMessageToConversation,
+              npcConfig.name,
+              ModalHelpers.getFarewellCloseCallback(text)
+            );
+            return;
+          }
+
           if (awaitingElathrielAcceptConfirm && lower.includes('yes')) {
             awaitingElathrielAcceptConfirm = false;
             persistMissionProgress(HELLGATE_PART_1_MISSION, { accepted: true, completed: false }).catch((error) => {
@@ -33289,12 +33934,60 @@ function createNPCCooldownManager() {
               if (libraryProgress.completed) {
                 const draconiaProgress = getMissionProgress(DRACONIA_TOWER_MISSION) || {};
                 if (draconiaProgress.completed) {
+                  // ---- Draconia Tower completed → the final Draconia Quest. ----
+                  const draconiaQuestProgress = getMissionProgress(DRACONIA_QUEST_MISSION) || {};
+                  if (draconiaQuestProgress.completed) {
+                    cooldown.queueResponse(
+                      text,
+                      getMissionDialogueLine(DRACONIA_QUEST_MISSION, 'alreadyCompleted', 'It is finished. Draconia is quiet, top to bottom.'),
+                      addMessageToConversation,
+                      npcConfig.name,
+                      ModalHelpers.getFarewellCloseCallback(text)
+                    );
+                    return;
+                  }
+                  if (isDraconiaQuestCompletionPending()) {
+                    completeDraconiaQuestMission().catch((error) => {
+                      console.error('[Quests Mod][Elathriel] Error completing Draconia Quest:', error);
+                    });
+                    cooldown.queueResponse(
+                      text,
+                      getMissionDialogueLine(
+                        DRACONIA_QUEST_MISSION,
+                        'reward',
+                        'It is done, human. All of Draconia is quiet now. Take these 200 guild coins — the guild pays its debts.'
+                      ),
+                      addMessageToConversation,
+                      npcConfig.name,
+                      ModalHelpers.getFarewellCloseCallback(text)
+                    );
+                    return;
+                  }
+                  if (!draconiaQuestProgress.accepted) {
+                    awaitingElathrielDraconiaQuestAcceptConfirm = true;
+                    cooldown.queueResponse(
+                      text,
+                      getMissionDialogueLine(
+                        DRACONIA_QUEST_MISSION,
+                        'offer',
+                        'There is one room left in Draconia — the last of them. Go down with me and put it back to sleep. Will you finish this?'
+                      ),
+                      addMessageToConversation,
+                      npcConfig.name
+                    );
+                    return;
+                  }
+                  // Accepted but not won — offer to (re-)descend into the final room.
+                  awaitingElathrielDraconiaQuestEnterConfirm = true;
                   cooldown.queueResponse(
                     text,
-                    getMissionDialogueLine(DRACONIA_TOWER_MISSION, 'alreadyCompleted', 'The cemetery is quiet. The old one troubles no one now.'),
+                    getMissionDialogueLine(
+                      DRACONIA_QUEST_MISSION,
+                      'alreadyActive',
+                      'The last room in Draconia still stands open. Are you ready to go down?'
+                    ),
                     addMessageToConversation,
-                    npcConfig.name,
-                    ModalHelpers.getFarewellCloseCallback(text)
+                    npcConfig.name
                   );
                   return;
                 }
@@ -34627,6 +35320,7 @@ function createNPCCooldownManager() {
     copperKeySignReader.cleanupSystem();
     hellgateElathrielSignReader.cleanupSystem();
     hellgateLibraryElathrielSignReader.cleanupSystem();
+    draconiaQuestElathrielSignReader.cleanupSystem();
 
     // Cleanup boss HP bar systems
     ghazBossHpBar.cleanupSystem();
@@ -34937,6 +35631,7 @@ function createNPCCooldownManager() {
     // (isRoomActive), so it's also safe to always run.
     hellgateElathrielSignReader.setupObserver();
     hellgateLibraryElathrielSignReader.setupObserver();
+    draconiaQuestElathrielSignReader.setupObserver();
 
     // Boss HP bars — each gates on its own isActive(), so always-on setup is safe.
     ghazBossHpBar.setupObserver();

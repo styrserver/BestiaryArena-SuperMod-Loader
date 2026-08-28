@@ -4,6 +4,26 @@
   },
   "notes": [
     {
+      "version": "4.9.3",
+      "changes": [
+        {
+          "mod": "Quests",
+          "type": "added",
+          "text": "Another mission continues an existing questline, picking up after the one before it. It stages a custom battle in a reused room with an on-screen companion who has a name label and speaks a short line when right-clicked, and it uses up a carried item to leave once the battle is won. The reward is collected by returning to the quest giver afterwards, who also clears out items left over from earlier steps of the questline that no longer serve a purpose. The mission has its own icon in the mission list."
+        },
+        {
+          "mod": "Quests",
+          "type": "changed",
+          "text": "The Mission Leaderboard rank ladder has been rescaled so its highest rank lines up with completing every mission instead of being reached partway through. More completed missions are now needed to move up each rank, and the spacing adjusts automatically if the rank list changes. In the mission list, any mission handed out by someone other than the main quest giver is now shown with the giver's name as a prefix and a colour unique to that character, so you can tell at a glance who each mission is from. Some late-game dialogue has been reworded to line up with the established lore of the characters involved."
+        },
+        {
+          "mod": "Quests",
+          "type": "fixed",
+          "text": "The Mission Leaderboard's column headers now sit flush with the top of the list and fully hide the rows scrolling behind them instead of letting entries peek out above the header. An NPC's opening greeting is now always shown as a single message instead of being split into two."
+        }
+      ]
+    },
+    {
       "version": "4.9.2",
       "changes": [
         {
