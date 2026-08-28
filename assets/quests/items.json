@@ -677,7 +677,8 @@
     "jakundaf_desert": 10294,
     "apprentice_sheng": 5300,
     "hellgate_part_1": 2970,
-    "hellgate_library": 3723
+    "hellgate_library": 3723,
+    "draconia_quest": 2469
   },
   "devTools": {
     "_comment": "Story-ordered grantable items for Quest Dev Tools. productId links to products{} for live names. receivedBefore rules: anyMissionAcceptedOrCompleted | missionCompleted | missionAcceptedOrCompleted | receivedFlagOrMissionCompleted | receivedFlagOrMissionAcceptedOrCompleted | missionFieldOrCompleted | missionAnyField | anyOf.",
@@ -1355,6 +1356,14 @@
       {
         "productId": "bunnySlippers",
         "missionId": "svenson_love_story"
+      },
+      {
+        "productId": "dragonfetish",
+        "missionId": "draconia_quest"
+      },
+      {
+        "productId": "key3012",
+        "missionId": "draconia_quest"
       }
     ],
     "devCompleteRewards": [

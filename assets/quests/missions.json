@@ -437,12 +437,12 @@
     "weakened_archdemon": {
       "id": "weakened_archdemon",
       "title": "The Weakened Archdemon",
-      "prompt": "Player... word reaches me that Ghazbaran has been weakened. The archdemon hides in the north still, but this may be our only chance. Will you seek him out and defeat him?",
-      "accept": "Good. Speak with Svenson on Folda Boat — ask him for passage to Ghazbaran's Hideout.",
+      "prompt": "Player... the cultists in the Formorgar Mines beneath Hrodmir melted the ice in Ghazbaran's name and dragged the archdemon back to the mortal realm — but the conjuring half-failed. The Lord of Blades returned weakened and fled the mines. He has gone to ground on Vega. This may be our only chance to finish him. Will you go?",
+      "accept": "Good. Speak with Svenson on Folda Boat — ask him for passage to Ghazbaran's Hideout on Vega.",
       "answerYesNo": "Answer yes or no: will you hunt the weakened archdemon?",
-      "alreadyActive": "You already accepted this task. Ask Svenson for passage to Ghazbaran's Hideout, then defeat the archdemon.",
-      "alreadyCompleted": "You already struck down the weakened archdemon. White Wave Cellar sleeps easier for it.",
-      "objectiveLine1": "Talk to Svenson on Folda Boat and sail to Ghazbaran's Hideout.",
+      "alreadyActive": "You already accepted this task. Ask Svenson for passage to Ghazbaran's Hideout on Vega, then defeat the archdemon.",
+      "alreadyCompleted": "You already struck down the weakened archdemon on Vega. White Wave Cellar sleeps easier for it.",
+      "objectiveLine1": "Talk to Svenson on Folda Boat and sail to Ghazbaran's Hideout on Vega.",
       "objectiveLine2": "Defeat the weakened Ghazbaran.",
       "objectiveLine3": "Return to Dane at White Wave Cellar.",
       "hint": "Svenson can ferry you to White Wave Cellar or Ghazbaran's Hideout.",
@@ -450,10 +450,10 @@
       "rewardItemName": "Orb",
       "battleVictory": "Ghazbaran has fallen. Return to Dane to claim your reward.",
       "battleDefeat": "The weakened archdemon still proved too strong.",
-      "daneCompletion": "You did it, Player. The north is safer because of you. Take this orb — may it serve you well.",
+      "daneCompletion": "You did it, Player. The archdemon is dead, and the cultists in the Formorgar Mines have lost the master they bled the ice for. Take this orb — may it serve you well.",
       "daneAwaitingReward": "Ghazbaran is fallen. Speak with me when you are ready to claim your reward.",
       "svensonDestinationPrompt": "Where shall I take you — White Wave Cellar, or Ghazbaran's Hideout?",
-      "svensonGhazTravelPrompt": "Ghazbaran's Hideout... few who sail there return. The archdemon may be weakened, but his aura still kills. Are you certain you want to go?",
+      "svensonGhazTravelPrompt": "Vega... few who sail there to hunt the archdemon return. He fled the mines weakened, but his aura still kills. Are you certain you want to go?",
       "svensonGhazTravelStart": "Then may the gods watch over you. Once we land, there is no turning back until the fight is done.",
       "svensonGhazTravelLocked": "You are not ready for that route yet. Come back when you are stronger.",
       "daneMissionAccepted": "Then go. Svenson knows the northern routes — ask him for passage to the hideout."
@@ -602,6 +602,34 @@
       "dragonlordLeave": "LEAVE THE DRAGONS’ CEMETERY AT ONCE!",
       "dragonlordNoMushroom": "You come to the dragonsss’ cemetery with empty handsss? Bring me white mushroomsss, two-legsss — nothing elssse dullsss the ache.",
       "reward": "You carry the Dragonfetish out of that place — few of my kind ever did. The debt is closed, human. Go, and keep it."
+    },
+    "draconia_quest": {
+      "id": "draconia_quest",
+      "title": "Draconia Quest",
+      "offer": "There is one room left in Draconia — the last of them, the deepest. What stirs there was never meant to wake. Go down with me and put it back to sleep, and the Dragonfetish will carry you home when it is done. Will you finish this?",
+      "offerDecline": "Then leave the last door shut. Perhaps that is wiser.",
+      "prompt": [
+        "Good. Hold the Dragonfetish close — when the room is clear, use it and it will bring you back to the maze.",
+        "Speak to me again when you are ready to go down."
+      ],
+      "accept": "Then follow. This is the last of it.",
+      "alreadyCompleted": "It is finished. Draconia is quiet, top to bottom. You did what none of my people could.",
+      "alreadyActive": "The last room in Draconia still stands open. Are you ready to go down?",
+      "decline": "As you wish. The last door will keep.",
+      "objectiveLine1": "Follow Elathriel into the final room of Draconia and defeat what waits there.",
+      "objectiveLine2": "Use the Dragonfetish to return to Hedge Maze, then speak with Elathriel.",
+      "hint": "Speak with Elathriel in Hedge Maze about the final quest room in Draconia.",
+      "rewardCoins": 200,
+      "rewardSummary": "Reward: 200 guild coins.",
+      "battleVictory": "The last room is clear. Use the Dragonfetish — it will take you back to the maze.",
+      "battleDefeat": "The deep room is not yet yours. Gather yourself and go down again.",
+      "returnToBattle": "The last door is still open and nothing down there is dead yet. Shall I send you back down?",
+      "companionName": "Elathriel",
+      "companionSignLines": [
+        "You look to Elathriel.",
+        "He says: \"Cut down everything in this room — then raise the Dragonfetish and I will meet you back in the maze.\""
+      ],
+      "reward": "It is done, human. All of Draconia is quiet now. Take these 200 guild coins — the guild pays its debts. Go well."
     }
   },
   "completionSummaries": {
@@ -629,7 +657,8 @@
     "lost_oracle": "Returned the Spectral Stone to The Oracle, survived its wrath, and received its thanks.",
     "hellgate_part_1": "Received Key 3012 from Elathriel and cleared the Hellgate Treasure Room with him.",
     "hellgate_library": "Descended into the Hellgate Library, handed the Wrinkled Bonelord the book, survived the librarian's guardians, and received a White Mushroom from Elathriel.",
-    "draconia_tower": "Descended into Draconia Tower with Elathriel, put down the Dragon Lord and his beast, traded a white mushroom to the Old Dragonlord for the Dragonfetish, and returned to Elathriel."
+    "draconia_tower": "Descended into Draconia Tower with Elathriel, put down the Dragon Lord and his beast, traded a white mushroom to the Old Dragonlord for the Dragonfetish, and returned to Elathriel.",
+    "draconia_quest": "Followed Elathriel into the last room of Draconia, cleared it, used the Dragonfetish to return to Hedge Maze, and reported back to Elathriel for 200 guild coins."
   },
   "sealTranscripts": [
     {
@@ -688,7 +717,8 @@
       "lost_oracle",
       "hellgate_part_1",
       "hellgate_library",
-      "draconia_tower"
+      "draconia_tower",
+      "draconia_quest"
     ],
     "missions": {
       "king_honeyflower": {
@@ -853,6 +883,13 @@
         "extraFields": [
           "battleCompleted",
           "dragonfetishReceived"
+        ]
+      },
+      "draconia_quest": {
+        "stateKey": "progressDraconiaQuest",
+        "firebaseKey": "draconiaQuest",
+        "extraFields": [
+          "battleCompleted"
         ]
       }
     }

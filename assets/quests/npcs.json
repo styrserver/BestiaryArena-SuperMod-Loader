@@ -756,8 +756,9 @@
       "folda": "This is Folda Boat. Ask me for passage when you are ready to sail.",
       "white wave": "White Wave Cellar is home for me and Dane. Ask for passage when you want to sail there.",
       "white wave cellar": "White Wave Cellar is home for me and Dane. Ask for passage when you want to sail there.",
-      "ghazbaran": "Few who sail to Ghazbaran's Hideout return. Ask for passage when that hunt is yours.",
-      "hideout": "Few who sail to Ghazbaran's Hideout return. Ask for passage when that hunt is yours.",
+      "ghazbaran": "Ghazbaran's Hideout is on Vega, where the archdemon went to ground after fleeing the Formorgar Mines. Few who sail there return. Ask for passage when that hunt is yours.",
+      "hideout": "Ghazbaran's Hideout is on Vega, where the archdemon went to ground after fleeing the Formorgar Mines. Few who sail there return. Ask for passage when that hunt is yours.",
+      "vega": "Vega is a bleak island far out in the Nordic waters. The archdemon crawled there to lick his wounds. Ask for passage when that hunt is yours.",
       "name": "My name is Svenson from the Nordic Tibia Ferries.",
       "anderson": "The four of us are the captains of the Nordic Tibia Ferries.",
       "svenson": "The four of us are the captains of the Nordic Tibia Ferries.",
@@ -804,8 +805,13 @@
       "special": "Well, apart from not selling alcohol, you mean? I guess another specialty of Carlin are evergreen flower bowls.",
       "svenson": "Svenson finally made it back to White Wave Cellar. You did a brave thing bringing him home.",
       "captain": "Svenson is one of the toughest captains I've ever known.",
-      "ghazbaran": "They say the archdemon Ghazbaran has been weakened. Ask me about a mission if you dare face him.",
-      "archdemon": "They say the archdemon Ghazbaran has been weakened. Ask me about a mission if you dare face him.",
+      "ghazbaran": "Ghazbaran, the Lord of Blades — one of the Triangle of Terror. Cultists in the Formorgar Mines melted the ice to drag him back, but the conjuring half-failed. He returned weakened and fled to Vega. Ask me about a mission if you dare finish him.",
+      "archdemon": "Ghazbaran, the Lord of Blades — one of the Triangle of Terror. Cultists in the Formorgar Mines melted the ice to drag him back, but the conjuring half-failed. He returned weakened and fled to Vega. Ask me about a mission if you dare finish him.",
+      "cult": "The cultists in the Formorgar Mines melted the ice in Ghazbaran's name to wake the frozen demons. They got their archdemon — but only half of him, and he did not stay.",
+      "cultist": "The cultists in the Formorgar Mines melted the ice in Ghazbaran's name to wake the frozen demons. They got their archdemon — but only half of him, and he did not stay.",
+      "formorgar": "The Formorgar Mines run deep beneath Hrodmir. The ice down there was melted on purpose, and something half-woke because of it.",
+      "hrodmir": "Hrodmir sits on the ice islands to the north. The cultists did their work in the mines beneath it.",
+      "vega": "Vega is a bleak island far out in the Nordic waters. That is where the archdemon dragged himself to after the mines. Ask me about a mission if you mean to end him there.",
       "bye": "Please come back from time to time.",
       "goodbye": "Please come back from time to time.",
       "oracle": "Sailors speak of a lost Oracle. What caused it to vanish, none of them could say.",
@@ -850,6 +856,11 @@
       [
         "Expedition after expedition goes north chasing ore and old workings beneath the ice...",
         "...not all of them return on schedule."
+      ],
+      [
+        "Word came up the northern route in stages. First: an ancient evil was stirring in the mines beneath Hrodmir...",
+        "Then a later ship said demonic things were pushing through into the mortal realm down there, and the master himself showed his face in the Formorgar tunnels...",
+        "Last I heard, the conjuring soured on the cultists — their archdemon came through half-made, weak, and crawled off to Vega. I stopped asking after that."
       ],
       [
         "There are tales of horned cave-folk beneath one of the smaller ice islands — half traveler, half beast...",

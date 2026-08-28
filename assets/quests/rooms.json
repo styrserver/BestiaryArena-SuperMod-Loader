@@ -1,24 +1,27 @@
 {
   "_sections": {
-    "fishing": "1. Water fishing config",
-    "mining": "2. Mining tile config",
-    "desertDigging": "3. Desert dig config",
-    "serpentine": "4. Tower / chamber placement",
-    "honeyflower": "5. Flower pickup placement",
-    "crossingTheLine": "6. Boardgames tile drill",
-    "apprenticeSheng": "7. Apprentice battle room tiles",
-    "sevenSeals": "8. Seal room / tile config",
-    "spiderLair": "9. A Secluded Herb tile 77 + Sewers Old Widow battle",
-    "jakundafDesert": "10. Desert path entry tile",
-    "dragonmother": "11. Dragon encounter stairs tile",
-    "taintedSouls": "12. Eclipse cauldron / portal + Sewers Ekatrix battle",
-    "alDeeRookieGuard": "13. Katana Quest portal tile + Sewers Knarknaknork battle",
-    "hellgateTreasureRoom": "13a. Elathriel's Hellgate Part 1 + Sewers Fire Elemental battle",
-    "mornenion": "13b. Ab'Dendriel Hive decor tile mutations",
-    "boardNpcs": "14. Board NPC placements",
-    "ghazbaran": "14. Archdemon hideout tile",
-    "kingArenaRanks": "15. Arena rank titles by mission count",
-    "draconiaTower": "13c. Elathriel’s Draconia Tower + Sewers dragon-cemetery battle"
+    "fishing": "1. Water fishing spots",
+    "mining": "2. Mining hole tile",
+    "desertDigging": "3. Desert dig spot",
+    "serpentine": "4. Serpentine Tower basement + Cursed Chamber",
+    "honeyflower": "5. Honeyflower Tower pickup tile",
+    "crossingTheLine": "6. City Boardgames chess tiles",
+    "apprenticeSheng": "7. Minotaur Mage Room battle tiles",
+    "sevenSeals": "8. Ghostlands seal rooms",
+    "spiderLair": "9. A Secluded Herb tile 77 -> Sewers spider battle",
+    "jakundafDesert": "10. Jakundaf Desert path entry tile",
+    "dragonmother": "11. Lonesome Dragon stairs tile",
+    "taintedSouls": "12. Eclipse cauldron/portal -> Sewers Ekatrix battle",
+    "alDeeRookieGuard": "13. Katana Quest portal tile -> Sewers Knarknaknork battle",
+    "hellgateTreasureRoom": "14. Hellgate Part 1 (Sewers reskin battle)",
+    "boardNpcs": "15. Board NPC placements",
+    "ghazbaran": "16. Weakened Ghazbaran hideout tile",
+    "effects": "17. Shared quest tile effect sprites",
+    "kingArenaRanks": "18. Arena rank titles by mission count",
+    "mornenion": "19. Ab'Dendriel Hive decor mutations (Mornenion battle)",
+    "hellgateLibrary": "20. Hellgate Library (Sewers reskin battle)",
+    "draconiaTower": "21. Draconia Tower (Sewers dragon-cemetery battle)",
+    "draconiaQuest": "22. Draconia Quest (final Sewers battle, Dragonfetish return home)"
   },
   "fishing": {
     "SPRITE_IDS": [
@@ -19747,6 +19750,2754 @@
           {
             "spriteId": 4468,
             "floor": 4
+          }
+        ]
+      }
+    }
+  },
+  "draconiaQuest": {
+    "_comment": "Elathriel’s Draconia Quest: the final step after Draconia Tower. Chat-triggered teleport into the Sewers (re-skinned) for one last battle; on victory the player uses the Dragonfetish to return to Hedge Maze (item consumed), then speaks to Elathriel to close the quest for 200 guild coins. See enterDraconiaQuest() in Quests.js.",
+    "battleRoomName": "Sewers",
+    "battleRoomId": "rkswrs",
+    "battleId": "draconia_quest",
+    "battleDisplayName": "Draconia Quest",
+    "tileMutations": {
+      "0": {
+        "remove": [
+          353,
+          3994
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ]
+      },
+      "1": {
+        "remove": [
+          352,
+          4644
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ]
+      },
+      "2": {
+        "remove": [
+          351,
+          4635
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ]
+      },
+      "3": {
+        "remove": [
+          351,
+          4635
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ]
+      },
+      "4": {
+        "remove": [
+          351,
+          4635
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ]
+      },
+      "5": {
+        "remove": [
+          351,
+          4635
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ]
+      },
+      "6": {
+        "remove": [
+          351,
+          4635
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ]
+      },
+      "7": {
+        "remove": [
+          352,
+          4643
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ]
+      },
+      "8": {
+        "remove": [
+          352,
+          2926
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ],
+        "hitbox": true
+      },
+      "9": {
+        "remove": [
+          382
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ]
+      },
+      "10": {
+        "remove": [
+          373,
+          5557
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ]
+      },
+      "11": {
+        "remove": [
+          373,
+          5557
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ]
+      },
+      "12": {
+        "remove": [
+          373,
+          5557
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ]
+      },
+      "13": {
+        "remove": [
+          373
+        ],
+        "floorBelow": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1270
+          }
+        ]
+      },
+      "14": {
+        "remove": [
+          373
+        ],
+        "floorBelow": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ]
+      },
+      "15": {
+        "remove": [
+          352,
+          4644
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ]
+      },
+      "16": {
+        "remove": [
+          351,
+          4640
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1272
+          }
+        ]
+      },
+      "17": {
+        "remove": [
+          12706
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1271
+          }
+        ]
+      },
+      "18": {
+        "remove": [
+          12706
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1271
+          }
+        ]
+      },
+      "19": {
+        "remove": [
+          12706
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1271
+          }
+        ]
+      },
+      "20": {
+        "remove": [
+          12706
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1271
+          }
+        ]
+      },
+      "21": {
+        "remove": [
+          12706
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1271
+          }
+        ]
+      },
+      "22": {
+        "remove": [
+          353,
+          4636
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1271
+          }
+        ]
+      },
+      "23": {
+        "remove": [
+          352
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1271
+          }
+        ],
+        "hitbox": true
+      },
+      "24": {
+        "remove": [
+          354,
+          3996
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1271
+          }
+        ],
+        "hitbox": true
+      },
+      "25": {
+        "remove": [
+          355,
+          3995
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1271
+          }
+        ],
+        "hitbox": true
+      },
+      "26": {
+        "remove": [
+          354
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ],
+        "hitbox": true
+      },
+      "27": {
+        "remove": [
+          352,
+          2524
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ]
+      },
+      "28": {
+        "remove": [
+          352,
+          2473,
+          2523
+        ],
+        "floorBelow": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1270
+          }
+        ]
+      },
+      "29": {
+        "remove": [
+          352,
+          2471
+        ],
+        "floorBelow": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ]
+      },
+      "30": {
+        "remove": [
+          351,
+          4634
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1796
+          },
+          {
+            "spriteId": 1892
+          }
+        ]
+      },
+      "31": {
+        "remove": [
+          12706
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1270
+          }
+        ]
+      },
+      "32": {
+        "remove": [
+          12706
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 2435
+          }
+        ]
+      },
+      "33": {
+        "remove": [
+          12706
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 2437
+          }
+        ]
+      },
+      "34": {
+        "remove": [
+          12706
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1270
+          }
+        ]
+      },
+      "35": {
+        "remove": [
+          12706
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 2469
+          }
+        ]
+      },
+      "36": {
+        "remove": [
+          12706
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ]
+      },
+      "37": {
+        "remove": [
+          351,
+          4639
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1270
+          }
+        ]
+      },
+      "38": {
+        "remove": [
+          351,
+          4635
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 2435
+          }
+        ]
+      },
+      "39": {
+        "remove": [
+          354,
+          4643
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 2437
+          }
+        ]
+      },
+      "40": {
+        "remove": [
+          354
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1270
+          }
+        ],
+        "hitbox": true
+      },
+      "41": {
+        "remove": [
+          383
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ]
+      },
+      "42": {
+        "remove": [
+          374
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ]
+      },
+      "43": {
+        "remove": [
+          374
+        ],
+        "floorBelow": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1270
+          }
+        ]
+      },
+      "44": {
+        "remove": [
+          384
+        ],
+        "floorBelow": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ]
+      },
+      "45": {
+        "remove": [
+          351,
+          4640
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1796
+          },
+          {
+            "spriteId": 1912
+          }
+        ]
+      },
+      "46": {
+        "remove": [
+          12706
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1270
+          }
+        ]
+      },
+      "47": {
+        "remove": [
+          351,
+          4637
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 5622
+          },
+          {
+            "spriteId": 1855
+          },
+          {
+            "spriteId": 6375
+          }
+        ],
+        "hitbox": false
+      },
+      "48": {
+        "remove": [
+          351,
+          1792,
+          4633
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ],
+        "hitbox": false
+      },
+      "49": {
+        "remove": [
+          351,
+          1793,
+          4633
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1275
+          }
+        ]
+      },
+      "50": {
+        "remove": [
+          353,
+          4633
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1271
+          }
+        ]
+      },
+      "51": {
+        "remove": [
+          351,
+          4638
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 5102
+          }
+        ]
+      },
+      "52": {
+        "remove": [
+          12706
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1276
+          }
+        ]
+      },
+      "53": {
+        "remove": [
+          12706
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ],
+        "hitbox": false
+      },
+      "54": {
+        "remove": [
+          351,
+          4636
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ],
+        "hitbox": false
+      },
+      "55": {
+        "remove": [
+          351
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1270
+          }
+        ],
+        "hitbox": true
+      },
+      "56": {
+        "remove": [
+          382
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ]
+      },
+      "57": {
+        "remove": [
+          378
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ]
+      },
+      "58": {
+        "remove": [
+          5721
+        ],
+        "floorBelow": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1270
+          }
+        ]
+      },
+      "59": {
+        "remove": [
+          380
+        ],
+        "floorBelow": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ]
+      },
+      "60": {
+        "remove": [
+          12706
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1772
+          }
+        ]
+      },
+      "61": {
+        "remove": [
+          12706
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1796
+          },
+          {
+            "spriteId": 6382
+          }
+        ]
+      },
+      "62": {
+        "remove": [
+          352,
+          4636
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 5622
+          },
+          {
+            "spriteId": 1858
+          },
+          {
+            "spriteId": 6383
+          }
+        ],
+        "hitbox": false
+      },
+      "63": {
+        "remove": [
+          355
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ]
+      },
+      "64": {
+        "remove": [
+          351
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ]
+      },
+      "65": {
+        "remove": [
+          352,
+          2773
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ]
+      },
+      "66": {
+        "remove": [
+          351,
+          4634
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ],
+        "hitbox": false
+      },
+      "67": {
+        "remove": [
+          12706
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ],
+        "hitbox": false
+      },
+      "68": {
+        "remove": [
+          351,
+          4637
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ],
+        "hitbox": false
+      },
+      "69": {
+        "remove": [
+          352,
+          4641
+        ],
+        "add": [
+          {
+            "spriteId": 437,
+            "bank": 100
+          }
+        ]
+      },
+      "70": {
+        "remove": [
+          352
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1270
+          }
+        ],
+        "hitbox": true
+      },
+      "71": {
+        "remove": [
+          351,
+          2773
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ],
+        "hitbox": true
+      },
+      "72": {
+        "remove": [
+          376
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ]
+      },
+      "73": {
+        "remove": [
+          362
+        ],
+        "floorBelow": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1270
+          }
+        ]
+      },
+      "74": {
+        "remove": [
+          362
+        ],
+        "floorBelow": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ]
+      },
+      "75": {
+        "remove": [
+          12706
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1772
+          }
+        ]
+      },
+      "76": {
+        "remove": [
+          12706
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1272
+          },
+          {
+            "spriteId": 1796
+          },
+          {
+            "spriteId": 6384
+          }
+        ]
+      },
+      "77": {
+        "remove": [
+          353,
+          4636
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 6373,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true
+          }
+        ],
+        "hitbox": false
+      },
+      "78": {
+        "remove": [
+          351
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ]
+      },
+      "79": {
+        "remove": [
+          354,
+          1948
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ]
+      },
+      "80": {
+        "remove": [
+          351
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ]
+      },
+      "81": {
+        "remove": [
+          5770
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ]
+      },
+      "82": {
+        "remove": [
+          5770
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ]
+      },
+      "83": {
+        "remove": [
+          5770
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ]
+      },
+      "84": {
+        "remove": [
+          352
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ]
+      },
+      "85": {
+        "remove": [
+          351
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1270
+          }
+        ],
+        "hitbox": true
+      },
+      "86": {
+        "remove": [
+          351
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ],
+        "hitbox": true
+      },
+      "87": {
+        "remove": [
+          376
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ]
+      },
+      "88": {
+        "remove": [
+          5715
+        ],
+        "floorBelow": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1270
+          }
+        ]
+      },
+      "89": {
+        "remove": [
+          362
+        ],
+        "floorBelow": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ]
+      },
+      "90": {
+        "remove": [
+          351,
+          4638
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1796
+          },
+          {
+            "spriteId": 1892
+          },
+          {
+            "spriteId": 6382
+          }
+        ]
+      },
+      "91": {
+        "remove": [
+          12706
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1270
+          }
+        ]
+      },
+      "92": {
+        "remove": [
+          352,
+          4636
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 6385
+          },
+          {
+            "spriteId": 1796
+          }
+        ]
+      },
+      "93": {
+        "remove": [
+          354
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ]
+      },
+      "94": {
+        "remove": [
+          353
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1948
+          }
+        ]
+      },
+      "95": {
+        "remove": [
+          352,
+          3996
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ]
+      },
+      "96": {
+        "remove": [
+          351,
+          4634
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ],
+        "hitbox": false
+      },
+      "97": {
+        "remove": [
+          12706
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ],
+        "hitbox": false
+      },
+      "98": {
+        "remove": [
+          351,
+          4639
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ],
+        "hitbox": false
+      },
+      "99": {
+        "remove": [
+          351,
+          4635
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ],
+        "hitbox": false
+      },
+      "100": {
+        "remove": [
+          351,
+          4635
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1270
+          }
+        ]
+      },
+      "101": {
+        "remove": [
+          351,
+          4635,
+          5642
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ]
+      },
+      "102": {
+        "remove": [
+          379
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ]
+      },
+      "103": {
+        "remove": [
+          5726
+        ],
+        "floorBelow": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1270
+          }
+        ]
+      },
+      "104": {
+        "remove": [
+          5719
+        ],
+        "floorBelow": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ]
+      },
+      "105": {
+        "remove": [
+          351,
+          4634
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1852
+          },
+          {
+            "spriteId": 6384
+          },
+          {
+            "spriteId": 3654
+          }
+        ]
+      },
+      "106": {
+        "remove": [
+          351,
+          4637
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1277
+          }
+        ]
+      },
+      "107": {
+        "remove": [
+          351,
+          2113,
+          4641
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 2434
+          }
+        ]
+      },
+      "108": {
+        "remove": [
+          353,
+          1878,
+          4644
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ],
+        "hitbox": false
+      },
+      "109": {
+        "remove": [
+          351,
+          4635
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ],
+        "hitbox": false
+      },
+      "110": {
+        "remove": [
+          351,
+          4635
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ],
+        "hitbox": false
+      },
+      "111": {
+        "remove": [
+          351,
+          4640
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ],
+        "hitbox": false
+      },
+      "112": {
+        "remove": [
+          12706
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ],
+        "hitbox": false
+      },
+      "113": {
+        "remove": [
+          12706
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ],
+        "hitbox": false
+      },
+      "114": {
+        "remove": [
+          12706
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ],
+        "hitbox": false
+      },
+      "115": {
+        "remove": [
+          12706
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1270
+          }
+        ]
+      },
+      "116": {
+        "remove": [
+          5640,
+          12706
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ]
+      },
+      "117": {
+        "remove": [
+          362
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ]
+      },
+      "118": {
+        "remove": [
+          5715
+        ],
+        "floorBelow": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1270
+          }
+        ]
+      },
+      "119": {
+        "remove": [
+          362
+        ],
+        "floorBelow": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ]
+      },
+      "120": {
+        "remove": [
+          351,
+          4634
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1854
+          },
+          {
+            "spriteId": 1912
+          },
+          {
+            "spriteId": 3656
+          }
+        ]
+      },
+      "121": {
+        "remove": [
+          351,
+          4639
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1277
+          }
+        ]
+      },
+      "122": {
+        "remove": [
+          351,
+          4635
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 2434
+          }
+        ]
+      },
+      "123": {
+        "remove": [
+          351,
+          4640
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ],
+        "hitbox": false
+      },
+      "124": {
+        "remove": [
+          12706
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ],
+        "hitbox": false
+      },
+      "125": {
+        "remove": [
+          12706
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ],
+        "hitbox": false
+      },
+      "126": {
+        "remove": [
+          12706
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ],
+        "hitbox": false
+      },
+      "127": {
+        "remove": [
+          12706
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ],
+        "hitbox": false
+      },
+      "128": {
+        "remove": [
+          4614
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1985
+          }
+        ]
+      },
+      "129": {
+        "remove": [
+          12706
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1986
+          }
+        ]
+      },
+      "130": {
+        "remove": [
+          351,
+          4637
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1270
+          }
+        ]
+      },
+      "131": {
+        "remove": [
+          351,
+          4633,
+          5640
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ]
+      },
+      "132": {
+        "remove": [
+          362
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ]
+      },
+      "133": {
+        "remove": [
+          362
+        ],
+        "floorBelow": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1270
+          }
+        ]
+      },
+      "134": {
+        "remove": [
+          5717
+        ],
+        "floorBelow": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ]
+      },
+      "135": {
+        "remove": [
+          353,
+          4642
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1796
+          },
+          {
+            "spriteId": 1892
+          },
+          {
+            "spriteId": 3654
+          }
+        ]
+      },
+      "136": {
+        "remove": [
+          351,
+          4633
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1270
+          }
+        ]
+      },
+      "137": {
+        "remove": [
+          351,
+          4633
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 2434
+          }
+        ]
+      },
+      "138": {
+        "remove": [
+          351,
+          4633
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ],
+        "hitbox": false
+      },
+      "139": {
+        "remove": [
+          351,
+          4633
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ],
+        "hitbox": false
+      },
+      "140": {
+        "remove": [
+          355,
+          4633
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ],
+        "hitbox": false
+      },
+      "141": {
+        "remove": [
+          355,
+          4633
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ],
+        "hitbox": false
+      },
+      "142": {
+        "remove": [
+          354,
+          4633
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 2524,
+            "cropX": 1,
+            "cropped": true
+          }
+        ]
+      },
+      "143": {
+        "remove": [
+          353,
+          4633
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1984
+          }
+        ]
+      },
+      "144": {
+        "remove": [
+          352,
+          4633
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1984
+          }
+        ]
+      },
+      "145": {
+        "remove": [
+          352,
+          2925,
+          4641
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1270
+          }
+        ]
+      },
+      "146": {
+        "remove": [
+          382
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ]
+      },
+      "147": {
+        "remove": [
+          373,
+          5557
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ]
+      },
+      "148": {
+        "remove": [
+          373,
+          5557
+        ],
+        "floorBelow": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1270
+          }
+        ]
+      },
+      "149": {
+        "remove": [
+          373
+        ],
+        "floorBelow": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ]
+      },
+      "150": {
+        "remove": [
+          353,
+          3994
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1796
+          },
+          {
+            "spriteId": 1892
+          },
+          {
+            "spriteId": 3654
+          }
+        ]
+      },
+      "151": {
+        "remove": [
+          352,
+          3995
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1270
+          }
+        ]
+      },
+      "152": {
+        "remove": [
+          354
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1271
+          }
+        ]
+      },
+      "153": {
+        "remove": [
+          351
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1271
+          }
+        ]
+      },
+      "154": {
+        "remove": [
+          351
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1271
+          }
+        ]
+      },
+      "155": {
+        "remove": [
+          351
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1271
+          }
+        ]
+      },
+      "156": {
+        "remove": [
+          351,
+          3995
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1271
+          }
+        ]
+      },
+      "157": {
+        "remove": [
+          353
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1271
+          }
+        ]
+      },
+      "158": {
+        "remove": [
+          352
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1271
+          }
+        ]
+      },
+      "159": {
+        "remove": [
+          352,
+          3607
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1271
+          }
+        ]
+      },
+      "160": {
+        "remove": [
+          351
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1276
+          }
+        ]
+      },
+      "161": {
+        "remove": [
+          354
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ]
+      },
+      "162": {
+        "remove": [
+          352
+        ],
+        "add": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          }
+        ]
+      },
+      "163": {
+        "remove": [
+          352,
+          3996
+        ],
+        "floorBelow": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
+          },
+          {
+            "spriteId": 1270
+          }
+        ]
+      },
+      "164": {
+        "remove": [
+          352
+        ],
+        "floorBelow": [
+          {
+            "spriteId": 410,
+            "cropX": 1,
+            "cropY": 1,
+            "cropped": true,
+            "bank": 100
           }
         ]
       }
