@@ -4,6 +4,26 @@
   },
   "notes": [
     {
+      "version": "4.9.6",
+      "changes": [
+        {
+          "mod": "Mod Settings",
+          "type": "fixed",
+          "text": "Hiding the Wiki and Discord links in the header no longer removes them from the page. Removing them could later crash the whole game to a blank error screen (\"Node.insertBefore\") when the site redrew the header, because the game no longer recognised its own menu. The links are now hidden in place, which the game tolerates."
+        }
+      ]
+    },
+    {
+      "version": "4.9.5",
+      "changes": [
+        {
+          "mod": "Mod Loader",
+          "type": "fixed",
+          "text": "On iOS (Orion), every mod that syncs with Firebase — Guilds, Quests, Equipment, VIP List, and the Mod Settings online-players record — stopped loading and saving after 4.9.4, failing with \"Load failed\". The DevTools source label added to each mod in 4.9.4 was being read by the mobile browser as the mod's real address, which put the mod in a state where it could not talk to Firebase. The label is now a full site address, so mobile sync works again; desktop is unaffected. A side benefit on desktop: uncaught errors thrown later by a mod (from a timer or event handler) now show the mod name, line, and stack in the Error Log instead of a bare \"Script error.\"."
+        }
+      ]
+    },
+    {
       "version": "4.9.4",
       "changes": [
         {

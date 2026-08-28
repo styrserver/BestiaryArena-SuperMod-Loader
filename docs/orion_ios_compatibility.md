@@ -157,6 +157,13 @@ These rules apply to this extension and other WebKit-based mobile WebExtensions.
 - Do not use `type="module"` for bundled `.mjs` files unless they use `import`/`export`.
 - `ba-sandbox-utils.mjs` and `mod-coordination.mjs` are IIFEs; load as `text/javascript` on all platforms.
 
+### `//# sourceURL` on eval'd code must be an absolute same-origin URL (critical)
+
+- Mods run through `new Function(...)` in [`content/local_mods.js`](../content/local_mods.js) with a `//# sourceURL=` trailer so DevTools and the Error Log show `<Mod_Name>.js:123` instead of `VM123:456`.
+- **WebKit uses `sourceURL` as the script's real resource URL** and derives that script's origin (and the base for its `fetch()` calls) from it. V8 (Chrome) and SpiderMonkey (Firefox) treat it as a DevTools label only.
+- A scheme-less value (`bestiary-mod/<Mod_Name>.js`) put every mod in an **opaque origin** on Orion. Result: every cross-origin `fetch()` from mod code — all the Firebase sync calls (Guilds, Quests, Equipment, Mod Settings highscore, VIP List, …) — failed with `TypeError: Load failed`, while same-origin game/tRPC traffic kept working. Regression introduced with the `VM123` → `Mod_Name.js` change; fixed by anchoring the trailer to `window.location.origin` (`https://bestiaryarena.com/bestiary-mod/<Mod_Name>.js`).
+- **AI audit:** flag any `//# sourceURL=`, `//@ sourceURL=`, or `eval`/`new Function` label that is not an absolute `http(s)://` URL on the page origin. Also flag whitespace in the label (the directive silently stops at the first space).
+
 ### Loader fallbacks
 
 - On mobile, the **content script** fetches bundled mod text first (via the injector bridge), then page fetch, then background `getModContent`. See [Orion iOS Compatibility](orion_ios_compatibility.md#loader-fallbacks).

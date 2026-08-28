@@ -16835,7 +16835,14 @@ function startPlayerCountUpdates() {
   activeTimeouts.add(playercountState.recordCheckInterval);
 }
 
-// Remove Wiki and Discord links from header
+// Hide (do NOT remove) the Wiki and Discord links in the header.
+//
+// The header <ul> is React-rendered. Deleting a native <li> from it changes the
+// child-node list React tracks, so the next time that component re-renders,
+// React's commit phase calls parent.insertBefore(newNode, anchor) with an anchor
+// we removed -> `NotFoundError: Node.insertBefore` -> full client-side crash.
+// Setting `display:none` keeps the node in the tree, so reconciliation stays
+// consistent while the link is still visually gone.
 function removeHeaderLinks() {
   const tryRemove = () => {
     const headerUl = document.querySelector('header ul.pixel-font-16.flex.items-center');
@@ -16844,24 +16851,25 @@ function removeHeaderLinks() {
       activeTimeouts.add(timeoutId);
       return;
     }
-    
-    // Remove Wiki link
+
+    const hideLi = (li, label) => {
+      if (!li || li.dataset.modSettingsHidden === 'true') return;
+      li.style.display = 'none';
+      li.dataset.modSettingsHidden = 'true';
+      console.log(`[Mod Settings] ${label} link hidden in header`);
+    };
+
+    // Hide Wiki link
     const wikiLi = Array.from(headerUl.children).find(
       el => el.querySelector('a') && el.querySelector('a').href && el.querySelector('a').href.includes('bestiaryarena.wiki.gg')
     );
-    if (wikiLi) {
-      safeRemoveElement(wikiLi);
-      console.log('[Mod Settings] Wiki link removed from header');
-    }
-    
-    // Remove Discord link
+    hideLi(wikiLi, 'Wiki');
+
+    // Hide Discord link
     const discordLi = Array.from(headerUl.children).find(
       el => el.querySelector('a') && el.querySelector('a').href && el.querySelector('a').href.includes('discord.gg')
     );
-    if (discordLi) {
-      safeRemoveElement(discordLi);
-      console.log('[Mod Settings] Discord link removed from header');
-    }
+    hideLi(discordLi, 'Discord');
   };
   tryRemove();
 }

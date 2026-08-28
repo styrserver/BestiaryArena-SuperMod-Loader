@@ -984,7 +984,19 @@ async function executeLocalMod(modNameOrObject, forceExecution = false) {
     .replace(/[^\w.-]+/g, '_')    // spaces & punctuation -> _
     .replace(/^_+|_+$/g, '')      // trim leading/trailing _
     || 'mod';
-  const modSourceUrl = `bestiary-mod/${modSourceLabel}.js`;
+  // Must be an ABSOLUTE same-origin https URL, not a bare "bestiary-mod/<name>.js".
+  // WebKit (Orion on iOS) treats `//# sourceURL=` as the script's real resource URL
+  // and derives that script's origin / fetch base from it. A scheme-less value left
+  // mod code in an opaque origin, so every cross-origin `fetch()` from a mod (all the
+  // Firebase sync calls) failed with `TypeError: Load failed`. Anchoring it to the
+  // page origin keeps mods same-origin with the game — fetch works — while DevTools
+  // and the Error Log still show "<Mod_Name>.js:123". Chrome/Firefox treat sourceURL
+  // as a label only and are unaffected either way.
+  const modSourceOrigin =
+    (typeof window !== 'undefined' && window.location && /^https?:$/.test(window.location.protocol))
+      ? window.location.origin
+      : 'https://bestiaryarena.com';
+  const modSourceUrl = `${modSourceOrigin}/bestiary-mod/${modSourceLabel}.js`;
   
   // If already executed, log and exit (but allow a forced re-execution if needed)
   if (executedMods[modName] && !forceExecution) {

@@ -110,8 +110,11 @@ is still written (`true` iff `verbose`) as a read-only back-compat alias.
 
 **Call-site attribution.** The gated methods are installed as accessor properties whose
 getter returns the *native* function, so DevTools still shows the real `file:line`. Mods
-run via `new Function` with a `//# sourceURL=bestiary-mod/<Mod_Name>.js` trailer, so their
-lines show as `<Mod_Name>.js:123` instead of `VM123:456`. Only `console.error` is a wrapper
+run via `new Function` with a `//# sourceURL=<page-origin>/bestiary-mod/<Mod_Name>.js` trailer,
+so their lines show as `<Mod_Name>.js:123` instead of `VM123:456`. The trailer **must** be an
+absolute same-origin `https://` URL — WebKit (Orion/iOS) uses `sourceURL` as the script's real
+resource URL and derives its fetch origin from it, so a scheme-less value put every mod in an
+opaque origin and broke all cross-origin `fetch()` (Firebase sync) with `TypeError: Load failed`. Only `console.error` is a wrapper
 (for the Error Log side effect) — its DevTools line points at `ba-logger.js`, but the stored
 entry's `source` is recovered from the captured stack. Mods and loader files must **not**
 wrap `console` themselves — any wrapper becomes the attributed frame for every later log.
