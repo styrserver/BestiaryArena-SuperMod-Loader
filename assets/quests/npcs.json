@@ -14,7 +14,19 @@
     "bonelord": "11b. Board NPCs (A Wrinkled Bonelord — Hellgate Library)",
     "oldDragonlord": "11c. Board NPCs (An Old Dragonlord — Draconia Tower)",
     "questItems": "12. Quest item chat responses (involved vs uninvolved NPC lines)",
-    "questItemUninvolvedTemplates": "13. Uninvolved quest item templates ({item} placeholder)"
+    "questItemUninvolvedTemplates": "13. Uninvolved quest item templates ({item} placeholder)",
+    "shared": "0. Shared transcript keywords merged under every NPC (gamemaster / isle of solitude / gm island). NPC-specific keywords override these."
+  },
+  "shared": {
+    "_comment": "Generic keyword lines every NPC (and King Tibianus) falls back to when the player asks about these topics. Merged UNDER each NPC's own keyword map in Quests.js, so any NPC-specific key of the same name wins. Substring match, longest-first — keep keys distinctive (no bare 'gm').",
+    "keywords": {
+      "gamemaster": "Gamemasters were CipSoft's own staff. You could tell them by the 'GM' before their name and the blue outfit no ordinary player could wear. They read criminal records, broadcast warnings in red, and could teleport anywhere. The volunteer ones were all let go back in 2010.",
+      "game master": "Gamemasters were CipSoft's own staff. You could tell them by the 'GM' before their name and the blue outfit no ordinary player could wear. They read criminal records, broadcast warnings in red, and could teleport anywhere. The volunteer ones were all let go back in 2010.",
+      "gamemasters": "Gamemasters were CipSoft's own staff. You could tell them by the 'GM' before their name and the blue outfit no ordinary player could wear. They read criminal records, broadcast warnings in red, and could teleport anywhere. The volunteer ones were all let go back in 2010.",
+      "gm outfit": "That blue GM outfit? Only gamemasters ever wore it. You will not find it in any shop.",
+      "isle of solitude": "The Isle of Solitude - that rock in the bay between Carlin and Greenshore where the gamemasters kept their residence. Only King Tibianus can grant passage there. Ask him about it if you must see it for yourself.",
+      "gm island": "GM Island is just another name for the Isle of Solitude. Only King Tibianus can send you there - ask him about it."
+    }
   },
   "king-tibianus": {
     "keywords": {
@@ -22,6 +34,8 @@
       "hello": "I greet thee, my loyal subject Player.",
       "salutations": "I greet thee, my loyal subject Player.",
       "how are you": "Thank you, I'm fine.",
+      "isle of solitude": "The Isle of Solitude? A speck of rock in the bay between Carlin and Greenshore, where my colleagues keep their residence and troublesome souls are sent to reflect on their crimes. Officially, it does not exist.",
+      "gm island": "The Isle of Solitude? A speck of rock in the bay between Carlin and Greenshore, where my colleagues keep their residence and troublesome souls are sent to reflect on their crimes. Officially, it does not exist.",
       "army": "Ask the soldiers about that.",
       "benjamin": "He was once my greatest general. Now he is very old and senile so we assigned him to work for the Royal Tibia Mail.",
       "bozo": "He is my royal jester and cheers me up now and then.",

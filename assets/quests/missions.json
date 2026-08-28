@@ -206,6 +206,7 @@
       "alreadyActive": "You're already helping me find my Small Axe. Bring it back when you find it!",
       "requiresLetterComplete": "Before I set you another task, bring me the king's stamped letter. Deliver that first, then we can talk.",
       "requiresLetterForFishingRod": "I only sell fishing rods to those who've finished delivering the king's stamped letter to me.",
+    "alreadyOwnsFishingRod": "You already have a fishing rod — a sturdy one lasts a lifetime. I only sell one to a customer.",
       "objectiveLine1": "Find Al Dee's Small Axe in the waters of a cave.",
       "objectiveLine2": "Return the Small Axe to Al Dee.",
       "hint": "Search underwater areas or caves where minotaurs and goblins roam.",

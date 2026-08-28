@@ -7,7 +7,7 @@
     "questLogIcons": "5. Quest Log mission card icon filenames",
     "questLogSpriteIcons": "6. Quest Log mission card board sprite ids",
     "devTools": "7. Quest Dev Tools grantable items (story order). Add new grantables here — keys auto-wire into Dev Tools.",
-    "itemLifecycle": "8. Item cleanup / stale / Dev complete-all reward rules (productId → products{})"
+    "itemLifecycle": "8. Item cleanup / stale / soul-core backfill / Dev complete-all reward rules (productId → products{})"
   },
   "products": {
     "silverToken": {
@@ -159,14 +159,16 @@
       "spriteId": 3483,
       "iconUrl": "https://bestiaryarena.com/assets/ITEM/3483.png",
       "description": "A sturdy fishing rod perfect for catching fish in local waters.",
-      "rarity": 2
+      "rarity": 2,
+      "maxCount": 1
     },
     "lightShovel": {
       "productName": "Light Shovel",
       "spriteId": 5710,
       "iconUrl": "https://bestiaryarena.com/assets/ITEM/5710.png",
       "description": "Lighter than a shovel.",
-      "rarity": 4
+      "rarity": 4,
+      "maxCount": 1
     },
     "obsidianKnife": {
       "productName": "Obsidian Knife",
@@ -1112,7 +1114,7 @@
     ]
   },
   "itemLifecycle": {
-    "_comment": "cleanupRules drive cleanupInvalidQuestItems. staleCleanupOnComplete drives cleanupStaleQuestItemsAfterCompletedMissions. devCompleteRewards drive QuestsDev.completeAll item grants. independentDrop: true = Rookgaard/global drops that must NOT be deleted when the linked mission is not yet accepted (only removeWhenCompleted / staleCleanup apply).",
+    "_comment": "cleanupRules drive cleanupInvalidQuestItems. staleCleanupOnComplete drives cleanupStaleQuestItemsAfterCompletedMissions. soulCoreGrantOnComplete drives backfillSoulCoresFromCompletedMissions (grant the soul core to anyone who finished the mission but has none in inventory). devCompleteRewards drive QuestsDev.completeAll item grants. independentDrop: true = Rookgaard/global drops that must NOT be deleted when the linked mission is not yet accepted (only removeWhenCompleted / staleCleanup apply).",
     "cleanupRules": [
       {
         "productId": "mapColour",
@@ -1365,6 +1367,15 @@
         "productId": "key3012",
         "missionId": "draconia_quest"
       }
+    ],
+    "soulCoreGrantOnComplete": [
+      { "productId": "goldenMug", "missionId": "dragonmother" },
+      { "productId": "oldWidowSoulCore", "missionId": "mother_of_all_spiders" },
+      { "productId": "knarknaknorkSoulCore", "missionId": "al_dee_rookie_guard" },
+      { "productId": "ekatrixSoulCore", "missionId": "tainted_souls" },
+      { "productId": "ghazbaranSoulCore", "missionId": "weakened_archdemon" },
+      { "productId": "mornenionSoulCore", "missionId": "al_dee_golden_rope" },
+      { "productId": "apprenticeShengSoulCore", "missionId": "apprentice_sheng" }
     ],
     "devCompleteRewards": [
       {

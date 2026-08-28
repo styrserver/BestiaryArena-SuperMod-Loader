@@ -13,6 +13,7 @@
     "hellgate_treasure_room": "11. Hellgate Treasure Room (Elathriel's Hellgate Part 1, Sewers reskin)",
     "hellgate_library": "12. Hellgate Library (Elathriel's Hellgate Library, Sewers library reskin — battle starts when the Wrinkled Bonelord takes the book)",
     "draconia_tower": "12. Draconia Tower (Elathriel’s dragon-cemetery battle, Sewers reskin)",
+    "isle_of_solitude": "12b. Isle of Solitude / GM Island (King Tibianus easter egg — empty walk-around sandbox, Sewers reskin)",
     "draconia_quest": "13. Draconia Quest (Elathriel’s final Draconia battle, Sewers reskin — Dragonfetish return)"
   },
   "mornenion": {
@@ -1981,6 +1982,13 @@
       92
     ],
     "allowedTilesMessage": "Ally creatures can only be placed on the marked tiles!"
+  },
+  "isle_of_solitude": {
+    "_comment": "King Tibianus easter egg. Empty CustomBattle (no villains) stood up only so the board clears and the Sewers quest overlays suppress. Walk-around scene, no combat — see enterIsleOfSolitude() in Quests.js.",
+    "allyLimit": 1,
+    "preventVillainMovement": true,
+    "hideVillainSprites": true,
+    "villains": []
   },
   "draconia_tower": {
     "allyLimit": 6,
