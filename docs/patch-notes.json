@@ -4,6 +4,26 @@
   },
   "notes": [
     {
+      "version": "4.9.7",
+      "changes": [
+        {
+          "mod": "Custom Battles",
+          "type": "fixed",
+          "text": "Custom creature sprites now render at the correct size and facing during a battle, not only while the piece stands still on the setup board. Previously such a sprite could look squashed or crop to the wrong direction once its creature started moving or attacking."
+        },
+        {
+          "mod": "Quests",
+          "type": "added",
+          "text": "Added a new quest that continues an existing quest line for players who have finished it — a short chat-driven step with a single battle and a reward that leads into a future quest."
+        },
+        {
+          "mod": "Quests",
+          "type": "fixed",
+          "text": "A quest boss with a custom sprite now renders correctly for the whole fight, and that battle no longer lags heavily. The boss reskin now reuses the shared custom-sprite system instead of a separate per-frame board watcher."
+        }
+      ]
+    },
+    {
       "version": "4.9.6",
       "changes": [
         {

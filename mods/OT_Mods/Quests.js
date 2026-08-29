@@ -1101,6 +1101,17 @@ function applyQuestRoomsFromAssets(roomsData) {
     }
   }
 
+  const realmOfDreamsRoom = roomsData.realmOfDreams;
+  if (realmOfDreamsRoom) {
+    if (realmOfDreamsRoom.battleRoomName) REALM_OF_DREAMS_BATTLE_ROOM_NAME = realmOfDreamsRoom.battleRoomName;
+    if (realmOfDreamsRoom.battleRoomId) REALM_OF_DREAMS_BATTLE_ROOM_ID = realmOfDreamsRoom.battleRoomId;
+    if (realmOfDreamsRoom.battleDisplayName) REALM_OF_DREAMS_BATTLE_DISPLAY_NAME = realmOfDreamsRoom.battleDisplayName;
+    if (realmOfDreamsRoom.battleId) REALM_OF_DREAMS_BATTLE_ID = realmOfDreamsRoom.battleId;
+    if (realmOfDreamsRoom.tileMutations && typeof realmOfDreamsRoom.tileMutations === 'object') {
+      REALM_OF_DREAMS_TILE_MUTATIONS = realmOfDreamsRoom.tileMutations;
+    }
+  }
+
   const isleOfSolitudeRoom = roomsData.isleOfSolitude;
   if (isleOfSolitudeRoom) {
     if (isleOfSolitudeRoom.battleRoomName) ISLE_BATTLE_ROOM_NAME = isleOfSolitudeRoom.battleRoomName;
@@ -1542,7 +1553,8 @@ const QUEST_MISSION_IDS = [
   'hellgate_part_1',
   'hellgate_library',
   'draconia_tower',
-  'draconia_quest'
+  'draconia_quest',
+  'realm_of_dreams'
 ];
 
 for (const missionId of QUEST_MISSION_IDS) {
@@ -1575,6 +1587,7 @@ const HELLGATE_PART_1_MISSION = MISSION_BY_ID.hellgate_part_1;
 const HELLGATE_LIBRARY_MISSION = MISSION_BY_ID.hellgate_library;
 const DRACONIA_TOWER_MISSION = MISSION_BY_ID.draconia_tower;
 const DRACONIA_QUEST_MISSION = MISSION_BY_ID.draconia_quest;
+const REALM_OF_DREAMS_MISSION = MISSION_BY_ID.realm_of_dreams;
 
 const MINOTAUR_TROPHY_CONFIG = {};
 const ORB_CONFIG = {};
@@ -1818,12 +1831,24 @@ let DRACONIA_TILE_MUTATIONS = null;
 
 // Draconia Quest (Elathriel — the final step after Draconia Tower. Chat-triggered teleport
 // into the Sewers for one last battle; on victory the player uses the Dragonfetish to
-// return to Hedge Maze, where Elathriel closes the quest for 200 guild coins).
+// return to Hedge Maze, where Elathriel closes the quest and hands over the
+// Key to Magic (Book)).
 let DRACONIA_QUEST_BATTLE_ROOM_NAME = 'Sewers';
 let DRACONIA_QUEST_BATTLE_ROOM_ID = 'rkswrs';
 let DRACONIA_QUEST_BATTLE_DISPLAY_NAME = 'Draconia Quest';
 let DRACONIA_QUEST_BATTLE_ID = 'draconia_quest';
 let DRACONIA_QUEST_TILE_MUTATIONS = null;
+
+// Access the Realm of Dreams (Tesha — the Key to Magic. Chat-triggered teleport into
+// the Sewers, re-skinned as the burning Northern Dragon Lair. The book is consumed on
+// battle victory; the player then returns to Darama Oasis and Tesha closes the quest
+// for Chayenne's Magical Key, which a later quest uses to actually reach Chayenne.)
+let REALM_OF_DREAMS_BATTLE_ROOM_NAME = 'Sewers';
+let REALM_OF_DREAMS_BATTLE_ROOM_ID = 'rkswrs';
+let REALM_OF_DREAMS_BATTLE_DISPLAY_NAME = 'The Northern Dragon Lair';
+let REALM_OF_DREAMS_BATTLE_ID = 'realm_of_dreams';
+let REALM_OF_DREAMS_TILE_MUTATIONS = null;
+let REALM_OF_DREAMS_RETURN_ROOM_NAME = 'Darama Oasis';
 
 // Isle of Solitude / GM Island (King Tibianus easter egg — chat-triggered teleport into
 // the Sewers re-skinned as the isle. No mission, no battle: a walk-around scene. An empty
@@ -1888,15 +1913,26 @@ function getNpcQuestItemChatResponse(npcId, message, playerName = 'Player') {
   if (!entry) return null;
 
   const npcResponses = NPC_QUEST_ITEM_CHAT_RESPONSES[npcId];
-  if (!npcResponses) {
-    return getNpcQuestItemUninvolvedResponse(npcId, entry.productName, playerName);
-  }
-
-  const line = npcResponses[entry.id];
+  const line = npcResponses ? npcResponses[entry.id] : null;
   if (line == null) {
     return getNpcQuestItemUninvolvedResponse(npcId, entry.productName, playerName);
   }
 
+  return formatQuestItemChatLine(line, playerName);
+}
+
+// Early, greedy-logic-proof intercept for "hintOnly" quest items — ones with no
+// hand-in / mechanic on any NPC, only a "here's who wants it" line. Handlers whose
+// own mission-keyword logic would otherwise swallow the phrase (e.g. King Tibianus
+// treats any message containing "key" as a mission query) call this near the top
+// and return early. Only NPCs that actually have a questItems line for the item
+// respond; everyone else falls through to their normal flow.
+function getNpcQuestItemHintResponse(npcId, message, playerName = 'Player') {
+  const entry = matchQuestItemInChatMessage(message);
+  if (!entry || !entry.hintOnly) return null;
+  const npcResponses = NPC_QUEST_ITEM_CHAT_RESPONSES[npcId];
+  const line = npcResponses ? npcResponses[entry.id] : null;
+  if (line == null) return null;
   return formatQuestItemChatLine(line, playerName);
 }
 
@@ -2230,8 +2266,6 @@ let GHAZBARAN_HIDEOUT_DISPLAY_NAME = '';
 let GHAZBARAN_TILE_INDEX = null;
 let GHAZBARAN_NICKNAME = '';
 let GHAZBARAN_AURA_NICKNAME = '';
-const GHAZ_OUTFIT_OVERLAY_CLASS = 'quests-ghaz-outfit-overlay';
-const GHAZ_OUTFIT_STYLE_ID = 'quests-ghaz-outfit-sheet-style';
 
 const KING_TIBIANUS_TAB_ID = 'quests-mod-king-tibianus-tab';
 const ARENA_LEADERBOARD_TAB_ID = 'quests-mod-arena-leaderboard-tab';
@@ -2402,6 +2436,7 @@ function createNPCCooldownManager() {
     progressHellgateLibrary: { accepted: false, completed: false, battleCompleted: false, bookGiven: false },
     progressDraconiaTower: { accepted: false, completed: false, battleCompleted: false, dragonfetishReceived: false },
     progressDraconiaQuest: { accepted: false, completed: false, battleCompleted: false },
+    progressRealmOfDreams: { accepted: false, completed: false, battleCompleted: false },
     progressChristmasMiracle: { accepted: false, completed: false },
     progressSvensonLoveStory: { accepted: false, completed: false, plankDelivered: false, strandedAtAwash: false, awashYarnDelivered: false, awashYarnRequested: false, strandedAtUnderground: false, undergroundCompassDelivered: false, undergroundCompassRequested: false, strandedAtWhiteWave: false, whiteWaveSlippersDelivered: false },
     progressWeakenedArchdemon: { accepted: false, completed: false, battleCompleted: false },
@@ -2609,6 +2644,14 @@ function createNPCCooldownManager() {
   let draconiaQuestHitboxesApplied = false;
   let draconiaQuestSceneSub = null;
 
+  // Access the Realm of Dreams (Tesha: the Key to Magic. Teleport into the Sewers
+  // reskinned as the burning Northern Dragon Lair; battle on entry, then return to
+  // Darama Oasis to hand back to Tesha for Chayenne's Magical Key).
+  let playerEnteredRealmOfDreams = false;
+  let realmOfDreamsBattle = null;
+  let realmOfDreamsHitboxesApplied = false;
+  let realmOfDreamsSceneSub = null;
+
   // Putrid Chamber (Serpentine Tower Quest: basement lever → custom battle)
   let playerUsedSerpentineLeverToPutridChamber = false;
   let putridChamberBattle = null;
@@ -2631,7 +2674,6 @@ function createNPCCooldownManager() {
   // Weakened Archdemon (Ruprecht's Hut via Svenson → Ghazbaran)
   let playerTraveledToGhazHideout = false;
   let ghazbaranBattle = null;
-  let ghazOutfitObserver = null;
   let ghazAbilityDebugLogged = false;
   let ghazServerSnapshotLogged = false;
   let ghazBattleStartSnapshotLogged = false;
@@ -2644,15 +2686,6 @@ function createNPCCooldownManager() {
   let ghazLastPseudoLavaholeTick = null;
   let ghazLastPseudoLavahole2Tick = null;
   let ghazLavaholeInterval = null;
-  let ghazNativeDamageDomObserver = null;
-  let ghazNativeDamageHpSampleLogged = false;
-  let ghazNativeDamageEventCount = 0;
-  let ghazNativeDamageDomEventCount = 0;
-  let ghazNativeDamageActorEnterUnsub = null;
-  let ghazNativeSpellDamageSample = null;
-  let ghazAnimLastStateByKey = new Map();
-  const GHAZ_NATIVE_DAMAGE_LOG_LIMIT = 60;
-  const GHAZ_NATIVE_DAMAGE_DOM_LOG_LIMIT = 40;
 
   // =======================
   // Quest Log System State
@@ -2889,7 +2922,7 @@ function createNPCCooldownManager() {
 
   /**
    * Reusable on-screen boss HP bar (fixed top-center, pixel-art frame, color-banded fill,
-   * "current / max" readout, ~200ms polling). Originally built one-off for Ghazbaran
+   * "current / max" readout, ~400ms polling). Originally built one-off for Ghazbaran
    * (Weakened Archdemon); factored out here so any boss fight can get one the same way —
    * see ghazBossHpBar / ekatrixBossHpBar / oldWidowBossHpBar / mornenionBossHpBar below
    * for how each boss instance is wired up.
@@ -3133,7 +3166,7 @@ function createNPCCooldownManager() {
           return;
         }
         update(false);
-      }, 200);
+      }, 400);
     }
 
     function show() {
@@ -5467,6 +5500,8 @@ function createNPCCooldownManager() {
   const QUEST_BOARD_HIDDEN_TAG_DRACONIA = 'draconia-tower';
   const QUEST_BOARD_ADDED_ATTR_DRACONIA_QUEST = 'data-quests-draconia-quest-added';
   const QUEST_BOARD_HIDDEN_TAG_DRACONIA_QUEST = 'draconia-quest';
+  const QUEST_BOARD_ADDED_ATTR_REALM_OF_DREAMS = 'data-quests-realm-of-dreams-added';
+  const QUEST_BOARD_HIDDEN_TAG_REALM_OF_DREAMS = 'realm-of-dreams';
   const QUEST_BOARD_ADDED_ATTR_SPIDER_LAIR = 'data-quests-spider-lair-added';
 
   function hideQuestBoardElement(element, options = {}) {
@@ -6372,6 +6407,9 @@ function createNPCCooldownManager() {
     const descFrame = document.createElement('div');
     descFrame.style.cssText = `
       min-height: 50px;
+      max-height: 160px;
+      overflow-y: auto;
+      overscroll-behavior: contain;
       padding: 2px 4px;
       width: 100%;
       box-sizing: border-box;
@@ -8605,7 +8643,9 @@ function createNPCCooldownManager() {
         PRESENT_CONFIG.productName,
         BUNNY_SLIPPERS_CONFIG.productName,
         'Key 3012',
-        'Beware of the Bonelords (Book)'
+        'Beware of the Bonelords (Book)',
+        'Key to Magic (Book)',
+        "Chayenne's Magical Key"
       ].includes(productName) || isBosstiaryCollectionItemName(productName);
 
       const newCount = isRedDragonMaterial ? Math.min(30, currentCount + amount) :
@@ -13217,6 +13257,24 @@ function createNPCCooldownManager() {
           return;
         }
 
+        // Quest items that only have a generic "take it to <NPC>" hint (e.g. the
+        // Key to Magic → Tesha) must answer before the mission-keyword logic below,
+        // which would otherwise treat "key to magic" as a copper-key query.
+        const kingItemHint = getNpcQuestItemHintResponse('king-tibianus', text, playerName);
+        if (kingItemHint) {
+          kingChatState.missionOffered = false;
+          kingChatState.offeredMission = null;
+          tibianusCooldown.queueResponse(
+            text,
+            kingItemHint,
+            addMessageToConversation,
+            'King Tibianus',
+            ModalHelpers.getFarewellCloseCallback(text)
+          );
+          clearTextarea();
+          return;
+        }
+
         // Refresh mission context (in case first mission just completed)
         activeMission = currentMission();
         kingStrings = buildStrings(activeMission);
@@ -15365,6 +15423,14 @@ function createNPCCooldownManager() {
       const taintedSoulsProgress = getMissionProgress(TAINTED_SOULS_MISSION);
       const lostOracleProgress = getMissionProgress(LOST_ORACLE_MISSION) || {};
 
+      // Quest items with only a generic "take it to <NPC>" hint (Key to Magic →
+      // Tesha) answer before Wyda's own "magic"/"key" keyword lines.
+      const wydaItemHint = getNpcQuestItemHintResponse('wyda', text, wydaPlayerName);
+      if (wydaItemHint) {
+        wydaCooldown.queueResponse(text, wydaItemHint, addMessage, 'Wyda', ModalHelpers.getFarewellCloseCallback(text));
+        return;
+      }
+
       // The Lost Oracle: Luminous Orb → Spectral Stone
       const mentionsLuminous = lowerText.includes('luminous') || lowerText.includes('orb');
       const mentionsSpectral = lowerText.includes('spectral');
@@ -15817,6 +15883,7 @@ function createNPCCooldownManager() {
 
     const teshaCooldown = createNPCCooldownManager();
     let teshaOfferingSerpentineTower = false;
+    let teshaOfferingRealmOfDreams = false;
 
     async function sendMessageToTesha() {
       const text = (textarea.value || '').trim();
@@ -15828,6 +15895,173 @@ function createNPCCooldownManager() {
 
       const scarabProgress = getMissionProgress(KING_SCARAB_COIN_MISSION);
       const serpentineProgress = getMissionProgress(SERPENTINE_TOWER_MISSION);
+
+      // Key to Magic (Book) → "The Key to Magic" quest (prep for a later Realm of
+      // Dreams quest). Offered when the player asks Tesha about the book/quest
+      // directly, or asks for a "mission" once every earlier Tesha quest is wrapped
+      // up. Saying "yes" sends the player down into the Northern Dragon Lair to put
+      // out the fire guarding the way; the book is consumed on battle victory, and a
+      // further ask on return hands Chayenne's Magical Key over.
+      async function handleTeshaRealmOfDreams() {
+        const realmProgress = getMissionProgress(REALM_OF_DREAMS_MISSION) || {};
+
+        if (realmProgress.completed) {
+          teshaCooldown.queueResponse(
+            text,
+            getMissionDialogueLine(REALM_OF_DREAMS_MISSION, 'alreadyCompleted', 'The fire in the dragon graveyard is out and the way to the Realm of Dreams stands open. Chayenne herself is a visit for another day.'),
+            addMessage,
+            'Tesha',
+            ModalHelpers.getFarewellCloseCallback(text)
+          );
+          return;
+        }
+
+        // Fire-path cleared, back with Tesha — hand over the reward and close the quest.
+        if (isRealmOfDreamsCompletionPending()) {
+          const completed = await completeRealmOfDreamsMission();
+          teshaCooldown.queueResponse(
+            text,
+            completed
+              ? getMissionDialogueLine(REALM_OF_DREAMS_MISSION, 'reward', "You put out a fire that has guarded the dragon graveyard for an age. Take this: Chayenne's Magical Key. When the time comes to walk into the Realm of Dreams and stand before Chayenne, it will carry you there.")
+              : getMissionCommonLine('errorGeneric', 'Something went wrong. Please try again.'),
+            addMessage,
+            'Tesha',
+            ModalHelpers.getFarewellCloseCallback(text)
+          );
+          setNpcModalPendingBadge(teshaImageContainer, hasTeshaQuestAction());
+          return;
+        }
+
+        // Quest accepted, book already spent, battle not yet cleared — offer to step
+        // back through the fire (no second book needed).
+        if (realmProgress.accepted) {
+          teshaOfferingRealmOfDreams = true;
+          teshaCooldown.queueResponse(
+            text,
+            getMissionDialogueLine(REALM_OF_DREAMS_MISSION, 'alreadyActive', 'The Northern Dragon Lair is still burning — the way to Chayenne is not open yet. Shall I send you back down among the bones?'),
+            addMessage,
+            'Tesha'
+          );
+          return;
+        }
+
+        const draconiaQuestDone = !!(getMissionProgress(DRACONIA_QUEST_MISSION) || {}).completed;
+        let hasKeyToMagicBook = false;
+        try {
+          const questItems = await getQuestItems(false);
+          hasKeyToMagicBook = (questItems?.['Key to Magic (Book)'] || 0) >= 1;
+        } catch (err) {
+          console.error('[Quests Mod][Tesha] Error checking for Key to Magic (Book):', err);
+        }
+        if (!hasKeyToMagicBook && !draconiaQuestDone) {
+          teshaCooldown.queueResponse(
+            text,
+            getMissionDialogueLine(REALM_OF_DREAMS_MISSION, 'teshaNoBook', 'You speak of the Key to Magic? I cannot read you the way from a rumour, pilgrim. Bring the book itself before me.'),
+            addMessage,
+            'Tesha',
+            ModalHelpers.getFarewellCloseCallback(text)
+          );
+          return;
+        }
+        if (!hasKeyToMagicBook) {
+          teshaCooldown.queueResponse(
+            text,
+            'The book itself, pilgrim — not just the memory of it. I cannot read you the way to the dragon graveyard without it. Bring the Key to Magic here.',
+            addMessage,
+            'Tesha',
+            ModalHelpers.getFarewellCloseCallback(text)
+          );
+          return;
+        }
+
+        teshaOfferingRealmOfDreams = true;
+        teshaCooldown.queueResponse(
+          text,
+          getMissionDialogueLine(REALM_OF_DREAMS_MISSION, 'offer', 'The Key to Magic... so it surfaced at last. This book names the one who keeps the Realm of Dreams — Chayenne. It traces the way to her back to the dragon graveyard, the Northern Dragon Lair, and to something down among the bones that still burns and will not let anyone past. Before I can send anyone to her, that has to be put out. Will you go down and end it?'),
+          addMessage,
+          'Tesha'
+        );
+      }
+
+      function isRealmOfDreamsEligible() {
+        const realm = getMissionProgress(REALM_OF_DREAMS_MISSION) || {};
+        if (realm.completed) return false;
+        return realm.accepted
+          || getCachedQuestItemCount('Key to Magic (Book)') > 0
+          || !!(getMissionProgress(DRACONIA_QUEST_MISSION) || {}).completed;
+      }
+
+      const askingAboutKeyToMagic =
+        lowerText.includes('key to magic') ||
+        lowerText.includes('realm of dreams');
+      if (askingAboutKeyToMagic) {
+        await handleTeshaRealmOfDreams();
+        return;
+      }
+
+      if (teshaOfferingRealmOfDreams && (lowerText.includes('yes') || lowerText.includes('open'))) {
+        teshaOfferingRealmOfDreams = false;
+        const alreadyAccepted = !!(getMissionProgress(REALM_OF_DREAMS_MISSION) || {}).accepted;
+        try {
+          if (!alreadyAccepted) {
+            const questItems = await getQuestItems(false);
+            if ((questItems?.['Key to Magic (Book)'] || 0) < 1) {
+              teshaCooldown.queueResponse(
+                text,
+                getMissionDialogueLine(REALM_OF_DREAMS_MISSION, 'teshaNoBook', 'The book is gone from your hands, pilgrim. I cannot read you the way to the dragon graveyard without it.'),
+                addMessage,
+                'Tesha',
+                ModalHelpers.getFarewellCloseCallback(text)
+              );
+              return;
+            }
+            // The book is spent walking through the fire — consumed on battle victory,
+            // not here, so a defeat leaves it in hand for another attempt.
+            await persistMissionProgress(REALM_OF_DREAMS_MISSION, { accepted: true, completed: false, battleCompleted: false });
+            NotificationService.showQuestAccepted(REALM_OF_DREAMS_MISSION, '[Quests Mod][Tesha]');
+            setNpcModalPendingBadge(teshaImageContainer, hasTeshaQuestAction());
+          }
+        } catch (err) {
+          console.error('[Quests Mod][Tesha] Error starting Realm of Dreams battle:', err);
+          teshaCooldown.queueResponse(text, getMissionCommonLine('errorGeneric', 'Something went wrong. Please try again.'), addMessage, 'Tesha');
+          return;
+        }
+        teshaCooldown.queueResponse(
+          text,
+          getMissionDialogueLine(REALM_OF_DREAMS_MISSION, 'accept', 'Then go down among the bones, and hold nothing back. End the fire there and the way to the Realm of Dreams stands open at last.'),
+          addMessage,
+          'Tesha',
+          () => {
+            setTimeout(() => {
+              ModalHelpers.closeModal(0);
+              enterRealmOfDreams();
+            }, 2000);
+          }
+        );
+        return;
+      }
+
+      if (teshaOfferingRealmOfDreams && (lowerText.includes('no') || lowerText.includes('not'))) {
+        teshaOfferingRealmOfDreams = false;
+        teshaCooldown.queueResponse(
+          text,
+          getMissionDialogueLine(REALM_OF_DREAMS_MISSION, 'decline', 'Then the fire keeps the graveyard, as it has for an age. Come back when you are ready to go down.'),
+          addMessage,
+          'Tesha',
+          ModalHelpers.getFarewellCloseCallback(text)
+        );
+        return;
+      }
+
+      // Player is back from the fire-path — almost anything on-topic hands the reward over.
+      if (isRealmOfDreamsCompletionPending()
+        && (lowerText.includes('reward') || lowerText.includes('mission') || lowerText.includes('quest')
+          || lowerText.includes('key') || lowerText.includes('chayenne') || lowerText.includes('dream')
+          || lowerText.includes('done') || lowerText.includes('back') || lowerText.includes('fire')
+          || lowerText.includes('magic'))) {
+        await handleTeshaRealmOfDreams();
+        return;
+      }
 
       const wantsSerpentineReward =
         lowerText.includes('mission') ||
@@ -15898,6 +16132,15 @@ function createNPCCooldownManager() {
       }
 
       if (lowerText.includes('mission') || lowerText.includes('quest')) {
+        // When no earlier Tesha chain is mid-progress and the player has earned the
+        // Key to Magic (Book), Realm of Dreams is the current offer.
+        const scarabActive = scarabProgress.accepted && !scarabProgress.completed;
+        const serpentineActive = serpentineProgress.accepted && !serpentineProgress.completed;
+        if (!scarabActive && !serpentineActive && isRealmOfDreamsEligible()) {
+          await handleTeshaRealmOfDreams();
+          return;
+        }
+
         if (scarabProgress.accepted && !scarabProgress.completed) {
           teshaCooldown.queueResponse(
             text,
@@ -18957,6 +19200,17 @@ function createNPCCooldownManager() {
             cleanupDraconiaQuestQuest();
           }
 
+          // Realm of Dreams: leaving the Sewers during the fire-path fight — tear the scene
+          // down. The battle's own onClose handles victory (return to Tesha) / defeat; this
+          // covers a manual room-picker exit.
+          if (lastOverlayHiderRoomName === REALM_OF_DREAMS_BATTLE_ROOM_NAME
+            && currentRoomName && currentRoomName !== REALM_OF_DREAMS_BATTLE_ROOM_NAME
+            && (playerEnteredRealmOfDreams || realmOfDreamsBattle)
+            && !realmOfDreamsBattle?.isRoomReloadInProgress?.()) {
+            console.log('[Quests Mod][Overlay Hider] Leaving Realm of Dreams - clearing quest state (CustomBattle cleanup)');
+            cleanupRealmOfDreamsQuest();
+          }
+
           // Lonesome Dragon: leaving room — cleanup unless returning to Dragon Lair after defeat for stairs retry
           if (lastOverlayHiderRoomName === LONESOME_DRAGON_ROOM_NAME && currentRoomName && currentRoomName !== LONESOME_DRAGON_ROOM_NAME) {
             if (lonesomeDragonBattle?.isEntryVillainSetupDone()) {
@@ -19035,19 +19289,19 @@ function createNPCCooldownManager() {
             bansheeLastRoomBattle.ensureCustomVillainsPresent();
           }
 
-          // Weakened Archdemon: keep Ghaz on board and refresh custom outfit while in hideout
+          // Weakened Archdemon: keep Ghaz on board while in hideout. His sprite is a
+          // CustomBattles registry sprite (customSpriteKey 'weakened-ghazbaran'), so the
+          // reskin is handled by content/custom-battles.js — no quest-side outfit hook.
           if (currentRoomName === GHAZBARAN_HIDEOUT_ROOM_NAME && playerTraveledToGhazHideout && ghazbaranBattle) {
             ghazbaranBattle.runEntryVillainSetupIfNeeded({
               isActiveCheck: () => playerTraveledToGhazHideout && isWeakenedArchdemonQuestActive(),
               onComplete: () => {
                 hideQuestOverlays();
                 hideHeroEditorButton();
-                startGhazOutfitObserver();
-                refreshGhazOutfitSprites();
               }
             });
             ghazbaranBattle.ensureCustomVillainsPresent();
-            refreshGhazOutfitSprites();
+            ensureGhazHideoutStyles();
           }
 
           // The Tainted Souls: leave Sewers battle room unless warping back to Eclipse after defeat
@@ -27363,7 +27617,8 @@ function createNPCCooldownManager() {
   // Draconia Quest (Elathriel — the final step after Draconia Tower. Chat-triggered
   // teleport into the Sewers, re-skinned for one last battle. The full villain roster
   // spawns on entry. On victory the player "uses" the Dragonfetish (consumed) and is
-  // returned to Hedge Maze, where Elathriel closes the mission for 200 guild coins.
+  // returned to Hedge Maze, where Elathriel closes the mission and grants the
+  // Key to Magic (Book).
   // Mirrors the Draconia Tower flow minus the post-battle board NPC / trade.)
   // =======================
 
@@ -27563,37 +27818,32 @@ function createNPCCooldownManager() {
     return !!progress.battleCompleted && !progress.completed;
   }
 
-  async function awardDraconiaQuestGuildCoins() {
-    const amount = Number(DRACONIA_QUEST_MISSION.rewardCoins) || 200;
-    if (amount <= 0) return;
+  function getDraconiaQuestRewardItemName() {
+    return getMissionRewardItemName(DRACONIA_QUEST_MISSION, 'keyToMagicBook') || 'Key to Magic (Book)';
+  }
+
+  async function grantDraconiaQuestReward() {
+    const itemName = getDraconiaQuestRewardItemName();
     try {
-      const coinsAdder =
-        globalThis.addGuildCoins ||
-        (globalThis.Guilds && globalThis.Guilds.addGuildCoins) ||
-        (globalThis.BestiaryModAPI?.guilds?.addGuildCoins) ||
-        (typeof questsAddGuildCoins === 'function' ? questsAddGuildCoins : null);
-      if (!coinsAdder) {
-        console.warn(`${getDraconiaQuestLogPrefix()} addGuildCoins not available, skipping guild coin reward`);
-        return;
-      }
-      await coinsAdder(amount);
-      console.log(`${getDraconiaQuestLogPrefix()} Awarded guild coins:`, amount);
+      await addQuestItem(itemName, 1);
+      showQuestItemNotification(itemName, 1);
+      console.log(`${getDraconiaQuestLogPrefix()} Granted reward item:`, itemName);
     } catch (error) {
-      console.error(`${getDraconiaQuestLogPrefix()} Error awarding guild coins:`, error);
+      console.error(`${getDraconiaQuestLogPrefix()} Error granting reward item:`, error);
     }
   }
 
   async function completeDraconiaQuestMission() {
     const progress = getMissionProgress(DRACONIA_QUEST_MISSION) || {};
     if (progress.completed) return false;
-    const rewardCoins = Number(DRACONIA_QUEST_MISSION.rewardCoins) || 200;
+    const rewardItemName = getDraconiaQuestRewardItemName();
     try {
       await persistMissionProgress(DRACONIA_QUEST_MISSION, {
         accepted: true,
         completed: true,
         battleCompleted: true
       });
-      await awardDraconiaQuestGuildCoins();
+      await grantDraconiaQuestReward();
       // Belt-and-suspenders: the Dragonfetish should already have been consumed on the
       // victory return, but drop any leftover copy now that the quest is closed. Also
       // clear Key 3012 — the whole Elathriel chain (Hellgate -> Library -> Draconia) is
@@ -27601,7 +27851,7 @@ function createNPCCooldownManager() {
       // this too, on the next inventory sync).
       try { await consumeQuestItem('Dragonfetish', 1); } catch (_) {}
       try { await consumeQuestItem('Key 3012', 1); } catch (_) {}
-      NotificationService.showQuestCompleted(DRACONIA_QUEST_MISSION, getDraconiaQuestLogPrefix(), { rewardCoins });
+      NotificationService.showQuestCompleted(DRACONIA_QUEST_MISSION, getDraconiaQuestLogPrefix(), { productName: rewardItemName });
       updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
       console.log(`${getDraconiaQuestLogPrefix()} Mission completed`);
       return true;
@@ -27765,6 +28015,360 @@ function createNPCCooldownManager() {
 
     updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
     showToast({ message: 'Following Elathriel down into the last room of Draconia...', logPrefix: getDraconiaQuestLogPrefix() });
+  }
+
+  // =======================
+  // Access the Realm of Dreams (Tesha — the Key to Magic. Chat-triggered teleport into
+  // the Sewers, re-skinned as the burning Northern Dragon Lair. Saying "yes" drops the
+  // player into the battle; the Key to Magic (Book) is consumed on victory, after which
+  // they return to Darama Oasis and Tesha closes the mission for Chayenne's Magical Key
+  // (used by a later quest to actually reach Chayenne). Mirrors the Draconia Quest flow
+  // minus the companion NPC.)
+  // =======================
+
+  function getRealmOfDreamsLogPrefix() {
+    return '[Quests Mod][Realm of Dreams]';
+  }
+
+  function buildRealmOfDreamsMutationSpriteHTML(entry, mutationKey) {
+    const spriteId = entry?.spriteId;
+    if (spriteId == null) return '';
+    const cropX = entry.cropX != null ? entry.cropX : 0;
+    const cropY = entry.cropY != null ? entry.cropY : 0;
+    const cropped = entry.cropped ? 'true' : 'false';
+    const bankStyle = entry.bank != null ? ` --bank: ${entry.bank};` : '';
+    const rightCalc = formatHellgateMutationOffsetCalc(entry.offsetX);
+    const bottomCalc = formatHellgateMutationOffsetCalc(entry.offsetY);
+    const offsetStyle = `${rightCalc ? ` right: ${rightCalc};` : ''}${bottomCalc ? ` bottom: ${bottomCalc};` : ''}`;
+    return `<div class="sprite item relative id-${spriteId}" ${QUEST_BOARD_ADDED_ATTR_REALM_OF_DREAMS}="1" data-quests-realm-of-dreams-mutation-key="${mutationKey}" style="z-index: 1000;${bankStyle}${offsetStyle}"><div class="viewport"><img alt="${spriteId}" data-cropped="${cropped}" class="spritesheet" style="--cropX: ${cropX}; --cropY: ${cropY};"></div></div>`;
+  }
+
+  function applyRealmOfDreamsTileMutations() {
+    const mutations = REALM_OF_DREAMS_TILE_MUTATIONS;
+    if (!mutations || typeof mutations !== 'object') return;
+    let wroteHitboxes = false;
+    Object.entries(mutations).forEach(([tileKey, entry]) => {
+      const tileIndex = Number(tileKey);
+      if (!Number.isFinite(tileIndex) || !entry || typeof entry !== 'object') return;
+      const tile = getTileElement(tileIndex);
+
+      (entry.remove || []).forEach((spriteId) => {
+        if (spriteId == null || !tile) return;
+        tile.querySelectorAll(`.sprite.item.relative.id-${spriteId}`).forEach((sprite) => {
+          hideQuestBoardElement(sprite, { tag: QUEST_BOARD_HIDDEN_TAG_REALM_OF_DREAMS });
+        });
+      });
+
+      (entry.add || []).forEach((spriteEntry, spriteIndex) => {
+        const spriteId = spriteEntry?.spriteId;
+        if (spriteId == null || !tile) return;
+        const mutationKey = `${tileIndex}-${spriteIndex}`;
+        if (tile.querySelector(`[data-quests-realm-of-dreams-mutation-key="${mutationKey}"]`)) return;
+        const wrap = document.createElement('div');
+        wrap.innerHTML = buildRealmOfDreamsMutationSpriteHTML(spriteEntry, mutationKey);
+        if (wrap.firstElementChild) tile.appendChild(wrap.firstElementChild);
+      });
+
+      if (Array.isArray(entry.floorBelow) && entry.floorBelow.length) {
+        applyQuestFloorBelowSprites(
+          tileIndex, entry.floorBelow, QUEST_BOARD_ADDED_ATTR_REALM_OF_DREAMS, 'data-quests-realm-of-dreams-fb-key'
+        );
+      }
+
+      if (Object.prototype.hasOwnProperty.call(entry, 'hitbox')) {
+        try {
+          getHellgateRoomRefs().forEach((room) => {
+            const data = room?.file?.data;
+            if (!data) return;
+            if (!Array.isArray(data.hitboxes)) data.hitboxes = [];
+            data.hitboxes[tileIndex] = entry.hitbox === true;
+            wroteHitboxes = true;
+          });
+        } catch (_) {}
+      }
+    });
+
+    if (wroteHitboxes) realmOfDreamsHitboxesApplied = true;
+
+    const battle = realmOfDreamsBattle;
+    if (battle?.refreshPlacementHitboxMaskFromLive) {
+      battle.refreshPlacementHitboxMaskFromLive(() => playerEnteredRealmOfDreams);
+    } else if (battle?.syncPlacementHitboxMask) {
+      battle.syncPlacementHitboxMask(() => playerEnteredRealmOfDreams);
+    }
+  }
+
+  function restoreRealmOfDreamsTileMutations() {
+    restoreQuestBoardElementsByTag(QUEST_BOARD_HIDDEN_TAG_REALM_OF_DREAMS);
+    document.querySelectorAll(`[${QUEST_BOARD_ADDED_ATTR_REALM_OF_DREAMS}="1"]`).forEach((el) => {
+      try { el.remove(); } catch (_) {}
+    });
+    realmOfDreamsHitboxesApplied = false;
+  }
+
+  function stopRealmOfDreamsSceneSync() {
+    if (realmOfDreamsSceneSub) {
+      try { realmOfDreamsSceneSub.unsubscribe?.(); } catch (_) {}
+      realmOfDreamsSceneSub = null;
+    }
+  }
+
+  function startRealmOfDreamsSceneSync() {
+    stopRealmOfDreamsSceneSync();
+    const paint = () => {
+      if (playerEnteredRealmOfDreams
+        && !realmOfDreamsBattle
+        && isOnRoomByName(REALM_OF_DREAMS_BATTLE_ROOM_NAME)) {
+        applyRealmOfDreamsTileMutations();
+      }
+    };
+    paint();
+    const deadline = (typeof performance !== 'undefined' ? performance.now() : Date.now()) + 800;
+    const rafPaint = () => {
+      if (!playerEnteredRealmOfDreams) return;
+      paint();
+      const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      if (now < deadline && typeof requestAnimationFrame === 'function') requestAnimationFrame(rafPaint);
+    };
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(rafPaint);
+    [150, 400, 900, 1600].forEach((d) => setTimeout(paint, d));
+    if (!globalThis.state?.board?.subscribe) return;
+    realmOfDreamsSceneSub = globalThis.state.board.subscribe(() => {
+      if (!playerEnteredRealmOfDreams) {
+        stopRealmOfDreamsSceneSync();
+        return;
+      }
+      paint();
+    });
+  }
+
+  function restoreBoardSetupRealmOfDreams() {
+    if (realmOfDreamsBattle) realmOfDreamsBattle.restoreBoardSetup();
+    restoreRealmOfDreamsTileMutations();
+  }
+
+  function cleanupRealmOfDreamsQuest() {
+    try {
+      removeCustomBattleStatusToast();
+      stopRealmOfDreamsSceneSync();
+      playerEnteredRealmOfDreams = false;
+      restoreRealmOfDreamsTileMutations();
+      if (realmOfDreamsBattle) {
+        realmOfDreamsBattle.cleanup(restoreBoardSetupRealmOfDreams, showQuestOverlays);
+        realmOfDreamsBattle = null;
+        console.log(`${getRealmOfDreamsLogPrefix()} Battle cleaned up`);
+      }
+      updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+    } catch (error) {
+      console.error(`${getRealmOfDreamsLogPrefix()} Error cleaning up:`, error);
+    }
+  }
+
+  function isRealmOfDreamsCompletionPending() {
+    const progress = getMissionProgress(REALM_OF_DREAMS_MISSION) || {};
+    return !!progress.battleCompleted && !progress.completed;
+  }
+
+  function getRealmOfDreamsRewardItemName() {
+    return getMissionRewardItemName(REALM_OF_DREAMS_MISSION, 'chayennesMagicalKey') || "Chayenne's Magical Key";
+  }
+
+  async function grantRealmOfDreamsReward() {
+    const itemName = getRealmOfDreamsRewardItemName();
+    try {
+      await addQuestItem(itemName, 1);
+      showQuestItemNotification(itemName, 1);
+      console.log(`${getRealmOfDreamsLogPrefix()} Granted reward item:`, itemName);
+    } catch (error) {
+      console.error(`${getRealmOfDreamsLogPrefix()} Error granting reward item:`, error);
+    }
+  }
+
+  async function completeRealmOfDreamsMission() {
+    const progress = getMissionProgress(REALM_OF_DREAMS_MISSION) || {};
+    if (progress.completed) return false;
+    const rewardItemName = getRealmOfDreamsRewardItemName();
+    try {
+      await persistMissionProgress(REALM_OF_DREAMS_MISSION, {
+        accepted: true,
+        completed: true,
+        battleCompleted: true
+      });
+      await grantRealmOfDreamsReward();
+      // The book was consumed on battle victory; drop any stray copy now the quest is
+      // closed (itemLifecycle.staleCleanupOnComplete covers this too on the next sync).
+      try { await consumeQuestItem('Key to Magic (Book)', 1); } catch (_) {}
+      NotificationService.showQuestCompleted(REALM_OF_DREAMS_MISSION, getRealmOfDreamsLogPrefix(), { productName: rewardItemName });
+      updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+      console.log(`${getRealmOfDreamsLogPrefix()} Mission completed`);
+      return true;
+    } catch (error) {
+      console.error(`${getRealmOfDreamsLogPrefix()} Error completing mission:`, error);
+      return false;
+    }
+  }
+
+  function navigateToDaramaOasis() {
+    try {
+      const roomId = getRoomIdByRoomName(REALM_OF_DREAMS_RETURN_ROOM_NAME);
+      if (!roomId) {
+        console.warn(`${getRealmOfDreamsLogPrefix()} Darama Oasis room not found`);
+        return;
+      }
+      globalThis.state.board.send({ type: 'selectRoomById', roomId });
+    } catch (error) {
+      console.error(`${getRealmOfDreamsLogPrefix()} Error navigating to Darama Oasis:`, error);
+    }
+  }
+
+  function returnFromRealmOfDreams() {
+    showToast({
+      message: 'You climb up out of the dragon graveyard, the fire behind you dead at last. Speak with Tesha.',
+      logPrefix: getRealmOfDreamsLogPrefix()
+    });
+    cleanupRealmOfDreamsQuest();
+    setTimeout(() => navigateToDaramaOasis(), 100);
+  }
+
+  function createRealmOfDreamsBattleInstance(roomId) {
+    if (!window.CustomBattles) {
+      console.error(`${getRealmOfDreamsLogPrefix()} CustomBattles still not available`);
+      return null;
+    }
+    const spawn = getHydratedQuestBattleSpawn(REALM_OF_DREAMS_BATTLE_ID || 'realm_of_dreams');
+    const villains = spawn.villains;
+    const tileRestrictions = {};
+    if (spawn.allowedTiles?.length) {
+      tileRestrictions.allowedTiles = spawn.allowedTiles;
+      tileRestrictions.message = spawn.allowedTilesMessage || 'Ally creatures can only be placed on the marked tiles!';
+    }
+    const config = {
+      name: REALM_OF_DREAMS_BATTLE_DISPLAY_NAME || 'The Northern Dragon Lair',
+      roomId,
+      villains,
+      allyLimit: spawn.allyLimit ?? 6,
+      preventVillainMovement: spawn.preventVillainMovement !== false,
+      hideVillainSprites: spawn.hideVillainSprites !== false,
+      ...(Object.keys(tileRestrictions).length ? { tileRestrictions } : {}),
+      activationCheck: (isSandbox, inBattleArea) => isSandbox && inBattleArea && playerEnteredRealmOfDreams,
+      victoryDefeat: {
+        onVictory: async () => {
+          console.log(`${getRealmOfDreamsLogPrefix()} Fire-path cleared`);
+          // The Key to Magic (Book) is spent walking through the fire.
+          try { await consumeQuestItem('Key to Magic (Book)', 1); } catch (_) {}
+          try {
+            await persistMissionProgress(REALM_OF_DREAMS_MISSION, {
+              accepted: true,
+              completed: false,
+              battleCompleted: true
+            });
+          } catch (error) {
+            console.error(`${getRealmOfDreamsLogPrefix()} Error saving battleCompleted flag:`, error);
+          }
+        },
+        onDefeat: () => {},
+        onClose: (isVictory) => {
+          if (isVictory) {
+            returnFromRealmOfDreams();
+          } else {
+            cleanupRealmOfDreamsQuest();
+            setTimeout(() => navigateToDaramaOasis(), 100);
+          }
+        },
+        victoryTitle: 'Victory!',
+        defeatTitle: 'Defeat',
+        victoryMessage: getMissionDialogueLine(
+          REALM_OF_DREAMS_MISSION,
+          'battleVictory',
+          'The fire among the bones is spent and the way to the Realm of Dreams lies open. Return to Tesha in the Darama Oasis.'
+        ),
+        defeatMessage: getMissionDialogueLine(
+          REALM_OF_DREAMS_MISSION,
+          'battleDefeat',
+          'The fire in the dragon graveyard is fiercer than the book warned. Gather yourself and go down again.'
+        ),
+        showItems: false,
+        items: []
+      }
+    };
+    return window.CustomBattles.create(config);
+  }
+
+  function initializeRealmOfDreamsBattle(roomId) {
+    if (window.CustomBattles) return createRealmOfDreamsBattleInstance(roomId);
+    return waitForCustomBattles({ logPrefix: getRealmOfDreamsLogPrefix() }).then((api) => {
+      if (!api) return null;
+      return createRealmOfDreamsBattleInstance(roomId);
+    });
+  }
+
+  function setupRealmOfDreamsBattleInstance(battle) {
+    if (!battle) return false;
+    realmOfDreamsBattle = battle;
+    stopRealmOfDreamsSceneSync();
+    realmOfDreamsBattle.setup(
+      () => playerEnteredRealmOfDreams,
+      NotificationService.createBattleToastCallback(getRealmOfDreamsLogPrefix())
+    );
+    realmOfDreamsBattle.resetSandboxBattleState();
+    realmOfDreamsBattle.setupTileRestrictions(
+      () => playerEnteredRealmOfDreams,
+      NotificationService.createBattleToastCallback(getRealmOfDreamsLogPrefix())
+    );
+    realmOfDreamsBattle.setupAllyLimit?.(
+      () => playerEnteredRealmOfDreams,
+      NotificationService.createBattleToastCallback(getRealmOfDreamsLogPrefix())
+    );
+    showCustomBattleStatusToast({
+      battleName: REALM_OF_DREAMS_BATTLE_DISPLAY_NAME || 'The Northern Dragon Lair',
+      allyLimit: battle.config?.allyLimit ?? 6,
+      battle,
+      logPrefix: getRealmOfDreamsLogPrefix()
+    });
+    realmOfDreamsBattle.scheduleEntryVillainSetup({
+      attemptDelays: [0, 100, 250, 500, 800, 1200],
+      isActiveCheck: () => playerEnteredRealmOfDreams,
+      onComplete: () => {
+        hideQuestOverlays();
+        hideHeroEditorButton();
+        realmOfDreamsBattle.startPersistentVisualSync(applyRealmOfDreamsTileMutations, {
+          isActiveCheck: () => playerEnteredRealmOfDreams
+        });
+      }
+    });
+    return true;
+  }
+
+  function enterRealmOfDreams() {
+    let roomId = REALM_OF_DREAMS_BATTLE_ROOM_ID || getRoomIdByRoomName(REALM_OF_DREAMS_BATTLE_ROOM_NAME);
+    if (!roomId) roomId = getRoomIdByRoomName(REALM_OF_DREAMS_BATTLE_ROOM_NAME);
+    if (!roomId) {
+      showToast({ message: 'The way down into the Northern Dragon Lair could not be found.', logPrefix: getRealmOfDreamsLogPrefix() });
+      return;
+    }
+
+    playerEnteredRealmOfDreams = true;
+    if (realmOfDreamsBattle) {
+      realmOfDreamsBattle.cleanup(restoreBoardSetupRealmOfDreams, showQuestOverlays);
+      realmOfDreamsBattle = null;
+    }
+
+    globalThis.state.board.send({ type: 'selectRoomById', roomId });
+    startRealmOfDreamsSceneSync();
+
+    const initResult = initializeRealmOfDreamsBattle(roomId);
+    if (initResult && typeof initResult.then === 'function') {
+      initResult.then((battle) => {
+        if (playerEnteredRealmOfDreams && !realmOfDreamsBattle) {
+          setupRealmOfDreamsBattleInstance(battle);
+        }
+      }).catch((error) => console.error(`${getRealmOfDreamsLogPrefix()} Error initializing battle:`, error));
+    } else if (initResult) {
+      setupRealmOfDreamsBattleInstance(initResult);
+    }
+
+    updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+    showToast({ message: 'Tesha reads the way — and sends you down into the Northern Dragon Lair, toward the fire among the bones...', logPrefix: getRealmOfDreamsLogPrefix() });
   }
 
   // ============================================================
@@ -28767,6 +29371,13 @@ function createNPCCooldownManager() {
   }
 
   function hasTeshaQuestAction() {
+    // Realm of Dreams: startable once the Key to Magic (Book) is in hand, or waiting
+    // for the reward hand-back once the fire-path battle is cleared.
+    const realm = getMissionProgress(REALM_OF_DREAMS_MISSION) || {};
+    if (!realm.completed) {
+      if (realm.battleCompleted) return true;
+      if (!realm.accepted && getCachedQuestItemCount('Key to Magic (Book)') > 0) return true;
+    }
     const scarab = getMissionProgress(KING_SCARAB_COIN_MISSION) || {};
     if (scarab.accepted && !scarab.completed && getCachedQuestItemCount(SCARAB_COIN_CONFIG.productName) > 0) return true;
     if (!scarab.completed) return false;
@@ -31182,269 +31793,35 @@ function createNPCCooldownManager() {
     }
   }
 
-  function ensureGhazOutfitSheetStyles() {
-    let style = document.getElementById(GHAZ_OUTFIT_STYLE_ID);
+  // Ghaz's sprite reskin is handled by content/custom-battles.js via the
+  // 'weakened-ghazbaran' registry sprite (customSpriteKey on the battles.json villain).
+  // The only quest-side visual tweaks left are hiding the hidden ability-carrier unit
+  // ("Ghazbaran's Aura") and the level badge on Ghaz himself.
+  const GHAZ_HIDEOUT_STYLE_ID = 'quests-ghaz-hideout-style';
+  function ensureGhazHideoutStyles() {
+    let style = document.getElementById(GHAZ_HIDEOUT_STYLE_ID);
     if (!style) {
       style = document.createElement('style');
-      style.id = GHAZ_OUTFIT_STYLE_ID;
+      style.id = GHAZ_HIDEOUT_STYLE_ID;
       document.head.appendChild(style);
     }
-    const url = getQuestItemsAssetUrl('ghaz-idle.png').replace(/"/g, '\\"');
-    const movingUrl = getQuestItemsAssetUrl('ghaz-moving.png').replace(/"/g, '\\"');
     const auraName = String(GHAZBARAN_AURA_NICKNAME || '').replace(/"/g, '\\"');
-    // Match Dragon (id-34) board viewport: fixed 144x144 (zoom is applied by the board, not here).
-    const size = '144px';
-    style.textContent = `
-      .${GHAZ_OUTFIT_OVERLAY_CLASS} > .viewport > img.actor.spritesheet,
-      .${GHAZ_OUTFIT_OVERLAY_CLASS} img.actor.spritesheet {
-        display: none !important;
-        visibility: hidden !important;
-        opacity: 0 !important;
-        background-image: none !important;
-      }
-      .${GHAZ_OUTFIT_OVERLAY_CLASS}.sprite.outfit {
-        width: ${size} !important;
-        height: ${size} !important;
-        max-width: none !important;
-        max-height: none !important;
-        overflow: visible !important;
-      }
-      .${GHAZ_OUTFIT_OVERLAY_CLASS} > .viewport {
-        width: ${size} !important;
-        height: ${size} !important;
-        max-width: none !important;
-        max-height: none !important;
-        position: relative !important;
-        overflow: visible !important;
-      }
-      .${GHAZ_OUTFIT_OVERLAY_CLASS} .quests-custom-outfit-sheet {
-        position: absolute !important;
-        inset: 0 !important;
-        width: ${size} !important;
-        height: ${size} !important;
-        z-index: 2 !important;
-        background-image: url("${url}") !important;
-        background-repeat: no-repeat !important;
-        background-size: 400% 100% !important;
-        image-rendering: pixelated !important;
-        pointer-events: none !important;
-        animation: none !important;
-      }
-      .${GHAZ_OUTFIT_OVERLAY_CLASS}.moving .quests-custom-outfit-sheet {
-        background-image: url("${movingUrl}") !important;
-        /* Ghaz moving atlas: 4 direction columns x 8 animation rows. */
-        background-size: 400% 800% !important;
-        animation: quests-ghaz-moving-frames 884ms steps(8) infinite !important;
-      }
-      .${GHAZ_OUTFIT_OVERLAY_CLASS} .quests-custom-outfit-sheet[data-facing="north"] { background-position-x: 0% !important; }
-      .${GHAZ_OUTFIT_OVERLAY_CLASS} .quests-custom-outfit-sheet[data-facing="east"]  { background-position-x: 33.333% !important; }
-      .${GHAZ_OUTFIT_OVERLAY_CLASS} .quests-custom-outfit-sheet[data-facing="south"] { background-position-x: 66.666% !important; }
-      .${GHAZ_OUTFIT_OVERLAY_CLASS} .quests-custom-outfit-sheet[data-facing="west"]  { background-position-x: 100% !important; }
-      .${GHAZ_OUTFIT_OVERLAY_CLASS}.idle .quests-custom-outfit-sheet {
-        background-position-y: 0% !important;
-      }
-      @keyframes quests-ghaz-moving-frames {
-        from { background-position-y: 0%; }
-        to { background-position-y: 87.5%; }
-      }
-      /* Hide the secondary ability-carrier unit so Ghaz still looks like one creature. */
+    const nick = String(GHAZBARAN_NICKNAME).replace(/"/g, '\\"');
+    const auraRule = auraName
+      ? `
       [data-name="${auraName}"] {
         display: none !important;
         visibility: hidden !important;
         opacity: 0 !important;
         pointer-events: none !important;
-      }
-      /* Hide level badge on Weakened Ghazbaran */
-      .${GHAZ_OUTFIT_OVERLAY_CLASS} ~ .level,
-      .${GHAZ_OUTFIT_OVERLAY_CLASS} + .level,
-      [data-name="${String(GHAZBARAN_NICKNAME).replace(/"/g, '\\"')}"] .level,
-      [data-custom-battle-nickname="${String(GHAZBARAN_NICKNAME).replace(/"/g, '\\"')}"] .level {
+      }`
+      : '';
+    style.textContent = `${auraRule}
+      [data-name="${nick}"] .level,
+      [data-custom-battle-nickname="${nick}"] .level {
         display: none !important;
       }
     `;
-  }
-
-  function getGhazSpriteFacing(sprite) {
-    if (!sprite?.classList) return 'south';
-    if (sprite.classList.contains('north')) return 'north';
-    if (sprite.classList.contains('east')) return 'east';
-    if (sprite.classList.contains('west')) return 'west';
-    return 'south';
-  }
-
-  function applyGhazOutfitToSprite(sprite) {
-    if (!sprite?.classList) return false;
-    const spriteNick = sprite.dataset?.customBattleNickname || '';
-    if (spriteNick && spriteNick !== GHAZBARAN_NICKNAME) return false;
-    ensureGhazOutfitSheetStyles();
-    sprite.classList.add(GHAZ_OUTFIT_OVERLAY_CLASS);
-    sprite.dataset.questsGhazOutfit = '1';
-    const viewport = sprite.querySelector(':scope > .viewport') || sprite.querySelector('.viewport') || sprite;
-    let sheet = viewport.querySelector(':scope > .quests-custom-outfit-sheet')
-      || viewport.querySelector('.quests-custom-outfit-sheet');
-    if (!sheet) {
-      sheet = document.createElement('div');
-      sheet.className = 'quests-custom-outfit-sheet';
-      sheet.setAttribute('aria-label', GHAZBARAN_NICKNAME);
-      viewport.appendChild(sheet);
-    }
-    const facing = getGhazSpriteFacing(sprite);
-    const isIdle = sprite.classList.contains('idle');
-    const movingSheetUrl = getQuestItemsAssetUrl('ghaz-moving.png');
-    const idleSheetUrl = getQuestItemsAssetUrl('ghaz-idle.png');
-    const facingToX = {
-      north: '0%',
-      east: '33.333%',
-      south: '66.666%',
-      west: '100%'
-    };
-    const facingX = facingToX[facing] || facingToX.south;
-
-    sheet.setAttribute('data-facing', facing);
-    sheet.style.backgroundPositionX = facingX;
-    sheet.style.backgroundRepeat = 'no-repeat';
-    sheet.style.willChange = 'background-position';
-    if (isIdle) {
-      sheet.style.backgroundImage = `url("${idleSheetUrl}")`;
-      sheet.style.backgroundSize = '400% 100%';
-      sheet.style.backgroundPositionY = '0%';
-      sheet.style.animation = 'none';
-    } else {
-      sheet.style.backgroundImage = `url("${movingSheetUrl}")`;
-      sheet.style.backgroundSize = '400% 800%';
-      // 87.5% is the last valid row in an 8-row spritesheet.
-      sheet.style.animation = 'quests-ghaz-moving-frames 884ms steps(8) infinite';
-    }
-    try {
-      const tileHint = sprite.closest?.('[id^="tile-index-"]')?.id || 'unknown-tile';
-      const key = String(sprite.dataset?.customBattleNickname || '') || tileHint;
-      const state = isIdle ? 'idle' : 'moving';
-      ghazAnimLastStateByKey.set(key, `${state}|${facing}|${tileHint}`);
-    } catch (_) { /* noop */ }
-    return true;
-  }
-
-  function collectGhazOutfitSprites() {
-    const found = new Set();
-
-    document.querySelectorAll(`[data-name="${GHAZBARAN_NICKNAME}"] .sprite.outfit`).forEach((sprite) => {
-      found.add(sprite);
-    });
-
-    document.querySelectorAll(`[data-custom-battle-nickname="${GHAZBARAN_NICKNAME}"]`).forEach((el) => {
-      const sprite = el.classList?.contains('outfit') ? el : el.querySelector?.('.sprite.outfit');
-      if (sprite) found.add(sprite);
-    });
-
-    document.querySelectorAll('button[data-custom-battle-locked="1"]').forEach((button) => {
-      const nickEl = button.querySelector('[data-custom-battle-nickname]');
-      const nick = nickEl?.dataset?.customBattleNickname || button.dataset?.customBattleNickname || '';
-      if (nick !== GHAZBARAN_NICKNAME) return;
-      button.querySelectorAll('.sprite.outfit').forEach((sprite) => found.add(sprite));
-    });
-
-    const tile = document.getElementById(`tile-index-${GHAZBARAN_TILE_INDEX}`);
-    const tileBottom = tile?.style?.bottom || '';
-    const tileRight = tile?.style?.right || '';
-    if (tileBottom && tileRight) {
-      document.querySelectorAll('button[aria-roledescription="draggable"]').forEach((button) => {
-        if (button.style.bottom === tileBottom && button.style.right === tileRight) {
-          button.querySelectorAll('.sprite.outfit').forEach((sprite) => found.add(sprite));
-        }
-      });
-    }
-
-    const col = GHAZBARAN_TILE_INDEX % 15;
-    const row = Math.floor(GHAZBARAN_TILE_INDEX / 15);
-    const expectedTranslate = `calc(${col * 32}px * var(--zoomFactor)) calc(${row * 32}px * var(--zoomFactor))`;
-    document.querySelectorAll('button[aria-roledescription="draggable"]').forEach((button) => {
-      const translate = button.style.translate || '';
-      if (translate === expectedTranslate || translate.startsWith(expectedTranslate)) {
-        button.querySelectorAll('.sprite.outfit').forEach((sprite) => found.add(sprite));
-      }
-    });
-
-    tile?.querySelectorAll?.('.sprite.outfit')?.forEach((sprite) => found.add(sprite));
-
-    return [...found];
-  }
-
-  function getSpriteCustomBattleNickname(sprite) {
-    if (!sprite) return '';
-    const direct = sprite.dataset?.customBattleNickname;
-    if (direct) return String(direct);
-    const owner = sprite.closest?.('[data-custom-battle-nickname]');
-    if (owner?.dataset?.customBattleNickname) return String(owner.dataset.customBattleNickname);
-    const lockedButton = sprite.closest?.('button[data-custom-battle-locked="1"]');
-    if (lockedButton?.dataset?.customBattleNickname) return String(lockedButton.dataset.customBattleNickname);
-    return '';
-  }
-
-  function removeWrongGhazOutfitOverlays() {
-    document.querySelectorAll(`.sprite.outfit.${GHAZ_OUTFIT_OVERLAY_CLASS}`).forEach((sprite) => {
-      const nick = getSpriteCustomBattleNickname(sprite);
-      if (nick && nick === GHAZBARAN_NICKNAME) return;
-      sprite.classList.remove(GHAZ_OUTFIT_OVERLAY_CLASS);
-      delete sprite.dataset.questsGhazOutfit;
-      sprite.querySelectorAll('.quests-custom-outfit-sheet').forEach((sheet) => sheet.remove());
-    });
-  }
-
-  let ghazOutfitRefreshQueued = false;
-  function refreshGhazOutfitSprites() {
-    if (!playerTraveledToGhazHideout) return;
-    removeWrongGhazOutfitOverlays();
-    let targets = collectGhazOutfitSprites();
-    // Fallback: target only pieces on Ghaz's tile, not all locked pieces.
-    if (!targets.length) {
-      const ghazTile = document.getElementById(`tile-index-${GHAZBARAN_TILE_INDEX}`);
-      if (ghazTile) {
-        targets = [...ghazTile.querySelectorAll('.sprite.outfit')];
-      }
-    }
-    targets.forEach((sprite) => applyGhazOutfitToSprite(sprite));
-  }
-
-  function queueGhazOutfitRefresh() {
-    if (ghazOutfitRefreshQueued || !playerTraveledToGhazHideout) return;
-    ghazOutfitRefreshQueued = true;
-    requestAnimationFrame(() => {
-      ghazOutfitRefreshQueued = false;
-      refreshGhazOutfitSprites();
-    });
-  }
-
-  function startGhazOutfitObserver() {
-    stopGhazOutfitObserver();
-    ensureGhazOutfitSheetStyles();
-    refreshGhazOutfitSprites();
-    // Retry a few times — CustomBattles locks pieces after board DOM settles.
-    [80, 200, 500, 1000, 2000].forEach((delay) => {
-      setTimeout(() => {
-        if (playerTraveledToGhazHideout) refreshGhazOutfitSprites();
-      }, delay);
-    });
-    ghazOutfitObserver = new MutationObserver(() => {
-      queueGhazOutfitRefresh();
-    });
-    const root = document.querySelector('#board')
-      || document.querySelector('[class*="board"]')
-      || document.body;
-    ghazOutfitObserver.observe(root, {
-      childList: true,
-      subtree: true,
-      attributes: true,
-      attributeFilter: ['class', 'style', 'data-custom-battle-locked']
-    });
-  }
-
-  function stopGhazOutfitObserver() {
-    if (ghazOutfitObserver) {
-      ghazOutfitObserver.disconnect();
-      ghazOutfitObserver = null;
-    }
-    ghazOutfitRefreshQueued = false;
-    ghazAnimLastStateByKey.clear();
   }
 
   function createGhazbaranBattleInstance(roomId) {
@@ -31516,7 +31893,6 @@ function createNPCCooldownManager() {
   function cleanupGhazbaranBattle() {
     try {
       removeCustomBattleStatusToast();
-      stopGhazOutfitObserver();
       if (ghazbaranBattle) {
         ghazbaranBattle.cleanup(restoreBoardSetupGhazbaran, showQuestOverlays);
         ghazbaranBattle = null;
@@ -31531,13 +31907,9 @@ function createNPCCooldownManager() {
       ghazBattleWorld = null;
       ghazLastPseudoLavaholeTick = null;
       ghazLastPseudoLavahole2Tick = null;
-      ghazNativeDamageHpSampleLogged = false;
-      ghazNativeDamageEventCount = 0;
-      ghazNativeDamageDomEventCount = 0;
-      ghazNativeSpellDamageSample = null;
       if (ghazLavaholeInterval) { clearInterval(ghazLavaholeInterval); ghazLavaholeInterval = null; }
       ghazBossHpBar.remove();
-      document.getElementById(GHAZ_OUTFIT_STYLE_ID)?.remove();
+      document.getElementById(GHAZ_HIDEOUT_STYLE_ID)?.remove();
       console.log('[Quests Mod][Weakened Archdemon] Battle cleaned up');
     } catch (error) {
       console.error('[Quests Mod][Weakened Archdemon] Error cleaning up:', error);
@@ -31674,8 +32046,7 @@ function createNPCCooldownManager() {
         logGhazPlacementDebug('entry-onComplete');
         setTimeout(() => logGhazPlacementDebug('entry-onComplete+150ms'), 150);
         setTimeout(() => logGhazPlacementDebug('entry-onComplete+600ms'), 600);
-        startGhazOutfitObserver();
-        refreshGhazOutfitSprites();
+        ensureGhazHideoutStyles();
       }
     });
     return true;
@@ -31702,16 +32073,27 @@ function createNPCCooldownManager() {
     }
   }
 
+  let ghazBoardEntityCache = { at: 0, value: null };
   function getGhazbaranBoardEntity() {
+    // Called from the HP-bar poll and the Lavahole interval several times per second;
+    // the board entity doesn't change mid-fight, so a short TTL cache avoids repeated
+    // state.board.getSnapshot() + Array.find() churn. Stale across battles is fine —
+    // the TTL is 1s and the identifiers it matches on are re-checked after that.
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    if (ghazBoardEntityCache.value && (now - ghazBoardEntityCache.at) < 1000) {
+      return ghazBoardEntityCache.value;
+    }
     const boardContext = globalThis.state?.board?.getSnapshot?.()?.context;
     const boardConfig = Array.isArray(boardContext?.boardConfig) ? boardContext.boardConfig : [];
-    return boardConfig.find((entity) =>
+    const found = boardConfig.find((entity) =>
       entity?.villain === true
       && (
         entity?.nickname === GHAZBARAN_NICKNAME
         || String(entity?.key || '').startsWith(`ghazbaran-tile-${GHAZBARAN_TILE_INDEX}-`)
       )
     ) || null;
+    ghazBoardEntityCache = { at: now, value: found };
+    return found;
   }
 
   function debugAndTryApplyGhazHybridAbility() {
@@ -31874,16 +32256,10 @@ function createNPCCooldownManager() {
     };
     clean(ghazGameTimerDebugUnsub);
     clean(ghazNewGameDebugUnsub);
-    clean(ghazNativeDamageActorEnterUnsub);
     ghazGameTimerDebugUnsub = null;
     ghazNewGameDebugUnsub = null;
-    ghazNativeDamageActorEnterUnsub = null;
-    unpatchGhazNativeDamageTracking(ghazBattleWorld);
-    if (ghazNativeDamageDomObserver) {
-      ghazNativeDamageDomObserver.disconnect();
-      ghazNativeDamageDomObserver = null;
-    }
     if (ghazLavaholeInterval) { clearInterval(ghazLavaholeInterval); ghazLavaholeInterval = null; }
+    ghazBoardEntityCache = { at: 0, value: null };
     ghazBossHpBar.remove();
   }
 
@@ -32043,12 +32419,6 @@ function createNPCCooldownManager() {
     return Number.isFinite(tileIndex) ? tileIndex : null;
   }
 
-  function resolveGhazDamageSourceLabel(from) {
-    if (!from) return null;
-    if (typeof from === 'object') return getGhazActorDisplayLabel(from.owner || from);
-    return String(from);
-  }
-
   function summarizeGhazHpComponent(hp) {
     if (!hp || typeof hp !== 'object') return null;
     const publishKeys = Object.keys(hp).filter((key) => key.startsWith('on') && typeof hp[key]?.publish === 'function');
@@ -32064,287 +32434,6 @@ function createNPCCooldownManager() {
       hasCalculateAppliedDamage: typeof hp.calculateAppliedDamage === 'function',
       ownerLabel: getGhazActorDisplayLabel(hp.owner)
     };
-  }
-
-  function sanitizeGhazDamageOpts(opts) {
-    if (opts == null) return opts;
-    if (typeof opts === 'number') return { points: opts, _note: 'passed as raw number' };
-    const safe = {};
-    ['points', 'damageType', 'crit', 'rawPoints', 'overkill', 'skillId', 'abilityId', 'isAbility', 'isAutoAttack'].forEach((key) => {
-      if (opts[key] !== undefined) safe[key] = opts[key];
-    });
-    safe.from = resolveGhazDamageSourceLabel(opts.from);
-    safe.optsKeys = Object.keys(opts).slice(0, 25);
-    return safe;
-  }
-
-  function sanitizeGhazDamageResult(result) {
-    if (result == null) return result;
-    if (typeof result === 'number') return { applied: result };
-    if (typeof result !== 'object') return { value: result, type: typeof result };
-    const safe = { resultType: typeof result, resultKeys: Object.keys(result).slice(0, 20) };
-    ['damageType', 'crit', 'blocked', 'dodged', 'applied', 'calculatedDamage', 'damageToApply'].forEach((key) => {
-      if (result[key] !== undefined) safe[key] = result[key];
-    });
-    const numeric = Number(result);
-    if (Number.isFinite(numeric)) safe.numeric = numeric;
-    return safe;
-  }
-
-  function sanitizeGhazHpChangePayload(payload) {
-    if (!payload || typeof payload !== 'object') return payload;
-    const safe = {};
-    ['current', 'previous', 'damage', 'heal', 'points', 'damageType', 'crit', 'overkill'].forEach((key) => {
-      if (payload[key] !== undefined) safe[key] = payload[key];
-    });
-    safe.source = resolveGhazDamageSourceLabel(payload.source || payload.from);
-    safe.payloadKeys = Object.keys(payload).slice(0, 25);
-    return safe;
-  }
-
-  function describeGhazDamageDomNode(node) {
-    if (!node || node.nodeType !== 1) return null;
-    const rect = node.getBoundingClientRect?.();
-    return {
-      tag: node.tagName?.toLowerCase?.() || null,
-      id: node.id || null,
-      className: String(node.className || '').slice(0, 120),
-      text: String(node.textContent || '').trim().slice(0, 32),
-      ariaLabel: node.getAttribute?.('aria-label') || null,
-      parentTag: node.parentElement?.tagName?.toLowerCase?.() || null,
-      parentClass: String(node.parentElement?.className || '').slice(0, 80),
-      rect: rect ? {
-        left: Math.round(rect.left),
-        top: Math.round(rect.top),
-        w: Math.round(rect.width),
-        h: Math.round(rect.height)
-      } : null
-    };
-  }
-
-  function looksLikeGhazNativeDamageDomNode(node) {
-    if (!node || node.nodeType !== 1) return false;
-    const cls = String(node.className || '');
-    if (cls.includes('quests-pseudo-damage')) return false;
-    if (node.matches?.('canvas.font-outlined, .font-outlined-fill, .font-outlined')) return true;
-    const text = String(node.textContent || '').trim();
-    if (/^[-+]?\d+$/.test(text) && text.length <= 7) {
-      try {
-        const style = window.getComputedStyle(node);
-        if (style.position === 'fixed' || style.position === 'absolute') return true;
-      } catch (_) { /* noop */ }
-    }
-    return false;
-  }
-
-  function collectGhazFloatingDamageDomCandidates(root = document.body) {
-    if (!root?.querySelectorAll) return [];
-    const seen = new Set();
-    const out = [];
-    const push = (node) => {
-      if (!node || seen.has(node)) return;
-      seen.add(node);
-      out.push(node);
-    };
-    ['canvas.font-outlined', '.font-outlined-fill', '.font-outlined'].forEach((sel) => {
-      try { root.querySelectorAll(sel).forEach(push); } catch (_) { /* noop */ }
-    });
-    const battleRoot = document.getElementById('battle-area')
-      || document.querySelector('[data-battle-area]')
-      || root;
-    try {
-      battleRoot.querySelectorAll('div, span').forEach((el) => {
-        if (el.children.length > 0) return;
-        const text = String(el.textContent || '').trim();
-        if (!/^[-+]?\d+$/.test(text)) return;
-        const style = window.getComputedStyle(el);
-        if (style.position === 'fixed' || style.position === 'absolute') push(el);
-      });
-    } catch (_) { /* noop */ }
-    return out;
-  }
-
-  function findGhazNewDamageDomNodes(beforeNodes, afterNodes) {
-    const beforeSet = new Set(beforeNodes || []);
-    return (afterNodes || []).filter((node) => !beforeSet.has(node));
-  }
-
-  function logGhazNativeDamageDomNodes(label, nodes, extra = {}) {
-    if (!nodes?.length) return;
-    if (ghazNativeDamageDomEventCount >= GHAZ_NATIVE_DAMAGE_DOM_LOG_LIMIT) return;
-    ghazNativeDamageDomEventCount += 1;
-    console.log(`[Quests Mod][Weakened Archdemon][Debug][nativeDamage][${label}]`, {
-      ...extra,
-      nodes: nodes.map(describeGhazDamageDomNode).slice(0, 8)
-    });
-  }
-
-  function unpatchGhazNativeDamageTracking(world) {
-    const actors = getBattleWorldActors(world);
-    actors.forEach((actor) => {
-      const hp = actor?.hp;
-      if (!hp?.__ghazOrigApplyDamage) return;
-      hp.applyDamage = hp.__ghazOrigApplyDamage;
-      delete hp.__ghazOrigApplyDamage;
-      delete actor.__ghazNativeDamagePatched;
-      delete hp.__ghazHpChangeSubbed;
-    });
-  }
-
-  function subscribeGhazHpChangeDebug(actor) {
-    const hp = actor?.hp;
-    if (!hp?.onHpChange || typeof hp.onHpChange.subscribe !== 'function' || hp.__ghazHpChangeSubbed) return;
-    hp.__ghazHpChangeSubbed = true;
-    try {
-      hp.onHpChange.subscribe((payload) => {
-        if (!playerTraveledToGhazHideout || !ghazbaranBattle) return;
-        if (ghazNativeDamageEventCount >= GHAZ_NATIVE_DAMAGE_LOG_LIMIT) return;
-        ghazNativeDamageEventCount += 1;
-        console.log('[Quests Mod][Weakened Archdemon][Debug][nativeDamage] onHpChange', {
-          target: getGhazActorDisplayLabel(actor),
-          payload: sanitizeGhazHpChangePayload(payload)
-        });
-        if (getGhazActorDisplayLabel(actor).toLowerCase().includes(String(GHAZBARAN_NICKNAME).toLowerCase())) {
-          ghazBossHpBar.update(true);
-        }
-        requestAnimationFrame(() => {
-          const domNodes = collectGhazFloatingDamageDomCandidates();
-          logGhazNativeDamageDomNodes('onHpChange-dom-scan', domNodes.slice(-4), {
-            target: getGhazActorDisplayLabel(actor)
-          });
-        });
-      });
-    } catch (error) {
-      console.warn('[Quests Mod][Weakened Archdemon][Debug][nativeDamage] onHpChange subscribe failed:', error);
-    }
-  }
-
-  function patchGhazNativeDamageTracking(world) {
-    if (!world) return 0;
-    const actors = getBattleWorldActors(world);
-    let patched = 0;
-    actors.forEach((actor) => {
-      const hp = actor?.hp;
-      if (!hp || typeof hp.applyDamage !== 'function' || actor.__ghazNativeDamagePatched) return;
-
-      if (!ghazNativeDamageHpSampleLogged) {
-        ghazNativeDamageHpSampleLogged = true;
-        console.log('[Quests Mod][Weakened Archdemon][Debug][nativeDamage] HP component sample', {
-          actor: getGhazActorDisplayLabel(actor),
-          hp: summarizeGhazHpComponent(hp)
-        });
-      }
-
-      const origApplyDamage = hp.applyDamage.bind(hp);
-      hp.__ghazOrigApplyDamage = origApplyDamage;
-      hp.applyDamage = (opts = {}) => {
-        if (!playerTraveledToGhazHideout || !ghazbaranBattle) {
-          return origApplyDamage(opts);
-        }
-
-        const targetLabel = getGhazActorDisplayLabel(actor);
-        const beforeHp = hp._hp ?? hp.currentHP ?? null;
-        const domBefore = collectGhazFloatingDamageDomCandidates();
-        const shouldLog = ghazNativeDamageEventCount < GHAZ_NATIVE_DAMAGE_LOG_LIMIT;
-
-        let result;
-        let threw = null;
-        try {
-          result = origApplyDamage(opts);
-        } catch (error) {
-          threw = error;
-          throw error;
-        } finally {
-          if (shouldLog) {
-            ghazNativeDamageEventCount += 1;
-            const afterHp = hp._hp ?? hp.currentHP ?? null;
-            const logPayload = {
-              target: targetLabel,
-              source: resolveGhazDamageSourceLabel(opts?.from),
-              opts: sanitizeGhazDamageOpts(opts),
-              result: sanitizeGhazDamageResult(result),
-              hpBefore: beforeHp,
-              hpAfter: afterHp,
-              hpDelta: (Number.isFinite(beforeHp) && Number.isFinite(afterHp)) ? (afterHp - beforeHp) : null,
-              threw: threw ? String(threw?.message || threw) : null
-            };
-            const sourceLabel = logPayload.source || '';
-            if (
-              !ghazNativeSpellDamageSample
-              && sourceLabel.toLowerCase().includes(String(GHAZBARAN_NICKNAME).toLowerCase())
-              && Number.isFinite(Number(opts?.points))
-              && Number(opts.points) > 0
-            ) {
-              ghazNativeSpellDamageSample = {
-                damageType: opts.damageType || 'fire',
-                isAbility: opts.isAbility,
-                crit: opts.crit === true
-              };
-              console.log('[Quests Mod][Weakened Archdemon][Debug][nativeDamage] Captured Ghaz spell sample for pseudo spells', ghazNativeSpellDamageSample);
-            }
-            console.log('[Quests Mod][Weakened Archdemon][Debug][nativeDamage] applyDamage', logPayload);
-            if (targetLabel.toLowerCase().includes(String(GHAZBARAN_NICKNAME).toLowerCase())) {
-              ghazBossHpBar.update(true);
-            }
-            requestAnimationFrame(() => {
-              const domAfter = collectGhazFloatingDamageDomCandidates();
-              const newNodes = findGhazNewDamageDomNodes(domBefore, domAfter);
-              logGhazNativeDamageDomNodes('applyDamage-new-nodes', newNodes, {
-                target: targetLabel,
-                source: logPayload.source
-              });
-            });
-          }
-        }
-        return result;
-      };
-
-      subscribeGhazHpChangeDebug(actor);
-      actor.__ghazNativeDamagePatched = true;
-      patched += 1;
-    });
-    return patched;
-  }
-
-  function setupGhazNativeDamageDomObserver() {
-    if (ghazNativeDamageDomObserver) return;
-    ghazNativeDamageDomObserver = new MutationObserver((mutations) => {
-      if (!playerTraveledToGhazHideout || !ghazbaranBattle) return;
-      if (ghazNativeDamageDomEventCount >= GHAZ_NATIVE_DAMAGE_DOM_LOG_LIMIT) return;
-      mutations.forEach((mutation) => {
-        mutation.addedNodes.forEach((node) => {
-          if (node.nodeType !== 1) return;
-          if (looksLikeGhazNativeDamageDomNode(node)) {
-            logGhazNativeDamageDomNodes('mutation-added', [node]);
-            return;
-          }
-          node.querySelectorAll?.('canvas.font-outlined, .font-outlined-fill, .font-outlined, div, span').forEach((child) => {
-            if (looksLikeGhazNativeDamageDomNode(child)) {
-              logGhazNativeDamageDomNodes('mutation-child', [child]);
-            }
-          });
-        });
-      });
-    });
-    ghazNativeDamageDomObserver.observe(document.body, { childList: true, subtree: true });
-    console.log('[Quests Mod][Weakened Archdemon][Debug][nativeDamage] DOM observer started');
-  }
-
-  function scheduleGhazNativeDamageTracking(world, label = 'newGame') {
-    const run = (phase) => {
-      if (!playerTraveledToGhazHideout || !ghazbaranBattle) return;
-      const patched = patchGhazNativeDamageTracking(world || ghazBattleWorld);
-      if (patched > 0) {
-        console.log('[Quests Mod][Weakened Archdemon][Debug][nativeDamage] applyDamage hooks installed', {
-          phase,
-          patched
-        });
-      }
-    };
-    run(`${label}-immediate`);
-    [100, 400, 1000].forEach((delay) => {
-      setTimeout(() => run(`${label}+${delay}ms`), delay);
-    });
   }
 
   function buildGhazPseudoDamageOpts(sourceActor, points) {
@@ -32368,7 +32457,7 @@ function createNPCCooldownManager() {
     if (hpComp._isAlive === false || actor?.dead || actor?.isDead) return 0;
 
     const before = hpComp._hp ?? hpComp.currentHP ?? null;
-    const applyFn = hpComp.__ghazOrigApplyDamage || hpComp.applyDamage.bind(hpComp);
+    const applyFn = hpComp.applyDamage.bind(hpComp);
     const opts = buildGhazPseudoDamageOpts(sourceActor, dmg);
 
     try {
@@ -32613,11 +32702,6 @@ function createNPCCooldownManager() {
     cleanupGhazRuntimeDebugHooks();
     ghazLastDebugGameTimerState = null;
     ghazWorldEventDebugLogged = false;
-    ghazNativeDamageHpSampleLogged = false;
-    ghazNativeDamageEventCount = 0;
-    ghazNativeDamageDomEventCount = 0;
-    // Heavy DOM mutation observer disabled for performance.
-    // setupGhazNativeDamageDomObserver();
 
     ghazGameTimerDebugUnsub = null;
 
@@ -32688,10 +32772,7 @@ function createNPCCooldownManager() {
         ghazBattleWorld = event?.world || null;
         ghazLastPseudoLavaholeTick = null;
         ghazLastPseudoLavahole2Tick = null;
-        ghazNativeDamageHpSampleLogged = false;
-        ghazNativeDamageEventCount = 0;
-        ghazNativeDamageDomEventCount = 0;
-        ghazNativeSpellDamageSample = null;
+        ghazBoardEntityCache = { at: 0, value: null };
         if (ghazLavaholeInterval) { clearInterval(ghazLavaholeInterval); ghazLavaholeInterval = null; }
         // ghazBossHpBar shows/updates itself via its own newGame/emitNewGame subscription.
         patchGhazAbilityCooldownTo3s(event?.world || null);
@@ -34571,6 +34652,20 @@ function createNPCCooldownManager() {
             return;
           }
 
+          // Quest items with only a generic "take it to <NPC>" hint (Key to Magic →
+          // Tesha) must answer before the mission logic below, which matches "book".
+          const elathrielItemHint = getNpcQuestItemHintResponse(BOARD_NPC_ELATHRIEL_ID, text, playerName);
+          if (elathrielItemHint) {
+            cooldown.queueResponse(
+              text,
+              elathrielItemHint,
+              addMessageToConversation,
+              npcConfig.name,
+              ModalHelpers.getFarewellCloseCallback(text)
+            );
+            return;
+          }
+
           const askedElathrielMission = lower.includes('mission') || lower.includes('quest')
             || lower.includes('help') || lower.includes('hellgate') || lower.includes('library')
             || lower.includes('book') || lower.includes('bonelord')
@@ -34603,7 +34698,7 @@ function createNPCCooldownManager() {
                       getMissionDialogueLine(
                         DRACONIA_QUEST_MISSION,
                         'reward',
-                        'It is done, human. All of Draconia is quiet now. Take these 200 guild coins — the guild pays its debts.'
+                        'It is done, human. All of Draconia is quiet now. What woke in that last room left this behind — the Key to Magic. Keep it; the guild pays its debts.'
                       ),
                       addMessageToConversation,
                       npcConfig.name,

@@ -87,6 +87,13 @@ if (window.CustomBattles) {
                 idleUrl: 'ghaz-idle.png',
                 portraitUrl: 'ghaz-icon.gif', // dedicated single-frame icon for portraits/picker cards
                 movingUrl: 'ghaz-moving.png',
+                // Sheet geometry (see cellSize note on ensureCustomSpriteStyles). ghaz-idle.png
+                // is 256x64 (4 facings x 1 frame @ 64px); ghaz-moving.png is 256x512 (4 x 8 @ 64px).
+                // Dragon id-65 renders idle at 32px natively, so without these the idle pose
+                // squashes the instant the actor stops moving mid-battle.
+                cellSize: 64,
+                facings: 4,
+                idleFrameRows: 1,
                 movingFrameRows: 8,
                 movingFrameDurationMs: 2400 // matches Dragon's own native .outfit.id-34.moving timing
             },
@@ -155,11 +162,43 @@ if (window.CustomBattles) {
             }
             const overlayClass = getCustomSpriteOverlayClass(spriteDef.key);
             const idleUrl = getCustomSpriteAssetUrl(spriteDef.idleUrl).replace(/"/g, '\\"');
+            const movingRows = Number(spriteDef.movingFrameRows) || 1;
+
+            // When the registry entry declares its sheet geometry (cellSize), pin the native
+            // sizing custom properties (--size / --sWidth / --sHeight) for this sprite so it
+            // no longer inherits the base creature's own idle/moving cell-size split. Dragon
+            // id-65, for instance, renders idle at 32px but moving at 64px — a 64px custom
+            // idle sheet squashes into the 32px box the moment the actor stops moving in a
+            // real battle (the Map Editor only ever shows the moving-size state, which is why
+            // it looks fine there). Native still drives facing translate + the
+            // homogeneous-transition row stepping; we only feed it geometry that matches the
+            // custom art. Selectors are `.outfit.<overlayClass>.<state>` (0-3-0 specificity,
+            // injected after the bundle) so they win over `.outfit.id-N.<state>`.
+            const cellSize = Number(spriteDef.cellSize) || 0;
+            const facings = Number(spriteDef.facings) || 4;
+            const idleRows = Number(spriteDef.idleFrameRows) || 1;
+            let sizingRule = '';
+            if (cellSize > 0) {
+                sizingRule = `
+      .outfit.${overlayClass} { --size: ${cellSize}px !important; }
+      .outfit.${overlayClass}.idle {
+        --size: ${cellSize}px !important;
+        --sWidth: ${cellSize * facings}px !important;
+        --sHeight: ${cellSize * idleRows}px !important;
+      }`;
+                if (spriteDef.movingUrl) {
+                    sizingRule += `
+      .outfit.${overlayClass}.moving {
+        --size: ${cellSize}px !important;
+        --sWidth: ${cellSize * facings}px !important;
+        --sHeight: ${cellSize * movingRows}px !important;
+      }`;
+                }
+            }
 
             let movingRule = '';
             if (spriteDef.movingUrl) {
                 const movingUrl = getCustomSpriteAssetUrl(spriteDef.movingUrl).replace(/"/g, '\\"');
-                const movingRows = Number(spriteDef.movingFrameRows) || 1;
                 const durationMs = Number(spriteDef.movingFrameDurationMs) || 900;
                 movingRule = movingRows > 1
                     ? `
@@ -178,6 +217,7 @@ if (window.CustomBattles) {
         content: url("${idleUrl}") !important;
       }
       ${movingRule}
+      ${sizingRule}
     `;
             customSpriteStylesInjected.add(spriteDef.key);
         }
@@ -2967,7 +3007,7 @@ if (window.CustomBattles) {
              * Reverts any custom-sprite overlay (class + injected sheet div) whose piece is
              * no longer configured — e.g. the creature was removed from the tile, or its
              * customSpriteKey changed. Without this, an overlay tagged onto a sprite element
-             * stays there forever once added (mirrors Quests.js's removeWrongGhazOutfitOverlays).
+             * stays there forever once added.
              */
             removeStaleCustomSpriteOverlays(activeOverrides) {
                 const activePieces = activeOverrides || this.getOutfitSpriteOverrides();
