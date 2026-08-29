@@ -14,7 +14,8 @@
     "hellgate_library": "12. Hellgate Library (Elathriel's Hellgate Library, Sewers library reskin — battle starts when the Wrinkled Bonelord takes the book)",
     "draconia_tower": "12. Draconia Tower (Elathriel’s dragon-cemetery battle, Sewers reskin)",
     "isle_of_solitude": "12b. Isle of Solitude / GM Island (King Tibianus easter egg — empty walk-around sandbox, Sewers reskin)",
-    "draconia_quest": "13. Draconia Quest (Elathriel’s final Draconia battle, Sewers reskin — Dragonfetish return)"
+    "draconia_quest": "13. Draconia Quest (Elathriel’s final Draconia battle, Sewers reskin — Dragonfetish return)",
+    "realm_of_dreams": "14. Realm of Dreams (Tesha - Key to Magic, Sewers reskin, Fire Elementals)"
   },
   "mornenion": {
     "allyLimit": 3,
@@ -581,6 +582,7 @@
         "keyPrefix": "ghazbaran-tile-62-",
         "creatureName": "Dragon",
         "fallbackGameId": 35,
+        "customSpriteKey": "weakened-ghazbaran",
         "awakened": true,
         "level": 500,
         "tier": 2,
@@ -2267,6 +2269,223 @@
       139,
       140,
       141
+    ],
+    "allowedTilesMessage": "Ally creatures can only be placed on the marked tiles!"
+  },
+  "realm_of_dreams": {
+    "allyLimit": 6,
+    "preventVillainMovement": true,
+    "hideVillainSprites": true,
+    "villains": [
+      {
+        "nickname": "Fire Elemental",
+        "tileIndex": 50,
+        "keyPrefix": "fire-elemental-tile-50-",
+        "fallbackGameId": 30,
+        "level": 150,
+        "direction": "south",
+        "creatureName": "Fire Elemental",
+        "shiny": true,
+        "awakened": true,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Skullcracker Armor",
+          "gameId": 19
+        }
+      },
+      {
+        "nickname": "Fire Elemental",
+        "tileIndex": 56,
+        "keyPrefix": "fire-elemental-tile-56-",
+        "fallbackGameId": 30,
+        "level": 150,
+        "direction": "south",
+        "creatureName": "Fire Elemental",
+        "shiny": true,
+        "awakened": true,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Skullcracker Armor",
+          "gameId": 19
+        }
+      },
+      {
+        "nickname": "Fire Elemental",
+        "tileIndex": 67,
+        "keyPrefix": "fire-elemental-tile-67-",
+        "fallbackGameId": 30,
+        "level": 150,
+        "direction": "south",
+        "creatureName": "Fire Elemental",
+        "shiny": true,
+        "awakened": true,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Skullcracker Armor",
+          "gameId": 19
+        }
+      },
+      {
+        "nickname": "Fire Elemental",
+        "tileIndex": 69,
+        "keyPrefix": "fire-elemental-tile-69-",
+        "fallbackGameId": 30,
+        "level": 150,
+        "direction": "south",
+        "creatureName": "Fire Elemental",
+        "shiny": true,
+        "awakened": true,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Skullcracker Armor",
+          "gameId": 19
+        }
+      },
+      {
+        "nickname": "Fire Elemental",
+        "tileIndex": 79,
+        "keyPrefix": "fire-elemental-tile-79-",
+        "fallbackGameId": 30,
+        "level": 150,
+        "direction": "south",
+        "creatureName": "Fire Elemental",
+        "shiny": true,
+        "awakened": true,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Skullcracker Armor",
+          "gameId": 19
+        }
+      },
+      {
+        "nickname": "Fire Elemental",
+        "tileIndex": 99,
+        "keyPrefix": "fire-elemental-tile-99-",
+        "fallbackGameId": 30,
+        "level": 150,
+        "direction": "south",
+        "creatureName": "Fire Elemental",
+        "shiny": true,
+        "awakened": true,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Skullcracker Armor",
+          "gameId": 19
+        }
+      },
+      {
+        "nickname": "Fire Elemental",
+        "tileIndex": 101,
+        "keyPrefix": "fire-elemental-tile-101-",
+        "fallbackGameId": 30,
+        "level": 150,
+        "direction": "south",
+        "creatureName": "Fire Elemental",
+        "shiny": true,
+        "awakened": true,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Skullcracker Armor",
+          "gameId": 19
+        }
+      }
+    ],
+    "allowedTiles": [
+      35,
+      36,
+      37,
+      38,
+      39,
+      40,
+      41,
+      49,
+      50,
+      51,
+      52,
+      53,
+      54,
+      55,
+      56,
+      64,
+      65,
+      66,
+      67,
+      68,
+      69,
+      70,
+      71,
+      79,
+      80,
+      81,
+      82,
+      83,
+      84,
+      85,
+      86,
+      94,
+      95,
+      96,
+      97,
+      98,
+      99,
+      100,
+      101
     ],
     "allowedTilesMessage": "Ally creatures can only be placed on the marked tiles!"
   }

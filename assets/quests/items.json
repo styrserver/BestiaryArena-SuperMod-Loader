@@ -321,6 +321,20 @@
       "description": "A charm of knotted dragon-bone and scale, pressed into your hand by the Old Dragonlord of Draconia. It still smells faintly of ash.",
       "rarity": 4,
       "maxCount": 1
+    },
+    "keyToMagicBook": {
+      "productName": "Key to Magic (Book)",
+      "icon": "Book_(Draconia).gif",
+      "description": "It hints at a grand secret.",
+      "rarity": 3,
+      "maxCount": 1
+    },
+    "chayennesMagicalKey": {
+      "productName": "Chayenne's Magical Key",
+      "icon": "Chayenne's_Magical_Key.gif",
+      "description": "No one really knows where it leads to, but the dragon graveyard might reveal the secret - or not.",
+      "rarity": 5,
+      "maxCount": 1
     }
   },
   "creatureDrops": {
@@ -650,6 +664,16 @@
         "spectral stone",
         "spectral"
       ]
+    },
+    {
+      "id": "key_to_magic_book",
+      "productName": "Key to Magic (Book)",
+      "hintOnly": true,
+      "keywords": [
+        "key to magic (book)",
+        "key to magic book",
+        "key to magic"
+      ]
     }
   ],
   "questLogIcons": {
@@ -666,7 +690,9 @@
     "svenson_love_story": "Spool_of_Yarn.gif",
     "weakened_archdemon": "Orb.gif",
     "lost_oracle": "Life_Crystal.gif",
-    "draconia_tower": "Dragonfetish.gif"
+    "draconia_tower": "Dragonfetish.gif",
+    "draconia_quest": "Book_(Draconia).gif",
+    "realm_of_dreams": "Chayenne's_Magical_Key.gif"
   },
   "questLogSpriteIcons": {
     "king_crossing_the_line": 3538,
@@ -679,8 +705,7 @@
     "jakundaf_desert": 10294,
     "apprentice_sheng": 5300,
     "hellgate_part_1": 2970,
-    "hellgate_library": 3723,
-    "draconia_quest": 2469
+    "hellgate_library": 3723
   },
   "devTools": {
     "_comment": "Story-ordered grantable items for Quest Dev Tools. productId links to products{} for live names. receivedBefore rules: anyMissionAcceptedOrCompleted | missionCompleted | missionAcceptedOrCompleted | receivedFlagOrMissionCompleted | receivedFlagOrMissionAcceptedOrCompleted | missionFieldOrCompleted | missionAnyField | anyOf.",
@@ -1110,6 +1135,22 @@
           "type": "missionCompleted",
           "missionId": "draconia_tower"
         }
+      },
+      {
+        "key": "keyToMagicBook",
+        "productId": "keyToMagicBook",
+        "receivedBefore": {
+          "type": "missionCompleted",
+          "missionId": "draconia_quest"
+        }
+      },
+      {
+        "key": "chayennesMagicalKey",
+        "productId": "chayennesMagicalKey",
+        "receivedBefore": {
+          "type": "missionCompleted",
+          "missionId": "realm_of_dreams"
+        }
       }
     ]
   },
@@ -1366,6 +1407,10 @@
       {
         "productId": "key3012",
         "missionId": "draconia_quest"
+      },
+      {
+        "productId": "keyToMagicBook",
+        "missionId": "realm_of_dreams"
       }
     ],
     "soulCoreGrantOnComplete": [
@@ -1444,6 +1489,14 @@
       },
       {
         "productId": "dragonfetish",
+        "amount": 1
+      },
+      {
+        "productId": "keyToMagicBook",
+        "amount": 1
+      },
+      {
+        "productId": "chayennesMagicalKey",
         "amount": 1
       }
     ]

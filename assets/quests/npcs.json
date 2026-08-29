@@ -1025,6 +1025,7 @@
   },
   "questItems": {
     "king-tibianus": {
+      "key_to_magic_book": "The Key to Magic? No relic of my crown, and no scholar of mine can read it. Take it to Tesha in the Darama Oasis — she has given her life to the study of magic and ascension.",
       "honeyflower": "I require a honeyflower from Honeyflower Tower. Ask about missions if you would serve the crown.",
       "copper_key": "My copper key was lost in the mines. Ask about missions if you would retrieve it.",
       "map_to_mines": "That map should guide you to the mines where my copper key was lost.",
@@ -1061,6 +1062,7 @@
       "yarn": "Wyda in the swamps may have spun that yarn from spider silk — or a ferry captain might need it for repairs."
     },
     "al-dee": {
+      "key_to_magic_book": "Ha! I sell rope and shovels, not forbidden books. If anyone would want that, it's Tesha out in the Darama Oasis — she's mad for magic and ascension.",
       "small_axe": "Ah, my Small Axe! It fell into the cave waters while I fled minotaurs and goblins.",
       "light_shovel": "A handy reward for returning my axe — lighter than a shovel!",
       "elvenhair_rope": "My elvenhair rope was taken by elves! Ask about missions if you will help me find it.",
@@ -1093,6 +1095,7 @@
       "silver_token": "The king's starter coin? Present it when you hail King Tibianus."
     },
     "costello": {
+      "key_to_magic_book": "This book was never meant to be opened, Player, and it is beyond the wisdom of our order. Tesha, in the Darama Oasis, studies magic and ascension — show it to her.",
       "holy_tible": "The Holy Tible! Show it to me when the king sends you on the monks' study.",
       "costello_diary": "My diary tracks the seven seals of Ghostlands. Complete them and return to me.",
       "blessed_ankh": "The Blessed Ankh is earned when the seven seals are done. Then take it to Wyda in Venore.",
@@ -1125,6 +1128,7 @@
       "silver_token": "The king's silver token is presented when you first hail him."
     },
     "wyda": {
+      "key_to_magic_book": "Ooh, now THAT is interesting. Witch's magic is candlelight next to whatever that is. Take it to Tesha in the Darama Oasis — she's the one who dreams of ascension.",
       "blessed_ankh": "The Blessed Ankh! Costello sent you? Give it to me when you are on that task.",
       "spider_silk": "Spider silk from the mother of all spiders — bring it when you accept my task.",
       "old_widow_soul_core": "A soul core from the mother of all spiders. Keep it — I only needed the silk.",
@@ -1259,6 +1263,7 @@
       "silver_token": "Show the king's silver token when you hail King Tibianus."
     },
     "svenson": {
+      "key_to_magic_book": "I steer ships, not spells. If that book means anything to anyone, it's Tesha in the Darama Oasis — she studies magic and ascension.",
       "wishlist": "Santa handles wishlists in Folda. I handle ferries.",
       "christmas_present": "Ask Santa in Folda about presents. I can get you there by sea.",
       "present": "Presents are Santa's concern. Ferries are mine.",
@@ -1292,6 +1297,7 @@
       "orb": "A glowing orb from Dane's thanks — keep it safe ashore."
     },
     "dane": {
+      "key_to_magic_book": "Keep that closed at my bar, please. Tesha in the Darama Oasis is the one who studies magic and ascension — show it to her, not to me.",
       "orb": "That orb is yours for defeating Ghazbaran. May it serve you well.",
       "bunny_slippers": "Svenson promised me bunny slippers. Warm feet for a cold cellar!",
       "wishlist": "Wishlists belong with Santa Claus, not behind my bar.",
@@ -1323,6 +1329,9 @@
       "dragon_claw": "A dragon claw trophy! Impressive, but I prefer quiet evenings.",
       "map_to_mines": "That map leads to mines, not to my bar.",
       "silver_token": "Show the king's silver token when you hail him in Thais."
+    },
+    "elathriel": {
+      "key_to_magic_book": "That is no elven work, human, and it is beyond me. Tesha in the Darama Oasis has spent her life on magic and ascension — take it to her."
     }
   },
   "questItemUninvolvedTemplates": {
@@ -1335,6 +1344,7 @@
     "rookstayer": "I can't worry about {item} — Apprentice Sheng is the danger here!",
     "svenson": "I don't deal in {item}. I ferry passengers across the Nordic routes.",
     "dane": "I don't deal in {item}. Ask me about drinks, rumours, or this cellar.",
-    "the-oracle": "{item} has no bearing on your destiny, child."
+    "the-oracle": "{item} has no bearing on your destiny, child.",
+    "a-wrinkled-bonelord": "{item}? I have catalogued that as 'not my concern', two-eyes."
   }
 }
