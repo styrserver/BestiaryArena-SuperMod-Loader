@@ -4,6 +4,16 @@
   },
   "notes": [
     {
+      "version": "4.9.8",
+      "changes": [
+        {
+          "mod": "Quests",
+          "type": "changed",
+          "text": "Tweaked the placement area for one quest battle, removing a few tiles that were allowed for ally placement."
+        }
+      ]
+    },
+    {
       "version": "4.9.7",
       "changes": [
         {
