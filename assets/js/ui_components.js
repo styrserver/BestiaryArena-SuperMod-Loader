@@ -386,13 +386,26 @@ const DEBUG = false; // Set to true for development
     
     scrollView.addEventListener('scroll', handleScroll);
     updateScrollThumb();
-    
+
     // Return object with methods
     return {
       element: container,
       scrollView,
       contentContainer,
-      
+
+      // Optional teardown for mods that create/discard scroll containers repeatedly:
+      // drops the scroll listener and any pending rAF so nothing keeps the subtree alive.
+      destroy() {
+        scrollView.removeEventListener('scroll', handleScroll);
+        if (requestId) {
+          cancelAnimationFrame(requestId);
+          requestId = null;
+        }
+        if (container.parentNode) {
+          container.parentNode.removeChild(container);
+        }
+      },
+
       addContent(content) {
         if (typeof content === 'string') {
           const div = document.createElement('div');
