@@ -1840,10 +1840,10 @@ let DRACONIA_QUEST_BATTLE_DISPLAY_NAME = 'Draconia Quest';
 let DRACONIA_QUEST_BATTLE_ID = 'draconia_quest';
 let DRACONIA_QUEST_TILE_MUTATIONS = null;
 
-// Access the Realm of Dreams (Tesha — the Key to Magic. Chat-triggered teleport into
+// Realm of Dreams (Tesha — the Key to Magic. Chat-triggered teleport into
 // the Sewers, re-skinned as the burning Northern Dragon Lair. The book is consumed on
 // battle victory; the player then returns to Darama Oasis and Tesha closes the quest
-// for Chayenne's Magical Key, which a later quest uses to actually reach Chayenne.)
+// for a Mintwallin Prison Key found among the bones — King Tibianus has a hint about it.)
 let REALM_OF_DREAMS_BATTLE_ROOM_NAME = 'Sewers';
 let REALM_OF_DREAMS_BATTLE_ROOM_ID = 'rkswrs';
 let REALM_OF_DREAMS_BATTLE_DISPLAY_NAME = 'The Northern Dragon Lair';
@@ -2118,8 +2118,11 @@ const QUESTS_DEV_ITEM_CATALOG = [];
 const QUEST_ITEM_CLEANUP_RULES = [];
 const QUEST_ITEM_STALE_CLEANUP_RULES = [];
 const QUEST_DEV_COMPLETE_REWARD_RULES = [];
-// { productId, missionId } — grant the soul core to anyone who completed the mission but
-// has none in inventory. Filled from items.json → itemLifecycle.soulCoreGrantOnComplete.
+// { productId, missionId, removedByMissionId? } — grant the reward item (soul core, quest
+// key, …) to anyone who completed `missionId` but has none in inventory. Optional
+// `removedByMissionId`: skip the backfill once that follow-up mission has been accepted or
+// completed (for reward items a later quest consumes). Filled from items.json →
+// itemLifecycle.soulCoreGrantOnComplete.
 const QUEST_SOUL_CORE_GRANT_RULES = [];
 
 const COPPER_KEY_CONFIG = {};
@@ -2645,9 +2648,9 @@ function createNPCCooldownManager() {
   let draconiaQuestHitboxesApplied = false;
   let draconiaQuestSceneSub = null;
 
-  // Access the Realm of Dreams (Tesha: the Key to Magic. Teleport into the Sewers
+  // Realm of Dreams (Tesha: the Key to Magic. Teleport into the Sewers
   // reskinned as the burning Northern Dragon Lair; battle on entry, then return to
-  // Darama Oasis to hand back to Tesha for Chayenne's Magical Key).
+  // Darama Oasis to Tesha, who hands over a Mintwallin Prison Key found among the bones).
   let playerEnteredRealmOfDreams = false;
   let realmOfDreamsBattle = null;
   let realmOfDreamsHitboxesApplied = false;
@@ -8651,7 +8654,7 @@ function createNPCCooldownManager() {
         'Key 3012',
         'Beware of the Bonelords (Book)',
         'Key to Magic (Book)',
-        "Chayenne's Magical Key"
+        'Mintwallin Prison Key'
       ].includes(productName) || isBosstiaryCollectionItemName(productName);
 
       const newCount = isRedDragonMaterial ? Math.min(30, currentCount + amount) :
@@ -8741,6 +8744,13 @@ function createNPCCooldownManager() {
         const mission = MISSION_BY_ID[rule.missionId];
         if (!mission) continue;
         if (!(getMissionProgress(mission) || {}).completed) continue;
+        // A later quest may consume this reward item — once its follow-up mission is
+        // under way, stop re-granting what the player has legitimately spent.
+        if (rule.removedByMissionId) {
+          const followUp = MISSION_BY_ID[rule.removedByMissionId];
+          const followUpProgress = followUp ? (getMissionProgress(followUp) || {}) : null;
+          if (followUpProgress && (followUpProgress.accepted || followUpProgress.completed)) continue;
+        }
         const name = resolveQuestProductName(rule.productId);
         if (!name || getCachedQuestItemCount(name) > 0) continue;
         try {
@@ -15936,7 +15946,7 @@ function createNPCCooldownManager() {
       // directly, or asks for a "mission" once every earlier Tesha quest is wrapped
       // up. Saying "yes" sends the player down into the Northern Dragon Lair to put
       // out the fire guarding the way; the book is consumed on battle victory, and a
-      // further ask on return hands Chayenne's Magical Key over.
+      // further ask on return hands the Mintwallin Prison Key over.
       async function handleTeshaRealmOfDreams() {
         const realmProgress = getMissionProgress(REALM_OF_DREAMS_MISSION) || {};
 
@@ -15957,7 +15967,7 @@ function createNPCCooldownManager() {
           teshaCooldown.queueResponse(
             text,
             completed
-              ? getMissionDialogueLine(REALM_OF_DREAMS_MISSION, 'reward', "You put out a fire that has guarded the dragon graveyard for an age. Take this: Chayenne's Magical Key. When the time comes to walk into the Realm of Dreams and stand before Chayenne, it will carry you there.")
+              ? getMissionDialogueLine(REALM_OF_DREAMS_MISSION, 'reward', "You put out a fire that guarded the dragon graveyard for an age, and the way to the Realm of Dreams is clear at last. While you were down among the bones, this turned up in the ashes — a Mintwallin Prison Key. It means nothing to me, but King Tibianus of Thais knows every lock in his realm. Take it to him and ask.")
               : getMissionCommonLine('errorGeneric', 'Something went wrong. Please try again.'),
             addMessage,
             'Tesha',
@@ -28060,12 +28070,12 @@ function createNPCCooldownManager() {
   }
 
   // =======================
-  // Access the Realm of Dreams (Tesha — the Key to Magic. Chat-triggered teleport into
+  // Realm of Dreams (Tesha — the Key to Magic. Chat-triggered teleport into
   // the Sewers, re-skinned as the burning Northern Dragon Lair. Saying "yes" drops the
   // player into the battle; the Key to Magic (Book) is consumed on victory, after which
-  // they return to Darama Oasis and Tesha closes the mission for Chayenne's Magical Key
-  // (used by a later quest to actually reach Chayenne). Mirrors the Draconia Quest flow
-  // minus the companion NPC.)
+  // they return to Darama Oasis and Tesha closes the mission for a Mintwallin Prison Key
+  // found among the bones (King Tibianus has a hint line about it). Mirrors the Draconia
+  // Quest flow minus the companion NPC.)
   // =======================
 
   function getRealmOfDreamsLogPrefix() {
@@ -28212,7 +28222,7 @@ function createNPCCooldownManager() {
   }
 
   function getRealmOfDreamsRewardItemName() {
-    return getMissionRewardItemName(REALM_OF_DREAMS_MISSION, 'chayennesMagicalKey') || "Chayenne's Magical Key";
+    return getMissionRewardItemName(REALM_OF_DREAMS_MISSION, 'mintwallinPrisonKey') || 'Mintwallin Prison Key';
   }
 
   async function grantRealmOfDreamsReward() {

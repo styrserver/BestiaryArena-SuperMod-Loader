@@ -435,7 +435,7 @@ const CREATURE_GENE_ENGINE_MAX = 20;
 // matching the board's own default genes for a freshly placed villain/ally.
 const CREATURE_GENE_UI_DEFAULT = 100;
 const CREATURE_DIRECTIONS = ['south', 'north', 'east', 'west'];
-const CREATURE_EQUIP_STATS = ['hp', 'ad', 'ap', 'armor', 'magicResist'];
+const CREATURE_EQUIP_STATS = ['hp', 'ad', 'ap'];
 const CREATURE_EQUIP_TIER_DEFAULT = 5;
 const CREATURE_EQUIP_TIER_MIN = 1;
 const CREATURE_EQUIP_TIER_MAX = 5;
@@ -14657,23 +14657,222 @@ const TILE_KEYBOARD_NAV_DELTAS = {
   ArrowRight: [1, 0]
 };
 
+// Resolve which editor-added asset the battlefield hotkeys (PageUp/PageDown/Delete) act
+// on for a tile: the sprite whose inspector "Edit" panel is open if it belongs to this
+// tile, else the topmost editor-added main-layer sprite, else the last editor-added
+// floor-below sprite. Returns null when the tile has no editor asset.
+function resolveMapEditorHotkeyAsset(tileIndex) {
+  if (tileIndex == null) return null;
+
+  const editing = editorState.editingSprite;
+  if (editing && editing.tileIndex === tileIndex) {
+    if (editing.floorBelow) {
+      const configs = editorEdits.addedFloorBelowConfigs[tileIndex] || [];
+      if (editing.fbIndex != null && configs[editing.fbIndex]) {
+        return {
+          kind: 'floorBelow',
+          tileIndex,
+          fbIndex: editing.fbIndex,
+          liveId: editing.fromId ?? configs[editing.fbIndex]?.id ?? null
+        };
+      }
+    } else if (editing.layerIndex != null && resolveAddedSpriteAtLayer(tileIndex, editing.layerIndex)) {
+      return { kind: 'main', tileIndex, layerIndex: editing.layerIndex, liveId: editing.fromId ?? null };
+    }
+  }
+
+  const tileEl = getTileElement(tileIndex);
+  if (tileEl) {
+    const editable = getEditableTileSprites(tileIndex, tileEl);
+    for (let i = editable.length - 1; i >= 0; i -= 1) {
+      const sprite = editable[i];
+      if (isSpriteAddedOnTile(tileIndex, sprite, editable)) {
+        return {
+          kind: 'main',
+          tileIndex,
+          layerIndex: i,
+          liveId: getSpriteIdsFromElement(sprite)[0] ?? null,
+          sprite
+        };
+      }
+    }
+  }
+
+  const fbConfigs = editorEdits.addedFloorBelowConfigs[tileIndex] || [];
+  if (fbConfigs.length) {
+    return {
+      kind: 'floorBelow',
+      tileIndex,
+      fbIndex: fbConfigs.length - 1,
+      liveId: fbConfigs[fbConfigs.length - 1]?.id ?? null
+    };
+  }
+  return null;
+}
+
+/** Editable-layer index of the topmost editor-added main-layer sprite on a tile. */
+function findTopAddedMainLayerIndex(tileIndex) {
+  const tileEl = getTileElement(tileIndex);
+  if (!tileEl) return null;
+  const editable = getEditableTileSprites(tileIndex, tileEl);
+  for (let i = editable.length - 1; i >= 0; i -= 1) {
+    if (isSpriteAddedOnTile(tileIndex, editable[i], editable)) return i;
+  }
+  return null;
+}
+
+// PageUp = one floor up (toward the main layer), PageDown = one floor down (deeper into
+// the floor-below layers). `direction` is -1 for up, +1 for down. Returns true when the
+// keystroke was handled (and should be swallowed).
+function handleMapEditorAssetFloorHotkey(tileIndex, direction) {
+  const target = resolveMapEditorHotkeyAsset(tileIndex);
+  if (!target) return false;
+
+  const liveId = target.liveId;
+  let ok = false;
+  let nextEditing = null;
+
+  if (target.kind === 'main') {
+    if (direction < 0) {
+      setStatusMessage(t('mods.mapEditor.hotkeyFloorTopAlready', 'Asset is already on the main layer (floor 0).'));
+      return true;
+    }
+    ok = moveAddedSpriteToFloorBelow(tileIndex, target.layerIndex, 1);
+    if (ok) {
+      const fb = editorEdits.addedFloorBelowConfigs[tileIndex] || [];
+      nextEditing = { tileIndex, fromId: liveId, fbIndex: fb.length - 1, floorBelow: true };
+      setStatusMessage(t('mods.mapEditor.hotkeyFloorDownFirst', 'Asset moved to floor -1.'));
+    }
+  } else {
+    const configs = editorEdits.addedFloorBelowConfigs[tileIndex] || [];
+    const config = configs[target.fbIndex];
+    if (!config) return false;
+    const depth = clampFloorDepth(config.floor ?? 1);
+
+    if (direction > 0) {
+      if (depth >= 9) {
+        setStatusMessage(t('mods.mapEditor.hotkeyFloorBottomAlready', 'Asset is already on the lowest floor (-9).'));
+        return true;
+      }
+      ok = setFloorBelowSpriteDepth(tileIndex, target.fbIndex, depth + 1);
+      if (ok) {
+        nextEditing = { tileIndex, fromId: liveId, fbIndex: target.fbIndex, floorBelow: true };
+        setStatusMessage(t('mods.mapEditor.hotkeyFloorSet', 'Asset moved to floor -{n}.').replace('{n}', String(depth + 1)));
+      }
+    } else if (depth <= 1) {
+      ok = moveFloorBelowSpriteToMain(tileIndex, target.fbIndex);
+      if (ok) {
+        const layerIndex = findTopAddedMainLayerIndex(tileIndex);
+        nextEditing = layerIndex != null ? { tileIndex, fromId: liveId, layerIndex } : null;
+        setStatusMessage(t('mods.mapEditor.hotkeyFloorUpMain', 'Asset moved to the main layer (floor 0).'));
+      }
+    } else {
+      ok = setFloorBelowSpriteDepth(tileIndex, target.fbIndex, depth - 1);
+      if (ok) {
+        nextEditing = { tileIndex, fromId: liveId, fbIndex: target.fbIndex, floorBelow: true };
+        setStatusMessage(t('mods.mapEditor.hotkeyFloorSet', 'Asset moved to floor -{n}.').replace('{n}', String(depth - 1)));
+      }
+    }
+  }
+
+  if (ok) {
+    editorState.editingSprite = nextEditing;
+    editorState.editingCreatureTileIndex = null;
+    refreshInspector();
+  }
+  return true;
+}
+
+function deleteMapEditorCreatureViaHotkey(tileIndex) {
+  const ok = clearActorOnTile(tileIndex);
+  setStatusMessage(
+    ok
+      ? t('mods.mapEditor.removeCreatureOk', 'Creature removed from tile {tile}.').replace('{tile}', String(tileIndex))
+      : t('mods.mapEditor.removeCreatureFail', 'Could not remove creature.'),
+    !ok
+  );
+  if (ok) {
+    editorState.editingCreatureTileIndex = null;
+    editorState.editingSprite = null;
+    refreshInspector();
+  }
+  return true;
+}
+
+function mapEditorCreatureRemovableViaHotkey(tileIndex) {
+  return editorState.sandboxTestActive
+    && (editorPlacedVillains.has(tileIndex)
+      || (!editorEdits.mapCleaned && resolveCreatureGameId(getActorOnTile(tileIndex)) != null));
+}
+
+// Delete removes the resolved editor asset, or the placed creature when its editor panel
+// is open (or when the tile has a creature but no editor sprite to peel first).
+function handleMapEditorAssetDeleteHotkey(tileIndex) {
+  if (tileIndex == null) return false;
+
+  if (editorState.editingCreatureTileIndex === tileIndex && mapEditorCreatureRemovableViaHotkey(tileIndex)) {
+    return deleteMapEditorCreatureViaHotkey(tileIndex);
+  }
+
+  const target = resolveMapEditorHotkeyAsset(tileIndex);
+  if (target) {
+    let ok = false;
+    if (target.kind === 'floorBelow') {
+      ok = removeAddedFloorBelowSprite(tileIndex, target.fbIndex);
+    } else {
+      const sprite = resolveAddedSpriteAtLayer(tileIndex, target.layerIndex)?.sprite || target.sprite || null;
+      ok = sprite ? removeAddedSprite(sprite, tileIndex) : false;
+    }
+    setStatusMessage(
+      ok
+        ? t('mods.mapEditor.hotkeyAssetDeleted', 'Asset deleted.')
+        : t('mods.mapEditor.hotkeyAssetDeleteFail', 'Could not delete asset.'),
+      !ok
+    );
+    if (ok) {
+      editorState.editingSprite = null;
+      refreshInspector();
+    }
+    return true;
+  }
+
+  if (mapEditorCreatureRemovableViaHotkey(tileIndex)) {
+    return deleteMapEditorCreatureViaHotkey(tileIndex);
+  }
+  return false;
+}
+
 function handleMapEditorTileKeyboardNav(event) {
   if (!editorState.open || editorState.selectedTileIndex == null) return;
-  const delta = TILE_KEYBOARD_NAV_DELTAS[event.key];
-  if (!delta) return;
   if (isMapEditorKeyboardInputTarget(event.target) || isMapEditorKeyboardInputTarget(document.activeElement)) {
     return;
   }
 
-  const nextTileIndex = getTileIndexGridOffset(
-    editorState.selectedTileIndex,
-    delta[0],
-    delta[1]
-  );
-  if (nextTileIndex == null) return;
+  const delta = TILE_KEYBOARD_NAV_DELTAS[event.key];
+  if (delta) {
+    const nextTileIndex = getTileIndexGridOffset(
+      editorState.selectedTileIndex,
+      delta[0],
+      delta[1]
+    );
+    if (nextTileIndex == null) return;
+    event.preventDefault();
+    selectTile(nextTileIndex);
+    return;
+  }
 
-  event.preventDefault();
-  selectTile(nextTileIndex);
+  if (event.key === 'PageUp' || event.key === 'PageDown') {
+    if (handleMapEditorAssetFloorHotkey(editorState.selectedTileIndex, event.key === 'PageUp' ? -1 : 1)) {
+      event.preventDefault();
+    }
+    return;
+  }
+
+  if (event.key === 'Delete') {
+    if (handleMapEditorAssetDeleteHotkey(editorState.selectedTileIndex)) {
+      event.preventDefault();
+    }
+  }
 }
 
 function attachMapEditorTileKeyboardNav() {

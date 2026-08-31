@@ -2471,6 +2471,28 @@ function isWhitelistedModalContextActive() {
   return false;
 }
 
+/**
+ * True while the Map Editor (OT_Mods/Map_Editor.js) is open — panel, sandbox test, or a
+ * loaded custom-map DOM session. The editor binds its own battlefield hotkeys, so all
+ * Mod Settings hotkeys must stand down for the duration.
+ */
+function isMapEditorOpenForHotkeyBlocking() {
+  try {
+    if (typeof window.MapEditor?.isOpen === 'function' && window.MapEditor.isOpen() === true) {
+      return true;
+    }
+  } catch (_) {
+    // fall through to the DOM check
+  }
+  const panel = document.getElementById('map-editor-panel');
+  if (!panel) return false;
+  try {
+    return window.getComputedStyle(panel).display !== 'none';
+  } catch (_) {
+    return true;
+  }
+}
+
 function handleGlobalHotkeys(event) {
   if (!event || event.repeat) return;
   // Ignore synthetic keyboard events dispatched by mods/scripts.
@@ -2481,6 +2503,11 @@ function handleGlobalHotkeys(event) {
   if (event.ctrlKey || event.metaKey || event.altKey) return;
   if (isTypingIntoInput(event.target)) return;
   if (isAnyModalOpenForHotkeyBlocking() && !isWhitelistedModalContextActive()) return;
+  // The Map Editor owns the keyboard while it is open (tile nav, PageUp/PageDown floor
+  // moves, Delete) — every Mod Settings hotkey would collide, and this listener runs
+  // first on window-capture and would stopPropagation() the key before the editor sees
+  // it. Bail out entirely so the editor's own handler gets the event.
+  if (isMapEditorOpenForHotkeyBlocking()) return;
 
   const pressedId = normalizeHotkeyIdentifierFromKey(event.key);
   if (!pressedId) return;

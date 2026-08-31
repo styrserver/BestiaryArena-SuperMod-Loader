@@ -4,6 +4,36 @@
   },
   "notes": [
     {
+      "version": "4.9.10",
+      "changes": [
+        {
+          "mod": "Map Editor",
+          "type": "added",
+          "text": "Battlefield hotkeys for the selected tile: PageUp / PageDown move its asset up or down a floor, and Delete removes it (or a placed creature). Acts on the asset whose Edit panel is open, otherwise the tile's top asset."
+        },
+        {
+          "mod": "Map Editor",
+          "type": "changed",
+          "text": "Removed ARMOR and MAGIC RESIST from the equipment stat options for placed creatures; only HP, AD and AP can be chosen now."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "changed",
+          "text": "All keyboard hotkeys now stand down while the Map Editor is open, so they no longer collide with the editor's own tile and asset shortcuts."
+        },
+        {
+          "mod": "Quests",
+          "type": "changed",
+          "text": "Reworked a late-game quest's reward item and its follow-up hint, and shortened one mission title."
+        },
+        {
+          "mod": "Quests",
+          "type": "fixed",
+          "text": "That reward item is now capped at one per account and is granted retroactively to anyone who already finished the quest without it in their inventory."
+        }
+      ]
+    },
+    {
       "version": "4.9.9",
       "changes": [
         {
