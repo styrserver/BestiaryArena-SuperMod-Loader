@@ -1,0 +1,41 @@
+{
+  "_sections": {
+    "timing": "1. Polling, retry, and NPC chat delays (ms)",
+    "modal": "2. Quest mod modal dimensions",
+    "ui": "3. Shared UI chrome (frames, cursors, row heights)",
+    "firebase": "4. Firebase Realtime Database base URL"
+  },
+
+  "timing": {
+    "buttonCheckInterval": 1000,
+    "buttonRetryMax": 8,
+    "buttonRetryDelay": 200,
+    "observerDebounceDelay": 100,
+    "npcChatResponseDelayMs": 1000,
+    "npcChatMultiLineDelayMs": 2000,
+    "npcModalCloseDelayMs": 1000,
+    "kingTibianusSwearCloseDelayMs": 2000
+  },
+
+  "modal": {
+    "viewportPadding": 16,
+    "minWidth": 280,
+    "minHeight": 160,
+    "kingTibianus": { "width": 450, "height": 500, "minHeight": 320 },
+    "arenaLeaderboard": { "width": 500, "minHeight": 260, "maxHeight": 500 },
+    "npcChat": { "width": 450, "height": 280, "minHeight": 240 },
+    "questItems": { "width": 450, "height": 280, "minHeight": 240 }
+  },
+
+  "ui": {
+    "kingChatRowHeight": 90,
+    "questAccessCursor": "pointer",
+    "questAccessTileTitle": "Right-click",
+    "gameFrameBorderImage": "url(\"https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png\") 4 stretch",
+    "gameFrameBackground": "url(\"https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png\")"
+  },
+
+  "firebase": {
+    "firebaseUrl": "https://vip-list-messages-default-rtdb.europe-west1.firebasedatabase.app"
+  }
+}
