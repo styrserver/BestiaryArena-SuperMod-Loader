@@ -5,27 +5,12 @@ if (typeof window.browser === 'undefined') {
 
 window.browserAPI = window.browserAPI || (typeof browser !== 'undefined' ? browser : (typeof chrome !== 'undefined' ? chrome : null));
 
-// Global Debug Flag System
-// Read initial debug setting from localStorage
-window.BESTIARY_DEBUG = localStorage.getItem('bestiary-debug') === 'true';
-
-// Dynamic console.log override that checks flag on each call
-const originalLog = console.log;
-console.log = function(...args) {
-  if (window.BESTIARY_DEBUG) {
-    originalLog.apply(console, args);
-  }
-};
-
-// Also override console.log in the page context immediately
-if (typeof window !== 'undefined') {
-  window.BESTIARY_DEBUG = localStorage.getItem('bestiary-debug') === 'true';
-  const pageOriginalLog = window.console.log;
-  window.console.log = function(...args) {
-    if (window.BESTIARY_DEBUG) {
-      pageOriginalLog.apply(window.console, args);
-    }
-  };
+// Console verbosity is owned by content/ba-logger.js (loaded before this file in
+// the manifest); it also keeps `window.BESTIARY_DEBUG` (legacy alias) in sync with
+// the `verbose` level. Only seed it if ba-logger somehow has not run yet.
+if (typeof window.BESTIARY_DEBUG === 'undefined') {
+  window.BESTIARY_DEBUG = localStorage.getItem('ba-log-level') === 'verbose'
+    || (localStorage.getItem('bestiary-debug') === 'true' && !localStorage.getItem('ba-log-level'));
 }
 
 // Content Script Injector for Bestiary Arena Mod Loader
@@ -369,30 +354,9 @@ window.addEventListener('message', function(event) {
 // Initialization
 if (window.DEBUG) console.log('Starting script injection sequence...');
 
-// Inject debug override directly into page context
-const debugOverrideScript = document.createElement('script');
-debugOverrideScript.textContent = `
-  // Global Debug Flag System for Mod Console Logs
-  window.BESTIARY_DEBUG = localStorage.getItem('bestiary-debug') === 'true';
-  
-  // Override console.log in page context
-  const originalLog = console.log;
-  console.log = function(...args) {
-    if (window.BESTIARY_DEBUG) {
-      originalLog.apply(console, args);
-    }
-  };
-  
-  // Listen for debug mode changes
-  window.addEventListener('message', function(event) {
-    if (event.source !== window) return;
-    if (event.data && event.data.from === 'BESTIARY_EXTENSION' && event.data.action === 'updateDebugMode') {
-      window.BESTIARY_DEBUG = event.data.enabled;
-      console.log('Debug mode updated to:', window.BESTIARY_DEBUG ? 'enabled' : 'disabled');
-    }
-  });
-`;
-document.head.appendChild(debugOverrideScript);
+// Page-context console verbosity and the `window.BESTIARY_DEBUG` alias are owned by
+// content/ba-logger.js (injected first into the MAIN world by injector.js). No
+// console.log override or updateDebugMode bridge is installed here.
 
 loadScripts();
 

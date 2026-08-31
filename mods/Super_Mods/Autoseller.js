@@ -161,6 +161,7 @@
     
     // Global references for cleanup
     let originalFetch = null;
+    let autosellerFetchWrapper = null;
     let messageListener = null;
     let menuColorObserver = null; // MutationObserver for menu color updates
     let autosellerModalLayoutCleanup = null;
@@ -6791,7 +6792,7 @@
         if (!window.fetch) return;
         
         originalFetch = window.fetch;
-        window.fetch = function(...args) {
+        autosellerFetchWrapper = function(...args) {
             const [url, options] = args;
             const urlStr = typeof url === 'string' ? url : (url && typeof url.url === 'string' ? url.url : '');
             
@@ -6889,7 +6890,7 @@
             
             return originalFetch.apply(this, args);
         };
-        
+        window.fetch = autosellerFetchWrapper;
     }
 
     function isTabVisible() {
@@ -12178,6 +12179,10 @@
                             console.warn('[Autoseller] Error unsubscribing pending game-end inventory watcher:', error);
                         }
                     }
+
+                    // Held a reference to the last battle's `game.world.onGameEnd` emitter
+                    // (the .once() handlers self-remove, but this kept the world object alive).
+                    gameEndSubscription = null;
                     
                     // 2. Set cleanup flag and clear all timers
                     isCleaningUp = true;
@@ -12325,11 +12330,13 @@
                     lastAutocollectTime = 0;
                     isCollecting = false;
                     
-                    // 8. Restore global state
-                    if (originalFetch) {
+                    // 8. Restore global state — only if our wrapper is still the current
+                    //    fetch (a mod that patched on top of us owns it now; don't clobber).
+                    if (originalFetch && (autosellerFetchWrapper == null || window.fetch === autosellerFetchWrapper)) {
                         window.fetch = originalFetch;
-                        originalFetch = null;
                     }
+                    originalFetch = null;
+                    autosellerFetchWrapper = null;
                     if (messageListener) {
                         window.removeEventListener('message', messageListener);
                         messageListener = null;

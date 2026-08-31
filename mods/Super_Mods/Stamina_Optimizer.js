@@ -2136,8 +2136,12 @@ function stopStaminaMonitoring() {
         clearTimeout(staminaReadyTimer);
         staminaReadyTimer = null;
     }
-    if (typeof staminaPlayerUnsub === 'function') {
-        try { staminaPlayerUnsub(); } catch (_) { /* ignore */ }
+    if (staminaPlayerUnsub) {
+        // player.subscribe() may return a bare function OR an { unsubscribe } object.
+        try {
+            if (typeof staminaPlayerUnsub === 'function') staminaPlayerUnsub();
+            else if (typeof staminaPlayerUnsub.unsubscribe === 'function') staminaPlayerUnsub.unsubscribe();
+        } catch (_) { /* ignore */ }
         staminaPlayerUnsub = null;
     }
     if (window.staminaOptimizerRefillInterval) {

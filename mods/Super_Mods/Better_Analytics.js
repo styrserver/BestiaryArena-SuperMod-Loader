@@ -1080,7 +1080,11 @@
     function unsubscribeAll(subs) {
         for (const sub of subs || []) {
             try {
-                if (sub && typeof sub.unsubscribe === 'function') sub.unsubscribe();
+                // Store/emitter .subscribe() returns either an object with .unsubscribe()
+                // or a bare unsubscribe function (e.g. board.select(fn).subscribe(cb)).
+                // Handle both — previously bare-function unsubscribers were silently skipped.
+                if (typeof sub === 'function') sub();
+                else if (sub && typeof sub.unsubscribe === 'function') sub.unsubscribe();
             } catch { /* ignore */ }
         }
     }
@@ -1122,6 +1126,8 @@
 
             modLifecycleHandlersSetup = false;
             teardownModCoordination();
+            // Reset the module-load guard so a re-enable / soft reload re-runs the body.
+            try { delete window.__betterAnalyticsLoaded; } catch (_) { window.__betterAnalyticsLoaded = false; }
         } catch (error) {
             console.error(`[${modName}][ERROR][cleanup] Error during cleanup:`, error);
         }

@@ -4911,6 +4911,17 @@ context.exports = {
   cleanup: () => {
     uninstallXpDebugFetchHook();
     clearBoardAnalyzerModalLayoutCleanup();
+    // Abort a running analysis and tear down its resources (turbo mode, its gameTimer
+    // speedup subscription + timer interval, the gameStateTracker subscription) — the
+    // per-run cleanup only fires when a run completes/aborts naturally, not on mod disable.
+    try {
+      if (analysisState && analysisState.isRunning()) {
+        analysisState.stop();
+      }
+      cleanupAnalysisResources(analysisState?.currentId);
+    } catch (error) {
+      console.warn('[Board Analyzer] Error tearing down analysis on cleanup:', error);
+    }
     modalManager.closeAll();
     // Unregister from coordination system
     if (window.ModCoordination) {

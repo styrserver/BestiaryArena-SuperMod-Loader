@@ -3277,7 +3277,9 @@ function cleanupMapShortcuts() {
 
   if (mapShortcutsSubscription) {
     try {
-      mapShortcutsSubscription();
+      // board.subscribe() returns an { unsubscribe } object here, not a bare function.
+      if (typeof mapShortcutsSubscription === 'function') mapShortcutsSubscription();
+      else if (typeof mapShortcutsSubscription.unsubscribe === 'function') mapShortcutsSubscription.unsubscribe();
     } catch (error) {
       console.warn('[Setup Manager] Error unsubscribing map shortcuts listener:', error);
     }
@@ -3359,6 +3361,7 @@ waitForGame();
 // Clean up when the mod is disabled
 function cleanup() {
   cancelPendingDeleteConfirmation();
+  clearSetupManagerModalLayoutCleanup();
 
   if (activeModal && typeof activeModal.close === 'function') {
     try {

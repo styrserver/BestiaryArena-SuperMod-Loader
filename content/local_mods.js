@@ -362,6 +362,7 @@ function whenModApiReady(callback) {
   const runOnce = () => {
     if (done) return;
     done = true;
+    document.removeEventListener('bestiary-mod-api-ready', onReady);
     callback();
   };
 
@@ -382,6 +383,9 @@ function whenModApiReady(callback) {
       if (isModApiReadyForExecution() || window.BestiaryModAPI) {
         console.warn('[Local Mods] Relaxed loader: API wait timeout, proceeding');
         runOnce();
+      } else {
+        // Give-up branch: drop the listener so it can't leak if the event never fires.
+        document.removeEventListener('bestiary-mod-api-ready', onReady);
       }
     }, 5000);
   }
@@ -1040,23 +1044,34 @@ async function executeLocalMod(modNameOrObject, forceExecution = false) {
       console.warn(`Mod API UI not ready yet, will retry executing mod: ${modName}`);
       
       let retryCount = 0;
+      let retryDone = false;
       const maxRetries = 20;
+      const finishRetry = () => {
+        if (retryDone) return;
+        retryDone = true;
+        document.removeEventListener('bestiary-mod-api-ready', onReady);
+        executeLocalMod(modNameOrObject, forceExecution);
+      };
       const checkAndExecute = () => {
+        if (retryDone) return;
         retryCount++;
         if (isModApiReadyForExecution()) {
           console.log(`Mod API UI ready on retry ${retryCount}, executing mod: ${modName}`);
-          executeLocalMod(modNameOrObject, forceExecution);
+          finishRetry();
         } else if (retryCount < maxRetries) {
           setTimeout(checkAndExecute, 300);
         } else {
+          retryDone = true;
+          document.removeEventListener('bestiary-mod-api-ready', onReady);
           console.error(`Mod API UI not ready after ${maxRetries} retries, giving up on mod: ${modName}`);
         }
       };
-      
+
       const onReady = () => {
         document.removeEventListener('bestiary-mod-api-ready', onReady);
+        if (retryDone) return;
         if (isModApiReadyForExecution()) {
-          executeLocalMod(modNameOrObject, forceExecution);
+          finishRetry();
         } else {
           setTimeout(checkAndExecute, 300);
         }
@@ -1107,7 +1122,10 @@ async function executeLocalMod(modNameOrObject, forceExecution = false) {
               config: modConfig,
               api: window.BestiaryModAPI,
               // Add debug flag to context
-              BESTIARY_DEBUG: window.BESTIARY_DEBUG || localStorage.getItem('bestiary-debug') === 'true'
+              BESTIARY_DEBUG: window.BESTIARY_DEBUG || localStorage.getItem('bestiary-debug') === 'true',
+              // Seed exports so a bare `exports = {…}` inside `with (context)` binds to
+              // THIS property (and `return context.exports` sees it), not a stray global.
+              exports: {}
             };
             
             const scriptFunction = new Function('context', `
@@ -1153,7 +1171,9 @@ async function executeLocalMod(modNameOrObject, forceExecution = false) {
         config: { enabled: mod.enabled },
         api: window.BestiaryModAPI,
         // Add debug flag to context
-        BESTIARY_DEBUG: window.BESTIARY_DEBUG || localStorage.getItem('bestiary-debug') === 'true'
+        BESTIARY_DEBUG: window.BESTIARY_DEBUG || localStorage.getItem('bestiary-debug') === 'true',
+        // See note above: seed exports so bare `exports = {…}` binds to context.exports.
+        exports: {}
       };
       
       const scriptFunction = new Function('context', `
@@ -1337,8 +1357,35 @@ function resetCompletionSignal() {
   window.BestiaryUIComponents?.resetLoaderFailureHandled?.();
 }
 
+// Call one executed mod's exports.cleanup(), swallowing any error/rejection.
+function runExecutedModCleanup(modName) {
+  const cleanup = executedMods[modName]?.exports?.cleanup;
+  if (typeof cleanup !== 'function') return;
+  try {
+    const result = cleanup();
+    if (result && typeof result.catch === 'function') {
+      result.catch((err) => console.error(`[Local Mods] ${modName} cleanup() rejected:`, err));
+    }
+  } catch (err) {
+    console.error(`[Local Mods] ${modName} cleanup() threw:`, err);
+  }
+}
+
+// Tear down every executed mod before a soft reload re-runs their bodies — otherwise
+// each reload duplicates every listener / timer / observer / subscription the mods set up.
+function runAllExecutedModCleanups(reason) {
+  const names = Object.keys(executedMods);
+  if (names.length === 0) return;
+  console.log(`[Local Mods] Running cleanup for ${names.length} mod(s) before ${reason}`);
+  // Reverse of load order: unwind in the opposite order things were set up.
+  for (const modName of names.reverse()) {
+    runExecutedModCleanup(modName);
+  }
+}
+
 document.addEventListener('reloadLocalMods', () => {
   console.log('[Local Mods] Reloading...');
+  runAllExecutedModCleanups('reload');
   window.localMods = [];
   executedMods = {};
   initializationPromise = null; // Reset initialization promise
@@ -1469,13 +1516,20 @@ window.addEventListener('message', function(event) {
       const modIndex = window.localMods.findIndex(mod => mod.name === modName);
       if (modIndex !== -1) {
         window.localMods[modIndex].enabled = enabled;
-        
-        // If mod was disabled, no action needed
-        // If mod was enabled, we should execute it if not already executed
+
         if (enabled && !executedMods[modName]) {
+          // Re-enable: run it if it hasn't been executed yet.
           executeLocalMod(modName).catch(error => {
             console.error(`Error auto-executing mod ${modName}:`, error);
           });
+        } else if (!enabled && executedMods[modName]) {
+          // Disable: actually tear the mod down (it used to keep running). Mods that
+          // wire their own updateLocalModState listener may also self-clean — every
+          // audited cleanup() is idempotent and this call is error-swallowed, so a
+          // double call is harmless. Drop the record so a re-enable re-runs the body.
+          console.log(`[Local Mods] Disabling ${modName} — running cleanup()`);
+          runExecutedModCleanup(modName);
+          delete executedMods[modName];
         }
       } else {
         console.error(`Cannot update state: mod ${modName} not found in local mods list`);

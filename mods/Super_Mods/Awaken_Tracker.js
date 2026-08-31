@@ -1840,8 +1840,11 @@
             farmerDepletionObserver.disconnect();
             farmerDepletionObserver = null;
         }
-        if (typeof farmerDepletionPlayerUnsub === 'function') {
-            try { farmerDepletionPlayerUnsub(); } catch (_) { /* ignore */ }
+        if (farmerDepletionPlayerUnsub) {
+            try {
+                if (typeof farmerDepletionPlayerUnsub === 'function') farmerDepletionPlayerUnsub();
+                else if (typeof farmerDepletionPlayerUnsub.unsubscribe === 'function') farmerDepletionPlayerUnsub.unsubscribe();
+            } catch (_) { /* ignore */ }
             farmerDepletionPlayerUnsub = null;
         }
         if (farmerDepletionSafetyTimer) {
@@ -1863,8 +1866,11 @@
             clearInterval(farmerStaminaSafetyTimer);
             farmerStaminaSafetyTimer = null;
         }
-        if (typeof farmerStaminaPlayerUnsub === 'function') {
-            try { farmerStaminaPlayerUnsub(); } catch (_) { /* ignore */ }
+        if (farmerStaminaPlayerUnsub) {
+            try {
+                if (typeof farmerStaminaPlayerUnsub === 'function') farmerStaminaPlayerUnsub();
+                else if (typeof farmerStaminaPlayerUnsub.unsubscribe === 'function') farmerStaminaPlayerUnsub.unsubscribe();
+            } catch (_) { /* ignore */ }
             farmerStaminaPlayerUnsub = null;
         }
         if (farmerStaminaVisibilityHandler) {

@@ -3217,7 +3217,10 @@
             previousDust = numericDust;
           });
         
-        dustDisplay._unsubscribe = subscription.unsubscribe;
+        // .select(fn).subscribe(cb) returns a bare unsubscribe function, not { unsubscribe }
+        dustDisplay._unsubscribe = (typeof subscription === 'function')
+          ? subscription
+          : subscription?.unsubscribe?.bind(subscription);
         
         // Subscribe to capacity changes (only for initial load, then ignore state updates)
         let previousEquipsLength = currentCapacity;
@@ -3252,7 +3255,9 @@
             previousEquipsLength = numericLength;
           });
         
-        capacityDisplay._unsubscribe = capacitySubscription.unsubscribe;
+        capacityDisplay._unsubscribe = (typeof capacitySubscription === 'function')
+          ? capacitySubscription
+          : capacitySubscription?.unsubscribe?.bind(capacitySubscription);
       }
       
       console.log('Dust display injected successfully');

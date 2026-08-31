@@ -1953,6 +1953,11 @@ exports = {
 exports.cleanup = function() {
   console.log('[Highscores] Running cleanup...');
 
+  // Close an open map-row context menu (its ESC keydown + document mousedown-capture
+  // listeners are removed only by closeMenu()).
+  if (highscoresOpenContextMenu?.closeMenu) {
+    try { highscoresOpenContextMenu.closeMenu(); } catch (_) { /* ignore */ }
+  }
   closeHighscoresModal();
 
   if (api?.ui?.removeButton) {

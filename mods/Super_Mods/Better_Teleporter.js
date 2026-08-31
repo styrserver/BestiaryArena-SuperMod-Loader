@@ -3627,6 +3627,8 @@
     document.getElementById(TABLE_STYLE_ID)?.remove();
 
     delete window.__betterTeleporterOpen;
+    // Reset the module-load guard so a re-enable / soft reload re-runs the body.
+    try { delete window.__betterTeleporterLoaded; } catch (_) { window.__betterTeleporterLoaded = false; }
     console.log('[Better Teleporter] cleaned up');
   }
 

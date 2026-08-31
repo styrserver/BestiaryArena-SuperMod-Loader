@@ -12997,14 +12997,15 @@ exports = {
           const playerKey = playerName.toLowerCase();
           if (playerName === 'all-chat') {
             removeScrollDetection(panel, { handlerKey: '_scrollHandler' });
-            // Remove All Chat MutationObserver
-            if (panel._toggleButtonObserver) {
-              panel._toggleButtonObserver.disconnect();
-              panel._toggleButtonObserver = null;
-            }
           } else {
             // Remove conversation scroll handlers
             removeScrollDetection(panel, { handlerKey: `_scrollHandler_conversation_${playerKey}` });
+          }
+          // Disconnect the actions-column width MutationObserver on every panel that
+          // has one (previously only done for the all-chat panel).
+          if (panel._toggleButtonObserver) {
+            panel._toggleButtonObserver.disconnect();
+            panel._toggleButtonObserver = null;
           }
           // Remove guild chat scroll handlers if any
           for (const key of Object.keys(panel)) {

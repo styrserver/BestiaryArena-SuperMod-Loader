@@ -4092,17 +4092,15 @@
   // Start initialization
   initializeAutoscroller();
   
-  if (typeof exports !== 'undefined') {
-    exports.cleanup = cleanup;
-  }
-  
   if (typeof window !== 'undefined') {
     window.Autoscroller = window.Autoscroller || {};
     window.Autoscroller.cleanup = cleanup;
     window.Autoscroller.reinjectButton = requestAutoscrollerButtonReinject;
   }
-  
-  exports = {};
+
+  // Assign the whole object once — a trailing `exports = {}` used to run here and
+  // wipe the earlier exports.cleanup, leaving the mod with no loader-visible cleanup.
+  exports = { cleanup, reinjectButton: requestAutoscrollerButtonReinject };
   
   /**
    * Retry selling monsters that failed due to rate limiting

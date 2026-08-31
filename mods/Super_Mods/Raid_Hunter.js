@@ -902,8 +902,11 @@ function clearStaminaDepletionWatchers() {
         staminaDepletionObserver.disconnect();
         staminaDepletionObserver = null;
     }
-    if (typeof staminaDepletionPlayerUnsub === 'function') {
-        try { staminaDepletionPlayerUnsub(); } catch (_) { /* ignore */ }
+    if (staminaDepletionPlayerUnsub) {
+        try {
+            if (typeof staminaDepletionPlayerUnsub === 'function') staminaDepletionPlayerUnsub();
+            else if (typeof staminaDepletionPlayerUnsub.unsubscribe === 'function') staminaDepletionPlayerUnsub.unsubscribe();
+        } catch (_) { /* ignore */ }
         staminaDepletionPlayerUnsub = null;
     }
     if (staminaDepletionSafetyTimer) {
@@ -1057,8 +1060,11 @@ function stopStaminaTooltipMonitoring() {
         clearInterval(staminaRecoverySafetyTimer);
         staminaRecoverySafetyTimer = null;
     }
-    if (typeof staminaRecoveryPlayerUnsub === 'function') {
-        try { staminaRecoveryPlayerUnsub(); } catch (_) { /* ignore */ }
+    if (staminaRecoveryPlayerUnsub) {
+        try {
+            if (typeof staminaRecoveryPlayerUnsub === 'function') staminaRecoveryPlayerUnsub();
+            else if (typeof staminaRecoveryPlayerUnsub.unsubscribe === 'function') staminaRecoveryPlayerUnsub.unsubscribe();
+        } catch (_) { /* ignore */ }
         staminaRecoveryPlayerUnsub = null;
     }
     if (staminaRecoveryVisibilityHandler) {
@@ -7857,6 +7863,13 @@ function cleanupRaidHunter() {
         // 4. Clean up modal if open
         if (activeRaidHunterModal) {
             cleanupRaidHunterModal();
+        }
+
+        // 4.1. Close any open context menu (its ESC keydown + overlay listeners are
+        // removed only by closeMenu(); nothing else did this on mod teardown).
+        if (openContextMenu && typeof openContextMenu.closeMenu === 'function') {
+            try { openContextMenu.closeMenu(); } catch (_) { /* ignore */ }
+            openContextMenu = null;
         }
         
         // 5. Clean up modal cleanup observer (defensive check - in case modal was already closed)

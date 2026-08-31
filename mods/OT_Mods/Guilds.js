@@ -11582,6 +11582,12 @@ exports = {
         guildDropdownClickHandler = null;
       }
 
+      // Remove the extension-base-URL window message listener (stored for exactly this)
+      if (windowMessageHandler) {
+        window.removeEventListener('message', windowMessageHandler);
+        windowMessageHandler = null;
+      }
+
       // Clear cache cleanup interval
       if (cacheCleanupInterval) {
         clearInterval(cacheCleanupInterval);

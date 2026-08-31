@@ -6838,6 +6838,28 @@ function cleanupChallenges() {
     try { headerObserver.disconnect(); } catch (e) {}
     headerObserver = null;
   }
+
+  // Module-level timers/subscriptions that otherwise survive a mod teardown mid-queue
+  // or mid-battle (each has a dedicated stop helper that flow logic calls contextually,
+  // but nothing calls them on unload).
+  try { stopSoloChallengeToast(); } catch (e) {}
+  try { stopMultiplayerChallengeToast(); } catch (e) {}
+  try { cleanupChallengeBattle(); } catch (e) {}
+  try { clearChallengePlayerArsenalNavigationHook(); } catch (e) {}
+  if (challengeMultiplayerQueueWatchIntervalId != null) {
+    clearInterval(challengeMultiplayerQueueWatchIntervalId);
+    challengeMultiplayerQueueWatchIntervalId = null;
+  }
+  if (challengeMultiplayerQueueWatchFirstTimeoutId != null) {
+    clearTimeout(challengeMultiplayerQueueWatchFirstTimeoutId);
+    challengeMultiplayerQueueWatchFirstTimeoutId = null;
+  }
+  if (typeof window !== 'undefined' && window.__challengesFooterQueueIntervalId) {
+    clearInterval(window.__challengesFooterQueueIntervalId);
+    window.__challengesFooterQueueIntervalId = null;
+  }
+  try { closeChallengesModalIfOpen(); } catch (e) {}
+
   document.querySelectorAll('.challenges-header-btn').forEach(function(btn) {
     var li = btn.closest('li');
     if (li && li.parentNode) {

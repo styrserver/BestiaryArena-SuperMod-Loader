@@ -3028,16 +3028,21 @@
     lastTrackedMapCode = null;
     lastTrackedUserScores = null;
     
-    // Clean up state subscriptions
+    // Clean up state subscriptions. globalThis.state.X.subscribe() returns an
+    // { unsubscribe } object here, not a bare function — the old `typeof === 'function'`
+    // check missed ALL of them, leaking the board/game/gameTimer/player subscriptions.
     BetterHighscoresState.subscriptions.forEach(unsubscribe => {
       try {
         if (typeof unsubscribe === 'function') {
           unsubscribe();
+        } else if (unsubscribe && typeof unsubscribe.unsubscribe === 'function') {
+          unsubscribe.unsubscribe();
         }
       } catch (error) {
         console.warn('[Better Highscores] Error unsubscribing:', error);
       }
     });
+    BetterHighscoresState.subscriptions.length = 0;
     
     clearDebounceTimeout('mapChangeDebounceTimeout');
     clearDebounceTimeout('containerDebounceTimeout');

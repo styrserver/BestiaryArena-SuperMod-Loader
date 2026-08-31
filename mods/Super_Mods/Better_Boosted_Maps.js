@@ -489,8 +489,11 @@ function clearStaminaDepletionWatchers() {
         staminaDepletionObserver.disconnect();
         staminaDepletionObserver = null;
     }
-    if (typeof staminaDepletionPlayerUnsub === 'function') {
-        try { staminaDepletionPlayerUnsub(); } catch (_) { /* ignore */ }
+    if (staminaDepletionPlayerUnsub) {
+        try {
+            if (typeof staminaDepletionPlayerUnsub === 'function') staminaDepletionPlayerUnsub();
+            else if (typeof staminaDepletionPlayerUnsub.unsubscribe === 'function') staminaDepletionPlayerUnsub.unsubscribe();
+        } catch (_) { /* ignore */ }
         staminaDepletionPlayerUnsub = null;
     }
     if (staminaDepletionSafetyTimer) {
@@ -703,8 +706,11 @@ function stopStaminaTooltipMonitoring() {
         clearInterval(staminaRecoverySafetyTimer);
         staminaRecoverySafetyTimer = null;
     }
-    if (typeof staminaRecoveryPlayerUnsub === 'function') {
-        try { staminaRecoveryPlayerUnsub(); } catch (_) { /* ignore */ }
+    if (staminaRecoveryPlayerUnsub) {
+        try {
+            if (typeof staminaRecoveryPlayerUnsub === 'function') staminaRecoveryPlayerUnsub();
+            else if (typeof staminaRecoveryPlayerUnsub.unsubscribe === 'function') staminaRecoveryPlayerUnsub.unsubscribe();
+        } catch (_) { /* ignore */ }
         staminaRecoveryPlayerUnsub = null;
     }
     if (staminaRecoveryVisibilityHandler) {
@@ -4805,10 +4811,17 @@ function createDropdownSetting(id, label, description, value = 'Auto-setup', opt
 
 function cleanupModal() {
     clearBoostedMapsModalLayoutCleanup();
-    if (modState.activeModal) {
-        modState.activeModal = null;
+    // Null the ref FIRST, then close — the modal's onClose calls back into cleanupModal(),
+    // and the ESC-listener guard is `if (... && modState.activeModal)`, so clearing the
+    // ref up front makes the re-entrant call a no-op. Nulling alone (the old behaviour)
+    // left the modal DOM + any open sub-panel's document-capture / window scroll+resize
+    // listeners in the page on mod teardown.
+    const modal = modState.activeModal;
+    modState.activeModal = null;
+    if (modal && typeof modal.close === 'function') {
+        try { modal.close(); } catch (_) { /* ignore */ }
     }
-    
+
     if (modState.escKeyListener) {
         document.removeEventListener('keydown', modState.escKeyListener);
         modState.escKeyListener = null;

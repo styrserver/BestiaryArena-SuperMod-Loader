@@ -220,6 +220,17 @@ const currentLocale = api.i18n.getLocale();
 const supportedLocales = api.i18n.getSupportedLocales();
 ```
 
+## Utility API
+
+```javascript
+// Safely tear down a game-state subscription regardless of its shape.
+// globalThis.state.X.subscribe() returns { unsubscribe }, but
+// X.select(fn).subscribe() and world emitters return a bare function.
+const sub = globalThis.state.board.subscribe(onChange);
+// ...later, in cleanup():
+api.util.unsubscribe(sub); // null-safe; returns true if it tore something down
+```
+
 ## Hook API
 
 The Hook API allows intercepting and modifying game methods:
@@ -278,7 +289,7 @@ unsubscribe();
 
 1. **Error Handling**: Always use try/catch blocks around API calls to handle potential errors gracefully.
 
-2. **Resource Cleanup**: Unsubscribe from state subscriptions and remove UI elements when your mod is disabled.
+2. **Resource Cleanup**: Expose an idempotent `exports.cleanup()` — the loader runs it when your mod is disabled and before every soft reload. Unsubscribe from state subscriptions (via `api.util.unsubscribe`), clear intervals, disconnect observers, remove document/window listeners, close modals and menus, and reset any `window.__yourModLoaded` guard. See `mod_development_guide.md` → "Best Practices → Cleanup & memory leaks".
 
 3. **Configuration Persistence**: Use `api.service.updateScriptConfig()` to save mod settings between sessions.
 

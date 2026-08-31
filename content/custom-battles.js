@@ -5817,6 +5817,14 @@ if (window.CustomBattles) {
             return false;
         }
         (function startAutoNativeAnimDebugWatch() {
+            // Sprite-dev instrumentation only. A body-wide subtree+class MutationObserver is
+            // expensive during battles, so don't arm it unless verbose logging is on — the
+            // level this debug output is gated to anyway.
+            const verbose = (() => {
+                try { return globalThis.BestiaryLogger?.getLevel?.() === 'verbose' || window.BESTIARY_DEBUG === true; }
+                catch (_) { return false; }
+            })();
+            if (!verbose) return;
             if (tryAutoDebugNativeAnimation()) return;
             const observer = new MutationObserver(() => {
                 if (tryAutoDebugNativeAnimation()) observer.disconnect();

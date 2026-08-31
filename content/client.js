@@ -1354,7 +1354,28 @@ if (typeof browserAPI === 'undefined') {
       getLocale: () => currentLocale,
       getSupportedLocales: () => ['en-US', 'pt-BR']
     },
-    
+
+    util: {
+      /**
+       * Tear down whatever `store.subscribe(...)` / `emitter.subscribe(...)` returned.
+       * The game's stores are inconsistent: `globalThis.state.X.subscribe()` returns
+       * an `{ unsubscribe }` object, while `X.select(fn).subscribe()` and the world
+       * event emitters return a bare unsubscribe function. Pass the return value here
+       * (in your cleanup) and both shapes are handled. Safe to call with null.
+       * @param {Function|{unsubscribe:Function}|null|undefined} sub
+       * @returns {boolean} true if something was torn down
+       */
+      unsubscribe: function(sub) {
+        try {
+          if (typeof sub === 'function') { sub(); return true; }
+          if (sub && typeof sub.unsubscribe === 'function') { sub.unsubscribe(); return true; }
+        } catch (error) {
+          console.warn('[BestiaryModAPI] util.unsubscribe failed:', error);
+        }
+        return false;
+      }
+    },
+
     hook: {
       method: function(object, methodName, callback) {
         if (!object || typeof object[methodName] !== 'function') {
@@ -2104,6 +2125,34 @@ if (typeof browserAPI === 'undefined') {
               }
             });
             
+            // Document-level drag listeners are attached only while a drag is in
+            // progress and removed on mouseup, so a scroll container that is created
+            // and discarded leaves no permanent listeners (and no detached-DOM leak).
+            const onDragMove = (e) => {
+              if (!isDragging) return;
+
+              const deltaY = e.clientY - startY;
+              const containerHeight = scrollView.clientHeight;
+              const scrollHeight = scrollView.scrollHeight;
+              const thumbHeight = Math.max(30, (containerHeight / scrollHeight) * containerHeight);
+
+              // Calculate movement ratio based on scrollbar height and content height
+              const moveRatio = deltaY / (containerHeight - thumbHeight);
+              const scrollDelta = moveRatio * (scrollHeight - containerHeight);
+
+              // Apply scroll
+              scrollView.scrollTop = Math.max(0, Math.min(scrollHeight - containerHeight, startScrollTop + scrollDelta));
+              updateScrollThumb();
+            };
+
+            const onDragEnd = () => {
+              if (!isDragging) return;
+              isDragging = false;
+              document.body.style.userSelect = '';
+              document.removeEventListener('mousemove', onDragMove);
+              document.removeEventListener('mouseup', onDragEnd);
+            };
+
             // Mouse down on thumb
             scrollThumb.addEventListener('mousedown', (e) => {
               isDragging = true;
@@ -2111,32 +2160,8 @@ if (typeof browserAPI === 'undefined') {
               startScrollTop = scrollView.scrollTop;
               document.body.style.userSelect = 'none'; // Prevent text selection while dragging
               e.preventDefault(); // Prevent text selection
-            });
-            
-            // Mouse move for dragging
-            document.addEventListener('mousemove', (e) => {
-              if (!isDragging) return;
-              
-              const deltaY = e.clientY - startY;
-              const containerHeight = scrollView.clientHeight;
-              const scrollHeight = scrollView.scrollHeight;
-              const thumbHeight = Math.max(30, (containerHeight / scrollHeight) * containerHeight);
-              
-              // Calculate movement ratio based on scrollbar height and content height
-              const moveRatio = deltaY / (containerHeight - thumbHeight);
-              const scrollDelta = moveRatio * (scrollHeight - containerHeight);
-              
-              // Apply scroll
-              scrollView.scrollTop = Math.max(0, Math.min(scrollHeight - containerHeight, startScrollTop + scrollDelta));
-              updateScrollThumb();
-            });
-            
-            // Mouse up to end drag
-            document.addEventListener('mouseup', () => {
-              if (isDragging) {
-                isDragging = false;
-                document.body.style.userSelect = '';
-              }
+              document.addEventListener('mousemove', onDragMove);
+              document.addEventListener('mouseup', onDragEnd);
             });
             
             // Initial calculation
@@ -2644,23 +2669,28 @@ if (typeof browserAPI === 'undefined') {
       
       // Try to expose utility functions immediately if they're already loaded
       if (!exposeUtilityFunctions()) {
-        // If not loaded yet, wait for the utility-functions-loaded event
+        // If not loaded yet, wait for either signal. Both listeners remove
+        // themselves (and each other) as soon as the functions are exposed, so
+        // they don't linger firing exposeUtilityFunctions() on every page message.
         console.log('Waiting for utility functions to load...');
-        document.addEventListener('utility-functions-loaded', () => {
-          // Set a small timeout to ensure functions are fully available in window scope
-          setTimeout(() => {
-            exposeUtilityFunctions();
-          }, 100);
-        });
-        
-        // Also listen for the window message event as a fallback
-        window.addEventListener('message', function(event) {
+
+        const onUtilityFunctionsLoaded = () => {
+          setTimeout(tryExposeAndCleanup, 100);
+        };
+        const onUtilityMessage = (event) => {
           if (event.data && event.data.type === 'UTILITY_FUNCTIONS_READY') {
-            setTimeout(() => {
-              exposeUtilityFunctions();
-            }, 100);
+            setTimeout(tryExposeAndCleanup, 100);
           }
-        });
+        };
+        const tryExposeAndCleanup = () => {
+          if (exposeUtilityFunctions()) {
+            document.removeEventListener('utility-functions-loaded', onUtilityFunctionsLoaded);
+            window.removeEventListener('message', onUtilityMessage);
+          }
+        };
+
+        document.addEventListener('utility-functions-loaded', onUtilityFunctionsLoaded);
+        window.addEventListener('message', onUtilityMessage);
       }
       
       // Signal that the API is ready

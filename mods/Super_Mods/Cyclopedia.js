@@ -1186,6 +1186,9 @@ const cyclopediaState = {
     this.clearCache();
     // Use TimerManager for centralized timer cleanup
     TimerManager.cleanup();
+    // TimerManager only tracks its own Set — this.timers (the init cacheCleanup /
+    // domCacheCleanup intervals) must be cleared here or they fire forever after unload.
+    this.timers.forEach((id) => { try { clearInterval(id); } catch (_) {} });
     this.timers.clear();
     this.observer = null; this.modalOpen = false; this.currentModal = null;
     this.profileData = null; this.lastFetch = 0; this.fetchInProgress = false;
@@ -6189,32 +6192,34 @@ function showDeleteConfirmationModal(runType, runData, onConfirm) {
   });
   
   // Add event listeners
+  const handleEscape = (e) => {
+    if (e.key === 'Escape') {
+      closeModal();
+    }
+  };
   const closeModal = () => {
+    // Remove the keydown listener on every close path (Cancel / Delete / overlay /
+    // Escape) — previously only the Escape path removed it, leaking one per dialog.
+    document.removeEventListener('keydown', handleEscape);
     if (overlay?.parentNode) {
       overlay.parentNode.removeChild(overlay);
     }
   };
-  
+
   cancelButton.addEventListener('click', closeModal);
   deleteButton.addEventListener('click', () => {
     closeModal();
     if (onConfirm) onConfirm();
   });
-  
+
   // Close on overlay click
   overlay.addEventListener('click', (e) => {
     if (e.target === overlay) {
       closeModal();
     }
   });
-  
+
   // Close on Escape key
-  const handleEscape = (e) => {
-    if (e.key === 'Escape') {
-      closeModal();
-      document.removeEventListener('keydown', handleEscape);
-    }
-  };
   document.addEventListener('keydown', handleEscape);
   
   // Assemble modal
@@ -13066,15 +13071,17 @@ function createStatisticsSection(selectedMap, leaderboardData) {
     }
   };
   
-  // Add global click listener with event delegation
-  document.addEventListener('click', (e) => {
-    // Only reset if the click is not on a delete cell that's in confirming state
+  // Global click listener with event delegation. Via registerModalHandler with a named
+  // handler so modal close removes it — the old inline-arrow version could not be
+  // removed and accumulated one document listener (+ this render's DOM closure) per render.
+  const resetDeleteStatesOnOutsideClick = (e) => {
     const clickedDeleteCell = e.target.closest('[data-confirming="true"]');
     if (!clickedDeleteCell) {
       resetDeleteStates();
     }
-  }, { passive: true }); // Use passive listener for better performance
-  
+  };
+  registerModalHandler(document, 'click', resetDeleteStatesOnOutsideClick, { passive: true });
+
   // Store the reset function for potential cleanup
   row3.resetDeleteStates = resetDeleteStates;
   
@@ -14609,8 +14616,10 @@ function createMapsTabPage(selectedCreature, selectedEquipment, selectedInventor
     updateRightCol();
   }
 
-  document.addEventListener('cyclopedia-season-changed', syncMapsTabStatisticsHeadings);
-  
+  // Via registerModalHandler so it's torn down on modal close instead of accumulating
+  // one stale listener (+ this tab's detached DOM closure) per Maps-tab render.
+  registerModalHandler(document, 'cyclopedia-season-changed', syncMapsTabStatisticsHeadings);
+
   // Function to update column layout based on selection
   function updateColumnLayout(isRegionSelected) {
     const statsLabel = getMapsTabStatisticsHeading();

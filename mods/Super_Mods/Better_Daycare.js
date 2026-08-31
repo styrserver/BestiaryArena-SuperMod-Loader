@@ -1224,8 +1224,12 @@
   }
 
   function stopDaycareSlotWatcher() {
-    if (typeof playerStateUnsubscribe === 'function') {
-      playerStateUnsubscribe();
+    if (playerStateUnsubscribe) {
+      // player.subscribe() returns an { unsubscribe } object here, not a bare function.
+      try {
+        if (typeof playerStateUnsubscribe === 'function') playerStateUnsubscribe();
+        else if (typeof playerStateUnsubscribe.unsubscribe === 'function') playerStateUnsubscribe.unsubscribe();
+      } catch (_) { /* ignore */ }
       playerStateUnsubscribe = null;
     }
   }

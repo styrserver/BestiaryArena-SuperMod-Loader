@@ -73,6 +73,7 @@ const processedServerResultKeys = new Set();
 
 // Cleanup tracking for memory leak prevention
 let originalFetch = null;
+let runTrackerFetchWrapper = null;
 let latestKnownSeason = 2;
 let seasonLastFetchedAt = 0;
 let seasonFetchPromise = null;
@@ -84,12 +85,14 @@ async function performCleanup() {
     
     processedServerResultKeys.clear();
 
-    // Restore original global functions
-    if (originalFetch) {
+    // Restore original fetch — only if our wrapper is still the current one, so we
+    // don't clobber a mod that patched fetch on top of us.
+    if (originalFetch && (runTrackerFetchWrapper == null || window.fetch === runTrackerFetchWrapper)) {
       console.log('[RunTracker] Restoring original fetch function');
       window.fetch = originalFetch;
-      originalFetch = null;
     }
+    originalFetch = null;
+    runTrackerFetchWrapper = null;
     
     // Clear all pending debouncer timers
     if (Utils && Utils.debouncer && Utils.debouncer.timers) {
@@ -1693,7 +1696,7 @@ function setupNetworkListener() {
   try {
     // Monitor fetch requests for server results
     originalFetch = window.fetch;
-    window.fetch = async function(...args) {
+    runTrackerFetchWrapper = async function(...args) {
       const response = await originalFetch.apply(this, args);
       
       // Check if RunTracker is enabled before processing
@@ -1745,7 +1748,8 @@ function setupNetworkListener() {
       
       return response;
     };
-    
+    window.fetch = runTrackerFetchWrapper;
+
     // NOTE: RunTracker used to also wrap console.log to scrape "$replay(...)"
     // strings into a separate replay-snapshot store. That was removed because
     // wrapping console.log mis-attributes every later log line (in DevTools) to

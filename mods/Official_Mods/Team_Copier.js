@@ -1112,7 +1112,11 @@ function showTeamLoadedNotification(data) {
 // Cleanup function for Team Copier mod (exposed for mod system)
 context.exports.cleanup = function() {
   console.log('[Team Copier] Running cleanup...');
-  
+
+  // This assignment replaces the earlier `cleanup: clearTeamCopierModalLayoutCleanup`,
+  // so call it here or the modal resize listener never gets removed.
+  clearTeamCopierModalLayoutCleanup();
+
   // Remove any existing modals
   const existingModal = document.querySelector('#team-copier-modal');
   if (existingModal) {

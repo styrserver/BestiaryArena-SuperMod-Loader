@@ -1633,5 +1633,11 @@
     cleanup,
   };
 
+  // Expose cleanup to the mod loader (previously only on window.BetterRuneRecycler,
+  // so disable/reload never tore down the button-poll interval + inventory observer).
+  if (typeof context !== 'undefined') {
+    context.exports = { cleanup, openRuneRecyclerModal };
+  }
+
 })();
 

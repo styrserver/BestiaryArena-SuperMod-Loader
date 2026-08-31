@@ -508,15 +508,22 @@ exports = {
       turboState.tickDisplayElement = null;
     }
     
-    // Disconnect game controls observer
+    // Disconnect observers (defensive — disableTurbo() only runs when turboState.active)
+    if (turboState.observer) {
+      turboState.observer.disconnect();
+      turboState.observer = null;
+    }
     if (turboState.gameControlsObserver) {
       turboState.gameControlsObserver.disconnect();
       turboState.gameControlsObserver = null;
     }
-    
-    // Unsubscribe from speedup
+
+    // Unsubscribe from speedup (bare fn or { unsubscribe })
     if (turboState.speedupSubscription) {
-      turboState.speedupSubscription.unsubscribe();
+      try {
+        if (typeof turboState.speedupSubscription === 'function') turboState.speedupSubscription();
+        else if (typeof turboState.speedupSubscription.unsubscribe === 'function') turboState.speedupSubscription.unsubscribe();
+      } catch (_) { /* ignore */ }
       turboState.speedupSubscription = null;
     }
     

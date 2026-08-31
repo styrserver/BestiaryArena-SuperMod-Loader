@@ -1274,8 +1274,11 @@ function clearStaminaDepletionWatchers() {
         staminaDepletionObserver.disconnect();
         staminaDepletionObserver = null;
     }
-    if (typeof staminaDepletionPlayerUnsub === 'function') {
-        try { staminaDepletionPlayerUnsub(); } catch (_) { /* ignore */ }
+    if (staminaDepletionPlayerUnsub) {
+        try {
+            if (typeof staminaDepletionPlayerUnsub === 'function') staminaDepletionPlayerUnsub();
+            else if (typeof staminaDepletionPlayerUnsub.unsubscribe === 'function') staminaDepletionPlayerUnsub.unsubscribe();
+        } catch (_) { /* ignore */ }
         staminaDepletionPlayerUnsub = null;
     }
     if (staminaDepletionSafetyTimer) {
@@ -1423,8 +1426,11 @@ function stopStaminaTooltipMonitoring() {
         clearInterval(staminaRecoverySafetyTimer);
         staminaRecoverySafetyTimer = null;
     }
-    if (typeof staminaRecoveryPlayerUnsub === 'function') {
-        try { staminaRecoveryPlayerUnsub(); } catch (_) { /* ignore */ }
+    if (staminaRecoveryPlayerUnsub) {
+        try {
+            if (typeof staminaRecoveryPlayerUnsub === 'function') staminaRecoveryPlayerUnsub();
+            else if (typeof staminaRecoveryPlayerUnsub.unsubscribe === 'function') staminaRecoveryPlayerUnsub.unsubscribe();
+        } catch (_) { /* ignore */ }
         staminaRecoveryPlayerUnsub = null;
     }
     if (staminaRecoveryVisibilityHandler) {

@@ -331,13 +331,15 @@ function startTracking() {
       
       const world = event.world;
       if (world && world.onGameEnd && typeof world.onGameEnd.subscribe === 'function') {
-        // Clean up any existing subscription
+        // Clean up any existing subscription (may be a bare fn or an { unsubscribe } object)
         if (onGameEndUnsubscribe) {
           try {
-            onGameEndUnsubscribe();
+            if (typeof onGameEndUnsubscribe === 'function') onGameEndUnsubscribe();
+            else if (typeof onGameEndUnsubscribe.unsubscribe === 'function') onGameEndUnsubscribe.unsubscribe();
           } catch (e) {
             console.error('Error unsubscribing from previous game:', e);
           }
+          onGameEndUnsubscribe = null;
         }
         
         // Subscribe to game end event
@@ -779,9 +781,13 @@ context.exports.cleanup = function() {
   // Clear tick history
   tickHistory = [];
   
-  // Unsubscribe from game end events
+  // Unsubscribe from game end events (world.onGameEnd.subscribe() may return a bare
+  // function or an { unsubscribe } object).
   if (onGameEndUnsubscribe) {
-    onGameEndUnsubscribe();
+    try {
+      if (typeof onGameEndUnsubscribe === 'function') onGameEndUnsubscribe();
+      else if (typeof onGameEndUnsubscribe.unsubscribe === 'function') onGameEndUnsubscribe.unsubscribe();
+    } catch (_) { /* ignore */ }
     onGameEndUnsubscribe = null;
   }
   

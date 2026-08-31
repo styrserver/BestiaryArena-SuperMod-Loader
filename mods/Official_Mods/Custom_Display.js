@@ -107,10 +107,17 @@ function monitorGameState() {
     gameStateSubscription.unsubscribe();
     gameStateSubscription = null;
   }
-  
+
   if (boardStateSubscription) {
     boardStateSubscription.unsubscribe();
     boardStateSubscription = null;
+  }
+
+  // Disconnect the previous viewport observer too — this function can run more than
+  // once, and without this each call orphaned a live #viewport-subtree MutationObserver.
+  if (window._performanceModeDomObserver) {
+    try { window._performanceModeDomObserver.disconnect(); } catch (_) { /* ignore */ }
+    window._performanceModeDomObserver = null;
   }
 
   try {

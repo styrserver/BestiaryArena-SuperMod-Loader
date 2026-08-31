@@ -3121,6 +3121,20 @@ const setupSessionWidgetSync = () => {
 // Subscribe to board game state changes
 const subscribeToGameState = () => {
   try {
+    // Idempotent: this runs from startAutomation() and a couple of retry paths. Without
+    // tearing down first, each call stacked another #body-subtree MutationObserver (the
+    // old one orphaned when the var was overwritten) plus more board.on() handlers.
+    unsubscribeFromGameState();
+    if (Array.isArray(gameStateUnsubscribers) && gameStateUnsubscribers.length) {
+      gameStateUnsubscribers.forEach(unsub => {
+        try {
+          if (typeof unsub === 'function') unsub();
+          else if (unsub && typeof unsub.unsubscribe === 'function') unsub.unsubscribe();
+        } catch (_) { /* ignore */ }
+      });
+      gameStateUnsubscribers = [];
+    }
+
     // Subscribe to board state changes for new game detection
     if (globalThis.state && globalThis.state.board) {
       // Consolidated new game handler with debouncing
@@ -3981,9 +3995,10 @@ const stopAutomation = () => {
   // Clean up game state API subscriptions
   if (gameStateUnsubscribers && Array.isArray(gameStateUnsubscribers)) {
     gameStateUnsubscribers.forEach(unsub => {
-      if (typeof unsub === 'function') {
-        unsub();
-      }
+      try {
+        if (typeof unsub === 'function') unsub();
+        else if (unsub && typeof unsub.unsubscribe === 'function') unsub.unsubscribe();
+      } catch (_) { /* ignore */ }
     });
     gameStateUnsubscribers = [];
   }
@@ -5078,10 +5093,32 @@ context.exports = {
   cleanup: () => {
     // Cleanup function for when mod is disabled
     stopAutomation();
-    
+
+    // stopAutomation() early-returns when the loop isn't running (`if (!automationInterval)`),
+    // so tear these down directly too — otherwise the game-state observers + visibility
+    // handler + suspension interval survive a disable while automation is idle.
+    unsubscribeFromGameState();
+    if (window.__bestiaryAutomatorVisibilityHandler) {
+      document.removeEventListener('visibilitychange', window.__bestiaryAutomatorVisibilityHandler);
+      window.__bestiaryAutomatorVisibilityHandler = null;
+    }
+    if (window.__bestiaryAutomatorSuspensionCheck) {
+      clearInterval(window.__bestiaryAutomatorSuspensionCheck);
+      window.__bestiaryAutomatorSuspensionCheck = null;
+    }
+    if (Array.isArray(gameStateUnsubscribers)) {
+      gameStateUnsubscribers.forEach(unsub => {
+        try {
+          if (typeof unsub === 'function') unsub();
+          else if (unsub && typeof unsub.unsubscribe === 'function') unsub.unsubscribe();
+        } catch (_) { /* ignore */ }
+      });
+      gameStateUnsubscribers = [];
+    }
+
     // Clear all timeouts
     cancelAllTimeouts();
-    
+
     // Clear seashell timer
     clearSeashellTimer();
     

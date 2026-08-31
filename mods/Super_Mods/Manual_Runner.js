@@ -2229,7 +2229,11 @@ async function waitForRewardScreenToClose(maxWaitMs = 2500) {
 function cleanupRewardsScreenSubscription() {
   if (openRewardsSubscription) {
     try {
-      if (typeof openRewardsSubscription.unsubscribe === 'function') {
+      // board.select(fn).subscribe(cb) returns a bare unsubscribe function, not an
+      // { unsubscribe } object — handle both (cleanupBoardSubscription already does).
+      if (typeof openRewardsSubscription === 'function') {
+        openRewardsSubscription();
+      } else if (typeof openRewardsSubscription.unsubscribe === 'function') {
         openRewardsSubscription.unsubscribe();
       }
     } catch (e) {

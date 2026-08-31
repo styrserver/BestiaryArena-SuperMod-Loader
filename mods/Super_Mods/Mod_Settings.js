@@ -6449,6 +6449,33 @@ async function exportConfiguration(modal) {
   }
 }
 
+// Recovery helper for the pre-import safety snapshot written by importConfiguration().
+// Run from the DevTools console: `await window.__baRestorePreimportBackup()` restores only
+// keys that are currently missing; pass `true` to overwrite existing keys too.
+async function restorePreimportBackup(overwriteExisting = false) {
+  if (!window.browserAPI?.storage?.local) {
+    console.error('[Mod Settings] No extension storage available');
+    return { restored: 0, error: 'no-storage' };
+  }
+  const stored = await new Promise(resolve => {
+    window.browserAPI.storage.local.get('__ba_preimport_backup', r => resolve(r && r.__ba_preimport_backup));
+  });
+  if (!stored || !stored.data) {
+    console.warn('[Mod Settings] No __ba_preimport_backup found');
+    return { restored: 0, error: 'no-backup' };
+  }
+  const keys = Object.keys(stored.data);
+  let restored = 0, skipped = 0;
+  for (const k of keys) {
+    if (!overwriteExisting && localStorage.getItem(k) !== null) { skipped++; continue; }
+    try { localStorage.setItem(k, stored.data[k]); restored++; }
+    catch (e) { console.error('[Mod Settings] Could not restore key', k, e); }
+  }
+  console.log(`[Mod Settings] Pre-import backup from ${new Date(stored.when).toLocaleString()} (${stored.origin}): restored ${restored}, skipped ${skipped} existing. Reload the page to pick them up.`);
+  return { restored, skipped, when: stored.when, keys };
+}
+try { window.__baRestorePreimportBackup = restorePreimportBackup; } catch (_) {}
+
 // Import configuration function
 async function importConfiguration(modal) {
   try {
@@ -6621,43 +6648,72 @@ async function importConfiguration(modal) {
           }
         }
         
-        // Import game localStorage data if available
+        // Import game localStorage data if available.
+        // MERGE semantics: keys present in the import are written over the top; keys the
+        // user already has that the import does NOT mention are left untouched. (The old
+        // code did localStorage.clear() first, which silently destroyed anything not in the
+        // imported file — e.g. Map Editor session saves — with only a non-persisted
+        // in-memory "backup" that was thrown away on success.)
         if (importData.gameLocalStorage && Object.keys(importData.gameLocalStorage).length > 0) {
           try {
-            // Backup current localStorage before clearing
-            const currentLocalStorage = {};
+            const importedKeys = Object.keys(importData.gameLocalStorage);
+            const importedKeySet = new Set(importedKeys);
+
+            // Keys the local store has that the import doesn't carry. Merge won't delete
+            // these, but snapshot them anyway as a recoverable safety net so a future
+            // change of these semantics (or a manual cleanup) can't cause silent data loss.
+            const orphanKeys = [];
             for (let i = 0; i < localStorage.length; i++) {
               const key = localStorage.key(i);
-              if (key) {
-                currentLocalStorage[key] = localStorage.getItem(key);
+              if (key && !importedKeySet.has(key)) orphanKeys.push(key);
+            }
+            if (orphanKeys.length > 0 && window.browserAPI?.storage?.local) {
+              const snapshot = {};
+              orphanKeys.forEach(k => { snapshot[k] = localStorage.getItem(k); });
+              try {
+                await new Promise(resolve => {
+                  window.browserAPI.storage.local.set({
+                    '__ba_preimport_backup': { when: Date.now(), origin: location.origin, data: snapshot }
+                  }, resolve);
+                });
+                console.log(`[Mod Settings] Snapshotted ${orphanKeys.length} local-only key(s) to chrome.storage.local __ba_preimport_backup before import`);
+              } catch (snapErr) {
+                console.warn('[Mod Settings] Could not write pre-import backup:', snapErr);
               }
             }
-            
-            // Clear existing localStorage
-            localStorage.clear();
-            
-            // Set new localStorage data
-            Object.keys(importData.gameLocalStorage).forEach(key => {
+
+            // Track originals of the keys we're about to change, so a mid-write failure
+            // rolls back cleanly without touching unrelated keys.
+            const changed = {};
+            let failedKey = null;
+            for (const key of importedKeys) {
+              changed[key] = localStorage.getItem(key); // null if it didn't exist
               try {
                 localStorage.setItem(key, importData.gameLocalStorage[key]);
               } catch (e) {
                 console.warn('[Mod Settings] Could not set localStorage key:', key, e);
-                // Restore backup on failure
-                Object.keys(currentLocalStorage).forEach(backupKey => {
-                  try {
-                    localStorage.setItem(backupKey, currentLocalStorage[backupKey]);
-                  } catch (restoreError) {
-                    console.error('[Mod Settings] Failed to restore localStorage backup:', restoreError);
-                  }
-                });
-                throw new Error(`Failed to set localStorage key: ${key}`);
+                failedKey = key;
+                break;
               }
-            });
-            
-            console.log(`[Mod Settings] Restored ${Object.keys(importData.gameLocalStorage).length} game localStorage items`);
+            }
+
+            if (failedKey) {
+              // Roll back only what we touched
+              Object.keys(changed).forEach(k => {
+                try {
+                  if (changed[k] === null) localStorage.removeItem(k);
+                  else localStorage.setItem(k, changed[k]);
+                } catch (restoreError) {
+                  console.error('[Mod Settings] Failed to roll back localStorage key:', k, restoreError);
+                }
+              });
+              throw new Error(`Failed to set localStorage key: ${failedKey} (quota?). No changes applied.`);
+            }
+
+            console.log(`[Mod Settings] Merged ${importedKeys.length} game localStorage item(s) (kept ${orphanKeys.length} existing local-only key(s))`);
           } catch (error) {
-            console.log('[Mod Settings] Could not restore game localStorage:', error);
-            alert('Warning: Failed to restore game localStorage data: ' + error.message);
+            console.log('[Mod Settings] Could not merge game localStorage:', error);
+            alert('Warning: Failed to import game localStorage data: ' + error.message);
           }
         }
         
@@ -15933,26 +15989,27 @@ function stopBattleBoardObserver() {
 
 // Parse autoplay time from text content (supports English and Portuguese)
 function parseAutoplayTime(textContent) {
-  // Build regex pattern using translation strings for both languages
-  const enText = "Autoplay session";
-  const ptText = "Sessão autoplay";
-  // Match both mm:ss and hh:mm:ss formats
-  const pattern = new RegExp(`(?:${enText}|${ptText}) \\((\\d+):(\\d+)(?::(\\d+))?\\)`);
-  
-  const match = textContent.match(pattern);
-  if (match) {
-    // If third group exists, it's hh:mm:ss format
-    if (match[3] !== undefined) {
-      const hours = parseInt(match[1]);
-      const minutes = parseInt(match[2]);
-      const seconds = parseInt(match[3]);
+  // The autoplay session widget has changed label formats over time
+  // ("Autoplay session (mm:ss)", "Sessão autoplay (…)", and now
+  // "Session (1 run) (1:08)"), so instead of matching a fixed label we scan
+  // for the last parenthesised time token of the form (mm:ss) or (h:mm:ss).
+  // "(1 run)" has no colon and is ignored.
+  if (typeof textContent !== 'string') return null;
+  const timePattern = /\((\d+):(\d{1,2})(?::(\d{1,2}))?\)/g;
+  let match, last = null;
+  while ((match = timePattern.exec(textContent)) !== null) {
+    last = match;
+  }
+  if (last) {
+    if (last[3] !== undefined) {
+      const hours = parseInt(last[1]);
+      const minutes = parseInt(last[2]);
+      const seconds = parseInt(last[3]);
       return (hours * 60) + minutes + (seconds / 60);
-    } else {
-      // Otherwise it's mm:ss format
-      const minutes = parseInt(match[1]);
-      const seconds = parseInt(match[2]);
-      return minutes + (seconds / 60);
     }
+    const minutes = parseInt(last[1]);
+    const seconds = parseInt(last[2]);
+    return minutes + (seconds / 60);
   }
   return null;
 }
@@ -16045,13 +16102,14 @@ function startAutoplayRefreshMonitor(options = {}) {
         
         // Reset board activity timer on new game
         resetBoardActivityTimer();
-        
-        // Reset internal timer on new game if using internal timer mode or both mode
-        const timerMode = config.autoplayRefreshTimerMode || (config.useInternalTimer ? 'internal' : 'autoplay');
-        if (timerMode === 'internal' || timerMode === 'both') {
-          resetInternalTimer();
-        }
-        
+
+        // NOTE: do NOT reset the internal timer here. It is an independent
+        // stopwatch that starts when the monitor starts / autoplay begins
+        // (see startAutoplayRefreshMonitor and the setPlayMode handler). During
+        // autoplay a newGame event fires every ~20-40s, so resetting it here
+        // meant it could never accumulate to autoplayRefreshMinutes and the
+        // timed refresh never triggered in 'internal'/'both' mode.
+
         // Check autoplay session timer and refresh if needed on each new game
         checkAutoplayRefreshThreshold();
         
@@ -17654,6 +17712,9 @@ function cleanupBetterUI() {
     inventoryModButtonsState.missingRetryCount.clear();
     inventoryModButtonsState.knownClasses.clear();
     stopMonsterBestiarySearchCosmeticsListener();
+    // Remove the two document-wide capture 'mouseover' hover-delegation listeners +
+    // per-button tooltip listeners (only config toggles removed these before, not cleanup).
+    removeAdvancedStatsOnHover();
     battleBoardObserver = disconnectObserver(battleBoardObserver, 'Battle board');
     
     // Unsubscribe from board state events
@@ -18361,6 +18422,7 @@ exports = {
   cleanup: function() {
     try {
       cleanupBetterUI();
+      try { if (window.__baRestorePreimportBackup === restorePreimportBackup) delete window.__baRestorePreimportBackup; } catch (_) {}
       return true;
     } catch (error) {
       console.error('[Mod Settings] Cleanup error:', error);

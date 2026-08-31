@@ -3647,7 +3647,7 @@ function setupTblNetworkListener() {
   const previousFetch = window.fetch.bind(window);
   state.fetchRestore = previousFetch;
 
-  window.fetch = async function tblFloorLeagueFetch(...args) {
+  state.fetchWrapper = async function tblFloorLeagueFetch(...args) {
     const response = await previousFetch(...args);
     if (isDisposed()) {
       return response;
@@ -3666,6 +3666,7 @@ function setupTblNetworkListener() {
     }
     return response;
   };
+  window.fetch = state.fetchWrapper;
 }
 
 function sanitizeTblLeaderboardEntry(entry) {
@@ -6742,8 +6743,13 @@ function cleanupTblFloorLeague() {
   cleanupTblToastContainer();
   removeTblBoardSubscription();
   if (state.fetchRestore) {
-    window.fetch = state.fetchRestore;
+    // Only restore if our wrapper is still current — don't clobber a mod that
+    // patched fetch on top of us.
+    if (state.fetchWrapper == null || window.fetch === state.fetchWrapper) {
+      window.fetch = state.fetchRestore;
+    }
     state.fetchRestore = null;
+    state.fetchWrapper = null;
   }
   if (state.runTrackerTrigger) {
     window.removeEventListener('runtracker:runsUpdated', state.runTrackerTrigger);

@@ -693,8 +693,12 @@ function subscribeHeroEditorBoardUpdates() {
 }
 
 function unsubscribeHeroEditorBoardUpdates() {
-  if (typeof heroEditorBoardUnsubscribe === 'function') {
-    heroEditorBoardUnsubscribe();
+  if (heroEditorBoardUnsubscribe) {
+    // board.subscribe() returns an { unsubscribe } object here, not a bare function.
+    try {
+      if (typeof heroEditorBoardUnsubscribe === 'function') heroEditorBoardUnsubscribe();
+      else if (typeof heroEditorBoardUnsubscribe.unsubscribe === 'function') heroEditorBoardUnsubscribe.unsubscribe();
+    } catch (_) { /* ignore */ }
     heroEditorBoardUnsubscribe = null;
   }
 }

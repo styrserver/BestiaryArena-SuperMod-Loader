@@ -5209,14 +5209,13 @@
     }
   });
   
-  if (typeof exports !== 'undefined') {
-    exports.cleanup = cleanup;
-  }
   if (typeof window !== 'undefined') {
     window.DiceRoller = window.DiceRoller || {};
     window.DiceRoller.cleanup = cleanup;
     window.DiceRoller.reinjectButton = requestDiceRollerButtonReinject;
   }
-  exports = {};
-  
+  // Expose cleanup on context.exports for the loader. Assign the whole object once
+  // (a trailing `exports = {}` used to run here and wiped the earlier exports.cleanup).
+  exports = { cleanup, reinjectButton: requestDiceRollerButtonReinject };
+
 })();

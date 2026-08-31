@@ -14,6 +14,7 @@ const DATA_AVAILABLE = typeof DATA !== 'undefined';
 
 // Store original fetch for cleanup
 let originalFetch = null;
+let outfiterFetchWrapper = null;
 
 // Store timer IDs for cleanup
 let restoreTimer = null;
@@ -197,9 +198,9 @@ function interceptOutfitChangeErrors() {
     }
     
     // Hook into fetch to intercept outfit change API calls
-    window.fetch = function(...args) {
+    outfiterFetchWrapper = function(...args) {
       const [url, options] = args;
-      
+
       // Check if this is an outfit change request
       if (url && url.includes('account.changeOutfit') && options && options.method === 'POST') {
         return originalFetch.apply(this, args).then(async response => {
@@ -281,7 +282,8 @@ function interceptOutfitChangeErrors() {
       // For non-outfit requests, use original fetch
       return originalFetch.apply(this, args);
     };
-    
+    window.fetch = outfiterFetchWrapper;
+
     console.log('[Outfiter] Successfully set up outfit change error interception');
     return true;
   } catch (error) {
@@ -408,11 +410,13 @@ exports = {
           }
         });
         
-        // Restore original fetch if it was modified
-        if (originalFetch) {
+        // Restore original fetch — only if our wrapper is still the current one
+        // (don't clobber a mod that patched fetch on top of us).
+        if (originalFetch && (outfiterFetchWrapper == null || window.fetch === outfiterFetchWrapper)) {
           window.fetch = originalFetch;
-          originalFetch = null;
         }
+        originalFetch = null;
+        outfiterFetchWrapper = null;
       }
       
       console.log('[Outfiter] Cleaned up successfully');

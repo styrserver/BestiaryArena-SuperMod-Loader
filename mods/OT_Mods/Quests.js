@@ -1662,6 +1662,7 @@ const MISSION_NPC_LABELS = {
   jakundaf_desert: 'Wyda',
   tainted_souls: 'Wyda',
   serpentine_tower: 'Tesha',
+  realm_of_dreams: 'Tesha',
   apprentice_sheng: 'Rookstayer',
   christmas_miracle: 'Santa Claus',
   svenson_love_story: 'Svenson',
@@ -4978,11 +4979,16 @@ function createNPCCooldownManager() {
     onTileRightClick: () => { enterMornenionHoleFromHedgeMaze(); }
   });
 
-  // Diagnostic-only listener, registered once at load (before the conditional handler
-  // above ever attaches), so it always sees every right-click on the target tile even
-  // when the main system's gating rejects it. Explains "right-click does nothing" reports
-  // without needing the user to run console commands by hand.
-  if (typeof document !== 'undefined') {
+  // Diagnostic-only listener: always sees every right-click on the target tile even when
+  // the main system's gating rejects it, explaining "right-click does nothing" reports.
+  // Only armed at verbose log level — it's an inline handler registered at module load
+  // (before EventManager's TDZ ends) that cleanup() can't remove, so keeping it out of the
+  // default path avoids both the per-event cost and an accumulate-on-reload listener.
+  const mornenionHoleDebugVerbose = (() => {
+    try { return globalThis.BestiaryLogger?.getLevel?.() === 'verbose' || window.BESTIARY_DEBUG === true; }
+    catch (_) { return false; }
+  })();
+  if (typeof document !== 'undefined' && mornenionHoleDebugVerbose) {
     document.addEventListener('contextmenu', (event) => {
       try {
         if (getCurrentMapName() !== MINING_CONFIG.TARGET_MAP) return;
@@ -9744,13 +9750,17 @@ function createNPCCooldownManager() {
           ? TOAST_MESSAGES.questCompletedWithCoins(mission.title, rewardCoins)
           : TOAST_MESSAGES.questCompleted(mission.title);
       }
-      this.show({ productName, message: resolvedMessage, logPrefix });
+      // Pin the gold "completed" styling explicitly so it survives copy edits in toasts.json
+      // (resolveToastVariant's English-prefix fallback would otherwise be the only thing keeping it).
+      this.show({ productName, message: resolvedMessage, logPrefix, variant: 'completed' });
     },
 
     showTaskCompletedWithCoins(mission, logPrefix = '[Quests Mod]') {
       this.showImportant(
         TOAST_MESSAGES.taskCompletedWithCoins(mission.title, mission.rewardCoins),
-        logPrefix
+        logPrefix,
+        undefined,
+        'completed'
       );
     },
 
@@ -9771,7 +9781,7 @@ function createNPCCooldownManager() {
     },
 
     showSealCompleted(ordinal, logPrefix = '[Quests Mod]') {
-      this.showImportant(TOAST_MESSAGES.sealCompleted(ordinal), logPrefix);
+      this.showImportant(TOAST_MESSAGES.sealCompleted(ordinal), logPrefix, undefined, 'completed');
     },
 
     showBattleToast(toastData, logPrefix = '[Quests Mod]') {
@@ -9811,6 +9821,7 @@ function createNPCCooldownManager() {
   }
 
   function showQueenBansheesCompletionToasts() {
+    NotificationService.showQuestCompleted(COSTELLO_QUEEN_BANSHEES_MISSION, '[Quests Mod][Costello]');
     NotificationService.showItemReceived(
       COSTELLO_QUEEN_BANSHEES_MISSION.rewardItemName,
       '[Quests Mod][Costello]'
@@ -12795,6 +12806,14 @@ function createNPCCooldownManager() {
           renderKingQuestUI();
           console.log('[Quests Mod][King Tibianus] Quest marked as completed');
 
+          if (!currentProgress.completed) {
+            NotificationService.showQuestCompleted(
+              mission,
+              '[Quests Mod][King Tibianus]',
+              mission.rewardCoins > 0 ? { rewardCoins: mission.rewardCoins } : undefined
+            );
+          }
+
           // Update rank display after quest completion
           scheduleArenaRankDisplayUpdate(100);
         } catch (error) {
@@ -14204,6 +14223,11 @@ function createNPCCooldownManager() {
 
             setMissionProgress(KING_LETTER_MISSION, { accepted: true, completed: true });
             console.log('[Quests Mod][Al Dee] Letter delivery mission completed');
+            NotificationService.showQuestCompleted(
+              KING_LETTER_MISSION,
+              '[Quests Mod][Al Dee]',
+              KING_LETTER_MISSION.rewardCoins > 0 ? { rewardCoins: KING_LETTER_MISSION.rewardCoins } : undefined
+            );
 
             try {
               const afterProducts = await getQuestItems(false);
@@ -14280,6 +14304,7 @@ function createNPCCooldownManager() {
 
               // Mark mission as completed
               setMissionProgress(AL_DEE_FISHING_MISSION, { accepted: true, completed: true });
+              NotificationService.showQuestCompleted(AL_DEE_FISHING_MISSION, '[Quests Mod][Al Dee]');
               fishingState.ironOreQuestActive = false;
               fishingState.ironOreQuestExpired = false;
               fishingState.ironOreQuestCompleted = true;
@@ -14301,7 +14326,7 @@ function createNPCCooldownManager() {
               // Queue response with cooldown
               alDeeCooldown.queueResponse(
                 text,
-                AL_DEE_FISHING_MISSION.complete.replace('Player', playerName),
+                getMissionCompleteLine(AL_DEE_FISHING_MISSION),
                 addMessageToConversation,
                 'Al Dee'
               );
@@ -14368,6 +14393,7 @@ function createNPCCooldownManager() {
 
                 // Mark mission as completed
                 setMissionProgress(AL_DEE_GOLDEN_ROPE_MISSION, { accepted: true, completed: true });
+                NotificationService.showQuestCompleted(AL_DEE_GOLDEN_ROPE_MISSION, '[Quests Mod][Al Dee]');
                 console.log('[Quests Mod][Al Dee] Golden rope mission completed');
 
                 // Save progress to Firebase using registry (future-proof)
@@ -14401,7 +14427,7 @@ function createNPCCooldownManager() {
                 // Queue response with cooldown
                 alDeeCooldown.queueResponse(
                   text,
-                  AL_DEE_GOLDEN_ROPE_MISSION.complete.replace('Player', playerName),
+                  getMissionCompleteLine(AL_DEE_GOLDEN_ROPE_MISSION),
                   addMessageToConversation,
                   'Al Dee'
                 );
@@ -14439,6 +14465,7 @@ function createNPCCooldownManager() {
               }
 
               setMissionProgress(AL_DEE_ROOKIE_GUARD_MISSION, { accepted: true, completed: true, battleCompleted: true });
+              NotificationService.showQuestCompleted(AL_DEE_ROOKIE_GUARD_MISSION, '[Quests Mod][Al Dee]');
               console.log('[Quests Mod][Al Dee] Rookie Guard mission completed');
 
               if (playerName) {
@@ -14448,7 +14475,7 @@ function createNPCCooldownManager() {
 
               alDeeCooldown.queueResponse(
                 text,
-                AL_DEE_ROOKIE_GUARD_MISSION.complete.replace('Player', playerName),
+                getMissionCompleteLine(AL_DEE_ROOKIE_GUARD_MISSION),
                 addMessageToConversation,
                 'Al Dee'
               );
@@ -15326,6 +15353,11 @@ function createNPCCooldownManager() {
                 await coinsAdder(monksStudyCoins);
               }
               costelloAwaitingHolyTible = false;
+              NotificationService.showQuestCompleted(
+                KING_MONKS_STUDY_MISSION,
+                '[Quests Mod][Costello]',
+                monksStudyCoins > 0 ? { rewardCoins: monksStudyCoins } : undefined
+              );
               costelloCooldown.queueResponse(text, formatDialogueLine(getMissionDialogueLine(KING_MONKS_STUDY_MISSION, 'costelloStudyComplete', 'Thank you. Your study here is complete. Here are {coins} guild coins as a reward.'), { coins: monksStudyCoins }), addMessageToConversation, 'Costello');
             } else {
               costelloCooldown.queueResponse(text, getMissionDialogueLine(KING_MONKS_STUDY_MISSION, 'costelloHolyTibleMissing', 'You do not have the Holy Tible. Return when you have it.'), addMessageToConversation, 'Costello');
@@ -15536,6 +15568,7 @@ function createNPCCooldownManager() {
             await addQuestItem(MOTHER_OF_ALL_SPIDERS_MISSION.rewardItemName, 1);
             if (typeof updateTile83WydaRightClickState === 'function') updateTile83WydaRightClickState();
             wydaCooldown.queueResponse(text, getMissionDialogueLine(MOTHER_OF_ALL_SPIDERS_MISSION, 'wydaSilkComplete', 'The silk! Excellent. I can make good use of this. Here, take this Spool of Yarn as thanks.'), addMessage, 'Wyda');
+            NotificationService.showQuestCompleted(MOTHER_OF_ALL_SPIDERS_MISSION, '[Quests Mod][Wyda]');
             NotificationService.showItemReceived(MOTHER_OF_ALL_SPIDERS_MISSION.rewardItemName, '[Quests Mod][Wyda]');
             return;
           }
@@ -15570,7 +15603,9 @@ function createNPCCooldownManager() {
               ? formatDialogueLine(getMissionDialogueLine(FOLLOWER_OF_ZATHROTH_MISSION, 'wydaHandInCoinLine', ' Here are {coins} guild coins for your trouble.'), { coins: FOLLOWER_OF_ZATHROTH_MISSION.rewardCoins })
               : '';
             wydaCooldown.queueResponse(text, getMissionDialogueLine(FOLLOWER_OF_ZATHROTH_MISSION, 'wydaHandInComplete', 'The Blessed Ankh! Yes, this is what I needed. You have done well. The matter Costello spoke of is complete.') + coinMsg, addMessage, 'Wyda');
-            NotificationService.showTaskCompletedWithCoins(FOLLOWER_OF_ZATHROTH_MISSION, '[Quests Mod][Wyda]');
+            NotificationService.showQuestCompleted(FOLLOWER_OF_ZATHROTH_MISSION, '[Quests Mod][Wyda]', {
+              rewardCoins: FOLLOWER_OF_ZATHROTH_MISSION.rewardCoins > 0 ? FOLLOWER_OF_ZATHROTH_MISSION.rewardCoins : undefined
+            });
             return;
           }
         } catch (err) {
@@ -21240,6 +21275,12 @@ function createNPCCooldownManager() {
   // playerUsed*/battle-instance state, so at most one of them actually does anything for
   // any given battle start.
   let questBattleStartHookRegistered = false;
+  let questBattleStartBoardHandler = null;
+  let questBattleStartBoardUnsub = null;
+  function handleQuestBattleStartFromBoardEvent() {
+    triggerMornenionBattleStart('before-game-start');
+    triggerSpiderLairBattleStart('before-game-start');
+  }
   function registerQuestBattleStartHitboxSafetyNet(retryCount = 0) {
     if (questBattleStartHookRegistered) return;
     if (!globalThis.state?.board?.on) {
@@ -21250,10 +21291,8 @@ function createNPCCooldownManager() {
       }
       return;
     }
-    globalThis.state.board.on('before-game-start', () => {
-      triggerMornenionBattleStart('before-game-start');
-      triggerSpiderLairBattleStart('before-game-start');
-    });
+    questBattleStartBoardHandler = handleQuestBattleStartFromBoardEvent;
+    questBattleStartBoardUnsub = globalThis.state.board.on('before-game-start', questBattleStartBoardHandler);
     questBattleStartHookRegistered = true;
     console.log('[Quests Mod] before-game-start hitbox safety net installed');
   }
@@ -21266,15 +21305,18 @@ function createNPCCooldownManager() {
   // listener "a backup" to a document-level click(capture) handler that matches the
   // Start/Play button by its text content, which is the one mechanism actually confirmed
   // to fire in sandbox mode. Mirror that approach here instead of trusting the event.
+  function handleQuestStartButtonClick(event) {
+    const button = event.target?.closest?.('button');
+    if (!button) return;
+    const text = button.textContent?.trim();
+    if (text !== 'Start' && text !== 'Iniciar' && text !== 'Play' && text !== 'Jogar') return;
+    triggerMornenionBattleStart('Start button click');
+    triggerSpiderLairBattleStart('Start button click');
+  }
   if (typeof document !== 'undefined') {
-    document.addEventListener('click', (event) => {
-      const button = event.target?.closest?.('button');
-      if (!button) return;
-      const text = button.textContent?.trim();
-      if (text !== 'Start' && text !== 'Iniciar' && text !== 'Play' && text !== 'Jogar') return;
-      triggerMornenionBattleStart('Start button click');
-      triggerSpiderLairBattleStart('Start button click');
-    }, true);
+    // Via EventManager so cleanup()'s EventManager.cleanupAll() removes it (and the
+    // tracked Set makes re-registration on a mod reload idempotent).
+    EventManager.addEventListener(document, 'click', handleQuestStartButtonClick, true);
   }
 
   // The one source of truth for "is tile N supposed to be walkable" — every tile in
@@ -36090,15 +36132,9 @@ function createNPCCooldownManager() {
     // Cleanup mining/digging system
     cleanupMiningSystem();
 
-    // Cleanup Mornenion ally limit subscription
-    if (mornenionAllyLimitSubscription) {
-      try {
-        mornenionAllyLimitSubscription.unsubscribe();
-      } catch (e) {
-        console.warn('[Quests Mod][Mornenion] Error unsubscribing ally limit:', e);
-      }
-      mornenionAllyLimitSubscription = null;
-    }
+    // (Removed a dead `mornenionAllyLimitSubscription` block — that variable is never
+    // declared or assigned anywhere, so reading it threw a ReferenceError that aborted
+    // the rest of cleanup(). It never fired before because nothing called cleanup().)
 
     // Cleanup creature placement tracking
     if (creaturePlacementSubscription) {
@@ -36162,6 +36198,24 @@ function createNPCCooldownManager() {
 
     // Cleanup quest overlay hider
     cleanupQuestOverlayHider();
+
+    // Cleanup before-game-start hitbox safety-net board hook
+    if (questBattleStartHookRegistered) {
+      try {
+        if (typeof questBattleStartBoardUnsub === 'function') {
+          questBattleStartBoardUnsub();
+        } else if (questBattleStartBoardUnsub && typeof questBattleStartBoardUnsub.unsubscribe === 'function') {
+          questBattleStartBoardUnsub.unsubscribe();
+        } else if (globalThis.state?.board?.off && questBattleStartBoardHandler) {
+          globalThis.state.board.off('before-game-start', questBattleStartBoardHandler);
+        }
+      } catch (e) {
+        console.warn('[Quests Mod] Error removing before-game-start safety-net hook:', e);
+      }
+      questBattleStartBoardUnsub = null;
+      questBattleStartBoardHandler = null;
+      questBattleStartHookRegistered = false;
+    }
 
     // Cleanup all tracked event listeners
     EventManager.cleanupAll();

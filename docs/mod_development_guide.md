@@ -209,7 +209,24 @@ Each mod runs in a sandboxed context with the following objects available:
 
 ### Lifecycle
 
-A mod is loaded when the game page loads and remains active until the page is closed or refreshed. If you need to run cleanup code when the mod is disabled, you can implement that logic in the `exports` object.
+A mod's body runs when the game page loads. The loader also calls `exports.cleanup()`:
+
+- **on disable** — when the user toggles the mod off in the popup (the mod's record is
+  then dropped, so re-enabling re-runs the body), and
+- **before a soft reload** — the popup's "Reload" button tears every mod down and re-runs
+  them without a page refresh.
+
+So **every mod must export a `cleanup` function** (either `context.exports = { cleanup }` or a
+bare `exports = { cleanup }` — both reach the loader) that undoes *everything* its body did:
+every `addEventListener`, `setInterval`/`setTimeout`, `MutationObserver`, store
+`.subscribe()`, injected DOM node, monkey-patch, and `window.*` global. `cleanup()` **must be
+idempotent** (guard with `if (x) { … x = null }`) — a mod that also listens for its own
+`updateLocalModState` message will get `cleanup()` called twice.
+
+If your mod uses a module-load guard (`if (window.__myModLoaded) return`), **reset it in
+`cleanup()`** (`delete window.__myModLoaded`) or a re-enable / soft reload silently no-ops.
+
+See [Best Practices → Cleanup & memory leaks](#cleanup--memory-leaks) for the full checklist.
 
 ## The API
 
@@ -466,6 +483,22 @@ document.addEventListener('utility-api-ready', () => {
   const trollId = api.utility.maps.monsterNamesToGameIds.get('troll');
   console.log('Troll ID:', trollId);
 });
+```
+
+#### `api.util.unsubscribe(sub)`
+
+The game's stores are inconsistent about what `.subscribe()` returns:
+`globalThis.state.{board,player,game,gameTimer,daily}.subscribe()` returns an
+`{ unsubscribe }` **object**, while `state.X.select(fn).subscribe()` and the world event
+emitters (`world.onGameEnd.subscribe`, `world.grid.onActor*.subscribe`) return a bare
+**function**. A teardown that only handles one shape silently leaks the other. In your
+`cleanup()`, always:
+
+```javascript
+const sub = globalThis.state.board.select(s => s.context.floor).subscribe(onFloor);
+// …later, in cleanup():
+api.util.unsubscribe(sub);   // handles both shapes, null-safe
+```
 
 ### Hook API
 
@@ -822,8 +855,35 @@ For more details on the game state API, see the [Game State API Documentation](g
 
 - Avoid unnecessary DOM operations
 - Use event delegation where possible
-- Clean up event listeners and intervals when they're no longer needed
 - Use `setTimeout` and `requestAnimationFrame` for animations instead of loops
+
+### Cleanup & memory leaks
+
+`exports.cleanup()` runs on disable and before every soft reload (see [Lifecycle](#lifecycle)).
+A 2026 audit found ~70 leak sites across the loader and mods; these are the rules that came
+out of it:
+
+- **`.subscribe()` return shape.** `globalThis.state.X.subscribe()` → `{ unsubscribe }`
+  object; `X.select(fn).subscribe()` and world emitters → bare function. Use
+  [`api.util.unsubscribe(sub)`](#apiutilunsubscribesub) — it handles both. A one-shape check
+  silently leaks the other (this was ~⅓ of the audit's findings).
+- **No inline-arrow `document`/`window` listeners** that outlive one interaction — you can't
+  `removeEventListener` an anonymous function. Store a named handler in a module var and
+  remove it in `cleanup()`.
+- **Every `setInterval` handle** lives in a module var, cleared in `cleanup()`; guard each
+  `setInterval` call site with `if (!handle)` so it can't double-set.
+- **Debug-only** body-wide `MutationObserver`s / polls: gate behind
+  `globalThis.BestiaryLogger?.getLevel?.() === 'verbose'` — don't arm them for every user.
+- **Modal `cleanup()` must actually `.close()` the modal** (or call its layout-cleanup
+  helper) — nulling the reference alone leaves the modal DOM, its `resize` listener, and any
+  open sub-panel's document listeners in the page.
+- **Open context menus / confirm-armed buttons**: close them in `cleanup()`
+  (`openContextMenu?.closeMenu?.()`) — their ESC/click-capture document listeners are
+  otherwise only removed by a click that may never come.
+- **`window.fetch` patches**: name your wrapper and guard the restore with
+  `if (window.fetch === myWrapper)` so disabling your mod doesn't clobber a mod that patched
+  on top of you.
+- **`cleanup()` must be idempotent** and must reset any `window.__myModLoaded` guard.
 
 ### User Experience
 

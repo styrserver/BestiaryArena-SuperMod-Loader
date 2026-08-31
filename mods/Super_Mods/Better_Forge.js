@@ -3974,7 +3974,7 @@
       if (globalThis.state?.player?.select) {
           let previousDust = currentDust;
           let isFirstCallback = true;
-          const subscription = globalThis.state.player
+          const dustSelectSubscription = globalThis.state.player
             .select((state) => readDustFromPlayerState(state))
             .subscribe((newDust) => {
               const numericDust = Number.isFinite(newDust) ? newDust : 0;
@@ -3999,7 +3999,11 @@
               previousDust = numericDust;
             });
 
-          dustDisplay._unsubscribe = subscription.unsubscribe;
+          // .select(fn).subscribe(cb) may return a bare unsubscribe function OR an
+          // { unsubscribe } object — handle both, else the subscription leaked per modal open.
+          dustDisplay._unsubscribe = (typeof dustSelectSubscription === 'function')
+            ? dustSelectSubscription
+            : dustSelectSubscription?.unsubscribe?.bind(dustSelectSubscription);
         } else if (globalThis.state?.player?.subscribe) {
           let previousDust = currentDust;
           const unsubscribe = globalThis.state.player.subscribe(() => {

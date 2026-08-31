@@ -1265,10 +1265,13 @@ function syncPublishSetupButtons() {
 function startPublishSetupBoardWatch() {
   if (!battleHelperPublishBoardUnsub) {
     try {
+      // board.subscribe() may return a bare function OR an { unsubscribe } object —
+      // store whatever it returns (the old code discarded the { unsubscribe } case,
+      // leaking the subscription).
       const unsub = globalThis.state?.board?.subscribe?.(() => {
         syncPublishSetupButtons();
       });
-      if (typeof unsub === 'function') {
+      if (typeof unsub === 'function' || (unsub && typeof unsub.unsubscribe === 'function')) {
         battleHelperPublishBoardUnsub = unsub;
       }
     } catch (error) {
@@ -1280,8 +1283,11 @@ function startPublishSetupBoardWatch() {
 
 function stopPublishSetupBoardWatchIfIdle() {
   if (battleHelperPublishToastBtn || battleHelperModalPublishBtn) return;
-  if (typeof battleHelperPublishBoardUnsub === 'function') {
-    try { battleHelperPublishBoardUnsub(); } catch (_) { /* ignore */ }
+  if (battleHelperPublishBoardUnsub) {
+    try {
+      if (typeof battleHelperPublishBoardUnsub === 'function') battleHelperPublishBoardUnsub();
+      else if (typeof battleHelperPublishBoardUnsub.unsubscribe === 'function') battleHelperPublishBoardUnsub.unsubscribe();
+    } catch (_) { /* ignore */ }
   }
   battleHelperPublishBoardUnsub = null;
 }
@@ -3334,8 +3340,11 @@ context.exports = {
     stopBattleHelperPublishSetupToast();
     removeBattleHelperToastContainer();
     clearBattleHelperModalCleanup();
-    if (typeof battleHelperPublishBoardUnsub === 'function') {
-      try { battleHelperPublishBoardUnsub(); } catch (_) { /* ignore */ }
+    if (battleHelperPublishBoardUnsub) {
+      try {
+        if (typeof battleHelperPublishBoardUnsub === 'function') battleHelperPublishBoardUnsub();
+        else if (typeof battleHelperPublishBoardUnsub.unsubscribe === 'function') battleHelperPublishBoardUnsub.unsubscribe();
+      } catch (_) { /* ignore */ }
     }
     battleHelperPublishBoardUnsub = null;
     battleHelperPublishToastBtn = null;

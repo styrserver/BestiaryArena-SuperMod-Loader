@@ -1150,7 +1150,15 @@
       observer.disconnect();
       observer = null;
     }
-    
+
+    // Remove the fuse-confirmation document click listener if it's currently armed.
+    // (removeConfirmationPrompt() early-returns when the tooltip is gone, so do it directly.)
+    if (confirmationOutsideHandler) {
+      document.removeEventListener('click', confirmationOutsideHandler, true);
+      confirmationOutsideHandler = null;
+    }
+
+
     const styleElement = document.getElementById('better-hygenie-styles');
     if (styleElement) {
       styleElement.remove();

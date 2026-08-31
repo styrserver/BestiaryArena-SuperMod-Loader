@@ -4,6 +4,46 @@
   },
   "notes": [
     {
+      "version": "4.9.9",
+      "changes": [
+        {
+          "mod": "Mod Loader",
+          "type": "added",
+          "text": "New api.util.unsubscribe(sub) helper that safely tears down a game-state subscription regardless of which shape it returned."
+        },
+        {
+          "mod": "Mod Loader",
+          "type": "changed",
+          "text": "Disabling a mod now runs its cleanup, and a soft reload cleans up every running mod before re-running them, so timers, observers and listeners are no longer left behind or duplicated."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "fixed",
+          "text": "Autoplay auto-refresh on a timer now works. In \"internal timer\" and \"both\" modes the stopwatch was reset on every new game, so during autoplay it never reached the refresh threshold. The autoplay-session-time reader also stopped matching after the game relabelled the session widget (now \"Session (N runs) (m:ss)\"), which broke \"autoplay\" and \"both\" modes too; it now reads the time from the widget in both English and Portuguese. Importing a configuration no longer wipes local data the imported file doesn't contain (such as Map Editor saves): it now merges over your existing keys instead of clearing everything first, and snapshots anything it would replace so it can be recovered."
+        },
+        {
+          "mod": "Multiple Mods",
+          "type": "fixed",
+          "text": "Fixed memory leaks across roughly 40 mods: game-state subscriptions, MutationObservers and document/window listeners that were not released when a panel or modal closed or when the mod was disabled. Debug-only page watchers are now armed only at the verbose log level."
+        },
+        {
+          "mod": "Quests",
+          "type": "added",
+          "text": "Completing a quest now always shows a \"Mission completed\" notification. Several quests previously finished without one."
+        },
+        {
+          "mod": "Quests",
+          "type": "changed",
+          "text": "Quest-completion notifications now keep their highlighted styling reliably, even after notification text is edited."
+        },
+        {
+          "mod": "Quests",
+          "type": "fixed",
+          "text": "Fixed a quest-completion message that repeated a word, and a finished quest that was missing its quest-giver grouping in the completed-quests list."
+        }
+      ]
+    },
+    {
       "version": "4.9.8",
       "changes": [
         {

@@ -3625,30 +3625,39 @@ function attachSetupButtonHoverPreview(setupButton) {
   });
 }
 
+function setupPreviewMouseOverHandler(event) {
+  if (!isSetupShortcutsAndHoverEnabled()) return;
+  const setupButton = event.target.closest('button');
+  if (!setupButton || !isBetterSetupsMainActionButton(setupButton)) return;
+  attachSetupButtonHoverPreview(setupButton);
+  scheduleSetupPreviewForButton(setupButton);
+}
+
+function setupPreviewMouseOutHandler(event) {
+  const setupButton = event.target.closest('button');
+  if (!setupButton || !isBetterSetupsMainActionButton(setupButton)) return;
+  const related = event.relatedTarget;
+  if (related && setupButton.contains(related)) return;
+  if (activeSetupPreviewAnchor === setupButton) {
+    hideSetupPreview();
+  }
+}
+
 function ensureSetupPreviewDelegation() {
   if (document.documentElement.dataset.betterSetupsPreviewDelegation === 'true') {
     return;
   }
-
   document.documentElement.dataset.betterSetupsPreviewDelegation = 'true';
+  // Named handlers (not inline arrows) so teardownSetupPreviewDelegation() can remove them.
+  document.addEventListener('mouseover', setupPreviewMouseOverHandler, true);
+  document.addEventListener('mouseout', setupPreviewMouseOutHandler, true);
+}
 
-  document.addEventListener('mouseover', (event) => {
-    if (!isSetupShortcutsAndHoverEnabled()) return;
-    const setupButton = event.target.closest('button');
-    if (!setupButton || !isBetterSetupsMainActionButton(setupButton)) return;
-    attachSetupButtonHoverPreview(setupButton);
-    scheduleSetupPreviewForButton(setupButton);
-  }, true);
-
-  document.addEventListener('mouseout', (event) => {
-    const setupButton = event.target.closest('button');
-    if (!setupButton || !isBetterSetupsMainActionButton(setupButton)) return;
-    const related = event.relatedTarget;
-    if (related && setupButton.contains(related)) return;
-    if (activeSetupPreviewAnchor === setupButton) {
-      hideSetupPreview();
-    }
-  }, true);
+function teardownSetupPreviewDelegation() {
+  if (document.documentElement.dataset.betterSetupsPreviewDelegation !== 'true') return;
+  document.removeEventListener('mouseover', setupPreviewMouseOverHandler, true);
+  document.removeEventListener('mouseout', setupPreviewMouseOutHandler, true);
+  delete document.documentElement.dataset.betterSetupsPreviewDelegation;
 }
 
 // =======================
@@ -3765,6 +3774,7 @@ function getMapSetupData(mapId) {
       clearBetterSetupsModalLayoutCleanup();
       hideSetupPreview();
       stopSetupInterfaceObserver();
+      teardownSetupPreviewDelegation();
     }
   };
 }

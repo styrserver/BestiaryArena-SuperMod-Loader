@@ -16938,6 +16938,12 @@ function cleanupMapEditor() {
     exitMapEditorPlayModeLock();
     notifyMapEditorOpenChanged();
   }
+  // Full teardown overrides "keep locked": closeMapEditor()/stopMapEditorSandboxTest()
+  // only exit the floor lock when shouldKeepMapEditorFloorLocked() is false, and only
+  // endWorkshopMapSession() detaches the map-selector observer — so an active workshop
+  // session would otherwise leak a body-subtree MutationObserver + a board subscription.
+  endWorkshopMapSession();
+  exitMapEditorFloorLock();
   detachBoardListener();
   teardownPanelDragListeners();
   teardownPanelResizeListeners();
