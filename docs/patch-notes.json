@@ -4,6 +4,21 @@
   },
   "notes": [
     {
+      "version": "4.9.11",
+      "changes": [
+        {
+          "mod": "Better Teleporter",
+          "type": "added",
+          "text": "XP column now has a \"Team XP / Stam\" metric that ranks maps by whole-team XP throughput (run XP × team slots ÷ stamina), favouring bigger boards when levelling a large roster. \"XP / Stam\" and \"Team XP / Stam\" are each clickable to sort (they underline on hover). Right-click the column header to show or hide either metric; the choice is remembered across sessions."
+        },
+        {
+          "mod": "Map Editor",
+          "type": "fixed",
+          "text": "Editing a tile's assets while a battle is actually running could crash the whole game to a blank error screen. Asset add, delete, move-between-floors and reorder now stand down until the battle is paused or stopped; the Delete / PageUp / PageDown tile hotkeys say so."
+        }
+      ]
+    },
+    {
       "version": "4.9.10",
       "changes": [
         {

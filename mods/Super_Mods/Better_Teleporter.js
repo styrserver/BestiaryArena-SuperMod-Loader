@@ -18,6 +18,7 @@
   const SORT_BOUND_ATTR = `data-${NS}-sort-bound`;
   const SORT_HEADER_ATTR = `data-${NS}-sort-header`;
   const SORT_ARROW_ATTR = `data-${NS}-sort-arrow`;
+  const SORT_TARGET_CLASS = `${NS}-sort-target`;
   const REGION_HEADER_ATTR = `data-${NS}-region-header`;
   const TABLE_STYLE_ID = `${NS}-table-styles`;
   const THEAD_HEIGHT_VAR = `--${NS}-thead-height`;
@@ -145,6 +146,36 @@
     sortKey: null,
     sortDir: 'asc',
   };
+
+  // Which XP-column metric lines are shown (right-click the column header).
+  // Persisted to localStorage so the choice survives a page refresh, and kept
+  // out of sessionPreferences so the teleporter's "Reset" button leaves it alone.
+  const COLUMN_PREFS_STORAGE_KEY = `${NS}-column-prefs`;
+  const DEFAULT_COLUMN_PREFS = { showPerStamina: true, showPerStaminaTotal: true };
+  let columnPrefs = { ...DEFAULT_COLUMN_PREFS };
+
+  function loadColumnPrefs() {
+    try {
+      const raw = localStorage.getItem(COLUMN_PREFS_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') return;
+      const next = {
+        showPerStamina: parsed.showPerStamina !== false,
+        showPerStaminaTotal: parsed.showPerStaminaTotal !== false,
+      };
+      // Never restore a state with both metrics hidden.
+      columnPrefs = (next.showPerStamina || next.showPerStaminaTotal)
+        ? next
+        : { ...DEFAULT_COLUMN_PREFS };
+    } catch (_) {}
+  }
+
+  function saveColumnPrefs() {
+    try {
+      localStorage.setItem(COLUMN_PREFS_STORAGE_KEY, JSON.stringify(columnPrefs));
+    } catch (_) {}
+  }
 
   let sessionPreferences = { ...DEFAULT_SESSION_PREFERENCES };
 
@@ -595,6 +626,14 @@
       }
       div[role="dialog"][${TARGET_ATTR}] table tbody td:nth-child(2) {
         overflow: hidden;
+      }
+      div[role="dialog"][${TARGET_ATTR}] table thead .${SORT_TARGET_CLASS} {
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      div[role="dialog"][${TARGET_ATTR}] table thead .${SORT_TARGET_CLASS}:hover {
+        text-decoration: underline;
+        text-underline-offset: 2px;
       }
     `;
     document.head.appendChild(style);
@@ -1399,6 +1438,14 @@
         const staminaCost = Number(room.staminaCost ?? 0);
         const expAvg = Math.round(levelSumCapped * 562.5);
         const expPerStamina = staminaCost > 0 ? expAvg / staminaCost : 0;
+        // How many of your own creatures can be fielded on this map. Every fielded
+        // creature earns the full run XP (the after-battle formula depends only on
+        // enemy levels, not team size), so total roster XP per run ≈ expAvg * team
+        // slots. `expPerStaminaTotal` is that throughput per stamina, which ranks
+        // maps better when grinding a large roster to level 99. Prefer the room's
+        // declared maxTeamSize; fall back to the enemy count for odd/legacy rooms.
+        const teamSlots = Number(room.maxTeamSize) > 0 ? Number(room.maxTeamSize) : villains.length;
+        const expPerStaminaTotal = staminaCost > 0 ? (expAvg * teamSlots) / staminaCost : 0;
 
         byId.set(roomId, {
           id: roomId,
@@ -1408,6 +1455,8 @@
           staminaCost,
           expAvg,
           expPerStamina,
+          teamSlots,
+          expPerStaminaTotal,
           raid: room.raid === true,
           dynamicEvent: globalThis.mapsDatabase?.isDynamicEventMap?.(roomId) === true,
         });
@@ -1842,8 +1891,15 @@
     const dialog = table.closest('div[role="dialog"]');
     if (isTableSearchActive(dialog)) return;
 
-    const { sortKey, sortDir } = sessionPreferences;
+    let { sortKey } = sessionPreferences;
+    const { sortDir } = sessionPreferences;
     const state = getTableSortState(table);
+
+    // Ignore a remembered sort whose metric line is currently hidden.
+    if ((sortKey === 'expPerStamina' && !isXpLineVisible('perStamina'))
+      || (sortKey === 'expPerStaminaTotal' && !isXpLineVisible('perStaminaTotal'))) {
+      sortKey = null;
+    }
 
     if (!sortKey) {
       if (state.sortKey) {
@@ -2536,16 +2592,17 @@
 
   function updateSortArrows(table) {
     const state = getTableSortState(table);
-    for (const th of table.querySelectorAll('th[data-sort]')) {
-      const arrow = th.querySelector(`[${SORT_ARROW_ATTR}]`);
+    // A sort target is either a <th data-sort> (map name column) or a nested
+    // element carrying its own data-sort (the XP column exposes two of them).
+    for (const el of table.querySelectorAll('[data-sort]')) {
+      const arrow = el.querySelector(`[${SORT_ARROW_ATTR}]`);
       if (!arrow) continue;
-      const next = state.sortKey && th.dataset.sort === state.sortKey
-        ? (state.sortDir === 'desc' ? '↓' : '↑')
-        : '';
+      const isActive = state.sortKey && el.dataset.sort === state.sortKey;
+      const next = isActive ? (state.sortDir === 'desc' ? '↓' : '↑') : '';
+      if (isActive) arrow.style.color = '#fff';
+      else arrow.style.removeProperty('color');
       if (arrow.textContent === next) continue;
       arrow.textContent = next;
-      if (next) arrow.style.color = '#fff';
-      else arrow.style.removeProperty('color');
     }
   }
 
@@ -2601,6 +2658,7 @@
           tr,
           name: room?.name || getRoomNameFromRow(tr) || roomId,
           expPerStamina: room?.expPerStamina ?? 0,
+          expPerStaminaTotal: room?.expPerStaminaTotal ?? 0,
         });
       }
 
@@ -2608,6 +2666,9 @@
       roomRows.sort((a, b) => {
         if (state.sortKey === 'name') {
           return a.name.localeCompare(b.name) * mul;
+        }
+        if (state.sortKey === 'expPerStaminaTotal') {
+          return (a.expPerStaminaTotal - b.expPerStaminaTotal) * mul;
         }
         return (a.expPerStamina - b.expPerStamina) * mul;
       });
@@ -2659,7 +2720,7 @@
   function handleSortClick(table, sortKey) {
     const state = getTableSortState(table);
     const dialog = table.closest('div[role="dialog"]');
-    const initialDir = sortKey === 'expPerStamina' ? 'desc' : 'asc';
+    const initialDir = sortKey === 'name' ? 'asc' : 'desc';
 
     let nextSortKey = state.sortKey;
     let nextSortDir = state.sortDir;
@@ -2702,7 +2763,88 @@
 
     th.dataset.sort = sortKey;
     th.setAttribute(SORT_HEADER_ATTR, 'true');
+    th.classList.add(SORT_TARGET_CLASS);
     th.style.cursor = 'pointer';
+    th.style.userSelect = 'none';
+  }
+
+  function isXpLineVisible(lineName) {
+    if (lineName === 'perStamina') return columnPrefs.showPerStamina !== false;
+    if (lineName === 'perStaminaTotal') return columnPrefs.showPerStaminaTotal !== false;
+    return true;
+  }
+
+  // Toggle the `data-line` rows inside one XP cell (or the header) to match the
+  // right-click column preferences. The raw "xp" line is always shown.
+  function applyXpStamLineVisibility(container) {
+    if (!container) return;
+    for (const el of container.querySelectorAll('[data-line]')) {
+      el.style.display = isXpLineVisible(el.dataset.line) ? '' : 'none';
+    }
+  }
+
+  function applyXpStamColumnVisibility(table) {
+    if (!table) return;
+
+    const th = table.querySelector(`th[${XP_STAM_ATTR}]`);
+    if (th) {
+      for (const line of th.querySelectorAll('[data-sort]')) {
+        const lineName = line.dataset.sort === 'expPerStaminaTotal' ? 'perStaminaTotal' : 'perStamina';
+        line.style.display = isXpLineVisible(lineName) ? '' : 'none';
+      }
+    }
+
+    for (const td of table.querySelectorAll(`td[${XP_STAM_ATTR}]`)) {
+      applyXpStamLineVisibility(td);
+    }
+
+    // Don't leave the table sorted by a metric the user just hid.
+    const state = getTableSortState(table);
+    const sortHidden = (state.sortKey === 'expPerStamina' && !isXpLineVisible('perStamina'))
+      || (state.sortKey === 'expPerStaminaTotal' && !isXpLineVisible('perStaminaTotal'));
+    if (sortHidden) {
+      state.sortKey = null;
+      state.sortDir = 'asc';
+      syncSessionSortFromTable(table);
+      applyTableSort(table);
+    }
+
+    if (th) updateStickyRegionOffset(table);
+  }
+
+  function applyXpStamColumnVisibilityToOpenDialogs() {
+    for (const dialog of findTeleporterDialogs()) {
+      const table = dialog.querySelector('table');
+      if (table) applyXpStamColumnVisibility(table);
+    }
+  }
+
+  // The XP column header carries two independently clickable sort targets:
+  // "XP / Stam" (single-creature efficiency) and "Team XP / Stam" (whole-team XP
+  // throughput = expAvg * unit slots / stamina). Each is its own <div data-sort>,
+  // and each can be hidden via the header's right-click menu.
+  function prepareXpStamSortableHeader(th) {
+    if (th.getAttribute(SORT_HEADER_ATTR) === 'true') return;
+
+    th.textContent = '';
+    const targets = [
+      ['mods.betterTeleporter.xpStam', 'expPerStamina'],
+      ['mods.betterTeleporter.xpStamTotal', 'expPerStaminaTotal'],
+    ];
+    for (const [labelKey, sortKey] of targets) {
+      const line = document.createElement('div');
+      line.dataset.sort = sortKey;
+      line.classList.add(SORT_TARGET_CLASS);
+      line.style.userSelect = 'none';
+      line.title = t('mods.betterTeleporter.xpStamSortHint');
+      line.append(document.createTextNode(`${t(labelKey)} `));
+      const arrow = document.createElement('span');
+      arrow.setAttribute(SORT_ARROW_ATTR, 'true');
+      line.appendChild(arrow);
+      th.appendChild(line);
+    }
+
+    th.setAttribute(SORT_HEADER_ATTR, 'true');
     th.style.userSelect = 'none';
   }
 
@@ -2715,35 +2857,52 @@
     const mapTh = headerRow.querySelector('th:not([' + XP_STAM_ATTR + '])');
     const xpTh = headerRow.querySelector(`th[${XP_STAM_ATTR}]`);
     if (mapTh) prepareSortableHeader(mapTh, 'name');
-    if (xpTh) prepareSortableHeader(xpTh, 'expPerStamina');
+    if (xpTh) prepareXpStamSortableHeader(xpTh);
 
     const onClick = (event) => {
-      const th = event.target.closest('th[data-sort]');
-      if (!th || !table.contains(th)) return;
+      const sortEl = event.target.closest('[data-sort]');
+      if (!sortEl || !table.contains(sortEl)) return;
       event.preventDefault();
       event.stopPropagation();
-      handleSortClick(table, th.dataset.sort);
+      handleSortClick(table, sortEl.dataset.sort);
     };
 
+    let xpContextHandler = null;
+    if (xpTh) {
+      xpContextHandler = (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        showXpColumnContextMenu(event.clientX, event.clientY);
+      };
+      xpTh.addEventListener('contextmenu', xpContextHandler);
+    }
+
     table.addEventListener('click', onClick);
-    tableSortHandlers.set(table, onClick);
+    tableSortHandlers.set(table, { click: onClick, xpTh, xpContextHandler });
     table.setAttribute(SORT_BOUND_ATTR, 'true');
     updateSortArrows(table);
+    applyXpStamColumnVisibility(table);
   }
 
   function teardownSortableHeaders(table) {
     const handler = tableSortHandlers.get(table);
     if (handler) {
-      table.removeEventListener('click', handler);
+      table.removeEventListener('click', handler.click);
+      if (handler.xpTh && handler.xpContextHandler) {
+        handler.xpTh.removeEventListener('contextmenu', handler.xpContextHandler);
+      }
       tableSortHandlers.delete(table);
     }
     table.removeAttribute(SORT_BOUND_ATTR);
 
     for (const th of table.querySelectorAll(`th[${SORT_HEADER_ATTR}]`)) {
-      const label = th.textContent.replace(/[↑↓]\s*$/, '').trim();
+      const label = th.hasAttribute(XP_STAM_ATTR)
+        ? t('mods.betterTeleporter.xpStam')
+        : th.textContent.replace(/[↑↓]\s*$/, '').trim();
       th.textContent = label;
       th.removeAttribute(SORT_HEADER_ATTR);
       th.removeAttribute('data-sort');
+      th.classList.remove(SORT_TARGET_CLASS);
       th.style.removeProperty('cursor');
       th.style.removeProperty('user-select');
     }
@@ -2758,12 +2917,19 @@
     if (room?.expAvg > 0) {
       const xpFmt = room.expAvg.toLocaleString('pt-BR');
       const effFmt = Math.round(room.expPerStamina).toLocaleString('pt-BR');
+      const totalFmt = Math.round(room.expPerStaminaTotal ?? 0).toLocaleString('pt-BR');
       const xpLabel = t('mods.betterTeleporter.xpLabel');
       const stamSuffix = t('mods.betterTeleporter.stamSuffix');
+      const teamStamSuffix = t('mods.betterTeleporter.teamStamSuffix');
+      const totalLine = room.expPerStaminaTotal > 0
+        ? `<div data-line="perStaminaTotal">${totalFmt} <span style="color:#888;">${teamStamSuffix}</span></div>`
+        : '';
       td.innerHTML = `
-        <div>${xpFmt} <span style="color:#888;">${xpLabel}</span></div>
-        <div>${effFmt} <span style="color:#888;">${stamSuffix}</span></div>
+        <div data-line="xp">${xpFmt} <span style="color:#888;">${xpLabel}</span></div>
+        <div data-line="perStamina">${effFmt} <span style="color:#888;">${stamSuffix}</span></div>
+        ${totalLine}
       `;
+      applyXpStamLineVisibility(td);
     } else {
       td.innerHTML = '<span style="color:#666;">—</span>';
     }
@@ -2783,8 +2949,7 @@
     th.style.textAlign = 'left';
     th.style.paddingLeft = '6px';
     th.style.whiteSpace = 'nowrap';
-    th.textContent = t('mods.betterTeleporter.xpStam');
-    prepareSortableHeader(th, 'expPerStamina');
+    prepareXpStamSortableHeader(th);
     headerRow.appendChild(th);
   }
 
@@ -3215,7 +3380,7 @@
     const cancelButton = document.createElement('button');
     cancelButton.type = 'button';
     cancelButton.className = CONTEXT_MENU_UI.CANCEL_CLASS;
-    cancelButton.textContent = tf('mods.betterTeleporter.contextMenuCancel', 'Cancel');
+    cancelButton.textContent = tf('mods.betterTeleporter.contextMenuCancel', 'Close');
     cancelButton.style.width = '70px';
     cancelButton.style.minHeight = '24px';
     cancelButton.style.textAlign = 'center';
@@ -3410,6 +3575,131 @@
     openRowContextMenu = menuState;
   }
 
+  function createXpColumnCheckboxRow(labelText, isChecked, onToggle) {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = getContextMenuButtonClassName();
+    applyContextMenuEntryChrome(row);
+    Object.assign(row.style, CONTEXT_MENU_BUTTON_LAYOUT);
+
+    const render = (checked) => {
+      row.textContent = `${checked ? '☑' : '☐'} ${labelText}`;
+    };
+    render(isChecked);
+
+    bindContextMenuHoverBrightness(row);
+    bindContextMenuActivation(row, () => {
+      render(onToggle());
+    });
+    return row;
+  }
+
+  function showXpColumnContextMenu(x, y) {
+    closeRowContextMenu();
+
+    const host = findOpenTeleporterDialog();
+    if (!host) return;
+
+    const { hostPosition, hostOverflow } = prepareContextMenuHost(host);
+    const overlay = createContextMenuOverlay();
+    const menu = createContextMenuPanel();
+
+    menu.appendChild(createContextMenuText('pixel-font-16', tf('mods.betterTeleporter.columnMenuTitle', 'XP column'), {
+      color: '#ffe066',
+      fontWeight: 'bold',
+      marginBottom: '4px',
+      textAlign: 'center',
+    }));
+    menu.appendChild(createContextMenuText('pixel-font-14', tf('mods.betterTeleporter.columnMenuSubtitle', 'Show metrics:'), {
+      color: '#cccccc',
+      fontSize: '11px',
+      marginBottom: '12px',
+      textAlign: 'center',
+    }));
+
+    const toggle = (key) => {
+      const other = key === 'showPerStamina' ? 'showPerStaminaTotal' : 'showPerStamina';
+      const current = columnPrefs[key] !== false;
+      // Keep at least one metric visible.
+      if (current && columnPrefs[other] === false) return true;
+      columnPrefs[key] = !current;
+      saveColumnPrefs();
+      applyXpStamColumnVisibilityToOpenDialogs();
+      return columnPrefs[key] !== false;
+    };
+
+    const actionsContainer = createContextMenuActionsContainer();
+    actionsContainer.appendChild(createXpColumnCheckboxRow(
+      t('mods.betterTeleporter.xpStam'),
+      columnPrefs.showPerStamina !== false,
+      () => toggle('showPerStamina'),
+    ));
+    actionsContainer.appendChild(createXpColumnCheckboxRow(
+      t('mods.betterTeleporter.xpStamTotal'),
+      columnPrefs.showPerStaminaTotal !== false,
+      () => toggle('showPerStaminaTotal'),
+    ));
+    menu.appendChild(actionsContainer);
+
+    const buttonContainer = document.createElement('div');
+    buttonContainer.style.display = 'flex';
+    buttonContainer.style.justifyContent = 'center';
+    buttonContainer.style.gap = '8px';
+
+    const menuState = {
+      host,
+      overlay,
+      menu,
+      hostPosition,
+      hostOverflow,
+      escHandler: null,
+      overlayClickHandler: null,
+      modalClickHandler: null,
+      modalContent: host,
+      closeMenu: null,
+    };
+
+    function closeMenu() {
+      detachContextMenuListeners(menuState);
+      overlay.remove();
+      menu.remove();
+      restoreContextMenuHost(host, hostPosition, hostOverflow);
+      if (openRowContextMenu === menuState) {
+        openRowContextMenu = null;
+      }
+    }
+
+    menuState.closeMenu = closeMenu;
+    menuState.overlayClickHandler = (event) => {
+      if (event.target !== overlay) return;
+      stopContextMenuEvent(event);
+      closeMenu();
+    };
+    menuState.escHandler = (event) => {
+      if (event.key === 'Escape') closeMenu();
+    };
+    menuState.modalClickHandler = (event) => {
+      if (menu.contains(event.target) || overlay.contains(event.target)) return;
+      closeMenu();
+    };
+
+    buttonContainer.appendChild(createContextMenuCancelButton(null, closeMenu));
+    menu.appendChild(buttonContainer);
+
+    host.appendChild(overlay);
+    host.appendChild(menu);
+    positionContextMenuInHost(menu, host, x, y);
+    shieldContextMenuEvents(menu);
+
+    overlay.addEventListener('mousedown', menuState.overlayClickHandler);
+    overlay.addEventListener('click', menuState.overlayClickHandler);
+    document.addEventListener('keydown', menuState.escHandler);
+    host.addEventListener('mousedown', menuState.modalClickHandler);
+    host.addEventListener('click', menuState.modalClickHandler);
+
+    openRowContextMenu = menuState;
+  }
+
   function bindRowContextMenu(tr, roomId) {
     if (!roomId || tr.getAttribute(ROW_CONTEXT_BOUND_ATTR) === 'true') return;
     if (!isCyclopediaModEnabled()) return;
@@ -3559,6 +3849,7 @@
   function initialize() {
     if (observer) return;
     resetSessionPreferences();
+    loadColumnPrefs();
     injectLayoutStyles();
     injectTableStyles();
     revertMisTaggedTeleporterDialogs();

@@ -383,8 +383,25 @@ let restoreBoardGuardHandler = null;
 const MAP_EDITOR_MANIPULATOR_COOLDOWN_MS = 500;
 let mapEditorManipulatorCooldownUntil = 0;
 
+// True while a battle is actually running on the board. React re-renders the tile and
+// #floor-below subtrees every tick then, so mutating editor-added sprite nodes that sit
+// among React's own children races a commit -> "Node.insertBefore: Child to insert before
+// is not a child of this node" -> hard client-side crash. User-initiated asset edits stand
+// down until the battle is paused/stopped; internal restore paths pass skipThrottle.
+function isMapEditorLiveBattleActive() {
+  try {
+    return globalThis.state?.board?.getSnapshot?.()?.context?.gameStarted === true;
+  } catch (e) {
+    return false;
+  }
+}
+
 function guardMapEditorManipulator(actionKey, options = {}) {
   if (options.skipThrottle === true) return true;
+  if (options.allowDuringBattle !== true && isMapEditorLiveBattleActive()) {
+    logMapEditor('manipulatorThrottled', { action: actionKey, reason: 'battle-live' });
+    return false;
+  }
   if (restoreMapInProgress) {
     logMapEditor('manipulatorThrottled', { action: actionKey, reason: 'restore-in-progress' });
     return false;
@@ -4679,6 +4696,7 @@ function rebuildEditorFloorBelowNodesForTile(tileIndex) {
 }
 
 function moveAddedSpriteToFloorBelow(tileIndex, layerIndex, floorDepth = 1) {
+  if (!guardMapEditorManipulator('move-sprite-floor-below')) return false;
   const resolved = resolveAddedSpriteAtLayer(tileIndex, layerIndex);
   if (!resolved) return false;
 
@@ -4719,6 +4737,7 @@ function moveAddedSpriteToFloorBelow(tileIndex, layerIndex, floorDepth = 1) {
 
 /** Floor-below → main layer. `fbIndex` indexes editorEdits.addedFloorBelowConfigs[tileIndex]. */
 function moveFloorBelowSpriteToMain(tileIndex, fbIndex) {
+  if (!guardMapEditorManipulator('move-sprite-to-main')) return false;
   const configs = getAddedFloorBelowConfigs(tileIndex);
   if (!configs || fbIndex < 0 || fbIndex >= configs.length) return false;
 
@@ -4752,6 +4771,7 @@ function moveFloorBelowSpriteToMain(tileIndex, fbIndex) {
  * the ▲/▼ buttons pass fbIndex ± 1.
  */
 function reorderFloorBelowSprite(tileIndex, fromIndex, toIndex) {
+  if (!guardMapEditorManipulator('reorder-floor-below')) return false;
   const configs = getAddedFloorBelowConfigs(tileIndex);
   if (!configs || fromIndex === toIndex) return false;
   if (fromIndex < 0 || fromIndex >= configs.length) return false;
@@ -4816,6 +4836,7 @@ function applyAddedFloorBelowSpriteEdit(tileIndex, fbIndex, patch = {}, options 
  * z-index lands on the new level.
  */
 function setFloorBelowSpriteDepth(tileIndex, fbIndex, floorDepth) {
+  if (!guardMapEditorManipulator('set-floor-below-depth')) return false;
   const configs = getAddedFloorBelowConfigs(tileIndex);
   if (!configs || fbIndex < 0 || fbIndex >= configs.length) return false;
 
@@ -4834,6 +4855,7 @@ function setFloorBelowSpriteDepth(tileIndex, fbIndex, floorDepth) {
 }
 
 function removeAddedFloorBelowSprite(tileIndex, fbIndex) {
+  if (!guardMapEditorManipulator('remove-floor-below-sprite')) return false;
   const configs = getAddedFloorBelowConfigs(tileIndex);
   if (!configs || fbIndex < 0 || fbIndex >= configs.length) return false;
 
@@ -14859,6 +14881,17 @@ function handleMapEditorTileKeyboardNav(event) {
     event.preventDefault();
     selectTile(nextTileIndex);
     return;
+  }
+
+  if (event.key === 'PageUp' || event.key === 'PageDown' || event.key === 'Delete') {
+    if (isMapEditorLiveBattleActive()) {
+      event.preventDefault();
+      setStatusMessage(
+        t('mods.mapEditor.hotkeyBattleLive', 'Pause the battle before editing tile assets.'),
+        true
+      );
+      return;
+    }
   }
 
   if (event.key === 'PageUp' || event.key === 'PageDown') {
