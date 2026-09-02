@@ -14,7 +14,9 @@
     "npcChatResponseDelayMs": 1000,
     "npcChatMultiLineDelayMs": 2000,
     "npcModalCloseDelayMs": 1000,
-    "kingTibianusSwearCloseDelayMs": 2000
+    "kingTibianusSwearCloseDelayMs": 2000,
+    "villainSetupAttemptDelaysMs": [0, 100, 250, 500, 800, 1200],
+    "sceneSyncRepaintDelaysMs": [150, 400, 900, 1600]
   },
 
   "modal": {
@@ -31,6 +33,7 @@
     "kingChatRowHeight": 90,
     "questAccessCursor": "pointer",
     "questAccessTileTitle": "Right-click",
+    "allowedTilesMessage": "Ally creatures can only be placed on the marked tiles!",
     "gameFrameBorderImage": "url(\"https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png\") 4 stretch",
     "gameFrameBackground": "url(\"https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png\")"
   },

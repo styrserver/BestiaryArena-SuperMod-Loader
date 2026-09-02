@@ -36,6 +36,9 @@
       "how are you": "Thank you, I'm fine.",
       "isle of solitude": "The Isle of Solitude? A speck of rock in the bay between Carlin and Greenshore, where my colleagues keep their residence and troublesome souls are sent to reflect on their crimes. Officially, it does not exist.",
       "gm island": "The Isle of Solitude? A speck of rock in the bay between Carlin and Greenshore, where my colleagues keep their residence and troublesome souls are sent to reflect on their crimes. Officially, it does not exist.",
+      "mad mage": "The Mad Mage. A sorcerer of real power, once — until his mind went. The minotaurs keep him in a cell beneath Mintwallin and he raves at the walls. The crown has long wished to know what he still remembers. Ask me about Mintwallin if you carry the key to that cell.",
+      "mintwallin": "Mintwallin is the minotaur city hidden below the Ancient Temple, north-west of my north gate — a maze of tunnels and one-way holes ruled by their King Markwin. No place for my subjects to wander. But if the old prison key is in your hand, there is one down there worth a word: the Mad Mage.",
+      "markwin": "Markwin styles himself monarch of the minotaurs and holds their hidden city of Mintwallin. A brute with a crown. His prisoners rot; one of them, the Mad Mage, the crown would hear from.",
       "army": "Ask the soldiers about that.",
       "benjamin": "He was once my greatest general. Now he is very old and senile so we assigned him to work for the Royal Tibia Mail.",
       "bozo": "He is my royal jester and cheers me up now and then.",
@@ -1021,6 +1024,58 @@
     "boardChat": {
       "welcomeMessage": "Player,@ R@3 Y£U0 {P3R}P@RD3 T€ [F4C3] Y€RU D3$TN1Y\\?",
       "placeholder": "Type your message to The Oracle..."
+    }
+  },
+  "a-prisoner": {
+    "_comment": "The Mad Mage. Keyword Board NPC on tile 81 of the Sewers re-skinned as Mintwallin Prison (Visiting Mintwallin, Part 1). Placed by BOARD_NPC_A_PRISONER_ID in Quests.js; only present while playerEnteredMintwallinPrison.",
+    "keywords": {
+      "hi": "Huh? What? I can see! Wow! A non-mino. Did they capture you as well?",
+      "hello": "Huh? What? I can see! Wow! A non-mino. Did they capture you as well?",
+      "capture": "Yes, they capture people. I guess that's their job.",
+      "job": "Job? JOB? Hey man - I am in prison! But you know - once upon a time - I was a powerful mage! A mage ... come to think of it .., what is that - a mage?",
+      "name": "My name is - uhm - hang on? I knew it yesterday, didn't I? Doesn't matter!",
+      "mad mage": "Hey! That's me! You got it! Thanks mate - now I remember my name!",
+      "sorcerer": "I am the mightiest sorcerer from here to there! Yeah!",
+      "power": "Power. Hmmm. Once while we were crossing the mountains together a man named Aureus said to me that parcels are equal to power. Any idea what that meant?",
+      "books": "I have many books in my home. But only powerful people can read them. I bet you will only see three dots after the headline! Hehehe! Hahaha! Excellent!",
+      "book": "I have many books in my home. But only powerful people can read them. I bet you will only see three dots after the headline! Hehehe! Hahaha! Excellent!",
+      "time": "Better save time than comitting a crime. I am a poet and I know it!",
+      "rune": "Runes? Blank little pebbles for children to scribble on. I was beyond runes before your grandfather drew breath! Real power is in the numbers - the surreal ones, the space between one and two. Nobody listens.",
+      "runes": "Runes? Blank little pebbles for children to scribble on. I was beyond runes before your grandfather drew breath! Real power is in the numbers - the surreal ones, the space between one and two. Nobody listens.",
+      "magic": "Magic! Buckets of it, I had. Then the minos took my mana and now I cannot light a candle. Hehehe. Ask me about mathemagics instead - that they cannot take.",
+      "mathemagics": "Numbers, boy! Surreal numbers! Parcels equal power, mud shows the way, and every riddle has one true answer. That is the only magic worth knowing down here.",
+      "numbers": "Numbers, boy! Surreal numbers! Parcels equal power, mud shows the way, and every riddle has one true answer. That is the only magic worth knowing down here.",
+      "key": "Sure I have the key! Hehehe! Perhaps I will give it to you. IF you can solve my riddle.",
+      "riddle": "Great riddle, isn't it? If you can tell me the correct answer, I will give you something. Hehehe!",
+      "something": "No! I won't tell you. Shame coz it would be useful for you - hehehe.",
+      "escape": "How could I escape? They only give me rotten food here. I can't regain my powers because I have no mana!",
+      "mana": "How could I escape? They only give me rotten food here. I can't regain my powers because I have no mana!",
+      "labyrinth": "It's easy to find your way through it! Just follow the pools of mud. Hehe - useful hint, isn't it?",
+      "way": "It's easy to find your way through it! Just follow the pools of mud. Hehe - useful hint, isn't it?",
+      "mud": "It's easy to find your way through it! Just follow the pools of mud. Hehe - useful hint, isn't it?",
+      "mino": "They are trying to capture me! Or hang on! Haven't they already captured me? Hmmm - I will have to think about this.",
+      "minos": "They are trying to capture me! Or hang on! Haven't they already captured me? Hmmm - I will have to think about this.",
+      "markwin": "He is the worst of them all! He is the king of the minos! May he burn in hell!",
+      "palkar": "He is the leader of the outcasts. I hope he will never conquer the city of Mintwallin. That would be the end of me!",
+      "karl": "Tataah!",
+      "demon": "The only monster I cannot conjure. But soon I will be powerful enough!",
+      "monster": "Yeah! There are many monsters guarding my home. Only the bravest hero will be able to slay them!",
+      "conjure": "Yeah! There are many monsters guarding my home. Only the bravest hero will be able to slay them!",
+      "home": "Yeah! There are many monsters guarding my home. Only the bravest hero will be able to slay them!",
+      "mintwallin": "This is Mintwallin - the city of the minos, deep under the ground. And this dark little hole is my share of it.",
+      "bye": "Next time we should talk about my surreal numbers.",
+      "farewell": "Next time we should talk about my surreal numbers.",
+      "goodbye": "Next time we should talk about my surreal numbers."
+    },
+    "confusion": [
+      "What? Speak up! The rotten food dulls the ears.",
+      "Hehehe! I have no idea what you mean. Ask me about my riddle, or the key, or the way through the labyrinth.",
+      "A mage ... come to think of it, what is that - a mage?",
+      "Don't leave! I want to tell you about my surreal numbers."
+    ],
+    "boardChat": {
+      "welcomeMessage": "Huh? What? I can see! Wow! A non-mino. Did they capture you as well?",
+      "placeholder": "Type your message to A Prisoner..."
     }
   },
   "questItems": {

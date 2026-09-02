@@ -206,7 +206,7 @@
       "alreadyActive": "You're already helping me find my Small Axe. Bring it back when you find it!",
       "requiresLetterComplete": "Before I set you another task, bring me the king's stamped letter. Deliver that first, then we can talk.",
       "requiresLetterForFishingRod": "I only sell fishing rods to those who've finished delivering the king's stamped letter to me.",
-    "alreadyOwnsFishingRod": "You already have a fishing rod — a sturdy one lasts a lifetime. I only sell one to a customer.",
+      "alreadyOwnsFishingRod": "You already have a fishing rod — a sturdy one lasts a lifetime. I only sell one to a customer.",
       "objectiveLine1": "Find Al Dee's Small Axe in the waters of a cave.",
       "objectiveLine2": "Return the Small Axe to Al Dee.",
       "hint": "Search underwater areas or caves where minotaurs and goblins roam.",
@@ -648,7 +648,7 @@
       "battleVictory": "The fire among the bones is spent and the way to the Realm of Dreams lies open. Return to Tesha in the Darama Oasis.",
       "battleDefeat": "The fire in the dragon graveyard is fiercer than the book warned. Gather yourself and go down again.",
       "returnObjective": "Return to Tesha in the Darama Oasis.",
-      "reward": "You put out a fire that guarded the dragon graveyard for an age, and the way to the Realm of Dreams is clear at last — that is no small thing, pilgrim. While you were down among the bones, this turned up in the ashes. \"Mintwallin Prison Key\", the old stamp reads. It means nothing to me, but King Tibianus of Thais knows every lock in his realm — take it to him and ask.",
+      "reward": "You put out a fire that guarded the dragon graveyard for an age, and the way to the Realm of Dreams is clear at last — that is no small thing, pilgrim. While you were down among the bones, this turned up in the ashes. \"Mintwallin Prison Key\", the old stamp reads. It means nothing to me, but King Tibianus knows every lock in his realm — take it to him and ask.",
       "objectiveLine1": "Descend into the Northern Dragon Lair and clear the fire guarding the way to the Realm of Dreams.",
       "objectiveLine2": "Return to Tesha in the Darama Oasis.",
       "hint": "Show the Key to Magic (Book) to Tesha in the Darama Oasis, then agree to go down into the Northern Dragon Lair.",
@@ -657,6 +657,32 @@
       "rewardSpriteId": 2969,
       "rewardDescription": "Provides access to the prison in Mintwallin.",
       "rewardSummary": "Reward: Mintwallin Prison Key."
+    },
+    "visiting_mintwallin": {
+      "id": "visiting_mintwallin",
+      "title": "Mad Mage Room",
+      "offer": "Mintwallin. So the old key found its lock in your hand after all. That cell you would open holds the one the minotaurs call the Mad Mage — once a sorcerer of no small power, now a ruin of a man rotting in the dark beneath King Markwin's city. He raves, he forgets his own name, and yet he still guards a room no one has walked out of. The crown would know what is in it. Will you go down, hear him out, and open the Mad Mage's room?",
+      "answerYesNo": "Answer me, Player — will you take the key down to Mintwallin, solve the Mad Mage's riddle, and clear his room?",
+      "accept": "Then go down among the horns and the dark. The prisoner in that cell is half-mad — get what you can out of him, open the room, and clear it.",
+      "decline": "Then the key stays cold in your pack and the Mad Mage keeps his secrets. Return when your nerve is steadier.",
+      "alreadyActive": "The Mad Mage still waits in his cell beneath Mintwallin, and his room is still sealed. Shall I send you back down to him?",
+      "alreadyCompleted": "You have already sat with the Mad Mage and heard his ravings. The crown thanks you for it.",
+      "noKey": "Mintwallin is a minotaur city, not a place the crown sends its subjects to wander. Without the prison key cut for that cell there is nothing for you down there but horns and axes.",
+      "requiresRealmOfDreams": "That key came out of a dragon's graveyard by way of Tesha's errand — finish what she set you to before you go opening cells beneath Mintwallin.",
+      "objectiveLine1": "Descend to the cell beneath Mintwallin and hear the Mad Mage out.",
+      "hint": "Ask King Tibianus about the Mad Mage while you carry the Mintwallin Prison Key. The prisoner is half-mad and full of tricks — hear him out, answer his riddle, and play along until he hands over the key.",
+      "riddleCorrect": "Hurray! A real answer — I knew there was a brain rattling around in there somewhere. The key is yours, then. If you truly want it. Do you?",
+      "keyConfirm1": "Hehehe! Splendid. Now — about that key. You are quite sure you want it?",
+      "keyConfirm2": "Really, really?",
+      "keyConfirm3": "Really, really, really, really?",
+      "keyGrant": "Then take it and get happy — or die, hehe.",
+      "riddleSolvedObjective": "The Mad Mage gave up his key. Open the room it fits and deal with whatever is inside, then report back to the King.",
+      "battleVictory": "The Mad Mage's room is cleared. Whatever he was hoarding down there, it is the crown's business now. Return to King Tibianus.",
+      "battleDefeat": "The things in the Mad Mage's room are more than the old fool let on. Gather yourself and go down again.",
+      "returnObjective": "Return to King Tibianus with word that the room is cleared.",
+      "objectiveLine2": "Return to King Tibianus with word that the room is cleared.",
+      "rewardCoins": 200,
+      "reward": "You went down into a minotaur city, out-talked a madman, and cleared a room that has killed better subjects than you. The crown does not forget such service, Player — take {coins} guild coins from the treasury with my thanks."
     }
   },
   "completionSummaries": {
@@ -686,7 +712,8 @@
     "hellgate_library": "Descended into the Hellgate Library, handed the Wrinkled Bonelord the book, survived the librarian's guardians, and received a White Mushroom from Elathriel.",
     "draconia_tower": "Descended into Draconia Tower with Elathriel, put down the Dragon Lord and his beast, traded a white mushroom to the Old Dragonlord for the Dragonfetish, and returned to Elathriel.",
     "draconia_quest": "Followed Elathriel into the last room of Draconia, cleared it, used the Dragonfetish to return to Hedge Maze, and reported back to Elathriel to receive the Key to Magic (Book).",
-    "realm_of_dreams": "Read the Key to Magic (Book) with Tesha, descended into the Northern Dragon Lair to put out the fire guarding the way to the Realm of Dreams, and returned to the Darama Oasis, where Tesha handed over a Mintwallin Prison Key found among the bones."
+    "realm_of_dreams": "Read the Key to Magic (Book) with Tesha, descended into the Northern Dragon Lair to put out the fire guarding the way to the Realm of Dreams, and returned to the Darama Oasis, where Tesha handed over a Mintwallin Prison Key found among the bones.",
+    "visiting_mintwallin": "Descended to the cell beneath Mintwallin, solved the Mad Mage's riddle, cleared the room his key opened, and reported back to King Tibianus."
   },
   "sealTranscripts": [
     {
@@ -747,7 +774,8 @@
       "hellgate_library",
       "draconia_tower",
       "draconia_quest",
-      "realm_of_dreams"
+      "realm_of_dreams",
+      "visiting_mintwallin"
     ],
     "missions": {
       "king_honeyflower": {
@@ -925,6 +953,14 @@
         "stateKey": "progressRealmOfDreams",
         "firebaseKey": "realmOfDreams",
         "extraFields": [
+          "battleCompleted"
+        ]
+      },
+      "visiting_mintwallin": {
+        "stateKey": "progressVisitingMintwallin",
+        "firebaseKey": "visitingMintwallin",
+        "extraFields": [
+          "riddleSolved",
           "battleCompleted"
         ]
       }

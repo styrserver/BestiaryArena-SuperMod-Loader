@@ -15,7 +15,9 @@
     "draconia_tower": "12. Draconia Tower (Elathriel’s dragon-cemetery battle, Sewers reskin)",
     "isle_of_solitude": "12b. Isle of Solitude / GM Island (King Tibianus easter egg — empty walk-around sandbox, Sewers reskin)",
     "draconia_quest": "13. Draconia Quest (Elathriel’s final Draconia battle, Sewers reskin — Dragonfetish return)",
-    "realm_of_dreams": "14. Realm of Dreams (Tesha - Key to Magic, Sewers reskin, Fire Elementals)"
+    "realm_of_dreams": "14. Realm of Dreams (Tesha - Key to Magic, Sewers reskin, Fire Elementals)",
+    "mintwallin_prison": "15. Mintwallin Prison (Visiting Mintwallin / the Mad Mage — King Tibianus easter egg, Sewers reskin walk-around)",
+    "mad_mage_room": "16. Mad Mage Room (Mad Mage Room quest, Part 2 — Sewers reskin battle after A Prisoner's riddle)"
   },
   "mornenion": {
     "allyLimit": 3,
@@ -2483,6 +2485,260 @@
       99,
       100,
       101
+    ],
+    "allowedTilesMessage": "Ally creatures can only be placed on the marked tiles!"
+  },
+  "mintwallin_prison": {
+    "_comment": "Visiting Mintwallin (the Mad Mage). Empty CustomBattle (no villains) stood up only so the board clears and the Sewers quest overlays suppress. Walk-around scene, no combat — see enterMintwallinPrison() in Quests.js.",
+    "allyLimit": 1,
+    "preventVillainMovement": true,
+    "hideVillainSprites": true,
+    "villains": []
+  },
+  "mad_mage_room": {
+    "allyLimit": 6,
+    "preventVillainMovement": true,
+    "hideVillainSprites": true,
+    "villains": [
+      {
+        "nickname": "Cyclops",
+        "tileIndex": 19,
+        "keyPrefix": "cyclops-tile-19-",
+        "fallbackGameId": 50,
+        "level": 95,
+        "direction": "south",
+        "creatureName": "Cyclops",
+        "shiny": true,
+        "awakened": true,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Boots of Haste",
+          "gameId": 1
+        }
+      },
+      {
+        "nickname": "Giant Spider",
+        "tileIndex": 38,
+        "keyPrefix": "giant-spider-tile-38-",
+        "fallbackGameId": 76,
+        "level": 175,
+        "direction": "south",
+        "creatureName": "Giant Spider",
+        "shiny": true,
+        "awakened": true,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "hp",
+          "tier": 5,
+          "name": "Bloody Edge",
+          "gameId": 18
+        }
+      },
+      {
+        "nickname": "Demon Skeleton",
+        "tileIndex": 41,
+        "keyPrefix": "demon-skeleton-tile-41-",
+        "fallbackGameId": 21,
+        "level": 85,
+        "direction": "west",
+        "creatureName": "Demon Skeleton",
+        "shiny": true,
+        "awakened": true,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "hp",
+          "tier": 5,
+          "name": "Bloody Edge",
+          "gameId": 18
+        }
+      },
+      {
+        "nickname": "Demon Skeleton",
+        "tileIndex": 62,
+        "keyPrefix": "demon-skeleton-tile-62-",
+        "fallbackGameId": 21,
+        "level": 85,
+        "direction": "east",
+        "creatureName": "Demon Skeleton",
+        "shiny": true,
+        "awakened": true,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "hp",
+          "tier": 5,
+          "name": "Bloody Edge",
+          "gameId": 18
+        }
+      },
+      {
+        "nickname": "Ghoul",
+        "tileIndex": 70,
+        "keyPrefix": "ghoul-tile-70-",
+        "fallbackGameId": 19,
+        "level": 75,
+        "direction": "west",
+        "creatureName": "Ghoul",
+        "shiny": true,
+        "awakened": true,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Fire Axe",
+          "gameId": 20
+        }
+      },
+      {
+        "nickname": "Dragon",
+        "tileIndex": 96,
+        "keyPrefix": "dragon-tile-96-",
+        "fallbackGameId": 65,
+        "level": 125,
+        "direction": "east",
+        "creatureName": "Dragon",
+        "shiny": true,
+        "awakened": true,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Bonelord Helmet",
+          "gameId": 4
+        }
+      },
+      {
+        "nickname": "Skeleton",
+        "tileIndex": 116,
+        "keyPrefix": "skeleton-tile-116-",
+        "fallbackGameId": 7,
+        "level": 65,
+        "direction": "west",
+        "creatureName": "Skeleton",
+        "shiny": true,
+        "awakened": true,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Skullcracker Armor",
+          "gameId": 19
+        }
+      },
+      {
+        "nickname": "Bonelord",
+        "tileIndex": 122,
+        "keyPrefix": "bonelord-tile-122-",
+        "fallbackGameId": 105,
+        "level": 100,
+        "direction": "east",
+        "creatureName": "Bonelord",
+        "shiny": true,
+        "awakened": true,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Spellbook of Ancient Arcana",
+          "gameId": 41
+        }
+      }
+    ],
+    "allowedTiles": [
+      48,
+      49,
+      50,
+      51,
+      52,
+      53,
+      54,
+      55,
+      56,
+      63,
+      64,
+      65,
+      66,
+      67,
+      68,
+      69,
+      70,
+      71,
+      78,
+      79,
+      80,
+      81,
+      82,
+      83,
+      84,
+      85,
+      86,
+      93,
+      94,
+      95,
+      96,
+      97,
+      98,
+      99,
+      100,
+      101,
+      108,
+      109,
+      110,
+      111,
+      112,
+      113,
+      114,
+      115,
+      116
     ],
     "allowedTilesMessage": "Ally creatures can only be placed on the marked tiles!"
   }

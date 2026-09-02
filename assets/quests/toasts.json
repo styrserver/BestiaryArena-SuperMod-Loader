@@ -44,7 +44,7 @@
     "enteringLonesomeDragon": "The stairs seal behind you — Demodras has you trapped!",
     "needDragonClawForStairs": "You need Demodras' claw to descend these stairs.",
     "putridChamberNotStrongEnough": "You are not strong enough.",
-    "travelingPutridChamber": "The floor gives way — you are pulled into the Putrid Chamber!",
+    "travelingPutridChamber": "The floor gives way — into the Putrid Chamber!",
     "travelingWithSvenson": "Traveling with Svenson...",
     "travelingGhazHideout": "Traveling to Ghazbaran's Hideout...",
     "fishingFoundAxe": "You found a Small Axe with your Magnet!",
@@ -54,11 +54,11 @@
     "fishingError": "Something went wrong while fishing.",
     "desertDigNothing": "You dig in the sand but find nothing.",
     "desertDigSandsEmpty": "The sands feel empty.",
-    "desertDigNeedMission": "The sands yield nothing. Perhaps the king knows what to seek here.",
+    "desertDigNeedMission": "The sands yield nothing — ask the king what to seek.",
     "missingDestroyFieldRune": "You are missing a Destroy Field Rune.",
     "alreadyHaveDestroyFieldRune": "You already carry a destroy field rune.",
-    "crossingTheLineObjectiveComplete": "Fastest Bishop in Carlin completed! Return to the king to claim your reward.",
-    "ironOreRewardReady": "A while has passed. King Tibianus should have something for you now.",
+    "crossingTheLineObjectiveComplete": "Fastest Bishop in Carlin done — return to the king.",
+    "ironOreRewardReady": "The king should have something for you now.",
     "enteringJakundafDesert": "Entering the Jakundaf Desert path...",
     "jakundafDesertNotFound": "Sewers battle room not found.",
     "taintedSoulsNeedToad": "You need the Stuffed Toad to use this cauldron.",
@@ -68,7 +68,20 @@
     "taintedSoulsPortalOpened": "A portal opens from the cauldron.",
     "enteringEkatrixPortal": "Stepping through the portal...",
     "ekatrixNotFound": "Ekatrix's domain was not found.",
-    "taintedSoulsReportBack": "Ekatrix has fallen. Return to Wyda for your reward."
+    "taintedSoulsReportBack": "Ekatrix has fallen. Return to Wyda for your reward.",
+    "roomNotFound": "{place} could not be found.",
+    "battleStartFailed": "Could not start the battle — room not found.",
+    "steppingThroughPortal": "Stepping through the portal...",
+    "enteringWithElathriel": "Following Elathriel into {place}...",
+    "bonelordLibrarianWaiting": "The librarian is still waiting. No more words.",
+    "isleEntered": "Isle of Solitude. Right-click the ladder teleporter to leave.",
+    "mintwallinPrisonEntered": "The prison beneath Mintwallin. Right-click the marked tile to leave.",
+    "madMageKeyReceived": "You have the key. Use the tile 84 teleporter to enter his room.",
+    "madMageRoomEntered": "You turn the key. The room beyond wants you dead...",
+    "madMageRoomCleared": "The room is cleared. Return to King Tibianus.",
+    "dragonfetishRaised": "You raise the Dragonfetish. Speak with Elathriel.",
+    "realmOfDreamsEntering": "Tesha sends you into the Northern Dragon Lair, toward the fire...",
+    "realmOfDreamsReturned": "Out of the graveyard, the fire dead behind you. Speak with Tesha."
   },
   "messageBuilders": {
     "questDiscovered": [
@@ -153,7 +166,24 @@
     "taintedSoulsPortalOpened": [],
     "enteringEkatrixPortal": [],
     "ekatrixNotFound": [],
-    "taintedSoulsReportBack": []
+    "taintedSoulsReportBack": [],
+    "roomNotFound": [
+      "place"
+    ],
+    "battleStartFailed": [],
+    "steppingThroughPortal": [],
+    "enteringWithElathriel": [
+      "place"
+    ],
+    "bonelordLibrarianWaiting": [],
+    "isleEntered": [],
+    "mintwallinPrisonEntered": [],
+    "madMageKeyReceived": [],
+    "madMageRoomEntered": [],
+    "madMageRoomCleared": [],
+    "dragonfetishRaised": [],
+    "realmOfDreamsEntering": [],
+    "realmOfDreamsReturned": []
   },
   "variants": {
     "frightenedHole": "warning",
@@ -205,7 +235,18 @@
     "taintedSoulsPortalOpened": "info",
     "enteringEkatrixPortal": "info",
     "ekatrixNotFound": "nothing",
-    "taintedSoulsReportBack": "info"
+    "taintedSoulsReportBack": "info",
+    "battleStartFailed": "warning",
+    "steppingThroughPortal": "info",
+    "bonelordLibrarianWaiting": "warning",
+    "isleEntered": "info",
+    "mintwallinPrisonEntered": "info",
+    "madMageKeyReceived": "info",
+    "madMageRoomEntered": "warning",
+    "madMageRoomCleared": "completed",
+    "dragonfetishRaised": "info",
+    "realmOfDreamsEntering": "info",
+    "realmOfDreamsReturned": "info"
   },
   "styling": {
     "defaultDuration": 5000,

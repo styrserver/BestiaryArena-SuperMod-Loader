@@ -336,6 +336,14 @@
       "description": "Provides access to the prison in Mintwallin.",
       "rarity": 2,
       "maxCount": 1
+    },
+    "madMageQuestKey": {
+      "productName": "Mad Mage Quest Key",
+      "spriteId": 2969,
+      "iconUrl": "https://bestiaryarena.com/assets/ITEM/2969.png",
+      "description": "The key the Mad Mage handed over for solving his riddle. It opens the sealed room in his cell.",
+      "rarity": 2,
+      "maxCount": 1
     }
   },
   "creatureDrops": {
@@ -717,7 +725,8 @@
     "jakundaf_desert": 10294,
     "apprentice_sheng": 5300,
     "hellgate_part_1": 2970,
-    "hellgate_library": 3723
+    "hellgate_library": 3723,
+    "visiting_mintwallin": 2184
   },
   "devTools": {
     "_comment": "Story-ordered grantable items for Quest Dev Tools. productId links to products{} for live names. receivedBefore rules: anyMissionAcceptedOrCompleted | missionCompleted | missionAcceptedOrCompleted | receivedFlagOrMissionCompleted | receivedFlagOrMissionAcceptedOrCompleted | missionFieldOrCompleted | missionAnyField | anyOf.",
@@ -1163,11 +1172,20 @@
           "type": "missionCompleted",
           "missionId": "realm_of_dreams"
         }
+      },
+      {
+        "key": "madMageQuestKey",
+        "productId": "madMageQuestKey",
+        "receivedBefore": {
+          "type": "missionFieldOrCompleted",
+          "missionId": "visiting_mintwallin",
+          "field": "riddleSolved"
+        }
       }
     ]
   },
   "itemLifecycle": {
-    "_comment": "cleanupRules drive cleanupInvalidQuestItems. staleCleanupOnComplete drives cleanupStaleQuestItemsAfterCompletedMissions. soulCoreGrantOnComplete drives backfillSoulCoresFromCompletedMissions (grant the reward item - soul core, unique quest key, etc. - to anyone who finished the mission but has none in inventory; optional removedByMissionId stops the backfill once a follow-up quest that consumes the item is accepted/completed). devCompleteRewards drive QuestsDev.completeAll item grants. independentDrop: true = Rookgaard/global drops that must NOT be deleted when the linked mission is not yet accepted (only removeWhenCompleted / staleCleanup apply).",
+    "_comment": "cleanupRules drive cleanupInvalidQuestItems (strip an item the player should not hold given mission progress). requiredStatus accepted|completed; removeWhenCompleted also strips once done; independentDrop: true = Rookgaard/global drops that must NOT be deleted when the linked mission is not yet accepted (only removeWhenCompleted / staleCleanup apply); requiredProgressFlag + clearedByProgressFlag = flag-window item (lost_oracle orb chain) valid only while one sub-flag is set and the next is not. staleCleanupOnComplete drives cleanupStaleQuestItemsAfterCompletedMissions (strip an item a later quest already consumed); whenField strips at a named sub-flag OR the consumer mission's .completed; alsoWhenMissionDone [missionIds] strips when any downstream chain mission is accepted/completed (covers gappy saves). soulCoreGrantOnComplete drives backfillSoulCoresFromCompletedMissions (grant a reward item - soul core, key, book, tool - to anyone who earned it but holds none): grantWhenField grants at a sub-flag instead of .completed; removedByMissionId (string OR array) stops the backfill once a follow-up/downstream quest is accepted/completed; removedByProgressFlag { firebaseKey, field } stops it once that later-quest sub-flag is set OR that mission is .completed. devCompleteRewards drive QuestsDev.completeAll item grants.",
     "cleanupRules": [
       {
         "productId": "mapColour",
@@ -1317,6 +1335,59 @@
         "productId": "ekatrixSoulCore",
         "missionId": "tainted_souls",
         "requiredStatus": "completed"
+      },
+      {
+        "productId": "blessedAnkh",
+        "missionId": "costello_queen_banshees",
+        "requiredStatus": "completed"
+      },
+      {
+        "productId": "stuffedToad",
+        "missionId": "jakundaf_desert",
+        "requiredStatus": "completed"
+      },
+      {
+        "productId": "spoolOfYarn",
+        "missionId": "mother_of_all_spiders",
+        "requiredStatus": "completed"
+      },
+      {
+        "productId": "bunnySlippers",
+        "missionId": "christmas_miracle",
+        "requiredStatus": "completed"
+      },
+      {
+        "productId": "bewareOfTheBonelordsBook",
+        "missionId": "hellgate_part_1",
+        "requiredStatus": "completed"
+      },
+      {
+        "productId": "whiteMushroom",
+        "missionId": "hellgate_library",
+        "requiredStatus": "completed"
+      },
+      {
+        "productId": "keyToMagicBook",
+        "missionId": "draconia_quest",
+        "requiredStatus": "completed"
+      },
+      {
+        "productId": "luminousOrb",
+        "missionId": "lost_oracle",
+        "requiredProgressFlag": "orbExchanged",
+        "clearedByProgressFlag": "spectralStoneReceived"
+      },
+      {
+        "productId": "spectralStone",
+        "missionId": "lost_oracle",
+        "requiredProgressFlag": "spectralStoneReceived",
+        "clearedByProgressFlag": "oracleEnraged"
+      },
+      {
+        "productId": "madMageQuestKey",
+        "missionId": "visiting_mintwallin",
+        "requiredProgressFlag": "riddleSolved",
+        "clearedByProgressFlag": "completed"
       }
     ],
     "staleCleanupOnComplete": [
@@ -1398,23 +1469,28 @@
       },
       {
         "productId": "minotaurTrophy",
-        "missionId": "svenson_love_story"
+        "missionId": "svenson_love_story",
+        "whenField": "plankDelivered"
       },
       {
         "productId": "spoolOfYarn",
-        "missionId": "svenson_love_story"
+        "missionId": "svenson_love_story",
+        "whenField": "awashYarnDelivered"
       },
       {
         "productId": "scorpionSceptre",
-        "missionId": "svenson_love_story"
+        "missionId": "svenson_love_story",
+        "whenField": "undergroundCompassDelivered"
       },
       {
         "productId": "bunnySlippers",
-        "missionId": "svenson_love_story"
+        "missionId": "svenson_love_story",
+        "whenField": "whiteWaveSlippersDelivered"
       },
       {
         "productId": "dragonfetish",
-        "missionId": "draconia_quest"
+        "missionId": "draconia_quest",
+        "alsoWhenMissionDone": ["realm_of_dreams", "visiting_mintwallin"]
       },
       {
         "productId": "key3012",
@@ -1422,18 +1498,85 @@
       },
       {
         "productId": "keyToMagicBook",
-        "missionId": "realm_of_dreams"
+        "missionId": "realm_of_dreams",
+        "whenField": "battleCompleted",
+        "alsoWhenMissionDone": ["visiting_mintwallin"]
+      },
+      {
+        "productId": "holyTible",
+        "missionId": "king_monks_study"
+      },
+      {
+        "productId": "blessedAnkh",
+        "missionId": "follower_of_zathroth"
+      },
+      {
+        "productId": "stuffedToad",
+        "missionId": "tainted_souls",
+        "whenField": "portalOpened"
+      },
+      {
+        "productId": "bewareOfTheBonelordsBook",
+        "missionId": "hellgate_library",
+        "whenField": "bookGiven",
+        "alsoWhenMissionDone": ["draconia_tower", "draconia_quest", "realm_of_dreams", "visiting_mintwallin"]
+      },
+      {
+        "productId": "whiteMushroom",
+        "missionId": "draconia_tower",
+        "whenField": "dragonfetishReceived",
+        "alsoWhenMissionDone": ["draconia_quest", "realm_of_dreams", "visiting_mintwallin"]
+      },
+      {
+        "productId": "orb",
+        "missionId": "lost_oracle",
+        "whenField": "orbExchanged"
+      },
+      {
+        "productId": "luminousOrb",
+        "missionId": "lost_oracle",
+        "whenField": "spectralStoneReceived"
+      },
+      {
+        "productId": "spectralStone",
+        "missionId": "lost_oracle",
+        "whenField": "oracleEnraged"
+      },
+      {
+        "productId": "madMageQuestKey",
+        "missionId": "visiting_mintwallin"
+      },
+      {
+        "productId": "mintwallinPrisonKey",
+        "missionId": "visiting_mintwallin"
       }
     ],
     "soulCoreGrantOnComplete": [
-      { "productId": "mintwallinPrisonKey", "missionId": "realm_of_dreams" },
+      { "productId": "mintwallinPrisonKey", "missionId": "realm_of_dreams", "removedByProgressFlag": { "firebaseKey": "visitingMintwallin", "field": "completed" } },
+      { "productId": "madMageQuestKey", "missionId": "visiting_mintwallin", "grantWhenField": "riddleSolved", "removedByProgressFlag": { "firebaseKey": "visitingMintwallin", "field": "completed" } },
       { "productId": "goldenMug", "missionId": "dragonmother" },
       { "productId": "oldWidowSoulCore", "missionId": "mother_of_all_spiders" },
       { "productId": "knarknaknorkSoulCore", "missionId": "al_dee_rookie_guard" },
       { "productId": "ekatrixSoulCore", "missionId": "tainted_souls" },
       { "productId": "ghazbaranSoulCore", "missionId": "weakened_archdemon" },
       { "productId": "mornenionSoulCore", "missionId": "al_dee_golden_rope" },
-      { "productId": "apprenticeShengSoulCore", "missionId": "apprentice_sheng" }
+      { "productId": "apprenticeShengSoulCore", "missionId": "apprentice_sheng" },
+      { "productId": "lightShovel", "missionId": "al_dee_fishing_gold" },
+      { "productId": "dragonClaw", "missionId": "king_red_dragon", "removedByProgressFlag": { "firebaseKey": "dragonmother", "field": "completed" } },
+      { "productId": "holyTible", "missionId": "al_dee_golden_rope", "removedByProgressFlag": { "firebaseKey": "monksStudy", "field": "completed" } },
+      { "productId": "blessedAnkh", "missionId": "costello_queen_banshees", "removedByProgressFlag": { "firebaseKey": "followerOfZathroth", "field": "completed" } },
+      { "productId": "stuffedToad", "missionId": "jakundaf_desert", "removedByProgressFlag": { "firebaseKey": "taintedSouls", "field": "portalOpened" } },
+      { "productId": "spoolOfYarn", "missionId": "mother_of_all_spiders", "removedByProgressFlag": { "firebaseKey": "svensonLoveStory", "field": "awashYarnDelivered" } },
+      { "productId": "minotaurTrophy", "missionId": "apprentice_sheng", "removedByProgressFlag": { "firebaseKey": "svensonLoveStory", "field": "plankDelivered" } },
+      { "productId": "scorpionSceptre", "missionId": "serpentine_tower", "removedByProgressFlag": { "firebaseKey": "svensonLoveStory", "field": "undergroundCompassDelivered" } },
+      { "productId": "bunnySlippers", "missionId": "christmas_miracle", "removedByProgressFlag": { "firebaseKey": "svensonLoveStory", "field": "whiteWaveSlippersDelivered" } },
+      { "productId": "orb", "missionId": "weakened_archdemon", "removedByProgressFlag": { "firebaseKey": "lostOracle", "field": "orbExchanged" } },
+      { "productId": "luminousOrb", "missionId": "lost_oracle", "grantWhenField": "orbExchanged", "removedByProgressFlag": { "firebaseKey": "lostOracle", "field": "spectralStoneReceived" } },
+      { "productId": "spectralStone", "missionId": "lost_oracle", "grantWhenField": "spectralStoneReceived", "removedByProgressFlag": { "firebaseKey": "lostOracle", "field": "oracleEnraged" } },
+      { "productId": "bewareOfTheBonelordsBook", "missionId": "hellgate_part_1", "removedByProgressFlag": { "firebaseKey": "hellgateLibrary", "field": "bookGiven" }, "removedByMissionId": ["draconia_tower", "draconia_quest", "realm_of_dreams", "visiting_mintwallin"] },
+      { "productId": "whiteMushroom", "missionId": "hellgate_library", "removedByProgressFlag": { "firebaseKey": "draconiaTower", "field": "dragonfetishReceived" }, "removedByMissionId": ["draconia_quest", "realm_of_dreams", "visiting_mintwallin"] },
+      { "productId": "dragonfetish", "missionId": "draconia_tower", "grantWhenField": "dragonfetishReceived", "removedByProgressFlag": { "firebaseKey": "draconiaQuest", "field": "battleCompleted" }, "removedByMissionId": ["realm_of_dreams", "visiting_mintwallin"] },
+      { "productId": "keyToMagicBook", "missionId": "draconia_quest", "removedByProgressFlag": { "firebaseKey": "realmOfDreams", "field": "battleCompleted" }, "removedByMissionId": ["visiting_mintwallin"] }
     ],
     "devCompleteRewards": [
       {
