@@ -4,6 +4,36 @@
   },
   "notes": [
     {
+      "version": "4.9.12",
+      "changes": [
+        {
+          "mod": "Bestiary Automator",
+          "type": "fixed",
+          "text": "The extension-wide fetch hook used for stamina-potion handling no longer throws when a request is made with a Request object instead of a URL string, and disabling the mod only restores the original fetch if nothing else has hooked it since."
+        },
+        {
+          "mod": "Better Highscores",
+          "type": "changed",
+          "text": "Finished community events no longer re-download their results from Firebase on every page load — the final standings are cached locally after the first view — and battle-tracking hooks are no longer installed for an event that has already ended. The leaderboard button on a finished event now always reads \"Board\" instead of sometimes offering \"Join\", and the shiny \"Drop: … ago\" time is hidden once the event is over."
+        },
+        {
+          "mod": "Guilds",
+          "type": "fixed",
+          "text": "The guild-coin helper functions other mods rely on are no longer wiped from the shared Guilds interface when it refreshes, and the player-existence check now caches its result and distinguishes \"this player was renamed away\" from \"the profile server didn't answer\"."
+        },
+        {
+          "mod": "Quests",
+          "type": "changed",
+          "text": "Sharply reduced Firebase reads: mission progress and quest-item inventory are now served from memory or a shared short-lived cache instead of being re-fetched for every individual check, redundant leaderboard writes are skipped, and quest items are no longer loaded twice during startup. A late-game walk-around NPC now shows the quest-action icon on the board while there is still something to do with them, matching every other quest NPC, and their dialogue no longer barters for items and currency that aren't in the game. Quest toasts that ran long enough to overflow the notification have been shortened, and every quest toast's text now lives in one place instead of being split between the copy file and the code."
+        },
+        {
+          "mod": "Quests",
+          "type": "fixed",
+          "text": "If the initial mission-progress load fails with a network error it now aborts instead of continuing with empty defaults, which previously risked overwriting saved progress on the next action. On startup the quest-item bag is now fully reconciled against quest progress across every quest line — any reward item you earned but are missing is restored, and any item a later step has already used up is cleared, including the mid-quest hand-in stages. The developer console commands that change quest progress now run the same bag reconciliation (and there is a QuestsDev.reconcile() to trigger it directly). The animated on-board quest markers (the pointing arrow and the tile highlight) no longer sometimes render blank until a page reload — they were re-encoded with a frame-disposal mode the browser composites reliably. Leftover diagnostic logging that flooded the browser console during quest battles has been removed, and modal-size overrides set in the config file now actually take effect. The Mission Leaderboard no longer keeps dead rows for players who have since changed their name — when a Firebase admin loads the game, a one-time sweep checks each entry against the profile server and removes the ones whose player no longer exists (it backs off if the server looks unreliable)."
+        }
+      ]
+    },
+    {
       "version": "4.9.11",
       "changes": [
         {

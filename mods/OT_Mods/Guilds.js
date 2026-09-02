@@ -1175,6 +1175,55 @@ async function playerExists(playerName) {
   }
 }
 
+// Player-existence status cache. Kept separate from playerExistsCache (boolean) because
+// callers that delete data on the result need to tell "server says gone" apart from
+// "couldn't reach the server". 'exists' cached long; 'missing' short so a reverted rename
+// or a transient outage self-corrects.
+const profileStatusCache = createTTLCache(30 * 60 * 1000);
+
+/**
+ * Resolve whether a Bestiary Arena player currently exists, via the profile API.
+ * @returns {Promise<'exists'|'missing'|'unknown'>}
+ *   'missing' ONLY on a definitive server answer (404 / tRPC error / 200 with no player).
+ *   'unknown' for 429, 5xx, or network failure — the caller must not treat this as gone.
+ */
+async function checkProfileStatus(playerName) {
+  if (!playerName || typeof playerName !== 'string') return 'unknown';
+  const cached = profileStatusCache.get(playerName);
+  if (cached) return cached;
+  try {
+    return await withProfileRateLimit(async () => {
+      const url = buildProfileApiUrl(playerName);
+      let response;
+      for (let attempt = 0; ; attempt++) {
+        response = await fetch(url, { headers: { Accept: 'application/json' } });
+        if (response.status !== 429 || attempt >= PROFILE_429_MAX_RETRIES) break;
+        const retryAfter = parseInt(response.headers.get('Retry-After'), 10);
+        const waitMs = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : PROFILE_429_RETRY_AFTER_MS;
+        await new Promise(r => setTimeout(r, waitMs));
+      }
+      if (response.status === 429) return 'unknown';
+      if (response.status === 404) { profileStatusCache.set(playerName, 'missing'); return 'missing'; }
+      if (!response.ok) return 'unknown';
+      let data;
+      try { data = await response.json(); } catch (_) { return 'unknown'; }
+      let profileData;
+      if (Array.isArray(data) && data[0]?.result) {
+        if (data[0].result.error) { profileStatusCache.set(playerName, 'missing'); return 'missing'; }
+        profileData = data[0].result.data?.json;
+      } else {
+        profileData = data;
+      }
+      const exists = profileData && (typeof profileData !== 'object' || profileData.name);
+      const status = exists ? 'exists' : 'missing';
+      profileStatusCache.set(playerName, status, status === 'exists' ? 6 * 60 * 60 * 1000 : 30 * 60 * 1000);
+      return status;
+    });
+  } catch (_) {
+    return 'unknown';
+  }
+}
+
 // Player profile cache (1 hour TTL)
 const playerProfileCache = createTTLCache(60 * 60 * 1000);
 /** Coalesce concurrent fetchPlayerProfile(name) calls (same tick / modal open). */
@@ -4780,11 +4829,13 @@ async function runGlobalSkillResetIfAllowed() {
 
 function refreshGuildsPublicApi() {
   if (typeof window === 'undefined') return;
-  window.Guilds = {
+  // Merge (don't replace) so coin helpers added earlier survive.
+  window.Guilds = Object.assign(window.Guilds || {}, {
     canRunGuildAdminTools,
     canRunGuildAdminToolsAsync,
-    runGlobalSkillResetIfAllowed
-  };
+    runGlobalSkillResetIfAllowed,
+    checkProfileStatus
+  });
 }
 
 refreshGuildsPublicApi();
@@ -11130,6 +11181,7 @@ function resumeGuildsAfterAnalysis() {
     cacheCleanupInterval = setInterval(() => {
       try {
         playerExistsCache.cleanup();
+        profileStatusCache.cleanup();
         playerProfileCache.cleanup();
         guildPointsCache.cleanup();
       } catch (error) {
@@ -11310,6 +11362,7 @@ async function initializeGuilds() {
     cacheCleanupInterval = setInterval(() => {
       try {
         playerExistsCache.cleanup();
+        profileStatusCache.cleanup();
         playerProfileCache.cleanup();
         guildPointsCache.cleanup();
       } catch (error) {
@@ -11613,6 +11666,7 @@ exports = {
       // Clear all caches
       try {
         playerExistsCache.clear();
+        profileStatusCache.clear();
         playerProfileCache.clear();
         guildPointsCache.clear();
       } catch (error) {

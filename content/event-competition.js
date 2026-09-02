@@ -1119,6 +1119,11 @@ function applyTblCompetitionSnapshotToState(snapshot) {
     state.winnersSnapshot = buildTblWinnersSnapshotFromCompetitionSnapshot(snapshot);
   }
 
+  // Immutable after the event ends — cache it so future loads need no network.
+  if (hasTblEventEnded()) {
+    writeTblCompetitionSnapshotLocal(snapshot);
+  }
+
   return true;
 }
 
@@ -1288,6 +1293,15 @@ async function ensureTblWinnersSnapshot(options = {}) {
   if (!force && isValidTblCompetitionSnapshot(state.competitionSnapshot)) {
     applyTblCompetitionSnapshotToState(state.competitionSnapshot);
     return state.winnersSnapshot;
+  }
+
+  // Ended-event snapshot is immutable — serve it from localStorage with no network.
+  if (!force) {
+    const localSnapshot = readTblCompetitionSnapshotLocal();
+    if (isValidTblCompetitionSnapshot(localSnapshot)) {
+      applyTblCompetitionSnapshotToState(localSnapshot);
+      return state.winnersSnapshot;
+    }
   }
 
   state.winnersLoadPromise = (async () => {
@@ -1730,6 +1744,33 @@ function readTblJoinedLocal() {
 
 function isTblPlayerJoined() {
   return state.joined || readTblJoinedLocal();
+}
+
+// Once an event has ended its competition snapshot is immutable. Persist it so
+// subsequent page loads render the summary from localStorage with zero network
+// (previously every load re-fetched events/snapshot.json + events/winners.json).
+function getTblCompetitionSnapshotStorageKey() {
+  return `${cfg.joinStorageKey || cfg.id || cfg.roomId || 'event'}-competition-snapshot`;
+}
+
+function readTblCompetitionSnapshotLocal() {
+  try {
+    const raw = localStorage.getItem(getTblCompetitionSnapshotStorageKey());
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch (error) {
+    return null;
+  }
+}
+
+function writeTblCompetitionSnapshotLocal(snapshot) {
+  try {
+    if (isValidTblCompetitionSnapshot(snapshot)) {
+      localStorage.setItem(getTblCompetitionSnapshotStorageKey(), JSON.stringify(snapshot));
+    }
+  } catch (error) {
+    // Quota / serialization failure — non-fatal, we just re-fetch next load.
+  }
 }
 
 function writeTblJoinedLocal(joined) {
@@ -2617,7 +2658,10 @@ function createTblEventCompetitionButton() {
   const label = document.createElement('span');
   label.className = 'tbl-event-competition-btn-label';
   label.style.whiteSpace = 'nowrap';
-  const showBoardLabel = state.joined || state.currentPlayerEligible === false;
+  // A finished event can never be joined — always show the board/winners label.
+  const showBoardLabel = hasTblEventEnded()
+    || state.joined
+    || state.currentPlayerEligible === false;
   label.textContent = showBoardLabel
     ? tEvent('Board')
     : tEvent('Join');
@@ -4809,16 +4853,19 @@ function buildTblLeagueTopPlayersGridHtml(topThree, competitionMode, viewerName,
       html += formatTblTopGridValueCell(count, viewerName, entry.player.name);
     });
     html += '</tr>';
-    html += `<tr><th class="tbl-league-top-grid-label">${escapeTblHtml(tEvent('GridDrop'))}</th>`;
-    slots.forEach((entry) => {
-      if (!entry) {
-        html += '<td class="tbl-league-top-grid-cell">—</td>';
-        return;
-      }
-      const dropAgo = getTblPlayerShinyDropLabel(entry.player);
-      html += formatTblTopGridValueCell(dropAgo, viewerName, entry.player.name);
-    });
-    html += '</tr>';
+    // Skip the "Drop" (time since last shiny) row for a finished event.
+    if (!hasTblEventEnded()) {
+      html += `<tr><th class="tbl-league-top-grid-label">${escapeTblHtml(tEvent('GridDrop'))}</th>`;
+      slots.forEach((entry) => {
+        if (!entry) {
+          html += '<td class="tbl-league-top-grid-cell">—</td>';
+          return;
+        }
+        const dropAgo = getTblPlayerShinyDropLabel(entry.player);
+        html += formatTblTopGridValueCell(dropAgo, viewerName, entry.player.name);
+      });
+      html += '</tr>';
+    }
   } else if (isRank) {
     html += `<tr><th class="tbl-league-top-grid-label">${escapeTblHtml(tEvent('GridPoints'))}</th>`;
     slots.forEach((entry) => {
@@ -4888,6 +4935,10 @@ function formatTblOverallStandingGridFooterRow(player, rank, viewerName, competi
 function formatTblOverallStandingStats(player, competitionMode = COMPETITION_TAB.FLOOR) {
   if (competitionMode === COMPETITION_TAB.SHINY) {
     const count = getTblStandingShinyCount(player);
+    // No "· N days ago" tail once the event is over — just the count.
+    if (hasTblEventEnded()) {
+      return tEvent('WinnersShinyStats', { count });
+    }
     const lastDropped = getTblPlayerShinyDropLabel(player);
     return tEvent('PlayerStandingShiny', { count, lastDropped });
   }
@@ -5811,9 +5862,13 @@ function buildTblShinyRowList(rows, options = {}) {
     const isYou = Boolean(viewerName && row.name === viewerName);
     const nameHtml = formatTblShinyRowNameHtml(row.name, viewerName);
     const countLabel = escapeTblHtml(tEvent('ShinyCountLabel', { count }));
-    const dropLabel = escapeTblHtml(tEvent('ShinyDropLabel', {
-      time: getTblPlayerShinyDropLabel(row)
-    }));
+    // "Drop: N days ago" is only meaningful during a live event — once it's over
+    // the relative time carries no information, so drop it.
+    const dropLabelHtml = hasTblEventEnded()
+      ? ''
+      : `<div class="pixel-font-14" style="color:#aaa;">${escapeTblHtml(tEvent('ShinyDropLabel', {
+          time: getTblPlayerShinyDropLabel(row)
+        }))}</div>`;
     const rankLabel = row.rank ? `#${row.rank}` : '—';
     const rankColor = isYou ? '#8f8' : '#ccc';
 
@@ -5825,7 +5880,7 @@ function buildTblShinyRowList(rows, options = {}) {
           <div class="pixel-font-14" style="color:${rankColor};">${escapeTblHtml(rankLabel)}</div>
         </div>
         <div class="pixel-font-14">${countLabel}</div>
-        <div class="pixel-font-14" style="color:#aaa;">${dropLabel}</div>
+        ${dropLabelHtml}
       </div>
     `;
     scrollContainer.addContent(itemEl);
@@ -6719,6 +6774,18 @@ function setupTblRunTrackerTrigger() {
 
 function initTblFloorLeague() {
   state.joined = readTblJoinedLocal();
+
+  if (hasTblEventEnded()) {
+    // Nothing is submittable or joinable any more. Skip the score-capture fetch
+    // wrapper, run-tracker trigger, countdown watcher and eligibility purge —
+    // just make the (now immutable, localStorage-cached) winners snapshot ready.
+    setupTblBoardListener();
+    ensureTblWinnersSnapshot().catch((error) => {
+      console.warn(`${logPrefix} Failed to warm winners snapshot:`, error);
+    });
+    return;
+  }
+
   refreshTblJoinState().catch(() => {});
   purgeTblIneligibleFirebaseRecords().catch(() => {});
   setupTblNetworkListener();
@@ -6727,11 +6794,6 @@ function initTblFloorLeague() {
   setupTblEventCountdownToastWatcher();
   if (isTblMapActive()) {
     scheduleTblShinyDataWarm();
-  }
-  if (hasTblEventEnded()) {
-    ensureTblWinnersSnapshot().catch((error) => {
-      console.warn(`${logPrefix} Failed to warm winners snapshot:`, error);
-    });
   }
 }
 

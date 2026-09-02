@@ -2404,25 +2404,35 @@ const removeStaminaPotionFromInventory = (potionTier = 1) => {
   }
 };
 
-// Store original fetch function
+// Store original fetch function + a reference to our own wrapper so cleanup can
+// restore only when we're still the active fetch (never clobber a later mod's hook).
 let originalFetch = null;
+let automatorFetchWrapper = null;
 
 // Intercept fetch requests to handle 404 errors from stamina potion API gracefully
 // Note: Browser console may still show 404 errors - these are expected when potions are unavailable
 // and are handled gracefully by this interceptor
 const setupStaminaPotionErrorHandler = () => {
   try {
+    // Already installed and still active — don't stack a second wrapper.
+    if (automatorFetchWrapper && window.fetch === automatorFetchWrapper) {
+      return;
+    }
     // Store original fetch if not already stored
     if (!originalFetch) {
       originalFetch = window.fetch;
     }
     
     // Hook into fetch to intercept stamina potion API calls
-    window.fetch = function(...args) {
+    automatorFetchWrapper = function(...args) {
       const [url, options] = args;
-      
-      // Check if this is a stamina potion request
-      if (url && url.includes('inventory.staminaPotion') && options && options.method === 'POST') {
+
+      // Check if this is a stamina potion request. `url` may be a Request object or
+      // URL instance (not just a string) — coerce before substring-matching.
+      const urlStr = typeof url === 'string' ? url
+        : (url && typeof url.url === 'string' ? url.url
+          : (url && typeof url.href === 'string' ? url.href : ''));
+      if (urlStr.includes('inventory.staminaPotion') && options && options.method === 'POST') {
         // Try to extract potion tier from request body
         let potionTier = 1;
         try {
@@ -2533,7 +2543,9 @@ const setupStaminaPotionErrorHandler = () => {
       // For non-stamina potion requests, use original fetch
       return originalFetch.apply(this, args);
     };
-    
+
+    window.fetch = automatorFetchWrapper;
+
     console.log('[Bestiary Automator] Stamina potion error handler set up successfully');
   } catch (error) {
     console.error('[Bestiary Automator] Error setting up stamina potion error handler:', error);
@@ -5122,11 +5134,15 @@ context.exports = {
     // Clear seashell timer
     clearSeashellTimer();
     
-    // Restore original fetch function if it was overridden
-    if (originalFetch && window.fetch !== originalFetch) {
+    // Restore original fetch — but only if ours is still the active wrapper.
+    // If another mod wrapped fetch after us, leave its hook in place.
+    if (originalFetch && window.fetch === automatorFetchWrapper) {
       window.fetch = originalFetch;
       console.log('[Bestiary Automator] Restored original fetch function');
+    } else if (window.fetch !== automatorFetchWrapper && automatorFetchWrapper) {
+      console.warn('[Bestiary Automator] fetch was re-wrapped by another mod — leaving it in place');
     }
+    automatorFetchWrapper = null;
     
     // Reset session flags
     fasterAutoplayExecutedThisSession = false;

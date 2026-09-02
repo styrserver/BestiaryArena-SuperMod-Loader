@@ -11,6 +11,13 @@ let BUTTON_CHECK_INTERVAL = 1000;
 let BUTTON_RETRY_MAX = 8;
 let BUTTON_RETRY_DELAY = 200;
 let OBSERVER_DEBOUNCE_DELAY = 100;
+
+// Retry schedule for CustomBattles.scheduleEntryVillainSetup (was inline in ~9 quests) and
+// the scene-sync repaint burst (was inline in the teleport-quest factory + Isle/Draconia).
+// Both hydrated from assets/quests/config.json -> timing. Mutated in place on hydrate, so
+// pass a copy (`[...ARR]`) to anything that might retain/mutate the array.
+const VILLAIN_SETUP_ATTEMPT_DELAYS_MS = [0, 100, 250, 500, 800, 1200];
+const SCENE_SYNC_REPAINT_DELAYS_MS = [150, 400, 900, 1600];
 const QUESTS_MODAL_CONFIG = {
   viewportPadding: 16,
   minWidth: 280,
@@ -20,14 +27,31 @@ const QUESTS_MODAL_CONFIG = {
   npcChat: { width: 450, height: 280, minHeight: 240 },
   questItems: { width: 450, height: 280, minHeight: 240 }
 };
-const ARENA_LEADERBOARD_MODAL_MIN_HEIGHT = QUESTS_MODAL_CONFIG.arenaLeaderboard.minHeight;
-const ARENA_LEADERBOARD_MODAL_MAX_HEIGHT = QUESTS_MODAL_CONFIG.arenaLeaderboard.maxHeight;
-const ARENA_LEADERBOARD_MODAL_WIDTH = QUESTS_MODAL_CONFIG.arenaLeaderboard.width;
-const KING_TIBI_MODAL_WIDTH = QUESTS_MODAL_CONFIG.kingTibianus.width;
-const KING_TIBI_MODAL_HEIGHT = QUESTS_MODAL_CONFIG.kingTibianus.height;
-const COSTELLO_MODAL_HEIGHT = QUESTS_MODAL_CONFIG.npcChat.height;
-const QUEST_ITEMS_MODAL_WIDTH = QUESTS_MODAL_CONFIG.questItems.width;
-const QUEST_ITEMS_MODAL_HEIGHT = QUESTS_MODAL_CONFIG.questItems.height;
+// NOTE: these mirror QUESTS_MODAL_CONFIG's nested values so the many call sites below can
+// stay simple numbers instead of deep property reads. They are `let`, not `const`, because
+// applyQuestConfigFromAssets() (assets/quests/config.json -> modal) can override
+// QUESTS_MODAL_CONFIG's nested objects wholesale *after* this file has already evaluated —
+// syncModalDimensionConstantsFromConfig() re-derives them from the live config object
+// whenever that happens, so a config.json override actually takes effect.
+let ARENA_LEADERBOARD_MODAL_MIN_HEIGHT = QUESTS_MODAL_CONFIG.arenaLeaderboard.minHeight;
+let ARENA_LEADERBOARD_MODAL_MAX_HEIGHT = QUESTS_MODAL_CONFIG.arenaLeaderboard.maxHeight;
+let ARENA_LEADERBOARD_MODAL_WIDTH = QUESTS_MODAL_CONFIG.arenaLeaderboard.width;
+let KING_TIBI_MODAL_WIDTH = QUESTS_MODAL_CONFIG.kingTibianus.width;
+let KING_TIBI_MODAL_HEIGHT = QUESTS_MODAL_CONFIG.kingTibianus.height;
+let COSTELLO_MODAL_HEIGHT = QUESTS_MODAL_CONFIG.npcChat.height;
+let QUEST_ITEMS_MODAL_WIDTH = QUESTS_MODAL_CONFIG.questItems.width;
+let QUEST_ITEMS_MODAL_HEIGHT = QUESTS_MODAL_CONFIG.questItems.height;
+
+function syncModalDimensionConstantsFromConfig() {
+  ARENA_LEADERBOARD_MODAL_MIN_HEIGHT = QUESTS_MODAL_CONFIG.arenaLeaderboard.minHeight;
+  ARENA_LEADERBOARD_MODAL_MAX_HEIGHT = QUESTS_MODAL_CONFIG.arenaLeaderboard.maxHeight;
+  ARENA_LEADERBOARD_MODAL_WIDTH = QUESTS_MODAL_CONFIG.arenaLeaderboard.width;
+  KING_TIBI_MODAL_WIDTH = QUESTS_MODAL_CONFIG.kingTibianus.width;
+  KING_TIBI_MODAL_HEIGHT = QUESTS_MODAL_CONFIG.kingTibianus.height;
+  COSTELLO_MODAL_HEIGHT = QUESTS_MODAL_CONFIG.npcChat.height;
+  QUEST_ITEMS_MODAL_WIDTH = QUESTS_MODAL_CONFIG.questItems.width;
+  QUEST_ITEMS_MODAL_HEIGHT = QUESTS_MODAL_CONFIG.questItems.height;
+}
 
 let questsModalLayoutCleanup = null;
 
@@ -478,6 +502,7 @@ let ORACLE_DESTINY_DIALOGUE = {};
 let ELATHRIEL_RESPONSES = {};
 let BONELORD_RESPONSES = {};
 let OLD_DRAGONLORD_RESPONSES = {};
+let A_PRISONER_RESPONSES = {};
 let KING_TIBIANUS_CONFUSION_RESPONSES = [];
 let KING_TIBIANUS_SWEAR_WORDS = [];
 let KING_TIBIANUS_SWEAR_RESPONSE = 'How dare you! Guards, remove this insolent subject!';
@@ -493,6 +518,7 @@ let ORACLE_CONFUSION_RESPONSES = [];
 let ELATHRIEL_CONFUSION_RESPONSES = [];
 let BONELORD_CONFUSION_RESPONSES = [];
 let OLD_DRAGONLORD_CONFUSION_RESPONSES = [];
+let A_PRISONER_CONFUSION_RESPONSES = [];
 let NPC_QUEST_ITEM_CHAT_RESPONSES = {};
 const NPC_QUEST_ITEM_UNINVOLVED_TEMPLATES = {};
 
@@ -588,19 +614,57 @@ function buildMissionRewardSummary(mission) {
   return `Reward: ${parts.join(', ')}.`;
 }
 
-function getQuestJsonAssetUrl(filename) {
+// Shared extension-runtime base URL, cached after the first successful resolve so every
+// later asset lookup (this fires on the order of 60+ times for quest item/NPC art) skips
+// the try/catch + browserAPI probe. getQuestJsonAssetUrl and getQuestItemsAssetUrl (the
+// image-asset alias used throughout the quest UI, further down in the IIFE below) both
+// delegate to this single implementation — they used to be two independently-maintained
+// copies of the same resolve logic.
+let cachedExtensionBaseUrl = null;
+
+function constructUrl(base, path) {
+  const normalizedBase = base.endsWith('/') ? base : base + '/';
+  const normalizedPath = path.startsWith('/') ? path.substring(1) : path;
+  return normalizedBase + normalizedPath;
+}
+
+function getQuestAssetUrl(filename) {
   const assetPath = '/assets/quests/' + filename;
+
+  if (cachedExtensionBaseUrl) {
+    return constructUrl(cachedExtensionBaseUrl, assetPath);
+  }
+
   try {
     const api = typeof window !== 'undefined' && (window.browserAPI || window.chrome || window.browser);
-    if (api?.runtime?.getURL) {
-      return api.runtime.getURL(assetPath);
+    if (api?.runtime?.id && api.runtime.id !== 'invalid' && api.runtime.getURL) {
+      const url = api.runtime.getURL(assetPath);
+      if (url?.includes('://') && !url.includes('://invalid')) {
+        const baseUrlMatch = url.match(/^(chrome-extension|moz-extension):\/\/[^/]+\//);
+        if (baseUrlMatch) {
+          cachedExtensionBaseUrl = baseUrlMatch[0];
+        }
+        return url;
+      }
     }
-  } catch (_) { /* ignore */ }
-  if (typeof window !== 'undefined' && window.BESTIARY_EXTENSION_BASE_URL) {
-    const base = window.BESTIARY_EXTENSION_BASE_URL.replace(/\/?$/, '/');
-    return base + assetPath.replace(/^\//, '');
+  } catch (e) {
+    console.warn('[Quests Mod] Error getting URL from browser API:', e);
   }
+
+  if (typeof window !== 'undefined' && window.BESTIARY_EXTENSION_BASE_URL) {
+    cachedExtensionBaseUrl = window.BESTIARY_EXTENSION_BASE_URL;
+  }
+
+  if (cachedExtensionBaseUrl) {
+    return constructUrl(cachedExtensionBaseUrl, assetPath);
+  }
+
+  console.warn('[Quests Mod] Could not determine extension runtime URL, using relative path:', assetPath);
   return assetPath;
+}
+
+function getQuestJsonAssetUrl(filename) {
+  return getQuestAssetUrl(filename);
 }
 
 const MISSION_BY_ID = {};
@@ -623,13 +687,23 @@ function applyQuestConfigFromAssets(configData) {
     if (timing.kingTibianusSwearCloseDelayMs != null) {
       KING_TIBIANUS_SWEAR_CLOSE_DELAY_MS = timing.kingTibianusSwearCloseDelayMs;
     }
+    if (Array.isArray(timing.villainSetupAttemptDelaysMs) && timing.villainSetupAttemptDelaysMs.length) {
+      replaceArrayContents(VILLAIN_SETUP_ATTEMPT_DELAYS_MS, timing.villainSetupAttemptDelaysMs);
+    }
+    if (Array.isArray(timing.sceneSyncRepaintDelaysMs) && timing.sceneSyncRepaintDelaysMs.length) {
+      replaceArrayContents(SCENE_SYNC_REPAINT_DELAYS_MS, timing.sceneSyncRepaintDelaysMs);
+    }
   }
-  if (configData.modal) Object.assign(QUESTS_MODAL_CONFIG, configData.modal);
+  if (configData.modal) {
+    Object.assign(QUESTS_MODAL_CONFIG, configData.modal);
+    syncModalDimensionConstantsFromConfig();
+  }
   const ui = configData.ui;
   if (ui) {
     if (ui.kingChatRowHeight != null) QUESTS_KING_CHAT_ROW_HEIGHT = ui.kingChatRowHeight;
     if (ui.questAccessCursor) QUEST_ACCESS_CURSOR = ui.questAccessCursor;
     if (ui.questAccessTileTitle) QUEST_ACCESS_TILE_TITLE = ui.questAccessTileTitle;
+    if (ui.allowedTilesMessage) QUEST_ALLOWED_TILES_MESSAGE = ui.allowedTilesMessage;
     if (ui.gameFrameBorderImage) GAME_FRAME_BORDER_IMAGE = ui.gameFrameBorderImage;
     if (ui.gameFrameBackground) GAME_FRAME_BACKGROUND = ui.gameFrameBackground;
   }
@@ -706,6 +780,10 @@ function applyQuestDialogueFromAssets(missionsData, npcsData) {
       OLD_DRAGONLORD_RESPONSES = { ...(npc.keywords || {}) };
       OLD_DRAGONLORD_CONFUSION_RESPONSES = [...(npc.confusion || [])];
     }],
+    ['a-prisoner', (npc) => {
+      A_PRISONER_RESPONSES = { ...(npc.keywords || {}) };
+      A_PRISONER_CONFUSION_RESPONSES = [...(npc.confusion || [])];
+    }],
     ['king-tibianus', (npc) => {
       KING_TIBIANUS_CONFUSION_RESPONSES = [...(npc.confusion || [])];
       KING_TIBIANUS_SWEAR_WORDS = Array.isArray(npc.swear?.words) ? [...npc.swear.words] : [];
@@ -730,6 +808,7 @@ function applyQuestDialogueFromAssets(missionsData, npcsData) {
   ELATHRIEL_RESPONSES = { ...NPC_SHARED_KEYWORDS, ...ELATHRIEL_RESPONSES };
   BONELORD_RESPONSES = { ...NPC_SHARED_KEYWORDS, ...BONELORD_RESPONSES };
   OLD_DRAGONLORD_RESPONSES = { ...NPC_SHARED_KEYWORDS, ...OLD_DRAGONLORD_RESPONSES };
+  A_PRISONER_RESPONSES = { ...NPC_SHARED_KEYWORDS, ...A_PRISONER_RESPONSES };
 
   NPC_QUEST_ITEM_CHAT_RESPONSES = JSON.parse(JSON.stringify(npcsData.questItems || {}));
   Object.assign(NPC_QUEST_ITEM_UNINVOLVED_TEMPLATES, npcsData.questItemUninvolvedTemplates || {});
@@ -1123,6 +1202,28 @@ function applyQuestRoomsFromAssets(roomsData) {
     }
   }
 
+  const mintwallinPrisonRoom = roomsData.mintwallinPrison;
+  if (mintwallinPrisonRoom) {
+    if (mintwallinPrisonRoom.battleRoomName) MINTWALLIN_BATTLE_ROOM_NAME = mintwallinPrisonRoom.battleRoomName;
+    if (mintwallinPrisonRoom.battleRoomId) MINTWALLIN_BATTLE_ROOM_ID = mintwallinPrisonRoom.battleRoomId;
+    if (mintwallinPrisonRoom.battleDisplayName) MINTWALLIN_BATTLE_DISPLAY_NAME = mintwallinPrisonRoom.battleDisplayName;
+    if (mintwallinPrisonRoom.battleId) MINTWALLIN_BATTLE_ID = mintwallinPrisonRoom.battleId;
+    if (mintwallinPrisonRoom.tileMutations && typeof mintwallinPrisonRoom.tileMutations === 'object') {
+      MINTWALLIN_TILE_MUTATIONS = mintwallinPrisonRoom.tileMutations;
+    }
+  }
+
+  const madMageRoom = roomsData.madMageRoom;
+  if (madMageRoom) {
+    if (madMageRoom.battleRoomName) MAD_MAGE_BATTLE_ROOM_NAME = madMageRoom.battleRoomName;
+    if (madMageRoom.battleRoomId) MAD_MAGE_BATTLE_ROOM_ID = madMageRoom.battleRoomId;
+    if (madMageRoom.battleDisplayName) MAD_MAGE_BATTLE_DISPLAY_NAME = madMageRoom.battleDisplayName;
+    if (madMageRoom.battleId) MAD_MAGE_BATTLE_ID = madMageRoom.battleId;
+    if (madMageRoom.tileMutations && typeof madMageRoom.tileMutations === 'object') {
+      MAD_MAGE_TILE_MUTATIONS = madMageRoom.tileMutations;
+    }
+  }
+
   const mornenionRoom = roomsData.mornenion;
   if (mornenionRoom) {
     if (mornenionRoom.tileMutations && typeof mornenionRoom.tileMutations === 'object') {
@@ -1419,7 +1520,10 @@ const DEFAULT_TOAST_MESSAGE_BUILDERS = {
   missingDestroyFieldRune: [],
   alreadyHaveDestroyFieldRune: [],
   crossingTheLineObjectiveComplete: [],
-  ironOreRewardReady: []
+  ironOreRewardReady: [],
+  roomNotFound: ['place'],
+  battleStartFailed: [],
+  enteringWithElathriel: ['place']
 };
 
 function rebuildToastMessagesFromTemplates(builderSpec = DEFAULT_TOAST_MESSAGE_BUILDERS) {
@@ -1473,6 +1577,10 @@ const QUEST_FIGHT_ICON_Z_INDEX = 30000;
 let QUEST_FIGHT_ICON_URL = 'https://bestiaryarena.com/assets/icons/fight.png';
 let QUEST_ACCESS_CURSOR = 'pointer';
 let QUEST_ACCESS_TILE_TITLE = 'Right-click';
+// Fallback for a quest battle's ally-tile-restriction toast when battles.json gives no
+// per-battle allowedTilesMessage. Was inline in ~10 create<Quest>BattleInstance functions;
+// getHydratedQuestBattleSpawn now guarantees spawn.allowedTilesMessage is set from this.
+let QUEST_ALLOWED_TILES_MESSAGE = 'Ally creatures can only be placed on the marked tiles!';
 
 let SERPENTINE_TOWER_BASEMENT_ROOM_NAME = '';
 let DESTROY_FIELD_RUNE_ITEM_NAME = '';
@@ -1520,6 +1628,7 @@ const APPRENTICE_SHENG_OVERLAY_CLASS = 'quests-rookstayer-overlay';
 let APPRENTICE_SHENG_FIGHT_ICON_URL = '';
 let ROOKSTAYER_OUTFIT_SPRITE_ID = '';
 const BOARD_NPC_ROOKSTAYER_ID = 'rookstayer';
+const BOARD_NPC_A_PRISONER_ID = 'a-prisoner';
 const BOARD_NPC_NAME_TAG_DATA_ATTR = 'data-quests-board-npc-id';
 const HONEYFLOWER_CONFIG = {};
 
@@ -1554,7 +1663,8 @@ const QUEST_MISSION_IDS = [
   'hellgate_library',
   'draconia_tower',
   'draconia_quest',
-  'realm_of_dreams'
+  'realm_of_dreams',
+  'visiting_mintwallin'
 ];
 
 for (const missionId of QUEST_MISSION_IDS) {
@@ -1588,6 +1698,7 @@ const HELLGATE_LIBRARY_MISSION = MISSION_BY_ID.hellgate_library;
 const DRACONIA_TOWER_MISSION = MISSION_BY_ID.draconia_tower;
 const DRACONIA_QUEST_MISSION = MISSION_BY_ID.draconia_quest;
 const REALM_OF_DREAMS_MISSION = MISSION_BY_ID.realm_of_dreams;
+const VISITING_MINTWALLIN_MISSION = MISSION_BY_ID.visiting_mintwallin;
 
 const MINOTAUR_TROPHY_CONFIG = {};
 const ORB_CONFIG = {};
@@ -1771,6 +1882,10 @@ let SPIDER_LAIR_TILE_MUTATIONS = null;
 const SPIDER_LAIR_SCENE_SPRITE_REPLACEMENTS = { rootId: 'background-scene', rules: [] };
 
 let JAKUNDAF_ENTRY_ROOM_NAMES = ["Wyda's House", "Wyda's House in Venore"];
+// Wyda's House IS the Jakundaf Desert entry room — same room list, one canonical array.
+// replaceArrayContents mutates in place, so hydrating JAKUNDAF_ENTRY_ROOM_NAMES from
+// rooms.json -> jakundafDesert.roomNames keeps this alias in sync automatically.
+let WYDA_HOUSE_ROOM_NAMES = JAKUNDAF_ENTRY_ROOM_NAMES;
 let JAKUNDAF_DESERT_TILE_INDEX = 76;
 let JAKUNDAF_DESERT_CONTEXT_MENU_LABEL = 'Enter Jakundaf Desert';
 let JAKUNDAF_BATTLE_ROOM_NAME = 'Sewers';
@@ -1859,6 +1974,35 @@ let ISLE_BATTLE_ROOM_ID = 'rkswrs';
 let ISLE_BATTLE_DISPLAY_NAME = 'Isle of Solitude';
 let ISLE_BATTLE_ID = 'isle_of_solitude';
 let ISLE_TILE_MUTATIONS = null;
+
+// Visiting Mintwallin (the Mad Mage), Part 1 — King Tibianus grants passage into the
+// Sewers re-skinned as the prison beneath Mintwallin. No battle: a walk-around scene with
+// A Prisoner (keyword Board NPC) on tile 81. Right-click the teleporter on tile 84 to
+// return. Mirrors the Isle of Solitude easter egg.
+let MINTWALLIN_BATTLE_ROOM_NAME = 'Sewers';
+let MINTWALLIN_BATTLE_ROOM_ID = 'rkswrs';
+let MINTWALLIN_BATTLE_DISPLAY_NAME = 'Mintwallin Prison';
+let MINTWALLIN_BATTLE_ID = 'mintwallin_prison';
+let MINTWALLIN_TILE_MUTATIONS = null;
+const MINTWALLIN_TELEPORTER_TILE_INDEX = 84;
+const A_PRISONER_TILE_INDEX = 80;
+
+// Mad Mage Room, Part 2 — after A Prisoner's riddle is solved, the tile-84 teleporter
+// takes the player into the Sewers re-skinned as the Mad Mage's monster-guarded room
+// (a battle) instead of home. On victory: return to where they came from, then hail
+// King Tibianus to close the quest.
+let MAD_MAGE_BATTLE_ROOM_NAME = 'Sewers';
+let MAD_MAGE_BATTLE_ROOM_ID = 'rkswrs';
+let MAD_MAGE_BATTLE_DISPLAY_NAME = "The Mad Mage's Room";
+let MAD_MAGE_BATTLE_ID = 'mad_mage_room';
+let MAD_MAGE_TILE_MUTATIONS = null;
+let MAD_MAGE_RETURN_ROOM_NAME = 'Rookgaard';
+// Accepted answers to A Prisoner's riddle (normalised: lowercased, non-alphanumerics stripped).
+// first==last segment {dp|pd}; (2nd,4th) {(d,p)|(p,d)}; middle {ks|sk} → 8 combinations.
+const MAD_MAGE_RIDDLE_ANSWERS = new Set([
+  'dpdkspdp', 'dpdskpdp', 'pddksppd', 'pddskppd',
+  'dppksddp', 'dppskddp', 'pdpksdpd', 'pdpskdpd'
+]);
 
 // Ab'Dendriel Hive (Mornenion) reskin. NOTE: this was originally implemented via
 // CustomBattles' native sceneSpriteReplacements (a global sprite-id swap), but that
@@ -2242,6 +2386,7 @@ let BOARD_NPC_ELATHRIEL_ID = '';
 let ELATHRIEL_ROOM_NAME = '';
 let ELATHRIEL_TILE_INDEX = null;
 const ELATHRIEL_OVERLAY_CLASS = 'quests-elathriel-overlay';
+const A_PRISONER_OVERLAY_CLASS = 'quests-a-prisoner-overlay';
 let ELATHRIEL_OUTFIT_SPRITE_ID = '';
 let ELATHRIEL_DIALOGUE_ICON_URL = '';
 let BOARD_NPC_BONELORD_ID = '';
@@ -2384,7 +2529,8 @@ function createNPCCooldownManager() {
   let inventoryObserver = null;
   let buttonCheckInterval = null;
   let failedAttempts = 0;
-  let cachedExtensionBaseUrl = null;
+  // cachedExtensionBaseUrl lives at module scope (top of file) and is shared with
+  // getQuestJsonAssetUrl/getQuestAssetUrl — do not re-declare it here.
   let observerDebounceTimeout = null;
   let buttonRetryTimeout = null;
   let modalTimeout = null;
@@ -2397,7 +2543,14 @@ function createNPCCooldownManager() {
   let questItemsBoardSubscription = null;
   let lastProcessedQuestItemsSeed = null;
   let cachedQuestItems = null; // Cache for loaded quest items
-  
+  let cachedQuestItemsTime = 0; // Date.now() of the last fetch/refresh of cachedQuestItems
+  let questItemsInflight = null; // shared promise while a fetch is in progress
+  // Even a useCache:false caller reuses the cache if it was refreshed this recently.
+  // Every write path updates cachedQuestItems in place, so the only thing a forced
+  // refetch buys is picking up an out-of-tab change — 2s of staleness is harmless and
+  // collapses the burst of forced reads fired by a single board update.
+  const QUEST_ITEMS_FORCE_REFETCH_MIN_MS = 2000;
+
   // =======================
   // Copper Key System State
   // =======================
@@ -2441,6 +2594,7 @@ function createNPCCooldownManager() {
     progressDraconiaTower: { accepted: false, completed: false, battleCompleted: false, dragonfetishReceived: false },
     progressDraconiaQuest: { accepted: false, completed: false, battleCompleted: false },
     progressRealmOfDreams: { accepted: false, completed: false, battleCompleted: false },
+    progressVisitingMintwallin: { accepted: false, completed: false, riddleSolved: false, battleCompleted: false },
     progressChristmasMiracle: { accepted: false, completed: false },
     progressSvensonLoveStory: { accepted: false, completed: false, plankDelivered: false, strandedAtAwash: false, awashYarnDelivered: false, awashYarnRequested: false, strandedAtUnderground: false, undergroundCompassDelivered: false, undergroundCompassRequested: false, strandedAtWhiteWave: false, whiteWaveSlippersDelivered: false },
     progressWeakenedArchdemon: { accepted: false, completed: false, battleCompleted: false },
@@ -2456,6 +2610,16 @@ function createNPCCooldownManager() {
   let missionProgressHydratedFromFirebase = false;
   let missionProgressLoadPromise = null;
   let missionProgressPlayerSubscription = null;
+  // One-shot guard for loadQuestItemsOnInit() — bootstrap and the player-ready retry
+  // path both call it; without this it ran (and re-fetched everything) twice per load.
+  let questItemsInitPromise = null;
+  let questItemsInitDone = false;
+  // Short-lived read cache + in-flight coalescing for getKingTibianusProgress().
+  // The progress node is GET'd from ~20 call sites (several times during init alone);
+  // this collapses the burst without changing the returned shape.
+  let _kingProgressCache = null;   // { key, data, time }
+  let _kingProgressInflight = null; // { key, promise }
+  const KING_PROGRESS_CACHE_MS = 15000;
   let arenaRankDisplaySeq = 0;
   let arenaRankDisplayTimer = null;
   
@@ -2517,8 +2681,8 @@ function createNPCCooldownManager() {
   let tile53RightClickEnabled = false;
   let tile53ContextMenu = null;
   let tile53BoardSubscription = null;
-  // Wyda (tile 83, Wyda's House in Venore)
-  const WYDA_HOUSE_ROOM_NAMES = ["Wyda's House", "Wyda's House in Venore"];
+  // Wyda (tile 83, Wyda's House in Venore). WYDA_HOUSE_ROOM_NAMES is the module-level alias
+  // of JAKUNDAF_ENTRY_ROOM_NAMES (same room) — declared near it, hydrated from rooms.json.
   const WYDA_TILE_INDEX = 83;
   let tile83WydaRightClickEnabled = false;
   let tile83WydaContextMenu = null;
@@ -2632,6 +2796,24 @@ function createNPCCooldownManager() {
   let isleTeleporterContextMenu = null;
   let isleTeleporterRightClickEnabled = false;
   let isleHitboxSnapshot = null; // original rkswrs data.hitboxes, captured before the isle reskin mutates it
+
+  // Visiting Mintwallin (the Mad Mage), Part 1 — walk-around Sewers reskin, no battle.
+  // mintwallinReturnRoomId captured on entry so the tile-84 teleporter can send the player
+  // back where they came from. Mirrors the Isle of Solitude vars above.
+  let playerEnteredMintwallinPrison = false;
+  let mintwallinPrisonBattle = null;
+  let mintwallinPrisonHitboxesApplied = false;
+  let mintwallinReturnRoomId = null;
+  let mintwallinSceneSub = null;
+  let mintwallinTeleporterContextMenu = null;
+  let mintwallinTeleporterRightClickEnabled = false;
+  let mintwallinHitboxSnapshot = null;
+
+  // Mad Mage Room (Part 2 battle) — plain vars owned here, driven through createTeleportBattleQuest.
+  let playerEnteredMadMageRoom = false;
+  let madMageRoomBattle = null;
+  let madMageRoomHitboxesApplied = false;
+  let madMageRoomSceneSub = null;
 
   // Draconia Tower (Elathriel: teleport into the Sewers dragon-cemetery reskin; battle on
   // entry, then a post-battle talk with An Old Dragonlord to trade a White Mushroom).
@@ -2844,8 +3026,6 @@ function createNPCCooldownManager() {
             navigateToHedgeMaze();
           }, 100);
         },
-        victoryTitle: 'Victory!',
-        defeatTitle: 'Defeat',
         victoryMessage: getMissionDialogueLine(AL_DEE_GOLDEN_ROPE_MISSION, 'battleVictory', 'Mornenion was slain. You found Elvenhair Rope and a soul core.'),
         defeatMessage: getMissionDialogueLine(AL_DEE_GOLDEN_ROPE_MISSION, 'battleDefeat', 'Mornenion\'s powers were too strong for you.'),
         showItems: false,
@@ -3310,7 +3490,7 @@ function createNPCCooldownManager() {
       // no-op for this flag, so room.file.data.hitboxes is never touched for placement
       // purposes — avoids the hitbox-mask desync bug this quest hit before.
       ...(spawn.allowedTiles?.length
-        ? { tileRestrictions: { allowedTiles: spawn.allowedTiles, message: spawn.allowedTilesMessage || 'Ally creatures can only be placed on the marked tiles!', noHitboxMask: true } }
+        ? { tileRestrictions: { allowedTiles: spawn.allowedTiles, message: spawn.allowedTilesMessage, noHitboxMask: true } }
         : {}),
       debugPlacementMask: true,
       activationCheck: (isSandbox, inBattleArea) => {
@@ -3338,8 +3518,6 @@ function createNPCCooldownManager() {
           cleanupApprenticeShengBattle();
           updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
         },
-        victoryTitle: 'Victory!',
-        defeatTitle: 'Defeat',
         victoryMessage: getMissionDialogueLine(APPRENTICE_SHENG_MISSION, 'battleVictory', 'Apprentice Sheng has been defeated.'),
         defeatMessage: getMissionDialogueLine(APPRENTICE_SHENG_MISSION, 'battleDefeat', 'Apprentice Sheng was too strong.'),
         showItems: false,
@@ -3468,8 +3646,6 @@ function createNPCCooldownManager() {
             console.log('[Quests Mod][The Lost Oracle] Victory closed — speak with The Oracle for thanks');
           }
         },
-        victoryTitle: 'Victory!',
-        defeatTitle: 'Defeat',
         victoryMessage: getMissionDialogueLine(
           LOST_ORACLE_MISSION,
           'battleVictory',
@@ -3710,7 +3886,7 @@ function createNPCCooldownManager() {
       if (!roomId) {
         console.error('[Quests Mod][The Lost Oracle] Monastery Catacombs roomId not found');
         showToast({
-          message: 'Could not start the battle — room not found.',
+          message: TOAST_MESSAGES.battleStartFailed,
           logPrefix: BATTLE_TOAST_LOG.lostOracle || '[Quests Mod][The Lost Oracle]'
         });
         return;
@@ -3782,8 +3958,6 @@ function createNPCCooldownManager() {
           cleanupBansheeLastRoomQuest();
           setTimeout(() => navigateToDemonrageSeal(), 100);
         },
-        victoryTitle: 'Victory!',
-        defeatTitle: 'Defeat',
         victoryMessage: "Banshee's Last Room cleared.",
         defeatMessage: "The banshees were too strong.",
         showItems: false,
@@ -3836,7 +4010,7 @@ function createNPCCooldownManager() {
     const spiderLairTileRestrictions = {};
     if (spawn.allowedTiles?.length) {
       spiderLairTileRestrictions.allowedTiles = spawn.allowedTiles;
-      spiderLairTileRestrictions.message = spawn.allowedTilesMessage || 'Ally creatures can only be placed on the marked tiles!';
+      spiderLairTileRestrictions.message = spawn.allowedTilesMessage;
     }
     const spiderLairConfig = {
       name: SPIDER_LAIR_BATTLE_DISPLAY_NAME || 'Spider Lair',
@@ -3870,8 +4044,6 @@ function createNPCCooldownManager() {
           spiderLairRetryWithoutTile77 = !isVictory;
           setTimeout(() => navigateToSecludedHerb(), 100);
         },
-        victoryTitle: 'Victory!',
-        defeatTitle: 'Defeat',
         victoryMessage: getMissionDialogueLine(MOTHER_OF_ALL_SPIDERS_MISSION, 'battleVictory', 'The Old Widow was slain. You found Spider Silk and a soul core.'),
         defeatMessage: getMissionDialogueLine(MOTHER_OF_ALL_SPIDERS_MISSION, 'battleDefeat', 'The Old Widow was too strong.'),
         showItems: false,
@@ -4028,7 +4200,7 @@ function createNPCCooldownManager() {
     const tileRestrictions = {};
     if (spawn.allowedTiles?.length) {
       tileRestrictions.allowedTiles = spawn.allowedTiles;
-      tileRestrictions.message = spawn.allowedTilesMessage || 'Ally creatures can only be placed on the marked tiles!';
+      tileRestrictions.message = spawn.allowedTilesMessage;
     }
     const config = {
       name: JAKUNDAF_BATTLE_DISPLAY_NAME || 'Jakundaf Desert',
@@ -4068,8 +4240,6 @@ function createNPCCooldownManager() {
           jakundafDesertRetryWithoutTile76 = !isVictory;
           setTimeout(() => navigateToJakundafEntryRoom(), 100);
         },
-        victoryTitle: 'Victory!',
-        defeatTitle: 'Defeat',
         victoryMessage: getMissionDialogueLine(
           JAKUNDAF_DESERT_MISSION,
           'battleVictory',
@@ -4166,7 +4336,7 @@ function createNPCCooldownManager() {
     const tileRestrictions = {};
     if (spawn.allowedTiles?.length) {
       tileRestrictions.allowedTiles = spawn.allowedTiles;
-      tileRestrictions.message = spawn.allowedTilesMessage || 'Ally creatures can only be placed on specific tiles!';
+      tileRestrictions.message = spawn.allowedTilesMessage;
     }
     if (spawn.blockedTiles?.length) {
       tileRestrictions.blockedTiles = spawn.blockedTiles;
@@ -4223,8 +4393,6 @@ function createNPCCooldownManager() {
           lonesomeDragonRetryWithoutTile47 = !isVictory;
           setTimeout(() => navigateToDragonLair(), 100);
         },
-        victoryTitle: 'Victory!',
-        defeatTitle: 'Defeat',
         victoryMessage: getMissionDialogueLine(DRAGONMOTHER_MISSION, 'battleVictory', 'Demodras has fallen. You found a Demodras Soul Core.'),
         defeatMessage: getMissionDialogueLine(DRAGONMOTHER_MISSION, 'battleDefeat', 'Demodras was too strong.'),
         showItems: false,
@@ -4256,7 +4424,7 @@ function createNPCCooldownManager() {
     showCustomBattleStatusToast({ battleName: 'Demodras', allyLimit: battle.config?.allyLimit ?? 6, battle, logPrefix: '[Quests Mod][Lonesome Dragon]' });
     startDemodrasAbilityCooldownHooks();
     lonesomeDragonBattle.scheduleEntryVillainSetup({
-      attemptDelays: [0, 100, 250, 500, 800, 1200],
+      attemptDelays: VILLAIN_SETUP_ATTEMPT_DELAYS_MS,
       isActiveCheck: () => playerUsedTile47ToLonesomeDragon,
       onComplete: () => {
         hideQuestOverlays();
@@ -4379,7 +4547,7 @@ function createNPCCooldownManager() {
       allies: hydrateBattleUnits(battleCfg.allies || [], defaults),
       allyLimit: battleCfg.allyLimit,
       allowedTiles: expandBattleTileSpec(battleCfg.allowedTiles),
-      allowedTilesMessage: battleCfg.allowedTilesMessage || null,
+      allowedTilesMessage: battleCfg.allowedTilesMessage || QUEST_ALLOWED_TILES_MESSAGE,
       blockedTiles: expandBattleTileSpec(battleCfg.blockedTiles),
       blockedTilesMessage: battleCfg.blockedTilesMessage || null,
       preventVillainMovement: battleCfg.preventVillainMovement,
@@ -4388,31 +4556,23 @@ function createNPCCooldownManager() {
   }
 
   function buildSerpentineTowerProgress(patch = {}) {
-    const current = getMissionProgress(SERPENTINE_TOWER_MISSION);
-    return {
-      accepted: patch.accepted ?? current.accepted ?? false,
-      completed: patch.completed ?? current.completed ?? false,
-      destroyFieldRuneTaken: patch.destroyFieldRuneTaken ?? current.destroyFieldRuneTaken ?? false,
-      putridChamberComplete: patch.putridChamberComplete ?? current.putridChamberComplete ?? false
-    };
+    return buildMissionProgressPatch(
+      SERPENTINE_TOWER_MISSION,
+      ['destroyFieldRuneTaken', 'putridChamberComplete'],
+      patch
+    );
   }
 
   function buildHoneyflowerProgress(patch = {}) {
-    const current = getMissionProgress(KING_HONEYFLOWER_MISSION);
-    return {
-      accepted: patch.accepted ?? current.accepted ?? false,
-      completed: patch.completed ?? current.completed ?? false,
-      honeyflowerPicked: patch.honeyflowerPicked ?? current.honeyflowerPicked ?? false
-    };
+    return buildMissionProgressPatch(KING_HONEYFLOWER_MISSION, ['honeyflowerPicked'], patch);
   }
 
   function buildCrossingTheLineProgress(patch = {}) {
-    const current = getMissionProgress(KING_CROSSING_THE_LINE_MISSION);
-    return {
-      accepted: patch.accepted ?? current.accepted ?? false,
-      completed: patch.completed ?? current.completed ?? false,
-      crossingObjectiveComplete: patch.crossingObjectiveComplete ?? current.crossingObjectiveComplete ?? false
-    };
+    return buildMissionProgressPatch(
+      KING_CROSSING_THE_LINE_MISSION,
+      ['crossingObjectiveComplete'],
+      patch
+    );
   }
 
   function hasHoneyflowerBeenPicked() {
@@ -4558,8 +4718,6 @@ function createNPCCooldownManager() {
           cleanupPutridChamberQuest();
           setTimeout(() => navigateToSerpentineTowerBasement(), 100);
         },
-        victoryTitle: 'Victory!',
-        defeatTitle: 'Defeat',
         victoryMessage: getMissionDialogueLine(SERPENTINE_TOWER_MISSION, 'battleVictory', 'You survived the horrors of The Cursed Chamber. Return to Tesha in Darama Oasis.'),
         defeatMessage: getMissionDialogueLine(SERPENTINE_TOWER_MISSION, 'battleDefeat', 'The creatures of The Cursed Chamber were too strong.'),
         showItems: false,
@@ -5217,7 +5375,7 @@ function createNPCCooldownManager() {
       // Opening the Mornenion hole — not an ore find.
       if (openedMornenionHole) {
         showToast({
-          message: TOAST_MESSAGES.dugMornenionHole || 'You dig a hole into the depths.',
+          message: TOAST_MESSAGES.dugMornenionHole,
           logPrefix: '[Quests Mod][Digging]'
         });
       }
@@ -5505,6 +5663,10 @@ function createNPCCooldownManager() {
   const QUEST_BOARD_HIDDEN_TAG_HELLGATE_LIBRARY = 'hellgate-library';
   const QUEST_BOARD_ADDED_ATTR_ISLE = 'data-quests-isle-of-solitude-added';
   const QUEST_BOARD_HIDDEN_TAG_ISLE = 'isle-of-solitude';
+  const QUEST_BOARD_ADDED_ATTR_MINTWALLIN = 'data-quests-mintwallin-prison-added';
+  const QUEST_BOARD_HIDDEN_TAG_MINTWALLIN = 'mintwallin-prison';
+  const QUEST_BOARD_ADDED_ATTR_MAD_MAGE = 'data-quests-mad-mage-room-added';
+  const QUEST_BOARD_HIDDEN_TAG_MAD_MAGE = 'mad-mage-room';
   const QUEST_BOARD_ADDED_ATTR_DRACONIA = 'data-quests-draconia-added';
   const QUEST_BOARD_HIDDEN_TAG_DRACONIA = 'draconia-tower';
   const QUEST_BOARD_ADDED_ATTR_DRACONIA_QUEST = 'data-quests-draconia-quest-added';
@@ -5560,51 +5722,11 @@ function createNPCCooldownManager() {
     return element?.hasAttribute?.(QUEST_BOARD_HIDDEN_ATTR) ?? false;
   }
 
-  // Helper to construct URL from base and path
-  function constructUrl(base, path) {
-    const normalizedBase = base.endsWith('/') ? base : base + '/';
-    const normalizedPath = path.startsWith('/') ? path.substring(1) : path;
-    return normalizedBase + normalizedPath;
-  }
-
-  // Helper function to get quest items asset URL
+  // constructUrl/getQuestAssetUrl/cachedExtensionBaseUrl are defined once at module scope
+  // (top of file) and shared via closure — see getQuestJsonAssetUrl there. This used to be
+  // a second, independently-maintained copy of the same base-URL resolution logic.
   function getQuestItemsAssetUrl(filename) {
-    const imagePath = '/assets/quests/' + filename;
-    
-    // Use cached base URL if available
-    if (cachedExtensionBaseUrl) {
-      return constructUrl(cachedExtensionBaseUrl, imagePath);
-    }
-    
-    // Try multiple methods to get extension runtime URL
-    try {
-      const api = window.browserAPI || window.chrome || window.browser;
-      if (api?.runtime?.id && api.runtime.id !== 'invalid' && api.runtime.getURL) {
-        const url = api.runtime.getURL(imagePath);
-        if (url?.includes('://') && !url.includes('://invalid')) {
-          const baseUrlMatch = url.match(/^(chrome-extension|moz-extension):\/\/[^/]+\//);
-          if (baseUrlMatch) {
-            cachedExtensionBaseUrl = baseUrlMatch[0];
-          }
-          return url;
-        }
-      }
-    } catch (e) {
-      console.warn('[Quests Mod] Error getting URL from browser API:', e);
-    }
-    
-    // Try window.BESTIARY_EXTENSION_BASE_URL
-    if (typeof window !== 'undefined' && window.BESTIARY_EXTENSION_BASE_URL) {
-      cachedExtensionBaseUrl = window.BESTIARY_EXTENSION_BASE_URL;
-    }
-    
-    if (cachedExtensionBaseUrl) {
-      return constructUrl(cachedExtensionBaseUrl, imagePath);
-    }
-    
-    // Last resort: return path
-    console.warn('[Quests Mod] Could not determine extension runtime URL, using relative path:', imagePath);
-    return imagePath;
+    return getQuestAssetUrl(filename);
   }
 
   function playRightClickLootEffect(tileElement, { x, y } = {}) {
@@ -6706,8 +6828,20 @@ function createNPCCooldownManager() {
     return playerName || getCurrentPlayerName();
   }
 
-  // Hash username for Firebase key
+  // Hash username for Firebase key. Result is stable per username and used on every
+  // Firebase op, so memoize it (SHA-256 digest is small but this is awaited a lot).
+  const _hashUsernameCache = new Map();
   async function hashUsername(username) {
+    const cacheKey = String(username ?? '').toLowerCase();
+    if (_hashUsernameCache.has(cacheKey)) {
+      return _hashUsernameCache.get(cacheKey);
+    }
+    const hashed = await _computeHashUsername(username);
+    _hashUsernameCache.set(cacheKey, hashed);
+    return hashed;
+  }
+
+  async function _computeHashUsername(username) {
     try {
       const encoder = new TextEncoder();
       const data = encoder.encode(username.toLowerCase());
@@ -7497,12 +7631,16 @@ function createNPCCooldownManager() {
      * @param {*} defaultReturn - Default value to return on 404 or error
      * @returns {Promise<*>} Parsed JSON response or defaultReturn
      */
-    async get(path, errorContext, defaultReturn = null) {
+    async get(path, errorContext, defaultReturn = null, { throwOnNetworkError = false } = {}) {
       try {
         const response = await fetch(`${path}.json`);
         return await this.handleResponse(response, errorContext, defaultReturn);
       } catch (error) {
         console.error(`[Quests Mod] Error ${errorContext}:`, error);
+        // A transient network failure is otherwise indistinguishable from "no data"
+        // (both return defaultReturn). Callers that would persist state back — e.g.
+        // the init hydrate — must be able to tell the difference and abort.
+        if (throwOnNetworkError) throw error;
         return defaultReturn;
       }
     },
@@ -7839,7 +7977,59 @@ function createNPCCooldownManager() {
     return `${FIREBASE_CONFIG.firebaseUrl}/quests/king-tibianus/arena-leaderboard`;
   }
 
-  async function getKingTibianusProgress(playerName) {
+  function invalidateKingTibianusProgressCache() {
+    _kingProgressCache = null;
+    _kingProgressInflight = null;
+  }
+
+  /**
+   * Cached / in-flight-coalesced read of the current player's mission progress node.
+   * Shape is identical to _fetchKingTibianusProgressUncached(); callers are unchanged.
+   * @param {string} playerName
+   * @param {{ bypassCache?: boolean, throwOnNetworkError?: boolean }} [opts]
+   */
+  async function getKingTibianusProgress(playerName, opts = {}) {
+    const { bypassCache = false, throwOnNetworkError = false } = opts;
+    if (!playerName) {
+      return { accepted: false, completed: false, __isEmpty: true };
+    }
+    const key = String(playerName).toLowerCase();
+    const now = Date.now();
+    // Once hydrated, kingChatState IS the authoritative copy of the current player's
+    // progress (getArenaProgressSnapshot relies on the same fact). Serve reads for the
+    // current player straight from memory — no fetch, no staleness.
+    if (!bypassCache
+        && missionProgressHydratedFromFirebase
+        && key === String(getCurrentPlayerName() || '').toLowerCase()) {
+      return getAllMissionProgress();
+    }
+    if (!bypassCache
+        && _kingProgressCache
+        && _kingProgressCache.key === key
+        && (now - _kingProgressCache.time) < KING_PROGRESS_CACHE_MS) {
+      return _kingProgressCache.data;
+    }
+    if (!bypassCache
+        && _kingProgressInflight
+        && _kingProgressInflight.key === key) {
+      return _kingProgressInflight.promise;
+    }
+    const promise = (async () => {
+      const result = await _fetchKingTibianusProgressUncached(playerName, { throwOnNetworkError });
+      _kingProgressCache = { key, data: result, time: Date.now() };
+      return result;
+    })();
+    _kingProgressInflight = { key, promise };
+    try {
+      return await promise;
+    } finally {
+      if (_kingProgressInflight && _kingProgressInflight.promise === promise) {
+        _kingProgressInflight = null;
+      }
+    }
+  }
+
+  async function _fetchKingTibianusProgressUncached(playerName, { throwOnNetworkError = false } = {}) {
     if (!playerName) {
       return { accepted: false, completed: false, __isEmpty: true };
     }
@@ -7847,7 +8037,8 @@ function createNPCCooldownManager() {
     const data = await FirebaseService.get(
       `${getKingTibianusProgressPath()}/${hashedPlayer}`,
       'fetch King Tibianus progress',
-      null
+      null,
+      { throwOnNetworkError }
     );
     if (!data || Object.keys(data).length === 0) {
       return { accepted: false, completed: false, __isEmpty: true };
@@ -7987,6 +8178,8 @@ function createNPCCooldownManager() {
       normalized,
       'save King Tibianus progress'
     );
+    // The stored node just changed — drop the read cache so the next reader sees it.
+    invalidateKingTibianusProgressCache();
     console.log('[Quests Mod][King Tibianus] Progress saved', normalized);
     saveArenaLeaderboardEntry(playerName, normalized).catch((err) => {
       console.warn('[Quests Mod][Arena Leaderboard] Failed to update entry:', err);
@@ -8016,6 +8209,10 @@ function createNPCCooldownManager() {
         && typeof existing.updatedAt === 'number'
         && existing.updatedAt > 0
       ) {
+        // Stored entry already matches — skip the redundant PUT entirely.
+        if (existing.playerName === playerName) {
+          return;
+        }
         updatedAt = existing.updatedAt;
       }
     } catch (_) {
@@ -8098,6 +8295,82 @@ function createNPCCooldownManager() {
     console.log('[Quests Mod][Arena Leaderboard] Entry deleted for player:', playerName);
   }
 
+  // Leaderboard entries are keyed by hashed player name. When a player renames, a fresh
+  // entry lands under the new name and the old one is orphaned forever — its profile link
+  // 404s and it still costs a read on every board load. There is no stable account id to
+  // detect "I renamed", so the only cleanup signal is the public profile API. To keep it
+  // simple (and safe from any client griefing the shared board), the full sweep runs once
+  // per session on init — for Firebase admins only. Regular clients just render the board.
+  const arenaLeaderboardNameStatus = new Map(); // name(lower) -> 'exists' | 'missing' | 'unknown'
+  let arenaLeaderboardSweepDone = false;
+  const ARENA_LB_SWEEP_MIN_AGE_MS = 24 * 60 * 60 * 1000; // skip entries touched in the last day
+
+  async function sweepRenamedArenaLeaderboardEntries() {
+    try {
+      if (arenaLeaderboardSweepDone) return;
+      const checkProfileStatus = globalThis.Guilds?.checkProfileStatus;
+      if (typeof checkProfileStatus !== 'function') return; // no reliable existence signal
+
+      let isAdmin = false;
+      try { isAdmin = await isCurrentPlayerQuestAdminAsync(); } catch (_) {}
+      if (!isAdmin) return;
+      arenaLeaderboardSweepDone = true;
+
+      const entries = await loadArenaLeaderboard(true);
+      if (!Array.isArray(entries) || entries.length < 2) return;
+
+      const now = Date.now();
+      const currentPlayer = String(getCurrentPlayerName() || '').trim().toLowerCase();
+      const candidates = entries.filter((entry) => {
+        const name = String(entry?.playerName || '').trim();
+        if (!name || name.toLowerCase() === currentPlayer) return false;
+        const at = Number(entry.updatedAt);
+        return !(Number.isFinite(at) && at > 0 && (now - at) < ARENA_LB_SWEEP_MIN_AGE_MS);
+      });
+      if (!candidates.length) return;
+
+      let checked = 0;
+      let missing = 0;
+      const toDelete = [];
+      for (const entry of candidates) {
+        const name = String(entry.playerName).trim();
+        const status = await checkProfileStatus(name).catch(() => 'unknown');
+        arenaLeaderboardNameStatus.set(name.toLowerCase(), status);
+        if (status === 'unknown') continue;
+        checked += 1;
+        if (status === 'missing') {
+          missing += 1;
+          toDelete.push(entry);
+        }
+      }
+
+      // Systemic-failure guard: if most of what we could resolve came back "missing", the
+      // profile API is probably degraded — bail rather than gut the shared board.
+      if (checked >= 4 && (missing / checked) > 0.5) {
+        console.warn('[Quests Mod][Arena Leaderboard] Sweep aborted — too many entries reported missing at once (profile API likely degraded)', { checked, missing });
+        return;
+      }
+      if (!toDelete.length) {
+        console.log('[Quests Mod][Arena Leaderboard] Sweep complete — no renamed/orphaned entries found', { checked });
+        return;
+      }
+
+      for (const entry of toDelete) {
+        try {
+          await deleteArenaLeaderboardEntry(entry.playerName);
+          console.log('[Quests Mod][Arena Leaderboard] Pruned orphaned entry for renamed player:', entry.playerName);
+        } catch (err) {
+          console.warn('[Quests Mod][Arena Leaderboard] Failed to prune entry:', entry.playerName, err);
+        }
+      }
+      arenaLeaderboardCache = null;
+      arenaLeaderboardCacheTime = 0;
+      console.log(`[Quests Mod][Arena Leaderboard] Sweep complete — pruned ${toDelete.length} orphaned entr${toDelete.length === 1 ? 'y' : 'ies'} of ${checked} checked`);
+    } catch (error) {
+      console.warn('[Quests Mod][Arena Leaderboard] Sweep failed:', error);
+    }
+  }
+
   async function deleteKingTibianusProgress(playerName) {
     if (!playerName) return;
     const hashedPlayer = await hashUsername(playerName);
@@ -8105,6 +8378,7 @@ function createNPCCooldownManager() {
       `${getKingTibianusProgressPath()}/${hashedPlayer}`,
       'delete King Tibianus progress'
     );
+    invalidateKingTibianusProgressCache();
     console.log('[Quests Mod][King Tibianus] Progress deleted for player:', playerName);
   }
 
@@ -8309,7 +8583,8 @@ function createNPCCooldownManager() {
     if (!playerName) {
       return Promise.resolve({ __isEmpty: true });
     }
-    return getKingTibianusProgress(playerName);
+    // forceFirebase callers explicitly want a fresh server read.
+    return getKingTibianusProgress(playerName, { bypassCache: !!forceFirebase });
   }
 
   function scheduleArenaRankDisplayUpdate(delayMs = 0) {
@@ -8386,45 +8661,72 @@ function createNPCCooldownManager() {
     if (!currentPlayer) {
       return {};
     }
-    
-    if (useCache && cachedQuestItems !== null) {
-      return cachedQuestItems;
-    }
-    
-    const hashedPlayer = await hashUsername(currentPlayer);
-    const data = await FirebaseService.get(
-      `${getQuestItemsApiUrl()}/${hashedPlayer}`,
-      'fetch quest items',
-      null
-    );
-    
-    if (!data || !data.encrypted) {
-      cachedQuestItems = {};
-      return {};
-    }
-    
-    const decrypted = await decryptQuestItems(data.encrypted, currentPlayer);
-    const normalized = normalizeQuestItems(decrypted);
-    if (!areQuestItemMapsEqual(decrypted, normalized)) {
-      try {
-        const encrypted = await encryptQuestItems(normalized, currentPlayer);
-        await FirebaseService.put(
-          `${getQuestItemsApiUrl()}/${hashedPlayer}`,
-          { encrypted },
-          'sanitize quest items'
-        );
-        console.log('[Quests Mod][Quest Items] Sanitized invalid quest item keys/values');
-      } catch (sanitizeError) {
-        console.warn('[Quests Mod][Quest Items] Failed to persist sanitized items:', sanitizeError);
+
+    if (cachedQuestItems !== null) {
+      if (useCache) {
+        return cachedQuestItems;
+      }
+      // Forced refresh, but the cache is very fresh — skip the redundant fetch+decrypt.
+      if ((Date.now() - cachedQuestItemsTime) < QUEST_ITEMS_FORCE_REFETCH_MIN_MS) {
+        return cachedQuestItems;
       }
     }
-    cachedQuestItems = normalized;
-    return normalized;
+
+    // Coalesce concurrent callers onto one network round-trip + one decrypt.
+    if (questItemsInflight) {
+      return questItemsInflight;
+    }
+
+    questItemsInflight = (async () => {
+      const hashedPlayer = await hashUsername(currentPlayer);
+      const data = await FirebaseService.get(
+        `${getQuestItemsApiUrl()}/${hashedPlayer}`,
+        'fetch quest items',
+        null
+      );
+
+      if (!data || !data.encrypted) {
+        cachedQuestItems = {};
+        cachedQuestItemsTime = Date.now();
+        return {};
+      }
+
+      const decrypted = await decryptQuestItems(data.encrypted, currentPlayer);
+      const normalized = normalizeQuestItems(decrypted);
+      if (!areQuestItemMapsEqual(decrypted, normalized)) {
+        try {
+          const encrypted = await encryptQuestItems(normalized, currentPlayer);
+          await FirebaseService.put(
+            `${getQuestItemsApiUrl()}/${hashedPlayer}`,
+            { encrypted },
+            'sanitize quest items'
+          );
+          console.log('[Quests Mod][Quest Items] Sanitized invalid quest item keys/values');
+        } catch (sanitizeError) {
+          console.warn('[Quests Mod][Quest Items] Failed to persist sanitized items:', sanitizeError);
+        }
+      }
+      cachedQuestItems = normalized;
+      cachedQuestItemsTime = Date.now();
+      return normalized;
+    })();
+
+    try {
+      return await questItemsInflight;
+    } finally {
+      questItemsInflight = null;
+    }
   }
-  
+
+  // Mark cachedQuestItems as freshly authoritative — call after a write updates it in place.
+  function markQuestItemsCacheFresh() {
+    cachedQuestItemsTime = Date.now();
+  }
+
   // Clear quest items cache
   function clearQuestItemsCache() {
     cachedQuestItems = null;
+    cachedQuestItemsTime = 0;
     console.log('[Quests Mod] Quest items cache cleared');
   }
 
@@ -8449,31 +8751,46 @@ function createNPCCooldownManager() {
     return products;
   }
 
-  // Load quest items from Firebase on initialization
+  // Load quest items from Firebase on initialization.
+  // Bootstrap and the player-ready mission-progress retry BOTH call this; the guard
+  // below makes it run exactly once (concurrent callers share the same promise).
   async function loadQuestItemsOnInit() {
-    try {
-      console.log('[Quests Mod] Loading quest items from Firebase on initialization...');
-      const playerName = await waitForCurrentPlayerName();
-      if (!playerName) {
-        console.warn('[Quests Mod] Player name not available yet — quest items will load after mission progress sync');
-        return;
-      }
+    if (questItemsInitDone) return;
+    if (questItemsInitPromise) return questItemsInitPromise;
+    questItemsInitPromise = (async () => {
       try {
-        const kingProgress = await getKingTibianusProgress(playerName);
-        await grantStarterSilverTokenIfNeeded(kingProgress, playerName);
-      } catch (err) {
-        console.warn('[Quests Mod] Could not grant starter Silver Token on init:', err);
+        console.log('[Quests Mod] Loading quest items from Firebase on initialization...');
+        const playerName = await waitForCurrentPlayerName();
+        if (!playerName) {
+          console.warn('[Quests Mod] Player name not available yet — quest items will load after mission progress sync');
+          return; // not marked done — a later call (retry path) may still succeed
+        }
+        try {
+          const kingProgress = await getKingTibianusProgress(playerName);
+          await grantStarterSilverTokenIfNeeded(kingProgress, playerName);
+        } catch (err) {
+          console.warn('[Quests Mod] Could not grant starter Silver Token on init:', err);
+        }
+        // Usually already synced by finishMissionProgressHydration(); kept for the
+        // hydrate-failed fallback path. Cheap now — saveArenaLeaderboardEntry skips
+        // the PUT when the stored entry is already current.
+        syncArenaLeaderboardForCurrentPlayer().catch((err) => {
+          console.warn('[Quests Mod][Arena Leaderboard] Failed to sync on init:', err);
+        });
+        // Firebase admins only: one-shot sweep for entries left behind by renamed players.
+        sweepRenamedArenaLeaderboardEntries().catch(() => {});
+        await reloadQuestItemsFromFirebase();
+        await cleanupStaleQuestItemsAfterCompletedMissions();
+        await backfillSoulCoresFromCompletedMissions();
+        await syncBosstiaryCollectionFromProgress();
+        questItemsInitDone = true;
+      } catch (error) {
+        console.error('[Quests Mod] Error loading quest items on init:', error);
+      } finally {
+        questItemsInitPromise = null;
       }
-      syncArenaLeaderboardForCurrentPlayer().catch((err) => {
-        console.warn('[Quests Mod][Arena Leaderboard] Failed to sync on init:', err);
-      });
-      await reloadQuestItemsFromFirebase();
-      await cleanupStaleQuestItemsAfterCompletedMissions();
-      await backfillSoulCoresFromCompletedMissions();
-      await syncBosstiaryCollectionFromProgress();
-    } catch (error) {
-      console.error('[Quests Mod] Error loading quest items on init:', error);
-    }
+    })();
+    return questItemsInitPromise;
   }
 
   async function isCopperKeyMissionCompleted() {
@@ -8654,7 +8971,13 @@ function createNPCCooldownManager() {
         'Key 3012',
         'Beware of the Bonelords (Book)',
         'Key to Magic (Book)',
-        'Mintwallin Prison Key'
+        'Mintwallin Prison Key',
+        'Mad Mage Quest Key',
+        'Orb',
+        'Luminous Orb',
+        'Spectral Stone',
+        'Dragonfetish',
+        'White Mushroom'
       ].includes(productName) || isBosstiaryCollectionItemName(productName);
 
       const newCount = isRedDragonMaterial ? Math.min(30, currentCount + amount) :
@@ -8681,6 +9004,7 @@ function createNPCCooldownManager() {
       
       // Update cache
       cachedQuestItems = updatedProducts;
+      markQuestItemsCacheFresh();
       
       // Update tile 79 right-click state if function is available (quest items affect tile 79 access)
       if (typeof updateTile79RightClickState === 'function') {
@@ -8731,25 +9055,48 @@ function createNPCCooldownManager() {
     }
   }
 
-  // Grant any soul core whose mission is completed but that the player doesn't hold — covers
-  // players who finished the mission before the soul core reward existed, or lost it.
-  // Rules from items.json → itemLifecycle.soulCoreGrantOnComplete.
+  // Grant any reward item whose mission is completed (or has reached a named sub-flag) but
+  // that the player doesn't hold — covers players who finished the mission before the reward
+  // existed, or lost it. Rules from items.json → itemLifecycle.soulCoreGrantOnComplete.
+  //   grantWhenField      : grant when progress[fbKey][field] is truthy instead of `.completed`
+  //   removedByMissionId  : skip once that follow-up mission is accepted/completed
+  //   removedByProgressFlag: { firebaseKey, field } — skip once that sub-flag is set (a later
+  //                          quest consumed the item at a point before its own completion)
   async function backfillSoulCoresFromCompletedMissions() {
     try {
       if (!QUEST_SOUL_CORE_GRANT_RULES.length) return;
       await getQuestItems(false); // refresh cachedQuestItems
+      const allProgress = getAllMissionProgress();
       const granted = [];
       for (const rule of QUEST_SOUL_CORE_GRANT_RULES) {
         if (!rule?.productId || !rule?.missionId) continue;
         const mission = MISSION_BY_ID[rule.missionId];
         if (!mission) continue;
-        if (!(getMissionProgress(mission) || {}).completed) continue;
-        // A later quest may consume this reward item — once its follow-up mission is
-        // under way, stop re-granting what the player has legitimately spent.
+        const srcProgress = getMissionProgress(mission) || {};
+        const earned = rule.grantWhenField ? !!srcProgress[rule.grantWhenField] : !!srcProgress.completed;
+        if (!earned) continue;
+        // A later quest may consume this reward item — once any listed follow-up mission is
+        // under way (or done), stop re-granting what the player has legitimately spent.
+        // Accepts a single id or an array (a downstream mission in the same chain proves
+        // the player progressed past the consume point even on a gappy save).
         if (rule.removedByMissionId) {
-          const followUp = MISSION_BY_ID[rule.removedByMissionId];
-          const followUpProgress = followUp ? (getMissionProgress(followUp) || {}) : null;
-          if (followUpProgress && (followUpProgress.accepted || followUpProgress.completed)) continue;
+          const followUpIds = Array.isArray(rule.removedByMissionId)
+            ? rule.removedByMissionId
+            : [rule.removedByMissionId];
+          const spent = followUpIds.some((id) => {
+            const fu = MISSION_BY_ID[id];
+            const fp = fu ? (getMissionProgress(fu) || {}) : null;
+            return !!fp && (fp.accepted || fp.completed);
+          });
+          if (spent) continue;
+        }
+        // Some follow-up quests consume the item at a sub-flag well before they complete
+        // (e.g. lost_oracle.orbExchanged, svenson_love_story.plankDelivered). Also treat a
+        // fully-completed follow-up as consumed — the sub-flag may not have been persisted
+        // (old saves, dev completes), but a completed consuming quest definitely used it.
+        if (rule.removedByProgressFlag?.firebaseKey && rule.removedByProgressFlag?.field) {
+          const gate = allProgress?.[rule.removedByProgressFlag.firebaseKey];
+          if (gate && (gate[rule.removedByProgressFlag.field] || gate.completed)) continue;
         }
         const name = resolveQuestProductName(rule.productId);
         if (!name || getCachedQuestItemCount(name) > 0) continue;
@@ -8766,6 +9113,28 @@ function createNPCCooldownManager() {
       }
     } catch (error) {
       console.warn('[Quests Mod][Soul Cores] Backfill failed:', error);
+    }
+  }
+
+  // Bring the quest-item bag in line with current mission progress: strip items the
+  // player can't legitimately hold, strip items a later step already consumed, and
+  // grant back any earned reward that's missing. Same three passes as init
+  // (loadQuestItemsOnInit). Reused by the QuestsDev.* progress commands and exposed as
+  // QuestsDev.reconcile(). Does NOT grant accept-time items that quest handlers add
+  // inline (Map to the Mines, Obsidian Knife, Costello's diary, …).
+  async function reconcileQuestItemsFromProgress({ label = 'reconcile' } = {}) {
+    try {
+      await getQuestItems(false);
+      await cleanupInvalidQuestItems(getAllMissionProgress());
+      await cleanupStaleQuestItemsAfterCompletedMissions();
+      await backfillSoulCoresFromCompletedMissions();
+      if (typeof refreshQuestItemsModal === 'function') {
+        await refreshQuestItemsModal();
+      }
+      if (typeof syncActiveMissionTabs === 'function') syncActiveMissionTabs();
+      console.log(`[Quests Mod][Dev] Quest-item bag reconciled to progress (${label})`);
+    } catch (error) {
+      console.warn(`[Quests Mod][Dev] Quest-item reconcile failed (${label}):`, error);
     }
   }
 
@@ -8804,6 +9173,7 @@ function createNPCCooldownManager() {
       );
 
       cachedQuestItems = updatedProducts;
+      markQuestItemsCacheFresh();
       
       // Update tile 79 right-click state if function is available (quest items affect tile 79 access)
       if (typeof updateTile79RightClickState === 'function') {
@@ -8893,7 +9263,28 @@ function createNPCCooldownManager() {
       const progress = getAllMissionProgress();
       for (const rule of QUEST_ITEM_STALE_CLEANUP_RULES) {
         if (!rule?.productId || !rule?.missionId) continue;
-        const done = isCleanupRuleCompleted(progress, rule.missionId, rule.productId);
+        // `whenField`: strip the item once a named sub-flag is set, not only at full
+        // `.completed` — for items a later quest consumes mid-mission (svenson_love_story
+        // hand-ins, lost_oracle orb chain, hellgate bookGiven, …).
+        let done;
+        if (rule.whenField) {
+          const fbKey = MISSION_FIREBASE_KEY_MAP[rule.missionId];
+          const p = fbKey ? progress?.[fbKey] : null;
+          // sub-flag set, or the whole consuming mission finished (flag may be unpersisted)
+          done = !!(p && (p[rule.whenField] || p.completed));
+        } else {
+          done = isCleanupRuleCompleted(progress, rule.missionId, rule.productId);
+        }
+        // `alsoWhenMissionDone`: any downstream mission in the chain being accepted/completed
+        // also means the item was consumed — covers gappy saves where the direct consumer
+        // mission's flag/completion was never persisted.
+        if (!done && Array.isArray(rule.alsoWhenMissionDone)) {
+          done = rule.alsoWhenMissionDone.some((id) => {
+            const fb = MISSION_FIREBASE_KEY_MAP[id];
+            const dp = fb ? progress?.[fb] : null;
+            return !!dp && (dp.accepted || dp.completed);
+          });
+        }
         await maybeRemove(done, resolveQuestProductName(rule.productId));
       }
 
@@ -10422,6 +10813,36 @@ function createNPCCooldownManager() {
     return MissionManager.getProgress(mission);
   }
 
+  // Generic replacement for the mission-specific build<Quest>Progress(patch) helpers that
+  // used to be hand-duplicated per quest (buildSerpentineTowerProgress,
+  // buildHoneyflowerProgress, buildCrossingTheLineProgress, buildTaintedSoulsProgress,
+  // buildLostOracleProgress, ...): every one of them merged { accepted, completed, ...extra }
+  // as `patch.x ?? current.x ?? false`. `extraKeys` lists that quest's own progress flags
+  // (e.g. ['portalOpened', 'battleCompleted']) beyond the always-present accepted/completed.
+  function buildMissionProgressPatch(mission, extraKeys, patch = {}) {
+    const current = getMissionProgress(mission) || {};
+    const result = {
+      accepted: patch.accepted ?? current.accepted ?? false,
+      completed: patch.completed ?? current.completed ?? false
+    };
+    for (const key of extraKeys) {
+      result[key] = patch[key] ?? current[key] ?? false;
+    }
+    return result;
+  }
+
+  // Generic replacement for the per-quest is<Battle>CompletedPendingReward()/PendingThanks()
+  // checks (Hellgate Part 1, Hellgate Library, Apprentice Sheng, Lost Oracle, Weakened
+  // Archdemon, ...): victory only sets battleCompleted=true, and the actual reward/thanks is
+  // handed over on the next conversation with the quest's own NPC — so "pending" always means
+  // battleCompleted && !completed, optionally narrowed by a quest-specific extra condition
+  // (e.g. Lost Oracle also requires !oracleDismissed).
+  function isBattleCompletedPendingReward(mission, extraCondition = null) {
+    const progress = getMissionProgress(mission) || {};
+    if (!progress.battleCompleted || progress.completed) return false;
+    return extraCondition ? !!extraCondition(progress) : true;
+  }
+
   function setMissionProgress(mission, progress) {
     MissionManager.setProgress(mission, progress);
     if (questDialogueReady && progress?.accepted && !progress?.completed) {
@@ -11538,6 +11959,7 @@ function createNPCCooldownManager() {
     kingChatState.offeredMission = null;
     let awaitingLostOracleOrbConfirm = false;
     let awaitingIsleConfirm = false; // Isle of Solitude easter egg — pending "yes" to teleport
+    let awaitingMintwallinConfirm = false; // Visiting Mintwallin — pending "yes" to enter the prison
     
     // Close any existing modals first (like Autoscroller does)
     for (let i = 0; i < 2; i++) {
@@ -11837,6 +12259,7 @@ function createNPCCooldownManager() {
         );
 
         cachedQuestItems = updatedProducts;
+        markQuestItemsCacheFresh();
         NotificationService.showItemReceived('Stamped Letter', '[Quests Mod][King Tibianus]');
         console.log('[Quests Mod][King Tibianus] Exchanged Letter from Al Dee for Stamped Letter');
 
@@ -13284,6 +13707,132 @@ function createNPCCooldownManager() {
             'King Tibianus'
           );
           return;
+        }
+
+        // Visiting Mintwallin (the Mad Mage), Part 1. "mad mage" / "mintwallin" must be
+        // handled here, before the generic mission-keyword block below treats the word
+        // "mage" as a Crossing the Line query. Gated on holding the Mintwallin Prison Key
+        // and having finished the Realm of Dreams errand that produced it.
+        {
+          const hasPrisonKey = (cachedQuestItems && (cachedQuestItems['Mintwallin Prison Key'] || 0) > 0);
+          const realmDone = MissionManager.isCompleted(REALM_OF_DREAMS_MISSION);
+          const mintwallinProgress = getMissionProgress(VISITING_MINTWALLIN_MISSION) || {};
+          const canOfferMintwallin = hasPrisonKey && realmDone
+            && !mintwallinProgress.accepted && !mintwallinProgress.completed;
+          const mentionsMadMage = lowerText.includes('mad mage') || lowerText.includes('mintwallin');
+          const mentionsGenericMission = lowerText.includes('mission') || lowerText.includes('quest') || lowerText.includes('task');
+          // Generic "mission"/"quest" also routes to the Mad Mage Room quest — to offer it
+          // (eligible, not started) or, once accepted-and-unfinished, to re-send the player
+          // down to Mintwallin. Without this the King's "all missions completed" branch
+          // below swallows the request and the player has no way back to A Prisoner.
+          const mintwallinInProgress = mintwallinProgress.accepted && !mintwallinProgress.completed;
+          const triggerMintwallin = mentionsMadMage
+            || (mentionsGenericMission && (canOfferMintwallin || mintwallinInProgress));
+
+          // Post-battle: the Mad Mage's room is cleared — King Tibianus closes the mission.
+          if ((mentionsMadMage || mentionsGenericMission)
+            && mintwallinProgress.battleCompleted && !mintwallinProgress.completed) {
+            clearTextarea();
+            awaitingMintwallinConfirm = false;
+            try {
+              await persistMissionProgress(VISITING_MINTWALLIN_MISSION, {
+                accepted: true, completed: true, riddleSolved: true, battleCompleted: true
+              });
+              // The Mad Mage Room is cleared — both keys have served their purpose.
+              for (const keyName of ['Mad Mage Quest Key', 'Mintwallin Prison Key']) {
+                const removed = await consumeAllOfQuestItem(keyName);
+                if (removed > 0) NotificationService.showItemRemoved(keyName, '[Quests Mod][King Tibianus]');
+              }
+              const mintwallinCoins = VISITING_MINTWALLIN_MISSION.rewardCoins || 0;
+              if (mintwallinCoins > 0) {
+                await awardGuildCoins(mintwallinCoins);
+                await updateGuildCoinDisplay();
+              }
+              NotificationService.showQuestCompleted(
+                VISITING_MINTWALLIN_MISSION,
+                '[Quests Mod][King Tibianus]',
+                mintwallinCoins > 0 ? { rewardCoins: mintwallinCoins } : undefined
+              );
+              renderKingQuestUI();
+            } catch (err) {
+              console.error('[Quests Mod][King Tibianus] Error completing Mad Mage Room:', err);
+            }
+            tibianusCooldown.queueResponse(
+              text,
+              formatDialogueLine(
+                getMissionDialogueLine(VISITING_MINTWALLIN_MISSION, 'reward', "You went down into a minotaur city, out-talked a madman, and cleared a room that has killed better subjects than you. The crown does not forget such service, Player — take {coins} guild coins from the treasury with my thanks."),
+                { coins: VISITING_MINTWALLIN_MISSION.rewardCoins || 0 }
+              ),
+              addMessageToConversation,
+              'King Tibianus',
+              ModalHelpers.getFarewellCloseCallback(text)
+            );
+            return;
+          }
+
+          if (awaitingMintwallinConfirm) {
+            if (isAffirmativeReply(lowerText)) {
+              awaitingMintwallinConfirm = false;
+              clearTextarea();
+              if (!mintwallinProgress.accepted && VISITING_MINTWALLIN_MISSION) {
+                await startKingTibianusQuestForMission(VISITING_MINTWALLIN_MISSION);
+                NotificationService.showQuestAccepted(VISITING_MINTWALLIN_MISSION, '[Quests Mod][King Tibianus]');
+              }
+              tibianusCooldown.queueResponse(
+                text,
+                getMissionDialogueLine(VISITING_MINTWALLIN_MISSION, 'accept', 'Then go. Follow the pools of mud through the labyrinth. Hear what the Mad Mage says and bring it back to the crown.'),
+                addMessageToConversation,
+                'King Tibianus',
+                () => {
+                  setTimeout(() => {
+                    ModalHelpers.closeModal(0);
+                    enterMintwallinPrison();
+                  }, 2000);
+                }
+              );
+              return;
+            }
+            if (isNegativeReply(lowerText)) {
+              awaitingMintwallinConfirm = false;
+              clearTextarea();
+              tibianusCooldown.queueResponse(
+                text,
+                getMissionDialogueLine(VISITING_MINTWALLIN_MISSION, 'decline', 'Then the key stays cold in your pack and the Mad Mage keeps his secrets.'),
+                addMessageToConversation,
+                'King Tibianus',
+                ModalHelpers.getFarewellCloseCallback(text)
+              );
+              return;
+            }
+            awaitingMintwallinConfirm = false;
+          }
+
+          if (triggerMintwallin) {
+            clearTextarea();
+            if (mintwallinProgress.completed) {
+              tibianusCooldown.queueResponse(
+                text,
+                getMissionDialogueLine(VISITING_MINTWALLIN_MISSION, 'alreadyCompleted', 'You have already sat with the Mad Mage and heard his ravings. The crown thanks you for it.'),
+                addMessageToConversation,
+                'King Tibianus',
+                ModalHelpers.getFarewellCloseCallback(text)
+              );
+              return;
+            }
+            if (!hasPrisonKey) {
+              const noKeyLine = realmDone
+                ? getMissionDialogueLine(VISITING_MINTWALLIN_MISSION, 'noKey', 'Mintwallin is a minotaur city, not a place the crown sends its subjects to wander. Without the prison key cut for that cell there is nothing for you down there but horns and axes.')
+                : getMissionDialogueLine(VISITING_MINTWALLIN_MISSION, 'requiresRealmOfDreams', 'That key came out of a dragon’s graveyard by way of Tesha’s errand — finish what she set you to before you go opening cells beneath Mintwallin.');
+              tibianusCooldown.queueResponse(text, noKeyLine, addMessageToConversation, 'King Tibianus', ModalHelpers.getFarewellCloseCallback(text));
+              return;
+            }
+            const offerLine = mintwallinProgress.accepted
+              ? getMissionDialogueLine(VISITING_MINTWALLIN_MISSION, 'alreadyActive', 'The Mad Mage still waits in his cell beneath Mintwallin. Shall I send you back down to him?')
+              : getMissionDialogueLine(VISITING_MINTWALLIN_MISSION, 'offer', 'The Mad Mage rots in a cell beneath Mintwallin. Will you go down and speak with the prisoner?');
+            awaitingMintwallinConfirm = true;
+            tibianusCooldown.queueResponse(text, offerLine, addMessageToConversation, 'King Tibianus');
+            return;
+          }
         }
 
         // Quest items that only have a generic "take it to <NPC>" hint (e.g. the
@@ -15967,7 +16516,7 @@ function createNPCCooldownManager() {
           teshaCooldown.queueResponse(
             text,
             completed
-              ? getMissionDialogueLine(REALM_OF_DREAMS_MISSION, 'reward', "You put out a fire that guarded the dragon graveyard for an age, and the way to the Realm of Dreams is clear at last. While you were down among the bones, this turned up in the ashes — a Mintwallin Prison Key. It means nothing to me, but King Tibianus of Thais knows every lock in his realm. Take it to him and ask.")
+              ? getMissionDialogueLine(REALM_OF_DREAMS_MISSION, 'reward', "You put out a fire that guarded the dragon graveyard for an age, and the way to the Realm of Dreams is clear at last. While you were down among the bones, this turned up in the ashes — a Mintwallin Prison Key. It means nothing to me, but King Tibianus knows every lock in his realm. Take it to him and ask.")
               : getMissionCommonLine('errorGeneric', 'Something went wrong. Please try again.'),
             addMessage,
             'Tesha',
@@ -17359,14 +17908,21 @@ function createNPCCooldownManager() {
         rankCell.style.cssText = `min-width:0;text-align:center;font-variant-numeric:tabular-nums;color:${isCurrentPlayer ? 'rgb(230,215,176)' : 'rgb(255,255,255)'};`;
         rankCell.textContent = String(index + 1);
 
-        const nameLink = document.createElement('a');
-        nameLink.href = getArenaProfileUrl(playerName);
-        nameLink.target = '_blank';
-        nameLink.rel = 'noopener noreferrer';
+        // A rename orphans the old entry; until the prune pass removes it, show the stale
+        // name as plain dimmed text so nobody clicks through to a 404 profile.
+        const nameMissing = arenaLeaderboardNameStatus.get(String(playerName).toLowerCase()) === 'missing';
+        const nameLink = document.createElement(nameMissing ? 'span' : 'a');
+        if (!nameMissing) {
+          nameLink.href = getArenaProfileUrl(playerName);
+          nameLink.target = '_blank';
+          nameLink.rel = 'noopener noreferrer';
+          nameLink.title = `Open ${playerName}'s profile`;
+        } else {
+          nameLink.title = `${playerName} (renamed — profile no longer exists)`;
+        }
         nameLink.className = 'pixel-font-16';
-        nameLink.style.cssText = `margin:0;${ellipsisCellStyle}color:${isCurrentPlayer ? 'rgb(230,215,176)' : 'rgb(255,255,255)'};font-style:normal;cursor:pointer;text-decoration:underline;`;
+        nameLink.style.cssText = `margin:0;${ellipsisCellStyle}color:${nameMissing ? 'rgb(140,140,140)' : (isCurrentPlayer ? 'rgb(230,215,176)' : 'rgb(255,255,255)')};font-style:${nameMissing ? 'italic' : 'normal'};cursor:${nameMissing ? 'default' : 'pointer'};text-decoration:${nameMissing ? 'none' : 'underline'};`;
         nameLink.textContent = playerName;
-        nameLink.title = `Open ${playerName}'s profile`;
 
         const rankTitleCell = document.createElement('span');
         rankTitleCell.className = 'pixel-font-16';
@@ -19221,6 +19777,25 @@ function createNPCCooldownManager() {
             && !isleOfSolitudeBattle?.isRoomReloadInProgress?.()) {
             console.log('[Quests Mod][Overlay Hider] Leaving Isle of Solitude - clearing easter-egg scene (CustomBattle cleanup)');
             cleanupIsleOfSolitudeQuest();
+          }
+
+          // Visiting Mintwallin: player left the Sewers prison scene via the room picker
+          // instead of the tile-84 teleporter — tear the walk-around scene down.
+          if (lastOverlayHiderRoomName === MINTWALLIN_BATTLE_ROOM_NAME
+            && currentRoomName && currentRoomName !== MINTWALLIN_BATTLE_ROOM_NAME
+            && (playerEnteredMintwallinPrison || mintwallinPrisonBattle)
+            && !mintwallinPrisonBattle?.isRoomReloadInProgress?.()) {
+            console.log('[Quests Mod][Overlay Hider] Leaving Mintwallin Prison - clearing walk-around scene (CustomBattle cleanup)');
+            cleanupMintwallinPrisonQuest();
+          }
+
+          // Mad Mage Room: player left the Sewers battle scene via the room picker.
+          if (lastOverlayHiderRoomName === MAD_MAGE_BATTLE_ROOM_NAME
+            && currentRoomName && currentRoomName !== MAD_MAGE_BATTLE_ROOM_NAME
+            && (playerEnteredMadMageRoom || madMageRoomBattle)
+            && !madMageRoomBattle?.isRoomReloadInProgress?.()) {
+            console.log('[Quests Mod][Overlay Hider] Leaving Mad Mage Room - clearing battle scene (CustomBattle cleanup)');
+            cleanupMadMageRoomQuest();
           }
 
           // Draconia Tower: leaving the Sewers during the fight or the post-battle talk —
@@ -24223,7 +24798,7 @@ function createNPCCooldownManager() {
     if (!roomId) roomId = getRoomIdByRoomName(JAKUNDAF_BATTLE_ROOM_NAME);
     if (!roomId) {
       showToast({
-        message: TOAST_MESSAGES.jakundafDesertNotFound || 'Sewers battle room not found.',
+        message: TOAST_MESSAGES.jakundafDesertNotFound,
         logPrefix: BATTLE_TOAST_LOG.jakundafDesert || '[Quests Mod][Jakundaf Desert]'
       });
       return;
@@ -24272,7 +24847,7 @@ function createNPCCooldownManager() {
 
     globalThis.state.board.send({ type: 'selectRoomById', roomId });
     showToast({
-      message: TOAST_MESSAGES.enteringJakundafDesert || 'Entering the Jakundaf Desert path...',
+      message: TOAST_MESSAGES.enteringJakundafDesert,
       logPrefix
     });
   }
@@ -24424,13 +24999,11 @@ function createNPCCooldownManager() {
   }
 
   function buildTaintedSoulsProgress(patch = {}) {
-    const current = getMissionProgress(TAINTED_SOULS_MISSION) || {};
-    return {
-      accepted: patch.accepted ?? current.accepted ?? false,
-      completed: patch.completed ?? current.completed ?? false,
-      portalOpened: patch.portalOpened ?? current.portalOpened ?? false,
-      battleCompleted: patch.battleCompleted ?? current.battleCompleted ?? false
-    };
+    return buildMissionProgressPatch(
+      TAINTED_SOULS_MISSION,
+      ['portalOpened', 'battleCompleted'],
+      patch
+    );
   }
 
   function hasStuffedToadForEclipseCauldron() {
@@ -24738,7 +25311,7 @@ function createNPCCooldownManager() {
     const tileRestrictions = {};
     if (spawn.allowedTiles?.length) {
       tileRestrictions.allowedTiles = spawn.allowedTiles;
-      tileRestrictions.message = spawn.allowedTilesMessage || 'Ally creatures can only be placed on the marked tiles!';
+      tileRestrictions.message = spawn.allowedTilesMessage;
     }
     const config = {
       name: EKATRIX_BATTLE_DISPLAY_NAME || 'Ekatrix',
@@ -24779,8 +25352,6 @@ function createNPCCooldownManager() {
             else navigateToEclipseRoom();
           }, 100);
         },
-        victoryTitle: 'Victory!',
-        defeatTitle: 'Defeat',
         victoryMessage: getMissionDialogueLine(
           TAINTED_SOULS_MISSION,
           'battleVictory',
@@ -25252,7 +25823,7 @@ function createNPCCooldownManager() {
     const tileRestrictions = {};
     if (spawn.allowedTiles?.length) {
       tileRestrictions.allowedTiles = spawn.allowedTiles;
-      tileRestrictions.message = spawn.allowedTilesMessage || 'Ally creatures can only be placed on the marked tiles!';
+      tileRestrictions.message = spawn.allowedTilesMessage;
     }
     const config = {
       name: SEWERS_BATTLE_DISPLAY_NAME || 'Knarknaknork',
@@ -25285,8 +25856,6 @@ function createNPCCooldownManager() {
           cleanupSewersQuest();
           setTimeout(() => navigateToKatanaQuest(), 100);
         },
-        victoryTitle: 'Victory!',
-        defeatTitle: 'Defeat',
         victoryMessage: getMissionDialogueLine(
           AL_DEE_ROOKIE_GUARD_MISSION,
           'battleVictory',
@@ -25511,7 +26080,7 @@ function createNPCCooldownManager() {
     // Puts the board into sandbox mode (required for activationCheck's isSandbox check)
     // and spawns the custom villains onto the room tiles, with retries for remounts.
     sewersBattle.scheduleEntryVillainSetup({
-      attemptDelays: [0, 100, 250, 500, 800, 1200],
+      attemptDelays: VILLAIN_SETUP_ATTEMPT_DELAYS_MS,
       isActiveCheck: () => playerEnteredSewersPortal,
       onComplete: () => {
         hideQuestOverlays();
@@ -25530,7 +26099,7 @@ function createNPCCooldownManager() {
     let roomId = SEWERS_BATTLE_ROOM_ID || getRoomIdByRoomName(SEWERS_BATTLE_ROOM_NAME);
     if (!roomId) roomId = getRoomIdByRoomName(SEWERS_BATTLE_ROOM_NAME);
     if (!roomId) {
-      showToast({ message: 'The sewers could not be found.', logPrefix: getRookieGuardLogPrefix() });
+      showToast({ message: TOAST_MESSAGES.roomNotFound('The sewers'), variant: 'nothing', logPrefix: getRookieGuardLogPrefix() });
       return;
     }
 
@@ -25553,7 +26122,7 @@ function createNPCCooldownManager() {
     }
 
     globalThis.state.board.send({ type: 'selectRoomById', roomId });
-    showToast({ message: 'Stepping through the portal...', logPrefix: getRookieGuardLogPrefix() });
+    showToast({ message: TOAST_MESSAGES.steppingThroughPortal, logPrefix: getRookieGuardLogPrefix() });
   }
 
   function closeSewersPortalContextMenu() {
@@ -25709,7 +26278,7 @@ function createNPCCooldownManager() {
     const tileRestrictions = {};
     if (spawn.allowedTiles?.length) {
       tileRestrictions.allowedTiles = spawn.allowedTiles;
-      tileRestrictions.message = spawn.allowedTilesMessage || 'Ally creatures can only be placed on the marked tiles!';
+      tileRestrictions.message = spawn.allowedTilesMessage;
     }
     const config = {
       name: HELLGATE_BATTLE_DISPLAY_NAME || 'Hellgate Treasure Room',
@@ -25744,8 +26313,6 @@ function createNPCCooldownManager() {
           cleanupHellgateTreasureRoomQuest();
           setTimeout(() => navigateToHedgeMazeFromHellgate(), 100);
         },
-        victoryTitle: 'Victory!',
-        defeatTitle: 'Defeat',
         victoryMessage: getMissionDialogueLine(
           HELLGATE_PART_1_MISSION,
           'battleVictory',
@@ -25767,8 +26334,7 @@ function createNPCCooldownManager() {
   // victory only sets battleCompleted, the actual reward is handed over on the next
   // conversation with the quest's own NPC.
   function isHellgateBattleCompletedPendingReward() {
-    const progress = getMissionProgress(HELLGATE_PART_1_MISSION);
-    return !!progress?.battleCompleted && !progress?.completed;
+    return isBattleCompletedPendingReward(HELLGATE_PART_1_MISSION);
   }
 
   async function completeHellgatePart1MissionWithBook() {
@@ -26222,7 +26788,7 @@ function createNPCCooldownManager() {
     // Puts the board into sandbox mode (required for activationCheck's isSandbox check)
     // and spawns the custom villains onto the room tiles, with retries for remounts.
     hellgateBattle.scheduleEntryVillainSetup({
-      attemptDelays: [0, 100, 250, 500, 800, 1200],
+      attemptDelays: VILLAIN_SETUP_ATTEMPT_DELAYS_MS,
       isActiveCheck: () => playerFollowedElathrielToHellgate,
       onComplete: () => {
         hideQuestOverlays();
@@ -26239,7 +26805,7 @@ function createNPCCooldownManager() {
     let roomId = HELLGATE_BATTLE_ROOM_ID || getRoomIdByRoomName(HELLGATE_BATTLE_ROOM_NAME);
     if (!roomId) roomId = getRoomIdByRoomName(HELLGATE_BATTLE_ROOM_NAME);
     if (!roomId) {
-      showToast({ message: 'The Hellgate treasure room could not be found.', logPrefix: getHellgateLogPrefix() });
+      showToast({ message: TOAST_MESSAGES.roomNotFound('The Hellgate treasure room'), variant: 'nothing', logPrefix: getHellgateLogPrefix() });
       return;
     }
 
@@ -26262,7 +26828,7 @@ function createNPCCooldownManager() {
     }
 
     globalThis.state.board.send({ type: 'selectRoomById', roomId });
-    showToast({ message: 'Following Elathriel into the treasure room...', logPrefix: getHellgateLogPrefix() });
+    showToast({ message: TOAST_MESSAGES.enteringWithElathriel('the treasure room'), logPrefix: getHellgateLogPrefix() });
   }
 
   // =======================
@@ -26513,7 +27079,7 @@ function createNPCCooldownManager() {
     const tileRestrictions = {};
     if (spawn.allowedTiles?.length) {
       tileRestrictions.allowedTiles = spawn.allowedTiles;
-      tileRestrictions.message = spawn.allowedTilesMessage || 'Ally creatures can only be placed on the marked tiles!';
+      tileRestrictions.message = spawn.allowedTilesMessage;
     }
     const config = {
       name: HELLGATE_LIBRARY_BATTLE_DISPLAY_NAME || 'Hellgate Library',
@@ -26542,8 +27108,6 @@ function createNPCCooldownManager() {
           cleanupHellgateLibraryQuest();
           setTimeout(() => navigateToHedgeMazeFromHellgate(), 100);
         },
-        victoryTitle: 'Victory!',
-        defeatTitle: 'Defeat',
         victoryMessage: getMissionDialogueLine(
           HELLGATE_LIBRARY_MISSION,
           'battleVictory',
@@ -26562,8 +27126,7 @@ function createNPCCooldownManager() {
   }
 
   function isHellgateLibraryBattleCompletedPendingReward() {
-    const progress = getMissionProgress(HELLGATE_LIBRARY_MISSION);
-    return !!progress?.battleCompleted && !progress?.completed;
+    return isBattleCompletedPendingReward(HELLGATE_LIBRARY_MISSION);
   }
 
   async function completeHellgateLibraryMissionWithMushroom() {
@@ -26642,7 +27205,7 @@ function createNPCCooldownManager() {
       logPrefix: getHellgateLibraryLogPrefix()
     });
     battle.scheduleEntryVillainSetup({
-      attemptDelays: [0, 100, 250, 500, 800, 1200],
+      attemptDelays: VILLAIN_SETUP_ATTEMPT_DELAYS_MS,
       isActiveCheck: () => playerEnteredHellgateLibrary,
       onComplete: () => {
         hideQuestOverlays();
@@ -26663,7 +27226,7 @@ function createNPCCooldownManager() {
     }
     const roomId = HELLGATE_LIBRARY_BATTLE_ROOM_ID || getRoomIdByRoomName(HELLGATE_LIBRARY_BATTLE_ROOM_NAME);
     if (!roomId) {
-      showToast({ message: 'The Hellgate Library could not be found.', logPrefix: getHellgateLibraryLogPrefix() });
+      showToast({ message: TOAST_MESSAGES.roomNotFound('The Hellgate Library'), variant: 'nothing', logPrefix: getHellgateLibraryLogPrefix() });
       return;
     }
     try {
@@ -26705,7 +27268,7 @@ function createNPCCooldownManager() {
     let roomId = HELLGATE_LIBRARY_BATTLE_ROOM_ID || getRoomIdByRoomName(HELLGATE_LIBRARY_BATTLE_ROOM_NAME);
     if (!roomId) roomId = getRoomIdByRoomName(HELLGATE_LIBRARY_BATTLE_ROOM_NAME);
     if (!roomId) {
-      showToast({ message: 'The Hellgate Library could not be found.', logPrefix: getHellgateLibraryLogPrefix() });
+      showToast({ message: TOAST_MESSAGES.roomNotFound('The Hellgate Library'), variant: 'nothing', logPrefix: getHellgateLibraryLogPrefix() });
       return;
     }
 
@@ -26744,14 +27307,14 @@ function createNPCCooldownManager() {
     updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
 
     if (skipToBattle) {
-      showToast({ message: 'The librarian is still waiting. No more words.', logPrefix: getHellgateLibraryLogPrefix() });
+      showToast({ message: TOAST_MESSAGES.bonelordLibrarianWaiting, logPrefix: getHellgateLibraryLogPrefix() });
       // Instance is already up from the sync path above (unless CustomBattles was still
       // loading, handled in the async branch) — spawn the villains straight away.
       if (hellgateLibraryBattle && !hellgateLibraryBattleStarted) startHellgateLibraryBattle();
       return;
     }
 
-    showToast({ message: 'Following Elathriel down into the library...', logPrefix: getHellgateLibraryLogPrefix() });
+    showToast({ message: TOAST_MESSAGES.enteringWithElathriel('the library'), logPrefix: getHellgateLibraryLogPrefix() });
   }
 
   // =======================
@@ -26970,7 +27533,7 @@ function createNPCCooldownManager() {
       if (now < deadline && typeof requestAnimationFrame === 'function') requestAnimationFrame(rafPaint);
     };
     if (typeof requestAnimationFrame === 'function') requestAnimationFrame(rafPaint);
-    [150, 400, 900, 1600].forEach((d) => setTimeout(paint, d));
+    SCENE_SYNC_REPAINT_DELAYS_MS.forEach((d) => setTimeout(paint, d));
     if (!globalThis.state?.board?.subscribe) return;
     isleSceneSub = globalThis.state.board.subscribe(() => {
       if (!playerEnteredIsleOfSolitude) {
@@ -27054,7 +27617,7 @@ function createNPCCooldownManager() {
     let roomId = ISLE_BATTLE_ROOM_ID || getRoomIdByRoomName(ISLE_BATTLE_ROOM_NAME);
     if (!roomId) roomId = getRoomIdByRoomName(ISLE_BATTLE_ROOM_NAME);
     if (!roomId) {
-      showToast({ message: 'The Isle of Solitude could not be found.', logPrefix: getIsleLogPrefix() });
+      showToast({ message: TOAST_MESSAGES.roomNotFound('The Isle of Solitude'), variant: 'nothing', logPrefix: getIsleLogPrefix() });
       return;
     }
 
@@ -27094,7 +27657,7 @@ function createNPCCooldownManager() {
     clearIsleBoardPieces();
     enableIsleTeleporterRightClick();
     updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
-    showToast({ message: 'You step onto the Isle of Solitude. Right-click the teleporter on the ladder to leave.', logPrefix: getIsleLogPrefix() });
+    showToast({ message: TOAST_MESSAGES.isleEntered, logPrefix: getIsleLogPrefix() });
   }
 
   // Leaves the isle and returns the player to the room they came from (captured on entry).
@@ -27202,6 +27765,566 @@ function createNPCCooldownManager() {
   });
 
   // =======================
+  // Visiting Mintwallin (the Mad Mage), Part 1 — King Tibianus grants passage into the
+  // Sewers re-skinned as the prison beneath Mintwallin. No mission battle: a walk-around
+  // scene. An empty CustomBattle is stood up purely so the board clears and the Sewers
+  // quest overlays suppress themselves (same trick as the Isle of Solitude easter egg,
+  // which this mirrors line-for-line). A Prisoner is placed by the Board NPC system on
+  // tile 81 while playerEnteredMintwallinPrison is true. Right-click the teleporter on
+  // tile 84 to return to the room the player was in when they asked the King.
+  // =======================
+
+  function getMintwallinLogPrefix() {
+    return '[Quests Mod][Mintwallin Prison]';
+  }
+
+  function buildMintwallinMutationSpriteHTML(entry, mutationKey) {
+    const spriteId = entry?.spriteId;
+    if (spriteId == null) return '';
+    const cropX = entry.cropX != null ? entry.cropX : 0;
+    const cropY = entry.cropY != null ? entry.cropY : 0;
+    const cropped = entry.cropped ? 'true' : 'false';
+    const bankStyle = entry.bank != null ? ` --bank: ${entry.bank};` : '';
+    const rightCalc = formatHellgateMutationOffsetCalc(entry.offsetX);
+    const bottomCalc = formatHellgateMutationOffsetCalc(entry.offsetY);
+    const offsetStyle = `${rightCalc ? ` right: ${rightCalc};` : ''}${bottomCalc ? ` bottom: ${bottomCalc};` : ''}`;
+    return `<div class="sprite item relative id-${spriteId}" ${QUEST_BOARD_ADDED_ATTR_MINTWALLIN}="1" data-quests-mintwallin-mutation-key="${mutationKey}" style="z-index: 1000;${bankStyle}${offsetStyle}"><div class="viewport"><img alt="${spriteId}" data-cropped="${cropped}" class="spritesheet" style="--cropX: ${cropX}; --cropY: ${cropY};"></div></div>`;
+  }
+
+  // Shares rkswrs with Hellgate / Isle, so getHellgateRoomRefs() resolves the live refs.
+  function getMintwallinHitboxDataRefs() {
+    return getHellgateRoomRefs()
+      .map((room) => room?.file?.data)
+      .filter((data) => data && Array.isArray(data.hitboxes));
+  }
+
+  function applyMintwallinTileMutations() {
+    const mutations = MINTWALLIN_TILE_MUTATIONS;
+    if (!mutations || typeof mutations !== 'object') return;
+
+    if (mintwallinHitboxSnapshot == null) {
+      const live = mintwallinPrisonBattle?.getRoomHitboxesArray?.()
+        || getMintwallinHitboxDataRefs()[0]?.hitboxes;
+      if (Array.isArray(live) && live.length) mintwallinHitboxSnapshot = live.slice();
+    }
+
+    let wroteHitboxes = false;
+    Object.entries(mutations).forEach(([tileKey, entry]) => {
+      const tileIndex = Number(tileKey);
+      if (!Number.isFinite(tileIndex) || !entry || typeof entry !== 'object') return;
+      const tile = getTileElement(tileIndex);
+
+      (entry.remove || []).forEach((spriteId) => {
+        if (spriteId == null || !tile) return;
+        tile.querySelectorAll(`.sprite.item.relative.id-${spriteId}`).forEach((sprite) => {
+          hideQuestBoardElement(sprite, { tag: QUEST_BOARD_HIDDEN_TAG_MINTWALLIN });
+        });
+      });
+
+      (entry.add || []).forEach((spriteEntry, spriteIndex) => {
+        const spriteId = spriteEntry?.spriteId;
+        if (spriteId == null || !tile) return;
+        const mutationKey = `${tileIndex}-${spriteIndex}`;
+        if (tile.querySelector(`[data-quests-mintwallin-mutation-key="${mutationKey}"]`)) return;
+        const wrap = document.createElement('div');
+        wrap.innerHTML = buildMintwallinMutationSpriteHTML(spriteEntry, mutationKey);
+        if (wrap.firstElementChild) tile.appendChild(wrap.firstElementChild);
+      });
+
+      if (Array.isArray(entry.floorBelow) && entry.floorBelow.length) {
+        applyQuestFloorBelowSprites(
+          tileIndex, entry.floorBelow, QUEST_BOARD_ADDED_ATTR_MINTWALLIN, 'data-quests-mintwallin-fb-key'
+        );
+      }
+
+      if (Object.prototype.hasOwnProperty.call(entry, 'hitbox')) {
+        try {
+          getMintwallinHitboxDataRefs().forEach((data) => {
+            data.hitboxes[tileIndex] = entry.hitbox === true;
+            wroteHitboxes = true;
+          });
+        } catch (_) {}
+      }
+    });
+
+    if (wroteHitboxes) {
+      mintwallinPrisonHitboxesApplied = true;
+      mintwallinPrisonBattle?.bumpSelectedRoomFileIdentity?.();
+    }
+  }
+
+  function restoreMintwallinTileMutations() {
+    restoreQuestBoardElementsByTag(QUEST_BOARD_HIDDEN_TAG_MINTWALLIN);
+    document.querySelectorAll(`[${QUEST_BOARD_ADDED_ATTR_MINTWALLIN}="1"]`).forEach((el) => {
+      try { el.remove(); } catch (_) {}
+    });
+
+    if (Array.isArray(mintwallinHitboxSnapshot) && mintwallinHitboxSnapshot.length) {
+      const snap = mintwallinHitboxSnapshot;
+      if (mintwallinPrisonBattle?.writeHitboxesInPlace) {
+        mintwallinPrisonBattle.writeHitboxesInPlace(snap);
+      } else {
+        getMintwallinHitboxDataRefs().forEach((data) => {
+          const t = data.hitboxes;
+          for (let i = 0; i < snap.length; i += 1) t[i] = snap[i];
+          if (t.length > snap.length) t.length = snap.length;
+        });
+        mintwallinPrisonBattle?.bumpSelectedRoomFileIdentity?.();
+      }
+    }
+    mintwallinHitboxSnapshot = null;
+    mintwallinPrisonHitboxesApplied = false;
+  }
+
+  function clearMintwallinBoardPieces() {
+    try {
+      const cfg = globalThis.state?.board?.getSnapshot?.()?.context?.boardConfig;
+      if (!Array.isArray(cfg) || cfg.length === 0) return;
+      globalThis.state.board.send({
+        type: 'setState',
+        fn: (prev) => ({ ...prev, boardConfig: [] })
+      });
+    } catch (_) {}
+  }
+
+  function stopMintwallinSceneSync() {
+    if (mintwallinSceneSub) {
+      try { mintwallinSceneSub.unsubscribe?.(); } catch (_) {}
+      mintwallinSceneSub = null;
+    }
+  }
+
+  function startMintwallinSceneSync() {
+    stopMintwallinSceneSync();
+    const paint = () => {
+      if (playerEnteredMintwallinPrison && isOnRoomByName(MINTWALLIN_BATTLE_ROOM_NAME)) {
+        applyMintwallinTileMutations();
+        clearMintwallinBoardPieces();
+      }
+    };
+    paint();
+    const deadline = (typeof performance !== 'undefined' ? performance.now() : Date.now()) + 800;
+    const rafPaint = () => {
+      if (!playerEnteredMintwallinPrison) return;
+      paint();
+      const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      if (now < deadline && typeof requestAnimationFrame === 'function') requestAnimationFrame(rafPaint);
+    };
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(rafPaint);
+    SCENE_SYNC_REPAINT_DELAYS_MS.forEach((d) => setTimeout(paint, d));
+    if (!globalThis.state?.board?.subscribe) return;
+    mintwallinSceneSub = globalThis.state.board.subscribe(() => {
+      if (!playerEnteredMintwallinPrison) {
+        stopMintwallinSceneSync();
+        return;
+      }
+      paint();
+    });
+  }
+
+  function restoreBoardSetupMintwallin() {
+    if (mintwallinPrisonBattle) mintwallinPrisonBattle.restoreBoardSetup();
+    restoreMintwallinTileMutations();
+  }
+
+  function cleanupMintwallinPrisonQuest() {
+    try {
+      removeCustomBattleStatusToast();
+      stopMintwallinSceneSync();
+      disableMintwallinTeleporterRightClick();
+      playerEnteredMintwallinPrison = false;
+      restoreMintwallinTileMutations();
+      if (mintwallinPrisonBattle) {
+        mintwallinPrisonBattle.cleanup(restoreBoardSetupMintwallin, showQuestOverlays);
+        mintwallinPrisonBattle = null;
+        console.log(`${getMintwallinLogPrefix()} Battle cleaned up`);
+      }
+      showQuestOverlays();
+      updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+      if (typeof refreshQuestTileHighlights === 'function') refreshQuestTileHighlights();
+    } catch (error) {
+      console.error(`${getMintwallinLogPrefix()} Error cleaning up:`, error);
+    }
+  }
+
+  function createMintwallinBattleInstance(roomId) {
+    if (!window.CustomBattles) {
+      console.error(`${getMintwallinLogPrefix()} CustomBattles still not available`);
+      return null;
+    }
+    const spawn = getHydratedQuestBattleSpawn(MINTWALLIN_BATTLE_ID || 'mintwallin_prison');
+    const config = {
+      name: MINTWALLIN_BATTLE_DISPLAY_NAME || 'Mintwallin Prison',
+      roomId,
+      villains: [],
+      allyLimit: spawn.allyLimit ?? 1,
+      preventVillainMovement: spawn.preventVillainMovement !== false,
+      hideVillainSprites: spawn.hideVillainSprites !== false,
+      activationCheck: (isSandbox, inBattleArea) => isSandbox && inBattleArea && playerEnteredMintwallinPrison
+    };
+    return window.CustomBattles.create(config);
+  }
+
+  function initializeMintwallinBattle(roomId) {
+    if (window.CustomBattles) return createMintwallinBattleInstance(roomId);
+    return waitForCustomBattles({ logPrefix: getMintwallinLogPrefix() }).then((api) => {
+      if (!api) return null;
+      return createMintwallinBattleInstance(roomId);
+    });
+  }
+
+  function setupMintwallinPreBattle(battle) {
+    if (!battle) return false;
+    mintwallinPrisonBattle = battle;
+    mintwallinPrisonBattle.setup(
+      () => playerEnteredMintwallinPrison,
+      NotificationService.createBattleToastCallback(getMintwallinLogPrefix())
+    );
+    mintwallinPrisonBattle.resetSandboxBattleState();
+    mintwallinPrisonBattle.setupAllyLimit?.(
+      () => playerEnteredMintwallinPrison,
+      NotificationService.createBattleToastCallback(getMintwallinLogPrefix())
+    );
+    mintwallinPrisonBattle.startPersistentVisualSync(applyMintwallinTileMutations, {
+      isActiveCheck: () => playerEnteredMintwallinPrison
+    });
+    return true;
+  }
+
+  function enterMintwallinPrison() {
+    if (playerEnteredMintwallinPrison) return;
+    let roomId = MINTWALLIN_BATTLE_ROOM_ID || getRoomIdByRoomName(MINTWALLIN_BATTLE_ROOM_NAME);
+    if (!roomId) roomId = getRoomIdByRoomName(MINTWALLIN_BATTLE_ROOM_NAME);
+    if (!roomId) {
+      showToast({ message: TOAST_MESSAGES.roomNotFound('The way down to Mintwallin'), variant: 'nothing', logPrefix: getMintwallinLogPrefix() });
+      return;
+    }
+
+    mintwallinReturnRoomId = globalThis.state?.board?.getSnapshot?.()?.context?.selectedMap?.selectedRoom?.id
+      || globalThis.state?.board?.getSnapshot?.()?.context?.selectedRoomId
+      || getRoomIdByRoomName('Rookgaard')
+      || null;
+
+    playerEnteredMintwallinPrison = true;
+    mintwallinHitboxSnapshot = null;
+    if (mintwallinPrisonBattle) {
+      mintwallinPrisonBattle.cleanup(restoreBoardSetupMintwallin, showQuestOverlays);
+      mintwallinPrisonBattle = null;
+    }
+
+    globalThis.state.board.send({ type: 'selectRoomById', roomId });
+    startMintwallinSceneSync();
+
+    const initResult = initializeMintwallinBattle(roomId);
+    if (initResult && typeof initResult.then === 'function') {
+      initResult.then((battle) => {
+        if (playerEnteredMintwallinPrison && !mintwallinPrisonBattle) {
+          setupMintwallinPreBattle(battle);
+          hideQuestOverlays();
+          hideHeroEditorButton();
+          clearMintwallinBoardPieces();
+        }
+      }).catch((error) => console.error(`${getMintwallinLogPrefix()} Error initializing prison instance:`, error));
+    } else if (initResult) {
+      setupMintwallinPreBattle(initResult);
+    }
+
+    hideQuestOverlays();
+    hideHeroEditorButton();
+    clearMintwallinBoardPieces();
+    enableMintwallinTeleporterRightClick();
+    updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+    if (typeof refreshQuestTileHighlights === 'function') refreshQuestTileHighlights();
+    showToast({ message: TOAST_MESSAGES.mintwallinPrisonEntered, logPrefix: getMintwallinLogPrefix() });
+  }
+
+  function leaveMintwallinPrison() {
+    // Once the Mad Mage's riddle is solved (and his room not yet cleared), the tile-84
+    // teleporter opens onto the Mad Mage's room battle instead of sending the player home.
+    const vmProgress = getMissionProgress(VISITING_MINTWALLIN_MISSION) || {};
+    if (vmProgress.riddleSolved && !vmProgress.battleCompleted && !vmProgress.completed) {
+      const returnTo = mintwallinReturnRoomId;
+      console.log(`${getMintwallinLogPrefix()} Teleporter used — riddle solved, opening the Mad Mage's room`);
+      cleanupMintwallinPrisonQuest();
+      mintwallinReturnRoomId = null;
+      setTimeout(() => enterMadMageRoom(returnTo), 80);
+      return;
+    }
+    const back = mintwallinReturnRoomId || getRoomIdByRoomName('Rookgaard');
+    console.log(`${getMintwallinLogPrefix()} Teleporter used on tile ${MINTWALLIN_TELEPORTER_TILE_INDEX} — returning to room ${back || '(unknown)'}`);
+    cleanupMintwallinPrisonQuest();
+    mintwallinReturnRoomId = null;
+    if (back) {
+      setTimeout(() => {
+        try { globalThis.state.board.send({ type: 'selectRoomById', roomId: back }); } catch (_) {}
+      }, 60);
+    }
+  }
+
+  function isMintwallinTeleporterActive() {
+    return playerEnteredMintwallinPrison && isOnRoomByName(MINTWALLIN_BATTLE_ROOM_NAME);
+  }
+
+  function closeMintwallinTeleporterContextMenu() {
+    if (mintwallinTeleporterContextMenu && mintwallinTeleporterContextMenu.closeMenu) {
+      mintwallinTeleporterContextMenu.closeMenu();
+    }
+    mintwallinTeleporterContextMenu = null;
+  }
+
+  function createMintwallinTeleporterContextMenu(x, y, anchorElement = null) {
+    closeMintwallinTeleporterContextMenu();
+    const vmProgress = getMissionProgress(VISITING_MINTWALLIN_MISSION) || {};
+    const opensMadMageRoom = vmProgress.riddleSolved && !vmProgress.battleCompleted && !vmProgress.completed;
+    const label = opensMadMageRoom ? "Enter the Mad Mage's room" : 'Leave the prison';
+    mintwallinTeleporterContextMenu = createContextMenu({
+      x,
+      y,
+      layout: 'center',
+      logPrefix: getMintwallinLogPrefix(),
+      anchorElement: anchorElement || getTileElement(MINTWALLIN_TELEPORTER_TILE_INDEX),
+      buttons: [
+        {
+          text: label,
+          width: '180px',
+          backgroundColor: '#2a4a2a',
+          color: '#4CAF50',
+          border: '1px solid #4CAF50',
+          hoverBackgroundColor: '#1a2a1a',
+          hoverBorderColor: '#66BB6A',
+          onClick: () => {
+            closeMintwallinTeleporterContextMenu();
+            leaveMintwallinPrison();
+          }
+        }
+      ],
+      onClose: () => { mintwallinTeleporterContextMenu = null; }
+    });
+    return mintwallinTeleporterContextMenu;
+  }
+
+  function handleMintwallinTeleporterRightClickDocument(event) {
+    if (!isMintwallinTeleporterActive()) return;
+    const tile = getTileElement(MINTWALLIN_TELEPORTER_TILE_INDEX);
+    if (!tile) return;
+    const clickedTile = tile.contains(event.target);
+    const clickedOwnHighlightOverlay = typeof isQuestTileHighlightOverlay === 'function'
+      && isQuestTileHighlightOverlay(event.target)
+      && event.target.closest('[id^="tile-index-"]') === tile;
+    if (!clickedTile && !clickedOwnHighlightOverlay) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    event.stopPropagation();
+    createMintwallinTeleporterContextMenu(event.clientX, event.clientY, tile);
+  }
+
+  function enableMintwallinTeleporterRightClick() {
+    if (mintwallinTeleporterRightClickEnabled) return;
+    document.addEventListener('contextmenu', handleMintwallinTeleporterRightClickDocument, true);
+    mintwallinTeleporterRightClickEnabled = true;
+    const tile = getTileElement(MINTWALLIN_TELEPORTER_TILE_INDEX);
+    if (tile) tile.style.pointerEvents = 'auto';
+  }
+
+  function disableMintwallinTeleporterRightClick() {
+    closeMintwallinTeleporterContextMenu();
+    if (!mintwallinTeleporterRightClickEnabled) return;
+    document.removeEventListener('contextmenu', handleMintwallinTeleporterRightClickDocument, true);
+    mintwallinTeleporterRightClickEnabled = false;
+    const tile = getTileElement(MINTWALLIN_TELEPORTER_TILE_INDEX);
+    if (tile) tile.style.pointerEvents = '';
+  }
+
+  // ---- Mad Mage Room (Part 2 battle) ----------------------------------------------------
+  const madMageRoomQuest = createTeleportBattleQuest({
+    id: 'mad-mage-room',
+    logPrefix: '[Quests Mod][Mad Mage Room]',
+    addedAttr: QUEST_BOARD_ADDED_ATTR_MAD_MAGE,
+    hiddenTag: QUEST_BOARD_HIDDEN_TAG_MAD_MAGE,
+    mutationKeyAttr: 'data-quests-mad-mage-mutation-key',
+    floorBelowKeyAttr: 'data-quests-mad-mage-fb-key',
+    getTileMutations: () => MAD_MAGE_TILE_MUTATIONS,
+    isEntered: () => playerEnteredMadMageRoom,
+    getBattle: () => madMageRoomBattle,
+    getSceneSub: () => madMageRoomSceneSub,
+    setSceneSub: (v) => { madMageRoomSceneSub = v; },
+    setHitboxesApplied: (v) => { madMageRoomHitboxesApplied = v; },
+    roomName: () => MAD_MAGE_BATTLE_ROOM_NAME
+  });
+
+  function getMadMageRoomLogPrefix() { return madMageRoomQuest.getLogPrefix(); }
+  function applyMadMageRoomTileMutations() { madMageRoomQuest.applyTileMutations(); }
+  function restoreMadMageRoomTileMutations() { madMageRoomQuest.restoreTileMutations(); }
+  function stopMadMageRoomSceneSync() { madMageRoomQuest.stopSceneSync(); }
+  function startMadMageRoomSceneSync() { madMageRoomQuest.startSceneSync(); }
+  function restoreBoardSetupMadMageRoom() { madMageRoomQuest.restoreBoardSetup(); }
+
+  function cleanupMadMageRoomQuest() {
+    try {
+      removeCustomBattleStatusToast();
+      stopMadMageRoomSceneSync();
+      playerEnteredMadMageRoom = false;
+      restoreMadMageRoomTileMutations();
+      if (madMageRoomBattle) {
+        madMageRoomBattle.cleanup(restoreBoardSetupMadMageRoom, showQuestOverlays);
+        madMageRoomBattle = null;
+        console.log(`${getMadMageRoomLogPrefix()} Battle cleaned up`);
+      }
+      showQuestOverlays();
+      updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+    } catch (error) {
+      console.error(`${getMadMageRoomLogPrefix()} Error cleaning up:`, error);
+    }
+  }
+
+  function navigateToMadMageReturnRoom(explicitRoomId) {
+    try {
+      const roomId = explicitRoomId
+        || getRoomIdByRoomName(MAD_MAGE_RETURN_ROOM_NAME)
+        || getRoomIdByRoomName('Rookgaard');
+      if (roomId) globalThis.state.board.send({ type: 'selectRoomById', roomId });
+    } catch (error) {
+      console.error(`${getMadMageRoomLogPrefix()} Error navigating home:`, error);
+    }
+  }
+
+  function returnFromMadMageRoom(explicitRoomId) {
+    showToast({
+      message: TOAST_MESSAGES.madMageRoomCleared,
+      logPrefix: getMadMageRoomLogPrefix()
+    });
+    cleanupMadMageRoomQuest();
+    setTimeout(() => navigateToMadMageReturnRoom(explicitRoomId), 100);
+  }
+
+  function createMadMageRoomBattleInstance(roomId, returnRoomId) {
+    if (!window.CustomBattles) {
+      console.error(`${getMadMageRoomLogPrefix()} CustomBattles still not available`);
+      return null;
+    }
+    const spawn = getHydratedQuestBattleSpawn(MAD_MAGE_BATTLE_ID || 'mad_mage_room');
+    const tileRestrictions = {};
+    if (spawn.allowedTiles?.length) {
+      tileRestrictions.allowedTiles = spawn.allowedTiles;
+      tileRestrictions.message = spawn.allowedTilesMessage;
+    }
+    const config = {
+      name: MAD_MAGE_BATTLE_DISPLAY_NAME || "The Mad Mage's Room",
+      roomId,
+      villains: spawn.villains,
+      allyLimit: spawn.allyLimit ?? 6,
+      preventVillainMovement: spawn.preventVillainMovement !== false,
+      hideVillainSprites: spawn.hideVillainSprites !== false,
+      ...(Object.keys(tileRestrictions).length ? { tileRestrictions } : {}),
+      activationCheck: (isSandbox, inBattleArea) => isSandbox && inBattleArea && playerEnteredMadMageRoom,
+      victoryDefeat: {
+        onVictory: async () => {
+          try {
+            await persistMissionProgress(VISITING_MINTWALLIN_MISSION, {
+              accepted: true, completed: false, riddleSolved: true, battleCompleted: true
+            });
+          } catch (error) {
+            console.error(`${getMadMageRoomLogPrefix()} Error saving battleCompleted:`, error);
+          }
+        },
+        onDefeat: () => {},
+        onClose: (isVictory) => {
+          if (isVictory) {
+            returnFromMadMageRoom(returnRoomId);
+          } else {
+            // Defeat: sent home, but the Mad Mage's key still works — hailing King
+            // Tibianus ("mad mage" → yes) drops the player back in the prison, and
+            // tile 84 opens the room again (riddleSolved stays true).
+            cleanupMadMageRoomQuest();
+            setTimeout(() => navigateToMadMageReturnRoom(returnRoomId), 100);
+          }
+        },
+        victoryMessage: getMissionDialogueLine(VISITING_MINTWALLIN_MISSION, 'battleVictory', "The Mad Mage's room is cleared. Return to King Tibianus."),
+        defeatMessage: getMissionDialogueLine(VISITING_MINTWALLIN_MISSION, 'battleDefeat', "The things in the Mad Mage's room are more than the old fool let on. Gather yourself and go down again."),
+        showItems: false,
+        items: []
+      }
+    };
+    return window.CustomBattles.create(config);
+  }
+
+  function initializeMadMageRoomBattle(roomId, returnRoomId) {
+    if (window.CustomBattles) return createMadMageRoomBattleInstance(roomId, returnRoomId);
+    return waitForCustomBattles({ logPrefix: getMadMageRoomLogPrefix() }).then((api) => {
+      if (!api) return null;
+      return createMadMageRoomBattleInstance(roomId, returnRoomId);
+    });
+  }
+
+  function setupMadMageRoomBattleInstance(battle) {
+    if (!battle) return false;
+    madMageRoomBattle = battle;
+    stopMadMageRoomSceneSync();
+    madMageRoomBattle.setup(
+      () => playerEnteredMadMageRoom,
+      NotificationService.createBattleToastCallback(getMadMageRoomLogPrefix())
+    );
+    madMageRoomBattle.resetSandboxBattleState();
+    madMageRoomBattle.setupTileRestrictions?.(
+      () => playerEnteredMadMageRoom,
+      NotificationService.createBattleToastCallback(getMadMageRoomLogPrefix())
+    );
+    madMageRoomBattle.setupAllyLimit?.(
+      () => playerEnteredMadMageRoom,
+      NotificationService.createBattleToastCallback(getMadMageRoomLogPrefix())
+    );
+    showCustomBattleStatusToast({
+      battleName: MAD_MAGE_BATTLE_DISPLAY_NAME || "The Mad Mage's Room",
+      allyLimit: battle.config?.allyLimit ?? 6,
+      battle,
+      logPrefix: getMadMageRoomLogPrefix()
+    });
+    madMageRoomBattle.scheduleEntryVillainSetup({
+      attemptDelays: VILLAIN_SETUP_ATTEMPT_DELAYS_MS,
+      isActiveCheck: () => playerEnteredMadMageRoom,
+      onComplete: () => {
+        hideQuestOverlays();
+        hideHeroEditorButton();
+        madMageRoomBattle.startPersistentVisualSync(applyMadMageRoomTileMutations, {
+          isActiveCheck: () => playerEnteredMadMageRoom
+        });
+      }
+    });
+    return true;
+  }
+
+  function enterMadMageRoom(returnRoomId) {
+    if (playerEnteredMadMageRoom) return;
+    let roomId = MAD_MAGE_BATTLE_ROOM_ID || getRoomIdByRoomName(MAD_MAGE_BATTLE_ROOM_NAME);
+    if (!roomId) roomId = getRoomIdByRoomName(MAD_MAGE_BATTLE_ROOM_NAME);
+    if (!roomId) {
+      showToast({ message: TOAST_MESSAGES.roomNotFound("The Mad Mage's room"), variant: 'nothing', logPrefix: getMadMageRoomLogPrefix() });
+      return;
+    }
+
+    playerEnteredMadMageRoom = true;
+    if (madMageRoomBattle) {
+      madMageRoomBattle.cleanup(restoreBoardSetupMadMageRoom, showQuestOverlays);
+      madMageRoomBattle = null;
+    }
+
+    globalThis.state.board.send({ type: 'selectRoomById', roomId });
+    startMadMageRoomSceneSync();
+
+    const initResult = initializeMadMageRoomBattle(roomId, returnRoomId);
+    if (initResult && typeof initResult.then === 'function') {
+      initResult.then((battle) => {
+        if (playerEnteredMadMageRoom && !madMageRoomBattle) setupMadMageRoomBattleInstance(battle);
+      }).catch((error) => console.error(`${getMadMageRoomLogPrefix()} Error initializing battle:`, error));
+    } else if (initResult) {
+      setupMadMageRoomBattleInstance(initResult);
+    }
+
+    updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+    showToast({ message: TOAST_MESSAGES.madMageRoomEntered, logPrefix: getMadMageRoomLogPrefix() });
+  }
+
+  // =======================
   // Draconia Tower (Elathriel — after Hellgate Library, teleports the player into the
   // Sewers re-skinned as a dragon cemetery. The battle spawns on entry (Dragon Lord,
   // Dragon, An Old Dragonlord). On victory the fight is torn down and An Old Dragonlord
@@ -27261,6 +28384,185 @@ function createNPCCooldownManager() {
       wrap.innerHTML = `<div class="sprite item id-${spriteId} pointer-events-none absolute size-scaled-sprite" ${addedAttr}="1" ${keyAttr}="${mkey}" style="z-index:${z};right:calc(${r}px * var(--zoomFactor));bottom:calc(${b}px * var(--zoomFactor));${bankStyle}"><div class="viewport"><img alt="${spriteId}" data-cropped="${cropped}" class="spritesheet" style="--cropX: ${cropX}; --cropY: ${cropY};"></div></div>`;
       if (wrap.firstElementChild) floorBelow.appendChild(wrap.firstElementChild);
     });
+  }
+
+  // ============================================================
+  // Reusable factory for the "chat-triggered teleport into a re-skinned battle room"
+  // quest shape (Hellgate Part 1/Library, Isle of Solitude, Draconia Tower/Quest, Realm of
+  // Dreams, ...). Every one of those quests used to hand-duplicate this exact ~130-line block
+  // (mutation-sprite HTML builder, apply/restore tile mutations, scene-sync start/stop,
+  // restoreBoardSetup) with only a handful of per-quest tokens actually differing. Only that
+  // shared mechanical core is factored here — victory/defeat text, reward granting, and room
+  // navigation stay quest-specific (they're genuinely different per quest, not boilerplate)
+  // and are still written by hand in each quest's own create<Quest>BattleInstance/enter<Quest>.
+  //
+  // cfg:
+  //   id            - short slug used only for logging/derived defaults (e.g. 'realm-of-dreams')
+  //   logPrefix     - e.g. '[Quests Mod][Realm of Dreams]'
+  //   addedAttr     - e.g. QUEST_BOARD_ADDED_ATTR_REALM_OF_DREAMS
+  //   hiddenTag     - e.g. QUEST_BOARD_HIDDEN_TAG_REALM_OF_DREAMS
+  //   mutationKeyAttr, floorBelowKeyAttr - the two data-quests-*-*-key attr names
+  //   getTileMutations() - returns the current *_TILE_MUTATIONS table (a live getter, since
+  //                        these are only populated once assets/quests/rooms.json loads)
+  //   isEntered()      - read the quest's own playerEntered<Quest> flag
+  //   getBattle()      - read the quest's own <quest>Battle instance var
+  //   getSceneSub()/setSceneSub(v) - read/write the quest's own <quest>SceneSub subscription var
+  //   setHitboxesApplied(v) - write the quest's own <quest>HitboxesApplied flag
+  //   roomName      - the battle room's display name, for isOnRoomByName()
+  // Returns { getLogPrefix, buildMutationSpriteHTML, applyTileMutations, restoreTileMutations,
+  //           stopSceneSync, startSceneSync, restoreBoardSetup }. State stays owned by the
+  //   caller's own plain vars, read through the getter closures above (not the factory) —
+  //   writing them (on battle enter/cleanup) is still the quest's own job, so existing
+  //   external reads of e.g. playerEnteredRealmOfDreams/realmOfDreamsBattle keep working
+  //   unchanged.
+  // ============================================================
+  function createTeleportBattleQuest(cfg) {
+    const {
+      logPrefix,
+      addedAttr,
+      hiddenTag,
+      mutationKeyAttr,
+      floorBelowKeyAttr,
+      getTileMutations,
+      isEntered,
+      getBattle,
+      getSceneSub,
+      setSceneSub,
+      setHitboxesApplied = () => {},
+      roomName
+    } = cfg;
+
+    function getLogPrefix() {
+      return logPrefix;
+    }
+
+    function buildMutationSpriteHTML(entry, mutationKey) {
+      const spriteId = entry?.spriteId;
+      if (spriteId == null) return '';
+      const cropX = entry.cropX != null ? entry.cropX : 0;
+      const cropY = entry.cropY != null ? entry.cropY : 0;
+      const cropped = entry.cropped ? 'true' : 'false';
+      const bankStyle = entry.bank != null ? ` --bank: ${entry.bank};` : '';
+      const rightCalc = formatHellgateMutationOffsetCalc(entry.offsetX);
+      const bottomCalc = formatHellgateMutationOffsetCalc(entry.offsetY);
+      const offsetStyle = `${rightCalc ? ` right: ${rightCalc};` : ''}${bottomCalc ? ` bottom: ${bottomCalc};` : ''}`;
+      return `<div class="sprite item relative id-${spriteId}" ${addedAttr}="1" ${mutationKeyAttr}="${mutationKey}" style="z-index: 1000;${bankStyle}${offsetStyle}"><div class="viewport"><img alt="${spriteId}" data-cropped="${cropped}" class="spritesheet" style="--cropX: ${cropX}; --cropY: ${cropY};"></div></div>`;
+    }
+
+    function applyTileMutations() {
+      const mutations = getTileMutations();
+      if (!mutations || typeof mutations !== 'object') return;
+      let wroteHitboxes = false;
+      Object.entries(mutations).forEach(([tileKey, entry]) => {
+        const tileIndex = Number(tileKey);
+        if (!Number.isFinite(tileIndex) || !entry || typeof entry !== 'object') return;
+        const tile = getTileElement(tileIndex);
+
+        (entry.remove || []).forEach((spriteId) => {
+          if (spriteId == null || !tile) return;
+          tile.querySelectorAll(`.sprite.item.relative.id-${spriteId}`).forEach((sprite) => {
+            hideQuestBoardElement(sprite, { tag: hiddenTag });
+          });
+        });
+
+        (entry.add || []).forEach((spriteEntry, spriteIndex) => {
+          const spriteId = spriteEntry?.spriteId;
+          if (spriteId == null || !tile) return;
+          const mutationKey = `${tileIndex}-${spriteIndex}`;
+          if (tile.querySelector(`[${mutationKeyAttr}="${mutationKey}"]`)) return;
+          const wrap = document.createElement('div');
+          wrap.innerHTML = buildMutationSpriteHTML(spriteEntry, mutationKey);
+          if (wrap.firstElementChild) tile.appendChild(wrap.firstElementChild);
+        });
+
+        if (Array.isArray(entry.floorBelow) && entry.floorBelow.length) {
+          applyQuestFloorBelowSprites(tileIndex, entry.floorBelow, addedAttr, floorBelowKeyAttr);
+        }
+
+        if (Object.prototype.hasOwnProperty.call(entry, 'hitbox')) {
+          try {
+            getHellgateRoomRefs().forEach((room) => {
+              const data = room?.file?.data;
+              if (!data) return;
+              if (!Array.isArray(data.hitboxes)) data.hitboxes = [];
+              data.hitboxes[tileIndex] = entry.hitbox === true;
+              wroteHitboxes = true;
+            });
+          } catch (_) {}
+        }
+      });
+
+      if (wroteHitboxes) setHitboxesApplied(true);
+
+      const battle = getBattle();
+      if (battle?.refreshPlacementHitboxMaskFromLive) {
+        battle.refreshPlacementHitboxMaskFromLive(isEntered);
+      } else if (battle?.syncPlacementHitboxMask) {
+        battle.syncPlacementHitboxMask(isEntered);
+      }
+    }
+
+    function restoreTileMutations() {
+      restoreQuestBoardElementsByTag(hiddenTag);
+      document.querySelectorAll(`[${addedAttr}="1"]`).forEach((el) => {
+        try { el.remove(); } catch (_) {}
+      });
+      setHitboxesApplied(false);
+    }
+
+    function stopSceneSync() {
+      const sub = getSceneSub();
+      if (sub) {
+        try { sub.unsubscribe?.(); } catch (_) {}
+        setSceneSub(null);
+      }
+    }
+
+    // Keeps the room reskin painted on room navigations / React remounts while there is no
+    // active battle instance to run startPersistentVisualSync — i.e. the brief window before
+    // villains spawn on entry, and (for quests that have one) the whole post-battle talk window.
+    function startSceneSync() {
+      stopSceneSync();
+      const paint = () => {
+        if (isEntered() && !getBattle() && isOnRoomByName(typeof roomName === 'function' ? roomName() : roomName)) {
+          applyTileMutations();
+        }
+      };
+      paint();
+      const deadline = (typeof performance !== 'undefined' ? performance.now() : Date.now()) + 800;
+      const rafPaint = () => {
+        if (!isEntered()) return;
+        paint();
+        const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+        if (now < deadline && typeof requestAnimationFrame === 'function') requestAnimationFrame(rafPaint);
+      };
+      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(rafPaint);
+      SCENE_SYNC_REPAINT_DELAYS_MS.forEach((d) => setTimeout(paint, d));
+      if (!globalThis.state?.board?.subscribe) return;
+      setSceneSub(globalThis.state.board.subscribe(() => {
+        if (!isEntered()) {
+          stopSceneSync();
+          return;
+        }
+        paint();
+      }));
+    }
+
+    function restoreBoardSetup() {
+      const battle = getBattle();
+      if (battle) battle.restoreBoardSetup();
+      restoreTileMutations();
+    }
+
+    return {
+      getLogPrefix,
+      buildMutationSpriteHTML,
+      applyTileMutations,
+      restoreTileMutations,
+      stopSceneSync,
+      startSceneSync,
+      restoreBoardSetup
+    };
   }
 
   function buildDraconiaMutationSpriteHTML(entry, mutationKey) {
@@ -27376,7 +28678,7 @@ function createNPCCooldownManager() {
       if (now < deadline && typeof requestAnimationFrame === 'function') requestAnimationFrame(rafPaint);
     };
     if (typeof requestAnimationFrame === 'function') requestAnimationFrame(rafPaint);
-    [150, 400, 900, 1600].forEach((d) => setTimeout(paint, d));
+    SCENE_SYNC_REPAINT_DELAYS_MS.forEach((d) => setTimeout(paint, d));
     if (!globalThis.state?.board?.subscribe) return;
     draconiaTowerSceneSub = globalThis.state.board.subscribe(() => {
       if (!playerEnteredDraconiaTower) {
@@ -27464,7 +28766,7 @@ function createNPCCooldownManager() {
     const tileRestrictions = {};
     if (spawn.allowedTiles?.length) {
       tileRestrictions.allowedTiles = spawn.allowedTiles;
-      tileRestrictions.message = spawn.allowedTilesMessage || 'Ally creatures can only be placed on the marked tiles!';
+      tileRestrictions.message = spawn.allowedTilesMessage;
     }
     const config = {
       name: DRACONIA_BATTLE_DISPLAY_NAME || 'Draconia Tower',
@@ -27501,8 +28803,6 @@ function createNPCCooldownManager() {
             setTimeout(() => navigateToHedgeMazeFromHellgate(), 100);
           }
         },
-        victoryTitle: 'Victory!',
-        defeatTitle: 'Defeat',
         victoryMessage: getMissionDialogueLine(
           DRACONIA_TOWER_MISSION,
           'battleVictory',
@@ -27583,7 +28883,7 @@ function createNPCCooldownManager() {
       logPrefix: getDraconiaLogPrefix()
     });
     draconiaTowerBattle.scheduleEntryVillainSetup({
-      attemptDelays: [0, 100, 250, 500, 800, 1200],
+      attemptDelays: VILLAIN_SETUP_ATTEMPT_DELAYS_MS,
       isActiveCheck: () => playerEnteredDraconiaTower,
       onComplete: () => {
         hideQuestOverlays();
@@ -27600,7 +28900,7 @@ function createNPCCooldownManager() {
     let roomId = DRACONIA_BATTLE_ROOM_ID || getRoomIdByRoomName(DRACONIA_BATTLE_ROOM_NAME);
     if (!roomId) roomId = getRoomIdByRoomName(DRACONIA_BATTLE_ROOM_NAME);
     if (!roomId) {
-      showToast({ message: 'Draconia Tower could not be found.', logPrefix: getDraconiaLogPrefix() });
+      showToast({ message: TOAST_MESSAGES.roomNotFound('Draconia Tower'), variant: 'nothing', logPrefix: getDraconiaLogPrefix() });
       return;
     }
 
@@ -27626,7 +28926,7 @@ function createNPCCooldownManager() {
     }
 
     updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
-    showToast({ message: 'Following Elathriel down into Draconia Tower...', logPrefix: getDraconiaLogPrefix() });
+    showToast({ message: TOAST_MESSAGES.enteringWithElathriel('Draconia Tower'), logPrefix: getDraconiaLogPrefix() });
   }
 
   // Battle already won (progress.battleCompleted) but mission not finished — Elathriel
@@ -27635,7 +28935,7 @@ function createNPCCooldownManager() {
   function enterDraconiaTowerPostBattleReturn() {
     let roomId = DRACONIA_BATTLE_ROOM_ID || getRoomIdByRoomName(DRACONIA_BATTLE_ROOM_NAME);
     if (!roomId) {
-      showToast({ message: 'Draconia Tower could not be found.', logPrefix: getDraconiaLogPrefix() });
+      showToast({ message: TOAST_MESSAGES.roomNotFound('Draconia Tower'), variant: 'nothing', logPrefix: getDraconiaLogPrefix() });
       return;
     }
     playerEnteredDraconiaTower = true;
@@ -27651,7 +28951,7 @@ function createNPCCooldownManager() {
     hideQuestOverlays();
     hideHeroEditorButton();
     updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
-    showToast({ message: 'Following Elathriel back down into Draconia Tower...', logPrefix: getDraconiaLogPrefix() });
+    showToast({ message: TOAST_MESSAGES.enteringWithElathriel('Draconia Tower'), logPrefix: getDraconiaLogPrefix() });
   }
 
   function getOldDragonlordKeywordResponse(message, playerName) {
@@ -27832,7 +29132,7 @@ function createNPCCooldownManager() {
       if (now < deadline && typeof requestAnimationFrame === 'function') requestAnimationFrame(rafPaint);
     };
     if (typeof requestAnimationFrame === 'function') requestAnimationFrame(rafPaint);
-    [150, 400, 900, 1600].forEach((d) => setTimeout(paint, d));
+    SCENE_SYNC_REPAINT_DELAYS_MS.forEach((d) => setTimeout(paint, d));
     if (!globalThis.state?.board?.subscribe) return;
     draconiaQuestSceneSub = globalThis.state.board.subscribe(() => {
       if (!playerEnteredDraconiaQuest) {
@@ -27922,7 +29222,7 @@ function createNPCCooldownManager() {
       console.error(`${getDraconiaQuestLogPrefix()} Error consuming Dragonfetish:`, error);
     }
     showToast({
-      message: 'You raise the Dragonfetish — and Draconia falls away around you. Speak with Elathriel.',
+      message: TOAST_MESSAGES.dragonfetishRaised,
       logPrefix: getDraconiaQuestLogPrefix()
     });
     cleanupDraconiaQuestQuest();
@@ -27939,7 +29239,7 @@ function createNPCCooldownManager() {
     const tileRestrictions = {};
     if (spawn.allowedTiles?.length) {
       tileRestrictions.allowedTiles = spawn.allowedTiles;
-      tileRestrictions.message = spawn.allowedTilesMessage || 'Ally creatures can only be placed on the marked tiles!';
+      tileRestrictions.message = spawn.allowedTilesMessage;
     }
     const config = {
       name: DRACONIA_QUEST_BATTLE_DISPLAY_NAME || 'Draconia Quest',
@@ -27972,8 +29272,6 @@ function createNPCCooldownManager() {
             setTimeout(() => navigateToHedgeMazeFromHellgate(), 100);
           }
         },
-        victoryTitle: 'Victory!',
-        defeatTitle: 'Defeat',
         victoryMessage: getMissionDialogueLine(
           DRACONIA_QUEST_MISSION,
           'battleVictory',
@@ -28023,7 +29321,7 @@ function createNPCCooldownManager() {
       logPrefix: getDraconiaQuestLogPrefix()
     });
     draconiaQuestBattle.scheduleEntryVillainSetup({
-      attemptDelays: [0, 100, 250, 500, 800, 1200],
+      attemptDelays: VILLAIN_SETUP_ATTEMPT_DELAYS_MS,
       isActiveCheck: () => playerEnteredDraconiaQuest,
       onComplete: () => {
         hideQuestOverlays();
@@ -28040,7 +29338,7 @@ function createNPCCooldownManager() {
     let roomId = DRACONIA_QUEST_BATTLE_ROOM_ID || getRoomIdByRoomName(DRACONIA_QUEST_BATTLE_ROOM_NAME);
     if (!roomId) roomId = getRoomIdByRoomName(DRACONIA_QUEST_BATTLE_ROOM_NAME);
     if (!roomId) {
-      showToast({ message: 'The final room in Draconia could not be found.', logPrefix: getDraconiaQuestLogPrefix() });
+      showToast({ message: TOAST_MESSAGES.roomNotFound('The final room in Draconia'), variant: 'nothing', logPrefix: getDraconiaQuestLogPrefix() });
       return;
     }
 
@@ -28066,7 +29364,7 @@ function createNPCCooldownManager() {
     }
 
     updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
-    showToast({ message: 'Following Elathriel down into the last room of Draconia...', logPrefix: getDraconiaQuestLogPrefix() });
+    showToast({ message: TOAST_MESSAGES.enteringWithElathriel('the last room of Draconia'), logPrefix: getDraconiaQuestLogPrefix() });
   }
 
   // =======================
@@ -28078,125 +29376,55 @@ function createNPCCooldownManager() {
   // Quest flow minus the companion NPC.)
   // =======================
 
+  // Realm of Dreams runs on the shared createTeleportBattleQuest() factory (see its
+  // definition/comment above, near applyQuestFloorBelowSprites) instead of hand-duplicating
+  // the mutation/scene-sync boilerplate. State stays owned by the plain vars declared in
+  // section 3 (playerEnteredRealmOfDreams, realmOfDreamsBattle, ...) via getter/setter
+  // closures, so every existing external reference to those vars and to the function names
+  // below (getRealmOfDreamsLogPrefix, buildRealmOfDreamsMutationSpriteHTML, etc.) keeps
+  // working unchanged.
+  const realmOfDreamsQuest = createTeleportBattleQuest({
+    id: 'realm-of-dreams',
+    logPrefix: '[Quests Mod][Realm of Dreams]',
+    addedAttr: QUEST_BOARD_ADDED_ATTR_REALM_OF_DREAMS,
+    hiddenTag: QUEST_BOARD_HIDDEN_TAG_REALM_OF_DREAMS,
+    mutationKeyAttr: 'data-quests-realm-of-dreams-mutation-key',
+    floorBelowKeyAttr: 'data-quests-realm-of-dreams-fb-key',
+    getTileMutations: () => REALM_OF_DREAMS_TILE_MUTATIONS,
+    isEntered: () => playerEnteredRealmOfDreams,
+    getBattle: () => realmOfDreamsBattle,
+    getSceneSub: () => realmOfDreamsSceneSub,
+    setSceneSub: (v) => { realmOfDreamsSceneSub = v; },
+    setHitboxesApplied: (v) => { realmOfDreamsHitboxesApplied = v; },
+    roomName: () => REALM_OF_DREAMS_BATTLE_ROOM_NAME
+  });
+
   function getRealmOfDreamsLogPrefix() {
-    return '[Quests Mod][Realm of Dreams]';
+    return realmOfDreamsQuest.getLogPrefix();
   }
 
   function buildRealmOfDreamsMutationSpriteHTML(entry, mutationKey) {
-    const spriteId = entry?.spriteId;
-    if (spriteId == null) return '';
-    const cropX = entry.cropX != null ? entry.cropX : 0;
-    const cropY = entry.cropY != null ? entry.cropY : 0;
-    const cropped = entry.cropped ? 'true' : 'false';
-    const bankStyle = entry.bank != null ? ` --bank: ${entry.bank};` : '';
-    const rightCalc = formatHellgateMutationOffsetCalc(entry.offsetX);
-    const bottomCalc = formatHellgateMutationOffsetCalc(entry.offsetY);
-    const offsetStyle = `${rightCalc ? ` right: ${rightCalc};` : ''}${bottomCalc ? ` bottom: ${bottomCalc};` : ''}`;
-    return `<div class="sprite item relative id-${spriteId}" ${QUEST_BOARD_ADDED_ATTR_REALM_OF_DREAMS}="1" data-quests-realm-of-dreams-mutation-key="${mutationKey}" style="z-index: 1000;${bankStyle}${offsetStyle}"><div class="viewport"><img alt="${spriteId}" data-cropped="${cropped}" class="spritesheet" style="--cropX: ${cropX}; --cropY: ${cropY};"></div></div>`;
+    return realmOfDreamsQuest.buildMutationSpriteHTML(entry, mutationKey);
   }
 
   function applyRealmOfDreamsTileMutations() {
-    const mutations = REALM_OF_DREAMS_TILE_MUTATIONS;
-    if (!mutations || typeof mutations !== 'object') return;
-    let wroteHitboxes = false;
-    Object.entries(mutations).forEach(([tileKey, entry]) => {
-      const tileIndex = Number(tileKey);
-      if (!Number.isFinite(tileIndex) || !entry || typeof entry !== 'object') return;
-      const tile = getTileElement(tileIndex);
-
-      (entry.remove || []).forEach((spriteId) => {
-        if (spriteId == null || !tile) return;
-        tile.querySelectorAll(`.sprite.item.relative.id-${spriteId}`).forEach((sprite) => {
-          hideQuestBoardElement(sprite, { tag: QUEST_BOARD_HIDDEN_TAG_REALM_OF_DREAMS });
-        });
-      });
-
-      (entry.add || []).forEach((spriteEntry, spriteIndex) => {
-        const spriteId = spriteEntry?.spriteId;
-        if (spriteId == null || !tile) return;
-        const mutationKey = `${tileIndex}-${spriteIndex}`;
-        if (tile.querySelector(`[data-quests-realm-of-dreams-mutation-key="${mutationKey}"]`)) return;
-        const wrap = document.createElement('div');
-        wrap.innerHTML = buildRealmOfDreamsMutationSpriteHTML(spriteEntry, mutationKey);
-        if (wrap.firstElementChild) tile.appendChild(wrap.firstElementChild);
-      });
-
-      if (Array.isArray(entry.floorBelow) && entry.floorBelow.length) {
-        applyQuestFloorBelowSprites(
-          tileIndex, entry.floorBelow, QUEST_BOARD_ADDED_ATTR_REALM_OF_DREAMS, 'data-quests-realm-of-dreams-fb-key'
-        );
-      }
-
-      if (Object.prototype.hasOwnProperty.call(entry, 'hitbox')) {
-        try {
-          getHellgateRoomRefs().forEach((room) => {
-            const data = room?.file?.data;
-            if (!data) return;
-            if (!Array.isArray(data.hitboxes)) data.hitboxes = [];
-            data.hitboxes[tileIndex] = entry.hitbox === true;
-            wroteHitboxes = true;
-          });
-        } catch (_) {}
-      }
-    });
-
-    if (wroteHitboxes) realmOfDreamsHitboxesApplied = true;
-
-    const battle = realmOfDreamsBattle;
-    if (battle?.refreshPlacementHitboxMaskFromLive) {
-      battle.refreshPlacementHitboxMaskFromLive(() => playerEnteredRealmOfDreams);
-    } else if (battle?.syncPlacementHitboxMask) {
-      battle.syncPlacementHitboxMask(() => playerEnteredRealmOfDreams);
-    }
+    realmOfDreamsQuest.applyTileMutations();
   }
 
   function restoreRealmOfDreamsTileMutations() {
-    restoreQuestBoardElementsByTag(QUEST_BOARD_HIDDEN_TAG_REALM_OF_DREAMS);
-    document.querySelectorAll(`[${QUEST_BOARD_ADDED_ATTR_REALM_OF_DREAMS}="1"]`).forEach((el) => {
-      try { el.remove(); } catch (_) {}
-    });
-    realmOfDreamsHitboxesApplied = false;
+    realmOfDreamsQuest.restoreTileMutations();
   }
 
   function stopRealmOfDreamsSceneSync() {
-    if (realmOfDreamsSceneSub) {
-      try { realmOfDreamsSceneSub.unsubscribe?.(); } catch (_) {}
-      realmOfDreamsSceneSub = null;
-    }
+    realmOfDreamsQuest.stopSceneSync();
   }
 
   function startRealmOfDreamsSceneSync() {
-    stopRealmOfDreamsSceneSync();
-    const paint = () => {
-      if (playerEnteredRealmOfDreams
-        && !realmOfDreamsBattle
-        && isOnRoomByName(REALM_OF_DREAMS_BATTLE_ROOM_NAME)) {
-        applyRealmOfDreamsTileMutations();
-      }
-    };
-    paint();
-    const deadline = (typeof performance !== 'undefined' ? performance.now() : Date.now()) + 800;
-    const rafPaint = () => {
-      if (!playerEnteredRealmOfDreams) return;
-      paint();
-      const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
-      if (now < deadline && typeof requestAnimationFrame === 'function') requestAnimationFrame(rafPaint);
-    };
-    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(rafPaint);
-    [150, 400, 900, 1600].forEach((d) => setTimeout(paint, d));
-    if (!globalThis.state?.board?.subscribe) return;
-    realmOfDreamsSceneSub = globalThis.state.board.subscribe(() => {
-      if (!playerEnteredRealmOfDreams) {
-        stopRealmOfDreamsSceneSync();
-        return;
-      }
-      paint();
-    });
+    realmOfDreamsQuest.startSceneSync();
   }
 
   function restoreBoardSetupRealmOfDreams() {
-    if (realmOfDreamsBattle) realmOfDreamsBattle.restoreBoardSetup();
-    restoreRealmOfDreamsTileMutations();
+    realmOfDreamsQuest.restoreBoardSetup();
   }
 
   function cleanupRealmOfDreamsQuest() {
@@ -28275,7 +29503,7 @@ function createNPCCooldownManager() {
 
   function returnFromRealmOfDreams() {
     showToast({
-      message: 'You climb up out of the dragon graveyard, the fire behind you dead at last. Speak with Tesha.',
+      message: TOAST_MESSAGES.realmOfDreamsReturned,
       logPrefix: getRealmOfDreamsLogPrefix()
     });
     cleanupRealmOfDreamsQuest();
@@ -28292,7 +29520,7 @@ function createNPCCooldownManager() {
     const tileRestrictions = {};
     if (spawn.allowedTiles?.length) {
       tileRestrictions.allowedTiles = spawn.allowedTiles;
-      tileRestrictions.message = spawn.allowedTilesMessage || 'Ally creatures can only be placed on the marked tiles!';
+      tileRestrictions.message = spawn.allowedTilesMessage;
     }
     const config = {
       name: REALM_OF_DREAMS_BATTLE_DISPLAY_NAME || 'The Northern Dragon Lair',
@@ -28327,8 +29555,6 @@ function createNPCCooldownManager() {
             setTimeout(() => navigateToDaramaOasis(), 100);
           }
         },
-        victoryTitle: 'Victory!',
-        defeatTitle: 'Defeat',
         victoryMessage: getMissionDialogueLine(
           REALM_OF_DREAMS_MISSION,
           'battleVictory',
@@ -28378,7 +29604,7 @@ function createNPCCooldownManager() {
       logPrefix: getRealmOfDreamsLogPrefix()
     });
     realmOfDreamsBattle.scheduleEntryVillainSetup({
-      attemptDelays: [0, 100, 250, 500, 800, 1200],
+      attemptDelays: VILLAIN_SETUP_ATTEMPT_DELAYS_MS,
       isActiveCheck: () => playerEnteredRealmOfDreams,
       onComplete: () => {
         hideQuestOverlays();
@@ -28395,7 +29621,7 @@ function createNPCCooldownManager() {
     let roomId = REALM_OF_DREAMS_BATTLE_ROOM_ID || getRoomIdByRoomName(REALM_OF_DREAMS_BATTLE_ROOM_NAME);
     if (!roomId) roomId = getRoomIdByRoomName(REALM_OF_DREAMS_BATTLE_ROOM_NAME);
     if (!roomId) {
-      showToast({ message: 'The way down into the Northern Dragon Lair could not be found.', logPrefix: getRealmOfDreamsLogPrefix() });
+      showToast({ message: TOAST_MESSAGES.roomNotFound('The Northern Dragon Lair'), variant: 'nothing', logPrefix: getRealmOfDreamsLogPrefix() });
       return;
     }
 
@@ -28420,7 +29646,7 @@ function createNPCCooldownManager() {
     }
 
     updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
-    showToast({ message: 'Tesha reads the way — and sends you down into the Northern Dragon Lair, toward the fire among the bones...', logPrefix: getRealmOfDreamsLogPrefix() });
+    showToast({ message: TOAST_MESSAGES.realmOfDreamsEntering, logPrefix: getRealmOfDreamsLogPrefix() });
   }
 
   // ============================================================
@@ -29477,6 +30703,26 @@ function createNPCCooldownManager() {
         if (hasOrb && getCachedQuestItemCount(LUMINOUS_ORB_CONFIG.productName) === 0) reasons.push('hand-in:lost-oracle-orb');
       }
 
+      // Mad Mage Room (mission id visiting_mintwallin) — its own post-game mission, not
+      // part of the honeyflower→scarab focal chain. Offer once the player holds the
+      // Mintwallin Prison Key and finished Realm of Dreams; also flag the post-battle
+      // report-back so the King's fight.png stays lit until the mission is closed.
+      const madMageProgress = getMissionProgress(VISITING_MINTWALLIN_MISSION) || {};
+      if (!madMageProgress.completed) {
+        if (madMageProgress.battleCompleted) {
+          // Room cleared — the player must report back to the King to close the mission.
+          reasons.push('complete:mad-mage-room');
+        } else if (!madMageProgress.accepted
+          && getCachedQuestItemCount('Mintwallin Prison Key') > 0
+          && MissionManager.isCompleted(REALM_OF_DREAMS_MISSION)) {
+          // New mission the King can offer.
+          reasons.push('offer:mad-mage-room');
+        }
+        // Accepted-but-not-battle-done is deliberately NOT a pending reason: the next step
+        // (A Prisoner's riddle, the teleporter, the room fight) happens away from the King,
+        // so his fight.png should be dark until there's actually something to do with him.
+      }
+
       // New mission offer — the King only ever discusses ONE "focal" mission at a
       // time via generic conversation ("mission"/greeting), following the same
       // honeyflower -> crossing-the-line -> chain sequence as currentMission() /
@@ -30088,6 +31334,17 @@ function createNPCCooldownManager() {
       alt: 'Use the teleporter',
       showDuringPlacement: true
     });
+
+    // Mad Mage Room quest — the tile-84 exit/next-step teleporter in the Mintwallin prison.
+    registerQuestTileHighlightSource({
+      getTiles: () => {
+        const tile = getTileElement(MINTWALLIN_TELEPORTER_TILE_INDEX);
+        return tile ? [tile] : [];
+      },
+      isAccessActive: () => isMintwallinTeleporterActive(),
+      alt: 'Use the teleporter',
+      showDuringPlacement: true
+    });
   }
 
   function setupTileHighlightObserver() {
@@ -30567,6 +31824,43 @@ function createNPCCooldownManager() {
       // Green — he's an ally now, not a foe (the fight is over by the time he's placed).
       hpBarColor: 'rgb(96, 192, 96)',
       nameColor: 'rgb(96, 192, 96)'
+    },
+    {
+      // The Mad Mage — a single "A Prisoner" figure on tile 80 of the Mintwallin prison
+      // cell. Board shell / modal exactly mirror Dane & Svenson (idle spritesheet over the
+      // generic humanoid outfit, gif portrait in the modal). Shows the fight.png quest-action
+      // icon on his name tag only until he hands over his key (riddleSolved) — after that the
+      // next step is the teleporter, not him. Right-click still opens the keyword/riddle chat.
+      id: BOARD_NPC_A_PRISONER_ID,
+      name: 'A Prisoner',
+      hideLevel: true,
+      tileIndex: A_PRISONER_TILE_INDEX,
+      roomName: MINTWALLIN_BATTLE_ROOM_NAME,
+      roomId: MINTWALLIN_BATTLE_ROOM_ID,
+      overlayClass: A_PRISONER_OVERLAY_CLASS,
+      isMadMagePrisoner: true,
+      outfitSpriteId: ROOKSTAYER_OUTFIT_SPRITE_ID,
+      facing: 'south',
+      modalOutfitFacing: 'south',
+      modalOutfitShiny: false,
+      modalOutfitTranslate: '-12px -12px',
+      outfitSpritesheetUrl: getQuestItemsAssetUrl('A_PrisonerIdle.png'),
+      outfitSheetFrameCount: 1,
+      imageUrl: getQuestItemsAssetUrl('A_Prisoner.gif'),
+      dialogueIconUrl: 'https://bestiaryarena.com/assets/icons/fight.png',
+      logPrefix: '[Quests Mod][Board NPC][A Prisoner]',
+      chatMode: 'keywords',
+      // Walk-around prison scene keeps the player's saved team on the board until a fight
+      // that never comes — opt out of the ally-piece guard (same as the Bonelord).
+      allowWithAllyPieces: true,
+      isUnlocked: () => playerEnteredMintwallinPrison,
+      isInteractable: () => {
+        const progress = getMissionProgress(VISITING_MINTWALLIN_MISSION) || {};
+        return !!progress.accepted && !progress.riddleSolved && !progress.completed;
+      },
+      chat: {},
+      hpBarColor: 'rgb(96, 192, 96)',
+      nameColor: 'rgb(96, 192, 96)'
     }
   ];
 
@@ -30600,16 +31894,20 @@ function createNPCCooldownManager() {
     const oldDragonlordConfig = BOARD_NPC_CONFIGS.find((c) => c.id === BOARD_NPC_OLD_DRAGONLORD_ID)
       || BOARD_NPC_CONFIGS.find((c) => c.overlayClass === OLD_DRAGONLORD_OVERLAY_CLASS);
     if (oldDragonlordChat && oldDragonlordConfig?.chat) Object.assign(oldDragonlordConfig.chat, oldDragonlordChat);
+    const aPrisonerChat = questNpcsDialogue['a-prisoner']?.boardChat;
+    if (aPrisonerChat) {
+      BOARD_NPC_CONFIGS.forEach((c) => {
+        if (c.isMadMagePrisoner && c.chat) Object.assign(c.chat, aPrisonerChat);
+      });
+    }
   };
 
   function isApprenticeShengBattleCompletedPendingReward() {
-    const progress = getMissionProgress(APPRENTICE_SHENG_MISSION);
-    return !!progress?.battleCompleted && !progress?.completed;
+    return isBattleCompletedPendingReward(APPRENTICE_SHENG_MISSION);
   }
 
   function isLostOracleBattleCompletedPendingThanks() {
-    const progress = getMissionProgress(LOST_ORACLE_MISSION) || {};
-    return !!progress.battleCompleted && !progress.completed && !progress.oracleDismissed;
+    return isBattleCompletedPendingReward(LOST_ORACLE_MISSION, (progress) => !progress.oracleDismissed);
   }
 
   async function completeApprenticeShengMissionWithTrophy() {
@@ -30986,7 +32284,7 @@ function createNPCCooldownManager() {
       if (!roomId) {
         console.error('[Quests Mod][Apprentice Sheng] Minotaur Mage Room roomId not found');
         showToast({
-          message: 'Could not start the battle — room not found.',
+          message: TOAST_MESSAGES.battleStartFailed,
           logPrefix: '[Quests Mod][Apprentice Sheng]'
         });
         return;
@@ -31300,18 +32598,19 @@ function createNPCCooldownManager() {
   }
 
   function buildLostOracleProgress(patch = {}) {
-    const current = getMissionProgress(LOST_ORACLE_MISSION) || {};
-    return {
-      accepted: patch.accepted ?? current.accepted ?? false,
-      completed: patch.completed ?? current.completed ?? false,
-      askedNpcs: patch.askedNpcs ?? current.askedNpcs ?? false,
-      kingInformed: patch.kingInformed ?? current.kingInformed ?? false,
-      orbExchanged: patch.orbExchanged ?? current.orbExchanged ?? false,
-      spectralStoneReceived: patch.spectralStoneReceived ?? current.spectralStoneReceived ?? false,
-      oracleEnraged: patch.oracleEnraged ?? current.oracleEnraged ?? false,
-      battleCompleted: patch.battleCompleted ?? current.battleCompleted ?? false,
-      oracleDismissed: patch.oracleDismissed ?? current.oracleDismissed ?? false
-    };
+    return buildMissionProgressPatch(
+      LOST_ORACLE_MISSION,
+      [
+        'askedNpcs',
+        'kingInformed',
+        'orbExchanged',
+        'spectralStoneReceived',
+        'oracleEnraged',
+        'battleCompleted',
+        'oracleDismissed'
+      ],
+      patch
+    );
   }
 
   function messageMentionsOracle(text) {
@@ -31758,8 +33057,7 @@ function createNPCCooldownManager() {
   }
 
   function isWeakenedArchdemonBattleCompletedPendingReward() {
-    const progress = getMissionProgress(WEAKENED_ARCHDEMON_MISSION) || {};
-    return !!progress.battleCompleted && !progress.completed;
+    return isBattleCompletedPendingReward(WEAKENED_ARCHDEMON_MISSION);
   }
 
   async function startWeakenedArchdemonMission() {
@@ -31908,8 +33206,6 @@ function createNPCCooldownManager() {
           cleanupGhazbaranBattle();
           setTimeout(() => navigateToFoldaBoat(), 100);
         },
-        victoryTitle: 'Victory!',
-        defeatTitle: 'Defeat',
         victoryMessage: getMissionDialogueLine(
           WEAKENED_ARCHDEMON_MISSION,
           'battleVictory',
@@ -32951,6 +34247,9 @@ function createNPCCooldownManager() {
       let awaitingElathrielDraconiaQuestEnterConfirm = false;
       let awaitingElathrielDraconiaQuestReturnConfirm = false;
       let awaitingBonelordBookConfirm = false;
+      // A Prisoner (Mad Mage) riddle → key hand-over: after the correct answer he asks a
+      // chain of "yes" confirmations before granting his key (riddleSolved).
+      let prisonerKeyYesCount = -1; // -1 = not offering the key yet; 0..3 = mid confirm chain
       // Oracle destiny tree: prepared → sure → yes teleports after SO BE IT!
       let oracleDestinyStage = npcConfig.overlayClass === ORACLE_OVERLAY_CLASS ? 'prepared' : null;
 
@@ -35122,6 +36421,75 @@ function createNPCCooldownManager() {
           return;
         }
 
+        if (npcConfig.isMadMagePrisoner) {
+          const vmProgress = getMissionProgress(VISITING_MINTWALLIN_MISSION) || {};
+          const isRiddleAnswer = MAD_MAGE_RIDDLE_ANSWERS.has(lower.replace(/[^a-z0-9]/g, ''));
+
+          // Mid confirm-chain: only "yes" advances; anything else drops back to normal chat.
+          if (prisonerKeyYesCount >= 0) {
+            if (/\byes\b/i.test(lower)) {
+              prisonerKeyYesCount += 1;
+              let line;
+              if (prisonerKeyYesCount === 1) line = getMissionDialogueLine(VISITING_MINTWALLIN_MISSION, 'keyConfirm1', 'Hehehe! Splendid. Now - about that key. You are quite sure you want it?');
+              else if (prisonerKeyYesCount === 2) line = getMissionDialogueLine(VISITING_MINTWALLIN_MISSION, 'keyConfirm2', 'Really, really?');
+              else if (prisonerKeyYesCount === 3) line = getMissionDialogueLine(VISITING_MINTWALLIN_MISSION, 'keyConfirm3', 'Really, really, really, really?');
+              else {
+                line = getMissionDialogueLine(VISITING_MINTWALLIN_MISSION, 'keyGrant', 'Then take it and get happy - or die, hehe.');
+                prisonerKeyYesCount = -1;
+                if (!vmProgress.riddleSolved && !vmProgress.completed) {
+                  persistMissionProgress(VISITING_MINTWALLIN_MISSION, {
+                    accepted: true,
+                    completed: false,
+                    riddleSolved: true,
+                    battleCompleted: !!vmProgress.battleCompleted
+                  }).catch((e) => console.error(`${npcConfig.logPrefix} riddleSolved persist:`, e));
+                  addQuestItem('Mad Mage Quest Key', 1)
+                    .then(() => NotificationService.showItemReceived('Mad Mage Quest Key', npcConfig.logPrefix))
+                    .catch((e) => console.error(`${npcConfig.logPrefix} Mad Mage Quest Key grant:`, e));
+                  showToast({ message: TOAST_MESSAGES.madMageKeyReceived, logPrefix: npcConfig.logPrefix });
+                }
+              }
+              cooldown.queueResponse(text, line, addMessageToConversation, npcConfig.name);
+              return;
+            }
+            prisonerKeyYesCount = -1;
+          }
+
+          if (isRiddleAnswer && !vmProgress.riddleSolved && !vmProgress.completed) {
+            prisonerKeyYesCount = 0;
+            cooldown.queueResponse(
+              text,
+              getMissionDialogueLine(VISITING_MINTWALLIN_MISSION, 'riddleCorrect', "Hurray! A real answer - I knew there was a brain rattling around in there somewhere. The key is yours, then. If you truly want it. Do you?"),
+              addMessageToConversation,
+              npcConfig.name
+            );
+            return;
+          }
+
+          let prisonerLine;
+          if ((vmProgress.riddleSolved || vmProgress.completed) && isNpcFarewellMessage(text)) {
+            prisonerLine = "Good bye! Don't forget about the secrets of mathemagics.";
+          } else if ((vmProgress.riddleSolved || vmProgress.completed) && (lower.includes('key') || lower.includes('riddle') || isRiddleAnswer)) {
+            prisonerLine = (vmProgress.battleCompleted || vmProgress.completed)
+              ? 'You cleared my room? Hah! Told you only the bravest hero could. Now leave me to my numbers.'
+              : "You have my key already. Go on - the room won't clear itself. Hehehe!";
+          } else {
+            prisonerLine = getNpcKeywordResponse(A_PRISONER_RESPONSES, text, playerName);
+          }
+          if (prisonerLine == null) {
+            prisonerLine = getRandomNpcConfusionResponse(A_PRISONER_CONFUSION_RESPONSES, playerName)
+              || "Hehehe! Ask me about my riddle, or the key, or the way through the labyrinth.";
+          }
+          cooldown.queueResponse(
+            text,
+            prisonerLine,
+            addMessageToConversation,
+            npcConfig.name,
+            isNpcFarewellMessage(text) ? ModalHelpers.getFarewellCloseCallback(text) : undefined
+          );
+          return;
+        }
+
         let response = getSantaKeywordResponse(text, playerName);
         if (response == null) {
           response = getNpcQuestItemChatResponse('santa-claus', text, playerName);
@@ -35608,40 +36976,17 @@ function createNPCCooldownManager() {
   }
 
   function shouldPlaceBoardNpc(npcConfig, boardContext = null) {
-    const debug = npcConfig?.id === BOARD_NPC_ELATHRIEL_ID;
-    const logSkip = (reason) => {
-      if (debug) console.log(`${npcConfig.logPrefix || '[Quests Mod][Board NPC]'} not placed — ${reason}`);
-    };
-    if (!areQuestHelpersEnabled()) {
-      logSkip('quest helpers disabled');
-      return false;
-    }
-    if (typeof npcConfig.isUnlocked === 'function' && !npcConfig.isUnlocked()) {
-      logSkip('isUnlocked() returned false');
-      return false;
-    }
+    if (!areQuestHelpersEnabled()) return false;
+    if (typeof npcConfig.isUnlocked === 'function' && !npcConfig.isUnlocked()) return false;
     if (npcConfig.roomId) {
       const context = boardContext || globalThis.state?.board?.getSnapshot?.()?.context;
       const currentRoomId = context?.selectedMap?.selectedRoom?.id;
-      if (!currentRoomId || currentRoomId !== npcConfig.roomId) {
-        logSkip(`not on roomId "${npcConfig.roomId}" (currently: ${currentRoomId ?? 'none'})`);
-        return false;
-      }
+      if (!currentRoomId || currentRoomId !== npcConfig.roomId) return false;
     } else if (!isOnRoomByName(npcConfig.roomName)) {
-      const context = boardContext || globalThis.state?.board?.getSnapshot?.()?.context;
-      const currentRoomId = context?.selectedMap?.selectedRoom?.id;
-      const currentRoomName = currentRoomId != null ? globalThis.state?.utils?.ROOM_NAME?.[currentRoomId] : null;
-      logSkip(`not on room "${npcConfig.roomName}" (currently: ${currentRoomName ?? currentRoomId ?? 'none'})`);
       return false;
     }
-    if (isBoardBattleActive(boardContext)) {
-      logSkip('a battle is active');
-      return false;
-    }
-    if (!npcConfig.allowWithAllyPieces && countAllyPiecesOnBoard(boardContext) > 0) {
-      logSkip('ally pieces are already on the board');
-      return false;
-    }
+    if (isBoardBattleActive(boardContext)) return false;
+    if (!npcConfig.allowWithAllyPieces && countAllyPiecesOnBoard(boardContext) > 0) return false;
     return true;
   }
 
@@ -35671,12 +37016,7 @@ function createNPCCooldownManager() {
       }
       boardNpcRuntimeState.lastRoomById.set(npcConfig.id, currentRoomName);
 
-      if (!tile) {
-        if (npcConfig.id === BOARD_NPC_ELATHRIEL_ID) {
-          console.log(`${npcConfig.logPrefix || '[Quests Mod][Board NPC]'} not placed — tile-index-${npcConfig.tileIndex} not found in current DOM (currently on: ${currentRoomName ?? currentRoomId ?? 'none'})`);
-        }
-        return;
-      }
+      if (!tile) return;
 
       if (!shouldPlaceBoardNpc(npcConfig, context)) {
         unmarkQuestAccessTile(tile);
@@ -36006,6 +37346,15 @@ function createNPCCooldownManager() {
       }
       missionProgressPlayerSubscription = null;
     }
+
+    // Reset init/dedupe state so a soft reload re-hydrates cleanly.
+    missionProgressLoadPromise = null;
+    questItemsInitPromise = null;
+    questItemsInitDone = false;
+    questItemsInflight = null;
+    invalidateKingTibianusProgressCache();
+    clearQuestItemsCache();
+    _hashUsernameCache.clear();
     
     // Cleanup quest items drop system
     if (questItemsBoardSubscription) {
@@ -36109,6 +37458,14 @@ function createNPCCooldownManager() {
       cleanupIsleOfSolitudeQuest();
     } catch (e) {
       console.warn('[Quests Mod][Isle of Solitude] cleanup during teardown:', e);
+    }
+    // Cleanup Mad Mage Room quest (Mintwallin prison walk-around + Part 2 battle)
+    try {
+      disableMintwallinTeleporterRightClick();
+      cleanupMintwallinPrisonQuest();
+      cleanupMadMageRoomQuest();
+    } catch (e) {
+      console.warn('[Quests Mod][Mad Mage Room] cleanup during teardown:', e);
     }
     // Cleanup Draconia Tower (Elathriel / An Old Dragonlord) battle system
     try {
@@ -36530,13 +37887,15 @@ function createNPCCooldownManager() {
           requiredStatus: rule.requiredStatus || 'accepted',
           removeWhenCompleted: !!rule.removeWhenCompleted,
           removeWhenPutridChamberComplete: !!rule.removeWhenPutridChamberComplete,
-          independentDrop: !!rule.independentDrop
+          independentDrop: !!rule.independentDrop,
+          requiredProgressFlag: rule.requiredProgressFlag || null,
+          clearedByProgressFlag: rule.clearedByProgressFlag || null
         };
       }
 
       let serpentineRunePickupFlagNeedsSave = false;
 
-      for (const [itemName, { productId, missionId, requiredStatus, removeWhenCompleted, removeWhenPutridChamberComplete, independentDrop }] of Object.entries(itemMissionMap)) {
+      for (const [itemName, { productId, missionId, requiredStatus, removeWhenCompleted, removeWhenPutridChamberComplete, independentDrop, requiredProgressFlag, clearedByProgressFlag }] of Object.entries(itemMissionMap)) {
         const itemCount = questItems[itemName] || 0;
         if (itemCount > 0) {
           // Get mission progress from registry
@@ -36547,7 +37906,20 @@ function createNPCCooldownManager() {
           }
 
           const missionProgress = firebaseKey ? progress?.[firebaseKey] : null;
-          
+
+          // Flag-window items (lost_oracle orb chain): valid only while one sub-flag is set
+          // and the next one is not. Outside that window — including a stale copy left after
+          // the exchange, or one held before the quest reached the flag — strip it.
+          if (requiredProgressFlag) {
+            const inWindow = !!missionProgress?.[requiredProgressFlag]
+              && !(clearedByProgressFlag && missionProgress?.[clearedByProgressFlag]);
+            if (!inWindow) {
+              console.log(`[Quests Mod] Removing ${itemName} (outside ${requiredProgressFlag} window)`);
+              await consumeQuestItem(itemName, itemCount);
+            }
+            continue;
+          }
+
           // Special handling for items that should be removed when quest is completed (unique items)
           if (removeWhenCompleted && isCleanupRuleCompleted(progress, missionId, productId)) {
             console.log(`[Quests Mod] Removing ${itemName} (unique item, quest completed)`);
@@ -36687,7 +38059,12 @@ function createNPCCooldownManager() {
   }
 
   async function hydrateMissionProgressFromFirebase(playerName) {
-    const progress = await getKingTibianusProgress(playerName);
+    // Abort on a real network failure instead of treating it as "new account" —
+    // otherwise the first quest write would persist empty defaults over real data.
+    const progress = await getKingTibianusProgress(playerName, {
+      bypassCache: true,
+      throwOnNetworkError: true
+    });
 
     if (!progress || progress.__isEmpty) {
       console.log('[Quests Mod] No mission progress found in Firebase');
@@ -36981,8 +38358,7 @@ function createNPCCooldownManager() {
             fishingState.ironOreQuestStartTime = null;
 
             showToast({
-              message: TOAST_MESSAGES.ironOreRewardReady
-                || 'A while has passed. King Tibianus should have something for you now.',
+              message: TOAST_MESSAGES.ironOreRewardReady,
               logPrefix: '[Quests Mod][Iron Ore Quest]',
               variant: 'info'
             });
@@ -37302,7 +38678,20 @@ function createNPCCooldownManager() {
         honeyflowerPicked: true,
         crossingObjectiveComplete: true,
         battleCompleted: true,
-        rookstayerDismissed: true
+        rookstayerDismissed: true,
+        // Every mid-quest / hand-in sub-flag true, so completeAll's reconcile lands on the
+        // real "everything finished" bag (all consumed items gone, only permanents kept).
+        pathCleared: true,
+        portalOpened: true,
+        bookGiven: true,
+        dragonfetishReceived: true,
+        riddleSolved: true,
+        askedNpcs: true,
+        kingInformed: true,
+        orbExchanged: true,
+        spectralStoneReceived: true,
+        oracleEnraged: true,
+        oracleDismissed: true
       })
     };
   }
@@ -37345,7 +38734,8 @@ function createNPCCooldownManager() {
           honeyflowerPicked: true,
           crossingObjectiveComplete: true,
           battleCompleted: true,
-          rookstayerDismissed: true
+          rookstayerDismissed: true,
+          riddleSolved: true
         }));
       }
       setMissionProgress(mission, progress);
@@ -37490,6 +38880,18 @@ function createNPCCooldownManager() {
       if (needsSave) await devSaveAllProgress(actions, 'grant');
 
       await syncChristmasMiracleFromInventory({ showToasts: false });
+
+      // If grant() only changed mission/seal progress, sync the bag to it. If it also
+      // set item counts directly, skip auto-reconcile so those edits survive — the dev
+      // can run QuestsDev.reconcile() explicitly.
+      const touchedItems = Object.keys(getQuestsDevItemKeys()).some((k) => Number(opts[k]))
+        || (items && typeof items === 'object' && Object.keys(items).length > 0);
+      if (needsSave && !touchedItems) {
+        await reconcileQuestItemsFromProgress({ label: 'grant' });
+      } else if (needsSave && touchedItems) {
+        console.log('[Quests Mod][Dev] grant() changed progress and items — skipped auto-reconcile so item edits survive. Run QuestsDev.reconcile() to sync the bag to progress.');
+      }
+
       await refreshDevQuestUi();
 
       console.log('[Quests Mod][Dev] Quest items modified:', actions.length ? actions.join(', ') : '(none)');
@@ -37513,6 +38915,7 @@ function createNPCCooldownManager() {
         kingChatState.sevenSealsCompleted = getDefaultSevenSealsCompleted().map(() => true);
       }
       await devSaveAllProgress(actions, 'complete');
+      await reconcileQuestItemsFromProgress({ label: `complete ${missionId}` });
       await refreshDevQuestUi();
       console.log('[Quests Mod][Dev] Mission completed:', missionId, actions.join(', ') || '(saved)');
     } catch (error) {
@@ -37553,6 +38956,10 @@ function createNPCCooldownManager() {
         granted.push(`${itemName} (${count})`);
       }
       console.log('[Quests Mod][Dev] All quest reward items granted:', granted.join(', '));
+      // Reconcile to the true "everything finished" bag: items later quests consume are
+      // stripped, only permanent rewards (soul cores, keys, tools) remain. Use
+      // QuestsDev.grant({...}) to put a specific consumed item back for testing.
+      await reconcileQuestItemsFromProgress({ label: 'completeAll' });
       await refreshDevQuestUi();
     } catch (err) {
       console.error('[Quests Mod][Dev] Failed to complete all quests:', err);
@@ -37595,6 +39002,7 @@ function createNPCCooldownManager() {
       if (missionId === KING_MONKS_STUDY_MISSION.id && typeof updateTile53CostelloRightClickState === 'function') {
         updateTile53CostelloRightClickState();
       }
+      await reconcileQuestItemsFromProgress({ label: `accept ${missionId}` });
       await refreshDevQuestUi();
     } catch (error) {
       console.error('[Quests Mod][Dev] Error setting mission progress:', error);
@@ -37696,6 +39104,7 @@ function createNPCCooldownManager() {
         }
       }
 
+      await reconcileQuestItemsFromProgress({ label: `reset ${missionId}` });
       await refreshDevQuestUi();
       console.log('[Quests Mod][Dev] UI state updated');
     } catch (error) {
@@ -37751,6 +39160,7 @@ function createNPCCooldownManager() {
       await addQuestItem(SILVER_TOKEN_CONFIG.productName, 1);
       console.log('[Quests Mod][Dev] Granted Silver Token for King access');
 
+      await reconcileQuestItemsFromProgress({ label: 'resetAll' });
       await refreshDevQuestUi();
       updateArenaLeaderboardDisplay(true).catch((err) => {
         console.warn('[Quests Mod][Dev] Error refreshing arena leaderboard after reset:', err);
@@ -37794,6 +39204,7 @@ function createNPCCooldownManager() {
       setMissionProgress(CHRISTMAS_MIRACLE_MISSION, { accepted: false, completed: false });
       await saveKingTibianusProgress(playerName, getAllMissionProgress());
       clearQuestItemsCache();
+      await reconcileQuestItemsFromProgress({ label: 'resetSanta' });
       await refreshDevQuestUi();
       console.log('[Quests Mod][Dev] Santa Claus reset complete — Wishlist can drop again; Present can be claimed again; mission cleared');
     } catch (error) {
@@ -37827,6 +39238,7 @@ function createNPCCooldownManager() {
     console.log('[Quests Mod][Dev] Item keys for grant():', getQuestsDevItemKeyIds());
     console.log('[Quests Mod][Dev] Catalog:', QuestsDev.catalog());
     console.log('[Quests Mod][Dev] Examples: QuestsDev.grant({ leather: 1, monksStudy: 1 }); QuestsDev.setAccepted("king_copper_key"); QuestsDev.complete("king_red_dragon"); QuestsDev.reset("svenson_love_story"); QuestsDev.resetLoveStoryWithItems(); QuestsDev.resetSanta(); QuestsDev.completeAll(); QuestsDev.resetAll();');
+    console.log('[Quests Mod][Dev] complete / setAccepted / reset / resetAll / completeAll / resetSanta now auto-sync the quest-item bag to progress (grant/stale/backfill rules). QuestsDev.reconcile() runs that sync on demand — use it after a grant() that changed both progress and items.');
   }
 
   function questsDevCatalog() {
@@ -37839,7 +39251,7 @@ function createNPCCooldownManager() {
       ),
       sealsCount: SEVEN_SEALS_COUNT,
       actions: [
-        'grant', 'completeAll', 'check', 'setAccepted', 'complete', 'reset', 'resetAll',
+        'grant', 'completeAll', 'reconcile', 'check', 'setAccepted', 'complete', 'reset', 'resetAll',
         'resetIronOreReceived', 'resetSanta', 'resetLoveStoryWithItems',
         'setSealCompleted', 'getSealCompleted', 'areAllSevenSealsCompleted', 'help', 'catalog'
       ]
@@ -37849,6 +39261,7 @@ function createNPCCooldownManager() {
   const QuestsDev = {
     grant: questsDevGrant,
     completeAll: questsDevCompleteAll,
+    reconcile: () => reconcileQuestItemsFromProgress({ label: 'manual' }),
     check: checkMissionState,
     setAccepted: setMissionAccepted,
     complete: setMissionCompleted,
@@ -37874,6 +39287,7 @@ function createNPCCooldownManager() {
     globalThis.QuestsDev = QuestsDev;
     globalThis.questsDevGrant = questsDevGrant;
     globalThis.questsDevCompleteAll = questsDevCompleteAll;
+    globalThis.questsDevReconcile = QuestsDev.reconcile;
 
     // Legacy window aliases → QuestsDev (kept for old bookmarks / muscle memory)
     window.checkMissionState = QuestsDev.check;
