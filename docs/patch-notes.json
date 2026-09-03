@@ -4,6 +4,16 @@
   },
   "notes": [
     {
+      "version": "4.9.13",
+      "changes": [
+        {
+          "mod": "Quests",
+          "type": "fixed",
+          "text": "A permanent quest NPC could vanish from the board once their introductory quest was done and you were no longer carrying a related quest item, leaving no way to reach them. The town quest NPCs now stay reachable on the board for good once unlocked, and that state is saved so it survives a progress reload. The quest-action icon (crossed swords) on a board NPC now shows only when that NPC actually has a new quest or a step to advance, never just because the NPC is present."
+        }
+      ]
+    },
+    {
       "version": "4.9.12",
       "changes": [
         {

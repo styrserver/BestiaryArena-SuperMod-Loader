@@ -998,7 +998,6 @@ function applyQuestRoomsFromAssets(roomsData) {
     if (sheng.villainGameIdFallback != null) APPRENTICE_SHENG_VILLAIN_GAME_ID_FALLBACK = sheng.villainGameIdFallback;
     if (sheng.fightIconUrl) {
       APPRENTICE_SHENG_FIGHT_ICON_URL = sheng.fightIconUrl;
-      QUEST_FIGHT_ICON_URL = sheng.fightIconUrl;
     }
     if (sheng.rookstayerOutfitSpriteId) {
       ROOKSTAYER_OUTFIT_SPRITE_ID = sheng.rookstayerOutfitSpriteId;
@@ -1238,10 +1237,7 @@ function applyQuestRoomsFromAssets(roomsData) {
       if (board.santa.tileIndex != null) SANTA_CLAUS_TILE_INDEX = board.santa.tileIndex;
       if (board.santa.id) BOARD_NPC_SANTA_ID = board.santa.id;
       if (board.santa.outfitSpriteId) SANTA_OUTFIT_SPRITE_ID = board.santa.outfitSpriteId;
-      if (board.santa.dialogueIconUrl) {
-        SANTA_DIALOGUE_ICON_URL = board.santa.dialogueIconUrl;
-        QUEST_FIGHT_ICON_URL = board.santa.dialogueIconUrl;
-      }
+      if (board.santa.dialogueIconUrl) SANTA_DIALOGUE_ICON_URL = board.santa.dialogueIconUrl;
     }
     if (board.alDeeRatPlague) {
       if (board.alDeeRatPlague.id) BOARD_NPC_AL_DEE_RAT_PLAGUE_ID = board.alDeeRatPlague.id;
@@ -1574,7 +1570,9 @@ const QUEST_FIGHT_ICON_CLASS = 'quests-fight-icon';
 const QUEST_FIGHT_ICON_ATTR = 'data-quests-fight-icon-id';
 /** Above tile highlights (10002), board NPC overlays (10002), and name tags (20001). */
 const QUEST_FIGHT_ICON_Z_INDEX = 30000;
-let QUEST_FIGHT_ICON_URL = 'https://bestiaryarena.com/assets/icons/fight.png';
+// The one crossed-swords badge image ("this NPC has a quest action for you").
+// Every renderer (tile badge, board-NPC name tag, modal pending badge) uses this.
+const QUEST_FIGHT_ICON_URL = 'https://bestiaryarena.com/assets/icons/fight.png';
 let QUEST_ACCESS_CURSOR = 'pointer';
 let QUEST_ACCESS_TILE_TITLE = 'Right-click';
 // Fallback for a quest battle's ally-tile-restriction toast when battles.json gives no
@@ -2600,6 +2598,7 @@ function createNPCCooldownManager() {
     progressWeakenedArchdemon: { accepted: false, completed: false, battleCompleted: false },
     progressLostOracle: { accepted: false, completed: false, askedNpcs: false, kingInformed: false, orbExchanged: false, spectralStoneReceived: false, oracleEnraged: false, battleCompleted: false, oracleDismissed: false },
     costelloVisited: false,
+    metTesha: false, // Set true the first time the player opens Tesha's chat (or backfilled from any Tesha-chain progress on load). Persisted so Tesha stays reachable on the board forever after — her arrow / fight icon must not depend on holding a Scarab Coin or on a pending quest step.
     mornenionDefeated: false, // Mornenion defeat flag (also stored in Firebase as progress.mornenion.defeated); keep in sync so getAllMissionProgress() includes it when saving
     sevenSealsCompleted: getDefaultSevenSealsCompleted(), // one boolean per seal (index 0 = First Seal … 6 = Seventh Seal); complete each seal separately via setSealCompleted(sealIndex, true)
     missionOffered: false,
@@ -7895,6 +7894,7 @@ function createNPCCooldownManager() {
       }
     }
     result.costelloVisited = !!kingChatState.costelloVisited;
+    result.metTesha = !!kingChatState.metTesha;
     result.mornenion = { defeated: !!kingChatState.mornenionDefeated };
     result.sevenSealsCompleted = normalizeSevenSealsCompleted(kingChatState.sevenSealsCompleted);
     result.starterCoinThanked = !!kingChatState.starterCoinThanked;
@@ -8045,7 +8045,7 @@ function createNPCCooldownManager() {
     }
     // New shape preferred: nested format with all missions from registry
     // Check if any registered mission field exists in data
-    const hasAnyMissionField = Object.values(MISSION_FIREBASE_KEY_MAP).some(key => data[key]) || data.ironOre || data.mornenion || data.costelloVisited || data.starterCoinThanked === true || Array.isArray(data.sevenSealsCompleted) || Array.isArray(data.sevenSealsVisited);
+    const hasAnyMissionField = Object.values(MISSION_FIREBASE_KEY_MAP).some(key => data[key]) || data.ironOre || data.mornenion || data.costelloVisited || data.metTesha === true || data.starterCoinThanked === true || Array.isArray(data.sevenSealsCompleted) || Array.isArray(data.sevenSealsVisited);
     
     if (hasAnyMissionField) {
       const result = {};
@@ -8081,6 +8081,7 @@ function createNPCCooldownManager() {
       };
       
       result.costelloVisited = !!data.costelloVisited;
+      result.metTesha = !!data.metTesha;
       result.starterCoinThanked = !!data.starterCoinThanked;
       if (Array.isArray(data.sevenSealsCompleted) && data.sevenSealsCompleted.length === SEVEN_SEALS_COUNT) {
         result.sevenSealsCompleted = data.sevenSealsCompleted.slice(0, SEVEN_SEALS_COUNT).map(Boolean);
@@ -8134,6 +8135,7 @@ function createNPCCooldownManager() {
       merged.ironOre ||
       merged.mornenion ||
       merged.costelloVisited ||
+      merged.metTesha ||
       Array.isArray(merged.sevenSealsCompleted)
     );
     
@@ -8165,6 +8167,7 @@ function createNPCCooldownManager() {
           };
           
           result.costelloVisited = !!merged.costelloVisited;
+          result.metTesha = !!merged.metTesha;
           result.starterCoinThanked = !!merged.starterCoinThanked;
           result.sevenSealsCompleted = normalizeSevenSealsCompleted(merged.sevenSealsCompleted);
           return result;
@@ -9392,6 +9395,22 @@ function createNPCCooldownManager() {
     if (progress.mornenion?.defeated) return true;
     if (progress.ironOre?.completed || progress.ironOre?.active || progress.ironOre?.startTime) return true;
     return false;
+  }
+
+  // True if the player has ever engaged Tesha's quest chain — used to backfill the
+  // persisted metTesha flag for players who predate it. Runs after the mission loop in
+  // loadKingTibianusProgress(), so kingChatState mission state is already hydrated.
+  function inferMetTeshaFromProgress(progress) {
+    if (!progress || progress.__isEmpty) return false;
+    if (progress.meetingWithTesha?.accepted || progress.meetingWithTesha?.completed) return true;
+    const engaged = (mission) => {
+      const p = (typeof mission !== 'undefined' && mission) ? (getMissionProgress(mission) || {}) : {};
+      return !!(p.accepted || p.completed || p.battleCompleted || p.putridChamberComplete);
+    };
+    return engaged(KING_SCARAB_COIN_MISSION)
+      || engaged(SERPENTINE_TOWER_MISSION)
+      || engaged(REALM_OF_DREAMS_MISSION)
+      || engaged(VISITING_MINTWALLIN_MISSION);
   }
 
   async function grantStarterSilverTokenIfNeeded(progress, playerName) {
@@ -16460,6 +16479,7 @@ function createNPCCooldownManager() {
   // Tesha Modal (Darama Oasis) – uses shared NPC chat layout
   async function showTeshaModal() {
     await ensureQuestDialogueLoaded();
+    markTeshaMet();
     const teshaPlayerName = getCurrentPlayerName() || 'Player';
     const teshaIconUrl = getQuestItemsAssetUrl('Tesha.gif');
     const { contentDiv, addMessage, imageContainer: teshaImageContainer, textarea, sendBtn } = createNPCChatModalContent({
@@ -30518,33 +30538,53 @@ function createNPCCooldownManager() {
   let tileHighlightGameTimerSubscription = null;
 
   function getQuestFightIconUrl() {
-    return QUEST_FIGHT_ICON_URL
-      || APPRENTICE_SHENG_FIGHT_ICON_URL
-      || 'https://bestiaryarena.com/assets/icons/fight.png';
+    return QUEST_FIGHT_ICON_URL;
   }
 
   const NPC_MODAL_PENDING_BADGE_CLASS = 'quests-npc-modal-pending-badge';
 
-  // Same fight.png badge shown on board NPCs with a pending quest action, but
-  // overlaid on an NPC's portrait inside their own chat modal.
+  // The crossed-swords quest-action badge is one 16x16 pixelated <img> everywhere it
+  // appears; only the anchor / offsets differ. `variant`:
+  //   'tile'    — pinned to a board tile corner (needs `id` for later removal)
+  //   'nameTag' — inline in a board NPC's floating name tag (interactive)
+  //   'modal'   — overlaid on an NPC portrait inside their chat modal
+  function buildFightIconImg(variant, { alt = 'Quest', id = null, src } = {}) {
+    const img = document.createElement('img');
+    img.src = src || getQuestFightIconUrl();
+    img.draggable = false;
+    if (variant === 'nameTag') {
+      img.className = 'pixelated inline-block';
+      img.alt = 'Dialogue';
+      img.style.cssText = [
+        'position:relative', 'width:16px', 'height:16px',
+        'pointer-events:auto', 'cursor:' + QUEST_ACCESS_CURSOR,
+        'margin-left:3px', 'margin-top:-7px', 'vertical-align:middle',
+        'image-rendering:pixelated', `z-index:${QUEST_FIGHT_ICON_Z_INDEX}`
+      ].join(';');
+    } else if (variant === 'modal') {
+      img.className = `${NPC_MODAL_PENDING_BADGE_CLASS} pixelated`;
+      img.alt = 'Quest pending';
+      img.title = 'A quest is pending';
+      img.style.cssText = [
+        'position:absolute', 'right:16px', 'top:10px', 'width:16px', 'height:16px',
+        'pointer-events:none', 'z-index:5', 'image-rendering:pixelated'
+      ].join(';');
+    } else { // 'tile'
+      img.className = `${QUEST_FIGHT_ICON_CLASS} pixelated`;
+      if (id != null) img.setAttribute(QUEST_FIGHT_ICON_ATTR, id);
+      img.alt = alt;
+      img.title = QUEST_ACCESS_TILE_TITLE;
+      img.style.cssText = [
+        'position:absolute', 'right:2px', 'top:2px', 'width:16px', 'height:16px',
+        'pointer-events:none', `z-index:${QUEST_FIGHT_ICON_Z_INDEX}`, 'image-rendering:pixelated'
+      ].join(';');
+    }
+    return img;
+  }
+
+  // fight.png badge overlaid on an NPC's portrait inside their own chat modal.
   function createNpcModalPendingBadge() {
-    const icon = document.createElement('img');
-    icon.className = `${NPC_MODAL_PENDING_BADGE_CLASS} pixelated`;
-    icon.src = getQuestFightIconUrl();
-    icon.alt = 'Quest pending';
-    icon.title = 'A quest is pending';
-    icon.draggable = false;
-    icon.style.cssText = [
-      'position:absolute',
-      'right:16px',
-      'top:10px',
-      'width:16px',
-      'height:16px',
-      'pointer-events:none',
-      'z-index:5',
-      'image-rendering:pixelated'
-    ].join(';');
-    return icon;
+    return buildFightIconImg('modal');
   }
 
   function setNpcModalPendingBadge(portraitContainer, isPending) {
@@ -30575,23 +30615,7 @@ function createNPCCooldownManager() {
     removeQuestFightIcon(id);
     if (!areQuestHelpersEnabled()) return;
 
-    const icon = document.createElement('img');
-    icon.className = `${QUEST_FIGHT_ICON_CLASS} pixelated`;
-    icon.setAttribute(QUEST_FIGHT_ICON_ATTR, id);
-    icon.src = getQuestFightIconUrl();
-    icon.alt = alt;
-    icon.title = QUEST_ACCESS_TILE_TITLE;
-    icon.draggable = false;
-    icon.style.cssText = [
-      'position:absolute',
-      'right:2px',
-      'top:2px',
-      'width:16px',
-      'height:16px',
-      'pointer-events:none',
-      `z-index:${QUEST_FIGHT_ICON_Z_INDEX}`,
-      'image-rendering:pixelated'
-    ].join(';');
+    const icon = buildFightIconImg('tile', { alt, id });
     ensureBoardNpcTileOverflowVisible(tileElement);
     tileElement.appendChild(icon);
     bringQuestTileOverlaysToFront(tileElement);
@@ -30600,6 +30624,12 @@ function createNPCCooldownManager() {
   function registerQuestFightIconSource(source) {
     questFightIconSources.push(source);
   }
+
+  // ── Per-NPC "has a quest action" predicates ────────────────────────────────
+  // These are the single source of truth for whether an NPC's fight.png badge shows.
+  // Every renderer must go through them (town NPCs: QUEST_TOWN_NPCS[].pending; chat
+  // modals: setNpcModalPendingBadge; the King: hasKingTibianusQuestAction). Never
+  // substitute "the NPC is unlocked / on the board" for "the NPC has something to do".
 
   /** New quest available or a hand-in / talk step is ready at Wyda. */
   function hasWydaQuestAction() {
@@ -30663,6 +30693,40 @@ function createNPCCooldownManager() {
     if (serpentine.completed) return false;
     if (!serpentine.accepted) return true;
     return !!serpentine.putridChamberComplete;
+  }
+
+  // Tesha is a permanent NPC (bank / jewel store, plus she gates the Serpentine Tower and
+  // Realm of Dreams chains). Once the player has engaged her at all she must ALWAYS be
+  // reachable on Darama Oasis — her board arrow / fight icon must not depend on currently
+  // holding a Scarab Coin or on hasTeshaQuestAction() (which goes false between quests).
+  function teshaUnlocked() {
+    if (kingChatState.metTesha) return true;
+    const scarab = getMissionProgress(KING_SCARAB_COIN_MISSION) || {};
+    if (scarab.accepted || scarab.completed) return true;
+    const serpentine = getMissionProgress(SERPENTINE_TOWER_MISSION) || {};
+    if (serpentine.accepted || serpentine.completed || serpentine.putridChamberComplete) return true;
+    const realm = getMissionProgress(REALM_OF_DREAMS_MISSION) || {};
+    if (realm.accepted || realm.completed || realm.battleCompleted) return true;
+    const mintwallin = getMissionProgress(VISITING_MINTWALLIN_MISSION) || {};
+    if (mintwallin.accepted || mintwallin.completed || mintwallin.battleCompleted) return true;
+    return false;
+  }
+
+  // Persist the "player has met Tesha" flag the first time her chat opens, so she never
+  // disappears from the board afterwards (even if a later reconciliation clears the
+  // Scarab Coin mission). Fire-and-forget; mirrors the Costello / starterCoinThanked pattern.
+  function markTeshaMet() {
+    if (kingChatState.metTesha) return;
+    kingChatState.metTesha = true;
+    const playerName = getCurrentPlayerName();
+    if (!playerName || !missionProgressHydratedFromFirebase) return;
+    try {
+      saveKingTibianusProgress(playerName, getAllMissionProgress())
+        .catch((err) => console.error('[Quests Mod][Tesha] Error saving metTesha:', err));
+    } catch (err) {
+      console.error('[Quests Mod][Tesha] Error saving metTesha:', err);
+    }
+    if (typeof updateTeshaArrowState === 'function') updateTeshaArrowState();
   }
 
   // King Tibianus isn't a board NPC, so unlike hasWydaQuestAction/hasAlDeeQuestAction/hasTeshaQuestAction
@@ -30778,23 +30842,25 @@ function createNPCCooldownManager() {
     }
   }
 
-  function shouldShowWydaFightIcon(boardContext = null) {
-    return shouldEnableTile83WydaRightClick(boardContext) && hasWydaQuestAction();
-  }
-
-  function shouldShowCostelloFightIcon(boardContext = null) {
-    return shouldEnableTile53CostelloRightClick(boardContext) && hasCostelloQuestAction();
-  }
-
-  function shouldShowAlDeeFightIcon(boardContext = null) {
-    return shouldEnableTile79RightClick(boardContext) && hasAlDeeQuestAction();
-  }
-
-  function shouldShowTeshaFightIcon(boardContext = null) {
+  // Tesha's board tile (Darama Oasis) has no dedicated right-click enabler like the
+  // other town NPCs — the room / battle / ally-piece gating lives here instead.
+  function isTeshaBoardTileReachable(boardContext = null) {
     try {
       if (!isOnRoomByName(DESERT_DIGGING_CONFIG.TARGET_MAP)) return false;
       if (isBoardBattleActive(boardContext) || countAllyPiecesOnBoard(boardContext) > 0) return false;
-      return hasTeshaQuestAction();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  // Fight-icon (!) badge for a town NPC: shown only while the NPC's tile is reachable
+  // AND a quest step is actually pending. A "permanent" NPC (e.g. Tesha) stays
+  // reachable on the board with nothing pending — that's the arrow / tile-highlight's
+  // job, NOT the badge's. See QUEST_TOWN_NPCS for the per-NPC predicates.
+  function isQuestTownNpcFightIconActive(npc, boardContext = null) {
+    try {
+      return npc.reachable(boardContext) && npc.pending();
     } catch (_) {
       return false;
     }
@@ -31052,33 +31118,62 @@ function createNPCCooldownManager() {
     }
   }
 
-  function initializeQuestFightIconSources() {
-    if (questFightIconSources.length > 0) return;
-
-    registerQuestFightIconSource({
+  // ── Town NPCs (right-click a tile to open a chat modal) ─────────────────────
+  // Wyda, Costello, Al Dee and Tesha share one shape: a pulse highlight + right-click
+  // access while the tile is `reachable`, plus a fight-icon (!) badge while a quest
+  // step is `pending` (or always, for a `permanent` NPC the player has unlocked).
+  // The per-NPC has*QuestAction / shouldEnableTile*RightClick helpers remain the
+  // source of truth; this table removes the copy-pasted wiring into the fight-icon
+  // and tile-highlight registries.
+  const QUEST_TOWN_NPCS = [
+    {
       id: 'wyda',
       alt: 'Visit Wyda',
       getTile: () => getTileElement(WYDA_TILE_INDEX),
-      isActive: shouldShowWydaFightIcon
-    });
-    registerQuestFightIconSource({
+      reachable: (ctx) => shouldEnableTile83WydaRightClick(ctx),
+      pending: () => hasWydaQuestAction(),
+      highlight: true
+    },
+    {
       id: 'costello',
       alt: 'Visit Costello',
       getTile: () => getTileElement(COSTELLO_TILE_INDEX),
-      isActive: shouldShowCostelloFightIcon
-    });
-    registerQuestFightIconSource({
+      reachable: (ctx) => shouldEnableTile53CostelloRightClick(ctx),
+      pending: () => hasCostelloQuestAction(),
+      highlight: true
+    },
+    {
       id: 'al-dee',
       alt: 'Visit Al Dee',
       getTile: () => getTileElement(79),
-      isActive: shouldShowAlDeeFightIcon
-    });
-    registerQuestFightIconSource({
+      reachable: (ctx) => shouldEnableTile79RightClick(ctx),
+      pending: () => hasAlDeeQuestAction(),
+      highlight: true
+    },
+    {
       id: 'tesha',
       alt: 'Talk to Tesha',
       getTile: () => getTileElement(TESHA_TILE_INDEX),
-      isActive: shouldShowTeshaFightIcon
-    });
+      reachable: (ctx) => isTeshaBoardTileReachable(ctx),
+      pending: () => hasTeshaQuestAction(),
+      // Tesha stays reachable on the board via her dedicated arrow overlay
+      // (updateTeshaArrowState → teshaUnlocked()), not the shared tile-highlight
+      // glow and not the fight-icon badge.
+      highlight: false
+    }
+  ];
+
+  function initializeQuestFightIconSources() {
+    if (questFightIconSources.length > 0) return;
+
+    for (const npc of QUEST_TOWN_NPCS) {
+      registerQuestFightIconSource({
+        id: npc.id,
+        alt: npc.alt,
+        getTile: () => npc.getTile(),
+        isActive: (ctx) => isQuestTownNpcFightIconActive(npc, ctx)
+      });
+    }
   }
 
   function initializeQuestTileHighlightSources() {
@@ -31102,33 +31197,20 @@ function createNPCCooldownManager() {
       alt: 'Fastest Bishop in Carlin'
     });
 
-    registerQuestTileHighlightSource({
-      getTiles: () => {
-        const tile = getTileElement(COSTELLO_TILE_INDEX);
-        return tile ? [tile] : [];
-      },
-      // Glow whenever the NPC is unlocked; fight icons still use shouldShow*FightIcon.
-      isAccessActive: shouldEnableTile53CostelloRightClick,
-      alt: 'Visit Costello'
-    });
-
-    registerQuestTileHighlightSource({
-      getTiles: () => {
-        const tile = getTileElement(WYDA_TILE_INDEX);
-        return tile ? [tile] : [];
-      },
-      isAccessActive: shouldEnableTile83WydaRightClick,
-      alt: 'Visit Wyda'
-    });
-
-    registerQuestTileHighlightSource({
-      getTiles: () => {
-        const tile = getTileElement(79);
-        return tile ? [tile] : [];
-      },
-      isAccessActive: shouldEnableTile79RightClick,
-      alt: 'Visit Al Dee'
-    });
+    // Town NPCs (Wyda / Costello / Al Dee): glow + right-click access whenever the
+    // NPC's tile is reachable. Fight-icon (!) badges are handled separately via
+    // QUEST_TOWN_NPCS / isQuestTownNpcFightIconActive.
+    for (const npc of QUEST_TOWN_NPCS) {
+      if (!npc.highlight) continue;
+      registerQuestTileHighlightSource({
+        getTiles: () => {
+          const tile = npc.getTile();
+          return tile ? [tile] : [];
+        },
+        isAccessActive: (ctx) => npc.reachable(ctx),
+        alt: npc.alt
+      });
+    }
 
     registerQuestTileHighlightSource({
       getTiles: () => {
@@ -31462,8 +31544,9 @@ function createNPCCooldownManager() {
         return;
       }
 
-      const scarabProgress = getMissionProgress(KING_SCARAB_COIN_MISSION);
-      const qualifiesForArrow = scarabProgress.completed || await hasScarabCoinInInventory();
+      // Tesha stays on the board once unlocked — not just while a Scarab Coin is in hand.
+      // Keep the inventory check as an early-load fallback (flag may not be hydrated yet).
+      const qualifiesForArrow = teshaUnlocked() || await hasScarabCoinInInventory();
       const shouldShow = isOnRoomByName(DESERT_DIGGING_CONFIG.TARGET_MAP) &&
         !isBoardBattleActive(boardContext) &&
         countAllyPiecesOnBoard(boardContext) === 0 &&
@@ -36731,23 +36814,7 @@ function createNPCCooldownManager() {
   }
 
   function createBoardNpcDialogueIcon(npcConfig) {
-    const dialogueIcon = document.createElement('img');
-    dialogueIcon.src = npcConfig.dialogueIconUrl || getQuestFightIconUrl();
-    dialogueIcon.alt = 'Dialogue';
-    dialogueIcon.className = 'pixelated inline-block';
-    dialogueIcon.style.cssText = [
-      'position:relative',
-      'width:16px',
-      'height:16px',
-      'pointer-events:auto',
-      'cursor:' + QUEST_ACCESS_CURSOR,
-      'margin-left:3px',
-      'margin-top:-7px',
-      'vertical-align:middle',
-      'image-rendering:pixelated',
-      `z-index:${QUEST_FIGHT_ICON_Z_INDEX}`
-    ].join(';');
-    return dialogueIcon;
+    return buildFightIconImg('nameTag', { src: npcConfig.dialogueIconUrl });
   }
 
   function bindBoardNpcContextMenuHandlers(npcConfig, elements) {
@@ -36990,13 +37057,13 @@ function createNPCCooldownManager() {
     return true;
   }
 
+  // The fight.png badge means "this NPC has a quest action for you" — a new quest or a
+  // step ready to advance. It is NOT "the NPC exists": an unlocked NPC with nothing to
+  // do shows no badge. Every BOARD_NPC_CONFIGS entry therefore MUST declare an explicit
+  // isInteractable; without one we show no badge rather than falling back to isUnlocked().
   function isBoardNpcInteractable(npcConfig) {
-    if (!npcConfig) return false;
-    if (typeof npcConfig.isInteractable === 'function') {
-      return !!npcConfig.isInteractable();
-    }
-    // Default: only show fight.png when the NPC is placed for an active/new quest step.
-    return typeof npcConfig.isUnlocked === 'function' ? !!npcConfig.isUnlocked() : true;
+    if (!npcConfig || typeof npcConfig.isInteractable !== 'function') return false;
+    return !!npcConfig.isInteractable();
   }
 
   function updateBoardNpcState(npcConfig, boardContext = null) {
@@ -38095,6 +38162,10 @@ function createNPCCooldownManager() {
       if (progress.costelloVisited !== undefined) {
         kingChatState.costelloVisited = !!progress.costelloVisited;
       }
+      // Tesha is a permanent NPC (bank / jewel store / follow-on quests). Once the player
+      // has engaged her chain at all, she must stay reachable on the board forever — so
+      // treat any Tesha-chain progress as "met" for players who predate the metTesha flag.
+      kingChatState.metTesha = !!progress.metTesha || inferMetTeshaFromProgress(progress);
       kingChatState.mornenionDefeated = !!(progress.mornenion && progress.mornenion.defeated);
       if (Array.isArray(progress.sevenSealsCompleted) && progress.sevenSealsCompleted.length === SEVEN_SEALS_COUNT) {
         kingChatState.sevenSealsCompleted = progress.sevenSealsCompleted.slice(0, SEVEN_SEALS_COUNT).map(Boolean);
@@ -38115,6 +38186,17 @@ function createNPCCooldownManager() {
         console.log('[Quests Mod] Backfilled starterCoinThanked from existing progress');
       } catch (err) {
         console.error('[Quests Mod] Error backfilling starterCoinThanked:', err);
+      }
+    }
+
+    if (progress && kingChatState.metTesha && !progress.metTesha && !progress.__isEmpty) {
+      // Backfill metTesha for players who engaged Tesha's chain before the flag existed,
+      // so a later reconciliation that clears the Scarab Coin mission can't make her vanish.
+      try {
+        await saveKingTibianusProgress(playerName, getAllMissionProgress());
+        console.log('[Quests Mod] Backfilled metTesha from existing progress');
+      } catch (err) {
+        console.error('[Quests Mod] Error backfilling metTesha:', err);
       }
     }
 
@@ -38937,6 +39019,7 @@ function createNPCCooldownManager() {
         kingChatState[stateKey] = buildDevCompletedMissionProgress(firebaseKey);
       }
       kingChatState.costelloVisited = true;
+      kingChatState.metTesha = true;
       kingChatState.mornenionDefeated = true;
       kingChatState.sevenSealsCompleted = getDefaultSevenSealsCompleted().map(() => true);
 
@@ -38944,6 +39027,7 @@ function createNPCCooldownManager() {
       allCompleted.ironOre = { active: false, startTime: null, completed: true };
       allCompleted.mornenion = { defeated: true };
       allCompleted.costelloVisited = true;
+      allCompleted.metTesha = true;
       allCompleted.sevenSealsCompleted = getDefaultSevenSealsCompleted().map(() => true);
 
       await saveKingTibianusProgress(currentPlayer, allCompleted);
@@ -39126,6 +39210,7 @@ function createNPCCooldownManager() {
         kingChatState.progressMeetingWithTesha = { accepted: false, completed: false };
       }
       kingChatState.costelloVisited = false;
+      kingChatState.metTesha = false;
       kingChatState.mornenionDefeated = false;
       kingChatState.starterCoinThanked = false;
       kingChatState.sevenSealsCompleted = getDefaultSevenSealsCompleted().slice();
