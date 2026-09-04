@@ -4,6 +4,16 @@
   },
   "notes": [
     {
+      "version": "4.9.14",
+      "changes": [
+        {
+          "mod": "Quests",
+          "type": "fixed",
+          "text": "A permanent town quest NPC's tutorial arrow could stay missing from the board after their introductory quest was finished, since the arrow was only kept refreshed while that quest was still in progress. It is now maintained by the always-on board watcher, so once the NPC is unlocked the arrow reliably reappears whenever you are standing on their map out of combat."
+        }
+      ]
+    },
+    {
       "version": "4.9.13",
       "changes": [
         {

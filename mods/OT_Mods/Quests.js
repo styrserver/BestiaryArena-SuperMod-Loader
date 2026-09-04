@@ -31113,6 +31113,15 @@ function createNPCCooldownManager() {
     if (typeof updateJakundafDesertArrow === 'function') {
       updateJakundafDesertArrow(ctx);
     }
+    // Tesha's board arrow has its own updater (teshaUnlocked() gate, not the shared
+    // tile-highlight glow). Fold it in here so every refresh site — especially the
+    // post-Firebase-hydration refreshSystemsAfterMissionProgressLoaded() — re-evaluates
+    // it too. Without this the arrow only reappears on the next board/gameTimer event,
+    // which never fires on a peaceful town map like Darama Oasis, so a slow hydrate
+    // (mobile, poor connection) leaves the arrow missing until you move a piece.
+    if (typeof updateTeshaArrowState === 'function') {
+      updateTeshaArrowState(ctx);
+    }
     if (typeof updateAllQuestFightIcons === 'function') {
       updateAllQuestFightIcons(ctx);
     }
@@ -31438,6 +31447,10 @@ function createNPCCooldownManager() {
       tileHighlightBoardSubscription = globalThis.state.board.subscribe(({ context: boardContext }) => {
         updateAllQuestTileHighlights(boardContext);
         updateAllQuestFightIcons(boardContext);
+        // This observer is always wired; the dedicated Tesha-arrow observer only runs
+        // while a Tesha-chain mission is accepted-incomplete. Once she's unlocked and
+        // that chain is done, this is the only board subscription left to place her arrow.
+        if (typeof updateTeshaArrowState === 'function') updateTeshaArrowState(boardContext);
       });
     }
 
@@ -31446,11 +31459,15 @@ function createNPCCooldownManager() {
         const ctx = globalThis.state?.board?.getSnapshot()?.context;
         updateAllQuestTileHighlights(ctx);
         updateAllQuestFightIcons(ctx);
+        if (typeof updateTeshaArrowState === 'function') updateTeshaArrowState(ctx);
       });
     }
 
     updateAllQuestTileHighlights(globalThis.state?.board?.getSnapshot()?.context);
     updateAllQuestFightIcons(globalThis.state?.board?.getSnapshot()?.context);
+    if (typeof updateTeshaArrowState === 'function') {
+      updateTeshaArrowState(globalThis.state?.board?.getSnapshot()?.context);
+    }
     console.log('[Quests Mod][Tile Highlight] Observer set up for quest access tiles');
   }
 
@@ -31472,6 +31489,9 @@ function createNPCCooldownManager() {
       tileHighlightGameTimerSubscription = null;
     }
     removeAllQuestFightIcons();
+    // This observer may be the one that placed Tesha's arrow (see setupTileHighlightObserver);
+    // the dedicated Tesha observer's own cleanup is a no-op when it never ran.
+    if (typeof removeTeshaArrow === 'function') removeTeshaArrow();
   }
 
   function cleanupTileHighlightSystem() {
