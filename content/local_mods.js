@@ -78,10 +78,11 @@ const FALLBACK_DEFAULT_ENABLED_MODS = [
   'database/equipment-database.js', 'database/maps-database.js', 'database/equipment-lua-export.js',
   'database/creature-lua-export.js',
   'database/playereq-database.js', 'database/firebase-admins.js',
-  'Official Mods/Bestiary_Automator.js', 'Official Mods/Board Analyzer.js', 'Official Mods/Custom_Display.js',
-  'Official Mods/Hero_Editor.js', 'Official Mods/Highscore_Improvements.js', 'Official Mods/Item_tier_list.js',
-  'Official Mods/Monster_tier_list.js', 'Official Mods/Setup_Manager.js', 'Official Mods/Team_Copier.js',
-  'Official Mods/Tick_Tracker.js', 'Official Mods/Turbo Mode.js',
+  'Official Mods/Bestiary_Automator.js', 'Official Mods/Board Analyzer.js',
+  'Official Mods/Highscore_Improvements.js',
+  'Official Mods/Item_tier_list.js', 'Official Mods/Monster_tier_list.js',
+  'Official Mods/Setup_Manager.js',
+  'Super Mods/Autoseller.js', 'Super Mods/Cyclopedia.js', 'Super Mods/Hunt Analyzer.js',
   'Super Mods/Mod Settings.js', 'Super Mods/RunTracker.js', 'Super Mods/Outfiter.js'
 ];
 
@@ -104,6 +105,38 @@ function getFallbackBundledModPathSet() {
 
 function isKnownBundledModPath(modName) {
   return getFallbackBundledModPathSet().has(modName);
+}
+
+// Flag 4 guard: the Orion/iOS fallback arrays above are hand-copied from
+// content/mod-registry.js. When the real registry DOES load, assert the copies
+// still match it — a console.error always prints and lands in the popup Error Log,
+// so a forgotten fallback update (which only breaks browsers that can't import the
+// module) surfaces the first time any developer runs the extension.
+function assertFallbackMatchesRegistry(registry) {
+  if (!registry) return;
+  const pairs = [
+    ['FALLBACK_DATABASE_MODS', 'DATABASE_MODS', FALLBACK_DATABASE_MODS],
+    ['FALLBACK_OFFICIAL_MODS', 'OFFICIAL_MODS', FALLBACK_OFFICIAL_MODS],
+    ['FALLBACK_SUPER_MODS', 'SUPER_MODS', FALLBACK_SUPER_MODS],
+    ['FALLBACK_OT_MODS', 'OT_MODS', FALLBACK_OT_MODS],
+    ['FALLBACK_DEFAULT_ENABLED_MODS', 'DEFAULT_ENABLED_MODS', FALLBACK_DEFAULT_ENABLED_MODS],
+    ['defaultEnabledMods', 'DEFAULT_ENABLED_MODS', defaultEnabledMods]
+  ];
+  for (const [localName, key, fallback] of pairs) {
+    const authoritative = registry[key];
+    if (!Array.isArray(authoritative) || !Array.isArray(fallback)) continue;
+    const mismatch =
+      authoritative.length !== fallback.length ||
+      authoritative.some((v, i) => v !== fallback[i]);
+    if (mismatch) {
+      console.error(
+        `[Mod Registry] ${localName} in content/local_mods.js is out of sync with ` +
+        `content/mod-registry.js ${key}. Update the local array to match (these copies are ` +
+        `used on browsers that cannot import the registry module, e.g. Orion/iOS).`,
+        { registry: authoritative, local: fallback }
+      );
+    }
+  }
 }
 
 function createFallbackRegistry() {
@@ -694,6 +727,7 @@ async function loadModRegistry() {
     const module = await import(registryUrl);
     MOD_REGISTRY = module;
     console.log('[Mod Registry] Successfully loaded mod registry');
+    assertFallbackMatchesRegistry(module);
     return module;
   } catch (error) {
     console.warn('[Mod Registry] Dynamic import failed, using embedded fallback:', error);
@@ -720,22 +754,22 @@ let defaultEnabledMods = [
   'database/equipment-lua-export.js',
   'database/creature-lua-export.js',
   'database/playereq-database.js',
+  'database/firebase-admins.js',
   'Official Mods/Bestiary_Automator.js',
   'Official Mods/Board Analyzer.js',
-  'Official Mods/Custom_Display.js',
-  'Official Mods/Hero_Editor.js',
   'Official Mods/Highscore_Improvements.js',
   'Official Mods/Item_tier_list.js',
   'Official Mods/Monster_tier_list.js',
   'Official Mods/Setup_Manager.js',
-  'Official Mods/Team_Copier.js',
-  'Official Mods/Tick_Tracker.js',
-  'Official Mods/Turbo Mode.js',
+  // Super Mods enabled by default (user-toggleable in popup)
+  'Super Mods/Autoseller.js',
+  'Super Mods/Cyclopedia.js',
+  'Super Mods/Hunt Analyzer.js',
   // Hidden Super Mods - enabled by default since users can't toggle them in popup
   'Super Mods/Mod Settings.js',
   'Super Mods/RunTracker.js',
   'Super Mods/Outfiter.js'
-  // All other Super Mods are disabled by default - users must manually enable them
+  // All other mods are disabled by default - users must manually enable them
 ];
 
 // Update defaultEnabledMods from registry if available

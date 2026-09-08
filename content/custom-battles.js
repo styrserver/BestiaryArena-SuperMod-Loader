@@ -305,6 +305,86 @@ if (window.CustomBattles) {
             setRoomInfoOverlaySuppressed(false);
         }
 
+        // Sandbox "Loot / Auto-setup" toolbar (top-left overlay). Native React node, so
+        // hide with display:none (never remove — see CLAUDE.md) and re-assert on re-render.
+        let sandboxToolbarObserver = null;
+        let sandboxToolbarHideTimer = null;
+
+        function isSandboxToolbarElement(el) {
+            if (!el || el.nodeType !== 1) return false;
+            if (!el.classList?.contains('absolute')) return false;
+            if (!el.classList.contains('left-0') || !el.classList.contains('top-0')) return false;
+            if (!el.classList.contains('z-4')) return false;
+            return (el.textContent || '').includes('Auto-setup');
+        }
+
+        function setSandboxToolbarSuppressed(suppressed) {
+            try {
+                document.querySelectorAll('.absolute.left-0.top-0.z-4').forEach((el) => {
+                    if (!isSandboxToolbarElement(el)) return;
+                    if (suppressed) {
+                        if (el.dataset.customBattlePrevDisplay == null) {
+                            el.dataset.customBattlePrevDisplay = el.style.display || '';
+                        }
+                        el.dataset.customBattleSandboxToolbarHidden = '1';
+                        el.style.display = 'none';
+                    } else if (el.dataset.customBattleSandboxToolbarHidden === '1') {
+                        el.style.display = el.dataset.customBattlePrevDisplay || '';
+                        delete el.dataset.customBattlePrevDisplay;
+                        delete el.dataset.customBattleSandboxToolbarHidden;
+                    }
+                });
+            } catch (error) {
+                console.warn('[Custom Battles] Error toggling sandbox toolbar visibility:', error);
+            }
+        }
+
+        function stopSandboxToolbarWatch() {
+            if (sandboxToolbarHideTimer) {
+                clearTimeout(sandboxToolbarHideTimer);
+                sandboxToolbarHideTimer = null;
+            }
+            if (sandboxToolbarObserver) {
+                try {
+                    sandboxToolbarObserver.disconnect();
+                } catch (_) {
+                    // no-op
+                }
+                sandboxToolbarObserver = null;
+            }
+        }
+
+        function startSandboxToolbarWatch() {
+            setSandboxToolbarSuppressed(true);
+            if (sandboxToolbarObserver || typeof MutationObserver === 'undefined') return;
+
+            const observeRoot = document.body || document.documentElement;
+            if (!observeRoot) return;
+
+            sandboxToolbarObserver = new MutationObserver(() => {
+                if (sandboxToolbarHideTimer) clearTimeout(sandboxToolbarHideTimer);
+                sandboxToolbarHideTimer = setTimeout(() => {
+                    sandboxToolbarHideTimer = null;
+                    if (activeCustomBattles.size > 0) {
+                        setSandboxToolbarSuppressed(true);
+                    }
+                }, 50);
+            });
+            sandboxToolbarObserver.observe(observeRoot, {
+                childList: true,
+                subtree: true
+            });
+        }
+
+        function hideSandboxToolbarForCustomBattle() {
+            startSandboxToolbarWatch();
+        }
+
+        function showSandboxToolbarAfterCustomBattle() {
+            stopSandboxToolbarWatch();
+            setSandboxToolbarSuppressed(false);
+        }
+
         function setBetterHighscoresSuppressed(suppressed) {
             try {
                 if (typeof window !== 'undefined' && window.BetterHighscores
@@ -646,6 +726,7 @@ if (window.CustomBattles) {
                 this.allyDeathsThisGame = 0;
                 this.allyDeathTrackingUnsubs = [];
                 this.newGameUnsub = null;
+                this.genericNewGameUnsub = null;
                 this._roomReloadInProgress = false;
                 this._roomReloadClearTimer = null;
                 this.autoSetupVillainSyncUnsub = null;
@@ -668,6 +749,7 @@ if (window.CustomBattles) {
                 this.geneIntegrityTimerIds = [];
                 this.preBattleGeneTamperCount = 0;
                 this.lastPreBattleGeneIntegrityCheckAt = 0;
+                this.abilityCooldownTimerIds = [];
                 if (!config.roomId) {
                     throw new Error('CustomBattle config must include roomId');
                 }
@@ -964,6 +1046,7 @@ if (window.CustomBattles) {
                 console.log(`[Custom Battles][${this.config.name || 'Battle'}] One-shot entry villain setup`);
                 hideBetterHighscoresForCustomBattle();
                 hideRoomInfoOverlayForCustomBattle();
+                hideSandboxToolbarForCustomBattle();
                 this.removeOriginalVillains();
                 this.entryVillainSetupDone = true;
                 this.scheduleVillainOutfitSpriteOverrides({ force: true });
@@ -2039,6 +2122,134 @@ if (window.CustomBattles) {
                         this.enforceConfiguredGenesIntegrity(world, `${reason}+${delay}ms`);
                     }, delay);
                     this.geneIntegrityTimerIds.push(timerId);
+                });
+            }
+
+            // Ability cooldown override: villains/allies with a configured abilityCooldownTicks
+            // (Map Editor's creature editor "Ability CD" field is the only current producer of
+            // this) get their live actor's real runtime ability-cooldown component patched
+            // directly — there is no config-level field the native game or board reads to
+            // override a monster's ability cooldown at spawn time. This mirrors the one proven
+            // technique in this codebase for changing it (Quests.js's Lost Oracle rage-battle
+            // patchOracleRageAbilityCooldownTo2s), generalized here so any CustomBattles-driven
+            // battle gets it for free instead of needing bespoke per-fight code.
+            getConfiguredAbilityCooldownPieces() {
+                const normalize = (piece, isVillain) => {
+                    const ticks = Number(piece?.abilityCooldownTicks);
+                    if (!Number.isFinite(ticks) || ticks < 0) return null;
+                    return {
+                        isVillain,
+                        tileIndex: Number(piece.tileIndex),
+                        nickname: String(piece.nickname || piece.name || ''),
+                        gameId: Number(piece.gameId),
+                        cooldownTicks: Math.floor(ticks)
+                    };
+                };
+                const villains = (this.config.villains || [])
+                    .map((v) => normalize(v, true))
+                    .filter(Boolean);
+                const allies = (this.config.allies || [])
+                    .map((a) => normalize(a, false))
+                    .filter(Boolean);
+                return [...villains, ...allies];
+            }
+
+            // Traced directly from the game's own minified source (the Cooldown class backing
+            // abilityCooldown/autoAttack cooldown/movement cooldown alike): it stores its base
+            // duration in ticks as `_baseCooldown` (readable via the `.baseCooldown` getter) and
+            // exposes `setBaseCooldown(ticks)`, which correctly rescales any in-progress
+            // remaining cooldown proportionally instead of leaving it stale. None of the other
+            // key names this used to guess at (baseCooldownTicks/baseCooldownMs/etc.) exist
+            // anywhere in the game's code — they never matched anything.
+            findAbilityCooldownComponent(actor) {
+                if (!actor || typeof actor !== 'object') return null;
+                const isCooldownComponent = (value) => value && typeof value === 'object'
+                    && typeof value._baseCooldown === 'number'
+                    && typeof value.setBaseCooldown === 'function';
+                // Most monsters expose their ability's cooldown clock as `abilityCooldown`, but
+                // a number of them name it after their own move instead (biteCooldownClock,
+                // flurryCooldown, rageCooldownClock, wakeCooldown, spellCooldown,
+                // passiveCooldownClock, ...) — duck-type match by shape when the common name
+                // isn't present, preferring `abilityCooldown` whenever it does qualify.
+                if (isCooldownComponent(actor.abilityCooldown)) return actor.abilityCooldown;
+                for (const key of Object.keys(actor)) {
+                    if (key === 'abilityCooldown') continue;
+                    if (isCooldownComponent(actor[key])) return actor[key];
+                }
+                return null;
+            }
+
+            applyAbilityCooldownToActor(actor, cooldownTicks) {
+                const abilityCd = this.findAbilityCooldownComponent(actor);
+                if (!abilityCd) return false;
+                if (abilityCd._baseCooldown === cooldownTicks) return false;
+                abilityCd.setBaseCooldown(cooldownTicks);
+                return true;
+            }
+
+            enforceConfiguredAbilityCooldowns(world = null, reason = 'runtime') {
+                const pieces = this.getConfiguredAbilityCooldownPieces();
+                if (!pieces.length) return false;
+                let changed = false;
+                const matchedPieceKeys = new Set();
+                let unmatchedActorAbilityCd = 0;
+                try {
+                    const activeWorld = world || globalThis.state?.board?.getSnapshot?.()?.context?.world || null;
+                    const entries = activeWorld?.grid?.childrenById?.entries?.();
+                    const actors = [];
+                    if (entries && typeof entries[Symbol.iterator] === 'function') {
+                        for (const [, actor] of entries) actors.push(actor);
+                    } else if (Array.isArray(activeWorld?.grid?.actors)) {
+                        actors.push(...activeWorld.grid.actors);
+                    }
+                    actors.forEach((actor) => {
+                        const piece = pieces.find((p) => this.actorMatchesGenePiece(actor, p));
+                        if (!piece) return;
+                        matchedPieceKeys.add(`${piece.isVillain ? 'v' : 'a'}:${piece.tileIndex}`);
+                        if (this.applyAbilityCooldownToActor(actor, piece.cooldownTicks)) {
+                            changed = true;
+                        } else if (!this.findAbilityCooldownComponent(actor)) {
+                            unmatchedActorAbilityCd += 1;
+                        }
+                    });
+                    if (changed) {
+                        console.log(`[Custom Battles][${this.config.name || 'Battle'}] Enforced configured ability cooldowns (${reason})`);
+                    } else {
+                        // Nothing changed — say exactly why, since a silent no-op here is the
+                        // most likely cause of "ability CD doesn't seem to work" reports.
+                        const missingActorForPiece = pieces.length > matchedPieceKeys.size;
+                        if (!actors.length) {
+                            console.log(`[Custom Battles][${this.config.name || 'Battle'}] Ability cooldown not applied (${reason}): no live battle world/actors yet — normal before the fight actually starts.`);
+                        } else if (missingActorForPiece) {
+                            console.log(`[Custom Battles][${this.config.name || 'Battle'}] Ability cooldown not applied (${reason}): ${pieces.length - matchedPieceKeys.size} configured piece(s) had no matching live actor (check tileIndex/gameId/nickname match).`);
+                        } else if (unmatchedActorAbilityCd > 0) {
+                            console.log(`[Custom Battles][${this.config.name || 'Battle'}] Ability cooldown not applied (${reason}): matched ${unmatchedActorAbilityCd} live actor(s) but found no cooldown-clock component on them at all (this monster's ability may not use a Cooldown component, or already sat at the configured value).`);
+                        }
+                    }
+                } catch (error) {
+                    console.warn(`[Custom Battles][${this.config.name || 'Battle'}] Error enforcing ability cooldowns (${reason}):`, error);
+                }
+                return changed;
+            }
+
+            clearAbilityCooldownTimers() {
+                while (this.abilityCooldownTimerIds.length > 0) {
+                    const timerId = this.abilityCooldownTimerIds.pop();
+                    clearTimeout(timerId);
+                }
+            }
+
+            scheduleConfiguredAbilityCooldownChecks(world = null, reason = 'newGame') {
+                const pieces = this.getConfiguredAbilityCooldownPieces();
+                if (!pieces.length) return;
+                this.clearAbilityCooldownTimers();
+                this.enforceConfiguredAbilityCooldowns(world, `${reason}-immediate`);
+                [150, 600, 1200].forEach((delay) => {
+                    const timerId = setTimeout(() => {
+                        if (!this.isActive) return;
+                        this.enforceConfiguredAbilityCooldowns(world, `${reason}+${delay}ms`);
+                    }, delay);
+                    this.abilityCooldownTimerIds.push(timerId);
                 });
             }
 
@@ -4778,6 +4989,31 @@ if (window.CustomBattles) {
             }
 
             /**
+             * Actor display names, gene integrity, and ability cooldown enforcement all need to
+             * re-run once a battle's actors actually exist (on 'newGame'). This used to live
+             * inside setupVictoryDefeatDetection()'s own 'newGame' subscription — which setup()
+             * only calls when config.victoryDefeat is set — so any battle without a configured
+             * victory/defeat flow (e.g. Map Editor's sandbox test battles) never got these
+             * enforced at all. Registered unconditionally so it works regardless of victoryDefeat.
+             */
+            setupGenericNewGameScheduling() {
+                if (typeof globalThis === 'undefined' || !globalThis.state?.board) return;
+                const board = globalThis.state.board;
+                if (typeof board.on !== 'function') return;
+
+                if (this.genericNewGameUnsub) {
+                    try { this.genericNewGameUnsub(); } catch (e) {}
+                    this.genericNewGameUnsub = null;
+                }
+                this.genericNewGameUnsub = board.on('newGame', (event) => {
+                    const world = event && event.world;
+                    this.scheduleConfiguredActorDisplayNames(world || null, 'newGame');
+                    this.scheduleConfiguredGenesIntegrityChecks(world || null, 'newGame');
+                    this.scheduleConfiguredAbilityCooldownChecks(world || null, 'newGame');
+                });
+            }
+
+            /**
              * Setup victory/defeat detection
              */
             setupVictoryDefeatDetection() {
@@ -4803,8 +5039,6 @@ if (window.CustomBattles) {
                     }
                     this.newGameUnsub = board.on('newGame', (event) => {
                         const world = event && event.world;
-                        this.scheduleConfiguredActorDisplayNames(world || null, 'newGame');
-                        this.scheduleConfiguredGenesIntegrityChecks(world || null, 'newGame');
                         if (!world || !world.grid || !world.grid.onActorDeath) return;
                         this.allyDeathsThisGame = 0;
                         this.unsubscribeAllyDeathTracking();
@@ -5301,6 +5535,7 @@ if (window.CustomBattles) {
                 activeCustomBattles.add(this);
                 hideBetterHighscoresForCustomBattle();
                 hideRoomInfoOverlayForCustomBattle();
+                hideSandboxToolbarForCustomBattle();
                 installGlobalAllyVillainOverlapGuard();
                 this.activationCallback = activationCallback || null;
                 this._overlapToastCallback = showToastCallback || null;
@@ -5330,6 +5565,10 @@ if (window.CustomBattles) {
                 if (this.config.victoryDefeat) {
                     this.setupVictoryDefeatDetection();
                 }
+
+                // Actor display names / gene integrity / ability cooldown enforcement — always
+                // on, independent of victoryDefeat (see setupGenericNewGameScheduling doc comment).
+                this.setupGenericNewGameScheduling();
 
                 if (this.sceneSpriteState) {
                     this.setupSceneSpriteReplacements();
@@ -5455,6 +5694,10 @@ if (window.CustomBattles) {
                     try { this.newGameUnsub(); } catch (e) {}
                     this.newGameUnsub = null;
                 }
+                if (this.genericNewGameUnsub) {
+                    try { this.genericNewGameUnsub(); } catch (e) {}
+                    this.genericNewGameUnsub = null;
+                }
 
                 if (this.autoSetupVillainSyncTimer) {
                     clearTimeout(this.autoSetupVillainSyncTimer);
@@ -5472,6 +5715,7 @@ if (window.CustomBattles) {
                 this.clearGeneIntegrityTimers();
                 this.preBattleGeneTamperCount = 0;
                 this.lastPreBattleGeneIntegrityCheckAt = 0;
+                this.clearAbilityCooldownTimers();
                 if (this.forcedAllyWatchUnsub) {
                     try {
                         if (typeof this.forcedAllyWatchUnsub === 'function') this.forcedAllyWatchUnsub();
@@ -5565,6 +5809,7 @@ if (window.CustomBattles) {
                 if (activeCustomBattles.size <= 1) {
                     showBetterHighscoresAfterCustomBattle();
                     showRoomInfoOverlayAfterCustomBattle();
+                    showSandboxToolbarAfterCustomBattle();
                 }
 
                 // Show overlays if callback provided

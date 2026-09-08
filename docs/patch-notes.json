@@ -4,6 +4,116 @@
   },
   "notes": [
     {
+      "version": "5.0.0",
+      "changes": [
+        {
+          "mod": "Autoseller",
+          "type": "fixed",
+          "text": "The mod's top-bar button is now added at the end of the header bar and hidden in place when disabled, instead of being pulled out of it — reordering or removing the game's own header links could later crash the game to a blank screen."
+        },
+        {
+          "mod": "Battle Helper",
+          "type": "changed",
+          "text": "Help-request ages over a day now read as \"1d 14h ago\" instead of \"38h ago\"; a week or more still shows just the day count."
+        },
+        {
+          "mod": "Better Highscores",
+          "type": "added",
+          "text": "Hovering a record in the highscores panel now shows the holder's name as a link that opens their profile in a new tab."
+        },
+        {
+          "mod": "Better Highscores",
+          "type": "fixed",
+          "text": "The mod's top-bar button is now added at the end of the header bar and hidden in place when turned off, instead of being removed — reordering or removing the game's own header links could later crash the game to a blank screen."
+        },
+        {
+          "mod": "Better Teleporter",
+          "type": "added",
+          "text": "Each of the XP column's three metrics in the teleport list — total run XP, XP per stamina, and whole-team XP per stamina — now has a hover tooltip explaining what it means for that specific map, with the map's own numbers filled in."
+        },
+        {
+          "mod": "Better Teleporter",
+          "type": "changed",
+          "text": "Every column in the teleport list now has even 5px padding on both sides."
+        },
+        {
+          "mod": "Better Teleporter",
+          "type": "fixed",
+          "text": "Scrolling a long teleport list is no longer choppy — the mod was re-scanning every row each frame while the game redrew sprites during the scroll, and now only re-scans when rows are added or removed."
+        },
+        {
+          "mod": "Challenges",
+          "type": "fixed",
+          "text": "The mod's top-bar button is now added at the end of the header bar and hidden in place on cleanup, instead of being removed — reordering or removing the game's own header links could later crash the game to a blank screen."
+        },
+        {
+          "mod": "Custom Battles",
+          "type": "changed",
+          "text": "The sandbox Loot / Auto-setup toolbar in the top-left corner is now hidden during a custom battle, like the other native UI, and restored when the battle ends."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "fixed",
+          "text": "The Cyclopedia top-bar button is now added at the end of the header bar and hidden in place on cleanup, instead of being removed — reordering or removing the game's own header links could later crash the game to a blank screen."
+        },
+        {
+          "mod": "Map Editor",
+          "type": "added",
+          "text": "Asset-list sprites that span several crop cells (for example a 3x3 floor atlas) now show a variant count. Placing one starts at the first cell; clicking the same sprite again while its tile is still selected steps the placed sprite to the next cell (wrapping around), so you can vary a floor in place without stacking duplicates. Placed multi-variant sprites also get a Variant N/total control with prev/next buttons in the edit drawer."
+        },
+        {
+          "mod": "Map Editor",
+          "type": "changed",
+          "text": "Editing a tile's walkability now drops it from the ally-placement allowlist once it's no longer walkable. The Allow spawn / Clear spawn / Clear all spawns buttons were removed from the battle rules panel — turn on \"Show allow-spawn overlay\" and click tiles directly instead."
+        },
+        {
+          "mod": "Map Editor",
+          "type": "fixed",
+          "text": "A creature's custom ability cooldown set in the editor was never carried into test battles; it's now applied when the battle starts and updates live if one is already running. Loading a saved map into a test battle could also leave the previous map's ally-placement highlight showing while dragging a creature onto the board (the allowed area was correct, only the highlight was stale) — the board now refreshes right after a map loads."
+        },
+        {
+          "mod": "Mod Loader",
+          "type": "changed",
+          "text": "The automatic page refresh after a client-side crash is more resilient: it also recovers from a fully blank page, spaces its retries out (about 1s, 5s, 15s) instead of three quick reloads, and logs every decision to the Error Log. New installs also start with a revised default mod set — Autoseller, Cyclopedia and Hunt Analyzer on; Custom Display, Hero Editor, Team Copier, Tick Tracker and Turbo Mode off — while existing installs keep their current choices."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "added",
+          "text": "The Interface tab has a new custom background section: choose a textured preset or upload your own image (up to 8MB) as a swatch, with a tiled/cover/contain/stretch fit remembered per background and right-click to remove an upload."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "fixed",
+          "text": "The Settings and Online-players buttons now sit at the end of the header bar and hide in place instead of being removed (reordering or removing the game's header links could crash the game to a blank screen), and the Online-players counter stays pinned to the far right even when another mod adds a button later. The genes/equipment/ability hover tooltip no longer renders clipped at the bottom of the screen until you move the mouse, and on the Portuguese site its ability description now shows in Portuguese instead of falling back to English (stat names, \"Equipment:\" and \"none\" stay English to match the game). The equipment icon in that tooltip no longer logs \"UI Components not loaded\" on every hover."
+        },
+        {
+          "mod": "Quests",
+          "type": "added",
+          "text": "A new multi-part questline adds a series of escalating solo battle challenges, unlocked one at a time from a new quest-giver (with their own dialogue portrait) via a board lever that warps you into each fight. The lever glows while a challenge is ready, right-clicking it opens a confirmation menu, and it can't be re-triggered mid-warp. Winning a challenge doesn't advance the questline on its own — you report back to the quest-giver in person, whose board icon stays lit until you do. They stay permanently reachable once you're past the early game. Questline progress is tracked, saved, and shown as a count in the quest log."
+        },
+        {
+          "mod": "Quests",
+          "type": "changed",
+          "text": "The two tutorial quests now carry a \"Tutorial\" prefix in their own accent colour in the starting quest list, shown like the quest-giver name on other NPCs' missions, so it's clear which quests form the tutorial. Standing side NPCs not tied to a specific earlier quest now appear on the board only once both tutorial quests are done, instead of some showing up partway through (or, in one case, on a brand-new account). During one mid-game fetch-and-travel quest, the NPC's quest-action icon now lights for a fetch step only once you're carrying the item they asked for, not the whole time you're looking for it."
+        },
+        {
+          "mod": "Quests",
+          "type": "fixed",
+          "text": "Resetting a single quest from Quest Dev Tools now also clears side-progress stored outside its main entry (the new questline's per-challenge flags, and an intermediate step in one of the starting NPC's quests), so it truly starts over. The new questline's board icon updates immediately when you accept a challenge or report a win instead of waiting for the next board change, and no longer acts as though challenges remain once they're all done. Several board NPCs could greet you with a bare \"Hello <name>.\" when their chat text failed to load in time — now looked up reliably, and one greeting was reworded to fit the character. \"Complete all missions\" now also grants the fishing quest's reward and marks it bought, so a dev account matches a real one. One-time reward flags on early quests that could stay stuck as not-received, and a one-time shop purchase that could stick as bought after its item was lost from your bag, are now re-checked and corrected when your progress loads."
+        },
+        {
+          "mod": "VIP List",
+          "type": "fixed",
+          "text": "The Chat top-bar button is now added at the end of the header bar — slotting it between the game's own header links could later crash the game to a blank screen."
+        },
+        {
+          "mod": "Welcome",
+          "type": "changed",
+          "text": "The welcome screen's \"What's Included\" summary reflects the revised default mod set, the \"Never Show Again\" button uses the game's red style, and the modal now grows to fit its content (scrolling only when the window is too short) with content centred vertically."
+        }
+      ]
+    },
+    {
       "version": "4.9.14",
       "changes": [
         {

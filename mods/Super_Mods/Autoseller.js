@@ -8863,6 +8863,8 @@
             
             if (ul.querySelector(`.${UI_CONSTANTS.CSS_CLASSES.AUTOSELLER_NAV_BTN}`)) {
                 const existingBtn = ul.querySelector(`.${UI_CONSTANTS.CSS_CLASSES.AUTOSELLER_NAV_BTN}`);
+                const existingLi = existingBtn?.closest('li');
+                if (existingLi) existingLi.style.display = '';
                 const existingIcon = existingBtn?.querySelector('img');
                 const existingLabel = existingBtn && Array.from(existingBtn.querySelectorAll('span')).find(function(span) {
                     return span.classList.contains('hidden') && span.classList.contains('sm:inline');
@@ -12240,7 +12242,11 @@
                     cleanupLegacyDragonPlantBadgeHosts();
                     
                     if (widget && widget.parentNode) widget.parentNode.removeChild(widget);
-                    if (navBtn && navBtn.parentNode) navBtn.parentNode.removeChild(navBtn);
+                    // Hide the nav <li> in place — never removeChild from the
+                    // React-rendered nav <ul> (see .claude/CLAUDE.md).
+                    // addAutosellerNavButton() re-shows it on re-enable.
+                    const navLi = navBtn && navBtn.closest('li');
+                    if (navLi) navLi.style.display = 'none';
                     if (responsiveStyle && responsiveStyle.parentNode) responsiveStyle.parentNode.removeChild(responsiveStyle);
                     if (widgetStyle && widgetStyle.parentNode) widgetStyle.parentNode.removeChild(widgetStyle);
                     if (dragonPlantBadgeStyle && dragonPlantBadgeStyle.parentNode) {

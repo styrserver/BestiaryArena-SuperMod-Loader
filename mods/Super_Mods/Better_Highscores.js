@@ -2206,6 +2206,147 @@
 // =======================
 // MODULE 6: UI Components & Rendering
 // =======================
+
+  // ── Player profile hover tooltip ─────────────────────────────────────────
+  // Hovering a leaderboard entry shows the holder's name as a link to their
+  // profile. Fixed outer wrapper (pointer-events:none) around a panel styled
+  // like the highscores panel itself (background-regular texture + 4-frame
+  // border), shown 150ms after the mouse enters (matches Mod Settings). One
+  // shared element on <body> (the panel is a body overlay); torn down in
+  // cleanup() and hidden whenever the panel is detached/rebuilt.
+  const PROFILE_URL_BASE = 'https://bestiaryarena.com/profile/';
+  const PROFILE_TOOLTIP_SHOW_DELAY_MS = 150; // matches Mod Settings' HOVER_TOOLTIP_SHOW
+  let playerProfileTooltipEl = null;
+  let playerProfileTooltipContent = null;
+  let playerProfileTooltipAnchor = null;
+  let playerProfileTooltipShowTimer = null;
+
+  function getPlayerProfileUrl(userName) {
+    return PROFILE_URL_BASE + encodeURIComponent(String(userName || '').trim());
+  }
+
+  function ensurePlayerProfileTooltip() {
+    if (playerProfileTooltipEl && document.body.contains(playerProfileTooltipEl)) {
+      return playerProfileTooltipEl;
+    }
+    const el = document.createElement('div');
+    el.className = 'better-highscores-profile-tooltip';
+    el.style.cssText = 'position: fixed; display: none; z-index: 10000; pointer-events: none;';
+
+    const content = document.createElement('div');
+    // Same background + frame border as the highscores panel itself.
+    Object.assign(content.style, {
+      pointerEvents: 'auto', // interactive (link)
+      display: 'flex',
+      background: `url("${ASSETS.BACKGROUND}") repeat`,
+      backgroundSize: 'auto',
+      border: '4px solid transparent',
+      borderImage: `url("${ASSETS.FRAME}") 4 stretch`,
+      borderRadius: '4px',
+      padding: '2px 6px',
+      color: 'white'
+    });
+    // Leaving the tooltip (unless heading back onto the score) hides it at once.
+    content.addEventListener('mouseleave', (e) => {
+      if (playerProfileTooltipAnchor && playerProfileTooltipAnchor.contains(e.relatedTarget)) return;
+      hidePlayerProfileTooltip();
+    });
+    el.appendChild(content);
+
+    document.body.appendChild(el);
+    playerProfileTooltipEl = el;
+    playerProfileTooltipContent = content;
+    return el;
+  }
+
+  function hidePlayerProfileTooltip() {
+    if (playerProfileTooltipShowTimer) {
+      clearTimeout(playerProfileTooltipShowTimer);
+      playerProfileTooltipShowTimer = null;
+    }
+    if (playerProfileTooltipEl) playerProfileTooltipEl.style.display = 'none';
+    playerProfileTooltipAnchor = null;
+  }
+
+  function destroyPlayerProfileTooltip() {
+    if (playerProfileTooltipShowTimer) {
+      clearTimeout(playerProfileTooltipShowTimer);
+      playerProfileTooltipShowTimer = null;
+    }
+    if (playerProfileTooltipEl) {
+      try { playerProfileTooltipEl.remove(); } catch (e) { /* noop */ }
+    }
+    playerProfileTooltipEl = null;
+    playerProfileTooltipContent = null;
+    playerProfileTooltipAnchor = null;
+  }
+
+  function positionPlayerProfileTooltip(anchorEl) {
+    if (!playerProfileTooltipEl || !anchorEl) return;
+    const rect = anchorEl.getBoundingClientRect();
+    const box = playerProfileTooltipEl.getBoundingClientRect();
+    // Overlap the anchor by 1px so there's no dead zone between the score and the
+    // tooltip — leaving one lands you directly on the other, no hide grace needed.
+    let left = rect.right - 1;
+    let top = rect.top;
+    if (left + box.width > window.innerWidth - 8) left = rect.left - box.width + 1;
+    if (left < 8) left = 8;
+    if (top + box.height > window.innerHeight - 8) top = window.innerHeight - box.height - 8;
+    if (top < 8) top = 8;
+    playerProfileTooltipEl.style.left = `${left}px`;
+    playerProfileTooltipEl.style.top = `${top}px`;
+  }
+
+  function showPlayerProfileTooltip(anchorEl, userName) {
+    const name = String(userName || '').trim();
+    if (!name || !anchorEl || !anchorEl.isConnected) return;
+
+    ensurePlayerProfileTooltip();
+    playerProfileTooltipAnchor = anchorEl;
+    playerProfileTooltipContent.textContent = '';
+
+    // The player's name, as the profile link itself — underlined, sized to match
+    // the leaderboard entries.
+    const link = document.createElement('a');
+    link.className = 'pixel-font-14 text-whiteHighlight';
+    link.href = getPlayerProfileUrl(name);
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    link.title = t('mods.betterUI.betterHighscoresOpenProfile');
+    link.textContent = name;
+    Object.assign(link.style, {
+      fontSize: '14px',
+      lineHeight: '1',
+      textDecoration: 'underline',
+      cursor: 'pointer',
+      whiteSpace: 'nowrap'
+    });
+    playerProfileTooltipContent.appendChild(link);
+
+    playerProfileTooltipEl.style.visibility = 'hidden';
+    playerProfileTooltipEl.style.display = 'block';
+    positionPlayerProfileTooltip(anchorEl);
+    playerProfileTooltipEl.style.visibility = '';
+  }
+
+  function attachPlayerProfileHover(entrySpan, userName) {
+    const name = String(userName || '').trim();
+    if (!entrySpan || !name) return;
+    entrySpan.style.cursor = 'help';
+    entrySpan.addEventListener('mouseenter', () => {
+      if (playerProfileTooltipShowTimer) clearTimeout(playerProfileTooltipShowTimer);
+      playerProfileTooltipShowTimer = scheduleTimeout(() => {
+        playerProfileTooltipShowTimer = null;
+        showPlayerProfileTooltip(entrySpan, name);
+      }, PROFILE_TOOLTIP_SHOW_DELAY_MS);
+    });
+    entrySpan.addEventListener('mouseleave', (e) => {
+      // Moving straight onto the tooltip? Keep it. Otherwise hide immediately.
+      if (playerProfileTooltipContent && playerProfileTooltipContent.contains(e.relatedTarget)) return;
+      hidePlayerProfileTooltip();
+    });
+  }
+
   function createScoreIcon(src, alt, title, opacity = 1) {
     const icon = document.createElement('img');
     icon.src = src;
@@ -2340,6 +2481,9 @@
     valueText.textContent = formattedEntry.value;
     entrySpan.appendChild(valueText);
 
+    // Hover → tooltip with the record holder's name + a link to their profile.
+    attachPlayerProfileHover(entrySpan, entry.userName);
+
     section.appendChild(entrySpan);
   }
 
@@ -2444,6 +2588,9 @@
 
   // Function to update existing leaderboard display with new data (no flickering)
   function updateLeaderboardData(tickData, rankData, floorData) {
+    // Entry spans (and their hover listeners) are rebuilt below — drop any open
+    // profile tooltip so it can't linger over a removed anchor.
+    hidePlayerProfileTooltip();
     if (!leaderboardContainer || !leaderboardContainer.isConnected) {
       return false; // No container to update
     }
@@ -2786,20 +2933,11 @@
         return;
       }
 
-      if (ul.querySelector('.better-highscores-nav-btn')) {
+      const existing = ul.querySelector('.better-highscores-nav-btn');
+      if (existing) {
+        const existingLi = existing.closest('li');
+        if (existingLi) existingLi.style.display = '';
         syncNavButtonSelectedState();
-        return;
-      }
-
-      const autosellerBtn = ul.querySelector('.autoseller-nav-btn');
-      if (!autosellerBtn) {
-        scheduleTimeout(tryInsert, 500);
-        return;
-      }
-
-      const autosellerLi = autosellerBtn.closest('li');
-      if (!autosellerLi) {
-        scheduleTimeout(tryInsert, 500);
         return;
       }
 
@@ -2814,13 +2952,13 @@
       li.appendChild(btn);
       syncNavButtonSelectedState();
 
-      if (autosellerLi.nextSibling) {
-        ul.insertBefore(li, autosellerLi.nextSibling);
-      } else {
-        ul.appendChild(li);
-      }
+      // Always append at the end of the nav <ul>. Never splice between the game's
+      // own <li>s: the header is React-rendered, and a foreign node mid-list can
+      // desync React's insert anchors on its next commit -> "Node.insertBefore"
+      // client-side crash. See .claude/CLAUDE.md.
+      ul.appendChild(li);
 
-      console.log('[Better Highscores] Nav button inserted after Autoseller');
+      console.log('[Better Highscores] Nav button appended to nav');
     };
 
     tryInsert();
@@ -2830,8 +2968,10 @@
     const btn = document.querySelector('.better-highscores-nav-btn');
     const li = btn?.closest('li');
     if (li) {
-      li.remove();
-      console.log('[Better Highscores] Nav button removed');
+      // Hide in place — never removeChild from the React-rendered nav <ul>
+      // (see .claude/CLAUDE.md). addHighscoresNavButton() re-shows it.
+      li.style.display = 'none';
+      console.log('[Better Highscores] Nav button hidden');
     }
   }
 
@@ -2992,6 +3132,7 @@
   }
 
   function detachLeaderboardContainer(container) {
+    hidePlayerProfileTooltip();
     if (!container) {
       return;
     }
@@ -3017,6 +3158,7 @@
     removeOverlayPositionListener();
     cleanupTblFloorLeague();
     closeBetterHighscoresContextMenu();
+    destroyPlayerProfileTooltip();
     removeRestoreButton();
     removeHighscoresNavButton();
     

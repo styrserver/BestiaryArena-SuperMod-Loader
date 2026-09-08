@@ -6723,6 +6723,8 @@ function openChallengesModalFromHeader() {
 function addChallengesHeaderButton() {
   var existingBtn = document.querySelector('.challenges-header-btn');
   if (existingBtn) {
+    var existingLi = existingBtn.closest('li');
+    if (existingLi) existingLi.style.display = '';
     existingBtn.textContent = challengesText('mods.challenges.title');
     updateChallengesNavHeaderMatchAlert();
     existingBtn.onclick = function(e) {
@@ -6756,21 +6758,11 @@ function addChallengesHeaderButton() {
   });
   li.appendChild(btn);
 
-  var cyclopediaLi = Array.from(headerUl.children).find(function(el) {
-    return el.querySelector('.cyclopedia-header-btn');
-  });
-  if (cyclopediaLi) {
-    cyclopediaLi.insertAdjacentElement('afterend', li);
-  } else {
-    var settingsLi = Array.from(headerUl.children).find(function(el) {
-      return el.querySelector('.mod-settings-header-btn');
-    });
-    if (settingsLi) {
-      settingsLi.insertAdjacentElement('afterend', li);
-    } else {
-      headerUl.appendChild(li);
-    }
-  }
+  // Always append at the end of the nav <ul>. Never splice between the game's
+  // own <li>s: the header is React-rendered, and a foreign node mid-list can
+  // desync React's insert anchors on its next commit -> "Node.insertBefore"
+  // client-side crash. See .claude/CLAUDE.md.
+  headerUl.appendChild(li);
 
   updateChallengesNavHeaderMatchAlert();
   return true;
@@ -6860,13 +6852,11 @@ function cleanupChallenges() {
   }
   try { closeChallengesModalIfOpen(); } catch (e) {}
 
+  // Hide the nav <li> in place — never removeChild from the React-rendered nav
+  // <ul> (see .claude/CLAUDE.md). addChallengesHeaderButton() re-shows it.
   document.querySelectorAll('.challenges-header-btn').forEach(function(btn) {
     var li = btn.closest('li');
-    if (li && li.parentNode) {
-      li.parentNode.removeChild(li);
-    } else {
-      try { btn.remove(); } catch (e) {}
-    }
+    if (li) li.style.display = 'none';
   });
 }
 

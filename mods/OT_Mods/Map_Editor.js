@@ -339,6 +339,8 @@ let assetListFilterKey = null;
 let allRoomsCreaturesCache = null;
 let creatureListLoadId = 0;
 let creatureLiveApplyTimer = null;
+let lastAbilityCooldownLiveApplyLogKey = null;
+let lastCreatureLiveApplyLogKey = null;
 let creatureListRenderRaf = null;
 let creatureListSearchTimer = null;
 let creatureListLoadMoreObserver = null;
@@ -2606,6 +2608,18 @@ function setHitboxValue(tileIndex, value) {
   syncLiveRoomHitbox(tileIndex);
   logMapEditor('setHitbox', { tileIndex, value, overridden: value !== original });
   if (editorState.hitboxOverlay) updateHitboxOverlay();
+  // A tile just made non-walkable (value === true) can't validly stay in the ally
+  // placement-restriction allowlist — nobody could ever be placed there anyway, and
+  // leaving it in silently shrinks the effective allowed area with no visible cause.
+  // Newly-walkable tiles are deliberately NOT auto-added: allowedPlacementTiles is a
+  // manually-curated subset of walkable tiles (e.g. "allies only near the entrance"),
+  // not a mirror of walkability, so only pruning now-invalid entries is safe here.
+  if (value === true && editorBattleRules.allowedPlacementTiles.includes(tileIndex)) {
+    setAllowedPlacementTiles(
+      editorBattleRules.allowedPlacementTiles.filter((t) => t !== tileIndex)
+    );
+    logMapEditor('prunedAllowedPlacementTile', { tileIndex, reason: 'now-blocked' });
+  }
   refreshInspector();
   notifyMapEditorEditsChanged();
   syncMapEditorPlacementAllowSpawnMask();
@@ -2664,6 +2678,18 @@ function writeLiveRoomHitboxesInPlace(nextHitboxes) {
       target.length = nextHitboxes.length;
       changed = true;
     }
+    // room.file.data.blocked is a SEPARATE native property from hitboxes — the game's own
+    // ally-placement validity check rejects a placed ally sitting on any tile in `blocked`,
+    // completely independent of hitboxes/our own allowedTiles overlay. Map Editor has no
+    // "blocked" concept of its own, so our custom map data never specifies it — which meant
+    // sanitizeRoomFileDataForRuntime's own "keep whatever the live room already had" fallback
+    // was silently carrying the underlying native room's OWN blocked tiles (e.g. Sewers'
+    // original monster-den corridor) straight into every custom map built on that canvas,
+    // permanently vetoing ally placement on those tiles no matter what allowedTiles says.
+    if (Array.isArray(data.blocked) && data.blocked.some((entry) => entry != null)) {
+      data.blocked = [];
+      changed = true;
+    }
   };
   visit(getCurrentRoom()?.file?.data);
   if (roomId) {
@@ -2718,7 +2744,10 @@ function setAllowedPlacementTiles(tiles, options = {}) {
     // AND this exact mask sync a second time regardless of its skipVillainBoardResync flag —
     // measured at ~400ms of pure duplicate work per tile toggle for zero behavioral benefit.
   }
-  syncMapEditorPlacementAllowSpawnMask();
+  syncMapEditorPlacementAllowSpawnMask({
+    reason: options.reason || 'set-allowed-tiles',
+    log: options.log === true
+  });
   return next;
 }
 
@@ -2745,18 +2774,6 @@ function toggleTileAllowedPlacement(tileIndex) {
           .replace('{tile}', String(index))
   );
   return adding;
-}
-
-function setTileAllowedPlacement(tileIndex, allowed) {
-  if (tileIndex == null || !Number.isFinite(tileIndex)) return false;
-  if (!guardMapEditorManipulator('set-placement-tile')) return false;
-  const index = Math.floor(tileIndex);
-  const current = new Set(getAllowedPlacementTiles());
-  if (allowed) current.add(index);
-  else current.delete(index);
-  setAllowedPlacementTiles([...current], { singleTileIndex: index });
-  logMapEditor('setPlacementTile', { tileIndex: index, allowed: !!allowed });
-  return true;
 }
 
 function buildTileRestrictionsForExport() {
@@ -2907,6 +2924,23 @@ function isLikelyAllyDragSource(target) {
   return false;
 }
 
+/** Non-villain, non-editor-managed pieces currently on the board — i.e. player-dragged
+ * allies — as {tileIndex} entries, for before/after diffing around a drag gesture. */
+function getPlayerAllyBoardTiles() {
+  try {
+    const boardConfig = globalThis.state?.board?.getSnapshot?.()?.context?.boardConfig;
+    if (!Array.isArray(boardConfig)) return [];
+    return boardConfig
+      .filter((entity) => entity && !entity.villain && !isMapEditorVillainEntity(entity) && !isMapEditorAllyEntity(entity))
+      .map((entity) => Number(entity.tileIndex))
+      .filter((tileIndex) => Number.isFinite(tileIndex));
+  } catch (error) {
+    return [];
+  }
+}
+
+let mapEditorAllyDragBoardTilesBefore = [];
+
 function handleMapEditorAllyDragStart(event) {
   if (!editorState.sandboxTestActive) return;
   if (!isLikelyAllyDragSource(event.target)) return;
@@ -2916,6 +2950,8 @@ function handleMapEditorAllyDragStart(event) {
     mapEditorAllyDragEndTimer = null;
   }
 
+  mapEditorAllyDragBoardTilesBefore = getPlayerAllyBoardTiles();
+
   const allowed = getAllowedPlacementTiles();
   const now = Date.now();
   const shouldLog = now - mapEditorAllyDragMaskLogAt > 400;
@@ -2924,7 +2960,8 @@ function handleMapEditorAllyDragStart(event) {
     console.log('[Map Editor] Ally drag/pointer — remasking allow-spawn only (hide villain highlights)', {
       type: event.type,
       allowedCount: allowed.length,
-      allowedTiles: allowed.slice()
+      allowedTiles: allowed.slice(),
+      liveHitboxSnapshot: getCurrentRoom()?.file?.data?.hitboxes?.slice()
     });
   }
 
@@ -2955,6 +2992,58 @@ function handleMapEditorAllyDragEnd() {
       syncMapEditorPlacementAllowSpawnMask({ reason: 'ally-drag-end', allyDrag: false });
     }, 120);
   }
+
+  // Diagnostic: this is the actual answer to "was that drop functionally correct or just
+  // visually wrong" — diff the ally tiles on the board before vs after this drag gesture,
+  // and check each newly-placed one against the allowed list at the moment of drop. If a
+  // logged tile here is NOT allowed, the game genuinely accepted an invalid placement (a
+  // real bug); if every logged tile IS allowed despite the drag highlight looking wrong,
+  // it's purely the native drag UI's own rendering, not a functional problem.
+  setTimeout(() => {
+    try {
+      const afterTiles = getPlayerAllyBoardTiles();
+      const beforeSet = new Set(mapEditorAllyDragBoardTilesBefore);
+      const newTiles = afterTiles.filter((tileIndex) => !beforeSet.has(tileIndex));
+      if (newTiles.length) {
+        const allowed = new Set(getAllowedPlacementTiles());
+        // (globalThis.state.board.getSnapshot().context has no top-level roomId — that field
+        // belongs to an unrelated native "build your own room" feature's own store, confirmed
+        // by an earlier diagnostic pass reading it as null here. The real Start-button
+        // validity check for this board lives in boardConfig itself, so dump that directly:
+        // duplicate/overlapping tileIndex entries (SHARED_TILE-style) or a stale ghost piece
+        // are the remaining native rejection reasons that don't depend on which tile it is.)
+        const boardConfig = globalThis.state?.board?.getSnapshot?.()?.context?.boardConfig || [];
+        const tileCounts = {};
+        for (const entity of boardConfig) {
+          const key = entity?.tileIndex;
+          tileCounts[key] = (tileCounts[key] || 0) + 1;
+        }
+        const duplicateTiles = Object.entries(tileCounts).filter(([, count]) => count > 1).map(([tile]) => Number(tile));
+        console.log('[Map Editor][PlacementMask] Ally drop result', {
+          droppedOnTiles: newTiles,
+          eachTileAllowed: newTiles.map((tileIndex) => ({
+            tileIndex,
+            allowed: allowed.has(tileIndex),
+            editorRoomHitbox: getCurrentRoom()?.file?.data?.hitboxes?.[tileIndex],
+            // room.file.data.blocked is a separate native property from hitboxes — the game's
+            // ally-placement validity check can reject a tile that's in here even when
+            // hitboxes/allowedTiles say it's fine. writeLiveRoomHitboxesInPlace now clears
+            // this on every mask sync; this confirms whether that's actually holding.
+            editorRoomBlocked: getCurrentRoom()?.file?.data?.blocked?.[tileIndex]
+          })),
+          fullBlockedArray: getCurrentRoom()?.file?.data?.blocked?.slice(),
+          anyInvalidDrop: newTiles.some((tileIndex) => !allowed.has(tileIndex)),
+          duplicateTiles,
+          fullBoardConfig: boardConfig.map((e) => ({ tileIndex: e.tileIndex, villain: e.villain, gameId: e.gameId, type: e.type })),
+          liveHitboxSnapshot: getCurrentRoom()?.file?.data?.hitboxes?.slice()
+        });
+      } else {
+        console.log('[Map Editor][PlacementMask] Ally drop result: no new ally tile detected (drag may have been cancelled/rejected, or this wasn\'t a placement drag)');
+      }
+    } catch (error) {
+      console.warn('[Map Editor][PlacementMask] Ally drop diagnostic failed', error);
+    }
+  }, 250);
   if (!mapEditorAllyDragPlacementOverlayWasOn && editorState.placementOverlay) {
     // Only auto-hide if we turned it on for this drag.
     const toggle = document.getElementById('map-editor-placement-toggle');
@@ -3002,6 +3091,32 @@ function formatSpriteConfigHint(entry) {
   if (entry.offsetY) parts.push(`offsetY ${entry.offsetY}`);
   if (entry.cropped) parts.push('cropped');
   return parts.length ? parts.join(', ') : '';
+}
+
+// Stable identity for one visual variant of a sprite id (crop cell / bank / pixel offset).
+// Used to dedupe the per-id variant list the Asset list cycles through.
+function spriteVariantKey(cfg) {
+  if (!cfg || typeof cfg !== 'object') return '';
+  return [
+    cfg.cropX ?? 0,
+    cfg.cropY ?? 0,
+    cfg.bank ?? '',
+    cfg.offsetX ?? 0,
+    cfg.offsetY ?? 0,
+    cfg.cropped ? 1 : 0
+  ].join('|');
+}
+
+// Deterministic order for a sprite id's variants so the Asset list walks them 1..X in a
+// predictable sequence: bank, then row (cropY), then column (cropX), then pixel offsets.
+function compareSpriteVariants(a, b) {
+  const bankA = Number(a?.bank ?? 0) || 0;
+  const bankB = Number(b?.bank ?? 0) || 0;
+  return bankA - bankB
+    || (a?.cropY ?? 0) - (b?.cropY ?? 0)
+    || (a?.cropX ?? 0) - (b?.cropX ?? 0)
+    || (a?.offsetY ?? 0) - (b?.offsetY ?? 0)
+    || (a?.offsetX ?? 0) - (b?.offsetX ?? 0);
 }
 
 // =======================
@@ -4591,6 +4706,17 @@ function applyAddedSpriteEdit(tileIndex, layerIndex, patch = {}, options = {}) {
     if (offsetY !== 0) nextPatch.offsetY = offsetY;
     else delete nextPatch.offsetY;
   }
+  // `variant` swaps the whole crop-cell / bank identity at once (keeps id + offsets).
+  if (patch.variant && typeof patch.variant === 'object') {
+    delete nextPatch.cropX;
+    delete nextPatch.cropY;
+    delete nextPatch.cropped;
+    delete nextPatch.bank;
+    if (patch.variant.cropX != null) nextPatch.cropX = patch.variant.cropX;
+    if (patch.variant.cropY != null) nextPatch.cropY = patch.variant.cropY;
+    if (patch.variant.cropped) nextPatch.cropped = true;
+    if (patch.variant.bank != null) nextPatch.bank = patch.variant.bank;
+  }
 
   const nextConfig = compactSpriteConfig(nextPatch);
   if (!nextConfig) return false;
@@ -4600,13 +4726,21 @@ function applyAddedSpriteEdit(tileIndex, layerIndex, patch = {}, options = {}) {
     sprite.classList.remove(`id-${currentId}`);
     sprite.classList.add(`id-${nextId}`);
     const img = sprite.querySelector('img');
+    if (img) img.alt = String(nextId);
+  }
+  // Reset crop/bank props so a variant with fewer set fields (e.g. cell 0,0) doesn't
+  // inherit the previous cell's --cropX/--cropY/--bank. applySpriteConfigToElement()
+  // re-applies whatever nextConfig actually needs right after.
+  {
+    const img = sprite.querySelector('img');
     if (img) {
-      img.alt = String(nextId);
-      if (nextConfig.cropX == null && nextConfig.cropY == null && !nextConfig.cropped) {
-        img.setAttribute('data-cropped', 'false');
-        img.style.setProperty('--cropX', '0');
-        img.style.setProperty('--cropY', '0');
-      }
+      img.style.setProperty('--cropX', '0');
+      img.style.setProperty('--cropY', '0');
+      img.setAttribute('data-cropped', nextConfig.cropped || nextConfig.cropX > 0 || nextConfig.cropY > 0 ? 'true' : 'false');
+    }
+    if (nextConfig.bank == null) {
+      sprite.removeAttribute('data-bank');
+      sprite.style.removeProperty('--bank');
     }
   }
 
@@ -6626,13 +6760,19 @@ function applyDomSessionEdits(options = {}) {
     );
   }
   if (allyLimit != null) editorBattleRules.allyLimit = allyLimit;
-  if (allowedPlacementTiles != null) {
-    setAllowedPlacementTiles(allowedPlacementTiles, { skipNotify: true });
-  }
   syncMapEditorTestBattleConfigFromRules();
 
   if ((Array.isArray(actors) || villains != null) && editorState.sandboxTestActive) {
     applyEditorVillainsToBoard({ allowDuringRestore: true });
+  }
+
+  // Applied AFTER villains sync to the board (sendBoardSetState above), not before: keeps the
+  // mask write from racing the villain board-sync's own sendBoardSetState. This computes the
+  // correct restricted hitboxes (confirmed correct by diagnostics), but making the game's own
+  // drag-and-drop UI actually pick it up needs a real roomId bounce — see the
+  // reloadRoomFromGame() call in loadDomSession() below, right after this function returns.
+  if (allowedPlacementTiles != null) {
+    setAllowedPlacementTiles(allowedPlacementTiles, { skipNotify: true, log: true, reason: 'session-load' });
   }
 
   if (selectedTileIndex != null && getTileElement(selectedTileIndex)) {
@@ -7085,6 +7225,27 @@ async function loadDomSession(payload) {
       ensureMapEditorSandboxPlayMode();
     }
 
+    // The mask sync above (reason: 'session-load') already computes the correct restricted
+    // hitboxes at that point — confirmed correct by diagnostics. But re-syncing the mask data
+    // again, or forcing another board-state emission, can NEVER fix the native drag-highlight
+    // rendering by itself: traced into the game's own minified source (chunk 233, the Board
+    // component) and found the walkable/droppable-tile list is a React useMemo keyed on
+    // `[roomData, sandboxMode]`, where `roomData` is a plain object reference that's rebuilt
+    // ONLY when `roomId` changes (a separate outer useMemo keyed on `[roomId]`, sourced from
+    // the static globalThis.state.utils.ROOMS registry). Since the Map Editor sandbox reuses
+    // one fixed native roomId as its test canvas across every custom-map load, that outer memo
+    // — and therefore the frozen droppable-tile set dnd-kit registers for drag-and-drop — never
+    // recomputes again for the life of the sandbox session, no matter how the underlying
+    // hitboxes array is mutated or how many times boardConfig changes. The only thing that
+    // busts it is an actual roomId change. reloadRoomFromGame()'s bounce-through-another-room
+    // trick (already used elsewhere in this file, e.g. edit-session-end) does exactly that,
+    // then reapplies our villains/mask against the freshly-rebuilt native board afterward.
+    reloadRoomFromGame(room.id, getBoardFloor(), {
+      skipRevertEdits: true,
+      allowBounce: true,
+      reason: 'session-load'
+    });
+
     return true;
   } finally {
     scopeHandlingSuspended = false;
@@ -7218,6 +7379,22 @@ function syncMapEditorTestBattleConfigFromRules() {
   }
   if (prevLimit !== rules.allyLimit) {
     logMapEditor('syncTestBattleAllyLimit', { from: prevLimit, to: rules.allyLimit });
+  }
+  // allyLimit above only feeds OUR OWN ally-count enforcement (CustomBattles' setupAllyLimit).
+  // The native game's own Start-button validity check separately reads the room's own
+  // maxTeamSize property directly off whatever room object it looks up — completely unaware
+  // of our allyLimit. A native room like Sewers defaults to maxTeamSize:1 (single-ally), so
+  // placing a 2nd ally anywhere (regardless of tile) silently disables Start with no visible
+  // reason once the room's own team-size cap is exceeded. Keep every live room reference's
+  // maxTeamSize in lockstep with our configured allyLimit so the native check doesn't disagree.
+  const roomId = getCurrentRoom()?.id;
+  if (roomId) {
+    const refs = collectRoomReferences(roomId);
+    for (const room of refs) {
+      if (room.maxTeamSize !== rules.allyLimit) {
+        room.maxTeamSize = rules.allyLimit;
+      }
+    }
   }
   return true;
 }
@@ -9440,6 +9617,14 @@ function collectRoomReferences(roomId) {
       }
     }
   }
+  // getCurrentRoom() (context.selectedMap.selectedRoom) is a separate object from the ones
+  // above — the game's own "Start"-button validity check and its board-rendering component
+  // both key their room lookup off context.roomId into utils.ROOMS directly, never off
+  // selectedMap.selectedRoom. But getCurrentRoom() is what most of this file reads/logs as
+  // "the current room", so if it's ever a distinct reference (not caught by the two loops
+  // above) any mutation here would silently miss it, making the two diverge.
+  const selectedRoom = getBoardContext()?.selectedMap?.selectedRoom;
+  if (selectedRoom?.id === roomId) refs.push(selectedRoom);
   return [...new Set(refs)];
 }
 
@@ -9665,6 +9850,7 @@ function detachSandboxTestBoardHook() {
     sandboxTestReapplyTimer = null;
   }
   detachMapEditorAllyDragHooks();
+  stopMapEditorStartButtonWatch();
 }
 
 function clearSandboxTestPersistence() {
@@ -9696,19 +9882,32 @@ function completeSandboxReapplyTail(reason = 'unknown', options = {}) {
   }
   restoreAllNativeSpritePlacements();
   scheduleDeferredNativeSpritePlacementRestore();
+  // skipVillainBoardResync is what lightweight per-edit notifications use (e.g. nudging a
+  // sprite's pixel offset via applyAddedSpriteEdit) specifically to AVOID the heavier work
+  // below — syncMapEditorPlacementAllowSpawnMask()'s hitbox write calls
+  // bumpSelectedRoomFileIdentity(), which emits a real board-state update, which re-enters
+  // this file's own board subscription and calls refreshInspector() REENTRANTLY while the
+  // original edit (e.g. the offset stepper's click handler) is still executing up the call
+  // stack — tearing down and rebuilding the very row/button the user just clicked, breaking
+  // further clicks on it. Only the maxTeamSize/mask sync in the main path below (which every
+  // real room reload already flows through unskipped) needs to run; don't add it here.
   if (options.skipVillainBoardResync === true) {
     logMapEditor('villainApplySkipped', { reason, skip: 'skipVillainBoardResync' });
-    syncMapEditorPlacementAllowSpawnMask();
     return;
   }
   if (restoreMapInProgress) {
     logMapEditor('villainApplySkipped', { reason, skip: 'restore-in-progress' });
-    syncMapEditorPlacementAllowSpawnMask();
     return;
   }
   logBoardStateSnapshot('beforeVillainApply', { reason });
   applyEditorVillainsToBoard();
   logBoardStateSnapshot('afterVillainApply', { reason });
+  // Re-assert allyLimit/tileRestrictions AND the live room's own maxTeamSize here too — a
+  // native room reload/bounce (e.g. reloadRoomFromGame's same-room bounce trick) can reset
+  // room.maxTeamSize back to that room's native default (Sewers defaults to 1), and nothing
+  // else in this reapply path touches it, so it would otherwise silently stay wrong after
+  // every such reload instead of just at edit-session-start.
+  syncMapEditorTestBattleConfigFromRules();
   syncMapEditorPlacementAllowSpawnMask();
 }
 
@@ -9788,11 +9987,75 @@ function notifyMapEditorEditsChanged(options = {}) {
   });
 }
 
+// Find the native board's own Start/Stop button. It's a plain green/red button next to a
+// mode-picker button with aria-haspopup="menu" — matched structurally since it has no stable
+// id/class of its own we can rely on (variant classes are shared with many other buttons).
+function findMapEditorStartButton() {
+  const candidates = document.querySelectorAll(
+    'button[data-cuelume-press="true"].frame-1-green, button[data-cuelume-press="true"].frame-1-red'
+  );
+  for (const btn of candidates) {
+    if (btn.nextElementSibling?.getAttribute?.('aria-haspopup') === 'menu') return btn;
+  }
+  return null;
+}
+
+let mapEditorStartButtonPollTimer = null;
+let mapEditorStartButtonLastDisabled = null;
+
+// Every other diagnostic in this file has shown clean, correct data (hitboxes, blocked,
+// allowedTiles, boardConfig) right up to the moment Start is disabled anyway — so the next
+// thing worth knowing is a snapshot taken at the EXACT instant the button's own disabled
+// attribute flips, tied directly to the observed effect instead of guessing at more native
+// validation internals from static source reading.
+function logMapEditorStartButtonSnapshot(disabled) {
+  try {
+    const boardConfig = globalThis.state?.board?.getSnapshot?.()?.context?.boardConfig || [];
+    const room = getCurrentRoom();
+    logMapEditor('startButtonDisabledChanged', {
+      disabled,
+      maxTeamSize: room?.maxTeamSize ?? null,
+      boardPieces: boardConfig.map((e) => ({
+        tileIndex: e.tileIndex,
+        villain: e.villain,
+        gameId: e.gameId,
+        type: e.type,
+        hitbox: room?.file?.data?.hitboxes?.[e.tileIndex],
+        blocked: room?.file?.data?.blocked?.[e.tileIndex]
+      }))
+    });
+  } catch (error) {
+    console.warn('[Map Editor] startButtonDisabledChanged diagnostic failed', error);
+  }
+}
+
+function startMapEditorStartButtonWatch() {
+  stopMapEditorStartButtonWatch();
+  mapEditorStartButtonLastDisabled = null;
+  mapEditorStartButtonPollTimer = setInterval(() => {
+    const btn = findMapEditorStartButton();
+    if (!btn) return;
+    const disabled = btn.disabled === true;
+    if (disabled === mapEditorStartButtonLastDisabled) return;
+    mapEditorStartButtonLastDisabled = disabled;
+    logMapEditorStartButtonSnapshot(disabled);
+  }, 300);
+}
+
+function stopMapEditorStartButtonWatch() {
+  if (mapEditorStartButtonPollTimer) {
+    clearInterval(mapEditorStartButtonPollTimer);
+    mapEditorStartButtonPollTimer = null;
+  }
+  mapEditorStartButtonLastDisabled = null;
+}
+
 function attachSandboxTestBoardHook() {
   detachSandboxTestBoardHook();
   if (!globalThis.state?.board?.on) return;
 
   attachMapEditorAllyDragHooks();
+  startMapEditorStartButtonWatch();
 
   sandboxTestAutoSetupHandler = () => {
     if (!editorState.sandboxTestActive) return;
@@ -10455,22 +10718,29 @@ function getConfiguredAssetsFromAllRooms() {
   const addEntry = (entry, room) => {
     if (!entry?.id || !room) return;
     const roomLabel = getRoomDisplayName(room);
+    // Track every distinct crop/bank/offset combo this sprite id is used with across all
+    // maps, so the Asset list can randomly pick one on placement (see
+    // pickAssetPlacementConfig). e.g. sprite 1127 is a 3x3 floor atlas — nine variants.
+    const variantConfig = compactSpriteConfig(entry) || { id: entry.id };
+    const variantKey = spriteVariantKey(variantConfig);
     const existing = byId.get(entry.id);
     if (!existing) {
       byId.set(entry.id, {
         ...entry,
         usageCount: 1,
         roomLabels: new Set([roomLabel]),
-        roomIds: new Set([room.id])
+        roomIds: new Set([room.id]),
+        variantMap: new Map([[variantKey, variantConfig]])
       });
       return;
     }
     existing.usageCount += 1;
     existing.roomLabels.add(roomLabel);
     if (room.id) existing.roomIds.add(room.id);
+    if (!existing.variantMap.has(variantKey)) existing.variantMap.set(variantKey, variantConfig);
     if (formatSpriteConfigHint(entry) && !formatSpriteConfigHint(existing)) {
-      const { usageCount, roomLabels, roomIds } = existing;
-      Object.assign(existing, entry, { usageCount, roomLabels, roomIds });
+      const { usageCount, roomLabels, roomIds, variantMap } = existing;
+      Object.assign(existing, entry, { usageCount, roomLabels, roomIds, variantMap });
     }
   };
 
@@ -10503,7 +10773,7 @@ function getConfiguredAssetsFromAllRooms() {
     byId,
     roomCount: rooms.length,
     list: Array.from(byId.values())
-      .map(({ roomLabels, roomIds, ...asset }) => {
+      .map(({ roomLabels, roomIds, variantMap, ...asset }) => {
         const hint = formatSpriteConfigHint(asset);
         const labels = roomLabels ? Array.from(roomLabels) : [];
         const ids = roomIds ? Array.from(roomIds) : [];
@@ -10511,7 +10781,10 @@ function getConfiguredAssetsFromAllRooms() {
           ...asset,
           mapCount: roomLabels?.size || 0,
           roomIds: ids,
-          searchLabels: labels
+          searchLabels: labels,
+          variants: variantMap
+            ? Array.from(variantMap.values()).sort(compareSpriteVariants)
+            : []
         };
       })
       .sort((a, b) => a.id - b.id)
@@ -10735,8 +11008,21 @@ function createAssetCard(asset) {
   const idLine = document.createElement('div');
   idLine.className = 'me-asset-id';
   idLine.textContent = `#${asset.id}`;
-
   meta.append(idLine);
+
+  const variantCount = Array.isArray(asset.variants) ? asset.variants.length : 0;
+  if (variantCount > 1) {
+    const variantLine = document.createElement('div');
+    variantLine.className = 'me-asset-variants';
+    variantLine.textContent = `⛃ ${variantCount}`;
+    variantLine.title = t(
+      'mods.mapEditor.assetVariants',
+      '{count} crop variants — click again on the tile to step to the next one'
+    ).replace('{count}', String(variantCount));
+    meta.append(variantLine);
+    card.title += ` — ${variantLine.title}`;
+  }
+
   card.appendChild(meta);
   card.addEventListener('click', (e) => {
     e.stopPropagation();
@@ -10875,19 +11161,106 @@ function scheduleAssetListRefresh() {
   }, ASSET_LIST_SEARCH_DEBOUNCE_MS);
 }
 
+// A sprite id in the Asset list can be used across maps with several crop cells / banks
+// (e.g. 1127 is a 3x3 floor atlas). `variants` is that de-duped list of configs.
+function getAssetVariantConfigs(asset) {
+  if (Array.isArray(asset?.variants) && asset.variants.length) return asset.variants;
+  return [compactSpriteConfig(asset) || { id: asset.id }];
+}
+
+// Next variant in sequence after `currentConfig` (wrapping X -> 1). With no current
+// config (first placement) this returns the first variant. Never "exhausts".
+function nextSpriteVariant(variants, currentConfig = null) {
+  if (!variants.length) return null;
+  if (!currentConfig || variants.length === 1) return variants[0];
+  const currentKey = spriteVariantKey(currentConfig);
+  const idx = variants.findIndex((variant) => spriteVariantKey(variant) === currentKey);
+  return variants[idx < 0 ? 0 : (idx + 1) % variants.length];
+}
+
+// The de-duped, deterministically-ordered variant list for a bare sprite id, drawn from
+// every map's usage. Empty when the id has only ever been used one way.
+function getSpriteVariantsForId(spriteId) {
+  const id = Number(spriteId);
+  if (!Number.isFinite(id)) return [];
+  getConfiguredAssetsFromAllRooms();
+  const entry = allRoomsAssetsCache?.byId?.get(id);
+  if (!entry?.variantMap || entry.variantMap.size < 2) return [];
+  return Array.from(entry.variantMap.values()).sort(compareSpriteVariants);
+}
+
+// Locate an editor-added sprite of `spriteId` on a tile plus its slot in the tracked
+// addedSpriteConfigs array (they map positionally, in layer order).
+function findAddedSpriteConfigOnTile(tileIndex, spriteId) {
+  const tileEl = getTileElement(tileIndex);
+  if (!tileEl) return null;
+  const configs = editorEdits.addedSpriteConfigs[tileIndex];
+  if (!configs || !configs.length) return null;
+  const fullList = getTileSpritesInLayerOrder(tileEl, tileIndex);
+  const addedIndexes = [...getAddedSpriteInstanceIndexes(tileIndex, fullList)].sort((a, b) => a - b);
+  for (let slot = 0; slot < addedIndexes.length && slot < configs.length; slot += 1) {
+    const sprite = fullList[addedIndexes[slot]];
+    if (Number(getSpriteIdsFromElement(sprite)[0]) === Number(spriteId)) {
+      return { sprite, configIndex: slot, config: configs[slot] };
+    }
+  }
+  return null;
+}
+
+// Re-skin an existing editor-added sprite in place (swap its crop cell / bank), instead
+// of stacking a second sprite on the tile.
+function replaceAddedSpriteVariantOnTile(tileIndex, spriteId, nextConfig) {
+  const found = findAddedSpriteConfigOnTile(tileIndex, spriteId);
+  if (!found) return false;
+  const compact = compactSpriteConfig({ ...nextConfig, id: spriteId });
+  if (!compact) return false;
+  editorEdits.addedSpriteConfigs[tileIndex][found.configIndex] = compact;
+  const img = found.sprite.querySelector('img');
+  if (img) {
+    img.style.setProperty('--cropX', '0');
+    img.style.setProperty('--cropY', '0');
+    img.setAttribute('data-cropped', 'false');
+  }
+  if (compact.bank == null) {
+    found.sprite.removeAttribute('data-bank');
+    found.sprite.style.removeProperty('--bank');
+  }
+  applySpriteConfigToElement(found.sprite, compact);
+  applyEditorAddedSpritePlacement(found.sprite, compact);
+  syncLiveTileLayerToRoom(tileIndex);
+  notifyMapEditorEditsChanged({ skipVillainBoardResync: true });
+  refreshAssetCardPreviewForSprite(spriteId);
+  return true;
+}
+
 function applyAssetToSelection(asset) {
   if (!asset?.id) return;
   const tileIndex = editorState.selectedTileIndex;
   if (tileIndex != null) {
-    if (tileHasSpriteConfig(tileIndex, asset)) {
+    const variants = getAssetVariantConfigs(asset);
+
+    // Re-click on a tile that already carries this sprite: advance it to the next crop
+    // variant in sequence, in place, rather than adding a duplicate. Wraps around.
+    const existing = findAddedSpriteConfigOnTile(tileIndex, asset.id);
+    if (existing) {
+      const next = nextSpriteVariant(variants, existing.config);
+      const ok = next && replaceAddedSpriteVariantOnTile(tileIndex, asset.id, next);
       setStatusMessage(
-        t('mods.mapEditor.assetDuplicate', 'Sprite already on tile {tile}.')
-          .replace('{tile}', String(tileIndex)),
-        true
+        ok
+          ? t('mods.mapEditor.assetCycled', 'Cycled sprite {id} on tile {tile}.')
+              .replace('{id}', String(asset.id))
+              .replace('{tile}', String(tileIndex))
+          : t('mods.mapEditor.assetAddFailed', 'Could not add sprite {id}.')
+              .replace('{id}', String(asset.id)),
+        !ok
       );
+      refreshInspector();
       return;
     }
-    const ok = addSpriteToTile(getTileElement(tileIndex), asset.id, tileIndex, asset);
+
+    const pick = variants[0];
+    const placement = pick ? { ...pick, id: asset.id } : asset;
+    const ok = addSpriteToTile(getTileElement(tileIndex), asset.id, tileIndex, placement);
     setStatusMessage(
       ok
         ? t('mods.mapEditor.assetAdded', 'Added sprite {id} to tile {tile}.')
@@ -11228,6 +11601,17 @@ function buildMapEditorVillainConfig(tileIndex, gameId, actorConfig = null) {
   }
   if (actorConfig?.awakened === true || actorConfig?.awaken === true || actorConfig?.isAwakened === true) {
     config.awakened = true;
+  }
+  // Forwarded to CustomBattles as villain/ally config so its ability-cooldown enforcement
+  // (getConfiguredAbilityCooldownPieces / enforceConfiguredAbilityCooldowns) can find and
+  // patch the live actor once the test battle actually spawns it — this field alone, saved
+  // only on the room's static actor data, has no effect on its own.
+  const cooldownTicks = Number(
+    actorConfig?.abilityCooldown?.cooldownTicks
+    ?? actorConfig?.abilityCooldownTicks
+  );
+  if (Number.isFinite(cooldownTicks) && cooldownTicks >= 0) {
+    config.abilityCooldownTicks = Math.floor(cooldownTicks);
   }
 
   return config;
@@ -11728,7 +12112,18 @@ function applyCreatureEditorForm(tileIndex, baseActor, formRoot, options = {}) {
   }
   if (live) {
     updateCreatureActorRowSummary(tileIndex, actorConfig);
-    logMapEditor('creatureLiveApply', { tileIndex, gameId: actorConfig.id });
+    // Both 'input' and 'change' are wired to the live-apply schedule (see
+    // attachCreatureFormLiveApply), so settling on a value (typing, then blur/Enter) applies
+    // — and logs — it twice in a row. Only log when the applied value actually changed.
+    const logKey = `${tileIndex}:${actorConfig.id}:${actorConfig.abilityCooldown?.cooldownTicks ?? ''}`;
+    if (logKey !== lastCreatureLiveApplyLogKey) {
+      lastCreatureLiveApplyLogKey = logKey;
+      logMapEditor('creatureLiveApply', {
+        tileIndex,
+        gameId: actorConfig.id,
+        abilityCooldownTicks: actorConfig.abilityCooldown?.cooldownTicks ?? null
+      });
+    }
     return true;
   }
   editorState.editingCreatureTileIndex = null;
@@ -12017,10 +12412,26 @@ function createCreatureEditorPanel(tileIndex, actor) {
   abilityCdInput.dataset.creatureAbilityCd = '1';
   abilityCdInput.classList.add('me-creature-input-compact');
   abilityCdInput.placeholder = t('mods.mapEditor.creatureAbilityCdPlaceholder', 'Ticks (optional)');
+  const abilityCdHint = document.createElement('span');
+  abilityCdHint.className = 'me-creature-form-hint';
+  // The game runs at 16 ticks/second, and this field is in raw ticks (not seconds) — a
+  // low-looking number like "2" is actually ~0.125s, near-instant. Show the seconds
+  // equivalent live so that isn't mistaken for a bug (as it was before this hint existed).
+  const updateAbilityCdHint = () => {
+    const ticks = Number(abilityCdInput.value);
+    abilityCdHint.textContent = Number.isFinite(ticks) && ticks >= 0
+      ? tReplace('mods.mapEditor.creatureAbilityCdSeconds', { seconds: (ticks / 16).toFixed(2) }, '≈ {seconds}s')
+      : '';
+  };
+  abilityCdInput.addEventListener('input', updateAbilityCdHint);
+  updateAbilityCdHint();
+  const abilityCdRow = document.createElement('div');
+  abilityCdRow.className = 'me-row me-creature-ability-cd-row';
+  abilityCdRow.append(abilityCdInput, abilityCdHint);
   appendCreatureFormRow(
     form,
     t('mods.mapEditor.creatureAbilityCd', 'Ability CD'),
-    abilityCdInput
+    abilityCdRow
   );
 
   panel.appendChild(form);
@@ -12310,6 +12721,38 @@ function applyEditorVillainsToBoard(options = {}) {
   }));
   syncMapEditorVillainKeyPrefixes();
   syncMapEditorAllyKeyPrefixes();
+
+  // Ability cooldown isn't part of the board-config piece createCustomVillainEntity builds
+  // (see its call site below) — it only ever exists on the LIVE runtime actor once a battle
+  // is actually running, patched in by enforceConfiguredAbilityCooldowns. That function
+  // otherwise only runs once at battle start ('newGame'), so an edit made mid-battle (or
+  // an edit that doesn't change the board piece enough to avoid the "no-change" skip a few
+  // lines down) would never reach the live actor without this call — this makes an ability
+  // CD edit apply immediately if a test battle is already running, and is a harmless no-op
+  // (no world/actors to patch) during the pre-battle placement phase.
+  if (typeof mapEditorTestBattle.enforceConfiguredAbilityCooldowns === 'function') {
+    const configuredCount = mapEditorTestBattle.config.villains
+      .filter((v) => Number.isFinite(Number(v.abilityCooldownTicks))).length;
+    if (configuredCount > 0) {
+      const appliedToLiveActor = mapEditorTestBattle.enforceConfiguredAbilityCooldowns(null, 'editor-live-apply');
+      // This whole block runs on every board sync — including every ally drag, which fires
+      // constantly — so logging the identical "nothing to patch yet" result every single time
+      // drowned out everything else in the console. Only log a real application (always
+      // interesting) or a genuine change in whether one's pending (e.g. battle just started),
+      // not the same no-op repeated back to back.
+      const logKey = `${configuredCount}:${appliedToLiveActor}`;
+      if (appliedToLiveActor || logKey !== lastAbilityCooldownLiveApplyLogKey) {
+        lastAbilityCooldownLiveApplyLogKey = logKey;
+        logMapEditor('abilityCooldownLiveApply', {
+          configuredCount,
+          appliedToLiveActor,
+          note: appliedToLiveActor
+            ? 'Patched the live actor now.'
+            : 'No live actor patched yet — normal if the test battle has not started, otherwise check enforceConfiguredAbilityCooldowns diagnostics in custom-battles.js.'
+        });
+      }
+    }
+  }
 
   try {
     const boardContext = globalThis.state.board.getSnapshot().context;
@@ -13106,25 +13549,8 @@ function updateHitboxEditRow() {
 }
 
 function updatePlacementEditRow() {
-  const allowBtn = queryInspector('#map-editor-placement-allow-btn');
-  const clearBtn = queryInspector('#map-editor-placement-clear-btn');
-  const clearAllBtn = queryInspector('#map-editor-placement-clear-all-btn');
   const placementToggle = queryInspector('#map-editor-placement-toggle');
-  const tileIndex = editorState.selectedTileIndex;
-  const allowed = tileIndex != null && isTileAllowedForPlacement(tileIndex);
-  const hasAny = getAllowedPlacementTiles().length > 0;
-
   if (placementToggle) placementToggle.checked = editorState.placementOverlay;
-  if (allowBtn) {
-    allowBtn.disabled = tileIndex == null;
-    allowBtn.classList.toggle('active', allowed);
-  }
-  if (clearBtn) {
-    clearBtn.disabled = tileIndex == null || !allowed;
-  }
-  if (clearAllBtn) {
-    clearAllBtn.disabled = !hasAny;
-  }
 }
 
 function updateTileResetButton() {
@@ -13466,7 +13892,14 @@ function refreshEditTab() {
       const idSpan = document.createElement('span');
       idSpan.className = 'me-sprite-id';
       const liveId = ids[0];
-      const configId = configEntry?.id;
+      // configEntry here is configuredLayer[index] — the BASELINE tile layer (as of edit-session
+      // start) at this array position, used to show "(cfg N)" when a pre-existing sprite's id
+      // changed since the session began. For an editor-added sprite (isAdded), there is no
+      // baseline entry for it at all — configuredLayer[index] at that position is just whatever
+      // unrelated sprite happened to occupy that same index in the ORIGINAL layer, a coincidence
+      // of array position, not something this sprite was ever edited from. Comparing against it
+      // produces a bogus "(cfg N)" for a perfectly correct, freshly-added sprite.
+      const configId = isAdded ? null : configEntry?.id;
       if (configOnly) {
         idSpan.textContent = `ID ${configId} (config)`;
       } else if (liveId != null) {
@@ -13655,6 +14088,42 @@ function refreshEditTab() {
         });
         floorSelect.classList.add('me-sprite-move-layer-btn');
         offsetRow.append(floorSelect);
+
+        // Variant stepper — only when this sprite id is used across maps with more than
+        // one crop cell / bank. Steps this placed sprite through them in order.
+        const variants = getSpriteVariantsForId(liveId);
+        if (variants.length > 1) {
+          const stepVariant = (dir) => {
+            const key = spriteVariantKey(editConfig);
+            const at = variants.findIndex((v) => spriteVariantKey(v) === key);
+            const from = at < 0 ? 0 : at;
+            const to = (from + dir + variants.length) % variants.length;
+            applyAddedSpriteEdit(tileIndex, index, { id: liveId, variant: variants[to] }, { keepEditing: true });
+            refreshInspector();
+          };
+          const group = document.createElement('div');
+          group.className = 'me-sprite-offset-group';
+          const prevBtn = document.createElement('button');
+          prevBtn.type = 'button';
+          prevBtn.className = 'me-btn me-btn-compact';
+          prevBtn.textContent = '◀';
+          prevBtn.title = t('mods.mapEditor.spriteVariantPrev', 'Previous crop variant');
+          prevBtn.addEventListener('click', (e) => { e.stopPropagation(); stepVariant(-1); });
+          const label = document.createElement('span');
+          label.className = 'me-sprite-offset-value';
+          const curIdx = variants.findIndex((v) => spriteVariantKey(v) === spriteVariantKey(editConfig));
+          label.textContent = t('mods.mapEditor.spriteVariantLabel', 'Variant {n}/{total}')
+            .replace('{n}', String((curIdx < 0 ? 0 : curIdx) + 1))
+            .replace('{total}', String(variants.length));
+          const nextBtn = document.createElement('button');
+          nextBtn.type = 'button';
+          nextBtn.className = 'me-btn me-btn-compact';
+          nextBtn.textContent = '▶';
+          nextBtn.title = t('mods.mapEditor.spriteVariantNext', 'Next crop variant');
+          nextBtn.addEventListener('click', (e) => { e.stopPropagation(); stepVariant(1); });
+          group.append(prevBtn, label, nextBtn);
+          offsetRow.append(group);
+        }
 
         editRow.append(offsetRow);
         row.appendChild(editRow);
@@ -14029,50 +14498,6 @@ function buildInspectorContent() {
   });
   battleRulesRow.appendChild(allyLimitInput);
   battleRulesSection.appendChild(battleRulesRow);
-
-  const placementRow = document.createElement('div');
-  placementRow.className = 'me-row me-map-battle-rules-row';
-
-  const placementAllowBtn = createPanelButton(
-    t('mods.mapEditor.placementAllow', 'Allow spawn'),
-    () => {
-      if (editorState.selectedTileIndex == null) return;
-      setTileAllowedPlacement(editorState.selectedTileIndex, true);
-      setStatusMessage(
-        t('mods.mapEditor.placementTileAllowed', 'Tile {tile} allowed for ally placement.')
-          .replace('{tile}', String(editorState.selectedTileIndex))
-      );
-    },
-    'me-btn me-btn-compact'
-  );
-  placementAllowBtn.id = 'map-editor-placement-allow-btn';
-
-  const placementClearBtn = createPanelButton(
-    t('mods.mapEditor.placementClear', 'Clear spawn'),
-    () => {
-      if (editorState.selectedTileIndex == null) return;
-      setTileAllowedPlacement(editorState.selectedTileIndex, false);
-      setStatusMessage(
-        t('mods.mapEditor.placementTileCleared', 'Tile {tile} removed from ally placement.')
-          .replace('{tile}', String(editorState.selectedTileIndex))
-      );
-    },
-    'me-btn me-btn-compact'
-  );
-  placementClearBtn.id = 'map-editor-placement-clear-btn';
-
-  const placementClearAllBtn = createPanelButton(
-    t('mods.mapEditor.placementClearAll', 'Clear all spawns'),
-    () => {
-      setAllowedPlacementTiles([]);
-      setStatusMessage(t('mods.mapEditor.placementClearedAll', 'Ally placement tiles cleared (no restriction).'));
-    },
-    'me-btn me-btn-compact me-btn-muted'
-  );
-  placementClearAllBtn.id = 'map-editor-placement-clear-all-btn';
-
-  placementRow.append(placementAllowBtn, placementClearBtn, placementClearAllBtn);
-  battleRulesSection.appendChild(placementRow);
 
   const placementOverlayRow = document.createElement('label');
   placementOverlayRow.className = 'me-check-row';
@@ -15904,6 +16329,11 @@ function injectStyles() {
       font-size: 11px;
       color: var(--me-gold);
     }
+    #${PANEL_ID} .me-asset-variants {
+      font-size: 10px;
+      opacity: 0.75;
+      line-height: 1.2;
+    }
     #${PANEL_ID} .me-asset-empty {
       grid-column: 1 / -1;
       padding: 8px 0;
@@ -16252,6 +16682,15 @@ function injectStyles() {
     #${PANEL_ID} .me-creature-input-compact {
       width: 88px;
       min-width: 0;
+    }
+    #${PANEL_ID} .me-creature-ability-cd-row {
+      align-items: center;
+      gap: 6px;
+    }
+    #${PANEL_ID} .me-creature-form-hint {
+      font-size: 11px;
+      color: #888;
+      white-space: nowrap;
     }
     #${PANEL_ID} .me-creature-check-row {
       gap: 12px;

@@ -185,6 +185,9 @@ function toggleFeature() {
   api.showModal({
     title: 'Feature Status',
     content: `Feature is now ${config.enabled ? 'enabled' : 'disabled'}!`,
+    // Each button: { text, onClick, primary?, closeOnClick?, variant? }
+    //   primary: true        → green background
+    //   variant: 'danger'    → red game-asset button (frame-1-red / surface-red)
     buttons: [{ text: 'OK', primary: true }]
   });
 }

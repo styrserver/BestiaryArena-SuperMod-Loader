@@ -35,6 +35,9 @@ const defaultConfig = {
   persistPowerSavingMode: false,
   powerSavingModeEnabled: false,
   compactNavBar: false,
+  customBackgroundImageUrl: '', // a preset URL, or CUSTOM_BACKGROUND_UPLOAD_MARKER when an uploaded image is selected (the image itself lives in IndexedDB, not here)
+  customBackgroundFit: 'repeat', // 'repeat' | 'cover' | 'contain' | 'stretch' — effective fit of whichever background is currently active
+  customBackgroundFitByKey: {}, // preset key (or 'custom') -> remembered fit, so switching backgrounds doesn't reset each one's fit to default
   showLastVisitedMapButton: false,
   alwaysOpenHuntAnalyzer: false,
   enablePlayercount: true,
@@ -545,6 +548,7 @@ function clearModSettingsModalCoordinationSubs() {
 
 /** Tear down settings-modal timers, bus subscriptions, resize, and capture mode. Idempotent. */
 function teardownSettingsModal() {
+  closeCustomBackgroundDeleteMenu();
   clearModSettingsModalWatchers();
   clearModSettingsModalCoordinationSubs();
   clearModSettingsModalLayoutCleanup();
@@ -882,6 +886,7 @@ const PERSISTENT_INVENTORY_ATTR = 'data-ba-persistent-inventory';
 const PERSISTENT_INVENTORY_RESTORING_ATTR = 'data-ba-persistent-inventory-restoring';
 const INVENTORY_HORIZONTAL_ATTR = 'data-ba-inventory-horizontal';
 const INVENTORY_HORIZONTAL_STYLE_ID = 'mod-settings-inventory-horizontal-style';
+const CUSTOM_BACKGROUND_STYLE_ID = 'mod-settings-custom-background-style';
 const INVENTORY_COLUMNS_STYLE_ID = 'mod-settings-inventory-columns-style';
 const INVENTORY_COLUMNS_ATTR = 'data-ba-inventory-columns';
 const INVENTORY_FILLER_HIDDEN_ATTR = 'data-ba-inventory-filler-hidden';
@@ -1373,12 +1378,7 @@ const INVENTORY_HOTKEY_BADGE_ENTRIES = [
 ];
 
 function ensureInventoryHotkeyBadgeStyle() {
-  let styleEl = document.getElementById(INVENTORY_HOTKEY_BADGE_STYLE_ID);
-  if (!styleEl) {
-    styleEl = document.createElement('style');
-    styleEl.id = INVENTORY_HOTKEY_BADGE_STYLE_ID;
-    document.documentElement.appendChild(styleEl);
-  }
+  const styleEl = ensureStyleTag(INVENTORY_HOTKEY_BADGE_STYLE_ID);
   const css =
     `.${INVENTORY_HOTKEY_BADGE_CLASS}{` +
     `position:absolute;top:1px;left:1px;z-index:4;pointer-events:none;` +
@@ -3190,7 +3190,8 @@ const playercountState = {
   recordToastBaselineReady: false,
   lastRecordToastAt: 0,
   updateInterval: null,
-  recordCheckInterval: null
+  recordCheckInterval: null,
+  navOrderObserver: null
 };
 
 // Global update tracking
@@ -3475,12 +3476,7 @@ function upsertFeatureStyle({ idPrefix, colorKey, cssText, replaceAllColors = fa
     return;
   }
   const styleId = `${idPrefix}-${colorKey}-style`;
-  let style = document.getElementById(styleId);
-  if (!style) {
-    style = document.createElement('style');
-    style.id = styleId;
-    document.head.appendChild(style);
-  }
+  const style = ensureStyleTag(styleId, { root: document.head });
   style.textContent = cssText;
 }
 
@@ -3869,6 +3865,42 @@ function notifyQuestHelpersChanged(disabled) {
   }));
 }
 
+// Shared localStorage JSON read/write — every settings sub-feature that persists its own
+// small blob (depot, automator, hunt analyzer, mod coordination, map history) used to
+// hand-roll its own try/JSON.parse/fallback and JSON.stringify/setItem; centralized here so
+// error handling only needs to change in one place.
+function readJSONFromStorage(key, fallback, { onError } = {}) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : (typeof fallback === 'function' ? fallback() : fallback);
+  } catch (error) {
+    if (onError) onError(error);
+    return typeof fallback === 'function' ? fallback() : fallback;
+  }
+}
+
+function writeJSONToStorage(key, value, { onError } = {}) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+    return true;
+  } catch (error) {
+    if (onError) onError(error);
+    return false;
+  }
+}
+
+// Shared "get style tag by id, create + append if missing" — several features each inject
+// their own single <style> tag and used to hand-roll this same lookup/create/append dance.
+function ensureStyleTag(id, { root = document.documentElement } = {}) {
+  let styleEl = document.getElementById(id);
+  if (!styleEl) {
+    styleEl = document.createElement('style');
+    styleEl.id = id;
+    root.appendChild(styleEl);
+  }
+  return styleEl;
+}
+
 const DEPOT_CONFIG_STORAGE_KEY = 'depot-manager-config';
 const DEPOT_DEFAULT_CONFIG = {
   enableFavorites: false,
@@ -3877,26 +3909,20 @@ const DEPOT_DEFAULT_CONFIG = {
 };
 
 function readDepotConfigFromStorage() {
-  try {
-    const raw = localStorage.getItem(DEPOT_CONFIG_STORAGE_KEY);
-    if (!raw) return { ...DEPOT_DEFAULT_CONFIG };
-    return Object.assign({}, DEPOT_DEFAULT_CONFIG, JSON.parse(raw));
-  } catch (e) {
-    return { ...DEPOT_DEFAULT_CONFIG };
-  }
+  const raw = readJSONFromStorage(DEPOT_CONFIG_STORAGE_KEY, null);
+  return raw ? Object.assign({}, DEPOT_DEFAULT_CONFIG, raw) : { ...DEPOT_DEFAULT_CONFIG };
 }
 
 function writeDepotConfigToStorage(next) {
-  try {
-    localStorage.setItem(DEPOT_CONFIG_STORAGE_KEY, JSON.stringify(next));
-    if (typeof window !== 'undefined') {
-      window.depotManagerConfig = next;
-    }
-    if (window.depotManager && typeof window.depotManager.reloadDepotConfigFromStorage === 'function') {
-      window.depotManager.reloadDepotConfigFromStorage();
-    }
-  } catch (e) {
-    console.error('[Mod Settings] Error saving Depot config:', e);
+  const ok = writeJSONToStorage(DEPOT_CONFIG_STORAGE_KEY, next, {
+    onError: (e) => console.error('[Mod Settings] Error saving Depot config:', e)
+  });
+  if (!ok) return;
+  if (typeof window !== 'undefined') {
+    window.depotManagerConfig = next;
+  }
+  if (window.depotManager && typeof window.depotManager.reloadDepotConfigFromStorage === 'function') {
+    window.depotManager.reloadDepotConfigFromStorage();
   }
 }
 
@@ -7066,22 +7092,20 @@ function createSettingsCheckboxHandler(configKey, onEnable, onDisable) {
 
 /** Shared reader for Bestiary Automator localStorage config. */
 function getAutomatorConfigFromStorage() {
-  try {
-    const raw = localStorage.getItem('bestiary-automator-config');
-    return raw ? JSON.parse(raw) : {};
-  } catch (_) {
-    return {};
-  }
+  return readJSONFromStorage('bestiary-automator-config', {});
+}
+
+/** Shared writer for Bestiary Automator localStorage config. */
+function writeAutomatorConfigToStorage(nextConfig) {
+  return writeJSONToStorage('bestiary-automator-config', nextConfig, {
+    onError: (e) => console.error('[Mod Settings] Error updating Bestiary Automator config:', e)
+  });
 }
 
 function readHuntAnalyzerSettings() {
-  try {
-    const raw = localStorage.getItem('huntAnalyzerSettings');
-    return raw ? JSON.parse(raw) : {};
-  } catch (error) {
-    console.error('[Mod Settings] Error reading Hunt Analyzer settings:', error);
-    return {};
-  }
+  return readJSONFromStorage('huntAnalyzerSettings', {}, {
+    onError: (e) => console.error('[Mod Settings] Error reading Hunt Analyzer settings:', e)
+  });
 }
 
 function updateHuntAnalyzerSettings(mutator) {
@@ -7704,6 +7728,39 @@ function showSettingsModal() {
                 <input type="checkbox" id="remove-footer-toggle" style="transform: scale(1.2);">
                 <span>${t('mods.betterUI.hideWebsiteFooter')}</span>
               </label>
+            </div>
+          </div>
+          <div style="${uiSectionWrapperStyle}">
+            <h4 style="${uiSectionTitleStyle}">${t('mods.betterUI.customBackgroundTitle')}</h4>
+            <div style="${uiOptionStyle}">
+              <span style="color: #ccc; font-size: 13px; display: block; margin-bottom: 6px;">${t('mods.betterUI.customBackgroundPresetsLabel')}</span>
+              <div id="custom-background-preset-list" style="display: flex; flex-wrap: wrap; gap: 8px;">
+                <div class="custom-background-preset-swatch" data-preset-key="none" title="${t('mods.betterUI.customBackgroundPresetNone')}" style="width: 48px; height: 48px; border-radius: 4px; cursor: pointer; box-sizing: border-box; border: 2px solid transparent; background: #222; display: flex; align-items: center; justify-content: center; color: #888; font-size: 9px; text-align: center; line-height: 1.1; pointer-events: auto;">${t('mods.betterUI.customBackgroundPresetNone')}</div>
+                ${getCustomBackgroundThemePresets().map((preset) => `
+                <div class="custom-background-preset-swatch" data-preset-key="${preset.key}" data-preset-url="${preset.url.replace(/"/g, '&quot;')}" title="${preset.name.replace(/"/g, '&quot;')}" style="width: 48px; height: 48px; border-radius: 4px; cursor: pointer; box-sizing: border-box; border: 2px solid transparent; background-image: url('${preset.url}'); background-repeat: repeat; pointer-events: auto;"></div>
+                `).join('')}
+              </div>
+            </div>
+            <div style="${uiOptionStyle}">
+              <label style="display: flex; flex-direction: column; gap: 5px;">
+                <span style="color: #ccc; font-size: 13px;">${t('mods.betterUI.customBackgroundUploadLabel')}</span>
+                <input type="file" id="custom-background-file-input" accept="image/*" style="pointer-events: auto; color: #ccc; max-width: 260px;" onclick="event.stopPropagation();">
+              </label>
+            </div>
+            <div style="${uiOptionStyle} display: flex; align-items: center; gap: 10px;">
+              <span style="color: #ccc;">${t('mods.betterUI.customBackgroundFitLabel')}</span>
+              <select id="custom-background-fit-selector" style="width: fit-content; background: #333; color: #ccc; border: 1px solid #555; padding: 4px 20px 4px 10px; border-radius: 4px; pointer-events: auto;">
+                <option value="repeat">${t('mods.betterUI.customBackgroundFitRepeat')}</option>
+                <option value="cover">${t('mods.betterUI.customBackgroundFitCover')}</option>
+                <option value="contain">${t('mods.betterUI.customBackgroundFitContain')}</option>
+                <option value="stretch">${t('mods.betterUI.customBackgroundFitStretch')}</option>
+              </select>
+            </div>
+            <div id="custom-background-status" style="font-size: 12px; color: #7f8fa4;" hidden></div>
+            <div style="${uiOptionStyle}">
+              <button type="button" id="custom-background-reset-btn" class="focus-style-visible hotkey-reset-btn pixel-font-14 frame-1 active:frame-pressed-1 surface-regular px-2 py-0.5 pb-[3px] text-whiteRegular" style="pointer-events: auto;" onclick="event.stopPropagation();">
+                ${t('mods.betterUI.customBackgroundResetButton')}
+              </button>
             </div>
           </div>
         `;
@@ -8622,6 +8679,180 @@ function showSettingsModal() {
         )(removeFooterCheckbox);
       }
 
+      // Custom Background handlers
+      const customBackgroundFileInput = content.querySelector('#custom-background-file-input');
+      const customBackgroundFitSelector = content.querySelector('#custom-background-fit-selector');
+      const customBackgroundResetBtn = content.querySelector('#custom-background-reset-btn');
+      const customBackgroundStatus = content.querySelector('#custom-background-status');
+      const customBackgroundPresetList = content.querySelector('#custom-background-preset-list');
+
+      if (customBackgroundFitSelector) {
+        customBackgroundFitSelector.value = config.customBackgroundFit || 'repeat';
+      }
+
+      const setCustomBackgroundStatus = (message, isError) => {
+        if (!customBackgroundStatus) return;
+        customBackgroundStatus.textContent = message || '';
+        customBackgroundStatus.style.color = isError ? '#e06c75' : '#7f8fa4';
+        customBackgroundStatus.style.marginBottom = message ? '15px' : '0';
+        customBackgroundStatus.hidden = !message;
+      };
+
+      // A swatch's "target value" is what gets written to config.customBackgroundImageUrl
+      // when clicked: the marker for the uploaded-image swatch (its actual bytes live in
+      // IndexedDB, not in this attribute), or the preset's own URL otherwise.
+      const getCustomBackgroundSwatchTarget = (swatch) =>
+        swatch.dataset.presetKey === 'custom' ? CUSTOM_BACKGROUND_UPLOAD_MARKER : (swatch.dataset.presetUrl || '');
+
+      const updateCustomBackgroundPresetHighlight = () => {
+        content.querySelectorAll('.custom-background-preset-swatch').forEach((swatch) => {
+          const isNone = swatch.dataset.presetKey === 'none';
+          const active = isNone
+            ? !config.customBackgroundImageUrl
+            : config.customBackgroundImageUrl === getCustomBackgroundSwatchTarget(swatch);
+          swatch.style.borderColor = active ? '#ffaa00' : 'transparent';
+        });
+      };
+
+      const bindCustomBackgroundPresetSwatch = (swatch) => {
+        swatch.addEventListener('click', () => {
+          if (swatch.dataset.presetKey === 'none') {
+            config.customBackgroundImageUrl = '';
+            config.customBackgroundFit = 'repeat';
+          } else {
+            config.customBackgroundImageUrl = getCustomBackgroundSwatchTarget(swatch);
+            config.customBackgroundFit = getCustomBackgroundFitForKey(swatch.dataset.presetKey);
+          }
+          saveConfig();
+          if (customBackgroundFitSelector) customBackgroundFitSelector.value = config.customBackgroundFit || 'repeat';
+          setCustomBackgroundStatus('');
+          applyCustomBackgroundStyle();
+          updateCustomBackgroundPresetHighlight();
+        });
+      };
+
+      // Keeps the uploaded-image swatch (right after "None") in sync with the in-memory
+      // customBackgroundUploadedImageCache — creating it on first upload, updating its
+      // thumbnail on re-upload, and removing it if there's no uploaded image at all.
+      const ensureCustomBackgroundUploadSwatch = () => {
+        if (!customBackgroundPresetList) return;
+        let swatch = customBackgroundPresetList.querySelector('.custom-background-preset-swatch[data-preset-key="custom"]');
+        if (!customBackgroundUploadedImageCache) {
+          if (swatch) swatch.remove();
+          return;
+        }
+        if (!swatch) {
+          swatch = document.createElement('div');
+          swatch.className = 'custom-background-preset-swatch';
+          swatch.dataset.presetKey = 'custom';
+          swatch.title = t('mods.betterUI.customBackgroundPresetCustom');
+          Object.assign(swatch.style, {
+            width: '48px',
+            height: '48px',
+            borderRadius: '4px',
+            cursor: 'pointer',
+            boxSizing: 'border-box',
+            border: '2px solid transparent',
+            backgroundRepeat: 'no-repeat',
+            backgroundSize: 'cover',
+            backgroundPosition: 'center',
+            pointerEvents: 'auto'
+          });
+          bindCustomBackgroundPresetSwatch(swatch);
+          swatch.addEventListener('contextmenu', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            showCustomBackgroundDeleteMenu(event.clientX, event.clientY);
+          });
+          const noneSwatch = customBackgroundPresetList.querySelector('.custom-background-preset-swatch[data-preset-key="none"]');
+          if (noneSwatch) {
+            noneSwatch.insertAdjacentElement('afterend', swatch);
+          } else {
+            customBackgroundPresetList.insertBefore(swatch, customBackgroundPresetList.firstChild);
+          }
+        }
+        swatch.style.backgroundImage = `url('${customBackgroundUploadedImageCache}')`;
+      };
+
+      if (customBackgroundFileInput) {
+        customBackgroundFileInput.addEventListener('change', () => {
+          const file = customBackgroundFileInput.files && customBackgroundFileInput.files[0];
+          if (!file) return;
+
+          if (!/^image\//i.test(file.type)) {
+            setCustomBackgroundStatus(t('mods.betterUI.customBackgroundFileInvalidType'), true);
+            customBackgroundFileInput.value = '';
+            return;
+          }
+          if (file.size > CUSTOM_BACKGROUND_MAX_UPLOAD_BYTES) {
+            setCustomBackgroundStatus(t('mods.betterUI.customBackgroundFileTooLarge'), true);
+            customBackgroundFileInput.value = '';
+            return;
+          }
+
+          const reader = new FileReader();
+          reader.onload = () => {
+            const dataUrl = typeof reader.result === 'string' ? reader.result : '';
+            if (!isValidCustomBackgroundUrl(dataUrl)) {
+              setCustomBackgroundStatus(t('mods.betterUI.customBackgroundFileInvalidType'), true);
+              customBackgroundFileInput.value = '';
+              return;
+            }
+            customBackgroundUploadedImageCache = dataUrl;
+            config.customBackgroundImageUrl = CUSTOM_BACKGROUND_UPLOAD_MARKER;
+            config.customBackgroundFit = getCustomBackgroundFitForKey('custom');
+            saveConfig();
+            setCustomBackgroundUploadInDb(dataUrl).catch((error) => {
+              console.error('[Mod Settings] Failed to save uploaded background to IndexedDB:', error);
+            });
+            setCustomBackgroundStatus('');
+            if (customBackgroundFitSelector) customBackgroundFitSelector.value = config.customBackgroundFit;
+            ensureCustomBackgroundUploadSwatch();
+            applyCustomBackgroundStyle();
+            updateCustomBackgroundPresetHighlight();
+            customBackgroundFileInput.value = '';
+          };
+          reader.onerror = () => {
+            setCustomBackgroundStatus(t('mods.betterUI.customBackgroundFileReadError'), true);
+            customBackgroundFileInput.value = '';
+          };
+          reader.readAsDataURL(file);
+        });
+      }
+
+      if (customBackgroundFitSelector) {
+        customBackgroundFitSelector.addEventListener('change', () => {
+          setCustomBackgroundFitForKey(resolveCustomBackgroundActiveKey(), customBackgroundFitSelector.value);
+          saveConfig();
+          applyCustomBackgroundStyle();
+        });
+      }
+
+      content.querySelectorAll('.custom-background-preset-swatch').forEach(bindCustomBackgroundPresetSwatch);
+
+      if (customBackgroundResetBtn) {
+        customBackgroundResetBtn.addEventListener('click', (event) => {
+          event.stopPropagation();
+          config.customBackgroundImageUrl = '';
+          config.customBackgroundFit = 'repeat';
+          config.customBackgroundFitByKey = {};
+          saveConfig();
+          clearCustomBackgroundStyle();
+          customBackgroundUploadedImageCache = null;
+          deleteCustomBackgroundUploadFromDb().catch((error) => {
+            console.error('[Mod Settings] Failed to delete uploaded background from IndexedDB:', error);
+          });
+          if (customBackgroundFileInput) customBackgroundFileInput.value = '';
+          if (customBackgroundFitSelector) customBackgroundFitSelector.value = 'repeat';
+          setCustomBackgroundStatus('');
+          ensureCustomBackgroundUploadSwatch();
+          updateCustomBackgroundPresetHighlight();
+        });
+      }
+
+      ensureCustomBackgroundUploadSwatch();
+      updateCustomBackgroundPresetHighlight();
+
       const hideStopAfterDefeatCheckbox = content.querySelector('#hide-stop-after-defeat-toggle');
       if (hideStopAfterDefeatCheckbox) {
         bindExclusiveSettingsCheckbox({
@@ -8842,25 +9073,19 @@ function showSettingsModal() {
     if (persistAutomatorAutoRefillCheckbox) {
       // Set initial state from Bestiary Automator's config
       try {
-        const automatorConfig = localStorage.getItem('bestiary-automator-config');
-        const parsedConfig = automatorConfig ? JSON.parse(automatorConfig) : {};
-        persistAutomatorAutoRefillCheckbox.checked = parsedConfig.persistAutoRefillOnRefresh || false;
+        persistAutomatorAutoRefillCheckbox.checked = getAutomatorConfigFromStorage().persistAutoRefillOnRefresh || false;
       } catch (error) {
         console.error('[Mod Settings] Error reading Bestiary Automator config:', error);
       }
-      
+
       persistAutomatorAutoRefillCheckbox.addEventListener('change', () => {
         const newValue = persistAutomatorAutoRefillCheckbox.checked;
-        
+
         // Write directly to Bestiary Automator's localStorage
-        try {
-          const automatorConfig = localStorage.getItem('bestiary-automator-config');
-          const config = automatorConfig ? JSON.parse(automatorConfig) : {};
-          config.persistAutoRefillOnRefresh = newValue;
-          localStorage.setItem('bestiary-automator-config', JSON.stringify(config));
+        const automatorConfig = getAutomatorConfigFromStorage();
+        automatorConfig.persistAutoRefillOnRefresh = newValue;
+        if (writeAutomatorConfigToStorage(automatorConfig)) {
           console.log('[Mod Settings] Updated Bestiary Automator localStorage persistAutoRefillOnRefresh:', newValue);
-        } catch (error) {
-          console.error('[Mod Settings] Error updating Bestiary Automator config:', error);
         }
         
         // Also update runtime if Bestiary Automator is loaded
@@ -8907,13 +9132,10 @@ function showSettingsModal() {
           getLockMessage: () => t('mods.betterUI.useApiForStaminaRefillThresholdsLock'),
           getUnlockedTitle: () => t('mods.betterUI.useApiForStaminaRefillWarning'),
           onUnlockedChange: (newValue) => {
-            try {
-              const automatorConfig = getAutomatorConfigFromStorage();
-              automatorConfig.useApiForStaminaRefill = newValue;
-              localStorage.setItem('bestiary-automator-config', JSON.stringify(automatorConfig));
+            const automatorConfig = getAutomatorConfigFromStorage();
+            automatorConfig.useApiForStaminaRefill = newValue;
+            if (writeAutomatorConfigToStorage(automatorConfig)) {
               console.log('[Mod Settings] Updated Bestiary Automator localStorage useApiForStaminaRefill:', newValue);
-            } catch (error) {
-              console.error('[Mod Settings] Error updating Bestiary Automator config:', error);
             }
 
             if (window.bestiaryAutomator && typeof window.bestiaryAutomator.updateConfig === 'function') {
@@ -9573,11 +9795,12 @@ function showSettingsModal() {
             addPlayercountHeaderButton();
           } else {
             clearPlayerCountIntervals();
-            // Remove button
+            stopPlayercountNavOrderObserver();
+            // Hide in place — never removeChild from the React-rendered nav <ul>
+            // (see .claude/CLAUDE.md). addPlayercountHeaderButton() re-shows it.
             const btn = document.querySelector('.playercount-header-btn');
-            if (btn && btn.parentNode) {
-              btn.parentNode.remove();
-            }
+            const li = btn && btn.closest('li');
+            if (li) li.style.display = 'none';
           }
         });
       }
@@ -9926,61 +10149,23 @@ function showSettingsModal() {
 
 // Create settings button in header
 function createSettingsButton() {
-  const tryInsert = () => {
-    // Find the header <ul> by its class
-    const headerUl = document.querySelector('header ul.pixel-font-16.flex.items-center');
-    if (!headerUl) {
-      const timeoutId = scheduleTimeout(tryInsert, 500);
-      return;
+  addOrShowHeaderNavItem({
+    selector: '.mod-settings-header-btn',
+    label: 'Settings button',
+    buildLi: () => {
+      const li = document.createElement('li');
+      li.className = 'hover:text-whiteExp';
+      const btn = document.createElement('button');
+      btn.textContent = t('mods.betterUI.settingsHeaderButton');
+      btn.className = 'mod-settings-header-btn';
+      btn.onclick = showSettingsModal;
+      li.appendChild(btn);
+      return li;
+    },
+    onReady: (li) => {
+      uiState.settingsButton = li.querySelector('.mod-settings-header-btn');
     }
-    
-    // Prevent duplicate button
-    if (headerUl.querySelector('.mod-settings-header-btn')) {
-      console.log('[Mod Settings] Settings header button already exists, skipping insert.');
-      return;
-    }
-
-    // Create the <li> and <button>
-    const li = document.createElement('li');
-    li.className = 'hover:text-whiteExp';
-    const btn = document.createElement('button');
-    btn.textContent = t('mods.betterUI.settingsHeaderButton');
-    btn.className = 'mod-settings-header-btn';
-    btn.onclick = showSettingsModal;
-    li.appendChild(btn);
-
-    // Insert before Cyclopedia (English) or Ciclopédia (Portuguese)
-    const cyclopediaLi = Array.from(headerUl.children).find(
-      el => el.querySelector('button.cyclopedia-header-btn')
-    );
-
-    if (cyclopediaLi) {
-      headerUl.insertBefore(li, cyclopediaLi);
-      console.log('[Mod Settings] Settings header button inserted before Cyclopedia');
-    } else {
-      // Fallback: Insert after Trophy Room
-      const trophyRoomLi = Array.from(headerUl.children).find(
-        el => el.querySelector('button') && (el.textContent.includes('Trophy Room') || el.textContent.includes('Sala de Trof'))
-      );
-      
-      if (trophyRoomLi) {
-        if (trophyRoomLi.nextSibling) {
-          headerUl.insertBefore(li, trophyRoomLi.nextSibling);
-        } else {
-          headerUl.appendChild(li);
-        }
-        console.log('[Mod Settings] Settings header button inserted after Trophy Room (fallback)');
-      } else {
-        // Final fallback: append to header
-        headerUl.appendChild(li);
-        console.log('[Mod Settings] Settings header button appended to header (final fallback)');
-      }
-    }
-    
-    // Store reference for cleanup
-    uiState.settingsButton = btn;
-  };
-  tryInsert();
+  });
 }
 // 7. Rainbow Tiers Functions
 // =======================
@@ -11126,7 +11311,8 @@ const advancedHoverState = {
   activeTooltip: null,
   activeCleanup: null,
   activeButton: null,
-  activeToken: 0
+  activeToken: 0,
+  activeResizeObserver: null
 };
 
 const equipmentHoverDelegationState = {
@@ -11135,6 +11321,10 @@ const equipmentHoverDelegationState = {
 };
 
 function destroyActiveAdvancedHoverTooltip() {
+  if (advancedHoverState.activeResizeObserver) {
+    try { advancedHoverState.activeResizeObserver.disconnect(); } catch (error) { /* noop */ }
+    advancedHoverState.activeResizeObserver = null;
+  }
   if (advancedHoverState.activeTooltip) {
     advancedHoverState.activeTooltip.remove();
     advancedHoverState.activeTooltip = null;
@@ -11633,6 +11823,84 @@ function getAbilityInfoForGameId(gameId) {
   }
 }
 
+// One grouped console line per ability-tooltip render when hover debug is on —
+// see isAdvancedHoverDebugEnabled(). Explains the EN/PT localisation state.
+function hoverI18nDebug(...args) {
+  if (!isAdvancedHoverDebugEnabled()) return;
+  try { console.info('[Mod Settings][hover-i18n]', ...args); } catch (e) { /* noop */ }
+}
+
+// "en" | "pt" — matches how the game's locale context keys off `"en" === locale`.
+function detectGameLocale() {
+  try {
+    const lang = (document.documentElement.getAttribute('lang') || '').toLowerCase();
+    if (lang.startsWith('pt')) return 'pt';
+    if (lang.startsWith('en')) return 'en';
+    if (location.pathname.includes('/pt/') || location.pathname.startsWith('/pt')) return 'pt';
+  } catch (e) { /* noop */ }
+  return 'en';
+}
+
+// The game localises ability tooltips through a React context Provider mounted
+// high in ITS component tree. globalThis.state.utils.createUIComponent renders
+// into a brand-new, detached React root with no Provider above it, so the game's
+// useI18n() hook falls back to its DEFAULT context ({ isEn: true, translate: x=>x })
+// and every ability description comes out English regardless of /pt/. Pull the
+// Provider (and the game's React) out of the webpack registry so we can wrap the
+// component in it ourselves. IDs are from the current game build and may change —
+// every failure path is logged and we fall back to the plain (English) render.
+const GAME_I18N_PROVIDER_MODULE_ID = 27468;
+const GAME_REACT_MODULE_IDS = [67294, 72408];
+let gameI18nBridge = null;          // set once, on success — { React, LocaleProvider }
+let cachedWebpackRequire = null;
+let gameI18nBridgeFailLogged = false;
+
+function getWebpackRequire() {
+  if (typeof cachedWebpackRequire === 'function') return cachedWebpackRequire;
+  const registry = typeof window !== 'undefined' ? window.webpackChunk_N_E : null;
+  if (!Array.isArray(registry) || typeof registry.push !== 'function') return null;
+  try {
+    registry.push([['ba-mod-settings-i18n-probe'], {}, (req) => { cachedWebpackRequire = req; }]);
+  } catch (e) { /* noop */ }
+  return typeof cachedWebpackRequire === 'function' ? cachedWebpackRequire : null;
+}
+
+// Returns { React, LocaleProvider } on success, else null (retries next call —
+// webpack may not be ready the first time). Only the first failure is logged.
+function getGameI18nBridge() {
+  if (gameI18nBridge) return gameI18nBridge;
+  const fail = (why) => {
+    if (!gameI18nBridgeFailLogged) { gameI18nBridgeFailLogged = true; hoverI18nDebug('bridge unavailable:', why); }
+    return null;
+  };
+  try {
+    const webpackRequire = getWebpackRequire();
+    if (!webpackRequire) return fail('__webpack_require__ not reachable (webpack not ready or global renamed)');
+
+    const tryRequire = (id) => { try { return webpackRequire(id); } catch (e) { return null; } };
+
+    const i18nMod = tryRequire(GAME_I18N_PROVIDER_MODULE_ID);
+    const LocaleProvider = i18nMod && i18nMod.$;
+    if (typeof LocaleProvider !== 'function' || !/["']en["']\s*===/.test(String(LocaleProvider))) {
+      return fail(`locale Provider not at module ${GAME_I18N_PROVIDER_MODULE_ID} (game build changed?)`);
+    }
+
+    let React = null;
+    for (const id of GAME_REACT_MODULE_IDS) {
+      const mod = tryRequire(id);
+      const candidate = mod && (typeof mod.createElement === 'function' ? mod : mod.default);
+      if (candidate && typeof candidate.createElement === 'function') { React = candidate; break; }
+    }
+    if (!React) return fail('game React not resolved from webpack');
+
+    gameI18nBridge = { React, LocaleProvider };
+    hoverI18nDebug('bridge ready — game i18n Provider + React resolved from webpack');
+    return gameI18nBridge;
+  } catch (err) {
+    return fail('extraction threw: ' + (err && err.message));
+  }
+}
+
 function createAdvancedHoverStatRow(label, value, maxValue, barColor = 'rgb(96, 192, 96)') {
   const statRow = document.createElement('div');
   statRow.setAttribute('data-transparent', 'false');
@@ -11696,16 +11964,21 @@ function createAdvancedHoverStatRow(label, value, maxValue, barColor = 'rgb(96, 
 }
 
 function createEquipmentIconForTooltip(equipment) {
-  if (!equipment?.spriteId || !api?.ui?.components?.createItemPortrait) {
-    return null;
-  }
+  if (!equipment?.spriteId) return null;
+  const options = {
+    itemId: equipment.spriteId,
+    stat: equipment.stat || 'ad',
+    tier: equipment.tier || 1,
+    onClick: () => {}
+  };
+  // Prefer BestiaryUIComponents directly (like Better_Analytics / Hero_Editor):
+  // api.ui.components.createItemPortrait logs "UI Components not loaded" on every
+  // call, which on a per-hover path floods the console.
+  const factory = window.BestiaryUIComponents?.createItemPortrait
+    || api?.ui?.components?.createItemPortrait;
+  if (typeof factory !== 'function') return null;
   try {
-    return api.ui.components.createItemPortrait({
-      itemId: equipment.spriteId,
-      stat: equipment.stat || 'ad',
-      tier: equipment.tier || 1,
-      onClick: () => {}
-    });
+    return factory(options);
   } catch (error) {
     return null;
   }
@@ -11726,6 +11999,11 @@ function buildAdvancedStatsTooltip(info) {
   tooltipContent.className = 'frame-pressed-1 surface-dark flex shrink-0 flex-col gap-1.5 px-2 py-1 pb-2';
 
   if (config.showAdvancedStatsOnHover) {
+    // These labels mirror the game's own genes tooltip, which hard-codes them in
+    // English on every locale (verified in the game bundle) — so we leave them in
+    // English too rather than inventing a translation the game doesn't have. Only
+    // content that comes straight from the game (the ability name and description
+    // below) is localised, by the game itself.
     tooltipContent.appendChild(createAdvancedHoverStatRow('Hitpoints', info.hp, 20));
     tooltipContent.appendChild(createAdvancedHoverStatRow('Attack', info.ad, 20));
     tooltipContent.appendChild(createAdvancedHoverStatRow('Ability Power', info.ap, 20));
@@ -11775,29 +12053,70 @@ function buildAdvancedStatsTooltip(info) {
         root.style.cssText = 'max-width: 200px; color: #fff; line-height: 1.1;';
         tooltipContent.appendChild(root);
 
-        if (typeof globalThis.state?.utils?.createUIComponent === 'function' && abilityInfo.TooltipContent) {
-          try {
-            const component = awaken
-              ? globalThis.state.utils.createUIComponent(root, abilityInfo.TooltipContent, { awaken: true })
-              : globalThis.state.utils.createUIComponent(root, abilityInfo.TooltipContent);
-            if (component && typeof component.mount === 'function') {
-              component.mount();
-              mountedComponents.push(component);
-              const blockquotes = root.querySelectorAll('blockquote');
-              blockquotes.forEach((bq) => {
-                bq.style.setProperty('font-size', '10px', 'important');
-              });
-            } else {
-              root.textContent = 'Ability details unavailable';
-              root.className = 'pixel-font-14 text-whiteDark';
-            }
-          } catch (error) {
+        const createUIComponent = globalThis.state?.utils?.createUIComponent;
+        if (typeof createUIComponent !== 'function' || !abilityInfo.TooltipContent) {
+          root.textContent = 'Ability details unavailable';
+          root.className = 'pixel-font-14 text-whiteDark';
+          hoverI18nDebug('ability block: createUIComponent / TooltipContent unavailable');
+          return;
+        }
+
+        const props = awaken ? { awaken: true } : undefined;
+        const gameLocale = detectGameLocale();
+        // Wrap the game's TooltipContent in its own locale Provider so its
+        // useI18n() hook sees the real locale instead of the detached-root default
+        // (which is always English). Only needed off the English locale.
+        let renderComponent = abilityInfo.TooltipContent;
+        let localeWrapped = false;
+        if (gameLocale !== 'en') {
+          const bridge = getGameI18nBridge();
+          if (bridge) {
+            const { React, LocaleProvider } = bridge;
+            const Inner = abilityInfo.TooltipContent;
+            renderComponent = (innerProps) =>
+              React.createElement(LocaleProvider, { locale: gameLocale },
+                React.createElement(Inner, innerProps));
+            localeWrapped = true;
+          }
+        }
+
+        try {
+          const component = props
+            ? createUIComponent(root, renderComponent, props)
+            : createUIComponent(root, renderComponent);
+          if (component && typeof component.mount === 'function') {
+            component.mount();
+            mountedComponents.push(component);
+            const blockquotes = root.querySelectorAll('blockquote');
+            blockquotes.forEach((bq) => {
+              bq.style.setProperty('font-size', '10px', 'important');
+            });
+          } else {
             root.textContent = 'Ability details unavailable';
             root.className = 'pixel-font-14 text-whiteDark';
           }
-        } else {
+        } catch (error) {
           root.textContent = 'Ability details unavailable';
           root.className = 'pixel-font-14 text-whiteDark';
+          hoverI18nDebug('ability block: render threw —', error && error.message);
+        }
+
+        if (isAdvancedHoverDebugEnabled()) {
+          // React 18 createRoot().render() is async — read the text on the next
+          // tick so the sample reflects what actually rendered.
+          setTimeout(() => {
+            const sample = (root.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 140);
+            hoverI18nDebug({
+              gameId: info.gameId,
+              gameLocale,
+              localeWrapped,
+              bridge: gameLocale === 'en'
+                ? 'not needed (English)'
+                : (getGameI18nBridge() ? 'active' : 'UNAVAILABLE — ability text falls back to English'),
+              looksPortuguese: /\b(habilidade|alvo|inimig|ataqu|caus\w+ dano|cura\w*|adaga|torna|fica|aliad)/i.test(sample),
+              renderedTextSample: sample
+            });
+          }, 50);
         }
       };
 
@@ -11935,9 +12254,7 @@ function attachEquipmentAbilityHoverTooltip(button) {
       advancedHoverState.activeTooltip = built.tooltip;
       advancedHoverState.activeCleanup = built.cleanup;
       advancedHoverState.activeButton = button;
-      document.body.appendChild(advancedHoverState.activeTooltip);
-      advancedHoverState.activeTooltip.style.display = 'block';
-      positionAdvancedStatsTooltip(advancedHoverState.activeTooltip, button);
+      presentAdvancedStatsTooltip(advancedHoverState.activeTooltip, button);
     }, TIMEOUT_DELAYS.HOVER_TOOLTIP_SHOW);
   };
   const hide = () => {
@@ -12008,6 +12325,32 @@ function positionAdvancedStatsTooltip(tooltip, button) {
   tooltip.style.top = `${top}px`;
 }
 
+// Show + place the hover tooltip, then keep it placed as its content settles.
+// The ability block mounts a game React component asynchronously, so its height
+// at first paint is smaller than final — without this the tooltip renders clipped
+// at the bottom of the viewport and only jumps up once a mousemove re-positions
+// it. Position once now, again after layout, and on every resize.
+function presentAdvancedStatsTooltip(tooltip, button) {
+  document.body.appendChild(tooltip);
+  tooltip.style.visibility = 'hidden';
+  tooltip.style.display = 'block';
+  positionAdvancedStatsTooltip(tooltip, button);
+  tooltip.style.visibility = '';
+
+  const reposition = () => {
+    if (advancedHoverState.activeTooltip === tooltip && document.body.contains(tooltip)) {
+      positionAdvancedStatsTooltip(tooltip, button);
+    }
+  };
+  requestAnimationFrame(() => { reposition(); requestAnimationFrame(reposition); });
+
+  if (typeof ResizeObserver === 'function') {
+    const ro = new ResizeObserver(reposition);
+    try { ro.observe(tooltip); } catch (error) { /* noop */ }
+    advancedHoverState.activeResizeObserver = ro;
+  }
+}
+
 function attachAdvancedStatsTooltip(button) {
   if (!button || button.dataset.advancedStatsHoverAttached === 'true') return;
   if (!isInventoryCreatureButton(button)) return;
@@ -12043,9 +12386,7 @@ function attachAdvancedStatsTooltip(button) {
       advancedHoverState.activeTooltip = built.tooltip;
       advancedHoverState.activeCleanup = built.cleanup;
       advancedHoverState.activeButton = button;
-      document.body.appendChild(advancedHoverState.activeTooltip);
-      advancedHoverState.activeTooltip.style.display = 'block';
-      positionAdvancedStatsTooltip(advancedHoverState.activeTooltip, button);
+      presentAdvancedStatsTooltip(advancedHoverState.activeTooltip, button);
     }, TIMEOUT_DELAYS.HOVER_TOOLTIP_SHOW);
   };
   const hide = () => {
@@ -12454,12 +12795,7 @@ function labelTextMatchesMarkers(labelText, markers) {
 }
 
 function ensurePersistentPowersaverInGameLabelStyle() {
-  let style = document.getElementById(PERSIST_PS_IN_GAME_STYLE_ID);
-  if (!style) {
-    style = document.createElement('style');
-    style.id = PERSIST_PS_IN_GAME_STYLE_ID;
-    document.head.appendChild(style);
-  }
+  const style = ensureStyleTag(PERSIST_PS_IN_GAME_STYLE_ID, { root: document.head });
   // Title via ::after. Game text cleared in JS. Real game checkbox hidden; custom
   // preference checkbox shown. gap:0 + pref margin = one normal gap.
   style.textContent = `
@@ -13995,12 +14331,7 @@ function ensurePersistentInventoryPositionStyle(left, top) {
   if (persistentInventoryState.positionStyleCss === css) {
     return;
   }
-  let styleEl = document.getElementById(PERSISTENT_INVENTORY_STYLE_ID);
-  if (!styleEl) {
-    styleEl = document.createElement('style');
-    styleEl.id = PERSISTENT_INVENTORY_STYLE_ID;
-    document.documentElement.appendChild(styleEl);
-  }
+  const styleEl = ensureStyleTag(PERSISTENT_INVENTORY_STYLE_ID);
   styleEl.textContent = css;
   persistentInventoryState.positionStyleCss = css;
 }
@@ -14231,6 +14562,317 @@ function clearInventoryColumnsStyle() {
     parent.insertBefore(document.createTextNode(el.textContent || ''), el);
     el.remove();
   });
+}
+
+// =======================
+// Custom Background
+// =======================
+
+const CUSTOM_BACKGROUND_MAX_UPLOAD_BYTES = 8 * 1024 * 1024; // 8MB raw file — safe because uploads live in IndexedDB, not localStorage
+const CUSTOM_BACKGROUND_UPLOAD_MARKER = 'indexeddb:custom-upload';
+const CUSTOM_BACKGROUND_DB_NAME = 'ba-mod-settings-custom-background';
+const CUSTOM_BACKGROUND_DB_STORE = 'uploads';
+const CUSTOM_BACKGROUND_DB_KEY = 'uploadedImage';
+
+// In-memory cache of the uploaded background (populated from IndexedDB on init, or
+// immediately on a fresh upload). The data: URI itself never touches localStorage/config —
+// only this marker string does — since localStorage's ~5-10MB per-origin quota is shared
+// with every other mod's settings, while IndexedDB's quota is far larger.
+let customBackgroundUploadedImageCache = null;
+
+function openCustomBackgroundDb() {
+  return new Promise((resolve, reject) => {
+    try {
+      const request = indexedDB.open(CUSTOM_BACKGROUND_DB_NAME, 1);
+      request.onupgradeneeded = () => {
+        if (!request.result.objectStoreNames.contains(CUSTOM_BACKGROUND_DB_STORE)) {
+          request.result.createObjectStore(CUSTOM_BACKGROUND_DB_STORE);
+        }
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
+
+async function getCustomBackgroundUploadFromDb() {
+  const db = await openCustomBackgroundDb();
+  try {
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(CUSTOM_BACKGROUND_DB_STORE, 'readonly');
+      const request = tx.objectStore(CUSTOM_BACKGROUND_DB_STORE).get(CUSTOM_BACKGROUND_DB_KEY);
+      request.onsuccess = () => resolve(request.result || null);
+      request.onerror = () => reject(request.error);
+    });
+  } finally {
+    db.close();
+  }
+}
+
+async function setCustomBackgroundUploadInDb(dataUrl) {
+  const db = await openCustomBackgroundDb();
+  try {
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(CUSTOM_BACKGROUND_DB_STORE, 'readwrite');
+      tx.objectStore(CUSTOM_BACKGROUND_DB_STORE).put(dataUrl, CUSTOM_BACKGROUND_DB_KEY);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } finally {
+    db.close();
+  }
+}
+
+async function deleteCustomBackgroundUploadFromDb() {
+  const db = await openCustomBackgroundDb();
+  try {
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(CUSTOM_BACKGROUND_DB_STORE, 'readwrite');
+      tx.objectStore(CUSTOM_BACKGROUND_DB_STORE).delete(CUSTOM_BACKGROUND_DB_KEY);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } finally {
+    db.close();
+  }
+}
+
+// Loads the cached upload from IndexedDB on startup, migrating a raw data: URI that an
+// earlier version of this feature stored directly in config/localStorage (if present).
+async function loadCustomBackgroundUploadCache() {
+  if (typeof config.customBackgroundUploadedImage === 'string' && config.customBackgroundUploadedImage) {
+    const legacyDataUrl = config.customBackgroundUploadedImage;
+    try {
+      await setCustomBackgroundUploadInDb(legacyDataUrl);
+      customBackgroundUploadedImageCache = legacyDataUrl;
+    } catch (error) {
+      console.error('[Mod Settings] Failed to migrate legacy custom background to IndexedDB:', error);
+      customBackgroundUploadedImageCache = legacyDataUrl;
+    }
+    if (config.customBackgroundImageUrl === legacyDataUrl) {
+      config.customBackgroundImageUrl = CUSTOM_BACKGROUND_UPLOAD_MARKER;
+    }
+    delete config.customBackgroundUploadedImage;
+    saveConfig();
+    return;
+  }
+  try {
+    customBackgroundUploadedImageCache = await getCustomBackgroundUploadFromDb();
+  } catch (error) {
+    console.error('[Mod Settings] Failed to load custom background from IndexedDB:', error);
+    customBackgroundUploadedImageCache = null;
+  }
+  // Self-heal: if the active selection is the uploaded image but it failed to load
+  // (IndexedDB unavailable/cleared), don't leave the UI claiming an active background
+  // that will never render.
+  if (!customBackgroundUploadedImageCache && config.customBackgroundImageUrl === CUSTOM_BACKGROUND_UPLOAD_MARKER) {
+    config.customBackgroundImageUrl = '';
+    config.customBackgroundFit = 'repeat';
+    saveConfig();
+  }
+}
+
+function isValidCustomBackgroundUrl(url) {
+  if (typeof url !== 'string' || !url.trim()) return false;
+  const trimmed = url.trim();
+  if (trimmed.includes("'") || trimmed.includes('\\') || /[\r\n]/.test(trimmed)) return false;
+  return /^https?:\/\/\S+$/i.test(trimmed) || /^data:image\/\S+$/i.test(trimmed);
+}
+
+function buildCustomBackgroundCss() {
+  const isCustomUpload = config.customBackgroundImageUrl === CUSTOM_BACKGROUND_UPLOAD_MARKER;
+  const url = isCustomUpload ? customBackgroundUploadedImageCache : config.customBackgroundImageUrl;
+  if (!isValidCustomBackgroundUrl(url)) return '';
+
+  const fitRules = {
+    repeat: 'background-repeat: repeat; background-size: auto; background-position: 0 0;',
+    cover: 'background-repeat: no-repeat; background-size: cover; background-position: center center;',
+    contain: 'background-repeat: no-repeat; background-size: contain; background-position: center center;',
+    stretch: 'background-repeat: no-repeat; background-size: 100% 100%; background-position: center center;'
+  };
+  const fit = fitRules[config.customBackgroundFit] ? config.customBackgroundFit : 'repeat';
+
+  return `body.checkered { background-image: url('${url.trim()}') !important; ${fitRules[fit]} }`;
+}
+
+function applyCustomBackgroundStyle() {
+  const css = buildCustomBackgroundCss();
+  if (!css) {
+    clearCustomBackgroundStyle();
+    return;
+  }
+  const styleEl = ensureStyleTag(CUSTOM_BACKGROUND_STYLE_ID);
+  if (styleEl.textContent !== css) {
+    styleEl.textContent = css;
+  }
+}
+
+function clearCustomBackgroundStyle() {
+  document.getElementById(CUSTOM_BACKGROUND_STYLE_ID)?.remove();
+}
+
+const CUSTOM_BACKGROUND_ASSET_ORIGIN = 'https://bestiaryarena.com';
+
+// The game's own tiled panel-background textures (same assets Hunt Analyzer's themes draw
+// from), offered here as flat, deduplicated preset swatches — one entry per distinct image.
+const CUSTOM_BACKGROUND_PRESETS_LIST = [
+  { key: 'darker', name: 'Original', asset: '/_next/static/media/background-darker.2679c837.png' },
+  { key: 'dark', name: 'Dark', asset: '/_next/static/media/background-dark.95edca67.png' },
+  { key: 'regular', name: 'Regular', asset: '/_next/static/media/background-regular.b0337118.png' },
+  { key: 'blue', name: 'Frosty', asset: '/_next/static/media/background-blue.7259c4ed.png' },
+  { key: 'green', name: 'Venomous', asset: '/_next/static/media/background-green.be515334.png' },
+  { key: 'red', name: 'Demonic', asset: '/_next/static/media/background-red.21d3f4bd.png' }
+];
+
+function resolveCustomBackgroundAssetUrl(asset) {
+  if (typeof asset !== 'string' || !asset) return '';
+  if (/^https?:\/\//i.test(asset)) return asset;
+  return CUSTOM_BACKGROUND_ASSET_ORIGIN + (asset.startsWith('/') ? asset : `/${asset}`);
+}
+
+function getCustomBackgroundThemePresets() {
+  return CUSTOM_BACKGROUND_PRESETS_LIST.map((p) => ({
+    key: p.key,
+    name: p.name,
+    url: resolveCustomBackgroundAssetUrl(p.asset)
+  }));
+}
+
+// Per-background fit memory — 'none' aside, every selectable background (each preset key,
+// plus 'custom' for the uploaded image) remembers its own fit so switching between them
+// doesn't reset the others back to the default.
+function resolveCustomBackgroundActiveKey() {
+  const url = config.customBackgroundImageUrl;
+  if (!url) return 'none';
+  if (url === CUSTOM_BACKGROUND_UPLOAD_MARKER) return 'custom';
+  const preset = CUSTOM_BACKGROUND_PRESETS_LIST.find((p) => resolveCustomBackgroundAssetUrl(p.asset) === url);
+  return preset ? preset.key : 'custom';
+}
+
+function getDefaultCustomBackgroundFitForKey(key) {
+  return key === 'custom' ? 'cover' : 'repeat';
+}
+
+function getCustomBackgroundFitForKey(key) {
+  const stored = config.customBackgroundFitByKey && config.customBackgroundFitByKey[key];
+  return stored || getDefaultCustomBackgroundFitForKey(key);
+}
+
+function setCustomBackgroundFitForKey(key, fit) {
+  if (!config.customBackgroundFitByKey || typeof config.customBackgroundFitByKey !== 'object') {
+    config.customBackgroundFitByKey = {};
+  }
+  config.customBackgroundFitByKey[key] = fit;
+  config.customBackgroundFit = fit;
+}
+
+// ── Right-click "Delete" menu for the uploaded-image swatch ────────────────
+const CUSTOM_BACKGROUND_DELETE_MENU_ID = 'mod-settings-custom-background-delete-menu';
+
+function handleCustomBackgroundDeleteMenuOutsideClick(event) {
+  const menu = document.getElementById(CUSTOM_BACKGROUND_DELETE_MENU_ID);
+  if (menu && !menu.contains(event.target)) closeCustomBackgroundDeleteMenu();
+}
+
+function handleCustomBackgroundDeleteMenuEscape(event) {
+  if (event.key === 'Escape') closeCustomBackgroundDeleteMenu();
+}
+
+function closeCustomBackgroundDeleteMenu() {
+  document.getElementById(CUSTOM_BACKGROUND_DELETE_MENU_ID)?.remove();
+  document.removeEventListener('mousedown', handleCustomBackgroundDeleteMenuOutsideClick, true);
+  document.removeEventListener('keydown', handleCustomBackgroundDeleteMenuEscape, true);
+}
+
+function updateAllCustomBackgroundPresetSwatchHighlights() {
+  document.querySelectorAll('.custom-background-preset-swatch').forEach((swatch) => {
+    const isNone = swatch.dataset.presetKey === 'none';
+    const targetValue = swatch.dataset.presetKey === 'custom'
+      ? CUSTOM_BACKGROUND_UPLOAD_MARKER
+      : (swatch.dataset.presetUrl || '');
+    const active = isNone ? !config.customBackgroundImageUrl : config.customBackgroundImageUrl === targetValue;
+    swatch.style.borderColor = active ? '#ffaa00' : 'transparent';
+  });
+}
+
+function deleteCustomBackgroundUpload() {
+  const wasActive = config.customBackgroundImageUrl === CUSTOM_BACKGROUND_UPLOAD_MARKER;
+  customBackgroundUploadedImageCache = null;
+  if (config.customBackgroundFitByKey) delete config.customBackgroundFitByKey.custom;
+  if (wasActive) {
+    config.customBackgroundImageUrl = '';
+    config.customBackgroundFit = 'repeat';
+    clearCustomBackgroundStyle();
+  }
+  saveConfig();
+  deleteCustomBackgroundUploadFromDb().catch((error) => {
+    console.error('[Mod Settings] Failed to delete uploaded background from IndexedDB:', error);
+  });
+  document.querySelectorAll('.custom-background-preset-swatch[data-preset-key="custom"]').forEach((el) => el.remove());
+  updateAllCustomBackgroundPresetSwatchHighlights();
+  if (wasActive) {
+    const fitSelector = document.getElementById('custom-background-fit-selector');
+    if (fitSelector) fitSelector.value = config.customBackgroundFit;
+  }
+}
+
+function showCustomBackgroundDeleteMenu(x, y) {
+  closeCustomBackgroundDeleteMenu();
+
+  const menu = document.createElement('div');
+  menu.id = CUSTOM_BACKGROUND_DELETE_MENU_ID;
+  menu.className = 'pixel-font-14';
+  Object.assign(menu.style, {
+    position: 'fixed',
+    left: `${x}px`,
+    top: `${y}px`,
+    zIndex: '200002',
+    background: "url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat",
+    border: '4px solid transparent',
+    borderImage: 'url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch',
+    borderRadius: '6px',
+    padding: '4px',
+    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.5)'
+  });
+
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'pixel-font-14';
+  button.textContent = t('mods.betterUI.customBackgroundDeleteUpload');
+  Object.assign(button.style, {
+    width: '170px',
+    height: '28px',
+    fontSize: '13px',
+    lineHeight: '1.2',
+    backgroundColor: '#4a2a2a',
+    color: '#ff8a8a',
+    border: '1px solid #e06c75',
+    borderRadius: '4px',
+    cursor: 'pointer',
+    pointerEvents: 'auto',
+    textShadow: '1px 1px 0px rgba(0,0,0,0.8)'
+  });
+  button.addEventListener('mouseenter', () => { button.style.backgroundColor = '#3a1a1a'; });
+  button.addEventListener('mouseleave', () => { button.style.backgroundColor = '#4a2a2a'; });
+  button.addEventListener('click', (event) => {
+    event.stopPropagation();
+    deleteCustomBackgroundUpload();
+    closeCustomBackgroundDeleteMenu();
+  });
+
+  menu.appendChild(button);
+  document.body.appendChild(menu);
+
+  const rect = menu.getBoundingClientRect();
+  if (rect.right > window.innerWidth - 8) menu.style.left = `${Math.max(8, window.innerWidth - rect.width - 8)}px`;
+  if (rect.bottom > window.innerHeight - 8) menu.style.top = `${Math.max(8, window.innerHeight - rect.height - 8)}px`;
+
+  setTimeout(() => {
+    document.addEventListener('mousedown', handleCustomBackgroundDeleteMenuOutsideClick, true);
+    document.addEventListener('keydown', handleCustomBackgroundDeleteMenuEscape, true);
+  }, 0);
 }
 
 function ensureInventoryTitleEllipsisSpan(handle) {
@@ -14575,12 +15217,7 @@ function capturePersistentInventoryStateFromDom() {
 function setPersistentInventoryRestoringVisual(active, root = findInventoryWidgetRoot()) {
   const styleEl = document.getElementById(PERSISTENT_INVENTORY_RESTORE_STYLE_ID);
   if (active) {
-    let el = styleEl;
-    if (!el) {
-      el = document.createElement('style');
-      el.id = PERSISTENT_INVENTORY_RESTORE_STYLE_ID;
-      document.documentElement.appendChild(el);
-    }
+    const el = ensureStyleTag(PERSISTENT_INVENTORY_RESTORE_STYLE_ID);
     el.textContent =
       `[${PERSISTENT_INVENTORY_RESTORING_ATTR}="1"] button.widget-top-button,` +
       `[${PERSISTENT_INVENTORY_RESTORING_ATTR}="1"] button[aria-label="Pin widget"],` +
@@ -15988,7 +16625,10 @@ function startBattleBoardObserver(options = {}) {
     if (typeof newGameUnsubscribe === 'function') newGameUnsubscribe();
     if (typeof endGameUnsubscribe === 'function') endGameUnsubscribe();
     if (typeof autoSetupUnsubscribe === 'function') autoSetupUnsubscribe();
-    if (typeof boardConfigUnsubscribe === 'function') boardConfigUnsubscribe();
+    // boardConfigUnsubscribe comes from state.board.subscribe(), which returns an
+    // {unsubscribe} object, not a bare function (unlike the .on() handlers above) —
+    // needs the dual-shape unsubscriber or this never actually tears down.
+    unsubscribePowerSavingHandle(boardConfigUnsubscribe);
   };
 }
 
@@ -16376,8 +17016,9 @@ function stopAutoplayRefreshMonitor(options = {}) {
       }
     }
     
-    if (subscriptions.autoplayRefreshBoardState && typeof subscriptions.autoplayRefreshBoardState === 'function') {
-      subscriptions.autoplayRefreshBoardState();
+    if (subscriptions.autoplayRefreshBoardState) {
+      // state.board.subscribe() returns an {unsubscribe} object, not a bare function.
+      unsubscribePowerSavingHandle(subscriptions.autoplayRefreshBoardState);
       subscriptions.autoplayRefreshBoardState = null;
       if (!quiet) {
         console.log('[Mod Settings] Autoplay refresh board state subscription stopped');
@@ -16920,6 +17561,90 @@ function startPlayerCountUpdates() {
   activeTimeouts.add(playercountState.recordCheckInterval);
 }
 
+// ---------------------------------------------------------------------------
+// Header nav <ul> helpers
+//
+// The header <ul> is React-rendered. A foreign <li> spliced *between* the game's
+// own <li>s can desync React's insert anchors on its next commit ->
+// "Node.insertBefore" client-side crash, and deleting a native <li> does the
+// same. So: mod buttons are only ever *appended* at the end, and "removing" one
+// means hiding it in place (see .claude/CLAUDE.md).
+// ---------------------------------------------------------------------------
+
+const HEADER_NAV_UL_SELECTOR = 'header ul.pixel-font-16.flex.items-center';
+
+function getHeaderNavUl() {
+  return document.querySelector(HEADER_NAV_UL_SELECTOR);
+}
+
+/**
+ * Append a mod button to the header nav <ul>, or just re-show it if it is
+ * already present (cleanup hides in place rather than removing). Retries every
+ * 500ms until the <ul> exists.
+ *
+ * @param {object} opts
+ * @param {string} opts.selector  CSS selector matching the button when present
+ * @param {() => HTMLLIElement} opts.buildLi  builds the <li> (with its button)
+ * @param {(li: HTMLLIElement, created: boolean) => void} [opts.onReady]
+ * @param {string} [opts.label]  short name for logging
+ */
+function addOrShowHeaderNavItem({ selector, buildLi, onReady, label }) {
+  const tryInsert = () => {
+    const headerUl = getHeaderNavUl();
+    if (!headerUl) {
+      scheduleTimeout(tryInsert, 500);
+      return;
+    }
+    let li = headerUl.querySelector(selector)?.closest('li') || null;
+    const created = !li;
+    if (li) {
+      li.style.display = '';
+      if (label) console.log(`[Mod Settings] ${label} re-shown in nav.`);
+    } else {
+      li = buildLi();
+      // Always append at the end — never splice between the game's own <li>s.
+      headerUl.appendChild(li);
+      if (label) console.log(`[Mod Settings] ${label} appended to nav.`);
+    }
+    try {
+      onReady?.(li, created);
+    } catch (err) {
+      console.error(`[Mod Settings] ${label || 'nav item'} onReady failed:`, err);
+    }
+  };
+  tryInsert();
+}
+
+// Move a still-present, visible mod <li> back to the end of its <ul>.
+// appendChild of an existing child relocates it — and moving a *foreign* node to
+// the trailing position is toward the React-safe state (all foreign nodes after
+// the game's own), never away from it.
+function moveNavItemToEnd(li) {
+  const ul = li?.parentElement;
+  if (!ul || ul.lastElementChild === li || li.style.display === 'none') return;
+  ul.appendChild(li);
+}
+
+// The Online counter should always sit at the far right of the nav, even when
+// another mod appends its button after ours. A childList observer scoped to the
+// nav <ul> (cheap — fires only when its direct children change) nudges it back.
+function keepPlayercountNavItemLast(li) {
+  moveNavItemToEnd(li);
+  if (playercountState.navOrderObserver || !li?.parentElement) return;
+  playercountState.navOrderObserver = new MutationObserver(() => {
+    const current = getHeaderNavUl()?.querySelector('.playercount-header-btn')?.closest('li');
+    if (current) moveNavItemToEnd(current);
+  });
+  playercountState.navOrderObserver.observe(li.parentElement, { childList: true });
+}
+
+function stopPlayercountNavOrderObserver() {
+  if (playercountState.navOrderObserver) {
+    playercountState.navOrderObserver.disconnect();
+    playercountState.navOrderObserver = null;
+  }
+}
+
 // Hide (do NOT remove) the Wiki and Discord links in the header.
 //
 // The header <ul> is React-rendered. Deleting a native <li> from it changes the
@@ -16959,71 +17684,25 @@ function removeHeaderLinks() {
   tryRemove();
 }
 
-// Add Playercount button to the header
+// Add Playercount button to the header (kept pinned to the far right).
 function addPlayercountHeaderButton() {
-  const tryInsert = () => {
-    // Find the header <ul> by its class
-    const headerUl = document.querySelector('header ul.pixel-font-16.flex.items-center');
-    if (!headerUl) {
-      const timeoutId = setTimeout(tryInsert, 500);
-      activeTimeouts.add(timeoutId);
-      return;
+  addOrShowHeaderNavItem({
+    selector: '.playercount-header-btn',
+    label: 'Playercount button',
+    buildLi: () => {
+      const li = document.createElement('li');
+      const btn = document.createElement('span');
+      btn.innerHTML = '<span class="pixel-font-16 text-white animate-in fade-in">Online: <span class="text-error">?</span></span>';
+      btn.className = 'playercount-header-btn';
+      btn.title = 'Loading player count...';
+      li.appendChild(btn);
+      return li;
+    },
+    onReady: (li) => {
+      keepPlayercountNavItemLast(li);
+      startPlayerCountUpdates();
     }
-    
-    // Prevent duplicate button
-    if (headerUl.querySelector('.playercount-header-btn')) {
-      console.log('[Mod Settings] Playercount header button already exists, skipping insert.');
-      return;
-    }
-
-    // Create the <li> and <span> (non-clickable)
-    const li = document.createElement('li');
-    const btn = document.createElement('span');
-    btn.innerHTML = '<span class="pixel-font-16 text-white animate-in fade-in">Online: <span class="text-error">?</span></span>';
-    btn.className = 'playercount-header-btn';
-    btn.title = 'Loading player count...';
-    
-    li.appendChild(btn);
-
-    // Insert after Challenges, else after Cyclopedia
-    const challengesLi = Array.from(headerUl.children).find(
-      el => el.querySelector('.challenges-header-btn')
-    );
-    const cyclopediaLi = Array.from(headerUl.children).find(
-      el => el.querySelector('.cyclopedia-header-btn')
-    );
-
-    if (challengesLi) {
-      if (challengesLi.nextSibling) {
-        headerUl.insertBefore(li, challengesLi.nextSibling);
-      } else {
-        headerUl.appendChild(li);
-      }
-      console.log('[Mod Settings] Playercount header button inserted after Challenges.');
-    } else if (cyclopediaLi) {
-      if (cyclopediaLi.nextSibling) {
-        headerUl.insertBefore(li, cyclopediaLi.nextSibling);
-      } else {
-        headerUl.appendChild(li);
-      }
-      console.log('[Mod Settings] Playercount header button inserted after Cyclopedia.');
-    } else {
-      // Fallback: Insert after Settings
-      const settingsLi = Array.from(headerUl.children).find(
-        el => el.querySelector('.mod-settings-header-btn')
-      );
-      if (settingsLi && settingsLi.nextSibling) {
-        headerUl.insertBefore(li, settingsLi.nextSibling);
-      } else {
-        headerUl.appendChild(li);
-      }
-      console.log('[Mod Settings] Playercount header button inserted after Settings.');
-    }
-    
-    // Start the periodic updates
-    startPlayerCountUpdates();
-  };
-  tryInsert();
+  });
 }
 
 // =======================
@@ -17034,23 +17713,17 @@ const MOD_COORDINATION_STORAGE_KEY = 'mod-coordination-priorities';
 
 // Load saved priority overrides from localStorage
 function loadModPriorities() {
-  try {
-    const saved = localStorage.getItem(MOD_COORDINATION_STORAGE_KEY);
-    return saved ? JSON.parse(saved) : {};
-  } catch (error) {
-    console.error('[Mod Settings] Error loading mod priorities:', error);
-    return {};
-  }
+  return readJSONFromStorage(MOD_COORDINATION_STORAGE_KEY, {}, {
+    onError: (e) => console.error('[Mod Settings] Error loading mod priorities:', e)
+  });
 }
 
 // Save priority overrides to localStorage
 function saveModPriorities(priorities) {
-  try {
-    localStorage.setItem(MOD_COORDINATION_STORAGE_KEY, JSON.stringify(priorities));
-    console.log('[Mod Settings] Mod priorities saved:', priorities);
-  } catch (error) {
-    console.error('[Mod Settings] Error saving mod priorities:', error);
-  }
+  const ok = writeJSONToStorage(MOD_COORDINATION_STORAGE_KEY, priorities, {
+    onError: (e) => console.error('[Mod Settings] Error saving mod priorities:', e)
+  });
+  if (ok) console.log('[Mod Settings] Mod priorities saved:', priorities);
 }
 
 // Load and display mod priorities in the UI
@@ -17405,6 +18078,7 @@ function pauseModSettingsForAnalysis() {
   }
 
   clearPlayerCountIntervals();
+  stopPlayercountNavOrderObserver();
   stopAutoplayRefreshMonitor({ quiet: true });
   stopAutoUploadMonitor();
 }
@@ -17608,6 +18282,11 @@ function initBetterUI() {
       }, 1000);
     }
     
+    // Apply custom background if enabled (loads any uploaded image from IndexedDB first)
+    loadCustomBackgroundUploadCache()
+      .catch((error) => console.error('[Mod Settings] Custom background cache load failed:', error))
+      .then(() => applyCustomBackgroundStyle());
+
     // Hide website footer if enabled
     if (config.removeWebsiteFooter) {
       scheduleTimeout(() => {
@@ -17666,6 +18345,7 @@ function cleanupBetterUI() {
     } else {
       teardownSettingsModal();
     }
+    closeCustomBackgroundDeleteMenu();
     stopAutoUploadMonitor();
 
     if (powerSavingRestoreDebounceTimer) {
@@ -17735,6 +18415,7 @@ function cleanupBetterUI() {
     );
     observers.inventoryModButtons = disconnectObserver(observers.inventoryModButtons, 'Inventory mod buttons');
     clearInventoryColumnsStyle();
+    clearCustomBackgroundStyle();
     stopPersistentInventoryObserver();
     inventoryModButtonsState.missingRetryCount.clear();
     inventoryModButtonsState.knownClasses.clear();
@@ -17761,16 +18442,15 @@ function cleanupBetterUI() {
     removeLastMapNavButton();
     cleanupHotkeys();
     
-    // Cleanup playercount
+    // Cleanup playercount — hide the <li> in place, never removeChild from the
+    // React-rendered nav <ul> (see .claude/CLAUDE.md). Re-enable re-shows it.
     clearPlayerCountIntervals();
+    stopPlayercountNavOrderObserver();
     const playercountBtn = document.querySelector('.playercount-header-btn');
-    if (playercountBtn && playercountBtn.parentNode) {
-      try {
-        playercountBtn.parentNode.remove();
-        console.log('[Mod Settings] Playercount button removed');
-      } catch (error) {
-        console.warn('[Mod Settings] Error removing playercount button:', error);
-      }
+    const playercountLi = playercountBtn && playercountBtn.closest('li');
+    if (playercountLi) {
+      playercountLi.style.display = 'none';
+      console.log('[Mod Settings] Playercount button hidden');
     }
     
     // Clean up toast container
@@ -17801,16 +18481,15 @@ function cleanupBetterUI() {
     }
     timerState.element = null;
     
-    if (uiState.settingsButton && uiState.settingsButton.parentNode) {
+    if (uiState.settingsButton) {
       try {
-        // Remove the li parent element (which contains the button)
+        // Hide the <li> in place — never removeChild from the React-rendered nav
+        // <ul> (see .claude/CLAUDE.md). createSettingsButton() re-shows it.
         const liParent = uiState.settingsButton.closest('li');
-        if (liParent && liParent.parentNode) {
-          liParent.parentNode.removeChild(liParent);
-        }
-        console.log('[Mod Settings] Settings button removed from header');
+        if (liParent) liParent.style.display = 'none';
+        console.log('[Mod Settings] Settings button hidden in header');
       } catch (error) {
-        console.warn('[Mod Settings] Error removing settings button:', error);
+        console.warn('[Mod Settings] Error hiding settings button:', error);
       }
     }
     uiState.settingsButton = null;
@@ -18065,14 +18744,12 @@ window.markModSettingsProgrammaticNavFloorGuard = markProgrammaticNavFloorGuard;
 
 // Load map history from localStorage
 const loadLastVisitedMap = () => {
-  try {
-    const saved = localStorage.getItem(LAST_MAP_STORAGE_KEY);
-    if (saved) {
-      mapHistory = JSON.parse(saved);
-      console.log('[Mod Settings] Loaded map history:', mapHistory);
-    }
-  } catch (error) {
-    console.error('[Mod Settings] Error loading map history:', error);
+  const saved = readJSONFromStorage(LAST_MAP_STORAGE_KEY, null, {
+    onError: (e) => console.error('[Mod Settings] Error loading map history:', e)
+  });
+  if (saved) {
+    mapHistory = saved;
+    console.log('[Mod Settings] Loaded map history:', mapHistory);
   }
 };
 
@@ -18365,7 +19042,7 @@ const removeLastMapNavButton = () => {
 const subscribeToMapChanges = () => {
   try {
     if (globalThis.state && globalThis.state.board) {
-      if (typeof mapChangeUnsubscribe === 'function') return;
+      if (mapChangeUnsubscribe) return;
       const handleBoardChange = (state) => {
         try {
           const boardContext = state.context;
@@ -18418,8 +19095,9 @@ const subscribeToMapChanges = () => {
 
 // Unsubscribe from map changes
 const unsubscribeFromMapChanges = () => {
-  if (mapChangeUnsubscribe && typeof mapChangeUnsubscribe === 'function') {
-    mapChangeUnsubscribe();
+  if (mapChangeUnsubscribe) {
+    // state.board.subscribe() returns an {unsubscribe} object, not a bare function.
+    unsubscribePowerSavingHandle(mapChangeUnsubscribe);
     mapChangeUnsubscribe = null;
     console.log('[Mod Settings] Unsubscribed from map changes');
   }

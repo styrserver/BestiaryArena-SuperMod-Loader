@@ -19,7 +19,7 @@ const config = Object.assign({}, defaultConfig, context.config);
 
 const WELCOME_MODAL_SIZE = {
   width: 700,
-  height: 550,
+  height: 600,
   viewportPadding: 16,
   minWidth: 300,
   minHeight: 300
@@ -587,6 +587,8 @@ function buildWelcomeModalContent({ officialCount, superCount, otCount, version 
     minWidth: '0',
     width: '100%',
     boxSizing: 'border-box',
+    display: 'flex',
+    flexDirection: 'column',
     overflowX: 'hidden',
     overflowY: 'auto',
     padding: 'clamp(8px, 2vw, 14px)',
@@ -605,6 +607,7 @@ function buildWelcomeModalContent({ officialCount, superCount, otCount, version 
     </p>`;
 
   scrollArea.innerHTML = `
+    <div class="welcome-scroll-inner" style="margin: auto 0; width: 100%;">
     <div style="margin-bottom: 10px;">
       <h2 style="color: #a6adc8; margin: 0 0 6px; font-size: 18px; line-height: 1.3;">
         ${welcomeInlineIcon(WELCOME_ASSETS.logo, { size: 20, alt: 'Bestiary Arena' })}Bestiary Arena SuperMod Loader
@@ -618,8 +621,8 @@ function buildWelcomeModalContent({ officialCount, superCount, otCount, version 
         ${welcomeInlineIcon(WELCOME_ASSETS.shinyStar, { alt: 'Features' })}What's Included
       </h3>
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 4px 14px; text-align: left; color: #a6adc8;">
-        ${featureRow(WELCOME_ASSETS.spellbook, `${officialCount} Original Mods:`, 'Automator, Board Analyzer, Hero Editor, and more. <em>(On by default)</em>')}
-        ${featureRow(WELCOME_ASSETS.starAwaken, `${superCount} Super Mods:`, 'Autoseller, Cyclopedia, Hunt Analyzer, Raid Hunter, and more. <em>(Mostly off)</em>')}
+        ${featureRow(WELCOME_ASSETS.spellbook, `${officialCount} Original Mods:`, 'Automator, Board Analyzer, Highscores, tier lists, and more. <em>(6 on by default)</em>')}
+        ${featureRow(WELCOME_ASSETS.starAwaken, `${superCount} Super Mods:`, 'Autoseller, Cyclopedia, Hunt Analyzer, Raid Hunter, and more. <em>(Mostly off &mdash; 3 on)</em>')}
         ${featureRow(WELCOME_ASSETS.chat, `${otCount} OT Mods:`, 'Challenges, Guilds, VIP List, Quests. <em>(Off by default)</em>')}
         ${featureRow(WELCOME_ASSETS.chest, 'Backups:', 'Import and export settings via Mod Settings.')}
         ${featureRow(WELCOME_ASSETS.quest, 'Patch Notes:', 'See what\'s new each version in the popup.')}
@@ -644,6 +647,7 @@ function buildWelcomeModalContent({ officialCount, superCount, otCount, version 
         ${welcomeInlineIcon(WELCOME_ASSETS.shinyStar, { alt: '' })}Enjoy your enhanced Bestiary Arena experience!
       </p>
       <p style="font-size: 13px; opacity: 0.7; margin: 0;">Bestiary Arena SuperMod Loader${versionLabel}</p>
+    </div>
     </div>
   `;
 
@@ -728,6 +732,8 @@ function applyWelcomeModalLayout(modalRef, contentRoot, dimensions) {
       minWidth: '0',
       width: '100%',
       boxSizing: 'border-box',
+      display: 'flex',
+      flexDirection: 'column',
       overflowX: 'hidden',
       overflowY: 'auto'
     });
@@ -736,6 +742,19 @@ function applyWelcomeModalLayout(modalRef, contentRoot, dimensions) {
   const buttonFooter = dialog.querySelector('.widget-bottom > .flex.justify-end.gap-2');
   if (buttonFooter) {
     buttonFooter.style.flexShrink = '0';
+  }
+
+  // Autofit: grow the dialog to fit its content so the scroll area doesn't need a
+  // scrollbar, clamped to the viewport (below that, it falls back to scrolling).
+  if (scrollArea) {
+    const viewportPad = WELCOME_MODAL_SIZE.viewportPadding * 2;
+    const maxHeight = window.innerHeight - viewportPad;
+    const overflow = scrollArea.scrollHeight - scrollArea.clientHeight;
+    if (overflow > 1 && height < maxHeight) {
+      const grownHeight = Math.min(maxHeight, height + overflow);
+      dialog.style.height = `${grownHeight}px`;
+      dialog.style.maxHeight = `${grownHeight}px`;
+    }
   }
 }
 
@@ -974,6 +993,7 @@ async function showWelcomeModal() {
       buttons: [
         {
           text: 'Never Show Again',
+          variant: 'danger',
           onClick: () => setNeverShowAgain()
         },
         {

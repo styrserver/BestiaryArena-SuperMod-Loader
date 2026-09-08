@@ -12877,39 +12877,12 @@ function createChatHeaderButton() {
     };
     li.appendChild(btn);
 
-    // Try to insert after Autoseller button
-    const autosellerLi = Array.from(headerUl.children).find(
-      el => el.querySelector('.autoseller-nav-btn')
-    );
-
-    if (autosellerLi) {
-      // Insert after Autoseller
-      if (autosellerLi.nextSibling) {
-        headerUl.insertBefore(li, autosellerLi.nextSibling);
-      } else {
-        headerUl.appendChild(li);
-      }
-      console.log('[VIP List] Chat header button inserted after Autoseller.');
-    } else {
-      // Fallback: Insert after Quest button
-      const questLi = Array.from(headerUl.children).find(
-        el => {
-          const button = el.querySelector('button');
-          return button && (button.textContent.includes('Quest') || button.textContent.includes('Tarefa') || button.getAttribute('alt') === 'Quests');
-        }
-      );
-      if (questLi) {
-        if (questLi.nextSibling) {
-          headerUl.insertBefore(li, questLi.nextSibling);
-        } else {
-          headerUl.appendChild(li);
-        }
-        console.log('[VIP List] Chat header button inserted after Quest (fallback).');
-      } else {
-        headerUl.appendChild(li);
-        console.log('[VIP List] Chat header button appended to end (fallback).');
-      }
-    }
+    // Always append at the end of the nav <ul>. Never splice between the game's
+    // own <li>s: the header is React-rendered, and a foreign node mid-list can
+    // desync React's insert anchors on its next commit -> "Node.insertBefore"
+    // client-side crash. See .claude/CLAUDE.md.
+    headerUl.appendChild(li);
+    console.log('[VIP List] Chat header button appended to nav.');
   };
   tryInsert();
 }

@@ -52,6 +52,15 @@ function appendLoaderError(entry) {
   if ((entry.level || 'error') !== 'error') return;
   try {
     const now = Date.now();
+    // Flag fatal client-side crashes for the runtime crash-recovery watcher even
+    // when Next.js never renders a readable error page (its root error boundary
+    // can re-throw while rendering its own fallback, leaving the React root blank).
+    // Every recorded error from both worlds funnels through here, so this is the
+    // one reliable cross-world signal.
+    if (/client-side exception|Node\.insertBefore|is not a child of this node|Minified React error #(?:418|423|425)/i
+      .test(`${entry.source || ''} ${entry.message || ''} ${entry.detail || ''}`)) {
+      window.__BA_RUNTIME_CRASH_SIGNAL__ = true;
+    }
     // \x1f (unit separator) joins the fields so ordinary punctuation in a message
     // can't forge a collision with a different source/detail split.
     const signature = `${entry.source || 'unknown'}\x1f${entry.message || ''}\x1f${entry.detail || ''}`;
@@ -178,11 +187,25 @@ if (IS_TOP_FRAME && !window.__BA_RUNTIME_CRASH_RECOVERY__) {
   const CRASH_RECOVERY_RETRY_COUNT_LEGACY_KEY = 'ba-runtime-crash-retry-count';
   const MAX_CRASH_RECOVERY_RETRIES = 3;
   const CRASH_RECOVERY_WINDOW_MS = 60 * 1000;
-  const CRASH_RECOVERY_DELAY_MS = 2500;
+  // Escalating backoff: reload almost immediately the first time, then give the
+  // page progressively more room so a deterministic-on-load crash can't burn the
+  // whole retry budget in a few seconds. Index is clamped to the last entry.
+  const CRASH_RECOVERY_DELAYS_MS = [600, 5000, 15000];
   let crashRecoveryScheduled = false;
   let crashRecoveryLimitLogged = false;
   let crashRecoveryDisabledLogged = false;
   let crashRecoveryRelaxedLogged = false;
+
+  // Recovery decisions are console.warn (level-gated, never stored). Mirror each
+  // one into the Error Log so "why didn't the page auto-refresh?" is answerable
+  // from a captured log. Dedupe in appendLoaderError keeps repeats to one/window.
+  function recordRecoveryDiagnostic(message, detail) {
+    try {
+      appendLoaderError({ level: 'error', source: 'Injector', message, detail });
+    } catch {
+      // ignore logging failures
+    }
+  }
 
   function readCrashRecoveryRetryTimes() {
     try {
@@ -253,6 +276,17 @@ if (IS_TOP_FRAME && !window.__BA_RUNTIME_CRASH_RECOVERY__) {
         return true;
       }
     }
+
+    // Fallback for the blank-page case: a fatal client-side error was recorded
+    // this session and the React root has been torn down to nothing. Next.js's
+    // own error page never rendered, so none of the checks above can see it.
+    if (window.__BA_RUNTIME_CRASH_SIGNAL__) {
+      const root = document.getElementById('__next') || document.querySelector('#root');
+      if (root && root.childElementCount === 0) {
+        return true;
+      }
+    }
+
     return false;
   }
 
@@ -263,6 +297,7 @@ if (IS_TOP_FRAME && !window.__BA_RUNTIME_CRASH_RECOVERY__) {
       if (!crashRecoveryDisabledLogged) {
         crashRecoveryDisabledLogged = true;
         console.warn('[Injector] Runtime crash detected but auto-reload is disabled in Mod Settings');
+        recordRecoveryDiagnostic('Runtime crash detected — auto-reload skipped (disabled in Mod Settings)');
       }
       return;
     }
@@ -271,6 +306,7 @@ if (IS_TOP_FRAME && !window.__BA_RUNTIME_CRASH_RECOVERY__) {
       if (!crashRecoveryRelaxedLogged) {
         crashRecoveryRelaxedLogged = true;
         console.warn('[Injector] Runtime crash detected (relaxed loader: no auto-refresh)');
+        recordRecoveryDiagnostic('Runtime crash detected — auto-reload skipped (relaxed loader)');
       }
       return;
     }
@@ -280,18 +316,25 @@ if (IS_TOP_FRAME && !window.__BA_RUNTIME_CRASH_RECOVERY__) {
       if (!crashRecoveryLimitLogged) {
         crashRecoveryLimitLogged = true;
         console.warn('[Injector] Runtime crash detected — auto-refresh retry limit reached');
+        recordRecoveryDiagnostic(
+          `Runtime crash detected — auto-reload skipped (retry limit ${MAX_CRASH_RECOVERY_RETRIES} reached in ${Math.round(CRASH_RECOVERY_WINDOW_MS / 1000)}s window)`
+        );
       }
       return;
     }
 
     crashRecoveryScheduled = true;
     const attempt = incrementCrashRecoveryRetryCount();
+    const delayMs = CRASH_RECOVERY_DELAYS_MS[Math.min(attempt - 1, CRASH_RECOVERY_DELAYS_MS.length - 1)];
     console.warn(
-      `[Injector] Next.js client error page detected — refreshing in ${Math.round(CRASH_RECOVERY_DELAY_MS / 1000)}s (${attempt}/${MAX_CRASH_RECOVERY_RETRIES})`
+      `[Injector] Next.js client error page detected — refreshing in ${Math.round(delayMs / 1000)}s (${attempt}/${MAX_CRASH_RECOVERY_RETRIES})`
+    );
+    recordRecoveryDiagnostic(
+      `Runtime crash detected — auto-reloading in ${Math.round(delayMs / 1000)}s (attempt ${attempt}/${MAX_CRASH_RECOVERY_RETRIES})`
     );
     setTimeout(() => {
       window.location.reload();
-    }, CRASH_RECOVERY_DELAY_MS);
+    }, delayMs);
   }
 
   function onPossibleCrashDomChange() {
@@ -299,6 +342,12 @@ if (IS_TOP_FRAME && !window.__BA_RUNTIME_CRASH_RECOVERY__) {
       crashRecoveryLimitLogged = false;
       crashRecoveryDisabledLogged = false;
       crashRecoveryRelaxedLogged = false;
+      // Game is rendering again — drop a stale crash signal so a brief empty root
+      // during later navigation can't combine with it into a false positive.
+      const root = document.getElementById('__next') || document.querySelector('#root');
+      if (window.__BA_RUNTIME_CRASH_SIGNAL__ && root && root.childElementCount > 0) {
+        window.__BA_RUNTIME_CRASH_SIGNAL__ = false;
+      }
       return;
     }
 

@@ -804,8 +804,12 @@ function formatHelpAge(createdAt) {
   if (minutes < 1) return t('mods.battleHelper.help.ageJustNow');
   if (minutes < 60) return tReplace('mods.battleHelper.help.ageMinutes', { n: String(minutes) });
   const hours = Math.floor(minutes / 60);
-  if (hours < 48) return tReplace('mods.battleHelper.help.ageHours', { n: String(hours) });
+  if (hours < 24) return tReplace('mods.battleHelper.help.ageHours', { n: String(hours) });
   const days = Math.floor(hours / 24);
+  const remHours = hours % 24;
+  if (days < 7) {
+    return tReplace('mods.battleHelper.help.ageDaysHours', { d: String(days), h: String(remHours) });
+  }
   return tReplace('mods.battleHelper.help.ageDays', { n: String(days) });
 }
 

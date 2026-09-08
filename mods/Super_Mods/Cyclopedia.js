@@ -6617,8 +6617,13 @@ function addCyclopediaHeaderButton() {
           TimerManager.addTimeout(retryTimeout, 'headerButtonRetry');
           return;
         }
-        if (headerUl.querySelector('.cyclopedia-header-btn')) return;
-        
+        const existing = headerUl.querySelector('.cyclopedia-header-btn');
+        if (existing) {
+          const existingLi = existing.closest('li');
+          if (existingLi) existingLi.style.display = '';
+          return;
+        }
+
         const li = document.createElement('li');
         li.className = 'hover:text-whiteExp';
         const btn = document.createElement('button');
@@ -6632,22 +6637,12 @@ function addCyclopediaHeaderButton() {
           }
         };
         li.appendChild(btn);
-        const settingsLi = Array.from(headerUl.children).find(
-          el => el.querySelector('button.mod-settings-header-btn')
-        );
-        if (settingsLi && settingsLi.nextSibling) {
-          headerUl.insertBefore(li, settingsLi.nextSibling);
-        } else {
-          // Fallback: Insert after Trophy Room (English) or Sala de Troféus (Portuguese) if Settings not found
-          const trophyRoomLi = Array.from(headerUl.children).find(
-            el => el.querySelector('button') && (el.textContent.includes('Trophy Room') || el.textContent.includes('Sala de Trof'))
-          );
-          if (trophyRoomLi && trophyRoomLi.nextSibling) {
-            headerUl.insertBefore(li, trophyRoomLi.nextSibling);
-          } else {
-            headerUl.appendChild(li);
-          }
-        }
+
+        // Always append at the end of the nav <ul>. Never splice between the
+        // game's own <li>s: the header is React-rendered, and a foreign node
+        // mid-list can desync React's insert anchors on its next commit ->
+        // "Node.insertBefore" client-side crash. See .claude/CLAUDE.md.
+        headerUl.appendChild(li);
       } catch (insertError) {
         console.error('[Cyclopedia] Error inserting header button:', insertError);
       }
@@ -21269,11 +21264,12 @@ function cleanupCyclopedia() {
       activeCyclopediaModal = null;
     }
     
-    // Remove header button
+    // Hide header button — never removeChild from the React-rendered nav <ul>
+    // (see .claude/CLAUDE.md). addCyclopediaHeaderButton() re-shows it.
     const headerUl = DOMCache.get('header ul.pixel-font-16.flex.items-center');
     if (headerUl) {
       const btnLi = headerUl.querySelector('li:has(.cyclopedia-header-btn)');
-      if (btnLi) btnLi.remove();
+      if (btnLi) btnLi.style.display = 'none';
     }
     
     // Clear global DOM references

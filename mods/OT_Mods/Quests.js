@@ -503,6 +503,7 @@ let ELATHRIEL_RESPONSES = {};
 let BONELORD_RESPONSES = {};
 let OLD_DRAGONLORD_RESPONSES = {};
 let A_PRISONER_RESPONSES = {};
+let BASILISK_RESPONSES = {};
 let KING_TIBIANUS_CONFUSION_RESPONSES = [];
 let KING_TIBIANUS_SWEAR_WORDS = [];
 let KING_TIBIANUS_SWEAR_RESPONSE = 'How dare you! Guards, remove this insolent subject!';
@@ -519,6 +520,7 @@ let ELATHRIEL_CONFUSION_RESPONSES = [];
 let BONELORD_CONFUSION_RESPONSES = [];
 let OLD_DRAGONLORD_CONFUSION_RESPONSES = [];
 let A_PRISONER_CONFUSION_RESPONSES = [];
+let BASILISK_CONFUSION_RESPONSES = [];
 let NPC_QUEST_ITEM_CHAT_RESPONSES = {};
 const NPC_QUEST_ITEM_UNINVOLVED_TEMPLATES = {};
 
@@ -784,6 +786,10 @@ function applyQuestDialogueFromAssets(missionsData, npcsData) {
       A_PRISONER_RESPONSES = { ...(npc.keywords || {}) };
       A_PRISONER_CONFUSION_RESPONSES = [...(npc.confusion || [])];
     }],
+    ['basilisk', (npc) => {
+      BASILISK_RESPONSES = { ...(npc.keywords || {}) };
+      BASILISK_CONFUSION_RESPONSES = [...(npc.confusion || [])];
+    }],
     ['king-tibianus', (npc) => {
       KING_TIBIANUS_CONFUSION_RESPONSES = [...(npc.confusion || [])];
       KING_TIBIANUS_SWEAR_WORDS = Array.isArray(npc.swear?.words) ? [...npc.swear.words] : [];
@@ -809,6 +815,7 @@ function applyQuestDialogueFromAssets(missionsData, npcsData) {
   BONELORD_RESPONSES = { ...NPC_SHARED_KEYWORDS, ...BONELORD_RESPONSES };
   OLD_DRAGONLORD_RESPONSES = { ...NPC_SHARED_KEYWORDS, ...OLD_DRAGONLORD_RESPONSES };
   A_PRISONER_RESPONSES = { ...NPC_SHARED_KEYWORDS, ...A_PRISONER_RESPONSES };
+  BASILISK_RESPONSES = { ...NPC_SHARED_KEYWORDS, ...BASILISK_RESPONSES };
 
   NPC_QUEST_ITEM_CHAT_RESPONSES = JSON.parse(JSON.stringify(npcsData.questItems || {}));
   Object.assign(NPC_QUEST_ITEM_UNINVOLVED_TEMPLATES, npcsData.questItemUninvolvedTemplates || {});
@@ -1223,6 +1230,85 @@ function applyQuestRoomsFromAssets(roomsData) {
     }
   }
 
+  const basiliskLever = roomsData.basiliskLever;
+  if (basiliskLever) {
+    if (basiliskLever.leverRoomName) BASILISK_LEVER_ROOM_NAME = basiliskLever.leverRoomName;
+    if (basiliskLever.leverTile != null) BASILISK_LEVER_TILE = basiliskLever.leverTile;
+    if (basiliskLever.leverSprite) Object.assign(BASILISK_LEVER_SPRITE, basiliskLever.leverSprite);
+    if (basiliskLever.leverWarpNavDelayMs != null) BASILISK_LEVER_WARP_NAV_DELAY_MS = basiliskLever.leverWarpNavDelayMs;
+  }
+
+  const basiliskChallenge1Room = roomsData.basiliskChallenge1;
+  if (basiliskChallenge1Room) {
+    if (basiliskChallenge1Room.battleRoomName) BASILISK_BATTLE_ROOM_NAME = basiliskChallenge1Room.battleRoomName;
+    if (basiliskChallenge1Room.battleRoomId) BASILISK_BATTLE_ROOM_ID = basiliskChallenge1Room.battleRoomId;
+    if (basiliskChallenge1Room.battleDisplayName) BASILISK_BATTLE_DISPLAY_NAME = basiliskChallenge1Room.battleDisplayName;
+    if (basiliskChallenge1Room.battleId) BASILISK_BATTLE_ID = basiliskChallenge1Room.battleId;
+    if (basiliskChallenge1Room.returnRoomName) BASILISK_RETURN_ROOM_NAME = basiliskChallenge1Room.returnRoomName;
+    if (basiliskChallenge1Room.tileMutations && typeof basiliskChallenge1Room.tileMutations === 'object') {
+      BASILISK_TILE_MUTATIONS = basiliskChallenge1Room.tileMutations;
+    }
+  }
+
+  const basiliskChallenge2Room = roomsData.basiliskChallenge2;
+  if (basiliskChallenge2Room) {
+    if (basiliskChallenge2Room.battleRoomName) BASILISK2_BATTLE_ROOM_NAME = basiliskChallenge2Room.battleRoomName;
+    if (basiliskChallenge2Room.battleRoomId) BASILISK2_BATTLE_ROOM_ID = basiliskChallenge2Room.battleRoomId;
+    if (basiliskChallenge2Room.battleDisplayName) BASILISK2_BATTLE_DISPLAY_NAME = basiliskChallenge2Room.battleDisplayName;
+    if (basiliskChallenge2Room.battleId) BASILISK2_BATTLE_ID = basiliskChallenge2Room.battleId;
+    if (basiliskChallenge2Room.tileMutations && typeof basiliskChallenge2Room.tileMutations === 'object') {
+      BASILISK2_TILE_MUTATIONS = basiliskChallenge2Room.tileMutations;
+    }
+  }
+
+  const basiliskChallenge3Room = roomsData.basiliskChallenge3;
+  if (basiliskChallenge3Room) {
+    if (basiliskChallenge3Room.battleRoomName) BASILISK3_BATTLE_ROOM_NAME = basiliskChallenge3Room.battleRoomName;
+    if (basiliskChallenge3Room.battleRoomId) BASILISK3_BATTLE_ROOM_ID = basiliskChallenge3Room.battleRoomId;
+    if (basiliskChallenge3Room.battleDisplayName) BASILISK3_BATTLE_DISPLAY_NAME = basiliskChallenge3Room.battleDisplayName;
+    if (basiliskChallenge3Room.battleId) BASILISK3_BATTLE_ID = basiliskChallenge3Room.battleId;
+    if (basiliskChallenge3Room.tileMutations && typeof basiliskChallenge3Room.tileMutations === 'object') {
+      BASILISK3_TILE_MUTATIONS = basiliskChallenge3Room.tileMutations;
+    }
+  }
+
+  const basiliskChallenge4Room = roomsData.basiliskChallenge4;
+  if (basiliskChallenge4Room) {
+    if (basiliskChallenge4Room.battleRoomName) BASILISK4_BATTLE_ROOM_NAME = basiliskChallenge4Room.battleRoomName;
+    if (basiliskChallenge4Room.battleRoomId) BASILISK4_BATTLE_ROOM_ID = basiliskChallenge4Room.battleRoomId;
+    if (basiliskChallenge4Room.battleDisplayName) BASILISK4_BATTLE_DISPLAY_NAME = basiliskChallenge4Room.battleDisplayName;
+    if (basiliskChallenge4Room.battleId) BASILISK4_BATTLE_ID = basiliskChallenge4Room.battleId;
+    if (basiliskChallenge4Room.tileMutations && typeof basiliskChallenge4Room.tileMutations === 'object') {
+      BASILISK4_TILE_MUTATIONS = basiliskChallenge4Room.tileMutations;
+    }
+    if (basiliskChallenge4Room.sceneSpriteReplacements?.rules?.length) {
+      BASILISK4_SCENE_SPRITE_REPLACEMENTS.rootId = basiliskChallenge4Room.sceneSpriteReplacements.rootId || 'background-scene';
+      BASILISK4_SCENE_SPRITE_REPLACEMENTS.rules = basiliskChallenge4Room.sceneSpriteReplacements.rules.slice();
+    }
+  }
+
+  const basiliskChallenge5Room = roomsData.basiliskChallenge5;
+  if (basiliskChallenge5Room) {
+    if (basiliskChallenge5Room.battleRoomName) BASILISK5_BATTLE_ROOM_NAME = basiliskChallenge5Room.battleRoomName;
+    if (basiliskChallenge5Room.battleRoomId) BASILISK5_BATTLE_ROOM_ID = basiliskChallenge5Room.battleRoomId;
+    if (basiliskChallenge5Room.battleDisplayName) BASILISK5_BATTLE_DISPLAY_NAME = basiliskChallenge5Room.battleDisplayName;
+    if (basiliskChallenge5Room.battleId) BASILISK5_BATTLE_ID = basiliskChallenge5Room.battleId;
+    if (basiliskChallenge5Room.tileMutations && typeof basiliskChallenge5Room.tileMutations === 'object') {
+      BASILISK5_TILE_MUTATIONS = basiliskChallenge5Room.tileMutations;
+    }
+  }
+
+  const basiliskChallenge6Room = roomsData.basiliskChallenge6;
+  if (basiliskChallenge6Room) {
+    if (basiliskChallenge6Room.battleRoomName) BASILISK6_BATTLE_ROOM_NAME = basiliskChallenge6Room.battleRoomName;
+    if (basiliskChallenge6Room.battleRoomId) BASILISK6_BATTLE_ROOM_ID = basiliskChallenge6Room.battleRoomId;
+    if (basiliskChallenge6Room.battleDisplayName) BASILISK6_BATTLE_DISPLAY_NAME = basiliskChallenge6Room.battleDisplayName;
+    if (basiliskChallenge6Room.battleId) BASILISK6_BATTLE_ID = basiliskChallenge6Room.battleId;
+    if (basiliskChallenge6Room.tileMutations && typeof basiliskChallenge6Room.tileMutations === 'object') {
+      BASILISK6_TILE_MUTATIONS = basiliskChallenge6Room.tileMutations;
+    }
+  }
+
   const mornenionRoom = roomsData.mornenion;
   if (mornenionRoom) {
     if (mornenionRoom.tileMutations && typeof mornenionRoom.tileMutations === 'object') {
@@ -1290,6 +1376,13 @@ function applyQuestRoomsFromAssets(roomsData) {
       if (board.oldDragonlord.imageFilename) OLD_DRAGONLORD_IMAGE_FILENAME = board.oldDragonlord.imageFilename;
       if (board.oldDragonlord.dialogueIconUrl) OLD_DRAGONLORD_DIALOGUE_ICON_URL = board.oldDragonlord.dialogueIconUrl;
       if (board.oldDragonlord.outfitSpriteId != null) OLD_DRAGONLORD_OUTFIT_SPRITE_ID = board.oldDragonlord.outfitSpriteId;
+    }
+    if (board.basilisk) {
+      if (board.basilisk.id) BOARD_NPC_BASILISK_ID = board.basilisk.id;
+      if (board.basilisk.roomName) BASILISK_ROOM_NAME = board.basilisk.roomName;
+      if (board.basilisk.tileIndex != null) BASILISK_TILE_INDEX = board.basilisk.tileIndex;
+      if (board.basilisk.outfitSpriteId != null) BASILISK_OUTFIT_SPRITE_ID = board.basilisk.outfitSpriteId;
+      if (board.basilisk.dialogueIconUrl) BASILISK_DIALOGUE_ICON_URL = board.basilisk.dialogueIconUrl;
     }
     if (board.oracle) {
       if (board.oracle.id) BOARD_NPC_ORACLE_ID = board.oracle.id;
@@ -1662,7 +1755,8 @@ const QUEST_MISSION_IDS = [
   'draconia_tower',
   'draconia_quest',
   'realm_of_dreams',
-  'visiting_mintwallin'
+  'visiting_mintwallin',
+  'the_basilisk_challenges'
 ];
 
 for (const missionId of QUEST_MISSION_IDS) {
@@ -1697,6 +1791,7 @@ const DRACONIA_TOWER_MISSION = MISSION_BY_ID.draconia_tower;
 const DRACONIA_QUEST_MISSION = MISSION_BY_ID.draconia_quest;
 const REALM_OF_DREAMS_MISSION = MISSION_BY_ID.realm_of_dreams;
 const VISITING_MINTWALLIN_MISSION = MISSION_BY_ID.visiting_mintwallin;
+const THE_BASILISK_CHALLENGES_MISSION = MISSION_BY_ID.the_basilisk_challenges;
 
 const MINOTAUR_TROPHY_CONFIG = {};
 const ORB_CONFIG = {};
@@ -1758,10 +1853,15 @@ function applyMissionRegistryFromAssets(missionsData) {
 const QUEST_LOG_MISSIONS = [];
 rebuildQuestLogMissions();
 
-// Quest-giver NPC per mission, for labelling missions that show up in the
-// King Tibianus mission list even though another NPC hands them out.
-// Missions given by King Tibianus are the default and get no prefix.
+// Prefix per mission for the King Tibianus mission list. Normally the quest-giver
+// NPC when someone other than the King hands the mission out; missions given by
+// King Tibianus get no prefix by default. The two starter quests are the
+// exception — they carry a "Tutorial" prefix so it's obvious which quests make up
+// the tutorial. Rendered as `${prefix} - ${title}` in its own accent colour
+// (MISSION_NPC_COLORS), exactly like the NPC prefixes.
 const MISSION_NPC_LABELS = {
+  king_honeyflower: 'Tutorial',
+  king_crossing_the_line: 'Tutorial',
   al_dee_fishing_gold: 'Al Dee',
   al_dee_golden_rope: 'Al Dee',
   al_dee_rookie_guard: 'Al Dee',
@@ -1780,12 +1880,15 @@ const MISSION_NPC_LABELS = {
   hellgate_part_1: 'Elathriel',
   hellgate_library: 'Elathriel',
   draconia_tower: 'Elathriel',
-  draconia_quest: 'Elathriel'
+  draconia_quest: 'Elathriel',
+  the_basilisk_challenges: 'Basilisk'
 };
 
-// One accent colour per quest-giver for the mission-list entry.
+// One accent colour per quest-giver (and the "Tutorial" prefix) for the
+// mission-list entry.
 const MISSION_NPC_COLORS = {
   'King Tibianus': '#ffffff',
+  'Tutorial': '#79c0d6',
   'Al Dee': '#5fd28a',
   'Costello': '#c88bff',
   'Wyda': '#6cc6b0',
@@ -1795,7 +1898,8 @@ const MISSION_NPC_COLORS = {
   'Svenson': '#7fa8ff',
   'Dane': '#d98cae',
   'The Oracle': '#a0a0c8',
-  'Elathriel': '#b5d94f'
+  'Elathriel': '#b5d94f',
+  'Basilisk': '#7cb03c'
 };
 
 function getMissionNpcLabel(mission) {
@@ -1808,7 +1912,8 @@ function getMissionNpcColor(mission) {
   return (npc && MISSION_NPC_COLORS[npc]) || null;
 }
 
-// Prefixes the mission title with its quest-giver's name when the giver is not King Tibianus.
+// Prefixes the mission title with its label ("Tutorial", or the quest-giver's
+// name when the giver is not King Tibianus) — `${label} - ${title}`.
 function getMissionListDisplayTitle(mission) {
   if (!mission) return '';
   const npc = getMissionNpcLabel(mission);
@@ -1838,6 +1943,13 @@ const SIXTH_SEAL = 5;
 const SEVENTH_SEAL = 6;
 function getDefaultSevenSealsCompleted() {
   return Array(SEVEN_SEALS_COUNT).fill(false);
+}
+
+// The Basilisk Challenges progress array (index 0 = Challenge 1 … 5 = Challenge 6). Only
+// Challenge 1 is wired today; the rest default to false and stay forward-compatible for when
+// Challenges 2-6 are added later (see setBasiliskChallengeCompleted() / getBasiliskChallengeCompleted()).
+function getDefaultBasiliskChallengesCompleted() {
+  return Array(BASILISK_CHALLENGES_COUNT).fill(false);
 }
 
 let FIRST_SEAL_GHOSTLANDS_SURFACE_ROOM = '';
@@ -2408,6 +2520,70 @@ let OLD_DRAGONLORD_IMAGE_FILENAME = 'An_Old_Dragonlord.gif';
 let OLD_DRAGONLORD_DIALOGUE_ICON_URL = '';
 let OLD_DRAGONLORD_OUTFIT_SPRITE_ID = 39;
 const OLD_DRAGONLORD_OVERLAY_CLASS = 'quests-old-dragonlord-overlay';
+let BOARD_NPC_BASILISK_ID = 'basilisk';
+let BASILISK_ROOM_NAME = 'The Farms';
+let BASILISK_TILE_INDEX = 87;
+let BASILISK_OUTFIT_SPRITE_ID = 28;
+let BASILISK_DIALOGUE_ICON_URL = '';
+const BASILISK_OVERLAY_CLASS = 'quests-basilisk-overlay';
+// The Basilisk Challenges: lever on tile 22 of The Farms (own tile/room, distinct from the
+// Serpentine Tower Basement lever on tile 64) — same sprite-swap mechanism (2772 -> 2773).
+let BASILISK_LEVER_ROOM_NAME = 'The Farms';
+let BASILISK_LEVER_TILE = 22;
+const BASILISK_LEVER_SPRITE = { from: '2772', to: '2773' };
+let BASILISK_LEVER_WARP_NAV_DELAY_MS = 1000;
+// Basilisk Challenge 1 battle room — the shared Sewers (rkswrs) reskin, same mechanism as
+// Mad Mage Room / Hellgate / Draconia (see createTeleportBattleQuest()).
+let BASILISK_BATTLE_ROOM_NAME = 'Sewers';
+let BASILISK_BATTLE_ROOM_ID = 'rkswrs';
+let BASILISK_BATTLE_DISPLAY_NAME = 'Basilisk Challenge 1';
+let BASILISK_BATTLE_ID = 'basilisk_challenge_1';
+let BASILISK_TILE_MUTATIONS = null;
+let BASILISK_RETURN_ROOM_NAME = 'The Farms';
+// Basilisk Challenge 2 battle room — another Sewers (rkswrs) reskin, sharing the same room as
+// Challenge 1 (only one Basilisk challenge is ever active at a time; activationCheck flags keep
+// them from colliding). Boss: Slug King (on-screen boss HP bar, no soul core reward).
+let BASILISK2_BATTLE_ROOM_NAME = 'Sewers';
+let BASILISK2_BATTLE_ROOM_ID = 'rkswrs';
+let BASILISK2_BATTLE_DISPLAY_NAME = 'Basilisk Challenge 2';
+let BASILISK2_BATTLE_ID = 'basilisk_challenge_2';
+let BASILISK2_TILE_MUTATIONS = null;
+// Basilisk Challenge 3 — another Sewers (rkswrs) reskin, 12 Mad Technomancers, no boss.
+let BASILISK3_BATTLE_ROOM_NAME = 'Sewers';
+let BASILISK3_BATTLE_ROOM_ID = 'rkswrs';
+let BASILISK3_BATTLE_DISPLAY_NAME = 'Basilisk Challenge 3';
+let BASILISK3_BATTLE_ID = 'basilisk_challenge_3';
+let BASILISK3_TILE_MUTATIONS = null;
+// Basilisk Challenge 4 — Sewers (rkswrs) reskin (tileMutations; sceneSpriteReplacements
+// supported from rooms.json but currently unused). 9 villains (Rats/Ghouls), no boss, no reward.
+let BASILISK4_BATTLE_ROOM_NAME = 'Sewers';
+let BASILISK4_BATTLE_ROOM_ID = 'rkswrs';
+let BASILISK4_BATTLE_DISPLAY_NAME = 'Basilisk Challenge 4';
+let BASILISK4_BATTLE_ID = 'basilisk_challenge_4';
+let BASILISK4_TILE_MUTATIONS = null;
+const BASILISK4_SCENE_SPRITE_REPLACEMENTS = { rootId: 'background-scene', rules: [] };
+// Basilisk Challenge 5 — Sewers (rkswrs) reskin (tileMutations add/remove + floorBelow).
+// 10 villains (Fire Elementals/Ghosts nicknamed Mad Sheep), no boss, no reward.
+let BASILISK5_BATTLE_ROOM_NAME = 'Sewers';
+let BASILISK5_BATTLE_ROOM_ID = 'rkswrs';
+let BASILISK5_BATTLE_DISPLAY_NAME = 'Basilisk Challenge 5';
+let BASILISK5_BATTLE_ID = 'basilisk_challenge_5';
+let BASILISK5_TILE_MUTATIONS = null;
+// Basilisk Challenge 6 — final; Sewers (rkswrs) reskin (tileMutations add/remove).
+// Single boss-tier villain: Amazon. No boss HP bar, no reward.
+let BASILISK6_BATTLE_ROOM_NAME = 'Sewers';
+let BASILISK6_BATTLE_ROOM_ID = 'rkswrs';
+let BASILISK6_BATTLE_DISPLAY_NAME = 'Basilisk Challenge 6';
+let BASILISK6_BATTLE_ID = 'basilisk_challenge_6';
+let BASILISK6_TILE_MUTATIONS = null;
+// Basilisk Challenges progress array — one boolean per challenge (index 0 = Challenge 1).
+// Only index 0 is wired today; challenges 2-6 default to false and stay forward-compatible.
+let BASILISK_CHALLENGES_COUNT = 6;
+// How many of the 6 challenges actually have battle content wired up (enterNextBasiliskChallenge
+// only knows how to route to challenges below this). Bump this the moment each new challenge's
+// enter*/create*BattleInstance functions land — that's the only change needed; the lever
+// gating and dialogue below already key off this instead of a hardcoded "challenge 1" check.
+let BASILISK_CHALLENGES_IMPLEMENTED_COUNT = 6;
 let GHAZBARAN_HIDEOUT_ROOM_NAME = '';
 let GHAZBARAN_HIDEOUT_DISPLAY_NAME = '';
 let GHAZBARAN_TILE_INDEX = null;
@@ -2425,8 +2601,8 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
 const ACTIVE_MISSION_TAB_ID_PREFIX = 'quests-mod-active-mission-tab-';
 const ACTIVE_MISSION_TAB_ATTR = 'data-quests-active-mission-id';
 const QUEST_ADMIN_DEV_MODAL_WIDTH = 800;
-const QUEST_ADMIN_DEV_MODAL_HEIGHT = 720;
-const QUEST_ADMIN_DEV_MODAL_MIN_HEIGHT = 420;
+const QUEST_ADMIN_DEV_MODAL_HEIGHT = 800; // upper bound — actual height autofits to content, see onAfterLayout below
+const QUEST_ADMIN_DEV_MODAL_MIN_HEIGHT = 600;
 
 // Quest Log icons — filled from assets/quests/items.json
 const MISSION_QUEST_LOG_ICON_MAP = {};
@@ -2593,6 +2769,7 @@ function createNPCCooldownManager() {
     progressDraconiaQuest: { accepted: false, completed: false, battleCompleted: false },
     progressRealmOfDreams: { accepted: false, completed: false, battleCompleted: false },
     progressVisitingMintwallin: { accepted: false, completed: false, riddleSolved: false, battleCompleted: false },
+    progressBasiliskChallenges: { accepted: false, completed: false, battleCompleted: false },
     progressChristmasMiracle: { accepted: false, completed: false },
     progressSvensonLoveStory: { accepted: false, completed: false, plankDelivered: false, strandedAtAwash: false, awashYarnDelivered: false, awashYarnRequested: false, strandedAtUnderground: false, undergroundCompassDelivered: false, undergroundCompassRequested: false, strandedAtWhiteWave: false, whiteWaveSlippersDelivered: false },
     progressWeakenedArchdemon: { accepted: false, completed: false, battleCompleted: false },
@@ -2601,6 +2778,7 @@ function createNPCCooldownManager() {
     metTesha: false, // Set true the first time the player opens Tesha's chat (or backfilled from any Tesha-chain progress on load). Persisted so Tesha stays reachable on the board forever after — her arrow / fight icon must not depend on holding a Scarab Coin or on a pending quest step.
     mornenionDefeated: false, // Mornenion defeat flag (also stored in Firebase as progress.mornenion.defeated); keep in sync so getAllMissionProgress() includes it when saving
     sevenSealsCompleted: getDefaultSevenSealsCompleted(), // one boolean per seal (index 0 = First Seal … 6 = Seventh Seal); complete each seal separately via setSealCompleted(sealIndex, true)
+    basiliskChallengesCompleted: getDefaultBasiliskChallengesCompleted(), // one boolean per Basilisk challenge (index 0 = Challenge 1 … 5 = Challenge 6); complete each separately via setBasiliskChallengeCompleted(index, true)
     missionOffered: false,
     offeredMission: null,
     awaitingKeyConfirm: false,
@@ -2813,6 +2991,42 @@ function createNPCCooldownManager() {
   let madMageRoomBattle = null;
   let madMageRoomHitboxesApplied = false;
   let madMageRoomSceneSub = null;
+
+  // The Basilisk Challenges — Challenge 1 (lever on tile 22 of The Farms -> Sewers reskin battle)
+  let playerEnteredBasiliskChallenge1 = false;
+  let basiliskChallenge1Battle = null;
+  let basiliskChallenge1HitboxesApplied = false;
+  let basiliskChallenge1SceneSub = null;
+  // The Basilisk Challenges — Challenge 2 (same lever, next incomplete challenge -> Sewers reskin)
+  let playerEnteredBasiliskChallenge2 = false;
+  let basiliskChallenge2Battle = null;
+  let basiliskChallenge2HitboxesApplied = false;
+  let basiliskChallenge2SceneSub = null;
+  // The Basilisk Challenges — Challenge 3 (same lever, next incomplete challenge -> Sewers reskin)
+  let playerEnteredBasiliskChallenge3 = false;
+  let basiliskChallenge3Battle = null;
+  let basiliskChallenge3HitboxesApplied = false;
+  let basiliskChallenge3SceneSub = null;
+  // The Basilisk Challenges — Challenge 4 (same lever, next incomplete challenge -> Sewers reskin)
+  let playerEnteredBasiliskChallenge4 = false;
+  let basiliskChallenge4Battle = null;
+  let basiliskChallenge4HitboxesApplied = false;
+  let basiliskChallenge4SceneSub = null;
+  // The Basilisk Challenges — Challenge 5 (same lever, next incomplete challenge -> Sewers reskin)
+  let playerEnteredBasiliskChallenge5 = false;
+  let basiliskChallenge5Battle = null;
+  let basiliskChallenge5HitboxesApplied = false;
+  let basiliskChallenge5SceneSub = null;
+  // The Basilisk Challenges — Challenge 6 (final; same lever, Sewers reskin)
+  let playerEnteredBasiliskChallenge6 = false;
+  let basiliskChallenge6Battle = null;
+  let basiliskChallenge6HitboxesApplied = false;
+  let basiliskChallenge6SceneSub = null;
+  let basiliskLeverRightClickEnabled = false;
+  let basiliskLeverBoardSubscription = null;
+  let awaitingBasiliskChallengeConfirm = false;
+  let basiliskLeverContextMenu = null;
+  let basiliskLeverWarpPending = false;
 
   // Draconia Tower (Elathriel: teleport into the Sewers dragon-cemetery reskin; battle on
   // entry, then a post-battle talk with An Old Dragonlord to trade a White Mushroom).
@@ -4515,6 +4729,7 @@ function createNPCCooldownManager() {
     if (unitDef.shiny != null) unit.shiny = !!unitDef.shiny;
     if (unitDef.awakened != null) unit.awakened = !!unitDef.awakened;
     if (unitDef.customSpriteKey != null) unit.customSpriteKey = unitDef.customSpriteKey;
+    if (unitDef.abilityCooldownTicks != null) unit.abilityCooldownTicks = unitDef.abilityCooldownTicks;
     if (equip) unit.equip = equip;
     return unit;
   }
@@ -5666,6 +5881,18 @@ function createNPCCooldownManager() {
   const QUEST_BOARD_HIDDEN_TAG_MINTWALLIN = 'mintwallin-prison';
   const QUEST_BOARD_ADDED_ATTR_MAD_MAGE = 'data-quests-mad-mage-room-added';
   const QUEST_BOARD_HIDDEN_TAG_MAD_MAGE = 'mad-mage-room';
+  const QUEST_BOARD_ADDED_ATTR_BASILISK = 'data-quests-basilisk-challenge-1-added';
+  const QUEST_BOARD_HIDDEN_TAG_BASILISK = 'basilisk-challenge-1';
+  const QUEST_BOARD_ADDED_ATTR_BASILISK2 = 'data-quests-basilisk-challenge-2-added';
+  const QUEST_BOARD_HIDDEN_TAG_BASILISK2 = 'basilisk-challenge-2';
+  const QUEST_BOARD_ADDED_ATTR_BASILISK3 = 'data-quests-basilisk-challenge-3-added';
+  const QUEST_BOARD_HIDDEN_TAG_BASILISK3 = 'basilisk-challenge-3';
+  const QUEST_BOARD_ADDED_ATTR_BASILISK4 = 'data-quests-basilisk-challenge-4-added';
+  const QUEST_BOARD_HIDDEN_TAG_BASILISK4 = 'basilisk-challenge-4';
+  const QUEST_BOARD_ADDED_ATTR_BASILISK5 = 'data-quests-basilisk-challenge-5-added';
+  const QUEST_BOARD_HIDDEN_TAG_BASILISK5 = 'basilisk-challenge-5';
+  const QUEST_BOARD_ADDED_ATTR_BASILISK6 = 'data-quests-basilisk-challenge-6-added';
+  const QUEST_BOARD_HIDDEN_TAG_BASILISK6 = 'basilisk-challenge-6';
   const QUEST_BOARD_ADDED_ATTR_DRACONIA = 'data-quests-draconia-added';
   const QUEST_BOARD_HIDDEN_TAG_DRACONIA = 'draconia-tower';
   const QUEST_BOARD_ADDED_ATTR_DRACONIA_QUEST = 'data-quests-draconia-quest-added';
@@ -7897,6 +8124,7 @@ function createNPCCooldownManager() {
     result.metTesha = !!kingChatState.metTesha;
     result.mornenion = { defeated: !!kingChatState.mornenionDefeated };
     result.sevenSealsCompleted = normalizeSevenSealsCompleted(kingChatState.sevenSealsCompleted);
+    result.basiliskChallengesCompleted = normalizeBasiliskChallengesCompleted(kingChatState.basiliskChallengesCompleted);
     result.starterCoinThanked = !!kingChatState.starterCoinThanked;
     // ironOre lives in fishingState, not kingChatState — always include so saves don't wipe it.
     result.ironOre = {
@@ -7912,6 +8140,13 @@ function createNPCCooldownManager() {
       return getDefaultSevenSealsCompleted().slice();
     }
     return arr.slice(0, SEVEN_SEALS_COUNT).map(Boolean);
+  }
+
+  function normalizeBasiliskChallengesCompleted(arr) {
+    if (!Array.isArray(arr) || arr.length !== BASILISK_CHALLENGES_COUNT) {
+      return getDefaultBasiliskChallengesCompleted().slice();
+    }
+    return arr.slice(0, BASILISK_CHALLENGES_COUNT).map(Boolean);
   }
 
   function areAllSevenSealsCompleted() {
@@ -7941,6 +8176,81 @@ function createNPCCooldownManager() {
     if (sealIndex < 0 || sealIndex >= SEVEN_SEALS_COUNT) return false;
     const completed = kingChatState.sevenSealsCompleted;
     return Array.isArray(completed) && completed[sealIndex] === true;
+  }
+
+  // The Basilisk Challenges progress tracking — mirrors the seven-seals pattern above.
+  // Persisted the same way (special-cased top-level field in getAllMissionProgress() /
+  // _fetchKingTibianusProgressUncached() / saveKingTibianusProgress()), not via a mission's
+  // own registry extraFields, since it tracks 6 independent challenges rather than one flag.
+  function areAllBasiliskChallengesCompleted() {
+    const completed = kingChatState.basiliskChallengesCompleted;
+    if (!Array.isArray(completed) || completed.length < BASILISK_CHALLENGES_COUNT) return false;
+    return completed.slice(0, BASILISK_CHALLENGES_COUNT).every(Boolean);
+  }
+
+  async function setBasiliskChallengeCompleted(challengeIndex, completed) {
+    if (challengeIndex < 0 || challengeIndex >= BASILISK_CHALLENGES_COUNT) return;
+    if (!Array.isArray(kingChatState.basiliskChallengesCompleted) || kingChatState.basiliskChallengesCompleted.length !== BASILISK_CHALLENGES_COUNT) {
+      kingChatState.basiliskChallengesCompleted = getDefaultBasiliskChallengesCompleted().slice();
+    }
+    kingChatState.basiliskChallengesCompleted[challengeIndex] = !!completed;
+    const playerName = getCurrentPlayerName();
+    if (playerName) {
+      const allProgress = getAllMissionProgress();
+      await saveKingTibianusProgress(playerName, allProgress);
+    }
+  }
+
+  function getBasiliskChallengeCompleted(challengeIndex) {
+    if (challengeIndex < 0 || challengeIndex >= BASILISK_CHALLENGES_COUNT) return false;
+    const completed = kingChatState.basiliskChallengesCompleted;
+    return Array.isArray(completed) && completed[challengeIndex] === true;
+  }
+
+  // Dev-only control for the "won, hasn't reported to the Basilisk yet" flag (battleCompleted
+  // on THE_BASILISK_CHALLENGES_MISSION's progress — see isBasiliskChallengeReportPending).
+  // Lets Quest Dev Tools simulate a battle win without actually playing the fight: flip this
+  // on to see the lever go dead and the board NPC's fight.png light up, then talk to the
+  // Basilisk to exercise the real report-in/finalize flow.
+  async function setBasiliskChallengeBattleCompleted(value) {
+    const progress = getMissionProgress(THE_BASILISK_CHALLENGES_MISSION) || {};
+    await persistMissionProgress(THE_BASILISK_CHALLENGES_MISSION, {
+      accepted: true,
+      completed: !!progress.completed,
+      battleCompleted: !!value
+    });
+    if (typeof updateAllBoardNpcStates === 'function') {
+      updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+    }
+    if (typeof updateBasiliskLeverTile22State === 'function') {
+      updateBasiliskLeverTile22State();
+    }
+  }
+
+  function getBasiliskChallengeBattleCompleted() {
+    return !!getMissionProgress(THE_BASILISK_CHALLENGES_MISSION)?.battleCompleted;
+  }
+
+  // First incomplete challenge (0-based index), or 0 if every wired challenge is done —
+  // pulling the lever always enters at least Challenge 1 again. Only index 0 is wired today;
+  // this stays correct once Challenges 2-6 are added without any change to the lever handler.
+  function getNextIncompleteBasiliskChallengeIndex() {
+    const completed = normalizeBasiliskChallengesCompleted(kingChatState.basiliskChallengesCompleted);
+    const idx = completed.findIndex((done) => !done);
+    return idx === -1 ? 0 : idx;
+  }
+
+  // False once the player has cleared every challenge that's actually been built
+  // (BASILISK_CHALLENGES_IMPLEMENTED_COUNT) but hasn't finished all 6 — i.e. there's nothing
+  // left for the lever to send them into yet. Distinct from areAllBasiliskChallengesCompleted(),
+  // which only turns true once all 6 are done and would otherwise leave the lever pulling
+  // players into a next challenge that doesn't exist.
+  function hasMoreBasiliskChallengesAvailable() {
+    // All six done -> getNextIncompleteBasiliskChallengeIndex() wraps to 0, so guard
+    // explicitly (otherwise the lever would stay live and re-enter Challenge 1 forever
+    // now that IMPLEMENTED_COUNT === BASILISK_CHALLENGES_COUNT).
+    if (areAllBasiliskChallengesCompleted()) return false;
+    return getNextIncompleteBasiliskChallengeIndex() < BASILISK_CHALLENGES_IMPLEMENTED_COUNT;
   }
 
   // Validation: Ensure registry consistency at initialization
@@ -8045,7 +8355,7 @@ function createNPCCooldownManager() {
     }
     // New shape preferred: nested format with all missions from registry
     // Check if any registered mission field exists in data
-    const hasAnyMissionField = Object.values(MISSION_FIREBASE_KEY_MAP).some(key => data[key]) || data.ironOre || data.mornenion || data.costelloVisited || data.metTesha === true || data.starterCoinThanked === true || Array.isArray(data.sevenSealsCompleted) || Array.isArray(data.sevenSealsVisited);
+    const hasAnyMissionField = Object.values(MISSION_FIREBASE_KEY_MAP).some(key => data[key]) || data.ironOre || data.mornenion || data.costelloVisited || data.metTesha === true || data.starterCoinThanked === true || Array.isArray(data.sevenSealsCompleted) || Array.isArray(data.sevenSealsVisited) || Array.isArray(data.basiliskChallengesCompleted);
     
     if (hasAnyMissionField) {
       const result = {};
@@ -8089,6 +8399,11 @@ function createNPCCooldownManager() {
         result.sevenSealsCompleted = SEVEN_SEALS_GHOSTLANDS_ROOM_NAMES.map(roomName => data.sevenSealsVisited.includes(roomName));
       } else {
         result.sevenSealsCompleted = getDefaultSevenSealsCompleted().slice();
+      }
+      if (Array.isArray(data.basiliskChallengesCompleted) && data.basiliskChallengesCompleted.length === BASILISK_CHALLENGES_COUNT) {
+        result.basiliskChallengesCompleted = data.basiliskChallengesCompleted.slice(0, BASILISK_CHALLENGES_COUNT).map(Boolean);
+      } else {
+        result.basiliskChallengesCompleted = getDefaultBasiliskChallengesCompleted().slice();
       }
       result.__isEmpty = false;
       return result;
@@ -8136,7 +8451,8 @@ function createNPCCooldownManager() {
       merged.mornenion ||
       merged.costelloVisited ||
       merged.metTesha ||
-      Array.isArray(merged.sevenSealsCompleted)
+      Array.isArray(merged.sevenSealsCompleted) ||
+      Array.isArray(merged.basiliskChallengesCompleted)
     );
     
     const normalized = hasNestedFormat
@@ -8170,6 +8486,7 @@ function createNPCCooldownManager() {
           result.metTesha = !!merged.metTesha;
           result.starterCoinThanked = !!merged.starterCoinThanked;
           result.sevenSealsCompleted = normalizeSevenSealsCompleted(merged.sevenSealsCompleted);
+          result.basiliskChallengesCompleted = normalizeBasiliskChallengesCompleted(merged.basiliskChallengesCompleted);
           return result;
         })()
       : {
@@ -14497,14 +14814,27 @@ function createNPCCooldownManager() {
           Promise.all([
             getAlDeeShopPurchases(playerName).catch(() => ({})),
             getQuestItems(false).catch(() => null)
-          ]).then(([purchases, freshItems]) => {
+          ]).then(async ([purchases, freshItems]) => {
             const owns = ownsShopItem() || !!(freshItems && (freshItems[displayName] || 0) > 0);
             const flagged = purchases[itemId] === true;
-            isPurchased = flagged || owns;
             if (owns && !flagged) {
               saveAlDeeShopPurchase(playerName, itemId, true).catch((err) =>
                 console.warn('[Quests Mod][Al Dee Shop] Could not back-fill purchase flag:', err));
+            } else if (flagged && !owns) {
+              // The purchase flag says this was already bought and paid for, but the item
+              // itself is gone (e.g. a stale-item cleanup pass, a bag wipe from a dev reset,
+              // or any other way the count reached 0) — without this, the buy button stays
+              // permanently stuck on "Bought" with no item and no way to get it back, since
+              // nothing else regrants a one-time shop purchase the way soul cores/mission
+              // rewards self-heal. Re-grant it instead of leaving the player locked out.
+              try {
+                await addQuestItem(displayName, 1);
+                console.log(`[Quests Mod][Al Dee Shop] Re-granted ${displayName} — purchase flag was set but the item was missing`);
+              } catch (err) {
+                console.warn(`[Quests Mod][Al Dee Shop] Could not re-grant ${displayName}:`, err);
+              }
             }
+            isPurchased = flagged || owns;
             updateButtonState();
           }).catch(() => {
             updateButtonState();
@@ -17246,10 +17576,21 @@ function createNPCCooldownManager() {
     return Number.isFinite(spriteId) ? spriteId : null;
   }
 
-  function createActiveMissionIconElement(mission, iconFilenameOverride = null) {
+  function createActiveMissionIconElement(mission, iconFilenameOverride = null, size = 32) {
     if (!iconFilenameOverride) {
       const spriteId = getMissionQuestLogSpriteId(mission);
       if (spriteId != null) {
+        // Game board sprites (id-N) don't scale cleanly at small sizes (the spritesheet
+        // crop math is calibrated for the native ~32px size) — use the flat ITEM portrait
+        // instead, same rule createProductIcon() already follows.
+        if (size < 32) {
+          const iconImg = document.createElement('img');
+          iconImg.src = `https://bestiaryarena.com/assets/ITEM/${spriteId}.png`;
+          iconImg.alt = String(spriteId);
+          iconImg.className = 'pixelated';
+          iconImg.style.cssText = `width: ${size}px; height: ${size}px; image-rendering: pixelated; object-fit: contain;`;
+          return iconImg;
+        }
         const wrap = document.createElement('div');
         wrap.className = `sprite item relative id-${spriteId}`;
         wrap.style.zIndex = '1000';
@@ -17261,8 +17602,8 @@ function createNPCCooldownManager() {
     const iconImg = document.createElement('img');
     iconImg.alt = mission?.title || 'Mission';
     iconImg.className = 'pixelated';
-    iconImg.width = 32;
-    iconImg.height = 32;
+    iconImg.width = size;
+    iconImg.height = size;
     iconImg.src = getQuestItemsAssetUrl(iconFilenameOverride || getMissionQuestLogIconFilename(mission));
     iconImg.style.imageRendering = 'pixelated';
     return iconImg;
@@ -17665,6 +18006,11 @@ function createNPCCooldownManager() {
         return makeActiveMissionCountProgress(0, 1);
       }
       return makeActiveMissionCountProgress(0, 1);
+    }
+
+    if (mission.id === THE_BASILISK_CHALLENGES_MISSION.id) {
+      const done = normalizeBasiliskChallengesCompleted(kingChatState.basiliskChallengesCompleted).filter(Boolean).length;
+      return makeActiveMissionCountProgress(done, BASILISK_CHALLENGES_COUNT);
     }
 
     return null;
@@ -18604,7 +18950,7 @@ function createNPCCooldownManager() {
 
     let refreshItemCounts = () => {};
     let refreshMissionStatuses = () => {};
-    let refreshSealStatuses = () => {};
+    let refreshSubProgressionPanels = () => {};
     let receivedFlagsCache = {
       copperKey: false,
       letter: false,
@@ -18621,7 +18967,7 @@ function createNPCCooldownManager() {
         receivedFlagsCache = await loadQuestDevItemReceivedFlags(getCurrentPlayerName());
         refreshItemCounts();
         refreshMissionStatuses();
-        refreshSealStatuses();
+        refreshSubProgressionPanels();
         setStatus(`Done: ${label}`);
       } catch (error) {
         console.error('[Quests Mod][Dev]', label, error);
@@ -18759,30 +19105,13 @@ function createNPCCooldownManager() {
       return slot;
     };
 
-    // Quick actions
-    const quick = section('Quick actions');
-    const quickRow = buttonRow(quick);
-    const quickActions = [
-      { label: 'Log state', command: 'QuestsDev.check()', run: () => QuestsDev.check() },
-      { label: 'Complete all', command: 'QuestsDev.completeAll()', run: () => QuestsDev.completeAll() },
-      { label: 'Reset all', command: 'QuestsDev.resetAll()', run: () => QuestsDev.resetAll(), danger: true },
-      { label: 'Reset Santa', command: 'QuestsDev.resetSanta()', run: () => QuestsDev.resetSanta() },
-      { label: 'Reset Iron Ore flag', command: 'QuestsDev.resetIronOreReceived()', run: () => QuestsDev.resetIronOreReceived() },
-      { label: 'Reset Love Story + items', command: 'QuestsDev.resetLoveStoryWithItems()', run: () => QuestsDev.resetLoveStoryWithItems() }
-    ];
-    for (const action of quickActions) {
-      const group = document.createElement('div');
-      group.style.cssText = 'display:flex;gap:2px;';
-      group.appendChild(makeBtn(action.label, () => runGuarded(action.label, action.run), {
-        danger: !!action.danger,
-        command: action.command
-      }));
-      group.appendChild(makeCopyBtn(action.command));
-      quickRow.appendChild(group);
-    }
-    contentDiv.appendChild(quick);
-
-    const listWrapStyle = 'display:flex;flex-direction:column;gap:3px;max-height:320px;overflow-y:auto;padding:4px;flex:1 1 auto;min-height:0;';
+    // Bounded between 100-500px: short lists shrink instead of leaving empty space,
+    // long lists (40+ rows) stop growing at 500px and scroll internally rather than
+    // pushing the whole modal (and its sibling column) to an awkward height.
+    // No top padding: the sticky header (appendGridHeader) sits flush against this
+    // box's top edge, otherwise rows scroll up into the padding strip and peek out
+    // above the pinned header (same fix as the Arena leaderboard header).
+    const listWrapStyle = 'display:flex;flex-direction:column;gap:3px;min-height:100px;max-height:500px;overflow-y:auto;padding:0 4px 4px;';
     const rowGridStyle = 'display:grid;grid-template-columns:28px minmax(0,1fr) auto;gap:4px 8px;align-items:center;padding:3px 4px;border-radius:2px;cursor:context-menu;';
     const readableFont = 'font-family:Arial, Helvetica, sans-serif;font-size:12px;letter-spacing:0.01em;';
     const cellNameStyle = `${readableFont}overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;`;
@@ -18832,8 +19161,12 @@ function createNPCCooldownManager() {
         'z-index:2',
         'margin:0 -4px',
         'padding:4px 8px',
-        'background:url("https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png") repeat',
-        'box-shadow:0 1px 0 rgba(0,0,0,0.45)'
+        // Solid background-color fallback behind the tiled texture so scrolled rows
+        // are fully hidden behind the pinned header instead of showing through.
+        'background-color:#191919',
+        'background-image:url("https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png")',
+        'background-repeat:repeat',
+        'box-shadow:0 4px 6px -3px rgba(0,0,0,0.6)'
       ].join(';');
       header.appendChild(document.createElement('div'));
       const name = document.createElement('span');
@@ -18856,7 +19189,6 @@ function createNPCCooldownManager() {
     const itemsSection = section('Items (story order)');
     itemsSection.style.flex = '1 1 0';
     itemsSection.style.minWidth = '0';
-    itemsSection.style.height = '100%';
     const itemsList = document.createElement('div');
     itemsList.className = 'frame-pressed-1 surface-dark';
     itemsList.style.cssText = listWrapStyle;
@@ -18968,7 +19300,6 @@ function createNPCCooldownManager() {
     const missionSection = section('Missions (story order)');
     missionSection.style.flex = '1 1 0';
     missionSection.style.minWidth = '0';
-    missionSection.style.height = '100%';
     const missionsList = document.createElement('div');
     missionsList.className = 'frame-pressed-1 surface-dark';
     missionsList.style.cssText = listWrapStyle;
@@ -18996,31 +19327,270 @@ function createNPCCooldownManager() {
       }
     };
 
+    // Missions that track more than one accepted/completed flag internally (e.g. seven
+    // independent seals, six independent Basilisk challenges) register here so their own
+    // per-step dev controls appear inline under that mission's row instead of living in a
+    // separate always-visible section. Add an entry here for any future quest with its own
+    // multi-step progress array — everything else (rendering, refresh, left-click wiring)
+    // is generic and needs no further changes.
+    const QUEST_DEV_SUB_PROGRESSIONS = {
+      costello_queen_banshees: {
+        label: 'Seven Seals',
+        getCount: () => SEVEN_SEALS_COUNT,
+        itemLabel: (i) => `Seal ${i + 1}`,
+        isCompleted: (i) => QuestsDev.getSealCompleted(i),
+        setCompleted: (i, value) => QuestsDev.setSealCompleted(i, value),
+        setCommand: (i) => `QuestsDev.setSealCompleted(${i}, true)`,
+        clearCommand: (i) => `QuestsDev.setSealCompleted(${i}, false)`
+      },
+      the_basilisk_challenges: {
+        label: 'Basilisk Challenges',
+        getCount: () => BASILISK_CHALLENGES_COUNT,
+        itemLabel: (i) => `Challenge ${i + 1}`,
+        isCompleted: (i) => QuestsDev.getBasiliskChallengeCompleted(i),
+        setCompleted: (i, value) => QuestsDev.setBasiliskChallengeCompleted(i, value),
+        setCommand: (i) => `QuestsDev.setBasiliskChallengeCompleted(${i}, true)`,
+        clearCommand: (i) => `QuestsDev.setBasiliskChallengeCompleted(${i}, false)`,
+        // "Won, hasn't reported to the Basilisk yet" — simulates onVictory without playing
+        // the actual battle. Toggling this on should immediately kill the lever's glow and
+        // light up the board NPC's fight.png; talking to the Basilisk then exercises the real
+        // finalize step (which also flips one of the Challenge N buttons above and clears this).
+        extraToggle: {
+          label: 'Won (pending report)',
+          isActive: () => QuestsDev.getBasiliskChallengeBattleCompleted(),
+          setActive: (value) => QuestsDev.setBasiliskChallengeBattleCompleted(value),
+          command: 'QuestsDev.setBasiliskChallengeBattleCompleted(true)'
+        }
+      },
+      // "received before" Firebase flags (see assets/quests/items.json) gate a mission's
+      // one-time reward from dropping/being claimable again. resetQuest() never touches
+      // these, so re-testing a mission from scratch needs to flip them separately — the
+      // same toggle-button UI as Seven Seals / Basilisk Challenges, just with 1-2 items
+      // instead of 6-7. isCompleted reads the already-live receivedFlagsCache (refreshed
+      // by runGuarded after every action) rather than re-fetching from Firebase.
+      king_copper_key: {
+        label: 'Copper Key flag',
+        getCount: () => 1,
+        itemLabel: () => 'Received',
+        isCompleted: () => !!receivedFlagsCache.copperKey,
+        setCompleted: (i, value) => (value ? QuestsDev.markCopperKeyReceived() : QuestsDev.resetCopperKeyReceived()),
+        setCommand: () => 'QuestsDev.markCopperKeyReceived()',
+        clearCommand: () => 'QuestsDev.resetCopperKeyReceived()'
+      },
+      king_letter_al_dee: {
+        label: 'Letter flag',
+        getCount: () => 1,
+        itemLabel: () => 'Received',
+        isCompleted: () => !!receivedFlagsCache.letter,
+        setCompleted: (i, value) => (value ? QuestsDev.markLetterReceived() : QuestsDev.resetLetterReceived()),
+        setCommand: () => 'QuestsDev.markLetterReceived()',
+        clearCommand: () => 'QuestsDev.resetLetterReceived()'
+      },
+      al_dee_fishing_gold: {
+        label: 'Iron Ore flag',
+        getCount: () => 1,
+        itemLabel: () => 'Received',
+        isCompleted: () => !!receivedFlagsCache.ironOre,
+        setCompleted: (i, value) => (value ? QuestsDev.markIronOreReceived() : QuestsDev.resetIronOreReceived()),
+        setCommand: () => 'QuestsDev.markIronOreReceived()',
+        clearCommand: () => 'QuestsDev.resetIronOreReceived()'
+      },
+      christmas_miracle: {
+        label: 'Santa flags',
+        getCount: () => 2,
+        itemLabel: (i) => (i === 0 ? 'Wishlist' : 'Present'),
+        isCompleted: (i) => !!(i === 0 ? receivedFlagsCache.wishlist : receivedFlagsCache.present),
+        setCompleted: (i, value) => (i === 0
+          ? (value ? QuestsDev.markWishlistReceived() : QuestsDev.resetWishlistReceived())
+          : (value ? QuestsDev.markSantaPresentReceived() : QuestsDev.resetSantaPresentReceived())),
+        setCommand: (i) => (i === 0 ? 'QuestsDev.markWishlistReceived()' : 'QuestsDev.markSantaPresentReceived()'),
+        clearCommand: (i) => (i === 0 ? 'QuestsDev.resetWishlistReceived()' : 'QuestsDev.resetSantaPresentReceived()')
+      }
+    };
+
+    // Auto-generate a sub-progression entry for every mission's own extraFields — battle-
+    // completion flags and other per-mission sub-steps (plankDelivered, riddleSolved,
+    // bookGiven, ...), sourced from missions.json -> registry.missions[].extraFields via
+    // MISSION_EXTRA_FIELD_SCHEMAS. QuestsDev.reset() wipes ALL of a mission's flags at
+    // once (full re-test); this lets a single sub-step (most commonly battleCompleted) be
+    // flipped back on its own, e.g. to re-fight a boss without losing earlier progress.
+    // Fully data-driven — a mission with extraFields gets this panel automatically the
+    // moment it's added to the registry, no code changes needed here.
+    const humanizeProgressFlagName = (field) => field
+      .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+      .replace(/^./, (c) => c.toUpperCase());
+    for (const [missionId, firebaseKey] of Object.entries(MISSION_FIREBASE_KEY_MAP)) {
+      if (QUEST_DEV_SUB_PROGRESSIONS[missionId]) continue; // already has a hand-written panel above
+      const fields = MISSION_EXTRA_FIELD_SCHEMAS[firebaseKey]?.fields;
+      if (!Array.isArray(fields) || !fields.length) continue;
+      const mission = MISSION_BY_ID[missionId];
+      if (!mission) continue;
+      QUEST_DEV_SUB_PROGRESSIONS[missionId] = {
+        label: 'Progress flags',
+        getCount: () => fields.length,
+        itemLabel: (i) => humanizeProgressFlagName(fields[i]),
+        isCompleted: (i) => !!getMissionProgress(mission)?.[fields[i]],
+        setCompleted: (i, value) => QuestsDev.setProgressFlag(missionId, fields[i], value),
+        setCommand: (i) => `QuestsDev.setProgressFlag(${JSON.stringify(missionId)}, ${JSON.stringify(fields[i])}, true)`,
+        clearCommand: (i) => `QuestsDev.setProgressFlag(${JSON.stringify(missionId)}, ${JSON.stringify(fields[i])}, false)`
+      };
+    }
+
+    // missionId -> extra mission-specific dev actions beyond Accept/Complete/Reset, for
+    // QuestsDev commands that exist but had no button anywhere in this modal.
+    const QUEST_DEV_MISSION_EXTRA_ACTIONS = {
+      svenson_love_story: [{
+        text: 'Reset (+ items)',
+        onClick: () => runGuarded('Reset A Love Story (+ items)', () => QuestsDev.resetLoveStoryWithItems()),
+        command: 'QuestsDev.resetLoveStoryWithItems()'
+      }],
+      king_letter_al_dee: [{
+        text: 'Debug tile 79',
+        onClick: () => runGuarded('Debug tile 79', () => { QuestsDev.debugTile79(); setStatus('Tile 79 debug info logged to console.'); }),
+        command: 'QuestsDev.debugTile79()'
+      }]
+    };
+
+    // missionId -> refresh function, populated only while that mission's panel is expanded.
+    const openSubProgressionPanels = new Map();
+    refreshSubProgressionPanels = () => {
+      for (const refresh of openSubProgressionPanels.values()) refresh();
+    };
+
+    function buildSubProgressionPanel(missionId, def) {
+      const panel = document.createElement('div');
+      panel.style.cssText = 'grid-column:1 / -1;display:flex;flex-wrap:wrap;gap:6px;' +
+        'padding:6px 4px 6px 32px;margin:0 -4px;background:rgba(0,0,0,0.2);';
+
+      const count = def.getCount();
+      const itemButtons = [];
+      for (let i = 0; i < count; i++) {
+        const command = def.setCommand(i);
+        const group = document.createElement('div');
+        group.style.cssText = 'display:flex;gap:2px;';
+        // Toggle: click a completed (green) item to un-complete just that one, without
+        // touching the others — this is the only way to turn off a single step short of
+        // clearing the whole progression via the "Clear" button below.
+        const btn = makeBtn(def.itemLabel(i), () => {
+          const nextValue = !def.isCompleted(i);
+          return runGuarded(`${nextValue ? 'Complete' : 'Un-complete'} ${def.itemLabel(i)}`, async () => {
+            await def.setCompleted(i, nextValue);
+          });
+        }, { command });
+        itemButtons.push({ index: i, btn });
+        group.appendChild(btn);
+        group.appendChild(makeCopyBtn(command));
+        panel.appendChild(group);
+      }
+
+      const allCmd = Array.from({ length: count }, (_, i) => def.setCommand(i)).join('\n');
+      const clearCmd = Array.from({ length: count }, (_, i) => def.clearCommand(i)).join('\n');
+      const allGroup = document.createElement('div');
+      allGroup.style.cssText = 'display:flex;gap:2px;';
+      allGroup.appendChild(makeBtn(`All (${def.label})`, () => runGuarded(`Complete all: ${def.label}`, async () => {
+        for (let i = 0; i < count; i++) await def.setCompleted(i, true);
+      }), { command: allCmd }));
+      allGroup.appendChild(makeCopyBtn(allCmd));
+      panel.appendChild(allGroup);
+
+      const clearGroup = document.createElement('div');
+      clearGroup.style.cssText = 'display:flex;gap:2px;';
+      clearGroup.appendChild(makeBtn(`Clear (${def.label})`, () => runGuarded(`Clear all: ${def.label}`, async () => {
+        for (let i = 0; i < count; i++) await def.setCompleted(i, false);
+      }), { danger: true, command: clearCmd }));
+      clearGroup.appendChild(makeCopyBtn(clearCmd));
+      panel.appendChild(clearGroup);
+
+      // Optional extra toggle beyond the plain per-item array (e.g. Basilisk Challenges'
+      // "won, awaiting report" flag, which isn't itself one of the indexed items) — generic
+      // so any future sub-progression can opt in the same way without touching this renderer.
+      let extraBtn = null;
+      if (def.extraToggle) {
+        const extra = def.extraToggle;
+        const extraGroup = document.createElement('div');
+        extraGroup.style.cssText = 'display:flex;gap:2px;';
+        extraBtn = makeBtn(extra.label, () => {
+          const nextValue = !extra.isActive();
+          return runGuarded(`${nextValue ? 'Set' : 'Clear'} ${extra.label}`, async () => {
+            await extra.setActive(nextValue);
+          });
+        }, { command: extra.command });
+        extraGroup.appendChild(extraBtn);
+        extraGroup.appendChild(makeCopyBtn(extra.command));
+        panel.appendChild(extraGroup);
+      }
+
+      const refresh = () => {
+        for (const { index, btn } of itemButtons) {
+          const done = def.isCompleted(index);
+          btn.style.background = done ? PROGRESS_GREEN : PROGRESS_RED;
+          btn.style.color = done ? TEXT_GREEN : TEXT_RED;
+          btn.style.outline = done
+            ? '1px solid rgba(96, 192, 96, 0.55)'
+            : '1px solid rgba(255, 138, 128, 0.45)';
+        }
+        if (extraBtn && def.extraToggle) {
+          const active = def.extraToggle.isActive();
+          extraBtn.style.background = active ? PROGRESS_GREEN : PROGRESS_RED;
+          extraBtn.style.color = active ? TEXT_GREEN : TEXT_RED;
+          extraBtn.style.outline = active
+            ? '1px solid rgba(96, 192, 96, 0.55)'
+            : '1px solid rgba(255, 138, 128, 0.45)';
+        }
+      };
+      refresh();
+      openSubProgressionPanels.set(missionId, refresh);
+      return panel;
+    }
+
     for (const mission of getQuestDevMissionsInProgressOrder()) {
       const acceptCmd = `QuestsDev.setAccepted(${JSON.stringify(mission.id)})`;
       const completeCmd = `QuestsDev.complete(${JSON.stringify(mission.id)})`;
       const resetCmd = `QuestsDev.reset(${JSON.stringify(mission.id)})`;
+      const subProgression = QUEST_DEV_SUB_PROGRESSIONS[mission.id];
 
       const iconCell = document.createElement('div');
-      iconCell.appendChild(createDevIconSlot(createActiveMissionIconElement(mission)));
+      iconCell.appendChild(createDevIconSlot(createActiveMissionIconElement(mission, null, 24)));
 
       const nameEl = document.createElement('span');
       nameEl.style.cssText = cellNameStyle;
-      nameEl.textContent = mission.title || mission.id;
-      nameEl.title = `${mission.id} — right-click for actions`;
+      // Leading chevron marks rows with an expandable sub-progression panel (e.g. Seven
+      // Seals, Basilisk Challenges) — the only visual cue that left-click does something here.
+      nameEl.textContent = subProgression ? `▸ ${mission.title || mission.id}` : (mission.title || mission.id);
+      nameEl.title = subProgression
+        ? `${mission.id} — left-click to view progress, right-click for actions`
+        : `${mission.id} — right-click for actions`;
 
       const missionStatusEl = document.createElement('span');
       missionStatusEl.style.cssText = `${cellStatusStyle};text-transform:lowercase;`;
 
       const rowWrap = document.createElement('div');
       rowWrap.style.cssText = rowGridStyle;
-      rowWrap.title = 'Right-click for actions';
+      rowWrap.title = subProgression ? 'Left-click to view progress — right-click for actions' : 'Right-click for actions';
       rowWrap.appendChild(iconCell);
       rowWrap.appendChild(nameEl);
       rowWrap.appendChild(missionStatusEl);
       missionRows.set(mission.id, { row: rowWrap, statusEl: missionStatusEl, nameEl });
 
+      if (subProgression) {
+        let expandedPanel = null;
+        rowWrap.style.cursor = 'pointer';
+        rowWrap.addEventListener('click', () => {
+          if (expandedPanel) {
+            expandedPanel.remove();
+            expandedPanel = null;
+            openSubProgressionPanels.delete(mission.id);
+            nameEl.textContent = `▸ ${mission.title || mission.id}`;
+            return;
+          }
+          expandedPanel = buildSubProgressionPanel(mission.id, subProgression);
+          rowWrap.insertAdjacentElement('afterend', expandedPanel);
+          nameEl.textContent = `▾ ${mission.title || mission.id}`;
+        });
+      }
+
       rowWrap.addEventListener('contextmenu', (event) => {
+        const extraActions = QUEST_DEV_MISSION_EXTRA_ACTIONS[mission.id] || [];
         openDevMenu(event, [
           {
             text: 'Accept',
@@ -19045,6 +19615,10 @@ function createNPCCooldownManager() {
             hoverBorderColor: '#ffcdd2',
             onClick: () => runGuarded(`Reset ${mission.id}`, () => QuestsDev.reset(mission.id))
           },
+          ...extraActions.map((action) => ({
+            text: action.text,
+            onClick: action.onClick
+          })),
           {
             text: 'Copy accept cmd',
             onClick: () => copyCommand(acceptCmd)
@@ -19057,9 +19631,13 @@ function createNPCCooldownManager() {
             text: 'Copy reset cmd',
             onClick: () => copyCommand(resetCmd)
           },
+          ...extraActions.map((action) => ({
+            text: `Copy ${action.text.toLowerCase()} cmd`,
+            onClick: () => copyCommand(action.command)
+          })),
           {
             text: 'Copy all cmds',
-            onClick: () => copyCommand(`${acceptCmd}\n${completeCmd}\n${resetCmd}`)
+            onClick: () => copyCommand([acceptCmd, completeCmd, resetCmd, ...extraActions.map((a) => a.command)].filter(Boolean).join('\n'))
           }
         ]);
       });
@@ -19069,61 +19647,65 @@ function createNPCCooldownManager() {
     refreshMissionStatuses();
     missionSection.appendChild(missionsList);
     itemsMissionsRow.appendChild(missionSection);
-    contentDiv.appendChild(itemsMissionsRow);
 
-    // Seals
-    const sealsSection = section('Seven seals');
-    const sealsRow = buttonRow(sealsSection);
-    const sealButtons = [];
-    for (let i = 0; i < SEVEN_SEALS_COUNT; i++) {
-      const command = `QuestsDev.setSealCompleted(${i}, true)`;
-      const group = document.createElement('div');
-      group.style.cssText = 'display:flex;gap:2px;';
-      const btn = makeBtn(`Seal ${i + 1}`, () => runGuarded(`Complete seal ${i + 1}`, async () => {
-        await QuestsDev.setSealCompleted(i, true);
-      }), { command });
-      sealButtons.push({ index: i, btn });
-      group.appendChild(btn);
-      group.appendChild(makeCopyBtn(command));
-      sealsRow.appendChild(group);
-    }
-    const allSealsCmd = 'QuestsDev.grant({ firstSeal: 1, secondSeal: 1, thirdSeal: 1, fourthSeal: 1, fifthSeal: 1, sixthSeal: 1, seventhSeal: 1 })';
-    const clearSealsCmd = 'QuestsDev.grant({ resetAllSeals: true })';
-    const allSealsGroup = document.createElement('div');
-    allSealsGroup.style.cssText = 'display:flex;gap:2px;';
-    allSealsGroup.appendChild(makeBtn('All seals', () => runGuarded('Complete all seals', () => QuestsDev.grant({
-      firstSeal: 1, secondSeal: 1, thirdSeal: 1, fourthSeal: 1, fifthSeal: 1, sixthSeal: 1, seventhSeal: 1
-    })), { command: allSealsCmd }));
-    allSealsGroup.appendChild(makeCopyBtn(allSealsCmd));
-    sealsRow.appendChild(allSealsGroup);
-    const clearSealsGroup = document.createElement('div');
-    clearSealsGroup.style.cssText = 'display:flex;gap:2px;';
-    clearSealsGroup.appendChild(makeBtn('Clear seals', () => runGuarded('Clear seals', () => QuestsDev.grant({ resetAllSeals: true })), { danger: true, command: clearSealsCmd }));
-    clearSealsGroup.appendChild(makeCopyBtn(clearSealsCmd));
-    sealsRow.appendChild(clearSealsGroup);
-    contentDiv.appendChild(sealsSection);
+    // Items/Missions live in their own scrolling area, separate from contentDiv itself.
+    // Global actions and the "Ready."/status line below must stay fixed-height and always
+    // visible — previously they were plain siblings of itemsMissionsRow inside contentDiv,
+    // so while a resize was mid-flight (see autofitQuestDevToolsModalHeight) and the two
+    // list boxes hadn't shrunk yet, they could push Global actions and the status line
+    // below contentDiv's clipped bottom edge, hiding them until the lists finished
+    // resizing. Giving only the lists' row flex-grow (and letting it scroll) keeps the
+    // fixed elements below always on-screen regardless of list height.
+    const questDevScrollArea = document.createElement('div');
+    questDevScrollArea.style.cssText = 'display:flex;flex-direction:column;flex:1 1 auto;min-height:0;overflow-y:auto;';
+    questDevScrollArea.appendChild(itemsMissionsRow);
+    contentDiv.appendChild(questDevScrollArea);
 
-    refreshSealStatuses = () => {
-      for (const { index, btn } of sealButtons) {
-        const done = typeof QuestsDev.getSealCompleted === 'function'
-          ? QuestsDev.getSealCompleted(index)
-          : getSealCompleted(index);
-        btn.style.background = done ? PROGRESS_GREEN : PROGRESS_RED;
-        btn.style.color = done ? TEXT_GREEN : TEXT_RED;
-        btn.style.outline = done
-          ? '1px solid rgba(96, 192, 96, 0.55)'
-          : '1px solid rgba(255, 138, 128, 0.45)';
-      }
-    };
-    refreshSealStatuses();
+    // Seven Seals / Basilisk Challenges dev controls now live inline under their own
+    // mission row (left-click to expand) via QUEST_DEV_SUB_PROGRESSIONS above, instead of
+    // a separate always-visible section here.
 
+    // Global actions: QuestsDev commands that operate on the whole quest line rather than
+    // a single mission or item, so they don't fit a per-row context menu. These previously
+    // existed only as console commands with no button anywhere in this modal.
+    const globalActionsSection = section('Global actions');
+    globalActionsSection.style.flex = '0 0 auto';
+    const globalActionsRow = buttonRow(globalActionsSection);
+    const globalActionCmd = 'QuestsDev.completeAll()';
+    const globalActionGroup1 = document.createElement('div');
+    globalActionGroup1.style.cssText = 'display:flex;gap:2px;';
+    globalActionGroup1.appendChild(makeBtn('Complete all missions', () => runGuarded('Complete all missions', () => QuestsDev.completeAll()), { command: globalActionCmd }));
+    globalActionGroup1.appendChild(makeCopyBtn(globalActionCmd));
+    globalActionsRow.appendChild(globalActionGroup1);
+
+    const reconcileCmd = 'QuestsDev.reconcile()';
+    const reconcileGroup = document.createElement('div');
+    reconcileGroup.style.cssText = 'display:flex;gap:2px;';
+    reconcileGroup.appendChild(makeBtn('Reconcile items', () => runGuarded('Reconcile items', () => QuestsDev.reconcile()), { command: reconcileCmd }));
+    reconcileGroup.appendChild(makeCopyBtn(reconcileCmd));
+    globalActionsRow.appendChild(reconcileGroup);
+
+    const checkCmd = 'QuestsDev.check()';
+    const checkGroup = document.createElement('div');
+    checkGroup.style.cssText = 'display:flex;gap:2px;';
+    checkGroup.appendChild(makeBtn('Check state', () => runGuarded('Check state', async () => {
+      await QuestsDev.check();
+      setStatus('Mission/progress state logged to console.');
+    }), { command: checkCmd }));
+    checkGroup.appendChild(makeCopyBtn(checkCmd));
+    globalActionsRow.appendChild(checkGroup);
+
+    const resetAllCmd = 'QuestsDev.resetAll()';
+    const resetAllGroup = document.createElement('div');
+    resetAllGroup.style.cssText = 'display:flex;gap:2px;';
+    resetAllGroup.appendChild(makeBtn('Reset ALL quests', () => runGuarded('Reset ALL quests', () => QuestsDev.resetAll()), { danger: true, command: resetAllCmd }));
+    resetAllGroup.appendChild(makeCopyBtn(resetAllCmd));
+    globalActionsRow.appendChild(resetAllGroup);
+
+    contentDiv.appendChild(globalActionsSection);
+
+    statusEl.style.flex = '0 0 auto';
     contentDiv.appendChild(statusEl);
-
-    const help = document.createElement('p');
-    help.className = 'pixel-font-14';
-    help.style.cssText = 'margin:0;color:#666;';
-    help.textContent = 'Console: QuestsDev.help() — Right-click items/missions for actions. Copy / Ctrl+click quick actions.';
-    contentDiv.appendChild(help);
 
     openQuestsModal({
       title: 'Quest Dev Tools',
@@ -19131,8 +19713,62 @@ function createNPCCooldownManager() {
       maxWidth: QUEST_ADMIN_DEV_MODAL_WIDTH,
       maxHeight: QUEST_ADMIN_DEV_MODAL_HEIGHT,
       minHeight: QUEST_ADMIN_DEV_MODAL_MIN_HEIGHT,
-      buttons: [{ text: 'Close', primary: false }]
+      buttons: [{ text: 'Close', primary: false }],
+      // Autofit to the content's actual height (min 600 / max 800). contentDiv's children
+      // (the two list panels) are flex/height:100% so they stretch to fill whatever height
+      // they're given — scrollHeight only reveals a size bigger than that if the content
+      // overflows, never a size smaller than an already-generous box. So briefly release the
+      // height:100% constraint (AND the flex-grow that would otherwise re-stretch it — see
+      // autofitQuestDevToolsModalHeight) to let contentDiv shrink-wrap to its true natural
+      // height, measure that, then restore it (the dialog itself gets resized to the number).
+      onAfterLayout: (dialog) => {
+        autofitQuestDevToolsModalHeight(dialog, contentDiv);
+        // The shared modal layout (setupQuestsModalResponsiveLayout) resets the dialog back
+        // to its fixed max-height on every window resize, undoing this autofit — mirroring
+        // how Cyclopedia's modal re-applies its own sizing on resize, re-run the same
+        // measurement afterward so the modal stays correctly sized instead of snapping back
+        // to the max. Registered after the shared resize listener so it always runs second.
+        const onResize = () => {
+          if (!dialog.isConnected || dialog.getAttribute('data-state') !== 'open') {
+            window.removeEventListener('resize', onResize);
+            return;
+          }
+          requestAnimationFrame(() => autofitQuestDevToolsModalHeight(dialog, contentDiv));
+        };
+        window.addEventListener('resize', onResize);
+      }
     });
+  }
+
+  function autofitQuestDevToolsModalHeight(dialog, contentDiv) {
+    try {
+      const chromeHeight = dialog.offsetHeight - contentDiv.offsetHeight;
+      // contentDiv itself is "flex: 1 1 auto" inside widget-bottom's column layout —
+      // flex-grow:1 force-stretches it to fill all leftover space regardless of its own
+      // height, so height:'auto' alone does nothing. Zero out the grow too while
+      // measuring so it actually shrink-wraps to its natural content size.
+      const originalContentHeight = contentDiv.style.height;
+      const originalContentFlex = contentDiv.style.flex;
+      contentDiv.style.flex = '0 0 auto';
+      contentDiv.style.height = 'auto';
+      const naturalContentHeight = contentDiv.scrollHeight;
+      contentDiv.style.flex = originalContentFlex;
+      contentDiv.style.height = originalContentHeight;
+      // Also clamp to the viewport (same padding the shared layout uses in
+      // getQuestsModalDimensions) — otherwise resizing the browser window shorter than
+      // the content-fit height has no visible effect, since content height itself
+      // doesn't change on a resize and this function only ever looked at content.
+      const viewportMax = window.innerHeight - QUESTS_MODAL_CONFIG.viewportPadding * 2;
+      const desiredHeight = Math.min(
+        QUEST_ADMIN_DEV_MODAL_HEIGHT,
+        viewportMax,
+        Math.max(QUEST_ADMIN_DEV_MODAL_MIN_HEIGHT, chromeHeight + naturalContentHeight)
+      );
+      dialog.style.height = `${desiredHeight}px`;
+      dialog.style.maxHeight = `${desiredHeight}px`;
+    } catch (error) {
+      console.error('[Quests Mod][Quest Dev Tools] Error autofitting modal height:', error);
+    }
   }
 
   function createArenaLeaderboardTab() {
@@ -28344,6 +28980,1333 @@ function createNPCCooldownManager() {
     showToast({ message: TOAST_MESSAGES.madMageRoomEntered, logPrefix: getMadMageRoomLogPrefix() });
   }
 
+  // ---- The Basilisk Challenges — Challenge 1 (lever on tile 22 of The Farms) -------------
+  // Mirrors the Mad Mage Room quest above exactly: same createTeleportBattleQuest() factory
+  // for the tile-mutation apply/restore + scene-sync boilerplate, same CustomBattles.create()
+  // shape hydrated from battles.json via getHydratedQuestBattleSpawn(). Only challenge 1 of 6
+  // is wired; see getNextIncompleteBasiliskChallengeIndex()/setBasiliskChallengeCompleted().
+  const basiliskChallenge1Quest = createTeleportBattleQuest({
+    id: 'basilisk-challenge-1',
+    logPrefix: '[Quests Mod][Basilisk Challenge 1]',
+    addedAttr: QUEST_BOARD_ADDED_ATTR_BASILISK,
+    hiddenTag: QUEST_BOARD_HIDDEN_TAG_BASILISK,
+    mutationKeyAttr: 'data-quests-basilisk-mutation-key',
+    floorBelowKeyAttr: 'data-quests-basilisk-fb-key',
+    getTileMutations: () => BASILISK_TILE_MUTATIONS,
+    isEntered: () => playerEnteredBasiliskChallenge1,
+    getBattle: () => basiliskChallenge1Battle,
+    getSceneSub: () => basiliskChallenge1SceneSub,
+    setSceneSub: (v) => { basiliskChallenge1SceneSub = v; },
+    setHitboxesApplied: (v) => { basiliskChallenge1HitboxesApplied = v; },
+    roomName: () => BASILISK_BATTLE_ROOM_NAME
+  });
+
+  function getBasiliskChallenge1LogPrefix() { return basiliskChallenge1Quest.getLogPrefix(); }
+  function applyBasiliskChallenge1TileMutations() { basiliskChallenge1Quest.applyTileMutations(); }
+  function restoreBasiliskChallenge1TileMutations() { basiliskChallenge1Quest.restoreTileMutations(); }
+  function stopBasiliskChallenge1SceneSync() { basiliskChallenge1Quest.stopSceneSync(); }
+  function startBasiliskChallenge1SceneSync() { basiliskChallenge1Quest.startSceneSync(); }
+  function restoreBoardSetupBasiliskChallenge1() { basiliskChallenge1Quest.restoreBoardSetup(); }
+
+  function cleanupBasiliskChallenge1Quest() {
+    try {
+      removeCustomBattleStatusToast();
+      stopBasiliskChallenge1SceneSync();
+      playerEnteredBasiliskChallenge1 = false;
+      restoreBasiliskChallenge1TileMutations();
+      if (basiliskChallenge1Battle) {
+        basiliskChallenge1Battle.cleanup(restoreBoardSetupBasiliskChallenge1, showQuestOverlays);
+        basiliskChallenge1Battle = null;
+        console.log(`${getBasiliskChallenge1LogPrefix()} Battle cleaned up`);
+      }
+      showQuestOverlays();
+      updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+    } catch (error) {
+      console.error(`${getBasiliskChallenge1LogPrefix()} Error cleaning up:`, error);
+    }
+  }
+
+  function navigateToBasiliskReturnRoom(explicitRoomId) {
+    try {
+      const roomId = explicitRoomId
+        || getRoomIdByRoomName(BASILISK_RETURN_ROOM_NAME)
+        || getRoomIdByRoomName('The Farms');
+      if (roomId) globalThis.state.board.send({ type: 'selectRoomById', roomId });
+    } catch (error) {
+      console.error(`${getBasiliskChallenge1LogPrefix()} Error navigating home:`, error);
+    }
+  }
+
+  function returnFromBasiliskChallenge1(explicitRoomId, isVictory) {
+    if (isVictory) {
+      showToast({
+        message: TOAST_MESSAGES.basiliskChallenge1Cleared,
+        logPrefix: getBasiliskChallenge1LogPrefix()
+      });
+    }
+    cleanupBasiliskChallenge1Quest();
+    setTimeout(() => navigateToBasiliskReturnRoom(explicitRoomId), 100);
+  }
+
+  function createBasiliskChallenge1BattleInstance(roomId, returnRoomId) {
+    if (!window.CustomBattles) {
+      console.error(`${getBasiliskChallenge1LogPrefix()} CustomBattles still not available`);
+      return null;
+    }
+    const spawn = getHydratedQuestBattleSpawn(BASILISK_BATTLE_ID || 'basilisk_challenge_1');
+    const tileRestrictions = {};
+    if (spawn.allowedTiles?.length) {
+      tileRestrictions.allowedTiles = spawn.allowedTiles;
+      tileRestrictions.message = spawn.allowedTilesMessage;
+    }
+    const config = {
+      name: BASILISK_BATTLE_DISPLAY_NAME || 'Basilisk Challenge 1',
+      roomId,
+      villains: spawn.villains,
+      allyLimit: spawn.allyLimit ?? 1,
+      preventVillainMovement: spawn.preventVillainMovement !== false,
+      hideVillainSprites: spawn.hideVillainSprites !== false,
+      ...(Object.keys(tileRestrictions).length ? { tileRestrictions } : {}),
+      activationCheck: (isSandbox, inBattleArea) => isSandbox && inBattleArea && playerEnteredBasiliskChallenge1,
+      victoryDefeat: {
+        // No reloadRoomOnClose here (deviates from the raw exported battle spec, which set
+        // it true): onClose already navigates back to The Farms via returnFromBasiliskChallenge1,
+        // and combining that with a same-room reload of the shared Sewers battle room risks a
+        // race between the two navigations — Mad Mage Room (the template for this quest) hits
+        // the same tradeoff and also leaves it unset for that reason.
+        onVictory: async () => {
+          // Winning does NOT itself advance basiliskChallengesCompleted[] (and therefore
+          // doesn't unlock the lever for the next challenge) — that only happens once the
+          // player reports back to the Basilisk in person (see the 'mission'/'challenge'
+          // chat handler below, gated on battleCompleted). battleCompleted here is purely
+          // "won, hasn't reported in yet"; shouldEnableBasiliskLeverRightClick() keeps the
+          // lever disabled for the whole time it's true.
+          try {
+            await persistMissionProgress(THE_BASILISK_CHALLENGES_MISSION, {
+              accepted: true,
+              completed: areAllBasiliskChallengesCompleted(),
+              battleCompleted: true
+            });
+          } catch (error) {
+            console.error(`${getBasiliskChallenge1LogPrefix()} Error saving battleCompleted:`, error);
+          }
+        },
+        onDefeat: () => {},
+        onClose: (isVictory) => {
+          returnFromBasiliskChallenge1(returnRoomId, isVictory);
+        },
+        victoryMessage: getMissionDialogueLine(THE_BASILISK_CHALLENGES_MISSION, 'battleVictory', 'SSSURVIVED, HAVE YOU? IMPRESSSIVE, TWO-LEGGER. RETURN TO THE FARM WHENEVER YOU LIKE.'),
+        defeatMessage: getMissionDialogueLine(THE_BASILISK_CHALLENGES_MISSION, 'battleDefeat', 'FALLEN SSSO SSSOON? THE KNIGHTSSS ARE NOT GENTLE. GATHER YOURSSSELF AND TRY AGAIN.'),
+        showItems: false,
+        items: []
+      }
+    };
+    return window.CustomBattles.create(config);
+  }
+
+  function initializeBasiliskChallenge1Battle(roomId, returnRoomId) {
+    if (window.CustomBattles) return createBasiliskChallenge1BattleInstance(roomId, returnRoomId);
+    return waitForCustomBattles({ logPrefix: getBasiliskChallenge1LogPrefix() }).then((api) => {
+      if (!api) return null;
+      return createBasiliskChallenge1BattleInstance(roomId, returnRoomId);
+    });
+  }
+
+  function setupBasiliskChallenge1BattleInstance(battle) {
+    if (!battle) return false;
+    basiliskChallenge1Battle = battle;
+    stopBasiliskChallenge1SceneSync();
+    basiliskChallenge1Battle.setup(
+      () => playerEnteredBasiliskChallenge1,
+      NotificationService.createBattleToastCallback(getBasiliskChallenge1LogPrefix())
+    );
+    basiliskChallenge1Battle.resetSandboxBattleState();
+    basiliskChallenge1Battle.setupTileRestrictions?.(
+      () => playerEnteredBasiliskChallenge1,
+      NotificationService.createBattleToastCallback(getBasiliskChallenge1LogPrefix())
+    );
+    basiliskChallenge1Battle.setupAllyLimit?.(
+      () => playerEnteredBasiliskChallenge1,
+      NotificationService.createBattleToastCallback(getBasiliskChallenge1LogPrefix())
+    );
+    showCustomBattleStatusToast({
+      battleName: BASILISK_BATTLE_DISPLAY_NAME || 'Basilisk Challenge 1',
+      allyLimit: battle.config?.allyLimit ?? 1,
+      battle,
+      logPrefix: getBasiliskChallenge1LogPrefix()
+    });
+    basiliskChallenge1Battle.scheduleEntryVillainSetup({
+      attemptDelays: VILLAIN_SETUP_ATTEMPT_DELAYS_MS,
+      isActiveCheck: () => playerEnteredBasiliskChallenge1,
+      onComplete: () => {
+        hideQuestOverlays();
+        hideHeroEditorButton();
+        basiliskChallenge1Battle.startPersistentVisualSync(applyBasiliskChallenge1TileMutations, {
+          isActiveCheck: () => playerEnteredBasiliskChallenge1
+        });
+      }
+    });
+    return true;
+  }
+
+  function enterBasiliskChallenge1(returnRoomId) {
+    if (playerEnteredBasiliskChallenge1) return;
+    let roomId = BASILISK_BATTLE_ROOM_ID || getRoomIdByRoomName(BASILISK_BATTLE_ROOM_NAME);
+    if (!roomId) roomId = getRoomIdByRoomName(BASILISK_BATTLE_ROOM_NAME);
+    if (!roomId) {
+      showToast({ message: TOAST_MESSAGES.roomNotFound('Basilisk Challenge 1'), variant: 'nothing', logPrefix: getBasiliskChallenge1LogPrefix() });
+      return;
+    }
+
+    playerEnteredBasiliskChallenge1 = true;
+    if (basiliskChallenge1Battle) {
+      basiliskChallenge1Battle.cleanup(restoreBoardSetupBasiliskChallenge1, showQuestOverlays);
+      basiliskChallenge1Battle = null;
+    }
+
+    globalThis.state.board.send({ type: 'selectRoomById', roomId });
+    startBasiliskChallenge1SceneSync();
+
+    const initResult = initializeBasiliskChallenge1Battle(roomId, returnRoomId);
+    if (initResult && typeof initResult.then === 'function') {
+      initResult.then((battle) => {
+        if (playerEnteredBasiliskChallenge1 && !basiliskChallenge1Battle) setupBasiliskChallenge1BattleInstance(battle);
+      }).catch((error) => console.error(`${getBasiliskChallenge1LogPrefix()} Error initializing battle:`, error));
+    } else if (initResult) {
+      setupBasiliskChallenge1BattleInstance(initResult);
+    }
+
+    updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+    showToast({ message: TOAST_MESSAGES.enteringBasiliskChallenge1, logPrefix: getBasiliskChallenge1LogPrefix() });
+  }
+
+  // ---- The Basilisk Challenges — Challenge 2 (same lever, Sewers reskin) ----------------
+  // Exact mirror of Challenge 1 above: same createTeleportBattleQuest() factory + CustomBattles
+  // shape hydrated from battles.json. Boss fight — Slug King gets an on-screen boss HP
+  // bar (slugKingBossHpBar); no soul core is granted (onVictory only records progress).
+  const basiliskChallenge2Quest = createTeleportBattleQuest({
+    id: 'basilisk-challenge-2',
+    logPrefix: '[Quests Mod][Basilisk Challenge 2]',
+    addedAttr: QUEST_BOARD_ADDED_ATTR_BASILISK2,
+    hiddenTag: QUEST_BOARD_HIDDEN_TAG_BASILISK2,
+    mutationKeyAttr: 'data-quests-basilisk-2-mutation-key',
+    floorBelowKeyAttr: 'data-quests-basilisk-2-fb-key',
+    getTileMutations: () => BASILISK2_TILE_MUTATIONS,
+    isEntered: () => playerEnteredBasiliskChallenge2,
+    getBattle: () => basiliskChallenge2Battle,
+    getSceneSub: () => basiliskChallenge2SceneSub,
+    setSceneSub: (v) => { basiliskChallenge2SceneSub = v; },
+    setHitboxesApplied: (v) => { basiliskChallenge2HitboxesApplied = v; },
+    roomName: () => BASILISK2_BATTLE_ROOM_NAME
+  });
+
+  function getBasiliskChallenge2LogPrefix() { return basiliskChallenge2Quest.getLogPrefix(); }
+  function applyBasiliskChallenge2TileMutations() { basiliskChallenge2Quest.applyTileMutations(); }
+  function restoreBasiliskChallenge2TileMutations() { basiliskChallenge2Quest.restoreTileMutations(); }
+  function stopBasiliskChallenge2SceneSync() { basiliskChallenge2Quest.stopSceneSync(); }
+  function startBasiliskChallenge2SceneSync() { basiliskChallenge2Quest.startSceneSync(); }
+  function restoreBoardSetupBasiliskChallenge2() { basiliskChallenge2Quest.restoreBoardSetup(); }
+
+  function cleanupBasiliskChallenge2Quest() {
+    try {
+      removeCustomBattleStatusToast();
+      stopBasiliskChallenge2SceneSync();
+      playerEnteredBasiliskChallenge2 = false;
+      restoreBasiliskChallenge2TileMutations();
+      if (basiliskChallenge2Battle) {
+        basiliskChallenge2Battle.cleanup(restoreBoardSetupBasiliskChallenge2, showQuestOverlays);
+        basiliskChallenge2Battle = null;
+        console.log(`${getBasiliskChallenge2LogPrefix()} Battle cleaned up`);
+      }
+      showQuestOverlays();
+      updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+    } catch (error) {
+      console.error(`${getBasiliskChallenge2LogPrefix()} Error cleaning up:`, error);
+    }
+  }
+
+  function returnFromBasiliskChallenge2(explicitRoomId, isVictory) {
+    if (isVictory) {
+      showToast({
+        message: TOAST_MESSAGES.basiliskChallenge1Cleared,
+        logPrefix: getBasiliskChallenge2LogPrefix()
+      });
+    }
+    cleanupBasiliskChallenge2Quest();
+    setTimeout(() => navigateToBasiliskReturnRoom(explicitRoomId), 100);
+  }
+
+  function createBasiliskChallenge2BattleInstance(roomId, returnRoomId) {
+    if (!window.CustomBattles) {
+      console.error(`${getBasiliskChallenge2LogPrefix()} CustomBattles still not available`);
+      return null;
+    }
+    const spawn = getHydratedQuestBattleSpawn(BASILISK2_BATTLE_ID || 'basilisk_challenge_2');
+    const tileRestrictions = {};
+    if (spawn.allowedTiles?.length) {
+      tileRestrictions.allowedTiles = spawn.allowedTiles;
+      tileRestrictions.message = spawn.allowedTilesMessage;
+    }
+    const config = {
+      name: BASILISK2_BATTLE_DISPLAY_NAME || 'Basilisk Challenge 2',
+      roomId,
+      villains: spawn.villains,
+      allyLimit: spawn.allyLimit ?? 1,
+      preventVillainMovement: spawn.preventVillainMovement !== false,
+      hideVillainSprites: spawn.hideVillainSprites !== false,
+      ...(Object.keys(tileRestrictions).length ? { tileRestrictions } : {}),
+      activationCheck: (isSandbox, inBattleArea) => isSandbox && inBattleArea && playerEnteredBasiliskChallenge2,
+      victoryDefeat: {
+        // Same reasoning as Challenge 1: no reloadRoomOnClose (onClose already navigates home).
+        // Winning does NOT itself advance basiliskChallengesCompleted[] — only reporting back to
+        // the Basilisk does (see the 'mission'/'challenge' chat handler). No item/soul core is
+        // granted for this boss.
+        onVictory: async () => {
+          try {
+            await persistMissionProgress(THE_BASILISK_CHALLENGES_MISSION, {
+              accepted: true,
+              completed: areAllBasiliskChallengesCompleted(),
+              battleCompleted: true
+            });
+          } catch (error) {
+            console.error(`${getBasiliskChallenge2LogPrefix()} Error saving battleCompleted:`, error);
+          }
+        },
+        onDefeat: () => {},
+        onClose: (isVictory) => {
+          returnFromBasiliskChallenge2(returnRoomId, isVictory);
+        },
+        victoryMessage: getMissionDialogueLine(THE_BASILISK_CHALLENGES_MISSION, 'battleVictory2', 'THE SSSALAMANDER KING LIESSS STILL? YOU ARE MORE THAN YOU LOOK, TWO-LEGGER. RETURN TO THE FARM.'),
+        defeatMessage: getMissionDialogueLine(THE_BASILISK_CHALLENGES_MISSION, 'battleDefeat2', 'THE KING’SSS FLAMESSS WERE TOO MUCH FOR YOU. GATHER YOURSSSELF AND TRY AGAIN.'),
+        showItems: false,
+        items: []
+      }
+    };
+    return window.CustomBattles.create(config);
+  }
+
+  function initializeBasiliskChallenge2Battle(roomId, returnRoomId) {
+    if (window.CustomBattles) return createBasiliskChallenge2BattleInstance(roomId, returnRoomId);
+    return waitForCustomBattles({ logPrefix: getBasiliskChallenge2LogPrefix() }).then((api) => {
+      if (!api) return null;
+      return createBasiliskChallenge2BattleInstance(roomId, returnRoomId);
+    });
+  }
+
+  function setupBasiliskChallenge2BattleInstance(battle) {
+    if (!battle) return false;
+    basiliskChallenge2Battle = battle;
+    stopBasiliskChallenge2SceneSync();
+    basiliskChallenge2Battle.setup(
+      () => playerEnteredBasiliskChallenge2,
+      NotificationService.createBattleToastCallback(getBasiliskChallenge2LogPrefix())
+    );
+    basiliskChallenge2Battle.resetSandboxBattleState();
+    basiliskChallenge2Battle.setupTileRestrictions?.(
+      () => playerEnteredBasiliskChallenge2,
+      NotificationService.createBattleToastCallback(getBasiliskChallenge2LogPrefix())
+    );
+    basiliskChallenge2Battle.setupAllyLimit?.(
+      () => playerEnteredBasiliskChallenge2,
+      NotificationService.createBattleToastCallback(getBasiliskChallenge2LogPrefix())
+    );
+    showCustomBattleStatusToast({
+      battleName: BASILISK2_BATTLE_DISPLAY_NAME || 'Basilisk Challenge 2',
+      allyLimit: battle.config?.allyLimit ?? 1,
+      battle,
+      logPrefix: getBasiliskChallenge2LogPrefix()
+    });
+    basiliskChallenge2Battle.scheduleEntryVillainSetup({
+      attemptDelays: VILLAIN_SETUP_ATTEMPT_DELAYS_MS,
+      isActiveCheck: () => playerEnteredBasiliskChallenge2,
+      onComplete: () => {
+        hideQuestOverlays();
+        hideHeroEditorButton();
+        basiliskChallenge2Battle.startPersistentVisualSync(applyBasiliskChallenge2TileMutations, {
+          isActiveCheck: () => playerEnteredBasiliskChallenge2
+        });
+      }
+    });
+    return true;
+  }
+
+  function enterBasiliskChallenge2(returnRoomId) {
+    if (playerEnteredBasiliskChallenge2) return;
+    let roomId = BASILISK2_BATTLE_ROOM_ID || getRoomIdByRoomName(BASILISK2_BATTLE_ROOM_NAME);
+    if (!roomId) roomId = getRoomIdByRoomName(BASILISK2_BATTLE_ROOM_NAME);
+    if (!roomId) {
+      showToast({ message: TOAST_MESSAGES.roomNotFound('Basilisk Challenge 2'), variant: 'nothing', logPrefix: getBasiliskChallenge2LogPrefix() });
+      return;
+    }
+
+    playerEnteredBasiliskChallenge2 = true;
+    if (basiliskChallenge2Battle) {
+      basiliskChallenge2Battle.cleanup(restoreBoardSetupBasiliskChallenge2, showQuestOverlays);
+      basiliskChallenge2Battle = null;
+    }
+
+    globalThis.state.board.send({ type: 'selectRoomById', roomId });
+    startBasiliskChallenge2SceneSync();
+
+    const initResult = initializeBasiliskChallenge2Battle(roomId, returnRoomId);
+    if (initResult && typeof initResult.then === 'function') {
+      initResult.then((battle) => {
+        if (playerEnteredBasiliskChallenge2 && !basiliskChallenge2Battle) setupBasiliskChallenge2BattleInstance(battle);
+      }).catch((error) => console.error(`${getBasiliskChallenge2LogPrefix()} Error initializing battle:`, error));
+    } else if (initResult) {
+      setupBasiliskChallenge2BattleInstance(initResult);
+    }
+
+    updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+    showToast({ message: TOAST_MESSAGES.enteringBasiliskChallenge1, logPrefix: getBasiliskChallenge2LogPrefix() });
+  }
+
+  // ---- The Basilisk Challenges — Challenge 3 (same lever, Sewers reskin) ----------------
+  // Exact mirror of Challenges 1-2. No boss — 12 Mad Technomancers, no boss HP bar, no reward.
+  const basiliskChallenge3Quest = createTeleportBattleQuest({
+    id: 'basilisk-challenge-3',
+    logPrefix: '[Quests Mod][Basilisk Challenge 3]',
+    addedAttr: QUEST_BOARD_ADDED_ATTR_BASILISK3,
+    hiddenTag: QUEST_BOARD_HIDDEN_TAG_BASILISK3,
+    mutationKeyAttr: 'data-quests-basilisk-3-mutation-key',
+    floorBelowKeyAttr: 'data-quests-basilisk-3-fb-key',
+    getTileMutations: () => BASILISK3_TILE_MUTATIONS,
+    isEntered: () => playerEnteredBasiliskChallenge3,
+    getBattle: () => basiliskChallenge3Battle,
+    getSceneSub: () => basiliskChallenge3SceneSub,
+    setSceneSub: (v) => { basiliskChallenge3SceneSub = v; },
+    setHitboxesApplied: (v) => { basiliskChallenge3HitboxesApplied = v; },
+    roomName: () => BASILISK3_BATTLE_ROOM_NAME
+  });
+
+  function getBasiliskChallenge3LogPrefix() { return basiliskChallenge3Quest.getLogPrefix(); }
+  function applyBasiliskChallenge3TileMutations() { basiliskChallenge3Quest.applyTileMutations(); }
+  function restoreBasiliskChallenge3TileMutations() { basiliskChallenge3Quest.restoreTileMutations(); }
+  function stopBasiliskChallenge3SceneSync() { basiliskChallenge3Quest.stopSceneSync(); }
+  function startBasiliskChallenge3SceneSync() { basiliskChallenge3Quest.startSceneSync(); }
+  function restoreBoardSetupBasiliskChallenge3() { basiliskChallenge3Quest.restoreBoardSetup(); }
+
+  function cleanupBasiliskChallenge3Quest() {
+    try {
+      removeCustomBattleStatusToast();
+      stopBasiliskChallenge3SceneSync();
+      playerEnteredBasiliskChallenge3 = false;
+      restoreBasiliskChallenge3TileMutations();
+      if (basiliskChallenge3Battle) {
+        basiliskChallenge3Battle.cleanup(restoreBoardSetupBasiliskChallenge3, showQuestOverlays);
+        basiliskChallenge3Battle = null;
+        console.log(`${getBasiliskChallenge3LogPrefix()} Battle cleaned up`);
+      }
+      showQuestOverlays();
+      updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+    } catch (error) {
+      console.error(`${getBasiliskChallenge3LogPrefix()} Error cleaning up:`, error);
+    }
+  }
+
+  function returnFromBasiliskChallenge3(explicitRoomId, isVictory) {
+    if (isVictory) {
+      showToast({
+        message: TOAST_MESSAGES.basiliskChallenge1Cleared,
+        logPrefix: getBasiliskChallenge3LogPrefix()
+      });
+    }
+    cleanupBasiliskChallenge3Quest();
+    setTimeout(() => navigateToBasiliskReturnRoom(explicitRoomId), 100);
+  }
+
+  function createBasiliskChallenge3BattleInstance(roomId, returnRoomId) {
+    if (!window.CustomBattles) {
+      console.error(`${getBasiliskChallenge3LogPrefix()} CustomBattles still not available`);
+      return null;
+    }
+    const spawn = getHydratedQuestBattleSpawn(BASILISK3_BATTLE_ID || 'basilisk_challenge_3');
+    const tileRestrictions = {};
+    if (spawn.allowedTiles?.length) {
+      tileRestrictions.allowedTiles = spawn.allowedTiles;
+      tileRestrictions.message = spawn.allowedTilesMessage;
+    }
+    const config = {
+      name: BASILISK3_BATTLE_DISPLAY_NAME || 'Basilisk Challenge 3',
+      roomId,
+      villains: spawn.villains,
+      allyLimit: spawn.allyLimit ?? 1,
+      preventVillainMovement: spawn.preventVillainMovement !== false,
+      hideVillainSprites: spawn.hideVillainSprites !== false,
+      ...(Object.keys(tileRestrictions).length ? { tileRestrictions } : {}),
+      activationCheck: (isSandbox, inBattleArea) => isSandbox && inBattleArea && playerEnteredBasiliskChallenge3,
+      victoryDefeat: {
+        onVictory: async () => {
+          try {
+            await persistMissionProgress(THE_BASILISK_CHALLENGES_MISSION, {
+              accepted: true,
+              completed: areAllBasiliskChallengesCompleted(),
+              battleCompleted: true
+            });
+          } catch (error) {
+            console.error(`${getBasiliskChallenge3LogPrefix()} Error saving battleCompleted:`, error);
+          }
+        },
+        onDefeat: () => {},
+        onClose: (isVictory) => {
+          returnFromBasiliskChallenge3(returnRoomId, isVictory);
+        },
+        victoryMessage: getMissionDialogueLine(THE_BASILISK_CHALLENGES_MISSION, 'battleVictory3', 'THE TECHNOMANCERSSS AND THEIR TOYSSS LIE BROKEN. WELL FOUGHT, TWO-LEGGER. RETURN TO THE FARM.'),
+        defeatMessage: getMissionDialogueLine(THE_BASILISK_CHALLENGES_MISSION, 'battleDefeat3', 'THEIR BOLTSSS TORE THROUGH YOU. GATHER YOURSSSELF AND TRY AGAIN.'),
+        showItems: false,
+        items: []
+      }
+    };
+    return window.CustomBattles.create(config);
+  }
+
+  function initializeBasiliskChallenge3Battle(roomId, returnRoomId) {
+    if (window.CustomBattles) return createBasiliskChallenge3BattleInstance(roomId, returnRoomId);
+    return waitForCustomBattles({ logPrefix: getBasiliskChallenge3LogPrefix() }).then((api) => {
+      if (!api) return null;
+      return createBasiliskChallenge3BattleInstance(roomId, returnRoomId);
+    });
+  }
+
+  function setupBasiliskChallenge3BattleInstance(battle) {
+    if (!battle) return false;
+    basiliskChallenge3Battle = battle;
+    stopBasiliskChallenge3SceneSync();
+    basiliskChallenge3Battle.setup(
+      () => playerEnteredBasiliskChallenge3,
+      NotificationService.createBattleToastCallback(getBasiliskChallenge3LogPrefix())
+    );
+    basiliskChallenge3Battle.resetSandboxBattleState();
+    basiliskChallenge3Battle.setupTileRestrictions?.(
+      () => playerEnteredBasiliskChallenge3,
+      NotificationService.createBattleToastCallback(getBasiliskChallenge3LogPrefix())
+    );
+    basiliskChallenge3Battle.setupAllyLimit?.(
+      () => playerEnteredBasiliskChallenge3,
+      NotificationService.createBattleToastCallback(getBasiliskChallenge3LogPrefix())
+    );
+    showCustomBattleStatusToast({
+      battleName: BASILISK3_BATTLE_DISPLAY_NAME || 'Basilisk Challenge 3',
+      allyLimit: battle.config?.allyLimit ?? 1,
+      battle,
+      logPrefix: getBasiliskChallenge3LogPrefix()
+    });
+    basiliskChallenge3Battle.scheduleEntryVillainSetup({
+      attemptDelays: VILLAIN_SETUP_ATTEMPT_DELAYS_MS,
+      isActiveCheck: () => playerEnteredBasiliskChallenge3,
+      onComplete: () => {
+        hideQuestOverlays();
+        hideHeroEditorButton();
+        basiliskChallenge3Battle.startPersistentVisualSync(applyBasiliskChallenge3TileMutations, {
+          isActiveCheck: () => playerEnteredBasiliskChallenge3
+        });
+      }
+    });
+    return true;
+  }
+
+  function enterBasiliskChallenge3(returnRoomId) {
+    if (playerEnteredBasiliskChallenge3) return;
+    let roomId = BASILISK3_BATTLE_ROOM_ID || getRoomIdByRoomName(BASILISK3_BATTLE_ROOM_NAME);
+    if (!roomId) roomId = getRoomIdByRoomName(BASILISK3_BATTLE_ROOM_NAME);
+    if (!roomId) {
+      showToast({ message: TOAST_MESSAGES.roomNotFound('Basilisk Challenge 3'), variant: 'nothing', logPrefix: getBasiliskChallenge3LogPrefix() });
+      return;
+    }
+
+    playerEnteredBasiliskChallenge3 = true;
+    if (basiliskChallenge3Battle) {
+      basiliskChallenge3Battle.cleanup(restoreBoardSetupBasiliskChallenge3, showQuestOverlays);
+      basiliskChallenge3Battle = null;
+    }
+
+    globalThis.state.board.send({ type: 'selectRoomById', roomId });
+    startBasiliskChallenge3SceneSync();
+
+    const initResult = initializeBasiliskChallenge3Battle(roomId, returnRoomId);
+    if (initResult && typeof initResult.then === 'function') {
+      initResult.then((battle) => {
+        if (playerEnteredBasiliskChallenge3 && !basiliskChallenge3Battle) setupBasiliskChallenge3BattleInstance(battle);
+      }).catch((error) => console.error(`${getBasiliskChallenge3LogPrefix()} Error initializing battle:`, error));
+    } else if (initResult) {
+      setupBasiliskChallenge3BattleInstance(initResult);
+    }
+
+    updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+    showToast({ message: TOAST_MESSAGES.enteringBasiliskChallenge1, logPrefix: getBasiliskChallenge3LogPrefix() });
+  }
+
+  // ---- The Basilisk Challenges — Challenge 4 (same lever, Sewers reskin) ----------------
+  // Mirror of Challenges 1-3. Also passes a native sceneSpriteReplacements swap when
+  // rooms.json defines one (currently none). 9 villains (Rats/Ghouls); no boss, no reward.
+  const basiliskChallenge4Quest = createTeleportBattleQuest({
+    id: 'basilisk-challenge-4',
+    logPrefix: '[Quests Mod][Basilisk Challenge 4]',
+    addedAttr: QUEST_BOARD_ADDED_ATTR_BASILISK4,
+    hiddenTag: QUEST_BOARD_HIDDEN_TAG_BASILISK4,
+    mutationKeyAttr: 'data-quests-basilisk-4-mutation-key',
+    floorBelowKeyAttr: 'data-quests-basilisk-4-fb-key',
+    getTileMutations: () => BASILISK4_TILE_MUTATIONS,
+    isEntered: () => playerEnteredBasiliskChallenge4,
+    getBattle: () => basiliskChallenge4Battle,
+    getSceneSub: () => basiliskChallenge4SceneSub,
+    setSceneSub: (v) => { basiliskChallenge4SceneSub = v; },
+    setHitboxesApplied: (v) => { basiliskChallenge4HitboxesApplied = v; },
+    roomName: () => BASILISK4_BATTLE_ROOM_NAME
+  });
+
+  function getBasiliskChallenge4LogPrefix() { return basiliskChallenge4Quest.getLogPrefix(); }
+  function applyBasiliskChallenge4TileMutations() { basiliskChallenge4Quest.applyTileMutations(); }
+  function restoreBasiliskChallenge4TileMutations() { basiliskChallenge4Quest.restoreTileMutations(); }
+  function stopBasiliskChallenge4SceneSync() { basiliskChallenge4Quest.stopSceneSync(); }
+  function startBasiliskChallenge4SceneSync() { basiliskChallenge4Quest.startSceneSync(); }
+  function restoreBoardSetupBasiliskChallenge4() { basiliskChallenge4Quest.restoreBoardSetup(); }
+
+  function cleanupBasiliskChallenge4Quest() {
+    try {
+      removeCustomBattleStatusToast();
+      stopBasiliskChallenge4SceneSync();
+      playerEnteredBasiliskChallenge4 = false;
+      restoreBasiliskChallenge4TileMutations();
+      if (basiliskChallenge4Battle) {
+        basiliskChallenge4Battle.cleanup(restoreBoardSetupBasiliskChallenge4, showQuestOverlays);
+        basiliskChallenge4Battle = null;
+        console.log(`${getBasiliskChallenge4LogPrefix()} Battle cleaned up`);
+      }
+      showQuestOverlays();
+      updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+    } catch (error) {
+      console.error(`${getBasiliskChallenge4LogPrefix()} Error cleaning up:`, error);
+    }
+  }
+
+  function returnFromBasiliskChallenge4(explicitRoomId, isVictory) {
+    if (isVictory) {
+      showToast({
+        message: TOAST_MESSAGES.basiliskChallenge1Cleared,
+        logPrefix: getBasiliskChallenge4LogPrefix()
+      });
+    }
+    cleanupBasiliskChallenge4Quest();
+    setTimeout(() => navigateToBasiliskReturnRoom(explicitRoomId), 100);
+  }
+
+  function createBasiliskChallenge4BattleInstance(roomId, returnRoomId) {
+    if (!window.CustomBattles) {
+      console.error(`${getBasiliskChallenge4LogPrefix()} CustomBattles still not available`);
+      return null;
+    }
+    const spawn = getHydratedQuestBattleSpawn(BASILISK4_BATTLE_ID || 'basilisk_challenge_4');
+    const tileRestrictions = {};
+    if (spawn.allowedTiles?.length) {
+      tileRestrictions.allowedTiles = spawn.allowedTiles;
+      tileRestrictions.message = spawn.allowedTilesMessage;
+    }
+    const config = {
+      name: BASILISK4_BATTLE_DISPLAY_NAME || 'Basilisk Challenge 4',
+      roomId,
+      villains: spawn.villains,
+      allyLimit: spawn.allyLimit ?? 1,
+      preventVillainMovement: spawn.preventVillainMovement !== false,
+      hideVillainSprites: spawn.hideVillainSprites !== false,
+      ...(Object.keys(tileRestrictions).length ? { tileRestrictions } : {}),
+      ...(BASILISK4_SCENE_SPRITE_REPLACEMENTS.rules.length
+        ? { sceneSpriteReplacements: BASILISK4_SCENE_SPRITE_REPLACEMENTS }
+        : {}),
+      activationCheck: (isSandbox, inBattleArea) => isSandbox && inBattleArea && playerEnteredBasiliskChallenge4,
+      victoryDefeat: {
+        onVictory: async () => {
+          try {
+            await persistMissionProgress(THE_BASILISK_CHALLENGES_MISSION, {
+              accepted: true,
+              completed: areAllBasiliskChallengesCompleted(),
+              battleCompleted: true
+            });
+          } catch (error) {
+            console.error(`${getBasiliskChallenge4LogPrefix()} Error saving battleCompleted:`, error);
+          }
+        },
+        onDefeat: () => {},
+        onClose: (isVictory) => {
+          returnFromBasiliskChallenge4(returnRoomId, isVictory);
+        },
+        victoryMessage: getMissionDialogueLine(THE_BASILISK_CHALLENGES_MISSION, 'battleVictory4', 'THE VERMIN OF THE SSSEWERSSS ARE SSSTILLED. NOT PRETTY WORK, BUT WORK WELL DONE. RETURN TO THE FARM.'),
+        defeatMessage: getMissionDialogueLine(THE_BASILISK_CHALLENGES_MISSION, 'battleDefeat4', 'PULLED UNDER BY RATSSS AND GHOULSSS? GATHER YOURSSSELF AND TRY AGAIN.'),
+        showItems: false,
+        items: []
+      }
+    };
+    return window.CustomBattles.create(config);
+  }
+
+  function initializeBasiliskChallenge4Battle(roomId, returnRoomId) {
+    if (window.CustomBattles) return createBasiliskChallenge4BattleInstance(roomId, returnRoomId);
+    return waitForCustomBattles({ logPrefix: getBasiliskChallenge4LogPrefix() }).then((api) => {
+      if (!api) return null;
+      return createBasiliskChallenge4BattleInstance(roomId, returnRoomId);
+    });
+  }
+
+  function setupBasiliskChallenge4BattleInstance(battle) {
+    if (!battle) return false;
+    basiliskChallenge4Battle = battle;
+    stopBasiliskChallenge4SceneSync();
+    basiliskChallenge4Battle.setup(
+      () => playerEnteredBasiliskChallenge4,
+      NotificationService.createBattleToastCallback(getBasiliskChallenge4LogPrefix())
+    );
+    basiliskChallenge4Battle.resetSandboxBattleState();
+    basiliskChallenge4Battle.setupTileRestrictions?.(
+      () => playerEnteredBasiliskChallenge4,
+      NotificationService.createBattleToastCallback(getBasiliskChallenge4LogPrefix())
+    );
+    basiliskChallenge4Battle.setupAllyLimit?.(
+      () => playerEnteredBasiliskChallenge4,
+      NotificationService.createBattleToastCallback(getBasiliskChallenge4LogPrefix())
+    );
+    showCustomBattleStatusToast({
+      battleName: BASILISK4_BATTLE_DISPLAY_NAME || 'Basilisk Challenge 4',
+      allyLimit: battle.config?.allyLimit ?? 1,
+      battle,
+      logPrefix: getBasiliskChallenge4LogPrefix()
+    });
+    basiliskChallenge4Battle.scheduleEntryVillainSetup({
+      attemptDelays: VILLAIN_SETUP_ATTEMPT_DELAYS_MS,
+      isActiveCheck: () => playerEnteredBasiliskChallenge4,
+      onComplete: () => {
+        hideQuestOverlays();
+        hideHeroEditorButton();
+        basiliskChallenge4Battle.startPersistentVisualSync(applyBasiliskChallenge4TileMutations, {
+          isActiveCheck: () => playerEnteredBasiliskChallenge4
+        });
+      }
+    });
+    return true;
+  }
+
+  function enterBasiliskChallenge4(returnRoomId) {
+    if (playerEnteredBasiliskChallenge4) return;
+    let roomId = BASILISK4_BATTLE_ROOM_ID || getRoomIdByRoomName(BASILISK4_BATTLE_ROOM_NAME);
+    if (!roomId) roomId = getRoomIdByRoomName(BASILISK4_BATTLE_ROOM_NAME);
+    if (!roomId) {
+      showToast({ message: TOAST_MESSAGES.roomNotFound('Basilisk Challenge 4'), variant: 'nothing', logPrefix: getBasiliskChallenge4LogPrefix() });
+      return;
+    }
+
+    playerEnteredBasiliskChallenge4 = true;
+    if (basiliskChallenge4Battle) {
+      basiliskChallenge4Battle.cleanup(restoreBoardSetupBasiliskChallenge4, showQuestOverlays);
+      basiliskChallenge4Battle = null;
+    }
+
+    globalThis.state.board.send({ type: 'selectRoomById', roomId });
+    startBasiliskChallenge4SceneSync();
+
+    const initResult = initializeBasiliskChallenge4Battle(roomId, returnRoomId);
+    if (initResult && typeof initResult.then === 'function') {
+      initResult.then((battle) => {
+        if (playerEnteredBasiliskChallenge4 && !basiliskChallenge4Battle) setupBasiliskChallenge4BattleInstance(battle);
+      }).catch((error) => console.error(`${getBasiliskChallenge4LogPrefix()} Error initializing battle:`, error));
+    } else if (initResult) {
+      setupBasiliskChallenge4BattleInstance(initResult);
+    }
+
+    updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+    showToast({ message: TOAST_MESSAGES.enteringBasiliskChallenge1, logPrefix: getBasiliskChallenge4LogPrefix() });
+  }
+
+  // ---- The Basilisk Challenges — Challenge 5 (same lever, Sewers reskin) ----------------
+  // Mirror of Challenges 1-4. 10 villains (Fire Elementals/Ghosts); no boss, no reward.
+  const basiliskChallenge5Quest = createTeleportBattleQuest({
+    id: 'basilisk-challenge-5',
+    logPrefix: '[Quests Mod][Basilisk Challenge 5]',
+    addedAttr: QUEST_BOARD_ADDED_ATTR_BASILISK5,
+    hiddenTag: QUEST_BOARD_HIDDEN_TAG_BASILISK5,
+    mutationKeyAttr: 'data-quests-basilisk-5-mutation-key',
+    floorBelowKeyAttr: 'data-quests-basilisk-5-fb-key',
+    getTileMutations: () => BASILISK5_TILE_MUTATIONS,
+    isEntered: () => playerEnteredBasiliskChallenge5,
+    getBattle: () => basiliskChallenge5Battle,
+    getSceneSub: () => basiliskChallenge5SceneSub,
+    setSceneSub: (v) => { basiliskChallenge5SceneSub = v; },
+    setHitboxesApplied: (v) => { basiliskChallenge5HitboxesApplied = v; },
+    roomName: () => BASILISK5_BATTLE_ROOM_NAME
+  });
+
+  function getBasiliskChallenge5LogPrefix() { return basiliskChallenge5Quest.getLogPrefix(); }
+  function applyBasiliskChallenge5TileMutations() { basiliskChallenge5Quest.applyTileMutations(); }
+  function restoreBasiliskChallenge5TileMutations() { basiliskChallenge5Quest.restoreTileMutations(); }
+  function stopBasiliskChallenge5SceneSync() { basiliskChallenge5Quest.stopSceneSync(); }
+  function startBasiliskChallenge5SceneSync() { basiliskChallenge5Quest.startSceneSync(); }
+  function restoreBoardSetupBasiliskChallenge5() { basiliskChallenge5Quest.restoreBoardSetup(); }
+
+  function cleanupBasiliskChallenge5Quest() {
+    try {
+      removeCustomBattleStatusToast();
+      stopBasiliskChallenge5SceneSync();
+      playerEnteredBasiliskChallenge5 = false;
+      restoreBasiliskChallenge5TileMutations();
+      if (basiliskChallenge5Battle) {
+        basiliskChallenge5Battle.cleanup(restoreBoardSetupBasiliskChallenge5, showQuestOverlays);
+        basiliskChallenge5Battle = null;
+        console.log(`${getBasiliskChallenge5LogPrefix()} Battle cleaned up`);
+      }
+      showQuestOverlays();
+      updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+    } catch (error) {
+      console.error(`${getBasiliskChallenge5LogPrefix()} Error cleaning up:`, error);
+    }
+  }
+
+  function returnFromBasiliskChallenge5(explicitRoomId, isVictory) {
+    if (isVictory) {
+      showToast({
+        message: TOAST_MESSAGES.basiliskChallenge1Cleared,
+        logPrefix: getBasiliskChallenge5LogPrefix()
+      });
+    }
+    cleanupBasiliskChallenge5Quest();
+    setTimeout(() => navigateToBasiliskReturnRoom(explicitRoomId), 100);
+  }
+
+  function createBasiliskChallenge5BattleInstance(roomId, returnRoomId) {
+    if (!window.CustomBattles) {
+      console.error(`${getBasiliskChallenge5LogPrefix()} CustomBattles still not available`);
+      return null;
+    }
+    const spawn = getHydratedQuestBattleSpawn(BASILISK5_BATTLE_ID || 'basilisk_challenge_5');
+    const tileRestrictions = {};
+    if (spawn.allowedTiles?.length) {
+      tileRestrictions.allowedTiles = spawn.allowedTiles;
+      tileRestrictions.message = spawn.allowedTilesMessage;
+    }
+    const config = {
+      name: BASILISK5_BATTLE_DISPLAY_NAME || 'Basilisk Challenge 5',
+      roomId,
+      villains: spawn.villains,
+      allyLimit: spawn.allyLimit ?? 1,
+      preventVillainMovement: spawn.preventVillainMovement !== false,
+      hideVillainSprites: spawn.hideVillainSprites !== false,
+      ...(Object.keys(tileRestrictions).length ? { tileRestrictions } : {}),
+      activationCheck: (isSandbox, inBattleArea) => isSandbox && inBattleArea && playerEnteredBasiliskChallenge5,
+      victoryDefeat: {
+        onVictory: async () => {
+          try {
+            await persistMissionProgress(THE_BASILISK_CHALLENGES_MISSION, {
+              accepted: true,
+              completed: areAllBasiliskChallengesCompleted(),
+              battleCompleted: true
+            });
+          } catch (error) {
+            console.error(`${getBasiliskChallenge5LogPrefix()} Error saving battleCompleted:`, error);
+          }
+        },
+        onDefeat: () => {},
+        onClose: (isVictory) => {
+          returnFromBasiliskChallenge5(returnRoomId, isVictory);
+        },
+        victoryMessage: getMissionDialogueLine(THE_BASILISK_CHALLENGES_MISSION, 'battleVictory5', 'FIRE AND SSSHADESSS BOTH LAID LOW. YOU BURN BRIGHT, TWO-LEGGER. RETURN TO THE FARM.'),
+        defeatMessage: getMissionDialogueLine(THE_BASILISK_CHALLENGES_MISSION, 'battleDefeat5', 'BURNED AND HAUNTED IN ONE BREATH? GATHER YOURSSSELF AND TRY AGAIN.'),
+        showItems: false,
+        items: []
+      }
+    };
+    return window.CustomBattles.create(config);
+  }
+
+  function initializeBasiliskChallenge5Battle(roomId, returnRoomId) {
+    if (window.CustomBattles) return createBasiliskChallenge5BattleInstance(roomId, returnRoomId);
+    return waitForCustomBattles({ logPrefix: getBasiliskChallenge5LogPrefix() }).then((api) => {
+      if (!api) return null;
+      return createBasiliskChallenge5BattleInstance(roomId, returnRoomId);
+    });
+  }
+
+  function setupBasiliskChallenge5BattleInstance(battle) {
+    if (!battle) return false;
+    basiliskChallenge5Battle = battle;
+    stopBasiliskChallenge5SceneSync();
+    basiliskChallenge5Battle.setup(
+      () => playerEnteredBasiliskChallenge5,
+      NotificationService.createBattleToastCallback(getBasiliskChallenge5LogPrefix())
+    );
+    basiliskChallenge5Battle.resetSandboxBattleState();
+    basiliskChallenge5Battle.setupTileRestrictions?.(
+      () => playerEnteredBasiliskChallenge5,
+      NotificationService.createBattleToastCallback(getBasiliskChallenge5LogPrefix())
+    );
+    basiliskChallenge5Battle.setupAllyLimit?.(
+      () => playerEnteredBasiliskChallenge5,
+      NotificationService.createBattleToastCallback(getBasiliskChallenge5LogPrefix())
+    );
+    showCustomBattleStatusToast({
+      battleName: BASILISK5_BATTLE_DISPLAY_NAME || 'Basilisk Challenge 5',
+      allyLimit: battle.config?.allyLimit ?? 1,
+      battle,
+      logPrefix: getBasiliskChallenge5LogPrefix()
+    });
+    basiliskChallenge5Battle.scheduleEntryVillainSetup({
+      attemptDelays: VILLAIN_SETUP_ATTEMPT_DELAYS_MS,
+      isActiveCheck: () => playerEnteredBasiliskChallenge5,
+      onComplete: () => {
+        hideQuestOverlays();
+        hideHeroEditorButton();
+        basiliskChallenge5Battle.startPersistentVisualSync(applyBasiliskChallenge5TileMutations, {
+          isActiveCheck: () => playerEnteredBasiliskChallenge5
+        });
+      }
+    });
+    return true;
+  }
+
+  function enterBasiliskChallenge5(returnRoomId) {
+    if (playerEnteredBasiliskChallenge5) return;
+    let roomId = BASILISK5_BATTLE_ROOM_ID || getRoomIdByRoomName(BASILISK5_BATTLE_ROOM_NAME);
+    if (!roomId) roomId = getRoomIdByRoomName(BASILISK5_BATTLE_ROOM_NAME);
+    if (!roomId) {
+      showToast({ message: TOAST_MESSAGES.roomNotFound('Basilisk Challenge 5'), variant: 'nothing', logPrefix: getBasiliskChallenge5LogPrefix() });
+      return;
+    }
+
+    playerEnteredBasiliskChallenge5 = true;
+    if (basiliskChallenge5Battle) {
+      basiliskChallenge5Battle.cleanup(restoreBoardSetupBasiliskChallenge5, showQuestOverlays);
+      basiliskChallenge5Battle = null;
+    }
+
+    globalThis.state.board.send({ type: 'selectRoomById', roomId });
+    startBasiliskChallenge5SceneSync();
+
+    const initResult = initializeBasiliskChallenge5Battle(roomId, returnRoomId);
+    if (initResult && typeof initResult.then === 'function') {
+      initResult.then((battle) => {
+        if (playerEnteredBasiliskChallenge5 && !basiliskChallenge5Battle) setupBasiliskChallenge5BattleInstance(battle);
+      }).catch((error) => console.error(`${getBasiliskChallenge5LogPrefix()} Error initializing battle:`, error));
+    } else if (initResult) {
+      setupBasiliskChallenge5BattleInstance(initResult);
+    }
+
+    updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+    showToast({ message: TOAST_MESSAGES.enteringBasiliskChallenge1, logPrefix: getBasiliskChallenge5LogPrefix() });
+  }
+
+  // ---- The Basilisk Challenges — Challenge 6 (final; same lever, Sewers reskin) ----------
+  // Mirror of Challenges 1-5. Minotaur-cult mob + boss "The Horned Fox" (hornedFoxBossHpBar).
+  // Completing this one flips areAllBasiliskChallengesCompleted() true, finishes the mission,
+  // and the Basilisk report hands over "The Horned Fox Soul Core".
+  const basiliskChallenge6Quest = createTeleportBattleQuest({
+    id: 'basilisk-challenge-6',
+    logPrefix: '[Quests Mod][Basilisk Challenge 6]',
+    addedAttr: QUEST_BOARD_ADDED_ATTR_BASILISK6,
+    hiddenTag: QUEST_BOARD_HIDDEN_TAG_BASILISK6,
+    mutationKeyAttr: 'data-quests-basilisk-6-mutation-key',
+    floorBelowKeyAttr: 'data-quests-basilisk-6-fb-key',
+    getTileMutations: () => BASILISK6_TILE_MUTATIONS,
+    isEntered: () => playerEnteredBasiliskChallenge6,
+    getBattle: () => basiliskChallenge6Battle,
+    getSceneSub: () => basiliskChallenge6SceneSub,
+    setSceneSub: (v) => { basiliskChallenge6SceneSub = v; },
+    setHitboxesApplied: (v) => { basiliskChallenge6HitboxesApplied = v; },
+    roomName: () => BASILISK6_BATTLE_ROOM_NAME
+  });
+
+  function getBasiliskChallenge6LogPrefix() { return basiliskChallenge6Quest.getLogPrefix(); }
+  function applyBasiliskChallenge6TileMutations() { basiliskChallenge6Quest.applyTileMutations(); }
+  function restoreBasiliskChallenge6TileMutations() { basiliskChallenge6Quest.restoreTileMutations(); }
+  function stopBasiliskChallenge6SceneSync() { basiliskChallenge6Quest.stopSceneSync(); }
+  function startBasiliskChallenge6SceneSync() { basiliskChallenge6Quest.startSceneSync(); }
+  function restoreBoardSetupBasiliskChallenge6() { basiliskChallenge6Quest.restoreBoardSetup(); }
+
+  function cleanupBasiliskChallenge6Quest() {
+    try {
+      removeCustomBattleStatusToast();
+      stopBasiliskChallenge6SceneSync();
+      playerEnteredBasiliskChallenge6 = false;
+      restoreBasiliskChallenge6TileMutations();
+      if (basiliskChallenge6Battle) {
+        basiliskChallenge6Battle.cleanup(restoreBoardSetupBasiliskChallenge6, showQuestOverlays);
+        basiliskChallenge6Battle = null;
+        console.log(`${getBasiliskChallenge6LogPrefix()} Battle cleaned up`);
+      }
+      showQuestOverlays();
+      updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+    } catch (error) {
+      console.error(`${getBasiliskChallenge6LogPrefix()} Error cleaning up:`, error);
+    }
+  }
+
+  function returnFromBasiliskChallenge6(explicitRoomId, isVictory) {
+    if (isVictory) {
+      showToast({
+        message: TOAST_MESSAGES.basiliskChallenge1Cleared,
+        logPrefix: getBasiliskChallenge6LogPrefix()
+      });
+    }
+    cleanupBasiliskChallenge6Quest();
+    setTimeout(() => navigateToBasiliskReturnRoom(explicitRoomId), 100);
+  }
+
+  function createBasiliskChallenge6BattleInstance(roomId, returnRoomId) {
+    if (!window.CustomBattles) {
+      console.error(`${getBasiliskChallenge6LogPrefix()} CustomBattles still not available`);
+      return null;
+    }
+    const spawn = getHydratedQuestBattleSpawn(BASILISK6_BATTLE_ID || 'basilisk_challenge_6');
+    const tileRestrictions = {};
+    if (spawn.allowedTiles?.length) {
+      tileRestrictions.allowedTiles = spawn.allowedTiles;
+      tileRestrictions.message = spawn.allowedTilesMessage;
+    }
+    const config = {
+      name: BASILISK6_BATTLE_DISPLAY_NAME || 'Basilisk Challenge 6',
+      roomId,
+      villains: spawn.villains,
+      allyLimit: spawn.allyLimit ?? 1,
+      preventVillainMovement: spawn.preventVillainMovement !== false,
+      hideVillainSprites: spawn.hideVillainSprites !== false,
+      ...(Object.keys(tileRestrictions).length ? { tileRestrictions } : {}),
+      activationCheck: (isSandbox, inBattleArea) => isSandbox && inBattleArea && playerEnteredBasiliskChallenge6,
+      victoryDefeat: {
+        onVictory: async () => {
+          try {
+            await persistMissionProgress(THE_BASILISK_CHALLENGES_MISSION, {
+              accepted: true,
+              completed: areAllBasiliskChallengesCompleted(),
+              battleCompleted: true
+            });
+          } catch (error) {
+            console.error(`${getBasiliskChallenge6LogPrefix()} Error saving battleCompleted:`, error);
+          }
+        },
+        onDefeat: () => {},
+        onClose: (isVictory) => {
+          returnFromBasiliskChallenge6(returnRoomId, isVictory);
+        },
+        victoryMessage: getMissionDialogueLine(THE_BASILISK_CHALLENGES_MISSION, 'battleVictory6', 'THE LAST OF MY CHALLSSSENGERSSS HAS FALLEN. ALL SSSIX BROKEN BY YOUR HAND. RETURN TO THE FARM, TWO-LEGGER — WE HAVE MUCH TO SSSPEAK OF.'),
+        defeatMessage: getMissionDialogueLine(THE_BASILISK_CHALLENGES_MISSION, 'battleDefeat6', 'THE FINAL TRIAL, AND SSSTILL YOU FALL? GATHER YOURSSSELF AND TRY AGAIN.'),
+        showItems: false,
+        items: []
+      }
+    };
+    return window.CustomBattles.create(config);
+  }
+
+  function initializeBasiliskChallenge6Battle(roomId, returnRoomId) {
+    if (window.CustomBattles) return createBasiliskChallenge6BattleInstance(roomId, returnRoomId);
+    return waitForCustomBattles({ logPrefix: getBasiliskChallenge6LogPrefix() }).then((api) => {
+      if (!api) return null;
+      return createBasiliskChallenge6BattleInstance(roomId, returnRoomId);
+    });
+  }
+
+  function setupBasiliskChallenge6BattleInstance(battle) {
+    if (!battle) return false;
+    basiliskChallenge6Battle = battle;
+    stopBasiliskChallenge6SceneSync();
+    basiliskChallenge6Battle.setup(
+      () => playerEnteredBasiliskChallenge6,
+      NotificationService.createBattleToastCallback(getBasiliskChallenge6LogPrefix())
+    );
+    basiliskChallenge6Battle.resetSandboxBattleState();
+    basiliskChallenge6Battle.setupTileRestrictions?.(
+      () => playerEnteredBasiliskChallenge6,
+      NotificationService.createBattleToastCallback(getBasiliskChallenge6LogPrefix())
+    );
+    basiliskChallenge6Battle.setupAllyLimit?.(
+      () => playerEnteredBasiliskChallenge6,
+      NotificationService.createBattleToastCallback(getBasiliskChallenge6LogPrefix())
+    );
+    showCustomBattleStatusToast({
+      battleName: BASILISK6_BATTLE_DISPLAY_NAME || 'Basilisk Challenge 6',
+      allyLimit: battle.config?.allyLimit ?? 1,
+      battle,
+      logPrefix: getBasiliskChallenge6LogPrefix()
+    });
+    basiliskChallenge6Battle.scheduleEntryVillainSetup({
+      attemptDelays: VILLAIN_SETUP_ATTEMPT_DELAYS_MS,
+      isActiveCheck: () => playerEnteredBasiliskChallenge6,
+      onComplete: () => {
+        hideQuestOverlays();
+        hideHeroEditorButton();
+        basiliskChallenge6Battle.startPersistentVisualSync(applyBasiliskChallenge6TileMutations, {
+          isActiveCheck: () => playerEnteredBasiliskChallenge6
+        });
+      }
+    });
+    return true;
+  }
+
+  function enterBasiliskChallenge6(returnRoomId) {
+    if (playerEnteredBasiliskChallenge6) return;
+    let roomId = BASILISK6_BATTLE_ROOM_ID || getRoomIdByRoomName(BASILISK6_BATTLE_ROOM_NAME);
+    if (!roomId) roomId = getRoomIdByRoomName(BASILISK6_BATTLE_ROOM_NAME);
+    if (!roomId) {
+      showToast({ message: TOAST_MESSAGES.roomNotFound('Basilisk Challenge 6'), variant: 'nothing', logPrefix: getBasiliskChallenge6LogPrefix() });
+      return;
+    }
+
+    playerEnteredBasiliskChallenge6 = true;
+    if (basiliskChallenge6Battle) {
+      basiliskChallenge6Battle.cleanup(restoreBoardSetupBasiliskChallenge6, showQuestOverlays);
+      basiliskChallenge6Battle = null;
+    }
+
+    globalThis.state.board.send({ type: 'selectRoomById', roomId });
+    startBasiliskChallenge6SceneSync();
+
+    const initResult = initializeBasiliskChallenge6Battle(roomId, returnRoomId);
+    if (initResult && typeof initResult.then === 'function') {
+      initResult.then((battle) => {
+        if (playerEnteredBasiliskChallenge6 && !basiliskChallenge6Battle) setupBasiliskChallenge6BattleInstance(battle);
+      }).catch((error) => console.error(`${getBasiliskChallenge6LogPrefix()} Error initializing battle:`, error));
+    } else if (initResult) {
+      setupBasiliskChallenge6BattleInstance(initResult);
+    }
+
+    updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+    showToast({ message: TOAST_MESSAGES.enteringBasiliskChallenge1, logPrefix: getBasiliskChallenge6LogPrefix() });
+  }
+
+  // Pulling the lever always enters the next incomplete challenge. All six challenges are
+  // wired (BASILISK_CHALLENGES_IMPLEMENTED_COUNT === BASILISK_CHALLENGES_COUNT); it routes
+  // to enterBasiliskChallenge{1..6}() and the lever falls dead once all six are reported.
+  function enterNextBasiliskChallenge(returnRoomId) {
+    if (isBasiliskChallengeReportPending()) {
+      // Same defensive no-op reasoning as the implemented-count check below — the lever
+      // should already be disabled while a completed challenge is awaiting report.
+      console.warn(`${getBasiliskChallenge1LogPrefix()} enterNextBasiliskChallenge called while a challenge report is pending — ignoring.`);
+      return;
+    }
+    const index = getNextIncompleteBasiliskChallengeIndex();
+    if (index >= BASILISK_CHALLENGES_IMPLEMENTED_COUNT) {
+      // The lever should already be disabled before this is ever reachable (see
+      // shouldEnableBasiliskLeverRightClick) — this is just a defensive no-op so a stray
+      // call never warps into a challenge that doesn't exist yet.
+      console.warn(`[Quests Mod][Basilisk Lever] enterNextBasiliskChallenge called with index ${index}, but only ${BASILISK_CHALLENGES_IMPLEMENTED_COUNT} challenge(s) are implemented — ignoring.`);
+      return;
+    }
+    if (index === 0) {
+      enterBasiliskChallenge1(returnRoomId);
+      return;
+    }
+    if (index === 1) {
+      enterBasiliskChallenge2(returnRoomId);
+      return;
+    }
+    if (index === 2) {
+      enterBasiliskChallenge3(returnRoomId);
+      return;
+    }
+    if (index === 3) {
+      enterBasiliskChallenge4(returnRoomId);
+      return;
+    }
+    if (index === 4) {
+      enterBasiliskChallenge5(returnRoomId);
+      return;
+    }
+    if (index === 5) {
+      enterBasiliskChallenge6(returnRoomId);
+      return;
+    }
+    enterBasiliskChallenge1(returnRoomId);
+  }
+
+  // ---- Basilisk lever (tile 22, The Farms) — own tile/room, independent of the Serpentine
+  // Tower Basement lever (tile 64). Same lever-sprite-swap mechanism (2772 -> 2773), gated on
+  // the mission having been accepted instead of isSerpentineTowerBasementGameplayActive().
+  function isBasiliskChallengesAccepted() {
+    return !!getMissionProgress(THE_BASILISK_CHALLENGES_MISSION).accepted;
+  }
+
+  // True from the moment a challenge is won until the player reports back to the Basilisk in
+  // person (the 'mission'/'challenge' chat handler is what actually advances
+  // basiliskChallengesCompleted[] and clears this). The lever stays disabled the whole time —
+  // winning a challenge should never itself unlock the next one; talking to the Basilisk does.
+  function isBasiliskChallengeReportPending() {
+    return !!getMissionProgress(THE_BASILISK_CHALLENGES_MISSION).battleCompleted;
+  }
+
+  function getBasiliskLeverTileElement() {
+    if (!isOnRoomByName(BASILISK_LEVER_ROOM_NAME)) return null;
+    const tileEl = document.getElementById('tile-index-' + BASILISK_LEVER_TILE);
+    if (!tileEl) return null;
+    const hasLever = tileEl.querySelector(
+      `.sprite.item.relative.id-${BASILISK_LEVER_SPRITE.from}, .sprite.item.relative.id-${BASILISK_LEVER_SPRITE.to}`
+    );
+    return hasLever ? tileEl : null;
+  }
+
+  function shouldEnableBasiliskLeverRightClick() {
+    if (!isBasiliskChallengesAccepted()) return false;
+    // Won the last challenge but hasn't reported back to the Basilisk yet — the lever stays
+    // dead until that conversation happens (see isBasiliskChallengeReportPending's doc comment).
+    if (isBasiliskChallengeReportPending()) return false;
+    // Nothing left to send the player into once they've cleared every challenge that's
+    // actually built — leave the lever inert rather than let them pull it into a
+    // still-unimplemented challenge (see BASILISK_CHALLENGES_IMPLEMENTED_COUNT).
+    if (!hasMoreBasiliskChallengesAvailable()) return false;
+    return !!getBasiliskLeverTileElement();
+  }
+
+  // Actually pulls the lever (sprite swap on first pull) and, after the poof/warp delay,
+  // enters the challenge. Guarded by basiliskLeverWarpPending so mashing the lever/menu
+  // button can't stack multiple poof animations or queue multiple pending entries.
+  function pullBasiliskLever(tileEl, leverSprite, alreadyPulled) {
+    if (basiliskLeverWarpPending) return;
+    basiliskLeverWarpPending = true;
+
+    if (!alreadyPulled && leverSprite) {
+      leverSprite.classList.remove(`id-${BASILISK_LEVER_SPRITE.from}`);
+      leverSprite.classList.add(`id-${BASILISK_LEVER_SPRITE.to}`);
+      const img = leverSprite.querySelector('img');
+      if (img) {
+        img.alt = BASILISK_LEVER_SPRITE.to;
+        img.setAttribute('data-cropped', 'false');
+        img.style.setProperty('--cropX', '0');
+        img.style.setProperty('--cropY', '0');
+      }
+      console.log('[Quests Mod][Basilisk Lever] Lever on tile 22 pulled on The Farms');
+    } else {
+      console.log('[Quests Mod][Basilisk Lever] Pulled lever clicked again — re-entering the Basilisk challenge');
+    }
+
+    createPoofAnimation(tileEl);
+    setTimeout(() => {
+      basiliskLeverWarpPending = false;
+      enterNextBasiliskChallenge(getCurrentRoomId());
+    }, BASILISK_LEVER_WARP_NAV_DELAY_MS);
+  }
+
+  function closeBasiliskLeverContextMenu() {
+    if (basiliskLeverContextMenu?.closeMenu) basiliskLeverContextMenu.closeMenu();
+    basiliskLeverContextMenu = null;
+  }
+
+  function handleBasiliskLeverTile22RightClickDocument(event) {
+    if (!isBasiliskChallengesAccepted()) return;
+    if (isBasiliskChallengeReportPending()) return;
+    if (!hasMoreBasiliskChallengesAvailable()) return;
+    if (playerEnteredBasiliskChallenge1) return;
+    const tileEl = getBasiliskLeverTileElement();
+    if (!tileEl || !tileEl.contains(event.target)) return;
+
+    const leverSprite = tileEl.querySelector(`.sprite.item.relative.id-${BASILISK_LEVER_SPRITE.from}`);
+    const pulledLeverSprite = tileEl.querySelector(`.sprite.item.relative.id-${BASILISK_LEVER_SPRITE.to}`);
+    if (!leverSprite && !pulledLeverSprite) return;
+
+    const clickedOverlay = isQuestTileHighlightOverlay(event.target);
+    const clickedUnpulled = !!(leverSprite && (leverSprite.contains(event.target) || clickedOverlay || event.target === tileEl));
+    const clickedPulled = !!(pulledLeverSprite && (pulledLeverSprite.contains(event.target) || clickedOverlay || event.target === tileEl));
+    if (!clickedUnpulled && !clickedPulled) return;
+
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    event.stopPropagation();
+
+    closeBasiliskLeverContextMenu();
+
+    // A pull/warp is already in flight — ignore further right-clicks until it resolves
+    // (poof animation + entering the challenge) instead of opening another menu.
+    if (basiliskLeverWarpPending) return;
+
+    const alreadyPulled = clickedPulled && !clickedUnpulled;
+    basiliskLeverContextMenu = createContextMenu({
+      x: event.clientX,
+      y: event.clientY,
+      layout: 'center',
+      anchorElement: tileEl,
+      logPrefix: '[Quests Mod][Basilisk Lever]',
+      buttons: [
+        {
+          text: alreadyPulled ? 'Enter the Challenge' : 'Pull the Lever',
+          width: '150px',
+          backgroundColor: '#2a4a2a',
+          color: '#4CAF50',
+          border: '1px solid #4CAF50',
+          hoverBackgroundColor: '#1a2a1a',
+          hoverBorderColor: '#66BB6A',
+          onClick: () => {
+            closeBasiliskLeverContextMenu();
+            pullBasiliskLever(tileEl, leverSprite, alreadyPulled);
+          }
+        }
+      ],
+      onClose: () => {
+        basiliskLeverContextMenu = null;
+      }
+    });
+  }
+
+  function updateBasiliskLeverTile22State() {
+    try {
+      const shouldBeEnabled = shouldEnableBasiliskLeverRightClick();
+      const tileEl = document.getElementById('tile-index-' + BASILISK_LEVER_TILE);
+
+      if (shouldBeEnabled && !basiliskLeverRightClickEnabled) {
+        document.addEventListener('contextmenu', handleBasiliskLeverTile22RightClickDocument, true);
+        basiliskLeverRightClickEnabled = true;
+        if (tileEl) {
+          if (tileEl.classList.contains('pointer-events-none')) {
+            tileEl.classList.remove('pointer-events-none');
+            tileEl.dataset.questsBasiliskLeverRemovedPointerEventsNone = '1';
+          }
+          tileEl.style.pointerEvents = 'auto';
+        }
+      } else if (!shouldBeEnabled && basiliskLeverRightClickEnabled) {
+        document.removeEventListener('contextmenu', handleBasiliskLeverTile22RightClickDocument, true);
+        basiliskLeverRightClickEnabled = false;
+        if (tileEl?.isConnected) {
+          if (tileEl.dataset.questsBasiliskLeverRemovedPointerEventsNone === '1') {
+            tileEl.classList.add('pointer-events-none');
+            delete tileEl.dataset.questsBasiliskLeverRemovedPointerEventsNone;
+          }
+          tileEl.style.pointerEvents = '';
+        }
+      }
+    } catch (e) {
+      console.error('[Quests Mod][Basilisk Lever] Error updating tile 22 state:', e);
+    }
+  }
+
+  function setupBasiliskLeverObserver() {
+    // Accepting the mission doesn't itself change board state, so the board .subscribe()
+    // below won't fire from that alone — nothing re-checks tile 22 until the player next
+    // changes rooms/maps (a genuine board update). Always force one recompute here so
+    // accepting the mission enables the right-click immediately, whether or not the
+    // subscription itself was already set up from an earlier call.
+    setTimeout(updateBasiliskLeverTile22State, 0);
+    if (basiliskLeverBoardSubscription) return;
+    if (typeof globalThis === 'undefined' || !globalThis.state?.board?.subscribe) return;
+    basiliskLeverBoardSubscription = globalThis.state.board.subscribe(() => {
+      updateBasiliskLeverTile22State();
+    });
+  }
+
+  function disableBasiliskLeverRightClick() {
+    if (basiliskLeverRightClickEnabled) {
+      document.removeEventListener('contextmenu', handleBasiliskLeverTile22RightClickDocument, true);
+      basiliskLeverRightClickEnabled = false;
+    }
+  }
+
+  function cleanupBasiliskLeverObserver() {
+    disableBasiliskLeverRightClick();
+    closeBasiliskLeverContextMenu();
+    if (basiliskLeverBoardSubscription) {
+      try {
+        basiliskLeverBoardSubscription.unsubscribe();
+      } catch (e) {
+        console.warn('[Quests Mod][Basilisk Lever] Error unsubscribing board:', e);
+      }
+      basiliskLeverBoardSubscription = null;
+    }
+  }
+
+  function needsBasiliskChallengesObserver() {
+    return !!getMissionProgress(THE_BASILISK_CHALLENGES_MISSION).accepted;
+  }
+
   // =======================
   // Draconia Tower (Elathriel — after Hellgate Library, teleports the player into the
   // Sewers re-skinned as a dragon cemetery. The battle spawns on entry (Dragon Lord,
@@ -30678,6 +32641,63 @@ function createNPCCooldownManager() {
     return false;
   }
 
+  // "A Love Story" is a four-item fetch chain (Wooden Plank -> Spool of Yarn ->
+  // Compass -> Bunny Slippers) with a "talk to Svenson and set sail" step between
+  // each. The fight.png badge should mean "there is something to do at Svenson
+  // right now" — a new quest, a talk/travel step, or a hand-in the player can
+  // actually complete — NOT "you accepted a fetch and haven't found the item
+  // yet". So each fetch stage is gated on holding its item; talk/travel stages
+  // stay lit unconditionally.
+  function svensonLoveStoryItemName(stage) {
+    switch (stage) {
+      case 'plank': return APPRENTICE_SHENG_MISSION.rewardItemName || MINOTAUR_TROPHY_CONFIG.productName;
+      case 'yarn': return MOTHER_OF_ALL_SPIDERS_MISSION.rewardItemName;
+      case 'compass': return SERPENTINE_TOWER_MISSION.rewardItemName || SCORPION_SCEPTRE_CONFIG.productName;
+      case 'slippers': return CHRISTMAS_MIRACLE_MISSION.rewardItemName || BUNNY_SLIPPERS_CONFIG.productName;
+      default: return null;
+    }
+  }
+
+  function holdsSvensonLoveStoryItem(stage) {
+    const name = svensonLoveStoryItemName(stage);
+    return !!name && getCachedQuestItemCount(name) > 0;
+  }
+
+  /** New quest, a talk/travel step, or a hand-in the player can complete now. */
+  function hasSvensonQuestAction() {
+    const love = getMissionProgress(SVENSON_LOVE_STORY_MISSION) || {};
+
+    if (!love.completed) {
+      if (!love.accepted) return true; // offer available
+
+      // White Wave: bring Bunny Slippers for Dane.
+      if (love.strandedAtWhiteWave) {
+        return !love.whiteWaveSlippersDelivered && holdsSvensonLoveStoryItem('slippers');
+      }
+      // Underground: hear the request (talk), then fetch a Compass.
+      if (love.strandedAtUnderground) {
+        if (love.undergroundCompassDelivered) return true;          // "talk to continue"
+        if (!love.undergroundCompassRequested) return true;          // just arrived — hear request
+        return holdsSvensonLoveStoryItem('compass');                 // fetch Compass
+      }
+      // Awash: hear what happened (talk), then fetch a Spool of Yarn.
+      if (love.strandedAtAwash) {
+        if (love.awashYarnDelivered) return true;                    // "talk to continue"
+        if (!love.awashYarnRequested) return true;                   // just arrived — hear request
+        return holdsSvensonLoveStoryItem('yarn');                    // fetch Spool of Yarn
+      }
+      // Folda Boat: "talk to set sail" after the plank, else fetch a Wooden Plank.
+      if (love.plankDelivered) return true;                          // travel step
+      return holdsSvensonLoveStoryItem('plank');                     // fetch Wooden Plank
+    }
+
+    // Love story done — Weakened Archdemon passage / pre-battle step at Svenson.
+    const arch = getMissionProgress(WEAKENED_ARCHDEMON_MISSION) || {};
+    if (!arch.accepted) return true;
+    if (!arch.completed && !arch.battleCompleted) return true;
+    return false;
+  }
+
   function hasTeshaQuestAction() {
     // Realm of Dreams: startable once the Key to Magic (Book) is in hand, or waiting
     // for the reward hand-back once the fire-path battle is cleared.
@@ -31436,6 +33456,17 @@ function createNPCCooldownManager() {
       alt: 'Use the teleporter',
       showDuringPlacement: true
     });
+
+    // The Basilisk Challenges — lever on tile 22 of The Farms, glows once the mission is
+    // accepted (same shouldEnableBasiliskLeverRightClick() gate the right-click handler uses).
+    registerQuestTileHighlightSource({
+      getTiles: () => {
+        const tile = getTileElement(BASILISK_LEVER_TILE);
+        return tile ? [tile] : [];
+      },
+      isAccessActive: () => shouldEnableBasiliskLeverRightClick(),
+      alt: 'Pull the lever'
+    });
   }
 
   function setupTileHighlightObserver() {
@@ -31641,6 +33672,14 @@ function createNPCCooldownManager() {
     console.log('[Quests Mod][Tesha] Arrow system cleaned up');
   }
 
+  // The two tutorial quests are "Retrieve the Honeyflower" then "Fastest Bishop in
+  // Carlin" (king_crossing_the_line). Standing side NPCs that aren't tied to a
+  // specific earlier quest — Rookstayer, Svenson, Elathriel, Basilisk, the Oracle —
+  // only appear once BOTH tutorial quests are behind the player, so a brand-new
+  // account never sees a mid/late-game NPC on the board. Completing Fastest Bishop
+  // implies Honeyflower was completed first, so this one check covers both.
+  const hasFinishedTutorialQuests = () => MissionManager.isCompleted(KING_CROSSING_THE_LINE_MISSION);
+
   const BOARD_NPC_CONFIGS = [
     {
       id: BOARD_NPC_ROOKSTAYER_ID,
@@ -31658,7 +33697,7 @@ function createNPCCooldownManager() {
       logPrefix: '[Quests Mod][Board NPC][Rookstayer]',
       isUnlocked: () => {
         const progress = getMissionProgress(APPRENTICE_SHENG_MISSION);
-        return MissionManager.isCompleted(KING_HONEYFLOWER_MISSION)
+        return hasFinishedTutorialQuests()
           && !progress?.completed
           && !progress?.rookstayerDismissed
           && !playerAcceptedApprenticeShengBattle;
@@ -31740,15 +33779,10 @@ function createNPCCooldownManager() {
       dialogueIconUrl: SVENSON_DIALOGUE_ICON_URL,
       logPrefix: '[Quests Mod][Board NPC][Svenson]',
       chatMode: 'keywords',
-      isUnlocked: () => MissionManager.isCompleted(KING_CROSSING_THE_LINE_MISSION),
-      isInteractable: () => {
-        const love = getMissionProgress(SVENSON_LOVE_STORY_MISSION) || {};
-        if (!love.accepted || !love.completed) return true;
-        const arch = getMissionProgress(WEAKENED_ARCHDEMON_MISSION) || {};
-        if (!arch.accepted) return true;
-        if (arch.accepted && !arch.completed && !arch.battleCompleted) return true;
-        return false;
-      },
+      isUnlocked: () => hasFinishedTutorialQuests(),
+      // fight.png only when there's something to do at Svenson now — a hand-in
+      // step lights up only once the player is actually carrying the item.
+      isInteractable: () => hasSvensonQuestAction(),
       chat: {},
       hpBarColor: 'rgb(96, 192, 96)',
       nameColor: 'rgb(96, 192, 96)'
@@ -31802,7 +33836,8 @@ function createNPCCooldownManager() {
       chatMode: 'keywords',
       isUnlocked: () => {
         const progress = getMissionProgress(LOST_ORACLE_MISSION) || {};
-        return !playerAcceptedOracleRageBattle
+        return hasFinishedTutorialQuests()
+          && !playerAcceptedOracleRageBattle
           && !progress.completed
           && !progress.oracleDismissed;
       },
@@ -31832,10 +33867,7 @@ function createNPCCooldownManager() {
       dialogueIconUrl: ELATHRIEL_DIALOGUE_ICON_URL,
       logPrefix: '[Quests Mod][Board NPC][Elathriel]',
       chatMode: 'keywords',
-      isUnlocked: () => {
-        const progress = getMissionProgress(KING_CROSSING_THE_LINE_MISSION) || {};
-        return !!progress.crossingObjectiveComplete;
-      },
+      isUnlocked: () => hasFinishedTutorialQuests(),
       isInteractable: () => {
         // Fight icon stays lit through the whole Hellgate → Library → Draconia Tower →
         // Draconia Quest chain (each step's predecessor is its prerequisite, so an
@@ -31964,39 +33996,68 @@ function createNPCCooldownManager() {
       chat: {},
       hpBarColor: 'rgb(96, 192, 96)',
       nameColor: 'rgb(96, 192, 96)'
+    },
+    {
+      // Basilisk — offers The Basilisk Challenges quest. A permanent NPC on The Farms,
+      // unlocked once the tutorial is behind the player — same gate (and same "permanent
+      // side NPC" pattern) as Svenson, rather than being visible to a brand-new player.
+      id: BOARD_NPC_BASILISK_ID,
+      name: 'Basilisk',
+      hideLevel: true,
+      tileIndex: BASILISK_TILE_INDEX,
+      roomName: BASILISK_ROOM_NAME,
+      overlayClass: BASILISK_OVERLAY_CLASS,
+      outfitSpriteId: BASILISK_OUTFIT_SPRITE_ID,
+      facing: 'west',
+      shiny: false,
+      imageUrl: getQuestItemsAssetUrl('Basilisk.gif'),
+      dialogueIconUrl: BASILISK_DIALOGUE_ICON_URL,
+      logPrefix: '[Quests Mod][Board NPC][Basilisk]',
+      chatMode: 'keywords',
+      isUnlocked: () => hasFinishedTutorialQuests(),
+      // fight.png shows for a new, unaccepted offer, or while a just-won challenge is awaiting
+      // report (battleCompleted — see isBasiliskChallengeReportPending) — that's the one point
+      // mid-questline where talking to him again IS the action to take (it advances
+      // basiliskChallengesCompleted[] and re-enables the lever). Off once the whole questline
+      // is completed (nothing left to do), and off while a challenge is accepted-but-not-won
+      // where the lever/battle is the action.
+      isInteractable: () => {
+        const progress = getMissionProgress(THE_BASILISK_CHALLENGES_MISSION) || {};
+        if (progress.completed) return false;
+        if (progress.battleCompleted) return true;
+        return !progress.accepted;
+      },
+      chat: {},
+      // Snake green, distinct from the "ally" green used elsewhere for post-battle NPCs.
+      hpBarColor: 'rgb(124, 176, 60)',
+      nameColor: 'rgb(124, 176, 60)'
     }
   ];
 
 
   patchBoardNpcChatFromDialogue = function patchBoardNpcChatFromDialogue() {
     if (!questNpcsDialogue) return;
-    const rookChat = questNpcsDialogue.rookstayer?.boardChat;
-    const rookConfig = BOARD_NPC_CONFIGS.find((c) => c.id === BOARD_NPC_ROOKSTAYER_ID);
-    if (rookChat && rookConfig?.chat) Object.assign(rookConfig.chat, rookChat);
-    const santaChat = questNpcsDialogue.santa?.boardChat;
-    const santaConfig = BOARD_NPC_CONFIGS.find((c) => c.id === BOARD_NPC_SANTA_ID);
-    if (santaChat && santaConfig?.chat) Object.assign(santaConfig.chat, santaChat);
-    const svensonChat = questNpcsDialogue.svenson?.boardChat;
-    const svensonConfig = BOARD_NPC_CONFIGS.find((c) => c.id === BOARD_NPC_SVENSON_ID);
-    if (svensonChat && svensonConfig?.chat) Object.assign(svensonConfig.chat, svensonChat);
-    const daneChat = questNpcsDialogue.dane?.boardChat;
-    const daneConfig = BOARD_NPC_CONFIGS.find((c) => c.id === BOARD_NPC_DANE_ID);
-    if (daneChat && daneConfig?.chat) Object.assign(daneConfig.chat, daneChat);
-    const oracleChat = questNpcsDialogue.oracle?.boardChat;
-    const oracleConfig = BOARD_NPC_CONFIGS.find((c) => c.id === BOARD_NPC_ORACLE_ID)
-      || BOARD_NPC_CONFIGS.find((c) => c.overlayClass === ORACLE_OVERLAY_CLASS);
-    if (oracleChat && oracleConfig?.chat) Object.assign(oracleConfig.chat, oracleChat);
-    const elathrielChat = questNpcsDialogue.elathriel?.boardChat;
-    const elathrielConfig = BOARD_NPC_CONFIGS.find((c) => c.id === BOARD_NPC_ELATHRIEL_ID);
-    if (elathrielChat && elathrielConfig?.chat) Object.assign(elathrielConfig.chat, elathrielChat);
-    const bonelordChat = questNpcsDialogue.bonelord?.boardChat;
-    const bonelordConfig = BOARD_NPC_CONFIGS.find((c) => c.id === BOARD_NPC_BONELORD_ID)
-      || BOARD_NPC_CONFIGS.find((c) => c.overlayClass === BONELORD_OVERLAY_CLASS);
-    if (bonelordChat && bonelordConfig?.chat) Object.assign(bonelordConfig.chat, bonelordChat);
-    const oldDragonlordChat = questNpcsDialogue.oldDragonlord?.boardChat;
-    const oldDragonlordConfig = BOARD_NPC_CONFIGS.find((c) => c.id === BOARD_NPC_OLD_DRAGONLORD_ID)
-      || BOARD_NPC_CONFIGS.find((c) => c.overlayClass === OLD_DRAGONLORD_OVERLAY_CLASS);
-    if (oldDragonlordChat && oldDragonlordConfig?.chat) Object.assign(oldDragonlordConfig.chat, oldDragonlordChat);
+    // Resolve by overlayClass first (a stable const), then id. BOARD_NPC_*_ID is
+    // still '' when BOARD_NPC_CONFIGS is first evaluated, so an id-only lookup
+    // here can miss — leaving the NPC's boardChat (welcomeMessage, yes/no lines,
+    // plead lines) unmerged and the modal falling back to a bare "Hello <name>.".
+    const patch = (dialogueKey, overlayClass, idConst) => {
+      const boardChat = questNpcsDialogue[dialogueKey]?.boardChat;
+      if (!boardChat) return;
+      const cfg = (overlayClass && BOARD_NPC_CONFIGS.find((c) => c.overlayClass === overlayClass))
+        || (idConst && BOARD_NPC_CONFIGS.find((c) => c.id === idConst))
+        || null;
+      if (cfg?.chat) Object.assign(cfg.chat, boardChat);
+    };
+    patch('rookstayer', APPRENTICE_SHENG_OVERLAY_CLASS, BOARD_NPC_ROOKSTAYER_ID);
+    patch('santa', SANTA_CLAUS_OVERLAY_CLASS, BOARD_NPC_SANTA_ID);
+    patch('svenson', SVENSON_OVERLAY_CLASS, BOARD_NPC_SVENSON_ID);
+    patch('dane', DANE_OVERLAY_CLASS, BOARD_NPC_DANE_ID);
+    patch('oracle', ORACLE_OVERLAY_CLASS, BOARD_NPC_ORACLE_ID);
+    patch('elathriel', ELATHRIEL_OVERLAY_CLASS, BOARD_NPC_ELATHRIEL_ID);
+    patch('bonelord', BONELORD_OVERLAY_CLASS, BOARD_NPC_BONELORD_ID);
+    patch('oldDragonlord', OLD_DRAGONLORD_OVERLAY_CLASS, BOARD_NPC_OLD_DRAGONLORD_ID);
+    patch('basilisk', BASILISK_OVERLAY_CLASS, BOARD_NPC_BASILISK_ID);
     const aPrisonerChat = questNpcsDialogue['a-prisoner']?.boardChat;
     if (aPrisonerChat) {
       BOARD_NPC_CONFIGS.forEach((c) => {
@@ -32475,6 +34536,13 @@ function createNPCCooldownManager() {
 
   function getBonelordKeywordResponse(message, playerName) {
     return matchKeywordResponsesSync(BONELORD_RESPONSES, message, playerName, {
+      defaultResponse: null,
+      lowercaseKeys: true
+    });
+  }
+
+  function getBasiliskKeywordResponse(message, playerName) {
+    return matchKeywordResponsesSync(BASILISK_RESPONSES, message, playerName, {
       defaultResponse: null,
       lowercaseKeys: true
     });
@@ -33812,6 +35880,29 @@ function createNPCCooldownManager() {
     findActor: (world) => findBattleActorByName(world, OLD_DRAGONLORD_BOSS_NAME)
   });
 
+  // Slug King (The Basilisk Challenges — Challenge 2). Boss HP bar only; no soul core.
+  // Icon falls back to the Basilisk's own portrait since this boss has no collectible.
+  const SLUG_KING_BOSS_NAME = 'Slug King';
+  const slugKingBossHpBar = createBossHpBar({
+    id: 'slug-king',
+    getName: () => SLUG_KING_BOSS_NAME,
+    getIconUrl: () => getQuestItemsAssetUrl('Basilisk.gif'),
+    isActive: () => playerEnteredBasiliskChallenge2 && !!basiliskChallenge2Battle,
+    findActor: (world) => findBattleActorByName(world, SLUG_KING_BOSS_NAME)
+  });
+
+  // The Horned Fox (The Basilisk Challenges — Challenge 6, the final fight). Boss HP bar,
+  // and clearing all six challenges rewards "The Horned Fox Soul Core" (granted by the
+  // Basilisk report handler / soul-core backfill, not here).
+  const HORNED_FOX_BOSS_NAME = 'The Horned Fox';
+  const hornedFoxBossHpBar = createBossHpBar({
+    id: 'horned-fox',
+    getName: () => HORNED_FOX_BOSS_NAME,
+    getIconUrl: () => getQuestItemsAssetUrl('The_Horned_Fox_Soul_Core.gif'),
+    isActive: () => playerEnteredBasiliskChallenge6 && !!basiliskChallenge6Battle,
+    findActor: (world) => findBattleActorByName(world, HORNED_FOX_BOSS_NAME)
+  });
+
   function getBattleWorldActors(world) {
     if (!world?.grid) return [];
     if (Array.isArray(world.grid.actors)) return world.grid.actors;
@@ -34262,6 +36353,9 @@ function createNPCCooldownManager() {
   async function showBoardNpcKeywordModal(npcConfig) {
     try {
       await ensureNpcDialogueAssetsReady(npcConfig?.logPrefix || '[Quests Mod][NPC]');
+      // Re-merge boardChat now that assets are loaded — the one-shot call during
+      // asset load can run before the config ids are resolved. Idempotent.
+      if (typeof patchBoardNpcChatFromDialogue === 'function') patchBoardNpcChatFromDialogue();
       const playerName = getCurrentPlayerName() || 'Player';
       const baseWelcome = sanitizeDialogueText(npcConfig?.chat?.welcomeMessage, `Hello ${playerName}.`);
       let welcome = baseWelcome.replace(/Player/g, playerName);
@@ -36524,6 +38618,171 @@ function createNPCCooldownManager() {
           return;
         }
 
+        if (npcConfig.id === BOARD_NPC_BASILISK_ID) {
+          const trimmed = text.trim();
+          const lower = trimmed.toLowerCase();
+          const bcProgress = getMissionProgress(THE_BASILISK_CHALLENGES_MISSION) || {};
+
+          // Two-step: asking about the challenge makes him ask yes/no; answering "yes" is
+          // what actually accepts the mission and arms the lever on tile 22. Mirrors the
+          // Bonelord's book-confirm two-step yes/no pattern above.
+          if (awaitingBasiliskChallengeConfirm) {
+            if (/\byes\b/i.test(lower) || lower.includes('accept')) {
+              awaitingBasiliskChallengeConfirm = false;
+              try {
+                await persistMissionProgress(THE_BASILISK_CHALLENGES_MISSION, {
+                  accepted: true,
+                  completed: false,
+                  battleCompleted: !!bcProgress.battleCompleted
+                });
+                setupBasiliskLeverObserver();
+                NotificationService.showQuestAccepted(THE_BASILISK_CHALLENGES_MISSION, npcConfig.logPrefix);
+              } catch (error) {
+                console.error(`${npcConfig.logPrefix} Error accepting the challenge:`, error);
+              }
+              // Accepting flips the NPC's fight.png off (isInteractable keys on !accepted) and
+              // arms the lever — but a chat reply doesn't itself touch board state, so force the
+              // recompute here the same way the victory-report branch below does.
+              updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+              updateBasiliskLeverTile22State();
+              cooldown.queueResponse(
+                text,
+                getMissionDialogueLine(THE_BASILISK_CHALLENGES_MISSION, 'accept', 'SSSO BE IT. THE LEVER ON THE GROUND ISSS YOURSSS TO PULL NOW.'),
+                addMessageToConversation,
+                npcConfig.name
+              );
+              return;
+            }
+            if (/\bno\b/i.test(lower) || lower.includes('decline')) {
+              awaitingBasiliskChallengeConfirm = false;
+              cooldown.queueResponse(
+                text,
+                getMissionDialogueLine(THE_BASILISK_CHALLENGES_MISSION, 'decline', 'COWARDICE SSSUITSSS YOU, TWO-LEGGER.'),
+                addMessageToConversation,
+                npcConfig.name
+              );
+              return;
+            }
+            // Any other reply — keep waiting on a yes/no, fall through to the keyword flow.
+          }
+
+          const asksAboutChallenge = /challenge|mission|quest/i.test(trimmed);
+          if (asksAboutChallenge && !awaitingBasiliskChallengeConfirm) {
+            // Won the challenge but hasn't reported in yet — THIS is what actually advances
+            // basiliskChallengesCompleted[] and re-enables the lever (see
+            // isBasiliskChallengeReportPending / shouldEnableBasiliskLeverRightClick). Must be
+            // checked before the plain accepted&&!completed branch below, since battleCompleted
+            // is also true at this point (completed only means "all 6 done").
+            if (bcProgress.accepted && bcProgress.battleCompleted) {
+              const indexJustWon = getNextIncompleteBasiliskChallengeIndex();
+              try {
+                await setBasiliskChallengeCompleted(indexJustWon, true);
+                await persistMissionProgress(THE_BASILISK_CHALLENGES_MISSION, {
+                  accepted: true,
+                  completed: areAllBasiliskChallengesCompleted(),
+                  battleCompleted: false
+                });
+              } catch (error) {
+                console.error(`${getBasiliskChallenge1LogPrefix()} Error finalizing challenge completion:`, error);
+              }
+              // All six cleared — hand over the final reward: The Horned Fox Soul Core.
+              // maxCount 1 (items.json) + the cached-count guard keep this from double-granting
+              // on a repeat "challenge" chat; the soul-core backfill re-grants it if lost.
+              if (areAllBasiliskChallengesCompleted()) {
+                try {
+                  const hornedFoxSoulCore = resolveQuestProductName('hornedFoxSoulCore');
+                  if (hornedFoxSoulCore && getCachedQuestItemCount(hornedFoxSoulCore) < 1) {
+                    await addQuestItem(hornedFoxSoulCore, 1);
+                    NotificationService.showItemReceived(hornedFoxSoulCore, `${getBasiliskChallenge1LogPrefix()}`);
+                  }
+                } catch (error) {
+                  console.error(`${getBasiliskChallenge1LogPrefix()} Error granting The Horned Fox Soul Core:`, error);
+                }
+              }
+              // battleCompleted just flipped false — the board NPC's fight.png (isInteractable)
+              // and the lever's own glow (shouldEnableBasiliskLeverRightClick) both key off it,
+              // but neither is re-evaluated by anything else here (a chat reply doesn't itself
+              // touch board state the way a battle/room-change does), so force the recompute.
+              updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+              updateBasiliskLeverTile22State();
+              const completedCount = normalizeBasiliskChallengesCompleted(kingChatState.basiliskChallengesCompleted)
+                .filter(Boolean).length;
+              const allDoneNow = completedCount >= BASILISK_CHALLENGES_COUNT;
+              const reportKey = allDoneNow ? 'victoryReportFinal' : 'victoryReport';
+              const reportFallback = allDoneNow
+                ? 'ALL SSSIX CHALLSSSENGESSS BROKEN BY YOUR HAND, TWO-LEGGER. TAKE THISSS — THE HORNED FOX SSSOUL CORE. YOU HAVE EARNED IT.'
+                : 'SSSO, YOU HAVE RETURNED — AND STILL BREATHING! CHALLSSSENGE {completed} OF {total} NOW FALLEN TO YOUR BLADE. {remaining} REMAIN, IF YOU DARE.';
+              cooldown.queueResponse(
+                text,
+                formatDialogueLine(
+                  getMissionDialogueLine(THE_BASILISK_CHALLENGES_MISSION, reportKey, reportFallback),
+                  {
+                    completed: completedCount,
+                    total: BASILISK_CHALLENGES_COUNT,
+                    remaining: BASILISK_CHALLENGES_COUNT - completedCount
+                  }
+                ),
+                addMessageToConversation,
+                npcConfig.name
+              );
+              return;
+            }
+            if (bcProgress.accepted && !bcProgress.completed) {
+              const completedCount = normalizeBasiliskChallengesCompleted(kingChatState.basiliskChallengesCompleted)
+                .filter(Boolean).length;
+              const vars = {
+                completed: completedCount,
+                total: BASILISK_CHALLENGES_COUNT,
+                remaining: BASILISK_CHALLENGES_COUNT - completedCount
+              };
+              // Cleared everything that's actually been built but not all 6 — the lever is
+              // deliberately disabled in this state (shouldEnableBasiliskLeverRightClick), so
+              // don't tell the player to go pull it.
+              const dialogueKey = hasMoreBasiliskChallengesAvailable() ? 'alreadyActive' : 'waitingForMore';
+              const fallback = dialogueKey === 'alreadyActive'
+                ? 'THE LEVER ISSS YOURSSS ALREADY, TWO-LEGGER. {completed} OF {total} CHALLSSSENGESSS FALLEN, {remaining} SSSTILL WAIT. PULL IT WHEN YOU ARE READY.'
+                : 'YOU HAVE PROVEN YOURSSSELF SSSO FAR, TWO-LEGGER — {completed} OF {total} CHALLSSSENGESSS FALLEN. THE RESSST SSSTILL SSSLEEP. RETURN WHEN I HAVE MORE FOR YOU.';
+              cooldown.queueResponse(
+                text,
+                formatDialogueLine(getMissionDialogueLine(THE_BASILISK_CHALLENGES_MISSION, dialogueKey, fallback), vars),
+                addMessageToConversation,
+                npcConfig.name
+              );
+              return;
+            }
+            if (bcProgress.completed) {
+              cooldown.queueResponse(
+                text,
+                getMissionDialogueLine(THE_BASILISK_CHALLENGES_MISSION, 'alreadyCompleted', 'ALL SSSIX OF MY CHALLSSSENGESSS LIE BROKEN BEHIND YOU, TWO-LEGGER. THERE ISSS NOTHING MORE — ONLY MY RESSSPECT.'),
+                addMessageToConversation,
+                npcConfig.name
+              );
+              return;
+            }
+            awaitingBasiliskChallengeConfirm = true;
+            cooldown.queueResponse(
+              text,
+              getMissionDialogueLine(THE_BASILISK_CHALLENGES_MISSION, 'offer', 'A CHALLSSSENGE, YESSS. FOUR KNIGHTSSS WAIT IN THE SSSEWERSSS. WILL YOU ACCEPT, TWO-LEGGER?'),
+              addMessageToConversation,
+              npcConfig.name
+            );
+            return;
+          }
+
+          let basiliskLine = getBasiliskKeywordResponse(text, playerName);
+          if (basiliskLine == null) {
+            basiliskLine = getRandomNpcConfusionResponse(BASILISK_CONFUSION_RESPONSES, playerName);
+          }
+          cooldown.queueResponse(
+            text,
+            basiliskLine,
+            addMessageToConversation,
+            npcConfig.name,
+            isNpcFarewellMessage(text) ? ModalHelpers.getFarewellCloseCallback(text) : undefined
+          );
+          return;
+        }
+
         if (npcConfig.isMadMagePrisoner) {
           const vmProgress = getMissionProgress(VISITING_MINTWALLIN_MISSION) || {};
           const isRiddleAnswer = MAD_MAGE_RIDDLE_ANSWERS.has(lower.replace(/[^a-z0-9]/g, ''));
@@ -36637,6 +38896,8 @@ function createNPCCooldownManager() {
   async function showBoardNpcModal(npcConfig) {
     try {
       await ensureNpcDialogueAssetsReady(npcConfig?.logPrefix || '[Quests Mod][NPC]');
+      // Re-merge boardChat now that assets are loaded (idempotent) — see showBoardNpcKeywordModal.
+      if (typeof patchBoardNpcChatFromDialogue === 'function') patchBoardNpcChatFromDialogue();
       if (npcConfig.id === BOARD_NPC_AL_DEE_RAT_PLAGUE_ID) {
         showAlDeeModal();
         return;
@@ -37546,6 +39807,18 @@ function createNPCCooldownManager() {
     } catch (e) {
       console.warn('[Quests Mod][Isle of Solitude] cleanup during teardown:', e);
     }
+    // Cleanup The Basilisk Challenges (lever on The Farms + Challenge 1 battle)
+    try {
+      cleanupBasiliskLeverObserver();
+      cleanupBasiliskChallenge1Quest();
+      cleanupBasiliskChallenge2Quest();
+      cleanupBasiliskChallenge3Quest();
+      cleanupBasiliskChallenge4Quest();
+      cleanupBasiliskChallenge5Quest();
+      cleanupBasiliskChallenge6Quest();
+    } catch (e) {
+      console.warn('[Quests Mod][Basilisk Challenges] cleanup during teardown:', e);
+    }
     // Cleanup Mad Mage Room quest (Mintwallin prison walk-around + Part 2 battle)
     try {
       disableMintwallinTeleporterRightClick();
@@ -37579,6 +39852,8 @@ function createNPCCooldownManager() {
     demodrasBossHpBar.cleanupSystem();
     wrinkledBonelordBossHpBar.cleanupSystem();
     oldDragonlordBossHpBar.cleanupSystem();
+    slugKingBossHpBar.cleanupSystem();
+    hornedFoxBossHpBar.cleanupSystem();
 
     // Cleanup water fishing system
     cleanupWaterFishingSystem();
@@ -37905,6 +40180,8 @@ function createNPCCooldownManager() {
     demodrasBossHpBar.setupObserver();
     wrinkledBonelordBossHpBar.setupObserver();
     oldDragonlordBossHpBar.setupObserver();
+    slugKingBossHpBar.setupObserver();
+    hornedFoxBossHpBar.setupObserver();
 
     if (needsHoneyflowerObserver()) {
       setupHoneyflowerTileObserver();
@@ -37912,6 +40189,9 @@ function createNPCCooldownManager() {
     if (needsSerpentineTeshaObservers()) {
       setupTeshaArrowObserver();
       setupSerpentineDestroyFieldObserver();
+    }
+    if (needsBasiliskChallengesObserver()) {
+      setupBasiliskLeverObserver();
     }
     if (needsSpiderLairObserver()) {
       setupTile77SpiderLairObserver();
@@ -38192,6 +40472,9 @@ function createNPCCooldownManager() {
       } else if (Array.isArray(progress.sevenSealsVisited)) {
         kingChatState.sevenSealsCompleted = SEVEN_SEALS_GHOSTLANDS_ROOM_NAMES.map(roomName => progress.sevenSealsVisited.includes(roomName));
       }
+      if (Array.isArray(progress.basiliskChallengesCompleted) && progress.basiliskChallengesCompleted.length === BASILISK_CHALLENGES_COUNT) {
+        kingChatState.basiliskChallengesCompleted = progress.basiliskChallengesCompleted.slice(0, BASILISK_CHALLENGES_COUNT).map(Boolean);
+      }
 
       kingChatState.starterCoinThanked = inferStarterCoinThankedFromProgress(progress);
     }
@@ -38217,6 +40500,50 @@ function createNPCCooldownManager() {
         console.log('[Quests Mod] Backfilled metTesha from existing progress');
       } catch (err) {
         console.error('[Quests Mod] Error backfilling metTesha:', err);
+      }
+    }
+
+    // The Copper Key / Letter / Iron Ore / Wishlist / Present "received before" flags
+    // (separate Firebase paths from mission progress, gating each one-time reward from
+    // dropping again) only self-heal lazily, inside the live award-check the player
+    // triggers by revisiting that exact interaction (e.g. talking to Santa) — unlike
+    // starterCoinThanked/metTesha above, nothing backfills them on a normal load. A player
+    // who finished the related quest without ever re-triggering that specific check (a
+    // returning player, a dev-granted completion, a seasonal NPC no longer around) is left
+    // with a flag that never catches up despite the quest being done. Each canAward*
+    // helper already backfills its own flag internally via canAwardUniqueItem() once its
+    // quest reads as concluded — call them once here (ignoring the boolean) so that
+    // self-heal runs on startup instead of waiting on a revisit that may never happen.
+    if (progress && !progress.__isEmpty && playerName) {
+      try {
+        await Promise.all([
+          canAwardCopperKeyDrop(playerName),
+          canAwardLetterFromAlDeeDrop(playerName),
+          canAwardIronOreDrop(playerName),
+          canAwardWishlistDrop(playerName),
+          canAwardSantaPresent(playerName)
+        ]);
+      } catch (err) {
+        console.error('[Quests Mod] Error backfilling received-before flags:', err);
+      }
+
+      // Same self-heal for Al Dee's shop: the "bought" flag (a separate Firebase record,
+      // independent of the quest-item bag) blocks re-buying a one-time purchase forever
+      // once set — but nothing regranted the actual item if the bag ever lost it (a stale-
+      // item cleanup pass, a dev reset that wiped items without also clearing the purchase
+      // record, etc). Previously this only self-healed the moment the player happened to
+      // reopen the shop UI (see createShopItem); check it here too so it recovers on load.
+      try {
+        const shopPurchases = await getAlDeeShopPurchases(playerName);
+        if (shopPurchases?.fishing_rod === true) {
+          const items = await getQuestItems(false);
+          if (!((items?.['Fishing Rod'] || 0) > 0)) {
+            await addQuestItem('Fishing Rod', 1);
+            console.log('[Quests Mod] Re-granted Fishing Rod — purchase flag was set but the item was missing');
+          }
+        }
+      } catch (err) {
+        console.error('[Quests Mod] Error backfilling Al Dee shop purchases:', err);
       }
     }
 
@@ -39059,6 +41386,22 @@ function createNPCCooldownManager() {
         await addQuestItem(itemName, count);
         granted.push(`${itemName} (${count})`);
       }
+
+      // The Fishing Rod is a 100-coin Al Dee shop purchase, not a quest reward, so
+      // it has no devCompleteRewards entry — but a fully progressed account that ran
+      // "Fishing for gold" bought (and kept) one, and the mod's water-fishing needs
+      // it. Set the shop "bought" flag too so the shop / reconcile stay consistent
+      // (resetAll clears it via deleteAlDeeShopPurchases).
+      try {
+        await saveAlDeeShopPurchase(currentPlayer, 'fishing_rod', true);
+        if (!((await getQuestItems(false))?.['Fishing Rod'] || 0)) {
+          await addQuestItem('Fishing Rod', 1);
+          granted.push('Fishing Rod (1)');
+        }
+      } catch (err) {
+        console.error('[Quests Mod][Dev] Failed to grant Fishing Rod:', err);
+      }
+
       console.log('[Quests Mod][Dev] All quest reward items granted:', granted.join(', '));
       // Reconcile to the true "everything finished" bag: items later quests consume are
       // stripped, only permanent rewards (soul cores, keys, tools) remain. Use
@@ -39172,6 +41515,20 @@ function createNPCCooldownManager() {
       if (missionId === AL_DEE_GOLDEN_ROPE_MISSION.id) {
         kingChatState.mornenionDefeated = false;
       }
+      // The Basilisk Challenges tracks per-challenge completion in a side array
+      // (kingChatState.basiliskChallengesCompleted, surfaced via getAllMissionProgress as
+      // result.basiliskChallenges... / basiliskChallengesCompleted). Resetting the mission
+      // entry alone leaves all six sub-challenges marked done, so clear the array too.
+      if (missionId === THE_BASILISK_CHALLENGES_MISSION.id) {
+        kingChatState.basiliskChallengesCompleted = getDefaultBasiliskChallengesCompleted().slice();
+      }
+      // "Found Costello at the Monastery" is a King's Study sub-flag (kingChatState.costelloVisited,
+      // drives the mission's objective line / hand-in). Reset it with the mission so its first
+      // step can be re-done. metTesha is deliberately NOT cleared here — it's re-derived from any
+      // remaining Tesha-chain progress on load, so a single mid-chain reset shouldn't drop it.
+      if (missionId === KING_MONKS_STUDY_MISSION.id) {
+        kingChatState.costelloVisited = false;
+      }
       console.log('[Quests Mod][Dev] Local state reset for', missionId, kingChatState[stateKey]);
 
       await saveKingTibianusProgress(playerName, getAllMissionProgress());
@@ -39216,6 +41573,33 @@ function createNPCCooldownManager() {
     }
   }
 
+  // Toggle a single sub-progress flag (battleCompleted and other mission-specific steps —
+  // see MISSION_EXTRA_FIELD_SCHEMAS, sourced from missions.json -> registry.missions[].
+  // extraFields) without touching accepted/completed or any other flag on that mission.
+  // QuestsDev.reset() wipes ALL of a mission's flags at once; this is for flipping back
+  // just one step (e.g. re-testing a boss fight) while keeping earlier progress intact.
+  async function questsDevSetProgressFlag(missionId, field, value) {
+    const mission = QUESTS_DEV_MISSIONS_BY_ID[missionId];
+    if (!mission) {
+      console.error('[Quests Mod][Dev] Unknown mission ID. Available IDs:', Object.keys(MISSION_STATE_MAP));
+      return;
+    }
+    const firebaseKey = MISSION_FIREBASE_KEY_MAP[missionId];
+    const fields = MISSION_EXTRA_FIELD_SCHEMAS[firebaseKey]?.fields || [];
+    if (!fields.includes(field)) {
+      console.error(`[Quests Mod][Dev] Unknown progress flag "${field}" for ${missionId}. Valid flags:`, fields);
+      return;
+    }
+    try {
+      const patch = buildMissionProgressPatch(mission, fields, { [field]: !!value });
+      await persistMissionProgress(mission, patch);
+      await refreshDevQuestUi();
+      console.log(`[Quests Mod][Dev] ${missionId}.${field} set to ${!!value}`);
+    } catch (error) {
+      console.error(`[Quests Mod][Dev] Error setting ${missionId}.${field}:`, error);
+    }
+  }
+
   async function resetAllQuests() {
     console.log('[Quests Mod][Dev] Resetting ALL quests and quest items');
     try {
@@ -39234,6 +41618,7 @@ function createNPCCooldownManager() {
       kingChatState.mornenionDefeated = false;
       kingChatState.starterCoinThanked = false;
       kingChatState.sevenSealsCompleted = getDefaultSevenSealsCompleted().slice();
+      kingChatState.basiliskChallengesCompleted = getDefaultBasiliskChallengesCompleted().slice();
       playerAcceptedApprenticeShengBattle = false;
       if (typeof cleanupApprenticeShengBattle === 'function') cleanupApprenticeShengBattle();
       playerAcceptedOracleRageBattle = false;
@@ -39291,6 +41676,89 @@ function createNPCCooldownManager() {
     } catch (error) {
       console.error('[Quests Mod][Dev] Error resetting Iron Ore received status:', error);
     }
+  }
+
+  async function resetCopperKeyReceived() {
+    console.log('[Quests Mod][Dev] Resetting Copper Key received status');
+    try {
+      const playerName = getCurrentPlayerName();
+      if (!playerName) {
+        console.error('[Quests Mod][Dev] No player name found');
+        return;
+      }
+      await deleteCopperKeyReceived(playerName);
+      console.log('[Quests Mod][Dev] Copper Key received status deleted from Firebase');
+    } catch (error) {
+      console.error('[Quests Mod][Dev] Error resetting Copper Key received status:', error);
+    }
+  }
+
+  async function resetLetterReceived() {
+    console.log('[Quests Mod][Dev] Resetting Letter from Al Dee received status');
+    try {
+      const playerName = getCurrentPlayerName();
+      if (!playerName) {
+        console.error('[Quests Mod][Dev] No player name found');
+        return;
+      }
+      await deleteLetterFromAlDeeReceived(playerName);
+      console.log('[Quests Mod][Dev] Letter from Al Dee received status deleted from Firebase');
+    } catch (error) {
+      console.error('[Quests Mod][Dev] Error resetting Letter from Al Dee received status:', error);
+    }
+  }
+
+  // Mark-as-received counterparts to the reset* functions above — needed so the "Copper
+  // Key" / "Letter from Al Dee" / "Iron Ore" / "Wishlist" / "Present" flags can be toggled
+  // both ways from the mission's sub-progression panel (QUEST_DEV_SUB_PROGRESSIONS), the
+  // same green/red toggle-button UI already used for Seven Seals and Basilisk Challenges.
+  async function markCopperKeyReceivedDev() {
+    const playerName = getCurrentPlayerName();
+    if (!playerName) { console.error('[Quests Mod][Dev] No player name found'); return; }
+    await markCopperKeyReceived(playerName);
+    console.log('[Quests Mod][Dev] Copper Key marked as received');
+  }
+
+  async function markLetterReceivedDev() {
+    const playerName = getCurrentPlayerName();
+    if (!playerName) { console.error('[Quests Mod][Dev] No player name found'); return; }
+    await markLetterFromAlDeeReceived(playerName);
+    console.log('[Quests Mod][Dev] Letter from Al Dee marked as received');
+  }
+
+  async function markIronOreReceivedDev() {
+    const playerName = getCurrentPlayerName();
+    if (!playerName) { console.error('[Quests Mod][Dev] No player name found'); return; }
+    await markIronOreReceived(playerName);
+    console.log('[Quests Mod][Dev] Iron Ore marked as received');
+  }
+
+  async function resetWishlistReceived() {
+    const playerName = getCurrentPlayerName();
+    if (!playerName) { console.error('[Quests Mod][Dev] No player name found'); return; }
+    await deleteWishlistReceived(playerName);
+    console.log('[Quests Mod][Dev] Wishlist received status deleted from Firebase');
+  }
+
+  async function markWishlistReceivedDev() {
+    const playerName = getCurrentPlayerName();
+    if (!playerName) { console.error('[Quests Mod][Dev] No player name found'); return; }
+    await markWishlistReceived(playerName);
+    console.log('[Quests Mod][Dev] Wishlist marked as received');
+  }
+
+  async function resetSantaPresentReceived() {
+    const playerName = getCurrentPlayerName();
+    if (!playerName) { console.error('[Quests Mod][Dev] No player name found'); return; }
+    await deleteSantaPresentClaimed(playerName);
+    console.log('[Quests Mod][Dev] Santa Present claimed status deleted from Firebase');
+  }
+
+  async function markSantaPresentReceivedDev() {
+    const playerName = getCurrentPlayerName();
+    if (!playerName) { console.error('[Quests Mod][Dev] No player name found'); return; }
+    await markSantaPresentClaimed(playerName);
+    console.log('[Quests Mod][Dev] Santa Present marked as claimed');
   }
 
   async function resetSantaClaus() {
@@ -39355,10 +41823,17 @@ function createNPCCooldownManager() {
         getQuestDevMissionsInProgressOrder().map((mission) => [mission.id, mission.title || mission.id])
       ),
       sealsCount: SEVEN_SEALS_COUNT,
+      basiliskChallengesCount: BASILISK_CHALLENGES_COUNT,
       actions: [
-        'grant', 'completeAll', 'reconcile', 'check', 'setAccepted', 'complete', 'reset', 'resetAll',
-        'resetIronOreReceived', 'resetSanta', 'resetLoveStoryWithItems',
-        'setSealCompleted', 'getSealCompleted', 'areAllSevenSealsCompleted', 'help', 'catalog'
+        'grant', 'completeAll', 'reconcile', 'check', 'setAccepted', 'complete', 'reset', 'resetAll', 'setProgressFlag',
+        'resetCopperKeyReceived', 'markCopperKeyReceived', 'resetLetterReceived', 'markLetterReceived',
+        'resetIronOreReceived', 'markIronOreReceived', 'resetWishlistReceived', 'markWishlistReceived',
+        'resetSantaPresentReceived', 'markSantaPresentReceived', 'resetSanta', 'resetLoveStoryWithItems',
+        'debugTile79', 'updateTile79',
+        'setSealCompleted', 'getSealCompleted', 'areAllSevenSealsCompleted',
+        'setBasiliskChallengeCompleted', 'getBasiliskChallengeCompleted', 'areAllBasiliskChallengesCompleted',
+        'setBasiliskChallengeBattleCompleted', 'getBasiliskChallengeBattleCompleted',
+        'help', 'catalog'
       ]
     };
   }
@@ -39371,8 +41846,18 @@ function createNPCCooldownManager() {
     setAccepted: setMissionAccepted,
     complete: setMissionCompleted,
     reset: resetQuest,
+    setProgressFlag: questsDevSetProgressFlag,
     resetAll: resetAllQuests,
+    resetCopperKeyReceived,
+    markCopperKeyReceived: markCopperKeyReceivedDev,
+    resetLetterReceived,
+    markLetterReceived: markLetterReceivedDev,
     resetIronOreReceived,
+    markIronOreReceived: markIronOreReceivedDev,
+    resetWishlistReceived,
+    markWishlistReceived: markWishlistReceivedDev,
+    resetSantaPresentReceived,
+    markSantaPresentReceived: markSantaPresentReceivedDev,
     resetSanta: resetSantaClaus,
     resetLoveStoryWithItems,
     debugTile79,
@@ -39382,6 +41867,12 @@ function createNPCCooldownManager() {
     areAllSevenSealsCompleted,
     sealIndices: { FIRST_SEAL, SECOND_SEAL, THIRD_SEAL, FOURTH_SEAL, FIFTH_SEAL, SIXTH_SEAL, SEVENTH_SEAL },
     sealsCount: SEVEN_SEALS_COUNT,
+    setBasiliskChallengeCompleted,
+    getBasiliskChallengeCompleted,
+    areAllBasiliskChallengesCompleted,
+    setBasiliskChallengeBattleCompleted,
+    getBasiliskChallengeBattleCompleted,
+    basiliskChallengesCount: BASILISK_CHALLENGES_COUNT,
     get itemKeys() { return getQuestsDevItemKeys(); },
     missionIds: () => Object.keys(MISSION_STATE_MAP),
     catalog: questsDevCatalog,
@@ -39400,6 +41891,7 @@ function createNPCCooldownManager() {
     window.debugTile79 = QuestsDev.debugTile79;
     window.updateTile79 = QuestsDev.updateTile79;
     window.resetQuest = QuestsDev.reset;
+    window.setProgressFlag = QuestsDev.setProgressFlag;
     window.resetAlDeeFishing = async () => QuestsDev.reset(AL_DEE_FISHING_MISSION.id);
     window.resetMeetingWithTesha = async () => QuestsDev.reset(KING_SCARAB_COIN_MISSION.id);
     window.resetLoveStory = async () => QuestsDev.reset(SVENSON_LOVE_STORY_MISSION.id);
@@ -39410,8 +41902,23 @@ function createNPCCooldownManager() {
     window.areAllSevenSealsCompleted = QuestsDev.areAllSevenSealsCompleted;
     window.QUESTS_SEAL_INDICES = QuestsDev.sealIndices;
     window.SEVEN_SEALS_COUNT = SEVEN_SEALS_COUNT;
+    window.setBasiliskChallengeCompleted = QuestsDev.setBasiliskChallengeCompleted;
+    window.getBasiliskChallengeCompleted = QuestsDev.getBasiliskChallengeCompleted;
+    window.areAllBasiliskChallengesCompleted = QuestsDev.areAllBasiliskChallengesCompleted;
+    window.setBasiliskChallengeBattleCompleted = QuestsDev.setBasiliskChallengeBattleCompleted;
+    window.getBasiliskChallengeBattleCompleted = QuestsDev.getBasiliskChallengeBattleCompleted;
+    window.BASILISK_CHALLENGES_COUNT = BASILISK_CHALLENGES_COUNT;
     window.resetAllQuests = QuestsDev.resetAll;
+    window.resetCopperKeyReceived = QuestsDev.resetCopperKeyReceived;
+    window.markCopperKeyReceived = QuestsDev.markCopperKeyReceived;
+    window.resetLetterReceived = QuestsDev.resetLetterReceived;
+    window.markLetterReceived = QuestsDev.markLetterReceived;
     window.resetIronOreReceived = QuestsDev.resetIronOreReceived;
+    window.markIronOreReceived = QuestsDev.markIronOreReceived;
+    window.resetWishlistReceived = QuestsDev.resetWishlistReceived;
+    window.markWishlistReceived = QuestsDev.markWishlistReceived;
+    window.resetSantaPresentReceived = QuestsDev.resetSantaPresentReceived;
+    window.markSantaPresentReceived = QuestsDev.markSantaPresentReceived;
     window.resetSanta = QuestsDev.resetSanta;
   }
 

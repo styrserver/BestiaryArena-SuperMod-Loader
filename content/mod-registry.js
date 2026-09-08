@@ -102,20 +102,19 @@ export const DEFAULT_ENABLED_MODS = [
   'database/firebase-admins.js',
   'Official Mods/Bestiary_Automator.js',
   'Official Mods/Board Analyzer.js',
-  'Official Mods/Custom_Display.js',
-  'Official Mods/Hero_Editor.js',
   'Official Mods/Highscore_Improvements.js',
   'Official Mods/Item_tier_list.js',
   'Official Mods/Monster_tier_list.js',
   'Official Mods/Setup_Manager.js',
-  'Official Mods/Team_Copier.js',
-  'Official Mods/Tick_Tracker.js',
-  'Official Mods/Turbo Mode.js',
+  // Super Mods enabled by default (user-toggleable in popup)
+  'Super Mods/Autoseller.js',
+  'Super Mods/Cyclopedia.js',
+  'Super Mods/Hunt Analyzer.js',
   // Hidden Super Mods - enabled by default since users can't toggle them in popup
   'Super Mods/Mod Settings.js',
   'Super Mods/RunTracker.js',
   'Super Mods/Outfiter.js'
-  // All other Super Mods are disabled by default - users must manually enable them
+  // All other mods are disabled by default - users must manually enable them
 ];
 
 // Mods that should be hidden from the UI (utility/system mods)

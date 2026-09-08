@@ -25,6 +25,8 @@
   const MAP_COLUMN_WIDTH_PX = 180;
   const ROOM_TYPE_ATTR = `data-${NS}-room-type`;
   const TOOLTIP_ATTR = `data-${NS}-tooltip`;
+  const XP_TIP_ATTR = `data-${NS}-xp-tip`;
+  const XP_TIP_EL_ID = `${NS}-xp-tip-el`;
   const ROW_PORTRAIT_ENHANCED_ATTR = `data-${NS}-row-portraits-enhanced`;
   const TABLE_ENHANCED_ATTR = `data-${NS}-table-enhanced`;
   const FILTERS_ATTR = `data-${NS}-filters`;
@@ -624,8 +626,17 @@
       div[role="dialog"][${TARGET_ATTR}] table thead th {
         z-index: 5 !important;
       }
+      div[role="dialog"][${TARGET_ATTR}] table thead th,
+      div[role="dialog"][${TARGET_ATTR}] table tbody td {
+        padding-left: 5px !important;
+        padding-right: 5px !important;
+      }
       div[role="dialog"][${TARGET_ATTR}] table tbody td:nth-child(2) {
         overflow: hidden;
+      }
+      div[role="dialog"][${TARGET_ATTR}] table thead th[${XP_STAM_ATTR}],
+      div[role="dialog"][${TARGET_ATTR}] table tbody td[${XP_STAM_ATTR}] {
+        white-space: nowrap;
       }
       div[role="dialog"][${TARGET_ATTR}] table thead .${SORT_TARGET_CLASS} {
         cursor: pointer;
@@ -2908,11 +2919,109 @@
     }
   }
 
+  // Custom hover tooltip for the XP column lines. Native `title` tooltips can't be
+  // width-constrained, so these get a shared, CSS-styled element instead (max 200px,
+  // wrapping text). It mimics native hover behaviour: appears after a short delay,
+  // anchored to the hovered line (it does NOT chase the cursor), hides on leave.
+  // Bound once via delegation on `document`; torn down in cleanup().
+  const XP_TIP_DELAY_MS = 450;
+  let xpTipEl = null;
+  let xpTipHandlersBound = false;
+  let xpTipShowTimer = null;
+  let xpTipCurrentTarget = null;
+
+  function ensureXpTooltipEl() {
+    if (xpTipEl && document.body.contains(xpTipEl)) return xpTipEl;
+    xpTipEl = document.getElementById(XP_TIP_EL_ID) || document.createElement('div');
+    xpTipEl.id = XP_TIP_EL_ID;
+    xpTipEl.style.cssText = [
+      'position:fixed', 'z-index:2147483647', 'max-width:200px', 'width:max-content',
+      'white-space:normal', 'line-height:1.35', 'padding:6px 8px',
+      'background:#0f0f0f', 'color:#e8e8e8', 'border:1px solid #555',
+      'border-radius:3px', 'box-shadow:0 2px 8px rgba(0,0,0,0.5)',
+      'font-size:12px', 'text-align:left', 'pointer-events:none', 'display:none',
+    ].join(';');
+    if (!xpTipEl.parentNode) document.body.appendChild(xpTipEl);
+    return xpTipEl;
+  }
+
+  function positionXpTooltipToTarget(target) {
+    const el = ensureXpTooltipEl();
+    const pad = 12;
+    const anchor = target.getBoundingClientRect();
+    const rect = el.getBoundingClientRect();
+    let left = anchor.left;
+    let top = anchor.bottom + 6;
+    if (left + rect.width > window.innerWidth - pad) left = window.innerWidth - pad - rect.width;
+    if (left < pad) left = pad;
+    if (top + rect.height > window.innerHeight - pad) top = anchor.top - rect.height - 6;
+    if (top < pad) top = pad;
+    el.style.left = `${Math.round(left)}px`;
+    el.style.top = `${Math.round(top)}px`;
+  }
+
+  function hideXpTooltip() {
+    if (xpTipShowTimer) { clearTimeout(xpTipShowTimer); xpTipShowTimer = null; }
+    if (xpTipCurrentTarget) {
+      xpTipCurrentTarget.style.textDecoration = '';
+      xpTipCurrentTarget.style.textUnderlineOffset = '';
+      xpTipCurrentTarget = null;
+    }
+    if (xpTipEl) xpTipEl.style.display = 'none';
+  }
+
+  function onXpTipOver(event) {
+    const target = event.target?.closest?.(`[${XP_TIP_ATTR}]`);
+    if (!target) return;
+    if (target === xpTipCurrentTarget) return;
+    hideXpTooltip();
+    xpTipCurrentTarget = target;
+    // Immediate hover affordance (before the tooltip's own delay elapses).
+    target.style.textDecoration = 'underline';
+    target.style.textUnderlineOffset = '2px';
+    const text = target.getAttribute(XP_TIP_ATTR);
+    if (!text) return;
+    xpTipShowTimer = setTimeout(() => {
+      xpTipShowTimer = null;
+      if (xpTipCurrentTarget !== target || !document.body.contains(target)) return;
+      const el = ensureXpTooltipEl();
+      el.innerHTML = text;
+      el.style.display = 'block';
+      positionXpTooltipToTarget(target);
+    }, XP_TIP_DELAY_MS);
+  }
+
+  function onXpTipOut(event) {
+    const from = event.target?.closest?.(`[${XP_TIP_ATTR}]`);
+    if (!from) return;
+    const to = event.relatedTarget;
+    if (to && to.closest?.(`[${XP_TIP_ATTR}]`)) return;
+    hideXpTooltip();
+  }
+
+  function bindXpTooltipHandlers() {
+    if (xpTipHandlersBound) return;
+    document.addEventListener('mouseover', onXpTipOver, true);
+    document.addEventListener('mouseout', onXpTipOut, true);
+    xpTipHandlersBound = true;
+  }
+
+  function unbindXpTooltipHandlers() {
+    if (xpTipHandlersBound) {
+      document.removeEventListener('mouseover', onXpTipOver, true);
+      document.removeEventListener('mouseout', onXpTipOut, true);
+      xpTipHandlersBound = false;
+    }
+    hideXpTooltip();
+    xpTipEl?.remove();
+    xpTipEl = null;
+  }
+
   function createXpStamCell(room) {
     const td = document.createElement('td');
     td.className = 'px-1 align-middle pixel-font-14 [&:not(:first-child)]:table-frame-left py-0 pl-1 pr-0 sm:pl-0';
     td.setAttribute(XP_STAM_ATTR, 'true');
-    td.style.cssText = 'text-align: left; padding-left: 6px; color: #ccc; white-space: nowrap; line-height: 1.3; vertical-align: middle;';
+    td.style.cssText = 'text-align: left; padding-left: 20px; color: #ccc; white-space: nowrap; line-height: 1.3; vertical-align: middle;';
 
     if (room?.expAvg > 0) {
       const xpFmt = room.expAvg.toLocaleString('pt-BR');
@@ -2929,6 +3038,32 @@
         <div data-line="perStamina">${effFmt} <span style="color:#888;">${stamSuffix}</span></div>
         ${totalLine}
       `;
+
+      // Map-specific explanatory tooltips on each metric line.
+      const mapName = room.name || room.id || '?';
+      const stamFmt = Number(room.staminaCost ?? 0).toLocaleString('pt-BR');
+      const slotsFmt = Number(room.teamSlots ?? 0).toLocaleString('pt-BR');
+      // Templates carry rich HTML; interpolated values are HTML-escaped so a map
+      // name with `<`/`&`/quotes can't break the markup or the attribute.
+      const esc = (s) => String(s).replace(/[&<>"']/g, (c) => (
+        { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+      ));
+      const fillTip = (key, extra) => {
+        const tpl = t(key);
+        const vars = { map: mapName, xp: xpFmt, stam: stamFmt, eff: effFmt, total: totalFmt, slots: slotsFmt, ...extra };
+        return tpl.replace(/\{(\w+)\}/g, (m, name) => (name in vars ? esc(vars[name]) : m));
+      };
+      const setTip = (lineName, key) => {
+        const el = td.querySelector(`[data-line="${lineName}"]`);
+        if (!el) return;
+        el.setAttribute(XP_TIP_ATTR, fillTip(key));
+        el.style.cursor = 'help';
+        el.style.width = 'fit-content';
+      };
+      setTip('xp', 'mods.betterTeleporter.xpTipTotal');
+      setTip('perStamina', 'mods.betterTeleporter.xpTipPerStamina');
+      setTip('perStaminaTotal', 'mods.betterTeleporter.xpTipTeamPerStamina');
+
       applyXpStamLineVisibility(td);
     } else {
       td.innerHTML = '<span style="color:#666;">—</span>';
@@ -3002,6 +3137,7 @@
   }
 
   function tableNeedsPortraitEnhancement(table) {
+    if (table.getAttribute(TABLE_ENHANCED_ATTR) === 'true') return false;
     for (const tr of table.querySelectorAll('tbody tr')) {
       if (getRegionHeaderCell(tr)) continue;
       const roomId = extractRoomIdFromRow(tr);
@@ -3011,6 +3147,11 @@
   }
 
   function tableNeedsEnhancement(table) {
+    // Fast path: a table we already fully enhanced is trusted until the observer
+    // clears the flag (it does so the moment real <tr>s are added/removed). This
+    // keeps the whole-table row scan out of the per-frame MutationObserver work
+    // that benign sprite/canvas churn triggers while the list is scrolling.
+    if (table.getAttribute(TABLE_ENHANCED_ATTR) === 'true') return false;
     if (!table.querySelector(`th[${XP_STAM_ATTR}]`)) return true;
     for (const tr of table.querySelectorAll('tbody tr')) {
       if (rowNeedsEnhancement(tr)) return true;
@@ -3803,6 +3944,10 @@
     const hostDialog = node.closest?.(`div[role="dialog"][${TARGET_ATTR}]`);
     if (hostDialog) {
       if (node.matches?.('tr') || node.querySelector?.('tr')) return true;
+      // Steady-state fast path: if the table is already fully enhanced, non-<tr>
+      // subtree churn inside the dialog (sprite/canvas re-renders during scroll)
+      // can't affect us — skip the fuller completeness probe.
+      if (hostDialog.querySelector('table')?.getAttribute(TABLE_ENHANCED_ATTR) === 'true') return false;
       return !isTeleporterProcessingComplete(hostDialog);
     }
 
@@ -3834,8 +3979,24 @@
 
       for (const node of mutation.addedNodes) {
         if (!addedNodeAffectsTeleporter(node)) continue;
+        // Real row churn (native search repopulating, region expand) invalidates
+        // the "table fully enhanced" fast-path so the new rows get processed.
+        if (node instanceof Element && (node.matches?.('tr') || node.querySelector?.('tr'))) {
+          const table = node.closest?.('table') || mutation.target?.closest?.('table');
+          table?.removeAttribute(TABLE_ENHANCED_ATTR);
+        }
         scanNodeForTeleporter(node);
         shouldSchedule = true;
+      }
+
+      for (const node of mutation.removedNodes) {
+        if (!(node instanceof Element)) continue;
+        if (!node.matches?.('tr') && !node.querySelector?.('tr')) continue;
+        const table = mutation.target?.closest?.('table');
+        if (table && table.closest(`div[role="dialog"][${TARGET_ATTR}]`)) {
+          table.removeAttribute(TABLE_ENHANCED_ATTR);
+          shouldSchedule = true;
+        }
       }
     }
 
@@ -3862,6 +4023,7 @@
       attributeFilter: ['data-state'],
     });
     processTeleporterModals();
+    bindXpTooltipHandlers();
     installBoardButtonInterceptListeners();
     window.__betterTeleporterOpen = openNativeTeleporter;
     console.log('[Better Teleporter] initialized');
@@ -3877,6 +4039,7 @@
     openRowContextMenu = null;
     openingNativeTeleporter = false;
     detachTeleporterKeyboardNavListener();
+    unbindXpTooltipHandlers();
     removeBoardButtonInterceptListeners();
     if (processModalsRaf != null) {
       cancelAnimationFrame(processModalsRaf);
