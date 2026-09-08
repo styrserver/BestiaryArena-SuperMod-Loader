@@ -683,6 +683,35 @@
       "objectiveLine2": "Return to King Tibianus with word that the room is cleared.",
       "rewardCoins": 200,
       "reward": "You went down into a minotaur city, out-talked a madman, and cleared a room that has killed better subjects than you. The crown does not forget such service, Player — take {coins} guild coins from the treasury with my thanks."
+    },
+    "the_basilisk_challenges": {
+      "id": "the_basilisk_challenges",
+      "title": "The Basilisk Challenges",
+      "offer": "A CHALLSSSENGE, YESSS. KNIGHTSSS AND WORSSSE WAIT IN THE SSSEWERSSS FOR ANY FOOL WHO PULLSSS MY LEVER. SSSIX CHALLSSSENGESSS IN ALL WILL COME TO SSSTAND ON THISSS FARM, THOUGH NOT ALL ARE READY YET. WILL YOU ACCEPT, TWO-LEGGER?",
+      "answerYesNo": "YESSS OR NO, TWO-LEGGER? WILL YOU FACE MY CHALLSSSENGE?",
+      "accept": "SSSO BE IT. THE LEVER ON THE GROUND ISSS YOURSSS TO PULL NOW. PULL IT WHEN YOU ARE READY, AND THE SSSEWERSSS WILL SSSWALLOW YOU WHOLE.",
+      "decline": "COWARDICE SSSUITSSS YOU, TWO-LEGGER. THE LEVER STAYSSS SSSTILL UNTIL YOU FIND YOUR NERVE.",
+      "alreadyActive": "THE LEVER ISSS YOURSSS ALREADY, TWO-LEGGER. {completed} OF {total} CHALLSSSENGESSS FALLEN, {remaining} SSSTILL WAIT. PULL IT WHEN YOU ARE READY.",
+      "victoryReport": "SSSO, YOU HAVE RETURNED — AND STILL BREATHING! CHALLSSSENGE {completed} OF {total} NOW FALLEN TO YOUR BLADE. {remaining} REMAIN, IF YOU DARE.",
+      "victoryReportFinal": "ALL SSSIX CHALLSSSENGESSS BROKEN BY YOUR HAND, TWO-LEGGER. TAKE THISSS — THE HORNED FOX SSSOUL CORE. YOU HAVE EARNED IT.",
+      "waitingForMore": "YOU HAVE PROVEN YOURSSSELF SSSO FAR, TWO-LEGGER — {completed} OF {total} CHALLSSSENGESSS FALLEN. THE RESSST SSSTILL SSSLEEP. RETURN WHEN I HAVE MORE FOR YOU.",
+      "alreadyCompleted": "ALL SSSIX OF MY CHALLSSSENGESSS LIE BROKEN BEHIND YOU, TWO-LEGGER. THERE ISSS NOTHING MORE — ONLY MY RESSSPECT.",
+      "battleVictory": "SSSURVIVED, HAVE YOU? IMPRESSSIVE, TWO-LEGGER. RETURN TO THE FARM WHENEVER YOU LIKE.",
+      "battleDefeat": "FALLEN SSSO SSSOON? THE KNIGHTSSS ARE NOT GENTLE. GATHER YOURSSSELF AND TRY AGAIN.",
+      "battleVictory2": "THE SSSLUG KING LIESSS STILL? YOU ARE MORE THAN YOU LOOK, TWO-LEGGER. RETURN TO THE FARM.",
+      "battleDefeat2": "THE SSSLUG KING'SSS BROOD WERE TOO MUCH FOR YOU. GATHER YOURSSSELF AND TRY AGAIN.",
+      "battleVictory3": "THE TECHNOMANCERSSS AND THEIR TOYSSS LIE BROKEN. WELL FOUGHT, TWO-LEGGER. RETURN TO THE FARM.",
+      "battleDefeat3": "THEIR BOLTSSS TORE THROUGH YOU. GATHER YOURSSSELF AND TRY AGAIN.",
+      "battleVictory4": "THE VERMIN OF THE SSSEWERSSS ARE SSSTILLED. NOT PRETTY WORK, BUT WORK WELL DONE. RETURN TO THE FARM.",
+      "battleDefeat4": "PULLED UNDER BY RATSSS AND GHOULSSS? GATHER YOURSSSELF AND TRY AGAIN.",
+      "battleVictory5": "FIRE AND SSSHADESSS BOTH LAID LOW. YOU BURN BRIGHT, TWO-LEGGER. RETURN TO THE FARM.",
+      "battleDefeat5": "BURNED AND HAUNTED IN ONE BREATH? GATHER YOURSSSELF AND TRY AGAIN.",
+      "battleVictory6": "THE HORNED FOX AND HISSS CULT LIE BROKEN — ALL SSSIX CHALLSSSENGESSS FALLEN. RETURN TO THE FARM, TWO-LEGGER. A PRIZE WAITSSS.",
+      "battleDefeat6": "THE FINAL TRIAL, AND SSSTILL YOU FALL? GATHER YOURSSSELF AND TRY AGAIN.",
+      "reward": "SSSURVIVE, AND YOU WILL HAVE EARNED MY RESSSPECT. THAT ISSS RARER THAN GOLD, TWO-LEGGER.",
+      "objectiveLine1": "Complete the Basilisk's challenges.",
+      "objectiveLine2": "Pull the lever and defeat the Basilisk's Knights.",
+      "hint": "Return to the Basilisk on The Farms if you've forgotten his challenge."
     }
   },
   "completionSummaries": {
@@ -713,7 +742,8 @@
     "draconia_tower": "Descended into Draconia Tower with Elathriel, put down the Dragon Lord and his beast, traded a white mushroom to the Old Dragonlord for the Dragonfetish, and returned to Elathriel.",
     "draconia_quest": "Followed Elathriel into the last room of Draconia, cleared it, used the Dragonfetish to return to Hedge Maze, and reported back to Elathriel to receive the Key to Magic (Book).",
     "realm_of_dreams": "Read the Key to Magic (Book) with Tesha, descended into the Northern Dragon Lair to put out the fire guarding the way to the Realm of Dreams, and returned to the Darama Oasis, where Tesha handed over a Mintwallin Prison Key found among the bones.",
-    "visiting_mintwallin": "Descended to the cell beneath Mintwallin, solved the Mad Mage's riddle, cleared the room his key opened, and reported back to King Tibianus."
+    "visiting_mintwallin": "Descended to the cell beneath Mintwallin, solved the Mad Mage's riddle, cleared the room his key opened, and reported back to King Tibianus.",
+    "the_basilisk_challenges": "Cleared all six of the Basilisk's challenges in the Sewers — ending with the Horned Fox and his cult — and claimed the Horned Fox Soul Core."
   },
   "sealTranscripts": [
     {
@@ -775,7 +805,8 @@
       "draconia_tower",
       "draconia_quest",
       "realm_of_dreams",
-      "visiting_mintwallin"
+      "visiting_mintwallin",
+      "the_basilisk_challenges"
     ],
     "missions": {
       "king_honeyflower": {
@@ -961,6 +992,13 @@
         "firebaseKey": "visitingMintwallin",
         "extraFields": [
           "riddleSolved",
+          "battleCompleted"
+        ]
+      },
+      "the_basilisk_challenges": {
+        "stateKey": "progressBasiliskChallenges",
+        "firebaseKey": "basiliskChallenges",
+        "extraFields": [
           "battleCompleted"
         ]
       }

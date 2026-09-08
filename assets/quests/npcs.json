@@ -13,6 +13,7 @@
     "oracle": "11. Board NPCs (The Oracle)",
     "bonelord": "11b. Board NPCs (A Wrinkled Bonelord — Hellgate Library)",
     "oldDragonlord": "11c. Board NPCs (An Old Dragonlord — Draconia Tower)",
+    "basilisk": "11d. Board NPCs (Basilisk — The Basilisk Challenges)",
     "questItems": "12. Quest item chat responses (involved vs uninvolved NPC lines)",
     "questItemUninvolvedTemplates": "13. Uninvolved quest item templates ({item} placeholder)",
     "shared": "0. Shared transcript keywords merged under every NPC (gamemaster / isle of solitude / gm island). NPC-specific keywords override these."
@@ -902,8 +903,8 @@
       "teshial": "Dreamers are of no practical use. I don't mourn their demise.",
       "deraisim": "Confused cowards. With all their skill they still tend to hide and run. What a waste.",
       "kuridai": "We are the heart of the elven society. We forge, we build, and we don't allow our people to be pushed around.",
-      "hi": "Be greeted Player.",
-      "hello": "Be greeted Player.",
+      "hi": "Be greeted, Player. Do not mistake courtesy for welcome — say what you want of me.",
+      "hello": "Be greeted, Player. Do not mistake courtesy for welcome — say what you want of me.",
       "army": "It's one of the more useful concepts we can learn from the other races.",
       "door": "For safety we keep the door to the hellgate locked all times. I have the keys to open it when needed.",
       "hellgate": "It was here among other structures, like the depot tower, before our people came here. It's secured by a sealed door.",
@@ -933,7 +934,7 @@
       "Say what you mean, or don't waste my time."
     ],
     "boardChat": {
-      "welcomeMessage": "Be greeted Player.",
+      "welcomeMessage": "Be greeted, Player. Do not mistake courtesy for welcome — say what you want of me.",
       "placeholder": "Type your message to Elathriel..."
     }
   },
@@ -994,6 +995,43 @@
     "boardChat": {
       "welcomeMessage": "AHHH MUSHRRROOOMSSS! NOW MY PAIN WILL BE EASSSED FOR A WHILE! TAKE THISS AND LEAVE THE DRAGONSSS' CEMETERY AT ONCE!",
       "placeholder": "Type your message to the Old Dragonlord..."
+    }
+  },
+  "basilisk": {
+    "_comment": "Basilisk. Board NPC on tile 87 of The Farms, facing west (offers The Basilisk Challenges quest). Hisses everything in ALL CAPS with tripled sibilants — modeled on An Old Dragonlord's hiss but given its own full keyword/confusion table (like A Wrinkled Bonelord) since the player converses with him directly to accept/decline and ask about the challenges. The yes/no accept exchange itself is handled in Quests.js (Board NPC keyword branch), not here.",
+    "keywords": {
+      "hi": "SSSO. A TWO-LEGGER COMESSS TO MY FARM. STAND STILL AND LET ME LOOK AT YOU.",
+      "hello": "SSSO. A TWO-LEGGER COMESSS TO MY FARM. STAND STILL AND LET ME LOOK AT YOU.",
+      "name": "THEY CALL ME BASSSILISSSK. A NAME EARNED, NOT GIVEN, HISSSSS.",
+      "basilisk": "YESSS, THAT ISSS ME. KING OF SSSERPENTSSS, THOUGH THISSS FARM ISSS A SSSMALL KINGDOM.",
+      "farm": "THE FARMSSS WERE QUIET BEFORE I CAME. NOW THEY ARE MINE TO WATCH.",
+      "farms": "THE FARMSSS WERE QUIET BEFORE I CAME. NOW THEY ARE MINE TO WATCH.",
+      "snake": "A SSSNAKE? INSSSULTING. I AM SSSO MUCH MORE THAN A SSSNAKE.",
+      "eyes": "LOOK INTO MY EYESSS IF YOU DARE. MANY WHO SSSTARE TOO LONG DO NOT WALK AWAY SSSOFT.",
+      "eye": "LOOK INTO MY EYESSS IF YOU DARE. MANY WHO SSSTARE TOO LONG DO NOT WALK AWAY SSSOFT.",
+      "stare": "LOOK INTO MY EYESSS IF YOU DARE. MANY WHO SSSTARE TOO LONG DO NOT WALK AWAY SSSOFT.",
+      "gaze": "LOOK INTO MY EYESSS IF YOU DARE. MANY WHO SSSTARE TOO LONG DO NOT WALK AWAY SSSOFT.",
+      "stone": "SSSOME SSSAY MY GAZE TURNSSS FLESSSH TO SSSTONE. I NEVER CORRECT THEM. IT ISSS GOOD FOR BUSSSINESSS.",
+      "venom": "MY VENOM ISSS THE LEASSST OF WHAT SSSHOULD WORRY YOU, TWO-LEGGER.",
+      "poison": "MY VENOM ISSS THE LEASSST OF WHAT SSSHOULD WORRY YOU, TWO-LEGGER.",
+      "lever": "THE LEVER ON THE GROUND, YESSS. PULL IT AND YOU GO WHERE I SSSEND YOU — INTO MY CHALLSSSENGE.",
+      "challenge": "A CHALLSSSENGE, YESSS. FOUR KNIGHTSSS WAIT IN THE SSSEWERSSS FOR ANY FOOL WHO PULLSSS MY LEVER. ARE YOU READY, TWO-LEGGER? YESSS OR NO?",
+      "challenges": "SSSIX CHALLSSSENGESSS IN ALL, THOUGH ONLY THE FIRSSST ISSS READY FOR YOU NOW. THE REST SSSLEEP, FOR NOW. WILL YOU FACE THE FIRSSST? YESSS OR NO?",
+      "hint": "PULL THE LEVER ON THE GROUND ONCE YOU HAVE AGREED, AND THE SSSEWERSSS WILL SSSWALLOW YOU WHOLE.",
+      "knight": "FOUR OF THEM GUARD MY FIRSSST CHALLSSSENGE. THEY DO NOT MOVE. THEY DO NOT NEED TO.",
+      "reward": "SSSURVIVE, AND YOU WILL HAVE EARNED MY RESSSPECT. THAT ISSS RARER THAN GOLD, TWO-LEGGER.",
+      "bye": "GO THEN. THE LEVER WILL WAIT AS LONG AS I DO.",
+      "goodbye": "GO THEN. THE LEVER WILL WAIT AS LONG AS I DO.",
+      "farewell": "GO THEN. THE LEVER WILL WAIT AS LONG AS I DO."
+    },
+    "confusion": [
+      "HISSSSS? SSSPEAK PLAINLY, TWO-LEGGER.",
+      "MY EARSSS DO NOT CATCH SSSUCH WORDSSS. TRY AGAIN.",
+      "SSSSILENCE WOULD SSSERVE YOU BETTER THAN THAT."
+    ],
+    "boardChat": {
+      "welcomeMessage": "SSSO. A TWO-LEGGER COMESSS TO MY FARM. STAND STILL AND LET ME LOOK AT YOU.",
+      "placeholder": "Type your message to the Basilisk..."
     }
   },
   "oracle": {

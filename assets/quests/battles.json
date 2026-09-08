@@ -17,7 +17,8 @@
     "draconia_quest": "13. Draconia Quest (Elathriel’s final Draconia battle, Sewers reskin — Dragonfetish return)",
     "realm_of_dreams": "14. Realm of Dreams (Tesha - Key to Magic, Sewers reskin, Fire Elementals)",
     "mintwallin_prison": "15. Mintwallin Prison (Visiting Mintwallin / the Mad Mage — King Tibianus easter egg, Sewers reskin walk-around)",
-    "mad_mage_room": "16. Mad Mage Room (Mad Mage Room quest, Part 2 — Sewers reskin battle after A Prisoner's riddle)"
+    "mad_mage_room": "16. Mad Mage Room (Mad Mage Room quest, Part 2 — Sewers reskin battle after A Prisoner's riddle)",
+    "basilisk_challenge_1": "17. Basilisk Challenge 1 (The Basilisk Challenges quest — Sewers reskin, lever on tile 22 of The Farms)"
   },
   "mornenion": {
     "allyLimit": 3,
@@ -2739,6 +2740,1585 @@
       114,
       115,
       116
+    ],
+    "allowedTilesMessage": "Ally creatures can only be placed on the marked tiles!"
+  },
+  "basilisk_challenge_1": {
+    "allyLimit": 6,
+    "preventVillainMovement": true,
+    "hideVillainSprites": true,
+    "villains": [
+      {
+        "nickname": "Elite Knight",
+        "tileIndex": 53,
+        "keyPrefix": "elite-knight-tile-53-",
+        "fallbackGameId": 52,
+        "level": 175,
+        "direction": "south",
+        "creatureName": "Knight",
+        "shiny": true,
+        "awakened": true,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ad",
+          "tier": 5,
+          "name": "Fire Axe",
+          "gameId": 20
+        },
+        "abilityCooldownTicks": 16
+      },
+      {
+        "nickname": "Elite Knight",
+        "tileIndex": 66,
+        "keyPrefix": "elite-knight-tile-66-",
+        "fallbackGameId": 52,
+        "level": 175,
+        "direction": "south",
+        "creatureName": "Knight",
+        "shiny": true,
+        "awakened": true,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ad",
+          "tier": 5,
+          "name": "Fire Axe",
+          "gameId": 20
+        },
+        "abilityCooldownTicks": 16
+      },
+      {
+        "nickname": "Elite Knight",
+        "tileIndex": 78,
+        "keyPrefix": "elite-knight-tile-78-",
+        "fallbackGameId": 52,
+        "level": 175,
+        "direction": "south",
+        "creatureName": "Knight",
+        "shiny": true,
+        "awakened": true,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ad",
+          "tier": 5,
+          "name": "Fire Axe",
+          "gameId": 20
+        },
+        "abilityCooldownTicks": 16
+      },
+      {
+        "nickname": "Elite Knight",
+        "tileIndex": 85,
+        "keyPrefix": "elite-knight-tile-85-",
+        "fallbackGameId": 52,
+        "level": 175,
+        "direction": "south",
+        "creatureName": "Knight",
+        "shiny": true,
+        "awakened": true,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ad",
+          "tier": 5,
+          "name": "Fire Axe",
+          "gameId": 20
+        },
+        "abilityCooldownTicks": 16
+      }
+    ],
+    "allowedTiles": [
+      32,
+      33,
+      34,
+      36,
+      37,
+      38,
+      39,
+      40,
+      41,
+      47,
+      49,
+      51,
+      52,
+      53,
+      54,
+      55,
+      56,
+      62,
+      64,
+      65,
+      66,
+      67,
+      68,
+      69,
+      70,
+      71,
+      77,
+      78,
+      79,
+      81,
+      82,
+      83,
+      84,
+      85,
+      86,
+      92,
+      93,
+      94,
+      96,
+      97,
+      98,
+      99,
+      100,
+      101
+    ],
+    "allowedTilesMessage": "Ally creatures can only be placed on the marked tiles!"
+  },
+  "basilisk_challenge_2": {
+    "allyLimit": 4,
+    "preventVillainMovement": true,
+    "hideVillainSprites": true,
+    "villains": [
+      {
+        "nickname": "Slug Trainer",
+        "tileIndex": 67,
+        "keyPrefix": "slug-trainer-tile-67-",
+        "fallbackGameId": 77,
+        "level": 50,
+        "direction": "north",
+        "creatureName": "Swamp Troll",
+        "shiny": true,
+        "awakened": true,
+        "outfitSpriteId": 15,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Bonelord Helmet",
+          "gameId": 4
+        },
+        "abilityCooldownTicks": 8
+      },
+      {
+        "nickname": "Slug Trainer",
+        "tileIndex": 81,
+        "keyPrefix": "slug-trainer-tile-81-",
+        "fallbackGameId": 77,
+        "level": 50,
+        "direction": "west",
+        "creatureName": "Swamp Troll",
+        "shiny": true,
+        "awakened": true,
+        "outfitSpriteId": 15,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Bonelord Helmet",
+          "gameId": 4
+        },
+        "abilityCooldownTicks": 8
+      },
+      {
+        "nickname": "Slug King",
+        "tileIndex": 82,
+        "keyPrefix": "slug-king-tile-82-",
+        "fallbackGameId": 10,
+        "level": 250,
+        "direction": "west",
+        "creatureName": "Rotworm",
+        "shiny": true,
+        "awakened": true,
+        "outfitSpriteId": 53,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Medusa Shield",
+          "gameId": 17
+        },
+        "abilityCooldownTicks": 0
+      },
+      {
+        "nickname": "Slug Trainer",
+        "tileIndex": 83,
+        "keyPrefix": "slug-trainer-tile-83-",
+        "fallbackGameId": 77,
+        "level": 50,
+        "direction": "east",
+        "creatureName": "Swamp Troll",
+        "shiny": true,
+        "awakened": true,
+        "outfitSpriteId": 15,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Bonelord Helmet",
+          "gameId": 4
+        },
+        "abilityCooldownTicks": 8
+      },
+      {
+        "nickname": "Slug Trainer",
+        "tileIndex": 97,
+        "keyPrefix": "slug-trainer-tile-97-",
+        "fallbackGameId": 77,
+        "level": 50,
+        "direction": "south",
+        "creatureName": "Swamp Troll",
+        "shiny": true,
+        "awakened": true,
+        "outfitSpriteId": 15,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Bonelord Helmet",
+          "gameId": 4
+        },
+        "abilityCooldownTicks": 8
+      }
+    ],
+    "allowedTiles": [
+      17,
+      32,
+      47,
+      48,
+      50,
+      51,
+      52,
+      53,
+      62,
+      63,
+      65,
+      66,
+      67,
+      68,
+      77,
+      78,
+      79,
+      80,
+      81,
+      82,
+      83,
+      84,
+      85,
+      95,
+      96,
+      97,
+      98,
+      99,
+      100,
+      111,
+      112,
+      113,
+      114,
+      115
+    ],
+    "allowedTilesMessage": "Ally creatures can only be placed on the marked tiles!"
+  },
+  "basilisk_challenge_3": {
+    "allyLimit": 5,
+    "preventVillainMovement": true,
+    "hideVillainSprites": true,
+    "villains": [
+      {
+        "nickname": "Mad Technomancer",
+        "tileIndex": 52,
+        "keyPrefix": "mad-technomancer-tile-52-",
+        "fallbackGameId": 12,
+        "level": 75,
+        "direction": "west",
+        "creatureName": "Goblin",
+        "shiny": true,
+        "awakened": true,
+        "outfitSpriteId": 66,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ad",
+          "tier": 5,
+          "name": "Chain Bolter",
+          "gameId": 16
+        },
+        "abilityCooldownTicks": 0
+      },
+      {
+        "nickname": "Mad Technomancer",
+        "tileIndex": 53,
+        "keyPrefix": "mad-technomancer-tile-53-",
+        "fallbackGameId": 40,
+        "level": 75,
+        "direction": "west",
+        "creatureName": "Elf Scout",
+        "shiny": true,
+        "awakened": true,
+        "outfitSpriteId": 66,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ad",
+          "tier": 5,
+          "name": "Chain Bolter",
+          "gameId": 16
+        },
+        "abilityCooldownTicks": 0
+      },
+      {
+        "nickname": "Mad Technomancer",
+        "tileIndex": 54,
+        "keyPrefix": "mad-technomancer-tile-54-",
+        "fallbackGameId": 37,
+        "level": 75,
+        "direction": "west",
+        "creatureName": "Deer",
+        "shiny": true,
+        "awakened": true,
+        "outfitSpriteId": 66,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ad",
+          "tier": 5,
+          "name": "Chain Bolter",
+          "gameId": 16
+        },
+        "abilityCooldownTicks": 0
+      },
+      {
+        "nickname": "Mad Technomancer",
+        "tileIndex": 55,
+        "keyPrefix": "mad-technomancer-tile-55-",
+        "fallbackGameId": 40,
+        "level": 75,
+        "direction": "west",
+        "creatureName": "Elf Scout",
+        "shiny": true,
+        "awakened": true,
+        "outfitSpriteId": 66,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ad",
+          "tier": 5,
+          "name": "Chain Bolter",
+          "gameId": 16
+        },
+        "abilityCooldownTicks": 0
+      },
+      {
+        "nickname": "Mad Technomancer",
+        "tileIndex": 56,
+        "keyPrefix": "mad-technomancer-tile-56-",
+        "fallbackGameId": 37,
+        "level": 75,
+        "direction": "west",
+        "creatureName": "Deer",
+        "shiny": true,
+        "awakened": true,
+        "outfitSpriteId": 66,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ad",
+          "tier": 5,
+          "name": "Chain Bolter",
+          "gameId": 16
+        },
+        "abilityCooldownTicks": 0
+      },
+      {
+        "nickname": "Mad Technomancer",
+        "tileIndex": 82,
+        "keyPrefix": "mad-technomancer-tile-82-",
+        "fallbackGameId": 12,
+        "level": 75,
+        "direction": "west",
+        "creatureName": "Goblin",
+        "shiny": true,
+        "awakened": true,
+        "outfitSpriteId": 66,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Chain Bolter",
+          "gameId": 16
+        },
+        "abilityCooldownTicks": 0
+      },
+      {
+        "nickname": "Elf Scout",
+        "tileIndex": 83,
+        "keyPrefix": "elf-scout-tile-83-",
+        "fallbackGameId": 40,
+        "level": 75,
+        "direction": "west",
+        "creatureName": "Elf Scout",
+        "shiny": true,
+        "awakened": true,
+        "outfitSpriteId": 66,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Chain Bolter",
+          "gameId": 16
+        },
+        "abilityCooldownTicks": 0
+      },
+      {
+        "nickname": "Mad Technomancer",
+        "tileIndex": 84,
+        "keyPrefix": "mad-technomancer-tile-84-",
+        "fallbackGameId": 37,
+        "level": 75,
+        "direction": "west",
+        "creatureName": "Deer",
+        "shiny": true,
+        "awakened": true,
+        "outfitSpriteId": 66,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ad",
+          "tier": 5,
+          "name": "Chain Bolter",
+          "gameId": 16
+        },
+        "abilityCooldownTicks": 0
+      },
+      {
+        "nickname": "Mad Technomancer",
+        "tileIndex": 85,
+        "keyPrefix": "mad-technomancer-tile-85-",
+        "fallbackGameId": 40,
+        "level": 75,
+        "direction": "west",
+        "creatureName": "Elf Scout",
+        "shiny": true,
+        "awakened": true,
+        "outfitSpriteId": 66,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ad",
+          "tier": 5,
+          "name": "Chain Bolter",
+          "gameId": 16
+        },
+        "abilityCooldownTicks": 0
+      },
+      {
+        "nickname": "Mad Technomancer",
+        "tileIndex": 86,
+        "keyPrefix": "mad-technomancer-tile-86-",
+        "fallbackGameId": 37,
+        "level": 75,
+        "direction": "west",
+        "creatureName": "Deer",
+        "shiny": true,
+        "awakened": true,
+        "outfitSpriteId": 66,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ad",
+          "tier": 5,
+          "name": "Chain Bolter",
+          "gameId": 16
+        },
+        "abilityCooldownTicks": 0
+      },
+      {
+        "nickname": "Mad Technomancer",
+        "tileIndex": 113,
+        "keyPrefix": "mad-technomancer-tile-113-",
+        "fallbackGameId": 40,
+        "level": 75,
+        "direction": "west",
+        "creatureName": "Elf Scout",
+        "shiny": true,
+        "awakened": true,
+        "outfitSpriteId": 66,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ad",
+          "tier": 5,
+          "name": "Chain Bolter",
+          "gameId": 16
+        },
+        "abilityCooldownTicks": 0
+      },
+      {
+        "nickname": "Mad Technomancer",
+        "tileIndex": 114,
+        "keyPrefix": "mad-technomancer-tile-114-",
+        "fallbackGameId": 37,
+        "level": 75,
+        "direction": "west",
+        "creatureName": "Deer",
+        "shiny": true,
+        "awakened": true,
+        "outfitSpriteId": 66,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ad",
+          "tier": 5,
+          "name": "Chain Bolter",
+          "gameId": 16
+        },
+        "abilityCooldownTicks": 0
+      }
+    ],
+    "allowedTiles": [
+      2,
+      3,
+      4,
+      5,
+      17,
+      18,
+      19,
+      20,
+      32,
+      33,
+      34,
+      35,
+      47,
+      48,
+      49,
+      50,
+      62,
+      63,
+      64,
+      65,
+      77,
+      92
+    ],
+    "allowedTilesMessage": "Ally creatures can only be placed on the marked tiles!"
+  },
+  "basilisk_challenge_4": {
+    "allyLimit": 4,
+    "preventVillainMovement": true,
+    "hideVillainSprites": true,
+    "villains": [
+      {
+        "nickname": "Rat",
+        "tileIndex": 2,
+        "keyPrefix": "rat-tile-2-",
+        "fallbackGameId": 19,
+        "level": 100,
+        "direction": "south",
+        "creatureName": "Ghoul",
+        "shiny": true,
+        "awakened": true,
+        "outfitSpriteId": 21,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Boots of Haste",
+          "gameId": 1
+        },
+        "abilityCooldownTicks": 0
+      },
+      {
+        "nickname": "Rat",
+        "tileIndex": 5,
+        "keyPrefix": "rat-tile-5-",
+        "fallbackGameId": 19,
+        "level": 100,
+        "direction": "south",
+        "creatureName": "Ghoul",
+        "shiny": true,
+        "awakened": true,
+        "outfitSpriteId": 21,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Boots of Haste",
+          "gameId": 1
+        },
+        "abilityCooldownTicks": 0
+      },
+      {
+        "nickname": "Rat",
+        "tileIndex": 32,
+        "keyPrefix": "rat-tile-32-",
+        "fallbackGameId": 28,
+        "level": 100,
+        "direction": "east",
+        "creatureName": "Mummy",
+        "shiny": true,
+        "awakened": true,
+        "outfitSpriteId": 21,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Boots of Haste",
+          "gameId": 1
+        },
+        "abilityCooldownTicks": 0
+      },
+      {
+        "nickname": "Rat",
+        "tileIndex": 34,
+        "keyPrefix": "rat-tile-34-",
+        "fallbackGameId": 19,
+        "level": 100,
+        "direction": "south",
+        "creatureName": "Ghoul",
+        "shiny": true,
+        "awakened": true,
+        "outfitSpriteId": 21,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Boots of Haste",
+          "gameId": 1
+        },
+        "abilityCooldownTicks": 0
+      },
+      {
+        "nickname": "Rat",
+        "tileIndex": 52,
+        "keyPrefix": "rat-tile-52-",
+        "fallbackGameId": 19,
+        "level": 100,
+        "direction": "south",
+        "creatureName": "Ghoul",
+        "shiny": true,
+        "awakened": true,
+        "outfitSpriteId": 21,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Boots of Haste",
+          "gameId": 1
+        },
+        "abilityCooldownTicks": 0
+      },
+      {
+        "nickname": "Rat",
+        "tileIndex": 56,
+        "keyPrefix": "rat-tile-56-",
+        "fallbackGameId": 19,
+        "level": 100,
+        "direction": "west",
+        "creatureName": "Ghoul",
+        "shiny": true,
+        "awakened": true,
+        "outfitSpriteId": 21,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Boots of Haste",
+          "gameId": 1
+        },
+        "abilityCooldownTicks": 0
+      },
+      {
+        "nickname": "Rat",
+        "tileIndex": 63,
+        "keyPrefix": "rat-tile-63-",
+        "fallbackGameId": 19,
+        "level": 100,
+        "direction": "east",
+        "creatureName": "Ghoul",
+        "shiny": true,
+        "awakened": true,
+        "outfitSpriteId": 21,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Boots of Haste",
+          "gameId": 1
+        },
+        "abilityCooldownTicks": 0
+      },
+      {
+        "nickname": "Rat",
+        "tileIndex": 82,
+        "keyPrefix": "rat-tile-82-",
+        "fallbackGameId": 28,
+        "level": 100,
+        "direction": "east",
+        "creatureName": "Mummy",
+        "shiny": true,
+        "awakened": true,
+        "outfitSpriteId": 21,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Boots of Haste",
+          "gameId": 1
+        },
+        "abilityCooldownTicks": 0
+      },
+      {
+        "nickname": "Rat",
+        "tileIndex": 84,
+        "keyPrefix": "rat-tile-84-",
+        "fallbackGameId": 19,
+        "level": 100,
+        "direction": "west",
+        "creatureName": "Ghoul",
+        "shiny": true,
+        "awakened": true,
+        "outfitSpriteId": 21,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Boots of Haste",
+          "gameId": 1
+        },
+        "abilityCooldownTicks": 0
+      },
+      {
+        "nickname": "Rat",
+        "tileIndex": 113,
+        "keyPrefix": "rat-tile-113-",
+        "fallbackGameId": 19,
+        "level": 100,
+        "direction": "north",
+        "creatureName": "Ghoul",
+        "shiny": true,
+        "awakened": true,
+        "outfitSpriteId": 21,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Boots of Haste",
+          "gameId": 1
+        },
+        "abilityCooldownTicks": 0
+      },
+      {
+        "nickname": "Rat",
+        "tileIndex": 122,
+        "keyPrefix": "rat-tile-122-",
+        "fallbackGameId": 19,
+        "level": 100,
+        "direction": "north",
+        "creatureName": "Ghoul",
+        "shiny": true,
+        "awakened": true,
+        "outfitSpriteId": 21,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Boots of Haste",
+          "gameId": 1
+        },
+        "abilityCooldownTicks": 0
+      }
+    ],
+    "allowedTiles": [
+      2,
+      3,
+      4,
+      5,
+      17,
+      18,
+      19,
+      20,
+      32,
+      33,
+      34,
+      35,
+      47,
+      48,
+      49,
+      50,
+      52,
+      53,
+      54,
+      55,
+      56,
+      62,
+      63,
+      64,
+      65,
+      66,
+      67,
+      68,
+      69,
+      70,
+      71,
+      77,
+      82,
+      83,
+      84,
+      85,
+      86,
+      92,
+      97,
+      98,
+      99,
+      107,
+      113,
+      114,
+      122
+    ],
+    "allowedTilesMessage": "Ally creatures can only be placed on the marked tiles!"
+  },
+  "basilisk_challenge_5": {
+    "allyLimit": 6,
+    "preventVillainMovement": true,
+    "hideVillainSprites": true,
+    "villains": [
+      {
+        "nickname": "Mad Sheep",
+        "tileIndex": 18,
+        "keyPrefix": "mad-sheep-tile-18-",
+        "fallbackGameId": 30,
+        "level": 40,
+        "direction": "east",
+        "creatureName": "Fire Elemental",
+        "shiny": true,
+        "awakened": true,
+        "outfitSpriteId": 14,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Amazon Armor",
+          "gameId": 32
+        },
+        "abilityCooldownTicks": 32
+      },
+      {
+        "nickname": "Mad Sheep",
+        "tileIndex": 32,
+        "keyPrefix": "mad-sheep-tile-32-",
+        "fallbackGameId": 30,
+        "level": 40,
+        "direction": "east",
+        "creatureName": "Fire Elemental",
+        "shiny": true,
+        "awakened": true,
+        "outfitSpriteId": 14,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Amazon Armor",
+          "gameId": 32
+        },
+        "abilityCooldownTicks": 32
+      },
+      {
+        "nickname": "Mad Sheep",
+        "tileIndex": 34,
+        "keyPrefix": "mad-sheep-tile-34-",
+        "fallbackGameId": 22,
+        "level": 40,
+        "direction": "east",
+        "creatureName": "Ghost",
+        "shiny": true,
+        "awakened": true,
+        "outfitSpriteId": 14,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Amazon Armor",
+          "gameId": 32
+        },
+        "abilityCooldownTicks": 32
+      },
+      {
+        "nickname": "Mad Sheep",
+        "tileIndex": 48,
+        "keyPrefix": "mad-sheep-tile-48-",
+        "fallbackGameId": 30,
+        "level": 40,
+        "direction": "east",
+        "creatureName": "Fire Elemental",
+        "shiny": true,
+        "awakened": true,
+        "outfitSpriteId": 14,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Amazon Armor",
+          "gameId": 32
+        },
+        "abilityCooldownTicks": 32
+      },
+      {
+        "nickname": "Mad Sheep",
+        "tileIndex": 62,
+        "keyPrefix": "mad-sheep-tile-62-",
+        "fallbackGameId": 22,
+        "level": 40,
+        "direction": "east",
+        "creatureName": "Ghost",
+        "shiny": true,
+        "awakened": true,
+        "outfitSpriteId": 14,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Amazon Armor",
+          "gameId": 32
+        },
+        "abilityCooldownTicks": 32
+      },
+      {
+        "nickname": "Mad Sheep",
+        "tileIndex": 64,
+        "keyPrefix": "mad-sheep-tile-64-",
+        "fallbackGameId": 30,
+        "level": 40,
+        "direction": "east",
+        "creatureName": "Fire Elemental",
+        "shiny": true,
+        "awakened": true,
+        "outfitSpriteId": 14,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Amazon Armor",
+          "gameId": 32
+        },
+        "abilityCooldownTicks": 32
+      },
+      {
+        "nickname": "Mad Sheep",
+        "tileIndex": 78,
+        "keyPrefix": "mad-sheep-tile-78-",
+        "fallbackGameId": 30,
+        "level": 40,
+        "direction": "east",
+        "creatureName": "Fire Elemental",
+        "shiny": true,
+        "awakened": true,
+        "outfitSpriteId": 14,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Amazon Armor",
+          "gameId": 32
+        },
+        "abilityCooldownTicks": 32
+      },
+      {
+        "nickname": "Mad Sheep",
+        "tileIndex": 92,
+        "keyPrefix": "mad-sheep-tile-92-",
+        "fallbackGameId": 30,
+        "level": 40,
+        "direction": "east",
+        "creatureName": "Fire Elemental",
+        "shiny": true,
+        "awakened": true,
+        "outfitSpriteId": 14,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Amazon Armor",
+          "gameId": 32
+        },
+        "abilityCooldownTicks": 32
+      },
+      {
+        "nickname": "Mad Sheep",
+        "tileIndex": 94,
+        "keyPrefix": "mad-sheep-tile-94-",
+        "fallbackGameId": 22,
+        "level": 40,
+        "direction": "east",
+        "creatureName": "Ghost",
+        "shiny": true,
+        "awakened": true,
+        "outfitSpriteId": 14,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Amazon Armor",
+          "gameId": 32
+        },
+        "abilityCooldownTicks": 32
+      },
+      {
+        "nickname": "Mad Sheep",
+        "tileIndex": 108,
+        "keyPrefix": "mad-sheep-tile-108-",
+        "fallbackGameId": 30,
+        "level": 40,
+        "direction": "east",
+        "creatureName": "Fire Elemental",
+        "shiny": true,
+        "awakened": true,
+        "outfitSpriteId": 14,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Amazon Armor",
+          "gameId": 32
+        },
+        "abilityCooldownTicks": 32
+      }
+    ],
+    "allowedTiles": [
+      52,
+      53,
+      54,
+      55,
+      56,
+      67,
+      68,
+      69,
+      70,
+      71,
+      82,
+      83,
+      84,
+      85,
+      86,
+      97,
+      98,
+      99,
+      113,
+      114
+    ],
+    "allowedTilesMessage": "Ally creatures can only be placed on the marked tiles!"
+  },
+  "basilisk_challenge_6": {
+    "allyLimit": 8,
+    "preventVillainMovement": true,
+    "hideVillainSprites": true,
+    "villains": [
+      {
+        "nickname": "Depowered Minotaur",
+        "tileIndex": 49,
+        "keyPrefix": "depowered-minotaur-tile-49-",
+        "fallbackGameId": 61,
+        "level": 25,
+        "direction": "east",
+        "creatureName": "Nightstalker",
+        "shiny": true,
+        "awakened": true,
+        "outfitSpriteId": 25,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Epee",
+          "gameId": 10
+        },
+        "abilityCooldownTicks": 32
+      },
+      {
+        "nickname": "Minotaur Cult Follower",
+        "tileIndex": 52,
+        "keyPrefix": "minotaur-cult-follower-tile-52-",
+        "fallbackGameId": 8,
+        "level": 10,
+        "direction": "east",
+        "creatureName": "Tortoise",
+        "shiny": true,
+        "awakened": true,
+        "outfitSpriteId": 24,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Skullcracker Armor",
+          "gameId": 19
+        },
+        "abilityCooldownTicks": 32
+      },
+      {
+        "nickname": "Minotaur Cult Follower",
+        "tileIndex": 69,
+        "keyPrefix": "minotaur-cult-follower-tile-69-",
+        "fallbackGameId": 8,
+        "level": 10,
+        "direction": "east",
+        "creatureName": "Tortoise",
+        "shiny": true,
+        "awakened": true,
+        "outfitSpriteId": 24,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Skullcracker Armor",
+          "gameId": 19
+        },
+        "abilityCooldownTicks": 32
+      },
+      {
+        "nickname": "Depowered Minotaur",
+        "tileIndex": 77,
+        "keyPrefix": "depowered-minotaur-tile-77-",
+        "fallbackGameId": 61,
+        "level": 25,
+        "direction": "east",
+        "creatureName": "Nightstalker",
+        "shiny": true,
+        "awakened": true,
+        "outfitSpriteId": 25,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Epee",
+          "gameId": 10
+        },
+        "abilityCooldownTicks": 32
+      },
+      {
+        "nickname": "Minotaur Cult Prophet",
+        "tileIndex": 95,
+        "keyPrefix": "minotaur-cult-prophet-tile-95-",
+        "fallbackGameId": 101,
+        "level": 25,
+        "direction": "east",
+        "creatureName": "Thalas",
+        "shiny": true,
+        "awakened": true,
+        "outfitSpriteId": 23,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Soft Boots",
+          "gameId": 44
+        },
+        "abilityCooldownTicks": 48
+      },
+      {
+        "nickname": "Minotaur Cult Prophet",
+        "tileIndex": 99,
+        "keyPrefix": "minotaur-cult-prophet-tile-99-",
+        "fallbackGameId": 101,
+        "level": 25,
+        "direction": "north",
+        "creatureName": "Thalas",
+        "shiny": true,
+        "awakened": true,
+        "outfitSpriteId": 23,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Soft Boots",
+          "gameId": 44
+        },
+        "abilityCooldownTicks": 48
+      },
+      {
+        "nickname": "The Horned Fox",
+        "tileIndex": 112,
+        "keyPrefix": "the-horned-fox-tile-112-",
+        "fallbackGameId": 35,
+        "level": 200,
+        "direction": "north",
+        "creatureName": "Minotaur Guard",
+        "awakened": true,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Vampire Shield",
+          "gameId": 7
+        },
+        "abilityCooldownTicks": 64
+      },
+      {
+        "nickname": "Depowered Minotaur",
+        "tileIndex": 122,
+        "keyPrefix": "depowered-minotaur-tile-122-",
+        "fallbackGameId": 61,
+        "level": 25,
+        "direction": "east",
+        "creatureName": "Nightstalker",
+        "shiny": true,
+        "awakened": true,
+        "outfitSpriteId": 25,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Epee",
+          "gameId": 10
+        },
+        "abilityCooldownTicks": 32
+      },
+      {
+        "nickname": "Minotaur Cult Follower",
+        "tileIndex": 125,
+        "keyPrefix": "minotaur-cult-follower-tile-125-",
+        "fallbackGameId": 8,
+        "level": 10,
+        "direction": "east",
+        "creatureName": "Tortoise",
+        "shiny": true,
+        "awakened": true,
+        "outfitSpriteId": 24,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Skullcracker Armor",
+          "gameId": 19
+        },
+        "abilityCooldownTicks": 32
+      },
+      {
+        "nickname": "Minotaur Cult Prophet",
+        "tileIndex": 142,
+        "keyPrefix": "minotaur-cult-prophet-tile-142-",
+        "fallbackGameId": 101,
+        "level": 25,
+        "direction": "north",
+        "creatureName": "Thalas",
+        "shiny": true,
+        "awakened": true,
+        "outfitSpriteId": 23,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Soft Boots",
+          "gameId": 44
+        },
+        "abilityCooldownTicks": 48
+      }
+    ],
+    "allowedTiles": [
+      24,
+      25,
+      26,
+      39,
+      40,
+      41,
+      56,
+      71
     ],
     "allowedTilesMessage": "Ally creatures can only be placed on the marked tiles!"
   }

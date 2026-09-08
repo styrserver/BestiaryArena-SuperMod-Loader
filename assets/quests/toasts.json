@@ -79,6 +79,8 @@
     "madMageKeyReceived": "You have the key. Use the tile 84 teleporter to enter his room.",
     "madMageRoomEntered": "You turn the key. The room beyond wants you dead...",
     "madMageRoomCleared": "The room is cleared. Return to King Tibianus.",
+    "enteringBasiliskChallenge1": "Entering the Basilisk's challenge...",
+    "basiliskChallenge1Cleared": "Challenge cleared! Return to the Farms.",
     "dragonfetishRaised": "You raise the Dragonfetish. Speak with Elathriel.",
     "realmOfDreamsEntering": "Tesha sends you into the Northern Dragon Lair, toward the fire...",
     "realmOfDreamsReturned": "Out of the graveyard, the fire dead behind you. Speak with Tesha."
@@ -181,6 +183,8 @@
     "madMageKeyReceived": [],
     "madMageRoomEntered": [],
     "madMageRoomCleared": [],
+    "enteringBasiliskChallenge1": [],
+    "basiliskChallenge1Cleared": [],
     "dragonfetishRaised": [],
     "realmOfDreamsEntering": [],
     "realmOfDreamsReturned": []
@@ -244,6 +248,8 @@
     "madMageKeyReceived": "info",
     "madMageRoomEntered": "warning",
     "madMageRoomCleared": "completed",
+    "enteringBasiliskChallenge1": "info",
+    "basiliskChallenge1Cleared": "completed",
     "dragonfetishRaised": "info",
     "realmOfDreamsEntering": "info",
     "realmOfDreamsReturned": "info"

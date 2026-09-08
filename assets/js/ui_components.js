@@ -250,7 +250,12 @@ const DEBUG = false; // Set to true for development
       
       buttons.forEach(btn => {
         const button = document.createElement('button');
-        button.className = 'focus-style-visible frame-1 active:frame-pressed-1 surface-regular pixel-font-14';
+        // `variant: 'danger'` uses the game's red button asset (frame-1-red / surface-red);
+        // omit for the default regular-surface button.
+        const frameClasses = btn.variant === 'danger'
+          ? 'frame-1-red active:frame-pressed-1-red surface-red'
+          : 'frame-1 active:frame-pressed-1 surface-regular';
+        button.className = `focus-style-visible ${frameClasses} pixel-font-14`;
         button.textContent = btn.text || 'OK';
         button.style.cssText = `
           padding: 4px 8px;

@@ -240,6 +240,13 @@
       "maxCount": 1,
       "soulCore": true
     },
+    "hornedFoxSoulCore": {
+      "productName": "The Horned Fox Soul Core",
+      "icon": "The_Horned_Fox_Soul_Core.gif",
+      "rarity": 0,
+      "maxCount": 1,
+      "soulCore": true
+    },
     "elvenhairRope": {
       "productName": "Elvenhair Rope",
       "icon": "Elvenhair_Rope.gif",
@@ -711,7 +718,8 @@
     "weakened_archdemon": "Orb.gif",
     "lost_oracle": "Life_Crystal.gif",
     "draconia_tower": "Dragonfetish.gif",
-    "draconia_quest": "Book_(Draconia).gif"
+    "draconia_quest": "Book_(Draconia).gif",
+    "the_basilisk_challenges": "The_Horned_Fox_Soul_Core.gif"
   },
   "questLogSpriteIcons": {
     "realm_of_dreams": 2969,
@@ -820,6 +828,14 @@
         "receivedBefore": {
           "type": "missionCompleted",
           "missionId": "tainted_souls"
+        }
+      },
+      {
+        "key": "hornedFoxSoulCore",
+        "productId": "hornedFoxSoulCore",
+        "receivedBefore": {
+          "type": "missionCompleted",
+          "missionId": "the_basilisk_challenges"
         }
       },
       {
@@ -1337,6 +1353,11 @@
         "requiredStatus": "completed"
       },
       {
+        "productId": "hornedFoxSoulCore",
+        "missionId": "the_basilisk_challenges",
+        "requiredStatus": "completed"
+      },
+      {
         "productId": "blessedAnkh",
         "missionId": "costello_queen_banshees",
         "requiredStatus": "completed"
@@ -1561,6 +1582,7 @@
       { "productId": "ghazbaranSoulCore", "missionId": "weakened_archdemon" },
       { "productId": "mornenionSoulCore", "missionId": "al_dee_golden_rope" },
       { "productId": "apprenticeShengSoulCore", "missionId": "apprentice_sheng" },
+      { "productId": "hornedFoxSoulCore", "missionId": "the_basilisk_challenges" },
       { "productId": "lightShovel", "missionId": "al_dee_fishing_gold" },
       { "productId": "dragonClaw", "missionId": "king_red_dragon", "removedByProgressFlag": { "firebaseKey": "dragonmother", "field": "completed" } },
       { "productId": "holyTible", "missionId": "al_dee_golden_rope", "removedByProgressFlag": { "firebaseKey": "monksStudy", "field": "completed" } },
@@ -1633,6 +1655,10 @@
       },
       {
         "productId": "ekatrixSoulCore",
+        "amount": 1
+      },
+      {
+        "productId": "hornedFoxSoulCore",
         "amount": 1
       },
       {
