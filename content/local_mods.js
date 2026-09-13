@@ -40,8 +40,8 @@ const FALLBACK_DATABASE_MODS = [
 ];
 const FALLBACK_OFFICIAL_MODS = [
   'Bestiary_Automator.js', 'Board Analyzer.js', 'Custom_Display.js', 'Hero_Editor.js',
-  'Highscore_Improvements.js', 'Item_tier_list.js', 'Monster_tier_list.js', 'Setup_Manager.js',
-  'Team_Copier.js', 'Tick_Tracker.js', 'Turbo Mode.js'
+  'Highscore_Improvements.js', 'Setup_Manager.js',
+  'Team_Copier.js', 'Tick_Tracker.js', 'Turbo Mode.js', 'Usage_List.js'
 ];
 const FALLBACK_SUPER_MODS = [
   'Autoseller.js', 'Autoscroller.js', 'Battle_Helper.js', 'Better Analytics.js', 'Better Bestiary.js', 'Better Boosted Maps.js',
@@ -80,8 +80,7 @@ const FALLBACK_DEFAULT_ENABLED_MODS = [
   'database/playereq-database.js', 'database/firebase-admins.js',
   'Official Mods/Bestiary_Automator.js', 'Official Mods/Board Analyzer.js',
   'Official Mods/Highscore_Improvements.js',
-  'Official Mods/Item_tier_list.js', 'Official Mods/Monster_tier_list.js',
-  'Official Mods/Setup_Manager.js',
+  'Official Mods/Setup_Manager.js', 'Official Mods/Usage_List.js',
   'Super Mods/Autoseller.js', 'Super Mods/Cyclopedia.js', 'Super Mods/Hunt Analyzer.js',
   'Super Mods/Mod Settings.js', 'Super Mods/RunTracker.js', 'Super Mods/Outfiter.js'
 ];
@@ -758,9 +757,8 @@ let defaultEnabledMods = [
   'Official Mods/Bestiary_Automator.js',
   'Official Mods/Board Analyzer.js',
   'Official Mods/Highscore_Improvements.js',
-  'Official Mods/Item_tier_list.js',
-  'Official Mods/Monster_tier_list.js',
   'Official Mods/Setup_Manager.js',
+  'Official Mods/Usage_List.js',
   // Super Mods enabled by default (user-toggleable in popup)
   'Super Mods/Autoseller.js',
   'Super Mods/Cyclopedia.js',

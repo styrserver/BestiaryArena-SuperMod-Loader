@@ -4,6 +4,56 @@
   },
   "notes": [
     {
+      "version": "5.0.1",
+      "changes": [
+        {
+          "mod": "Map Editor",
+          "type": "added",
+          "text": "The creature editor's old \"Map export\" section is now \"Combat timing\", directly under Combat stats. It adds Attack CD (ticks) and Move speed (the same SPD scale as Combat stats, and it updates the SPD stat as you change it) next to Ability CD, to override a placed creature's attack and movement pace. Each box shows the creature's native value greyed when left blank, and Ability CD greys out entirely for creatures whose ability has no cooldown."
+        },
+        {
+          "mod": "Map Editor",
+          "type": "fixed",
+          "text": "Leaving a Combat-timing field blank in the creature editor no longer saves it as an instant (0-value) override — blank now correctly means \"native default\"."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "fixed",
+          "text": "Creature and equipment usage stats (bestiary/equipment browser counts and each detail page's usage percentage) no longer count event/raid maps' saved Auto-setups, matching how region map listings already excluded them."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "changed",
+          "text": "The Mod Settings button now sits just before Cyclopedia in the top navigation bar instead of after it."
+        },
+        {
+          "mod": "Quests",
+          "type": "added",
+          "text": "A new quest unlocks once the tutorial is done: right-click a marked tile in an early map to pick up a mysterious item and start it, then ask King Tibianus for guidance. Following his directions leads to a hidden area reached via a tile with a follow-the-path prompt, where a new quest-giver awaits with their own dialogue. That quest-giver has a follow-up task once the first is finished — accept it in conversation, then a new path tile leads to a battle worth reporting back afterward."
+        },
+        {
+          "mod": "Quests",
+          "type": "changed",
+          "text": "The pickup effect shown when receiving certain quest items, and the water-fishing animation, now use the game's own effect sprites instead of custom images, and more pickups play that effect for consistency. The Mission Log now shows a proper checklist for every mission's objectives, striking through completed steps instead of always listing every line at once. The arena rank ladder now spans the current full mission count instead of topping out early. The Quest Items window is a bit taller with a higher minimum height, and its item details panel keeps the icon and description in fixed places instead of shifting around as you browse — descriptions sit in a fixed-size scrollable box, with any action button always pinned to its bottom edge. Its bosstiary sub-panel now scrolls its collected soul cores independently of the description text below them. The King's mission list is now ordered to roughly match how far you've actually progressed, keeping each quest-giver's own quests grouped together instead of scattered throughout the list, and a mission that needs an area you haven't reached yet won't be handed out until you get there."
+        },
+        {
+          "mod": "Quests",
+          "type": "fixed",
+          "text": "One completed mission's log entry was missing its reward line; it now shows the reward like every other completed mission. Also cleaned up a leftover duplicate item-name reference from an old rename that no longer served any purpose. Fixed a quest-giver's pending-task indicator not reflecting the newest quest's state, that quest's item not being asked about correctly, and a walk-around area not fully clearing leftover creatures when revisited. A new hidden battle area's floor decorations and leftover tiles from the room it reuses weren't always hidden correctly, its ally-placement tiles allowed a wider area than intended, one tile briefly showed a broken decoration sprite, its quest-log icon showed a generic placeholder instead of its own, and its path-back arrow could stay visible for a moment after the battle there was already won."
+        },
+        {
+          "mod": "Usage List",
+          "type": "changed",
+          "text": "Item Tier List and Monster Tier List are now one \"Usage List\" mod (Creatures tab first, then Equipment) in a single 500×600 modal. Portraits are hover-only — hovering shows the tier, usage count, and the maps it's used on, grouped and ordered by region; event/raid maps aren't counted. Equipment with more than one stat variant (AD/AP/HP) is now tracked and shown as separate entries instead of being merged under one \"most-used\" stat. It only counts usage from each map's saved Auto-setup, not Setup Manager's separate named-setup library."
+        },
+        {
+          "mod": "Usage List",
+          "type": "fixed",
+          "text": "Creature portraits show the creature's actual rarity tier instead of one derived from usage count, no longer show a duplicated usage number, and the tier-star badge no longer renders behind the creature sprite."
+        }
+      ]
+    },
+    {
       "version": "5.0.0",
       "changes": [
         {

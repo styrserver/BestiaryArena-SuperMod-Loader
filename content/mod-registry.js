@@ -40,12 +40,11 @@ export const OFFICIAL_MODS = [
   'Custom_Display.js',
   'Hero_Editor.js',
   'Highscore_Improvements.js',
-  'Item_tier_list.js',
-  'Monster_tier_list.js',
   'Setup_Manager.js',
   'Team_Copier.js',
   'Tick_Tracker.js',
-  'Turbo Mode.js'
+  'Turbo Mode.js',
+  'Usage_List.js'
 ];
 
 // Super mods - enhanced/advanced mods
@@ -103,9 +102,8 @@ export const DEFAULT_ENABLED_MODS = [
   'Official Mods/Bestiary_Automator.js',
   'Official Mods/Board Analyzer.js',
   'Official Mods/Highscore_Improvements.js',
-  'Official Mods/Item_tier_list.js',
-  'Official Mods/Monster_tier_list.js',
   'Official Mods/Setup_Manager.js',
+  'Official Mods/Usage_List.js',
   // Super Mods enabled by default (user-toggleable in popup)
   'Super Mods/Autoseller.js',
   'Super Mods/Cyclopedia.js',

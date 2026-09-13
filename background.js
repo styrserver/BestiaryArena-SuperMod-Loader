@@ -218,9 +218,8 @@ const HARDCODED_DEFAULT_ENABLED_MODS = [
   'Official Mods/Bestiary_Automator.js',
   'Official Mods/Board Analyzer.js',
   'Official Mods/Highscore_Improvements.js',
-  'Official Mods/Item_tier_list.js',
-  'Official Mods/Monster_tier_list.js',
   'Official Mods/Setup_Manager.js',
+  'Official Mods/Usage_List.js',
   'Super Mods/Autoseller.js',
   'Super Mods/Cyclopedia.js',
   'Super Mods/Hunt Analyzer.js',
@@ -231,7 +230,7 @@ const HARDCODED_DEFAULT_ENABLED_MODS = [
 
 const HARDCODED_MOD_COUNTS = {
   database: 9,
-  official: 11,
+  official: 10,
   super: 28,
   ot: 5
 };

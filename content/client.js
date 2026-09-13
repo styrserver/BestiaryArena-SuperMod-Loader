@@ -2204,30 +2204,50 @@ if (typeof browserAPI === 'undefined') {
         createMonsterPortrait: function(options) {
           if (!window.BestiaryUIComponents) {
             console.warn('UI Components not loaded, using fallback monster portrait');
+            const tier = Math.min(5, Math.max(1, options.tier || 1));
+
             const div = document.createElement('div');
-            div.style.cssText = 'width: 34px; height: 34px; max-width: 34px; max-height: 34px; background: #333; position: relative; border: 2px solid #555;';
-            
+            div.style.cssText = 'width: 34px; height: 34px; max-width: 34px; max-height: 34px; background: #333; position: relative; border: 2px solid #555; overflow: hidden;';
+
+            // Add rarity background based on tier (same classes the real component uses)
+            const rarityBg = document.createElement('div');
+            rarityBg.className = 'has-rarity absolute inset-0 z-1 opacity-80';
+            rarityBg.setAttribute('data-rarity', tier);
+            div.appendChild(rarityBg);
+
+            // Add tier stars for tier > 1
+            if (tier > 1) {
+              const tierStars = document.createElement('img');
+              tierStars.className = 'tier-stars pixelated absolute right-0 top-0 z-2 opacity-75';
+              tierStars.alt = 'star tier';
+              tierStars.src = `/assets/icons/star-tier-${Math.min(4, tier)}.png`;
+              div.appendChild(tierStars);
+            }
+
+            // Left unpositioned (no z-index) so the rarity tint/star badge above always paint
+            // on top of it, same as the real component — a positioned img with an equal/higher
+            // z-index would otherwise cover the star icon depending on DOM order.
             const img = document.createElement('img');
             img.src = `/assets/portraits/${options.monsterId}.png`;
             img.alt = 'Monster';
             img.style.cssText = 'width: 100%; height: 100%; max-width: 34px; max-height: 34px; object-fit: contain;';
-            
+
             div.appendChild(img);
-            
+
             const level = document.createElement('span');
             level.textContent = options.level || 1;
-            level.style.cssText = 'position: absolute; bottom: 0; left: 2px; color: white; font-size: 12px; background: rgba(0,0,0,0.7); padding: 0 2px;';
-            
+            level.style.cssText = 'position: absolute; z-index: 3; bottom: 0; left: 2px; color: white; font-size: 12px; background: rgba(0,0,0,0.7); padding: 0 2px;';
+
             div.appendChild(level);
-            
+
             if (options.onClick) {
               div.style.cursor = 'pointer';
               div.addEventListener('click', options.onClick);
             }
-            
+
             return div;
           }
-          
+
           return window.BestiaryUIComponents.createMonsterPortrait(options);
         },
         

@@ -98,6 +98,48 @@ Hydrated into `MISSION_BY_ID` via `applyQuestDialogueFromAssets()`. Registry dri
 
 ---
 
+### Ordering new missions in `storyOrder`
+
+`registry.storyOrder` is sorted by **real unlock progression**, not by when the mission was added to the file. The method (see `registry._storyOrderComment` in the JSON for the short version):
+
+1. **Resolve the mission's gate room(s)** — the room(s) the player must have already reached to start/progress it. Use the live game data to place a room: open DevTools on the loaded game and run
+   ```js
+   globalThis.state.utils.REGIONS.map((r, i) => ({ i, id: r.id, rooms: r.rooms.map((room, j) => ({ j, id: room.id, name: globalThis.state.utils.ROOM_NAME[room.id] })) }))
+   ```
+   A room's position is `(regionIndex, roomIndexWithinRegion)` — lower is earlier. Watch for flavor text that doesn't match a real room name (e.g. "Rotworm Dungeon" isn't an actual room; check the code/`rooms.json` for the room it's actually implemented in) and for a quest's *battle* room being a reused `Sewers` reskin — the real gate is wherever the player physically travels to trigger it, not the reused battle room.
+2. **Cluster by quest-giver.** All of one NPC's missions move together as a block, positioned by whichever of that NPC's own missions unlocks soonest — don't scatter one NPC's quests across the list by each quest's individual room. King Tibianus is the exception: he has no single unlock point (he's available from the very start), so his *solo* missions are NOT one cluster — each sorts by its own gate, **except** the ones with zero cross-NPC prerequisite (see step 3), which do sit together at the very top.
+3. **Check for a hard cross-NPC prerequisite** (an item from another NPC's reward, or "meeting" an NPC for the first time via another mission) and pin the dependent mission/cluster immediately after whichever prerequisite it needs, even if its own room would otherwise sort earlier. Search `missions.json` for `"requires[A-Z]` and search `Quests.js` for `canOffer` / `cachedQuestItems\[` gating an NPC's offer — both patterns surface these. Known examples already in the data: `al_dee_golden_rope`→Holy Tible→`king_monks_study`; `al_dee_fishing_gold`→Light Shovel→`king_scarab_coin`; `king_scarab_coin`→meeting Tesha→`serpentine_tower`/`realm_of_dreams`; `realm_of_dreams`→Mintwallin Prison Key→`visiting_mintwallin`; `king_letter_al_dee`→"the stamped letter"→the rest of the Al Dee chain.
+4. Missions with **no gate at all** (generic drops available from anywhere, e.g. `king_red_dragon`) sort with whichever no-gate cluster they narratively belong to — don't force them into a room-based position they don't have.
+
+---
+
+### Locking a mission behind an unlocked room
+
+Each mission entry in `registry.missions.<id>` may declare a `"gateRooms": ["Room A", "Room B", ...]` array — an ordered list of real room display names (matching `globalThis.state.utils.ROOM_NAME` values) the player must reach, in sequence, to fully complete that mission. A single-entry array just means "must be reachable to start"; a multi-entry array is a room-hopping chain (e.g. `svenson_love_story`: Folda Boat → White Wave Cellar → Underground Lake → Awash Steamship). Omit the field (or leave it empty) for a mission with no room requirement — either it's always available, or it's gated purely by another mission's completion/item (handled by that mission's own existing code, not this map).
+
+**Do not hand-roll `isRoomUnlockedByName(...)` checks per mission.** `Quests.js` hydrates this into `MISSION_GATE_ROOMS_MAP` (in `applyMissionRegistryMaps()`) and exposes one canonical set of helpers right next to `isRoomUnlockedByName()`:
+
+| Function | Use |
+|---|---|
+| `getMissionGateRooms(mission)` | The mission's full gate-room chain (array, possibly empty) |
+| `getMissionLockRoomName(mission)` | The **first** gate room only — this is what gates *starting* the mission. `null` if no gate. |
+| `isMissionUnlocked(mission)` | `true` if the mission has no gate, or its first gate room has been reached — call this before letting an NPC offer/accept a mission |
+| `isMissionRoomStageUnlocked(mission, stageIndex)` | Checks one specific leg of a multi-room chain (0-based index into `gateRooms`) — call this at each "now go to the next room" dialogue checkpoint in a chain mission, so the NPC can say "you're not ready for that yet" instead of pointing the player at a room they haven't unlocked yet |
+
+**Wiring pattern for a new (or existing) mission's accept flow:**
+```js
+if (!isMissionUnlocked(mission)) {
+  const lockRoom = getMissionLockRoomName(mission);
+  showToast({ message: TOAST_MESSAGES.missionLocked(lockRoom), logPrefix: '[Quests Mod][<Your NPC>]' });
+  return; // don't set accepted:true, don't advance the conversation
+}
+```
+This is already wired into `startKingTibianusQuestForMission()`, the single chokepoint for every King-given mission — it covers `king_copper_key`, `king_monks_study`, and `king_scarab_coin` for free. **Every other NPC's own accept/offer flow (Al Dee, Costello, Wyda, Svenson, Elathriel, Tesha, Rookstayer, Santa Claus, Dane, The Oracle, Basilisk) still needs this same check added at its own accept point** — there is no single shared chokepoint for non-King NPCs today, so this is a per-NPC retrofit using the exact snippet above. Mission-triggered-by-right-clicking-a-tile-in-a-specific-room (e.g. `visiting_the_cleric`'s Green Tome pickup) does **not** need this check — the game's own room-selection already makes the tile unreachable if the room isn't unlocked, so the lock would be redundant there. It's only needed where a mission is offered purely through **chat**, regardless of where the player currently stands.
+
+**Known gap:** the King's mission-list modal ("Missions" tab) currently only lists missions that are already `accepted` — there's no listing of not-yet-started missions to visually grey out yet. Adding one (to show upcoming/locked missions before they're accepted) is a separate, not-yet-done UI enhancement; `isMissionUnlocked()` is ready to drive it whenever that list is built.
+
+---
+
 ### `npcs.json`
 
 | Section | Purpose |
@@ -175,14 +217,16 @@ Rule of thumb: **if it is player-facing text or a tunable number**, prefer JSON;
 
 1. Add mission id to `QUEST_MISSION_IDS` in `Quests.js` (or rely on registry after JSON load).
 2. Add full entry under `missions.json` → `missions.<id>`.
-3. Add `registry.storyOrder` entry and `registry.missions.<id>` (`stateKey`, `firebaseKey`, `extraFields` if needed).
-4. Add `completionSummaries.<id>` if the quest log needs a custom summary.
-5. Add `kingChatState` progress field in `Quests.js` if the mission uses Firebase progress (or extend code generation later).
-6. Wire NPC/battle/room handlers in `Quests.js` as needed.
-7. If the mission grants an item: `items.json` → `products`, drops/lifecycle/devTools as needed; add icon file to `assets/quests/`.
-8. If custom battle: `battles.json` entry.
-9. If new placements: `rooms.json` section.
-10. Quest log icon: `items.json` → `questLogIcons` or `questLogSpriteIcons`.
+3. Work out the mission's gate room(s) and place it in `registry.storyOrder` per "Ordering new missions in `storyOrder`" above.
+4. Add `registry.missions.<id>` (`stateKey`, `firebaseKey`, `extraFields` if needed, and `gateRooms` if it has a room requirement — see "Locking a mission behind an unlocked room" above).
+5. Wire the `isMissionUnlocked(mission)` check into your NPC's accept/offer flow if the mission has a `gateRooms` entry and is offered via chat (skip if it's only triggered by right-clicking a tile in its own gate room — that's already self-gating).
+6. Add `completionSummaries.<id>` if the quest log needs a custom summary.
+7. Add `kingChatState` progress field in `Quests.js` if the mission uses Firebase progress (or extend code generation later).
+8. Wire NPC/battle/room handlers in `Quests.js` as needed.
+9. If the mission grants an item: `items.json` → `products`, drops/lifecycle/devTools as needed; add icon file to `assets/quests/`.
+10. If custom battle: `battles.json` entry.
+11. If new placements: `rooms.json` section.
+12. Quest log icon: `items.json` → `questLogIcons` or `questLogSpriteIcons`.
 
 Quest Dev Tools picks up missions automatically from the registry (no separate mission list).
 

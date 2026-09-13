@@ -2125,24 +2125,35 @@ if (window.CustomBattles) {
                 });
             }
 
-            // Ability cooldown override: villains/allies with a configured abilityCooldownTicks
-            // (Map Editor's creature editor "Ability CD" field is the only current producer of
-            // this) get their live actor's real runtime ability-cooldown component patched
-            // directly — there is no config-level field the native game or board reads to
-            // override a monster's ability cooldown at spawn time. This mirrors the one proven
-            // technique in this codebase for changing it (Quests.js's Lost Oracle rage-battle
-            // patchOracleRageAbilityCooldownTo2s), generalized here so any CustomBattles-driven
-            // battle gets it for free instead of needing bespoke per-fight code.
+            // Cooldown overrides: villains/allies with a configured abilityCooldownTicks /
+            // attackCooldownTicks / moveCooldownTicks (Map Editor's creature editor "Combat
+            // timing" fields are the only current producer) get their live actor's real
+            // runtime Cooldown component patched directly — there is no config-level field the
+            // native game or board reads to override a monster's cooldowns at spawn time. This
+            // mirrors the one proven technique in this codebase for changing ability CD
+            // (Quests.js's Lost Oracle rage-battle patchOracleRageAbilityCooldownTo2s),
+            // generalized here so any CustomBattles-driven battle gets it for free instead of
+            // needing bespoke per-fight code.
             getConfiguredAbilityCooldownPieces() {
+                const readTicks = (value) => {
+                    const ticks = Number(value);
+                    return Number.isFinite(ticks) && ticks >= 0 ? Math.floor(ticks) : null;
+                };
                 const normalize = (piece, isVillain) => {
-                    const ticks = Number(piece?.abilityCooldownTicks);
-                    if (!Number.isFinite(ticks) || ticks < 0) return null;
+                    const cooldownTicks = readTicks(piece?.abilityCooldownTicks);
+                    const moveCooldownTicks = readTicks(piece?.moveCooldownTicks);
+                    const attackCooldownTicks = readTicks(piece?.attackCooldownTicks);
+                    if (cooldownTicks == null && moveCooldownTicks == null && attackCooldownTicks == null) {
+                        return null;
+                    }
                     return {
                         isVillain,
                         tileIndex: Number(piece.tileIndex),
                         nickname: String(piece.nickname || piece.name || ''),
                         gameId: Number(piece.gameId),
-                        cooldownTicks: Math.floor(ticks)
+                        cooldownTicks,
+                        moveCooldownTicks,
+                        attackCooldownTicks
                     };
                 };
                 const villains = (this.config.villains || [])
@@ -2179,12 +2190,82 @@ if (window.CustomBattles) {
                 return null;
             }
 
-            applyAbilityCooldownToActor(actor, cooldownTicks) {
-                const abilityCd = this.findAbilityCooldownComponent(actor);
-                if (!abilityCd) return false;
-                if (abilityCd._baseCooldown === cooldownTicks) return false;
-                abilityCd.setBaseCooldown(cooldownTicks);
+            applyCooldownComponentBase(cd, cooldownTicks) {
+                if (!cd || typeof cd.setBaseCooldown !== 'function') return false;
+                if (cd._baseCooldown === cooldownTicks) return false;
+                cd.setBaseCooldown(cooldownTicks);
                 return true;
+            }
+
+            applyAbilityCooldownToActor(actor, cooldownTicks) {
+                return this.applyCooldownComponentBase(
+                    this.findAbilityCooldownComponent(actor), cooldownTicks
+                );
+            }
+
+            // Movement (walk/wander) and auto-attack clocks are backed by the same Cooldown
+            // class as abilityCooldown — traced from the game's actor + movement-component
+            // source: `this.cooldown.autoAttack` is seeded from the `attackDelay` stat, and
+            // `this.movement.cooldown.{walk,wander}` from the `speed` stat's step duration,
+            // and both are re-derived through `setBaseCooldown` on every stat update. Slamming
+            // the base value here is the same one proven technique; a later self-buff to
+            // speed/attackDelay can re-derive over it, but the scheduled re-checks below
+            // re-apply it (same caveat the ability-CD override already carries).
+            findAutoAttackCooldownComponent(actor) {
+                const cd = actor?.cooldown?.autoAttack ?? actor?.autoAttackCooldown ?? null;
+                return cd && typeof cd.setBaseCooldown === 'function' ? cd : null;
+            }
+
+            findMovementCooldownComponents(actor) {
+                const mv = actor?.movement?.cooldown;
+                if (!mv || typeof mv !== 'object') return [];
+                return [mv.walk, mv.wander].filter(
+                    (cd) => cd && typeof cd.setBaseCooldown === 'function'
+                );
+            }
+
+            applyAttackCooldownToActor(actor, cooldownTicks) {
+                return this.applyCooldownComponentBase(
+                    this.findAutoAttackCooldownComponent(actor), cooldownTicks
+                );
+            }
+
+            applyMoveCooldownToActor(actor, cooldownTicks) {
+                let changed = false;
+                this.findMovementCooldownComponents(actor).forEach((cd) => {
+                    if (this.applyCooldownComponentBase(cd, cooldownTicks)) changed = true;
+                });
+                return changed;
+            }
+
+            // Read the live actor's current base cooldown ticks for a tile, so the Map Editor
+            // creature editor can show "now: Nt" next to its override fields during a test
+            // battle. Returns null when no battle/actor is live.
+            readLiveActorBaseCooldownsForTile(tileIndex, isVillain) {
+                try {
+                    const activeWorld = globalThis.state?.board?.getSnapshot?.()?.context?.world || null;
+                    const entries = activeWorld?.grid?.childrenById?.entries?.();
+                    const actors = [];
+                    if (entries && typeof entries[Symbol.iterator] === 'function') {
+                        for (const [, actor] of entries) actors.push(actor);
+                    } else if (Array.isArray(activeWorld?.grid?.actors)) {
+                        actors.push(...activeWorld.grid.actors);
+                    }
+                    const piece = { isVillain: !!isVillain, tileIndex: Number(tileIndex) };
+                    const actor = actors.find((a) => this.actorMatchesGenePiece(a, piece));
+                    if (!actor) return null;
+                    const read = (cd) => {
+                        const v = Number(cd?.baseCooldown ?? cd?._baseCooldown);
+                        return Number.isFinite(v) ? Math.round(v) : null;
+                    };
+                    return {
+                        ability: read(this.findAbilityCooldownComponent(actor)),
+                        attack: read(this.findAutoAttackCooldownComponent(actor)),
+                        move: read(this.findMovementCooldownComponents(actor)[0])
+                    };
+                } catch (_) {
+                    return null;
+                }
             }
 
             enforceConfiguredAbilityCooldowns(world = null, reason = 'runtime') {
@@ -2206,14 +2287,24 @@ if (window.CustomBattles) {
                         const piece = pieces.find((p) => this.actorMatchesGenePiece(actor, p));
                         if (!piece) return;
                         matchedPieceKeys.add(`${piece.isVillain ? 'v' : 'a'}:${piece.tileIndex}`);
-                        if (this.applyAbilityCooldownToActor(actor, piece.cooldownTicks)) {
+                        if (piece.cooldownTicks != null) {
+                            if (this.applyAbilityCooldownToActor(actor, piece.cooldownTicks)) {
+                                changed = true;
+                            } else if (!this.findAbilityCooldownComponent(actor)) {
+                                unmatchedActorAbilityCd += 1;
+                            }
+                        }
+                        if (piece.attackCooldownTicks != null
+                            && this.applyAttackCooldownToActor(actor, piece.attackCooldownTicks)) {
                             changed = true;
-                        } else if (!this.findAbilityCooldownComponent(actor)) {
-                            unmatchedActorAbilityCd += 1;
+                        }
+                        if (piece.moveCooldownTicks != null
+                            && this.applyMoveCooldownToActor(actor, piece.moveCooldownTicks)) {
+                            changed = true;
                         }
                     });
                     if (changed) {
-                        console.log(`[Custom Battles][${this.config.name || 'Battle'}] Enforced configured ability cooldowns (${reason})`);
+                        console.log(`[Custom Battles][${this.config.name || 'Battle'}] Enforced configured cooldowns (ability/attack/move) (${reason})`);
                     } else {
                         // Nothing changed — say exactly why, since a silent no-op here is the
                         // most likely cause of "ability CD doesn't seem to work" reports.
