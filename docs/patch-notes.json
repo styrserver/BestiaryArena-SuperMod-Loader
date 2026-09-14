@@ -4,6 +4,16 @@
   },
   "notes": [
     {
+      "version": "5.0.3",
+      "changes": [
+        {
+          "mod": "Battle Helper",
+          "type": "fixed",
+          "text": "Its modal could resize and relabel other mods' open dialogs (e.g. Cyclopedia, Quest Dev Tools) to its own dimensions out of nowhere, most noticeably on Firefox. A resize listener left over from a previously closed Battle Helper window was grabbing whichever dialog happened to be open instead of its own; it's now scoped correctly."
+        }
+      ]
+    },
+    {
       "version": "5.0.2",
       "changes": [
         {

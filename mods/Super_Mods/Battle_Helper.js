@@ -3430,7 +3430,14 @@ function syncBattleHelperButtonState() {
 function getBattleHelperDialog(modalRef) {
   if (modalRef?.element) return modalRef.element;
   if (modalRef instanceof HTMLElement) return modalRef;
-  return document.querySelector('div[role="dialog"][data-state="open"]');
+  // Prefer a dialog Battle Helper has already tagged as its own. Only fall back to
+  // "any open dialog" for the very first resolve right after creation (before the
+  // id is stamped) — never as a standing fallback, or a leaked resize listener
+  // (e.g. modal dismissed via Escape/backdrop, bypassing our close cleanup) will
+  // hijack whatever unrelated mod dialog happens to be open. See Cyclopedia/Quests
+  // dialogs getting stamped id="battle-helper-modal" and forced to 920x600.
+  return document.getElementById(BATTLE_HELPER_MODAL_ID) ||
+    document.querySelector('div[role="dialog"][data-state="open"]');
 }
 
 function clearBattleHelperModalLayoutCleanup() {
@@ -3579,6 +3586,11 @@ function stabilizeBattleHelperModalRendering(dialog) {
 function applyBattleHelperModalLayout(modalRef, contentRoot, dimensions) {
   const dialog = getBattleHelperDialog(modalRef);
   if (!dialog) return;
+  // Cache the resolved element so later calls (resize events, including from a
+  // leaked listener) use it directly and never re-query "any open dialog".
+  if (modalRef && typeof modalRef === 'object' && !modalRef.element) {
+    modalRef.element = dialog;
+  }
 
   const { width, height, maxHeight } = dimensions;
   const snappedWidth = snapBattleHelperModalPx(width);
