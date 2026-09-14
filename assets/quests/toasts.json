@@ -85,6 +85,7 @@
     "realmOfDreamsEntering": "Tesha sends you into the Northern Dragon Lair, toward the fire...",
     "realmOfDreamsReturned": "Out of the graveyard, the fire dead behind you. Speak with Tesha.",
     "clericTempleEntered": "Following the path to the temple in Plains of Havoc...",
+    "necromantHouseEntered": "The Necromant House. Arcian's manor waits below.",
     "missionLocked": "You must find your way to {place} before this task can be entrusted to you."
   },
   "messageBuilders": {
@@ -191,6 +192,7 @@
     "realmOfDreamsEntering": [],
     "realmOfDreamsReturned": [],
     "clericTempleEntered": [],
+    "necromantHouseEntered": [],
     "missionLocked": [
       "place"
     ]
@@ -260,7 +262,8 @@
     "dragonfetishRaised": "info",
     "realmOfDreamsEntering": "info",
     "realmOfDreamsReturned": "info",
-    "clericTempleEntered": "info"
+    "clericTempleEntered": "info",
+    "necromantHouseEntered": "info"
   },
   "styling": {
     "defaultDuration": 5000,

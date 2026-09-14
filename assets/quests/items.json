@@ -752,7 +752,8 @@
     "apprentice_sheng": 5300,
     "hellgate_part_1": 2970,
     "hellgate_library": 3723,
-    "visiting_mintwallin": 2184
+    "visiting_mintwallin": 2184,
+    "the_necromant_house": 4285
   },
   "devTools": {
     "_comment": "Story-ordered grantable items for Quest Dev Tools. productId links to products{} for live names. receivedBefore rules: anyMissionAcceptedOrCompleted | missionCompleted | missionAcceptedOrCompleted | receivedFlagOrMissionCompleted | receivedFlagOrMissionAcceptedOrCompleted | missionFieldOrCompleted | missionAnyField | anyOf.",

@@ -107,6 +107,24 @@
       "rewardIcon": "Fernfang_Soul_Core.gif",
       "rewardSummary": "Reward: Fernfang Soul Core."
     },
+    "the_necromant_house": {
+      "id": "the_necromant_house",
+      "title": "The Necromant House",
+      "prompt": "The Necromant House stirs again, east of the Dark Cathedral — built long ago by a sorcerer named Arcian before his own apprentice put a knife in his back. I sent word to a few who wished to see it for themselves, and none of them have returned. Will you go and learn what became of them?",
+      "accept": "Then go. The house stands east of the Dark Cathedral; the only way in is through a cave to the south. Go carefully — Arcian's work did not end when he died.",
+      "decline": "Then they stay lost, and their fate stays a mystery. Come back when you have found your nerve.",
+      "alreadyActive": "Have you found any trace of them in the Necromant House yet? I fear the worst, the longer this drags on.",
+      "alreadyCompleted": "You already brought me word of the Necromant House and what became of those I sent. My thanks stand, Player.",
+      "battleVictory": "Whatever wore their faces down there is not wearing them anymore. Return to me with the news.",
+      "battleDefeat": "Whatever the House left of them was more than you bargained for. Gather yourself and go down again.",
+      "objectiveLine1": "Ask Oldrak about the Necromant House.",
+      "objectiveLine2": "Travel to the Necromant House, east of the Dark Cathedral, entering through the cave to the south.",
+      "objectiveLine3": "Return to Oldrak with word of what became of them.",
+      "hint": "The Necromant House lies east of the Dark Cathedral, entered from an underground cave to the south. Whatever you find inside, it used to be the ones Oldrak sent.",
+      "rewardCoins": 200,
+      "complete": "So that is what became of them — turned to bone in a house that never should have been reopened. Grim news, but news all the same, and better it end at your hand than fester any further. Take this for your trouble, Player.",
+      "rewardSummary": "Reward: 200 guild coins."
+    },
     "king_copper_key": {
       "id": "king_copper_key",
       "title": "Retrieve King Tibianus's Belongings",
@@ -766,20 +784,21 @@
     "jakundaf_desert": "Cleared the villains blocking the Jakundaf Desert from the Plains of Havoc and returned to Wyda.",
     "tainted_souls": "Used the Stuffed Toad in the Eclipse Cauldron, slew Ekatrix, and returned to Wyda.",
     "isle_of_the_mists": "Stepped through the path south of the temple, slew Fernfang on the Isle of the Mists, and reported back.",
+    "the_necromant_house": "Investigated the Necromant House east of the Dark Cathedral for Oldrak, found those he sent turned to bone, cleared the house, and reported back.",
     "serpentine_tower": "Used the lever in the Serpentine Tower basement and survived The Cursed Chamber.",
-    "apprentice_sheng": "Helped Rookstayer defeat Apprentice Sheng in the Minotaur Mage Room and claimed a Wooden Plank.",
+    "apprentice_sheng": "Helped Rookstayer defeat Apprentice Sheng in the Minotaur Mage Room.",
     "christmas_miracle": "Received a Christmas present from Santa Claus.",
     "svenson_love_story": "Guided Svenson through storms and misnavigation, then delivered Bunny Slippers so he could bring Dane her present.",
-    "weakened_archdemon": "Defeated the weakened archdemon and received an Orb from Dane.",
+    "weakened_archdemon": "Defeated the weakened archdemon.",
     "dragonmother": "Descended into Lonesome Dragon with Demodras' claw and slew Demodras.",
     "lost_oracle": "Returned the Spectral Stone to The Oracle, survived its wrath, and received its thanks.",
     "hellgate_part_1": "Received Key 3012 from Elathriel and cleared the Hellgate Treasure Room with him.",
-    "hellgate_library": "Descended into the Hellgate Library, handed the Wrinkled Bonelord the book, survived the librarian's guardians, and received a White Mushroom from Elathriel.",
-    "draconia_tower": "Descended into Draconia Tower with Elathriel, put down the Dragon Lord and his beast, traded a white mushroom to the Old Dragonlord for the Dragonfetish, and returned to Elathriel.",
-    "draconia_quest": "Followed Elathriel into the last room of Draconia, cleared it, used the Dragonfetish to return to Hedge Maze, and reported back to Elathriel to receive the Key to Magic (Book).",
-    "realm_of_dreams": "Read the Key to Magic (Book) with Tesha, descended into the Northern Dragon Lair to put out the fire guarding the way to the Realm of Dreams, and returned to the Darama Oasis, where Tesha handed over a Mintwallin Prison Key found among the bones.",
+    "hellgate_library": "Descended into the Hellgate Library, handed the Wrinkled Bonelord the book, and survived the librarian's guardians.",
+    "draconia_tower": "Descended into Draconia Tower with Elathriel, put down the Dragon Lord and his beast, traded a white mushroom to the Old Dragonlord, and returned to Elathriel.",
+    "draconia_quest": "Followed Elathriel into the last room of Draconia, cleared it, used the Dragonfetish to return to Hedge Maze, and reported back to Elathriel.",
+    "realm_of_dreams": "Read the Key to Magic (Book) with Tesha, descended into the Northern Dragon Lair to put out the fire guarding the way to the Realm of Dreams, and returned to the Darama Oasis.",
     "visiting_mintwallin": "Descended to the cell beneath Mintwallin, solved the Mad Mage's riddle, cleared the room his key opened, and reported back to King Tibianus.",
-    "the_basilisk_challenges": "Cleared all six of the Basilisk's challenges in the Sewers — ending with the Horned Fox and his cult — and claimed the Horned Fox Soul Core."
+    "the_basilisk_challenges": "Cleared all six of the Basilisk's challenges in the Sewers — ending with the Horned Fox and his cult."
   },
   "sealTranscripts": [
     {
@@ -842,6 +861,7 @@
       "tainted_souls",
       "visiting_the_cleric",
       "isle_of_the_mists",
+      "the_necromant_house",
       "king_scarab_coin",
       "serpentine_tower",
       "realm_of_dreams",
@@ -873,6 +893,13 @@
       "isle_of_the_mists": {
         "stateKey": "progressIsleOfTheMists",
         "firebaseKey": "isleOfTheMists",
+        "extraFields": [
+          "battleCompleted"
+        ]
+      },
+      "the_necromant_house": {
+        "stateKey": "progressTheNecromantHouse",
+        "firebaseKey": "theNecromantHouse",
         "extraFields": [
           "battleCompleted"
         ]
