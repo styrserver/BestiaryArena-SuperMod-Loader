@@ -250,6 +250,76 @@ async function getExtensionVersion() {
   }
 }
 
+// =======================
+// 4b. Update Detection
+// =======================
+
+const LAST_SEEN_VERSION_KEY = 'ba-last-seen-version';
+
+async function getStoredValue(key) {
+  if (window.browserAPI && window.browserAPI.storage && window.browserAPI.storage.local) {
+    try {
+      const storageData = await new Promise(resolve => {
+        window.browserAPI.storage.local.get([key], resolve);
+      });
+      return storageData[key];
+    } catch (error) {
+      console.warn(`[Welcome] Extension storage read failed for ${key}, falling back to localStorage:`, error);
+    }
+  }
+  try {
+    return localStorage.getItem(key) ?? undefined;
+  } catch (error) {
+    console.warn(`[Welcome] localStorage read failed for ${key}:`, error);
+    return undefined;
+  }
+}
+
+async function setStoredValue(key, value) {
+  if (window.browserAPI && window.browserAPI.storage && window.browserAPI.storage.local) {
+    try {
+      await new Promise(resolve => {
+        window.browserAPI.storage.local.set({ [key]: value }, resolve);
+      });
+      return;
+    } catch (error) {
+      console.warn(`[Welcome] Extension storage write failed for ${key}, falling back to localStorage:`, error);
+    }
+  }
+  try {
+    localStorage.setItem(key, value);
+  } catch (error) {
+    console.warn(`[Welcome] localStorage write failed for ${key}:`, error);
+  }
+}
+
+// Compares the currently running version against the last one we recorded,
+// shows an "Updated to vX.Y.Z" toast when they differ (including when no
+// version was recorded yet), and persists the new version either way.
+async function checkForVersionUpdate(currentVersion) {
+  if (!currentVersion || currentVersion === 'unknown') return;
+
+  try {
+    const lastSeenVersion = await getStoredValue(LAST_SEEN_VERSION_KEY);
+    console.log('[Welcome] Version check — last seen:', lastSeenVersion, 'current:', currentVersion);
+
+    if (lastSeenVersion !== currentVersion) {
+      createToast({
+        message: `<span style="color:#ffd166;">Updated</span> to v${currentVersion}!`,
+        type: 'success',
+        duration: 6000,
+        icon: WELCOME_ASSETS.logo
+      });
+    }
+
+    if (lastSeenVersion !== currentVersion) {
+      await setStoredValue(LAST_SEEN_VERSION_KEY, currentVersion);
+    }
+  } catch (error) {
+    console.warn('[Welcome] Could not check for version update:', error);
+  }
+}
+
 // Get mod counts dynamically
 async function getModCounts() {
   console.log('[Welcome] Getting mod counts...');
@@ -470,6 +540,11 @@ async function handleModLoadingFinished(errors = []) {
     });
 
     console.log('[Welcome] Completion toast created successfully');
+
+    getExtensionVersion()
+      .then(version => checkForVersionUpdate(version))
+      .catch(error => console.warn('[Welcome] Could not resolve version for update check:', error));
+
     handleCompletionModalClose('(completion toast)');
   } catch (error) {
     console.error('[Welcome] Error creating completion toast:', error);

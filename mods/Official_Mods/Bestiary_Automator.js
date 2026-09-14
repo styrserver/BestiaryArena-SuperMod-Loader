@@ -2750,24 +2750,44 @@ const openQuestLogForSeashell = async () => {
       return true;
     }
     
-    // Try to find quest log button or icon
+    // Try to find quest log button or icon. The nav button's icon/label is rewritten by
+    // Better Tasker ("Tasking"/taskrank.png) or Raid Hunter ("Raiding"/enemy.png) whenever
+    // they're active, so plain "quest" text/src selectors miss it in those states - match
+    // all known label states instead of just the original "Quests" one.
     const questSelectors = [
+      'button img[src*="quest.png"]',
+      'button img[src*="taskrank.png"]',
+      'button img[src*="enemy.png"]',
+      'button img[alt="Quests"]',
+      'button img[alt="Tasking"]',
+      'button img[alt="Enemy"]',
       'button[aria-label*="quest"]',
       'button[title*="quest"]',
       '.quest-icon',
-      'img[src*="quest.png"]',
       'button:has(svg[data-lucide="book"])',
       'button:has(svg[data-lucide="scroll"])',
       'img[src*="quest-blip.png"]', // Try quest blip as fallback
       '#header-slot img[src*="quest"]' // Try header slot
     ];
-    
+
     let questButton = null;
     for (const selector of questSelectors) {
       questButton = document.querySelector(selector);
       if (questButton) {
         console.log(`[Bestiary Automator] Found quest button with selector: ${selector}`);
         break;
+      }
+    }
+    if (!questButton) {
+      const textMatches = ['Quests', 'Tasking', 'Raiding'];
+      const navButtons = document.querySelectorAll('header button, #header-slot button, [role="banner"] button');
+      for (const btn of navButtons) {
+        const spanText = btn.querySelector('span')?.textContent?.trim();
+        if (spanText && textMatches.includes(spanText)) {
+          questButton = btn;
+          console.log(`[Bestiary Automator] Found quest button by nav label text: ${spanText}`);
+          break;
+        }
       }
     }
     

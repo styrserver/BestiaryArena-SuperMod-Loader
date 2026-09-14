@@ -4,6 +4,56 @@
   },
   "notes": [
     {
+      "version": "5.0.2",
+      "changes": [
+        {
+          "mod": "Battle Helper",
+          "type": "added",
+          "text": "The Selected request panel now has a Chat box under Setups for discussing that specific help request live, and each row in Open requests shows a \"New!\" indicator when it has setups or chat you haven't seen yet, clearing once you open that request. Chat messages can be deleted inline (click × once to arm, again to confirm) — you can always delete your own, and admins can delete anyone's."
+        },
+        {
+          "mod": "Battle Helper",
+          "type": "changed",
+          "text": "The Selected request panel's \"Replies\" section is now labeled \"Setups\", matching what those entries actually are."
+        },
+        {
+          "mod": "Bestiary Automator",
+          "type": "fixed",
+          "text": "Automatic seashell collection could fail to open the quest log while Better Tasker or Raid Hunter had the nav button showing their own status, since it wasn't recognized as the quest log opener in those states. It now recognizes the button regardless of which mod last relabeled it."
+        },
+        {
+          "mod": "Better Tasker",
+          "type": "fixed",
+          "text": "Finishing a ready task could fail to open the quest log and get stuck retrying, because the task-in-progress button relabel wasn't recognized by the quest-log-opening logic. It now recognizes the button in either state."
+        },
+        {
+          "mod": "Quests",
+          "type": "added",
+          "text": "The quest-giver from the recent hidden-area quest has a further follow-up task once that one is finished — accept it in conversation, then a tutorial arrow at the same path tile leads to a new battle, worth reporting back afterward."
+        },
+        {
+          "mod": "Quests",
+          "type": "changed",
+          "text": "Several missions' Mission Log completion summaries repeated the reward already shown on the reward line right below them; those summaries no longer restate it."
+        },
+        {
+          "mod": "Quests",
+          "type": "fixed",
+          "text": "That quest-giver's pending-task indicator could stay dark after finishing the earlier quest even though a new task had become available. It now lights up correctly for the follow-up."
+        },
+        {
+          "mod": "Raid Hunter",
+          "type": "fixed",
+          "text": "The raid status indicator could fail to take over the nav button while Better Tasker had it showing a task in progress. It now recognizes and takes over that state correctly."
+        },
+        {
+          "mod": "Welcome",
+          "type": "added",
+          "text": "An \"Updated to vX.X.X!\" toast now appears alongside the mods-loaded toast whenever the loader has updated since your last visit."
+        }
+      ]
+    },
+    {
       "version": "5.0.1",
       "changes": [
         {

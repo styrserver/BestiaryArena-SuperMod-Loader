@@ -7087,20 +7087,24 @@ function getCurrentRoomId() {
 
 // Function to find quest button with multiple fallback selectors
 function findQuestButton() {
-    // Try image-based selectors first
+    // Try image-based selectors first. Includes taskrank.png/alt="Tasking" because Better Tasker
+    // relabels this same nav button while a task is active - without it, Raid Hunter can't find/take
+    // control of the button (e.g. to show "Raiding") whenever Better Tasker modified it first.
     const imageSelectors = [
         'button img[src*="quest.png"]',
         'button img[src*="enemy.png"]', // For raiding state
-        'button img[alt="Quests"]'
+        'button img[src*="taskrank.png"]', // Better Tasker's "Tasking" state
+        'button img[alt="Quests"]',
+        'button img[alt="Tasking"]'
     ];
-    
+
     for (const selector of imageSelectors) {
         const button = document.querySelector(selector)?.closest('button');
         if (button) return button;
     }
-    
+
     // Try text-based selectors
-    const textMatches = ['Raiding', 'Quest Log', 'Quests'];
+    const textMatches = ['Raiding', 'Quest Log', 'Quests', 'Tasking'];
     const buttons = document.querySelectorAll('button');
     
     for (const button of buttons) {

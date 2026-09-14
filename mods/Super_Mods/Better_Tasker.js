@@ -3662,31 +3662,41 @@ function isOnCorrectTaskingMap() {
     }
 }
 
-// Function to find quest button with multiple fallback selectors
+// Function to find quest button with multiple fallback selectors.
+// Must recognize every mod's relabel of this shared nav button (Better Tasker's own "Tasking",
+// and Raid Hunter's "Raiding"/enemy.png), not just the native "Quests" state - otherwise this
+// lookup silently fails whenever another mod currently owns the button (see QuestButtonManager).
 function findQuestButton() {
     // First, try to find by quest icon (normal state) - check both selected and unselected
     const questIconButton = document.querySelector('button img[src*="quest.png"]')?.closest('button');
     if (questIconButton) {
         return questIconButton;
     }
-    
-    // Then, look for any button with "Tasking" text - check both selected and unselected
+
+    // Raid Hunter's "Raiding" state (enemy.png icon)
+    const raidingIconButton = document.querySelector('button img[src*="enemy.png"]')?.closest('button');
+    if (raidingIconButton) {
+        console.log('[Better Tasker] Found quest button by Raiding icon');
+        return raidingIconButton;
+    }
+
+    // Then, look for any button with "Tasking" or "Raiding" text - check both selected and unselected
     const allButtons = document.querySelectorAll('button');
     for (const button of allButtons) {
         const span = button.querySelector('span');
-        if (span && span.textContent === 'Tasking') {
-            console.log('[Better Tasker] Found quest button by Tasking text');
+        if (span && (span.textContent === 'Tasking' || span.textContent === 'Raiding')) {
+            console.log(`[Better Tasker] Found quest button by "${span.textContent}" text`);
             return button;
         }
     }
-    
+
     // Fallback: look for any button with quest-related alt text - check both selected and unselected
     const questAltButton = document.querySelector('button img[alt="Quests"]')?.closest('button');
     if (questAltButton) {
         console.log('[Better Tasker] Found quest button by quest alt text');
         return questAltButton;
     }
-    
+
     // Additional fallback: look for any button with "Quests" text
     for (const button of allButtons) {
         const span = button.querySelector('span');
@@ -3695,7 +3705,7 @@ function findQuestButton() {
             return button;
         }
     }
-    
+
     console.log('[Better Tasker] Quest button not found');
     return null;
 }
@@ -6677,84 +6687,37 @@ async function openQuestLogDirectly() {
             }
         }
         
-        // SECOND: Try to find quest log button or icon (fallback)
-        const questSelectors = [
-            'button[aria-label*="quest"]',
-            'button[title*="quest"]',
-            '.quest-icon',
-            'img[src*="quest.png"]',
-            'button:has(svg[data-lucide="book"])',
-            'button:has(svg[data-lucide="scroll"])'
-        ];
-        
-        let questButton = null;
-        for (const selector of questSelectors) {
-            questButton = document.querySelector(selector);
-            if (questButton) {
-                break;
-            }
-        }
-        
+        // SECOND: Try the nav quest button via findQuestButton(), which recognizes both the
+        // original "Quests" label and Better Tasker's own "Tasking" relabel (modifyQuestButtonForTasking()) -
+        // the plain 'quest' text/aria-label selectors previously here never matched once the button
+        // was relabeled "Tasking", causing every retry to fail while a task was active.
+        const questButton = findQuestButton();
+
         if (questButton) {
             questButton.click();
             await sleep(300);
-            
+
             // Validate that quest log actually opened
-            const questLogContainer = document.querySelector('[class*="quest"], [class*="modal"], [class*="dialog"]');
+            const questLogContainer = findQuestLogContainer();
             if (questLogContainer) {
-                
+                console.log('[Better Tasker] Quest log opened via nav quest button and validated');
+
                 // Check if we're in a sub-view (like Halloween Quests) and need to go back
-                const backButton = Array.from(document.querySelectorAll('button')).find(btn => 
+                const backButton = Array.from(document.querySelectorAll('button')).find(btn =>
                     btn.querySelector('svg.lucide-arrow-left')
                 );
-                
+
                 if (backButton && isElementVisible(backButton)) {
                     backButton.click();
                     await sleep(500); // Wait for transition back to main quest log
                 }
-                
+
                 return true;
             } else {
                 console.log('[Better Tasker] Quest log button clicked but UI did not appear');
                 return false;
             }
         } else {
-            console.log('[Better Tasker] Could not find quest log button, trying fallback...');
-            
-            // Fallback: try to find any button that might open quest log
-            const allButtons = document.querySelectorAll('button');
-            const questButtonFallback = Array.from(allButtons).find(btn => 
-                btn.textContent.toLowerCase().includes('quest') ||
-                btn.getAttribute('aria-label')?.toLowerCase().includes('quest') ||
-                btn.getAttribute('title')?.toLowerCase().includes('quest')
-            );
-            
-            if (questButtonFallback) {
-                questButtonFallback.click();
-                await sleep(300);
-                
-                // Validate that quest log actually opened
-                const questLogContainer = document.querySelector('[class*="quest"], [class*="modal"], [class*="dialog"]');
-                if (questLogContainer) {
-                    console.log('[Better Tasker] Quest log opened via fallback and validated');
-                    
-                    // Check if we're in a sub-view (like Halloween Quests) and need to go back
-                    const backButton = Array.from(document.querySelectorAll('button')).find(btn => 
-                        btn.querySelector('svg.lucide-arrow-left')
-                    );
-                    
-                    if (backButton && isElementVisible(backButton)) {
-                        backButton.click();
-                        await sleep(500); // Wait for transition back to main quest log
-                    }
-                    
-                    return true;
-                } else {
-                    console.log('[Better Tasker] Quest log fallback clicked but UI did not appear');
-                    return false;
-                }
-            }
-            
             console.log('[Better Tasker] Could not find quest log button with any method');
             return false;
         }

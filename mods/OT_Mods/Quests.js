@@ -1030,6 +1030,17 @@ function applyQuestRoomsFromAssets(roomsData) {
     }
   }
 
+  const necromantHouseRoom = roomsData.necromantHouse;
+  if (necromantHouseRoom) {
+    if (necromantHouseRoom.battleRoomName) NECROMANT_HOUSE_BATTLE_ROOM_NAME = necromantHouseRoom.battleRoomName;
+    if (necromantHouseRoom.battleRoomId) NECROMANT_HOUSE_BATTLE_ROOM_ID = necromantHouseRoom.battleRoomId;
+    if (necromantHouseRoom.battleDisplayName) NECROMANT_HOUSE_BATTLE_DISPLAY_NAME = necromantHouseRoom.battleDisplayName;
+    if (necromantHouseRoom.battleId) NECROMANT_HOUSE_BATTLE_ID = necromantHouseRoom.battleId;
+    if (necromantHouseRoom.tileMutations && typeof necromantHouseRoom.tileMutations === 'object') {
+      NECROMANT_HOUSE_TILE_MUTATIONS = necromantHouseRoom.tileMutations;
+    }
+  }
+
   const crossing = roomsData.crossingTheLine;
   if (crossing) {
     if (crossing.roomName) CITY_BOARDGAMES_ROOM_NAME = crossing.roomName;
@@ -1791,6 +1802,7 @@ const QUEST_MISSION_IDS = [
   'king_crossing_the_line',
   'visiting_the_cleric',
   'isle_of_the_mists',
+  'the_necromant_house',
   'king_copper_key',
   'king_red_dragon',
   'dragonmother',
@@ -1829,6 +1841,7 @@ const KING_HONEYFLOWER_MISSION = MISSION_BY_ID.king_honeyflower;
 const KING_CROSSING_THE_LINE_MISSION = MISSION_BY_ID.king_crossing_the_line;
 const VISITING_THE_CLERIC_MISSION = MISSION_BY_ID.visiting_the_cleric;
 const ISLE_OF_THE_MISTS_MISSION = MISSION_BY_ID.isle_of_the_mists;
+const THE_NECROMANT_HOUSE_MISSION = MISSION_BY_ID.the_necromant_house;
 const KING_COPPER_KEY_MISSION = MISSION_BY_ID.king_copper_key;
 const KING_RED_DRAGON_MISSION = MISSION_BY_ID.king_red_dragon;
 const KING_LETTER_MISSION = MISSION_BY_ID.king_letter_al_dee;
@@ -1939,6 +1952,7 @@ const MISSION_NPC_LABELS = {
   king_honeyflower: 'Tutorial',
   king_crossing_the_line: 'Tutorial',
   isle_of_the_mists: 'Oldrak',
+  the_necromant_house: 'Oldrak',
   al_dee_fishing_gold: 'Al Dee',
   al_dee_golden_rope: 'Al Dee',
   al_dee_rookie_guard: 'Al Dee',
@@ -2182,6 +2196,16 @@ let ISLE_OF_MISTS_BATTLE_ID = 'isle_of_the_mists';
 let ISLE_OF_MISTS_BATTLE_DISPLAY_NAME = 'Isle of the Mists';
 let ISLE_OF_MISTS_TILE_MUTATIONS = null;
 let ISLE_OF_MISTS_ARROW_TILE_INDEX = 127;
+
+// The Necromant House — Oldrak's follow-up quest after Isle of the Mists. Chat-triggered
+// teleport into the Sewers for a single battle against the "Lost Scout" villains (those
+// Oldrak sent, turned to bone); no walk-around leg, mirrors Hellgate Part 1 / Isle of
+// the Mists's own direct-entry style.
+let NECROMANT_HOUSE_BATTLE_ROOM_NAME = 'Sewers';
+let NECROMANT_HOUSE_BATTLE_ROOM_ID = 'rkswrs';
+let NECROMANT_HOUSE_BATTLE_ID = 'necromant_house';
+let NECROMANT_HOUSE_BATTLE_DISPLAY_NAME = 'The Necromant House';
+let NECROMANT_HOUSE_TILE_MUTATIONS = null;
 
 // Visiting Mintwallin (the Mad Mage), Part 1 — King Tibianus grants passage into the
 // Sewers re-skinned as the prison beneath Mintwallin. No battle: a walk-around scene with
@@ -2853,6 +2877,7 @@ function createNPCCooldownManager() {
   const kingChatState = {
     progressVisitingTheCleric: { accepted: false, completed: false, directionsGiven: false },
     progressIsleOfTheMists: { accepted: false, completed: false, battleCompleted: false },
+    progressTheNecromantHouse: { accepted: false, completed: false, battleCompleted: false },
     progressCopper: { accepted: false, completed: false },
     progressHoneyflower: { accepted: false, completed: false, honeyflowerPicked: false },
     progressCrossingTheLine: { accepted: false, completed: false, crossingObjectiveComplete: false },
@@ -11119,7 +11144,7 @@ function createNPCCooldownManager() {
       button.type = 'button';
       button.className = 'pixel-font-14';
       button.textContent = buttonConfig.text;
-      button.style.width = buttonConfig.width || '140px';
+      button.style.minWidth = buttonConfig.width || '140px';
       button.style.height = buttonConfig.height || '30px';
       button.style.fontSize = buttonConfig.fontSize || '14px';
       button.style.lineHeight = '1.2';
@@ -25124,7 +25149,7 @@ function createNPCCooldownManager() {
     roomName: () => CLERIC_BATTLE_ROOM_NAME,
     tileIndex: () => ISLE_OF_MISTS_ARROW_TILE_INDEX,
     shouldEnable: shouldEnableIsleOfMistsArrow,
-    buttonText: 'Step through',
+    buttonText: 'Wander the Plains of Havoc',
     onClick: () => enterIsleOfMistsBattle(),
     arrowClass: ISLE_OF_MISTS_ARROW_CLASS
   });
@@ -25405,6 +25430,257 @@ function createNPCCooldownManager() {
     hideQuestOverlays();
     hideHeroEditorButton();
     updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+  }
+
+  // =======================
+  // The Necromant House — Oldrak's follow-up quest after Isle of the Mists. Accepting
+  // via chat lights up the same tile-127 tutorial arrow used for Isle of the Mists,
+  // inside the temple reskin of the Sewers — stepping through tears down the temple
+  // and starts the "Lost Scout" battle (those Oldrak sent, turned to bone). Single
+  // room, single battle, no walk-around leg beyond the arrow step — mirrors Hellgate
+  // Part 1 / Isle of the Mists's own direct-entry style. Reward (200 guild coins) is
+  // handed over by Oldrak in person on the next conversation once battleCompleted is
+  // set (see the "mission" keyword block above for BOARD_NPC_OLDRAK_ID), not granted
+  // automatically here.
+  // =======================
+
+  let playerEnteredNecromantHouse = false;
+  let necromantHouseBattle = null;
+  let necromantHouseSceneSub = null;
+  let necromantHouseHitboxesApplied = false;
+
+  function getNecromantHouseLogPrefix() { return '[Quests Mod][The Necromant House]'; }
+
+  // Reuses tile 127 inside the temple reskin — safe alongside Isle of the Mists's own
+  // arrow there since the two quests' shouldEnable checks are mutually exclusive
+  // (Isle of the Mists's arrow goes dark once its mission is completed, which is the
+  // same moment this one can first light up).
+  const NECROMANT_HOUSE_ARROW_TILE_INDEX = 127;
+  const NECROMANT_HOUSE_ARROW_CLASS = 'quests-necromant-house-arrow';
+
+  function shouldEnableNecromantHouseArrow(boardContext = null) {
+    try {
+      if (!playerEnteredVisitingTheClericSewers) return false;
+      if (!isOnRoomByName(CLERIC_BATTLE_ROOM_NAME)) return false;
+      const progress = getMissionProgress(THE_NECROMANT_HOUSE_MISSION);
+      return !!progress.accepted && !progress.completed && !progress.battleCompleted;
+    } catch (error) {
+      console.error(`${getNecromantHouseLogPrefix()} Error checking path tile access:`, error);
+      return false;
+    }
+  }
+
+  const necromantHouseArrowTileAction = createArrowTileMenuAction({
+    id: 'The Necromant House',
+    roomName: () => CLERIC_BATTLE_ROOM_NAME,
+    tileIndex: () => NECROMANT_HOUSE_ARROW_TILE_INDEX,
+    shouldEnable: shouldEnableNecromantHouseArrow,
+    buttonText: 'Wander the Plains of Havoc',
+    onClick: () => enterNecromantHouse(),
+    arrowClass: NECROMANT_HOUSE_ARROW_CLASS
+  });
+  const setupNecromantHouseArrowObserver = necromantHouseArrowTileAction.setupObserver;
+  const cleanupNecromantHouseArrowSystem = necromantHouseArrowTileAction.cleanup;
+
+  const necromantHouseQuest = createTeleportBattleQuest({
+    logPrefix: getNecromantHouseLogPrefix(),
+    addedAttr: 'data-quests-necromant-house-added',
+    hiddenTag: 'quests-necromant-house-hidden',
+    mutationKeyAttr: 'data-quests-necromant-house-mutation-key',
+    floorBelowKeyAttr: 'data-quests-necromant-house-fb-key',
+    getTileMutations: () => NECROMANT_HOUSE_TILE_MUTATIONS,
+    isEntered: () => playerEnteredNecromantHouse,
+    getBattle: () => necromantHouseBattle,
+    getSceneSub: () => necromantHouseSceneSub,
+    setSceneSub: (v) => { necromantHouseSceneSub = v; },
+    setHitboxesApplied: (v) => { necromantHouseHitboxesApplied = v; },
+    roomName: () => NECROMANT_HOUSE_BATTLE_ROOM_NAME
+  });
+
+  function applyNecromantHouseTileMutations() { necromantHouseQuest.applyTileMutations(); }
+  function restoreNecromantHouseTileMutations() { necromantHouseQuest.restoreTileMutations(); }
+  function stopNecromantHouseSceneSync() { necromantHouseQuest.stopSceneSync(); }
+  function startNecromantHouseSceneSync() { necromantHouseQuest.startSceneSync(); }
+  function restoreBoardSetupNecromantHouse() { necromantHouseQuest.restoreBoardSetup(); }
+
+  function cleanupNecromantHouseQuest() {
+    try {
+      removeCustomBattleStatusToast();
+      stopNecromantHouseSceneSync();
+      playerEnteredNecromantHouse = false;
+      restoreNecromantHouseTileMutations();
+      if (necromantHouseBattle) {
+        necromantHouseBattle.cleanup(restoreBoardSetupNecromantHouse, showQuestOverlays);
+        necromantHouseBattle = null;
+        console.log(`${getNecromantHouseLogPrefix()} Battle cleaned up`);
+      }
+      showQuestOverlays();
+      updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+    } catch (error) {
+      console.error(`${getNecromantHouseLogPrefix()} Error cleaning up:`, error);
+    }
+  }
+
+  function createNecromantHouseBattleInstance(roomId) {
+    if (!window.CustomBattles) {
+      console.error(`${getNecromantHouseLogPrefix()} CustomBattles still not available`);
+      return null;
+    }
+    const spawn = getHydratedQuestBattleSpawn(NECROMANT_HOUSE_BATTLE_ID || 'necromant_house');
+    if (!spawn.villains?.length) {
+      console.error(`${getNecromantHouseLogPrefix()} No villains resolved for battle id "${NECROMANT_HOUSE_BATTLE_ID}" — check that assets/quests/battles.json has this entry and the mod's data was reloaded.`);
+    }
+    const tileRestrictions = {};
+    if (spawn.allowedTiles?.length) {
+      tileRestrictions.allowedTiles = spawn.allowedTiles;
+      tileRestrictions.message = spawn.allowedTilesMessage;
+    }
+    const config = {
+      name: NECROMANT_HOUSE_BATTLE_DISPLAY_NAME || 'The Necromant House',
+      roomId,
+      villains: spawn.villains,
+      allyLimit: spawn.allyLimit ?? 6,
+      preventVillainMovement: spawn.preventVillainMovement !== false,
+      hideVillainSprites: spawn.hideVillainSprites !== false,
+      ...(Object.keys(tileRestrictions).length ? { tileRestrictions } : {}),
+      activationCheck: (isSandbox, inBattleArea) => isSandbox && inBattleArea && playerEnteredNecromantHouse,
+      victoryDefeat: {
+        onVictory: async () => {
+          console.log(`${getNecromantHouseLogPrefix()} The expedition's fate is sealed.`);
+          try {
+            await persistMissionProgress(THE_NECROMANT_HOUSE_MISSION, {
+              accepted: true,
+              completed: false,
+              battleCompleted: true
+            });
+          } catch (error) {
+            console.error(`${getNecromantHouseLogPrefix()} Error saving battleCompleted flag:`, error);
+          }
+        },
+        onDefeat: () => {},
+        onClose: () => {
+          cleanupNecromantHouseQuest();
+          setTimeout(() => enterVisitingTheClericTemple(), 100);
+        },
+        victoryMessage: getMissionDialogueLine(
+          THE_NECROMANT_HOUSE_MISSION,
+          'battleVictory',
+          "Whatever wore your expedition's faces down there is not wearing them anymore. Return to King Tibianus with the news."
+        ),
+        defeatMessage: getMissionDialogueLine(
+          THE_NECROMANT_HOUSE_MISSION,
+          'battleDefeat',
+          'Whatever the House left of them was more than you bargained for. Gather yourself and go down again.'
+        ),
+        showItems: false,
+        items: []
+      }
+    };
+    let battle = null;
+    try {
+      battle = window.CustomBattles.create(config);
+    } catch (error) {
+      console.error(`${getNecromantHouseLogPrefix()} CustomBattles.create() threw:`, error);
+      return null;
+    }
+    return battle;
+  }
+
+  function initializeNecromantHouseBattle(roomId) {
+    if (window.CustomBattles) return createNecromantHouseBattleInstance(roomId);
+    return waitForCustomBattles({ logPrefix: getNecromantHouseLogPrefix() }).then((api) => {
+      if (!api) return null;
+      return createNecromantHouseBattleInstance(roomId);
+    });
+  }
+
+  function setupNecromantHouseBattleInstance(battle) {
+    if (!battle) return false;
+    necromantHouseBattle = battle;
+    stopNecromantHouseSceneSync();
+    necromantHouseBattle.setup(
+      () => playerEnteredNecromantHouse,
+      NotificationService.createBattleToastCallback(getNecromantHouseLogPrefix())
+    );
+    necromantHouseBattle.resetSandboxBattleState();
+    necromantHouseBattle.setupTileRestrictions?.(
+      () => playerEnteredNecromantHouse,
+      NotificationService.createBattleToastCallback(getNecromantHouseLogPrefix())
+    );
+    necromantHouseBattle.setupAllyLimit?.(
+      () => playerEnteredNecromantHouse,
+      NotificationService.createBattleToastCallback(getNecromantHouseLogPrefix())
+    );
+    showCustomBattleStatusToast({
+      battleName: NECROMANT_HOUSE_BATTLE_DISPLAY_NAME || 'The Necromant House',
+      allyLimit: battle.config?.allyLimit ?? 6,
+      battle,
+      logPrefix: getNecromantHouseLogPrefix()
+    });
+    // Entered while ALREADY standing in rkswrs (from the temple's own tile-127 arrow),
+    // not via a real cross-room navigation — same edge case Isle of the Mists hits (see
+    // its own setupIsleOfMistsPreBattle for the full explanation). selectRoomById to the
+    // already-selected room is a no-op, so reloadConfiguredRoomAndReapply bounces through
+    // another room and back to force a genuine remount before spawning villains.
+    necromantHouseBattle.reloadConfiguredRoomAndReapply({
+      roomId: battle.config?.roomId || NECROMANT_HOUSE_BATTLE_ROOM_ID,
+      forceSameRoomRefresh: true,
+      isActiveCheck: () => playerEnteredNecromantHouse,
+      attemptDelays: VILLAIN_SETUP_ATTEMPT_DELAYS_MS,
+      onComplete: () => {
+        hideQuestOverlays();
+        hideHeroEditorButton();
+        necromantHouseBattle.startPersistentVisualSync(applyNecromantHouseTileMutations, {
+          isActiveCheck: () => playerEnteredNecromantHouse
+        });
+      }
+    });
+    return true;
+  }
+
+  // The temple and the Necromant House reskin the SAME room (rkswrs) — stepping through
+  // the tile-127 arrow doesn't navigate to a different room, so the temple's own
+  // (battle-free) scene is torn down first, then the house's tile mutations + CustomBattle
+  // take its place. Returning (onClose above) reverses this via enterVisitingTheClericTemple().
+  function enterNecromantHouse() {
+    if (playerEnteredNecromantHouse) return;
+    if (playerEnteredVisitingTheClericSewers) {
+      cleanupVisitingTheClericQuest();
+    }
+
+    let roomId = NECROMANT_HOUSE_BATTLE_ROOM_ID || getRoomIdByRoomName(NECROMANT_HOUSE_BATTLE_ROOM_NAME);
+    if (!roomId) roomId = getRoomIdByRoomName(NECROMANT_HOUSE_BATTLE_ROOM_NAME);
+    if (!roomId) {
+      showToast({ message: TOAST_MESSAGES.roomNotFound('The Necromant House'), variant: 'nothing', logPrefix: getNecromantHouseLogPrefix() });
+      return;
+    }
+
+    playerEnteredNecromantHouse = true;
+    if (necromantHouseBattle) {
+      necromantHouseBattle.cleanup(restoreBoardSetupNecromantHouse, showQuestOverlays);
+      necromantHouseBattle = null;
+    }
+
+    globalThis.state.board.send({ type: 'selectRoomById', roomId });
+    startNecromantHouseSceneSync();
+
+    const initResult = initializeNecromantHouseBattle(roomId);
+    if (initResult && typeof initResult.then === 'function') {
+      initResult.then((battle) => {
+        if (playerEnteredNecromantHouse && !necromantHouseBattle) {
+          setupNecromantHouseBattleInstance(battle);
+          hideQuestOverlays();
+          hideHeroEditorButton();
+        }
+      }).catch((error) => console.error(`${getNecromantHouseLogPrefix()} Error initializing battle:`, error));
+    } else if (initResult) {
+      setupNecromantHouseBattleInstance(initResult);
+    }
+
+    hideQuestOverlays();
+    hideHeroEditorButton();
+    updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+    showToast({ message: TOAST_MESSAGES.necromantHouseEntered, logPrefix: getNecromantHouseLogPrefix() });
   }
 
   // =======================
@@ -35197,8 +35473,13 @@ function createNPCCooldownManager() {
         // Visiting the Cleric is done — the badge can still light for the follow-up quest:
         // a new offer waiting, or a won battle pending its report-back reward.
         const mistsProgress = getMissionProgress(ISLE_OF_THE_MISTS_MISSION) || {};
-        if (mistsProgress.completed) return false;
-        return !mistsProgress.accepted || !!mistsProgress.battleCompleted;
+        if (!mistsProgress.completed) {
+          return !mistsProgress.accepted || !!mistsProgress.battleCompleted;
+        }
+        // Isle of the Mists is done — the badge can still light for The Necromant House.
+        const necromantProgress = getMissionProgress(THE_NECROMANT_HOUSE_MISSION) || {};
+        if (necromantProgress.completed) return false;
+        return !necromantProgress.accepted || !!necromantProgress.battleCompleted;
       },
       chat: {},
       hpBarColor: 'rgb(96, 192, 96)',
@@ -37636,6 +37917,7 @@ function createNPCCooldownManager() {
       let awaitingElathrielDraconiaQuestReturnConfirm = false;
       let awaitingBonelordBookConfirm = false;
       let awaitingOldrakMistsConfirm = false;
+      let awaitingOldrakNecromantConfirm = false;
       // A Prisoner (Mad Mage) riddle → key hand-over: after the correct answer he asks a
       // chain of "yes" confirmations before granting his key (riddleSolved).
       let prisonerKeyYesCount = -1; // -1 = not offering the key yet; 0..3 = mid confirm chain
@@ -40086,6 +40368,42 @@ function createNPCCooldownManager() {
             return;
           }
 
+          // The Necromant House — Oldrak's follow-up quest after Isle of the Mists. No
+          // key, no riddle — a single battle in the reskinned Sewers against the "Lost
+          // Scout" villains (the expedition, turned to bone), then report back for 200
+          // guild coins. Accepting lights up the same tile-127 tutorial arrow used for
+          // Isle of the Mists (see shouldEnableNecromantHouseArrow) — stepping through
+          // it starts the battle.
+          if (awaitingOldrakNecromantConfirm && /\byes\b/i.test(lower)) {
+            awaitingOldrakNecromantConfirm = false;
+            try {
+              await persistMissionProgress(THE_NECROMANT_HOUSE_MISSION, { accepted: true, completed: false, battleCompleted: false });
+              necromantHouseArrowTileAction.update(globalThis.state?.board?.getSnapshot()?.context);
+              updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+              cooldown.queueResponse(
+                text,
+                getMissionDialogueLine(THE_NECROMANT_HOUSE_MISSION, 'accept', "Then go. The house stands east of the Dark Cathedral; the only way in is through a cave to the south. Go carefully — Arcian's work did not end when he died."),
+                addMessageToConversation,
+                npcConfig.name
+              );
+            } catch (error) {
+              console.error(`${npcConfig.logPrefix} Error accepting The Necromant House:`, error);
+            }
+            return;
+          }
+
+          if (awaitingOldrakNecromantConfirm && /\bno\b/i.test(lower)) {
+            awaitingOldrakNecromantConfirm = false;
+            cooldown.queueResponse(
+              text,
+              getMissionDialogueLine(THE_NECROMANT_HOUSE_MISSION, 'decline', 'Then they stay lost, and their fate stays a mystery. Come back when you have found your nerve.'),
+              addMessageToConversation,
+              npcConfig.name,
+              ModalHelpers.getFarewellCloseCallback(text)
+            );
+            return;
+          }
+
           if (/\bmission\b/i.test(lower) && !clericProgress.completed) {
             try {
               await consumeQuestItem(resolveQuestProductName('greenTome') || 'Green Tome', 1);
@@ -40104,17 +40422,66 @@ function createNPCCooldownManager() {
             return;
           }
 
-          if (/\bmission\b/i.test(lower) && clericProgress.completed) {
-            if (mistsProgress.completed) {
+          if (/\bmission\b/i.test(lower) && clericProgress.completed && mistsProgress.completed) {
+            const necromantProgress = getMissionProgress(THE_NECROMANT_HOUSE_MISSION) || {};
+
+            if (necromantProgress.completed) {
               cooldown.queueResponse(
                 text,
-                getMissionDialogueLine(ISLE_OF_THE_MISTS_MISSION, 'alreadyCompleted', 'Fernfang troubles the isle no more — though what silence he left behind, I cannot say is any better. There is little more to tell.'),
+                getMissionDialogueLine(THE_NECROMANT_HOUSE_MISSION, 'alreadyCompleted', 'You already brought me word of the Necromant House and what became of those I sent. My thanks stand, Player.'),
                 addMessageToConversation,
                 npcConfig.name
               );
               return;
             }
 
+            if (necromantProgress.battleCompleted) {
+              try {
+                const coinsAdder = globalThis.addGuildCoins ||
+                  (globalThis.Guilds && globalThis.Guilds.addGuildCoins) ||
+                  (globalThis.BestiaryModAPI && globalThis.BestiaryModAPI.guilds && globalThis.BestiaryModAPI.guilds.addGuildCoins) ||
+                  (typeof addGuildCoins === 'function' ? addGuildCoins : null);
+                const necromantCoins = THE_NECROMANT_HOUSE_MISSION.rewardCoins || 0;
+                if (coinsAdder && necromantCoins > 0) {
+                  await coinsAdder(necromantCoins);
+                }
+                await persistMissionProgress(THE_NECROMANT_HOUSE_MISSION, { accepted: true, completed: true, battleCompleted: true });
+                necromantHouseArrowTileAction.update(globalThis.state?.board?.getSnapshot()?.context);
+                updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+                NotificationService.showQuestCompleted(THE_NECROMANT_HOUSE_MISSION, npcConfig.logPrefix, necromantCoins > 0 ? { rewardCoins: necromantCoins } : undefined);
+                cooldown.queueResponse(
+                  text,
+                  getMissionDialogueLine(THE_NECROMANT_HOUSE_MISSION, 'complete', 'So that is what became of them — turned to bone in a house that never should have been reopened. Grim news, but news all the same, and better it end at your hand than fester any further. Take this for your trouble, Player.'),
+                  addMessageToConversation,
+                  npcConfig.name
+                );
+              } catch (error) {
+                console.error(`${npcConfig.logPrefix} Error completing The Necromant House:`, error);
+              }
+              return;
+            }
+
+            if (necromantProgress.accepted) {
+              cooldown.queueResponse(
+                text,
+                getMissionDialogueLine(THE_NECROMANT_HOUSE_MISSION, 'alreadyActive', 'Have you found any trace of them in the Necromant House yet? I fear the worst, the longer this drags on.'),
+                addMessageToConversation,
+                npcConfig.name
+              );
+              return;
+            }
+
+            awaitingOldrakNecromantConfirm = true;
+            cooldown.queueResponse(
+              text,
+              getMissionDialogueLine(THE_NECROMANT_HOUSE_MISSION, 'prompt', 'The Necromant House stirs again, east of the Dark Cathedral — built long ago by a sorcerer named Arcian before his own apprentice put a knife in his back. I sent word to a few who wished to see it for themselves, and none of them have returned. Will you go and learn what became of them?'),
+              addMessageToConversation,
+              npcConfig.name
+            );
+            return;
+          }
+
+          if (/\bmission\b/i.test(lower) && clericProgress.completed && !mistsProgress.completed) {
             if (mistsProgress.battleCompleted) {
               try {
                 const coinsAdder = globalThis.addGuildCoins ||
@@ -41107,6 +41474,8 @@ function createNPCCooldownManager() {
     cleanupClericBoardClearWatcher();
     cleanupIsleOfMistsArrowSystem();
     cleanupIsleOfMistsQuest();
+    cleanupNecromantHouseArrowSystem();
+    cleanupNecromantHouseQuest();
     // Cleanup Fastest Bishop in Carlin system
     cleanupCrossingTheLineSystem();
 
@@ -41538,6 +41907,7 @@ function createNPCCooldownManager() {
     setupClericArrowObserver();
     setupClericBoardClearWatcher();
     setupIsleOfMistsArrowObserver();
+    setupNecromantHouseArrowObserver();
     if (needsSerpentineTeshaObservers()) {
       setupTeshaArrowObserver();
       setupSerpentineDestroyFieldObserver();

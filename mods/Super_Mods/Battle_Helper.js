@@ -67,6 +67,9 @@ const BATTLE_HELP_GOAL_TYPES = ['ticks', 'rank', 'floor'];
 const BATTLE_HELP_MAX_TICKS = 9600;
 const BATTLE_HELP_NOTE_MAX_LENGTH = 80;
 const BATTLE_HELP_BUTTON_POLL_MS = 60000;
+const BATTLE_HELP_CHAT_MESSAGE_MAX_LENGTH = 200;
+const BATTLE_HELP_CHAT_POLL_MS = 6000;
+const BATTLE_HELP_CHAT_MIN_HEIGHT_PX = 40;
 
 const DEFAULT_MONSTER_STAT = 1;
 const DEFAULT_MONSTER_EXP = 0;
@@ -854,7 +857,8 @@ function normalizeHelpRequest(id, raw) {
     createdAt: Number(raw.createdAt) || 0,
     expiresAt: Number(raw.expiresAt) || 0,
     status: raw.status === 'closed' ? 'closed' : 'open',
-    replies: raw.replies && typeof raw.replies === 'object' ? raw.replies : {}
+    replies: raw.replies && typeof raw.replies === 'object' ? raw.replies : {},
+    chat: raw.chat && typeof raw.chat === 'object' ? raw.chat : {}
   };
 }
 
@@ -885,6 +889,63 @@ function hasCurrentPlayerHelpedRequest(request) {
 function countUnhelpedOpenRequests(requests) {
   if (!Array.isArray(requests)) return 0;
   return requests.filter((request) => !hasCurrentPlayerHelpedRequest(request)).length;
+}
+
+// =======================
+// 2.6 Help Board — "New!" activity badge (per-browser, localStorage)
+// =======================
+const BATTLE_HELP_SEEN_ACTIVITY_STORAGE_KEY = 'battleHelperHelpSeenActivity';
+
+function loadHelpSeenActivityMap() {
+  try {
+    const raw = localStorage.getItem(BATTLE_HELP_SEEN_ACTIVITY_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch (_) {
+    return {};
+  }
+}
+
+function saveHelpSeenActivityMap(map) {
+  try {
+    localStorage.setItem(BATTLE_HELP_SEEN_ACTIVITY_STORAGE_KEY, JSON.stringify(map));
+  } catch (_) { /* ignore quota / private-mode errors */ }
+}
+
+function getHelpRequestActivityCounts(request) {
+  return {
+    replyCount: getHelpRepliesList(request).length,
+    chatCount: getHelpChatMessagesList(request?.chat).length
+  };
+}
+
+function hasUnseenHelpActivity(requestId, counts) {
+  const map = loadHelpSeenActivityMap();
+  const seen = map[requestId];
+  if (!seen) return counts.replyCount > 0 || counts.chatCount > 0;
+  return counts.replyCount > (seen.replyCount || 0) || counts.chatCount > (seen.chatCount || 0);
+}
+
+function markHelpRequestActivitySeen(requestId, counts) {
+  if (!requestId) return;
+  const map = loadHelpSeenActivityMap();
+  map[requestId] = { replyCount: counts.replyCount, chatCount: counts.chatCount };
+  saveHelpSeenActivityMap(map);
+}
+
+/** Drop seen-activity entries for requests that are no longer open, so storage doesn't grow forever. */
+function pruneHelpSeenActivityMap(currentRequestIds) {
+  const map = loadHelpSeenActivityMap();
+  const keep = new Set(currentRequestIds);
+  let changed = false;
+  for (const id of Object.keys(map)) {
+    if (!keep.has(id)) {
+      delete map[id];
+      changed = true;
+    }
+  }
+  if (changed) saveHelpSeenActivityMap(map);
 }
 
 async function fetchHelpRequests() {
@@ -1186,6 +1247,77 @@ async function publishHelpReply(requestId, note = '') {
   return reply;
 }
 
+function sanitizeHelpChatMessage(text) {
+  return String(text || '').replace(/\s+/g, ' ').trim().slice(0, BATTLE_HELP_CHAT_MESSAGE_MAX_LENGTH);
+}
+
+function getHelpChatMessagesList(raw) {
+  if (!raw || typeof raw !== 'object') return [];
+  return Object.entries(raw)
+    .map(([id, msg]) => ({
+      id,
+      name: String(msg?.name || '').trim(),
+      text: sanitizeHelpChatMessage(msg?.text),
+      createdAt: Number(msg?.createdAt) || 0
+    }))
+    .filter((m) => m.name && m.text)
+    .sort((a, b) => a.createdAt - b.createdAt);
+}
+
+async function fetchHelpChatMessages(requestId) {
+  const id = String(requestId || '').trim();
+  if (!id) return [];
+  const raw = await BattleHelpFirebase.get(
+    `${BATTLE_HELP_REQUESTS_PATH}/${id}/chat`,
+    'load help chat',
+    {}
+  );
+  return getHelpChatMessagesList(raw);
+}
+
+async function sendHelpChatMessage(requestId, text) {
+  const name = getCurrentPlayerName();
+  if (!name) {
+    throw new Error(t('mods.battleHelper.help.errors.playerNameRequired'));
+  }
+  const id = String(requestId || '').trim();
+  if (!id) {
+    throw new Error(t('mods.battleHelper.help.errors.selectRequestFirst'));
+  }
+  const message = sanitizeHelpChatMessage(text);
+  if (!message) return null;
+  const payload = { name, text: message, createdAt: Date.now() };
+  await BattleHelpFirebase.post(
+    `${BATTLE_HELP_REQUESTS_PATH}/${id}/chat`,
+    payload,
+    'send help chat message'
+  );
+  return payload;
+}
+
+/** Admin-only (window.FirebaseAdminsAPI, shared with VIP_List's moderation tools). */
+async function isCurrentPlayerChatAdmin() {
+  const player = getCurrentPlayerName();
+  if (!player || typeof window.FirebaseAdminsAPI?.isPlayerAdminAsync !== 'function') {
+    return false;
+  }
+  try {
+    return await window.FirebaseAdminsAPI.isPlayerAdminAsync(player);
+  } catch (_) {
+    return false;
+  }
+}
+
+async function deleteHelpChatMessage(requestId, msgId) {
+  const id = String(requestId || '').trim();
+  const mid = String(msgId || '').trim();
+  if (!id || !mid) return;
+  await BattleHelpFirebase.delete(
+    `${BATTLE_HELP_REQUESTS_PATH}/${id}/chat/${mid}`,
+    'delete help chat message'
+  );
+}
+
 // =======================
 // 3. State & Session Backup
 // =======================
@@ -1214,6 +1346,8 @@ let battleHelperModalPublishBtn = null;
 let battleHelperModalPublishBaseDisabled = true;
 let battleHelperPublishBoardUnsub = null;
 let battleHelpButtonPollTimer = null;
+let battleHelpChatPollTimer = null;
+let stopHelpChatPollingRef = null;
 let helpRequestActivateSeq = 0;
 let helpViewSetupSeq = 0;
 let clearHelpSelectionRef = null;
@@ -2534,6 +2668,7 @@ function buildHelpBoardColumns(onContentChange, shared) {
   function selectHelpRequest(request) {
     if (!request) return;
     helpBoardState.selectedId = request.id;
+    markHelpRequestActivitySeen(request.id, getHelpRequestActivityCounts(request));
     renderList();
   }
 
@@ -2687,13 +2822,210 @@ function buildHelpBoardColumns(onContentChange, shared) {
   battleHelperModalPublishBtn = publishButton;
   startPublishSetupBoardWatch();
 
-  const repliesScroll = createBattleHelperScrollContainer({ height: 160, grow: true });
+  const repliesScroll = createBattleHelperScrollContainer({ height: 130, grow: false });
   const repliesBody = document.createElement('div');
   repliesBody.style.cssText = 'display: flex; flex-direction: column; gap: 4px; width: 100%;';
   repliesScroll.addContent(repliesBody);
   detailCard.appendChild(createSectionLabel(t('mods.battleHelper.help.repliesTitle')));
   detailCard.appendChild(repliesScroll.element);
+
+  const chatScroll = createBattleHelperScrollContainer({ height: BATTLE_HELP_CHAT_MIN_HEIGHT_PX, grow: true });
+  const chatBody = document.createElement('div');
+  chatBody.style.cssText = 'display: flex; flex-direction: column; gap: 3px; width: 100%;';
+  chatScroll.addContent(chatBody);
+  detailCard.appendChild(createSectionLabel(t('mods.battleHelper.help.chatTitle')));
+  detailCard.appendChild(chatScroll.element);
+
+  const chatInputRow = document.createElement('div');
+  chatInputRow.style.cssText = 'display: flex; flex-direction: row; gap: 4px; width: 100%; align-items: center; box-sizing: border-box;';
+  const chatInput = createCompactInput(tReplace('mods.battleHelper.help.chatPlaceholder', {
+    max: String(BATTLE_HELP_CHAT_MESSAGE_MAX_LENGTH)
+  }));
+  chatInput.maxLength = BATTLE_HELP_CHAT_MESSAGE_MAX_LENGTH;
+  chatInput.style.flex = '1 1 auto';
+  chatInput.style.minWidth = '0';
+  chatInput.disabled = true;
+  const chatSendButton = document.createElement('button');
+  chatSendButton.type = 'button';
+  chatSendButton.className = BATTLE_HELPER_BUTTON_CLASS.secondary;
+  chatSendButton.style.cssText = 'cursor: pointer; flex: 0 0 auto;';
+  chatSendButton.textContent = t('mods.battleHelper.help.chatSend');
+  chatSendButton.disabled = true;
+  chatInputRow.appendChild(chatInput);
+  chatInputRow.appendChild(chatSendButton);
+  detailCard.appendChild(chatInputRow);
+
   detailColumn.appendChild(detailCard);
+
+  let chatPollingRequestId = null;
+  let chatFetchSeq = 0;
+  let chatIsAdmin = false;
+  let lastChatMessages = [];
+
+  function renderChatMessages(messages) {
+    lastChatMessages = messages;
+    const viewport = chatScroll.scrollView;
+    const wasAtBottom = !viewport
+      || (viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 24);
+    chatBody.textContent = '';
+    if (!messages.length) {
+      const empty = document.createElement('p');
+      empty.className = 'pixel-font-14 text-whiteRegular m-0 italic';
+      empty.textContent = t('mods.battleHelper.help.noChatMessages');
+      chatBody.appendChild(empty);
+    } else {
+      const requestIdAtRender = chatPollingRequestId;
+      const currentPlayerLower = getCurrentPlayerName().toLowerCase();
+      messages.forEach((msg) => {
+        const row = document.createElement('div');
+        row.style.cssText = 'display: flex; flex-direction: row; align-items: flex-start; gap: 4px; width: 100%; box-sizing: border-box;';
+
+        const textEl = document.createElement('p');
+        textEl.className = 'pixel-font-14 text-whiteRegular m-0';
+        textEl.style.cssText = 'flex: 1 1 auto; min-width: 0; word-break: break-word; white-space: pre-wrap;';
+        textEl.appendChild(createBattleHelperProfileLink(msg.name, { color: '#7dd3fc' }));
+        const ageText = formatHelpAge(msg.createdAt);
+        if (ageText) {
+          const ageSpan = document.createElement('span');
+          ageSpan.style.opacity = '0.7';
+          ageSpan.textContent = ` (${ageText})`;
+          textEl.appendChild(ageSpan);
+        }
+        textEl.appendChild(document.createTextNode(`: ${msg.text}`));
+        row.appendChild(textEl);
+
+        const isOwnMessage = Boolean(currentPlayerLower) && msg.name.toLowerCase() === currentPlayerLower;
+        if (chatIsAdmin || isOwnMessage) {
+          const defaultTitle = isOwnMessage
+            ? t('mods.battleHelper.help.chatDeleteOwn')
+            : t('mods.battleHelper.help.chatAdminDelete');
+          const deleteBtn = document.createElement('button');
+          deleteBtn.type = 'button';
+          deleteBtn.title = defaultTitle;
+          deleteBtn.textContent = '×';
+          deleteBtn.style.cssText = 'cursor: pointer; flex: 0 0 auto; background: none; border: none; color: #f87171; font-size: 15px; line-height: 1; padding: 0 2px;';
+
+          let armed = false;
+          let revertTimerId = null;
+          const revertDeleteBtn = () => {
+            armed = false;
+            revertTimerId = null;
+            deleteBtn.textContent = '×';
+            deleteBtn.title = defaultTitle;
+            deleteBtn.style.color = '#f87171';
+            deleteBtn.style.fontWeight = 'normal';
+          };
+
+          deleteBtn.addEventListener('click', async () => {
+            if (deleteBtn.disabled) return;
+
+            if (!armed) {
+              armed = true;
+              deleteBtn.textContent = '✓';
+              deleteBtn.title = t('mods.battleHelper.help.chatAdminDeleteConfirm');
+              deleteBtn.style.color = '#fbbf24';
+              deleteBtn.style.fontWeight = 'bold';
+              revertTimerId = scheduleBattleHelperTimeout(revertDeleteBtn, 3000);
+              return;
+            }
+
+            if (revertTimerId) {
+              battleHelperPendingTimers.delete(revertTimerId);
+              clearTimeout(revertTimerId);
+              revertTimerId = null;
+            }
+            deleteBtn.disabled = true;
+            try {
+              await deleteHelpChatMessage(requestIdAtRender, msg.id);
+              await refreshHelpChat(requestIdAtRender);
+            } catch (error) {
+              console.warn('[Battle Helper] deleteHelpChatMessage:', error);
+              deleteBtn.disabled = false;
+              revertDeleteBtn();
+            }
+          });
+          row.appendChild(deleteBtn);
+        }
+
+        chatBody.appendChild(row);
+      });
+    }
+    if (viewport && wasAtBottom) {
+      requestAnimationFrame(() => { viewport.scrollTop = viewport.scrollHeight; });
+    }
+    if (typeof onContentChange === 'function') {
+      requestAnimationFrame(() => onContentChange());
+    }
+  }
+
+  isCurrentPlayerChatAdmin().then((isAdmin) => {
+    chatIsAdmin = isAdmin;
+    if (isAdmin && chatPollingRequestId) {
+      renderChatMessages(lastChatMessages);
+    }
+  });
+
+  async function refreshHelpChat(requestId, { scrollToBottom = false } = {}) {
+    const seq = ++chatFetchSeq;
+    try {
+      const messages = await fetchHelpChatMessages(requestId);
+      if (seq !== chatFetchSeq || chatPollingRequestId !== requestId) return;
+      renderChatMessages(messages);
+      if (scrollToBottom && chatScroll.scrollView) {
+        requestAnimationFrame(() => { chatScroll.scrollView.scrollTop = chatScroll.scrollView.scrollHeight; });
+      }
+    } catch (error) {
+      console.warn('[Battle Helper] refreshHelpChat:', error);
+    }
+  }
+
+  function stopChatPolling() {
+    if (battleHelpChatPollTimer) {
+      clearInterval(battleHelpChatPollTimer);
+      battleHelpChatPollTimer = null;
+    }
+    chatPollingRequestId = null;
+    chatFetchSeq += 1;
+  }
+
+  function startChatPollingForRequest(requestId) {
+    if (chatPollingRequestId === requestId && battleHelpChatPollTimer) return;
+    stopChatPolling();
+    chatPollingRequestId = requestId;
+    chatBody.textContent = '';
+    refreshHelpChat(requestId, { scrollToBottom: true });
+    battleHelpChatPollTimer = setInterval(() => {
+      refreshHelpChat(requestId);
+    }, BATTLE_HELP_CHAT_POLL_MS);
+  }
+  stopHelpChatPollingRef = stopChatPolling;
+
+  async function sendChatMessageFromInput() {
+    const request = helpBoardState.requests.find((r) => r.id === helpBoardState.selectedId);
+    if (!request) return;
+    const message = sanitizeHelpChatMessage(chatInput.value);
+    if (!message) return;
+    chatSendButton.disabled = true;
+    chatInput.disabled = true;
+    try {
+      await sendHelpChatMessage(request.id, message);
+      chatInput.value = '';
+      await refreshHelpChat(request.id, { scrollToBottom: true });
+    } catch (error) {
+      setHelpStatus(String(error?.message || error), 'error');
+    } finally {
+      chatSendButton.disabled = false;
+      chatInput.disabled = false;
+      chatInput.focus();
+    }
+  }
+  chatSendButton.addEventListener('click', sendChatMessageFromInput);
+  chatInput.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      sendChatMessageFromInput();
+    }
+  });
 
   function renderReplies(request) {
     repliesBody.textContent = '';
@@ -2784,6 +3116,11 @@ function buildHelpBoardColumns(onContentChange, shared) {
       syncPublishSetupButtons();
       closeButton.disabled = true;
       repliesBody.textContent = '';
+      chatInput.disabled = true;
+      chatSendButton.disabled = true;
+      chatInput.value = '';
+      stopChatPolling();
+      chatBody.textContent = '';
       return;
     }
 
@@ -2830,6 +3167,10 @@ function buildHelpBoardColumns(onContentChange, shared) {
     syncPublishSetupButtons();
     closeButton.disabled = !isOwn;
     renderReplies(request);
+
+    chatInput.disabled = false;
+    chatSendButton.disabled = false;
+    startChatPollingForRequest(request.id);
   }
 
   function renderList() {
@@ -2873,13 +3214,27 @@ function buildHelpBoardColumns(onContentChange, shared) {
 
       const meta = document.createElement('div');
       meta.className = 'pixel-font-12 text-whiteRegular';
-      meta.style.opacity = '0.85';
-      const replyCount = getHelpRepliesList(request).length;
-      meta.textContent = [
+
+      const metaBase = document.createElement('span');
+      metaBase.style.opacity = '0.85';
+      metaBase.textContent = [
         formatHelpGoalLabel(request.goalType, request.goalValue),
-        formatHelpAge(request.createdAt),
-        tReplace('mods.battleHelper.help.replyCount', { n: String(replyCount) })
+        formatHelpAge(request.createdAt)
       ].filter(Boolean).join(' · ');
+      meta.appendChild(metaBase);
+
+      const activityCounts = getHelpRequestActivityCounts(request);
+      const metaTrailing = document.createElement('span');
+      if (hasUnseenHelpActivity(request.id, activityCounts)) {
+        metaTrailing.style.cssText = 'color: #6ee07a; font-weight: bold;';
+        metaTrailing.textContent = ` · ${t('mods.battleHelper.help.newActivityBadge')}`;
+      } else {
+        metaTrailing.style.opacity = '0.85';
+        metaTrailing.textContent = ` · ${tReplace('mods.battleHelper.help.replyCount', {
+          n: String(activityCounts.replyCount)
+        })}`;
+      }
+      meta.appendChild(metaTrailing);
       textCol.appendChild(meta);
       row.appendChild(textCol);
 
@@ -2911,6 +3266,7 @@ function buildHelpBoardColumns(onContentChange, shared) {
       if (helpBoardState.selectedId && !requests.some((r) => r.id === helpBoardState.selectedId)) {
         helpBoardState.selectedId = null;
       }
+      pruneHelpSeenActivityMap(requests.map((r) => r.id));
       renderList();
       updateOpenRequestsTitle(requests.length);
       setHelpBoardOpenCount(countUnhelpedOpenRequests(requests));
@@ -3088,6 +3444,9 @@ function clearBattleHelperModalCleanup() {
   abortHelpBoardInFlightOperations();
   clearBattleHelperModalLayoutCleanup();
   clearModalPublishSetupButton();
+  if (typeof stopHelpChatPollingRef === 'function') {
+    stopHelpChatPollingRef();
+  }
 }
 
 function attachBattleHelperModalCloseCleanup(modalRef) {
@@ -3340,6 +3699,11 @@ context.exports = {
     helpBoardState.openCount = 0;
     clearHelpSelectionRef = null;
     stopHelpBoardButtonPolling();
+    if (battleHelpChatPollTimer) {
+      clearInterval(battleHelpChatPollTimer);
+      battleHelpChatPollTimer = null;
+    }
+    stopHelpChatPollingRef = null;
     stopBattleHelperViewingProfileToast();
     stopBattleHelperPublishSetupToast();
     removeBattleHelperToastContainer();
