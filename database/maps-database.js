@@ -93,7 +93,10 @@ function getMapsByDifficulty(difficulty) {
 }
 
 /**
- * Get maps by maximum team size
+ * Get maps by maximum team size.
+ * NOTE: multi-floor quest rooms (type: 'multi', e.g. The Annihilator Quest) have no
+ * top-level maxTeamSize — it varies per floor in room.floorRules[floorIndex] instead —
+ * so they never match here and are silently excluded, not misreported.
  * @param {number} teamSize - The maximum team size
  * @returns {Array} Array of maps with the specified max team size
  */

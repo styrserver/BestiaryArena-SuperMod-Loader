@@ -32,7 +32,11 @@ Maintainer workflow
    (Module:MapsData.getDrops in the doc below) instead of us duplicating a second,
    auto-guessed copy of the same fact that could drift out of sync.
 6. `max_rank_points` uses the game's own formula (2 * maxTeamSize - 1), same as
-   Better_Highscores.js "Calculate max rank points".
+   Better_Highscores.js "Calculate max rank points". Multi-floor quest rooms (type:
+   'multi', e.g. The Annihilator Quest) have no top-level maxTeamSize/staminaCost —
+   those vary per floor in room.floorRules[floorIndex] instead. `stamina` and
+   `max_rank_points` for those rooms report floor 0's values (see getRoomMaxTeamSize/
+   getRoomStaminaCost below); they are NOT a genuine flat cost for the whole dungeon.
 7. `type` is "raid", "event", or false (regular map) — matches the wiki's own
    Raids/Events section split, same logic regions-lua-export.js already uses.
    CAVEAT: a raid room only becomes "event" if it's NOT in maps-database.js's
@@ -129,9 +133,38 @@ function getRegionDisplayName(region) {
   return region.name || region.id || null;
 }
 
+/**
+ * Multi-floor quest rooms (type: 'multi', e.g. The Annihilator Quest) carry no top-level
+ * maxTeamSize/staminaCost at all — those live per-floor in room.floorRules[floorIndex]
+ * instead (confirmed live: The Annihilator Quest is maxTeamSize 4 on floors 0-14, 6 on
+ * floor 15, staminaCost 12 vs 18). A flat room.maxTeamSize/staminaCost read silently comes
+ * back undefined for these and previously collapsed to a misleading "0" via `?? 0` below.
+ * We report floor 0's values (the cost/limit a player commits to on entry) rather than
+ * inventing a single number across floors that differ — see docs/game_state_api.md's
+ * multi-floor room shape note for the full floorRules structure.
+ */
+function getRoomEntryFloorRule(room) {
+  if (room?.type === 'multi' && Array.isArray(room.floorRules)) {
+    return room.floorRules[0] || null;
+  }
+  return null;
+}
+
+function getRoomMaxTeamSize(room) {
+  const floorRule = getRoomEntryFloorRule(room);
+  if (floorRule && typeof floorRule.maxTeamSize === 'number') return floorRule.maxTeamSize;
+  return typeof room?.maxTeamSize === 'number' ? room.maxTeamSize : null;
+}
+
+function getRoomStaminaCost(room) {
+  const floorRule = getRoomEntryFloorRule(room);
+  if (floorRule && typeof floorRule.staminaCost === 'number') return floorRule.staminaCost;
+  return typeof room?.staminaCost === 'number' ? room.staminaCost : null;
+}
+
 /** Max rank points: same formula as Better_Highscores.js ("Calculate max rank points"). */
 function getMaxRankPoints(room) {
-  const maxTeamSize = room?.maxTeamSize;
+  const maxTeamSize = getRoomMaxTeamSize(room);
   if (typeof maxTeamSize !== 'number' || !Number.isFinite(maxTeamSize)) return null;
   return (2 * maxTeamSize) - 1;
 }
@@ -240,7 +273,7 @@ function buildMapsExportData() {
       wikiKey: getWikiKeyForMapId(mapId),
       region: regionName,
       difficulty: getDifficultyLabel(room.difficulty),
-      stamina: room.staminaCost ?? null,
+      stamina: getRoomStaminaCost(room),
       maxRankPoints: getMaxRankPoints(room),
       type: getMapType(mapId, room),
       expansion: getExpansionName(mapId),
@@ -429,7 +462,7 @@ function buildMapPageBody(mapIdOrName) {
   }
 
   const infoboxLine = `{{Maps|image1=${mapId}.png}}`;
-  const intro = `${firstSentence} The [[difficulty]] is ${difficulty.toLowerCase()} and you spend ${room.staminaCost ?? '?'} [[stamina]] for each battle.`;
+  const intro = `${firstSentence} The [[difficulty]] is ${difficulty.toLowerCase()} and you spend ${getRoomStaminaCost(room) ?? '?'} [[stamina]] for each battle.`;
 
   const creatureTable = buildCreatureTableRows(room)
     || '(No creatures found — check state.utils.ROOMS actors for this map.)';

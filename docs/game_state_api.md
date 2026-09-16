@@ -576,6 +576,29 @@ const roomExample = {
   "staminaCost": 3              // Stamina cost to play
 };
 
+// Multi-floor quest room example (e.g. The Annihilator Quest, id "edanni").
+// type: 'multi' rooms have NO top-level maxTeamSize/staminaCost — those vary per floor
+// instead. Reading room.maxTeamSize directly (the single-floor pattern above) silently
+// returns undefined for these; several bugs shipped from exactly that (see
+// mods/Official_Mods/Setup_Manager.js getMaxTeamSize()). The current floor is
+// globalThis.state.board.getSnapshot().context.floor (0-indexed) — index into floorRules
+// (and floorFiles) with it.
+const multiFloorRoomExample = {
+  "id": "edanni",
+  "isUnlocked": true,
+  "type": "multi",
+  "difficulty": 3,
+  "floorFiles": [                    // One entry per floor, board layout only
+    { "name": "edanni1", "data": { "tiles": [/* ... */], "actors": [/* ... */] } }
+    // ...16 floors total for The Annihilator Quest (indices 0-15)
+  ],
+  "floorRules": [                    // Parallel array — per-floor battle rules
+    { "maxTeamSize": 4, "staminaCost": 12, "setupKey": "edanni" },  // floors 0-14
+    // ...
+    { "maxTeamSize": 6, "staminaCost": 18, "setupKey": "edanni2" }  // floor 15 (index 15)
+  ]
+};
+
 // Region structure example
 const regionExample = {
   "id": "rook",                // Region identifier

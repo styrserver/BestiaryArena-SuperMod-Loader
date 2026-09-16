@@ -4,6 +4,41 @@
   },
   "notes": [
     {
+      "version": "5.0.5",
+      "changes": [
+        {
+          "mod": "creature-database.js",
+          "type": "added",
+          "text": "Marked Astronis, Cake Drake, Mateusz Dragon Wielki, Setzer Gambler, and Ti as unobtainable creatures."
+        },
+        {
+          "mod": "maps-lua-export.js",
+          "type": "fixed",
+          "text": "Multi-floor quest rooms whose ally limit/stamina cost varies per floor have no flat value to read, so the wiki Lua export was silently emitting stamina 0 and max rank points 0 for them; now reports the entry floor's real values instead."
+        },
+        {
+          "mod": "Mod Loader",
+          "type": "fixed",
+          "text": "$replay on a multi-floor quest room always loaded the enemy team from its first floor, no matter which floor was requested, because the game's own room-monster lookup has no way to take a floor argument; ba-sandbox-utils.mjs now resolves that floor's real enemies itself for those rooms."
+        },
+        {
+          "mod": "Setup Manager",
+          "type": "added",
+          "text": "Saved setups now remember the ally limit from when they were saved, so the creature-count indicator no longer shifts if you view Setup Manager while on a different floor of a multi-floor quest."
+        },
+        {
+          "mod": "Setup Manager",
+          "type": "fixed",
+          "text": "The ally-limit indicator always showed the same generic number on multi-floor quest rooms whose limit actually changes per floor; now reads the correct per-floor limit."
+        },
+        {
+          "mod": "Setup Manager",
+          "type": "fixed",
+          "text": "Loading a saved setup with custom pieces on a multi-floor quest room populated enemies from that room's first floor instead of the floor you were actually on, same root cause as the $replay fix above."
+        }
+      ]
+    },
+    {
       "version": "5.0.4",
       "changes": [
         {

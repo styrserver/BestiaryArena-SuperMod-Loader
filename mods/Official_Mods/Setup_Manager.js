@@ -229,6 +229,44 @@ function getCurrentMapName() {
   }
 }
 
+// state.utils.getBoardMonstersFromRoomId(mapId) is floor-blind: it has no way to take a
+// floor argument, and for multi-floor rooms (type: 'multi', e.g. The Annihilator Quest,
+// which have no top-level room.file at all) it silently falls back to floor 0's enemy
+// layout regardless of the room's actual current floor. Confirmed against the same bug in
+// ba-sandbox-utils.mjs's $replay configureBoard(). For multi-floor rooms we build the enemy
+// team ourselves straight from that floor's raw floorFiles[floor].data.actors instead.
+function getEnemyTeamConfigForRoom(mapId) {
+  try {
+    const room = globalThis.state?.utils?.ROOMS?.find(r => r?.id === mapId);
+    if (room?.type === 'multi') {
+      const floorIdx = globalThis.state.board.getSnapshot()?.context?.floor ?? 0;
+      const rawActors = room.floorFiles?.[floorIdx]?.data?.actors;
+      const enemyTeamConfig = [];
+      if (Array.isArray(rawActors)) {
+        rawActors.forEach((actor, tileIndex) => {
+          if (!actor) return; // sparse/dense-null array — skip empty tiles
+          enemyTeamConfig.push({
+            type: 'file',
+            key: `multi-floor-enemy-${tileIndex}`,
+            tileIndex,
+            villain: true,
+            gameId: actor.id,
+            direction: actor.direction,
+            level: actor.level,
+            equip: actor.equip ?? null,
+            shiny: actor.shiny ?? false
+          });
+        });
+      }
+      return enemyTeamConfig;
+    }
+    return globalThis.state.utils.getBoardMonstersFromRoomId(mapId) || [];
+  } catch (error) {
+    console.error('Error getting enemy team config for room:', error);
+    return [];
+  }
+}
+
 function formatSetupCreatureCount(current, max) {
   return tReplace('mods.setupManager.creatureCount', { current, max });
 }
@@ -252,34 +290,57 @@ function getCurrentCreatureCount() {
 // Get maximum team size for current map
 function getMaxTeamSize(mapId) {
   try {
-    if (!mapId || !globalThis.state?.utils?.ROOMS) {
+    if (!mapId) {
       return 5; // Default fallback
     }
-    
+
+    // Prefer the live selected-room object over the static ROOMS table. Multi-floor quest
+    // rooms (type: 'multi', e.g. The Annihilator Quest) have no top-level maxTeamSize at
+    // all — the ally limit instead lives per-floor in selectedRoom.floorRules[floor], indexed
+    // by the live context.floor. Single-floor rooms just carry maxTeamSize directly.
+    const boardContext = globalThis.state?.board?.getSnapshot()?.context;
+    const selectedRoom = boardContext?.selectedMap?.selectedRoom;
+    const roomMatches = selectedRoom && (selectedRoom.id === mapId || String(selectedRoom.id) === String(mapId));
+
+    if (roomMatches && selectedRoom.type === 'multi' && Array.isArray(selectedRoom.floorRules)) {
+      const floorRule = selectedRoom.floorRules[boardContext.floor];
+      if (floorRule && typeof floorRule.maxTeamSize === 'number') {
+        return floorRule.maxTeamSize;
+      }
+    }
+
+    if (roomMatches && typeof selectedRoom.maxTeamSize === 'number') {
+      return selectedRoom.maxTeamSize;
+    }
+
+    if (!globalThis.state?.utils?.ROOMS) {
+      return 5; // Default fallback
+    }
+
     const rooms = globalThis.state.utils.ROOMS;
-    
+
     // Try to find room by id (could be string or number)
-    let roomData = rooms.find(room => 
-      room.id === mapId || 
-      room.id === String(mapId) || 
+    let roomData = rooms.find(room =>
+      room.id === mapId ||
+      room.id === String(mapId) ||
       String(room.id) === mapId
     );
-    
+
     // If not found, try to find by file name or other identifier
     if (!roomData && typeof mapId === 'string') {
-      roomData = rooms.find(room => 
-        room.file?.name === mapId || 
+      roomData = rooms.find(room =>
+        room.file?.name === mapId ||
         room.file?.id === mapId
       );
     }
-    
+
     if (roomData && typeof roomData.maxTeamSize === 'number') {
       return roomData.maxTeamSize;
     }
   } catch (error) {
     console.warn('Error getting max team size:', error);
   }
-  
+
   // Default fallback (most common is 5)
   return 5;
 }
@@ -383,7 +444,10 @@ function saveTeamSetup(mapId, name, setup) {
     return false;
   }
 
-  config.savedSetups[mapId].push({ name, setup, notes: '' });
+  // Memorize the ally limit in effect when this setup was saved, so the card's "X/Y
+  // creatures" indicator doesn't shift later if the player is currently on a different
+  // floor of a multi-floor room (e.g. The Annihilator Quest) with a different limit.
+  config.savedSetups[mapId].push({ name, setup, notes: '', maxTeamSize: getMaxTeamSize(mapId) });
   
   // Save the updated config
   saveConfigToStorage();
@@ -677,7 +741,7 @@ function loadTeamSetup(mapId, setupName) {
         return false;
       }
       
-      const enemyTeamConfig = globalThis.state.utils.getBoardMonstersFromRoomId(mapIdFromBoard);
+      const enemyTeamConfig = getEnemyTeamConfigForRoom(mapIdFromBoard);
       
       const playerTeamConfig = setupArray.map((piece, index) => {
         if (piece.type === 'custom') {
@@ -2283,11 +2347,15 @@ function createSetupCard(mapId, setupName, setupData, { matchesAutoSetup = false
     setupCreatureCount = setupData.setup.length;
   }
   
-  const maxCount = getMaxTeamSize(mapId);
+  // Saved setups remember the ally limit from when they were saved (see saveTeamSetup);
+  // fall back to the live limit for "Auto-Setup" and setups saved before this was tracked.
+  const maxCount = (isSavedSetup && typeof setupData?.maxTeamSize === 'number')
+    ? setupData.maxTeamSize
+    : getMaxTeamSize(mapId);
   const countIndicator = document.createElement('div');
   countIndicator.className = 'pixel-font-12 text-whiteRegular shrink-0';
   countIndicator.textContent = formatSetupCreatureCount(setupCreatureCount, maxCount);
-  
+
   // Color code: green if equals max, red otherwise
   const isMaxCreatures = setupCreatureCount === maxCount;
   const indicatorColor = isMaxCreatures ? '#4caf50' : '#ff4444'; // green or red
@@ -2543,10 +2611,11 @@ function showNotesModal(mapId, setupName, setupData) {
               // Setup not found, create it with notes
               const currentSetup = getCurrentTeamSetup();
               if (currentSetup && currentSetup.length > 0) {
-                config.savedSetups[mapId].push({ 
-                  name: setupName, 
-                  setup: currentSetup, 
-                  notes: newNotes 
+                config.savedSetups[mapId].push({
+                  name: setupName,
+                  setup: currentSetup,
+                  notes: newNotes,
+                  maxTeamSize: getMaxTeamSize(mapId)
                 });
               }
             }

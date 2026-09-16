@@ -440,10 +440,42 @@
 					console.warn('state.utils.getBoardMonstersFromRoomId not available yet');
 					return false;
 				}
-				
-				const enemyTeamConfig = globalThis.state.utils.getBoardMonstersFromRoomId(mapId);
+
+				// getBoardMonstersFromRoomId(mapId) is floor-blind: it has no way to take a floor
+				// argument, and for multi-floor rooms (type: 'multi', e.g. The Annihilator Quest,
+				// which have no top-level room.file at all) it silently falls back to floor 0's
+				// layout regardless of the room's actual current floor. Confirmed live: for
+				// room "edanni" on floor 10, it kept returning floor 0's monsters (gameId
+				// 11/11/15/5/11/11) instead of floor 10's real ones (raw floorFiles[10].data.actors
+				// has id 40/40/41/41/40/40). So for multi-floor rooms we build the enemy team
+				// ourselves straight from that floor's raw actors data instead of calling it.
+				const roomForLookup = globalThis.state.utils.ROOMS?.find((r) => r?.id === mapId);
+				const floorIdx = globalThis.state.board.getSnapshot()?.context?.floor ?? 0;
+				let enemyTeamConfig;
+				if (roomForLookup?.type === 'multi') {
+					const rawActors = roomForLookup.floorFiles?.[floorIdx]?.data?.actors;
+					enemyTeamConfig = [];
+					if (Array.isArray(rawActors)) {
+						rawActors.forEach((actor, tileIndex) => {
+							if (!actor) return; // sparse/dense-null array — skip empty tiles
+							enemyTeamConfig.push({
+								type: 'file',
+								key: `multi-floor-enemy-${tileIndex}`,
+								tileIndex,
+								villain: true,
+								gameId: actor.id,
+								direction: actor.direction,
+								level: actor.level,
+								equip: actor.equip ?? null,
+								shiny: actor.shiny ?? false,
+							});
+						});
+					}
+				} else {
+					enemyTeamConfig = globalThis.state.utils.getBoardMonstersFromRoomId(mapId);
+				}
 				const boardConfig = [...enemyTeamConfig, ...playerTeamConfig];
-				
+
 				// Log the final board configuration
 				console.log('Final board configuration before sending to game:');
 				boardConfig.forEach((piece, index) => {
@@ -451,12 +483,16 @@
 						console.log(`Final board piece ${index} - Level: ${piece.level}, Type: ${piece.type}`);
 					}
 				});
-				
+
+				// Re-assert floor alongside boardConfig in the same write (belt-and-suspenders;
+				// context.floor itself was confirmed to hold steady through this whole function —
+				// the actual bug was the enemy team above silently coming from the wrong floor).
 				globalThis.state.board.send({
 					type: 'setState',
 					fn: (prev) => {
 						return {
 							...prev,
+							floor: config.floor ?? 0,
 							boardConfig: boardConfig,
 						};
 					},

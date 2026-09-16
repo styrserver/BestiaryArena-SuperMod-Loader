@@ -285,7 +285,7 @@ function buildCreatureDatabase() {
     }
     
     const allCreatureNames = allMonsters.map(m => m.metadata.name);
-    const hardcodedUnobtainable = ['Black Knight', 'Beer Barrel', 'Cobra Statue', 'Dharalion', 'Dead Tree', 'Dwarf Henchman', 'Earth Crystal', 'Energy Crystal', 'Grynch Clan Commander', 'Grynch Clan Mastermind', 'Lavahole', 'Magma Crystal', 'Morguthis', 'Monster Cauldron', 'Obelisk', 'Old Giant Spider', 'Omruc', 'Orc', 'Rahemos', 'Regeneration Tank', 'Sweaty Cyclops', 'Tentugly', 'Willi Wasp', 'The Percht Queen'];
+    const hardcodedUnobtainable = ['Astronis', 'Black Knight', 'Beer Barrel', 'Cake Drake', 'Cobra Statue', 'Dharalion', 'Dead Tree', 'Dwarf Henchman', 'Earth Crystal', 'Energy Crystal', 'Grynch Clan Commander', 'Grynch Clan Mastermind', 'Lavahole', 'Magma Crystal', 'Mateusz Dragon Wielki', 'Morguthis', 'Monster Cauldron', 'Obelisk', 'Old Giant Spider', 'Omruc', 'Orc', 'Rahemos', 'Regeneration Tank', 'Setzer Gambler', 'Sweaty Cyclops', 'Tentugly', 'Ti', 'Willi Wasp', 'The Percht Queen'];
     const hardcodedNonAwakenable = [...EVENT_CREATURES];
     
     const unobtainableFromMonsters = allMonsters
