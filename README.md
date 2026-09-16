@@ -196,6 +196,8 @@ Mods have access to the game's state through `globalThis.state`, which provides 
   - `maps-database.js` - Maps reference data
   - `equipment-lua-export.js` - DevTools/console helpers to export equipment wiki Lua (`dumpEquipmentWikiLua()`)
   - `creature-lua-export.js` - DevTools/console helpers to export creature stats wiki Lua (`dumpCreatureWikiLua()`)
+  - `maps-lua-export.js` - DevTools/console helpers to export map wikitext pages (`dumpMapWiki()`)
+  - `regions-lua-export.js` - DevTools/console helpers to export region wikitext pages (`dumpRegionWiki()`)
   - `playereq-database.js` - Player equipment helpers (slot types, dynamic equipment lists)
   - `firebase-admins.js` - Firebase admin allowlist for privileged mod features
 - `mods/` - Local mod files, organized as follows:
@@ -251,6 +253,35 @@ getCreatureExportSections();                       // inspect regular / event / 
 ```
 
 Live stats (hitpoints, attack, ability_power, armor, magic_resist, movement_speed, `roles`, `is_poisonous`) come from `getMonster` and `creature-database.js` `HARDCODED_MAP_MONSTER_STATS`. Wiki-only fields (`attack_speed`, `scales_ad`, `scales_ap`, specials) are in `WIKI_CREATURE_EXTRA_FIELDS` inside the exporter — update there when wiki rules change.
+
+**Maps** (`maps-lua-export.js`):
+
+```javascript
+dumpMapsWikiLua();                                    // downloads maps-wiki-YYYY-MM-DD.lua
+dumpMapsWikiLua({ download: false, copy: true });
+buildMapsExportData();                                // inspect the structured data
+```
+
+Same shape as the equipment/creature exporters: one `Module:MapsData/data`-style Lua table (`["Map Name"] = { region, difficulty, stamina, max_rank_points, type }`), grouped into region sections, built from `state.utils.ROOMS`/`REGIONS` and the max-rank-points formula from Better_Highscores.js. Unlike `Template:Equipment`, `Template:Maps` currently reads raw params (`action=raw` shows no `{{#invoke:...}}`) — pairing this data page with a `Module:MapsData` logic module (mirroring `Module:EquipmentData`'s `getItemData`) is a one-time wiki-side change. `type` is `"raid"`, `"event"`, or `false` — matches the wiki's own Raids/Events section split (same `maps-database.js` `isDynamicEventMap`/`EVENT_TO_ROOM_MAPPING` logic `regions-lua-export.js` already uses); Template:Maps has no infobox slot for it today, it's there for future use. There's deliberately no `drops` field: `Module:EquipmentData/data` already stores which Map/Raid/BoostedMap each item comes from (hand-verified by wiki editors), so `Template:Maps`' drops field should reverse-query that module live instead of duplicating a second, auto-guessed copy that could drift out of sync.
+
+**Regions** (`regions-lua-export.js`):
+
+```javascript
+dumpRegionsWikiLua();                                 // downloads regions-wiki-YYYY-MM-DD.lua
+dumpRegionsWikiLua({ download: false, copy: true });
+buildRegionsExportData();                             // inspect the structured data
+```
+
+Same idea, one `Module:RegionsData/data`-style table (`order`, `unlock_starting`, `unlock_map`, `unlock_region`, `rune`, `expansion`, `regular_map_count`, `expansion_map_count`, `raid_count`, `event_count`, `raids`, `events`) in region unlock order. `expansion` auto-resolves from `maps-database.js`'s `MAP_EXPANSIONS`, and `rune` auto-resolves from `inventory-database.js`'s per-item `obtain` field (also via `maps-database.js`, `getRegionRune()`) — neither is duplicated here. Only `unlock_map`/`unlock_region` (despite the name, always a map — e.g. "defeating Katana Quest in Rookgaard") has no game-state or wiki-API source at all, so it's pre-filled by hand in `REGION_UNLOCK_INFO` — already populated for all 7 current regions as of 2026-09; extend it when a new region ships. Yasir shop contents/prices have no static source at all (Better_Yasir.js reads them live from the DOM per shop) and aren't part of this data table.
+
+`{{Infobox Region}}` only ever renders the small infobox box — it was never going to produce the intro paragraph or the Maps/Expansion/Raids/Events tables below it. For that, use the page-body builder:
+
+```javascript
+dumpRegionPageBody('ankrahmun');                      // downloads ankrahmun-page-YYYY-MM-DD.wiki
+dumpAllRegionPageBodies();                            // one file, every region
+```
+
+Produces the whole page: infobox call, intro prose with real counts/ordinal, and one `{{#invoke:MapsData|makeRegionTable|...}}` line per Maps/Expansion/Raids/Events section (the tables themselves render live from `Module:MapsData/data` — see `Module:MapsData.makeRegionTable` in the wiki-side docs — so they never go stale even without re-running this). Only the unlock sentence (needs `REGION_UNLOCK_INFO` filled in) and the Yasir section (no static source at all) are left as stubs.
 
 ## Mods
 

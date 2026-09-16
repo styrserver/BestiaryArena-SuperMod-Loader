@@ -175,6 +175,8 @@ Mods have access to the game's state through <code>globalThis.state</code>, whic
 ** <code>maps-database.js</code> - Maps reference data
 ** <code>equipment-lua-export.js</code> - Console helpers to export equipment wiki Lua (<code>dumpEquipmentWikiLua()</code>)
 ** <code>creature-lua-export.js</code> - Console helpers to export creature stats wiki Lua (<code>dumpCreatureWikiLua()</code>)
+** <code>maps-lua-export.js</code> - Console helpers to export map wikitext pages (<code>dumpMapWiki()</code>)
+** <code>regions-lua-export.js</code> - Console helpers to export region wikitext pages (<code>dumpRegionWiki()</code>)
 ** <code>playereq-database.js</code> - Player equipment helpers (slot types, dynamic equipment lists)
 ** <code>firebase-admins.js</code> - Firebase admin allowlist for privileged mod features
 * <code>mods/</code> - Local mod files, organized as follows:
@@ -222,6 +224,27 @@ dumpCreatureWikiLua({ download: false, copy: true });
 getCreatureExportSections();                       // inspect regular / event / unobtainable / gazer lists
 </syntaxhighlight>
 Live stats (hitpoints, attack, ability_power, armor, magic_resist, movement_speed, <code>roles</code>, <code>is_poisonous</code>) come from <code>getMonster</code> and <code>creature-database.js</code> <code>HARDCODED_MAP_MONSTER_STATS</code>. Wiki-only fields (<code>attack_speed</code>, <code>scales_ad</code>, <code>scales_ap</code>, specials) are in <code>WIKI_CREATURE_EXTRA_FIELDS</code> inside the exporter — update there when wiki rules change.
+
+'''Maps''' (<code>maps-lua-export.js</code>):
+<syntaxhighlight lang="javascript">
+dumpMapsWikiLua();                                    // downloads maps-wiki-YYYY-MM-DD.lua
+dumpMapsWikiLua({ download: false, copy: true });
+</syntaxhighlight>
+Same shape as the equipment/creature exporters: a <code>Module:MapsData/data</code>-style Lua table (<code>region</code>, <code>difficulty</code>, <code>stamina</code>, <code>max_rank_points</code>, <code>type</code>), grouped into region sections. <code>Template:Maps</code> currently reads raw params, not a module (confirmed via <code>action=raw</code>) — pair this data page with a <code>Module:MapsData</code> logic module (mirroring <code>Module:EquipmentData</code>'s <code>getItemData</code>) as a one-time wiki-side change. <code>type</code> is "raid", "event", or false — matches the wiki's own Raids/Events split (same logic <code>regions-lua-export.js</code> already uses); no infobox slot consumes it yet, it's there for future use. No <code>drops</code> field here on purpose — <code>Module:EquipmentData/data</code> already knows which Map/Raid/BoostedMap each item comes from; <code>Template:Maps</code>' drops field should reverse-query that module live instead of duplicating it.
+
+'''Regions''' (<code>regions-lua-export.js</code>):
+<syntaxhighlight lang="javascript">
+dumpRegionsWikiLua();                                 // downloads regions-wiki-YYYY-MM-DD.lua
+dumpRegionsWikiLua({ download: false, copy: true });
+</syntaxhighlight>
+Same idea, a <code>Module:RegionsData/data</code>-style table (<code>order</code>, <code>unlock_starting</code>, <code>unlock_map</code>, <code>unlock_region</code>, <code>rune</code>, <code>expansion</code>, <code>regular_map_count</code>, <code>expansion_map_count</code>, <code>raid_count</code>, <code>event_count</code>, <code>raids</code>, <code>events</code>). <code>expansion</code> auto-resolves from <code>maps-database.js</code>'s <code>MAP_EXPANSIONS</code>, and <code>rune</code> auto-resolves from <code>inventory-database.js</code>'s per-item <code>obtain</code> field (via <code>maps-database.js</code> <code>getRegionRune()</code>) — neither duplicated here. Only <code>unlock_map</code>/<code>unlock_region</code> (always a map, despite the name) has no source at all, pre-filled by hand in <code>REGION_UNLOCK_INFO</code> for all 7 current regions. Yasir prices have no static source at all (read live from the DOM by Better Yasir) and aren't part of this table.
+
+<code>{{tl|Infobox Region}}</code> only renders the small infobox box — not the intro paragraph or the Maps/Expansion/Raids/Events tables below it. For the whole page:
+<syntaxhighlight lang="javascript">
+dumpRegionPageBody('ankrahmun');                      // downloads ankrahmun-page-YYYY-MM-DD.wiki
+dumpAllRegionPageBodies();                            // one file, every region
+</syntaxhighlight>
+Builds the whole page: infobox call, intro prose (real counts/ordinal), and one <code>{{#invoke:MapsData|makeRegionTable|...}}</code> line per Maps/Expansion/Raids/Events section — those tables render live from <code>Module:MapsData/data</code>, so they never go stale without re-running this. Only the unlock sentence and the Yasir section stay as stubs (no source for either).
 
 == Mods ==
 The extension comes with several powerful mods that demonstrate different features:

@@ -47,8 +47,6 @@ const scriptCache = {};
 let localMods = [];
 let registeredTabs = new Set(); // Track which tabs have received local mods
 
-const DEBUG = false; // Set to true for development
-
 const LOADER_ERROR_STORAGE_KEY = 'ba-loader-errors';
 const MAX_LOADER_ERRORS = 300;
 
@@ -213,6 +211,8 @@ const HARDCODED_DEFAULT_ENABLED_MODS = [
   'database/maps-database.js',
   'database/equipment-lua-export.js',
   'database/creature-lua-export.js',
+  'database/maps-lua-export.js',
+  'database/regions-lua-export.js',
   'database/playereq-database.js',
   'database/firebase-admins.js',
   'Official Mods/Bestiary_Automator.js',
@@ -229,7 +229,7 @@ const HARDCODED_DEFAULT_ENABLED_MODS = [
 ];
 
 const HARDCODED_MOD_COUNTS = {
-  database: 9,
+  database: 11,
   official: 10,
   super: 28,
   ot: 5
@@ -389,8 +389,8 @@ function hashToGistUrl(hash) {
 }
 
 function isTrustedSource(url) {
-  // Only allow githubusercontent.com, gist.githubusercontent.com, or your own domain
-  return /^https:\/\/(gist\.githubusercontent\.com|raw\.githubusercontent\.com|yourdomain\.com)\//.test(url);
+  // Only allow githubusercontent.com / gist.githubusercontent.com
+  return /^https:\/\/(gist\.githubusercontent\.com|raw\.githubusercontent\.com)\//.test(url);
 }
 
 async function fetchScript(source) {
@@ -427,11 +427,11 @@ async function fetchScript(source) {
               buttons: [{ text: 'OK', onClick: () => {} }]
             });
           }
-          if (!DEBUG) return null;
+          return null;
         }
         break;
     }
-    
+
     if (!await hasGitHubHostAccess()) {
       const cached = await browserAPI.storage.local.get(`script_${source}`);
       if (cached[`script_${source}`]) {
@@ -441,7 +441,7 @@ async function fetchScript(source) {
       throw new Error('GitHub host access not granted. Open the extension popup to allow remote mod downloads.');
     }
 
-    if (DEBUG) console.log('Fetching script from:', url);
+    console.log('Fetching script from:', url);
     
     const response = await fetch(url, {
       cache: 'no-store',
@@ -466,7 +466,7 @@ async function fetchScript(source) {
     
     return scriptContent;
   } catch (error) {
-    if (DEBUG) console.error('Error fetching script:', error);
+    console.error('Error fetching script:', error);
     return null;
   }
 }

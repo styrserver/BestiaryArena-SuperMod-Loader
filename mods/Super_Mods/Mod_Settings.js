@@ -8148,6 +8148,19 @@ function showSettingsModal() {
             </div>
             <div id="challenges-admin-status" style="font-size: 12px; color: #7f8fa4; min-height: 18px;"></div>
           </div>
+          <div id="wiki-exports-section" style="margin-top: 20px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.1);">
+            <h4 style="margin: 0 0 10px 0; color: #ffaa00; font-size: 14px;">Wiki exports</h4>
+            <p style="margin: 0 0 12px 0; font-size: 11px; color: #888;">Downloads a file from live game data to paste into the matching wiki.gg Module or page — nothing is uploaded automatically.</p>
+            <div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px;">
+              <button type="button" id="wiki-export-equipment-btn" class="btn btn-secondary" style="width: 100%; pointer-events: auto;">Download Equipment wiki Lua</button>
+              <button type="button" id="wiki-export-creatures-btn" class="btn btn-secondary" style="width: 100%; pointer-events: auto;">Download Creatures wiki Lua</button>
+              <button type="button" id="wiki-export-maps-btn" class="btn btn-secondary" style="width: 100%; pointer-events: auto;">Download Maps wiki Lua</button>
+              <button type="button" id="wiki-export-regions-btn" class="btn btn-secondary" style="width: 100%; pointer-events: auto;">Download Regions wiki Lua</button>
+              <button type="button" id="wiki-export-map-pages-btn" class="btn btn-secondary" style="width: 100%; pointer-events: auto;">Download all Map page bodies</button>
+              <button type="button" id="wiki-export-region-pages-btn" class="btn btn-secondary" style="width: 100%; pointer-events: auto;">Download all Region page bodies</button>
+            </div>
+            <div id="wiki-exports-status" style="font-size: 12px; color: #7f8fa4; min-height: 18px;"></div>
+          </div>
         `;
         rightColumn.appendChild(advancedContent);
       } else if (categoryId === 'hunt-analyzer') {
@@ -9781,7 +9794,36 @@ function showSettingsModal() {
           );
         });
       }
-      
+
+      const wikiExportsStatus = content.querySelector('#wiki-exports-status');
+      const wikiExportButtons = [
+        ['#wiki-export-equipment-btn', () => window.dumpEquipmentWikiLua?.(), 'Equipment wiki Lua'],
+        ['#wiki-export-creatures-btn', () => window.dumpCreatureWikiLua?.(), 'Creature wiki Lua'],
+        ['#wiki-export-maps-btn', () => window.dumpMapsWikiLua?.(), 'Maps wiki Lua'],
+        ['#wiki-export-regions-btn', () => window.dumpRegionsWikiLua?.(), 'Regions wiki Lua'],
+        ['#wiki-export-map-pages-btn', () => window.dumpAllMapPageBodies?.(), 'Map page bodies'],
+        ['#wiki-export-region-pages-btn', () => window.dumpAllRegionPageBodies?.(), 'Region page bodies']
+      ];
+      wikiExportButtons.forEach(([selector, runExport, label]) => {
+        const btn = content.querySelector(selector);
+        if (!btn) return;
+        applyAdvancedActionButtonStyle(btn, { variant: 'blue' });
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          try {
+            const result = runExport();
+            if (wikiExportsStatus) {
+              wikiExportsStatus.textContent = result
+                ? `Downloaded ${label}.`
+                : `${label} export function not available — is that database script enabled?`;
+            }
+          } catch (err) {
+            if (wikiExportsStatus) wikiExportsStatus.textContent = `Export error: ${err.message}`;
+          }
+        });
+      });
+
       const playercountCheckbox = content.querySelector('#playercount-toggle');
       if (playercountCheckbox) {
         playercountCheckbox.checked = config.enablePlayercount;

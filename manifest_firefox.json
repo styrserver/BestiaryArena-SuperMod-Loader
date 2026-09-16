@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "BestiaryArena SuperMod Loader",
-  "version": "5.0.3",
+  "version": "5.0.4",
   "description": "SuperMod loader for Bestiary Arena - Advanced mod management system with enhanced features and custom mods.",
   "icons": {
     "16": "assets/icons/icon-16.png",
@@ -110,6 +110,8 @@
     "database/maps-database.js",
     "database/equipment-lua-export.js",
     "database/creature-lua-export.js",
+    "database/maps-lua-export.js",
+    "database/regions-lua-export.js",
     "database/welcome.js"
   ],
   "browser_specific_settings": {

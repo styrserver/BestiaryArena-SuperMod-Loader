@@ -3,8 +3,7 @@
 // =======================
 (function() {
   console.log('[Better Hy\'genie] initializing...');
-  console.log('[Better Hy\'genie] DEBUG: Mod is loading and console.log is working!');
-  
+
 // =======================
 // 1. Configuration & Constants
 // =======================
@@ -1190,8 +1189,7 @@
   }
   
   initializeBetterHygenie();
-  console.log('[Better Hy\'genie] DEBUG: Initialization completed successfully!');
-  
+
   if (typeof context !== 'undefined') {
     context.exports = {
       cleanup: cleanup

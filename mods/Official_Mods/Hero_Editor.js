@@ -1130,9 +1130,9 @@ function applyHeroChangesFromControls(originalBoardData, controls, equipMap, opt
       throw new Error('Failed to apply changes');
     }
 
-    if (window.DEBUG) {
-      console.log('[Hero Editor] Live board update applied:', payload);
-    }
+    // Fires on every live edit while the panel is open — debug-tier (Verbose-only)
+    // so it doesn't spam Info level during active editing.
+    console.debug('[Hero Editor] Live board update applied:', payload);
 
     return true;
   } catch (error) {
