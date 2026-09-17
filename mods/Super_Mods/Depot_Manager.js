@@ -4470,14 +4470,24 @@ function resolveCreatureUniqueIdFromReactFiber(creatureImg) {
   return null;
 }
 
+/** Total gene points (0-100): sum of the five flat stats, matching the game's own gene concept. */
+function totalGenesForMonster(m) {
+  return (m.hp || 0) + (m.ad || 0) + (m.ap || 0) + (m.armor || 0) + (m.magicResist || 0);
+}
+
+/**
+ * The native grid sorts same-species duplicates by level desc, then total genes desc (verified
+ * against Mod Settings' hover-compare debug logs against a live mismatch). Must stay in sync with
+ * the identical function in Mod_Settings.js — both resolve the same ambiguous-duplicate problem.
+ */
 function sortMonstersByVisualOrder(monsters) {
   return monsters.slice().sort((a, b) => {
-    if (b.exp !== a.exp) return b.exp - a.exp;
-    if (a.metadata?.name && b.metadata?.name) {
-      const nameCompare = a.metadata.name.localeCompare(b.metadata.name);
-      if (nameCompare !== 0) return nameCompare;
-    }
-    return (a.createdAt || 0) - (b.createdAt || 0);
+    const levelA = getLevelFromExp(a.exp || 0);
+    const levelB = getLevelFromExp(b.exp || 0);
+    if (levelB !== levelA) return levelB - levelA;
+    const genesDiff = totalGenesForMonster(b) - totalGenesForMonster(a);
+    if (genesDiff !== 0) return genesDiff;
+    return String(a.id).localeCompare(String(b.id));
   });
 }
 

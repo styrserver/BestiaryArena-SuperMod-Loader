@@ -1629,6 +1629,14 @@
                           rateLimitedSalesRetryCount.delete(monsterId);
                           console.warn(`[Autoscroller] Failed to sell monster ${monsterId} after ${retryCount + 2} attempts`);
                         }
+                      }).catch(error => {
+                        if (error.message === 'Queue cleared') {
+                          console.log(`[Autoscroller] Retry of monster ${monsterId} cancelled by queue reset`);
+                        } else {
+                          console.error(`[Autoscroller] Error retrying sale of monster ${monsterId}:`, error);
+                        }
+                        rateLimitedSales.delete(monsterId);
+                        rateLimitedSalesRetryCount.delete(monsterId);
                       });
                     }
                   }, PERFORMANCE.SELL_RETRY_DELAY);
@@ -1892,7 +1900,13 @@
                 }
               }
             } catch (error) {
-              console.error(`[Autoscroller] Error during autosell/autosqueeze:`, error);
+              if (error.message === 'Queue cleared') {
+                // Expected when the API queue is reset mid-request (modal reopened, autoscroll
+                // stopped, mod reloaded) - not a real failure, so don't spam the Error Log.
+                console.log('[Autoscroller] Autosell/autosqueeze request cancelled by queue reset');
+              } else {
+                console.error(`[Autoscroller] Error during autosell/autosqueeze:`, error);
+              }
               // Don't let autosell errors stop the autoscroll
             }
           }
@@ -4144,7 +4158,11 @@
         rateLimitedSalesRetryCount.delete(monsterId);
       }
       } catch (error) {
-        console.error(`[Autoscroller] Error retrying sale of monster ${monsterId}:`, error);
+        if (error.message === 'Queue cleared') {
+          console.log(`[Autoscroller] Retry of monster ${monsterId} cancelled by queue reset`);
+        } else {
+          console.error(`[Autoscroller] Error retrying sale of monster ${monsterId}:`, error);
+        }
         rateLimitedSales.delete(monsterId);
         rateLimitedSalesRetryCount.delete(monsterId);
       }

@@ -89,7 +89,14 @@ const HARDCODED_MAP_MONSTER_STATS = {
   'rahemos': { baseStats: { hp: 1232, ad: 23, ap: 23, armor: 73, magicResist: 69 }, level: 200 },
   'regeneration tank': { baseStats: { hp: 8352, ad: 0, ap: 0, armor: 126, magicResist: 696 }, level: 99 },
   'monster cauldron': { baseStats: { hp: 1114, ad: 92, ap: 112, armor: 45, magicResist: 42 }, level: 99 },
-  'grynch clan mastermind': { baseStats: { hp: 220, ad: 0, ap: 0, armor: 66, magicResist: 66 }, level: 200 }
+  'grynch clan mastermind': { baseStats: { hp: 220, ad: 0, ap: 0, armor: 66, magicResist: 66 }, level: 200 },
+  // Tibian Legends (The Annihilator Quest, floor 1) — these totals already include each
+  // one's fixed T5 equipment bonus (Astronis: Ice Rapier AD, Mateusz/Setzer: Demon Armor AP,
+  // Ti: Demon Armor HP), since this table has no separate equip slot to track that.
+  'astronis': { baseStats: { hp: 2080, ad: 34, ap: 0, armor: 84, magicResist: 78 }, level: 100 },
+  'mateusz dragon wielki': { baseStats: { hp: 1794, ad: 149, ap: 20, armor: 84, magicResist: 78 }, level: 100 },
+  'setzer gambler': { baseStats: { hp: 1768, ad: 149, ap: 176, armor: 84, magicResist: 78 }, level: 100 },
+  'ti': { baseStats: { hp: 2096, ad: 110, ap: 0, armor: 84, magicResist: 78 }, level: 100 }
 };
 
 /** Stat bar display config for creature wiki templates. */

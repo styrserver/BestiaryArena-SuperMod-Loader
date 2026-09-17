@@ -32,7 +32,7 @@ Maintainer workflow
    the auto-resolved value.
 6. `unlock_map` / `unlock_region` ("unlocked after defeating X in Y") still have NO
    game-state source at all — sourced by hand from the wiki's own region pages into
-   REGION_UNLOCK_INFO below (already filled in for all 7 current regions as of 2026-09;
+   REGION_UNLOCK_INFO below (already filled in for all 8 current regions as of 2026-09;
    re-check when a new region ships). NOTE: despite the name, the wiki's "defeating X"
    always names a MAP (e.g. Carlin: "defeating Katana Quest in Rookgaard" — Katana Quest
    is a Rookgaard map, not a monster), not a creature — don't be misled by Ankrahmun's
@@ -79,7 +79,8 @@ const REGION_UNLOCK_INFO = {
   abdendriel: { map: 'Santa Claus Home', region: 'Folda' },
   kazordoon: { map: 'The Orc King Hall', region: "Ab'Dendriel" },
   venore: { map: "Mad Technomancer's Lab", region: 'Kazordoon' },
-  ankrahmun: { map: 'Shadowthorn', region: 'Venore' }
+  ankrahmun: { map: 'Shadowthorn', region: 'Venore' },
+  edron: { map: 'Serpentine Tower Basement', region: 'Ankrahmun' }
 };
 
 /**

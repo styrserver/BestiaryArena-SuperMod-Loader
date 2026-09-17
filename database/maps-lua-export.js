@@ -10,7 +10,10 @@ buildMapsExportData();               // inspect the structured data, no Lua form
 
 dumpMapPageBody('ankoas');           // full page wikitext for one map (infobox call +
                                       // intro + per-actor Creatures table + Tips &
-                                      // Tricks skeleton) to paste as that map's page
+                                      // Tricks skeleton) to paste as that map's page.
+                                      // Multi-floor quest rooms (type: 'multi', e.g.
+                                      // The Annihilator Quest) get a Tabber tab per
+                                      // floor in Creatures instead of one flat table.
 dumpAllMapPageBodies();              // same, one file, EVERY map including raids/events
 dumpAllMapPageBodies({ excludeRaids: true }); // opt OUT of raid/event maps
 
@@ -50,6 +53,14 @@ Maintainer workflow
    this data, instead of pasting a static table per region that goes stale the moment
    a map's stats change. Per-map intro prose / Tips & Tricks are still NOT here — those
    stay hand-written page content, same as Equipment pages' own "Notes" section.
+   Multi-floor quest rooms (type: 'multi') have no top-level room.file.data.actors —
+   getRoomActors() reads floorFiles[0].data.actors instead (see its comment); this is
+   why maps like The Behemoth Quest/The Annihilator Quest used to print "No creatures
+   found" despite having real enemies on their first floor. The Lua table's `creatures`
+   field (this point) stays floor-0-only via getRoomActors — but the page-body builder's
+   own Creatures section (buildMultiFloorCreatureTabber, see the "Page-body builder"
+   section below) instead renders a Tabber tab per floor, since each floor can have
+   entirely different enemies.
 
 Sync map (edit the matching source when rules change):
   Difficulty labels     ↔  maps-database.js getDifficultyLabel (single source, not duplicated here)
@@ -162,6 +173,49 @@ function getRoomStaminaCost(room) {
   return typeof room?.staminaCost === 'number' ? room.staminaCost : null;
 }
 
+/**
+ * Same multi-floor gap as above, but for the actors (creature) layer: multi-floor rooms
+ * have no top-level room.file.data.actors at all — only room.floorFiles[floorIndex].data.
+ * actors — so a flat `room.file.data.actors` read (getRoomCreatureNames/
+ * buildCreatureTableRows below) silently comes back undefined/[] for these, which is why
+ * The Behemoth Quest / The Annihilator Quest's wiki page bodies printed "No creatures
+ * found" despite genuinely having enemies. Same floor-0 convention as
+ * getRoomMaxTeamSize/getRoomStaminaCost: report floor 0's actors as "the" creature list.
+ */
+function getRoomActors(room) {
+  if (room?.type === 'multi' && Array.isArray(room.floorFiles)) {
+    return room.floorFiles[0]?.data?.actors || null;
+  }
+  return room?.file?.data?.actors || null;
+}
+
+/**
+ * Wikitext note for multi-floor quest room pages. The Creatures section below is tabbed
+ * per floor (buildMultiFloorCreatureTabber), but the intro's stamina cost and the Rank
+ * points sentence still only ever reflect floor 0 (see getRoomEntryFloorRule) — readers
+ * need to know those two numbers specifically can go up on later floors.
+ * Returns null for ordinary single-floor rooms.
+ */
+function buildMultiFloorNote(room) {
+  if (room?.type !== 'multi' || !Array.isArray(room.floorRules) || room.floorRules.length === 0) {
+    return null;
+  }
+  const floorCount = room.floorRules.length;
+  const firstRule = room.floorRules[0];
+  const lastRule = room.floorRules[floorCount - 1];
+
+  const varyingDetails = [];
+  if (lastRule?.maxTeamSize !== firstRule?.maxTeamSize) {
+    varyingDetails.push(`ally limit up to ${lastRule?.maxTeamSize ?? '?'} on floor ${floorCount}`);
+  }
+  if (lastRule?.staminaCost !== firstRule?.staminaCost) {
+    varyingDetails.push(`stamina cost up to ${lastRule?.staminaCost ?? '?'} on floor ${floorCount}`);
+  }
+  const detailClause = varyingDetails.length ? ` (${varyingDetails.join(', ')})` : '';
+
+  return `'''Note:''' This is a multi-floor quest with ${floorCount} floors${detailClause}. The stamina cost above and the rank points below reflect floor 1 only — see each floor's tab for its own creatures.`;
+}
+
 /** Max rank points: same formula as Better_Highscores.js ("Calculate max rank points"). */
 function getMaxRankPoints(room) {
   const maxTeamSize = getRoomMaxTeamSize(room);
@@ -206,7 +260,7 @@ function getMonsterName(monsterId) {
  * time dumpMapsWikiLua() runs, instead of needing an ad-hoc console check.
  */
 function getRoomCreatureNames(room, mapId) {
-  const actors = room?.file?.data?.actors;
+  const actors = getRoomActors(room);
   const realActors = Array.isArray(actors) ? actors.filter(Boolean) : [];
 
   if (realActors.length === 0) {
@@ -398,9 +452,8 @@ function getEquipmentName(equipGameId) {
   }
 }
 
-/** One row per actor instance (not deduped) — a map's real team composition. */
-function buildCreatureTableRows(room) {
-  const actors = room?.file?.data?.actors;
+/** One row per actor instance (not deduped) — a raw actors array's real team composition. */
+function buildCreatureTableRowsFromActors(actors) {
   const realActors = Array.isArray(actors) ? actors.filter(Boolean) : [];
   if (realActors.length === 0) return null;
 
@@ -413,6 +466,30 @@ function buildCreatureTableRows(room) {
   });
 
   return `{| class="wikitable"\n!Creature\n!\n!Level\n!Equipment\n|-\n${rows.join('\n|-\n')}\n|}`;
+}
+
+/** Floor 0's Creatures table only — see getRoomActors for the multi-floor caveat. */
+function buildCreatureTableRows(room) {
+  return buildCreatureTableRowsFromActors(getRoomActors(room));
+}
+
+/**
+ * Multi-floor quest rooms have a genuinely different Creatures table per floor (confirmed
+ * live: The Annihilator Quest's floor 10 actors are entirely different monsters from floor
+ * 0's — see Setup_Manager.js/ba-sandbox-utils.mjs's floor-aware enemy lookup fixes). Renders
+ * one Tabber tab per floor instead of a single table; Tabber ships by default on
+ * Fandom/wiki.gg wikis. Returns null for non-multi-floor rooms.
+ */
+function buildMultiFloorCreatureTabber(room) {
+  if (room?.type !== 'multi' || !Array.isArray(room.floorFiles) || room.floorFiles.length === 0) {
+    return null;
+  }
+  const tabs = room.floorFiles.map((floorFile, index) => {
+    const table = buildCreatureTableRowsFromActors(floorFile?.data?.actors)
+      || '(No creatures found on this floor.)';
+    return `|-|Floor ${index + 1}=\n${table}`;
+  });
+  return `<tabber>\n${tabs.join('\n')}\n</tabber>`;
 }
 
 /**
@@ -463,8 +540,9 @@ function buildMapPageBody(mapIdOrName) {
 
   const infoboxLine = `{{Maps|image1=${mapId}.png}}`;
   const intro = `${firstSentence} The [[difficulty]] is ${difficulty.toLowerCase()} and you spend ${getRoomStaminaCost(room) ?? '?'} [[stamina]] for each battle.`;
+  const multiFloorNote = buildMultiFloorNote(room);
 
-  const creatureTable = buildCreatureTableRows(room)
+  const creatureTable = (room?.type === 'multi' ? buildMultiFloorCreatureTabber(room) : buildCreatureTableRows(room))
     || '(No creatures found — check state.utils.ROOMS actors for this map.)';
 
   const sections = [
@@ -472,7 +550,8 @@ function buildMapPageBody(mapIdOrName) {
     `== Tips & Tricks ==\n-\n\n==== First-time battling ====\n-\n\n==== Speedrun ====\n-\n\n==== Rank points ====\nThis map grants you maximum [[rank points]] of ${maxRankPoints ?? '?'}.\n[[Category:Maps]]\n[[Category:${regionName}]]`
   ];
 
-  return `${infoboxLine}\n\n${intro}\n\n${sections.join('\n\n')}`;
+  const introBlock = multiFloorNote ? `${intro}\n\n${multiFloorNote}` : intro;
+  return `${infoboxLine}\n\n${introBlock}\n\n${sections.join('\n\n')}`;
 }
 
 /**

@@ -4,6 +4,101 @@
   },
   "notes": [
     {
+      "version": "5.0.6",
+      "changes": [
+        {
+          "mod": "Autoscroller",
+          "type": "fixed",
+          "text": "Reopening the modal, stopping autoscroll, or a mod reload while a sell/squeeze request was still queued rejected it with a generic \"queue cleared\" error; two spots logged that as a real crash and a third didn't catch it at all, so it now gets recognized and logged quietly instead."
+        },
+        {
+          "mod": "Awaken Tracker",
+          "type": "changed",
+          "text": "Its Awaken Farmer now outranks Better Boosted Maps in mod coordination instead of sitting just above Stamina Optimizer, so it takes the board first when both are enabled and Better Boosted Maps waits its turn."
+        },
+        {
+          "mod": "Awaken Tracker",
+          "type": "fixed",
+          "text": "The Awaken Farmer only told mod coordination it was active once autoplay actually started, not while it was navigating to a map and loading a setup — so another farming mod could see it as idle and start navigating over it mid-switch. It now claims the board the moment it commits to switching maps."
+        },
+        {
+          "mod": "Bestiary Automator",
+          "type": "changed",
+          "text": "Mod coordination priority raised from 50 to 60, clearing an accidental tie with Better Daycare (no functional effect today since neither mod is ever checked against the other, but ties are a landmine for future coordination checks)."
+        },
+        {
+          "mod": "Better Analytics",
+          "type": "changed",
+          "text": "Mod coordination priority changed from 5 to 10, clearing an accidental tie with Stamina Optimizer (no functional effect today)."
+        },
+        {
+          "mod": "Better Analytics",
+          "type": "fixed",
+          "text": "The Enemies panel on a multi-floor quest room doubled up with the wrong floor's monsters mixed into the real ones (e.g. showing 12 enemies instead of 6), because it merged the game's own room-monster lookup — which has no way to know which floor you're on and always answers with floor one's roster — into the live board's real per-floor enemies without noticing they'd disagree. It also left stale per-villain UI collapse state and cached actor probes from the previous floor's roster in place."
+        },
+        {
+          "mod": "Better Boosted Maps",
+          "type": "changed",
+          "text": "Now yields to Awaken Tracker's Awaken Farmer the same way it already yields to Raid Hunter, Better Tasker, Manual Runner, and Board Analyzer, and resumes automatically once the farmer is done."
+        },
+        {
+          "mod": "Better Daycare",
+          "type": "changed",
+          "text": "Mod coordination priority raised from 50 to 70, clearing an accidental tie with Bestiary Automator (no functional effect today)."
+        },
+        {
+          "mod": "creature-database.js",
+          "type": "added",
+          "text": "Added hardcoded map stats for the four Tibian Legends creatures."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "changed",
+          "text": "Raised the explored maps and bag outfits progress bar caps to 80 and 211 to match the game's current totals. The Maps tab's Regions list box is now 45% of the left column's height instead of 40%, so it fits more regions without scrolling."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "fixed",
+          "text": "The awaken toggle on a creature with hardcoded map stats recomputed its stat bars with the normal per-level/gene scaling formula, silently overriding numbers that are actually fixed; it now leaves hardcoded stats alone."
+        },
+        {
+          "mod": "Depot Manager",
+          "type": "fixed",
+          "text": "Its creature-id map (used by favorites, send-to-depot, and Mod Settings' hover tooltip) could pick the wrong instance among two or more identical-looking duplicates (same species/level/shiny/elite/rarity), because its tiebreak sorted by exp/name/creation-order — criteria with no relationship to the game's actual grid order. Now sorts by level then total genes descending, matching the native grid."
+        },
+        {
+          "mod": "maps-database.js",
+          "type": "added",
+          "text": "getMultiFloorRoomIds() gives a live-scanned list of multi-floor quest room ids (type: 'multi'), instead of hand-maintaining that list wherever it's needed."
+        },
+        {
+          "mod": "maps-lua-export.js",
+          "type": "added",
+          "text": "Multi-floor quest room page bodies now render a Tabber tab per floor in the Creatures section, since each floor can have entirely different enemies, plus a note flagging that the shown stamina cost/rank points reflect the first floor only (ally limit and cost can rise on later floors)."
+        },
+        {
+          "mod": "maps-lua-export.js",
+          "type": "fixed",
+          "text": "Multi-floor quest rooms have no top-level creature list to read, so their generated wiki page body always printed \"No creatures found\" even though they have real enemies."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "fixed",
+          "text": "\"Show genes and equipment on hover\" could show a different owned creature's stats than the one you were hovering when you had two or more duplicates (same species/level/shiny/elite/rarity), because the duplicate-resolution logic sorted candidates by exp/name/creation-order — criteria with no relationship to how the game's own grid orders them. Now sorts by level then total genes descending, which matches the native grid and fixes the mismatch."
+        },
+        {
+          "mod": "regions-lua-export.js",
+          "type": "fixed",
+          "text": "REGION_UNLOCK_INFO was missing the newest region's unlock chain (added after the initial 7-region fill-in), so its wiki-exported intro sentence fell back to an unfilled [[???]] placeholder."
+        },
+        {
+          "mod": "Stamina Optimizer",
+          "type": "changed",
+          "text": "Mod coordination priority changed from 5 to 20, clearing an accidental tie with Better Analytics (no functional effect today)."
+        }
+      ]
+    },
+    {
       "version": "5.0.5",
       "changes": [
         {
@@ -29,12 +124,7 @@
         {
           "mod": "Setup Manager",
           "type": "fixed",
-          "text": "The ally-limit indicator always showed the same generic number on multi-floor quest rooms whose limit actually changes per floor; now reads the correct per-floor limit."
-        },
-        {
-          "mod": "Setup Manager",
-          "type": "fixed",
-          "text": "Loading a saved setup with custom pieces on a multi-floor quest room populated enemies from that room's first floor instead of the floor you were actually on, same root cause as the $replay fix above."
+          "text": "The ally-limit indicator always showed the same generic number on multi-floor quest rooms whose limit actually changes per floor; now reads the correct per-floor limit. Loading a saved setup with custom pieces on such a room also populated enemies from that room's first floor instead of the floor you were actually on, same root cause as the $replay fix above."
         }
       ]
     },

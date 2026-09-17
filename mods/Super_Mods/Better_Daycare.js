@@ -40,7 +40,7 @@
 
   if (window.ModCoordination) {
     window.ModCoordination.registerMod(MOD_NAME, {
-      priority: 50,
+      priority: 70,
       metadata: { description: 'Automates Daycare level-ups/ejections and fills empty slots from a queue.' }
     });
     window.ModCoordination.updateModState(MOD_NAME, { enabled: true });

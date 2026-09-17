@@ -1684,7 +1684,8 @@ function canRunBoostedMaps() {
             'Board Analyzer',
             'Manual Runner',
             'Raid Hunter',
-            'Better Tasker'
+            'Better Tasker',
+            'Awaken Farmer'
             // Note: Stamina Optimizer check removed - it only blocks when enabling autoplay, not during navigation
         ]);
         if (!canRun) {
@@ -5553,7 +5554,7 @@ function init() {
     // Register with mod coordination system
     if (window.ModCoordination) {
         window.ModCoordination.registerMod('Better Boosted Maps', {
-            priority: 10,
+            priority: 30,
             metadata: { description: 'Automated boosted map farming system' }
         });
         
@@ -5583,7 +5584,7 @@ function init() {
                         checkAndStartBoostedMapFarming();
                     }, COORDINATION_RESUME_DELAY_MS);
                 }
-            } else if (data.modName === 'Board Analyzer' || data.modName === 'Manual Runner') {
+            } else if (data.modName === 'Board Analyzer' || data.modName === 'Manual Runner' || data.modName === 'Awaken Farmer') {
                 // Check if we can run when these mods change state
                 updateExposedState();
                 

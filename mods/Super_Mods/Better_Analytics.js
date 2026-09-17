@@ -191,7 +191,7 @@
 
         try {
             window.ModCoordination.registerMod(modName, {
-                priority: 5,
+                priority: 10,
                 metadata: { description: modDescription }
             });
 
@@ -1793,7 +1793,14 @@
 
         if (floor !== boardTrack.floor) {
             boardTrack.floor = floor;
-            cachedSpawnTileKeyLookup = null;
+            // Multi-floor quest rooms (e.g. The Annihilator Quest, roomId stays "edanni" the
+            // whole climb) swap in an entirely new villain roster per floor — different
+            // creatures, not the same ones re-scaled — so a floor change needs the same
+            // villain-identity cleanup as an actual room change: drop any UI/collapse state
+            // and cached per-actor probes keyed by the old floor's villains, or they can
+            // wrongly carry over onto whatever new creature now occupies that tile/key.
+            clearFightActorCollapseRegistry();
+            clearCollapsedOverrides();
             invalidateBoardPreviewCache();
             lastUnitsRenderKey = '';
             clearBreadcrumbTrails();
@@ -7655,6 +7662,50 @@
         });
     }
 
+    /**
+     * state.utils.getBoardMonstersFromRoomId(roomId) is floor-blind — it has no way to take
+     * a floor argument, and for multi-floor quest rooms (type: 'multi', e.g. The Annihilator
+     * Quest, roomId stays "edanni" across all 16 floors) it silently always returns floor 0's
+     * monster layout. getBoardPreviewUnits() below merges this "map" source alongside the
+     * live boardConfig ("board" source) to fill in enemies before/outside an active fight;
+     * for a multi-floor room on any floor other than 0, that merge doesn't dedupe (different
+     * gameIds/tiles) and doubles up the Enemies list with the wrong floor's monsters mixed
+     * in with the real ones (confirmed live: 6 real floor-10 enemies + 6 stale floor-0
+     * enemies = "Enemies (12)"). Same root cause already fixed in ba-sandbox-utils.mjs's
+     * $replay and Setup_Manager.js's loadTeamSetup — for multi-floor rooms, read that floor's
+     * real actors straight from floorFiles instead of calling the floor-blind native helper.
+     */
+    function getFloorAwareBoardMonstersForRoom(roomId) {
+        try {
+            const room = globalThis.state?.utils?.ROOMS?.find((r) => r?.id === roomId);
+            if (room?.type === 'multi') {
+                const floorIdx = resolveCurrentFloor();
+                const rawActors = room.floorFiles?.[floorIdx]?.data?.actors;
+                const pieces = [];
+                if (Array.isArray(rawActors)) {
+                    rawActors.forEach((actor, tileIndex) => {
+                        if (!actor) return; // sparse/dense-null array — skip empty tiles
+                        pieces.push({
+                            type: 'file',
+                            tileIndex,
+                            villain: true,
+                            gameId: actor.id,
+                            direction: actor.direction,
+                            level: actor.level,
+                            equip: actor.equip ?? null,
+                            shiny: actor.shiny ?? false
+                        });
+                    });
+                }
+                return pieces;
+            }
+            const getBoardMonsters = globalThis.state?.utils?.getBoardMonstersFromRoomId;
+            return typeof getBoardMonsters === 'function' ? (getBoardMonsters(roomId) || []) : [];
+        } catch {
+            return [];
+        }
+    }
+
     function getBoardPreviewUnits() {
         return profileUnitsLag('getBoardPreviewUnits', () => {
             if (!cachedGameChunk661Text || !cachedGameChunk235Text) {
@@ -7684,10 +7735,9 @@
                 for (const p of config) addPiece(p, 'board');
             }
 
-            const getBoardMonsters = globalThis.state?.utils?.getBoardMonstersFromRoomId;
-            if (roomId && typeof getBoardMonsters === 'function') {
+            if (roomId) {
                 try {
-                    for (const p of getBoardMonsters(roomId) || []) addPiece(p, 'map');
+                    for (const p of getFloorAwareBoardMonstersForRoom(roomId)) addPiece(p, 'map');
                 } catch { /* ignore */ }
             }
 

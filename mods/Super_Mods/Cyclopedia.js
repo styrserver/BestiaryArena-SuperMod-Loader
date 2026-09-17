@@ -410,8 +410,8 @@ const CYCLOPEDIA_SETTINGS = {
   playerStatCaps: {
     // Perfect/Shiny max comes from creature-database (game monsters), not a hardcoded cap.
     bisEquipments: 126,
-    exploredMaps: 73,
-    bagOutfits: 205,
+    exploredMaps: 80,
+    bagOutfits: 211,
     raids: 18
   }
 };
@@ -8070,7 +8070,8 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
 
     // Check if this creature has hardcoded stats (for unobtainable creatures with different map stats)
     const creatureNameLower = monsterData?.metadata?.name?.toLowerCase();
-    if (creatureNameLower && HARDCODED_MONSTER_STATS[creatureNameLower] && monsterData?.metadata?.baseStats) {
+    const hasHardcodedStats = !!(creatureNameLower && HARDCODED_MONSTER_STATS[creatureNameLower] && monsterData?.metadata?.baseStats);
+    if (hasHardcodedStats) {
       // Clone only the baseStats object using spread to avoid mutating internal game state
       const clonedBaseStats = { ...monsterData.metadata.baseStats };
 
@@ -8095,7 +8096,11 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
       };
     }
 
-    if (!useAwakenedScaling) return displayMonsterData;
+    // Hardcoded stats are the fixed, exact numbers this creature actually has on its map —
+    // the awaken toggle's scaleStat({level:99, geneValue:20}) preview formula doesn't apply
+    // to them (it's meant for obtainable creatures' normal per-level/gene growth), so skip
+    // it here rather than silently recomputing "awakened" numbers that don't exist in-game.
+    if (!useAwakenedScaling || hasHardcodedStats) return displayMonsterData;
 
     const scaleStatFn = globalThis.state?.utils?.scaleStat;
     const baseStats = displayMonsterData?.metadata?.baseStats;
@@ -14519,8 +14524,8 @@ function createMapsTabPage(selectedCreature, selectedEquipment, selectedInventor
     updateRightCol: () => {}
   });
 
-  topBox.style.flex = '0 0 40%';
-  topBox.style.maxHeight = '40%';
+  topBox.style.flex = '0 0 45%';
+  topBox.style.maxHeight = '45%';
   topBox.style.minHeight = '0';
   leftCol.appendChild(topBox);
   updateBottomBox();

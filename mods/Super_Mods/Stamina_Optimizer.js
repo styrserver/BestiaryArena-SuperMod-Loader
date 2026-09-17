@@ -3327,7 +3327,7 @@ function init() {
     }
     if (window.ModCoordination) {
         window.ModCoordination.registerMod('Stamina Optimizer', {
-            priority: 5,
+            priority: 20,
             metadata: { description: 'Automatically manages stamina by starting/stopping gameplay' }
         });
     }

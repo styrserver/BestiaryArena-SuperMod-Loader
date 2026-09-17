@@ -11427,14 +11427,27 @@ function countSameGameIdPrecedingInMonsterScroll(creatureImg, gameId) {
   return before;
 }
 
+/** Total gene points (0-100): sum of the five flat stats, matching the game's own gene concept. */
+function totalGenesForMonster(m) {
+  return (m.hp || 0) + (m.ad || 0) + (m.ap || 0) + (m.armor || 0) + (m.magicResist || 0);
+}
+
+/**
+ * The native grid sorts same-species duplicates by level desc, then total genes desc — verified
+ * against a live mismatch (see [Mod Settings][hover-compare] debug logs). createdAt/name have no
+ * relationship to the game's actual order and previously caused wrong-instance stat tooltips
+ * whenever two+ owned creatures shared species/level/shiny/elite/rarity.
+ */
 function sortMonstersByVisualOrder(monsters) {
   return monsters.slice().sort((a, b) => {
-    if ((b.exp || 0) !== (a.exp || 0)) return (b.exp || 0) - (a.exp || 0);
-    const aName = a?.metadata?.name || '';
-    const bName = b?.metadata?.name || '';
-    const nameCompare = aName.localeCompare(bName);
-    if (nameCompare !== 0) return nameCompare;
-    return (a.createdAt || 0) - (b.createdAt || 0);
+    const levelA = getLevelFromExp(a.exp || 0);
+    const levelB = getLevelFromExp(b.exp || 0);
+    if (levelB !== levelA) return levelB - levelA;
+    const genesDiff = totalGenesForMonster(b) - totalGenesForMonster(a);
+    if (genesDiff !== 0) return genesDiff;
+    // Full tie (identical level + genes): no known game criterion distinguishes these visually;
+    // fall back to a stable, deterministic order so repeated hovers don't flip-flop.
+    return String(a.id).localeCompare(String(b.id));
   });
 }
 

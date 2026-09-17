@@ -76,10 +76,10 @@
     /** Sealed drops (gene injects) require red floors. */
     const AWAKEN_FARM_MIN_FLOOR = 11;
     const AWAKEN_FARM_MAX_FLOOR = 15;
-    /** Just above Stamina Optimizer (5): lowest farming priority except SO is last. */
-    const FARMER_PRIORITY = 6;
+    /** Above Better Boosted Maps (30), below Better Tasker (90): outranks boosted-map farming. */
+    const FARMER_PRIORITY = 40;
     const FARMER_YIELD_MODS = [
-        'Manual Runner', 'Board Analyzer', 'Better Boosted Maps',
+        'Manual Runner', 'Board Analyzer',
         'Raid Hunter', 'Better Tasker', 'Autoscroller'
     ];
     const FARMER_DEFAULTS = {
@@ -1697,6 +1697,11 @@
         resumeTimer: null,
         busy: false,
         wasInitiatedByMod: false,
+        /** True from the moment we decide to switch maps until we stop — covers the
+         *  navigate/setup window where wasInitiatedByMod is still false but the board
+         *  is effectively claimed. Without this, other mods' ModCoordination checks see
+         *  us as inactive during navigation and race onto the same board. */
+        boardClaimed: false,
         currentRoomId: null,
         enabledRefill: false,
         status: 'idle',
@@ -2463,7 +2468,7 @@
                 priority: FARMER_PRIORITY,
                 metadata: { description: 'Farms maps to gene-cap awakened creatures' }
             });
-            // Override any stale localStorage priority so we stay just above Stamina Optimizer.
+            // Override any stale localStorage priority so we stay above Better Boosted Maps.
             window.ModCoordination.updateModPriority?.(FARMER_MOD_NAME, FARMER_PRIORITY);
             farmerModRegistered = true;
             return true;
@@ -2479,8 +2484,14 @@
         const s = loadFarmerSettings();
         window.ModCoordination.updateModState(FARMER_MOD_NAME, {
             enabled: s.enabled === true,
-            active: farmerRuntime.wasInitiatedByMod === true
+            active: farmerRuntime.boardClaimed === true || farmerRuntime.wasInitiatedByMod === true
         });
+    }
+
+    function farmerReleaseBoardClaim() {
+        if (!farmerRuntime.boardClaimed) return;
+        farmerRuntime.boardClaimed = false;
+        syncFarmerModCoordination();
     }
 
     function isRaidHunterEnabled() {
@@ -2542,7 +2553,6 @@
         if (awakenPausedForAnalysis || isAwakenAnalysisBlockingActive()) return 'board-analyzer';
         if (window.ModCoordination?.isModActive?.('Manual Runner')) return 'manual-runner';
         if (window.ModCoordination?.isModActive?.('Board Analyzer')) return 'board-analyzer';
-        if (window.ModCoordination?.isModActive?.('Better Boosted Maps')) return 'better-boosted-maps';
         if (isRaidHunterPendingOrActive()) return 'raid-hunter';
         if (window.ModCoordination?.canModRun
             && !window.ModCoordination.canModRun(FARMER_MOD_NAME, FARMER_YIELD_MODS)) {
@@ -2754,6 +2764,7 @@
         farmerStopStaminaMonitoring();
         tryPauseGameAutoplay();
         farmerRuntime.wasInitiatedByMod = false;
+        farmerRuntime.boardClaimed = false;
         farmerRuntime.currentRoomId = null;
         farmerRuntime.status = 'idle';
         window.AutoplayManager?.releaseControl(FARMER_MOD_NAME);
@@ -2799,6 +2810,7 @@
                 }
                 farmerRuntime.status = 'done';
                 if (farmerRuntime.wasInitiatedByMod) farmerStopAutoplay();
+                else farmerReleaseBoardClaim();
                 if (typeof farmerRuntime.uiRefresh === 'function') farmerRuntime.uiRefresh();
                 return;
             }
@@ -2811,6 +2823,7 @@
                 }
                 farmerRuntime.status = 'no-maps';
                 if (farmerRuntime.wasInitiatedByMod) farmerStopAutoplay();
+                else farmerReleaseBoardClaim();
                 if (typeof farmerRuntime.uiRefresh === 'function') farmerRuntime.uiRefresh();
                 return;
             }
@@ -2828,12 +2841,17 @@
 
             if (needSwitch) {
                 farmerRuntime.status = 'starting';
+                // Claim the board before the start delay so other mods' coordination
+                // checks see us active during navigation, not just once autoplay starts.
+                farmerRuntime.boardClaimed = true;
+                syncFarmerModCoordination();
                 if (typeof farmerRuntime.uiRefresh === 'function') farmerRuntime.uiRefresh();
                 showFarmerStartingToast();
                 console.log(`[Awaken Farmer] Waiting ${DEFAULT_START_DELAY}s before navigation...`);
                 await farmerSleep(DEFAULT_START_DELAY * 1000);
                 if (!loadFarmerSettings().enabled || !farmerCanRun()) {
                     farmerRuntime.status = loadFarmerSettings().enabled ? 'blocked' : 'idle';
+                    farmerReleaseBoardClaim();
                     return;
                 }
 
@@ -2847,6 +2865,7 @@
                 const navigated = await farmerNavigateToMap(next.roomId);
                 if (!navigated) {
                     farmerRuntime.status = 'nav-failed';
+                    farmerReleaseBoardClaim();
                     return;
                 }
                 await farmerSetFloor(pickAwakenFarmFloor(next.roomId) ?? AWAKEN_FARM_MIN_FLOOR);
@@ -2998,6 +3017,8 @@
         farmerStopStaminaMonitoring();
         if (releaseControl && farmerRuntime.wasInitiatedByMod) {
             farmerStopAutoplay();
+        } else if (releaseControl) {
+            farmerReleaseBoardClaim();
         }
         if (farmerRuntime.enabledRefill) {
             // Leave Automator refill as-is if user may want it; only clear our tracking flag.

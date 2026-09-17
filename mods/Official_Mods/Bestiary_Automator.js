@@ -7,7 +7,7 @@ console.log('[Bestiary Automator] initializing...');
 // Register with mod coordination system
 if (window.ModCoordination) {
     window.ModCoordination.registerMod('Bestiary Automator', {
-        priority: 50,
+        priority: 60,
         metadata: { description: 'Automated game assistance system' }
     });
     window.ModCoordination.updateModState('Bestiary Automator', { enabled: true });

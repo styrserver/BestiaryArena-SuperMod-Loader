@@ -106,6 +106,23 @@ function getMapsByMaxTeamSize(teamSize) {
 }
 
 /**
+ * Room ids for multi-floor quest rooms (type: 'multi', e.g. The Annihilator Quest, The
+ * Behemoth Quest) — rooms whose data lives per-floor in floorFiles/floorRules instead of
+ * a flat file/maxTeamSize/staminaCost. Authoritative live scan of state.utils.ROOMS,
+ * not a hardcoded list, since new ones could ship later.
+ * @returns {string[]} room ids
+ */
+function getMultiFloorRoomIds() {
+  try {
+    const rooms = globalThis.state?.utils?.ROOMS;
+    if (!Array.isArray(rooms)) return [];
+    return rooms.filter(r => r?.type === 'multi').map(r => r.id);
+  } catch (_) {
+    return [];
+  }
+}
+
+/**
  * Get maps by stamina cost
  * @param {number} staminaCost - The stamina cost
  * @returns {Array} Array of maps with the specified stamina cost
@@ -601,6 +618,7 @@ mapsDatabase.getAllMaps = getAllMaps;
 mapsDatabase.getMapById = getMapById;
 mapsDatabase.getMapsByDifficulty = getMapsByDifficulty;
 mapsDatabase.getMapsByMaxTeamSize = getMapsByMaxTeamSize;
+mapsDatabase.getMultiFloorRoomIds = getMultiFloorRoomIds;
 mapsDatabase.getMapsByStaminaCost = getMapsByStaminaCost;
 mapsDatabase.getRaidMaps = getRaidMaps;
 mapsDatabase.getNonRaidMaps = getNonRaidMaps;
