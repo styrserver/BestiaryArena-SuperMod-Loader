@@ -3171,8 +3171,29 @@ function saveSettings(settings) {
     try {
         localStorage.setItem(`${MOD_ID}Settings`, JSON.stringify(settings));
         console.log('[Stamina Optimizer] Settings saved');
+        logCurrentSettings('settings saved');
     } catch (error) {
         console.error('[Stamina Optimizer] Error saving settings:', error);
+    }
+}
+
+// Log the effective settings (defaults merged with anything saved) plus automation state,
+// so it's obvious from the console what threshold/action monitorStamina() is using.
+function logCurrentSettings(context) {
+    try {
+        const settings = loadSettings();
+        console.log(`[Stamina Optimizer] Settings (${context}):`, {
+            automationEnabled: isAutomationEnabled === AUTOMATION_ENABLED,
+            maxStamina: settings.maxStamina,
+            minStamina: settings.minStamina,
+            action: settings.action,
+            mapId: settings.mapId,
+            setupLabel: settings.setupLabel,
+            floor: settings.floor,
+            currentStamina: getCurrentStamina()
+        });
+    } catch (error) {
+        console.error('[Stamina Optimizer] Error logging current settings:', error);
     }
 }
 
@@ -3332,6 +3353,7 @@ function init() {
         });
     }
     loadAutomationState();
+    logCurrentSettings('init');
     syncModCoordinationState();
     createButton();
     if (isAutomationEnabled) {
@@ -3352,6 +3374,8 @@ function init() {
             
             const gracePeriodTimeout = setTimeout(() => {
                 console.log('[Stamina Optimizer] Grace period ended - now allowing actions');
+                logCurrentSettings('grace period ended (fallback)');
+                void monitorStamina();
                 const index = otherTimeouts.indexOf(gracePeriodTimeout);
                 if (index > -1) otherTimeouts.splice(index, 1);
             }, MODS_LOADING_GRACE_PERIOD);
@@ -3389,9 +3413,14 @@ let windowMessageHandler = (event) => {
         }, 1500);
         otherTimeouts.push(timeout);
         
-        // Log when grace period ends
+        // When grace period ends, force an immediate check instead of waiting for the next
+        // player.subscribe event or the 60s safety poll — otherwise a room that's already
+        // above maxStamina at boot (whose ready-timer never got armed, see
+        // scheduleStaminaReadyTimeout) can sit idle for up to a minute before anything acts.
         const gracePeriodTimeout = setTimeout(() => {
             console.log('[Stamina Optimizer] ✅ Grace period ended - ready for actions');
+            logCurrentSettings('grace period ended');
+            void monitorStamina();
             const index = otherTimeouts.indexOf(gracePeriodTimeout);
             if (index > -1) otherTimeouts.splice(index, 1);
         }, MODS_LOADING_GRACE_PERIOD);

@@ -110,6 +110,7 @@ function getRoomDisplayName(roomId) {
  * @returns {Map<number, { raidNames: Set<string>, mapNames: Set<string> }>}
  */
 function buildEquipmentRoomPresence() {
+  // Intermediate per-room accumulation: equipId -> raid/map -> Set<roomId>.
   const byEquipId = new Map();
   const rooms = globalThis.state?.utils?.ROOMS;
   if (!rooms) {
@@ -120,22 +121,34 @@ function buildEquipmentRoomPresence() {
   const addEquipOnRoom = (equipGameId, roomId) => {
     if (!equipGameId || !roomId) return;
     if (!byEquipId.has(equipGameId)) {
-      byEquipId.set(equipGameId, { raidNames: new Set(), mapNames: new Set() });
+      byEquipId.set(equipGameId, { raid: new Set(), map: new Set() });
     }
-    const display = getRoomDisplayName(roomId);
     const bucket = byEquipId.get(equipGameId);
-    if (isRaidRoomId(roomId)) {
-      bucket.raidNames.add(display);
-    } else {
-      bucket.mapNames.add(display);
-    }
+    (isRaidRoomId(roomId) ? bucket.raid : bucket.map).add(roomId);
   };
 
   const scanRoom = (room) => {
     try {
       const roomId = room?.id;
+      if (!roomId) return;
+
+      // Multi-floor quest rooms keep board data per-floor in floorFiles instead of a
+      // top-level file.data.actors — scan each floor separately so gear worn only on a
+      // specific floor (e.g. Demon Armor on The Annihilator Quest floor 16) is still found.
+      if (room?.type === 'multi' && Array.isArray(room.floorFiles)) {
+        room.floorFiles.forEach((floorFile) => {
+          const actors = floorFile?.data?.actors;
+          if (!Array.isArray(actors)) return;
+          actors.forEach((actor) => {
+            const gid = actor?.equip?.gameId;
+            if (gid) addEquipOnRoom(gid, roomId);
+          });
+        });
+        return;
+      }
+
       const actors = room?.file?.data?.actors;
-      if (!roomId || !actors || !Array.isArray(actors)) return;
+      if (!Array.isArray(actors)) return;
       actors.forEach((actor) => {
         const gid = actor?.equip?.gameId;
         if (gid) addEquipOnRoom(gid, roomId);
@@ -151,7 +164,14 @@ function buildEquipmentRoomPresence() {
     Object.values(rooms).forEach(scanRoom);
   }
 
-  return byEquipId;
+  const result = new Map();
+  byEquipId.forEach((bucket, equipGameId) => {
+    const raidNames = new Set([...bucket.raid].map(getRoomDisplayName));
+    const mapNames = new Set([...bucket.map].map(getRoomDisplayName));
+    result.set(equipGameId, { raidNames, mapNames });
+  });
+
+  return result;
 }
 
 function getEquipmentGameIdByName(equipmentName) {
@@ -188,7 +208,9 @@ function luaStringLiteral(value) {
 const LIST_SEPARATOR = ', ';
 
 function sortedJoin(set, separator = LIST_SEPARATOR) {
-  return [...set].sort((a, b) => a.localeCompare(b)).join(separator);
+  // numeric: true so "...Floor 7" sorts before "...Floor 10" (plain localeCompare treats
+  // the floor number as text and puts "Floor 10" before "Floor 7").
+  return [...set].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).join(separator);
 }
 
 /** Pad `["Name"]` so `=` lines up for wiki-style tables. */

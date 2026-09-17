@@ -3137,6 +3137,14 @@
       return;
     }
 
+    // The settings menu's overlay/menu are appended directly to document.body,
+    // independent of this container. If it's still open when its anchor gets
+    // detached (e.g. leaderboard hidden/suppressed mid-battle), it never gets
+    // a mousedown/Escape to close it — it's orphaned as a full-viewport,
+    // pointer-events:auto div that silently eats every click and right-click
+    // on the page from then on.
+    closeBetterHighscoresContextMenu();
+
     const contentDiv = container._contentDiv;
     if (contentDiv && container._contextMenuHandler) {
       contentDiv.removeEventListener('contextmenu', container._contextMenuHandler);

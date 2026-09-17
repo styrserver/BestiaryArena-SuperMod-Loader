@@ -2741,6 +2741,8 @@
         farmerRuntime.wasInitiatedByMod = true;
         syncFarmerModCoordination();
         if (!(await farmerEnsureAutoplayMode())) {
+            const mode = globalThis.state?.board?.getSnapshot?.()?.context?.mode;
+            console.log(`[Awaken Farmer] Autoplay start aborted — mode is "${mode}" after setPlayMode`);
             window.AutoplayManager?.releaseControl(FARMER_MOD_NAME);
             farmerRuntime.wasInitiatedByMod = false;
             syncFarmerModCoordination();
@@ -2749,6 +2751,7 @@
         await farmerSleep(200);
         const startBtn = farmerFindButtonByText('Start', 'Iniciar');
         if (!startBtn) {
+            console.log('[Awaken Farmer] Autoplay start aborted — no Start/Iniciar button found on page');
             window.AutoplayManager?.releaseControl(FARMER_MOD_NAME);
             farmerRuntime.wasInitiatedByMod = false;
             syncFarmerModCoordination();

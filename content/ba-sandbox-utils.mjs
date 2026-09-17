@@ -762,6 +762,13 @@
 					const id = String(regionId ?? '').trim();
 					regionName = id.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());
 					console.warn(`Region name for ID ${regionId} not found, using fallback: ${regionName}`);
+					// Cache the fallback too (same as the state.utils.REGION_NAME hit above) —
+					// otherwise a region absent from both the static list and REGION_NAME
+					// (e.g. quest-only rooms like The Annihilator Quest's "edron") re-warns on
+					// every single serializeBoard() call, and Hero Editor's board listener
+					// calls this on nearly every board state change.
+					regionIdsToNames.set(regionId, regionName);
+					regionNamesToIds.set(regionName, regionId);
 				}
 				
 				const mapId = selectedMap.selectedRoom.id;

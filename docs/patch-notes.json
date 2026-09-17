@@ -4,6 +4,56 @@
   },
   "notes": [
     {
+      "version": "5.0.7",
+      "changes": [
+        {
+          "mod": "Awaken Tracker",
+          "type": "changed",
+          "text": "The Awaken Farmer's two silent failure points when (re)starting autoplay — the board not actually switching into autoplay mode, and the Start button not being found — now log why, instead of just releasing board control and retrying next tick with no trace."
+        },
+        {
+          "mod": "ba-sandbox-utils.mjs",
+          "type": "fixed",
+          "text": "Its per-room region-name fallback (used by $replay/Hero Editor's board serializer) wasn't cached when a region was missing from both the mod's static list and the game's own region-name table, so it re-logged the same \"region name not found\" warning on every single board update instead of once."
+        },
+        {
+          "mod": "Better Highscores",
+          "type": "fixed",
+          "text": "Its settings menu's full-screen click-catching overlay stayed in the page if the leaderboard widget was torn down while the menu was still open (e.g. a battle starting/ending), silently blocking every click and right-click on the page from then on. The menu now closes automatically whenever its widget is removed."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "added",
+          "text": "Equipment's Maps tab and a creature's own map-location list now scan multi-floor quest rooms floor-by-floor, so gear or creatures that only appear on a specific floor are found instead of showing no map data at all."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "changed",
+          "text": "A multi-floor quest room's entry now shows a color-coded difficulty percentage badge (green/yellow/red) for the floor(s) it was found on instead of nothing — a range colors its low and high ends independently so each reflects its own tier — and such rooms — which don't belong to any region — are grouped under their own \"Quests\" heading instead of being silently dropped."
+        },
+        {
+          "mod": "equipment-lua-export.js",
+          "type": "added",
+          "text": "The wiki equipment export now scans multi-floor quest rooms floor-by-floor too, so gear only found on a specific floor no longer exports as Map = false."
+        },
+        {
+          "mod": "equipment-lua-export.js",
+          "type": "fixed",
+          "text": "A multi-floor quest room's Raid/Map export value had a difficulty-percentage suffix appended to its name, which doesn't match any wiki page and left the link broken. It now exports the plain room name instead."
+        },
+        {
+          "mod": "Stamina Optimizer",
+          "type": "changed",
+          "text": "Now logs its effective settings (thresholds, action, current stamina) at startup and once the boot grace period ends, so a stalled automation run can be diagnosed straight from the console."
+        },
+        {
+          "mod": "Stamina Optimizer",
+          "type": "fixed",
+          "text": "If stamina was already above your configured threshold when the mod finished its boot grace period, nothing forced a fresh check — it could sit idle for up to a minute (or longer, waiting on a player-state change) before actually starting. The grace period ending now triggers an immediate check."
+        }
+      ]
+    },
+    {
       "version": "5.0.6",
       "changes": [
         {

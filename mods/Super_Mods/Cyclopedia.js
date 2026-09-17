@@ -886,6 +886,10 @@ function getCyclopediaRoomIdToRegionIdMap() {
 
 function resolveCyclopediaRoomRegionName(roomIdOrKey) {
   const room = getCyclopediaRoomByMapId(roomIdOrKey);
+  // Multi-floor quest rooms (e.g. The Annihilator Quest, The Behemoth Quest) are never
+  // listed inside a region's room array, so the lookup below would always fall through to
+  // "Unknown Region" — bucket them under "Quests" instead.
+  if (room?.type === 'multi') return 'Quests';
   const mapCode = room?.id;
   const region = (mapCode && findCyclopediaRegionByMapId(mapCode))
     || (room?.region && findCyclopediaRegionById(room.region));
@@ -3169,10 +3173,60 @@ const LOCATION_UTILS = {
   })
 };
 
+// Multi-floor rooms (type: 'multi', e.g. The Annihilator Quest, The Behemoth Quest) scale
+// monster stats +20% per floor starting at 100% on floor 1 (floor index 0) — floor 16
+// (index 15) is 100 + 15*20 = 400%. Top-level (not nested) so both the creature-location
+// scan below and the equipment-location scan further down the file can share it. Keep in
+// sync with the copy of this formula in database/equipment-lua-export.js.
+const FLOOR_BASE_PERCENT = 100;
+const FLOOR_STEP_PERCENT = 20;
+
+function floorPercent(floorIndex) {
+  return FLOOR_BASE_PERCENT + floorIndex * FLOOR_STEP_PERCENT;
+}
+
+/** Green 100-200%, yellow 220-300%, red 320-400% — mirrors the in-game difficulty bar. */
+function floorPercentColor(percent) {
+  if (percent <= 200) return '#4caf50';
+  if (percent <= 300) return '#ffe066';
+  return '#ff4444';
+}
+
+/**
+ * Appends the "(400%)" / "(220-400%)" suffix to `span` as colored child nodes instead of
+ * baking it into plain text, so the base room name stays the default text color. A range
+ * colors its min and max independently (e.g. "220" yellow, "400" red) so each number
+ * reflects its own difficulty tier instead of the whole badge taking the max's color.
+ * No-op when `floors` is null/empty.
+ */
+function appendFloorPercentBadge(span, floors) {
+  if (!floors || floors.size === 0) return;
+  const sorted = [...floors].sort((a, b) => a - b);
+  const min = floorPercent(sorted[0]);
+  const max = floorPercent(sorted[sorted.length - 1]);
+
+  const addPart = (text, color) => {
+    const part = document.createElement('span');
+    part.textContent = text;
+    if (color) part.style.color = color;
+    span.appendChild(part);
+  };
+
+  if (min === max) {
+    addPart(` (${min}%)`, floorPercentColor(min));
+    return;
+  }
+  addPart(' (', null);
+  addPart(`${min}`, floorPercentColor(min));
+  addPart('-', null);
+  addPart(`${max}`, floorPercentColor(max));
+  addPart('%)', null);
+}
+
 function findMonsterLocations(monsterName) {
   const cacheKey = monsterName.toLowerCase();
   if (cyclopediaState.monsterLocationCache.has(cacheKey)) return cyclopediaState.monsterLocationCache.get(cacheKey);
-  
+
   const locations = [];
   try {
     const monsterGameId = LOCATION_UTILS.getMonsterGameId(monsterName);
@@ -3180,12 +3234,37 @@ function findMonsterLocations(monsterName) {
       cyclopediaState.monsterLocationCache.set(cacheKey, locations);
       return locations;
     }
-    
+
     getCyclopediaAllRoomEntries().forEach(([roomKey, room]) => {
       try {
+        // Multi-floor quest rooms keep board data per-floor in floorFiles instead of a
+        // top-level file.data.actors — scan each floor separately so a creature that only
+        // appears on e.g. floor 16 is still found, and fold the floors it appears on into
+        // one row (floors exposed separately for the caller to render as a colored
+        // "(min-max%)" badge) instead of one row per floor.
+        if (room?.type === 'multi' && Array.isArray(room.floorFiles)) {
+          const floors = new Set();
+          const roomLocations = [];
+          room.floorFiles.forEach((floorFile, floorIndex) => {
+            const actors = floorFile?.data?.actors;
+            if (!Array.isArray(actors)) return;
+            const monsterInFloor = actors.filter(actor => actor?.id === monsterGameId);
+            if (monsterInFloor.length === 0) return;
+            floors.add(floorIndex);
+            monsterInFloor.forEach((actor) => {
+              roomLocations.push(LOCATION_UTILS.createLocationData(actor, roomLocations.length));
+            });
+          });
+          if (roomLocations.length > 0) {
+            const roomName = getCyclopediaRoomDisplayName(room?.id ?? roomKey);
+            locations.push({ roomId: roomKey, roomName, positions: roomLocations, floors });
+          }
+          return;
+        }
+
         const actors = room.file?.data?.actors;
         if (!actors) return;
-        
+
         const monsterInRoom = actors.filter(actor => actor?.id === monsterGameId);
         if (monsterInRoom.length > 0) {
           const roomName = getCyclopediaRoomDisplayName(room?.id ?? roomKey);
@@ -3199,7 +3278,7 @@ function findMonsterLocations(monsterName) {
   } catch (error) {
     console.warn('[Cyclopedia] Error in monster location cache:', error);
   }
-  
+
   cyclopediaState.monsterLocationCache.set(cacheKey, locations);
   return locations;
 }
@@ -8548,12 +8627,12 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
   } else if (monsterLocations.length > 0) {
     const regionMap = new Map();
     monsterLocations.forEach((location) => {
-      const translatedRoomName = getCyclopediaRoomDisplayName(location.roomId);
+      const translatedRoomName = location.roomName || getCyclopediaRoomDisplayName(location.roomId);
       const regionName = resolveCyclopediaRoomRegionName(location.roomId);
       if (!regionMap.has(regionName)) {
         regionMap.set(regionName, []);
       }
-      regionMap.get(regionName).push({ roomName: translatedRoomName, positions: location.positions });
+      regionMap.get(regionName).push({ roomName: translatedRoomName, positions: location.positions, floors: location.floors });
     });
     if (regionMap.size > 0) {
       for (const [regionName, rooms] of regionMap.entries()) {
@@ -8576,7 +8655,7 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
         regionDiv.style.textAlign = 'center';
         regionDiv.textContent = regionName;
         dropsList.appendChild(regionDiv);
-        rooms.forEach(({ roomName, positions }) => {
+        rooms.forEach(({ roomName, positions, floors }) => {
           const roomDiv = document.createElement('div');
           roomDiv.style.fontWeight = 'bold';
           roomDiv.className = FONT_CONSTANTS.SIZES.SMALL;
@@ -8593,6 +8672,7 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
           roomDiv.textContent = '';
           const nameSpan = document.createElement('span');
           nameSpan.textContent = roomName;
+          appendFloorPercentBadge(nameSpan, floors);
           nameSpan.style.flex = '1 1 auto';
           nameSpan.style.overflow = 'hidden';
           nameSpan.style.textOverflow = 'ellipsis';
@@ -8603,7 +8683,7 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
           rightSpan.style.gap = '2px';
           rightSpan.style.marginLeft = '8px';
           const foundLocation = monsterLocations.find(
-            (loc) => getCyclopediaRoomDisplayName(loc.roomId) === roomName
+            (loc) => (loc.roomName || getCyclopediaRoomDisplayName(loc.roomId)) === roomName
           );
           let staminaCost = null;
           const foundRoom = foundLocation ? getCyclopediaRoomByMapId(foundLocation.roomId) : null;
@@ -15391,65 +15471,91 @@ function createEquipmentTabPage(selectedCreature, selectedEquipment, selectedInv
 
   // Equipment-to-creature mapping cache for faster lookups
   let equipmentCreatureCache = null;
-  
+  // floorPercent / appendFloorPercentBadge are defined top-level near
+  // findMonsterLocations (shared with the creature-location scan).
+
   function buildEquipmentCreatureCache() {
     if (equipmentCreatureCache) return equipmentCreatureCache;
-    
-    const cache = new Map(); // Map<equipId, Map<roomName, Set<creatureName>>>
+
+    // Map<equipId, Map<roomCode, { floors: Set<number>|null, creatures: Set<creatureName> }>>
+    // floors is null for ordinary single-floor rooms, and a set of floor indices for
+    // multi-floor quest rooms (type: 'multi'), which keep board data per-floor in
+    // floorFiles instead of a top-level file.data.actors.
+    const cache = new Map();
     const roomNames = globalThis.state?.utils?.ROOM_NAME;
     const roomEntries = getCyclopediaAllRoomEntries();
-    
+
     if (!roomEntries.length || !roomNames) {
       console.warn('[Cyclopedia] Missing room data for cache');
       return cache;
     }
-    
-    
+
+
     let totalActors = 0;
     let actorsWithEquipment = 0;
-    
+
+    const registerActor = (equipId, creatureId, roomCode, floorIndex) => {
+      let creatureName = 'Unknown Creature';
+      try {
+        if (globalThis.state?.utils?.getMonster) {
+          const monsterData = globalThis.state.utils.getMonster(creatureId);
+          creatureName = monsterData?.metadata?.name || creatureName;
+        }
+      } catch (error) {
+        // Skip if can't get creature name
+      }
+
+      if (!cache.has(equipId)) {
+        cache.set(equipId, new Map());
+      }
+
+      const equipData = cache.get(equipId);
+      if (!equipData.has(roomCode)) {
+        equipData.set(roomCode, { floors: floorIndex == null ? null : new Set(), creatures: new Set() });
+      }
+      const entry = equipData.get(roomCode);
+      if (floorIndex != null) {
+        if (!entry.floors) entry.floors = new Set();
+        entry.floors.add(floorIndex);
+      }
+      entry.creatures.add(creatureName);
+    };
+
     roomEntries.forEach(([, room]) => {
       try {
+        const roomCode = room?.id;
+        if (!roomCode) return;
+
+        if (room.type === 'multi' && Array.isArray(room.floorFiles)) {
+          room.floorFiles.forEach((floorFile, floorIndex) => {
+            const actors = floorFile?.data?.actors;
+            if (!Array.isArray(actors)) return;
+            actors.forEach(actor => {
+              totalActors++;
+              if (actor?.equip?.gameId) {
+                actorsWithEquipment++;
+                registerActor(actor.equip.gameId, actor.id, roomCode, floorIndex);
+              }
+            });
+          });
+          return;
+        }
+
         const actors = room.file?.data?.actors;
         if (!actors || !Array.isArray(actors)) return;
-        
-        const roomCode = room.id;
-        const roomName = roomNames[roomCode] || roomCode;
-        
+
         actors.forEach(actor => {
           totalActors++;
           if (actor?.equip?.gameId) {
             actorsWithEquipment++;
-            const equipId = actor.equip.gameId;
-            const creatureId = actor.id;
-            
-            // Get creature name
-            let creatureName = 'Unknown Creature';
-            try {
-              if (globalThis.state?.utils?.getMonster) {
-                const monsterData = globalThis.state.utils.getMonster(creatureId);
-                creatureName = monsterData?.metadata?.name || creatureName;
-              }
-            } catch (error) {
-              // Skip if can't get creature name
-            }
-            
-            if (!cache.has(equipId)) {
-              cache.set(equipId, new Map());
-            }
-            
-            const equipData = cache.get(equipId);
-            if (!equipData.has(roomCode)) {
-              equipData.set(roomCode, new Set());
-            }
-            equipData.get(roomCode).add(creatureName);
+            registerActor(actor.equip.gameId, actor.id, roomCode, null);
           }
         });
       } catch (error) {
-        console.warn('[Cyclopedia] Error building cache for room:', roomIndex, error);
+        console.warn('[Cyclopedia] Error building cache for room:', room?.id, error);
       }
     });
-    
+
     equipmentCreatureCache = cache;
     return cache;
   }
@@ -15462,66 +15568,76 @@ function createEquipmentTabPage(selectedCreature, selectedEquipment, selectedInv
   // Function to get creature usage data for equipment (optimized with cache)
   function getCreatureUsageForEquipment(equipId) {
     const usageData = [];
-    
+
     try {
       // Use cached data for instant lookup
       const cache = buildEquipmentCreatureCache();
       const equipData = cache.get(equipId);
-      
+
       if (!equipData) {
         return usageData; // No creatures found using this equipment
       }
-      
+
+      const roomNames = globalThis.state?.utils?.ROOM_NAME;
+      const baseNameForRoom = (roomCode) => roomNames?.[roomCode] || roomCode;
+
       // Get region data for proper ordering
       const regions = getCyclopediaRegionsList();
       if (!regions.length) {
         // Fallback: just return all rooms in cache order
-        const roomNames = globalThis.state?.utils?.ROOM_NAME;
-        equipData.forEach((creatures, roomCode) => {
-          const displayName = roomNames?.[roomCode] || roomCode;
+        equipData.forEach((entry, roomCode) => {
+          if (!entry.creatures.size) return;
           usageData.push({
-            mapName: displayName,
-            creatures: Array.from(creatures).sort(),
+            mapName: baseNameForRoom(roomCode),
+            floors: entry.floors,
+            creatures: Array.from(entry.creatures).sort(),
             regionName: 'Other Maps'
           });
         });
         return usageData;
       }
-      
+
       // Build ordered list using region room order
       const orderedUsage = [];
+      const handledRoomCodes = new Set();
       regions.forEach(region => {
         if (!region.rooms) return;
-        
+
         const regionName = cyclopediaGetRegionDisplayName(region.id);
-        let regionHasMaps = false;
-        
+
         region.rooms.forEach(room => {
-          const roomCode = room.id;
-          
-          if (equipData.has(roomCode)) {
-            const creatures = Array.from(equipData.get(roomCode)).sort();
-            if (creatures.length > 0) {
-              // Use the room name from ROOM_NAME mapping, fallback to room code if no name
-              const roomNames = globalThis.state?.utils?.ROOM_NAME;
-              const displayName = roomNames?.[roomCode] || roomCode;
-              orderedUsage.push({
-                mapName: displayName,
-                creatures: creatures,
-                regionName: regionName
-              });
-              regionHasMaps = true;
-            }
-          }
+          const entry = equipData.get(room.id);
+          if (!entry || !entry.creatures.size) return;
+
+          handledRoomCodes.add(room.id);
+          orderedUsage.push({
+            mapName: baseNameForRoom(room.id),
+            floors: entry.floors,
+            creatures: Array.from(entry.creatures).sort(),
+            regionName: regionName
+          });
         });
       });
-      
+
+      // Multi-floor quest rooms (e.g. The Annihilator Quest, The Behemoth Quest) aren't
+      // listed inside any region's room array, so they never match above — surface them in
+      // their own bucket instead of silently dropping them.
+      equipData.forEach((entry, roomCode) => {
+        if (handledRoomCodes.has(roomCode) || !entry.creatures.size) return;
+        orderedUsage.push({
+          mapName: baseNameForRoom(roomCode),
+          floors: entry.floors,
+          creatures: Array.from(entry.creatures).sort(),
+          regionName: 'Quests'
+        });
+      });
+
       return orderedUsage;
-      
+
     } catch (error) {
       console.warn('[Cyclopedia] Error getting creature usage data:', error);
     }
-    
+
     return usageData;
   }
 
@@ -15849,7 +15965,7 @@ function createEquipmentTabPage(selectedCreature, selectedEquipment, selectedInv
           });
         }
 
-        function appendStyledMapRow(parentEl, mapName, creaturesLabel) {
+        function appendStyledMapRow(parentEl, mapName, creaturesLabel, floors) {
           const usageDiv = document.createElement('div');
           usageDiv.style.cssText = `
                 padding: 2px 4px; display: flex; flex-direction: column; gap: 2px;
@@ -15877,6 +15993,7 @@ function createEquipmentTabPage(selectedCreature, selectedEquipment, selectedInv
                 white-space: nowrap;
               `;
           mapNameSpan.textContent = mapName;
+          appendFloorPercentBadge(mapNameSpan, floors);
 
           NavigationHandler.attachMapNavigation(mapNameDiv, mapName);
 
@@ -15990,7 +16107,7 @@ function createEquipmentTabPage(selectedCreature, selectedEquipment, selectedInv
             appendRegionHeader(creatureUsageContainer, regionName);
 
             maps.forEach((usage) => {
-              appendStyledMapRow(creatureUsageContainer, usage.mapName, usage.creatures.join(', '));
+              appendStyledMapRow(creatureUsageContainer, usage.mapName, usage.creatures.join(', '), usage.floors);
             });
           });
         }
