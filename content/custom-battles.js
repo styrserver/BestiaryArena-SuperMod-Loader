@@ -102,6 +102,30 @@ if (window.CustomBattles) {
                 name: "Kraknaknork's Demon",
                 baseGameId: 92, // Beer Barrel
                 idleUrl: "Kraknaknork's Demon.png"
+            },
+            {
+                key: 'demon',
+                name: 'Demon',
+                // Plain Dragon in every way that matters for gameplay/feel (stats, move speed,
+                // attack cadence, walk-cycle timing) — only the art is swapped. No moveSpeed/
+                // attackCooldownTicks override here on purpose: leaving them unset means
+                // Combat timing stays 100% native Dragon.
+                baseGameId: 65,
+                level: 666,
+                awakened: true,
+                idleUrl: 'demon-idle.png',
+                portraitUrl: 'demon-icon.gif', // dedicated single-frame icon for portraits/picker cards
+                movingUrl: 'demon-moving.png',
+                // Sheet geometry matches Dragon's own OUTFIT asset exactly (id-65: 256x64 idle /
+                // 256x512 moving, i.e. 4 facings x 1 idle frame / 8 moving frames @ 64px) so the
+                // reused native sizing/animation CSS crops and steps it correctly.
+                cellSize: 64,
+                facings: 4,
+                idleFrameRows: 1,
+                movingFrameRows: 8,
+                // Dragon's own native moving-animation duration ("2.4s steps(8)", confirmed via
+                // the live game CSS) — kept as a fixed constant, matching every native creature.
+                movingFrameDurationMs: 2400
             }
         ];
 
@@ -200,11 +224,15 @@ if (window.CustomBattles) {
             if (spriteDef.movingUrl) {
                 const movingUrl = getCustomSpriteAssetUrl(spriteDef.movingUrl).replace(/"/g, '\\"');
                 const durationMs = Number(spriteDef.movingFrameDurationMs) || 900;
+                // Read from a CSS custom property first so a per-placement override (set as an
+                // inline style on the sprite element — see applyCustomSpriteVisualToSprite) can
+                // win over this registry default without needing a whole new class per value.
                 movingRule = movingRows > 1
                     ? `
       .${overlayClass}.moving .spritesheet {
         content: url("${movingUrl}") !important;
-        animation: homogeneous-transition ${durationMs}ms steps(${movingRows}) infinite !important;
+        animation: homogeneous-transition var(--cb-moving-duration, ${durationMs}ms) steps(${movingRows}) infinite !important;
+        animation-delay: var(--cb-moving-delay, 0ms) !important;
       }`
                     : `
       .${overlayClass}.moving .spritesheet {
@@ -215,6 +243,7 @@ if (window.CustomBattles) {
             style.textContent = `
       .${overlayClass} .spritesheet {
         content: url("${idleUrl}") !important;
+        animation: none !important;
       }
       ${movingRule}
       ${sizingRule}
@@ -745,6 +774,13 @@ if (window.CustomBattles) {
                 this.outfitSpriteOverrideIntervalStopTimer = null;
                 this._outfitOverrideMissLogCount = 0;
                 this._outfitOverrideMissLogByKey = new Map();
+                // A stable per-tile clock for custom-sprite walk cycles (tileIndex:key ->
+                // performance.now() the cycle first started), independent of the actual DOM
+                // node's lifetime. The board frequently rebuilds a piece's sprite element
+                // (re-render bursts, class/style churn elsewhere triggering the shared
+                // MutationObserver), and each rebuild needs the overlay class re-applied from
+                // scratch — see applyCustomSpriteVisualToSprite's animation-delay comment.
+                this._customSpriteMoveCycleEpoch = new Map();
                 this._namedPieceMissLogByKey = new Map();
                 this.geneIntegrityTimerIds = [];
                 this.preBattleGeneTamperCount = 0;
@@ -3300,12 +3336,54 @@ if (window.CustomBattles) {
                 ensureCustomSpriteStyles(spriteDef);
                 this.tagCustomPieceSprite(sprite, piece);
 
+                // Walk-cycle duration: the registry's fixed constant (spriteDef.
+                // movingFrameDurationMs), unless this specific placement declares an explicit
+                // override. No auto-sync to moveSpeed — pieces are expected to match their
+                // baseGameId's own native timing (see the registry entry's own comment), same
+                // as any native creature.
+                const explicitMs = Number(piece.customSpriteMovingFrameDurationMs);
+                const overrideMs = Number.isFinite(explicitMs) && explicitMs > 0 ? explicitMs : null;
+                const overrideValue = overrideMs != null ? `${overrideMs}ms` : '';
+                const prevValue = sprite.style.getPropertyValue('--cb-moving-duration');
+                if (prevValue !== overrideValue) {
+                    if (overrideValue) sprite.style.setProperty('--cb-moving-duration', overrideValue);
+                    else sprite.style.removeProperty('--cb-moving-duration');
+                }
+
                 // classList.add() re-serializes and re-sets the whole class attribute even when
                 // the token is already present (per spec, its "update steps" always run) — that
                 // fires a 'class' mutation record on every call, which is exactly the attribute
                 // the loop-causing MutationObserver watches. Only call it when actually needed.
                 const overlayClass = getCustomSpriteOverlayClass(spriteDef.key);
                 if (sprite.classList.contains(overlayClass)) return false;
+
+                // Keep the walk cycle on a continuous clock regardless of how many times this
+                // piece's actual .sprite.outfit DOM node gets rebuilt (board re-render bursts,
+                // or any unrelated DOM mutation elsewhere retriggering the shared
+                // MutationObserver — both are common and can fire dozens of times in a few
+                // seconds right after battle start). Without this, EVERY re-application starts
+                // the CSS animation over at frame 0 (a freshly added class has no history to
+                // resume from), which native creatures never suffer since they need zero
+                // JS-driven reapplication at all — this reads as "the custom sprite's walk
+                // animation looks stuck/much slower than a native creature at a similar speed",
+                // even though the configured duration numbers are identical. A negative
+                // animation-delay computed from a stable per-tile epoch (independent of the DOM
+                // node's own lifetime) makes a freshly classed element pick up the cycle exactly
+                // where it should already be, instead of restarting it. Only computed here (once
+                // per fresh class-add), not on every call, so this never fights with the 'style'
+                // mutation-record guard the classList check above exists for.
+                const cycleMs = overrideMs ?? (Number(spriteDef.movingFrameDurationMs) || 900);
+                if (cycleMs > 0) {
+                    const epochKey = `${piece.tileIndex}:${spriteDef.key}`;
+                    let epoch = this._customSpriteMoveCycleEpoch.get(epochKey);
+                    if (epoch == null) {
+                        epoch = performance.now();
+                        this._customSpriteMoveCycleEpoch.set(epochKey, epoch);
+                    }
+                    const offsetMs = Math.round((performance.now() - epoch) % cycleMs);
+                    sprite.style.setProperty('--cb-moving-delay', `-${offsetMs}ms`);
+                }
+
                 sprite.classList.add(overlayClass);
                 return true;
             }
@@ -6139,9 +6217,13 @@ if (window.CustomBattles) {
                     getActiveBattles: () => [...activeCustomBattles],
                     isAllyContextMenuBlocked: shouldBlockAllyContextMenu,
                     playEffectOnWalkableTiles,
+                    getCachedEffectFrameCount,
+                    ensureDynamicStyle,
                     CUSTOM_SPRITES: CUSTOM_MAP_SPRITES,
                     getCustomSpriteDef,
                     getCustomSpriteAssetUrl,
+                    ensureCustomSpriteStyles,
+                    getCustomSpriteOverlayClass,
                     debugNativeOutfitSprite,
                     navigateToRoom: (roomId) => {
                         if (!roomId || !globalThis.state?.board?.send) return false;

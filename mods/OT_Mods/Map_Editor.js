@@ -11534,6 +11534,53 @@ function resolveOutfitSpriteIdFromInput(input) {
 }
 
 /**
+ * Finds a registered custom sprite (window.CustomBattles.CUSTOM_SPRITES, e.g. the
+ * "Demon" sprite registered as customSpriteKey 'demons-outfit') by exact key, exact
+ * name, or a unique partial name match — same matching rules as
+ * resolveCreatureIdByGameIdOrName, so the Outfit sprite field can pick up a custom
+ * sprite by name instead of only resolving native creatures/outfits.
+ */
+function resolveCustomSpriteDefFromInput(input) {
+  const trimmed = String(input ?? '').trim();
+  if (!trimmed) return null;
+  const registry = getCustomSpriteRegistry();
+  if (!registry.length) return null;
+  const lower = trimmed.toLowerCase();
+  const byKey = registry.find((def) => String(def?.key || '').toLowerCase() === lower);
+  if (byKey) return byKey;
+  const exactName = registry.find((def) => String(def?.name || '').toLowerCase() === lower);
+  if (exactName) return exactName;
+  const partialMatches = registry.filter((def) => String(def?.name || def?.key || '').toLowerCase().includes(lower));
+  return partialMatches.length === 1 ? partialMatches[0] : null;
+}
+
+/**
+ * Combined resolution for the Outfit sprite field: a registered custom sprite (by name
+ * or key) wins over the native creature/outfit resolution, so typing "Demon" selects
+ * the custom sprite even if some creature's name also happens to contain "Demon".
+ * Returns { customSpriteKey } or { outfitSpriteId } or null when nothing matches.
+ */
+function resolveOutfitFieldInput(input) {
+  const customDef = resolveCustomSpriteDefFromInput(input);
+  if (customDef) return { customSpriteKey: customDef.key };
+  const outfitSpriteId = resolveOutfitSpriteIdFromInput(input);
+  return outfitSpriteId != null ? { outfitSpriteId } : null;
+}
+
+/** Display text for a resolved custom sprite key: its registry name, else the raw key. */
+function formatCustomSpriteKeyDisplay(key) {
+  const def = window.CustomBattles?.getCustomSpriteDef?.(key) || getCustomSpriteRegistry().find((d) => d?.key === key);
+  return def?.name || key;
+}
+
+/** Display text for whatever resolveOutfitFieldInput() returned. */
+function formatOutfitFieldDisplay(resolved) {
+  if (!resolved) return '';
+  if (resolved.customSpriteKey != null) return formatCustomSpriteKeyDisplay(resolved.customSpriteKey);
+  return formatOutfitSpriteIdDisplay(resolved.outfitSpriteId);
+}
+
+/**
  * Reverse of resolveOutfitSpriteIdForCreature: given a resolved outfit sprite ID, find the
  * creature whose own sprite ID resolves to it, so the field can display a name (e.g. "Orc
  * Shaman") instead of a bare number. Returns null when no unique creature matches, in which
@@ -11683,6 +11730,9 @@ function buildMapEditorVillainConfig(tileIndex, gameId, actorConfig = null) {
   if (actorConfig?.outfitSpriteId != null) config.outfitSpriteId = actorConfig.outfitSpriteId;
   if (actorConfig?.itemSpriteId != null) config.itemSpriteId = actorConfig.itemSpriteId;
   if (actorConfig?.customSpriteKey != null) config.customSpriteKey = actorConfig.customSpriteKey;
+  if (Number.isFinite(Number(actorConfig?.customSpriteMovingFrameDurationMs))) {
+    config.customSpriteMovingFrameDurationMs = Number(actorConfig.customSpriteMovingFrameDurationMs);
+  }
   if (actorConfig?.genes && typeof actorConfig.genes === 'object') {
     config.genes = cloneJson(actorConfig.genes);
   }
@@ -11727,6 +11777,7 @@ function buildActorConfigFromVillainConfig(villain) {
     outfitSpriteId: villain.outfitSpriteId,
     itemSpriteId: villain.itemSpriteId,
     customSpriteKey: villain.customSpriteKey,
+    customSpriteMovingFrameDurationMs: villain.customSpriteMovingFrameDurationMs,
     abilityCooldownTicks: villain.abilityCooldownTicks,
     attackCooldownTicks: villain.attackCooldownTicks,
     moveCooldownTicks: villain.moveCooldownTicks,
@@ -11797,6 +11848,15 @@ function normalizeActorConfig(raw) {
   const outfitSpriteId = Number(normalized.outfitSpriteId);
   if (Number.isFinite(outfitSpriteId) && outfitSpriteId > 0) normalized.outfitSpriteId = outfitSpriteId;
   else delete normalized.outfitSpriteId;
+
+  // Per-placement override for a custom sprite's walk-cycle duration (blank = use the
+  // registry default from CUSTOM_MAP_SPRITES); meaningless without a customSpriteKey.
+  const movingDurationMs = Number(normalized.customSpriteMovingFrameDurationMs);
+  if (normalized.customSpriteKey != null && Number.isFinite(movingDurationMs) && movingDurationMs > 0) {
+    normalized.customSpriteMovingFrameDurationMs = Math.floor(movingDurationMs);
+  } else {
+    delete normalized.customSpriteMovingFrameDurationMs;
+  }
 
   const itemSpriteId = Number(normalized.itemSpriteId);
   if (Number.isFinite(itemSpriteId) && itemSpriteId > 0) normalized.itemSpriteId = itemSpriteId;
@@ -12063,9 +12123,21 @@ function buildActorConfigFromCreatureForm(baseActor, formState) {
     delete merged.equip;
   }
 
-  const outfitSpriteId = resolveOutfitSpriteIdFromInput(formState.outfitSpriteId);
-  if (Number.isFinite(outfitSpriteId) && outfitSpriteId > 0) merged.outfitSpriteId = outfitSpriteId;
-  else delete merged.outfitSpriteId;
+  // A registered custom sprite (e.g. "Demon") and a native outfit override are mutually
+  // exclusive visual overrides driven by the same text field — whichever this resolves
+  // to replaces the other so switching the field's text actually swaps the look instead
+  // of leaving a stale customSpriteKey/outfitSpriteId behind from a previous edit.
+  const outfitResolved = resolveOutfitFieldInput(formState.outfitSpriteId);
+  if (outfitResolved?.customSpriteKey != null) {
+    merged.customSpriteKey = outfitResolved.customSpriteKey;
+    delete merged.outfitSpriteId;
+  } else if (Number.isFinite(outfitResolved?.outfitSpriteId) && outfitResolved.outfitSpriteId > 0) {
+    merged.outfitSpriteId = outfitResolved.outfitSpriteId;
+    delete merged.customSpriteKey;
+  } else {
+    delete merged.outfitSpriteId;
+    delete merged.customSpriteKey;
+  }
 
   const itemSpriteId = Number(formState.itemSpriteId);
   if (Number.isFinite(itemSpriteId) && itemSpriteId > 0) merged.itemSpriteId = itemSpriteId;
@@ -12584,24 +12656,27 @@ function createCreatureEditorPanel(tileIndex, actor) {
   const outfitInput = document.createElement('input');
   outfitInput.type = 'text';
   outfitInput.className = 'me-input me-creature-input-compact';
-  outfitInput.value = formState.outfitSpriteId === '' || formState.outfitSpriteId == null
-    ? ''
-    : formatOutfitSpriteIdDisplay(formState.outfitSpriteId);
+  outfitInput.value = actor?.customSpriteKey != null
+    ? formatCustomSpriteKeyDisplay(actor.customSpriteKey)
+    : (formState.outfitSpriteId === '' || formState.outfitSpriteId == null
+      ? ''
+      : formatOutfitSpriteIdDisplay(formState.outfitSpriteId));
   outfitInput.dataset.creatureOutfitId = '1';
-  outfitInput.placeholder = t('mods.mapEditor.creatureOutfitIdPlaceholder', 'Name, ID, or outfit:<id> (e.g. Druid, outfit:3)');
+  outfitInput.placeholder = t('mods.mapEditor.creatureOutfitIdPlaceholder', 'Name, ID, custom sprite name, or outfit:<id> (e.g. Druid, Demon, outfit:3)');
   outfitInput.title = t(
     'mods.mapEditor.creatureOutfitIdHint',
-    'Overrides how this creature looks while keeping its own combat stats. Type another creature\'s name (e.g. "Druid") or its ID to use that creature\'s sprite, or "outfit:<id>" (e.g. "outfit:3") to use a raw OUTFIT sprite ID directly, not tied to any creature.'
+    'Overrides how this creature looks while keeping its own combat stats. Type another creature\'s name (e.g. "Druid") or its ID to use that creature\'s sprite, the name of a registered custom sprite (e.g. "Demon") to use that custom art, or "outfit:<id>" (e.g. "outfit:3") to use a raw OUTFIT sprite ID directly, not tied to any creature.'
   );
-  // Normalize the field to the creature's canonical display name once it settles (e.g.
-  // typing "orc shaman" becomes "Orc Shaman", and a typed numeric ID becomes that
-  // creature's name too), instead of collapsing free text down to a bare sprite ID. The
-  // resolved numeric ID is still what actually gets stored — see mergeActorConfigFromForm,
-  // which re-resolves this field's text at save time regardless of what it displays.
+  // Normalize the field to its canonical display name once it settles (e.g. typing
+  // "orc shaman" becomes "Orc Shaman", a typed numeric ID becomes that creature's name,
+  // and a custom sprite's name/key becomes its registered display name), instead of
+  // collapsing free text down to a bare sprite ID. The resolved value is still what
+  // actually gets stored — see buildActorConfigFromCreatureForm, which re-resolves this
+  // field's text at save time regardless of what it displays.
   outfitInput.addEventListener('blur', () => {
-    const resolved = resolveOutfitSpriteIdFromInput(outfitInput.value);
+    const resolved = resolveOutfitFieldInput(outfitInput.value);
     if (resolved != null) {
-      const display = formatOutfitSpriteIdDisplay(resolved);
+      const display = formatOutfitFieldDisplay(resolved);
       if (display !== outfitInput.value.trim()) {
         outfitInput.value = display;
       }
@@ -13145,6 +13220,20 @@ function collectMapUsedCreatures() {
   };
 
   const scanRoom = (room) => {
+    // Multi-floor rooms (e.g. The Annihilator Quest) carry no top-level
+    // room.file.data.actors — each floor's layout lives in room.floorFiles[n].data.actors
+    // instead. Scan every floor so the Creature List reflects creatures that only
+    // appear on floors other than floor 0.
+    if (Array.isArray(room?.floorFiles)) {
+      room.floorFiles.forEach((floorFile) => {
+        const floorActors = floorFile?.data?.actors;
+        if (!Array.isArray(floorActors)) return;
+        floorActors.forEach((actor) => {
+          if (actor) addActor(actor, room);
+        });
+      });
+      return;
+    }
     const actors = room?.file?.data?.actors;
     if (!Array.isArray(actors)) return;
     actors.forEach((actor) => {
@@ -13412,6 +13501,19 @@ async function applyCustomSpriteToSelection(spriteDef) {
   actorConfig.customSpriteKey = spriteDef.key;
   actorConfig.nickname = spriteDef.nickname || displayName;
   actorConfig.level = Number(spriteDef.level) || 50;
+  actorConfig.direction = spriteDef.direction || 'south';
+  // Stored as the same nested { cooldownTicks | speed } container the creature edit form
+  // reads via CREATURE_COOLDOWN_FIELDS/buildCreatureEditorFormState (actor.attackCooldown /
+  // actor.moveCooldown) — a flat actorConfig.moveSpeed/.attackCooldownTicks round-trips fine
+  // through buildMapEditorVillainConfig's live-board forwarding but the form only checks the
+  // nested container, so it showed blank.
+  if (Number.isFinite(Number(spriteDef.moveSpeed))) {
+    actorConfig.moveCooldown = { speed: Math.floor(Number(spriteDef.moveSpeed)) };
+  }
+  if (Number.isFinite(Number(spriteDef.attackCooldownTicks))) {
+    actorConfig.attackCooldown = { cooldownTicks: Math.floor(Number(spriteDef.attackCooldownTicks)) };
+  }
+  if (spriteDef.awakened === true) actorConfig.awakened = true;
 
   const tileIndex = editorState.selectedTileIndex;
   if (tileIndex != null) {

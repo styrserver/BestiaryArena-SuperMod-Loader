@@ -4,6 +4,41 @@
   },
   "notes": [
     {
+      "version": "5.0.9",
+      "changes": [
+        {
+          "mod": "Bestiary Automator",
+          "type": "changed",
+          "text": "Autocollect Level-Up Rewards now keeps collecting and re-checking for another pending reward before closing the modal, instead of collecting only one and closing, so a backlog of several level-ups is fully cleared in one pass."
+        },
+        {
+          "mod": "custom-battles.js",
+          "type": "fixed",
+          "text": "A custom sprite's walk-cycle animation could restart from its first frame every time the board rebuilt its element (common during normal board re-render churn), instead of continuing smoothly from where it left off — making it look stuck or much slower than a native creature moving at the same speed. It now always resumes at the correct point in the cycle."
+        },
+        {
+          "mod": "Hunt Analyzer",
+          "type": "fixed",
+          "text": "The battle counter (and its /h rate) is incremented on the game's own new-battle event, which can be missed or coalesced when maps clear back-to-back very fast, so it could fall well behind the actual number of processed results while gold/exp/win-loss stayed accurate. It now can't fall behind win/loss totals, which are always updated in lockstep with every other stat."
+        },
+        {
+          "mod": "Map Editor",
+          "type": "added",
+          "text": "A new \"Demon\" custom sprite is available alongside Weakened Ghazbaran in the creature picker's Custom sprites section — same base creature, stats, move speed, and animation timing as Dragon, just with different art, and placed at level 666 and Awakened by default. Its name (or any other registered custom sprite's) can also be typed directly into a placed creature's Outfit sprite field to apply it, the same as clicking its card in the picker."
+        },
+        {
+          "mod": "Map Editor",
+          "type": "fixed",
+          "text": "The Creature List panel's per-creature \"used on this map\" info only scanned floor 0's actor layout, so creatures that only appear on floors 1+ of a multi-floor quest room weren't tagged as used and their room labels were incomplete. It now scans every floor."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "added",
+          "text": "A new \"Enable Easter Eggs\" toggle under Gameplay settings — on by default."
+        }
+      ]
+    },
+    {
       "version": "5.0.8",
       "changes": [
         {

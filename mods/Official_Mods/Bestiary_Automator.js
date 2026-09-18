@@ -2601,8 +2601,21 @@ const takeRewardsIfAvailable = async () => {
       },
     });
     await sleep(TIMING.REWARDS_COLLECT_DELAY);
-    clickButtonWithText('mods.automator.collect');
-    await sleep(TIMING.REWARDS_COLLECT_DELAY);
+
+    // Keep collecting as long as another reward is waiting, instead of closing after one.
+    // Each level-up reward replaces the Collect button with the next one once claimed, so
+    // re-checking for it after a delay tells us whether there's more to collect.
+    const MAX_LEVELUP_REWARDS_PER_PASS = 50; // safety cap against an unexpected stuck loop
+    let collectedCount = 0;
+    while (collectedCount < MAX_LEVELUP_REWARDS_PER_PASS && findButtonWithText('mods.automator.collect')) {
+      clickButtonWithText('mods.automator.collect');
+      collectedCount++;
+      await sleep(TIMING.REWARDS_COLLECT_DELAY);
+    }
+    if (collectedCount > 0) {
+      console.log(`[Bestiary Automator] Collected ${collectedCount} level-up reward(s)`);
+    }
+
     clickAllCloseButtons();
     await sleep(TIMING.REWARDS_COLLECT_DELAY);
     

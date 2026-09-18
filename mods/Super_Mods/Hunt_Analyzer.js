@@ -1709,7 +1709,12 @@ function getFilteredTimeHours() {
 
 function getFilteredSessionCount() {
   if (HuntAnalyzerState.ui.selectedMapFilter === "ALL") {
-    return HuntAnalyzerState.session.count;
+    // session.count is incremented on the 'newGame' event, which can be missed/coalesced
+    // when battles clear back-to-back very fast. totals.wins/losses are incremented once
+    // per processed serverResults (processSession), so they never lag behind — use whichever
+    // is higher so the displayed count can't fall behind the actual processed battle total.
+    const fromWinsLosses = (HuntAnalyzerState.totals.wins || 0) + (HuntAnalyzerState.totals.losses || 0);
+    return Math.max(HuntAnalyzerState.session.count || 0, fromWinsLosses);
   }
   return HuntAnalyzerState.data.sessions.filter(
     (session) => session.roomName === HuntAnalyzerState.ui.selectedMapFilter

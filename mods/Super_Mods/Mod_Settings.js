@@ -22,6 +22,7 @@ const defaultConfig = {
   enableSetupShortcutsAndHover: true,
   hotkeySetupSource: 'betterSetups', // 'betterSetups' | 'setupManager'
   enableShinyEnemies: false,
+  enableEasterEggs: true,
   enableAutoplayRefresh: false,
   alwaysNavigateMaxFloor: false,
   autoplayRefreshMinutes: 30,
@@ -8059,6 +8060,12 @@ function showSettingsModal() {
               ${warningLabelSpanHtml(t('mods.betterUI.alwaysNavigateMaxFloor'), { title: t('mods.betterUI.alwaysNavigateMaxFloorWarning') })}
             </label>
           </div>
+          <div style="margin-bottom: 15px;">
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+              <input type="checkbox" id="enable-easter-eggs-toggle" style="transform: scale(1.2);">
+              ${warningLabelSpanHtml(t('mods.betterUI.enableEasterEggs'), { title: t('mods.betterUI.enableEasterEggsWarning') })}
+            </label>
+          </div>
           <div id="turbo-speed-settings-section" style="margin-top: 20px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.1); margin-bottom: 20px;">
             <h4 style="margin: 0 0 12px 0; color: #ffaa00; font-size: 14px; display: flex; align-items: center; gap: 6px;">
               <span id="turbo-speed-settings-unavailable-warning" hidden style="cursor: help; color: #f0c36d; font-size: 12px;">⚠️</span>
@@ -9317,6 +9324,22 @@ function showSettingsModal() {
 
           if (config.alwaysNavigateMaxFloor) {
             applyBestCompletedFloorForCurrentMap('settings-toggle');
+          }
+        });
+      }
+
+      const enableEasterEggsCheckbox = content.querySelector('#enable-easter-eggs-toggle');
+      if (enableEasterEggsCheckbox) {
+        enableEasterEggsCheckbox.checked = !!config.enableEasterEggs;
+
+        enableEasterEggsCheckbox.addEventListener('change', () => {
+          config.enableEasterEggs = enableEasterEggsCheckbox.checked;
+          saveConfig();
+
+          if (config.enableEasterEggs) {
+            startEasterEggWatcher();
+          } else {
+            stopEasterEggWatcher();
           }
         });
       }
@@ -12642,8 +12665,350 @@ function shouldSkipShinyEnemy(creatureName) {
 // Helper: Check if a battle container is an enemy (red health bar)
 function isEnemyByHealthBar(battleContainer) {
   const healthBar = battleContainer.querySelector('.h-full.shrink-0');
-  return healthBar && healthBar.style.background && 
+  return healthBar && healthBar.style.background &&
          healthBar.style.background.includes('rgb(255, 102, 102)');
+}
+
+// =======================
+// Easter Egg: Demon skin roll for The Annihilator Quest
+// =======================
+// Reuses the 'demon' entry already registered in window.CustomBattles.CUSTOM_SPRITES
+// (content/custom-battles.js — the same Dragon-based reskin the Map Editor's custom-sprite
+// picker offers). We don't duplicate its CSS-injection logic; ensureCustomSpriteStyles /
+// getCustomSpriteOverlayClass are exposed on window.CustomBattles for exactly this reuse.
+const EASTER_EGG_DEMON_SPRITE_KEY = 'demon';
+const EASTER_EGG_DEMON_CHANCE = 0.05;
+const EASTER_EGG_ANNIHILATOR_QUEST_NAME = 'The Annihilator Quest';
+// 'newGame' and 'emitNewGame' can both fire for the same battle start (see
+// handleEasterEggBattleStart) — treat triggers within this window as one battle rather
+// than rolling twice. Also used instead of an emitEndGame-driven reset, since emitEndGame
+// turned out to be just as unreliable across trigger paths (manual/autoplay/sandbox) as
+// relying on a single new-game event was. Kept short on purpose: the two events for ONE
+// battle fire within the same tick, but back-to-back floors under fast/turbo autoplay can
+// legitimately start a new battle well under a second after the last one ended — a wide
+// window here silently eats real rolls for those floors (suspected cause of a battle
+// showing zero Easter Egg activity at all, not even the "skipping roll" log).
+const EASTER_EGG_ROLL_DEBOUNCE_MS = 300;
+
+// Each demon-skinned enemy independently rolls this chance, once, to shout a taunt above
+// its own sprite for a few seconds.
+const EASTER_EGG_SHOUT_CHANCE = 0.5;
+const EASTER_EGG_SHOUT_DURATION_MS = 5000;
+const EASTER_EGG_SHOUT_CLASS = 'easter-egg-demon-shout';
+const EASTER_EGG_DEMON_QUOTES = [
+  'Your soul will be mine!',
+  'CHAMEK ATH UTHUL ARAK!',
+  'I SMELL FEEEEAAAAAR!',
+  'Your resistance is futile!',
+  'MUHAHAHAHA!'
+];
+let easterEggShoutStylesEnsured = false;
+let easterEggLastSpriteSummaryLog = '';
+
+let easterEggDemonObserver = null;
+let easterEggNewGameUnsub = null;
+let easterEggEmitNewGameUnsub = null;
+let easterEggEndGameUnsub = null;
+let easterEggActiveThisBattle = false;
+let easterEggLastRollAt = 0;
+let easterEggBattleWorld = null;
+
+function isAnnihilatorQuestRoomActive() {
+  try {
+    const selectedRoom = globalThis.state?.board?.getSnapshot()?.context?.selectedMap?.selectedRoom;
+    if (!selectedRoom) return false;
+    const roomNames = globalThis.state?.utils?.ROOM_NAME || {};
+    const roomName = selectedRoom.name || roomNames[selectedRoom.id] || '';
+    return roomName === EASTER_EGG_ANNIHILATOR_QUEST_NAME;
+  } catch (error) {
+    console.warn('[Mod Settings] Error checking Annihilator Quest room:', error);
+    return false;
+  }
+}
+
+// Same fixed-position, tile-anchored floating-text approach as Quests.js's sign-reader
+// bubble (right-click "read" feedback) — mounted on document.body (escapes per-tile
+// z-index stacking) and positioned from the anchor's own getBoundingClientRect(), but red
+// instead of green and auto-removed after EASTER_EGG_SHOUT_DURATION_MS instead of staying
+// until dismissed.
+function ensureEasterEggShoutStyles() {
+  if (easterEggShoutStylesEnsured) return;
+  const styleId = `${EASTER_EGG_SHOUT_CLASS}-styles`;
+  if (document.getElementById(styleId)) {
+    easterEggShoutStylesEnsured = true;
+    return;
+  }
+  const style = document.createElement('style');
+  style.id = styleId;
+  style.textContent = `
+    .${EASTER_EGG_SHOUT_CLASS} {
+      position: fixed;
+      transform: translate(-50%, -100%);
+      width: max-content;
+      max-width: 220px;
+      pointer-events: none;
+      z-index: 2147483647;
+      text-align: center;
+      font-size: 16px;
+      line-height: 1.2;
+      color: #ff3b3b;
+      text-shadow: -1px 0 #000, 1px 0 #000, 0 -1px #000, 0 1px #000;
+      user-select: none;
+    }
+  `;
+  document.head.appendChild(style);
+  easterEggShoutStylesEnsured = true;
+}
+
+function showEasterEggDemonShout(anchorElement) {
+  if (!anchorElement) return;
+  try {
+    ensureEasterEggShoutStyles();
+    const rect = anchorElement.getBoundingClientRect();
+    const quote = EASTER_EGG_DEMON_QUOTES[Math.floor(Math.random() * EASTER_EGG_DEMON_QUOTES.length)];
+    const bubble = document.createElement('div');
+    bubble.className = `${EASTER_EGG_SHOUT_CLASS} pixel-font-16 revert-pixel-font-spacing`;
+    bubble.style.left = `${rect.left + rect.width / 2}px`;
+    bubble.style.top = `${rect.top + 14}px`;
+    bubble.textContent = quote;
+    document.body.appendChild(bubble);
+    console.log(
+      `[Mod Settings] Easter Egg: shout bubble mounted "${quote}" at ` +
+      `(${Math.round(rect.left + rect.width / 2)}, ${Math.round(rect.top - 6)}) ` +
+      `[anchor rect: ${Math.round(rect.width)}x${Math.round(rect.height)}]`
+    );
+    setTimeout(() => {
+      if (bubble.parentNode) bubble.remove();
+    }, EASTER_EGG_SHOUT_DURATION_MS + 60);
+  } catch (error) {
+    console.error('[Mod Settings] Error showing Easter Egg demon shout:', error);
+  }
+}
+
+// Renames every live enemy actor to "Demon" (Lv.666), matching custom-battles.js's own
+// applyConfiguredActorDisplayNames — mutating actor.name/nickname/metadata.name on a LIVE
+// world.grid.actors entry is enough for React to re-render the outlined HUD name+level
+// tag through the canvas font pipeline, no DOM/canvas manipulation needed. Renamed once
+// per actor object (a plain marker property on the actor itself, harmless — actors are
+// discarded after the battle) so repeated observer passes don't reprocess it.
+// NOTE: unlike the sprite skin (pure CSS), actor.level is also read elsewhere for combat
+// math on a freshly-created actor — here the actor already exists mid-battle and this
+// quest's outcome is resolved server-side (RunTracker reads serverResults after the
+// fact), so this should only affect the displayed label, not the already-decided result.
+// Watch for HP-bar/stat-tooltip weirdness if that assumption turns out wrong.
+function applyDemonEasterEggRenames() {
+  if (!easterEggActiveThisBattle) return;
+  try {
+    let actors = easterEggBattleWorld?.grid?.actors;
+    if (!Array.isArray(actors) || !actors.length) {
+      const ctx = globalThis.state?.board?.getSnapshot?.()?.context;
+      actors = ctx?.world?.grid?.actors;
+    }
+    if (!Array.isArray(actors) || !actors.length) {
+      console.warn('[Mod Settings] Easter Egg: no live actors found to rename (neither event.world nor ctx.world had any)');
+      return;
+    }
+
+    actors.forEach((actor) => {
+      if (!actor || actor.villain !== true) return;
+      if (actor.__easterEggDemonRenamed) return;
+      actor.__easterEggDemonRenamed = true;
+
+      const originalName = String(actor.name || actor.nickname || '').trim() || 'unknown';
+      const originalLevel = actor.level;
+      try {
+        actor.name = 'Demon';
+        actor.nickname = 'Demon';
+        if (actor.metadata && typeof actor.metadata === 'object') {
+          actor.metadata.name = 'Demon';
+        }
+        actor.level = 666;
+        console.log(
+          `[Mod Settings] Easter Egg: renamed "${originalName}" (Lv.${originalLevel}) to "Demon" (Lv.666)`
+        );
+      } catch (error) {
+        console.warn(`[Mod Settings] Easter Egg: failed to rename actor "${originalName}"`, error);
+      }
+    });
+  } catch (error) {
+    console.error('[Mod Settings] Error renaming Easter Egg demon actors:', error);
+  }
+}
+
+// Tags every currently-rendered enemy creature's .sprite.outfit with the demon overlay
+// class. Re-run on a light MutationObserver (same enemy-detection approach as
+// applyShinyEnemies: red health bar under a [data-name] container) so newly-spawned or
+// re-rendered enemy sprites pick up the skin too, for the whole battle.
+function applyDemonEasterEggSprites() {
+  if (!easterEggActiveThisBattle) return;
+  if (isBlockedByAnalysisMods()) return;
+  try {
+    applyDemonEasterEggRenames();
+
+    const spriteDef = window.CustomBattles?.getCustomSpriteDef?.(EASTER_EGG_DEMON_SPRITE_KEY);
+    if (!spriteDef || typeof window.CustomBattles.ensureCustomSpriteStyles !== 'function') return;
+    window.CustomBattles.ensureCustomSpriteStyles(spriteDef);
+    const overlayClass = window.CustomBattles.getCustomSpriteOverlayClass(EASTER_EGG_DEMON_SPRITE_KEY);
+
+    let enemyContainerCount = 0;
+    let spriteCount = 0;
+    document.querySelectorAll('[data-name]').forEach((container) => {
+      if (container.closest('[role="dialog"]')) return;
+      if (!isEnemyByHealthBar(container)) return;
+      enemyContainerCount++;
+      container.querySelectorAll('.sprite.outfit').forEach((sprite) => {
+        spriteCount++;
+        // The transform-flash effect is triggered from applyDemonEasterEggRenames()
+        // instead, keyed off the live actor's own tileIndex — a real board coordinate,
+        // unlike this sprite's DOM rect (see that function; also fixes the shout bubble
+        // anchor below, which needs a real on-screen box, just not a tile index).
+        if (!sprite.classList.contains(overlayClass)) {
+          sprite.classList.add(overlayClass);
+        }
+        // Roll the shout exactly once per sprite DOM node — the node persists for the
+        // whole battle (position updates via CSS transform, not re-mounting), so a
+        // dataset marker set here survives every later re-sync pass without re-rolling.
+        if (!sprite.dataset.easterEggShoutRolled) {
+          sprite.dataset.easterEggShoutRolled = '1';
+          const shoutRoll = Math.random();
+          const shoutHit = shoutRoll < EASTER_EGG_SHOUT_CHANCE;
+          console.log(
+            `[Mod Settings] Easter Egg shout roll for "${container.getAttribute('data-name') || 'unknown'}": ` +
+            `${shoutRoll.toFixed(4)} (need < ${EASTER_EGG_SHOUT_CHANCE}) — ${shoutHit ? 'HIT, shouting' : 'no hit'}`
+          );
+          if (shoutHit) {
+            showEasterEggDemonShout(sprite);
+          }
+        }
+      });
+    });
+    if (enemyContainerCount > 0) {
+      const summary = `${spriteCount}-${enemyContainerCount}`;
+      if (summary !== easterEggLastSpriteSummaryLog) {
+        easterEggLastSpriteSummaryLog = summary;
+        console.log(`[Mod Settings] Easter Egg: ${spriteCount} demon sprite(s) tagged across ${enemyContainerCount} enemy container(s)`);
+      }
+    } else if (easterEggLastSpriteSummaryLog) {
+      easterEggLastSpriteSummaryLog = '';
+      console.log('[Mod Settings] Easter Egg: no enemy containers found this pass (0 demon sprites tagged)');
+    }
+  } catch (error) {
+    console.error('[Mod Settings] Error applying Easter Egg demon sprites:', error);
+  }
+}
+
+function removeDemonEasterEggSprites() {
+  try {
+    const overlayClass = window.CustomBattles?.getCustomSpriteOverlayClass?.(EASTER_EGG_DEMON_SPRITE_KEY)
+      || `custom-battles-sprite-${EASTER_EGG_DEMON_SPRITE_KEY}`;
+    document.querySelectorAll(`.${overlayClass}`).forEach((sprite) => {
+      sprite.classList.remove(overlayClass);
+      sprite.style.removeProperty('--cb-moving-duration');
+      sprite.style.removeProperty('--cb-moving-delay');
+      delete sprite.dataset.easterEggShoutRolled;
+    });
+    document.querySelectorAll(`.${EASTER_EGG_SHOUT_CLASS}`).forEach((bubble) => bubble.remove());
+    easterEggLastSpriteSummaryLog = '';
+  } catch (error) {
+    console.error('[Mod Settings] Error removing Easter Egg demon sprites:', error);
+  }
+}
+
+// Board fires 'newGame' AND 'emitNewGame' for a battle start, but which one actually
+// reaches a listener registered by a different mod is inconsistent across trigger paths
+// (manual Start click vs autoplay vs sandbox) — Better_Analytics.js subscribes to both
+// for the same reason. Subscribe to both here too and dedupe with a time window so a
+// battle that fires both only rolls once — NOT an emitEndGame-driven per-battle flag,
+// since emitEndGame proved just as unreliable (a flag reset there could get stuck "rolled"
+// forever after the first battle and silently roll zero times for every battle after it).
+function handleEasterEggBattleStart(source, event) {
+  if (!config.enableEasterEggs || isBlockedByAnalysisMods()) return;
+  // custom-battles.js's own getActiveBattleWorld() prefers the world handed directly by
+  // the newGame/emitNewGame event over re-reading state.board's context afterwards — the
+  // rename step silently found zero live actors because ctx.world isn't reliably
+  // repopulated after the fact, only the event payload carries it.
+  if (event?.world?.grid?.actors) {
+    easterEggBattleWorld = event.world;
+  }
+  const now = Date.now();
+  if (now - easterEggLastRollAt < EASTER_EGG_ROLL_DEBOUNCE_MS) {
+    console.log(
+      `[Mod Settings] Easter Egg (${source}): debounced (${now - easterEggLastRollAt}ms since last roll, ` +
+      `need >= ${EASTER_EGG_ROLL_DEBOUNCE_MS}ms) — treating as the same battle, not rolling again`
+    );
+    return;
+  }
+  easterEggLastRollAt = now;
+
+  // Clear any demon skin left over from a previous battle in case that battle's
+  // emitEndGame never fired.
+  easterEggActiveThisBattle = false;
+  removeDemonEasterEggSprites();
+
+  if (!isAnnihilatorQuestRoomActive()) {
+    console.log(`[Mod Settings] Easter Egg (${source}): not The Annihilator Quest, skipping roll`);
+    return;
+  }
+
+  const roll = Math.random();
+  easterEggActiveThisBattle = roll < EASTER_EGG_DEMON_CHANCE;
+  console.log(
+    `[Mod Settings] Easter Egg (${source}): rolled ${roll.toFixed(4)} (need < ${EASTER_EGG_DEMON_CHANCE}) — ` +
+    `${easterEggActiveThisBattle ? 'HIT, applying demon skin' : 'no hit'}`
+  );
+  if (easterEggActiveThisBattle) {
+    scheduleTimeout(() => applyDemonEasterEggSprites(), 100);
+  }
+}
+
+function startEasterEggWatcher() {
+  if (!config.enableEasterEggs) {
+    console.log('[Mod Settings] Easter Egg: watcher not started (setting disabled)');
+    return;
+  }
+  if (easterEggNewGameUnsub || easterEggEmitNewGameUnsub || easterEggEndGameUnsub || easterEggDemonObserver) {
+    console.log('[Mod Settings] Easter Egg: watcher already running, skipping duplicate start');
+    return;
+  }
+  if (typeof globalThis.state?.board?.on !== 'function') {
+    console.warn('[Mod Settings] Easter Egg: watcher not started (state.board.on unavailable)');
+    return;
+  }
+
+  easterEggNewGameUnsub = globalThis.state.board.on('newGame', (event) => handleEasterEggBattleStart('newGame', event));
+  easterEggEmitNewGameUnsub = globalThis.state.board.on('emitNewGame', (event) => handleEasterEggBattleStart('emitNewGame', event));
+
+  easterEggEndGameUnsub = globalThis.state.board.on('emitEndGame', () => {
+    easterEggActiveThisBattle = false;
+    removeDemonEasterEggSprites();
+  });
+
+  easterEggDemonObserver = createThrottledObserver(() => {
+    applyDemonEasterEggSprites();
+  }, 150);
+  easterEggDemonObserver.observe(document.body, { childList: true, subtree: true });
+
+  console.log('[Mod Settings] Easter Egg watcher started');
+}
+
+function stopEasterEggWatcher() {
+  if (easterEggNewGameUnsub) {
+    try { easterEggNewGameUnsub(); } catch (_) { /* ignore */ }
+    easterEggNewGameUnsub = null;
+  }
+  if (easterEggEmitNewGameUnsub) {
+    try { easterEggEmitNewGameUnsub(); } catch (_) { /* ignore */ }
+    easterEggEmitNewGameUnsub = null;
+  }
+  if (easterEggEndGameUnsub) {
+    try { easterEggEndGameUnsub(); } catch (_) { /* ignore */ }
+    easterEggEndGameUnsub = null;
+  }
+  easterEggDemonObserver = disconnectObserver(easterEggDemonObserver, 'Easter Egg demon');
+  easterEggActiveThisBattle = false;
+  easterEggLastRollAt = 0;
+  easterEggBattleWorld = null;
+  removeDemonEasterEggSprites();
 }
 
 function applyShinyEnemies() {
@@ -18284,6 +18649,11 @@ function initBetterUI() {
       applyShinyEnemies();
     }
 
+    if (config.enableEasterEggs) {
+      console.log('[Mod Settings] Starting Easter Egg watcher');
+      startEasterEggWatcher();
+    }
+
     if (isCreatureHoverTooltipEnabled()) {
       console.log('[Mod Settings] Applying creature hover tooltip');
       applyAdvancedStatsOnHover();
@@ -18424,6 +18794,7 @@ function cleanupBetterUI() {
     }
     closeCustomBackgroundDeleteMenu();
     stopAutoUploadMonitor();
+    stopEasterEggWatcher();
 
     if (powerSavingRestoreDebounceTimer) {
       clearTimeout(powerSavingRestoreDebounceTimer);
