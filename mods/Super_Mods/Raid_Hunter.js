@@ -640,6 +640,7 @@ function skipInvalidRaidAndRetry(reason, allowInterrupt = false) {
 // Seasonal/event raids that are only shown in Raid map list when currently an active raid
 const HALLOWEEN_MANSION_RAID = 'Halloween Mansion';
 const JOLLY_AXEMAN_RAIDS = ['Jolly Axeman Tavern', 'Dog Raceway', "Ruprecht's Hut", 'White Wave Cellar'];
+const WORLD_CUP_RAIDS = ['Tibia Ball League', 'Three on Three'];
 
 // Live accessors — always read from maps-database (do not snapshot at load time).
 function getEventToRoomMapping() {
@@ -5817,11 +5818,13 @@ function createRaidMapSelection() {
     const activeRaidList = raidStateForFilter?.context?.list || [];
     const activeRaidNames = new Set(activeRaidList.map(r => getEventNameForRoomId(r.roomId)).filter(Boolean));
     const isJollyAxemanActive = JOLLY_AXEMAN_RAIDS.some(name => activeRaidNames.has(name));
+    const isWorldCupActive = WORLD_CUP_RAIDS.some(name => activeRaidNames.has(name));
 
     Object.keys(raidGroups).forEach(region => {
         raidGroups[region] = raidGroups[region].filter(raidName => {
             if (raidName === HALLOWEEN_MANSION_RAID && !activeRaidNames.has(HALLOWEEN_MANSION_RAID)) return false;
             if (JOLLY_AXEMAN_RAIDS.includes(raidName) && !isJollyAxemanActive) return false;
+            if (WORLD_CUP_RAIDS.includes(raidName) && !isWorldCupActive) return false;
             return true;
         });
     });

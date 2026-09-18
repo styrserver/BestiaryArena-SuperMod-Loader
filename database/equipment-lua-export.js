@@ -134,7 +134,7 @@ function buildEquipmentRoomPresence() {
 
       // Multi-floor quest rooms keep board data per-floor in floorFiles instead of a
       // top-level file.data.actors — scan each floor separately so gear worn only on a
-      // specific floor (e.g. Demon Armor on The Annihilator Quest floor 16) is still found.
+      // specific floor (e.g. Demon Armor on The Annihilator Quest floor 15) is still found.
       if (room?.type === 'multi' && Array.isArray(room.floorFiles)) {
         room.floorFiles.forEach((floorFile) => {
           const actors = floorFile?.data?.actors;

@@ -4,6 +4,36 @@
   },
   "notes": [
     {
+      "version": "5.0.8",
+      "changes": [
+        {
+          "mod": "Better Tasker",
+          "type": "fixed",
+          "text": "Multi-floor quest rooms (different creatures per floor) could be picked as a per-creature tasking map, or handed back as the quest log's suggested map, then navigated to with a floor override that didn't necessarily exist on that room — leaving the run stuck instead of starting. These rooms are now excluded from the per-creature map list, and if the suggested map is one, Better Tasker automatically falls back to another map that actually has that creature. Also added Werefox, which was missing, to the list of unobtainable-via-task creatures shown disabled in settings — it could previously be selected and hunted even though it can't actually appear as a task."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "fixed",
+          "text": "A selected map's Creature Information panel read its actor list from the wrong place for multi-floor quest rooms, showing \"No creatures found\" instead of listing each floor's creatures grouped under its difficulty percentage, with floors sharing an identical roster combined into one entry."
+        },
+        {
+          "mod": "docs/game_state_api.md",
+          "type": "added",
+          "text": "Documented that state.utils.getBoardMonstersFromRoomId(roomId) takes no floor/options argument and silently returns floor 0's board for multi-floor quest rooms regardless of the actual current floor, with the correct per-floor workaround pattern already used elsewhere in the codebase."
+        },
+        {
+          "mod": "inventory-database.js",
+          "type": "fixed",
+          "text": "The Avarice Rune's obtain info only listed one of its two source regions."
+        },
+        {
+          "mod": "Raid Hunter",
+          "type": "fixed",
+          "text": "The two World Cup PvP minigame rooms were always listed as huntable raids instead of only appearing while actually active, unlike other rotating seasonal raids."
+        }
+      ]
+    },
+    {
       "version": "5.0.7",
       "changes": [
         {

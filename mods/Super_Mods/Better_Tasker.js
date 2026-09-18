@@ -37,6 +37,7 @@ const UNSELECTABLE_CREATURES = [
     'Polar Bear',
     'Swamp Troll',
     'Tortoise',
+    'Werefox',
     'Yeti'
 ];
 
@@ -309,6 +310,36 @@ function getCreatureNameByGameId(creatureId) {
     }
 }
 
+// Multi-floor quest rooms (type: 'multi', e.g. The Annihilator Quest, The Behemoth Quest —
+// no top-level room.file at all) have a different, unrelated set of creatures per floor
+// (room.floorFiles[floorIndex].data.actors). There's no single "this room has creature X"
+// answer for them, and state.utils.getBoardMonstersFromRoomId(mapId) is floor-blind (always
+// checks floor 0), so treating them like normal rooms either wrongly excludes them (creature
+// only lives on a deeper floor) or wrongly includes them (creature matched floor 0 but the
+// task/override floor points somewhere else entirely). Better Tasker can't reliably resolve
+// "the right floor for this creature" for these rooms, so it ignores them outright — both
+// as per-creature override choices and as automatic quest-log suggestions.
+function isMultiFloorRoom(roomId) {
+    try {
+        const rooms = globalThis.state?.utils?.ROOMS;
+        const room = Array.isArray(rooms) ? rooms.find((r) => r?.id === roomId) : null;
+        return room?.type === 'multi';
+    } catch (_) {
+        return false;
+    }
+}
+
+// getAllMapOptions() already excludes multi-floor rooms and is pre-sorted in game order,
+// so its first match for a creature is a reasonable "best" (earliest/lowest-tier) pick.
+function pickAlternateMapForCreature(creatureName) {
+    try {
+        const options = getAllMapOptions(creatureName);
+        return Array.isArray(options) && options.length > 0 ? options[0] : null;
+    } catch (_) {
+        return null;
+    }
+}
+
 function getAllMapOptions(creatureName = null) {
     try {
         const roomNameMap = globalThis.state?.utils?.ROOM_NAME;
@@ -317,6 +348,7 @@ function getAllMapOptions(creatureName = null) {
 
         const isExcluded = (roomId) => {
             try {
+                if (isMultiFloorRoom(roomId)) return true;
                 if (!mapsDb) return false;
                 if (typeof mapsDb.isMapRaidComprehensive === 'function') {
                     return mapsDb.isMapRaidComprehensive(roomId);
@@ -5386,12 +5418,22 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
             // If quest log cannot be opened (e.g., during autoplay), try to use stored taskingMapId
             if (taskingMapId) {
                 console.log(`[Better Tasker] Using stored tasking map ID: ${taskingMapId}`);
-                const roomId = (creatureOverride?.mapId != null ? String(creatureOverride.mapId) : null) || taskingMapId;
+                let roomId = (creatureOverride?.mapId != null ? String(creatureOverride.mapId) : null) || taskingMapId;
                 console.log('[Better Tasker] Stored-map navigation target:', {
                     overrideMapId: creatureOverride?.mapId ?? null,
                     taskingMapId,
                     selectedRoomId: roomId
                 });
+                if (isMultiFloorRoom(roomId)) {
+                    console.log('[Better Tasker] Stored tasking map is a multi-floor quest room (different creatures per floor) - looking for an alternate map for this creature:', { roomId, activeCreatureName });
+                    const alternate = pickAlternateMapForCreature(activeCreatureName);
+                    if (!alternate) {
+                        console.log(`[Better Tasker] No alternate non-multi-floor map found for "${activeCreatureName}" - cannot proceed with this task automatically`);
+                        return false;
+                    }
+                    console.log(`[Better Tasker] Using alternate map for "${activeCreatureName}" instead of multi-floor suggestion: ${alternate.name} (${alternate.id})`);
+                    roomId = alternate.id;
+                }
                 const roomAutomation = resolveTaskerAutomationSettingsForRoom(roomId, runtimeSettings, resolvedFloor);
                 runtimeSettings = {
                     ...runtimeSettings,
@@ -5572,6 +5614,16 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
             });
             
             if (roomId) {
+                if (isMultiFloorRoom(roomId)) {
+                    console.log('[Better Tasker] Suggested map is a multi-floor quest room (different creatures per floor) - looking for an alternate map for this creature:', { roomId, mapName, activeCreatureName });
+                    const alternate = pickAlternateMapForCreature(activeCreatureName);
+                    if (!alternate) {
+                        console.log(`[Better Tasker] No alternate non-multi-floor map found for "${activeCreatureName}" - cannot proceed with this task automatically`);
+                        return false;
+                    }
+                    console.log(`[Better Tasker] Using alternate map for "${activeCreatureName}" instead of multi-floor suggestion: ${alternate.name} (${alternate.id})`);
+                    roomId = alternate.id;
+                }
                 const roomAutomation = resolveTaskerAutomationSettingsForRoom(roomId, runtimeSettings, resolvedFloor);
                 runtimeSettings = {
                     ...runtimeSettings,

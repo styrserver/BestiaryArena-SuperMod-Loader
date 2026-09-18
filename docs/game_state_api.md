@@ -442,6 +442,72 @@ const abbaneSetup = globalThis.state.utils.getBoardMonstersFromRoomId('abbane');
 ]
 ```
 
+#### `getBoardMonstersFromRoomId` takes one argument only — it is floor-blind
+
+The function's real signature is `getBoardMonstersFromRoomId(roomId)`. There is **no second
+argument** — no `floor`, no `boosted`, no options object of any kind. Passing one (e.g.
+`getBoardMonstersFromRoomId(roomId, { floor: 10, boosted: false })`) is silently ignored; the
+call still resolves the same way as `getBoardMonstersFromRoomId(roomId)` alone.
+
+For ordinary single-floor rooms this is fine — the room's `file.data.actors` is the only layout
+that exists. But for **multi-floor quest rooms** (`room.type === 'multi'`, e.g. *The Behemoth
+Quest* and *The Annihilator Quest*, id `edanni`), each floor has its own actor layout in
+`room.floorFiles[floorIndex].data.actors`, and `getBoardMonstersFromRoomId` has no way to select
+one — it silently falls back to **floor 0's** layout regardless of which floor is actually
+current. This was confirmed live against room `edanni` on floor 10: the call kept returning
+floor 0's monsters (gameId `11/11/15/5/11/11`) instead of floor 10's real ones (raw
+`floorFiles[10].data.actors` has id `40/40/41/41/40/40`).
+
+**Correct pattern for any room that might be multi-floor:**
+
+```javascript
+function getBoardMonstersForFloor(roomId, floorIndex) {
+  const room = globalThis.state.utils.ROOMS?.find(r => r?.id === roomId);
+
+  if (room?.type === 'multi') {
+    const rawActors = room.floorFiles?.[floorIndex]?.data?.actors;
+    if (!Array.isArray(rawActors)) return [];
+    return rawActors
+      .map((actor, tileIndex) => actor && ({
+        type: 'file',
+        key: `multi-floor-enemy-${tileIndex}`,
+        tileIndex,
+        villain: true,
+        gameId: actor.id,
+        direction: actor.direction,
+        level: actor.level,
+        equip: actor.equip ?? null,
+        shiny: actor.shiny ?? false,
+      }))
+      .filter(Boolean); // rawActors is dense-with-null; skip empty tiles
+  }
+
+  return globalThis.state.utils.getBoardMonstersFromRoomId(roomId) || [];
+}
+
+// Current floor comes from board context, not from any argument to the getter:
+const floorIndex = globalThis.state.board.getSnapshot()?.context?.floor ?? 0;
+getBoardMonstersForFloor('edanni', floorIndex);
+```
+
+`globalThis.state.utils.ROOMS` filtered to `r.type === 'multi'` gives every room that needs this
+treatment (also exposed as `database/maps-database.js`'s `getMultiFloorRoomIds()`, a live scan
+rather than a hardcoded list). This pattern is already implemented independently in
+`content/ba-sandbox-utils.mjs` (`$replay`'s `configureBoard`), `mods/Official_Mods/Setup_Manager.js`
+(`getEnemyTeamConfigForRoom`), and `mods/Super_Mods/Cyclopedia.js` — reuse one of those rather than
+re-deriving it.
+
+**When the floor-blindness does and doesn't matter:** it matters whenever a caller needs the
+floor's actual board — correct levels/tiers/positions to place custom pieces or replay a fight
+(the three call sites above). It does *not* matter for callers that only ask "does this map's
+roster ever include creature X" by `gameId`/name — e.g. `mods/Super_Mods/Better_Tasker.js`'s
+`getAllMapOptions()` and `mods/Super_Mods/Autoseller.js`'s `getCurrentMapPriorityNameSets()` both
+call the plain floor-0 getter against multi-floor rooms and that's fine, because The Behemoth
+Quest and The Annihilator Quest reuse the same creature roster across all their floors (just
+scaled stats/levels per floor) — floor 0's `gameId` set already equals every other floor's. Don't
+"fix" those two to use the per-floor pattern above; they're identity checks, not board-accuracy
+checks.
+
 ### Experience and Level Calculations
 
 The game provides utility functions for calculating experience points and levels:

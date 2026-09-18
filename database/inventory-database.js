@@ -239,7 +239,7 @@ const inventoryTooltips = {
     text: 'This rune can be transmuted into 2,000gp.',
     icon: '/assets/icons/rune-avarice.png',
     rarity: '2',
-    obtain: 'Rookgaard'
+    obtain: 'Rookgaard, Venore'
   },
   runeHp: {
     displayName: "Hitpoints Rune",

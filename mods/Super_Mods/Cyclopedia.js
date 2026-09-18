@@ -3174,10 +3174,12 @@ const LOCATION_UTILS = {
 };
 
 // Multi-floor rooms (type: 'multi', e.g. The Annihilator Quest, The Behemoth Quest) scale
-// monster stats +20% per floor starting at 100% on floor 1 (floor index 0) — floor 16
-// (index 15) is 100 + 15*20 = 400%. Top-level (not nested) so both the creature-location
-// scan below and the equipment-location scan further down the file can share it. Keep in
-// sync with the copy of this formula in database/equipment-lua-export.js.
+// monster stats +20% per floor starting at 100% on floor 0 — floor 15 is 100 + 15*20 =
+// 400%. The floor index IS the displayed floor number (game UI shows "Floor 0"-"Floor 15",
+// see Stamina_Optimizer.js's floor dropdown and en-US.json's "Select the difficulty floor
+// (0-15)") — no +1 offset. Top-level (not nested) so both the creature-location scan below
+// and the equipment-location scan further down the file can share it. Keep in sync with the
+// copy of this formula in database/equipment-lua-export.js.
 const FLOOR_BASE_PERCENT = 100;
 const FLOOR_STEP_PERCENT = 20;
 
@@ -3239,7 +3241,7 @@ function findMonsterLocations(monsterName) {
       try {
         // Multi-floor quest rooms keep board data per-floor in floorFiles instead of a
         // top-level file.data.actors — scan each floor separately so a creature that only
-        // appears on e.g. floor 16 is still found, and fold the floors it appears on into
+        // appears on e.g. floor 15 is still found, and fold the floors it appears on into
         // one row (floors exposed separately for the caller to render as a colored
         // "(min-max%)" badge) instead of one row per floor.
         if (room?.type === 'multi' && Array.isArray(room.floorFiles)) {
@@ -13387,39 +13389,24 @@ function createStatisticsSection(selectedMap, leaderboardData) {
 }
 
 // Optimized creature list section with memory management
-function createCreatureListSection(roomActors, selectedMap, mapsTabNav = {}) {
-  const { setActiveTab, tabPages } = mapsTabNav;
-  const creaturesContainer = document.createElement('div');
-  creaturesContainer.style.marginTop = '4px';
-  creaturesContainer.style.textAlign = 'center';
+function sortActorsForDisplay(actors) {
+  return actors.filter(actor => actor && actor.id).sort((a, b) => {
+    const levelA = a.level || 1;
+    const levelB = b.level || 1;
+    if (levelA !== levelB) return levelB - levelA;
 
-  if (roomActors && roomActors.length > 0) {
-    // Filter and sort actors efficiently
-    const validActors = roomActors.filter(actor => actor && actor.id);
-    const sortedActors = validActors.sort((a, b) => {
-      const levelA = a.level || 1;
-      const levelB = b.level || 1;
-      if (levelA !== levelB) return levelB - levelA;
-      
-      // Use cached creature data for name comparison
-      const nameA = CreatureListManager.getCachedCreatureData(a.id)?.data?.name || 'Unknown';
-      const nameB = CreatureListManager.getCachedCreatureData(b.id)?.data?.name || 'Unknown';
-      return nameA.localeCompare(nameB);
-    });
-    
-    const creaturesGrid = document.createElement('div');
-    creaturesGrid.style.cssText = `
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-      width: 100%;
-      max-width: 100%;
-    `;
-    
-    sortedActors.forEach((actor) => {
-      if (!actor || !actor.id) return;
-      
-      try {
+    // Use cached creature data for name comparison
+    const nameA = CreatureListManager.getCachedCreatureData(a.id)?.data?.name || 'Unknown';
+    const nameB = CreatureListManager.getCachedCreatureData(b.id)?.data?.name || 'Unknown';
+    return nameA.localeCompare(nameB);
+  });
+}
+
+function buildCreatureRow(actor, mapsTabNav = {}) {
+  const { setActiveTab, tabPages } = mapsTabNav;
+  if (!actor || !actor.id) return null;
+
+  try {
         // Get or create creature row from pool
         const creatureRow = CreatureListManager.getPooledElement('creatureRows', () => {
           const row = document.createElement('div');
@@ -13678,14 +13665,121 @@ function createCreatureListSection(roomActors, selectedMap, mapsTabNav = {}) {
         creatureRow.appendChild(iconContainer);
         creatureRow.appendChild(infoContainer);
         creatureRow.appendChild(equipmentContainer);
-        
-        creaturesGrid.appendChild(creatureRow);
-      } catch (error) {
-        console.error('[Cyclopedia] Error creating creature row for actor:', actor, error);
-      }
-    });
-    
-    creaturesContainer.appendChild(creaturesGrid);
+
+        return creatureRow;
+  } catch (error) {
+    console.error('[Cyclopedia] Error creating creature row for actor:', actor, error);
+    return null;
+  }
+}
+
+function createCreatureGrid(actors, mapsTabNav = {}) {
+  const creaturesGrid = document.createElement('div');
+  creaturesGrid.style.cssText = `
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    width: 100%;
+    max-width: 100%;
+  `;
+
+  sortActorsForDisplay(actors).forEach((actor) => {
+    const creatureRow = buildCreatureRow(actor, mapsTabNav);
+    if (creatureRow) creaturesGrid.appendChild(creatureRow);
+  });
+
+  return creaturesGrid;
+}
+
+/** Display-relevant identity of an actor (what a creature row actually shows), so two
+ * floors whose actors only differ in e.g. tileIndex/direction still count as "the same"
+ * for consolidation purposes. */
+function actorDisplaySignature(actor) {
+  return `${actor?.id}|${actor?.level || 1}|${actor?.equip?.gameId || ''}|${actor?.equip?.tier || ''}|${actor?.equip?.stat || ''}`;
+}
+
+/** Order-independent signature for a floor's actor roster — two floors with the same
+ * creatures listed in a different array order still consolidate into one group. */
+function floorActorsSignature(actors) {
+  return actors
+    .filter(actor => actor && actor.id)
+    .map(actorDisplaySignature)
+    .sort()
+    .join(';');
+}
+
+/**
+ * Groups floors with an identical creature roster (same creatures, levels, equipment)
+ * into one entry instead of repeating an identical list under every floor header —
+ * multi-floor quest rooms commonly reuse the same layout across a run of floors.
+ * @param {Array<{floorIndex:number, actors:Array}>} floorGroups
+ * @returns {Array<{floorIndexes:number[], actors:Array}>} sorted by first floor index
+ */
+function consolidateIdenticalFloors(floorGroups) {
+  const merged = new Map(); // signature -> { floorIndexes, actors }
+  floorGroups.forEach(({ floorIndex, actors }) => {
+    const signature = floorActorsSignature(actors);
+    if (!merged.has(signature)) {
+      merged.set(signature, { floorIndexes: [], actors });
+    }
+    merged.get(signature).floorIndexes.push(floorIndex);
+  });
+  return [...merged.values()].sort((a, b) => Math.min(...a.floorIndexes) - Math.min(...b.floorIndexes));
+}
+
+/**
+ * @param {Array|null} roomActors - Flat actor list for ordinary single-floor rooms.
+ * @param {string} selectedMap - Room id, shown in the empty-state message.
+ * @param {Object} mapsTabNav
+ * @param {Array<{floorIndex:number, actors:Array}>|null} floorGroups - For multi-floor
+ *   quest rooms: each floor's actors rendered under its own difficulty-percent header
+ *   instead of one undifferentiated list, since stats (and so which actors matter) scale
+ *   per floor. Floors with an identical roster are consolidated under one combined
+ *   min-max percent header. Takes precedence over roomActors when provided and non-empty.
+ */
+function createCreatureListSection(roomActors, selectedMap, mapsTabNav = {}, floorGroups = null) {
+  const creaturesContainer = document.createElement('div');
+  creaturesContainer.style.marginTop = '4px';
+  creaturesContainer.style.textAlign = 'center';
+
+  const nonEmptyFloorGroups = Array.isArray(floorGroups)
+    ? floorGroups.filter(group => Array.isArray(group?.actors) && group.actors.length > 0)
+    : [];
+
+  if (nonEmptyFloorGroups.length > 0) {
+    consolidateIdenticalFloors(nonEmptyFloorGroups)
+      .forEach((group) => {
+        const floorHeader = document.createElement('div');
+        floorHeader.style.cssText = `
+          font-weight: bold;
+          font-size: 12px;
+          color: ${COLOR_CONSTANTS.TEXT};
+          text-align: center;
+          margin: 8px 0 4px;
+        `;
+        const sortedFloors = [...group.floorIndexes].sort((a, b) => a - b);
+        const minPercent = floorPercent(sortedFloors[0]);
+        const maxPercent = floorPercent(sortedFloors[sortedFloors.length - 1]);
+        const addPercentPart = (text, color) => {
+          const part = document.createElement('span');
+          part.textContent = text;
+          if (color) part.style.color = color;
+          floorHeader.appendChild(part);
+        };
+        if (minPercent === maxPercent) {
+          addPercentPart(`${minPercent}%`, floorPercentColor(minPercent));
+        } else {
+          addPercentPart(`${minPercent}`, floorPercentColor(minPercent));
+          addPercentPart('-', null);
+          addPercentPart(`${maxPercent}`, floorPercentColor(maxPercent));
+          addPercentPart('%', null);
+        }
+
+        creaturesContainer.appendChild(floorHeader);
+        creaturesContainer.appendChild(createCreatureGrid(group.actors, mapsTabNav));
+      });
+  } else if (roomActors && roomActors.length > 0) {
+    creaturesContainer.appendChild(createCreatureGrid(roomActors, mapsTabNav));
   } else {
     const noCreaturesMsg = document.createElement('p');
     noCreaturesMsg.textContent = `No creatures found on this map. (Room ID: ${selectedMap})`;
@@ -13695,7 +13789,7 @@ function createCreatureListSection(roomActors, selectedMap, mapsTabNav = {}) {
     `;
     creaturesContainer.appendChild(noCreaturesMsg);
   }
-  
+
   return creaturesContainer;
 }
 
@@ -14843,8 +14937,19 @@ function createMapsTabPage(selectedCreature, selectedEquipment, selectedInventor
         contentContainer.style.width = '100%';
         contentContainer.style.boxSizing = 'border-box';
 
-        const roomActors = roomData?.file?.data?.actors ?? null;
-        const creaturesContainer = createCreatureListSection(roomActors, selectedMap, mapsTabNav);
+        // Multi-floor quest rooms (e.g. The Behemoth Quest, The Annihilator Quest) keep
+        // board data per-floor in floorFiles instead of a top-level file.data.actors, and
+        // scale monster stats per floor — so list each floor's actors under its own
+        // header instead of flattening them into one undifferentiated list.
+        const isMultiFloorRoom = roomData?.type === 'multi' && Array.isArray(roomData.floorFiles);
+        const floorGroups = isMultiFloorRoom
+          ? roomData.floorFiles.map((floorFile, floorIndex) => ({
+              floorIndex,
+              actors: Array.isArray(floorFile?.data?.actors) ? floorFile.data.actors : []
+            }))
+          : null;
+        const roomActors = isMultiFloorRoom ? null : (roomData?.file?.data?.actors ?? null);
+        const creaturesContainer = createCreatureListSection(roomActors, selectedMap, mapsTabNav, floorGroups);
         contentContainer.appendChild(creaturesContainer);
         
         // Add both divs to col2 content area (Map Information - left column, small)
