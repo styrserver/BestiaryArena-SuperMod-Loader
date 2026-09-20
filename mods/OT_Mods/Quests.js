@@ -796,6 +796,14 @@ function applyQuestDialogueFromAssets(missionsData, npcsData) {
       OLDRAK_RESPONSES = { ...(npc.keywords || {}) };
       OLDRAK_CONFUSION_RESPONSES = [...(npc.confusion || [])];
     }],
+    ['avarTar', (npc) => {
+      AVAR_TAR_RESPONSES = { ...(npc.keywords || {}) };
+      AVAR_TAR_CONFUSION_RESPONSES = [...(npc.confusion || [])];
+    }],
+    ['astronis', (npc) => {
+      ASTRONIS_RESPONSES = { ...(npc.keywords || {}) };
+      ASTRONIS_CONFUSION_RESPONSES = [...(npc.confusion || [])];
+    }],
     ['king-tibianus', (npc) => {
       KING_TIBIANUS_CONFUSION_RESPONSES = [...(npc.confusion || [])];
       KING_TIBIANUS_SWEAR_WORDS = Array.isArray(npc.swear?.words) ? [...npc.swear.words] : [];
@@ -823,6 +831,8 @@ function applyQuestDialogueFromAssets(missionsData, npcsData) {
   A_PRISONER_RESPONSES = { ...NPC_SHARED_KEYWORDS, ...A_PRISONER_RESPONSES };
   BASILISK_RESPONSES = { ...NPC_SHARED_KEYWORDS, ...BASILISK_RESPONSES };
   OLDRAK_RESPONSES = { ...NPC_SHARED_KEYWORDS, ...OLDRAK_RESPONSES };
+  AVAR_TAR_RESPONSES = { ...NPC_SHARED_KEYWORDS, ...AVAR_TAR_RESPONSES };
+  ASTRONIS_RESPONSES = { ...NPC_SHARED_KEYWORDS, ...ASTRONIS_RESPONSES };
 
   NPC_QUEST_ITEM_CHAT_RESPONSES = JSON.parse(JSON.stringify(npcsData.questItems || {}));
   Object.assign(NPC_QUEST_ITEM_UNINVOLVED_TEMPLATES, npcsData.questItemUninvolvedTemplates || {});
@@ -1017,6 +1027,54 @@ function applyQuestRoomsFromAssets(roomsData) {
   const isleOfMistsTiles = roomsData.isleOfTheMistsTiles;
   if (isleOfMistsTiles) {
     if (isleOfMistsTiles.arrowTileIndex != null) ISLE_OF_MISTS_ARROW_TILE_INDEX = isleOfMistsTiles.arrowTileIndex;
+  }
+
+  const avarTarTiles = roomsData.avarTarTiles;
+  if (avarTarTiles) {
+    if (avarTarTiles.entryRoomName) AVAR_TAR_ENTRY_ROOM_NAME = avarTarTiles.entryRoomName;
+    if (avarTarTiles.entryTileIndex != null) AVAR_TAR_ENTRY_TILE_INDEX = avarTarTiles.entryTileIndex;
+  }
+
+  const avarTarHideoutRoom = roomsData.avarTarHideout;
+  if (avarTarHideoutRoom) {
+    if (avarTarHideoutRoom.battleRoomName) AVAR_TAR_HIDEOUT_ROOM_NAME = avarTarHideoutRoom.battleRoomName;
+    if (avarTarHideoutRoom.battleRoomId) AVAR_TAR_HIDEOUT_ROOM_ID = avarTarHideoutRoom.battleRoomId;
+    if (avarTarHideoutRoom.battleDisplayName) AVAR_TAR_HIDEOUT_DISPLAY_NAME = avarTarHideoutRoom.battleDisplayName;
+    if (avarTarHideoutRoom.battleId) AVAR_TAR_HIDEOUT_BATTLE_ID = avarTarHideoutRoom.battleId;
+    if (avarTarHideoutRoom.tileMutations && typeof avarTarHideoutRoom.tileMutations === 'object') {
+      AVAR_TAR_TILE_MUTATIONS = avarTarHideoutRoom.tileMutations;
+    }
+  }
+
+  const parchmentRoom = roomsData.parchmentRoom;
+  if (parchmentRoom) {
+    if (parchmentRoom.battleRoomName) PARCHMENT_ROOM_BATTLE_ROOM_NAME = parchmentRoom.battleRoomName;
+    if (parchmentRoom.battleRoomId) PARCHMENT_ROOM_BATTLE_ROOM_ID = parchmentRoom.battleRoomId;
+    if (parchmentRoom.battleDisplayName) PARCHMENT_ROOM_BATTLE_DISPLAY_NAME = parchmentRoom.battleDisplayName;
+    if (parchmentRoom.battleId) PARCHMENT_ROOM_BATTLE_ID = parchmentRoom.battleId;
+    if (parchmentRoom.coffinTileIndex != null) PARCHMENT_ROOM_COFFIN_TILE_INDEX = parchmentRoom.coffinTileIndex;
+    if (parchmentRoom.tileMutations && typeof parchmentRoom.tileMutations === 'object') {
+      PARCHMENT_ROOM_TILE_MUTATIONS = parchmentRoom.tileMutations;
+    }
+  }
+
+  const parchmentRoomEntry = roomsData.parchmentRoomEntry;
+  if (parchmentRoomEntry) {
+    if (parchmentRoomEntry.roomName) PARCHMENT_ROOM_ENTRY_ROOM_NAME = parchmentRoomEntry.roomName;
+    if (parchmentRoomEntry.tileIndex != null) PARCHMENT_ROOM_ENTRY_TILE_INDEX = parchmentRoomEntry.tileIndex;
+  }
+
+  const parchmentAntechamber = roomsData.parchmentAntechamber;
+  if (parchmentAntechamber) {
+    if (parchmentAntechamber.battleRoomName) PARCHMENT_ANTECHAMBER_ROOM_NAME = parchmentAntechamber.battleRoomName;
+    if (parchmentAntechamber.battleRoomId) PARCHMENT_ANTECHAMBER_ROOM_ID = parchmentAntechamber.battleRoomId;
+    if (parchmentAntechamber.battleDisplayName) PARCHMENT_ANTECHAMBER_DISPLAY_NAME = parchmentAntechamber.battleDisplayName;
+    if (parchmentAntechamber.battleId) PARCHMENT_ANTECHAMBER_BATTLE_ID = parchmentAntechamber.battleId;
+    if (parchmentAntechamber.continueTileIndex != null) PARCHMENT_ANTECHAMBER_CONTINUE_TILE_INDEX = parchmentAntechamber.continueTileIndex;
+    if (parchmentAntechamber.inscriptionTileIndex != null) PARCHMENT_ANTECHAMBER_INSCRIPTION_TILE_INDEX = parchmentAntechamber.inscriptionTileIndex;
+    if (parchmentAntechamber.tileMutations && typeof parchmentAntechamber.tileMutations === 'object') {
+      PARCHMENT_ANTECHAMBER_TILE_MUTATIONS = parchmentAntechamber.tileMutations;
+    }
   }
 
   const isleOfMistsRoom = roomsData.isleOfTheMists;
@@ -1250,6 +1308,17 @@ function applyQuestRoomsFromAssets(roomsData) {
     }
   }
 
+  const annihilatorOrshabaalRoom = roomsData.annihilator_orshabaal;
+  if (annihilatorOrshabaalRoom) {
+    if (annihilatorOrshabaalRoom.battleRoomName) ANNIHILATOR_ORSHABAAL_BATTLE_ROOM_NAME = annihilatorOrshabaalRoom.battleRoomName;
+    if (annihilatorOrshabaalRoom.battleRoomId) ANNIHILATOR_ORSHABAAL_BATTLE_ROOM_ID = annihilatorOrshabaalRoom.battleRoomId;
+    if (annihilatorOrshabaalRoom.battleDisplayName) ANNIHILATOR_ORSHABAAL_BATTLE_DISPLAY_NAME = annihilatorOrshabaalRoom.battleDisplayName;
+    if (annihilatorOrshabaalRoom.battleId) ANNIHILATOR_ORSHABAAL_BATTLE_ID = annihilatorOrshabaalRoom.battleId;
+    if (annihilatorOrshabaalRoom.tileMutations && typeof annihilatorOrshabaalRoom.tileMutations === 'object') {
+      ANNIHILATOR_ORSHABAAL_TILE_MUTATIONS = annihilatorOrshabaalRoom.tileMutations;
+    }
+  }
+
   const isleOfSolitudeRoom = roomsData.isleOfSolitude;
   if (isleOfSolitudeRoom) {
     if (isleOfSolitudeRoom.battleRoomName) ISLE_BATTLE_ROOM_NAME = isleOfSolitudeRoom.battleRoomName;
@@ -1445,6 +1514,15 @@ function applyQuestRoomsFromAssets(roomsData) {
       if (board.oldrak.tileIndex != null) OLDRAK_TILE_INDEX = board.oldrak.tileIndex;
       if (board.oldrak.outfitSpriteId != null) OLDRAK_OUTFIT_SPRITE_ID = board.oldrak.outfitSpriteId;
       if (board.oldrak.dialogueIconUrl) OLDRAK_DIALOGUE_ICON_URL = board.oldrak.dialogueIconUrl;
+    }
+    if (board.avarTar) {
+      if (board.avarTar.id) BOARD_NPC_AVAR_TAR_ID = board.avarTar.id;
+      if (board.avarTar.name) AVAR_TAR_NPC_NAME = board.avarTar.name;
+      if (board.avarTar.roomName) AVAR_TAR_HIDEOUT_ROOM_NAME = board.avarTar.roomName;
+      if (board.avarTar.roomId) AVAR_TAR_HIDEOUT_ROOM_ID = board.avarTar.roomId;
+      if (board.avarTar.tileIndex != null) AVAR_TAR_TILE_INDEX = board.avarTar.tileIndex;
+      if (board.avarTar.outfitSpriteId != null) AVAR_TAR_OUTFIT_SPRITE_ID = board.avarTar.outfitSpriteId;
+      if (board.avarTar.dialogueIconUrl) AVAR_TAR_DIALOGUE_ICON_URL = board.avarTar.dialogueIconUrl;
     }
     if (board.oracle) {
       if (board.oracle.id) BOARD_NPC_ORACLE_ID = board.oracle.id;
@@ -1679,7 +1757,13 @@ const DEFAULT_TOAST_MESSAGE_BUILDERS = {
   ironOreRewardReady: [],
   roomNotFound: ['place'],
   battleStartFailed: [],
-  enteringWithElathriel: ['place']
+  enteringWithElathriel: ['place'],
+  avarTarHideoutEntered: [],
+  parchmentRoomEntered: [],
+  parchmentAntechamberEntered: [],
+  parchmentAntechamberInscription: [],
+  battlingStatus: ['name', 'placed', 'allyLimit'],
+  battlingStatusUnknownLimit: ['name']
 };
 
 function rebuildToastMessagesFromTemplates(builderSpec = DEFAULT_TOAST_MESSAGE_BUILDERS) {
@@ -1790,6 +1874,8 @@ let APPRENTICE_SHENG_FIGHT_ICON_URL = '';
 let ROOKSTAYER_OUTFIT_SPRITE_ID = '';
 const BOARD_NPC_ROOKSTAYER_ID = 'rookstayer';
 const BOARD_NPC_A_PRISONER_ID = 'a-prisoner';
+const BOARD_NPC_ASTRONIS_ID = 'astronis';
+const ASTRONIS_OVERLAY_CLASS = 'quests-astronis-overlay';
 const BOARD_NPC_NAME_TAG_DATA_ATTR = 'data-quests-board-npc-id';
 const HONEYFLOWER_CONFIG = {};
 
@@ -1803,6 +1889,7 @@ const QUEST_MISSION_IDS = [
   'visiting_the_cleric',
   'isle_of_the_mists',
   'the_necromant_house',
+  'parchment_room',
   'king_copper_key',
   'king_red_dragon',
   'dragonmother',
@@ -1829,7 +1916,8 @@ const QUEST_MISSION_IDS = [
   'draconia_quest',
   'realm_of_dreams',
   'visiting_mintwallin',
-  'the_basilisk_challenges'
+  'the_basilisk_challenges',
+  'annihilator_orshabaal'
 ];
 
 for (const missionId of QUEST_MISSION_IDS) {
@@ -1842,6 +1930,7 @@ const KING_CROSSING_THE_LINE_MISSION = MISSION_BY_ID.king_crossing_the_line;
 const VISITING_THE_CLERIC_MISSION = MISSION_BY_ID.visiting_the_cleric;
 const ISLE_OF_THE_MISTS_MISSION = MISSION_BY_ID.isle_of_the_mists;
 const THE_NECROMANT_HOUSE_MISSION = MISSION_BY_ID.the_necromant_house;
+const PARCHMENT_ROOM_MISSION = MISSION_BY_ID.parchment_room;
 const KING_COPPER_KEY_MISSION = MISSION_BY_ID.king_copper_key;
 const KING_RED_DRAGON_MISSION = MISSION_BY_ID.king_red_dragon;
 const KING_LETTER_MISSION = MISSION_BY_ID.king_letter_al_dee;
@@ -1868,6 +1957,7 @@ const DRACONIA_QUEST_MISSION = MISSION_BY_ID.draconia_quest;
 const REALM_OF_DREAMS_MISSION = MISSION_BY_ID.realm_of_dreams;
 const VISITING_MINTWALLIN_MISSION = MISSION_BY_ID.visiting_mintwallin;
 const THE_BASILISK_CHALLENGES_MISSION = MISSION_BY_ID.the_basilisk_challenges;
+const ANNIHILATOR_ORSHABAAL_MISSION = MISSION_BY_ID.annihilator_orshabaal;
 
 const MINOTAUR_TROPHY_CONFIG = {};
 const ORB_CONFIG = {};
@@ -1953,6 +2043,7 @@ const MISSION_NPC_LABELS = {
   king_crossing_the_line: 'Tutorial',
   isle_of_the_mists: 'Oldrak',
   the_necromant_house: 'Oldrak',
+  parchment_room: 'Avar Tar',
   al_dee_fishing_gold: 'Al Dee',
   al_dee_golden_rope: 'Al Dee',
   al_dee_rookie_guard: 'Al Dee',
@@ -1972,7 +2063,8 @@ const MISSION_NPC_LABELS = {
   hellgate_library: 'Elathriel',
   draconia_tower: 'Elathriel',
   draconia_quest: 'Elathriel',
-  the_basilisk_challenges: 'Basilisk'
+  the_basilisk_challenges: 'Basilisk',
+  annihilator_orshabaal: 'Bubble'
 };
 
 // One accent colour per quest-giver (and the "Tutorial" prefix) for the
@@ -1991,7 +2083,9 @@ const MISSION_NPC_COLORS = {
   'Dane': '#d98cae',
   'The Oracle': '#a0a0c8',
   'Elathriel': '#b5d94f',
-  'Basilisk': '#7cb03c'
+  'Basilisk': '#7cb03c',
+  'Avar Tar': '#e0a030',
+  'Bubble': '#60c060'
 };
 
 function getMissionNpcLabel(mission) {
@@ -2168,6 +2262,17 @@ let REALM_OF_DREAMS_BATTLE_ID = 'realm_of_dreams';
 let REALM_OF_DREAMS_TILE_MUTATIONS = null;
 let REALM_OF_DREAMS_RETURN_ROOM_NAME = 'Darama Oasis';
 
+// Astronis' Call (Astronis — a guild leader who recruits the player after floor 15 of
+// The Annihilator Quest to help him bring down Orshabaal. Chat-triggered teleport into
+// the Sewers, re-skinned as Orshabaal's lair. Victory grants an Orshabaal Soul Core on
+// report-back to Astronis, back in The Annihilator Quest room (edanni).)
+let ANNIHILATOR_ORSHABAAL_BATTLE_ROOM_NAME = 'Sewers';
+let ANNIHILATOR_ORSHABAAL_BATTLE_ROOM_ID = 'rkswrs';
+let ANNIHILATOR_ORSHABAAL_BATTLE_DISPLAY_NAME = "Orshabaal's Lair";
+let ANNIHILATOR_ORSHABAAL_BATTLE_ID = 'annihilator_orshabaal';
+let ANNIHILATOR_ORSHABAAL_TILE_MUTATIONS = null;
+let ANNIHILATOR_ORSHABAAL_RETURN_ROOM_NAME = 'The Annihilator Quest';
+
 // Isle of Solitude / GM Island (King Tibianus easter egg — chat-triggered teleport into
 // the Sewers re-skinned as the isle. No mission, no battle: a walk-around scene. An empty
 // CustomBattle keeps the board clear; right-click tile 37 returns to the prior room).
@@ -2196,6 +2301,77 @@ let ISLE_OF_MISTS_BATTLE_ID = 'isle_of_the_mists';
 let ISLE_OF_MISTS_BATTLE_DISPLAY_NAME = 'Isle of the Mists';
 let ISLE_OF_MISTS_TILE_MUTATIONS = null;
 let ISLE_OF_MISTS_ARROW_TILE_INDEX = 127;
+
+// Avar Tar — first post-tutorial NPC, available once hasFinishedTutorialQuests() is true.
+// Arrow tile 154 in Edron Wilderness ("Go back to Edron") leads into his camp, a Sewers
+// reskin (pure walk-around, no battle). General transcripts only for now — no mission
+// logic yet; he'll offer the first real quest here later. See enterAvarTarHideout().
+let AVAR_TAR_ENTRY_ROOM_NAME = 'Edron Wilderness';
+let AVAR_TAR_ENTRY_TILE_INDEX = 154;
+const AVAR_TAR_ARROW_CLASS = 'quests-avar-tar-arrow';
+let AVAR_TAR_HIDEOUT_ROOM_NAME = 'Sewers';
+let AVAR_TAR_HIDEOUT_ROOM_ID = 'rkswrs';
+let AVAR_TAR_HIDEOUT_DISPLAY_NAME = "Avar Tar's Camp";
+let AVAR_TAR_HIDEOUT_BATTLE_ID = 'avar_tar_hideout';
+let AVAR_TAR_TILE_MUTATIONS = null;
+let BOARD_NPC_AVAR_TAR_ID = 'avar-tar';
+let AVAR_TAR_NPC_NAME = 'Avar Tar';
+let AVAR_TAR_OUTFIT_SPRITE_ID = 73;
+let AVAR_TAR_TILE_INDEX = 85;
+const AVAR_TAR_OVERLAY_CLASS = 'quests-avar-tar-overlay';
+// Standard fight.png badge, same as every other Board NPC — Avar_Tar.gif squished to 16px
+// didn't read as a quest-available indicator. His own gif stays the board sprite/chat
+// portrait (imageUrl on the BOARD_NPC_CONFIGS entry) — this is only the tiny name-tag badge.
+let AVAR_TAR_DIALOGUE_ICON_URL = 'https://bestiaryarena.com/assets/icons/fight.png';
+let AVAR_TAR_RESPONSES = {};
+let AVAR_TAR_CONFUSION_RESPONSES = [];
+let ASTRONIS_RESPONSES = {};
+let ASTRONIS_CONFUSION_RESPONSES = [];
+let playerEnteredAvarTarHideout = false;
+let avarTarHideoutBattle = null;
+let avarTarHideoutSceneSub = null;
+
+// Parchment Room Quest — Avar Tar's first real quest. Accepting via chat teleports the
+// player directly into a Sewers reskin (a demon guards a coffin; disturbing it spawns
+// three more). Gated behind the "Cake Drake Party" room (registry.missions.parchment_room
+// -> gateRooms) — accepting via chat does NOT teleport the player in; it arms a hole on
+// tile 70 of that SAME "Cake Drake Party" room (a real, already-existing map, not a
+// Sewers reskin — a Tile_Highlight_Effect.gif overlay, right-click -> "Go down the hole")
+// that the player steps through themselves once they're actually standing there, not
+// while merely visiting Avar Tar. Victory does NOT tear the battle down or navigate away
+// either — the room stays reskinned with the battlefield cleared so the player can
+// right-click the coffin (tile 67) for the Golden Key before leaving on their own.
+// Reference: tibia.fandom.com/wiki/Parchment_Room_Quest.
+let PARCHMENT_ROOM_BATTLE_ROOM_NAME = 'Sewers';
+let PARCHMENT_ROOM_BATTLE_ROOM_ID = 'rkswrs';
+let PARCHMENT_ROOM_BATTLE_ID = 'parchment_room';
+let PARCHMENT_ROOM_BATTLE_DISPLAY_NAME = 'The Parchment Room';
+let PARCHMENT_ROOM_TILE_MUTATIONS = null;
+let PARCHMENT_ROOM_COFFIN_TILE_INDEX = 67;
+let PARCHMENT_ROOM_ENTRY_ROOM_NAME = 'Cake Drake Party';
+let PARCHMENT_ROOM_ENTRY_TILE_INDEX = 70;
+const PARCHMENT_ROOM_HOLE_ARROW_CLASS = 'quests-parchment-room-hole';
+const PARCHMENT_ROOM_COFFIN_ARROW_CLASS = 'quests-parchment-room-coffin';
+let playerEnteredParchmentRoom = false;
+let parchmentRoomBattle = null;
+let parchmentRoomSceneSub = null;
+
+// Approach corridor between the Cake Drake Party hole and the actual Parchment Room
+// fight — a plain walk-around Sewers reskin (no battle, mirrors Avar Tar's camp) with a
+// highlight tile (79) that teleports into the real battle room, and a flavor-only
+// examine tile (65) with a cryptic green inscription. Also reuses room id rkswrs, so it
+// needs the same mutual-teardown care as Avar Tar's camp / the Parchment Room battle.
+let PARCHMENT_ANTECHAMBER_ROOM_NAME = 'Sewers';
+let PARCHMENT_ANTECHAMBER_ROOM_ID = 'rkswrs';
+let PARCHMENT_ANTECHAMBER_BATTLE_ID = 'parchment_antechamber';
+let PARCHMENT_ANTECHAMBER_DISPLAY_NAME = 'The Parchment Room Approach';
+let PARCHMENT_ANTECHAMBER_TILE_MUTATIONS = null;
+let PARCHMENT_ANTECHAMBER_CONTINUE_TILE_INDEX = 79;
+let PARCHMENT_ANTECHAMBER_INSCRIPTION_TILE_INDEX = 65;
+const PARCHMENT_ANTECHAMBER_CONTINUE_ARROW_CLASS = 'quests-parchment-antechamber-continue';
+let playerEnteredParchmentAntechamber = false;
+let parchmentAntechamberBattle = null;
+let parchmentAntechamberSceneSub = null;
 
 // The Necromant House — Oldrak's follow-up quest after Isle of the Mists. Chat-triggered
 // teleport into the Sewers for a single battle against the "Lost Scout" villains (those
@@ -2413,6 +2589,21 @@ async function matchKeywordResponses(map, message, playerName = 'Player', option
   return defaultResponse;
 }
 
+// Real local clock time, formatted "9:45 am" — shared by every NPC that answers the "time"
+// keyword with the player's actual current time (Oldrak, Avar Tar, Al Dee, ...) instead of a
+// static/flavor line. Declared here (outside the mod's main IIFE) so both the older King-chat
+// style NPCs (Al Dee, below) and the newer Board NPCs (Oldrak, Avar Tar, inside the IIFE) can
+// call it — the IIFE can see this outer scope, not the other way around.
+function getCurrentClockTimeString() {
+  const now = new Date();
+  let hours = now.getHours();
+  const minutes = String(now.getMinutes()).padStart(2, '0');
+  const suffix = hours >= 12 ? 'pm' : 'am';
+  hours = hours % 12;
+  if (hours === 0) hours = 12;
+  return `${hours}:${minutes} ${suffix}`;
+}
+
 function getNpcKeywordResponse(responses, message, playerName = 'Player', options = {}) {
   return matchKeywordResponsesSync(responses, message, playerName, {
     defaultResponse: null,
@@ -2457,6 +2648,9 @@ function getCostelloResponse(message, playerName = 'Player') {
 }
 
 function getAlDeeResponse(message, playerName = 'Player') {
+  if (String(message || '').toLowerCase().includes('time')) {
+    return `It's about ${getCurrentClockTimeString()}. I'm so sorry, I have no watches to sell. Do you want to buy something else?`;
+  }
   return getNpcKeywordResponse(AL_DEE_RESPONSES, message, playerName);
 }
 
@@ -2878,6 +3072,7 @@ function createNPCCooldownManager() {
     progressVisitingTheCleric: { accepted: false, completed: false, directionsGiven: false },
     progressIsleOfTheMists: { accepted: false, completed: false, battleCompleted: false },
     progressTheNecromantHouse: { accepted: false, completed: false, battleCompleted: false },
+    progressParchmentRoom: { accepted: false, completed: false, battleCompleted: false, keyReceived: false },
     progressCopper: { accepted: false, completed: false },
     progressHoneyflower: { accepted: false, completed: false, honeyflowerPicked: false },
     progressCrossingTheLine: { accepted: false, completed: false, crossingObjectiveComplete: false },
@@ -2904,12 +3099,27 @@ function createNPCCooldownManager() {
     progressRealmOfDreams: { accepted: false, completed: false, battleCompleted: false },
     progressVisitingMintwallin: { accepted: false, completed: false, riddleSolved: false, battleCompleted: false },
     progressBasiliskChallenges: { accepted: false, completed: false, battleCompleted: false },
+    // `completed` here is a PERMANENT ever-completed-once flag and never resets (drives the
+    // one-time reward + the quest log's completed state) — accepted/battleCompleted DO reset
+    // per raid instance, tracked separately below (annihilatorOrshabaalRaidStartedAt /
+    // annihilatorOrshabaalLastReportedRaidStartedAt are real numbers/timestamps, which is why
+    // they live outside this object instead of as mission extraFields — extraFields go through
+    // getExtraMissionProgressFields(), which hardcodes every extra field to a boolean via
+    // `!!source?.[field]` and would silently corrupt a timestamp to true/false).
+    progressAnnihilatorOrshabaal: { accepted: false, completed: false, battleCompleted: false },
     progressChristmasMiracle: { accepted: false, completed: false },
     progressSvensonLoveStory: { accepted: false, completed: false, plankDelivered: false, strandedAtAwash: false, awashYarnDelivered: false, awashYarnRequested: false, strandedAtUnderground: false, undergroundCompassDelivered: false, undergroundCompassRequested: false, strandedAtWhiteWave: false, whiteWaveSlippersDelivered: false },
     progressWeakenedArchdemon: { accepted: false, completed: false, battleCompleted: false },
     progressLostOracle: { accepted: false, completed: false, askedNpcs: false, kingInformed: false, orbExchanged: false, spectralStoneReceived: false, oracleEnraged: false, battleCompleted: false, oracleDismissed: false },
     costelloVisited: false,
     metTesha: false, // Set true the first time the player opens Tesha's chat (or backfilled from any Tesha-chain progress on load). Persisted so Tesha stays reachable on the board forever after — her arrow / fight icon must not depend on holding a Scarab Coin or on a pending quest step.
+    metAvarTar: false, // Set true the first time the player opens Avar Tar's board chat. Persisted so his wilderness arrow tile stays reachable forever after — reachability must not depend on re-querying live tutorial-completion state, which may not be hydrated yet on first render.
+    // Which World Raid instance (Firebase server timestamp, a real number) Bubble's
+    // accepted/battleCompleted currently belong to, and which instance was last turned in —
+    // real numbers, not booleans, so they live here rather than as mission extraFields (see
+    // progressAnnihilatorOrshabaal's comment). null = no raid tracked / never reported.
+    annihilatorOrshabaalRaidStartedAt: null,
+    annihilatorOrshabaalLastReportedRaidStartedAt: null,
     mornenionDefeated: false, // Mornenion defeat flag (also stored in Firebase as progress.mornenion.defeated); keep in sync so getAllMissionProgress() includes it when saving
     sevenSealsCompleted: getDefaultSevenSealsCompleted(), // one boolean per seal (index 0 = First Seal … 6 = Seventh Seal); complete each seal separately via setSealCompleted(sealIndex, true)
     basiliskChallengesCompleted: getDefaultBasiliskChallengesCompleted(), // one boolean per Basilisk challenge (index 0 = Challenge 1 … 5 = Challenge 6); complete each separately via setBasiliskChallengeCompleted(index, true)
@@ -3191,6 +3401,12 @@ function createNPCCooldownManager() {
   let realmOfDreamsBattle = null;
   let realmOfDreamsHitboxesApplied = false;
   let realmOfDreamsSceneSub = null;
+  let playerEnteredAnnihilatorOrshabaal = false;
+  let annihilatorOrshabaalBattle = null;
+  let annihilatorOrshabaalHitboxesApplied = false;
+  let annihilatorOrshabaalSceneSub = null;
+  let annihilatorOrshabaalBattleWorld = null;
+  let annihilatorOrshabaalKillCredited = false; // guards against double-crediting (HP-death hook + native onVictory can both fire)
 
   // Putrid Chamber (Serpentine Tower Quest: basement lever → custom battle)
   let playerUsedSerpentineLeverToPutridChamber = false;
@@ -3476,7 +3692,16 @@ function createNPCCooldownManager() {
    * @param {(world: any) => any} findActor - resolve this boss's live battle actor from a
    *   battle-world object (the `event.world` payload from board.on('newGame'/'emitNewGame'))
    */
-  function createBossHpBar({ id, getName, getIconUrl, isActive, findActor, debug = false }) {
+  // `onDeath` fires once, edge-triggered, the first poll tick after the tracked actor goes
+  // from alive to dead (readHpValues().alive flips true → false) — independent of whatever
+  // the sandbox's own gameTimer eventually grades the fight as. See the Orshabaal instance
+  // below for why this matters: custom-battles.js battles are purely local sandbox
+  // simulations with a fixed native tick ceiling for scoring/grading, and a slow-but-lethal
+  // ally squad can still be mid-fight (boss already dead, cleanup animations playing) when
+  // that ceiling hits and the timer resolves the whole match as a "defeat". Reward logic that
+  // only trusts gameTimer's state would then never fire even though the boss is provably
+  // dead — reading his HP directly sidesteps that entirely.
+  function createBossHpBar({ id, getName, getIconUrl, isActive, findActor, debug = false, onDeath }) {
     const barId = `quests-boss-hp-bar-${id}`;
     const styleId = `${barId}-styles`;
     let barEl = null;
@@ -3486,6 +3711,7 @@ function createNPCCooldownManager() {
     let lastKey = null;
     let battleWorld = null;
     let worldUnsubs = [];
+    let wasAlive = null; // null = not yet observed this attempt; reset on remove() for the next one
 
     function getMountRoot() {
       return document.querySelector('.relative.z-0.select-none')
@@ -3634,6 +3860,7 @@ function createNPCCooldownManager() {
       fillEl = null;
       valueEl = null;
       lastKey = null;
+      wasAlive = null;
       document.getElementById(barId)?.remove();
     }
 
@@ -3666,6 +3893,15 @@ function createNPCCooldownManager() {
         if (valueEl) valueEl.textContent = '— / —';
         return;
       }
+
+      if (wasAlive === true && alive === false && typeof onDeath === 'function') {
+        try {
+          onDeath();
+        } catch (error) {
+          console.error(`[Quests Mod][BossHpBar][${id}] Error in onDeath callback:`, error);
+        }
+      }
+      wasAlive = alive;
 
       const pct = Math.max(0, Math.min(1, ratio));
       const key = `${current}/${max}:${alive ? 1 : 0}`;
@@ -4873,6 +5109,7 @@ function createNPCCooldownManager() {
     if (unitDef.abilityCooldownTicks != null) unit.abilityCooldownTicks = unitDef.abilityCooldownTicks;
     if (unitDef.attackCooldownTicks != null) unit.attackCooldownTicks = unitDef.attackCooldownTicks;
     if (unitDef.moveCooldownTicks != null) unit.moveCooldownTicks = unitDef.moveCooldownTicks;
+    if (unitDef.range != null) unit.range = unitDef.range;
     if (equip) unit.equip = equip;
     return unit;
   }
@@ -6042,6 +6279,8 @@ function createNPCCooldownManager() {
   const QUEST_BOARD_HIDDEN_TAG_DRACONIA_QUEST = 'draconia-quest';
   const QUEST_BOARD_ADDED_ATTR_REALM_OF_DREAMS = 'data-quests-realm-of-dreams-added';
   const QUEST_BOARD_HIDDEN_TAG_REALM_OF_DREAMS = 'realm-of-dreams';
+  const QUEST_BOARD_ADDED_ATTR_ANNIHILATOR_ORSHABAAL = 'data-quests-annihilator-orshabaal-added';
+  const QUEST_BOARD_HIDDEN_TAG_ANNIHILATOR_ORSHABAAL = 'annihilator-orshabaal-hidden';
   const QUEST_BOARD_ADDED_ATTR_SPIDER_LAIR = 'data-quests-spider-lair-added';
 
   function hideQuestBoardElement(element, options = {}) {
@@ -7367,7 +7606,7 @@ function createNPCCooldownManager() {
   // if not, what room does the player still need?" — every mission's lock behaviour
   // (King's mission-list greying, and each NPC's own accept/offer flow) should read
   // this instead of hand-rolling its own isRoomUnlockedByName() call. See
-  // docs/quests_data.md -> "Locking a mission behind an unlocked room" for the
+  // assets/quests/README.md -> "Locking a mission behind an unlocked room" for the
   // authoring convention new quests should follow.
 
   // Full ordered list of gate rooms for a mission (its whole chain, if it has one).
@@ -7594,6 +7833,19 @@ function createNPCCooldownManager() {
       return regionId === 'rook'; // 'rook' = Rookgaard region
     } catch (error) {
       console.error('[Quests Mod] Error checking Rookgaard region:', error);
+      return false;
+    }
+  }
+
+  // Check if current battle is in the Edron region — gates the World Raid (Orshabaal) trigger
+  // roll (see setupQuestItemsDropSystem's victory hook), same pattern as isInRookgaard().
+  function isInEdron() {
+    try {
+      const boardContext = globalThis.state?.board?.getSnapshot?.()?.context;
+      const regionId = boardContext?.selectedMap?.selectedRegion?.id;
+      return regionId === 'edron';
+    } catch (error) {
+      console.error('[Quests Mod] Error checking Edron region:', error);
       return false;
     }
   }
@@ -8348,6 +8600,16 @@ function createNPCCooldownManager() {
     }
     result.costelloVisited = !!kingChatState.costelloVisited;
     result.metTesha = !!kingChatState.metTesha;
+    result.metAvarTar = !!kingChatState.metAvarTar;
+    // Real numbers, not booleans — see progressAnnihilatorOrshabaal's comment for why these
+    // aren't mission extraFields. Firebase RTDB drops a `null` value (delete, not store), which
+    // is fine — hydration below already treats "absent" the same as "null".
+    if (Number.isFinite(kingChatState.annihilatorOrshabaalRaidStartedAt)) {
+      result.annihilatorOrshabaalRaidStartedAt = kingChatState.annihilatorOrshabaalRaidStartedAt;
+    }
+    if (Number.isFinite(kingChatState.annihilatorOrshabaalLastReportedRaidStartedAt)) {
+      result.annihilatorOrshabaalLastReportedRaidStartedAt = kingChatState.annihilatorOrshabaalLastReportedRaidStartedAt;
+    }
     result.mornenion = { defeated: !!kingChatState.mornenionDefeated };
     result.sevenSealsCompleted = normalizeSevenSealsCompleted(kingChatState.sevenSealsCompleted);
     result.basiliskChallengesCompleted = normalizeBasiliskChallengesCompleted(kingChatState.basiliskChallengesCompleted);
@@ -8618,6 +8880,14 @@ function createNPCCooldownManager() {
       
       result.costelloVisited = !!data.costelloVisited;
       result.metTesha = !!data.metTesha;
+      result.metAvarTar = !!data.metAvarTar;
+      // Real numbers — do NOT boolean-coerce (see progressAnnihilatorOrshabaal's comment).
+      {
+        const raidStartedAt = Number(data.annihilatorOrshabaalRaidStartedAt);
+        result.annihilatorOrshabaalRaidStartedAt = Number.isFinite(raidStartedAt) ? raidStartedAt : null;
+        const lastReported = Number(data.annihilatorOrshabaalLastReportedRaidStartedAt);
+        result.annihilatorOrshabaalLastReportedRaidStartedAt = Number.isFinite(lastReported) ? lastReported : null;
+      }
       result.starterCoinThanked = !!data.starterCoinThanked;
       if (Array.isArray(data.sevenSealsCompleted) && data.sevenSealsCompleted.length === SEVEN_SEALS_COUNT) {
         result.sevenSealsCompleted = data.sevenSealsCompleted.slice(0, SEVEN_SEALS_COUNT).map(Boolean);
@@ -8710,9 +8980,21 @@ function createNPCCooldownManager() {
           
           result.costelloVisited = !!merged.costelloVisited;
           result.metTesha = !!merged.metTesha;
+          result.metAvarTar = !!merged.metAvarTar;
           result.starterCoinThanked = !!merged.starterCoinThanked;
           result.sevenSealsCompleted = normalizeSevenSealsCompleted(merged.sevenSealsCompleted);
           result.basiliskChallengesCompleted = normalizeBasiliskChallengesCompleted(merged.basiliskChallengesCompleted);
+          // Real numbers — do NOT boolean-coerce (see progressAnnihilatorOrshabaal's comment).
+          // This whitelist rebuild previously dropped both fields silently: they'd update fine
+          // in memory and every save would log success, but the actual Firebase write never
+          // included them — so a refresh right after turning in a raid kill lost the "already
+          // reported" marker and Bubble would offer the same still-live raid again.
+          if (Number.isFinite(merged.annihilatorOrshabaalRaidStartedAt)) {
+            result.annihilatorOrshabaalRaidStartedAt = merged.annihilatorOrshabaalRaidStartedAt;
+          }
+          if (Number.isFinite(merged.annihilatorOrshabaalLastReportedRaidStartedAt)) {
+            result.annihilatorOrshabaalLastReportedRaidStartedAt = merged.annihilatorOrshabaalLastReportedRaidStartedAt;
+          }
           return result;
         })()
       : {
@@ -10124,7 +10406,14 @@ function createNPCCooldownManager() {
         }
         
         lastProcessedQuestItemsSeed = seed;
-        
+
+        // World Raid (Orshabaal) trigger roll — any battle victory in the Edron region, tiny
+        // chance, independent of creature/gameId. Fire-and-forget; see the World Raid module
+        // doc comment near tryTriggerWorldRaid() for the trust-model caveats.
+        if (isInEdron() && typeof tryTriggerWorldRaid === 'function') {
+          tryTriggerWorldRaid().catch((err) => console.error('[Quests Mod][World Raid] Trigger roll error:', err));
+        }
+
         // Get creature gameId from serverResults (from monsterDrop)
         const creatureGameId = getCreatureGameId(serverResults);
         
@@ -10606,6 +10895,12 @@ function createNPCCooldownManager() {
     toast.className = 'non-dismissable-dialogs shadow-lg animate-in fade-in zoom-in-95 slide-in-from-top lg:slide-in-from-bottom';
     if (!dismissable) {
       toast.setAttribute('role', 'presentation');
+    } else {
+      // The toast container is `pointer-events: none` (so the stack doesn't block clicks on
+      // the game underneath) — without this, a dismissable toast's own click-to-dismiss
+      // listener never actually receives the click, no matter how long its duration is.
+      toast.style.pointerEvents = 'auto';
+      toast.style.cursor = 'pointer';
     }
 
     const widgetTop = document.createElement('div');
@@ -10818,9 +11113,9 @@ function createNPCCooldownManager() {
   function buildCustomBattleStatusToastText({ battleName, allyLimit, battle }) {
     if (typeof allyLimit === 'number') {
       const placed = countPlayerPlacedAlliesForStatusToast(battle);
-      return `Battling ${battleName}\nCreatures allowed: ${placed}/${allyLimit}`;
+      return TOAST_MESSAGES.battlingStatus(battleName, placed, allyLimit);
     }
-    return `Battling ${battleName}\nCreatures allowed: N/A`;
+    return TOAST_MESSAGES.battlingStatusUnknownLimit(battleName);
   }
 
   function stopCustomBattleStatusToastBoardWatch() {
@@ -13247,12 +13542,6 @@ function createNPCCooldownManager() {
           line1.style.color = '#888';
           line1.style.fontStyle = 'italic';
           descBlock.appendChild(line1);
-        } else if (!selectedProgress.accepted) {
-          const line1 = document.createElement('p');
-          line1.textContent = 'No active mission.';
-          line1.style.color = '#888';
-          line1.style.fontStyle = 'italic';
-          descBlock.appendChild(line1);
         } else if (selectedProgress.completed) {
           const line1 = document.createElement('p');
           line1.textContent = getMissionCompletionSummary(selectedMission);
@@ -13269,6 +13558,12 @@ function createNPCCooldownManager() {
             line2.style.color = 'rgb(230, 215, 176)';
             descBlock.appendChild(line2);
           }
+        } else if (!selectedProgress.accepted) {
+          const line1 = document.createElement('p');
+          line1.textContent = 'No active mission.';
+          line1.style.color = '#888';
+          line1.style.fontStyle = 'italic';
+          descBlock.appendChild(line1);
         } else {
           // For letter mission, show the current stage objective
           if (selectedMission.id === KING_LETTER_MISSION.id) {
@@ -17789,8 +18084,27 @@ function createNPCCooldownManager() {
       .filter((el) => isInDOM(el));
   }
 
+  // World Raid (Orshabaal) is repeatable per raid instance and its permanent `completed` flag
+  // (the one-time-ever reward marker) never resets — see ensureAnnihilatorOrshabaalProgressForCurrentRaid.
+  // MissionManager.isActive()'s generic `accepted && !completed` gate would therefore hide this
+  // mission's Quest Log tab forever after a player's very first completion, even while they're
+  // actively fighting a LATER raid. Show the tab for this mission's whole lifecycle instead:
+  // from the moment a live raid is revealed to this client (so the player has somewhere to be
+  // told "go find Bubble" before they've even talked to him — a genuinely new tier, no other
+  // mission has a pre-accepted Quest Log entry), through accepted/battle, until THIS raid
+  // specifically has been reported in.
+  function isAnnihilatorOrshabaalMissionTabVisible() {
+    if (!isAnnihilatorOrshabaalRaidVisibleToThisClient()) return false;
+    const raidStartedAt = isWorldRaidStateLive(worldRaidState) ? Number(worldRaidState.startedAt) : null;
+    if (!raidStartedAt) return false;
+    return getAnnihilatorOrshabaalLastReportedRaidStartedAt() !== raidStartedAt;
+  }
+
   function getActiveQuestLogMissions() {
-    return QUEST_LOG_MISSIONS.filter((mission) => MissionManager.isActive(mission));
+    return QUEST_LOG_MISSIONS.filter((mission) => {
+      if (mission.id === ANNIHILATOR_ORSHABAAL_MISSION.id) return isAnnihilatorOrshabaalMissionTabVisible();
+      return MissionManager.isActive(mission);
+    });
   }
 
   /**
@@ -18139,6 +18453,25 @@ function createNPCCooldownManager() {
       return mission.objectiveLine1;
     }
 
+    if (mission.id === PARCHMENT_ROOM_MISSION.id) {
+      if (progress?.keyReceived) return mission.objectiveLine3 || mission.objectiveLine2;
+      if (progress?.accepted) return mission.objectiveLine2 || mission.objectiveLine1;
+      return mission.objectiveLine1;
+    }
+
+    if (mission.id === THE_NECROMANT_HOUSE_MISSION.id) {
+      if (progress?.battleCompleted) return mission.objectiveLine3 || mission.objectiveLine2;
+      return mission.objectiveLine1;
+    }
+
+    if (mission.id === ANNIHILATOR_ORSHABAAL_MISSION.id) {
+      if (progress?.battleCompleted) return mission.objectiveLine2 || mission.returnObjective;
+      if (progress?.accepted) return mission.objectiveLine1;
+      // Tab is visible (isAnnihilatorOrshabaalMissionTabVisible) before the player has even
+      // talked to Bubble yet — the one genuinely new pre-accepted Quest Log state.
+      return 'Look for Bubble in The Annihilator Quest.';
+    }
+
     return mission.objectiveLine1 || mission.objectiveLine2 || 'In progress';
   }
 
@@ -18370,8 +18703,19 @@ function createNPCCooldownManager() {
     return null;
   }
 
-  function getActiveMissionTabClassName() {
-    return 'frame-1 surface-regular relative grid gap-2 p-1.5 text-left data-[disabled=\'true\']:order-last md:data-[highlighted=\'true\']:brightness-[1.2]';
+  function getActiveMissionTabClassName(missionId) {
+    // World Raid (Orshabaal) is the one active mission that's a live, time-boxed event rather
+    // than an ordinary ongoing quest — the native red frame/surface pair (same as Raid Hunter's
+    // toggle button) makes that read as urgent at a glance instead of blending into the grey
+    // "surface-regular" rows every other mission uses. NOTE: no "active:frame-pressed-1-red" —
+    // that pressed-state modifier is only ever paired with real <button> elements elsewhere in
+    // this codebase (Raid Hunter's toggle, Better Tasker's toggle, ui_components' danger
+    // button); putting it on this static tab <div> gave it a clickable-button bevel look even
+    // though the tab itself isn't a button.
+    const frameSurface = missionId === ANNIHILATOR_ORSHABAAL_MISSION.id
+      ? 'frame-1-red surface-red'
+      : 'frame-1 surface-regular';
+    return `${frameSurface} relative grid gap-2 p-1.5 text-left data-[disabled='true']:order-last md:data-[highlighted='true']:brightness-[1.2]`;
   }
 
   function createActiveMissionProgressBar(progressDisplay) {
@@ -18454,6 +18798,15 @@ function createNPCCooldownManager() {
     const activeMissions = getActiveQuestLogMissions();
     const activeMissionIds = new Set(activeMissions.map((mission) => mission.id));
     const tabEntries = getActiveMissionTabEntries(activeMissions);
+    // World Raid (Orshabaal) is a time-sensitive LIVE event — always show it first, ahead of
+    // every other (no-deadline) active mission, regardless of story order. Array.prototype.sort
+    // is stable, so this only ever pulls the raid entry to the front without reshuffling
+    // anything else's relative order.
+    tabEntries.sort((a, b) => {
+      const aFirst = a.missionId === ANNIHILATOR_ORSHABAAL_MISSION.id ? 0 : 1;
+      const bFirst = b.missionId === ANNIHILATOR_ORSHABAAL_MISSION.id ? 0 : 1;
+      return aFirst - bFirst;
+    });
     const activeTabKeys = new Set(tabEntries.map((entry) => entry.key));
 
     existingTabs.forEach((tab) => {
@@ -18480,8 +18833,14 @@ function createNPCCooldownManager() {
         tab.style.display = 'none';
       }
 
-      tab.className = getActiveMissionTabClassName();
-      tab.style.order = String(-1 + index);
+      tab.className = getActiveMissionTabClassName(entry.missionId);
+      // The three admin utility tabs (Quest Dev Tools/-4, Mission Leaderboard/-3, King
+      // Tibianus/-2) are pinned above every mission via hardcoded negative order values.
+      // World Raid is a live, time-boxed event notification — it should outrank those
+      // utility panels too, not just the other (no-deadline) active missions.
+      tab.style.order = entry.missionId === ANNIHILATOR_ORSHABAAL_MISSION.id
+        ? '-5'
+        : String(-1 + index);
       renderActiveMissionTabContent(tab, entry);
 
       const desiredNext = insertAfter.nextElementSibling;
@@ -18886,10 +19245,45 @@ function createNPCCooldownManager() {
     });
   }
 
+  const WORLD_RAID_PULSE_STYLE_ID = 'quests-mod-world-raid-pulse-style';
+
+  // Same technique Challenges.js uses for its header button (a CSS @keyframes rule toggled
+  // purely via classList.add/remove — no inline style.animation set directly).
+  function ensureWorldRaidPulseStyles() {
+    let style = document.getElementById(WORLD_RAID_PULSE_STYLE_ID);
+    if (!style) {
+      style = document.createElement('style');
+      style.id = WORLD_RAID_PULSE_STYLE_ID;
+      document.head.appendChild(style);
+    }
+    style.textContent = `
+      @keyframes quests-world-raid-pulse {
+        0%, 100% { box-shadow: 0 0 2px 0 rgba(255,59,59,0.5); filter: brightness(1); }
+        50% { box-shadow: 0 0 10px 3px rgba(255,59,59,0.9); filter: brightness(1.25); }
+      }
+      #${KING_MISSIONS_BUTTON_ID}.quests-world-raid-live {
+        animation: quests-world-raid-pulse 1.4s ease-in-out infinite;
+      }
+    `;
+  }
+
   function updateMissionsButtonState() {
     if (!missionsToggleButton) return;
     missionsToggleButton.setAttribute('aria-pressed', kingModeActive ? 'true' : 'false');
     missionsToggleButton.textContent = kingModeActive ? 'Back' : 'Missions';
+    ensureWorldRaidPulseStyles();
+    // Only pulse while the button actually reads "Missions" (not "Back", kingModeActive), the
+    // toast buildup has finished revealing the raid to this browser, AND
+    // getAnnihilatorOrshabaalRaidStatus() (the single source of truth shared with Bubble's own
+    // visibility/fight.png badge) says there's still something to do — once it's been handled,
+    // further glowing would just be a stale notification with nothing left to react to.
+    missionsToggleButton.classList.toggle(
+      'quests-world-raid-live',
+      !kingModeActive
+        && typeof isAnnihilatorOrshabaalRaidVisibleToThisClient === 'function'
+        && isAnnihilatorOrshabaalRaidVisibleToThisClient()
+        && getAnnihilatorOrshabaalRaidStatus().hasPendingAction
+    );
   }
 
   function applyMissionsQuestLogGridPacking(questLogContainer) {
@@ -19802,7 +20196,27 @@ function createNPCCooldownManager() {
         text: 'Debug tile 79',
         onClick: () => runGuarded('Debug tile 79', () => { QuestsDev.debugTile79(); setStatus('Tile 79 debug info logged to console.'); }),
         command: 'QuestsDev.debugTile79()'
-      }]
+      }],
+      // World Raid (Orshabaal) — see the WARNING on worldRaidForceTrigger/worldRaidForceEnd's
+      // own doc comment: these hit the SAME shared, global Firebase path production uses.
+      // Trigger/End here starts/ends a REAL raid for every mod user online, not just this admin.
+      annihilator_orshabaal: [
+        {
+          text: 'Trigger World Raid',
+          onClick: () => runGuarded('Trigger World Raid', () => QuestsDev.worldRaidForceTrigger()),
+          command: 'QuestsDev.worldRaidForceTrigger()'
+        },
+        {
+          text: 'End World Raid',
+          onClick: () => runGuarded('End World Raid', () => QuestsDev.worldRaidForceEnd()),
+          command: 'QuestsDev.worldRaidForceEnd()'
+        },
+        {
+          text: 'World Raid status',
+          onClick: () => runGuarded('World Raid status', () => { QuestsDev.worldRaidStatus(); setStatus('World Raid status logged to console.'); }),
+          command: 'QuestsDev.worldRaidStatus()'
+        }
+      ]
     };
 
     // missionId -> refresh function, populated only while that mission's panel is expanded.
@@ -20797,6 +21211,48 @@ function createNPCCooldownManager() {
             && !visitingTheClericBattle?.isRoomReloadInProgress?.()) {
             console.log('[Quests Mod][Overlay Hider] Leaving Visiting the Cleric temple - clearing walk-around scene (CustomBattle cleanup)');
             cleanupVisitingTheClericQuest();
+          }
+
+          // Avar Tar's camp: player left the Sewers reskin via the room picker instead of a
+          // dedicated exit tile (this walk-around has none yet) — tear the scene down.
+          if (lastOverlayHiderRoomName === AVAR_TAR_HIDEOUT_ROOM_NAME
+            && currentRoomName && currentRoomName !== AVAR_TAR_HIDEOUT_ROOM_NAME
+            && (playerEnteredAvarTarHideout || avarTarHideoutBattle)
+            && !avarTarHideoutBattle?.isRoomReloadInProgress?.()) {
+            console.log("[Quests Mod][Overlay Hider] Leaving Avar Tar's camp - clearing walk-around scene (CustomBattle cleanup)");
+            cleanupAvarTarHideoutQuest();
+          }
+
+          // Astronis' Call: player left the Sewers battle scene against Orshabaal via the
+          // room picker instead of the victory/defeat modal's own onClose — tear the
+          // reskin/battle state down.
+          if (lastOverlayHiderRoomName === ANNIHILATOR_ORSHABAAL_BATTLE_ROOM_NAME
+            && currentRoomName && currentRoomName !== ANNIHILATOR_ORSHABAAL_BATTLE_ROOM_NAME
+            && (playerEnteredAnnihilatorOrshabaal || annihilatorOrshabaalBattle)
+            && !annihilatorOrshabaalBattle?.isRoomReloadInProgress?.()) {
+            console.log('[Quests Mod][Overlay Hider] Leaving Orshabaal\'s Lair - clearing battle scene (CustomBattle cleanup)');
+            cleanupAnnihilatorOrshabaalQuest();
+          }
+
+          // Parchment Room: player left the Sewers battle scene via the room picker
+          // (there's no dedicated exit tile — victory/defeat both leave the player free
+          // to keep exploring) — tear the reskin/battle state down.
+          if (lastOverlayHiderRoomName === PARCHMENT_ROOM_BATTLE_ROOM_NAME
+            && currentRoomName && currentRoomName !== PARCHMENT_ROOM_BATTLE_ROOM_NAME
+            && (playerEnteredParchmentRoom || parchmentRoomBattle)
+            && !parchmentRoomBattle?.isRoomReloadInProgress?.()) {
+            console.log('[Quests Mod][Overlay Hider] Leaving the Parchment Room - clearing battle scene (CustomBattle cleanup)');
+            cleanupParchmentRoomQuest();
+          }
+
+          // Parchment Room Approach: player left the Sewers walk-around via the room
+          // picker instead of tile 79's teleport — tear the reskin down.
+          if (lastOverlayHiderRoomName === PARCHMENT_ANTECHAMBER_ROOM_NAME
+            && currentRoomName && currentRoomName !== PARCHMENT_ANTECHAMBER_ROOM_NAME
+            && (playerEnteredParchmentAntechamber || parchmentAntechamberBattle)
+            && !parchmentAntechamberBattle?.isRoomReloadInProgress?.()) {
+            console.log('[Quests Mod][Overlay Hider] Leaving the Parchment Room Approach - clearing walk-around scene (CustomBattle cleanup)');
+            cleanupParchmentAntechamberQuest();
           }
 
           // Isle of the Mists shares the same roomId as the temple, so it never trips the
@@ -24775,7 +25231,7 @@ function createNPCCooldownManager() {
 
   // Same idea, plus a Tutorial_Arrow_Effect.gif overlay kept in sync with shouldEnable —
   // the tile itself (not the arrow) is the clickable surface, made so by createRoomTileAction.
-  function createArrowTileMenuAction({ id, roomName, tileIndex, shouldEnable, buttonText, onClick, arrowClass }) {
+  function createArrowTileMenuAction({ id, roomName, tileIndex, shouldEnable, buttonText, onClick, arrowClass, imageFilename }) {
     let contextMenu = null;
     let boardSubscription = null;
 
@@ -24795,7 +25251,7 @@ function createNPCCooldownManager() {
       if (tileElement.querySelector(`.${arrowClass}`)) return;
       const arrow = document.createElement('img');
       arrow.className = `${arrowClass} pixelated`;
-      arrow.src = getQuestItemsAssetUrl('Tutorial_Arrow_Effect.gif');
+      arrow.src = getQuestItemsAssetUrl(imageFilename || 'Tutorial_Arrow_Effect.gif');
       arrow.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;z-index:10003;image-rendering:pixelated;object-fit:contain';
       tileElement.appendChild(arrow);
     }
@@ -25122,6 +25578,855 @@ function createNPCCooldownManager() {
     hideHeroEditorButton();
     updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
     showToast({ message: TOAST_MESSAGES.clericTempleEntered, logPrefix: getClericLogPrefix() });
+  }
+
+  // =======================
+  // Avar Tar — arrow tile in Edron Wilderness (tile 154) + his camp (Sewers reskin, no battle)
+  // =======================
+
+  function getAvarTarLogPrefix() { return '[Quests Mod][Avar Tar]'; }
+
+  function shouldEnableAvarTarWildernessArrow(boardContext = null) {
+    try {
+      if (!hasFinishedTutorialQuests() && !kingChatState.metAvarTar) return false;
+      return isOnRoomByName(AVAR_TAR_ENTRY_ROOM_NAME);
+    } catch (error) {
+      console.error(`${getAvarTarLogPrefix()} Error checking wilderness arrow tile access:`, error);
+      return false;
+    }
+  }
+
+  const avarTarArrowTileAction = createArrowTileMenuAction({
+    id: 'Avar Tar',
+    roomName: () => AVAR_TAR_ENTRY_ROOM_NAME,
+    tileIndex: () => AVAR_TAR_ENTRY_TILE_INDEX,
+    shouldEnable: shouldEnableAvarTarWildernessArrow,
+    buttonText: 'Go back to Edron',
+    onClick: () => enterAvarTarHideout(),
+    arrowClass: AVAR_TAR_ARROW_CLASS
+  });
+  const setupAvarTarArrowObserver = avarTarArrowTileAction.setupObserver;
+  const cleanupAvarTarArrowSystem = avarTarArrowTileAction.cleanup;
+
+  const avarTarHideoutQuest = createTeleportBattleQuest({
+    logPrefix: getAvarTarLogPrefix(),
+    addedAttr: 'data-quests-avar-tar-added',
+    hiddenTag: 'quests-avar-tar-hidden',
+    mutationKeyAttr: 'data-quests-avar-tar-mutation-key',
+    floorBelowKeyAttr: 'data-quests-avar-tar-fb-key',
+    getTileMutations: () => AVAR_TAR_TILE_MUTATIONS,
+    isEntered: () => playerEnteredAvarTarHideout,
+    getBattle: () => avarTarHideoutBattle,
+    getSceneSub: () => avarTarHideoutSceneSub,
+    setSceneSub: (v) => { avarTarHideoutSceneSub = v; },
+    roomName: () => AVAR_TAR_HIDEOUT_ROOM_NAME
+  });
+
+  function applyAvarTarTileMutations() {
+    avarTarHideoutQuest.applyTileMutations();
+    clearAvarTarHideoutBoardPieces();
+  }
+  function restoreAvarTarTileMutations() { avarTarHideoutQuest.restoreTileMutations(); }
+  function stopAvarTarSceneSync() { avarTarHideoutQuest.stopSceneSync(); }
+  function startAvarTarSceneSync() { avarTarHideoutQuest.startSceneSync(); }
+  function restoreBoardSetupAvarTar() { avarTarHideoutQuest.restoreBoardSetup(); }
+
+  // Wipe every piece off the board so the camp stays empty (mirrors clearVisitingTheClericBoardPieces).
+  function clearAvarTarHideoutBoardPieces() {
+    try {
+      const cfg = globalThis.state?.board?.getSnapshot?.()?.context?.boardConfig;
+      if (!Array.isArray(cfg) || cfg.length === 0) return;
+      globalThis.state.board.send({
+        type: 'setState',
+        fn: (prev) => ({ ...prev, boardConfig: [] })
+      });
+    } catch (_) {}
+  }
+
+  let avarTarBoardClearSub = null;
+
+  function setupAvarTarBoardClearWatcher() {
+    if (avarTarBoardClearSub) return;
+    if (typeof globalThis === 'undefined' || !globalThis.state?.board?.subscribe) return;
+    avarTarBoardClearSub = globalThis.state.board.subscribe(() => {
+      if (playerEnteredAvarTarHideout && isOnRoomByName(AVAR_TAR_HIDEOUT_ROOM_NAME)) {
+        clearAvarTarHideoutBoardPieces();
+      }
+    });
+  }
+
+  function cleanupAvarTarBoardClearWatcher() {
+    if (avarTarBoardClearSub) {
+      try {
+        avarTarBoardClearSub.unsubscribe();
+      } catch (e) {
+        console.warn(`${getAvarTarLogPrefix()} Error unsubscribing board-clear watcher:`, e);
+      }
+      avarTarBoardClearSub = null;
+    }
+  }
+
+  function cleanupAvarTarHideoutQuest() {
+    try {
+      removeCustomBattleStatusToast();
+      stopAvarTarSceneSync();
+      playerEnteredAvarTarHideout = false;
+      restoreAvarTarTileMutations();
+      if (avarTarHideoutBattle) {
+        avarTarHideoutBattle.cleanup(restoreBoardSetupAvarTar, showQuestOverlays);
+        avarTarHideoutBattle = null;
+        console.log(`${getAvarTarLogPrefix()} Battle cleaned up`);
+      }
+      showQuestOverlays();
+      updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+    } catch (error) {
+      console.error(`${getAvarTarLogPrefix()} Error cleaning up:`, error);
+    }
+  }
+
+  function createAvarTarHideoutBattleInstance(roomId) {
+    if (!window.CustomBattles) {
+      console.error(`${getAvarTarLogPrefix()} CustomBattles still not available`);
+      return null;
+    }
+    const spawn = getHydratedQuestBattleSpawn(AVAR_TAR_HIDEOUT_BATTLE_ID || 'avar_tar_hideout');
+    const tileRestrictions = {};
+    if (spawn.allowedTiles?.length) {
+      tileRestrictions.allowedTiles = spawn.allowedTiles;
+      tileRestrictions.message = spawn.allowedTilesMessage;
+    }
+    const config = {
+      name: AVAR_TAR_HIDEOUT_DISPLAY_NAME || "Avar Tar's Camp",
+      roomId,
+      villains: [],
+      allyLimit: spawn.allyLimit ?? 1,
+      preventVillainMovement: spawn.preventVillainMovement !== false,
+      hideVillainSprites: spawn.hideVillainSprites !== false,
+      ...(Object.keys(tileRestrictions).length ? { tileRestrictions } : {}),
+      activationCheck: (isSandbox, inBattleArea) => isSandbox && inBattleArea && playerEnteredAvarTarHideout
+    };
+    return window.CustomBattles.create(config);
+  }
+
+  function initializeAvarTarHideoutBattle(roomId) {
+    if (window.CustomBattles) return createAvarTarHideoutBattleInstance(roomId);
+    return waitForCustomBattles({ logPrefix: getAvarTarLogPrefix() }).then((api2) => {
+      if (!api2) return null;
+      return createAvarTarHideoutBattleInstance(roomId);
+    });
+  }
+
+  function setupAvarTarPreBattle(battle) {
+    if (!battle) return false;
+    avarTarHideoutBattle = battle;
+    avarTarHideoutBattle.setup(
+      () => playerEnteredAvarTarHideout,
+      NotificationService.createBattleToastCallback(getAvarTarLogPrefix())
+    );
+    avarTarHideoutBattle.resetSandboxBattleState();
+    avarTarHideoutBattle.setupAllyLimit?.(
+      () => playerEnteredAvarTarHideout,
+      NotificationService.createBattleToastCallback(getAvarTarLogPrefix())
+    );
+    avarTarHideoutBattle.startPersistentVisualSync(applyAvarTarTileMutations, {
+      isActiveCheck: () => playerEnteredAvarTarHideout
+    });
+    return true;
+  }
+
+  // Avar Tar's camp, the Parchment Room, and its approach antechamber all reuse the same
+  // Sewers room (rkswrs) — only one can be "active" at a time, so whichever of the other
+  // two is currently entered must be torn down first (mirrors Necromant House <-> Visiting
+  // the Cleric's own mutual teardown). `exclude` is the area being entered, so it's skipped.
+  function teardownOtherParchmentAreaSiblings(exclude) {
+    if (exclude !== 'avarTar' && playerEnteredAvarTarHideout) cleanupAvarTarHideoutQuest();
+    if (exclude !== 'antechamber' && playerEnteredParchmentAntechamber) cleanupParchmentAntechamberQuest();
+    if (exclude !== 'parchmentRoom' && playerEnteredParchmentRoom) cleanupParchmentRoomQuest();
+  }
+
+  function enterAvarTarHideout() {
+    if (playerEnteredAvarTarHideout) return;
+    teardownOtherParchmentAreaSiblings('avarTar');
+    let roomId = AVAR_TAR_HIDEOUT_ROOM_ID || getRoomIdByRoomName(AVAR_TAR_HIDEOUT_ROOM_NAME);
+    if (!roomId) roomId = getRoomIdByRoomName(AVAR_TAR_HIDEOUT_ROOM_NAME);
+    if (!roomId) {
+      showToast({ message: TOAST_MESSAGES.roomNotFound('Edron'), variant: 'nothing', logPrefix: getAvarTarLogPrefix() });
+      return;
+    }
+
+    playerEnteredAvarTarHideout = true;
+    if (avarTarHideoutBattle) {
+      avarTarHideoutBattle.cleanup(restoreBoardSetupAvarTar, showQuestOverlays);
+      avarTarHideoutBattle = null;
+    }
+
+    globalThis.state.board.send({ type: 'selectRoomById', roomId });
+    startAvarTarSceneSync();
+    clearAvarTarHideoutBoardPieces();
+
+    const initResult = initializeAvarTarHideoutBattle(roomId);
+    if (initResult && typeof initResult.then === 'function') {
+      initResult.then((battle) => {
+        if (playerEnteredAvarTarHideout && !avarTarHideoutBattle) {
+          setupAvarTarPreBattle(battle);
+          hideQuestOverlays();
+          hideHeroEditorButton();
+          clearAvarTarHideoutBoardPieces();
+        }
+      }).catch((error) => console.error(`${getAvarTarLogPrefix()} Error initializing Avar Tar's camp:`, error));
+    } else if (initResult) {
+      setupAvarTarPreBattle(initResult);
+    }
+
+    hideQuestOverlays();
+    hideHeroEditorButton();
+    updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+    showToast({ message: TOAST_MESSAGES.avarTarHideoutEntered, logPrefix: getAvarTarLogPrefix() });
+  }
+
+  // =======================
+  // Parchment Room Quest — Avar Tar's first quest. Direct-entry (accepting via chat
+  // teleports straight in, same as Hellgate Part 1 / Isle of the Mists), single battle
+  // against 4 demons in a Sewers reskin. Victory clears the battlefield but keeps the
+  // reskin + quest state alive (does NOT auto-return like Necromant House) so the player
+  // can right-click the coffin on tile 67 for the Golden Key before leaving on their own.
+  // =======================
+
+  function getParchmentRoomLogPrefix() { return '[Quests Mod][Parchment Room]'; }
+
+  // The native nameplate above each Parchment Room demon renders "Demon (Lv.300)" during
+  // combat — a native-UI quirk, nothing our config controls (confirmed: these demons are
+  // never interactive `button[data-custom-battle-piece]` setup pieces, so a scoped selector
+  // can't target them — see createLevelTextHider's doc comment for why this is a persistent
+  // document-wide text scan instead). Matches "Lv." + any number so changing the demons'
+  // configured level later doesn't require touching this. requireSiblingText scopes the hide
+  // to nameplates whose sibling name span is exactly "Demon" — the villain nickname — so an
+  // ally's own nameplate (which also renders a level) is never touched.
+  const parchmentRoomLevelHider = createLevelTextHider({
+    logPrefix: getParchmentRoomLogPrefix(),
+    matchText: /Lv\.\d+/,
+    requireSiblingText: /^Demon$/,
+    isActive: () => playerEnteredParchmentRoom
+  });
+  const startParchmentRoomLv300Hider = parchmentRoomLevelHider.start;
+  const stopParchmentRoomLv300Hider = parchmentRoomLevelHider.stop;
+
+  // selectRoomById loads the native Sewers room, whose own vanilla actor layout (a Rat —
+  // Sewers is an early low-level map) briefly renders on the board before CustomBattles'
+  // async villain-sync timer (syncCustomVillainsIfNeeded, custom-battles.js) swaps it for
+  // the configured demons. That sync retries every 120-150ms until the board settles, which
+  // can chain to ~1s under heavy page load (many other mod subsystems competing for the main
+  // thread right after a teleport) — so the wrong creature is visibly on the board for a
+  // moment. Hide the whole #actors layer via an injected <style> (never touch the
+  // React-managed actor nodes directly) until the swap lands, then reveal — a blank board is
+  // less jarring than the wrong creature standing there.
+  const PARCHMENT_ROOM_ACTOR_SYNC_STYLE_ID = 'quests-parchment-room-actor-sync-style';
+  const PARCHMENT_ROOM_ACTOR_SYNC_POLL_MS = 100;
+  const PARCHMENT_ROOM_ACTOR_SYNC_MAX_WAIT_MS = 3000;
+  let parchmentRoomActorSyncInterval = null;
+  let parchmentRoomActorSyncTimeout = null;
+
+  function setParchmentRoomActorsHidden(hidden) {
+    if (!hidden) {
+      document.getElementById(PARCHMENT_ROOM_ACTOR_SYNC_STYLE_ID)?.remove();
+      return;
+    }
+    let style = document.getElementById(PARCHMENT_ROOM_ACTOR_SYNC_STYLE_ID);
+    if (!style) {
+      style = document.createElement('style');
+      style.id = PARCHMENT_ROOM_ACTOR_SYNC_STYLE_ID;
+      document.head.appendChild(style);
+    }
+    style.textContent = '#actors { visibility: hidden !important; }';
+  }
+
+  function stopParchmentRoomActorSyncWait() {
+    if (parchmentRoomActorSyncInterval) {
+      clearInterval(parchmentRoomActorSyncInterval);
+      parchmentRoomActorSyncInterval = null;
+    }
+    if (parchmentRoomActorSyncTimeout) {
+      clearTimeout(parchmentRoomActorSyncTimeout);
+      parchmentRoomActorSyncTimeout = null;
+    }
+    setParchmentRoomActorsHidden(false);
+  }
+
+  // Fails open after PARCHMENT_ROOM_ACTOR_SYNC_MAX_WAIT_MS so a stalled sync never leaves the
+  // board permanently blank.
+  function startParchmentRoomActorSyncWait() {
+    stopParchmentRoomActorSyncWait();
+    setParchmentRoomActorsHidden(true);
+    parchmentRoomActorSyncInterval = setInterval(() => {
+      if (!playerEnteredParchmentRoom) {
+        stopParchmentRoomActorSyncWait();
+        return;
+      }
+      try {
+        const boardConfig = globalThis.state?.board?.getSnapshot?.()?.context?.boardConfig || [];
+        const demonsAlreadyCleared = !!getMissionProgress(PARCHMENT_ROOM_MISSION)?.battleCompleted;
+        if (demonsAlreadyCleared || boardConfig.some((entity) => entity?.villain)) {
+          stopParchmentRoomActorSyncWait();
+        }
+      } catch (error) {
+        console.error(`${getParchmentRoomLogPrefix()} Error checking actor sync state:`, error);
+        stopParchmentRoomActorSyncWait();
+      }
+    }, PARCHMENT_ROOM_ACTOR_SYNC_POLL_MS);
+    parchmentRoomActorSyncTimeout = setTimeout(() => stopParchmentRoomActorSyncWait(), PARCHMENT_ROOM_ACTOR_SYNC_MAX_WAIT_MS);
+  }
+
+  const parchmentRoomQuest = createTeleportBattleQuest({
+    logPrefix: getParchmentRoomLogPrefix(),
+    addedAttr: 'data-quests-parchment-room-added',
+    hiddenTag: 'quests-parchment-room-hidden',
+    mutationKeyAttr: 'data-quests-parchment-room-mutation-key',
+    floorBelowKeyAttr: 'data-quests-parchment-room-fb-key',
+    getTileMutations: () => PARCHMENT_ROOM_TILE_MUTATIONS,
+    isEntered: () => playerEnteredParchmentRoom,
+    getBattle: () => parchmentRoomBattle,
+    getSceneSub: () => parchmentRoomSceneSub,
+    setSceneSub: (v) => { parchmentRoomSceneSub = v; },
+    roomName: () => PARCHMENT_ROOM_BATTLE_ROOM_NAME
+  });
+
+  function applyParchmentRoomTileMutations() { parchmentRoomQuest.applyTileMutations(); }
+  function restoreParchmentRoomTileMutations() { parchmentRoomQuest.restoreTileMutations(); }
+  function stopParchmentRoomSceneSync() { parchmentRoomQuest.stopSceneSync(); }
+  function startParchmentRoomSceneSync() { parchmentRoomQuest.startSceneSync(); }
+  function restoreBoardSetupParchmentRoom() { parchmentRoomQuest.restoreBoardSetup(); }
+
+  // The coffin in the middle of the room (tile 67) — right-click after the demon(s) are
+  // dealt with to claim the Golden Key. Matches the original quest: "you can decide to
+  // kill the demons or to grab the reward and run away. You have to open the coffin to
+  // get the reward."
+  function shouldEnableParchmentRoomCoffin(boardContext = null) {
+    try {
+      if (!playerEnteredParchmentRoom) return false;
+      if (!isOnRoomByName(PARCHMENT_ROOM_BATTLE_ROOM_NAME)) return false;
+      const progress = getMissionProgress(PARCHMENT_ROOM_MISSION) || {};
+      return !!progress.battleCompleted && !progress.keyReceived && !progress.completed;
+    } catch (error) {
+      console.error(`${getParchmentRoomLogPrefix()} Error checking coffin tile access:`, error);
+      return false;
+    }
+  }
+
+  async function openParchmentRoomCoffin() {
+    if (!shouldEnableParchmentRoomCoffin()) return;
+    try {
+      const productName = resolveQuestProductName('goldenKey') || 'Golden Key';
+      await addQuestItem(productName, 1);
+      playRightClickLootEffect(getTileElement(PARCHMENT_ROOM_COFFIN_TILE_INDEX));
+      await persistMissionProgress(PARCHMENT_ROOM_MISSION, { accepted: true, completed: false, battleCompleted: true, keyReceived: true });
+      NotificationService.showItemReceived(productName, getParchmentRoomLogPrefix());
+      parchmentRoomCoffinTileAction.update(globalThis.state?.board?.getSnapshot()?.context);
+      console.log(`${getParchmentRoomLogPrefix()} Golden Key retrieved from the coffin on tile ${PARCHMENT_ROOM_COFFIN_TILE_INDEX}`);
+      setTimeout(() => {
+        if (!playerEnteredParchmentRoom) return;
+        enterAvarTarHideout();
+      }, 2000);
+    } catch (error) {
+      console.error(`${getParchmentRoomLogPrefix()} Error opening the coffin:`, error);
+    }
+  }
+
+  const parchmentRoomCoffinTileAction = createArrowTileMenuAction({
+    id: 'Parchment Room Coffin',
+    roomName: () => PARCHMENT_ROOM_BATTLE_ROOM_NAME,
+    tileIndex: () => PARCHMENT_ROOM_COFFIN_TILE_INDEX,
+    shouldEnable: shouldEnableParchmentRoomCoffin,
+    buttonText: 'Open the coffin',
+    onClick: openParchmentRoomCoffin,
+    arrowClass: PARCHMENT_ROOM_COFFIN_ARROW_CLASS,
+    imageFilename: 'Tile_Highlight_Effect.gif'
+  });
+  const setupParchmentRoomCoffinObserver = parchmentRoomCoffinTileAction.setupObserver;
+  const cleanupParchmentRoomCoffinSystem = parchmentRoomCoffinTileAction.cleanup;
+
+  // The hole down into the Hero Cave — lives on tile 70 of the real "Cake Drake Party"
+  // room (the mission's own gateRoom, NOT a Sewers reskin and NOT Avar Tar's camp), armed
+  // the moment the quest is accepted. Only shows while the player is actually standing in
+  // that room — asking Avar Tar about it, or merely visiting his camp, does not light it
+  // up. Right-click -> "Go down the hole" is the only way in; accepting via chat no
+  // longer auto-teleports.
+  function shouldEnableParchmentRoomHole(boardContext = null) {
+    try {
+      if (!isOnRoomByName(PARCHMENT_ROOM_ENTRY_ROOM_NAME)) return false;
+      const progress = getMissionProgress(PARCHMENT_ROOM_MISSION) || {};
+      return !!progress.accepted && !progress.completed && !progress.keyReceived;
+    } catch (error) {
+      console.error(`${getParchmentRoomLogPrefix()} Error checking hole tile access:`, error);
+      return false;
+    }
+  }
+
+  const parchmentRoomHoleTileAction = createArrowTileMenuAction({
+    id: 'Parchment Room Hole',
+    roomName: () => PARCHMENT_ROOM_ENTRY_ROOM_NAME,
+    tileIndex: () => PARCHMENT_ROOM_ENTRY_TILE_INDEX,
+    shouldEnable: shouldEnableParchmentRoomHole,
+    buttonText: 'Go down the hole',
+    onClick: () => enterParchmentAntechamber(),
+    arrowClass: PARCHMENT_ROOM_HOLE_ARROW_CLASS,
+    imageFilename: 'Tile_Highlight_Effect.gif'
+  });
+  const setupParchmentRoomHoleObserver = parchmentRoomHoleTileAction.setupObserver;
+  const cleanupParchmentRoomHoleSystem = parchmentRoomHoleTileAction.cleanup;
+
+  function cleanupParchmentRoomQuest() {
+    try {
+      removeCustomBattleStatusToast();
+      stopParchmentRoomSceneSync();
+      stopParchmentRoomLv300Hider();
+      stopParchmentRoomActorSyncWait();
+      playerEnteredParchmentRoom = false;
+      restoreParchmentRoomTileMutations();
+      if (parchmentRoomBattle) {
+        parchmentRoomBattle.cleanup(restoreBoardSetupParchmentRoom, showQuestOverlays);
+        parchmentRoomBattle = null;
+        console.log(`${getParchmentRoomLogPrefix()} Battle cleaned up`);
+      }
+      showQuestOverlays();
+      updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+    } catch (error) {
+      console.error(`${getParchmentRoomLogPrefix()} Error cleaning up:`, error);
+    }
+  }
+
+  function createParchmentRoomBattleInstance(roomId) {
+    if (!window.CustomBattles) {
+      console.error(`${getParchmentRoomLogPrefix()} CustomBattles still not available`);
+      return null;
+    }
+    const spawn = getHydratedQuestBattleSpawn(PARCHMENT_ROOM_BATTLE_ID || 'parchment_room');
+    // Once the demons have been beaten (persisted, so this holds across leaving and
+    // coming back down the hole — not just for the rest of this session), they stay
+    // dead: re-entering spawns nobody, so the coffin is reachable without a re-fight.
+    // Only the completed report-back to Avar Tar retires the quest entirely (see
+    // shouldEnableParchmentRoomHole — the hole itself stops showing once keyReceived).
+    const demonsAlreadyCleared = !!getMissionProgress(PARCHMENT_ROOM_MISSION)?.battleCompleted;
+    if (!demonsAlreadyCleared && !spawn.villains?.length) {
+      console.error(`${getParchmentRoomLogPrefix()} No villains resolved for battle id "${PARCHMENT_ROOM_BATTLE_ID}" — check that assets/quests/battles.json has this entry and the mod's data was reloaded.`);
+    }
+    const tileRestrictions = {};
+    if (spawn.allowedTiles?.length) {
+      tileRestrictions.allowedTiles = spawn.allowedTiles;
+      tileRestrictions.message = spawn.allowedTilesMessage;
+    }
+    const config = {
+      name: PARCHMENT_ROOM_BATTLE_DISPLAY_NAME || 'The Parchment Room',
+      roomId,
+      villains: demonsAlreadyCleared ? [] : spawn.villains,
+      allyLimit: spawn.allyLimit ?? 10,
+      preventVillainMovement: spawn.preventVillainMovement !== false,
+      hideVillainSprites: spawn.hideVillainSprites !== false,
+      ...(Object.keys(tileRestrictions).length ? { tileRestrictions } : {}),
+      activationCheck: (isSandbox, inBattleArea) => isSandbox && inBattleArea && playerEnteredParchmentRoom,
+      victoryDefeat: {
+        onVictory: async () => {
+          try {
+            await persistMissionProgress(PARCHMENT_ROOM_MISSION, { accepted: true, completed: false, battleCompleted: true });
+          } catch (error) {
+            console.error(`${getParchmentRoomLogPrefix()} Error saving battleCompleted flag:`, error);
+          }
+          // Clear the demons so the coffin can be searched undisturbed — matches the
+          // original quest's own "kill the demons or grab the reward and run" choice;
+          // either way the coffin is what matters, not the corpses. Do NOT use a raw
+          // `boardConfig: []` wipe here: that also deletes the player's own ally pieces
+          // (breaks the "Creatures allowed: N/M" status toast — it reads boardConfig too)
+          // and doesn't even stick, since the engine's own villain-resync watchers
+          // (syncCustomVillainsIfNeeded / autoSetupVillainSyncHandler) rebuild villains
+          // from config.villains the moment gameStarted flips back to false. Mutating
+          // config.villains to empty FIRST, then using the engine's own rebuild path
+          // (forceImmediateBoardRewrite -> removeOriginalVillains), removes only the
+          // villain entities and leaves it that way — the same path createParchmentRoomBattleInstance's
+          // own demonsAlreadyCleared check uses on a fresh re-entry.
+          try {
+            if (parchmentRoomBattle) {
+              parchmentRoomBattle.config.villains = [];
+              parchmentRoomBattle.resetSandboxBattleState();
+              parchmentRoomBattle.forceImmediateBoardRewrite();
+            }
+          } catch (error) {
+            console.error(`${getParchmentRoomLogPrefix()} Error clearing villains after victory:`, error);
+          }
+          // No demons left to fight — the "Battling / Creatures allowed" status toast is
+          // only meaningful while there's an actual fight to place allies for, not while
+          // the player is just walking over to loot the coffin.
+          removeCustomBattleStatusToast();
+          // forceImmediateBoardRewrite() dispatches a fresh boardConfig, which makes React
+          // re-render #tiles from its own room data — wiping our manually-appended reskin
+          // sprites and the coffin tile in the process, since React doesn't know about
+          // those extra child nodes and drops anything not in its own tree. The scene-sync
+          // loop (startParchmentRoomSceneSync) won't repaint this on its own because its
+          // paint() intentionally no-ops while getBattle() is truthy, so reapply here
+          // directly, a beat after the rewrite has actually landed.
+          SCENE_SYNC_REPAINT_DELAYS_MS.forEach((delay) => {
+            setTimeout(() => {
+              if (!playerEnteredParchmentRoom) return;
+              applyParchmentRoomTileMutations();
+              parchmentRoomCoffinTileAction.update(globalThis.state?.board?.getSnapshot()?.context);
+            }, delay);
+          });
+          parchmentRoomCoffinTileAction.update(globalThis.state?.board?.getSnapshot()?.context);
+          updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+        },
+        onDefeat: () => {},
+        onClose: (isVictory) => {
+          // Victory: stay put to search the coffin — full teardown only happens when the
+          // player actually leaves the room (see the Overlay Hider branch), not from here.
+          // Defeat: send the player back to the approach antechamber — the portal right
+          // after going down the hole, not all the way back to Avar Tar's camp — rather
+          // than leaving them to retry standing among the corpses. enterParchmentAntechamber()
+          // already handles tearing down the Parchment Room and navigating back (mirrors
+          // Mornenion's onClose navigate-back-on-close).
+          if (!isVictory) {
+            setTimeout(() => enterParchmentAntechamber(), 100);
+            return;
+          }
+          updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+        },
+        victoryMessage: getMissionDialogueLine(
+          PARCHMENT_ROOM_MISSION,
+          'battleVictory',
+          'Five demons, felled! Now find the coffin and claim your prize.'
+        ),
+        defeatMessage: getMissionDialogueLine(
+          PARCHMENT_ROOM_MISSION,
+          'battleDefeat',
+          'Even heroes stumble sometimes. Rest, resupply, and try again.'
+        ),
+        showItems: false,
+        items: []
+      }
+    };
+    let battle = null;
+    try {
+      battle = window.CustomBattles.create(config);
+    } catch (error) {
+      console.error(`${getParchmentRoomLogPrefix()} CustomBattles.create() threw:`, error);
+      return null;
+    }
+    return battle;
+  }
+
+  function initializeParchmentRoomBattle(roomId) {
+    if (window.CustomBattles) return createParchmentRoomBattleInstance(roomId);
+    return waitForCustomBattles({ logPrefix: getParchmentRoomLogPrefix() }).then((api) => {
+      if (!api) return null;
+      return createParchmentRoomBattleInstance(roomId);
+    });
+  }
+
+  function setupParchmentRoomBattleInstance(battle) {
+    if (!battle) return false;
+    parchmentRoomBattle = battle;
+    stopParchmentRoomSceneSync();
+    parchmentRoomBattle.setup(
+      () => playerEnteredParchmentRoom,
+      NotificationService.createBattleToastCallback(getParchmentRoomLogPrefix())
+    );
+    parchmentRoomBattle.resetSandboxBattleState();
+    parchmentRoomBattle.setupTileRestrictions?.(
+      () => playerEnteredParchmentRoom,
+      NotificationService.createBattleToastCallback(getParchmentRoomLogPrefix())
+    );
+    parchmentRoomBattle.setupAllyLimit?.(
+      () => playerEnteredParchmentRoom,
+      NotificationService.createBattleToastCallback(getParchmentRoomLogPrefix())
+    );
+    // Skip the "Battling / Creatures allowed" status toast entirely when there's no fight
+    // this visit — re-entering after the demons are already dead (just here for the
+    // coffin) shouldn't show a battle-in-progress toast that no onVictory will ever
+    // dismiss, since no victory happens on a re-entry with zero villains.
+    if (battle.config?.villains?.length) {
+      showCustomBattleStatusToast({
+        battleName: PARCHMENT_ROOM_BATTLE_DISPLAY_NAME || 'The Parchment Room',
+        allyLimit: battle.config?.allyLimit ?? 10,
+        battle,
+        logPrefix: getParchmentRoomLogPrefix()
+      });
+    }
+    // Entered from a genuinely different room (Cake Drake Party, via the hole tile) —
+    // a real selectRoomById navigation, not a same-room reuse — so a plain entry-villain
+    // schedule is enough (mirrors Hellgate's setupHellgateBattleInstance); no same-room
+    // bounce/reload trick needed here.
+    parchmentRoomBattle.scheduleEntryVillainSetup({
+      attemptDelays: VILLAIN_SETUP_ATTEMPT_DELAYS_MS,
+      isActiveCheck: () => playerEnteredParchmentRoom,
+      onComplete: () => {
+        hideQuestOverlays();
+        hideHeroEditorButton();
+        parchmentRoomBattle.startPersistentVisualSync(applyParchmentRoomTileMutations, {
+          isActiveCheck: () => playerEnteredParchmentRoom
+        });
+      }
+    });
+    return true;
+  }
+
+  // =======================
+  // Parchment Room Approach — the Sewers reskin between the Cake Drake Party hole and the
+  // real Parchment Room fight. Plain walk-around, no battle (mirrors Avar Tar's camp).
+  // Tile 79 highlights and teleports into the actual battle; tile 65 is a flavor-only
+  // examine with a cryptic green inscription.
+  // =======================
+
+  function getParchmentAntechamberLogPrefix() { return '[Quests Mod][Parchment Room Approach]'; }
+
+  const parchmentAntechamberQuest = createTeleportBattleQuest({
+    logPrefix: getParchmentAntechamberLogPrefix(),
+    addedAttr: 'data-quests-parchment-antechamber-added',
+    hiddenTag: 'quests-parchment-antechamber-hidden',
+    mutationKeyAttr: 'data-quests-parchment-antechamber-mutation-key',
+    floorBelowKeyAttr: 'data-quests-parchment-antechamber-fb-key',
+    getTileMutations: () => PARCHMENT_ANTECHAMBER_TILE_MUTATIONS,
+    isEntered: () => playerEnteredParchmentAntechamber,
+    getBattle: () => parchmentAntechamberBattle,
+    getSceneSub: () => parchmentAntechamberSceneSub,
+    setSceneSub: (v) => { parchmentAntechamberSceneSub = v; },
+    roomName: () => PARCHMENT_ANTECHAMBER_ROOM_NAME
+  });
+
+  function applyParchmentAntechamberTileMutations() {
+    parchmentAntechamberQuest.applyTileMutations();
+    clearParchmentAntechamberBoardPieces();
+  }
+  function restoreParchmentAntechamberTileMutations() { parchmentAntechamberQuest.restoreTileMutations(); }
+  function stopParchmentAntechamberSceneSync() { parchmentAntechamberQuest.stopSceneSync(); }
+  function startParchmentAntechamberSceneSync() { parchmentAntechamberQuest.startSceneSync(); }
+  function restoreBoardSetupParchmentAntechamber() { parchmentAntechamberQuest.restoreBoardSetup(); }
+
+  // Wipe every piece off the board so the approach stays empty (mirrors clearAvarTarHideoutBoardPieces).
+  function clearParchmentAntechamberBoardPieces() {
+    try {
+      const cfg = globalThis.state?.board?.getSnapshot?.()?.context?.boardConfig;
+      if (!Array.isArray(cfg) || cfg.length === 0) return;
+      globalThis.state.board.send({
+        type: 'setState',
+        fn: (prev) => ({ ...prev, boardConfig: [] })
+      });
+    } catch (_) {}
+  }
+
+  let parchmentAntechamberBoardClearSub = null;
+
+  function setupParchmentAntechamberBoardClearWatcher() {
+    if (parchmentAntechamberBoardClearSub) return;
+    if (typeof globalThis === 'undefined' || !globalThis.state?.board?.subscribe) return;
+    parchmentAntechamberBoardClearSub = globalThis.state.board.subscribe(() => {
+      if (playerEnteredParchmentAntechamber && isOnRoomByName(PARCHMENT_ANTECHAMBER_ROOM_NAME)) {
+        clearParchmentAntechamberBoardPieces();
+      }
+    });
+  }
+
+  function cleanupParchmentAntechamberBoardClearWatcher() {
+    if (parchmentAntechamberBoardClearSub) {
+      try {
+        parchmentAntechamberBoardClearSub.unsubscribe();
+      } catch (e) {
+        console.warn(`${getParchmentAntechamberLogPrefix()} Error unsubscribing board-clear watcher:`, e);
+      }
+      parchmentAntechamberBoardClearSub = null;
+    }
+  }
+
+  function cleanupParchmentAntechamberQuest() {
+    try {
+      removeCustomBattleStatusToast();
+      stopParchmentAntechamberSceneSync();
+      playerEnteredParchmentAntechamber = false;
+      restoreParchmentAntechamberTileMutations();
+      if (parchmentAntechamberBattle) {
+        parchmentAntechamberBattle.cleanup(restoreBoardSetupParchmentAntechamber, showQuestOverlays);
+        parchmentAntechamberBattle = null;
+        console.log(`${getParchmentAntechamberLogPrefix()} Battle cleaned up`);
+      }
+      showQuestOverlays();
+      updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+    } catch (error) {
+      console.error(`${getParchmentAntechamberLogPrefix()} Error cleaning up:`, error);
+    }
+  }
+
+  function createParchmentAntechamberBattleInstance(roomId) {
+    if (!window.CustomBattles) {
+      console.error(`${getParchmentAntechamberLogPrefix()} CustomBattles still not available`);
+      return null;
+    }
+    const spawn = getHydratedQuestBattleSpawn(PARCHMENT_ANTECHAMBER_BATTLE_ID || 'parchment_antechamber');
+    const tileRestrictions = {};
+    if (spawn.allowedTiles?.length) {
+      tileRestrictions.allowedTiles = spawn.allowedTiles;
+      tileRestrictions.message = spawn.allowedTilesMessage;
+    }
+    const config = {
+      name: PARCHMENT_ANTECHAMBER_DISPLAY_NAME || 'The Parchment Room Approach',
+      roomId,
+      villains: [],
+      allyLimit: spawn.allyLimit ?? 1,
+      preventVillainMovement: spawn.preventVillainMovement !== false,
+      hideVillainSprites: spawn.hideVillainSprites !== false,
+      ...(Object.keys(tileRestrictions).length ? { tileRestrictions } : {}),
+      activationCheck: (isSandbox, inBattleArea) => isSandbox && inBattleArea && playerEnteredParchmentAntechamber
+    };
+    return window.CustomBattles.create(config);
+  }
+
+  function initializeParchmentAntechamberBattle(roomId) {
+    if (window.CustomBattles) return createParchmentAntechamberBattleInstance(roomId);
+    return waitForCustomBattles({ logPrefix: getParchmentAntechamberLogPrefix() }).then((api3) => {
+      if (!api3) return null;
+      return createParchmentAntechamberBattleInstance(roomId);
+    });
+  }
+
+  function setupParchmentAntechamberPreBattle(battle) {
+    if (!battle) return false;
+    parchmentAntechamberBattle = battle;
+    parchmentAntechamberBattle.setup(
+      () => playerEnteredParchmentAntechamber,
+      NotificationService.createBattleToastCallback(getParchmentAntechamberLogPrefix())
+    );
+    parchmentAntechamberBattle.resetSandboxBattleState();
+    parchmentAntechamberBattle.setupAllyLimit?.(
+      () => playerEnteredParchmentAntechamber,
+      NotificationService.createBattleToastCallback(getParchmentAntechamberLogPrefix())
+    );
+    parchmentAntechamberBattle.startPersistentVisualSync(applyParchmentAntechamberTileMutations, {
+      isActiveCheck: () => playerEnteredParchmentAntechamber
+    });
+    return true;
+  }
+
+  function enterParchmentAntechamber() {
+    if (playerEnteredParchmentAntechamber) return;
+    teardownOtherParchmentAreaSiblings('antechamber');
+
+    let roomId = PARCHMENT_ANTECHAMBER_ROOM_ID || getRoomIdByRoomName(PARCHMENT_ANTECHAMBER_ROOM_NAME);
+    if (!roomId) roomId = getRoomIdByRoomName(PARCHMENT_ANTECHAMBER_ROOM_NAME);
+    if (!roomId) {
+      showToast({ message: TOAST_MESSAGES.roomNotFound('The Parchment Room'), variant: 'nothing', logPrefix: getParchmentAntechamberLogPrefix() });
+      return;
+    }
+
+    playerEnteredParchmentAntechamber = true;
+    if (parchmentAntechamberBattle) {
+      parchmentAntechamberBattle.cleanup(restoreBoardSetupParchmentAntechamber, showQuestOverlays);
+      parchmentAntechamberBattle = null;
+    }
+
+    globalThis.state.board.send({ type: 'selectRoomById', roomId });
+    startParchmentAntechamberSceneSync();
+    clearParchmentAntechamberBoardPieces();
+    parchmentAntechamberInscriptionSignReader.resetRead();
+
+    const initResult = initializeParchmentAntechamberBattle(roomId);
+    if (initResult && typeof initResult.then === 'function') {
+      initResult.then((battle) => {
+        if (playerEnteredParchmentAntechamber && !parchmentAntechamberBattle) {
+          setupParchmentAntechamberPreBattle(battle);
+          hideQuestOverlays();
+          hideHeroEditorButton();
+          clearParchmentAntechamberBoardPieces();
+        }
+      }).catch((error) => console.error(`${getParchmentAntechamberLogPrefix()} Error initializing battle:`, error));
+    } else if (initResult) {
+      setupParchmentAntechamberPreBattle(initResult);
+    }
+
+    hideQuestOverlays();
+    hideHeroEditorButton();
+    updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+    showToast({ message: TOAST_MESSAGES.parchmentAntechamberEntered, logPrefix: getParchmentAntechamberLogPrefix() });
+  }
+
+  // Tile 79 — highlighted the moment the player is actually standing in the approach;
+  // right-click teleports into the real battle room. Same accept/complete/key gating the
+  // old hole tile used, since this now sits in the spot that tile used to occupy.
+  function shouldEnableParchmentAntechamberContinue(boardContext = null) {
+    try {
+      if (!playerEnteredParchmentAntechamber) return false;
+      if (!isOnRoomByName(PARCHMENT_ANTECHAMBER_ROOM_NAME)) return false;
+      const progress = getMissionProgress(PARCHMENT_ROOM_MISSION) || {};
+      return !!progress.accepted && !progress.completed && !progress.keyReceived;
+    } catch (error) {
+      console.error(`${getParchmentAntechamberLogPrefix()} Error checking continue tile access:`, error);
+      return false;
+    }
+  }
+
+  const parchmentAntechamberContinueTileAction = createArrowTileMenuAction({
+    id: 'Parchment Room Antechamber Continue',
+    roomName: () => PARCHMENT_ANTECHAMBER_ROOM_NAME,
+    tileIndex: () => PARCHMENT_ANTECHAMBER_CONTINUE_TILE_INDEX,
+    shouldEnable: shouldEnableParchmentAntechamberContinue,
+    buttonText: 'Enter the teleporter',
+    onClick: () => enterParchmentRoom(),
+    arrowClass: PARCHMENT_ANTECHAMBER_CONTINUE_ARROW_CLASS,
+    imageFilename: 'Tile_Highlight_Effect.gif'
+  });
+  const setupParchmentAntechamberContinueObserver = parchmentAntechamberContinueTileAction.setupObserver;
+  const cleanupParchmentAntechamberContinueSystem = parchmentAntechamberContinueTileAction.cleanup;
+
+  // Tile 65 — pure flavor. Right-click reads a weathered, half-legible warning carved
+  // into the wall; no gameplay effect either way. Same green floating-text mechanism as
+  // Muhamad (GM Island / Isle of Solitude) and the Sword of Fury sign, not a toast.
+  const parchmentAntechamberInscriptionSignReader = createSignReaderSystem({
+    id: 'Parchment Room Antechamber Inscription',
+    tileIndex: PARCHMENT_ANTECHAMBER_INSCRIPTION_TILE_INDEX,
+    spriteSelector: '[data-quests-parchment-antechamber-mutation-key="65-0"]',
+    // Function form (not a plain array) — resolved at read time, since this const
+    // initializes before toasts.json finishes loading and TOAST_MESSAGES would
+    // otherwise get captured empty.
+    lines: () => [
+      'You examine the wall.',
+      `You read: "${TOAST_MESSAGES.parchmentAntechamberInscription}"`
+    ],
+    isRoomActive: () => playerEnteredParchmentAntechamber && isOnRoomByName(PARCHMENT_ANTECHAMBER_ROOM_NAME)
+  });
+
+  function enterParchmentRoom() {
+    if (playerEnteredParchmentRoom) return;
+    teardownOtherParchmentAreaSiblings('parchmentRoom');
+
+    let roomId = PARCHMENT_ROOM_BATTLE_ROOM_ID || getRoomIdByRoomName(PARCHMENT_ROOM_BATTLE_ROOM_NAME);
+    if (!roomId) roomId = getRoomIdByRoomName(PARCHMENT_ROOM_BATTLE_ROOM_NAME);
+    if (!roomId) {
+      showToast({ message: TOAST_MESSAGES.roomNotFound('The Parchment Room'), variant: 'nothing', logPrefix: getParchmentRoomLogPrefix() });
+      return;
+    }
+
+    playerEnteredParchmentRoom = true;
+    if (parchmentRoomBattle) {
+      parchmentRoomBattle.cleanup(restoreBoardSetupParchmentRoom, showQuestOverlays);
+      parchmentRoomBattle = null;
+    }
+
+    globalThis.state.board.send({ type: 'selectRoomById', roomId });
+    startParchmentRoomActorSyncWait();
+    startParchmentRoomSceneSync();
+    startParchmentRoomLv300Hider();
+
+    const initResult = initializeParchmentRoomBattle(roomId);
+    if (initResult && typeof initResult.then === 'function') {
+      initResult.then((battle) => {
+        if (playerEnteredParchmentRoom && !parchmentRoomBattle) {
+          setupParchmentRoomBattleInstance(battle);
+          hideQuestOverlays();
+          hideHeroEditorButton();
+        }
+      }).catch((error) => console.error(`${getParchmentRoomLogPrefix()} Error initializing battle:`, error));
+    } else if (initResult) {
+      setupParchmentRoomBattleInstance(initResult);
+    }
+
+    hideQuestOverlays();
+    hideHeroEditorButton();
+    updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+    showToast({ message: TOAST_MESSAGES.parchmentRoomEntered, logPrefix: getParchmentRoomLogPrefix() });
   }
 
   // =======================
@@ -27061,9 +28366,9 @@ function createNPCCooldownManager() {
     return null;
   }
 
-  function showTaintedSoulsToast(messageKey, fallback) {
+  function showTaintedSoulsToast(messageKey) {
     showToast({
-      message: TOAST_MESSAGES[messageKey] || fallback,
+      message: TOAST_MESSAGES[messageKey],
       logPrefix: getTaintedSoulsLogPrefix()
     });
   }
@@ -27114,28 +28419,28 @@ function createNPCCooldownManager() {
   async function useStuffedToadInEclipseCauldron() {
     const jakundaf = getMissionProgress(JAKUNDAF_DESERT_MISSION) || {};
     if (!jakundaf.completed) {
-      showTaintedSoulsToast('taintedSoulsNeedMission', 'The cauldron does not stir. Wyda may know more.');
+      showTaintedSoulsToast('taintedSoulsNeedMission');
       return false;
     }
     const progress = getMissionProgress(TAINTED_SOULS_MISSION) || {};
     if (!progress.accepted || progress.completed) {
-      showTaintedSoulsToast('taintedSoulsNeedMission', 'The cauldron does not stir. Wyda may know more.');
+      showTaintedSoulsToast('taintedSoulsNeedMission');
       return false;
     }
     if (progress.portalOpened) {
-      showTaintedSoulsToast('taintedSoulsPortalOpened', 'A portal opens from the cauldron.');
+      showTaintedSoulsToast('taintedSoulsPortalOpened');
       applyEkatrixPortalSprite();
       return true;
     }
     if (!hasStuffedToadForEclipseCauldron()) {
-      showTaintedSoulsToast('taintedSoulsNeedToad', 'You need the Stuffed Toad to use this cauldron.');
+      showTaintedSoulsToast('taintedSoulsNeedToad');
       return false;
     }
 
     const toadName = getTaintedSoulsRequiredItemName();
     const consumed = await consumeQuestItem(toadName, 1);
     if (!consumed) {
-      showTaintedSoulsToast('taintedSoulsNeedToad', 'You need the Stuffed Toad to use this cauldron.');
+      showTaintedSoulsToast('taintedSoulsNeedToad');
       return false;
     }
     NotificationService.showItemRemoved(toadName, getTaintedSoulsLogPrefix());
@@ -27151,7 +28456,7 @@ function createNPCCooldownManager() {
     applyEkatrixPortalSprite();
     updateEclipseTaintedSoulsState();
     if (typeof refreshQuestTileHighlights === 'function') refreshQuestTileHighlights();
-    showTaintedSoulsToast('taintedSoulsPortalOpened', 'A portal opens from the cauldron.');
+    showTaintedSoulsToast('taintedSoulsPortalOpened');
     return true;
   }
 
@@ -27413,18 +28718,18 @@ function createNPCCooldownManager() {
   function enterEkatrixPortal() {
     const progress = getMissionProgress(TAINTED_SOULS_MISSION) || {};
     if (progress.battleCompleted || progress.completed) {
-      showTaintedSoulsToast('taintedSoulsReportBack', 'Ekatrix has fallen. Return to Wyda for your reward.');
+      showTaintedSoulsToast('taintedSoulsReportBack');
       return false;
     }
     if (!progress.accepted || !progress.portalOpened) {
-      showTaintedSoulsToast('taintedSoulsPortalStub', 'The portal to Ekatrix is not yet open.');
+      showTaintedSoulsToast('taintedSoulsPortalStub');
       return false;
     }
 
     let roomId = EKATRIX_BATTLE_ROOM_ID || getRoomIdByRoomName(EKATRIX_BATTLE_ROOM_NAME);
     if (!roomId) roomId = getRoomIdByRoomName(EKATRIX_BATTLE_ROOM_NAME);
     if (!roomId) {
-      showTaintedSoulsToast('ekatrixNotFound', "Ekatrix's domain was not found.");
+      showTaintedSoulsToast('ekatrixNotFound');
       return false;
     }
 
@@ -27446,7 +28751,7 @@ function createNPCCooldownManager() {
     }
 
     globalThis.state.board.send({ type: 'selectRoomById', roomId });
-    showTaintedSoulsToast('enteringEkatrixPortal', 'Stepping through the portal...');
+    showTaintedSoulsToast('enteringEkatrixPortal');
     return true;
   }
 
@@ -31728,6 +33033,91 @@ function createNPCCooldownManager() {
   }
 
   // ============================================================
+  // Reusable factory for hiding a literal text fragment (e.g. "(Lv.300)") that a native
+  // in-battle floating nameplate renders and that our config has no control over. The
+  // nameplate is absolutely positioned and remounts as its creature moves, so this can't be
+  // a one-shot check — it polls on an interval for as long as isActive() is true and hides
+  // every match every pass (already-hidden elements are skipped via a dataset flag). Hidden
+  // via style.display='none', NEVER removed — see top-level CLAUDE.md's rule against
+  // removing nodes from React-managed containers (crashes on React's next commit).
+  //
+  // cfg:
+  //   logPrefix         - e.g. '[Quests Mod][Parchment Room]'
+  //   matchText         - either a literal substring (e.g. 'Lv.300') or a RegExp
+  //                       (e.g. /Lv\.\d+/) to test text nodes against — use a RegExp when the
+  //                       exact level can change (e.g. rebalancing) so nothing needs updating
+  //                       here when it does.
+  //   requireSiblingText - optional string/RegExp. The name and level render as sibling
+  //                       spans under the same nameplate wrapper (e.g. "Demon" next to
+  //                       "(Lv.300)"), so when set, a match only gets hidden if one of its
+  //                       *sibling* elements' text passes this — scopes hiding to a specific
+  //                       creature (e.g. the villain) without touching allies' own nameplates
+  //                       that happen to also show a level.
+  //   isActive()        - read the quest's own playerEntered<Quest> flag; false stops the poll
+  //   intervalMs        - poll interval (default 500)
+  // Returns { start, stop }.
+  // ============================================================
+  function createLevelTextHider(cfg) {
+    const { logPrefix, matchText, requireSiblingText, isActive, intervalMs = 500 } = cfg;
+    const matches = matchText instanceof RegExp
+      ? (text) => matchText.test(text)
+      : (text) => text.includes(matchText);
+    const siblingMatches = requireSiblingText instanceof RegExp
+      ? (text) => requireSiblingText.test(text)
+      : (text) => text.includes(requireSiblingText);
+    let interval = null;
+
+    function hasMatchingSibling(el) {
+      const parent = el.parentElement;
+      if (!parent) return false;
+      return Array.from(parent.children).some((sib) => sib !== el && siblingMatches((sib.textContent || '').trim()));
+    }
+
+    function hideOnce() {
+      try {
+        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+          acceptNode(node) {
+            return node.nodeValue && matches(node.nodeValue)
+              ? NodeFilter.FILTER_ACCEPT
+              : NodeFilter.FILTER_SKIP;
+          }
+        });
+        let node;
+        let hiddenCount = 0;
+        while ((node = walker.nextNode())) {
+          const el = node.parentElement;
+          if (!el || el.dataset.questsLevelHidden === '1') continue;
+          if (requireSiblingText && !hasMatchingSibling(el)) continue;
+          el.style.display = 'none';
+          el.dataset.questsLevelHidden = '1';
+          hiddenCount++;
+        }
+        if (hiddenCount) console.log(`${logPrefix} Hid ${hiddenCount} "${matchText}" nameplate element(s).`);
+      } catch (error) {
+        console.error(`${logPrefix} Error hiding "${matchText}" text:`, error);
+      }
+    }
+
+    function start() {
+      if (interval) return;
+      hideOnce();
+      interval = setInterval(() => {
+        if (!isActive()) { stop(); return; }
+        hideOnce();
+      }, intervalMs);
+    }
+
+    function stop() {
+      if (interval) {
+        clearInterval(interval);
+        interval = null;
+      }
+    }
+
+    return { start, stop };
+  }
+
+  // ============================================================
   // Reusable factory for the "chat-triggered teleport into a re-skinned battle room"
   // quest shape (Hellgate Part 1/Library, Isle of Solitude, Draconia Tower/Quest, Realm of
   // Dreams, ...). Every one of those quests used to hand-duplicate this exact ~130-line block
@@ -32990,6 +34380,902 @@ function createNPCCooldownManager() {
     showToast({ message: TOAST_MESSAGES.realmOfDreamsEntering, logPrefix: getRealmOfDreamsLogPrefix() });
   }
 
+  // =======================
+  // Astronis' Call — Astronis ("Bubble"), a guild leader NPC standing on tile 87 of The
+  // Annihilator Quest (edanni). Requires floor 15 cleared, same as before — but is NO LONGER
+  // a permanent NPC: he only appears during a live, GLOBAL World Raid event (see the World
+  // Raid module doc comment further below), and the fight against Orshabaal only exists while
+  // that raid is live. Runs on the same createTeleportBattleQuest() factory as Realm of
+  // Dreams — chat-triggered teleport into the shared Sewers reskin, victory grants an
+  // Orshabaal Soul Core on report-back to Bubble (once, ever — see completeAnnihilatorOrshabaalMission),
+  // and both victory and defeat return the player to edanni. A raid ending mid-fight (someone
+  // else's victory, or the 24h expiry) force-ejects the player back to edanni too — see
+  // pollWorldRaidState().
+  // =======================
+
+  // =======================
+  // Creature Cry system — reusable factory for a creature that "shouts" random red text above
+  // its own board tile (same mechanic as createSignReaderSystem's green sign text — a
+  // fixed-position element mounted to document.body, positioned from the tile's own
+  // getBoundingClientRect() to escape per-tile z-index stacking, not a toast), while some
+  // condition is active. The text appears and disappears instantly — no fade or drift — matching
+  // the native "Demon" nameplate-style cry text. Polled (not per-tick) with a chance to fire each
+  // poll, with lightweight anti-repeat de-duplication so the same line rarely fires twice in a row.
+  // First consumer: Orshabaal, below. To add a cry system for a future creature, just call
+  // createCreatureCrySystem({...}) with its own id/lines/isActive/tileIndex — no changes
+  // needed here.
+  // =======================
+  function createCreatureCrySystem({
+    id, lines, isActive, tileIndex, pollIntervalMs = 5000, triggerChance = 0.5, historySize = 2,
+    durationMs = 3000, logPrefix
+  }) {
+    let timer = null;
+    let recentHistory = [];
+    const prefix = logPrefix || `[Quests Mod][Creature Cry][${id}]`;
+    const slug = String(id).toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    const textClass = `quests-creature-cry-${slug}-text`;
+    const styleId = `${textClass}-styles`;
+
+    function pickLine() {
+      const pool = lines.filter((line) => !recentHistory.includes(line));
+      const candidates = pool.length ? pool : lines;
+      const line = candidates[Math.floor(Math.random() * candidates.length)];
+      recentHistory.push(line);
+      if (recentHistory.length > historySize) recentHistory.shift();
+      return line;
+    }
+
+    function ensureStyles() {
+      if (document.getElementById(styleId)) return;
+      const style = document.createElement('style');
+      style.id = styleId;
+      // Instant appear/disappear, fixed in place — no fade-in, no float/drift. Matches the
+      // native "Demon" nameplate-style cry text: it's just there, then it's gone.
+      style.textContent = `
+        .${textClass} {
+          position: fixed;
+          transform: translate(-50%, -100%);
+          width: max-content;
+          max-width: 280px;
+          pointer-events: none;
+          z-index: 2147483647;
+          text-align: center;
+          font-size: 16px;
+          line-height: 1.2;
+          font-weight: 700;
+          color: #ff5c1a;
+          text-shadow: -1px 0 #000, 1px 0 #000, 0 -1px #000, 0 1px #000;
+          user-select: none;
+        }
+      `;
+      document.head.appendChild(style);
+    }
+
+    function resolveTileIndex() {
+      return typeof tileIndex === 'function' ? tileIndex() : tileIndex;
+    }
+
+    function showLine(message) {
+      const idx = resolveTileIndex();
+      if (idx == null) return;
+      const tileEl = getTileElement(idx);
+      if (!tileEl) return;
+      ensureStyles();
+      // Don't stack a second cry on top of one still fading — let each finish first.
+      if (document.querySelector(`.${textClass}`)) return;
+      const rect = tileEl.getBoundingClientRect();
+      const bubble = document.createElement('div');
+      bubble.className = `${textClass} pixel-font-16 revert-pixel-font-spacing`;
+      bubble.style.left = `${rect.left + rect.width / 2}px`;
+      bubble.style.top = `${rect.top}px`;
+      bubble.textContent = message;
+      document.body.appendChild(bubble);
+      setTimeout(() => {
+        if (bubble.parentNode) bubble.remove();
+      }, durationMs + 60);
+      console.log(`${prefix} ${message}`);
+    }
+
+    function tick() {
+      try {
+        if (typeof isActive === 'function' && !isActive()) return;
+        if (!Array.isArray(lines) || !lines.length) return;
+        if (Math.random() >= triggerChance) return;
+        showLine(pickLine());
+      } catch (error) {
+        console.error(`${prefix} Error:`, error);
+      }
+    }
+
+    return {
+      setupObserver() {
+        if (timer) return;
+        timer = setInterval(tick, pollIntervalMs);
+      },
+      cleanupSystem() {
+        if (timer) {
+          clearInterval(timer);
+          timer = null;
+        }
+        recentHistory = [];
+        document.querySelectorAll(`.${textClass}`).forEach((el) => el.remove());
+      }
+    };
+  }
+
+  const ORSHABAAL_CRY_LINES = [
+    'PRAISED BE MY MASTERS, THE RUTHLESS SEVEN!',
+    'YOU ARE DOOMED!',
+    'ORSHABAAL IS BACK!',
+    'Be prepared for the day my masters will come for you!',
+    'SOULS FOR ORSHABAAL!'
+  ];
+
+  const ORSHABAAL_VILLAIN_TILE_INDEX = 32; // matches battles.json's annihilator_orshabaal villain entry — pinned (preventVillainMovement: true), so a fixed tile is safe to hardcode here.
+
+  const orshabaalCrySystem = createCreatureCrySystem({
+    id: 'orshabaal',
+    lines: ORSHABAAL_CRY_LINES,
+    isActive: () => playerEnteredAnnihilatorOrshabaal && !!annihilatorOrshabaalBattle,
+    tileIndex: ORSHABAAL_VILLAIN_TILE_INDEX,
+    logPrefix: '[Quests Mod][Orshabaal Cry]'
+  });
+
+  function getAnnihilatorOrshabaalLogPrefix() { return '[Quests Mod][Astronis]'; }
+
+  function hasCompletedAnnihilatorFloor15() {
+    const rooms = globalThis.state?.player?.getSnapshot?.()?.context?.rooms;
+    const floor = rooms?.edanni?.floor;
+    return typeof floor === 'number' && floor >= 15;
+  }
+
+  // =======================
+  // World Raid (Orshabaal) — a GLOBAL, cross-account event, not per-player progress. A tiny
+  // per-victory chance (any battle won in the Edron region — see the Edron-drop hook in
+  // setupQuestItemsDropSystem) writes a shared "raid started" record to Firebase; every
+  // client polls that same record. Bubble is only ever visible while a raid is live AND this
+  // browser has finished playing the 3-toast warning buildup for THAT raid instance — a
+  // player who logs in mid-raid still gets the full local buildup before he appears, but the
+  // 24h expiry itself is computed purely from the shared `startedAt`, identical for everyone.
+  //
+  // Defeating Orshabaal is tracked PER PLAYER, not globally — each player's own win is just
+  // their own mission progress (`battleCompleted`, synced to their own Firebase quests path,
+  // same as every other quest). The raid itself stays live for the full 24h window for
+  // everyone regardless of how many players (or whether anyone) has already beaten him —
+  // one player's kill does not end the event early for the rest of the world. (Earlier builds
+  // of this feature had a global `defeatedAt` that ended the raid for everyone on the first
+  // kill; that was removed — it meant only the single fastest player could ever collect the
+  // reward, locking everyone else out the moment someone else won.)
+  //
+  // Trust model (read this before touching the trigger write): this whole feature is
+  // built on the same raw, unauthenticated Firebase REST PUT every other "shared" write in
+  // this codebase uses (FirebaseService, guild coins, leaderboards, …), and — same as every
+  // one of those — the `world-raid` path's deployed Realtime Database rule is flat
+  // `.read/.write: true`, not narrowed to this node specifically. An attempt to lock it down
+  // with a conditional rule was tried and repeatedly rejected live 401s that couldn't be
+  // diagnosed without direct project access, so it was reverted — this path is exactly as
+  // client-trusted as everything else in this project. `startedAt` is still written as a
+  // Firebase server timestamp ({".sv":"timestamp"}) so at least a normal client can't
+  // backdate/future-date it, but any client can still trigger/reset/spoof this at will via a
+  // raw PUT if it wants to. Do not treat the client-side probability roll or cooldown check
+  // below as the real gate — they're UX niceties, not security; all real protection here is
+  // "nobody bothered to abuse it".
+  // =======================
+
+  const WORLD_RAID_FIREBASE_PATH = `${FIREBASE_CONFIG.firebaseUrl}/world-raid/annihilator-orshabaal`;
+  const WORLD_RAID_TRIGGER_CHANCE = 0.00001; // 0.001% per eligible (Edron) battle victory
+  const WORLD_RAID_DURATION_MS = 24 * 60 * 60 * 1000;
+  const WORLD_RAID_COOLDOWN_MS = 5 * 24 * 60 * 60 * 1000; // 5 days of quiet after a raid ENDS before another can trigger
+  const WORLD_RAID_POLL_INTERVAL_MS = 30000;
+  const WORLD_RAID_TOAST_GAP_MS = 60000;
+  const WORLD_RAID_TOAST_DURATION_MS = 30000;
+  const WORLD_RAID_TOAST_SEEN_STORAGE_KEY = 'bestiary-world-raid-orshabaal-toast-seen';
+
+  let worldRaidState = null; // { startedAt: number } | null — last Firebase poll result
+  // Distinguishes "we haven't fetched world-raid state yet this session" from "we fetched it
+  // and there's genuinely no raid" — both look identical as `worldRaidState === null`, but
+  // treating the former as the latter is a real bug: right after a page refresh there's a
+  // window (one network round-trip) where this is still false while mission progress has
+  // ALREADY hydrated from Firebase with battleCompleted: true. Without this guard,
+  // ensureAnnihilatorOrshabaalProgressForCurrentRaid() reads the not-yet-fetched null state as
+  // "no raid live" and wipes that real battleCompleted flag before the raid's true (live)
+  // state is ever known — which is exactly the "I killed it, refreshed, and it offered the
+  // fight again" bug this flag exists to close.
+  let worldRaidStateFetched = false;
+  let worldRaidPollTimer = null;
+  let worldRaidToastSequenceTimers = [];
+  let worldRaidLocalRevealedStartedAt = null; // startedAt this browser has finished the toast buildup for
+
+  function isWorldRaidStateLive(state) {
+    const startedAt = Number(state?.startedAt);
+    if (!Number.isFinite(startedAt)) return false;
+    return (Date.now() - startedAt) < WORLD_RAID_DURATION_MS;
+  }
+
+  // When a raid instance ends — always its full 24h window running out, since an individual
+  // player's kill no longer ends it early for everyone (see the module doc comment above).
+  function getWorldRaidEffectiveEndTime(state) {
+    const startedAt = Number(state?.startedAt);
+    if (!Number.isFinite(startedAt)) return null;
+    return startedAt + WORLD_RAID_DURATION_MS;
+  }
+
+  // True while a previous raid's 5-day cooldown hasn't elapsed yet — distinct from
+  // isWorldRaidStateLive() (which is true only during the raid itself). No prior raid record
+  // at all is never "on cooldown".
+  function isWorldRaidOnCooldown(state) {
+    if (isWorldRaidStateLive(state)) return false;
+    const endedAt = getWorldRaidEffectiveEndTime(state);
+    if (endedAt == null) return false;
+    return (Date.now() - endedAt) < WORLD_RAID_COOLDOWN_MS;
+  }
+
+  // Re-checked on every call (not cached at module load) since the log level can be changed
+  // live from the popup while the game is running — same rationale as the Mornenion Hole
+  // debug listener's own verbose check.
+  function isQuestsVerboseLogging() {
+    try {
+      return globalThis.BestiaryLogger?.getLevel?.() === 'verbose' || window.BESTIARY_DEBUG === true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  // "1d 4h 32m", "12m 34s", "45s" — always at least seconds-precision, no more than two units.
+  function formatWorldRaidDuration(ms) {
+    if (!Number.isFinite(ms)) return 'n/a';
+    const sign = ms < 0 ? '-' : '';
+    const totalSeconds = Math.floor(Math.abs(ms) / 1000);
+    const days = Math.floor(totalSeconds / 86400);
+    const hours = Math.floor((totalSeconds % 86400) / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    if (days > 0) return `${sign}${days}d ${hours}h`;
+    if (hours > 0) return `${sign}${hours}h ${minutes}m`;
+    if (minutes > 0) return `${sign}${minutes}m ${seconds}s`;
+    return `${sign}${seconds}s`;
+  }
+
+  // Verbose-gated (see isQuestsVerboseLogging) periodic status line — the countdown/timer
+  // readout requested for debugging the raid without needing to call QuestsDev.worldRaidStatus()
+  // by hand every time. `reason` identifies what triggered this particular log call.
+  // Dedup key for the routine 'poll' reason only — a countdown's remaining time changes every
+  // tick by definition, so comparing the raw timer text would defeat the point of deduping.
+  // Keyed on the stuff that actually represents a state CHANGE (live/cooldown transitions, the
+  // raid record itself, local reveal, visibility) — not on elapsed time.
+  let lastWorldRaidPollLogKey = null;
+
+  function logWorldRaidDebugStatus(reason) {
+    if (!isQuestsVerboseLogging()) return;
+    const state = worldRaidState;
+    const live = isWorldRaidStateLive(state);
+    const onCooldown = isWorldRaidOnCooldown(state);
+    const visibleToThisClient = isAnnihilatorOrshabaalRaidVisibleToThisClient();
+    const toastSequenceInProgress = worldRaidToastSequenceTimers.length > 0;
+    // This player's own status against the CURRENT raid instance — without this, the debug
+    // line only ever shows the shared/global raid record, which reads identically whether or
+    // not you personally already fought and turned it in. Pulled from
+    // getAnnihilatorOrshabaalRaidStatus(), the single source of truth also used by Bubble's
+    // own visibility, his fight.png badge, the Missions button glow, and the chat handler —
+    // so this log can never show a different verdict than what the game itself is acting on.
+    const myStatus = getAnnihilatorOrshabaalRaidStatus();
+    const myProgress = myStatus.progress;
+
+    if (reason === 'poll') {
+      const key = [
+        live, onCooldown, state?.startedAt ?? null,
+        worldRaidLocalRevealedStartedAt, visibleToThisClient, toastSequenceInProgress,
+        myProgress.accepted, myProgress.battleCompleted, myProgress.completed,
+        myStatus.alreadyReportedThisRaid, myStatus.hasPendingAction
+      ].join('|');
+      if (key === lastWorldRaidPollLogKey) return; // unchanged since last tick — skip the spam
+      lastWorldRaidPollLogKey = key;
+    }
+
+    const now = Date.now();
+    let timerLine;
+    if (live) {
+      const endsAt = Number(state.startedAt) + WORLD_RAID_DURATION_MS;
+      timerLine = `LIVE — ends in ${formatWorldRaidDuration(endsAt - now)}`;
+    } else if (onCooldown) {
+      const cooldownEndsAt = getWorldRaidEffectiveEndTime(state) + WORLD_RAID_COOLDOWN_MS;
+      timerLine = `on cooldown — triggerable again in ${formatWorldRaidDuration(cooldownEndsAt - now)}`;
+    } else {
+      timerLine = 'no active raid, not on cooldown — triggerable now';
+    }
+    console.log(`[Quests Mod][World Raid][debug] (${reason}) ${timerLine}`, {
+      state,
+      locallyRevealedStartedAt: worldRaidLocalRevealedStartedAt,
+      visibleToThisClient,
+      toastSequenceInProgress,
+      myAccepted: !!myProgress.accepted,
+      myBattleCompleted: !!myProgress.battleCompleted,
+      myCompletedEver: !!myProgress.completed,
+      myAlreadyReportedThisRaid: myStatus.alreadyReportedThisRaid,
+      myHasPendingAction: myStatus.hasPendingAction
+    });
+  }
+
+  async function fetchWorldRaidState() {
+    return await FirebaseService.get(WORLD_RAID_FIREBASE_PATH, 'fetch world raid state', null);
+  }
+
+  function getLocallySeenWorldRaidStartedAt() {
+    try {
+      const raw = localStorage.getItem(WORLD_RAID_TOAST_SEEN_STORAGE_KEY);
+      const v = Number(raw);
+      return Number.isFinite(v) ? v : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function setLocallySeenWorldRaidStartedAt(startedAt) {
+    try {
+      localStorage.setItem(WORLD_RAID_TOAST_SEEN_STORAGE_KEY, String(startedAt));
+    } catch (_) {
+      // Non-fatal — worst case this browser replays the buildup once more than necessary.
+    }
+  }
+
+  function clearWorldRaidToastTimers() {
+    worldRaidToastSequenceTimers.forEach((id) => clearTimeout(id));
+    worldRaidToastSequenceTimers = [];
+  }
+
+  function playWorldRaidToastSequence(startedAt) {
+    clearWorldRaidToastTimers();
+    if (isQuestsVerboseLogging()) {
+      console.log(`[Quests Mod][World Raid][debug] Starting local toast buildup for raid startedAt=${startedAt} (${WORLD_RAID_TOAST_GAP_MS * 2 + WORLD_RAID_TOAST_DURATION_MS}ms total until Bubble reveals)`);
+    }
+    const show = (message) => showToast({
+      message,
+      duration: WORLD_RAID_TOAST_DURATION_MS,
+      logPrefix: '[Quests Mod][World Raid]'
+    });
+    show(TOAST_MESSAGES.worldRaidOrshabaalWarning1);
+    worldRaidToastSequenceTimers.push(setTimeout(() => {
+      show(TOAST_MESSAGES.worldRaidOrshabaalWarning2);
+      logWorldRaidDebugStatus('toast-2');
+    }, WORLD_RAID_TOAST_GAP_MS));
+    worldRaidToastSequenceTimers.push(setTimeout(() => {
+      show(TOAST_MESSAGES.worldRaidOrshabaalWarning3);
+      worldRaidLocalRevealedStartedAt = startedAt;
+      setLocallySeenWorldRaidStartedAt(startedAt);
+      updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+      if (typeof updateMissionsButtonState === 'function') updateMissionsButtonState();
+      if (typeof syncActiveMissionTabs === 'function') syncActiveMissionTabs();
+      logWorldRaidDebugStatus('toast-3-revealed');
+    }, WORLD_RAID_TOAST_GAP_MS * 2));
+  }
+
+  // Called on every poll tick while a raid is live: starts (or resumes/skips) this browser's
+  // local reveal sequence for the CURRENT raid instance.
+  function ensureWorldRaidLocalRevealForCurrentState() {
+    if (!isWorldRaidStateLive(worldRaidState)) return;
+    const startedAt = Number(worldRaidState.startedAt);
+    if (worldRaidLocalRevealedStartedAt === startedAt) return; // already revealed, or sequencing
+    if (worldRaidToastSequenceTimers.length) return; // buildup already in progress for this raid
+    const seen = getLocallySeenWorldRaidStartedAt();
+    if (seen === startedAt) {
+      // This exact raid's buildup already played in this browser before (e.g. a reload
+      // mid-raid) — reveal immediately, no need to replay the toasts.
+      worldRaidLocalRevealedStartedAt = startedAt;
+      return;
+    }
+    playWorldRaidToastSequence(startedAt);
+  }
+
+  function isAnnihilatorOrshabaalRaidVisibleToThisClient() {
+    return isWorldRaidStateLive(worldRaidState)
+      && worldRaidLocalRevealedStartedAt === Number(worldRaidState.startedAt);
+  }
+
+  function buildWorldRaidTriggerPayload() {
+    return { startedAt: { '.sv': 'timestamp' } };
+  }
+
+  async function tryTriggerWorldRaid() {
+    try {
+      if (isWorldRaidStateLive(worldRaidState) || isWorldRaidOnCooldown(worldRaidState)) return;
+      if (Math.random() >= WORLD_RAID_TRIGGER_CHANCE) return;
+      // Re-check fresh right before writing — narrows (does not eliminate) the race against
+      // another client's simultaneous trigger. There is no server-side backstop (see the
+      // module doc comment above) — this is best-effort only.
+      const current = await fetchWorldRaidState();
+      worldRaidStateFetched = true;
+      if (isWorldRaidStateLive(current) || isWorldRaidOnCooldown(current)) {
+        worldRaidState = current;
+        return;
+      }
+      await FirebaseService.put(
+        WORLD_RAID_FIREBASE_PATH,
+        buildWorldRaidTriggerPayload(),
+        'trigger world raid'
+      );
+      console.log('[Quests Mod][World Raid] Triggered a new Orshabaal world raid.');
+      worldRaidState = await fetchWorldRaidState();
+      logWorldRaidDebugStatus('triggered');
+    } catch (error) {
+      console.error('[Quests Mod][World Raid] Error triggering raid:', error);
+    }
+  }
+
+  async function pollWorldRaidState() {
+    try {
+      const wasLive = isWorldRaidStateLive(worldRaidState);
+      const next = await fetchWorldRaidState();
+      const nowLive = isWorldRaidStateLive(next);
+      worldRaidState = next;
+      worldRaidStateFetched = true;
+
+      if (nowLive) {
+        ensureWorldRaidLocalRevealForCurrentState();
+      } else {
+        worldRaidLocalRevealedStartedAt = null;
+        clearWorldRaidToastTimers();
+      }
+
+      if (wasLive && !nowLive && playerEnteredAnnihilatorOrshabaal) {
+        // Raid's 24h window expired while this player was mid-fight — eject.
+        showToast({
+          message: TOAST_MESSAGES.worldRaidOrshabaalEnded,
+          duration: 8000,
+          logPrefix: '[Quests Mod][World Raid]'
+        });
+        cleanupAnnihilatorOrshabaalQuest();
+        setTimeout(() => navigateToAnnihilatorQuest(), 100);
+      }
+
+      // Once a raid's live window AND its full 5-day cooldown have both elapsed, nothing
+      // reads this record anymore — cooldown (getWorldRaidEffectiveEndTime → startedAt +
+      // WORLD_RAID_DURATION_MS) is the ONLY reason it's kept around past the raid itself, so
+      // once isWorldRaidOnCooldown also goes false there's no correctness reason left to keep
+      // it. Delete it instead of leaving a stale row in Firebase forever. Safe to do from every
+      // client unconditionally: delete on an already-absent node is a no-op, and worst case
+      // several clients race to delete the same expired record at once.
+      if (next && !nowLive && !isWorldRaidOnCooldown(next)) {
+        try {
+          await FirebaseService.delete(WORLD_RAID_FIREBASE_PATH, 'auto-clear expired world raid record');
+          worldRaidState = null;
+          console.log('[Quests Mod][World Raid] Cleared expired raid record (live window + cooldown both elapsed).');
+        } catch (error) {
+          console.error('[Quests Mod][World Raid] Error auto-clearing expired raid record:', error);
+        }
+      }
+
+      // Self-heal accepted/battleCompleted on every tick (not just when the player happens to
+      // talk to Bubble) — this is what actually clears a stale "accepted: true" left over from
+      // a raid that's since ended, instead of it lingering until the next chat interaction.
+      if (missionProgressHydratedFromFirebase) {
+        await ensureAnnihilatorOrshabaalProgressForCurrentRaid();
+      }
+
+      updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+      if (typeof updateMissionsButtonState === 'function') updateMissionsButtonState();
+      if (typeof syncActiveMissionTabs === 'function') syncActiveMissionTabs();
+      logWorldRaidDebugStatus('poll');
+    } catch (error) {
+      console.error('[Quests Mod][World Raid] Poll error:', error);
+    }
+  }
+
+  function setupWorldRaidPolling() {
+    if (worldRaidPollTimer) return;
+    pollWorldRaidState();
+    worldRaidPollTimer = setInterval(pollWorldRaidState, WORLD_RAID_POLL_INTERVAL_MS);
+  }
+
+  function cleanupWorldRaidPolling() {
+    if (worldRaidPollTimer) {
+      clearInterval(worldRaidPollTimer);
+      worldRaidPollTimer = null;
+    }
+    clearWorldRaidToastTimers();
+    worldRaidState = null;
+    worldRaidStateFetched = false;
+    worldRaidLocalRevealedStartedAt = null;
+    lastWorldRaidPollLogKey = null;
+  }
+
+  // Real-number accessors for the two World Raid tracking fields (see progressAnnihilatorOrshabaal's
+  // comment for why these live outside the mission's generic progress object).
+  function getAnnihilatorOrshabaalRaidStartedAt() {
+    const v = Number(kingChatState.annihilatorOrshabaalRaidStartedAt);
+    return Number.isFinite(v) ? v : null;
+  }
+
+  function getAnnihilatorOrshabaalLastReportedRaidStartedAt() {
+    const v = Number(kingChatState.annihilatorOrshabaalLastReportedRaidStartedAt);
+    return Number.isFinite(v) ? v : null;
+  }
+
+  async function setAnnihilatorOrshabaalRaidTracking(updates = {}) {
+    let changed = false;
+    if ('raidStartedAt' in updates && kingChatState.annihilatorOrshabaalRaidStartedAt !== updates.raidStartedAt) {
+      kingChatState.annihilatorOrshabaalRaidStartedAt = updates.raidStartedAt;
+      changed = true;
+    }
+    if ('lastReportedRaidStartedAt' in updates
+      && kingChatState.annihilatorOrshabaalLastReportedRaidStartedAt !== updates.lastReportedRaidStartedAt) {
+      kingChatState.annihilatorOrshabaalLastReportedRaidStartedAt = updates.lastReportedRaidStartedAt;
+      changed = true;
+    }
+    if (!changed) return;
+    const playerName = getCurrentPlayerName();
+    if (!playerName || !missionProgressHydratedFromFirebase) return;
+    try {
+      await saveKingTibianusProgress(playerName, getAllMissionProgress());
+    } catch (err) {
+      console.error('[Quests Mod][World Raid] Error saving raid tracking fields:', err);
+    }
+  }
+
+  // ── Single source of truth for "where does this player stand on the CURRENT raid" ──
+  // Bubble's visibility, his fight.png badge, the Missions button glow, the chat handler's
+  // dialogue branching, and the verbose debug log each used to independently re-derive some
+  // version of "has this player already handled this raid" — which is exactly why bugs kept
+  // slipping through one at a time (the hydration race, the Firebase-write whitelist bug, the
+  // native-tick-cap crediting gap): five almost-but-not-quite-identical checks, each patched
+  // separately. This is now the only place that combines raid-liveness with this player's own
+  // progress into a verdict; every consumer below reads from it instead of recomputing it.
+  function getAnnihilatorOrshabaalRaidStatus() {
+    const raidLive = isWorldRaidStateLive(worldRaidState);
+    const liveRaidStartedAt = raidLive ? Number(worldRaidState.startedAt) : null;
+    const progress = getMissionProgress(ANNIHILATOR_ORSHABAAL_MISSION) || {};
+    const trackedRaidStartedAt = getAnnihilatorOrshabaalRaidStartedAt();
+    const lastReportedRaidStartedAt = getAnnihilatorOrshabaalLastReportedRaidStartedAt();
+
+    // The raid instance this player's progress actually applies to: the live one once it's
+    // been claimed as theirs, otherwise whatever they last had tracked — covers the grace
+    // period right after a raid ends where they haven't reported back yet.
+    const relevantRaidStartedAt = raidLive ? liveRaidStartedAt : trackedRaidStartedAt;
+    const isFreshRaidForPlayer = raidLive && trackedRaidStartedAt !== liveRaidStartedAt;
+    const alreadyReportedThisRaid = relevantRaidStartedAt != null
+      && lastReportedRaidStartedAt === relevantRaidStartedAt;
+
+    // Something for the player to do right now: a fresh, unaccepted offer for an instance
+    // they haven't touched, or a battle already won and awaiting turn-in (whether the raid is
+    // still live or just ended) — in every case, only while it hasn't already been reported.
+    const hasPendingAction = !alreadyReportedThisRaid && (
+      isFreshRaidForPlayer
+      || (!!progress.battleCompleted && relevantRaidStartedAt != null)
+      || (raidLive && !progress.accepted)
+    );
+
+    return {
+      raidLive,
+      liveRaidStartedAt,
+      relevantRaidStartedAt,
+      progress,
+      alreadyReportedThisRaid,
+      hasPendingAction
+    };
+  }
+
+  // Bubble is no longer a permanent NPC (see the removed metAstronis flag) — he only appears
+  // to a player who has both proven themselves (floor 15) AND is watching a live raid this
+  // browser has finished revealing. EXCEPTION: a player who just won THIS raid instance and
+  // hasn't reported back yet still sees him even after the raid ends globally, so they always
+  // have a way to walk back and collect the one-time reward.
+  function astronisUnlocked() {
+    if (!hasCompletedAnnihilatorFloor15()) return false;
+    if (isAnnihilatorOrshabaalRaidVisibleToThisClient()) return true;
+    const status = getAnnihilatorOrshabaalRaidStatus();
+    return !status.raidLive && status.hasPendingAction;
+  }
+
+  // Keeps accepted/battleCompleted in sync with the CURRENT world-raid instance (or lack
+  // thereof) — repeatable per raid, while `completed` (the permanent one-time flag) never
+  // resets. Two cases:
+  //  - No raid live right now: any leftover accepted/battleCompleted from a raid that has
+  //    since ended (defeated or expired) is stale and must be cleared here — nothing else
+  //    ever revisits it once the raid's gone, so leaving it would show "accepted" forever.
+  //  - A raid IS live, but a DIFFERENT instance than the one accepted/battleCompleted
+  //    currently track: reset for the new instance.
+  // Called on every World Raid poll tick (see pollWorldRaidState) — not just when the player
+  // happens to talk to Bubble — so this self-heals promptly instead of waiting on chat.
+  async function ensureAnnihilatorOrshabaalProgressForCurrentRaid() {
+    // Never judge "is a raid live" off data we've never actually fetched (see
+    // worldRaidStateFetched's doc comment) — that reads a fresh page load's still-null
+    // worldRaidState as "no raid", which can wipe a real, already-earned battleCompleted the
+    // instant mission progress finishes hydrating from Firebase, before the raid's true state
+    // is known.
+    if (!worldRaidStateFetched) {
+      try {
+        worldRaidState = await fetchWorldRaidState();
+      } catch (error) {
+        console.error('[Quests Mod][World Raid] Error fetching state for ensureAnnihilatorOrshabaalProgressForCurrentRaid:', error);
+      }
+      worldRaidStateFetched = true;
+    }
+    const liveRaidStartedAt = isWorldRaidStateLive(worldRaidState) ? Number(worldRaidState.startedAt) : null;
+    const trackedRaidStartedAt = getAnnihilatorOrshabaalRaidStartedAt();
+    const progress = getMissionProgress(ANNIHILATOR_ORSHABAAL_MISSION) || {};
+
+    if (!liveRaidStartedAt) {
+      if (progress.accepted || progress.battleCompleted) {
+        const reset = { ...progress, accepted: false, battleCompleted: false };
+        await persistMissionProgress(ANNIHILATOR_ORSHABAAL_MISSION, reset);
+        return reset;
+      }
+      return progress;
+    }
+
+    if (trackedRaidStartedAt !== liveRaidStartedAt) {
+      await setAnnihilatorOrshabaalRaidTracking({ raidStartedAt: liveRaidStartedAt });
+      if (progress.accepted || progress.battleCompleted) {
+        const reset = { ...progress, accepted: false, battleCompleted: false };
+        await persistMissionProgress(ANNIHILATOR_ORSHABAAL_MISSION, reset);
+        return reset;
+      }
+    }
+    return progress;
+  }
+
+  const annihilatorOrshabaalQuest = createTeleportBattleQuest({
+    logPrefix: getAnnihilatorOrshabaalLogPrefix(),
+    addedAttr: QUEST_BOARD_ADDED_ATTR_ANNIHILATOR_ORSHABAAL,
+    hiddenTag: QUEST_BOARD_HIDDEN_TAG_ANNIHILATOR_ORSHABAAL,
+    getTileMutations: () => ANNIHILATOR_ORSHABAAL_TILE_MUTATIONS,
+    isEntered: () => playerEnteredAnnihilatorOrshabaal,
+    getBattle: () => annihilatorOrshabaalBattle,
+    getSceneSub: () => annihilatorOrshabaalSceneSub,
+    setSceneSub: (v) => { annihilatorOrshabaalSceneSub = v; },
+    setHitboxesApplied: (v) => { annihilatorOrshabaalHitboxesApplied = v; },
+    roomName: () => ANNIHILATOR_ORSHABAAL_BATTLE_ROOM_NAME
+  });
+
+  function applyAnnihilatorOrshabaalTileMutations() {
+    annihilatorOrshabaalQuest.applyTileMutations();
+  }
+  function restoreAnnihilatorOrshabaalTileMutations() {
+    annihilatorOrshabaalQuest.restoreTileMutations();
+  }
+  function stopAnnihilatorOrshabaalSceneSync() {
+    annihilatorOrshabaalQuest.stopSceneSync();
+  }
+  function startAnnihilatorOrshabaalSceneSync() {
+    annihilatorOrshabaalQuest.startSceneSync();
+  }
+  function restoreBoardSetupAnnihilatorOrshabaal() {
+    annihilatorOrshabaalQuest.restoreBoardSetup();
+  }
+
+  function navigateToAnnihilatorQuest() {
+    try {
+      const roomId = getRoomIdByRoomName(ANNIHILATOR_ORSHABAAL_RETURN_ROOM_NAME) || 'edanni';
+      if (!roomId) {
+        console.warn(`${getAnnihilatorOrshabaalLogPrefix()} The Annihilator Quest room not found`);
+        return;
+      }
+      globalThis.state.board.send({ type: 'selectRoomById', roomId });
+    } catch (error) {
+      console.error(`${getAnnihilatorOrshabaalLogPrefix()} Error navigating to The Annihilator Quest:`, error);
+    }
+  }
+
+  function cleanupAnnihilatorOrshabaalQuest() {
+    try {
+      removeCustomBattleStatusToast();
+      orshabaalBossHpBar.remove();
+      stopAnnihilatorOrshabaalSceneSync();
+      playerEnteredAnnihilatorOrshabaal = false;
+      annihilatorOrshabaalKillCredited = false;
+      restoreAnnihilatorOrshabaalTileMutations();
+      if (annihilatorOrshabaalBattle) {
+        annihilatorOrshabaalBattle.cleanup(restoreBoardSetupAnnihilatorOrshabaal, showQuestOverlays);
+        annihilatorOrshabaalBattle = null;
+        console.log(`${getAnnihilatorOrshabaalLogPrefix()} Battle cleaned up`);
+      }
+      showQuestOverlays();
+      updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+    } catch (error) {
+      console.error(`${getAnnihilatorOrshabaalLogPrefix()} Error cleaning up:`, error);
+    }
+  }
+
+  // Marks this attempt's mission progress as won. Called from two places: the boss HP bar's
+  // onDeath hook (fires the instant Orshabaal's HP reaches 0, regardless of the sandbox's own
+  // fixed tick-ceiling grading) and the native victoryDefeat.onVictory callback (fires only
+  // when gameTimer itself resolves the fight as "victory" before that ceiling). Guarded by
+  // annihilatorOrshabaalKillCredited so whichever one notices first is the one that counts —
+  // the other is a no-op, not a duplicate write.
+  async function creditAnnihilatorOrshabaalKill() {
+    if (annihilatorOrshabaalKillCredited) return;
+    annihilatorOrshabaalKillCredited = true;
+    console.log(`${getAnnihilatorOrshabaalLogPrefix()} Orshabaal defeated`);
+    try {
+      const progress = getMissionProgress(ANNIHILATOR_ORSHABAAL_MISSION) || {};
+      await persistMissionProgress(ANNIHILATOR_ORSHABAAL_MISSION, { ...progress, accepted: true, battleCompleted: true });
+    } catch (error) {
+      console.error(`${getAnnihilatorOrshabaalLogPrefix()} Error saving battleCompleted flag:`, error);
+    }
+    // Per-player only — this player's own kill doesn't end the raid for anyone else
+    // (see the World Raid module doc comment above).
+    if (typeof updateMissionsButtonState === 'function') updateMissionsButtonState();
+  }
+
+  async function grantAnnihilatorOrshabaalReward() {
+    const itemName = 'Orshabaal Soul Core';
+    try {
+      await addQuestItem(itemName, 1);
+      showQuestItemNotification(itemName, 1);
+      console.log(`${getAnnihilatorOrshabaalLogPrefix()} Granted reward item:`, itemName);
+    } catch (error) {
+      console.error(`${getAnnihilatorOrshabaalLogPrefix()} Error granting reward:`, error);
+    }
+  }
+
+  async function completeAnnihilatorOrshabaalMission() {
+    const progress = getMissionProgress(ANNIHILATOR_ORSHABAAL_MISSION) || {};
+    if (progress.completed) return false;
+    try {
+      await persistMissionProgress(ANNIHILATOR_ORSHABAAL_MISSION, { ...progress, accepted: true, completed: true, battleCompleted: true });
+      await grantAnnihilatorOrshabaalReward();
+      NotificationService.showQuestCompleted(ANNIHILATOR_ORSHABAAL_MISSION, getAnnihilatorOrshabaalLogPrefix(), { productName: 'Orshabaal Soul Core' });
+      updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+      return true;
+    } catch (error) {
+      console.error(`${getAnnihilatorOrshabaalLogPrefix()} Error completing mission:`, error);
+      return false;
+    }
+  }
+
+  function findAnnihilatorOrshabaalBattleActor(world = annihilatorOrshabaalBattleWorld) {
+    const actors = getBattleWorldActors(world);
+    if (!actors.length) return null;
+    const nickname = 'orshabaal';
+    return actors.find((actor) => actor?.villain === true && String(actor?.name || actor?.metadata?.name || '').toLowerCase().includes(nickname))
+      || actors.find((actor) => actor?.villain === true && Number(actor?.gameId ?? actor?.monsterId ?? actor?.metadata?.id) === 65)
+      || actors.find((actor) => String(actor?.name || actor?.metadata?.name || actor?.entityTag || '').toLowerCase().includes(nickname))
+      || null;
+  }
+
+  const orshabaalBossHpBar = createBossHpBar({
+    id: 'orshabaal',
+    getName: () => 'Orshabaal',
+    getIconUrl: () => getQuestItemsAssetUrl('Orshabaal_Soul_Core.gif'),
+    isActive: () => playerEnteredAnnihilatorOrshabaal && !!annihilatorOrshabaalBattle,
+    findActor: (world) => findAnnihilatorOrshabaalBattleActor(world || annihilatorOrshabaalBattleWorld),
+    onDeath: () => { creditAnnihilatorOrshabaalKill().catch((err) => console.error(`${getAnnihilatorOrshabaalLogPrefix()} Error crediting kill from HP-death hook:`, err)); }
+  });
+
+  function createAnnihilatorOrshabaalBattleInstance(roomId) {
+    if (!window.CustomBattles) {
+      console.error(`${getAnnihilatorOrshabaalLogPrefix()} CustomBattles still not available`);
+      return null;
+    }
+    const spawn = getHydratedQuestBattleSpawn(ANNIHILATOR_ORSHABAAL_BATTLE_ID || 'annihilator_orshabaal');
+    const villains = spawn.villains;
+    const allies = spawn.allies;
+    const tileRestrictions = {};
+    if (spawn.allowedTiles?.length) {
+      tileRestrictions.allowedTiles = spawn.allowedTiles;
+      tileRestrictions.message = spawn.allowedTilesMessage;
+    }
+    const config = {
+      name: ANNIHILATOR_ORSHABAAL_BATTLE_DISPLAY_NAME || "Orshabaal's Lair",
+      roomId,
+      villains,
+      allies,
+      allyLimit: spawn.allyLimit ?? 15,
+      preventVillainMovement: spawn.preventVillainMovement !== false,
+      hideVillainSprites: spawn.hideVillainSprites !== false,
+      ...(Object.keys(tileRestrictions).length ? { tileRestrictions } : {}),
+      activationCheck: (isSandbox, inBattleArea) => isSandbox && inBattleArea && playerEnteredAnnihilatorOrshabaal,
+      victoryDefeat: {
+        // Usually redundant with the boss HP bar's onDeath hook (which normally fires first,
+        // the instant his HP hits 0) — kept as a fallback for the case where the sandbox's own
+        // gameTimer does resolve this as a native "victory" before the HP poll's next 400ms
+        // tick catches it. creditAnnihilatorOrshabaalKill() is idempotent either way.
+        onVictory: async () => {
+          await creditAnnihilatorOrshabaalKill();
+        },
+        onDefeat: () => {},
+        onClose: (isVictory) => {
+          if (isVictory) {
+            cleanupAnnihilatorOrshabaalQuest();
+            setTimeout(() => globalThis.state.board.send({ type: 'selectRoomById', roomId: 'edanni' }), 100);
+          } else {
+            cleanupAnnihilatorOrshabaalQuest();
+            setTimeout(() => globalThis.state.board.send({ type: 'selectRoomById', roomId: 'edanni' }), 100);
+          }
+        },
+        victoryMessage: getMissionDialogueLine(
+          ANNIHILATOR_ORSHABAAL_MISSION,
+          'battleVictory',
+          "It's down. Whatever it truly was, it won't be surfacing again — not this way, not this time. Return to Bubble."
+        ),
+        defeatMessage: getMissionDialogueLine(
+          ANNIHILATOR_ORSHABAAL_MISSION,
+          'battleDefeat',
+          'Orshabaal is stronger than you expected. Gather yourself and try again.'
+        ),
+        showItems: false,
+        items: []
+      }
+    };
+    return window.CustomBattles.create(config);
+  }
+
+  function initializeAnnihilatorOrshabaalBattle(roomId) {
+    if (window.CustomBattles) return createAnnihilatorOrshabaalBattleInstance(roomId);
+    return waitForCustomBattles({ logPrefix: getAnnihilatorOrshabaalLogPrefix() }).then((api) => {
+      if (!api) return null;
+      return createAnnihilatorOrshabaalBattleInstance(roomId);
+    });
+  }
+
+  function setupAnnihilatorOrshabaalBattleInstance(battle) {
+    if (!battle) return false;
+    annihilatorOrshabaalBattle = battle;
+    stopAnnihilatorOrshabaalSceneSync();
+    annihilatorOrshabaalBattle.setup(
+      () => playerEnteredAnnihilatorOrshabaal,
+      NotificationService.createBattleToastCallback(getAnnihilatorOrshabaalLogPrefix())
+    );
+    annihilatorOrshabaalBattle.resetSandboxBattleState();
+    annihilatorOrshabaalBattle.setupTileRestrictions(
+      () => playerEnteredAnnihilatorOrshabaal,
+      NotificationService.createBattleToastCallback(getAnnihilatorOrshabaalLogPrefix())
+    );
+    annihilatorOrshabaalBattle.setupAllyLimit?.(
+      () => playerEnteredAnnihilatorOrshabaal,
+      NotificationService.createBattleToastCallback(getAnnihilatorOrshabaalLogPrefix())
+    );
+    showCustomBattleStatusToast({
+      battleName: ANNIHILATOR_ORSHABAAL_BATTLE_DISPLAY_NAME || "Orshabaal's Lair",
+      allyLimit: battle.config?.allyLimit ?? 15,
+      battle,
+      logPrefix: getAnnihilatorOrshabaalLogPrefix()
+    });
+    annihilatorOrshabaalBattle.scheduleEntryVillainSetup({
+      attemptDelays: VILLAIN_SETUP_ATTEMPT_DELAYS_MS,
+      isActiveCheck: () => playerEnteredAnnihilatorOrshabaal,
+      onComplete: () => {
+        hideQuestOverlays();
+        hideHeroEditorButton();
+        annihilatorOrshabaalBattle.startPersistentVisualSync(applyAnnihilatorOrshabaalTileMutations, {
+          isActiveCheck: () => playerEnteredAnnihilatorOrshabaal
+        });
+      }
+    });
+    return true;
+  }
+
+  function enterAnnihilatorOrshabaal() {
+    let roomId = ANNIHILATOR_ORSHABAAL_BATTLE_ROOM_ID || getRoomIdByRoomName(ANNIHILATOR_ORSHABAAL_BATTLE_ROOM_NAME);
+    if (!roomId) roomId = getRoomIdByRoomName(ANNIHILATOR_ORSHABAAL_BATTLE_ROOM_NAME);
+    if (!roomId) {
+      showToast({ message: TOAST_MESSAGES.roomNotFound("Orshabaal's Lair"), variant: 'nothing', logPrefix: getAnnihilatorOrshabaalLogPrefix() });
+      return;
+    }
+
+    playerEnteredAnnihilatorOrshabaal = true;
+    if (annihilatorOrshabaalBattle) {
+      annihilatorOrshabaalBattle.cleanup(restoreBoardSetupAnnihilatorOrshabaal, showQuestOverlays);
+      annihilatorOrshabaalBattle = null;
+    }
+
+    globalThis.state.board.send({ type: 'selectRoomById', roomId });
+    startAnnihilatorOrshabaalSceneSync();
+
+    const initResult = initializeAnnihilatorOrshabaalBattle(roomId);
+    if (initResult && typeof initResult.then === 'function') {
+      initResult.then((battle) => {
+        if (playerEnteredAnnihilatorOrshabaal && !annihilatorOrshabaalBattle) {
+          setupAnnihilatorOrshabaalBattleInstance(battle);
+        }
+      }).catch((error) => console.error(`${getAnnihilatorOrshabaalLogPrefix()} Error initializing battle:`, error));
+    } else if (initResult) {
+      setupAnnihilatorOrshabaalBattleInstance(initResult);
+    }
+
+    updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+    showToast({ message: TOAST_MESSAGES.annihilatorOrshabaalEntering, logPrefix: getAnnihilatorOrshabaalLogPrefix() });
+  }
+
   // ============================================================
   // Easter egg: right-clicking the Spike Sword prop in the Sewers (tile 42) makes it
   // vanish in a puff of red sparkles — a nod to the real Sword of Fury's "disappearing" trick.
@@ -34107,6 +36393,23 @@ function createNPCCooldownManager() {
     if (typeof updateTeshaArrowState === 'function') updateTeshaArrowState();
   }
 
+  // Avar Tar is reached via the Edron Wilderness arrow tile, gated on
+  // hasFinishedTutorialQuests() — see shouldEnableAvarTarWildernessArrow(). Once the player
+  // has engaged him at all, metAvarTar keeps that arrow reachable even if the tutorial
+  // re-check ever goes stale, same rationale as metTesha.
+  function markAvarTarMet() {
+    if (kingChatState.metAvarTar) return;
+    kingChatState.metAvarTar = true;
+    const playerName = getCurrentPlayerName();
+    if (!playerName || !missionProgressHydratedFromFirebase) return;
+    try {
+      saveKingTibianusProgress(playerName, getAllMissionProgress())
+        .catch((err) => console.error('[Quests Mod][Avar Tar] Error saving metAvarTar:', err));
+    } catch (err) {
+      console.error('[Quests Mod][Avar Tar] Error saving metAvarTar:', err);
+    }
+  }
+
   // King Tibianus isn't a board NPC, so unlike hasWydaQuestAction/hasAlDeeQuestAction/hasTeshaQuestAction
   // above, this has to be reachable both from his Quest Log tab (no modal open yet) and from inside his
   // chat modal, so it only relies on top-level helpers/constants rather than the modal's local closures.
@@ -34846,6 +37149,17 @@ function createNPCCooldownManager() {
       alt: 'Speak with Muhamad',
       showDuringPlacement: true
     });
+
+    // Parchment Room Approach — the inscription on tile 65 (flavor only).
+    registerQuestTileHighlightSource({
+      getTiles: () => {
+        const tile = getTileElement(parchmentAntechamberInscriptionSignReader.tileIndex);
+        return tile ? [tile] : [];
+      },
+      isAccessActive: (boardContext) => parchmentAntechamberInscriptionSignReader.shouldEnable(boardContext),
+      alt: 'Examine the wall',
+      showDuringPlacement: true
+    });
     registerQuestTileHighlightSource({
       getTiles: () => {
         const tile = getTileElement(37);
@@ -35484,6 +37798,80 @@ function createNPCCooldownManager() {
       chat: {},
       hpBarColor: 'rgb(96, 192, 96)',
       nameColor: 'rgb(96, 192, 96)'
+    },
+    {
+      // Avar Tar — first post-tutorial NPC. Renders as the "hero" native outfit (id 73),
+      // like Oldrak/Bonelord/An Old Dragonlord. Only present while the player is standing
+      // in his camp reskin of the Sewers — same rkswrs room hosts several other quests'
+      // reskins, so gate on playerEnteredAvarTarHideout, not just "in Sewers". General
+      // transcripts only for now (no isInteractable badge — no quest offered yet).
+      id: BOARD_NPC_AVAR_TAR_ID,
+      name: AVAR_TAR_NPC_NAME,
+      hideLevel: true,
+      tileIndex: AVAR_TAR_TILE_INDEX,
+      roomId: AVAR_TAR_HIDEOUT_ROOM_ID,
+      roomName: AVAR_TAR_HIDEOUT_ROOM_NAME,
+      overlayClass: AVAR_TAR_OVERLAY_CLASS,
+      outfitSpriteId: AVAR_TAR_OUTFIT_SPRITE_ID,
+      facing: 'south',
+      shiny: false,
+      // Board sprite uses the native outfit (outfitSpriteId, above); imageUrl is only the
+      // chat modal's portrait, taking priority over outfitSpriteId there (see
+      // showBoardNpcKeywordModal's modalOpts branch) — same split as Oldrak.
+      imageUrl: getQuestItemsAssetUrl('Avar_Tar.gif'),
+      dialogueIconUrl: AVAR_TAR_DIALOGUE_ICON_URL,
+      logPrefix: '[Quests Mod][Board NPC][Avar Tar]',
+      chatMode: 'keywords',
+      allowWithAllyPieces: true,
+      isUnlocked: () => playerEnteredAvarTarHideout,
+      // fight.png shows for a fresh, unaccepted Parchment Room offer, or once the golden
+      // key has been claimed and he's ready to pay out — off while the quest is merely
+      // accepted-but-not-yet-key'd (the coffin/battle is the action then) or fully done.
+      isInteractable: () => {
+        const progress = getMissionProgress(PARCHMENT_ROOM_MISSION) || {};
+        if (progress.completed) return false;
+        if (progress.keyReceived) return true;
+        return !progress.accepted;
+      },
+      chat: {},
+      hpBarColor: 'rgb(96, 192, 96)',
+      nameColor: 'rgb(96, 192, 96)'
+    },
+    {
+      // Astronis — guild leader NPC in The Annihilator Quest (edanni), tile 87. NOT a
+      // permanent NPC: only visible to a player who has cleared floor 15 of that room AND is
+      // watching a live World Raid this browser has finished its toast buildup for — see
+      // astronisUnlocked() and the World Raid module doc comment above it. Recruits the
+      // player to help defeat Orshabaal in a Sewers reskin via createTeleportBattleQuest,
+      // then pays out an Orshabaal Soul Core on report-back — once, ever; the mission itself
+      // is repeatable on each new raid instance (see ensureAnnihilatorOrshabaalProgressForCurrentRaid).
+      // Uses his own native outfit (id 500016) for both the board sprite and the chat modal
+      // portrait — no imageUrl, same split as Old Dragonlord.
+      id: BOARD_NPC_ASTRONIS_ID,
+      name: 'Bubble',
+      hideLevel: true,
+      tileIndex: 87,
+      roomId: 'edanni',
+      roomName: 'The Annihilator Quest',
+      overlayClass: ASTRONIS_OVERLAY_CLASS,
+      outfitSpriteId: 500016,
+      facing: 'west',
+      modalOutfitFacing: 'south',
+      shiny: false,
+      dialogueIconUrl: undefined,
+      logPrefix: '[Quests Mod][Board NPC][Astronis]',
+      chatMode: 'keywords',
+      isUnlocked: () => astronisUnlocked(),
+      // fight.png shows whenever there's a raid action available for THIS player: a fresh
+      // offer for the current raid instance, or a battle won and ready to report/reward — off
+      // once this raid's already been turned in, or while merely accepted-but-not-yet-fought.
+      // Delegates to getAnnihilatorOrshabaalRaidStatus() — the single source of truth shared
+      // with astronisUnlocked(), the Missions button glow, and the chat handler — so this
+      // badge can never drift out of sync with what Bubble himself actually offers.
+      isInteractable: () => getAnnihilatorOrshabaalRaidStatus().hasPendingAction,
+      chat: {},
+      hpBarColor: 'rgb(96, 192, 96)',
+      nameColor: 'rgb(96, 192, 96)'
     }
   ];
 
@@ -35512,6 +37900,8 @@ function createNPCCooldownManager() {
     patch('oldDragonlord', OLD_DRAGONLORD_OVERLAY_CLASS, BOARD_NPC_OLD_DRAGONLORD_ID);
     patch('basilisk', BASILISK_OVERLAY_CLASS, BOARD_NPC_BASILISK_ID);
     patch('oldrak', OLDRAK_OVERLAY_CLASS, BOARD_NPC_OLDRAK_ID);
+    patch('avarTar', AVAR_TAR_OVERLAY_CLASS, BOARD_NPC_AVAR_TAR_ID);
+    patch('astronis', ASTRONIS_OVERLAY_CLASS, BOARD_NPC_ASTRONIS_ID);
     const aPrisonerChat = questNpcsDialogue['a-prisoner']?.boardChat;
     if (aPrisonerChat) {
       BOARD_NPC_CONFIGS.forEach((c) => {
@@ -36003,18 +38393,31 @@ function createNPCCooldownManager() {
   }
 
   function getOldrakTimeLine() {
-    const now = new Date();
-    let hours = now.getHours();
-    const minutes = String(now.getMinutes()).padStart(2, '0');
-    const suffix = hours >= 12 ? 'pm' : 'am';
-    hours = hours % 12;
-    if (hours === 0) hours = 12;
-    return `Now, it is ${hours}:${minutes} ${suffix}.`;
+    return `Now, it is ${getCurrentClockTimeString()}.`;
   }
 
   function getOldrakKeywordResponse(message, playerName) {
     if (String(message || '').toLowerCase().includes('time')) return getOldrakTimeLine();
     return matchKeywordResponsesSync(OLDRAK_RESPONSES, message, playerName, {
+      defaultResponse: null,
+      lowercaseKeys: true
+    });
+  }
+
+  function getAvarTarTimeLine() {
+    return `It's ${getCurrentClockTimeString()} right now.`;
+  }
+
+  function getAvarTarKeywordResponse(message, playerName) {
+    if (String(message || '').toLowerCase().includes('time')) return getAvarTarTimeLine();
+    return matchKeywordResponsesSync(AVAR_TAR_RESPONSES, message, playerName, {
+      defaultResponse: null,
+      lowercaseKeys: true
+    });
+  }
+
+  function getAstronisKeywordResponse(message, playerName) {
+    return matchKeywordResponsesSync(ASTRONIS_RESPONSES, message, playerName, {
       defaultResponse: null,
       lowercaseKeys: true
     });
@@ -37828,6 +40231,7 @@ function createNPCCooldownManager() {
       // Re-merge boardChat now that assets are loaded — the one-shot call during
       // asset load can run before the config ids are resolved. Idempotent.
       if (typeof patchBoardNpcChatFromDialogue === 'function') patchBoardNpcChatFromDialogue();
+      if (npcConfig.id === BOARD_NPC_AVAR_TAR_ID) markAvarTarMet();
       const playerName = getCurrentPlayerName() || 'Player';
       const baseWelcome = sanitizeDialogueText(npcConfig?.chat?.welcomeMessage, `Hello ${playerName}.`);
       let welcome = baseWelcome.replace(/Player/g, playerName);
@@ -37918,6 +40322,8 @@ function createNPCCooldownManager() {
       let awaitingBonelordBookConfirm = false;
       let awaitingOldrakMistsConfirm = false;
       let awaitingOldrakNecromantConfirm = false;
+      let awaitingAvarTarParchmentConfirm = false;
+      let awaitingAstronisOrshabaalConfirm = false;
       // A Prisoner (Mad Mage) riddle → key hand-over: after the correct answer he asks a
       // chain of "yes" confirmations before granting his key (riddleSolved).
       let prisonerKeyYesCount = -1; // -1 = not offering the key yet; 0..3 = mid confirm chain
@@ -40550,6 +42956,278 @@ function createNPCCooldownManager() {
           return;
         }
 
+        if (npcConfig.id === BOARD_NPC_AVAR_TAR_ID) {
+          const trimmed = text.trim();
+          const lower = trimmed.toLowerCase();
+
+          if (awaitingAvarTarParchmentConfirm && /\byes\b/i.test(lower)) {
+            awaitingAvarTarParchmentConfirm = false;
+            try {
+              await persistMissionProgress(PARCHMENT_ROOM_MISSION, { accepted: true, completed: false, battleCompleted: false, keyReceived: false });
+              updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+              // No auto-teleport — the hole only arms on tile 70 of Cake Drake Party
+              // itself (see parchmentRoomHoleTileAction), not here in Avar Tar's camp.
+              // This re-sync is harmless (shouldEnable checks the room), just not
+              // load-bearing here — the tile action's own board subscription picks it
+              // up the moment the player actually walks into that room.
+              parchmentRoomHoleTileAction.update(globalThis.state?.board?.getSnapshot()?.context);
+              cooldown.queueResponse(
+                text,
+                getMissionDialogueLine(PARCHMENT_ROOM_MISSION, 'accept', "Then go, brave one! Where you broke the Cake Drake Party, the ground has opened into the Hero Cave — step down when you're ready. Return to me once you've claimed what's inside!"),
+                addMessageToConversation,
+                npcConfig.name
+              );
+            } catch (error) {
+              console.error(`${npcConfig.logPrefix} Error accepting the Parchment Room quest:`, error);
+            }
+            return;
+          }
+
+          if (awaitingAvarTarParchmentConfirm && /\bno\b/i.test(lower)) {
+            awaitingAvarTarParchmentConfirm = false;
+            cooldown.queueResponse(
+              text,
+              getMissionDialogueLine(PARCHMENT_ROOM_MISSION, 'decline', "Wise. Even I hesitate before five demons at once ... well, 'hesitate' is a strong word for someone as heroic as me, but you understand my meaning."),
+              addMessageToConversation,
+              npcConfig.name,
+              ModalHelpers.getFarewellCloseCallback(text)
+            );
+            return;
+          }
+
+          // Parchment Room Quest — Avar Tar's first real quest. Triggered on "parchment"
+          // or "mission" (matching the Basilisk/Oldrak convention), but NOT the generic
+          // "quest" keyword, since "quest" already has its own plain flavor line in
+          // AVAR_TAR_RESPONSES (the King Tibianus quip) that should keep working once
+          // this mission is fully completed.
+          if (/parchment|\bmission\b/i.test(trimmed) && !awaitingAvarTarParchmentConfirm) {
+            const parchmentProgress = getMissionProgress(PARCHMENT_ROOM_MISSION) || {};
+
+            if (parchmentProgress.completed) {
+              cooldown.queueResponse(
+                text,
+                getMissionDialogueLine(PARCHMENT_ROOM_MISSION, 'alreadyCompleted', "Ah, the hero of the Parchment Room! I still remember the tale — or rather, I remember telling it to someone who probably wasn't listening."),
+                addMessageToConversation,
+                npcConfig.name
+              );
+              return;
+            }
+
+            if (parchmentProgress.keyReceived) {
+              try {
+                const coinsAdder = globalThis.addGuildCoins ||
+                  (globalThis.Guilds && globalThis.Guilds.addGuildCoins) ||
+                  (globalThis.BestiaryModAPI && globalThis.BestiaryModAPI.guilds && globalThis.BestiaryModAPI.guilds.addGuildCoins) ||
+                  (typeof addGuildCoins === 'function' ? addGuildCoins : null);
+                const parchmentCoins = PARCHMENT_ROOM_MISSION.rewardCoins || 0;
+                if (coinsAdder && parchmentCoins > 0) {
+                  await coinsAdder(parchmentCoins);
+                }
+                await persistMissionProgress(PARCHMENT_ROOM_MISSION, { accepted: true, completed: true, battleCompleted: true, keyReceived: true });
+                updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+                NotificationService.showQuestCompleted(PARCHMENT_ROOM_MISSION, npcConfig.logPrefix, parchmentCoins > 0 ? { rewardCoins: parchmentCoins } : undefined);
+                cooldown.queueResponse(
+                  text,
+                  getMissionDialogueLine(PARCHMENT_ROOM_MISSION, 'complete', "You claimed the golden key from the coffin itself? Hah! I knew sending you was the right call — nearly as good as if I'd gone myself. Take these guild coins for your trouble, hero."),
+                  addMessageToConversation,
+                  npcConfig.name
+                );
+              } catch (error) {
+                console.error(`${npcConfig.logPrefix} Error completing the Parchment Room quest:`, error);
+              }
+              return;
+            }
+
+            if (parchmentProgress.accepted) {
+              // Not the room the hole lives in (that's Cake Drake Party, not Avar Tar's
+              // camp) — nothing to re-sync here, the tile action's own board subscription
+              // handles it once the player actually walks there.
+              cooldown.queueResponse(
+                text,
+                getMissionDialogueLine(PARCHMENT_ROOM_MISSION, 'alreadyActive', "Have you claimed the golden key from that coffin yet? Go back down where you broke the Cake Drake Party — the demons won't wait forever. Well, the dead ones certainly won't."),
+                addMessageToConversation,
+                npcConfig.name
+              );
+              return;
+            }
+
+            if (!isMissionUnlocked(PARCHMENT_ROOM_MISSION)) {
+              const lockRoom = getMissionLockRoomName(PARCHMENT_ROOM_MISSION);
+              showToast({ message: TOAST_MESSAGES.missionLocked(lockRoom), logPrefix: npcConfig.logPrefix });
+              return;
+            }
+
+            awaitingAvarTarParchmentConfirm = true;
+            cooldown.queueResponse(
+              text,
+              getMissionDialogueLine(PARCHMENT_ROOM_MISSION, 'prompt', "The Parchment Room, they call it — somewhere in the Hero Cave near Edron. Some coward rigged a nasty trap to guard whatever's kept in there. A hero's errand, but I have other legends to attend to. Would you dare it in my stead, Player?"),
+              addMessageToConversation,
+              npcConfig.name
+            );
+            return;
+          }
+
+          // General transcripts otherwise — pure keyword lookup + confusion fallback,
+          // mirroring the Basilisk's plain-chat branch above.
+          let avarTarLine = getAvarTarKeywordResponse(text, playerName);
+          if (avarTarLine == null) {
+            avarTarLine = getRandomNpcConfusionResponse(AVAR_TAR_CONFUSION_RESPONSES, playerName);
+          }
+          cooldown.queueResponse(
+            text,
+            avarTarLine,
+            addMessageToConversation,
+            npcConfig.name,
+            isNpcFarewellMessage(text) ? ModalHelpers.getFarewellCloseCallback(text) : undefined
+          );
+          return;
+        }
+
+        if (npcConfig.id === BOARD_NPC_ASTRONIS_ID) {
+          const trimmed = text.trim();
+          const lower = trimmed.toLowerCase();
+          // Repeatable-per-raid reset: if a new raid instance has started since this player's
+          // stored progress, clear accepted/battleCompleted (but never `completed` — that's the
+          // permanent ever-completed-once flag) before any branch below reads progress.
+          await ensureAnnihilatorOrshabaalProgressForCurrentRaid();
+          const status = getAnnihilatorOrshabaalRaidStatus();
+
+          if (awaitingAstronisOrshabaalConfirm && /\byes\b/i.test(lower)) {
+            awaitingAstronisOrshabaalConfirm = false;
+            try {
+              const latestProgress = getMissionProgress(ANNIHILATOR_ORSHABAAL_MISSION) || {};
+              if (!latestProgress.accepted) {
+                // raidStartedAt tracking is already in sync — ensureAnnihilatorOrshabaalProgressForCurrentRaid()
+                // ran at the top of this handler.
+                await persistMissionProgress(ANNIHILATOR_ORSHABAAL_MISSION, {
+                  ...latestProgress,
+                  accepted: true,
+                  battleCompleted: false
+                });
+                NotificationService.showQuestAccepted(ANNIHILATOR_ORSHABAAL_MISSION, npcConfig.logPrefix);
+              }
+              cooldown.queueResponse(
+                text,
+                getMissionDialogueLine(ANNIHILATOR_ORSHABAAL_MISSION, 'accept', 'Then stand with me, and hold nothing back. Orshabaal will not fall to hesitation.'),
+                addMessageToConversation,
+                npcConfig.name,
+                () => {
+                  setTimeout(() => {
+                    ModalHelpers.closeModal(0);
+                    enterAnnihilatorOrshabaal();
+                  }, 2000);
+                }
+              );
+            } catch (error) {
+              console.error(`${npcConfig.logPrefix} Error accepting Astronis' Call:`, error);
+            }
+            return;
+          }
+
+          if (awaitingAstronisOrshabaalConfirm && /\bno\b/i.test(lower)) {
+            awaitingAstronisOrshabaalConfirm = false;
+            cooldown.queueResponse(
+              text,
+              getMissionDialogueLine(ANNIHILATOR_ORSHABAAL_MISSION, 'decline', 'Then stay behind, if that is your choice. Orshabaal will not wait forever, and neither will I.'),
+              addMessageToConversation,
+              npcConfig.name,
+              ModalHelpers.getFarewellCloseCallback(text)
+            );
+            return;
+          }
+
+          if (/orshabaal|\bmission\b/i.test(trimmed) && !awaitingAstronisOrshabaalConfirm) {
+            const orshabaalProgress = getMissionProgress(ANNIHILATOR_ORSHABAAL_MISSION) || {};
+
+            if (status.alreadyReportedThisRaid) {
+              // Already turned in THIS raid instance — accepted/battleCompleted are already
+              // reset to false by now, so without this check we'd fall through to re-offering
+              // the same still-live raid.
+              cooldown.queueResponse(
+                text,
+                getMissionDialogueLine(ANNIHILATOR_ORSHABAAL_MISSION, 'alreadyHelpedThisRaid', "You already stood with me against it this time. My thanks again — but I've nothing more to give you for it twice."),
+                addMessageToConversation,
+                npcConfig.name
+              );
+              return;
+            }
+
+            if (orshabaalProgress.battleCompleted) {
+              if (orshabaalProgress.completed) {
+                // Permanent reward already granted in an earlier raid — repeat help, no reward.
+                await persistMissionProgress(ANNIHILATOR_ORSHABAAL_MISSION, {
+                  ...orshabaalProgress,
+                  accepted: false,
+                  battleCompleted: false
+                });
+                await setAnnihilatorOrshabaalRaidTracking({ lastReportedRaidStartedAt: status.relevantRaidStartedAt });
+                cooldown.queueResponse(
+                  text,
+                  getMissionDialogueLine(ANNIHILATOR_ORSHABAAL_MISSION, 'alreadyHelpedThisRaid', "You already stood with me against it this time. My thanks again — but I've nothing more to give you for it twice."),
+                  addMessageToConversation,
+                  npcConfig.name
+                );
+                return;
+              }
+              const completed = await completeAnnihilatorOrshabaalMission();
+              if (completed) {
+                const afterReward = getMissionProgress(ANNIHILATOR_ORSHABAAL_MISSION) || {};
+                await persistMissionProgress(ANNIHILATOR_ORSHABAAL_MISSION, {
+                  ...afterReward,
+                  accepted: false,
+                  battleCompleted: false
+                });
+                await setAnnihilatorOrshabaalRaidTracking({ lastReportedRaidStartedAt: status.relevantRaidStartedAt });
+              }
+              cooldown.queueResponse(
+                text,
+                completed
+                  ? getMissionDialogueLine(ANNIHILATOR_ORSHABAAL_MISSION, 'reward', "Orshabaal is finished, and the region owes you for it. Here — an Orshabaal Soul Core, pulled from the wreck of it. Not something I'd trust to just anyone.")
+                  : getMissionCommonLine('errorGeneric', 'Something went wrong. Please try again.'),
+                addMessageToConversation,
+                npcConfig.name
+              );
+              return;
+            }
+
+            if (orshabaalProgress.accepted) {
+              awaitingAstronisOrshabaalConfirm = true;
+              cooldown.queueResponse(
+                text,
+                getMissionDialogueLine(ANNIHILATOR_ORSHABAAL_MISSION, 'alreadyActive', "Orshabaal still stands, and my offer with it. Shall I send you against the beast again?"),
+                addMessageToConversation,
+                npcConfig.name
+              );
+              return;
+            }
+
+            awaitingAstronisOrshabaalConfirm = true;
+            cooldown.queueResponse(
+              text,
+              getMissionDialogueLine(ANNIHILATOR_ORSHABAAL_MISSION, 'offer', "You climbed out of that floor still breathing — good, because I need you now more than I did an hour ago. You felt that, didn't you? Orshabaal's back. Not sleeping, not hiding — out, right now, somewhere close, and my guild's already moving before it digs in and this gets a lot harder. I'm Bubble. Will you stand with us while it's still finding its footing?"),
+              addMessageToConversation,
+              npcConfig.name
+            );
+            return;
+          }
+
+          let astronisLine = getAstronisKeywordResponse(text, playerName);
+          if (astronisLine == null) {
+            astronisLine = getNpcQuestItemChatResponse(BOARD_NPC_ASTRONIS_ID, text, playerName);
+          }
+          if (astronisLine == null) {
+            astronisLine = getRandomNpcConfusionResponse(ASTRONIS_CONFUSION_RESPONSES, playerName);
+          }
+          cooldown.queueResponse(
+            text,
+            astronisLine,
+            addMessageToConversation,
+            npcConfig.name,
+            isNpcFarewellMessage(text) ? ModalHelpers.getFarewellCloseCallback(text) : undefined
+          );
+          return;
+        }
+
         let response = getSantaKeywordResponse(text, playerName);
         if (response == null) {
           response = getNpcQuestItemChatResponse('santa-claus', text, playerName);
@@ -41472,6 +44150,21 @@ function createNPCCooldownManager() {
     cleanupClericArrowSystem();
     cleanupVisitingTheClericQuest();
     cleanupClericBoardClearWatcher();
+    // Cleanup Avar Tar systems (Edron Wilderness arrow tile, camp scene)
+    cleanupAvarTarArrowSystem();
+    cleanupAvarTarHideoutQuest();
+    cleanupAvarTarBoardClearWatcher();
+    cleanupParchmentRoomCoffinSystem();
+
+    // Cleanup Astronis' Call (Sewers reskin battle against Orshabaal)
+    cleanupAnnihilatorOrshabaalQuest();
+    cleanupWorldRaidPolling();
+    cleanupParchmentRoomHoleSystem();
+    cleanupParchmentRoomQuest();
+    cleanupParchmentAntechamberContinueSystem();
+    parchmentAntechamberInscriptionSignReader.cleanupSystem();
+    cleanupParchmentAntechamberQuest();
+    cleanupParchmentAntechamberBoardClearWatcher();
     cleanupIsleOfMistsArrowSystem();
     cleanupIsleOfMistsQuest();
     cleanupNecromantHouseArrowSystem();
@@ -41563,6 +44256,8 @@ function createNPCCooldownManager() {
     oldDragonlordBossHpBar.cleanupSystem();
     slugKingBossHpBar.cleanupSystem();
     hornedFoxBossHpBar.cleanupSystem();
+    orshabaalBossHpBar.cleanupSystem();
+    orshabaalCrySystem.cleanupSystem();
 
     // Cleanup water fishing system
     cleanupWaterFishingSystem();
@@ -41891,6 +44586,9 @@ function createNPCCooldownManager() {
     oldDragonlordBossHpBar.setupObserver();
     slugKingBossHpBar.setupObserver();
     hornedFoxBossHpBar.setupObserver();
+    orshabaalBossHpBar.setupObserver();
+    orshabaalCrySystem.setupObserver();
+    setupWorldRaidPolling();
 
     if (needsHoneyflowerObserver()) {
       setupHoneyflowerTileObserver();
@@ -41906,6 +44604,13 @@ function createNPCCooldownManager() {
     setupGreenTomeTileObserver();
     setupClericArrowObserver();
     setupClericBoardClearWatcher();
+    setupAvarTarArrowObserver();
+    setupAvarTarBoardClearWatcher();
+    setupParchmentRoomCoffinObserver();
+    setupParchmentRoomHoleObserver();
+    setupParchmentAntechamberContinueObserver();
+    parchmentAntechamberInscriptionSignReader.setupObserver();
+    setupParchmentAntechamberBoardClearWatcher();
     setupIsleOfMistsArrowObserver();
     setupNecromantHouseArrowObserver();
     if (needsSerpentineTeshaObservers()) {
@@ -42188,6 +44893,14 @@ function createNPCCooldownManager() {
       // has engaged her chain at all, she must stay reachable on the board forever — so
       // treat any Tesha-chain progress as "met" for players who predate the metTesha flag.
       kingChatState.metTesha = !!progress.metTesha || inferMetTeshaFromProgress(progress);
+      kingChatState.metAvarTar = !!progress.metAvarTar;
+      // Real numbers — do NOT boolean-coerce (see progressAnnihilatorOrshabaal's comment).
+      {
+        const raidStartedAt = Number(progress.annihilatorOrshabaalRaidStartedAt);
+        kingChatState.annihilatorOrshabaalRaidStartedAt = Number.isFinite(raidStartedAt) ? raidStartedAt : null;
+        const lastReported = Number(progress.annihilatorOrshabaalLastReportedRaidStartedAt);
+        kingChatState.annihilatorOrshabaalLastReportedRaidStartedAt = Number.isFinite(lastReported) ? lastReported : null;
+      }
       kingChatState.mornenionDefeated = !!(progress.mornenion && progress.mornenion.defeated);
       if (Array.isArray(progress.sevenSealsCompleted) && progress.sevenSealsCompleted.length === SEVEN_SEALS_COUNT) {
         kingChatState.sevenSealsCompleted = progress.sevenSealsCompleted.slice(0, SEVEN_SEALS_COUNT).map(Boolean);
@@ -43526,6 +46239,80 @@ function createNPCCooldownManager() {
     }
   }
 
+  // World Raid (Orshabaal) dev helpers. WARNING: these write directly to the SAME shared,
+  // global Firebase path production uses (WORLD_RAID_FIREBASE_PATH) — there is no separate
+  // dev/staging record. Using worldRaidForceTrigger() on the live game starts a REAL raid for
+  // every mod user currently online, not just you. These also skip the client-side cooldown
+  // check entirely (this file has no way to know your Firebase project's deployed rules) — if
+  // your Realtime Database rules enforce the 5-day cooldown (WORLD_RAID_COOLDOWN_MS) server-side,
+  // a force-trigger during that window will still be rejected there; use worldRaidClear() or
+  // temporarily relax the rule in the console to test mid-cooldown.
+  async function worldRaidForceTrigger() {
+    try {
+      await FirebaseService.put(
+        WORLD_RAID_FIREBASE_PATH,
+        buildWorldRaidTriggerPayload(),
+        'dev force-trigger world raid'
+      );
+      await pollWorldRaidState();
+      console.log('[Quests Mod][World Raid][Dev] Force-triggered a new raid. State:', worldRaidState);
+    } catch (error) {
+      console.error('[Quests Mod][World Raid][Dev] Error force-triggering raid:', error);
+    }
+  }
+
+  // There's no more global "defeated" flag to set (a kill no longer ends the raid for
+  // everyone — see the module doc comment above), so "force end" instead backdates
+  // `startedAt` past the 24h window, simulating a natural expiry for testing the
+  // post-raid/cooldown flow.
+  async function worldRaidForceEnd() {
+    try {
+      await FirebaseService.put(
+        `${WORLD_RAID_FIREBASE_PATH}/startedAt`,
+        Date.now() - WORLD_RAID_DURATION_MS - 1000,
+        'dev force-end world raid'
+      );
+      await pollWorldRaidState();
+      console.log('[Quests Mod][World Raid][Dev] Force-ended the raid (backdated startedAt). State:', worldRaidState);
+    } catch (error) {
+      console.error('[Quests Mod][World Raid][Dev] Error force-ending raid:', error);
+    }
+  }
+
+  async function worldRaidClear() {
+    try {
+      await FirebaseService.delete(WORLD_RAID_FIREBASE_PATH, 'dev clear world raid');
+      await pollWorldRaidState();
+      console.log('[Quests Mod][World Raid][Dev] Cleared the raid record entirely.');
+    } catch (error) {
+      console.error('[Quests Mod][World Raid][Dev] Error clearing raid:', error);
+    }
+  }
+
+  function worldRaidDevStatus() {
+    const effectiveEndTime = getWorldRaidEffectiveEndTime(worldRaidState);
+    const raidStatus = getAnnihilatorOrshabaalRaidStatus();
+    const status = {
+      firebaseState: worldRaidState,
+      isLive: isWorldRaidStateLive(worldRaidState),
+      onCooldown: isWorldRaidOnCooldown(worldRaidState),
+      cooldownEndsAt: effectiveEndTime != null ? new Date(effectiveEndTime + WORLD_RAID_COOLDOWN_MS).toISOString() : null,
+      locallyRevealed: worldRaidLocalRevealedStartedAt,
+      visibleToThisClient: isAnnihilatorOrshabaalRaidVisibleToThisClient(),
+      bubbleUnlocked: astronisUnlocked(),
+      floor15Cleared: hasCompletedAnnihilatorFloor15(),
+      // From getAnnihilatorOrshabaalRaidStatus() — the single source of truth also driving
+      // Bubble's fight.png badge, the Missions button glow, and the chat handler.
+      myProgress: raidStatus.progress,
+      myRaidStartedAt: getAnnihilatorOrshabaalRaidStartedAt(),
+      myLastReportedRaidStartedAt: getAnnihilatorOrshabaalLastReportedRaidStartedAt(),
+      myAlreadyReportedThisRaid: raidStatus.alreadyReportedThisRaid,
+      myHasPendingAction: raidStatus.hasPendingAction
+    };
+    console.log('[Quests Mod][World Raid][Dev] Status:', status);
+    return status;
+  }
+
   function questsDevHelp() {
     console.log('[Quests Mod][Dev] QuestsDev API:', Object.keys(QuestsDev));
     console.log('[Quests Mod][Dev] Mission IDs:', Object.keys(MISSION_STATE_MAP));
@@ -43533,6 +46320,8 @@ function createNPCCooldownManager() {
     console.log('[Quests Mod][Dev] Catalog:', QuestsDev.catalog());
     console.log('[Quests Mod][Dev] Examples: QuestsDev.grant({ leather: 1, monksStudy: 1 }); QuestsDev.setAccepted("king_copper_key"); QuestsDev.complete("king_red_dragon"); QuestsDev.reset("svenson_love_story"); QuestsDev.resetLoveStoryWithItems(); QuestsDev.resetSanta(); QuestsDev.completeAll(); QuestsDev.resetAll();');
     console.log('[Quests Mod][Dev] complete / setAccepted / reset / resetAll / completeAll / resetSanta now auto-sync the quest-item bag to progress (grant/stale/backfill rules). QuestsDev.reconcile() runs that sync on demand — use it after a grant() that changed both progress and items.');
+    console.log('[Quests Mod][Dev] World Raid (Orshabaal): QuestsDev.worldRaidStatus() to inspect, QuestsDev.worldRaidForceTrigger() / .worldRaidForceEnd() / .worldRaidClear() to control it. WARNING: these hit the SAME shared Firebase path production uses — forceTrigger starts a real raid for every mod user online, not just you.');
+    console.log('[Quests Mod][Dev] World Raid: set the extension\'s Log Level to "verbose" (popup) for a running console timer — logs on every 30s poll tick, each toast-buildup stage, and every trigger/defeat, each with a formatted countdown (LIVE — ends in Xh Ym / on cooldown — triggerable again in Xd Yh / triggerable now).');
   }
 
   function questsDevCatalog() {
@@ -43597,7 +46386,11 @@ function createNPCCooldownManager() {
     get itemKeys() { return getQuestsDevItemKeys(); },
     missionIds: () => Object.keys(MISSION_STATE_MAP),
     catalog: questsDevCatalog,
-    help: questsDevHelp
+    help: questsDevHelp,
+    worldRaidForceTrigger,
+    worldRaidForceEnd,
+    worldRaidClear,
+    worldRaidStatus: worldRaidDevStatus
   };
 
   function registerQuestsDevHelpers() {

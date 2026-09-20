@@ -2127,25 +2127,31 @@ if (window.CustomBattles) {
                 });
             }
 
-            // Cooldown overrides: villains/allies with a configured abilityCooldownTicks /
-            // attackCooldownTicks / moveCooldownTicks (Map Editor's creature editor "Combat
-            // timing" fields are the only current producer) get their live actor's real
-            // runtime Cooldown component patched directly — there is no config-level field the
-            // native game or board reads to override a monster's cooldowns at spawn time. This
-            // mirrors the one proven technique in this codebase for changing ability CD
-            // (Quests.js's Lost Oracle rage-battle patchOracleRageAbilityCooldownTo2s),
-            // generalized here so any CustomBattles-driven battle gets it for free instead of
-            // needing bespoke per-fight code.
+            // Cooldown/range overrides: villains/allies with a configured abilityCooldownTicks /
+            // attackCooldownTicks / moveCooldownTicks / range (Map Editor's creature editor
+            // "Combat tuning" fields are the only current producer) get their live actor's real
+            // runtime Cooldown component (or Range component, for `range`) patched directly —
+            // there is no config-level field the native game or board reads to override a
+            // monster's cooldowns/range at spawn time. This mirrors the one proven technique in
+            // this codebase for changing ability CD (Quests.js's Lost Oracle rage-battle
+            // patchOracleRageAbilityCooldownTo2s), generalized here so any CustomBattles-driven
+            // battle gets it for free instead of needing bespoke per-fight code.
             getConfiguredAbilityCooldownPieces() {
                 const readTicks = (value) => {
                     const ticks = Number(value);
                     return Number.isFinite(ticks) && ticks >= 0 ? Math.floor(ticks) : null;
                 };
+                const readRange = (value) => {
+                    const range = Number(value);
+                    return Number.isFinite(range) && range >= 1 ? Math.floor(range) : null;
+                };
                 const normalize = (piece, isVillain) => {
                     const cooldownTicks = readTicks(piece?.abilityCooldownTicks);
                     const moveCooldownTicks = readTicks(piece?.moveCooldownTicks);
                     const attackCooldownTicks = readTicks(piece?.attackCooldownTicks);
-                    if (cooldownTicks == null && moveCooldownTicks == null && attackCooldownTicks == null) {
+                    const range = readRange(piece?.range);
+                    if (cooldownTicks == null && moveCooldownTicks == null
+                        && attackCooldownTicks == null && range == null) {
                         return null;
                     }
                     return {
@@ -2155,7 +2161,8 @@ if (window.CustomBattles) {
                         gameId: Number(piece.gameId),
                         cooldownTicks,
                         moveCooldownTicks,
-                        attackCooldownTicks
+                        attackCooldownTicks,
+                        range
                     };
                 };
                 const villains = (this.config.villains || [])
@@ -2240,9 +2247,33 @@ if (window.CustomBattles) {
                 return changed;
             }
 
-            // Read the live actor's current base cooldown ticks for a tile, so the Map Editor
-            // creature editor can show "now: Nt" next to its override fields during a test
-            // battle. Returns null when no battle/actor is live.
+            // Range (attack/ability reach, in tiles) — NOT a Cooldown component, traced
+            // separately from the game's own minified source (chunk 252, module 80133): every
+            // actor gets `this.rangeComponent = this.addComponent(new RangeClass({ range,
+            // rangedCreature }))`. Unlike Cooldown's `_baseCooldown` (private, needs
+            // `setBaseCooldown()`), `baseRange` is a plain public field with no setter — write
+            // it directly and call the component's own `updateRange()` to recompute
+            // `calculatedRange` (which `range`'s getter returns; `rangeLimits` can still clamp
+            // it downward, but there is no upward ceiling to fight).
+            findRangeComponent(actor) {
+                const rc = actor?.rangeComponent;
+                return rc && typeof rc.updateRange === 'function' && typeof rc.baseRange === 'number'
+                    ? rc
+                    : null;
+            }
+
+            applyRangeToActor(actor, rangeTiles) {
+                const rc = this.findRangeComponent(actor);
+                if (!rc) return false;
+                if (rc.baseRange === rangeTiles) return false;
+                rc.baseRange = rangeTiles;
+                rc.updateRange();
+                return true;
+            }
+
+            // Read the live actor's current base cooldown ticks (and range) for a tile, so the
+            // Map Editor creature editor can show the live value as its override fields'
+            // placeholder during a test battle. Returns null when no battle/actor is live.
             readLiveActorBaseCooldownsForTile(tileIndex, isVillain) {
                 try {
                     const activeWorld = globalThis.state?.board?.getSnapshot?.()?.context?.world || null;
@@ -2260,10 +2291,13 @@ if (window.CustomBattles) {
                         const v = Number(cd?.baseCooldown ?? cd?._baseCooldown);
                         return Number.isFinite(v) ? Math.round(v) : null;
                     };
+                    const rangeComponent = this.findRangeComponent(actor);
+                    const rangeValue = Number(rangeComponent?.baseRange);
                     return {
                         ability: read(this.findAbilityCooldownComponent(actor)),
                         attack: read(this.findAutoAttackCooldownComponent(actor)),
-                        move: read(this.findMovementCooldownComponents(actor)[0])
+                        move: read(this.findMovementCooldownComponents(actor)[0]),
+                        range: Number.isFinite(rangeValue) ? Math.round(rangeValue) : null
                     };
                 } catch (_) {
                     return null;
@@ -2304,9 +2338,13 @@ if (window.CustomBattles) {
                             && this.applyMoveCooldownToActor(actor, piece.moveCooldownTicks)) {
                             changed = true;
                         }
+                        if (piece.range != null
+                            && this.applyRangeToActor(actor, piece.range)) {
+                            changed = true;
+                        }
                     });
                     if (changed) {
-                        console.log(`[Custom Battles][${this.config.name || 'Battle'}] Enforced configured cooldowns (ability/attack/move) (${reason})`);
+                        console.log(`[Custom Battles][${this.config.name || 'Battle'}] Enforced configured cooldowns/range (ability/attack/move/range) (${reason})`);
                     } else {
                         // Nothing changed — say exactly why, since a silent no-op here is the
                         // most likely cause of "ability CD doesn't seem to work" reports.
@@ -2568,9 +2606,24 @@ if (window.CustomBattles) {
                 const name = (root?.getAttribute('data-name') || '').trim();
 
                 // Mid-battle: resurrect/rebuild drops our dataset tags and often leaves the
-                // spawn tile. Reclaim by display name so outfit overrides re-apply immediately.
+                // spawn tile. Reclaim by display name so outfit overrides re-apply immediately —
+                // but only when that name is unambiguous. A player's own creature can share the
+                // exact same default display name (e.g. an unrenamed "Druid" ally placed
+                // alongside a forced Druid ally that has an outfit override), and this branch
+                // has no tile check at all, so a bare name match would also skin the player's
+                // own piece. Cross-check boardConfig: if anything player-owned (type === 'player')
+                // currently carries this same nickname, the name alone can't tell them apart —
+                // fall through to the tile-based checks below instead of guessing.
                 if (this.isBoardBattleActive() && nickname && name === nickname) {
-                    return true;
+                    let hasPlayerOwnedCollision = false;
+                    try {
+                        const boardConfig = globalThis.state?.board?.getSnapshot?.()?.context?.boardConfig || [];
+                        hasPlayerOwnedCollision = boardConfig.some((e) =>
+                            e?.type === 'player' && String(e?.nickname || e?.name || '').trim() === nickname);
+                    } catch (_) {
+                        // ignore — treat as no collision, same as before this check existed
+                    }
+                    if (!hasPlayerOwnedCollision) return true;
                 }
 
                 if (!this.spriteIsOnConfiguredTile(sprite, piece.tileIndex)) return false;
@@ -4596,6 +4649,21 @@ if (window.CustomBattles) {
                         this.preventVillainMovement();
                         this.removeAlliesOutsideAllowedTiles(showToastCallback);
                         this.removeAlliesOnBlockedTiles(showToastCallback);
+                        // A manual single-tile drag onto a forced ally's tile overwrites that
+                        // ally entirely in boardConfig (native drop replaces whatever occupied
+                        // the tile) rather than merely "moving" it, so preventVillainMovement()'s
+                        // restorePinnedEntityIfMoved() loop above has nothing left to find and
+                        // fix. setupForcedAllyWatch()'s own subscribe is meant to catch this via
+                        // ensureForcedAlliesPresent(), but it's a separate subscription racing
+                        // this one over the same state change, and both this handler's own
+                        // removeAlliesOutsideAllowedTiles()/removeAlliesOnBlockedTiles() calls
+                        // above just set this.boardSetupLock via runLockedBoardSetup() — which
+                        // only clears after a 50ms setTimeout (see runLockedBoardSetup) — so an
+                        // immediate, synchronous ensureForcedAlliesPresent() call here would just
+                        // see the lock still held and bail out as a no-op. Defer past that
+                        // window, same margin syncCustomVillainsIfNeeded() already uses for the
+                        // equivalent villain-restore race.
+                        setTimeout(() => this.ensureForcedAlliesPresent(), 60);
                         // Preserve ally-drag mode so board setState bumps don't re-light villain tiles mid-drag.
                         this.syncPlacementHitboxMask(activationCallback, {
                             allyDrag: this._placementHitboxAllyDrag === true

@@ -468,15 +468,21 @@ const CREATURE_COMBAT_STAT_KEYS = [
 ];
 const CREATURE_LIVE_APPLY_MS = 500;
 
-// Combat-timing overrides. None has a spawn-time config the game reads — CustomBattles'
-// enforceConfiguredAbilityCooldowns patches them onto the live actor's Cooldown component
-// during a test battle / native-map run, so they persist only via map export.
+// Combat-tuning overrides. None has a spawn-time config the game reads — CustomBattles'
+// enforceConfiguredAbilityCooldowns patches them onto the live actor's Cooldown/Range
+// component during a test battle / native-map run, so they persist only via map export.
 //   unit 'ticks'  → stored as `{ cooldownTicks: N }`, forwarded as `<villainKey>` verbatim.
 //   unit 'speed'  → stored as `{ speed: S }` (an SPD value, like the Combat-stats panel's
 //                   SPD); the walk-cooldown ticks CustomBattles needs are derived from it.
+//   unit 'range'  → stored as `{ range: N }` (tiles), forwarded as `<villainKey>` verbatim.
+//                   Patches the live actor's rangeComponent.baseRange directly — traced from
+//                   the game's own minified source (chunk 252, module 80133): every actor
+//                   gets `this.rangeComponent = this.addComponent(new RangeClass({ range, ... }))`,
+//                   and unlike Cooldown's `_baseCooldown`, `baseRange` is a plain public field
+//                   (no setter to duck-type) — set it and call `.updateRange()`.
 // storeKey = key on the actor config; villainKey = flat field forwarded to CustomBattles;
 // liveKey = readLiveActorBaseCooldownsForTile() result key.
-const CREATURE_COOLDOWN_FIELDS = [
+const CREATURE_COMBAT_FIELDS = [
   {
     formKey: 'abilityCooldownTicks', datasetAttr: 'data-creature-ability-cd', unit: 'ticks',
     storeKey: 'abilityCooldown', villainKey: 'abilityCooldownTicks', liveKey: 'ability',
@@ -491,29 +497,36 @@ const CREATURE_COOLDOWN_FIELDS = [
     formKey: 'moveSpeed', datasetAttr: 'data-creature-move-spd', unit: 'speed',
     storeKey: 'moveCooldown', villainKey: 'moveCooldownTicks', liveKey: 'move',
     labelKey: 'mods.mapEditor.creatureMoveSpeed', labelFallback: 'Move speed'
+  },
+  {
+    formKey: 'range', datasetAttr: 'data-creature-range', unit: 'range',
+    storeKey: 'rangeOverride', villainKey: 'range', liveKey: 'range',
+    labelKey: 'mods.mapEditor.creatureRange', labelFallback: 'Range'
   }
 ];
 
 /** The stored container key that holds this field's number. */
 function cooldownFieldValueKey(field) {
-  return field.unit === 'speed' ? 'speed' : 'cooldownTicks';
+  if (field.unit === 'speed') return 'speed';
+  if (field.unit === 'range') return 'range';
+  return 'cooldownTicks';
 }
 
 /** Read a stored override container to a form value ('' when absent/invalid). */
 function readStoredCooldownFieldValue(container, field) {
   const v = Number(container?.[cooldownFieldValueKey(field)]);
-  const min = field.unit === 'speed' ? 1 : 0;
+  const min = field.unit === 'speed' || field.unit === 'range' ? 1 : 0;
   return Number.isFinite(v) && v >= min ? Math.floor(v) : '';
 }
 
 /**
  * Set/clear `target[storeKey]` from a raw form value. A blank field (empty string / null)
  * clears the override — `Number('')` is 0, so it must be caught before the numeric check or
- * an untouched field would persist as an instant clock / zero speed.
+ * an untouched field would persist as an instant clock / zero speed / zero-tile range.
  */
 function applyCooldownFieldToActorConfig(target, field, rawValue) {
   const raw = typeof rawValue === 'string' ? rawValue.trim() : rawValue;
-  const min = field.unit === 'speed' ? 1 : 0;
+  const min = field.unit === 'speed' || field.unit === 'range' ? 1 : 0;
   const num = raw === '' || raw == null ? NaN : Number(raw);
   if (Number.isFinite(num) && num >= min) {
     target[field.storeKey] = { [cooldownFieldValueKey(field)]: Math.floor(num) };
@@ -1279,9 +1292,10 @@ function restoreDomEditsFromTrace(restorePlan) {
   }
   for (const entry of [...editorEdits.hiddenSprites].reverse()) {
     let sprite = entry.sprite;
+    const matchAdded = entry.isAdded ?? null;
     if (!sprite?.isConnected) {
-      sprite = findSpriteOnTileByIds(entry.tileIndex, entry.spriteIds, { onlyHidden: true })
-        || findSpriteOnTileByIds(entry.tileIndex, entry.spriteIds);
+      sprite = findSpriteOnTileByIds(entry.tileIndex, entry.spriteIds, { onlyHidden: true, matchAdded })
+        || findSpriteOnTileByIds(entry.tileIndex, entry.spriteIds, { matchAdded });
     }
     if (!sprite || isEphemeralBattleSprite(sprite)) continue;
     if (restoreSpriteElement(sprite, { skipThrottle: true, silent: true })) reverted += 1;
@@ -1726,12 +1740,17 @@ function trackAddedSprite(tileIndex, spriteEl) {
 function trackHiddenSprite(tileIndex, spriteEl) {
   if (tileIndex == null || !spriteEl) return;
   const spriteIds = getSpriteIdsFromElement(spriteEl);
+  const isAdded = isEditorAddedSprite(spriteEl);
   editorEdits.hiddenSprites = editorEdits.hiddenSprites.filter((entry) => entry.sprite !== spriteEl);
-  editorEdits.hiddenSprites.push({ tileIndex, sprite: spriteEl, spriteIds });
+  editorEdits.hiddenSprites.push({ tileIndex, sprite: spriteEl, spriteIds, isAdded });
 }
 
+// A hidden native tile sprite and a user-added sprite can share the same
+// spriteId (e.g. re-adding an edited copy of a tile's own sprite id). Without
+// matchAdded, id-only matching can't tell them apart and a hide/restore aimed
+// at one grabs the other instead.
 function findSpriteOnTileByIds(tileIndex, spriteIds, options = {}) {
-  const { excludeHidden = false, onlyHidden = false } = options;
+  const { excludeHidden = false, onlyHidden = false, matchAdded = null } = options;
   const tileEl = getTileElement(tileIndex);
   if (!tileEl || !spriteIds?.length) return null;
   const sprites = getAllSpritesOnTile(tileEl);
@@ -1740,6 +1759,7 @@ function findSpriteOnTileByIds(tileIndex, spriteIds, options = {}) {
       const hidden = isSpriteHidden(sprite);
       if (excludeHidden && hidden) return false;
       if (onlyHidden && !hidden) return false;
+      if (matchAdded != null && isEditorAddedSprite(sprite) !== matchAdded) return false;
       return getSpriteIdsFromElement(sprite).includes(id);
     });
     if (match) return match;
@@ -1763,15 +1783,19 @@ function reapplyHiddenSpritesToDom() {
   const nextEntries = [];
   for (const entry of editorEdits.hiddenSprites) {
     // Prefer a still-visible duplicate so each hidden entry claims its own node.
-    let sprite = findSpriteOnTileByIds(entry.tileIndex, entry.spriteIds, { excludeHidden: true });
+    // matchAdded keeps a hidden native sprite from grabbing a same-id added
+    // sprite (or vice versa) when both exist on the same tile.
+    const matchAdded = entry.isAdded ?? null;
+    let sprite = findSpriteOnTileByIds(entry.tileIndex, entry.spriteIds, { excludeHidden: true, matchAdded });
     if (!sprite && entry.sprite?.isConnected) sprite = entry.sprite;
-    if (!sprite) sprite = findSpriteOnTileByIds(entry.tileIndex, entry.spriteIds);
+    if (!sprite) sprite = findSpriteOnTileByIds(entry.tileIndex, entry.spriteIds, { matchAdded });
     if (!sprite || isEphemeralBattleSprite(sprite)) continue;
 
     const refreshed = {
       tileIndex: entry.tileIndex,
       sprite,
-      spriteIds: entry.spriteIds?.length ? entry.spriteIds : getSpriteIdsFromElement(sprite)
+      spriteIds: entry.spriteIds?.length ? entry.spriteIds : getSpriteIdsFromElement(sprite),
+      isAdded: entry.isAdded
     };
     nextEntries.push(refreshed);
     if (applyHiddenSpriteVisual(sprite)) applied += 1;
@@ -2391,9 +2415,10 @@ function resetTileEdits(tileIndex, options = {}) {
   for (const entry of [...editorEdits.hiddenSprites]) {
     if (entry.tileIndex !== tileIndex) continue;
     let sprite = entry.sprite;
+    const matchAdded = entry.isAdded ?? null;
     if (!sprite?.isConnected) {
-      sprite = findSpriteOnTileByIds(tileIndex, entry.spriteIds, { onlyHidden: true })
-        || findSpriteOnTileByIds(tileIndex, entry.spriteIds);
+      sprite = findSpriteOnTileByIds(tileIndex, entry.spriteIds, { onlyHidden: true, matchAdded })
+        || findSpriteOnTileByIds(tileIndex, entry.spriteIds, { matchAdded });
     }
     if (sprite && restoreSpriteElement(sprite, { skipThrottle: true })) changed = true;
   }
@@ -2575,10 +2600,11 @@ function toggleHideNativeMapSprites() {
     let restored = 0;
     for (const entry of [...editorEdits.hiddenSprites].reverse()) {
       if (entry.bulk !== true) continue;
+      const matchAdded = entry.isAdded ?? null;
       const sprite = entry.sprite?.isConnected
         ? entry.sprite
-        : (findSpriteOnTileByIds(entry.tileIndex, entry.spriteIds, { onlyHidden: true })
-          || findSpriteOnTileByIds(entry.tileIndex, entry.spriteIds));
+        : (findSpriteOnTileByIds(entry.tileIndex, entry.spriteIds, { onlyHidden: true, matchAdded })
+          || findSpriteOnTileByIds(entry.tileIndex, entry.spriteIds, { matchAdded }));
       if (sprite && restoreSpriteElement(sprite, { skipThrottle: true, silent: true })) restored += 1;
     }
     editorEdits.hiddenSprites = editorEdits.hiddenSprites.filter((entry) => entry.bulk !== true);
@@ -4510,8 +4536,9 @@ function restoreSpriteElement(spriteEl, options = {}) {
   if (!target) {
     const tileIndex = tracked?.tileIndex ?? resolvedTileIndex;
     const spriteIds = tracked?.spriteIds || getSpriteIdsFromElement(spriteEl);
-    target = findSpriteOnTileByIds(tileIndex, spriteIds, { onlyHidden: true })
-      || findSpriteOnTileByIds(tileIndex, spriteIds);
+    const matchAdded = tracked?.isAdded ?? null;
+    target = findSpriteOnTileByIds(tileIndex, spriteIds, { onlyHidden: true, matchAdded })
+      || findSpriteOnTileByIds(tileIndex, spriteIds, { matchAdded });
   }
   if (!target || !target.hasAttribute(HIDDEN_ATTR)) return false;
   target.style.visibility = '';
@@ -5184,12 +5211,13 @@ function getEditableFloorBelowSprites(tileIndex) {
 }
 
 function findFloorBelowSpriteOnTile(tileIndex, spriteIds, options = {}) {
-  const { excludeHidden = false, onlyHidden = false } = options;
+  const { excludeHidden = false, onlyHidden = false, matchAdded = null } = options;
   if (!spriteIds?.length) return null;
   for (const sprite of getFloorBelowSpritesForTile(tileIndex)) {
     const hidden = isSpriteHidden(sprite);
     if (excludeHidden && hidden) continue;
     if (onlyHidden && !hidden) continue;
+    if (matchAdded != null && isEditorAddedSprite(sprite) !== matchAdded) continue;
     const ids = getSpriteIdsFromElement(sprite);
     if (spriteIds.some((id) => ids.includes(id))) return sprite;
   }
@@ -11739,13 +11767,24 @@ function buildMapEditorVillainConfig(tileIndex, gameId, actorConfig = null) {
   if (actorConfig?.awakened === true || actorConfig?.awaken === true || actorConfig?.isAwakened === true) {
     config.awakened = true;
   }
-  // Forwarded to CustomBattles as villain/ally config so its cooldown enforcement
+  // Forwarded to CustomBattles as villain/ally config so its cooldown/range enforcement
   // (getConfiguredAbilityCooldownPieces / enforceConfiguredAbilityCooldowns) can find and
-  // patch the live actor's ability / auto-attack / movement Cooldown component once the test
-  // battle actually spawns it — these fields alone, saved only on the room's static actor
-  // data, have no effect on their own.
-  CREATURE_COOLDOWN_FIELDS.forEach((field) => {
+  // patch the live actor's ability / auto-attack / movement Cooldown component (or its
+  // Range component) once the test battle actually spawns it — these fields alone, saved
+  // only on the room's static actor data, have no effect on their own.
+  CREATURE_COMBAT_FIELDS.forEach((field) => {
     const container = actorConfig?.[field.storeKey];
+    if (field.unit === 'range') {
+      // Not a cooldown-ticks value — read/forward the tile count verbatim instead of
+      // running it through cooldownFieldForwardTicks (which only understands ticks/speed).
+      let rangeTiles = Number(container?.range);
+      if (!Number.isFinite(rangeTiles) || rangeTiles < 1) {
+        const flat = Number(actorConfig?.[field.villainKey]);
+        rangeTiles = Number.isFinite(flat) && flat >= 1 ? flat : null;
+      }
+      if (Number.isFinite(rangeTiles) && rangeTiles >= 1) config[field.villainKey] = Math.floor(rangeTiles);
+      return;
+    }
     let ticks = cooldownFieldForwardTicks(container, field);
     if (ticks == null) {
       const flat = Number(actorConfig?.[field.villainKey]);
@@ -11781,7 +11820,8 @@ function buildActorConfigFromVillainConfig(villain) {
     abilityCooldownTicks: villain.abilityCooldownTicks,
     attackCooldownTicks: villain.attackCooldownTicks,
     moveCooldownTicks: villain.moveCooldownTicks,
-    moveSpeed: villain.moveSpeed
+    moveSpeed: villain.moveSpeed,
+    range: villain.range
   });
 }
 
@@ -11866,7 +11906,7 @@ function normalizeActorConfig(raw) {
   if (nickname) normalized.nickname = nickname;
   else delete normalized.nickname;
 
-  CREATURE_COOLDOWN_FIELDS.forEach((field) => {
+  CREATURE_COMBAT_FIELDS.forEach((field) => {
     const container = field.storeKey === 'abilityCooldown'
       ? (normalized.abilityCooldown ?? normalized.ability?.cooldown)
       : normalized[field.storeKey];
@@ -12049,7 +12089,7 @@ function isActorAwakened(actor) {
 function buildCreatureEditorFormState(actor, tileIndex = null) {
   const equip = actor?.equip && typeof actor.equip === 'object' ? actor.equip : null;
   const cooldownFormState = {};
-  CREATURE_COOLDOWN_FIELDS.forEach((field) => {
+  CREATURE_COMBAT_FIELDS.forEach((field) => {
     const container = field.storeKey === 'abilityCooldown'
       ? (actor?.abilityCooldown ?? actor?.ability?.cooldown)
       : actor?.[field.storeKey];
@@ -12143,7 +12183,7 @@ function buildActorConfigFromCreatureForm(baseActor, formState) {
   if (Number.isFinite(itemSpriteId) && itemSpriteId > 0) merged.itemSpriteId = itemSpriteId;
   else delete merged.itemSpriteId;
 
-  CREATURE_COOLDOWN_FIELDS.forEach((field) => {
+  CREATURE_COMBAT_FIELDS.forEach((field) => {
     applyCooldownFieldToActorConfig(merged, field, formState[field.formKey]);
   });
 
@@ -12192,7 +12232,7 @@ function readCreatureEditorFormState(formRoot) {
     genes[key] = clampCreatureUiGene(slider?.value);
   });
   const cooldownState = {};
-  CREATURE_COOLDOWN_FIELDS.forEach((field) => {
+  CREATURE_COMBAT_FIELDS.forEach((field) => {
     cooldownState[field.formKey] = formRoot.querySelector(`[${field.datasetAttr}]`)?.value;
   });
   return {
@@ -12297,11 +12337,11 @@ function applyCreatureEditorForm(tileIndex, baseActor, formRoot, options = {}) {
     // attachCreatureFormLiveApply), so settling on a value (typing, then blur/Enter) applies
     // — and logs — it twice in a row. Only log when the applied value actually changed.
     const cooldownDetail = {};
-    CREATURE_COOLDOWN_FIELDS.forEach((field) => {
+    CREATURE_COMBAT_FIELDS.forEach((field) => {
       const container = actorConfig[field.storeKey];
       cooldownDetail[field.formKey] = container?.[cooldownFieldValueKey(field)] ?? null;
     });
-    const cooldownSummary = CREATURE_COOLDOWN_FIELDS
+    const cooldownSummary = CREATURE_COMBAT_FIELDS
       .map((field) => cooldownDetail[field.formKey] ?? '')
       .join('/');
     const logKey = `${tileIndex}:${actorConfig.id}:${cooldownSummary}`;
@@ -12356,9 +12396,10 @@ function cancelCreatureEdit() {
 }
 
 /**
- * The live actor's current base cooldown ticks for a tile ({ ability, attack, move }), or
- * null when no test battle / live actor exists. A returned object with `ability: null`
- * means the actor WAS found but its ability has no cooldown clock at all.
+ * The live actor's current base cooldown ticks and range for a tile
+ * ({ ability, attack, move, range }), or null when no test battle / live actor exists. A
+ * returned object with `ability: null` means the actor WAS found but its ability has no
+ * cooldown clock at all.
  */
 function readLiveCreatureCooldowns(tileIndex) {
   if (!editorState.sandboxTestActive || tileIndex == null) return null;
@@ -12391,12 +12432,73 @@ function nativeWalkCooldownTicksFromSpeed(speed) {
   return Number.isFinite(ticks) && ticks > 0 ? ticks : null;
 }
 
+// Range has no generic metadata source the way speed/attackDelay do (see
+// nativeCreatureFieldValue below) — the game hardcodes each creature's native range as a
+// literal inside that creature's own behavior-class constructor, scattered across dozens of
+// classes with no lookup table. So instead of a static source, remember whatever a live test
+// battle actually reveals: the first time a creature's range is observed live, cache it by
+// gameId (persisted to localStorage) and reuse it as the pre-fill from then on — the same
+// "always shows a default" experience Move speed gets, just bootstrapped from one real
+// observation instead of game data.
+const NATIVE_RANGE_CACHE_STORAGE_KEY = 'bestiary-map-editor-native-range-cache-v1';
+/** @type {Map<number, number>} gameId → last live-discovered native (un-overridden) range. */
+let nativeRangeCacheByGameId = new Map();
+
+function loadNativeRangeCache() {
+  try {
+    const raw = localStorage.getItem(NATIVE_RANGE_CACHE_STORAGE_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return;
+    Object.entries(parsed).forEach(([gameId, range]) => {
+      const id = Number(gameId);
+      const r = Number(range);
+      if (Number.isFinite(id) && Number.isFinite(r) && r >= 1) {
+        nativeRangeCacheByGameId.set(id, Math.floor(r));
+      }
+    });
+  } catch (_) {
+    // Cache starts empty — worst case, Range just falls back to the generic placeholder.
+  }
+}
+loadNativeRangeCache();
+
+function saveNativeRangeCache() {
+  try {
+    const obj = {};
+    nativeRangeCacheByGameId.forEach((range, gameId) => { obj[gameId] = range; });
+    localStorage.setItem(NATIVE_RANGE_CACHE_STORAGE_KEY, JSON.stringify(obj));
+  } catch (_) {
+    // Best-effort persistence only — an in-memory-only cache for this session is fine too.
+  }
+}
+
 /**
- * A creature's native (pre-battle) value for one Combat-timing field, in that field's unit,
- * from `metadata.baseStats`. Attack (`attackDelayTicks`, ticks) and move (`speed`, SPD) live
- * in metadata; ability cooldown is buried in the ability script chunk, so returns null.
+ * Record a live-discovered range for a creature as its native default — call ONLY when no
+ * Range override is currently configured for that piece, otherwise this would cache the
+ * overridden value as if it were the creature's true default and poison every future edit.
+ */
+function rememberNativeRange(gameId, range) {
+  const id = Number(gameId);
+  const r = Number(range);
+  if (!Number.isFinite(id) || !Number.isFinite(r) || r < 1) return;
+  const floored = Math.floor(r);
+  if (nativeRangeCacheByGameId.get(id) === floored) return;
+  nativeRangeCacheByGameId.set(id, floored);
+  saveNativeRangeCache();
+}
+
+/**
+ * A creature's native (pre-battle) value for one Combat-tuning field, in that field's unit.
+ * Attack (`attackDelayTicks`, ticks) and move (`speed`, SPD) live in generic
+ * `metadata.baseStats`; ability cooldown is buried in the ability script chunk, so returns
+ * null for it. Range has no metadata source at all — see the cache above instead.
  */
 function nativeCreatureFieldValue(gameId, field) {
+  if (field.unit === 'range') {
+    const cached = nativeRangeCacheByGameId.get(Number(gameId));
+    return Number.isFinite(cached) ? cached : null;
+  }
   const baseStats = globalThis.state?.utils?.getMonster?.(gameId)?.metadata?.baseStats;
   if (!baseStats || typeof baseStats !== 'object') return null;
   if (field.unit === 'speed') {
@@ -12410,34 +12512,44 @@ function nativeCreatureFieldValue(gameId, field) {
   return null;
 }
 
-/** "Combat timing" section: ability / attack cooldown (ticks) + movement (SPD) overrides. */
+/** "Combat tuning" section: ability / attack cooldown (ticks), movement (SPD), and range (tiles) overrides. */
 function appendCreatureCooldownSection(form, formState, tileIndex, actor) {
   const title = document.createElement('div');
   title.className = 'me-creature-section-title';
-  title.textContent = t('mods.mapEditor.creatureCombatTiming', 'Combat timing');
+  title.textContent = t('mods.mapEditor.creatureCombatTuning', 'Combat tuning');
   form.appendChild(title);
 
   const gameId = resolveCreatureGameId(actor);
   const live = readLiveCreatureCooldowns(tileIndex);
 
-  CREATURE_COOLDOWN_FIELDS.forEach((field) => {
+  CREATURE_COMBAT_FIELDS.forEach((field) => {
     const input = createCreatureNumberInput(formState[field.formKey], {
-      min: field.unit === 'speed' ? 1 : 0
+      min: field.unit === 'speed' || field.unit === 'range' ? 1 : 0
     });
     input.setAttribute(field.datasetAttr, '1');
     input.classList.add('me-creature-input-compact');
 
-    // Metadata native value (works pre-battle) preferred; for tick fields fall back to the
-    // live actor's current base cooldown. Shown greyed in the empty box as the
-    // "is my number better or worse" anchor.
-    const liveTicks = field.unit === 'ticks' && live
+    // Metadata native value (works pre-battle) preferred; for tick fields (and range, which
+    // has no metadata source at all — see nativeCreatureFieldValue) fall back to the live
+    // actor's current base cooldown/range. Shown greyed in the empty box as the "is my
+    // number better or worse" anchor.
+    const liveTicks = (field.unit === 'ticks' || field.unit === 'range') && live
       && Number.isFinite(Number(live[field.liveKey]))
       ? Number(live[field.liveKey])
       : null;
+    // Learn this creature's true native range from an un-overridden live actor (see
+    // rememberNativeRange's guard doc) so later edits — even outside a live test — get it
+    // pre-filled too, the same way Move speed's metadata lookup always does.
+    if (field.unit === 'range' && liveTicks != null && formState[field.formKey] === '') {
+      rememberNativeRange(gameId, liveTicks);
+    }
     const nativeValue = nativeCreatureFieldValue(gameId, field) ?? liveTicks;
     input.placeholder = nativeValue != null
       ? String(nativeValue)
-      : t('mods.mapEditor.creatureAbilityCdPlaceholder', 'Ticks (optional)');
+      : t(
+          field.unit === 'range' ? 'mods.mapEditor.creatureRangePlaceholder' : 'mods.mapEditor.creatureAbilityCdPlaceholder',
+          field.unit === 'range' ? 'Tiles (optional)' : 'Ticks (optional)'
+        );
 
     const row = document.createElement('div');
     row.className = 'me-row me-creature-ability-cd-row';
@@ -13004,7 +13116,7 @@ function applyEditorVillainsToBoard(options = {}) {
   // (no world/actors to patch) during the pre-battle placement phase.
   if (typeof mapEditorTestBattle.enforceConfiguredAbilityCooldowns === 'function') {
     const configuredCount = mapEditorTestBattle.config.villains
-      .filter((v) => CREATURE_COOLDOWN_FIELDS.some(
+      .filter((v) => CREATURE_COMBAT_FIELDS.some(
         ({ villainKey }) => Number.isFinite(Number(v[villainKey]))
       )).length;
     if (configuredCount > 0) {
@@ -13503,7 +13615,7 @@ async function applyCustomSpriteToSelection(spriteDef) {
   actorConfig.level = Number(spriteDef.level) || 50;
   actorConfig.direction = spriteDef.direction || 'south';
   // Stored as the same nested { cooldownTicks | speed } container the creature edit form
-  // reads via CREATURE_COOLDOWN_FIELDS/buildCreatureEditorFormState (actor.attackCooldown /
+  // reads via CREATURE_COMBAT_FIELDS/buildCreatureEditorFormState (actor.attackCooldown /
   // actor.moveCooldown) — a flat actorConfig.moveSpeed/.attackCooldownTicks round-trips fine
   // through buildMapEditorVillainConfig's live-board forwarding but the form only checks the
   // nested container, so it showed blank.

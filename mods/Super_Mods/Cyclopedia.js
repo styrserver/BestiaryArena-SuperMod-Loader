@@ -12342,7 +12342,15 @@ function createStatisticsSection(selectedMap, leaderboardData) {
           }
         } else {
           timeCell.textContent = '-';
-          
+          if (run.floorGroup && run.seed) {
+            // Multi-floor rooms: the game server only sends floorTicks/gameTicks when a
+            // clear sets a new deepest-floor personal best for that room (its own scoring
+            // is "deepest floor reached", not per-floor). Clearing a floor at or below one
+            // you've already reached deeper than gets no timing data from the server at
+            // all, so RunTracker has nothing to store even though the win/replay is real.
+            timeCell.title = 'No time recorded for this floor — the game only sends timing data when a clear sets a new deepest-floor personal best for this room';
+            timeCell.style.fontStyle = 'italic';
+          }
         }
         row.appendChild(timeCell);
         

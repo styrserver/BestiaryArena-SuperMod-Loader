@@ -1386,7 +1386,7 @@ For more examples, check out the existing mods in the `mods` directory.
 
 ### Quest mod data (`assets/quests`)
 
-The bundled **Quests** mod (`mods/OT_Mods/Quests.js`) loads copy, items, battles, placements, and tuning from JSON under `assets/quests/`. See **[Quest mod data](quests_data.md)** for the file map, reward field conventions (`rewardCoins`, `{coins}` in dialogue, `rewardProductId`), what stays in JavaScript, and the checklist for adding a mission.
+The bundled **Quests** mod (`mods/OT_Mods/Quests.js`) loads copy, items, battles, placements, and tuning from JSON under `assets/quests/`. See **[assets/quests/README.md](../assets/quests/README.md)** — the single source of truth for that mod's data — for the file map, reward field conventions (`rewardCoins`, `{coins}` in dialogue, `rewardProductId`), what stays in JavaScript, the Board NPC / teleport-battle-quest patterns, item-lifecycle reconciliation, and the checklist for adding a mission.
 
 - [Mod Loading System](mod_loading_optimizations.md) - Loader order, mobile/relaxed path, and popup Error Log
 - [Orion iOS Compatibility](orion_ios_compatibility.md) - WebKit/Orion platform constraints and extension resource loading

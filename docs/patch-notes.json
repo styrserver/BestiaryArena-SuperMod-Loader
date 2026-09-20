@@ -4,6 +4,66 @@
   },
   "notes": [
     {
+      "version": "5.0.10",
+      "changes": [
+        {
+          "mod": "Custom Battles",
+          "type": "fixed",
+          "text": "A forced ally pinned to a specific tile could be evicted entirely (instead of just moved) if the player dropped another ally piece directly onto it, and nothing brought it back — villains already recovered from this kind of overwrite, forced allies now do too. Separately, a forced ally's custom outfit could also get applied to an unrelated player-owned creature that happened to share its exact default display name mid-battle — now cross-checked against the live board so a same-named player piece is left alone."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "changed",
+          "text": "A floor-record row with no clear time recorded now shows its \"-\" in italic with a tooltip explaining why, instead of looking identical to a normal empty row."
+        },
+        {
+          "mod": "Guilds",
+          "type": "fixed",
+          "text": "The Guilds and Equipment items added to the account dropdown menu were inserted next to the menu's own items instead of appended after them, which could occasionally destabilize that menu and crash the game the next time it was reopened - they're now always added to the end of the menu instead. Separately, an account whose skill data still used the old level-based format (from before lifetime-XP tracking) had every one of its combat skills silently zeroed out the next time it was read, with no way to get the old levels back; that data is now converted into equivalent XP instead of being discarded. A mistimed or empty read of a player's skills could also get treated as a fresh account and have zeros written over real data - skill saves are now conditional on nothing else having changed the data first, so a stale read can no longer overwrite real progress."
+        },
+        {
+          "mod": "Map Editor",
+          "type": "changed",
+          "text": "The creature editor's \"Combat timing\" panel is now called \"Combat tuning\" and gained a Range field (tiles) alongside Ability CD / Attack CD / Move speed, so a creature's attack/ability reach can be overridden the same way as its cooldowns. Range has no generic native-value source like the other fields, so its default pre-fills from the first time it's observed live during a test battle, and is remembered after that."
+        },
+        {
+          "mod": "Quests",
+          "type": "added",
+          "text": "A new NPC and quest are now available once a certain dungeon's final floor is cleared, ending in a permanent reward item. Some creatures can now shout short lines of battle dialogue that appear briefly above their tile during a fight, and certain live, time-limited quest events now get a distinct urgent highlight in the Quest Log and are always listed first instead of blending in with ordinary ongoing quests."
+        },
+        {
+          "mod": "Quests",
+          "type": "changed",
+          "text": "One quest reward item's icon now uses the game's own item art instead of a custom image, matching how other similar rewards are displayed. For a live, time-limited quest event, every player who takes part can now independently complete it and claim their own reward, instead of only whoever finishes first. That same event's battle was tuned down slightly after reports that it was too tough to clear within the sandbox's own fixed battle-length limit."
+        },
+        {
+          "mod": "Quests",
+          "type": "fixed",
+          "text": "One active quest's Quest Log entry stayed stuck on its initial objective line and never advanced to reflect progress after accepting it. That quest's battle could also show a native enemy level label during combat that our config has no control over, and losing the fight left the player standing in place instead of returning them to where they'd entered from — both fixed. Separately, a live, time-limited quest event's reward could become uncollectible if the event ended before it was picked up, and quest toast notifications across the mod could stop being dismissible by clicking them — both fixed. That same event's battle could hit a fixed time limit and register as a loss even after its actual objective had already been achieved, so credit was never given — now tracked directly from the objective itself. A notification tied to that event kept nudging the player even after they'd already completed it, and refreshing the page right after completing it could reset that progress and offer it again — both fixed. A repeatable quest's entry in one of the mission-history views could also show with no quest-giver name and no completion text once it had been completed more than once — fixed."
+        },
+        {
+          "mod": "RunTracker",
+          "type": "changed",
+          "text": "Multi-floor quest rooms (different creatures per floor) used to track only a single \"deepest floor reached\" record per room, so a faster clear of an earlier floor was discarded once a later floor was reached with the same team, and reusing a team across floors could overwrite an unrelated floor's record. Floor records for these rooms are now tracked per distinct floor layout, so every unique fight keeps its own best time instead of collapsing into one record for the whole room. Existing saved runs are migrated automatically to the new format on first load; floors that were only passed through en route to a deeper floor come back with their setup and replay seed but no recorded time."
+        },
+        {
+          "mod": "RunTracker",
+          "type": "fixed",
+          "text": "A losing attempt on a setup that matched a previously saved run could log that the saved run was being updated, even though losses are always discarded and nothing was actually saved - misleading console output only, no effect on stored data."
+        },
+        {
+          "mod": "VIP List",
+          "type": "added",
+          "text": "The account dropdown menu's VIP List, Guilds, and Equipment items now sit under their own \"OT Mods\" heading and separator at the bottom of the menu, styled to match the game's own \"My account\" section header above it."
+        },
+        {
+          "mod": "VIP List",
+          "type": "fixed",
+          "text": "The VIP List item added to the account dropdown menu was inserted next to the menu's own logout button and separator instead of appended after them, which could occasionally destabilize that menu and crash the game the next time it was reopened. It's now always added to the end of the menu instead."
+        }
+      ]
+    },
+    {
       "version": "5.0.9",
       "changes": [
         {

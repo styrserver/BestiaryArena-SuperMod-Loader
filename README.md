@@ -226,7 +226,7 @@ Mods have access to the game's state through `globalThis.state`, which provides 
 - [Firebase Best Runs API](docs/firebase_runs_api.md) - Fetch and decrypt Mod Settings best-runs uploads
 - [Fetch Best Runs (HTML tool)](docs/fetch-best-runs.html) - Browser UI for fetching and decrypting uploaded runs
 - [VIP List Chat](docs/chat_documentation.md) - Private and All Chat via Firebase
-- [Quest mod data](docs/quests_data.md) - Layout of the Quests mod's JSON assets
+- [Quest mod data](assets/quests/README.md) - Layout of the Quests mod's JSON assets
 - [Item API discovery notes](docs/item_finder.md) - Internal console snippets for maintainers
 - [Patch notes (JSON)](docs/patch-notes.json) - Machine-readable changelog consumed by the in-loader patch notes feature
 

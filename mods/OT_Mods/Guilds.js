@@ -4665,71 +4665,145 @@ function normalizeSkillXpPayload(data) {
   return normalized;
 }
 
+// Convert a legacy level-based skills document (pre-4.7.6: one integer level
+// per skill plus a totalSkillIncreases counter) into the current lifetime-XP
+// schema, so an account that still carries the old shape keeps credit for its
+// levels instead of being silently zeroed. Conservative: each skill's XP is
+// set to the total XP required to just reach its stored level (0 XP into that
+// level), since the old schema never recorded partial progress within a
+// level — this never overshoots what the player actually had.
+function convertLegacyLevelSkillsToXp(data) {
+  const converted = getDefaultSkills();
+  if (!data || typeof data !== 'object') return converted;
+
+  for (const key of TRACKED_SKILL_KEYS) {
+    const skillConfig = SKILL_FORMULAS[key];
+    if (!skillConfig) continue;
+
+    const rawLevel = Number(data[key]);
+    if (!Number.isFinite(rawLevel)) continue;
+
+    const level = Math.max(skillConfig.startLevel, Math.min(SKILL_LEVEL_CAP, Math.round(rawLevel)));
+    if (level <= skillConfig.startLevel) continue; // nothing above baseline to carry over
+
+    try {
+      converted[key] = calculateTotalBattlesForLevel(level, key);
+    } catch (error) {
+      console.error(`[Guilds] Failed converting legacy level for ${key}:`, error);
+    }
+  }
+
+  return normalizeSkillXpPayload(converted);
+}
+
+// Interpret a raw Firebase document for player-skills/{player} into a usable
+// skills object, without ever touching the network. Shared by every read path
+// (plain reads and the ETag-aware conditional-write path below) so they can't
+// drift into disagreeing about what "empty" or "legacy" means.
+function interpretSkillsDocument(data) {
+  if (!data || typeof data !== 'object' || Object.keys(data).length === 0) {
+    return { skills: getDefaultSkills(), isEmpty: true, isLegacy: false };
+  }
+  if (Object.prototype.hasOwnProperty.call(data, 'totalSkillIncreases')) {
+    return { skills: convertLegacyLevelSkillsToXp(data), isEmpty: false, isLegacy: true };
+  }
+  return { skills: normalizeSkillXpPayload(data), isEmpty: false, isLegacy: false };
+}
+
+// Low-level fetch of the raw player-skills document plus its Firebase ETag,
+// so a caller that's about to write can make that write conditional on the
+// document not having changed since this read (see savePlayerSkillsToFirebase).
+async function fetchPlayerSkillsDocument(playerName) {
+  const normalizedName = sanitizeFirebaseKey(playerName);
+  const path = getPlayerSkillsPath(normalizedName);
+  const response = await fetch(path, { headers: { 'X-Firebase-ETag': 'true' } });
+
+  if (!response.ok) {
+    return { data: null, etag: null, notFound: response.status === 404 };
+  }
+
+  const etag = response.headers.get('ETag');
+  const data = await response.json();
+  return { data, etag, notFound: false };
+}
+
 // Get player skill XP from Firebase (single source of truth)
 async function getPlayerSkillsFromFirebase(playerName) {
   try {
     if (!playerName) return getDefaultSkills();
 
-    const normalizedName = sanitizeFirebaseKey(playerName);
-    const path = getPlayerSkillsPath(normalizedName);
+    const { data } = await fetchPlayerSkillsDocument(playerName);
+    const { skills, isEmpty, isLegacy } = interpretSkillsDocument(data);
 
-    const response = await fetch(path);
-    if (!response.ok) {
-      if (response.status === 404) {
-        console.log('[Guilds] No skills found for player, initializing XP defaults:', playerName);
-        const defaultSkills = getDefaultSkills();
-        await savePlayerSkillsToFirebase(playerName, defaultSkills);
-        return defaultSkills;
-      }
-      return getDefaultSkills();
+    // A read that comes back empty is NOT written back here — it might just
+    // be a genuinely new account (nothing lost either way), but it might also
+    // be a transient/stale read for an account that has real data at this
+    // path. Persisting defaults on a bare read used to be able to silently
+    // overwrite real progress with zeros; only a real XP delta (below) or a
+    // confirmed legacy-schema migration is allowed to write to this path now.
+    if (isEmpty) {
+      return skills;
     }
 
-    const data = await response.json();
-
-    // Empty or old level-based schema (had totalSkillIncreases) → fresh XP start
-    if (!data || Object.keys(data).length === 0 || Object.prototype.hasOwnProperty.call(data, 'totalSkillIncreases')) {
-      console.log('[Guilds] Resetting player skills to XP defaults:', playerName);
-      const defaultSkills = getDefaultSkills();
-      await savePlayerSkillsToFirebase(playerName, defaultSkills);
-      return defaultSkills;
+    if (isLegacy) {
+      console.log('[Guilds] Migrating legacy level-based skills to XP for player:', playerName);
+      await savePlayerSkillsToFirebase(playerName, skills);
     }
 
-    return normalizeSkillXpPayload(data);
+    return skills;
   } catch (error) {
     console.error('[Guilds] Error fetching player skills from Firebase:', error);
     return getDefaultSkills();
   }
 }
 
-// Save player skill XP to Firebase
-async function savePlayerSkillsToFirebase(playerName, skillsData) {
+// Save player skill XP to Firebase. Pass { ifMatchEtag } (from
+// fetchPlayerSkillsDocument) to make the write conditional on the document
+// not having changed since it was read — Firebase rejects the write with 412
+// instead of letting it silently clobber a newer save from another tab/device
+// or a save based on a stale/empty read.
+async function savePlayerSkillsToFirebase(playerName, skillsData, { ifMatchEtag } = {}) {
   try {
-    if (!playerName || !skillsData) return false;
+    if (!playerName || !skillsData) return { success: false };
 
     const normalizedName = sanitizeFirebaseKey(playerName);
     const path = getPlayerSkillsPath(normalizedName);
     const payload = normalizeSkillXpPayload(skillsData);
 
+    const headers = { 'Content-Type': 'application/json' };
+    if (ifMatchEtag) {
+      headers['if-match'] = ifMatchEtag;
+    }
+
     const response = await fetch(path, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify(payload)
     });
 
+    if (response.status === 412) {
+      console.warn('[Guilds] Skill save conflict (document changed since read), not overwriting:', playerName);
+      return { success: false, conflict: true };
+    }
+
     if (!response.ok) {
       console.error('[Guilds] Failed to save player skills:', response.status, response.statusText);
-      return false;
+      return { success: false };
     }
 
     console.log('[Guilds] Successfully saved player skills:', playerName, payload);
-    return true;
+    return { success: true };
   } catch (error) {
     console.error('[Guilds] Error saving player skills to Firebase:', error);
-    return false;
+    return { success: false };
   }
 }
 
-// Apply XP deltas against the latest Firebase snapshot to reduce cross-browser overwrites
+// Apply XP deltas against the latest Firebase snapshot. Re-reads with an
+// ETag immediately before writing and writes conditionally on that ETag, so
+// a race with another tab/device — or a stale/empty read colliding with a
+// real XP gain — is detected as a conflict and retried against a fresh read
+// instead of blindly overwriting whatever is actually there.
 async function applySkillXpDeltas(playerName, xpDeltas) {
   if (!playerName || !xpDeltas || typeof xpDeltas !== 'object') {
     return { success: false, xpSkills: getDefaultSkills(), leveled: [] };
@@ -4741,24 +4815,50 @@ async function applySkillXpDeltas(playerName, xpDeltas) {
     return { success: true, xpSkills, leveled: [] };
   }
 
-  // Re-read immediately before write so another browser's save is included when possible
-  const xpSkills = await getPlayerSkillsFromFirebase(playerName);
-  const leveled = [];
+  const MAX_ATTEMPTS = 3;
+  let lastXpSkills = getDefaultSkills();
 
-  for (const [skillType, amount] of deltaEntries) {
-    if (!TRACKED_SKILL_KEYS.includes(skillType)) continue;
-    const oldXp = xpSkills[skillType] || 0;
-    const oldLevel = getLevelFromXp(oldXp, skillType);
-    const newXp = addSkillXp(oldXp, amount);
-    xpSkills[skillType] = newXp;
-    const newLevel = getLevelFromXp(newXp, skillType);
-    if (newLevel > oldLevel) {
-      leveled.push({ skillType, oldLevel, newLevel });
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const { data, etag, notFound } = await fetchPlayerSkillsDocument(playerName);
+    const { skills: baseSkills } = interpretSkillsDocument(data);
+
+    const xpSkills = { ...baseSkills };
+    const leveled = [];
+    for (const [skillType, amount] of deltaEntries) {
+      if (!TRACKED_SKILL_KEYS.includes(skillType)) continue;
+      const oldXp = xpSkills[skillType] || 0;
+      const oldLevel = getLevelFromXp(oldXp, skillType);
+      const newXp = addSkillXp(oldXp, amount);
+      xpSkills[skillType] = newXp;
+      const newLevel = getLevelFromXp(newXp, skillType);
+      if (newLevel > oldLevel) {
+        leveled.push({ skillType, oldLevel, newLevel });
+      }
     }
+    lastXpSkills = xpSkills;
+
+    // A document that doesn't exist yet has no ETag to match against — write
+    // it unconditionally since there is nothing prior it could clobber.
+    const saveResult = await savePlayerSkillsToFirebase(
+      playerName,
+      xpSkills,
+      notFound ? {} : { ifMatchEtag: etag }
+    );
+
+    if (saveResult.success) {
+      return { success: true, xpSkills, leveled };
+    }
+
+    if (!saveResult.conflict) {
+      // A real failure (network/HTTP error), not a race — retrying immediately won't help.
+      return { success: false, xpSkills, leveled: [] };
+    }
+
+    console.warn(`[Guilds] Skill XP save conflict for ${playerName}, retrying (attempt ${attempt}/${MAX_ATTEMPTS})`);
   }
 
-  const success = await savePlayerSkillsToFirebase(playerName, xpSkills);
-  return { success, xpSkills, leveled };
+  console.error(`[Guilds] Giving up on skill XP save for ${playerName} after ${MAX_ATTEMPTS} conflicting attempts`);
+  return { success: false, xpSkills: lastXpSkills, leveled: [] };
 }
 
 function canRunGuildAdminTools() {
@@ -8338,15 +8438,13 @@ function injectGuildMenuItem(menuElement) {
     }, 100);
   });
 
-  // Insert after VIP List item, before the separator
-  const nextSibling = vipListItem.nextElementSibling;
-  if (nextSibling && nextSibling.classList.contains('separator')) {
-    // Insert before the separator
-    group.insertBefore(guildsMenuItem, nextSibling);
-  } else {
-    // Insert right after VIP List
-    vipListItem.parentNode.insertBefore(guildsMenuItem, vipListItem.nextSibling);
-  }
+  // Append at the end of the native menu group instead of splicing next to
+  // VIP List's item — this group is a React-owned Radix menu that remounts
+  // on every open, so inserting relative to its own/sibling mods' children
+  // can hand React a stale insertBefore anchor on a later remount (see
+  // CLAUDE.md: "Never remove or reorder native DOM nodes inside a
+  // React-managed container").
+  group.appendChild(guildsMenuItem);
 
   // Inject Equipment menu item after Guilds
   injectEquipmentMenuItem(guildsMenuItem);
@@ -11099,8 +11197,10 @@ function injectEquipmentMenuItem(guildsMenuItem) {
     }, 150);
   });
 
-  // Insert right after Guilds menu item
-  guildsMenuItem.parentNode.insertBefore(equipmentMenuItem, guildsMenuItem.nextSibling);
+  // Append at the end of the native menu group instead of splicing next to
+  // the Guilds item — see the matching note in injectGuildMenuItem() above;
+  // this group is a React-owned Radix menu that remounts on every open.
+  guildsMenuItem.parentNode.appendChild(equipmentMenuItem);
 }
 
 // =======================

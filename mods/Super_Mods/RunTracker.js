@@ -333,6 +333,136 @@ function assignFloorSeed(map, floor, seed) {
   }
 }
 
+// Multi-floor quest rooms (e.g. The Annihilator Quest, The Behemoth Quest) have a unique
+// board layout per floor index (room.floorFiles[floorIndex]). Floors are grouped by that
+// layout name so every distinct fight keeps its own best-run record instead of collapsing
+// into one "deepest floor reached" record for the whole 16-floor room.
+function getRoomInfoForMapName(mapName) {
+  try {
+    if (!mapName) return null;
+    const rooms = globalThis.state?.utils?.ROOMS;
+    const roomNames = globalThis.state?.utils?.ROOM_NAME;
+    if (!Array.isArray(rooms) || !roomNames) return null;
+    const roomId = Object.keys(roomNames).find((id) => roomNames[id] === mapName);
+    if (!roomId) return null;
+    return rooms.find((r) => r?.id === roomId) || null;
+  } catch (error) {
+    return null;
+  }
+}
+
+function isMultiFloorRoom(room) {
+  return !!room && room.type === 'multi' && Array.isArray(room.floorFiles);
+}
+
+function getFloorGroupKey(room, floorIndex) {
+  const idx = Number(floorIndex);
+  if (isMultiFloorRoom(room) && Number.isFinite(idx) && room.floorFiles[idx]?.name) {
+    return room.floorFiles[idx].name;
+  }
+  return `floor_${Number.isFinite(idx) ? idx : floorIndex}`;
+}
+
+// One-time migration of existing multi-floor room floor records (collapsed by setup,
+// deepest-floor-reached model) into per-floor-group records. Old entries already carry
+// floorHistory/floorSeeds for every floor reached along the way, so every floor's seed
+// (and thus its replay) is recoverable; only the entry's own headline floor kept a real
+// clear time, so non-headline floors migrate as seed-only (untimed) records.
+function migrateMultiFloorRoomsToPerFloorGroups() {
+  try {
+    if (!runStorage.metadata) runStorage.metadata = {};
+    if (runStorage.metadata.floorGroupMigrationVersion >= 1) return;
+
+    const rooms = globalThis.state?.utils?.ROOMS;
+    const roomNames = globalThis.state?.utils?.ROOM_NAME;
+    if (!Array.isArray(rooms) || !roomNames) {
+      console.log('[RunTracker] Skipping floor-group migration - game state not ready yet, will retry next load');
+      return;
+    }
+
+    let migratedMaps = 0;
+    let migratedGroups = 0;
+
+    for (const mapKey in runStorage.runs) {
+      const mapData = runStorage.runs[mapKey];
+      if (!mapData || !Array.isArray(mapData.floor) || mapData.floor.length === 0) continue;
+
+      const sampleName = mapData.floor[0]?.mapName
+        || (Array.isArray(mapData.speedrun) && mapData.speedrun[0]?.mapName)
+        || (Array.isArray(mapData.rank) && mapData.rank[0]?.mapName);
+      const room = getRoomInfoForMapName(sampleName);
+      if (!isMultiFloorRoom(room)) continue;
+
+      const groupMap = new Map();
+
+      for (const entry of mapData.floor) {
+        const headlineFloor = Number(entry.floor);
+        const entryFloorHistory = normalizeFloorHistory(entry);
+        const entryFloorSeeds = cloneFloorSeedMap(entry);
+        const floorsToProcess = entryFloorHistory.length > 0
+          ? entryFloorHistory
+          : (Number.isFinite(headlineFloor) && headlineFloor > 0 ? [headlineFloor] : []);
+
+        for (const floorNum of floorsToProcess) {
+          const groupKey = getFloorGroupKey(room, floorNum);
+          const isHeadline = floorNum === headlineFloor;
+          const seed = entryFloorSeeds[floorNum] ?? (isHeadline ? Number(entry.seed) : undefined);
+
+          const candidate = {
+            ...entry,
+            floor: floorNum,
+            floorGroup: groupKey,
+            seed: Number.isFinite(seed) ? seed : entry.seed,
+            floorTicks: isHeadline ? entry.floorTicks : undefined,
+            time: isHeadline ? entry.time : undefined,
+            floorHistory: [floorNum],
+            floorSeeds: Number.isFinite(seed) ? { [floorNum]: seed } : {}
+          };
+
+          const existing = groupMap.get(groupKey);
+          if (!existing) {
+            groupMap.set(groupKey, candidate);
+            continue;
+          }
+
+          const mergedHistory = normalizeFloorHistory({ floor: candidate.floor, floorHistory: existing.floorHistory });
+          const mergedSeeds = cloneFloorSeedMap(existing);
+          if (Number.isFinite(seed)) mergedSeeds[floorNum] = seed;
+
+          const candidateIsBetter =
+            candidate.floor > existing.floor ||
+            (candidate.floor === existing.floor && candidate.floorTicks && existing.floorTicks && candidate.floorTicks < existing.floorTicks) ||
+            (candidate.floor === existing.floor && candidate.floorTicks && !existing.floorTicks);
+
+          const winner = candidateIsBetter ? candidate : existing;
+          groupMap.set(groupKey, { ...winner, floorHistory: mergedHistory, floorSeeds: mergedSeeds });
+        }
+      }
+
+      if (groupMap.size > 0) {
+        mapData.floorLegacy = mapData.floor;
+        mapData.floor = Array.from(groupMap.values()).sort((a, b) => {
+          if ((a.floor || 0) !== (b.floor || 0)) return (b.floor || 0) - (a.floor || 0);
+          if (a.floorTicks && b.floorTicks) return a.floorTicks - b.floorTicks;
+          if (a.floorTicks && !b.floorTicks) return -1;
+          if (!a.floorTicks && b.floorTicks) return 1;
+          return 0;
+        });
+        migratedGroups += mapData.floor.length;
+        migratedMaps += 1;
+      }
+    }
+
+    runStorage.metadata.floorGroupMigrationVersion = 1;
+    if (migratedMaps > 0) {
+      console.log(`[RunTracker] Migrated ${migratedMaps} multi-floor room(s) to per-floor-group records (${migratedGroups} groups total)`);
+      runStorage.lastUpdated = Date.now();
+    }
+  } catch (error) {
+    Utils.handleError(error, 'migrating multi-floor rooms to per-floor groups', false);
+  }
+}
+
 // Get monster name from database ID by looking up in player's monster inventory
 function getMonsterNameFromDatabaseId(databaseId) {
   try {
@@ -558,6 +688,14 @@ async function initializeStorage() {
     if (seasonMigratedCount > 0) {
       console.log(`[RunTracker] Migrated ${seasonMigratedCount} runs to add season: 1 fallback`);
     }
+
+    // One-time migration: multi-floor quest rooms (Annihilator, Behemoth, ...) used to
+    // collapse all floor runs for the whole room into a single "deepest floor reached"
+    // record, deduped by team setup. Split those into one record per floor-layout group
+    // (see getFloorGroupKey) so every distinct fight keeps its own best time. Requires
+    // globalThis.state.utils.ROOMS to be ready; if it isn't yet, this retries on the next
+    // initializeStorage() call (mod reload / re-enable) rather than blocking startup.
+    migrateMultiFloorRoomsToPerFloorGroups();
 
     // Remove speedrun entries above floor 0 (times are not comparable across floors)
     let speedrunFloorPurgeCount = 0;
@@ -975,6 +1113,16 @@ function parseServerResults(serverResults) {
     } else if (serverResults.floorTicks !== undefined && serverResults.floorTicks !== null) {
       runData.floorTicks = serverResults.floorTicks;
     }
+
+    // Multi-floor quest rooms: the server only sends floorTicks/gameTicks when a clear
+    // sets a new deepest-floor personal best for the room, so a win on a floor at or
+    // below one already reached deeper legitimately carries no timing data at all. Log
+    // this so a "-" time in Cyclopedia's floor table is traceable to its real cause
+    // instead of looking like a tracking bug.
+    if (runData.floor > 0 && (runData.floorTicks === undefined || runData.floorTicks === null)
+        && (runData.time === undefined || runData.time === null)) {
+      console.log(`[RunTracker] Floor ${runData.floor} win for ${runData.mapName} carried no floorTicks/gameTicks from the server (likely not a new deepest-floor best for this room) - record will show no time`);
+    }
     
     // Same field Hunt Analyzer uses (board context serverResults.rewardScreen.victory).
     runData.victory = serverResults.rewardScreen.victory;
@@ -1159,55 +1307,6 @@ async function addRun(runData) {
       // Silently continue if fallback check fails
     }
     
-    // Check if we have an existing run with the same setup
-    const existingRun = findExistingRun(runData);
-    if (existingRun) {
-      console.log('[RunTracker] Found existing run with same setup, checking if new run is better');
-      
-      // Check if the new run is better than the existing one in any category
-      let shouldUpdate = false;
-      let updateReason = [];
-      
-      // For speedrun: check if new time is faster
-      if (runData.time !== undefined && runData.time !== null && existingRun.time !== undefined && existingRun.time !== null) {
-        if (runData.time < existingRun.time) {
-          shouldUpdate = true;
-          updateReason.push(`faster time (${runData.time} vs ${existingRun.time})`);
-        }
-      }
-      
-      // For rank: check if new points are higher or same points with faster time
-      if (runData.points !== undefined && runData.points !== null && existingRun.points !== undefined && existingRun.points !== null) {
-        if (runData.points > existingRun.points) {
-          shouldUpdate = true;
-          updateReason.push(`higher points (${runData.points} vs ${existingRun.points})`);
-        } else if (runData.points === existingRun.points && runData.time < existingRun.time) {
-          shouldUpdate = true;
-          updateReason.push(`same points but faster time (${runData.time} vs ${existingRun.time})`);
-        }
-      }
-      
-      // For floor: check if new floor is higher or same floor with faster floorTicks
-      if (runData.floor !== undefined && runData.floor !== null && runData.floor > 0 && existingRun.floor !== undefined && existingRun.floor !== null) {
-        if (runData.floor > existingRun.floor) {
-          shouldUpdate = true;
-          updateReason.push(`higher floor (${runData.floor} vs ${existingRun.floor})`);
-        } else if (runData.floor === existingRun.floor && runData.floorTicks && existingRun.floorTicks && runData.floorTicks < existingRun.floorTicks) {
-          shouldUpdate = true;
-          updateReason.push(`same floor but faster floorTicks (${runData.floorTicks} vs ${existingRun.floorTicks})`);
-        }
-      }
-      
-      if (shouldUpdate) {
-        console.log(`[RunTracker] Updating existing run: ${updateReason.join(', ')}`);
-        // Continue with the update process
-      } else {
-        // Don't return early - let each category check independently
-        // A run might not be better overall but could still be better in a specific category
-        console.log('[RunTracker] New run is not better than existing run in checked categories, but will check each category independently');
-      }
-    }
-    
     // Initialize map if it doesn't exist
     if (!runStorage.runs[runData.mapKey]) {
       runStorage.runs[runData.mapKey] = {
@@ -1227,7 +1326,42 @@ async function addRun(runData) {
       console.log(`[RunTracker] Skipping non-victory run for ${runData.mapName} (victory: ${runData.victory})`);
       return false;
     }
-    
+
+    // Check if we have an existing run with the same setup (informational only - each
+    // category below decides independently whether to actually replace its stored best)
+    const existingRun = findExistingRun(runData);
+    if (existingRun) {
+      let updateReason = [];
+
+      if (runData.time !== undefined && runData.time !== null && existingRun.time !== undefined && existingRun.time !== null) {
+        if (runData.time < existingRun.time) {
+          updateReason.push(`faster time (${runData.time} vs ${existingRun.time})`);
+        }
+      }
+
+      if (runData.points !== undefined && runData.points !== null && existingRun.points !== undefined && existingRun.points !== null) {
+        if (runData.points > existingRun.points) {
+          updateReason.push(`higher points (${runData.points} vs ${existingRun.points})`);
+        } else if (runData.points === existingRun.points && runData.time < existingRun.time) {
+          updateReason.push(`same points but faster time (${runData.time} vs ${existingRun.time})`);
+        }
+      }
+
+      if (runData.floor !== undefined && runData.floor !== null && runData.floor > 0 && existingRun.floor !== undefined && existingRun.floor !== null) {
+        if (runData.floor > existingRun.floor) {
+          updateReason.push(`higher floor (${runData.floor} vs ${existingRun.floor})`);
+        } else if (runData.floor === existingRun.floor && runData.floorTicks && existingRun.floorTicks && runData.floorTicks < existingRun.floorTicks) {
+          updateReason.push(`same floor but faster floorTicks (${runData.floorTicks} vs ${existingRun.floorTicks})`);
+        }
+      }
+
+      if (updateReason.length > 0) {
+        console.log(`[RunTracker] Found existing run with same setup, will attempt to update: ${updateReason.join(', ')}`);
+      } else {
+        console.log('[RunTracker] Found existing run with same setup, not better in checked categories, but will check each category independently');
+      }
+    }
+
     // Check speedrun only at floor 0 (higher floors belong in the floor category)
     if (runData.time !== undefined && runData.time !== null) {
       if (qualifiesForSpeedrunCategory(runData)) {
@@ -1427,6 +1561,77 @@ async function checkAndUpdateRankRuns(runData) {
 
 // Check and update floor category
 async function checkAndUpdateFloorRuns(runData) {
+  const room = getRoomInfoForMapName(runData.mapName);
+  if (isMultiFloorRoom(room)) {
+    return checkAndUpdateFloorRunsMultiFloor(runData, room);
+  }
+  return checkAndUpdateFloorRunsSingleFloor(runData);
+}
+
+// Multi-floor quest rooms: one best-run record per floor layout group (see getFloorGroupKey).
+function checkAndUpdateFloorRunsMultiFloor(runData, room) {
+  const floorRuns = runStorage.runs[runData.mapKey].floor;
+  const runSeason = Number(runData.season || 1);
+  const floorValue = Number(runData.floor);
+  if (!Number.isFinite(floorValue) || floorValue <= 0) return false;
+  const groupKey = getFloorGroupKey(room, floorValue);
+
+  const existingIndex = floorRuns.findIndex((run) =>
+    run.floorGroup === groupKey && Number(run?.season || 1) === runSeason
+  );
+
+  if (existingIndex === -1) {
+    const floorSeeds = {};
+    assignFloorSeed(floorSeeds, runData.floor, runData.seed);
+    const newRun = { ...runData, floorGroup: groupKey, floorHistory: [floorValue], floorSeeds };
+    floorRuns.push(newRun);
+    sortFloorRunsMulti(floorRuns);
+    console.log(`[RunTracker] Added new floor group record for ${runData.mapName} (${groupKey}): floor ${floorValue}${runData.floorTicks ? `, floorTicks ${runData.floorTicks}` : ''}`);
+    return true;
+  }
+
+  const existing = floorRuns[existingIndex];
+  const mergedFloorHistory = normalizeFloorHistory({ floor: floorValue, floorHistory: existing.floorHistory });
+  const mergedFloorSeeds = cloneFloorSeedMap(existing);
+  assignFloorSeed(mergedFloorSeeds, runData.floor, runData.seed);
+
+  let shouldReplace = false;
+  if (floorValue > existing.floor) {
+    shouldReplace = true;
+  } else if (floorValue === existing.floor) {
+    if (runData.floorTicks && existing.floorTicks) {
+      shouldReplace = runData.floorTicks < existing.floorTicks;
+    } else if (runData.floorTicks && !existing.floorTicks) {
+      shouldReplace = true;
+    } else if (!runData.floorTicks && !existing.floorTicks && runData.time && existing.time) {
+      shouldReplace = runData.time < existing.time;
+    }
+  }
+
+  if (shouldReplace) {
+    floorRuns[existingIndex] = { ...existing, ...runData, floorGroup: groupKey, floorHistory: mergedFloorHistory, floorSeeds: mergedFloorSeeds };
+    sortFloorRunsMulti(floorRuns);
+    console.log(`[RunTracker] Updated floor group record for ${runData.mapName} (${groupKey}): floor ${floorValue} (was ${existing.floor})`);
+  } else {
+    floorRuns[existingIndex] = { ...existing, floorHistory: mergedFloorHistory, floorSeeds: mergedFloorSeeds };
+    console.log(`[RunTracker] Recorded floor ${floorValue} seed for existing group ${groupKey} without replacing best run`);
+  }
+  return true;
+}
+
+function sortFloorRunsMulti(floorRuns) {
+  floorRuns.sort((a, b) => {
+    if ((a.floor || 0) !== (b.floor || 0)) return (b.floor || 0) - (a.floor || 0);
+    if (a.floorTicks && b.floorTicks) return a.floorTicks - b.floorTicks;
+    if (a.floorTicks && !b.floorTicks) return -1;
+    if (!a.floorTicks && b.floorTicks) return 1;
+    if (a.time && b.time) return a.time - b.time;
+    return 0;
+  });
+}
+
+// Single-floor rooms: legacy behavior — best floor reached, deduped by team setup.
+function checkAndUpdateFloorRunsSingleFloor(runData) {
   const floorRuns = runStorage.runs[runData.mapKey].floor;
   const runSeason = Number(runData.season || 1);
   const seasonRuns = floorRuns.filter(run => Number(run?.season || 1) === runSeason);

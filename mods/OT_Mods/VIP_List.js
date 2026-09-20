@@ -11524,23 +11524,36 @@ function injectVIPListItem(menuElement) {
     vipListItem.style.background = 'transparent';
   });
   
-  // Insert before the separator before logout (or before logout button)
-  const separator = logoutButton.previousElementSibling;
-  if (separator && separator.classList.contains('separator')) {
-    separator.insertAdjacentElement('beforebegin', vipListItem);
-  } else {
-    logoutButton.insertAdjacentElement('beforebegin', vipListItem);
+  // Append at the end of the native menu group instead of splicing before the
+  // logout button/separator — this group is a React-owned Radix menu that
+  // remounts on every open, so inserting relative to its own children can
+  // hand React a stale insertBefore anchor on a later remount (see
+  // CLAUDE.md: "Never remove or reorder native DOM nodes inside a
+  // React-managed container").
+  const ownSeparator = document.createElement('div');
+  ownSeparator.setAttribute('role', 'none');
+  ownSeparator.setAttribute('aria-orientation', 'horizontal');
+  ownSeparator.className = 'separator my-1';
+  group.appendChild(ownSeparator);
+
+  // Static section label above the mod-added items, styled and structured
+  // like the native "My account" header (title, then its own separator) —
+  // plain div, no role/tabindex, so Radix's keyboard nav and item collection
+  // skip over it like it does that one.
+  if (!group.querySelector('.ot-mods-menu-title')) {
+    const otModsTitle = document.createElement('div');
+    otModsTitle.className = 'dropdown-menu-item text-whiteExp ot-mods-menu-title';
+    otModsTitle.textContent = t('mods.vipList.otModsMenuTitle') || 'OT Mods';
+    group.appendChild(otModsTitle);
+
+    const otModsSeparator = document.createElement('div');
+    otModsSeparator.setAttribute('role', 'none');
+    otModsSeparator.setAttribute('aria-orientation', 'horizontal');
+    otModsSeparator.className = 'separator my-1';
+    group.appendChild(otModsSeparator);
   }
-  
-  // Add separator before VIP List item if needed
-  const prevItem = vipListItem.previousElementSibling;
-  if (!prevItem || !prevItem.classList.contains('separator')) {
-    const separator = document.createElement('div');
-    separator.setAttribute('role', 'none');
-    separator.setAttribute('aria-orientation', 'horizontal');
-    separator.className = 'separator my-1';
-    vipListItem.insertAdjacentElement('beforebegin', separator);
-  }
+
+  group.appendChild(vipListItem);
   
   processedMenus.add(menuElement);
   console.log('[VIP List] Successfully injected VIP List menu item');
