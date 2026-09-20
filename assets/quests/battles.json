@@ -20,7 +20,11 @@
     "mad_mage_room": "16. Mad Mage Room (Mad Mage Room quest, Part 2 — Sewers reskin battle after A Prisoner's riddle)",
     "basilisk_challenge_1": "17. Basilisk Challenge 1 (The Basilisk Challenges quest — Sewers reskin, lever on tile 22 of The Farms)",
     "visiting_the_cleric": "18. Visiting the Cleric (Oldrak's temple — empty walk-around sandbox, Sewers reskin)",
-    "isle_of_the_mists": "19. Isle of the Mists (Fernfang battle, Sewers reskin — given by Oldrak)"
+    "avar_tar_hideout": "18b. Avar Tar's Camp (empty walk-around sandbox, Sewers reskin, reached from Edron Wilderness)",
+    "parchment_room": "18c. Parchment Room Quest (Avar Tar — 4 demons, Sewers reskin, coffin pickup on tile 67)",
+    "parchment_antechamber": "18d. Parchment Room approach (empty walk-around sandbox, Sewers reskin — reached from Cake Drake Party's hole)",
+    "isle_of_the_mists": "19. Isle of the Mists (Fernfang battle, Sewers reskin — given by Oldrak)",
+    "annihilator_orshabaal": "20. Astronis' Call (Astronis — Orshabaal battle, Sewers reskin, given after floor 15 of The Annihilator Quest)"
   },
   "mornenion": {
     "allyLimit": 3,
@@ -1482,8 +1486,19 @@
         "shiny": true,
         "awakened": true,
         "outfitSpriteId": 33,
-        "genes": { "hp": 20, "ad": 20, "ap": 20, "armor": 20, "magicResist": 20 },
-        "equip": { "stat": "ap", "tier": 5, "name": "Skullcracker Armor", "gameId": 19 }
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Skullcracker Armor",
+          "gameId": 19
+        }
       },
       {
         "nickname": "Lost Scout",
@@ -1496,8 +1511,19 @@
         "shiny": true,
         "awakened": true,
         "outfitSpriteId": 33,
-        "genes": { "hp": 20, "ad": 20, "ap": 20, "armor": 20, "magicResist": 20 },
-        "equip": { "stat": "ap", "tier": 5, "name": "Skullcracker Armor", "gameId": 19 }
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Skullcracker Armor",
+          "gameId": 19
+        }
       },
       {
         "nickname": "Lost Scout",
@@ -1510,8 +1536,19 @@
         "shiny": true,
         "awakened": true,
         "outfitSpriteId": 33,
-        "genes": { "hp": 20, "ad": 20, "ap": 20, "armor": 20, "magicResist": 20 },
-        "equip": { "stat": "ap", "tier": 5, "name": "Skullcracker Armor", "gameId": 19 }
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Skullcracker Armor",
+          "gameId": 19
+        }
       },
       {
         "nickname": "Lost Scout",
@@ -1524,8 +1561,19 @@
         "shiny": true,
         "awakened": true,
         "outfitSpriteId": 33,
-        "genes": { "hp": 20, "ad": 20, "ap": 20, "armor": 20, "magicResist": 20 },
-        "equip": { "stat": "ap", "tier": 5, "name": "Skullcracker Armor", "gameId": 19 }
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Skullcracker Armor",
+          "gameId": 19
+        }
       },
       {
         "nickname": "Lost Scout",
@@ -1538,8 +1586,19 @@
         "shiny": true,
         "awakened": true,
         "outfitSpriteId": 33,
-        "genes": { "hp": 20, "ad": 20, "ap": 20, "armor": 20, "magicResist": 20 },
-        "equip": { "stat": "ap", "tier": 5, "name": "Skullcracker Armor", "gameId": 19 }
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Skullcracker Armor",
+          "gameId": 19
+        }
       },
       {
         "nickname": "Lost Scout",
@@ -1552,8 +1611,19 @@
         "shiny": true,
         "awakened": true,
         "outfitSpriteId": 33,
-        "genes": { "hp": 20, "ad": 20, "ap": 20, "armor": 20, "magicResist": 20 },
-        "equip": { "stat": "ap", "tier": 5, "name": "Skullcracker Armor", "gameId": 19 }
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Skullcracker Armor",
+          "gameId": 19
+        }
       },
       {
         "nickname": "Lost Scout",
@@ -1565,8 +1635,19 @@
         "creatureName": "Skeleton",
         "shiny": true,
         "awakened": true,
-        "genes": { "hp": 20, "ad": 20, "ap": 20, "armor": 20, "magicResist": 20 },
-        "equip": { "stat": "ap", "tier": 5, "name": "Skullcracker Armor", "gameId": 19 }
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Skullcracker Armor",
+          "gameId": 19
+        }
       },
       {
         "nickname": "Lost Scout",
@@ -1579,8 +1660,19 @@
         "shiny": true,
         "awakened": true,
         "outfitSpriteId": 33,
-        "genes": { "hp": 20, "ad": 20, "ap": 20, "armor": 20, "magicResist": 20 },
-        "equip": { "stat": "ap", "tier": 5, "name": "Skullcracker Armor", "gameId": 19 }
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Skullcracker Armor",
+          "gameId": 19
+        }
       },
       {
         "nickname": "Lost Scout",
@@ -1593,8 +1685,19 @@
         "shiny": true,
         "awakened": true,
         "outfitSpriteId": 33,
-        "genes": { "hp": 20, "ad": 20, "ap": 20, "armor": 20, "magicResist": 20 },
-        "equip": { "stat": "ap", "tier": 5, "name": "Skullcracker Armor", "gameId": 19 }
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Skullcracker Armor",
+          "gameId": 19
+        }
       },
       {
         "nickname": "Lost Scout",
@@ -1607,8 +1710,19 @@
         "shiny": true,
         "awakened": true,
         "outfitSpriteId": 33,
-        "genes": { "hp": 20, "ad": 20, "ap": 20, "armor": 20, "magicResist": 20 },
-        "equip": { "stat": "ap", "tier": 5, "name": "Skullcracker Armor", "gameId": 19 }
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "ap",
+          "tier": 5,
+          "name": "Skullcracker Armor",
+          "gameId": 19
+        }
       }
     ],
     "allowedTiles": [
@@ -2157,6 +2271,157 @@
   },
   "visiting_the_cleric": {
     "_comment": "Oldrak's temple. Empty CustomBattle (no villains) stood up only so the board clears and the Sewers quest overlays suppress. Walk-around scene, no combat — see enterVisitingTheClericTemple() in Quests.js.",
+    "allyLimit": 1,
+    "preventVillainMovement": true,
+    "hideVillainSprites": true,
+    "villains": []
+  },
+  "avar_tar_hideout": {
+    "_comment": "Avar Tar's camp near Edron. Empty CustomBattle (no villains) stood up only so the board clears and the Sewers quest overlays suppress. Walk-around scene, no combat — see enterAvarTarHideout() in Quests.js. Also the quest-giving hub for the Parchment Room Quest (see battles.parchment_room).",
+    "allyLimit": 1,
+    "preventVillainMovement": true,
+    "hideVillainSprites": true,
+    "villains": [],
+    "allowedTiles": [
+      64,
+      65,
+      66,
+      79,
+      80,
+      81
+    ],
+    "allowedTilesMessage": "Ally creatures can only be placed on the marked tiles!"
+  },
+  "parchment_room": {
+    "_comment": "Parchment Room Quest (Avar Tar). Sewers reskin — a demon guards a coffin; opening it after the fight (right-click tile 67) grants the Golden Key. See enterParchmentRoom() in Quests.js.",
+    "allyLimit": 10,
+    "preventVillainMovement": true,
+    "hideVillainSprites": true,
+    "villains": [
+      {
+        "nickname": "Demon",
+        "tileIndex": 37,
+        "keyPrefix": "parchment-room-demon-tile-37-",
+        "fallbackGameId": 117,
+        "level": 300,
+        "direction": "south",
+        "creatureName": "Astronis",
+        "awakened": true,
+        "customSpriteKey": "demon",
+        "abilityCooldownTicks": 48,
+        "attackCooldownTicks": 48,
+        "moveCooldownTicks": 8,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "hp",
+          "tier": 5,
+          "name": "Ice Rapier",
+          "gameId": 12
+        }
+      },
+      {
+        "nickname": "Demon",
+        "tileIndex": 79,
+        "keyPrefix": "parchment-room-demon-tile-79-",
+        "fallbackGameId": 118,
+        "level": 300,
+        "direction": "east",
+        "creatureName": "Setzer Gambler",
+        "awakened": true,
+        "customSpriteKey": "demon",
+        "abilityCooldownTicks": 48,
+        "attackCooldownTicks": 48,
+        "moveCooldownTicks": 8,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "hp",
+          "tier": 5,
+          "name": "Demon Shield",
+          "gameId": 52
+        }
+      },
+      {
+        "nickname": "Demon",
+        "tileIndex": 85,
+        "keyPrefix": "parchment-room-demon-tile-85-",
+        "fallbackGameId": 26,
+        "level": 300,
+        "direction": "west",
+        "creatureName": "Dragon Lord",
+        "awakened": true,
+        "customSpriteKey": "demon",
+        "abilityCooldownTicks": 48,
+        "attackCooldownTicks": 48,
+        "moveCooldownTicks": 8,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "hp",
+          "tier": 5,
+          "name": "Golden Armor",
+          "gameId": 51
+        }
+      },
+      {
+        "nickname": "Demon",
+        "tileIndex": 127,
+        "keyPrefix": "parchment-room-demon-tile-127-",
+        "fallbackGameId": 65,
+        "level": 300,
+        "direction": "north",
+        "creatureName": "Dragon",
+        "customSpriteKey": "demon",
+        "abilityCooldownTicks": 48,
+        "attackCooldownTicks": 48,
+        "moveCooldownTicks": 8,
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "equip": {
+          "stat": "hp",
+          "tier": 5,
+          "name": "Magic Plate Armor",
+          "gameId": 54
+        }
+      }
+    ],
+    "allowedTiles": [
+      51,
+      52,
+      53,
+      66,
+      68,
+      81,
+      83,
+      96,
+      97,
+      98
+    ],
+    "allowedTilesMessage": "Ally creatures can only be placed on the marked tiles!"
+  },
+  "parchment_antechamber": {
+    "_comment": "Approach corridor before the Parchment Room fight. Empty CustomBattle (no villains) stood up only so the board clears and the Sewers quest overlays suppress. Walk-around scene, no combat -- see enterParchmentAntechamber() in Quests.js.",
     "allyLimit": 1,
     "preventVillainMovement": true,
     "hideVillainSprites": true,
@@ -4639,6 +4904,223 @@
       41,
       56,
       71
+    ],
+    "allowedTilesMessage": "Ally creatures can only be placed on the marked tiles!"
+  },
+  "annihilator_orshabaal": {
+    "_comment": "Astronis' Call (Astronis). Sewers reskin as Orshabaal's Lair — a single demon boss fight. See enterAnnihilatorOrshabaal() in Quests.js.",
+    "allyLimit": 8,
+    "preventVillainMovement": true,
+    "hideVillainSprites": true,
+    "villains": [
+      {
+        "nickname": "Orshabaal",
+        "tileIndex": 32,
+        "keyPrefix": "orshabaal-tile-32-",
+        "fallbackGameId": 65,
+        "level": 2500,
+        "tier": 0,
+        "direction": "south",
+        "customSpriteKey": "demon",
+        "genes": {
+          "hp": 20,
+          "ad": 20,
+          "ap": 20,
+          "armor": 20,
+          "magicResist": 20
+        },
+        "abilityCooldownTicks": 32,
+        "attackCooldownTicks": 16,
+        "moveCooldownTicks": 8,
+        "moveSpeed": 160
+      }
+    ],
+    "allies": [
+      {
+        "nickname": "Bubble",
+        "tileIndex": 48,
+        "keyPrefix": "orshabaal-bubble-tile-48-",
+        "fallbackGameId": 117,
+        "level": 1000,
+        "tier": 0,
+        "direction": "west",
+        "genes": { "hp": 20, "ad": 20, "ap": 20, "armor": 20, "magicResist": 20 },
+        "moveCooldownTicks": 13,
+        "moveSpeed": 100
+      },
+      {
+        "nickname": "Fire Elemental",
+        "tileIndex": 99,
+        "keyPrefix": "orshabaal-fire-elemental-tile-99-",
+        "fallbackGameId": 30,
+        "level": 150,
+        "tier": 0,
+        "direction": "west",
+        "genes": { "hp": 20, "ad": 20, "ap": 20, "armor": 20, "magicResist": 20 },
+        "awakened": true,
+        "abilityCooldownTicks": 32,
+        "moveCooldownTicks": 1600,
+        "moveSpeed": 1
+      },
+      {
+        "nickname": "Sorcerer",
+        "tileIndex": 100,
+        "keyPrefix": "orshabaal-sorcerer-tile-100-",
+        "fallbackGameId": 118,
+        "level": 150,
+        "tier": 0,
+        "direction": "west",
+        "genes": { "hp": 20, "ad": 20, "ap": 20, "armor": 20, "magicResist": 20 },
+        "abilityCooldownTicks": 32,
+        "moveCooldownTicks": 1600,
+        "moveSpeed": 1,
+        "range": 10
+      },
+      {
+        "nickname": "Druid",
+        "tileIndex": 101,
+        "keyPrefix": "orshabaal-druid-tile-101-",
+        "fallbackGameId": 29,
+        "outfitSpriteId": 500018,
+        "level": 150,
+        "tier": 0,
+        "direction": "west",
+        "genes": { "hp": 20, "ad": 20, "ap": 20, "armor": 20, "magicResist": 20 },
+        "abilityCooldownTicks": 48,
+        "moveCooldownTicks": 1600,
+        "moveSpeed": 1
+      },
+      {
+        "nickname": "Fire Elemental",
+        "tileIndex": 114,
+        "keyPrefix": "orshabaal-fire-elemental-tile-114-",
+        "fallbackGameId": 30,
+        "level": 150,
+        "tier": 0,
+        "direction": "west",
+        "genes": { "hp": 20, "ad": 20, "ap": 20, "armor": 20, "magicResist": 20 },
+        "awakened": true,
+        "abilityCooldownTicks": 31,
+        "moveCooldownTicks": 1600,
+        "moveSpeed": 1
+      },
+      {
+        "nickname": "Sorcerer",
+        "tileIndex": 115,
+        "keyPrefix": "orshabaal-sorcerer-tile-115-",
+        "fallbackGameId": 118,
+        "level": 100,
+        "tier": 0,
+        "direction": "west",
+        "genes": { "hp": 20, "ad": 20, "ap": 20, "armor": 20, "magicResist": 20 },
+        "abilityCooldownTicks": 31,
+        "moveCooldownTicks": 1600,
+        "moveSpeed": 1,
+        "range": 10
+      },
+      {
+        "nickname": "Druid",
+        "tileIndex": 116,
+        "keyPrefix": "orshabaal-druid-tile-116-",
+        "fallbackGameId": 29,
+        "outfitSpriteId": 500018,
+        "level": 150,
+        "tier": 0,
+        "direction": "west",
+        "genes": { "hp": 20, "ad": 20, "ap": 20, "armor": 20, "magicResist": 20 },
+        "abilityCooldownTicks": 47,
+        "moveCooldownTicks": 1600,
+        "moveSpeed": 1
+      },
+      {
+        "nickname": "Fire Elemental",
+        "tileIndex": 129,
+        "keyPrefix": "orshabaal-fire-elemental-tile-129-",
+        "fallbackGameId": 30,
+        "level": 150,
+        "tier": 0,
+        "direction": "west",
+        "genes": { "hp": 20, "ad": 20, "ap": 20, "armor": 20, "magicResist": 20 },
+        "awakened": true,
+        "abilityCooldownTicks": 30,
+        "moveCooldownTicks": 1600,
+        "moveSpeed": 1
+      },
+      {
+        "nickname": "Sorcerer",
+        "tileIndex": 130,
+        "keyPrefix": "orshabaal-sorcerer-tile-130-",
+        "fallbackGameId": 118,
+        "level": 100,
+        "tier": 0,
+        "direction": "west",
+        "genes": { "hp": 20, "ad": 20, "ap": 20, "armor": 20, "magicResist": 20 },
+        "abilityCooldownTicks": 30,
+        "moveCooldownTicks": 1600,
+        "moveSpeed": 1,
+        "range": 10
+      },
+      {
+        "nickname": "Druid",
+        "tileIndex": 131,
+        "keyPrefix": "orshabaal-druid-tile-131-",
+        "fallbackGameId": 29,
+        "outfitSpriteId": 500018,
+        "level": 150,
+        "tier": 0,
+        "direction": "west",
+        "genes": { "hp": 20, "ad": 20, "ap": 20, "armor": 20, "magicResist": 20 },
+        "attackCooldownTicks": 46,
+        "moveCooldownTicks": 1600,
+        "moveSpeed": 1
+      },
+      {
+        "nickname": "Fire Elemental",
+        "tileIndex": 144,
+        "keyPrefix": "orshabaal-fire-elemental-tile-144-",
+        "fallbackGameId": 30,
+        "level": 150,
+        "tier": 0,
+        "direction": "west",
+        "genes": { "hp": 20, "ad": 20, "ap": 20, "armor": 20, "magicResist": 20 },
+        "awakened": true,
+        "abilityCooldownTicks": 29,
+        "moveCooldownTicks": 1600,
+        "moveSpeed": 1
+      },
+      {
+        "nickname": "Sorcerer",
+        "tileIndex": 145,
+        "keyPrefix": "orshabaal-sorcerer-tile-145-",
+        "fallbackGameId": 118,
+        "level": 100,
+        "tier": 0,
+        "direction": "west",
+        "genes": { "hp": 20, "ad": 20, "ap": 20, "armor": 20, "magicResist": 20 },
+        "abilityCooldownTicks": 29,
+        "moveCooldownTicks": 1600,
+        "moveSpeed": 1,
+        "range": 10
+      },
+      {
+        "nickname": "Druid",
+        "tileIndex": 146,
+        "keyPrefix": "orshabaal-druid-tile-146-",
+        "fallbackGameId": 29,
+        "outfitSpriteId": 500018,
+        "level": 150,
+        "tier": 0,
+        "direction": "west",
+        "genes": { "hp": 20, "ad": 20, "ap": 20, "armor": 20, "magicResist": 20 },
+        "attackCooldownTicks": 45,
+        "moveCooldownTicks": 1600,
+        "moveSpeed": 1
+      }
+    ],
+    "allowedTiles": [
+      8, 9, 10, 11, 23, 24, 25, 26, 32, 40, 41, 52, 54, 55, 56, 67, 69, 70, 71,
+      82, 83, 84, 85, 86, 97, 98, 99, 100, 101, 111, 112, 113, 114, 115, 116,
+      126, 127, 128, 129, 130, 131, 137, 138, 139, 140, 141, 142, 143, 144, 145, 146
     ],
     "allowedTilesMessage": "Ally creatures can only be placed on the marked tiles!"
   }

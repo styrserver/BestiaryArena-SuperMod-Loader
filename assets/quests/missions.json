@@ -125,6 +125,24 @@
       "complete": "So that is what became of them — turned to bone in a house that never should have been reopened. Grim news, but news all the same, and better it end at your hand than fester any further. Take this for your trouble, Player.",
       "rewardSummary": "Reward: 200 guild coins."
     },
+    "parchment_room": {
+      "id": "parchment_room",
+      "title": "Parchment Room Quest",
+      "prompt": "The Parchment Room, they call it — somewhere in the Hero Cave near Edron. Some coward rigged a nasty trap to guard whatever's kept in there, and I hear it does not take kindly to visitors. A hero's errand if ever there was one, but I have other legends to attend to just now. Would you dare it in my stead, Player?",
+      "accept": "Then go, brave one! Where you broke the Cake Drake Party, the ground has opened into the Hero Cave — mind the gravestone down there ('Death to those who disturb the slumber of Father', or so it once read) and step down when you're ready. Kill the demons or don't, but you'll need to open that coffin either way. Return to me once you've claimed what's inside!",
+      "decline": "Wise. Even I hesitate before five demons at once ... well, 'hesitate' is a strong word for someone as heroic as me, but you understand my meaning.",
+      "alreadyActive": "Have you claimed the golden key from that coffin yet? Go back down where you broke the Cake Drake Party — the demons won't wait forever. Well, the dead ones certainly won't.",
+      "alreadyCompleted": "Ah, the hero of the Parchment Room! I still remember the tale — or rather, I remember telling it to someone who probably wasn't listening.",
+      "battleVictory": "Five demons, felled! ...well, you felled them, but I like to think my legend inspired you from afar. Now find the coffin and claim your prize, Player.",
+      "battleDefeat": "Ha! Even heroes stumble sometimes. Rest, resupply, and try again — the demons won't be going anywhere.",
+      "objectiveLine1": "Ask Avar Tar about the parchment room.",
+      "objectiveLine2": "Enter the Hero Cave near Edron, defeat the demons guarding the coffin, and open it for the golden key.",
+      "objectiveLine3": "Return to Avar Tar with the golden key.",
+      "hint": "The Parchment Room lies within the Hero Cave near Edron, past a gravestone warning trespassers away. The coffin at its center holds the reward — but disturbing it wakes four more demons.",
+      "rewardCoins": 100,
+      "complete": "You claimed the golden key from the coffin itself? Hah! I knew sending you was the right call — nearly as good as if I'd gone myself. Take these guild coins for your trouble, hero.",
+      "rewardSummary": "Reward: Golden Key (Key 6010) + 100 guild coins."
+    },
     "king_copper_key": {
       "id": "king_copper_key",
       "title": "Retrieve King Tibianus's Belongings",
@@ -765,6 +783,28 @@
       "rewardProductId": "hornedFoxSoulCore",
       "rewardIcon": "The_Horned_Fox_Soul_Core.gif",
       "rewardSummary": "Reward: The Horned Fox Soul Core."
+    },
+    "annihilator_orshabaal": {
+      "id": "annihilator_orshabaal",
+      "title": "Bubble's Call",
+      "offer": "You climbed out of that floor still breathing — good, because I need you now more than I did an hour ago. You felt that, didn't you? Orshabaal's back. Not sleeping, not hiding — out, right now, somewhere close, and my guild's already moving before it digs in and this gets a lot harder. I'm Bubble. Will you stand with us while it's still finding its footing?",
+      "answerYesNo": "Answer me plainly — will you stand with me against Orshabaal, now, while there's still a window to catch it?",
+      "accept": "Then move — we don't have long before it's dug in somewhere and this gets a lot harder. Hold nothing back.",
+      "decline": "Then stay behind. It won't wait for you to find your nerve, and neither will I.",
+      "alreadyActive": "It's still out there, and my offer still stands with it. Shall I send you against it again?",
+      "alreadyCompleted": "Orshabaal's dealt with, thanks to you. Quiet again, for now — but I've learned not to trust that it stays that way.",
+      "alreadyHelpedThisRaid": "You already stood with me against it this time. My thanks again — but I've nothing more to give you for it twice.",
+      "battleVictory": "It's down. Whatever it truly was, it won't be surfacing again — not this way, not this time. Return to Bubble.",
+      "battleDefeat": "It was stronger than the stories let on, wasn't it. Gather yourself — it's not going anywhere fast.",
+      "returnObjective": "Return to Bubble with word that it's finished.",
+      "reward": "So it's finished, and this ground owes you more than it can ever pay back. Here — pulled from the wreck of it. An Orshabaal Soul Core. Not something I'd trust to just anyone's hands.",
+      "objectiveLine1": "Join Bubble and defeat Orshabaal.",
+      "objectiveLine2": "Return to Bubble with word that Orshabaal has fallen.",
+      "hint": "Speak with Bubble in The Annihilator Quest about Orshabaal.",
+      "rewardItemName": "Orshabaal Soul Core",
+      "rewardProductId": "orshabaalSoulCore",
+      "rewardIcon": "Orshabaal_Soul_Core.gif",
+      "rewardSummary": "Reward: Orshabaal Soul Core."
     }
   },
   "completionSummaries": {
@@ -785,6 +825,7 @@
     "tainted_souls": "Used the Stuffed Toad in the Eclipse Cauldron, slew Ekatrix, and returned to Wyda.",
     "isle_of_the_mists": "Stepped through the path south of the temple, slew Fernfang on the Isle of the Mists, and reported back.",
     "the_necromant_house": "Investigated the Necromant House east of the Dark Cathedral for Oldrak, found those he sent turned to bone, cleared the house, and reported back.",
+    "parchment_room": "Cleared the demon-guarded Parchment Room in the Hero Cave near Edron for Avar Tar, opened the coffin for the golden key, and reported back.",
     "serpentine_tower": "Used the lever in the Serpentine Tower basement and survived The Cursed Chamber.",
     "apprentice_sheng": "Helped Rookstayer defeat Apprentice Sheng in the Minotaur Mage Room.",
     "christmas_miracle": "Received a Christmas present from Santa Claus.",
@@ -798,7 +839,8 @@
     "draconia_quest": "Followed Elathriel into the last room of Draconia, cleared it, used the Dragonfetish to return to Hedge Maze, and reported back to Elathriel.",
     "realm_of_dreams": "Read the Key to Magic (Book) with Tesha, descended into the Northern Dragon Lair to put out the fire guarding the way to the Realm of Dreams, and returned to the Darama Oasis.",
     "visiting_mintwallin": "Descended to the cell beneath Mintwallin, solved the Mad Mage's riddle, cleared the room his key opened, and reported back to King Tibianus.",
-    "the_basilisk_challenges": "Cleared all six of the Basilisk's challenges in the Sewers — ending with the Horned Fox and his cult."
+    "the_basilisk_challenges": "Cleared all six of the Basilisk's challenges in the Sewers — ending with the Horned Fox and his cult.",
+    "annihilator_orshabaal": "Joined Bubble's guild, defeated Orshabaal in the stone circle north of Edron near the Dragon Lair, and reported back for an Orshabaal Soul Core."
   },
   "sealTranscripts": [
     {
@@ -832,7 +874,7 @@
   ],
   "registry": {
     "_comment": "storyOrder drives Quest Log / Dev Tools. stateKey → kingChatState property. firebaseKey → Firebase progress blob. extraFields schema drives getExtraMissionProgressFields.",
-    "_storyOrderComment": "Ordered by real unlock progression (each mission's required room(s), resolved via globalThis.state.utils.REGIONS), with two overrides: (1) missions belonging to the same quest-giver are kept as one contiguous block, positioned by whichever of that NPC's missions unlocks soonest; (2) a mission with a hard prerequisite from ANOTHER NPC's mission (an item, or 'meeting' that NPC for the first time) is pinned after that prerequisite even if its own room would sort earlier. See docs/quests_data.md -> 'Ordering new missions in storyOrder' for the full method and the current per-mission gate table.",
+    "_storyOrderComment": "Ordered by real unlock progression (each mission's required room(s), resolved via globalThis.state.utils.REGIONS), with two overrides: (1) missions belonging to the same quest-giver are kept as one contiguous block, positioned by whichever of that NPC's missions unlocks soonest; (2) a mission with a hard prerequisite from ANOTHER NPC's mission (an item, or 'meeting' that NPC for the first time) is pinned after that prerequisite even if its own room would sort earlier. See assets/quests/README.md -> 'Ordering new missions in storyOrder' for the full method and the current per-mission gate table.",
     "storyOrder": [
       "king_honeyflower",
       "king_crossing_the_line",
@@ -856,6 +898,7 @@
       "draconia_tower",
       "draconia_quest",
       "the_basilisk_challenges",
+      "parchment_room",
       "mother_of_all_spiders",
       "jakundaf_desert",
       "tainted_souls",
@@ -865,7 +908,8 @@
       "king_scarab_coin",
       "serpentine_tower",
       "realm_of_dreams",
-      "visiting_mintwallin"
+      "visiting_mintwallin",
+      "annihilator_orshabaal"
     ],
     "missions": {
       "king_honeyflower": {
@@ -903,6 +947,15 @@
         "extraFields": [
           "battleCompleted"
         ]
+      },
+      "parchment_room": {
+        "stateKey": "progressParchmentRoom",
+        "firebaseKey": "parchmentRoom",
+        "extraFields": [
+          "battleCompleted",
+          "keyReceived"
+        ],
+        "gateRooms": ["Cake Drake Party"]
       },
       "king_copper_key": {
         "stateKey": "progressCopper",
@@ -1121,6 +1174,13 @@
           "battleCompleted"
         ],
         "gateRooms": ["The Farms"]
+      },
+      "annihilator_orshabaal": {
+        "stateKey": "progressAnnihilatorOrshabaal",
+        "firebaseKey": "annihilatorOrshabaal",
+        "extraFields": [
+          "battleCompleted"
+        ]
       }
     }
   }

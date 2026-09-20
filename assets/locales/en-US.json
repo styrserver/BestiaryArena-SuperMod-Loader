@@ -1315,6 +1315,7 @@
       "settingsPoCurrencyDustIconAlt": "Dust"
     },
     "vipList": {
+      "otModsMenuTitle": "OT Mods",
       "menuItem": "VIP List",
       "modalTitle": "VIP List",
       "closeButton": "Close",
@@ -2643,11 +2644,13 @@
       "creatureOutfitUseOwnId": "Use this creature’s ID",
       "creatureItemId": "Item sprite",
       "creatureSpriteIdPlaceholder": "Sprite ID",
-      "creatureCombatTiming": "Combat timing",
+      "creatureCombatTuning": "Combat tuning",
       "creatureAbilityCd": "Ability CD",
       "creatureAttackCd": "Attack CD",
       "creatureMoveSpeed": "Move speed",
+      "creatureRange": "Range",
       "creatureAbilityCdPlaceholder": "Ticks (optional)",
+      "creatureRangePlaceholder": "Tiles (optional)",
       "creatureAbilityNoCooldown": "This creature's ability has no cooldown to change.",
       "creatureAbilityNoCooldownShort": "no ability cooldown",
       "creatureAbility": "Ability",

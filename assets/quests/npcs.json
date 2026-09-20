@@ -15,6 +15,7 @@
     "oldDragonlord": "11c. Board NPCs (An Old Dragonlord — Draconia Tower)",
     "basilisk": "11d. Board NPCs (Basilisk — The Basilisk Challenges)",
     "oldrak": "11e. Board NPCs (Oldrak — Visiting the Cleric)",
+    "avarTar": "11f. Board NPCs (Avar Tar — Edron Wilderness camp, general transcripts only)",
     "questItems": "12. Quest item chat responses (involved vs uninvolved NPC lines)",
     "questItemUninvolvedTemplates": "13. Uninvolved quest item templates ({item} placeholder)",
     "shared": "0. Shared transcript keywords merged under every NPC (gamemaster / isle of solitude / gm island). NPC-specific keywords override these."
@@ -176,6 +177,7 @@
     }
   },
   "al-dee": {
+    "_comment": "The 'time' keyword (answered with the player's real local clock time) is handled in Quests.js, not here — see getAlDeeResponse().",
     "keywords": {
       "hi": "Hello, hello, Player! Please come in, look, and buy! I'm a specialist for all sorts of tools. Just ask me for a trade to see my offers!",
       "hello": "Hello, hello, Player! Please come in, look, and buy! I'm a specialist for all sorts of tools. Just ask me for a trade to see my offers!",
@@ -206,7 +208,6 @@
       "iron ore": "Hmm... King Tibianus might be interested in this Iron Ore...",
       "job": "I'm a merchant. Just ask me for a trade to see my offers.",
       "name": "My name is Al Dee, but you can call me Al. Can I interest you in a trade?",
-      "time": "It's about 0:00 am. I'm so sorry, I have no watches to sell. Do you want to buy something else?",
       "premium": "As a premium adventurer you have many advantages. You really should check them out!",
       "king": "The king encouraged salesmen to travel here, but only I dared to take the risk, and a risk it was!",
       "sell": "Just ask me for a trade to see what I buy from you.",
@@ -1074,6 +1075,82 @@
     "boardChat": {
       "welcomeMessage": "Welcome Player! Rarely I can welcome visitors in these days.",
       "placeholder": "Type your message to Oldrak..."
+    }
+  },
+  "avarTar": {
+    "_comment": "Avar Tar. Board NPC on tile 85 of the Sewers reskin used for his camp near Edron. Reached via the arrow tile in Edron Wilderness ('Go back to Edron' -> enterAvarTarHideout()). General transcripts only for now — no quest logic in Quests.js yet; he'll offer the first quest here later. The 'time' keyword (answered with the player's real local clock time) is handled in Quests.js, not here — see getAvarTarKeywordResponse().",
+    "keywords": {
+      "hi": "Greetings, traveller Player!",
+      "hello": "Greetings, traveller Player!",
+      "name": "I'm Avar Tar, slayer of monsters, saviour of princesses, and defender of the weak.",
+      "job": "I'm a professional hero.",
+      "hero": "I think I'm the greatest hero in Tibia, but my humility forbids me to make an issue out of it.",
+      "tibia": "I've seen it all and done it all ... at least twice.",
+      "ferumbras": "I fought him several times, sometimes he killed me, sometimes I killed him. I'd say we are even right now, but I'm getting better and more powerful each day.",
+      "triangle of terror": "They might be a nice way for weaker heroes to prove their skill.",
+      "orshabaal": "Don't be afraid! As long as I stand guard here, the beast won't reach the town!",
+      "excalibug": "I am sure it's hidden in a vault of the Nightmare Knights beneath the Plains of Havoc. I'm planning an expedition to go there and to rout out the Ruthless Seven, but I have to save the world first.",
+      "ruthless seven": "Oh come on. Let the noobs take care of them. Call me if they are fourteen or so.",
+      "quest": "I'm on a quest for the Thaian king ... as usual.",
+      "king tibianus": "I'm on a quest for the Thaian king ... as usual.",
+      "sword of fury": "Ah, my trusty old sword. I left it on Rookgaard years ago when I left for the main continent.",
+      "rookgaard": [
+        "Rookgaard is full of memories of my first heroic accomplishments ...",
+        "I heard that after all these years, the minotaur mage there refuses to leave his room as he is still afraid of me."
+      ],
+      "thais": "If I had time, I would restore peace in this once proud city, but there's too much to do before I can start that quest.",
+      "carlin": "I saved the women there once or twice.",
+      "magic": "I had to master the magic of all 4 vocations for one of the quests.",
+      "news": "There is a great evil lurking beneath this isle ... and beneath the Plains of Havoc, and in the ancient necropolis, and beneath the Ghostlands ... well basically everywhere.",
+      "rumors": "There is a great evil lurking beneath this isle ... and beneath the Plains of Havoc, and in the ancient necropolis, and beneath the Ghostlands ... well basically everywhere.",
+      "demons": "Demons know and fear my name! It's not always easy to be a hero, you know?",
+      "bonelord language": "29639 46781! 9063376290 3222011 677 80322429 67538 14805394, 6880326 677 63378129 337011 72683 149630 4378! 453 639 578300 986372 2953639! I know it's rather short, but still, this poem I like best.",
+      "falcon": [
+        "The Order of the Falcon, a quest for true chivalric virtues indeed! Unfortunately the order has all but disappeared long before my time. ...",
+        "Their stronghold is still intact, however, just head north from Edron. But be careful, something is not right with the place."
+      ],
+      "bye": "See you later, Player.",
+      "goodbye": "See you later, Player.",
+      "farewell": "See you later, Player."
+    },
+    "confusion": [
+      "A hero such as I cannot be bothered with riddles, traveller. Speak plainer.",
+      "Hmph. Even the greatest hero in Tibia doesn't understand that one.",
+      "Try again — my humility forbids me from pretending I followed that."
+    ],
+    "boardChat": {
+      "welcomeMessage": "Greetings, traveller Player!",
+      "placeholder": "Type your message to Avar Tar..."
+    }
+  },
+  "astronis": {
+    "_comment": "Bubble (display name; internal id/config key stays 'astronis'). Board NPC on tile 87 of The Annihilator Quest (edanni), only visible while a live World Raid is up (floor 15 cleared AND Orshabaal currently summoned — see astronisUnlocked() / the World Raid module in Quests.js). Present-tense, mobilizing-right-now urgency — Orshabaal isn't a distant rumor when he's talking to you, he's out THERE right now. Offers/resolves the Bubble's Call quest (annihilator_orshabaal) through his own board chat, the same self-contained pattern as Avar Tar's Parchment Room quest.",
+    "keywords": {
+      "hi": "You felt that, didn't you? Orshabaal's back. No time for pleasantries — I'm Bubble.",
+      "hello": "You felt that, didn't you? Orshabaal's back. No time for pleasantries — I'm Bubble.",
+      "name": "Bubble. Names matter less than they used to, with that thing out there right now.",
+      "job": "I lead what's left of a guild that's mobilizing right now, same as every other time this happens. Someone has to.",
+      "guild": "What's left of it is moving, right now, trying to catch this thing before it digs in somewhere and this gets a lot harder.",
+      "orshabaal": "Don't say that name like it's just another monster. It's not sleeping, not hiding — it's out there right now, close, and it won't stay findable for long. That's the only window we get.",
+      "annihilator": "Fifteen floors down, and you're standing here talking to me instead of lying somewhere in the dark. That's why I came looking for you the moment I felt it stir.",
+      "floor 15": "Fifteen floors down, and you're standing here talking to me instead of lying somewhere in the dark. That's why I came looking for you the moment I felt it stir.",
+      "demons": "It never surfaces alone. Whatever's with it right now, a swarm of lesser things dragged up in its wake — and more than once, the fool thing's own brood has boxed it in before we ever got the chance. Small mercies, those.",
+      "heal": "Wound it enough and it won't stand and die like anything decent should. It'll try to slink off and mend whatever passes for wounds on a thing like that, and come back worse if we let it. Finishing it clean, now, while it's exposed — that's the whole plan.",
+      "fire": "You'll feel it before you see it. The air's already changing. When the fire starts falling, don't be standing where it lands.",
+      "quest": "There's one thing worth doing right now, and it's happening whether you help or not. Ask me plainly, if you've got the stomach.",
+      "region": "Not quiet anymore. You can feel it too, can't you — that's Orshabaal, out there, right now.",
+      "bye": "Watch the dark corners. That's all the advice I've got left to give.",
+      "goodbye": "Watch the dark corners. That's all the advice I've got left to give.",
+      "farewell": "Watch the dark corners. That's all the advice I've got left to give."
+    },
+    "confusion": [
+      "I don't chase riddles down here. Speak plainly, if you're able.",
+      "Say it again — plainly, this time. My patience thinned out years ago.",
+      "Wasted words get people killed this close to the dark. Try again."
+    ],
+    "boardChat": {
+      "welcomeMessage": "You felt that, didn't you? Orshabaal's back. I'm Bubble.",
+      "placeholder": "Type your message to Bubble..."
     }
   },
   "oracle": {

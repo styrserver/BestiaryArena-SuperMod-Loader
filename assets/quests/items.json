@@ -18,7 +18,8 @@
     },
     "scarabCoin": {
       "productName": "Scarab Coin",
-      "icon": "Scarab_Coin.gif",
+      "spriteId": 3042,
+      "iconUrl": "https://bestiaryarena.com/assets/ITEM/3042.png",
       "description": "You see a scarab coin.",
       "rarity": 3,
       "maxCount": 1
@@ -228,6 +229,13 @@
       "maxCount": 1,
       "soulCore": true
     },
+    "orshabaalSoulCore": {
+      "productName": "Orshabaal Soul Core",
+      "icon": "Orshabaal_Soul_Core.gif",
+      "rarity": 0,
+      "maxCount": 1,
+      "soulCore": true
+    },
     "fernfangSoulCore": {
       "productName": "Fernfang Soul Core",
       "icon": "Fernfang_Soul_Core.gif",
@@ -358,6 +366,13 @@
       "iconUrl": "https://bestiaryarena.com/assets/ITEM/2969.png",
       "description": "Provides access to the prison in Mintwallin.",
       "rarity": 2,
+      "maxCount": 1
+    },
+    "goldenKey": {
+      "productName": "Golden Key",
+      "icon": "Golden_Key.gif",
+      "description": "Opens the door to the Demon Hell, below the Hero Cave.",
+      "rarity": 3,
       "maxCount": 1
     },
     "madMageQuestKey": {
@@ -588,6 +603,14 @@
       ]
     },
     {
+      "id": "orshabaal_soul_core",
+      "productName": "Orshabaal Soul Core",
+      "keywords": [
+        "orshabaal soul core",
+        "demon soul core"
+      ]
+    },
+    {
       "id": "bosstiary",
       "productName": "Bosstiary",
       "keywords": [
@@ -727,7 +750,6 @@
     "king_monks_study": "The_Holy_Tible.png",
     "mother_of_all_spiders": "Spider_Silk.gif",
     "tainted_souls": "Ekatrix_Soul_Core.gif",
-    "king_scarab_coin": "Scarab_Coin.gif",
     "christmas_miracle": "Wishlist.gif",
     "svenson_love_story": "Spool_of_Yarn.gif",
     "weakened_archdemon": "Orb.gif",
@@ -735,9 +757,12 @@
     "draconia_tower": "Dragonfetish.gif",
     "draconia_quest": "Book_(Draconia).gif",
     "the_basilisk_challenges": "The_Horned_Fox_Soul_Core.gif",
-    "isle_of_the_mists": "Fernfang_Soul_Core.gif"
+    "parchment_room": "Golden_Key.gif",
+    "isle_of_the_mists": "Fernfang_Soul_Core.gif",
+    "annihilator_orshabaal": "demon-icon.gif"
   },
   "questLogSpriteIcons": {
+    "king_scarab_coin": 3042,
     "visiting_the_cleric": 2849,
     "king_copper_key": 2970,
     "realm_of_dreams": 2969,
@@ -839,6 +864,14 @@
         "receivedBefore": {
           "type": "missionCompleted",
           "missionId": "dragonmother"
+        }
+      },
+      {
+        "key": "orshabaalSoulCore",
+        "productId": "orshabaalSoulCore",
+        "receivedBefore": {
+          "type": "missionCompleted",
+          "missionId": "annihilator_orshabaal"
         }
       },
       {
@@ -1232,6 +1265,15 @@
           "missionId": "visiting_mintwallin",
           "field": "riddleSolved"
         }
+      },
+      {
+        "key": "goldenKey",
+        "productId": "goldenKey",
+        "receivedBefore": {
+          "type": "missionFieldOrCompleted",
+          "missionId": "parchment_room",
+          "field": "keyReceived"
+        }
       }
     ]
   },
@@ -1394,6 +1436,11 @@
         "requiredStatus": "completed"
       },
       {
+        "productId": "orshabaalSoulCore",
+        "missionId": "annihilator_orshabaal",
+        "requiredStatus": "completed"
+      },
+      {
         "productId": "fernfangSoulCore",
         "missionId": "isle_of_the_mists",
         "requiredStatus": "completed"
@@ -1455,6 +1502,11 @@
         "missionId": "visiting_mintwallin",
         "requiredProgressFlag": "riddleSolved",
         "clearedByProgressFlag": "completed"
+      },
+      {
+        "productId": "goldenKey",
+        "missionId": "parchment_room",
+        "requiredProgressFlag": "keyReceived"
       }
     ],
     "staleCleanupOnComplete": [
@@ -1625,11 +1677,13 @@
       { "productId": "oldWidowSoulCore", "missionId": "mother_of_all_spiders" },
       { "productId": "knarknaknorkSoulCore", "missionId": "al_dee_rookie_guard" },
       { "productId": "ekatrixSoulCore", "missionId": "tainted_souls" },
+      { "productId": "orshabaalSoulCore", "missionId": "annihilator_orshabaal" },
       { "productId": "fernfangSoulCore", "missionId": "isle_of_the_mists" },
       { "productId": "ghazbaranSoulCore", "missionId": "weakened_archdemon" },
       { "productId": "mornenionSoulCore", "missionId": "al_dee_golden_rope" },
       { "productId": "apprenticeShengSoulCore", "missionId": "apprentice_sheng" },
       { "productId": "hornedFoxSoulCore", "missionId": "the_basilisk_challenges" },
+      { "productId": "goldenKey", "missionId": "parchment_room", "grantWhenField": "keyReceived" },
       { "productId": "lightShovel", "missionId": "al_dee_fishing_gold" },
       { "productId": "dragonClaw", "missionId": "king_red_dragon", "removedByProgressFlag": { "firebaseKey": "dragonmother", "field": "completed" } },
       { "productId": "holyTible", "missionId": "al_dee_golden_rope", "removedByProgressFlag": { "firebaseKey": "monksStudy", "field": "completed" } },

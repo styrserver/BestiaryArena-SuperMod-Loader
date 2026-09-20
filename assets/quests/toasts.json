@@ -84,9 +84,21 @@
     "dragonfetishRaised": "You raise the Dragonfetish. Speak with Elathriel.",
     "realmOfDreamsEntering": "Tesha sends you into the Northern Dragon Lair, toward the fire...",
     "realmOfDreamsReturned": "Out of the graveyard, the fire dead behind you. Speak with Tesha.",
+    "annihilatorOrshabaalEntering": "Bubble sends you against Orshabaal...",
+    "annihilatorOrshabaalReturned": "The fight with Orshabaal is over. Speak with Bubble.",
+    "worldRaidOrshabaalWarning1": "Orshabaal's minions are working on his return to the World. LEAVE Edron at once, mortals.",
+    "worldRaidOrshabaalWarning2": "Orshabaal is about to make his way into the mortal realm. Run for your lives!",
+    "worldRaidOrshabaalWarning3": "Orshabaal has been summoned from hell to plague the lands of mortals again.",
+    "worldRaidOrshabaalEnded": "The raid has ended. You are pulled back from Orshabaal's Lair.",
     "clericTempleEntered": "Following the path to the temple in Plains of Havoc...",
     "necromantHouseEntered": "The Necromant House. Arcian's manor waits below.",
-    "missionLocked": "You must find your way to {place} before this task can be entrusted to you."
+    "missionLocked": "You must find your way to {place} before this task can be entrusted to you.",
+    "avarTarHideoutEntered": "Heading back to Avar Tar's camp...",
+    "parchmentRoomEntered": "Entering the Parchment Room...",
+    "parchmentAntechamberEntered": "The approach to the Parchment Room...",
+    "parchmentAntechamberInscription": "De.th to those who disturb ..e slumber of .ath..",
+    "battlingStatus": "Battling {name}\nCreatures allowed: {placed}/{allyLimit}",
+    "battlingStatusUnknownLimit": "Battling {name}\nCreatures allowed: N/A"
   },
   "messageBuilders": {
     "questDiscovered": [
@@ -191,10 +203,28 @@
     "dragonfetishRaised": [],
     "realmOfDreamsEntering": [],
     "realmOfDreamsReturned": [],
+    "annihilatorOrshabaalEntering": [],
+    "annihilatorOrshabaalReturned": [],
+    "worldRaidOrshabaalWarning1": [],
+    "worldRaidOrshabaalWarning2": [],
+    "worldRaidOrshabaalWarning3": [],
+    "worldRaidOrshabaalEnded": [],
     "clericTempleEntered": [],
     "necromantHouseEntered": [],
     "missionLocked": [
       "place"
+    ],
+    "avarTarHideoutEntered": [],
+    "parchmentRoomEntered": [],
+    "parchmentAntechamberEntered": [],
+    "parchmentAntechamberInscription": [],
+    "battlingStatus": [
+      "name",
+      "placed",
+      "allyLimit"
+    ],
+    "battlingStatusUnknownLimit": [
+      "name"
     ]
   },
   "variants": {
@@ -262,8 +292,18 @@
     "dragonfetishRaised": "info",
     "realmOfDreamsEntering": "info",
     "realmOfDreamsReturned": "info",
+    "annihilatorOrshabaalEntering": "info",
+    "annihilatorOrshabaalReturned": "info",
+    "worldRaidOrshabaalWarning1": "warning",
+    "worldRaidOrshabaalWarning2": "warning",
+    "worldRaidOrshabaalWarning3": "warning",
+    "worldRaidOrshabaalEnded": "warning",
     "clericTempleEntered": "info",
-    "necromantHouseEntered": "info"
+    "necromantHouseEntered": "info",
+    "avarTarHideoutEntered": "info",
+    "parchmentRoomEntered": "info",
+    "parchmentAntechamberEntered": "info",
+    "parchmentAntechamberInscription": "quest"
   },
   "styling": {
     "defaultDuration": 5000,

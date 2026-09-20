@@ -1315,6 +1315,7 @@
       "settingsPoCurrencyDustIconAlt": "Poeira"
     },
     "vipList": {
+      "otModsMenuTitle": "OT Mods",
       "menuItem": "Lista VIP",
       "modalTitle": "Lista VIP",
       "closeButton": "Fechar",
@@ -2643,11 +2644,13 @@
       "creatureOutfitUseOwnId": "Usar o ID desta criatura",
       "creatureItemId": "Sprite de item",
       "creatureSpriteIdPlaceholder": "ID do sprite",
-      "creatureCombatTiming": "Tempo de combate",
+      "creatureCombatTuning": "Ajuste de combate",
       "creatureAbilityCd": "CD da habilidade",
       "creatureAttackCd": "CD de ataque",
       "creatureMoveSpeed": "Velocidade",
+      "creatureRange": "Alcance",
       "creatureAbilityCdPlaceholder": "Ticks (opcional)",
+      "creatureRangePlaceholder": "Tiles (opcional)",
       "creatureAbilityNoCooldown": "A habilidade desta criatura não tem cooldown para alterar.",
       "creatureAbilityNoCooldownShort": "sem cooldown de habilidade",
       "creatureAbility": "Habilidade",
