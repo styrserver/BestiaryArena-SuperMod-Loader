@@ -4,6 +4,36 @@
   },
   "notes": [
     {
+      "version": "5.0.11",
+      "changes": [
+        {
+          "mod": "Better Exaltation Chest",
+          "type": "fixed",
+          "text": "Disenchanting equipment (manually or via auto mode) didn't update local inventory unless dust was gained on that specific disenchant, so the arsenal capacity count and equipment list could fall out of sync with the server and only catch up on a page refresh. Separately, a freshly-opened item that got disenchanted before the game had finished adding it to local state could be left behind as a permanent phantom arsenal entry, inflating the shown capacity until refreshed - a delayed retry now cleans those up. The dust-gained animation could also play twice for the same disenchant."
+        },
+        {
+          "mod": "Better Highscores",
+          "type": "fixed",
+          "text": "Multi-floor quest rooms (e.g. The Behemoth Quest, The Annihilator Quest) showed no max value for the rank leaderboard, because team size for those rooms varies per floor and rank is always scored on the first floor - now reads the correct floor's team size instead of a value that doesn't exist for those rooms."
+        },
+        {
+          "mod": "Highscore Improvements",
+          "type": "fixed",
+          "text": "Same multi-floor quest room rank-max bug as Better Highscores, fixed the same way."
+        },
+        {
+          "mod": "Quests",
+          "type": "changed",
+          "text": "The per-battle-victory trigger chance for a live, time-limited quest event was raised from 0.001% to 0.1%, so it now surfaces far more often. Internal refactor: a board-clearing watcher duplicated across three reskinned quest areas now shares one helper instead — no gameplay change."
+        },
+        {
+          "mod": "Quests",
+          "type": "fixed",
+          "text": "One town NPC's quest-action icon could light up from an item picked up well before that NPC was ever actually unlocked, showing a dead-end prompt with no way to reach or act on it."
+        }
+      ]
+    },
+    {
       "version": "5.0.10",
       "changes": [
         {

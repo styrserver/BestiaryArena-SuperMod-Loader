@@ -1843,12 +1843,22 @@
       
       // Find the current room by ID
       const currentRoom = rooms.find(room => room.id === mapCode);
-      if (!currentRoom || !currentRoom.maxTeamSize) {
+      if (!currentRoom) {
         return null;
       }
-      
+
+      // type: 'multi' rooms (e.g. The Behemoth Quest, The Annihilator Quest) have no
+      // top-level maxTeamSize — it varies per floor via floorRules. Rank is always scored
+      // on floor 0.
+      const maxTeamSize = currentRoom.type === 'multi'
+        ? currentRoom.floorRules?.[0]?.maxTeamSize
+        : currentRoom.maxTeamSize;
+      if (!maxTeamSize) {
+        return null;
+      }
+
       // Calculate max rank points: rankPoints = (2 * maxTeamSize) - 1
-      const maxRankPoints = (2 * currentRoom.maxTeamSize) - 1;
+      const maxRankPoints = (2 * maxTeamSize) - 1;
       
       return maxRankPoints;
     } catch (error) {

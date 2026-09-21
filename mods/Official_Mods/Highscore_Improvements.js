@@ -314,7 +314,11 @@ function getRoomDataByCode(code) {
 
 function getMapMaxRankPoints(code) {
   const room = getRoomDataByCode(code);
-  const maxTeamSize = Number(room?.maxTeamSize);
+  // type: 'multi' rooms (e.g. The Behemoth Quest, The Annihilator Quest) have no top-level
+  // maxTeamSize — it varies per floor via floorRules. Rank is always scored on floor 0.
+  const maxTeamSize = Number(
+    room?.type === 'multi' ? room?.floorRules?.[0]?.maxTeamSize : room?.maxTeamSize
+  );
   if (!Number.isFinite(maxTeamSize) || maxTeamSize < 1) return null;
   return (2 * maxTeamSize) - 1;
 }

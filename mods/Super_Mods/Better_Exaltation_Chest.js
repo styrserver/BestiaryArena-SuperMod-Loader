@@ -175,6 +175,12 @@
   
   // Flag to ignore state-based capacity updates after initial modal load
   let ignoreStateCapacityUpdates = false;
+
+  // Set right before updateLocalStateAfterDisenchant() writes dust to state, so the dust
+  // subscription (which reacts to that same write) doesn't also animate it — the disenchant
+  // handler already animates it explicitly. Consumed (and cleared) by the first dust-increase
+  // callback the subscription sees afterward.
+  let suppressNextDustSubscriptionAnimation = false;
   
   // Cached equipment list (preloaded when modal opens)
   let cachedEquipmentList = null;
@@ -939,18 +945,21 @@
       .then(result => {
         if (result.success) {
           equipmentStats.disenchanted++;
+          updateLocalStateAfterDisenchant(equipmentId, result.dustGained);
+          // Real state (context.equips) lags the chest-open response, so a freshly-opened
+          // item may not be in there yet when we try to remove it — reading the true count
+          // here would show a stale/ghosted value. Use the paired optimistic +1/-1 instead.
+          updateCapacityDisplayImmediatelyDecrement();
+          if (equipmentLog.length > 0) {
+            const lastEntry = equipmentLog[equipmentLog.length - 1];
+            if (lastEntry.equipment.id === equipmentId && lastEntry.action === 'opened') {
+              lastEntry.action = 'disenchanted';
+              lastEntry.dustGained = result.dustGained;
+            }
+          }
           if (result.dustGained && result.dustGained > 0) {
             equipmentStats.dustGained += result.dustGained;
-            updateLocalStateAfterDisenchant(equipmentId, result.dustGained);
             updateDustDisplayWithAnimation(result.dustGained);
-            updateCapacityDisplayImmediatelyDecrement();
-            if (equipmentLog.length > 0) {
-              const lastEntry = equipmentLog[equipmentLog.length - 1];
-              if (lastEntry.equipment.id === equipmentId && lastEntry.action === 'opened') {
-                lastEntry.action = 'disenchanted';
-                lastEntry.dustGained = result.dustGained;
-              }
-            }
           }
           const equipment = getEquipmentDetailsFromChestResponse(lastOpenedEquipment);
           const name = equipment ? equipment.name : 'Unknown';
@@ -1634,14 +1643,20 @@
     try {
       const player = globalThis.state?.player;
       if (!player || typeof player.send !== 'function') return;
-      
+
+      // The disenchant handler already animates this dust gain explicitly; suppress the
+      // dust subscription's own reaction to the state write below so it doesn't animate twice.
+      if (dustGained != null && dustGained > 0) {
+        suppressNextDustSubscriptionAnimation = true;
+      }
+
       player.send({
         type: 'setState',
         fn: (prev) => {
           const newState = { ...prev };
           newState.inventory = { ...prev.inventory };
           newState.context = { ...prev.context };
-          
+
           // Remove disenchanted equipment from arsenal (equips may live on root or context)
           if (prev.equips && Array.isArray(prev.equips)) {
             newState.equips = prev.equips.filter(e => e.id !== equipmentId);
@@ -1649,7 +1664,7 @@
           if (prev.context?.equips && Array.isArray(prev.context.equips)) {
             newState.context.equips = prev.context.equips.filter(e => e.id !== equipmentId);
           }
-          
+
           // Update dust in all places the game reads from (like Better Forge)
           if (dustGained != null && dustGained > 0) {
             const currentDust = Number(prev.inventory?.dust ?? prev.dust ?? prev.context?.dust ?? 0);
@@ -1662,6 +1677,32 @@
           return newState;
         }
       });
+
+      // The freshly-opened item may not have landed in context.equips yet when we run the
+      // filter above (the game adds it from the chest-open response on its own timeline,
+      // independent of our disenchant call). Retry the removal shortly after so it doesn't
+      // become a permanent ghost entry once the native add does land.
+      createTrackedTimeout(() => {
+        try {
+          player.send({
+            type: 'setState',
+            fn: (prev) => {
+              const hasRoot = prev.equips && Array.isArray(prev.equips) && prev.equips.some(e => e.id === equipmentId);
+              const hasContext = prev.context?.equips && Array.isArray(prev.context.equips) && prev.context.equips.some(e => e.id === equipmentId);
+              if (!hasRoot && !hasContext) return prev;
+
+              const newState = { ...prev };
+              if (hasRoot) newState.equips = prev.equips.filter(e => e.id !== equipmentId);
+              if (hasContext) {
+                newState.context = { ...prev.context, equips: prev.context.equips.filter(e => e.id !== equipmentId) };
+              }
+              return newState;
+            }
+          });
+        } catch (e) {
+          console.warn('[Better Exaltation Chest] Failed to retry-remove equipment after disenchant:', e);
+        }
+      }, 1500); // longer than the native chest-open-to-state-add lag and the 1000ms auto-open interval
     } catch (e) {
       console.warn('[Better Exaltation Chest] Failed to update local state after disenchant:', e);
     }
@@ -1738,26 +1779,27 @@
           .then(result => {
             if (result.success) {
               console.log('[Better Exaltation Chest] ✅ Equipment auto-disenchanted successfully');
-              
-              // Update stats tracking, logs, and dust display
+
+              updateLocalStateAfterDisenchant(equipData.id, result.dustGained);
+              // Real state (context.equips) lags the chest-open response, so a freshly-opened
+              // item may not be in there yet when we try to remove it — reading the true count
+              // here would show a stale/ghosted value. Use the paired optimistic +1/-1 instead.
+              updateCapacityDisplayImmediatelyDecrement();
+
+              // Update the log entry with dust gained
+              if (equipmentLog.length > 0) {
+                const lastEntry = equipmentLog[equipmentLog.length - 1];
+                if (lastEntry.equipment.id === equipData.id && lastEntry.action === 'disenchanted') {
+                  lastEntry.dustGained = result.dustGained;
+                }
+              }
+
+              // Update stats tracking and dust display
               if (result.dustGained && result.dustGained > 0) {
                 console.log('[Better Exaltation Chest] 💰 Dust gained from disenchanting:', result.dustGained);
                 equipmentStats.dustGained += result.dustGained;
                 updateStatusDisplay();
-                
-                updateLocalStateAfterDisenchant(equipData.id, result.dustGained);
                 updateDustDisplayWithAnimation(result.dustGained);
-                
-                // Update capacity display immediately after disenchanting (decrement by 1)
-                updateCapacityDisplayImmediatelyDecrement();
-                
-                // Update the log entry with dust gained
-                if (equipmentLog.length > 0) {
-                  const lastEntry = equipmentLog[equipmentLog.length - 1];
-                  if (lastEntry.equipment.id === equipData.id && lastEntry.action === 'disenchanted') {
-                    lastEntry.dustGained = result.dustGained;
-                  }
-                }
               }
             } else {
               console.warn('[Better Exaltation Chest] ⚠️ Failed to auto-disenchant equipment:', result.error);
@@ -3203,9 +3245,13 @@
             }
             
             const dustChange = numericDust - previousDust;
-            
+
             if (dustChange > 0) {
-              updateDustDisplayWithAnimation(dustChange);
+              if (suppressNextDustSubscriptionAnimation) {
+                suppressNextDustSubscriptionAnimation = false;
+              } else {
+                updateDustDisplayWithAnimation(dustChange);
+              }
             } else if (dustChange < 0 || numericDust !== previousDust) {
               // Update display for dust decreases or other changes
               const dustAmountElement = document.getElementById('better-exaltation-dust-amount');
@@ -3340,7 +3386,7 @@
       console.warn('[Better Exaltation Chest] Error decrementing capacity display immediately:', error);
     }
   }
-  
+
   function updateCapacityDisplay() {
     try {
       const capacityAmountElement = document.getElementById('better-exaltation-capacity-amount');

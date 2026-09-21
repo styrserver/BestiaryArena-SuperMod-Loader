@@ -25449,22 +25449,34 @@ function createNPCCooldownManager() {
     } catch (_) {}
   }
 
+  let clericBoardClearSub = null;
+
   // The teleport-quest factory's own scene-sync loop (startClericSceneSync, active before
   // any CustomBattle instance exists) repaints tile mutations but doesn't clear boardConfig
   // — that only happens via applyClericTileMutations(), which is the CustomBattle's
   // persistent-visual-sync callback and so only runs once the battle instance is up. This
   // separate, always-on watcher covers the brief window before that, and any board change
   // afterward the battle's own sync doesn't happen to catch.
-  const clericBoardClearWatcher = createBoardClearWatcher({
-    isEntered: () => playerEnteredVisitingTheClericSewers,
-    getRoomName: () => CLERIC_BATTLE_ROOM_NAME,
-    onClear: () => clearVisitingTheClericBoardPieces(),
-    logPrefix: () => getClericLogPrefix()
-  });
+  function setupClericBoardClearWatcher() {
+    if (clericBoardClearSub) return;
+    if (typeof globalThis === 'undefined' || !globalThis.state?.board?.subscribe) return;
+    clericBoardClearSub = globalThis.state.board.subscribe(() => {
+      if (playerEnteredVisitingTheClericSewers && isOnRoomByName(CLERIC_BATTLE_ROOM_NAME)) {
+        clearVisitingTheClericBoardPieces();
+      }
+    });
+  }
 
-  function setupClericBoardClearWatcher() { clericBoardClearWatcher.setup(); }
-
-  function cleanupClericBoardClearWatcher() { clericBoardClearWatcher.cleanup(); }
+  function cleanupClericBoardClearWatcher() {
+    if (clericBoardClearSub) {
+      try {
+        clericBoardClearSub.unsubscribe();
+      } catch (e) {
+        console.warn(`${getClericLogPrefix()} Error unsubscribing board-clear watcher:`, e);
+      }
+      clericBoardClearSub = null;
+    }
+  }
 
   function cleanupVisitingTheClericQuest() {
     try {
@@ -25630,16 +25642,28 @@ function createNPCCooldownManager() {
     } catch (_) {}
   }
 
-  const avarTarBoardClearWatcher = createBoardClearWatcher({
-    isEntered: () => playerEnteredAvarTarHideout,
-    getRoomName: () => AVAR_TAR_HIDEOUT_ROOM_NAME,
-    onClear: () => clearAvarTarHideoutBoardPieces(),
-    logPrefix: () => getAvarTarLogPrefix()
-  });
+  let avarTarBoardClearSub = null;
 
-  function setupAvarTarBoardClearWatcher() { avarTarBoardClearWatcher.setup(); }
+  function setupAvarTarBoardClearWatcher() {
+    if (avarTarBoardClearSub) return;
+    if (typeof globalThis === 'undefined' || !globalThis.state?.board?.subscribe) return;
+    avarTarBoardClearSub = globalThis.state.board.subscribe(() => {
+      if (playerEnteredAvarTarHideout && isOnRoomByName(AVAR_TAR_HIDEOUT_ROOM_NAME)) {
+        clearAvarTarHideoutBoardPieces();
+      }
+    });
+  }
 
-  function cleanupAvarTarBoardClearWatcher() { avarTarBoardClearWatcher.cleanup(); }
+  function cleanupAvarTarBoardClearWatcher() {
+    if (avarTarBoardClearSub) {
+      try {
+        avarTarBoardClearSub.unsubscribe();
+      } catch (e) {
+        console.warn(`${getAvarTarLogPrefix()} Error unsubscribing board-clear watcher:`, e);
+      }
+      avarTarBoardClearSub = null;
+    }
+  }
 
   function cleanupAvarTarHideoutQuest() {
     try {
@@ -26185,16 +26209,28 @@ function createNPCCooldownManager() {
     } catch (_) {}
   }
 
-  const parchmentAntechamberBoardClearWatcher = createBoardClearWatcher({
-    isEntered: () => playerEnteredParchmentAntechamber,
-    getRoomName: () => PARCHMENT_ANTECHAMBER_ROOM_NAME,
-    onClear: () => clearParchmentAntechamberBoardPieces(),
-    logPrefix: () => getParchmentAntechamberLogPrefix()
-  });
+  let parchmentAntechamberBoardClearSub = null;
 
-  function setupParchmentAntechamberBoardClearWatcher() { parchmentAntechamberBoardClearWatcher.setup(); }
+  function setupParchmentAntechamberBoardClearWatcher() {
+    if (parchmentAntechamberBoardClearSub) return;
+    if (typeof globalThis === 'undefined' || !globalThis.state?.board?.subscribe) return;
+    parchmentAntechamberBoardClearSub = globalThis.state.board.subscribe(() => {
+      if (playerEnteredParchmentAntechamber && isOnRoomByName(PARCHMENT_ANTECHAMBER_ROOM_NAME)) {
+        clearParchmentAntechamberBoardPieces();
+      }
+    });
+  }
 
-  function cleanupParchmentAntechamberBoardClearWatcher() { parchmentAntechamberBoardClearWatcher.cleanup(); }
+  function cleanupParchmentAntechamberBoardClearWatcher() {
+    if (parchmentAntechamberBoardClearSub) {
+      try {
+        parchmentAntechamberBoardClearSub.unsubscribe();
+      } catch (e) {
+        console.warn(`${getParchmentAntechamberLogPrefix()} Error unsubscribing board-clear watcher:`, e);
+      }
+      parchmentAntechamberBoardClearSub = null;
+    }
+  }
 
   function cleanupParchmentAntechamberQuest() {
     try {
@@ -33066,51 +33102,6 @@ function createNPCCooldownManager() {
     }
 
     return { start, stop };
-  }
-
-  // ============================================================
-  // Reusable factory for the small "wipe boardConfig while the player is standing in a
-  // teleport-battle quest's reskinned room" watcher. Three quests (Cleric, Avar Tar Hideout,
-  // Parchment Antechamber) used to hand-duplicate this exact ~20-line block. The teleport-quest
-  // factory's own scene-sync loop repaints tile mutations but doesn't clear boardConfig — that
-  // only happens via the quest's own apply<X>TileMutations(), which is the CustomBattle's
-  // persistent-visual-sync callback and so only runs once the battle instance is up. This
-  // separate, always-on watcher covers the brief window before that, and any board change
-  // afterward the battle's own sync doesn't happen to catch.
-  //
-  // cfg:
-  //   isEntered()  - read the quest's own playerEntered<X> flag
-  //   getRoomName() - a live getter for the reskinned room's display name (these are `let`s
-  //                   reassigned once assets/quests/rooms.json hydrates, e.g.
-  //                   CLERIC_BATTLE_ROOM_NAME) — read on every board change, not resolved once
-  //   onClear()    - the quest's own clear<X>BoardPieces() (unchanged, kept quest-specific)
-  //   logPrefix()  - the quest's own getXLogPrefix() (called lazily, matches existing warn text)
-  // Returns { setup, cleanup }. State (the subscription handle) is owned by the factory
-  //   instance's own closure, not the caller.
-  // ============================================================
-  function createBoardClearWatcher({ isEntered, getRoomName, onClear, logPrefix }) {
-    let sub = null;
-    return {
-      setup() {
-        if (sub) return;
-        if (typeof globalThis === 'undefined' || !globalThis.state?.board?.subscribe) return;
-        sub = globalThis.state.board.subscribe(() => {
-          if (isEntered() && isOnRoomByName(getRoomName())) {
-            onClear();
-          }
-        });
-      },
-      cleanup() {
-        if (sub) {
-          try {
-            sub.unsubscribe();
-          } catch (e) {
-            console.warn(`${logPrefix()} Error unsubscribing board-clear watcher:`, e);
-          }
-          sub = null;
-        }
-      }
-    };
   }
 
   // ============================================================
