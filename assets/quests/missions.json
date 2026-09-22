@@ -955,6 +955,7 @@
           "battleCompleted",
           "keyReceived"
         ],
+        "forceExtraFieldsWhenCompleted": true,
         "gateRooms": ["Cake Drake Party"]
       },
       "king_copper_key": {
