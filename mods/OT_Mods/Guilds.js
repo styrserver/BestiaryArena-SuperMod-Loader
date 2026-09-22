@@ -30,6 +30,19 @@ function getPlayerSkillsPath(normalizedName) {
   return `${GUILD_CONFIG.firebaseUrl}/player-skills/${normalizedName}.json`;
 }
 
+// A dropped connection (offline, Firebase hiccup) throws the same TypeError
+// shape as a real bug — but it's not one, and logging it as console.error
+// floods the Error Log ring buffer during an outage. Downgrade these to
+// console.warn instead.
+function isTransientNetworkError(error) {
+  const msg = error && error.message;
+  return typeof msg === 'string' && (
+    msg.includes('NetworkError') ||
+    msg.includes('Failed to fetch') ||
+    msg.includes('Load failed')
+  );
+}
+
 const POINTS_CONFIG = {
   LEVELS_PER_POINT: 100,
   RANK_POINTS_PER_POINT: 1,
@@ -4752,7 +4765,11 @@ async function getPlayerSkillsFromFirebase(playerName) {
 
     return skills;
   } catch (error) {
-    console.error('[Guilds] Error fetching player skills from Firebase:', error);
+    if (isTransientNetworkError(error)) {
+      console.warn('[Guilds] Network error fetching player skills (will retry):', error.message);
+    } else {
+      console.error('[Guilds] Error fetching player skills from Firebase:', error);
+    }
     return getDefaultSkills();
   }
 }
@@ -11618,7 +11635,11 @@ async function syncGuildFromFirebase(currentPlayer) {
 
     syncGuildChatTabWithRetry();
   } catch (error) {
-    console.error('[Guilds] Error syncing guild from Firebase:', error);
+    if (isTransientNetworkError(error)) {
+      console.warn('[Guilds] Network error syncing guild (will retry):', error.message);
+    } else {
+      console.error('[Guilds] Error syncing guild from Firebase:', error);
+    }
   }
 }
 

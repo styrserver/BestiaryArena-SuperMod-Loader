@@ -5,6 +5,11 @@
   if (window.__betterBestiaryLoaded) return;
   window.__betterBestiaryLoaded = true;
 
+  // Cross-mod contract consumed by Cyclopedia.js (close/prepareClose/isOpen) and
+  // Depot_Manager.js (showDepotCreatures) - one namespaced object instead of four
+  // separate bare globals (__betterBestiaryClose/PrepareClose/IsOpen/ShowDepotCreatures).
+  window.BetterBestiary = window.BetterBestiary || {};
+
   const defaultConfig = { enabled: true };
   const config = Object.assign({}, defaultConfig, context?.config);
 
@@ -290,7 +295,7 @@
     resetDepotMultiselectorSession();
     sessionOverlaySessionActive = false;
     sessionOverlayState = { showDepot: false };
-    delete window.__betterBestiaryShowDepotCreatures;
+    delete window.BetterBestiary?.showDepotCreatures;
   }
 
   function beginSessionOverlaySession() {
@@ -301,7 +306,7 @@
   }
 
   function syncBetterBestiaryShowDepotFlag() {
-    window.__betterBestiaryShowDepotCreatures = () => sessionOverlayState.showDepot === true;
+    window.BetterBestiary.showDepotCreatures = () => sessionOverlayState.showDepot === true;
   }
 
   function refreshDepotOverlayLayout(modal = findBestiaryModal()) {
@@ -1874,9 +1879,9 @@
 
   initialize();
 
-  window.__betterBestiaryClose = closeForExternalNavigation;
-  window.__betterBestiaryPrepareClose = prepareForExternalClose;
-  window.__betterBestiaryIsOpen = isBetterBestiaryModalOpen;
+  window.BetterBestiary.close = closeForExternalNavigation;
+  window.BetterBestiary.prepareClose = prepareForExternalClose;
+  window.BetterBestiary.isOpen = isBetterBestiaryModalOpen;
 
   exports = {
     cleanup,

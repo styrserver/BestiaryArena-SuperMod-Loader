@@ -287,12 +287,13 @@ function buildEquipmentDatabase() {
       isEventEquipmentName,
       getBisProgressEquipmentNames,
       getEquipmentNameMap,
+      getAllEquipment,
       clampEquipmentTier,
       getEquipmentTierColorLabel,
       mountEquipmentEffectComponent
     };
   }
-  
+
   // Extract just the names and sort alphabetically
   const allEquipmentNames = allEquipment
     .map(e => e.metadata.name)
@@ -326,6 +327,7 @@ function buildEquipmentDatabase() {
     isEventEquipmentName,
     getBisProgressEquipmentNames,
     getEquipmentNameMap,
+    getAllEquipment,
     clampEquipmentTier,
     getEquipmentTierColorLabel,
     mountEquipmentEffectComponent
@@ -392,6 +394,7 @@ const placeholderDatabase = {
   isEventEquipmentName,
   getBisProgressEquipmentNames,
   getEquipmentNameMap,
+  getAllEquipment,
   clampEquipmentTier,
   getEquipmentTierColorLabel,
   mountEquipmentEffectComponent
@@ -419,6 +422,7 @@ waitForGameState(() => {
     globalWindow.equipmentDatabase.isEventEquipmentName = isEventEquipmentName;
     globalWindow.equipmentDatabase.getBisProgressEquipmentNames = getBisProgressEquipmentNames;
     globalWindow.equipmentDatabase.getEquipmentNameMap = getEquipmentNameMap;
+    globalWindow.equipmentDatabase.getAllEquipment = getAllEquipment;
     globalWindow.equipmentDatabase.clampEquipmentTier = clampEquipmentTier;
     globalWindow.equipmentDatabase.getEquipmentTierColorLabel = getEquipmentTierColorLabel;
     globalWindow.equipmentDatabase.mountEquipmentEffectComponent = mountEquipmentEffectComponent;

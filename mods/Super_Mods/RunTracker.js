@@ -1050,10 +1050,7 @@ function parseServerResults(serverResults) {
               runData.regionName = globalThis.mapsDatabase.getRegionDisplayNameFromRegion(regionEntry);
             } else {
               const regionId = regionEntry.id;
-              const mapped = globalThis.mapsDatabase?.REGION_NAME_MAP?.[String(regionId ?? '').toLowerCase()];
-              if (mapped) {
-                runData.regionName = mapped;
-              } else if (regionEntry.name) {
+              if (regionEntry.name) {
                 runData.regionName = regionEntry.name;
               } else if (regionId) {
                 runData.regionName = String(regionId).replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());

@@ -4,6 +4,116 @@
   },
   "notes": [
     {
+      "version": "5.0.12",
+      "changes": [
+        {
+          "mod": "Awaken Tracker",
+          "type": "changed",
+          "text": "Its post-load boot-grace wait (5s after all mods finish loading, before auto-starting) now shares one signal listener and timer with Better Boosted Maps, Better Tasker, Raid Hunter, and Stamina Optimizer via Mod Coordination, instead of each mod running its own duplicate 'allModsLoaded' listener and grace timer. No visible change; internal cleanup only."
+        },
+        {
+          "mod": "Bestiary Automator",
+          "type": "fixed",
+          "text": "Its 'skipping cube trigger' log line (autoOpenCubes disabled/already run/batch in progress) repeated on every 5-10s automation tick for as long as that state held, instead of logging once when the reason actually changes."
+        },
+        {
+          "mod": "Bestiary Automator",
+          "type": "changed",
+          "text": "Its config-update debug log deep-cloned the full config object on every settings change regardless of Log Level; it now only does that work when Log Level is actually set to see it. No visible change; internal cleanup only."
+        },
+        {
+          "mod": "Better Teleporter",
+          "type": "fixed",
+          "text": "Multi-floor quest rooms showed 0 XP/stamina in the map list, because their stamina cost and team size live per-floor instead of on the room itself - now reads the first floor's values like other rooms."
+        },
+        {
+          "mod": "Better Bestiary",
+          "type": "changed",
+          "text": "Its four separate cross-mod signals for Cyclopedia and Depot Manager (close/prepareClose/isOpen/showDepotCreatures) are now grouped under one window.BetterBestiary object instead of four separate globals. No visible change; internal cleanup only."
+        },
+        {
+          "mod": "Better Boosted Maps",
+          "type": "changed",
+          "text": "Its post-load boot-grace wait now shares one signal listener and timer with Awaken Tracker, Better Tasker, Raid Hunter, and Stamina Optimizer via Mod Coordination, instead of running its own duplicate 'allModsLoaded' listener and grace timer. No visible change; internal cleanup only."
+        },
+        {
+          "mod": "Better Tasker",
+          "type": "changed",
+          "text": "Its post-load boot-grace wait now shares one signal listener and timer with Awaken Tracker, Better Boosted Maps, Raid Hunter, and Stamina Optimizer via Mod Coordination, instead of running its own duplicate 'allModsLoaded' listener and grace timer. Also removed a redundant 2-second poll checking whether Board Analyzer/Manual Runner is running - it already reacted to that instantly via a Mod Coordination event subscription; the poll was leftover dead weight from before that subscription was added. No visible change; internal cleanup only."
+        },
+        {
+          "mod": "Board Analyzer",
+          "type": "changed",
+          "text": "Turbo-speed analysis runs now log a per-run performance breakdown (tick timing vs. script overhead) instead of only a final summary, to help diagnose slow runs. Confirmed 1000x turbo already runs at the game engine's practical tick-rate ceiling - there's no further speed to gain there. Internal cleanup: removed a large block of unused legacy analysis code left over from an earlier refactor - no behavior change."
+        },
+        {
+          "mod": "Challenges",
+          "type": "fixed",
+          "text": "The multiplayer queue/match cleanup that runs on load repeated its Firebase get/delete cycle two extra times a few seconds later as a safety net for when the player name isn't resolved yet - it now skips those retries once an earlier attempt already completed the cleanup, instead of always redoing it on every load regardless. Also, its queue-poll debug log JSON-stringified the full queue data on every poll tick regardless of Log Level; it now only does that work when Log Level is actually set to see it."
+        },
+        {
+          "mod": "Depot Manager",
+          "type": "fixed",
+          "text": "The depot grid layout pass could still run in full while Board Analyzer or Autoscroller was active, redoing a 300+ slot visual match on every simulated battle instead of sitting out like its other cosmetic work already does."
+        },
+        {
+          "mod": "Dice Roller",
+          "type": "changed",
+          "text": "Its debug logging (tier calculations, autoroll target checks, high-tier dice operations) used its own separate on/off switch instead of the shared Log Level setting - it now follows Log Level like every other mod's debug output does, so setting it to Verbose is enough to see Dice Roller's debug logs too."
+        },
+        {
+          "mod": "Equipment Database",
+          "type": "changed",
+          "text": "Player Equipment Database no longer re-scans the full equipment catalog a second time on load - it now reuses the scan Equipment Database already did, falling back to its own scan only if that isn't available yet. No visible change; internal cleanup only, shared by Guilds' equip-slot filtering."
+        },
+        {
+          "mod": "Guilds",
+          "type": "changed",
+          "text": "Fetching player skills or syncing guild membership during a dropped connection was logged as an error and stored in the Error Log; it's now logged as a warning instead, since it's not a bug and resolves on its own once the connection returns."
+        },
+        {
+          "mod": "Maps Database",
+          "type": "changed",
+          "text": "Region display names (Ab'Dendriel, etc.) now resolve solely from the game's live region list - removed a hardcoded region name table that duplicated it, plus dead fallback checks for a state.utils.REGION_NAME map that doesn't actually exist. No visible change; internal cleanup only, shared by the region name lookups in Better Teleporter, Board Analyzer, Cyclopedia, Mod Settings, and RunTracker."
+        },
+        {
+          "mod": "Mod Loader",
+          "type": "changed",
+          "text": "The Log Level system's console gating only ever covered log/info/warn/debug/table/group (plus the always-on error/assert); trimmed the unused trace/dir/dirxml/count/countReset/time/timeEnd/timeLog gating that no mod actually calls. No visible change; internal cleanup only."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "fixed",
+          "text": "Persistent Power Saving Mode kept reacting to every battle start/stop during a Board Analyzer or Manual Runner session - clicking its checkbox and re-triggering its own DOM watcher dozens of times against a hidden board - instead of pausing for the whole session like Mod Settings' other laggy features already do."
+        },
+        {
+          "mod": "Quests",
+          "type": "changed",
+          "text": "Fetching quest items or the live world raid state during a dropped connection was logged as an error and stored in the Error Log; it's now logged as a warning instead, since it's not a bug and resolves on its own once the connection returns. Separately, a Spider Lair debug log deep-cloned its villain config on every load regardless of Log Level; it now only does that work when Log Level is actually set to see it."
+        },
+        {
+          "mod": "Quests",
+          "type": "fixed",
+          "text": "Force-completing a specific quest via the developer tools marked it done without actually granting its item reward, since that reward was only ever handed out by a mid-quest action the shortcut skipped - the shortcut now grants it too."
+        },
+        {
+          "mod": "Raid Hunter",
+          "type": "changed",
+          "text": "Its post-load boot-grace wait now shares one signal listener and timer with Awaken Tracker, Better Boosted Maps, Better Tasker, and Stamina Optimizer via Mod Coordination, instead of running its own duplicate 'allModsLoaded' listener and grace timer. Also removed a redundant 2-second poll checking whether Board Analyzer/Manual Runner is running - it already reacted to that instantly via a Mod Coordination event subscription; the poll was explicitly marked as legacy and pending removal in its own code comment. No visible change; internal cleanup only."
+        },
+        {
+          "mod": "Stamina Optimizer",
+          "type": "changed",
+          "text": "Removed a leftover fallback that could have created a second, duplicate autoplay coordination object if it ever loaded before the shared coordination system did; it now just relies on that always being ready, and logs an error instead if it isn't. Its post-load boot-grace wait also now shares one signal listener and timer with Awaken Tracker, Better Boosted Maps, Better Tasker, and Raid Hunter via Mod Coordination, instead of running its own duplicate 'allModsLoaded' listener and grace timer. No visible change; internal cleanup only."
+        },
+        {
+          "mod": "VIP List",
+          "type": "changed",
+          "text": "Checking for new messages or chat requests during a dropped connection was logged as an error and stored in the Error Log; it's now logged as a warning instead, since it's not a bug and resolves on its own once the connection returns."
+        }
+      ]
+    },
+    {
       "version": "5.0.11",
       "changes": [
         {

@@ -1382,12 +1382,12 @@
     if (typeof globalThis.mapsDatabase?.getRegionDisplayName === 'function') {
       return globalThis.mapsDatabase.getRegionDisplayName(regionId);
     }
-    const fromGame = globalThis.state?.utils?.REGION_NAME?.[regionId]
-      || globalThis.state?.utils?.regionIdsToNames?.[regionId];
-    if (fromGame) return fromGame;
     const key = String(regionId).toLowerCase();
-    const mapped = globalThis.mapsDatabase?.REGION_NAME_MAP?.[key];
-    if (mapped) return mapped;
+    const regions = globalThis.state?.utils?.REGIONS;
+    const fromGame = Array.isArray(regions)
+      ? regions.find((r) => r?.id === regionId || String(r?.id ?? '').toLowerCase() === key)?.name
+      : undefined;
+    if (fromGame) return fromGame;
     return String(regionId).replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());
   }
 
@@ -1446,7 +1446,13 @@
           }
         }
 
-        const staminaCost = Number(room.staminaCost ?? 0);
+        // Multi-floor quest rooms (type: 'multi', e.g. The Annihilator Quest, The
+        // Behemoth Quest) have no top-level maxTeamSize/staminaCost — those vary per
+        // floor in room.floorRules[floorIndex] instead, so reading room.staminaCost
+        // directly silently gives 0 (see docs/game_state_api.md). Use floor 0's rule,
+        // same convention Better Highscores/Highscore Improvements use for rank.
+        const floorRule = room.type === 'multi' ? room.floorRules?.[0] : null;
+        const staminaCost = Number((floorRule ? floorRule.staminaCost : room.staminaCost) ?? 0);
         const expAvg = Math.round(levelSumCapped * 562.5);
         const expPerStamina = staminaCost > 0 ? expAvg / staminaCost : 0;
         // How many of your own creatures can be fielded on this map. Every fielded
@@ -1455,7 +1461,8 @@
         // slots. `expPerStaminaTotal` is that throughput per stamina, which ranks
         // maps better when grinding a large roster to level 99. Prefer the room's
         // declared maxTeamSize; fall back to the enemy count for odd/legacy rooms.
-        const teamSlots = Number(room.maxTeamSize) > 0 ? Number(room.maxTeamSize) : villains.length;
+        const declaredMaxTeamSize = Number(floorRule ? floorRule.maxTeamSize : room.maxTeamSize);
+        const teamSlots = declaredMaxTeamSize > 0 ? declaredMaxTeamSize : villains.length;
         const expPerStaminaTotal = staminaCost > 0 ? (expAvg * teamSlots) / staminaCost : 0;
 
         byId.set(roomId, {
@@ -1843,9 +1850,10 @@
       if (room.regionName === name) return room.regionId;
     }
 
-    const regionNames = globalThis.state?.utils?.REGION_NAME || {};
-    for (const [id, label] of Object.entries(regionNames)) {
-      if (label === name) return id;
+    const regions = globalThis.state?.utils?.REGIONS;
+    if (Array.isArray(regions)) {
+      const region = regions.find((r) => r?.name === name);
+      if (region?.id) return region.id;
     }
     return null;
   }

@@ -1472,8 +1472,16 @@ if (typeof window !== 'undefined') {
   };
 }
 
-/** Reset local multiplayer state and clear this player's queue/match from Firebase so the mod starts on a clean slate. Called on script init. */
+/**
+ * Reset local multiplayer state and clear this player's queue/match from Firebase so the mod
+ * starts on a clean slate. Called on script init, then retried at 500ms/2000ms in case the
+ * player name isn't resolved yet on the first attempt - multiplayerSlateClearedForCurrentPlayer
+ * short-circuits those retries once an earlier call already did the Firebase cleanup, so a normal
+ * load (name available immediately) doesn't repeat the same get+delete cycle two extra times.
+ */
+var multiplayerSlateClearedForCurrentPlayer = false;
 function clearMultiplayerSlateForCurrentPlayer() {
+  if (multiplayerSlateClearedForCurrentPlayer) return;
   console.log('[Challenges MP]','clearMultiplayerSlateForCurrentPlayer');
   clearMultiplayerStateFields(challengesMultiplayerPersisted);
   var name = (getCurrentPlayerName() || '').trim();
@@ -1484,6 +1492,7 @@ function clearMultiplayerSlateForCurrentPlayer() {
     }
     return;
   }
+  multiplayerSlateClearedForCurrentPlayer = true;
   var key = sanitizeFirebaseKeyForChallenges(name);
   var queuePath = getMultiplayerQueuePath() + '/' + key;
   var playerMatchPath = getMultiplayerPlayerMatchesPath() + '/' + key;
@@ -2358,7 +2367,9 @@ function openChallengesModal(initialTabIndex) {
           }
           return;
         }
-        console.log('[Challenges MP]','poll: queueData', JSON.stringify(queueData));
+        if (globalThis.BestiaryLogger?.isEnabled('log')) {
+          console.log('[Challenges MP]','poll: queueData', JSON.stringify(queueData));
+        }
         if (myKey && state.inQueue && state.clientToken) {
           var myEntry = queueData[myKey];
           if (myEntry && myEntry.clientToken && myEntry.clientToken !== state.clientToken) {

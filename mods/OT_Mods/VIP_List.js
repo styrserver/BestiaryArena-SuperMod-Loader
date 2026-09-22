@@ -573,6 +573,19 @@ const tReplace = (key, replacements) => {
 // 6. Player Data Helpers
 // =======================
 
+// A dropped connection (offline, Firebase hiccup) throws the same TypeError
+// shape as a real bug — but it's not one, and logging it as console.error
+// floods the Error Log ring buffer during an outage. Downgrade these to
+// console.warn instead.
+function isTransientNetworkError(error) {
+  const msg = error && error.message;
+  return typeof msg === 'string' && (
+    msg.includes('NetworkError') ||
+    msg.includes('Failed to fetch') ||
+    msg.includes('Load failed')
+  );
+}
+
 // Get current player's name from game state
 // Validate if a username looks valid (not encrypted/corrupted)
 function isValidUsername(username) {
@@ -3318,7 +3331,11 @@ async function checkForChatRequests() {
     
     return requests.filter(req => req !== null && req.from);
   } catch (error) {
-    console.error('[VIP List] Error checking for chat requests:', error);
+    if (isTransientNetworkError(error)) {
+      console.warn('[VIP List] Network error checking for chat requests (will retry):', error.message);
+    } else {
+      console.error('[VIP List] Error checking for chat requests:', error);
+    }
     return [];
   }
 }
@@ -3954,7 +3971,11 @@ async function checkForMessages() {
     lastMessageCheckTime = Date.now();
     return unreadMessages;
   } catch (error) {
-    console.error('[VIP List] Error checking messages:', error);
+    if (isTransientNetworkError(error)) {
+      console.warn('[VIP List] Network error checking messages (will retry):', error.message);
+    } else {
+      console.error('[VIP List] Error checking messages:', error);
+    }
     return [];
   }
 }

@@ -53,8 +53,6 @@ const STAMINA_SAFETY_POLL_MS = STAMINA_REGEN_MS;
 // Fixed start delay — same contract as Raid Hunter / Better Tasker / Awaken Farmer / Stamina Optimizer
 const DEFAULT_START_DELAY = 3; // seconds
 const COORDINATION_RESUME_DELAY_MS = 1000; // after a higher-priority mod yields
-const MODS_LOADING_GRACE_PERIOD = 5000;
-const MAX_WAIT_FOR_SIGNAL = 15000;
 const START_TOAST_COOLDOWN_MS = 10000;
 
 // Stamina constants
@@ -5614,69 +5612,29 @@ function init() {
         setupPageVisibilityMonitoring();
     }
 
-    setupBootGrace(() => {
+    const onBootReady = () => {
+        bootReadyUnsubscribe = null;
         if (modState.enabled) {
-            console.log('[Better Boosted Maps] Boot grace ended — checking if farming should start');
+            console.log('[Better Boosted Maps] Boot ready — checking if farming should start');
             checkAndStartBoostedMapFarming();
         }
-    });
-    
-    console.log('[Better Boosted Maps] Initialized - waiting for allModsLoaded + boot grace');
+    };
+    if (window.ModCoordination) {
+        bootReadyUnsubscribe = window.ModCoordination.onReady(onBootReady);
+    } else {
+        onBootReady();
+    }
+
+    console.log('[Better Boosted Maps] Initialized - waiting for shared boot-ready signal');
 }
 
-let allModsLoaded = false;
 let lastStartToastAt = 0;
-let bootGraceDone = false;
-let bootGraceTimer = null;
-let bootFallbackTimer = null;
-let bootMessageHandler = null;
-
-function setupBootGrace(onReady) {
-    if (bootMessageHandler) return;
-
-    const beginGrace = () => {
-        if (bootGraceDone || bootGraceTimer) return;
-        console.log(`[Better Boosted Maps] Boot grace started — waiting ${MODS_LOADING_GRACE_PERIOD / 1000}s`);
-        bootGraceTimer = setTimeout(() => {
-            bootGraceTimer = null;
-            bootGraceDone = true;
-            if (typeof onReady === 'function') onReady();
-        }, MODS_LOADING_GRACE_PERIOD);
-    };
-
-    bootMessageHandler = (event) => {
-        if (event.source !== window) return;
-        if (event.data?.from === 'LOCAL_MODS_LOADER' && event.data?.action === 'allModsLoaded') {
-            if (allModsLoaded) return;
-            allModsLoaded = true;
-            console.log('[Better Boosted Maps] Received allModsLoaded signal');
-            beginGrace();
-        }
-    };
-    window.addEventListener('message', bootMessageHandler);
-
-    bootFallbackTimer = setTimeout(() => {
-        bootFallbackTimer = null;
-        if (!allModsLoaded) {
-            console.warn('[Better Boosted Maps] allModsLoaded not received — starting boot grace anyway');
-            allModsLoaded = true;
-            beginGrace();
-        }
-    }, MAX_WAIT_FOR_SIGNAL);
-}
+let bootReadyUnsubscribe = null;
 
 function teardownBootGrace() {
-    if (bootMessageHandler) {
-        try { window.removeEventListener('message', bootMessageHandler); } catch (_) {}
-        bootMessageHandler = null;
-    }
-    if (bootGraceTimer) {
-        clearTimeout(bootGraceTimer);
-        bootGraceTimer = null;
-    }
-    if (bootFallbackTimer) {
-        clearTimeout(bootFallbackTimer);
-        bootFallbackTimer = null;
+    if (bootReadyUnsubscribe) {
+        bootReadyUnsubscribe();
+        bootReadyUnsubscribe = null;
     }
 }
 

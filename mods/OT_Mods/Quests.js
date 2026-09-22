@@ -4594,7 +4594,9 @@ function createNPCCooldownManager() {
     if (hasEquip) {
       console.log('[Quests Mod][Spider Lair] Villains hydrated with shared equip from battles.json');
     } else {
-      console.log('[Quests Mod][Spider Lair] No equip resolved for villains. Config:', JSON.parse(JSON.stringify(villains)));
+      if (globalThis.BestiaryLogger?.isEnabled('log')) {
+        console.log('[Quests Mod][Spider Lair] No equip resolved for villains. Config:', JSON.parse(JSON.stringify(villains)));
+      }
     }
     const spiderLairTileRestrictions = {};
     if (spawn.allowedTiles?.length) {
@@ -8308,7 +8310,20 @@ function createNPCCooldownManager() {
   // =======================
   // Firebase Service
   // =======================
-  
+
+  // A dropped connection (offline, Firebase hiccup) throws the same TypeError
+  // shape as a real bug — but it's not one, and logging it as console.error
+  // floods the Error Log ring buffer during an outage. Downgrade these to
+  // console.warn instead.
+  function isTransientNetworkError(error) {
+    const msg = error && error.message;
+    return typeof msg === 'string' && (
+      msg.includes('NetworkError') ||
+      msg.includes('Failed to fetch') ||
+      msg.includes('Load failed')
+    );
+  }
+
   const FirebaseService = {
     /**
      * Handle Firebase response with standardized error handling
@@ -8339,7 +8354,11 @@ function createNPCCooldownManager() {
         const response = await fetch(`${path}.json`);
         return await this.handleResponse(response, errorContext, defaultReturn);
       } catch (error) {
-        console.error(`[Quests Mod] Error ${errorContext}:`, error);
+        if (isTransientNetworkError(error)) {
+          console.warn(`[Quests Mod] Network error ${errorContext} (will retry):`, error.message);
+        } else {
+          console.error(`[Quests Mod] Error ${errorContext}:`, error);
+        }
         // A transient network failure is otherwise indistinguishable from "no data"
         // (both return defaultReturn). Callers that would persist state back — e.g.
         // the init hydrate — must be able to tell the difference and abort.

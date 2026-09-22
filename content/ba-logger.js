@@ -13,7 +13,7 @@
  *   errors(1)   error              <- default
  *   warnings(2) error, warn
  *   info(3)     error, warn, log, info
- *   verbose(4)  everything (debug, trace, group*, table, dir, count, ...)
+ *   verbose(4)  everything (debug, table, group*)
  *
  * Rules that never change with the level:
  *   - console.error ALWAYS prints, and ALWAYS lands in the Error Log with full
@@ -73,9 +73,8 @@
   // --- native console handles (also exposed for other loader files) ---------
   const nativeConsole = globalThis.__BA_NATIVE_CONSOLE__ || {};
   const CONSOLE_METHODS = [
-    'log', 'info', 'warn', 'error', 'debug', 'trace', 'dir', 'dirxml',
-    'table', 'group', 'groupCollapsed', 'groupEnd', 'count', 'countReset',
-    'time', 'timeEnd', 'timeLog', 'assert'
+    'log', 'info', 'warn', 'error', 'debug',
+    'table', 'group', 'groupCollapsed', 'groupEnd', 'assert'
   ];
   for (const m of CONSOLE_METHODS) {
     if (typeof console[m] === 'function' && typeof nativeConsole[m] !== 'function') {
@@ -95,18 +94,10 @@
     info: LEVELS.info,
     warn: LEVELS.warnings,
     debug: LEVELS.verbose,
-    trace: LEVELS.verbose,
-    dir: LEVELS.verbose,
-    dirxml: LEVELS.verbose,
     table: LEVELS.verbose,
     group: LEVELS.verbose,
     groupCollapsed: LEVELS.verbose,
-    groupEnd: LEVELS.verbose,
-    count: LEVELS.verbose,
-    countReset: LEVELS.verbose,
-    time: LEVELS.verbose,
-    timeEnd: LEVELS.verbose,
-    timeLog: LEVELS.verbose
+    groupEnd: LEVELS.verbose
   };
 
   // --- formatting ----------------------------------------------------------

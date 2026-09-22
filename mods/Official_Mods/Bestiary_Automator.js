@@ -1850,22 +1850,30 @@ const openCubesIfEnabled = async () => {
     return;
   }
   if (!config.autoOpenCubes || cubesOpenedThisSession) {
-    if (!config.autoOpenCubes) {
-      console.log('[Bestiary Automator] [cubes] Skipping trigger: autoOpenCubes disabled');
-    } else if (cubesOpenedThisSession) {
-      console.log('[Bestiary Automator] [cubes] Skipping trigger: already ran cube batch this session', {
-        stacks: getSurpriseCubeStackSnapshot(getPlayerInventory())
-      });
+    const reason = !config.autoOpenCubes ? 'disabled' : 'already-ran';
+    if (lastCubesSkipReasonLogged !== reason) {
+      lastCubesSkipReasonLogged = reason;
+      if (reason === 'disabled') {
+        console.log('[Bestiary Automator] [cubes] Skipping trigger: autoOpenCubes disabled');
+      } else {
+        console.log('[Bestiary Automator] [cubes] Skipping trigger: already ran cube batch this session', {
+          stacks: getSurpriseCubeStackSnapshot(getPlayerInventory())
+        });
+      }
     }
     return;
   }
   if (cubesOpenInProgress) {
-    console.log('[Bestiary Automator] [cubes] Skipping trigger: cube batch already in progress');
+    if (lastCubesSkipReasonLogged !== 'in-progress') {
+      lastCubesSkipReasonLogged = 'in-progress';
+      console.log('[Bestiary Automator] [cubes] Skipping trigger: cube batch already in progress');
+    }
     return;
   }
   if (!isGameStateAPIAvailable()) {
     return;
   }
+  lastCubesSkipReasonLogged = null;
   cubesOpenInProgress = true;
   try {
     const outcome = await openAllSurpriseCubesFromInventory({
@@ -2252,6 +2260,9 @@ const refillStaminaIfNeeded = async () => {
 let rewardsCollectedThisSession = false;
 let cubesOpenedThisSession = false;
 let cubesOpenInProgress = false;
+// Only log a given "skipping cube trigger" reason once per state, instead of on every
+// automation tick (5-10s) for as long as that state holds - avoids repeat log spam.
+let lastCubesSkipReasonLogged = null;
 
 // Track if Faster Autoplay has been executed for this game session
 let fasterAutoplayExecutedThisSession = false;
@@ -3198,6 +3209,7 @@ const subscribeToGameState = () => {
         console.log('[Bestiary Automator] New game detected, resetting session flags');
         rewardsCollectedThisSession = false;
         cubesOpenedThisSession = false;
+        lastCubesSkipReasonLogged = null;
         fasterAutoplayExecutedThisSession = false;
         fasterAutoplayRunning = false;
         
@@ -3932,6 +3944,7 @@ const startAutomation = () => {
   rewardsCollectedThisSession = false;
   cubesOpenedThisSession = false;
   cubesOpenInProgress = false;
+  lastCubesSkipReasonLogged = null;
   fasterAutoplayExecutedThisSession = false;
   fasterAutoplayRunning = false;
   
@@ -4813,6 +4826,7 @@ function init() {
   // Reset session flags on initialization
   rewardsCollectedThisSession = false;
   cubesOpenedThisSession = false;
+  lastCubesSkipReasonLogged = null;
   fasterAutoplayExecutedThisSession = false;
   fasterAutoplayRunning = false;
   
@@ -5101,12 +5115,16 @@ context.exports = {
   toggleAutomation,
   updateConfig: (newConfig) => {
     console.log('[Bestiary Automator] updateConfig called with:', newConfig);
-    console.log('[Bestiary Automator] Current config before update:', JSON.parse(JSON.stringify(config)));
-    
+    if (globalThis.BestiaryLogger?.isEnabled('log')) {
+      console.log('[Bestiary Automator] Current config before update:', JSON.parse(JSON.stringify(config)));
+    }
+
     const oldEnabled = config.enabled;
     Object.assign(config, newConfig);
-    
-    console.log('[Bestiary Automator] Config after update:', JSON.parse(JSON.stringify(config)));
+
+    if (globalThis.BestiaryLogger?.isEnabled('log')) {
+      console.log('[Bestiary Automator] Config after update:', JSON.parse(JSON.stringify(config)));
+    }
     
     // Only start or stop automation if the enabled state actually changed
     if (newConfig.hasOwnProperty('enabled') && newConfig.enabled !== oldEnabled) {
@@ -5182,7 +5200,8 @@ context.exports = {
     fasterAutoplayRunning = false;
     rewardsCollectedThisSession = false;
     cubesOpenedThisSession = false;
-    
+    lastCubesSkipReasonLogged = null;
+
     // Unregister from coordination system
     if (window.ModCoordination) {
       window.ModCoordination.unregisterMod('Bestiary Automator');

@@ -1976,7 +1976,7 @@
                     getRarityFromStats(creature);
       
       // Only log tier calculations in debug mode
-      if (window.DiceRollerDebugMode === true) {
+      if (window.BestiaryLogger?.getLevel?.() === 'verbose') {
         console.log('[Dice Roller] Portrait tier calculation:', {
           selectedGameId,
           currentTier,
@@ -2885,7 +2885,7 @@
     lastApiCall = Date.now();
     
     // Debug logging for high-tier dice operations
-    if (window.DiceRollerDebugMode === true && requiredDiceTier >= 4) {
+    if (window.BestiaryLogger?.getLevel?.() === 'verbose' && requiredDiceTier >= 4) {
       const playerContext = globalThis.state.player.getSnapshot().context;
       const inventory = playerContext.inventory || {};
       const diceKey = `diceManipulator${requiredDiceTier}`;
@@ -3000,7 +3000,7 @@
                               // Deselect dice that are no longer needed (lower tier dice that can't be used)
                 const diceToRemove = selectedDice.filter(dice => dice < diceToUseForStats);
                 if (diceToRemove.length > 0) {
-                  if (window.DiceRollerDebugMode === true) {
+                  if (window.BestiaryLogger?.getLevel?.() === 'verbose') {
                     console.log('[Dice Roller] Debug - Auto-deselecting dice:', {
                       originalSelection: [...selectedDice],
                       diceToRemove,
@@ -3682,7 +3682,7 @@
                 }
               } catch (err) {
                 console.warn('[Dice Roller] Roll failed:', err.message);
-                if (window.DiceRollerDebugMode === true) {
+                if (window.BestiaryLogger?.getLevel?.() === 'verbose') {
                   console.log('[Dice Roller] Debug - Roll failure details:', {
                     attempt: autorollAttempt,
                     selectedGameId,
@@ -3720,7 +3720,7 @@
               }
               
               // Debug logging for target validation
-              if (window.DiceRollerDebugMode === true) {
+              if (window.BestiaryLogger?.getLevel?.() === 'verbose') {
                 console.log('[Dice Roller] Debug - Target validation:', {
                   mode: 'genes',
                   availableStats,
@@ -3827,7 +3827,7 @@
             }
             if (window.DiceRollerMode === 'genes' && allMet) {
               // Debug logging for target met condition
-              if (window.DiceRollerDebugMode === true) {
+              if (window.BestiaryLogger?.getLevel?.() === 'verbose') {
                 console.log('[Dice Roller] Debug - Target met condition triggered:', {
                   mode: 'genes',
                   allMet,
@@ -5129,7 +5129,6 @@
           delete window.DiceRollerSelectedTier;
           delete window.DiceRollerCurrentTier;
           delete window.DiceRollerCurrentGameId;
-          delete window.DiceRollerDebugMode;
           delete window.DiceRollerStopWhenChangingDice;
           delete window.DiceRollerContinuouslyChangeDice;
           delete window.DiceRollerContinuouslyUseSameDice;
@@ -5172,11 +5171,9 @@
 // =======================
 // 8. Cleanup & Exports
 // =======================
-  // Debug mode disabled by default - set window.DiceRollerDebugMode = true to enable
-  if (typeof window !== 'undefined') {
-    window.DiceRollerDebugMode = false;
-  }
-  
+  // Debug logging above is gated on the Log Level setting (verbose) instead of a
+  // bespoke on/off flag - see docs/mod_development_guide.md logging conventions.
+
   if (config.enabled) {
     if (globalThis.state?.player) {
       playerStateSubscription = globalThis.state.player.subscribe((playerState) => {

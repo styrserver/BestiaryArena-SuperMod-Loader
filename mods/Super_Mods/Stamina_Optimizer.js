@@ -54,12 +54,10 @@ const NAVIGATION_DELAY = 500;
 const AUTO_SETUP_DELAY = 800;
 const PAUSE_BUTTON_CLICK_DELAY = 100;
 const PAUSE_BUTTON_UPDATE_DELAY = 300;
-const MODS_LOADING_GRACE_PERIOD = 5000; // 5 seconds after allModsLoaded before allowing actions
 // Fixed start delay — same contract as other farming mods (3s, not user-configurable)
 const DEFAULT_START_DELAY = 3;
 const ACTION_START_DELAY = DEFAULT_START_DELAY * 1000;
 const START_TOAST_COOLDOWN_MS = 10000;
-const MAX_WAIT_FOR_SIGNAL = 15000; // Maximum time to wait for allModsLoaded signal (15 seconds)
 const ROOM_NAV_POLL_MS = 100;
 const ROOM_NAV_TIMEOUT_MS = 8000;
 const ROOM_NAV_TIMEOUT_HIDDEN_MS = 20000;
@@ -83,48 +81,17 @@ const COLOR_SUCCESS = '#4ade80';
 // 2. STATE MANAGEMENT
 // ============================================================================
 
-// Control Manager class for coordination
-class ControlManager {
-    constructor(name, uniqueProperties = {}) {
-        this.name = name;
-        this.currentOwner = null;
-        Object.assign(this, uniqueProperties);
-    }
-    
-    requestControl(modName) {
-        if (this.currentOwner === null || this.currentOwner === modName) {
-            this.currentOwner = modName;
-            console.log(`[${this.name}] Control granted to ${modName}`);
-            return true;
-        }
-        console.log(`[${this.name}] Control denied to ${modName} (currently owned by ${this.currentOwner})`);
-        return false;
-    }
-    
-    releaseControl(modName) {
-        if (this.currentOwner === modName) {
-            this.currentOwner = null;
-            console.log(`[${this.name}] Control released by ${modName}`);
-            return true;
-        }
-        return false;
-    }
-    
-    hasControl(modName) {
-        return this.currentOwner === modName;
-    }
-    
-    getCurrentOwner() {
-        return this.currentOwner;
-    }
+// window.AutoplayManager is created by content/mod-coordination.mjs, which is injected
+// as a core page script before any Local Mod (including this one) runs — see
+// docs/mod_loading_optimizations.md "Loading Order". This used to have its own fallback
+// `new ControlManager(...)` here (a second, duplicate definition of the same class in
+// content/mod-coordination.mjs) in case that hadn't happened yet; that fallback was never
+// actually exercised, since the load order guarantees window.AutoplayManager already
+// exists by this point. Fail loudly instead if that invariant is ever violated, rather
+// than silently constructing a second implementation of the same manager.
+if (!window.AutoplayManager) {
+    console.error('[Stamina Optimizer] window.AutoplayManager is missing - content/mod-coordination.mjs should have created it before any mod runs. Autoplay coordination will not work.');
 }
-
-window.AutoplayManager = window.AutoplayManager || new ControlManager('Autoplay Manager', {
-    originalMode: null,
-    isControlledByOther(modName) {
-        return this.currentOwner !== null && this.currentOwner !== modName;
-    }
-});
 
 let isAutomationEnabled = AUTOMATION_DISABLED;
 let isCurrentlyActive = false;
@@ -141,9 +108,10 @@ let autoplayStopCheckTimeout = null;
 let stateFlagTimeouts = [];
 let modalTimeouts = [];
 let otherTimeouts = [];
-let allModsLoaded = false;
+let isBootReady = false; // Set once via the shared ModCoordination.onReady() boot-grace signal
+let staminaModsLoadedUnsubscribe = null;
+let staminaBootReadyUnsubscribe = null;
 let hasLoggedAutoplayDetection = false;
-let gracePeriodEndTime = 0; // Timestamp when grace period ends (0 = grace period active or not started)
 let lastMissingBoostedStateLog = 0;
 let lastMissingFunctionLog = 0;
 let functionRetryAttempts = 0;
@@ -2000,23 +1968,11 @@ async function monitorStamina() {
         return;
     }
     
-    // Check if we're still waiting for allModsLoaded signal or in grace period
-    if (!allModsLoaded) {
-        // Still waiting for the signal - don't execute actions yet
+    // Still waiting for the shared allModsLoaded signal + boot-grace period — don't execute actions yet
+    if (!isBootReady) {
         return;
     }
-    
-    // Check if we're still in the grace period after allModsLoaded
-    const now = Date.now();
-    if (gracePeriodEndTime > 0 && now < gracePeriodEndTime) {
-        const remainingSeconds = Math.ceil((gracePeriodEndTime - now) / 1000);
-        // Only log at 10s, 5s, and when it ends
-        if (remainingSeconds === 3 || remainingSeconds === 2 || remainingSeconds === 1) {
-            console.log(`[Stamina Optimizer] ⏳ Waiting for mods to finish loading (${remainingSeconds}s remaining)...`);
-        }
-        return;
-    }
-    
+
     const settings = loadSettings();
     const maxStamina = settings.maxStamina || DEFAULT_MAX_STAMINA;
     const minStamina = settings.minStamina || DEFAULT_MIN_STAMINA;
@@ -3362,29 +3318,36 @@ function init() {
         setupBestiaryRefillMonitoring();
     }
     
-    console.log('[Stamina Optimizer] Initialized - waiting for allModsLoaded signal');
-    
-    // Fallback: if allModsLoaded signal is never received, set grace period after max wait time
-    const fallbackTimeout = setTimeout(() => {
-        if (!allModsLoaded) {
-            console.warn('[Stamina Optimizer] allModsLoaded signal not received after timeout - setting grace period anyway');
-            allModsLoaded = true;
-            gracePeriodEndTime = Date.now() + MODS_LOADING_GRACE_PERIOD;
-            console.log(`[Stamina Optimizer] Grace period started (fallback) - will wait ${MODS_LOADING_GRACE_PERIOD / 1000}s before allowing actions`);
-            
-            const gracePeriodTimeout = setTimeout(() => {
-                console.log('[Stamina Optimizer] Grace period ended - now allowing actions');
-                logCurrentSettings('grace period ended (fallback)');
-                void monitorStamina();
-                const index = otherTimeouts.indexOf(gracePeriodTimeout);
+    console.log('[Stamina Optimizer] Initialized - waiting for shared boot-ready signal');
+
+    // mod-coordination.mjs owns the single allModsLoaded listener + grace timer (and its
+    // own 15s no-signal fallback) that used to be duplicated across five automation mods.
+    if (window.ModCoordination) {
+        staminaModsLoadedUnsubscribe = window.ModCoordination.onModsLoaded(() => {
+            staminaModsLoadedUnsubscribe = null;
+            console.log('[Stamina Optimizer] Received allModsLoaded signal');
+            const timeout = setTimeout(() => {
+                startAutomation();
+                const index = otherTimeouts.indexOf(timeout);
                 if (index > -1) otherTimeouts.splice(index, 1);
-            }, MODS_LOADING_GRACE_PERIOD);
-            otherTimeouts.push(gracePeriodTimeout);
-        }
-        const index = otherTimeouts.indexOf(fallbackTimeout);
-        if (index > -1) otherTimeouts.splice(index, 1);
-    }, MAX_WAIT_FOR_SIGNAL);
-    otherTimeouts.push(fallbackTimeout);
+            }, 1500);
+            otherTimeouts.push(timeout);
+        });
+
+        // When boot grace ends, force an immediate check instead of waiting for the next
+        // player.subscribe event or the 60s safety poll — otherwise a room that's already
+        // above maxStamina at boot (whose ready-timer never got armed, see
+        // scheduleStaminaReadyTimeout) can sit idle for up to a minute before anything acts.
+        staminaBootReadyUnsubscribe = window.ModCoordination.onReady(() => {
+            staminaBootReadyUnsubscribe = null;
+            isBootReady = true;
+            console.log('[Stamina Optimizer] ✅ Boot ready - now allowing actions');
+            logCurrentSettings('boot ready');
+            void monitorStamina();
+        });
+    } else {
+        isBootReady = true;
+    }
 }
 
 // Start automation after all mods are loaded
@@ -3394,40 +3357,6 @@ function startAutomation() {
         updateButton();
     }
 }
-
-// Listen for allModsLoaded signal
-let windowMessageHandler = (event) => {
-    if (event.source !== window) return;
-    if (event.data?.from === 'LOCAL_MODS_LOADER' && event.data?.action === 'allModsLoaded') {
-        console.log('[Stamina Optimizer] Received allModsLoaded signal');
-        allModsLoaded = true;
-        
-        // Set grace period end time to allow other mods to initialize
-        gracePeriodEndTime = Date.now() + MODS_LOADING_GRACE_PERIOD;
-        console.log(`[Stamina Optimizer] Grace period started - will wait ${MODS_LOADING_GRACE_PERIOD / 1000}s before allowing actions`);
-        
-        const timeout = setTimeout(() => {
-            startAutomation();
-            const index = otherTimeouts.indexOf(timeout);
-            if (index > -1) otherTimeouts.splice(index, 1);
-        }, 1500);
-        otherTimeouts.push(timeout);
-        
-        // When grace period ends, force an immediate check instead of waiting for the next
-        // player.subscribe event or the 60s safety poll — otherwise a room that's already
-        // above maxStamina at boot (whose ready-timer never got armed, see
-        // scheduleStaminaReadyTimeout) can sit idle for up to a minute before anything acts.
-        const gracePeriodTimeout = setTimeout(() => {
-            console.log('[Stamina Optimizer] ✅ Grace period ended - ready for actions');
-            logCurrentSettings('grace period ended');
-            void monitorStamina();
-            const index = otherTimeouts.indexOf(gracePeriodTimeout);
-            if (index > -1) otherTimeouts.splice(index, 1);
-        }, MODS_LOADING_GRACE_PERIOD);
-        otherTimeouts.push(gracePeriodTimeout);
-    }
-};
-window.addEventListener('message', windowMessageHandler);
 
 // Run initialization
 init();
@@ -3469,9 +3398,13 @@ function cleanupStaminaOptimizer() {
 
         cleanupModal();
 
-        if (windowMessageHandler) {
-            window.removeEventListener('message', windowMessageHandler);
-            windowMessageHandler = null;
+        if (staminaModsLoadedUnsubscribe) {
+            staminaModsLoadedUnsubscribe();
+            staminaModsLoadedUnsubscribe = null;
+        }
+        if (staminaBootReadyUnsubscribe) {
+            staminaBootReadyUnsubscribe();
+            staminaBootReadyUnsubscribe = null;
         }
 
         isStartingAutoplay = false;

@@ -1,7 +1,24 @@
 console.log('[playereq-database.js] Loading equipment database...');
 
 // Function to dynamically fetch all equipment
+//
+// equipment-database.js (always loaded before this file — see background.js,
+// content/mod-registry.js, content/local_mods.js, popup.js) does the identical
+// state.utils.getEquipment(1..999) scan and exposes the raw, uncached function via
+// window.equipmentDatabase.getAllEquipment. Reuse it instead of scanning twice; fall
+// back to an independent scan below if that database isn't wired up (defensive —
+// keeps this file correct even if load order/registration ever changes).
 function getAllEquipment() {
+  const sharedScan = window.equipmentDatabase?.getAllEquipment;
+  if (typeof sharedScan === 'function' && sharedScan !== getAllEquipment) {
+    try {
+      const shared = sharedScan();
+      if (Array.isArray(shared) && shared.length > 0) return shared;
+    } catch (e) {
+      console.warn('[playereq-database.js] Shared equipment scan failed, falling back to local scan', e);
+    }
+  }
+
   const equipment = [];
   for (let i = 1; i < 1000; i++) {
     try {

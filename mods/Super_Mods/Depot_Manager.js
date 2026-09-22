@@ -2736,8 +2736,8 @@ function getBetterBestiaryCreatureSlotElements(modal) {
 
 function shouldShowDepotInBetterBestiary() {
   try {
-    return typeof window.__betterBestiaryShowDepotCreatures === 'function'
-      && window.__betterBestiaryShowDepotCreatures();
+    return typeof window.BetterBestiary?.showDepotCreatures === 'function'
+      && window.BetterBestiary.showDepotCreatures();
   } catch {
     return false;
   }
@@ -3214,6 +3214,9 @@ function buildDepotHideSlotPairsFromVisualMatch(slotElements) {
 
 function applyDepotLayout() {
   if (isDepotWorkSuspended()) return;
+  // Board Analyzer/Autoscroller can churn board state hundreds of times per run;
+  // none of that is a real depot-grid change worth a full visual-match pass.
+  if (isBlockedByAnalysisMods()) return;
   if (!depotConfig.enableCreatureDepot) {
     const grid = getMonsterGridFlexContainer();
     if (grid) {

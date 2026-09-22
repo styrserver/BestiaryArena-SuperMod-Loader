@@ -11,7 +11,7 @@
  *   - buildCyclopediaMonsterNameMap empty Map if creatureDatabase not hydrated yet
  *   - getYourRoomsForCyclopediaSeason bootstrap before profile cache on first paint
  *   - Modal fallback MutationObserver + ESC when onClose path fails
- *   - Better Bestiary cross-mod contracts (__betterBestiaryIsOpen, simulateEscapePresses)
+ *   - Better Bestiary cross-mod contracts (window.BetterBestiary.isOpen, simulateEscapePresses)
  *
  * SECTION INDEX (incremental refactor — line numbers shift as code moves):
  *   1. Configuration & Constants
@@ -929,8 +929,7 @@ const GAME_DATA = {
   NO_RARITY_KEYS: GAME_KEYS.NO_RARITY,
   CURRENCY_KEYS: GAME_KEYS.CURRENCY,
   UPGRADE_KEYS: GAME_KEYS.UPGRADE,
-  RARITY_COLORS: inventoryDatabase.rarityColors || {},
-  REGION_NAME_MAP: mapsDbRef.REGION_NAME_MAP || {}
+  RARITY_COLORS: inventoryDatabase.rarityColors || {}
 };
 
 // =======================
@@ -7290,7 +7289,7 @@ function waitForDialogsCleared(maxMs = 2500) {
     const start = Date.now();
     const check = () => {
       const bestiaryGone = !document.querySelector('[role="dialog"][data-state="open"][data-better-bestiary-enhanced]')
-        && !(typeof window.__betterBestiaryIsOpen === 'function' && window.__betterBestiaryIsOpen());
+        && !(typeof window.BetterBestiary?.isOpen === 'function' && window.BetterBestiary.isOpen());
       if ((bestiaryGone && !isBodyScrollLocked()) || Date.now() - start > maxMs) {
         resolve();
         return;
@@ -7318,7 +7317,7 @@ function simulateEscapePresses(count = 3, intervalMs = 100) {
 }
 
 function closeDialogsForCyclopedia() {
-  window.__betterBestiaryPrepareClose?.();
+  window.BetterBestiary?.prepareClose?.();
   return simulateEscapePresses(3, 100);
 }
 
@@ -21014,8 +21013,8 @@ function openCyclopediaModal(options) {
   try {
     const now = Date.now();
     options = options || {};
-    const betterBestiaryOpen = typeof window.__betterBestiaryIsOpen === 'function'
-      ? window.__betterBestiaryIsOpen()
+    const betterBestiaryOpen = typeof window.BetterBestiary?.isOpen === 'function'
+      ? window.BetterBestiary.isOpen()
       : Boolean(document.querySelector('[role="dialog"][data-state="open"][data-better-bestiary-enhanced]'));
     const scrollLocked = isBodyScrollLocked();
     if ((betterBestiaryOpen || scrollLocked) && !options._closedDialogs) {

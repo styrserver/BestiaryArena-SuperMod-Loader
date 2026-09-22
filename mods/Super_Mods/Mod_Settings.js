@@ -596,7 +596,7 @@ const THROTTLE_SETTINGS = {
   UPDATE: 10000     // 10 seconds for update throttle
 };
 
-/** Region display name via maps-database (static map / game REGION_NAME / REGIONS.name). */
+/** Region display name via maps-database (state.utils.REGIONS[].name). */
 function resolveRegionDisplayName(region) {
   if (!region) return 'Unknown Region';
   if (typeof globalThis.mapsDatabase?.getRegionDisplayNameFromRegion === 'function') {
@@ -607,8 +607,6 @@ function resolveRegionDisplayName(region) {
   if (typeof globalThis.mapsDatabase?.getRegionDisplayName === 'function') {
     return globalThis.mapsDatabase.getRegionDisplayName(id);
   }
-  const mapped = globalThis.mapsDatabase?.REGION_NAME_MAP?.[String(id).toLowerCase()];
-  if (mapped) return mapped;
   if (region.name) return region.name;
   return String(id).replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());
 }
@@ -14108,6 +14106,10 @@ function ensurePowerSavingSessionListener() {
 
   const onSessionMaybeChanged = () => {
     if (!config.persistPowerSavingMode) return;
+    // Board Analyzer/Manual Runner drives gameStarted true/false hundreds of times per
+    // run against a hidden board — none of that is a real session change worth reacting
+    // to (checkbox click + MutationObserver churn on a display:none element).
+    if (isAnalysisBlockingModActive()) return;
 
     try {
       const ctx = board.getSnapshot?.().context;

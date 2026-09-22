@@ -17,6 +17,9 @@ globalThis.state = {
   board: {
     /* Board state and controls */
   },
+  clientConfig: {
+    /* Client-side behavior config (filters, autoplay delay, etc.) */
+  },
   daily: {
     /* Daily challenge state */
   },
@@ -29,20 +32,27 @@ globalThis.state = {
   player: {
     /* Player data and inventory */
   },
+  raids: {
+    /* Live raid events */
+  },
   utils: {
     /* Utility functions and constants */
   },
 };
 ```
 
-Each component (except `utils`) follows a similar structure with these methods:
+Each component (except `utils`) follows a similar structure with these methods/properties:
 
 - `getSnapshot()` - Returns the current state
 - `getInitialSnapshot()` - Returns the initial state
+- `get()` - Shorthand equivalent of `getSnapshot()` (e.g. `globalThis.state.player.get().context`)
+- `select(selectorFn, compareFn?)` - Returns a derived, subscribable observable for one slice of the context (see [Tracking Menu State Changes](#tracking-menu-state-changes) below; not menu-specific, available on every component)
 - `on(eventName, callback)` - Subscribe to state events
-- `send(action)` - Send actions to modify state
+- `send(action)` - Send actions to modify state (legacy form — see [Updating State: `send` vs. `trigger`](#updating-state-send-vs-trigger))
+- `trigger` - Proxy object exposing the same actions as callable methods, e.g. `trigger.setState({ fn })` (current/preferred form — see below)
 - `subscribe(callback)` - Subscribe to state changes
 - `inspect(callback)` - Monitor all state transitions and events
+- `sessionId` - The actor's XState session identifier
 
 ## Context Objects
 
@@ -793,6 +803,37 @@ function tryForMonsterDrop({
 - `mutateShiny(monster)` — converts a monster into its shiny variant
 - `rollForSealedMonsterDrop({ monsterDropPool, floor, boostedOrRaid })` — rolls a sealed monster drop on higher floors
 - `BASE_RED_FLOORS` — floor threshold where sealed drops replace normal drops
+
+### Updating State: `send` vs. `trigger`
+
+This doc's own examples above use two different call shapes for the same kind of update:
+
+```javascript
+// Form 1 — send() with a "setState" action (used in the Board/Player examples above)
+globalThis.state.board.send({ type: "setState", fn: (prev) => ({ ...prev, floor: 10 }) });
+
+// Form 2 — trigger.setState() (used in the Client Configuration examples below)
+globalThis.state.board.trigger.setState({ fn: (prev) => ({ ...prev, floor: 10 }) });
+```
+
+Both exist on every state component. **`trigger.setState({ fn })` is the current, actively-used
+form** — it's what the mod codebase itself uses almost everywhere state is written (`Raid_Hunter.js`,
+`Better_Setups.js`, `Outfiter.js`, `Map_Editor.js`, `Board_Analyzer.js`, `Bestiary_Automator.js`,
+`Autoseller.js`, `content/custom-battles.js`, `content/ba-sandbox-utils.mjs`, etc.). `send({ type:
+"setState", fn })` still works and is kept as a defensive fallback in a few call sites for when
+`trigger` isn't present, following the pattern used in `Map_Editor.js` and `custom-battles.js`:
+
+```javascript
+if (globalThis.state.board.trigger?.setState) {
+  globalThis.state.board.trigger.setState({ fn });
+} else if (globalThis.state.board.send) {
+  globalThis.state.board.send({ type: "setState", fn });
+}
+```
+
+**When writing new code, prefer `trigger.setState({ fn })`.** The `send({ type: "setState", ... })`
+examples elsewhere in this doc remain valid (both forms are live in the current game build), but new
+call sites in this codebase consistently use `trigger`.
 
 ## Events and Listeners
 

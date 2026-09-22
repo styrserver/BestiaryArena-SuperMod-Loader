@@ -6,25 +6,14 @@
 	console.log('Loading BA Sandbox Utils...');
 
 	try {
-		// Define region mappings
-		const regionNamesToIds = new Map([
-			['Rookgaard', 'rook'],
-			['Carlin', 'carlin'],
-			['Folda', 'folda'],
-			["Ab'Dendriel", 'abdendriel'],
-			['Kazordoon', 'kazordoon'],
-			['Venore', 'venore'],
-			['Ankrahmun', 'ankrahmun'],
-		]);
-
-		// Create reverse mapping
-		const regionIdsToNames = (() => {
-			const map = new Map();
-			for (const [name, id] of regionNamesToIds) {
-				map.set(id, name);
-			}
-			return map;
-		})();
+		// Region mappings — populated from state.utils.REGIONS once game state is
+		// ready (see initializeMaps), same pattern as mapNamesToIds below. Do not
+		// hand-seed region ids/names here: the game state is the source of truth
+		// and already includes every region (including late additions like Edron).
+		// Note: state.utils has no REGION_NAME map (verified against a live dump) —
+		// REGIONS is the only source.
+		const regionNamesToIds = new Map();
+		const regionIdsToNames = new Map();
 
 		// Maps that will be populated later when game state is available
 		let mapNamesToIds = new Map();
@@ -144,23 +133,20 @@
 				console.error('Error initializing map name maps:', error);
 			}
 			
-			// Try to dynamically discover regions from game state for future-proofing
+			// Populate region maps from game state (mutate in place — window.regionNamesToIds
+			// / window.regionIdsToNames below hold references to these exact Maps).
 			try {
-				if (safeAccess(globalThis, 'state.utils.REGION_NAME')) {
-					const regionIdToName = globalThis.state.utils.REGION_NAME;
-					if (regionIdToName && typeof regionIdToName === 'object') {
-						// Add any new regions that aren't already in our static list
-						for (const [id, name] of Object.entries(regionIdToName)) {
-							if (!regionIdsToNames.has(id)) {
-								regionIdsToNames.set(id, name);
-								regionNamesToIds.set(name, id);
-								console.log(`Discovered new region: ${name} (ID: ${id})`);
-							}
+				const regions = safeAccess(globalThis, 'state.utils.REGIONS');
+				if (Array.isArray(regions)) {
+					for (const region of regions) {
+						if (region?.id && region?.name) {
+							regionIdsToNames.set(region.id, region.name);
+							regionNamesToIds.set(region.name, region.id);
 						}
 					}
 				}
 			} catch (error) {
-				console.warn('Could not dynamically discover regions:', error);
+				console.warn('Could not initialize region maps from game state:', error);
 			}
 
 			// Initialize monsterNamesToGameIds
@@ -750,9 +736,12 @@
 				const regionId = selectedMap.selectedRegion.id;
 				let regionName = regionIdsToNames.get(regionId);
 				if (!regionName) {
-					const fromState = safeAccess(globalThis, 'state.utils.REGION_NAME');
-					regionName = fromState?.[regionId]
-						|| fromState?.[String(regionId).toLowerCase()];
+					const regions = safeAccess(globalThis, 'state.utils.REGIONS');
+					const key = String(regionId ?? '').toLowerCase();
+					const region = Array.isArray(regions)
+						? regions.find((r) => r?.id === regionId || String(r?.id ?? '').toLowerCase() === key)
+						: undefined;
+					regionName = region?.name;
 					if (regionName) {
 						regionIdsToNames.set(regionId, regionName);
 						regionNamesToIds.set(regionName, regionId);
@@ -762,11 +751,10 @@
 					const id = String(regionId ?? '').trim();
 					regionName = id.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());
 					console.warn(`Region name for ID ${regionId} not found, using fallback: ${regionName}`);
-					// Cache the fallback too (same as the state.utils.REGION_NAME hit above) —
-					// otherwise a region absent from both the static list and REGION_NAME
-					// (e.g. quest-only rooms like The Annihilator Quest's "edron") re-warns on
-					// every single serializeBoard() call, and Hero Editor's board listener
-					// calls this on nearly every board state change.
+					// Cache the fallback too (same as the REGIONS hit above) — otherwise a
+					// region absent from REGIONS (e.g. a quest-only room whose region isn't
+					// listed there) re-warns on every single serializeBoard() call, and
+					// Hero Editor's board listener calls this on nearly every board state change.
 					regionIdsToNames.set(regionId, regionName);
 					regionNamesToIds.set(regionName, regionId);
 				}

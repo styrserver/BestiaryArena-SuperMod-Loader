@@ -24,8 +24,6 @@ function dispatchEsc() {
 // Default settings
 // Fixed start delay — same contract as BBM / Better Tasker / Awaken Farmer / Stamina Optimizer
 const DEFAULT_START_DELAY = 3; // seconds
-const MODS_LOADING_GRACE_PERIOD = 5000;
-const MAX_WAIT_FOR_SIGNAL = 15000;
 
 // Automation state
 const AUTOMATION_ENABLED = true;
@@ -1732,10 +1730,6 @@ function resetState(resetType = 'full') {
                 clearInterval(raidEndCheckInterval);
                 raidEndCheckInterval = null;
             }
-            if (boardAnalyzerCoordinationInterval) {
-                clearInterval(boardAnalyzerCoordinationInterval);
-                boardAnalyzerCoordinationInterval = null;
-            }
             if (questButtonValidationInterval) {
                 clearInterval(questButtonValidationInterval);
                 questButtonValidationInterval = null;
@@ -1921,7 +1915,6 @@ let stateManager = {
 
 
 // Board Analyzer coordination
-let boardAnalyzerCoordinationInterval = null;
 let isBoardAnalyzerRunning = false;
 
 // Auto floor game end monitoring
@@ -1937,9 +1930,6 @@ let openContextMenu = null;
 let pageVisibilityHandler = null;
 let lastPageVisibilityChange = 0;
 let isPageVisibilityTransitioning = false; // Flag to prevent stamina callbacks during visibility transitions
-
-// Window message listener for allModsLoaded signal (stored for cleanup)
-let windowMessageHandler = null;
 
 // Autoplay state tracking for debouncing
 let lastAutoplayState = null;
@@ -2362,11 +2352,7 @@ function cleanupAll() {
             clearInterval(raidEndCheckInterval);
             raidEndCheckInterval = null;
         }
-        if (boardAnalyzerCoordinationInterval) {
-            clearInterval(boardAnalyzerCoordinationInterval);
-            boardAnalyzerCoordinationInterval = null;
-        }
-        
+
         // Disconnect all observers
         if (questLogObserver) {
             questLogObserver.disconnect();
@@ -4957,12 +4943,14 @@ async function checkForExistingRaids() {
     }
 }
 
-// Sets up Board Analyzer coordination
+// Sets up Board Analyzer coordination — the 'modActiveChanged' subscription in init() (see
+// "Subscribe to mod state changes instead of polling") already reacts to every future state
+// change; this just does one immediate sync in case Board Analyzer/Manual Runner is already
+// active at load time. Used to be a 2s setInterval poll doing the same job redundantly (the
+// event listener already had it covered, per the old "legacy polling - will be replaced by
+// events" comment at its call site) — removed.
 function setupBoardAnalyzerCoordination() {
-    // Poll for Board Analyzer state changes every 2 seconds (reduced from 500ms)
-    boardAnalyzerCoordinationInterval = setInterval(() => {
-        handleBoardAnalyzerCoordination();
-    }, 2000);
+    handleBoardAnalyzerCoordination();
 }
 
 // Sets up raid monitoring.
@@ -6998,7 +6986,7 @@ function init() {
     
     setupRaidMonitoring();
     
-    // Set up Board Analyzer coordination (legacy polling - will be replaced by events)
+    // Set up Board Analyzer coordination (immediate sync; ongoing updates come via modActiveChanged)
     setupBoardAnalyzerCoordination();
     
     // Start monitoring for quest log (like Better Yasir)
@@ -7008,7 +6996,7 @@ function init() {
     // Set up page visibility monitoring for foreground/background transitions
     setupPageVisibilityMonitoring();
 
-    console.log('[Raid Hunter] Raid Hunter Mod initialized - waiting for allModsLoaded signal before checking raids');
+    console.log('[Raid Hunter] Raid Hunter Mod initialized - waiting for shared boot-ready signal before checking raids');
 }
 
 // Start raid automation only after all mods are loaded
@@ -7027,40 +7015,19 @@ function startRaidAutomation() {
     }
 }
 
-// Listen for allModsLoaded signal and start automation after shared boot grace
-// Store handler reference for cleanup (prevents memory leaks per mod development guide)
-let raidHunterBootGraceTimer = null;
-let raidHunterBootFallbackTimer = null;
-windowMessageHandler = (event) => {
-    if (event.source !== window) return;
-    if (event.data?.from === 'LOCAL_MODS_LOADER' && event.data?.action === 'allModsLoaded') {
-        if (allModsLoaded) return;
-        console.log('[Raid Hunter] Received allModsLoaded signal');
+// Defer automation until the shared boot-ready signal (mod-coordination.mjs owns the
+// single allModsLoaded listener + grace timer now; unsubscribed in cleanup below).
+let raidHunterBootReadyUnsubscribe = null;
+if (window.ModCoordination) {
+    raidHunterBootReadyUnsubscribe = window.ModCoordination.onReady(() => {
+        raidHunterBootReadyUnsubscribe = null;
         allModsLoaded = true;
-        if (raidHunterBootFallbackTimer) {
-            clearTimeout(raidHunterBootFallbackTimer);
-            raidHunterBootFallbackTimer = null;
-        }
-        console.log(`[Raid Hunter] Boot grace started — waiting ${MODS_LOADING_GRACE_PERIOD / 1000}s`);
-        raidHunterBootGraceTimer = setTimeout(() => {
-            raidHunterBootGraceTimer = null;
-            startRaidAutomation();
-        }, MODS_LOADING_GRACE_PERIOD);
-    }
-};
-window.addEventListener('message', windowMessageHandler);
-
-raidHunterBootFallbackTimer = setTimeout(() => {
-    raidHunterBootFallbackTimer = null;
-    if (!allModsLoaded) {
-        console.warn('[Raid Hunter] allModsLoaded not received — starting boot grace anyway');
-        allModsLoaded = true;
-        raidHunterBootGraceTimer = setTimeout(() => {
-            raidHunterBootGraceTimer = null;
-            startRaidAutomation();
-        }, MODS_LOADING_GRACE_PERIOD);
-    }
-}, MAX_WAIT_FOR_SIGNAL);
+        startRaidAutomation();
+    });
+} else {
+    allModsLoaded = true;
+    startRaidAutomation();
+}
 
 // Run initialization immediately when file loads
 init();
@@ -7913,18 +7880,10 @@ function cleanupRaidHunter() {
             pageVisibilityHandler = null;
         }
         
-        // 11. Clean up window message listener (prevent memory leaks)
-        if (windowMessageHandler) {
-            window.removeEventListener('message', windowMessageHandler);
-            windowMessageHandler = null;
-        }
-        if (raidHunterBootGraceTimer) {
-            clearTimeout(raidHunterBootGraceTimer);
-            raidHunterBootGraceTimer = null;
-        }
-        if (raidHunterBootFallbackTimer) {
-            clearTimeout(raidHunterBootFallbackTimer);
-            raidHunterBootFallbackTimer = null;
+        // 11. Clean up shared boot-ready subscription (prevent memory leaks)
+        if (raidHunterBootReadyUnsubscribe) {
+            raidHunterBootReadyUnsubscribe();
+            raidHunterBootReadyUnsubscribe = null;
         }
         
         // Note: Control release is handled automatically by withControl functions

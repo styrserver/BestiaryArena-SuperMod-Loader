@@ -91,8 +91,6 @@ const BESTIARY_INIT_WAIT = 2000;
 
 // Fixed start delay — same contract as BBM / Raid Hunter / Awaken Farmer / Stamina Optimizer
 const DEFAULT_START_DELAY = 3; // seconds
-const MODS_LOADING_GRACE_PERIOD = 5000;
-const MAX_WAIT_FOR_SIGNAL = 15000;
 const ESC_KEY_DELAY = 50;
 const TASK_START_DELAY = 200;
 const MANUAL_PLAY_PAUSE_MS = 180000; // 3 minutes — back off after user changes map manually
@@ -2155,7 +2153,6 @@ let creatureFilterCheckTimeout = null;
 
 // Board Analyzer coordination state
 let isBoardAnalyzerRunning = false;
-let boardAnalyzerCoordinationInterval = null;
 
 // Modal State
 let activeTaskerModal = null;
@@ -3187,25 +3184,17 @@ function handleBoardAnalyzerCoordination() {
     }
 }
 
-// Setup Board Analyzer coordination
+// Setup Board Analyzer coordination — the 'modActiveChanged' subscription in init() (see
+// "Subscribe to mod state changes instead of polling") already reacts to every future state
+// change; this just does one immediate sync in case Board Analyzer/Manual Runner is already
+// active at the moment automation (re)starts. Used to be a 2s setInterval poll doing the same
+// job redundantly (the event listener already had it covered) — removed.
 function setupBoardAnalyzerCoordination() {
-    if (boardAnalyzerCoordinationInterval) {
-        clearInterval(boardAnalyzerCoordinationInterval);
-        boardAnalyzerCoordinationInterval = null;
-    }
-    
-    // Poll for Board Analyzer state changes every 2 seconds
-    boardAnalyzerCoordinationInterval = setInterval(() => {
-        handleBoardAnalyzerCoordination();
-    }, 2000);
+    handleBoardAnalyzerCoordination();
 }
 
 // Clean up Board Analyzer coordination
 function cleanupBoardAnalyzerCoordination() {
-    if (boardAnalyzerCoordinationInterval) {
-        clearInterval(boardAnalyzerCoordinationInterval);
-        boardAnalyzerCoordinationInterval = null;
-    }
     isBoardAnalyzerRunning = false;
 }
 
@@ -8772,71 +8761,31 @@ function init() {
     // Always start UI monitoring to insert buttons (needed to enable/disable mod)
     startUIMonitoring();
     
-    // Defer automation until allModsLoaded + boot grace (manual toggle still starts immediately)
-    setupBootGrace(() => {
+    // Defer automation until the shared boot-ready signal (manual toggle still starts immediately)
+    const onBootReady = () => {
+        bootReadyUnsubscribe = null;
         if (taskerState === TASKER_STATES.ENABLED) {
             startAutomation();
         }
         if (taskerState === TASKER_STATES.NEW_TASK_ONLY) {
             scheduleTaskCheck();
         }
-    });
-    
-    console.log('[Better Tasker] Better Tasker Mod initialized - waiting for allModsLoaded + boot grace');
+    };
+    if (window.ModCoordination) {
+        bootReadyUnsubscribe = window.ModCoordination.onReady(onBootReady);
+    } else {
+        onBootReady();
+    }
+
+    console.log('[Better Tasker] Better Tasker Mod initialized - waiting for shared boot-ready signal');
 }
 
-let allModsLoaded = false;
-let bootGraceDone = false;
-let bootGraceTimer = null;
-let bootFallbackTimer = null;
-let bootMessageHandler = null;
-
-function setupBootGrace(onReady) {
-    if (bootMessageHandler) return;
-
-    const beginGrace = () => {
-        if (bootGraceDone || bootGraceTimer) return;
-        console.log(`[Better Tasker] Boot grace started — waiting ${MODS_LOADING_GRACE_PERIOD / 1000}s`);
-        bootGraceTimer = setTimeout(() => {
-            bootGraceTimer = null;
-            bootGraceDone = true;
-            if (typeof onReady === 'function') onReady();
-        }, MODS_LOADING_GRACE_PERIOD);
-    };
-
-    bootMessageHandler = (event) => {
-        if (event.source !== window) return;
-        if (event.data?.from === 'LOCAL_MODS_LOADER' && event.data?.action === 'allModsLoaded') {
-            if (allModsLoaded) return;
-            allModsLoaded = true;
-            console.log('[Better Tasker] Received allModsLoaded signal');
-            beginGrace();
-        }
-    };
-    window.addEventListener('message', bootMessageHandler);
-
-    bootFallbackTimer = setTimeout(() => {
-        bootFallbackTimer = null;
-        if (!allModsLoaded) {
-            console.warn('[Better Tasker] allModsLoaded not received — starting boot grace anyway');
-            allModsLoaded = true;
-            beginGrace();
-        }
-    }, MAX_WAIT_FOR_SIGNAL);
-}
+let bootReadyUnsubscribe = null;
 
 function teardownBootGrace() {
-    if (bootMessageHandler) {
-        try { window.removeEventListener('message', bootMessageHandler); } catch (_) {}
-        bootMessageHandler = null;
-    }
-    if (bootGraceTimer) {
-        clearTimeout(bootGraceTimer);
-        bootGraceTimer = null;
-    }
-    if (bootFallbackTimer) {
-        clearTimeout(bootFallbackTimer);
-        bootFallbackTimer = null;
+    if (bootReadyUnsubscribe) {
+        bootReadyUnsubscribe();
+        bootReadyUnsubscribe = null;
     }
 }
 

@@ -1431,8 +1431,11 @@ const serializeBoard = () => {
   const regionId = selectedMap.selectedRegion.id;
   let regionName = regionIdsToNames.get(regionId);
   if (!regionName) {
-    const fromState = globalThis.state?.utils?.REGION_NAME;
-    regionName = fromState?.[regionId] || fromState?.[String(regionId).toLowerCase()];
+    const regions = globalThis.state?.utils?.REGIONS;
+    const key = String(regionId ?? '').toLowerCase();
+    regionName = Array.isArray(regions)
+      ? regions.find((r) => r?.id === regionId || String(r?.id ?? '').toLowerCase() === key)?.name
+      : undefined;
     if (!regionName) {
       const id = String(regionId ?? '').trim();
       regionName = id.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());
@@ -2053,207 +2056,6 @@ function initializeAnalysis() {
   return thisAnalysisId;
 }
 
-// Helper function to setup analysis environment
-function setupAnalysisEnvironment() {
-  // Update coordination system state
-  if (window.ModCoordination) {
-    window.ModCoordination.updateModState('Board Analyzer', { 
-      active: true,
-      metadata: { 
-        startTime: Date.now(),
-        endTime: null
-      }
-    });
-  }
-  
-  console.log('[Board Analyzer] Analysis started - other mods should pause');
-  
-  // Disable Turbo Mode button during analysis
-  if (window.turboButton) {
-    window.turboButton.disabled = true;
-    window.turboButton.title = t('mods.boardAnalyzer.turboDisabledTooltip');
-  }
-  
-  // Reset tracking variables
-  currentSeed = null;
-  currentRegionId = null;
-  currentRoomId = null;
-  currentRoomName = null;
-  currentFloor = null;
-  boardSetup = [];
-}
-
-// Helper function to capture current board state
-function captureCurrentBoardState() {
-  try {
-    const boardContext = globalThis.state.board.getSnapshot().context;
-    if (boardContext.boardConfig && Array.isArray(boardContext.boardConfig)) {
-      // Deep clone the board configuration to preserve it
-      boardSetup = JSON.parse(JSON.stringify(boardContext.boardConfig));
-    }
-  } catch (error) {
-    console.warn('[Board Analyzer] Error capturing board configuration:', error);
-  }
-}
-
-// Helper function to preserve Better Highscores container
-function preserveBetterHighscores() {
-  if (window.BetterHighscores && typeof window.BetterHighscores.preserveContainer === 'function') {
-    try {
-      window.BetterHighscores.preserveContainer();
-    } catch (error) {
-      console.warn('[Board Analyzer] Error preserving Better Highscores container:', error);
-    }
-  }
-}
-
-// Helper function to hide game board if configured
-function hideGameBoardIfConfigured() {
-  const gameFrame = document.querySelector('main .frame-4');
-  if (config.hideGameBoard && gameFrame) {
-    gameFrame.style.display = 'none';
-  }
-}
-
-// Helper function to capture map information
-function captureMapInformation() {
-  try {
-    const boardContext = globalThis.state.board.getSnapshot().context;
-    const selectedMap = boardContext.selectedMap || {};
-    
-    if (selectedMap.selectedRegion && selectedMap.selectedRegion.id) {
-      currentRegionId = selectedMap.selectedRegion.id;
-    }
-    
-    if (selectedMap.selectedRoom) {
-      currentRoomId = selectedMap.selectedRoom.id;
-      currentRoomName = mapIdsToNames.get(currentRoomId) || 
-                         globalThis.state.utils.ROOM_NAME[currentRoomId] || 
-                         selectedMap.selectedRoom.file.name;
-    }
-    
-    // Capture floor information
-    if (typeof boardContext.floor !== 'undefined') {
-      currentFloor = boardContext.floor;
-    }
-  } catch (error) {
-    console.error('Error capturing map information:', error);
-  }
-}
-
-// Helper function to run a single analysis run
-async function runSingleAnalysis(i, thisAnalysisId, statusCallback, statsCalculator) {
-  // Check if this analysis instance is still valid
-  if (!analysisState.isValidId(thisAnalysisId)) {
-    console.log('[Board Analyzer] Analysis instance changed, stopping this run');
-    return null;
-  }
-  
-  // Check if analysis state was reset (stop button was clicked)
-  if (!analysisState.isRunning()) {
-    console.log('[Board Analyzer] Analysis state reset, stopping this run');
-    return null;
-  }
-  
-  // Start timing this run
-  const lastRunStart = performance.now();
-  
-  // Check if forced stop was requested
-  if (analysisState.forceStop) {
-    console.log('Analysis stopped by user - breaking out of loop');
-    return null;
-  }
-  
-  // Update status callback if provided
-  if (statusCallback && statsCalculator.runTimes.length > 0) {
-    const avgRunTime = statsCalculator.runTimesSum / statsCalculator.runTimes.length;
-    const remainingRuns = config.runs - i + 1;
-    const estimatedTimeRemaining = avgRunTime * remainingRuns;
-    const completionRate = statsCalculator.totalRuns > 0 ? (statsCalculator.completedRuns / statsCalculator.totalRuns * 100).toFixed(2) : '0.00';
-    
-    statusCallback({
-      current: i,
-      total: config.runs,
-      status: 'running',
-      avgRunTime: avgRunTime.toFixed(0),
-      estimatedTimeRemaining: formatDurationWholeSeconds(estimatedTimeRemaining),
-      completionRate: completionRate,
-      completedRuns: statsCalculator.completedRuns,
-      totalRunsInStats: statsCalculator.totalRuns
-    });
-  } else if (statusCallback) {
-    statusCallback({
-      current: i,
-      total: config.runs,
-      status: 'running'
-    });
-  }
-  
-  // Generate a new unique seed for this run
-  const runSeed = Math.floor((Date.now() * Math.random()) % 2147483647);
-  
-  try {
-    // Start the game using direct state manipulation with embedded seed
-    globalThis.state.board.send({
-      type: "setState",
-      fn: prevState => ({
-        ...prevState,
-        customSandboxSeed: runSeed,
-        gameStarted: true
-      })
-    });
-    
-    // Wait for game to complete
-    const result = await getLastTick(thisAnalysisId);
-    
-    // Check if this run was force stopped, analysis changed, or analysis reset
-    if (result.forceStopped || result.analysisChanged || result.analysisReset) {
-      console.log('[Board Analyzer] Analysis stopped during run', i,
-        `(${statsCalculator.totalRuns} completed)`);
-      return null;
-    }
-    
-    // Add seed to result
-    result.seed = runSeed;
-    
-    // Estimate experience if enabled
-    if (config.estimateExperience) {
-      result.estimatedExp = estimateRunExperience(result.completed);
-    }
-    
-    const { ticks, grade, rankPoints, completed } = result;
-    
-    // Use statistics calculator to track stats efficiently
-    const runTime = performance.now() - lastRunStart;
-    statsCalculator.addRun(result, runTime);
-    
-    // Stop the game using direct state manipulation
-    globalThis.state.board.send({
-      type: "setState",
-      fn: prevState => ({
-        ...prevState,
-        gameStarted: false
-      })
-    });
-    
-    return result;
-    
-  } catch (runError) {
-    console.error(`Error in run ${i}:`, runError);
-    // Try to ensure game is stopped before continuing
-    try {
-      globalThis.state.board.send({
-        type: "setState",
-        fn: prevState => ({
-          ...prevState,
-          gameStarted: false
-        })
-      });
-    } catch (e) {}
-    return null;
-  }
-}
-
 // Helper function to initialize analysis environment
 function initializeAnalysisEnvironment() {
   // Update coordination system state
@@ -2574,7 +2376,7 @@ async function runAnalysisLoop(runs, thisAnalysisId, statsCalculator, bestRuns, 
     timing.lastRunStart = performance.now();
     
     // Process individual run
-    const runResult = await processSingleRun(i, thisAnalysisId, statsCalculator, bestRuns, timing, perf);
+    const runResult = await processSingleRun(i, runs, thisAnalysisId, statsCalculator, bestRuns, timing, perf);
     
     if (runResult === null) {
       // Analysis was stopped
@@ -2730,12 +2532,13 @@ function updateStatusCallback(currentRun, totalRuns, statsCalculator, statusCall
 }
 
 // Helper function to process a single analysis run
-async function processSingleRun(runIndex, thisAnalysisId, statsCalculator, bestRuns, timing, perf = null) {
+async function processSingleRun(runIndex, totalRuns, thisAnalysisId, statsCalculator, bestRuns, timing, perf = null) {
   // Generate a new unique seed for this run
   const runSeed = Math.floor((Date.now() * Math.random()) % 2147483647);
-  
+
   try {
     // Start the game using direct state manipulation with embedded seed
+    const startSendStart = performance.now();
     globalThis.state.board.send({
       type: "setState",
       fn: prevState => ({
@@ -2744,10 +2547,15 @@ async function processSingleRun(runIndex, thisAnalysisId, statsCalculator, bestR
         gameStarted: true
       })
     });
-    
+    const startSendMs = performance.now() - startSendStart;
+    if (perf) perf.recordStartSend(startSendMs);
+
     // Wait for game to complete
+    const waitStart = performance.now();
     const result = await getLastTick(thisAnalysisId);
-    
+    const tickWaitMs = performance.now() - waitStart;
+    if (perf) perf.recordTickWait(tickWaitMs);
+
     // Check if this run was force stopped, analysis changed, or analysis reset
     if (result.forceStopped || result.analysisChanged || result.analysisReset) {
       if (perf) {
@@ -2757,28 +2565,35 @@ async function processSingleRun(runIndex, thisAnalysisId, statsCalculator, bestR
         `(${statsCalculator.totalRuns} completed)`);
       return null;
     }
-    
+
     // Skipped runs should not persist data (ticks/replay/seed/exp).
     if (!result.skipped) {
       // Add seed to result
       result.seed = runSeed;
-      
+
       // Estimate experience if enabled
       if (config.estimateExperience) {
         result.estimatedExp = estimateRunExperience(result.completed);
       }
     }
-    
+
     const { ticks, grade, rankPoints, completed } = result;
-    
+
     // Use statistics calculator to track stats efficiently
     const runTime = performance.now() - timing.lastRunStart;
+    const addRunStart = performance.now();
     statsCalculator.addRun(result, runTime);
-    
+    const addRunMs = performance.now() - addRunStart;
+    if (perf) perf.recordAddRun(addRunMs);
+
     // Process run results and update best runs
+    const processResultsStart = performance.now();
     const shouldStop = processRunResults(result, runIndex, statsCalculator, bestRuns);
-    
+    const processResultsMs = performance.now() - processResultsStart;
+    if (perf) perf.recordProcessResults(processResultsMs);
+
     // Stop the game using direct state manipulation
+    const stopSendStart = performance.now();
     globalThis.state.board.send({
       type: "setState",
       fn: prevState => ({
@@ -2786,11 +2601,31 @@ async function processSingleRun(runIndex, thisAnalysisId, statsCalculator, bestR
         gameStarted: false
       })
     });
-    
+    const stopSendMs = performance.now() - stopSendStart;
+    if (perf) perf.recordStopSend(stopSendMs);
+
+    // Live per-run breakdown, gated by the normal console.log level (info/verbose) —
+    // lets you watch script overhead accumulate in real time instead of waiting for
+    // the end-of-analysis summary. skipped runs are marked so throttle-skips are obvious.
+    // msPerTick isolates the native tickEngine's per-tick cost from our own script
+    // overhead (startSend/addRun/processResults/stopSend) — that's the number to compare
+    // against the 16ms/60fps floor Turbo_Mode.js and Better_Analytics.js clamp to, to see
+    // whether this uncapped interval is actually buying anything over that floor.
+    const msPerTick = ticks > 0 ? tickWaitMs / ticks : null;
+    console.log(
+      `[Board Analyzer][Perf] Run ${runIndex}/${totalRuns}: total=${runTime.toFixed(0)}ms` +
+      ` (tickWait=${tickWaitMs.toFixed(0)}ms ticks=${ticks}` +
+      (msPerTick !== null ? ` msPerTick=${msPerTick.toFixed(2)}ms` : '') +
+      ` startSend=${startSendMs.toFixed(1)}ms` +
+      ` addRun=${addRunMs.toFixed(2)}ms processResults=${processResultsMs.toFixed(2)}ms` +
+      ` stopSend=${stopSendMs.toFixed(1)}ms)` +
+      (result.skipped ? ' [skipped]' : '')
+    );
+
     if (shouldStop) {
       return { result, shouldStop: true }; // Return both result and stop signal
     }
-    
+
     return result;
     
   } catch (runError) {
@@ -3062,6 +2897,15 @@ function formatDurationWholeSeconds(ms) {
   return `${minutes}m ${seconds}s`;
 }
 
+// Formats a {count, total, avg} triple for a perf.recordX() accumulator pair
+function perfStat(count, totalMs) {
+  return {
+    count,
+    total: formatMilliseconds(totalMs),
+    avg: count > 0 ? formatMillisecondsPrecise(totalMs / count) : '0ms'
+  };
+}
+
 function createAnalysisPerformanceTracker() {
   return {
     setupMs: 0,
@@ -3070,6 +2914,18 @@ function createAnalysisPerformanceTracker() {
     statusBuildMs: 0,
     liveUiFlushCount: 0,
     liveUiFlushMs: 0,
+    // Per-run breakdown of everything inside processSingleRun that is NOT
+    // the in-game tick wait itself, to find where per-run script overhead goes.
+    startSendCount: 0,
+    startSendMs: 0,
+    tickWaitCount: 0,
+    tickWaitMs: 0,
+    addRunCount: 0,
+    addRunMs: 0,
+    processResultsCount: 0,
+    processResultsMs: 0,
+    stopSendCount: 0,
+    stopSendMs: 0,
     recordStatusBuild(ms) {
       this.statusBuildCount++;
       this.statusBuildMs += ms;
@@ -3077,6 +2933,26 @@ function createAnalysisPerformanceTracker() {
     recordLiveUiFlush(ms) {
       this.liveUiFlushCount++;
       this.liveUiFlushMs += ms;
+    },
+    recordStartSend(ms) {
+      this.startSendCount++;
+      this.startSendMs += ms;
+    },
+    recordTickWait(ms) {
+      this.tickWaitCount++;
+      this.tickWaitMs += ms;
+    },
+    recordAddRun(ms) {
+      this.addRunCount++;
+      this.addRunMs += ms;
+    },
+    recordProcessResults(ms) {
+      this.processResultsCount++;
+      this.processResultsMs += ms;
+    },
+    recordStopSend(ms) {
+      this.stopSendCount++;
+      this.stopSendMs += ms;
     }
   };
 }
@@ -3115,6 +2991,19 @@ function logAnalysisPerformanceSummary(perf, metrics) {
     } : null,
     scriptOverhead: {
       loopCallbacks: formatMilliseconds(loopOverheadMs),
+      // Breakdown of loopCallbacks: everything processSingleRun does around the
+      // actual in-game tick wait (tickWait itself is inside runTimesSum, shown
+      // here too so the two numbers can be sanity-checked against perRunWall).
+      perRunBreakdown: {
+        startSend: perfStat(perf.startSendCount, perf.startSendMs),
+        tickWait: perfStat(perf.tickWaitCount, perf.tickWaitMs),
+        addRunStats: perfStat(perf.addRunCount, perf.addRunMs),
+        processResults: perfStat(perf.processResultsCount, perf.processResultsMs),
+        stopSend: perfStat(perf.stopSendCount, perf.stopSendMs),
+        unaccounted: formatMilliseconds(Math.max(0, loopOverheadMs - (
+          perf.startSendMs + perf.addRunMs + perf.processResultsMs + perf.stopSendMs
+        )))
+      },
       statusBuilds: {
         count: perf.statusBuildCount,
         total: formatMilliseconds(perf.statusBuildMs),

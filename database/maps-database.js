@@ -160,18 +160,6 @@ function isRaid(mapId) {
   return map ? map.raid === true : false;
 }
 
-/** Region id → display name fallback when game state names are unavailable. */
-const REGION_NAME_MAP = {
-  rook: 'Rookgaard',
-  carlin: 'Carlin',
-  folda: 'Folda',
-  abdendriel: 'Ab\'Dendriel',
-  kazordoon: 'Kazordoon',
-  venore: 'Venore',
-  ankrahmun: 'Ankrahmun',
-  edron: 'Edron'
-};
-
 function titleCaseRegionId(regionId) {
   const raw = String(regionId ?? '').trim();
   if (!raw) return 'Unknown Region';
@@ -180,24 +168,15 @@ function titleCaseRegionId(regionId) {
 
 /**
  * Resolve a region id to its display name.
- * Priority: static REGION_NAME_MAP → state.utils.REGION_NAME → REGIONS[].name → title case.
+ * Priority: state.utils.REGIONS[].name → title case.
+ * Note: state.utils has no REGION_NAME map (verified against a live dump) —
+ * REGIONS is the only source for region display names.
  * @param {string} regionId
  * @returns {string}
  */
 function getRegionDisplayName(regionId) {
   if (regionId == null || regionId === '') return 'Unknown Region';
   const key = String(regionId).toLowerCase();
-
-  if (REGION_NAME_MAP[key]) return REGION_NAME_MAP[key];
-  if (REGION_NAME_MAP[regionId]) return REGION_NAME_MAP[regionId];
-
-  try {
-    const regionNames = globalThis.state?.utils?.REGION_NAME;
-    if (regionNames && typeof regionNames === 'object') {
-      if (regionNames[regionId]) return regionNames[regionId];
-      if (regionNames[key]) return regionNames[key];
-    }
-  } catch (_) { /* ignore */ }
 
   try {
     const regions = globalThis.state?.utils?.REGIONS;
@@ -631,7 +610,6 @@ mapsDatabase.buildMapOrderIndex = buildMapOrderIndex;
 mapsDatabase.getMapOrderIndex = getMapOrderIndex;
 mapsDatabase.compareMapsByGameOrder = compareMapsByGameOrder;
 mapsDatabase.MAP_ORDER_UNKNOWN = MAP_ORDER_UNKNOWN;
-mapsDatabase.REGION_NAME_MAP = { ...REGION_NAME_MAP };
 mapsDatabase.getRegionDisplayName = getRegionDisplayName;
 mapsDatabase.getRegionDisplayNameFromRegion = getRegionDisplayNameFromRegion;
 mapsDatabase.EVENT_TO_ROOM_MAPPING = { ...EVENT_TO_ROOM_MAPPING };

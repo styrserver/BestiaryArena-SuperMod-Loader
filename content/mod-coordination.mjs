@@ -96,11 +96,87 @@ try {
             return this.currentOwner !== null && this.currentOwner !== modName;
         }
     }
-    
+
+    // =======================
+    // Shared boot-ready broker
+    // =======================
+    // Single source of truth for the "allModsLoaded" postMessage signal from
+    // content/local_mods.js plus the post-signal grace period. Previously each
+    // automation mod (Awaken Tracker, Better Boosted Maps, Better Tasker,
+    // Raid Hunter, Stamina Optimizer) attached its own 'message' listener and
+    // ran its own 5s grace timer + 15s fallback timer for this exact signal.
+    // This collapses that into one listener/timer pair; mods subscribe via
+    // ModCoordination.onModsLoaded()/onReady() instead of rolling their own.
+    const BOOT_GRACE_PERIOD_MS = 5000;
+    const BOOT_MAX_WAIT_FOR_SIGNAL_MS = 15000;
+
+    let bootSignalReceived = false;
+    let bootReady = false;
+    let bootGraceTimer = null;
+    let bootFallbackTimer = null;
+    const bootModsLoadedCallbacks = new Set();
+    const bootReadyCallbacks = new Set();
+
+    function bootRunCallbacks(set) {
+        set.forEach((callback) => {
+            try {
+                callback();
+            } catch (error) {
+                console.error('[Mod Coordination] Error in boot-ready callback:', error);
+            }
+        });
+        set.clear();
+    }
+
+    function bootBeginGrace() {
+        if (bootReady || bootGraceTimer) return;
+        if (window.BESTIARY_DEBUG) {
+            console.log(`[Mod Coordination] Boot grace started — waiting ${BOOT_GRACE_PERIOD_MS / 1000}s`);
+        }
+        bootGraceTimer = setTimeout(() => {
+            bootGraceTimer = null;
+            bootReady = true;
+            if (window.BESTIARY_DEBUG) {
+                console.log('[Mod Coordination] Boot grace ended — mods ready');
+            }
+            bootRunCallbacks(bootReadyCallbacks);
+        }, BOOT_GRACE_PERIOD_MS);
+    }
+
+    function bootHandleSignal() {
+        if (bootSignalReceived) return;
+        bootSignalReceived = true;
+        if (bootFallbackTimer) {
+            clearTimeout(bootFallbackTimer);
+            bootFallbackTimer = null;
+        }
+        if (window.BESTIARY_DEBUG) {
+            console.log('[Mod Coordination] Received allModsLoaded signal');
+        }
+        bootRunCallbacks(bootModsLoadedCallbacks);
+        bootBeginGrace();
+    }
+
+    function bootMessageHandler(event) {
+        if (event.source !== window) return;
+        if (event.data?.from === 'LOCAL_MODS_LOADER' && event.data?.action === 'allModsLoaded') {
+            bootHandleSignal();
+        }
+    }
+    window.addEventListener('message', bootMessageHandler);
+
+    bootFallbackTimer = setTimeout(() => {
+        bootFallbackTimer = null;
+        if (!bootSignalReceived) {
+            console.warn('[Mod Coordination] allModsLoaded not received — starting boot grace anyway');
+            bootHandleSignal();
+        }
+    }, BOOT_MAX_WAIT_FOR_SIGNAL_MS);
+
     // =======================
     // ModCoordination Class
     // =======================
-    
+
     /**
      * Global mod coordination system
      */
@@ -544,7 +620,52 @@ try {
                 listeners.delete(callback);
             }
         }
-        
+
+        // =======================
+        // Boot-ready signal
+        // =======================
+
+        /**
+         * Subscribe to the (once) moment the 'allModsLoaded' postMessage signal
+         * arrives from content/local_mods.js — fires immediately if it already has.
+         * @param {Function} callback
+         * @returns {Function} Unsubscribe function
+         */
+        onModsLoaded(callback) {
+            if (typeof callback !== 'function') return () => {};
+            if (bootSignalReceived) {
+                try { callback(); } catch (error) { console.error('[Mod Coordination] Error in boot-ready callback:', error); }
+                return () => {};
+            }
+            bootModsLoadedCallbacks.add(callback);
+            return () => bootModsLoadedCallbacks.delete(callback);
+        }
+
+        /**
+         * Subscribe to the (once) moment the shared post-signal boot grace period
+         * ends — fires immediately if it already has. This is what mods should use
+         * to defer automation until the rest of the extension has settled.
+         * @param {Function} callback
+         * @returns {Function} Unsubscribe function
+         */
+        onReady(callback) {
+            if (typeof callback !== 'function') return () => {};
+            if (bootReady) {
+                try { callback(); } catch (error) { console.error('[Mod Coordination] Error in boot-ready callback:', error); }
+                return () => {};
+            }
+            bootReadyCallbacks.add(callback);
+            return () => bootReadyCallbacks.delete(callback);
+        }
+
+        /**
+         * True once the shared boot grace period has ended.
+         * @returns {boolean}
+         */
+        isBootReady() {
+            return bootReady;
+        }
+
         // =======================
         // Cleanup
         // =======================

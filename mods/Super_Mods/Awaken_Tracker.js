@@ -71,8 +71,6 @@
     const STAMINA_READY_TIMER_MAX_MS = 5 * 60 * 1000;
     const STAMINA_SAFETY_POLL_MS = STAMINA_REGEN_MS;
     const COORDINATION_RESUME_DELAY_MS = 1000;
-    const MODS_LOADING_GRACE_PERIOD = 5000;
-    const MAX_WAIT_FOR_SIGNAL = 15000;
     /** Sealed drops (gene injects) require red floors. */
     const AWAKEN_FARM_MIN_FLOOR = 11;
     const AWAKEN_FARM_MAX_FLOOR = 15;
@@ -2161,11 +2159,8 @@
         return started;
     }
 
-    let farmerAllModsLoaded = false;
     let farmerBootGraceDone = false;
-    let farmerBootGraceTimer = null;
-    let farmerBootFallbackTimer = null;
-    let farmerBootMessageHandler = null;
+    let farmerBootReadyUnsubscribe = null;
 
     function farmerSleep(ms) { return sleep(ms); }
 
@@ -2568,52 +2563,26 @@
     let farmerCoordinationUnsubscribe = null;
 
     function setupFarmerBootGrace() {
-        if (farmerBootMessageHandler) return;
+        if (farmerBootReadyUnsubscribe || farmerBootGraceDone) return;
 
-        const beginGrace = () => {
-            if (farmerBootGraceDone || farmerBootGraceTimer) return;
-            console.log(`[Awaken Farmer] Boot grace started — waiting ${MODS_LOADING_GRACE_PERIOD / 1000}s before auto-start`);
-            farmerBootGraceTimer = setTimeout(() => {
-                farmerBootGraceTimer = null;
-                farmerBootGraceDone = true;
-                console.log('[Awaken Farmer] Boot grace ended');
-                if (loadFarmerSettings().enabled) startFarmerLoop();
-            }, MODS_LOADING_GRACE_PERIOD);
+        const onBootReady = () => {
+            farmerBootReadyUnsubscribe = null;
+            farmerBootGraceDone = true;
+            console.log('[Awaken Farmer] Boot ready — shared boot-grace ended');
+            if (loadFarmerSettings().enabled) startFarmerLoop();
         };
 
-        farmerBootMessageHandler = (event) => {
-            if (event.source !== window) return;
-            if (event.data?.from === 'LOCAL_MODS_LOADER' && event.data?.action === 'allModsLoaded') {
-                if (farmerAllModsLoaded) return;
-                farmerAllModsLoaded = true;
-                console.log('[Awaken Farmer] Received allModsLoaded signal');
-                beginGrace();
-            }
-        };
-        window.addEventListener('message', farmerBootMessageHandler);
-
-        farmerBootFallbackTimer = setTimeout(() => {
-            farmerBootFallbackTimer = null;
-            if (!farmerAllModsLoaded) {
-                console.warn('[Awaken Farmer] allModsLoaded not received — starting boot grace anyway');
-                farmerAllModsLoaded = true;
-                beginGrace();
-            }
-        }, MAX_WAIT_FOR_SIGNAL);
+        if (window.ModCoordination) {
+            farmerBootReadyUnsubscribe = window.ModCoordination.onReady(onBootReady);
+        } else {
+            onBootReady();
+        }
     }
 
     function teardownFarmerBootGrace() {
-        if (farmerBootMessageHandler) {
-            try { window.removeEventListener('message', farmerBootMessageHandler); } catch (_) {}
-            farmerBootMessageHandler = null;
-        }
-        if (farmerBootGraceTimer) {
-            clearTimeout(farmerBootGraceTimer);
-            farmerBootGraceTimer = null;
-        }
-        if (farmerBootFallbackTimer) {
-            clearTimeout(farmerBootFallbackTimer);
-            farmerBootFallbackTimer = null;
+        if (farmerBootReadyUnsubscribe) {
+            farmerBootReadyUnsubscribe();
+            farmerBootReadyUnsubscribe = null;
         }
     }
 
