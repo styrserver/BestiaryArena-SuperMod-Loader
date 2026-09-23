@@ -4,6 +4,41 @@
   },
   "notes": [
     {
+      "version": "5.0.13",
+      "changes": [
+        {
+          "mod": "Better Analytics",
+          "type": "added",
+          "text": "Range now shows on unit cards when known. It has no game data source at all - it's only ever learned by observing a live actor, so it's cached by creature (shared with Map Editor's own Range cache) and reused as soon as either mod has seen it once. Also added a 'Raw source' box under each unit's Ability details, showing that creature's own class code straight from the game's script - reformatted into readable, indented rows instead of one unreadable minified line - for checking what the game actually has for a creature."
+        },
+        {
+          "mod": "Better Analytics",
+          "type": "changed",
+          "text": "Range moved out of the compact stat grid into its own row under Atk delay, and the header's compact stat summary is now terser (e.g. '574HP · 32T · 144CD' instead of 'HP 574 · Atk 32 ticks · CD 144 ticks'). A preview ability's 'starts N ticks' first-cast timer is now colored differently from the steady-state cooldown shown next to it, so it doesn't read as the same number twice. The Ability and Raw source boxes now use consistent 10px spacing on all sides instead of the old lopsided margins."
+        },
+        {
+          "mod": "Better Analytics",
+          "type": "fixed",
+          "text": "Ability tooltip durations embedded in a longer clause (e.g. 'trapped for 3.50s') weren't converted to ticks - only a duration standing alone in its own span was. The Atk delay row was missing entirely for a few creatures (e.g. Hero, Hunter) whose native data has no attack-delay value of its own to fall back on, because the auto-attack detection this fallback relies on was matching against a specific minified parameter name that isn't guaranteed to hold across game builds. Separately, the same class-extraction code (also used by that auto-attack fallback) found the start of a creature's class correctly but then kept reading past its actual end - for some creatures, by 2x or more - pulling in unrelated helper functions and even the next creature's entire metadata and tooltip text; it now stops at the creature's own closing brace."
+        },
+        {
+          "mod": "Better Tasker",
+          "type": "added",
+          "text": "Default Floor dropdown (Floor 0-15) in Default Settings. Used for every task unless the creature has its own floor set in its right-click settings."
+        },
+        {
+          "mod": "Better Tasker",
+          "type": "fixed",
+          "text": "Resetting a creature's right-click settings (or just opening and closing the menu) re-saved them on close, so the ⚙ indicator stayed lit. Settings that match the defaults are no longer saved as creature overrides."
+        },
+        {
+          "mod": "Quests",
+          "type": "added",
+          "text": "With Log Level set to verbose, each world raid trigger roll is now logged (roll value, hit/miss, or why it was skipped while a raid is live or on cooldown). Quest Dev Tools also gets a 'Reset raid cooldown' button, which clears a finished raid's cooldown but refuses to act while a raid is live."
+        }
+      ]
+    },
+    {
       "version": "5.0.12",
       "changes": [
         {

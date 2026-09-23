@@ -1293,7 +1293,8 @@
         { key: 'ap', label: 'AP' },
         { key: 'armor', label: 'ARM' },
         { key: 'magicResist', label: 'MR' },
-        { key: 'speed', label: 'SPD' }
+        { key: 'speed', label: 'SPD' },
+        { key: 'range', label: 'Range' }
     ];
     const STAT_ICONS = (() => {
         const fallback = {
@@ -1355,6 +1356,11 @@
     const previewMechanicsLogSig = new Map();
     const previewMechanicsResultCache = new Map();
     const metadataUntimedCooldownCache = new Map();
+    // Same storage key Map_Editor.js's NATIVE_RANGE_CACHE uses — deliberately shared so a
+    // range observed live by either mod pre-fills the other (range has no metadata source at
+    // all; it can only ever be learned by watching a real actor).
+    const NATIVE_RANGE_CACHE_STORAGE_KEY = 'bestiary-map-editor-native-range-cache-v1';
+    let nativeRangeCacheByGameId = null;
     const unitsLagStats = { counts: new Map(), ms: new Map(), lastReport: 0 };
     let cachedBoardPreviewUnits = null;
     let cachedBoardPreviewSig = '';
@@ -5930,6 +5936,24 @@
         };
     }
 
+    // Range has no per-creature metadata source at all — the game hardcodes each creature's
+    // range as a literal inside its own behavior-class constructor (see Map_Editor.js's
+    // NATIVE_RANGE_CACHE comment). `actor.rangeComponent.baseRange` is the only place it's
+    // ever readable, and only once a live actor exists.
+    function resolveActorRangeComponent(actor) {
+        const rc = actor?.rangeComponent;
+        return rc && typeof rc.baseRange === 'number' ? rc : null;
+    }
+
+    function readActorRange(actor) {
+        const rc = resolveActorRangeComponent(actor);
+        if (!rc) return null;
+        const current = Number(rc.calculatedRange ?? rc.range ?? rc.baseRange);
+        if (Number.isFinite(current) && current > 0) return current;
+        const base = Number(rc.baseRange);
+        return Number.isFinite(base) && base > 0 ? base : null;
+    }
+
     function readActorAttackSpeed(actor, metadata) {
         const attackDelayInfo = readActorAttackDelay(actor);
         const delayTicks = attackDelayInfo.delayTicks;
@@ -6014,6 +6038,8 @@
         const metadata = getMonsterMetadata(gameId);
         const cooldownInfo = readActorCooldown(actor, metadata, { skipCalculator: true });
         const attackDelayInfo = readActorAttackDelay(actor);
+        const rangeTiles = readActorRange(actor);
+        if (rangeTiles != null) rememberNativeRange(gameId, rangeTiles);
         const statKeys = ['ad', 'ap', 'armor', 'magicResist', 'speed'];
         const stats = {};
         for (const statKey of statKeys) {
@@ -6035,6 +6061,7 @@
             armor: stats.armor,
             magicResist: stats.magicResist,
             speed: stats.speed,
+            range: rangeTiles,
             attackDelayTicks: attackDelayInfo.delayTicks ?? null,
             attackDelayRemainingTicks: attackDelayInfo.delayRemainingTicks,
             attackDelayReady: attackDelayInfo.delayReady,
@@ -6071,6 +6098,8 @@
         const metadata = getMonsterMetadata(gameId);
         const cooldownInfo = readActorCooldown(actor, metadata, { skipCalculator: true });
         const attackDelayInfo = readActorAttackDelay(actor);
+        const rangeTiles = readActorRange(actor);
+        if (rangeTiles != null) rememberNativeRange(gameId, rangeTiles);
         const statKeys = ['ad', 'ap', 'armor', 'magicResist', 'speed'];
         const stats = {};
         for (const statKey of statKeys) {
@@ -6097,6 +6126,7 @@
             armor: stats.armor,
             magicResist: stats.magicResist,
             speed: stats.speed,
+            range: rangeTiles ?? prev.range ?? null,
             attackDelayTicks: attackDelayInfo.delayTicks ?? null,
             attackDelayRemainingTicks: attackDelayInfo.delayRemainingTicks,
             attackDelayReady: attackDelayInfo.delayReady,
@@ -6132,6 +6162,8 @@
         const cooldownInfo = readActorCooldown(actor, metadata, { skipCalculator: true });
         const attackDelayInfo = readActorAttackDelay(actor);
         const attackSpeedInfo = readActorAttackSpeed(actor, metadata);
+        const rangeTiles = readActorRange(actor);
+        if (rangeTiles != null) rememberNativeRange(gameId, rangeTiles);
         const catalogBase = metadata?.baseStats ?? null;
         const statKeys = ['ad', 'ap', 'armor', 'magicResist', 'speed'];
         const statResolutions = {};
@@ -6169,6 +6201,7 @@
             armor: normalizeUnitStatValue('armor', statResolutions.armor.value),
             magicResist: normalizeUnitStatValue('magicResist', statResolutions.magicResist.value),
             speed: normalizeUnitStatValue('speed', statResolutions.speed.value),
+            range: rangeTiles,
             statSources: Object.fromEntries(statKeys.map((k) => [k, statResolutions[k].source])),
             attackSpeed: attackSpeedInfo.value,
             attackSpeedSource: attackSpeedInfo.source,
@@ -7044,6 +7077,28 @@
         return classSliceHasAutoAttackComponent(classSlice);
     }
 
+    // Debug aid: surface the same raw class text creatureHasAutoAttackFrom661Script (and every
+    // other 661-script-scraper in this file) already extracts, so a user can see exactly what
+    // we're parsing without needing devtools. Starts at the constructor's `super(...)` call, same
+    // as findMonsterClassSlice always has — it doesn't include the class's own metadata object
+    // literal (that one's mostly a giant inline TooltipContent JSX function, not useful here).
+    function getMonsterRawSourceInfo(gameId, metadata) {
+        const scriptText = cachedGameChunk661Text;
+        if (!scriptText || gameId == null) return { status: 'loading' };
+
+        const skillSrc = metadata?.skill?.src;
+        const monsterName = metadata?.name;
+        const anchor = findMonsterMetadataAnchor(scriptText, skillSrc, monsterName);
+        if (!anchor) return { status: 'not-found' };
+
+        const classSlice = findMonsterClassSlice(scriptText, anchor.varName, anchor.index);
+        return {
+            status: classSlice ? 'ok' : 'class-not-found',
+            varName: anchor.varName,
+            classSlice
+        };
+    }
+
     function creatureHasAutoAttack(gameId, metadata, actor = null) {
         if (actor) return actorHasAutoAttack(actor);
 
@@ -7059,6 +7114,51 @@
 
     function resolvePreviewAttackDelayTicks(resolved, metadata) {
         return resolvePreviewAttackDelayDetailed(resolved, metadata).ticks;
+    }
+
+    function loadNativeRangeCache() {
+        if (nativeRangeCacheByGameId) return nativeRangeCacheByGameId;
+        nativeRangeCacheByGameId = new Map();
+        try {
+            const raw = localStorage.getItem(NATIVE_RANGE_CACHE_STORAGE_KEY);
+            if (raw) {
+                const parsed = JSON.parse(raw);
+                if (parsed && typeof parsed === 'object') {
+                    for (const [gameId, range] of Object.entries(parsed)) {
+                        const id = Number(gameId);
+                        const r = Number(range);
+                        if (Number.isFinite(id) && Number.isFinite(r) && r >= 1) {
+                            nativeRangeCacheByGameId.set(id, Math.floor(r));
+                        }
+                    }
+                }
+            }
+        } catch {
+            // Cache starts empty — Range simply won't pre-fill in preview until observed live.
+        }
+        return nativeRangeCacheByGameId;
+    }
+
+    function rememberNativeRange(gameId, range) {
+        const id = Number(gameId);
+        const r = Number(range);
+        if (!Number.isFinite(id) || !Number.isFinite(r) || r < 1) return;
+        const cache = loadNativeRangeCache();
+        const floored = Math.floor(r);
+        if (cache.get(id) === floored) return;
+        cache.set(id, floored);
+        try {
+            const obj = {};
+            cache.forEach((v, k) => { obj[k] = v; });
+            localStorage.setItem(NATIVE_RANGE_CACHE_STORAGE_KEY, JSON.stringify(obj));
+        } catch {
+            // Best-effort persistence only — an in-memory-only cache for this session is fine too.
+        }
+    }
+
+    function resolvePreviewRangeTiles(gameId) {
+        const cached = loadNativeRangeCache().get(Number(gameId));
+        return Number.isFinite(cached) ? cached : null;
     }
 
     function resolvePreviewAttackDelayDetailed(resolved, metadata) {
@@ -7475,6 +7575,9 @@
             armor: normalizeUnitStatValue('armor', stats.armor),
             magicResist: normalizeUnitStatValue('magicResist', stats.magicResist),
             speed: normalizeUnitStatValue('speed', stats.speed),
+            // Range has no metadata source — pulled fresh (not memoized in `mechanics`) so a
+            // value learned from a live fight since the last cache write shows up immediately.
+            range: resolvePreviewRangeTiles(resolved.gameId),
             statSources,
             roles: Array.isArray(metadata?.roles) ? metadata.roles : [],
             baseStats: Object.keys(baseStats).some((k) => baseStats[k] != null) ? baseStats : null,
@@ -7573,6 +7676,7 @@
             armor: normalizeUnitStatValue('armor', stats.armor),
             magicResist: normalizeUnitStatValue('magicResist', stats.magicResist),
             speed: normalizeUnitStatValue('speed', stats.speed),
+            range: resolvePreviewRangeTiles(resolved.gameId) ?? unit.range ?? null,
             statSources,
             baseStats: Object.keys(baseStats).some((k) => baseStats[k] != null) ? baseStats : null,
             equipment: resolved.equipment ?? null,
@@ -9135,6 +9239,15 @@
         return parseTooltipDurationText(String(text || '').trim()) != null;
     }
 
+    function extractTrailingDurationClause(text) {
+        const trimmed = String(text || '').trim();
+        const match = trimmed.match(/^(.*\s)?([+-]?[\d.]+s)$/i);
+        if (!match) return null;
+        const durationText = match[2];
+        if (parseTooltipDurationText(durationText) == null) return null;
+        return { prefix: match[1] || '', durationText };
+    }
+
     function isAttackSpeedScalingContext(contextText) {
         return /bonus\s+attack\s+speed|attack\s+speed\s+buff/i.test(String(contextText || ''));
     }
@@ -10257,27 +10370,92 @@
     function findMonsterClassSlice(scriptText, metadataVarName, metadataIndex) {
         if (!scriptText || !metadataVarName) return null;
         const searchFrom = metadataIndex != null && metadataIndex >= 0 ? metadataIndex : 0;
-        const needles = [
-            `super({...e,...${metadataVarName},`,
-            `super({...e,...${metadataVarName}}`,
-            `super({...${metadataVarName},`,
-            `super({...${metadataVarName},...e}`,
-            `super({...e,...${metadataVarName}},`,
-            `constructor(e,t=${metadataVarName}){super({...e,...t}`
+        const searchWindow = scriptText.slice(searchFrom, searchFrom + 20000);
+        const escapedVar = escapeCdrRegexLiteral(metadataVarName);
+
+        // Minified constructor-parameter names vary per build (e.g. `e`/`t` in one
+        // deploy, `t` alone in another) — match the shape generically instead of a
+        // literal letter, or every creature's class lookup silently fails whenever
+        // the minifier picks a different identifier.
+        const patterns = [
+            new RegExp(`constructor\\(([\\w$]+),([\\w$]+)=${escapedVar}\\)\\{super\\(\\{\\.\\.\\.\\1,\\.\\.\\.\\2\\}`),
+            new RegExp(`super\\(\\{\\.\\.\\.[\\w$]+,\\.\\.\\.${escapedVar}[,}]`),
+            new RegExp(`super\\(\\{\\.\\.\\.${escapedVar},\\.\\.\\.[\\w$]+[,}]`),
+            new RegExp(`super\\(\\{\\.\\.\\.${escapedVar}[,}]`)
         ];
+
         let start = -1;
-        for (const needle of needles) {
-            const idx = scriptText.indexOf(needle, searchFrom);
-            if (idx >= 0) {
-                start = idx;
+        for (const pattern of patterns) {
+            const match = searchWindow.match(pattern);
+            if (match) {
+                start = searchFrom + match.index;
                 break;
             }
         }
+
+        if (start < 0) {
+            // Legacy literal needles as a last-resort fallback.
+            const needles = [
+                `super({...e,...${metadataVarName},`,
+                `super({...e,...${metadataVarName}}`,
+                `super({...${metadataVarName},`,
+                `super({...${metadataVarName},...e}`,
+                `super({...e,...${metadataVarName}},`,
+                `constructor(e,t=${metadataVarName}){super({...e,...t}`
+            ];
+            for (const needle of needles) {
+                const idx = scriptText.indexOf(needle, searchFrom);
+                if (idx >= 0) {
+                    start = idx;
+                    break;
+                }
+            }
+        }
+
         if (start < 0) return null;
 
+        const bodyEnd = findMonsterClassBodyEnd(scriptText, start);
+        if (bodyEnd != null) return scriptText.slice(start, bodyEnd);
+
+        // Fallback for anything the depth scan couldn't resolve cleanly (e.g. ran off the
+        // end of the file with an unclosed string) — same behavior as before this existed.
         const classEnd = scriptText.indexOf('class ', start + 20);
         const end = classEnd >= 0 ? classEnd : start + 12000;
         return scriptText.slice(start, end);
+    }
+
+    // The slice starts mid-expression at `super(...)`, with no enclosing brace of its own to
+    // balance against — so "where does this class actually end" can't be answered by depth
+    // alone; it has to be answered by finding the first `}`/`)`/`]` that has no opener *within
+    // this slice*, i.e. depth about to go negative. That's the constructor's own closing brace.
+    // The class body's closing brace immediately follows it in every build seen so far, so it's
+    // included too. Searching for the next literal "class " keyword instead (the old approach)
+    // is wrong whenever the next thing in the file isn't another class — a standalone helper
+    // function or a *different* creature's metadata object, both common — which silently pulls
+    // hundreds to thousands of characters of unrelated code into the "class" text.
+    function findMonsterClassBodyEnd(scriptText, start) {
+        let depth = 0;
+        let inString = null;
+        const n = scriptText.length;
+        for (let i = start; i < n; i++) {
+            const ch = scriptText[i];
+            if (inString) {
+                if (ch === '\\') { i++; continue; }
+                if (ch === inString) inString = null;
+                continue;
+            }
+            if (ch === '"' || ch === "'" || ch === '`') { inString = ch; continue; }
+            if (ch === '{' || ch === '(' || ch === '[') { depth++; continue; }
+            if (ch === '}' || ch === ')' || ch === ']') {
+                if (depth === 0) {
+                    let end = i + 1;
+                    if (scriptText[end] === '}') end++;
+                    return end;
+                }
+                depth--;
+            }
+        }
+        return null;
     }
 
     function readScriptConstMinMs(scriptText, constName, nearIndex = 0) {
@@ -11093,20 +11271,29 @@
             if (span.closest('span.whitespace-nowrap')) continue;
 
             const originalText = span.textContent?.trim() ?? '';
-            if (!isStandaloneDurationSpanText(originalText)) continue;
+            const clause = isStandaloneDurationSpanText(originalText)
+                ? { prefix: '', durationText: originalText }
+                : extractTrailingDurationClause(originalText);
+            if (!clause) continue;
 
-            const durationMs = parseTooltipDurationText(originalText);
+            const durationMs = parseTooltipDurationText(clause.durationText);
             if (durationMs == null) continue;
 
             const ticks = msToGameCooldownTicks(durationMs);
             if (ticks == null) continue;
 
             const { value, suffix } = formatTicksParts(ticks);
-            applyScaledTooltipValue(span, originalText, {
-                value,
-                suffix,
-                title: `${originalText} = ${formatTicks(ticks)}`
-            }, originalText);
+            if (clause.prefix) {
+                span.textContent = `${clause.prefix}${value}${suffix}`;
+                span.classList.add('bs-scaled-value');
+                span.title = `${clause.durationText} = ${formatTicks(ticks)}`;
+            } else {
+                applyScaledTooltipValue(span, originalText, {
+                    value,
+                    suffix,
+                    title: `${originalText} = ${formatTicks(ticks)}`
+                }, originalText);
+            }
             applied += 1;
         }
         return applied;
@@ -12334,6 +12521,21 @@
         `</details>`;
     }
 
+    // Debug box: this creature's raw class text straight from the game's own script (see
+    // getMonsterRawSourceInfo). Applies to any creature with a gameId, ability or not — it's
+    // there to answer "what does the game actually have for this actor", not just abilities.
+    function renderRawSourceBlockHtml(unit) {
+        if (unit?.gameId == null) return '';
+        const gameIdAttr = ` data-unit-game-id="${escapeHtml(String(unit.gameId))}"`;
+        return `<details class="bs-details bs-raw-source-details"${gameIdAttr}>` +
+            `<summary class="bs-ability-summary" title="This creature's raw class source, extracted live from the game's own script — for checking what the game actually has, not a supported/stable API">` +
+                `<span class="bs-ability-chevron" aria-hidden="true">▶</span>` +
+                `<span class="bs-label">Raw source</span>` +
+            `</summary>` +
+            `<div class="bs-raw-source-mount"></div>` +
+        `</details>`;
+    }
+
     function hydrateUnitCardAbility(card, unit) {
         const details = card?.querySelector('.bs-ability-details');
         if (!details) return;
@@ -12386,8 +12588,143 @@
         return partial;
     }
 
+    // The minified class body is one long comma/semicolon-chained expression with no line
+    // breaks at all — this is a dependency-free, heuristic reformatter (not a real JS parser)
+    // that breaks after `{`/`[`/`,`/`;`, breaks before `}`/`]`, and indents by nesting depth,
+    // while staying inside string/template literals so it never breaks mid-string. It doesn't
+    // understand regex literals, but monster class bodies don't contain any.
+    function formatRawSourceForDisplay(code) {
+        if (typeof code !== 'string' || !code) return code;
+        const MAX_INPUT = 20000;
+        const truncated = code.length > MAX_INPUT;
+        const src = truncated ? code.slice(0, MAX_INPUT) : code;
+        const INDENT = '  ';
+        const n = src.length;
+
+        let out = '';
+        let depth = 0;
+        let inString = null;
+
+        const lastSignificantChar = () => {
+            const trimmed = out.replace(/\s+$/, '');
+            return trimmed.slice(-1);
+        };
+        const breakLine = (d) => {
+            out = out.replace(/[ \t]+$/, '');
+            out += '\n' + INDENT.repeat(Math.max(0, d));
+        };
+
+        for (let i = 0; i < n; i++) {
+            const ch = src[i];
+
+            if (inString) {
+                out += ch;
+                if (ch === '\\' && i + 1 < n) {
+                    out += src[++i];
+                } else if (ch === inString) {
+                    inString = null;
+                }
+                continue;
+            }
+
+            if (ch === '"' || ch === "'" || ch === '`') {
+                inString = ch;
+                out += ch;
+                continue;
+            }
+
+            if (ch === '{' || ch === '[') {
+                depth++;
+                out += ch;
+                breakLine(depth);
+                continue;
+            }
+            if (ch === '}' || ch === ']') {
+                const openChar = ch === '}' ? '{' : '[';
+                depth = Math.max(0, depth - 1);
+                if (lastSignificantChar() === openChar) {
+                    out = out.replace(/\s+$/, ''); // empty {}/[] — collapse back onto one line
+                } else {
+                    breakLine(depth);
+                }
+                out += ch;
+                continue;
+            }
+            if (ch === '(') {
+                depth++;
+                out += ch;
+                continue;
+            }
+            if (ch === ')') {
+                depth = Math.max(0, depth - 1);
+                out += ch;
+                continue;
+            }
+            if (ch === ';' || ch === ',') {
+                out += ch;
+                breakLine(depth);
+                continue;
+            }
+
+            out += ch;
+        }
+
+        return truncated ? `${out}\n… (truncated, ${code.length} chars total)` : out;
+    }
+
+    function renderRawSourceMount(mount, gameId, metadata, info) {
+        mount.innerHTML = '';
+        if (!info || info.status !== 'ok' || !info.classSlice) {
+            const reason = info?.status === 'not-found'
+                ? "no metadata anchor matched this creature's name/ability in the script"
+                : info?.status === 'class-not-found'
+                    ? "found the metadata but not the class constructor that spreads it"
+                    : 'the script chunk failed to load';
+            const msg = document.createElement('div');
+            msg.textContent = `Couldn't find a matching class for #${gameId}` +
+                (metadata?.name ? ` (${metadata.name})` : '') + ` — ${reason}.`;
+            mount.appendChild(msg);
+            return;
+        }
+        const header = `// #${gameId}${metadata?.name ? ` ${metadata.name}` : ''} — metadata var "${info.varName}", ` +
+            `${info.classSlice.length} chars, extracted live from the game's own script (minified names ` +
+            `can differ on the next deploy).\n\n`;
+        const pre = document.createElement('pre');
+        pre.className = 'bs-raw-source-pre';
+        pre.textContent = header + formatRawSourceForDisplay(info.classSlice);
+        mount.appendChild(pre);
+    }
+
+    function mountUnitRawSourceDetails(details, unit) {
+        const mount = details?.querySelector('.bs-raw-source-mount');
+        if (!mount) return;
+        if (mount.dataset.mounted === '1') return; // static per gameId — populate once
+
+        const gameId = unit?.gameId ?? readAbilityDetailsStat(details.dataset, 'unitGameId');
+        if (gameId == null) {
+            mount.textContent = 'No creature id available for this card.';
+            return;
+        }
+        mount.dataset.mounted = '1';
+        mount.textContent = 'Loading game script…';
+        const metadata = getMonsterMetadata(gameId);
+
+        const render = () => renderRawSourceMount(mount, gameId, metadata, getMonsterRawSourceInfo(gameId, metadata));
+        if (cachedGameChunk661Text) {
+            render();
+        } else {
+            ensureGameChunk661Text().then(render).catch(() => {
+                mount.textContent = "Couldn't load the game's script (network error, or the chunk moved).";
+            });
+        }
+    }
+
     function handleUnitsBodyAbilityToggle(e) {
         const details = e.target;
+        if (details?.classList?.contains('bs-raw-source-details')) {
+            if (details.open) mountUnitRawSourceDetails(details, resolveUnitForAbilityDetails(details));
+            return;
+        }
         if (!details?.classList?.contains('bs-ability-details')) return;
         const card = details.closest('.bs-card');
         const key = card?.dataset?.unitKey;
@@ -14492,6 +14829,14 @@
                 height: 11px;
                 flex-shrink: 0;
             }
+            #${PANEL_ID} .bs-stat-icon-text {
+                flex-shrink: 0;
+                font-size: 8px;
+                font-weight: 700;
+                letter-spacing: 0.02em;
+                text-transform: uppercase;
+                color: #777;
+            }
             #${PANEL_ID} .bs-stat-base {
                 color: #777;
                 font-size: 9px;
@@ -14581,8 +14926,8 @@
                 white-space: nowrap;
             }
             #${PANEL_ID} .bs-ability-mount {
-                margin-top: 4px;
-                padding: 4px 8px 2px 18px;
+                margin: 10px;
+                padding: 10px;
                 border-left: 2px solid rgba(97, 175, 239, 0.35);
             }
             #${PANEL_ID} .bs-ability-mount .tooltip-prose {
@@ -14601,6 +14946,25 @@
             }
             #${PANEL_ID} .bs-ability-mount .bs-true-damage-icon {
                 filter: brightness(0) invert(1);
+            }
+            #${PANEL_ID} .bs-raw-source-mount {
+                margin: 10px;
+                padding: 10px;
+                border-left: 2px solid rgba(224, 108, 117, 0.35);
+            }
+            #${PANEL_ID} .bs-raw-source-pre {
+                margin: 0;
+                max-height: 400px;
+                overflow: auto;
+                white-space: pre;
+                tab-size: 2;
+                color: #999;
+                font-size: 9px;
+                line-height: 1.4;
+                font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+                background: rgba(0, 0, 0, 0.2);
+                border-radius: 3px;
+                padding: 6px;
             }
             #${PANEL_ID}.resizing {
                 user-select: none;
@@ -14891,11 +15255,28 @@
         return STAT_KEYS.find((stat) => stat.key === key)?.label || key;
     }
 
+    // The game only tracks one range value per creature (`actor.rangeComponent`) — it's the
+    // shared reach used for both auto-attack target acquisition AND whatever the ability's own
+    // targeting falls back to (see custom-battles.js's findRangeComponent trace). There's no
+    // separate "ability range" to read, so the tooltip says so instead of implying one exists.
+    const STAT_TOOLTIPS = {
+        range: 'Range (shared reach for auto-attack targeting and the ability’s own target search — the game does not track these separately)'
+    };
+
+    function getStatTooltip(key) {
+        return STAT_TOOLTIPS[key] || getStatLabel(key);
+    }
+
     function renderStatIconHtml(key) {
         const label = getStatLabel(key);
+        const tooltip = getStatTooltip(key);
         const src = STAT_ICONS[key];
-        if (!src) return '';
-        return `<img class="bs-stat-icon pixelated" src="${src}" alt="${escapeHtml(label)}" title="${escapeHtml(label)}">`;
+        if (src) {
+            return `<img class="bs-stat-icon pixelated" src="${src}" alt="${escapeHtml(label)}" title="${escapeHtml(tooltip)}">`;
+        }
+        // Fallback for any stat with no native icon asset to reuse — a short text badge
+        // instead of silently rendering a bare, unlabeled number.
+        return `<span class="bs-stat-icon-text" title="${escapeHtml(tooltip)}">${escapeHtml(label.slice(0, 3))}</span>`;
     }
 
     function renderGridStatCell(unit, key) {
@@ -14975,13 +15356,21 @@
         return `<div class="bs-status-effects">${chips}${more}</div>`;
     }
 
+    // Compact header summary only — the full-word "Atk delay:"/"Ability CD:" rows in the
+    // card body stay verbose; this is just the terse chip strip next to the name.
+    function formatTicksCompact(ticks, suffix) {
+        if (ticks == null || !Number.isFinite(ticks)) return '—';
+        const rounded = Math.round(ticks * 10) / 10;
+        return `${rounded}${suffix}`;
+    }
+
     function renderCompactSummary(unit) {
         const bits = [];
         if (unit.level != null) bits.push(escapeHtml(`Lv ${unit.level}`));
         if (unit.hp != null) {
             const hpText = unit.source === 'fight'
-                ? `HP ${unit.hp}/${unit.hpMax ?? '?'}`
-                : `HP ${unit.hp}`;
+                ? `${unit.hp}/${unit.hpMax ?? '?'}HP`
+                : `${unit.hp}HP`;
             bits.push(coloredStatSpan(hpText, unit.alive !== false));
         }
         if (unitShowsLiveMechanics(unit)) {
@@ -14990,7 +15379,7 @@
             } else {
                 const atkRemainingTicks = resolveUnitAttackDelayRemainingTicks(unit);
                 if (atkRemainingTicks != null && atkRemainingTicks > 0) {
-                    bits.push(coloredStatSpan(`Atk ${formatTicks(atkRemainingTicks)}`, false));
+                    bits.push(coloredStatSpan(formatTicksCompact(atkRemainingTicks, 'T'), false));
                 } else if (unit.attackDelayReady === false) {
                     bits.push(coloredStatSpan('Atk waiting', false));
                 }
@@ -14998,7 +15387,7 @@
         } else {
             const attackDelayTicks = resolveUnitAttackDelayTicks(unit);
             if (attackDelayTicks != null) {
-                bits.push(coloredStatSpan(`Atk ${formatTicks(attackDelayTicks)}`, true));
+                bits.push(coloredStatSpan(formatTicksCompact(attackDelayTicks, 'T'), true));
             }
         }
         if (unit.cooldownReady === true && unitShowsLiveMechanics(unit)) {
@@ -15006,7 +15395,7 @@
         } else if (!unitShowsLiveMechanics(unit)) {
             const cdTicks = resolveUnitCooldownTicks(unit);
             if (cdTicks != null) {
-                bits.push(coloredStatSpan(`CD ${formatTicks(cdTicks)}`, true));
+                bits.push(coloredStatSpan(formatTicksCompact(cdTicks, 'CD'), true));
             } else if (unit.cooldownReady === true) {
                 bits.push(coloredStatSpan('CD ready', true));
             }
@@ -15015,7 +15404,7 @@
         } else {
             const cdRemainingTicks = resolveUnitCooldownRemainingTicks(unit);
             if (cdRemainingTicks != null && cdRemainingTicks > 0) {
-                bits.push(coloredStatSpan(`CD ${formatTicks(cdRemainingTicks)}`, false));
+                bits.push(coloredStatSpan(formatTicksCompact(cdRemainingTicks, 'CD'), false));
             } else if (unit.cooldownReady === false) {
                 bits.push(coloredStatSpan('CD on cooldown', false));
             }
@@ -15031,8 +15420,15 @@
         });
         if (!hasAnyStat) return '';
 
+        const rowHasValue = (key) => {
+            const live = key === 'hp' ? unit.hp : unit[key];
+            return live != null || unit.baseStats?.[key] != null;
+        };
+
         let rowsHtml = '';
         for (const [leftKey, rightKey] of STAT_GRID_ROWS) {
+            // Skip a row entirely instead of reserving blank grid space for two empty cells.
+            if (!rowHasValue(leftKey) && !rowHasValue(rightKey)) continue;
             rowsHtml += `<div class="bs-stat-row">${renderGridStatCell(unit, leftKey)}${renderGridStatCell(unit, rightKey)}</div>`;
         }
         return `<div class="bs-stat-grid">${rowsHtml}</div>`;
@@ -15053,6 +15449,10 @@
                 (atkState ? ` · ${atkState}` : '') +
                 `</div>`;
         }
+        if (unit.range != null) {
+            mechanicsHtml += `<div class="bs-row" data-bs-mech="range" title="${escapeHtml(getStatTooltip('range'))}">` +
+                `<span class="bs-label">Range:</span> ${formatUnitStatDisplay('range', unit.range)} tiles</div>`;
+        }
         const cooldownTicks = resolveUnitCooldownTicks(unit);
         if (cooldownTicks != null) {
             const cdState = liveMechanics
@@ -15062,7 +15462,7 @@
                 )
                 : null;
             const initialCd = !liveMechanics && unit.previewInitialCooldownTicks != null
-                ? ` · starts ${formatTicks(unit.previewInitialCooldownTicks)}`
+                ? ` · <span style="color:var(--bs-info)" title="First-cast cooldown before the ability reaches its steady-state timer shown above">starts ${formatTicks(unit.previewInitialCooldownTicks)}</span>`
                 : '';
             const meditatingLabel = unit.isMeditating ? ' <span style="color:#888">(meditating)</span>' : '';
             mechanicsHtml += `<div class="bs-row" data-bs-mech="ability-cd"><span class="bs-label">Ability CD:</span> ${formatTicks(cooldownTicks)}` +
@@ -15114,6 +15514,7 @@
     function buildUnitCardMechanicsPatchKey(unit) {
         return [
             resolveUnitAttackDelayTicks(unit),
+            normalizeUnitStatValue('range', unit.range),
             resolveUnitCooldownTicks(unit),
             resolveUnitAttackDelayRemainingTicks(unit),
             unit.attackDelayReady,
@@ -15159,6 +15560,7 @@
         const live = card.querySelector('.bs-card-live');
         if (!live) return;
         live.querySelector('[data-bs-mech="atk-delay"]')?.remove();
+        live.querySelector('[data-bs-mech="range"]')?.remove();
         live.querySelector('[data-bs-mech="ability-cd"]')?.remove();
         const tickHtml = buildUnitCardTickMechanicsHtml(unit);
         if (!tickHtml) return;
@@ -15297,6 +15699,7 @@
             (rolesHtml ? `<div class="bs-row">${rolesHtml}</div>` : '') +
             `<div class="bs-card-live">${liveInner}</div>` +
             abilityBlock +
+            renderRawSourceBlockHtml(unit) +
         `</div>`;
 
         return `<div class="bs-card${deadClass}${collapseClass}" data-unit-key="${escapeHtml(displayKey)}">` +

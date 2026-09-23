@@ -451,11 +451,12 @@ function createDropdownSetting(id, label, description, value = 'Auto-setup', opt
         cursor: pointer;
     `;
     
-    // Add options to dropdown
+    // Add options to dropdown (plain strings, or { value, label } objects)
     options.forEach(option => {
         const optionElement = document.createElement('option');
-        optionElement.value = option;
-        optionElement.textContent = option;
+        const isObject = option && typeof option === 'object';
+        optionElement.value = isObject ? option.value : option;
+        optionElement.textContent = isObject ? option.label : option;
         optionElement.style.cssText = `
             background: #333;
             color: #fff;
@@ -589,7 +590,7 @@ function createCreatureContextMenu(creatureName, x, y, onClose) {
         optionElement.textContent = `Floor ${i}`;
         floorSelect.appendChild(optionElement);
     }
-    floorSelect.value = String(existing.floor != null ? Math.max(0, Math.min(15, Number(existing.floor) || 0)) : 0);
+    floorSelect.value = String(existing.floor != null ? Math.max(0, Math.min(15, Number(existing.floor) || 0)) : getDefaultTaskerFloor(settings));
 
     const setupSelect = document.createElement('select');
     setupSelect.className = 'pixel-font-14';
@@ -645,13 +646,24 @@ function createCreatureContextMenu(creatureName, x, y, onClose) {
             setupMethod: setupSelect.value || latest.setupMethod || 'Auto-setup',
             autoRefillStamina: !!refillCheckbox.checked
         };
-        latest.creatureOverrides[creatureKey] = nextOverride;
+        // Every close persists, so an override identical to the defaults (e.g. right after
+        // Reset, or open/close without changes) must be dropped — otherwise it gets re-saved
+        // and the ⚙ indicator lights up for a creature with nothing customised.
+        const matchesDefaults = nextOverride.mapId === null
+            && nextOverride.floor === getDefaultTaskerFloor(latest)
+            && nextOverride.setupMethod === (latest.setupMethod || 'Auto-setup')
+            && nextOverride.autoRefillStamina === !!latest.autoRefillStamina;
+        if (matchesDefaults) {
+            delete latest.creatureOverrides[creatureKey];
+        } else {
+            latest.creatureOverrides[creatureKey] = nextOverride;
+        }
         localStorage.setItem('betterTaskerSettings', JSON.stringify(latest));
         console.log('[Better Tasker] Creature context persisted:', {
             reason,
             creatureName,
             creatureKey,
-            override: nextOverride
+            override: matchesDefaults ? null : nextOverride
         });
     };
 
@@ -671,10 +683,12 @@ function createCreatureContextMenu(creatureName, x, y, onClose) {
         }
         rebuildMapOptions();
         mapSelect.value = '';
-        floorSelect.value = '0';
+        floorSelect.value = String(getDefaultTaskerFloor(latest));
         const fallbackSetup = latest.setupMethod || setupOptions[0] || 'Auto-setup';
         setupSelect.value = setupOptions.includes(fallbackSetup) ? fallbackSetup : (setupOptions[0] || 'Auto-setup');
         refillCheckbox.checked = !!latest.autoRefillStamina;
+        // Refresh the row's ⚙ indicator now instead of waiting for the menu to close
+        if (typeof onClose === 'function') onClose();
     });
     const closeBtn = createStyledButton('bt-close-creature-ctx', t('mods.betterTasker.close'), 'green', () => closeMenu());
     resetBtn.style.flex = '1';
@@ -4610,7 +4624,17 @@ function createGeneralSettings() {
         getAvailableSetupOptions()
     );
     settingsWrapper.appendChild(setupMethodDiv);
-    
+
+    // Default floor selection (per-creature overrides take precedence)
+    const defaultFloorDiv = createDropdownSetting(
+        'defaultFloor',
+        t('mods.betterTasker.defaultFloor'),
+        '',
+        String(getDefaultTaskerFloor(loadSettings())),
+        Array.from({ length: 16 }, (_, i) => ({ value: String(i), label: `Floor ${i}` }))
+    );
+    settingsWrapper.appendChild(defaultFloorDiv);
+
     // Auto-refill Stamina setting
     const staminaRefillSetting = createCheckboxSetting(
         'autoRefillStamina',
@@ -4950,6 +4974,7 @@ function loadSettings() {
         fasterAutoplay: false,
         enableDragonPlant: false,
         setupMethod: 'Auto-setup',  // Default to Auto-setup (translation applied at display time)
+        defaultFloor: 0,
         creatureOverrides: {},
         // Default all creatures to enabled, except unselectable ones
         ...Object.fromEntries(
@@ -4972,6 +4997,11 @@ function loadSettings() {
     return defaultSettings;
 }
 
+// Default floor (0-15) used when a creature has no per-creature floor override
+function getDefaultTaskerFloor(settings = loadSettings()) {
+    return Math.max(0, Math.min(15, Number(settings?.defaultFloor) || 0));
+}
+
 // Auto-save settings when changed
 function autoSaveSettings() {
     try {
@@ -4980,12 +5010,14 @@ function autoSaveSettings() {
         
         inputs.forEach(input => {
             // Only process inputs that belong to Better Tasker settings
-            if (input.id === 'autoCompleteTasks' || input.id === 'autoRefillStamina' || input.id === 'fasterAutoplay' || input.id === 'enableDragonPlant' || input.id === 'setupMethod' || input.id.startsWith('creature-')) {
+            if (input.id === 'autoCompleteTasks' || input.id === 'autoRefillStamina' || input.id === 'fasterAutoplay' || input.id === 'enableDragonPlant' || input.id === 'setupMethod' || input.id === 'defaultFloor' || input.id.startsWith('creature-')) {
                 // Skip disabled checkboxes (unselectable creatures)
                 if (input.disabled) return;
-                
+
                 if (input.type === 'checkbox') {
                     settings[input.id] = input.checked;
+                } else if (input.id === 'defaultFloor') {
+                    settings.defaultFloor = getDefaultTaskerFloor({ defaultFloor: input.value });
                 } else {
                     settings[input.id] = input.value;
                 }
@@ -5048,6 +5080,12 @@ function loadAndApplySettings() {
             }
         }
         
+        // Apply default floor setting (change listener already added by createDropdownSetting)
+        const defaultFloorSelect = document.getElementById('defaultFloor');
+        if (defaultFloorSelect) {
+            defaultFloorSelect.value = String(getDefaultTaskerFloor(settings));
+        }
+
         // Apply creature selections from individual settings
         const creatures = getTaskerPickerCreatures();
         console.log('[Better Tasker] Loading creature settings:', {
@@ -5380,7 +5418,7 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
         const activeCreatureName = preferredCreatureName || getActiveTaskCreatureNameFromGameState() || extractCreatureFromTask();
         const creatureOverride = getCreatureOverrides(activeCreatureName);
         const resolvedSetupMethod = creatureOverride?.setupMethod || settings.setupMethod || 'Auto-setup';
-        const resolvedFloor = creatureOverride?.floor != null ? creatureOverride.floor : 0;
+        const resolvedFloor = creatureOverride?.floor != null ? creatureOverride.floor : getDefaultTaskerFloor(settings);
         const resolvedAutoRefillStamina = creatureOverride?.autoRefillStamina !== undefined
             ? !!creatureOverride.autoRefillStamina
             : !!settings.autoRefillStamina;

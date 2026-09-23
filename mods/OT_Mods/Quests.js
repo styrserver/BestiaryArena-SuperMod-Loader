@@ -20230,6 +20230,11 @@ function createNPCCooldownManager() {
           command: 'QuestsDev.worldRaidForceEnd()'
         },
         {
+          text: 'Reset raid cooldown',
+          onClick: () => runGuarded('Reset raid cooldown', () => QuestsDev.worldRaidResetCooldown()),
+          command: 'QuestsDev.worldRaidResetCooldown()'
+        },
+        {
           text: 'World Raid status',
           onClick: () => runGuarded('World Raid status', () => { QuestsDev.worldRaidStatus(); setStatus('World Raid status logged to console.'); }),
           command: 'QuestsDev.worldRaidStatus()'
@@ -34792,8 +34797,17 @@ function createNPCCooldownManager() {
 
   async function tryTriggerWorldRaid() {
     try {
-      if (isWorldRaidStateLive(worldRaidState) || isWorldRaidOnCooldown(worldRaidState)) return;
-      if (Math.random() >= WORLD_RAID_TRIGGER_CHANCE) return;
+      if (isWorldRaidStateLive(worldRaidState) || isWorldRaidOnCooldown(worldRaidState)) {
+        if (isQuestsVerboseLogging()) {
+          console.log(`[Quests Mod][World Raid][debug] Edron victory — roll skipped (${isWorldRaidStateLive(worldRaidState) ? 'raid live' : 'on cooldown'})`);
+        }
+        return;
+      }
+      const roll = Math.random();
+      if (isQuestsVerboseLogging()) {
+        console.log(`[Quests Mod][World Raid][debug] Edron victory roll: ${(roll * 100).toFixed(3)}% (need < ${(WORLD_RAID_TRIGGER_CHANCE * 100).toFixed(3)}%) — ${roll < WORLD_RAID_TRIGGER_CHANCE ? 'HIT' : 'miss'}${worldRaidStateFetched ? '' : ' [raid state not fetched yet]'}`);
+      }
+      if (roll >= WORLD_RAID_TRIGGER_CHANCE) return;
       // Re-check fresh right before writing — narrows (does not eliminate) the race against
       // another client's simultaneous trigger. There is no server-side backstop (see the
       // module doc comment above) — this is best-effort only.
@@ -46255,6 +46269,31 @@ function createNPCCooldownManager() {
     }
   }
 
+  // Clears only a finished raid's 5-day cooldown (by deleting the record, same as
+  // worldRaidClear) so Edron victories can roll again. Refuses while a raid is LIVE — use
+  // worldRaidForceEnd()/worldRaidClear() for that — so it can't accidentally end a real
+  // raid for everyone. Same shared-Firebase-path caveat as the helpers above.
+  async function worldRaidResetCooldown() {
+    try {
+      const current = await fetchWorldRaidState();
+      if (isWorldRaidStateLive(current)) {
+        console.warn('[Quests Mod][World Raid][Dev] Raid is LIVE — not resetting cooldown. Use worldRaidForceEnd() or worldRaidClear() instead.');
+        return { reset: false, reason: 'live' };
+      }
+      if (!isWorldRaidOnCooldown(current)) {
+        console.log('[Quests Mod][World Raid][Dev] Not on cooldown — already triggerable.');
+        return { reset: false, reason: 'not-on-cooldown' };
+      }
+      await FirebaseService.delete(WORLD_RAID_FIREBASE_PATH, 'dev reset world raid cooldown');
+      await pollWorldRaidState();
+      console.log('[Quests Mod][World Raid][Dev] Cooldown reset — Edron victories can trigger a raid again.');
+      return { reset: true };
+    } catch (error) {
+      console.error('[Quests Mod][World Raid][Dev] Error resetting raid cooldown:', error);
+      return { reset: false, reason: 'error' };
+    }
+  }
+
   function worldRaidDevStatus() {
     const effectiveEndTime = getWorldRaidEffectiveEndTime(worldRaidState);
     const raidStatus = getAnnihilatorOrshabaalRaidStatus();
@@ -46286,7 +46325,7 @@ function createNPCCooldownManager() {
     console.log('[Quests Mod][Dev] Catalog:', QuestsDev.catalog());
     console.log('[Quests Mod][Dev] Examples: QuestsDev.grant({ leather: 1, monksStudy: 1 }); QuestsDev.setAccepted("king_copper_key"); QuestsDev.complete("king_red_dragon"); QuestsDev.reset("svenson_love_story"); QuestsDev.resetLoveStoryWithItems(); QuestsDev.resetSanta(); QuestsDev.completeAll(); QuestsDev.resetAll();');
     console.log('[Quests Mod][Dev] complete / setAccepted / reset / resetAll / completeAll / resetSanta now auto-sync the quest-item bag to progress (grant/stale/backfill rules). QuestsDev.reconcile() runs that sync on demand — use it after a grant() that changed both progress and items.');
-    console.log('[Quests Mod][Dev] World Raid (Orshabaal): QuestsDev.worldRaidStatus() to inspect, QuestsDev.worldRaidForceTrigger() / .worldRaidForceEnd() / .worldRaidClear() to control it. WARNING: these hit the SAME shared Firebase path production uses — forceTrigger starts a real raid for every mod user online, not just you.');
+    console.log('[Quests Mod][Dev] World Raid (Orshabaal): QuestsDev.worldRaidStatus() to inspect, QuestsDev.worldRaidForceTrigger() / .worldRaidForceEnd() / .worldRaidResetCooldown() / .worldRaidClear() to control it. WARNING: these hit the SAME shared Firebase path production uses — forceTrigger starts a real raid for every mod user online, not just you.');
     console.log('[Quests Mod][Dev] World Raid: set the extension\'s Log Level to "verbose" (popup) for a running console timer — logs on every 30s poll tick, each toast-buildup stage, and every trigger/defeat, each with a formatted countdown (LIVE — ends in Xh Ym / on cooldown — triggerable again in Xd Yh / triggerable now).');
   }
 
@@ -46356,6 +46395,7 @@ function createNPCCooldownManager() {
     worldRaidForceTrigger,
     worldRaidForceEnd,
     worldRaidClear,
+    worldRaidResetCooldown,
     worldRaidStatus: worldRaidDevStatus
   };
 
