@@ -1782,6 +1782,7 @@
       "close": "Fechar",
       "tasking": "Em tarefa",
       "setupMethod": "Método de configuração",
+      "defaultFloor": "Andar padrão",
       "monsterSelectionTitle": "Seleção de Monstros"
     },
     "betterTeleporter": {

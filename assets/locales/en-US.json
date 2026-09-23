@@ -1782,6 +1782,7 @@
       "close": "Close",
       "tasking": "Tasking",
       "setupMethod": "Setup Method",
+      "defaultFloor": "Default Floor",
       "monsterSelectionTitle": "Monster Selection"
     },
     "betterTeleporter": {
