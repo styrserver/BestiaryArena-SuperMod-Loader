@@ -84,7 +84,7 @@
     "dragonfetishRaised": "You raise the Dragonfetish. Speak with Elathriel.",
     "realmOfDreamsEntering": "Tesha sends you into the Northern Dragon Lair, toward the fire...",
     "realmOfDreamsReturned": "Out of the graveyard, the fire dead behind you. Speak with Tesha.",
-    "annihilatorOrshabaalEntering": "Bubble sends you against Orshabaal...",
+    "annihilatorOrshabaalEntering": "Bubble sends you against Orshabaal (level {level})...",
     "annihilatorOrshabaalReturned": "The fight with Orshabaal is over. Speak with Bubble.",
     "worldRaidOrshabaalWarning1": "Orshabaal's minions are working on his return to the World. LEAVE Edron at once, mortals.",
     "worldRaidOrshabaalWarning2": "Orshabaal is about to make his way into the mortal realm. Run for your lives!",
@@ -208,7 +208,9 @@
     "dragonfetishRaised": [],
     "realmOfDreamsEntering": [],
     "realmOfDreamsReturned": [],
-    "annihilatorOrshabaalEntering": [],
+    "annihilatorOrshabaalEntering": [
+      "level"
+    ],
     "annihilatorOrshabaalReturned": [],
     "worldRaidOrshabaalWarning1": [],
     "worldRaidOrshabaalWarning2": [],

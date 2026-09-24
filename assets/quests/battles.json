@@ -5411,7 +5411,7 @@
         "tileIndex": 32,
         "keyPrefix": "orshabaal-tile-32-",
         "fallbackGameId": 65,
-        "level": 2500,
+        "level": 2000,
         "tier": 0,
         "direction": "south",
         "customSpriteKey": "demon",
