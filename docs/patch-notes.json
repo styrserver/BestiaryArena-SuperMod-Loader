@@ -4,6 +4,31 @@
   },
   "notes": [
     {
+      "version": "5.0.16",
+      "changes": [
+        {
+          "mod": "Better Highscores",
+          "type": "changed",
+          "text": "The world raid bar now shows your best level beaten (the same value the leaderboard ranks by) instead of the level you're about to fight, which moved to its hover text. If you hold the top spot, your own value is hidden and the top level turns green, like the normal world-record entries."
+        },
+        {
+          "mod": "Custom Battles",
+          "type": "changed",
+          "text": "Big battles with many custom creatures run much smoother: custom sprites and names are now re-checked a few times per second instead of on every animation frame, and movement/health-bar updates during a fight no longer trigger a re-check at all. At the 'verbose' log level, a performance summary is logged every 5 seconds."
+        },
+        {
+          "mod": "Quests",
+          "type": "added",
+          "text": "Quest Dev Tools can teleport straight into the world raid boss fight for testing, at your normal level or any level you choose. These practice fights never count: no mission progress, wins or leaderboard changes."
+        },
+        {
+          "mod": "Quests",
+          "type": "changed",
+          "text": "Every quest is now locked until both tutorial missions are finished. Asking about other topics no longer skips ahead, quest-giving characters, the holiday quest item and the world raid (including its announcements) stay hidden until then, and new players can no longer start a world raid. Quests you had already started or finished before this update stay available. A world raid (its announcements, mission log entry and Missions button glow) is now only shown to, and can only be started by, players who have cleared the highest floor of the quest map it requires."
+        }
+      ]
+    },
+    {
       "version": "5.0.15",
       "changes": [
         {

@@ -79,6 +79,10 @@ if (window.CustomBattles) {
         // the base creature's own OUTFIT/ITEM asset (same column count = facings, same row
         // count = movingFrameRows) or the reused native CSS will crop/step it wrong.
         let cachedCustomSpriteExtensionBaseUrl = null;
+        // Mid-battle floor between two MutationObserver-driven custom-piece DOM syncs (see
+        // requestCustomPieceDomSync). ~7 runs/s is plenty to re-skin a rebuilt sprite node
+        // before it's noticeable, versus the previous once-per-render-frame.
+        const CUSTOM_PIECE_BATTLE_SYNC_INTERVAL_MS = 150;
         const CUSTOM_MAP_SPRITES = [
             {
                 key: 'weakened-ghazbaran',
@@ -782,6 +786,14 @@ if (window.CustomBattles) {
                 // scratch — see applyCustomSpriteVisualToSprite's animation-delay comment.
                 this._customSpriteMoveCycleEpoch = new Map();
                 this._namedPieceMissLogByKey = new Map();
+                // Custom-piece DOM sync throttling (see requestCustomPieceDomSync) + a
+                // per-run cache of shared lookups (see syncCustomPieceDom / _syncCache).
+                this._customPieceDomSyncTimer = null;
+                this._customPieceDomSyncRaf = null;
+                this._lastCustomPieceDomSyncAt = 0;
+                this._syncCache = null;
+                this._monsterSpriteIdByGameId = new Map();
+                this._customPieceDomSyncStats = null;
                 this.geneIntegrityTimerIds = [];
                 this.preBattleGeneTamperCount = 0;
                 this.lastPreBattleGeneIntegrityCheckAt = 0;
@@ -845,6 +857,7 @@ if (window.CustomBattles) {
              * True while a fight is running — boardConfig is owned by the game, not sandbox setup.
              */
             isBoardBattleActive() {
+                if (this._syncCache) return this._syncCache.battleActive;
                 try {
                     const boardContext = globalThis.state?.board?.getSnapshot()?.context;
                     return boardContext?.gameStarted === true;
@@ -2384,6 +2397,28 @@ if (window.CustomBattles) {
                 });
             }
 
+            // Shared lookups reused across every piece within one syncCustomPieceDom() run
+            // (cached in this._syncCache) — outside a run they fall back to a live read.
+            getDraggablePieceButtons() {
+                const cache = this._syncCache;
+                if (cache) {
+                    if (!cache.draggableButtons) {
+                        cache.draggableButtons = [...document.querySelectorAll('button[aria-roledescription="draggable"]')];
+                    }
+                    return cache.draggableButtons;
+                }
+                return [...document.querySelectorAll('button[aria-roledescription="draggable"]')];
+            }
+
+            getLiveBoardConfig() {
+                if (this._syncCache) return this._syncCache.boardConfig;
+                try {
+                    return globalThis.state?.board?.getSnapshot?.()?.context?.boardConfig || [];
+                } catch (_) {
+                    return [];
+                }
+            }
+
             findBoardPieceButtonsForTile(tileIndex) {
                 const matched = new Set();
                 const tile = document.getElementById(`tile-index-${tileIndex}`);
@@ -2393,7 +2428,7 @@ if (window.CustomBattles) {
                 const row = Math.floor(Number(tileIndex) / 15);
                 const expectedTranslate = `calc(${col * 32}px * var(--zoomFactor)) calc(${row * 32}px * var(--zoomFactor))`;
 
-                document.querySelectorAll('button[aria-roledescription="draggable"]').forEach((button) => {
+                this.getDraggablePieceButtons().forEach((button) => {
                     if (tileBottom && tileRight
                         && button.style.bottom === tileBottom
                         && button.style.right === tileRight) {
@@ -2617,7 +2652,7 @@ if (window.CustomBattles) {
                 if (this.isBoardBattleActive() && nickname && name === nickname) {
                     let hasPlayerOwnedCollision = false;
                     try {
-                        const boardConfig = globalThis.state?.board?.getSnapshot?.()?.context?.boardConfig || [];
+                        const boardConfig = this.getLiveBoardConfig();
                         hasPlayerOwnedCollision = boardConfig.some((e) =>
                             e?.type === 'player' && String(e?.nickname || e?.name || '').trim() === nickname);
                     } catch (_) {
@@ -2650,7 +2685,7 @@ if (window.CustomBattles) {
                     if (!Number.isFinite(tile)) return false;
                     const nickname = piece?.nickname && String(piece.nickname).trim();
                     if (!nickname) return false;
-                    const boardConfig = globalThis.state?.board?.getSnapshot?.()?.context?.boardConfig || [];
+                    const boardConfig = this.getLiveBoardConfig();
                     const entity = boardConfig.find((e) => Number(e?.tileIndex) === tile);
                     return !!entity && String(entity.nickname || '').trim() === nickname;
                 } catch (_) {
@@ -2741,6 +2776,13 @@ if (window.CustomBattles) {
             }
 
             getCustomPieceIdentitySets() {
+                if (this._syncCache?.identitySets) return this._syncCache.identitySets;
+                const sets = this.buildCustomPieceIdentitySets();
+                if (this._syncCache) this._syncCache.identitySets = sets;
+                return sets;
+            }
+
+            buildCustomPieceIdentitySets() {
                 const pieces = this.getConfiguredCustomPieces();
                 const uniqueNicknames = new Set();
                 const spawnTranslates = new Set();
@@ -2810,6 +2852,8 @@ if (window.CustomBattles) {
                 if (!pieces.length) return 0;
 
                 const identitySets = this.getCustomPieceIdentitySets();
+                // Copy — this set is extended below and the identity sets may be the
+                // per-run cached object shared with isCustomPieceActorRoot().
                 const customTranslates = new Set(identitySets.spawnTranslates);
                 let hidden = 0;
 
@@ -3055,7 +3099,40 @@ if (window.CustomBattles) {
                 });
             }
 
-            syncCustomPieceDom() {
+            syncCustomPieceDom(trigger = 'direct') {
+                // Re-entrancy: a nested call just reuses the outer run's cache.
+                if (this._syncCache) {
+                    this.runCustomPieceDomSyncSteps();
+                    return;
+                }
+                const verbose = globalThis.BestiaryLogger?.getLevel?.() === 'verbose';
+                const startedAt = verbose ? performance.now() : 0;
+                // One board snapshot per run instead of one per piece/sprite check — every
+                // helper below reads through this cache (isBoardBattleActive,
+                // getLiveBoardConfig, getDraggablePieceButtons, getCustomPieceIdentitySets).
+                let boardContext = null;
+                try {
+                    boardContext = globalThis.state?.board?.getSnapshot?.()?.context || null;
+                } catch (_) {
+                    boardContext = null;
+                }
+                this._syncCache = {
+                    battleActive: boardContext?.gameStarted === true,
+                    boardConfig: boardContext?.boardConfig || [],
+                    draggableButtons: null,
+                    sizeScaledSprites: null,
+                    identitySets: null
+                };
+                try {
+                    this.runCustomPieceDomSyncSteps();
+                } finally {
+                    this._syncCache = null;
+                    this._lastCustomPieceDomSyncAt = performance.now();
+                }
+                if (verbose) this.recordCustomPieceDomSyncStats(trigger, performance.now() - startedAt);
+            }
+
+            runCustomPieceDomSyncSteps() {
                 // Keep forced nicknames on world actors so resurrected DOM nodes still
                 // expose data-name for outfit reclaim (e.g. Minotaur after Fiendish revive).
                 if (this.isBoardBattleActive()) {
@@ -3065,6 +3142,95 @@ if (window.CustomBattles) {
                 this.applyVillainOutfitSpriteOverrides();
                 this.applyCustomPieceInteractionLocks();
                 this.hideCustomPieceBattleControls();
+            }
+
+            // Verbose-only perf counters: every 5s logs how often the custom-piece DOM sync
+            // ran, what triggered it, and how long it took in total — the diagnostic for
+            // "custom battle feels laggy" reports (e.g. Orshabaal's 14-piece fight).
+            recordCustomPieceDomSyncStats(trigger, ms) {
+                const now = performance.now();
+                let stats = this._customPieceDomSyncStats;
+                if (!stats) {
+                    stats = { windowStart: now, calls: 0, totalMs: 0, maxMs: 0, triggers: {}, skipped: 0 };
+                    this._customPieceDomSyncStats = stats;
+                }
+                stats.calls += 1;
+                stats.totalMs += ms;
+                if (ms > stats.maxMs) stats.maxMs = ms;
+                stats.triggers[trigger] = (stats.triggers[trigger] || 0) + 1;
+                const elapsed = now - stats.windowStart;
+                if (elapsed >= 5000) {
+                    console.log(
+                        `[Custom Battles][${this.config.name || 'Battle'}][Perf] custom-piece DOM sync: ` +
+                        `${stats.calls} runs in ${(elapsed / 1000).toFixed(1)}s ` +
+                        `(${(stats.calls / (elapsed / 1000)).toFixed(1)}/s), total ${stats.totalMs.toFixed(1)}ms, ` +
+                        `avg ${(stats.totalMs / stats.calls).toFixed(2)}ms, max ${stats.maxMs.toFixed(2)}ms, ` +
+                        `ignored mutation batches ${stats.skipped}, battleActive=${this.isBoardBattleActive()}`,
+                        stats.triggers
+                    );
+                    this._customPieceDomSyncStats = null;
+                }
+            }
+
+            noteSkippedCustomPieceMutationBatch() {
+                if (globalThis.BestiaryLogger?.getLevel?.() !== 'verbose') return;
+                if (!this._customPieceDomSyncStats) {
+                    this._customPieceDomSyncStats = { windowStart: performance.now(), calls: 0, totalMs: 0, maxMs: 0, triggers: {}, skipped: 0 };
+                }
+                this._customPieceDomSyncStats.skipped += 1;
+            }
+
+            // Mid-battle the game rewrites inline `style` (movement translate, HP bar widths)
+            // on every actor nearly every frame. Those never strip our overrides — only a
+            // rebuilt node (childList) or a rewritten className can — so ignore pure style
+            // churn while the fight runs. Setup keeps reacting to everything, as before.
+            isRelevantCustomPieceMutationBatch(records) {
+                if (!this.isBoardBattleActive()) return true;
+                for (const record of records) {
+                    if (record.type === 'childList') {
+                        for (const node of record.addedNodes) {
+                            if (node.nodeType === 1) return true;
+                        }
+                        continue;
+                    }
+                    if (record.type === 'attributes' && record.attributeName !== 'style') return true;
+                }
+                return false;
+            }
+
+            // Coalesces MutationObserver-driven syncs: at most one per animation frame during
+            // setup, and at most one per CUSTOM_PIECE_BATTLE_SYNC_INTERVAL_MS mid-battle
+            // (trailing edge, so the last change in a burst is always handled). The old
+            // observer ran the full sync synchronously for every mutation batch — with ~20
+            // actors animating that was a full-document scan on nearly every frame.
+            requestCustomPieceDomSync(trigger = 'mutation') {
+                if (this._customPieceDomSyncTimer || this._customPieceDomSyncRaf) return;
+                const run = () => {
+                    this._customPieceDomSyncTimer = null;
+                    this._customPieceDomSyncRaf = null;
+                    if (!this.outfitSpriteOverrideObserver) return;
+                    this.syncCustomPieceDom(trigger);
+                };
+                if (this.isBoardBattleActive()) {
+                    const since = performance.now() - this._lastCustomPieceDomSyncAt;
+                    const wait = Math.max(0, CUSTOM_PIECE_BATTLE_SYNC_INTERVAL_MS - since);
+                    this._customPieceDomSyncTimer = setTimeout(run, wait);
+                } else if (typeof requestAnimationFrame === 'function') {
+                    this._customPieceDomSyncRaf = requestAnimationFrame(run);
+                } else {
+                    this._customPieceDomSyncTimer = setTimeout(run, 16);
+                }
+            }
+
+            cancelPendingCustomPieceDomSync() {
+                if (this._customPieceDomSyncTimer) {
+                    clearTimeout(this._customPieceDomSyncTimer);
+                    this._customPieceDomSyncTimer = null;
+                }
+                if (this._customPieceDomSyncRaf) {
+                    if (typeof cancelAnimationFrame === 'function') cancelAnimationFrame(this._customPieceDomSyncRaf);
+                    this._customPieceDomSyncRaf = null;
+                }
             }
 
             rescheduleCustomPieceDomSync(reason = '') {
@@ -3166,11 +3332,20 @@ if (window.CustomBattles) {
                 // (looked up from the game's own monster metadata), never a blanket .sprite.item.
                 let customVisualNativeItemId = null;
                 if (useCustomVisual) {
-                    try {
-                        const spriteId = globalThis.state?.utils?.getMonster?.(piece.gameId)?.metadata?.spriteId;
-                        if (spriteId != null) customVisualNativeItemId = String(spriteId);
-                    } catch (_) {
-                        // noop
+                    const cacheKey = String(piece.gameId);
+                    if (this._monsterSpriteIdByGameId.has(cacheKey)) {
+                        customVisualNativeItemId = this._monsterSpriteIdByGameId.get(cacheKey);
+                    } else {
+                        try {
+                            const spriteId = globalThis.state?.utils?.getMonster?.(piece.gameId)?.metadata?.spriteId;
+                            if (spriteId != null) customVisualNativeItemId = String(spriteId);
+                            // Only memoize a resolved lookup — state.utils may not be ready yet.
+                            if (globalThis.state?.utils?.getMonster) {
+                                this._monsterSpriteIdByGameId.set(cacheKey, customVisualNativeItemId);
+                            }
+                        } catch (_) {
+                            // noop
+                        }
                     }
                 }
                 const genericSelector = customVisualNativeItemId
@@ -3211,7 +3386,7 @@ if (window.CustomBattles) {
 
                 const tileBottom = tile?.style?.bottom || '';
                 const tileRight = tile?.style?.right || '';
-                document.querySelectorAll('button[aria-roledescription="draggable"]').forEach((button) => {
+                this.getDraggablePieceButtons().forEach((button) => {
                     const positionMatches = (tileBottom && tileRight
                         && button.style.bottom === tileBottom && button.style.right === tileRight)
                         || (button.style.translate || '').startsWith(expectedTranslate);
@@ -3219,7 +3394,15 @@ if (window.CustomBattles) {
                     button.querySelectorAll(genericSelector).forEach((sprite) => matched.add(sprite));
                 });
 
-                document.querySelectorAll('.size-scaled-sprite').forEach((node) => {
+                const cache = this._syncCache;
+                let sizeScaledNodes;
+                if (cache) {
+                    if (!cache.sizeScaledSprites) cache.sizeScaledSprites = [...document.querySelectorAll('.size-scaled-sprite')];
+                    sizeScaledNodes = cache.sizeScaledSprites;
+                } else {
+                    sizeScaledNodes = document.querySelectorAll('.size-scaled-sprite');
+                }
+                sizeScaledNodes.forEach((node) => {
                     if (node.id && node.id.startsWith('tile-index-') && node.id !== `tile-index-${tileIndex}`) {
                         return;
                     }
@@ -3666,6 +3849,8 @@ if (window.CustomBattles) {
                     }
                     this.outfitSpriteOverrideObserver = null;
                 }
+                this.cancelPendingCustomPieceDomSync();
+                this._customPieceDomSyncStats = null;
                 this._outfitOverrideMissLogByKey.clear();
                 this._outfitOverrideMissLogCount = 0;
                 this._namedPieceMissLogByKey.clear();
@@ -3695,7 +3880,7 @@ if (window.CustomBattles) {
                 }
 
                 if (!force && this.outfitSpriteOverrideObserver) {
-                    this.syncCustomPieceDom();
+                    this.syncCustomPieceDom('reschedule');
                     return;
                 }
 
@@ -3704,7 +3889,7 @@ if (window.CustomBattles) {
                 let attempt = 0;
                 const fire = () => {
                     this.outfitSpriteOverrideTimer = null;
-                    this.syncCustomPieceDom();
+                    this.syncCustomPieceDom('retry');
                     if (attempt < delays.length) {
                         const delay = delays[attempt++];
                         this.outfitSpriteOverrideTimer = setTimeout(fire, delay);
@@ -3714,7 +3899,7 @@ if (window.CustomBattles) {
 
                 // Keep a light periodic sync for short-lived DOM churn, then rely on MutationObserver.
                 this.outfitSpriteOverrideInterval = setInterval(() => {
-                    this.syncCustomPieceDom();
+                    this.syncCustomPieceDom('interval');
                 }, 250);
                 this.outfitSpriteOverrideIntervalStopTimer = setTimeout(() => {
                     if (this.outfitSpriteOverrideInterval) {
@@ -3727,8 +3912,12 @@ if (window.CustomBattles) {
                 const observeRoot = document.body || document.documentElement;
                 if (!observeRoot) return;
 
-                this.outfitSpriteOverrideObserver = new MutationObserver(() => {
-                    this.syncCustomPieceDom();
+                this.outfitSpriteOverrideObserver = new MutationObserver((records) => {
+                    if (!this.isRelevantCustomPieceMutationBatch(records)) {
+                        this.noteSkippedCustomPieceMutationBatch();
+                        return;
+                    }
+                    this.requestCustomPieceDomSync('mutation');
                 });
                 this.outfitSpriteOverrideObserver.observe(observeRoot, {
                     childList: true,

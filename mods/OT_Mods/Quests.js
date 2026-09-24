@@ -3508,6 +3508,10 @@ function createNPCCooldownManager() {
   let annihilatorOrshabaalSceneSub = null;
   let annihilatorOrshabaalBattleWorld = null;
   let annihilatorOrshabaalKillCredited = false; // guards against double-crediting (HP-death hook + native onVictory can both fire)
+  // Quest Dev Tools practice run (QuestsDev.orshabaalTeleport): the fight is real, but a win is
+  // never credited (no progress, wins, scaling or leaderboard write). Optional level override.
+  let annihilatorOrshabaalDevPractice = false;
+  let annihilatorOrshabaalDevLevelOverride = null;
 
   // Putrid Chamber (Serpentine Tower Quest: basement lever → custom battle)
   let playerUsedSerpentineLeverToPutridChamber = false;
@@ -10700,7 +10704,9 @@ function createNPCCooldownManager() {
             const goblinName = getCreatureDisplayNameByGameId(creatureGameId) || creatureName;
             if (isGoblinCreatureName(goblinName)) {
               const currentPlayer = getCurrentPlayerName();
-              if (!(await canAwardWishlistDrop(currentPlayer))) {
+              if (isMissionLockedByTutorial(CHRISTMAS_MIRACLE_MISSION)) {
+                console.log('[Quests Mod][Wishlist] Tutorial missions not finished yet — skip drop');
+              } else if (!(await canAwardWishlistDrop(currentPlayer))) {
                 console.log('[Quests Mod][Wishlist] Already received, owned, or quest concluded — skip drop');
               } else {
                 const actualDropChance = getStaminaScaledDropChance(staminaSpent, WISHLIST_CONFIG.dropChance);
@@ -11875,6 +11881,28 @@ function createNPCCooldownManager() {
     }
   };
 
+  // ── Tutorial lock ──
+  // Every mission except the two tutorial ones ("Retrieve the Honeyflower" → "Fastest Bishop
+  // in Carlin") is locked until Fastest Bishop is completed (which implies Honeyflower).
+  // Missions the player had already started or finished before this lock existed stay
+  // playable (grandfathered) — the lock only stops NEW missions from starting.
+  // Entry points check this themselves (King keywords, Santa, Wishlist drop, Bubble/Astronis,
+  // plus the board NPCs' hasFinishedTutorialQuests() gates); setMissionProgress() below is
+  // the safety net so a future entry point that forgets can't start a mission anyway.
+  const TUTORIAL_MISSION_IDS = new Set(['king_honeyflower', 'king_crossing_the_line']);
+
+  function isTutorialMissionChainComplete() {
+    return MissionManager.isCompleted(KING_CROSSING_THE_LINE_MISSION);
+  }
+
+  function isMissionLockedByTutorial(mission) {
+    if (!mission?.id || TUTORIAL_MISSION_IDS.has(mission.id)) return false;
+    if (isTutorialMissionChainComplete()) return false;
+    const progress = MissionManager.getProgress(mission) || {};
+    if (progress.accepted || progress.completed || progress.battleCompleted) return false;
+    return true;
+  }
+
   // Legacy function wrappers for backward compatibility
   function getMissionProgress(mission) {
     return MissionManager.getProgress(mission);
@@ -11910,7 +11938,23 @@ function createNPCCooldownManager() {
     return extraCondition ? !!extraCondition(progress) : true;
   }
 
-  function setMissionProgress(mission, progress) {
+  // Returns false (and changes nothing) when the tutorial lock refuses the write.
+  function setMissionProgress(mission, progress, { bypassTutorialLock = false } = {}) {
+    // Tutorial-lock safety net: refuse STARTING a locked mission (not-accepted → accepted).
+    // Only once Firebase progress has hydrated — before that the tutorial state is unknown
+    // and a load/reconcile write must never be mistaken for a fresh start.
+    if (!bypassTutorialLock
+      && progress?.accepted
+      && !progress?.completed
+      && missionProgressHydratedFromFirebase
+      && isMissionLockedByTutorial(mission)) {
+      console.error(
+        `[Quests Mod][Tutorial Lock] Blocked starting "${mission?.id}" — the tutorial missions ` +
+        '(Retrieve the Honeyflower, Fastest Bishop in Carlin) must be completed first. ' +
+        'An entry point is missing its isMissionLockedByTutorial() check.'
+      );
+      return false;
+    }
     MissionManager.setProgress(mission, progress);
     if (questDialogueReady && progress?.accepted && !progress?.completed) {
       setupProgressAwareQuestObservers();
@@ -11919,6 +11963,7 @@ function createNPCCooldownManager() {
     if (progress?.completed) {
       refreshBoardNpcsAfterQuestItemsChange();
     }
+    return true;
   }
 
   /**
@@ -11928,11 +11973,13 @@ function createNPCCooldownManager() {
    * @param {Object} [options]
    * @param {string} [options.playerName] - Override for the current player name
    */
-  async function persistMissionProgress(mission, progress, { playerName } = {}) {
-    setMissionProgress(mission, progress);
+  // Resolves false when the tutorial lock refused the write (nothing saved), true otherwise.
+  async function persistMissionProgress(mission, progress, { playerName, bypassTutorialLock = false } = {}) {
+    if (setMissionProgress(mission, progress, { bypassTutorialLock }) === false) return false;
     const name = playerName || getCurrentPlayerName();
-    if (!name) return;
+    if (!name) return true;
     await saveKingTibianusProgress(name, getAllMissionProgress());
+    return true;
   }
 
   // =======================
@@ -14656,6 +14703,16 @@ function createNPCCooldownManager() {
           return true;
         }
 
+        if (isMissionLockedByTutorial(offeredMissionToStart)) {
+          kingChatState.missionOffered = false;
+          kingChatState.offeredMission = null;
+          queueKingReply('Complete your current task for me first, then we may speak of further drills.', { onDone: () => {
+            clearTextarea();
+          } });
+          tibianusCooldown.reset();
+          return true;
+        }
+
         if (offeredMissionToStart.id === KING_COPPER_KEY_MISSION.id && !canOfferCopperKeyMission()) {
           kingChatState.missionOffered = false;
           kingChatState.offeredMission = null;
@@ -15105,6 +15162,13 @@ function createNPCCooldownManager() {
           kingChatState.missionOffered = false;
           kingChatState.offeredMission = null;
         } else if (mentionsCrossing && !getHoneyflowerMissionProgress().completed) {
+          kingResponse = 'Complete your current task for me first, then we may speak of further drills.';
+          kingChatState.missionOffered = false;
+          kingChatState.offeredMission = null;
+        } else if ((mentionsKey || mentionsDragon || mentionsLetter || mentionsMonks || mentionsScarab)
+          && isMissionLockedByTutorial(targetMission)) {
+          // Tutorial lock: topic keywords used to jump straight to the King's later missions
+          // (Red Dragon, Copper Key, Letter, ...) before the two tutorial quests were done.
           kingResponse = 'Complete your current task for me first, then we may speak of further drills.';
           kingChatState.missionOffered = false;
           kingChatState.offeredMission = null;
@@ -19277,7 +19341,19 @@ function createNPCCooldownManager() {
       const table = document.createElement('div');
       table.style.cssText = 'width:100%;box-sizing:border-box;display:flex;flex-direction:column;gap:2px;';
       table.appendChild(buildOrshabaalLeaderboardRow(headerCells, { header: true }));
-      if (message) table.appendChild(createArenaLeaderboardPlaceholderMessage(message));
+      if (message) {
+        // Empty/loading state: stretch the table to the box's full height and centre the
+        // message in the space below the header, horizontally and vertically.
+        table.style.minHeight = '100%';
+        const placeholder = createArenaLeaderboardPlaceholderMessage(message);
+        Object.assign(placeholder.style, {
+          flex: '1 1 auto',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center'
+        });
+        table.appendChild(placeholder);
+      }
       return table;
     };
     appendArenaLeaderboardBox(listElement, shell('Loading...'), ORSHABAAL_LEADERBOARD_BOX_TITLE);
@@ -19328,12 +19404,16 @@ function createNPCCooldownManager() {
       isActiveBattle: () => playerEnteredAnnihilatorOrshabaal && !!annihilatorOrshabaalBattle,
       getEndsAt: () => (isWorldRaidStateLive(worldRaidState) ? getWorldRaidEffectiveEndTime(worldRaidState) : null),
       iconUrl: () => getQuestItemsAssetUrl('Orshabaal_Soul_Core.gif'),
+      // "You" = your best completed (highest defeated) level — the same value the leaderboard
+      // and the Top entry rank by, so the two are directly comparable. Fight level in the hover.
       getPlayerStats: () => {
         const wins = getOrshabaalDefeatCount();
         const fighting = annihilatorOrshabaalFightLevel ?? getOrshabaalScaledLevel(wins);
+        const best = Math.floor(Number(kingChatState.annihilatorOrshabaalHighestLevelDefeated) || 0);
         return {
-          valueText: String(fighting),
-          detail: `Fighting level ${fighting} · ${wins} win${wins === 1 ? '' : 's'} so far`
+          valueText: best > 0 ? String(best) : '-',
+          bestLevel: best,
+          detail: `${best > 0 ? `Best level beaten ${best}` : 'No level beaten yet'} · fighting level ${fighting} · ${wins} win${wins === 1 ? '' : 's'} so far`
         };
       },
       loadEntries: (force) => loadOrshabaalLeaderboard(force),
@@ -20610,6 +20690,19 @@ function createNPCCooldownManager() {
           text: 'World Raid status',
           onClick: () => runGuarded('World Raid status', () => { QuestsDev.worldRaidStatus(); setStatus('World Raid status logged to console.'); }),
           command: 'QuestsDev.worldRaidStatus()'
+        },
+        // Practice run: straight into the fight, win never credited (see orshabaalDevTeleport).
+        {
+          text: 'Teleport to Orshabaal battle',
+          onClick: () => runGuarded('Teleport to Orshabaal battle', () => {
+            const input = window.prompt('Orshabaal level for this practice fight (1–10000). Leave empty for your normal scaled level. A win is NOT credited.', '');
+            if (input === null) return;
+            const result = QuestsDev.orshabaalTeleport(input.trim() === '' ? null : input.trim());
+            // Close Dev Tools so the board (and the placement tiles) is visible — same as
+            // Bubble's own entry does.
+            if (result) ModalHelpers.closeModal(0);
+          }),
+          command: 'QuestsDev.orshabaalTeleport()'
         },
         // Per-player Orshabaal scaling — these only change YOUR wins + leaderboard row.
         ...[
@@ -35894,10 +35987,43 @@ function createNPCCooldownManager() {
 
   function getAnnihilatorOrshabaalLogPrefix() { return '[Quests Mod][Astronis]'; }
 
+  function getAnnihilatorFloor() {
+    const floor = globalThis.state?.player?.getSnapshot?.()?.context?.rooms?.edanni?.floor;
+    return typeof floor === 'number' ? floor : null;
+  }
+
   function hasCompletedAnnihilatorFloor15() {
-    const rooms = globalThis.state?.player?.getSnapshot?.()?.context?.rooms;
-    const floor = rooms?.edanni?.floor;
-    return typeof floor === 'number' && floor >= 15;
+    const floor = getAnnihilatorFloor();
+    return floor != null && floor >= 15;
+  }
+
+  // Single gate for everything World Raid shows or does for THIS player: the announcement
+  // toasts / reveal, the Missions log tab + button glow, Bubble, raid tracking and the Edron
+  // trigger roll. Requires both tutorial missions done AND The Annihilator Quest cleared at
+  // floor 15 (400%). Returns the reason string when ineligible, null when eligible.
+  function getWorldRaidIneligibleReason() {
+    if (isMissionLockedByTutorial(ANNIHILATOR_ORSHABAAL_MISSION)) {
+      return 'tutorial missions not completed yet';
+    }
+    if (!hasCompletedAnnihilatorFloor15()) {
+      const floor = getAnnihilatorFloor();
+      return `The Annihilator Quest not completed at floor 15 / 400% (current floor: ${floor != null ? floor : 'none'})`;
+    }
+    return null;
+  }
+
+  function isEligibleForWorldRaid() {
+    return getWorldRaidIneligibleReason() === null;
+  }
+
+  // Logs "raid hidden for this player" once per raid instance + reason (the poll re-checks
+  // every tick, so an unthrottled log would repeat forever).
+  let lastLoggedWorldRaidIneligibleKey = null;
+  function logWorldRaidHiddenForPlayer(startedAt, reason) {
+    const key = `${startedAt}|${reason}`;
+    if (key === lastLoggedWorldRaidIneligibleKey) return;
+    lastLoggedWorldRaidIneligibleKey = key;
+    console.log(`[Quests Mod][World Raid] Raid is live but hidden for this player: ${reason}`);
   }
 
   // =======================
@@ -36138,6 +36264,14 @@ function createNPCCooldownManager() {
   // local reveal sequence for the CURRENT raid instance.
   function ensureWorldRaidLocalRevealForCurrentState() {
     if (!isWorldRaidStateLive(worldRaidState)) return;
+    // No raid announcement/reveal for a player who can't take part yet (tutorial + Annihilator
+    // floor 15). The poll keeps calling this, so the buildup starts on the next tick after
+    // they become eligible.
+    const ineligibleReason = getWorldRaidIneligibleReason();
+    if (ineligibleReason) {
+      logWorldRaidHiddenForPlayer(worldRaidState.startedAt, ineligibleReason);
+      return;
+    }
     const startedAt = Number(worldRaidState.startedAt);
     if (worldRaidLocalRevealedStartedAt === startedAt) return; // already revealed, or sequencing
     if (worldRaidToastSequenceTimers.length) return; // buildup already in progress for this raid
@@ -36152,7 +36286,11 @@ function createNPCCooldownManager() {
   }
 
   function isAnnihilatorOrshabaalRaidVisibleToThisClient() {
-    return isWorldRaidStateLive(worldRaidState)
+    // Also re-checked here (not just at reveal time): this browser may have revealed the raid
+    // earlier (localStorage "seen" key, or a pre-5.0.16 build) for a player who isn't eligible.
+    // Drives the Missions log tab, the Missions button glow and Bubble.
+    return isEligibleForWorldRaid()
+      && isWorldRaidStateLive(worldRaidState)
       && worldRaidLocalRevealedStartedAt === Number(worldRaidState.startedAt);
   }
 
@@ -36162,6 +36300,13 @@ function createNPCCooldownManager() {
 
   async function tryTriggerWorldRaid() {
     try {
+      // Only players who could actually take part may start the (global) raid by winning in
+      // Edron — tutorial done + The Annihilator Quest cleared at floor 15 (400%).
+      const ineligibleReason = getWorldRaidIneligibleReason();
+      if (ineligibleReason) {
+        console.log(`[Quests Mod][World Raid] Edron victory — raid roll skipped: ${ineligibleReason}`);
+        return;
+      }
       if (isWorldRaidStateLive(worldRaidState) || isWorldRaidOnCooldown(worldRaidState)) {
         if (isQuestsVerboseLogging()) {
           console.log(`[Quests Mod][World Raid][debug] Edron victory — roll skipped (${isWorldRaidStateLive(worldRaidState) ? 'raid live' : 'on cooldown'})`);
@@ -36357,7 +36502,7 @@ function createNPCCooldownManager() {
   // hasn't reported back yet still sees him even after the raid ends globally, so they always
   // have a way to walk back and collect the one-time reward.
   function astronisUnlocked() {
-    if (!hasCompletedAnnihilatorFloor15()) return false;
+    if (!isEligibleForWorldRaid()) return false;
     if (isAnnihilatorOrshabaalRaidVisibleToThisClient()) return true;
     const status = getAnnihilatorOrshabaalRaidStatus();
     return !status.raidLive && status.hasPendingAction;
@@ -36374,6 +36519,11 @@ function createNPCCooldownManager() {
   // Called on every World Raid poll tick (see pollWorldRaidState) — not just when the player
   // happens to talk to Bubble — so this self-heals promptly instead of waiting on chat.
   async function ensureAnnihilatorOrshabaalProgressForCurrentRaid() {
+    // Not eligible (tutorial / Annihilator floor 15): don't claim the live raid instance for
+    // this player. Existing accepted/battleCompleted flags are left untouched here.
+    if (!isEligibleForWorldRaid()) {
+      return getMissionProgress(ANNIHILATOR_ORSHABAAL_MISSION) || {};
+    }
     // Never judge "is a raid live" off data we've never actually fetched (see
     // worldRaidStateFetched's doc comment) — that reads a fresh page load's still-null
     // worldRaidState as "no raid", which can wipe a real, already-earned battleCompleted the
@@ -36461,6 +36611,8 @@ function createNPCCooldownManager() {
       playerEnteredAnnihilatorOrshabaal = false;
       annihilatorOrshabaalKillCredited = false;
       annihilatorOrshabaalFightLevel = null;
+      annihilatorOrshabaalDevPractice = false;
+      annihilatorOrshabaalDevLevelOverride = null;
       restoreAnnihilatorOrshabaalTileMutations();
       if (annihilatorOrshabaalBattle) {
         annihilatorOrshabaalBattle.cleanup(restoreBoardSetupAnnihilatorOrshabaal, showQuestOverlays);
@@ -36772,6 +36924,10 @@ function createNPCCooldownManager() {
   async function creditAnnihilatorOrshabaalKill() {
     if (annihilatorOrshabaalKillCredited) return;
     annihilatorOrshabaalKillCredited = true;
+    if (annihilatorOrshabaalDevPractice) {
+      console.log(`${getAnnihilatorOrshabaalLogPrefix()}[Dev] Orshabaal defeated in a practice run — not credited (no progress, wins or leaderboard change)`);
+      return;
+    }
     console.log(`${getAnnihilatorOrshabaalLogPrefix()} Orshabaal defeated`);
     try {
       const progress = getMissionProgress(ANNIHILATOR_ORSHABAAL_MISSION) || {};
@@ -36843,7 +36999,7 @@ function createNPCCooldownManager() {
     const villains = spawn.villains;
     const allies = spawn.allies;
     // Hydrated units are fresh copies, so overriding the level here never touches battles.json.
-    annihilatorOrshabaalFightLevel = getOrshabaalScaledLevel();
+    annihilatorOrshabaalFightLevel = annihilatorOrshabaalDevLevelOverride ?? getOrshabaalScaledLevel();
     const orshabaalUnit = villains.find((v) => String(v?.nickname || '').toLowerCase() === 'orshabaal');
     if (orshabaalUnit) {
       orshabaalUnit.level = annihilatorOrshabaalFightLevel;
@@ -36946,7 +37102,11 @@ function createNPCCooldownManager() {
     return true;
   }
 
-  function enterAnnihilatorOrshabaal() {
+  // devPractice/devLevel: only passed by QuestsDev.orshabaalTeleport — a normal entry (Bubble)
+  // always clears them, so a practice flag can never leak into a real, credited fight.
+  function enterAnnihilatorOrshabaal({ devPractice = false, devLevel = null } = {}) {
+    annihilatorOrshabaalDevPractice = devPractice === true;
+    annihilatorOrshabaalDevLevelOverride = annihilatorOrshabaalDevPractice && Number.isFinite(devLevel) ? devLevel : null;
     let roomId = ANNIHILATOR_ORSHABAAL_BATTLE_ROOM_ID || getRoomIdByRoomName(ANNIHILATOR_ORSHABAAL_BATTLE_ROOM_NAME);
     if (!roomId) roomId = getRoomIdByRoomName(ANNIHILATOR_ORSHABAAL_BATTLE_ROOM_NAME);
     if (!roomId) {
@@ -36977,7 +37137,9 @@ function createNPCCooldownManager() {
     updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
     const enteringToast = TOAST_MESSAGES.annihilatorOrshabaalEntering;
     showToast({
-      message: typeof enteringToast === 'function' ? enteringToast(getOrshabaalScaledLevel()) : enteringToast,
+      message: typeof enteringToast === 'function'
+        ? enteringToast(annihilatorOrshabaalDevLevelOverride ?? getOrshabaalScaledLevel())
+        : enteringToast,
       logPrefix: getAnnihilatorOrshabaalLogPrefix()
     });
   }
@@ -39198,6 +39360,7 @@ function createNPCCooldownManager() {
       logPrefix: '[Quests Mod][Board NPC][Santa Claus]',
       chatMode: 'keywords',
       isUnlocked: () => {
+        if (isMissionLockedByTutorial(CHRISTMAS_MIRACLE_MISSION)) return false;
         const count = cachedQuestItems?.[WISHLIST_CONFIG.productName] || 0;
         return count >= 1;
       },
@@ -47449,7 +47612,8 @@ function createNPCCooldownManager() {
           riddleSolved: true
         }));
       }
-      setMissionProgress(mission, progress);
+      // Dev tools may put any mission into any state, tutorial or not.
+      setMissionProgress(mission, progress, { bypassTutorialLock: true });
       acts.push(completed ? `${display}: completed` : `${display}: accepted`);
       if (completed && typeof onComplete === 'function') await onComplete(acts);
     }
@@ -47726,7 +47890,8 @@ function createNPCCooldownManager() {
         accepted: true,
         completed: false
       };
-      await persistMissionProgress(mission, progress);
+      // Dev tools may accept any mission, tutorial or not.
+      await persistMissionProgress(mission, progress, { bypassTutorialLock: true });
       console.log('[Quests Mod][Dev] Mission set to accepted and saved:', missionId);
       if (missionId === KING_MONKS_STUDY_MISSION.id && typeof updateTile53CostelloRightClickState === 'function') {
         updateTile53CostelloRightClickState();
@@ -47874,7 +48039,7 @@ function createNPCCooldownManager() {
     }
     try {
       const patch = buildMissionProgressPatch(mission, fields, { [field]: !!value });
-      await persistMissionProgress(mission, patch);
+      await persistMissionProgress(mission, patch, { bypassTutorialLock: true });
       // Sub-flags gate itemLifecycle rules (e.g. demon_helmet.battleCompleted consumes the
       // Golden Key) — sync the bag like every other progress-mutating dev command does.
       await reconcileQuestItemsFromProgress({ label: `setProgressFlag ${missionId}.${field}` });
@@ -48244,6 +48409,27 @@ function createNPCCooldownManager() {
     return summary;
   }
 
+  // Teleports straight into the Orshabaal fight as a practice run — no raid, eligibility,
+  // tutorial or mission-accept requirement, and a win is never credited (see
+  // creditAnnihilatorOrshabaalKill). `level` overrides the boss level (clamped 1..10000);
+  // omitted = your normal scaled level.
+  function orshabaalDevTeleport(level = null) {
+    let devLevel = null;
+    if (level != null && level !== '') {
+      const parsed = Math.floor(Number(level));
+      if (!Number.isFinite(parsed)) {
+        console.error('[Quests Mod][Dev] orshabaalTeleport: level must be a number, got', level);
+        return null;
+      }
+      devLevel = Math.max(1, Math.min(ORSHABAAL_MAX_LEVEL, parsed));
+    }
+    if (playerEnteredAnnihilatorOrshabaal) cleanupAnnihilatorOrshabaalQuest();
+    const fightLevel = devLevel ?? getOrshabaalScaledLevel();
+    console.log(`[Quests Mod][Dev] Teleporting to the Orshabaal battle (practice run, level ${fightLevel}${devLevel != null ? ' — override' : ' — your scaled level'}; a win is not credited)`);
+    enterAnnihilatorOrshabaal({ devPractice: true, devLevel });
+    return { practice: true, level: fightLevel };
+  }
+
   function orshabaalDevAddWins(delta = 1) {
     return orshabaalDevSetWins(getOrshabaalDefeatCount() + Math.floor(Number(delta) || 0));
   }
@@ -48261,6 +48447,7 @@ function createNPCCooldownManager() {
     console.log('[Quests Mod][Dev] complete / setAccepted / reset / resetAll / completeAll / resetSanta now auto-sync the quest-item bag to progress (grant/stale/backfill rules). QuestsDev.reconcile() runs that sync on demand — use it after a grant() that changed both progress and items.');
     console.log('[Quests Mod][Dev] World Raid (Orshabaal): QuestsDev.worldRaidStatus() to inspect, QuestsDev.worldRaidForceTrigger() / .worldRaidForceEnd() / .worldRaidResetCooldown() / .worldRaidClear() to control it. WARNING: these hit the SAME shared Firebase path production uses — forceTrigger starts a real raid for every mod user online, not just you.');
     console.log('[Quests Mod][Dev] Orshabaal wins (your own scaling + leaderboard row only): QuestsDev.orshabaalWins() to inspect, QuestsDev.orshabaalAddWins(n) / .orshabaalRemoveWins(n) / .orshabaalSetWins(n) to change. Level = base + 500 × wins, capped.');
+    console.log('[Quests Mod][Dev] Orshabaal practice fight: QuestsDev.orshabaalTeleport() teleports straight into the battle at your scaled level, or QuestsDev.orshabaalTeleport(level) at any level (1–10000). No raid/requirements needed; a win is NOT credited (no progress, wins or leaderboard change).');
     console.log('[Quests Mod][Dev] World Raid: set the extension\'s Log Level to "verbose" (popup) for a running console timer — logs on every 30s poll tick, each toast-buildup stage, and every trigger/defeat, each with a formatted countdown (LIVE — ends in Xh Ym / on cooldown — triggerable again in Xd Yh / triggerable now).');
   }
 
@@ -48283,7 +48470,7 @@ function createNPCCooldownManager() {
         'setSealCompleted', 'getSealCompleted', 'areAllSevenSealsCompleted',
         'setBasiliskChallengeCompleted', 'getBasiliskChallengeCompleted', 'areAllBasiliskChallengesCompleted',
         'setBasiliskChallengeBattleCompleted', 'getBasiliskChallengeBattleCompleted',
-        'orshabaalWins', 'orshabaalSetWins', 'orshabaalAddWins', 'orshabaalRemoveWins', 'orshabaalResetAllWins',
+        'orshabaalWins', 'orshabaalSetWins', 'orshabaalAddWins', 'orshabaalRemoveWins', 'orshabaalResetAllWins', 'orshabaalTeleport',
         'help', 'catalog'
       ]
     };
@@ -48337,7 +48524,8 @@ function createNPCCooldownManager() {
     orshabaalSetWins: orshabaalDevSetWins,
     orshabaalAddWins: orshabaalDevAddWins,
     orshabaalRemoveWins: orshabaalDevRemoveWins,
-    orshabaalResetAllWins: orshabaalDevResetAllWins
+    orshabaalResetAllWins: orshabaalDevResetAllWins,
+    orshabaalTeleport: orshabaalDevTeleport
   };
 
   function registerQuestsDevHelpers() {

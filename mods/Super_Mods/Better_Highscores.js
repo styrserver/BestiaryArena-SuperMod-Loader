@@ -1227,23 +1227,32 @@
 
       parts.header.replaceChildren(createWorldRaidEntry(active.iconUrl, active.title, active.title, WORLD_RAID_TITLE_COLOR, `World Raid: ${active.title}`));
 
+      // Same rule as the normal overlay's world-record sections: when you hold the record,
+      // your own value would just repeat it — show only the record, in green.
+      const youHoldRecord = !!leader?.isYou;
       let topNode;
       if (!data) {
         topNode = createWorldRaidEntry(ASSETS.HIGHSCORE_ICON, 'Top', '…', '#aaa', 'Loading top slayers');
       } else if (!leader) {
         topNode = createWorldRaidEntry(ASSETS.HIGHSCORE_ICON, 'Top', '-', '#aaa', 'No slayers yet');
       } else {
-        topNode = createWorldRaidEntry(ASSETS.HIGHSCORE_ICON, 'Top', leader.valueText, getMedalColor(1));
+        topNode = createWorldRaidEntry(ASSETS.HIGHSCORE_ICON, 'Top', leader.valueText, youHoldRecord ? '#00ff00' : getMedalColor(1));
         // Hover → same player-profile tooltip the normal world-record entries use.
         attachPlayerProfileHover(topNode, leader.name);
       }
       parts.top.replaceChildren(topNode);
 
-      const rankText = data?.you ? ` · rank #${data.you.rank}` : '';
-      parts.you.replaceChildren(createWorldRaidEntry(
-        ASSETS.ACHIEVEMENT_ICON, 'You', active.player?.valueText || '-', 'white',
-        `${active.player?.detail || ''}${rankText}`
-      ));
+      if (youHoldRecord) {
+        parts.you.replaceChildren();
+        parts.you.style.display = 'none';
+      } else {
+        const rankText = data?.you ? ` · rank #${data.you.rank}` : '';
+        parts.you.style.display = 'flex';
+        parts.you.replaceChildren(createWorldRaidEntry(
+          ASSETS.ACHIEVEMENT_ICON, 'You', active.player?.valueText || '-', 'white',
+          `${active.player?.detail || ''}${rankText}`
+        ));
+      }
 
       parts.timerEntry = createWorldRaidEntry(WORLD_RAID_TIMER_ICON, 'Time left', '', 'white', 'Time left in this raid');
       parts.time.replaceChildren(parts.timerEntry);
