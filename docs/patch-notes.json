@@ -4,6 +4,26 @@
   },
   "notes": [
     {
+      "version": "5.0.15",
+      "changes": [
+        {
+          "mod": "Better Highscores",
+          "type": "added",
+          "text": "In a world raid, the overlay no longer hides: it shows a compact world raid bar with the raid, time left, the top level beaten (hover to see who) and the level you're fighting. It hides while the fight runs so it doesn't cover the boss health bar, and comes back afterwards. Click it to open the world raid leaderboard."
+        },
+        {
+          "mod": "Quests",
+          "type": "added",
+          "text": "The world raid boss now gets 500 levels stronger for you each time you beat it (starting lower than before, with a cap). Only your first win completes the mission and gives its reward; every later win counts for the new world raid leaderboard, opened with the 'World Raid' button in the Mission Leaderboard window and ranked by highest level beaten, then wins, then who got there first. Wins are stored only in the cloud, kept safe if saving fails and retried until they go through. Quest Dev Tools can add, remove or reset your own wins, or reset everyone's."
+        },
+        {
+          "mod": "Quests",
+          "type": "changed",
+          "text": "World raids now last 12 hours (was 24) with a 36-hour cooldown after they end (was 5 days). The world raid's dialogue now fits repeat raids: returning players get their own offer and turn-in lines, and new keywords explain why the boss keeps getting stronger and where to see the rankings. Quest Dev Tools right-click menus now show each action's copy-command button beside it instead of in a separate list."
+        }
+      ]
+    },
+    {
       "version": "5.0.14",
       "changes": [
         {

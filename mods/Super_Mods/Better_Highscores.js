@@ -296,7 +296,14 @@
       styles.top = 'auto';
       styles.bottom = `${Math.max(gap, window.innerHeight - rect.bottom + gap)}px`;
     } else {
-      styles.top = `${rect.top + gap}px`;
+      let top = rect.top + gap;
+      // The World Raid overlay shares the board's top-centre slot with Quests' boss HP bar
+      // (#quests-boss-hp-bar-<id>) — sit just below it instead of on top of it.
+      if (container._worldRaid) {
+        const hpRect = document.querySelector('[id^="quests-boss-hp-bar-"]')?.getBoundingClientRect();
+        if (hpRect && hpRect.height > 0) top = Math.max(top, hpRect.bottom + 4);
+      }
+      styles.top = `${top}px`;
       styles.bottom = 'auto';
     }
 
@@ -314,6 +321,9 @@
       }
       if (restoreButton) {
         syncOverlayPosition(restoreButton);
+      }
+      if (worldRaidOverlay) {
+        syncOverlayPosition(worldRaidOverlay);
       }
     };
 
@@ -1077,6 +1087,262 @@
   }
 
 // =======================
+// MODULE 1c: World Raid overlay
+// =======================
+// Custom battles normally hide Better Highscores entirely (custom-battles.js →
+// setCustomBattleSuppressed). A World Raid fight is a custom battle too, but instead of an
+// empty board it gets its own overlay in the same spot: top slayers, your wins + fight level,
+// and the raid's time left. All raid data comes from Quests' read-only window.WorldRaids
+// bridge, so a future raid shows up here with no changes to this file. Clicking opens the
+// full World Raid leaderboard.
+  const WORLD_RAID_OVERLAY_CLASS = 'better-highscores-world-raid';
+  const WORLD_RAID_TICK_MS = 1000;
+  const WORLD_RAID_TOP_REFRESH_MS = 60000;
+  const WORLD_RAID_TOP_COUNT = 3;
+  const WORLD_RAID_TITLE_COLOR = '#ff6b3d';
+
+  let worldRaidOverlay = null;
+  let worldRaidTickTimer = null;
+  let worldRaidGameStartedSub = null;
+  let worldRaidTop = { raidId: null, data: null, fetchedAt: 0, inflight: false };
+
+  function isBoardGameStarted() {
+    try {
+      return globalThis.state?.board?.getSnapshot?.()?.context?.gameStarted === true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function getActiveWorldRaid() {
+    if (modDisposed || isBetterHighscoresHidden() || isPowerSavingSuppressed() || !isCustomBattleSuppressed()) {
+      return null;
+    }
+    // Hidden while the fight is actually running — it would cover the boss HP bar. Shown
+    // again during setup and after the fight ends.
+    if (isBoardGameStarted()) {
+      return null;
+    }
+    try {
+      return window.WorldRaids?.getActive?.() || null;
+    } catch (error) {
+      console.warn('[Better Highscores][World Raid] getActive failed:', error);
+      return null;
+    }
+  }
+
+  function formatWorldRaidTimeLeft(ms) {
+    if (!Number.isFinite(ms)) return '';
+    const total = Math.max(0, Math.floor(ms / 1000));
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const s = total % 60;
+    return h > 0 ? `${h}h ${m}m` : `${m}m ${String(s).padStart(2, '0')}s`;
+  }
+
+  function createWorldRaidSection() {
+    const section = document.createElement('div');
+    Object.assign(section.style, SECTION_WRAPPER_STYLE);
+    return section;
+  }
+
+  function buildWorldRaidOverlay() {
+    const wrapper = document.createElement('div');
+    wrapper.className = WORLD_RAID_OVERLAY_CLASS;
+
+    const backgroundDiv = document.createElement('div');
+    Object.assign(backgroundDiv.style, {
+      position: 'absolute', top: '0', left: '0', right: '0', bottom: '0',
+      background: `url("${ASSETS.BACKGROUND}")`,
+      backgroundSize: 'auto',
+      backgroundRepeat: 'repeat',
+      opacity: getBackgroundOpacity(),
+      borderRadius: '4px',
+      zIndex: '0',
+      pointerEvents: 'none'
+    });
+    wrapper.appendChild(backgroundDiv);
+
+    const content = document.createElement('div');
+    applyContentContainerStyles(content);
+    content.title = 'Click to open the World Raid leaderboard';
+
+    const header = createWorldRaidSection();
+    const top = createWorldRaidSection();
+    const you = createWorldRaidSection();
+    const time = createWorldRaidSection();
+    [top, you, time].forEach((el) => {
+      el.style.borderLeft = '1px solid rgba(255, 255, 255, 0.2)';
+      el.style.paddingLeft = '6px';
+    });
+    content.append(header, time, top, you);
+    wrapper.appendChild(content);
+
+    const onClick = (e) => {
+      e.stopPropagation();
+      try {
+        window.WorldRaids?.openLeaderboard?.();
+      } catch (error) {
+        console.error('[Better Highscores][World Raid] Could not open leaderboard:', error);
+      }
+    };
+    content.addEventListener('click', onClick);
+
+    wrapper._backgroundDiv = backgroundDiv;
+    wrapper._contentDiv = content;
+    wrapper._worldRaid = { header, top, you, time, onClick };
+    return wrapper;
+  }
+
+  const WORLD_RAID_TIMER_ICON = '/assets/icons/speed.png';
+
+  // icon + text, in the same shape as the normal overlay's entries.
+  function createWorldRaidEntry(iconSrc, iconAlt, text, color, title = '') {
+    const span = document.createElement('span');
+    Object.assign(span.style, ENTRY_SPAN_STYLE, { color });
+    if (iconSrc) span.appendChild(createScoreIcon(iconSrc, iconAlt, title || iconAlt));
+    const label = document.createElement('span');
+    label.textContent = text;
+    span.appendChild(label);
+    if (title) span.title = title;
+    span._label = label;
+    return span;
+  }
+
+  // Compact, symbol-first layout matching the normal overlay:
+  //   [raid icon] Orshabaal │ [clock] 7h 48m │ [trophy] N │ [achievement] N
+  // Top level shows no name — hovering it opens the leader's profile tooltip.
+  // The static part is rebuilt only when its data changes; the countdown just updates text.
+  function renderWorldRaidOverlay(active) {
+    const parts = worldRaidOverlay?._worldRaid;
+    if (!parts) return;
+    // mountOverlay/applyContainerStyles reset the content cursor to the settings-menu one.
+    worldRaidOverlay._contentDiv.style.cursor = 'pointer';
+
+    const data = worldRaidTop.raidId === active.id ? worldRaidTop.data : null;
+    const leader = data?.entries?.[0] || null;
+    const key = JSON.stringify([active.id, active.title, active.iconUrl, active.player, data ? data.entries : 'loading', data?.you?.rank ?? null]);
+    if (parts.key !== key) {
+      parts.key = key;
+
+      parts.header.replaceChildren(createWorldRaidEntry(active.iconUrl, active.title, active.title, WORLD_RAID_TITLE_COLOR, `World Raid: ${active.title}`));
+
+      let topNode;
+      if (!data) {
+        topNode = createWorldRaidEntry(ASSETS.HIGHSCORE_ICON, 'Top', '…', '#aaa', 'Loading top slayers');
+      } else if (!leader) {
+        topNode = createWorldRaidEntry(ASSETS.HIGHSCORE_ICON, 'Top', '-', '#aaa', 'No slayers yet');
+      } else {
+        topNode = createWorldRaidEntry(ASSETS.HIGHSCORE_ICON, 'Top', leader.valueText, getMedalColor(1));
+        // Hover → same player-profile tooltip the normal world-record entries use.
+        attachPlayerProfileHover(topNode, leader.name);
+      }
+      parts.top.replaceChildren(topNode);
+
+      const rankText = data?.you ? ` · rank #${data.you.rank}` : '';
+      parts.you.replaceChildren(createWorldRaidEntry(
+        ASSETS.ACHIEVEMENT_ICON, 'You', active.player?.valueText || '-', 'white',
+        `${active.player?.detail || ''}${rankText}`
+      ));
+
+      parts.timerEntry = createWorldRaidEntry(WORLD_RAID_TIMER_ICON, 'Time left', '', 'white', 'Time left in this raid');
+      parts.time.replaceChildren(parts.timerEntry);
+    }
+
+    const left = Number.isFinite(active.endsAt) ? formatWorldRaidTimeLeft(active.endsAt - Date.now()) : '';
+    parts.time.style.display = left ? 'flex' : 'none';
+    if (parts.timerEntry && parts.timerEntry._label.textContent !== left) {
+      parts.timerEntry._label.textContent = left;
+    }
+  }
+
+  function refreshWorldRaidTop(raidId, forceRefresh = false) {
+    if (worldRaidTop.inflight || typeof window.WorldRaids?.getTop !== 'function') return;
+    worldRaidTop.inflight = true;
+    window.WorldRaids.getTop(raidId, WORLD_RAID_TOP_COUNT, forceRefresh)
+      .then((data) => {
+        if (modDisposed) return;
+        worldRaidTop = { raidId, data, fetchedAt: Date.now(), inflight: false };
+        syncWorldRaidOverlay();
+      })
+      .catch((error) => {
+        console.warn('[Better Highscores][World Raid] Could not load top slayers:', error);
+        // Back off a full refresh interval instead of retrying every tick.
+        worldRaidTop = { ...worldRaidTop, fetchedAt: Date.now(), inflight: false };
+      });
+  }
+
+  function removeWorldRaidOverlay() {
+    if (!worldRaidOverlay) return;
+    hidePlayerProfileTooltip(); // the leader entry uses the shared profile-hover tooltip
+    const parts = worldRaidOverlay._worldRaid;
+    if (parts?.onClick) worldRaidOverlay._contentDiv?.removeEventListener('click', parts.onClick);
+    worldRaidOverlay.remove();
+    worldRaidOverlay = null;
+  }
+
+  function syncWorldRaidOverlay() {
+    const active = getActiveWorldRaid();
+    if (!active) {
+      removeWorldRaidOverlay();
+      return;
+    }
+    if (!worldRaidOverlay || !document.body.contains(worldRaidOverlay)) {
+      worldRaidOverlay = buildWorldRaidOverlay();
+      mountOverlay(worldRaidOverlay);
+      // Reappearing (e.g. after a fight) — refresh the top slayers so a fresh kill shows.
+      worldRaidTop.fetchedAt = 0;
+    }
+    const isNewRaid = worldRaidTop.raidId !== active.id;
+    if (isNewRaid || Date.now() - worldRaidTop.fetchedAt > WORLD_RAID_TOP_REFRESH_MS) {
+      if (isNewRaid) worldRaidTop = { raidId: active.id, data: null, fetchedAt: 0, inflight: false };
+      // Force on entry so a kill made seconds ago is already on the board.
+      refreshWorldRaidTop(active.id, isNewRaid);
+    }
+    renderWorldRaidOverlay(active);
+    // Re-check every tick: the boss HP bar it sits under appears/disappears with the fight.
+    syncOverlayPosition(worldRaidOverlay);
+  }
+
+  // Runs only while a custom battle is suppressing the normal overlay — the 1s tick drives the
+  // countdown and notices the World Raid fight starting/ending (getActive() is a cheap sync read).
+  function startWorldRaidTicker() {
+    if (!worldRaidTickTimer) {
+      worldRaidTickTimer = setInterval(syncWorldRaidOverlay, WORLD_RAID_TICK_MS);
+    }
+    // React to the fight starting/stopping immediately instead of on the next 1s tick.
+    // select(fn).subscribe returns a bare unsubscribe function (see stopWorldRaidTicker).
+    if (!worldRaidGameStartedSub && typeof globalThis.state?.board?.select === 'function') {
+      try {
+        worldRaidGameStartedSub = globalThis.state.board
+          .select((snapshot) => snapshot?.context?.gameStarted === true)
+          .subscribe(() => syncWorldRaidOverlay());
+      } catch (error) {
+        console.warn('[Better Highscores][World Raid] Could not watch game start:', error);
+      }
+    }
+    syncWorldRaidOverlay();
+  }
+
+  function stopWorldRaidTicker() {
+    if (worldRaidTickTimer) {
+      clearInterval(worldRaidTickTimer);
+      worldRaidTickTimer = null;
+    }
+    if (worldRaidGameStartedSub) {
+      try {
+        if (typeof worldRaidGameStartedSub === 'function') worldRaidGameStartedSub();
+        else worldRaidGameStartedSub.unsubscribe?.();
+      } catch (_) {
+        // Already gone.
+      }
+      worldRaidGameStartedSub = null;
+    }
+    removeWorldRaidOverlay();
+    worldRaidTop = { raidId: null, data: null, fetchedAt: 0, inflight: false };
+  }
+
+// =======================
 // MODULE 2: State Management
 // =======================
   const BetterHighscoresState = {
@@ -1616,6 +1882,12 @@
     BetterHighscoresState.customBattleSuppressed = next;
     console.log(`[Better Highscores] Custom battle suppression ${next ? 'enabled' : 'disabled'}`);
     applyLeaderboardSuppressionVisibility();
+    // A World Raid fight is a custom battle: show its own overlay instead of nothing.
+    if (next) {
+      startWorldRaidTicker();
+    } else {
+      stopWorldRaidTicker();
+    }
   }
 
   function setPowerSavingSuppressed(suppressed) {
@@ -3133,6 +3405,7 @@
     window.removeEventListener('ba-power-saving-mode-changed', onPowerSavingModeChanged);
     removeOverlayPositionListener();
     cleanupTblFloorLeague();
+    stopWorldRaidTicker();
     closeBetterHighscoresContextMenu();
     destroyPlayerProfileTooltip();
     removeRestoreButton();
@@ -3227,6 +3500,9 @@
   
   // Function to update opacity of existing container
   function updateOpacity(opacity) {
+    if (worldRaidOverlay?._backgroundDiv) {
+      worldRaidOverlay._backgroundDiv.style.opacity = opacity;
+    }
     if (leaderboardContainer && leaderboardContainer._backgroundDiv) {
       leaderboardContainer._backgroundDiv.style.opacity = opacity;
     } else if (leaderboardContainer) {
@@ -3240,6 +3516,9 @@
     if (isBetterHighscoresHidden()) {
       return;
     }
+    if (worldRaidOverlay) {
+      applyContainerStyles(worldRaidOverlay);
+    }
 
     if (leaderboardContainer && document.contains(leaderboardContainer)) {
       applyContainerStyles(leaderboardContainer);
@@ -3252,6 +3531,9 @@
   function updateScale() {
     if (isBetterHighscoresHidden()) {
       return;
+    }
+    if (worldRaidOverlay) {
+      applyContainerStyles(worldRaidOverlay);
     }
 
     if (leaderboardContainer && document.contains(leaderboardContainer)) {

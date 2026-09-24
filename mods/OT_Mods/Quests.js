@@ -3210,6 +3210,15 @@ function createNPCCooldownManager() {
     // progressAnnihilatorOrshabaal's comment). null = no raid tracked / never reported.
     annihilatorOrshabaalRaidStartedAt: null,
     annihilatorOrshabaalLastReportedRaidStartedAt: null,
+    // Per-player Orshabaal scaling: every raid instance this player beats him in adds
+    // ORSHABAAL_LEVEL_PER_DEFEAT to his level for their next fight. LastDefeatRaidStartedAt
+    // dedupes so a reload + re-entry within the same raid can't count twice. Real numbers.
+    annihilatorOrshabaalDefeats: 0,
+    annihilatorOrshabaalLastDefeatRaidStartedAt: null,
+    annihilatorOrshabaalHighestLevelDefeated: 0,
+    // Which wins "season" these numbers belong to (see ORSHABAAL_WINS_EPOCH_PATH). A mismatch
+    // with Firebase's current epoch means an admin reset everyone — local counts are zeroed.
+    annihilatorOrshabaalWinsEpoch: 0,
     mornenionDefeated: false, // Mornenion defeat flag (also stored in Firebase as progress.mornenion.defeated); keep in sync so getAllMissionProgress() includes it when saving
     sevenSealsCompleted: getDefaultSevenSealsCompleted(), // one boolean per seal (index 0 = First Seal … 6 = Seventh Seal); complete each seal separately via setSealCompleted(sealIndex, true)
     basiliskChallengesCompleted: getDefaultBasiliskChallengesCompleted(), // one boolean per Basilisk challenge (index 0 = Challenge 1 … 5 = Challenge 6); complete each separately via setBasiliskChallengeCompleted(index, true)
@@ -3492,6 +3501,9 @@ function createNPCCooldownManager() {
   let realmOfDreamsSceneSub = null;
   let playerEnteredAnnihilatorOrshabaal = false;
   let annihilatorOrshabaalBattle = null;
+  // Orshabaal's level for the fight currently in progress — snapshotted at entry so the
+  // credited level always matches what the player actually fought.
+  let annihilatorOrshabaalFightLevel = null;
   let annihilatorOrshabaalHitboxesApplied = false;
   let annihilatorOrshabaalSceneSub = null;
   let annihilatorOrshabaalBattleWorld = null;
@@ -8718,6 +8730,8 @@ function createNPCCooldownManager() {
     if (Number.isFinite(kingChatState.annihilatorOrshabaalLastReportedRaidStartedAt)) {
       result.annihilatorOrshabaalLastReportedRaidStartedAt = kingChatState.annihilatorOrshabaalLastReportedRaidStartedAt;
     }
+    copyOrshabaalScalingFields(kingChatState, result);
+    stripEmptyOrshabaalScalingFields(result);
     result.mornenion = { defeated: !!kingChatState.mornenionDefeated };
     result.sevenSealsCompleted = normalizeSevenSealsCompleted(kingChatState.sevenSealsCompleted);
     result.basiliskChallengesCompleted = normalizeBasiliskChallengesCompleted(kingChatState.basiliskChallengesCompleted);
@@ -8874,6 +8888,33 @@ function createNPCCooldownManager() {
     }
   })();
 
+  // Orshabaal per-player scaling fields (see kingChatState.annihilatorOrshabaalDefeats). Real
+  // numbers — never boolean-coerce. Copies only valid values, so an absent field in `source`
+  // leaves `target` untouched. Shared by every progress read/save/hydrate path.
+  // Save-side: a player with no wins stores NO Orshabaal fields at all — progress is PUT as a
+  // whole, so omitting them deletes any stale values from Firebase instead of keeping zeros.
+  function stripEmptyOrshabaalScalingFields(target) {
+    if (!target || Number(target.annihilatorOrshabaalDefeats) > 0) return;
+    delete target.annihilatorOrshabaalDefeats;
+    delete target.annihilatorOrshabaalHighestLevelDefeated;
+    delete target.annihilatorOrshabaalLastDefeatRaidStartedAt;
+    delete target.annihilatorOrshabaalWinsEpoch;
+  }
+
+  function copyOrshabaalScalingFields(source, target) {
+    if (!source || !target) return;
+    const defeats = Number(source.annihilatorOrshabaalDefeats);
+    if (Number.isFinite(defeats) && defeats >= 0) target.annihilatorOrshabaalDefeats = Math.floor(defeats);
+    const lastDefeatRaid = Number(source.annihilatorOrshabaalLastDefeatRaidStartedAt);
+    if (source.annihilatorOrshabaalLastDefeatRaidStartedAt != null && Number.isFinite(lastDefeatRaid)) {
+      target.annihilatorOrshabaalLastDefeatRaidStartedAt = lastDefeatRaid;
+    }
+    const highest = Number(source.annihilatorOrshabaalHighestLevelDefeated);
+    if (Number.isFinite(highest) && highest >= 0) target.annihilatorOrshabaalHighestLevelDefeated = Math.floor(highest);
+    const epoch = Number(source.annihilatorOrshabaalWinsEpoch);
+    if (Number.isFinite(epoch) && epoch >= 0) target.annihilatorOrshabaalWinsEpoch = epoch;
+  }
+
   // King Tibianus quest progress helpers
   function getKingTibianusProgressPath() {
     return `${FIREBASE_CONFIG.firebaseUrl}/quests/king-tibianus/progress`;
@@ -8996,6 +9037,7 @@ function createNPCCooldownManager() {
         const lastReported = Number(data.annihilatorOrshabaalLastReportedRaidStartedAt);
         result.annihilatorOrshabaalLastReportedRaidStartedAt = Number.isFinite(lastReported) ? lastReported : null;
       }
+      copyOrshabaalScalingFields(data, result);
       result.starterCoinThanked = !!data.starterCoinThanked;
       if (Array.isArray(data.sevenSealsCompleted) && data.sevenSealsCompleted.length === SEVEN_SEALS_COUNT) {
         result.sevenSealsCompleted = data.sevenSealsCompleted.slice(0, SEVEN_SEALS_COUNT).map(Boolean);
@@ -9103,6 +9145,9 @@ function createNPCCooldownManager() {
           if (Number.isFinite(merged.annihilatorOrshabaalLastReportedRaidStartedAt)) {
             result.annihilatorOrshabaalLastReportedRaidStartedAt = merged.annihilatorOrshabaalLastReportedRaidStartedAt;
           }
+          // Same whitelist trap as above — omit these and the defeat count silently never saves.
+          copyOrshabaalScalingFields(merged, result);
+          stripEmptyOrshabaalScalingFields(result);
           return result;
         })()
       : {
@@ -9217,6 +9262,45 @@ function createNPCCooldownManager() {
       });
     arenaLeaderboardCacheTime = now;
     return arenaLeaderboardCache;
+  }
+
+  // Orshabaal World Raid leaderboard — one row per player (hashed name), written on each
+  // counted kill by saveOrshabaalLeaderboardEntry(). Ranked by highest level defeated, then
+  // total defeats, then who got there first.
+  let orshabaalLeaderboardCache = null;
+  let orshabaalLeaderboardCacheTime = 0;
+
+  async function loadOrshabaalLeaderboard(forceRefresh = false) {
+    const now = Date.now();
+    if (!forceRefresh && orshabaalLeaderboardCache && (now - orshabaalLeaderboardCacheTime) < ARENA_LEADERBOARD_CACHE_MS) {
+      return orshabaalLeaderboardCache;
+    }
+    const data = await FirebaseService.get(
+      ORSHABAAL_LEADERBOARD_PATH,
+      'fetch orshabaal leaderboard',
+      null
+    );
+    let epoch = orshabaalWinsEpoch ?? ORSHABAAL_MIN_WINS_EPOCH;
+    try {
+      epoch = await fetchOrshabaalWinsEpoch();
+    } catch (_) {
+      // Unreachable — filter with the last known epoch.
+    }
+    orshabaalLeaderboardCache = (data && typeof data === 'object' ? Object.values(data) : [])
+      .filter((entry) => entry && Number(entry.defeats) > 0 && (Number(entry.epoch) || 0) === epoch)
+      .sort((a, b) => {
+        const levelDiff = (Number(b.highestLevelDefeated) || 0) - (Number(a.highestLevelDefeated) || 0);
+        if (levelDiff) return levelDiff;
+        const defeatDiff = (Number(b.defeats) || 0) - (Number(a.defeats) || 0);
+        if (defeatDiff) return defeatDiff;
+        // Same level + same kills: whoever beat that level first ranks higher.
+        const reachedAt = (entry) => Number(entry.highestLevelReachedAt) || Number(entry.updatedAt) || Infinity;
+        const timeDiff = reachedAt(a) - reachedAt(b);
+        if (timeDiff) return timeDiff;
+        return String(a.playerName || '').localeCompare(String(b.playerName || ''));
+      });
+    orshabaalLeaderboardCacheTime = now;
+    return orshabaalLeaderboardCache;
   }
 
   async function deleteArenaLeaderboardEntry(playerName) {
@@ -11541,8 +11625,16 @@ function createNPCCooldownManager() {
       buttonContainer.style.gap = gap;
     }
 
-    // Create buttons
-    buttons.forEach((buttonConfig) => {
+    // A button config may carry a `companion` config (e.g. a "Copy" button for its console
+    // command): the pair is laid out side by side as one row of a 2-column grid, so every
+    // action lines up with its companion. Buttons without a companion span both columns.
+    const hasCompanions = layout !== 'center' && buttons.some((b) => b && b.companion);
+    if (hasCompanions) {
+      buttonContainer.style.display = 'grid';
+      buttonContainer.style.gridTemplateColumns = 'minmax(0, 1fr) auto';
+    }
+
+    const createMenuButton = (buttonConfig) => {
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'pixel-font-14';
@@ -11583,8 +11675,18 @@ function createNPCCooldownManager() {
           buttonConfig.onClick();
         }
       });
+      return button;
+    };
 
+    buttons.forEach((buttonConfig) => {
+      const button = createMenuButton(buttonConfig);
       buttonContainer.appendChild(button);
+      if (!hasCompanions) return;
+      if (buttonConfig.companion) {
+        buttonContainer.appendChild(createMenuButton(buttonConfig.companion));
+      } else {
+        button.style.gridColumn = '1 / -1';
+      }
     });
 
     menu.appendChild(buttonContainer);
@@ -18989,8 +19091,8 @@ function createNPCCooldownManager() {
     return `https://bestiaryarena.com/profile/${encodeURIComponent(String(playerName || '').trim())}`;
   }
 
-  function appendArenaLeaderboardBox(listElement, content) {
-    const box = createBox({ title: 'Rankings', content });
+  function appendArenaLeaderboardBox(listElement, content, title = 'Rankings') {
+    const box = createBox({ title, content });
     // Let the box fill the modal's list area so a long ranking list (more than ~10
     // players) scrolls inside it instead of overflowing the modal.
     box.style.flex = '1 1 auto';
@@ -19146,10 +19248,157 @@ function createNPCCooldownManager() {
     }
   }
 
+  const ORSHABAAL_LEADERBOARD_GRID_COLUMNS = 'minmax(0, 8%) minmax(0, 44%) minmax(0, 24%) minmax(0, 20%)';
+  const ORSHABAAL_LEADERBOARD_BOX_TITLE = 'Orshabaal Slayers';
+
+  function buildOrshabaalLeaderboardRow(cells, { header = false, background = 'transparent', highlight = false } = {}) {
+    const ellipsisCellStyle = 'min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+    const row = document.createElement('div');
+    row.className = header ? 'pixel-font-16 text-whiteRegular' : 'pixel-font-16';
+    row.style.cssText = header
+      ? `width:calc(100% + 16px);margin:0 -8px;box-sizing:border-box;display:grid;grid-template-columns:${ORSHABAAL_LEADERBOARD_GRID_COLUMNS};gap:6px;padding:8px 8px 6px;border-bottom:1px solid rgba(255,255,255,0.18);align-items:end;position:sticky;top:0;z-index:5;background-color:#191919;background-image:url("https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png");background-repeat:repeat;box-shadow:0 6px 8px -4px rgba(0,0,0,0.6);`
+      : `width:100%;min-width:0;box-sizing:border-box;display:grid;grid-template-columns:${ORSHABAAL_LEADERBOARD_GRID_COLUMNS};gap:6px;padding:4px 0;align-items:center;min-height:28px;border-radius:2px;background:${background};${highlight ? 'box-shadow:inset 2px 0 0 rgb(100,150,255);' : ''}`;
+    const color = highlight ? 'rgb(230,215,176)' : 'rgb(255,255,255)';
+    cells.forEach((value, colIndex) => {
+      const cell = document.createElement('span');
+      cell.className = 'pixel-font-16';
+      cell.style.cssText = `${ellipsisCellStyle}color:${color};${colIndex === 1 ? '' : 'text-align:center;font-variant-numeric:tabular-nums;'}`;
+      cell.textContent = String(value);
+      if (colIndex === 1) cell.title = String(value);
+      row.appendChild(cell);
+    });
+    return row;
+  }
+
+  async function renderOrshabaalLeaderboardInto(listElement, forceRefresh = false) {
+    if (!listElement) return;
+    const headerCells = ['#', 'Player', 'Best lvl', 'Kills'];
+    const shell = (message) => {
+      const table = document.createElement('div');
+      table.style.cssText = 'width:100%;box-sizing:border-box;display:flex;flex-direction:column;gap:2px;';
+      table.appendChild(buildOrshabaalLeaderboardRow(headerCells, { header: true }));
+      if (message) table.appendChild(createArenaLeaderboardPlaceholderMessage(message));
+      return table;
+    };
+    appendArenaLeaderboardBox(listElement, shell('Loading...'), ORSHABAAL_LEADERBOARD_BOX_TITLE);
+    try {
+      const entries = await loadOrshabaalLeaderboard(forceRefresh);
+      if (!entries.length) {
+        appendArenaLeaderboardBox(listElement, shell('Nobody has slain Orshabaal yet.'), ORSHABAAL_LEADERBOARD_BOX_TITLE);
+        return;
+      }
+      const currentPlayer = getCurrentPlayerName();
+      const table = shell(null);
+      entries.forEach((entry, index) => {
+        const isCurrentPlayer = !!currentPlayer && entry.playerName === currentPlayer;
+        const formatAt = (value) => (Number(value) > 0 ? new Date(Number(value)).toLocaleString() : 'unknown');
+        const rowTitle = `First beat level ${Number(entry.highestLevelDefeated) || 0}: ${formatAt(entry.highestLevelReachedAt ?? entry.updatedAt)}\nLast kill: ${formatAt(entry.lastDefeatAt ?? entry.updatedAt)}`;
+        table.appendChild(Object.assign(buildOrshabaalLeaderboardRow([
+          index + 1,
+          entry.playerName || 'Unknown',
+          Number(entry.highestLevelDefeated) || 0,
+          Number(entry.defeats) || 0
+        ], {
+          highlight: isCurrentPlayer,
+          background: isCurrentPlayer ? 'rgba(100,150,255,0.22)' : (index % 2 === 1 ? 'rgba(255,255,255,0.04)' : 'transparent')
+        }), { title: rowTitle }));
+      });
+      appendArenaLeaderboardBox(listElement, table, ORSHABAAL_LEADERBOARD_BOX_TITLE);
+    } catch (error) {
+      console.error('[Quests Mod] Error loading Orshabaal leaderboard:', error);
+      appendArenaLeaderboardBox(listElement, shell('Could not load rankings.'), ORSHABAAL_LEADERBOARD_BOX_TITLE);
+    }
+  }
+
+  // Every World Raid, for both the "World Raid" leaderboard view and the in-battle overlay
+  // Better Highscores draws (via window.WorldRaids below). To add a raid, append an entry:
+  //   render(sectionEl, force)  fills its box in the leaderboard view
+  //   title                     overlay header
+  //   isActiveBattle()          true while THIS player is inside that raid's fight
+  //   getEndsAt()               raid end time (ms) or null
+  //   iconUrl()                 small icon for the overlay header
+  //   getPlayerStats()          { valueText, detail } — "you" value + its hover text
+  //   loadEntries(force)        sorted leaderboard rows
+  //   describeEntry(entry)      { name, valueText } for one row in the overlay
+  const WORLD_RAID_LEADERBOARDS = [
+    {
+      id: 'orshabaal',
+      title: 'Orshabaal',
+      render: renderOrshabaalLeaderboardInto,
+      isActiveBattle: () => playerEnteredAnnihilatorOrshabaal && !!annihilatorOrshabaalBattle,
+      getEndsAt: () => (isWorldRaidStateLive(worldRaidState) ? getWorldRaidEffectiveEndTime(worldRaidState) : null),
+      iconUrl: () => getQuestItemsAssetUrl('Orshabaal_Soul_Core.gif'),
+      getPlayerStats: () => {
+        const wins = getOrshabaalDefeatCount();
+        const fighting = annihilatorOrshabaalFightLevel ?? getOrshabaalScaledLevel(wins);
+        return {
+          valueText: String(fighting),
+          detail: `Fighting level ${fighting} · ${wins} win${wins === 1 ? '' : 's'} so far`
+        };
+      },
+      loadEntries: (force) => loadOrshabaalLeaderboard(force),
+      describeEntry: (entry) => ({
+        name: entry.playerName || 'Unknown',
+        valueText: String(Number(entry.highestLevelDefeated) || 0)
+      })
+    }
+  ];
+
+  // Read-only bridge for other mods (Better Highscores' World Raid overlay). Plain data only —
+  // callers never touch Quests internals. Removed in cleanup().
+  const worldRaidsPublicApi = {
+    version: 1,
+    getActive() {
+      const raid = WORLD_RAID_LEADERBOARDS.find((r) => {
+        try { return r.isActiveBattle(); } catch (_) { return false; }
+      });
+      if (!raid) return null;
+      return {
+        id: raid.id,
+        title: raid.title,
+        endsAt: raid.getEndsAt(),
+        iconUrl: raid.iconUrl?.() || null,
+        player: raid.getPlayerStats()
+      };
+    },
+    async getTop(raidId, limit = 3, forceRefresh = false) {
+      const raid = WORLD_RAID_LEADERBOARDS.find((r) => r.id === raidId);
+      if (!raid) return { entries: [], you: null };
+      const rows = await raid.loadEntries(forceRefresh);
+      const me = getCurrentPlayerName();
+      const toRow = (entry, index) => ({ rank: index + 1, ...raid.describeEntry(entry), isYou: !!me && entry.playerName === me });
+      const youIndex = me ? rows.findIndex((entry) => entry.playerName === me) : -1;
+      return {
+        entries: rows.slice(0, limit).map(toRow),
+        you: youIndex >= 0 ? toRow(rows[youIndex], youIndex) : null
+      };
+    },
+    openLeaderboard() {
+      showArenaRankingsModal({ initialView: 'worldRaid', closeOtherModals: false });
+    }
+  };
+  window.WorldRaids = worldRaidsPublicApi;
+
+  async function renderWorldRaidLeaderboardsInto(listElement, forceRefresh = false) {
+    if (!listElement) return;
+    listElement.innerHTML = '';
+    await Promise.all(WORLD_RAID_LEADERBOARDS.map((board, index) => {
+      const section = document.createElement('div');
+      section.dataset.worldRaid = board.id;
+      section.style.cssText = `flex:1 1 0;min-height:0;display:flex;flex-direction:column;${index > 0 ? 'margin-top:8px;' : ''}`;
+      listElement.appendChild(section);
+      return board.render(section, forceRefresh).catch((err) => {
+        console.warn(`[Quests Mod] Error rendering ${board.id} World Raid leaderboard:`, err);
+      });
+    }));
+  }
+
   async function updateArenaLeaderboardDisplay(forceRefresh = false) {
     const modalList = document.getElementById(ARENA_LEADERBOARD_MODAL_LIST_ID);
     if (modalList) {
-      await renderArenaLeaderboardInto(modalList, forceRefresh);
+      // Background refreshes must keep whichever view the World Raid toggle is showing.
+      const render = modalList.dataset.view === 'worldRaid' ? renderWorldRaidLeaderboardsInto : renderArenaLeaderboardInto;
+      await render(modalList, forceRefresh);
     }
   }
 
@@ -19266,7 +19515,12 @@ function createNPCCooldownManager() {
     restoreQuestLogMissionsView(0);
   }
 
-  function showArenaRankingsModal() {
+  // options.initialView: 'missions' (default) | 'worldRaid'. options.closeOtherModals: false
+  // skips the synthetic Escape presses — used when opened from the in-battle World Raid overlay,
+  // where there is no other modal to close.
+  function showArenaRankingsModal(options = {}) {
+    const startInWorldRaid = options.initialView === 'worldRaid';
+    const closeOtherModals = options.closeOtherModals !== false;
     const api = (typeof globalThis !== 'undefined' && globalThis.BestiaryModAPI) || (typeof window !== 'undefined' && window.BestiaryModAPI);
     if (!api?.ui?.components?.createModal) {
       console.warn('[Quests Mod] Modal API unavailable for arena rankings');
@@ -19277,7 +19531,7 @@ function createNPCCooldownManager() {
     clearTimeoutOrInterval(dialogTimeout);
     const shouldRestoreMissions = kingModeActive;
 
-    for (let i = 0; i < 2; i++) {
+    for (let i = 0; closeOtherModals && i < 2; i++) {
       document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, which: 27, bubbles: true }));
     }
 
@@ -19301,6 +19555,8 @@ function createNPCCooldownManager() {
       listContainer.className = 'arena-leaderboard-modal-list';
       listContainer.style.cssText = 'flex:1;height:100%;min-height:0;min-width:0;display:flex;flex-direction:column;gap:0;padding:0;box-sizing:border-box;';
       appendArenaLeaderboardBox(listContainer, buildArenaLeaderboardTableShell('Loading...'));
+      let showingWorldRaidBoards = startInWorldRaid;
+      listContainer.dataset.view = startInWorldRaid ? 'worldRaid' : 'missions';
       mainRow.appendChild(listContainer);
       modalBody.appendChild(mainRow);
       contentDiv.appendChild(modalBody);
@@ -19316,6 +19572,20 @@ function createNPCCooldownManager() {
         height: modalDims.height,
         content: contentDiv,
         buttons: [{
+          // Toggles the same list area between mission rankings and every World Raid board.
+          text: startInWorldRaid ? 'Missions' : 'World Raid',
+          primary: false,
+          closeOnClick: false,
+          onClick: (event) => {
+            showingWorldRaidBoards = !showingWorldRaidBoards;
+            listContainer.dataset.view = showingWorldRaidBoards ? 'worldRaid' : 'missions';
+            if (event?.currentTarget) event.currentTarget.textContent = showingWorldRaidBoards ? 'Missions' : 'World Raid';
+            const render = showingWorldRaidBoards ? renderWorldRaidLeaderboardsInto : renderArenaLeaderboardInto;
+            render(listContainer, false).catch((err) => {
+              console.warn('[Quests Mod] Error switching leaderboard view:', err);
+            });
+          }
+        }, {
           text: 'Back',
           primary: false,
           onClick: () => {
@@ -19334,16 +19604,16 @@ function createNPCCooldownManager() {
         ARENA_LEADERBOARD_MODAL_MAX_HEIGHT,
         ARENA_LEADERBOARD_MODAL_MIN_HEIGHT,
         (dialog) => {
-          const backButton = Array.from(dialog?.querySelectorAll('.flex.justify-end.gap-2 button') || [])
-            .find((btn) => btn.textContent?.trim() === 'Back');
-          if (backButton) {
-            backButton.className = 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-blue active:frame-pressed-1-blue surface-blue gap-1 px-2 py-0.5 pb-[3px] pixel-font-14';
-            backButton.style.cssText = 'cursor: pointer; white-space: nowrap; box-sizing: border-box; max-height: 21px; height: 21px; font-size: 14px;';
-          }
+          Array.from(dialog?.querySelectorAll('.flex.justify-end.gap-2 button') || [])
+            .filter((btn) => ['Back', 'World Raid', 'Missions'].includes(btn.textContent?.trim()))
+            .forEach((btn) => {
+              btn.className = 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-blue active:frame-pressed-1-blue surface-blue gap-1 px-2 py-0.5 pb-[3px] pixel-font-14';
+              btn.style.cssText = 'cursor: pointer; white-space: nowrap; box-sizing: border-box; max-height: 21px; height: 21px; font-size: 14px;';
+            });
         }
       );
 
-      renderArenaLeaderboardInto(listContainer, true).catch((err) => {
+      (startInWorldRaid ? renderWorldRaidLeaderboardsInto : renderArenaLeaderboardInto)(listContainer, true).catch((err) => {
         console.warn('[Quests Mod] Error loading arena rankings modal:', err);
       });
 
@@ -19993,14 +20263,23 @@ function createNPCCooldownManager() {
       event.stopPropagation();
       closeDevContextMenu();
       let menuObj = null;
+      const closeThen = (fn) => () => {
+        menuObj?.closeMenu();
+        openDevContextMenu = null;
+        if (fn) fn();
+      };
+      // Item `copyCommand` → a "Copy <label>" button beside it (action | copy action).
       const wrapped = buttons.map((btn) => ({
         ...btn,
         width: btn.width || '160px',
-        onClick: () => {
-          menuObj?.closeMenu();
-          openDevContextMenu = null;
-          if (btn.onClick) btn.onClick();
-        }
+        onClick: closeThen(btn.onClick),
+        ...(btn.copyCommand ? {
+          companion: {
+            text: `Copy ${String(btn.text || '').toLowerCase()}`,
+            width: 'auto',
+            onClick: closeThen(() => copyCommand(btn.copyCommand))
+          }
+        } : {})
       }));
       menuObj = createContextMenu({
         x: event.clientX,
@@ -20124,7 +20403,8 @@ function createNPCCooldownManager() {
             backgroundColor: '#2a4a7a',
             color: '#4FC3F7',
             border: '1px solid #4FC3F7',
-            onClick: () => runGuarded(`Grant ${resolveQuestDevItemName(key)} +${grantAmount}`, () => QuestsDev.grant({ [key]: grantAmount }))
+            onClick: () => runGuarded(`Grant ${resolveQuestDevItemName(key)} +${grantAmount}`, () => QuestsDev.grant({ [key]: grantAmount })),
+            copyCommand: grantCmd
           },
           {
             text: 'Remove -1',
@@ -20133,15 +20413,8 @@ function createNPCCooldownManager() {
             border: '1px solid #ff8a80',
             hoverBackgroundColor: '#2a1a1a',
             hoverBorderColor: '#ffcdd2',
-            onClick: () => runGuarded(`Remove ${resolveQuestDevItemName(key)} -1`, () => QuestsDev.grant({ [key]: -1 }))
-          },
-          {
-            text: 'Copy grant cmd',
-            onClick: () => copyCommand(grantCmd)
-          },
-          {
-            text: 'Copy remove cmd',
-            onClick: () => copyCommand(removeCmd)
+            onClick: () => runGuarded(`Remove ${resolveQuestDevItemName(key)} -1`, () => QuestsDev.grant({ [key]: -1 })),
+            copyCommand: removeCmd
           },
           {
             text: 'Copy all cmds',
@@ -20337,7 +20610,33 @@ function createNPCCooldownManager() {
           text: 'World Raid status',
           onClick: () => runGuarded('World Raid status', () => { QuestsDev.worldRaidStatus(); setStatus('World Raid status logged to console.'); }),
           command: 'QuestsDev.worldRaidStatus()'
-        }
+        },
+        // Per-player Orshabaal scaling — these only change YOUR wins + leaderboard row.
+        ...[
+          { text: 'Orshabaal wins +1', label: 'Orshabaal wins +1', run: () => QuestsDev.orshabaalAddWins(1), command: 'QuestsDev.orshabaalAddWins(1)' },
+          { text: 'Orshabaal wins −1', label: 'Orshabaal wins −1', run: () => QuestsDev.orshabaalRemoveWins(1), command: 'QuestsDev.orshabaalRemoveWins(1)' },
+          { text: 'Orshabaal wins → 0', label: 'Orshabaal wins reset', run: () => QuestsDev.orshabaalSetWins(0), command: 'QuestsDev.orshabaalSetWins(0)' },
+          { text: 'Show Orshabaal wins', label: 'Orshabaal wins', run: async () => QuestsDev.orshabaalWins(), command: 'QuestsDev.orshabaalWins()' },
+          {
+            text: 'Reset ALL players\' Orshabaal wins',
+            label: 'Reset all Orshabaal wins',
+            run: async () => {
+              if (!window.confirm('Reset Orshabaal wins for EVERY player and clear the World Raid leaderboard? This cannot be undone.')) return null;
+              return QuestsDev.orshabaalResetAllWins();
+            },
+            command: 'QuestsDev.orshabaalResetAllWins()'
+          }
+        ].map(({ text, label, run, command }) => ({
+          text,
+          command,
+          onClick: async () => {
+            let summary = null;
+            await runGuarded(label, async () => { summary = await run(); });
+            if (summary) {
+              setStatus(`Orshabaal wins: ${summary.wins} · best lvl ${summary.highestLevelDefeated} · next fight lvl ${summary.nextFightLevel}`);
+            }
+          }
+        }))
       ]
     };
 
@@ -20487,14 +20786,16 @@ function createNPCCooldownManager() {
             backgroundColor: '#2a4a7a',
             color: '#4FC3F7',
             border: '1px solid #4FC3F7',
-            onClick: () => runGuarded(`Accept ${mission.id}`, () => QuestsDev.setAccepted(mission.id))
+            onClick: () => runGuarded(`Accept ${mission.id}`, () => QuestsDev.setAccepted(mission.id)),
+            copyCommand: acceptCmd
           },
           {
             text: 'Complete',
             backgroundColor: '#2a4a7a',
             color: '#4FC3F7',
             border: '1px solid #4FC3F7',
-            onClick: () => runGuarded(`Complete ${mission.id}`, () => QuestsDev.complete(mission.id))
+            onClick: () => runGuarded(`Complete ${mission.id}`, () => QuestsDev.complete(mission.id)),
+            copyCommand: completeCmd
           },
           {
             text: 'Reset',
@@ -20503,27 +20804,13 @@ function createNPCCooldownManager() {
             border: '1px solid #ff8a80',
             hoverBackgroundColor: '#2a1a1a',
             hoverBorderColor: '#ffcdd2',
-            onClick: () => runGuarded(`Reset ${mission.id}`, () => QuestsDev.reset(mission.id))
+            onClick: () => runGuarded(`Reset ${mission.id}`, () => QuestsDev.reset(mission.id)),
+            copyCommand: resetCmd
           },
           ...extraActions.map((action) => ({
             text: action.text,
-            onClick: action.onClick
-          })),
-          {
-            text: 'Copy accept cmd',
-            onClick: () => copyCommand(acceptCmd)
-          },
-          {
-            text: 'Copy complete cmd',
-            onClick: () => copyCommand(completeCmd)
-          },
-          {
-            text: 'Copy reset cmd',
-            onClick: () => copyCommand(resetCmd)
-          },
-          ...extraActions.map((action) => ({
-            text: `Copy ${action.text.toLowerCase()} cmd`,
-            onClick: () => copyCommand(action.command)
+            onClick: action.onClick,
+            copyCommand: action.command
           })),
           {
             text: 'Copy all cmds',
@@ -35473,7 +35760,7 @@ function createNPCCooldownManager() {
   // Dreams — chat-triggered teleport into the shared Sewers reskin, victory grants an
   // Orshabaal Soul Core on report-back to Bubble (once, ever — see completeAnnihilatorOrshabaalMission),
   // and both victory and defeat return the player to edanni. A raid ending mid-fight (someone
-  // else's victory, or the 24h expiry) force-ejects the player back to edanni too — see
+  // else's victory, or the 12h expiry) force-ejects the player back to edanni too — see
   // pollWorldRaidState().
   // =======================
 
@@ -35620,11 +35907,11 @@ function createNPCCooldownManager() {
   // client polls that same record. Bubble is only ever visible while a raid is live AND this
   // browser has finished playing the 3-toast warning buildup for THAT raid instance — a
   // player who logs in mid-raid still gets the full local buildup before he appears, but the
-  // 24h expiry itself is computed purely from the shared `startedAt`, identical for everyone.
+  // 12h expiry itself is computed purely from the shared `startedAt`, identical for everyone.
   //
   // Defeating Orshabaal is tracked PER PLAYER, not globally — each player's own win is just
   // their own mission progress (`battleCompleted`, synced to their own Firebase quests path,
-  // same as every other quest). The raid itself stays live for the full 24h window for
+  // same as every other quest). The raid itself stays live for the full 12h window for
   // everyone regardless of how many players (or whether anyone) has already beaten him —
   // one player's kill does not end the event early for the rest of the world. (Earlier builds
   // of this feature had a global `defeatedAt` that ended the raid for everyone on the first
@@ -35648,8 +35935,22 @@ function createNPCCooldownManager() {
 
   const WORLD_RAID_FIREBASE_PATH = `${FIREBASE_CONFIG.firebaseUrl}/world-raid/annihilator-orshabaal`;
   const WORLD_RAID_TRIGGER_CHANCE = 0.001; // 0.1% per eligible (Edron) battle victory
-  const WORLD_RAID_DURATION_MS = 24 * 60 * 60 * 1000;
-  const WORLD_RAID_COOLDOWN_MS = 5 * 24 * 60 * 60 * 1000; // 5 days of quiet after a raid ENDS before another can trigger
+  const WORLD_RAID_DURATION_MS = 12 * 60 * 60 * 1000;
+  const WORLD_RAID_COOLDOWN_MS = 36 * 60 * 60 * 1000; // 36h of quiet after a raid ENDS before another can trigger
+  // Per-player scaling: Orshabaal's battles.json level is the base; each raid instance this
+  // player has beaten him in adds ORSHABAAL_LEVEL_PER_DEFEAT, capped at ORSHABAAL_MAX_LEVEL.
+  const ORSHABAAL_LEVEL_PER_DEFEAT = 500;
+  const ORSHABAAL_MAX_LEVEL = 10000;
+  const ORSHABAAL_LEADERBOARD_PATH = `${FIREBASE_CONFIG.firebaseUrl}/world-raid/orshabaal-leaderboard`;
+  // Global wins "season". Firebase is the single source of truth for wins: a player's stored
+  // count only counts while its epoch equals this value. Resetting everyone = bumping it
+  // (QuestsDev.orshabaalResetAllWins) — every client zeroes its own count the next time it
+  // checks, and leaderboard rows from older epochs are ignored. Absent = epoch 0.
+  const ORSHABAAL_WINS_EPOCH_PATH = `${FIREBASE_CONFIG.firebaseUrl}/world-raid/orshabaal-wins-epoch`;
+  const ORSHABAAL_WINS_EPOCH_RECHECK_MS = 5 * 60 * 1000;
+  // Lowest valid epoch. Anything saved before epochs existed has none (= 0), so it is always
+  // stale: every client deletes that old win data on its next load — no manual reset needed.
+  const ORSHABAAL_MIN_WINS_EPOCH = 1;
   const WORLD_RAID_POLL_INTERVAL_MS = 30000;
   const WORLD_RAID_TOAST_GAP_MS = 60000;
   const WORLD_RAID_TOAST_DURATION_MS = 30000;
@@ -35676,7 +35977,7 @@ function createNPCCooldownManager() {
     return (Date.now() - startedAt) < WORLD_RAID_DURATION_MS;
   }
 
-  // When a raid instance ends — always its full 24h window running out, since an individual
+  // When a raid instance ends — always its full 12h window running out, since an individual
   // player's kill no longer ends it early for everyone (see the module doc comment above).
   function getWorldRaidEffectiveEndTime(state) {
     const startedAt = Number(state?.startedAt);
@@ -35684,7 +35985,7 @@ function createNPCCooldownManager() {
     return startedAt + WORLD_RAID_DURATION_MS;
   }
 
-  // True while a previous raid's 5-day cooldown hasn't elapsed yet — distinct from
+  // True while a previous raid's 36h cooldown hasn't elapsed yet — distinct from
   // isWorldRaidStateLive() (which is true only during the raid itself). No prior raid record
   // at all is never "on cooldown".
   function isWorldRaidOnCooldown(state) {
@@ -35910,7 +36211,7 @@ function createNPCCooldownManager() {
       }
 
       if (wasLive && !nowLive && playerEnteredAnnihilatorOrshabaal) {
-        // Raid's 24h window expired while this player was mid-fight — eject.
+        // Raid's 12h window expired while this player was mid-fight — eject.
         showToast({
           message: TOAST_MESSAGES.worldRaidOrshabaalEnded,
           duration: 8000,
@@ -35920,7 +36221,7 @@ function createNPCCooldownManager() {
         setTimeout(() => navigateToAnnihilatorQuest(), 100);
       }
 
-      // Once a raid's live window AND its full 5-day cooldown have both elapsed, nothing
+      // Once a raid's live window AND its full 36h cooldown have both elapsed, nothing
       // reads this record anymore — cooldown (getWorldRaidEffectiveEndTime → startedAt +
       // WORLD_RAID_DURATION_MS) is the ONLY reason it's kept around past the raid itself, so
       // once isWorldRaidOnCooldown also goes false there's no correctness reason left to keep
@@ -35942,6 +36243,10 @@ function createNPCCooldownManager() {
       // a raid that's since ended, instead of it lingering until the next chat interaction.
       if (missionProgressHydratedFromFirebase) {
         await ensureAnnihilatorOrshabaalProgressForCurrentRaid();
+        // Pick up an admin wins reset while online, so the next fight's level is right.
+        if (nowLive && Date.now() - orshabaalWinsEpochCheckedAt > ORSHABAAL_WINS_EPOCH_RECHECK_MS) {
+          await syncOrshabaalWinsEpoch();
+        }
       }
 
       updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
@@ -36155,6 +36460,7 @@ function createNPCCooldownManager() {
       stopAnnihilatorOrshabaalSceneSync();
       playerEnteredAnnihilatorOrshabaal = false;
       annihilatorOrshabaalKillCredited = false;
+      annihilatorOrshabaalFightLevel = null;
       restoreAnnihilatorOrshabaalTileMutations();
       if (annihilatorOrshabaalBattle) {
         annihilatorOrshabaalBattle.cleanup(restoreBoardSetupAnnihilatorOrshabaal, showQuestOverlays);
@@ -36174,6 +36480,295 @@ function createNPCCooldownManager() {
   // when gameTimer itself resolves the fight as "victory" before that ceiling). Guarded by
   // annihilatorOrshabaalKillCredited so whichever one notices first is the one that counts —
   // the other is a no-op, not a duplicate write.
+  // ── Per-player Orshabaal scaling ──
+  // The stored count is authoritative (so dev tools can set it to anything, including 0).
+  // Players who beat him before this counter existed get 1 backfilled on login by
+  // reconcileOrshabaalScalingOnHydration().
+  function getOrshabaalDefeatCount() {
+    const stored = Number(kingChatState.annihilatorOrshabaalDefeats);
+    return Number.isFinite(stored) && stored > 0 ? Math.floor(stored) : 0;
+  }
+
+  function getOrshabaalBaseLevel() {
+    const cfg = getQuestBattleConfig(ANNIHILATOR_ORSHABAAL_BATTLE_ID || 'annihilator_orshabaal') || {};
+    const def = (cfg.villains || []).find((v) => String(v?.nickname || '').toLowerCase() === 'orshabaal');
+    const level = Number(def?.level);
+    return Number.isFinite(level) && level > 0 ? level : 2000;
+  }
+
+  function getOrshabaalScaledLevel(defeats = getOrshabaalDefeatCount()) {
+    return Math.min(ORSHABAAL_MAX_LEVEL, getOrshabaalBaseLevel() + defeats * ORSHABAAL_LEVEL_PER_DEFEAT);
+  }
+
+  // ── Wins epoch (global reset) ──
+  let orshabaalWinsEpoch = null; // last epoch read from Firebase; null = never read
+  let orshabaalWinsEpochCheckedAt = 0;
+
+  async function fetchOrshabaalWinsEpoch() {
+    const value = await FirebaseService.get(ORSHABAAL_WINS_EPOCH_PATH, 'fetch orshabaal wins epoch', null, { throwOnNetworkError: true });
+    orshabaalWinsEpoch = Math.max(ORSHABAAL_MIN_WINS_EPOCH, Number(value) || 0);
+    orshabaalWinsEpochCheckedAt = Date.now();
+    return orshabaalWinsEpoch;
+  }
+
+  function getStoredOrshabaalWinsEpoch() {
+    return Number(kingChatState.annihilatorOrshabaalWinsEpoch) || 0;
+  }
+
+  // Clears this player's wins if they belong to an older epoch. Returns true only when there
+  // was stale data to delete (a player with nothing stored just adopts the epoch — no save).
+  function applyOrshabaalWinsEpoch(epoch) {
+    if (getStoredOrshabaalWinsEpoch() === epoch) return false;
+    const previous = getOrshabaalDefeatCount();
+    const hadData = previous > 0
+      || (Number(kingChatState.annihilatorOrshabaalHighestLevelDefeated) || 0) > 0
+      || kingChatState.annihilatorOrshabaalLastDefeatRaidStartedAt != null;
+    kingChatState.annihilatorOrshabaalDefeats = 0;
+    kingChatState.annihilatorOrshabaalHighestLevelDefeated = 0;
+    kingChatState.annihilatorOrshabaalLastDefeatRaidStartedAt = null;
+    kingChatState.annihilatorOrshabaalWinsEpoch = epoch;
+    clearPendingOrshabaalScaling();
+    clearOrshabaalScalingRetry();
+    if (hadData) {
+      console.log(`${getAnnihilatorOrshabaalLogPrefix()} Deleted stale Orshabaal win data (${previous} win(s) from an older season)`);
+    }
+    return hadData;
+  }
+
+  async function deleteOwnOrshabaalLeaderboardRow() {
+    const playerName = getCurrentPlayerName();
+    if (!playerName) return;
+    try {
+      const hashedPlayer = await hashUsername(playerName);
+      await FirebaseService.delete(`${ORSHABAAL_LEADERBOARD_PATH}/${hashedPlayer}`, 'delete stale orshabaal leaderboard entry');
+      orshabaalLeaderboardCache = null;
+    } catch (error) {
+      console.warn(`${getAnnihilatorOrshabaalLogPrefix()} Could not delete stale Orshabaal leaderboard row:`, error?.message || error);
+    }
+  }
+
+  // Reads the current epoch and applies it; if that zeroed this player's wins, saves the
+  // zeroed progress. Never throws — an unreachable Firebase just leaves local state alone.
+  async function syncOrshabaalWinsEpoch({ save = true } = {}) {
+    try {
+      const reset = applyOrshabaalWinsEpoch(await fetchOrshabaalWinsEpoch());
+      const playerName = getCurrentPlayerName();
+      if (reset && save && playerName && missionProgressHydratedFromFirebase) {
+        await saveKingTibianusProgress(playerName, getAllMissionProgress());
+        await deleteOwnOrshabaalLeaderboardRow();
+      }
+      return reset;
+    } catch (error) {
+      console.warn(`${getAnnihilatorOrshabaalLogPrefix()} Could not check Orshabaal wins epoch:`, error?.message || error);
+      return false;
+    }
+  }
+
+  // Writes this player's row from their current in-memory scaling fields. Reads the stored row
+  // first: an identical row is skipped (no write), and updatedAt is only refreshed when the
+  // numbers actually change — so the per-login resync never reshuffles tie order.
+  async function saveOrshabaalLeaderboardEntry() {
+    const playerName = getCurrentPlayerName();
+    if (!playerName) return;
+    const defeats = getOrshabaalDefeatCount();
+    if (defeats <= 0) return;
+    const highestLevelDefeated = Number(kingChatState.annihilatorOrshabaalHighestLevelDefeated) || 0;
+    const hashedPlayer = await hashUsername(playerName);
+    const entryPath = `${ORSHABAAL_LEADERBOARD_PATH}/${hashedPlayer}`;
+    const existing = await FirebaseService.get(entryPath, 'fetch orshabaal leaderboard entry', null, { throwOnNetworkError: true });
+    const epoch = getStoredOrshabaalWinsEpoch();
+    // A row from an older epoch is a different season — never inherit its timestamps.
+    const sameEpoch = !!existing && (Number(existing.epoch) || 0) === epoch;
+    const sameHighest = sameEpoch && Number(existing.highestLevelDefeated) === highestLevelDefeated;
+    const sameDefeats = sameEpoch && Number(existing.defeats) === defeats;
+    if (sameHighest && sameDefeats && existing.playerName === playerName
+      && Number(existing.highestLevelReachedAt) > 0 && Number(existing.lastDefeatAt) > 0) return;
+    // Firebase server timestamps — not the client clock, so nobody can backdate a kill to win
+    // a tie. Each timestamp is only refreshed when its own number changes; rows written
+    // before these fields existed inherit their old updatedAt once.
+    const serverNow = { '.sv': 'timestamp' };
+    const keepOr = (value) => (Number(value) > 0 ? Number(value) : serverNow);
+    await FirebaseService.put(
+      entryPath,
+      {
+        playerName,
+        defeats,
+        highestLevelDefeated,
+        epoch,
+        // When this player FIRST beat their current best level — the tie-breaker.
+        highestLevelReachedAt: sameHighest ? keepOr(existing.highestLevelReachedAt ?? existing.updatedAt) : serverNow,
+        // When the latest counted kill was saved.
+        lastDefeatAt: sameDefeats ? keepOr(existing.lastDefeatAt ?? existing.updatedAt) : serverNow,
+        updatedAt: serverNow
+      },
+      'save orshabaal leaderboard entry'
+    );
+    orshabaalLeaderboardCache = null;
+  }
+
+  // ── Durable save for counted kills ──
+  // A counted kill is written to localStorage BEFORE any network call, then flushed to
+  // Firebase (progress + leaderboard) with backoff retries. If every retry fails, or the tab
+  // closes first, the pending record is merged back in on the next login
+  // (reconcileOrshabaalScalingOnHydration) — so a dropped request can't lose a kill.
+  const ORSHABAAL_PENDING_SCALING_STORAGE_KEY = 'bestiary-orshabaal-scaling-pending';
+  const ORSHABAAL_SCALING_RETRY_DELAYS_MS = [5000, 30000, 120000, 300000, 300000, 300000];
+  let orshabaalScalingRetryTimer = null;
+  let orshabaalScalingRetryAttempt = 0;
+
+  function readPendingOrshabaalScaling(playerName) {
+    try {
+      const pending = JSON.parse(localStorage.getItem(ORSHABAAL_PENDING_SCALING_STORAGE_KEY) || 'null');
+      if (!pending || String(pending.player || '') !== String(playerName || '').toLowerCase()) return null;
+      return pending;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function writePendingOrshabaalScaling(playerName) {
+    try {
+      localStorage.setItem(ORSHABAAL_PENDING_SCALING_STORAGE_KEY, JSON.stringify({
+        player: String(playerName || '').toLowerCase(),
+        annihilatorOrshabaalDefeats: kingChatState.annihilatorOrshabaalDefeats,
+        annihilatorOrshabaalLastDefeatRaidStartedAt: kingChatState.annihilatorOrshabaalLastDefeatRaidStartedAt,
+        annihilatorOrshabaalHighestLevelDefeated: kingChatState.annihilatorOrshabaalHighestLevelDefeated,
+        annihilatorOrshabaalWinsEpoch: getStoredOrshabaalWinsEpoch()
+      }));
+    } catch (_) {
+      // Storage blocked — the in-session retries below still apply.
+    }
+  }
+
+  function clearPendingOrshabaalScaling() {
+    try {
+      localStorage.removeItem(ORSHABAAL_PENDING_SCALING_STORAGE_KEY);
+    } catch (_) {
+      // Non-fatal — a stale pending record only re-merges values already saved (max-merge).
+    }
+  }
+
+  function clearOrshabaalScalingRetry() {
+    if (orshabaalScalingRetryTimer) {
+      clearTimeout(orshabaalScalingRetryTimer);
+      orshabaalScalingRetryTimer = null;
+    }
+    orshabaalScalingRetryAttempt = 0;
+  }
+
+  async function flushOrshabaalScalingSave() {
+    if (orshabaalScalingRetryTimer) {
+      clearTimeout(orshabaalScalingRetryTimer);
+      orshabaalScalingRetryTimer = null;
+    }
+    const playerName = getCurrentPlayerName();
+    try {
+      // saveKingTibianusProgress silently no-ops before hydration — that is NOT a success.
+      if (!playerName || !missionProgressHydratedFromFirebase) {
+        throw new Error('player progress not loaded yet');
+      }
+      await saveKingTibianusProgress(playerName, getAllMissionProgress());
+      await saveOrshabaalLeaderboardEntry();
+      clearPendingOrshabaalScaling();
+      if (orshabaalScalingRetryAttempt > 0) {
+        console.log(`${getAnnihilatorOrshabaalLogPrefix()} Orshabaal defeat saved after ${orshabaalScalingRetryAttempt} retries`);
+      }
+      orshabaalScalingRetryAttempt = 0;
+      return true;
+    } catch (error) {
+      const delay = ORSHABAAL_SCALING_RETRY_DELAYS_MS[orshabaalScalingRetryAttempt];
+      if (delay == null) {
+        console.error(`${getAnnihilatorOrshabaalLogPrefix()} Orshabaal defeat still not saved after ${orshabaalScalingRetryAttempt} retries — kept locally, will retry on next login:`, error);
+        orshabaalScalingRetryAttempt = 0;
+        return false;
+      }
+      orshabaalScalingRetryAttempt += 1;
+      console.warn(`${getAnnihilatorOrshabaalLogPrefix()} Orshabaal defeat save failed (retry ${orshabaalScalingRetryAttempt} in ${Math.round(delay / 1000)}s):`, error?.message || error);
+      orshabaalScalingRetryTimer = setTimeout(() => {
+        orshabaalScalingRetryTimer = null;
+        flushOrshabaalScalingSave();
+      }, delay);
+      return false;
+    }
+  }
+
+  // Runs once per login, right after mission progress hydrates:
+  //  1. applies the global wins epoch — zeroes wins from before an admin reset;
+  //  2. merges back any kill from THIS epoch that never reached Firebase (pending record);
+  //  3. resyncs this player's leaderboard row from their saved progress (self-heals a row a
+  //     failed write left stale — skipped with no write when it already matches).
+  // Wins come only from the stored Firebase count — never inferred from quest completion.
+  async function reconcileOrshabaalScalingOnHydration(playerName, progress) {
+    if (!playerName || !progress || progress.__isEmpty) return;
+    let needsProgressSave = false;
+
+    let epoch = null;
+    try {
+      epoch = await fetchOrshabaalWinsEpoch();
+    } catch (error) {
+      console.warn('[Quests Mod] Could not read Orshabaal wins epoch on login (using saved one):', error?.message || error);
+    }
+    if (epoch != null && applyOrshabaalWinsEpoch(epoch)) {
+      needsProgressSave = true;
+      await deleteOwnOrshabaalLeaderboardRow();
+    }
+    const currentEpoch = epoch ?? getStoredOrshabaalWinsEpoch();
+
+    const pending = readPendingOrshabaalScaling(playerName);
+    if (pending) {
+      const storedDefeats = Number(kingChatState.annihilatorOrshabaalDefeats) || 0;
+      const pendingDefeats = Number(pending.annihilatorOrshabaalDefeats) || 0;
+      if ((Number(pending.annihilatorOrshabaalWinsEpoch) || 0) !== currentEpoch) {
+        clearPendingOrshabaalScaling(); // kill from before a reset — no longer counts
+      } else if (pendingDefeats > storedDefeats) {
+        copyOrshabaalScalingFields(pending, kingChatState);
+        needsProgressSave = true;
+        console.log(`[Quests Mod] Recovered unsaved Orshabaal defeat count (${storedDefeats} → ${pendingDefeats}) from local storage`);
+      } else {
+        clearPendingOrshabaalScaling(); // Firebase already has it (or more) — stale record.
+      }
+    }
+
+    if (needsProgressSave) {
+      writePendingOrshabaalScaling(playerName);
+      await flushOrshabaalScalingSave();
+    } else if (getOrshabaalDefeatCount() > 0) {
+      try {
+        await saveOrshabaalLeaderboardEntry();
+      } catch (error) {
+        console.warn('[Quests Mod] Orshabaal leaderboard resync failed (will retry next login):', error?.message || error);
+      }
+    }
+  }
+
+  // Counts this kill toward the player's scaling — once per raid instance. Keyed on the raid's
+  // shared startedAt, so reloads/re-entries within the same raid never double-count.
+  async function recordOrshabaalDefeatForScaling() {
+    const status = getAnnihilatorOrshabaalRaidStatus();
+    const raidStartedAt = status.relevantRaidStartedAt;
+    if (raidStartedAt == null) {
+      console.warn(`${getAnnihilatorOrshabaalLogPrefix()} Kill not counted for scaling — no raid instance to attribute it to`);
+      return;
+    }
+    if (Number(kingChatState.annihilatorOrshabaalLastDefeatRaidStartedAt) === raidStartedAt) {
+      console.log(`${getAnnihilatorOrshabaalLogPrefix()} Kill already counted for raid ${raidStartedAt} — scaling unchanged`);
+      return;
+    }
+    // An admin reset may have happened since login — count against the current season.
+    await syncOrshabaalWinsEpoch({ save: false });
+    const fightLevel = annihilatorOrshabaalFightLevel ?? getOrshabaalScaledLevel();
+    const defeats = getOrshabaalDefeatCount() + 1;
+    kingChatState.annihilatorOrshabaalDefeats = defeats;
+    kingChatState.annihilatorOrshabaalLastDefeatRaidStartedAt = raidStartedAt;
+    kingChatState.annihilatorOrshabaalHighestLevelDefeated = Math.max(
+      Number(kingChatState.annihilatorOrshabaalHighestLevelDefeated) || 0,
+      fightLevel
+    );
+    console.log(`${getAnnihilatorOrshabaalLogPrefix()} Defeat #${defeats} at level ${fightLevel} — next fight is level ${getOrshabaalScaledLevel(defeats)}`);
+    writePendingOrshabaalScaling(getCurrentPlayerName());
+    await flushOrshabaalScalingSave();
+  }
+
   async function creditAnnihilatorOrshabaalKill() {
     if (annihilatorOrshabaalKillCredited) return;
     annihilatorOrshabaalKillCredited = true;
@@ -36183,6 +36778,11 @@ function createNPCCooldownManager() {
       await persistMissionProgress(ANNIHILATOR_ORSHABAAL_MISSION, { ...progress, accepted: true, battleCompleted: true });
     } catch (error) {
       console.error(`${getAnnihilatorOrshabaalLogPrefix()} Error saving battleCompleted flag:`, error);
+    }
+    try {
+      await recordOrshabaalDefeatForScaling();
+    } catch (error) {
+      console.error(`${getAnnihilatorOrshabaalLogPrefix()} Error recording defeat for scaling:`, error);
     }
     // Per-player only — this player's own kill doesn't end the raid for anyone else
     // (see the World Raid module doc comment above).
@@ -36242,6 +36842,15 @@ function createNPCCooldownManager() {
     const spawn = getHydratedQuestBattleSpawn(ANNIHILATOR_ORSHABAAL_BATTLE_ID || 'annihilator_orshabaal');
     const villains = spawn.villains;
     const allies = spawn.allies;
+    // Hydrated units are fresh copies, so overriding the level here never touches battles.json.
+    annihilatorOrshabaalFightLevel = getOrshabaalScaledLevel();
+    const orshabaalUnit = villains.find((v) => String(v?.nickname || '').toLowerCase() === 'orshabaal');
+    if (orshabaalUnit) {
+      orshabaalUnit.level = annihilatorOrshabaalFightLevel;
+      console.log(`${getAnnihilatorOrshabaalLogPrefix()} Orshabaal scaled to level ${annihilatorOrshabaalFightLevel} (${getOrshabaalDefeatCount()} prior defeats)`);
+    } else {
+      console.warn(`${getAnnihilatorOrshabaalLogPrefix()} Orshabaal villain not found in spawn — level scaling skipped`);
+    }
     const tileRestrictions = {};
     if (spawn.allowedTiles?.length) {
       tileRestrictions.allowedTiles = spawn.allowedTiles;
@@ -36278,12 +36887,12 @@ function createNPCCooldownManager() {
         victoryMessage: getMissionDialogueLine(
           ANNIHILATOR_ORSHABAAL_MISSION,
           'battleVictory',
-          "It's down. Whatever it truly was, it won't be surfacing again — not this way, not this time. Return to Bubble."
+          "It's down — for now. Something like that doesn't stay dead; it'll crawl back angrier. Return to Bubble."
         ),
         defeatMessage: getMissionDialogueLine(
           ANNIHILATOR_ORSHABAAL_MISSION,
           'battleDefeat',
-          'Orshabaal is stronger than you expected. Gather yourself and try again.'
+          "It was stronger than the stories let on, wasn't it. Gather yourself — but don't take too long. It won't stay exposed forever."
         ),
         showItems: false,
         items: []
@@ -36366,7 +36975,11 @@ function createNPCCooldownManager() {
     }
 
     updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
-    showToast({ message: TOAST_MESSAGES.annihilatorOrshabaalEntering, logPrefix: getAnnihilatorOrshabaalLogPrefix() });
+    const enteringToast = TOAST_MESSAGES.annihilatorOrshabaalEntering;
+    showToast({
+      message: typeof enteringToast === 'function' ? enteringToast(getOrshabaalScaledLevel()) : enteringToast,
+      logPrefix: getAnnihilatorOrshabaalLogPrefix()
+    });
   }
 
   // ============================================================
@@ -44371,7 +44984,7 @@ function createNPCCooldownManager() {
               // the same still-live raid.
               cooldown.queueResponse(
                 text,
-                getMissionDialogueLine(ANNIHILATOR_ORSHABAAL_MISSION, 'alreadyHelpedThisRaid', "You already stood with me against it this time. My thanks again — but I've nothing more to give you for it twice."),
+                getMissionDialogueLine(ANNIHILATOR_ORSHABAAL_MISSION, 'alreadyHelpedThisRaid', "You've already put it down this time — nothing left here but to wait. It'll claw its way back, meaner, and I'll need you again when it does."),
                 addMessageToConversation,
                 npcConfig.name
               );
@@ -44387,9 +45000,10 @@ function createNPCCooldownManager() {
                   battleCompleted: false
                 });
                 await setAnnihilatorOrshabaalRaidTracking({ lastReportedRaidStartedAt: status.relevantRaidStartedAt });
+                // The win itself was already counted toward the leaderboard when he died.
                 cooldown.queueResponse(
                   text,
-                  getMissionDialogueLine(ANNIHILATOR_ORSHABAAL_MISSION, 'alreadyHelpedThisRaid', "You already stood with me against it this time. My thanks again — but I've nothing more to give you for it twice."),
+                  getMissionDialogueLine(ANNIHILATOR_ORSHABAAL_MISSION, 'repeatVictory', "Down again — and it hit harder than last time, didn't it? I've no more cores to hand out, but the guild keeps a tally of who's faced the worst of it. Your name's on it."),
                   addMessageToConversation,
                   npcConfig.name
                 );
@@ -44428,6 +45042,15 @@ function createNPCCooldownManager() {
             }
 
             awaitingAstronisOrshabaalConfirm = true;
+            if (orshabaalProgress.completed) {
+              cooldown.queueResponse(
+                text,
+                getMissionDialogueLine(ANNIHILATOR_ORSHABAAL_MISSION, 'offerReturning', 'Back again — and so is it. Meaner than the last time we put it down; they always come back worse. Will you stand with me against it once more?'),
+                addMessageToConversation,
+                npcConfig.name
+              );
+              return;
+            }
             cooldown.queueResponse(
               text,
               getMissionDialogueLine(ANNIHILATOR_ORSHABAAL_MISSION, 'offer', "You climbed out of that floor still breathing — good, because I need you now more than I did an hour ago. You felt that, didn't you? Orshabaal's back. Not sleeping, not hiding — out, right now, somewhere close, and my guild's already moving before it digs in and this gets a lot harder. I'm Bubble. Will you stand with us while it's still finding its footing?"),
@@ -45370,6 +45993,8 @@ function createNPCCooldownManager() {
     // Cleanup Astronis' Call (Sewers reskin battle against Orshabaal)
     cleanupAnnihilatorOrshabaalQuest();
     cleanupWorldRaidPolling();
+    clearOrshabaalScalingRetry();
+    if (window.WorldRaids === worldRaidsPublicApi) delete window.WorldRaids;
     cleanupParchmentRoomHoleSystem();
     cleanupDemonHelmetHoleSystem();
     cleanupDemonHelmetGateDoorSystem();
@@ -46111,6 +46736,11 @@ function createNPCCooldownManager() {
         const lastReported = Number(progress.annihilatorOrshabaalLastReportedRaidStartedAt);
         kingChatState.annihilatorOrshabaalLastReportedRaidStartedAt = Number.isFinite(lastReported) ? lastReported : null;
       }
+      kingChatState.annihilatorOrshabaalDefeats = 0;
+      kingChatState.annihilatorOrshabaalLastDefeatRaidStartedAt = null;
+      kingChatState.annihilatorOrshabaalHighestLevelDefeated = 0;
+      kingChatState.annihilatorOrshabaalWinsEpoch = 0;
+      copyOrshabaalScalingFields(progress, kingChatState);
       kingChatState.mornenionDefeated = !!(progress.mornenion && progress.mornenion.defeated);
       if (Array.isArray(progress.sevenSealsCompleted) && progress.sevenSealsCompleted.length === SEVEN_SEALS_COUNT) {
         kingChatState.sevenSealsCompleted = progress.sevenSealsCompleted.slice(0, SEVEN_SEALS_COUNT).map(Boolean);
@@ -46146,6 +46776,14 @@ function createNPCCooldownManager() {
       } catch (err) {
         console.error('[Quests Mod] Error backfilling metTesha:', err);
       }
+    }
+
+    // Orshabaal scaling: recover unsaved kills, backfill pre-counter completions, and resync
+    // this player's leaderboard row. See reconcileOrshabaalScalingOnHydration.
+    try {
+      await reconcileOrshabaalScalingOnHydration(playerName, progress);
+    } catch (err) {
+      console.error('[Quests Mod] Error reconciling Orshabaal scaling:', err);
     }
 
     // The Copper Key / Letter / Iron Ore / Wishlist / Present "received before" flags
@@ -47457,7 +48095,7 @@ function createNPCCooldownManager() {
   // dev/staging record. Using worldRaidForceTrigger() on the live game starts a REAL raid for
   // every mod user currently online, not just you. These also skip the client-side cooldown
   // check entirely (this file has no way to know your Firebase project's deployed rules) — if
-  // your Realtime Database rules enforce the 5-day cooldown (WORLD_RAID_COOLDOWN_MS) server-side,
+  // your Realtime Database rules enforce the 36h cooldown (WORLD_RAID_COOLDOWN_MS) server-side,
   // a force-trigger during that window will still be rejected there; use worldRaidClear() or
   // temporarily relax the rule in the console to test mid-cooldown.
   async function worldRaidForceTrigger() {
@@ -47476,7 +48114,7 @@ function createNPCCooldownManager() {
 
   // There's no more global "defeated" flag to set (a kill no longer ends the raid for
   // everyone — see the module doc comment above), so "force end" instead backdates
-  // `startedAt` past the 24h window, simulating a natural expiry for testing the
+  // `startedAt` past the 12h window, simulating a natural expiry for testing the
   // post-raid/cooldown flow.
   async function worldRaidForceEnd() {
     try {
@@ -47502,7 +48140,7 @@ function createNPCCooldownManager() {
     }
   }
 
-  // Clears only a finished raid's 5-day cooldown (by deleting the record, same as
+  // Clears only a finished raid's 36h cooldown (by deleting the record, same as
   // worldRaidClear) so Edron victories can roll again. Refuses while a raid is LIVE — use
   // worldRaidForceEnd()/worldRaidClear() for that — so it can't accidentally end a real
   // raid for everyone. Same shared-Firebase-path caveat as the helpers above.
@@ -47551,6 +48189,69 @@ function createNPCCooldownManager() {
     return status;
   }
 
+  // ── Orshabaal wins (per-player scaling) dev helpers ──
+  // Unlike the raid helpers above these only touch YOUR OWN progress + YOUR leaderboard row.
+  function orshabaalDevWinsSummary() {
+    const wins = getOrshabaalDefeatCount();
+    return {
+      wins,
+      highestLevelDefeated: Number(kingChatState.annihilatorOrshabaalHighestLevelDefeated) || 0,
+      nextFightLevel: getOrshabaalScaledLevel(wins),
+      lastDefeatRaidStartedAt: kingChatState.annihilatorOrshabaalLastDefeatRaidStartedAt ?? null
+    };
+  }
+
+  // Sets the win count outright. Best level beaten is rewritten to match (the level win #n
+  // would have been fought at), so the leaderboard stays consistent. Lowering the count also
+  // clears the once-per-raid marker, so you can re-fight and re-count in the current raid.
+  async function orshabaalDevSetWins(count) {
+    const wins = Math.max(0, Math.floor(Number(count) || 0));
+    if (!missionProgressHydratedFromFirebase) throw new Error('Mission progress not loaded yet');
+    const playerName = getCurrentPlayerName();
+    if (!playerName) throw new Error('No player name');
+    await syncOrshabaalWinsEpoch({ save: false }); // write into the current season
+    const previous = getOrshabaalDefeatCount();
+    kingChatState.annihilatorOrshabaalDefeats = wins;
+    kingChatState.annihilatorOrshabaalHighestLevelDefeated = wins > 0 ? getOrshabaalScaledLevel(wins - 1) : 0;
+    if (wins < previous) kingChatState.annihilatorOrshabaalLastDefeatRaidStartedAt = null;
+    // The dev value is authoritative — drop any pending kill record so the next login's
+    // max-merge can't raise it back up.
+    clearPendingOrshabaalScaling();
+    clearOrshabaalScalingRetry();
+    await saveKingTibianusProgress(playerName, getAllMissionProgress());
+    if (wins > 0) {
+      await saveOrshabaalLeaderboardEntry();
+    } else {
+      const hashedPlayer = await hashUsername(playerName);
+      await FirebaseService.delete(`${ORSHABAAL_LEADERBOARD_PATH}/${hashedPlayer}`, 'dev delete orshabaal leaderboard entry');
+      orshabaalLeaderboardCache = null;
+    }
+    const summary = orshabaalDevWinsSummary();
+    console.log(`[Quests Mod][World Raid][Dev] Orshabaal wins ${previous} → ${wins}:`, summary);
+    return summary;
+  }
+
+  // Resets EVERY player's Orshabaal wins (shared, global — not just you): bumps the wins epoch
+  // to a server timestamp and deletes the whole leaderboard. Each client zeroes its own count
+  // on next login, before counting its next kill, or within ~5 min while a raid is live.
+  async function orshabaalDevResetAllWins() {
+    await FirebaseService.put(ORSHABAAL_WINS_EPOCH_PATH, { '.sv': 'timestamp' }, 'dev reset all orshabaal wins');
+    await FirebaseService.delete(ORSHABAAL_LEADERBOARD_PATH, 'dev clear orshabaal leaderboard');
+    orshabaalLeaderboardCache = null;
+    await syncOrshabaalWinsEpoch();
+    const summary = { epoch: orshabaalWinsEpoch, ...orshabaalDevWinsSummary() };
+    console.log('[Quests Mod][World Raid][Dev] Reset ALL players\' Orshabaal wins — new epoch:', summary);
+    return summary;
+  }
+
+  function orshabaalDevAddWins(delta = 1) {
+    return orshabaalDevSetWins(getOrshabaalDefeatCount() + Math.floor(Number(delta) || 0));
+  }
+
+  function orshabaalDevRemoveWins(delta = 1) {
+    return orshabaalDevSetWins(getOrshabaalDefeatCount() - Math.floor(Number(delta) || 0));
+  }
+
   function questsDevHelp() {
     console.log('[Quests Mod][Dev] QuestsDev API:', Object.keys(QuestsDev));
     console.log('[Quests Mod][Dev] Mission IDs:', Object.keys(MISSION_STATE_MAP));
@@ -47559,6 +48260,7 @@ function createNPCCooldownManager() {
     console.log('[Quests Mod][Dev] Examples: QuestsDev.grant({ leather: 1, monksStudy: 1 }); QuestsDev.setAccepted("king_copper_key"); QuestsDev.complete("king_red_dragon"); QuestsDev.reset("svenson_love_story"); QuestsDev.resetLoveStoryWithItems(); QuestsDev.resetSanta(); QuestsDev.completeAll(); QuestsDev.resetAll();');
     console.log('[Quests Mod][Dev] complete / setAccepted / reset / resetAll / completeAll / resetSanta now auto-sync the quest-item bag to progress (grant/stale/backfill rules). QuestsDev.reconcile() runs that sync on demand — use it after a grant() that changed both progress and items.');
     console.log('[Quests Mod][Dev] World Raid (Orshabaal): QuestsDev.worldRaidStatus() to inspect, QuestsDev.worldRaidForceTrigger() / .worldRaidForceEnd() / .worldRaidResetCooldown() / .worldRaidClear() to control it. WARNING: these hit the SAME shared Firebase path production uses — forceTrigger starts a real raid for every mod user online, not just you.');
+    console.log('[Quests Mod][Dev] Orshabaal wins (your own scaling + leaderboard row only): QuestsDev.orshabaalWins() to inspect, QuestsDev.orshabaalAddWins(n) / .orshabaalRemoveWins(n) / .orshabaalSetWins(n) to change. Level = base + 500 × wins, capped.');
     console.log('[Quests Mod][Dev] World Raid: set the extension\'s Log Level to "verbose" (popup) for a running console timer — logs on every 30s poll tick, each toast-buildup stage, and every trigger/defeat, each with a formatted countdown (LIVE — ends in Xh Ym / on cooldown — triggerable again in Xd Yh / triggerable now).');
   }
 
@@ -47581,6 +48283,7 @@ function createNPCCooldownManager() {
         'setSealCompleted', 'getSealCompleted', 'areAllSevenSealsCompleted',
         'setBasiliskChallengeCompleted', 'getBasiliskChallengeCompleted', 'areAllBasiliskChallengesCompleted',
         'setBasiliskChallengeBattleCompleted', 'getBasiliskChallengeBattleCompleted',
+        'orshabaalWins', 'orshabaalSetWins', 'orshabaalAddWins', 'orshabaalRemoveWins', 'orshabaalResetAllWins',
         'help', 'catalog'
       ]
     };
@@ -47629,7 +48332,12 @@ function createNPCCooldownManager() {
     worldRaidForceEnd,
     worldRaidClear,
     worldRaidResetCooldown,
-    worldRaidStatus: worldRaidDevStatus
+    worldRaidStatus: worldRaidDevStatus,
+    orshabaalWins: orshabaalDevWinsSummary,
+    orshabaalSetWins: orshabaalDevSetWins,
+    orshabaalAddWins: orshabaalDevAddWins,
+    orshabaalRemoveWins: orshabaalDevRemoveWins,
+    orshabaalResetAllWins: orshabaalDevResetAllWins
   };
 
   function registerQuestsDevHelpers() {
