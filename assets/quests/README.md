@@ -170,7 +170,9 @@ Checklist:
    then `setup<X>ArrowObserver = <x>ArrowTileAction.setupObserver` / `cleanup<X>ArrowSystem = <x>ArrowTileAction.cleanup`.
    `imageFilename` is optional — omit it for the default `Tutorial_Arrow_Effect.gif`, or pass a
    different filename (e.g. `'Tile_Highlight_Effect.gif'`, used by the Parchment Room's hole tile)
-   for a different visual.
+   for a different visual. Or pass `glowTarget: (tile) => element` to make an object already on the tile
+   (e.g. an injected door sprite) glow in rainbow colours in place (`.quests-rainbow-glow`), with no
+   overlay at all. The Demon Helmet gate door (tile 52) uses this.
 7. **Leaving via the room picker** (not a dedicated exit tile): add a branch to the big "Overlay Hider"
    room-change watcher in Quests.js (search `Leaving Visiting the Cleric temple` for the exact spot):
    `if (lastOverlayHiderRoomName === <X>_ROOM_NAME && currentRoomName !== <X>_ROOM_NAME && (playerEntered<X> || <x>Battle) && !<x>Battle?.isRoomReloadInProgress?.()) cleanup<X>Quest();`
@@ -473,7 +475,7 @@ it is" rule.
 `reconcileQuestItemsFromProgress({ label })` (Quests.js, right after `backfillSoulCoresFromCompletedMissions`)
 runs all three passes plus a modal/tab refresh. It runs automatically at the end of every
 progress-mutating dev command: `QuestsDev.complete`, `.setAccepted`, `.reset`, `.resetAll`, `.completeAll`,
-`.resetSanta`, and `.grant(...)` **when the call changed only mission/seal progress** (a `grant` that also
+`.resetSanta`, `.setProgressFlag` (the per-mission "Progress flags" toggles), and `.grant(...)` **when the call changed only mission/seal progress** (a `grant` that also
 set item counts skips it and logs a hint, so deliberate item edits survive). `QuestsDev.reconcile()` (alias
 `questsDevReconcile`) runs it on demand.
 
@@ -618,6 +620,15 @@ Legend: **G** = grant site, **C** = consume site, **W** = window the item should
 | **Beware of the Bonelords (Book)** `bewareOfTheBonelordsBook` | G: on `hellgate_part_1` complete · C: `hellgate_library` `bookGiven` | completed && !bookGiven | cleanup ✅, stale ✅ (`whenField`), backfill ✅ |
 | **White Mushroom** `whiteMushroom` | G: on `hellgate_library` complete · C: `draconia_tower` `dragonfetishReceived` | completed && !dragonfetishReceived | cleanup ✅, stale ✅ (`whenField` — `draconia_tower` may never reach full `completed`), backfill ✅ |
 | **Dragonfetish** `dragonfetish` | G: `draconia_tower` `dragonfetishReceived` · C: `draconia_quest` battle return / complete | dragonfetishReceived && !completed | stale ✅, backfill ✅ (`grantWhenField` + `removedByProgressFlag`) |
+
+</details>
+
+<details>
+<summary>Avar Tar line (Parchment Room → Demon Helmet)</summary>
+
+| Item | G / C | Window | Rules |
+|---|---|---|---|
+| **Golden Key** `goldenKey` | G: `parchment_room` `keyReceived` (coffin) · C: `demon_helmet` `keyUsed` (door on tile 52 of the gate room, after the Fire Elemental fight) | keyReceived && !demonHelmet.keyUsed | cleanup ✅ (`requiredProgressFlag`), stale ✅ (`whenField:"keyUsed"`), backfill ✅ (`grantWhenField` + `removedByProgressFlag`) |
 
 </details>
 

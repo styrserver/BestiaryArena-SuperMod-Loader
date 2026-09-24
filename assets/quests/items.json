@@ -778,7 +778,8 @@
     "hellgate_part_1": 2970,
     "hellgate_library": 3723,
     "visiting_mintwallin": 2184,
-    "the_necromant_house": 4285
+    "the_necromant_house": 4285,
+    "demon_helmet": 3387
   },
   "devTools": {
     "_comment": "Story-ordered grantable items for Quest Dev Tools. productId links to products{} for live names. receivedBefore rules: anyMissionAcceptedOrCompleted | missionCompleted | missionAcceptedOrCompleted | receivedFlagOrMissionCompleted | receivedFlagOrMissionAcceptedOrCompleted | missionFieldOrCompleted | missionAnyField | anyOf.",
@@ -1666,6 +1667,11 @@
         "missionId": "visiting_mintwallin"
       },
       {
+        "productId": "goldenKey",
+        "missionId": "demon_helmet",
+        "whenField": "keyUsed"
+      },
+      {
         "productId": "mintwallinPrisonKey",
         "missionId": "visiting_mintwallin"
       }
@@ -1683,7 +1689,7 @@
       { "productId": "mornenionSoulCore", "missionId": "al_dee_golden_rope" },
       { "productId": "apprenticeShengSoulCore", "missionId": "apprentice_sheng" },
       { "productId": "hornedFoxSoulCore", "missionId": "the_basilisk_challenges" },
-      { "productId": "goldenKey", "missionId": "parchment_room", "grantWhenField": "keyReceived" },
+      { "productId": "goldenKey", "missionId": "parchment_room", "grantWhenField": "keyReceived", "removedByProgressFlag": { "firebaseKey": "demonHelmet", "field": "keyUsed" } },
       { "productId": "lightShovel", "missionId": "al_dee_fishing_gold" },
       { "productId": "dragonClaw", "missionId": "king_red_dragon", "removedByProgressFlag": { "firebaseKey": "dragonmother", "field": "completed" } },
       { "productId": "holyTible", "missionId": "al_dee_golden_rope", "removedByProgressFlag": { "firebaseKey": "monksStudy", "field": "completed" } },

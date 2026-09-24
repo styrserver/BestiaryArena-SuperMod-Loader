@@ -143,6 +143,33 @@
       "complete": "You claimed the golden key from the coffin itself? Hah! I knew sending you was the right call — nearly as good as if I'd gone myself. Take these guild coins for your trouble, hero.",
       "rewardSummary": "Reward: Golden Key (Key 6010) + 100 guild coins."
     },
+    "demon_helmet": {
+      "id": "demon_helmet",
+      "title": "Demon Helmet Quest",
+      "prompt": "That golden key you pulled from the coffin — you know what it opens, don't you? The door past the gate of expertise, deep below the Hero Cave. Beyond it lies a room with four demons and more banshees than I'd care to count ... and the chests of the Demon Helmet, the Demon Shield and a pair of Steel Boots. I cleared it myself, of course. Twice. Will you dare it, Player?",
+      "accept": "Ha! That's the spirit of a true hero! Go back to where you broke the Cake Drake Party and step down the hole into the Hero Cave again. Hold that golden key tight, mind the fire on the way down, and don't let the banshees sing you to sleep!",
+      "decline": "No shame in it. Four demons at once has sent braver souls than you crying home to their mothers ... not me, naturally.",
+      "notReady": "The Demon Helmet? Ha! You haven't even been through the Parchment Room yet. Bring me the golden key from that coffin first, then we'll talk about demons.",
+      "noKey": "Where's that golden key of yours, Player? Without it the door below the Hero Cave won't budge, not even for a hero like me ... well, perhaps for me.",
+      "alreadyActive": "The demons are still guarding those chests, Player. The golden key won't turn itself. Go back to the Cake Drake Party and down the hole!",
+      "alreadyCompleted": "You wear that Demon Helmet well, Player. Almost as well as I do. Almost.",
+      "gateVictory": "The fire elementals burn out. A heavy door stands at the end of the hall — the golden key should fit.",
+      "battleVictory": "The demons are dust and the banshees wail no more! Return to Avar Tar and tell him the tale.",
+      "gateDefeat": "The flames drive you back up the hole. Rest, heal, and go down again.",
+      "teleporterVictory": "The room falls silent. The teleporter hums — step onto it when you are ready.",
+      "teleporterDefeat": "The demons drive you back up the hole. Rest, heal, and go down again.",
+      "battleDefeat": "The banshees' screams drive you back up through the portal. Rest, heal, and go down the hole again.",
+      "complete": "You made it back in one piece! Demon Helmet, Demon Shield, Steel Boots ... a proper haul for a proper hero. I'd say I taught you well, but my humility forbids it. Take these 200 guild coins as well, you've earned them.",
+      "objectiveLine1": "Ask Avar Tar about the demon helmet.",
+      "objectiveLine2": "Go down the hole in the Cake Drake Party and defeat the fire elementals at the gate.",
+      "objectiveLine3": "Use the golden key on the door.",
+      "objectiveLine4": "Clear the teleporter room beyond the door.",
+      "objectiveLine5": "Take the teleporter and defeat the demons guarding the chests.",
+      "objectiveLine6": "Return to Avar Tar and tell him the demons have fallen.",
+      "hint": "Take the hole in the Cake Drake Party again. Bring the golden key and a big team.",
+      "rewardCoins": 200,
+      "rewardSummary": "Reward: 200 guild coins."
+    },
     "king_copper_key": {
       "id": "king_copper_key",
       "title": "Retrieve King Tibianus's Belongings",
@@ -826,6 +853,7 @@
     "isle_of_the_mists": "Stepped through the path south of the temple, slew Fernfang on the Isle of the Mists, and reported back.",
     "the_necromant_house": "Investigated the Necromant House east of the Dark Cathedral for Oldrak, found those he sent turned to bone, cleared the house, and reported back.",
     "parchment_room": "Cleared the demon-guarded Parchment Room in the Hero Cave near Edron for Avar Tar, opened the coffin for the golden key, and reported back.",
+    "demon_helmet": "Used the golden key to reach the demon room below the Hero Cave, defeated the four demons and the banshees, claimed the Demon Helmet and reported back to Avar Tar.",
     "serpentine_tower": "Used the lever in the Serpentine Tower basement and survived The Cursed Chamber.",
     "apprentice_sheng": "Helped Rookstayer defeat Apprentice Sheng in the Minotaur Mage Room.",
     "christmas_miracle": "Received a Christmas present from Santa Claus.",
@@ -899,6 +927,7 @@
       "draconia_quest",
       "the_basilisk_challenges",
       "parchment_room",
+      "demon_helmet",
       "mother_of_all_spiders",
       "jakundaf_desert",
       "tainted_souls",
@@ -957,6 +986,17 @@
         ],
         "forceExtraFieldsWhenCompleted": true,
         "gateRooms": ["Cake Drake Party"]
+      },
+      "demon_helmet": {
+        "stateKey": "progressDemonHelmet",
+        "firebaseKey": "demonHelmet",
+        "extraFields": [
+          "gateCleared",
+          "keyUsed",
+          "teleporterCleared",
+          "battleCompleted"
+        ],
+        "forceExtraFieldsWhenCompleted": true
       },
       "king_copper_key": {
         "stateKey": "progressCopper",
