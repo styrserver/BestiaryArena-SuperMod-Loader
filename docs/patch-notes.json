@@ -4,6 +4,76 @@
   },
   "notes": [
     {
+      "version": "5.0.14",
+      "changes": [
+        {
+          "mod": "Better Highscores",
+          "type": "changed",
+          "text": "World records (speedrun, rank and floor) now load from the game's public trophy room data in one request instead of two, and are always fresh instead of cached for 30 seconds. The post-battle recheck now runs after 3.5 seconds instead of 2.5, so it always gets fresh data."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "changed",
+          "text": "Maps tab and Leaderboards world records now load from the game's public trophy room data and are always fresh, instead of cached for up to 10 minutes."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "fixed",
+          "text": "Multi-floor maps (e.g. The Annihilator Quest) now show under their real region (e.g. Edron) in creature locations and equipment map lists, instead of a made-up \"Quests\" group."
+        },
+        {
+          "mod": "docs/game_state_api.md",
+          "type": "added",
+          "text": "Public Highscores API section: the trophy room endpoint's data shape, the shared fetch helper and its rate-limit behavior, and when to take one snapshot instead of fetching repeatedly."
+        },
+        {
+          "mod": "Guilds",
+          "type": "added",
+          "text": "When a leader or officer opens their guild, members whose game profile no longer exists (renamed or deleted accounts) are removed automatically, with a guild chat message. Each is double-checked with the server first, and nothing is removed if the game's API looks unhealthy."
+        },
+        {
+          "mod": "Guilds",
+          "type": "changed",
+          "text": "World-record counts now load from the game's public trophy room data, fetched once per guild panel load and counted toward the profile rate limit, so it doesn't slow down member loading."
+        },
+        {
+          "mod": "Guilds",
+          "type": "fixed",
+          "text": "Hover tooltips (member points, guild points, equipment, skills) no longer stay stuck on screen after closing or switching a guild window. When the game rate-limits profile loading, all profile requests now pause together until the limit clears (with one console warning) instead of each request retrying on its own and flooding the console. Rate-limited players are no longer briefly cached as missing, and members with no game profile (renamed or deleted accounts) no longer stop the guild's points from being cached, which made every panel open reload all members."
+        },
+        {
+          "mod": "Highscore Improvements",
+          "type": "changed",
+          "text": "World records now load from the game's public trophy room data in one request instead of two."
+        },
+        {
+          "mod": "Mod Loader",
+          "type": "added",
+          "text": "BestiaryModAPI.util.fetchTrophyRoomData(): shared, always-fresh fetch of the game's public highscores. Calls within 2 seconds of each other share one request. If the game rate-limits it, it retries once and otherwise falls back to the last loaded data instead of failing."
+        },
+        {
+          "mod": "Mod Loader",
+          "type": "fixed",
+          "text": "If the game tab reloads while the server or your connection is down, it no longer stays stuck on the browser's \"can't connect\" page. The extension now checks the server in the background and reloads the tab once it's back (unless auto-reload is disabled in Mod Settings), and logs each step to the Error Log. Unhandled game errors seen from the extension side are now logged with their real message instead of \"{}\"."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "changed",
+          "text": "Run upload validation now checks against fresh world records from the game's public trophy room data, instead of a copy cached for up to 5 minutes."
+        },
+        {
+          "mod": "Quests",
+          "type": "added",
+          "text": "New quest: an existing storyline continues with a new multi-part chapter — several new custom battles across new areas, with progress saved between each part."
+        },
+        {
+          "mod": "Quests",
+          "type": "fixed",
+          "text": "Quest Dev Tools: toggling a mission's progress flag now also syncs quest items to the new progress (like Complete/Accept/Reset already did), instead of leaving items that should have been removed or granted until the next reload. Reskinned quest areas no longer lose some of their decorations after a battle is won, when a tile re-used one of the original room's own sprites."
+        }
+      ]
+    },
+    {
       "version": "5.0.13",
       "changes": [
         {

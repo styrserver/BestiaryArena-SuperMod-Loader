@@ -835,6 +835,36 @@ if (globalThis.state.board.trigger?.setState) {
 examples elsewhere in this doc remain valid (both forms are live in the current game build), but new
 call sites in this codebase consistently use `trigger`.
 
+## Public Highscores API (Trophy Room)
+
+`game.getFullTrophyRoomData` returns every room's #1 tick, rank and floor record, plus the global top-20 boards, in **one public GET** (no login needed, ~43 KB). It returns the same records as the logged-in `game.getTickHighscores` + `game.getRoomsHighscores` pair (verified identical for all 100 rooms, 2026-09-23), so prefer it for new code. All bundled mods (Better Highscores, Highscore Improvements, Cyclopedia, Guilds, Mod Settings run-upload validation) now use it; only `game.getTickLeaderboards` (per-room top lists) is still fetched separately.
+
+In mods, fetch it through the shared helper rather than calling `fetch` yourself:
+
+```javascript
+const { highscores, leaderboards } = await window.BestiaryModAPI.util.fetchTrophyRoomData();
+
+highscores.tick.rkswrs;   // #1 speedrun on Sewers
+highscores.rank.rkswrs;   // #1 rank-points run
+highscores.floor.rkswrs;  // #1 floor run
+leaderboards.floor;       // global top 20 by total floors
+```
+
+`util.fetchTrophyRoomData()` (in `content/client.js`) always fetches fresh, but has a **2-second cooldown** shared by every mod: calls made within 2 s of the last request (or while it's in flight) get that request's result. The cooldown runs from when the last request finished. This way several mods reacting to the same map change or battle end cost one request. The game's rate limit is shared across its whole API (e.g. Guilds' profile bursts), so on a `429` the helper waits `Retry-After` (default 1 s, max 5 s) and retries once. If a fetch still fails, it returns the **last successful payload** instead of rejecting; it only rejects if nothing has loaded yet. Don't add a longer cache on top for one-off reads: consumers are expected to get the latest records. The exception is a **bulk operation that also spends the server's budget of 30 requests per 10 s** (e.g. Guilds' panel load, which sends up to 28 profile requests per 10 s). Take one snapshot for the whole operation and send it through the same rate limiter. Guilds' `getRoomsHighscoresCached()` does this (30 s snapshot via `withProfileRateLimit`); re-fetching every 2 s there caused profile 429s and 10 s back-offs.
+
+If you call the endpoint directly: it's a plain GET (`/api/trpc/game.getFullTrophyRoomData`), **not** the `?batch=1&input=…` form, so the payload is `json.result.data.json` (no `[0]`).
+
+Every entry also carries the holder's `userId`, `userName` and outfit (`outfitId`, `head`, `body`, `legs`, `feet`):
+
+| Path | Keyed by | Extra fields |
+|------|----------|--------------|
+| `highscores.tick[roomCode]` | room code | `ticks` |
+| `highscores.rank[roomCode]` | room code | `rank` (points), `ticks` |
+| `highscores.floor[roomCode]` | room code | `floor`, `ticks` (the old `getRoomsHighscores` could also say `floorTicks`) |
+| `leaderboards.tick[]` | top 20, sorted | `ticks` (sum over rooms) |
+| `leaderboards.rank[]` | top 20, sorted | `points`, `ticks` |
+| `leaderboards.floor[]` | top 20, sorted | `floors` (sum), `ticks` |
+
 ## Events and Listeners
 
 The game uses XState under the hood, providing a powerful event system for monitoring and interacting with game state.

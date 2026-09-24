@@ -1272,6 +1272,7 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // once-per-load guard; otherwise iOS/Orion (and desktop) never re-deliver until the
     // browser process restarts and wipes the in-memory Set.
     clearTabModDelivery(sender.tab.id);
+    cancelDeadTabRecovery(sender.tab.id, 'page is running again');
 
     getActiveScripts().then((scripts) => {
       const enabledScripts = scripts.filter((s) => s.enabled);
@@ -1347,7 +1348,194 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
 // Clean up registered tabs when they're closed
 browserAPI.tabs.onRemoved.addListener((tabId) => {
   clearTabModDelivery(tabId);
+  cancelDeadTabRecovery(tabId);
 });
+
+// ---------------------------------------------------------------------------
+// Browser error-page recovery
+//
+// When a game tab finishes loading but no content script answers (checkAPI and the
+// injection/messaging fallbacks all fail), the tab is almost always showing the
+// browser's own network error page (Firefox about:neterror, Chrome chrome-error://)
+// — the server or network was down at the moment the page (re)loaded. Content
+// scripts never run there, so the in-page crash watcher, autoplay refresh and every
+// mod reload are gone. This worker is the only code left: probe the server with
+// backoff and reload the tab once it answers.
+// ---------------------------------------------------------------------------
+const AUTO_RELOAD_DISABLED_STORAGE_KEY = 'ba-disable-auto-reload'; // mirrored by injector.js
+const TAB_RECOVERY_ALARM_PREFIX = 'ba-tab-recovery:';
+// Chrome alarms fire no sooner than 30s; the tail entry repeats until recovery.
+const TAB_RECOVERY_PROBE_DELAYS_MS = [30000, 60000, 120000, 300000];
+const TAB_RECOVERY_MAX_RELOADS = 6;
+const TAB_RECOVERY_PROBE_URL = 'https://bestiaryarena.com/';
+const TAB_RECOVERY_PROBE_TIMEOUT_MS = 10000;
+const tabRecoveryState = new Map(); // tabId -> { probes, reloads, timer, limitLogged }
+
+// Recovery decisions are console.warn (level-gated, never stored); mirror the
+// milestones into the Error Log so a captured log explains what happened.
+function recordTabRecoveryDiagnostic(message) {
+  console.warn(`[Background] ${message}`);
+  appendBackgroundLoaderError({ level: 'error', source: 'Tab recovery', message });
+}
+
+function getTabRecoveryState(tabId) {
+  let state = tabRecoveryState.get(tabId);
+  if (!state) {
+    state = { probes: 0, reloads: 0, timer: null, limitLogged: false };
+    tabRecoveryState.set(tabId, state);
+  }
+  return state;
+}
+
+function clearTabRecoveryTimer(tabId, state) {
+  if (state?.timer) {
+    clearTimeout(state.timer);
+    state.timer = null;
+  }
+  try {
+    browserAPI.alarms?.clear(`${TAB_RECOVERY_ALARM_PREFIX}${tabId}`);
+  } catch {
+    // ignore
+  }
+}
+
+function cancelDeadTabRecovery(tabId, reason) {
+  const state = tabRecoveryState.get(tabId);
+  if (!state) return;
+  clearTabRecoveryTimer(tabId, state);
+  tabRecoveryState.delete(tabId);
+  if (reason) recordTabRecoveryDiagnostic(`Tab ${tabId} recovered (${reason})`);
+}
+
+function isAutoReloadDisabledInStorage() {
+  return new Promise((resolve) => {
+    try {
+      browserAPI.storage.local.get([AUTO_RELOAD_DISABLED_STORAGE_KEY], (result) => {
+        resolve(result?.[AUTO_RELOAD_DISABLED_STORAGE_KEY] === true);
+      });
+    } catch {
+      resolve(false);
+    }
+  });
+}
+
+function getTabSafe(tabId) {
+  return new Promise((resolve) => {
+    try {
+      browserAPI.tabs.get(tabId, (tab) => {
+        resolve(browserAPI.runtime.lastError ? null : tab);
+      });
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
+function tabHasContentScript(tabId) {
+  return new Promise((resolve) => {
+    try {
+      browserAPI.tabs.sendMessage(tabId, { action: 'checkAPI' }, () => {
+        resolve(!browserAPI.runtime.lastError);
+      });
+    } catch {
+      resolve(false);
+    }
+  });
+}
+
+async function isGameServerReachable() {
+  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const timeout = controller ? setTimeout(() => controller.abort(), TAB_RECOVERY_PROBE_TIMEOUT_MS) : null;
+  try {
+    const response = await fetch(TAB_RECOVERY_PROBE_URL, {
+      method: 'HEAD',
+      cache: 'no-store',
+      signal: controller?.signal
+    });
+    // Any HTTP answer below 500 means the server is up enough to serve the game.
+    return response.status < 500;
+  } catch {
+    return false;
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
+/** Tab finished loading with no content script — start (or continue) probing. */
+function scheduleDeadTabRecovery(tabId) {
+  if (tabId == null) return;
+  const state = getTabRecoveryState(tabId);
+  if (state.timer) return; // already waiting
+  if (state.reloads >= TAB_RECOVERY_MAX_RELOADS) {
+    if (!state.limitLogged) {
+      state.limitLogged = true;
+      recordTabRecoveryDiagnostic(
+        `Tab ${tabId} still on a browser error page after ${TAB_RECOVERY_MAX_RELOADS} reloads — giving up`
+      );
+    }
+    return;
+  }
+
+  const delayMs = TAB_RECOVERY_PROBE_DELAYS_MS[Math.min(state.probes, TAB_RECOVERY_PROBE_DELAYS_MS.length - 1)];
+  if (state.probes === 0) {
+    recordTabRecoveryDiagnostic(
+      `Tab ${tabId} loaded with no content script (likely a browser network error page) — checking server in ${Math.round(delayMs / 1000)}s`
+    );
+  }
+  state.probes += 1;
+
+  if (browserAPI.alarms) {
+    // MV3 service workers are killed when idle, taking setTimeout with them.
+    state.timer = true;
+    browserAPI.alarms.create(`${TAB_RECOVERY_ALARM_PREFIX}${tabId}`, { when: Date.now() + delayMs });
+  } else {
+    state.timer = setTimeout(() => runDeadTabRecoveryProbe(tabId), delayMs);
+  }
+}
+
+async function runDeadTabRecoveryProbe(tabId) {
+  // A restarted MV3 worker loses the in-memory state; the alarm alone means "keep going".
+  const state = getTabRecoveryState(tabId);
+  state.timer = null;
+
+  const tab = await getTabSafe(tabId);
+  if (!tab || !tab.url || !isBestiaryAllowedForModInjectionUrl(tab.url)) {
+    cancelDeadTabRecovery(tabId);
+    return;
+  }
+  if (await tabHasContentScript(tabId)) {
+    cancelDeadTabRecovery(tabId, 'page is running again');
+    return;
+  }
+  if (await isAutoReloadDisabledInStorage()) {
+    recordTabRecoveryDiagnostic(`Tab ${tabId} on a browser error page — reload skipped (auto-reload disabled in Mod Settings)`);
+    cancelDeadTabRecovery(tabId);
+    return;
+  }
+  if (!(await isGameServerReachable())) {
+    scheduleDeadTabRecovery(tabId);
+    return;
+  }
+
+  state.reloads += 1;
+  state.probes = 0;
+  recordTabRecoveryDiagnostic(
+    `Game server reachable again — reloading tab ${tabId} (reload ${state.reloads}/${TAB_RECOVERY_MAX_RELOADS})`
+  );
+  try {
+    browserAPI.tabs.reload(tabId);
+  } catch (error) {
+    console.warn('[Background] Tab recovery reload failed:', error);
+  }
+}
+
+if (browserAPI.alarms?.onAlarm) {
+  browserAPI.alarms.onAlarm.addListener((alarm) => {
+    if (!alarm?.name?.startsWith(TAB_RECOVERY_ALARM_PREFIX)) return;
+    const tabId = Number(alarm.name.slice(TAB_RECOVERY_ALARM_PREFIX.length));
+    if (Number.isInteger(tabId)) runDeadTabRecoveryProbe(tabId);
+  });
+}
 
 // Mirrors content_scripts matches in the manifest — only inject on allowlisted game URLs
 // (e.g. /game and /pt/game). Without this, tabs.onUpdated would inject injector.js on any
@@ -1487,6 +1675,7 @@ browserAPI.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
                     console.log("Successfully initialized mod loader via messaging");
                   } else {
                     console.error("Failed to initialize via messaging:", browserAPI.runtime.lastError);
+                    scheduleDeadTabRecovery(tabId);
                   }
                 });
               });
@@ -1506,11 +1695,13 @@ browserAPI.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
                   }, 1000);
                 } else {
                   console.error("Failed to initialize via messaging:", browserAPI.runtime.lastError);
+                  scheduleDeadTabRecovery(tabId);
                 }
               });
             }
           } else {
             console.log('Content script already functioning; waiting for contentScriptReady to deliver mods');
+            cancelDeadTabRecovery(tabId, 'page is running again');
           }
         });
       }, 500);

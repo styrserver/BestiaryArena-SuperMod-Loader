@@ -118,6 +118,33 @@
     }
   }
 
+  // An Error from another realm (page ↔ content-script world, iframe) fails
+  // `instanceof Error` — in Firefox the content-script world then sees an opaque
+  // wrapper that JSON-stringifies to "{}". Duck-type name/message instead.
+  function asErrorLike(value) {
+    if (value instanceof Error) return value;
+    try {
+      if (value && typeof value === 'object' && typeof value.message === 'string' && value.message) {
+        return {
+          name: typeof value.name === 'string' && value.name ? value.name : 'Error',
+          message: value.message,
+          stack: typeof value.stack === 'string' ? value.stack : undefined
+        };
+      }
+    } catch { /* inaccessible wrapper */ }
+    return null;
+  }
+
+  function describeRejectionReason(reason) {
+    const json = safeStringify(reason);
+    if (json === '{}' && reason && typeof reason === 'object') {
+      let tag = 'object';
+      try { tag = Object.prototype.toString.call(reason).slice(8, -1) || tag; } catch { /* ignore */ }
+      return `Unhandled rejection: [${tag} with no readable fields — likely a page-world error seen from the extension world]`;
+    }
+    return `Unhandled rejection: ${json}`;
+  }
+
   function formatArg(arg) {
     if (arg instanceof Error) {
       return `${arg.name}: ${arg.message}${arg.stack ? `\n${arg.stack}` : ''}`;
@@ -128,8 +155,8 @@
       return `${arg.message || 'ErrorEvent'}${loc}${s}`;
     }
     if (typeof PromiseRejectionEvent !== 'undefined' && arg instanceof PromiseRejectionEvent) {
-      const r = arg.reason;
-      return r instanceof Error ? `${r.name}: ${r.message}\n${r.stack || ''}` : `Unhandled rejection: ${safeStringify(r)}`;
+      const r = asErrorLike(arg.reason);
+      return r ? `${r.name}: ${r.message}\n${r.stack || ''}` : describeRejectionReason(arg.reason);
     }
     if (arg === null) return 'null';
     if (arg === undefined) return 'undefined';
@@ -366,11 +393,12 @@
   function reportRejectionEvent(event) {
     try {
       const reason = event && event.reason;
+      const errorLike = asErrorLike(reason);
       emitToSink({
         level: 'error',
         source: 'unhandledrejection',
-        message: reason instanceof Error ? `${reason.name}: ${reason.message}` : `Unhandled rejection: ${formatLogArgs([reason])}`,
-        detail: reason instanceof Error ? reason.stack : undefined
+        message: errorLike ? `${errorLike.name}: ${errorLike.message}` : describeRejectionReason(reason),
+        detail: errorLike ? errorLike.stack : undefined
       });
     } catch { /* ignore */ }
   }

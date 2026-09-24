@@ -272,6 +272,14 @@ async function fetchTRPC(method) {
   }
 }
 
+// Public (no login) per-room #1 tick/rank/floor records in one request — replaces
+// game.getTickHighscores + game.getRoomsHighscores (identical records, verified 2026-09-23).
+// Always fresh; the shared API helper collapses calls within its 2s cooldown into one request.
+async function fetchTrophyHighscores() {
+  const data = await window.BestiaryModAPI.util.fetchTrophyRoomData();
+  return data?.highscores || {};
+}
+
 function isMapRaid(mapId) {
   const classify = globalThis.mapsDatabase?.isMapRaidComprehensive;
   return typeof classify === 'function' ? classify(mapId) : false;
@@ -1608,11 +1616,12 @@ async function showImprovementsModal() {
     const yourName = (ctx.name || '').trim().toLowerCase();
     
     // Fetch data from API
-    const [best, lbs, roomsHighscores] = await Promise.all([
-      fetchTRPC('game.getTickHighscores'),
-      fetchTRPC('game.getTickLeaderboards'),
-      fetchTRPC('game.getRoomsHighscores')
+    const [highscores, lbs] = await Promise.all([
+      fetchTrophyHighscores(),
+      fetchTRPC('game.getTickLeaderboards')
     ]);
+    const best = highscores.tick || {};
+    const roomsHighscores = { ticks: best, rank: highscores.rank || {}, floor: highscores.floor || {} };
     
     const summaryMapCodes = getSummaryMapCodesInOrder(rooms);
     const summaryEntries = buildSummaryEntries(summaryMapCodes, rooms, best, roomsHighscores, you, yourName);

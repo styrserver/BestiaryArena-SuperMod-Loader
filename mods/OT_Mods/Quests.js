@@ -1077,6 +1077,43 @@ function applyQuestRoomsFromAssets(roomsData) {
     }
   }
 
+  const demonHelmetGate = roomsData.demonHelmetGate;
+  if (demonHelmetGate) {
+    if (demonHelmetGate.battleRoomName) DEMON_HELMET_GATE_ROOM_NAME = demonHelmetGate.battleRoomName;
+    if (demonHelmetGate.battleRoomId) DEMON_HELMET_GATE_ROOM_ID = demonHelmetGate.battleRoomId;
+    if (demonHelmetGate.battleDisplayName) DEMON_HELMET_GATE_DISPLAY_NAME = demonHelmetGate.battleDisplayName;
+    if (demonHelmetGate.battleId) DEMON_HELMET_GATE_BATTLE_ID = demonHelmetGate.battleId;
+    if (demonHelmetGate.doorTileIndex != null) DEMON_HELMET_GATE_DOOR_TILE_INDEX = demonHelmetGate.doorTileIndex;
+    if (demonHelmetGate.doorClosedSpriteId != null) DEMON_HELMET_GATE_DOOR_CLOSED_SPRITE_ID = demonHelmetGate.doorClosedSpriteId;
+    if (demonHelmetGate.doorOpenSpriteId != null) DEMON_HELMET_GATE_DOOR_OPEN_SPRITE_ID = demonHelmetGate.doorOpenSpriteId;
+    if (demonHelmetGate.tileMutations && typeof demonHelmetGate.tileMutations === 'object') {
+      DEMON_HELMET_GATE_TILE_MUTATIONS = demonHelmetGate.tileMutations;
+    }
+  }
+
+  const demonHelmetTeleporter = roomsData.demonHelmetTeleporter;
+  if (demonHelmetTeleporter) {
+    if (demonHelmetTeleporter.battleRoomName) DEMON_HELMET_TELEPORTER_ROOM_NAME = demonHelmetTeleporter.battleRoomName;
+    if (demonHelmetTeleporter.battleRoomId) DEMON_HELMET_TELEPORTER_ROOM_ID = demonHelmetTeleporter.battleRoomId;
+    if (demonHelmetTeleporter.battleDisplayName) DEMON_HELMET_TELEPORTER_DISPLAY_NAME = demonHelmetTeleporter.battleDisplayName;
+    if (demonHelmetTeleporter.battleId) DEMON_HELMET_TELEPORTER_BATTLE_ID = demonHelmetTeleporter.battleId;
+    if (demonHelmetTeleporter.teleporterTileIndex != null) DEMON_HELMET_TELEPORTER_TILE_INDEX = demonHelmetTeleporter.teleporterTileIndex;
+    if (demonHelmetTeleporter.tileMutations && typeof demonHelmetTeleporter.tileMutations === 'object') {
+      DEMON_HELMET_TELEPORTER_TILE_MUTATIONS = demonHelmetTeleporter.tileMutations;
+    }
+  }
+
+  const demonHelmetRoom = roomsData.demonHelmetRoom;
+  if (demonHelmetRoom) {
+    if (demonHelmetRoom.battleRoomName) DEMON_HELMET_BATTLE_ROOM_NAME = demonHelmetRoom.battleRoomName;
+    if (demonHelmetRoom.battleRoomId) DEMON_HELMET_BATTLE_ROOM_ID = demonHelmetRoom.battleRoomId;
+    if (demonHelmetRoom.battleDisplayName) DEMON_HELMET_BATTLE_DISPLAY_NAME = demonHelmetRoom.battleDisplayName;
+    if (demonHelmetRoom.battleId) DEMON_HELMET_BATTLE_ID = demonHelmetRoom.battleId;
+    if (demonHelmetRoom.tileMutations && typeof demonHelmetRoom.tileMutations === 'object') {
+      DEMON_HELMET_TILE_MUTATIONS = demonHelmetRoom.tileMutations;
+    }
+  }
+
   const isleOfMistsRoom = roomsData.isleOfTheMists;
   if (isleOfMistsRoom) {
     if (isleOfMistsRoom.battleRoomName) ISLE_OF_MISTS_BATTLE_ROOM_NAME = isleOfMistsRoom.battleRoomName;
@@ -1760,6 +1797,11 @@ const DEFAULT_TOAST_MESSAGE_BUILDERS = {
   enteringWithElathriel: ['place'],
   avarTarHideoutEntered: [],
   parchmentRoomEntered: [],
+  demonHelmetGateEntered: [],
+  demonHelmetTeleporterEntered: [],
+  demonHelmetRoomEntered: [],
+  demonHelmetKeyUsed: [],
+  demonHelmetNeedGoldenKey: [],
   parchmentAntechamberEntered: [],
   parchmentAntechamberInscription: [],
   battlingStatus: ['name', 'placed', 'allyLimit'],
@@ -1890,6 +1932,7 @@ const QUEST_MISSION_IDS = [
   'isle_of_the_mists',
   'the_necromant_house',
   'parchment_room',
+  'demon_helmet',
   'king_copper_key',
   'king_red_dragon',
   'dragonmother',
@@ -1931,6 +1974,7 @@ const VISITING_THE_CLERIC_MISSION = MISSION_BY_ID.visiting_the_cleric;
 const ISLE_OF_THE_MISTS_MISSION = MISSION_BY_ID.isle_of_the_mists;
 const THE_NECROMANT_HOUSE_MISSION = MISSION_BY_ID.the_necromant_house;
 const PARCHMENT_ROOM_MISSION = MISSION_BY_ID.parchment_room;
+const DEMON_HELMET_MISSION = MISSION_BY_ID.demon_helmet;
 const KING_COPPER_KEY_MISSION = MISSION_BY_ID.king_copper_key;
 const KING_RED_DRAGON_MISSION = MISSION_BY_ID.king_red_dragon;
 const KING_LETTER_MISSION = MISSION_BY_ID.king_letter_al_dee;
@@ -2044,6 +2088,7 @@ const MISSION_NPC_LABELS = {
   isle_of_the_mists: 'Oldrak',
   the_necromant_house: 'Oldrak',
   parchment_room: 'Avar Tar',
+  demon_helmet: 'Avar Tar',
   al_dee_fishing_gold: 'Al Dee',
   al_dee_golden_rope: 'Al Dee',
   al_dee_rookie_guard: 'Al Dee',
@@ -2372,6 +2417,50 @@ const PARCHMENT_ANTECHAMBER_CONTINUE_ARROW_CLASS = 'quests-parchment-antechamber
 let playerEnteredParchmentAntechamber = false;
 let parchmentAntechamberBattle = null;
 let parchmentAntechamberSceneSub = null;
+
+// Demon Helmet Quest — Avar Tar's follow-up after the Parchment Room. Accepting in his
+// chat teleports straight into a Sewers reskin (4 demons + 5 banshees); victory consumes
+// the Golden Key, and closing the result modal always returns the player to his camp.
+// Same room id (rkswrs) as the camp, so it joins the Parchment-area mutual teardown.
+// Reference: tibia.fandom.com/wiki/Demon_Helmet_Quest.
+let DEMON_HELMET_BATTLE_ROOM_NAME = 'Sewers';
+let DEMON_HELMET_BATTLE_ROOM_ID = 'rkswrs';
+let DEMON_HELMET_BATTLE_ID = 'demon_helmet';
+let DEMON_HELMET_BATTLE_DISPLAY_NAME = 'Demon Helmet Quest';
+let DEMON_HELMET_TILE_MUTATIONS = null;
+let playerEnteredDemonHelmetRoom = false;
+let demonHelmetBattle = null;
+let demonHelmetSceneSub = null;
+
+// Demon Helmet Quest, part 1 — the Gate of the Lost Souls. The Cake Drake Party hole leads
+// here first: a Fire Elemental fight, then the golden-key door on tile 52 leads on to the
+// demon room above. Same room id (rkswrs), so it joins the Parchment-area mutual teardown.
+let DEMON_HELMET_GATE_ROOM_NAME = 'Sewers';
+let DEMON_HELMET_GATE_ROOM_ID = 'rkswrs';
+let DEMON_HELMET_GATE_BATTLE_ID = 'demon_helmet_gate';
+let DEMON_HELMET_GATE_DISPLAY_NAME = 'The Path to Demon Helmet Quest';
+let DEMON_HELMET_GATE_TILE_MUTATIONS = null;
+let DEMON_HELMET_GATE_DOOR_TILE_INDEX = 52;
+let DEMON_HELMET_GATE_DOOR_CLOSED_SPRITE_ID = 5098;
+let DEMON_HELMET_GATE_DOOR_OPEN_SPRITE_ID = 5099;
+const DEMON_HELMET_GATE_DOOR_ARROW_CLASS = 'quests-demon-helmet-gate-door';
+let playerEnteredDemonHelmetGate = false;
+let demonHelmetGateBattle = null;
+let demonHelmetGateSceneSub = null;
+
+// Demon Helmet Quest, part 2 — the teleporter room behind the gate's golden-key door. A
+// Fire Elemental + Demon fight; winning keeps the player here and lights up the teleporter
+// on tile 83, which leads into the demon room. Same room id (rkswrs) as the other stages.
+let DEMON_HELMET_TELEPORTER_ROOM_NAME = 'Sewers';
+let DEMON_HELMET_TELEPORTER_ROOM_ID = 'rkswrs';
+let DEMON_HELMET_TELEPORTER_BATTLE_ID = 'demon_helmet_teleporter';
+let DEMON_HELMET_TELEPORTER_DISPLAY_NAME = 'The Demon Helmet Teleporter';
+let DEMON_HELMET_TELEPORTER_TILE_MUTATIONS = null;
+let DEMON_HELMET_TELEPORTER_TILE_INDEX = 83;
+const DEMON_HELMET_TELEPORTER_ARROW_CLASS = 'quests-demon-helmet-teleporter';
+let playerEnteredDemonHelmetTeleporter = false;
+let demonHelmetTeleporterBattle = null;
+let demonHelmetTeleporterSceneSub = null;
 
 // The Necromant House — Oldrak's follow-up quest after Isle of the Mists. Chat-triggered
 // teleport into the Sewers for a single battle against the "Lost Scout" villains (those
@@ -3073,6 +3162,7 @@ function createNPCCooldownManager() {
     progressIsleOfTheMists: { accepted: false, completed: false, battleCompleted: false },
     progressTheNecromantHouse: { accepted: false, completed: false, battleCompleted: false },
     progressParchmentRoom: { accepted: false, completed: false, battleCompleted: false, keyReceived: false },
+    progressDemonHelmet: { accepted: false, completed: false, gateCleared: false, keyUsed: false, teleporterCleared: false, battleCompleted: false },
     progressCopper: { accepted: false, completed: false },
     progressHoneyflower: { accepted: false, completed: false, honeyflowerPicked: false },
     progressCrossingTheLine: { accepted: false, completed: false, crossingObjectiveComplete: false },
@@ -18477,6 +18567,15 @@ function createNPCCooldownManager() {
       return mission.objectiveLine1;
     }
 
+    if (mission.id === DEMON_HELMET_MISSION.id) {
+      if (progress?.battleCompleted) return mission.objectiveLine6 || mission.objectiveLine5;
+      if (progress?.teleporterCleared) return mission.objectiveLine5 || mission.objectiveLine4;
+      if (progress?.keyUsed) return mission.objectiveLine4 || mission.objectiveLine3;
+      if (progress?.gateCleared) return mission.objectiveLine3 || mission.objectiveLine2;
+      if (progress?.accepted) return mission.objectiveLine2 || mission.objectiveLine1;
+      return mission.objectiveLine1;
+    }
+
     if (mission.id === THE_NECROMANT_HOUSE_MISSION.id) {
       if (progress?.battleCompleted) return mission.objectiveLine3 || mission.objectiveLine2;
       return mission.objectiveLine1;
@@ -21276,6 +21375,34 @@ function createNPCCooldownManager() {
             && !parchmentAntechamberBattle?.isRoomReloadInProgress?.()) {
             console.log('[Quests Mod][Overlay Hider] Leaving the Parchment Room Approach - clearing walk-around scene (CustomBattle cleanup)');
             cleanupParchmentAntechamberQuest();
+          }
+
+          // Demon Helmet room: player left the Sewers battle via the room picker instead
+          // of the victory/defeat modal's own onClose — tear the reskin/battle down.
+          if (lastOverlayHiderRoomName === DEMON_HELMET_BATTLE_ROOM_NAME
+            && currentRoomName && currentRoomName !== DEMON_HELMET_BATTLE_ROOM_NAME
+            && (playerEnteredDemonHelmetRoom || demonHelmetBattle)
+            && !demonHelmetBattle?.isRoomReloadInProgress?.()) {
+            console.log('[Quests Mod][Overlay Hider] Leaving the Demon Helmet room - clearing battle scene (CustomBattle cleanup)');
+            cleanupDemonHelmetQuest();
+          }
+
+          // Demon Helmet teleporter room (part 2): same, for the room behind the gate door.
+          if (lastOverlayHiderRoomName === DEMON_HELMET_TELEPORTER_ROOM_NAME
+            && currentRoomName && currentRoomName !== DEMON_HELMET_TELEPORTER_ROOM_NAME
+            && (playerEnteredDemonHelmetTeleporter || demonHelmetTeleporterBattle)
+            && !demonHelmetTeleporterBattle?.isRoomReloadInProgress?.()) {
+            console.log('[Quests Mod][Overlay Hider] Leaving the Demon Helmet teleporter room - clearing battle scene (CustomBattle cleanup)');
+            cleanupDemonHelmetTeleporterQuest();
+          }
+
+          // Demon Helmet gate (part 1): same, for the Fire Elemental room before the door.
+          if (lastOverlayHiderRoomName === DEMON_HELMET_GATE_ROOM_NAME
+            && currentRoomName && currentRoomName !== DEMON_HELMET_GATE_ROOM_NAME
+            && (playerEnteredDemonHelmetGate || demonHelmetGateBattle)
+            && !demonHelmetGateBattle?.isRoomReloadInProgress?.()) {
+            console.log('[Quests Mod][Overlay Hider] Leaving the Demon Helmet gate - clearing battle scene (CustomBattle cleanup)');
+            cleanupDemonHelmetGateQuest();
           }
 
           // Isle of the Mists shares the same roomId as the temple, so it never trips the
@@ -25254,9 +25381,15 @@ function createNPCCooldownManager() {
 
   // Same idea, plus a Tutorial_Arrow_Effect.gif overlay kept in sync with shouldEnable —
   // the tile itself (not the arrow) is the clickable surface, made so by createRoomTileAction.
-  function createArrowTileMenuAction({ id, roomName, tileIndex, shouldEnable, buttonText, onClick, arrowClass, imageFilename }) {
+  // glowTarget (optional): (tileElement) => Element — highlight that existing object on the
+  // tile with a rainbow glow (.quests-rainbow-glow) instead of overlaying imageFilename.
+  function createArrowTileMenuAction({ id, roomName, tileIndex, shouldEnable, buttonText, onClick, arrowClass, imageFilename, glowTarget }) {
+    const GLOW_TARGET_RETRY_MS = 250;
+    const GLOW_TARGET_MAX_RETRIES = 12;
     let contextMenu = null;
     let boardSubscription = null;
+    let glowRetryTimer = null;
+    let glowRetries = 0;
 
     function closeContextMenu() {
       if (contextMenu && contextMenu.closeMenu) contextMenu.closeMenu();
@@ -25272,6 +25405,23 @@ function createNPCCooldownManager() {
       ensureQuestTileHighlightStyles();
       markQuestAccessTile(tileElement);
       if (tileElement.querySelector(`.${arrowClass}`)) return;
+      if (typeof glowTarget === 'function') {
+        // Glow mode: light up an object already on the tile (e.g. an injected door
+        // sprite) in place instead of overlaying a gif. The object may not be painted yet
+        // (reskin repaint still pending), so retry briefly rather than falling back.
+        const target = glowTarget(tileElement);
+        if (target) {
+          glowRetries = 0;
+          target.classList.add(arrowClass, 'quests-rainbow-glow');
+        } else if (glowRetries < GLOW_TARGET_MAX_RETRIES && !glowRetryTimer) {
+          glowRetries += 1;
+          glowRetryTimer = setTimeout(() => {
+            glowRetryTimer = null;
+            update(globalThis.state?.board?.getSnapshot?.()?.context);
+          }, GLOW_TARGET_RETRY_MS);
+        }
+        return;
+      }
       const arrow = document.createElement('img');
       arrow.className = `${arrowClass} pixelated`;
       arrow.src = getQuestItemsAssetUrl(imageFilename || 'Tutorial_Arrow_Effect.gif');
@@ -25280,9 +25430,19 @@ function createNPCCooldownManager() {
     }
 
     function removeArrow() {
+      if (glowRetryTimer) {
+        clearTimeout(glowRetryTimer);
+        glowRetryTimer = null;
+      }
+      glowRetries = 0;
       document.querySelectorAll(`.${arrowClass}`).forEach((el) => {
         const tile = el.parentElement;
-        try { el.remove(); } catch (_) {}
+        if (typeof glowTarget === 'function' && el.tagName !== 'IMG') {
+          // Glow mode: the element is the tile's own object — un-style it, never remove it.
+          el.classList.remove(arrowClass, 'quests-rainbow-glow');
+        } else {
+          try { el.remove(); } catch (_) {}
+        }
         if (tile) unmarkQuestAccessTile(tile);
       });
     }
@@ -25302,7 +25462,9 @@ function createNPCCooldownManager() {
           logPrefix: `[Quests Mod][${id}]`,
           anchorElement: tile,
           buttons: [buildSingleActionMenuButton({
-            buttonText,
+            // May be a function so the label can follow progress (e.g. a door that says
+            // "Use the golden key" once, then "Go through the door").
+            buttonText: typeof buttonText === 'function' ? buttonText() : buttonText,
             buttonWidth: '150px',
             onClick: () => {
               closeContextMenu();
@@ -25733,14 +25895,18 @@ function createNPCCooldownManager() {
     return true;
   }
 
-  // Avar Tar's camp, the Parchment Room, and its approach antechamber all reuse the same
-  // Sewers room (rkswrs) — only one can be "active" at a time, so whichever of the other
-  // two is currently entered must be torn down first (mirrors Necromant House <-> Visiting
-  // the Cleric's own mutual teardown). `exclude` is the area being entered, so it's skipped.
+  // Avar Tar's camp, the Parchment Room, its approach antechamber, and the Demon Helmet
+  // room all reuse the same Sewers room (rkswrs) — only one can be "active" at a time, so
+  // whichever of the others is currently entered must be torn down first (mirrors Necromant
+  // House <-> Visiting the Cleric's own mutual teardown). `exclude` is the area being
+  // entered, so it's skipped.
   function teardownOtherParchmentAreaSiblings(exclude) {
     if (exclude !== 'avarTar' && playerEnteredAvarTarHideout) cleanupAvarTarHideoutQuest();
     if (exclude !== 'antechamber' && playerEnteredParchmentAntechamber) cleanupParchmentAntechamberQuest();
     if (exclude !== 'parchmentRoom' && playerEnteredParchmentRoom) cleanupParchmentRoomQuest();
+    if (exclude !== 'demonHelmetGate' && playerEnteredDemonHelmetGate) cleanupDemonHelmetGateQuest();
+    if (exclude !== 'demonHelmetTeleporter' && playerEnteredDemonHelmetTeleporter) cleanupDemonHelmetTeleporterQuest();
+    if (exclude !== 'demonHelmet' && playerEnteredDemonHelmetRoom) cleanupDemonHelmetQuest();
   }
 
   function enterAvarTarHideout() {
@@ -26414,6 +26580,895 @@ function createNPCCooldownManager() {
     hideHeroEditorButton();
     updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
     showToast({ message: TOAST_MESSAGES.parchmentRoomEntered, logPrefix: getParchmentRoomLogPrefix() });
+  }
+
+  // =======================
+  // Demon Helmet Quest — Avar Tar's follow-up after the Parchment Room. Accepting in his
+  // chat does NOT teleport: it arms the same hole the Parchment Room used (tile 70 of the
+  // real "Cake Drake Party" room). Progress runs in four steps (missions.json extraFields):
+  //   1. gateCleared — the hole leads to the Gate of the Lost Souls (Fire Elementals);
+  //      winning keeps the player there (Parchment-Room style, villains cleared in place).
+  //   2. keyUsed — right-clicking the door on tile 52 consumes the Golden Key and opens it;
+  //      a second right-click ("Go through the door") leads into the teleporter room.
+  //   3. teleporterCleared — the teleporter room (Fire Elementals + Demons); winning keeps
+  //      the player there and lights the teleporter on tile 83.
+  //   4. battleCompleted — the teleporter leads to the demon room, 4 demons + 5 banshees.
+  //      Closing the result modal returns the player to Avar Tar's camp, where he pays
+  //      out the guild coins on the next chat.
+  // Any defeat returns the player to Cake Drake Party; progress already made is kept.
+  // =======================
+
+  function getDemonHelmetLogPrefix() { return '[Quests Mod][Demon Helmet]'; }
+
+  // Shares tile 70 of Cake Drake Party with parchmentRoomHoleTileAction — safe because the
+  // two shouldEnable checks are mutually exclusive (this one needs the Parchment Room
+  // completed, the Parchment hole goes dark once its golden key is claimed).
+  const DEMON_HELMET_HOLE_ARROW_CLASS = 'quests-demon-helmet-hole';
+
+  function shouldEnableDemonHelmetHole(boardContext = null) {
+    try {
+      if (!isOnRoomByName(PARCHMENT_ROOM_ENTRY_ROOM_NAME)) return false;
+      if (!(getMissionProgress(PARCHMENT_ROOM_MISSION) || {}).completed) return false;
+      const progress = getMissionProgress(DEMON_HELMET_MISSION) || {};
+      return !!progress.accepted && !progress.completed && !progress.battleCompleted;
+    } catch (error) {
+      console.error(`${getDemonHelmetLogPrefix()} Error checking hole tile access:`, error);
+      return false;
+    }
+  }
+
+  const demonHelmetHoleTileAction = createArrowTileMenuAction({
+    id: 'Demon Helmet Hole',
+    roomName: () => PARCHMENT_ROOM_ENTRY_ROOM_NAME,
+    tileIndex: () => PARCHMENT_ROOM_ENTRY_TILE_INDEX,
+    shouldEnable: shouldEnableDemonHelmetHole,
+    buttonText: 'Go down the hole',
+    onClick: () => enterDemonHelmetGate(),
+    arrowClass: DEMON_HELMET_HOLE_ARROW_CLASS,
+    imageFilename: 'Tile_Highlight_Effect.gif'
+  });
+  const setupDemonHelmetHoleObserver = demonHelmetHoleTileAction.setupObserver;
+  const cleanupDemonHelmetHoleSystem = demonHelmetHoleTileAction.cleanup;
+
+  function returnToCakeDrakeParty() {
+    const roomId = getRoomIdByRoomName(PARCHMENT_ROOM_ENTRY_ROOM_NAME);
+    if (!roomId) {
+      console.error(`${getDemonHelmetLogPrefix()} Could not resolve room "${PARCHMENT_ROOM_ENTRY_ROOM_NAME}" to return to`);
+      return;
+    }
+    globalThis.state.board.send({ type: 'selectRoomById', roomId });
+  }
+
+  const demonHelmetQuest = createTeleportBattleQuest({
+    logPrefix: getDemonHelmetLogPrefix(),
+    addedAttr: 'data-quests-demon-helmet-added',
+    hiddenTag: 'quests-demon-helmet-hidden',
+    mutationKeyAttr: 'data-quests-demon-helmet-mutation-key',
+    floorBelowKeyAttr: 'data-quests-demon-helmet-fb-key',
+    getTileMutations: () => DEMON_HELMET_TILE_MUTATIONS,
+    isEntered: () => playerEnteredDemonHelmetRoom,
+    getBattle: () => demonHelmetBattle,
+    getSceneSub: () => demonHelmetSceneSub,
+    setSceneSub: (v) => { demonHelmetSceneSub = v; },
+    roomName: () => DEMON_HELMET_BATTLE_ROOM_NAME
+  });
+
+  function applyDemonHelmetTileMutations() { demonHelmetQuest.applyTileMutations(); }
+  function restoreDemonHelmetTileMutations() { demonHelmetQuest.restoreTileMutations(); }
+  function stopDemonHelmetSceneSync() { demonHelmetQuest.stopSceneSync(); }
+  function startDemonHelmetSceneSync() { demonHelmetQuest.startSceneSync(); }
+  function restoreBoardSetupDemonHelmet() { demonHelmetQuest.restoreBoardSetup(); }
+
+  function getGoldenKeyProductName() {
+    return resolveQuestProductName('goldenKey') || 'Golden Key';
+  }
+
+  async function hasGoldenKey() {
+    const questItems = await getQuestItems(false);
+    return (questItems?.[getGoldenKeyProductName()] || 0) > 0;
+  }
+
+  // The golden key opens the door on tile 52 of the gate room and is spent there.
+  // itemLifecycle (items.json) mirrors this: staleCleanupOnComplete strips it at
+  // demonHelmet.keyUsed and the Parchment Room backfill stops re-granting it.
+  async function consumeDemonHelmetGoldenKey() {
+    const productName = getGoldenKeyProductName();
+    const questItems = await getQuestItems(false);
+    const count = questItems?.[productName] || 0;
+    if (count > 0) {
+      await consumeQuestItem(productName, count);
+      console.log(`${getDemonHelmetLogPrefix()} Golden Key used up on the demon room door`);
+    }
+  }
+
+  function cleanupDemonHelmetQuest() {
+    try {
+      removeCustomBattleStatusToast();
+      stopDemonHelmetSceneSync();
+      playerEnteredDemonHelmetRoom = false;
+      restoreDemonHelmetTileMutations();
+      if (demonHelmetBattle) {
+        demonHelmetBattle.cleanup(restoreBoardSetupDemonHelmet, showQuestOverlays);
+        demonHelmetBattle = null;
+        console.log(`${getDemonHelmetLogPrefix()} Battle cleaned up`);
+      }
+      showQuestOverlays();
+      updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+    } catch (error) {
+      console.error(`${getDemonHelmetLogPrefix()} Error cleaning up:`, error);
+    }
+  }
+
+  function createDemonHelmetBattleInstance(roomId) {
+    if (!window.CustomBattles) {
+      console.error(`${getDemonHelmetLogPrefix()} CustomBattles still not available`);
+      return null;
+    }
+    const spawn = getHydratedQuestBattleSpawn(DEMON_HELMET_BATTLE_ID || 'demon_helmet');
+    if (!spawn.villains?.length) {
+      console.error(`${getDemonHelmetLogPrefix()} No villains resolved for battle id "${DEMON_HELMET_BATTLE_ID}" — check that assets/quests/battles.json has this entry and the mod's data was reloaded.`);
+    }
+    const tileRestrictions = {};
+    if (spawn.allowedTiles?.length) {
+      tileRestrictions.allowedTiles = spawn.allowedTiles;
+      tileRestrictions.message = spawn.allowedTilesMessage;
+    }
+    const config = {
+      name: DEMON_HELMET_BATTLE_DISPLAY_NAME || 'Demon Helmet Quest',
+      roomId,
+      villains: spawn.villains,
+      allyLimit: spawn.allyLimit ?? 12,
+      preventVillainMovement: spawn.preventVillainMovement !== false,
+      hideVillainSprites: spawn.hideVillainSprites !== false,
+      ...(Object.keys(tileRestrictions).length ? { tileRestrictions } : {}),
+      activationCheck: (isSandbox, inBattleArea) => isSandbox && inBattleArea && playerEnteredDemonHelmetRoom,
+      victoryDefeat: {
+        onVictory: async () => {
+          console.log(`${getDemonHelmetLogPrefix()} The demons have fallen!`);
+          // Coins are handed over by Avar Tar in person on the next conversation — only
+          // battleCompleted is persisted here (same pattern as The Necromant House). The
+          // golden key was already spent on the gate door (keyUsed).
+          try {
+            await persistMissionProgress(DEMON_HELMET_MISSION, { accepted: true, completed: false, gateCleared: true, keyUsed: true, teleporterCleared: true, battleCompleted: true });
+          } catch (error) {
+            console.error(`${getDemonHelmetLogPrefix()} Error saving battleCompleted flag:`, error);
+            return;
+          }
+          updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+        },
+        onDefeat: () => {},
+        onClose: (isVictory) => {
+          // Runs only once the result modal closes (Close / backdrop click, or its built-in
+          // 5s auto-close) — onVictory above only saves progress, so nothing moves before.
+          cleanupDemonHelmetQuest();
+          // Victory: straight back to Avar Tar for the payout. Defeat: back up the hole
+          // to Cake Drake Party, where it's still armed for another try.
+          setTimeout(() => (isVictory ? enterAvarTarHideout() : returnToCakeDrakeParty()), 100);
+        },
+        victoryMessage: getMissionDialogueLine(
+          DEMON_HELMET_MISSION,
+          'battleVictory',
+          'The demons are dust and the banshees wail no more! Return to Avar Tar and tell him the tale.'
+        ),
+        defeatMessage: getMissionDialogueLine(
+          DEMON_HELMET_MISSION,
+          'battleDefeat',
+          "The banshees' screams drive you back. Rest, heal, and ask Avar Tar to send you down again."
+        ),
+        showItems: false,
+        items: []
+      }
+    };
+    let battle = null;
+    try {
+      battle = window.CustomBattles.create(config);
+    } catch (error) {
+      console.error(`${getDemonHelmetLogPrefix()} CustomBattles.create() threw:`, error);
+      return null;
+    }
+    return battle;
+  }
+
+  function initializeDemonHelmetBattle(roomId) {
+    if (window.CustomBattles) return createDemonHelmetBattleInstance(roomId);
+    return waitForCustomBattles({ logPrefix: getDemonHelmetLogPrefix() }).then((api) => {
+      if (!api) return null;
+      return createDemonHelmetBattleInstance(roomId);
+    });
+  }
+
+  function setupDemonHelmetBattleInstance(battle) {
+    if (!battle) return false;
+    demonHelmetBattle = battle;
+    stopDemonHelmetSceneSync();
+    demonHelmetBattle.setup(
+      () => playerEnteredDemonHelmetRoom,
+      NotificationService.createBattleToastCallback(getDemonHelmetLogPrefix())
+    );
+    demonHelmetBattle.resetSandboxBattleState();
+    demonHelmetBattle.setupTileRestrictions?.(
+      () => playerEnteredDemonHelmetRoom,
+      NotificationService.createBattleToastCallback(getDemonHelmetLogPrefix())
+    );
+    demonHelmetBattle.setupAllyLimit?.(
+      () => playerEnteredDemonHelmetRoom,
+      NotificationService.createBattleToastCallback(getDemonHelmetLogPrefix())
+    );
+    showCustomBattleStatusToast({
+      battleName: DEMON_HELMET_BATTLE_DISPLAY_NAME || 'Demon Helmet Quest',
+      allyLimit: battle.config?.allyLimit ?? 12,
+      battle,
+      logPrefix: getDemonHelmetLogPrefix()
+    });
+    // Entered while ALREADY standing in rkswrs (the teleporter room, via its tile-83 pad),
+    // not via a real cross-room navigation — same edge case as The Necromant House / Isle
+    // of the Mists (see setupIsleOfMistsPreBattle). selectRoomById to the already-selected
+    // room is a no-op, so reloadConfiguredRoomAndReapply bounces through another room and
+    // back to force a genuine remount before spawning villains.
+    demonHelmetBattle.reloadConfiguredRoomAndReapply({
+      roomId: battle.config?.roomId || DEMON_HELMET_BATTLE_ROOM_ID,
+      forceSameRoomRefresh: true,
+      isActiveCheck: () => playerEnteredDemonHelmetRoom,
+      attemptDelays: VILLAIN_SETUP_ATTEMPT_DELAYS_MS,
+      onComplete: () => {
+        hideQuestOverlays();
+        hideHeroEditorButton();
+        demonHelmetBattle.startPersistentVisualSync(applyDemonHelmetTileMutations, {
+          isActiveCheck: () => playerEnteredDemonHelmetRoom
+        });
+      }
+    });
+    return true;
+  }
+
+  function enterDemonHelmetRoom() {
+    if (playerEnteredDemonHelmetRoom) return;
+    teardownOtherParchmentAreaSiblings('demonHelmet');
+
+    let roomId = DEMON_HELMET_BATTLE_ROOM_ID || getRoomIdByRoomName(DEMON_HELMET_BATTLE_ROOM_NAME);
+    if (!roomId) roomId = getRoomIdByRoomName(DEMON_HELMET_BATTLE_ROOM_NAME);
+    if (!roomId) {
+      showToast({ message: TOAST_MESSAGES.roomNotFound('Demon Helmet Quest'), variant: 'nothing', logPrefix: getDemonHelmetLogPrefix() });
+      return;
+    }
+
+    playerEnteredDemonHelmetRoom = true;
+    if (demonHelmetBattle) {
+      demonHelmetBattle.cleanup(restoreBoardSetupDemonHelmet, showQuestOverlays);
+      demonHelmetBattle = null;
+    }
+
+    globalThis.state.board.send({ type: 'selectRoomById', roomId });
+    startDemonHelmetSceneSync();
+
+    const initResult = initializeDemonHelmetBattle(roomId);
+    if (initResult && typeof initResult.then === 'function') {
+      initResult.then((battle) => {
+        if (playerEnteredDemonHelmetRoom && !demonHelmetBattle) {
+          setupDemonHelmetBattleInstance(battle);
+          hideQuestOverlays();
+          hideHeroEditorButton();
+        }
+      }).catch((error) => console.error(`${getDemonHelmetLogPrefix()} Error initializing battle:`, error));
+    } else if (initResult) {
+      setupDemonHelmetBattleInstance(initResult);
+    }
+
+    hideQuestOverlays();
+    hideHeroEditorButton();
+    updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+    showToast({ message: TOAST_MESSAGES.demonHelmetRoomEntered, logPrefix: getDemonHelmetLogPrefix() });
+  }
+
+  // =======================
+  // Demon Helmet Quest, part 1 — the Gate of the Lost Souls. First stop after the Cake Drake
+  // Party hole: 4 Fire Elementals. Victory persists gateCleared and keeps the player here
+  // (villains cleared in place, same as the Parchment Room) so the door on tile 52 can be
+  // used; the door consumes the Golden Key once (keyUsed) and opens, then a second
+  // right-click walks through it into the demon room.
+  // =======================
+
+  function getDemonHelmetGateLogPrefix() { return '[Quests Mod][Demon Helmet Gate]'; }
+
+  // Once the golden key has been used, the door on the door tile renders open: the same
+  // reskin table, with the closed-door sprite swapped for the open one (rooms.json ->
+  // demonHelmetGate.doorClosedSpriteId / doorOpenSpriteId). Cached per source table.
+  let demonHelmetGateOpenDoorCache = { source: null, value: null };
+  function getDemonHelmetGateTileMutations() {
+    const base = DEMON_HELMET_GATE_TILE_MUTATIONS;
+    if (!base || !(getMissionProgress(DEMON_HELMET_MISSION) || {}).keyUsed) return base;
+    if (demonHelmetGateOpenDoorCache.source === base) return demonHelmetGateOpenDoorCache.value;
+    const doorKey = String(DEMON_HELMET_GATE_DOOR_TILE_INDEX);
+    const door = base[doorKey];
+    let value = base;
+    if (door && Array.isArray(door.add)) {
+      value = {
+        ...base,
+        [doorKey]: {
+          ...door,
+          add: door.add.map((sprite) => (sprite?.spriteId === DEMON_HELMET_GATE_DOOR_CLOSED_SPRITE_ID
+            ? { ...sprite, spriteId: DEMON_HELMET_GATE_DOOR_OPEN_SPRITE_ID }
+            : sprite))
+        }
+      };
+    }
+    demonHelmetGateOpenDoorCache = { source: base, value };
+    return value;
+  }
+
+  // Added reskin sprites are de-duplicated by their slot key ("<tile>-<index>"), not by sprite
+  // id — so drop the door tile's injected nodes and repaint to pick up the open-door sprite.
+  function repaintDemonHelmetGateDoor() {
+    const tile = getTileElement(DEMON_HELMET_GATE_DOOR_TILE_INDEX);
+    tile?.querySelectorAll(`[data-quests-demon-helmet-gate-mutation-key^="${DEMON_HELMET_GATE_DOOR_TILE_INDEX}-"]`)
+      .forEach((el) => { try { el.remove(); } catch (_) {} });
+    applyDemonHelmetGateTileMutations();
+    // The glow lived on the removed node — re-apply it to the freshly painted open door.
+    demonHelmetGateDoorTileAction.update(globalThis.state?.board?.getSnapshot()?.context);
+  }
+
+  const demonHelmetGateQuest = createTeleportBattleQuest({
+    logPrefix: getDemonHelmetGateLogPrefix(),
+    addedAttr: 'data-quests-demon-helmet-gate-added',
+    hiddenTag: 'quests-demon-helmet-gate-hidden',
+    mutationKeyAttr: 'data-quests-demon-helmet-gate-mutation-key',
+    floorBelowKeyAttr: 'data-quests-demon-helmet-gate-fb-key',
+    getTileMutations: () => getDemonHelmetGateTileMutations(),
+    isEntered: () => playerEnteredDemonHelmetGate,
+    getBattle: () => demonHelmetGateBattle,
+    getSceneSub: () => demonHelmetGateSceneSub,
+    setSceneSub: (v) => { demonHelmetGateSceneSub = v; },
+    roomName: () => DEMON_HELMET_GATE_ROOM_NAME
+  });
+
+  function applyDemonHelmetGateTileMutations() { demonHelmetGateQuest.applyTileMutations(); }
+  function restoreDemonHelmetGateTileMutations() { demonHelmetGateQuest.restoreTileMutations(); }
+  function stopDemonHelmetGateSceneSync() { demonHelmetGateQuest.stopSceneSync(); }
+  function startDemonHelmetGateSceneSync() { demonHelmetGateQuest.startSceneSync(); }
+  function restoreBoardSetupDemonHelmetGate() { demonHelmetGateQuest.restoreBoardSetup(); }
+
+  // True between the gate victory and the result modal closing — the door stays dark until
+  // the player has dismissed (or waited out) the win screen.
+  let demonHelmetGateAwaitingResultClose = false;
+
+  function shouldEnableDemonHelmetGateDoor(boardContext = null) {
+    try {
+      if (!playerEnteredDemonHelmetGate || demonHelmetGateAwaitingResultClose) return false;
+      if (!isOnRoomByName(DEMON_HELMET_GATE_ROOM_NAME)) return false;
+      const progress = getMissionProgress(DEMON_HELMET_MISSION) || {};
+      return !!progress.gateCleared && !progress.battleCompleted && !progress.completed;
+    } catch (error) {
+      console.error(`${getDemonHelmetGateLogPrefix()} Error checking door tile access:`, error);
+      return false;
+    }
+  }
+
+  let demonHelmetGateDoorBusy = false;
+
+  async function useDemonHelmetGateDoor() {
+    if (demonHelmetGateDoorBusy || !shouldEnableDemonHelmetGateDoor()) return;
+    demonHelmetGateDoorBusy = true;
+    try {
+      const progress = getMissionProgress(DEMON_HELMET_MISSION) || {};
+      if (!progress.keyUsed) {
+        if (!(await hasGoldenKey())) {
+          showToast({ message: TOAST_MESSAGES.demonHelmetNeedGoldenKey, logPrefix: getDemonHelmetGateLogPrefix() });
+          return;
+        }
+        await consumeDemonHelmetGoldenKey();
+        playRightClickLootEffect(getTileElement(DEMON_HELMET_GATE_DOOR_TILE_INDEX));
+        await persistMissionProgress(DEMON_HELMET_MISSION, { accepted: true, completed: false, gateCleared: true, keyUsed: true, battleCompleted: false });
+        repaintDemonHelmetGateDoor();
+        NotificationService.showItemRemoved(getGoldenKeyProductName(), getDemonHelmetGateLogPrefix());
+        showToast({ message: TOAST_MESSAGES.demonHelmetKeyUsed, logPrefix: getDemonHelmetGateLogPrefix() });
+        updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+        // No auto-teleport: the door now stands open (and keeps glowing); a second
+        // right-click -> "Go through the door" is what leads into the demon room.
+        return;
+      }
+      // Door already unlocked (this visit or an earlier one) — through to the teleporter room.
+      enterDemonHelmetTeleporter();
+    } catch (error) {
+      console.error(`${getDemonHelmetGateLogPrefix()} Error using the door:`, error);
+    } finally {
+      demonHelmetGateDoorBusy = false;
+    }
+  }
+
+  const demonHelmetGateDoorTileAction = createArrowTileMenuAction({
+    id: 'Demon Helmet Gate Door',
+    roomName: () => DEMON_HELMET_GATE_ROOM_NAME,
+    tileIndex: () => DEMON_HELMET_GATE_DOOR_TILE_INDEX,
+    shouldEnable: shouldEnableDemonHelmetGateDoor,
+    buttonText: () => ((getMissionProgress(DEMON_HELMET_MISSION) || {}).keyUsed ? 'Go through the door' : 'Use the golden key'),
+    onClick: () => useDemonHelmetGateDoor(),
+    arrowClass: DEMON_HELMET_GATE_DOOR_ARROW_CLASS,
+    // The door sprite itself glows rainbow (closed or open door) instead of the
+    // Tile_Highlight_Effect.gif square overlay.
+    glowTarget: (tile) => tile.querySelector(
+      `[data-quests-demon-helmet-gate-mutation-key].id-${DEMON_HELMET_GATE_DOOR_CLOSED_SPRITE_ID}, `
+      + `[data-quests-demon-helmet-gate-mutation-key].id-${DEMON_HELMET_GATE_DOOR_OPEN_SPRITE_ID}`
+    )
+  });
+  const setupDemonHelmetGateDoorObserver = demonHelmetGateDoorTileAction.setupObserver;
+  const cleanupDemonHelmetGateDoorSystem = demonHelmetGateDoorTileAction.cleanup;
+
+  function cleanupDemonHelmetGateQuest() {
+    try {
+      removeCustomBattleStatusToast();
+      stopDemonHelmetGateSceneSync();
+      playerEnteredDemonHelmetGate = false;
+      demonHelmetGateAwaitingResultClose = false;
+      restoreDemonHelmetGateTileMutations();
+      if (demonHelmetGateBattle) {
+        demonHelmetGateBattle.cleanup(restoreBoardSetupDemonHelmetGate, showQuestOverlays);
+        demonHelmetGateBattle = null;
+        console.log(`${getDemonHelmetGateLogPrefix()} Battle cleaned up`);
+      }
+      demonHelmetGateDoorTileAction.update(globalThis.state?.board?.getSnapshot()?.context);
+      showQuestOverlays();
+      updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+    } catch (error) {
+      console.error(`${getDemonHelmetGateLogPrefix()} Error cleaning up:`, error);
+    }
+  }
+
+  function createDemonHelmetGateBattleInstance(roomId) {
+    if (!window.CustomBattles) {
+      console.error(`${getDemonHelmetGateLogPrefix()} CustomBattles still not available`);
+      return null;
+    }
+    const spawn = getHydratedQuestBattleSpawn(DEMON_HELMET_GATE_BATTLE_ID || 'demon_helmet_gate');
+    // Once the Fire Elementals are beaten (persisted), they stay dead — coming back down the
+    // hole after losing to the demons spawns nobody here, so the door is reachable directly.
+    const gateAlreadyCleared = !!getMissionProgress(DEMON_HELMET_MISSION)?.gateCleared;
+    if (!gateAlreadyCleared && !spawn.villains?.length) {
+      console.error(`${getDemonHelmetGateLogPrefix()} No villains resolved for battle id "${DEMON_HELMET_GATE_BATTLE_ID}" — check that assets/quests/battles.json has this entry and the mod's data was reloaded.`);
+    }
+    const tileRestrictions = {};
+    if (spawn.allowedTiles?.length) {
+      tileRestrictions.allowedTiles = spawn.allowedTiles;
+      tileRestrictions.message = spawn.allowedTilesMessage;
+    }
+    const config = {
+      name: DEMON_HELMET_GATE_DISPLAY_NAME || 'The Path to Demon Helmet Quest',
+      roomId,
+      villains: gateAlreadyCleared ? [] : spawn.villains,
+      allyLimit: spawn.allyLimit ?? 4,
+      preventVillainMovement: spawn.preventVillainMovement !== false,
+      hideVillainSprites: spawn.hideVillainSprites !== false,
+      ...(Object.keys(tileRestrictions).length ? { tileRestrictions } : {}),
+      activationCheck: (isSandbox, inBattleArea) => isSandbox && inBattleArea && playerEnteredDemonHelmetGate,
+      victoryDefeat: {
+        // Only the progress flag is saved at the moment of victory. Everything the player
+        // sees change (fire elementals cleared, status toast gone, door lit) waits until the
+        // result modal closes — by its Close button / backdrop click, or its built-in 5s
+        // auto-close (custom-battles.js showVictoryDefeatModal) — same as the demon battle.
+        onVictory: async () => {
+          demonHelmetGateAwaitingResultClose = true;
+          try {
+            await persistMissionProgress(DEMON_HELMET_MISSION, { accepted: true, completed: false, gateCleared: true });
+          } catch (error) {
+            console.error(`${getDemonHelmetGateLogPrefix()} Error saving gateCleared flag:`, error);
+          }
+        },
+        onDefeat: () => {},
+        onClose: (isVictory) => {
+          demonHelmetGateAwaitingResultClose = false;
+          // Defeat: back up to Cake Drake Party.
+          if (!isVictory) {
+            cleanupDemonHelmetGateQuest();
+            setTimeout(() => returnToCakeDrakeParty(), 100);
+            return;
+          }
+          // Victory: stay put to use the door. Clear the Fire Elementals in place via the
+          // engine's own rebuild path — see the Parchment Room's onVictory for why a raw
+          // boardConfig wipe is wrong here.
+          try {
+            if (demonHelmetGateBattle) {
+              demonHelmetGateBattle.config.villains = [];
+              demonHelmetGateBattle.resetSandboxBattleState();
+              demonHelmetGateBattle.forceImmediateBoardRewrite();
+            }
+          } catch (error) {
+            console.error(`${getDemonHelmetGateLogPrefix()} Error clearing villains after victory:`, error);
+          }
+          removeCustomBattleStatusToast();
+          // forceImmediateBoardRewrite() re-renders #tiles and drops the reskin sprites; the
+          // scene-sync loop no-ops while a battle exists, so repaint directly (as the
+          // Parchment Room does) and re-arm the door highlight.
+          SCENE_SYNC_REPAINT_DELAYS_MS.forEach((delay) => {
+            setTimeout(() => {
+              if (!playerEnteredDemonHelmetGate) return;
+              applyDemonHelmetGateTileMutations();
+              demonHelmetGateDoorTileAction.update(globalThis.state?.board?.getSnapshot()?.context);
+            }, delay);
+          });
+          demonHelmetGateDoorTileAction.update(globalThis.state?.board?.getSnapshot()?.context);
+          updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+        },
+        victoryMessage: getMissionDialogueLine(
+          DEMON_HELMET_MISSION,
+          'gateVictory',
+          'The fire elementals burn out. A heavy door stands at the end of the hall — the golden key should fit.'
+        ),
+        defeatMessage: getMissionDialogueLine(
+          DEMON_HELMET_MISSION,
+          'gateDefeat',
+          'The flames drive you back up the hole. Rest, heal, and go down again.'
+        ),
+        showItems: false,
+        items: []
+      }
+    };
+    let battle = null;
+    try {
+      battle = window.CustomBattles.create(config);
+    } catch (error) {
+      console.error(`${getDemonHelmetGateLogPrefix()} CustomBattles.create() threw:`, error);
+      return null;
+    }
+    return battle;
+  }
+
+  function initializeDemonHelmetGateBattle(roomId) {
+    if (window.CustomBattles) return createDemonHelmetGateBattleInstance(roomId);
+    return waitForCustomBattles({ logPrefix: getDemonHelmetGateLogPrefix() }).then((api) => {
+      if (!api) return null;
+      return createDemonHelmetGateBattleInstance(roomId);
+    });
+  }
+
+  function setupDemonHelmetGateBattleInstance(battle) {
+    if (!battle) return false;
+    demonHelmetGateBattle = battle;
+    stopDemonHelmetGateSceneSync();
+    demonHelmetGateBattle.setup(
+      () => playerEnteredDemonHelmetGate,
+      NotificationService.createBattleToastCallback(getDemonHelmetGateLogPrefix())
+    );
+    demonHelmetGateBattle.resetSandboxBattleState();
+    demonHelmetGateBattle.setupTileRestrictions?.(
+      () => playerEnteredDemonHelmetGate,
+      NotificationService.createBattleToastCallback(getDemonHelmetGateLogPrefix())
+    );
+    demonHelmetGateBattle.setupAllyLimit?.(
+      () => playerEnteredDemonHelmetGate,
+      NotificationService.createBattleToastCallback(getDemonHelmetGateLogPrefix())
+    );
+    // No "Battling" status toast on a re-entry with the gate already cleared — no victory
+    // would ever dismiss it.
+    if (battle.config?.villains?.length) {
+      showCustomBattleStatusToast({
+        battleName: DEMON_HELMET_GATE_DISPLAY_NAME || 'The Path to Demon Helmet Quest',
+        allyLimit: battle.config?.allyLimit ?? 4,
+        battle,
+        logPrefix: getDemonHelmetGateLogPrefix()
+      });
+    }
+    // Entered from a genuinely different room (Cake Drake Party, via the hole tile) — a
+    // real selectRoomById navigation — so a plain entry-villain schedule is enough (same
+    // as setupParchmentRoomBattleInstance); no same-room bounce/reload trick needed.
+    demonHelmetGateBattle.scheduleEntryVillainSetup({
+      attemptDelays: VILLAIN_SETUP_ATTEMPT_DELAYS_MS,
+      isActiveCheck: () => playerEnteredDemonHelmetGate,
+      onComplete: () => {
+        hideQuestOverlays();
+        hideHeroEditorButton();
+        demonHelmetGateBattle.startPersistentVisualSync(applyDemonHelmetGateTileMutations, {
+          isActiveCheck: () => playerEnteredDemonHelmetGate
+        });
+        demonHelmetGateDoorTileAction.update(globalThis.state?.board?.getSnapshot()?.context);
+      }
+    });
+    return true;
+  }
+
+  function enterDemonHelmetGate() {
+    if (playerEnteredDemonHelmetGate) return;
+    teardownOtherParchmentAreaSiblings('demonHelmetGate');
+
+    let roomId = DEMON_HELMET_GATE_ROOM_ID || getRoomIdByRoomName(DEMON_HELMET_GATE_ROOM_NAME);
+    if (!roomId) roomId = getRoomIdByRoomName(DEMON_HELMET_GATE_ROOM_NAME);
+    if (!roomId) {
+      showToast({ message: TOAST_MESSAGES.roomNotFound('Demon Helmet Quest'), variant: 'nothing', logPrefix: getDemonHelmetGateLogPrefix() });
+      return;
+    }
+
+    playerEnteredDemonHelmetGate = true;
+    if (demonHelmetGateBattle) {
+      demonHelmetGateBattle.cleanup(restoreBoardSetupDemonHelmetGate, showQuestOverlays);
+      demonHelmetGateBattle = null;
+    }
+
+    globalThis.state.board.send({ type: 'selectRoomById', roomId });
+    startDemonHelmetGateSceneSync();
+
+    const initResult = initializeDemonHelmetGateBattle(roomId);
+    if (initResult && typeof initResult.then === 'function') {
+      initResult.then((battle) => {
+        if (playerEnteredDemonHelmetGate && !demonHelmetGateBattle) {
+          setupDemonHelmetGateBattleInstance(battle);
+          hideQuestOverlays();
+          hideHeroEditorButton();
+        }
+      }).catch((error) => console.error(`${getDemonHelmetGateLogPrefix()} Error initializing battle:`, error));
+    } else if (initResult) {
+      setupDemonHelmetGateBattleInstance(initResult);
+    }
+
+    hideQuestOverlays();
+    hideHeroEditorButton();
+    updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+    showToast({ message: TOAST_MESSAGES.demonHelmetGateEntered, logPrefix: getDemonHelmetGateLogPrefix() });
+  }
+
+  // =======================
+  // Demon Helmet Quest, part 2 — the teleporter room behind the gate's golden-key door.
+  // Fire Elementals + Demons. Victory persists teleporterCleared and keeps the player here
+  // (villains cleared in place once the result modal closes, same as the gate); the
+  // teleporter on tile 83 then gets the tile highlight and leads into the demon room. Entered from the gate
+  // room — same room id (rkswrs) — so villain setup uses the same-room reload trick.
+  // =======================
+
+  function getDemonHelmetTeleporterLogPrefix() { return '[Quests Mod][Demon Helmet Teleporter]'; }
+
+  const demonHelmetTeleporterQuest = createTeleportBattleQuest({
+    logPrefix: getDemonHelmetTeleporterLogPrefix(),
+    addedAttr: 'data-quests-demon-helmet-teleporter-added',
+    hiddenTag: 'quests-demon-helmet-teleporter-hidden',
+    mutationKeyAttr: 'data-quests-demon-helmet-teleporter-mutation-key',
+    floorBelowKeyAttr: 'data-quests-demon-helmet-teleporter-fb-key',
+    getTileMutations: () => DEMON_HELMET_TELEPORTER_TILE_MUTATIONS,
+    isEntered: () => playerEnteredDemonHelmetTeleporter,
+    getBattle: () => demonHelmetTeleporterBattle,
+    getSceneSub: () => demonHelmetTeleporterSceneSub,
+    setSceneSub: (v) => { demonHelmetTeleporterSceneSub = v; },
+    roomName: () => DEMON_HELMET_TELEPORTER_ROOM_NAME
+  });
+
+  function applyDemonHelmetTeleporterTileMutations() { demonHelmetTeleporterQuest.applyTileMutations(); }
+  function restoreDemonHelmetTeleporterTileMutations() { demonHelmetTeleporterQuest.restoreTileMutations(); }
+  function stopDemonHelmetTeleporterSceneSync() { demonHelmetTeleporterQuest.stopSceneSync(); }
+  function startDemonHelmetTeleporterSceneSync() { demonHelmetTeleporterQuest.startSceneSync(); }
+  function restoreBoardSetupDemonHelmetTeleporter() { demonHelmetTeleporterQuest.restoreBoardSetup(); }
+
+  // True between the victory and the result modal closing — the teleporter stays dark until
+  // the player has dismissed (or waited out) the win screen.
+  let demonHelmetTeleporterAwaitingResultClose = false;
+
+  function shouldEnableDemonHelmetTeleporterPad(boardContext = null) {
+    try {
+      if (!playerEnteredDemonHelmetTeleporter || demonHelmetTeleporterAwaitingResultClose) return false;
+      if (!isOnRoomByName(DEMON_HELMET_TELEPORTER_ROOM_NAME)) return false;
+      const progress = getMissionProgress(DEMON_HELMET_MISSION) || {};
+      return !!progress.teleporterCleared && !progress.battleCompleted && !progress.completed;
+    } catch (error) {
+      console.error(`${getDemonHelmetTeleporterLogPrefix()} Error checking teleporter tile access:`, error);
+      return false;
+    }
+  }
+
+  const demonHelmetTeleporterPadTileAction = createArrowTileMenuAction({
+    id: 'Demon Helmet Teleporter',
+    roomName: () => DEMON_HELMET_TELEPORTER_ROOM_NAME,
+    tileIndex: () => DEMON_HELMET_TELEPORTER_TILE_INDEX,
+    shouldEnable: shouldEnableDemonHelmetTeleporterPad,
+    buttonText: 'Enter the teleporter',
+    onClick: () => {
+      if (!shouldEnableDemonHelmetTeleporterPad()) return;
+      enterDemonHelmetRoom();
+    },
+    arrowClass: DEMON_HELMET_TELEPORTER_ARROW_CLASS,
+    // Standard tile highlight here — the rainbow in-place glow is reserved for the gate door.
+    imageFilename: 'Tile_Highlight_Effect.gif'
+  });
+  const setupDemonHelmetTeleporterPadObserver = demonHelmetTeleporterPadTileAction.setupObserver;
+  const cleanupDemonHelmetTeleporterPadSystem = demonHelmetTeleporterPadTileAction.cleanup;
+
+  function cleanupDemonHelmetTeleporterQuest() {
+    try {
+      removeCustomBattleStatusToast();
+      stopDemonHelmetTeleporterSceneSync();
+      playerEnteredDemonHelmetTeleporter = false;
+      demonHelmetTeleporterAwaitingResultClose = false;
+      restoreDemonHelmetTeleporterTileMutations();
+      if (demonHelmetTeleporterBattle) {
+        demonHelmetTeleporterBattle.cleanup(restoreBoardSetupDemonHelmetTeleporter, showQuestOverlays);
+        demonHelmetTeleporterBattle = null;
+        console.log(`${getDemonHelmetTeleporterLogPrefix()} Battle cleaned up`);
+      }
+      demonHelmetTeleporterPadTileAction.update(globalThis.state?.board?.getSnapshot()?.context);
+      showQuestOverlays();
+      updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+    } catch (error) {
+      console.error(`${getDemonHelmetTeleporterLogPrefix()} Error cleaning up:`, error);
+    }
+  }
+
+  function createDemonHelmetTeleporterBattleInstance(roomId) {
+    if (!window.CustomBattles) {
+      console.error(`${getDemonHelmetTeleporterLogPrefix()} CustomBattles still not available`);
+      return null;
+    }
+    const spawn = getHydratedQuestBattleSpawn(DEMON_HELMET_TELEPORTER_BATTLE_ID || 'demon_helmet_teleporter');
+    // Once cleared (persisted), the room stays empty — coming back after losing to the
+    // demons walks straight past it to the teleporter.
+    const alreadyCleared = !!getMissionProgress(DEMON_HELMET_MISSION)?.teleporterCleared;
+    if (!alreadyCleared && !spawn.villains?.length) {
+      console.error(`${getDemonHelmetTeleporterLogPrefix()} No villains resolved for battle id "${DEMON_HELMET_TELEPORTER_BATTLE_ID}" — check that assets/quests/battles.json has this entry and the mod's data was reloaded.`);
+    }
+    const tileRestrictions = {};
+    if (spawn.allowedTiles?.length) {
+      tileRestrictions.allowedTiles = spawn.allowedTiles;
+      tileRestrictions.message = spawn.allowedTilesMessage;
+    }
+    const config = {
+      name: DEMON_HELMET_TELEPORTER_DISPLAY_NAME || 'The Demon Helmet Teleporter',
+      roomId,
+      villains: alreadyCleared ? [] : spawn.villains,
+      allyLimit: spawn.allyLimit ?? 1,
+      preventVillainMovement: spawn.preventVillainMovement !== false,
+      hideVillainSprites: spawn.hideVillainSprites !== false,
+      ...(Object.keys(tileRestrictions).length ? { tileRestrictions } : {}),
+      activationCheck: (isSandbox, inBattleArea) => isSandbox && inBattleArea && playerEnteredDemonHelmetTeleporter,
+      victoryDefeat: {
+        // Same as the gate: only the progress flag is saved at the moment of victory; the
+        // visible changes wait for the result modal to close (click or its 5s auto-close).
+        onVictory: async () => {
+          demonHelmetTeleporterAwaitingResultClose = true;
+          try {
+            await persistMissionProgress(DEMON_HELMET_MISSION, { accepted: true, completed: false, gateCleared: true, keyUsed: true, teleporterCleared: true });
+          } catch (error) {
+            console.error(`${getDemonHelmetTeleporterLogPrefix()} Error saving teleporterCleared flag:`, error);
+          }
+        },
+        onDefeat: () => {},
+        onClose: (isVictory) => {
+          demonHelmetTeleporterAwaitingResultClose = false;
+          // Defeat: back up to Cake Drake Party (gate and door progress are kept).
+          if (!isVictory) {
+            cleanupDemonHelmetTeleporterQuest();
+            setTimeout(() => returnToCakeDrakeParty(), 100);
+            return;
+          }
+          // Victory: stay put to use the teleporter. Clear the villains in place via the
+          // engine's own rebuild path (see the Parchment Room's onVictory for why).
+          try {
+            if (demonHelmetTeleporterBattle) {
+              demonHelmetTeleporterBattle.config.villains = [];
+              demonHelmetTeleporterBattle.resetSandboxBattleState();
+              demonHelmetTeleporterBattle.forceImmediateBoardRewrite();
+            }
+          } catch (error) {
+            console.error(`${getDemonHelmetTeleporterLogPrefix()} Error clearing villains after victory:`, error);
+          }
+          removeCustomBattleStatusToast();
+          SCENE_SYNC_REPAINT_DELAYS_MS.forEach((delay) => {
+            setTimeout(() => {
+              if (!playerEnteredDemonHelmetTeleporter) return;
+              applyDemonHelmetTeleporterTileMutations();
+              demonHelmetTeleporterPadTileAction.update(globalThis.state?.board?.getSnapshot()?.context);
+            }, delay);
+          });
+          demonHelmetTeleporterPadTileAction.update(globalThis.state?.board?.getSnapshot()?.context);
+          updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+        },
+        victoryMessage: getMissionDialogueLine(
+          DEMON_HELMET_MISSION,
+          'teleporterVictory',
+          'The room falls silent. The teleporter hums — step onto it when you are ready.'
+        ),
+        defeatMessage: getMissionDialogueLine(
+          DEMON_HELMET_MISSION,
+          'teleporterDefeat',
+          'The demons drive you back up the hole. Rest, heal, and go down again.'
+        ),
+        showItems: false,
+        items: []
+      }
+    };
+    let battle = null;
+    try {
+      battle = window.CustomBattles.create(config);
+    } catch (error) {
+      console.error(`${getDemonHelmetTeleporterLogPrefix()} CustomBattles.create() threw:`, error);
+      return null;
+    }
+    return battle;
+  }
+
+  function initializeDemonHelmetTeleporterBattle(roomId) {
+    if (window.CustomBattles) return createDemonHelmetTeleporterBattleInstance(roomId);
+    return waitForCustomBattles({ logPrefix: getDemonHelmetTeleporterLogPrefix() }).then((api) => {
+      if (!api) return null;
+      return createDemonHelmetTeleporterBattleInstance(roomId);
+    });
+  }
+
+  function setupDemonHelmetTeleporterBattleInstance(battle) {
+    if (!battle) return false;
+    demonHelmetTeleporterBattle = battle;
+    stopDemonHelmetTeleporterSceneSync();
+    demonHelmetTeleporterBattle.setup(
+      () => playerEnteredDemonHelmetTeleporter,
+      NotificationService.createBattleToastCallback(getDemonHelmetTeleporterLogPrefix())
+    );
+    demonHelmetTeleporterBattle.resetSandboxBattleState();
+    demonHelmetTeleporterBattle.setupTileRestrictions?.(
+      () => playerEnteredDemonHelmetTeleporter,
+      NotificationService.createBattleToastCallback(getDemonHelmetTeleporterLogPrefix())
+    );
+    demonHelmetTeleporterBattle.setupAllyLimit?.(
+      () => playerEnteredDemonHelmetTeleporter,
+      NotificationService.createBattleToastCallback(getDemonHelmetTeleporterLogPrefix())
+    );
+    // No "Battling" status toast on a re-entry with the room already cleared.
+    if (battle.config?.villains?.length) {
+      showCustomBattleStatusToast({
+        battleName: DEMON_HELMET_TELEPORTER_DISPLAY_NAME || 'The Demon Helmet Teleporter',
+        allyLimit: battle.config?.allyLimit ?? 1,
+        battle,
+        logPrefix: getDemonHelmetTeleporterLogPrefix()
+      });
+    }
+    // Entered while ALREADY standing in rkswrs (the gate room, through its door), not via a
+    // real cross-room navigation — same edge case as the demon room / Isle of the Mists (see
+    // setupIsleOfMistsPreBattle): bounce through another room to force a genuine remount.
+    demonHelmetTeleporterBattle.reloadConfiguredRoomAndReapply({
+      roomId: battle.config?.roomId || DEMON_HELMET_TELEPORTER_ROOM_ID,
+      forceSameRoomRefresh: true,
+      isActiveCheck: () => playerEnteredDemonHelmetTeleporter,
+      attemptDelays: VILLAIN_SETUP_ATTEMPT_DELAYS_MS,
+      onComplete: () => {
+        hideQuestOverlays();
+        hideHeroEditorButton();
+        demonHelmetTeleporterBattle.startPersistentVisualSync(applyDemonHelmetTeleporterTileMutations, {
+          isActiveCheck: () => playerEnteredDemonHelmetTeleporter
+        });
+        demonHelmetTeleporterPadTileAction.update(globalThis.state?.board?.getSnapshot()?.context);
+      }
+    });
+    return true;
+  }
+
+  function enterDemonHelmetTeleporter() {
+    if (playerEnteredDemonHelmetTeleporter) return;
+    teardownOtherParchmentAreaSiblings('demonHelmetTeleporter');
+
+    let roomId = DEMON_HELMET_TELEPORTER_ROOM_ID || getRoomIdByRoomName(DEMON_HELMET_TELEPORTER_ROOM_NAME);
+    if (!roomId) roomId = getRoomIdByRoomName(DEMON_HELMET_TELEPORTER_ROOM_NAME);
+    if (!roomId) {
+      showToast({ message: TOAST_MESSAGES.roomNotFound('Demon Helmet Quest'), variant: 'nothing', logPrefix: getDemonHelmetTeleporterLogPrefix() });
+      return;
+    }
+
+    playerEnteredDemonHelmetTeleporter = true;
+    if (demonHelmetTeleporterBattle) {
+      demonHelmetTeleporterBattle.cleanup(restoreBoardSetupDemonHelmetTeleporter, showQuestOverlays);
+      demonHelmetTeleporterBattle = null;
+    }
+
+    globalThis.state.board.send({ type: 'selectRoomById', roomId });
+    startDemonHelmetTeleporterSceneSync();
+
+    const initResult = initializeDemonHelmetTeleporterBattle(roomId);
+    if (initResult && typeof initResult.then === 'function') {
+      initResult.then((battle) => {
+        if (playerEnteredDemonHelmetTeleporter && !demonHelmetTeleporterBattle) {
+          setupDemonHelmetTeleporterBattleInstance(battle);
+          hideQuestOverlays();
+          hideHeroEditorButton();
+        }
+      }).catch((error) => console.error(`${getDemonHelmetTeleporterLogPrefix()} Error initializing battle:`, error));
+    } else if (initResult) {
+      setupDemonHelmetTeleporterBattleInstance(initResult);
+    }
+
+    hideQuestOverlays();
+    hideHeroEditorButton();
+    updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+    showToast({ message: TOAST_MESSAGES.demonHelmetTeleporterEntered, logPrefix: getDemonHelmetTeleporterLogPrefix() });
   }
 
   // =======================
@@ -33211,7 +34266,11 @@ function createNPCCooldownManager() {
 
         (entry.remove || []).forEach((spriteId) => {
           if (spriteId == null || !tile) return;
-          tile.querySelectorAll(`.sprite.item.relative.id-${spriteId}`).forEach((sprite) => {
+          // :not([addedAttr]) — a tile may re-add the very sprite id it removes (e.g. the
+          // Demon Helmet gate re-adds native 373 on tiles 147-149 as its own sprite). Without
+          // this, every repaint after the first (e.g. after a victory board rewrite) would
+          // hide our own injected copy too, making the tile vanish.
+          tile.querySelectorAll(`.sprite.item.relative.id-${spriteId}:not([${addedAttr}])`).forEach((sprite) => {
             hideQuestBoardElement(sprite, { tag: hiddenTag });
           });
         });
@@ -33220,6 +34279,11 @@ function createNPCCooldownManager() {
           const spriteId = spriteEntry?.spriteId;
           if (spriteId == null || !tile) return;
           const mutationKey = `${tileIndex}-${spriteIndex}`;
+          // Heal an injected copy that an older build's remove pass hid (see above).
+          const existing = tile.querySelector(`[${mutationKeyAttr}="${mutationKey}"]`);
+          if (existing && existing.getAttribute('data-quests-board-hidden') === hiddenTag) {
+            try { existing.remove(); } catch (_) {}
+          }
           if (tile.querySelector(`[${mutationKeyAttr}="${mutationKey}"]`)) return;
           const wrap = document.createElement('div');
           wrap.innerHTML = buildMutationSpriteHTML(spriteEntry, mutationKey);
@@ -36358,6 +37422,25 @@ function createNPCCooldownManager() {
     return !!serpentine.putridChamberComplete;
   }
 
+  // Avar Tar: fight.png shows for a fresh, unaccepted Parchment Room offer, or once the
+  // golden key has been claimed and he's ready to pay out — off while the quest is merely
+  // accepted-but-not-yet-key'd (the coffin/battle is the action then). Once the Parchment
+  // Room is done, the same rule applies to the Demon Helmet Quest (on for a fresh offer or
+  // a pending payout, off while accepted-but-not-won or fully done). Drives both his board
+  // name-tag badge (BOARD_NPC_CONFIGS isInteractable) and the badge on his Edron
+  // Wilderness entry arrow.
+  function hasAvarTarQuestAction() {
+    const progress = getMissionProgress(PARCHMENT_ROOM_MISSION) || {};
+    if (progress.completed) {
+      const helmetProgress = getMissionProgress(DEMON_HELMET_MISSION) || {};
+      if (helmetProgress.completed) return false;
+      if (helmetProgress.battleCompleted) return true;
+      return !helmetProgress.accepted;
+    }
+    if (progress.keyReceived) return true;
+    return !progress.accepted;
+  }
+
   // Tesha is a permanent NPC (bank / jewel store, plus she gates the Serpentine Tower and
   // Realm of Dreams chains). Once the player has engaged her at all she must ALWAYS be
   // reachable on Darama Oasis — her board arrow / fight icon must not depend on currently
@@ -36665,6 +37748,21 @@ function createNPCCooldownManager() {
         animation: quests-tile-highlight-pulse 1.6s ease-in-out infinite;
         cursor: ${QUEST_ACCESS_CURSOR} !important;
       }
+      /* Rainbow outline glow on the object itself (drop-shadow follows the sprite's own
+         silhouette) — the in-place alternative to Tile_Highlight_Effect.gif's cycling
+         square, used by createArrowTileMenuAction's glowTarget option (e.g. a door). */
+      @keyframes quests-rainbow-glow {
+        0%, 100% { filter: drop-shadow(0 0 1px #ff3b3b) drop-shadow(0 0 3px #ff3b3b); }
+        17% { filter: drop-shadow(0 0 1px #ff9f1a) drop-shadow(0 0 3px #ff9f1a); }
+        33% { filter: drop-shadow(0 0 1px #ffe81a) drop-shadow(0 0 3px #ffe81a); }
+        50% { filter: drop-shadow(0 0 1px #3bff5a) drop-shadow(0 0 3px #3bff5a); }
+        67% { filter: drop-shadow(0 0 1px #3bb8ff) drop-shadow(0 0 3px #3bb8ff); }
+        83% { filter: drop-shadow(0 0 1px #b03bff) drop-shadow(0 0 3px #b03bff); }
+      }
+      .quests-rainbow-glow {
+        animation: quests-rainbow-glow 1.8s linear infinite;
+        cursor: ${QUEST_ACCESS_CURSOR} !important;
+      }
       [${TILE_HIGHLIGHT_TILE_ATTR}="1"] {
         cursor: ${QUEST_ACCESS_CURSOR} !important;
       }
@@ -36907,6 +38005,16 @@ function createNPCCooldownManager() {
         isActive: (ctx) => isQuestTownNpcFightIconActive(npc, ctx)
       });
     }
+
+    // Avar Tar's entry arrow in Edron Wilderness (tile 154): mirrors the fight.png on his
+    // own name tag in the camp — same hasAvarTarQuestAction() predicate — but only while
+    // the arrow itself is showing, so the badge never appears without a way in.
+    registerQuestFightIconSource({
+      id: 'avar-tar-arrow',
+      alt: 'Visit Avar Tar',
+      getTile: () => getTileElement(AVAR_TAR_ENTRY_TILE_INDEX),
+      isActive: (ctx) => shouldEnableAvarTarWildernessArrow(ctx) && hasAvarTarQuestAction()
+    });
   }
 
   function initializeQuestTileHighlightSources() {
@@ -37829,15 +38937,9 @@ function createNPCCooldownManager() {
       chatMode: 'keywords',
       allowWithAllyPieces: true,
       isUnlocked: () => playerEnteredAvarTarHideout,
-      // fight.png shows for a fresh, unaccepted Parchment Room offer, or once the golden
-      // key has been claimed and he's ready to pay out — off while the quest is merely
-      // accepted-but-not-yet-key'd (the coffin/battle is the action then) or fully done.
-      isInteractable: () => {
-        const progress = getMissionProgress(PARCHMENT_ROOM_MISSION) || {};
-        if (progress.completed) return false;
-        if (progress.keyReceived) return true;
-        return !progress.accepted;
-      },
+      // Same predicate drives the fight.png on his Edron Wilderness entry arrow (see the
+      // 'avar-tar-arrow' source in initializeQuestFightIconSources), so the two stay in sync.
+      isInteractable: () => hasAvarTarQuestAction(),
       chat: {},
       hpBarColor: 'rgb(96, 192, 96)',
       nameColor: 'rgb(96, 192, 96)'
@@ -40328,6 +41430,7 @@ function createNPCCooldownManager() {
       let awaitingOldrakMistsConfirm = false;
       let awaitingOldrakNecromantConfirm = false;
       let awaitingAvarTarParchmentConfirm = false;
+      let awaitingAvarTarDemonHelmetConfirm = false;
       let awaitingAstronisOrshabaalConfirm = false;
       // A Prisoner (Mad Mage) riddle → key hand-over: after the correct answer he asks a
       // chain of "yes" confirmations before granting his key (riddleSolved).
@@ -42965,6 +44068,124 @@ function createNPCCooldownManager() {
           const trimmed = text.trim();
           const lower = trimmed.toLowerCase();
 
+          // Demon Helmet Quest — Avar Tar's follow-up once the Parchment Room is done.
+          // "yes" to his offer accepts the quest — no teleport: it arms the hole on tile 70
+          // of Cake Drake Party (demonHelmetHoleTileAction), same as the Parchment Room.
+          if (awaitingAvarTarDemonHelmetConfirm && /\byes\b/i.test(lower)) {
+            awaitingAvarTarDemonHelmetConfirm = false;
+            try {
+              if (!(await hasGoldenKey())) {
+                cooldown.queueResponse(
+                  text,
+                  getMissionDialogueLine(DEMON_HELMET_MISSION, 'noKey', "Where's that golden key of yours, Player? Without it the door below the Hero Cave won't budge."),
+                  addMessageToConversation,
+                  npcConfig.name
+                );
+                return;
+              }
+              await persistMissionProgress(DEMON_HELMET_MISSION, { accepted: true, completed: false, battleCompleted: false });
+              NotificationService.showQuestAccepted(DEMON_HELMET_MISSION, npcConfig.logPrefix);
+              updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+              demonHelmetHoleTileAction.update(globalThis.state?.board?.getSnapshot()?.context);
+              cooldown.queueResponse(
+                text,
+                getMissionDialogueLine(DEMON_HELMET_MISSION, 'accept', "Ha! That's the spirit of a true hero! Go back to the Cake Drake Party and down the hole into the Hero Cave — and hold that golden key tight."),
+                addMessageToConversation,
+                npcConfig.name
+              );
+            } catch (error) {
+              console.error(`${npcConfig.logPrefix} Error accepting the Demon Helmet quest:`, error);
+            }
+            return;
+          }
+
+          if (awaitingAvarTarDemonHelmetConfirm && /\bno\b/i.test(lower)) {
+            awaitingAvarTarDemonHelmetConfirm = false;
+            cooldown.queueResponse(
+              text,
+              getMissionDialogueLine(DEMON_HELMET_MISSION, 'decline', 'No shame in it. Four demons at once has sent braver souls than you crying home ... not me, naturally.'),
+              addMessageToConversation,
+              npcConfig.name,
+              ModalHelpers.getFarewellCloseCallback(text)
+            );
+            return;
+          }
+
+          // Triggered on "demon helmet"/"helmet", or on "mission" once the Parchment Room is
+          // finished ("parchment" itself still reaches the Parchment branch below and gets
+          // its alreadyCompleted line). Plain "demons" keeps its own flavor line.
+          const parchmentDone = !!(getMissionProgress(PARCHMENT_ROOM_MISSION) || {}).completed;
+          const asksDemonHelmet = /demon\s*helmet|\bhelmet\b/i.test(trimmed)
+            || (parchmentDone && /\bmission\b/i.test(trimmed) && !/parchment/i.test(trimmed));
+          if (asksDemonHelmet && !awaitingAvarTarDemonHelmetConfirm && !awaitingAvarTarParchmentConfirm) {
+            const helmetProgress = getMissionProgress(DEMON_HELMET_MISSION) || {};
+
+            if (helmetProgress.completed) {
+              cooldown.queueResponse(
+                text,
+                getMissionDialogueLine(DEMON_HELMET_MISSION, 'alreadyCompleted', 'You wear that Demon Helmet well, Player. Almost as well as I do. Almost.'),
+                addMessageToConversation,
+                npcConfig.name
+              );
+              return;
+            }
+
+            if (helmetProgress.battleCompleted) {
+              try {
+                const coinsAdder = globalThis.addGuildCoins ||
+                  (globalThis.Guilds && globalThis.Guilds.addGuildCoins) ||
+                  (globalThis.BestiaryModAPI && globalThis.BestiaryModAPI.guilds && globalThis.BestiaryModAPI.guilds.addGuildCoins) ||
+                  (typeof addGuildCoins === 'function' ? addGuildCoins : null);
+                const helmetCoins = DEMON_HELMET_MISSION.rewardCoins || 0;
+                if (coinsAdder && helmetCoins > 0) {
+                  await coinsAdder(helmetCoins);
+                }
+                await persistMissionProgress(DEMON_HELMET_MISSION, { accepted: true, completed: true, battleCompleted: true });
+                updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+                NotificationService.showQuestCompleted(DEMON_HELMET_MISSION, npcConfig.logPrefix, helmetCoins > 0 ? { rewardCoins: helmetCoins } : undefined);
+                cooldown.queueResponse(
+                  text,
+                  getMissionDialogueLine(DEMON_HELMET_MISSION, 'complete', 'You made it back in one piece! A proper haul for a proper hero. Take these guild coins as well, you have earned them.'),
+                  addMessageToConversation,
+                  npcConfig.name
+                );
+              } catch (error) {
+                console.error(`${npcConfig.logPrefix} Error completing the Demon Helmet quest:`, error);
+              }
+              return;
+            }
+
+            if (!parchmentDone) {
+              cooldown.queueResponse(
+                text,
+                getMissionDialogueLine(DEMON_HELMET_MISSION, 'notReady', "The Demon Helmet? Ha! You haven't even been through the Parchment Room yet. Bring me the golden key from that coffin first."),
+                addMessageToConversation,
+                npcConfig.name
+              );
+              return;
+            }
+
+            if (helmetProgress.accepted) {
+              // Accepted but not yet won — the hole in Cake Drake Party is the way in.
+              cooldown.queueResponse(
+                text,
+                getMissionDialogueLine(DEMON_HELMET_MISSION, 'alreadyActive', 'The demons are still guarding those chests, Player. Go back to the Cake Drake Party and down the hole!'),
+                addMessageToConversation,
+                npcConfig.name
+              );
+              return;
+            }
+
+            awaitingAvarTarDemonHelmetConfirm = true;
+            cooldown.queueResponse(
+              text,
+              getMissionDialogueLine(DEMON_HELMET_MISSION, 'prompt', 'That golden key you pulled from the coffin opens the door deep below the Hero Cave. Four demons guard the Demon Helmet there. Will you go, Player?'),
+              addMessageToConversation,
+              npcConfig.name
+            );
+            return;
+          }
+
           if (awaitingAvarTarParchmentConfirm && /\byes\b/i.test(lower)) {
             awaitingAvarTarParchmentConfirm = false;
             try {
@@ -44150,11 +45371,17 @@ function createNPCCooldownManager() {
     cleanupAnnihilatorOrshabaalQuest();
     cleanupWorldRaidPolling();
     cleanupParchmentRoomHoleSystem();
+    cleanupDemonHelmetHoleSystem();
+    cleanupDemonHelmetGateDoorSystem();
+    cleanupDemonHelmetTeleporterPadSystem();
     cleanupParchmentRoomQuest();
     cleanupParchmentAntechamberContinueSystem();
     parchmentAntechamberInscriptionSignReader.cleanupSystem();
     cleanupParchmentAntechamberQuest();
     cleanupParchmentAntechamberBoardClearWatcher();
+    cleanupDemonHelmetQuest();
+    cleanupDemonHelmetGateQuest();
+    cleanupDemonHelmetTeleporterQuest();
     cleanupIsleOfMistsArrowSystem();
     cleanupIsleOfMistsQuest();
     cleanupNecromantHouseArrowSystem();
@@ -44588,6 +45815,9 @@ function createNPCCooldownManager() {
     setupAvarTarBoardClearWatcher();
     setupParchmentRoomCoffinObserver();
     setupParchmentRoomHoleObserver();
+    setupDemonHelmetHoleObserver();
+    setupDemonHelmetGateDoorObserver();
+    setupDemonHelmetTeleporterPadObserver();
     setupParchmentAntechamberContinueObserver();
     parchmentAntechamberInscriptionSignReader.setupObserver();
     setupParchmentAntechamberBoardClearWatcher();
@@ -46007,6 +47237,9 @@ function createNPCCooldownManager() {
     try {
       const patch = buildMissionProgressPatch(mission, fields, { [field]: !!value });
       await persistMissionProgress(mission, patch);
+      // Sub-flags gate itemLifecycle rules (e.g. demon_helmet.battleCompleted consumes the
+      // Golden Key) — sync the bag like every other progress-mutating dev command does.
+      await reconcileQuestItemsFromProgress({ label: `setProgressFlag ${missionId}.${field}` });
       await refreshDevQuestUi();
       console.log(`[Quests Mod][Dev] ${missionId}.${field} set to ${!!value}`);
     } catch (error) {

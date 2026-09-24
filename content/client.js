@@ -1052,7 +1052,37 @@ if (typeof browserAPI === 'undefined') {
       content(scrollArea);
     }
   }
-  
+
+  // Shared request for util.fetchTrophyRoomData (one per cooldown window, across all mods)
+  const TROPHY_ROOM_COOLDOWN_MS = 2000;
+  const TROPHY_ROOM_429_RETRY_DEFAULT_MS = 1000;
+  const TROPHY_ROOM_429_RETRY_MAX_MS = 5000;
+  let trophyRoomRequest = null;
+  let trophyRoomRequestAt = 0; // set on start and again on settle (cooldown runs from the later)
+  let trophyRoomLastGood = null; // last successful payload, served if a fresh fetch fails
+
+  // One GET; on 429 waits Retry-After (default 1s, capped 5s) and retries once.
+  // The game's rate limit is shared across its API (e.g. Guilds' profile bursts), so a
+  // single 429 on this endpoint is common and usually clears within a second.
+  async function requestTrophyRoomData(allowRetry) {
+    const res = await fetch('/api/trpc/game.getFullTrophyRoomData', {
+      headers: { 'Accept': '*/*', 'Content-Type': 'application/json', 'X-Game-Version': '1' }
+    });
+    if (res.status === 429 && allowRetry) {
+      const retryAfterSec = Number(res.headers?.get?.('Retry-After'));
+      const waitMs = Number.isFinite(retryAfterSec) && retryAfterSec > 0
+        ? Math.min(retryAfterSec * 1000, TROPHY_ROOM_429_RETRY_MAX_MS)
+        : TROPHY_ROOM_429_RETRY_DEFAULT_MS;
+      await new Promise((resolve) => setTimeout(resolve, waitMs));
+      return requestTrophyRoomData(false);
+    }
+    if (!res.ok) throw new Error(`game.getFullTrophyRoomData → ${res.status}`);
+    const json = await res.json();
+    const data = json?.result?.data?.json;
+    if (!data?.highscores) throw new Error('game.getFullTrophyRoomData → unexpected payload');
+    return data;
+  }
+
   window.BestiaryModAPI = {
     showModal: function(options) {
       // Only remove prior *mod* overlays/dialogs. Never detach game React/Radix dialogs
@@ -1373,6 +1403,35 @@ if (typeof browserAPI === 'undefined') {
           console.warn('[BestiaryModAPI] util.unsubscribe failed:', error);
         }
         return false;
+      },
+
+      /**
+       * Public trophy-room highscores (`game.getFullTrophyRoomData`, no login needed):
+       * `{ highscores: { tick, rank, floor }, leaderboards: { tick, rank, floor } }`.
+       * Always fetches fresh, but calls within TROPHY_ROOM_COOLDOWN_MS of the last
+       * request (or while one is in flight) share that request's result, so several
+       * mods reacting to the same map change / battle end cost one request.
+       * A 429 is retried once; if the fetch still fails, the last successful payload
+       * is returned instead (rejects only when nothing has ever loaded).
+       * @returns {Promise<object>} the payload (`result.data.json`)
+       */
+      fetchTrophyRoomData: function() {
+        const now = Date.now();
+        if (trophyRoomRequest && (trophyRoomRequestAt === 0 || now - trophyRoomRequestAt < TROPHY_ROOM_COOLDOWN_MS)) {
+          return trophyRoomRequest; // in flight (At === 0) or settled within the cooldown
+        }
+        trophyRoomRequestAt = 0;
+        trophyRoomRequest = requestTrophyRoomData(true).then((data) => {
+          trophyRoomRequestAt = Date.now();
+          trophyRoomLastGood = data;
+          return data;
+        }, (error) => {
+          trophyRoomRequestAt = Date.now();
+          if (!trophyRoomLastGood) throw error;
+          console.warn('[BestiaryModAPI] fetchTrophyRoomData failed, serving last good data:', error.message);
+          return trophyRoomLastGood;
+        });
+        return trophyRoomRequest;
       }
     },
 

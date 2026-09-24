@@ -755,7 +755,9 @@
     CONTAINER_DEBOUNCE_AUTOPLAY: 50,
     UPDATE_THROTTLE: 100,
     POST_BATTLE_FRESH_WINDOW: 8000,
-    HIGHSCORE_RETRY: 2500
+    // fetchTrophyRoomData's 2s cooldown runs from when a request settles, so this must exceed
+    // BATTLE_REFRESH + request time + 2000 or the retry just gets the first refresh's result
+    HIGHSCORE_RETRY: 3500
   };
   
   const UI_CONFIG = {
@@ -1104,9 +1106,6 @@
     lastErrorTime: 0,
     totalErrors: 0,
     
-    // Cache state
-    leaderboardCache: new Map(),
-    cacheTimeout: 30000, // 30 seconds
     lastBattleCompletionAt: 0,
     
     // Subscription management for cleanup
@@ -1126,7 +1125,6 @@
       this.consecutiveErrors = 0;
       this.lastErrorTime = 0;
       this.totalErrors = 0;
-      this.leaderboardCache.clear();
       this.lastBattleCompletionAt = 0;
       this.subscriptions = [];
       this.timeouts = [];
@@ -1221,29 +1219,12 @@
 // =======================
 // MODULE 4: API Functions
 // =======================
-  // Helper function to fetch data from TRPC API
-  async function fetchTRPC(method) {
-    console.log(`[Better Highscores] 🌐 API REQUEST: ${method}`);
-    try {
-      const inp = encodeURIComponent(JSON.stringify({ 0: { json: null, meta: { values: ["undefined"] } } }));
-      const res = await fetch(`/pt/api/trpc/${method}?batch=1&input=${inp}`, {
-        headers: { 
-          'Accept': '*/*', 
-          'Content-Type': 'application/json', 
-          'X-Game-Version': '1' 
-        }
-      });
-      
-      if (!res.ok) {
-        throw new Error(`${method} → ${res.status}`);
-      }
-      
-      const json = await res.json();
-      return json[0].result.data.json;
-    } catch (error) {
-      console.error('[Better Highscores] Error fetching from TRPC:', error);
-      throw error;
-    }
+  // Public (no login) per-room #1 records for tick, rank and floor in one request.
+  // Shape: { highscores: { tick, rank, floor }, leaderboards: { tick, rank, floor } }
+  // Always fresh; the shared API helper collapses calls within its 2s cooldown into one request.
+  async function fetchTrophyRoomData() {
+    console.log('[Better Highscores] 🌐 API REQUEST: game.getFullTrophyRoomData');
+    return window.BestiaryModAPI.util.fetchTrophyRoomData();
   }
 
   // Function to get current map code using proper game state API
@@ -1301,50 +1282,29 @@
     }
   }
 
-  // Function to fetch leaderboard data with caching
-  async function fetchLeaderboardData(mapCode, forceRefresh = false) {
-    const cacheKey = `leaderboard_${mapCode}`;
-    const cached = BetterHighscoresState.leaderboardCache.get(cacheKey);
-    
-    if (!forceRefresh && cached && Date.now() - cached.timestamp < BetterHighscoresState.cacheTimeout) {
-      return cached.data;
-    }
-    
+  // Function to fetch leaderboard data (always fresh — no per-map cache)
+  async function fetchLeaderboardData(mapCode) {
     try {
       console.log('[Better Highscores] Fetching leaderboard data for map:', mapCode);
       
-      const [roomsHighscores, tickHighscores] = await Promise.all([
-        fetchTRPC('game.getRoomsHighscores'),
-        fetchTRPC('game.getTickHighscores')
-      ]);
+      const trophyData = await fetchTrophyRoomData();
+      const highscores = trophyData?.highscores || {};
       
-      console.log('[Better Highscores] Leaderboard response:', { roomsHighscores, tickHighscores });
+      console.log('[Better Highscores] Leaderboard response:', highscores);
       
-      // Speedrun WR uses getTickHighscores; rank/floor use getRoomsHighscores
-      const tickEntry = tickHighscores?.[mapCode] || roomsHighscores?.ticks?.[mapCode];
-      const tickData = tickEntry ? [tickEntry] : [];
-      const rankData = roomsHighscores?.rank?.[mapCode] ? [roomsHighscores.rank[mapCode]] : [];
-      const floorData = roomsHighscores?.floor?.[mapCode] ? [roomsHighscores.floor[mapCode]] : [];
+      const tickData = highscores.tick?.[mapCode] ? [highscores.tick[mapCode]] : [];
+      const rankData = highscores.rank?.[mapCode] ? [highscores.rank[mapCode]] : [];
+      const floorData = highscores.floor?.[mapCode] ? [highscores.floor[mapCode]] : [];
       
       console.log('[Better Highscores] Extracted tick data for map', mapCode, ':', tickData);
       console.log('[Better Highscores] Extracted rank data for map', mapCode, ':', rankData);
       console.log('[Better Highscores] Extracted floor data for map', mapCode, ':', floorData);
       
-      const data = {
+      return {
         tickData,
         rankData,
         floorData
       };
-      
-      // Avoid poisoning cache with potentially stale immediate post-battle snapshots.
-      if (!forceRefresh) {
-        BetterHighscoresState.leaderboardCache.set(cacheKey, {
-          data,
-          timestamp: Date.now()
-        });
-      }
-      
-      return data;
     } catch (error) {
       const errorResult = handleError(error, 'fetchLeaderboardData');
       if (errorResult.shouldStop) {
@@ -1402,7 +1362,7 @@
     }
 
     try {
-      const { tickData, rankData, floorData } = await fetchLeaderboardData(mapCode, true);
+      const { tickData, rankData, floorData } = await fetchLeaderboardData(mapCode);
 
       if (modDisposed) {
         return false;
@@ -1441,14 +1401,12 @@
 
     console.log(`[Better Highscores] Scheduling leaderboard refresh (${reason}) for map: ${mapCode}`);
     BetterHighscoresState.lastBattleCompletionAt = Date.now();
-    BetterHighscoresState.leaderboardCache.delete(`leaderboard_${mapCode}`);
 
     scheduleTimeout(() => {
       refreshLeaderboardForMap(mapCode);
     }, DELAYS.BATTLE_REFRESH);
 
     scheduleTimeout(() => {
-      BetterHighscoresState.leaderboardCache.delete(`leaderboard_${mapCode}`);
       refreshLeaderboardForMap(mapCode);
     }, DELAYS.HIGHSCORE_RETRY);
   }
@@ -2816,7 +2774,7 @@
       
       const mapName = getMapName(mapCode);
       
-      const { tickData, rankData, floorData } = await fetchLeaderboardData(mapCode, shouldForceRefresh);
+      const { tickData, rankData, floorData } = await fetchLeaderboardData(mapCode);
 
       if (modDisposed) {
         return;

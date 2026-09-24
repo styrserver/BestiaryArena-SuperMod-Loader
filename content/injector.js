@@ -146,10 +146,37 @@ function clearStoredLoaderErrors(callback) {
   }
 }
 
+// Mirror Mod Settings' "Disable auto-reload" into extension storage. The background
+// worker's browser-error-page recovery (background.js scheduleDeadTabRecovery) can't
+// read the page's localStorage, and by the time it runs no page code is alive.
+const AUTO_RELOAD_DISABLED_STORAGE_KEY = 'ba-disable-auto-reload';
+let mirroredAutoReloadDisabled = null;
+
+function mirrorAutoReloadDisabled(disabled) {
+  if (!IS_TOP_FRAME || !browserAPI?.storage?.local) return;
+  const value = disabled === true;
+  if (value === mirroredAutoReloadDisabled) return;
+  mirroredAutoReloadDisabled = value;
+  try {
+    browserAPI.storage.local.set({ [AUTO_RELOAD_DISABLED_STORAGE_KEY]: value });
+  } catch {
+    // ignore storage failures
+  }
+}
+
+try {
+  const savedModSettings = JSON.parse(localStorage.getItem('better-ui-config') || 'null');
+  mirrorAutoReloadDisabled(savedModSettings?.disableAutoReload === true);
+} catch {
+  mirrorAutoReloadDisabled(false);
+}
+
 window.addEventListener('message', (event) => {
   if (event.source !== window) return;
   if (event.data?.from === 'BA_LOADER_ERROR' && event.data.entry) {
     appendLoaderError(event.data.entry);
+  } else if (event.data?.from === 'BA_AUTO_RELOAD_PREF') {
+    mirrorAutoReloadDisabled(event.data.disabled);
   }
 });
 

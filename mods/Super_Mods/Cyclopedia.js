@@ -843,6 +843,24 @@ function findCyclopediaRegionByMapId(mapId) {
   return null;
 }
 
+// Multi-floor rooms (type: 'multi', e.g. The Annihilator Quest "edanni") aren't listed in
+// any region's room array, but room ids share a 2-letter region prefix ("rk" Rookgaard,
+// "cr" Carlin, "ed" Edron) — infer the region from the siblings that share it.
+function findCyclopediaRegionByRoomIdPrefix(mapId) {
+  if (typeof mapId !== 'string' || mapId.length < 3) return null;
+  const prefix = mapId.slice(0, 2);
+  let best = null;
+  let bestCount = 0;
+  for (const region of getCyclopediaRegionsList()) {
+    const count = region.rooms?.filter((room) => typeof room?.id === 'string' && room.id.startsWith(prefix)).length || 0;
+    if (count > bestCount) {
+      best = region;
+      bestCount = count;
+    }
+  }
+  return best;
+}
+
 function getCyclopediaMapsInRegion(regionId) {
   const region = findCyclopediaRegionById(regionId);
   if (!region?.rooms) return [];
@@ -886,13 +904,10 @@ function getCyclopediaRoomIdToRegionIdMap() {
 
 function resolveCyclopediaRoomRegionName(roomIdOrKey) {
   const room = getCyclopediaRoomByMapId(roomIdOrKey);
-  // Multi-floor quest rooms (e.g. The Annihilator Quest, The Behemoth Quest) are never
-  // listed inside a region's room array, so the lookup below would always fall through to
-  // "Unknown Region" — bucket them under "Quests" instead.
-  if (room?.type === 'multi') return 'Quests';
-  const mapCode = room?.id;
+  const mapCode = room?.id ?? (typeof roomIdOrKey === 'string' ? roomIdOrKey : null);
   const region = (mapCode && findCyclopediaRegionByMapId(mapCode))
-    || (room?.region && findCyclopediaRegionById(room.region));
+    || (room?.region && findCyclopediaRegionById(room.region))
+    || (mapCode && findCyclopediaRegionByRoomIdPrefix(mapCode));
   if (region?.id) return cyclopediaGetRegionDisplayName(region.id);
   return cyclopediaGetRegionDisplayName('Unknown Region');
 }
@@ -3928,39 +3943,31 @@ const MapsDataFetcher = {
     }
   },
   
-  // Batch fetch all leaderboard data
+  // Batch fetch all leaderboard data. World records are always fresh (the shared API helper
+  // collapses calls within its 2s cooldown into one request); only getTickLeaderboards is cached.
   async fetchAllLeaderboardData() {
     const playerState = globalThis.state?.player?.getSnapshot?.()?.context;
     if (!playerState?.name) return null;
 
-    // Check for cached combined data (recompute yourRooms — season can change without refetch)
-    const cachedData = this.getCached('combined-leaderboards');
-    if (cachedData) {
-      return {
-        ...cachedData,
-        yourRooms: getYourRoomsForCyclopediaSeason(playerState.rooms || {})
-      };
-    }
-
     try {
-      console.log('[Cyclopedia] Fetching maps leaderboard batch: game.getTickHighscores, game.getTickLeaderboards, game.getRoomsHighscores');
-      // Fetch all data in parallel with individual caching
-      const [best, lbs, roomsHighscores] = await Promise.all([
-        this.fetchTRPC('game.getTickHighscores'),
-        this.fetchTRPC('game.getTickLeaderboards'),
-        this.fetchTRPC('game.getRoomsHighscores')
+      console.log('[Cyclopedia] Fetching maps leaderboard batch: game.getFullTrophyRoomData, game.getTickLeaderboards');
+      // getFullTrophyRoomData replaces getTickHighscores + getRoomsHighscores (identical records);
+      // roomsHighscores keeps the old { ticks, rank, floor } shape for existing readers.
+      const [trophy, lbs] = await Promise.all([
+        window.BestiaryModAPI.util.fetchTrophyRoomData(),
+        this.fetchTRPC('game.getTickLeaderboards')
       ]);
+      const highscores = trophy?.highscores || {};
+      const best = highscores.tick || {};
+      const roomsHighscores = { ticks: best, rank: highscores.rank || {}, floor: highscores.floor || {} };
 
-      const data = {
+      return {
         best,
         lbs,
         roomsHighscores,
         yourRooms: getYourRoomsForCyclopediaSeason(playerState.rooms || {}),
         ROOM_NAMES: globalThis.state.utils.ROOM_NAME
       };
-
-      this.setCached('combined-leaderboards', data);
-      return data;
     } catch (error) {
       console.error('[Cyclopedia] Error fetching maps leaderboard data:', error);
       return null;
@@ -13205,7 +13212,7 @@ function createStatisticsSection(selectedMap, leaderboardData) {
         selectedMap,
         '| Cyclopedia season toggle:',
         activeSeason,
-        '| game.getTickHighscores / getRoomsHighscores are global room WRs (no season in API payload).',
+        '| game.getFullTrophyRoomData highscores are global room WRs (no season in API payload).',
         '| world record rendering enabled:',
         allowGlobalWorldRecords,
         {
@@ -15731,16 +15738,16 @@ function createEquipmentTabPage(selectedCreature, selectedEquipment, selectedInv
         });
       });
 
-      // Multi-floor quest rooms (e.g. The Annihilator Quest, The Behemoth Quest) aren't
-      // listed inside any region's room array, so they never match above — surface them in
-      // their own bucket instead of silently dropping them.
+      // Multi-floor rooms (e.g. The Annihilator Quest, The Behemoth Quest) aren't listed
+      // inside any region's room array, so they never match above — resolve their real
+      // region (by id prefix) rather than silently dropping them.
       equipData.forEach((entry, roomCode) => {
         if (handledRoomCodes.has(roomCode) || !entry.creatures.size) return;
         orderedUsage.push({
           mapName: baseNameForRoom(roomCode),
           floors: entry.floors,
           creatures: Array.from(entry.creatures).sort(),
-          regionName: 'Quests'
+          regionName: resolveCyclopediaRoomRegionName(roomCode)
         });
       });
 
@@ -17757,14 +17764,15 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
 
       let best, lbs, roomsHighscores;
 
-      const cachedData = getCachedLeaderboardData('speedrun-rank');
-      if (cachedData) {
-        ({ best, lbs, roomsHighscores } = cachedData);
+      // Always fetch fresh world records; fall back to the last good copy if the request fails
+      const bundle = await CyclopediaApi.fetchLeaderboardBundle();
+      if (bundle) {
+        ({ best, lbs, roomsHighscores } = bundle);
+        setCachedLeaderboardData('speedrun-rank', { best, lbs, roomsHighscores });
       } else {
-        const bundle = await CyclopediaApi.fetchLeaderboardBundle();
-        if (bundle) {
-          ({ best, lbs, roomsHighscores } = bundle);
-          setCachedLeaderboardData('speedrun-rank', { best, lbs, roomsHighscores });
+        const cachedData = getCachedLeaderboardData('speedrun-rank');
+        if (cachedData) {
+          ({ best, lbs, roomsHighscores } = cachedData);
         }
       }
 
@@ -17787,14 +17795,15 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
 
       let best, lbs, roomsHighscores;
       
-      const cachedData = getCachedLeaderboardData('combined-leaderboards');
-      if (cachedData) {
-        ({ best, lbs, roomsHighscores } = cachedData);
+      // Always fetch fresh world records; fall back to the last good copy if the request fails
+      const bundle = await CyclopediaApi.fetchLeaderboardBundle();
+      if (bundle) {
+        ({ best, lbs, roomsHighscores } = bundle);
+        setCachedLeaderboardData('combined-leaderboards', { best, lbs, roomsHighscores });
       } else {
-        const bundle = await CyclopediaApi.fetchLeaderboardBundle();
-        if (bundle) {
-          ({ best, lbs, roomsHighscores } = bundle);
-          setCachedLeaderboardData('combined-leaderboards', { best, lbs, roomsHighscores });
+        const cachedData = getCachedLeaderboardData('combined-leaderboards');
+        if (cachedData) {
+          ({ best, lbs, roomsHighscores } = cachedData);
         }
       }
 

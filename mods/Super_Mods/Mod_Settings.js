@@ -3846,6 +3846,9 @@ function saveConfig() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
     // Update global exposure
     window.betterUIConfig = config;
+    // The background worker can't read page localStorage; the injector mirrors this
+    // flag into extension storage so its browser-error-page recovery honours it.
+    window.postMessage({ from: 'BA_AUTO_RELOAD_PREF', disabled: config.disableAutoReload === true }, window.location.origin);
     console.log('[Mod Settings] Configuration saved to localStorage:', config);
   } catch (error) {
     console.error('[Mod Settings] Error saving config:', error);
@@ -4635,10 +4638,6 @@ function getRunsForSeason(runs, targetSeason) {
   return runs.filter(run => getRunSeasonValue(run) === targetSeason);
 }
 
-let uploadValidationLeaderboardCache = null;
-let uploadValidationLeaderboardCacheTime = 0;
-const UPLOAD_VALIDATION_LEADERBOARD_TTL = 5 * 60 * 1000;
-
 function getYourRoomsForUploadValidation() {
   if (window.currentSpeedrunRankData?.yourRooms) {
     return window.currentSpeedrunRankData.yourRooms;
@@ -4646,49 +4645,18 @@ function getYourRoomsForUploadValidation() {
   return globalThis.state?.player?.getSnapshot?.()?.context?.rooms || {};
 }
 
+// Always fresh world records; the shared API helper collapses calls within its 2s cooldown.
 async function fetchUploadValidationLeaderboardData() {
-  const now = Date.now();
-  if (uploadValidationLeaderboardCache && now - uploadValidationLeaderboardCacheTime < UPLOAD_VALIDATION_LEADERBOARD_TTL) {
-    return uploadValidationLeaderboardCache;
-  }
-
-  if (window.currentSpeedrunRankData?.best) {
-    uploadValidationLeaderboardCache = {
-      best: window.currentSpeedrunRankData.best,
-      yourRooms: window.currentSpeedrunRankData.yourRooms || getYourRoomsForUploadValidation(),
-      roomsHighscores: window.currentSpeedrunRankData.roomsHighscores || null
-    };
-    uploadValidationLeaderboardCacheTime = now;
-    return uploadValidationLeaderboardCache;
-  }
-
   try {
-    const inp = encodeURIComponent(JSON.stringify({ 0: { json: null, meta: { values: ['undefined'] } } }));
-    const headers = { Accept: '*/*', 'Content-Type': 'application/json', 'X-Game-Version': '1' };
-    const [tickResponse, roomsResponse] = await Promise.all([
-      fetch(`/api/trpc/game.getTickHighscores?batch=1&input=${inp}`, { headers }),
-      fetch(`/api/trpc/game.getRoomsHighscores?batch=1&input=${inp}`, { headers })
-    ]);
-    if (!tickResponse.ok) {
-      console.warn('[Mod Settings] Could not fetch tick highscores for run validation');
-      return { best: {}, yourRooms: getYourRoomsForUploadValidation(), roomsHighscores: null };
-    }
-    const tickJson = await tickResponse.json();
-    const best = tickJson[0]?.result?.data?.json || {};
-    let roomsHighscores = null;
-    if (roomsResponse.ok) {
-      const roomsJson = await roomsResponse.json();
-      roomsHighscores = roomsJson[0]?.result?.data?.json || null;
-    }
-    uploadValidationLeaderboardCache = {
-      best,
+    // Public endpoint: per-room #1 tick/rank/floor records in one request (no login needed)
+    const highscores = (await window.BestiaryModAPI.util.fetchTrophyRoomData())?.highscores || {};
+    return {
+      best: highscores.tick || {},
       yourRooms: getYourRoomsForUploadValidation(),
-      roomsHighscores
+      roomsHighscores: { rank: highscores.rank || {}, floor: highscores.floor || {} }
     };
-    uploadValidationLeaderboardCacheTime = now;
-    return uploadValidationLeaderboardCache;
   } catch (error) {
-    console.warn('[Mod Settings] Error fetching tick highscores for run validation:', error);
+    console.warn('[Mod Settings] Error fetching trophy room highscores for run validation:', error);
     return { best: {}, yourRooms: getYourRoomsForUploadValidation(), roomsHighscores: null };
   }
 }

@@ -1092,21 +1092,38 @@ function buildProfileApiUrl(playerName) {
   return `https://bestiaryarena.com/api/trpc/serverSide.profilePageData?batch=1&input=%7B%220%22%3A%7B%22json%22%3A%22${encodeURIComponent(playerName)}%22%7D%7D`;
 }
 
-// Rate limit: Bestiary Arena profile API allows 30 requests per 10 seconds
+// Rate limit: Bestiary Arena API allows 30 requests per 10 seconds, shared across its whole
+// API (the game's own calls and other mods count too), so leave headroom.
 const PROFILE_RATE_WINDOW_MS = 10000;
-const PROFILE_RATE_MAX = 28; // stay under 30 to avoid 429
+const PROFILE_RATE_MAX = 25;
 const profileRequestTimestamps = [];
 const profileRateLimitQueue = [];
+let profileQueueTimer = null;
+// On a 429 the whole queue pauses until the server's Retry-After has passed. Otherwise the
+// queue keeps sending into the limit and every request earns its own 429 + back-off.
+let profileBackoffUntil = 0;
+
+function scheduleProfileQueue(delayMs) {
+  if (profileQueueTimer) return;
+  profileQueueTimer = setTimeout(() => {
+    profileQueueTimer = null;
+    processProfileRateLimitQueue();
+  }, Math.max(0, delayMs));
+}
 
 function processProfileRateLimitQueue() {
   if (profileRateLimitQueue.length === 0) return;
   const now = Date.now();
+  if (now < profileBackoffUntil) {
+    scheduleProfileQueue(profileBackoffUntil - now + 50);
+    return;
+  }
   while (profileRequestTimestamps.length && profileRequestTimestamps[0] < now - PROFILE_RATE_WINDOW_MS) {
     profileRequestTimestamps.shift();
   }
   if (profileRequestTimestamps.length >= PROFILE_RATE_MAX) {
     const waitMs = Math.min(PROFILE_RATE_WINDOW_MS, profileRequestTimestamps[0] + PROFILE_RATE_WINDOW_MS - now + 50);
-    setTimeout(processProfileRateLimitQueue, Math.max(100, waitMs));
+    scheduleProfileQueue(Math.max(100, waitMs));
     return;
   }
   const next = profileRateLimitQueue.shift();
@@ -1114,18 +1131,20 @@ function processProfileRateLimitQueue() {
   profileRequestTimestamps.push(Date.now());
   next.run();
   if (profileRateLimitQueue.length > 0) {
-    setTimeout(processProfileRateLimitQueue, 0);
+    scheduleProfileQueue(0);
   }
 }
 
-/** Run a profile API request respecting rate limit (28 per 10s). */
-function withProfileRateLimit(fn) {
+/** Run an API request respecting the shared rate limit. `priority` puts it at the front (retries). */
+function withProfileRateLimit(fn, priority = false) {
   return new Promise((resolve, reject) => {
-    profileRateLimitQueue.push({
+    const job = {
       run: () => {
         Promise.resolve(fn()).then(resolve).catch(reject);
       }
-    });
+    };
+    if (priority) profileRateLimitQueue.unshift(job);
+    else profileRateLimitQueue.push(job);
     processProfileRateLimitQueue();
   });
 }
@@ -1134,6 +1153,36 @@ function withProfileRateLimit(fn) {
 const PROFILE_429_RETRY_AFTER_MS = 10500;
 /** Max number of retries on 429 before giving up (initial attempt + this many retries) */
 const PROFILE_429_MAX_RETRIES = 2;
+
+/** Pause the whole profile queue for the server's Retry-After. Logs once per pause, not per request. */
+function noteProfileRateLimited(response) {
+  const retryAfter = parseInt(response.headers.get('Retry-After'), 10);
+  const waitMs = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : PROFILE_429_RETRY_AFTER_MS;
+  const now = Date.now();
+  const until = now + waitMs;
+  if (until <= profileBackoffUntil) return;
+  const alreadyPaused = profileBackoffUntil > now;
+  profileBackoffUntil = until;
+  if (!alreadyPaused) {
+    console.warn(`[Guilds] Profile API rate limited (429), pausing profile requests for ${Math.round(waitMs / 1000)} s (${profileRateLimitQueue.length} queued)`);
+  }
+}
+
+/**
+ * GET a profile API URL through the shared queue. A 429 pauses the queue and the request is
+ * re-queued at the front (so retries count against the limit too). Returns the final Response;
+ * after PROFILE_429_MAX_RETRIES it may still be a 429, which callers must not cache as "missing".
+ */
+async function fetchProfileApi(url) {
+  for (let attempt = 0; ; attempt++) {
+    const response = await withProfileRateLimit(
+      () => fetch(url, { headers: { Accept: 'application/json' } }),
+      attempt > 0
+    );
+    if (response.status !== 429 || attempt >= PROFILE_429_MAX_RETRIES) return response;
+    noteProfileRateLimited(response);
+  }
+}
 
 // Check if a player exists by fetching their profile data (with caching)
 async function playerExists(playerName) {
@@ -1148,15 +1197,9 @@ async function playerExists(playerName) {
   }
   
   try {
-    return await withProfileRateLimit(async () => {
-      const apiUrl = buildProfileApiUrl(playerName);
-      let response = await fetch(apiUrl, { headers: { 'Accept': 'application/json' } });
-      if (response.status === 429) {
-        const retryAfter = parseInt(response.headers.get('Retry-After'), 10);
-        const waitMs = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : PROFILE_429_RETRY_AFTER_MS;
-        await new Promise(r => setTimeout(r, waitMs));
-        response = await fetch(apiUrl, { headers: { 'Accept': 'application/json' } });
-      }
+    return await (async () => {
+      const response = await fetchProfileApi(buildProfileApiUrl(playerName));
+      if (response.status === 429) return false; // unknown: don't cache as "doesn't exist"
       if (!response.ok) {
         playerExistsCache.set(playerName, false);
         return false;
@@ -1177,7 +1220,7 @@ async function playerExists(playerName) {
     // Cache the result
     playerExistsCache.set(playerName, exists);
       return exists;
-    });
+    })();
   } catch (error) {
     // Network or parsing errors - don't cache false, let it retry next time
     // Only log unexpected errors (not network timeouts which are common)
@@ -1205,16 +1248,8 @@ async function checkProfileStatus(playerName) {
   const cached = profileStatusCache.get(playerName);
   if (cached) return cached;
   try {
-    return await withProfileRateLimit(async () => {
-      const url = buildProfileApiUrl(playerName);
-      let response;
-      for (let attempt = 0; ; attempt++) {
-        response = await fetch(url, { headers: { Accept: 'application/json' } });
-        if (response.status !== 429 || attempt >= PROFILE_429_MAX_RETRIES) break;
-        const retryAfter = parseInt(response.headers.get('Retry-After'), 10);
-        const waitMs = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : PROFILE_429_RETRY_AFTER_MS;
-        await new Promise(r => setTimeout(r, waitMs));
-      }
+    return await (async () => {
+      const response = await fetchProfileApi(buildProfileApiUrl(playerName));
       if (response.status === 429) return 'unknown';
       if (response.status === 404) { profileStatusCache.set(playerName, 'missing'); return 'missing'; }
       if (!response.ok) return 'unknown';
@@ -1231,7 +1266,7 @@ async function checkProfileStatus(playerName) {
       const status = exists ? 'exists' : 'missing';
       profileStatusCache.set(playerName, status, status === 'exists' ? 6 * 60 * 60 * 1000 : 30 * 60 * 1000);
       return status;
-    });
+    })();
   } catch (_) {
     return 'unknown';
   }
@@ -1241,6 +1276,86 @@ async function checkProfileStatus(playerName) {
 const playerProfileCache = createTTLCache(60 * 60 * 1000);
 /** Coalesce concurrent fetchPlayerProfile(name) calls (same tick / modal open). */
 const profileFetchInFlight = new Map();
+// Players the server definitively has no profile for (404 / tRPC error / no name), e.g. a
+// member who renamed or deleted their account. playerProfileCache can't hold this (a cached
+// null reads back as a miss), so without it they were re-fetched on every panel load and
+// counted as "couldn't load", which kept the guild's points from ever being cached.
+const profileMissingCache = createTTLCache(30 * 60 * 1000);
+
+/** True if the last profile lookup for this player got a definitive "no such player". */
+function isProfileKnownMissing(playerName) {
+  return profileMissingCache.get(playerName) === true;
+}
+
+/**
+ * Cache a guild's points total unless some member's profile couldn't be loaded (429 / network).
+ * Members with no game profile at all are final (counted as 0) and don't block caching.
+ */
+function cacheGuildPointsIfComplete(guildId, memberCount, missingNames, points) {
+  const noProfile = missingNames.filter((name) => name && isProfileKnownMissing(name));
+  const unavailable = missingNames.filter((name) => !name || !isProfileKnownMissing(name));
+  if (noProfile.length > 0) {
+    console.log(`[Guilds] ${noProfile.length} member(s) have no game profile (renamed or deleted?), counted as 0 points: ${noProfile.join(', ')}`);
+  }
+  if (unavailable.length === 0) {
+    guildPointsCache.set(guildId, points);
+  } else {
+    console.warn(`[Guilds] Guild points for ${guildId} are partial (${unavailable.length}/${memberCount} profiles couldn't be loaded); not caching: ${unavailable.join(', ')}`);
+  }
+  return { noProfile, unavailable };
+}
+
+// Guilds already pruned this session (one attempt per guild per page load)
+const guildMissingMemberPruneDone = new Set();
+
+/**
+ * Leader/officer only: remove members whose game profile no longer exists (renamed or deleted
+ * accounts). Their guild row is dead: the player now plays under another name (or not at all),
+ * so the row only adds a 0-point member and a wasted profile request per panel load.
+ * Safety: each name is re-checked with checkProfileStatus and removed only on a definitive
+ * 'missing'; the whole prune is skipped if any profile was merely unavailable (429/network) or
+ * if more than half the guild looks missing (systemic API problem, not renames).
+ * Goes through kickMember, so role rules apply (never the leader; officers can't remove officers).
+ * @returns {Promise<string[]>} usernames actually removed
+ */
+async function pruneMissingGuildMembers(guildId, members, noProfileNames, unavailableNames) {
+  if (!guildId || !Array.isArray(members) || !noProfileNames?.length) return [];
+  if (guildMissingMemberPruneDone.has(guildId)) return [];
+  if (unavailableNames?.length) return []; // API not fully healthy right now; try on a later open
+
+  const currentPlayer = getCurrentPlayerName();
+  const currentMember = findMemberByUsername(members, currentPlayer);
+  if (!currentMember || !hasPermission(currentMember.role, 'kick')) return [];
+
+  if (members.length >= 4 && noProfileNames.length * 2 > members.length) {
+    console.warn(`[Guilds] ${noProfileNames.length}/${members.length} members look missing; not auto-removing (likely an API problem, not renames).`);
+    return [];
+  }
+  guildMissingMemberPruneDone.add(guildId);
+
+  const removed = [];
+  for (const name of noProfileNames) {
+    const target = findMemberByUsername(members, name);
+    if (!target) continue;
+    if (target.username.toLowerCase() === currentPlayer.toLowerCase()) continue;
+    if (target.role === GUILD_ROLES.LEADER) continue;
+    if (currentMember.role !== GUILD_ROLES.LEADER && target.role === GUILD_ROLES.OFFICER) continue;
+    const status = await checkProfileStatus(target.username);
+    if (status !== 'missing') continue;
+    try {
+      await kickMember(guildId, target.username, {
+        systemMessage: `${target.username} was removed from the guild (no game profile: renamed or deleted account)`
+      });
+      removed.push(target.username);
+    } catch (error) {
+      console.warn(`[Guilds] Could not auto-remove ${target.username}:`, error?.message || error);
+    }
+  }
+  if (removed.length > 0) {
+    console.log(`[Guilds] Auto-removed ${removed.length} member(s) with no game profile: ${removed.join(', ')}`);
+  }
+  return removed;
+}
 
 // Guild points cache (5 minutes TTL)
 const guildPointsCache = createTTLCache(5 * 60 * 1000);
@@ -1262,27 +1377,20 @@ async function fetchPlayerProfile(playerName) {
     return cached;
   }
 
+  if (isProfileKnownMissing(playerName)) {
+    return null;
+  }
+
   const inFlight = profileFetchInFlight.get(playerName);
   if (inFlight) {
     return inFlight;
   }
-  
-  const doFetch = async (retryCount) => {
-    const apiUrl = buildProfileApiUrl(playerName);
-    const response = await fetch(apiUrl, { headers: { 'Accept': 'application/json' } });
-    if (response.status === 429 && retryCount < PROFILE_429_MAX_RETRIES) {
-      const retryAfter = parseInt(response.headers.get('Retry-After'), 10);
-      let waitMs = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : PROFILE_429_RETRY_AFTER_MS;
-      // Slight backoff on each retry so we don't hammer the server
-      if (retryCount > 0) waitMs = Math.min(20000, waitMs + retryCount * 2000);
-      if (waitMs > 0) {
-        console.warn('[Guilds] Profile API rate limited (429), retrying after', Math.round(waitMs / 1000), 's (attempt', retryCount + 1, 'of', PROFILE_429_MAX_RETRIES + 1, ')');
-        await new Promise(r => setTimeout(r, waitMs));
-      }
-      return doFetch(retryCount + 1);
-    }
+
+  const doFetch = async () => {
+    const response = await fetchProfileApi(buildProfileApiUrl(playerName));
+    if (response.status === 429) return null; // still limited after retries: don't cache
     if (!response.ok) {
-      playerProfileCache.set(playerName, null);
+      if (response.status === 404) profileMissingCache.set(playerName, true);
       return null;
     }
     const data = await response.json();
@@ -1298,13 +1406,17 @@ async function fetchPlayerProfile(playerName) {
         profileData = null;
       }
     }
-    playerProfileCache.set(playerName, profileData);
+    if (profileData) {
+      playerProfileCache.set(playerName, profileData);
+    } else {
+      profileMissingCache.set(playerName, true);
+    }
     return profileData;
   };
 
   const promise = (async () => {
     try {
-      return await withProfileRateLimit(() => doFetch(0));
+      return await doFetch();
     } catch (error) {
       if (!error.message || (!error.message.includes('fetch') && !error.message.includes('network'))) {
         console.error('[Guilds] Error fetching player profile:', error);
@@ -1325,57 +1437,41 @@ function calculateLevelFromExp(exp) {
   return Math.floor(exp / 400) + 1;
 }
 
-// Fetch TRPC data
-async function fetchTRPC(method) {
-  try {
-    const inp = encodeURIComponent(JSON.stringify({ 0: { json: null, meta: { values: ["undefined"] } } }));
-    const res = await fetch(`/pt/api/trpc/${method}?batch=1&input=${inp}`, {
-      headers: { 
-        'Accept': '*/*', 
-        'Content-Type': 'application/json', 
-        'X-Game-Version': '1' 
-      }
-    });
-    
-    if (!res.ok) {
-      throw new Error(`${method} → ${res.status}`);
-    }
-    
-    const json = await res.json();
-    return json[0].result.data.json;
-  } catch (error) {
-    console.error('[Guilds] Error fetching from TRPC:', error);
-    throw error;
-  }
-}
-
-// One highscores payload is reused for all WR checks during a short window (avoids N identical fetches per modal)
-const roomsHighscoresCacheState = { data: null, expiresAt: 0, inFlight: null };
-const ROOMS_HIGHSCORES_TTL_MS = 20000;
-
 /** Max guilds computing points at once in the browser list (profile API is shared across all). */
 const GUILD_BROWSER_POINTS_CONCURRENCY = 3;
 
+// Public (no login) per-room #1 records, in the old getRoomsHighscores shape
+// { ticks, rank, floor } for the counters below.
+// One snapshot is reused for ROOMS_HIGHSCORES_SNAPSHOT_MS: a guild panel load runs the WR
+// counters from several call sites over ~20-30 s while also sending up to 28 profile
+// requests per 10 s. The server allows 30 per 10 s across its whole API, so re-fetching
+// every 2 s pushed profile requests into 429 back-offs. The one fetch also goes through
+// withProfileRateLimit so it counts against the same budget.
+const ROOMS_HIGHSCORES_SNAPSHOT_MS = 30000;
+const roomsHighscoresSnapshot = { data: null, at: 0, inFlight: null };
+
 async function getRoomsHighscoresCached() {
-  const now = Date.now();
-  if (roomsHighscoresCacheState.data != null && now < roomsHighscoresCacheState.expiresAt) {
-    return roomsHighscoresCacheState.data;
+  if (roomsHighscoresSnapshot.data && Date.now() - roomsHighscoresSnapshot.at < ROOMS_HIGHSCORES_SNAPSHOT_MS) {
+    return roomsHighscoresSnapshot.data;
   }
-  if (roomsHighscoresCacheState.inFlight) {
-    return roomsHighscoresCacheState.inFlight;
+  if (roomsHighscoresSnapshot.inFlight) {
+    return roomsHighscoresSnapshot.inFlight;
   }
-  roomsHighscoresCacheState.inFlight = fetchTRPC('game.getRoomsHighscores')
+  roomsHighscoresSnapshot.inFlight = withProfileRateLimit(() => window.BestiaryModAPI.util.fetchTrophyRoomData())
     .then((data) => {
-      roomsHighscoresCacheState.data = data;
-      roomsHighscoresCacheState.expiresAt = Date.now() + ROOMS_HIGHSCORES_TTL_MS;
-      roomsHighscoresCacheState.inFlight = null;
-      return data;
+      const highscores = data?.highscores || {};
+      roomsHighscoresSnapshot.data = { ticks: highscores.tick || {}, rank: highscores.rank || {}, floor: highscores.floor || {} };
+      roomsHighscoresSnapshot.at = Date.now();
+      return roomsHighscoresSnapshot.data;
     })
-    .catch((err) => {
-      roomsHighscoresCacheState.inFlight = null;
-      throw err;
+    .catch((error) => {
+      console.error('[Guilds] Error fetching trophy room highscores:', error);
+      throw error;
+    })
+    .finally(() => {
+      roomsHighscoresSnapshot.inFlight = null;
     });
-  return roomsHighscoresCacheState.inFlight;
+  return roomsHighscoresSnapshot.inFlight;
 }
 
 // Count records in a category (ticks/rank/floor) where predicate(userName) is true
@@ -1793,7 +1889,7 @@ function applyGuildPointsBreakdownToUI(ref, breakdown) {
  * handlers.onGuildBreakdown(breakdown)
  */
 async function loadGuildPanelPointsData(guildId, members, handlers = {}) {
-  const { onMemberRowPoints, onGuildBreakdown } = handlers;
+  const { onMemberRowPoints, onGuildBreakdown, onMembersRemoved } = handlers;
 
   const emptyBreakdown = {
     total: 0,
@@ -1842,12 +1938,12 @@ async function loadGuildPanelPointsData(guildId, members, handlers = {}) {
     let totalTimeSum = 0;
     let totalEquipmentPoints = 0;
     let totalFloors = 0;
-    let missingProfiles = 0;
+    const missingNames = [];
 
     for (let i = 0; i < results.length; i++) {
       const profile = results[i].profile;
       if (!profile) {
-        missingProfiles++;
+        missingNames.push(members[i]?.username);
         continue;
       }
       totalLevels += calculateLevelFromExp(toNonNegativeNumber(profile.exp));
@@ -1887,10 +1983,16 @@ async function loadGuildPanelPointsData(guildId, members, handlers = {}) {
       totalFloors
     };
 
-    if (missingProfiles === 0) {
-      guildPointsCache.set(guildId, finalPoints);
-    } else {
-      console.warn(`[Guilds] Guild points for ${guildId} are partial (${missingProfiles}/${members.length} profiles missing, likely 429); not caching.`);
+    const { noProfile, unavailable } = cacheGuildPointsIfComplete(guildId, members.length, missingNames, finalPoints);
+    if (noProfile.length > 0) {
+      pruneMissingGuildMembers(guildId, members, noProfile, unavailable)
+        .then((removed) => {
+          if (removed.length > 0) {
+            guildPointsCache.delete(guildId);
+            if (onMembersRemoved) onMembersRemoved(removed);
+          }
+        })
+        .catch((error) => console.warn('[Guilds] Auto-remove of missing members failed:', error));
     }
 
     if (onGuildBreakdown) onGuildBreakdown(breakdown);
@@ -1932,7 +2034,7 @@ async function calculateGuildPoints(guildId, options = {}) {
     let totalTimeSum = 0;
     let totalEquipmentPoints = 0;
     let totalFloors = 0;
-    let missingProfiles = 0;
+    const missingNames = [];
 
     if (onProgress) {
       // Progressive: fetch one member at a time and report after each
@@ -1948,7 +2050,7 @@ async function calculateGuildPoints(guildId, options = {}) {
           totalTimeSum += toNonNegativeNumber(profile.ticks);
           totalFloors += toNonNegativeNumber(profile.floors);
         } else {
-          missingProfiles++;
+          missingNames.push(member.username);
         }
         totalEquipmentPoints += toNonNegativeNumber(equipmentPoints);
         const pointsSoFar = computeGuildPointsFromTotals({
@@ -1971,11 +2073,7 @@ async function calculateGuildPoints(guildId, options = {}) {
         totalEquipmentPoints,
         totalFloors
       }, worldRecordBonus);
-      if (missingProfiles === 0) {
-        guildPointsCache.set(guildId, points);
-      } else {
-        console.warn(`[Guilds] Guild points for ${guildId} are partial (${missingProfiles}/${members.length} profiles missing, likely 429); not caching.`);
-      }
+      cacheGuildPointsIfComplete(guildId, members.length, missingNames, points);
       onProgress(points, { partial: false });
       return points;
     }
@@ -1989,7 +2087,7 @@ async function calculateGuildPoints(guildId, options = {}) {
     for (let i = 0; i < profiles.length; i++) {
       const profile = profiles[i];
       if (!profile) {
-        missingProfiles++;
+        missingNames.push(members[i]?.username);
         continue;
       }
       totalLevels += calculateLevelFromExp(toNonNegativeNumber(profiles[i].exp));
@@ -2010,11 +2108,7 @@ async function calculateGuildPoints(guildId, options = {}) {
       totalFloors
     }, worldRecordBonus);
 
-    if (missingProfiles === 0) {
-      guildPointsCache.set(guildId, points);
-    } else {
-      console.warn(`[Guilds] Guild points for ${guildId} are partial (${missingProfiles}/${members.length} profiles missing, likely 429); not caching.`);
-    }
+    cacheGuildPointsIfComplete(guildId, members.length, missingNames, points);
     return points;
   } catch (error) {
     console.error('[Guilds] Error calculating guild points:', error);
@@ -3519,7 +3613,7 @@ async function demoteMember(guildId, memberUsername) {
   }
 }
 
-async function kickMember(guildId, memberUsername) {
+async function kickMember(guildId, memberUsername, { systemMessage = null } = {}) {
   try {
     const currentPlayer = validateCurrentPlayer();
 
@@ -3576,7 +3670,7 @@ async function kickMember(guildId, memberUsername) {
     }
 
     // Post system message
-    await sendGuildSystemMessage(guildId, `${currentPlayer} kicked ${memberUsername} from the guild`);
+    await sendGuildSystemMessage(guildId, systemMessage || `${currentPlayer} kicked ${memberUsername} from the guild`);
 
     return true;
   } catch (error) {
@@ -5523,8 +5617,47 @@ function ensureModalApi() {
   return true;
 }
 
+// Hover tooltips are appended to document.body (for fixed positioning), so closing a modal
+// doesn't remove them — one under the cursor at close time stays visible forever.
+// While a Guilds modal is open, watch dialogs: when the open dialog is swapped for another
+// (Back / navigate), hide all tooltips; when no dialog is left, remove them.
+let guildTooltipSweepObserver = null;
+
+function removeGuildTooltips() {
+  document.querySelectorAll('[data-guilds-tooltip]').forEach((el) => el.remove());
+}
+
+function hideGuildTooltips() {
+  document.querySelectorAll('[data-guilds-tooltip]').forEach((el) => { el.style.display = 'none'; });
+}
+
+function stopGuildTooltipSweep() {
+  if (guildTooltipSweepObserver) {
+    guildTooltipSweepObserver.disconnect();
+    guildTooltipSweepObserver = null;
+  }
+}
+
+function armGuildTooltipSweep() {
+  if (guildTooltipSweepObserver) return;
+  let lastDialog = null;
+  guildTooltipSweepObserver = new MutationObserver(() => {
+    const dialog = document.querySelector('div[role="dialog"]');
+    if (dialog) {
+      if (lastDialog && dialog !== lastDialog) hideGuildTooltips();
+      lastDialog = dialog;
+      return;
+    }
+    if (!lastDialog) return; // modal not rendered yet
+    stopGuildTooltipSweep();
+    removeGuildTooltips();
+  });
+  guildTooltipSweepObserver.observe(document.body, { childList: true, subtree: true });
+}
+
 // Open modal via api.showModal (Highscores pattern), with createModal fallback
 function openModal({ title, width, height, content, buttons }) {
+  armGuildTooltipSweep();
   const options = { title, content, buttons: buttons || [] };
   if (width != null) options.width = width;
   if (height != null && height !== undefined) options.height = height;
@@ -6948,6 +7081,15 @@ async function openGuildPanel(viewGuildId = null) {
         },
         onGuildBreakdown: (breakdown) => {
           if (guildPointsUiRef) applyGuildPointsBreakdownToUI(guildPointsUiRef, breakdown);
+        },
+        onMembersRemoved: (usernames) => {
+          for (const username of usernames) {
+            const row = membersList.querySelector(`.guild-member-row[data-username="${CSS.escape(username)}"]`);
+            if (row) {
+              row._guildPointsUi?.tooltip?.remove();
+              row.remove();
+            }
+          }
         }
       });
     } catch (_) {
@@ -7162,6 +7304,7 @@ async function openGuildPanel(viewGuildId = null) {
       box-shadow: 0 4px 12px rgba(0, 0, 0, 0.8);
       font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif;
     `;
+    tooltip.setAttribute('data-guilds-tooltip', 'true');
     document.body.appendChild(tooltip);
     memberItem._guildPointsUi = { tooltip, pointsDisplay };
 
@@ -7604,6 +7747,7 @@ async function openGuildPanel(viewGuildId = null) {
 
   pointsValueContainer.appendChild(pointsIcon);
   pointsValueContainer.appendChild(currentPoints);
+  tooltip.setAttribute('data-guilds-tooltip', 'true');
   document.body.appendChild(tooltip); // Add tooltip to body for proper positioning
 
   pointsSection.appendChild(pointsLabel);
@@ -8662,6 +8806,7 @@ function showEquipmentTooltip(tooltip) {
 function createTooltipElement() {
   const tooltip = document.createElement('div');
   tooltip.setAttribute('data-equipment-tooltip', 'true');
+  tooltip.setAttribute('data-guilds-tooltip', 'true');
   tooltip.style.cssText = `
     position: fixed;
     padding: 8px 10px;
@@ -11770,6 +11915,14 @@ exports = {
 
       clearGuildsModalLayoutRegistry();
 
+      stopGuildTooltipSweep();
+      removeGuildTooltips();
+
+      if (profileQueueTimer) {
+        clearTimeout(profileQueueTimer);
+        profileQueueTimer = null;
+      }
+
       // Clear periodic guild background sync
       if (guildBackgroundSyncInterval) {
         clearInterval(guildBackgroundSyncInterval);
@@ -11789,6 +11942,8 @@ exports = {
         playerExistsCache.clear();
         profileStatusCache.clear();
         playerProfileCache.clear();
+        profileMissingCache.clear();
+        guildMissingMemberPruneDone.clear();
         guildPointsCache.clear();
       } catch (error) {
         console.error('[Guilds] Error clearing caches:', error);
