@@ -268,7 +268,7 @@ if (window.CustomBattles) {
             if (!el.classList.contains('absolute')) return false;
             if (!el.classList.contains('right-0') || !el.classList.contains('top-0')) return false;
             const text = el.textContent || '';
-            return text.includes('Monsters');
+            return text.includes('Monsters') || text.includes('Monstros');
         }
 
         function setRoomInfoOverlaySuppressed(suppressed) {
@@ -4924,7 +4924,7 @@ if (window.CustomBattles) {
                     let stopButton = null;
                     for (const selector of selectors) {
                         stopButton = document.querySelector(selector);
-                        if (stopButton && stopButton.textContent.trim() === 'Stop') {
+                        if (stopButton && ['Stop', 'Parar'].includes(stopButton.textContent.trim())) {
                             break;
                         }
                         if (stopButton) break;
@@ -4934,7 +4934,7 @@ if (window.CustomBattles) {
                     if (!stopButton) {
                         const buttons = document.querySelectorAll('button.frame-1-red, button.surface-red');
                         for (const btn of buttons) {
-                            if (btn.textContent.trim() === 'Stop' && btn.getAttribute('data-state') === 'closed') {
+                            if (['Stop', 'Parar'].includes(btn.textContent.trim()) && btn.getAttribute('data-state') === 'closed') {
                                 stopButton = btn;
                                 break;
                             }
@@ -4969,7 +4969,7 @@ if (window.CustomBattles) {
                     let stopButton = null;
                     for (const selector of selectors) {
                         stopButton = document.querySelector(selector);
-                        if (stopButton && stopButton.textContent.trim() === 'Stop') {
+                        if (stopButton && ['Stop', 'Parar'].includes(stopButton.textContent.trim())) {
                             break;
                         }
                         if (stopButton) break;
@@ -4979,7 +4979,7 @@ if (window.CustomBattles) {
                     if (!stopButton) {
                         const buttons = document.querySelectorAll('button.frame-1-red, button.surface-red');
                         for (const btn of buttons) {
-                            if (btn.textContent.trim() === 'Stop' && btn.getAttribute('data-state') === 'closed') {
+                            if (['Stop', 'Parar'].includes(btn.textContent.trim()) && btn.getAttribute('data-state') === 'closed') {
                                 stopButton = btn;
                                 break;
                             }

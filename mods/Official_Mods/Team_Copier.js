@@ -447,7 +447,7 @@ function copyTeamSetup() {
     // Check if we have player pieces
     if (!boardData.board || boardData.board.length === 0) {
       console.warn('No player pieces found in the board data');
-      showNotification('No player pieces to copy', 'warning');
+      showNotification(t('mods.teamCopier.noPiecesToCopy'), 'warning');
       return;
     }
     
@@ -483,7 +483,7 @@ function createCompressedLink(boardData) {
   // Check if we have player pieces
   if (!boardData.board || boardData.board.length === 0) {
     console.warn('No player pieces found in the board data');
-    showNotification('No player pieces to copy', 'warning');
+    showNotification(t('mods.teamCopier.noPiecesToCopy'), 'warning');
     return null;
   }
   
@@ -523,7 +523,7 @@ function createReadableLink(boardData) {
   // Check if we have player pieces
   if (!boardData.board || boardData.board.length === 0) {
     console.warn('No player pieces found in the board data');
-    showNotification('No player pieces to copy', 'warning');
+    showNotification(t('mods.teamCopier.noPiecesToCopy'), 'warning');
     return null;
   }
   
@@ -665,7 +665,7 @@ function showTeamCopierModal() {
     
     // Verify that the command is valid
     if (!commandText) {
-      showNotification('Please paste a valid team configuration', 'warning');
+      showNotification(t('mods.teamCopier.pasteValidConfig'), 'warning');
       return;
     }
     
@@ -688,7 +688,7 @@ function showTeamCopierModal() {
         try {
           boardData = JSON.parse(commandText);
         } catch (e) {
-          showNotification('Invalid command format. Please use $configureBoard() or $replay() format', 'error');
+          showNotification(t('mods.teamCopier.invalidCommandFormat'), 'error');
           return;
         }
       }
@@ -706,7 +706,7 @@ function showTeamCopierModal() {
       return;
     } catch (error) {
       console.error('Error parsing team configuration:', error);
-      showNotification('Invalid team configuration format', 'error');
+      showNotification(t('mods.teamCopier.invalidConfigFormat'), 'error');
     }
   });
   
@@ -848,7 +848,7 @@ function showTeamCopierModal() {
         useCompression: config.useCompression
       });
       
-      showNotification('Settings saved', 'success');
+      showNotification(t('mods.teamCopier.settingsSaved'), 'success');
     });
     
     settingsSection.appendChild(seedContainer);
@@ -862,7 +862,7 @@ function showTeamCopierModal() {
   } else if (!hasValidBoardData) {
     // Add a message when there are no pieces on the board
     const noTeamMessage = document.createElement('div');
-    noTeamMessage.textContent = 'No player pieces found on the board. Paste a team configuration above to load a team.';
+    noTeamMessage.textContent = t('mods.teamCopier.noTeamOnBoard');
     noTeamMessage.style.cssText = 'padding: 10px; color: #aaa; text-align: center; margin-top: 10px; font-style: italic;';
     loadTeamSection.appendChild(noTeamMessage);
   }
@@ -947,7 +947,7 @@ function showTeamCopierModal() {
       const success = copyToClipboard(replayText);
       
       if (success) {
-        showNotification(`Copied setup with seed ${seed}!`, 'success');
+        showNotification(t('mods.teamCopier.copiedWithSeed').replace('{seed}', seed), 'success');
       } else {
         showNotification(t('mods.teamCopier.errorMessage'), 'error');
       }
@@ -1047,7 +1047,7 @@ function checkForSharedTeamData() {
       }, 200);
     } catch (error) {
       console.error('Error parsing shared team data:', error);
-      showNotification('Error parsing shared team data', 'error');
+      showNotification(t('mods.teamCopier.errorParsingShared'), 'error');
     }
   }
 }
@@ -1088,7 +1088,7 @@ function applySharedTeamData(boardData) {
     }
   } catch (error) {
     console.error('Error applying shared team data:', error);
-    showNotification('Error applying shared team data', 'error');
+    showNotification(t('mods.teamCopier.errorApplyingShared'), 'error');
   }
 }
 
@@ -1101,7 +1101,7 @@ function showTeamLoadedNotification(data) {
     const teamSize = data.board ? data.board.length : 0;
     
     // Create notification message
-    const message = `Loaded shared team: ${teamSize} units on ${mapName} (${regionName})`;
+    const message = t('mods.teamCopier.loadedSharedTeam').replace('{count}', teamSize).replace('{map}', mapName).replace('{region}', regionName);
     
     showNotification(message, 'success', 4000);
   } catch (error) {

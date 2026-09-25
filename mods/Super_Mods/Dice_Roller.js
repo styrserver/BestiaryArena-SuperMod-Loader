@@ -7,6 +7,11 @@
 // =======================
 // 1. Configuration & Constants
 // =======================
+  const t = (key) => {
+    const modApi = (typeof api !== 'undefined' && api) ? api : (typeof context !== 'undefined' && context && context.api) ? context.api : window.BestiaryModAPI;
+    return (modApi && modApi.i18n && typeof modApi.i18n.t === 'function') ? modApi.i18n.t(key) : key;
+  };
+
   const defaultConfig = { enabled: true };
   const config = Object.assign({}, defaultConfig, context?.config);
   
@@ -120,14 +125,15 @@
   const STAT_KEYS = ['ap', 'hp', 'ad', 'armor', 'magicResist'];
   
   const TIER_CONFIG = {
-    GREY: { name: 'Grey (5%-49%)', color: '#888888', rarity: 1 },
-    GREEN: { name: 'Green (50%-59%)', color: '#00ff00', rarity: 2 },
-    BLUE: { name: 'Blue (60%-69%)', color: '#0080ff', rarity: 3 },
-    PURPLE: { name: 'Purple (70%-79%)', color: '#8000ff', rarity: 4 },
-    YELLOW: { name: 'Yellow (80%-100%)', color: '#ffff00', rarity: 5 }
+    GREY: { nameKey: 'mods.diceRoller.tierGrey', name: 'Grey (5%-49%)', color: '#888888', rarity: 1 },
+    GREEN: { nameKey: 'mods.diceRoller.tierGreen', name: 'Green (50%-59%)', color: '#00ff00', rarity: 2 },
+    BLUE: { nameKey: 'mods.diceRoller.tierBlue', name: 'Blue (60%-69%)', color: '#0080ff', rarity: 3 },
+    PURPLE: { nameKey: 'mods.diceRoller.tierPurple', name: 'Purple (70%-79%)', color: '#8000ff', rarity: 4 },
+    YELLOW: { nameKey: 'mods.diceRoller.tierYellow', name: 'Yellow (80%-100%)', color: '#ffff00', rarity: 5 }
   };
   
   const TIER_KEYS = Object.keys(TIER_CONFIG);
+  const getTierLabel = (tier) => (tier ? t(tier.nameKey) : '');
   
   function getCreatureTier(creature) {
     const totalStats = (creature.hp || 0) + (creature.ad || 0) + (creature.ap || 0) + (creature.armor || 0) + (creature.magicResist || 0);
@@ -368,11 +374,12 @@
     if (!statusDiv) return;
     
     const originalText = statusDiv.textContent;
-    statusDiv.textContent = `Error: ${message}`;
+    const errorText = t('mods.diceRoller.errorPrefix').replace('{message}', message);
+    statusDiv.textContent = errorText;
     statusDiv.style.color = '#ff6b6b';
     
     setTimeout(() => {
-      if (statusDiv && statusDiv.textContent === `Error: ${message}`) {
+      if (statusDiv && statusDiv.textContent === errorText) {
         statusDiv.textContent = originalText;
         statusDiv.style.color = '#ffffff';
       }
@@ -1330,14 +1337,8 @@
     
     const searchInput = document.createElement('input');
     searchInput.id = 'dice-roller-search';
-    searchInput.placeholder = 'Search creatures...';
-    searchInput.title = `Search Syntaxes:
-• Stat search: /HP 20, /AD >15, /AP <=10, /ARM >=5, /MR <8
-• Any stat: /20 (any stat equals 20), />15 (any stat > 15)
-• Count stats: /3x20 (exactly 3 stats = 20), />3x20 (more than 3 stats = 20), /<2x>15 (less than 2 stats > 15)
-• Exact match: "Spider" (matches only "Spider", not "Giant Spider")
-• Combined: dragon AND /HP >15, /AD 20 OR /AP 20
-• Operators: AND, OR (case insensitive)`;
+    searchInput.placeholder = t('common.searchCreatures');
+    searchInput.title = t('mods.diceRoller.searchTooltip');
     searchInput.style.cssText = `
       background: rgba(255, 255, 255, 0.1);
       color: #fff;
@@ -1362,7 +1363,7 @@
     // Add tier filter button
     const filterBtn = document.createElement('button');
     filterBtn.id = 'dice-roller-filter';
-    filterBtn.textContent = 'All';
+    filterBtn.textContent = t('common.all');
     filterBtn.style.cssText = `
       background: rgba(255, 255, 255, 0.1);
       color: #fff;
@@ -1558,7 +1559,7 @@
   // Render creature list
   function renderCreatureList(scrollArea, monsters, onSelect, updateDetailsOnly, selectedGameId, getSelectedDiceTier, getAvailableStats, selectedDice, lastStatusMessage) {
     if (!monsters.length) {
-      scrollArea.innerHTML = '<div style="color:#bbb;text-align:center;padding:16px;grid-column: span 6;">No creatures found.</div>';
+      scrollArea.innerHTML = `<div style="color:#bbb;text-align:center;padding:16px;grid-column: span 6;">${t('mods.diceRoller.noCreaturesFound')}</div>`;
       return;
     }
     
@@ -1634,7 +1635,7 @@
       const filteredMonsters = allMonsters.filter(monster => !shouldHideCreature(monster));
       renderCreatureList(scrollArea, filteredMonsters, onSelect, updateDetailsOnly, selectedGameId, getSelectedDiceTier, getAvailableStats, selectedDice, lastStatusMessage);
     } catch (e) {
-      scrollArea.innerHTML = '<div style="color:#f66;text-align:center;padding:16px;grid-column: span 5;">Error loading creatures.</div>';
+      scrollArea.innerHTML = `<div style="color:#f66;text-align:center;padding:16px;grid-column: span 5;">${t('mods.diceRoller.errorLoadingCreatures')}</div>`;
     }
     
     // Add scrollArea to wrapper and custom scrollbar
@@ -1662,12 +1663,20 @@
     // Setup tier filter functionality
     let currentFilterIndex = 0;
     const filterOptions = ['All', 'Grey', 'Green', 'Blue', 'Purple', 'Yellow'];
+    const filterLabelKeys = {
+      All: 'common.all',
+      Grey: 'mods.diceRoller.filterGrey',
+      Green: 'mods.diceRoller.filterGreen',
+      Blue: 'mods.diceRoller.filterBlue',
+      Purple: 'mods.diceRoller.filterPurple',
+      Yellow: 'mods.diceRoller.filterYellow'
+    };
     
     addTrackedEventListener(filterBtn, 'click', () => {
       currentFilterIndex = (currentFilterIndex + 1) % filterOptions.length;
       const selectedFilter = filterOptions[currentFilterIndex];
       
-      filterBtn.textContent = selectedFilter;
+      filterBtn.textContent = t(filterLabelKeys[selectedFilter]);
       currentFilter = selectedFilter.toLowerCase();
       
       // Apply filter with current search term
@@ -1697,7 +1706,7 @@
     addTrackedEventListener(scrollArea, 'searchCleared', () => {
       const monsters = safeGetMonsters();
       if (!monsters.length) {
-        scrollArea.innerHTML = '<div style="color:#bbb;text-align:center;padding:16px;grid-column: span 6;">No creatures found.</div>';
+        scrollArea.innerHTML = `<div style="color:#bbb;text-align:center;padding:16px;grid-column: span 6;">${t('mods.diceRoller.noCreaturesFound')}</div>`;
         return;
       }
       
@@ -1747,7 +1756,7 @@
       const allMonsters = safeGetMonsters();
       const monsters = allMonsters.filter(monster => !shouldHideCreature(monster));
       if (!monsters.length) {
-        scrollArea.innerHTML = '<div style="color:#bbb;text-align:center;padding:16px;grid-column: span 6;">No creatures found.</div>';
+        scrollArea.innerHTML = `<div style="color:#bbb;text-align:center;padding:16px;grid-column: span 6;">${t('mods.diceRoller.noCreaturesFound')}</div>`;
         return;
       }
       
@@ -1873,7 +1882,7 @@
             font-style: italic;
             font-size: 12px;
           `;
-          noResultsMsg.textContent = `No creatures found matching "${searchValue}"`;
+          noResultsMsg.textContent = t('mods.diceRoller.noCreaturesMatching').replace('{search}', searchValue);
           scrollArea.appendChild(noResultsMsg);
         } else {
           // Re-render only matching creatures using the helper function
@@ -1950,7 +1959,7 @@
     // Now only returns the portrait/stats row (row1), to be used in col3 row1
     if (!selectedGameId) {
       const div = document.createElement('div');
-      div.innerText = 'Select a creature.';
+      div.innerText = t('mods.diceRoller.selectCreature');
       div.style.display = 'flex';
       div.style.alignItems = 'center';
       div.style.justifyContent = 'center';
@@ -1967,7 +1976,7 @@
         : getMonstersFromState().find(c => String(c.id) === String(selectedGameId));
       if (!creature) {
         const div = document.createElement('div');
-        div.innerText = 'Creature not found.';
+        div.innerText = t('mods.diceRoller.creatureNotFound');
         return div;
       }
       // Use currentTier if provided (from autoroll), otherwise use global current tier, otherwise calculate from stats
@@ -2037,7 +2046,7 @@
       lockIcon.style.marginRight = '2px';
       
       const lockText = document.createElement('span');
-      lockText.textContent = creature.locked ? 'Locked' : 'Unlocked';
+      lockText.textContent = creature.locked ? t('mods.diceRoller.locked') : t('mods.diceRoller.unlocked');
       lockText.style.color = creature.locked ? '#ff6b6b' : '#6bcf7f';
       
       // Add click handler for lock/unlock functionality
@@ -2051,7 +2060,7 @@
           const originalIcon = lockIcon.textContent;
           const originalText = lockText.textContent;
           lockIcon.textContent = '⏳';
-          lockText.textContent = 'Updating...';
+          lockText.textContent = t('mods.diceRoller.updating');
           lockText.style.color = '#ffaa00';
           
           // Make API call to toggle lock status
@@ -2082,7 +2091,7 @@
           
           // Update UI
           lockIcon.textContent = creature.locked ? '🔒' : '🔓';
-          lockText.textContent = creature.locked ? 'Locked' : 'Unlocked';
+          lockText.textContent = creature.locked ? t('mods.diceRoller.locked') : t('mods.diceRoller.unlocked');
           lockText.style.color = creature.locked ? '#ff6b6b' : '#6bcf7f';
           
           // Show success feedback
@@ -2158,7 +2167,7 @@
         const shinyIcon = document.createElement('img');
         shinyIcon.src = 'https://bestiaryarena.com/assets/icons/shiny-star.png';
         shinyIcon.alt = 'shiny';
-        shinyIcon.title = 'Shiny';
+        shinyIcon.title = t('mods.huntAnalyzer.shiny');
         shinyIcon.style.position = 'absolute';
         shinyIcon.style.top = '2px';
         shinyIcon.style.left = '2px';
@@ -2198,7 +2207,7 @@
       
       // Level
       const levelDiv = document.createElement('div');
-      levelDiv.textContent = `Level ${getLevelFromExp(creature.exp)}`;
+      levelDiv.textContent = t('mods.diceRoller.levelLabel').replace('{level}', getLevelFromExp(creature.exp));
       levelDiv.style.fontSize = '11px';
       levelDiv.style.color = '#cccccc';
       levelDiv.style.fontFamily = 'Arial, sans-serif';
@@ -2390,7 +2399,7 @@
               <svg width="18" height="18" viewBox="0 0 18 18" fill="none" style="vertical-align:middle;display:inline-block;">
                 <path d="M4 9.5L8 13L14 6" stroke="#28c76f" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
               </svg>`;
-            checkmarkContainer.title = 'Stat matches target!';
+            checkmarkContainer.title = t('mods.diceRoller.statMatchesTarget');
           } else {
             checkmarkContainer.innerHTML = '';
             checkmarkContainer.title = '';
@@ -2572,7 +2581,7 @@
       TIER_KEYS.forEach(tierKey => {
         const tier = TIER_CONFIG[tierKey];
         const tierBtn = document.createElement('button');
-        tierBtn.textContent = tier.name;
+        tierBtn.textContent = getTierLabel(tier);
         tierBtn.style.width = '100%';
         tierBtn.style.height = '18px';
         tierBtn.style.border = '1px solid #444';
@@ -2595,7 +2604,7 @@
         // Add function to update button disabled state
         const updateButtonDisabledState = () => {
           const autoRollBtn = document.querySelector('div[role="dialog"][data-state="open"] .diceroller-btn[data-button-type="autoroll"]');
-          const isAutorolling = autoRollBtn && autoRollBtn.textContent === 'Autorolling...';
+          const isAutorolling = autoRollBtn && autoRollBtn.textContent === t('mods.diceRoller.autorolling');
           
           if (isAutorolling) {
             tierBtn.style.opacity = '0.5';
@@ -2617,7 +2626,7 @@
         tierBtn.addEventListener('click', () => {
           // Check if autoroll is in progress
           const autoRollBtn = document.querySelector('div[role="dialog"][data-state="open"] .diceroller-btn[data-button-type="autoroll"]');
-          if (autoRollBtn && autoRollBtn.textContent === 'Autorolling...') {
+          if (autoRollBtn && autoRollBtn.textContent === t('mods.diceRoller.autorolling')) {
             // Autoroll is in progress, don't allow tier changes
             return;
           }
@@ -2633,7 +2642,7 @@
           
           // Update all tier buttons
           tierColumn.querySelectorAll('button').forEach(btn => {
-            const btnTierKey = TIER_KEYS.find(key => btn.textContent === TIER_CONFIG[key].name);
+            const btnTierKey = TIER_KEYS.find(key => btn.textContent === getTierLabel(TIER_CONFIG[key]));
             if (btnTierKey) {
               const btnTier = TIER_CONFIG[btnTierKey];
               const isSelected = window.DiceRollerSelectedTier.includes(btnTierKey);
@@ -2675,7 +2684,7 @@
     return detailsCol;
     } catch (e) {
       const div = document.createElement('div');
-      div.innerText = 'Error loading details.' + (e && e.message ? ('\n' + e.message) : '');
+      div.innerText = t('mods.diceRoller.errorLoadingDetails') + (e && e.message ? ('\n' + e.message) : '');
       return div;
     }
   }
@@ -2829,7 +2838,7 @@
     if (window.DiceRollerMode === 'tier') {
       // In tier mode, validate tier selection
       if (!window.DiceRollerSelectedTier) {
-        updateRollStatus('Please select a target tier first.');
+        updateRollStatus(t('mods.diceRoller.selectTargetTierFirst'));
         throw new Error('No target tier selected');
       }
       
@@ -2839,8 +2848,8 @@
       if (creature) {
         const currentTier = getCreatureTier(creature);
         if (window.DiceRollerSelectedTier.includes(currentTier)) {
-          const tierNames = window.DiceRollerSelectedTier.map(tierKey => TIER_CONFIG[tierKey].name).join(', ');
-          updateRollStatus(`Creature already matches one of the target tiers: ${tierNames}`);
+          const tierNames = window.DiceRollerSelectedTier.map(tierKey => getTierLabel(TIER_CONFIG[tierKey])).join(', ');
+          updateRollStatus(t('mods.diceRoller.alreadyMatchesTier').replace('{tiers}', tierNames));
           return true; // Return true to indicate success
         }
       }
@@ -2860,10 +2869,10 @@
         });
       }
       
-      const targetTiers = window.DiceRollerSelectedTier.map(tierKey => TIER_CONFIG[tierKey].name).join(', ');
+      const targetTiers = window.DiceRollerSelectedTier.map(tierKey => getTierLabel(TIER_CONFIG[tierKey])).join(', ');
       const statusMessage = statusContinuouslyUseSameDice 
-        ? `Upgrading to ${targetTiers} tier... Rolling all stats with same dice until target reached`
-        : `Upgrading to ${targetTiers} tier... Rolling: ${availableStatsForStatus.join(', ')}`;
+        ? t('mods.diceRoller.upgradingSameDice').replace('{tiers}', targetTiers)
+        : t('mods.diceRoller.upgradingRolling').replace('{tiers}', targetTiers).replace('{stats}', availableStatsForStatus.join(', '));
       updateRollStatus(statusMessage);
     } else {
       // In genes mode, validate dice selection using utility function
@@ -2873,7 +2882,7 @@
         updateRollStatus(error.message);
         throw error;
       }
-      updateRollStatus(`Rolling ${availableStats.join(', ')} with tier ${requiredDiceTier} dice...`);
+      updateRollStatus(t('mods.diceRoller.rollingWithDice').replace('{stats}', availableStats.join(', ')).replace('{tier}', requiredDiceTier));
     }
     
     // Throttle API calls to prevent overwhelming the server
@@ -3045,11 +3054,11 @@
           const hasHigherTierDice = selectedDice.length > 1 && Math.max(...selectedDice) > Math.min(...selectedDice);
           
           if (!continuouslyChangeDice || hasHigherTierDice) {
-            updateRollStatus('All stats are at maximum (20) - cannot improve tier further');
+            updateRollStatus(t('mods.diceRoller.allStatsMax'));
             return true; // Return true to indicate "success" (no more improvement possible)
           } else {
             // For "Smart stat & dice roller" without higher tier dice, continue rolling
-            updateRollStatus('All stats at max but continuing to roll...');
+            updateRollStatus(t('mods.diceRoller.allStatsMaxContinuing'));
             // Don't return true - continue with the roll
           }
         }
@@ -3072,7 +3081,7 @@
           
           // Check if we have a dice of the required tier selected
           if (!selectedDice.includes(requiredDiceTierForStats)) {
-            updateRollStatus(`Need dice tier ${requiredDiceTierForStats} to roll ${requiredStatsCount} stats. Please select appropriate dice.`);
+            updateRollStatus(t('mods.diceRoller.needDiceTier').replace('{tier}', requiredDiceTierForStats).replace('{count}', requiredStatsCount));
             throw new Error(`No dice tier ${requiredDiceTierForStats} selected for ${requiredStatsCount} stats`);
           }
           
@@ -3125,7 +3134,7 @@
         if (wasRateLimited && typeof window !== 'undefined') {
           const autoRollBtn = DOMCache.get('div[role="dialog"][data-state="open"] .diceroller-btn[data-button-type="autoroll"]');
           if (autoRollBtn) {
-            autoRollBtn.textContent = 'Autorolling...';
+            autoRollBtn.textContent = t('mods.diceRoller.autorolling');
             if (rateLimitedInterval) {
               clearInterval(rateLimitedInterval);
               rateLimitedInterval = null;
@@ -3143,11 +3152,11 @@
           const autoRollBtn = DOMCache.get('div[role="dialog"][data-state="open"] .diceroller-btn[data-button-type="autoroll"]');
           if (autoRollBtn) {
             let dotCount = 1;
-            autoRollBtn.textContent = 'Rate-limited.';
+            autoRollBtn.textContent = t('common.rateLimited') + '.';
             if (rateLimitedInterval) clearInterval(rateLimitedInterval);
             rateLimitedInterval = setInterval(() => {
               dotCount = (dotCount % 3) + 1;
-              autoRollBtn.textContent = 'Rate-limited' + '.'.repeat(dotCount);
+              autoRollBtn.textContent = t('common.rateLimited') + '.'.repeat(dotCount);
             }, 400);
           }
         }
@@ -3160,11 +3169,11 @@
         const autoRollBtn = DOMCache.get('div[role="dialog"][data-state="open"] .diceroller-btn[data-button-type="autoroll"]');
         if (autoRollBtn) {
           let dotCount = 1;
-          autoRollBtn.textContent = 'Rate-limited.';
+          autoRollBtn.textContent = t('common.rateLimited') + '.';
           if (rateLimitedInterval) clearInterval(rateLimitedInterval);
           rateLimitedInterval = setInterval(() => {
             dotCount = (dotCount % 3) + 1;
-            autoRollBtn.textContent = 'Rate-limited' + '.'.repeat(dotCount);
+            autoRollBtn.textContent = t('common.rateLimited') + '.'.repeat(dotCount);
           }, 400);
         }
       }
@@ -3213,7 +3222,7 @@
         
         if (window.DiceRollerSelectedTier.includes(currentTier)) {
           const achievedTier = TIER_CONFIG[currentTier];
-          updateRollStatus(`🎉 Target tier reached: ${achievedTier.name}!`);
+          updateRollStatus(t('mods.diceRoller.targetTierReached').replace('{tier}', getTierLabel(achievedTier)));
           
           // Update creature portrait before returning
           if (typeof rerenderDetails === 'function') {
@@ -3224,8 +3233,8 @@
           return true;
         } else {
           // Continue rolling - update status to show progress
-          const targetTiers = window.DiceRollerSelectedTier.map(tierKey => TIER_CONFIG[tierKey].name).join(', ');
-          updateRollStatus(`Rolling... Current: ${currentTier} (${percentage.toFixed(1)}%), Targets: ${targetTiers}`);
+          const targetTiers = window.DiceRollerSelectedTier.map(tierKey => getTierLabel(TIER_CONFIG[tierKey])).join(', ');
+          updateRollStatus(t('mods.diceRoller.rollingProgress').replace('{current}', currentTier).replace('{percent}', percentage.toFixed(1)).replace('{targets}', targetTiers));
           
           // Update creature details after each roll in tier mode
           if (typeof rerenderDetails === 'function') {
@@ -3289,7 +3298,7 @@
     if (wasRateLimited && typeof window !== 'undefined') {
       const autoRollBtn = DOMCache.get('div[role="dialog"][data-state="open"] .diceroller-btn[data-button-type="autoroll"]');
       if (autoRollBtn) {
-        autoRollBtn.textContent = 'Autorolling...';
+        autoRollBtn.textContent = t('mods.diceRoller.autorolling');
         if (rateLimitedInterval) {
           clearInterval(rateLimitedInterval);
           rateLimitedInterval = null;
@@ -3298,7 +3307,7 @@
       wasRateLimited = false;
     }
     
-    updateRollStatus('Roll complete!');
+    updateRollStatus(t('mods.diceRoller.rollComplete'));
     return data;
   }
 
@@ -3365,7 +3374,7 @@
     rollCountDiv.style.fontFamily = 'Arial, sans-serif';
     rollCountDiv.style.fontWeight = 'normal';
     rollCountDiv.style.lineHeight = '1.2';
-    rollCountDiv.textContent = 'Autorolled (0)';
+    rollCountDiv.textContent = t('mods.diceRoller.autorolledCount').replace('{count}', 0);
     row2.appendChild(rollCountDiv);
     
     // Stats being rolled status
@@ -3379,7 +3388,7 @@
     statsStatusDiv.style.fontFamily = 'Arial, sans-serif';
     statsStatusDiv.style.fontWeight = 'normal';
     statsStatusDiv.style.lineHeight = '1.2';
-    statsStatusDiv.textContent = 'Stats: None';
+    statsStatusDiv.textContent = t('mods.diceRoller.statsNone');
     row2.appendChild(statsStatusDiv);
     
     // Function to update status displays
@@ -3401,13 +3410,13 @@
           if (selectedTiers && selectedTiers.length > 0) {
             const tierNames = selectedTiers.map(tierKey => {
               const tier = TIER_CONFIG[tierKey];
-              return `<span style="color: ${tier.color};">${tier.name.split(' ')[0]}</span>`;
+              return `<span style="color: ${tier.color};">${getTierLabel(tier).split(' ')[0]}</span>`;
             }).join(', ');
-            diceStatusDiv.innerHTML = `Target Tiers: ${tierNames}`;
-            statsStatusDiv.textContent = `Mode: Tier Upgrade`;
+            diceStatusDiv.innerHTML = t('mods.diceRoller.targetTiers').replace('{tiers}', tierNames);
+            statsStatusDiv.textContent = t('mods.diceRoller.modeTierUpgrade');
           } else {
-            diceStatusDiv.innerHTML = `Target Tiers: <span style="color: #888888;">None</span>`;
-            statsStatusDiv.textContent = `Mode: Tier Upgrade`;
+            diceStatusDiv.innerHTML = t('mods.diceRoller.targetTiers').replace('{tiers}', `<span style="color: #888888;">${t('mods.diceRoller.none')}</span>`);
+            statsStatusDiv.textContent = t('mods.diceRoller.modeTierUpgrade');
           }
         } else {
           // In genes mode, show dice manipulator information
@@ -3440,7 +3449,7 @@
             'magicResist': 'MR'
           };
           const statText = availableStats.map(stat => statLabels[stat] || stat).join(', ');
-          statsStatusDiv.textContent = `Stats: ${statText || 'None'}`;
+          statsStatusDiv.textContent = statText ? t('mods.diceRoller.statsList').replace('{stats}', statText) : t('mods.diceRoller.statsNone');
         }
       });
     }
@@ -3451,7 +3460,7 @@
     // Make resetRollCount available globally for this modal
     window.resetRollCount = () => {
       if (rollCountDiv) {
-        rollCountDiv.textContent = 'Autorolled (0)';
+        rollCountDiv.textContent = t('mods.diceRoller.autorolledCount').replace('{count}', 0);
       }
     };
     
@@ -3487,7 +3496,7 @@
     
     // Autoroll button
     const autoRollBtn = document.createElement('button');
-    autoRollBtn.textContent = 'Autoroll';
+    autoRollBtn.textContent = t('mods.diceRoller.autoroll');
     autoRollBtn.className = 'diceroller-btn';
     autoRollBtn.setAttribute('data-button-type', 'autoroll');
     autoRollBtn.style.width = '120px';
@@ -3499,7 +3508,7 @@
     
     // Stop button
     const stopBtn = document.createElement('button');
-    stopBtn.textContent = 'Stop';
+    stopBtn.textContent = t('common.stop');
     stopBtn.className = 'diceroller-btn';
     stopBtn.style.setProperty('width', '60px', 'important');
     stopBtn.style.setProperty('min-width', '60px', 'important');
@@ -3532,20 +3541,20 @@
       if (!autorolling) {
         // Start autoroll
         if (!selectedGameId) {
-          updateStatusWithError(statsStatusDiv, 'Select a creature first.', 2000);
+          updateStatusWithError(statsStatusDiv, t('mods.diceRoller.selectCreatureFirst'), 2000);
           return;
         }
         
         // Add loading state
         autoRollBtn.disabled = true;
-        autoRollBtn.textContent = 'Preparing...';
+        autoRollBtn.textContent = t('mods.diceRoller.preparing');
         autoRollBtn.style.opacity = '0.7';
         
         // Check if creature is locked
         const monsters = safeGetMonsters();
         const creature = monsters.find(c => String(c.id) === String(selectedGameId));
         if (creature && creature.locked) {
-          updateStatusWithError(statsStatusDiv, 'Cannot autoroll locked creatures. Unlock first.', 3000);
+          updateStatusWithError(statsStatusDiv, t('mods.diceRoller.cannotAutorollLocked'), 3000);
           return;
         }
         let lastDiceSelection = selectedDice.slice(); // Track dice selection at start
@@ -3566,24 +3575,24 @@
         if (window.DiceRollerMode === 'tier') {
           // In tier mode, we need dice but not specific stats
           if (!Array.isArray(selectedDice) || selectedDice.length === 0) {
-            updateStatusWithError(statsStatusDiv, 'Please select at least one dice to roll for tier upgrade.', 2000);
+            updateStatusWithError(statsStatusDiv, t('mods.diceRoller.selectDiceTierUpgrade'), 2000);
             return;
           }
         } else {
           // In genes mode, validate stat/dice combination
           if (!Array.isArray(selectedDice) || selectedDice.length === 0) {
-            updateStatusWithError(statsStatusDiv, 'Please select at least one dice to roll.', 2000);
+            updateStatusWithError(statsStatusDiv, t('mods.diceRoller.selectDice'), 2000);
             return;
           }
           const minDice = Math.min(...selectedDice);
           const maxStats = 6 - minDice;
           const selectedStats = Object.keys(currentDiceRulesConfig).filter(key => currentDiceRulesConfig[key].active);
           if (selectedStats.length === 0) {
-            updateStatusWithError(statsStatusDiv, 'Select at least one stat to roll for.', 2000);
+            updateStatusWithError(statsStatusDiv, t('mods.diceRoller.selectStat'), 2000);
             return;
           }
           if (selectedStats.length !== maxStats) {
-            updateStatusWithError(statsStatusDiv, `Select exactly ${maxStats} stats for dice ${minDice}.`, 2000);
+            updateStatusWithError(statsStatusDiv, t('mods.diceRoller.selectExactStats').replace('{count}', maxStats).replace('{dice}', minDice), 2000);
             return;
           }
         }
@@ -3599,7 +3608,7 @@
         autorolling = true;
         autorollCancel = false;
         autorollAttempt = 0;
-        autoRollBtn.textContent = 'Autorolling...';
+        autoRollBtn.textContent = t('mods.diceRoller.autorolling');
         autoRollBtn.disabled = true;
         stopBtn.style.display = 'inline-block';
         
@@ -3615,14 +3624,14 @@
         disableTierButtons();
         // Only reset count if this is a new autoroll (not continuing)
         if (autorollAttempt === 0) {
-          rollCountDiv.textContent = 'Autorolled (0)';
+          rollCountDiv.textContent = t('mods.diceRoller.autorolledCount').replace('{count}', 0);
         }
                   if (targetsSet) {
             // Autoroll loop
             while (autorolling) {
               autorollAttempt++;
               // Update roll count
-              rollCountDiv.textContent = `Autorolled (${autorollAttempt})`;
+              rollCountDiv.textContent = t('mods.diceRoller.autorolledCount').replace('{count}', autorollAttempt);
               
               // Check for dice selection change
               if (JSON.stringify(selectedDice) !== JSON.stringify(lastDiceSelection)) {
@@ -3630,7 +3639,7 @@
                 if (stopWhenChangingDice) {
                   // Show message in stats area temporarily
                   const originalText = statsStatusDiv.textContent;
-                  statsStatusDiv.textContent = 'Autoroll stopped: dice selection changed.';
+                  statsStatusDiv.textContent = t('mods.diceRoller.stoppedDiceChanged');
                   setTimeout(() => {
                     statsStatusDiv.textContent = originalText;
                   }, 2000);
@@ -3645,7 +3654,7 @@
                   updateStatusDisplays();
                   // Show message in stats area temporarily
                   const originalText = statsStatusDiv.textContent;
-                  statsStatusDiv.textContent = 'Dice selection changed, continuing with new dice.';
+                  statsStatusDiv.textContent = t('mods.diceRoller.diceChangedContinuing');
                   setTimeout(() => {
                     statsStatusDiv.textContent = originalText;
                   }, 2000);
@@ -3692,7 +3701,8 @@
                     timestamp: new Date().toISOString()
                   });
                 }
-                updateRollStatus(`Roll failed: ${err.message}. Retrying...`);
+                // updateRollStatus only exists inside autoroll(); this genes-mode loop reports via its status line.
+                statsStatusDiv.textContent = t('mods.diceRoller.rollFailedRetrying').replace('{error}', err.message);
                 await new Promise(resolve => setTimeout(resolve, 1000));
                 continue; // Try again instead of stopping
               }
@@ -3747,7 +3757,7 @@
             if (window.DiceRollerMode === 'genes' && reachedTargets.length > 0) {
               const { stopWhenChangingDice, continuouslyChangeDice } = getCheckboxState();
               // Deselect dice and stats for reached targets
-              let msg = 'Target(s) reached: ' + reachedTargets.map(rt => rt.stat).join(', ');
+              let msg = t('mods.diceRoller.targetsReachedList').replace('{stats}', reachedTargets.map(rt => rt.stat).join(', '));
               // Only uncheck the stat(s) whose target was reached
               for (const { stat } of reachedTargets) {
                 if (currentDiceRulesConfig[stat]) {
@@ -3809,7 +3819,7 @@
                 // If no more stats to roll for, stop
                 if (availableStats.length === 0) {
                   // Show message in stats area temporarily
-                  statsStatusDiv.textContent = 'All targets reached!';
+                  statsStatusDiv.textContent = t('mods.diceRoller.allTargetsReached');
                   setTimeout(() => {
                     statsStatusDiv.textContent = originalText;
                   }, 3000);
@@ -3845,7 +3855,7 @@
               
               // Show message in stats area temporarily
               const originalText = statsStatusDiv.textContent;
-              statsStatusDiv.textContent = 'Target met!';
+              statsStatusDiv.textContent = t('mods.diceRoller.targetMet');
               setTimeout(() => {
                 statsStatusDiv.textContent = originalText;
               }, 3000);
@@ -3872,18 +3882,18 @@
             }, selectedDice, getCheckboxState());
             // Update roll count for single roll (only if not already counting)
             if (autorollAttempt === 0) {
-              rollCountDiv.textContent = 'Autorolled (1)';
+              rollCountDiv.textContent = t('mods.diceRoller.autorolledCount').replace('{count}', 1);
             }
           } catch (err) {
             updateStatusWithError(statsStatusDiv, err.message);
           } finally {
             autoRollBtn.disabled = false;
-            autoRollBtn.textContent = 'Autoroll';
+            autoRollBtn.textContent = t('mods.diceRoller.autoroll');
             stopBtn.style.display = 'none';
           }
         }
         autorolling = false;
-        autoRollBtn.textContent = 'Autoroll';
+        autoRollBtn.textContent = t('mods.diceRoller.autoroll');
         autoRollBtn.disabled = false;
         stopBtn.style.display = 'none';
         
@@ -3912,7 +3922,7 @@
     stopBtn.onclick = () => {
       if (autorolling) {
         autorolling = false;
-        autoRollBtn.textContent = 'Autoroll';
+        autoRollBtn.textContent = t('mods.diceRoller.autoroll');
         autoRollBtn.disabled = false;
         stopBtn.style.display = 'none';
         
@@ -3929,7 +3939,7 @@
         
         // Show message in stats area temporarily
         const originalText = statsStatusDiv.textContent;
-        statsStatusDiv.textContent = 'Autoroll stopped by user.';
+        statsStatusDiv.textContent = t('mods.diceRoller.stoppedByUser');
         setTimeout(() => {
           statsStatusDiv.textContent = originalText;
         }, 2000);
@@ -3954,7 +3964,7 @@
     const allH2s = document.querySelectorAll('div[role="dialog"][data-state="open"] h2');
     let detailsH2 = null;
     for (const h2 of allH2s) {
-      if (h2.textContent && h2.textContent.includes('Details')) {
+      if (h2.textContent && h2.textContent.includes(t('common.details'))) {
         detailsH2 = h2;
         break;
       }
@@ -4243,7 +4253,7 @@
         
         // Only update details for the selected creature
         const col1 = createBox({
-          title: 'Creatures',
+          title: t('mods.diceRoller.sectionCreatures'),
           content: getCreatureList(selectCreature, selectedDice, render, updateDetailsOnlyClosure, selectedGameId, getSelectedDiceTier, getAvailableStats, lastStatusMessage)
         });
         col1.classList.add('dice-roller-modal-col1');
@@ -4251,7 +4261,7 @@
         col1.style.zIndex = '1';
         // col2: dice manipulators (row1), dice rules (row2), and checkboxes (row3)
         const col2 = createBox({
-          title: 'Dices & Rules',
+          title: t('mods.diceRoller.sectionDiceRules'),
           content: (() => {
             const col = document.createElement('div');
             col.style.display = 'flex';
@@ -4272,7 +4282,7 @@
             
             // Descriptive text above dice
             const descriptionText = document.createElement('div');
-            descriptionText.textContent = 'Select dice(s) to roll with.\nThese will be marked with a green border.';
+            descriptionText.textContent = t('mods.diceRoller.selectDiceDescription');
             descriptionText.style.color = '#888888';
             descriptionText.style.fontStyle = 'italic';
             descriptionText.style.fontSize = '11px';
@@ -4380,7 +4390,7 @@
             
             // Genes button
             const genesBtn = document.createElement('button');
-            genesBtn.textContent = 'Genes';
+            genesBtn.textContent = t('mods.diceRoller.modeGenes');
             genesBtn.className = 'diceroller-btn';
             genesBtn.setAttribute('data-state', selectedButton === 'genes' ? 'selected' : 'closed');
             genesBtn.style.setProperty('width', '60px', 'important');
@@ -4411,13 +4421,13 @@
               // Update checkbox labels for genes mode
               const stopCheckboxLabel = stopCheckboxWrapper.lastChild;
               if (stopCheckboxLabel && stopCheckboxLabel.nodeType === Node.TEXT_NODE) {
-                stopCheckboxLabel.textContent = 'Stop when changing dice';
+                stopCheckboxLabel.textContent = t('mods.diceRoller.stopWhenChangingDice');
               }
               
               // Update the "Smart stat & dice roller" checkbox label to "Continuously change dice"
               const contCheckboxLabel = contCheckboxWrapper.lastChild;
               if (contCheckboxLabel && contCheckboxLabel.nodeType === Node.TEXT_NODE) {
-                contCheckboxLabel.textContent = 'Continuously change dice';
+                contCheckboxLabel.textContent = t('mods.diceRoller.continuouslyChangeDice');
               }
               
               // Set default values for genes mode: "Continuously change dice" selected
@@ -4443,7 +4453,7 @@
             
             // Tier button
             const tierBtn = document.createElement('button');
-            tierBtn.textContent = 'Tier';
+            tierBtn.textContent = t('mods.diceRoller.modeTier');
             tierBtn.className = 'diceroller-btn';
             tierBtn.setAttribute('data-state', selectedButton === 'tier' ? 'selected' : 'closed');
             tierBtn.style.setProperty('width', '60px', 'important');
@@ -4474,13 +4484,13 @@
               // Update checkbox labels for tier mode
               const stopCheckboxLabel = stopCheckboxWrapper.lastChild;
               if (stopCheckboxLabel && stopCheckboxLabel.nodeType === Node.TEXT_NODE) {
-                stopCheckboxLabel.textContent = 'Roll until target tier';
+                stopCheckboxLabel.textContent = t('mods.diceRoller.rollUntilTargetTier');
               }
               
               // Update the "Continuously change dice" checkbox label back to "Smart stat & dice roller"
               const contCheckboxLabel = contCheckboxWrapper.lastChild;
               if (contCheckboxLabel && contCheckboxLabel.nodeType === Node.TEXT_NODE) {
-                contCheckboxLabel.textContent = 'Smart stat & dice roller';
+                contCheckboxLabel.textContent = t('mods.diceRoller.smartRoller');
               }
               
               // Set default values for tier mode
@@ -4689,7 +4699,7 @@
             speedWrapper.style.marginTop = '8px';
             
             const speedLabel = document.createElement('span');
-            speedLabel.textContent = 'Autoroll Speed:';
+            speedLabel.textContent = t('mods.diceRoller.speedLabel');
             speedWrapper.appendChild(speedLabel);
             
             const speedInput = document.createElement('input');
@@ -4733,7 +4743,7 @@
             
             // Add rate-limit warning below speed input
             const rateLimitWarning = document.createElement('div');
-            rateLimitWarning.textContent = '30 requests per 10 seconds is the rate-limit. Set 400ms or higher to avoid being rate-limited.';
+            rateLimitWarning.textContent = t('common.rateLimitTooltip');
             rateLimitWarning.style.fontSize = '11px';
             rateLimitWarning.style.fontStyle = 'italic';
             rateLimitWarning.style.color = '#ff9800';
@@ -4750,7 +4760,7 @@
         col2.classList.add('dice-roller-modal-col2');
         // col3: creature details (row1), placeholder (row2)
         const col3 = createBox({
-          title: 'Details',
+          title: t('common.details'),
           content: getCreatureDetailsCol(selectedGameId, getSelectedDiceTier, getAvailableStats, render, selectedDice, lastStatusMessage)
         });
         col3.classList.add('dice-roller-modal-col3');
@@ -4788,7 +4798,7 @@
         width: modalDimensions.width,
         height: modalDimensions.height,
         content: contentDiv,
-        buttons: [{ text: 'Close', primary: true }],
+        buttons: [{ text: t('common.close'), primary: true }],
         onClose: () => {
           clearDiceRollerModalLayoutCleanup();
           activeDiceRollerModal = null;

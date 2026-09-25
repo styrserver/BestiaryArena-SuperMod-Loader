@@ -220,8 +220,8 @@ function createTickItem(tickData) {
     const success = copyToClipboard(valueToCopy);
     if (success) {
       api.ui.components.createModal({
-        title: 'Copied!',
-        content: `Copied ${labelText}: ${valueToCopy}`,
+        title: t('mods.tickTracker.copiedTitle'),
+        content: t('mods.tickTracker.copiedContent').replace('{label}', labelText).replace('{value}', valueToCopy),
         buttons: [{ text: 'OK', primary: true }]
       });
     }

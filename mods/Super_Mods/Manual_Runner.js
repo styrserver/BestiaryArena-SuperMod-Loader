@@ -3013,7 +3013,7 @@ function showInjectSuccessToast({
     (awakenedTargetName && !/^gameId:\d+$/i.test(awakenedTargetName) ? awakenedTargetName : '') ||
     'creature';
   const introText = document.createElement('span');
-  introText.textContent = `Injected ${displayName}`;
+  introText.textContent = t('common.injectedCreature').replace('{name}', displayName);
   toastContent.appendChild(introText);
 
   const numericGoldDiff = Number(goldDiff);
@@ -4437,8 +4437,8 @@ function createConfigPanel() {
   sellLabel.textContent = t('mods.manualRunner.enableAutoSell');
   const sellWarningIcon = document.createElement('span');
   sellWarningIcon.textContent = '⚠';
-  sellWarningIcon.title = 'Autosell on floor 11+ may sell sealed creatures';
-  sellWarningIcon.setAttribute('aria-label', 'Warning: autosell may sell sealed creatures on floor 11+');
+  sellWarningIcon.title = t('mods.manualRunner.autosellSealedTooltip');
+  sellWarningIcon.setAttribute('aria-label', t('mods.manualRunner.autosellSealedAria'));
   sellWarningIcon.style.cssText = 'display: none; color: #f1c40f; font-weight: bold; cursor: help; margin-left: 2px;';
 
   const updateAutoSellWarning = () => {
@@ -4471,7 +4471,7 @@ function createConfigPanel() {
   injectWarningIcon.title =
     t('mods.manualRunner.autoInjectWarningTooltip') ||
     'Injects sealed drops into matching awakened creatures (costs gold). Runs before autosell when both are enabled.';
-  injectWarningIcon.setAttribute('aria-label', 'Warning: auto-inject affects sealed creatures on floor 11+');
+  injectWarningIcon.setAttribute('aria-label', t('mods.manualRunner.autoInjectSealedAria'));
   injectWarningIcon.style.cssText = 'display: none; color: #f1c40f; font-weight: bold; cursor: help; margin-left: 2px;';
 
   const updateAutoInjectWarning = () => {
@@ -4816,7 +4816,7 @@ function showRunningAnalysisModal(
         analysisState.reset();
         
         stopBtn.disabled = true;
-        stopBtn.textContent = t('mods.manualRunner.stopped') || 'Stopped';
+        stopBtn.textContent = t('mods.manualRunner.stopped');
         return;
       }
     

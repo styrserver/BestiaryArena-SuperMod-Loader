@@ -1925,7 +1925,7 @@ function showLoadingIndicator(container) {
   injectVIPListStyles();
   
   const text = document.createElement('span');
-  text.textContent = 'Loading older messages...';
+  text.textContent = t('mods.vipList.loadingOlderMessages');
   
   indicator.appendChild(spinner);
   indicator.appendChild(text);
@@ -1966,7 +1966,7 @@ function showBeginningIndicator(container) {
   `;
   
   const text = document.createElement('span');
-  text.textContent = 'Beginning of conversation';
+  text.textContent = t('mods.vipList.beginningOfConversation');
   
   indicator.appendChild(text);
   
@@ -2395,7 +2395,7 @@ async function loadGuildChatConversation(container, guildId, forceScrollToBottom
           font-style: italic;
           font-size: 12px;
         `;
-        emptyMsg.textContent = 'No messages yet';
+        emptyMsg.textContent = t('mods.vipList.noMessagesShort');
         container.appendChild(emptyMsg);
       }
       // Still scroll to bottom if forceScrollToBottom is true (tab switching)
@@ -2430,7 +2430,7 @@ async function loadGuildChatConversation(container, guildId, forceScrollToBottom
     
     if (messages.length === 0) {
       if (needsFullRebuild) {
-        const emptyMsg = createEmptyChatMessage('No messages yet');
+        const emptyMsg = createEmptyChatMessage(t('mods.vipList.noMessagesShort'));
         container.appendChild(emptyMsg);
       }
       if (panel) panel[`_previousMessageCount_${guildKey}`] = 0;
@@ -2720,7 +2720,7 @@ function updateChatInputState(textarea, sendButton, canChat, hasPrivilege, recip
   if (textarea) {
     textarea.disabled = !canChat;
     if (!hasPrivilege) {
-      textarea.placeholder = 'Request chat privileges to send messages';
+      textarea.placeholder = t('mods.vipList.requestPrivilegesPlaceholder');
     } else {
       textarea.placeholder = recipientHasChatEnabled 
         ? tReplace('mods.vipList.messagePlaceholder', { name: toPlayer })
@@ -5609,7 +5609,7 @@ function embedReplayLinks(text) {
                 const success = result instanceof Promise ? await result : result;
                 if (success) {
                   const originalText = link.textContent;
-                  link.textContent = 'Copied!';
+                  link.textContent = t('mods.vipList.copied');
                   link.style.color = CSS_CONSTANTS.COLORS.SUCCESS;
                   setTimeout(() => {
                     link.textContent = originalText;
@@ -6253,7 +6253,8 @@ async function checkAcceptedRequests() {
         const messagesArea = panel.querySelector(`#chat-messages-${playerName.toLowerCase()}`);
         if (messagesArea) {
           const privilegeMessage = messagesArea.querySelector('.chat-privilege-message');
-          const hasPendingRequest = privilegeMessage && privilegeMessage.textContent.includes('Waiting for');
+          const hasPendingRequest = privilegeMessage && (privilegeMessage.textContent.includes('Waiting for') ||
+            privilegeMessage.textContent.includes(t('mods.vipList.waitingForAccept').split('{name}')[0].trim()));
           
           if (hasPendingRequest) {
             const hasPrivilege = await hasChatPrivilege(currentPlayer, playerName);
@@ -6303,9 +6304,12 @@ function startPendingRequestCheck(playerName) {
       if (messagesArea) {
         const privilegeMessage = messagesArea.querySelector('.chat-privilege-message');
         const hasPendingRequest = privilegeMessage && (
-          privilegeMessage.textContent.includes('Waiting for') || 
+          privilegeMessage.textContent.includes('Waiting for') ||
+          privilegeMessage.textContent.includes(t('mods.vipList.waitingForAccept').split('{name}')[0].trim()) ||
           privilegeMessage.textContent.includes('Chat Request Sent') ||
-          privilegeMessage.textContent.includes('Chat Request Pending')
+          privilegeMessage.textContent.includes('Chat Request Pending') ||
+          privilegeMessage.textContent.includes(t('mods.vipList.chatRequestSent')) ||
+          privilegeMessage.textContent.includes(t('mods.vipList.chatRequestPending'))
         );
         
         if (!hasPendingRequest) {
@@ -8556,7 +8560,7 @@ function showChatLoadingIndicator(container) {
   injectVIPListStyles();
   
   const text = document.createElement('span');
-  text.textContent = 'Loading messages...';
+  text.textContent = t('mods.vipList.loadingMessages');
   
   loadingDiv.appendChild(spinner);
   loadingDiv.appendChild(text);
@@ -8610,7 +8614,7 @@ function showFetchingRunsIndicator(container) {
   injectVIPListStyles();
   
   const text = document.createElement('span');
-  text.textContent = 'Fetching runs...';
+  text.textContent = t('mods.vipList.fetchingRuns');
   
   loadingDiv.appendChild(spinner);
   loadingDiv.appendChild(text);
@@ -8917,7 +8921,7 @@ async function switchAllChatTab(playerName) {
             if (sendButton) sendButton.disabled = !canChat;
           } else if (playerName.startsWith('guild-')) {
             // Guild chat - always enabled
-            textarea.placeholder = 'Type a message...';
+            textarea.placeholder = t('mods.vipList.typeMessagePlaceholder');
             textarea.disabled = false;
             if (sendButton) sendButton.disabled = false;
           }
@@ -10907,7 +10911,7 @@ function createAddPlayerHandler(searchInput, addButton, originalPlaceholder) {
       console.log('[VIP List] Added player:', playerName);
     } catch (error) {
       console.error('[VIP List] Error adding player:', error);
-      alert(`Failed to add player "${playerName}". Please try again.`);
+      alert(tReplace('mods.vipList.addPlayerFailed', { name: playerName }));
     } finally {
       searchInput.disabled = false;
       addButton.disabled = false;

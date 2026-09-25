@@ -6996,9 +6996,12 @@ function getCyclopediaOpenDialog() {
     document.querySelector('div[role="dialog"]');
 }
 
-function getCyclopediaDialog(modalRef) {
+function getCyclopediaDialog(modalRef, contentRoot) {
   if (modalRef && modalRef.element) return modalRef.element;
   if (modalRef instanceof HTMLElement) return modalRef;
+  // Fallback showModal (Firefox without ui_components.js) returns a bare close
+  // function — resolve from our own content so we never restyle another mod's dialog.
+  if (contentRoot) return contentRoot.closest?.('div[role="dialog"]') || null;
   return getCyclopediaOpenDialog();
 }
 
@@ -7192,8 +7195,11 @@ function createCyclopediaTabShell({ rightColRow = false, mountLeft, mountRight, 
 }
 
 function applyCyclopediaModalLayout(modalRef, contentRoot, dimensions) {
-  const dialog = getCyclopediaDialog(modalRef);
-  if (!dialog) return;
+  const dialog = getCyclopediaDialog(modalRef, contentRoot);
+  if (!dialog || !dialog.isConnected) {
+    if (activeCyclopediaModal === modalRef) clearCyclopediaModalLayoutCleanup();
+    return;
+  }
 
   const { width, height } = dimensions;
   dialog.style.width = `${width}px`;
@@ -16687,8 +16693,12 @@ function createInventoryTabPage(selectedCreature, selectedEquipment, selectedInv
       };
     }
 
+    // Category lists pass catalog labels ('Augment Rune (HP)') here, not keys — those are already
+    // names, so only camelCase-split real keys ('someItemKey'), or '(HP)' becomes '( H P)'.
     return {
-      displayName: itemKey.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase()),
+      displayName: /[\s()]/.test(itemKey)
+        ? itemKey
+        : itemKey.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase()).trim(),
       rarity: '1'
     };
   };
@@ -16802,11 +16812,11 @@ function createInventoryTabPage(selectedCreature, selectedEquipment, selectedInv
       'outfit-bag': () => ({ key: 'outfitBag1', name: 'Outfit Bag' }),
       'nickname-monster': () => ({ key: 'nicknameMonster', name: 'Nickname Creature' }),
       'rune-blank': () => ({ key: 'runeBlank', name: 'Blank Rune' }),
-      'rune-hp': () => ({ key: 'runeHp', name: 'Hitpoints Rune' }),
-      'rune-ap': () => ({ key: 'runeAp', name: 'Ability Power Rune' }),
-      'rune-ad': () => ({ key: 'runeAd', name: 'Attack Damage Rune' }),
-      'rune-ar': () => ({ key: 'runeAr', name: 'Armor Rune' }),
-      'rune-mr': () => ({ key: 'runeMr', name: 'Magic Resist Rune' })
+      'rune-hp': () => ({ key: 'runeHp', name: 'Augment Rune (HP)' }),
+      'rune-ap': () => ({ key: 'runeAp', name: 'Augment Rune (AP)' }),
+      'rune-ad': () => ({ key: 'runeAd', name: 'Augment Rune (AD)' }),
+      'rune-ar': () => ({ key: 'runeAr', name: 'Augment Rune (AR)' }),
+      'rune-mr': () => ({ key: 'runeMr', name: 'Augment Rune (MR)' })
     };
 
     for (const [pattern, mapper] of Object.entries(imageMapping)) {

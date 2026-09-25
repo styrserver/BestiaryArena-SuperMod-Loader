@@ -76,10 +76,13 @@
   
   // Event listener management for memory leak prevention
   const eventListeners = new Map();
-  
+  let managedListenerSeq = 0;
+
   function addManagedEventListener(element, event, handler, options = {}) {
     element.addEventListener(event, handler, options);
-    const key = `${element.id || element.className || 'anonymous'}_${event}_${Date.now()}`;
+    // Counter makes keys unique: many rows are built in the same millisecond, and a colliding
+    // key would overwrite the earlier entry so cleanup could never remove that listener.
+    const key = `${element.id || element.className || 'anonymous'}_${event}_${++managedListenerSeq}`;
     eventListeners.set(key, { element, event, handler, options });
     return key;
   }
@@ -128,21 +131,40 @@
     });
   }
   
-  // Equipment setup state (load from localStorage, default: empty array)
-  let equipmentSetup = loadSetting(STORAGE_KEYS.EQUIPMENT_SETUP, []);
-  
-  // Deduplicate rules on load
+  // Locked rule: T5 equipment is always kept. Never stored in equipmentSetup, never editable;
+  // it is prepended by getActiveSetupRules() and shown as a sticky row at the top of Chest Settings.
+  const PROTECTED_T5_RULE = Object.freeze({ equipment: 'All', tier: 'T5', stat: 'All', locked: true });
+
+  function isProtectedRuleDuplicate(rule) {
+    return rule && rule.equipment === 'All' && rule.tier === 'T5' && rule.stat === 'All';
+  }
+
+  // User rules minus duplicates and minus any copy of the locked T5 rule
+  function normalizeUserRules(rules) {
+    return deduplicateRules((Array.isArray(rules) ? rules : []).filter(rule => !isProtectedRuleDuplicate(rule)));
+  }
+
+  function getActiveSetupRules() {
+    return [PROTECTED_T5_RULE, ...equipmentSetup];
+  }
+
+  // Equipment setup state (user rules only). null = never saved -> first-install default below.
+  // An empty array is valid: only the locked T5 rule applies.
+  const storedEquipmentSetup = loadSetting(STORAGE_KEYS.EQUIPMENT_SETUP, null);
+  let equipmentSetup = Array.isArray(storedEquipmentSetup) ? storedEquipmentSetup : [];
+
+  // Deduplicate rules on load (also drops stored copies of the locked T5 rule)
   if (equipmentSetup.length > 0) {
     const originalLength = equipmentSetup.length;
-    equipmentSetup = deduplicateRules(equipmentSetup);
+    equipmentSetup = normalizeUserRules(equipmentSetup);
     if (equipmentSetup.length !== originalLength) {
       console.log(`[Better Exaltation Chest] Removed ${originalLength - equipmentSetup.length} duplicate rule(s) on load`);
       saveSetting(STORAGE_KEYS.EQUIPMENT_SETUP, equipmentSetup);
     }
   }
   
-  // If no setup exists, create default "All" setup
-  if (equipmentSetup.length === 0) {
+  // First install: create default "All" setup
+  if (!Array.isArray(storedEquipmentSetup)) {
     equipmentSetup = [{ equipment: 'All', tier: 'All', stat: 'All' }];
     saveSetting(STORAGE_KEYS.EQUIPMENT_SETUP, equipmentSetup);
     console.log('[Better Exaltation Chest] Created default equipment setup: All/All/All');
@@ -261,13 +283,9 @@
     
     // Setup Rules
     summary += `--- Setup Rules ---\n`;
-    if (equipmentSetup.length === 0) {
-      summary += `No setup rules configured.\n`;
-    } else {
-      equipmentSetup.forEach((rule, index) => {
-        summary += `${index + 1}. ${rule.equipment}/${rule.tier}/${rule.stat}\n`;
-      });
-    }
+    getActiveSetupRules().forEach((rule, index) => {
+      summary += `${index + 1}. ${rule.equipment}/${rule.tier}/${rule.stat}${rule.locked ? ' (locked)' : ''}\n`;
+    });
     summary += `---------------------------\n\n`;
     
     // Equipment Details
@@ -562,23 +580,31 @@
   }
 
   function injectEquipmentSelectStyles() {
-    if (document.getElementById('better-exaltation-equipment-select-styles')) return;
-    const style = document.createElement('style');
-    style.id = 'better-exaltation-equipment-select-styles';
+    // Reuse an existing tag but always refresh its CSS, so a soft mod reload picks up changes
+    let style = document.getElementById('better-exaltation-equipment-select-styles');
+    if (!style) {
+      style = document.createElement('style');
+      style.id = 'better-exaltation-equipment-select-styles';
+    }
     style.textContent = `
       #equipment-setup-rows .better-exaltation-setup-row {
         display: flex;
         gap: 4px;
         align-items: center;
-        padding: 4px;
+        padding: 2px 4px;
         background: rgba(0, 0, 0, 0.3);
         border-radius: 3px;
         min-width: 0;
-        overflow-x: auto;
+        /* Never shrink below content height (that is what gave every row its own scrollbar);
+           only #equipment-setup-rows itself scrolls. */
+        flex: 0 0 auto;
+        min-height: 28px;
+        box-sizing: border-box;
+        overflow: visible;
       }
       #equipment-setup-rows .better-exaltation-equipment-select {
         flex: 1 1 72px;
-        min-width: 72px;
+        min-width: 0;
         max-width: 100%;
         height: 24px;
         min-height: 24px;
@@ -589,9 +615,9 @@
       }
       #equipment-setup-rows .better-exaltation-tier-select,
       #equipment-setup-rows .better-exaltation-stat-select {
-        flex: 0 0 auto;
+        flex: 0 1 50px;
         width: 50px;
-        min-width: 48px;
+        min-width: 40px;
         height: 24px;
         min-height: 24px;
         box-sizing: border-box;
@@ -599,13 +625,71 @@
       #equipment-setup-rows .better-exaltation-stat-select {
         min-width: 40px;
       }
+      #equipment-setup-rows .better-exaltation-setup-locked-row {
+        display: flex;
+        gap: 4px;
+        align-items: center;
+        padding: 2px 4px;
+        border-radius: 3px;
+        min-width: 0;
+        flex: 0 0 auto;
+        min-height: 28px;
+        box-sizing: border-box;
+        /* Pinned while the user rules scroll underneath: needs an opaque background */
+        position: sticky;
+        top: 0;
+        z-index: 2;
+        background: #2a2614;
+        border: 1px solid #6b5a1e;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.6);
+      }
+      #equipment-setup-rows .better-exaltation-setup-locked-row select:disabled {
+        opacity: 1;
+        color: #ffe066 !important;
+        cursor: not-allowed;
+      }
+      #equipment-setup-rows .better-exaltation-setup-lock {
+        flex: 0 0 auto;
+        width: 12px;
+        text-align: center;
+        font-size: 10px;
+        line-height: 24px;
+        user-select: none;
+      }
+      #equipment-setup-rows .better-exaltation-setup-remove-spacer {
+        flex: 0 0 24px;
+        width: 24px;
+      }
+      #equipment-setup-rows .better-exaltation-setup-drag {
+        flex: 0 0 auto;
+        width: 12px;
+        text-align: center;
+        color: #888;
+        font-size: 12px;
+        line-height: 24px;
+        letter-spacing: -3px;
+        cursor: grab;
+        user-select: none;
+        touch-action: none;
+      }
+      #equipment-setup-rows .better-exaltation-setup-drag:hover {
+        color: #ffe066;
+      }
+      #equipment-setup-rows .better-exaltation-setup-row-dragging {
+        outline: 1px dashed #ffe066;
+        background: rgba(255, 224, 102, 0.12);
+      }
+      #equipment-setup-rows .better-exaltation-setup-row-dragging .better-exaltation-setup-drag {
+        cursor: grabbing;
+        color: #ffe066;
+      }
       #equipment-setup-rows .better-exaltation-setup-remove {
         flex: 0 0 auto;
         min-width: 24px;
         min-height: 24px;
       }
     `;
-    document.head.appendChild(style);
+    if (!style.parentNode) document.head.appendChild(style);
   }
 
   function syncEquipmentSelectTitle(select) {
@@ -1477,7 +1561,7 @@
       }
       
       // Sort rules by specificity (most specific first) to prioritize specific rules over general ones
-      const sortedRules = [...equipmentSetup].sort((a, b) => {
+      const sortedRules = getActiveSetupRules().sort((a, b) => {
         const specificityA = calculateRuleSpecificity(a);
         const specificityB = calculateRuleSpecificity(b);
         return specificityB - specificityA; // Higher specificity first
@@ -1768,11 +1852,25 @@
     equipmentCheckTimeout = setTimeout(() => {
       pendingTimeouts.delete(equipmentCheckTimeout);
       const equipment = getEquipmentDetailsFromChestResponse(equipData);
-      const checkResult = checkEquipmentAgainstSettings(equipment, { 
-        updateStats: true, 
-        logPrefix: '📦 ' 
+
+      // Hard T5 guard on the raw response tier (the parsed tier falls back to 1 when missing)
+      if (Number(equipData?.tier) >= 5) {
+        console.log('[Better Exaltation Chest] 🔒 T5 equipment is always kept (locked rule)');
+        checkEquipmentAgainstSettings(equipment, { updateStats: true, logPrefix: '📦 ' });
+        return;
+      }
+
+      const checkResult = checkEquipmentAgainstSettings(equipment, {
+        updateStats: true,
+        logPrefix: '📦 '
       });
-      
+
+      // Fail safe: never auto-disenchant an item we could not identify or check
+      if (!checkResult.matches && (!equipment || checkResult.reason === 'Equipment not found' || checkResult.reason === 'Error checking equipment')) {
+        console.warn('[Better Exaltation Chest] ⚠️ Could not verify opened equipment, keeping it instead of disenchanting:', checkResult.reason);
+        return;
+      }
+
       if (!checkResult.matches) {
         console.log('[Better Exaltation Chest] 🔄 Auto-disenchanting equipment that does not match settings');
         disenchantEquipment(equipData.id)
@@ -2698,6 +2796,22 @@
       gap: 8px;
     `;
     
+    // Copy Autoseller button (imports Autoduster "Keep" settings as Chest Settings rules)
+    const copyAutosellerButton = document.createElement('button');
+    copyAutosellerButton.textContent = t('mods.betterExaltationChest.copyAutoseller');
+    copyAutosellerButton.title = t('mods.betterExaltationChest.copyAutosellerTooltip');
+    copyAutosellerButton.style.cssText = createButtonStyle('gray', `
+      width: 100%;
+      height: 32px;
+      font-size: 12px;
+    `);
+    addClickAnimation(copyAutosellerButton);
+    addManagedEventListener(copyAutosellerButton, 'click', (event) => {
+      event.stopPropagation();
+      copyAutosellerKeepSettings(document.getElementById('equipment-setup-rows'));
+      disableAutoOpeningIfActive();
+    });
+
     // Copy Log button
     const copyLogButton = document.createElement('button');
     copyLogButton.textContent = t('mods.betterExaltationChest.copyLog');
@@ -2731,6 +2845,7 @@
       showFeedbackMessage(t('mods.betterExaltationChest.logCleared'), false);
     });
     
+    logButtonsContainer.appendChild(copyAutosellerButton);
     logButtonsContainer.appendChild(copyLogButton);
     logButtonsContainer.appendChild(clearLogButton);
     
@@ -2749,35 +2864,23 @@
       flex-direction: column;
       width: 100%;
       height: 100%;
-      padding: 16px;
+      padding: 10px 12px;
       box-sizing: border-box;
       justify-content: flex-start;
       align-items: center;
     `;
-    
+
     const title = document.createElement('h4');
     title.textContent = t('mods.betterExaltationChest.chestSettingsTitle');
     title.className = 'pixel-font-14';
     title.style.cssText = `
-      margin: 0 0 8px 0;
+      margin: 0 0 6px 0;
       color: #ffe066;
       font-weight: bold;
       text-align: center;
       text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
     `;
     container.appendChild(title);
-    
-    // Add description
-    const description = document.createElement('div');
-    description.textContent = t('mods.betterExaltationChest.chestSettingsDescription');
-    description.style.cssText = `
-      margin: 0 0 12px 0;
-      color: #ccc;
-      font-size: 10px;
-      text-align: center;
-      font-style: italic;
-    `;
-    container.appendChild(description);
     
     // Equipment setup section
     const setupSection = createEquipmentSetupSection();
@@ -2795,7 +2898,8 @@
       flex-direction: column;
       width: 100%;
       flex: 1;
-      overflow-y: auto;
+      min-height: 0;
+      overflow: hidden;
     `;
     
     
@@ -2805,8 +2909,9 @@
     rowsContainer.style.cssText = `
       display: flex;
       flex-direction: column;
-      gap: 8px;
+      gap: 3px;
       flex: 1;
+      min-height: 0;
       overflow-y: auto;
     `;
     section.appendChild(rowsContainer);
@@ -2815,8 +2920,8 @@
     const buttonContainer = document.createElement('div');
     buttonContainer.style.cssText = `
       display: flex;
-      gap: 8px;
-      margin-top: 8px;
+      gap: 6px;
+      margin-top: 6px;
     `;
     
     // Add button
@@ -2824,7 +2929,7 @@
     addButton.textContent = '+';
     addButton.style.cssText = createButtonStyle('green', `
       flex: 7;
-      height: 32px;
+      height: 26px;
       font-size: 16px;
     `);
     addClickAnimation(addButton);
@@ -2833,13 +2938,13 @@
       addEquipmentSetupRow(rowsContainer);
       disableAutoOpeningIfActive();
     });
-    
+
     // Reset button
     const resetButton = document.createElement('button');
     resetButton.textContent = t('mods.betterExaltationChest.reset');
     resetButton.style.cssText = createButtonStyle('red', `
       flex: 3;
-      height: 32px;
+      height: 26px;
       font-size: 12px;
     `);
     addClickAnimation(resetButton);
@@ -2863,18 +2968,50 @@
   function loadEquipmentSetupRows(container) {
     // Clear existing rows
     container.innerHTML = '';
-    
-    // If no setup exists, add one default row
-    if (equipmentSetup.length === 0) {
-      addEquipmentSetupRow(container);
-      // Save the default setup to localStorage
-      saveEquipmentSetup();
-    } else {
-      // Load existing setup rows
-      equipmentSetup.forEach((setup, index) => {
-        addEquipmentSetupRow(container, setup, index);
-      });
-    }
+
+    // Locked "All / T5 / All" row, pinned (sticky) at the top
+    addLockedT5Row(container);
+
+    // User rows (may be none: then only the locked T5 rule applies)
+    equipmentSetup.forEach((setup, index) => {
+      addEquipmentSetupRow(container, setup, index);
+    });
+  }
+
+  // Read-only row for PROTECTED_T5_RULE. Uses its own class (not .better-exaltation-setup-row)
+  // so saving, the remove button and drag reordering never see it.
+  function addLockedT5Row(container) {
+    const row = document.createElement('div');
+    row.className = 'better-exaltation-setup-locked-row';
+    row.title = t('mods.betterExaltationChest.lockedT5Tooltip');
+
+    const lockIcon = document.createElement('span');
+    lockIcon.className = 'better-exaltation-setup-lock';
+    lockIcon.textContent = '🔒';
+    row.appendChild(lockIcon);
+
+    [
+      ['better-exaltation-equipment-select', PROTECTED_T5_RULE.equipment],
+      ['better-exaltation-tier-select', PROTECTED_T5_RULE.tier],
+      ['better-exaltation-stat-select', PROTECTED_T5_RULE.stat]
+    ].forEach(([className, value]) => {
+      const select = document.createElement('select');
+      select.className = className;
+      select.style.cssText = createDropdownStyle();
+      select.disabled = true;
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = value;
+      select.appendChild(option);
+      row.appendChild(select);
+    });
+
+    // Spacer where the remove button would be, so columns line up with the rows below
+    const spacer = document.createElement('span');
+    spacer.className = 'better-exaltation-setup-remove-spacer';
+    row.appendChild(spacer);
+
+    container.appendChild(row);
   }
   
   // Add a new equipment setup row
@@ -2930,30 +3067,11 @@
     addManagedEventListener(removeButton, 'click', (event) => {
       event.stopPropagation();
       
-      // Check if this is the last row
-      const rowsContainer = document.getElementById('equipment-setup-rows');
-      const existingRows = rowsContainer.querySelectorAll('div');
-      
-      if (existingRows.length <= 1) {
-        // Reset the last row to default values instead of deleting it
-        console.log('[Better Exaltation Chest] Resetting last row to default values');
-        // Check if values actually changed before saving
-        const valuesChanged = equipmentSelect.value !== 'All' || tierSelect.value !== 'All' || statSelect.value !== 'All';
-        equipmentSelect.value = 'All';
-        tierSelect.value = 'All';
-        statSelect.value = 'All';
-        syncEquipmentSelectTitle(equipmentSelect);
-        // Only save if values actually changed (change event may not fire if values were already 'All')
-        if (valuesChanged) {
-          saveEquipmentSetup();
-        }
-        disableAutoOpeningIfActive();
-      } else {
-        // Remove the row if it's not the last one
-        row.remove();
-        saveEquipmentSetup();
-        disableAutoOpeningIfActive();
-      }
+      // The locked T5 row always stays, so any user row can be removed (even the last one:
+      // an empty rule list means "keep only T5").
+      row.remove();
+      saveEquipmentSetup();
+      disableAutoOpeningIfActive();
     });
     
     // Set initial values
@@ -2981,14 +3099,91 @@
       });
     });
     
+    // Drag handle (reorder rows)
+    const dragHandle = document.createElement('span');
+    dragHandle.className = 'better-exaltation-setup-drag';
+    dragHandle.textContent = '⋮⋮';
+    dragHandle.title = t('mods.betterExaltationChest.dragToReorder');
+    attachSetupRowDragHandlers(row, dragHandle);
+
+    row.appendChild(dragHandle);
     row.appendChild(equipmentSelect);
     row.appendChild(tierSelect);
     row.appendChild(statSelect);
     row.appendChild(removeButton);
-    
+
     container.appendChild(row);
   }
   
+  // Drag-and-drop reordering of setup rows via the row's handle.
+  // Pointer events + setPointerCapture keep every listener on the handle itself (no
+  // document listeners to leak) and work for mouse and touch alike.
+  function attachSetupRowDragHandlers(row, handle) {
+    let pointerId = null;
+    let changed = false;
+
+    const finishDrag = () => {
+      if (pointerId === null) return;
+      try { handle.releasePointerCapture(pointerId); } catch (e) { /* already released */ }
+      pointerId = null;
+      row.classList.remove('better-exaltation-setup-row-dragging');
+      if (changed) {
+        changed = false;
+        saveEquipmentSetup();
+        disableAutoOpeningIfActive();
+      }
+    };
+
+    addManagedEventListener(handle, 'pointerdown', (event) => {
+      if (event.button !== 0 && event.pointerType === 'mouse') return;
+      event.preventDefault();
+      event.stopPropagation();
+      pointerId = event.pointerId;
+      changed = false;
+      try { handle.setPointerCapture(pointerId); } catch (e) { /* ignore */ }
+      row.classList.add('better-exaltation-setup-row-dragging');
+    });
+
+    addManagedEventListener(handle, 'pointermove', (event) => {
+      if (pointerId === null || event.pointerId !== pointerId) return;
+      event.preventDefault();
+      const container = row.parentNode;
+      if (!container) return;
+
+      // Auto-scroll the list when dragging near its top/bottom edge
+      const bounds = container.getBoundingClientRect();
+      const edge = 24;
+      if (event.clientY < bounds.top + edge) container.scrollTop -= 8;
+      else if (event.clientY > bounds.bottom - edge) container.scrollTop += 8;
+
+      // Move the *neighbours* past the dragged row rather than moving the row itself:
+      // re-inserting the row detaches it, which drops its pointer capture and ends the drag.
+      const midY = (el) => {
+        const rect = el.getBoundingClientRect();
+        return rect.top + rect.height / 2;
+      };
+      for (let guard = 0; guard < 500; guard++) {
+        const next = row.nextElementSibling;
+        if (next && next.classList.contains('better-exaltation-setup-row') && event.clientY > midY(next)) {
+          container.insertBefore(next, row);
+          changed = true;
+          continue;
+        }
+        const prev = row.previousElementSibling;
+        if (prev && prev.classList.contains('better-exaltation-setup-row') && event.clientY < midY(prev)) {
+          container.insertBefore(prev, row.nextSibling);
+          changed = true;
+          continue;
+        }
+        break;
+      }
+    });
+
+    addManagedEventListener(handle, 'pointerup', finishDrag);
+    addManagedEventListener(handle, 'pointercancel', finishDrag);
+    addManagedEventListener(handle, 'lostpointercapture', finishDrag);
+  }
+
   // Get equipment list from equipment database
   function generateEquipmentList() {
     // Use cached list if available
@@ -3054,7 +3249,7 @@
       // Add "All" option first
       const newAllOption = document.createElement('option');
       newAllOption.value = 'All';
-      newAllOption.textContent = 'All';
+      newAllOption.textContent = t('common.all');
       select.appendChild(newAllOption);
     }
     
@@ -3105,13 +3300,13 @@
       const rowsContainer = document.getElementById('equipment-setup-rows');
       if (!rowsContainer) return;
       
-      const rows = rowsContainer.querySelectorAll('div');
+      const rows = rowsContainer.querySelectorAll('.better-exaltation-setup-row');
       const newSetup = [];
-      
+
       rows.forEach(row => {
-        const equipmentSelect = row.querySelector('select:nth-child(1)');
-        const tierSelect = row.querySelector('select:nth-child(2)');
-        const statSelect = row.querySelector('select:nth-child(3)');
+        const equipmentSelect = row.querySelector('.better-exaltation-equipment-select');
+        const tierSelect = row.querySelector('.better-exaltation-tier-select');
+        const statSelect = row.querySelector('.better-exaltation-stat-select');
         
         if (equipmentSelect && tierSelect && statSelect) {
           newSetup.push({
@@ -3124,7 +3319,7 @@
       
       // Deduplicate rules before saving
       const originalLength = newSetup.length;
-      const deduplicatedSetup = deduplicateRules(newSetup);
+      const deduplicatedSetup = normalizeUserRules(newSetup);
       if (deduplicatedSetup.length !== originalLength) {
         console.log(`[Better Exaltation Chest] Removed ${originalLength - deduplicatedSetup.length} duplicate rule(s) before saving`);
       }
@@ -3137,19 +3332,106 @@
   
   // Reset equipment setup to default (single row with "All" selections)
   function resetEquipmentSetup(container) {
-    // Clear all existing rows
-    container.innerHTML = '';
-    
-    // Reset the equipment setup array to default "All/All/All"
+    // Drop any pending debounced save so it can't overwrite the reset
+    if (saveEquipmentSetupTimeout) {
+      clearTimeout(saveEquipmentSetupTimeout);
+      pendingTimeouts.delete(saveEquipmentSetupTimeout);
+      saveEquipmentSetupTimeout = null;
+    }
+
+    // Reset the equipment setup array to default "All/All/All" and re-render (locked row included)
     equipmentSetup = [{ equipment: 'All', tier: 'All', stat: 'All' }];
-    
-    // Add one default row
-    addEquipmentSetupRow(container);
+    loadEquipmentSetupRows(container);
     
     // Save the reset state
     saveSetting(STORAGE_KEYS.EQUIPMENT_SETUP, equipmentSetup);
     
     console.log('[Better Exaltation Chest] Equipment setup reset to default: All/All/All');
+  }
+
+  // Build setup rules from Autoseller's Autoduster "Keep" settings.
+  // Mirrors Autoseller's isItemKeptByFilterList() + autodusterKeepStats semantics:
+  //  - equipment in the Autoduster Keep column   -> "<name>/All/All"
+  //  - equipment in the Disenchant column with
+  //    per-stat keep (AD/AP/HP) ticked            -> "<name>/All/<STAT>" per kept stat
+  // Returns null if Autoseller settings are missing/unreadable.
+  function buildRulesFromAutosellerKeepSettings() {
+    let stored;
+    try {
+      const raw = localStorage.getItem('autoseller-settings');
+      if (!raw) return null;
+      stored = JSON.parse(raw) || {};
+    } catch (error) {
+      console.warn('[Better Exaltation Chest] Failed to read Autoseller settings:', error);
+      return null;
+    }
+
+    const ignoreListExists = 'autodusterIgnoreList' in stored;
+    const sellListExists = 'autodusterSellList' in stored;
+    const ignoreList = Array.isArray(stored.autodusterIgnoreList) ? stored.autodusterIgnoreList : [];
+    const sellList = Array.isArray(stored.autodusterSellList) ? stored.autodusterSellList : [];
+    const keepStatsByName = stored.autodusterKeepStats || {};
+
+    const isKept = (name) => {
+      if (!ignoreListExists && !sellListExists) return true; // Autoseller fresh-install default: keep
+      if (ignoreList.includes(name)) return true;
+      if (!sellListExists) return false; // legacy keep-only config
+      return !sellList.includes(name);   // tri-state: new releases default to keep
+    };
+
+    const equipmentNames = generateEquipmentList().filter(name => !EXCLUDED_EQUIPMENT.includes(name));
+    const rules = [];
+    let fullyKeptCount = 0;
+
+    equipmentNames.forEach(name => {
+      if (isKept(name)) {
+        rules.push({ equipment: name, tier: 'All', stat: 'All' });
+        fullyKeptCount++;
+        return;
+      }
+      const keepStats = keepStatsByName[name];
+      if (!keepStats) return;
+      const keptStats = ['hp', 'ad', 'ap'].filter(stat => keepStats[stat] === true);
+      if (keptStats.length === 3) {
+        rules.push({ equipment: name, tier: 'All', stat: 'All' });
+        fullyKeptCount++;
+      } else {
+        keptStats.forEach(stat => rules.push({ equipment: name, tier: 'All', stat: stat.toUpperCase() }));
+      }
+    });
+
+    // Everything kept in full -> collapse to a single All/All/All rule
+    if (equipmentNames.length > 0 && fullyKeptCount === equipmentNames.length) {
+      return [{ equipment: 'All', tier: 'All', stat: 'All' }];
+    }
+    return rules;
+  }
+
+  // Replace the current setup with rules copied from Autoseller's Autoduster "Keep" settings
+  function copyAutosellerKeepSettings(container) {
+    if (generateEquipmentList().length === 0) {
+      showFeedbackMessage(t('mods.betterExaltationChest.loadingEquipment'), false);
+      return;
+    }
+
+    const rules = buildRulesFromAutosellerKeepSettings();
+    if (rules === null) {
+      showFeedbackMessage(t('mods.betterExaltationChest.copyAutosellerNoSettings'), false);
+      return;
+    }
+    // Drop any pending debounced save so it can't overwrite the copied rules
+    if (saveEquipmentSetupTimeout) {
+      clearTimeout(saveEquipmentSetupTimeout);
+      pendingTimeouts.delete(saveEquipmentSetupTimeout);
+      saveEquipmentSetupTimeout = null;
+    }
+
+    equipmentSetup = normalizeUserRules(rules);
+    saveSetting(STORAGE_KEYS.EQUIPMENT_SETUP, equipmentSetup);
+    if (container) loadEquipmentSetupRows(container);
+
+    showFeedbackMessage(t('mods.betterExaltationChest.copyAutosellerDone').replace('{count}', equipmentSetup.length), true);
+    console.log(`[Better Exaltation Chest] Copied ${equipmentSetup.length} rule(s) from Autoseller Autoduster keep settings`);
   }
   
   // =======================

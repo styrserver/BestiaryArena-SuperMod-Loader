@@ -4401,7 +4401,9 @@ function createSpritePreviewBox(spriteEl, configEntry) {
   const spriteId = spriteEl
     ? getSpriteIdsFromElement(spriteEl)[0]
     : configEntry?.id;
-  box.title = spriteId != null ? `Sprite ID ${spriteId}` : 'Sprite preview';
+  box.title = spriteId != null
+    ? tReplace('mods.mapEditor.spritePreviewId', { id: spriteId }, 'Sprite ID {id}')
+    : t('mods.mapEditor.spritePreview', 'Sprite preview');
 
   const domConfig = spriteEl ? compactSpriteConfig(extractSpriteConfig(spriteEl)) : null;
   const config = domConfig
@@ -5716,7 +5718,7 @@ function updateHitboxOverlay() {
 
   const hitboxes = getHitboxes();
   if (!hitboxes?.length) {
-    setStatusMessage('No hitbox data for this room.', true);
+    setStatusMessage(t('mods.mapEditor.hitboxNoData', 'No hitbox data for this room.'), true);
     editorState.hitboxOverlay = false;
     const toggle = document.getElementById('map-editor-hitbox-toggle');
     if (toggle) toggle.checked = false;
@@ -5734,7 +5736,9 @@ function updateHitboxOverlay() {
 
     const overlay = document.createElement('div');
     overlay.className = HITBOX_OVERLAY_TILE_CLASS;
-    overlay.title = blocked ? `Tile ${tileId}: blocked` : `Tile ${tileId}: walkable`;
+    overlay.title = blocked
+      ? tReplace('mods.mapEditor.hitboxTileBlocked', { tile: tileId }, 'Tile {tile}: blocked')
+      : tReplace('mods.mapEditor.hitboxTileWalkable', { tile: tileId }, 'Tile {tile}: walkable');
     const bg = blocked ? 'rgba(255,80,80,0.45)' : 'rgba(80,200,120,0.35)';
     overlay.style.cssText = getTileOverlayBoxStyle([
       'pointer-events:none',
@@ -5746,14 +5750,14 @@ function updateHitboxOverlay() {
   });
 
   if (!overlayCount) {
-    setStatusMessage('Hitbox data found but no battlefield tiles matched.', true);
+    setStatusMessage(t('mods.mapEditor.hitboxNoTilesMatched', 'Hitbox data found but no battlefield tiles matched.'), true);
     editorState.hitboxOverlay = false;
     const toggle = document.getElementById('map-editor-hitbox-toggle');
     if (toggle) toggle.checked = false;
     return;
   }
 
-  setStatusMessage(`Hitbox overlay enabled (${overlayCount} tiles).`);
+  setStatusMessage(tReplace('mods.mapEditor.hitboxOverlayEnabled', { count: overlayCount }, 'Hitbox overlay enabled ({count} tiles).'));
 }
 
 // =======================
@@ -14087,11 +14091,12 @@ function refreshEditTab() {
 
   if (contextPrimary) {
     if (!room) {
-      contextPrimary.textContent = 'No room loaded';
+      contextPrimary.textContent = t('mods.mapEditor.contextNoRoom', 'No room loaded');
     } else if (tileIndex == null) {
       contextPrimary.textContent = `${room.id || 'no-id'} · ${getRoomDisplayName(room)}`;
     } else {
-      contextPrimary.textContent = `${room.id || 'no-id'} · ${getRoomDisplayName(room)} · Tile ${tileIndex}`;
+      contextPrimary.textContent = `${room.id || 'no-id'} · ${getRoomDisplayName(room)}`
+        + tReplace('mods.mapEditor.contextTileSuffix', { tile: tileIndex }, ' · Tile {tile}');
     }
   }
 
@@ -16199,7 +16204,7 @@ function findMapSelectorButtons() {
   else {
     for (const span of document.querySelectorAll('button span')) {
       const text = (span.textContent || '').trim();
-      if (text !== 'Select map' && text !== 'Maps') continue;
+      if (!['Select map', 'Maps', 'Selecionar mapa', 'Mapas'].includes(text)) continue;
       const btn = span.closest('button');
       if (btn) {
         buttons.push(btn);

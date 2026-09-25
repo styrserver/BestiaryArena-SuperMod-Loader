@@ -2152,7 +2152,7 @@ function createInventoryStyleCreaturePortrait(creatureData) {
         const shinyIcon = document.createElement('img');
         shinyIcon.src = 'https://bestiaryarena.com/assets/icons/shiny-star.png';
         shinyIcon.alt = 'Shiny';
-        shinyIcon.title = 'Shiny';
+        shinyIcon.title = t('mods.huntAnalyzer.shiny');
         shinyIcon.style.position = 'absolute';
         shinyIcon.style.bottom = '0px';
         shinyIcon.style.right = '0px';
@@ -2168,7 +2168,7 @@ function createInventoryStyleCreaturePortrait(creatureData) {
         sealedIcon.src = SEALED_ICON_SRC;
         sealedIcon.className = 'tier-stars pixelated absolute right-0 top-0 z-2 opacity-75';
         sealedIcon.alt = 'Sealed';
-        sealedIcon.title = 'Sealed';
+        sealedIcon.title = t('mods.huntAnalyzer.sealed');
         sealedIcon.style.width = '9px';
         sealedIcon.style.height = '10px';
         sealedIcon.style.filter = 'drop-shadow(black 0px 0px 1px)';
@@ -2985,43 +2985,11 @@ const UIElements = {
 // 3.0. Game integration helpers
 // =======================
 
-const HUNT_ANALYZER_RUNE_LOOKUP_PATTERNS = [
-    { patterns: ['shinytransfer', 'shiny-transfer', 'transfusion'], key: 'runeTransfusion' },
-    { patterns: ['kaleidoscopic', 'monster-recycle'], key: 'runeKaleidoscopic' },
-    { patterns: ['conversionhp', 'conversion-hp'], key: 'runeConversionHp' },
-    { patterns: ['conversionad', 'conversion-ad'], key: 'runeConversionAd' },
-    { patterns: ['conversionap', 'conversion-ap'], key: 'runeConversionAp' },
-    { patterns: ['blankrune', 'blank'], key: 'runeBlank' },
-    { patterns: ['avaricerune', 'avarice'], key: 'runeAvarice' },
-    { patterns: ['recyclerune', 'recycle'], key: 'runeRecycle' },
-    { patterns: ['hitpointsrune', 'hitpoints', 'hprune'], key: 'runeHp' },
-    { patterns: ['abilitypowerrune', 'abilitypower', 'aprune'], key: 'runeAp' },
-    { patterns: ['attackdamagerune', 'attackdamage', 'adrune'], key: 'runeAd' },
-    { patterns: ['armorrune', 'armor', 'arrune'], key: 'runeAr' },
-    { patterns: ['magicresistrune', 'magicresist', 'mrrune'], key: 'runeMr' }
-];
-
 const HUNT_ANALYZER_TIERED_CONSUMABLE_RULES = [
     { hints: ['dicemanipulator', 'dice'], keyPrefix: 'diceManipulator' },
     { hints: ['stamina'], keyPrefix: 'stamina' },
     { hints: ['summonscroll', 'summon'], keyPrefix: 'summonScroll' },
     { hints: ['insightstone', 'insight'], keyPrefix: 'insightStone' }
-];
-
-const HUNT_ANALYZER_RUNE_SPRITE_KEYS = [
-    ['rune-shiny-transfer', 'runeTransfusion'],
-    ['rune-monster-recycle', 'runeKaleidoscopic'],
-    ['rune-conversion-hp', 'runeConversionHp'],
-    ['rune-conversion-ad', 'runeConversionAd'],
-    ['rune-conversion-ap', 'runeConversionAp'],
-    ['rune-avarice', 'runeAvarice'],
-    ['rune-recycle', 'runeRecycle'],
-    ['rune-hp', 'runeHp'],
-    ['rune-ap', 'runeAp'],
-    ['rune-ad', 'runeAd'],
-    ['rune-ar', 'runeAr'],
-    ['rune-mr', 'runeMr'],
-    ['rune-blank', 'runeBlank']
 ];
 
 function matchesAnyNameHint(value, hints) {
@@ -3046,38 +3014,26 @@ function lookupTieredConsumableTooltip(inventoryDB, keyPrefix, item) {
     };
 }
 
-function resolveRuneItemInfoFromDatabase(inventoryDB, normalizedItemName, normalizedTooltip, item) {
-    for (const runePattern of HUNT_ANALYZER_RUNE_LOOKUP_PATTERNS) {
-        for (const pattern of runePattern.patterns) {
-            if (normalizedItemName?.includes(pattern) || normalizedTooltip?.includes(pattern)) {
-                return {
-                    rarity: inventoryDB.tooltips[runePattern.key]?.rarity || '1',
-                    displayName: inventoryDB.tooltips[runePattern.key]?.displayName || null
-                };
-            }
-        }
-    }
+// Rune identity comes from database/inventory-database.js (icon file name, then name/key), so a rune
+// added there is recognised here with no change. Unknown runes return null (never guessed as another rune).
+function resolveRuneItemInfoFromDatabase(inventoryDB, itemName, tooltipKey, item) {
+    const runeKeys = inventoryDB.runeKeysOrder || [];
+    const asRune = (key) => (key && runeKeys.includes(key) ? key : null);
+    const findByName = (label, partial) => asRune(inventoryDB.findItemKey?.(label, { partial }));
 
-    const spriteSrc = item?.spriteSrc;
-    if (spriteSrc) {
-        for (const [fragment, key] of HUNT_ANALYZER_RUNE_SPRITE_KEYS) {
-            if (spriteSrc.includes(fragment)) {
-                return {
-                    rarity: inventoryDB.tooltips[key]?.rarity || '1',
-                    displayName: inventoryDB.tooltips[key]?.displayName || null
-                };
-            }
-        }
-    }
+    const key =
+        asRune(inventoryDB.findItemKeyByIcon?.(item?.spriteSrc)) ||
+        findByName(tooltipKey, false) ||
+        findByName(itemName, false) ||
+        findByName(tooltipKey, true) ||
+        findByName(itemName, true);
 
-    if (inventoryDB.tooltips['runeBlank']) {
-        return {
-            rarity: inventoryDB.tooltips['runeBlank'].rarity,
-            displayName: inventoryDB.tooltips['runeBlank'].displayName
-        };
-    }
-
-    return null;
+    const entry = key ? inventoryDB.tooltips[key] : null;
+    if (!entry) return null;
+    return {
+        rarity: entry.rarity || '1',
+        displayName: entry.displayName || null
+    };
 }
 
 // Checks if the current game mode is sandbox mode.
@@ -3153,9 +3109,7 @@ function getItemInfoFromDatabase(itemName, tooltipKey, item) {
     }
 
     if (normalizedItemName?.includes('rune') || normalizedTooltip?.includes('rune')) {
-        const result = resolveRuneItemInfoFromDatabase(
-            inventoryDB, normalizedItemName, normalizedTooltip, item
-        );
+        const result = resolveRuneItemInfoFromDatabase(inventoryDB, itemName, tooltipKey, item);
         if (result) {
             itemInfoCache.set(cacheKey, result);
             return result;
@@ -3588,7 +3542,7 @@ function getCreatureDetails(monsterDrop) {
         const shinyIcon = document.createElement('img');
         shinyIcon.src = '/assets/icons/shiny-star.png';
         shinyIcon.alt = 'shiny';
-        shinyIcon.title = 'Shiny';
+        shinyIcon.title = t('mods.huntAnalyzer.shiny');
         shinyIcon.style.position = 'absolute';
         shinyIcon.style.top = '2px';
         shinyIcon.style.left = '2px';
@@ -3603,7 +3557,7 @@ function getCreatureDetails(monsterDrop) {
         const sealedIcon = document.createElement('img');
         sealedIcon.src = SEALED_ICON_SRC;
         sealedIcon.alt = 'sealed';
-        sealedIcon.title = 'Sealed';
+        sealedIcon.title = t('mods.huntAnalyzer.sealed');
         sealedIcon.style.position = 'absolute';
         sealedIcon.style.top = '2px';
         sealedIcon.style.right = '2px';
@@ -4332,7 +4286,7 @@ function updateRoomTitleDisplay(roomId, roomName) {
     // Check if map is boosted
     const boostedRoomId = globalThis.state?.daily?.getSnapshot?.()?.context?.boostedMap?.roomId;
     if (boostedRoomId === roomId) {
-        statusIndicators.push('Boosted');
+        statusIndicators.push(t('mods.huntAnalyzer.boostedIndicator'));
     }
 
     // Check if map is a raid using maps database

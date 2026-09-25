@@ -9,6 +9,11 @@
   
   const defaultConfig = { enabled: true };
   const config = { ...defaultConfig, ...context?.config };
+
+  const t = (key) => {
+    const modApi = (typeof api !== 'undefined' && api) ? api : (typeof context !== 'undefined' && context && context.api) ? context.api : window.BestiaryModAPI;
+    return (modApi && modApi.i18n && typeof modApi.i18n.t === 'function') ? modApi.i18n.t(key) : key;
+  };
   
   const FORGE_CONFIG = {
     BUTTON_CHECK_INTERVAL: 1000,
@@ -205,14 +210,14 @@
     if (showUserMessage && api?.ui?.components?.createModal) {
       try {
         api.ui.components.createModal({
-          title: 'Better Forge Error',
-          content: `<p>An error occurred in ${context}. The system has been reset.</p>`,
+          title: t('mods.betterForge.errorTitle'),
+          content: `<p>${t('mods.betterForge.errorReset').replace('{context}', context)}</p>`,
           buttons: [{ text: 'OK', primary: true }]
         });
       } catch (modalError) {
         console.error('[Better Forge] Failed to show error modal:', modalError);
         // Fallback: show alert if modal fails
-        alert(`Better Forge Error: An error occurred in ${context}. The system has been reset.`);
+        alert(`${t('mods.betterForge.errorTitle')}: ${t('mods.betterForge.errorReset').replace('{context}', context)}`);
       }
     }
   };
@@ -257,17 +262,17 @@
   function updateDisenchantButtonState(button, state, hasHighTier = false) {
     const states = {
       normal: {
-        text: 'Disenchant',
+        text: t('mods.betterForge.disenchant'),
         borderColor: '#ffe066',
         color: '#e6d7b0'
       },
       confirmation: {
-        text: hasHighTier ? 'Confirm\nDisenchant' : 'Confirm Disenchant',
+        text: hasHighTier ? t('mods.betterForge.confirmDisenchant').replace(' ', '\n') : t('mods.betterForge.confirmDisenchant'),
         borderColor: '#ff8800',
         color: '#ff4444'
       },
       disenchanting: {
-        text: 'Stop',
+        text: t('common.stop'),
         borderColor: '#ff4444',
         color: '#ffcccc'
       }
@@ -323,6 +328,8 @@
     for (const button of buttons) {
       if (button.textContent === 'Confirm Disenchant' || 
           button.textContent === 'Confirm\nDisenchant' ||
+          button.textContent === t('mods.betterForge.confirmDisenchant') ||
+          button.textContent === t('mods.betterForge.confirmDisenchant').replace(' ', '\n') ||
           button.style.borderColor === '#ff8800' ||
           button.style.color === '#ffcc88' ||
           button.style.color === '#ff4444') {
@@ -472,7 +479,7 @@
         updateDisenchantButtonState(button, 'confirmation', hasHighTier);
         
         if (hasHighTier) {
-          updateDisenchantStatus('⚠️ WARNING: High-tier items (T3/T4/T5) detected! Click the warning button to proceed', true);
+          updateDisenchantStatus(t('mods.betterForge.highTierWarning'), true);
         } else {
           updateDisenchantStatus();
         }
@@ -484,7 +491,7 @@
       forgeState.isConfirmationMode = false;
       forgeState.isDisenchanting = true;
       updateDisenchantButtonState(button, 'disenchanting');
-      updateDisenchantStatus('Starting disenchanting process...');
+      updateDisenchantStatus(t('mods.betterForge.startingDisenchant'));
       
 
       
@@ -533,7 +540,7 @@
         progressText.textContent = '0%';
       }
       
-      updateDisenchantStatus('Disenchanting stopped');
+      updateDisenchantStatus(t('mods.betterForge.disenchantStopped'));
       
     } catch (error) {
       handleError(error, 'stopDisenchanting', false);
@@ -666,7 +673,7 @@
       if (!forgeState.isForgeConfirmationMode) {
         forgeState.isForgeConfirmationMode = true;
         updateForgeButtonState('confirmation');
-        updateAutoUpgradeStatus('Click "Confirm Forge" to start forging process');
+        updateAutoUpgradeStatus(t('mods.betterForge.clickConfirmForge').replace('{button}', t('mods.betterForge.confirmForge')));
         addEscKeyHandler();
         return;
       }
@@ -677,7 +684,7 @@
       
       if (!canForge || steps.length === 0) {
         console.error(`[Better Forge] ❌ Cannot forge: ${error || 'Insufficient materials'}`);
-        updateAutoUpgradeStatus(error || 'Cannot forge - insufficient materials');
+        updateAutoUpgradeStatus(error || t('mods.betterForge.cannotForgeInsufficient'));
         return;
       }
 
@@ -692,7 +699,7 @@
       
       if (userDust < dustCost) {
         console.error(`[Better Forge] ❌ Insufficient dust: Need ${dustCost}, Have ${userDust}`);
-        updateAutoUpgradeStatus('Not enough dust for forging');
+        updateAutoUpgradeStatus(t('mods.betterForge.notEnoughDustForging'));
         return;
       }
 
@@ -720,7 +727,7 @@
       console.log(`[Better Forge] 📋 Queue contents:`, forgeState.forgeQueue);
 
       updateForgeButtonState('forging');
-      updateAutoUpgradeStatus('Starting forging process...');
+      updateAutoUpgradeStatus(t('mods.betterForge.startingForge'));
 
       // Start forging process with faster interval
               forgeState.forgeInterval = setInterval(() => {
@@ -760,7 +767,7 @@
 
       updateForgeButtonState('normal');
       setForgeUiLocked(false);
-      updateAutoUpgradeStatus('Forging stopped');
+      updateAutoUpgradeStatus(t('mods.betterForge.forgeStopped'));
 
       // Reset progress bar to 0%
       resetForgeProgressBar();
@@ -848,8 +855,11 @@
       if (step.needsDynamicItems) {
         const availableItems = findAvailableItemsForStep(step);
         if (!availableItems) {
-          console.error(`[Better Forge] ❌ No available items found for T${step.fromTier}→T${step.toTier}`);
-          forgeState.isForgingInProgress = false;
+          // Usually an earlier step failed, leaving fewer than two items of this tier. Dropping
+          // just this step left the rest of the plan running on missing inputs, so stop and say why.
+          console.warn(`[Better Forge] No available items found for T${step.fromTier}→T${step.toTier} — stopping`);
+          stopForging();
+          updateAutoUpgradeStatus(t('mods.betterForge.stepMissingItems').replace('{tier}', step.fromTier));
           return;
         }
         step.equipA = availableItems.item1.id;
@@ -1055,7 +1065,7 @@
               updateDustDisplayWithAnimation(dustChange, { cumulativeDisplay: forgeState.cumulativeDustChange });
             }
 
-            updateAutoUpgradeStatus(`Forged ${step.equipment} T${step.fromTier} → T${step.toTier}`);
+            updateAutoUpgradeStatus(t('mods.betterForge.forgedStep').replace('{equipment}', step.equipment).replace('{from}', step.fromTier).replace('{to}', step.toTier));
             
             // Don't reset progress bar here - let next step's animation overwrite it
             // This prevents flickering and ensures smooth transitions between steps
@@ -1084,7 +1094,7 @@
             console.warn(`[Better Forge] ⏰ Rate limited (${result.status}): ${result.message}`);
             // Rate limited - put step back in queue
             forgeState.forgeQueue.unshift(step);
-            updateAutoUpgradeStatus('Rate limited - waiting...');
+            updateAutoUpgradeStatus(t('mods.betterForge.rateLimitedWaiting'));
             // Reset progress bar to 0% for rate limited operations
             resetForgeProgressBar();
           } else if (result.status === 404) {
@@ -1112,11 +1122,11 @@
               return;
             } else {
               console.error(`[Better Forge] ❌ 404 error after ${FORGE_CONFIG.MAX_RETRIES} retries: ${result.message}`);
-              updateAutoUpgradeStatus(`Forge failed after ${FORGE_CONFIG.MAX_RETRIES} retries: ${result.message}`);
+              updateAutoUpgradeStatus(t('mods.betterForge.forgeFailedRetries').replace('{retries}', FORGE_CONFIG.MAX_RETRIES).replace('{error}', result.message));
             }
                       } else {
               console.error(`[Better Forge] ❌ Forge failed: ${result.message || 'Unknown error'}`);
-              updateAutoUpgradeStatus(`Forge failed: ${result.message || 'Unknown error'}`);
+              updateAutoUpgradeStatus(t('mods.betterForge.forgeFailed').replace('{error}', result.message || t('common.unknownError')));
               // Reset progress bar to 0% for failed operations
               resetForgeProgressBar();
             }
@@ -1136,7 +1146,7 @@
           }
           
           if (forgeState.isForging) {
-            updateAutoUpgradeStatus('Forge error - retrying...');
+            updateAutoUpgradeStatus(t('mods.betterForge.forgeErrorRetrying'));
           }
           
           // Reset progress bar to 0% on errors
@@ -1184,7 +1194,7 @@
 
       updateForgeButtonState('normal');
       setForgeUiLocked(false);
-      updateAutoUpgradeStatus('Forging completed successfully!');
+      updateAutoUpgradeStatus(t('mods.betterForge.forgeCompleted'));
 
       // Reset progress bar to 0% completion
       resetForgeProgressBar();
@@ -1195,7 +1205,7 @@
 
               // Set completion status - UI will be refreshed after final API call completes
         setTimeout(() => {
-          updateAutoUpgradeStatus('🎉 Forging completed successfully! Select new equipment to forge again.');
+          updateAutoUpgradeStatus(t('mods.betterForge.forgeCompletedSelectNew'));
           console.log('[Better Forge] ✅ Completion status set');
         }, 1000);
 
@@ -1212,15 +1222,15 @@
 
       const states = {
         normal: {
-          text: 'Forge',
+          text: t('mods.betterForge.forge'),
           color: '#888888'
         },
         confirmation: {
-          text: 'Confirm Forge',
+          text: t('mods.betterForge.confirmForge'),
           color: '#ff8800'
         },
         forging: {
-          text: 'Stop',
+          text: t('common.stop'),
           color: '#ff4444'
         }
       };
@@ -1624,7 +1634,7 @@
           // Update progress tracking for new steps
           forgeState.totalSteps = forgeState.forgeQueue.length;
           
-          updateAutoUpgradeStatus(`Created ${actualPairs} T${currentTier} → T${currentTier + 1} forging steps`);
+          updateAutoUpgradeStatus(t('mods.betterForge.createdSteps').replace('{count}', actualPairs).replace('{from}', currentTier).replace('{to}', currentTier + 1));
         } else {
           console.log(`[Better Forge] ⚠️ No new steps needed for T${currentTier} (${actualPairs} pairs calculated)`);
         }
@@ -1668,7 +1678,7 @@
       const allIds = equipmentToProcess.map(eq => eq.id);
       
       const statusText = document.getElementById('disenchant-status');
-      if (statusText) statusText.textContent = `Disenchanting ${equipmentToProcess.length} item(s)...`;
+      if (statusText) statusText.textContent = t('mods.betterForge.disenchantingItems').replace('{count}', equipmentToProcess.length);
       
       disenchantEquipments(allIds)
         .then(result => {
@@ -1701,7 +1711,7 @@
             }
             const disenchantBtn = getDisenchantButton();
             if (disenchantBtn) updateDisenchantButtonState(disenchantBtn, 'normal');
-            updateDisenchantStatus(result.message || result.error || 'Disenchant failed');
+            updateDisenchantStatus(result.message || result.error || t('mods.betterForge.disenchantFailed'));
             forgeState.isDisenchanting = false;
             forgeState.isDisenchantingInProgress = false;
           }
@@ -1715,7 +1725,7 @@
           }
           const disenchantBtn = getDisenchantButton();
           if (disenchantBtn) updateDisenchantButtonState(disenchantBtn, 'normal');
-          updateDisenchantStatus('Disenchant failed');
+          updateDisenchantStatus(t('mods.betterForge.disenchantFailed'));
           forgeState.isDisenchanting = false;
           forgeState.isDisenchantingInProgress = false;
         });
@@ -1853,11 +1863,11 @@
         
         let statusMessage;
         if (itemsCompleted === 0) {
-          statusMessage = 'Preparing to disenchant...';
+          statusMessage = t('mods.betterForge.preparingDisenchant');
         } else if (itemsCompleted < totalItems) {
-          statusMessage = `Disenchanting... ${itemsCompleted}/${totalItems} items`;
+          statusMessage = t('mods.betterForge.disenchantingProgress').replace('{done}', itemsCompleted).replace('{total}', totalItems);
         } else {
-          statusMessage = `Disenchanting... ${itemsCompleted}/${totalItems} items`;
+          statusMessage = t('mods.betterForge.disenchantingProgress').replace('{done}', itemsCompleted).replace('{total}', totalItems);
         }
         
         statusText.textContent = statusMessage;
@@ -2069,7 +2079,7 @@
   function calculateForgeSteps(equipment, stat, targetTier) {
     // Use only the highlighted equipment IDs for forging
     if (forgeState.highlightedEquipment.size === 0) {
-      return { canForge: false, steps: [], error: 'No equipment highlighted for forging' };
+      return { canForge: false, steps: [], error: t('mods.betterForge.errNoEquipmentHighlightedForging') };
     }
     
     // Get the actual equipment items from the highlighted IDs
@@ -2079,7 +2089,7 @@
       .filter(Boolean);
     
     if (highlightedItems.length === 0) {
-      return { canForge: false, steps: [], error: 'Highlighted equipment not found in inventory' };
+      return { canForge: false, steps: [], error: t('mods.betterForge.errHighlightedNotFound') };
     }
     
     console.log(`[Better Forge] 🔍 calculateForgeSteps - highlighted items:`, highlightedItems);
@@ -2268,7 +2278,7 @@
   function validateHighlightedEquipment(highlightedItems, expectedEquipment, expectedStat, targetTier) {
     try {
       if (highlightedItems.length === 0) {
-        return { valid: false, error: 'No equipment highlighted' };
+        return { valid: false, error: t('mods.betterForge.errNoEquipmentHighlighted') };
       }
       
       // Check that all items have the same equipment name and stat
@@ -2276,21 +2286,21 @@
         if (item.name !== expectedEquipment) {
           return { 
             valid: false, 
-            error: `Equipment mismatch. Expected: ${expectedEquipment}, Got: ${item.name}` 
+            error: t('mods.betterForge.errEquipmentMismatch').replace('{expected}', expectedEquipment).replace('{got}', item.name)
           };
         }
         
         if (item.stat.toLowerCase() !== expectedStat.toLowerCase()) {
           return { 
             valid: false, 
-            error: `Stat mismatch. Expected: ${expectedStat}, Got: ${item.stat}` 
+            error: t('mods.betterForge.errStatMismatch').replace('{expected}', expectedStat).replace('{got}', item.stat)
           };
         }
         
         if (item.tier >= targetTier) {
           return { 
             valid: false, 
-            error: `Cannot use T${item.tier} items to forge T${targetTier}` 
+            error: t('mods.betterForge.errCannotUseTier').replace('{tier}', item.tier).replace('{target}', targetTier)
           };
         }
       }
@@ -2310,14 +2320,14 @@
       if (totalT1Equivalent < totalT1Needed) {
         return { 
           valid: false, 
-          error: `Insufficient materials. Need ${totalT1Needed} T1 equivalents, have ${totalT1Equivalent}` 
+          error: t('mods.betterForge.errInsufficientMaterials').replace('{need}', totalT1Needed).replace('{have}', totalT1Equivalent)
         };
       }
       
       return { valid: true };
       
     } catch (error) {
-      return { valid: false, error: `Validation error: ${error.message}` };
+      return { valid: false, error: t('mods.betterForge.errValidation').replace('{error}', error.message) };
     }
   }
   
@@ -2330,7 +2340,7 @@
       const col2 = document.getElementById('disenchant-col2');
       if (!col2) return;
       
-      col2.innerHTML = '<div style="color:#bbb;text-align:center;padding:16px;grid-column: span 7;">Click equipment in Arsenal to select for disenchant</div>';
+      col2.innerHTML = `<div style="color:#bbb;text-align:center;padding:16px;grid-column: span 7;">${t('mods.betterForge.clickToSelectDisenchant')}</div>`;
       
       const disenchantBtn = getDisenchantButton();
       if (disenchantBtn) {
@@ -2340,7 +2350,7 @@
       forgeState.isDisenchanting = false;
       forgeState.isDisenchantingInProgress = false;
       
-      updateDisenchantStatus(`Disenchanting completed! Gained ${totalDustGained} dust`);
+      updateDisenchantStatus(t('mods.betterForge.disenchantCompleted').replace('{dust}', totalDustGained), false, true);
       
     } catch (error) {
       handleError(error, 'showDisenchantCompletionInColumn', false);
@@ -2419,6 +2429,11 @@
   // ============================================================================
 
   const TYPE_FILTER_OPTIONS = ['All', 'Type', 'T1', 'T2', 'T3', 'T4', 'T5'];
+  const getTypeFilterLabel = (option) => {
+    if (option === 'All') return t('common.all');
+    if (option === 'Type') return t('mods.betterForge.filterType');
+    return option;
+  };
 
   function compareEquipmentByTierThenName(a, b) {
     if (a.tier !== b.tier) return b.tier - a.tier;
@@ -2486,7 +2501,7 @@
     if (filterBtn && typeFilter) {
       const filterIndex = TYPE_FILTER_OPTIONS.findIndex(option => option.toLowerCase() === typeFilter);
       if (filterIndex >= 0) {
-        filterBtn.textContent = TYPE_FILTER_OPTIONS[filterIndex];
+        filterBtn.textContent = getTypeFilterLabel(TYPE_FILTER_OPTIONS[filterIndex]);
       }
     }
   }
@@ -2550,7 +2565,7 @@
       selectionDebounceTimeout = setTimeout(() => {
         // Selection is locked while a forge is running
         if (forgeState.isForging || forgeState.isForgingInProgress) {
-          updateAutoUpgradeStatus('Stop the forge before changing the selection');
+          updateAutoUpgradeStatus(t('mods.betterForge.stopForgeBeforeSelection'));
           return;
         }
 
@@ -2699,25 +2714,25 @@
       }
       
       if (!equipment) {
-        detailsContent.innerHTML = '<div style="color: #888888; font-size: 11px; text-align: center;">Select equipment to see available options</div>';
+        detailsContent.innerHTML = `<div style="color: #888888; font-size: 11px; text-align: center;">${t('mods.betterForge.selectEquipmentForOptions')}</div>`;
         updateForgeButtonColor(null); // Reset to default (grey)
-        updateAutoUpgradeStatus('Select equipment to see available options');
+        updateAutoUpgradeStatus(t('mods.betterForge.selectEquipmentForOptions'));
         return;
       }
       
       if (!tier || !stat) {
-        detailsContent.innerHTML = '<div style="color: #888888; font-size: 11px; text-align: center;">Select tier and stat to see upgrade details</div>';
+        detailsContent.innerHTML = `<div style="color: #888888; font-size: 11px; text-align: center;">${t('mods.betterForge.selectTierStatForDetails')}</div>`;
         updateForgeButtonColor(null); // Reset to default (grey)
-        updateAutoUpgradeStatus('Select tier and stat to see upgrade details');
+        updateAutoUpgradeStatus(t('mods.betterForge.selectTierStatForDetails'));
         return;
       }
       
       const requirements = calculateForgeRequirements(tier, 1);
       
       if (requirements.items === 0) {
-        detailsContent.innerHTML = '<div style="color: #888888; font-size: 11px; text-align: center;">Invalid tier selection</div>';
+        detailsContent.innerHTML = `<div style="color: #888888; font-size: 11px; text-align: center;">${t('mods.betterForge.invalidTierSelection')}</div>`;
         updateForgeButtonColor(null); // Reset to default (grey)
-        updateAutoUpgradeStatus('Invalid tier selection');
+        updateAutoUpgradeStatus(t('mods.betterForge.invalidTierSelection'));
         return;
       }
       
@@ -2784,12 +2799,12 @@
         
         if (userDust >= dustCost) {
           statusDiv.style.color = '#4CAF50'; // Green
-          statusDiv.textContent = `Cost: ${dustCost} dust`;
+          statusDiv.textContent = t('mods.betterForge.costDust').replace('{dust}', dustCost);
           // Update forge button color - can forge
           updateForgeButtonColor(true);
         } else {
           statusDiv.style.color = '#ff4444'; // Red
-          statusDiv.textContent = 'Not enough dust';
+          statusDiv.textContent = t('mods.betterForge.notEnoughDust');
           // Update forge button color - cannot forge
           updateForgeButtonColor(false);
         }
@@ -2804,7 +2819,7 @@
           
           const planTitle = document.createElement('div');
           planTitle.style.cssText = 'font-weight: bold; margin-bottom: 4px; color: #4CAF50;';
-          planTitle.textContent = 'Forge Plan:';
+          planTitle.textContent = t('mods.betterForge.forgePlan');
           planDiv.appendChild(planTitle);
           
           steps.forEach((step, index) => {
@@ -2816,13 +2831,13 @@
               const equipATier = step.equipA.tier || '?';
               const equipBTier = step.equipB.tier || '?';
               const resultTier = step.result.tier || '?';
-              stepDiv.textContent = `Step ${index + 1}: T${equipATier} → T${equipBTier} = T${resultTier}`;
+              stepDiv.textContent = t('mods.betterForge.planStep').replace('{n}', index + 1).replace('{a}', equipATier).replace('{b}', equipBTier).replace('{result}', resultTier);
             } else {
               // Show the planned tier progression
               const fromTier = step.fromTier || '?';
               const toTier = step.toTier || '?';
               const resultTier = step.resultTier || '?';
-              stepDiv.textContent = `Step ${index + 1}: T${fromTier} → T${toTier} = T${resultTier}`;
+              stepDiv.textContent = t('mods.betterForge.planStep').replace('{n}', index + 1).replace('{a}', fromTier).replace('{b}', toTier).replace('{result}', resultTier);
             }
             
             // Log step information for debugging
@@ -2835,7 +2850,7 @@
         }
       } else {
         statusDiv.style.color = '#ff4444'; // Red
-        statusDiv.textContent = 'Not enough items';
+        statusDiv.textContent = t('mods.betterForge.notEnoughItems');
         // Update forge button color - cannot forge
         updateForgeButtonColor(false);
       }
@@ -2855,7 +2870,7 @@
       console.error('[Better Forge] Error updating details display:', error);
       const detailsContent = document.getElementById('auto-upgrade-details-col');
       if (detailsContent) {
-        detailsContent.innerHTML = '<div style="color: #ff4444; font-size: 11px; text-align: center;">Error calculating requirements</div>';
+        detailsContent.innerHTML = `<div style="color: #ff4444; font-size: 11px; text-align: center;">${t('mods.betterForge.errorCalculating')}</div>`;
       }
     }
   }
@@ -3365,7 +3380,7 @@
 
         searchInput.value = equipmentName;
         searchInput.disabled = true;
-        searchInput.title = 'Deselect the equipment in the Auto-upgrade tab to search freely';
+        searchInput.title = t('mods.betterForge.deselectToSearch');
         searchInput.style.opacity = '0.5';
         searchInput.style.cursor = 'not-allowed';
       } else {
@@ -3486,7 +3501,7 @@
           emptyMsg.style.cssText = 'color:#bbb;text-align:center;padding:8px;font-size:11px;word-wrap:break-word;overflow-wrap:break-word;';
           col.appendChild(emptyMsg);
         }
-        emptyMsg.textContent = `No equipment matching "${searchTerm}"`;
+        emptyMsg.textContent = t('mods.betterForge.noEquipmentMatching').replace('{search}', searchTerm);
         emptyMsg.style.display = '';
       } else if (emptyMsg) {
         emptyMsg.style.display = 'none';
@@ -3686,7 +3701,7 @@
     if (isMissing) {
       // Show missing items display
       const missingLabel = document.createElement('span');
-      missingLabel.textContent = 'Need: ';
+      missingLabel.textContent = t('mods.betterForge.needLabel');
       missingLabel.style.cssText = `
         color: #ff4444;
         font-weight: bold;
@@ -3779,7 +3794,7 @@
       const requirements = calculateForgeRequirements(tier, 1);
       
       if (requirements.items === 0) {
-        updateAutoUpgradeStatus('Invalid tier selection');
+        updateAutoUpgradeStatus(t('mods.betterForge.invalidTierSelection'));
         return;
       }
       
@@ -3808,7 +3823,7 @@
       
     } catch (error) {
       console.error('[Better Forge] Error checking inventory for auto-upgrade:', error);
-      updateAutoUpgradeStatus('Error checking inventory');
+      updateAutoUpgradeStatus(t('mods.betterForge.errorCheckingInventory'));
     }
   }
   
@@ -4381,13 +4396,13 @@
              contentDiv.style.minWidth = '0';
              
              const arsenalBox = createBox({
-               title: 'Arsenal',
+               title: t('mods.betterForge.arsenalTitle'),
                content: getArsenalContent()
              });
              arsenalBox.classList.add('better-forge-modal-left');
              
              const forgeBox = createBox({
-               title: 'Forge',
+               title: t('mods.betterForge.forge'),
                content: getForgeContent()
              });
              forgeBox.classList.add('better-forge-modal-right');
@@ -4401,7 +4416,7 @@
                width: modalDimensions.width,
                height: modalDimensions.height,
                content: contentDiv,
-               buttons: [{ text: 'Close', primary: true }],
+               buttons: [{ text: t('common.close'), primary: true }],
                onClose: handleBetterForgeModalClose
              });
 
@@ -4593,7 +4608,7 @@
                      filteredEquipment = applyTypeFilter(baseEquipment, currentFilter);
                      
                      if (!filteredEquipment.length) {
-                       scrollArea.innerHTML = '<div style="color:#bbb;text-align:center;padding:16px;grid-column: span 6;max-width:100%;word-wrap:break-word;overflow-wrap:break-word;">No equipment found.</div>';
+                       scrollArea.innerHTML = '<div style="color:#bbb;text-align:center;padding:16px;grid-column: span 6;max-width:100%;word-wrap:break-word;overflow-wrap:break-word;">' + t('mods.betterForge.noEquipmentFound') + '</div>';
                        return;
                      }
                      
@@ -4681,7 +4696,7 @@
        
          const searchInput = document.createElement('input');
          searchInput.id = 'better-forge-search';
-         searchInput.placeholder = 'Search equipment...';
+         searchInput.placeholder = t('common.searchEquipment');
          searchInput.style.cssText = 'background: rgba(255, 255, 255, 0.1); color: #fff; border: 1px solid rgba(255, 255, 255, 0.2); padding: 3px 6px; border-radius: 2px; font-size: 12px; flex: 1; font-family: inherit; outline: none; box-sizing: border-box;';
          
          eventManager.add(searchInput, 'focus', () => {
@@ -4694,8 +4709,8 @@
          
          const filterBtn = document.createElement('button');
          filterBtn.id = 'better-forge-type';
-         filterBtn.title = 'Type';
-         filterBtn.textContent = 'All';
+         filterBtn.title = t('mods.betterForge.filterType');
+         filterBtn.textContent = t('common.all');
          filterBtn.style.cssText = 'background: rgba(255, 255, 255, 0.1); color: #fff; border: 1px solid rgba(255, 255, 255, 0.2); padding: 3px 8px; border-radius: 2px; font-size: 12px; cursor: pointer; font-family: inherit; outline: none; white-space: nowrap; min-width: 50px;';
          
          eventManager.add(filterBtn, 'mouseenter', () => {
@@ -4836,12 +4851,12 @@
        scrollArea.innerHTML = '';
        
        if (!equipmentItems.length) {
-         scrollArea.innerHTML = '<div style="color:#bbb;text-align:center;padding:16px;grid-column: span 6;max-width:100%;word-wrap:break-word;overflow-wrap:break-word;">No equipment found.</div>';
+         scrollArea.innerHTML = '<div style="color:#bbb;text-align:center;padding:16px;grid-column: span 6;max-width:100%;word-wrap:break-word;overflow-wrap:break-word;">' + t('mods.betterForge.noEquipmentFound') + '</div>';
          return;
        }
        
                 if (forgeState.isDisenchanting || forgeState.isDisenchantingInProgress) {
-           scrollArea.innerHTML = '<div style="color:#ffcc88;text-align:center;padding:16px;grid-column: span 6;max-width:100%;word-wrap:break-word;overflow-wrap:break-word;">Disenchanting in progress... Please wait.</div>';
+           scrollArea.innerHTML = '<div style="color:#ffcc88;text-align:center;padding:16px;grid-column: span 6;max-width:100%;word-wrap:break-word;overflow-wrap:break-word;">' + t('mods.betterForge.disenchantInProgressWait') + '</div>';
            return;
          }
        
@@ -4890,7 +4905,7 @@
                    word-wrap: break-word;
                    overflow-wrap: break-word;
                  `;
-                 noResultsMsg.textContent = `No equipment found matching "${searchValue}"`;
+                 noResultsMsg.textContent = t('mods.betterForge.noEquipmentFoundMatching').replace('{search}', searchValue);
                  scrollArea.appendChild(noResultsMsg);
                } else {
                  const fragment = document.createDocumentFragment();
@@ -4938,13 +4953,13 @@
        const disenchantBtn = document.createElement('button');
        disenchantBtn.id = 'better-forge-tab-disenchant';
        disenchantBtn.className = 'frame-pressed-1 surface-regular px-4 py-1 flex-1 tab-active';
-       disenchantBtn.textContent = 'Disenchant';
+       disenchantBtn.textContent = t('mods.betterForge.disenchant');
        disenchantBtn.style.cssText = 'margin: 0; padding: 2px 8px; text-align: center; color: rgb(255, 255, 255); cursor: pointer; height: auto; font-size: 14px; font-weight: bold;';
 
        const upgradeBtn = document.createElement('button');
        upgradeBtn.id = 'better-forge-tab-upgrade';
        upgradeBtn.className = 'frame-pressed-1 surface-dark px-4 py-1 flex-1';
-       upgradeBtn.textContent = 'Auto-upgrade';
+       upgradeBtn.textContent = t('mods.betterForge.autoUpgradeTab');
        upgradeBtn.style.cssText = 'margin: 0; padding: 2px 8px; text-align: center; color: rgb(255, 255, 255); cursor: pointer; height: auto; font-size: 14px; font-weight: bold;';
        
        const contentArea = document.createElement('div');
@@ -4958,7 +4973,7 @@
        eventManager.add(disenchantBtn, 'click', () => {
          // Tabs are locked while a forge is running — stop it first
          if (forgeState.isForging || forgeState.isForgingInProgress) {
-           updateAutoUpgradeStatus('Stop the forge before switching tabs');
+           updateAutoUpgradeStatus(t('mods.betterForge.stopForgeBeforeTabs'));
            return;
          }
 
@@ -4994,7 +5009,7 @@
        eventManager.add(upgradeBtn, 'click', () => {
          // Tabs are locked while a forge is running — stop it first
          if (forgeState.isForging || forgeState.isForgingInProgress) {
-           updateAutoUpgradeStatus('Stop the forge before switching tabs');
+           updateAutoUpgradeStatus(t('mods.betterForge.stopForgeBeforeTabs'));
            return;
          }
 
@@ -5043,7 +5058,7 @@
        
        const title = document.createElement('h3');
        title.style.cssText = 'margin: 0 0 10px 0; padding: 0; font-size: 16px; font-weight: bold; color: rgb(255, 255, 255); text-align: center;';
-       title.textContent = 'Disenchant Equipment';
+       title.textContent = t('mods.betterForge.disenchantEquipmentTitle');
        
        const columnContainer = document.createElement('div');
        columnContainer.style.cssText = 'display: flex; flex-direction: column; flex: 1; min-height: 0; width: 100%; min-width: 0; box-sizing: border-box;';
@@ -5053,16 +5068,16 @@
        
        const colTitle = document.createElement('h4');
        colTitle.style.cssText = 'margin: 0 0 4px 0; padding: 0; font-size: 14px; font-weight: bold; color: rgb(255, 255, 255); text-align: center;';
-       colTitle.textContent = 'Selected for Disenchant';
+       colTitle.textContent = t('mods.betterForge.selectedForDisenchant');
        
        const colContent = document.createElement('div');
        colContent.style.cssText = 'height: 124px; max-height: 124px; overflow-y: auto; display: grid; grid-template-columns: repeat(7, 1fr); grid-auto-rows: 34px; gap: 0; padding: 2px; background: rgba(40,40,40,0.96); width: 100%; box-sizing: border-box;';
        colContent.id = 'disenchant-col2';
        
        if (forgeState.isDisenchanting || forgeState.isDisenchantingInProgress) {
-         colContent.innerHTML = '<div style="color:#ffcc88;text-align:center;padding:16px;grid-column: span 7;">Disenchanting in progress... Equipment cannot be removed.</div>';
+         colContent.innerHTML = `<div style="color:#ffcc88;text-align:center;padding:16px;grid-column: span 7;">${t('mods.betterForge.disenchantInProgressLocked')}</div>`;
        } else {
-         colContent.innerHTML = '<div style="color:#bbb;text-align:center;padding:16px;grid-column: span 7;">Click equipment in Arsenal to select for disenchant</div>';
+         colContent.innerHTML = `<div style="color:#bbb;text-align:center;padding:16px;grid-column: span 7;">${t('mods.betterForge.clickToSelectDisenchant')}</div>`;
        }
        
        const disenchantControls = document.createElement('div');
@@ -5137,15 +5152,15 @@
          if (confirmCount > 0) {
            statusText.style.color = '#e6d7b0';
           const targetLabel = getConfirmationDisenchantTargetLabel(confirmEquipmentItems);
-          statusText.innerHTML = `Confirm to disenchant ${targetLabel} for <span style="color:#7dd3fc">${confirmDust} dust</span>`;
+          statusText.innerHTML = t('mods.betterForge.confirmDisenchantFor').replace('{target}', targetLabel).replace('{dust}', `<span style="color:#7dd3fc">${t('mods.betterForge.dustAmount').replace('{dust}', confirmDust)}</span>`);
          } else {
-           statusText.textContent = 'No equipment selected';
+           statusText.textContent = t('mods.betterForge.noEquipmentSelected');
            statusText.style.color = '#e6d7b0';
          }
        } else if (forgeState.isDisenchanting) {
-         statusText.textContent = 'Disenchanting in progress...';
+         statusText.textContent = t('mods.betterForge.disenchantInProgress');
        } else {
-         statusText.textContent = 'No equipment selected';
+         statusText.textContent = t('mods.betterForge.noEquipmentSelected');
        }
        
        statusText.id = 'disenchant-status';
@@ -5182,7 +5197,7 @@
       
       const title = document.createElement('h3');
       title.style.cssText = 'margin: 0 0 10px 0; padding: 0; font-size: 16px; font-weight: bold; color: rgb(255, 255, 255); text-align: center;';
-      title.textContent = 'Auto-upgrade Equipment';
+      title.textContent = t('mods.betterForge.autoUpgradeTitle');
       
       const columnContainer = document.createElement('div');
       columnContainer.style.cssText = 'display: flex; flex-direction: column; flex: 1; min-height: 0; width: 100%; min-width: 0; box-sizing: border-box;';
@@ -5197,7 +5212,7 @@
       
       const equipmentTitle = document.createElement('h4');
       equipmentTitle.style.cssText = 'margin: 0 0 4px 0; padding: 0; font-size: 14px; font-weight: bold; color: rgb(255, 255, 255); text-align: center;';
-      equipmentTitle.textContent = 'Equipment';
+      equipmentTitle.textContent = t('mods.betterForge.equipmentTitle');
       
              const equipmentContent = document.createElement('div');
        equipmentContent.style.cssText = 'height: 124px; max-height: 124px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; padding: 2px; background: rgba(40,40,40,0.96); width: 100%; box-sizing: border-box;';
@@ -5267,7 +5282,7 @@
        
        const tiersTitle = document.createElement('h4');
        tiersTitle.style.cssText = 'margin: 0 0 4px 0; padding: 0; font-size: 14px; font-weight: bold; color: rgb(255, 255, 255); text-align: center;';
-       tiersTitle.textContent = 'Tiers';
+       tiersTitle.textContent = t('mods.betterForge.tiersTitle');
        
        const tiersContent = document.createElement('div');
        tiersContent.style.cssText = 'height: calc(100% - 20px); max-height: calc(100% - 20px); overflow-y: auto; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 2px; padding: 2px; background: rgba(40,40,40,0.96); width: 100%; box-sizing: border-box; align-items: center; justify-items: center;';
@@ -5296,7 +5311,7 @@
          tierItem.className = 'auto-upgrade-tier';
          tierItem.style.borderColor = getRarityBorderColor(tier.level);
          tierItem.textContent = tier.name;
-         tierItem.title = `Tier ${tier.level}`;
+         tierItem.title = t('mods.betterForge.tierN').replace('{n}', tier.level);
          
          eventManager.add(tierItem, 'click', createSelectionHandler('tiers', tier.level));
          
@@ -5311,7 +5326,7 @@
        
        const statsTitle = document.createElement('h4');
        statsTitle.style.cssText = 'margin: 0 0 4px 0; padding: 0; font-size: 14px; font-weight: bold; color: rgb(255, 255, 255); text-align: center;';
-       statsTitle.textContent = 'Stats';
+       statsTitle.textContent = t('mods.betterForge.statsTitle');
        
        const statsContent = document.createElement('div');
        statsContent.style.cssText = 'height: calc(100% - 20px); max-height: calc(100% - 20px); overflow-y: auto; display: flex; flex-direction: row; gap: 4px; padding: 2px; background: rgba(40,40,40,0.96); width: 100%; box-sizing: border-box;';
@@ -5347,11 +5362,11 @@
       
       const detailsTitle = document.createElement('h4');
       detailsTitle.style.cssText = 'margin: 0 0 4px 0; padding: 0; font-size: 14px; font-weight: bold; color: rgb(255, 255, 255); text-align: center;';
-      detailsTitle.textContent = 'Result';
+      detailsTitle.textContent = t('mods.betterForge.resultTitle');
       
       const detailsContent = document.createElement('div');
       detailsContent.style.cssText = 'height: 124px; max-height: 124px; overflow-y: auto; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; color: #888888; font-size: 11px; text-align: center; padding: 8px; background: rgba(40,40,40,0.96); width: 100%; box-sizing: border-box; gap: 4px;';
-      detailsContent.textContent = 'Select equipment, tier, and stat to see result';
+      detailsContent.textContent = t('mods.betterForge.selectForResult');
       detailsContent.id = 'auto-upgrade-details-col';
       
              // Assemble the three columns
@@ -5385,7 +5400,7 @@
       const forgeBtn = document.createElement('button');
       forgeBtn.id = 'auto-upgrade-forge-btn';
       forgeBtn.style.cssText = 'background: url("https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png") repeat; border: 6px solid transparent; border-image: url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch; font-weight: 700; border-radius: 0; padding: 4px 12px; cursor: pointer; font-family: "Trebuchet MS", "Arial Black", Arial, sans-serif; font-size: 14px; outline: none; flex: 0.6; color: #888888;';
-      forgeBtn.textContent = 'Forge';
+      forgeBtn.textContent = t('mods.betterForge.forge');
       
       eventManager.add(forgeBtn, 'mousedown', () => {
         forgeBtn.style.borderImage = 'url("https://bestiaryarena.com/_next/static/media/1-frame-pressed.e3fabbc5.png") 6 fill stretch';
@@ -5405,7 +5420,7 @@
         
         const { selectedEquipment, selectedTier, selectedStat } = getCurrentSelection();
         if (!selectedEquipment || !selectedTier || !selectedStat) {
-          updateAutoUpgradeStatus('Please select equipment, tier, and stat first');
+          updateAutoUpgradeStatus(t('mods.betterForge.selectAllFirst'));
           return;
         }
         
@@ -5442,7 +5457,7 @@
       
       const statusText = document.createElement('div');
       statusText.style.cssText = 'color: #e6d7b0; font-size: 12px; font-weight: bold; text-align: center;';
-      statusText.textContent = 'Select equipment and tier to upgrade';
+      statusText.textContent = t('mods.betterForge.selectToUpgrade');
       statusText.id = 'auto-upgrade-status';
       
       statusRow.appendChild(statusText);
@@ -5475,9 +5490,9 @@
        col2.innerHTML = '';
        
        if (forgeState.isDisenchanting || forgeState.isDisenchantingInProgress) {
-         col2.innerHTML = '<div style="color:#ffcc88;text-align:center;padding:16px;grid-column: span 7;">Disenchanting in progress... Equipment cannot be removed.</div>';
+         col2.innerHTML = `<div style="color:#ffcc88;text-align:center;padding:16px;grid-column: span 7;">${t('mods.betterForge.disenchantInProgressLocked')}</div>`;
        } else {
-         col2.innerHTML = '<div style="color:#bbb;text-align:center;padding:16px;grid-column: span 7;">Click equipment in Arsenal to select for disenchant</div>';
+         col2.innerHTML = `<div style="color:#bbb;text-align:center;padding:16px;grid-column: span 7;">${t('mods.betterForge.clickToSelectDisenchant')}</div>`;
        }
        
        updateDisenchantStatus();
@@ -5572,7 +5587,7 @@
      return btn;
    }
    
-     function updateDisenchantStatus(customMessage = null, isWarning = false) {
+     function updateDisenchantStatus(customMessage = null, isWarning = false, isSuccess = false) {
     try {
       const col2 = document.getElementById('disenchant-col2');
       const statusText = document.getElementById('disenchant-status');
@@ -5581,7 +5596,7 @@
       
       if (customMessage) {
         statusText.textContent = customMessage;
-        if (customMessage.includes('Disenchanting completed')) {
+        if (isSuccess) {
           statusText.style.color = '#4ade80';
         } else if (isWarning || customMessage.includes('WARNING')) {
           statusText.style.color = '#ff4444';
@@ -5607,7 +5622,7 @@
       });
       
       if (totalItems === 0) {
-        statusText.textContent = 'No equipment selected';
+        statusText.textContent = t('mods.betterForge.noEquipmentSelected');
         statusText.style.color = '#e6d7b0'; // Reset to default color
       } else {
         // Calculate total dust preview
@@ -5621,12 +5636,12 @@
         if (forgeState.isConfirmationMode) {
           statusText.style.color = '#e6d7b0';
           const targetLabel = getConfirmationDisenchantTargetLabel(equipmentItems);
-          statusText.innerHTML = `Confirm to disenchant ${targetLabel} for <span style="color:#7dd3fc">${totalDust} dust</span>`;
+          statusText.innerHTML = t('mods.betterForge.confirmDisenchantFor').replace('{target}', targetLabel).replace('{dust}', `<span style="color:#7dd3fc">${t('mods.betterForge.dustAmount').replace('{dust}', totalDust)}</span>`);
         } else {
           if (totalItems === 1) {
-            statusText.textContent = `1 item selected - ${totalDust} dust`;
+            statusText.textContent = t('mods.betterForge.oneItemSelected').replace('{dust}', totalDust);
           } else {
-            statusText.textContent = `${totalItems} items selected - ${totalDust} dust`;
+            statusText.textContent = t('mods.betterForge.itemsSelected').replace('{count}', totalItems).replace('{dust}', totalDust);
           }
           statusText.style.color = '#e6d7b0';
         }
@@ -5694,7 +5709,7 @@
          showEquipmentInArsenal(equipment);
          
          if (col2.children.length === 0) {
-           col2.innerHTML = '<div style="color:#bbb;text-align:center;padding:16px;grid-column: span 7;">Click equipment in Arsenal to select for disenchant</div>';
+           col2.innerHTML = `<div style="color:#bbb;text-align:center;padding:16px;grid-column: span 7;">${t('mods.betterForge.clickToSelectDisenchant')}</div>`;
          }
          
          if (forgeState.isConfirmationMode) {

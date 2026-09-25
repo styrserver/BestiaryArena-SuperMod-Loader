@@ -3,6 +3,11 @@
 
 (function() {
     'use strict';
+
+    const t = (key) => {
+        const a = (typeof api !== 'undefined' && api) ? api : window.BestiaryModAPI;
+        return (a && a.i18n && typeof a.i18n.t === 'function') ? a.i18n.t(key) : key;
+    };
     
     // Configuration
     const CONFIG = {
@@ -62,20 +67,28 @@
         log('Better Cauldron mod initialized successfully');
     }
     
+    // Titles/descriptions as the game renders them (EN + PT), plus the cauldron's sprite ids,
+    // which match regardless of language.
+    const CAULDRON_TITLES = ['Monstrous Cauldron', 'Monstruous Cauldron', 'Caldeirão Monstruoso', 'Caldeirao Monstruoso'];
+    const CAULDRON_TEXTS = [
+        'In the end, every thing goes to the cauldron',
+        'All sold creatures go to the cauldron',
+        'No final, tudo vai para o caldeirão'
+    ];
+    const CAULDRON_SPRITE_SELECTOR = '.sprite.item.id-43670, .sprite.item.id-43671, .sprite.item.id-43672';
+
     function isCauldronModal(element) {
-        // Check if this element or its children contain the cauldron modal
-        const titleEl = element.querySelector && element.querySelector('h2');
-        const title = titleEl ? titleEl.textContent.trim() : '';
-        const hasCauldronTitle = title === 'Monstrous Cauldron' ||
-            title === 'Monstruous Cauldron' ||
-            title === 'Caldeirão de Monstros';
-        
-        const hasCauldronText = element.textContent && 
-            (element.textContent.includes('All sold creatures go to the cauldron') ||
-             element.textContent.includes('Todas as criaturas vendidas vão para o caldeirão') ||
-             element.textContent.includes('In the end, every thing goes to the cauldron'));
-        
-        return hasCauldronTitle || hasCauldronText;
+        if (!element || !element.querySelectorAll) return false;
+        // The dialog's first h2 is an empty screen-reader heading, so check every heading.
+        const hasCauldronTitle = Array.from(element.querySelectorAll('h2'))
+            .some(h2 => CAULDRON_TITLES.includes(h2.textContent.trim()));
+        const text = element.textContent || '';
+        const hasCauldronText = CAULDRON_TEXTS.some(snippet => text.includes(snippet));
+        // Sprite only counts inside the cauldron's tabbed dialog (the sprite also appears elsewhere, e.g. the store).
+        const hasCauldronSprite = !!element.querySelector(CAULDRON_SPRITE_SELECTOR) &&
+            !!element.querySelector('[role="tablist"]');
+
+        return hasCauldronTitle || hasCauldronText || hasCauldronSprite;
     }
     
     function enhanceCauldronTable(modalElement) {
@@ -101,7 +114,7 @@
             // Update tooltip title to indicate Better Cauldron (green like "Better Yasir activated!")
             const tooltipTitle = modalElement.querySelector('.tooltip-prose p.text-monster');
             if (tooltipTitle) {
-                tooltipTitle.textContent = 'Better Cauldron activated!';
+                tooltipTitle.textContent = t('mods.betterCauldron.activated');
                 tooltipTitle.classList.add('inline');
                 tooltipTitle.style.color = 'rgb(50, 205, 50)';
             }
@@ -196,33 +209,36 @@
     
     // Shared tier options (both creatures and equipment filter by tier)
     const TIER_OPTIONS = [
-        { value: '1', text: 'Grey' },
-        { value: '2', text: 'Green' },
-        { value: '3', text: 'Blue' },
-        { value: '4', text: 'Purple' },
-        { value: '5', text: 'Yellow' }
+        { value: '1', textKey: 'mods.betterCauldron.rarityGrey' },
+        { value: '2', textKey: 'mods.betterCauldron.rarityGreen' },
+        { value: '3', textKey: 'mods.betterCauldron.rarityBlue' },
+        { value: '4', textKey: 'mods.betterCauldron.rarityPurple' },
+        { value: '5', textKey: 'mods.betterCauldron.rarityYellow' }
     ];
 
     const TAB_CONFIG = {
         creatures: {
             searchId: 'cauldron-search',
             filterId: 'cauldron-filter-select',
-            placeholder: 'Search monsters...',
-            allLabel: 'All Monsters',
+            placeholderKey: 'mods.betterCauldron.searchMonsters',
+            allLabelKey: 'mods.betterCauldron.allMonsters',
             eventKeyPrefix: 'creatures'
         },
         equipment: {
             searchId: 'cauldron-search-equip',
             filterId: 'cauldron-filter-equip',
-            placeholder: 'Search equipment...',
-            allLabel: 'All Tiers',
+            placeholderKey: 'common.searchEquipment',
+            allLabelKey: 'mods.betterCauldron.allTiers',
             eventKeyPrefix: 'equip'
         }
     };
 
     function createControls(type) {
         const config = TAB_CONFIG[type];
-        const filterOptions = [{ value: 'all', text: config.allLabel }, ...TIER_OPTIONS];
+        const filterOptions = [
+            { value: 'all', text: t(config.allLabelKey) },
+            ...TIER_OPTIONS.map(option => ({ value: option.value, text: t(option.textKey) }))
+        ];
         
         const container = document.createElement('div');
         container.className = 'cauldron-controls';
@@ -243,7 +259,7 @@
         
         const searchInput = document.createElement('input');
         searchInput.id = config.searchId;
-        searchInput.placeholder = config.placeholder;
+        searchInput.placeholder = t(config.placeholderKey);
         searchInput.style.cssText = `
             background: rgba(255, 255, 255, 0.1);
             color: #fff;

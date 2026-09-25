@@ -4,6 +4,11 @@
 (function() {
   console.log('[Better Hy\'genie] initializing...');
 
+  const t = (key) => {
+    const a = (typeof api !== 'undefined' && api) ? api : (typeof context !== 'undefined' && context && context.api) ? context.api : window.BestiaryModAPI;
+    return (a && a.i18n && typeof a.i18n.t === 'function') ? a.i18n.t(key) : key;
+  };
+
 // =======================
 // 1. Configuration & Constants
 // =======================
@@ -507,9 +512,9 @@
   
   function updateFuseButtonText(button, quantity) {
     if (quantity > 1) {
-      button.innerHTML = `Fuse<br>${quantity}`;
+      button.innerHTML = `${t('mods.betterHygenie.fuseButton')}<br>${quantity}`;
     } else {
-      button.innerHTML = `Fuse<br>1`;
+      button.innerHTML = `${t('mods.betterHygenie.fuseButton')}<br>1`;
     }
   }
   
@@ -556,7 +561,7 @@
       });
 
       const itemName = getItemDisplayName(itemKey);
-      msgElem.textContent = `Are you sure you want to fuse ${quantity} ${itemName}?`;
+      msgElem.textContent = t('mods.betterHygenie.confirmFuse').replace('{quantity}', quantity).replace('{item}', itemName);
       msgElem.style.color = '#ff4d4d';
       fuseButton.dataset.confirm = 'pending';
       fuseButton.classList.add('confirm');
@@ -813,14 +818,14 @@
       if (currentQuantity < quantity) {
         handleError(new Error(`Insufficient items for fusion. Requested: ${quantity}, Available: ${currentQuantity}`), { requested: quantity, available: currentQuantity });
         removeConfirmationPrompt();
-        showTooltipMessage(`Not enough items! You only have ${currentQuantity} items available.`);
+        showTooltipMessage(t('mods.betterHygenie.notEnoughItems').replace('{count}', currentQuantity));
         return;
       }
       
       const fusionRatio = getFusionRatio(itemKey);
       if (quantity < fusionRatio) {
         removeConfirmationPrompt();
-        showTooltipMessage(`You need at least ${fusionRatio} items to perform a fusion.`);
+        showTooltipMessage(t('mods.betterHygenie.needAtLeast').replace('{count}', fusionRatio));
         return;
       }
       
@@ -833,25 +838,23 @@
       }
       
       const originalText = fuseButton.innerHTML;
-      fuseButton.innerHTML = 'Fusing...';
+      fuseButton.innerHTML = t('mods.betterHygenie.fusing');
       removeConfirmationPrompt();
       fuseButton.disabled = true;
       
       try {
         await performFusion(itemKey, quantity);
         removeConfirmationPrompt();
-        showTooltipMessage(`Successfully fused ${quantity} items!`, '#32cd32', 1500);
+        showTooltipMessage(t('mods.betterHygenie.fusedSuccess').replace('{quantity}', quantity), '#32cd32', 1500);
       } catch (error) {
         handleError(error, `${itemKey} fusion failed`);
         
-        let errorMessage = 'Fusion failed. Please try again.';
-        if (error.message.includes('Not enough items')) {
-          errorMessage = error.message;
-        } else if (error.message.includes('HTTP error! Status: 403')) {
-          errorMessage = 'Not enough items in inventory for this fusion.';
+        let errorMessage = t('mods.betterHygenie.fusionFailed');
+        if (error.message.includes('Not enough items') || error.message.includes('HTTP error! Status: 403')) {
+          errorMessage = t('mods.betterHygenie.notEnoughInventory');
         }
         
-        fuseButton.innerHTML = 'Error!';
+        fuseButton.innerHTML = t('mods.betterHygenie.errorButton');
         removeConfirmationPrompt();
         showTooltipMessage(errorMessage);
         setTimeout(() => {
@@ -890,7 +893,7 @@
          hygenieTitle = document.querySelector('h2 p');
      // Check for both English and Portuguese variants
      if (hygenieTitle && (hygenieTitle.textContent.includes('Hy\'genie') || hygenieTitle.textContent.includes('Hi\'giênio'))) {
-       hygenieTitle.textContent = "Better Hy'genie activated!";
+       hygenieTitle.textContent = t('mods.betterHygenie.activated');
        hygenieTitle.style.color = '#32cd32';
        const widgetBottom = hygenieTitle.closest('.widget-bottom');
        // Check for both English and Portuguese section text
@@ -1006,8 +1009,8 @@
        if (!tooltip) return;
        const titleElem = tooltip.querySelector('p');
        // Check for both English and Portuguese variants
-       if (titleElem && (titleElem.textContent.includes("Hy'genie") || titleElem.textContent.includes("Hi'giênio")) && titleElem.textContent !== "Better Hy'genie activated!") {
-         titleElem.textContent = "Better Hy'genie activated!";
+       if (titleElem && (titleElem.textContent.includes("Hy'genie") || titleElem.textContent.includes("Hi'giênio")) && titleElem.textContent !== t('mods.betterHygenie.activated')) {
+         titleElem.textContent = t('mods.betterHygenie.activated');
          titleElem.style.color = '#32cd32';
        }
      } catch (e) { /* silent */ }

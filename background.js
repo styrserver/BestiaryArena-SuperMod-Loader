@@ -1674,7 +1674,8 @@ browserAPI.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
                   if (!browserAPI.runtime.lastError) {
                     console.log("Successfully initialized mod loader via messaging");
                   } else {
-                    console.error("Failed to initialize via messaging:", browserAPI.runtime.lastError);
+                    // Expected while the tab is on an error page or mid-reload; dead-tab recovery handles it.
+                    console.warn("Failed to initialize via messaging:", browserAPI.runtime.lastError);
                     scheduleDeadTabRecovery(tabId);
                   }
                 });
@@ -1694,7 +1695,8 @@ browserAPI.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
                     deliverModLoaderToTab(tabId, enabledScripts);
                   }, 1000);
                 } else {
-                  console.error("Failed to initialize via messaging:", browserAPI.runtime.lastError);
+                  // Expected while the tab is on an error page or mid-reload; dead-tab recovery handles it.
+                  console.warn("Failed to initialize via messaging:", browserAPI.runtime.lastError);
                   scheduleDeadTabRecovery(tabId);
                 }
               });

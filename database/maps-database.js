@@ -204,7 +204,7 @@ function getRegionDisplayNameFromRegion(region) {
 }
 
 /**
- * A region's themed rune (e.g. Carlin -> "Ability Power Rune"), derived from
+ * A region's themed rune (e.g. Carlin -> "Augment Rune (AP)"), derived from
  * inventory-database.js's `obtain` field — NOT duplicated here. Each region rune's
  * `obtain` is set to exactly that region's display name (single source, no list to
  * keep in sync); every other item's `obtain` is a multi-source description ("Loot,

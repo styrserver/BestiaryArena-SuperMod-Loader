@@ -242,35 +242,35 @@ const inventoryTooltips = {
     obtain: 'Rookgaard, Venore'
   },
   runeHp: {
-    displayName: "Hitpoints Rune",
+    displayName: "Augment Rune (HP)",
     text: 'Raise a creature hitpoints genes by +1.',
     icon: '/assets/icons/rune-hp.png',
     rarity: '3',
     obtain: 'Ab\'Dendriel'
   },
   runeAd: {
-    displayName: "Attack Damage Rune",
+    displayName: "Augment Rune (AD)",
     text: 'Raise a creature attack damage genes by +1.',
     icon: '/assets/icons/rune-ad.png',
     rarity: '3',
     obtain: 'Venore'
   },
   runeAp: {
-    displayName: "Ability Power Rune",
+    displayName: "Augment Rune (AP)",
     text: 'Raise a creature ability power genes by +1.',
     icon: '/assets/icons/rune-ap.png',
     rarity: '3',
     obtain: 'Carlin'
   },
   runeAr: {
-    displayName: "Armor Rune",
+    displayName: "Augment Rune (AR)",
     text: 'Raise a creature armor genes by +1.',
     icon: '/assets/icons/rune-ar.png',
     rarity: '3',
     obtain: 'Kazordoon'
   },
   runeMr: {
-    displayName: "Magic Resist Rune",
+    displayName: "Augment Rune (MR)",
     text: 'Raise a creature magic resist genes by +1.',
     icon: '/assets/icons/rune-mr.png',
     rarity: '3',
@@ -305,21 +305,21 @@ const inventoryTooltips = {
     obtain: 'Obtained from Blank Rune'
   },
   runeConversionHp: {
-    displayName: "Conversion Rune (hp)",
+    displayName: "Conversion Rune (HP)",
     text: 'For a handful of dust you can convert any equipment stat to hitpoints.',
     icon: '/assets/icons/rune-conversion-hp.png',
     rarity: '5',
     obtain: 'Obtained from Blank Rune'
   },
   runeConversionAd: {
-    displayName: "Conversion Rune (ad)",
+    displayName: "Conversion Rune (AD)",
     text: 'For a handful of dust you can convert any equipment stat to attack damage.',
     icon: '/assets/icons/rune-conversion-ad.png',
     rarity: '5',
     obtain: 'Obtained from Blank Rune'
   },
   runeConversionAp: {
-    displayName: "Conversion Rune (ap)",
+    displayName: "Conversion Rune (AP)",
     text: 'For a handful of dust you can convert any equipment stat to ability power.',
     icon: '/assets/icons/rune-conversion-ap.png',
     rarity: '5',
@@ -327,8 +327,15 @@ const inventoryTooltips = {
   },
   runeTransfusion: {
     displayName: 'Transfusion Rune',
-    text: 'Transfuse the shiny trait from one awakened creature to another.',
+    text: 'Transfuse the shiny trait from a creature to another.',
     icon: '/assets/icons/rune-shiny-transfer.png',
+    rarity: '5',
+    obtain: 'Obtained from Blank Rune, Recycle Rune'
+  },
+  runeDowngradeEquip: {
+    displayName: 'Downgrade Rune',
+    text: 'Downgrades the tier of an equipment.',
+    icon: '/assets/icons/rune-downgrade-equip.png',
     rarity: '5',
     obtain: 'Obtained from Blank Rune, Recycle Rune'
   },
@@ -480,7 +487,7 @@ const INVENTORY_CATEGORIES = {
   'Consumables': ['Change Nickname', 'Dice Manipulators', 'Exaltation Chests', 'Nickname Creature', 'Outfit Bags', 'Stamina Potions', 'Stones of Insight', 'Summon Scrolls', 'Surprise Cubes'],
   'Currency': ['Beast Coins', 'Dust', 'Gold', 'Hunting Marks'],
   'Gazers': [],
-  'Runes': ['Avarice Rune', 'Hitpoints Rune', 'Attack Damage Rune', 'Ability Power Rune', 'Armor Rune', 'Magic Resist Rune', 'Blank Rune', 'Recycle Rune', 'Kaleidoscopic Rune', 'Transfusion Rune', 'Conversion Rune (hp)', 'Conversion Rune (ad)', 'Conversion Rune (ap)'],
+  'Runes': ['Avarice Rune', 'Augment Rune (HP)', 'Augment Rune (AD)', 'Augment Rune (AP)', 'Augment Rune (AR)', 'Augment Rune (MR)', 'Blank Rune', 'Recycle Rune', 'Kaleidoscopic Rune', 'Transfusion Rune', 'Conversion Rune (HP)', 'Conversion Rune (AD)', 'Conversion Rune (AP)', 'Downgrade Rune'],
   'Upgrades': ['Baby Dragon Plant', 'Creature Awakening', 'Daily Boosted Map', 'Daycare', 'Dungeon Ascension', 'Dragon Plant', 'Dr. Mephistopheles', 'Hy\'genie', 'Monstrous Cauldron', 'Monster Raids', 'Monster Squeezer', 'Mountain Fortress', 'Premium', 'The Sweaty Cyclop\'s Forge', 'Yasir\'s Trading Contract']
 };
 
@@ -493,10 +500,11 @@ const INVENTORY_VARIANTS = {
   'Summon Scrolls': ['summonScroll1', 'summonScroll2', 'summonScroll3', 'summonScroll4', 'summonScroll5', 'summonScroll6', 'summonScroll7'],
   'Surprise Cubes': ['surpriseCube1', 'surpriseCube2', 'surpriseCube3', 'surpriseCube4', 'surpriseCube5'],
   'Beast Coins': ['beastCoins'], 'Dust': ['dust'], 'Gold': ['gold'], 'Hunting Marks': ['huntingMarks'],
-  'Avarice Rune': ['runeAvarice'], 'Hitpoints Rune': ['runeHp'], 'Attack Damage Rune': ['runeAd'], 'Ability Power Rune': ['runeAp'], 'Armor Rune': ['runeAr'], 'Magic Resist Rune': ['runeMr'],
+  'Avarice Rune': ['runeAvarice'], 'Augment Rune (HP)': ['runeHp'], 'Augment Rune (AD)': ['runeAd'], 'Augment Rune (AP)': ['runeAp'], 'Augment Rune (AR)': ['runeAr'], 'Augment Rune (MR)': ['runeMr'],
   'Blank Rune': ['runeBlank'], 'Recycle Rune': ['runeRecycle'],
   'Kaleidoscopic Rune': ['runeKaleidoscopic'], 'Transfusion Rune': ['runeTransfusion'],
-  'Conversion Rune (hp)': ['runeConversionHp'], 'Conversion Rune (ad)': ['runeConversionAd'], 'Conversion Rune (ap)': ['runeConversionAp'],
+  'Conversion Rune (HP)': ['runeConversionHp'], 'Conversion Rune (AD)': ['runeConversionAd'], 'Conversion Rune (AP)': ['runeConversionAp'],
+  'Downgrade Rune': ['runeDowngradeEquip'],
   'Baby Dragon Plant': ['babyDragonPlant'], 'Daily Boosted Map': ['dailyBoostedMap'], 'Daycare': ['daycare'], 'Dungeon Ascension': ['dungeonAscension'], 'Dragon Plant': ['dragonPlant'], 'Hy\'genie': ['hygenie'],
   'Creature Awakening': ['creatureAwakening'],
   'Dr. Mephistopheles': ['drMephistopheles'],
@@ -507,11 +515,12 @@ const INVENTORY_VARIANTS = {
 const INVENTORY_STATIC_ITEMS = {
   'beastCoins': { name: 'Beast Coins', rarity: '1' }, 'dust': { name: 'Dust', rarity: '2' },
   'gold': { name: 'Gold', rarity: '3' }, 'huntingMarks': { name: 'Hunting Marks', rarity: '4' },
-  'runeAvarice': { name: 'Avarice Rune', rarity: '2' }, 'runeHp': { name: 'Hitpoints Rune', rarity: '3' }, 'runeAd': { name: 'Attack Damage Rune', rarity: '3' }, 'runeAp': { name: 'Ability Power Rune', rarity: '3' }, 
-  'runeAr': { name: 'Armor Rune', rarity: '3' }, 'runeMr': { name: 'Magic Resist Rune', rarity: '3' },
+  'runeAvarice': { name: 'Avarice Rune', rarity: '2' }, 'runeHp': { name: 'Augment Rune (HP)', rarity: '3' }, 'runeAd': { name: 'Augment Rune (AD)', rarity: '3' }, 'runeAp': { name: 'Augment Rune (AP)', rarity: '3' }, 
+  'runeAr': { name: 'Augment Rune (AR)', rarity: '3' }, 'runeMr': { name: 'Augment Rune (MR)', rarity: '3' },
   'runeBlank': { name: 'Blank Rune', rarity: '4' }, 'runeRecycle': { name: 'Recycle Rune', rarity: '4' },
   'runeKaleidoscopic': { name: 'Kaleidoscopic Rune', rarity: '5' }, 'runeTransfusion': { name: 'Transfusion Rune', rarity: '5' },
-  'runeConversionHp': { name: 'Conversion Rune (hp)', rarity: '5' }, 'runeConversionAd': { name: 'Conversion Rune (ad)', rarity: '5' }, 'runeConversionAp': { name: 'Conversion Rune (ap)', rarity: '5' },
+  'runeConversionHp': { name: 'Conversion Rune (HP)', rarity: '5' }, 'runeConversionAd': { name: 'Conversion Rune (AD)', rarity: '5' }, 'runeConversionAp': { name: 'Conversion Rune (AP)', rarity: '5' },
+  'runeDowngradeEquip': { name: 'Downgrade Rune', rarity: '5' },
   'nicknameMonster': { name: 'Nickname Creature', rarity: '3' }, 'nicknameChange': { name: 'Change Nickname', rarity: '2' },
   'nicknamePlayer': { name: 'Player Nickname', rarity: '2' }, 'equipChest': { name: 'Exaltation Chest', rarity: '5' },
   'hunterOutfitBag': { name: 'Hunter Outfit Bag', rarity: '2' }, 'outfitBag1': { name: 'Outfit Bag', rarity: '4' },
@@ -554,22 +563,28 @@ const RUNE_NON_SACRIFICABLE_KEYS = [
   'runeTransfusion',
   'runeConversionHp',
   'runeConversionAd',
-  'runeConversionAp'
+  'runeConversionAp',
+  'runeDowngradeEquip'
 ];
 
 // In-game display names (when they differ from mod-friendly tooltip names)
 const INVENTORY_GAME_DISPLAY_NAMES = {
-  runeHp: 'Augment Rune (HP)',
-  runeAp: 'Augment Rune (AP)',
-  runeAd: 'Augment Rune (AD)',
-  runeAr: 'Augment Rune (AR)',
-  runeMr: 'Augment Rune (MR)',
-  runeBlank: 'Blank Rune',
-  runeRecycleMonster: 'Kaleidoscopic Rune',
   summonScroll7: 'Christmas Scroll',
   outfitBag1: 'Outfit Bag',
   hunterOutfitBag: 'Hunter Outfit Bag',
   equipChest: 'Exaltation Chest'
+};
+
+// Other in-game labels, used by findItemKey(). Rune displayNames above are the detail-panel headings
+// ('Augment Rune (HP)', 'Kaleidoscopic Rune'); the inventory grid's icon alt text names some differently.
+// Only add names confirmed in the game, never guessed short forms.
+const INVENTORY_NAME_ALIASES = {
+  runeHp: ['HP Rune'],
+  runeAd: ['Attack Damage Rune'],
+  runeAp: ['Ability Power Rune'],
+  runeAr: ['Armor Rune'],
+  runeMr: ['Magic Resist Rune'],
+  runeKaleidoscopic: ['Reconstitution Rune']
 };
 
 // Tier suffix labels used by the game for variant items
@@ -643,7 +658,8 @@ const INVENTORY_MINI_ICONS = {
   runeConversionAp: '/assets/icons/rune-conversion-ap-mini.png',
   runeConversionAd: '/assets/icons/rune-conversion-ad-mini.png',
   runeTransfusion: '/assets/icons/rune-shiny-transfer-mini.png',
-  runeShinyTransfer: '/assets/icons/rune-shiny-transfer-mini.png'
+  runeShinyTransfer: '/assets/icons/rune-shiny-transfer-mini.png',
+  runeDowngradeEquip: '/assets/icons/rune-downgrade-equip-mini.png'
 };
 
 // Custom rarity styling flags for special scroll variants
@@ -702,6 +718,79 @@ const getRuneTypes = () => RUNE_KEYS_ORDER.map(getRuneType).filter(Boolean);
 const getRecyclableRuneTypes = () =>
   getRuneTypes().filter(r => !RUNE_NON_SACRIFICABLE_KEYS.includes(r.key));
 
+// =======================
+// Reverse lookups: free-form name / game key / icon path -> canonical item key
+// =======================
+
+const normalizeItemLabel = (value) =>
+  typeof value === 'string' ? value.toLowerCase().replace(/[^a-z0-9]/g, '') : '';
+
+// '/assets/icons/rune-hp-mini.png?v=2' -> 'rune-hp'
+const iconBaseName = (src) => {
+  if (typeof src !== 'string' || !src || src.startsWith('sprite://')) return '';
+  const file = src.split(/[?#]/)[0].split('/').pop() || '';
+  return file.replace(/\.[a-z0-9]+$/i, '').replace(/-mini$/, '').toLowerCase();
+};
+
+let itemLookupIndex = null;
+
+// Built on first use from this file's own tables, so a new item only needs its entries above.
+const getItemLookupIndex = () => {
+  if (itemLookupIndex) return itemLookupIndex;
+  const byLabel = new Map();
+  const byIcon = new Map();
+  const addLabel = (label, key) => {
+    const norm = normalizeItemLabel(label);
+    if (norm && !byLabel.has(norm)) byLabel.set(norm, resolveInventoryItemKey(key));
+  };
+  const addIcon = (src, key) => {
+    const base = iconBaseName(src);
+    if (base && !byIcon.has(base)) byIcon.set(base, resolveInventoryItemKey(key));
+  };
+
+  for (const [key, entry] of Object.entries(inventoryTooltips)) {
+    addLabel(key, key);
+    addLabel(entry?.displayName, key);
+    addIcon(entry?.icon, key);
+  }
+  for (const aliasKey of Object.keys(ITEM_KEY_ALIASES)) addLabel(aliasKey, aliasKey);
+  for (const [key, name] of Object.entries(INVENTORY_GAME_DISPLAY_NAMES)) addLabel(name, key);
+  for (const [key, names] of Object.entries(INVENTORY_NAME_ALIASES)) names.forEach(name => addLabel(name, key));
+  for (const [key, src] of Object.entries(INVENTORY_MINI_ICONS)) addIcon(src, key);
+
+  // Longest first so a partial match prefers 'conversionrunehp' over 'recyclerune' etc.
+  const labelsLongestFirst = [...byLabel.keys()].sort((a, b) => b.length - a.length);
+  itemLookupIndex = { byLabel, byIcon, labelsLongestFirst };
+  return itemLookupIndex;
+};
+
+const MIN_PARTIAL_LABEL_LENGTH = 6;
+
+/**
+ * Canonical item key for a key, display name or in-game label ('runeShinyTransfer',
+ * 'Transfusion Rune', 'HP Rune', 'Conversion Rune (AD)' ...). Case/punctuation-insensitive.
+ * Exact match first; with { partial: true } also accepts the longest known name contained in the label.
+ * @returns {string|null}
+ */
+const findItemKey = (label, { partial = false } = {}) => {
+  const norm = normalizeItemLabel(label);
+  if (!norm) return null;
+  const { byLabel, labelsLongestFirst } = getItemLookupIndex();
+  if (byLabel.has(norm)) return byLabel.get(norm);
+  if (!partial) return null;
+  const hit = labelsLongestFirst.find(name => name.length >= MIN_PARTIAL_LABEL_LENGTH && norm.includes(name));
+  return hit ? byLabel.get(hit) : null;
+};
+
+/**
+ * Canonical item key for an icon URL/path (full-size or '-mini' variant), matched on the exact file name.
+ * @returns {string|null}
+ */
+const findItemKeyByIcon = (src) => {
+  const base = iconBaseName(src);
+  return base ? getItemLookupIndex().byIcon.get(base) || null : null;
+};
+
 // Item key groups for inventory UI (currency, no-rarity consumables, upgrades)
 const ITEM_KEY_GROUPS = {
   currency: ['gold', 'dust', 'beastCoins', 'huntingMarks'],
@@ -726,11 +815,14 @@ const inventoryDatabase = {
   itemKeyGroups: ITEM_KEY_GROUPS,
   itemKeyAliases: ITEM_KEY_ALIASES,
   gameDisplayNames: INVENTORY_GAME_DISPLAY_NAMES,
+  nameAliases: INVENTORY_NAME_ALIASES,
   tierLabels: INVENTORY_TIER_LABELS,
   miniIcons: INVENTORY_MINI_ICONS,
   customStyles: INVENTORY_CUSTOM_STYLES,
   gazerVariants: INVENTORY_GAZER_VARIANTS,
   resolveItemKey: resolveInventoryItemKey,
+  findItemKey,
+  findItemKeyByIcon,
   getInventoryItemCount,
   runeKeysOrder: RUNE_KEYS_ORDER,
   runeNonSacrificableKeys: RUNE_NON_SACRIFICABLE_KEYS,

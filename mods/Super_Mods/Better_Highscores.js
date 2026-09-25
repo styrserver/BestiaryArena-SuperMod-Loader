@@ -46,7 +46,7 @@
       ? Math.min(1, Math.max(0, normalized.backgroundOpacity))
       : DEFAULT_SETTINGS.backgroundOpacity;
     normalized.scale = typeof normalized.scale === 'number'
-      ? Math.min(1.2, Math.max(0.8, normalized.scale))
+      ? Math.min(1.25, Math.max(0.75, normalized.scale))
       : DEFAULT_SETTINGS.scale;
     normalized.placement = normalized.placement === 'bottom' ? 'bottom' : 'top';
     normalized.hidden = normalized.hidden === true;
@@ -537,8 +537,8 @@
 
     menu.appendChild(createSettingsSliderRow(
       t('mods.betterUI.betterHighscoresScale'),
-      80,
-      120,
+      75,
+      125,
       Math.round(modSettings.scale * 100),
       (value) => {
         modSettings.scale = value / 100;
@@ -848,6 +848,7 @@
     time: {
       title: 'Ticks',
       displayName: 'Time',
+      displayKey: 'mods.betterHighscores.sectionTime',
       titleColor: UI_CONFIG.COLORS.TICK_TITLE,
       isRank: false,
       isFloor: false
@@ -1165,7 +1166,7 @@
 
     const content = document.createElement('div');
     applyContentContainerStyles(content);
-    content.title = 'Click to open the World Raid leaderboard';
+    content.title = t('mods.betterHighscores.worldRaidOpenTooltip');
 
     const header = createWorldRaidSection();
     const top = createWorldRaidSection();
@@ -1225,18 +1226,18 @@
     if (parts.key !== key) {
       parts.key = key;
 
-      parts.header.replaceChildren(createWorldRaidEntry(active.iconUrl, active.title, active.title, WORLD_RAID_TITLE_COLOR, `World Raid: ${active.title}`));
+      parts.header.replaceChildren(createWorldRaidEntry(active.iconUrl, active.title, active.title, WORLD_RAID_TITLE_COLOR, t('mods.betterHighscores.worldRaidTitle', { title: active.title })));
 
       // Same rule as the normal overlay's world-record sections: when you hold the record,
       // your own value would just repeat it — show only the record, in green.
       const youHoldRecord = !!leader?.isYou;
       let topNode;
       if (!data) {
-        topNode = createWorldRaidEntry(ASSETS.HIGHSCORE_ICON, 'Top', '…', '#aaa', 'Loading top slayers');
+        topNode = createWorldRaidEntry(ASSETS.HIGHSCORE_ICON, t('mods.betterHighscores.top'), '…', '#aaa', t('mods.betterHighscores.loadingTopSlayers'));
       } else if (!leader) {
-        topNode = createWorldRaidEntry(ASSETS.HIGHSCORE_ICON, 'Top', '-', '#aaa', 'No slayers yet');
+        topNode = createWorldRaidEntry(ASSETS.HIGHSCORE_ICON, t('mods.betterHighscores.top'), '-', '#aaa', t('mods.betterHighscores.noSlayersYet'));
       } else {
-        topNode = createWorldRaidEntry(ASSETS.HIGHSCORE_ICON, 'Top', leader.valueText, youHoldRecord ? '#00ff00' : getMedalColor(1));
+        topNode = createWorldRaidEntry(ASSETS.HIGHSCORE_ICON, t('mods.betterHighscores.top'), leader.valueText, youHoldRecord ? '#00ff00' : getMedalColor(1));
         // Hover → same player-profile tooltip the normal world-record entries use.
         attachPlayerProfileHover(topNode, leader.name);
       }
@@ -1246,15 +1247,15 @@
         parts.you.replaceChildren();
         parts.you.style.display = 'none';
       } else {
-        const rankText = data?.you ? ` · rank #${data.you.rank}` : '';
+        const rankText = data?.you ? t('mods.betterHighscores.rankSuffix', { rank: data.you.rank }) : '';
         parts.you.style.display = 'flex';
         parts.you.replaceChildren(createWorldRaidEntry(
-          ASSETS.ACHIEVEMENT_ICON, 'You', active.player?.valueText || '-', 'white',
+          ASSETS.ACHIEVEMENT_ICON, t('mods.betterHighscores.you'), active.player?.valueText || '-', 'white',
           `${active.player?.detail || ''}${rankText}`
         ));
       }
 
-      parts.timerEntry = createWorldRaidEntry(WORLD_RAID_TIMER_ICON, 'Time left', '', 'white', 'Time left in this raid');
+      parts.timerEntry = createWorldRaidEntry(WORLD_RAID_TIMER_ICON, t('mods.betterHighscores.timeLeft'), '', 'white', t('mods.betterHighscores.timeLeftTooltip'));
       parts.time.replaceChildren(parts.timerEntry);
     }
 
@@ -2668,7 +2669,7 @@
   function createLegacyWarningIcon() {
     const warningIcon = document.createElement('span');
     warningIcon.innerHTML = '⚠️';
-    warningIcon.title = 'Legacy';
+    warningIcon.title = t('mods.betterHighscores.legacy');
     Object.assign(warningIcon.style, {
       cursor: 'help',
       fontSize: '10px',
@@ -2685,13 +2686,13 @@
       cursor: isLegacy ? 'help' : 'default'
     });
     if (isLegacy) {
-      userEntrySpan.title = 'Legacy';
+      userEntrySpan.title = t('mods.betterHighscores.legacy');
       userEntrySpan.appendChild(createLegacyWarningIcon());
     } else {
       userEntrySpan.appendChild(createScoreIcon(
         ASSETS.ACHIEVEMENT_ICON,
-        'You',
-        'Your personal best record'
+        t('mods.betterHighscores.you'),
+        t('mods.betterHighscores.personalBest')
       ));
     }
 
@@ -2722,8 +2723,8 @@
 
     entrySpan.appendChild(createScoreIcon(
       formattedEntry.isCurrentUser ? ASSETS.ACHIEVEMENT_ICON : ASSETS.HIGHSCORE_ICON,
-      formattedEntry.isCurrentUser ? 'You' : 'Top',
-      formattedEntry.isCurrentUser ? 'Your personal best record' : 'World record holder'
+      formattedEntry.isCurrentUser ? t('mods.betterHighscores.you') : t('mods.betterHighscores.top'),
+      formattedEntry.isCurrentUser ? t('mods.betterHighscores.personalBest') : t('mods.betterHighscores.worldRecordHolder')
     ));
 
     const valueText = document.createElement('span');
@@ -2742,8 +2743,8 @@
 
     entrySpan.appendChild(createScoreIcon(
       ASSETS.HIGHSCORE_ICON,
-      'Top',
-      'No public world record yet',
+      t('mods.betterHighscores.top'),
+      t('mods.betterHighscores.noPublicWorldRecord'),
       0.45
     ));
 
@@ -2772,7 +2773,7 @@
       color: config.titleColor,
       fontSize: '10px'
     });
-    titleText.textContent = config.displayName || config.title;
+    titleText.textContent = config.displayKey ? t(config.displayKey) : (config.displayName || config.title);
     section.appendChild(titleText);
 
     const shouldShowMax = maxValue !== null && currentValue !== null;

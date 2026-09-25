@@ -146,6 +146,14 @@ if (typeof browserAPI === 'undefined') {
       } catch (e) {
         console.log('Error loading UI Components:', e);
       }
+      if (!script.src) {
+        // client.js runs in the page world, where browserAPI.runtime is unavailable. A <script>
+        // without src never fires onload/onerror, which used to leave this promise pending and
+        // stall initializeAPI (no utility API, no bestiary-mod-api-ready). Keep the fallbacks.
+        console.warn('UI Components URL unavailable in this context — using fallback components');
+        resolve();
+        return;
+      }
       script.onload = () => {
         console.log('UI Components loaded successfully');
         attachUIComponentsToModApi();

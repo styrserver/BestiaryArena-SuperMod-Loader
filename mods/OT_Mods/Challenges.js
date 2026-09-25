@@ -247,7 +247,50 @@ var CHALLENGES_I18N_FALLBACK = {
   'mods.challenges.tabs.multiplayer': "PvPvE",
   'mods.challenges.tabs.solo': "Solo",
   'mods.challenges.title': "Challenges",
-  'mods.challenges.victory': "Victory!"
+  'mods.challenges.victory': "Victory!",
+  'mods.challenges.toast.goingToMap': "Going to map: {name}",
+  'mods.challenges.toast.navigateFailed': "Could not navigate to map.",
+  'mods.challenges.toast.invalidRoll': "Invalid match roll.",
+  'mods.challenges.toast.noMaps': "No maps available.",
+  'mods.challenges.toast.rollCreaturesFailed': "Could not roll creatures for map.",
+  'mods.challenges.toast.rollPlayerCreaturesFailed': "Could not roll player creatures.",
+  'mods.challenges.toast.rollPlayerEquipmentFailed': "Could not roll player equipment.",
+  'mods.challenges.toast.syncRollFailed': "Could not sync challenge roll.",
+  'mods.challenges.toast.opponentRollTimeout': "Timed out waiting for opponent to roll the challenge.",
+  'mods.challenges.toast.setupCopied': "Setup config copied to clipboard.",
+  'mods.challenges.toast.copyFailed': "Copy failed.",
+  'mods.challenges.toast.rollFirst': "Roll map and creatures first.",
+  'mods.challenges.toast.gameStateUnavailableLong': "Game state not available. Make sure you are in the game and the board is loaded.",
+  'mods.challenges.toast.customBattlesUnavailableRetry': "Custom Battles system not available. Try again in a moment.",
+  'mods.challenges.toast.boardStateUnavailable': "Board state not available.",
+  'mods.challenges.toast.navigatingToChallenge': "Navigating to challenge.",
+  'mods.challenges.toast.errorStartingChallenge': "Error starting challenge: {error}",
+  'mods.challenges.toast.invalidSetupConfig': "Invalid setup config.",
+  'mods.challenges.toast.gameStateUnavailable': "Game state not available.",
+  'mods.challenges.toast.customBattlesUnavailable': "Custom Battles not available.",
+  'mods.challenges.toast.loadingSetup': "Loading challenge setup...",
+  'mods.challenges.toast.errorLoadingSetup': "Error loading setup: {error}",
+  'mods.challenges.errorPrefix': "Error: {error}",
+  'mods.challenges.unknownError': "Unknown error",
+  'mods.challenges.difficultyTooltip': "Difficulty: {value}",
+  'mods.challenges.difficultyCreatureMult': " (creature ×{n})",
+  'mods.challenges.difficultyEquipMult': " (equip ×{n})",
+  'mods.challenges.difficultyAwakenMult': " (awaken ×{n})",
+  'mods.challenges.awakenedAbility': "Awakened ability",
+  'mods.challenges.breakdown.creature': "Creature",
+  'mods.challenges.breakdown.equipment': "Equipment",
+  'mods.challenges.breakdown.base': "Base: (1000 − {ticks}) + {grade} = {base}",
+  'mods.challenges.breakdown.mapScore': "Map score: round({base} × {mult}) = {score}",
+  'mods.challenges.breakdown.arsenalAverage': "Arsenal average: {avg} × map max {max}×",
+  'mods.challenges.breakdown.arsenalBonus': "Arsenal bonus: +{bonus}",
+  'mods.challenges.breakdown.score': "Score: {map} + {bonus} = {score}",
+  'mods.challenges.breakdown.grade': "Grade: {grade} (+{points})",
+  'mods.challenges.breakdown.approx': "Base: ≈ {base} (from score ÷ multiplier)\nMultiplier: {mult}\nScore: round({base} × {multNum}) = {score}",
+  'mods.challenges.breakdown.scoreOnly': "Score: {score}",
+  'mods.challenges.aria.joinQueue': "Join challenges queue",
+  'mods.challenges.aria.acceptMatch': "Accept match",
+  'mods.challenges.aria.cancelChallenge': "Cancel challenge",
+  'mods.challenges.aria.leaveQueue': "Leave queue"
 };
 
 function challengesModTranslate(key, fallback) {
@@ -621,11 +664,11 @@ function navigateToRoomAndFinishMultiplayerMatch(roomId, roomName) {
   closeChallengesModalIfOpen();
   var state = getState();
   if (state && state.board && typeof state.board.send === 'function') {
-    showChallengesToast('Going to map: ' + (roomName || roomId), { duration: CHALLENGE_TOAST_DURATION });
+    showChallengesToast(challengesText('mods.challenges.toast.goingToMap').replace('{name}', roomName || roomId), { duration: CHALLENGE_TOAST_DURATION });
     console.log('[Challenges MP] navigateToRoomAndFinishMultiplayerMatch', roomId);
     state.board.send({ type: 'selectRoomById', roomId: roomId });
   } else {
-    showChallengeToastNotification('Could not navigate to map.');
+    showChallengeToastNotification(challengesText('mods.challenges.toast.navigateFailed'));
   }
 }
 
@@ -1065,7 +1108,7 @@ function normalizeVillainSpecsArray(specs) {
 function runMultiplayerRollThenStart(roomId, roomName, villainSpecs, matchId, myKey, opponentName, allyGameIds, allyEquips) {
   var specs = normalizeVillainSpecsArray(villainSpecs);
   if (!roomId || !specs.length) {
-    showChallengeToastNotification('Invalid match roll.');
+    showChallengeToastNotification(challengesText('mods.challenges.toast.invalidRoll'));
     return;
   }
   if (matchId) challengeMpRollStartedForMatchId = matchId;
@@ -1307,7 +1350,7 @@ function startMultiplayerMatchRollSync(matchId, myKey) {
     var allRooms = getAllRoomsForReel();
     if (!allRooms || !allRooms.length) {
       challengeMpRollWriteStartedForMatchId = null;
-      showChallengeToastNotification('No maps available.');
+      showChallengeToastNotification(challengesText('mods.challenges.toast.noMaps'));
       return;
     }
     var picked = pickRandomFromArray(allRooms, 1)[0];
@@ -1316,20 +1359,20 @@ function startMultiplayerMatchRollSync(matchId, myKey) {
     var villainSpecs = pickRandomCreatureSpecsForRoom(roomId);
     if (!villainSpecs || !villainSpecs.length) {
       challengeMpRollWriteStartedForMatchId = null;
-      showChallengeToastNotification('Could not roll creatures for map.');
+      showChallengeToastNotification(challengesText('mods.challenges.toast.rollCreaturesFailed'));
       return;
     }
     var arsenalCount = getChallengePlayerArsenalCount(villainSpecs);
     var allyGameIds = pickRandomUniqueChallengePlayerGameIds(arsenalCount);
     if (!allyGameIds.length) {
       challengeMpRollWriteStartedForMatchId = null;
-      showChallengeToastNotification('Could not roll player creatures.');
+      showChallengeToastNotification(challengesText('mods.challenges.toast.rollPlayerCreaturesFailed'));
       return;
     }
     var allyEquips = pickRandomChallengePlayerEquips(arsenalCount);
     if (!allyEquips.length) {
       challengeMpRollWriteStartedForMatchId = null;
-      showChallengeToastNotification('Could not roll player equipment.');
+      showChallengeToastNotification(challengesText('mods.challenges.toast.rollPlayerEquipmentFailed'));
       return;
     }
     var chosenAt = Date.now();
@@ -1358,7 +1401,7 @@ function startMultiplayerMatchRollSync(matchId, myKey) {
     }).catch(function(err) {
       challengeMpRollWriteStartedForMatchId = null;
       console.warn('[Challenges MP] chooser PATCH full roll failed', err);
-      showChallengeToastNotification('Could not sync challenge roll.');
+      showChallengeToastNotification(challengesText('mods.challenges.toast.syncRollFailed'));
     });
   }
 
@@ -1427,7 +1470,7 @@ function startMultiplayerMatchRollSync(matchId, myKey) {
     if (pollCount >= maxPolls) {
       stopPoll();
       console.warn('[Challenges MP] timed out waiting for chooser roll from Firebase');
-      showChallengeToastNotification('Timed out waiting for opponent to roll the challenge.');
+      showChallengeToastNotification(challengesText('mods.challenges.toast.opponentRollTimeout'));
     }
   }
 
@@ -2960,7 +3003,7 @@ function openChallengesModal(initialTabIndex) {
       console.log('[Challenges Mod] rollMap: rolled', rolledRoomName, '(' + rolledRoomId + ')');
     } catch (e) {
       console.error('[Challenges Mod] rollMapHandler error:', e);
-      setMapResultText('Error: ' + (e && e.message ? e.message : 'Roll failed'));
+      setMapResultText(challengesText('mods.challenges.errorPrefix').replace('{error}', e && e.message ? e.message : challengesText('mods.challenges.rollFailed')));
     }
   }
 
@@ -3167,10 +3210,10 @@ function openChallengesModal(initialTabIndex) {
     var creatureMult = getCreatureDifficultyMultiplier(name);
     var equipMult = (spec.equip && spec.equip.gameId != null) ? getEquipmentDifficultyMultiplier(getEquipmentName(spec.equip.gameId)) : 1;
     var awakenMult = spec.awakened === true ? CHALLENGE_AWAKEN_DIFFICULTY_MULT : 1;
-    var difficultyTooltip = 'Difficulty: ' + difficultyContrib;
-    if (creatureMult !== 1) difficultyTooltip += ' (creature ×' + creatureMult + ')';
-    if (equipMult !== 1) difficultyTooltip += ' (equip ×' + equipMult + ')';
-    if (awakenMult !== 1) difficultyTooltip += ' (awaken ×' + awakenMult + ')';
+    var difficultyTooltip = challengesText('mods.challenges.difficultyTooltip').replace('{value}', difficultyContrib);
+    if (creatureMult !== 1) difficultyTooltip += challengesText('mods.challenges.difficultyCreatureMult').replace('{n}', creatureMult);
+    if (equipMult !== 1) difficultyTooltip += challengesText('mods.challenges.difficultyEquipMult').replace('{n}', equipMult);
+    if (awakenMult !== 1) difficultyTooltip += challengesText('mods.challenges.difficultyAwakenMult').replace('{n}', awakenMult);
 
     var card = document.createElement('div');
     card.style.cssText = 'display: flex; flex-direction: row; align-items: stretch; gap: 6px; padding: 4px; border: 1px solid #555; border-radius: 4px; background: rgba(0,0,0,0.2); flex-wrap: nowrap;';
@@ -3191,7 +3234,7 @@ function openChallengesModal(initialTabIndex) {
       var awakenImg = document.createElement('img');
       awakenImg.src = CHALLENGE_AWAKEN_ICON_URL;
       awakenImg.alt = 'Awakened';
-      awakenImg.title = 'Awakened ability';
+      awakenImg.title = challengesText('mods.challenges.awakenedAbility');
       awakenImg.className = 'pixelated';
       awakenImg.style.cssText = 'width: 10px; height: 10px; flex-shrink: 0;';
       nameP.appendChild(awakenImg);
@@ -3702,7 +3745,7 @@ function openChallengesModal(initialTabIndex) {
     } catch (e) {
       console.error('[Challenges Mod] rollCreaturesHandler error:', e);
       creaturesListEl.innerHTML = '';
-      creaturesListEl.textContent = 'Error: ' + (e && e.message ? e.message : 'Roll failed');
+      creaturesListEl.textContent = challengesText('mods.challenges.errorPrefix').replace('{error}', e && e.message ? e.message : challengesText('mods.challenges.rollFailed'));
     }
   }
 
@@ -3912,8 +3955,8 @@ function openChallengesModal(initialTabIndex) {
       } catch (e) {
         console.error('[Challenges Mod] slot roll error:', e);
         var errMsg = (e && e.message ? e.message : t('mods.challenges.rollFailed'));
-        setMapResultText('Error: ' + errMsg);
-        creaturesListEl.textContent = 'Error: ' + errMsg;
+        setMapResultText(challengesText('mods.challenges.errorPrefix').replace('{error}', errMsg));
+        creaturesListEl.textContent = challengesText('mods.challenges.errorPrefix').replace('{error}', errMsg);
         creaturesListEl.style.textAlign = '';
         finishRollState();
         return;
@@ -5643,33 +5686,33 @@ function getScoreBreakdownText(row) {
     var base = (1000 - row.ticks) + gradePoints;
     var mapScore = Math.round(base * mult);
     var lines = [
-      'Base: (1000 − ' + row.ticks + ') + ' + gradePoints + ' = ' + base,
-      'Map score: round(' + base + ' × ' + multStr.replace('×', '') + ') = ' + mapScore
+      challengesText('mods.challenges.breakdown.base').replace('{ticks}', row.ticks).replace('{grade}', gradePoints).replace('{base}', base),
+      challengesText('mods.challenges.breakdown.mapScore').replace('{base}', base).replace('{mult}', multStr.replace('×', '')).replace('{score}', mapScore)
     ];
     if (row.playerArsenalItems && row.playerArsenalItems.length) {
       for (var i = 0; i < row.playerArsenalItems.length; i++) {
         var item = row.playerArsenalItems[i];
-        var itemLabel = item.name || (item.type === 'equipment' ? 'Equipment' : 'Creature');
+        var itemLabel = item.name || (item.type === 'equipment' ? challengesText('mods.challenges.breakdown.equipment') : challengesText('mods.challenges.breakdown.creature'));
         if (item.type === 'equipment' && item.tier != null) itemLabel += ' T' + item.tier;
         var itemPoints = item.points != null ? item.points : 0;
         lines.push(itemLabel + ': ' + formatChallengePlayerArsenalItemScore(itemPoints));
       }
     }
     if (row.playerArsenalAverage != null && row.playerArsenalMapMax != null) {
-      lines.push('Arsenal average: ' + Math.round(row.playerArsenalAverage) + ' × map max ' + row.playerArsenalMapMax + '×');
+      lines.push(challengesText('mods.challenges.breakdown.arsenalAverage').replace('{avg}', Math.round(row.playerArsenalAverage)).replace('{max}', row.playerArsenalMapMax));
     }
     if (arsenalBonus > 0) {
-      lines.push('Arsenal bonus: +' + arsenalBonus);
+      lines.push(challengesText('mods.challenges.breakdown.arsenalBonus').replace('{bonus}', arsenalBonus));
     }
-    lines.push('Score: ' + mapScore + ' + ' + arsenalBonus + ' = ' + score);
-    if (row.grade) lines.push('Grade: ' + row.grade + ' (+' + gradePoints + ')');
+    lines.push(challengesText('mods.challenges.breakdown.score').replace('{map}', mapScore).replace('{bonus}', arsenalBonus).replace('{score}', score));
+    if (row.grade) lines.push(challengesText('mods.challenges.breakdown.grade').replace('{grade}', row.grade).replace('{points}', gradePoints));
     return lines.join('\n');
   }
   if (row.difficulty != null && score > 0 && mult > 0) {
     var baseApprox = Math.round(score / mult);
-    return 'Base: ≈ ' + baseApprox + ' (from score ÷ multiplier)\nMultiplier: ' + multStr + '\nScore: round(' + baseApprox + ' × ' + multStr.replace('×', '') + ') = ' + score;
+    return challengesText('mods.challenges.breakdown.approx').split('{base}').join(baseApprox).replace('{mult}', multStr).replace('{multNum}', multStr.replace('×', '')).replace('{score}', score);
   }
-  return 'Score: ' + score;
+  return challengesText('mods.challenges.breakdown.scoreOnly').replace('{score}', score);
 }
 
 function getRandomInt(min, max) {
@@ -5851,7 +5894,7 @@ function buildChallengeConfig(roomId, villainSpecs, allyLimit, opts) {
         wrap.appendChild(row(challengesText('mods.challenges.difficultyLabel').replace(/:\s*$/, ''), getDifficultyMultiplier(difficulty).toFixed(2) + '×'));
         if (result.playerArsenalItems && result.playerArsenalItems.length) {
           result.playerArsenalItems.forEach(function(item) {
-            var itemLabel = item.name || (item.type === 'equipment' ? 'Equipment' : 'Creature');
+            var itemLabel = item.name || (item.type === 'equipment' ? challengesText('mods.challenges.breakdown.equipment') : challengesText('mods.challenges.breakdown.creature'));
             if (item.type === 'equipment' && item.tier != null) itemLabel += ' T' + item.tier;
             wrap.appendChild(row(itemLabel, formatChallengePlayerArsenalItemScore(item.points)));
           });
@@ -6019,7 +6062,7 @@ function showChallengesToast(message, options) {
       var joinLinkBtn = document.createElement('button');
       joinLinkBtn.type = 'button';
       joinLinkBtn.setAttribute('data-challenges-queue-watch-join', '1');
-      joinLinkBtn.setAttribute('aria-label', 'Join challenges queue');
+      joinLinkBtn.setAttribute('aria-label', challengesText('mods.challenges.aria.joinQueue'));
       joinLinkBtn.textContent = challengesText('mods.challenges.multiplayer.queueWatchInviteJoin');
       joinLinkBtn.style.cssText = 'flex-shrink: 0; padding: 0 0.2em; margin: 0; font-size: inherit; line-height: inherit; color: #ffe066; text-decoration: underline; background: transparent; border: none; cursor: pointer; pointer-events: auto; font-family: inherit; letter-spacing: 0.06em;';
       joinLinkBtn.addEventListener('click', function(e) {
@@ -6039,7 +6082,7 @@ function showChallengesToast(message, options) {
     if (options.showAccept === true || options.acceptLabel !== undefined) {
       acceptToastBtn = document.createElement('button');
       acceptToastBtn.type = 'button';
-      acceptToastBtn.setAttribute('aria-label', 'Accept match');
+      acceptToastBtn.setAttribute('aria-label', challengesText('mods.challenges.aria.acceptMatch'));
       acceptToastBtn.className = 'challenges-btn';
       acceptToastBtn.style.cssText = 'flex-shrink: 0; padding: 4px 10px; font-size: 12px; cursor: pointer;';
       acceptToastBtn.textContent = typeof options.acceptLabel === 'string' ? options.acceptLabel : 'Accept match';
@@ -6054,7 +6097,7 @@ function showChallengesToast(message, options) {
     if (options.showCancel === true || typeof options.onCancel === 'function') {
       cancelToastBtn = document.createElement('button');
       cancelToastBtn.type = 'button';
-      cancelToastBtn.setAttribute('aria-label', 'Cancel challenge');
+      cancelToastBtn.setAttribute('aria-label', challengesText('mods.challenges.aria.cancelChallenge'));
       cancelToastBtn.className = 'challenges-btn';
       cancelToastBtn.style.cssText = 'flex-shrink: 0; padding: 4px 10px; font-size: 12px; cursor: pointer; background: url("' + CHALLENGE_RED_BG + '") repeat !important; border: 3px solid transparent !important; border-image: url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 4 fill stretch !important; color: #fff !important; font-weight: bold;';
       cancelToastBtn.textContent = typeof options.cancelLabel === 'string' ? options.cancelLabel : challengesText('mods.challenges.cancel');
@@ -6069,7 +6112,7 @@ function showChallengesToast(message, options) {
     if (typeof options.onClose === 'function') {
       var closeBtn = document.createElement('button');
       closeBtn.type = 'button';
-      closeBtn.setAttribute('aria-label', 'Leave queue');
+      closeBtn.setAttribute('aria-label', challengesText('mods.challenges.aria.leaveQueue'));
       closeBtn.className = 'flex-shrink-0';
       closeBtn.style.cssText = 'width: 24px; height: 24px; padding: 0; border: none; background: transparent; cursor: pointer; color: #e74c3c; font-size: 18px; line-height: 1; display: flex; align-items: center; justify-content: center; border-radius: 4px;';
       closeBtn.innerHTML = '&times;';
@@ -6139,8 +6182,8 @@ function copyReplayToClipboard(text) {
   try {
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(text).then(function() {
-        showChallengesToast('Setup config copied to clipboard.', { duration: CHALLENGE_TOAST_DURATION });
-      }).catch(function() { showChallengesToast('Copy failed.', { duration: CHALLENGE_TOAST_DURATION }); });
+        showChallengesToast(challengesText('mods.challenges.toast.setupCopied'), { duration: CHALLENGE_TOAST_DURATION });
+      }).catch(function() { showChallengesToast(challengesText('mods.challenges.toast.copyFailed'), { duration: CHALLENGE_TOAST_DURATION }); });
     } else {
       var ta = document.createElement('textarea');
       ta.value = text;
@@ -6152,10 +6195,10 @@ function copyReplayToClipboard(text) {
       if (ta.parentNode) {
         ta.parentNode.removeChild(ta);
       }
-      showChallengesToast('Setup config copied to clipboard.', { duration: CHALLENGE_TOAST_DURATION });
+      showChallengesToast(challengesText('mods.challenges.toast.setupCopied'), { duration: CHALLENGE_TOAST_DURATION });
     }
   } catch (e) {
-    showChallengesToast('Copy failed.', { duration: CHALLENGE_TOAST_DURATION });
+    showChallengesToast(challengesText('mods.challenges.toast.copyFailed'), { duration: CHALLENGE_TOAST_DURATION });
   }
 }
 
@@ -6220,12 +6263,12 @@ function triggerChallengeStopButton() {
     var stopButton = null;
     for (var i = 0; i < selectors.length; i++) {
       stopButton = document.querySelector(selectors[i]);
-      if (stopButton && stopButton.textContent.trim() === 'Stop') break;
+      if (stopButton && ['Stop', 'Parar'].indexOf(stopButton.textContent.trim()) !== -1) break;
     }
     if (!stopButton) {
       var redBtns = document.querySelectorAll('button.frame-1-red, button.surface-red');
       for (var j = 0; j < redBtns.length; j++) {
-        if (redBtns[j].textContent.trim() === 'Stop' && redBtns[j].getAttribute('data-state') === 'closed') {
+        if (['Stop', 'Parar'].indexOf(redBtns[j].textContent.trim()) !== -1 && redBtns[j].getAttribute('data-state') === 'closed') {
           stopButton = redBtns[j];
           break;
         }
@@ -6367,13 +6410,13 @@ function startChallenge() {
 
   try {
     if (!rolledRoomId || !rolledCreatureSpecs || !rolledCreatureSpecs.length) {
-      showChallengeToastNotification('Roll map and creatures first.');
+      showChallengeToastNotification(challengesText('mods.challenges.toast.rollFirst'));
       return;
     }
 
     if (!state) {
       console.log('[Challenges Mod] startChallenge: no state, aborting');
-      showChallengeToast('Game state not available. Make sure you are in the game and the board is loaded.');
+      showChallengeToast(challengesText('mods.challenges.toast.gameStateUnavailableLong'));
       return;
     }
     console.log('[Challenges Mod] startChallenge: state OK');
@@ -6435,7 +6478,7 @@ function startChallenge() {
         if (!CustomBattles) {
           console.log('[Challenges Mod] startChallenge: CustomBattles not available after wait');
           restoreChallengePlayerArsenal();
-          showChallengeToast('Custom Battles system not available. Try again in a moment.');
+          showChallengeToast(challengesText('mods.challenges.toast.customBattlesUnavailableRetry'));
           return;
         }
         console.log('[Challenges Mod] startChallenge: CustomBattles ready');
@@ -6444,7 +6487,7 @@ function startChallenge() {
         if (!state || !state.board) {
           console.log('[Challenges Mod] startChallenge: no state/board in then');
           restoreChallengePlayerArsenal();
-          showChallengeToast('Board state not available.');
+          showChallengeToast(challengesText('mods.challenges.toast.boardStateUnavailable'));
           return;
         }
 
@@ -6497,7 +6540,7 @@ function startChallenge() {
           }, 350);
         });
 
-        showChallengeToastNotification('Navigating to challenge.');
+        showChallengeToastNotification(challengesText('mods.challenges.toast.navigatingToChallenge'));
         startSoloChallengeLiveToast(alliesAllowed);
         scheduleChallengePlayerArsenalAfterNavigation();
         console.log('[Challenges Mod] startChallenge: sending selectRoomById', roomId);
@@ -6506,13 +6549,13 @@ function startChallenge() {
       }).catch(function(err) {
         console.error('[Challenges Mod] startChallenge promise error:', err);
         restoreChallengePlayerArsenal();
-        showChallengeToast('Error starting challenge: ' + (err && err.message ? err.message : 'Unknown error'));
+        showChallengeToast(challengesText('mods.challenges.toast.errorStartingChallenge').replace('{error}', (err && err.message ? err.message : challengesText('mods.challenges.unknownError'))));
       });
     }, CHALLENGE_SANDBOX_DELAY_MS);
   } catch (err) {
     console.error('[Challenges Mod] startChallenge error:', err);
     restoreChallengePlayerArsenal();
-    showChallengeToast('Error: ' + (err && err.message ? err.message : 'Unknown error'));
+    showChallengeToast(challengesText('mods.challenges.errorPrefix').replace('{error}', (err && err.message ? err.message : challengesText('mods.challenges.unknownError'))));
   }
 }
 
@@ -6524,7 +6567,7 @@ function startChallengeWithVillainConfig(config) {
   console.log('[Challenges Mod] startChallengeWithVillainConfig called', { roomId: config && config.roomId, roomName: config && config.roomName, villains: config && config.villains && config.villains.length });
   if (!config || !config.roomId || !config.villains || !Array.isArray(config.villains) || config.villains.length === 0) {
     console.log('[Challenges Mod] startChallengeWithVillainConfig: invalid config, showing toast');
-    showChallengeToastNotification('Invalid setup config.');
+    showChallengeToastNotification(challengesText('mods.challenges.toast.invalidSetupConfig'));
     return;
   }
   try {
@@ -6541,7 +6584,7 @@ function startChallengeWithVillainConfig(config) {
   var state = getState();
   if (!state || !state.board) {
     console.log('[Challenges Mod] startChallengeWithVillainConfig: no state/board, aborting');
-    showChallengeToast('Game state not available.');
+    showChallengeToast(challengesText('mods.challenges.toast.gameStateUnavailable'));
     return;
   }
   if (!challengeBattle) {
@@ -6589,7 +6632,7 @@ function startChallengeWithVillainConfig(config) {
       if (!CustomBattles) {
         console.log('[Challenges Mod] startChallengeWithVillainConfig: CustomBattles not available');
         restoreChallengePlayerArsenal();
-        showChallengeToast('Custom Battles not available.');
+        showChallengeToast(challengesText('mods.challenges.toast.customBattlesUnavailable'));
         return;
       }
       console.log('[Challenges Mod] startChallengeWithVillainConfig: CustomBattles ready, creating battle');
@@ -6597,7 +6640,7 @@ function startChallengeWithVillainConfig(config) {
       if (!state || !state.board) {
         console.log('[Challenges Mod] startChallengeWithVillainConfig: no state/board after wait');
         restoreChallengePlayerArsenal();
-        showChallengeToast('Board state not available.');
+        showChallengeToast(challengesText('mods.challenges.toast.boardStateUnavailable'));
         return;
       }
         cleanupChallengeBattle();
@@ -6650,7 +6693,7 @@ function startChallengeWithVillainConfig(config) {
         }, delayMs);
       });
       if (!challengeMultiplayerContext) {
-        showChallengeToastNotification('Loading challenge setup...');
+        showChallengeToastNotification(challengesText('mods.challenges.toast.loadingSetup'));
         startSoloChallengeLiveToast(alliesAllowed);
       }
       scheduleChallengePlayerArsenalAfterNavigation();
@@ -6664,7 +6707,7 @@ function startChallengeWithVillainConfig(config) {
     }).catch(function(err) {
       console.error('[Challenges Mod] startChallengeWithVillainConfig error:', err);
       restoreChallengePlayerArsenal();
-      showChallengeToast('Error loading setup: ' + (err && err.message ? err.message : 'Unknown error'));
+      showChallengeToast(challengesText('mods.challenges.toast.errorLoadingSetup').replace('{error}', (err && err.message ? err.message : challengesText('mods.challenges.unknownError'))));
     });
   }, CHALLENGE_SANDBOX_DELAY_MS);
 }

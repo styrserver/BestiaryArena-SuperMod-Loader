@@ -53,9 +53,6 @@ const HIGHSCORE_LIST_NO_RESULTS_CLASS = 'highscores-no-results';
 const HIGHSCORE_LIST_UNPLAYED_CLASS = 'highscores-item--unplayed';
 const HIGHSCORES_STYLE_ID = 'highscores-styles';
 
-const HIGHSCORE_SEARCH_TOOLTIP =
-  'Map search:\n• Matches map name, region, and raid maps\n• Combine: rook AND raid, venore OR carlin\n• Operators: AND, OR (spaces required, case insensitive)';
-
 const HIGHSCORE_RAID_ICON = '/assets/icons/raid.png';
 
 const HIGHSCORE_TAB_ICON_SIZE = 12;
@@ -502,11 +499,11 @@ function floorIndexToAscensionPercent(floorIndex) {
 
 function formatNoWrStatHtml(unit, youValue, youSubTicks) {
   const yours = formatRecordValue(unit, youValue, unit !== 'ticks' ? youSubTicks : null);
-  return `<span style="color:#ccc">${yours}</span> <span style="color:#888">· No WR</span>`;
+  return `<span style="color:#ccc">${yours}</span> <span style="color:#888">· ${t('mods.highscore.noWr')}</span>`;
 }
 
 function formatOwnWrStatHtml(unit, youValue, youSubTicks) {
-  return `<span style="color:#8f8;">${formatRecordValue(unit, youValue, unit !== 'ticks' ? youSubTicks : null)} (You)</span>`;
+  return `<span style="color:#8f8;">${formatRecordValue(unit, youValue, unit !== 'ticks' ? youSubTicks : null)} ${t('mods.highscore.youSuffix')}</span>`;
 }
 
 function buildWorldRecordOnlyHtml(unit, playerName, theirValue, theirTicks) {
@@ -540,13 +537,13 @@ function formatSummaryStatHtml(unit, youValue, youSubTicks, bestRecord, you, you
 
   if (missingYou) {
     if (isOwnHighscoreRecord(bestRecord, you, yourName)) {
-      return `<span style="color:#8f8;">${formatRecordValue(unit, theirValue, unit !== 'ticks' ? theirTicks : null)} (You)</span>`;
+      return `<span style="color:#8f8;">${formatRecordValue(unit, theirValue, unit !== 'ticks' ? theirTicks : null)} ${t('mods.highscore.youSuffix')}</span>`;
     }
     return buildWorldRecordOnlyHtml(unit, bestRecord.userName, theirValue, theirTicks);
   }
 
   if (isOwnHighscoreRecord(bestRecord, you, yourName)) {
-    return `<span style="color:#8f8;">${formatRecordValue(unit, youValue, unit !== 'ticks' ? youSubTicks : null)} (You)</span>`;
+    return `<span style="color:#8f8;">${formatRecordValue(unit, youValue, unit !== 'ticks' ? youSubTicks : null)} ${t('mods.highscore.youSuffix')}</span>`;
   }
 
   return buildRecordComparisonHtml(
@@ -703,15 +700,15 @@ function buildSummaryEntries(mapCodes, rooms, best, roomsHighscores, you, yourNa
 }
 
 function formatTickImprovementText(tickDelta, yourTicks) {
-  if (tickDelta === null) return 'Ticks unavailable';
+  if (tickDelta === null) return t('mods.highscore.ticksUnavailable');
   if (tickDelta > 0) {
     const pct = yourTicks > 0 ? ((tickDelta / yourTicks) * 100).toFixed(1) : '0.0';
     return `+${tickDelta} ticks (${pct}%)`;
   }
   if (tickDelta < 0) {
-    return `${Math.abs(tickDelta)} ticks ahead`;
+    return t('mods.highscore.ticksAhead').replace('{ticks}', Math.abs(tickDelta));
   }
-  return 'Tied ticks';
+  return t('mods.highscore.tiedTicks');
 }
 
 function buildImprovementSummaryStats(tickOpportunities, rankOpportunities, floorOpportunities) {
@@ -747,7 +744,7 @@ function buildImprovementSummaryStats(tickOpportunities, rankOpportunities, floo
 
 function formatImprovementSummaryLine(stats) {
   const ticksText = stats.tickImprovement === 0 ? '0' : String(stats.tickImprovement);
-  return `Improvements — Ticks: ${ticksText} · Rank: +${stats.rankImprovement} · Floor: +${stats.floorImprovement}`;
+  return t('mods.highscore.improvementsLine').replace('{ticks}', ticksText).replace('{rank}', stats.rankImprovement).replace('{floor}', stats.floorImprovement);
 }
 
 // =======================
@@ -869,7 +866,7 @@ function isCyclopediaModEnabled() {
 
 function getViewInCyclopediaLabel() {
   const localized = t('mods.highscore.viewInCyclopedia');
-  return localized === 'mods.highscore.viewInCyclopedia' ? 'View in Cyclopedia' : localized;
+  return localized;
 }
 
 function buildCyclopediaMapNavigateTarget(code, name) {
@@ -1044,7 +1041,7 @@ function decorateImprovementMapName(itemEl, code) {
   const icon = document.createElement('img');
   icon.src = HIGHSCORE_RAID_ICON;
   icon.alt = 'raid';
-  icon.title = 'Raid map';
+  icon.title = t('mods.highscore.raidMap');
   icon.className = 'pixelated';
   icon.style.cssText = 'width:11px;height:11px;flex-shrink:0;';
 
@@ -1074,13 +1071,13 @@ function tagImprovementEmptyState(emptyEl) {
 
 function createHighscoreSearchBar(placeholder) {
   const searchContainer = document.createElement('div');
-  searchContainer.title = HIGHSCORE_SEARCH_TOOLTIP;
+  searchContainer.title = t('mods.highscore.searchTooltip');
   searchContainer.style.cssText = 'display: flex; align-items: center; gap: 4px; padding: 4px 6px; background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 3px; margin: 0; width: 100%; margin-left: 0; margin-right: 0; box-sizing: border-box; min-width: 0;';
 
   const searchInput = document.createElement('input');
   searchInput.type = 'text';
   searchInput.placeholder = placeholder;
-  searchInput.title = HIGHSCORE_SEARCH_TOOLTIP;
+  searchInput.title = t('mods.highscore.searchTooltip');
   searchInput.autocomplete = 'off';
   searchInput.style.cssText = 'background: rgba(255, 255, 255, 0.1); color: #fff; border: 1px solid rgba(255, 255, 255, 0.2); padding: 3px 6px; border-radius: 2px; font-size: 12px; flex: 1 1 0%; min-width: 0; font-family: inherit; outline: none; box-sizing: border-box; width: 100%;';
 
@@ -1104,7 +1101,7 @@ function ensureImprovementNoResultsMessage(grid) {
   if (!noResultsEl) {
     noResultsEl = document.createElement('div');
     noResultsEl.className = `${HIGHSCORE_LIST_NO_RESULTS_CLASS} pixel-font-14`;
-    noResultsEl.textContent = 'No maps match your search.';
+    noResultsEl.textContent = t('mods.highscore.noMapsMatch');
     noResultsEl.style.cssText = 'display:none; text-align:center; color:#aaa; font-style:italic; padding:12px 8px;';
     grid.appendChild(noResultsEl);
   }
@@ -1208,7 +1205,7 @@ function createSummaryContent(entries, you, yourName, improvementStats) {
   } else {
     const emptyEl = document.createElement('div');
     emptyEl.style.cssText = 'text-align: center; color: #eee; padding: 20px;';
-    emptyEl.textContent = 'No map records found.';
+    emptyEl.textContent = t('mods.highscore.noMapRecords');
     scrollContainer.addContent(tagImprovementEmptyState(emptyEl));
   }
 
@@ -1219,9 +1216,9 @@ function createSummaryContent(entries, you, yourName, improvementStats) {
   const rankWrCount = entries.filter((e) => e.ownsRankWr).length;
   const floorWrCount = entries.filter((e) => e.ownsFloorWr).length;
   statsContainer.innerHTML = `
-    <div>Maps with room to improve: ${improvementStats.mapsWithRoomToImprove} · Incomplete maps: ${incompleteMapCount}</div>
+    <div>${t('mods.highscore.mapsWithRoom').replace('{count}', improvementStats.mapsWithRoomToImprove).replace('{incomplete}', incompleteMapCount)}</div>
     <div>${formatImprovementSummaryLine(improvementStats)}</div>
-    <div>Your WRs — Ticks: ${tickWrCount} · Rank: ${rankWrCount} · Floor: ${floorWrCount}</div>
+    <div>${t('mods.highscore.yourWrs').replace('{ticks}', tickWrCount).replace('{rank}', rankWrCount).replace('{floor}', floorWrCount)}</div>
   `;
 
   return {
@@ -1285,9 +1282,9 @@ function createTickContent(opportunities, minTheo, hasTickWrData) {
               ? formatNoWrStatHtml('ticks', o.yours, null)
               : buildRecordComparisonHtml('ticks', o.yours, null, o.player, o.best, null)}</div>
           <div class="pixel-font-14" style="color: #8f8;">${o.ownsWr
-            ? 'You hold the WR'
+            ? t('mods.highscore.youHoldWr')
             : o.hasWr === false
-              ? 'No WR yet'
+              ? t('mods.highscore.noWrYet')
               : `+${o.diff} ticks (${o.pct}%)`}</div>
         </div>
       `;
@@ -1298,8 +1295,8 @@ function createTickContent(opportunities, minTheo, hasTickWrData) {
     const emptyEl = document.createElement('div');
     emptyEl.style.cssText = 'text-align: center; color: #eee; padding: 20px;';
     emptyEl.textContent = hasTickWrData
-      ? 'You are already at the top in all rooms!'
-      : 'No tick highscores available yet.';
+      ? t('mods.highscore.topAllRoomsTicks')
+      : t('mods.highscore.noTickHighscores');
     scrollContainer.addContent(tagImprovementEmptyState(emptyEl));
   }
   
@@ -1309,9 +1306,9 @@ function createTickContent(opportunities, minTheo, hasTickWrData) {
   const totalTicksImprovement = opportunities.reduce((sum, o) => sum + (o.ownsWr || o.hasWr === false ? 0 : o.diff), 0);
   const tickImprovementRooms = opportunities.filter((o) => !o.ownsWr && o.hasWr !== false).length;
   statsContainer.innerHTML = `
-    <div>Rooms with ticks improvement: ${tickImprovementRooms}</div>
-    <div>Total ticks improvement: ${totalTicksImprovement}</div>
-    <div>Theoretical minimum: ${minTheo}</div>
+    <div>${t('mods.highscore.roomsTicksImprovement').replace('{count}', tickImprovementRooms)}</div>
+    <div>${t('mods.highscore.totalTicksImprovement').replace('{count}', totalTicksImprovement)}</div>
+    <div>${t('mods.highscore.theoreticalMinimumLine').replace('{value}', minTheo)}</div>
   `;
   
   return {
@@ -1359,8 +1356,8 @@ function createRankContent(opportunities, hasRankWrData) {
     const emptyEl = document.createElement('div');
     emptyEl.style.cssText = 'text-align: center; color: #eee; padding: 20px;';
     emptyEl.textContent = hasRankWrData
-      ? 'You already have the maximum rank score in all rooms!'
-      : 'No rank highscores available yet.';
+      ? t('mods.highscore.maxRankAllRooms')
+      : t('mods.highscore.noRankHighscores');
     scrollContainer.addContent(tagImprovementEmptyState(emptyEl));
   }
   
@@ -1371,9 +1368,9 @@ function createRankContent(opportunities, hasRankWrData) {
   const tickGain = opportunities.reduce((sum, o) => sum + (o.ownsWr || o.hasWr === false ? 0 : Math.max(0, Number(o.tickDiff) || 0)), 0);
   const rankImprovementRooms = opportunities.filter((o) => !o.ownsWr && o.hasWr !== false).length;
   statsContainer.innerHTML = `
-    <div>Rooms with rank improvement: ${rankImprovementRooms}</div>
-    <div>Total rank points to gain: ${rankPointGain}</div>
-    <div>Same-rank tick gain: ${tickGain} ticks</div>
+    <div>${t('mods.highscore.roomsRankImprovement').replace('{count}', rankImprovementRooms)}</div>
+    <div>${t('mods.highscore.totalRankPoints').replace('{count}', rankPointGain)}</div>
+    <div>${t('mods.highscore.sameRankTickGain').replace('{ticks}', tickGain)}</div>
   `;
   
   return {
@@ -1419,8 +1416,8 @@ function createFloorContent(opportunities, hasFloorWrData) {
     const emptyEl = document.createElement('div');
     emptyEl.style.cssText = 'text-align: center; color: #eee; padding: 20px;';
     emptyEl.textContent = hasFloorWrData
-      ? 'You already have the best floor clear in all rooms!'
-      : 'No floor highscores available yet.';
+      ? t('mods.highscore.bestFloorAllRooms')
+      : t('mods.highscore.noFloorHighscores');
     scrollContainer.addContent(tagImprovementEmptyState(emptyEl));
   }
   
@@ -1430,9 +1427,9 @@ function createFloorContent(opportunities, hasFloorWrData) {
   const tickGain = opportunities.reduce((sum, o) => sum + (o.ownsWr || o.hasWr === false ? 0 : Math.max(0, Number(o.tickDiff) || 0)), 0);
   const floorImprovementRooms = opportunities.filter((o) => !o.ownsWr && o.hasWr !== false).length;
   statsContainer.innerHTML = `
-    <div>Rooms with floor improvement: ${floorImprovementRooms}</div>
-    <div>Total floor gain: +${floorGain}</div>
-    <div>Same-floor tick gain: ${tickGain} ticks</div>
+    <div>${t('mods.highscore.roomsFloorImprovement').replace('{count}', floorImprovementRooms)}</div>
+    <div>${t('mods.highscore.totalFloorGain').replace('{count}', floorGain)}</div>
+    <div>${t('mods.highscore.sameFloorTickGain').replace('{ticks}', tickGain)}</div>
   `;
   
   return {
@@ -1520,7 +1517,7 @@ function createTabs(summaryContent, tickContent, rankContent, floorContent) {
   tabButtons.className = 'flex mb-2';
 
   const tabDefs = [
-    { label: 'Summary', icon: HIGHSCORE_TAB_ICONS.summary, content: summaryContent },
+    { label: t('mods.highscore.tabSummary'), icon: HIGHSCORE_TAB_ICONS.summary, content: summaryContent },
     { label: 'Ticks', icon: HIGHSCORE_TAB_ICONS.ticks, content: tickContent },
     { label: 'Rank', icon: HIGHSCORE_TAB_ICONS.rank, content: rankContent },
     { label: 'Floor', icon: HIGHSCORE_TAB_ICONS.floor, content: floorContent }
@@ -1538,7 +1535,7 @@ function createTabs(summaryContent, tickContent, rankContent, floorContent) {
     return panel;
   });
 
-  const { searchContainer, searchInput } = createHighscoreSearchBar('Search maps...');
+  const { searchContainer, searchInput } = createHighscoreSearchBar(t('mods.highscore.searchPlaceholder'));
   searchContainer.style.flexShrink = '0';
   searchContainer.style.marginBottom = '8px';
 
@@ -1605,7 +1602,7 @@ async function showImprovementsModal() {
 
     dismissLoading = api.showModal({
       title: t('mods.highscore.title'),
-      content: '<div style="text-align: center; padding: 20px;">Loading data...</div>',
+      content: `<div style="text-align: center; padding: 20px;">${t('mods.highscore.loadingData')}</div>`,
       buttons: []
     });
     
@@ -1705,7 +1702,7 @@ async function showImprovementsModal() {
           yourRankTicks,
           bestRankTicks: null,
           tickDiff: 0,
-          improvementText: 'No WR yet',
+          improvementText: t('mods.highscore.noWrYet'),
           player: null,
           ownsWr: false,
           hasWr: false,
@@ -1731,9 +1728,9 @@ async function showImprovementsModal() {
       if (!ownsWr && rankDiff < 0) return [];
 
       const improvementText = ownsWr
-        ? 'You hold the WR'
+        ? t('mods.highscore.youHoldWr')
         : rankDiff > 0
-          ? `+${rankDiff} rank point${rankDiff > 1 ? 's' : ''}`
+          ? t('mods.highscore.rankPointsGain').replace('{count}', rankDiff)
           : formatTickImprovementText(sameRankTickDelta, yourRankTicks);
 
       return [{
@@ -1785,7 +1782,7 @@ async function showImprovementsModal() {
           bestFloorTicks: null,
           floorDiff: 0,
           tickDiff: 0,
-          improvementText: 'No WR yet',
+          improvementText: t('mods.highscore.noWrYet'),
           player: null,
           ownsWr: false,
           hasWr: false,
@@ -1842,9 +1839,9 @@ async function showImprovementsModal() {
       }
 
       const improvementText = ownsWr
-        ? 'You hold the WR'
+        ? t('mods.highscore.youHoldWr')
         : floorDiff > 0
-          ? `+${floorDiff} floor${floorDiff > 1 ? 's' : ''}`
+          ? t('mods.highscore.floorsGain').replace('{count}', floorDiff)
           : formatTickImprovementText(sameFloorTickDelta, yourFloorTicks);
 
       return [{
@@ -1902,7 +1899,7 @@ async function showImprovementsModal() {
       content: tabbedContent.element,
       buttons: [
         {
-          text: 'Close',
+          text: t('common.close'),
           primary: true,
           onClick: () => clearHighscoresModalCleanup()
         }
@@ -1919,8 +1916,8 @@ async function showImprovementsModal() {
     console.error('Error showing Highscores modal:', error);
 
     api.showModal({
-      title: 'Error',
-      content: '<p>Failed to load Highscores. Please try again later.</p><p style="color: #999; font-size: 12px;">Error: ' + error.message + '</p>',
+      title: t('common.error'),
+      content: `<p>${t('mods.highscore.loadFailed')}</p><p style="color: #999; font-size: 12px;">${t('mods.highscore.errorDetail').replace('{error}', error.message)}</p>`,
       buttons: [
         {
           text: 'OK',

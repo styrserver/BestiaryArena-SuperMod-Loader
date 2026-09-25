@@ -2039,11 +2039,11 @@ function showDepotModal() {
     const creatureSearchWrap = createDepotModalSearchWrap();
     const creatureSearch = document.createElement('input');
     creatureSearch.type = 'text';
-    creatureSearch.placeholder = 'Search creatures...';
+    creatureSearch.placeholder = t('common.searchCreatures');
     creatureSearch.title = DEPOT_CREATURE_SEARCH_TOOLTIP;
     creatureSearch.style.cssText = 'background:rgba(255,255,255,0.1);color:#fff;border:1px solid rgba(255,255,255,0.2);padding:3px 6px;border-radius:2px;font-size:12px;flex:1;min-width:0;font-family:inherit;outline:none;box-sizing:border-box;';
     const creatureFilterBtn = document.createElement('button');
-    creatureFilterBtn.textContent = 'All';
+    creatureFilterBtn.textContent = t('common.all');
     creatureFilterBtn.style.cssText = 'background:rgba(255,255,255,0.1);color:#fff;border:1px solid rgba(255,255,255,0.2);padding:3px 8px;border-radius:2px;font-size:12px;cursor:pointer;font-family:inherit;outline:none;white-space:nowrap;min-width:50px;margin-left:4px;';
     creatureSearchWrap.appendChild(creatureSearch);
     creatureSearchWrap.appendChild(creatureFilterBtn);
@@ -2054,11 +2054,11 @@ function showDepotModal() {
     const equipmentSearchWrap = createDepotModalSearchWrap();
     const equipmentSearch = document.createElement('input');
     equipmentSearch.type = 'text';
-    equipmentSearch.placeholder = 'Search equipment...';
+    equipmentSearch.placeholder = t('common.searchEquipment');
     equipmentSearch.title = DEPOT_EQUIPMENT_SEARCH_TOOLTIP;
     equipmentSearch.style.cssText = 'background:rgba(255,255,255,0.1);color:#fff;border:1px solid rgba(255,255,255,0.2);padding:3px 6px;border-radius:2px;font-size:12px;flex:1;min-width:0;font-family:inherit;outline:none;box-sizing:border-box;';
     const equipmentFilterBtn = document.createElement('button');
-    equipmentFilterBtn.textContent = 'All';
+    equipmentFilterBtn.textContent = t('common.all');
     equipmentFilterBtn.style.cssText = 'background:rgba(255,255,255,0.1);color:#fff;border:1px solid rgba(255,255,255,0.2);padding:3px 8px;border-radius:2px;font-size:12px;cursor:pointer;font-family:inherit;outline:none;white-space:nowrap;min-width:50px;margin-left:4px;';
     equipmentSearchWrap.appendChild(equipmentSearch);
     equipmentSearchWrap.appendChild(equipmentFilterBtn);
@@ -2069,11 +2069,11 @@ function showDepotModal() {
     const inventoryItemSearchWrap = createDepotModalSearchWrap();
     const inventoryItemSearch = document.createElement('input');
     inventoryItemSearch.type = 'text';
-    inventoryItemSearch.placeholder = 'Search items...';
-    inventoryItemSearch.title = 'Search by item name. Use quotes for exact match. Use AND / OR for combinations.';
+    inventoryItemSearch.placeholder = t('mods.depot.searchItems');
+    inventoryItemSearch.title = t('mods.depot.searchItemsTooltip');
     inventoryItemSearch.style.cssText = 'background:rgba(255,255,255,0.1);color:#fff;border:1px solid rgba(255,255,255,0.2);padding:3px 6px;border-radius:2px;font-size:12px;flex:1;min-width:0;font-family:inherit;outline:none;box-sizing:border-box;';
     const inventoryItemFilterBtn = document.createElement('button');
-    inventoryItemFilterBtn.textContent = 'All';
+    inventoryItemFilterBtn.textContent = t('common.all');
     inventoryItemFilterBtn.style.cssText = 'background:rgba(255,255,255,0.1);color:#fff;border:1px solid rgba(255,255,255,0.2);padding:3px 8px;border-radius:2px;font-size:12px;cursor:pointer;font-family:inherit;outline:none;white-space:nowrap;min-width:50px;margin-left:4px;';
     inventoryItemSearchWrap.appendChild(inventoryItemSearch);
     inventoryItemSearchWrap.appendChild(inventoryItemFilterBtn);
@@ -2155,7 +2155,7 @@ function showDepotModal() {
       if (rows.length === 0) {
         const empty = document.createElement('div');
         empty.style.cssText = 'color:#bbb;text-align:center;padding:16px;grid-column:span 6;';
-        empty.textContent = 'No creatures found.';
+        empty.textContent = t('mods.depot.noCreatures');
         creatureArea.appendChild(empty);
         return;
       }
@@ -2357,7 +2357,7 @@ function showDepotModal() {
       if (rows.length === 0) {
         const empty = document.createElement('div');
         empty.style.cssText = 'color:#bbb;text-align:center;padding:16px;grid-column:span 6;';
-        empty.textContent = 'No depot equipment found.';
+        empty.textContent = t('mods.depot.noEquipment');
         equipmentArea.appendChild(empty);
         return;
       }
@@ -2388,7 +2388,7 @@ function showDepotModal() {
       if (rows.length === 0) {
         const empty = document.createElement('div');
         empty.style.cssText = 'color:#bbb;text-align:center;padding:16px;grid-column:span 6;';
-        empty.textContent = 'No depot items found.';
+        empty.textContent = t('mods.depot.noItems');
         inventoryItemArea.appendChild(empty);
         return;
       }
@@ -2432,11 +2432,11 @@ function showDepotModal() {
     renderEquipmentRows();
     renderInventoryItemRows();
     const modalInstance = api.ui.components.createModal({
-      title: 'Depot',
+      title: t('mods.depot.modalTitle'),
       width: modalDimensions.width,
       height: modalDimensions.height,
       content,
-      buttons: [{ text: 'Close', primary: true }],
+      buttons: [{ text: t('common.close'), primary: true }],
       onClose: () => {
         clearDepotModalLayoutCleanup();
       }

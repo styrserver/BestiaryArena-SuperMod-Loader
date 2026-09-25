@@ -54,7 +54,6 @@ const USAGE_TAB_ICONS = {
   equipment: { src: '/assets/icons/equips.png', alt: 'Equipment' }
 };
 
-const USAGE_LIST_EXPLAINER = "Counts how often each creature/equipment appears across the board configurations you've saved via each map's Auto-setup.";
 
 // =======================
 // 2. Global State
@@ -445,7 +444,7 @@ function groupRoomCodesByRegion(roomCodes, roomRegionLookup, roomNames) {
   }
 
   return orderedRegionIds.map((regionId) => ({
-    regionName: regionId === UNKNOWN_REGION ? 'Other' : getUsageListRegionDisplayName(regionId),
+    regionName: regionId === UNKNOWN_REGION ? t('mods.usageList.regionOther') : getUsageListRegionDisplayName(regionId),
     rooms: groups.get(regionId)
       .slice()
       .sort(compareRoomCodesByGameOrder)
@@ -553,7 +552,7 @@ function buildCreaturesTabContent() {
       if (chunk.length === 0) return;
 
       const tierHeader = document.createElement('h3');
-      tierHeader.textContent = `Tier ${USAGE_TIER_LABELS[idx] || idx + 1}`;
+      tierHeader.textContent = `${t('mods.usageList.tierPrefix')} ${USAGE_TIER_LABELS[idx] || idx + 1}`;
       tierHeader.style.cssText = 'margin: 8px 0 4px; font-size: 1.2rem; border-bottom: 1px solid #444; padding-bottom: 2px; color: white;';
 
       const monsterContainer = document.createElement('div');
@@ -583,8 +582,8 @@ function buildCreaturesTabContent() {
               <span style="font-weight:bold; color:#fff;">${escapeHtml(monsterName)}</span>
               ${buildTooltipTierBadge(monster.tier, tierColor)}
             </div>
-            <div style="color:#ffd54f;">Used <strong>${monster.count}</strong> times</div>
-            <div style="margin-top:6px; color:#aaa;">Used on:</div>
+            <div style="color:#ffd54f;">${t('mods.usageList.usedTimes').replace('{count}', monster.count)}</div>
+            <div style="margin-top:6px; color:#aaa;">${t('mods.usageList.usedOn')}</div>
             ${formatUsedOnHtml(monster.regionGroups)}
           `;
         });
@@ -597,15 +596,15 @@ function buildCreaturesTabContent() {
       scrollContainer.addContent(monsterContainer);
     });
   } else {
-    scrollContainer.addContent(createUsageListEmptyState('No creature usage data yet. Save at least one map\'s board layout as its Auto-setup first.'));
+    scrollContainer.addContent(createUsageListEmptyState(t('mods.usageList.emptyCreatures')));
   }
 
   const statsContainer = document.createElement('div');
   statsContainer.className = 'frame-pressed-1 surface-dark p-2 pixel-font-14';
   statsContainer.innerHTML = `
-    <div>Distinct creatures tracked: ${list.length}</div>
-    <div>Total creature placements: ${total}</div>
-    <div style="color: #999; font-size: 11px; margin-top: 4px;">${USAGE_LIST_EXPLAINER}</div>
+    <div>${t('mods.usageList.distinctCreatures').replace('{count}', list.length)}</div>
+    <div>${t('mods.usageList.totalCreaturePlacements').replace('{count}', total)}</div>
+    <div style="color: #999; font-size: 11px; margin-top: 4px;">${t('mods.usageList.explainer')}</div>
   `;
 
   return { scrollContainer, statsContainer };
@@ -677,7 +676,7 @@ function buildEquipmentTabContent() {
       if (chunk.length === 0) return;
 
       const tierHeader = document.createElement('h3');
-      tierHeader.textContent = `Tier ${USAGE_TIER_LABELS[idx] || idx + 1}`;
+      tierHeader.textContent = `${t('mods.usageList.tierPrefix')} ${USAGE_TIER_LABELS[idx] || idx + 1}`;
       tierHeader.style.cssText = 'margin: 8px 0 4px; font-size: 1.2rem; border-bottom: 1px solid #444; padding-bottom: 2px; color: white;';
 
       const itemContainer = document.createElement('div');
@@ -715,8 +714,8 @@ function buildEquipmentTabContent() {
               <span style="background:${statColor}; color:#111; font-weight:bold; font-size:10px; padding:1px 5px; border-radius:3px;">${displayStat.toUpperCase()}</span>
               ${buildTooltipTierBadge(item.tier, tierColor)}
             </div>
-            <div style="color:#ffd54f;">Used <strong>${item.count}</strong> times</div>
-            <div style="margin-top:6px; color:#aaa;">Used on:</div>
+            <div style="color:#ffd54f;">${t('mods.usageList.usedTimes').replace('{count}', item.count)}</div>
+            <div style="margin-top:6px; color:#aaa;">${t('mods.usageList.usedOn')}</div>
             ${formatUsedOnHtml(item.regionGroups)}
           `;
         });
@@ -734,15 +733,15 @@ function buildEquipmentTabContent() {
       scrollContainer.addContent(itemContainer);
     });
   } else {
-    scrollContainer.addContent(createUsageListEmptyState('No equipment usage data yet. Save at least one map\'s board layout as its Auto-setup first.'));
+    scrollContainer.addContent(createUsageListEmptyState(t('mods.usageList.emptyEquipment')));
   }
 
   const statsContainer = document.createElement('div');
   statsContainer.className = 'frame-pressed-1 surface-dark p-2 pixel-font-14';
   statsContainer.innerHTML = `
-    <div>Distinct equipment variants tracked: ${list.length}</div>
-    <div>Total equipment placements: ${total}</div>
-    <div style="color: #999; font-size: 11px; margin-top: 4px;">${USAGE_LIST_EXPLAINER}</div>
+    <div>${t('mods.usageList.distinctEquipment').replace('{count}', list.length)}</div>
+    <div>${t('mods.usageList.totalEquipmentPlacements').replace('{count}', total)}</div>
+    <div style="color: #999; font-size: 11px; margin-top: 4px;">${t('mods.usageList.explainer')}</div>
   `;
 
   return { scrollContainer, statsContainer };
@@ -884,7 +883,7 @@ function showUsageListModal() {
       content: tabbedContent.element,
       buttons: [
         {
-          text: 'Close',
+          text: t('common.close'),
           primary: true,
           onClick: () => clearUsageListModalCleanup()
         }
@@ -900,8 +899,8 @@ function showUsageListModal() {
     console.error('Error showing Usage List modal:', error);
 
     api.ui.components.createModal({
-      title: 'Error',
-      content: '<p>Failed to generate the usage list. Make sure you are in the game and have access to creature/equipment data.</p>',
+      title: t('common.error'),
+      content: `<p>${t('mods.usageList.errorGenerate')}</p>`,
       buttons: [{ text: 'OK', primary: true }]
     });
   }

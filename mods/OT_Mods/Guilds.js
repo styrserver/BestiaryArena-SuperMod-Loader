@@ -684,7 +684,7 @@ function showSkillIncreaseNotification(skillType, oldLevel, newLevel, equipment)
   const skillName = skillConfig?.label || skillType;
 
   // Use the same toast system as Quests mod for consistency
-  const message = `You've advanced from level ${oldLevel} to level ${newLevel}.`;
+  const message = tReplace('mods.guilds.skillAdvanced', { old: oldLevel, new: newLevel });
 
   // Get or create the main toast container (same as Quests mod)
   let mainContainer = document.getElementById('quest-items-toast-container');
@@ -1747,7 +1747,7 @@ function fillMemberPointsTooltip(tooltip, pointsDisplay, member, pointsData) {
   tooltipContent.style.cssText = 'display: flex; flex-direction: column; gap: 6px;';
 
   const title = document.createElement('div');
-  title.textContent = `${member.username}'s Points`;
+  title.textContent = tReplace('mods.guilds.points.memberTitle', { name: member.username });
   title.style.cssText = `
     font-weight: 600;
     font-size: 12px;
@@ -1780,9 +1780,9 @@ function fillMemberPointsTooltip(tooltip, pointsDisplay, member, pointsData) {
     tooltipContent.appendChild(detail);
   };
 
-  addDetail('Level Points', `+${pointsData.levelPoints}`, CSS_CONSTANTS.COLORS.SUCCESS);
-  addDetail(`  (Level ${pointsData.level})`, ``, 'rgba(255, 255, 255, 0.6)');
-  addDetail('Rank Points', `+${pointsData.rankPoints}`, '#64b5f6');
+  addDetail(t('mods.guilds.points.levelPoints'), `+${pointsData.levelPoints}`, CSS_CONSTANTS.COLORS.SUCCESS);
+  addDetail(tReplace('mods.guilds.points.levelDetail', { level: pointsData.level }), ``, 'rgba(255, 255, 255, 0.6)');
+  addDetail(t('mods.guilds.points.rankPoints'), `+${pointsData.rankPoints}`, '#64b5f6');
   addDetail(`  (${formatNumber(pointsData.rankPointsValue)} total, every ${POINTS_CONFIG.RANK_POINTS_PER_POINT} = 1 pt)`, ``, 'rgba(255, 255, 255, 0.6)');
   if (pointsData.floorPoints > 0) {
     addDetail(t('mods.guilds.equipment.floorPoints') || 'Floor Points', `+${pointsData.floorPoints}`, '#ba68c8');
@@ -1790,15 +1790,15 @@ function fillMemberPointsTooltip(tooltip, pointsDisplay, member, pointsData) {
   }
   if (pointsData.equipmentPoints > 0) {
     addDetail(t('mods.guilds.equipment.equipmentPoints') || 'Equipment Points', `+${pointsData.equipmentPoints}`, '#81c784');
-    addDetail(`  (equipment + skill points)`, ``, 'rgba(255, 255, 255, 0.6)');
+    addDetail(t('mods.guilds.points.equipmentDetail'), ``, 'rgba(255, 255, 255, 0.6)');
   }
-  addDetail('Time Penalty', `-${pointsData.timeSumPenalty}`, CSS_CONSTANTS.COLORS.ERROR);
+  addDetail(t('mods.guilds.points.timePenalty'), `-${pointsData.timeSumPenalty}`, CSS_CONSTANTS.COLORS.ERROR);
   addDetail(`  (${formatNumber(pointsData.timeSum)} ticks, every ${POINTS_CONFIG.TIME_SUM_PENALTY_DIVISOR} = -1 pt)`, ``, 'rgba(255, 255, 255, 0.6)');
 
   if (pointsData.hasWorldRecord) {
     const wrBonus = (pointsData.worldRecordCount || 1) * POINTS_CONFIG.WORLD_RECORD_BONUS;
-    addDetail('World Record Holder', `+${wrBonus}`, CSS_CONSTANTS.COLORS.ROLE_LEADER);
-    addDetail(`  (${pointsData.worldRecordCount || 1} world record${(pointsData.worldRecordCount || 1) !== 1 ? 's' : ''}, every 1 = ${POINTS_CONFIG.WORLD_RECORD_BONUS} pt)`, ``, 'rgba(255, 255, 255, 0.6)');
+    addDetail(t('mods.guilds.points.worldRecordHolder'), `+${wrBonus}`, CSS_CONSTANTS.COLORS.ROLE_LEADER);
+    addDetail(tReplace('mods.guilds.points.worldRecordsDetail', { count: pointsData.worldRecordCount || 1, bonus: POINTS_CONFIG.WORLD_RECORD_BONUS }), ``, 'rgba(255, 255, 255, 0.6)');
   }
 
   const total = document.createElement('div');
@@ -1810,7 +1810,7 @@ function fillMemberPointsTooltip(tooltip, pointsDisplay, member, pointsData) {
     font-size: 12px;
     color: ${CSS_CONSTANTS.COLORS.TEXT_PRIMARY};
   `;
-  total.textContent = `Total: ${formatNumber(totalWithWR)}`;
+  total.textContent = tReplace('mods.guilds.points.total', { total: formatNumber(totalWithWR) });
   tooltipContent.appendChild(total);
 
   tooltip.innerHTML = '';
@@ -1849,24 +1849,24 @@ function applyGuildPointsBreakdownToUI(ref, breakdown) {
     tooltip.appendChild(detail);
   };
 
-  addDetail('Level Points', `+${breakdown.levelPoints}`, CSS_CONSTANTS.COLORS.SUCCESS);
-  addDetail(`  (${formatNumber(breakdown.totalLevels)} total levels)`, ``, 'rgba(255, 255, 255, 0.6)');
-  addDetail('Rank Points', `+${breakdown.rankPoints}`, '#64b5f6');
+  addDetail(t('mods.guilds.points.levelPoints'), `+${breakdown.levelPoints}`, CSS_CONSTANTS.COLORS.SUCCESS);
+  addDetail(tReplace('mods.guilds.points.totalLevelsDetail', { count: formatNumber(breakdown.totalLevels) }), ``, 'rgba(255, 255, 255, 0.6)');
+  addDetail(t('mods.guilds.points.rankPoints'), `+${breakdown.rankPoints}`, '#64b5f6');
   addDetail(`  (${formatNumber(breakdown.totalRankPointsValue)} total)`, ``, 'rgba(255, 255, 255, 0.6)');
   if (breakdown.floorPoints > 0) {
-    addDetail('Floor Points', `+${breakdown.floorPoints}`, '#ba68c8');
+    addDetail(t('mods.guilds.equipment.floorPoints'), `+${breakdown.floorPoints}`, '#ba68c8');
     addDetail(`  (${formatNumber(breakdown.totalFloors)} floors)`, ``, 'rgba(255, 255, 255, 0.6)');
   }
   if (breakdown.equipmentPoints > 0) {
-    addDetail('Equipment Points', `+${breakdown.equipmentPoints}`, '#81c784');
-    addDetail(`  (equipment + skill points)`, ``, 'rgba(255, 255, 255, 0.6)');
+    addDetail(t('mods.guilds.equipment.equipmentPoints'), `+${breakdown.equipmentPoints}`, '#81c784');
+    addDetail(t('mods.guilds.points.equipmentDetail'), ``, 'rgba(255, 255, 255, 0.6)');
   }
-  addDetail('Time Penalty', `-${breakdown.timeSumPenalty}`, CSS_CONSTANTS.COLORS.ERROR);
+  addDetail(t('mods.guilds.points.timePenalty'), `-${breakdown.timeSumPenalty}`, CSS_CONSTANTS.COLORS.ERROR);
   addDetail(`  (${formatNumber(breakdown.totalTimeSum)} ticks)`, ``, 'rgba(255, 255, 255, 0.6)');
 
   if (breakdown.worldRecordBonus > 0) {
-    addDetail('World Record Bonus', `+${breakdown.worldRecordBonus}`, CSS_CONSTANTS.COLORS.ROLE_LEADER);
-    addDetail(`  (${breakdown.totalWorldRecords || 0} world record${(breakdown.totalWorldRecords || 0) !== 1 ? 's' : ''}, every 1 = ${POINTS_CONFIG.WORLD_RECORD_BONUS} pt)`, ``, 'rgba(255, 255, 255, 0.6)');
+    addDetail(t('mods.guilds.points.worldRecordBonus'), `+${breakdown.worldRecordBonus}`, CSS_CONSTANTS.COLORS.ROLE_LEADER);
+    addDetail(tReplace('mods.guilds.points.worldRecordsDetail', { count: breakdown.totalWorldRecords || 0, bonus: POINTS_CONFIG.WORLD_RECORD_BONUS }), ``, 'rgba(255, 255, 255, 0.6)');
   }
 
   const total = document.createElement('div');
@@ -1879,7 +1879,7 @@ function applyGuildPointsBreakdownToUI(ref, breakdown) {
     font-size: 12px;
     font-weight: 700;
   `;
-  total.textContent = `Total: ${formatNumber(breakdown.total)} points`;
+  total.textContent = tReplace('mods.guilds.points.totalPoints', { total: formatNumber(breakdown.total) });
   tooltip.appendChild(total);
 }
 
@@ -3023,7 +3023,7 @@ function showGuildCoinNotification(amount) {
     // Add message
     const messageDiv = document.createElement('div');
     messageDiv.className = 'text-left';
-    messageDiv.textContent = `Guild Coin obtained! (+${amount})`;
+    messageDiv.textContent = tReplace('mods.guilds.guildCoinObtained', { amount });
     widgetBottom.appendChild(messageDiv);
     
     // Assemble toast
@@ -4502,10 +4502,10 @@ function formatTime(timestamp) {
   const hours = Math.floor(diff / 3600000);
   const days = Math.floor(diff / 86400000);
 
-  if (minutes < 1) return 'Just now';
-  if (minutes < 60) return `${minutes}m ago`;
-  if (hours < 24) return `${hours}h ago`;
-  if (days < 7) return `${days}d ago`;
+  if (minutes < 1) return t('mods.guilds.time.justNow');
+  if (minutes < 60) return tReplace('mods.guilds.time.minutesAgo', { n: minutes });
+  if (hours < 24) return tReplace('mods.guilds.time.hoursAgo', { n: hours });
+  if (days < 7) return tReplace('mods.guilds.time.daysAgo', { n: days });
   return date.toLocaleDateString();
 }
 
@@ -5203,11 +5203,11 @@ function addPlayerEquipmentTooltip(slot, slotType, name) {
         const providesSkill = EQUIPMENT_SKILL_MAPPING[item.name];
         if (providesSkill) {
           const skillName = providesSkill.charAt(0).toUpperCase() + providesSkill.slice(1).replace('Fighting', '').replace('Level', '').toLowerCase();
-          addTooltipDetail(tooltipContent, `Bonus (${skillName})`, `${item.tier * 2}%`, CSS_CONSTANTS.COLORS.SUCCESS);
+          addTooltipDetail(tooltipContent, tReplace('mods.guilds.equipment.skillBonus', { skill: skillName }), `${item.tier * 2}%`, CSS_CONSTANTS.COLORS.SUCCESS);
         } else {
           const globalBonusPercent = item.tier * 0.2;
           const displayPercent = globalBonusPercent % 1 === 0 ? globalBonusPercent.toString() : globalBonusPercent.toFixed(1);
-          addTooltipDetail(tooltipContent, 'Bonus (Global)', `${displayPercent}%`, CSS_CONSTANTS.COLORS.SUCCESS);
+          addTooltipDetail(tooltipContent, t('mods.guilds.equipment.globalBonus'), `${displayPercent}%`, CSS_CONSTANTS.COLORS.SUCCESS);
         }
       }
     } else {
@@ -5430,7 +5430,7 @@ function renderTibiaSkillsStats(skillData, playerName = null) {
       boxSizing: 'border-box',
       color: '#999'
     });
-    fallbackDiv.textContent = 'Skills unavailable';
+    fallbackDiv.textContent = t('mods.guilds.equipment.skillsUnavailable');
     return fallbackDiv;
   }
 }
@@ -5564,7 +5564,7 @@ async function showPlayerEquipmentModal(playerName) {
       280
     );
     const modal = openModal({
-      title: `${playerName}'s Equipment`,
+      title: tReplace('mods.guilds.equipment.playerEquipmentTitle', { name: playerName }),
       width: playerEquipModalSize.width,
       height: playerEquipModalSize.height,
       content: contentDiv,
@@ -5596,7 +5596,7 @@ async function showPlayerEquipmentModal(playerName) {
     
   } catch (error) {
     console.error('[Guilds] Error showing equipment modal:', error);
-    showWarningModal(t('mods.guilds.error') || 'Error', 'Failed to load equipment data.');
+    showWarningModal(t('mods.guilds.error') || 'Error', t('mods.guilds.equipment.loadFailed'));
   }
 }
 
@@ -7718,7 +7718,7 @@ async function openGuildPanel(viewGuildId = null) {
     border-bottom: 2px solid rgba(255, 255, 255, 0.2);
     padding-bottom: 6px;
   `;
-  tooltipTitle.textContent = 'Guild Points Breakdown';
+  tooltipTitle.textContent = t('mods.guilds.points.breakdownTitle');
   tooltip.appendChild(tooltipTitle);
 
   guildPointsUiRef = { currentPoints, tooltip };
@@ -9195,11 +9195,11 @@ function createEquipmentSlot(slotType, x, y, name) {
       const providesSkill = EQUIPMENT_SKILL_MAPPING[equippedItem.name];
       if (providesSkill) {
         const skillName = providesSkill.charAt(0).toUpperCase() + providesSkill.slice(1).replace('Fighting', '').replace('Level', '').toLowerCase();
-        addTooltipDetail(tooltipContent, `Bonus (${skillName})`, `${equippedItem.tier * 2}%`, CSS_CONSTANTS.COLORS.SUCCESS);
+        addTooltipDetail(tooltipContent, tReplace('mods.guilds.equipment.skillBonus', { skill: skillName }), `${equippedItem.tier * 2}%`, CSS_CONSTANTS.COLORS.SUCCESS);
       } else {
         const globalBonusPercent = equippedItem.tier * 0.2;
         const displayPercent = globalBonusPercent % 1 === 0 ? globalBonusPercent.toString() : globalBonusPercent.toFixed(1);
-        addTooltipDetail(tooltipContent, 'Bonus (Global)', `${displayPercent}%`, CSS_CONSTANTS.COLORS.SUCCESS);
+        addTooltipDetail(tooltipContent, t('mods.guilds.equipment.globalBonus'), `${displayPercent}%`, CSS_CONSTANTS.COLORS.SUCCESS);
       }
     } else {
       const emptyMsg = document.createElement('div');
@@ -10536,11 +10536,11 @@ function createEquipmentButton(equipment, onSelect) {
   const providesSkill = EQUIPMENT_SKILL_MAPPING[equipment.name];
   if (providesSkill) {
     const skillName = providesSkill.charAt(0).toUpperCase() + providesSkill.slice(1).replace('Fighting', '').toLowerCase();
-    addTooltipDetail(tooltipContent, `Bonus (${skillName})`, `${equipment.tier * 2}%`, CSS_CONSTANTS.COLORS.SUCCESS);
+    addTooltipDetail(tooltipContent, tReplace('mods.guilds.equipment.skillBonus', { skill: skillName }), `${equipment.tier * 2}%`, CSS_CONSTANTS.COLORS.SUCCESS);
   } else {
     const globalBonusPercent = equipment.tier * 0.2;
     const displayPercent = globalBonusPercent % 1 === 0 ? globalBonusPercent.toString() : globalBonusPercent.toFixed(1);
-    addTooltipDetail(tooltipContent, 'Bonus (Global)', `${displayPercent}%`, CSS_CONSTANTS.COLORS.SUCCESS);
+    addTooltipDetail(tooltipContent, t('mods.guilds.equipment.globalBonus'), `${displayPercent}%`, CSS_CONSTANTS.COLORS.SUCCESS);
   }
   
   tooltip.appendChild(tooltipContent);
@@ -11007,7 +11007,7 @@ function renderTibiaSkillsStats(skillData, playerName = null) {
               const nextLevel = value + 1;
 
               const tooltipText = document.createElement('div');
-              tooltipText.textContent = `${percentLeft}% left to ${stat.label} ${nextLevel}`;
+              tooltipText.textContent = tReplace('mods.guilds.equipment.skillProgressTooltip', { percent: percentLeft, skill: stat.label, level: nextLevel });
               tooltipText.style.cssText = `
                 color: ${actionsLeft === 0 ? CSS_CONSTANTS.COLORS.SUCCESS : CSS_CONSTANTS.COLORS.TEXT_WHITE};
                 font-size: 11px;
@@ -11132,7 +11132,7 @@ function renderTibiaSkillsStats(skillData, playerName = null) {
 
     const errorText = document.createElement('div');
     errorText.className = 'pixel-font-14 text-red-400';
-    errorText.textContent = 'Error loading skills';
+    errorText.textContent = t('mods.guilds.equipment.skillsLoadError');
     fallbackDiv.appendChild(errorText);
 
     return fallbackDiv;
@@ -11316,8 +11316,8 @@ function showEquipmentModal() {
         } catch (error) {
           console.error('[Guilds] Error loading equipment modal data:', error);
           if (!dialog.isConnected) return;
-          arsenalHost.replaceChildren(createEquipmentLoadingPlaceholder('Failed to load arsenal'));
-          detailsContainer.replaceChildren(createEquipmentLoadingPlaceholder('Failed to load skills'));
+          arsenalHost.replaceChildren(createEquipmentLoadingPlaceholder(t('mods.guilds.equipment.arsenalLoadFailed')));
+          detailsContainer.replaceChildren(createEquipmentLoadingPlaceholder(t('mods.guilds.equipment.skillsLoadFailed')));
         }
       })();
     }

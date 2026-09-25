@@ -6,6 +6,11 @@
 // =======================
 // MODULE 1: Configuration & Constants
 // =======================
+  const t = (key) => {
+    const modApi = (typeof api !== 'undefined' && api) ? api : (typeof context !== 'undefined' && context && context.api) ? context.api : window.BestiaryModAPI;
+    return (modApi && modApi.i18n && typeof modApi.i18n.t === 'function') ? modApi.i18n.t(key) : key;
+  };
+
   const defaultConfig = { enabled: true };
   const config = Object.assign({}, defaultConfig, context?.config);
   
@@ -313,7 +318,7 @@
   
   // Helper function to get proper pluralization for shiny creatures
   function getShinyCreatureText(count) {
-    return count === 1 ? '1 shiny creature' : `${count} shiny creatures`;
+    return count === 1 ? t('mods.autoscroller.shinyCreatureOne') : t('mods.autoscroller.shinyCreatureMany').replace('{count}', count);
   }
   
   // UI state
@@ -733,7 +738,7 @@
       
       const { autoscrollBtn } = getAutoscrollButtons();
       if (autoscrollBtn) {
-        autoscrollBtn.textContent = 'Error - Circuit Open';
+        autoscrollBtn.textContent = t('mods.autoscroller.errorCircuitOpen');
         autoscrollBtn.style.color = '#ff6b6b';
       }
       
@@ -874,7 +879,7 @@
                 clearInterval(rateLimitedInterval);
                 rateLimitedInterval = null;
               }
-              autoscrollBtn.textContent = 'Autoscrolling...';
+              autoscrollBtn.textContent = t('mods.autoscroller.autoscrolling');
             }
             // Reset rate limit tracking on success
             consecutiveRateLimits = 0;
@@ -892,11 +897,11 @@
           const { autoscrollBtn } = getAutoscrollButtons();
           if (autoscrollBtn) {
             let dotCount = 1;
-            autoscrollBtn.textContent = 'Rate-limited.';
+            autoscrollBtn.textContent = t('common.rateLimited') + '.';
             if (rateLimitedInterval) clearInterval(rateLimitedInterval);
             rateLimitedInterval = setInterval(() => {
               dotCount = (dotCount % 3) + 1;
-              autoscrollBtn.textContent = 'Rate-limited' + '.'.repeat(dotCount);
+              autoscrollBtn.textContent = t('common.rateLimited') + '.'.repeat(dotCount);
             }, PERFORMANCE.ANIMATION_INTERVAL);
           }
           
@@ -916,11 +921,11 @@
         const { autoscrollBtn } = getAutoscrollButtons();
         if (autoscrollBtn) {
           let dotCount = 1;
-          autoscrollBtn.textContent = 'Rate-limited.';
+          autoscrollBtn.textContent = t('common.rateLimited') + '.';
           if (rateLimitedInterval) clearInterval(rateLimitedInterval);
           rateLimitedInterval = setInterval(() => {
             dotCount = (dotCount % 3) + 1;
-            autoscrollBtn.textContent = 'Rate-limited' + '.'.repeat(dotCount);
+            autoscrollBtn.textContent = t('common.rateLimited') + '.'.repeat(dotCount);
           }, PERFORMANCE.ANIMATION_INTERVAL);
         }
         
@@ -1175,16 +1180,16 @@
 
   function getAutosellOptionLabelText() {
     if (isLateGameHuntLabelMode()) {
-      return 'Late-game hunt';
+      return t('mods.autoscroller.lateGameHunt');
     }
-    return 'Autosell non-selected';
+    return t('mods.autoscroller.autosellNonSelected');
   }
 
   function getAutosellOptionTooltip() {
     if (isLateGameHuntLabelMode()) {
-      return 'Tier 5 scroll: sells/squeezes all summons except shiny, sealed (tier 5), awakened (tier 6), and gazers. No creature targets required.';
+      return t('mods.autoscroller.lateGameHuntTooltip');
     }
-    return 'Sells/squeezes summons not in your selected creatures, except shiny, sealed (tier 5), awakened (tier 6), and gazers.';
+    return t('mods.autoscroller.autosellNonSelectedTooltip');
   }
 
   function updateAutosellOptionLabel(labelEl, warningEl) {
@@ -1236,56 +1241,56 @@
     
     // Check if scroll limit was reached
     if (scrollLimitReached) {
-      messageParts.push(`Scroll limit reached (${scrollLimit} scrolls)! Rolled ${autoscrollStats.totalScrolls} ${tierName} summon scrolls.`);
+      messageParts.push(t('mods.autoscroller.msgScrollLimitReached').replace('{limit}', scrollLimit).replace('{count}', autoscrollStats.totalScrolls).replace('{tier}', tierName));
       if (isShinyHuntMode()) {
-        messageParts.push(`Found ${getShinyCreatureText(autoscrollStats.shinyCount)}${formatShinyList(autoscrollStats.foundShinies)}.`);
+        messageParts.push(t('mods.autoscroller.msgFoundShinies').replace('{shinies}', getShinyCreatureText(autoscrollStats.shinyCount) + formatShinyList(autoscrollStats.foundShinies)));
       } else {
-        messageParts.push(`Found ${totalFound} selected creatures in this session.`);
+        messageParts.push(t('mods.autoscroller.msgFoundSelected').replace('{count}', totalFound));
         if (selectedScrollTier === 5) {
-          messageParts.push(`Found ${getShinyCreatureText(autoscrollStats.shinyCount)}${formatShinyList(autoscrollStats.foundShinies)}.`);
+          messageParts.push(t('mods.autoscroller.msgFoundShinies').replace('{shinies}', getShinyCreatureText(autoscrollStats.shinyCount) + formatShinyList(autoscrollStats.foundShinies)));
         }
       }
     } else if (reachedCreature && autoscrollStats.totalScrolls === 0) {
       // Target was already reached before any scrolls were rolled
-      messageParts.push(`Target already reached: Found ${stopConditions.totalCreaturesTarget} ${reachedCreature} in inventory.`);
+      messageParts.push(t('mods.autoscroller.msgTargetAlreadyReached').replace('{count}', stopConditions.totalCreaturesTarget).replace('{creature}', reachedCreature));
     } else if (reachedCreature) {
       // Target was reached after rolling some scrolls
-      messageParts.push(`Target reached of ${stopConditions.totalCreaturesTarget} ${reachedCreature}! Rolled ${autoscrollStats.totalScrolls} ${tierName} summon scrolls.`);
+      messageParts.push(t('mods.autoscroller.msgTargetReached').replace('{count}', stopConditions.totalCreaturesTarget).replace('{creature}', reachedCreature).replace('{rolled}', autoscrollStats.totalScrolls).replace('{tier}', tierName));
     } else {
       // No target reached
       if (isShinyHuntMode()) {
-        messageParts.push(`Rolled ${autoscrollStats.totalScrolls} ${tierName} summon scrolls.`);
-        messageParts.push(`Found ${getShinyCreatureText(autoscrollStats.shinyCount)}${formatShinyList(autoscrollStats.foundShinies)}.`);
+        messageParts.push(t('mods.autoscroller.msgRolled').replace('{count}', autoscrollStats.totalScrolls).replace('{tier}', tierName));
+        messageParts.push(t('mods.autoscroller.msgFoundShinies').replace('{shinies}', getShinyCreatureText(autoscrollStats.shinyCount) + formatShinyList(autoscrollStats.foundShinies)));
       } else {
-        messageParts.push(`Rolled ${autoscrollStats.totalScrolls} ${tierName} summon scrolls.`);
-        messageParts.push(`Found ${totalFound} selected creatures in this session.`);
+        messageParts.push(t('mods.autoscroller.msgRolled').replace('{count}', autoscrollStats.totalScrolls).replace('{tier}', tierName));
+        messageParts.push(t('mods.autoscroller.msgFoundSelected').replace('{count}', totalFound));
         // Add shiny count for T5 scrolls (but not in shiny hunt mode)
         if (selectedScrollTier === 5) {
-          messageParts.push(`Found ${getShinyCreatureText(autoscrollStats.shinyCount)}${formatShinyList(autoscrollStats.foundShinies)}.`);
+          messageParts.push(t('mods.autoscroller.msgFoundShinies').replace('{shinies}', getShinyCreatureText(autoscrollStats.shinyCount) + formatShinyList(autoscrollStats.foundShinies)));
         }
       }
     }
     
     // Optional: Add autosell statistics
     if (includeStats && autosellNonSelected && autoscrollStats.soldMonsters > 0) {
-      messageParts.push(`Sold ${autoscrollStats.soldMonsters} non-selected creatures for ${autoscrollStats.soldGold} gold.`);
+      messageParts.push(t('mods.autoscroller.msgSold').replace('{count}', autoscrollStats.soldMonsters).replace('{gold}', autoscrollStats.soldGold));
     }
     
     // Optional: Add autosqueeze statistics
     if (includeStats && autosellNonSelected && autoscrollStats.squeezedMonsters > 0) {
-      messageParts.push(`Squeezed ${autoscrollStats.squeezedMonsters} non-selected creatures for ${autoscrollStats.squeezedDust} dust.`);
+      messageParts.push(t('mods.autoscroller.msgSqueezed').replace('{count}', autoscrollStats.squeezedMonsters).replace('{dust}', autoscrollStats.squeezedDust));
     }
     
     // Optional: Add rate limit information
     if (includeRateLimitInfo) {
       if (autosellNonSelected && rateLimitedSales.size > 0) {
-        messageParts.push(`(${rateLimitedSales.size} operations pending due to rate limits)`);
+        messageParts.push(t('mods.autoscroller.msgPendingOps').replace('{count}', rateLimitedSales.size));
       }
       
       if (consecutiveRateLimits > 0) {
         const timeSinceLastRateLimit = Date.now() - lastRateLimitTime;
         if (timeSinceLastRateLimit < 30000) { // Show for 30 seconds after rate limit
-          messageParts.push(`[Rate limited ${consecutiveRateLimits}x]`);
+          messageParts.push(t('mods.autoscroller.msgRateLimitedTimes').replace('{count}', consecutiveRateLimits));
         }
       }
     }
@@ -1789,7 +1794,7 @@
       if (availableScrolls <= 0) {
         const statusElement = getAutoscrollStatusElement();
         if (statusElement) {
-          statusElement.textContent = STRING_CACHE.commonMessages.noScrolls;
+          statusElement.textContent = t('mods.autoscroller.noScrolls');
         }
         stopAutoscroll();
         return;
@@ -1932,7 +1937,7 @@
         console.warn('[Autoscroller] Circuit breaker is open, pausing autoscroll');
         const statusElement = getAutoscrollStatusElement();
         if (statusElement) {
-          statusElement.textContent = 'Paused - Too many errors. Will resume in 1 minute.';
+          statusElement.textContent = t('mods.autoscroller.pausedTooManyErrors');
         }
         await new Promise(resolve => setTimeout(resolve, ERROR_HANDLING.ERROR_RECOVERY_DELAY));
         return;
@@ -1967,7 +1972,7 @@
     
     const statusElement = getAutoscrollStatusElement();
     if (statusElement) {
-      statusElement.textContent = 'Starting autoscroll...';
+      statusElement.textContent = t('mods.autoscroller.starting');
     }
     
     autoscrollStats = {
@@ -2060,7 +2065,7 @@
     }
     
     if (stopBtn) {
-      stopBtn.textContent = 'Reset';
+      stopBtn.textContent = t('common.reset');
       stopBtn.style.display = 'block';
     }
     
@@ -2351,11 +2356,8 @@
 
     const searchInput = document.createElement('input');
     searchInput.id = 'autoscroller-creature-search';
-    searchInput.placeholder = 'Search creatures...';
-    searchInput.title = `Search by name:
-• Partial: dragon
-• Exact: "Spider"
-• Combined: orc AND shaman, wolf OR bear`;
+    searchInput.placeholder = t('common.searchCreatures');
+    searchInput.title = t('mods.autoscroller.searchTooltip');
     searchInput.style.cssText = `
       background: rgba(255, 255, 255, 0.1);
       color: #fff;
@@ -2400,7 +2402,7 @@
     if (!matching.length) {
       const noResults = document.createElement('div');
       noResults.style.cssText = 'color:#888;text-align:center;padding:16px;grid-column:span 5;font-style:italic;font-size:12px;';
-      noResults.textContent = `No creatures found matching "${searchValue}"`;
+      noResults.textContent = t('mods.autoscroller.noCreaturesMatching').replace('{search}', searchValue);
       scrollContainer.appendChild(noResults);
       return;
     }
@@ -2757,7 +2759,7 @@
 
         const pickerCreatures = getAutoscrollPickerCreatures();
         const creaturesBox = createCreatureIconPicker({
-          title: 'Creatures',
+          title: t('mods.autoscroller.sectionCreatures'),
           creatures: pickerCreatures,
           selectedCreatures,
           onToggleCreature: (creatureName, isSelected) => {
@@ -2785,7 +2787,7 @@
         col1.appendChild(creaturesBox);
         
         const col2 = createBox({
-          title: 'Rules',
+          title: t('mods.autoscroller.sectionRules'),
           content: getRulesColumn()
         });
         col2.classList.add('autoscroller-modal-col2');
@@ -2793,7 +2795,7 @@
         col2.style.justifyContent = 'center';
         
         const col3 = createBox({
-          title: 'Autoscrolling',
+          title: t('mods.autoscroller.sectionAutoscrolling'),
           content: getAutoscrollingColumn()
         });
         col3.classList.add('autoscroller-modal-col3');
@@ -2833,7 +2835,7 @@
         
         const totalLabel = document.createElement('label');
         totalLabel.htmlFor = 'total-creatures-checkbox';
-        totalLabel.textContent = 'Collect a total of';
+        totalLabel.textContent = t('mods.autoscroller.collectTotal');
         StyleUtils.applyLabelStyles(totalLabel);
         totalLabel.style.cursor = 'pointer';
         
@@ -2879,7 +2881,7 @@
         
         const tierLabel = document.createElement('label');
         tierLabel.htmlFor = 'tier-system-checkbox';
-        tierLabel.textContent = 'Collect by tier:';
+        tierLabel.textContent = t('mods.autoscroller.collectByTier');
         StyleUtils.applyLabelStyles(tierLabel);
         tierLabel.style.cursor = 'pointer';
         
@@ -3039,7 +3041,7 @@
         speedWrapper.style.marginBottom = '5px';
         
         const speedLabel = document.createElement('span');
-        speedLabel.textContent = 'Autoscroll Speed:';
+        speedLabel.textContent = t('mods.autoscroller.speedLabel');
         StyleUtils.applyLabelStyles(speedLabel);
         speedWrapper.appendChild(speedLabel);
         
@@ -3084,7 +3086,7 @@
           cursor: 'help'
         });
         speedTooltip.textContent = 'ⓘ';
-        speedTooltip.title = '30 requests per 10 seconds is the rate-limit. Set 400ms or higher to avoid being rate-limited.';
+        speedTooltip.title = t('common.rateLimitTooltip');
         speedWrapper.appendChild(speedTooltip);
         
         div.appendChild(speedWrapper);
@@ -3097,7 +3099,7 @@
         scrollLimitWrapper.style.marginTop = '4px';
         
         const scrollLimitLabel = document.createElement('span');
-        scrollLimitLabel.textContent = 'Scroll Limit:';
+        scrollLimitLabel.textContent = t('mods.autoscroller.scrollLimitLabel');
         StyleUtils.applyLabelStyles(scrollLimitLabel);
         scrollLimitWrapper.appendChild(scrollLimitLabel);
         
@@ -3154,7 +3156,7 @@
         
         // Title
         const title = document.createElement('h3');
-        title.textContent = 'Selected Creatures';
+        title.textContent = t('mods.autoscroller.selectedCreaturesTitle');
         title.style.margin = '0 0 8px 0';
         title.style.padding = '0';
         title.style.fontSize = '14px';
@@ -3176,7 +3178,7 @@
           
           if (selectedCreatures.length === 0) {
             const emptyMsg = document.createElement('div');
-            emptyMsg.textContent = 'No creatures selected';
+            emptyMsg.textContent = t('mods.autoscroller.noCreaturesSelected');
             emptyMsg.style.textAlign = 'center';
             emptyMsg.style.color = '#888888';
             emptyMsg.style.fontStyle = 'italic';
@@ -3242,7 +3244,7 @@
                 <svg width="14" height="14" viewBox="0 0 18 18" fill="none" style="vertical-align:middle;display:inline-block;">
                   <path d="M4 9.5L8 13L14 6" stroke="#28c76f" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>`;
-              markerCell.title = 'Target reached!';
+              markerCell.title = t('mods.autoscroller.targetReachedMarker');
             } else {
               markerCell.innerHTML = '';
               markerCell.title = '';
@@ -3310,7 +3312,7 @@
         
         // Status text
         const statusText = document.createElement('div');
-        statusText.textContent = 'Ready to autoscroll';
+        statusText.textContent = t('mods.autoscroller.ready');
         statusText.id = 'autoscroll-status';
         statusText.style.whiteSpace = 'pre-line'; // Allow line breaks with \n
         statusRow.appendChild(statusText);
@@ -3377,7 +3379,7 @@
             autoscrollBtn.style.removeProperty('text-shadow');
             autoscrollBtn.style.setProperty('border-color', '#8B5CF6', 'important');
           } else {
-            autoscrollBtn.textContent = 'Autoscroll';
+            autoscrollBtn.textContent = t('mods.autoscroller.autoscrollButton');
             autoscrollBtn.style.removeProperty('background');
             autoscrollBtn.style.removeProperty('background-size');
             autoscrollBtn.style.removeProperty('animation');
@@ -3396,7 +3398,7 @@
         buttonWrapper.appendChild(autoscrollBtn);
         
         const stopBtn = document.createElement('button');
-        stopBtn.textContent = 'Reset';
+        stopBtn.textContent = t('common.reset');
         stopBtn.className = 'autoscroller-btn';
         stopBtn.style.setProperty('width', '60px', 'important');
         stopBtn.style.setProperty('min-width', '60px', 'important');
@@ -3412,7 +3414,7 @@
             // Start autoscroll
             // Check if creatures need to be selected (skip for shiny hunt mode)
             if (selectedCreatures.length === 0 && !isShinyHuntMode()) {
-              showButtonError('Select creatures first');
+              showButtonError(t('mods.autoscroller.selectCreaturesFirst'));
               return;
             }
             
@@ -3422,29 +3424,29 @@
             const availableScrolls = inventory[scrollKey] || 0;
             
             if (availableScrolls <= 0) {
-              showButtonError('No scrolls available');
+              showButtonError(t('mods.autoscroller.noScrolls'));
               return;
             }
             
             if (stopConditions.useTotalCreatures) {
               if (stopConditions.totalCreaturesTarget <= 0) {
-                showButtonError('Set target > 0');
+                showButtonError(t('mods.autoscroller.setTarget'));
                 return;
               }
             } else if (stopConditions.useTierSystem) {
               const hasValidTarget = stopConditions.tierTargets.some(target => target > 0);
               if (!hasValidTarget) {
-                showButtonError('Set tier targets');
+                showButtonError(t('mods.autoscroller.setTierTargets'));
                 return;
               }
             } else {
-              showButtonError('Select stopping rule');
+              showButtonError(t('mods.autoscroller.selectRule'));
               return;
             }
             
             autoscrolling = true;
-            autoscrollBtn.textContent = 'Autoscrolling...';
-            stopBtn.textContent = 'Stop';
+            autoscrollBtn.textContent = t('mods.autoscroller.autoscrolling');
+            stopBtn.textContent = t('common.stop');
             autoscrollBtn.style.display = 'none';
             stopBtn.style.display = 'block';
             
@@ -3636,7 +3638,7 @@
         width: modalDimensions.width,
         height: modalDimensions.height,
         content: contentDiv,
-        buttons: [{ text: 'Close', primary: true }],
+        buttons: [{ text: t('common.close'), primary: true }],
         onClose: () => {
           clearAutoscrollerModalLayoutCleanup();
           activeAutoscrollerModal = null;

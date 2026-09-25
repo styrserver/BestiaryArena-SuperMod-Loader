@@ -1680,7 +1680,7 @@ function showRaidStartToast() {
         return;
     }
     lastStartToastAt = now;
-    showToast('Starting Raid Hunter');
+    showToast(t('mods.raidHunter.startingToast'));
 }
 
 // ============================================================================
@@ -2418,20 +2418,20 @@ function updateRaidState() {
         let statusText;
         if (isCurrentlyRaiding) {
             // Only show priority label for LOW priority (HIGH and MEDIUM are default/normal)
-            const priorityLabel = currentRaidInfo?.priority === RAID_PRIORITY.LOW ? ' (Low Priority)' : '';
-            statusText = `Raiding: ${currentRaidInfo?.name || 'Unknown'}${priorityLabel}`;
+            const priorityLabel = currentRaidInfo?.priority === RAID_PRIORITY.LOW ? t('mods.raidHunter.lowPrioritySuffix') : '';
+            statusText = tReplace('mods.raidHunter.statusRaiding', { name: currentRaidInfo?.name || 'Unknown' }) + priorityLabel;
         } else if (enabledMaps.length === 0) {
-            statusText = 'No raid maps enabled - check settings';
+            statusText = t('mods.raidHunter.statusNoMapsEnabled');
         } else if (isRaidActive) {
             // Check if we have low priority raid waiting for Better Tasker
             const lowPriorityRaid = raidQueue.find(r => r.priority === RAID_PRIORITY.LOW);
             if (lowPriorityRaid && !canProcessRaidWithPriority(RAID_PRIORITY.LOW, 'status check')) {
-                statusText = `${currentList.length} raid(s) available - Low priority raid waiting for Better Tasker`;
+                statusText = tReplace('mods.raidHunter.statusAvailableWaiting', { count: currentList.length });
             } else {
-            statusText = `${currentList.length} raid(s) available`;
+            statusText = tReplace('mods.raidHunter.statusAvailable', { count: currentList.length });
             }
         } else {
-            statusText = 'No raids available';
+            statusText = t('mods.raidHunter.statusNone');
         }
     } catch (error) {
         console.error('[Raid Hunter] Error updating raid state:', error);
@@ -2790,7 +2790,7 @@ function isMainQuestLogPanel(questLogContainer = null) {
 
     const highlightTitles = Array.from(container.querySelectorAll('p.text-whiteHighlight'))
         .map((el) => (el.textContent || '').trim());
-    if (highlightTitles.some((title) => title === 'Current raid' || title === 'Raid atual')) return true;
+    if (highlightTitles.some((title) => title === 'Current raid' || title === 'Invasão atual' || title === 'Raid atual')) return true;
     if (highlightTitles.some((title) => title === 'Daily boosted map' || title === 'Mapa boostado diário')) return true;
 
     const dialog = container.closest('div[role="dialog"]');
@@ -2898,9 +2898,9 @@ function createRaidClock() {
                 </div>
             </div>
             <div class="flex w-full flex-col">
-                <p class="text-whiteHighlight">Raid Monitor</p>
+                <p class="text-whiteHighlight">${t('mods.raidHunter.monitorTitle')}</p>
                 <div class="flex justify-between items-center pixel-font-14">
-                    <span>Next raid check in:</span>
+                    <span>${t('mods.raidHunter.nextCheckIn')}</span>
                     <div class="flex items-center">
                     <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-clock mr-1 inline-block size-2 -translate-y-px">
                         <circle cx="12" cy="12" r="10"></circle>
@@ -3141,7 +3141,7 @@ function updateRaidClock() {
             if (msUntilUpdate && msUntilUpdate > 0) {
                 raidCountdownEndTime = Date.now() + msUntilUpdate;
             } else {
-                timerElement.textContent = 'Checking...';
+                timerElement.textContent = t('common.checking');
                 timerElement.style.color = COLOR_WHITE;
                 return;
             }
@@ -3167,7 +3167,7 @@ function updateRaidClock() {
                 timerElement.style.color = COLOR_WHITE; // White for normal
             }
         } else {
-            timerElement.textContent = 'Checking...';
+            timerElement.textContent = t('common.checking');
             timerElement.style.color = '#ffffff';
             raidCountdownEndTime = null;
             
@@ -3180,7 +3180,7 @@ function updateRaidClock() {
             }, 1000);
         }
     } catch (error) {
-        timerElement.textContent = 'Error';
+        timerElement.textContent = t('common.error');
         timerElement.style.color = COLOR_RED;
         console.error('[Raid Hunter] Error updating raid clock:', error);
     }
@@ -5308,7 +5308,7 @@ function openRaidHunterSettingsModal() {
                         } catch (error) {
                             console.error('[Raid Hunter] Error creating modal:', error);
                             try {
-                                alert('Failed to open settings. Please try again.');
+                                alert(t('common.settingsOpenFailed'));
                             } catch (alertError) {
                                 console.error('[Raid Hunter] Even fallback alert failed:', alertError);
                             }
@@ -5317,7 +5317,7 @@ function openRaidHunterSettingsModal() {
                         }
                     } else {
                         console.warn('[Raid Hunter] API not available for modal creation');
-                        alert('Raid Hunter Settings - API not available');
+                        alert(t('mods.raidHunter.settingsApiUnavailable'));
                         raidHunterModalInProgress = false;
                     }
                 }, 100);
@@ -5333,13 +5333,13 @@ function openRaidHunterSettingsModal() {
         if (typeof context !== 'undefined' && context.api && context.api.ui) {
             try {
                 context.api.ui.components.createModal({
-                    title: 'Error',
-                    content: '<p>Failed to open Raid Hunter Settings. Please try again later.</p>',
+                    title: t('common.error'),
+                    content: `<p>${t('mods.raidHunter.settingsOpenFailedModal')}</p>`,
                     buttons: [{ text: 'OK', primary: true }]
                 });
             } catch (modalError) {
                 console.error('[Raid Hunter] Error showing error modal:', modalError);
-                alert('Failed to open settings. Please try again.');
+                alert(t('common.settingsOpenFailed'));
             }
         }
         
@@ -5456,7 +5456,7 @@ function createAutoRaidSettings() {
     // Setup method selection
     const setupMethodDiv = createDropdownSetting(
         'setupMethod',
-        'Setup Method', // Not in translations yet, keeping as-is
+        t('common.setupMethod'),
         '',
         loadSettings().setupMethod || t('mods.raidHunter.autoSetup'),
         getAvailableSetupOptions()
@@ -5651,11 +5651,10 @@ function createRaidMapSelection() {
         pointer-events: none;
         line-height: 1.6;
     `;
-    // Priority tooltip - keeping as hardcoded HTML for now since it's complex
-    tooltip.innerHTML = `Priority Levels:<br><br>` +
-        `<strong style="color: ${COLOR_RED}">High Priority:</strong> Highest priority - Never yields<br>` +
-        `<strong style="color: ${COLOR_GREEN}">Medium Priority:</strong> Yields to High Priority, never yields to Better Tasker<br>` +
-        `<strong style="color: ${COLOR_YELLOW}">Low Priority:</strong> Yields to Medium/High Priority and Better Tasker when active`;
+    tooltip.innerHTML = `${t('mods.raidHunter.priorityLevelsTitle')}<br><br>` +
+        `<strong style="color: ${COLOR_RED}">${t('mods.raidHunter.priorityHighLabel')}</strong> ${t('mods.raidHunter.priorityHighDesc')}<br>` +
+        `<strong style="color: ${COLOR_GREEN}">${t('mods.raidHunter.priorityMediumLabel')}</strong> ${t('mods.raidHunter.priorityMediumDesc')}<br>` +
+        `<strong style="color: ${COLOR_YELLOW}">${t('mods.raidHunter.priorityLowLabel')}</strong> ${t('mods.raidHunter.priorityLowDesc')}`;
     helpIcon.appendChild(tooltip);
     
     // Show/hide tooltip on hover
@@ -6040,13 +6039,13 @@ function createRaidMapSelection() {
         margin-top: 10px;
     `;
     
-    const selectAllBtn = createStyledButton('select-all-maps', 'Select All', 'green', () => {
+    const selectAllBtn = createStyledButton('select-all-maps', t('common.selectAll'), 'green', () => {
         const checkboxes = mapContainer.querySelectorAll('input[type="checkbox"]');
         checkboxes.forEach(cb => cb.checked = true);
         autoSaveSettings(); // Auto-save after selecting all
     });
     
-    const selectNoneBtn = createStyledButton('select-none-maps', 'Select None', 'red', () => {
+    const selectNoneBtn = createStyledButton('select-none-maps', t('common.selectNone'), 'red', () => {
         const checkboxes = mapContainer.querySelectorAll('input[type="checkbox"]');
         checkboxes.forEach(cb => cb.checked = false);
         autoSaveSettings(); // Auto-save after selecting none
@@ -6104,7 +6103,7 @@ function updateRaidCustomSettingsIndicator(raidDiv, raidName) {
         const indicator = document.createElement('span');
         indicator.className = 'raid-custom-settings-indicator pixel-font-16';
         indicator.textContent = '⚙';
-        indicator.title = 'Custom settings configured';
+        indicator.title = t('common.customSettingsTooltip');
         indicator.style.cssText = `
             font-size: 14px;
             color: #ff4444;
@@ -6249,7 +6248,7 @@ function createRaidContextMenu(raidName, x, y, onClose) {
     `;
     
     const setupLabel = document.createElement('label');
-    setupLabel.textContent = 'Setup Method';
+    setupLabel.textContent = t('common.setupMethod');
     setupLabel.className = 'pixel-font-14';
     setupLabel.style.cssText = `
         color: ${COLOR_WHITE};
@@ -6300,7 +6299,7 @@ function createRaidContextMenu(raidName, x, y, onClose) {
     // Save button
     const saveButton = document.createElement('button');
     saveButton.className = 'pixel-font-14';
-    saveButton.textContent = 'Save';
+    saveButton.textContent = t('common.save');
     saveButton.style.cssText = `
         width: 70px;
         height: 28px;
@@ -6347,7 +6346,7 @@ function createRaidContextMenu(raidName, x, y, onClose) {
     if (hasRaidCustomSettings(raidName)) {
         clearButton = document.createElement('button');
         clearButton.className = 'pixel-font-14';
-        clearButton.textContent = 'Clear';
+        clearButton.textContent = t('common.clear');
         clearButton.style.cssText = `
             width: 70px;
             height: 28px;
@@ -6393,7 +6392,7 @@ function createRaidContextMenu(raidName, x, y, onClose) {
     // Cancel button
     const cancelButton = document.createElement('button');
     cancelButton.className = 'pixel-font-14';
-    cancelButton.textContent = 'Cancel';
+    cancelButton.textContent = t('common.cancel');
     cancelButton.style.cssText = `
         width: 70px;
         height: 28px;
@@ -6792,7 +6791,7 @@ function autoSaveSettings() {
         
     } catch (error) {
         console.error('[Raid Hunter] Error auto-saving settings:', error);
-        showValidationMessage('Failed to save settings. Please try again.', 'error');
+        showValidationMessage(t('common.settingsSaveFailed'), 'error');
     }
 }
 
@@ -6891,7 +6890,7 @@ function loadAndApplySettings() {
         try { applyEventRaidAvailabilityUI(); } catch (_) {}
     } catch (error) {
         console.error('[Raid Hunter] Error loading and applying settings:', error);
-        showValidationMessage('Failed to load settings. Using defaults.', 'error');
+        showValidationMessage(t('common.settingsLoadFailed'), 'error');
     }
 }
 
@@ -7074,7 +7073,7 @@ function findQuestButton() {
     }
 
     // Try text-based selectors
-    const textMatches = ['Raiding', 'Quest Log', 'Quests', 'Tasking'];
+    const textMatches = ['Raiding', 'Quest Log', 'Quests', 'Tasking', t('mods.raidHunter.raiding'), t('mods.betterTasker.tasking')];
     const buttons = document.querySelectorAll('button');
     
     for (const button of buttons) {
@@ -7122,7 +7121,7 @@ function modifyQuestButtonForRaiding() {
         if (questButton) {
             const img = questButton.querySelector('img');
             const span = questButton.querySelector('span');
-            const isInRaidingState = img && img.src.includes('enemy.png') && span && span.textContent === 'Raiding';
+            const isInRaidingState = img && img.src.includes('enemy.png') && span && (span.textContent === 'Raiding' || span.textContent === t('mods.raidHunter.raiding'));
             if (isInRaidingState) {
                 // Already have control and button is already modified - no need to do anything
                 return true;
@@ -7185,7 +7184,7 @@ function modifyQuestButtonForRaiding() {
         
         // Change text to "Raiding"
         if (span) {
-            span.textContent = 'Raiding';
+            span.textContent = t('mods.raidHunter.raiding');
             // Add shimmer effect to the text
             span.style.background = `linear-gradient(45deg, ${COLOR_GREEN}, ${COLOR_DARK_GREEN}, ${COLOR_GREEN}, ${COLOR_DARK_GREEN})`;
             span.style.backgroundSize = '400% 400%';
@@ -7515,7 +7514,7 @@ function startQuestButtonValidation() {
                         // Check if quest button is already in raiding state
                         const img = questButton.querySelector('img');
                         const span = questButton.querySelector('span');
-                        const isInRaidingState = img && img.src.includes('enemy.png') && span && span.textContent === 'Raiding';
+                        const isInRaidingState = img && img.src.includes('enemy.png') && span && (span.textContent === 'Raiding' || span.textContent === t('mods.raidHunter.raiding'));
                         
                         if (!isInRaidingState) {
                             // Quest button is not in raiding state, try to modify it

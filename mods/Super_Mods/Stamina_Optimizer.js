@@ -960,7 +960,7 @@ function showStaminaOptimizerStartToast() {
         return;
     }
     lastStartToastAt = now;
-    showToast('Starting Stamina Optimizer');
+    showToast(t('mods.staminaOptimizer.startingToast'));
 }
 
 // ============================================================================
@@ -2030,7 +2030,7 @@ async function monitorStamina() {
             
             console.log(`[Stamina Optimizer] ⏹️ Stamina (${currentStamina}) < min (${minStamina}) - stopping`);
             try {
-                await stopAutoplay({ toastMessage: 'Stopping - Low Stamina' });
+                await stopAutoplay({ toastMessage: t('mods.staminaOptimizer.stoppingLowStamina') });
                 updateButton();
             } catch (error) {
                 console.error('[Stamina Optimizer] Error stopping autoplay:', error);
@@ -2686,7 +2686,7 @@ function createGroupedMapDropdown(id, label, description, value) {
     // Add default option
     const defaultOption = document.createElement('option');
     defaultOption.value = '';
-    defaultOption.textContent = '-- Select a Map --';
+    defaultOption.textContent = t('mods.staminaOptimizer.selectMapPlaceholder');
     defaultOption.style.cssText = `
         background: ${COLOR_DARK_GRAY};
         color: ${COLOR_GRAY};
@@ -2865,7 +2865,7 @@ function createSettingsContent() {
         settings.action || DEFAULT_ACTION,
         [
             { value: 'boosted-maps', label: 'Better Boosted Maps' },
-            { value: 'specific-map', label: 'Specific Map' }
+            { value: 'specific-map', label: t('mods.staminaOptimizer.actionSpecificMap') }
         ]
     );
     const mapSettingSlot = document.createElement('div');
@@ -2917,7 +2917,7 @@ function createSettingsContent() {
             
             const floorOptions = [];
             for (let i = 0; i <= 15; i++) {
-                floorOptions.push({ value: i, label: `Floor ${i}` });
+                floorOptions.push({ value: i, label: t('common.floorN').replace('{n}', i) });
             }
             const floorSetting = createDropdownSetting(
                 'floor',

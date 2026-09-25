@@ -916,7 +916,7 @@ class ChartRenderer {
     }
     
     const outcomeText = result.skipped
-      ? 'Skipped'
+      ? t('mods.boardAnalyzer.skippedOutcome')
       : (result.completed ? t('mods.boardAnalyzer.tooltipCompleted') : t('mods.boardAnalyzer.tooltipFailed'));
     tooltipText += `, ${outcomeText}`;
     if (currentFloor !== null && currentFloor !== undefined) {
@@ -3354,7 +3354,7 @@ function createConfigPanel(startAnalysisCallback) {
   stopTicksContainer.style.cssText = 'display: flex; justify-content: space-between; align-items: center;';
   
   const stopTicksLabel = document.createElement('label');
-  stopTicksLabel.textContent = 'Skip runs over N ticks (0 to disable):';
+  stopTicksLabel.textContent = t('mods.boardAnalyzer.skipRunsOverTicksLabel');
   
   const stopTicksInput = document.createElement('input');
   stopTicksInput.type = 'number';
@@ -3585,7 +3585,7 @@ function updateSkippedRunsDisplay(status) {
     skippedRunsEl.style.display = showSkipped ? '' : 'none';
     if (showSkipped) {
       skippedRunsEl.style.color = SKIPPED_RUN_COLOR;
-      skippedRunsEl.textContent = `Skipped runs ${skippedRate}% (${skippedRuns}/${totalRunsInStats})`;
+      skippedRunsEl.textContent = t('mods.boardAnalyzer.skippedRunsSummary').replace('{rate}', skippedRate).replace('{skipped}', skippedRuns).replace('{total}', totalRunsInStats);
     }
   }
 
@@ -3774,7 +3774,7 @@ function appendBasicLiveStats(content) {
   const skippedRunsInfo = document.createElement('p');
   skippedRunsInfo.id = 'analysis-skipped-runs';
   skippedRunsInfo.style.cssText = `display: none; margin-top: 2px; margin-bottom: 2px; font-size: 0.85em; color: ${SKIPPED_RUN_COLOR};`;
-  skippedRunsInfo.textContent = 'Skipped runs —';
+  skippedRunsInfo.textContent = t('mods.boardAnalyzer.skippedRunsEmpty');
   content.appendChild(skippedRunsInfo);
 }
 
@@ -3795,7 +3795,7 @@ function appendAdvancedLiveStats(content) {
   const skippedSection = document.createElement('div');
   skippedSection.id = 'analysis-live-skipped-section';
   skippedSection.style.cssText = 'display: none;';
-  appendLiveStatRow(skippedSection, 'Skipped runs', 'analysis-live-skipped-runs', `text-align: right; color: ${SKIPPED_RUN_COLOR};`);
+  appendLiveStatRow(skippedSection, t('mods.boardAnalyzer.skippedRunsLabel'), 'analysis-live-skipped-runs', `text-align: right; color: ${SKIPPED_RUN_COLOR};`);
   statsContainer.appendChild(skippedSection);
 
   const minTimeLabel = document.createElement('div');
@@ -4019,7 +4019,7 @@ function showResultsModal(results) {
     completionRateValue.style.cssText = 'text-align: right; color: green;';
 
     const skippedRateLabel = document.createElement('div');
-    skippedRateLabel.textContent = 'Skipped runs';
+    skippedRateLabel.textContent = t('mods.boardAnalyzer.skippedRunsLabel');
     skippedRateLabel.style.cssText = 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
 
     const skippedRateValue = document.createElement('div');
@@ -4195,8 +4195,8 @@ function showResultsModal(results) {
         // Verify and fix the replay data format
         if (!verifyAndFixReplayData(replayData)) {
           api.ui.components.createModal({
-            title: 'Error',
-            content: 'Failed to create replay data. The board configuration may be incomplete.',
+            title: t('common.error'),
+            content: t('mods.boardAnalyzer.replayCreateFailed'),
             buttons: [{ text: 'OK', primary: true }]
           });
           return;
@@ -4233,12 +4233,12 @@ function showResultsModal(results) {
             const success = copyToClipboard(replayText);
             
             if (success) {
-              showCopyNotification(`Copied run ${originalIndex + 1} replay data!`);
+              showCopyNotification(t('mods.boardAnalyzer.copiedRunReplay').replace('{run}', originalIndex + 1));
             } else {
-              showCopyNotification('Failed to copy replay data', true);
+              showCopyNotification(t('mods.boardAnalyzer.replayCopyFailed'), true);
             }
           } else {
-            showCopyNotification('Failed to create replay data for this run', true);
+            showCopyNotification(t('mods.boardAnalyzer.replayCreateRunFailed'), true);
           }
         });
         chartRenderer.render();

@@ -589,7 +589,7 @@
 
   function isNativeCreaturePickerActive(footer) {
     return Array.from(footer.querySelectorAll('button')).some(
-      (btn) => btn.textContent?.trim() === 'Add to Daycare'
+      (btn) => ['Add to Daycare', 'Colocar na Creche'].includes(btn.textContent?.trim())
     );
   }
 

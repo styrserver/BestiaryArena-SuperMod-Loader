@@ -1232,7 +1232,7 @@ function showBoostedMapStartToast() {
         return;
     }
     lastStartToastAt = now;
-    showToast('Starting Boosted Map');
+    showToast(t('mods.betterBoostedMaps.startingToast'));
 }
 
 function createSelectAllNoneButtons(idPrefix, scrollContainer) {
@@ -1245,7 +1245,7 @@ function createSelectAllNoneButtons(idPrefix, scrollContainer) {
     
     const selectAllBtn = createCustomStyledButton(
         `select-all-${idPrefix}`,
-        'Select All',
+        t('common.selectAll'),
         `${ACTION_BUTTON_CLASSES} ${BUTTON_STYLES.GREEN}`,
         'flex: 1;',
         () => {
@@ -1257,7 +1257,7 @@ function createSelectAllNoneButtons(idPrefix, scrollContainer) {
     
     const selectNoneBtn = createCustomStyledButton(
         `select-none-${idPrefix}`,
-        'Select None',
+        t('common.selectNone'),
         `${ACTION_BUTTON_CLASSES} ${BUTTON_STYLES.RED}`,
         'flex: 1;',
         () => {
@@ -2345,7 +2345,7 @@ function updateMapCustomSettingsIndicator(mapDiv, mapId) {
     const indicator = document.createElement('span');
     indicator.className = 'bbm-map-custom-settings-indicator pixel-font-16';
     indicator.textContent = '⚙';
-    indicator.title = 'Custom per-map or equipment-based settings';
+    indicator.title = t('mods.betterBoostedMaps.customRuleTooltip');
     indicator.style.cssText = `
         font-size: 14px;
         color: #ff4444;
@@ -3761,7 +3761,7 @@ function createBoostedMapContextMenu(mapId, mapName, x, y, onClose) {
     `;
     
     const setupLabel = document.createElement('label');
-    setupLabel.textContent = 'Setup Method';
+    setupLabel.textContent = t('common.setupMethod');
     setupLabel.className = 'pixel-font-14';
     setupLabel.style.cssText = `
         color: ${BBM_CTX_COLOR_WHITE};
@@ -4125,7 +4125,7 @@ function createBoostedMapSettings(settings) {
     // Setup method selection
     const setupMethodDiv = createDropdownSetting(
         'boosted-maps-setupMethod',
-        'Setup Method', // Not in translations yet, keeping as-is
+        t('common.setupMethod'),
         '',
         settings.setupMethod || t('mods.betterBoostedMaps.autoSetup'),
         getAvailableSetupOptions()
@@ -4206,8 +4206,8 @@ function createMapEquipmentSelection(settings) {
         margin-bottom: 5px;
     `;
     
-    const mapsTabBtn = createStyledButton('maps-tab-btn', 'Maps', 'green', () => switchTab('maps'));
-    const equipmentTabBtn = createStyledButton('equipment-tab-btn', 'Equipment', 'regular', () => switchTab('equipment'));
+    const mapsTabBtn = createStyledButton('maps-tab-btn', t('mods.betterBoostedMaps.tabMaps'), 'green', () => switchTab('maps'));
+    const equipmentTabBtn = createStyledButton('equipment-tab-btn', t('mods.betterBoostedMaps.tabEquipment'), 'regular', () => switchTab('equipment'));
     
     tabButtons.appendChild(mapsTabBtn);
     tabButtons.appendChild(equipmentTabBtn);

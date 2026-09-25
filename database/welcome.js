@@ -3,6 +3,31 @@
 // Shows a welcome page on initialization and a loading toast while mods load.
 // =======================
 /* global context, api, exports */
+
+// Translation lookup with an English fallback: the loading toast is shown in the first
+// (database) batch, which can run before the locale has finished loading, when
+// api.i18n.t() still returns the raw key.
+function wt(key, fallback, vars) {
+  let text = fallback;
+  try {
+    const translated = api?.i18n?.t?.(key);
+    if (typeof translated === 'string' && translated !== key) text = translated;
+  } catch (_) {
+    // Locale helper unavailable this early; keep the English fallback.
+  }
+  if (vars) {
+    for (const [name, value] of Object.entries(vars)) text = text.split(`{${name}}`).join(String(value));
+  }
+  return text;
+}
+
+function isWelcomeLocaleReady() {
+  try {
+    return api?.i18n?.t?.('mods.welcome.loadingMods') !== 'mods.welcome.loadingMods';
+  } catch (_) {
+    return false;
+  }
+}
 console.log('Welcome mod initializing...');
 
 // =======================
@@ -305,7 +330,7 @@ async function checkForVersionUpdate(currentVersion) {
 
     if (lastSeenVersion !== currentVersion) {
       createToast({
-        message: `<span style="color:#ffd166;">Updated</span> to v${currentVersion}!`,
+        message: `<span style="color:#ffd166;">${wt('mods.welcome.updatedWord', 'Updated')}</span> ${wt('mods.welcome.updatedToVersion', 'to v{version}!', { version: currentVersion })}`,
         type: 'success',
         duration: 6000,
         icon: WELCOME_ASSETS.logo
@@ -533,7 +558,7 @@ async function handleModLoadingFinished(errors = []) {
 
   try {
     createToast({
-      message: '<span class="text-monster">Mods</span> loaded successfully!',
+      message: `<span class="text-monster">${wt('mods.welcome.modsWord', 'Mods')}</span> ${wt('mods.welcome.loadedSuccessfully', 'loaded successfully!')}`,
       type: 'success',
       duration: 5000,
       icon: WELCOME_ASSETS.logo
@@ -688,38 +713,38 @@ function buildWelcomeModalContent({ officialCount, superCount, otCount, version 
         ${welcomeInlineIcon(WELCOME_ASSETS.logo, { size: 20, alt: 'Bestiary Arena' })}Bestiary Arena SuperMod Loader
       </h2>
       <p style="color: #a6adc8; margin: 0; font-size: 14px; line-height: 1.4;">
-        Powerful tools and improvements for a more efficient Bestiary Arena experience.
+        ${wt('mods.welcome.tagline', 'Powerful tools and improvements for a more efficient Bestiary Arena experience.')}
       </p>
     </div>
     <div style="background: rgba(0,0,0,0.2); border-radius: 6px; padding: 10px 12px; margin-bottom: 10px; box-sizing: border-box;">
       <h3 style="color: #a6adc8; margin: 0 0 8px; font-size: 15px; text-align: left;">
-        ${welcomeInlineIcon(WELCOME_ASSETS.shinyStar, { alt: 'Features' })}What's Included
+        ${welcomeInlineIcon(WELCOME_ASSETS.shinyStar, { alt: 'Features' })}${wt('mods.welcome.whatsIncluded', 'What\'s Included')}
       </h3>
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 4px 14px; text-align: left; color: #a6adc8;">
-        ${featureRow(WELCOME_ASSETS.spellbook, `${officialCount} Original Mods:`, 'Automator, Board Analyzer, Highscores, tier lists, and more. <em>(6 on by default)</em>')}
-        ${featureRow(WELCOME_ASSETS.starAwaken, `${superCount} Super Mods:`, 'Autoseller, Cyclopedia, Hunt Analyzer, Raid Hunter, and more. <em>(Mostly off &mdash; 3 on)</em>')}
-        ${featureRow(WELCOME_ASSETS.chat, `${otCount} OT Mods:`, 'Challenges, Guilds, VIP List, Quests. <em>(Off by default)</em>')}
-        ${featureRow(WELCOME_ASSETS.chest, 'Backups:', 'Import and export settings via Mod Settings.')}
-        ${featureRow(WELCOME_ASSETS.quest, 'Patch Notes:', 'See what\'s new each version in the popup.')}
-        ${featureRow(WELCOME_ASSETS.premium, 'Popup Controls:', 'Enable mods, add Gist scripts, manage extras.')}
-        ${featureRow(WELCOME_ASSETS.grade, 'Analytics:', 'Hunt Analyzer, Run Tracker, Better Analytics, and more.')}
+        ${featureRow(WELCOME_ASSETS.spellbook, wt('mods.welcome.originalModsLabel', '{count} Original Mods:', { count: officialCount }), wt('mods.welcome.originalModsText', 'Automator, Board Analyzer, Highscores, tier lists, and more. <em>(6 on by default)</em>'))}
+        ${featureRow(WELCOME_ASSETS.starAwaken, wt('mods.welcome.superModsLabel', '{count} Super Mods:', { count: superCount }), wt('mods.welcome.superModsText', 'Autoseller, Cyclopedia, Hunt Analyzer, Raid Hunter, and more. <em>(Mostly off &mdash; 3 on)</em>'))}
+        ${featureRow(WELCOME_ASSETS.chat, wt('mods.welcome.otModsLabel', '{count} OT Mods:', { count: otCount }), wt('mods.welcome.otModsText', 'Challenges, Guilds, VIP List, Quests. <em>(Off by default)</em>'))}
+        ${featureRow(WELCOME_ASSETS.chest, wt('mods.welcome.backupsLabel', 'Backups:'), wt('mods.welcome.backupsText', 'Import and export settings via Mod Settings.'))}
+        ${featureRow(WELCOME_ASSETS.quest, wt('mods.welcome.patchNotesLabel', 'Patch Notes:'), wt('mods.welcome.patchNotesText', 'See what\'s new each version in the popup.'))}
+        ${featureRow(WELCOME_ASSETS.premium, wt('mods.welcome.popupLabel', 'Popup Controls:'), wt('mods.welcome.popupText', 'Enable mods, add Gist scripts, manage extras.'))}
+        ${featureRow(WELCOME_ASSETS.grade, wt('mods.welcome.analyticsLabel', 'Analytics:'), wt('mods.welcome.analyticsText', 'Hunt Analyzer, Run Tracker, Better Analytics, and more.'))}
       </div>
     </div>
     <div style="display: flex; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; min-width: 0;">
       <div style="background: rgba(0,255,0,0.1); border: 1px solid rgba(0,255,0,0.3); border-radius: 6px; padding: 8px 10px; flex: 1 1 180px; min-width: 0; box-sizing: border-box;">
         <p style="color: #a6adc8; margin: 0; font-size: 14px; line-height: 1.4; text-align: left;">
-          ${welcomeInlineIcon(WELCOME_ASSETS.starTier, { alt: 'Approved' })}<strong>Safe & Approved</strong> — Officially approved by Xandjiji. Single-player enhancement only.
+          ${welcomeInlineIcon(WELCOME_ASSETS.starTier, { alt: 'Approved' })}<strong>${wt('mods.welcome.safeTitle', 'Safe & Approved')}</strong> — ${wt('mods.welcome.safeText', 'Officially approved by Xandjiji. Single-player enhancement only.')}
         </p>
       </div>
       <div style="background: rgba(0,255,0,0.1); border: 1px solid rgba(0,255,0,0.3); border-radius: 6px; padding: 8px 10px; flex: 1 1 180px; min-width: 0; box-sizing: border-box;">
         <p style="color: #a6adc8; margin: 0; font-size: 14px; line-height: 1.4; text-align: left;">
-          ${welcomeInlineIcon(WELCOME_ASSETS.stamina, { alt: 'Tip' })}<strong>Tip</strong> — Open the extension popup to toggle mods. Re-enable this welcome page from Extras anytime.
+          ${welcomeInlineIcon(WELCOME_ASSETS.stamina, { alt: 'Tip' })}<strong>${wt('mods.welcome.tipTitle', 'Tip')}</strong> — ${wt('mods.welcome.tipText', 'Open the extension popup to toggle mods. Re-enable this welcome page from Extras anytime.')}
         </p>
       </div>
     </div>
     <div style="color: #a6adc8; font-size: 14px; text-align: center;">
       <p style="margin: 0 0 4px; line-height: 1.4;">
-        ${welcomeInlineIcon(WELCOME_ASSETS.shinyStar, { alt: '' })}Enjoy your enhanced Bestiary Arena experience!
+        ${welcomeInlineIcon(WELCOME_ASSETS.shinyStar, { alt: '' })}${wt('mods.welcome.enjoy', 'Enjoy your enhanced Bestiary Arena experience!')}
       </p>
       <p style="font-size: 13px; opacity: 0.7; margin: 0;">Bestiary Arena SuperMod Loader${versionLabel}</p>
     </div>
@@ -947,6 +972,9 @@ function createToast({ message, type = 'info', duration = 3000, icon = null }) {
   
   return {
     element: flexContainer,
+    setMessage: (html) => {
+      messageDiv.innerHTML = html;
+    },
     remove: () => {
       if (flexContainer && flexContainer.parentNode) {
         flexContainer.parentNode.removeChild(flexContainer);
@@ -970,12 +998,22 @@ function showLoadingToast() {
   console.log('[Welcome] showLoadingToast called');
   
   try {
+    const buildLoadingMessage = () => `<span class="text-monster">${wt('mods.welcome.loadingMods', 'Loading mods')}</span>...`;
     loadingToast = createToast({
-      message: '<span class="text-monster">Loading mods</span>...',
+      message: buildLoadingMessage(),
       type: 'loading',
       duration: 0,
       icon: WELCOME_ASSETS.logo
     });
+
+    // Shown before the locale is guaranteed to be loaded: relabel once it arrives.
+    if (!isWelcomeLocaleReady()) {
+      const relabelLoadingToast = () => {
+        removeTrackedEventListener(document, 'bestiary-translations-loaded', relabelLoadingToast);
+        loadingToast?.setMessage?.(buildLoadingMessage());
+      };
+      trackEventListener(document, 'bestiary-translations-loaded', relabelLoadingToast);
+    }
 
     console.log('[Welcome] Loading toast created:', !!loadingToast);
   } catch (error) {
@@ -1045,9 +1083,9 @@ async function showWelcomeModal() {
     console.log('[Welcome] Mod counts received:', modCounts);
     
     // Handle case where mod counts couldn't be fetched
-    const officialCount = modCounts?.official || 'Multiple';
-    const superCount = modCounts?.super || 'Multiple';
-    const otCount = modCounts?.ot || 'Multiple';
+    const officialCount = modCounts?.official || wt('mods.welcome.multiple', 'Multiple');
+    const superCount = modCounts?.super || wt('mods.welcome.multiple', 'Multiple');
+    const otCount = modCounts?.ot || wt('mods.welcome.multiple', 'Multiple');
     
     clearWelcomeModalLayoutCleanup();
 
@@ -1061,18 +1099,18 @@ async function showWelcomeModal() {
     });
 
     modal = api.ui.components.createModal({
-      title: 'Welcome to Bestiary Arena SuperMod Loader!',
+      title: wt('mods.welcome.modalTitle', 'Welcome to Bestiary Arena SuperMod Loader!'),
       width: modalDimensions.width,
       height: modalDimensions.height,
       content,
       buttons: [
         {
-          text: 'Never Show Again',
+          text: wt('mods.welcome.neverShowAgain', 'Never Show Again'),
           variant: 'danger',
           onClick: () => setNeverShowAgain()
         },
         {
-          text: 'Got It!',
+          text: wt('mods.welcome.gotIt', 'Got It!'),
           primary: true
         }
       ]

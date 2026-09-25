@@ -2471,17 +2471,17 @@ function compareSetupEntriesForAudit(a, b) {
 function navigateToSetupMapFromAudit(entry) {
   const mapId = entry?.mapId;
   if (!mapId) {
-    showSetupNotification('Could not detect map id for this setup key.', 'warning');
+    showSetupNotification(t('mods.betterSetups.auditNoMapId'), 'warning');
     return;
   }
 
   try {
     globalThis.state.board.send({ type: 'selectRoomById', roomId: mapId });
     const mapName = globalThis.state?.utils?.ROOM_NAME?.[mapId] || mapId;
-    showSetupNotification(`Navigated to ${mapName}`, 'success');
+    showSetupNotification(tReplace('mods.betterSetups.auditNavigated', { map: mapName }), 'success');
   } catch (error) {
     console.error('[Better Setups] Failed to navigate to setup map:', error);
-    showSetupNotification('Failed to navigate to map.', 'error');
+    showSetupNotification(t('mods.betterSetups.auditNavigateFailed'), 'error');
   }
 }
 
@@ -2549,7 +2549,7 @@ function showMissingEquipmentAuditModal() {
     if (!results.length) {
       const emptyState = document.createElement('div');
       emptyState.style.cssText = 'color:#8fd18f;font-size:12px;padding:8px;border:1px solid rgba(143,209,143,0.35);background:rgba(10,45,10,0.35);border-radius:4px;';
-      emptyState.textContent = 'No missing equipment found in your saved setups.';
+      emptyState.textContent = t('mods.betterSetups.auditEmpty');
       list.appendChild(emptyState);
     } else {
       results.forEach((entry) => {
@@ -2560,18 +2560,18 @@ function showMissingEquipmentAuditModal() {
         title.type = 'button';
         title.style.cssText = 'font-size:12px;font-weight:700;line-height:1.3;text-align:left;color:#9dd2ff;background:transparent;border:none;padding:0;cursor:pointer;text-decoration:underline;';
         title.textContent = `${entry.label} (${entry.key})`;
-        title.title = `Navigate to ${entry.mapName}`;
+        title.title = tReplace('mods.betterSetups.auditNavigateTooltip', { map: entry.mapName });
         title.onclick = () => navigateToSetupMapFromAudit(entry);
         row.appendChild(title);
 
         const mapLine = document.createElement('div');
         mapLine.style.cssText = 'font-size:11px;color:#b8c7d9;line-height:1.3;';
-        mapLine.textContent = `Map: ${entry.mapName}`;
+        mapLine.textContent = tReplace('mods.betterSetups.auditMapLine', { map: entry.mapName });
         row.appendChild(mapLine);
 
         const missingLine = document.createElement('div');
         missingLine.style.cssText = 'font-size:11px;color:#ffb3b3;line-height:1.4;';
-        missingLine.textContent = `Missing: ${entry.missingItems.map(formatMissingEquipmentAuditItem).join(', ')}`;
+        missingLine.textContent = tReplace('mods.betterSetups.auditMissingLine', { items: entry.missingItems.map(formatMissingEquipmentAuditItem).join(', ') });
         row.appendChild(missingLine);
 
         list.appendChild(row);
@@ -2581,7 +2581,7 @@ function showMissingEquipmentAuditModal() {
     content.appendChild(list);
 
     const modalRef = api.ui.components.createModal({
-      title: 'Setups Missing Equipment',
+      title: t('mods.betterSetups.auditTitle'),
       width: modalDimensions.width,
       height: modalDimensions.height,
       content,
@@ -2599,7 +2599,7 @@ function showMissingEquipmentAuditModal() {
     setupBetterSetupsModalResponsiveLayout(modalRef, content);
   } catch (error) {
     console.error('[Better Setups] Error showing missing equipment audit modal:', error);
-    showSetupNotification('Failed to scan setups for missing equipment.', 'error');
+    showSetupNotification(t('mods.betterSetups.auditScanFailed'), 'error');
   }
 }
 

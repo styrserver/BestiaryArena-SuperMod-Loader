@@ -2274,7 +2274,7 @@
                 toastContent.style.gap = '4px';
 
                 const introText = document.createElement('span');
-                introText.textContent = `Injected ${creatureName || 'creature'}`;
+                introText.textContent = t('common.injectedCreature').replace('{name}', creatureName || t('common.creatureFallback'));
                 toastContent.appendChild(introText);
 
                 const numericGoldDiff = Number(goldDiff);
@@ -3725,7 +3725,7 @@
             autoplantButton.disabled = true;
             autoplantButton.style.opacity = '0.5';
             autoplantButton.style.cursor = 'not-allowed';
-            autoplantButton.title = 'Dragon Plant not purchased';
+            autoplantButton.title = t('mods.autoseller.dragonPlantNotPurchased');
         }
         
         // Function to update button appearance
@@ -3758,7 +3758,7 @@
                 autoplantButton.disabled = true;
                 autoplantButton.style.opacity = '0.5';
                 autoplantButton.style.cursor = 'not-allowed';
-                autoplantButton.title = 'Dragon Plant not purchased';
+                autoplantButton.title = t('mods.autoseller.dragonPlantNotPurchased');
             } else {
                 autoplantButton.disabled = false;
                 autoplantButton.style.opacity = '1';
@@ -3830,7 +3830,7 @@
             autocollectRow.label.style.opacity = '0.5';
             autocollectRow.label.style.cursor = 'not-allowed';
             autocollectRow.container.style.opacity = '0.5';
-            autocollectRow.container.title = 'Dragon Plant not purchased';
+            autocollectRow.container.title = t('mods.autoseller.dragonPlantNotPurchased');
         }
         
         placeholder.appendChild(autocollectRow.container);
@@ -4543,8 +4543,8 @@
                 if (keepRange) {
                     const indicator = document.createElement('span');
                     indicator.textContent = '🔒';
-                    const statusText = isIgnoreList ? 'Active' : 'Inactive';
-                    indicator.title = `Keep range: ${keepRange.min}-${keepRange.max}% (${statusText})`;
+                    const statusText = isIgnoreList ? t('common.active') : t('common.inactive');
+                    indicator.title = tReplace('mods.autoseller.keepRangeIndicatorTooltip', { min: keepRange.min, max: keepRange.max, status: statusText });
                     indicator.style.fontSize = '10px';
                     indicator.style.flexShrink = '0';
                     // Grey when inactive (in creatures list), colored when active (in ignore list)
@@ -4576,8 +4576,8 @@
                 sealedIndicator.src = 'https://bestiaryarena.com/assets/icons/star-tier-5.png';
                 sealedIndicator.alt = 'Sealed override';
                 sealedIndicator.title = isIgnoreList
-                    ? 'Sealed sell/squeeze override (inactive in Keep list)'
-                    : 'Sealed sell/squeeze override (active)';
+                    ? t('mods.autoseller.sealedOverrideTooltipInactive')
+                    : t('mods.autoseller.sealedOverrideTooltipActive');
                 sealedIndicator.style.width = '12px';
                 sealedIndicator.style.height = '12px';
                 sealedIndicator.style.flexShrink = '0';
@@ -4594,8 +4594,8 @@
                 sealedSellDenyIndicator.src = 'https://bestiaryarena.com/assets/icons/star-tier-5.png';
                 sealedSellDenyIndicator.alt = 'Sealed sell/devour ignore';
                 sealedSellDenyIndicator.title = isIgnoreList
-                    ? 'Sell/devour ignored for this creature (inactive in Keep list)'
-                    : 'Sell/devour ignored for this creature';
+                    ? t('mods.autoseller.sellIgnoredTooltipInactive')
+                    : t('mods.autoseller.sellIgnoredTooltip');
                 sealedSellDenyIndicator.style.width = '12px';
                 sealedSellDenyIndicator.style.height = '12px';
                 sealedSellDenyIndicator.style.flexShrink = '0';
@@ -4612,8 +4612,8 @@
                 injectIndicator.src = 'https://bestiaryarena.com/assets/icons/star-tier-6.png';
                 injectIndicator.alt = 'Sealed inject ignore';
                 injectIndicator.title = isIgnoreList
-                    ? 'Auto-inject ignored for this creature (inactive in Keep list)'
-                    : 'Auto-inject ignored for this creature';
+                    ? t('mods.autoseller.injectIgnoredTooltipInactive')
+                    : t('mods.autoseller.injectIgnoredTooltip');
                 injectIndicator.style.width = '12px';
                 injectIndicator.style.height = '12px';
                 injectIndicator.style.flexShrink = '0';
@@ -4630,8 +4630,8 @@
                 if (hasCustomAutodusterStats(name)) {
                     const indicator = document.createElement('span');
                     indicator.textContent = '🔒';
-                    const statusText = isIgnoreList ? 'Inactive' : 'Active';
-                    indicator.title = `Custom stat type settings (${statusText})`;
+                    const statusText = isIgnoreList ? t('common.inactive') : t('common.active');
+                    indicator.title = tReplace('mods.autoseller.customStatTypeTooltip', { status: statusText });
                     indicator.style.fontSize = '10px';
                     indicator.style.flexShrink = '0';
                     // Grey when inactive (in Keep list), colored when active (in Disenchant list)
@@ -5320,7 +5320,7 @@
         // Title with equipment name
         const title = document.createElement('div');
         title.className = 'pixel-font-16';
-        title.textContent = equipmentName || 'Autoduster Settings';
+        title.textContent = equipmentName || t('mods.autoseller.autodusterSettingsTitle');
         title.style.color = '#ffe066';
         title.style.fontWeight = 'bold';
         title.style.marginBottom = '4px';
@@ -5330,7 +5330,7 @@
         // Subtitle
         const subtitle = document.createElement('div');
         subtitle.className = 'pixel-font-14';
-        subtitle.textContent = 'Disenchant stat types:';
+        subtitle.textContent = t('mods.autoseller.disenchantStatTypes');
         subtitle.style.color = '#cccccc';
         subtitle.style.fontSize = '11px';
         subtitle.style.marginBottom = '12px';
@@ -5378,10 +5378,10 @@
             // Function to update status indicator
             const updateStatusIndicator = (isChecked) => {
                 if (isChecked) {
-                    statusIndicator.textContent = '(Disenchant)';
+                    statusIndicator.textContent = t('mods.autoseller.statStatusDisenchant');
                     statusIndicator.style.color = '#ff6b6b'; // Red
                 } else {
-                    statusIndicator.textContent = '(Keep)';
+                    statusIndicator.textContent = t('mods.autoseller.statStatusKeep');
                     statusIndicator.style.color = '#4CAF50'; // Green
                 }
             };
@@ -8522,10 +8522,10 @@
                     sectionContent = createAutplantPlaceholder();
                 } else if (categoryId === 'autosqueeze') {
                     sectionContent = createSettingsSection({
-                        label: 'Autosqueeze',
-                        inputLabel: 'Genes',
+                        label: t('mods.autoseller.autosqueezeSectionLabel'),
+                        inputLabel: t('mods.autoseller.genesInputLabel'),
                         desc: '', // Description removed
-                        tooltip: 'When enabled, creatures with genes at or below the specified percentage will be squeezed automatically.',
+                        tooltip: t('mods.autoseller.autosqueezeSectionTooltip'),
                         inputMin: 80,
                         inputMax: 100,
                         defaultMin: 80,
@@ -8536,10 +8536,10 @@
                     });
                 } else if (categoryId === 'autoduster') {
                     sectionContent = createSettingsSection({
-                        label: 'Autodust',
-                        inputLabel: 'Genes',
+                        label: t('mods.autoseller.autodustSectionLabel'),
+                        inputLabel: t('mods.autoseller.genesInputLabel'),
                         desc: '', // Description removed
-                        tooltip: 'When enabled, creatures with genes at or below the specified percentage will be disenchanted automatically.',
+                        tooltip: t('mods.autoseller.autodustSectionTooltip'),
                         inputMin: 80,
                         inputMax: 100,
                         defaultMin: 80,
@@ -9243,7 +9243,7 @@
         // Clear history/session stats button (matches Tick Tracker style)
         const clearButton = document.createElement('button');
         clearButton.className = 'ml-auto flex h-5 w-5 items-center justify-center rounded-md hover:bg-black/40';
-        clearButton.title = 'Clear session stats';
+        clearButton.title = t('mods.autoseller.clearSessionStats');
         clearButton.innerHTML = '×';
         clearButton.onclick = () => {
             stateManager.resetSession();
@@ -10239,7 +10239,7 @@
     }
 
     function buildLootTableActionTooltip(actionKey, active, settings, rowInfo = null) {
-        const name = rowInfo?.name || 'this creature';
+        const name = rowInfo?.name || t('mods.autoseller.thisCreatureFallback');
         const labels = {
             sell: () => {
                 const min = settings.autosellGenesMin ?? UI_CONSTANTS.SELL_GENE_MIN;

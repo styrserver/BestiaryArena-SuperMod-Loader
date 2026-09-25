@@ -4,6 +4,141 @@
   },
   "notes": [
     {
+      "version": "5.1.0",
+      "changes": [
+        {
+          "mod": "Battle Helper",
+          "type": "changed",
+          "text": "Help request chat now colors names: the person who asked for help is always blue, and everyone else gets their own color for that chat."
+        },
+        {
+          "mod": "Battle Helper",
+          "type": "fixed",
+          "text": "After closing the Battle Helper window, it no longer shrinks other mod windows (like the Cyclopedia) to its own 920x600 size when the browser window resizes. This mostly happened on Firefox."
+        },
+        {
+          "mod": "Bestiary Automator",
+          "type": "fixed",
+          "text": "On the Portuguese site, the seashell Open button and the game's 'Something went wrong' toast are now recognized."
+        },
+        {
+          "mod": "Better Cauldron",
+          "type": "fixed",
+          "text": "On the Portuguese site, search and filters now show up. The cauldron window was only recognized by its English title."
+        },
+        {
+          "mod": "Better Daycare",
+          "type": "fixed",
+          "text": "On the Portuguese site, Better Daycare's Settings button no longer shows up in the game's own add-creature picker."
+        },
+        {
+          "mod": "Better Exaltation Chest",
+          "type": "added",
+          "text": "A 'Copy Autoseller' button in Auto Settings replaces your Chest Settings with Autoseller's Autoduster 'Keep' settings, including per-stat choices (e.g. keep only the HP and AP versions of an item). Chest Settings rows can now be reordered by dragging the handle on the left."
+        },
+        {
+          "mod": "Better Exaltation Chest",
+          "type": "changed",
+          "text": "Auto-opening now always keeps T5 equipment: a locked 'All / T5 / All' rule stays pinned at the top of Chest Settings and can't be edited or removed. You can now delete every other rule, which keeps only T5 and disenchants everything else. Chest Settings is more compact, fitting more rules before it scrolls, and no longer shows the description line."
+        },
+        {
+          "mod": "Better Exaltation Chest",
+          "type": "fixed",
+          "text": "Chest Settings rows no longer each get their own scrollbar. Auto-opening no longer disenchants an item it couldn't identify. Pressing Reset right after changing a rule no longer gets undone."
+        },
+        {
+          "mod": "Better Forge",
+          "type": "fixed",
+          "text": "Auto-upgrade now stops and tells you why when an earlier step failed and there aren't enough items left for the next one, instead of quietly skipping steps."
+        },
+        {
+          "mod": "Better Highscores",
+          "type": "changed",
+          "text": "The size slider in the right-click menu now goes from 75% to 125% (was 80–120%)."
+        },
+        {
+          "mod": "Better Tasker",
+          "type": "fixed",
+          "text": "On the Portuguese site, removing the current task works again (it was looking for the wrong button text), the New Task button is found by its game name, and the quest button is found while Better Tasker or Raid Hunter has relabeled it."
+        },
+        {
+          "mod": "Challenges",
+          "type": "fixed",
+          "text": "On the Portuguese site, the battle Stop button is found when a challenge ends or is cancelled."
+        },
+        {
+          "mod": "Custom Battles",
+          "type": "fixed",
+          "text": "On the Portuguese site, the battle Stop button and the room info overlay are recognized."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "fixed",
+          "text": "The Cyclopedia window now only resizes itself and can no longer resize another mod's window. Inventory item names with capitals in brackets no longer show extra spaces (e.g. 'Augment Rune ( H P)')."
+        },
+        {
+          "mod": "Dice Roller",
+          "type": "fixed",
+          "text": "Genes-mode autoroll no longer stops with an error when a single roll fails; it shows the error and retries."
+        },
+        {
+          "mod": "Hunt Analyzer",
+          "type": "fixed",
+          "text": "Rune drops are now identified from the inventory database, so new runes like the Downgrade Rune are recognized automatically. Conversion, Reconstitution and some stat runes were sometimes logged as Blank or Recycle Runes; they're now named correctly, and an unknown rune is no longer shown as a Blank Rune."
+        },
+        {
+          "mod": "inventory-database.js",
+          "type": "added",
+          "text": "Downgrade Rune (runeDowngradeEquip): catalog entry, icon and mini icon, and listed as a rune that can't be sacrificed in the recycler. New findItemKey(name) and findItemKeyByIcon(src) lookups turn any item name, game key or icon path into its database key, so mods don't need their own name tables. Runes now use their in-game names (e.g. 'Augment Rune (HP)' instead of 'Hitpoints Rune', 'Conversion Rune (HP)' instead of '(hp)'), and the Transfusion Rune description matches the game."
+        },
+        {
+          "mod": "Manual Runner",
+          "type": "fixed",
+          "text": "The Stop button now reads 'Stopped' after a run ends instead of showing a raw text key."
+        },
+        {
+          "mod": "Map Editor",
+          "type": "fixed",
+          "text": "On the Portuguese site, the map picker button in the header is found."
+        },
+        {
+          "mod": "Mod Loader",
+          "type": "fixed",
+          "text": "When the browser's storage for the game is full, the Error Log now also lists which saved data takes up the most space. Empty 'Script error.' duplicates are no longer logged, and a tab that was still reloading is no longer reported as an error. The mod API no longer stalls partway through startup, so mods can again use its shared map and board helpers."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "fixed",
+          "text": "Turning Maxed Creatures styling off, or refreshing it, could put the wrong tier star on a creature after the Bestiary grid re-rendered or was searched."
+        },
+        {
+          "mod": "Multiple Mods",
+          "type": "changed",
+          "text": "Much more of the interface is translated into Portuguese: buttons, tooltips, settings, status messages, toasts and dialogs in 30 mods, including Mod Settings, Autoseller, Guilds, Challenges, Raid Hunter, Dice Roller, Better Forge and Autoscroller. The Highscores, Battle Helper, Better Analytics and Map Editor buttons now have Portuguese names."
+        },
+        {
+          "mod": "Raid Hunter",
+          "type": "fixed",
+          "text": "On the Portuguese site, the main Quest Log page is recognized by its current raid section."
+        },
+        {
+          "mod": "RunTracker",
+          "type": "fixed",
+          "text": "Floor runs no longer save a new setup each time a creature levels up. Setups that differ only by level now count as one; different genes, awakening or equipment still count as separate setups. Existing duplicates are merged once on load, keeping the best run and every floor cleared. A setup's best floor now always lists the same seed its replay uses."
+        },
+        {
+          "mod": "VIP List",
+          "type": "fixed",
+          "text": "On the Portuguese site, a pending chat request is recognized, so the check for its acceptance keeps running."
+        },
+        {
+          "mod": "Welcome",
+          "type": "changed",
+          "text": "The 'Loading mods' and 'Mods loaded' messages and the welcome window are translated into Portuguese."
+        }
+      ]
+    },
+    {
       "version": "5.0.16",
       "changes": [
         {

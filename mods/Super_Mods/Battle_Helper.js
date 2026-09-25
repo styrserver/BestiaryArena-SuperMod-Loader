@@ -2862,6 +2862,32 @@ function buildHelpBoardColumns(onContentChange, shared) {
   let chatIsAdmin = false;
   let lastChatMessages = [];
 
+  // Per-chat name colors: requester is always blue; everyone else gets a palette color on
+  // first appearance, starting at a per-request offset so different chats get different mixes.
+  // The map persists across polls so a name keeps its color even if earlier messages are deleted.
+  const CHAT_REQUESTER_COLOR = '#7dd3fc';
+  const CHAT_PARTICIPANT_COLORS = ['#f9a8d4', '#fcd34d', '#86efac', '#fdba74', '#c4b5fd', '#5eead4', '#fca5a5', '#bef264', '#f0abfc', '#fde047'];
+  let chatColorRequestId = null;
+  let chatColorByName = new Map();
+  let chatColorOffset = 0;
+
+  function getChatNameColor(name, requesterLower) {
+    const key = String(name || '').toLowerCase();
+    if (requesterLower && key === requesterLower) return CHAT_REQUESTER_COLOR;
+    if (chatColorRequestId !== chatPollingRequestId) {
+      chatColorRequestId = chatPollingRequestId;
+      chatColorByName = new Map();
+      let hash = 0;
+      for (const ch of String(chatPollingRequestId || '')) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+      chatColorOffset = hash % CHAT_PARTICIPANT_COLORS.length;
+    }
+    if (!chatColorByName.has(key)) {
+      const idx = (chatColorOffset + chatColorByName.size) % CHAT_PARTICIPANT_COLORS.length;
+      chatColorByName.set(key, CHAT_PARTICIPANT_COLORS[idx]);
+    }
+    return chatColorByName.get(key);
+  }
+
   function renderChatMessages(messages) {
     lastChatMessages = messages;
     const viewport = chatScroll.scrollView;
@@ -2876,6 +2902,8 @@ function buildHelpBoardColumns(onContentChange, shared) {
     } else {
       const requestIdAtRender = chatPollingRequestId;
       const currentPlayerLower = getCurrentPlayerName().toLowerCase();
+      const chatRequest = helpBoardState.requests.find((r) => r.id === requestIdAtRender);
+      const requesterLower = chatRequest ? chatRequest.requesterName.toLowerCase() : '';
       messages.forEach((msg) => {
         const row = document.createElement('div');
         row.style.cssText = 'display: flex; flex-direction: row; align-items: flex-start; gap: 4px; width: 100%; box-sizing: border-box;';
@@ -2883,7 +2911,7 @@ function buildHelpBoardColumns(onContentChange, shared) {
         const textEl = document.createElement('p');
         textEl.className = 'pixel-font-14 text-whiteRegular m-0';
         textEl.style.cssText = 'flex: 1 1 auto; min-width: 0; word-break: break-word; white-space: pre-wrap;';
-        textEl.appendChild(createBattleHelperProfileLink(msg.name, { color: '#7dd3fc' }));
+        textEl.appendChild(createBattleHelperProfileLink(msg.name, { color: getChatNameColor(msg.name, requesterLower) }));
         const ageText = formatHelpAge(msg.createdAt);
         if (ageText) {
           const ageSpan = document.createElement('span');
@@ -3427,17 +3455,16 @@ function syncBattleHelperButtonState() {
 // =======================
 // 9. Modal Orchestration
 // =======================
-function getBattleHelperDialog(modalRef) {
+function getBattleHelperDialog(modalRef, contentRoot) {
   if (modalRef?.element) return modalRef.element;
   if (modalRef instanceof HTMLElement) return modalRef;
-  // Prefer a dialog Battle Helper has already tagged as its own. Only fall back to
-  // "any open dialog" for the very first resolve right after creation (before the
-  // id is stamped) — never as a standing fallback, or a leaked resize listener
-  // (e.g. modal dismissed via Escape/backdrop, bypassing our close cleanup) will
-  // hijack whatever unrelated mod dialog happens to be open. See Cyclopedia/Quests
-  // dialogs getting stamped id="battle-helper-modal" and forced to 920x600.
-  return document.getElementById(BATTLE_HELPER_MODAL_ID) ||
-    document.querySelector('div[role="dialog"][data-state="open"]');
+  // When ui_components.js isn't in the page (typical on Firefox) createModal falls
+  // back to BestiaryModAPI.showModal, which returns a bare close *function* with no
+  // element. Resolve our dialog from our own content node — never from "any open
+  // dialog" or document.getElementById: a leaked resize listener (modal removed by
+  // another mod's createModal / backdrop, bypassing our close cleanup) used that to
+  // stamp id="battle-helper-modal" on Cyclopedia/Quests and force them to 920x600.
+  return contentRoot?.closest?.('div[role="dialog"]') || null;
 }
 
 function clearBattleHelperModalLayoutCleanup() {
@@ -3584,12 +3611,11 @@ function stabilizeBattleHelperModalRendering(dialog) {
 }
 
 function applyBattleHelperModalLayout(modalRef, contentRoot, dimensions) {
-  const dialog = getBattleHelperDialog(modalRef);
-  if (!dialog) return;
-  // Cache the resolved element so later calls (resize events, including from a
-  // leaked listener) use it directly and never re-query "any open dialog".
-  if (modalRef && typeof modalRef === 'object' && !modalRef.element) {
-    modalRef.element = dialog;
+  const dialog = getBattleHelperDialog(modalRef, contentRoot);
+  if (!dialog || !dialog.isConnected) {
+    // Our modal is gone without our close path running — drop the resize listener.
+    if (activeBattleHelperModal === modalRef) clearBattleHelperModalLayoutCleanup();
+    return;
   }
 
   const { width, height, maxHeight } = dimensions;
@@ -3637,7 +3663,9 @@ function setupBattleHelperModalResponsiveLayout(modalRef, contentRoot) {
 
 function openBattleHelperModal() {
   try {
-    if (activeBattleHelperModal?.close) {
+    if (typeof activeBattleHelperModal === 'function') {
+      activeBattleHelperModal();
+    } else if (activeBattleHelperModal?.close) {
       activeBattleHelperModal.close();
     }
   } catch (_) { /* ignore */ }

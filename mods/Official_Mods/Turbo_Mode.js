@@ -73,7 +73,7 @@ function enableTurbo() {
   
   // Update button text
   if (window.turboButton) {
-    window.turboButton.textContent = 'Disable Turbo';
+    window.turboButton.textContent = t('mods.turbo.buttonDisable');
   }
   updateTurboButton();
 }
@@ -116,7 +116,7 @@ function disableTurbo() {
   // Update tick display
   if (turboState.tickDisplayElement) {
     turboState.tickDisplayElement.style.color = '#888';
-    turboState.tickDisplayElement.textContent = 'Turbo: OFF';
+    turboState.tickDisplayElement.textContent = t('mods.turbo.display.off');
   }
   
   // Disconnect observer if it exists
@@ -149,7 +149,7 @@ function disableTurbo() {
   
   // Update button text
   if (window.turboButton) {
-    window.turboButton.textContent = 'Enable Turbo';
+    window.turboButton.textContent = t('mods.turbo.buttonEnable');
   }
   updateTurboButton();
   
@@ -190,8 +190,8 @@ function setupTimerWatcher() {
     
     // If the display shows just "Turbo: ON" but timer is available, we need to subscribe
     if (tickDisplayExists && timerAvailable && 
-        (turboState.tickDisplayElement.textContent === 'Turbo: ON' || 
-         turboState.tickDisplayElement.textContent === 'Turbo: ON | Lost connection to timer')) {
+        (turboState.tickDisplayElement.textContent === t('mods.turbo.display.on') || 
+         turboState.tickDisplayElement.textContent === t('mods.turbo.display.connectionLost'))) {
       console.log('Display shows no ticks or lost connection, subscribing...');
       subscribeToGameTimer();
     }
@@ -206,7 +206,7 @@ function subscribeToGameTimer() {
       typeof state.gameTimer.subscribe !== 'function') {
     
     if (turboState.tickDisplayElement && turboState.active) {
-      turboState.tickDisplayElement.textContent = 'Turbo: ON | No timer available';
+      turboState.tickDisplayElement.textContent = t('mods.turbo.display.noTimer');
     }
     
     return false;
@@ -225,7 +225,7 @@ function subscribeToGameTimer() {
       turboState.lastKnownTick = context.currentTick;
       
       // Update DOM every tick but use more efficient textContent assignment
-      turboState.tickDisplayElement.textContent = `Turbo: ON | Ticks: ${context.currentTick}`;
+      turboState.tickDisplayElement.textContent = t('mods.turbo.display.withTicks').replace('{ticks}', context.currentTick);
       turboState.tickDisplayElement.style.color = '#00ff00';
       
       // If we get here, we're definitely subscribed
@@ -251,7 +251,7 @@ function subscribeToGameTimer() {
       
       // If game is not running, show a special message
       if (!isGameRunning && turboState.tickDisplayElement) {
-        turboState.tickDisplayElement.textContent = 'Turbo: ON | Game paused';
+        turboState.tickDisplayElement.textContent = t('mods.turbo.display.paused');
       }
       
       return true;
@@ -260,7 +260,7 @@ function subscribeToGameTimer() {
       turboState.timerSubscribed = false;
       
       if (turboState.tickDisplayElement) {
-        turboState.tickDisplayElement.textContent = 'Turbo: ON | Failed to subscribe';
+        turboState.tickDisplayElement.textContent = t('mods.turbo.display.subscribeFailed');
       }
       
       return false;
@@ -270,7 +270,7 @@ function subscribeToGameTimer() {
     turboState.timerSubscribed = false;
     
     if (turboState.tickDisplayElement) {
-      turboState.tickDisplayElement.textContent = 'Turbo: ON | Lost connection to timer';
+      turboState.tickDisplayElement.textContent = t('mods.turbo.display.connectionLost');
     }
     
     return false;
@@ -292,7 +292,7 @@ function tryInitTickDisplay() {
     textAlign: 'right'
   });
   
-  tickEl.textContent = turboState.active ? 'Turbo: ON' : 'Turbo: OFF';
+  tickEl.textContent = turboState.active ? t('mods.turbo.display.on') : t('mods.turbo.display.off');
   container.appendChild(tickEl);
   turboState.tickDisplayElement = tickEl;
   
@@ -347,7 +347,7 @@ function watchForGameControls() {
           turboState.timerSubscribed = false;
           
           if (turboState.tickDisplayElement) {
-            turboState.tickDisplayElement.textContent = 'Turbo: ON | Game paused';
+            turboState.tickDisplayElement.textContent = t('mods.turbo.display.paused');
           }
         }
         
@@ -402,7 +402,7 @@ function watchForGameControls() {
   if (playButton) {
           console.log('Found play button initially - game is paused');
     if (turboState.tickDisplayElement && turboState.active) {
-      turboState.tickDisplayElement.textContent = 'Turbo: ON | Game paused';
+      turboState.tickDisplayElement.textContent = t('mods.turbo.display.paused');
     }
   }
 }
@@ -542,7 +542,7 @@ window.turboMode = exports;
 // Update the Turbo button style based on state
 function updateTurboButton() {
   const blocked = isTurboBlockedByAnalytics();
-  const blockedTooltip = 'Turbo blocked — turn off Slow motion in Advanced Analytics to speed up fights';
+  const blockedTooltip = t('mods.turbo.blockedTooltip');
 
   if (api && api.ui && window.turboButton) {
     api.ui.updateButton('turbo-mod-button', {

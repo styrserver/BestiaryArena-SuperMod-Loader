@@ -333,6 +333,42 @@ function assignFloorSeed(map, floor, seed) {
   }
 }
 
+// JSON with object keys sorted, so two pieces built in a different field order still match.
+function stableStringify(value) {
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value).sort().map((k) => `${JSON.stringify(k)}:${stableStringify(value[k])}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+// Floor-run setup identity: every stored piece field (creature, tile, genes, equipment, ...)
+// except level, so a team re-clearing after a level-up updates its record instead of adding
+// a new one. Pieces don't store awakened; replays derive it from level > 50, so that flag is
+// kept explicitly — an awakening still counts as a different setup.
+function getFloorSetupIdentityKey(setup) {
+  const pieces = Array.isArray(setup?.pieces) ? setup.pieces : [];
+  const normalized = pieces
+    .map((piece) => {
+      const { level, ...rest } = piece || {};
+      return { ...rest, awakened: piece?.awakened === true || Number(level) > 50 };
+    })
+    .sort((a, b) => (a.tile ?? 0) - (b.tile ?? 0));
+  return stableStringify(normalized);
+}
+
+// Floor-run ranking: higher floor, then fewer floorTicks (a run with ticks beats one without),
+// then faster time.
+function isBetterFloorRun(candidate, existing) {
+  const cf = Number(candidate?.floor) || 0;
+  const ef = Number(existing?.floor) || 0;
+  if (cf !== ef) return cf > ef;
+  if (candidate.floorTicks && existing.floorTicks) return candidate.floorTicks < existing.floorTicks;
+  if (candidate.floorTicks && !existing.floorTicks) return true;
+  if (!candidate.floorTicks && existing.floorTicks) return false;
+  return !!(candidate.time && existing.time && candidate.time < existing.time);
+}
+
 // Multi-floor quest rooms (e.g. The Annihilator Quest, The Behemoth Quest) have a unique
 // board layout per floor index (room.floorFiles[floorIndex]). Floors are grouped by that
 // layout name so every distinct fight keeps its own best-run record instead of collapsing
@@ -1632,23 +1668,10 @@ function checkAndUpdateFloorRunsSingleFloor(runData) {
   const floorRuns = runStorage.runs[runData.mapKey].floor;
   const runSeason = Number(runData.season || 1);
   const seasonRuns = floorRuns.filter(run => Number(run?.season || 1) === runSeason);
-  
-  // Check for same setup (more robust comparison)
-  const sameSetupRun = seasonRuns.find(run => {
-    if (!run.setup || !runData.setup) return false;
-    
-    // Compare pieces array
-    const runPieces = run.setup.pieces || [];
-    const dataPieces = runData.setup.pieces || [];
-    
-    if (runPieces.length !== dataPieces.length) return false;
-    
-    // Sort pieces by tile for consistent comparison
-    const sortedRunPieces = [...runPieces].sort((a, b) => a.tile - b.tile);
-    const sortedDataPieces = [...dataPieces].sort((a, b) => a.tile - b.tile);
-    
-    return JSON.stringify(sortedRunPieces) === JSON.stringify(sortedDataPieces);
-  });
+
+  // Same setup = same pieces ignoring creature level (see getFloorSetupIdentityKey)
+  const dataKey = runData.setup ? getFloorSetupIdentityKey(runData.setup) : null;
+  const sameSetupRun = dataKey && seasonRuns.find(run => run.setup && getFloorSetupIdentityKey(run.setup) === dataKey);
   
   if (sameSetupRun) {
     const existingFloorHistory = normalizeFloorHistory(sameSetupRun);
@@ -1688,6 +1711,9 @@ function checkAndUpdateFloorRunsSingleFloor(runData) {
       console.log(`[RunTracker] Updated floor run for ${runData.mapName} with same setup: floor ${runData.floor} (was ${sameSetupRun.floor})${runData.floorTicks ? `, floorTicks ${runData.floorTicks}` : ''}${!runData.floorTicks && runData.time ? `, time ${runData.time}` : ''}`);
     } else {
       const existingIndex = floorRuns.indexOf(sameSetupRun);
+      // A weaker clear of the record's own headline floor must not replace that floor's seed —
+      // floorSeeds[floor] has to match the seed the record's replay uses.
+      assignFloorSeed(existingFloorSeeds, sameSetupRun.floor, sameSetupRun.seed);
       floorRuns[existingIndex] = { ...sameSetupRun, floorHistory: existingFloorHistory, floorSeeds: existingFloorSeeds };
       console.log(`[RunTracker] Recorded additional floor ${runData.floor} for existing setup without replacing best run`);
       return true;
@@ -1802,6 +1828,97 @@ function isInvalidEmptySetupRun(run) {
 }
 
 // Remove runs that were saved with an empty board snapshot (all categories).
+// One-time cleanup: single-floor rooms used to key floor runs on the exact piece JSON, level
+// included, so every level-up of the same team was saved as a new "unique setup". Merge those
+// records per season + getFloorSetupIdentityKey: keep the best run (isBetterFloorRun) and union
+// every merged record's floorHistory/floorSeeds so no cleared floor or its seed is lost.
+// Multi-floor rooms (records carrying floorGroup) are already one-record-per-group and skipped.
+async function dedupeFloorRunsIgnoringLevel() {
+  try {
+    if (!runStorage || !runStorage.runs) return 0;
+    if (!runStorage.metadata) runStorage.metadata = {};
+    // v2 re-runs the (idempotent) merge to also re-pin floorSeeds[floor] = seed on every record.
+    if (runStorage.metadata.floorSetupDedupeVersion >= 2) return 0;
+    // Multi-floor rooms must be split into floorGroup records first, or they'd be merged here.
+    if (!(runStorage.metadata.floorGroupMigrationVersion >= 1)) {
+      console.log('[RunTracker] Skipping floor-setup dedupe - floor-group migration not done yet, will retry next load');
+      return 0;
+    }
+
+    let totalRemoved = 0;
+    let before = 0;
+
+    for (const [mapKey, mapData] of Object.entries(runStorage.runs)) {
+      const floorRuns = mapData?.floor;
+      if (!Array.isArray(floorRuns) || floorRuns.length < 2) continue;
+      if (floorRuns.some((run) => run?.floorGroup)) continue;
+
+      before += floorRuns.length;
+      const groups = new Map();
+      const kept = [];
+      for (const run of floorRuns) {
+        if (!run?.setup) { kept.push(run); continue; }
+        const key = `${Number(run.season || 1)}|${getFloorSetupIdentityKey(run.setup)}`;
+        const existing = groups.get(key);
+        if (!existing) {
+          groups.set(key, run);
+          kept.push(run);
+          continue;
+        }
+        const winner = isBetterFloorRun(run, existing) ? run : existing;
+        const loser = winner === run ? existing : run;
+        // Winner's seed wins for a floor both cleared; the loser only fills floors the winner lacks.
+        const floorSeeds = { ...cloneFloorSeedMap(loser), ...cloneFloorSeedMap(winner) };
+        const floorHistory = normalizeFloorHistory({
+          floorHistory: [...normalizeFloorHistory(winner), ...normalizeFloorHistory(loser)]
+        });
+        assignFloorSeed(floorSeeds, winner.floor, winner.seed);
+        const merged = { ...winner, floorHistory, floorSeeds };
+        groups.set(key, merged);
+        kept[kept.indexOf(existing)] = merged;
+        totalRemoved++;
+      }
+
+      if (kept.length !== floorRuns.length) {
+        kept.sort((a, b) => (isBetterFloorRun(a, b) ? -1 : isBetterFloorRun(b, a) ? 1 : 0));
+        mapData.floor = kept;
+        console.log(`[RunTracker] Merged ${floorRuns.length - kept.length} same-setup floor run(s) in ${mapKey} (level ignored): ${floorRuns.length} -> ${kept.length}`);
+      }
+    }
+
+    // Headline floor's seed must be the record's own replay seed (older builds let a weaker
+    // same-setup clear overwrite it).
+    let reseeded = 0;
+    for (const mapData of Object.values(runStorage.runs)) {
+      for (const run of (Array.isArray(mapData?.floor) ? mapData.floor : [])) {
+        const f = Number(run?.floor);
+        const sd = Number(run?.seed);
+        if (!Number.isFinite(f) || f <= 0 || !Number.isFinite(sd)) continue;
+        if (!run.floorSeeds || typeof run.floorSeeds !== 'object') run.floorSeeds = {};
+        if (Number(run.floorSeeds[f]) !== sd) { run.floorSeeds[f] = sd; reseeded++; }
+      }
+    }
+    if (reseeded > 0) {
+      runStorage.lastUpdated = Date.now();
+      console.log(`[RunTracker] Re-pinned headline floor seed on ${reseeded} floor run(s)`);
+    }
+
+    runStorage.metadata.floorSetupDedupeVersion = 2;
+    if (totalRemoved > 0) {
+      runStorage.lastUpdated = Date.now();
+      runStorage.metadata.totalRuns = Object.values(runStorage.runs).reduce((total, map) => {
+        return total + (map.speedrun?.length || 0) + (map.rank?.length || 0) + (map.floor?.length || 0);
+      }, 0);
+      console.log(`[RunTracker] Floor-setup dedupe: removed ${totalRemoved} of ${before} floor run(s)`);
+    }
+    await StorageManager.saveStorage();
+    return totalRemoved;
+  } catch (error) {
+    Utils.handleError(error, 'deduplicating floor runs', false);
+    return 0;
+  }
+}
+
 async function pruneInvalidEmptySetupRuns() {
   try {
     if (!runStorage || !runStorage.runs) {
@@ -1980,7 +2097,8 @@ async function initialize() {
     // Clean up any existing defeated runs with 0 rank points
     await cleanupDefeatedRuns();
     await pruneInvalidEmptySetupRuns();
-    
+    await dedupeFloorRunsIgnoringLevel();
+
     // Periodic cleanup disabled - keeping runs forever
     // setInterval(cleanupRuns, 60 * 60 * 1000); // Clean up every hour
     

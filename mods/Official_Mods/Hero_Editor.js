@@ -1139,8 +1139,8 @@ function applyHeroChangesFromControls(originalBoardData, controls, equipMap, opt
     console.error('[Hero Editor] Error applying hero changes:', error);
     if (!silent) {
       api.ui.components.createModal({
-        title: 'Error',
-        content: `Failed to update heroes: ${error.message || error}`,
+        title: t('common.error'),
+        content: t('mods.heroEditor.updateFailed').replace('{error}', error.message || error),
         buttons: [{ text: 'OK', primary: true }]
       });
     }
@@ -1779,7 +1779,7 @@ function showHeroEditorModal(options) {
 
     const col1Header = document.createElement('div');
     col1Header.className = 'pixel-font-12 text-whiteRegular mb-1 shrink-0';
-    col1Header.textContent = 'Allies';
+    col1Header.textContent = t('mods.heroEditor.alliesHeader');
 
     const listScrollContainer = createHeroEditorScrollContainer();
     listScrollContainer.element.classList.add('hero-editor-list-scroll');
@@ -1801,7 +1801,7 @@ function showHeroEditorModal(options) {
 
     const col2Header = document.createElement('div');
     col2Header.className = 'pixel-font-12 text-whiteRegular mb-1 shrink-0';
-    col2Header.textContent = 'Details';
+    col2Header.textContent = t('common.details');
 
     const detailHost = document.createElement('div');
     detailHost.className = 'hero-editor-detail-host frame-pressed-1 surface-dark relative box-border min-h-0 flex-1 overflow-hidden';
@@ -2059,7 +2059,7 @@ function showHeroEditorModal(options) {
       const refreshTopButtons = () => {
         const awakenActive = activeTopMode === 'awaken';
         const maxGenesActive = activeTopMode === 'maxGenes';
-        awakenButton.title = awakenEnabled ? 'Awakened Mode' : 'Normal Mode';
+        awakenButton.title = awakenEnabled ? t('mods.heroEditor.awakenedMode') : t('mods.heroEditor.normalMode');
         awakenButton.style.background = awakenActive ? GREEN_BUTTON_BG : REGULAR_BUTTON_BG;
         awakenButton.style.backgroundSize = 'auto';
         awakenButton.style.border = awakenActive ? '1px solid #4CAF50' : '1px solid #666';
@@ -2128,7 +2128,7 @@ function showHeroEditorModal(options) {
       maxGenesButton.style.height = TOP_BUTTON_SIZE;
       maxGenesButton.style.outline = 'none';
       maxGenesButton.style.flexShrink = '0';
-      maxGenesButton.title = 'Max Awakened Mode';
+      maxGenesButton.title = t('mods.heroEditor.maxAwakenedMode');
 
       const maxGenesIcon = document.createElement('img');
       maxGenesIcon.src = '/assets/icons/star-tier-shiny.png';
@@ -2285,7 +2285,7 @@ function showHeroEditorModal(options) {
       if (!hasEquipment) {
         // If no equipment, add a message at the top
         const noEquipMsg = document.createElement('div');
-        noEquipMsg.textContent = 'No equipment - select one below:';
+        noEquipMsg.textContent = t('mods.heroEditor.noEquipmentSelectBelow');
         noEquipMsg.className = isFloating ? 'text-whiteRegular mb-1' : 'pixel-font-12 text-whiteRegular mb-2';
         if (isFloating) {
           applyHeroEditorFloatingFont(noEquipMsg);
@@ -2355,7 +2355,7 @@ function showHeroEditorModal(options) {
       // Add "No Equipment" option at the top
       const noEquipOption = document.createElement('option');
       noEquipOption.value = '';
-      noEquipOption.textContent = '-- No Equipment --';
+      noEquipOption.textContent = t('mods.heroEditor.noEquipmentOption');
       // If hero has no equipment, select this option
       if (!hasEquipment) {
         noEquipOption.selected = true;
@@ -2432,7 +2432,7 @@ function showHeroEditorModal(options) {
       
       // Label for tier
       const tierLabel = document.createElement('span');
-      tierLabel.textContent = 'Tier:';
+      tierLabel.textContent = t('mods.heroEditor.tierLabel');
       tierLabel.className = isFloating
         ? 'text-whiteRegular flex items-center'
         : 'pixel-font-12 text-whiteRegular flex items-center';
@@ -2735,12 +2735,12 @@ function showHeroEditorModal(options) {
     }
     
     const modalRef = api.ui.components.createModal({
-      title: 'Edit Heroes',
+      title: t('mods.heroEditor.modalTitle'),
       width: HERO_EDITOR_MODAL_CONFIG.width,
       content: contentContainer,
       buttons: [
         {
-          text: 'Close',
+          text: t('common.close'),
           primary: true,
           onClick: () => {
             clearHeroEditorModalLayoutCleanup();
@@ -2764,8 +2764,8 @@ function showHeroEditorModal(options) {
     
     // Show error message
     api.ui.components.createModal({
-      title: 'Error',
-      content: `Failed to open hero editor: ${error.message}`,
+      title: t('common.error'),
+      content: t('mods.heroEditor.openFailed').replace('{error}', error.message),
       buttons: [{ text: 'OK', primary: true }]
     });
   }

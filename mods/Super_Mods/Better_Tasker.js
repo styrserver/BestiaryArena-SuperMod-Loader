@@ -587,7 +587,7 @@ function createCreatureContextMenu(creatureName, x, y, onClose) {
     for (let i = 0; i <= 15; i++) {
         const optionElement = document.createElement('option');
         optionElement.value = String(i);
-        optionElement.textContent = `Floor ${i}`;
+        optionElement.textContent = t('common.floorN').replace('{n}', i);
         floorSelect.appendChild(optionElement);
     }
     floorSelect.value = String(existing.floor != null ? Math.max(0, Math.min(15, Number(existing.floor) || 0)) : getDefaultTaskerFloor(settings));
@@ -1145,7 +1145,7 @@ function showTaskStartToast() {
         return;
     }
     lastStartToastAt = now;
-    showToast('Starting Better Tasker');
+    showToast(t('mods.betterTasker.startingToast'));
 }
 
 function claimTaskOperation(operationLabel = 'task operation') {
@@ -3288,7 +3288,7 @@ function updateNextTaskTimerDisplay() {
 
     const msRemaining = getTaskCooldownRemainingMs();
     if (msRemaining <= 0) {
-        timerElement.textContent = 'Ready';
+        timerElement.textContent = t('common.ready');
         timerElement.style.color = 'rgb(96, 192, 96)';
         return;
     }
@@ -3719,7 +3719,7 @@ function findQuestButton() {
     const allButtons = document.querySelectorAll('button');
     for (const button of allButtons) {
         const span = button.querySelector('span');
-        if (span && (span.textContent === 'Tasking' || span.textContent === 'Raiding')) {
+        if (span && ['Tasking', 'Raiding', t('mods.betterTasker.tasking'), t('mods.raidHunter.raiding')].includes(span.textContent)) {
             console.log(`[Better Tasker] Found quest button by "${span.textContent}" text`);
             return button;
         }
@@ -4483,7 +4483,7 @@ function openTaskerSettingsModal() {
                         } catch (error) {
                             console.error('[Better Tasker] Error creating modal:', error);
                             try {
-                                alert('Failed to open settings. Please try again.');
+                                alert(t('common.settingsOpenFailed'));
                             } catch (alertError) {
                                 console.error('[Better Tasker] Even fallback alert failed:', alertError);
                             }
@@ -4492,7 +4492,7 @@ function openTaskerSettingsModal() {
                         }
                     } else {
                         console.warn('[Better Tasker] API not available for modal creation');
-                        alert('Better Tasker Settings - API not available');
+                        alert(t('mods.betterTasker.settingsApiUnavailable'));
                         taskerModalInProgress = false;
                     }
                 }, 100);
@@ -4631,7 +4631,7 @@ function createGeneralSettings() {
         t('mods.betterTasker.defaultFloor'),
         '',
         String(getDefaultTaskerFloor(loadSettings())),
-        Array.from({ length: 16 }, (_, i) => ({ value: String(i), label: `Floor ${i}` }))
+        Array.from({ length: 16 }, (_, i) => ({ value: String(i), label: t('common.floorN').replace('{n}', i) }))
     );
     settingsWrapper.appendChild(defaultFloorDiv);
 
@@ -6111,7 +6111,7 @@ function getBothLanguages(key) {
         'mods.betterTasker.autoSetup': 'Autoconfigurar',
         'mods.betterTasker.start': 'Iniciar',
         'controls.close': 'Fechar',
-        'mods.betterTasker.newTask': 'Nova tarefa',
+        'mods.betterTasker.newTask': 'Nova task', // game's own wording
         'mods.betterTasker.remove': 'Remover',
         'mods.betterTasker.confirm': 'Confirmar',
         'mods.betterTasker.suggestedMap': 'Mapa sugerido:'
@@ -6131,8 +6131,8 @@ function findButtonByText(text) {
         'Close': getBothLanguages('controls.close'),
         'New task': getBothLanguages('mods.betterTasker.newTask'),
         'Remove': getBothLanguages('mods.betterTasker.remove'),
-        'Remove current task': ['Remove current task', 'Remover tarefa atual'],
-        'Remove task': ['Remove task', 'Remover tarefa'],
+        'Remove current task': ['Remove current task', 'Remover task atual', 'Remover tarefa atual'],
+        'Remove task': ['Remove task', 'Remover task', 'Remover tarefa'],
         'Confirm': getBothLanguages('mods.betterTasker.confirm')
     };
     
@@ -6185,8 +6185,9 @@ function findConfirmationButton() {
     
     // Define confirmation button text mappings using centralized constants
     const confirmationTexts = [
-        'Remove current task', 'Remover tarefa atual',
-        'Remove task', 'Remover tarefa',
+        // The game's pt-BR confirm button reads "Remover task atual"; older wordings kept as fallbacks.
+        'Remove current task', 'Remover task atual', 'Remover tarefa atual',
+        'Remove task', 'Remover task', 'Remover tarefa',
         ...getBothLanguages('mods.betterTasker.confirm')
     ];
     

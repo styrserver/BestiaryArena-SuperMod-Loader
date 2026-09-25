@@ -188,6 +188,38 @@
   }
 
   // --- Error Log sink ------------------------------------------------------
+  // The game and the mods share one localStorage quota (~5 MB on Firefox). When it fills up,
+  // the game's own stored-setups hook throws QuotaExceededError inside a React state update and
+  // crashes the page — so the first quota error per page also records which keys use the space.
+  let storageQuotaReported = false;
+  function describeLocalStorageUsage() {
+    const sizes = [];
+    let total = 0;
+    for (let i = 0; i < window.localStorage.length; i++) {
+      const key = window.localStorage.key(i);
+      const value = window.localStorage.getItem(key) || '';
+      const chars = key.length + value.length;
+      total += chars;
+      sizes.push([key, chars]);
+    }
+    sizes.sort((a, b) => b[1] - a[1]);
+    const kb = (chars) => `${Math.round((chars * 2) / 1024)} KB`; // UTF-16: 2 bytes per char
+    return `localStorage total ${kb(total)} in ${sizes.length} keys. Largest: ` +
+      sizes.slice(0, 10).map(([key, chars]) => `${key} (${kb(chars)})`).join(', ');
+  }
+  function reportStorageQuotaUsage(entry) {
+    if (storageQuotaReported || !HAS_WINDOW) return;
+    const text = `${entry.message || ''} ${entry.detail || ''}`;
+    if (!/QuotaExceeded|quota has been exceeded|exceeded the quota/i.test(text)) return;
+    storageQuotaReported = true;
+    // Deferred so the report lands after the quota error that triggered it.
+    setTimeout(() => {
+      try {
+        emitToSink({ level: 'error', source: 'storage-quota', message: describeLocalStorageUsage() });
+      } catch { /* localStorage unavailable — nothing to report */ }
+    }, 0);
+  }
+
   function emitToSink(entry) {
     const full = {
       ts: entry.ts || Date.now(),
@@ -196,6 +228,7 @@
       message: entry.message || '',
       detail: entry.detail || undefined
     };
+    reportStorageQuotaUsage(full);
     try {
       if (typeof globalThis.__BA_recordLoaderError === 'function') {
         globalThis.__BA_recordLoaderError(full);
@@ -378,6 +411,9 @@
   function reportErrorEvent(event) {
     try {
       const err = event && event.error;
+      // A browser-masked cross-origin copy ("Script error.", no error object, line 0) carries no
+      // information; the page-world logger records the real error with its stack.
+      if (!err && event && event.message === 'Script error.' && !event.lineno) return;
       const location = event && event.filename
         ? `${event.filename}:${event.lineno}:${event.colno}` : undefined;
       const stack = err instanceof Error ? err.stack : undefined;

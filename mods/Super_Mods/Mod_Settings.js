@@ -819,6 +819,20 @@ const tReplace = (key, replacements) => {
   return text;
 };
 
+// Display names of the shared skins/themes (border styles, Hunt Analyzer themes, backgrounds).
+const THEME_NAME_KEYS = {
+  Original: 'common.themeOriginal',
+  Demonic: 'common.themeDemonic',
+  Frosty: 'common.themeFrosty',
+  Venomous: 'common.themeVenomous',
+  Divine: 'common.themeDivine',
+  Undead: 'common.themeUndead',
+  Prismatic: 'common.themePrismatic',
+  Dark: 'common.themeDark',
+  Regular: 'common.themeRegular'
+};
+const translateThemeName = (name) => (THEME_NAME_KEYS[name] ? t(THEME_NAME_KEYS[name]) : name);
+
 // =======================
 // 3. Global State
 // =======================
@@ -1870,21 +1884,16 @@ function applyModDependentSection({ disabledTitle, disabled, sectionEl, warningE
   }
 }
 
-const RUN_TRACKER_SETTINGS_DISABLED_TITLE =
-  'Enable the Run Tracker mod for this setting to work.';
-const FIREBASE_RUNS_SETTINGS_DISABLED_TITLE =
-  'Enable the Run Tracker mod to upload or download best runs.';
-const BACKUP_RUN_DATA_DISABLED_TITLE =
-  'Enable the Run Tracker mod to include run data in backups.';
-const BACKUP_HUNT_DATA_DISABLED_TITLE =
-  'Enable the Hunt Analyzer mod to include hunt data in backups.';
-const QUESTS_RESET_DISABLED_TITLE =
-  'Enable the Quests mod to reset quest progress.';
+const RUN_TRACKER_SETTINGS_DISABLED_TITLE_KEY = 'mods.betterUI.runTrackerSettingsDisabledTitle';
+const FIREBASE_RUNS_SETTINGS_DISABLED_TITLE_KEY = 'mods.betterUI.firebaseRunsDisabledTitle';
+const BACKUP_RUN_DATA_DISABLED_TITLE_KEY = 'mods.betterUI.backupRunDataDisabledTitle';
+const BACKUP_HUNT_DATA_DISABLED_TITLE_KEY = 'mods.betterUI.backupHuntDataDisabledTitle';
+const QUESTS_RESET_DISABLED_TITLE_KEY = 'mods.betterUI.questsResetDisabledTitle';
 
 function updateOtModsSettingsAvailability() {
   const disabled = !isQuestsModEnabled();
   applyModDependentSection({
-    disabledTitle: QUESTS_RESET_DISABLED_TITLE,
+    disabledTitle: t(QUESTS_RESET_DISABLED_TITLE_KEY),
     disabled,
     sectionEl: document.getElementById('ot-mods-quests-section'),
     warningEl: document.getElementById('reset-all-quests-unavailable-warning'),
@@ -1925,7 +1934,7 @@ function updateModSettingsMenuVisibility() {
 function updateRunTrackerSettingsAvailability() {
   const disabled = !isRunTrackerModEnabled();
   applyModDependentCheckboxRow({
-    disabledTitle: RUN_TRACKER_SETTINGS_DISABLED_TITLE,
+    disabledTitle: t(RUN_TRACKER_SETTINGS_DISABLED_TITLE_KEY),
     disabled,
     warningEl: document.getElementById('run-tracker-unavailable-warning'),
     labelEl: document.getElementById('run-tracker-toggle-label'),
@@ -1948,7 +1957,7 @@ function updateFirebaseRunsSettingsAvailability() {
   ];
 
   applyModDependentSection({
-    disabledTitle: FIREBASE_RUNS_SETTINGS_DISABLED_TITLE,
+    disabledTitle: t(FIREBASE_RUNS_SETTINGS_DISABLED_TITLE_KEY),
     disabled,
     sectionEl: section,
     warningEl: warning,
@@ -1963,7 +1972,7 @@ function updateFirebaseRunsSettingsAvailability() {
 function updateBackupModExportAvailability() {
   const runTrackerDisabled = !isRunTrackerModEnabled();
   applyModDependentCheckboxRow({
-    disabledTitle: BACKUP_RUN_DATA_DISABLED_TITLE,
+    disabledTitle: t(BACKUP_RUN_DATA_DISABLED_TITLE_KEY),
     disabled: runTrackerDisabled,
     warningEl: document.getElementById('export-run-data-unavailable-warning'),
     labelEl: document.getElementById('export-run-data-label'),
@@ -1972,7 +1981,7 @@ function updateBackupModExportAvailability() {
 
   const huntAnalyzerDisabled = !isHuntAnalyzerModEnabled();
   applyModDependentCheckboxRow({
-    disabledTitle: BACKUP_HUNT_DATA_DISABLED_TITLE,
+    disabledTitle: t(BACKUP_HUNT_DATA_DISABLED_TITLE_KEY),
     disabled: huntAnalyzerDisabled,
     warningEl: document.getElementById('export-hunt-analyzer-unavailable-warning'),
     labelEl: document.getElementById('export-hunt-analyzer-label'),
@@ -1995,8 +2004,7 @@ function syncModDependentSettingsAvailability() {
 
 const TURBO_SCRIPT_CONFIG_HASH = 'local_Official Mods/Turbo Mode.js';
 const TURBO_DEFAULT_TICK_INTERVAL_MS = 62.5;
-const TURBO_SPEED_SETTINGS_DISABLED_TITLE =
-  'Enable the Turbo Mode mod to change turbo speed.';
+const TURBO_SPEED_SETTINGS_DISABLED_TITLE_KEY = 'mods.betterUI.turboSpeedDisabledTitle';
 
 function getTurboSpeedupFactor() {
   if (window.turboMode && typeof window.turboMode.getSpeed === 'function') {
@@ -2034,16 +2042,16 @@ function updateTurboSpeedSettingsAvailability() {
 
   if (warning) {
     warning.hidden = !disabled;
-    warning.title = disabled ? TURBO_SPEED_SETTINGS_DISABLED_TITLE : '';
+    warning.title = disabled ? t(TURBO_SPEED_SETTINGS_DISABLED_TITLE_KEY) : '';
   }
   if (section) {
     section.style.opacity = disabled ? '0.5' : '1';
-    section.title = disabled ? TURBO_SPEED_SETTINGS_DISABLED_TITLE : '';
+    section.title = disabled ? t(TURBO_SPEED_SETTINGS_DISABLED_TITLE_KEY) : '';
   }
   if (slider) {
     slider.disabled = disabled;
     slider.style.pointerEvents = disabled ? 'none' : 'auto';
-    slider.title = disabled ? TURBO_SPEED_SETTINGS_DISABLED_TITLE : '';
+    slider.title = disabled ? t(TURBO_SPEED_SETTINGS_DISABLED_TITLE_KEY) : '';
   }
 }
 
@@ -2653,12 +2661,9 @@ const HOTKEY_CAPTURE_ACTIVE_CLASS =
   'focus-style-visible hotkey-capture-btn pixel-font-14 flex shrink-0 cursor-pointer items-center justify-center tracking-wide text-whiteExp frame-pressed-1 surface-regular px-2 py-0.5 pb-[3px]';
 const HOTKEY_RESET_BUTTON_CLASS =
   'focus-style-visible hotkey-reset-btn pixel-font-14 frame-1 active:frame-pressed-1 surface-regular px-2 py-0.5 pb-[3px] text-whiteRegular';
-const RETURN_TO_MAP_HOTKEY_DISABLED_TITLE =
-  'Enable "Show Return to Map Button" in Interface for this hotkey to work.';
-const TURBO_MODE_HOTKEY_DISABLED_TITLE =
-  'Enable the Turbo Mode mod for this hotkey to work.';
-const CYCLOPEDIA_HOTKEY_DISABLED_TITLE =
-  'Enable the Cyclopedia mod for this hotkey to work.';
+const RETURN_TO_MAP_HOTKEY_DISABLED_TITLE_KEY = 'mods.betterUI.returnToMapHotkeyDisabledTitle';
+const TURBO_MODE_HOTKEY_DISABLED_TITLE_KEY = 'mods.betterUI.turboHotkeyDisabledTitle';
+const CYCLOPEDIA_HOTKEY_DISABLED_TITLE_KEY = 'mods.betterUI.cyclopediaHotkeyDisabledTitle';
 
 const HOTKEY_BATTLE_UI_ROWS = [
   {
@@ -2667,6 +2672,7 @@ const HOTKEY_BATTLE_UI_ROWS = [
     resetId: 'hotkey-floor-up-reset-btn',
     displayFallback: '',
     labelText: 'Floor up',
+    labelKey: 'mods.betterUI.hotkeyLabelFloorUp',
     initialDisplay: 'PageUp',
     marginTop: true
   },
@@ -2676,6 +2682,7 @@ const HOTKEY_BATTLE_UI_ROWS = [
     resetId: 'hotkey-floor-down-reset-btn',
     displayFallback: '',
     labelText: 'Floor down',
+    labelKey: 'mods.betterUI.hotkeyLabelFloorDown',
     initialDisplay: 'PageDown',
     marginTop: true
   },
@@ -2685,6 +2692,7 @@ const HOTKEY_BATTLE_UI_ROWS = [
     resetId: 'hotkey-cycle-bestiary-equipment-reset-btn',
     displayFallback: '',
     labelText: 'Cycle Bestiary/Equipment tab',
+    labelKey: 'mods.betterUI.hotkeyLabelCycleBestiaryTab',
     initialDisplay: 'Tab',
     marginTop: true
   },
@@ -2694,6 +2702,7 @@ const HOTKEY_BATTLE_UI_ROWS = [
     resetId: 'hotkey-cycle-battle-style-reset-btn',
     displayFallback: '',
     labelText: 'Cycle battle style',
+    labelKey: 'mods.betterUI.hotkeyLabelCycleBattleStyle',
     initialDisplay: 'V',
     marginTop: true
   },
@@ -2703,6 +2712,7 @@ const HOTKEY_BATTLE_UI_ROWS = [
     resetId: 'hotkey-previous-map-reset-btn',
     displayFallback: '',
     labelText: 'Previous map',
+    labelKey: 'mods.betterUI.hotkeyLabelPreviousMap',
     initialDisplay: 'J',
     marginTop: true
   },
@@ -2712,6 +2722,7 @@ const HOTKEY_BATTLE_UI_ROWS = [
     resetId: 'hotkey-next-map-reset-btn',
     displayFallback: '',
     labelText: 'Next map',
+    labelKey: 'mods.betterUI.hotkeyLabelNextMap',
     initialDisplay: 'K',
     marginTop: true
   },
@@ -2721,6 +2732,7 @@ const HOTKEY_BATTLE_UI_ROWS = [
     resetId: 'hotkey-start-or-skip-reset-btn',
     displayFallback: '',
     labelText: 'Start/Skip button',
+    labelKey: 'mods.betterUI.hotkeyLabelStartSkip',
     initialDisplay: 'Z',
     marginTop: true
   },
@@ -2784,12 +2796,12 @@ function getModsGatedHotkeyLabelHtml(row) {
       return `
                   <span id="hotkey-return-to-map-unavailable-warning" hidden style="cursor: help; margin-right: 6px; color: #f0c36d; font-size: 12px; display: inline-flex; align-items: center; justify-content: center; line-height: 1;">⚠️</span>
                   ${t('mods.betterUI.hotkeyLabelReturnToMap')}
-                  <span style="cursor: help; margin-left: 6px; color: #ffffff; font-size: 10px; display: inline-flex; align-items: center; justify-content: center; width: 12px; height: 12px; border: 1px solid #ffffff; border-radius: 50%; line-height: 1;" title="Shift + hotkey goes forward in map history">i</span>
+                  <span style="cursor: help; margin-left: 6px; color: #ffffff; font-size: 10px; display: inline-flex; align-items: center; justify-content: center; width: 12px; height: 12px; border: 1px solid #ffffff; border-radius: 50%; line-height: 1;" title="${t('mods.betterUI.hotkeyReturnToMapShiftHint')}">i</span>
                 `;
     case 'hotkeyToggleTurboMode':
       return `
                   <span id="hotkey-toggle-turbo-mode-unavailable-warning" hidden style="cursor: help; margin-right: 6px; color: #f0c36d; font-size: 12px; display: inline-flex; align-items: center; justify-content: center; line-height: 1;">⚠️</span>
-                  Toggle Turbo Mode
+                  ${t('mods.betterUI.hotkeyLabelToggleTurbo')}
                 `;
     case 'hotkeyOpenCyclopedia':
       return `
@@ -2954,7 +2966,7 @@ function updateReturnToMapHotkeyAvailability() {
     captureId: 'hotkey-return-to-map-capture-btn',
     resetId: 'hotkey-return-to-map-reset-btn',
     disabled: !config.showLastVisitedMapButton,
-    disabledTitle: RETURN_TO_MAP_HOTKEY_DISABLED_TITLE
+    disabledTitle: t(RETURN_TO_MAP_HOTKEY_DISABLED_TITLE_KEY)
   });
 }
 
@@ -2965,7 +2977,7 @@ function updateTurboModeHotkeyAvailability() {
     captureId: 'hotkey-toggle-turbo-mode-capture-btn',
     resetId: 'hotkey-toggle-turbo-mode-reset-btn',
     disabled: !isTurboModeModEnabled(),
-    disabledTitle: TURBO_MODE_HOTKEY_DISABLED_TITLE
+    disabledTitle: t(TURBO_MODE_HOTKEY_DISABLED_TITLE_KEY)
   });
 }
 
@@ -2976,7 +2988,7 @@ function updateCyclopediaHotkeyAvailability() {
     captureId: 'hotkey-open-cyclopedia-capture-btn',
     resetId: 'hotkey-open-cyclopedia-reset-btn',
     disabled: !isCyclopediaModEnabled(),
-    disabledTitle: CYCLOPEDIA_HOTKEY_DISABLED_TITLE
+    disabledTitle: t(CYCLOPEDIA_HOTKEY_DISABLED_TITLE_KEY)
   });
 }
 
@@ -3511,10 +3523,6 @@ function getInventoryBorderStyle(borderStyleName) {
   return `<div class="has-rarity absolute inset-0 z-1 opacity-80 pointer-events-none" data-rarity="5" data-max-shinies="true" data-max-shinies-color="${colorKey}" data-mod-inventory-border="true" style="${borderStyle}"></div>`;
 }
 
-// Must match native inventory slot utilities (quoted attribute variants) or hover border never applies.
-const INVENTORY_MOD_SLOT_CLASS =
-  "container-slot surface-darker data-[disabled='true']:dithered data-[highlighted='true']:unset-border-image data-[hoverable='true']:hover:unset-border-image";
-
 function normalizeInventoryModSlotHoverClasses(slot) {
   if (!(slot instanceof HTMLElement)) return;
   let className = slot.className || '';
@@ -3529,7 +3537,6 @@ function normalizeInventoryModSlotHoverClasses(slot) {
 
 // Expose globally for other mods
 window.getInventoryBorderStyle = getInventoryBorderStyle;
-window.INVENTORY_MOD_SLOT_CLASS = INVENTORY_MOD_SLOT_CLASS;
 
 function refreshInventoryModButtonBorderStyle(options = {}) {
   const forceBorderRebuild = options.forceBorderRebuild === true;
@@ -4417,7 +4424,7 @@ async function runAutoHideNonShinyAndNonAwakenedMonsters(source = 'manual') {
 
     if (result && result.totalToHide > 0) {
       createToast({
-        message: `Auto-hide complete (${result.hiddenCount}/${result.totalToHide})`,
+        message: tReplace('mods.betterUI.autoHideComplete', { hidden: result.hiddenCount, total: result.totalToHide }),
         type: 'success',
         duration: 2500
       });
@@ -4427,7 +4434,7 @@ async function runAutoHideNonShinyAndNonAwakenedMonsters(source = 'manual') {
   } catch (error) {
     console.error('[Mod Settings] Auto-hide failed:', error);
     createToast({
-      message: 'Auto-hide failed (check console)',
+      message: t('mods.betterUI.autoHideFailed'),
       type: 'error',
       duration: 2500
     });
@@ -5003,7 +5010,6 @@ function formatRunsAsText(runsData) {
     // Runs are already sorted by region when uploaded, so just iterate through them in order
     // Group by region for display (if we can determine regions)
     const regionGroups = {};
-    let lastRegionName = null;
     
     try {
       const regions = globalThis.state?.utils?.REGIONS;
@@ -5880,12 +5886,6 @@ async function downloadRunsAsTxt(playerName, password, source = 'local') {
   }
 }
 
-// Expose fetch function globally
-if (typeof window !== 'undefined') {
-  window.fetchPlayerRuns = fetchPlayerRuns;
-  window.downloadRunsAsTxt = downloadRunsAsTxt;
-}
-
 // Auto-upload hook for RunTracker
 let lastUploadedRunCount = 0;
 let autoUploadCheckInterval = null;
@@ -6076,12 +6076,12 @@ function generateConfigSummary(data, isImport = false) {
   if (data.localMods && data.localMods.length > 0) {
     const enabledMods = data.localMods.filter(mod => mod.enabled).length;
     const disabledMods = data.localMods.length - enabledMods;
-    summary.push(`${data.localMods.length} mods (${enabledMods} enabled, ${disabledMods} disabled)`);
+    summary.push(tReplace('mods.betterUI.summaryMods', { count: data.localMods.length, enabled: enabledMods, disabled: disabledMods }));
   }
   
   // Add manual mods if any
   if (data.manualMods && data.manualMods.length > 0) {
-    summary.push(`${data.manualMods.length} custom mods`);
+    summary.push(tReplace('mods.betterUI.summaryCustomMods', { count: data.manualMods.length }));
   }
   
   // Add game data info
@@ -6090,25 +6090,25 @@ function generateConfigSummary(data, isImport = false) {
     if (data.gameLocalStorage['stored-setup-labels']) {
       try {
         const setupLabels = JSON.parse(data.gameLocalStorage['stored-setup-labels']);
-        gameDataItems.push(`${setupLabels.length} setup labels`);
+        gameDataItems.push(tReplace('mods.betterUI.summarySetupLabelsCount', { count: setupLabels.length }));
       } catch (e) {
-        gameDataItems.push('setup labels');
+        gameDataItems.push(t('mods.betterUI.summarySetupLabels'));
       }
     }
     if (data.gameLocalStorage['stored-setups']) {
-      gameDataItems.push('saved setups');
+      gameDataItems.push(t('mods.betterUI.summarySavedSetups'));
     }
     if (data.gameLocalStorage['autoseller-settings']) {
-      gameDataItems.push('autoseller settings');
+      gameDataItems.push(t('mods.betterUI.summaryAutosellerSettings'));
     }
     if (data.gameLocalStorage['bestiary-automator-config']) {
-      gameDataItems.push('automator config');
+      gameDataItems.push(t('mods.betterUI.summaryAutomatorConfig'));
     }
     
     if (gameDataItems.length > 0) {
-      summary.push(`Game data: ${gameDataItems.join(', ')}`);
+      summary.push(tReplace('mods.betterUI.summaryGameData', { items: gameDataItems.join(', ') }));
     } else {
-      summary.push(`${Object.keys(data.gameLocalStorage).length} game settings`);
+      summary.push(tReplace('mods.betterUI.summaryGameSettings', { count: Object.keys(data.gameLocalStorage).length }));
     }
   }
   
@@ -6117,7 +6117,7 @@ function generateConfigSummary(data, isImport = false) {
     const runStats = data.runData.metadata;
     if (runStats.totalRuns > 0) {
       const estimatedSizeKB = Math.round((runStats.totalRuns * 1115) / 1024);
-      summary.push(`Run data: ${runStats.totalRuns} runs across ${runStats.totalMaps} maps (~${formatStorageSize(estimatedSizeKB)})`);
+      summary.push(tReplace('mods.betterUI.summaryRunData', { runs: runStats.totalRuns, maps: runStats.totalMaps, size: formatStorageSize(estimatedSizeKB) }));
     }
   }
   
@@ -6133,19 +6133,19 @@ function generateConfigSummary(data, isImport = false) {
     if (lifetimeBattles > 0 || storedSessions > 0) {
       const estimatedSizeKB = Math.round((JSON.stringify(huntData).length) / 1024);
       const detail = storedSessions > 0 && storedSessions < lifetimeBattles
-        ? `${lifetimeBattles} battles (${storedSessions} recent in storage)`
-        : `${lifetimeBattles} battles`;
-      summary.push(`Hunt Analyzer: ${detail} (~${formatStorageSize(estimatedSizeKB)})`);
+        ? tReplace('mods.betterUI.summaryHuntBattlesStored', { count: lifetimeBattles, stored: storedSessions })
+        : tReplace('mods.betterUI.summaryHuntBattles', { count: lifetimeBattles });
+      summary.push(tReplace('mods.betterUI.summaryHuntAnalyzer', { detail, size: formatStorageSize(estimatedSizeKB) }));
     }
   }
   
   // Add settings info
   const settings = [];
   if (data.locale && data.locale !== 'en-US') {
-    settings.push(`language: ${data.locale}`);
+    settings.push(tReplace('mods.betterUI.summaryLanguage', { locale: data.locale }));
   }
   if (settings.length > 0) {
-    summary.push(`Settings: ${settings.join(', ')}`);
+    summary.push(tReplace('mods.betterUI.summarySettings', { items: settings.join(', ') }));
   }
   
   return summary;
@@ -6200,7 +6200,7 @@ async function exportConfiguration(modal) {
     // Show loading state
     const exportBtn = document.getElementById('export-config-btn');
     if (exportBtn) {
-      exportBtn.textContent = '⏳ Exporting...';
+      exportBtn.textContent = `⏳ ${t('mods.betterUI.backupExporting')}`;
       exportBtn.disabled = true;
     }
     
@@ -6417,14 +6417,14 @@ async function exportConfiguration(modal) {
     
     // Reset button state
     if (exportBtn) {
-      exportBtn.textContent = '📤 Export Configuration';
+      exportBtn.textContent = `📤 ${t('mods.betterUI.backupExportButton')}`;
       exportBtn.disabled = false;
     }
     
     // Show success message using toast
     try {
       createToast({
-        message: `<span class="text-success">✅ Configuration exported successfully!</span><br><span class="text-whiteHighlight">📦 What was saved:</span><br>• ${summary.join('<br>• ')}`,
+        message: `<span class="text-success">✅ ${t('mods.betterUI.backupExportSuccess')}</span><br><span class="text-whiteHighlight">📦 ${t('mods.betterUI.backupWhatWasSaved')}</span><br>• ${summary.join('<br>• ')}`,
         type: 'success',
         duration: 8000
       });
@@ -6452,14 +6452,14 @@ async function exportConfiguration(modal) {
     // Reset button state
     const exportBtn = document.getElementById('export-config-btn');
     if (exportBtn) {
-      exportBtn.textContent = '📤 Export Configuration';
+      exportBtn.textContent = `📤 ${t('mods.betterUI.backupExportButton')}`;
       exportBtn.disabled = false;
     }
     
     // Show error message using toast
     try {
       createToast({
-        message: `<span class="text-error">❌ Export Failed</span><br><span class="text-whiteHighlight">Failed to export configuration: ${error.message}</span>`,
+        message: `<span class="text-error">❌ ${t('mods.betterUI.backupExportFailedTitle')}</span><br><span class="text-whiteHighlight">${tReplace('mods.betterUI.backupExportFailed', { error: error.message })}</span>`,
         type: 'error',
         duration: 6000
       });
@@ -6522,27 +6522,27 @@ async function importConfiguration(modal) {
         const confirmInfo = generateConfigSummary(importData, true);
         
         const confirmMessage = confirmInfo.length > 0 
-          ? `This will replace your current configuration. Are you sure you want to continue?\n\n📦 What will be imported:\n• ${confirmInfo.join('\n• ')}`
-          : 'This will replace your current configuration. Are you sure you want to continue?\n\n📦 Basic configuration will be imported.';
+          ? `${t('mods.betterUI.backupImportConfirm')}\n\n📦 ${t('mods.betterUI.backupWhatWillBeImported')}\n• ${confirmInfo.join('\n• ')}`
+          : `${t('mods.betterUI.backupImportConfirm')}\n\n📦 ${t('mods.betterUI.backupBasicConfigImported')}`;
         
         // Show confirmation modal
         const confirmed = await new Promise(resolve => {
-          const confirmModal = api.ui.components.createModal({
-            title: 'Confirm Import',
+          api.ui.components.createModal({
+            title: t('mods.betterUI.backupConfirmImportTitle'),
             width: 450,
             content: `
               <div style="padding: 20px;">
                 <p style="color: #a6adc8; margin-bottom: 20px; white-space: pre-line;">${confirmMessage}</p>
                 <div style="background: rgba(255, 0, 0, 0.1); border: 1px solid rgba(255, 0, 0, 0.3); border-radius: 8px; padding: 12px; margin-top: 15px;">
                   <p style="color: #e78284; margin: 0; font-size: 14px;">
-                    <strong>⚠️ Warning:</strong> This will overwrite your current configuration and game data.
+                    <strong>⚠️ ${t('mods.betterUI.backupWarningLabel')}</strong> ${t('mods.betterUI.backupImportOverwriteWarning')}
                   </p>
                 </div>
               </div>
             `,
             buttons: [
               {
-                text: 'Cancel',
+                text: t('common.cancel'),
                 primary: false,
                 onClick: () => {
                   document.querySelectorAll('.modal-bg, .modal-content, .modal-overlay, [role="dialog"]').forEach(el => {
@@ -6552,7 +6552,7 @@ async function importConfiguration(modal) {
                 }
               },
               {
-                text: 'Import Configuration',
+                text: t('mods.betterUI.backupImportButton'),
                 primary: true,
                 onClick: () => {
                   document.querySelectorAll('.modal-bg, .modal-content, .modal-overlay, [role="dialog"]').forEach(el => {
@@ -6570,7 +6570,7 @@ async function importConfiguration(modal) {
         // Show loading state
         const importBtn = document.getElementById('import-config-btn');
         if (importBtn) {
-          importBtn.textContent = '⏳ Importing...';
+          importBtn.textContent = `⏳ ${t('mods.betterUI.backupImporting')}`;
           importBtn.disabled = true;
         }
         
@@ -6733,7 +6733,7 @@ async function importConfiguration(modal) {
             console.log(`[Mod Settings] Merged ${importedKeys.length} game localStorage item(s) (kept ${orphanKeys.length} existing local-only key(s))`);
           } catch (error) {
             console.log('[Mod Settings] Could not merge game localStorage:', error);
-            alert('Warning: Failed to import game localStorage data: ' + error.message);
+            alert(tReplace('mods.betterUI.backupGameDataImportWarning', { error: error.message }));
           }
         }
         
@@ -6760,7 +6760,7 @@ async function importConfiguration(modal) {
         
         // Reset button state
         if (importBtn) {
-          importBtn.textContent = '📥 Import Configuration';
+          importBtn.textContent = `📥 ${t('mods.betterUI.backupImportButton')}`;
           importBtn.disabled = false;
         }
         
@@ -6770,13 +6770,13 @@ async function importConfiguration(modal) {
         // Show success message using toast
         try {
           createToast({
-            message: `<span class="text-success">✅ Configuration imported successfully!</span><br><span class="text-whiteHighlight">📦 What was restored:</span><br>• ${importSummary.join('<br>• ')}<br><br><span class="text-warning">🔄 Refreshing browser in 1 second...</span>`,
+            message: `<span class="text-success">✅ ${t('mods.betterUI.backupImportSuccess')}</span><br><span class="text-whiteHighlight">📦 ${t('mods.betterUI.backupWhatWasRestored')}</span><br>• ${importSummary.join('<br>• ')}<br><br><span class="text-warning">🔄 ${t('mods.betterUI.backupRefreshingSoon')}</span>`,
             type: 'success',
             duration: 10000
           });
         } catch (toastError) {
           console.error('[Mod Settings] Could not show import success toast:', toastError);
-          alert(`✅ Configuration imported successfully!\n\n📦 What was restored:\n• ${importSummary.join('\n• ')}\n\n🔄 Refreshing browser in 1 second...`);
+          alert(`✅ ${t('mods.betterUI.backupImportSuccess')}\n\n📦 ${t('mods.betterUI.backupWhatWasRestored')}\n• ${importSummary.join('\n• ')}\n\n🔄 ${t('mods.betterUI.backupRefreshingSoon')}`);
         }
        
         // Close the configurator modal
@@ -6803,20 +6803,20 @@ async function importConfiguration(modal) {
         // Reset button state
         const importBtn = document.getElementById('import-config-btn');
         if (importBtn) {
-          importBtn.textContent = '📥 Import Configuration';
+          importBtn.textContent = `📥 ${t('mods.betterUI.backupImportButton')}`;
           importBtn.disabled = false;
         }
         
         // Show error message using toast
         try {
           createToast({
-            message: `<span class="text-error">❌ Import Failed</span><br><span class="text-whiteHighlight">Failed to import configuration: ${error.message}</span>`,
+            message: `<span class="text-error">❌ ${t('mods.betterUI.backupImportFailedTitle')}</span><br><span class="text-whiteHighlight">${tReplace('mods.betterUI.backupImportFailed', { error: error.message })}</span>`,
             type: 'error',
             duration: 6000
           });
         } catch (toastError) {
           console.error('[Mod Settings] Could not show error toast:', toastError);
-          alert(`Failed to import configuration: ${error.message}`);
+          alert(tReplace('mods.betterUI.backupImportFailed', { error: error.message }));
         }
       }
      
@@ -6832,13 +6832,13 @@ async function importConfiguration(modal) {
     console.error('[Mod Settings] Error setting up import:', error);
     try {
       createToast({
-        message: `<span class="text-error">❌ Import Setup Error</span><br><span class="text-whiteHighlight">Failed to set up import: ${error.message}</span>`,
+        message: `<span class="text-error">❌ ${t('mods.betterUI.backupImportSetupErrorTitle')}</span><br><span class="text-whiteHighlight">${tReplace('mods.betterUI.backupImportSetupFailed', { error: error.message })}</span>`,
         type: 'error',
         duration: 6000
       });
     } catch (toastError) {
       console.error('[Mod Settings] Could not show setup error toast:', toastError);
-      alert(`Failed to set up import: ${error.message}`);
+      alert(tReplace('mods.betterUI.backupImportSetupFailed', { error: error.message }));
     }
   }
 }
@@ -6848,34 +6848,34 @@ async function resetAllSettings(modal) {
   try {
     // Show confirmation modal
     const confirmed = await new Promise(resolve => {
-      const confirmModal = api.ui.components.createModal({
-        title: 'Reset All Settings',
+      api.ui.components.createModal({
+        title: t('mods.betterUI.resetAllSettings'),
         width: 450,
         content: `
           <div style="padding: 20px;">
             <p style="color: #a6adc8; margin-bottom: 20px;">
-              This will reset all localStorage and extension settings to default (like a fresh installation).
+              ${t('mods.betterUI.resetAllIntro')}
             </p>
             <div style="background: rgba(0, 123, 255, 0.1); border: 1px solid rgba(0, 123, 255, 0.3); border-radius: 8px; padding: 12px; margin-bottom: 15px;">
               <p style="color: #4dabf7; margin: 0; font-size: 14px;">
-                <strong>💾 Recommendation:</strong> Make a backup using the Export button before resetting.
+                <strong>💾 ${t('mods.betterUI.resetAllRecommendationLabel')}</strong> ${t('mods.betterUI.resetAllRecommendation')}
               </p>
             </div>
             <div style="background: rgba(255, 193, 7, 0.1); border: 1px solid rgba(255, 193, 7, 0.3); border-radius: 8px; padding: 12px; margin-bottom: 15px;">
               <p style="color: #ffc107; margin: 0; font-size: 14px;">
-                <strong>⚠️ Note:</strong> This does not reset the mods in popup (needs to be handled manually).
+                <strong>⚠️ ${t('mods.betterUI.resetAllNoteLabel')}</strong> ${t('mods.betterUI.resetAllNote')}
               </p>
             </div>
             <div style="background: rgba(255, 0, 0, 0.1); border: 1px solid rgba(255, 0, 0, 0.3); border-radius: 8px; padding: 12px;">
               <p style="color: #e78284; margin: 0; font-size: 14px;">
-                <strong>⚠️ Warning:</strong> This action cannot be undone. All settings and game data will be lost.
+                <strong>⚠️ ${t('mods.betterUI.backupWarningLabel')}</strong> ${t('mods.betterUI.resetAllWarning')}
               </p>
             </div>
           </div>
         `,
         buttons: [
           {
-            text: 'Cancel',
+            text: t('common.cancel'),
             primary: false,
             onClick: () => {
               document.querySelectorAll('.modal-bg, .modal-content, .modal-overlay, [role="dialog"]').forEach(el => {
@@ -6885,7 +6885,7 @@ async function resetAllSettings(modal) {
             }
           },
           {
-            text: 'Reset All Settings',
+            text: t('mods.betterUI.resetAllSettings'),
             primary: true,
             onClick: () => {
               document.querySelectorAll('.modal-bg, .modal-content, .modal-overlay, [role="dialog"]').forEach(el => {
@@ -6977,13 +6977,13 @@ async function resetAllSettings(modal) {
     // Show success message
     try {
       createToast({
-        message: `<span class="text-success">✅ All settings reset successfully!</span><br><span class="text-whiteHighlight">All localStorage and extension settings have been reset to default.</span><br><span class="text-warning">⚠️ Mods in popup were preserved (${preservedManualMods.length + preservedLocalMods.length} mods).</span><br><br><span class="text-warning">🔄 Refreshing browser in 1 second...</span>`,
+        message: `<span class="text-success">✅ ${t('mods.betterUI.resetAllSuccess')}</span><br><span class="text-whiteHighlight">${t('mods.betterUI.resetAllSuccessDetail')}</span><br><span class="text-warning">⚠️ ${tReplace('mods.betterUI.resetAllModsPreserved', { count: preservedManualMods.length + preservedLocalMods.length })}</span><br><br><span class="text-warning">🔄 ${t('mods.betterUI.backupRefreshingSoon')}</span>`,
         type: 'success',
         duration: 10000
       });
     } catch (toastError) {
       console.error('[Mod Settings] Could not show reset success toast:', toastError);
-      alert(`✅ All settings reset successfully!\n\nAll localStorage and extension settings have been reset to default.\n\n⚠️ Mods in popup were preserved (${preservedManualMods.length + preservedLocalMods.length} mods).\n\n🔄 Refreshing browser in 1 second...`);
+      alert(`✅ ${t('mods.betterUI.resetAllSuccess')}\n\n${t('mods.betterUI.resetAllSuccessDetail')}\n\n⚠️ ${tReplace('mods.betterUI.resetAllModsPreserved', { count: preservedManualMods.length + preservedLocalMods.length })}\n\n🔄 ${t('mods.betterUI.backupRefreshingSoon')}`);
     }
     
     // Close the configurator modal
@@ -7017,13 +7017,13 @@ async function resetAllSettings(modal) {
     // Show error message
     try {
       createToast({
-        message: `<span class="text-error">❌ Reset Failed</span><br><span class="text-whiteHighlight">Failed to reset settings: ${error.message}</span>`,
+        message: `<span class="text-error">❌ ${t('mods.betterUI.resetAllFailedTitle')}</span><br><span class="text-whiteHighlight">${tReplace('mods.betterUI.resetAllFailed', { error: error.message })}</span>`,
         type: 'error',
         duration: 6000
       });
     } catch (toastError) {
       console.error('[Mod Settings] Could not show reset error toast:', toastError);
-      alert(`Failed to reset settings: ${error.message}`);
+      alert(tReplace('mods.betterUI.resetAllFailed', { error: error.message }));
     }
   }
 }
@@ -7607,13 +7607,13 @@ function showSettingsModal() {
             <div style="${uiOptionStyle} display: flex; align-items: center; gap: 10px;">
               <span style="color: #ccc;">${t('mods.betterUI.inventoryBorderStyle')}</span>
               <select id="inventory-border-style-selector" style="width: fit-content; background: #333; color: #ccc; border: 1px solid #555; padding: 4px 20px 4px 10px; border-radius: 4px; pointer-events: auto;">
-                <option value="Original">Original</option>
-                <option value="Demonic">Demonic</option>
-                <option value="Frosty">Frosty</option>
-                <option value="Venomous">Venomous</option>
-                <option value="Divine">Divine</option>
-                <option value="Undead">Undead</option>
-                <option value="Prismatic">Prismatic</option>
+                <option value="Original">${t('common.themeOriginal')}</option>
+                <option value="Demonic">${t('common.themeDemonic')}</option>
+                <option value="Frosty">${t('common.themeFrosty')}</option>
+                <option value="Venomous">${t('common.themeVenomous')}</option>
+                <option value="Divine">${t('common.themeDivine')}</option>
+                <option value="Undead">${t('common.themeUndead')}</option>
+                <option value="Prismatic">${t('common.themePrismatic')}</option>
               </select>
             </div>
             <div style="${uiOptionStyle} display: flex; align-items: center; gap: 10px;">
@@ -7704,7 +7704,7 @@ function showSettingsModal() {
               <div id="custom-background-preset-list" style="display: flex; flex-wrap: wrap; gap: 8px;">
                 <div class="custom-background-preset-swatch" data-preset-key="none" title="${t('mods.betterUI.customBackgroundPresetNone')}" style="width: 48px; height: 48px; border-radius: 4px; cursor: pointer; box-sizing: border-box; border: 2px solid transparent; background: #222; display: flex; align-items: center; justify-content: center; color: #888; font-size: 9px; text-align: center; line-height: 1.1; pointer-events: auto;">${t('mods.betterUI.customBackgroundPresetNone')}</div>
                 ${getCustomBackgroundThemePresets().map((preset) => `
-                <div class="custom-background-preset-swatch" data-preset-key="${preset.key}" data-preset-url="${preset.url.replace(/"/g, '&quot;')}" title="${preset.name.replace(/"/g, '&quot;')}" style="width: 48px; height: 48px; border-radius: 4px; cursor: pointer; box-sizing: border-box; border: 2px solid transparent; background-image: url('${preset.url}'); background-repeat: repeat; pointer-events: auto;"></div>
+                <div class="custom-background-preset-swatch" data-preset-key="${preset.key}" data-preset-url="${preset.url.replace(/"/g, '&quot;')}" title="${translateThemeName(preset.name).replace(/"/g, '&quot;')}" style="width: 48px; height: 48px; border-radius: 4px; cursor: pointer; box-sizing: border-box; border: 2px solid transparent; background-image: url('${preset.url}'); background-repeat: repeat; pointer-events: auto;"></div>
                 `).join('')}
               </div>
             </div>
@@ -7744,12 +7744,12 @@ function showSettingsModal() {
           <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 10px;">
             <span style="color: #ccc;">${t('common.color')}</span>
             <select id="color-picker" style="width: fit-content; background: #333; color: #ccc; border: 1px solid #555; padding: 4px 20px 4px 10px; border-radius: 4px; pointer-events: auto;">
-              <option value="prismatic">Prismatic</option>
-              <option value="demon" selected="">Demonic</option>
-              <option value="ice">Frosty</option>
-              <option value="poison">Venomous</option>
-              <option value="gold">Divine</option>
-              <option value="undead">Undead</option>
+              <option value="prismatic">${t('common.themePrismatic')}</option>
+              <option value="demon" selected="">${t('common.themeDemonic')}</option>
+              <option value="ice">${t('common.themeFrosty')}</option>
+              <option value="poison">${t('common.themeVenomous')}</option>
+              <option value="gold">${t('common.themeDivine')}</option>
+              <option value="undead">${t('common.themeUndead')}</option>
             </select>
           </div>
           <div style="margin-bottom: 15px;">
@@ -7761,12 +7761,12 @@ function showSettingsModal() {
           <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 10px;">
             <span style="color: #ccc;">${t('common.color')}</span>
             <select id="sealed-color-picker" style="width: fit-content; background: #333; color: #ccc; border: 1px solid #555; padding: 4px 20px 4px 10px; border-radius: 4px; pointer-events: auto;">
-              <option value="prismatic">Prismatic</option>
-              <option value="demon">Demonic</option>
-              <option value="ice">Frosty</option>
-              <option value="poison">Venomous</option>
-              <option value="gold">Divine</option>
-              <option value="undead">Undead</option>
+              <option value="prismatic">${t('common.themePrismatic')}</option>
+              <option value="demon">${t('common.themeDemonic')}</option>
+              <option value="ice">${t('common.themeFrosty')}</option>
+              <option value="poison">${t('common.themeVenomous')}</option>
+              <option value="gold">${t('common.themeDivine')}</option>
+              <option value="undead">${t('common.themeUndead')}</option>
             </select>
           </div>
           <div style="margin-bottom: 15px;">
@@ -7778,12 +7778,12 @@ function showSettingsModal() {
           <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 10px;">
             <span style="color: #ccc;">${t('common.color')}</span>
             <select id="shiny-color-picker" style="width: fit-content; background: #333; color: #ccc; border: 1px solid #555; padding: 4px 20px 4px 10px; border-radius: 4px; pointer-events: auto;">
-              <option value="prismatic">Prismatic</option>
-              <option value="demon">Demonic</option>
-              <option value="ice">Frosty</option>
-              <option value="poison">Venomous</option>
-              <option value="gold" selected="">Divine</option>
-              <option value="undead">Undead</option>
+              <option value="prismatic">${t('common.themePrismatic')}</option>
+              <option value="demon">${t('common.themeDemonic')}</option>
+              <option value="ice">${t('common.themeFrosty')}</option>
+              <option value="poison">${t('common.themeVenomous')}</option>
+              <option value="gold" selected="">${t('common.themeDivine')}</option>
+              <option value="undead">${t('common.themeUndead')}</option>
             </select>
           </div>
           <div style="margin-bottom: 15px;">
@@ -7824,7 +7824,7 @@ function showSettingsModal() {
           <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
             <span style="color: #ccc;">${t('mods.depot.defaultFavoriteSymbol')}</span>
             <select id="depot-favorite-symbol-select" style="width: fit-content; background: #333; color: #ccc; border: 1px solid #555; padding: 4px 20px 4px 10px; border-radius: 4px; pointer-events: auto;">
-              <option value="heart">Heart</option>
+              <option value="heart">${t('mods.betterUI.favoriteSymbolHeart')}</option>
               <option value="hp">HP</option>
               <option value="attackdamage">AD</option>
               <option value="abilitypower">AP</option>
@@ -7832,7 +7832,7 @@ function showSettingsModal() {
               <option value="armor">ARM</option>
               <option value="magicresist">MR</option>
               <option value="speed">SPD</option>
-              <option value="shinystar">Shiny</option>
+              <option value="shinystar">${t('mods.betterUI.favoriteSymbolShiny')}</option>
             </select>
           </div>
           <div style="margin-top: 14px;">
@@ -7921,7 +7921,7 @@ function showSettingsModal() {
           </div>
           <div id="hotkeys-battle-section-wrapper" style="margin-top: 18px; padding-top: 18px; border-top: 1px solid rgba(255,255,255,0.12); margin-bottom: 15px;">
             <div>
-            <h4 style="margin: 0 0 12px 0; color: #e8e8e8; font-size: 16px; font-weight: 600; text-align: left; padding-left: 8px;">Battle</h4>
+            <h4 style="margin: 0 0 12px 0; color: #e8e8e8; font-size: 16px; font-weight: 600; text-align: left; padding-left: 8px;">${t('mods.betterUI.sectionBattle')}</h4>
             </div>
             ${battleHotkeyRowsHtml}
           </div>
@@ -8036,7 +8036,7 @@ function showSettingsModal() {
             <h4 style="margin: 0 0 12px 0; color: #ffaa00; font-size: 14px; display: flex; align-items: center; gap: 6px;">
               <span id="turbo-speed-settings-unavailable-warning" hidden style="cursor: help; color: #f0c36d; font-size: 12px;">⚠️</span>
               ${t('mods.turbo.configTitle')}
-              ${warningLabelSpanHtml('', { title: `Adjust the slider to control how much faster the game runs when Turbo is enabled. Higher values make the game run faster but may cause performance issues on some devices. Default game speed is 1x (${TURBO_DEFAULT_TICK_INTERVAL_MS}ms per tick). Turbo speeds range from 2x to 10x with performance optimizations.` })}
+              ${warningLabelSpanHtml('', { title: tReplace('mods.betterUI.turboSpeedTooltip', { ms: TURBO_DEFAULT_TICK_INTERVAL_MS }) })}
             </h4>
             <div style="display: flex; flex-direction: column; margin-bottom: 12px;">
               <div style="display: flex; justify-content: space-between; margin-bottom: 5px; color: #ccc;">
@@ -8168,7 +8168,7 @@ function showSettingsModal() {
             <select id="hunt-analyzer-theme-selector" style="width: fit-content; background: #333; color: #ccc; border: 1px solid #555; padding: 4px 20px 4px 10px; border-radius: 4px; pointer-events: auto;">
               ${(() => {
                 // Dynamically get available themes from Hunt Analyzer if available
-                let themeOptions = '<option value="original" selected="">Original</option>';
+                let themeOptions = `<option value="original" selected="">${t('common.themeOriginal')}</option>`;
                 try {
                   // Try to access HUNT_ANALYZER_THEMES from window if exposed, or use default
                   if (window.HuntAnalyzerState && window.HuntAnalyzerState.settings) {
@@ -9886,7 +9886,7 @@ function showSettingsModal() {
             // Use theme name if available, otherwise capitalize key
             const themeName = window.HUNT_ANALYZER_THEMES?.[themeKey]?.name || 
                              themeKey.charAt(0).toUpperCase() + themeKey.slice(1);
-            option.textContent = themeName;
+            option.textContent = translateThemeName(themeName);
             huntAnalyzerThemeSelector.appendChild(option);
           });
         } catch (error) {
@@ -10244,7 +10244,6 @@ function applyDataAttributes(elements, prefix, colorKey, extraAttributes = {}) {
 function applySpecialStyling(options) {
   const {
     name,
-    configKey,
     configColorKey,
     getEligibleFn,
     applyStylingFn,
@@ -10305,16 +10304,7 @@ function removeCreatureCosmeticsInRoot(root) {
   if (!root) return;
   clearCreatureCosmeticsCheckedMarks(root);
 
-  root.querySelectorAll('img[alt="creature"][data-max-creatures="true"]').forEach((img) => {
-    img.removeAttribute('data-max-creatures');
-    img.removeAttribute('data-max-creatures-color');
-  });
   root.querySelectorAll('img[data-max-creatures="true"]').forEach((starImg) => {
-    const originalSrc = starImg.getAttribute('data-original-src');
-    if (originalSrc) {
-      starImg.src = originalSrc;
-      starImg.removeAttribute('data-original-src');
-    }
     starImg.removeAttribute('data-max-creatures');
     starImg.removeAttribute('data-max-creatures-color');
   });
@@ -10567,11 +10557,6 @@ function filterEligibleCreatures(visibleCreatures, options = {}) {
 
 function applyStylingToCreature(creature, colorKey) {
   const { elements } = creature;
-  
-  // Store original src before changing
-  if (!elements.starImg.hasAttribute('data-original-src')) {
-    elements.starImg.setAttribute('data-original-src', elements.starImg.src);
-  }
 
   const extraAttributes = {};
   if (elements.rarityDiv?.classList.contains('has-rarity')) {
@@ -10681,13 +10666,6 @@ function removeMaxCreatures() {
     getVisibleCreatures().forEach((imgEl) => {
       const starImg = imgEl.parentElement.querySelector('img[data-max-creatures="true"]');
       if (starImg) {
-        // Restore original src if stored
-        const originalSrc = starImg.getAttribute('data-original-src');
-        if (originalSrc) {
-          starImg.src = originalSrc;
-          starImg.removeAttribute('data-original-src');
-        }
-        // Remove all max creatures attributes
         starImg.removeAttribute('data-max-creatures');
         starImg.removeAttribute('data-max-creatures-color');
       }
@@ -12080,7 +12058,7 @@ function buildAdvancedStatsTooltip(info) {
     equipmentRow.className = 'flex items-center gap-2 pt-1';
     const equipmentLabel = document.createElement('span');
     equipmentLabel.className = 'pixel-font-16 text-whiteRegular';
-    equipmentLabel.textContent = 'Equipment:';
+    equipmentLabel.textContent = t('mods.betterUI.hoverEquipmentLabel');
     equipmentRow.appendChild(equipmentLabel);
 
     const equipIcon = createEquipmentIconForTooltip(info.equipment);
@@ -12121,7 +12099,7 @@ function buildAdvancedStatsTooltip(info) {
 
         const createUIComponent = globalThis.state?.utils?.createUIComponent;
         if (typeof createUIComponent !== 'function' || !abilityInfo.TooltipContent) {
-          root.textContent = 'Ability details unavailable';
+          root.textContent = t('mods.betterUI.hoverAbilityUnavailable');
           root.className = 'pixel-font-14 text-whiteDark';
           hoverI18nDebug('ability block: createUIComponent / TooltipContent unavailable');
           return;
@@ -12158,11 +12136,11 @@ function buildAdvancedStatsTooltip(info) {
               bq.style.setProperty('font-size', '10px', 'important');
             });
           } else {
-            root.textContent = 'Ability details unavailable';
+            root.textContent = t('mods.betterUI.hoverAbilityUnavailable');
             root.className = 'pixel-font-14 text-whiteDark';
           }
         } catch (error) {
-          root.textContent = 'Ability details unavailable';
+          root.textContent = t('mods.betterUI.hoverAbilityUnavailable');
           root.className = 'pixel-font-14 text-whiteDark';
           hoverI18nDebug('ability block: render threw —', error && error.message);
         }
@@ -12261,11 +12239,11 @@ function buildEquipmentEffectTooltip(gameId, tier = 1) {
         bq.style.setProperty('font-size', '10px', 'important');
       });
     } else {
-      root.textContent = 'Effect details unavailable';
+      root.textContent = t('mods.betterUI.hoverEffectUnavailable');
       root.className = 'pixel-font-14 text-whiteDark';
     }
   } else {
-    root.textContent = 'No description available.';
+    root.textContent = t('mods.betterUI.hoverNoDescription');
     root.className = 'pixel-font-14 text-whiteDark';
   }
 
@@ -14110,10 +14088,8 @@ function ensurePowerSavingSessionListener() {
         setLivePowerSavingModeEnabled(true);
       }
       schedulePowerSavingOffDebounce();
-      return;
     }
-
-    // Already idle with no pending debounce — nothing to do.
+    // Otherwise already idle with no pending debounce — nothing to do.
   };
 
   const subs = [];
@@ -15372,11 +15348,11 @@ function updateInventoryLayoutToggleLabel(button) {
   if (locked) {
     button.disabled = true;
     button.setAttribute('aria-disabled', 'true');
-    button.title = 'Unlock inventory position to change layout';
+    button.title = t('mods.betterUI.inventoryUnlockToChangeLayout');
   } else {
     button.disabled = false;
     button.removeAttribute('aria-disabled');
-    button.title = horizontal ? 'Vertical inventory layout' : 'Horizontal inventory layout';
+    button.title = horizontal ? t('mods.betterUI.inventoryLayoutVertical') : t('mods.betterUI.inventoryLayoutHorizontal');
   }
   button.setAttribute('aria-label', button.title);
 }
@@ -15388,8 +15364,8 @@ function updateInventoryLockToggleLabel(button) {
   if (button.getAttribute('aria-pressed') !== pressed) {
     button.innerHTML = getInventoryLockToggleIconSvg(locked);
     button.title = locked
-      ? 'Unlock inventory position (also allows depot item moves)'
-      : 'Lock inventory position (also blocks depot item moves)';
+      ? t('mods.betterUI.inventoryUnlockPosition')
+      : t('mods.betterUI.inventoryLockPosition');
     button.setAttribute('aria-label', button.title);
     button.setAttribute('aria-pressed', pressed);
   }
@@ -15594,35 +15570,6 @@ function bindPersistentInventoryPinButtonListener(root = findInventoryWidgetRoot
       if (!config.persistentInventory || persistentInventoryState.restoring) return;
       saveInventoryWidgetPinnedFromDom();
     }, 60);
-  });
-}
-
-function capturePersistentInventoryStateFromDom() {
-  if (!config.persistentInventory) {
-    return;
-  }
-  // Prefer live pin state when readable; otherwise keep intent to restore pinned.
-  const pinned = isInventoryWidgetPinned();
-  if (pinned === true || pinned === false) {
-    config.inventoryWidgetPinned = pinned;
-  } else if (config.inventoryWidgetPinned == null) {
-    config.inventoryWidgetPinned = true;
-  }
-  const root = findInventoryWidgetRoot();
-  if (root) {
-    const measuredWidth = root.offsetWidth || Math.round(root.getBoundingClientRect().width) || 0;
-    if (measuredWidth >= 40) {
-      const rect = root.getBoundingClientRect();
-      const clamped = clampInventoryLeftTop(root, rect.left, rect.top);
-      config.inventoryWidgetLeft = clamped.left;
-      config.inventoryWidgetTop = clamped.top;
-    }
-  }
-  saveConfig();
-  logPersistentInventory('captured state from DOM', {
-    pinned: config.inventoryWidgetPinned,
-    left: config.inventoryWidgetLeft,
-    top: config.inventoryWidgetTop
   });
 }
 
@@ -16314,9 +16261,6 @@ function updateStaminaTimer() {
       
       // Update timer only if stamina changed
       updateTimerDisplay(readyTime);
-    } else {
-      // No stamina change, exit early
-      return;
     }
   } catch (error) {
     console.error('[Mod Settings] Error updating stamina timer:', error);
@@ -16380,7 +16324,6 @@ function initStaminaTimer() {
     // Fix Chrome flexbox wrapping
     applyChromeFlex();
     
-    const staminaButton = staminaDiv.closest('button');
     console.log('[Mod Settings] Stamina button found, setting up timer');
     
     // Initial update
@@ -17767,29 +17710,6 @@ async function updatePlayerOnlineHighscoreIfHigher(count) {
   }
 }
 
-function shouldSyncPlayerOnlineHighscore(count) {
-  if (!Number.isFinite(count) || count < 0) {
-    return false;
-  }
-  // Always sync until history exists so the backup is seeded even when live count is below peak.
-  const history = playercountState.onlineRecord?.history;
-  if (!Array.isArray(history) || history.length === 0) {
-    return true;
-  }
-  const cachedPeak = playercountState.onlineRecord?.peak;
-  if (cachedPeak == null || !Number.isFinite(cachedPeak)) {
-    return true;
-  }
-  return count >= cachedPeak;
-}
-
-async function syncPlayerOnlineHighscore(count) {
-  if (!shouldSyncPlayerOnlineHighscore(count)) {
-    return playercountState.onlineRecord;
-  }
-  return updatePlayerOnlineHighscoreIfHigher(count);
-}
-
 async function fetchLivePlayerCount() {
   try {
     const response = await fetch("/api/player-count");
@@ -17950,7 +17870,7 @@ function startPlayerCountUpdates() {
     updatePlayerCountDisplay(count);
     const syncCount = count ?? playercountState.onlineRecord?.peak ?? null;
     if (syncCount !== null) {
-      // Full update path (not shouldSync) so history can seed and a lower
+      // Always run the full update path so history can seed and a lower
       // corrupted main peak can be restored even when live count is below peak.
       await updatePlayerOnlineHighscoreIfHigher(syncCount);
       updatePlayerCountDisplay(count);
@@ -18106,7 +18026,7 @@ function addPlayercountHeaderButton() {
       const btn = document.createElement('span');
       btn.innerHTML = '<span class="pixel-font-16 text-white animate-in fade-in">Online: <span class="text-error">?</span></span>';
       btn.className = 'playercount-header-btn';
-      btn.title = 'Loading player count...';
+      btn.title = t('mods.betterUI.playerCountLoading');
       li.appendChild(btn);
       return li;
     },
@@ -18143,8 +18063,7 @@ function loadAndDisplayModPriorities(container) {
   const listContainer = container.querySelector('#mod-coordination-list');
   if (!listContainer) return {};
   
-  // Clear existing content (but preserve info text)
-  const infoText = listContainer.querySelector('p');
+  // Clear existing content (the description paragraph lives outside this container)
   listContainer.innerHTML = '';
   
   // Get all registered mods from ModCoordination
@@ -19197,7 +19116,7 @@ const saveLastVisitedMap = (roomId, roomName) => {
 const navigateToLastMap = () => {
   if (!mapHistory || mapHistory.length === 0) {
     createToast({
-      message: 'No maps in history. Visit some maps first!',
+      message: t('mods.betterUI.mapHistoryEmpty'),
       type: 'info',
       duration: 3000
     });
@@ -19243,7 +19162,7 @@ const navigateToLastMap = () => {
   // Don't navigate if target is the same as current (only one map in history)
   if (targetMap.roomId === currentMapId) {
     createToast({
-      message: 'No other maps in history. Visit a different map first!',
+      message: t('mods.betterUI.mapHistoryNoOther'),
       type: 'info',
       duration: 3000
     });
@@ -19263,7 +19182,7 @@ const navigateToLastMap = () => {
     console.error('[Mod Settings] Error navigating to previous map:', error);
     isNavigatingViaButton = false; // Reset flag on error
     createToast({
-      message: 'Failed to navigate to map',
+      message: t('mods.betterUI.mapHistoryNavigateFailed'),
       type: 'error',
       duration: 2000
     });
@@ -19312,10 +19231,10 @@ const updateLastMapButton = () => {
       const roomNames = globalThis.state?.utils?.ROOM_NAME || {};
       roomName = roomNames[targetMap.roomId] || targetMap.roomId;
     }
-    lastMapButton.title = `Return to ${roomName}`;
+    lastMapButton.title = tReplace('mods.betterUI.mapHistoryReturnTo', { room: roomName });
     lastMapButton.style.opacity = '1';
   } else {
-    lastMapButton.title = 'No other maps in history';
+    lastMapButton.title = t('mods.betterUI.mapHistoryNoOtherShort');
     lastMapButton.style.opacity = '0.5'; // Dim the button but keep it visible
   }
 };
@@ -19349,7 +19268,7 @@ const addLastMapNavButton = () => {
     btn.innerHTML = '<div class="relative flex"><img alt="into" src="/assets/icons/into.png" width="5" height="7" class="pixelated"><img alt="into" src="/assets/icons/into.png" width="5" height="7" class="pixelated"><img alt="into" src="/assets/icons/into.png" width="5" height="7" class="pixelated"></div>';
 
     // Get proper tooltip text
-    let tooltipText = 'No maps in history';
+    let tooltipText = t('mods.betterUI.mapHistoryEmptyShort');
     if (mapHistory && mapHistory.length > 0) {
       // Get current map
       let currentMapId = null;
@@ -19388,9 +19307,9 @@ const addLastMapNavButton = () => {
           const roomNames = globalThis.state?.utils?.ROOM_NAME || {};
           roomName = roomNames[targetMap.roomId] || targetMap.roomId;
         }
-        tooltipText = `Return to ${roomName}`;
+        tooltipText = tReplace('mods.betterUI.mapHistoryReturnTo', { room: roomName });
       } else {
-        tooltipText = 'No other maps in history';
+        tooltipText = t('mods.betterUI.mapHistoryNoOtherShort');
       }
     }
     btn.title = tooltipText;

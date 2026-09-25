@@ -1320,10 +1320,10 @@
     ];
     const STAT_CHANGE_TRACK_KEYS = [
         ...STAT_KEYS,
-        { key: 'hpMax', label: 'HP max' },
-        { key: 'level', label: 'Lvl' },
-        { key: 'attackDelayTicks', label: 'Atk delay' },
-        { key: 'abilityCdTicks', label: 'Ability CD' }
+        { key: 'hpMax', label: 'HP max', labelKey: 'mods.betterAnalytics.statLabelHpMax' },
+        { key: 'level', label: 'Lvl', labelKey: 'mods.betterAnalytics.statLabelLevel' },
+        { key: 'attackDelayTicks', label: 'Atk delay', labelKey: 'mods.betterAnalytics.statLabelAtkDelay' },
+        { key: 'abilityCdTicks', label: 'Ability CD', labelKey: 'mods.betterAnalytics.statLabelAbilityCd' }
     ];
     const TICK_STAT_TRACK_KEYS = new Set(['attackDelayTicks', 'abilityCdTicks']);
     const STAT_LOWER_IS_BETTER = new Set(['attackDelayTicks', 'abilityCdTicks']);
@@ -4309,13 +4309,13 @@
             const suppressHp = actor.__bsSuppressHpStatLog === true;
             if (suppressHp) actor.__bsSuppressHpStatLog = false;
 
-            for (const { key, label } of STAT_CHANGE_TRACK_KEYS) {
+            for (const { key, label, labelKey } of STAT_CHANGE_TRACK_KEYS) {
                 const oldVal = prev[key];
                 const newVal = next[key];
                 if (oldVal === newVal || oldVal == null || newVal == null) continue;
                 if (key === 'hp' && suppressHp) continue;
                 changed = true;
-                if (log) recordStatChangeLogEntry(actor, key, label, oldVal, newVal);
+                if (log) recordStatChangeLogEntry(actor, key, labelKey ? t(labelKey) : label, oldVal, newVal);
                 if (UNITS_LIVE_STAT_INVALIDATE_KEYS.has(key)) {
                     invalidateActorSnapshotsCache();
                 }
@@ -7451,7 +7451,7 @@
         const toggleEl = card.querySelector('.bs-toggle');
         if (toggleEl) {
             toggleEl.textContent = collapsed ? '▶' : '▼';
-            toggleEl.title = collapsed ? 'Expand' : 'Collapse';
+            toggleEl.title = collapsed ? t('common.expand') : t('common.collapse');
         }
     }
 
@@ -11242,7 +11242,7 @@
         const minSpan = document.createElement('span');
         minSpan.className = 'text-cooldown bs-scaled-min-cd';
         minSpan.textContent = `${value}${suffix}`;
-        minSpan.title = `Minimum ability cooldown (${formatTicks(minTicks)})`;
+        minSpan.title = t('mods.betterAnalytics.minAbilityCooldown').replace('{ticks}', formatTicks(minTicks));
         paragraph.appendChild(minSpan);
         paragraph.appendChild(document.createTextNode('.'));
     }
@@ -13194,7 +13194,7 @@
                 if (!unitId) continue;
                 if (entry.applied) {
                     activeSlowByUnit.set(unitId, {
-                        label: entry.effectLabel || 'Slowed',
+                        label: entry.effectLabel || t('mods.betterAnalytics.statusSlowed'),
                         spdDelta: extractFoldedSpeedDelta(entry.foldedStats)
                     });
                 } else {
@@ -15445,13 +15445,13 @@
                     resolveUnitAttackDelayRemainingTicks(unit)
                 )
                 : null;
-            mechanicsHtml += `<div class="bs-row" data-bs-mech="atk-delay"><span class="bs-label">Atk delay:</span> ${formatTicks(attackDelayTicks)}` +
+            mechanicsHtml += `<div class="bs-row" data-bs-mech="atk-delay"><span class="bs-label">${escapeHtml(t('mods.betterAnalytics.mechAtkDelay'))}</span> ${formatTicks(attackDelayTicks)}` +
                 (atkState ? ` · ${atkState}` : '') +
                 `</div>`;
         }
         if (unit.range != null) {
             mechanicsHtml += `<div class="bs-row" data-bs-mech="range" title="${escapeHtml(getStatTooltip('range'))}">` +
-                `<span class="bs-label">Range:</span> ${formatUnitStatDisplay('range', unit.range)} tiles</div>`;
+                `<span class="bs-label">${escapeHtml(t('mods.betterAnalytics.mechRange'))}</span> ${escapeHtml(t('mods.betterAnalytics.mechRangeTiles').replace('{range}', formatUnitStatDisplay('range', unit.range)))}</div>`;
         }
         const cooldownTicks = resolveUnitCooldownTicks(unit);
         if (cooldownTicks != null) {
@@ -15462,10 +15462,10 @@
                 )
                 : null;
             const initialCd = !liveMechanics && unit.previewInitialCooldownTicks != null
-                ? ` · <span style="color:var(--bs-info)" title="First-cast cooldown before the ability reaches its steady-state timer shown above">starts ${formatTicks(unit.previewInitialCooldownTicks)}</span>`
+                ? ` · <span style="color:var(--bs-info)" title="${escapeHtml(t('mods.betterAnalytics.mechFirstCastTooltip'))}">${escapeHtml(t('mods.betterAnalytics.mechStarts').replace('{ticks}', formatTicks(unit.previewInitialCooldownTicks)))}</span>`
                 : '';
-            const meditatingLabel = unit.isMeditating ? ' <span style="color:#888">(meditating)</span>' : '';
-            mechanicsHtml += `<div class="bs-row" data-bs-mech="ability-cd"><span class="bs-label">Ability CD:</span> ${formatTicks(cooldownTicks)}` +
+            const meditatingLabel = unit.isMeditating ? ` <span style="color:#888">${escapeHtml(t('mods.betterAnalytics.mechMeditating'))}</span>` : '';
+            mechanicsHtml += `<div class="bs-row" data-bs-mech="ability-cd"><span class="bs-label">${escapeHtml(t('mods.betterAnalytics.mechAbilityCd'))}</span> ${formatTicks(cooldownTicks)}` +
                 (cdState ? ` · ${cdState}` : initialCd) +
                 `${meditatingLabel}</div>`;
         }
@@ -15475,10 +15475,10 @@
     function buildUnitCardStatusMechanicsHtml(unit) {
         let mechanicsHtml = '';
         if (unit.silenced) {
-            mechanicsHtml += `<div class="bs-row" style="color:#E06C75">Silenced</div>`;
+            mechanicsHtml += `<div class="bs-row" style="color:#E06C75">${escapeHtml(t('mods.betterAnalytics.mechSilenced'))}</div>`;
         }
         if (unit.buffedCount != null && unit.buffedCount > 0) {
-            mechanicsHtml += `<div class="bs-row"><span class="bs-label">Active buffs on others:</span> ${unit.buffedCount}</div>`;
+            mechanicsHtml += `<div class="bs-row"><span class="bs-label">${escapeHtml(t('mods.betterAnalytics.mechActiveBuffs'))}</span> ${unit.buffedCount}</div>`;
         }
         if (unit.alive === false) {
             mechanicsHtml += `<div class="bs-row" style="color:#888">${escapeHtml(t('mods.betterAnalytics.defeated'))}</div>`;
@@ -16643,7 +16643,7 @@
             api.ui.addButton({
                 id: BUTTON_ID,
                 text: getModDisplayName(),
-                tooltip: 'Better Analytics panel (units, battle log; speed in Sandbox)',
+                tooltip: t('mods.betterAnalytics.buttonTooltip'),
                 primary: false,
                 onClick: togglePanel
             });

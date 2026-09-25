@@ -455,11 +455,11 @@ const showStaminaRestoredToast = (pointsRestored) => {
     textLeft.className = 'text-left';
     
     const paragraph = document.createElement('p');
-    paragraph.textContent = 'Restored ';
+    paragraph.textContent = t('mods.automator.restoredPrefix');
     
     const staminaSpan = document.createElement('span');
     staminaSpan.className = 'text-stamina';
-    staminaSpan.textContent = `+${pointsRestored} stamina points`;
+    staminaSpan.textContent = t('mods.automator.staminaPointsRestored').replace('{points}', pointsRestored);
     
     paragraph.appendChild(staminaSpan);
     textLeft.appendChild(paragraph);
@@ -2803,7 +2803,7 @@ const openQuestLogForSeashell = async () => {
       }
     }
     if (!questButton) {
-      const textMatches = ['Quests', 'Tasking', 'Raiding'];
+      const textMatches = ['Quests', 'Tasking', 'Raiding', t('mods.betterTasker.tasking'), t('mods.raidHunter.raiding')];
       const navButtons = document.querySelectorAll('header button, #header-slot button, [role="banner"] button');
       for (const btn of navButtons) {
         const spanText = btn.querySelector('span')?.textContent?.trim();
@@ -2903,7 +2903,7 @@ const clickSeashellOpenButton = async () => {
         for (let i = 0; i < allButtons.length; i++) {
           const button = allButtons[i];
           console.log(`[Bestiary Automator] Checking button ${i + 1} text content: "${button.textContent.trim()}"`);
-          if (button.textContent.includes('Open')) {
+          if (button.textContent.includes('Open') || button.textContent.includes('Abrir')) {
             openButton = button;
             console.log('[Bestiary Automator] ✅ Found seashell Open button by text content!');
             console.log('[Bestiary Automator] Open button details:', {
@@ -2935,7 +2935,7 @@ const clickSeashellOpenButton = async () => {
         const allElements = seashellSection.querySelectorAll('*');
         console.log('[Bestiary Automator] Searching all elements for "Open" text...');
         for (const element of allElements) {
-          if (element.textContent && element.textContent.includes('Open')) {
+          if (element.textContent && (element.textContent.includes('Open') || element.textContent.includes('Abrir'))) {
             console.log('[Bestiary Automator] Found element with "Open" text:', {
               tagName: element.tagName,
               textContent: element.textContent.trim(),
@@ -3331,7 +3331,7 @@ const subscribeToGameState = () => {
               
               // Check child elements for "Something went wrong" toasts
               const somethingWrongToast = node.querySelector && node.querySelector('div.widget-bottom.pixel-font-16.flex.items-center.gap-2.px-2.py-1.text-whiteHighlight');
-              if (somethingWrongToast && somethingWrongToast.textContent.includes('Something went wrong')) {
+              if (somethingWrongToast && (somethingWrongToast.textContent.includes('Something went wrong') || somethingWrongToast.textContent.includes('Algo deu errado'))) {
                 processSomethingWrongToast();
                 return;
               }
@@ -3652,7 +3652,7 @@ const isSomethingWrongToast = (element) => {
     }
     
     const toastText = textElement.textContent;
-    return toastText.includes('Something went wrong');
+    return toastText.includes('Something went wrong') || toastText.includes('Algo deu errado');
   } catch (error) {
     console.error('[Bestiary Automator] Error checking if element is something wrong toast:', error);
     return false;
@@ -4418,7 +4418,7 @@ const createConfigPanel = () => {
   thresholdToggleButton.id = 'threshold-toggle-button';
   thresholdToggleButton.type = 'button';
   thresholdToggleButton.style.cssText = 'width: 80px; padding: 4px 8px; background-color: ' + (config.thresholdsEnabled ? 'rgb(76, 175, 80)' : 'rgb(231, 76, 60)') + '; color: white; border: 1px solid ' + (config.thresholdsEnabled ? 'rgb(69, 160, 73)' : 'rgb(211, 47, 47)') + '; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 12px; transition: background-color 0.2s, border-color 0.2s;';
-  thresholdToggleButton.title = config.thresholdsEnabled ? 'Thresholds enabled (click to disable)' : 'Thresholds disabled (click to enable)';
+  thresholdToggleButton.title = config.thresholdsEnabled ? t('mods.automator.thresholdsEnabledTooltip') : t('mods.automator.thresholdsDisabledTooltip');
   
   // Toggle threshold functionality
   thresholdToggleButton.addEventListener('click', () => {
@@ -4428,7 +4428,7 @@ const createConfigPanel = () => {
     // Update button appearance
     thresholdToggleButton.style.backgroundColor = config.thresholdsEnabled ? 'rgb(76, 175, 80)' : 'rgb(231, 76, 60)';
     thresholdToggleButton.style.borderColor = config.thresholdsEnabled ? 'rgb(69, 160, 73)' : 'rgb(211, 47, 47)';
-    thresholdToggleButton.title = config.thresholdsEnabled ? 'Thresholds enabled (click to disable)' : 'Thresholds disabled (click to enable)';
+    thresholdToggleButton.title = config.thresholdsEnabled ? t('mods.automator.thresholdsEnabledTooltip') : t('mods.automator.thresholdsDisabledTooltip');
     
     // Enable/disable all threshold inputs
     const thresholdInputs = ['mini', 'strong', 'great', 'ultimate', 'supreme'].map(type => 
@@ -4781,9 +4781,9 @@ const applyButtonStyling = (btn) => {
   const buttonText = config.fasterAutoplay ? `⚠️ ${baseText}` : baseText;
   let tooltip = t('mods.automator.configButtonTooltip');
   if (fasterAutoplayRunning) {
-    tooltip += ' - Autoplay delay running';
+    tooltip += t('mods.automator.autoplayDelayRunningSuffix');
   } else if (config.fasterAutoplay) {
-    tooltip += ' - Autoplay delay enabled';
+    tooltip += t('mods.automator.autoplayDelayEnabledSuffix');
   }
 
   // Persist label via updateButton so refreshModButtonLabels() keeps the warning on init
@@ -5099,7 +5099,7 @@ function updateSettingsModalUI() {
     if (thresholdToggleButton) {
       thresholdToggleButton.style.backgroundColor = config.thresholdsEnabled ? 'rgb(76, 175, 80)' : 'rgb(231, 76, 60)';
       thresholdToggleButton.style.borderColor = config.thresholdsEnabled ? 'rgb(69, 160, 73)' : 'rgb(211, 47, 47)';
-      thresholdToggleButton.title = config.thresholdsEnabled ? 'Thresholds enabled (click to disable)' : 'Thresholds disabled (click to enable)';
+      thresholdToggleButton.title = config.thresholdsEnabled ? t('mods.automator.thresholdsEnabledTooltip') : t('mods.automator.thresholdsDisabledTooltip');
     }
     
     // Update potion warning visibility after updating UI
