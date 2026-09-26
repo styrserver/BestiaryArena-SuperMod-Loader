@@ -2304,7 +2304,15 @@
       "startingToast": "Iniciando o mapa boostado",
       "customRuleTooltip": "Configurações personalizadas por mapa ou por equipamento",
       "tabMaps": "Mapas",
-      "tabEquipment": "Equipamentos"
+      "tabEquipment": "Equipamentos",
+      "tabFallback": "Reserva",
+      "fallbackTitle": "Mapa reserva",
+      "fallbackDescription": "Usado só quando o mapa boostado de hoje não está selecionado (mapa/equipamento desmarcado, excluído, raid ou nenhuma regra correspondente). Substitui as configurações globais nessa execução.",
+      "fallbackEnable": "Ativar reserva",
+      "fallbackMap": "Mapa",
+      "fallbackMapNone": "Selecione um mapa…",
+      "fallbackUseGlobal": "Usar configuração global",
+      "fallbackStartingToast": "Iniciando o mapa reserva"
     },
     "betterSetups": {
       "loadSetup": "Carregar Setup",

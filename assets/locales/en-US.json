@@ -2304,7 +2304,15 @@
       "startingToast": "Starting Boosted Map",
       "customRuleTooltip": "Custom per-map or equipment-based settings",
       "tabMaps": "Maps",
-      "tabEquipment": "Equipment"
+      "tabEquipment": "Equipment",
+      "tabFallback": "Fallback",
+      "fallbackTitle": "Fallback Map",
+      "fallbackDescription": "Farmed only when today's boosted map is not selected (map/equipment unticked, excluded, raid, or no matching rule). Overrides the global settings for that run.",
+      "fallbackEnable": "Enable fallback",
+      "fallbackMap": "Map",
+      "fallbackMapNone": "Select a map…",
+      "fallbackUseGlobal": "Use global setting",
+      "fallbackStartingToast": "Starting Fallback Map"
     },
     "betterSetups": {
       "loadSetup": "Load Setup",
