@@ -784,6 +784,8 @@ const modState = {
     },
     dailySubscription: null,
     lastBoostedMap: null,
+    fallbackSettingsChanged: false,
+    fallbackRecheckTimer: null,
     staminaCache: {
         currentMapId: null,
         cost: null
@@ -1226,13 +1228,13 @@ function showToast(message, duration = 5000) {
     }
 }
 
-function showBoostedMapStartToast() {
+function showBoostedMapStartToast(isFallback = false) {
     const now = Date.now();
     if (now - lastStartToastAt < START_TOAST_COOLDOWN_MS) {
         return;
     }
     lastStartToastAt = now;
-    showToast(t('mods.betterBoostedMaps.startingToast'));
+    showToast(t(isFallback ? 'mods.betterBoostedMaps.fallbackStartingToast' : 'mods.betterBoostedMaps.startingToast'));
 }
 
 function createSelectAllNoneButtons(idPrefix, scrollContainer) {
@@ -1566,38 +1568,40 @@ function shouldFarmBoostedMap() {
             return { shouldFarm: false, reason: 'No boosted map data' };
         }
         
+        // Get settings
+        const settings = loadSettings();
+
+        // From here on a "no" means today's boost is not farmable (not that we're blocked),
+        // so each one falls through to the Fallback tab when it's configured.
         if (isRaidRoomId(boostedData.roomId)) {
             const rn = getRoomName(boostedData.roomId);
             console.log(`[Better Boosted Maps] Daily boost is on raid "${rn}" — not boostable, skipping`);
-            return { shouldFarm: false, reason: `Map "${rn}" is a raid (not boostable)` };
+            return bbmResolveFallbackFarmCheck(`Map "${rn}" is a raid (not boostable)`, settings);
         }
-        
-        // Get settings
-        const settings = loadSettings();
-        
+
         // Check if map is enabled
         const roomName = getRoomName(boostedData.roomId);
         const isMapEnabled = settings.maps?.[boostedData.roomId] !== false;
-        
+
         if (!isMapEnabled) {
             console.log(`[Better Boosted Maps] Map "${roomName}" is not enabled`);
-            return { shouldFarm: false, reason: `Map "${roomName}" not enabled` };
+            return bbmResolveFallbackFarmCheck(`Map "${roomName}" not enabled`, settings);
         }
-        
+
         // Check if equipment is excluded
         const equipmentName = getEquipmentName(boostedData.equipId);
         if (EXCLUDED_EQUIPMENT.includes(equipmentName)) {
             console.log(`[Better Boosted Maps] Equipment "${equipmentName}" is excluded from boosted maps`);
-            return { shouldFarm: false, reason: `Equipment "${equipmentName}" is excluded` };
+            return bbmResolveFallbackFarmCheck(`Equipment "${equipmentName}" is excluded`, settings);
         }
-        
+
         // Check if equipment is enabled
         const equipId = equipmentName.toLowerCase().replace(/[^a-z0-9]/g, '-');
         const isEquipmentEnabled = settings.equipment?.[equipId] !== false;
-        
+
         if (!isEquipmentEnabled) {
             console.log(`[Better Boosted Maps] Equipment "${equipmentName}" is not enabled`);
-            return { shouldFarm: false, reason: `Equipment "${equipmentName}" not enabled` };
+            return bbmResolveFallbackFarmCheck(`Equipment "${equipmentName}" not enabled`, settings);
         }
 
         if (!bbmBoostedEquipmentMatchesMapRules(
@@ -1613,10 +1617,10 @@ function shouldFarmBoostedMap() {
                 `[Better Boosted Maps] Map "${roomName}" has equipment rule(s) but boost is "${equipmentName}" ` +
                 `(allowed: [${ruleNames.join(', ')}]) — skipping`
             );
-            return {
-                shouldFarm: false,
-                reason: `Boost equipment "${equipmentName}" does not match map equipment rule(s)`
-            };
+            return bbmResolveFallbackFarmCheck(
+                `Boost equipment "${equipmentName}" does not match map equipment rule(s)`,
+                settings
+            );
         }
         
         console.log(`[Better Boosted Maps] Should farm: ${roomName} with ${equipmentName}`);
@@ -2120,9 +2124,15 @@ function loadSettings() {
         maps: {},
         equipment: {},
         mapFloors: {},
-        mapSettings: {}
+        mapSettings: {},
+        // Fallback tab — '' setup / null refill inherit the left-column defaults
+        fallbackEnabled: false,
+        fallbackRoomId: '',
+        fallbackFloor: '0',
+        fallbackSetupMethod: '',
+        fallbackAutoRefillStamina: null
     };
-    
+
     const saved = localStorage.getItem('betterBoostedMapsSettings');
     if (saved) {
         try {
@@ -2312,6 +2322,65 @@ function bbmGetGlobalDefaultAutoRefillStamina(settings) {
 function bbmGetGlobalDefaultSetupMethod(settings) {
     const s = settings || loadSettings();
     return s.setupMethod || t('mods.betterBoostedMaps.autoSetup');
+}
+
+/**
+ * Fallback tab config (used only when today's boost is not farmable). Its values override the
+ * global left-column defaults; empty setup / 'global' refill inherit them.
+ * @returns {{ roomId: string, setupMethod: string, autoRefillStamina: boolean, floor: number }|null}
+ */
+function bbmGetFallbackConfig(settings) {
+    const s = settings || loadSettings();
+    if (!s.fallbackEnabled) return null;
+    const roomId = s.fallbackRoomId ? String(s.fallbackRoomId) : '';
+    if (!roomId) return null;
+    const roomNames = globalThis.state?.utils?.ROOM_NAME;
+    if (roomNames && !roomNames[roomId]) {
+        console.warn(`[Better Boosted Maps] Fallback map "${roomId}" no longer exists — fallback skipped`);
+        return null;
+    }
+    if (isRaidRoomId(roomId)) return null;
+    // Checkbox saves a boolean; null (never saved) — or a legacy 'global' string — inherits the global value
+    const refill = s.fallbackAutoRefillStamina;
+    return {
+        roomId,
+        setupMethod: s.fallbackSetupMethod || bbmGetGlobalDefaultSetupMethod(s),
+        autoRefillStamina: typeof refill === 'boolean'
+            ? refill
+            : refill === 'on' || (refill !== 'off' && bbmGetGlobalDefaultAutoRefillStamina(s)),
+        floor: bbmClampRuleFloor(parseInt(s.fallbackFloor, 10))
+    };
+}
+
+/** Boost not farmable for `reason` — return a fallback farmCheck when configured, else the plain "no". */
+function bbmResolveFallbackFarmCheck(reason, settings) {
+    const fb = bbmGetFallbackConfig(settings);
+    if (!fb) {
+        return { shouldFarm: false, reason };
+    }
+    const roomName = getRoomName(fb.roomId);
+    console.log(`[Better Boosted Maps] Boosted map not farmable (${reason}) — using fallback map "${roomName}"`);
+    return {
+        shouldFarm: true,
+        isFallback: true,
+        fallbackReason: reason,
+        roomId: fb.roomId,
+        roomName,
+        equipmentName: null,
+        equipId: null,
+        equipStat: null
+    };
+}
+
+/** Setup / refill / floor for a farmCheck (boosted: rules → per-map → global; fallback: Fallback tab → global). */
+function bbmResolveAutomationForFarmCheck(farmCheck, settings) {
+    if (!farmCheck) return null;
+    if (farmCheck.isFallback) {
+        const fb = bbmGetFallbackConfig(settings);
+        if (!fb || String(fb.roomId) !== String(farmCheck.roomId)) return null;
+        return { setupMethod: fb.setupMethod, autoRefillStamina: fb.autoRefillStamina, floor: fb.floor };
+    }
+    return getEffectiveMapAutomationSettings(farmCheck.roomId, settings, farmCheck.equipId, farmCheck.equipStat);
 }
 
 /** True when per-map context-menu data differs from global defaults or has at least one complete equipment rule. */
@@ -4208,9 +4277,11 @@ function createMapEquipmentSelection(settings) {
     
     const mapsTabBtn = createStyledButton('maps-tab-btn', t('mods.betterBoostedMaps.tabMaps'), 'green', () => switchTab('maps'));
     const equipmentTabBtn = createStyledButton('equipment-tab-btn', t('mods.betterBoostedMaps.tabEquipment'), 'regular', () => switchTab('equipment'));
-    
+    const fallbackTabBtn = createStyledButton('fallback-tab-btn', t('mods.betterBoostedMaps.tabFallback'), 'regular', () => switchTab('fallback'));
+
     tabButtons.appendChild(mapsTabBtn);
     tabButtons.appendChild(equipmentTabBtn);
+    tabButtons.appendChild(fallbackTabBtn);
     container.appendChild(tabButtons);
     
     // Tab content container
@@ -4235,34 +4306,230 @@ function createMapEquipmentSelection(settings) {
     equipmentContent.id = 'equipment-tab';
     equipmentContent.style.display = 'none';
     
+    // Create fallback tab content
+    const fallbackContent = createFallbackTab(settings);
+    fallbackContent.id = 'fallback-tab';
+    fallbackContent.style.display = 'none';
+
     tabContent.appendChild(mapsContent);
     tabContent.appendChild(equipmentContent);
+    tabContent.appendChild(fallbackContent);
     container.appendChild(tabContent);
-    
+
     // Store for tab switching
     window.boostedMapsActiveTab = 'maps';
-    
+
     return container;
 }
 
+const SETTINGS_TAB_NAMES = ['maps', 'equipment', 'fallback'];
+// Fallback's panel must stay a flex column so its box stretches to the tab area's height
+const SETTINGS_TAB_DISPLAY = { maps: 'block', equipment: 'block', fallback: 'flex' };
+
 function switchTab(tabName) {
     window.boostedMapsActiveTab = tabName;
-    
-    // Update tab buttons
-    const mapsBtn = document.getElementById('maps-tab-btn');
-    const equipmentBtn = document.getElementById('equipment-tab-btn');
-    
-    if (tabName === 'maps') {
-        mapsBtn.className = `${TAB_BUTTON_CLASSES} ${BUTTON_STYLES.GREEN}`;
-        equipmentBtn.className = `${TAB_BUTTON_CLASSES} ${BUTTON_STYLES.REGULAR}`;
-        document.getElementById('maps-tab').style.display = 'block';
-        document.getElementById('equipment-tab').style.display = 'none';
-    } else {
-        mapsBtn.className = `${TAB_BUTTON_CLASSES} ${BUTTON_STYLES.REGULAR}`;
-        equipmentBtn.className = `${TAB_BUTTON_CLASSES} ${BUTTON_STYLES.GREEN}`;
-        document.getElementById('maps-tab').style.display = 'none';
-        document.getElementById('equipment-tab').style.display = 'block';
+
+    SETTINGS_TAB_NAMES.forEach(name => {
+        const isActive = name === tabName;
+        const btn = document.getElementById(`${name}-tab-btn`);
+        const panel = document.getElementById(`${name}-tab`);
+        if (btn) {
+            btn.className = `${TAB_BUTTON_CLASSES} ${isActive ? BUTTON_STYLES.GREEN : BUTTON_STYLES.REGULAR}`;
+        }
+        if (panel) {
+            panel.style.display = isActive ? SETTINGS_TAB_DISPLAY[name] : 'none';
+        }
+    });
+}
+
+/** Fallback tab: map + floor + setup + autorefill used only when today's boost isn't farmable. */
+function createFallbackTab(settings) {
+    const wrapper = document.createElement('div');
+    // Fill the shared tab area (sized by the Maps/Equipment lists) instead of leaving a gap below
+    wrapper.style.cssText = `
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        height: 100%;
+        min-height: 0;
+        box-sizing: border-box;
+    `;
+
+    const title = document.createElement('h3');
+    title.textContent = t('mods.betterBoostedMaps.fallbackTitle');
+    title.className = 'pixel-font-16';
+    title.style.cssText = `
+        margin: 0;
+        color: #ffe066;
+        font-weight: bold;
+    `;
+    wrapper.appendChild(title);
+
+    const intro = document.createElement('div');
+    intro.textContent = t('mods.betterBoostedMaps.fallbackDescription');
+    intro.className = 'pixel-font-14';
+    intro.style.cssText = `
+        font-size: 12px;
+        line-height: 1.25;
+        color: #aaa;
+    `;
+    wrapper.appendChild(intro);
+
+    const body = document.createElement('div');
+    body.style.cssText = `
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        flex: 1 1 auto;
+        min-height: 0;
+        justify-content: space-evenly;
+        border: 1px solid #555;
+        border-radius: 3px;
+        padding: 6px 8px;
+        background: rgba(0, 0, 0, 0.3);
+    `;
+
+    // Compact rows: no description blocks, 16px checkboxes, 24px selects
+    const makeCheckboxRow = (id, label, checked) => {
+        const row = document.createElement('label');
+        row.setAttribute('for', id);
+        row.className = 'pixel-font-16';
+        row.style.cssText = `
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-weight: bold;
+            color: #fff;
+            cursor: pointer;
+            min-height: 20px;
+        `;
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.id = id;
+        cb.checked = !!checked;
+        cb.style.cssText = 'width: 16px; height: 16px; margin: 0; accent-color: #ffe066; cursor: pointer;';
+        cb.addEventListener('change', saveSettings);
+        row.appendChild(cb);
+        row.appendChild(document.createTextNode(label));
+        return { row, input: cb };
+    };
+    const makeOption = (value, text) => {
+        const opt = document.createElement('option');
+        opt.value = value;
+        opt.textContent = text;
+        opt.style.cssText = 'background: #333; color: #fff;';
+        return opt;
+    };
+    const makeSelectRow = (id, label) => {
+        const row = document.createElement('div');
+        row.style.cssText = `
+            display: grid;
+            grid-template-columns: 100px 1fr;
+            align-items: center;
+            gap: 6px;
+        `;
+        const lab = document.createElement('label');
+        lab.setAttribute('for', id);
+        lab.textContent = label;
+        lab.className = 'pixel-font-16';
+        lab.style.cssText = 'font-weight: bold; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
+        const select = document.createElement('select');
+        select.id = id;
+        select.className = 'pixel-font-16';
+        select.style.cssText = `
+            width: 100%;
+            min-width: 0;
+            height: 24px;
+            padding: 0 4px;
+            background: #333;
+            border: 1px solid #ffe066;
+            color: #fff;
+            border-radius: 3px;
+            box-sizing: border-box;
+            font-size: 14px;
+            cursor: pointer;
+        `;
+        select.addEventListener('change', saveSettings);
+        row.appendChild(lab);
+        row.appendChild(select);
+        return { row, select };
+    };
+
+    const enabled = makeCheckboxRow(
+        'boosted-maps-fallbackEnabled',
+        t('mods.betterBoostedMaps.fallbackEnable'),
+        settings.fallbackEnabled
+    );
+    body.appendChild(enabled.row);
+
+    // Rows sit directly in `body` (not a wrapper) so space-evenly spreads every row across the height
+    const controls = document.createDocumentFragment();
+    const controlRows = [];
+    const addControlRow = (row) => {
+        controlRows.push(row);
+        controls.appendChild(row);
+    };
+
+    // Auto-refill stamina — explicit on/off for fallback runs; defaults to the global value until set
+    const savedRefill = settings.fallbackAutoRefillStamina;
+    const refill = makeCheckboxRow(
+        'boosted-maps-fallbackAutoRefillStamina',
+        t('mods.betterBoostedMaps.autoRefillStamina'),
+        typeof savedRefill === 'boolean'
+            ? savedRefill
+            : savedRefill === 'on' || (savedRefill !== 'off' && bbmGetGlobalDefaultAutoRefillStamina(settings))
+    );
+    addControlRow(refill.row);
+
+    // Map (grouped by region, raids excluded — same source as the Maps tab)
+    const map = makeSelectRow('boosted-maps-fallbackRoomId', t('mods.betterBoostedMaps.fallbackMap'));
+    map.select.appendChild(makeOption('', t('mods.betterBoostedMaps.fallbackMapNone')));
+    Object.entries(organizeMapsByRegion()).forEach(([regionName, maps]) => {
+        const group = document.createElement('optgroup');
+        group.label = regionName;
+        group.style.cssText = 'background: #333; color: #ffe066;';
+        maps.forEach(({ id, name }) => group.appendChild(makeOption(id, name)));
+        map.select.appendChild(group);
+    });
+    map.select.value = settings.fallbackRoomId ? String(settings.fallbackRoomId) : '';
+    addControlRow(map.row);
+
+    // Floor (id must not start with "floor-" — saveSettings routes those into mapFloors)
+    const floor = makeSelectRow('boosted-maps-fallbackFloor', t('mods.betterBoostedMaps.floor'));
+    for (let i = 0; i <= 15; i++) {
+        floor.select.appendChild(makeOption(String(i), `${t('mods.betterBoostedMaps.floor')} ${i}`));
     }
+    floor.select.value = String(bbmClampRuleFloor(parseInt(settings.fallbackFloor, 10)));
+    addControlRow(floor.row);
+
+    // Setup method — '' inherits the global left-column choice
+    const setup = makeSelectRow('boosted-maps-fallbackSetupMethod', t('common.setupMethod'));
+    setup.select.appendChild(makeOption('', t('mods.betterBoostedMaps.fallbackUseGlobal')));
+    getAvailableSetupOptions().forEach(opt => setup.select.appendChild(makeOption(opt, opt)));
+    setup.select.value = settings.fallbackSetupMethod || '';
+    if (setup.select.value !== (settings.fallbackSetupMethod || '')) {
+        setup.select.value = ''; // saved Better Setups label no longer exists
+    }
+    addControlRow(setup.row);
+
+    body.appendChild(controls);
+    wrapper.appendChild(body);
+
+    // Grey out (but keep in the DOM, so saveSettings still reads them) while fallback is off
+    const syncFallbackControlsEnabled = () => {
+        const on = enabled.input.checked;
+        controlRows.forEach(row => {
+            row.style.opacity = on ? '1' : '0.4';
+            row.querySelectorAll('input, select').forEach(el => { el.disabled = !on; });
+        });
+    };
+    body.querySelectorAll('input, select').forEach(el => el.addEventListener('change', () => {
+        modState.fallbackSettingsChanged = true;
+        syncFallbackControlsEnabled();
+    }));
+    syncFallbackControlsEnabled();
+
+    return wrapper;
 }
 
 function attachSettingsListRowHover(rowEl, isDimmed) {
@@ -4827,6 +5094,21 @@ function cleanupModal() {
     }
 }
 
+// Fallback settings are only consulted when a check runs, so re-check once the modal closes
+// (only while idle — never interrupt a running boosted/fallback session).
+function scheduleFallbackRecheckAfterSettingsChange() {
+    if (!modState.fallbackSettingsChanged) return;
+    modState.fallbackSettingsChanged = false;
+    if (!modState.enabled || modState.farming.isActive || modState.fallbackRecheckTimer) return;
+    modState.fallbackRecheckTimer = setTimeout(() => {
+        modState.fallbackRecheckTimer = null;
+        if (modState.enabled && !modState.farming.isActive) {
+            console.log('[Better Boosted Maps] Fallback settings changed - re-checking what to farm');
+            checkAndStartBoostedMapFarming();
+        }
+    }, COORDINATION_RESUME_DELAY_MS);
+}
+
 function openSettingsModal() {
     try {
         if (modState.activeModal) {
@@ -4869,6 +5151,7 @@ function openSettingsModal() {
                                 onClose: () => {
                                     console.log('[Better Boosted Maps] Settings modal closed');
                                     cleanupModal();
+                                    scheduleFallbackRecheckAfterSettingsChange();
                                 }
                             });
 
@@ -5015,7 +5298,7 @@ async function startBoostedMapFarming(force = false) {
 
         const farmingSettings = loadSettings();
 
-        if (!bbmBoostedEquipmentMatchesMapRules(
+        if (!farmCheck.isFallback && !bbmBoostedEquipmentMatchesMapRules(
             farmCheck.roomId,
             farmCheck.equipId,
             farmCheck.equipStat,
@@ -5037,10 +5320,12 @@ async function startBoostedMapFarming(force = false) {
         }
         updateExposedState();
         
-        console.log(`[Better Boosted Maps] Starting boosted map farming: ${farmCheck.roomName}`);
-        
+        console.log(
+            `[Better Boosted Maps] Starting ${farmCheck.isFallback ? 'fallback' : 'boosted'} map farming: ${farmCheck.roomName}`
+        );
+
         // Show toast notification
-        showBoostedMapStartToast();
+        showBoostedMapStartToast(!!farmCheck.isFallback);
         
         // Close any open modals (3 ESC presses for consistency)
         console.log('[Better Boosted Maps] Clearing modals before navigation...');
@@ -5078,12 +5363,11 @@ async function startBoostedMapFarming(force = false) {
                 }
             }
             
-            const { floor } = getEffectiveMapAutomationSettings(
-                farmCheck.roomId,
-                farmingSettings,
-                farmCheck.equipId,
-                farmCheck.equipStat
-            );
+            const navAutomation = bbmResolveAutomationForFarmCheck(farmCheck, farmingSettings);
+            if (!navAutomation) {
+                throw new Error(`No automation settings resolved for room ${farmCheck.roomId}`);
+            }
+            const { floor } = navAutomation;
             console.log(`[Better Boosted Maps] Setting floor to ${floor} for map ${farmCheck.roomId}`);
             globalThis.state.board.trigger.setState({ fn: (prev) => ({ ...prev, floor: floor }) });
             await sleep(100);
@@ -5098,13 +5382,13 @@ async function startBoostedMapFarming(force = false) {
         // Check automation status after navigation
         if (!checkAutomationEnabled('after navigation')) return;
         
-        // Get user's selected setup method (per-map override when set)
-        const { setupMethod, autoRefillStamina: effectiveAutoRefill } = getEffectiveMapAutomationSettings(
-            farmCheck.roomId,
-            farmingSettings,
-            farmCheck.equipId,
-            farmCheck.equipStat
-        );
+        // Get user's selected setup method (per-map / Fallback tab override when set)
+        const setupAutomation = bbmResolveAutomationForFarmCheck(farmCheck, farmingSettings);
+        if (!setupAutomation) {
+            cancelBoostedMapFarming('No automation settings resolved after navigation');
+            return;
+        }
+        const { setupMethod, autoRefillStamina: effectiveAutoRefill } = setupAutomation;
         
         // Find and click the appropriate setup button
         console.log(`[Better Boosted Maps] Looking for ${setupMethod} button...`);
@@ -5222,7 +5506,9 @@ async function startBoostedMapFarming(force = false) {
         
         watchStaminaDepletion(handleStaminaDepletion);
         
-        console.log('[Better Boosted Maps] Boosted map farming started successfully');
+        console.log(
+            `[Better Boosted Maps] ${farmCheck.isFallback ? 'Fallback' : 'Boosted'} map farming started successfully`
+        );
     } catch (error) {
         console.error('[Better Boosted Maps] Error starting boosted map farming:', error);
         cancelBoostedMapFarming('Error during startup');
@@ -5414,12 +5700,10 @@ function checkBestiaryAutomatorHealth() {
 function validateSettingsAfterNavigation() {
     try {
         const settings = loadSettings();
-        const roomId = modState.farming.currentMapInfo?.roomId;
-        const equipId = modState.farming.currentMapInfo?.equipId;
-        const equipStat = modState.farming.currentMapInfo?.equipStat;
-        const effectiveRefill = roomId
-            ? getEffectiveMapAutomationSettings(roomId, settings, equipId, equipStat).autoRefillStamina
-            : !!settings.autoRefillStamina;
+        const mapInfo = modState.farming.currentMapInfo;
+        const isFallback = !!mapInfo?.isFallback;
+        const resolved = mapInfo?.roomId ? bbmResolveAutomationForFarmCheck(mapInfo, settings) : null;
+        const effectiveRefill = resolved ? resolved.autoRefillStamina : !!settings.autoRefillStamina;
         let validationIssues = [];
         
         // Validate Bestiary Automator settings if enabled
@@ -5437,13 +5721,13 @@ function validateSettingsAfterNavigation() {
             }
         }
         
-        // Validate boosted map settings
-        if (!settings.maps || Object.keys(settings.maps).length === 0) {
+        // Validate boosted map settings (irrelevant while farming the fallback map)
+        if (!isFallback && (!settings.maps || Object.keys(settings.maps).length === 0)) {
             validationIssues.push('No boosted maps configured');
         }
-        
+
         // Validate equipment settings
-        if (!settings.equipment || Object.keys(settings.equipment).length === 0) {
+        if (!isFallback && (!settings.equipment || Object.keys(settings.equipment).length === 0)) {
             validationIssues.push('No equipment configured');
         }
         
@@ -5497,7 +5781,9 @@ function checkAndStartBoostedMapFarming(force = false) {
     
     const farmCheck = shouldFarmBoostedMap();
     if (farmCheck.shouldFarm) {
-        console.log('[Better Boosted Maps] Conditions met - starting boosted map farming');
+        console.log(
+            `[Better Boosted Maps] Conditions met - starting ${farmCheck.isFallback ? 'fallback' : 'boosted'} map farming`
+        );
         if (canRunBoostedMaps() && !modState.farming.isActive) {
             startBoostedMapFarming(false);
         }
@@ -5653,6 +5939,7 @@ function exposeBoostedMapsState() {
             isYieldingToRaidHunter: modState.coordination.isRaidHunterActive,
             isYieldingToBetterTasker: modState.coordination.isBetterTaskerActive,
             isFarming: modState.farming.isActive,
+            isFallback: !!modState.farming.currentMapInfo?.isFallback,
             currentMap: modState.farming.currentMapInfo
         };
         
@@ -5763,10 +6050,17 @@ context.exports = {
             pageVisibilityHandler = null;
         }
         
+        // Must be cleared before closing the modal — its onClose would otherwise schedule a re-check
+        modState.fallbackSettingsChanged = false;
+        if (modState.fallbackRecheckTimer) {
+            clearTimeout(modState.fallbackRecheckTimer);
+            modState.fallbackRecheckTimer = null;
+        }
+
         if (modState.activeModal) {
             cleanupModal();
         }
-        
+
         // Reset farming state
         modState.farming.isActive = false;
         modState.farming.currentMapInfo = null;

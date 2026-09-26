@@ -1141,7 +1141,14 @@ function isBoostedMapFarmingValid() {
         if (!boostedState?.currentMap) {
             return modCoordActive;
         }
-        
+
+        // Fallback-tab map: chosen explicitly by the user, so the boosted-map Maps/Equipment
+        // ticks below don't apply to it.
+        if (boostedState.currentMap.isFallback) {
+            console.log('[Stamina Optimizer] Better Boosted Maps is farming its fallback map - will not stop');
+            return true;
+        }
+
         // Load Better Boosted Maps settings
         const settingsStr = localStorage.getItem('betterBoostedMapsSettings');
         if (!settingsStr) {

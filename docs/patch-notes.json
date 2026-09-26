@@ -4,6 +4,16 @@
   },
   "notes": [
     {
+      "version": "5.1.1",
+      "changes": [
+        {
+          "mod": "Better Boosted Maps",
+          "type": "added",
+          "text": "New Fallback tab: turn it on and pick a map, floor, setup method and auto-refill stamina to farm when today's boosted map won't be farmed (map or equipment unticked or excluded, the boost is on a raid, or no equipment rule matches). These choices apply only to fallback runs, and it switches back when a new boost can be farmed."
+        }
+      ]
+    },
+    {
       "version": "5.1.0",
       "changes": [
         {
