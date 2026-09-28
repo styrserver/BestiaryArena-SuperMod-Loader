@@ -8163,6 +8163,20 @@ function showSettingsModal() {
               <span style="cursor: help; font-size: 16px; color: #fff;" title="${t('mods.betterUI.huntIncludeDisenchantedEquipmentsTooltip')}">${t('mods.betterUI.huntIncludeDisenchantedEquipmentsLabel')}</span>
             </label>
           </div>
+          <div style="margin-bottom: 15px;">
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+              <input type="checkbox" id="hunt-analyzer-show-rates-toggle" style="transform: scale(1.2);">
+              <span style="cursor: help; font-size: 16px; color: #fff;" title="${t('mods.betterUI.huntShowRatesTooltip')}">${t('mods.betterUI.huntShowRatesLabel')}</span>
+            </label>
+          </div>
+          <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 10px;">
+            <span style="color: #ccc;">${t('mods.betterUI.huntSortLabel')}</span>
+            <select id="hunt-analyzer-sort-selector" style="width: fit-content; background: #333; color: #ccc; border: 1px solid #555; padding: 4px 20px 4px 10px; border-radius: 4px; pointer-events: auto;">
+              <option value="default">${t('mods.betterUI.huntSortDefault')}</option>
+              <option value="quantity">${t('mods.betterUI.huntSortQuantity')}</option>
+              <option value="rarity">${t('mods.betterUI.huntSortRarity')}</option>
+            </select>
+          </div>
           <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 10px;">
             <span style="color: #ccc;">${t('mods.betterUI.huntThemeLabel')}</span>
             <select id="hunt-analyzer-theme-selector" style="width: fit-content; background: #333; color: #ccc; border: 1px solid #555; padding: 4px 20px 4px 10px; border-radius: 4px; pointer-events: auto;">
@@ -9866,7 +9880,26 @@ function showSettingsModal() {
         settingsKey: 'includeDisenchantedEquipments',
         defaultChecked: true
       });
+
+      bindHuntAnalyzerCheckbox(content.querySelector('#hunt-analyzer-show-rates-toggle'), {
+        settingsKey: 'showDropRates',
+        defaultChecked: true,
+        // Redraw the loot/creature grids so the rate badges appear or disappear right away
+        onAfterWrite: () => window.refreshHuntAnalyzerGrids?.()
+      });
       
+      const huntAnalyzerSortSelector = content.querySelector('#hunt-analyzer-sort-selector');
+      if (huntAnalyzerSortSelector) {
+        const savedSort = readHuntAnalyzerSettings().gridSortBy;
+        huntAnalyzerSortSelector.value = ['quantity', 'rarity'].includes(savedSort) ? savedSort : 'default';
+        huntAnalyzerSortSelector.addEventListener('change', () => {
+          const newSort = huntAnalyzerSortSelector.value;
+          updateHuntAnalyzerSettings((s) => { s.gridSortBy = newSort; });
+          syncHuntAnalyzerRuntimeSetting('gridSortBy', newSort);
+          window.refreshHuntAnalyzerGrids?.();
+        });
+      }
+
       const huntAnalyzerThemeSelector = content.querySelector('#hunt-analyzer-theme-selector');
       if (huntAnalyzerThemeSelector) {
         // Dynamically populate theme options from Hunt Analyzer if available

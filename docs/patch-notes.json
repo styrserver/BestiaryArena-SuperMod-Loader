@@ -4,6 +4,61 @@
   },
   "notes": [
     {
+      "version": "5.1.2",
+      "changes": [
+        {
+          "mod": "Battle Helper",
+          "type": "changed",
+          "text": "Dropdown lists now use black text so options are easier to read."
+        },
+        {
+          "mod": "Battle Helper",
+          "type": "fixed",
+          "text": "Server errors when saving requests, setups or chat messages are now translated instead of always showing in English."
+        },
+        {
+          "mod": "Better Boosted Maps",
+          "type": "changed",
+          "text": "The Fallback tab's description is now shorter and clearer: it's a backup map farmed when your settings skip today's boosted map."
+        },
+        {
+          "mod": "Better Setups",
+          "type": "fixed",
+          "text": "The missing-equipment check (button, warning tooltip and results window) is now fully translated."
+        },
+        {
+          "mod": "Hunt Analyzer",
+          "type": "added",
+          "text": "New floor filter next to the map filter: loot, drops, totals and hourly rates can now be narrowed to one floor, and each filter only lists the maps or floors that go with the other. Floors are shown as difficulty percentages (100% to 400%). With a floor selected, the Clear button becomes Clear Floor and removes only that floor's battles and play time. Loot and creature icons now show a drop rate in the top right corner, coloured from red (rare) to green (common), showing the share of battles (for the current map and floor filter) that dropped it. The copied summary lists the same rate after each loot and creature line in a map's section."
+        },
+        {
+          "mod": "Hunt Analyzer",
+          "type": "changed",
+          "text": "Playtime is now split into battle time and idle time (between battles or away): Playtime and the copied summary's Time show the total with the split next to it (overall, per map and per floor; hover Playtime in the panel), and all hourly rates use battle time, so leaving the panel open no longer drags rates down. The copied summary also splits each map into floors (battles, W/L, time, gold, experience and hourly rates per floor), and only includes the map and floor you've filtered to. The panel also uses much less memory and CPU during long hunts, and console logging is down to one line per battle. The panel is restyled to match Better Analytics in every theme: titles without glow, flatter buttons that light up in the accent colour, framed map and floor dropdowns and square corners. The Creature Drops section is now titled Creatures."
+        },
+        {
+          "mod": "Hunt Analyzer",
+          "type": "fixed",
+          "text": "Short hunts no longer show a few seconds of time and huge hourly rates in the copied summary. Clear Map now also removes that map's battles and play time from the overall totals. After reloading the page, loot no longer lists the same item twice (for example two Gold lines). Disabling or reloading the mod now shuts it down completely (before, it kept listening for battles and held on to its data), and clicking the panel's title bar without dragging no longer moves the panel."
+        },
+        {
+          "mod": "Map Editor",
+          "type": "added",
+          "text": "Workshop tab: new Backup all saves and Restore saves buttons. Backup downloads every save on every map as one compact JSON file, each labeled with its custom map name; Restore merges a backup back in (adds missing saves, updates older copies, never deletes)."
+        },
+        {
+          "mod": "Map Editor",
+          "type": "changed",
+          "text": "Export Map (JSON) now includes the name of the save or workshop map applied to the map (also in the file name), and Import shows that name when loading it."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "added",
+          "text": "Hunt Analyzer tab: new Show drop rates option (on by default) to show or hide the drop-rate badges on loot and creature icons, and a Sort loot & creatures by list (type, quantity or rarity) for the panel grids."
+        }
+      ]
+    },
+    {
       "version": "5.1.1",
       "changes": [
         {

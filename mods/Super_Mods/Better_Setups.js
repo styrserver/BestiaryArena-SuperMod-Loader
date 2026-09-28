@@ -575,24 +575,30 @@ function updateSettingsMissingEquipmentWarningBadge(settingsButton) {
       <span aria-hidden="true" style="display:inline-flex;align-items:center;color:#f4d35e;">&#9888;</span>
       <span>${settingsText}</span>
     `;
-    settingsButton.title = `${missingCount} setup${missingCount === 1 ? '' : 's'} missing equipment`;
+    settingsButton.title = formatMissingEquipmentSetupCount(missingCount);
   } else {
     settingsButton.textContent = settingsText;
     settingsButton.removeAttribute('title');
   }
 }
 
+function formatMissingEquipmentSetupCount(count) {
+  return count === 1
+    ? t('mods.betterSetups.auditMissingCountOne')
+    : tReplace('mods.betterSetups.auditMissingCountMany', { n: String(count) });
+}
+
 function updateMissingEquipmentAuditButtonWarningBadge(button) {
   if (!button) return;
   const missingCount = getCachedMissingEquipmentSetupCount();
-  const label = 'Show setups with missing equipment';
+  const label = t('mods.betterSetups.auditButton');
 
   if (missingCount > 0) {
     button.innerHTML = `
       <span aria-hidden="true" style="display:inline-flex;align-items:center;color:#f4d35e;">&#9888;</span>
       <span>${label}</span>
     `;
-    button.title = `${missingCount} setup${missingCount === 1 ? '' : 's'} missing equipment`;
+    button.title = formatMissingEquipmentSetupCount(missingCount);
   } else {
     button.textContent = label;
     button.removeAttribute('title');
@@ -2290,7 +2296,7 @@ function renderLabelsSettingsPanel(container) {
   const actionsRow = document.createElement('div');
   actionsRow.style.cssText = 'display: flex; align-items: center; gap: 6px; margin: 8px 0 0 0; flex-shrink: 0;';
 
-  const auditMissingEquipmentBtn = createSettingsActionButton('Show setups with missing equipment', { variant: 'secondary' });
+  const auditMissingEquipmentBtn = createSettingsActionButton(t('mods.betterSetups.auditButton'), { variant: 'secondary' });
   auditMissingEquipmentBtn.style.width = '100%';
   updateMissingEquipmentAuditButtonWarningBadge(auditMissingEquipmentBtn);
   auditMissingEquipmentBtn.onclick = () => {
@@ -2487,7 +2493,7 @@ function navigateToSetupMapFromAudit(entry) {
 
 function formatMissingEquipmentAuditItem(item) {
   if (item.reason === 'missingById') {
-    return `Unknown equipment (saved id: ${item.equipId})`;
+    return tReplace('mods.betterSetups.auditUnknownEquipment', { id: String(item.equipId) });
   }
 
   const statLabel = formatSetupEquipmentStatLabel(item.stat);
@@ -2495,7 +2501,7 @@ function formatMissingEquipmentAuditItem(item) {
   if (item.name) {
     return `${titleCaseSetupName(item.name)} ${statLabel} T${tierLabel}`;
   }
-  return `Equipment #${item.gameId} ${statLabel} T${tierLabel}`;
+  return `${tReplace('mods.betterSetups.auditEquipmentById', { id: String(item.gameId) })} ${statLabel} T${tierLabel}`;
 }
 
 function findSetupsWithMissingEquipment() {
@@ -2507,7 +2513,7 @@ function findSetupsWithMissingEquipment() {
     const missingItems = analyzeSetupMissingEquipment(entry.pieces, availability);
     if (!missingItems.length) return;
     const mapId = extractMapIdFromSetupStorageKey(entry.label, entry.key);
-    const mapName = mapId ? (globalThis.state?.utils?.ROOM_NAME?.[mapId] || mapId) : 'Unknown Map';
+    const mapName = mapId ? (globalThis.state?.utils?.ROOM_NAME?.[mapId] || mapId) : t('mods.betterSetups.unknownMap');
     results.push({
       ...entry,
       mapId,
@@ -2540,7 +2546,10 @@ function showMissingEquipmentAuditModal() {
 
     const description = document.createElement('p');
     description.style.cssText = 'margin:0;color:#fff;font-size:12px;line-height:1.4;';
-    description.textContent = `Scanned ${totalScanned} saved setup${totalScanned === 1 ? '' : 's'}. Found ${results.length} setup${results.length === 1 ? '' : 's'} with missing equipment.`;
+    description.textContent = tReplace('mods.betterSetups.auditSummary', {
+      scanned: String(totalScanned),
+      found: String(results.length)
+    });
     content.appendChild(description);
 
     const list = document.createElement('div');

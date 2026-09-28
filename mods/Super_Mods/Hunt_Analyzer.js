@@ -61,7 +61,7 @@ const HUNT_ANALYZER_THEMES = {
       // Text colors
       text: '#ABB2BF',
       textSecondary: '#FFFFFF',
-      textAccent: '#E06C75',  // Room title, section titles
+      textAccent: '#E06C75',  // Room title, section titles, active/hover
       textStats: '#98C379',   // Stats text
       textInfo: '#61AFEF',    // Info text (sessions, playtime)
       textGold: '#E5C07B',    // Gold color
@@ -411,10 +411,13 @@ const HUNT_ANALYZER_INFO_ELEMENT_IDS = [
   'mod-win-loss-display'
 ];
 
+// Section headings ("Loot", "Creatures") look like the map name: 14px bold in the theme accent, no glow.
 function applyAccentTitleStyle(element) {
   if (!element) return;
   element.style.color = getThemeColor('textAccent');
-  element.style.textShadow = `${getThemeColor('textShadow')} 0px 0px 5px`;
+  element.style.textShadow = 'none';
+  element.style.fontSize = '14px';
+  element.style.fontWeight = 'bold';
 }
 
 function applyThemeFramedDisplaySurface(element) {
@@ -427,7 +430,8 @@ function applyThemeFramedDisplaySurface(element) {
 
 function applyThemeMapFilterDropdownStyles(dropdownButton, dropdownMenu) {
   if (dropdownButton) {
-    dropdownButton.style.border = `1px solid ${getThemeColor('border')}`;
+    dropdownButton.style.border = '4px solid transparent';
+    dropdownButton.style.borderImage = 'var(--ha-frame-1)';
     dropdownButton.style.backgroundColor = getThemeColor('dropdownBackground');
     dropdownButton.style.color = getThemeColor('text');
   }
@@ -537,7 +541,6 @@ function injectHuntAnalyzerStyles() {
             display: flex;
             flex-direction: column;
             font-family: Inter, sans-serif;
-            border-radius: 6px;
             box-shadow: 0 0 15px var(--ha-panel-shadow);
         }
         
@@ -572,7 +575,6 @@ function injectHuntAnalyzerStyles() {
             font-size: 14px;
             color: var(--ha-text-accent);
             font-weight: bold;
-            text-shadow: 0 0 5px var(--ha-text-shadow);
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
@@ -600,21 +602,18 @@ function injectHuntAnalyzerStyles() {
             white-space: nowrap;
             box-sizing: border-box;
             cursor: pointer;
-            transition: color 0.2s, border-image 0.1s, filter 0.15s;
-            box-shadow: 0 2px 5px var(--ha-button-shadow);
+            transition: color 0.15s, border-image 0.1s;
             flex-grow: 1;
             min-height: 24px;
             line-height: 1.1;
         }
         
         .ha-styled-button:hover {
-            color: var(--ha-text-secondary);
-            filter: brightness(1.12);
+            color: var(--ha-text-accent);
         }
         
         .ha-styled-button:active {
             border-image: var(--ha-frame-1-pressed);
-            filter: brightness(0.95);
         }
 
         .button-container {
@@ -660,8 +659,8 @@ function injectHuntAnalyzerStyles() {
         }
 
         #mod-map-filter-dropdown-button {
-            width: 200px;
-            min-width: 200px;
+            width: 100%;
+            min-width: 0;
             max-width: 200px;
             box-sizing: border-box;
             overflow: hidden;
@@ -679,17 +678,20 @@ function injectHuntAnalyzerStyles() {
             flex: 0 0 auto;
         }
 
-        #mod-map-filter-dropdown-menu [data-map-filter-option] {
+        #mod-map-filter-dropdown-menu [data-map-filter-option],
+        #mod-floor-filter-dropdown-menu [data-map-filter-option] {
             color: var(--ha-text);
             background-color: transparent;
         }
 
-        #mod-map-filter-dropdown-menu [data-map-filter-option][data-selected="true"] {
+        #mod-map-filter-dropdown-menu [data-map-filter-option][data-selected="true"],
+        #mod-floor-filter-dropdown-menu [data-map-filter-option][data-selected="true"] {
             background-color: var(--ha-dropdown-option-selected);
-            color: var(--ha-text-secondary);
+            color: var(--ha-text-accent);
         }
 
-        #mod-map-filter-dropdown-menu [data-map-filter-option][data-selected="false"]:hover {
+        #mod-map-filter-dropdown-menu [data-map-filter-option][data-selected="false"]:hover,
+        #mod-floor-filter-dropdown-menu [data-map-filter-option][data-selected="false"]:hover {
             background-color: var(--ha-dropdown-option-hover);
         }
         
@@ -713,7 +715,7 @@ function injectHuntAnalyzerStyles() {
         
         .ha-icon-button:hover {
             background-color: var(--ha-button-icon-hover);
-            color: var(--ha-text-secondary);
+            color: var(--ha-text-accent);
         }
         
         .ha-icon-button:active {
@@ -749,7 +751,6 @@ function injectHuntAnalyzerStyles() {
             font-size: 14px;
             color: var(--ha-text-accent);
             font-weight: bold;
-            text-shadow: var(--ha-text-shadow) 0px 0px 5px;
         }
         
         .ha-display-content {
@@ -840,6 +841,24 @@ function compareCreatureEntries(a, b) {
     return 0;
 }
 
+// Panel grid order, chosen in Mod Settings ("Sort loot & creatures by"). 'default' = the type order
+// above; the others fall back to it for ties. The copied summary always uses the type order.
+const HUNT_ANALYZER_GRID_SORT_MODES = ['default', 'quantity', 'rarity'];
+
+function getGridSortMode() {
+    const mode = HuntAnalyzerState.settings.gridSortBy;
+    return HUNT_ANALYZER_GRID_SORT_MODES.includes(mode) ? mode : 'default';
+}
+
+// Sorts the panel's loot or creature grid entries in place; getRarity reads the per-kind rarity.
+function sortGridEntries(entries, fallbackCompare, { getRarity }) {
+    const primary = {
+        quantity: (a, b) => (b.count || 0) - (a.count || 0),
+        rarity: (a, b) => getRarity(b) - getRarity(a)
+    }[getGridSortMode()];
+    return entries.sort(primary ? (a, b) => primary(a, b) || fallbackCompare(a, b) : fallbackCompare);
+}
+
 function applyFramedSectionStyles(element, { noTopMargin = false } = {}) {
     if (!element) return;
     element.style.backgroundImage = getThemeBackground('section');
@@ -851,6 +870,10 @@ function applyFramedSectionStyles(element, { noTopMargin = false } = {}) {
     element.style.borderImage = UI_LAYOUT.FRAME_BORDER_IMAGE;
     element.style.boxSizing = 'border-box';
 }
+
+// Reset functions of confirm buttons currently armed, so closing the panel can disarm them
+// (an armed button holds a document mousedown listener and a timeout).
+const armedInlineConfirmResets = new Set();
 
 function attachInlineConfirm(button, { baseText, confirmText, onConfirm, timeoutMs = 4000 }) {
     if (!button || typeof onConfirm !== 'function') return;
@@ -866,6 +889,7 @@ function attachInlineConfirm(button, { baseText, confirmText, onConfirm, timeout
     const originalFilter = button.style.filter || '';
 
     const resetState = () => {
+        armedInlineConfirmResets.delete(resetState);
         button.dataset.confirmArmed = 'false';
         button.textContent = resolveBaseText();
         button.style.width = fixedConfirmWidth || originalWidth;
@@ -904,6 +928,7 @@ function attachInlineConfirm(button, { baseText, confirmText, onConfirm, timeout
                 }
             };
             document.addEventListener('mousedown', outsideClickHandler, true);
+            armedInlineConfirmResets.add(resetState);
             return;
         }
 
@@ -913,6 +938,9 @@ function attachInlineConfirm(button, { baseText, confirmText, onConfirm, timeout
 }
 
 function getClearButtonLabel() {
+    if (HuntAnalyzerState.ui.selectedFloorFilter !== 'ALL') {
+        return t('mods.huntAnalyzer.clearFloor');
+    }
     if (HuntAnalyzerState.ui.selectedMapFilter === 'ALL') {
         return t('mods.huntAnalyzer.clearAll');
     }
@@ -970,27 +998,92 @@ function navigateToSelectedMapFilter() {
     return true;
 }
 
+// Removes the battles on the selected floor (within the selected map, or on every map when the
+// map filter is ALL), along with that floor's play time, so remaining totals and rates stay right.
+function clearSelectedFloorData() {
+    const tt = HuntAnalyzerState.timeTracking;
+    const mapFilter = HuntAnalyzerState.ui.selectedMapFilter;
+    const floorFilter = HuntAnalyzerState.ui.selectedFloorFilter;
+
+    // Bank the running segment into the clocks first so the removed time is complete
+    snapshotIntoTotals();
+
+    const affectedMaps = new Set();
+    HuntAnalyzerState.data.sessions.forEach((session) => {
+        if (sessionMatchesFilters(session) && session.roomName) affectedMaps.add(session.roomName);
+    });
+    for (const key of tt.floorTimeMs.keys()) {
+        const parsed = parseFloorTimeKey(key);
+        if (parsed && parsed.floor === floorFilter && (mapFilter === 'ALL' || parsed.roomName === mapFilter)) {
+            affectedMaps.add(parsed.roomName);
+        }
+    }
+
+    // Measure every map before deleting anything: the estimate for older battles depends on
+    // the sessions and clocks that are still present.
+    const removedMsByMap = new Map();
+    affectedMaps.forEach((mapName) => {
+        removedMsByMap.set(mapName, getFloorFilteredTimeMs(mapName, floorFilter));
+    });
+    removedMsByMap.forEach((removedMs, mapName) => {
+        const remainingMapMs = (tt.mapTimeMs.get(mapName) || 0) - removedMs;
+        if (remainingMapMs > 0) tt.mapTimeMs.set(mapName, remainingMapMs);
+        else tt.mapTimeMs.delete(mapName);
+        tt.accumulatedTimeMs = Math.max(0, tt.accumulatedTimeMs - removedMs);
+        const floorKey = getFloorTimeKey(mapName, floorFilter);
+        if (floorKey) tt.floorTimeMs.delete(floorKey);
+    });
+
+    const before = HuntAnalyzerState.data.sessions.length;
+    HuntAnalyzerState.data.sessions = HuntAnalyzerState.data.sessions.filter((session) => !sessionMatchesFilters(session));
+    const removedCount = before - HuntAnalyzerState.data.sessions.length;
+    HuntAnalyzerState.session.count = Math.max(0, (HuntAnalyzerState.session.count || 0) - removedCount);
+
+    // Stay on the map if it still has battles; the floor filter always returns to ALL
+    HuntAnalyzerState.ui.selectedFloorFilter = "ALL";
+    if (mapFilter !== 'ALL' && !HuntAnalyzerState.data.sessions.some((s) => s.roomName === mapFilter)) {
+        HuntAnalyzerState.ui.selectedMapFilter = "ALL";
+    }
+    dataProcessor.aggregateData();
+    flushPersistenceIfEnabled();
+}
+
 function clearAnalyzerDataAndRefresh() {
     const selectedMapFilter = HuntAnalyzerState.ui.selectedMapFilter;
     let resetFeedbackText = t('mods.huntAnalyzer.dataReset');
-    if (selectedMapFilter === 'ALL') {
+    if (HuntAnalyzerState.ui.selectedFloorFilter !== 'ALL') {
+        clearSelectedFloorData();
+        resetFeedbackText = t('mods.huntAnalyzer.floorReset');
+    } else if (selectedMapFilter === 'ALL') {
         resetHuntAnalyzerState();
     } else {
         const selectedMapRoomId = getRoomIdByMapName(selectedMapFilter);
+        // Bank the running segment, then take this map's time and battles out of the overall totals
+        snapshotIntoTotals();
+        const removedMapMs = HuntAnalyzerState.timeTracking.mapTimeMs.get(selectedMapFilter) || 0;
+        HuntAnalyzerState.timeTracking.accumulatedTimeMs = Math.max(0, HuntAnalyzerState.timeTracking.accumulatedTimeMs - removedMapMs);
+        const sessionsBefore = HuntAnalyzerState.data.sessions.length;
         HuntAnalyzerState.data.sessions = HuntAnalyzerState.data.sessions.filter(
             session => (
                 session.roomName !== selectedMapFilter &&
                 (selectedMapRoomId === null || String(session.roomId) !== String(selectedMapRoomId))
             )
         );
+        const removedSessionCount = sessionsBefore - HuntAnalyzerState.data.sessions.length;
+        HuntAnalyzerState.session.count = Math.max(0, (HuntAnalyzerState.session.count || 0) - removedSessionCount);
         HuntAnalyzerState.timeTracking.mapTimeMs.delete(selectedMapFilter);
+        for (const key of Array.from(HuntAnalyzerState.timeTracking.floorTimeMs.keys())) {
+            if (parseFloorTimeKey(key)?.roomName === selectedMapFilter) {
+                HuntAnalyzerState.timeTracking.floorTimeMs.delete(key);
+            }
+        }
         if (HuntAnalyzerState.timeTracking.currentMap === selectedMapFilter) {
             HuntAnalyzerState.timeTracking.currentMap = null;
-            HuntAnalyzerState.timeTracking.mapStartTime = 0;
         }
 
-        // Always return the filter to ALL after a scoped clear.
+        // Always return the filters to ALL after a scoped clear.
         HuntAnalyzerState.ui.selectedMapFilter = "ALL";
+        HuntAnalyzerState.ui.selectedFloorFilter = "ALL";
         dataProcessor.aggregateData();
         flushPersistenceIfEnabled();
         resetFeedbackText = getMapResetLabel();
@@ -1046,19 +1139,6 @@ function showPanelFeedback(panel, text, isSuccess = true) {
     }, 1500);
 }
 
-// Throttling for frequent updates
-let lastUpdateLogTime = 0;
-
-// Track last known values to avoid unnecessary updates
-let lastKnownSessionCount = 0;
-let lastKnownGold = 0;
-let lastKnownDust = 0;
-let lastKnownShiny = 0;
-let lastKnownSealed = 0;
-
-// Throttling for board subscription to avoid interfering with animations
-let lastBoardSubscriptionTime = 0;
-
 // =======================
 // 2.2. Constants & Globals
 // =======================
@@ -1088,37 +1168,16 @@ const LAYOUT_DIMENSIONS = {
 // 2.3. Configuration Constants
 // =======================
 const CONFIG = {
-    // Throttling and timing
-    UPDATE_LOG_THROTTLE: 30000, // 30 seconds
-    BOARD_SUBSCRIPTION_THROTTLE: 100, // 100ms
-    
-    // Panel positioning and sizing
-    PANEL_DEFAULT_TOP: 50,
-    PANEL_DEFAULT_LEFT: 10,
-    PANEL_GAP: 10,
-    
-    // Resize handles
-    RESIZE_EDGE_SIZE: 8,
-    RESIZE_HANDLE_SIZE: 6,
-    RESIZE_CORNER_SIZE: 12,
-    
-    // UI styling
-    ICON_SIZE: 36,
-    SMALL_ICON_SIZE: 12,
-    BUTTON_PADDING: '6px 12px',
-    ICON_BUTTON_PADDING: '2px 6px',
-    
     // Item processing
     GOLD_SPRITE_ID: 3031,
     HEAL_POTION_SPRITE_ID: 10327,
-    
-    // Stamina recovery values
+
+    // Stamina recovery per potion tier; Supreme (5) refills to max stamina, see getPlayerMaxStamina()
     STAMINA_RECOVERY: {
         1: 12,  // Mini
-        2: 24,  // Strong  
+        2: 24,  // Strong
         3: 48,  // Great
-        4: 96,  // Ultimate
-        5: null  // Supreme (will be set to player's max stamina, capped at 360)
+        4: 96   // Ultimate
     },
     
     // Auto-save interval (30 seconds)
@@ -1140,9 +1199,7 @@ const DEMONIC_CONFIRM_BG = 'url(/_next/static/media/background-red.21d3f4bd.png)
 const HuntAnalyzerState = {
   session: {
     count: 0,
-    startTime: 0,
-    isActive: false,
-    sessionStartTime: 0
+    startTime: 0
   },
   totals: {
     gold: 0,
@@ -1166,10 +1223,10 @@ const HuntAnalyzerState = {
     aggregatedCreatures: new Map()
   },
   ui: {
-    updateIntervalId: null,
     lastSeed: null,
-    autoplayLogText: "",
-    selectedMapFilter: "ALL"
+    selectedMapFilter: "ALL",
+    // "ALL", a floor number, or "UNKNOWN" (legacy sessions recorded before floor capture)
+    selectedFloorFilter: "ALL"
   },
   settings: (() => {
     const settings = {
@@ -1218,11 +1275,15 @@ const HuntAnalyzerState = {
   // Internal clock system — wall-clock ms via Date.now(), paused/resumed by game events
   timeTracking: {
     currentMap: null,
-    mapStartTime: 0,
     accumulatedTimeMs: 0, // Total time accumulated across all maps
     mapTimeMs: new Map(), // Time per map: Map<roomName, timeMs>
+    currentFloor: null,
+    floorTimeMs: new Map(), // Time per map+floor: Map<"roomName|floor", timeMs>
+    // Battles before this had no per-floor clock (see getFloorFilteredTimeMs)
+    floorClockStartedAt: Date.now(),
     clockIntervalId: null,
     liveSegmentStartMs: 0, // Date.now() when the current live segment started; 0 = paused
+    currentBattle: null, // { startMs, endMs, session } for the battle being timed (not persisted)
     // When true, wait for the next newGame before resuming manual timing (set on map change)
     waitingForManualStart: false,
     // When true, playtime clock stays idle until the first newGame (battle start)
@@ -1242,10 +1303,6 @@ function getCurrentMode() {
   } catch (_e) {
     return 'none';
   }
-}
-
-function huntAnalyzerHasRecordedBattles() {
-  return HuntAnalyzerState.data.sessions.length > 0;
 }
 
 function huntAnalyzerTimerArmed() {
@@ -1350,6 +1407,11 @@ function pauseLiveSegment() {
     if (HuntAnalyzerState.timeTracking.currentMap) {
       const prevMapTime = HuntAnalyzerState.timeTracking.mapTimeMs.get(HuntAnalyzerState.timeTracking.currentMap) || 0;
       HuntAnalyzerState.timeTracking.mapTimeMs.set(HuntAnalyzerState.timeTracking.currentMap, prevMapTime + liveMs);
+      const floorKey = getFloorTimeKey(HuntAnalyzerState.timeTracking.currentMap, HuntAnalyzerState.timeTracking.currentFloor);
+      if (floorKey) {
+        const prevFloorTime = HuntAnalyzerState.timeTracking.floorTimeMs.get(floorKey) || 0;
+        HuntAnalyzerState.timeTracking.floorTimeMs.set(floorKey, prevFloorTime + liveMs);
+      }
     }
   }
   HuntAnalyzerState.timeTracking.liveSegmentStartMs = 0;
@@ -1440,7 +1502,6 @@ function slimCreatureForPersistence(creature) {
         totalStats: creature.totalStats,
         gameId: creature.gameId,
         creatureId: creature.creatureId ?? null,
-        sellValue: parsePossibleGoldValue(creature.sellValue),
         isShiny: !!creature.isShiny,
         isSealed: !!creature.isSealed
     };
@@ -1480,6 +1541,15 @@ function applyTotalsSnapshot(snapshot, target = HuntAnalyzerState.totals) {
 
 function resetTotalsCounters() {
     applyTotalsSnapshot({}, HuntAnalyzerState.totals);
+}
+
+// Totals that aggregateData() recomputes from battle records (Dragon Plant totals are event-based).
+const HUNT_ANALYZER_AGGREGATED_TOTAL_KEYS = HUNT_ANALYZER_TOTAL_COUNTER_KEYS.filter((key) => !key.startsWith('dragonPlant'));
+
+function resetAggregatedTotals() {
+    for (const key of HUNT_ANALYZER_AGGREGATED_TOTAL_KEYS) {
+        HuntAnalyzerState.totals[key] = 0;
+    }
 }
 
 function mergeTotalsPreferHigher(persisted, derived) {
@@ -1578,7 +1648,6 @@ function getHuntAnalyzerStorageResetDismissHint() {
 class DOMCache {
   constructor() {
     this.elements = new Map();
-    this.itemVisuals = new Map();
   }
 
   get(id) {
@@ -1597,15 +1666,6 @@ class DOMCache {
 
   clear() {
     this.elements.clear();
-    this.itemVisuals.clear();
-  }
-
-  getItemVisual(key) {
-    return this.itemVisuals.get(key);
-  }
-
-  setItemVisual(key, visual) {
-    this.itemVisuals.set(key, visual);
   }
 }
 
@@ -1668,19 +1728,296 @@ function updateInternalClock() {
 // Track map change and start timing for new map
 function trackMapChange(roomName) {
   HuntAnalyzerState.timeTracking.currentMap = roomName;
-  HuntAnalyzerState.timeTracking.mapStartTime = Date.now();
+}
+
+// Track floor change: bank live time against the previous floor before switching.
+// With no floor known yet (fresh reset), the running segment belongs to the floor we just
+// learned — banking it first would file it under no floor and drop it from every floor line.
+function trackFloorChange(floor) {
+  if (!Number.isInteger(floor) || HuntAnalyzerState.timeTracking.currentFloor === floor) return;
+  if (Number.isInteger(HuntAnalyzerState.timeTracking.currentFloor)) snapshotIntoTotals();
+  HuntAnalyzerState.timeTracking.currentFloor = floor;
+}
+
+function getBoardFloor() {
+  const floor = globalThis.state?.board?.getSnapshot?.()?.context?.floor;
+  return Number.isInteger(floor) ? floor : null;
+}
+
+function getBoardRoomName() {
+  const roomId = getCurrentRoomIdForDisplay();
+  return roomId ? getRoomDisplayName(roomId) : null;
+}
+
+// Point the map clock at the board's map. Time already running belongs to the previous map, so
+// it is banked first — unless no map was known yet, in which case it belongs to this one.
+function syncMapClockToRoom(roomName) {
+  const tt = HuntAnalyzerState.timeTracking;
+  if (!roomName || tt.currentMap === roomName) return;
+  if (tt.currentMap) snapshotIntoTotals();
+  trackMapChange(roomName);
+}
+
+// The board is the source of truth for where the next battle is fought.
+function syncClockToBoard() {
+  syncMapClockToRoom(getBoardRoomName());
+  trackFloorChange(getBoardFloor());
+}
+
+function getFloorTimeKey(roomName, floor) {
+  return roomName && Number.isInteger(floor) ? `${roomName}|${floor}` : null;
+}
+
+function parseFloorTimeKey(key) {
+  const sep = typeof key === 'string' ? key.lastIndexOf('|') : -1;
+  if (sep <= 0) return null;
+  const floor = Number(key.slice(sep + 1));
+  return Number.isInteger(floor) ? { roomName: key.slice(0, sep), floor } : null;
+}
+
+function sessionMatchesMapFilter(session, mapFilter = HuntAnalyzerState.ui.selectedMapFilter) {
+  return mapFilter === 'ALL' || session?.roomName === mapFilter;
+}
+
+function sessionMatchesFloorFilter(session, floorFilter = HuntAnalyzerState.ui.selectedFloorFilter) {
+  if (floorFilter === 'ALL') return true;
+  if (floorFilter === 'UNKNOWN') return !Number.isInteger(session?.floor);
+  return session?.floor === floorFilter;
+}
+
+function sessionMatchesFilters(session) {
+  return sessionMatchesMapFilter(session) && sessionMatchesFloorFilter(session);
+}
+
+// Session-derived values are memoised because the panel re-reads them every second, while they
+// only change when a battle is added, the list is replaced/cleared, or a battle is edited in place.
+// The first two are detected from the array's identity and length; in-place edits (captured
+// sell/disenchant values) must call markSessionDataChanged().
+let huntAnalyzerSessionDataRevision = 0;
+let sessionMemoKey = null;
+const sessionMemo = new Map();
+
+function markSessionDataChanged() {
+  huntAnalyzerSessionDataRevision++;
+}
+
+function memoizeForSessions(key, compute) {
+  const sessions = HuntAnalyzerState.data.sessions;
+  if (!sessionMemoKey
+    || sessionMemoKey.sessions !== sessions
+    || sessionMemoKey.length !== sessions.length
+    || sessionMemoKey.revision !== huntAnalyzerSessionDataRevision) {
+    sessionMemo.clear();
+    sessionMemoKey = { sessions, length: sessions.length, revision: huntAnalyzerSessionDataRevision };
+  }
+  if (!sessionMemo.has(key)) sessionMemo.set(key, compute(sessions));
+  return sessionMemo.get(key);
+}
+
+// One pass over the battles matching the current map/floor filters.
+function getFilteredSessionStats() {
+  const { selectedMapFilter, selectedFloorFilter } = HuntAnalyzerState.ui;
+  return memoizeForSessions(`stats\u0000${selectedMapFilter}\u0000${selectedFloorFilter}`, (sessions) => {
+    const stats = { count: 0, lootGold: 0, creatureSellGold: 0, lootDust: 0, disenchantDust: 0, creatureSqueezeDust: 0 };
+    for (const session of sessions) {
+      if (!sessionMatchesFilters(session)) continue;
+      const { gold, dust } = getSessionGoldAndDust(session);
+      stats.count++;
+      stats.lootGold += gold;
+      stats.creatureSellGold += getSessionCreatureSellValue(session);
+      stats.lootDust += Math.max(0, dust);
+      stats.disenchantDust += Math.max(0, getSessionDisenchantDustValue(session));
+      stats.creatureSqueezeDust += Math.max(0, getSessionCreatureSqueezeDustValue(session));
+    }
+    return stats;
+  });
+}
+
+function getMapSessionCount(roomName) {
+  return memoizeForSessions(`mapCount\u0000${roomName}`,
+    (sessions) => sessions.reduce((n, s) => n + (s.roomName === roomName ? 1 : 0), 0));
 }
 
 // Wall-clock span from session timestamps for one map (used when per-map clock ms is missing).
 function getMapSessionWallClockSpanMs(roomName) {
-  const list = HuntAnalyzerState.data.sessions.filter(s => s.roomName === roomName);
-  const ts = list.map(s => s.timestamp).filter(t => typeof t === 'number' && t > 0);
-  if (ts.length < 2) return 0;
-  return Math.max(0, Math.max(...ts) - Math.min(...ts));
+  return memoizeForSessions(`mapSpan\u0000${roomName}`, (sessions) => {
+    let min = Infinity;
+    let max = -Infinity;
+    let n = 0;
+    for (const s of sessions) {
+      if (s.roomName !== roomName || !(typeof s.timestamp === 'number' && s.timestamp > 0)) continue;
+      n++;
+      if (s.timestamp < min) min = s.timestamp;
+      if (s.timestamp > max) max = s.timestamp;
+    }
+    return n < 2 ? 0 : Math.max(0, max - min);
+  });
 }
 
-// Get filtered time for rate calculations
+// Battle time: newGame -> world.onGameEnd, stored per battle, so it always lands on the right map
+// and floor. The server result (serverResults) arrives right after newGame — before the fight has
+// played out — so the battle record exists first and its duration is filled in when the game ends.
+// Battles without a duration (missed events, recorded before this existed) count as the average
+// known battle; with no known battle at all the caller falls back to the playtime clock.
+const MAX_BATTLE_DURATION_MS = 30 * 60 * 1000;
+
+let lastBattleEndMs = 0; // when the previous timed battle ended; starts the idle timer
+
+function formatSecondsForLog(ms) {
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
+// One prefix for all battle-timing lines. The normal path logs one line per battle (in
+// applyBattleDuration); everything else here only logs when timing goes wrong.
+function logBattleTiming(message, ...details) {
+  console.log(`[Hunt Analyzer] Battle timing: ${message}`, ...details);
+}
+
+// newGame: start timing this battle and stop it when its world reports the end.
+function beginBattleTiming(world) {
+  const now = Date.now();
+  const previous = HuntAnalyzerState.timeTracking.currentBattle;
+  if (previous && !previous.endMs) {
+    logBattleTiming(`previous battle never reported its end after ${formatSecondsForLog(now - previous.startMs)}; it keeps no duration`);
+  }
+
+  // Idle timer: gap since the previous battle ended (reward screen, restart, time away). Measured
+  // directly — the playtime clock is paused between battles in some modes, so it can't give idle.
+  const idleBeforeMs = lastBattleEndMs > 0 ? Math.max(0, now - lastBattleEndMs) : null;
+  const battle = { startMs: now, endMs: 0, resultAfterMs: null, session: null, idleBeforeMs };
+  HuntAnalyzerState.timeTracking.currentBattle = battle;
+  if (typeof world?.onGameEnd?.once !== 'function') {
+    logBattleTiming('no end signal (world.onGameEnd) for this battle; it keeps no duration');
+    return;
+  }
+  try {
+    world.onGameEnd.once(() => {
+      battle.endMs = Date.now();
+      lastBattleEndMs = battle.endMs;
+      applyBattleDuration(battle);
+    });
+  } catch (e) {
+    logBattleTiming('could not subscribe to onGameEnd', e);
+  }
+}
+
+// Result processed: link the new battle record to the battle being timed.
+function attachSessionToCurrentBattle(sessionData) {
+  const battle = HuntAnalyzerState.timeTracking.currentBattle;
+  if (!battle || battle.session) {
+    logBattleTiming(`result arrived with no battle being timed (${battle ? 'already linked' : 'no newGame seen'}); it keeps no duration`);
+    return;
+  }
+  battle.session = sessionData;
+  battle.resultAfterMs = Date.now() - battle.startMs;
+  sessionData.idleBeforeMs = battle.idleBeforeMs;
+  applyBattleDuration(battle);
+}
+
+// Writes the duration once both the end time and the battle record are known (either order),
+// then logs the battle in one line with the running totals for the current filters.
+function applyBattleDuration(battle) {
+  if (!battle.session || !battle.endMs) return;
+  if (HuntAnalyzerState.timeTracking.currentBattle === battle) {
+    HuntAnalyzerState.timeTracking.currentBattle = null;
+  }
+  const ms = battle.endMs - battle.startMs;
+  if (!(ms > 0 && ms <= MAX_BATTLE_DURATION_MS)) {
+    logBattleTiming(`ignored implausible duration ${formatSecondsForLog(ms)}`);
+    return;
+  }
+  battle.session.battleMs = ms;
+  markSessionDataChanged();
+  if (HuntAnalyzerState.settings.persistData) saveHuntAnalyzerData();
+
+  // Map/floor are on the "Session processed" line logged for this battle just before
+  const battleTotalMs = getFilteredBattleTimeMs();
+  const idleTotalMs = getFilteredIdleMs();
+  const formatOptional = (value) => (value == null ? 'n/a' : formatSecondsForLog(value));
+  logBattleTiming(
+    `battle=${formatSecondsForLog(ms)} idleBefore=${formatOptional(battle.idleBeforeMs)} ` +
+    `resultAfter=${formatOptional(battle.resultAfterMs)} | totals: battle=${formatOptional(battleTotalMs)} idle=${formatOptional(idleTotalMs)}`
+  );
+}
+
+function createBattleTimeTally() {
+  return { knownMs: 0, known: 0, missing: 0, idleMs: 0 };
+}
+
+function addSessionToBattleTimeTally(tally, session) {
+  if (typeof session?.battleMs === 'number') {
+    tally.knownMs += session.battleMs;
+    tally.known += 1;
+  } else {
+    tally.missing += 1;
+  }
+  if (typeof session?.idleBeforeMs === 'number') tally.idleMs += session.idleBeforeMs;
+}
+
+// Estimated battle ms for a tally, or null when no battle in it has a duration.
+function getBattleTimeTallyMs(tally) {
+  if (!tally || tally.known === 0) return null;
+  return tally.knownMs + tally.missing * (tally.knownMs / tally.known);
+}
+
+// { battleMs (estimated, or null when no battle has a duration), idleMs } for the filters.
+function getFilteredBattleTimeTally(mapFilter, floorFilter) {
+  return memoizeForSessions(`battleMs\u0000${mapFilter}\u0000${floorFilter}`, (sessions) => {
+    const tally = createBattleTimeTally();
+    for (const session of sessions) {
+      if (sessionMatchesMapFilter(session, mapFilter) && sessionMatchesFloorFilter(session, floorFilter)) {
+        addSessionToBattleTimeTally(tally, session);
+      }
+    }
+    return { battleMs: getBattleTimeTallyMs(tally), idleMs: tally.idleMs };
+  });
+}
+
+function getFilteredBattleTimeMs(
+  mapFilter = HuntAnalyzerState.ui.selectedMapFilter,
+  floorFilter = HuntAnalyzerState.ui.selectedFloorFilter
+) {
+  const storedMs = getFilteredBattleTimeTally(mapFilter, floorFilter).battleMs;
+  if (storedMs == null) return null;
+  // Battle in progress on a map/floor inside the filter
+  const tt = HuntAnalyzerState.timeTracking;
+  let liveMs = 0;
+  const battle = tt.currentBattle;
+  if (battle && !battle.endMs
+    && (mapFilter === 'ALL' || tt.currentMap === mapFilter)
+    && (floorFilter === 'ALL' || tt.currentFloor === floorFilter)) {
+    liveMs = Math.min(MAX_BATTLE_DURATION_MS, Math.max(0, Date.now() - battle.startMs));
+  }
+  return storedMs + liveMs;
+}
+
+// Time used for all rates: battle time when known, otherwise the playtime clock.
 function getFilteredTimeHours() {
+  const battleMs = getFilteredBattleTimeMs();
+  if (battleMs != null) return battleMs / (1000 * 60 * 60);
+  return getFilteredPlaytimeHours();
+}
+
+// Idle timer: runs from each battle's end until the next battle starts, and is stored on that next
+// battle. Adds the idle running right now (no battle in progress) to the unfiltered total only,
+// since it isn't known yet which map/floor the next battle will be on. Null if unknown.
+function getFilteredIdleMs() {
+  const { selectedMapFilter, selectedFloorFilter } = HuntAnalyzerState.ui;
+  const { battleMs, idleMs } = getFilteredBattleTimeTally(selectedMapFilter, selectedFloorFilter);
+  if (battleMs == null) return null;
+  const battle = HuntAnalyzerState.timeTracking.currentBattle;
+  const idleRunning = lastBattleEndMs > 0 && !(battle && !battle.endMs);
+  const liveIdleMs = idleRunning && selectedMapFilter === 'ALL' && selectedFloorFilter === 'ALL'
+    ? Math.max(0, Date.now() - lastBattleEndMs)
+    : 0;
+  return idleMs + liveIdleMs;
+}
+
+// Playtime clock for the current filters (battles and idle time together)
+function getFilteredPlaytimeHours() {
+  if (HuntAnalyzerState.ui.selectedFloorFilter !== "ALL") {
+    return getFloorFilteredTimeMs() / (1000 * 60 * 60);
+  }
   const liveMs = getLiveSessionMs();
   const allTrackedMs = HuntAnalyzerState.timeTracking.accumulatedTimeMs + liveMs;
   if (HuntAnalyzerState.ui.selectedMapFilter === "ALL") {
@@ -1698,7 +2035,7 @@ function getFilteredTimeHours() {
   }
   if (totalTimeMs <= 0) {
     // Last resort: assume this map’s sessions used a fair share of total tracked playtime
-    const mapSessions = HuntAnalyzerState.data.sessions.filter(s => s.roomName === filter).length;
+    const mapSessions = getMapSessionCount(filter);
     const totalSessions = HuntAnalyzerState.data.sessions.length;
     if (mapSessions > 0 && totalSessions > 0 && allTrackedMs > 0) {
       totalTimeMs = allTrackedMs * (mapSessions / totalSessions);
@@ -1707,8 +2044,68 @@ function getFilteredTimeHours() {
   return totalTimeMs / (1000 * 60 * 60);
 }
 
+// Playtime for the active floor filter (plus map filter, if any).
+// Battles since floorClockStartedAt are covered by the per-floor clock. Older battles (and
+// floor-unknown ones) have no floor clock, so each map's un-attributed time (map clock minus
+// its floor clocks) is shared out by the fraction of that map's older battles that match.
+function getFloorFilteredTimeMs(
+  mapFilter = HuntAnalyzerState.ui.selectedMapFilter,
+  floorFilter = HuntAnalyzerState.ui.selectedFloorFilter
+) {
+  const tt = HuntAnalyzerState.timeTracking;
+  const liveMs = getLiveSessionMs();
+
+  let totalMs = 0;
+  const floorClockMsByRoom = new Map();
+  for (const [key, ms] of tt.floorTimeMs) {
+    const parsed = parseFloorTimeKey(key);
+    if (!parsed) continue;
+    floorClockMsByRoom.set(parsed.roomName, (floorClockMsByRoom.get(parsed.roomName) || 0) + ms);
+    if (parsed.floor === floorFilter && (mapFilter === 'ALL' || parsed.roomName === mapFilter)) {
+      totalMs += ms;
+    }
+  }
+  if (liveMs > 0 && tt.currentFloor === floorFilter && (mapFilter === 'ALL' || tt.currentMap === mapFilter)) {
+    totalMs += liveMs;
+  }
+
+  const since = tt.floorClockStartedAt || 0;
+  const { legacyByRoom, matchingSessions } = memoizeForSessions(
+    `floorLegacy\u0000${mapFilter}\u0000${floorFilter}\u0000${since}`,
+    (sessions) => {
+      const byRoom = new Map();
+      let matching = 0;
+      for (const session of sessions) {
+        if (!sessionMatchesMapFilter(session, mapFilter)) continue;
+        const matches = sessionMatchesFloorFilter(session, floorFilter);
+        if (matches) matching++;
+        const isLegacy = !(typeof session.timestamp === 'number' && session.timestamp >= since) || !Number.isInteger(session.floor);
+        if (!isLegacy) continue;
+        const entry = byRoom.get(session.roomName) || { total: 0, matching: 0 };
+        entry.total++;
+        if (matches) entry.matching++;
+        byRoom.set(session.roomName, entry);
+      }
+      return { legacyByRoom: byRoom, matchingSessions: matching };
+    }
+  );
+  for (const [roomName, { total, matching }] of legacyByRoom) {
+    if (matching === 0) continue;
+    const untrackedMs = Math.max(0, (tt.mapTimeMs.get(roomName) || 0) - (floorClockMsByRoom.get(roomName) || 0));
+    totalMs += untrackedMs * (matching / total);
+  }
+
+  if (totalMs <= 0 && matchingSessions > 0) {
+    // Last resort: fair share of total tracked playtime by battle count
+    const allTrackedMs = tt.accumulatedTimeMs + liveMs;
+    const totalSessions = HuntAnalyzerState.data.sessions.length;
+    if (totalSessions > 0) totalMs = allTrackedMs * (matchingSessions / totalSessions);
+  }
+  return totalMs;
+}
+
 function getFilteredSessionCount() {
-  if (HuntAnalyzerState.ui.selectedMapFilter === "ALL") {
+  if (HuntAnalyzerState.ui.selectedMapFilter === "ALL" && HuntAnalyzerState.ui.selectedFloorFilter === "ALL") {
     // session.count is incremented on the 'newGame' event, which can be missed/coalesced
     // when battles clear back-to-back very fast. totals.wins/losses are incremented once
     // per processed serverResults (processSession), so they never lag behind — use whichever
@@ -1716,9 +2113,7 @@ function getFilteredSessionCount() {
     const fromWinsLosses = (HuntAnalyzerState.totals.wins || 0) + (HuntAnalyzerState.totals.losses || 0);
     return Math.max(HuntAnalyzerState.session.count || 0, fromWinsLosses);
   }
-  return HuntAnalyzerState.data.sessions.filter(
-    (session) => session.roomName === HuntAnalyzerState.ui.selectedMapFilter
-  ).length;
+  return getFilteredSessionStats().count;
 }
 
 function getFilteredDurationMs(filteredTimeHours = getFilteredTimeHours()) {
@@ -1742,47 +2137,35 @@ function calculateSmoothedPanelRates(filteredTimeHours = getFilteredTimeHours())
   };
 }
 
-// Format playtime for display
+// Format playtime for display (HH:MM:SS)
 function formatPlaytime(hours) {
-  const totalSeconds = Math.floor(hours * 3600);
-  
-  const displayHours = Math.floor(totalSeconds / 3600);
-  const displayMinutes = Math.floor((totalSeconds % 3600) / 60);
-  const displaySeconds = totalSeconds % 60;
-  
-  return `${displayHours.toString().padStart(2, '0')}:${displayMinutes.toString().padStart(2, '0')}:${displaySeconds.toString().padStart(2, '0')}`;
+  return formatTime(hours * 60 * 60 * 1000);
 }
 
 function formatPlaytimeLabel(playtimeText) {
   return `${t('mods.huntAnalyzer.playtime')}: ${playtimeText}`;
 }
 
-/** Rounds to nearest integer; |n| >= 1000 renders as K with two fraction digits (locale-aware), e.g. 1,84K or 1.84K. */
-function formatCompactInt(value) {
+// Rounds to an integer; from 1000 up renders as K (and from 1,000,000 as KK when allowKK) with two
+// locale-aware fraction digits, e.g. 1,84K or 1.84K.
+function formatScaledInt(value, allowKK) {
   const n = Math.round(Number(value));
   if (!Number.isFinite(n)) return String(value);
-  if (Math.abs(n) < 1000) return String(n);
+  const abs = Math.abs(n);
+  if (abs < 1000) return String(n);
   const sign = n < 0 ? '-' : '';
-  const kVal = Math.abs(n) / 1000;
-  const kStr = kVal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  return `${sign}${kStr}K`;
+  const [divisor, suffix] = allowKK && abs >= 1000000 ? [1000000, 'KK'] : [1000, 'K'];
+  const scaled = (abs / divisor).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return `${sign}${scaled}${suffix}`;
+}
+
+function formatCompactInt(value) {
+  return formatScaledInt(value, false);
 }
 
 /** Format experience values: <1K raw, >=1K as K, >=1KK (1,000,000) as KK. */
 function formatExpValue(value) {
-  const n = Math.round(Number(value));
-  if (!Number.isFinite(n)) return String(value);
-  const abs = Math.abs(n);
-  const sign = n < 0 ? '-' : '';
-  if (abs < 1000) return String(n);
-  if (abs < 1000000) {
-    const kVal = abs / 1000;
-    const kStr = kVal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    return `${sign}${kStr}K`;
-  }
-  const kkVal = abs / 1000000;
-  const kkStr = kkVal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  return `${sign}${kkStr}KK`;
+  return formatScaledInt(value, true);
 }
 
 /**
@@ -1847,7 +2230,22 @@ let updateIntervalId = null;
 let autoSaveIntervalId = null;
 let mapDebugLastLogTime = 0;
 let mapDebugLogCount = 0;
-let timeoutIds = [];
+// Pending one-shot timers; each id removes itself when it fires, cleanup() clears the rest.
+const pendingTimeoutIds = new Set();
+
+function scheduleTrackedTimeout(callback, delayMs = 0) {
+  const id = setTimeout(() => {
+    pendingTimeoutIds.delete(id);
+    callback();
+  }, delayMs);
+  pendingTimeoutIds.add(id);
+  return id;
+}
+
+function clearTrackedTimeouts() {
+  pendingTimeoutIds.forEach((id) => clearTimeout(id));
+  pendingTimeoutIds.clear();
+}
 
 const HUNT_ANALYZER_ANALYSIS_BLOCKING_MODS = ['Board Analyzer'];
 const HUNT_ANALYZER_ANALYSIS_HIDDEN_ATTR = 'data-ba-analysis-panel-hidden';
@@ -1856,6 +2254,21 @@ let huntAnalyzerAnalysisCoordinationUnsubscribe = null;
 let huntAnalyzerAnalysisCoordinationSetupTimer = null;
 let huntAnalyzerPausedUpdateInterval = false;
 let huntAnalyzerPausedAutoSaveInterval = false;
+
+// (Re)starts the 30s auto-save while persistence is on; returns whether it is running.
+function startAutoSaveInterval() {
+  if (autoSaveIntervalId) {
+    clearInterval(autoSaveIntervalId);
+    autoSaveIntervalId = null;
+  }
+  if (!HuntAnalyzerState.settings.persistData) return false;
+  autoSaveIntervalId = setInterval(() => {
+    if (HuntAnalyzerState.data.sessions.length > 0) {
+      saveHuntAnalyzerData();
+    }
+  }, CONFIG.AUTO_SAVE_INTERVAL);
+  return true;
+}
 
 function isHuntAnalyzerAnalysisBlockingActive() {
   if (!window.ModCoordination) return false;
@@ -1904,12 +2317,8 @@ function resumeHuntAnalyzerAfterAnalysis() {
   if (panel && huntAnalyzerPausedUpdateInterval && !updateIntervalId) {
     updateIntervalId = setInterval(updatePanelDisplay, 1000);
   }
-  if (panel && huntAnalyzerPausedAutoSaveInterval && HuntAnalyzerState.settings.persistData && !autoSaveIntervalId) {
-    autoSaveIntervalId = setInterval(() => {
-      if (HuntAnalyzerState.data.sessions.length > 0) {
-        saveHuntAnalyzerData();
-      }
-    }, CONFIG.AUTO_SAVE_INTERVAL);
+  if (panel && huntAnalyzerPausedAutoSaveInterval && !autoSaveIntervalId) {
+    startAutoSaveInterval();
   }
   huntAnalyzerPausedUpdateInterval = false;
   huntAnalyzerPausedAutoSaveInterval = false;
@@ -1971,119 +2380,44 @@ function teardownHuntAnalyzerAnalysisCoordination(options = {}) {
   }
 }
 
-// Event handler tracking for memory leak prevention
-let panelResizeMouseMoveHandler = null;
-let panelResizeMouseUpHandler = null;
-let panelDragMouseMoveHandler = null;
-let panelDragMouseUpHandler = null;
-let globalResizeMouseMoveHandler = null;
-let globalResizeMouseUpHandler = null;
-let windowMessageHandler = null;
-
-// Additional event handlers for cleanup
+// Event handler tracking for memory leak prevention. Drag/resize move+up handlers are attached
+// only while a drag/resize is in progress (see beginPanelPointerTracking).
+let panelPointerMoveHandler = null;
+let panelPointerUpHandler = null;
 let dropdownClickHandler = null;
 let documentClickHandler = null;
-let optionMouseEnterHandler = null;
-let optionMouseLeaveHandler = null;
-let optionClickHandler = null;
 let beforeUnloadHandler = null;
 let storageEventHandler = null;
 let visibilityChangeHandler = null;
 let pageHideHandler = null;
+let translationEventHandler = null;
 let persistenceSaveDebounceTimeoutId = null;
 let huntAnalyzerOriginalFetch = null;
 let huntAnalyzerFetchWrapper = null;
-const huntAnalyzerCreatureSellByMonsterId = new Map();
+let huntAnalyzerNewGameUnsubscribe = null;
 const huntAnalyzerPendingCreatureSellEvents = [];
 const huntAnalyzerPendingDisenchantDustEvents = [];
+// Unmatched sell/disenchant events are kept for a later battle, but only the newest few.
+const HUNT_ANALYZER_MAX_PENDING_EVENTS = 50;
 let huntAnalyzerLastObservedPlantGold = null;
-let huntAnalyzerLastCollectedPlantGoldValue = 0;
 let huntAnalyzerPlantCollectBurstTimeoutId = null;
 const HUNT_ANALYZER_PLANT_COLLECT_BURST_MS = 12000;
 const DRAGON_PLANT_COLLECT_BONUS_RATE = 0.05;
 
-// =======================
-// 2.9. Panel Management Class
-// =======================
-class PanelManager {
-  constructor() {
-    this.cachedElements = new Map();
-    this.layoutModes = LAYOUT_MODES;
-    this.layoutDimensions = LAYOUT_DIMENSIONS;
-    this.currentMode = LAYOUT_MODES.VERTICAL;
-  }
-
-  cacheElement(id, element) {
-    this.cachedElements.set(id, element);
-  }
-
-  getCachedElement(id) {
-    return this.cachedElements.get(id);
-  }
-
-  createPanel() {
-    return this.createAutoplayAnalyzerPanel();
-  }
-
-  updateLayout(panel, mode) {
-    this.currentMode = mode;
-    this.updatePanelLayout(panel);
-  }
-
-  getLayoutConstraints(mode) {
-    return this.layoutDimensions[mode];
-  }
-
-  // Delegate to existing functions for now
-  createAutoplayAnalyzerPanel() {
-    return createAutoplayAnalyzerPanel();
-  }
-
-  updatePanelLayout(panel) {
-    return updatePanelLayout(panel);
-  }
-}
-
-// Initialize panel manager
-const panelManager = new PanelManager();
-
-// Helper function to get player's max stamina from DOM
+// Player's max stamina read from the header (Supreme potions refill to it), capped at 360.
+// Read when a Supreme potion drops rather than once at load, when the header may not exist yet.
 function getPlayerMaxStamina() {
     try {
-        const elStamina = document.querySelector('[title="Stamina"]');
-        if (!elStamina) {
-            console.log('[Hunt Analyzer] Stamina element not found');
-            return 360; // Fallback to max
-        }
-        
-        const staminaSpans = elStamina.querySelectorAll('span span');
-        if (staminaSpans.length < 2) {
-            console.log('[Hunt Analyzer] Stamina spans not found');
-            return 360; // Fallback to max
-        }
-        
-        const maxStaminaText = staminaSpans[1].textContent.trim();
-        const maxStamina = parseInt(maxStaminaText.replace('/', ''));
-        
-        if (isNaN(maxStamina)) {
-            console.log('[Hunt Analyzer] Invalid max stamina value');
-            return 360; // Fallback to max
-        }
-        
-        // Cap at 360 as specified
-        const cappedStamina = Math.min(maxStamina, 360);
-        console.log(`[Hunt Analyzer] Player max stamina: ${maxStamina} (capped at ${cappedStamina})`);
-        return cappedStamina;
+        const staminaSpans = document.querySelector('[title="Stamina"]')?.querySelectorAll('span span');
+        const maxStamina = staminaSpans?.length >= 2
+            ? parseInt(staminaSpans[1].textContent.trim().replace('/', ''), 10)
+            : NaN;
+        return Number.isNaN(maxStamina) ? 360 : Math.min(maxStamina, 360);
     } catch (error) {
         console.error('[Hunt Analyzer] Error getting max stamina:', error);
-        return 360; // Fallback to max
+        return 360;
     }
 }
-
-// Initialize max stamina for tier 5 potions
-CONFIG.STAMINA_RECOVERY[5] = getPlayerMaxStamina();
-
-// Debug log to verify max stamina initialization
 
 // Initialize persistence system
 // Inject styles after state is defined (needed for theme system)
@@ -2091,17 +2425,16 @@ injectHuntAnalyzerStyles();
 loadHuntAnalyzerSettings();
 loadHuntAnalyzerState();
 
-// Ensure map filter is set to "ALL" on initialization
+// Ensure map/floor filters are set to "ALL" on initialization
 HuntAnalyzerState.ui.selectedMapFilter = "ALL";
+HuntAnalyzerState.ui.selectedFloorFilter = "ALL";
 
 // Do not resume live timing after reload; require a fresh newGame or autoplay session
 HuntAnalyzerState.timeTracking.liveSegmentStartMs = 0;
 HuntAnalyzerState.timeTracking.awaitingFirstBattle = true;
 
-// Initialize internal clock system
 // Clock stays idle until the first newGame; panel display still updates every second
 
-// Auto-reopen is handled during persistence initialization.
 
 // =======================
 // 2.10. Data Persistence System
@@ -2192,6 +2525,8 @@ function createInventoryStyleItemPortrait(itemData) {
             // Make sure the sprite container has relative positioning for the count overlay
             spriteDiv.style.position = 'relative';
             spriteDiv.appendChild(countSpan);
+            const dropRate = createDropRateOverlay(itemData);
+            if (dropRate) spriteDiv.appendChild(dropRate);
             return spriteDiv;
         } catch (error) {
             console.warn('[Hunt Analyzer] Error creating sprite, falling back to image:', error);
@@ -2244,60 +2579,17 @@ function createInventoryStyleItemPortrait(itemData) {
     containerSlot.appendChild(rarityDiv);
     containerSlot.appendChild(img);
     containerSlot.appendChild(countSpan);
-    
+    const dropRate = createDropRateOverlay(itemData);
+    if (dropRate) containerSlot.appendChild(dropRate);
+
     return containerSlot;
 }
 
-function extractEquipmentStatFromGameData(gameId) {
-    if (!gameId || typeof globalThis.state?.utils?.getEquipment !== 'function') return null;
-    try {
-        const equipData = globalThis.state.utils.getEquipment(gameId);
-        if (!equipData) return null;
-        if (equipData.metadata?.stat) return equipData.metadata.stat;
-        if (equipData.stats?.length > 0) return equipData.stats[0].type;
-    } catch (_e) { /* ignore */ }
+// Primary stat of an equipment definition from state.utils.getEquipment().
+function getEquipmentStatFromData(equipData) {
+    if (equipData?.metadata?.stat) return equipData.metadata.stat;
+    if (equipData?.stats?.length > 0) return equipData.stats[0].type;
     return null;
-}
-
-function shouldRegenerateLootVisual(value) {
-    if (!(value.visual instanceof HTMLElement)) return true;
-    return !!(value.isEquipment && typeof globalThis.state?.utils?.getEquipment === 'function' && value.gameId);
-}
-
-function regenerateLootAggregateVisual(value) {
-    if (!shouldRegenerateLootVisual(value)) return false;
-    if (value.isEquipment && !value.gameId && value.spriteId) {
-        value.gameId = value.spriteId;
-    }
-    if (value.isEquipment && value.gameId && !value.stat) {
-        const stat = extractEquipmentStatFromGameData(value.gameId);
-        if (stat) value.stat = stat;
-    }
-    value.visual = resolveLootGridVisual(value);
-    return value.visual instanceof HTMLElement;
-}
-
-function regenerateCreatureAggregateVisual(value) {
-    if (value.visual instanceof HTMLElement) return false;
-    value.visual = resolveCreatureGridVisual(value);
-    return true;
-}
-
-// Regenerate missing or stale portrait visuals when the game API becomes available.
-function regenerateAllVisuals() {
-    if (!globalThis.state?.utils) {
-        console.log('[Hunt Analyzer] Game API not available yet, skipping visual regeneration');
-        return;
-    }
-
-    HuntAnalyzerState.data.aggregatedLoot.forEach((value) => {
-        regenerateLootAggregateVisual(value);
-    });
-    HuntAnalyzerState.data.aggregatedCreatures.forEach((value) => {
-        regenerateCreatureAggregateVisual(value);
-    });
-
-    renderAllSessions();
 }
 
 function logPersistenceOperation(operation, success = true) {
@@ -2332,6 +2624,8 @@ function cleanSessionData(sessions) {
             roomName: session.roomName,
             floor: typeof session.floor === 'number' ? session.floor : null,
             timestamp: session.timestamp,
+            battleMs: typeof session.battleMs === 'number' ? session.battleMs : null,
+            idleBeforeMs: typeof session.idleBeforeMs === 'number' ? session.idleBeforeMs : null,
             staminaSpent: session.staminaSpent,
             staminaRecovered: session.staminaRecovered,
             experience: sessionStoredExperience(session),
@@ -2347,20 +2641,18 @@ function cleanSessionData(sessions) {
 }
 
 /** Only known counter fields — avoids persisting stray props (e.g. legacy render-only `loot`). */
-function getTotalsSnapshotForPersistence() {
-    return getTotalsSnapshot();
-}
-
 function buildHuntAnalyzerManifestPayload() {
     const mapTimeMsArray = Array.from(HuntAnalyzerState.timeTracking.mapTimeMs.entries());
     return {
-        totals: getTotalsSnapshotForPersistence(),
+        totals: getTotalsSnapshot(),
         session: HuntAnalyzerState.session,
         timeTracking: {
             currentMap: HuntAnalyzerState.timeTracking.currentMap,
-            mapStartTime: HuntAnalyzerState.timeTracking.mapStartTime,
             accumulatedTimeMs: HuntAnalyzerState.timeTracking.accumulatedTimeMs,
             mapTimeMs: mapTimeMsArray,
+            currentFloor: HuntAnalyzerState.timeTracking.currentFloor,
+            floorTimeMs: Array.from(HuntAnalyzerState.timeTracking.floorTimeMs.entries()),
+            floorClockStartedAt: HuntAnalyzerState.timeTracking.floorClockStartedAt,
             liveSegmentStartMs: 0
         }
     };
@@ -2506,6 +2798,7 @@ async function saveHuntAnalyzerDataAsync() {
                 console.error('[Hunt Analyzer] IndexedDB save failed:', idbError);
                 _consecutiveSaveFailures++;
                 showSaveWarning(`Battle history could not be saved to IndexedDB. Totals and playtime were saved.${getHuntAnalyzerStorageResetDismissHint()}`);
+                return; // keep the failure count; only a fully successful save resets it
             }
         }
 
@@ -2573,13 +2866,26 @@ function applyHuntAnalyzerManifest(parsedData) {
 
     if (parsedData.timeTracking) {
         HuntAnalyzerState.timeTracking.currentMap = parsedData.timeTracking.currentMap || null;
-        HuntAnalyzerState.timeTracking.mapStartTime = parsedData.timeTracking.mapStartTime || 0;
         HuntAnalyzerState.timeTracking.accumulatedTimeMs = parsedData.timeTracking.accumulatedTimeMs || 0;
         HuntAnalyzerState.timeTracking.liveSegmentStartMs = 0;
         HuntAnalyzerState.timeTracking.awaitingFirstBattle = true;
 
         if (parsedData.timeTracking.mapTimeMs && Array.isArray(parsedData.timeTracking.mapTimeMs)) {
             HuntAnalyzerState.timeTracking.mapTimeMs = new Map(parsedData.timeTracking.mapTimeMs);
+        }
+        if (Array.isArray(parsedData.timeTracking.floorTimeMs)) {
+            HuntAnalyzerState.timeTracking.floorTimeMs = new Map(parsedData.timeTracking.floorTimeMs);
+        }
+        // The board's floor wins over the saved one: after a reload the player may be on a
+        // different floor than the last battle, and the next battle's time must land there.
+        const boardFloor = getBoardFloor();
+        HuntAnalyzerState.timeTracking.currentFloor = boardFloor != null
+            ? boardFloor
+            : (Number.isInteger(parsedData.timeTracking.currentFloor) ? parsedData.timeTracking.currentFloor : null);
+        // Absent in data saved before floor tracking existed: keep the load-time default so
+        // every earlier battle counts as having no floor clock.
+        if (typeof parsedData.timeTracking.floorClockStartedAt === 'number') {
+            HuntAnalyzerState.timeTracking.floorClockStartedAt = parsedData.timeTracking.floorClockStartedAt;
         }
     }
 }
@@ -2672,11 +2978,12 @@ async function exportHuntAnalyzerDataForBackup() {
     await flushHuntAnalyzerDataAsync();
     const manifest = loadHuntAnalyzerManifestFromLocalStorage() || buildHuntAnalyzerManifestPayload();
     const sessions = await loadAllPersistedSessions(manifest);
+    const current = buildHuntAnalyzerManifestPayload();
     const data = {
-        ...buildHuntAnalyzerManifestPayload(),
-        totals: manifest.totals || getTotalsSnapshotForPersistence(),
-        session: manifest.session || HuntAnalyzerState.session,
-        timeTracking: manifest.timeTracking || buildHuntAnalyzerManifestPayload().timeTracking,
+        ...current,
+        totals: manifest.totals || current.totals,
+        session: manifest.session || current.session,
+        timeTracking: manifest.timeTracking || current.timeTracking,
         sessions: cleanSessionData(sessions)
     };
     const stateRaw = localStorage.getItem(HUNT_ANALYZER_STATE_KEY);
@@ -2776,11 +3083,6 @@ function loadHuntAnalyzerState() {
     return null;
 }
 
-// Save Hunt Analyzer settings
-function saveHuntAnalyzerSettings() {
-    return saveToStorage(HUNT_ANALYZER_SETTINGS_KEY, HuntAnalyzerState.settings);
-}
-
 // Load Hunt Analyzer settings
 function loadHuntAnalyzerSettings() {
     const parsedSettings = loadFromStorage(HUNT_ANALYZER_SETTINGS_KEY);
@@ -2839,42 +3141,19 @@ function updatePanelThemeColors(panel) {
         document.getElementById('mod-map-filter-dropdown-button'),
         document.getElementById('mod-map-filter-dropdown-menu')
     );
-    
-    // Update live display section background
-    const liveDisplaySection = panel.querySelector('.live-display-section');
-    if (liveDisplaySection) {
-        applyFramedSectionStyles(liveDisplaySection, { noTopMargin: true });
-    }
-    
-    // Update loot container
-    const lootContainer = panel.querySelector('.loot-container');
-    if (lootContainer) {
-        applyFramedSectionStyles(lootContainer, { noTopMargin: true });
-    }
-    
-      applyThemeFramedDisplaySurface(document.getElementById('mod-loot-display'));
+    applyThemeMapFilterDropdownStyles(
+        document.getElementById('mod-floor-filter-dropdown-button'),
+        document.getElementById('mod-floor-filter-dropdown-menu')
+    );
+
+    // Framed section backgrounds
+    ['.live-display-section', '.loot-container', '.creature-drop-container', '.map-filter-container', '.button-container']
+        .forEach((selector) => applyFramedSectionStyles(panel.querySelector(selector), { noTopMargin: true }));
+
+    applyThemeFramedDisplaySurface(document.getElementById('mod-loot-display'));
     applyAccentTitleStyle(document.getElementById('mod-loot-title'));
-    
-    // Update creature drop container
-    const creatureDropContainer = panel.querySelector('.creature-drop-container');
-    if (creatureDropContainer) {
-        applyFramedSectionStyles(creatureDropContainer, { noTopMargin: true });
-    }
-    
     applyThemeFramedDisplaySurface(document.getElementById('mod-creature-drop-display'));
     applyAccentTitleStyle(document.getElementById('mod-creature-drops-title'));
-    
-    // Update map filter container
-    const mapFilterContainer = panel.querySelector('.map-filter-container');
-    if (mapFilterContainer) {
-        applyFramedSectionStyles(mapFilterContainer, { noTopMargin: true });
-    }
-    
-    // Update button container
-    const buttonContainer = panel.querySelector('.button-container');
-    if (buttonContainer) {
-        applyFramedSectionStyles(buttonContainer, { noTopMargin: true });
-    }
 }
 
 // Check if panel should be reopened after page refresh
@@ -2901,85 +3180,9 @@ function shouldReopenHuntAnalyzer() {
 function autoReopenHuntAnalyzer() {
     if (shouldReopenHuntAnalyzer()) {
         console.log('[Hunt Analyzer] Auto-reopening panel after page refresh');
-        setTimeout(() => {
-            createAutoplayAnalyzerPanel();
-        }, 2000); // Wait 2 seconds for page to fully load
-    } else {
+        scheduleTrackedTimeout(createAutoplayAnalyzerPanel, 2000); // Wait 2 seconds for page to fully load
     }
 }
-
-// =======================
-// 3. Utility Modules
-// =======================
-const ItemUtils = {
-  getRarity(itemName, tooltipKey, item) {
-    return getItemInfoFromDatabase(itemName, tooltipKey, item).rarity;
-  },
-  
-  getDisplayName(itemName, tooltipKey, item) {
-    return getItemInfoFromDatabase(itemName, tooltipKey, item).displayName;
-  },
-  
-  createVisual(itemData) {
-    return getItemVisual(itemData);
-  },
-  
-  isRune(itemName, item) {
-    return isRuneItem(itemName, item);
-  },
-  
-  getStaminaRecovery(itemName, item) {
-    return getStaminaRecoveryAmount(itemName, item);
-  }
-};
-
-const CreatureUtils = {
-  getDetails(monsterDrop) {
-    return getCreatureDetails(monsterDrop);
-  },
-  
-  getTierDetails(genes) {
-    return getCreatureTierDetails(genes);
-  },
-  
-  getNameFromId(gameId) {
-    return getMonsterNameFromId(gameId);
-  }
-};
-
-const EquipmentUtils = {
-  getNameFromId(gameId) {
-    return getEquipmentNameFromId(gameId);
-  }
-};
-
-const FormatUtils = {
-  formatName(name) {
-    return formatNameToTitleCase(name);
-  },
-  
-  formatTime(ms) {
-    return formatTime(ms);
-  },
-  
-  getRarityColor(tierLevel) {
-    return getRarityBorderColor(tierLevel);
-  }
-};
-
-const UIElements = {
-  createStyledButton(text) {
-    return createStyledButton(text);
-  },
-  
-  createStyledIconButton(iconText) {
-    return createStyledIconButton(iconText);
-  },
-  
-  createItemSprite(itemId, tooltipKey, rarity = 1) {
-    return createItemSprite(itemId, tooltipKey, rarity);
-  }
-};
 
 // =======================
 // 3.0. Game integration helpers
@@ -3069,11 +3272,10 @@ function getItemInfoFromDatabase(itemName, tooltipKey, item) {
     }
     
     // Try to find the item in the inventory database by name or tooltip key
+    // Not cached: the database may still be loading, and a cached miss would stick until reload
     const inventoryDB = window.inventoryDatabase;
     if (!inventoryDB?.tooltips) {
-        const result = { rarity: null, displayName: null };
-        itemInfoCache.set(cacheKey, result);
-        return result;
+        return { rarity: null, displayName: null };
     }
     
     // Normalize names for matching
@@ -3173,47 +3375,29 @@ function getStaminaRecoveryAmount(itemName, item) {
         const existingRarity = item?.rarityLevel || item?.tier || 0;
         const count = item?.amount || 1;
         
-        const recoveryPerItem = CONFIG.STAMINA_RECOVERY[existingRarity] || 12;
+        const recoveryPerItem = existingRarity === 5
+            ? getPlayerMaxStamina()
+            : (CONFIG.STAMINA_RECOVERY[existingRarity] || 12);
         return recoveryPerItem * count;
     }
     
     return 0;
 }
 
-function getRarityBorderColor(tierLevel) {
-    // Use database colors if available, fallback to manual mapping
-    const rarityColors = window.inventoryDatabase?.rarityColors || {};
-    if (rarityColors[tierLevel]) {
-        return rarityColors[tierLevel];
-    }
-    
-    // Fallback to original manual mapping
-    switch (tierLevel) {
-        case 1: return "#ABB2BF";
-        case 2: return "#98C379";
-        case 3: return "#61AFEF";
-        case 4: return "#C678DD";
-        case 5: return "#E5C07B";
-        default: return "#3A404A";
-    }
-}
-const iconMap = {
-    ap: "/assets/icons/abilitypower.png",
-    ad: "/assets/icons/attackdamage.png",
-    hp: "/assets/icons/heal.png",
-    magicResist: "/assets/icons/magicresist.png",
-    armor: "/assets/icons/armor.png",
-    speed: "/assets/icons/speed.png",
-    level: "/assets/icons/achievement.png"
+const STAT_ICON_SRC_BY_TYPE = {
+    ad: '/assets/icons/attackdamage.png',
+    attackdamage: '/assets/icons/attackdamage.png',
+    ap: '/assets/icons/abilitypower.png',
+    abilitypower: '/assets/icons/abilitypower.png',
+    hp: '/assets/icons/heal.png',
+    health: '/assets/icons/heal.png',
+    armor: '/assets/icons/armor.png',
+    mr: '/assets/icons/magicresist.png',
+    magicresist: '/assets/icons/magicresist.png'
 };
 
-// Function to add stat icon to existing equipment portrait
-function addStatIconToPortrait(portrait, stat) {
-    if (!stat || !portrait) return;
-    
-    // Check if stat icon already exists
-    if (portrait.querySelector('.stat-icon')) return;
-    
+// Small stat badge in the bottom-right corner of an equipment portrait (unknown stats show AD).
+function createStatIcon(stat) {
     const statIcon = document.createElement('img');
     statIcon.className = 'stat-icon';
     statIcon.style.cssText = `
@@ -3225,83 +3409,38 @@ function addStatIconToPortrait(portrait, stat) {
         image-rendering: pixelated;
         z-index: 10;
     `;
-    
-    const statType = stat.toLowerCase();
-    if (statType === 'ad' || statType === 'attackdamage') {
-        statIcon.src = '/assets/icons/attackdamage.png';
-    } else if (statType === 'ap' || statType === 'abilitypower') {
-        statIcon.src = '/assets/icons/abilitypower.png';
-    } else if (statType === 'hp' || statType === 'health') {
-        statIcon.src = '/assets/icons/heal.png';
-    } else if (statType === 'armor') {
-        statIcon.src = '/assets/icons/armor.png';
-    } else if (statType === 'mr' || statType === 'magicresist') {
-        statIcon.src = '/assets/icons/magicresist.png';
-    } else {
-        statIcon.src = '/assets/icons/attackdamage.png';
-    }
-    
-    portrait.appendChild(statIcon);
+    statIcon.src = STAT_ICON_SRC_BY_TYPE[String(stat).toLowerCase()] || STAT_ICON_SRC_BY_TYPE.ad;
+    return statIcon;
 }
 
-// Function to add stat icons to all existing equipment portraits in the loot display
-function addStatIconsToExistingPortraits() {
-    const lootDisplay = document.getElementById('mod-loot-display');
-    if (!lootDisplay) return;
-    
-    const equipmentPortraits = lootDisplay.querySelectorAll('.equipment-portrait');
-    equipmentPortraits.forEach(portrait => {
-        // Check if stat icon already exists
-        if (portrait.querySelector('.stat-icon')) return;
-        
-        // Try to find the equipment data for this portrait
-        const spriteElement = portrait.querySelector('.sprite.item');
-        if (spriteElement) {
-            const itemId = spriteElement.className.match(/id-(\d+)/);
-            if (itemId) {
-                const gameId = parseInt(itemId[1]);
-                try {
-                    const equipData = globalThis.state?.utils?.getEquipment?.(gameId);
-                    if (equipData) {
-                        let stat = null;
-                        if (equipData.metadata && equipData.metadata.stat) {
-                            stat = equipData.metadata.stat;
-                        } else if (equipData.stats && equipData.stats.length > 0) {
-                            stat = equipData.stats[0].type;
-                        }
-                        
-                        if (stat) {
-                            addStatIconToPortrait(portrait, stat);
-                        }
-                    }
-                } catch (e) {
-                    console.warn('[Hunt Analyzer] Error getting equipment data for stat icon:', e);
-                }
-            }
-        }
-    });
+// Function to add stat icon to existing equipment portrait
+function addStatIconToPortrait(portrait, stat) {
+    if (!stat || !portrait) return;
+    if (portrait.querySelector('.stat-icon')) return;
+    portrait.appendChild(createStatIcon(stat));
 }
+
 function createItemSprite(itemId, tooltipKey = '', rarity = 1, stat = null) {
     // Create the main container following Cyclopedia pattern
     const containerSlot = createContainerSlot('34px', 'container-slot surface-darker');
     containerSlot.title = tooltipKey || `ID-${itemId}`;
-    
+
     // Create rarity container
     const rarityContainer = createRarityBorder(rarity, 'has-rarity relative grid h-full place-items-center');
-    
+
     // Create sprite container
     const spriteContainer = document.createElement('div');
     spriteContainer.className = 'relative size-sprite';
     spriteContainer.style.overflow = 'visible';
-    
+
     // Create sprite element
     const spriteElement = document.createElement('div');
     spriteElement.className = `sprite item id-${itemId} absolute bottom-0 right-0`;
-    
+
     // Create viewport
     const viewport = document.createElement('div');
     viewport.className = 'viewport';
-    
+
     // Create image
     const img = document.createElement('img');
     img.alt = tooltipKey || String(itemId);
@@ -3309,44 +3448,19 @@ function createItemSprite(itemId, tooltipKey = '', rarity = 1, stat = null) {
     img.className = 'spritesheet';
     img.style.setProperty('--cropX', '0');
     img.style.setProperty('--cropY', '0');
-    
+
     // Assemble the structure
     viewport.appendChild(img);
     spriteElement.appendChild(viewport);
     spriteContainer.appendChild(spriteElement);
     rarityContainer.appendChild(spriteContainer);
     containerSlot.appendChild(rarityContainer);
-    
+
     // Add stat icon if stat is provided
     if (stat) {
-        const statIcon = document.createElement('img');
-        statIcon.style.cssText = `
-            position: absolute;
-            bottom: 1px;
-            right: 1px;
-            width: 12px;
-            height: 12px;
-            image-rendering: pixelated;
-            z-index: 10;
-        `;
-        
-        const statType = stat.toLowerCase();
-        if (statType === 'ad' || statType === 'attackdamage') {
-            statIcon.src = '/assets/icons/attackdamage.png';
-        } else if (statType === 'ap' || statType === 'abilitypower') {
-            statIcon.src = '/assets/icons/abilitypower.png';
-        } else if (statType === 'hp' || statType === 'health') {
-            statIcon.src = '/assets/icons/heal.png';
-        } else if (statType === 'armor') {
-            statIcon.src = '/assets/icons/armor.png';
-        } else if (statType === 'mr' || statType === 'magicresist') {
-            statIcon.src = '/assets/icons/magicresist.png';
-        } else {
-            statIcon.src = '/assets/icons/attackdamage.png';
-        }
-        containerSlot.appendChild(statIcon);
+        containerSlot.appendChild(createStatIcon(stat));
     }
-    
+
     return containerSlot;
 }
 function getEquipmentNameFromId(gameId) {
@@ -3361,9 +3475,9 @@ function getEquipmentNameFromId(gameId) {
         const result = equipData && equipData.metadata ? equipData.metadata.name : null;
         equipmentCache.set(gameId, result);
         return result;
-    } catch (e) { 
-        equipmentCache.set(gameId, null);
-        return null; 
+    } catch (e) {
+        // Not cached: the game API may not be ready yet
+        return null;
     }
 }
 function getMonsterNameFromId(gameId) {
@@ -3384,9 +3498,9 @@ function getMonsterNameFromId(gameId) {
         const result = monsterData && monsterData.metadata ? monsterData.metadata.name : null;
         monsterCache.set(gameId, result);
         return result;
-    } catch (e) { 
-        monsterCache.set(gameId, null);
-        return null; 
+    } catch (e) {
+        // Not cached: the game API may not be ready yet
+        return null;
     }
 }
 function getCreatureTierDetails(genes) {
@@ -3399,178 +3513,21 @@ function getCreatureTierDetails(genes) {
     else if (totalStats >= 5) { tierName = "Common"; tierLevel = 1; }
     return { totalStats, tierName, tierLevel };
 }
-function getItemVisual(itemData, preResolvedName = null) {
-    let recognizedName = preResolvedName || itemData.tooltipKey || 'Unknown Item';
-    if (itemData.isEquipment && typeof globalThis.state?.utils?.getEquipment === 'function' && itemData.gameId) {
-        try {
-            const equipData = globalThis.state.utils.getEquipment(itemData.gameId);
-            if (equipData && equipData.metadata && typeof equipData.metadata.spriteId === 'number') {
-                const equipmentSpriteId = equipData.metadata.spriteId;
-                recognizedName = equipData.metadata.name || recognizedName;
-                
-                // Use simple sprite system like the original implementation
-                const spriteDiv = createItemSprite(equipmentSpriteId, recognizedName, itemData.rarity || 1);
-                
-                // Add count overlay to sprite (bottom left like creatures)
-                const countSpan = createCountOverlay(itemData.count);
-                
-                // Make sure the sprite container has relative positioning for the count overlay
-                spriteDiv.style.position = 'relative';
-                spriteDiv.appendChild(countSpan);
-                return { visualElement: spriteDiv, recognizedName: formatNameToTitleCase(recognizedName) };
-            }
-        } catch (e) { console.error("[Hunt Analyzer] Error getting equipment name:", e); }
-    }
-    if (itemData.spriteId === CONFIG.GOLD_SPRITE_ID) {
-        const img = document.createElement('img');
-        img.src = '/assets/icons/goldpile.png';
-        img.alt = 'Gold';
-        img.style.width = '36px';
-        img.style.height = '36px';
-        img.style.imageRendering = 'pixelated';
-        img.style.borderRadius = '3px';
-        recognizedName = 'Gold';
-        return { visualElement: img, recognizedName: recognizedName };
-    }
-    if (itemData.spriteSrc && itemData.spriteSrc.includes('dust')) {
-        const img = document.createElement('img');
-        img.src = DUST_ICON_SRC;
-        img.alt = 'Dust';
-        img.style.width = '36px';
-        img.style.height = '36px';
-        img.style.imageRendering = 'pixelated';
-        img.style.borderRadius = '3px';
-        recognizedName = 'Dust';
-        return { visualElement: img, recognizedName: recognizedName };
-    }
-    if (itemData.stat && iconMap[itemData.stat]) {
-        const img = document.createElement('img');
-        img.src = iconMap[itemData.stat];
-        img.alt = itemData.tooltipKey || itemData.stat;
-        recognizedName = formatNameToTitleCase(itemData.tooltipKey || `${itemData.stat.toUpperCase()} Stat`);
-        img.style.width = '36px';
-        img.style.height = '36px';
-        img.style.imageRendering = 'pixelated';
-        img.style.borderRadius = '3px';
-        return { visualElement: img, recognizedName: recognizedName };
-    }
-    if (itemData.spriteId) {
-        const spriteDiv = createItemSprite(itemData.spriteId, itemData.tooltipKey, itemData.rarity || 1);
-        
-        // Add count overlay to sprite (bottom left like creatures)
-        const countSpan = createCountOverlay(itemData.count);
-        
-        // Make sure the sprite container has relative positioning for the count overlay
-        spriteDiv.style.position = 'relative';
-        spriteDiv.appendChild(countSpan);
-        recognizedName = formatNameToTitleCase(itemData.tooltipKey || `ID-${itemData.spriteId}`);
-        return { visualElement: spriteDiv, recognizedName: recognizedName };
-    }
-    if (itemData.spriteSrc) {
-        const img = document.createElement('img');
-        img.src = itemData.spriteSrc;
-        img.alt = itemData.tooltipKey || 'item';
-        recognizedName = formatNameToTitleCase(itemData.tooltipKey || 'Item with Direct Image');
-        img.style.width = '36px';
-        img.style.height = '36px';
-        img.style.imageRendering = 'pixelated';
-        img.style.borderRadius = '3px';
-        return { visualElement: img, recognizedName: recognizedName };
-    }
-    if (itemData.stat) {
-        const emojiMap = {
-            hp: '❤️', ad: '⚔️', ap: '🧙', armor: '🛡️',
-            magicresist: '🔮', speed: '💨', level: '⬆️'
-        };
-        const emoji = emojiMap[itemData.stat.toLowerCase()] || '🪖';
-        recognizedName = formatNameToTitleCase(itemData.tooltipKey || `${itemData.stat.toUpperCase()} Stat`);
-        const visualElement = document.createElement('span');
-        visualElement.textContent = emoji;
-        visualElement.style.fontSize = '24px';
-        visualElement.style.width = '36px';
-        visualElement.style.height = '36px';
-        visualElement.style.display = 'flex';
-        visualElement.style.justifyContent = 'center';
-        visualElement.style.alignItems = 'center';
-        return { visualElement, recognizedName };
-    }
-    // Fallback for unknown items
-    const fallbackSpan = document.createElement('span');
-    fallbackSpan.textContent = '🎲';
-    fallbackSpan.style.fontSize = '24px';
-    fallbackSpan.style.width = '36px';
-    fallbackSpan.style.height = '36px';
-    fallbackSpan.style.display = 'flex';
-    fallbackSpan.style.justifyContent = 'center';
-    fallbackSpan.style.alignItems = 'center';
-    return { visualElement: fallbackSpan, recognizedName: formatNameToTitleCase(recognizedName) };
-}
+// Creature drop as stored in a battle record (the grid portrait is built at render time).
 function getCreatureDetails(monsterDrop) {
-    let name = `GameID: ${monsterDrop.gameId}`;
-    const displayName = window.creatureDatabase?.getDisplayNameForOwnedMonster?.(monsterDrop);
-    const friendlyName = displayName || getMonsterNameFromId(monsterDrop.gameId);
-    if (friendlyName) name = friendlyName;
-    name = formatNameToTitleCase(name);
-    
+    const friendlyName = window.creatureDatabase?.getDisplayNameForOwnedMonster?.(monsterDrop)
+        || getMonsterNameFromId(monsterDrop.gameId);
     const { totalStats, tierName, tierLevel } = getCreatureTierDetails(monsterDrop.genes);
-
-    // Check if creature is shiny/sealed
-    const isShiny = monsterDrop.shiny === true;
-    const isSealed = Number(monsterDrop.tier ?? monsterDrop.metadata?.tier ?? tierLevel) === 5;
-    
-    // Create container for creature visual with potential shiny overlay
-    const visualContainer = document.createElement('div');
-    visualContainer.style.position = 'relative';
-    visualContainer.style.width = '36px';
-    visualContainer.style.height = '36px';
-    visualContainer.style.display = 'inline-block';
-    
-    const creatureVisualImg = document.createElement('img');
-    // Use database function for portrait URL, fallback to manual construction
-    creatureVisualImg.src = window.creatureDatabase?.getMonsterPortraitUrl(monsterDrop.gameId, isShiny) || 
-        `/assets/portraits/${monsterDrop.gameId}${isShiny ? '-shiny' : ''}.png`;
-    creatureVisualImg.alt = name;
-    creatureVisualImg.style.width = '36px';
-    creatureVisualImg.style.height = '36px';
-    creatureVisualImg.style.imageRendering = 'pixelated';
-    creatureVisualImg.style.borderRadius = '3px';
-    
-    visualContainer.appendChild(creatureVisualImg);
-    
-    // Add shiny star overlay if creature is shiny
-    if (isShiny) {
-        const shinyIcon = document.createElement('img');
-        shinyIcon.src = '/assets/icons/shiny-star.png';
-        shinyIcon.alt = 'shiny';
-        shinyIcon.title = t('mods.huntAnalyzer.shiny');
-        shinyIcon.style.position = 'absolute';
-        shinyIcon.style.top = '2px';
-        shinyIcon.style.left = '2px';
-        shinyIcon.style.width = '8px';
-        shinyIcon.style.height = '8px';
-        shinyIcon.style.zIndex = '10';
-        shinyIcon.style.pointerEvents = 'none';
-        visualContainer.appendChild(shinyIcon);
-    }
-
-    if (isSealed) {
-        const sealedIcon = document.createElement('img');
-        sealedIcon.src = SEALED_ICON_SRC;
-        sealedIcon.alt = 'sealed';
-        sealedIcon.title = t('mods.huntAnalyzer.sealed');
-        sealedIcon.style.position = 'absolute';
-        sealedIcon.style.top = '2px';
-        sealedIcon.style.right = '2px';
-        sealedIcon.style.width = '8px';
-        sealedIcon.style.height = '8px';
-        sealedIcon.style.zIndex = '10';
-        sealedIcon.style.pointerEvents = 'none';
-        visualContainer.appendChild(sealedIcon);
-    }
-    
-    const sellValue = resolveCreatureSellValue(monsterDrop, tierLevel, totalStats);
-    const creatureId = monsterDrop.id ?? monsterDrop.monsterId ?? monsterDrop.metadata?.id ?? null;
-    return { name, visual: visualContainer, rarity: tierLevel, totalStats, tierName, tierLevel, gameId: monsterDrop.gameId, isShiny, isSealed, sellValue, creatureId };
+    return {
+        originalName: formatNameToTitleCase(friendlyName || `GameID: ${monsterDrop.gameId}`),
+        totalStats,
+        tierName,
+        tierLevel,
+        creatureId: monsterDrop.id ?? monsterDrop.monsterId ?? monsterDrop.metadata?.id ?? null,
+        gameId: monsterDrop.gameId,
+        isShiny: monsterDrop.shiny === true,
+        isSealed: Number(monsterDrop.tier ?? monsterDrop.metadata?.tier ?? tierLevel) === 5
+    };
 }
 
 function getRewardMonsterDrops(serverResults) {
@@ -3608,7 +3565,10 @@ function buildLootAggregateKey(item) {
     const name = item.originalName ?? '';
     const rarity = item.rarity ?? '';
     const spriteId = item.spriteId != null && item.spriteId !== '' ? item.spriteId : '';
-    const srcRaw = (item.src != null && item.src !== '')
+    // Saved sessions drop src when the spriteId is numeric (slimLootItemForPersistence), so
+    // ignore it here too — otherwise the same item splits into two lines after a page reload.
+    const srcRaw = isNumericHuntSpriteId(spriteId) ? ''
+        : (item.src != null && item.src !== '')
         ? item.src
         : (item.spriteSrc != null && item.spriteSrc !== '' ? item.spriteSrc : '');
     const src = srcRaw === '' || srcRaw == null ? '' : String(srcRaw);
@@ -3628,20 +3588,11 @@ function buildCreatureAggregateKey(creature) {
     return `${creature.gameId}_${creature.tierLevel}_${shinyPart}_unsealed`;
 }
 
-function syncAggregateCountOverlay(aggregateEntry) {
-    if (!aggregateEntry?.visual?.querySelector) return;
-    const countSpan = aggregateEntry.visual.querySelector('.pixel-font-16');
-    if (countSpan) countSpan.textContent = aggregateEntry.count;
-}
-
-function mergeAggregateEntry(aggregateMap, key, entry, options = {}) {
-    const { updateVisual = false, onMerged } = options;
+function mergeAggregateEntry(aggregateMap, key, entry, { onMerged } = {}) {
     if (aggregateMap.has(key)) {
         const existing = aggregateMap.get(key);
         existing.count += entry.count;
         if (onMerged) onMerged(existing, entry);
-        if (updateVisual) syncAggregateCountOverlay(existing);
-        aggregateMap.set(key, existing);
         return existing;
     }
     const copy = { ...entry };
@@ -3699,6 +3650,94 @@ function createCountOverlay(count) {
     countSpan.style.zIndex = '10';
     countSpan.textContent = count || 1;
     return countSpan;
+}
+
+// Per loot item and per creature: in how many battles (of those in the current map/floor filter) it
+// dropped. Keyed like aggregatedLoot / aggregatedCreatures, so a grid entry can look up its own rate.
+function getFilteredDropRates() {
+    const { selectedMapFilter, selectedFloorFilter } = HuntAnalyzerState.ui;
+    return memoizeForSessions(`dropRates\u0000${selectedMapFilter}\u0000${selectedFloorFilter}`, (sessions) => {
+        const lootBattlesByKey = new Map();
+        const creatureBattlesByKey = new Map();
+        const countBattle = (entries, buildKey, battlesByKey) => {
+            const seen = new Set();
+            for (const entry of entries || []) {
+                const key = buildKey(entry);
+                if (seen.has(key)) continue;
+                seen.add(key);
+                battlesByKey.set(key, (battlesByKey.get(key) || 0) + 1);
+            }
+        };
+        let battles = 0;
+        for (const session of sessions) {
+            if (!sessionMatchesFilters(session)) continue;
+            battles += 1;
+            countBattle(session.loot, buildLootAggregateKey, lootBattlesByKey);
+            countBattle(session.creatures, buildCreatureAggregateKey, creatureBattlesByKey);
+        }
+        return { battles, lootBattlesByKey, creatureBattlesByKey };
+    });
+}
+
+function formatDropRatePercent(rate) {
+    const percent = rate * 100;
+    if (percent >= 10) return `${Math.round(percent)}%`;
+    if (percent >= 0.1) return `${percent.toFixed(1)}%`;
+    return '<0.1%';
+}
+
+// Red (rare) -> yellow -> green (common). Square-root scale so the many low rates still spread
+// out: 100% green, 25% yellow, ~5% orange, ~1% red. Light enough to read on the black badge.
+function getDropRateColor(rate) {
+    const clamped = Math.max(0, Math.min(1, rate));
+    const hue = Math.round(120 * Math.sqrt(clamped));
+    return `hsl(${hue}, 85%, 62%)`;
+}
+
+// Rate badge: same look as the quantity badge, in the top right corner (top left when that corner
+// already holds a sealed icon), coloured by rate. Null when "Show rates" is unticked in Mod Settings
+// (on by default).
+function createRateBadge(rate, tooltip, { corner = 'right' } = {}) {
+    if (HuntAnalyzerState.settings.showDropRates === false) return null;
+    const rateSpan = createCountOverlay(formatDropRatePercent(rate));
+    // No text-whiteExp here: the badge colour comes from getDropRateColor
+    rateSpan.className = 'pixel-font-16 absolute z-3';
+    rateSpan.style.color = getDropRateColor(rate);
+    rateSpan.style.bottom = '';
+    // Straddles the slot's top edge: half above, half inside (cells get extra top padding for it)
+    rateSpan.style.top = '0px';
+    rateSpan.style.transform = 'translateY(-50%)';
+    rateSpan.style.left = corner === 'left' ? '2px' : '';
+    rateSpan.style.right = corner === 'left' ? '' : '2px';
+    rateSpan.style.fontSize = '11px';
+    rateSpan.title = tooltip;
+    return rateSpan;
+}
+
+// Badge for one grid entry: share of the filtered battles it dropped in.
+function createBattleShareBadge(dropBattles, battles, options) {
+    if (!battles || !dropBattles) return null;
+    return createRateBadge(
+        dropBattles / battles,
+        t('mods.huntAnalyzer.dropRateTooltip')
+            .replace('{drops}', String(dropBattles))
+            .replace('{battles}', String(battles)),
+        options
+    );
+}
+
+function createDropRateOverlay(lootEntry) {
+    const { battles, lootBattlesByKey } = getFilteredDropRates();
+    return createBattleShareBadge(lootBattlesByKey.get(buildLootAggregateKey(lootEntry)) || 0, battles);
+}
+
+function createCreatureDropRateOverlay(creatureEntry) {
+    const { battles, creatureBattlesByKey } = getFilteredDropRates();
+    return createBattleShareBadge(
+        creatureBattlesByKey.get(buildCreatureAggregateKey(creatureEntry)) || 0,
+        battles,
+        { corner: creatureEntry.isSealed ? 'left' : 'right' }
+    );
 }
 
 // Helper function to create container slots
@@ -3759,6 +3798,8 @@ class DataProcessor {
     this.state = HuntAnalyzerState;
   }
 
+  // Records one battle. Battle records hold data only; grid portraits are built when the panel
+  // renders (resolveLootGridVisual / resolveCreatureGridVisual), so no DOM is kept per battle.
   processSession(serverResults) {
     if (!serverResults?.rewardScreen) return;
 
@@ -3766,305 +3807,147 @@ class DataProcessor {
     const autoplayMessage = rewardScreen.victory ? "Victory!" : "Defeat!";
     const aggregatedLootForSession = new Map();
     const aggregatedCreaturesForSession = new Map();
-    const currentLootItemsLog = [];
 
     // Get room name for display and session data
-    const roomNamesMap = globalThis.state?.utils?.ROOM_NAME;
-    const readableRoomName = roomNamesMap?.[rewardScreen.roomId] || `Room ID: ${rewardScreen.roomId}`;
+    const readableRoomName = getRoomDisplayName(rewardScreen.roomId);
 
     // Track map change for internal clock system
     trackMapChange(readableRoomName);
 
     // Update Room ID display in header
-    const cachedRoomIdDisplayElement = domCache.get("mod-room-id-display");
-    if (cachedRoomIdDisplayElement && rewardScreen.roomId) {
+    if (domCache.get("mod-room-id-display") && rewardScreen.roomId) {
       updateRoomTitleDisplay(rewardScreen.roomId, readableRoomName);
     }
 
     // Process Gold - add to session loot but will be filtered out in aggregation
     if (rewardScreen.loot?.goldAmount > 0) {
-      const goldAmount = rewardScreen.loot.goldAmount;
-      const { visualElement: goldVisual, recognizedName: goldName } = getItemVisual({
-        spriteId: CONFIG.GOLD_SPRITE_ID,
-        tooltipKey: 'Gold',
-        amount: goldAmount
-      });
-
       aggregatedLootForSession.set('Gold', {
-        count: goldAmount,
-        visual: goldVisual,
-        originalName: goldName,
+        count: rewardScreen.loot.goldAmount,
+        originalName: 'Gold',
         rarity: 0,
-        rarityBorderColor: getRarityBorderColor(0),
         spriteId: CONFIG.GOLD_SPRITE_ID,
         src: '/assets/icons/goldpile.png',
         isEquipment: false,
         stat: null
       });
-      
-      currentLootItemsLog.push(`Gold (x${goldAmount})`);
     }
 
-    // Process all loot items
     const allLootItems = [
-      ...(rewardScreen.loot.droppedItems || []),
+      ...(rewardScreen.loot?.droppedItems || []),
       ...(rewardScreen.equipDrop ? [rewardScreen.equipDrop] : [])
     ];
 
-    // Immediately track stamina recovery from dropped potions
+    let sessionStaminaRecovered = 0;
     for (const item of allLootItems) {
-      if (item.spriteId === CONFIG.GOLD_SPRITE_ID || 
-          (item.tooltipKey && item.tooltipKey.toLowerCase() === 'gold') ||
-          item.spriteId === CONFIG.HEAL_POTION_SPRITE_ID) {
-        continue;
-      }
-
-      // Check if this is a stamina potion and add recovery immediately
-      let itemName = 'Unknown Item';
-      if (item.tooltipKey?.toLowerCase().includes('dust') || 
-          (item.spriteSrc && item.spriteSrc.includes('dust'))) {
-        itemName = 'Dust';
-      } else if (item.tooltipKey) {
-        itemName = item.tooltipKey;
-      } else if (item.name) {
-        itemName = item.name;
-      }
-
-      const staminaRecovery = getStaminaRecoveryAmount(itemName, item);
-      if (staminaRecovery > 0) {
-        HuntAnalyzerState.totals.staminaRecovered += staminaRecovery;
-      }
-    }
-
-    for (const item of allLootItems) {
-      if (item.spriteId === CONFIG.GOLD_SPRITE_ID || 
+      if (item.spriteId === CONFIG.GOLD_SPRITE_ID ||
           (item.tooltipKey && item.tooltipKey.toLowerCase() === 'gold') ||
           item.spriteId === CONFIG.HEAL_POTION_SPRITE_ID) { // Skip gold and heal potion
         continue;
       }
 
+      const isDustItem = item.tooltipKey?.toLowerCase().includes('dust') ||
+        (item.spriteSrc && item.spriteSrc.includes('dust'));
+      sessionStaminaRecovered += getStaminaRecoveryAmount(
+        isDustItem ? 'Dust' : (item.tooltipKey || item.name || 'Unknown Item'),
+        item
+      );
+
       const isEquipment = rewardScreen.equipDrop === item || (item.stat && item.gameId && item.tier);
       let rarity = item.rarityLevel || item.tier || 0;
-      
+
       let itemName = 'Unknown Item';
-      if (item.tooltipKey?.toLowerCase().includes('dust') || 
-          (item.spriteSrc && item.spriteSrc.includes('dust'))) {
+      if (isDustItem) {
         itemName = 'Dust';
       } else if (isEquipment) {
-        itemName = getEquipmentNameFromId(item.gameId) || 
+        itemName = getEquipmentNameFromId(item.gameId) ||
                   `${item.stat.toUpperCase()} Equipment Tier ${item.tier}`;
       } else if (item.tooltipKey) {
         itemName = item.tooltipKey;
       } else if (item.spriteId) {
         itemName = `ID-${item.spriteId}`;
       }
-      
+
       // For equipment items, ensure they have gameId
       if (isEquipment && !item.gameId) {
-        // Try to get gameId from spriteId if available
         item.gameId = item.spriteId;
       }
-      
+
       // Get both rarity and display name in one optimized lookup
       const { rarity: databaseRarity, displayName: databaseDisplayName } = getItemInfoFromDatabase(itemName, item.tooltipKey, item);
-      
       if (databaseRarity) {
         rarity = parseInt(databaseRarity);
       }
-      
       if (databaseDisplayName) {
-        // Extract the descriptive part from the display name for rarity text
-        // e.g., "Summon Scroll (Crude)" -> "Crude"
+        // "Summon Scroll (Crude)" -> name "Summon Scroll", descriptive rarity "Crude"
         const match = databaseDisplayName.match(/\(([^)]+)\)$/);
         if (match) {
-          // Store the descriptive rarity for later use
           item._descriptiveRarity = match[1];
-          // Use the base name without the descriptive part
           itemName = databaseDisplayName.replace(/\s*\([^)]+\)$/, '');
         } else {
           itemName = databaseDisplayName;
         }
       }
-      
-      
-      const rarityBorderColor = getRarityBorderColor(rarity);
 
-      // Use resolved itemName to avoid redundant API calls in getItemVisual
-      let itemVisual, resolvedItemName, equipmentStat = null;
-      
-      // Handle equipment items specially using API components for grid display
+      let resolvedItemName = itemName;
+      let equipmentStat = null;
       if (isEquipment && typeof globalThis.state?.utils?.getEquipment === 'function' && item.gameId) {
         try {
           const equipData = globalThis.state.utils.getEquipment(item.gameId);
-          if (equipData && equipData.metadata && typeof equipData.metadata.spriteId === 'number') {
-            const equipmentSpriteId = equipData.metadata.spriteId;
+          if (equipData?.metadata && typeof equipData.metadata.spriteId === 'number') {
             resolvedItemName = equipData.metadata.name || itemName;
-            
-            // Extract stat information from equipment data
-            if (equipData.metadata && equipData.metadata.stat) {
-              equipmentStat = equipData.metadata.stat;
-            } else if (equipData.stats && equipData.stats.length > 0) {
-              // Get the primary stat (first stat in the array)
-              equipmentStat = equipData.stats[0].type;
-            }
-            
-            // Use API component for equipment like Cyclopedia does
-            if (api && api.ui && api.ui.components && api.ui.components.createItemPortrait) {
-              try {
-                const equipmentPortrait = api.ui.components.createItemPortrait({
-                  itemId: equipmentSpriteId,
-                  tier: rarity || 1
-                });
-                
-                // Check if we got a valid DOM element
-                if (equipmentPortrait && equipmentPortrait.nodeType) {
-                  // If it's a button, get the first child (the actual portrait)
-                  if (equipmentPortrait.tagName === 'BUTTON' && equipmentPortrait.firstChild) {
-                    const firstChild = equipmentPortrait.firstChild;
-                    if (firstChild && firstChild.nodeType) {
-                      // Add count overlay to the portrait (bottom left like creatures)
-                      const countSpan = createCountOverlay(item.amount);
-                      
-                      firstChild.appendChild(countSpan);
-                      
-                      // Add stat icon to the portrait
-                      addStatIconToPortrait(firstChild, equipmentStat);
-                      
-                      itemVisual = firstChild;
-                    }
-                  }
-                }
-              } catch (apiError) {
-                console.warn('[Hunt Analyzer] Error creating API equipment portrait, falling back to sprite:', apiError);
-              }
-            }
-            
-            // Fallback to sprite system if API component failed
-            if (!itemVisual) {
-              const spriteDiv = createItemSprite(equipmentSpriteId, resolvedItemName, rarity || 1);
-              
-              // Add count overlay to sprite (bottom left like creatures)
-              const countSpan = createCountOverlay(item.amount);
-              
-              // Make sure the sprite container has relative positioning for the count overlay
-              spriteDiv.style.position = 'relative';
-              spriteDiv.appendChild(countSpan);
-              itemVisual = spriteDiv;
-            }
+            equipmentStat = getEquipmentStatFromData(equipData);
           }
-        } catch (e) { 
-          console.error("[Hunt Analyzer] Error getting equipment data:", e); 
+        } catch (e) {
+          console.error("[Hunt Analyzer] Error getting equipment data:", e);
         }
       }
-      
-      // For non-equipment items, use the same approach as regenerative system
-      if (!itemVisual) {
-        resolvedItemName = itemName;
-        
-        // Use the same visual creation system as the regenerative system
-        const itemData = {
-          spriteId: item.spriteId || item.gameId,
-          src: item.spriteSrc,
-          spriteSrc: item.spriteSrc,
-          originalName: resolvedItemName,
-          rarity: rarity,
-          count: item.amount || 1
-        };
-        itemVisual = createInventoryStyleItemPortrait(itemData);
-      }
 
-      // Handle dust items - add to session but will be filtered out in aggregation
+      const currentQuantity = item.amount || 1;
+
+      // Dust stays in session loot (filtered out in aggregation)
       if (resolvedItemName === 'Dust') {
-        HuntAnalyzerState.totals.dust += item.amount || 1;
-        currentLootItemsLog.push(`Dust (x${item.amount || 1})`);
-        // Continue processing to add dust to session loot (will be filtered out later)
+        HuntAnalyzerState.totals.dust += currentQuantity;
       }
 
       // Track rune drops - check both original and resolved names
       const originalItemName = item.tooltipKey || `ID-${item.spriteId}`;
       if (isRuneItem(originalItemName, item) || isRuneItem(resolvedItemName, item)) {
-        HuntAnalyzerState.totals.runes += item.amount || 1;
+        HuntAnalyzerState.totals.runes += currentQuantity;
       }
 
-      const mapKey = buildLootAggregateKey({
-        originalName: resolvedItemName,
-        rarity,
-        spriteId: item.spriteId || item.gameId,
-        src: item.spriteSrc,
-        spriteSrc: item.spriteSrc,
-        isEquipment,
-        stat: item.stat || equipmentStat || null
-      });
-      const currentQuantity = item.amount || 1;
-
-      mergeAggregateEntry(aggregatedLootForSession, mapKey, {
+      const lootEntry = {
         count: currentQuantity,
-        visual: itemVisual,
         originalName: resolvedItemName,
         rarity,
-        rarityBorderColor,
         spriteId: item.spriteId || item.gameId,
         src: item.spriteSrc,
         isEquipment,
         gameId: item.gameId,
         stat: item.stat || equipmentStat || null,
         _descriptiveRarity: item._descriptiveRarity || null
-      }, {
-        updateVisual: true,
+      };
+      mergeAggregateEntry(aggregatedLootForSession, buildLootAggregateKey(lootEntry), lootEntry, {
         onMerged: (existing) => {
           if (item._descriptiveRarity) existing._descriptiveRarity = item._descriptiveRarity;
           if (item.gameId) existing.gameId = item.gameId;
           if (equipmentStat && !existing.stat) existing.stat = equipmentStat;
         }
       });
-      currentLootItemsLog.push(`${resolvedItemName} (Rarity ${rarity}, x${currentQuantity})`);
     }
+    HuntAnalyzerState.totals.staminaRecovered += sessionStaminaRecovered;
 
     // Process Creature Drop(s) - manual mode can provide rewardScreen.monsters/next.monsterDrop.
-    const rewardMonsterDrops = getRewardMonsterDrops(serverResults);
-    rewardMonsterDrops.forEach((monsterDrop) => {
-      const { name: creatureName, totalStats, tierName, tierLevel, gameId: creatureGameId, isShiny, isSealed, sellValue, creatureId } =
-        getCreatureDetails(monsterDrop);
+    getRewardMonsterDrops(serverResults).forEach((monsterDrop) => {
+      const creature = getCreatureDetails(monsterDrop);
+      if (creature.originalName.toLowerCase().includes('monster squeezer')) return;
 
-      if (!creatureName.toLowerCase().includes('monster squeezer')) {
-        if (isShiny) {
-          HuntAnalyzerState.totals.shiny += 1;
-        }
-        if (isSealed) {
-          HuntAnalyzerState.totals.sealed += 1;
-        }
-
-        const mapKey = buildCreatureAggregateKey({
-          gameId: creatureGameId,
-          tierLevel,
-          isShiny,
-          isSealed
-        });
-        mergeAggregateEntry(aggregatedCreaturesForSession, mapKey, {
-          count: 1,
-          visual: createInventoryStyleCreaturePortrait({
-            gameId: creatureGameId,
-            originalName: creatureName,
-            tierLevel,
-            count: 1,
-            isShiny,
-            isSealed
-          }),
-          originalName: creatureName,
-          genes: Object.entries(monsterDrop.genes || {})
-            .map(([key, value]) => `${key.toUpperCase()}:${value}`)
-            .join(', '),
-          totalStats,
-          tierName,
-          tierLevel,
-          sellValue,
-          creatureId,
-          rarityBorderColor: getRarityBorderColor(tierLevel),
-          gameId: creatureGameId,
-          isShiny,
-          isSealed
-        }, { updateVisual: true });
+      if (creature.isShiny) {
+        HuntAnalyzerState.totals.shiny += 1;
       }
+      if (creature.isSealed) {
+        HuntAnalyzerState.totals.sealed += 1;
+      }
+      mergeAggregateEntry(aggregatedCreaturesForSession, buildCreatureAggregateKey(creature), { count: 1, ...creature });
     });
 
     // Update stamina spent
@@ -4078,42 +3961,16 @@ class DataProcessor {
       HuntAnalyzerState.totals.experience += battleExp;
     }
 
-    // Calculate stamina recovered for this session
-    let sessionStaminaRecovered = 0;
-    for (const item of allLootItems) {
-      if (item.spriteId === CONFIG.GOLD_SPRITE_ID || 
-          (item.tooltipKey && item.tooltipKey.toLowerCase() === 'gold') ||
-          item.spriteId === CONFIG.HEAL_POTION_SPRITE_ID) {
-        continue;
-      }
-
-      let itemName = 'Unknown Item';
-      if (item.tooltipKey?.toLowerCase().includes('dust') || 
-          (item.spriteSrc && item.spriteSrc.includes('dust'))) {
-        itemName = 'Dust';
-      } else if (item.tooltipKey) {
-        itemName = item.tooltipKey;
-      } else if (item.name) {
-        itemName = item.name;
-      }
-
-      const staminaRecovery = getStaminaRecoveryAmount(itemName, item);
-      if (staminaRecovery > 0) {
-        sessionStaminaRecovered += staminaRecovery;
-      }
-    }
-
     // Track win/loss
     if (rewardScreen.victory) {
       HuntAnalyzerState.totals.wins++;
     } else {
       HuntAnalyzerState.totals.losses++;
     }
-    
+
     // Extract gold and dust from loot array for session tracking
     let sessionGold = 0;
     let sessionDust = 0;
-    let sessionCreatureSellValue = 0;
     for (const item of aggregatedLootForSession.values()) {
       if (item.originalName === 'Gold') {
         sessionGold += item.count;
@@ -4121,19 +3978,13 @@ class DataProcessor {
         sessionDust += item.count;
       }
     }
-    for (const creature of aggregatedCreaturesForSession.values()) {
-      const creatureCount = Math.max(0, Number(creature?.count) || 0);
-      const valuePerCreature = parsePossibleGoldValue(creature?.sellValue);
-      if (creatureCount > 0 && valuePerCreature > 0) {
-        sessionCreatureSellValue += creatureCount * valuePerCreature;
-      }
-    }
-    
+
     // Floor is included in rewardScreen in current game payloads.
     // Keep null for unknown/legacy sessions so grouping stays stable.
     const battleFloor = typeof rewardScreen.floor === 'number'
       ? rewardScreen.floor
       : (typeof serverResults?.floor === 'number' ? serverResults.floor : null);
+    trackFloorChange(battleFloor);
 
     // Store session data
     const sessionData = {
@@ -4150,32 +4001,28 @@ class DataProcessor {
       victory: rewardScreen.victory,
       gold: sessionGold,
       dust: sessionDust,
-      creatureSellValue: sessionCreatureSellValue,
-      capturedDisenchantDustValues: []
+      capturedDisenchantDustValues: [],
+      battleMs: null // filled in by applyBattleDuration when the battle ends on screen
     };
-    
-    const equipmentDropsInSession = sessionData.loot.reduce((acc, item) => {
-      if (!item?.isEquipment) return acc;
-      return acc + Math.max(0, Number(item?.count) || 0);
-    }, 0);
 
     this.state.data.sessions.push(sessionData);
+    attachSessionToCurrentBattle(sessionData);
     reconcilePendingCreatureSellEventsIntoSessions();
     reconcilePendingDisenchantDustEventsIntoSessions();
     if (this.state.data.sessions.length === 1 && HuntAnalyzerState.timeTracking.awaitingFirstBattle) {
       HuntAnalyzerState.timeTracking.awaitingFirstBattle = false;
       armTimeTrackingAtBattleStart();
     }
-    
+
     // Consolidated session processing summary (single-line to avoid collapsed "Object" logs)
     console.log(
-      `[Hunt Analyzer] Session processed: result=${autoplayMessage} room=${readableRoomName} ` +
+      `[Hunt Analyzer] Session processed: result=${autoplayMessage} room=${readableRoomName} floor=${battleFloor} ` +
       `gold=${rewardScreen.loot?.goldAmount || 0} exp=${sessionData.experience} ` +
-      `lootItems=${aggregatedLootForSession.size} equipmentDrops=${equipmentDropsInSession} ` +
+      `lootItems=${aggregatedLootForSession.size} equipmentDrops=${getSessionEquipmentDropCount(sessionData)} ` +
       `creatures=${aggregatedCreaturesForSession.size} staminaSpent=${sessionData.staminaSpent} ` +
       `staminaRecovered=${sessionData.staminaRecovered}`
     );
-    
+
     // Auto-save data if persistence is enabled
     if (HuntAnalyzerState.settings.persistData) {
       saveHuntAnalyzerData();
@@ -4187,27 +4034,10 @@ class DataProcessor {
     this.state.data.aggregatedLoot.clear();
     this.state.data.aggregatedCreatures.clear();
 
-    // Reset totals
-    HuntAnalyzerState.totals.gold = 0;
-    HuntAnalyzerState.totals.creatures = 0;
-    HuntAnalyzerState.totals.equipment = 0;
-    HuntAnalyzerState.totals.runes = 0;
-    HuntAnalyzerState.totals.dust = 0;
-    HuntAnalyzerState.totals.shiny = 0;
-    HuntAnalyzerState.totals.sealed = 0;
-    HuntAnalyzerState.totals.staminaSpent = 0;
-    HuntAnalyzerState.totals.staminaRecovered = 0;
-    HuntAnalyzerState.totals.experience = 0;
-    HuntAnalyzerState.totals.wins = 0;
-    HuntAnalyzerState.totals.losses = 0;
+    resetAggregatedTotals();
 
-    // Filter sessions by selected map
-    const filteredSessions = this.state.data.sessions.filter(sessionData => {
-      if (this.state.ui.selectedMapFilter === "ALL") {
-        return true;
-      }
-      return sessionData.roomName === this.state.ui.selectedMapFilter;
-    });
+    // Filter sessions by selected map and floor
+    const filteredSessions = this.state.data.sessions.filter(sessionMatchesFilters);
 
     // Aggregate data from filtered sessions into the global maps
     filteredSessions.forEach(sessionData => {
@@ -4234,8 +4064,7 @@ class DataProcessor {
             mergeAggregateEntry(
                 this.state.data.aggregatedLoot,
                 buildLootAggregateKey(item),
-                item,
-                { updateVisual: true }
+                item
             );
             accumulateLootCategoryTotals(item);
         });
@@ -4244,8 +4073,7 @@ class DataProcessor {
             mergeAggregateEntry(
                 this.state.data.aggregatedCreatures,
                 buildCreatureAggregateKey(creature),
-                creature,
-                { updateVisual: true }
+                creature
             );
             if (creature.isShiny) HuntAnalyzerState.totals.shiny += creature.count;
             if (creature.isSealed) HuntAnalyzerState.totals.sealed += creature.count;
@@ -4310,6 +4138,41 @@ function updateRoomTitleDisplay(roomId, roomName) {
 // =======================
 
 // Update map filter dropdown based on available maps
+// Map dropdown options: farmed maps in Cyclopedia region order. With a floor selected, only maps
+// that have battles on that floor are offered (the floor menu is narrowed by map the same way).
+function populateMapFilterMenu(dropdownMenu = document.getElementById("mod-map-filter-dropdown-menu")) {
+    if (!dropdownMenu) return;
+    dropdownMenu.innerHTML = "";
+    const farmedMapNames = new Set(
+        HuntAnalyzerState.data.sessions
+            .filter((session) => sessionMatchesFloorFilter(session))
+            .map((session) => session.roomName)
+    );
+
+    // Build ordered list using region room order (same as Cyclopedia does)
+    const roomNamesMap = globalThis.state?.utils?.ROOM_NAME || {};
+    const regions = globalThis.state?.utils?.REGIONS || [];
+    const orderedMaps = [];
+    regions.forEach((region) => {
+        (region.rooms || []).forEach((room) => {
+            const mapName = roomNamesMap[room.id];
+            if (mapName && farmedMapNames.has(mapName)) {
+                orderedMaps.push(mapName);
+                farmedMapNames.delete(mapName);
+            }
+        });
+    });
+    // Maps not found in regions (fallback - should be rare)
+    orderedMaps.push(...Array.from(farmedMapNames).sort());
+
+    const selected = HuntAnalyzerState.ui.selectedMapFilter;
+    ["ALL", ...orderedMaps].forEach((mapName) => {
+        const option = createDropdownOption(mapName);
+        option.dataset.selected = mapName === selected ? "true" : "false";
+        dropdownMenu.appendChild(option);
+    });
+}
+
 function updateMapFilterDropdown() {
     const mapFilterRow = domCache.get("mod-map-filter-row");
     if (!mapFilterRow) return;
@@ -4342,18 +4205,19 @@ function updateMapFilterDropdown() {
     const dropdownContainer = document.createElement("div");
     dropdownContainer.style.position = "relative";
     dropdownContainer.style.display = "inline-block";
-    dropdownContainer.style.width = "200px";
-    dropdownContainer.style.flexShrink = "0";
+    // Shrinks (down to 100px) so the floor dropdown still fits beside it in a narrow panel
+    dropdownContainer.style.flex = "0 1 200px";
+    dropdownContainer.style.minWidth = "100px";
 
     // Create dropdown button
     const dropdownButton = document.createElement("button");
     dropdownButton.id = "mod-map-filter-dropdown-button";
-    dropdownButton.style.padding = "6px 12px";
-    dropdownButton.style.borderRadius = "4px";
+    // 4px game frame (applyThemeMapFilterDropdownStyles) + small padding, like the other buttons
+    dropdownButton.style.padding = "2px 8px";
     dropdownButton.style.fontSize = "12px";
     dropdownButton.style.cursor = "pointer";
-    dropdownButton.style.width = "200px";
-    dropdownButton.style.minWidth = "200px";
+    dropdownButton.style.width = "100%";
+    dropdownButton.style.minWidth = "0";
     dropdownButton.style.maxWidth = "200px";
     dropdownButton.style.boxSizing = "border-box";
     dropdownButton.style.textAlign = "left";
@@ -4394,57 +4258,12 @@ function updateMapFilterDropdown() {
     dropdownMenu.style.maxHeight = "200px";
     dropdownMenu.style.overflowY = "auto";
 
-    // Get unique map names from sessions (maps that have been farmed)
-    const farmedMapNames = new Set(HuntAnalyzerState.data.sessions.map(s => s.roomName));
-    
-    // Get region data and room name mapping (matching Cyclopedia's approach)
-    const roomNamesMap = globalThis.state?.utils?.ROOM_NAME || {};
-    const regions = globalThis.state?.utils?.REGIONS || [];
-    
-    // Build ordered list using region room order (same as Cyclopedia does)
-    const orderedMaps = [];
-    
-    if (regions.length > 0) {
-        // Iterate through regions in their native order
-        regions.forEach(region => {
-            if (!region.rooms) return;
-            
-            // Iterate through rooms in their native order within this region
-            region.rooms.forEach(room => {
-                const roomId = room.id;
-                const mapName = roomNamesMap[roomId];
-                
-                // Only include maps that have been farmed
-                if (mapName && farmedMapNames.has(mapName)) {
-                    orderedMaps.push(mapName);
-                    // Remove from set to avoid duplicates
-                    farmedMapNames.delete(mapName);
-                }
-            });
-        });
-    }
-    
-    // Add any remaining maps not found in regions (fallback - should be rare)
-    if (farmedMapNames.size > 0) {
-        const remainingMaps = Array.from(farmedMapNames).sort();
-        orderedMaps.push(...remainingMaps);
-    }
-    
-    // Add "ALL" option
-    const allOption = createDropdownOption("ALL");
-    dropdownMenu.appendChild(allOption);
-
-    // Add options for each farmed map (in Cyclopedia's order)
-    orderedMaps.forEach(mapName => {
-        const mapOption = createDropdownOption(mapName);
-        dropdownMenu.appendChild(mapOption);
-    });
-
-    syncMapFilterDropdownOptionStyles();
+    populateMapFilterMenu(dropdownMenu);
 
     // Toggle dropdown visibility
     dropdownClickHandler = (e) => {
         e.stopPropagation();
+        closeFloorFilterDropdown();
         const isVisible = dropdownMenu.style.display === "block";
         if (isVisible) {
             dropdownMenu.style.display = "none";
@@ -4458,11 +4277,12 @@ function updateMapFilterDropdown() {
     };
     dropdownButton.addEventListener("click", dropdownClickHandler);
 
-    // Close dropdown when clicking outside
+    // Close dropdowns when clicking outside
     documentClickHandler = () => {
         dropdownMenu.style.display = "none";
         arrow.textContent = "▼";
         syncMapFilterDropdownOptionStyles();
+        closeFloorFilterDropdown();
     };
     document.addEventListener("click", documentClickHandler);
 
@@ -4471,6 +4291,7 @@ function updateMapFilterDropdown() {
     dropdownContainer.appendChild(dropdownButton);
     dropdownContainer.appendChild(dropdownMenu);
     mapFilterRow.appendChild(dropdownContainer);
+    mapFilterRow.appendChild(createFloorFilterDropdown());
 
     const navigateButton = createStyledButton('→');
     navigateButton.id = 'mod-map-filter-navigate-button';
@@ -4555,6 +4376,12 @@ function createDropdownOption(mapName) {
             arrow.textContent = "▼";
         }
         
+        // Floors differ per map: drop a floor selection the new map never recorded
+        if (!getAvailableFloorFilterValues().includes(HuntAnalyzerState.ui.selectedFloorFilter)) {
+            HuntAnalyzerState.ui.selectedFloorFilter = "ALL";
+        }
+        populateFloorFilterMenu();
+
         // Refresh data and display
         dataProcessor.aggregateData();
         renderAllSessions();
@@ -4568,11 +4395,165 @@ function createDropdownOption(mapName) {
     return option;
 }
 
+function getFloorFilterLabel(value) {
+    if (value === "ALL") return t('mods.huntAnalyzer.allFloors');
+    if (value === "UNKNOWN") return t('mods.huntAnalyzer.floorUnknown');
+    return formatFloorPercent(value);
+}
+
+// Floors are shown as the game's difficulty percentage: floor 0 = 100%, +20% per floor (15 = 400%).
+function formatFloorPercent(floor) {
+    return `${100 + floor * 20}%`;
+}
+
+// Floor values recorded for the current map filter: "ALL", ascending floors, then "UNKNOWN".
+function getAvailableFloorFilterValues() {
+    const floors = new Set();
+    let hasUnknown = false;
+    for (const session of HuntAnalyzerState.data.sessions) {
+        if (!sessionMatchesMapFilter(session)) continue;
+        if (Number.isInteger(session.floor)) floors.add(session.floor);
+        else hasUnknown = true;
+    }
+    const values = ["ALL", ...Array.from(floors).sort((a, b) => a - b)];
+    if (hasUnknown) values.push("UNKNOWN");
+    return values;
+}
+
+function closeFloorFilterDropdown() {
+    const menu = document.getElementById("mod-floor-filter-dropdown-menu");
+    if (menu) menu.style.display = "none";
+    const arrow = document.getElementById("mod-floor-filter-dropdown-arrow");
+    if (arrow) arrow.textContent = "▼";
+}
+
+function syncFloorFilterLabel() {
+    const labelSpan = document.getElementById("mod-floor-filter-dropdown-label");
+    if (!labelSpan) return;
+    const label = getFloorFilterLabel(HuntAnalyzerState.ui.selectedFloorFilter);
+    labelSpan.textContent = label;
+    labelSpan.title = label;
+}
+
+function populateFloorFilterMenu() {
+    const menu = document.getElementById("mod-floor-filter-dropdown-menu");
+    if (!menu) return;
+    menu.innerHTML = "";
+    const selected = HuntAnalyzerState.ui.selectedFloorFilter;
+    getAvailableFloorFilterValues().forEach((value) => {
+        const option = document.createElement("div");
+        const label = getFloorFilterLabel(value);
+        option.textContent = label;
+        option.title = label;
+        // Reuses the map filter option styles (data-map-filter-option CSS)
+        option.dataset.mapFilterOption = String(value);
+        option.dataset.selected = value === selected ? 'true' : 'false';
+        option.style.padding = "8px 12px";
+        option.style.cursor = "pointer";
+        option.style.fontSize = "12px";
+        option.style.borderBottom = `1px solid ${getThemeColor('border')}`;
+        option.style.transition = "background-color 0.2s ease";
+        option.style.overflow = "hidden";
+        option.style.textOverflow = "ellipsis";
+        option.style.whiteSpace = "nowrap";
+        option.addEventListener("click", (e) => {
+            e.stopPropagation();
+            HuntAnalyzerState.ui.selectedFloorFilter = value;
+            closeFloorFilterDropdown();
+            populateFloorFilterMenu();
+            syncFloorFilterLabel();
+            populateMapFilterMenu();
+            dataProcessor.aggregateData();
+            renderAllSessions();
+            refreshClearButtonLabel();
+        });
+        menu.appendChild(option);
+    });
+}
+
+// Floor dropdown shown beside the map filter; its button/menu are rebuilt with the row.
+function createFloorFilterDropdown() {
+    const container = document.createElement("div");
+    container.style.position = "relative";
+    container.style.display = "inline-block";
+    container.style.flex = "0 0 auto";
+    container.style.width = "96px";
+
+    const button = document.createElement("button");
+    button.id = "mod-floor-filter-dropdown-button";
+    button.style.padding = "2px 6px";
+    button.style.fontSize = "12px";
+    button.style.cursor = "pointer";
+    button.style.width = "100%";
+    button.style.boxSizing = "border-box";
+    button.style.textAlign = "left";
+    button.style.display = "flex";
+    button.style.justifyContent = "space-between";
+    button.style.alignItems = "center";
+    button.style.gap = "4px";
+    button.style.overflow = "hidden";
+
+    const labelSpan = document.createElement("span");
+    labelSpan.id = "mod-floor-filter-dropdown-label";
+    labelSpan.style.flex = "1 1 auto";
+    labelSpan.style.minWidth = "0";
+    labelSpan.style.overflow = "hidden";
+    labelSpan.style.textOverflow = "ellipsis";
+    labelSpan.style.whiteSpace = "nowrap";
+
+    const arrow = document.createElement("span");
+    arrow.id = "mod-floor-filter-dropdown-arrow";
+    arrow.textContent = "▼";
+    arrow.style.fontSize = "10px";
+    arrow.style.flexShrink = "0";
+
+    button.appendChild(labelSpan);
+    button.appendChild(arrow);
+
+    const menu = document.createElement("div");
+    menu.id = "mod-floor-filter-dropdown-menu";
+    menu.style.position = "absolute";
+    menu.style.top = "100%";
+    menu.style.left = "0";
+    menu.style.right = "0";
+    menu.style.borderRadius = "4px";
+    menu.style.zIndex = "100";
+    menu.style.display = "none";
+    menu.style.maxHeight = "200px";
+    menu.style.overflowY = "auto";
+
+    // Button is discarded with the row on every rebuild, so an element-scoped listener can't leak
+    button.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const mapMenu = document.getElementById("mod-map-filter-dropdown-menu");
+        if (mapMenu) mapMenu.style.display = "none";
+        const mapArrow = document.getElementById("mod-map-filter-dropdown-arrow");
+        if (mapArrow) mapArrow.textContent = "▼";
+        if (menu.style.display === "block") {
+            closeFloorFilterDropdown();
+        } else {
+            populateFloorFilterMenu();
+            menu.style.display = "block";
+            arrow.textContent = "▲";
+        }
+    });
+
+    applyThemeMapFilterDropdownStyles(button, menu);
+
+    const label = getFloorFilterLabel(HuntAnalyzerState.ui.selectedFloorFilter);
+    labelSpan.textContent = label;
+    labelSpan.title = label;
+
+    container.appendChild(button);
+    container.appendChild(menu);
+    // Options are built on open (populateFloorFilterMenu), so the list always reflects current sessions
+    return container;
+}
+
 // =======================
 // 4. Data Processing Functions
 // =======================
 // Renders all stored game sessions to the analyzer panel.
-// Optimized to use incremental updates instead of full re-renders when possible.
 function renderAllSessions() {
     // Check if the panel is open first
     if (!document.getElementById(PANEL_ID)) {
@@ -4609,7 +4590,9 @@ function renderAllSessions() {
 
     updateFilteredSectionTitle('mod-loot-title', 'mods.huntAnalyzer.loot', totalLootItems);
 
-    const sortedFilteredLoot = allLoot.sort(compareLootEntries);
+    const sortedFilteredLoot = sortGridEntries(allLoot, compareLootEntries, {
+        getRarity: (entry) => entry.rarity || 0
+    });
 
     // Create grid container for loot using unified function
     const lootGridContainer = createUnifiedGridContainer();
@@ -4624,12 +4607,10 @@ function renderAllSessions() {
     
     // Append grid container to loot display
     cachedLootDiv.appendChild(lootGridContainer);
-    
-    // Add stat icons to any existing equipment portraits
-    setTimeout(() => addStatIconsToExistingPortraits(), 100);
 
-    const sortedOverallCreatures = Array.from(HuntAnalyzerState.data.aggregatedCreatures.values())
-        .sort(compareCreatureEntries);
+    const sortedOverallCreatures = sortGridEntries(Array.from(HuntAnalyzerState.data.aggregatedCreatures.values()), compareCreatureEntries, {
+        getRarity: (entry) => entry.tierLevel || 0
+    });
 
     // Calculate total creature drops for current filter
     let totalCreatureDrops = 0;
@@ -4637,7 +4618,7 @@ function renderAllSessions() {
         totalCreatureDrops += data.count;
     });
 
-    updateFilteredSectionTitle('mod-creature-drops-title', 'mods.huntAnalyzer.creatureDrops', totalCreatureDrops);
+    updateFilteredSectionTitle('mod-creature-drops-title', 'mods.huntAnalyzer.creatures', totalCreatureDrops);
 
     // Create grid container for creatures using unified function
     const gridContainer = createUnifiedGridContainer();
@@ -4645,7 +4626,12 @@ function renderAllSessions() {
     sortedOverallCreatures.forEach((data) => {
         const creatureEntryDiv = createGridEntryCell();
         const iconWrapper = createGridIconWrapper();
-        mountGridVisual(iconWrapper, resolveCreatureGridVisual(data), '👾');
+        const creatureVisual = resolveCreatureGridVisual(data);
+        if (creatureVisual instanceof HTMLElement) {
+            const creatureRate = createCreatureDropRateOverlay(data);
+            if (creatureRate) creatureVisual.appendChild(creatureRate);
+        }
+        mountGridVisual(iconWrapper, creatureVisual, '👾');
         creatureEntryDiv.appendChild(iconWrapper);
         gridContainer.appendChild(creatureEntryDiv);
     });
@@ -4662,14 +4648,22 @@ function renderAllSessions() {
 // `allGameSessionsData` array. It does NOT render directly.
 // serverResults - The structured data containing game outcome, loot, and creature drops.
 function processAutoplaySummary(serverResults) {
-    // Delegate to the new data processor
     dataProcessor.processSession(serverResults);
 
-    // Trigger re-render - use requestAnimationFrame to batch DOM updates
+    // Trigger re-render - use requestAnimationFrame to batch DOM updates. The filter dropdown is
+    // only rebuilt when this battle was on a map it doesn't list yet.
+    const roomName = HuntAnalyzerState.data.sessions[HuntAnalyzerState.data.sessions.length - 1]?.roomName;
     requestAnimationFrame(() => {
         renderAllSessions();
-        updateMapFilterDropdown();
+        if (!isMapListedInFilterDropdown(roomName)) {
+            updateMapFilterDropdown();
+        }
     });
+}
+
+function isMapListedInFilterDropdown(roomName) {
+    const menu = document.getElementById('mod-map-filter-dropdown-menu');
+    return !!menu && Array.from(menu.children).some((option) => option.dataset.mapFilterOption === roomName);
 }
 
 
@@ -4703,29 +4697,25 @@ function getSummaryRoomDisplayName(sessions) {
 }
 
 function formatFloorSessionBreakdown(sessions) {
+    // Keyed by floor number, or "UNKNOWN" for sessions recorded before floor capture
     const floorSessions = new Map();
     sessions.forEach((session) => {
-        const floorLabel = Number.isInteger(session.floor)
-            ? `${t('mods.huntAnalyzer.floor')} ${session.floor}`
-            : t('mods.huntAnalyzer.floorUnknown');
-        if (!floorSessions.has(floorLabel)) {
-            floorSessions.set(floorLabel, { sessions: 0, wins: 0, losses: 0 });
+        const floorKey = Number.isInteger(session.floor) ? session.floor : 'UNKNOWN';
+        if (!floorSessions.has(floorKey)) {
+            floorSessions.set(floorKey, { sessions: 0, wins: 0, losses: 0 });
         }
-        const floorStats = floorSessions.get(floorLabel);
+        const floorStats = floorSessions.get(floorKey);
         floorStats.sessions += 1;
         if (session.victory === true) floorStats.wins += 1;
         else if (session.victory === false) floorStats.losses += 1;
     });
     return Array.from(floorSessions.entries())
         .sort((a, b) => {
-            const floorMatchA = a[0].match(/\d+$/);
-            const floorMatchB = b[0].match(/\d+$/);
-            if (!floorMatchA && !floorMatchB) return 0;
-            if (!floorMatchA) return 1;
-            if (!floorMatchB) return -1;
-            return Number(floorMatchA[0]) - Number(floorMatchB[0]);
+            if (a[0] === 'UNKNOWN') return 1;
+            if (b[0] === 'UNKNOWN') return -1;
+            return a[0] - b[0];
         })
-        .map(([label, stats]) => `${label}: ${stats.sessions} (${stats.wins}/${stats.losses})`)
+        .map(([floorKey, stats]) => `${getFloorFilterLabel(floorKey)}: ${stats.sessions} (${stats.wins}/${stats.losses})`)
         .join(' | ');
 }
 
@@ -4752,10 +4742,7 @@ function registerCreatureSellValueByMonsterId(monsterId, goldValue, dustValue = 
     const parsedGold = parsePossibleGoldValue(goldValue);
     const parsedDust = parsePossibleGoldValue(dustValue);
     if (parsedGold <= 0 && parsedDust <= 0) return;
-    if (normalizedId) {
-        huntAnalyzerCreatureSellByMonsterId.set(normalizedId, parsedGold);
-    }
-    huntAnalyzerPendingCreatureSellEvents.push({ monsterId: normalizedId || null, goldValue: parsedGold, dustValue: parsedDust, consumed: false });
+    huntAnalyzerPendingCreatureSellEvents.push({ monsterId: normalizedId || null, goldValue: parsedGold, dustValue: parsedDust });
     reconcilePendingCreatureSellEventsIntoSessions();
 }
 
@@ -4786,68 +4773,134 @@ function registerDisenchantDustValueByEquipmentId(equipmentId, dustValue) {
     const normalizedId = typeof equipmentId === 'string' ? equipmentId : String(equipmentId ?? '');
     const parsedDust = parsePossibleGoldValue(dustValue);
     if (parsedDust <= 0) return;
-    huntAnalyzerPendingDisenchantDustEvents.push({ equipmentId: normalizedId || null, dustValue: parsedDust, consumed: false });
+    huntAnalyzerPendingDisenchantDustEvents.push({ equipmentId: normalizedId || null, dustValue: parsedDust });
     reconcilePendingDisenchantDustEventsIntoSessions();
 }
 
-function reconcilePendingDisenchantDustEventsIntoSessions() {
+// Attaches each pending event to the newest battle that still has room for it (a battle holds at
+// most one captured value per drop; an id already captured is a duplicate and is dropped).
+// Matched events are removed; unmatched ones wait for a later battle, newest MAX kept.
+function reconcilePendingEventsIntoSessions(events, { idKey, capturedKey, getCapacity, toEntry, describe }) {
     const sessions = HuntAnalyzerState?.data?.sessions;
-    if (!Array.isArray(sessions) || sessions.length === 0) return;
+    if (!Array.isArray(sessions) || sessions.length === 0 || events.length === 0) return;
 
-    huntAnalyzerPendingDisenchantDustEvents.forEach((event) => {
-        if (event.consumed) return;
+    let changed = false;
+    const unmatched = events.filter((event) => {
         for (let i = sessions.length - 1; i >= 0; i--) {
             const session = sessions[i];
-            const totalEquipmentDrops = getSessionEquipmentDropCount(session);
-            if (totalEquipmentDrops <= 0) continue;
-            if (!Array.isArray(session.capturedDisenchantDustValues)) {
-                session.capturedDisenchantDustValues = [];
+            const capacity = getCapacity(session);
+            if (capacity <= 0) continue;
+            if (!Array.isArray(session[capturedKey])) {
+                session[capturedKey] = [];
             }
-            const captured = session.capturedDisenchantDustValues;
-            if (event.equipmentId && captured.some((entry) => entry && entry.equipmentId === event.equipmentId)) {
-                event.consumed = true;
-                break;
+            const captured = session[capturedKey];
+            if (event[idKey] && captured.some((entry) => entry && entry[idKey] === event[idKey])) {
+                return false;
             }
-            if (captured.length >= totalEquipmentDrops) {
-                continue;
-            }
-            captured.push({ equipmentId: event.equipmentId, dustValue: event.dustValue });
-            event.consumed = true;
-            console.log(`[Hunt Analyzer] Reconciled disenchant dust into session: room=${session.roomName || 'Unknown'} +${event.dustValue} dust (id=${event.equipmentId || 'n/a'})`);
-            break;
+            if (captured.length >= capacity) continue;
+            captured.push(toEntry(event));
+            changed = true;
+            console.log(`[Hunt Analyzer] Reconciled ${describe(event)} into session: room=${session.roomName || 'Unknown'} (id=${event[idKey] || 'n/a'})`);
+            return false;
         }
+        return true;
+    });
+    events.splice(0, events.length, ...unmatched.slice(-HUNT_ANALYZER_MAX_PENDING_EVENTS));
+    if (changed) markSessionDataChanged();
+}
+
+function reconcilePendingDisenchantDustEventsIntoSessions() {
+    reconcilePendingEventsIntoSessions(huntAnalyzerPendingDisenchantDustEvents, {
+        idKey: 'equipmentId',
+        capturedKey: 'capturedDisenchantDustValues',
+        getCapacity: getSessionEquipmentDropCount,
+        toEntry: (event) => ({ equipmentId: event.equipmentId, dustValue: event.dustValue }),
+        describe: (event) => `disenchant +${event.dustValue} dust`
     });
 }
 
 function reconcilePendingCreatureSellEventsIntoSessions() {
-    const sessions = HuntAnalyzerState?.data?.sessions;
-    if (!Array.isArray(sessions) || sessions.length === 0) return;
-
-    huntAnalyzerPendingCreatureSellEvents.forEach((event) => {
-        if (event.consumed) return;
-        for (let i = sessions.length - 1; i >= 0; i--) {
-            const session = sessions[i];
-            const totalDrops = getSessionCreatureDropCount(session);
-            if (totalDrops <= 0) continue;
-            if (!Array.isArray(session.capturedCreatureSellValues)) {
-                session.capturedCreatureSellValues = [];
-            }
-            const captured = session.capturedCreatureSellValues;
-            if (event.monsterId && captured.some((entry) => entry && entry.monsterId === event.monsterId)) {
-                event.consumed = true;
-                break;
-            }
-            if (captured.length >= totalDrops) {
-                continue;
-            }
-            captured.push({ monsterId: event.monsterId, goldValue: event.goldValue, dustValue: event.dustValue || 0 });
-            event.consumed = true;
-            const dustLogSuffix = event.dustValue > 0 ? ` +${event.dustValue} dust` : '';
-            console.log(`[Hunt Analyzer] Reconciled creature value: room=${session.roomName || 'Unknown'} +${event.goldValue}g${dustLogSuffix} (id=${event.monsterId || 'n/a'})`);
-            break;
-        }
+    reconcilePendingEventsIntoSessions(huntAnalyzerPendingCreatureSellEvents, {
+        idKey: 'monsterId',
+        capturedKey: 'capturedCreatureSellValues',
+        getCapacity: getSessionCreatureDropCount,
+        toEntry: (event) => ({ monsterId: event.monsterId, goldValue: event.goldValue, dustValue: event.dustValue || 0 }),
+        describe: (event) => `creature value +${event.goldValue}g${event.dustValue > 0 ? ` +${event.dustValue} dust` : ''}`
     });
 }
+
+// tRPC request input for procedure 0 (body `{"0":{"json":...}}`), or null when unreadable.
+function readTrpcRequestJson(fetchArgs) {
+    try {
+        const bodyRaw = fetchArgs?.[1]?.body;
+        const bodyObj = typeof bodyRaw === 'string' ? JSON.parse(bodyRaw) : bodyRaw;
+        return bodyObj?.[0]?.json ?? null;
+    } catch (_e) {
+        return null;
+    }
+}
+
+// Splits an integer total over `count` shares; the remainder goes to the first share.
+function splitEvenly(total, count) {
+    const share = Math.floor(total / count);
+    return Array.from({ length: count }, (_, index) => share + (index === 0 ? total - share * count : 0));
+}
+
+// Game API responses that carry value for items/creatures dropped while hunting.
+// Each handler gets the response payload and the parsed request input.
+const HUNT_ANALYZER_TRACKED_TRPC_ROUTES = [
+    {
+        path: '/api/trpc/game.sellMonster',
+        handle(payload) {
+            registerCreatureSellValueByMonsterId(payload.soldMonsterId, payload.goldValue, payload.dustDiff ?? payload.dustValue);
+        }
+    },
+    {
+        path: '/api/trpc/inventory.monsterSqueezer',
+        handle(payload, requestJson) {
+            const dustDiff = parsePossibleGoldValue(payload.dustDiff ?? payload.dustValue);
+            if (dustDiff <= 0) return;
+            const monsterIds = Array.isArray(requestJson) ? requestJson : [];
+            if (monsterIds.length === 0) {
+                registerCreatureSellValueByMonsterId(null, 0, dustDiff);
+                return;
+            }
+            splitEvenly(dustDiff, monsterIds.length).forEach((shareDust, index) => {
+                registerCreatureSellValueByMonsterId(monsterIds[index], 0, shareDust);
+            });
+        }
+    },
+    {
+        path: '/api/trpc/quest.plantEat',
+        handle(payload, requestJson) {
+            const goldValue = parsePossibleGoldValue(payload.goldValue);
+            if (goldValue <= 0) return;
+            // Spread the value over the eaten monsters when the request names them
+            const monsterIds = Array.isArray(requestJson?.monsterIds) ? requestJson.monsterIds : [];
+            if (monsterIds.length === 0) {
+                registerCreatureSellValueByMonsterId(null, goldValue);
+                return;
+            }
+            splitEvenly(goldValue, monsterIds.length).forEach((share, index) => {
+                registerCreatureSellValueByMonsterId(monsterIds[index], share);
+            });
+        }
+    },
+    {
+        path: '/api/trpc/game.equipToDust',
+        handle(payload, requestJson) {
+            const dustDiff = parsePossibleGoldValue(payload.dustDiff);
+            if (dustDiff <= 0) {
+                console.log(`[Hunt Analyzer] equipToDust dustDiff invalid (${payload.dustDiff}); skipping`);
+                return;
+            }
+            const equipmentId = typeof requestJson === 'string'
+                ? requestJson
+                : (requestJson && typeof requestJson === 'object' ? requestJson.equipmentId || null : null);
+            registerDisenchantDustValueByEquipmentId(equipmentId, dustDiff);
+        }
+    }
+];
 
 function installCreatureSellTrackingFetchHook() {
     if (typeof window === 'undefined' || typeof window.fetch !== 'function' || huntAnalyzerOriginalFetch) {
@@ -4859,104 +4912,17 @@ function installCreatureSellTrackingFetchHook() {
         const response = await huntAnalyzerOriginalFetch.apply(this, args);
         try {
             const url = typeof args[0] === 'string' ? args[0] : (args[0]?.url || '');
-            if (typeof url === 'string' && url.includes('/api/trpc/game.sellMonster')) {
-                const cloned = response.clone();
-                cloned.json().then((data) => {
-                    const payload = Array.isArray(data) ? data[0]?.result?.data?.json : null;
-                    if (!payload) return;
-                    registerCreatureSellValueByMonsterId(
-                        payload.soldMonsterId,
-                        payload.goldValue,
-                        payload.dustDiff ?? payload.dustValue
-                    );
-                }).catch(() => {});
-            }
-            if (typeof url === 'string' && url.includes('/api/trpc/inventory.monsterSqueezer')) {
-                const cloned = response.clone();
-                cloned.json().then((data) => {
-                    const payload = Array.isArray(data) ? data[0]?.result?.data?.json : null;
-                    if (!payload) return;
-                    const dustDiff = parsePossibleGoldValue(payload.dustDiff ?? payload.dustValue);
-                    if (dustDiff <= 0) return;
-
-                    let requestMonsterIds = [];
-                    try {
-                        const bodyRaw = args?.[1]?.body;
-                        const bodyObj = typeof bodyRaw === 'string' ? JSON.parse(bodyRaw) : bodyRaw;
-                        requestMonsterIds = bodyObj?.[0]?.json ?? bodyObj?.['0']?.json ?? [];
-                    } catch (_e) {
-                        requestMonsterIds = [];
-                    }
-
-                    if (Array.isArray(requestMonsterIds) && requestMonsterIds.length > 0) {
-                        const perMonsterDust = Math.floor(dustDiff / requestMonsterIds.length);
-                        const remainderDust = dustDiff - (perMonsterDust * requestMonsterIds.length);
-                        requestMonsterIds.forEach((monsterId, index) => {
-                            const shareDust = perMonsterDust + (index === 0 ? remainderDust : 0);
-                            registerCreatureSellValueByMonsterId(monsterId, 0, shareDust);
-                        });
-                    } else {
-                        registerCreatureSellValueByMonsterId(null, 0, dustDiff);
-                    }
-                }).catch(() => {});
-            }
-            if (typeof url === 'string' && url.includes('/api/trpc/quest.plantEat')) {
-                const cloned = response.clone();
-                cloned.json().then((data) => {
-                    const payload = Array.isArray(data) ? data[0]?.result?.data?.json : null;
-                    if (!payload) return;
-                    const goldValue = parsePossibleGoldValue(payload.goldValue);
-                    if (goldValue <= 0) return;
-
-                    // If request body includes monsterIds, spread value across them; otherwise keep as unresolved event.
-                    let requestMonsterIds = [];
-                    try {
-                        const bodyRaw = args?.[1]?.body;
-                        const bodyObj = typeof bodyRaw === 'string' ? JSON.parse(bodyRaw) : null;
-                        requestMonsterIds = bodyObj?.[0]?.json?.monsterIds || [];
-                    } catch (_e) {
-                        requestMonsterIds = [];
-                    }
-
-                    if (Array.isArray(requestMonsterIds) && requestMonsterIds.length > 0) {
-                        const perMonster = Math.floor(goldValue / requestMonsterIds.length);
-                        const remainder = goldValue - (perMonster * requestMonsterIds.length);
-                        requestMonsterIds.forEach((monsterId, index) => {
-                            const share = perMonster + (index === 0 ? remainder : 0);
-                            registerCreatureSellValueByMonsterId(monsterId, share);
-                        });
-                    } else {
-                        registerCreatureSellValueByMonsterId(null, goldValue);
-                    }
-                }).catch(() => {});
-            }
-            if (typeof url === 'string' && url.includes('/api/trpc/game.equipToDust')) {
-                const cloned = response.clone();
-                cloned.json().then((data) => {
+            const route = typeof url === 'string'
+                ? HUNT_ANALYZER_TRACKED_TRPC_ROUTES.find(({ path }) => url.includes(path))
+                : null;
+            if (route) {
+                response.clone().json().then((data) => {
                     const payload = Array.isArray(data) ? data[0]?.result?.data?.json : null;
                     if (!payload) {
-                        console.log('[Hunt Analyzer] equipToDust payload missing; skipping dust capture');
+                        console.log(`[Hunt Analyzer] ${route.path} payload missing; skipping`);
                         return;
                     }
-                    const dustDiff = parsePossibleGoldValue(payload.dustDiff);
-                    if (dustDiff <= 0) {
-                        console.log(`[Hunt Analyzer] equipToDust dustDiff invalid (${payload.dustDiff}); skipping`);
-                        return;
-                    }
-                    let requestEquipmentId = null;
-                    try {
-                        const bodyRaw = args?.[1]?.body;
-                        const bodyObj = typeof bodyRaw === 'string' ? JSON.parse(bodyRaw) : bodyRaw;
-                        const rawJson = bodyObj?.[0]?.json ?? bodyObj?.['0']?.json ?? null;
-                        if (typeof rawJson === 'string') {
-                            requestEquipmentId = rawJson;
-                        } else if (rawJson && typeof rawJson === 'object') {
-                            requestEquipmentId = rawJson.equipmentId || null;
-                        }
-                    } catch (_e) {
-                        requestEquipmentId = null;
-                    }
-                    registerDisenchantDustValueByEquipmentId(requestEquipmentId, dustDiff);
+                    route.handle(payload, readTrpcRequestJson(args));
                 }).catch(() => {});
             }
         } catch (_e) {
@@ -4965,11 +4931,6 @@ function installCreatureSellTrackingFetchHook() {
         return response;
     };
     window.fetch = huntAnalyzerFetchWrapper;
-}
-
-function resolveCreatureSellValue(monsterDrop, fallbackTierLevel = 0, fallbackTotalGenes = 0) {
-    // Response-only mode: creature value is tracked from sell/devour API responses.
-    return 0;
 }
 
 function getSessionCreatureSellValue(session) {
@@ -4993,17 +4954,7 @@ function getSessionDisenchantDustValue(session) {
 function getFilteredGoldBreakdown() {
     const includeCreatureSellValue = HuntAnalyzerState.settings.includeCreatureSellValue !== false;
     const includeDragonPlantCollect = HuntAnalyzerState.settings.includeDragonPlantCollect !== false;
-    let baseGold = 0;
-    let creatureSellGold = 0;
-
-    HuntAnalyzerState.data.sessions.forEach((session) => {
-        if (HuntAnalyzerState.ui.selectedMapFilter !== 'ALL' && session?.roomName !== HuntAnalyzerState.ui.selectedMapFilter) {
-            return;
-        }
-        const sessionGold = getSessionGoldAndDust(session).gold;
-        baseGold += sessionGold;
-        creatureSellGold += getSessionCreatureSellValue(session);
-    });
+    const { lootGold: baseGold, creatureSellGold } = getFilteredSessionStats();
 
     const dragonPlantBonusGold = includeDragonPlantCollect
         ? Math.max(0, Math.floor(Number(HuntAnalyzerState.totals.dragonPlantBonusGold) || 0))
@@ -5041,20 +4992,10 @@ function getSessionDustBreakdown(session) {
 
 function getFilteredDustBreakdown() {
     const includeDisenchantedEquipments = HuntAnalyzerState.settings.includeDisenchantedEquipments !== false;
-    let lootDust = 0;
-    let equipmentDisenchantDust = 0;
-    let creatureSqueezeDust = 0;
-    HuntAnalyzerState.data.sessions.forEach((session) => {
-        if (HuntAnalyzerState.ui.selectedMapFilter !== 'ALL' && session?.roomName !== HuntAnalyzerState.ui.selectedMapFilter) {
-            return;
-        }
-        const sessionDust = getSessionDustBreakdown(session);
-        lootDust += sessionDust.lootDust;
-        if (includeDisenchantedEquipments) {
-            equipmentDisenchantDust += sessionDust.equipmentDisenchantDust;
-            creatureSqueezeDust += sessionDust.creatureSqueezeDust || 0;
-        }
-    });
+    const stats = getFilteredSessionStats();
+    const lootDust = stats.lootDust;
+    const equipmentDisenchantDust = includeDisenchantedEquipments ? stats.disenchantDust : 0;
+    const creatureSqueezeDust = includeDisenchantedEquipments ? stats.creatureSqueezeDust : 0;
     return {
         lootDust: Math.max(0, Math.floor(lootDust)),
         equipmentDisenchantDust: Math.max(0, Math.floor(equipmentDisenchantDust)),
@@ -5091,7 +5032,6 @@ function registerDragonPlantCollectEvent(withdrawnFromPlant) {
     const bonusGold = Math.floor(withdrawn * DRAGON_PLANT_COLLECT_BONUS_RATE);
     if (bonusGold <= 0) return;
 
-    huntAnalyzerLastCollectedPlantGoldValue = bonusGold;
     HuntAnalyzerState.totals.dragonPlantBonusGold += bonusGold;
 
     if (huntAnalyzerPlantCollectBurstTimeoutId == null) {
@@ -5154,7 +5094,11 @@ function createEmptyMapGroupStats(fallbackStartTime) {
         totalSealed: 0,
         startTime: fallbackStartTime,
         endTime: fallbackStartTime,
-        hasTimestamps: false
+        hasTimestamps: false,
+        battleTime: createBattleTimeTally(),
+        // key -> battles it dropped in (a stack or duplicate in one battle counts once), for drop rates
+        lootBattlesByKey: new Map(),
+        creatureBattlesByKey: new Map()
     };
 }
 
@@ -5175,6 +5119,7 @@ function ingestSessionIntoMapGroup(group, session, overallStartTime) {
     group.totalDust += sessionDust.total;
     group.totalStamina += session.staminaSpent || 0;
     group.totalExperience += sessionStoredExperience(session);
+    addSessionToBattleTimeTally(group.battleTime, session);
 
     if (session.timestamp) {
         group.hasTimestamps = true;
@@ -5185,17 +5130,36 @@ function ingestSessionIntoMapGroup(group, session, overallStartTime) {
         group.endTime = Math.max(group.endTime, Date.now());
     }
 
+    const countDropBattle = (battlesByKey, key, seen) => {
+        if (seen.has(key)) return;
+        seen.add(key);
+        battlesByKey.set(key, (battlesByKey.get(key) || 0) + 1);
+    };
+
+    const lootSeen = new Set();
     (session.loot || []).forEach((item) => {
-        mergeAggregateEntry(group.loot, buildLootAggregateKey(item), item);
+        const key = buildLootAggregateKey(item);
+        mergeAggregateEntry(group.loot, key, item);
+        countDropBattle(group.lootBattlesByKey, key, lootSeen);
         if (item.isEquipment) group.totalEquipment += item.count;
     });
 
+    const creatureSeen = new Set();
     (session.creatures || []).forEach((creature) => {
-        mergeAggregateEntry(group.creatures, buildCreatureAggregateKey(creature), creature);
+        const key = buildCreatureAggregateKey(creature);
+        mergeAggregateEntry(group.creatures, key, creature);
+        countDropBattle(group.creatureBattlesByKey, key, creatureSeen);
         group.totalCreatures += creature.count;
         if (creature.isShiny) group.totalShiny += creature.count;
         if (creature.isSealed) group.totalSealed += creature.count;
     });
+}
+
+// " — 65% of battles" for a Map Analysis loot/creature line: share of the map's battles (within the
+// current filters) it dropped in.
+function formatDropRateSuffix(dropBattles, battles) {
+    if (!battles || !dropBattles) return '';
+    return ` — ${formatDropRatePercent(dropBattles / battles)} ${t('mods.huntAnalyzer.ofBattles')}`;
 }
 
 function buildMapGroupsFromSessions(sessions) {
@@ -5205,8 +5169,16 @@ function buildMapGroupsFromSessions(sessions) {
         const mapName = session.roomName || t('mods.huntAnalyzer.unknownMap');
         if (!mapGroups[mapName]) {
             mapGroups[mapName] = createEmptyMapGroupStats(session.timestamp || overallStartTime);
+            mapGroups[mapName].floors = new Map(); // floor number or "UNKNOWN" -> group stats
         }
         ingestSessionIntoMapGroup(mapGroups[mapName], session, overallStartTime);
+
+        const floorKey = Number.isInteger(session.floor) ? session.floor : 'UNKNOWN';
+        const floors = mapGroups[mapName].floors;
+        if (!floors.has(floorKey)) {
+            floors.set(floorKey, createEmptyMapGroupStats(session.timestamp || overallStartTime));
+        }
+        ingestSessionIntoMapGroup(floors.get(floorKey), session, overallStartTime);
     });
     return mapGroups;
 }
@@ -5226,10 +5198,78 @@ function formatLootSummaryLine(item) {
 }
 
 function formatCreatureSummaryLine(creature) {
-    let creatureLine = `    ${creature.originalName} (${creature.tierName}): x${creature.count}`;
-    if (creature.isShiny) creatureLine = `    ✨ ${creatureLine}`;
-    if (creature.isSealed) creatureLine = `    ⭐ ${creatureLine}`;
-    return creatureLine;
+    const markers = `${creature.isSealed ? '⭐ ' : ''}${creature.isShiny ? '✨ ' : ''}`;
+    return `    ${markers}${creature.originalName} (${creature.tierName}): x${creature.count}`;
+}
+
+// Playtime for one map's Map Analysis block. Uses the map play clock (the same one the panel's
+// map filter uses); the first-to-last battle timestamp span is only a fallback, because it
+// ignores the time spent in the first battle and collapses to seconds for short hunts.
+// With a floor filter active, only that floor's time on the map counts.
+function getMapAnalysisTimeMs(mapName, mapData) {
+    if (HuntAnalyzerState.ui.selectedFloorFilter !== 'ALL') {
+        return getFloorFilteredTimeMs(mapName, HuntAnalyzerState.ui.selectedFloorFilter);
+    }
+    const tt = HuntAnalyzerState.timeTracking;
+    let clockMs = tt.mapTimeMs.get(mapName) || 0;
+    if (tt.currentMap === mapName) clockMs += getLiveSessionMs();
+    return clockMs > 0 ? clockMs : Math.max(0, mapData.endTime - mapData.startTime);
+}
+
+// "<total> (Battle <battle timer> | Idle <idle timer>)" — separator is ':' in the summary's
+// "Label: value" lines and '' in the compact floor lines.
+function formatTotalWithBattleAndIdle(battleMs, idleMs, separator = '') {
+    return `${formatTime(battleMs + idleMs)} (`
+        + `${t('mods.huntAnalyzer.battleTime')}${separator} ${formatTime(battleMs)} | `
+        + `${t('mods.huntAnalyzer.idle')}${separator} ${formatTime(idleMs)})`;
+}
+
+// Time text for a map/floor group, both timers summed from its battles. Rates use the battle time;
+// without any recorded battle durations it falls back to the playtime clock with no breakdown.
+function formatBattleAndIdleTime(playtimeMs, battleTimeTally, separator = '') {
+    const battleMs = getBattleTimeTallyMs(battleTimeTally);
+    if (battleMs == null) {
+        return { text: formatTime(playtimeMs), ratesMs: playtimeMs };
+    }
+    return {
+        text: formatTotalWithBattleAndIdle(battleMs, battleTimeTally.idleMs || 0, separator),
+        ratesMs: battleMs
+    };
+}
+
+// One line per floor inside a map's Map Analysis block (ascending, unknown floor last).
+// Time is the floor's battle time; Idle is the rest of its per-floor clock (estimated for battles
+// recorded before the floor clock existed).
+function formatMapFloorBreakdownLines(mapName, floors) {
+    if (!floors || floors.size === 0) return '';
+    const floorKeys = Array.from(floors.keys()).sort((a, b) => {
+        if (a === 'UNKNOWN') return 1;
+        if (b === 'UNKNOWN') return -1;
+        return a - b;
+    });
+
+    let lines = `  ${t('mods.huntAnalyzer.byFloor')}:\n`;
+    floorKeys.forEach((floorKey) => {
+        const floorData = floors.get(floorKey);
+        const floorTime = formatBattleAndIdleTime(getFloorFilteredTimeMs(mapName, floorKey), floorData.battleTime);
+        const floorHours = floorTime.ratesMs / (1000 * 60 * 60);
+        const floorWinRate = (floorData.wins + floorData.losses) > 0
+            ? Math.round((floorData.wins / (floorData.wins + floorData.losses)) * 100)
+            : 0;
+        const goldRate = floorHours > 0 ? ` (${Math.floor(floorData.totalGold / floorHours)} ${t('mods.huntAnalyzer.goldPerHour')})` : '';
+        const expRate = floorHours > 0 ? ` (${formatExpValue(Math.floor(floorData.totalExperience / floorHours))} ${t('mods.huntAnalyzer.expPerHour')})` : '';
+
+        lines += `    ${getFloorFilterLabel(floorKey)}: `
+            + `${t('mods.huntAnalyzer.sessions')} ${floorData.sessions}`
+            + ` | ${t('mods.huntAnalyzer.winLoss')} ${floorData.wins}/${floorData.losses} (${floorWinRate}%)`
+            + ` | ${t('mods.huntAnalyzer.time')} ${floorTime.text}`
+            + ` | ${t('mods.huntAnalyzer.gold')} ${floorData.totalGold}${goldRate}`
+            + ` | ${t('mods.huntAnalyzer.experience')} ${formatExpValue(floorData.totalExperience)}${expRate}`
+            + ` | ${t('mods.huntAnalyzer.stamina')} ${floorData.totalStamina}`
+            + ` | ${t('mods.huntAnalyzer.creatures')} ${floorData.totalCreatures}`
+            + ` | ${t('mods.huntAnalyzer.equipment')} ${floorData.totalEquipment}\n`;
+    });
+    return lines;
 }
 
 function appendMapAnalysisSection(summary, mapGroups) {
@@ -5244,7 +5284,8 @@ function appendMapAnalysisSection(summary, mapGroups) {
         .sort((a, b) => mapGroups[b].sessions - mapGroups[a].sessions)
         .forEach((mapName) => {
             const mapData = mapGroups[mapName];
-            const mapTimeHours = (mapData.endTime - mapData.startTime) / (1000 * 60 * 60);
+            const mapTime = formatBattleAndIdleTime(getMapAnalysisTimeMs(mapName, mapData), mapData.battleTime, ':');
+            const mapTimeHours = mapTime.ratesMs / (1000 * 60 * 60);
             const mapStats = {
                 sessions: mapData.sessions,
                 gold: mapData.totalGold,
@@ -5265,7 +5306,7 @@ function appendMapAnalysisSection(summary, mapGroups) {
                 : 0;
 
             summary += `\n${mapName}:\n`;
-            summary += `  ${t('mods.huntAnalyzer.sessions')}: ${mapData.sessions} | ${t('mods.huntAnalyzer.winLoss')}: ${mapData.wins}/${mapData.losses} (${mapWinRate}%) | ${t('mods.huntAnalyzer.time')}: ${formatTime(mapData.endTime - mapData.startTime)}${mapData.hasTimestamps ? '' : ` (${t('mods.huntAnalyzer.estimated')})`}\n`;
+            summary += `  ${t('mods.huntAnalyzer.sessions')}: ${mapData.sessions} | ${t('mods.huntAnalyzer.winLoss')}: ${mapData.wins}/${mapData.losses} (${mapWinRate}%) | ${t('mods.huntAnalyzer.time')}: ${mapTime.text}${mapData.hasTimestamps ? '' : ` (${t('mods.huntAnalyzer.estimated')})`}\n`;
             summary += `  ${t('mods.huntAnalyzer.gold')}: ${mapData.totalGold} | ${t('mods.huntAnalyzer.dust')}: ${mapData.totalDust} | ${t('mods.huntAnalyzer.stamina')}: ${mapData.totalStamina} | ${t('mods.huntAnalyzer.experience')}: ${formatExpValue(mapData.totalExperience)}\n`;
             summary += `  ${t('mods.huntAnalyzer.goldSources')}: ${t('mods.huntAnalyzer.loot')} ${mapData.totalLootGold} | ${t('mods.huntAnalyzer.creatures')} ${mapData.totalCreatureSellGold}\n`;
             if (HuntAnalyzerState.settings.includeDisenchantedEquipments !== false) {
@@ -5282,12 +5323,17 @@ function appendMapAnalysisSection(summary, mapGroups) {
                 summary += `  ${t('mods.huntAnalyzer.dustSourceRates')}: ${t('mods.huntAnalyzer.loot')} ${mapLootDustRate} ${t('mods.huntAnalyzer.dustPerHour')}\n`;
             }
             summary += `  ${t('mods.huntAnalyzer.efficiency')}: ${efficiency.goldPerStamina} ${t('mods.huntAnalyzer.goldPerStamina')} | ${efficiency.sessionsPerStamina} ${t('mods.huntAnalyzer.sessionsPerStamina')} | ${rates.staminaSpent} ${t('mods.huntAnalyzer.staminaPerHour')}\n`;
+            summary += formatMapFloorBreakdownLines(mapName, mapData.floors);
 
             const sortedLoot = Array.from(mapData.loot.values()).sort(compareLootEntries);
             if (sortedLoot.length > 0) {
                 summary += `  ${t('mods.huntAnalyzer.loot')}:\n`;
                 sortedLoot.forEach((item) => {
-                    summary += `${formatLootSummaryLine(item)}\n`;
+                    // Gold is a running total, not an item that may or may not drop
+                    const rate = item.originalName === 'Gold'
+                        ? ''
+                        : formatDropRateSuffix(mapData.lootBattlesByKey.get(buildLootAggregateKey(item)), mapData.sessions);
+                    summary += `${formatLootSummaryLine(item)}${rate}\n`;
                 });
             }
 
@@ -5295,7 +5341,8 @@ function appendMapAnalysisSection(summary, mapGroups) {
             if (sortedCreatures.length > 0) {
                 summary += `  ${t('mods.huntAnalyzer.creatures')}:\n`;
                 sortedCreatures.forEach((creature) => {
-                    summary += `${formatCreatureSummaryLine(creature)}\n`;
+                    const rate = formatDropRateSuffix(mapData.creatureBattlesByKey.get(buildCreatureAggregateKey(creature)), mapData.sessions);
+                    summary += `${formatCreatureSummaryLine(creature)}${rate}\n`;
                 });
             }
         });
@@ -5306,11 +5353,13 @@ function appendMapAnalysisSection(summary, mapGroups) {
 // Generates a summarized log text of all aggregated loot and creature drops.
 // This is the text that will be copied to the user's clipboard.
 function generateSummaryLogText() {
-    const sessions = HuntAnalyzerState.data.sessions;
+    // Every section follows the active map/floor filters (totals below already do via aggregateData)
+    const sessions = HuntAnalyzerState.data.sessions.filter(sessionMatchesFilters);
+    const filteredSessionCount = getFilteredSessionCount();
     const filteredTimeHours = getFilteredTimeHours();
     const goldBreakdown = getFilteredGoldBreakdown();
     const overallStats = {
-        sessions: HuntAnalyzerState.session.count,
+        sessions: filteredSessionCount,
         gold: goldBreakdown.total,
         creatures: HuntAnalyzerState.totals.creatures,
         equipment: HuntAnalyzerState.totals.equipment,
@@ -5334,7 +5383,10 @@ function generateSummaryLogText() {
 
     let summary = `--- ${t('mods.huntAnalyzer.logSummaryTitle')} ---\n`;
     summary += `${t('mods.huntAnalyzer.room')}: ${getSummaryRoomDisplayName(sessions)}\n`;
-    summary += `${t('mods.huntAnalyzer.sessions')}: ${HuntAnalyzerState.session.count}\n`;
+    if (HuntAnalyzerState.ui.selectedFloorFilter !== 'ALL') {
+        summary += `${t('mods.huntAnalyzer.floor')}: ${getFloorFilterLabel(HuntAnalyzerState.ui.selectedFloorFilter)}\n`;
+    }
+    summary += `${t('mods.huntAnalyzer.sessions')}: ${filteredSessionCount}\n`;
 
     const floorBreakdown = formatFloorSessionBreakdown(sessions);
     if (floorBreakdown) {
@@ -5342,7 +5394,10 @@ function generateSummaryLogText() {
     }
 
     summary += `${t('mods.huntAnalyzer.winLoss')}: ${HuntAnalyzerState.totals.wins}/${HuntAnalyzerState.totals.losses} (${winRate}%)\n`;
-    summary += `${t('mods.huntAnalyzer.timeElapsed')}: ${formatTime(filteredTimeHours * 60 * 60 * 1000)}\n`;
+    const overallIdleMs = getFilteredIdleMs();
+    summary += overallIdleMs == null
+        ? `${t('mods.huntAnalyzer.timeElapsed')}: ${formatTime(filteredTimeHours * 60 * 60 * 1000)}\n`
+        : `${t('mods.huntAnalyzer.time')}: ${formatTotalWithBattleAndIdle(filteredTimeHours * 60 * 60 * 1000, overallIdleMs, ':')}\n`;
     summary += `${t('mods.huntAnalyzer.gold')}: ${goldBreakdown.total} | ${t('mods.huntAnalyzer.dust')}: ${dustBreakdown.total}\n`;
     let goldSourcesLine = `${t('mods.huntAnalyzer.loot')} ${goldBreakdown.baseGold} | ${t('mods.huntAnalyzer.creatures')} ${goldBreakdown.creatureSellGold}`;
     let goldSourceRatesLine = `${t('mods.huntAnalyzer.loot')} ${overallLootGoldRate} ${t('mods.huntAnalyzer.goldPerHour')} | ${t('mods.huntAnalyzer.creatures')} ${overallCreatureGoldRate} ${t('mods.huntAnalyzer.goldPerHour')}`;
@@ -5399,6 +5454,8 @@ function createGridEntryCell() {
     cell.style.alignItems = 'center';
     cell.style.justifyContent = 'center';
     cell.style.padding = '2px';
+    // Room for the rate badge that sticks out above the icon
+    if (HuntAnalyzerState.settings.showDropRates !== false) cell.style.paddingTop = '8px';
     cell.style.backgroundColor = getThemeColor('entryBackground');
     cell.style.borderRadius = '4px';
     return cell;
@@ -5424,9 +5481,10 @@ function mountGridVisual(iconWrapper, visualElement, fallbackEmoji) {
 function updateFilteredSectionTitle(titleId, labelKey, totalCount) {
     const title = document.getElementById(titleId);
     if (!title) return;
-    const filterText = HuntAnalyzerState.ui.selectedMapFilter === 'ALL'
-        ? ''
-        : ` (${HuntAnalyzerState.ui.selectedMapFilter})`;
+    const filterParts = [];
+    if (HuntAnalyzerState.ui.selectedMapFilter !== 'ALL') filterParts.push(HuntAnalyzerState.ui.selectedMapFilter);
+    if (HuntAnalyzerState.ui.selectedFloorFilter !== 'ALL') filterParts.push(getFloorFilterLabel(HuntAnalyzerState.ui.selectedFloorFilter));
+    const filterText = filterParts.length ? ` (${filterParts.join(', ')})` : '';
     title.textContent = `${t(labelKey)}: ${totalCount}${filterText}`;
 }
 
@@ -5441,6 +5499,7 @@ function updatePanelResourceTotalDisplays(elementById) {
         const element = elementById?.[amountId]
             ?? domCache.get(amountId)
             ?? document.getElementById(amountId);
+        if (!element) return;
         if (totalKey === 'gold') {
             const breakdown = getFilteredGoldBreakdown();
             const creatureLine = breakdown.includeCreatureSellValue
@@ -5494,13 +5553,17 @@ function resolveLootGridVisual(data) {
                     });
 
                     if (equipmentPortrait?.nodeType) {
+                        const stat = data.stat || getEquipmentStatFromData(equipData);
+                        const dropRate = createDropRateOverlay(data);
                         if (equipmentPortrait.tagName === 'BUTTON' && equipmentPortrait.firstChild?.nodeType) {
                             const portrait = equipmentPortrait.firstChild;
                             portrait.appendChild(createCountOverlay(data.count));
-                            addStatIconToPortrait(portrait, data.stat);
+                            if (dropRate) portrait.appendChild(dropRate);
+                            addStatIconToPortrait(portrait, stat);
                             return portrait;
                         }
-                        addStatIconToPortrait(equipmentPortrait, data.stat);
+                        if (dropRate) equipmentPortrait.appendChild(dropRate);
+                        addStatIconToPortrait(equipmentPortrait, stat);
                         return equipmentPortrait;
                     }
                 }
@@ -5510,33 +5573,21 @@ function resolveLootGridVisual(data) {
         }
     }
 
-    let visualElement = data.visual;
-    if (!(visualElement instanceof HTMLElement)) {
-        visualElement = createInventoryStyleItemPortrait({
-            spriteId: data.spriteId,
-            src: data.src,
-            spriteSrc: data.src,
-            originalName: data.originalName,
-            rarity: data.rarity,
-            count: data.count,
-            isEquipment: data.isEquipment,
-            gameId: data.gameId,
-            stat: data.stat
-        });
-    }
-    return visualElement;
+    return createInventoryStyleItemPortrait({
+        spriteId: data.spriteId,
+        src: data.src,
+        spriteSrc: data.src,
+        originalName: data.originalName,
+        rarity: data.rarity,
+        count: data.count,
+        isEquipment: data.isEquipment,
+        gameId: data.gameId,
+        stat: data.stat
+    });
 }
 
 function resolveCreatureGridVisual(data) {
-    if (data.gameId) {
-        return createInventoryStyleCreaturePortrait(data);
-    }
-    if (data.visual instanceof HTMLElement) {
-        const countSpan = data.visual.querySelector('.pixel-font-16');
-        if (countSpan) countSpan.textContent = data.count || 1;
-        return data.visual;
-    }
-    return '👾';
+    return data.gameId ? createInventoryStyleCreaturePortrait(data) : '👾';
 }
 
 // Creates a framed drop section (used by loot and creature containers)
@@ -5559,8 +5610,6 @@ function createDropSection({ containerClassName, titleId, displayId }) {
     const title = document.createElement("h3");
     title.id = titleId;
     title.style.margin = "0px";
-    title.style.fontSize = "14px";
-    title.style.fontWeight = "bold";
     applyAccentTitleStyle(title);
     titleContainer.appendChild(title);
 
@@ -5617,16 +5666,23 @@ function updateStyleButtonState(styleButton, mode) {
 }
 
 // Helper function to apply layout dimensions to panel
-function applyLayoutDimensions(panel, mode) {
+// Min/max size limits of a layout mode (the current width/height are left alone).
+function applyLayoutConstraints(panel, mode) {
     const layout = LAYOUT_DIMENSIONS[mode];
     if (!layout) return;
-    
-    panel.style.width = layout.width + 'px';
-    panel.style.height = layout.height + 'px';
     panel.style.minWidth = layout.minWidth + 'px';
     panel.style.maxWidth = layout.maxWidth + 'px';
     panel.style.minHeight = layout.minHeight + 'px';
     panel.style.maxHeight = layout.maxHeight + 'px';
+}
+
+// Default size plus limits of a layout mode.
+function applyLayoutDimensions(panel, mode) {
+    const layout = LAYOUT_DIMENSIONS[mode];
+    if (!layout) return;
+    panel.style.width = layout.width + 'px';
+    panel.style.height = layout.height + 'px';
+    applyLayoutConstraints(panel, mode);
 }
 
 // Handles the style button click for layout switching
@@ -5688,45 +5744,35 @@ function handleMinimizeButtonClick(panel, styleButton, minimizeBtn) {
     savePanelSettings(panel);
 }
 
+// Releases what the open panel holds on document/window: drag/resize and dropdown listeners,
+// a half-confirmed Clear button, the live/auto-save intervals and cached element references.
+function teardownOpenPanelResources() {
+    endPanelPointerTracking();
+    if (documentClickHandler) {
+        document.removeEventListener('click', documentClickHandler);
+        documentClickHandler = null;
+    }
+    dropdownClickHandler = null;
+    armedInlineConfirmResets.forEach((reset) => reset());
+    domCache.clear();
+    if (updateIntervalId) {
+        clearInterval(updateIntervalId);
+        updateIntervalId = null;
+    }
+    if (autoSaveIntervalId) {
+        clearInterval(autoSaveIntervalId);
+        autoSaveIntervalId = null;
+    }
+    window.removeEventListener('resize', updatePanelPosition);
+}
+
 function closeHuntAnalyzerPanel() {
     const panel = document.getElementById(PANEL_ID);
     if (!panel) return;
 
     // Save panel settings before closing
     savePanelSettings(panel);
-    
-    // Remove document event listeners to prevent memory leaks
-    if (panelResizeMouseMoveHandler) {
-        document.removeEventListener('mousemove', panelResizeMouseMoveHandler);
-        panelResizeMouseMoveHandler = null;
-    }
-    if (panelResizeMouseUpHandler) {
-        document.removeEventListener('mouseup', panelResizeMouseUpHandler);
-        panelResizeMouseUpHandler = null;
-    }
-    if (panelDragMouseMoveHandler) {
-        document.removeEventListener('mousemove', panelDragMouseMoveHandler);
-        panelDragMouseMoveHandler = null;
-    }
-    if (panelDragMouseUpHandler) {
-        document.removeEventListener('mouseup', panelDragMouseUpHandler);
-        panelDragMouseUpHandler = null;
-    }
-    
-    // Clear cached DOM references
-    domCache.clear();
-    // Stop the live update interval
-    if (updateIntervalId) {
-        clearInterval(updateIntervalId);
-        updateIntervalId = null;
-    }
-    // Stop auto-save interval
-    if (autoSaveIntervalId) {
-        clearInterval(autoSaveIntervalId);
-        autoSaveIntervalId = null;
-    }
-    // Remove resize listener
-    window.removeEventListener('resize', updatePanelPosition);
+    teardownOpenPanelResources();
 
     HuntAnalyzerState.ui.isOpen = false;
     HuntAnalyzerState.ui.closedManually = true;
@@ -5737,85 +5783,11 @@ function closeHuntAnalyzerPanel() {
     panel.remove();
 }
 
-// Handles the close button click
-function handleCloseButtonClick(panel) {
-    closeHuntAnalyzerPanel();
-}
-
 function toggleHuntAnalyzerPanel() {
     if (document.getElementById(PANEL_ID)) {
         closeHuntAnalyzerPanel();
     } else {
         createAutoplayAnalyzerPanel();
-    }
-}
-
-// Handles panel resize mouse move
-function handlePanelResizeMouseMove(e, panel) {
-    if (!panelState.isResizing || panelState.mode === LAYOUT_MODES.MINIMIZED) return;
-    let dx = e.clientX - panelState.resizeStartX;
-    let dy = e.clientY - panelState.resizeStartY;
-    let newWidth = panelState.startWidth;
-    let newHeight = panelState.startHeight;
-    let newLeft = panelState.startLeft;
-    let newTop = panelState.startTop;
-    const layout = LAYOUT_DIMENSIONS[panelState.mode];
-    
-    // Allow resizing in both directions for vertical/horizontal
-    if (panelState.resizeDir.includes('e')) {
-        newWidth = clamp(panelState.startWidth + dx, layout.minWidth, layout.maxWidth);
-    }
-    if (panelState.resizeDir.includes('w')) {
-        newWidth = clamp(panelState.startWidth - dx, layout.minWidth, layout.maxWidth);
-        newLeft = panelState.startLeft + dx;
-    }
-    if (panelState.resizeDir.includes('s')) {
-        newHeight = clamp(panelState.startHeight + dy, layout.minHeight, layout.maxHeight);
-    }
-    if (panelState.resizeDir.includes('n')) {
-        newHeight = clamp(panelState.startHeight - dy, layout.minHeight, layout.maxHeight);
-        newTop = panelState.startTop + dy;
-    }
-    panel.style.width = newWidth + 'px';
-    panel.style.height = newHeight + 'px';
-    panel.style.left = newLeft + 'px';
-    panel.style.top = newTop + 'px';
-    panel.style.transition = 'none';
-}
-
-// Handles panel resize mouse up
-function handlePanelResizeMouseUp(panel) {
-    if (panelState.isResizing) {
-        panelState.isResizing = false;
-        document.body.style.userSelect = '';
-        panel.style.transition = '';
-        // Save panel settings after resize
-        savePanelSettings(panel);
-    }
-}
-
-// Handles panel drag mouse move
-function handlePanelDragMouseMove(e, panel) {
-    if (!panelState.isDragging) return;
-    let newLeft = e.clientX - panelState.dragOffsetX;
-    let newTop = e.clientY - panelState.dragOffsetY;
-    
-    // Clamp to viewport
-    newLeft = Math.max(0, Math.min(window.innerWidth - panel.offsetWidth, newLeft));
-    newTop = Math.max(0, Math.min(window.innerHeight - panel.offsetHeight, newTop));
-    panel.style.left = newLeft + 'px';
-    panel.style.top = newTop + 'px';
-    panel.style.transition = 'none';
-}
-
-// Handles panel drag mouse up
-function handlePanelDragMouseUp(panel) {
-    if (panelState.isDragging) {
-        panelState.isDragging = false;
-        document.body.style.userSelect = '';
-        panel.style.transition = '';
-        // Save panel settings after drag
-        savePanelSettings(panel);
     }
 }
 
@@ -5922,14 +5894,12 @@ function createFlexColumn(gap = '2px') {
 
 // Resets all Hunt Analyzer state data
 function resetHuntAnalyzerState() {
-    HuntAnalyzerState.ui.autoplayLogText = ""; // Reset the log text
     HuntAnalyzerState.ui.lastSeed = null;
     HuntAnalyzerState.ui.selectedMapFilter = "ALL";
+    HuntAnalyzerState.ui.selectedFloorFilter = "ALL";
     HuntAnalyzerState.session.count = 0;
     resetTotalsCounters();
     HuntAnalyzerState.session.startTime = Date.now();
-    HuntAnalyzerState.session.sessionStartTime = 0;
-    HuntAnalyzerState.session.isActive = false;
     HuntAnalyzerState.data.sessions = [];
     HuntAnalyzerState.data.aggregatedLoot.clear();
     HuntAnalyzerState.data.aggregatedCreatures.clear();
@@ -5939,9 +5909,13 @@ function resetHuntAnalyzerState() {
         clearInterval(HuntAnalyzerState.timeTracking.clockIntervalId);
     }
     HuntAnalyzerState.timeTracking.currentMap = null;
-    HuntAnalyzerState.timeTracking.mapStartTime = 0;
     HuntAnalyzerState.timeTracking.accumulatedTimeMs = 0;
     HuntAnalyzerState.timeTracking.mapTimeMs.clear();
+    lastBattleEndMs = 0; // idle timer restarts with the next battle
+    // Seed from the board so time is filed under a floor from the first battle on
+    HuntAnalyzerState.timeTracking.currentFloor = getBoardFloor();
+    HuntAnalyzerState.timeTracking.floorTimeMs.clear();
+    HuntAnalyzerState.timeTracking.floorClockStartedAt = Date.now();
     HuntAnalyzerState.timeTracking.clockIntervalId = null;
     HuntAnalyzerState.timeTracking.liveSegmentStartMs = 0;
     HuntAnalyzerState.timeTracking.waitingForManualStart = false;
@@ -5970,15 +5944,25 @@ function resetHuntAnalyzerState() {
     }
 }
 
+// Selected room id from board/player contexts (board context first).
+function resolveRoomIdFromContexts(boardCtx = {}, playerCtx = {}) {
+    return boardCtx.selectedMap?.selectedRoom?.id
+        || boardCtx.selectedMap?.id
+        || boardCtx.area?.id
+        || playerCtx.currentRoomId
+        || null;
+}
+
+function getRoomDisplayName(roomId) {
+    return globalThis.state?.utils?.ROOM_NAME?.[roomId] || `Room ID: ${roomId}`;
+}
+
 // Updates room display with current room information
 function getCurrentRoomIdForDisplay() {
-    const boardSnapshot = globalThis.state?.board?.getSnapshot?.();
-    const boardCtx = boardSnapshot?.context || {};
+    const boardCtx = globalThis.state?.board?.getSnapshot?.()?.context || {};
     const playerCtx = globalThis.state?.player?.getSnapshot?.()?.context || {};
 
-    return (boardCtx.selectedMap && boardCtx.selectedMap.selectedRoom && boardCtx.selectedMap.selectedRoom.id)
-        || (boardCtx.selectedMap && boardCtx.selectedMap.id)
-        || (boardCtx.area && boardCtx.area.id)
+    return resolveRoomIdFromContexts(boardCtx)
         || globalThis.state?.board?.area?.id
         || playerCtx.currentRoomId
         || globalThis.state?.player?.currentRoomId
@@ -5986,21 +5970,14 @@ function getCurrentRoomIdForDisplay() {
 }
 
 function updateCurrentRoomDisplay() {
-    const roomNamesMap = globalThis.state?.utils?.ROOM_NAME;
-    let roomDisplayName = t('mods.huntAnalyzer.currentRoom');
     const currentRoomId = getCurrentRoomIdForDisplay();
-    
-    if (currentRoomId && roomNamesMap?.[currentRoomId]) {
-        roomDisplayName = roomNamesMap[currentRoomId];
-    } else if (currentRoomId) {
-        roomDisplayName = `Room ID: ${currentRoomId}`;
-    }
-    
+    const roomDisplayName = currentRoomId ? getRoomDisplayName(currentRoomId) : t('mods.huntAnalyzer.currentRoom');
+
     // If map actually changed, record accumulated time for previous map and start new
-    if (roomDisplayName && HuntAnalyzerState.timeTracking.currentMap && HuntAnalyzerState.timeTracking.currentMap !== roomDisplayName) {
+    if (HuntAnalyzerState.timeTracking.currentMap && HuntAnalyzerState.timeTracking.currentMap !== roomDisplayName) {
         trackMapChange(roomDisplayName);
     }
-    
+
     if (currentRoomId) {
         updateRoomTitleDisplay(currentRoomId, roomDisplayName);
     }
@@ -6017,7 +5994,7 @@ function scheduleInitialRoomDisplaySync(maxAttempts = 12, intervalMs = 250) {
 
         attempt += 1;
         if (stillFallback && !hasRoomId && attempt < maxAttempts) {
-            setTimeout(sync, intervalMs);
+            scheduleTrackedTimeout(sync, intervalMs);
         }
     };
 
@@ -6075,27 +6052,16 @@ function createPanelContainer() {
     }
     
     // Always apply layout constraints
-    panel.style.minWidth = initialLayout.minWidth + 'px';
-    panel.style.maxWidth = initialLayout.maxWidth + 'px';
-    panel.style.minHeight = initialLayout.minHeight + 'px';
-    panel.style.maxHeight = initialLayout.maxHeight + 'px';
+    applyLayoutConstraints(panel, LAYOUT_MODES.VERTICAL);
 
-    // Try to regenerate visuals immediately, and set up periodic checks
-    regenerateAllVisuals();
-    
-    // Set up one-time visual regeneration check after a short delay
-    // This replaces the polling mechanism with a more efficient approach
-    setTimeout(() => {
+    // Render the initial display with any persisted data once the panel is in the DOM, then once
+    // more after a second: equipment portraits need the game API, which may not be ready yet.
+    scheduleTrackedTimeout(renderAllSessions, 100);
+    scheduleTrackedTimeout(() => {
         if (globalThis.state?.utils) {
-            regenerateAllVisuals();
+            renderAllSessions();
         }
-    }, 1000); // Single check after 1 second
-
-    // Render the initial display with any persisted data
-    // Use setTimeout to ensure DOM is ready
-    setTimeout(() => {
-        renderAllSessions();
-    }, 100);
+    }, 1000);
 
     return panel;
 }
@@ -6162,21 +6128,8 @@ function createAutoplayAnalyzerPanel() {
     if (HuntAnalyzerState.data.sessions.length === 0 && !hasPersistedAnalyzerStats()) {
         // Reset tracking variables for a fresh panel session
         HuntAnalyzerState.session.count = 0;
-        HuntAnalyzerState.totals.gold = 0;
-        HuntAnalyzerState.totals.creatures = 0;
-        HuntAnalyzerState.totals.equipment = 0;
-        HuntAnalyzerState.totals.runes = 0;
-        HuntAnalyzerState.totals.dust = 0;
-        HuntAnalyzerState.totals.shiny = 0;
-        HuntAnalyzerState.totals.sealed = 0;
-        HuntAnalyzerState.totals.staminaSpent = 0;
-        HuntAnalyzerState.totals.staminaRecovered = 0;
-        HuntAnalyzerState.totals.experience = 0;
-        HuntAnalyzerState.totals.wins = 0;
-        HuntAnalyzerState.totals.losses = 0;
+        resetAggregatedTotals();
         HuntAnalyzerState.session.startTime = Date.now();
-        HuntAnalyzerState.session.isActive = false;
-        HuntAnalyzerState.session.sessionStartTime = 0;
         HuntAnalyzerState.data.sessions = [];
         HuntAnalyzerState.data.aggregatedLoot.clear();
         HuntAnalyzerState.data.aggregatedCreatures.clear();
@@ -6185,208 +6138,55 @@ function createAutoplayAnalyzerPanel() {
         rebuildAggregatesFromSessionsWithMerge();
     }
 
-    // Consolidated panel initialization log
-    console.log('[Hunt Analyzer] Panel initialized:', {
-        hasPersistedData: HuntAnalyzerState.data.sessions.length > 0 || hasPersistedAnalyzerStats(),
-        sessionCount: HuntAnalyzerState.session.count,
-        isOpen: true
-    });
-    
+    // Single line (an object argument shows up collapsed as "Object" in the console)
+    const hasPersistedData = HuntAnalyzerState.data.sessions.length > 0 || hasPersistedAnalyzerStats();
+    console.log(
+        `[Hunt Analyzer] Panel initialized: battles=${HuntAnalyzerState.data.sessions.length} ` +
+        `restoredData=${hasPersistedData ? 'yes' : 'no'} autoSave=${HuntAnalyzerState.settings.persistData ? 'on' : 'off'}`
+    );
+
     // Set UI state to open
     HuntAnalyzerState.ui.isOpen = true;
     HuntAnalyzerState.ui.closedManually = false;
-    
+
     // Save UI state
     if (HuntAnalyzerState.settings.persistData) {
         saveHuntAnalyzerState();
     }
     // Create main panel container (this loads and applies saved settings)
     const panel = createPanelContainer();
-    
-    // Create header section
-    const { topHeaderContainer, titleAndControlsRow, headerControls, roomIdDisplay, styleButton, minimizeBtn, closeBtn } = createHeaderSection();
+
+    // Create header section (buttons are already assembled into the title row)
+    const { topHeaderContainer, titleAndControlsRow, roomIdDisplay, styleButton, minimizeBtn, closeBtn } = createHeaderSection();
     styleButton.addEventListener("click", () => handleStyleButtonClick(panel, styleButton, minimizeBtn));
-
-    // Set up minimize button event handler
     minimizeBtn.addEventListener("click", () => handleMinimizeButtonClick(panel, styleButton, minimizeBtn));
+    closeBtn.addEventListener("click", closeHuntAnalyzerPanel);
 
-    // Set up close button event handler
-    closeBtn.addEventListener("click", () => handleCloseButtonClick(panel));
-
-    // Add buttons in order: style, minimize, close
-    headerControls.appendChild(styleButton);
-    headerControls.appendChild(minimizeBtn);
-    headerControls.appendChild(closeBtn);
-    titleAndControlsRow.appendChild(roomIdDisplay);
-    titleAndControlsRow.appendChild(headerControls);
-    topHeaderContainer.appendChild(titleAndControlsRow);
-
-    // --- NATIVE-LIKE RESIZABLE PANEL LOGIC ---
-    // Disabled in favor of resize handles to reduce duplicate mousemove work.
-    const ENABLE_EDGE_RESIZE = false;
-    const edgeSize = 8; // px, area near edge/corner to trigger resize
-    let isResizing = false;
-    let resizeDir = '';
-    let resizeStartX = 0;
-    let resizeStartY = 0;
-    let startWidth = 0;
-    let startHeight = 0;
-    let startLeft = 0;
-    let startTop = 0;
-
-    // Helper to get which edge/corner is hovered
-    function getResizeDirection(e, panel) {
-        const rect = panel.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const y = e.clientY - rect.top;
-        let dir = '';
-        
-        // Only allow resizing when not minimized
-        if (panelState.mode !== LAYOUT_MODES.MINIMIZED) {
-            if (y < edgeSize) dir += 'n';
-            else if (y > rect.height - edgeSize) dir += 's';
-            if (x < edgeSize) dir += 'w';
-            else if (x > rect.width - edgeSize) dir += 'e';
-        }
-        
-        return dir;
-    }
-
-    // Change cursor on hover
-    if (ENABLE_EDGE_RESIZE) {
-        panel.addEventListener('mousemove', function(e) {
-            // Avoid expensive rect/cursor work while dragging.
-            if (isResizing || isDragging) return;
-            const dir = getResizeDirection(e, panel);
-            let cursor = '';
-            switch (dir) {
-                case 'n': cursor = panelState.mode === LAYOUT_MODES.MINIMIZED ? '' : 'ns-resize'; break;
-                case 's': cursor = panelState.mode === LAYOUT_MODES.MINIMIZED ? '' : 'ns-resize'; break;
-                case 'e': cursor = 'ew-resize'; break;
-                case 'w': cursor = 'ew-resize'; break;
-                case 'ne': cursor = panelState.mode === LAYOUT_MODES.MINIMIZED ? 'ew-resize' : 'nesw-resize'; break;
-                case 'nw': cursor = panelState.mode === LAYOUT_MODES.MINIMIZED ? 'ew-resize' : 'nwse-resize'; break;
-                case 'se': cursor = panelState.mode === LAYOUT_MODES.MINIMIZED ? 'ew-resize' : 'nwse-resize'; break;
-                case 'sw': cursor = panelState.mode === LAYOUT_MODES.MINIMIZED ? 'ew-resize' : 'nesw-resize'; break;
-                default: cursor = '';
-            }
-            panel.style.cursor = cursor || '';
-        });
-    }
-
-    // Start resizing on mousedown near edge/corner
-    if (ENABLE_EDGE_RESIZE) {
-        panel.addEventListener('mousedown', function(e) {
-            if (panelState.mode === LAYOUT_MODES.MINIMIZED) {
-                isResizing = false;
-                return;
-            }
-            if (e.target.tagName === 'BUTTON' || e.target === titleAndControlsRow) return;
-            const dir = getResizeDirection(e, panel);
-            if (!dir) return;
-            isResizing = true;
-            resizeDir = dir;
-            resizeStartX = e.clientX;
-            resizeStartY = e.clientY;
-            const rect = panel.getBoundingClientRect();
-            startWidth = rect.width;
-            startHeight = rect.height;
-            startLeft = rect.left;
-            startTop = rect.top;
-            document.body.style.userSelect = 'none';
-            e.preventDefault();
-        });
-    }
-
-    panelResizeMouseMoveHandler = function(e) {
-        if (!isResizing || panelState.mode === LAYOUT_MODES.MINIMIZED) return;
-        let dx = e.clientX - resizeStartX;
-        let dy = e.clientY - resizeStartY;
-        let newWidth = startWidth;
-        let newHeight = startHeight;
-        let newLeft = startLeft;
-        let newTop = startTop;
-        const layout = LAYOUT_DIMENSIONS[panelState.mode];
-        
-        // Allow resizing in both directions for vertical/horizontal
-        if (resizeDir.includes('e')) {
-            newWidth = clamp(startWidth + dx, layout.minWidth, layout.maxWidth);
-        }
-        if (resizeDir.includes('w')) {
-            newWidth = clamp(startWidth - dx, layout.minWidth, layout.maxWidth);
-            newLeft = startLeft + dx;
-        }
-        if (resizeDir.includes('s')) {
-            newHeight = clamp(startHeight + dy, layout.minHeight, layout.maxHeight);
-        }
-        if (resizeDir.includes('n')) {
-            newHeight = clamp(startHeight - dy, layout.minHeight, layout.maxHeight);
-            newTop = startTop + dy;
-        }
-        panel.style.width = newWidth + 'px';
-        panel.style.height = newHeight + 'px';
-        panel.style.left = newLeft + 'px';
-        panel.style.top = newTop + 'px';
-        panel.style.transition = 'none';
-    };
-    if (ENABLE_EDGE_RESIZE) {
-        document.addEventListener('mousemove', panelResizeMouseMoveHandler);
-    }
-
-    panelResizeMouseUpHandler = function() {
-        if (isResizing) {
-            isResizing = false;
-            document.body.style.userSelect = '';
-            panel.style.transition = '';
-            // Save panel settings after resize
-            savePanelSettings(panel);
-        }
-    };
-    if (ENABLE_EDGE_RESIZE) {
-        document.addEventListener('mouseup', panelResizeMouseUpHandler);
-    }
-    // --- END NATIVE-LIKE RESIZABLE PANEL LOGIC ---
-
-    // --- DRAGGABLE PANEL LOGIC ---
-    let isDragging = false;
-    let dragOffsetX = 0;
-    let dragOffsetY = 0;
+    // Drag the panel by its title row; move/up listeners exist only while dragging.
     let pendingDragFrame = null;
-    let queuedDragLeft = 0;
-    let queuedDragTop = 0;
-
-    titleAndControlsRow.addEventListener('mousedown', function(e) {
+    titleAndControlsRow.addEventListener('mousedown', (e) => {
         if (e.target.tagName === 'BUTTON') return; // Don't drag if clicking a button
-        isDragging = true;
         const rect = panel.getBoundingClientRect();
-        dragOffsetX = e.clientX - rect.left;
-        dragOffsetY = e.clientY - rect.top;
+        const dragOffsetX = e.clientX - rect.left;
+        const dragOffsetY = e.clientY - rect.top;
+        // Start from the current position, so a click without movement doesn't move the panel
+        let queuedDragLeft = rect.left;
+        let queuedDragTop = rect.top;
         document.body.style.userSelect = 'none';
         e.preventDefault();
-    });
 
-    panelDragMouseMoveHandler = function(e) {
-        if (!isDragging) return;
-        let newLeft = e.clientX - dragOffsetX;
-        let newTop = e.clientY - dragOffsetY;
-        // Clamp to viewport
-        newLeft = Math.max(0, Math.min(window.innerWidth - panel.offsetWidth, newLeft));
-        newTop = Math.max(0, Math.min(window.innerHeight - panel.offsetHeight, newTop));
-        queuedDragLeft = newLeft;
-        queuedDragTop = newTop;
-        if (pendingDragFrame !== null) return;
-        pendingDragFrame = requestAnimationFrame(() => {
-            panel.style.left = queuedDragLeft + 'px';
-            panel.style.top = queuedDragTop + 'px';
-            panel.style.transition = 'none';
-            pendingDragFrame = null;
-        });
-    };
-    document.addEventListener('mousemove', panelDragMouseMoveHandler);
-
-    panelDragMouseUpHandler = function() {
-        if (isDragging) {
-            isDragging = false;
+        beginPanelPointerTracking((moveEvent) => {
+            // Clamp to viewport
+            queuedDragLeft = Math.max(0, Math.min(window.innerWidth - panel.offsetWidth, moveEvent.clientX - dragOffsetX));
+            queuedDragTop = Math.max(0, Math.min(window.innerHeight - panel.offsetHeight, moveEvent.clientY - dragOffsetY));
+            if (pendingDragFrame !== null) return;
+            pendingDragFrame = requestAnimationFrame(() => {
+                pendingDragFrame = null;
+                panel.style.left = queuedDragLeft + 'px';
+                panel.style.top = queuedDragTop + 'px';
+                panel.style.transition = 'none';
+            });
+        }, () => {
             if (pendingDragFrame !== null) {
                 cancelAnimationFrame(pendingDragFrame);
                 pendingDragFrame = null;
@@ -6395,12 +6195,9 @@ function createAutoplayAnalyzerPanel() {
             panel.style.top = queuedDragTop + 'px';
             document.body.style.userSelect = '';
             panel.style.transition = '';
-            // Save panel settings after drag
-            savePanelSettings(panel);
-        }
-    };
-    document.addEventListener('mouseup', panelDragMouseUpHandler);
-    // --- END DRAGGABLE PANEL LOGIC ---
+            if (panel.isConnected) savePanelSettings(panel);
+        });
+    });
 
     // 2. Live Display Section
     const liveDisplaySection = document.createElement("div");
@@ -6533,7 +6330,6 @@ function createAutoplayAnalyzerPanel() {
     // 4. Loot + Creature Drops Sections (shared layout/styling)
     const {
         container: lootContainer,
-        title: lootTitle,
         displayDiv: lootDisplayDiv
     } = createDropSection({
         containerClassName: "loot-container",
@@ -6543,7 +6339,6 @@ function createAutoplayAnalyzerPanel() {
 
     const {
         container: creatureDropContainer,
-        title: creatureDropTitle,
         displayDiv: creatureDropDisplayDiv
     } = createDropSection({
         containerClassName: "creature-drop-container",
@@ -6565,7 +6360,6 @@ function createAutoplayAnalyzerPanel() {
     buttonContainer.style.flex = "0 0 auto"; // FIXED SIZE
     buttonContainer.style.flexDirection = 'row';
 
-    // Settings button removed - now handled by Mod Settings
 
     const clearButton = createStyledButton(getClearButtonLabel());
     clearButton.style.width = '135px';
@@ -6599,7 +6393,6 @@ function createAutoplayAnalyzerPanel() {
     leftColumn.appendChild(liveDisplaySection);
     leftColumn.appendChild(buttonContainer);
 
-    // Version display removed
 
     // Assemble the panel (default to vertical, updatePanelLayout will fix for horizontal)
     const frame = getPanelFrame(panel);
@@ -6642,10 +6435,9 @@ function createAutoplayAnalyzerPanel() {
 
     // Apply saved layout mode if available
     if (panelState && panelState.mode) {
-        // Apply layout mode to panel (preserveSize=true to keep saved width/height)
-        applyLayoutMode(panel, panelState.mode, mapFilterContainer, lootContainer, creatureDropContainer, buttonContainer, true);
-        
-        // Update panel layout to ensure everything is properly set up
+        // Size limits for the saved mode (saved width/height are kept); section visibility and
+        // order come from updatePanelLayout
+        applyLayoutConstraints(panel, panelState.mode);
         updatePanelLayout(panel);
         
         // If restoring from minimized, render the sessions
@@ -6685,18 +6477,8 @@ function createAutoplayAnalyzerPanel() {
     }
     updateIntervalId = setInterval(updatePanelDisplay, 1000);
     
-    // Set up periodic auto-save if persistence is enabled
-    if (HuntAnalyzerState.settings.persistData) {
-        if (autoSaveIntervalId) {
-            clearInterval(autoSaveIntervalId);
-        }
-        autoSaveIntervalId = setInterval(() => {
-            if (HuntAnalyzerState.data.sessions.length > 0) {
-                saveHuntAnalyzerData();
-            }
-        }, CONFIG.AUTO_SAVE_INTERVAL);
-        console.log('[Hunt Analyzer] Periodic auto-save enabled (30s interval)');
-    }
+    // Set up periodic auto-save if persistence is enabled (reported in the "Panel initialized" line)
+    startAutoSaveInterval();
 
     // Force layout update to fit header and live sections on first open
     updatePanelLayout(panel);
@@ -6719,11 +6501,6 @@ function createAutoplayAnalyzerPanel() {
     Array.from(panel.querySelectorAll('.resize-handle')).forEach(handle => {
         handle.addEventListener('mousedown', onResizeHandleMouseDown);
     });
-    // Add double-click to header
-    const header = panel.querySelector('.top-header');
-    if (header) {
-        header.addEventListener('dblclick', onHeaderDblClick);
-    }
 }
 
 
@@ -6841,9 +6618,19 @@ function updateStaminaSummaryDisplay(element) {
     element.setAttribute('title', `${t('mods.huntAnalyzer.totalStamina')}: ${formatExactInt(HuntAnalyzerState.totals.staminaSpent)}`);
 }
 
+// Playtime = battle time + idle time; the tooltip splits it. filteredTimeHours is the rates time
+// (battle time), or the playtime clock when no battle has a duration yet (then no split is shown).
 function updatePlaytimeDisplay(element, filteredTimeHours = getFilteredTimeHours()) {
     if (!element) return;
-    element.textContent = formatPlaytimeLabel(formatPlaytime(filteredTimeHours));
+    const idleMs = getFilteredIdleMs();
+    if (idleMs == null) {
+        element.textContent = formatPlaytimeLabel(formatPlaytime(filteredTimeHours));
+        element.title = '';
+        return;
+    }
+    const battleMs = filteredTimeHours * 60 * 60 * 1000;
+    element.textContent = formatPlaytimeLabel(formatTime(battleMs + idleMs));
+    element.title = `${t('mods.huntAnalyzer.battleTime')}: ${formatTime(battleMs)} | ${t('mods.huntAnalyzer.idle')}: ${formatTime(idleMs)}`;
 }
 
 function calculateStaminaRateMetrics(filteredTimeHours = getFilteredTimeHours()) {
@@ -6913,7 +6700,7 @@ function refreshPanelSectionTitles() {
     HuntAnalyzerState.data.aggregatedCreatures.forEach((data) => {
         totalCreatureDrops += data.count;
     });
-    updateFilteredSectionTitle('mod-creature-drops-title', 'mods.huntAnalyzer.creatureDrops', totalCreatureDrops);
+    updateFilteredSectionTitle('mod-creature-drops-title', 'mods.huntAnalyzer.creatures', totalCreatureDrops);
 }
 
 function refreshPanelLiveStats(elementById) {
@@ -6956,48 +6743,19 @@ function updateModExpRateDisplay(targetEl) {
 // Updates the display in the Hunt Analyzer Mod panel with the current loot, creature drops,
 // autoplay session count, and live drop rates.
 function updatePanelDisplay() {
-    const now = Date.now();
-    const shouldLog = (now - lastUpdateLogTime) > CONFIG.UPDATE_LOG_THROTTLE;
-    
-    // Always update for continuous timer - no throttling
-    lastBoardSubscriptionTime = now;
-    
-    if (shouldLog) {
-        lastUpdateLogTime = now;
-    }
-    
-    // Update tracked values for continuous updates
-    lastKnownSessionCount = HuntAnalyzerState.session.count;
-    lastKnownGold = HuntAnalyzerState.totals.gold;
-    lastKnownDust = HuntAnalyzerState.totals.dust;
-    lastKnownShiny = HuntAnalyzerState.totals.shiny;
-    lastKnownSealed = HuntAnalyzerState.totals.sealed;
-
     // Keep latest collected Dragon Plant value for tooltip details.
     trackDragonPlantCollectionValue();
     
     // Get cached DOM elements
     refreshPanelLiveStats();
 
-    const cachedRoomIdDisplayElement = domCache.get("mod-room-id-display");
-
     // Update room ID display
-    if (cachedRoomIdDisplayElement) {
-        const roomNamesMap = globalThis.state?.utils?.ROOM_NAME;
-        let roomDisplayName = t('mods.huntAnalyzer.currentRoom');
+    if (domCache.get("mod-room-id-display")) {
         const currentRoomId = getCurrentRoomIdForDisplay();
-        
-        if (currentRoomId && roomNamesMap?.[currentRoomId]) {
-            roomDisplayName = roomNamesMap[currentRoomId];
-        } else if (currentRoomId) {
-            roomDisplayName = `Room ID: ${currentRoomId}`;
-        }
-        
         if (currentRoomId) {
-            updateRoomTitleDisplay(currentRoomId, roomDisplayName);
+            updateRoomTitleDisplay(currentRoomId, getRoomDisplayName(currentRoomId));
         }
     }
-
 }
 
 // Calculates and applies the correct position for the analyzer panel.
@@ -7048,95 +6806,6 @@ function updatePanelPosition() {
     }
 }
 
-// Toggles the minimized state of the analyzer panel.
-// Hides/shows content and adjusts panel height.
-function toggleMinimize() {
-    const panel = document.getElementById(PANEL_ID);
-    const lootContainer = document.querySelector(`#${PANEL_ID} .loot-container`);
-    const creatureDropContainer = document.querySelector(`#${PANEL_ID} .creature-drop-container`);
-    const minimizeBtn = document.getElementById("mod-minimize-button");
-    const buttonContainer = panel && panel.querySelector('.button-container');
-
-    if (!panel || !lootContainer || !creatureDropContainer || !minimizeBtn) {
-        console.error("[Hunt Analyzer] Toggle minimize: Required elements not found.");
-        return;
-    }
-
-    // Switch mode
-    switch (panelState.mode) {
-        case LAYOUT_MODES.VERTICAL:
-            panelState.mode = LAYOUT_MODES.HORIZONTAL;
-            break;
-        case LAYOUT_MODES.HORIZONTAL:
-            panelState.mode = LAYOUT_MODES.MINIMIZED;
-            break;
-        case LAYOUT_MODES.MINIMIZED:
-            panelState.mode = LAYOUT_MODES.VERTICAL;
-            break;
-    }
-
-    // Set button text and tooltip to the CURRENT mode
-    if (panelState.mode === LAYOUT_MODES.VERTICAL) {
-        minimizeBtn.textContent = t('mods.huntAnalyzer.vertical');
-        minimizeBtn.title = `${t('mods.huntAnalyzer.currentLayout')}: ${t('mods.huntAnalyzer.vertical')}`;
-    } else if (panelState.mode === LAYOUT_MODES.HORIZONTAL) {
-        minimizeBtn.textContent = t('mods.huntAnalyzer.horizontal');
-        minimizeBtn.title = `${t('mods.huntAnalyzer.currentLayout')}: ${t('mods.huntAnalyzer.horizontal')}`;
-    } else if (panelState.mode === LAYOUT_MODES.MINIMIZED) {
-        minimizeBtn.textContent = t('mods.huntAnalyzer.minimized');
-        minimizeBtn.title = `${t('mods.huntAnalyzer.currentLayout')}: ${t('mods.huntAnalyzer.minimized')}`;
-    }
-
-    // Cancel any ongoing resize if switching to minimized
-    if (panelState.mode === LAYOUT_MODES.MINIMIZED) {
-        panelState.isResizing = false;
-    }
-    applyLayoutMode(panel, panelState.mode, mapFilterContainer, lootContainer, creatureDropContainer, buttonContainer);
-    updatePanelLayout(panel);
-    updatePanelPosition();
-    
-    // Save panel settings after layout mode change
-    savePanelSettings(panel);
-}
-
-// Add this helper function near the top (after LAYOUT_DIMENSIONS):
-function applyLayoutMode(panel, mode, mapFilterContainer, lootContainer, creatureDropContainer, buttonContainer, preserveSize = false) {
-    const layout = LAYOUT_DIMENSIONS[mode];
-    if (!layout) return;
-    
-    // Only set width/height if not preserving size (i.e., when user explicitly changes layout mode)
-    // When preserving size (on load), only set constraints
-    if (!preserveSize) {
-        panel.style.width = layout.width + 'px';
-        panel.style.height = layout.height + 'px';
-    }
-    
-    // Always apply constraints
-    panel.style.minWidth = layout.minWidth + 'px';
-    panel.style.maxWidth = layout.maxWidth + 'px';
-    panel.style.minHeight = layout.minHeight + 'px';
-    panel.style.maxHeight = layout.maxHeight + 'px';
-    if (mode === LAYOUT_MODES.HORIZONTAL) {
-        getPanelFrame(panel).style.flexDirection = 'row';
-    } else {
-        getPanelFrame(panel).style.flexDirection = 'column';
-    }
-    if (mode === LAYOUT_MODES.MINIMIZED) {
-        mapFilterContainer.style.display = 'none';
-        lootContainer.style.display = 'none';
-        creatureDropContainer.style.display = 'none';
-        if (buttonContainer) buttonContainer.style.display = 'none';
-    } else {
-        mapFilterContainer.style.display = 'flex';
-        lootContainer.style.display = 'flex';
-        lootContainer.style.flexDirection = 'column';
-        creatureDropContainer.style.display = 'flex';
-        creatureDropContainer.style.flexDirection = 'column';
-        if (buttonContainer) buttonContainer.style.display = 'flex';
-    }
-}
-
-// In updatePanelLayout, use currentLayoutMode instead of height for layout:
 function updatePanelLayout(panel) {
     const frame = getPanelFrame(panel);
     const leftColumn = panel._leftColumn;
@@ -7149,23 +6818,13 @@ function updatePanelLayout(panel) {
 
     // Always set fixed/flexible sizing regardless of layout
     if (leftColumn) {
-        if (panelState.mode === LAYOUT_MODES.HORIZONTAL) {
-            leftColumn.style.display = "flex";
-            leftColumn.style.flexDirection = "column";
-            leftColumn.style.width = "240px";
-            leftColumn.style.minWidth = "200px";
-            leftColumn.style.maxWidth = "300px";
-            leftColumn.style.flex = "0 0 auto";
-            leftColumn.style.height = "auto";
-        } else {
-            leftColumn.style.display = "flex";
-            leftColumn.style.flexDirection = "column";
-            leftColumn.style.width = "240px";
-            leftColumn.style.minWidth = "200px";
-            leftColumn.style.maxWidth = "300px";
-            leftColumn.style.flex = "0 0 auto";
-            leftColumn.style.height = "";
-        }
+        leftColumn.style.display = "flex";
+        leftColumn.style.flexDirection = "column";
+        leftColumn.style.width = "240px";
+        leftColumn.style.minWidth = "200px";
+        leftColumn.style.maxWidth = "300px";
+        leftColumn.style.flex = "0 0 auto";
+        leftColumn.style.height = panelState.mode === LAYOUT_MODES.HORIZONTAL ? "auto" : "";
     }
     if (topHeaderContainer) topHeaderContainer.style.flex = "0 0 auto";
     if (liveDisplaySection) {
@@ -7210,23 +6869,12 @@ function updatePanelLayout(panel) {
         }
         if (buttonContainer) buttonContainer.style.display = 'flex';
         
-        // Set flex based on layout mode
-        if (panelState.mode === LAYOUT_MODES.VERTICAL) {
-            // In vertical mode, give map filter minimal space and make loot/creatures bigger
-            if (mapFilterContainer) mapFilterContainer.style.flex = "0 0 auto";
-            if (lootContainer) lootContainer.style.flex = "1 1 0";
-            if (creatureDropContainer) creatureDropContainer.style.flex = "1 1 0";
-            if (buttonContainer) {
-                buttonContainer.style.width = 'auto';
-            }
-        } else {
-            // In horizontal mode, all sections get their normal sizing
-            if (mapFilterContainer) mapFilterContainer.style.flex = "0 0 auto";
-            if (lootContainer) lootContainer.style.flex = "1 1 0";
-            if (creatureDropContainer) creatureDropContainer.style.flex = "1 1 0";
-            if (buttonContainer) {
-                buttonContainer.style.width = '100%';
-            }
+        // Map filter takes minimal space; loot/creatures share the rest
+        if (mapFilterContainer) mapFilterContainer.style.flex = "0 0 auto";
+        if (lootContainer) lootContainer.style.flex = "1 1 0";
+        if (creatureDropContainer) creatureDropContainer.style.flex = "1 1 0";
+        if (buttonContainer) {
+            buttonContainer.style.width = panelState.mode === LAYOUT_MODES.VERTICAL ? 'auto' : '100%';
         }
     }
 
@@ -7237,14 +6885,7 @@ function updatePanelLayout(panel) {
         if (mapFilterContainer) mapFilterContainer.style.order = '';
         if (lootContainer) lootContainer.style.order = '1';
         if (creatureDropContainer) creatureDropContainer.style.order = '2';
-        // Ensure leftColumn exists and contains header, live, buttons, map filter in order
-        if (!leftColumn) {
-            // Create leftColumn if it doesn't exist
-            const newLeftColumn = document.createElement('div');
-            newLeftColumn.className = 'ha-left-column';
-            panel._leftColumn = newLeftColumn;
-            frame.insertBefore(newLeftColumn, frame.firstChild);
-        }
+        // leftColumn (always created with the panel) holds header, live stats, buttons, map filter
         if (leftColumn) {
             if (leftColumn.children[0] !== topHeaderContainer) leftColumn.insertBefore(topHeaderContainer, leftColumn.firstChild);
             if (leftColumn.children[1] !== liveDisplaySection) leftColumn.insertBefore(liveDisplaySection, leftColumn.children[1] || null);
@@ -7318,47 +6959,32 @@ function updatePanelLayout(panel) {
     }
 }
 
-// In the mousedown and mousemove handlers for resizing, keep the early return for minimized mode:
-// (already present, but ensure it stays)
-// panel.addEventListener('mousedown', ...)
-// document.addEventListener('mousemove', ...)
-
 // =======================
 // 6. Event Handlers and Initialization
 // =======================
 
-// Listen for game start and end events using the game's global API.
-if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.board && globalThis.state.board.on) {
-    
-    globalThis.state.board.on('newGame', (event) => {
-        if (huntAnalyzerPausedForAnalysis || isHuntAnalyzerAnalysisBlockingActive()) {
-            return;
-        }
-        // Only process if the panel is open
-        if (!document.getElementById(PANEL_ID)) {
-            return; // Exit immediately if panel is not open
-        }
-        
-        // Skip recording if in sandbox mode
-        if (isSandboxMode()) {
-            return;
-        }
-        
-        // Only update session state, don't process rewards here
-        // Rewards will be processed by the board subscription when serverResults arrive
-        HuntAnalyzerState.session.count++;
-        HuntAnalyzerState.session.isActive = true;
-        HuntAnalyzerState.session.sessionStartTime = Date.now();
+function isHuntAnalyzerTrackingBlocked() {
+    return huntAnalyzerPausedForAnalysis || isHuntAnalyzerAnalysisBlockingActive();
+}
 
-        if (HuntAnalyzerState.timeTracking.awaitingFirstBattle) {
-            HuntAnalyzerState.timeTracking.awaitingFirstBattle = false;
-            armTimeTrackingAtBattleStart();
-        }
-        
-        // Defer display update to avoid interfering with animations
-        timeoutIds.push(setTimeout(() => {
-            updatePanelDisplay();
-        }, 0));
+// Battle start: count it and start timing. Rewards are processed when serverResults arrive.
+function handleNewGameEvent(event) {
+    if (isHuntAnalyzerTrackingBlocked() || !document.getElementById(PANEL_ID) || isSandboxMode()) {
+        return;
+    }
+    HuntAnalyzerState.session.count++;
+    beginBattleTiming(event?.world);
+    // The battle is fought on the board's current map and floor; switch the clocks now, not when
+    // the result arrives, so this battle's time isn't filed under the previous map or floor.
+    syncClockToBoard();
+
+    if (HuntAnalyzerState.timeTracking.awaitingFirstBattle) {
+        HuntAnalyzerState.timeTracking.awaitingFirstBattle = false;
+        armTimeTrackingAtBattleStart();
+    }
+
+    // Defer display update to avoid interfering with animations
+    scheduleTrackedTimeout(updatePanelDisplay, 0);
 
     // Start the internal clock on first battle; keep it running for subsequent battles
     try {
@@ -7373,131 +6999,126 @@ if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.bo
             HuntAnalyzerState.timeTracking.waitingForManualStart = false;
         }
     } catch (_e) { /* ignore */ }
-    });
+}
 
-    if (globalThis.state.board.subscribe) {
-        boardSubscription = globalThis.state.board.subscribe(({ context }) => {
-            if (huntAnalyzerPausedForAnalysis || isHuntAnalyzerAnalysisBlockingActive()) {
-                return;
-            }
-            // Only process if the panel is open
-            if (!document.getElementById(PANEL_ID)) {
-                return; // Exit immediately if panel is not open
-            }
-            
-            // Ultra-minimal processing - only check for server results
-            const serverResults = context.serverResults;
-            if (!serverResults || !serverResults.rewardScreen || typeof serverResults.seed === 'undefined') {
-                return; // Exit immediately - no processing, no logging
-            }
-            
-            // Skip processing if in sandbox mode
-            if (isSandboxMode()) {
-                return;
-            }
-            
-            const seed = serverResults.seed;
-            
-            // Improved seed handling - only process if we haven't seen this seed before
-            if (seed === HuntAnalyzerState.ui.lastSeed) {
-                return; // Skip duplicate seeds silently
-            }
-            
-            // Only process when we have valid server results and a new seed
-            HuntAnalyzerState.ui.lastSeed = seed;
-            
-            
-            // Use setTimeout to defer processing and avoid blocking animations
-            timeoutIds.push(setTimeout(() => {
-                // Keep ticking independent of results; do not reset manual window here
-                processAutoplaySummary(serverResults);
-                HuntAnalyzerState.session.isActive = false;
-                
-                // Ensure clock keeps running after results
-                try {
-                    if (huntAnalyzerTimerArmed()) {
-                        if (!HuntAnalyzerState.timeTracking.clockIntervalId) {
-                            startInternalClock('serverResults');
-                        }
-                        if (getCurrentMode() === 'manual') {
-                            HuntAnalyzerState.timeTracking.waitingForManualStart = false;
-                            resumeLiveSegment();
-                        }
-                    }
-                } catch (_e) { /* ignore */ }
+// Battle result: process each new seed once, deferred so it doesn't block the reward animation.
+function handleBoardServerResults({ context }) {
+    if (isHuntAnalyzerTrackingBlocked() || !document.getElementById(PANEL_ID)) {
+        return;
+    }
+    const serverResults = context.serverResults;
+    if (!serverResults || !serverResults.rewardScreen || typeof serverResults.seed === 'undefined') {
+        return;
+    }
+    if (isSandboxMode() || serverResults.seed === HuntAnalyzerState.ui.lastSeed) {
+        return;
+    }
+    HuntAnalyzerState.ui.lastSeed = serverResults.seed;
 
-                updatePanelDisplay();
-            }, 0));
-        });
+    scheduleTrackedTimeout(() => {
+        processAutoplaySummary(serverResults);
 
-        // Separate lightweight subscription to detect map switches and stop internal clock
+        // Ensure clock keeps running after results
         try {
-            let lastSelectedRoomId = null;
-            let lastKnownMode = null;
-            modeMapSubscription = globalThis.state.board.subscribe((state) => {
-                if (huntAnalyzerPausedForAnalysis || isHuntAnalyzerAnalysisBlockingActive()) {
-                    return;
+            if (huntAnalyzerTimerArmed()) {
+                if (!HuntAnalyzerState.timeTracking.clockIntervalId) {
+                    startInternalClock('serverResults');
                 }
-                const ctx = state?.context || {};
-                const playerCtx = globalThis.state?.player?.getSnapshot?.()?.context || {};
-                const roomId = (ctx.selectedMap && ctx.selectedMap.selectedRoom && ctx.selectedMap.selectedRoom.id)
-                    || (ctx.selectedMap && ctx.selectedMap.id)
-                    || (ctx.area && ctx.area.id)
-                    || playerCtx.currentRoomId
-                    || null;
-                const mode = ctx.mode || null;
+                if (getCurrentMode() === 'manual') {
+                    HuntAnalyzerState.timeTracking.waitingForManualStart = false;
+                    resumeLiveSegment();
+                }
+            }
+        } catch (_e) { /* ignore */ }
 
-                // Mode transition handling: snapshot current live time, then resume if the new mode should run
-                if (mode !== lastKnownMode) {
-                    snapshotIntoTotals();
+        updatePanelDisplay();
+    }, 0);
+}
 
-                    if (huntAnalyzerTimerArmed()) {
-                        if (!HuntAnalyzerState.timeTracking.clockIntervalId) {
-                            startInternalClock('modeChange');
-                        }
-                        if (mode === 'manual') {
-                            HuntAnalyzerState.timeTracking.waitingForManualStart = false;
-                            resumeLiveSegment();
-                        }
-                    }
-                    lastKnownMode = mode;
+// Detects mode, floor and map switches to pause/bank the playtime clock.
+function createModeMapTracker() {
+    let lastSelectedRoomId = null;
+    let lastKnownMode = null;
+    return (state) => {
+        if (isHuntAnalyzerTrackingBlocked()) {
+            return;
+        }
+        const ctx = state?.context || {};
+        const playerCtx = globalThis.state?.player?.getSnapshot?.()?.context || {};
+        const roomId = resolveRoomIdFromContexts(ctx, playerCtx);
+        const mode = ctx.mode || null;
+
+        // Mode transition handling: snapshot current live time, then resume if the new mode should run
+        if (mode !== lastKnownMode) {
+            snapshotIntoTotals();
+
+            if (huntAnalyzerTimerArmed()) {
+                if (!HuntAnalyzerState.timeTracking.clockIntervalId) {
+                    startInternalClock('modeChange');
                 }
-                if (!roomId) {
-                    const now = Date.now();
-                    if (now - mapDebugLastLogTime > 5000 && mapDebugLogCount < 10) {
-                        mapDebugLastLogTime = now;
-                        mapDebugLogCount++;
-                        console.log('[Hunt Analyzer] Map debug: no roomId in context', {
-                            keys: Object.keys(ctx || {}),
-                            selectedMap: ctx.selectedMap,
-                            area: ctx.area,
-                            selectedRoom: ctx.selectedRoom,
-                            mode
-                        });
-                    }
-                    return;
+                if (mode === 'manual') {
+                    HuntAnalyzerState.timeTracking.waitingForManualStart = false;
+                    resumeLiveSegment();
                 }
-                if (lastSelectedRoomId === null) {
-                    lastSelectedRoomId = roomId;
-                    const roomNamesMap = globalThis.state?.utils?.ROOM_NAME;
-                    const roomName = roomNamesMap?.[roomId] || `Room ID: ${roomId}`;
-                    updateRoomTitleDisplay(roomId, roomName);
-                    return;
-                }
-                if (roomId !== lastSelectedRoomId) {
-                    // On map change: snapshot live time, update map context, wait for next newGame
-                    snapshotIntoTotals();
-                    lastSelectedRoomId = roomId;
-                    const roomNamesMap = globalThis.state?.utils?.ROOM_NAME;
-                    const roomName = roomNamesMap?.[roomId] || `Room ID: ${roomId}`;
-                    trackMapChange(roomName);
-                    HuntAnalyzerState.timeTracking.waitingForManualStart = true;
-                    updateRoomTitleDisplay(roomId, roomName);
-                }
-            });
+            }
+            lastKnownMode = mode;
+        }
+        trackFloorChange(ctx.floor);
+        if (!roomId) {
+            const now = Date.now();
+            if (now - mapDebugLastLogTime > 5000 && mapDebugLogCount < 10) {
+                mapDebugLastLogTime = now;
+                mapDebugLogCount++;
+                console.log('[Hunt Analyzer] Map debug: no roomId in context', {
+                    keys: Object.keys(ctx || {}),
+                    selectedMap: ctx.selectedMap,
+                    area: ctx.area,
+                    selectedRoom: ctx.selectedRoom,
+                    mode
+                });
+            }
+            return;
+        }
+        if (lastSelectedRoomId === null) {
+            // First room seen since load. After a reload the clock may still hold the saved map;
+            // if this is a different one, treat it as a map change.
+            lastSelectedRoomId = roomId;
+            const roomName = getRoomDisplayName(roomId);
+            if (HuntAnalyzerState.timeTracking.currentMap && HuntAnalyzerState.timeTracking.currentMap !== roomName) {
+                syncMapClockToRoom(roomName);
+                HuntAnalyzerState.timeTracking.waitingForManualStart = true;
+            }
+            updateRoomTitleDisplay(roomId, roomName);
+            return;
+        }
+        if (roomId !== lastSelectedRoomId) {
+            // On map change: snapshot live time, update map context, wait for next newGame
+            snapshotIntoTotals();
+            lastSelectedRoomId = roomId;
+            const roomName = getRoomDisplayName(roomId);
+            trackMapChange(roomName);
+            HuntAnalyzerState.timeTracking.waitingForManualStart = true;
+            updateRoomTitleDisplay(roomId, roomName);
+        }
+    };
+}
+
+// Listen for game start and end events using the game's global API. All three are torn down in
+// cleanupHuntAnalyzer(); board.on() returns an unsubscribe function, board.subscribe() an object.
+function installGameEventListeners() {
+    const board = globalThis.state?.board;
+    if (!board || typeof board.on !== 'function') return;
+
+    huntAnalyzerNewGameUnsubscribe = board.on('newGame', handleNewGameEvent);
+    if (typeof board.subscribe === 'function') {
+        boardSubscription = board.subscribe(handleBoardServerResults);
+        try {
+            modeMapSubscription = board.subscribe(createModeMapTracker());
         } catch (_e) { /* ignore */ }
     }
 }
+
+installGameEventListeners();
 
 // Create button to open the sidebar panel.
 function createHuntAnalyzerButton() {
@@ -7526,7 +7147,7 @@ async function initializeHuntAnalyzerPersistence() {
         autoReopenHuntAnalyzer();
     } else {
         console.log('[Hunt Analyzer] API not ready, retrying persistence initialization...');
-        setTimeout(initializeHuntAnalyzerPersistence, 100);
+        scheduleTrackedTimeout(initializeHuntAnalyzerPersistence, 100);
     }
 }
 
@@ -7534,10 +7155,9 @@ async function initializeHuntAnalyzerPersistence() {
 initializeHuntAnalyzerPersistence();
 
 // Translation event handler
-const translationEventHandler = (event) => {
-    
-    // Update button text if it exists
-    const button = document.querySelector(`[data-mod-id="${BUTTON_ID}"]`);
+translationEventHandler = () => {
+    // addButton gives the button this element id (data-mod-id holds the mod's id, not ours)
+    const button = document.getElementById(BUTTON_ID);
     if (button) {
         button.textContent = t('mods.huntAnalyzer.buttonText');
         button.title = t('mods.huntAnalyzer.buttonTooltip');
@@ -7591,9 +7211,7 @@ const translationEventHandler = (event) => {
 // Also listen for translation loading event to update button text and panel content
 document.addEventListener('bestiary-translations-loaded', translationEventHandler);
 
-// Initial script execution setup.
 
-// Add these functions before createAutoplayAnalyzerPanel()
 function savePanelSettings(panel) {
     if (!panel) return;
     
@@ -7605,8 +7223,7 @@ function savePanelSettings(panel) {
             height: panel.style.height || `${LAYOUT_DIMENSIONS[LAYOUT_MODES.VERTICAL].height}px`,
             top: rect.top + 'px',
             left: rect.left + 'px',
-            layoutMode: (panelState && panelState.mode) || LAYOUT_MODES.VERTICAL,
-            isMinimized: false
+            layoutMode: (panelState && panelState.mode) || LAYOUT_MODES.VERTICAL
         };
         
         // Update config (for mod loader's config system)
@@ -7690,10 +7307,7 @@ function applyPanelSettings(panel, settings) {
         }
         
         // Always enforce constraints from current mode (never from persisted style values).
-        panel.style.minWidth = layout.minWidth + 'px';
-        panel.style.maxWidth = layout.maxWidth + 'px';
-        panel.style.minHeight = layout.minHeight + 'px';
-        panel.style.maxHeight = layout.maxHeight + 'px';
+        applyLayoutConstraints(panel, currentMode);
         
         // Apply top position (ensure panel stays within viewport)
         if (settings.top) {
@@ -7719,34 +7333,6 @@ function applyPanelSettings(panel, settings) {
             }
         }
         
-        // Apply minimized/restore state from saved settings
-        if (settings.isMinimized !== undefined) {
-            const lootContainer = panel.querySelector('.loot-container');
-            const creatureDropContainer = panel.querySelector('.creature-drop-container');
-            const minimizeBtn = document.getElementById("mod-minimize-button");
-            const styleButton = document.getElementById("mod-style-button");
-            const buttonContainer = panel.querySelector('.button-container');
-            if (lootContainer && creatureDropContainer && minimizeBtn) {
-                if (settings.isMinimized) {
-                    // Store the last mode before minimizing
-                    if (panelState.mode !== LAYOUT_MODES.MINIMIZED) {
-                        panelState._lastMode = panelState.mode || LAYOUT_MODES.VERTICAL;
-                    }
-                    panelState.mode = LAYOUT_MODES.MINIMIZED;
-                    updateMinimizeButtonState(minimizeBtn, true);
-                } else {
-                    // Restore from minimized
-                    panelState.mode = panelState._lastMode || LAYOUT_MODES.VERTICAL;
-                    updateMinimizeButtonState(minimizeBtn, false);
-                    updateStyleButtonState(styleButton, panelState.mode);
-                    // Re-render loot and creature drops when restoring from minimized
-                    renderAllSessions();
-                }
-
-                // Ensure constraints match the resolved mode (prevents getting stuck at minimized 270x230).
-                applyLayoutDimensions(panel, panelState.mode);
-            }
-        }
         
         // Note: updatePanelLayout will be called after panel structure is built
         // This ensures all elements exist before layout is applied
@@ -7767,8 +7353,7 @@ const defaultConfig = {
     minHeight: "500px",
     top: "50px",
     left: "10px",
-    layoutMode: LAYOUT_MODES.VERTICAL,
-    isMinimized: false
+    layoutMode: LAYOUT_MODES.VERTICAL
   }
 };
 
@@ -7818,408 +7403,194 @@ function addResizeHandles(panel) {
     });
 }
 
+// Drag/resize tracking: the document-level move/up listeners exist only between mousedown and
+// mouseup, so an idle panel adds no global mousemove work.
+function beginPanelPointerTracking(onMove, onEnd) {
+    endPanelPointerTracking();
+    panelPointerMoveHandler = onMove;
+    panelPointerUpHandler = (e) => {
+        endPanelPointerTracking();
+        onEnd(e);
+    };
+    document.addEventListener('mousemove', panelPointerMoveHandler);
+    document.addEventListener('mouseup', panelPointerUpHandler);
+}
+
+function endPanelPointerTracking() {
+    if (panelPointerMoveHandler) {
+        document.removeEventListener('mousemove', panelPointerMoveHandler);
+        panelPointerMoveHandler = null;
+    }
+    if (panelPointerUpHandler) {
+        document.removeEventListener('mouseup', panelPointerUpHandler);
+        panelPointerUpHandler = null;
+    }
+}
+
 // Resizing logic using handles
 function onResizeHandleMouseDown(e) {
     if (panelState.mode === LAYOUT_MODES.MINIMIZED) return;
-    
+
     const dir = e.target.getAttribute('data-dir');
     if (!dir) return;
-    
+
     const panel = e.target.parentElement;
     const rect = panel.getBoundingClientRect();
-    
-    Object.assign(panelState, {
-        isResizing: true,
-        resizeDir: dir,
-        resizeStartX: e.clientX,
-        resizeStartY: e.clientY,
-        startWidth: rect.width,
-        startHeight: rect.height,
-        startLeft: rect.left,
-        startTop: rect.top
-    });
-    
+    const startX = e.clientX;
+    const startY = e.clientY;
+
     panel.classList.add('resizing');
     document.body.style.userSelect = 'none';
     e.preventDefault();
-}
 
-globalResizeMouseMoveHandler = function(e) {
-    if (!panelState.isResizing || panelState.mode === LAYOUT_MODES.MINIMIZED) return;
-    const panel = document.getElementById(PANEL_ID);
-    const layout = LAYOUT_DIMENSIONS[panelState.mode];
-    let dx = e.clientX - panelState.resizeStartX;
-    let dy = e.clientY - panelState.resizeStartY;
-    let newWidth = panelState.startWidth;
-    let newHeight = panelState.startHeight;
-    let newLeft = panelState.startLeft;
-    let newTop = panelState.startTop;
+    beginPanelPointerTracking((moveEvent) => {
+        if (panelState.mode === LAYOUT_MODES.MINIMIZED) return;
+        const layout = LAYOUT_DIMENSIONS[panelState.mode];
+        const dx = moveEvent.clientX - startX;
+        const dy = moveEvent.clientY - startY;
+        let newWidth = rect.width;
+        let newHeight = rect.height;
+        let newLeft = rect.left;
+        let newTop = rect.top;
 
-    // Handle width changes
-    if (panelState.resizeDir.includes('e')) {
-        // Right edge resize
-        newWidth = clamp(panelState.startWidth + dx, layout.minWidth, layout.maxWidth);
-    }
-    if (panelState.resizeDir.includes('w')) {
-        // Left edge resize
-        const rightEdge = panelState.startLeft + panelState.startWidth;
-        newWidth = clamp(panelState.startWidth - dx, layout.minWidth, layout.maxWidth);
-        newLeft = rightEdge - newWidth;
-    }
-
-    // Handle height changes
-    if (panelState.resizeDir.includes('s')) {
-        // Bottom edge resize
-        newHeight = clamp(panelState.startHeight + dy, layout.minHeight, layout.maxHeight);
-    }
-    if (panelState.resizeDir.includes('n')) {
-        // Top edge resize
-        const bottomEdge = panelState.startTop + panelState.startHeight;
-        newHeight = clamp(panelState.startHeight - dy, layout.minHeight, layout.maxHeight);
-        newTop = bottomEdge - newHeight;
-    }
-
-    // Apply changes
-    panel.style.width = newWidth + 'px';
-    panel.style.height = newHeight + 'px';
-    panel.style.left = newLeft + 'px';
-    panel.style.top = newTop + 'px';
-    panel.classList.add('resizing');
-};
-document.addEventListener('mousemove', globalResizeMouseMoveHandler);
-
-globalResizeMouseUpHandler = function(e) {
-    if (panelState.isResizing) {
-        const panel = document.getElementById(PANEL_ID);
-        if (panel) {
-            panel.classList.remove('resizing');
-            // Save panel settings after resize
-            savePanelSettings(panel);
+        if (dir.includes('e')) {
+            newWidth = clamp(rect.width + dx, layout.minWidth, layout.maxWidth);
         }
-        document.body.style.userSelect = '';
-        panelState.resetResizeState();
-    }
-};
-document.addEventListener('mouseup', globalResizeMouseUpHandler);
+        if (dir.includes('w')) {
+            // Keep the right edge fixed while dragging the left edge
+            newWidth = clamp(rect.width - dx, layout.minWidth, layout.maxWidth);
+            newLeft = rect.left + rect.width - newWidth;
+        }
+        if (dir.includes('s')) {
+            newHeight = clamp(rect.height + dy, layout.minHeight, layout.maxHeight);
+        }
+        if (dir.includes('n')) {
+            // Keep the bottom edge fixed while dragging the top edge
+            newHeight = clamp(rect.height - dy, layout.minHeight, layout.maxHeight);
+            newTop = rect.top + rect.height - newHeight;
+        }
 
-// Double-click header to maximize/restore
-function onHeaderDblClick(e) {
-    const panel = document.getElementById(PANEL_ID);
-    if (!panel) return;
-    panelState.setMaximized(panel, !panelState.isMaximized);
+        panel.style.width = newWidth + 'px';
+        panel.style.height = newHeight + 'px';
+        panel.style.left = newLeft + 'px';
+        panel.style.top = newTop + 'px';
+    }, () => {
+        panel.classList.remove('resizing');
+        document.body.style.userSelect = '';
+        if (panel.isConnected) savePanelSettings(panel);
+    });
 }
 
-// Optimize panel state management
+// Layout mode of the open panel; _lastMode is restored when leaving minimized.
 const panelState = {
     mode: LAYOUT_MODES.VERTICAL,
-    isResizing: false,
-    resizeDir: '',
-    resizeStartX: 0,
-    resizeStartY: 0,
-    startWidth: 0,
-    startHeight: 0,
-    startLeft: 0,
-    startTop: 0,
-    isMaximized: false,
-    lastSize: null,
-    
-    // Add methods for state management
-    resetResizeState() {
-        this.isResizing = false;
-        this.resizeDir = '';
-        this.resizeStartX = 0;
-        this.resizeStartY = 0;
-        this.startWidth = 0;
-        this.startHeight = 0;
-        this.startLeft = 0;
-        this.startTop = 0;
-    },
-    
-    saveCurrentSize(panel) {
-        if (!panel) return;
-        this.lastSize = {
-            width: panel.style.width,
-            height: panel.style.height,
-            left: panel.style.left,
-            top: panel.style.top
-        };
-    },
-    
-    restoreLastSize(panel) {
-        if (!panel || !this.lastSize) return;
-        Object.assign(panel.style, this.lastSize);
-    },
-    
-    setMaximized(panel, maximized) {
-        if (!panel) return;
-        this.isMaximized = maximized;
-        
-        if (maximized) {
-            this.saveCurrentSize(panel);
-            Object.assign(panel.style, {
-                width: window.innerWidth + 'px',
-                height: window.innerHeight + 'px',
-                left: '0px',
-                top: '0px'
-            });
-        } else {
-            this.restoreLastSize(panel);
-        }
-        // Save panel settings after maximize/restore
-        savePanelSettings(panel);
-    }
+    _lastMode: null
 };
-
-
-
 
 // =======================
 // 7. Cleanup System
 // =======================
 
-// Comprehensive cleanup function for memory leak prevention
-// Follows mod development guide best practices for cleanup
+// Undoes everything the mod set up; the loader calls it on disable and before a reload.
+// Idempotent, and each step is isolated so one failure can't skip the rest.
+let huntAnalyzerCleanedUp = false;
+
 async function cleanupHuntAnalyzer() {
-    
-    try {
-        teardownHuntAnalyzerAnalysisCoordination({ restore: false });
-        // 1. Clear intervals and timeouts
-        if (updateIntervalId) {
-            clearInterval(updateIntervalId);
-            updateIntervalId = null;
+    if (huntAnalyzerCleanedUp) return;
+    huntAnalyzerCleanedUp = true;
+
+    const step = (label, fn) => {
+        try {
+            fn();
+        } catch (error) {
+            console.warn(`[Hunt Analyzer] Cleanup step "${label}" failed:`, error);
         }
-        
-        if (autoSaveIntervalId) {
-            clearInterval(autoSaveIntervalId);
-            autoSaveIntervalId = null;
+    };
+    const unsubscribe = (sub) => {
+        if (typeof api !== 'undefined' && typeof api?.util?.unsubscribe === 'function') {
+            api.util.unsubscribe(sub);
+        } else if (typeof sub === 'function') {
+            sub();
+        } else {
+            sub?.unsubscribe?.();
         }
-        
-        // Stop internal clock system
+    };
+
+    step('analysis coordination', () => teardownHuntAnalyzerAnalysisCoordination({ restore: false }));
+    step('timers', () => {
         stopInternalClock();
-        
-        // Clear all timeouts
-        timeoutIds.forEach(id => clearTimeout(id));
-        timeoutIds = [];
-        
-        // 2. Remove document event listeners to prevent memory leaks
-        if (panelResizeMouseMoveHandler) {
-            document.removeEventListener('mousemove', panelResizeMouseMoveHandler);
-            panelResizeMouseMoveHandler = null;
-        }
-        if (panelResizeMouseUpHandler) {
-            document.removeEventListener('mouseup', panelResizeMouseUpHandler);
-            panelResizeMouseUpHandler = null;
-        }
-        if (panelDragMouseMoveHandler) {
-            document.removeEventListener('mousemove', panelDragMouseMoveHandler);
-            panelDragMouseMoveHandler = null;
-        }
-        if (panelDragMouseUpHandler) {
-            document.removeEventListener('mouseup', panelDragMouseUpHandler);
-            panelDragMouseUpHandler = null;
-        }
-        if (globalResizeMouseMoveHandler) {
-            document.removeEventListener('mousemove', globalResizeMouseMoveHandler);
-            globalResizeMouseMoveHandler = null;
-        }
-        if (globalResizeMouseUpHandler) {
-            document.removeEventListener('mouseup', globalResizeMouseUpHandler);
-            globalResizeMouseUpHandler = null;
-        }
-        if (windowMessageHandler) {
-            window.removeEventListener('message', windowMessageHandler);
-            windowMessageHandler = null;
-        }
-        
-        // Remove additional tracked event listeners
-        if (dropdownClickHandler) {
-            const dropdownButton = document.getElementById('mod-map-filter-dropdown-button');
-            if (dropdownButton) {
-                dropdownButton.removeEventListener('click', dropdownClickHandler);
-            }
-            dropdownClickHandler = null;
-        }
-        
-        if (documentClickHandler) {
-            document.removeEventListener('click', documentClickHandler);
-            documentClickHandler = null;
-        }
-        
-        // Remove window resize listener
-        window.removeEventListener('resize', updatePanelPosition);
-        
-        // Remove translation event listener
+        clearTrackedTimeouts();
+        clearTimeout(persistenceSaveDebounceTimeoutId);
+        persistenceSaveDebounceTimeoutId = null;
+        clearTimeout(huntAnalyzerPlantCollectBurstTimeoutId);
+        huntAnalyzerPlantCollectBurstTimeoutId = null;
+    });
+    step('panel resources', teardownOpenPanelResources);
+    step('game subscriptions', () => {
+        unsubscribe(huntAnalyzerNewGameUnsubscribe);
+        huntAnalyzerNewGameUnsubscribe = null;
+        unsubscribe(boardSubscription);
+        boardSubscription = null;
+        unsubscribe(modeMapSubscription);
+        modeMapSubscription = null;
+    });
+    step('page listeners', () => {
         document.removeEventListener('bestiary-translations-loaded', translationEventHandler);
-        
-        // Remove beforeunload listener
-        if (beforeUnloadHandler) {
-            window.removeEventListener('beforeunload', beforeUnloadHandler);
-            beforeUnloadHandler = null;
-        }
-        
-        // Remove storage event listener
-        if (storageEventHandler) {
-            window.removeEventListener('storage', storageEventHandler);
-            storageEventHandler = null;
-        }
-        if (visibilityChangeHandler) {
-            document.removeEventListener('visibilitychange', visibilityChangeHandler);
-            visibilityChangeHandler = null;
-        }
-        if (pageHideHandler) {
-            window.removeEventListener('pagehide', pageHideHandler);
-            pageHideHandler = null;
-        }
-        if (persistenceSaveDebounceTimeoutId) {
-            clearTimeout(persistenceSaveDebounceTimeoutId);
-            persistenceSaveDebounceTimeoutId = null;
-        }
-        
-        // 3. Unsubscribe from subscriptions
-        if (boardSubscription) {
-            try {
-                boardSubscription.unsubscribe();
-                boardSubscription = null;
-            } catch (error) {
-                console.warn('[Hunt Analyzer] Error unsubscribing board:', error);
-            }
-        }
-        if (modeMapSubscription) {
-            try {
-                modeMapSubscription.unsubscribe();
-                modeMapSubscription = null;
-            } catch (error) {
-                console.warn('[Hunt Analyzer] Error unsubscribing mode/map subscription:', error);
-            }
-        }
-        
-        
-        // 4. Set UI state to closed and save data before removing panel
-        HuntAnalyzerState.ui.isOpen = false;
-        HuntAnalyzerState.ui.closedManually = true;
-        
-        if (HuntAnalyzerState.settings.persistData) {
-            try {
-                await flushHuntAnalyzerDataAsync();
-                saveHuntAnalyzerState();
-            } catch (flushErr) {
-                console.warn('[Hunt Analyzer] cleanup save failed:', flushErr);
-            }
-        }
-        
-        // 5. Remove panel and test button
-        const panel = document.getElementById(PANEL_ID);
-        if (panel && panel.parentNode) {
-            panel.parentNode.removeChild(panel);
-        }
-        
-        // Remove test button if it exists
-        const testButton = document.querySelector('[data-hunt-analyzer-test]');
-        if (testButton && testButton.parentNode) {
-            testButton.parentNode.removeChild(testButton);
-        }
-        
-        // Remove any dynamically created dropdown elements
-        const dropdownElements = document.querySelectorAll('[data-map-filter-dropdown], .map-filter-dropdown');
-        dropdownElements.forEach(element => {
-            if (element.parentNode) {
-                element.parentNode.removeChild(element);
-            }
-        });
-        
-        // 5. Clear caches to prevent memory leaks
-        equipmentCache.clear();
-        monsterCache.clear();
-        itemInfoCache.clear();
-        
-        // Clear DOM cache if it exists
-        if (window.domCache && typeof window.domCache.clear === 'function') {
-            window.domCache.clear();
-        }
-        huntAnalyzerCreatureSellByMonsterId.clear();
-        huntAnalyzerPendingCreatureSellEvents.length = 0;
-        huntAnalyzerPendingDisenchantDustEvents.length = 0;
-        huntAnalyzerLastObservedPlantGold = null;
-        huntAnalyzerLastCollectedPlantGoldValue = 0;
-        if (huntAnalyzerPlantCollectBurstTimeoutId != null) {
-            clearTimeout(huntAnalyzerPlantCollectBurstTimeoutId);
-            huntAnalyzerPlantCollectBurstTimeoutId = null;
-        }
-        if (huntAnalyzerOriginalFetch && huntAnalyzerFetchWrapper && typeof window !== 'undefined' && window.fetch === huntAnalyzerFetchWrapper) {
+        document.removeEventListener('visibilitychange', visibilityChangeHandler);
+        window.removeEventListener('beforeunload', beforeUnloadHandler);
+        window.removeEventListener('pagehide', pageHideHandler);
+        window.removeEventListener('storage', storageEventHandler);
+        translationEventHandler = visibilityChangeHandler = beforeUnloadHandler = pageHideHandler = storageEventHandler = null;
+    });
+    step('fetch hook', () => {
+        // Only restore if nobody wrapped fetch after us; otherwise leave their wrapper in place
+        if (huntAnalyzerFetchWrapper && window.fetch === huntAnalyzerFetchWrapper) {
             window.fetch = huntAnalyzerOriginalFetch;
         }
         huntAnalyzerFetchWrapper = null;
         huntAnalyzerOriginalFetch = null;
-        
-        // 6. Reset critical state only
+    });
+
+    // Save before the in-memory data is dropped below
+    HuntAnalyzerState.ui.isOpen = false;
+    HuntAnalyzerState.ui.closedManually = true;
+    if (HuntAnalyzerState.settings.persistData) {
+        try {
+            await flushHuntAnalyzerDataAsync();
+            saveHuntAnalyzerState();
+        } catch (flushErr) {
+            console.warn('[Hunt Analyzer] cleanup save failed:', flushErr);
+        }
+    }
+    clearTimeout(_saveScheduleTimeoutId);
+    _saveScheduleTimeoutId = null;
+
+    step('DOM', () => {
+        document.getElementById(PANEL_ID)?.remove();
+        document.getElementById('hunt-analyzer-styles')?.remove();
+        api?.ui?.removeButton?.(BUTTON_ID);
+    });
+    step('window globals', () => {
+        // Only delete what is still ours, so a newer instance's exports survive
+        Object.entries(HUNT_ANALYZER_WINDOW_EXPORTS).forEach(([name, value]) => {
+            if (window[name] === value) delete window[name];
+        });
+    });
+    step('caches and state', () => {
+        equipmentCache.clear();
+        monsterCache.clear();
+        itemInfoCache.clear();
+        sessionMemo.clear();
+        sessionMemoKey = null;
+        huntAnalyzerPendingCreatureSellEvents.length = 0;
+        huntAnalyzerPendingDisenchantDustEvents.length = 0;
+        huntAnalyzerLastObservedPlantGold = null;
         HuntAnalyzerState.session.count = 0;
-        HuntAnalyzerState.session.isActive = false;
         HuntAnalyzerState.data.sessions = [];
         HuntAnalyzerState.data.aggregatedLoot.clear();
         HuntAnalyzerState.data.aggregatedCreatures.clear();
-        
-        
-    } catch (error) {
-        console.error('[Hunt Analyzer] Error during cleanup:', error);
-        
-        // Force cleanup of critical resources even if errors occur
-        try {
-            if (updateIntervalId) {
-                clearInterval(updateIntervalId);
-                updateIntervalId = null;
-            }
-            if (autoSaveIntervalId) {
-                clearInterval(autoSaveIntervalId);
-                autoSaveIntervalId = null;
-            }
-            timeoutIds.forEach(id => clearTimeout(id));
-            timeoutIds = [];
-            
-            if (boardSubscription) {
-                boardSubscription.unsubscribe();
-                boardSubscription = null;
-            }
-            
-            if (beforeUnloadHandler) {
-                window.removeEventListener('beforeunload', beforeUnloadHandler);
-                beforeUnloadHandler = null;
-            }
-            
-            if (storageEventHandler) {
-                window.removeEventListener('storage', storageEventHandler);
-                storageEventHandler = null;
-            }
-            if (visibilityChangeHandler) {
-                document.removeEventListener('visibilitychange', visibilityChangeHandler);
-                visibilityChangeHandler = null;
-            }
-            if (pageHideHandler) {
-                window.removeEventListener('pagehide', pageHideHandler);
-                pageHideHandler = null;
-            }
-            if (persistenceSaveDebounceTimeoutId) {
-                clearTimeout(persistenceSaveDebounceTimeoutId);
-                persistenceSaveDebounceTimeoutId = null;
-            }
-        } catch (forceCleanupError) {
-            console.error('[Hunt Analyzer] Error during force cleanup:', forceCleanupError);
-        }
-    }
+    });
 }
-
-// Listen for mod disable events
-windowMessageHandler = function(event) {
-    // Only log important messages, not routine API calls
-    if (event.data && event.data.message && event.data.message.action === 'updateLocalModState') {
-        const modName = event.data.message.name;
-        const enabled = event.data.message.enabled;
-        
-        if (modName === 'Super_Mods/Hunt Analyzer.js' && !enabled) {
-            cleanupHuntAnalyzer();
-        }
-    }
-};
-window.addEventListener('message', windowMessageHandler);
 
 // Save data before page unload
 beforeUnloadHandler = () => {
@@ -8257,31 +7628,30 @@ function getHuntAnalyzerPublicStats() {
     };
 }
 
-// Export functionality and expose state globally for Mod Settings integration
-window.HuntAnalyzerState = HuntAnalyzerState;
-window.saveHuntAnalyzerData = saveHuntAnalyzerData;
-window.HuntAnalyzerAPI = {
-    saveData: flushHuntAnalyzerDataAsync,
-    loadData: completeHuntAnalyzerPersistenceLoad,
-    exportAll: exportHuntAnalyzerDataForBackup,
-    importAll: importHuntAnalyzerDataFromBackup,
-    clearPersistedStorage: async () => {
-        try {
-            localStorage.removeItem(HUNT_ANALYZER_STORAGE_KEY);
-        } catch (_e) { /* ignore */ }
-        await idbClearAllSessions();
+// Globals read by Mod Settings (state, backup/restore, theme and visibility controls, theme list).
+// cleanupHuntAnalyzer() deletes them again.
+const HUNT_ANALYZER_WINDOW_EXPORTS = {
+    HuntAnalyzerState,
+    saveHuntAnalyzerData,
+    HuntAnalyzerAPI: {
+        saveData: flushHuntAnalyzerDataAsync,
+        loadData: completeHuntAnalyzerPersistenceLoad,
+        exportAll: exportHuntAnalyzerDataForBackup,
+        importAll: importHuntAnalyzerDataFromBackup,
+        clearPersistedStorage: async () => {
+            try {
+                localStorage.removeItem(HUNT_ANALYZER_STORAGE_KEY);
+            } catch (_e) { /* ignore */ }
+            await idbClearAllSessions();
+        },
+        getStats: getHuntAnalyzerPublicStats
     },
-    getStats: getHuntAnalyzerPublicStats
+    applyHuntAnalyzerTheme: applyTheme,
+    applyHuntAnalyzerVisibility: applyVisibilitySettings,
+    refreshHuntAnalyzerGrids: renderAllSessions,
+    HUNT_ANALYZER_THEMES
 };
-
-// Expose applyTheme function for Mod Settings integration
-window.applyHuntAnalyzerTheme = applyTheme;
-
-// Expose visibility function for Mod Settings integration
-window.applyHuntAnalyzerVisibility = applyVisibilitySettings;
-
-// Expose themes object for Mod Settings to dynamically list available themes
-window.HUNT_ANALYZER_THEMES = HUNT_ANALYZER_THEMES;
+Object.assign(window, HUNT_ANALYZER_WINDOW_EXPORTS);
 
 // Listen for theme changes from Mod Settings via storage events
 storageEventHandler = (e) => {

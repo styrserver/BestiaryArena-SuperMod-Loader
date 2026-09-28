@@ -354,6 +354,10 @@ let mapEditorTestNativeRoom = null;
 /** @type {'workshop' | 'local-save' | null} */
 let mapEditorDomSessionSource = null;
 let mapEditorDomSessionRoomId = null;
+/** Name of the local save / workshop map currently applied to the board (written to exports),
+ *  and the room it belongs to. Set on load and on Save, cleared when the map is restored. */
+let mapEditorAppliedMapName = null;
+let mapEditorAppliedMapRoomId = null;
 let workshopMapReturnInProgress = false;
 let mapSelectorLockActive = false;
 let mapSelectorLockObserver = null;
@@ -790,6 +794,21 @@ function setMapEditorFeedback(message, options = {}) {
     duration: MAP_EDITOR_TOAST_DURATION,
     variant: resolvedVariant
   });
+}
+
+function setAppliedCustomMapName(roomId, name) {
+  const trimmed = typeof name === 'string' ? name.trim() : '';
+  mapEditorAppliedMapName = trimmed || null;
+  mapEditorAppliedMapRoomId = trimmed ? (roomId || null) : null;
+}
+
+function clearAppliedCustomMapName() {
+  mapEditorAppliedMapName = null;
+  mapEditorAppliedMapRoomId = null;
+}
+
+function getAppliedCustomMapName(roomId) {
+  return roomId && roomId === mapEditorAppliedMapRoomId ? mapEditorAppliedMapName : null;
 }
 
 function isWorkshopMapSessionActive() {
@@ -1260,6 +1279,7 @@ function purgeAllEditorDomEdits(options = {}) {
   clearBaseTilesSnapshot();
   mapEditorTestNativeRoom = null;
   mapEditorDomSessionSource = null;
+  clearAppliedCustomMapName();
   endWorkshopMapSession();
   logMapEditor('purgeEditorDomEdits', { reverted });
   return reverted;
@@ -6607,6 +6627,7 @@ function saveMapSession() {
 
   editorState.selectedSaveId = saveEntry.id;
   editorState.selectedSaveRoomId = room.id;
+  setAppliedCustomMapName(room.id, saveName);
   if (nameInput) nameInput.value = saveName;
   updateSessionControls();
 
@@ -7010,7 +7031,7 @@ function domSessionPayloadFromWorkshopBundle(bundle, catalogEntry) {
     allowedPlacementTiles: bundle?.customBattle?.tileRestrictions?.allowedTiles
       ?? battleRules?.tileRestrictions?.allowedTiles
       ?? null,
-    label: catalogEntry?.title || bundle?.roomName,
+    label: catalogEntry?.title || bundle?.customMapName || bundle?.roomName,
     externalId: catalogEntry?.id
   });
 }
@@ -7282,6 +7303,7 @@ async function loadDomSession(payload) {
     notifyMapEditorOpenChanged();
 
     const label = payload.label || t('mods.mapEditor.defaultSaveName', 'Untitled');
+    setAppliedCustomMapName(room.id, payload.label);
     const savedAt = payload.savedAt
       ? new Date(payload.savedAt).toLocaleString()
       : null;
@@ -7514,6 +7536,131 @@ function listAllLocalMapSaves() {
     logMapEditor('listLocalSavesFailed', e);
   }
   return results.sort((a, b) => new Date(b.save.savedAt) - new Date(a.save.savedAt));
+}
+
+// Every local save on every map in one JSON file. Each entry keeps the full save as stored under
+// mapEditorSession:<roomId> (which already carries savedAt / isAutoSave), plus its map and custom
+// map name, so nothing is lost.
+function buildLocalSavesBackup() {
+  const entries = listAllLocalMapSaves();
+  return {
+    format: 'map-editor-saves-backup-v1',
+    sessionVersion: SESSION_VERSION,
+    exportedAt: new Date().toISOString(),
+    saveCount: entries.length,
+    mapCount: new Set(entries.map((entry) => entry.roomId)).size,
+    saves: entries.map(({ roomId, roomName, save }) => ({
+      customMapName: save.name,
+      roomId,
+      roomName,
+      save: cloneJson(save)
+    }))
+  };
+}
+
+function downloadLocalSavesBackup() {
+  const backup = buildLocalSavesBackup();
+  if (!backup.saveCount) {
+    setStatusMessage(t('mods.mapEditor.workshopBackupEmpty', 'No saves to back up yet.'), true);
+    return false;
+  }
+  const filename = `map-editor-saves-backup-${new Date().toISOString().slice(0, 10)}.json`;
+  // Minified: the backup is for Restore, not for reading, and indentation roughly triples its size
+  const downloaded = downloadJsonFile(filename, backup, { compact: true });
+  setStatusMessage(
+    downloaded
+      ? tReplace(
+        'mods.mapEditor.workshopBackupOk',
+        { count: backup.saveCount, maps: backup.mapCount, file: filename },
+        'Backed up {count} saves from {maps} maps to {file}.'
+      )
+      : t('mods.mapEditor.workshopBackupFail', 'Could not download the backup file.'),
+    !downloaded
+  );
+  logMapEditor('backupLocalSaves', { downloaded, saveCount: backup.saveCount, mapCount: backup.mapCount });
+  return downloaded;
+}
+
+const LOCAL_SAVES_BACKUP_FORMAT = 'map-editor-saves-backup-v1';
+
+// Merges a backup file into the local saves. Never deletes: new saves are added, a save whose id
+// already exists is replaced only when the backup copy is newer, otherwise it is left alone.
+function restoreLocalSavesBackup(backup) {
+  const result = { added: 0, updated: 0, skipped: 0, invalid: 0, failedMaps: 0, maps: 0 };
+  if (backup?.format !== LOCAL_SAVES_BACKUP_FORMAT || !Array.isArray(backup.saves)) return null;
+
+  const byRoom = new Map();
+  backup.saves.forEach((entry) => {
+    const save = entry?.save;
+    if (!entry?.roomId || !save?.id || !Array.isArray(save.tiles)) {
+      result.invalid += 1;
+      return;
+    }
+    if (!byRoom.has(entry.roomId)) byRoom.set(entry.roomId, { roomName: entry.roomName || null, saves: [] });
+    byRoom.get(entry.roomId).saves.push(save);
+  });
+
+  byRoom.forEach(({ roomName, saves }, roomId) => {
+    const store = getMapSessionStore(roomId) || { version: SESSION_VERSION, roomId, roomName, saves: [] };
+    let changed = false;
+    saves.forEach((save) => {
+      const index = store.saves.findIndex((existing) => existing.id === save.id);
+      if (index < 0) {
+        store.saves.push(cloneJson(save));
+        result.added += 1;
+        changed = true;
+      } else if (new Date(save.savedAt) > new Date(store.saves[index].savedAt)) {
+        store.saves[index] = cloneJson(save);
+        result.updated += 1;
+        changed = true;
+      } else {
+        result.skipped += 1;
+      }
+    });
+    if (!changed) return;
+    result.maps += 1;
+    // localStorage can refuse large writes (quota); report instead of silently dropping them
+    if (!writeMapSessionStore(store)) result.failedMaps += 1;
+  });
+  return result;
+}
+
+function pickAndRestoreLocalSavesBackup() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.json,application/json';
+  input.addEventListener('change', async () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    let result = null;
+    try {
+      result = restoreLocalSavesBackup(JSON.parse(await file.text()));
+    } catch (e) {
+      logMapEditor('restoreLocalSavesParseFailed', e);
+    }
+    if (!result) {
+      setStatusMessage(
+        t('mods.mapEditor.workshopRestoreInvalid', 'Not a Map Editor saves backup file.'),
+        true
+      );
+      return;
+    }
+    logMapEditor('restoreLocalSaves', result);
+    updateSessionControls();
+    if (result.failedMaps) {
+      setStatusMessage(
+        t('mods.mapEditor.workshopRestoreStorageFull', 'Browser storage is full; some saves could not be restored.'),
+        true
+      );
+      return;
+    }
+    setStatusMessage(tReplace(
+      'mods.mapEditor.workshopRestoreOk',
+      { added: result.added, updated: result.updated, skipped: result.skipped },
+      'Restored {added} new and {updated} newer saves; {skipped} already up to date.'
+    ));
+  }, { once: true });
+  input.click();
 }
 
 function getSelectedLocalSaveEntry() {
@@ -8124,6 +8271,7 @@ function completeDomRestoreInPlace(roomId, options = {}) {
       + (editorState.sandboxTestActive ? ROOM_RELOAD_SETTLE_MS : 0);
 
     mapEditorDomSessionSource = null;
+    clearAppliedCustomMapName();
     endWorkshopMapSession();
     notifyMapEditorOpenChanged();
     setMapEditorFeedback(
@@ -8267,6 +8415,7 @@ function restoreMapFromGame() {
       restoreMapInProgress = false;
       detachRestoreBoardGuard();
       mapEditorDomSessionSource = null;
+      clearAppliedCustomMapName();
       endWorkshopMapSession();
       notifyMapEditorOpenChanged();
       logBoardStateSnapshot('afterNativeRestore');
@@ -9537,6 +9686,9 @@ function buildQuestRoomExport(options = {}) {
 function buildFullMapExport(options = {}) {
   const bundle = buildUnifiedMapExport({ includeNativeRoom: !!options.includeNativeRoom });
   if (!bundle?.roomId) return null;
+  // Name of the save/workshop map applied on this room; Import uses it as the loaded map's name
+  const customMapName = getAppliedCustomMapName(bundle.roomId);
+  if (customMapName) bundle.customMapName = customMapName;
 
   const roomKey = options.roomKey || slugifyQuestRoomKey(bundle.roomName, bundle.roomId);
   const battleId = options.battleId || roomKey;
@@ -10337,6 +10489,7 @@ function stopMapEditorSandboxTest(options = {}) {
     setStatusMessage(t('mods.mapEditor.editSessionEnded', 'Map edits restored to game data.'));
   }
   mapEditorDomSessionSource = null;
+  clearAppliedCustomMapName();
   logMapEditor('editSessionStopped', { roomId });
   return true;
 }
@@ -10457,9 +10610,15 @@ async function copyTextToClipboard(text) {
   }
 }
 
-function downloadJsonFile(filename, data) {
+// File-name-safe form of a user-given name ("My map #2" -> "My_map_2").
+function toFileNameSlug(name) {
+  return String(name).trim().replace(/[^\w-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 48) || 'map';
+}
+
+function downloadJsonFile(filename, data, options = {}) {
   try {
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const json = options.compact ? JSON.stringify(data) : JSON.stringify(data, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -15172,7 +15331,8 @@ function buildInspectorContent() {
         return;
       }
       const json = JSON.stringify(bundle, null, 2);
-      const filename = `${bundle.roomId || 'map'}-${Date.now()}.json`;
+      const namePrefix = bundle.customMapName ? `${toFileNameSlug(bundle.customMapName)}-` : '';
+      const filename = `${namePrefix}${bundle.roomId || 'map'}-${Date.now()}.json`;
       const downloaded = downloadJsonFile(filename, bundle);
       const copied = await copyTextToClipboard(json);
       setStatusMessage(
@@ -15393,6 +15553,33 @@ function buildInspectorContent() {
   sessionHint.id = 'map-editor-session-hint';
   sessionHint.className = 'me-session-hint';
   localSection.appendChild(sessionHint);
+
+  const backupRow = document.createElement('div');
+  backupRow.className = 'me-row';
+  const backupBtn = createPanelButton(
+    t('mods.mapEditor.workshopBackupSaves', 'Backup all saves'),
+    () => downloadLocalSavesBackup(),
+    'me-btn'
+  );
+  backupBtn.id = 'map-editor-backup-saves-btn';
+  backupBtn.title = t(
+    'mods.mapEditor.workshopBackupSavesTooltip',
+    'Download every save on every map as one JSON file'
+  );
+  const restoreBtn = createPanelButton(
+    t('mods.mapEditor.workshopRestoreSaves', 'Restore saves'),
+    () => pickAndRestoreLocalSavesBackup(),
+    'me-btn'
+  );
+  restoreBtn.id = 'map-editor-restore-saves-btn';
+  restoreBtn.title = t(
+    'mods.mapEditor.workshopRestoreSavesTooltip',
+    'Load a backup file. Adds missing saves and updates older copies; never deletes.'
+  );
+  backupBtn.style.flex = '1 1 0';
+  restoreBtn.style.flex = '1 1 0';
+  backupRow.append(backupBtn, restoreBtn);
+  localSection.appendChild(backupRow);
   workshopBody.appendChild(localSection);
 
   const uploadSection = document.createElement('div');

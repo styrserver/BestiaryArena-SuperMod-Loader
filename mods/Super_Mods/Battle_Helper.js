@@ -278,7 +278,9 @@ const BattleHelpFirebase = {
   async handleResponse(response, errorContext, defaultReturn = null) {
     if (!response.ok) {
       if (response.status === 404) return defaultReturn;
-      throw new Error(`Failed to ${errorContext}: ${response.status}`);
+      // errorContext is an English debug label; the thrown message reaches the UI, so localize it
+      console.warn(`[Battle Helper] Failed to ${errorContext}: ${response.status}`);
+      throw new Error(tReplace('mods.battleHelper.help.errors.requestFailed', { status: response.status }));
     }
     return await response.json();
   },
@@ -2194,6 +2196,9 @@ function createFieldSelect(optionsList, initialValue = '') {
     const option = document.createElement('option');
     option.value = value;
     option.textContent = label;
+    // The native popup list is light; the inherited text-whiteRegular grey is hard to read on it
+    option.style.color = '#000';
+    option.style.backgroundColor = '#fff';
     if (value === initialValue) option.selected = true;
     select.appendChild(option);
   });
