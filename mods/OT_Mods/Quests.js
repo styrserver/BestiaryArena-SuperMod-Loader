@@ -5546,7 +5546,20 @@ function createNPCCooldownManager() {
   }
 
   // Set up event-driven subscriptions for digging functionality (only when Light Shovel is owned)
+  let miningObserverSetupInProgress = false;
   function setupMiningObserver() {
+    // Re-entrancy guard: updateMiningState() calls back into this when the board
+    // subscription is missing (e.g. game state not ready), which would recurse forever.
+    if (miningObserverSetupInProgress) return;
+    miningObserverSetupInProgress = true;
+    try {
+      setupMiningObserverInner();
+    } finally {
+      miningObserverSetupInProgress = false;
+    }
+  }
+
+  function setupMiningObserverInner() {
     // Only set up if Light Shovel is owned
     if (!hasLightShovelInInventory()) {
       return;

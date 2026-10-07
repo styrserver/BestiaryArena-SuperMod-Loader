@@ -1443,6 +1443,8 @@ function tabHasContentScript(tabId) {
   });
 }
 
+let lastProbeFailure = '';
+
 async function isGameServerReachable() {
   const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
   const timeout = controller ? setTimeout(() => controller.abort(), TAB_RECOVERY_PROBE_TIMEOUT_MS) : null;
@@ -1453,8 +1455,10 @@ async function isGameServerReachable() {
       signal: controller?.signal
     });
     // Any HTTP answer below 500 means the server is up enough to serve the game.
+    if (response.status >= 500) lastProbeFailure = `HTTP ${response.status}`;
     return response.status < 500;
-  } catch {
+  } catch (error) {
+    lastProbeFailure = `${error?.name || 'Error'}: ${error?.message || error}`;
     return false;
   } finally {
     if (timeout) clearTimeout(timeout);
@@ -1500,6 +1504,10 @@ async function runDeadTabRecoveryProbe(tabId) {
 
   const tab = await getTabSafe(tabId);
   if (!tab || !tab.url || !isBestiaryAllowedForModInjectionUrl(tab.url)) {
+    // Say why: a silent cancel here looks identical to "recovery never ran".
+    recordTabRecoveryDiagnostic(
+      `Tab ${tabId} recovery cancelled — ${tab ? `tab URL no longer a game URL (${String(tab.url).slice(0, 120)})` : 'tab is gone'}`
+    );
     cancelDeadTabRecovery(tabId);
     return;
   }
@@ -1513,6 +1521,10 @@ async function runDeadTabRecoveryProbe(tabId) {
     return;
   }
   if (!(await isGameServerReachable())) {
+    console.warn(`[Background] Tab ${tabId} recovery probe #${state.probes} failed: ${lastProbeFailure}`);
+    if (state.probes === 1 || state.probes % 4 === 0) {
+      recordTabRecoveryDiagnostic(`Tab ${tabId} server probe #${state.probes} failed (${lastProbeFailure}) — will retry`);
+    }
     scheduleDeadTabRecovery(tabId);
     return;
   }

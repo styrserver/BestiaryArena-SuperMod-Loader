@@ -9192,26 +9192,45 @@
             const amount = parseFloat(durationMatch[1]);
             const chunkSize = parseFloat(durationMatch[2]);
             if (!Number.isFinite(amount) || !Number.isFinite(chunkSize) || chunkSize <= 0) return null;
-            return { amount, isPercent: false, chunkSize, isDuration: true };
+            return { amount, isPercent: false, chunkSize, isDuration: true, isHp: false };
         }
 
-        const match = trimmed.match(/^([+-]?[\d.]+)(%?)\s*(?:per|for\s+every)\s*([\d.]+)$/i);
+        const match = trimmed.match(/^([+-]?[\d.]+)\s*(HP)?(%?)\s*(?:per|for\s+every)\s*([\d.]+)$/i);
         if (match) {
             const amount = parseFloat(match[1]);
-            const chunkSize = parseFloat(match[3]);
+            const chunkSize = parseFloat(match[4]);
             if (!Number.isFinite(amount) || !Number.isFinite(chunkSize) || chunkSize <= 0) return null;
-            return { amount, isPercent: match[2] === '%', chunkSize, isDuration: false };
+            return {
+                amount,
+                isPercent: match[3] === '%',
+                chunkSize,
+                isDuration: false,
+                isHp: Boolean(match[2])
+            };
         }
 
-        // Game x tooltip: ratio ends with "per" and the stat icon is a sibling (e.g. Monk "+2 per" + AP).
-        const implicitMatch = trimmed.match(/^([+-]?[\d.]+)(%?)\s*(?:per|for\s+every)\s*$/i);
+        // Game tooltip: ratio ends with "per" and the stat icon is a sibling (e.g. Monk "+2 per" + AP).
+        const implicitMatch = trimmed.match(/^([+-]?[\d.]+)\s*(HP)?(%?)\s*(?:per|for\s+every)\s*$/i);
         if (implicitMatch) {
             const amount = parseFloat(implicitMatch[1]);
             if (!Number.isFinite(amount)) return null;
-            return { amount, isPercent: implicitMatch[2] === '%', chunkSize: 1, isDuration: false };
+            return {
+                amount,
+                isPercent: implicitMatch[3] === '%',
+                chunkSize: 1,
+                isDuration: false,
+                isHp: Boolean(implicitMatch[2])
+            };
         }
 
         return null;
+    }
+
+    function tooltipHpDisplaySuffix(baseText, perChunk) {
+        const hpMatch = String(baseText || '').trim().match(/^([+-]?[\d.]+)(\s*)HP$/i);
+        if (hpMatch) return hpMatch[2] ? ' HP' : 'HP';
+        if (perChunk?.isHp) return 'HP';
+        return '';
     }
 
     function parseTooltipPerStatPercentRatio(text) {
@@ -9322,7 +9341,8 @@
             }
 
             const basePercent = parseTooltipPercentText(baseText);
-            const baseFlat = parseTooltipFlatText(baseText);
+            const baseHp = parseTooltipHealAmountText(baseText);
+            const baseFlat = parseTooltipFlatText(baseText) ?? baseHp;
 
             if (perChunk.isPercent || basePercent != null) {
                 const base = basePercent ?? 0;
@@ -9365,16 +9385,18 @@
             const base = baseFlat ?? 0;
             const rawTotal = base + (statValue / perChunk.chunkSize) * perChunk.amount;
             const total = Math.floor(rawTotal);
-            const inner = `${base} + (${statValue} ${statLabel} ÷ ${perChunk.chunkSize}) × ${perChunk.amount}`;
-            const expression = formatScalingExpression(inner, rawTotal, total);
+            const unitSuffix = tooltipHpDisplaySuffix(baseText, perChunk);
+            const inner = `${base}${unitSuffix} + (${statValue} ${statLabel} ÷ ${perChunk.chunkSize}) × ${perChunk.amount}${unitSuffix}`;
+            const expression = formatScalingExpression(inner, rawTotal, total, unitSuffix);
             return {
                 value: total,
-                suffix: '',
+                suffix: unitSuffix,
                 title: buildScalingMathTitle({
                     base,
                     statValue,
                     statLabel,
                     total,
+                    suffix: unitSuffix,
                     expression
                 })
             };

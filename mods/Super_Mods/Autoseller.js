@@ -223,6 +223,11 @@
     let dragonPlantActivateAttempts = 0;
     let dragonPlantActivateGiveUpForDrop = false;
     let dragonPlantActivateLastDropSig = '';
+    // quest.plantEat requests currently awaiting a response; re-clicking while one is
+    // in flight fires a duplicate batch that fails with "User version mismatch".
+    let plantEatInFlight = 0;
+    let plantEatLastSettledAt = 0;
+    const PLANT_EAT_SETTLE_GRACE_MS = 1200;
     let powerSavingModeChangedHandler = null;
     
     // Translation helper
@@ -1149,7 +1154,7 @@
     }
 
     function isActionRetryReason(reason) {
-        return reason === 'squeeze-incomplete' || reason === 'duster-incomplete';
+        return reason === 'squeeze-incomplete' || reason === 'duster-incomplete' || reason === 'sell-incomplete';
     }
     
     /**
@@ -6120,7 +6125,16 @@
         const alwaysDevourBelow = settings.autoplantAlwaysDevourBelow !== undefined ? settings.autoplantAlwaysDevourBelow : 49;
         const alwaysDevourEnabled = settings.autoplantAlwaysDevourEnabled !== undefined ? settings.autoplantAlwaysDevourEnabled : false;
         const protectSealedTier5 = settings.protectSealedTier5 === true;
-        const autosqueezeEnabled = settings.autosqueezeChecked === true;
+        // Only reserve the squeeze band when squeezing can actually happen; otherwise those
+        // creatures would be neither devoured nor squeezed.
+        let squeezerUnlocked = true;
+        try {
+            const playerFlags = globalThis.state?.player?.getSnapshot?.()?.context?.flags;
+            if (playerFlags !== undefined) {
+                squeezerUnlocked = new globalThis.state.utils.Flags(playerFlags).isSet("monsterSqueezer");
+            }
+        } catch (_) { /* assume unlocked */ }
+        const autosqueezeEnabled = settings.autosqueezeChecked === true && squeezerUnlocked;
         const squeezeMinGenes = settings.autosqueezeGenesMin ?? UI_CONSTANTS.SQUEEZE_GENE_MIN;
         const squeezeMaxGenes = settings.autosqueezeGenesMax ?? UI_CONSTANTS.SQUEEZE_GENE_MAX;
         
@@ -6811,13 +6825,23 @@
                 } catch (e) {
                     logAutosellerDebug('Devour', `plantEat request (body parse failed: ${e.message})`);
                 }
+                plantEatInFlight += 1;
                 return originalFetch.apply(this, args).then(response => {
                     // Clone the response so we can read it without affecting the original
                     const clonedResponse = response.clone();
-                    
+                    if (!response.ok) {
+                        logAutosellerDebug('Devour', `plantEat failed: HTTP ${response.status} — will re-click if the drop is still shown`);
+                        console.error(`[Autoseller] plantEat failed: HTTP ${response.status}`);
+                    }
+
                     // Process the response asynchronously
                     clonedResponse.json().then(data => {
                         try {
+                            if (data && Array.isArray(data) && data[0]?.error) {
+                                const errMsg = data[0].error?.json?.message || 'unknown error';
+                                logAutosellerDebug('Devour', `plantEat error response: ${errMsg}`);
+                                console.error(`[Autoseller] plantEat error response: ${errMsg}`);
+                            }
                             if (data && Array.isArray(data) && data[0]?.result?.data?.json) {
                                 const result = data[0].result.data.json;
                                 
@@ -6868,8 +6892,11 @@
                     }).catch(e => {
                         // Ignore JSON parsing errors
                     });
-                    
+
                     return response;
+                }).finally(() => {
+                    plantEatInFlight = Math.max(0, plantEatInFlight - 1);
+                    plantEatLastSettledAt = Date.now();
                 });
             }
 
@@ -7405,7 +7432,7 @@
         }
     };
     
-    async function processEligibleMonsters(monsters, type) {
+    async function processEligibleMonsters(monsters, type, sellAllowedIds = null) {
         const debugChannel = type === 'squeeze' ? 'Squeeze' : 'Sell';
         const outcome = { incomplete: false, attempted: 0, succeeded: 0, skippedNoLocalMatch: 0 };
         try {
@@ -7475,6 +7502,8 @@
                 // FAILSAFE: Filter out any shiny creatures that might have slipped through
                 toSell = monsters.filter(m => {
                     if (stateManager.isProcessed(m.id) || isShinyCreature(m)) return false;
+                    // Respect the keep/gene filters computed by filterMonstersForAutosell
+                    if (sellAllowedIds && !sellAllowedIds.has(m.id)) return false;
                     if (!isSealedTierFiveCreature(m)) return true;
                     const creatureName = m?.metadata?.name || m?.name || getCreatureNameFromMonster(m);
                     // Allow sealed sell when explicitly enabled for this creature.
@@ -7515,6 +7544,7 @@
                     return outcome;
                 }
 
+                outcome.attempted = toSell.length;
                 logAutosellerDebug('Sell', `selling ${toSell.length} monster(s): ${toSell.map(formatMonsterForDebug).join(' | ')}`);
                 
                 // Log will be combined with result
@@ -7533,15 +7563,16 @@
                         // Check if cleaning up before proceeding
                         if (isCleaningUp) {
                             logAutosellerDebug('Sell', `abort mid-batch: cleanup (monster ${id})`);
-                            return;
+                            outcome.incomplete = true;
+                            return outcome;
                         }
                         
                         logAutosellerDebug('Sell', `API sellMonster → ${formatMonsterForDebug(monster)}`);
                         
                         // Delay before selling and removing (allows UI to settle)
                         await new Promise(resolve => setTimeout(resolve, OPERATION_DELAYS.UI_SETTLE_MS));
-                        if (isCleaningUp) return;
-                        
+                        if (isCleaningUp) { outcome.incomplete = true; return outcome; }
+
                         await apiRateLimiter.waitForSlot();
                         apiRateLimiter.recordRequest();
                         
@@ -7553,7 +7584,8 @@
                             logAutosellerDebug('Sell', `rate limited (429) for id=${id}, retrying after delay`);
                             console.warn(`[${modName}][WARN][processEligibleMonsters] Rate limited (429) for monster ${id}, waiting...`);
                             await new Promise(resolve => setTimeout(resolve, OPERATION_DELAYS.RATE_LIMIT_RETRY_MS));
-                            if (isCleaningUp) return;
+                            outcome.incomplete = true; // re-queued via sell-incomplete
+                            if (isCleaningUp) return outcome;
                             continue;
                         }
                         
@@ -7569,12 +7601,14 @@
                             
                             logAutosellerDebug('Sell', `success id=${id} +${goldReceived}g`);
                             stateManager.updateSessionStats('sold', 1, goldReceived);
+                            outcome.succeeded += 1;
                             // Remove from local inventory and verify removal before marking as processed
                             const removalResult = await removeMonstersFromLocalInventory([id]);
                             if (removalResult.success) {
                                 // Only mark as processed after successful removal verification
                                 stateManager.markProcessed([id]);
                             } else {
+                                outcome.incomplete = true;
                                 logAutosellerDebug('Sell', `local inventory remove failed after sell id=${id}`);
                                 // Removal failed - log warning but don't mark as processed so it can be retried
                                 console.warn(`[${modName}][WARN][processEligibleMonsters] Failed to remove monster ${id} from local inventory after selling. Will retry on next batch.`);
@@ -7592,8 +7626,9 @@
                                 console.warn(`[${modName}][WARN][processEligibleMonsters] Failed to remove monster ${id} from local inventory (404). Will retry on next batch.`);
                             }
                         } else if (!result.success) {
+                            outcome.incomplete = true;
                             logAutosellerDebug('Sell', `API failed id=${id} HTTP ${result.status}`);
-                            console.warn(`[${modName}][WARN][processEligibleMonsters] Sell API failed for ID ${id}: HTTP ${result.status}`);
+                            console.error(`[${modName}][ERROR][processEligibleMonsters] Sell API failed for ID ${id}: HTTP ${result.status ?? 'network'}`, result?.error || result?.data);
                         } else if (stateManager.isProcessed(id)) {
                             logAutosellerDebug('Sell', `skip id=${id}: already marked processed`);
                         } else {
@@ -7601,12 +7636,12 @@
                         }
                         
                         await new Promise(resolve => setTimeout(resolve, SELL_RATE_LIMIT.DELAY_BETWEEN_SELLS_MS));
-                        if (isCleaningUp) return;
+                        if (isCleaningUp) { outcome.incomplete = true; return outcome; }
                     }
-                    
+
                     if (i + batchSize < toSell.length) {
                         await new Promise(resolve => setTimeout(resolve, SELL_RATE_LIMIT.BATCH_DELAY_MS));
-                        if (isCleaningUp) return;
+                        if (isCleaningUp) { outcome.incomplete = true; return outcome; }
                     }
                 }
             } else if (type === 'squeeze') {
@@ -7783,11 +7818,11 @@
         } catch (e) {
             console.error(`[${modName}][ERROR][processEligibleMonsters] Failed to ${type} monsters. Error: ${e.message}`, e);
             stateManager.updateErrorStats(`${type}Errors`);
-            outcome.incomplete = type === 'squeeze';
+            outcome.incomplete = type === 'squeeze' || type === 'sell';
             return outcome;
         }
     }
-    
+
     async function processEligibleEquipment(rewardEquipmentIds, inventoryEquipment, battleRewardEquipment = []) {
         const outcome = { incomplete: false, pendingCount: 0 };
         try {
@@ -10789,9 +10824,9 @@
             return true;
         });
         
-        return filteredMonsters.slice(0, 1);
+        return filteredMonsters;
     }
-    
+
     // Helper function to filter monsters for autosqueeze
     async function filterMonstersForAutosqueeze(matchedMonsters, settings, inventorySnapshot) {
         if (!settings.autosqueezeChecked || matchedMonsters.length === 0) {
@@ -11246,6 +11281,8 @@
         const floorFromBoardState = boardState?.context?.floor ?? boardState?.context?.room?.floor;
         logCreatureDropsForFloor11Plus(battleRewardMonsters, floorFromServerResults ?? floorFromBoardState);
 
+        // Never reuse the 5s cache here: a snapshot from before the drop landed would hide it from every retry
+        serverMonsterCache.clear();
         const inventorySnapshot = await fetchServerMonsters();
 
         if (rewardMonsterIds.size > 0) {
@@ -11298,7 +11335,19 @@
                     });
                     if (monstersToSell.length > 0 || injectCandidates.length > 0) {
                         console.log('[Autoseller] Processing autosell for', monstersToSell.length, 'monsters');
-                        await processEligibleMonsters(matchedMonsters, 'sell');
+                        const sellResult = await processEligibleMonsters(
+                            matchedMonsters,
+                            'sell',
+                            new Set(monstersToSell.map(m => m.id))
+                        );
+                        if (sellResult?.incomplete) {
+                            needsActionRetry = true;
+                            actionRetryReason = 'sell-incomplete';
+                            logAutosellerDebug(
+                                'GameEnd',
+                                `seed=${currentSeed}: sell incomplete (${sellResult.succeeded}/${sellResult.attempted} sold) — will retry`
+                            );
+                        }
                     }
                 }
 
@@ -11597,6 +11646,13 @@
         }
 
         const button = widgetBottom ? findDragonPlantButton(widgetBottom) : null;
+
+        // A plantEat is in flight (or just settled and React hasn't dropped the creature
+        // yet): wait instead of firing a duplicate request. Doesn't burn an attempt.
+        if (plantEatInFlight > 0 || (Date.now() - plantEatLastSettledAt) < PLANT_EAT_SETTLE_GRACE_MS) {
+            scheduleDragonPlantActivateAttempt(OPERATION_DELAYS.DRAGON_PLANT_ACTIVATE_RETRY_MS);
+            return;
+        }
 
         if (isDragonPlantButtonClickable(button)) {
             const clicked = clickDragonPlantButton();

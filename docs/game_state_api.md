@@ -799,10 +799,69 @@ function tryForMonsterDrop({
 **Related internal functions:**
 - `getMonsterDropPool(roomId)` — returns the list of possible monster drops for a room
 - `rollForShinyMonster(type, floor)` — rolls for a shiny based on drop type and floor
-- `rollForMonsterDrop(pool, isBoosted)` — picks a monster from the pool (boost increases odds)
+- `rollForMonsterDrop(pool, isBoosted)` — picks a monster from the pool and rolls its genes (see below)
 - `mutateShiny(monster)` — converts a monster into its shiny variant
 - `rollForSealedMonsterDrop({ monsterDropPool, floor, boostedOrRaid })` — rolls a sealed monster drop on higher floors
 - `BASE_RED_FLOORS` — floor threshold where sealed drops replace normal drops
+
+#### `rollForMonsterDrop` source (game code, TypeScript, pasted 2026-09-29)
+
+Reference copy of the native gene-roll for a normal (non-sealed) monster drop. Useful for
+drop-odds calculators, simulators, and sanity-checking "is this gene spread plausible".
+
+```ts
+export function rollForMonsterDrop(
+  monsterDropPool: { id: number; level: number }[],
+  boosted: boolean,
+): DBMonster {
+  const rng = new RNG();
+  const monsterDrop = rng.sampleFrom(monsterDropPool);
+
+  let hp = 1;
+  let ad = 1;
+  let ap = 1;
+  let armor = 1;
+  let magicResist = 1;
+
+  if (boosted) {
+    hp = rng.dice.d20();
+    ad = rng.dice.d20();
+    ap = rng.dice.d20();
+    armor = rng.dice.d20();
+    magicResist = rng.dice.d20();
+  } else {
+    [hp, ad, ap, armor, magicResist] = rng.shuffle([
+      rng.dice.advantageRoll(rng.dice.d20, monsterDrop.level >= 30 ? 0 : -1),
+      rng.dice.advantageRoll(rng.dice.d20, monsterDrop.level >= 35 ? 0 : -1),
+      rng.dice.advantageRoll(rng.dice.d20, monsterDrop.level >= 40 ? 0 : -1),
+      rng.dice.advantageRoll(rng.dice.d20, monsterDrop.level >= 45 ? 0 : -1),
+      rng.dice.advantageRoll(rng.dice.d20, monsterDrop.level >= 50 ? 0 : -1),
+    ]);
+  }
+
+  return {
+    id: generateMonsterId(),
+    gameId: monsterDrop.id,
+    exp: LEVEL_TO_XP_TABLE[10],
+    createdAt: Date.now(),
+    hp, ad, ap, armor, magicResist,
+  };
+}
+```
+
+**Takeaways:**
+- The monster is picked **uniformly** from the pool (`sampleFrom`) — no per-monster weighting here.
+- **Boosted**: each of the 5 genes is a plain, independent `d20` (1–20). No level scaling at all.
+- **Non-boosted**: five rolls, each `advantageRoll(d20, mod)`, where `mod` is `-1` (disadvantage) until
+  the *pool entry's* `level` reaches that roll's threshold (30/35/40/45/50), then `0` (plain d20).
+  The five rolled values are then **shuffled** across `hp/ad/ap/armor/magicResist`, so the
+  thresholds don't map to specific stats — they only decide how many of the five rolls are
+  disadvantaged. A level-50+ pool entry therefore rolls the same as a boosted one.
+- Drops always start at `LEVEL_TO_XP_TABLE[10]` exp (level 10).
+- Not covered here: `rollForShinyMonster`, `mutateShiny`, and `rollForSealedMonsterDrop`
+  (floors ≥ `BASE_RED_FLOORS`) — those are separate code paths.
+- `advantageRoll`'s exact semantics weren't in the paste; `-1` is assumed to mean "roll twice, keep
+  the lower". Verify against the game's `RNG` source before relying on exact probabilities.
 
 ### Updating State: `send` vs. `trigger`
 

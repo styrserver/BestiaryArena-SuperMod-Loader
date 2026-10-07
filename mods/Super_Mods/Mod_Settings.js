@@ -14853,9 +14853,11 @@ function buildInventoryColumnsStyleCss() {
 
   // 1-col header is too tight for "Inventory" + two toggles; drop the label so both icons fit.
   if (cols === 1) {
+    // Hide the native title text without touching React's text node: collapse the
+    // header's font-size and restore it on the element children (icons/toggles).
     css +=
-      `[${INVENTORY_NARROW_ATTR}="1"] .${INVENTORY_TITLE_CLASS}{` +
-      `display:none!important;}`;
+      `[${INVENTORY_NARROW_ATTR}="1"] .widget-top.widget-top-text{font-size:0!important;}` +
+      `[${INVENTORY_NARROW_ATTR}="1"] .widget-top.widget-top-text > *{font-size:16px;}`;
   }
 
   return css;
@@ -15297,6 +15299,13 @@ function showCustomBackgroundDeleteMenu(x, y) {
 }
 
 function ensureInventoryTitleEllipsisSpan(handle) {
+  // Intentionally a no-op. This used to replaceChild() React's own title text node
+  // with a wrapper <span>, which left React holding a stale node and crashed the app
+  // with "Node.insertBefore / removeChild ... not a child of this node" on the next
+  // render of the inventory header (see .claude/CLAUDE.md). Narrow-mode title
+  // hiding is done in CSS now (buildInventoryColumnsStyleCss).
+  return;
+  // eslint-disable-next-line no-unreachable
   if (!handle || handle.querySelector(`.${INVENTORY_TITLE_CLASS}`)) return;
   for (const node of Array.from(handle.childNodes)) {
     if (node.nodeType !== Node.TEXT_NODE) continue;

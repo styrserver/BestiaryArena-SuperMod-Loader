@@ -4,6 +4,36 @@
   },
   "notes": [
     {
+      "version": "5.1.3",
+      "changes": [
+        {
+          "mod": "Autoseller",
+          "type": "fixed",
+          "text": "Autosell now retries creatures it failed to sell (rate limits, server errors, sync delays) instead of silently skipping them, applies your keep rules and gene thresholds to what it sells, and no longer misses new drops after fast runs. Failed sells now show in the Error Log. Autoplant no longer clicks the Dragon Plant twice while a devour is still processing, and failed devours are logged. Creatures in the autosqueeze range are no longer held back from the plant when the Monster Squeezer is not unlocked."
+        },
+        {
+          "mod": "Better Analytics",
+          "type": "fixed",
+          "text": "Ability tooltips that scale HP with ability power (for example Ancient Scarabs: 25HP + 2HP per 1 AP) now show the correct total instead of leaving the unscaled values."
+        },
+        {
+          "mod": "Loader",
+          "type": "fixed",
+          "text": "Recovery of a game tab stuck on the browser's network error page now logs why it stops or keeps waiting, so failed auto-reloads can be diagnosed from the Error Log."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "fixed",
+          "text": "Fixed a crash (\"client-side exception\" followed by an automatic reload) caused by the Persistent Inventory title handling. The inventory title is no longer modified, and at 1 column it is now hidden with CSS only."
+        },
+        {
+          "mod": "Quests",
+          "type": "fixed",
+          "text": "Fixed an endless error loop (\"too much recursion\") that could happen when the game had not finished loading."
+        }
+      ]
+    },
+    {
       "version": "5.1.2",
       "changes": [
         {
