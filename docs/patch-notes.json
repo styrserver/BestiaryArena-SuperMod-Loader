@@ -4,6 +4,21 @@
   },
   "notes": [
     {
+      "version": "5.1.4",
+      "changes": [
+        {
+          "mod": "Battle Helper",
+          "type": "fixed",
+          "text": "Profiles with no equipment can now be imported."
+        },
+        {
+          "mod": "Loader",
+          "type": "changed",
+          "text": "When the game crashes with a DOM \"not a child of this node\" error, the Error Log now records which page elements were displaced or modified by mods and which mod last touched them, so the cause can be tracked down."
+        }
+      ]
+    },
+    {
       "version": "5.1.3",
       "changes": [
         {

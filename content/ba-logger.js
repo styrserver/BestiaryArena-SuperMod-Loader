@@ -249,6 +249,7 @@
     for (const a of args) {
       if (a instanceof Error && a.stack) { detail = a.stack; break; }
     }
+    for (const a of args) maybeDumpForensics(a);
     const cs = callSite();
     if (!detail) detail = cs.stack || undefined;
     emitToSink({
@@ -416,6 +417,7 @@
       if (!err && event && event.message === 'Script error.' && !event.lineno) return;
       const location = event && event.filename
         ? `${event.filename}:${event.lineno}:${event.colno}` : undefined;
+      maybeDumpForensics(err);
       const stack = err instanceof Error ? err.stack : undefined;
       emitToSink({
         level: 'error',
@@ -445,6 +447,186 @@
     try { errTarget.addEventListener('error', reportErrorEvent); } catch { /* ignore */ }
     try { errTarget.addEventListener('unhandledrejection', reportRejectionEvent); } catch { /* ignore */ }
   }
+
+  // --- React DOM-desync forensics (MAIN world only) ---------------------
+  // "Node.insertBefore / removeChild ... not a child of this node" means a
+  // React-owned node was moved/removed (or a foreign node spliced in) behind
+  // React's back. The native stack only shows React internals, so:
+  //  1. cheaply remember which mod (via its //# sourceURL frame) last inserted a
+  //     foreign node into / moved or removed a native node in the live tree;
+  //  2. on that error, diff React's current fiber tree against the real DOM and
+  //     log every native node whose parent differs, plus parents holding
+  //     foreign (non-React) children, each with its last-touching mod.
+  const DESYNC_RE = /insertBefore|removeChild|replaceChild|appendChild/;
+  const MOD_FRAME_RE = /\/bestiary-mod\/([^/\s:)]+?)\.js:(\d+)/;
+  let fiberKey = null;
+  const lastTouch = HAS_WINDOW ? new WeakMap() : null;
+
+  function getFiberKey(node) {
+    if (fiberKey) return fiberKey;
+    for (const k in node) {
+      if (k.charCodeAt(0) === 95 && k.startsWith('__reactFiber$')) { fiberKey = k; break; }
+    }
+    return fiberKey;
+  }
+  function isReactOwned(node) {
+    const k = fiberKey || getFiberKey(node);
+    return !!k && node[k] != null;
+  }
+  function touch(op, nodes) {
+    try {
+      const m = MOD_FRAME_RE.exec(new Error().stack || '');
+      if (!m) return;
+      const rec = { mod: m[1], line: m[2], op, ts: Date.now() };
+      for (const n of nodes) if (n && typeof n === 'object') lastTouch.set(n, rec);
+    } catch { /* ignore */ }
+  }
+  function describeNode(n) {
+    if (!n) return String(n);
+    if (n.nodeType === 3) return `#text(${JSON.stringify((n.nodeValue || '').slice(0, 20))})`;
+    if (n.nodeType !== 1) return `#${n.nodeName}`;
+    const cls = typeof n.className === 'string'
+      ? n.className.trim().split(/\s+/).filter(Boolean).slice(0, 3).join('.') : '';
+    return `${n.tagName.toLowerCase()}${n.id ? '#' + n.id : ''}${cls ? '.' + cls : ''}`;
+  }
+  function describePath(n) {
+    const parts = [];
+    for (let i = 0; n && i < 4; i++, n = n.parentNode) parts.push(describeNode(n));
+    return parts.join(' < ');
+  }
+  function describeTouch(n) {
+    const r = lastTouch.get(n);
+    return r ? ` [last touched by ${r.mod}.js:${r.line} via ${r.op}, ${Math.round((Date.now() - r.ts) / 1000)}s ago]` : '';
+  }
+
+  function installDomForensics() {
+    if (!IS_PAGE || globalThis.__BA_DOM_FORENSICS__) return;
+    globalThis.__BA_DOM_FORENSICS__ = true;
+    const NP = Node.prototype;
+    const EP = Element.prototype;
+    const nativeAppend = NP.appendChild;
+    const nativeInsert = NP.insertBefore;
+    NP.appendChild = function (child) {
+      try {
+        if (this.isConnected && child && (child.nodeType === 1 || child.nodeType === 3)) {
+          const owned = isReactOwned(child);
+          // foreign node going into the live tree, or a native node being moved
+          if (!owned || (child.parentNode && child.isConnected)) touch('appendChild', [this, child]);
+        }
+      } catch { /* ignore */ }
+      return nativeAppend.apply(this, arguments);
+    };
+    NP.insertBefore = function (child) {
+      try {
+        if (this.isConnected && child && (child.nodeType === 1 || child.nodeType === 3)) {
+          const owned = isReactOwned(child);
+          if (!owned || (child.parentNode && child.isConnected)) touch('insertBefore', [this, child]);
+        }
+      } catch { /* ignore */ }
+      return nativeInsert.apply(this, arguments);
+    };
+    // React never uses the ChildNode helpers, so any live-tree call is a mod's.
+    for (const name of ['remove', 'before', 'after', 'replaceWith', 'prepend', 'append']) {
+      const native = EP[name];
+      if (typeof native !== 'function') continue;
+      EP[name] = function () {
+        try {
+          if (this.isConnected) {
+            const targets = [this, this.parentNode];
+            if (name === 'prepend' || name === 'append') targets.pop();
+            touch(name, targets);
+          }
+        } catch { /* ignore */ }
+        return native.apply(this, arguments);
+      };
+    }
+  }
+
+  function hostRootFiber() {
+    const root = document.getElementById('__next') || document.body;
+    const start = root && (root.firstElementChild || root);
+    const k = start && getFiberKey(start);
+    let f = k ? start[k] : null;
+    if (!f && root) {
+      const all = root.querySelectorAll('*');
+      for (let i = 0; i < all.length && !f; i++) { const kk = getFiberKey(all[i]); if (kk) f = all[i][kk]; }
+    }
+    while (f && f.tag !== 3) f = f.return;
+    return f && f.stateNode && f.stateNode.current;
+  }
+
+  let lastForensicsAt = 0;
+  function dumpDomForensics(err) {
+    if (!IS_PAGE) return;
+    const now = Date.now();
+    if (now - lastForensicsAt < 500) return;
+    lastForensicsAt = now;
+    try {
+      const lines = [];
+      const cur = hostRootFiber();
+      let visited = 0;
+      const mismatched = [];
+      const foreignParents = [];
+      if (cur) {
+        // iterative DFS carrying the expected DOM parent for each host fiber
+        const stack = [[cur.child, cur.stateNode && cur.stateNode.containerInfo]];
+        while (stack.length && visited < 300000) {
+          const [first, hostParent] = stack.pop();
+          for (let f = first; f; f = f.sibling) {
+            visited++;
+            let parentForKids = hostParent;
+            if (f.tag === 5 || f.tag === 6) {
+              const dom = f.stateNode;
+              if (dom && hostParent && dom.parentNode !== hostParent && mismatched.length < 25) {
+                mismatched.push({ dom, expected: hostParent });
+              }
+              if (f.tag === 5) parentForKids = dom;
+            } else if (f.tag === 4 && f.stateNode) {
+              parentForKids = f.stateNode.containerInfo;
+            }
+            if (f.tag === 5 && f.stateNode && foreignParents.length < 25) {
+              const el = f.stateNode;
+              let foreign = 0;
+              const sample = [];
+              for (let c = el.firstChild; c; c = c.nextSibling) {
+                if (c.nodeType === 1 && !isReactOwned(c)) { foreign++; if (sample.length < 3) sample.push(c); }
+              }
+              if (foreign) foreignParents.push({ el, foreign, sample });
+            }
+            if (f.child) stack.push([f.child, parentForKids]);
+          }
+        }
+      } else {
+        lines.push('(could not locate React root fiber)');
+      }
+      lines.push(`error: ${err && err.name}: ${err && err.message}`);
+      lines.push(`fibers scanned: ${visited}`);
+      lines.push(`native nodes not under their React parent: ${mismatched.length}`);
+      for (const { dom, expected } of mismatched) {
+        lines.push(`  ${describeNode(dom)} now in ${dom.parentNode ? describePath(dom.parentNode) : '(detached)'}`
+          + `; React expects ${describePath(expected)}${describeTouch(dom)}${dom.parentNode ? describeTouch(dom.parentNode) : ''}`);
+      }
+      lines.push(`React parents holding foreign (non-React) element children: ${foreignParents.length}`);
+      for (const { el, foreign, sample } of foreignParents) {
+        lines.push(`  ${describePath(el)} : ${foreign} foreign${describeTouch(el)}`);
+        for (const s of sample) lines.push(`      ${describeNode(s)}${describeTouch(s)}`);
+      }
+      emitToSink({
+        level: 'error',
+        source: 'DomForensics',
+        message: `React DOM desync: ${mismatched.length} displaced native node(s), ${foreignParents.length} parent(s) with foreign children`,
+        detail: lines.join('\n')
+      });
+    } catch (e) {
+      try { emitToSink({ level: 'error', source: 'DomForensics', message: 'forensics failed: ' + (e && e.message) }); } catch { /* ignore */ }
+    }
+  }
+  function maybeDumpForensics(err) {
+    if (IS_PAGE && err instanceof Error && err.name === 'NotFoundError' && DESYNC_RE.test(err.message || '')) {
+      dumpDomForensics(err);
+    }
+  }
+  try { installDomForensics(); } catch { /* never break logging */ }
 
   // --- public control surface ----------------------------------------
   globalThis.BestiaryLogger = {

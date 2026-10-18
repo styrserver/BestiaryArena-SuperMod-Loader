@@ -1516,9 +1516,6 @@ function validateNormalizedArsenal(normalized) {
   if (!Array.isArray(normalized.monsters) || normalized.monsters.length === 0) {
     throw new Error(t('mods.battleHelper.errors.noUsableCreatures'));
   }
-  if (!Array.isArray(normalized.equips) || normalized.equips.length === 0) {
-    throw new Error(t('mods.battleHelper.errors.noUsableEquipment'));
-  }
 }
 
 // =======================
