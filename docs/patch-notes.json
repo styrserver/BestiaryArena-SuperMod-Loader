@@ -4,6 +4,26 @@
   },
   "notes": [
     {
+      "version": "5.1.10",
+      "changes": [
+        {
+          "mod": "Cyclopedia",
+          "type": "fixed",
+          "text": "World records and run warnings are no longer limited to Season 2: world records now show for whichever season is current in the game, so they keep working when a new season starts."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "added",
+          "text": "Admins get a Best runs admin tool that moves every player's old Firebase run record into its season and cleans up each season's saved info. No runs are deleted."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "changed",
+          "text": "Firebase run uploads now use the game's own season and store only season, game version and the number of uploaded maps and runs, and an upload also cleans leftover local-only data (such as migration flags and whole-storage totals) from your existing record, even when no run changed."
+        }
+      ]
+    },
+    {
       "version": "5.1.9",
       "changes": [
         {

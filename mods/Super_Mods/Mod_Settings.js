@@ -4323,7 +4323,12 @@ async function uploadBestRunsToFirebase(playerName, bestRuns, password, options 
       changedCount++;
     }
 
-    if (changedCount > 0) {
+    // PATCH replaces the whole `metadata` child, so rewriting it drops legacy keys left by older uploads
+    // (lastCleanup, migration flags, totalReplays) even when no map changed.
+    const newMetadata = bestRuns.metadata || {};
+    const hasStaleMetadata = Object.keys(remote.metadata || {}).some((k) => !(k in newMetadata));
+
+    if (changedCount > 0 || hasStaleMetadata) {
       await FirebaseRunsService.patch(path, {
         version: FIREBASE_RUNS_VERSION_V2,
         lastUpdated: now,
@@ -4352,6 +4357,111 @@ async function getBestRunsSeasonFirebasePath(playerName, season) {
   return `${await getBestRunsFirebasePath(playerName)}/seasons/${Number(season) || 1}`;
 }
 
+// Moves one player's legacy root record (best-runs/<hash>) into seasons/<its season>, then removes the
+// legacy root fields once the season record is confirmed. Returns true when a season record was created.
+// Strict reads: a failed read throws (never looks like "no record"), so callers can retry later.
+async function migrateLegacyRootRecord(rootPath, playerName) {
+  const legacy = await FirebaseRunsService.getStrict(rootPath, 'fetch legacy runs for migration');
+  let migrated = false;
+  if (legacy && legacy.version === FIREBASE_RUNS_VERSION_V2 && legacy.maps) {
+    const seasonPath = `${rootPath}/seasons/${Number(legacy.metadata?.season) || 1}`;
+    const existing = await FirebaseRunsService.getStrict(seasonPath, 'check season record for migration');
+    if (!existing) {
+      await FirebaseRunsService.put(seasonPath, {
+        version: FIREBASE_RUNS_VERSION_V2,
+        lastUpdated: legacy.lastUpdated,
+        metadata: legacy.metadata || {},
+        playerName: legacy.playerName || playerName,
+        maps: legacy.maps
+      }, 'migrate legacy runs to season record');
+      migrated = true;
+      console.log('[Mod Settings] Migrated legacy Firebase runs to season', Number(legacy.metadata?.season) || 1);
+    }
+    // Contract: remove the legacy root fields only once the season record is confirmed (re-read from
+    // Firebase) to hold every legacy map. PATCH with nulls leaves the sibling `seasons` node untouched.
+    const seasonRecord = await FirebaseRunsService.getStrict(seasonPath, 'verify season record before legacy cleanup');
+    const seasonMaps = seasonRecord && seasonRecord.maps;
+    // Safe when the season record holds every legacy map, or is at least as new as the legacy one
+    // (a later upload may have legitimately dropped maps, e.g. pruned empty-board runs).
+    const supersedes = seasonMaps && (
+      Object.keys(legacy.maps).every((k) => seasonMaps[k])
+      || Number(seasonRecord.lastUpdated) >= Number(legacy.lastUpdated)
+    );
+    if (supersedes) {
+      await FirebaseRunsService.patch(rootPath, {
+        version: null, maps: null, metadata: null, lastUpdated: null, playerName: null
+      }, 'remove legacy runs after migration');
+      console.log('[Mod Settings] Removed legacy Firebase runs record after migration');
+    } else {
+      console.log('[Mod Settings] Legacy Firebase migration: season record older and missing legacy maps, legacy fields kept');
+    }
+  } else {
+    console.log('[Mod Settings] Legacy Firebase migration: no legacy record, nothing to do');
+  }
+  return migrated;
+}
+
+// Rewrites one season record's `metadata` to the upload allowlist (season, gameVersion,
+// totalMaps). Maps are encrypted, so run totals can't be recomputed here; the stale local-storage
+// `totalRuns` is dropped and the next real upload from that player writes the correct one.
+// Returns true when the record was rewritten.
+async function cleanSeasonRecordMetadata(seasonPath, season) {
+  const record = await FirebaseRunsService.getStrict(seasonPath, 'read season record for metadata cleanup');
+  if (!record || !record.maps) return false;
+  const old = record.metadata || {};
+  const next = { season: Number(old.season) || Number(old.gameSeason) || season };
+  if (old.gameVersion != null) next.gameVersion = old.gameVersion;
+  next.totalMaps = Object.keys(record.maps).length;
+  const dirty = Object.keys(old).some((k) => !(k in next))
+    || Object.keys(next).some((k) => old[k] !== next[k]);
+  if (!dirty) return false;
+  await FirebaseRunsService.put(`${seasonPath}/metadata`, next, 'clean season record metadata');
+  return true;
+}
+
+// Admin-only: migrates every player's legacy root record and cleans every season record's metadata.
+// Idempotent and per-player fault tolerant. Never deletes maps (they are encrypted, so only their
+// owner can judge them) and never touches a record it cannot fully verify.
+async function adminCleanupAllBestRuns(onProgress) {
+  const name = getCurrentPlayerName();
+  const isAdmin = name && typeof window.FirebaseAdminsAPI?.isPlayerAdminAsync === 'function'
+    && await window.FirebaseAdminsAPI.isPlayerAdminAsync(name);
+  if (!isAdmin) return { error: 'Not a Firebase admin' };
+
+  const root = `${FIREBASE_RUNS_CONFIG.firebaseUrl}/best-runs`;
+  const shallowKeys = async (url) => {
+    const response = await fetch(`${url}.json?shallow=true`);
+    if (!response.ok) throw new Error(`Shallow read failed: ${response.status}`);
+    return Object.keys((await response.json()) || {});
+  };
+
+  const stats = { players: 0, migrated: 0, metadataCleaned: 0, failed: 0 };
+  let hashes;
+  try {
+    hashes = await shallowKeys(root);
+  } catch (error) {
+    return { error: error.message };
+  }
+
+  for (const hash of hashes) {
+    stats.players++;
+    const rootPath = `${root}/${hash}`;
+    try {
+      if (await migrateLegacyRootRecord(rootPath, null)) stats.migrated++;
+      for (const season of await shallowKeys(`${rootPath}/seasons`)) {
+        if (await cleanSeasonRecordMetadata(`${rootPath}/seasons/${season}`, Number(season) || 1)) {
+          stats.metadataCleaned++;
+        }
+      }
+    } catch (error) {
+      stats.failed++;
+      console.error('[Mod Settings] Admin best-runs cleanup failed for', hash, error);
+    }
+    if (typeof onProgress === 'function') onProgress(stats.players, hashes.length);
+  }
+  return stats;
+}
+
 // Copies the pre-per-season record (best-runs/<hash>) into seasons/<its season>. Maps are copied as
 // encrypted blobs, so no password is needed. The old root fields are deleted only after the season
 // record is re-read and confirmed to contain every legacy map. Skips the copy when that season already
@@ -4371,44 +4481,7 @@ async function migrateLegacyFirebaseRuns(playerName) {
   try {
     console.log('[Mod Settings] Legacy Firebase migration: checking', playerName);
     const rootPath = await getBestRunsFirebasePath(playerName);
-    // Strict reads: a failed read must throw (flag stays unset, retried later), never look like "no record".
-    const legacy = await FirebaseRunsService.getStrict(rootPath, 'fetch legacy runs for migration');
-    let migrated = false;
-    if (legacy && legacy.version === FIREBASE_RUNS_VERSION_V2 && legacy.maps) {
-      const seasonPath = `${rootPath}/seasons/${Number(legacy.metadata?.season) || 1}`;
-      const existing = await FirebaseRunsService.getStrict(seasonPath, 'check season record for migration');
-      if (!existing) {
-        await FirebaseRunsService.put(seasonPath, {
-          version: FIREBASE_RUNS_VERSION_V2,
-          lastUpdated: legacy.lastUpdated,
-          metadata: legacy.metadata || {},
-          playerName: legacy.playerName || playerName,
-          maps: legacy.maps
-        }, 'migrate legacy runs to season record');
-        migrated = true;
-        console.log('[Mod Settings] Migrated legacy Firebase runs to season', Number(legacy.metadata?.season) || 1);
-      }
-      // Contract: remove the legacy root fields only once the season record is confirmed (re-read from
-      // Firebase) to hold every legacy map. PATCH with nulls leaves the sibling `seasons` node untouched.
-      const seasonRecord = await FirebaseRunsService.getStrict(seasonPath, 'verify season record before legacy cleanup');
-      const seasonMaps = seasonRecord && seasonRecord.maps;
-      // Safe when the season record holds every legacy map, or is at least as new as the legacy one
-      // (a later upload may have legitimately dropped maps, e.g. pruned empty-board runs).
-      const supersedes = seasonMaps && (
-        Object.keys(legacy.maps).every((k) => seasonMaps[k])
-        || Number(seasonRecord.lastUpdated) >= Number(legacy.lastUpdated)
-      );
-      if (supersedes) {
-        await FirebaseRunsService.patch(rootPath, {
-          version: null, maps: null, metadata: null, lastUpdated: null, playerName: null
-        }, 'remove legacy runs after migration');
-        console.log('[Mod Settings] Removed legacy Firebase runs record after migration');
-      } else {
-        console.log('[Mod Settings] Legacy Firebase migration: season record older and missing legacy maps, legacy fields kept');
-      }
-    } else {
-      console.log('[Mod Settings] Legacy Firebase migration: no legacy record, nothing to do');
-    }
+    const migrated = await migrateLegacyRootRecord(rootPath, playerName);
     config.firebaseRunsLegacyMigratedFor = doneTag;
     saveConfig();
     return migrated;
@@ -4777,6 +4850,11 @@ function getGameSeasonAndVersion() {
   return { gameSeason: util?.getCurrentSeason?.() ?? null, gameVersion: util?.getGameVersion?.() ?? null };
 }
 
+// The game's own season; inferred from stored runs only while the game state is unavailable.
+function getCurrentSeason(allRuns) {
+  return Number(getGameSeasonAndVersion().gameSeason) || detectCurrentSeasonFromRuns(allRuns);
+}
+
 function getRunsForSeason(runs, targetSeason) {
   if (!Array.isArray(runs)) return [];
   return runs.filter(run => getRunSeasonValue(run) === targetSeason);
@@ -5137,8 +5215,8 @@ function formatRunsAsText(runsData) {
     let text = `========================================\n`;
     text += `Best Runs - ${playerName}\n`;
     text += `Generated: ${timestamp}\n`;
-    const { gameSeason, gameVersion } = runsData.metadata || {};
-    if (gameSeason != null) text += `Season: ${gameSeason}\n`;
+    const { season, gameVersion } = runsData.metadata || {};
+    if (season != null) text += `Season: ${season}\n`;
     if (gameVersion != null) text += `Game Version: ${gameVersion}\n`;
     text += `========================================\n\n`;
 
@@ -5481,11 +5559,11 @@ async function uploadBestRuns(options = {}) {
     
     // Get all runs from RunTracker
     const allRuns = window.RunTrackerAPI.getAllRuns();
-    const currentSeason = detectCurrentSeasonFromRuns(allRuns);
+    const currentSeason = getCurrentSeason(allRuns);
     const leaderboardData = currentSeason >= 2
       ? await fetchUploadValidationLeaderboardData()
       : { best: {}, yourRooms: getYourRoomsForUploadValidation() };
-    
+
     // Best speedrun + rank per map; all floor setups per map for current season (multiple clears to floor 15)
     // Sort by region and map order before storing. Floor runs: dedupe by replay hash within this upload only
     // (full Firebase PUT must include each setup every time; cross-upload Set would drop them on re-upload).
@@ -5506,10 +5584,13 @@ async function uploadBestRuns(options = {}) {
 
     const bestRuns = {
       runs: {},
+      // Explicit allowlist: local RunTracker metadata (migration flags, legacy lastCleanup, whole-storage
+      // totals) must not leak into the cloud record. Counts are filled in below from the uploaded runs.
       metadata: {
-        ...(allRuns.metadata || {}),
         season: currentSeason,
-        ...getGameSeasonAndVersion()
+        gameVersion: getGameSeasonAndVersion().gameVersion,
+        totalMaps: 0,
+        totalRuns: 0
       },
       playerName: playerName,
       uploadedAt: Date.now()
@@ -5795,7 +5876,12 @@ async function uploadBestRuns(options = {}) {
     
     // Replace runs with ordered version
     bestRuns.runs = orderedRuns;
-    
+    bestRuns.metadata.totalMaps = Object.keys(bestRuns.runs).length;
+    bestRuns.metadata.totalRuns = Object.values(bestRuns.runs).reduce(
+      (n, m) => n + (m.speedrun?.length || 0) + (m.rank?.length || 0) + (m.floor?.length || 0),
+      0
+    );
+
     const success = await uploadBestRunsToFirebase(
       playerName,
       bestRuns,
@@ -5824,8 +5910,7 @@ async function fetchPlayerRuns(playerName, password, season = null) {
     }
 
     const seasonToFetch = Number(season)
-      || getGameSeasonAndVersion().gameSeason
-      || detectCurrentSeasonFromRuns(window.RunTrackerAPI?.getAllRuns?.());
+      || getCurrentSeason(window.RunTrackerAPI?.getAllRuns?.());
     const remoteData = await fetchRunsFromFirebase(playerName, seasonToFetch);
     if (!remoteData) {
       return null;
@@ -5864,18 +5949,18 @@ async function downloadRunsAsTxt(playerName, password, source = 'local') {
       }
 
       const allRuns = window.RunTrackerAPI.getAllRuns();
-      const currentSeason = detectCurrentSeasonFromRuns(allRuns);
+      const currentSeason = getCurrentSeason(allRuns);
       const leaderboardData = currentSeason >= 2
         ? await fetchUploadValidationLeaderboardData()
         : { best: {}, yourRooms: getYourRoomsForUploadValidation() };
-      
+
       // Best per map for speedrun/rank; all floor setups per map for current season
       const bestRuns = {
         runs: {},
         metadata: {
           ...(allRuns.metadata || {}),
           season: currentSeason,
-          ...getGameSeasonAndVersion()
+          gameVersion: getGameSeasonAndVersion().gameVersion
         },
         playerName: 'local', // Use 'local' for local downloads since it's the user's own data
         uploadedAt: Date.now()
@@ -8279,6 +8364,14 @@ function showSettingsModal() {
             </div>
             <div id="challenges-admin-status" style="font-size: 12px; color: #7f8fa4; min-height: 18px;"></div>
           </div>
+          <div id="best-runs-admin-section" style="margin-top: 20px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.1); display: none;">
+            <h4 style="margin: 0 0 10px 0; color: #ff6b6b; font-size: 14px;">Best runs admin</h4>
+            <p style="margin: 0 0 12px 0; font-size: 11px; color: #888;">Only names in Firebase <code>config/admins</code>. Moves every player's legacy best-runs record into its season and rewrites each season's <strong>metadata</strong> to the current format. Maps are never deleted.</p>
+            <div style="margin-bottom: 12px;">
+              <button type="button" id="best-runs-cleanup-btn" class="btn btn-secondary" style="width: 100%; pointer-events: auto; color: #ffb4b4;">Clean up &amp; migrate all best runs</button>
+            </div>
+            <div id="best-runs-admin-status" style="font-size: 12px; color: #7f8fa4; min-height: 18px;"></div>
+          </div>
           <div id="wiki-exports-section" style="margin-top: 20px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.1);">
             <h4 style="margin: 0 0 10px 0; color: #ffaa00; font-size: 14px;">Wiki exports</h4>
             <p style="margin: 0 0 12px 0; font-size: 11px; color: #888;">Downloads a file from live game data to paste into the matching wiki.gg Module or page — nothing is uploaded automatically.</p>
@@ -9958,6 +10051,43 @@ function showSettingsModal() {
             window.Challenges?.runClearMultiplayerRecordsIfAllowed,
             4
           );
+        });
+      }
+
+      const bestRunsAdminSection = content.querySelector('#best-runs-admin-section');
+      const bestRunsCleanupBtn = content.querySelector('#best-runs-cleanup-btn');
+      const bestRunsAdminStatus = content.querySelector('#best-runs-admin-status');
+      if (bestRunsAdminSection) {
+        const adminName = getCurrentPlayerName();
+        const adminApi = window.FirebaseAdminsAPI;
+        if (adminName && typeof adminApi?.isPlayerAdminAsync === 'function') {
+          adminApi.isPlayerAdminAsync(adminName).then((allowed) => {
+            bestRunsAdminSection.style.display = allowed ? 'block' : 'none';
+          }).catch(() => {});
+        }
+      }
+      if (bestRunsCleanupBtn) {
+        applyAdvancedActionButtonStyle(bestRunsCleanupBtn, { variant: 'red' });
+        bestRunsCleanupBtn.addEventListener('click', async (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (!confirm('Migrate and clean up best-runs data for ALL players?\n\nLegacy records are moved into their season and season metadata is rewritten. Maps are not deleted.')) return;
+          bestRunsCleanupBtn.disabled = true;
+          if (bestRunsAdminStatus) bestRunsAdminStatus.textContent = 'Running cleanup...';
+          try {
+            const result = await adminCleanupAllBestRuns((done, total) => {
+              if (bestRunsAdminStatus) bestRunsAdminStatus.textContent = `Running cleanup... ${done}/${total} players`;
+            });
+            if (bestRunsAdminStatus) {
+              bestRunsAdminStatus.textContent = result.error
+                ? `Cleanup failed: ${result.error}`
+                : `Done: ${result.players} players, ${result.migrated} migrated, ${result.metadataCleaned} season records cleaned, ${result.failed} failed.`;
+            }
+          } catch (err) {
+            if (bestRunsAdminStatus) bestRunsAdminStatus.textContent = `Cleanup error: ${err.message}`;
+          } finally {
+            bestRunsCleanupBtn.disabled = false;
+          }
         });
       }
 

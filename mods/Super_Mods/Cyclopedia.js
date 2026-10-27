@@ -3670,7 +3670,7 @@ function filterLocalRunsByActiveSeason(runs) {
 
 // RunTracker prunes empty setup.pieces on load; Cyclopedia only warns on remaining data issues.
 function shouldShowCyclopediaRunWarnings() {
-  return Number(cyclopediaState.profileSeason || 1) === 2;
+  return Number(cyclopediaState.profileSeason || 1) >= 2;
 }
 
 function runSetupHasLevel1Creature(run) {
@@ -13255,8 +13255,8 @@ function createStatisticsSection(selectedMap, leaderboardData) {
       
       const { best, roomsHighscores } = data;
       const activeSeason = Number(cyclopediaState.profileSeason || 1);
-      // Temporary Season 2 rollout behavior: enable WR only for Season 2.
-      const allowGlobalWorldRecords = activeSeason === 2;
+      // World records are live data: only valid for the game's current season.
+      const allowGlobalWorldRecords = activeSeason === getCurrentGameSeason();
       console.log(
         '[Cyclopedia] Leaderboard data for map',
         selectedMap,
@@ -13893,8 +13893,8 @@ function createCompactStatColumn(iconSrc, iconAlt, mapId, mapData, leaderboardDa
   const isRankPoints = iconAlt === 'Grade';
   const isFloors = iconAlt === 'Floors';
   const activeSeason = Number(cyclopediaState.profileSeason || 1);
-  const allowGlobalWorldRecords = activeSeason === 2;
-  
+  const allowGlobalWorldRecords = activeSeason === getCurrentGameSeason();
+
   if (isSpeedrun) {
     const yourTicks = mapData?.ticks || 0;
     const bestTicks = leaderboardData?.best?.[mapId]?.ticks || 0;
@@ -14199,7 +14199,7 @@ function createRegionStatisticsSection(regionId, mapsInRegion, leaderboardData) 
   // Get player state
   const playerState = globalThis.state?.player?.getSnapshot?.()?.context;
   const activeSeason = Number(cyclopediaState.profileSeason || 1);
-  const allowGlobalWorldRecords = activeSeason === 2;
+  const allowGlobalWorldRecords = activeSeason === getCurrentGameSeason();
   const playerRooms = getYourRoomsForCyclopediaSeason(playerState?.rooms || {});
   
   // Calculate statistics
