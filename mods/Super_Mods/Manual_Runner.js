@@ -2758,7 +2758,7 @@ function logManualRunnerDropsForFloor11Plus(battleRewardMonsters, floor) {
 
 async function manualRunnerApiRequest(url, options = {}, retries = INJECT_API_RETRY_ATTEMPTS) {
   const { method = 'GET', body, headers = {} } = options;
-  const baseHeaders = { 'content-type': 'application/json', 'X-Game-Version': '1' };
+  const baseHeaders = { 'content-type': 'application/json', 'X-Game-Version': String(globalThis.state?.GAME_VERSION ?? '1') };
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
       const resp = await fetch(url, {

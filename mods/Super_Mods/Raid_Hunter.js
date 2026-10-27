@@ -4837,9 +4837,15 @@ async function checkForExistingRaids() {
         return;
     }
     
+    // Boot callback can fire after a crash-reload before game state exists; next trigger retries.
+    if (!globalThis.state?.raids) {
+        console.warn('[Raid Hunter] Game state not ready - skipping existing raid check');
+        return;
+    }
+
     try {
         isCheckingExistingRaids = true;
-        
+
         // Check if automation is enabled
         if (!isAutomationActive()) {
             console.log('[Raid Hunter] Automation is disabled - skipping existing raid check');

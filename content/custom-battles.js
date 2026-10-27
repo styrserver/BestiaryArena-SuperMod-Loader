@@ -106,30 +106,6 @@ if (window.CustomBattles) {
                 name: "Kraknaknork's Demon",
                 baseGameId: 92, // Beer Barrel
                 idleUrl: "Kraknaknork's Demon.png"
-            },
-            {
-                key: 'demon',
-                name: 'Demon',
-                // Plain Dragon in every way that matters for gameplay/feel (stats, move speed,
-                // attack cadence, walk-cycle timing) — only the art is swapped. No moveSpeed/
-                // attackCooldownTicks override here on purpose: leaving them unset means
-                // Combat timing stays 100% native Dragon.
-                baseGameId: 65,
-                level: 666,
-                awakened: true,
-                idleUrl: 'demon-idle.png',
-                portraitUrl: 'demon-icon.gif', // dedicated single-frame icon for portraits/picker cards
-                movingUrl: 'demon-moving.png',
-                // Sheet geometry matches Dragon's own OUTFIT asset exactly (id-65: 256x64 idle /
-                // 256x512 moving, i.e. 4 facings x 1 idle frame / 8 moving frames @ 64px) so the
-                // reused native sizing/animation CSS crops and steps it correctly.
-                cellSize: 64,
-                facings: 4,
-                idleFrameRows: 1,
-                movingFrameRows: 8,
-                // Dragon's own native moving-animation duration ("2.4s steps(8)", confirmed via
-                // the live game CSS) — kept as a fixed constant, matching every native creature.
-                movingFrameDurationMs: 2400
             }
         ];
 

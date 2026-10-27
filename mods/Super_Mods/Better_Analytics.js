@@ -260,7 +260,7 @@
             cleanup();
         };
         window.addEventListener('beforeunload', pageUnloadHandler);
-        window.addEventListener('unload', pageUnloadHandler);
+        window.addEventListener('pagehide', pageUnloadHandler); // 'unload' is blocked by the page's Permissions-Policy
 
         visibilityChangeHandler = () => {
             if (document.hidden) {
@@ -1110,7 +1110,7 @@
 
             if (pageUnloadHandler) {
                 window.removeEventListener('beforeunload', pageUnloadHandler);
-                window.removeEventListener('unload', pageUnloadHandler);
+                window.removeEventListener('pagehide', pageUnloadHandler);
                 pageUnloadHandler = null;
             }
 

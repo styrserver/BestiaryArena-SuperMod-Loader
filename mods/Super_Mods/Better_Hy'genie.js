@@ -333,7 +333,7 @@
             'Accept-Language': 'en-US',
             'Accept-Encoding': 'gzip, deflate, br, zstd',
             'Content-Type': 'application/json',
-            'X-Game-Version': '1',
+            'X-Game-Version': String(globalThis.state?.GAME_VERSION ?? '1'),
             'Origin': 'https://bestiaryarena.com',
             'Referer': 'https://bestiaryarena.com/game',
             'Sec-GPC': '1',

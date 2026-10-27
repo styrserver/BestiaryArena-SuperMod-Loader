@@ -4190,6 +4190,12 @@ const FirebaseRunsService = {
 
 const FIREBASE_RUNS_VERSION_V2 = '2.0';
 
+// Firebase RTDB rejects keys containing . $ # [ ] / with HTTP 400 (e.g. "map_amazon.com_warehouse").
+// Chunks carry their own real map key inside the encrypted payload, so the remote key is only an id.
+function toFirebaseKey(mapKey) {
+  return String(mapKey).replace(/[.$#\[\]\/]/g, '_');
+}
+
 function hashMapRunsPayload(mapData) {
   try {
     return JSON.stringify(mapData);
@@ -4248,7 +4254,7 @@ async function uploadBestRunsToFirebase(playerName, bestRuns, password, options 
       const maps = {};
       for (const [mapKey, mapData] of Object.entries(bestRuns.runs || {})) {
         const encrypted = await encryptRunsData({ runs: { [mapKey]: mapData } }, password);
-        maps[mapKey] = { encrypted, lastUpdated: now };
+        maps[toFirebaseKey(mapKey)] = { encrypted, lastUpdated: now };
         mapHashes[mapKey] = hashMapRunsPayload(mapData);
       }
       await FirebaseRunsService.put(path, {
@@ -4271,7 +4277,7 @@ async function uploadBestRunsToFirebase(playerName, bestRuns, password, options 
       }
       const encrypted = await encryptRunsData({ runs: { [mapKey]: mapData } }, password);
       await FirebaseRunsService.patch(
-        `${path}/maps/${mapKey}`,
+        `${path}/maps/${toFirebaseKey(mapKey)}`,
         { encrypted, lastUpdated: now },
         `upload map ${mapKey} to Firebase`
       );
@@ -4370,24 +4376,31 @@ async function hideNonShinyAndNonAwakenedMonsters(onProgress = null) {
       });
     }
 
-    const response = await fetch('https://bestiaryarena.com/api/trpc/game.hideMonster?batch=1', {
+    const sendHideRequest = (m) => fetch('https://bestiaryarena.com/api/trpc/game.hideMonster?batch=1', {
       method: 'POST',
       mode: 'cors',
       credentials: 'include',
       headers: {
         'content-type': 'application/json',
-        'x-game-version': '1'
+        'x-game-version': String(globalThis.state?.GAME_VERSION ?? '1')
       },
       body: JSON.stringify({
         0: {
           json: {
             hidden: true,
-            monsterId: monster.id
+            monsterId: m.id
           }
         }
       })
     });
+    let response = await sendHideRequest(monster);
 
+    if (response.status === 429) {
+      // Rate limited: back off once, then re-send this monster before giving up.
+      const retryAfterMs = Math.min(10000, (Number(response.headers.get('retry-after')) || 3) * 1000);
+      await new Promise((resolve) => setTimeout(resolve, retryAfterMs));
+      response = await sendHideRequest(monster);
+    }
     if (!response.ok) {
       throw new Error(`Hide request failed (${response.status})`);
     }
@@ -4638,6 +4651,12 @@ function detectCurrentSeasonFromRuns(allRuns) {
     console.warn('[Mod Settings] Failed to detect current season, using season 1:', error);
   }
   return latestSeason;
+}
+
+// Game-reported season (number) and version (string) from globalThis.state; null if not yet available.
+function getGameSeasonAndVersion() {
+  const util = window.BestiaryModAPI?.util;
+  return { gameSeason: util?.getCurrentSeason?.() ?? null, gameVersion: util?.getGameVersion?.() ?? null };
 }
 
 function getRunsForSeason(runs, targetSeason) {
@@ -5000,8 +5019,11 @@ function formatRunsAsText(runsData) {
     let text = `========================================\n`;
     text += `Best Runs - ${playerName}\n`;
     text += `Generated: ${timestamp}\n`;
+    const { gameSeason, gameVersion } = runsData.metadata || {};
+    if (gameSeason != null) text += `Season: ${gameSeason}\n`;
+    if (gameVersion != null) text += `Game Version: ${gameVersion}\n`;
     text += `========================================\n\n`;
-    
+
     if (!runsData.runs || Object.keys(runsData.runs).length === 0) {
       text += `No runs available.\n`;
       return text;
@@ -5368,7 +5390,8 @@ async function uploadBestRuns(options = {}) {
       runs: {},
       metadata: {
         ...(allRuns.metadata || {}),
-        season: currentSeason
+        season: currentSeason,
+        ...getGameSeasonAndVersion()
       },
       playerName: playerName,
       uploadedAt: Date.now()
@@ -5730,7 +5753,8 @@ async function downloadRunsAsTxt(playerName, password, source = 'local') {
         runs: {},
         metadata: {
           ...(allRuns.metadata || {}),
-          season: currentSeason
+          season: currentSeason,
+          ...getGameSeasonAndVersion()
         },
         playerName: 'local', // Use 'local' for local downloads since it's the user's own data
         uploadedAt: Date.now()
@@ -12649,11 +12673,11 @@ function isEnemyByHealthBar(battleContainer) {
 // =======================
 // Easter Egg: Demon skin roll for The Annihilator Quest
 // =======================
-// Reuses the 'demon' entry already registered in window.CustomBattles.CUSTOM_SPRITES
-// (content/custom-battles.js — the same Dragon-based reskin the Map Editor's custom-sprite
-// picker offers). We don't duplicate its CSS-injection logic; ensureCustomSpriteStyles /
-// getCustomSpriteOverlayClass are exposed on window.CustomBattles for exactly this reuse.
-const EASTER_EGG_DEMON_SPRITE_KEY = 'demon';
+// Skins enemies with the game's own native Demon outfit: swaps each enemy sprite's
+// `id-<outfitId>` class for Demon's, so the native sizing/animation CSS does the rest.
+// Native Demon art: https://bestiaryarena.com/assets/OUTFIT/35-idle.png
+const EASTER_EGG_DEMON_OUTFIT_ID = 35;
+const EASTER_EGG_DEMON_ORIGINAL_ID_ATTR = 'easterEggOriginalIdClass';
 const EASTER_EGG_DEMON_CHANCE = 0.05;
 const EASTER_EGG_ANNIHILATOR_QUEST_NAME = 'The Annihilator Quest';
 // 'newGame' and 'emitNewGame' can both fire for the same battle start (see
@@ -12822,10 +12846,7 @@ function applyDemonEasterEggSprites() {
   try {
     applyDemonEasterEggRenames();
 
-    const spriteDef = window.CustomBattles?.getCustomSpriteDef?.(EASTER_EGG_DEMON_SPRITE_KEY);
-    if (!spriteDef || typeof window.CustomBattles.ensureCustomSpriteStyles !== 'function') return;
-    window.CustomBattles.ensureCustomSpriteStyles(spriteDef);
-    const overlayClass = window.CustomBattles.getCustomSpriteOverlayClass(EASTER_EGG_DEMON_SPRITE_KEY);
+    const demonIdClass = `id-${EASTER_EGG_DEMON_OUTFIT_ID}`;
 
     let enemyContainerCount = 0;
     let spriteCount = 0;
@@ -12839,8 +12860,13 @@ function applyDemonEasterEggSprites() {
         // instead, keyed off the live actor's own tileIndex — a real board coordinate,
         // unlike this sprite's DOM rect (see that function; also fixes the shout bubble
         // anchor below, which needs a real on-screen box, just not a tile index).
-        if (!sprite.classList.contains(overlayClass)) {
-          sprite.classList.add(overlayClass);
+        if (!sprite.classList.contains(demonIdClass)) {
+          const previousIdClass = Array.from(sprite.classList).find((cls) => /^id-\d+$/.test(cls));
+          if (previousIdClass && !sprite.dataset[EASTER_EGG_DEMON_ORIGINAL_ID_ATTR]) {
+            sprite.dataset[EASTER_EGG_DEMON_ORIGINAL_ID_ATTR] = previousIdClass;
+          }
+          if (previousIdClass) sprite.classList.remove(previousIdClass);
+          sprite.classList.add(demonIdClass);
         }
         // Roll the shout exactly once per sprite DOM node — the node persists for the
         // whole battle (position updates via CSS transform, not re-mounting), so a
@@ -12876,12 +12902,12 @@ function applyDemonEasterEggSprites() {
 
 function removeDemonEasterEggSprites() {
   try {
-    const overlayClass = window.CustomBattles?.getCustomSpriteOverlayClass?.(EASTER_EGG_DEMON_SPRITE_KEY)
-      || `custom-battles-sprite-${EASTER_EGG_DEMON_SPRITE_KEY}`;
-    document.querySelectorAll(`.${overlayClass}`).forEach((sprite) => {
-      sprite.classList.remove(overlayClass);
-      sprite.style.removeProperty('--cb-moving-duration');
-      sprite.style.removeProperty('--cb-moving-delay');
+    document.querySelectorAll('[data-easter-egg-original-id-class]').forEach((sprite) => {
+      const originalIdClass = sprite.dataset[EASTER_EGG_DEMON_ORIGINAL_ID_ATTR];
+      const currentIdClass = Array.from(sprite.classList).find((cls) => /^id-\d+$/.test(cls));
+      if (currentIdClass && currentIdClass !== originalIdClass) sprite.classList.remove(currentIdClass);
+      if (originalIdClass) sprite.classList.add(originalIdClass);
+      delete sprite.dataset[EASTER_EGG_DEMON_ORIGINAL_ID_ATTR];
       delete sprite.dataset.easterEggShoutRolled;
     });
     document.querySelectorAll(`.${EASTER_EGG_SHOUT_CLASS}`).forEach((bubble) => bubble.remove());

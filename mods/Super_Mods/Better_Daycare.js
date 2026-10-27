@@ -282,7 +282,7 @@
     accept: '*/*',
     'content-type': 'application/json',
     Referer: 'https://bestiaryarena.com/game',
-    'X-Game-Version': '1'
+    'X-Game-Version': String(globalThis.state?.GAME_VERSION ?? '1')
   });
 
   async function addMonsterToDaycareViaApi(slotId, monsterId) {

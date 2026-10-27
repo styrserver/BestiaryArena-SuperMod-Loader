@@ -150,7 +150,7 @@ const getTrpcGamePostHeaders = () => ({
   accept: '*/*',
   'content-type': 'application/json',
   Referer: 'https://bestiaryarena.com/game',
-  'X-Game-Version': '1'
+  'X-Game-Version': String(globalThis.state?.GAME_VERSION ?? '1')
 });
 
 // Only track states that prevent conflicts
@@ -2102,7 +2102,7 @@ const refillStaminaViaAPI = async () => {
             'accept': '*/*',
             'content-type': 'application/json',
             'Referer': 'https://bestiaryarena.com/game',
-            'X-Game-Version': '1'
+            'X-Game-Version': String(globalThis.state?.GAME_VERSION ?? '1')
           },
           credentials: 'include',
           body: JSON.stringify({

@@ -2408,7 +2408,7 @@
         // X-Game-Version header is required by the API - without it, requests return HTTP 400
         const baseHeaders = {
             'content-type': 'application/json',
-            'X-Game-Version': '1'
+            'X-Game-Version': String(globalThis.state?.GAME_VERSION ?? '1')
         };
         
         for (let attempt = 0; attempt <= retries; attempt++) {
@@ -4058,25 +4058,61 @@
         return [...activeEventCreatures];
     }
 
+    // gameIds of every monster placed as an actor on any map (all floors). Cached once non-empty.
+    let mapMonsterGameIdsCache = null;
+    function getMapMonsterGameIds() {
+        if (mapMonsterGameIdsCache) return mapMonsterGameIdsCache;
+        const ids = new Set();
+        const fromDb = globalThis.mapsDatabase?.getAllMaps?.();
+        const rooms = (Array.isArray(fromDb) && fromDb.length > 0) ? fromDb : globalThis.state?.utils?.ROOMS;
+        const roomList = Array.isArray(rooms) ? rooms : Object.values(rooms || {});
+        const addActors = (actors) => {
+            if (!Array.isArray(actors)) return;
+            for (const actor of actors) {
+                if (actor && actor.id != null) ids.add(Number(actor.id));
+            }
+        };
+        for (const room of roomList) {
+            if (!room) continue;
+            addActors(room.file?.data?.actors);
+            if (Array.isArray(room.floorFiles)) {
+                for (const floorFile of room.floorFiles) addActors(floorFile?.data?.actors);
+            }
+        }
+        if (ids.size > 0) mapMonsterGameIdsCache = ids;
+        return ids;
+    }
+
+    // Keep only creatures that appear on at least one map. No-op while map data isn't loaded yet.
+    function filterCreaturesOnMaps(names) {
+        const db = window.creatureDatabase;
+        const mapIds = getMapMonsterGameIds();
+        if (mapIds.size === 0 || typeof db?.resolveCreatureDisplay !== 'function') return names;
+        return names.filter((name) => {
+            const gameId = db.resolveCreatureDisplay(name)?.gameId;
+            return gameId == null || mapIds.has(Number(gameId));
+        });
+    }
+
     // Helper function to get all creatures for Autoplant
     function getAllAutoplantCreatures() {
         const db = window.creatureDatabase;
         const activeRaidEventCreatures = getAutosellerActiveRaidEventCreatures();
+        let pickerNames;
         if (typeof db?.getAutoscrollAutosellerCreaturePickerNames === 'function') {
-            const pickerNames = db.getAutoscrollAutosellerCreaturePickerNames();
-            return [...new Set([...(Array.isArray(pickerNames) ? pickerNames : []), ...activeRaidEventCreatures])].sort((a, b) => a.localeCompare(b));
-        }
-        if (typeof db?.getCreaturePickerNames === 'function') {
-            const pickerNames = db.getCreaturePickerNames().filter((name) => {
+            pickerNames = db.getAutoscrollAutosellerCreaturePickerNames();
+        } else if (typeof db?.getCreaturePickerNames === 'function') {
+            pickerNames = db.getCreaturePickerNames().filter((name) => {
                 if (typeof db.isGazerCreatureName === 'function') {
                     return !db.isGazerCreatureName(name);
                 }
                 return !String(name).toLowerCase().includes('gazer');
             });
-            return [...new Set([...(Array.isArray(pickerNames) ? pickerNames : []), ...activeRaidEventCreatures])].sort((a, b) => a.localeCompare(b));
+        } else {
+            pickerNames = (db?.ALL_CREATURES || []).filter((name) => !String(name).toLowerCase().includes('gazer'));
         }
-        const pickerNames = (db?.ALL_CREATURES || []).filter((name) => !String(name).toLowerCase().includes('gazer'));
-        return [...new Set([...(Array.isArray(pickerNames) ? pickerNames : []), ...activeRaidEventCreatures])].sort((a, b) => a.localeCompare(b));
+        const onMaps = filterCreaturesOnMaps(Array.isArray(pickerNames) ? pickerNames : []);
+        return [...new Set([...onMaps, ...activeRaidEventCreatures])].sort((a, b) => a.localeCompare(b));
     }
 
     function resolveAutosellerCurrentRoomId() {
@@ -6831,7 +6867,7 @@
                     const clonedResponse = response.clone();
                     if (!response.ok) {
                         logAutosellerDebug('Devour', `plantEat failed: HTTP ${response.status} — will re-click if the drop is still shown`);
-                        console.error(`[Autoseller] plantEat failed: HTTP ${response.status}`);
+                        console.warn(`[Autoseller] plantEat failed: HTTP ${response.status}`);
                     }
 
                     // Process the response asynchronously
@@ -6840,7 +6876,7 @@
                             if (data && Array.isArray(data) && data[0]?.error) {
                                 const errMsg = data[0].error?.json?.message || 'unknown error';
                                 logAutosellerDebug('Devour', `plantEat error response: ${errMsg}`);
-                                console.error(`[Autoseller] plantEat error response: ${errMsg}`);
+                                console.warn(`[Autoseller] plantEat error response: ${errMsg}`);
                             }
                             if (data && Array.isArray(data) && data[0]?.result?.data?.json) {
                                 const result = data[0].result.data.json;

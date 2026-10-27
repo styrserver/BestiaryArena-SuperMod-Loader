@@ -409,10 +409,10 @@ const CYCLOPEDIA_UI = {
 const CYCLOPEDIA_SETTINGS = {
   playerStatCaps: {
     // Perfect/Shiny max comes from creature-database (game monsters), not a hardcoded cap.
-    bisEquipments: 126,
-    exploredMaps: 80,
+    bisEquipments: 165,
+    exploredMaps: 82,
     bagOutfits: 211,
-    raids: 18
+    raids: 19
   }
 };
 
@@ -1115,11 +1115,16 @@ if (typeof window.cyclopediaGlobalObserver === 'undefined') {
   window.cyclopediaGlobalObserver = null;
 }
 
+/** Game's current season (api.util.getCurrentSeason); 2 until state is ready. */
+function getCurrentGameSeason() {
+  return window.BestiaryModAPI?.util?.getCurrentSeason?.() ?? 2;
+}
+
 const cyclopediaState = {
   observer: null, modalOpen: false, currentModal: null,
   profileData: null, lastFetch: 0, fetchInProgress: false,
-  /** 1 or 2 — filters profilePageData season stats and season-scoped rooms/highscores in Cyclopedia. */
-  profileSeason: 2,
+  /** Season number (1..current) — filters profilePageData season stats and season-scoped rooms/highscores in Cyclopedia. */
+  profileSeason: getCurrentGameSeason(),
   /** Latest raw JSON from serverSide.profilePageData (start page) for season-scoped leaderboard rows. */
   lastStartupProfileData: null,
   /** Last selected map/region in Maps tab; prevents empty first render. */
@@ -1217,7 +1222,9 @@ const cyclopediaState = {
   }
 };
 
-const CYCLOPEDIA_PROFILE_SEASONS = [1, 2];
+function getCyclopediaProfileSeasons() {
+  return Array.from({ length: getCurrentGameSeason() }, (_, i) => i + 1);
+}
 
 const CYCLOPEDIA_ASSETS = {
   seasonIcon: 'https://bestiaryarena.com/assets/icons/season.png',
@@ -1304,10 +1311,10 @@ function unwrapProfilePageJson(profileData) {
   return profileData.json !== undefined ? profileData.json : profileData;
 }
 
-function getLatestProfileSeason(profileData, fallbackSeason = 2) {
+function getLatestProfileSeason(profileData, fallbackSeason = getCurrentGameSeason()) {
   const pd = unwrapProfilePageJson(profileData);
   const list = Array.isArray(pd?.seasons) ? pd.seasons : [];
-  let latest = Number(fallbackSeason) || 2;
+  let latest = Number(fallbackSeason) || getCurrentGameSeason();
   list.forEach((entry) => {
     const sn = Number(entry?.season);
     if (Number.isFinite(sn) && sn > latest) latest = sn;
@@ -3914,7 +3921,7 @@ const MapsDataFetcher = {
         headers: { 
           'Accept': '*/*', 
           'Content-Type': 'application/json', 
-          'X-Game-Version': '1' 
+          'X-Game-Version': String(globalThis.state?.GAME_VERSION ?? '1') 
         }
       });
       
@@ -7543,7 +7550,7 @@ function createStartPageManager() {
         
         const data = await this.fetchProfileData(playerState.name);
         const profileData = CyclopediaApi.parseProfileResponse(data);
-        cyclopediaState.profileSeason = getLatestProfileSeason(profileData, 2);
+        cyclopediaState.profileSeason = getLatestProfileSeason(profileData);
         
         this.renderLayout(playerState.name, profileData);
         this.setupTimers();
@@ -9271,7 +9278,7 @@ function updateCyclopediaStartpageRankings(root, profileData) {
 }
 
 function renderCyclopediaSeasonToggleRow(onSeasonChange) {
-  const currentSeason = getLatestProfileSeason(cyclopediaState.lastStartupProfileData, 2);
+  const currentSeason = getLatestProfileSeason(cyclopediaState.lastStartupProfileData);
   const tablist = document.createElement('div');
   tablist.setAttribute('role', 'tablist');
   tablist.setAttribute('aria-orientation', 'horizontal');
@@ -9281,7 +9288,7 @@ function renderCyclopediaSeasonToggleRow(onSeasonChange) {
   tablist.style.flexShrink = '0';
   tablist.style.marginBottom = '0';
 
-  CYCLOPEDIA_PROFILE_SEASONS.forEach((sn) => {
+  getCyclopediaProfileSeasons().forEach((sn) => {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.setAttribute('role', 'tab');
@@ -17684,7 +17691,7 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
       const requestId = createRequest();
       if (selectedCategory !== 'Rankings') {
         const rankingsPrefetchOptions = {
-          season: cyclopediaState.profileSeason ?? 2,
+          season: cyclopediaState.profileSeason ?? getCurrentGameSeason(),
           qualified: true,
           limit: START_PAGE_CONFIG.RANKINGS_PAGE_SIZE,
           offset: 0,
@@ -17829,7 +17836,7 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
   async function displayRankingsData(playerState) {
     applyCharactersRankingsColumnLayout();
     try {
-      const activeSeason = cyclopediaState.profileSeason ?? 2;
+      const activeSeason = cyclopediaState.profileSeason ?? getCurrentGameSeason();
       const rankingsState = cyclopediaState.rankingsState?.season === activeSeason
         ? cyclopediaState.rankingsState
         : {

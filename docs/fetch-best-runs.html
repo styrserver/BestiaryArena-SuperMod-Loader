@@ -303,6 +303,9 @@
             let text = `========================================\n`;
             text += `Best Runs - ${playerName}\n`;
             text += `Generated: ${timestamp}\n`;
+            const { gameSeason, gameVersion } = runsData.metadata || {};
+            if (gameSeason != null) text += `Season: ${gameSeason}\n`;
+            if (gameVersion != null) text += `Game Version: ${gameVersion}\n`;
             text += `========================================\n\n`;
             
             if (!runsData.runs || Object.keys(runsData.runs).length === 0) {

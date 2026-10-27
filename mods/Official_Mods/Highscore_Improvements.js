@@ -253,7 +253,7 @@ async function fetchTRPC(method) {
       headers: { 
         'Accept': '*/*', 
         'Content-Type': 'application/json', 
-        'X-Game-Version': '1' 
+        'X-Game-Version': String(globalThis.state?.GAME_VERSION ?? '1') 
       }
     });
     

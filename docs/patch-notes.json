@@ -4,6 +4,76 @@
   },
   "notes": [
     {
+      "version": "5.1.5",
+      "changes": [
+        {
+          "mod": "Autoseller",
+          "type": "changed",
+          "text": "Expected Dragon Plant rejections (rate limit, game version out of sync) are no longer logged as errors in the Error Log. The creature lists now only show creatures that exist on a map."
+        },
+        {
+          "mod": "Better Analytics",
+          "type": "fixed",
+          "text": "No longer triggers a browser \"unload is not allowed\" warning when the page closes."
+        },
+        {
+          "mod": "creature-database.js",
+          "type": "added",
+          "text": "Marked Healer, Orshabaal, Paladin, Rostein, Shooter, and Vladrukh as unobtainable creatures."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "changed",
+          "text": "The default season and the season tabs now follow the game's current season instead of being fixed to Season 2. Progress maximums updated: Explored maps 82, Completed raids 19, BIS Equipments 165."
+        },
+        {
+          "mod": "equipment-database.js",
+          "type": "added",
+          "text": "Marked Vampire Silk Slippers as event equipment."
+        },
+        {
+          "mod": "Guilds",
+          "type": "changed",
+          "text": "Faster startup: the guild menu no longer waits on the server, and the guild and skill syncs run together. Game profile requests are spaced out during startup."
+        },
+        {
+          "mod": "Hunt Analyzer",
+          "type": "changed",
+          "text": "Large numbers now show as 1k and 1.5kk (one decimal at most) instead of 1.00K and 1.50KK. Loot counts, stamina, rates and the Loot and Creatures totals use the same short format, with the exact number on hover."
+        },
+        {
+          "mod": "Loader",
+          "type": "changed",
+          "text": "Mod requests to the game now send the game's current version instead of a fixed value."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "changed",
+          "text": "Best runs uploaded to Firebase and the Best Runs text download now include the current game season and game version."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "fixed",
+          "text": "Best runs on maps with a dot in their name now upload to Firebase instead of failing every minute. Auto-hide waits and retries when the server rate-limits it."
+        },
+        {
+          "mod": "Quests",
+          "type": "fixed",
+          "text": "The startup cleanup of renamed players' leaderboard entries now spaces out its profile lookups, so it no longer triggers 429 rate-limit errors."
+        },
+        {
+          "mod": "Raid Hunter",
+          "type": "fixed",
+          "text": "No longer errors on startup when the game state is not ready yet after a page reload."
+        },
+        {
+          "mod": "RunTracker",
+          "type": "changed",
+          "text": "New runs are tagged with the game's current season immediately, without waiting for a profile lookup."
+        }
+      ]
+    },
+    {
       "version": "5.1.4",
       "changes": [
         {

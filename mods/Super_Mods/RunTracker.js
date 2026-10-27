@@ -74,7 +74,7 @@ const processedServerResultKeys = new Set();
 // Cleanup tracking for memory leak prevention
 let originalFetch = null;
 let runTrackerFetchWrapper = null;
-let latestKnownSeason = 2;
+let latestKnownSeason = window.BestiaryModAPI?.util?.getCurrentSeason?.() ?? 2;
 let seasonLastFetchedAt = 0;
 let seasonFetchPromise = null;
 
@@ -287,8 +287,8 @@ function getCurrentSeasonForRunData() {
   if (!seasonLastFetchedAt || now - seasonLastFetchedAt > 5 * 60 * 1000) {
     fetchLatestProfileSeason();
   }
-  // During rollout, default unknown season to 2 for newly saved runs.
-  return latestKnownSeason || 2;
+  // Game-reported season wins; fetched profile season only matters if state is unavailable.
+  return window.BestiaryModAPI?.util?.getCurrentSeason?.() ?? (latestKnownSeason || 2);
 }
 
 function normalizeFloorHistory(run) {

@@ -2146,24 +2146,25 @@ function formatPlaytimeLabel(playtimeText) {
   return `${t('mods.huntAnalyzer.playtime')}: ${playtimeText}`;
 }
 
-// Rounds to an integer; from 1000 up renders as K (and from 1,000,000 as KK when allowKK) with two
-// locale-aware fraction digits, e.g. 1,84K or 1.84K.
+// Rounds to an integer; from 1000 up renders as k (and from 1,000,000 as kk when allowKK) with up to
+// one locale-aware fraction digit and no trailing zeros, e.g. 1k, 1,8k or 1.8k.
 function formatScaledInt(value, allowKK) {
   const n = Math.round(Number(value));
   if (!Number.isFinite(n)) return String(value);
   const abs = Math.abs(n);
   if (abs < 1000) return String(n);
   const sign = n < 0 ? '-' : '';
-  const [divisor, suffix] = allowKK && abs >= 1000000 ? [1000000, 'KK'] : [1000, 'K'];
-  const scaled = (abs / divisor).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  // Compare the k value after 1-decimal rounding, so 999,999 becomes 1kk rather than 1 000k.
+  const [divisor, suffix] = allowKK && Math.round(abs / 100) >= 10000 ? [1000000, 'kk'] : [1000, 'k'];
+  const scaled = (abs / divisor).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 1 });
   return `${sign}${scaled}${suffix}`;
 }
 
 function formatCompactInt(value) {
-  return formatScaledInt(value, false);
+  return formatScaledInt(value, true);
 }
 
-/** Format experience values: <1K raw, >=1K as K, >=1KK (1,000,000) as KK. */
+/** Format experience values: <1k raw, >=1k as k, >=1,000,000 as kk. */
 function formatExpValue(value) {
   return formatScaledInt(value, true);
 }
@@ -3648,7 +3649,8 @@ function createCountOverlay(count) {
     countSpan.style.padding = '0px 2px';
     countSpan.style.borderRadius = '2px';
     countSpan.style.zIndex = '10';
-    countSpan.textContent = count || 1;
+    countSpan.textContent = formatCompactInt(count || 1);
+    countSpan.title = formatExactInt(count || 1);
     return countSpan;
 }
 
@@ -5485,7 +5487,8 @@ function updateFilteredSectionTitle(titleId, labelKey, totalCount) {
     if (HuntAnalyzerState.ui.selectedMapFilter !== 'ALL') filterParts.push(HuntAnalyzerState.ui.selectedMapFilter);
     if (HuntAnalyzerState.ui.selectedFloorFilter !== 'ALL') filterParts.push(getFloorFilterLabel(HuntAnalyzerState.ui.selectedFloorFilter));
     const filterText = filterParts.length ? ` (${filterParts.join(', ')})` : '';
-    title.textContent = `${t(labelKey)}: ${totalCount}${filterText}`;
+    title.textContent = `${t(labelKey)}: ${formatCompactInt(totalCount)}${filterText}`;
+    title.title = formatExactInt(totalCount);
 }
 
 function setCompactTotalDisplay(element, value) {

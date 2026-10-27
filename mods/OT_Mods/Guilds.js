@@ -1102,6 +1102,10 @@ let profileQueueTimer = null;
 // On a 429 the whole queue pauses until the server's Retry-After has passed. Otherwise the
 // queue keeps sending into the limit and every request earns its own 429 + back-off.
 let profileBackoffUntil = 0;
+// While initializeGuilds runs, BA API requests are spaced >= 1 s apart (10 per 10 s) so
+// startup never competes with the game's own boot-time calls.
+const PROFILE_INIT_MIN_GAP_MS = 1000;
+let profileInitPaced = false;
 
 function scheduleProfileQueue(delayMs) {
   if (profileQueueTimer) return;
@@ -1125,6 +1129,13 @@ function processProfileRateLimitQueue() {
     const waitMs = Math.min(PROFILE_RATE_WINDOW_MS, profileRequestTimestamps[0] + PROFILE_RATE_WINDOW_MS - now + 50);
     scheduleProfileQueue(Math.max(100, waitMs));
     return;
+  }
+  if (profileInitPaced && profileRequestTimestamps.length) {
+    const gapLeft = profileRequestTimestamps[profileRequestTimestamps.length - 1] + PROFILE_INIT_MIN_GAP_MS - now;
+    if (gapLeft > 0) {
+      scheduleProfileQueue(gapLeft);
+      return;
+    }
   }
   const next = profileRateLimitQueue.shift();
   if (!next) return;
@@ -11608,78 +11619,75 @@ function syncGuildChatTabWithRetry(retries = 3, delay = 1000) {
 
 async function initializeGuilds() {
   console.log('[Guilds] initialized');
-
-  // Initialize skill battle tracking
-  await initializeSkillBattleTracking();
-
-  // Keep Firebase guild references synced without requiring modal-open refresh.
-  startGuildBackgroundSync();
-  // Keep skill/equipment payloads synced periodically in the background.
-  startPlayerDataBackgroundPush();
-  // Push immediately on init (no need to wait for first 60s interval tick).
-  await pushCurrentPlayerDataToFirebase();
-
-  // Start periodic cache cleanup (every 5 minutes)
-  if (!cacheCleanupInterval) {
-    cacheCleanupInterval = setInterval(() => {
-      try {
-        playerExistsCache.cleanup();
-        profileStatusCache.cleanup();
-        playerProfileCache.cleanup();
-        guildPointsCache.cleanup();
-      } catch (error) {
-        console.error('[Guilds] Error during cache cleanup:', error);
-      }
-    }, 5 * 60 * 1000); // Every 5 minutes
-  }
-  
-  // Sync player's guild from Firebase and verify membership
+  profileInitPaced = true;
   try {
+    // UI hooks first: they need no network, so the menu item never waits on Firebase.
+    startAccountMenuObserver();
+    setupGuildsAnalysisCoordination();
+
+    // Start periodic cache cleanup (every 5 minutes)
+    if (!cacheCleanupInterval) {
+      cacheCleanupInterval = setInterval(() => {
+        try {
+          playerExistsCache.cleanup();
+          profileStatusCache.cleanup();
+          playerProfileCache.cleanup();
+          guildPointsCache.cleanup();
+        } catch (error) {
+          console.error('[Guilds] Error during cache cleanup:', error);
+        }
+      }, 5 * 60 * 1000);
+    }
+
+    await initializeSkillBattleTracking();
+    setupGuildCoinsDropSystem();
+
+    // Background intervals; the first tick is 60 s away, so push + sync run now in parallel.
+    startGuildBackgroundSync();
+    startPlayerDataBackgroundPush();
+
     const currentPlayer = getCurrentPlayerName();
+    const runCleanup = async () => {
+      try {
+        const result = await removeUnknownEquipment();
+        if (result.removed > 0) {
+          console.log(`[Guilds] Removed ${result.removed} unknown equipment slot(s) from Firebase`);
+        }
+      } catch (error) {
+        console.error('[Guilds] Error cleaning up unknown equipment:', error);
+      }
+      try {
+        await autoEquipEmptySlotsWithRetry();
+      } catch (error) {
+        console.error('[Guilds] Error auto-equipping empty slots:', error);
+      }
+    };
+
     if (!currentPlayer) {
       console.warn('[Guilds] Player name not available during initialization, will retry...');
-      // Retry after a delay if player name isn't available yet
+      pushCurrentPlayerDataToFirebase().catch(() => {});
       setTimeout(async () => {
         const retryPlayer = getCurrentPlayerName();
         if (retryPlayer) {
           await syncGuildFromFirebase(retryPlayer);
-          // Clean up unknown equipment on retry
-          await removeUnknownEquipment();
-          await autoEquipEmptySlotsWithRetry();
+          await runCleanup();
         }
       }, 2000);
-      startAccountMenuObserver();
       return;
     }
-    
-    await syncGuildFromFirebase(currentPlayer);
-    
-    // Clean up unknown equipment slots on initialization (unknown cannot be equipped)
-    try {
-      const result = await removeUnknownEquipment();
-      if (result.removed > 0) {
-        console.log(`[Guilds] Removed ${result.removed} unknown equipment slot(s) from Firebase`);
-      }
-    } catch (error) {
-      console.error('[Guilds] Error cleaning up unknown equipment:', error);
-    }
 
-    // Fill empty equipment slots with best owned gear (never replaces equipped items)
-    try {
-      await autoEquipEmptySlotsWithRetry();
-    } catch (error) {
-      console.error('[Guilds] Error auto-equipping empty slots:', error);
-    }
+    // Independent Firebase round trips run together; equipment cleanup/auto-equip
+    // follows the skills push (same player doc family) so it never races it.
+    await Promise.all([
+      syncGuildFromFirebase(currentPlayer),
+      pushCurrentPlayerDataToFirebase().then(runCleanup)
+    ]);
   } catch (error) {
     console.error('[Guilds] Error initializing:', error);
+  } finally {
+    profileInitPaced = false;
+    if (profileRateLimitQueue.length) scheduleProfileQueue(0);
   }
-
-  // Start menu observer
-  startAccountMenuObserver();
-  
-  // Initialize guild coins drop system
-  setupGuildCoinsDropSystem();
-  setupGuildsAnalysisCoordination();
 }
 
 /** Full scan of all guild member lists — use only for repair/reconcile, not background sync. */
@@ -11922,6 +11930,7 @@ exports = {
         clearTimeout(profileQueueTimer);
         profileQueueTimer = null;
       }
+      profileInitPaced = false;
 
       // Clear periodic guild background sync
       if (guildBackgroundSyncInterval) {

@@ -413,6 +413,17 @@ globalThis.state.player.subscribe((playerState) => {
 });
 ```
 
+## Season and Game Version
+
+```javascript
+globalThis.state.CURRENT_SEASON; // 2 (number)
+globalThis.state.GAME_VERSION;   // '3' (string)
+```
+
+Both sit directly on `globalThis.state` (not `state.utils`).
+
+`Mod_Settings.js` (`getGameSeasonAndVersion()`) includes both in the Firebase best-runs upload metadata as `gameSeason` / `gameVersion`.
+
 ## Game Utilities
 
 The utils component provides helper functions and game data.

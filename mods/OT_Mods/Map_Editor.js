@@ -11726,7 +11726,7 @@ function resolveOutfitSpriteIdFromInput(input) {
 
 /**
  * Finds a registered custom sprite (window.CustomBattles.CUSTOM_SPRITES, e.g. the
- * "Demon" sprite registered as customSpriteKey 'demons-outfit') by exact key, exact
+ * "Weakened Ghazbaran" sprite registered as customSpriteKey 'weakened-ghazbaran') by exact key, exact
  * name, or a unique partial name match — same matching rules as
  * resolveCreatureIdByGameIdOrName, so the Outfit sprite field can pick up a custom
  * sprite by name instead of only resolving native creatures/outfits.
@@ -11747,8 +11747,8 @@ function resolveCustomSpriteDefFromInput(input) {
 
 /**
  * Combined resolution for the Outfit sprite field: a registered custom sprite (by name
- * or key) wins over the native creature/outfit resolution, so typing "Demon" selects
- * the custom sprite even if some creature's name also happens to contain "Demon".
+ * or key) wins over the native creature/outfit resolution, so typing a custom sprite's
+ * name selects it even if some creature's name also happens to contain that text.
  * Returns { customSpriteKey } or { outfitSpriteId } or null when nothing matches.
  */
 function resolveOutfitFieldInput(input) {
@@ -12326,7 +12326,7 @@ function buildActorConfigFromCreatureForm(baseActor, formState) {
     delete merged.equip;
   }
 
-  // A registered custom sprite (e.g. "Demon") and a native outfit override are mutually
+  // A registered custom sprite (e.g. "Weakened Ghazbaran") and a native outfit override are mutually
   // exclusive visual overrides driven by the same text field — whichever this resolves
   // to replaces the other so switching the field's text actually swaps the look instead
   // of leaving a stale customSpriteKey/outfitSpriteId behind from a previous edit.
@@ -12940,7 +12940,7 @@ function createCreatureEditorPanel(tileIndex, actor) {
   outfitInput.placeholder = t('mods.mapEditor.creatureOutfitIdPlaceholder', 'Name, ID, custom sprite name, or outfit:<id> (e.g. Druid, Demon, outfit:3)');
   outfitInput.title = t(
     'mods.mapEditor.creatureOutfitIdHint',
-    'Overrides how this creature looks while keeping its own combat stats. Type another creature\'s name (e.g. "Druid") or its ID to use that creature\'s sprite, the name of a registered custom sprite (e.g. "Demon") to use that custom art, or "outfit:<id>" (e.g. "outfit:3") to use a raw OUTFIT sprite ID directly, not tied to any creature.'
+    'Overrides how this creature looks while keeping its own combat stats. Type another creature\'s name (e.g. "Druid") or its ID to use that creature\'s sprite, the name of a registered custom sprite (e.g. "Weakened Ghazbaran") to use that custom art, or "outfit:<id>" (e.g. "outfit:3") to use a raw OUTFIT sprite ID directly, not tied to any creature.'
   );
   // Normalize the field to its canonical display name once it settles (e.g. typing
   // "orc shaman" becomes "Orc Shaman", a typed numeric ID becomes that creature's name,

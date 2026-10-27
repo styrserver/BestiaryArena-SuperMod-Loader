@@ -211,7 +211,7 @@
         headers: {
           'accept': '*/*',
           'content-type': 'application/json',
-          'x-game-version': '1'
+          'x-game-version': String(globalThis.state?.GAME_VERSION ?? '1')
         },
         credentials: 'include',
         body: JSON.stringify(payload)
@@ -263,7 +263,7 @@
         headers: {
           'accept': '*/*',
           'content-type': 'application/json',
-          'x-game-version': '1'
+          'x-game-version': String(globalThis.state?.GAME_VERSION ?? '1')
         },
         credentials: 'include',
         body: JSON.stringify(payload)

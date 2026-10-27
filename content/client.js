@@ -1074,7 +1074,7 @@ if (typeof browserAPI === 'undefined') {
   // single 429 on this endpoint is common and usually clears within a second.
   async function requestTrophyRoomData(allowRetry) {
     const res = await fetch('/api/trpc/game.getFullTrophyRoomData', {
-      headers: { 'Accept': '*/*', 'Content-Type': 'application/json', 'X-Game-Version': '1' }
+      headers: { 'Accept': '*/*', 'Content-Type': 'application/json', 'X-Game-Version': String(globalThis.state?.GAME_VERSION ?? '1') }
     });
     if (res.status === 429 && allowRetry) {
       const retryAfterSec = Number(res.headers?.get?.('Retry-After'));
@@ -1411,6 +1411,24 @@ if (typeof browserAPI === 'undefined') {
           console.warn('[BestiaryModAPI] util.unsubscribe failed:', error);
         }
         return false;
+      },
+
+      /**
+       * Game-reported season (`globalThis.state.CURRENT_SEASON`).
+       * @returns {number|null} null until game state is ready
+       */
+      getCurrentSeason: function() {
+        const n = Number(globalThis.state?.CURRENT_SEASON);
+        return Number.isFinite(n) && n > 0 ? n : null;
+      },
+
+      /**
+       * Game-reported version (`globalThis.state.GAME_VERSION`, a string like '3').
+       * @returns {string|null} null until game state is ready
+       */
+      getGameVersion: function() {
+        const v = globalThis.state?.GAME_VERSION;
+        return v == null ? null : String(v);
       },
 
       /**

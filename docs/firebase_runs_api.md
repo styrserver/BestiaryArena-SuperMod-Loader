@@ -74,7 +74,7 @@ const hashedName = await hashUsername('PlayerName');
 {
   "version": "2.0",
   "lastUpdated": 1234567890,
-  "metadata": { "season": 2, "totalRuns": 10, "totalMaps": 5 },
+  "metadata": { "season": 2, "gameSeason": 2, "gameVersion": "3", "totalRuns": 10, "totalMaps": 5 },
   "playerName": "PlayerName",
   "maps": {
     "map_forest": {
@@ -84,6 +84,8 @@ const hashedName = await hashUsername('PlayerName');
   }
 }
 ```
+
+`metadata.season` is detected from the player's runs. `metadata.gameSeason` and `metadata.gameVersion` are read at upload time from `globalThis.state.CURRENT_SEASON` and `globalThis.state.GAME_VERSION` (see `game_state_api.md`). They are `null` if state is not ready yet, and older uploads lack them.
 
 Each `maps.{mapKey}.encrypted` blob decrypts to `{ "runs": { "{mapKey}": { speedrun, rank, floor } } }` using the same password and salt as v1.
 

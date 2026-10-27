@@ -60,6 +60,7 @@ const HARDCODED_BOOSTED_MAP = {
 const EVENT_EQUIPMENT = [
   'Grey Tome',
   'Orclops Santa',
+  'Vampire Silk Slippers',
   'Witch Hat'
 ];
 

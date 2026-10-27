@@ -2068,7 +2068,7 @@
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'X-Game-Version': '1'
+              'X-Game-Version': String(globalThis.state?.GAME_VERSION ?? '1')
             },
             body: JSON.stringify({
               "0": {
@@ -3121,7 +3121,7 @@
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "x-game-version": "1"
+            "x-game-version": String(globalThis.state?.GAME_VERSION ?? '1')
           },
           body: JSON.stringify(requestBody)
         });

@@ -9341,6 +9341,7 @@ function createNPCCooldownManager() {
   const arenaLeaderboardNameStatus = new Map(); // name(lower) -> 'exists' | 'missing' | 'unknown'
   let arenaLeaderboardSweepDone = false;
   const ARENA_LB_SWEEP_MIN_AGE_MS = 24 * 60 * 60 * 1000; // skip entries touched in the last day
+  const ARENA_LB_SWEEP_GAP_MS = 1500; // pause between profile lookups
 
   async function sweepRenamedArenaLeaderboardEntries() {
     try {
@@ -9370,6 +9371,9 @@ function createNPCCooldownManager() {
       let missing = 0;
       const toDelete = [];
       for (const entry of candidates) {
+        // Spread lookups out: the profile API limit is shared with the game and every other
+        // mod, and a back-to-back burst at startup earned 429s.
+        await new Promise((resolve) => setTimeout(resolve, ARENA_LB_SWEEP_GAP_MS));
         const name = String(entry.playerName).trim();
         const status = await checkProfileStatus(name).catch(() => 'unknown');
         arenaLeaderboardNameStatus.set(name.toLowerCase(), status);
