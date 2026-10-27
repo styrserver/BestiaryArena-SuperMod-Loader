@@ -63,7 +63,8 @@ const defaultConfig = {
   firebaseRunsPassword: '', // Encryption password for Firebase runs (stored encrypted)
   autoUploadRuns: false, // Automatically upload when new best run is recorded
   firebaseUploadRegions: {}, // regionId -> false when disabled; missing keys = enabled (all ON by default)
-  lastFirebaseUploadedMapHashes: {}, // mapKey -> payload hash for delta Firebase uploads (v2)
+  lastFirebaseUploadedMapHashes: {}, // "s<season>:<mapKey>" -> payload hash for delta Firebase uploads (v2)
+  firebaseRunsLegacyMigratedFor: '', // player name whose pre-per-season Firebase record was already checked/copied
   hotkeyOpenInventory: 'i', // KeyboardEvent.key id: letter/digit, or e.g. f1, insert, home, pageup
   hotkeyOpenQuestLog: 'q',
   hotkeyOpenStore: 's',
@@ -4241,22 +4242,27 @@ async function decryptBestRunsFromFirebaseRecord(remoteData, password) {
   return null;
 }
 
+// One record per season per player: best-runs/<hashedName>/seasons/<season>. Uploading a new season
+// never touches earlier seasons' records.
 async function uploadBestRunsToFirebase(playerName, bestRuns, password, options = {}) {
   const forceFull = options.forceFull === true;
   try {
-    const path = await getBestRunsFirebasePath(playerName);
+    const season = Number(bestRuns.metadata?.season) || 1;
+    await migrateLegacyFirebaseRuns(playerName);
+    const path = await getBestRunsSeasonFirebasePath(playerName, season);
     const remote = await FirebaseRunsService.get(path, 'fetch runs for delta upload', null);
     const now = Date.now();
     const mapHashes = { ...(config.lastFirebaseUploadedMapHashes || {}) };
-    const isLegacyV1 = remote && remote.encrypted && remote.version !== FIREBASE_RUNS_VERSION_V2;
-    const needsFullUpload = forceFull || !remote || isLegacyV1 || remote.version !== FIREBASE_RUNS_VERSION_V2;
+    // Hash cache is per season: the same mapKey has different runs in each season.
+    const hashKey = (mapKey) => `s${season}:${mapKey}`;
+    const needsFullUpload = forceFull || !remote || remote.version !== FIREBASE_RUNS_VERSION_V2;
 
     if (needsFullUpload) {
       const maps = {};
       for (const [mapKey, mapData] of Object.entries(bestRuns.runs || {})) {
         const encrypted = await encryptRunsData({ runs: { [mapKey]: mapData } }, password);
         maps[toFirebaseKey(mapKey)] = { encrypted, lastUpdated: now };
-        mapHashes[mapKey] = hashMapRunsPayload(mapData);
+        mapHashes[hashKey(mapKey)] = hashMapRunsPayload(mapData);
       }
       await FirebaseRunsService.put(path, {
         version: FIREBASE_RUNS_VERSION_V2,
@@ -4273,7 +4279,7 @@ async function uploadBestRunsToFirebase(playerName, bestRuns, password, options 
     let changedCount = 0;
     for (const [mapKey, mapData] of Object.entries(bestRuns.runs || {})) {
       const payloadHash = hashMapRunsPayload(mapData);
-      if (mapHashes[mapKey] === payloadHash) {
+      if (mapHashes[hashKey(mapKey)] === payloadHash) {
         continue;
       }
       const encrypted = await encryptRunsData({ runs: { [mapKey]: mapData } }, password);
@@ -4282,7 +4288,7 @@ async function uploadBestRunsToFirebase(playerName, bestRuns, password, options 
         { encrypted, lastUpdated: now },
         `upload map ${mapKey} to Firebase`
       );
-      mapHashes[mapKey] = payloadHash;
+      mapHashes[hashKey(mapKey)] = payloadHash;
       changedCount++;
     }
 
@@ -4311,12 +4317,61 @@ async function getBestRunsFirebasePath(playerName) {
   return `${FIREBASE_RUNS_CONFIG.firebaseUrl}/best-runs/${hashedName}`;
 }
 
-// Fetch runs from Firebase
-async function fetchRunsFromFirebase(playerName) {
+async function getBestRunsSeasonFirebasePath(playerName, season) {
+  return `${await getBestRunsFirebasePath(playerName)}/seasons/${Number(season) || 1}`;
+}
+
+// Copies the pre-per-season record (best-runs/<hash>) into seasons/<its season>. Maps are copied as
+// encrypted blobs, so no password is needed. Non-destructive: the old fields are left in place.
+// Skips when that season already has a record; remembers the check per player so it runs once.
+async function migrateLegacyFirebaseRuns(playerName) {
+  if (!playerName || config.firebaseRunsLegacyMigratedFor === playerName) {
+    return false;
+  }
   try {
-    const path = await getBestRunsFirebasePath(playerName);
-    const data = await FirebaseRunsService.get(path, 'fetch runs from Firebase', null);
-    return data;
+    const rootPath = await getBestRunsFirebasePath(playerName);
+    const legacy = await FirebaseRunsService.get(rootPath, 'fetch legacy runs for migration', null);
+    let migrated = false;
+    if (legacy && legacy.version === FIREBASE_RUNS_VERSION_V2 && legacy.maps) {
+      const seasonPath = `${rootPath}/seasons/${Number(legacy.metadata?.season) || 1}`;
+      const existing = await FirebaseRunsService.get(seasonPath, 'check season record for migration', null);
+      if (!existing) {
+        await FirebaseRunsService.put(seasonPath, {
+          version: FIREBASE_RUNS_VERSION_V2,
+          lastUpdated: legacy.lastUpdated,
+          metadata: legacy.metadata || {},
+          playerName: legacy.playerName || playerName,
+          maps: legacy.maps
+        }, 'migrate legacy runs to season record');
+        migrated = true;
+        console.log('[Mod Settings] Migrated legacy Firebase runs to season', Number(legacy.metadata?.season) || 1);
+      }
+    }
+    config.firebaseRunsLegacyMigratedFor = playerName;
+    saveConfig();
+    return migrated;
+  } catch (error) {
+    console.error('[Mod Settings] Error migrating legacy Firebase runs:', error);
+    return false;
+  }
+}
+
+// Fetch one season's runs record from Firebase
+async function fetchRunsFromFirebase(playerName, season) {
+  try {
+    const seasonNum = Number(season) || 1;
+    const seasonPath = await getBestRunsSeasonFirebasePath(playerName, seasonNum);
+    const data = await FirebaseRunsService.get(seasonPath, 'fetch runs from Firebase', null);
+    if (data) {
+      return data;
+    }
+    // Pre-per-season uploads live at the player root; only valid for the season they were made in.
+    const legacy = await FirebaseRunsService.get(await getBestRunsFirebasePath(playerName), 'fetch legacy runs from Firebase', null);
+    if (legacy && legacy.version === FIREBASE_RUNS_VERSION_V2 && legacy.maps
+      && (Number(legacy.metadata?.season) || 1) === seasonNum) {
+      return legacy;
+    }
+    return null;
   } catch (error) {
     console.error('[Mod Settings] Error fetching runs from Firebase:', error);
     return null;
@@ -5700,13 +5755,16 @@ async function uploadBestRuns(options = {}) {
 }
 
 // Fetch player runs from Firebase
-async function fetchPlayerRuns(playerName, password) {
+async function fetchPlayerRuns(playerName, password, season = null) {
   try {
     if (!playerName || !password) {
       return null;
     }
-    
-    const remoteData = await fetchRunsFromFirebase(playerName);
+
+    const seasonToFetch = Number(season)
+      || getGameSeasonAndVersion().gameSeason
+      || detectCurrentSeasonFromRuns(window.RunTrackerAPI?.getAllRuns?.());
+    const remoteData = await fetchRunsFromFirebase(playerName, seasonToFetch);
     if (!remoteData) {
       return null;
     }
@@ -5962,6 +6020,13 @@ function stopAutoUploadMonitor() {
     clearInterval(autoUploadCheckInterval);
     autoUploadCheckInterval = null;
   }
+}
+
+// One-time copy of the pre-per-season Firebase record into its season slot
+if (config.enableFirebaseRunsUpload) {
+  scheduleTimeout(() => {
+    migrateLegacyFirebaseRuns(getCurrentPlayerName());
+  }, 5000);
 }
 
 // Start monitor if enabled

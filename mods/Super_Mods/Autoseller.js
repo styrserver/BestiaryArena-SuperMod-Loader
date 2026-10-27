@@ -4088,9 +4088,11 @@
                 if (actor && actor.id != null) ids.add(Number(actor.id));
             }
         };
-        const addExtraDrops = (gameIds) => {
-            if (!Array.isArray(gameIds)) return;
-            for (const gameId of gameIds) {
+        // Entries are `{ gameId, ... }` objects (older shape: bare gameId numbers).
+        const addExtraDrops = (drops) => {
+            if (!Array.isArray(drops)) return;
+            for (const drop of drops) {
+                const gameId = drop?.gameId ?? drop;
                 if (gameId != null) ids.add(Number(gameId));
             }
         };
@@ -4196,9 +4198,9 @@
             if (Array.isArray(room?.floorRules)) {
                 for (const rule of room.floorRules) extraDropLists.push(rule?.extraMonsterDrops);
             }
-            for (const gameIds of extraDropLists) {
-                if (!Array.isArray(gameIds)) continue;
-                for (const gameId of gameIds) addCreature({ gameId });
+            for (const drops of extraDropLists) {
+                if (!Array.isArray(drops)) continue;
+                for (const drop of drops) addCreature({ gameId: drop?.gameId ?? drop });
             }
         } catch (_) {
             // Ignore map-priority extraction errors and keep default ordering.

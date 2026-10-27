@@ -4,6 +4,31 @@
   },
   "notes": [
     {
+      "version": "5.1.8",
+      "changes": [
+        {
+          "mod": "Autoseller",
+          "type": "fixed",
+          "text": "Drop-only creatures (such as Demon and Paladin) are now actually found: the map data lists them in a new format that the 5.1.7 fix did not read, so they were still missing from the creature picker and the Current Map group."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "fixed",
+          "text": "Bestiary: drop-only creatures (such as Demon and Paladin) now list their maps and floors under Locations, using the same corrected map data format."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "changed",
+          "text": "Firebase run uploads now keep one saved record per season for each player, so a new season no longer overwrites the previous one. Your existing upload is copied into its season automatically."
+        },
+        {
+          "mod": "creature-database.js",
+          "type": "changed",
+          "text": "Paladin is no longer marked as an unobtainable creature."
+        }
+      ]
+    },
+    {
       "version": "5.1.7",
       "changes": [
         {

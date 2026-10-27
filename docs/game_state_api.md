@@ -683,6 +683,8 @@ const multiFloorRoomExample = {
     { "maxTeamSize": 4, "staminaCost": 12, "setupKey": "edanni" },  // floors 0-14
     // ...
     { "maxTeamSize": 6, "staminaCost": 18, "setupKey": "edanni2" }  // floor 15 (index 15)
+    // A rule may also carry "extraMonsterDrops": [{ "gameId": 123, ... }] — see
+    // "extraMonsterDrops" under "Monster Drop System" below (e.g. edcow floors 11-15).
   ]
 };
 
@@ -817,18 +819,30 @@ function tryForMonsterDrop({
 
 #### `extraMonsterDrops` — drop-only creatures on a room
 
-A room in `globalThis.state.utils.ROOMS` may carry `extraMonsterDrops: number[]` — monster `gameId`s
-that can drop from the room even though they are not placed on its board. Multi-floor rooms put it
-on each floor instead: `room.floorRules[floor].extraMonsterDrops`.
+A room in `globalThis.state.utils.ROOMS` may carry `extraMonsterDrops: { gameId: number, allowNonSealedOnRedFloors?: boolean }[]`
+— monsters that can drop from the room even though they are not placed on its board. **Entries are
+objects, not bare ids** (verified in console 2026-10-27), so match with `.some(d => d.gameId === id)`,
+never `.includes(id)`. Multi-floor rooms put it on each floor instead:
+`room.floorRules[floor].extraMonsterDrops`.
 
 ```javascript
 const room = globalThis.state.utils.ROOMS.find(r => r.id === 'edorsha'); // Orshabaal Raid
-room.extraMonsterDrops; // [132]  (Demon)
+room.extraMonsterDrops; // [{ gameId: 132 }]  (Demon)
 ```
 
-Read from the game's room table (`538-*.js` chunk, checked 2026-10-27). Known uses: Orshabaal Raid
-(`edorsha`) → Demon; Kings' Lab (`klab`) → Dwarf Geomancer.
+Known uses (console-verified 2026-10-27): Kings' Lab (`klab`) → Dwarf Geomancer (56); Orshabaal Raid
+(`edorsha`) → Demon (132); `edsta` → The Pale Count (121) + Vampire Bride (122); `edcow` floors
+11–15 (`floorRules`) → Paladin (123, `allowNonSealedOnRedFloors: true`).
 
+- Entry fields:
+
+  | Field | Type | Meaning |
+  |---|---|---|
+  | `gameId` | `number` | Monster that can drop. Always present. |
+  | `allowNonSealedOnRedFloors` | `boolean?` | Only seen on `edcow` floors 11–15 (Paladin). Absent elsewhere (treat as `false`). **Inferred, not read from source:** past `BASE_RED_FLOORS` the native roll switches to `rollForSealedMonsterDrop`; this flag presumably lets the creature still drop as a normal (non-sealed) monster there. |
+
+  `getMonsterDropPool` is server-side, so the flag's exact effect is unverified. Check it against real
+  drops before relying on it.
 - The game validates each entry at load: it must be a known monster and must **not** be in the
   non-playable set (`state.utils` has no export for it), otherwise it throws
   `Non-playable extra monster drop`.
