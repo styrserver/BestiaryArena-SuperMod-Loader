@@ -4041,7 +4041,21 @@
             if (typeof mapsDb?.isDynamicEventMap === 'function' && !mapsDb.isDynamicEventMap(roomId)) {
                 continue;
             }
-            const roomMonsters = state.utils.getBoardMonstersFromRoomId(roomId) || [];
+            // getBoardMonstersFromRoomId is floor-blind (floor 0 only), so also read every
+            // floor's raw actors (floorFiles for multi-floor rooms, e.g. Halloween Mansion's
+            // Clot on floors 7-11).
+            const roomMonsters = [...(state.utils.getBoardMonstersFromRoomId(roomId) || [])];
+            const room = (state.utils.ROOMS || []).find((r) => r?.id === roomId);
+            const floorActorLists = [room?.file?.data?.actors];
+            if (Array.isArray(room?.floorFiles)) {
+                for (const floorFile of room.floorFiles) floorActorLists.push(floorFile?.data?.actors);
+            }
+            for (const actors of floorActorLists) {
+                if (!Array.isArray(actors)) continue;
+                for (const actor of actors) {
+                    if (actor && actor.id != null) roomMonsters.push({ gameId: actor.id });
+                }
+            }
             for (const roomMonster of roomMonsters) {
                 const creatureName = roomMonster?.metadata?.name
                     || roomMonster?.name

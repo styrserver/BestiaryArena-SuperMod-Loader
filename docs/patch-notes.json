@@ -4,6 +4,66 @@
   },
   "notes": [
     {
+      "version": "5.1.6",
+      "changes": [
+        {
+          "mod": "Autoscroller",
+          "type": "changed",
+          "text": "The creature picker no longer lists map-exclusive creatures (Demon, Yeti) that never drop from scrolls. Autoseller still lists them."
+        },
+        {
+          "mod": "Autoseller",
+          "type": "fixed",
+          "text": "Event creatures that only appear on later floors of an active event map (such as Clot) are now listed in the creature picker."
+        },
+        {
+          "mod": "creature-database.js",
+          "type": "added",
+          "text": "Added a list of map-exclusive creatures that do not drop from summon scrolls, and a shared helper that builds the game's old creature sprite styles."
+        },
+        {
+          "mod": "creature-database.js",
+          "type": "fixed",
+          "text": "The old Demon sprite is no longer cropped."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "added",
+          "text": "Bestiary: new grey enemy-icon button next to the shiny button on the Creatures list. Shows the old sprite of the selected creature, if it has one. Old and Shiny cannot be on at the same time."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "changed",
+          "text": "Maps: updated the event icon in the map list."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "fixed",
+          "text": "Map creature lists now show a creature's custom nickname next to its species name. Owned creatures that use an item sprite (such as Clot) no longer show a broken image."
+        },
+        {
+          "mod": "equipment-database.js",
+          "type": "added",
+          "text": "Marked Dreaded Cleaver as event equipment."
+        },
+        {
+          "mod": "maps-database.js",
+          "type": "fixed",
+          "text": "Orshabaal Raid is now classified as a normal raid instead of an event, so it gets the raid icon in the Cyclopedia and no Event badge in Raid Hunter."
+        },
+        {
+          "mod": "maps-lua-export.js",
+          "type": "fixed",
+          "text": "The map page Creatures table now includes a creature's custom nickname."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "added",
+          "text": "New Old Sprites setting (Creatures): shows the game's old creature art for creatures that have it, including shiny ones. It does not change the Cyclopedia. Off by default."
+        }
+      ]
+    },
+    {
       "version": "5.1.5",
       "changes": [
         {

@@ -18,6 +18,7 @@ const defaultConfig = {
   maxShiniesColor: 'prismatic',
   showAdvancedStatsOnHover: false,
   showAbilityOnHover: false,
+  useOldOutfits: false,
   showSetupLabels: false,
   enableSetupShortcutsAndHover: true,
   hotkeySetupSource: 'betterSetups', // 'betterSetups' | 'setupManager'
@@ -7818,6 +7819,12 @@ function showSettingsModal() {
           </div>
           <div style="margin-bottom: 15px;">
             <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+              <input type="checkbox" id="old-outfits-toggle" style="transform: scale(1.2);">
+              ${warningLabelSpanHtml(t('mods.betterUI.useOldOutfits'), { title: t('mods.betterUI.useOldOutfitsWarning') })}
+            </label>
+          </div>
+          <div style="margin-bottom: 15px;">
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
               <input type="checkbox" id="auto-hide-non-shiny-awakened-monsters-toggle" style="transform: scale(1.2);">
               ${warningLabelSpanHtml(t('mods.betterUI.autoHideNonShinyNonAwakenedMonsters'), { title: t('mods.betterUI.autoHideNonShinyNonAwakenedMonstersWarning') })}
             </label>
@@ -8665,7 +8672,12 @@ function showSettingsModal() {
           }
         )(abilityHoverCheckbox);
       }
-      
+
+      const oldOutfitsCheckbox = content.querySelector('#old-outfits-toggle');
+      if (oldOutfitsCheckbox) {
+        createSettingsCheckboxHandler('useOldOutfits', () => applyOldOutfits(), removeOldOutfits)(oldOutfitsCheckbox);
+      }
+
       const lastVisitedMapCheckbox = content.querySelector('#last-visited-map-toggle');
       if (lastVisitedMapCheckbox) {
         createSettingsCheckboxHandler('showLastVisitedMapButton',
@@ -16243,6 +16255,34 @@ function disablePersistentInventory() {
   clearPersistentInventorySavedConfig();
 }
 
+const OLD_OUTFITS_STYLE_ID = 'mod-settings-old-outfits-style';
+
+// Re-scope the game's old-outfits CSS to the whole page (shinies too: no old shiny sheets
+// exist). `:root:root` outranks the game's `.spritesheet[data-shiny=true]` rules. The
+// Cyclopedia modal is excluded: only its own Old button changes sprites there.
+function applyOldOutfits(attempt = 0) {
+  if (document.getElementById(OLD_OUTFITS_STYLE_ID)) return;
+  const cssText = window.creatureDatabase?.buildOldOutfitsCss?.(':root:root', '[data-cyclopedia-dialog="1"]');
+  if (!cssText) {
+    // Database or game stylesheet may not be ready yet on a cold load: retry for ~5s.
+    if (attempt < 10) {
+      scheduleTimeout(() => { if (config.useOldOutfits) applyOldOutfits(attempt + 1); }, 500);
+    } else {
+      console.error('[Mod Settings] Old outfits: game stylesheet rule not found');
+    }
+    return;
+  }
+  const style = document.createElement('style');
+  style.id = OLD_OUTFITS_STYLE_ID;
+  style.textContent = cssText;
+  document.head.appendChild(style);
+  console.log('[Mod Settings] Old outfits applied:', style.sheet?.cssRules.length ?? 0, 'rules');
+}
+
+function removeOldOutfits() {
+  document.getElementById(OLD_OUTFITS_STYLE_ID)?.remove();
+}
+
 // Remove compact nav bar (show text again)
 function removeCompactNavBar() {
   document.querySelectorAll('[data-compact-nav-hidden="true"]').forEach(span => {
@@ -18691,6 +18731,8 @@ function initBetterUI() {
       .catch((error) => console.error('[Mod Settings] Custom background cache load failed:', error))
       .then(() => applyCustomBackgroundStyle());
 
+    if (config.useOldOutfits) applyOldOutfits();
+
     // Hide website footer if enabled
     if (config.removeWebsiteFooter) {
       scheduleTimeout(() => {
@@ -18821,6 +18863,7 @@ function cleanupBetterUI() {
     observers.inventoryModButtons = disconnectObserver(observers.inventoryModButtons, 'Inventory mod buttons');
     clearInventoryColumnsStyle();
     clearCustomBackgroundStyle();
+    removeOldOutfits();
     stopPersistentInventoryObserver();
     inventoryModButtonsState.missingRetryCount.clear();
     inventoryModButtonsState.knownClasses.clear();

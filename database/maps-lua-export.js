@@ -462,7 +462,10 @@ function buildCreatureTableRowsFromActors(actors) {
     const gifName = creatureGifFileName(name);
     const equipName = actor.equip?.gameId != null ? getEquipmentName(actor.equip.gameId) : null;
     const equipCell = equipName ? `[[File:${equipName}.gif|center|frameless]]` : '';
-    return `|[[${name}]]\n|[[File:${gifName}.gif|center|frameless]]\n|${actor.level ?? ''}\n|${equipCell}`;
+    // Room actors can carry a custom `nickname` (e.g. Halloween Mansion floors 7-11: a Clot
+    // named "Hemorrhage"); the species link stays the real name so the wiki link resolves.
+    const nameCell = actor.nickname ? `[[${name}]] (${actor.nickname})` : `[[${name}]]`;
+    return `|${nameCell}\n|[[File:${gifName}.gif|center|frameless]]\n|${actor.level ?? ''}\n|${equipCell}`;
   });
 
   return `{| class="wikitable"\n!Creature\n!\n!Level\n!Equipment\n|-\n${rows.join('\n|-\n')}\n|}`;

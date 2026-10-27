@@ -329,6 +329,27 @@ const CYCLOPEDIA_WIDGET_TITLE_TOGGLE_STYLE = {
   outline: 'none'
 };
 
+/** Green "active" look shared by the title-bar toggle buttons. */
+function setCyclopediaToggleActive(button, active) {
+  button.style.background = active ? 'url("https://bestiaryarena.com/_next/static/media/background-green.be515334.png") repeat' : '';
+  button.style.border = active ? '1px solid #4CAF50' : '';
+}
+
+const CYCLOPEDIA_OLD_SPRITES_CLASS = 'cyclopedia-old-sprites';
+const CYCLOPEDIA_OLD_SPRITES_STYLE_ID = 'cyclopedia-old-sprites-style';
+
+/** Injects the game's old-outfit CSS, scoped to `.cyclopedia-old-sprites` (doubled to outrank `[data-shiny=true]`). */
+function ensureCyclopediaOldSpritesStyle() {
+  if (document.getElementById(CYCLOPEDIA_OLD_SPRITES_STYLE_ID)) return;
+  const scope = `.${CYCLOPEDIA_OLD_SPRITES_CLASS}.${CYCLOPEDIA_OLD_SPRITES_CLASS}`;
+  const cssText = window.creatureDatabase?.buildOldOutfitsCss?.(scope);
+  if (!cssText) return;
+  const style = document.createElement('style');
+  style.id = CYCLOPEDIA_OLD_SPRITES_STYLE_ID;
+  style.textContent = cssText;
+  document.head.appendChild(style);
+}
+
 function createCyclopediaWidgetTitle(text, extraStyle = {}) {
   const titleEl = document.createElement('h2');
   titleEl.className = CYCLOPEDIA_WIDGET_TITLE_CLASS;
@@ -1242,7 +1263,8 @@ const CYCLOPEDIA_ASSETS = {
   grade: 'https://bestiaryarena.com/assets/icons/grade.png',
   floors: 'https://bestiaryarena.com/assets/icons/floors.png',
   raid: 'https://bestiaryarena.com/assets/icons/raid.png',
-  plinko: 'https://bestiaryarena.com/assets/icons/plinko.png',
+  eventMini: 'https://bestiaryarena.com/assets/icons/event-mini-icon.png',
+  enemy: 'https://bestiaryarena.com/assets/icons/enemy.png',
   stamina: 'https://bestiaryarena.com/assets/icons/stamina.png'
 };
 
@@ -6437,18 +6459,14 @@ function createBox({
             // Create icon
             const icon = document.createElement('img');
             if (isDynamicEvent) {
-              // Use plinko icon for dynamic event maps
-              icon.src = CYCLOPEDIA_ASSETS.plinko;
+              icon.src = CYCLOPEDIA_ASSETS.eventMini;
               icon.alt = 'event';
               icon.title = 'Event map';
             } else {
-              // Use raid icon for static raids
               icon.src = CYCLOPEDIA_ASSETS.raid;
               icon.alt = 'raid';
               icon.title = 'Raid map';
             }
-            icon.style.width = '11px';
-            icon.style.height = '11px';
             icon.style.flexShrink = '0';
             // Insert before the text span (or any existing icons)
             const textSpan = contentContainer.querySelector('span');
@@ -7827,7 +7845,7 @@ function renderMonsterStats(monsterData) {
   }
 }
 
-function renderCreatureTemplate(name, showShinyPortraits = false) {
+function renderCreatureTemplate(name, showShinyPortraits = false, showOldSprites = false) {
   let monstersArr = null;
   if (
     globalThis.state &&
@@ -7927,6 +7945,10 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
   col1Picture.style.justifyContent = 'center';
   col1Picture.style.alignItems = 'center';
   col1Picture.style.height = '110px';
+  if (showOldSprites) {
+    ensureCyclopediaOldSpritesStyle();
+    col1Picture.classList.add(CYCLOPEDIA_OLD_SPRITES_CLASS);
+  }
   let monsterId = null;
   let monster = null;
 
@@ -8962,7 +8984,15 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
         size: 'small'
       });
       portrait.style.margin = '0';
-      
+
+      // createFullMonster always emits `.sprite.outfit`, but item-look creatures (e.g. Clot)
+      // only have `.item.id-N` sprite CSS, so the portrait renders as a broken image.
+      if (globalThis.state?.utils?.getMonster?.(monster.gameId || monster.id)?.metadata?.lookType === 'item') {
+        portrait.querySelectorAll('.sprite.outfit').forEach((sprite) => {
+          sprite.classList.replace('outfit', 'item');
+        });
+      }
+
       // Set shiny attribute on the sprite if creature is shiny
       if (monster.shiny === true) {
         
@@ -13500,7 +13530,9 @@ function buildCreatureRow(actor, mapsTabNav = {}) {
         }
         
         const nameElement = document.createElement('div');
-        nameElement.textContent = creatureName;
+        // Room actors can carry a custom nickname (e.g. Halloween Mansion's "Hemorrhage" Clot);
+        // show it next to the species, but keep click/title on the species name.
+        nameElement.textContent = actor.nickname ? `${actor.nickname} (${creatureName})` : creatureName;
         nameElement.style.cssText = `
           font-weight: bold;
           font-size: 14px;
@@ -13722,7 +13754,7 @@ function createCreatureGrid(actors, mapsTabNav = {}) {
  * floors whose actors only differ in e.g. tileIndex/direction still count as "the same"
  * for consolidation purposes. */
 function actorDisplaySignature(actor) {
-  return `${actor?.id}|${actor?.level || 1}|${actor?.equip?.gameId || ''}|${actor?.equip?.tier || ''}|${actor?.equip?.stat || ''}`;
+  return `${actor?.id}|${actor?.nickname || ''}|${actor?.level || 1}|${actor?.equip?.gameId || ''}|${actor?.equip?.tier || ''}|${actor?.equip?.stat || ''}`;
 }
 
 /** Order-independent signature for a floor's actor roster — two floors with the same
@@ -15057,13 +15089,14 @@ function createMapsTabPage(selectedCreature, selectedEquipment, selectedInventor
 function createBestiaryTabPage(selectedCreature, selectedEquipment, selectedInventory, setSelectedCreature, setSelectedEquipment, setSelectedInventory, updateRightCol) {
   // Shiny portrait toggle state
   let showShinyPortraits = false;
+  let showOldSprites = false;
 
   const { root: d, leftCol, rightCol } = createCyclopediaTabShell();
   
   function updateRightColInternal() {
     rightCol.innerHTML = '';
     if (selectedCreature) {
-      rightCol.appendChild(renderCreatureTemplate(selectedCreature, showShinyPortraits));
+      rightCol.appendChild(renderCreatureTemplate(selectedCreature, showShinyPortraits, showOldSprites));
     } else {
       const msg = DOMUtils.createElement('div', FONT_CONSTANTS.SIZES.BODY, 'Select a creature from the left column to view.');
       Object.assign(msg.style, {
@@ -15099,9 +15132,10 @@ function createBestiaryTabPage(selectedCreature, selectedEquipment, selectedInve
           gap: 1px;
         `;
         
-        const creaturesTitle = createCyclopediaWidgetTitle('Creatures', CYCLOPEDIA_WIDGET_TITLE_SPLIT_STYLE);
+        const creaturesTitle = createCyclopediaWidgetTitle('Creatures', { ...CYCLOPEDIA_WIDGET_TITLE_SPLIT_STYLE, width: '68%', flex: '0 0 68%' });
         titleContainer.appendChild(creaturesTitle);
 
+        const oldSpritesButton = document.createElement('button');
         const toggleButton = document.createElement('button');
         applyCyclopediaWidgetTitleChrome(toggleButton, CYCLOPEDIA_WIDGET_TITLE_TOGGLE_STYLE);
         toggleButton.title = showShinyPortraits ? 'Shiny Mode' : 'Normal Mode';
@@ -15116,24 +15150,40 @@ function createBestiaryTabPage(selectedCreature, selectedEquipment, selectedInve
           e.stopPropagation(); // Prevent title click event
           showShinyPortraits = !showShinyPortraits;
           toggleButton.title = showShinyPortraits ? 'Shiny Mode' : 'Normal Mode';
-          
-          // Update background and border color to show toggle state
-          if (showShinyPortraits) {
-            toggleButton.style.background = 'url("https://bestiaryarena.com/_next/static/media/background-green.be515334.png") repeat';
-            toggleButton.style.border = '1px solid #4CAF50';
-          } else {
-            // Reset to default widget-top styling (remove custom background/border to let CSS take over)
-            toggleButton.style.background = '';
-            toggleButton.style.border = '';
+          setCyclopediaToggleActive(toggleButton, showShinyPortraits);
+          // Shiny and Old Sprites are mutually exclusive (no shiny version of the old art).
+          if (showShinyPortraits && showOldSprites) {
+            showOldSprites = false;
+            oldSpritesButton.title = 'Old Sprites: Off';
+            setCyclopediaToggleActive(oldSpritesButton, false);
           }
-          
-          
-          
+
           // Update the right column to reflect the new mode
           updateRightColInternal();
         });
         
         titleContainer.appendChild(toggleButton);
+
+        applyCyclopediaWidgetTitleChrome(oldSpritesButton, CYCLOPEDIA_WIDGET_TITLE_TOGGLE_STYLE);
+        oldSpritesButton.title = 'Old Sprites: Off';
+        const oldSpritesImg = document.createElement('img');
+        oldSpritesImg.src = CYCLOPEDIA_ASSETS.enemy;
+        oldSpritesImg.alt = 'old sprites';
+        oldSpritesImg.style.cssText = 'width: 10px; height: 10px; filter: grayscale(1);';
+        oldSpritesButton.appendChild(oldSpritesImg);
+        oldSpritesButton.addEventListener('click', (e) => {
+          e.stopPropagation();
+          showOldSprites = !showOldSprites;
+          oldSpritesButton.title = showOldSprites ? 'Old Sprites: On' : 'Old Sprites: Off';
+          setCyclopediaToggleActive(oldSpritesButton, showOldSprites);
+          if (showOldSprites && showShinyPortraits) {
+            showShinyPortraits = false;
+            toggleButton.title = 'Normal Mode';
+            setCyclopediaToggleActive(toggleButton, false);
+          }
+          updateRightColInternal();
+        });
+        titleContainer.appendChild(oldSpritesButton);
         
         // Replace the original title with our new structure
         titleEl.parentNode.replaceChild(titleContainer, titleEl);
@@ -21521,6 +21571,8 @@ function cleanupCyclopedia() {
     
     // Clean up ability tooltips
     cleanupAbilityTooltips();
+
+    document.getElementById(CYCLOPEDIA_OLD_SPRITES_STYLE_ID)?.remove();
     
     // Clean up modal
     if (activeCyclopediaModal) {

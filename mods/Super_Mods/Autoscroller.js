@@ -224,6 +224,9 @@
     if (typeof db?.isEventCreatureName === 'function' && db.isEventCreatureName(creatureName)) {
       return true;
     }
+    if (typeof db?.isNonScrollCreatureName === 'function' && db.isNonScrollCreatureName(creatureName)) {
+      return true;
+    }
     if (typeof db?.isGazerCreatureName === 'function') {
       return db.isGazerCreatureName(creatureName);
     }
@@ -235,7 +238,7 @@
     if (!ALL_CREATURES_CACHE) {
       const db = window.creatureDatabase;
       if (typeof db?.getAutoscrollAutosellerCreaturePickerNames === 'function') {
-        ALL_CREATURES_CACHE = db.getAutoscrollAutosellerCreaturePickerNames();
+        ALL_CREATURES_CACHE = db.getAutoscrollAutosellerCreaturePickerNames().filter((name) => !isExcludedFromAutoscrollPicker(name));
       } else if (typeof db?.getCreaturePickerNames === 'function') {
         ALL_CREATURES_CACHE = db.getCreaturePickerNames().filter((name) => !isExcludedFromAutoscrollPicker(name));
       } else if (typeof db?.getCyclopediaCreatureNames === 'function') {

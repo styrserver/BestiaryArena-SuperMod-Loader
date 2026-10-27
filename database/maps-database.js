@@ -302,7 +302,8 @@ const EVENT_TO_ROOM_MAPPING = {
   'Dwarven Bank Heist': 'vbank',
   'An Arcanist Ritual': 'vdhar',
   'Botham II': 'ankuh',
-  'Esuph IV': 'anksqr'
+  'Esuph IV': 'anksqr',
+  'Orshabaal Raid': 'edorsha'
 };
 
 /**

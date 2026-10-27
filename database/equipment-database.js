@@ -58,6 +58,7 @@ const HARDCODED_BOOSTED_MAP = {
 
 /** Seasonal / event equipment — excluded from Cyclopedia BIS progress max. */
 const EVENT_EQUIPMENT = [
+  'Dreaded Cleaver',
   'Grey Tome',
   'Orclops Santa',
   'Vampire Silk Slippers',

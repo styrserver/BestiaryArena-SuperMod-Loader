@@ -69,6 +69,52 @@ function creatureHasShinyVariant(creatureName) {
   return true;
 }
 
+function findGameOldOutfitsRule(rules) {
+  for (const rule of rules) {
+    if (rule.selectorText && rule.cssRules?.length && rule.cssText.includes('/old-outfits/')) return rule;
+    if (!rule.selectorText && rule.cssRules) {
+      const nested = findGameOldOutfitsRule(rule.cssRules);
+      if (nested) return nested;
+    }
+  }
+  return null;
+}
+
+/**
+ * The game ships its old creature art (/assets/old-outfits/) as one nested CSS rule scoped
+ * to an event scene (`#scene-board-… { .outfit.id-N … }`) mapping current outfit ids to the
+ * old sheets plus their --size/--sWidth/--sHeight. Returns that rule flattened into plain
+ * rules, each selector prefixed with `scopePrefix` (use a prefix with >= 2 class/pseudo-class
+ * specificity so it outranks the game's `.spritesheet[data-shiny=true]` rules). Reading the
+ * game's own stylesheet keeps the id → old-sheet map out of our code. Returns null when the
+ * stylesheet isn't loaded yet. `excludeSelector` (optional) leaves everything inside matching
+ * containers untouched.
+ */
+function buildOldOutfitsCss(scopePrefix, excludeSelector = '') {
+  const exclude = excludeSelector ? `:not(${excludeSelector} *)` : '';
+  let rule = null;
+  for (const sheet of document.styleSheets) {
+    try {
+      rule = findGameOldOutfitsRule(sheet.cssRules);
+    } catch (_) { continue; /* cross-origin sheet */ }
+    if (rule) break;
+  }
+  if (!rule) return null;
+  // Flatten instead of re-serialising the parent so the result doesn't depend on how a
+  // browser prints nested CSS (`& .outfit…` vs `.outfit…`).
+  const rules = Array.from(rule.cssRules)
+    .filter((r) => r.selectorText)
+    .map((r) => `${scopePrefix} ${r.selectorText.replace(/^&\s*/, '')}${exclude} { ${r.style.cssText} }`);
+  // The game's own old-outfit rule gives these a smaller --size than their sheet's frame
+  // size (Demon: 64px frames declared as 32px), which crops the sprite.
+  for (const [outfitId, size] of Object.entries(OLD_OUTFIT_SIZE_FIXES)) {
+    rules.push(`${scopePrefix} .outfit.id-${outfitId}${exclude} { --size: ${size}px; }`);
+  }
+  return rules.join('\n');
+}
+
+const OLD_OUTFIT_SIZE_FIXES = { 35: 64 };
+
 /** Creatures hidden from Cyclopedia lists only (still in game data). */
 const CYCLOPEDIA_HIDDEN_CREATURES = ['Tentugly', 'Dwarf Henchman'];
 
@@ -139,6 +185,15 @@ function isEventCreatureName(creatureName) {
   const norm = String(creatureName ?? '').trim().toLowerCase();
   if (!norm) return false;
   return EVENT_CREATURES.some((name) => name.toLowerCase() === norm);
+}
+
+/** Map-exclusive creatures — never drop from summon scrolls (Autoscroller hides them; Autoseller keeps them). */
+const NON_SCROLL_CREATURES = ['Demon', 'Yeti'];
+
+function isNonScrollCreatureName(creatureName) {
+  const norm = String(creatureName ?? '').trim().toLowerCase();
+  if (!norm) return false;
+  return NON_SCROLL_CREATURES.some((name) => name.toLowerCase() === norm);
 }
 
 /** True for any gazer species or Albino Gazer (shiny Mystic). */
@@ -505,11 +560,14 @@ function initializeDatabase() {
   creatureDatabase.getCyclopediaCreatureNames = creatureDatabase.getCyclopediaCreatureNames || (() => getCyclopediaCreatureNames(creatureDatabase.ALL_CREATURES));
   creatureDatabase.resolveCreatureDisplay = resolveCreatureDisplay;
   creatureDatabase.creatureHasShinyVariant = creatureHasShinyVariant;
+  creatureDatabase.buildOldOutfitsCss = buildOldOutfitsCss;
   creatureDatabase.filterMonstersForCreatureDisplay = filterMonstersForCreatureDisplay;
   creatureDatabase.getCreaturePickerNames = creatureDatabase.getCreaturePickerNames || (() => getCyclopediaCreatureNames(creatureDatabase.ALL_CREATURES));
   creatureDatabase.getAutoscrollAutosellerCreaturePickerNames = creatureDatabase.getAutoscrollAutosellerCreaturePickerNames || (() => getAutoscrollAutosellerCreaturePickerNames(creatureDatabase.ALL_CREATURES));
   creatureDatabase.EVENT_CREATURES = EVENT_CREATURES;
   creatureDatabase.isEventCreatureName = isEventCreatureName;
+  creatureDatabase.NON_SCROLL_CREATURES = NON_SCROLL_CREATURES;
+  creatureDatabase.isNonScrollCreatureName = isNonScrollCreatureName;
   creatureDatabase.isGazerCreatureName = isGazerCreatureName;
   creatureDatabase.ALL_GAZER_GAME_IDS = ALL_GAZER_GAME_IDS;
   creatureDatabase.MYSTIC_GAZER_GAME_ID = MYSTIC_GAZER_GAME_ID;
@@ -544,6 +602,7 @@ const placeholderDatabase = {
   getMonsterNameMap,
   resolveCreatureDisplay,
   creatureHasShinyVariant,
+  buildOldOutfitsCss,
   filterMonstersForCreatureDisplay,
   getCreaturePickerNames: () => getCyclopediaCreatureNames([]),
   getAutoscrollAutosellerCreaturePickerNames: () => [],
@@ -614,6 +673,8 @@ waitForGameState(() => {
     globalWindow.creatureDatabase.getAutoscrollAutosellerCreaturePickerNames = creatureDatabase.getAutoscrollAutosellerCreaturePickerNames;
     globalWindow.creatureDatabase.EVENT_CREATURES = EVENT_CREATURES;
     globalWindow.creatureDatabase.isEventCreatureName = isEventCreatureName;
+    globalWindow.creatureDatabase.NON_SCROLL_CREATURES = NON_SCROLL_CREATURES;
+    globalWindow.creatureDatabase.isNonScrollCreatureName = isNonScrollCreatureName;
     globalWindow.creatureDatabase.isGazerCreatureName = isGazerCreatureName;
     globalWindow.creatureDatabase.ALL_GAZER_GAME_IDS = ALL_GAZER_GAME_IDS;
     globalWindow.creatureDatabase.MYSTIC_GAZER_GAME_ID = MYSTIC_GAZER_GAME_ID;
