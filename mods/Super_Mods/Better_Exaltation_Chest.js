@@ -187,6 +187,9 @@
   let saveEquipmentSetupTimeout = null;
   let updateCapacityDisplayTimeout = null;
   let chestOpenInProgress = false; // Track if a chest open request is pending
+  const MAX_STUCK_OPEN_ATTEMPTS = 5; // Stop auto-opening after this many clicks with no chest consumed
+  let lastChestCountSeen = null;
+  let stuckOpenAttempts = 0;
   
   // Equipment filtering state
   let lastOpenedEquipment = null;
@@ -1245,6 +1248,8 @@
     
     // Clear chest open in progress flag
     chestOpenInProgress = false;
+    lastChestCountSeen = null;
+    stuckOpenAttempts = 0;
   }
   
   function clickOpenButton() {
@@ -1269,7 +1274,22 @@
       logArsenalStatus();
       const chestCount = getExaltationChestCount();
       console.log(`[Better Exaltation Chest] Chests remaining: ${chestCount}`);
-      
+
+      // Stuck guard: chest count unchanged across clicks means opens aren't registering
+      if (autoModeEnabled) {
+        if (chestCount === lastChestCountSeen) {
+          stuckOpenAttempts++;
+        } else {
+          stuckOpenAttempts = 0;
+          lastChestCountSeen = chestCount;
+        }
+        if (stuckOpenAttempts >= MAX_STUCK_OPEN_ATTEMPTS) {
+          console.warn(`[Better Exaltation Chest] Chest count stuck at ${chestCount} after ${MAX_STUCK_OPEN_ATTEMPTS} retries, stopping auto-opening`);
+          stopAutoOpeningAndUpdateButton();
+          return;
+        }
+      }
+
       // Find the Open button in the current exaltation chest modal
       const openButton = findOpenButton();
       
@@ -3184,17 +3204,23 @@
     addManagedEventListener(handle, 'lostpointercapture', finishDrag);
   }
 
+  // Event equipment cannot be rolled in exaltation chests
+  function excludeEventEquipment(list) {
+    const isEvent = window.equipmentDatabase?.isEventEquipmentName;
+    return typeof isEvent === 'function' ? list.filter((name) => !isEvent(name)) : list;
+  }
+
   // Get equipment list from equipment database
   function generateEquipmentList() {
     // Use cached list if available
     if (cachedEquipmentList && cachedEquipmentList.length > 0) {
       return cachedEquipmentList;
     }
-    
+
     const equipmentDatabase = window.equipmentDatabase;
     if (equipmentDatabase && equipmentDatabase.ALL_EQUIPMENT && equipmentDatabase.ALL_EQUIPMENT.length > 0) {
       // Cache it for future use
-      cachedEquipmentList = equipmentDatabase.ALL_EQUIPMENT;
+      cachedEquipmentList = excludeEventEquipment(equipmentDatabase.ALL_EQUIPMENT);
       return cachedEquipmentList;
     }
     return [];
@@ -3223,7 +3249,7 @@
     const equipmentDatabase = window.equipmentDatabase;
     
     if (equipmentDatabase && equipmentDatabase.ALL_EQUIPMENT && equipmentDatabase.ALL_EQUIPMENT.length > 0) {
-      cachedEquipmentList = equipmentDatabase.ALL_EQUIPMENT;
+      cachedEquipmentList = excludeEventEquipment(equipmentDatabase.ALL_EQUIPMENT);
       equipmentPreloadInProgress = false;
       console.log(`[Better Exaltation Chest] Preloaded ${cachedEquipmentList.length} equipment items`);
     } else if (retryCount < CONSTANTS.EQUIPMENT_LOAD_MAX_RETRIES) {

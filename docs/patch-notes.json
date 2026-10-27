@@ -4,6 +4,31 @@
   },
   "notes": [
     {
+      "version": "5.1.7",
+      "changes": [
+        {
+          "mod": "Autoseller",
+          "type": "fixed",
+          "text": "Creatures that only drop from a map without being placed on its board (such as Demon) are now listed in the creature picker. The Current Map group now includes creatures and equipment from every floor and every drop-only creature of the map."
+        },
+        {
+          "mod": "Better Exaltation Chest",
+          "type": "changed",
+          "text": "Event equipment, which cannot be rolled from exaltation chests, is no longer listed in the equipment picker."
+        },
+        {
+          "mod": "Better Exaltation Chest",
+          "type": "fixed",
+          "text": "Auto-open now stops after 5 tries if the chest count does not change, instead of clicking forever."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "fixed",
+          "text": "Bestiary: creatures that only drop from a map without being placed on its board (such as Demon) now list that map under Locations."
+        }
+      ]
+    },
+    {
       "version": "5.1.6",
       "changes": [
         {

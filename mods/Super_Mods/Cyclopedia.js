@@ -3300,18 +3300,25 @@ function findMonsterLocations(monsterName) {
               roomLocations.push(LOCATION_UTILS.createLocationData(actor, roomLocations.length));
             });
           });
-          if (roomLocations.length > 0) {
+          // Drop-only creatures (floorRules[].extraMonsterDrops) are not on the board, so they
+          // add the floor but no position rows.
+          if (Array.isArray(room.floorRules)) {
+            room.floorRules.forEach((rule, floorIndex) => {
+              if (rule?.extraMonsterDrops?.includes(monsterGameId)) floors.add(floorIndex);
+            });
+          }
+          if (floors.size > 0) {
             const roomName = getCyclopediaRoomDisplayName(room?.id ?? roomKey);
             locations.push({ roomId: roomKey, roomName, positions: roomLocations, floors });
           }
           return;
         }
 
-        const actors = room.file?.data?.actors;
-        if (!actors) return;
-
-        const monsterInRoom = actors.filter(actor => actor?.id === monsterGameId);
-        if (monsterInRoom.length > 0) {
+        // Drop-only creatures (room.extraMonsterDrops) are not placed on the board, so they
+        // still get a room row but with no position details.
+        const monsterInRoom = (room.file?.data?.actors ?? []).filter(actor => actor?.id === monsterGameId);
+        const isExtraDrop = !!room.extraMonsterDrops?.includes(monsterGameId);
+        if (monsterInRoom.length > 0 || isExtraDrop) {
           const roomName = getCyclopediaRoomDisplayName(room?.id ?? roomKey);
           const roomLocations = monsterInRoom.map((actor, index) => LOCATION_UTILS.createLocationData(actor, index));
           locations.push({ roomId: roomKey, roomName, positions: roomLocations });

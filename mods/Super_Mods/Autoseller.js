@@ -4072,7 +4072,9 @@
         return [...activeEventCreatures];
     }
 
-    // gameIds of every monster placed as an actor on any map (all floors). Cached once non-empty.
+    // gameIds of every monster that can come from any map (all floors): placed actors plus
+    // the room's `extraMonsterDrops` (drop-only creatures that are not on the board, e.g. the
+    // Demon on Orshabaal Raid). Cached once non-empty.
     let mapMonsterGameIdsCache = null;
     function getMapMonsterGameIds() {
         if (mapMonsterGameIdsCache) return mapMonsterGameIdsCache;
@@ -4086,11 +4088,21 @@
                 if (actor && actor.id != null) ids.add(Number(actor.id));
             }
         };
+        const addExtraDrops = (gameIds) => {
+            if (!Array.isArray(gameIds)) return;
+            for (const gameId of gameIds) {
+                if (gameId != null) ids.add(Number(gameId));
+            }
+        };
         for (const room of roomList) {
             if (!room) continue;
             addActors(room.file?.data?.actors);
+            addExtraDrops(room.extraMonsterDrops);
             if (Array.isArray(room.floorFiles)) {
                 for (const floorFile of room.floorFiles) addActors(floorFile?.data?.actors);
+            }
+            if (Array.isArray(room.floorRules)) {
+                for (const rule of room.floorRules) addExtraDrops(rule?.extraMonsterDrops);
             }
         }
         if (ids.size > 0) mapMonsterGameIdsCache = ids;
@@ -4150,13 +4162,10 @@
         }
 
         try {
-            const board = utils.getBoardMonstersFromRoomId(roomId);
-            if (!Array.isArray(board)) return { creatureNames, equipmentNames };
-
-            for (const piece of board) {
+            const addCreature = (piece) => {
                 const creatureName = piece?.metadata?.name
                     || piece?.name
-                    || (piece?.gameId && utils.getMonster?.(piece.gameId)?.metadata?.name)
+                    || (piece?.gameId != null && utils.getMonster?.(piece.gameId)?.metadata?.name)
                     || '';
                 if (creatureName) creatureNames.add(creatureName);
 
@@ -4165,6 +4174,31 @@
                     const equipName = utils.getEquipment(equipGameId)?.metadata?.name || '';
                     if (equipName) equipmentNames.add(equipName);
                 }
+            };
+
+            // getBoardMonstersFromRoomId is floor-blind (floor 0 only), so also read every
+            // floor's raw actors plus the room's drop-only `extraMonsterDrops`.
+            const board = utils.getBoardMonstersFromRoomId(roomId);
+            if (Array.isArray(board)) board.forEach(addCreature);
+
+            const room = (utils.ROOMS || []).find((r) => r?.id === roomId);
+            const actorLists = [room?.file?.data?.actors];
+            if (Array.isArray(room?.floorFiles)) {
+                for (const floorFile of room.floorFiles) actorLists.push(floorFile?.data?.actors);
+            }
+            for (const actors of actorLists) {
+                if (!Array.isArray(actors)) continue;
+                for (const actor of actors) {
+                    if (actor && actor.id != null) addCreature({ gameId: actor.id, equip: actor.equip });
+                }
+            }
+            const extraDropLists = [room?.extraMonsterDrops];
+            if (Array.isArray(room?.floorRules)) {
+                for (const rule of room.floorRules) extraDropLists.push(rule?.extraMonsterDrops);
+            }
+            for (const gameIds of extraDropLists) {
+                if (!Array.isArray(gameIds)) continue;
+                for (const gameId of gameIds) addCreature({ gameId });
             }
         } catch (_) {
             // Ignore map-priority extraction errors and keep default ordering.

@@ -815,6 +815,31 @@ function tryForMonsterDrop({
 - `rollForSealedMonsterDrop({ monsterDropPool, floor, boostedOrRaid })` — rolls a sealed monster drop on higher floors
 - `BASE_RED_FLOORS` — floor threshold where sealed drops replace normal drops
 
+#### `extraMonsterDrops` — drop-only creatures on a room
+
+A room in `globalThis.state.utils.ROOMS` may carry `extraMonsterDrops: number[]` — monster `gameId`s
+that can drop from the room even though they are not placed on its board. Multi-floor rooms put it
+on each floor instead: `room.floorRules[floor].extraMonsterDrops`.
+
+```javascript
+const room = globalThis.state.utils.ROOMS.find(r => r.id === 'edorsha'); // Orshabaal Raid
+room.extraMonsterDrops; // [132]  (Demon)
+```
+
+Read from the game's room table (`538-*.js` chunk, checked 2026-10-27). Known uses: Orshabaal Raid
+(`edorsha`) → Demon; Kings' Lab (`klab`) → Dwarf Geomancer.
+
+- The game validates each entry at load: it must be a known monster and must **not** be in the
+  non-playable set (`state.utils` has no export for it), otherwise it throws
+  `Non-playable extra monster drop`.
+- Orshabaal Raid's board actors (Orshabaal, Rostein, Shooter, Healer) are all non-playable, so the
+  Demon is the only creature that can drop there.
+- The drop pool is presumably the room's playable actors plus `extraMonsterDrops`. `getMonsterDropPool`
+  itself is not in the client chunks (server-side), so that combination is inferred, not read.
+- Anything that asks "can this creature come from a map?" by scanning `room.file.data.actors` /
+  `room.floorFiles[].data.actors` alone will miss these creatures. Autoseller's
+  `getMapMonsterGameIds()` also reads `extraMonsterDrops` for this reason.
+
 #### `rollForMonsterDrop` source (game code, TypeScript, pasted 2026-09-29)
 
 Reference copy of the native gene-roll for a normal (non-sealed) monster drop. Useful for
