@@ -64,7 +64,7 @@ const defaultConfig = {
   autoUploadRuns: false, // Automatically upload when new best run is recorded
   firebaseUploadRegions: {}, // regionId -> false when disabled; missing keys = enabled (all ON by default)
   lastFirebaseUploadedMapHashes: {}, // "s<season>:<mapKey>" -> payload hash for delta Firebase uploads (v2)
-  firebaseRunsLegacyMigratedFor: '', // player name whose pre-per-season Firebase record was already checked/copied
+  firebaseRunsLegacyMigratedFor: '', // "<player name>#<migration version>" whose pre-per-season Firebase record was already checked/copied
   hotkeyOpenInventory: 'i', // KeyboardEvent.key id: letter/digit, or e.g. f1, insert, home, pageup
   hotkeyOpenQuestLog: 'q',
   hotkeyOpenStore: 's',
@@ -4151,6 +4151,19 @@ const FirebaseRunsService = {
     }
   },
 
+  // Like get(), but network/HTTP errors throw (404 still returns null) so callers can tell
+  // "record missing" from "read failed".
+  async getStrict(path, errorContext) {
+    const response = await fetch(`${path}.json`);
+    if (!response.ok) {
+      if (response.status === 404) {
+        return null;
+      }
+      throw new Error(`Failed to ${errorContext}: ${response.status}`);
+    }
+    return await response.json();
+  },
+
   async put(path, data, errorContext) {
     const options = {
       method: 'PUT',
@@ -4199,8 +4212,20 @@ function toFirebaseKey(mapKey) {
 }
 
 function hashMapRunsPayload(mapData) {
+  // Must stay short: these are persisted in config (localStorage) per map per season.
+  // Storing the raw JSON here overflowed the localStorage quota (QuotaExceededError).
   try {
-    return JSON.stringify(mapData);
+    const str = JSON.stringify(mapData);
+    let h1 = 0xdeadbeef;
+    let h2 = 0x41c6ce57;
+    for (let i = 0; i < str.length; i++) {
+      const ch = str.charCodeAt(i);
+      h1 = Math.imul(h1 ^ ch, 2654435761);
+      h2 = Math.imul(h2 ^ ch, 1597334677);
+    }
+    h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+    h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+    return `${str.length.toString(36)}-${(h2 >>> 0).toString(36)}${(h1 >>> 0).toString(36)}`;
   } catch (e) {
     return String(Date.now());
   }
@@ -4252,7 +4277,13 @@ async function uploadBestRunsToFirebase(playerName, bestRuns, password, options 
     const path = await getBestRunsSeasonFirebasePath(playerName, season);
     const remote = await FirebaseRunsService.get(path, 'fetch runs for delta upload', null);
     const now = Date.now();
-    const mapHashes = { ...(config.lastFirebaseUploadedMapHashes || {}) };
+    const mapHashes = {};
+    // Drop legacy entries that stored the full JSON payload instead of a short hash.
+    for (const [k, v] of Object.entries(config.lastFirebaseUploadedMapHashes || {})) {
+      if (typeof v === 'string' && v.length <= 40) {
+        mapHashes[k] = v;
+      }
+    }
     // Hash cache is per season: the same mapKey has different runs in each season.
     const hashKey = (mapKey) => `s${season}:${mapKey}`;
     const needsFullUpload = forceFull || !remote || remote.version !== FIREBASE_RUNS_VERSION_V2;
@@ -4322,19 +4353,30 @@ async function getBestRunsSeasonFirebasePath(playerName, season) {
 }
 
 // Copies the pre-per-season record (best-runs/<hash>) into seasons/<its season>. Maps are copied as
-// encrypted blobs, so no password is needed. Non-destructive: the old fields are left in place.
-// Skips when that season already has a record; remembers the check per player so it runs once.
+// encrypted blobs, so no password is needed. The old root fields are deleted only after the season
+// record is re-read and confirmed to contain every legacy map. Skips the copy when that season already
+// has a record; remembers the check per player so it runs once.
 async function migrateLegacyFirebaseRuns(playerName) {
-  if (!playerName || config.firebaseRunsLegacyMigratedFor === playerName) {
+  if (!playerName) {
+    console.log('[Mod Settings] Legacy Firebase migration: no player name yet, skipped');
+    return false;
+  }
+  // Versioned done-marker: flags written by the copy-only version (plain player name) don't match,
+  // so those players re-run once to get the legacy-root cleanup. Bump the suffix to force another pass.
+  const doneTag = `${playerName}#3`;
+  if (config.firebaseRunsLegacyMigratedFor === doneTag) {
+    console.log('[Mod Settings] Legacy Firebase migration: already checked for', playerName);
     return false;
   }
   try {
+    console.log('[Mod Settings] Legacy Firebase migration: checking', playerName);
     const rootPath = await getBestRunsFirebasePath(playerName);
-    const legacy = await FirebaseRunsService.get(rootPath, 'fetch legacy runs for migration', null);
+    // Strict reads: a failed read must throw (flag stays unset, retried later), never look like "no record".
+    const legacy = await FirebaseRunsService.getStrict(rootPath, 'fetch legacy runs for migration');
     let migrated = false;
     if (legacy && legacy.version === FIREBASE_RUNS_VERSION_V2 && legacy.maps) {
       const seasonPath = `${rootPath}/seasons/${Number(legacy.metadata?.season) || 1}`;
-      const existing = await FirebaseRunsService.get(seasonPath, 'check season record for migration', null);
+      const existing = await FirebaseRunsService.getStrict(seasonPath, 'check season record for migration');
       if (!existing) {
         await FirebaseRunsService.put(seasonPath, {
           version: FIREBASE_RUNS_VERSION_V2,
@@ -4346,8 +4388,28 @@ async function migrateLegacyFirebaseRuns(playerName) {
         migrated = true;
         console.log('[Mod Settings] Migrated legacy Firebase runs to season', Number(legacy.metadata?.season) || 1);
       }
+      // Contract: remove the legacy root fields only once the season record is confirmed (re-read from
+      // Firebase) to hold every legacy map. PATCH with nulls leaves the sibling `seasons` node untouched.
+      const seasonRecord = await FirebaseRunsService.getStrict(seasonPath, 'verify season record before legacy cleanup');
+      const seasonMaps = seasonRecord && seasonRecord.maps;
+      // Safe when the season record holds every legacy map, or is at least as new as the legacy one
+      // (a later upload may have legitimately dropped maps, e.g. pruned empty-board runs).
+      const supersedes = seasonMaps && (
+        Object.keys(legacy.maps).every((k) => seasonMaps[k])
+        || Number(seasonRecord.lastUpdated) >= Number(legacy.lastUpdated)
+      );
+      if (supersedes) {
+        await FirebaseRunsService.patch(rootPath, {
+          version: null, maps: null, metadata: null, lastUpdated: null, playerName: null
+        }, 'remove legacy runs after migration');
+        console.log('[Mod Settings] Removed legacy Firebase runs record after migration');
+      } else {
+        console.log('[Mod Settings] Legacy Firebase migration: season record older and missing legacy maps, legacy fields kept');
+      }
+    } else {
+      console.log('[Mod Settings] Legacy Firebase migration: no legacy record, nothing to do');
     }
-    config.firebaseRunsLegacyMigratedFor = playerName;
+    config.firebaseRunsLegacyMigratedFor = doneTag;
     saveConfig();
     return migrated;
   } catch (error) {

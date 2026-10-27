@@ -4,6 +4,21 @@
   },
   "notes": [
     {
+      "version": "5.1.9",
+      "changes": [
+        {
+          "mod": "Mod Settings",
+          "type": "changed",
+          "text": "Your old Firebase run upload is now moved into its season automatically on startup, and the outdated copy is removed once the season record is confirmed. A failed connection no longer marks the move as done or risks overwriting a newer season record."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "fixed",
+          "text": "Uploading runs no longer fills up browser storage and fails with a quota error when saving settings."
+        }
+      ]
+    },
+    {
       "version": "5.1.8",
       "changes": [
         {

@@ -251,6 +251,24 @@
             }
         }
         
+        // Uploads are stored per season at best-runs/<hash>/seasons/<season>. Pick the newest season;
+        // fall back to a pre-per-season record stored directly at the root.
+        // Firebase may return `seasons` as an array (with null holes) when keys are small integers.
+        function pickLatestSeasonRecord(rootData) {
+            if (!rootData) {
+                return null;
+            }
+            if (rootData.seasons && typeof rootData.seasons === 'object') {
+                const entries = Object.entries(rootData.seasons)
+                    .filter(([key, record]) => record && Number.isFinite(Number(key)))
+                    .sort((a, b) => Number(b[0]) - Number(a[0]));
+                if (entries.length > 0) {
+                    return entries[0][1];
+                }
+            }
+            return rootData;
+        }
+
         // Decrypt v1 (single blob) or v2 (per-map chunks under .maps)
         async function decryptBestRunsFromFirebaseRecord(remoteData, password) {
             if (!remoteData || !password) {
@@ -440,7 +458,8 @@
                     throw new Error(`HTTP ${response.status}`);
                 }
                 
-                const remoteData = await response.json();
+                const rootData = await response.json();
+                const remoteData = pickLatestSeasonRecord(rootData);
                 if (!remoteData || (!remoteData.encrypted && !(remoteData.version === '2.0' && remoteData.maps))) {
                     showStatus('No encrypted data found for this player.', 'error');
                     fetchBtn.disabled = false;

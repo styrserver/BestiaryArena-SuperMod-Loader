@@ -24,12 +24,16 @@ https://vip-list-messages-default-rtdb.europe-west1.firebasedatabase.app
 
 ### Path Format
 ```
-/best-runs/{hashedPlayerName}.json
+/best-runs/{hashedPlayerName}/seasons/{season}.json
 ```
+
+Each player has one record per season. `/best-runs/{hashedPlayerName}.json` returns the player's whole node (`{ "seasons": { "1": {...}, "2": {...} } }`). Records uploaded before per-season storage lived directly on that root node; Mod Settings moves them into `seasons/{season}` on startup and removes the root copy, so clients should read `seasons` first and only fall back to root fields for players who have not updated yet.
+
+Firebase may return `seasons` as a JSON array with `null` holes instead of an object when its keys are small integers. Treat it as a sparse map and skip `null` entries.
 
 ### Full URL Example
 ```
-https://vip-list-messages-default-rtdb.europe-west1.firebasedatabase.app/best-runs/a1b2c3d4e5f6...json
+https://vip-list-messages-default-rtdb.europe-west1.firebasedatabase.app/best-runs/a1b2c3d4e5f6.../seasons/2.json
 ```
 
 The `hashedPlayerName` is a SHA-256 hash of the player's name (lowercase).
@@ -69,7 +73,7 @@ const hashedName = await hashUsername('PlayerName');
 }
 ```
 
-### Encrypted Format v2 (current uploads)
+### Encrypted Format v2 (current uploads, one record per season at `seasons/{season}`)
 ```json
 {
   "version": "2.0",
@@ -243,12 +247,12 @@ async function decryptRunsData(encryptedText, password) {
 }
 
 // Fetch and decrypt runs
-async function fetchPlayerRuns(playerName, password) {
+async function fetchPlayerRuns(playerName, password, season = null) {
   try {
     // Hash username
     const hashedName = await hashUsername(playerName);
     
-    // Fetch encrypted data
+    // Fetch encrypted data (whole player node: all seasons)
     const response = await fetch(`${FIREBASE_URL}/best-runs/${hashedName}.json`);
     if (!response.ok) {
       if (response.status === 404) {
@@ -258,7 +262,19 @@ async function fetchPlayerRuns(playerName, password) {
       throw new Error(`HTTP ${response.status}`);
     }
     
-    const remoteData = await response.json();
+    // Pick the newest season (or pass `season` to choose one). `seasons` can come back as an
+    // array with null holes, so filter those out. Players who have not updated yet may still
+    // have a pre-per-season record on the root node.
+    const rootData = await response.json();
+    let remoteData = rootData;
+    if (rootData?.seasons) {
+      const entries = Object.entries(rootData.seasons)
+        .filter(([key, record]) => record && Number.isFinite(Number(key)))
+        .sort((a, b) => Number(b[0]) - Number(a[0]));
+      remoteData = season != null
+        ? rootData.seasons[season]
+        : (entries[0] ? entries[0][1] : null);
+    }
     if (!remoteData) {
       console.log('No encrypted data found');
       return null;
@@ -396,7 +412,7 @@ const data = await response.json();
 console.log(data);
 ```
 
-If you see `{encrypted: "...", lastUpdated: ..., version: "1.0"}`, the data exists and you just need the correct password.
+If you see `{seasons: {2: {version: "2.0", maps: {...}, ...}}}`, the data exists and you just need the correct password. Very old uploads may instead show `{encrypted: "...", lastUpdated: ..., version: "1.0"}` on the root node.
 
 ### Password Issues
 
@@ -447,12 +463,13 @@ Decrypts encrypted runs data.
 
 **Returns:** Promise<Object|null> - Decrypted runs data or null on error
 
-#### `fetchPlayerRuns(playerName, password)`
+#### `fetchPlayerRuns(playerName, password, season = null)`
 Fetches and decrypts runs from Firebase.
 
 **Parameters:**
 - `playerName` (string): Player name
 - `password` (string): Encryption password
+- `season` (number, optional): Season to fetch. Defaults to the newest uploaded season.
 
 **Returns:** Promise<Object|null> - Decrypted runs data or null on error
 
