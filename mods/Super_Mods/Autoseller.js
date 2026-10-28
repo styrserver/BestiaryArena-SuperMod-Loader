@@ -4088,23 +4088,14 @@
                 if (actor && actor.id != null) ids.add(Number(actor.id));
             }
         };
-        // Entries are `{ gameId, ... }` objects (older shape: bare gameId numbers).
-        const addExtraDrops = (drops) => {
-            if (!Array.isArray(drops)) return;
-            for (const drop of drops) {
-                const gameId = drop?.gameId ?? drop;
-                if (gameId != null) ids.add(Number(gameId));
-            }
-        };
         for (const room of roomList) {
             if (!room) continue;
             addActors(room.file?.data?.actors);
-            addExtraDrops(room.extraMonsterDrops);
             if (Array.isArray(room.floorFiles)) {
                 for (const floorFile of room.floorFiles) addActors(floorFile?.data?.actors);
             }
-            if (Array.isArray(room.floorRules)) {
-                for (const rule of room.floorRules) addExtraDrops(rule?.extraMonsterDrops);
+            for (const gameId of globalThis.mapsDatabase?.getExtraMonsterDropGameIds?.(room) || []) {
+                ids.add(gameId);
             }
         }
         if (ids.size > 0) mapMonsterGameIdsCache = ids;
@@ -4194,13 +4185,8 @@
                     if (actor && actor.id != null) addCreature({ gameId: actor.id, equip: actor.equip });
                 }
             }
-            const extraDropLists = [room?.extraMonsterDrops];
-            if (Array.isArray(room?.floorRules)) {
-                for (const rule of room.floorRules) extraDropLists.push(rule?.extraMonsterDrops);
-            }
-            for (const drops of extraDropLists) {
-                if (!Array.isArray(drops)) continue;
-                for (const drop of drops) addCreature({ gameId: drop?.gameId ?? drop });
+            for (const gameId of globalThis.mapsDatabase?.getExtraMonsterDropGameIds?.(room) || []) {
+                addCreature({ gameId });
             }
         } catch (_) {
             // Ignore map-priority extraction errors and keep default ordering.

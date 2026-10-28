@@ -1414,6 +1414,20 @@ if (typeof browserAPI === 'undefined') {
       },
 
       /**
+       * Format an item count the way the game's inventory badges do:
+       * below 1000 as-is; 1000-9999 rounded to one decimal with a comma ("4,6K");
+       * 10000+ floored to whole thousands ("11K" for 11972).
+       * @param {number} count
+       * @returns {string}
+       */
+      formatItemCount: function(count) {
+        const n = Math.max(0, Math.floor(Number(count) || 0));
+        if (n >= 10000) return `${Math.floor(n / 1000)}K`;
+        if (n >= 1000) return `${(Math.round(n / 100) / 10).toFixed(1).replace('.', ',')}K`;
+        return String(n);
+      },
+
+      /**
        * Game-reported season (`globalThis.state.CURRENT_SEASON`).
        * @returns {number|null} null until game state is ready
        */

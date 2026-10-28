@@ -4,6 +4,36 @@
   },
   "notes": [
     {
+      "version": "5.1.11",
+      "changes": [
+        {
+          "mod": "Autoscroller",
+          "type": "fixed",
+          "text": "Scroll counts now match the game's inventory: under 10K they round to one decimal (4561 shows as 4,6K), and from 10K up they round down (11972 shows as 11K)."
+        },
+        {
+          "mod": "Awaken Tracker",
+          "type": "added",
+          "text": "Drop-only creatures (such as Demon and Paladin) now count in the current map list, the farm map ranking, and the Awaken Farmer, and only on the floors where they can drop. The Overview also lists species you do not own yet (dimmed), with a new Not owned filter."
+        },
+        {
+          "mod": "Awaken Tracker",
+          "type": "changed",
+          "text": "Hide raids now only hides raids and events that are not live, so a live one stays visible."
+        },
+        {
+          "mod": "Client API",
+          "type": "added",
+          "text": "New api.util.formatItemCount() formats item counts the same way the game's inventory does, so mods can share one rounding."
+        },
+        {
+          "mod": "maps-database.js",
+          "type": "added",
+          "text": "New getExtraMonsterDropGameIds() and getExtraMonsterDropFloors() give mods one shared way to read drop-only creatures; Autoseller, Cyclopedia and Awaken Tracker now use them."
+        }
+      ]
+    },
+    {
       "version": "5.1.10",
       "changes": [
         {

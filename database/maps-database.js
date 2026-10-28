@@ -83,6 +83,61 @@ function getMapById(mapId) {
 }
 
 /**
+ * gameIds of drop-only creatures (`extraMonsterDrops`): not placed on the board, but they
+ * drop from the room (e.g. the Demon on Orshabaal Raid). Entries are `{ gameId, ... }`
+ * objects (older shape: bare gameId numbers).
+ * @param {Object|string} roomOrId - Room object, or room ID
+ * @param {number} [floorIndex] - Only that floor's `floorRules[floorIndex]` drops; when
+ *   omitted, the room's own drops plus every floor's.
+ * @returns {number[]} gameIds (may contain duplicates across floors)
+ */
+function getExtraMonsterDropGameIds(roomOrId, floorIndex) {
+  const room = typeof roomOrId === 'string' ? getMapById(roomOrId) : roomOrId;
+  const ids = [];
+  if (!room) return ids;
+  const add = (drops) => {
+    if (!Array.isArray(drops)) return;
+    for (const drop of drops) {
+      const gameId = Number(drop?.gameId ?? drop);
+      if (Number.isFinite(gameId)) ids.push(gameId);
+    }
+  };
+  if (floorIndex !== undefined) {
+    add(room.floorRules?.[floorIndex]?.extraMonsterDrops);
+    return ids;
+  }
+  add(room.extraMonsterDrops);
+  if (Array.isArray(room.floorRules)) {
+    for (const rule of room.floorRules) add(rule?.extraMonsterDrops);
+  }
+  return ids;
+}
+
+/**
+ * Which floors a drop-only creature can drop on.
+ * @param {Object|string} roomOrId - Room object, or room ID
+ * @param {number} gameId
+ * @returns {null|number[]} `null` when the room itself lists it (every floor); otherwise the
+ *   0-based `floorRules` indices that list it (empty array = does not drop here).
+ */
+function getExtraMonsterDropFloors(roomOrId, gameId) {
+  const room = typeof roomOrId === 'string' ? getMapById(roomOrId) : roomOrId;
+  const id = Number(gameId);
+  const floors = [];
+  if (!room || !Number.isFinite(id)) return floors;
+  if (Array.isArray(room.extraMonsterDrops)
+      && room.extraMonsterDrops.some((d) => Number(d?.gameId ?? d) === id)) {
+    return null;
+  }
+  if (Array.isArray(room.floorRules)) {
+    room.floorRules.forEach((_, floorIndex) => {
+      if (getExtraMonsterDropGameIds(room, floorIndex).includes(id)) floors.push(floorIndex);
+    });
+  }
+  return floors;
+}
+
+/**
  * Get maps by difficulty level
  * @param {number} difficulty - The difficulty level (1, 2, or 3)
  * @returns {Array} Array of maps with the specified difficulty
@@ -596,6 +651,8 @@ const mapsDatabase = buildMapsDatabase();
 // Add utility functions to the database
 mapsDatabase.getAllMaps = getAllMaps;
 mapsDatabase.getMapById = getMapById;
+mapsDatabase.getExtraMonsterDropGameIds = getExtraMonsterDropGameIds;
+mapsDatabase.getExtraMonsterDropFloors = getExtraMonsterDropFloors;
 mapsDatabase.getMapsByDifficulty = getMapsByDifficulty;
 mapsDatabase.getMapsByMaxTeamSize = getMapsByMaxTeamSize;
 mapsDatabase.getMultiFloorRoomIds = getMultiFloorRoomIds;

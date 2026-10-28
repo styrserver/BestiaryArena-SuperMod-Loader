@@ -11,6 +11,15 @@
     return (modApi && modApi.i18n && typeof modApi.i18n.t === 'function') ? modApi.i18n.t(key) : key;
   };
 
+  // Game-style inventory count ("4,6K", "11K"); shared helper lives in client.js, fallback covers older loaders
+  const formatItemCount = (count) => {
+    const modApi = (typeof api !== 'undefined' && api) ? api : (typeof context !== 'undefined' && context && context.api) ? context.api : window.BestiaryModAPI;
+    if (modApi && modApi.util && typeof modApi.util.formatItemCount === 'function') return modApi.util.formatItemCount(count);
+    if (count >= 10000) return `${Math.floor(count / 1000)}K`;
+    if (count >= 1000) return `${(Math.round(count / 100) / 10).toFixed(1).replace('.', ',')}K`;
+    return String(count);
+  };
+
   const defaultConfig = { enabled: true };
   const config = Object.assign({}, defaultConfig, context?.config);
   
@@ -1042,9 +1051,7 @@
             countElement.style.fontStyle = 'italic';
             countElement.style.fontWeight = 'normal';
           } else {
-            // Optimized number formatting
-            const formattedCount = count >= 1000 ? `${(count / 1000).toFixed(1).replace('.', ',')}K` : count.toString();
-            countElement.textContent = formattedCount;
+            countElement.textContent = formatItemCount(count);
             countElement.style.color = '#fff';
             countElement.style.fontStyle = 'normal';
             countElement.style.fontWeight = 'bold';
@@ -3611,7 +3618,7 @@
             countBelow.style.fontStyle = 'italic';
             countBelow.style.fontWeight = 'normal';
           } else {
-            countBelow.textContent = (count >= 1000 ? (count / 1000).toFixed(1).replace('.', ',') + 'K' : count);
+            countBelow.textContent = formatItemCount(count);
             countBelow.style.color = '#fff';
             countBelow.style.fontStyle = 'normal';
             countBelow.style.fontWeight = 'bold';

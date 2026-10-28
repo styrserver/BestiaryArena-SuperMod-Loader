@@ -500,6 +500,14 @@ const sub = globalThis.state.board.select(s => s.context.floor).subscribe(onFloo
 api.util.unsubscribe(sub);   // handles both shapes, null-safe
 ```
 
+#### `api.util.formatItemCount(count)`
+
+Formats an item count exactly like the game's inventory badges: below 1000 as-is,
+1000–9999 rounded to one decimal with a comma (`4561` → `4,6K`), 10000+ floored to whole
+thousands (`11972` → `11K`). Use it for any badge that sits next to a native item count
+instead of hand-rolling `toFixed`/`Math.floor` — the rounding differs by size, and
+getting it wrong makes the mod's number disagree with the game's.
+
 ### Hook API
 
 The hook API allows you to intercept and modify game functionality:

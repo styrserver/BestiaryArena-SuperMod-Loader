@@ -48,7 +48,8 @@
         ['capped', 'viewCapped'],
         ['missing-awaken', 'viewMissingAwaken'],
         ['missing-cap', 'viewMissingCap'],
-        ['needs-both', 'viewNeedsBoth']
+        ['needs-both', 'viewNeedsBoth'],
+        ['not-owned', 'viewNotOwned']
     ];
 
     const STORAGE_KEY_DATA = 'awakenTrackerData';
@@ -891,6 +892,13 @@
                     dedup.set(gameId, { gameId, name });
                 }
             }
+            const extraDropIds = window.mapsDatabase?.getExtraMonsterDropGameIds?.(roomId) || [];
+            for (const gameId of extraDropIds) {
+                if (dedup.has(gameId)) continue;
+                const name = resolveName(gameId);
+                if (!isCreatureEligibleForAwaken(name)) continue;
+                dedup.set(gameId, { gameId, name });
+            }
             state.currentMapEnemies = Array.from(dedup.values());
             ensureMapBaseline(roomId);
             scheduleRender();
@@ -1627,10 +1635,26 @@
                 try { board = utils.getBoardMonstersFromRoomId(room.id); } catch (_) { continue; }
                 if (!Array.isArray(board)) continue;
                 const villains = board.filter(p => p?.villain === true);
-                if (!villains.length) continue;
+                const boardIds = new Set(villains.map(v => Number(v.gameId)));
+                // Drop-only creatures (extraMonsterDrops) are not on the board; count each wanted one once.
+                // Floor-gated drops (floorRules) only count when the farm floor is one of them.
+                const farmFloor = pickAwakenFarmFloor(room.id);
+                const extraDropIds = new Set(
+                    (window.mapsDatabase?.getExtraMonsterDropGameIds?.(room.id) || [])
+                        .filter(id => {
+                            if (!wantedIds.has(id) || boardIds.has(id)) return false;
+                            const floors = window.mapsDatabase.getExtraMonsterDropFloors(room.id, id);
+                            if (floors === null) return true;
+                            return farmFloor == null ? floors.length > 0 : floors.includes(farmFloor);
+                        })
+                );
+                if (!villains.length && extraDropIds.size === 0) continue;
 
                 const wantedByCreature = new Map();
                 const otherByCreature = new Map();
+                for (const id of extraDropIds) {
+                    wantedByCreature.set(id, { count: 1, totalLevel: 0, dropOnly: true });
+                }
                 for (const v of villains) {
                     const id = Number(v.gameId);
                     if (!Number.isFinite(id)) continue;
@@ -1650,11 +1674,10 @@
 
                 const wantedTotal = Array.from(wantedByCreature.values()).reduce((a, b) => a + b.count, 0);
                 const uniqueWanted = wantedByCreature.size;
-                const totalVillains = villains.length;
+                const totalVillains = villains.length + extraDropIds.size;
                 const density = wantedTotal / totalVillains;
                 const stamina = Number(room.staminaCost ?? 0);
                 const wantedPerStamina = stamina > 0 ? wantedTotal / stamina : wantedTotal;
-                const farmFloor = pickAwakenFarmFloor(room.id);
                 let bestWantedSum = 0;
                 for (const id of wantedByCreature.keys()) {
                     const sum = progressById.get(id);
@@ -1671,7 +1694,7 @@
                     maxUnlockedFloor: getMaxUnlockedFloorForRoom(room.id),
                     wantedDetails: Array.from(wantedByCreature.entries()).map(([id, info]) => ({
                         id, name: namesById.get(id) || resolveName(id) || `#${id}`,
-                        count: info.count, avgLevel: info.totalLevel / info.count
+                        count: info.count, avgLevel: info.totalLevel / info.count, dropOnly: info.dropOnly === true
                     })).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)),
                     otherDetails: Array.from(otherByCreature.entries()).map(([id, info]) => ({
                         id, name: resolveName(id),
@@ -2747,7 +2770,9 @@
         if (!roomId || !wantedIds?.size) return false;
         try {
             const board = globalThis.state?.utils?.getBoardMonstersFromRoomId?.(roomId) || [];
-            return board.some(p => p?.villain === true && wantedIds.has(Number(p.gameId)));
+            if (board.some(p => p?.villain === true && wantedIds.has(Number(p.gameId)))) return true;
+            const extraDropIds = window.mapsDatabase?.getExtraMonsterDropGameIds?.(roomId) || [];
+            return extraDropIds.some(id => wantedIds.has(id));
         } catch (_) { return false; }
     }
 
@@ -4142,7 +4167,7 @@
                 let group = byGameId.get(m.gameId);
                 if (!group) {
                     group = {
-                        gameId: m.gameId, monsters: [],
+                        gameId: m.gameId, monsters: [], owned: true,
                         anyAwakened: false, anyAwakenedShiny: false, anyCapped: false,
                         anyPerfect: false, anyPerfectShiny: false,
                         anyShiny: false, best: null
@@ -4163,6 +4188,22 @@
                 if (!group.best || overviewMonsterRank(mon) > overviewMonsterRank(group.best)) group.best = mon;
             }
 
+            // Species never owned (e.g. drop-only Demon/Paladin) still show, flagged not owned.
+            const findByName = window.creatureDatabase?.findMonsterByName;
+            if (typeof findByName === 'function') {
+                for (const creatureName of window.creatureDatabase?.ALL_CREATURES || []) {
+                    if (!isCreatureEligibleForAwaken(creatureName)) continue;
+                    const gameId = findByName(creatureName)?.gameId;
+                    if (gameId == null || byGameId.has(gameId)) continue;
+                    byGameId.set(gameId, {
+                        gameId, monsters: [], owned: false,
+                        anyAwakened: false, anyAwakenedShiny: false, anyCapped: false,
+                        anyPerfect: false, anyPerfectShiny: false,
+                        anyShiny: false, best: null
+                    });
+                }
+            }
+
             const groups = [];
             let skippedUnobtainable = 0;
             let skippedNonAwakenable = 0;
@@ -4175,6 +4216,7 @@
             }
 
             const categoryRank = (g) => {
+                if (g.owned === false) return 3;
                 if (g.anyPerfect) return 0;
                 if (g.anyAwakened) return 1;
                 return 2;
@@ -4231,6 +4273,7 @@
 
         function attachOverviewCapToggles(groups) {
             for (const g of groups) {
+                if (g.owned === false) continue;
                 const row = overviewGrid.querySelector(`.awaken-overview-row[data-gameid="${g.gameId}"]`);
                 const mount = row?.querySelector('.overview-cap-toggle-mount');
                 if (!mount) continue;
@@ -4242,7 +4285,8 @@
         }
 
         function renderOverviewCard(g) {
-            const portraitUrl = `/assets/portraits/${g.gameId}${g.best.shiny ? '-shiny' : ''}.png`;
+            const notOwned = g.owned === false;
+            const portraitUrl = `/assets/portraits/${g.gameId}${g.best?.shiny ? '-shiny' : ''}.png`;
             const awakeBest = g.monsters.find(m => m.awakened);
             const statsHtml = STATS.map(s => {
                 if (!awakeBest) {
@@ -4283,12 +4327,14 @@
                 borderHtml = `<div role="none" class="rarity-hundo absolute inset-0 z-1 opacity-80"></div>`;
             } else if (g.anyAwakened) {
                 borderHtml = `<div role="none" class="rarity-awaken absolute inset-0 z-1 opacity-80"></div>`;
+            } else if (notOwned) {
+                borderHtml = '';
             } else {
                 const geneSum = Number(g.best?.sum) || 0;
                 const rarity = getGeneSumRarity(geneSum).rarity;
                 borderHtml = `<div role="none" class="has-rarity absolute inset-0 z-1 opacity-80" data-rarity="${rarity}"></div>`;
             }
-            return `<div class="at-row awaken-overview-row" data-gameid="${g.gameId}" data-name="${g.name.toLowerCase().replace(/"/g, '&quot;')}" data-awakened="${g.anyAwakened}" data-capped="${g.anyCapped}" data-perfect="${g.anyPerfect}">` +
+            return `<div class="at-row awaken-overview-row" data-gameid="${g.gameId}" data-name="${g.name.toLowerCase().replace(/"/g, '&quot;')}" data-awakened="${g.anyAwakened}" data-capped="${g.anyCapped}" data-perfect="${g.anyPerfect}" data-owned="${!notOwned}"${notOwned ? ` title="${t('mods.awakenTracker.badgeNotOwned')}" style="opacity:0.55;"` : ''}>` +
                 `<div class="container-slot surface-darker relative flex items-center justify-center overflow-hidden" style="width:34px;height:34px;flex-shrink:0;box-sizing:border-box;">` +
                     `${borderHtml}` +
                     `${levelHtml}` +
@@ -4318,6 +4364,7 @@
                 const isAwk = row.dataset.awakened === 'true';
                 const isCap = row.dataset.capped === 'true';
                 const isPerfect = row.dataset.perfect === 'true';
+                const isOwned = row.dataset.owned !== 'false';
                 let show = !q || name.includes(q);
                 if (view === 'awakened') show = show && isAwk;
                 else if (view === 'missing-awaken') show = show && !isAwk;
@@ -4326,6 +4373,7 @@
                 else if (view === 'perfect') show = show && isPerfect;
                 else if (view === 'awakened-not-capped') show = show && isAwk && !isCap;
                 else if (view === 'needs-both') show = show && !isAwk && !isCap;
+                else if (view === 'not-owned') show = show && !isOwned;
                 row.style.display = show ? '' : 'none';
                 if (show) visible++;
             });
@@ -4391,8 +4439,10 @@
             const results = ranked.results || [];
 
             const hideRaids = hideRaidsInput.checked;
-            const raidCount = results.filter(r => r.isRaid).length;
-            const visibleResults = hideRaids ? results.filter(r => !r.isRaid) : results;
+            // Live raids/events stay visible; only raids that are not currently spawnable hide.
+            const isHideableRaid = (r) => r.isRaid && !isRaidCurrentlyActive(r.roomId);
+            const raidCount = results.filter(hideRaids ? isHideableRaid : (r => r.isRaid)).length;
+            const visibleResults = hideRaids ? results.filter(r => !isHideableRaid(r)) : results;
 
             const wantedSummary = Array.from(wantedNamesById.values()).slice(0, 8).join(', ')
                 + (wantedNamesById.size > 8 ? ` … +${wantedNamesById.size - 8}` : '');
@@ -4419,7 +4469,7 @@
 
             farmListEl.innerHTML = visibleResults.slice(0, 60).map((r, idx) => {
                 const details = r.wantedDetails.map(d =>
-                    `<span style="color:#88c8ff;font-weight:bold;">${d.name}</span><span style="color:#888;">×${d.count} (${t('mods.awakenTracker.levelAbbrev', { level: Math.round(d.avgLevel) })})</span>`
+                    `<span style="color:#88c8ff;font-weight:bold;">${d.name}</span><span style="color:#888;">×${d.count} (${d.dropOnly ? t('mods.awakenTracker.dropOnlyAbbrev') : t('mods.awakenTracker.levelAbbrev', { level: Math.round(d.avgLevel) })})</span>`
                 ).join(' · ');
                 const otherDetails = (r.otherDetails || []).map(d =>
                     `<span style="color:#888;">${d.name}×${d.count}</span>`

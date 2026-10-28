@@ -169,6 +169,11 @@ const sub = globalThis.state.board.subscribe(onChange);
 // ...later, in cleanup():
 api.util.unsubscribe(sub); // null-safe; returns true if it tore something down
 
+// Format an item count like the game's inventory badges (use this, don't hand-roll it).
+api.util.formatItemCount(44);    // '44'
+api.util.formatItemCount(4561);  // '4,6K'  (1000-9999: rounded, one decimal)
+api.util.formatItemCount(11972); // '11K'   (10000+: floored to whole K)
+
 // Game-reported season and version (globalThis.state.CURRENT_SEASON / GAME_VERSION).
 api.util.getCurrentSeason(); // 2   (number, or null until game state is ready)
 api.util.getGameVersion();   // '3' (string, or null until game state is ready)

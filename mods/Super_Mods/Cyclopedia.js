@@ -3304,7 +3304,7 @@ function findMonsterLocations(monsterName) {
           // add the floor but no position rows.
           if (Array.isArray(room.floorRules)) {
             room.floorRules.forEach((rule, floorIndex) => {
-              if (rule?.extraMonsterDrops?.some(drop => (drop?.gameId ?? drop) === monsterGameId)) floors.add(floorIndex);
+              if (globalThis.mapsDatabase?.getExtraMonsterDropGameIds?.(room, floorIndex)?.includes(monsterGameId)) floors.add(floorIndex);
             });
           }
           if (floors.size > 0) {
@@ -3317,7 +3317,7 @@ function findMonsterLocations(monsterName) {
         // Drop-only creatures (room.extraMonsterDrops) are not placed on the board, so they
         // still get a room row but with no position details.
         const monsterInRoom = (room.file?.data?.actors ?? []).filter(actor => actor?.id === monsterGameId);
-        const isExtraDrop = !!room.extraMonsterDrops?.some(drop => (drop?.gameId ?? drop) === monsterGameId);
+        const isExtraDrop = !!globalThis.mapsDatabase?.getExtraMonsterDropGameIds?.(room)?.includes(monsterGameId);
         if (monsterInRoom.length > 0 || isExtraDrop) {
           const roomName = getCyclopediaRoomDisplayName(room?.id ?? roomKey);
           const roomLocations = monsterInRoom.map((actor, index) => LOCATION_UTILS.createLocationData(actor, index));
