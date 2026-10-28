@@ -479,7 +479,12 @@ current. This was confirmed live against room `edanni` on floor 10: the call kep
 floor 0's monsters (gameId `11/11/15/5/11/11`) instead of floor 10's real ones (raw
 `floorFiles[10].data.actors` has id `40/40/41/41/40/40`).
 
-**Correct pattern for any room that might be multi-floor:**
+**Preferred: use the shared helper.**
+`window.mapsDatabase.getBoardMonstersForFloor(roomId, floorIndex)` (in `database/maps-database.js`)
+implements the pattern below. `mods/Super_Mods/Awaken_Tracker.js` uses it (Paladin only exists on
+`edcow` floors 11–15, so the floor-0 getter never saw it).
+
+**Underlying pattern for any room that might be multi-floor:**
 
 ```javascript
 function getBoardMonstersForFloor(roomId, floorIndex) {

@@ -178,6 +178,39 @@ function getMultiFloorRoomIds() {
 }
 
 /**
+ * Board monsters for one floor. state.utils.getBoardMonstersFromRoomId(roomId) is floor-blind
+ * (always floor 0), so multi-floor rooms (type: 'multi') are built from that floor's raw
+ * floorFiles actors instead. See docs/game_state_api.md.
+ * @param {string} roomId
+ * @param {number} [floorIndex=0]
+ * @returns {Array} board pieces (`villain: true`, `gameId`, `level`, ...)
+ */
+function getBoardMonstersForFloor(roomId, floorIndex = 0) {
+  const room = getMapById(roomId);
+  if (room?.type === 'multi') {
+    const rawActors = room.floorFiles?.[floorIndex]?.data?.actors;
+    if (!Array.isArray(rawActors)) return [];
+    const pieces = [];
+    rawActors.forEach((actor, tileIndex) => {
+      if (!actor) return; // dense-with-null array — skip empty tiles
+      pieces.push({
+        type: 'file',
+        key: `multi-floor-enemy-${tileIndex}`,
+        tileIndex,
+        villain: true,
+        gameId: actor.id,
+        direction: actor.direction,
+        level: actor.level,
+        equip: actor.equip ?? null,
+        shiny: actor.shiny ?? false,
+      });
+    });
+    return pieces;
+  }
+  return globalThis.state?.utils?.getBoardMonstersFromRoomId?.(roomId) || [];
+}
+
+/**
  * Get maps by stamina cost
  * @param {number} staminaCost - The stamina cost
  * @returns {Array} Array of maps with the specified stamina cost
@@ -656,6 +689,7 @@ mapsDatabase.getExtraMonsterDropFloors = getExtraMonsterDropFloors;
 mapsDatabase.getMapsByDifficulty = getMapsByDifficulty;
 mapsDatabase.getMapsByMaxTeamSize = getMapsByMaxTeamSize;
 mapsDatabase.getMultiFloorRoomIds = getMultiFloorRoomIds;
+mapsDatabase.getBoardMonstersForFloor = getBoardMonstersForFloor;
 mapsDatabase.getMapsByStaminaCost = getMapsByStaminaCost;
 mapsDatabase.getRaidMaps = getRaidMaps;
 mapsDatabase.getNonRaidMaps = getNonRaidMaps;

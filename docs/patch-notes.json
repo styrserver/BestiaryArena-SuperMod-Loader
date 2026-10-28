@@ -4,6 +4,21 @@
   },
   "notes": [
     {
+      "version": "5.1.12",
+      "changes": [
+        {
+          "mod": "Awaken Tracker",
+          "type": "fixed",
+          "text": "Creatures that only appear on later floors of multi-floor maps (such as Paladin) are now found in the current map list, the farm map ranking, and the Awaken Farmer."
+        },
+        {
+          "mod": "maps-database.js",
+          "type": "added",
+          "text": "New getBoardMonstersForFloor() reads a map's monsters for a specific floor, since the game's own getter only returns floor 0; Awaken Tracker now uses it."
+        }
+      ]
+    },
+    {
       "version": "5.1.11",
       "changes": [
         {

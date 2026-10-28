@@ -865,6 +865,18 @@
             || null;
     }
 
+    function resolveCurrentFloor() {
+        return globalThis.state?.board?.getSnapshot?.()?.context?.floor ?? 0;
+    }
+
+    // Native getBoardMonstersFromRoomId is floor-blind (floor 0 only); multi-floor rooms like
+    // Edron cows (Paladin on floors 11-15) need the per-floor reader.
+    function getBoardMonstersForFloor(roomId, floor) {
+        const db = window.mapsDatabase;
+        if (typeof db?.getBoardMonstersForFloor === 'function') return db.getBoardMonstersForFloor(roomId, floor);
+        return globalThis.state?.utils?.getBoardMonstersFromRoomId?.(roomId) || [];
+    }
+
     function updateCurrentMapEnemies() {
         try {
             const roomId = resolveCurrentRoomId();
@@ -874,13 +886,12 @@
                 scheduleRender();
                 return;
             }
-            const getBoardMonsters = globalThis.state?.utils?.getBoardMonstersFromRoomId;
-            if (typeof getBoardMonsters !== 'function') {
+            if (typeof globalThis.state?.utils?.getBoardMonstersFromRoomId !== 'function') {
                 state.currentMapEnemies = [];
                 scheduleRender();
                 return;
             }
-            const monsters = getBoardMonsters(roomId) || [];
+            const monsters = getBoardMonstersForFloor(roomId, resolveCurrentFloor());
             const dedup = new Map();
             for (const piece of monsters) {
                 if (!piece || piece.villain !== true) continue;
@@ -1631,14 +1642,14 @@
                 // Sealed / awaken gene farming needs at least one unlocked floor in 11–15.
                 if (requireFarmFloor && !hasAwakenFarmFloorUnlocked(room.id)) continue;
 
+                const farmFloor = pickAwakenFarmFloor(room.id);
                 let board;
-                try { board = utils.getBoardMonstersFromRoomId(room.id); } catch (_) { continue; }
+                try { board = getBoardMonstersForFloor(room.id, farmFloor ?? AWAKEN_FARM_MIN_FLOOR); } catch (_) { continue; }
                 if (!Array.isArray(board)) continue;
                 const villains = board.filter(p => p?.villain === true);
                 const boardIds = new Set(villains.map(v => Number(v.gameId)));
                 // Drop-only creatures (extraMonsterDrops) are not on the board; count each wanted one once.
                 // Floor-gated drops (floorRules) only count when the farm floor is one of them.
-                const farmFloor = pickAwakenFarmFloor(room.id);
                 const extraDropIds = new Set(
                     (window.mapsDatabase?.getExtraMonsterDropGameIds?.(room.id) || [])
                         .filter(id => {
@@ -2769,7 +2780,7 @@
     function farmerMapStillHasTargets(roomId, wantedIds) {
         if (!roomId || !wantedIds?.size) return false;
         try {
-            const board = globalThis.state?.utils?.getBoardMonstersFromRoomId?.(roomId) || [];
+            const board = getBoardMonstersForFloor(roomId, resolveCurrentFloor());
             if (board.some(p => p?.villain === true && wantedIds.has(Number(p.gameId)))) return true;
             const extraDropIds = window.mapsDatabase?.getExtraMonsterDropGameIds?.(roomId) || [];
             return extraDropIds.some(id => wantedIds.has(id));
