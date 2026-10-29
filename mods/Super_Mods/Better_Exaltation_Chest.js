@@ -273,6 +273,23 @@
     return success;
   }
   
+  // Kept equipment as lines like "x2 Dwarven Legs (T4 AP)", sorted by name, then stat, then tier
+  function getKeptSummary() {
+    const groups = new Map();
+    equipmentLog.forEach(entry => {
+      if (entry.action !== 'kept' || !entry.equipment) return;
+      const { name, tier, stat } = entry.equipment;
+      const statLabel = String(stat).toUpperCase();
+      const key = `${name}|${tier}|${statLabel}`;
+      const group = groups.get(key) || { name, tier: Number(tier), stat: statLabel, count: 0 };
+      group.count++;
+      groups.set(key, group);
+    });
+    return [...groups.values()]
+      .sort((a, b) => a.name.localeCompare(b.name) || a.stat.localeCompare(b.stat) || a.tier - b.tier)
+      .map(g => `x${g.count} ${g.name} (T${g.tier} ${g.stat})`);
+  }
+
   function generateSummaryLogText() {
     const sessionDuration = Date.now() - sessionStartTime;
     const sessionHours = sessionDuration / (1000 * 60 * 60);
@@ -283,7 +300,19 @@
     summary += `Equipment Disenchanted: ${equipmentStats.disenchanted}\n`;
     summary += `Total Dust Gained: ${equipmentStats.dustGained.toLocaleString()}\n`;
     summary += `---------------------------\n\n`;
-    
+
+    // Kept Summary
+    summary += `--- Kept Summary ---\n`;
+    const keptSummary = getKeptSummary();
+    if (keptSummary.length === 0) {
+      summary += `Nothing kept yet.\n`;
+    } else {
+      keptSummary.forEach(line => {
+        summary += `${line}\n`;
+      });
+    }
+    summary += `---------------------------\n\n`;
+
     // Setup Rules
     summary += `--- Setup Rules ---\n`;
     getActiveSetupRules().forEach((rule, index) => {
@@ -803,6 +832,14 @@
     }
   }
   
+  function getKeptTooltipText() {
+    const keptSummary = getKeptSummary();
+    if (keptSummary.length === 0) return '';
+    return keptSummary
+      .join('\n')
+      .replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+  }
+
   function createStatusDisplay() {
     return `
       <div style="display: flex; flex-direction: column; gap: 6px; font-size: 14px;">
@@ -810,7 +847,7 @@
           <span style="color: #fff;">${t('mods.betterExaltationChest.totalOpened')}</span>
           <span style="color: #32cd32; font-weight: bold;">${equipmentStats.totalOpened}</span>
         </div>
-        <div style="display: flex; justify-content: space-between; align-items: center;">
+        <div title="${getKeptTooltipText()}" style="display: flex; justify-content: space-between; align-items: center;${equipmentStats.kept > 0 ? ' cursor: help;' : ''}">
           <span style="color: #fff;">${t('mods.betterExaltationChest.kept')}</span>
           <span style="color: #32cd32; font-weight: bold;">${equipmentStats.kept}</span>
         </div>

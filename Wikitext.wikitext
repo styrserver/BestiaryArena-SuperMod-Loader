@@ -10,7 +10,7 @@ A browser extension that allows loading and managing custom mods for the Bestiar
 [https://chromewebstore.google.com/detail/bestiaryarena-supermod-lo/hloidpjbdbbhhkihgeeddnofmpgbffjd Chromium] installation.
 
 === Mobile Installation ===
-For full mobile instructions, see [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/docs/mobile_installation.md Mobile Installation Guide].
+For full mobile instructions, see [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/docs/mobile.md#installation-android-firefox-and-orion-ios Mobile guide].
 
 ==== Android (Firefox) ====
 # Install Firefox for Android and open [https://addons.mozilla.org/en-US/firefox/addon/bestiaryarena-supermod-loader/ this addon page].
@@ -166,8 +166,8 @@ Mods have access to the game's state through <code>globalThis.state</code>, whic
 ** <code>event-competition.js</code> - Config-driven community event leaderboard framework (<code>window.EventCompetition</code>) for Firebase-backed floor/rank competitions (used by Better Highscores for Tibia Ball League)
 ** <code>ba-sandbox-utils.mjs</code> - Sandbox utility functions
 ** <code>utility_injector.js</code> - Utility injection system (<code>ba-sandbox-utils.mjs</code>, <code>custom-battles.js</code>, <code>event-competition.js</code>)
-* <code>docs/</code> - Mod developer markdown guides and [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/docs/patch-notes.json <code>patch-notes.json</code>] (version metadata used by the extension popup patch notes UI)
-* <code>database/</code> - Static tooltip and reference data used by mods
+* <code>docs/</code> - Mod developer guides, API references (game state, client, UI, raids, mod databases), the best-runs fetch tool, and [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/docs/patch-notes.json <code>patch-notes.json</code>] (version metadata used by the extension popup patch notes UI)
+* <code>database/</code> - Static game data and lookup helpers exposed to mods as <code>window.*</code> globals (see "Mod Databases" in [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/docs/game_state_api.md <code>docs/game_state_api.md</code>])
 ** <code>welcome.js</code> - Welcome screen data
 ** <code>inventory-database.js</code> - Inventory tooltip data
 ** <code>creature-database.js</code> - Creature reference data (lists, map boss stats, shiny/gazer helpers)
@@ -180,9 +180,9 @@ Mods have access to the game's state through <code>globalThis.state</code>, whic
 ** <code>playereq-database.js</code> - Player equipment helpers (slot types, dynamic equipment lists)
 ** <code>firebase-admins.js</code> - Firebase admin allowlist for privileged mod features
 * <code>mods/</code> - Local mod files, organized as follows:
-** <code>Official Mods/</code> - Core mods that provide essential gameplay enhancements and are included by default.
-** <code>Super Mods/</code> - Advanced mods with comprehensive features, included by default (see below for details).
-** <code>OT Mods/</code> - Community and social mods, included by default (see below for details).
+** <code>Official_Mods/</code> - Core mods that provide essential gameplay enhancements and are included by default.
+** <code>Super_Mods/</code> - Advanced mods with comprehensive features, included by default (see below for details).
+** <code>OT_Mods/</code> - Community and social mods, included by default (see below for details).
 * <code>popup/</code> - Extension popup UI
 * <code>background.js</code> - Background script for the extension
 * <code>manifest.json</code> - Extension manifest (Chromium store / unpacked load)
@@ -190,20 +190,17 @@ Mods have access to the game's state through <code>globalThis.state</code>, whic
 * [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/privacy_policy.md <code>privacy_policy.md</code>] - Privacy policy text used for store listings and compliance
 
 == Documentation ==
-* [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/docs/mod_development_guide.md Mod Development Guide] - Comprehensive guide for mod developers
-* [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/docs/mod_loading_optimizations.md Mod Loading System] - Loader architecture, mobile/relaxed path, and Error Log
-* [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/docs/orion_ios_compatibility.md Orion iOS Compatibility] - WebKit/Orion platform constraints and loader resource-loading rules
-* [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/docs/mobile_installation.md Mobile Installation Guide] - Step-by-step setup for Android Firefox and Orion on iOS
-* [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/docs/ui_management.md UI Management API] - Documentation for the UI Management API
-* [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/docs/ui_components.md UI Components Documentation] - Documentation for the UI Components
+* [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/docs/mod_development_guide.md Mod Development Guide] - Comprehensive guide for mod developers, including loader internals and the Error Log
+* [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/docs/mobile.md Mobile] - Android Firefox and Orion iOS setup, WebKit/Orion platform constraints, loader resource-loading rules
+* [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/docs/ui_components.md UI Components and Management] - UI components plus the button and config-panel API
 * [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/docs/client_api.md Client API Documentation] - Complete reference for the game's Client API
-* [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/docs/game_state_api.md Game State API Documentation] - Complete reference for accessing and modifying game state
-* [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/docs/utility_functions.md Utility Functions] - Board serialization, replay, and name/ID helpers
+* [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/docs/game_state_api.md Game State API Documentation] - Game state, mod databases, utility functions (<code>serializeBoard</code>, <code>replay</code>, name/ID maps)
 * [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/docs/custom_board_setups.md Custom Board Setups] - Examples for board placement and game events
 * [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/docs/raid_system_api.md Raid System API] - Raid state machine reference for automation mods
 * [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/docs/firebase_runs_api.md Firebase Best Runs API] - Fetch and decrypt Mod Settings best-runs uploads
 * [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/docs/fetch-best-runs.html Fetch Best Runs (HTML tool)] - Browser UI for fetching and decrypting uploaded runs
 * [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/docs/chat_documentation.md VIP List Chat] - Private and All Chat via Firebase
+* [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/assets/quests/README.md Quest mod data] - Layout of the Quests mod's JSON assets
 * [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/docs/patch-notes.json Patch notes (JSON)] - Machine-readable changelog consumed by the in-loader patch notes feature
 
 === Wiki Lua export helpers ===
@@ -622,8 +619,8 @@ Visit the [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/issues Gi
 == Troubleshooting ==
 If you encounter any issues:
 * '''Mods not appearing?''' Make sure you're on the Bestiary Arena website and the extension is enabled.
-* '''Mods not loading on mobile/iOS?''' Open the popup → '''Debug''' → '''Error Log''' (expand Debug to refresh). Use '''Copy''' to share errors for debugging. Tap '''Clear''' to wipe stale entries. Set '''Log Level''' to '''Verbose''' (applies immediately) if you need full <code>console.log</code> output in DevTools. See [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/docs/orion_ios_compatibility.md Orion iOS Compatibility] for platform-specific loader notes.
-* '''Game performance issues?''' Try using the Performance Mode mod to improve game speed.
+* '''Mods not loading on mobile/iOS?''' Open the popup → '''Debug''' → '''Error Log''' (expand Debug to refresh). Use '''Copy''' to share errors for debugging. Tap '''Clear''' to wipe stale entries. Set '''Log Level''' to '''Verbose''' (applies immediately) if you need full <code>console.log</code> output in DevTools. See [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/docs/mobile.md Orion iOS Compatibility] for platform-specific loader notes.
+* '''Game performance issues?''' Try Performance Mode in the Custom Display mod to improve game speed.
 * '''Extension not working after game update?''' Check for extension updates on GitHub.
 * '''Specific mod not working?''' Disable and re-enable the mod, or refresh the page.
 * '''Autoseller session widget not updating?''' Ensure the mod is enabled and you have completed at least one battle for stats to appear.

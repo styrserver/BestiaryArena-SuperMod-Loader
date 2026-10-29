@@ -210,6 +210,44 @@ function getBoardMonstersForFloor(roomId, floorIndex = 0) {
   return globalThis.state?.utils?.getBoardMonstersFromRoomId?.(roomId) || [];
 }
 
+const boardMonsterGameIdCache = new Map();
+
+/**
+ * gameIds of every creature placed on a room's board, across all floors (a normal room's
+ * `file.data.actors` plus each multi-floor room's `floorFiles[].data.actors`). Floor-aware,
+ * unlike state.utils.getBoardMonstersFromRoomId. Cached per option set once non-empty.
+ * @param {Object} [options]
+ * @param {boolean} [options.includeRaids=false] - Also scan raid / event rooms.
+ * @param {boolean} [options.includeDrops=false] - Also add `extraMonsterDrops` (drop-only
+ *   creatures that are never placed, e.g. the Demon on Orshabaal Raid).
+ * @returns {Set<number>} gameIds (empty while room data isn't loaded yet)
+ */
+function getBoardMonsterGameIds({ includeRaids = false, includeDrops = false } = {}) {
+  const cacheKey = `${includeRaids}|${includeDrops}`;
+  const cached = boardMonsterGameIdCache.get(cacheKey);
+  if (cached) return cached;
+  const ids = new Set();
+  const addActors = (actors) => {
+    if (!Array.isArray(actors)) return;
+    for (const actor of actors) {
+      if (actor && actor.id != null && Number.isFinite(Number(actor.id))) ids.add(Number(actor.id));
+    }
+  };
+  for (const room of getAllMaps()) {
+    if (!room?.id) continue;
+    if (!includeRaids && (room.raid === true || isMapRaidComprehensive(room.id))) continue;
+    addActors(room.file?.data?.actors);
+    if (Array.isArray(room.floorFiles)) {
+      for (const floorFile of room.floorFiles) addActors(floorFile?.data?.actors);
+    }
+    if (includeDrops) {
+      for (const gameId of getExtraMonsterDropGameIds(room)) ids.add(gameId);
+    }
+  }
+  if (ids.size > 0) boardMonsterGameIdCache.set(cacheKey, ids);
+  return ids;
+}
+
 /**
  * Get maps by stamina cost
  * @param {number} staminaCost - The stamina cost
@@ -690,6 +728,7 @@ mapsDatabase.getMapsByDifficulty = getMapsByDifficulty;
 mapsDatabase.getMapsByMaxTeamSize = getMapsByMaxTeamSize;
 mapsDatabase.getMultiFloorRoomIds = getMultiFloorRoomIds;
 mapsDatabase.getBoardMonstersForFloor = getBoardMonstersForFloor;
+mapsDatabase.getBoardMonsterGameIds = getBoardMonsterGameIds;
 mapsDatabase.getMapsByStaminaCost = getMapsByStaminaCost;
 mapsDatabase.getRaidMaps = getRaidMaps;
 mapsDatabase.getNonRaidMaps = getNonRaidMaps;

@@ -4074,32 +4074,9 @@
 
     // gameIds of every monster that can come from any map (all floors): placed actors plus
     // the room's `extraMonsterDrops` (drop-only creatures that are not on the board, e.g. the
-    // Demon on Orshabaal Raid). Cached once non-empty.
-    let mapMonsterGameIdsCache = null;
+    // Demon on Orshabaal Raid). Empty while map data isn't loaded yet.
     function getMapMonsterGameIds() {
-        if (mapMonsterGameIdsCache) return mapMonsterGameIdsCache;
-        const ids = new Set();
-        const fromDb = globalThis.mapsDatabase?.getAllMaps?.();
-        const rooms = (Array.isArray(fromDb) && fromDb.length > 0) ? fromDb : globalThis.state?.utils?.ROOMS;
-        const roomList = Array.isArray(rooms) ? rooms : Object.values(rooms || {});
-        const addActors = (actors) => {
-            if (!Array.isArray(actors)) return;
-            for (const actor of actors) {
-                if (actor && actor.id != null) ids.add(Number(actor.id));
-            }
-        };
-        for (const room of roomList) {
-            if (!room) continue;
-            addActors(room.file?.data?.actors);
-            if (Array.isArray(room.floorFiles)) {
-                for (const floorFile of room.floorFiles) addActors(floorFile?.data?.actors);
-            }
-            for (const gameId of globalThis.mapsDatabase?.getExtraMonsterDropGameIds?.(room) || []) {
-                ids.add(gameId);
-            }
-        }
-        if (ids.size > 0) mapMonsterGameIdsCache = ids;
-        return ids;
+        return globalThis.mapsDatabase?.getBoardMonsterGameIds?.({ includeRaids: true, includeDrops: true }) || new Set();
     }
 
     // Keep only creatures that appear on at least one map. No-op while map data isn't loaded yet.

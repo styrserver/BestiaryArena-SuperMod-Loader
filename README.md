@@ -23,7 +23,7 @@ Chromium: https://chromewebstore.google.com/detail/bestiaryarena-supermod-lo/hlo
 
 ### Mobile Installation
 
-For full mobile steps, see [Mobile Installation Guide](docs/mobile_installation.md).
+For full mobile steps, see [Mobile guide](docs/mobile.md#installation-android-firefox-and-orion-ios).
 
 #### Android (Firefox)
 1. Install Firefox for Android and open:
@@ -187,8 +187,8 @@ Mods have access to the game's state through `globalThis.state`, which provides 
   - `event-competition.js` - Config-driven community event leaderboard framework (`window.EventCompetition`) for Firebase-backed floor/rank competitions (used by Better Highscores for Tibia Ball League)
   - `ba-sandbox-utils.mjs` - Sandbox utility functions
   - `utility_injector.js` - Utility injection system (`ba-sandbox-utils.mjs`, `custom-battles.js`, `event-competition.js`)
-- `docs/` - Mod developer markdown guides and [`patch-notes.json`](docs/patch-notes.json) (version metadata used by the extension popup patch notes UI)
-- `database/` - Static tooltip and reference data used by mods
+- `docs/` - Mod developer guides, API references (game state, client, UI, raids, mod databases), the best-runs fetch tool, and [`patch-notes.json`](docs/patch-notes.json) (version metadata used by the extension popup patch notes UI)
+- `database/` - Static game data and lookup helpers exposed to mods as `window.*` globals (see "Mod Databases" in [`docs/game_state_api.md`](docs/game_state_api.md))
   - `welcome.js` - Welcome screen data
   - `inventory-database.js` - Inventory tooltip data
   - `creature-database.js` - Creature reference data (lists, map boss stats, shiny/gazer helpers)
@@ -201,9 +201,9 @@ Mods have access to the game's state through `globalThis.state`, which provides 
   - `playereq-database.js` - Player equipment helpers (slot types, dynamic equipment lists)
   - `firebase-admins.js` - Firebase admin allowlist for privileged mod features
 - `mods/` - Local mod files, organized as follows:
-  - `Official Mods/` - Core mods that provide essential gameplay enhancements and are included by default.
-  - `Super Mods/` - Advanced mods with comprehensive features, included by default (see below for details).
-  - `OT Mods/` - Community and social mods, included by default (see below for details).
+  - `Official_Mods/` - Core mods that provide essential gameplay enhancements and are included by default.
+  - `Super_Mods/` - Advanced mods with comprehensive features, included by default (see below for details).
+  - `OT_Mods/` - Community and social mods, included by default (see below for details).
 - `popup/` - Extension popup UI
 - `background.js` - Background script for the extension
 - `manifest.json` - Extension manifest (Chromium store / unpacked load)
@@ -212,22 +212,17 @@ Mods have access to the game's state through `globalThis.state`, which provides 
 
 ## Documentation
 
-- [Mod Development Guide](docs/mod_development_guide.md) - Comprehensive guide for mod developers
-- [Mod Loading System](docs/mod_loading_optimizations.md) - Loader architecture, mobile/relaxed path, and Error Log
-- [Orion iOS Compatibility](docs/orion_ios_compatibility.md) - WebKit/Orion platform constraints and loader resource-loading rules
-- [Mobile Installation Guide](docs/mobile_installation.md) - Step-by-step setup for Android Firefox and Orion on iOS
-- [UI Management API](docs/ui_management.md) - Documentation for the UI Management API
-- [UI Components Documentation](docs/ui_components.md) - Documentation for the UI Components
+- [Mod Development Guide](docs/mod_development_guide.md) - Comprehensive guide for mod developers, including loader internals and the Error Log
+- [Mobile](docs/mobile.md) - Android Firefox and Orion iOS setup, WebKit/Orion platform constraints, loader resource-loading rules
+- [UI Components and Management](docs/ui_components.md) - UI components plus the button and config-panel API
 - [Client API Documentation](docs/client_api.md) - Complete reference for the game's Client API
-- [Game State API Documentation](docs/game_state_api.md) - Complete reference for accessing and modifying game state
-- [Utility Functions](docs/utility_functions.md) - Board serialization, replay, and name/ID helpers
+- [Game State API Documentation](docs/game_state_api.md) - Game state, mod databases, utility functions (`serializeBoard`, `replay`, name/ID maps)
 - [Custom Board Setups](docs/custom_board_setups.md) - Examples for board placement and game events
 - [Raid System API](docs/raid_system_api.md) - Raid state machine reference for automation mods
 - [Firebase Best Runs API](docs/firebase_runs_api.md) - Fetch and decrypt Mod Settings best-runs uploads
 - [Fetch Best Runs (HTML tool)](docs/fetch-best-runs.html) - Browser UI for fetching and decrypting uploaded runs
 - [VIP List Chat](docs/chat_documentation.md) - Private and All Chat via Firebase
 - [Quest mod data](assets/quests/README.md) - Layout of the Quests mod's JSON assets
-- [Item API discovery notes](docs/item_finder.md) - Internal console snippets for maintainers
 - [Patch notes (JSON)](docs/patch-notes.json) - Machine-readable changelog consumed by the in-loader patch notes feature
 
 ### Wiki Lua export helpers
@@ -666,8 +661,8 @@ Visit the [GitHub Issues page](https://github.com/styrserver/BestiaryArena-Super
 If you encounter any issues:
 
 - **Mods not appearing?** Make sure you're on the Bestiary Arena website and the extension is enabled.
-- **Mods not loading on mobile/iOS?** Open the popup → **Debug** → **Error Log** (expand Debug to refresh). Use **Copy** to share errors for debugging. Tap **Clear** to wipe stale entries. Set **Log Level** to **Verbose** (applies immediately) if you need full `console.log` output in DevTools. See [Orion iOS Compatibility](docs/orion_ios_compatibility.md) for platform-specific loader notes.
-- **Game performance issues?** Try using the Performance Mode mod to improve game speed.
+- **Mods not loading on mobile/iOS?** Open the popup → **Debug** → **Error Log** (expand Debug to refresh). Use **Copy** to share errors for debugging. Tap **Clear** to wipe stale entries. Set **Log Level** to **Verbose** (applies immediately) if you need full `console.log` output in DevTools. See [Orion iOS Compatibility](docs/mobile.md) for platform-specific loader notes.
+- **Game performance issues?** Try Performance Mode in the Custom Display mod to improve game speed.
 - **Extension not working after game update?** Check for extension updates on GitHub.
 - **Specific mod not working?** Disable and re-enable the mod, or refresh the page.
 - **Autoseller session widget not updating?** Ensure the mod is enabled and you have completed at least one battle for stats to appear.

@@ -140,7 +140,7 @@ If you want to contribute by creating mods:
 
 ### Bundled mods that ship with the extension
 
-If you add or rename an official, Super, OT, or database script under `mods/` or `database/` so it ships inside the extension, keep **three** places in sync (browser limits on modules and service workers). Follow the checklist in [README.md — Adding a mod that ships inside the extension](README.md#adding-a-mod-that-ships-inside-the-extension) and the walkthrough [Adding a New Built-in Mod to the Extension](docs/mod_development_guide.md#adding-a-new-built-in-mod-to-the-extension) in the Mod Development Guide.
+If you add or rename an official, Super, OT, or database script under `mods/` or `database/` so it ships inside the extension, keep several places in sync (browser limits on modules and service workers). Follow the checklist in [README.md — Adding a mod that ships inside the extension](README.md#adding-a-mod-that-ships-inside-the-extension) and the walkthrough [Adding a New Built-in Mod to the Extension](docs/mod_development_guide.md#adding-a-new-built-in-mod-to-the-extension) in the Mod Development Guide.
 
 ### Best Practices for Mod Development
 

@@ -83,7 +83,7 @@ const COLOR_SUCCESS = '#4ade80';
 
 // window.AutoplayManager is created by content/mod-coordination.mjs, which is injected
 // as a core page script before any Local Mod (including this one) runs — see
-// docs/mod_loading_optimizations.md "Loading Order". This used to have its own fallback
+// docs/mod_development_guide.md "Loader Internals → Loading Order". This used to have its own fallback
 // `new ControlManager(...)` here (a second, duplicate definition of the same class in
 // content/mod-coordination.mjs) in case that hadn't happened yet; that fallback was never
 // actually exercised, since the load order guarantees window.AutoplayManager already

@@ -1,0 +1,1631 @@
+# Bestiary Arena Mod Loader - Game State API Documentation
+
+This document provides a comprehensive reference for accessing and modifying the game state in Bestiary Arena through the Mod Loader. The Game State API is exposed through `globalThis.state` and follows the XState state machine pattern.
+
+> **Credits**: The Game State API implementation and documentation were developed with significant contributions from [Mathias Bynens](https://github.com/mathiasbynens) and [Alexandre Seleghim](https://github.com/xandjiji), the creator of Bestiary Arena.
+
+## Overview
+
+Bestiary Arena exposes its client state to the DOM via `globalThis.state`, allowing advanced customization, automation, and tooling. Each component of the state is managed by a state machine for predictable and event-driven architecture.
+
+## State Structure
+
+The main access point is `globalThis.state`, which contains these major components:
+
+```javascript
+globalThis.state = {
+  board: {
+    /* Board state and controls */
+  },
+  clientConfig: {
+    /* Client-side behavior config (filters, autoplay delay, etc.) */
+  },
+  daily: {
+    /* Daily challenge state */
+  },
+  gameTimer: {
+    /* Game timing controls */
+  },
+  menu: {
+    /* Menu state */
+  },
+  player: {
+    /* Player data and inventory */
+  },
+  raids: {
+    /* Live raid events */
+  },
+  utils: {
+    /* Utility functions and constants */
+  },
+};
+```
+
+Each component (except `utils`) follows a similar structure with these methods/properties:
+
+- `getSnapshot()` - Returns the current state
+- `getInitialSnapshot()` - Returns the initial state
+- `get()` - Shorthand equivalent of `getSnapshot()` (e.g. `globalThis.state.player.get().context`)
+- `select(selectorFn, compareFn?)` - Returns a derived, subscribable observable for one slice of the context (see [Tracking Menu State Changes](#tracking-menu-state-changes) below; not menu-specific, available on every component)
+- `on(eventName, callback)` - Subscribe to state events
+- `send(action)` - Send actions to modify state (legacy form — see [Updating State: `send` vs. `trigger`](#updating-state-send-vs-trigger))
+- `trigger` - Proxy object exposing the same actions as callable methods, e.g. `trigger.setState({ fn })` (current/preferred form — see below)
+- `subscribe(callback)` - Subscribe to state changes
+- `inspect(callback)` - Monitor all state transitions and events
+- `sessionId` - The actor's XState session identifier
+
+## Context Objects
+
+Each state component has a context object that contains the actual state data. These can be accessed using `getSnapshot().context`.
+
+### Board Context
+
+The board context contains information about the current game board, selected maps, and game mode.
+
+```javascript
+const boardContext = globalThis.state.board.getSnapshot().context;
+```
+
+Key properties include:
+- `boardConfig` - Array of pieces on the board
+- `openMapPicker` - Boolean indicating if the map picker is open
+- `gameStarted` - Boolean indicating if the game has started
+- `sandboxSeed` - Seed for randomization in sandbox mode
+- `mode` - Game mode (sandbox, manual, autoplay)
+- `selectedMap` - Information about the currently selected map
+
+### Daily Context
+
+The daily context contains information about daily challenges and features.
+
+```javascript
+const dailyContext = globalThis.state.daily.getSnapshot().context;
+```
+
+Key properties include:
+```javascript
+{
+  "loaded": true,
+  "boostedMap": {
+    "roomId": "molse",    // ID of the boosted map
+    "equipId": 7,         // Boosted equipment ID
+    "equipStat": "ap"     // Boosted stat type
+  },
+  "yasir": {              // Special merchant
+    "location": "carlin", // Current location
+    "diceCost": 5183      // Cost in dice
+  },
+  "msUntilNextEpochDay": 12750651,  // Milliseconds until daily reset
+  "willUpdateAt": 1745884800000     // Timestamp of next update
+}
+```
+
+### GameTimer Context
+
+The gameTimer context tracks the game progress and results.
+
+```javascript
+const timerContext = globalThis.state.gameTimer.getSnapshot().context;
+```
+
+Key properties include:
+```javascript
+{
+  "currentTick": 1440,     // Current game tick
+  "state": "defeat",       // Game state (initial, victory, defeat)
+  "readableGrade": "F",    // Performance grade (S+, A, B, C, D, F)
+  "rankPoints": 0          // Points earned for rankings
+}
+```
+
+### Menu Context
+
+The menu context manages UI state for menus and navigation.
+
+```javascript
+const menuContext = globalThis.state.menu.getSnapshot().context;
+```
+
+Key properties include:
+```javascript
+{
+  "mode": false,          // Active mode
+  "inventory": {
+    "selectedItem": false // Currently selected inventory item
+  },
+  "store": {
+    "selectedCategory": "upgrades",  // Selected store category
+    "selectedItem": "containerSlot", // Selected item
+    "mobileNav": "category"          // Mobile navigation state
+  },
+  "trophyRoom": {
+    "selectedRegion": null, // Selected region in trophy room
+    "category": null        // Selected category
+  },
+  "questIconSrc": "quest.png", // Quest icon source
+  "questBlip": false           // Quest notification indicator
+}
+```
+
+#### Tracking Menu State Changes
+
+You can use `select()` to subscribe to specific parts of the menu state:
+
+```javascript
+// select a piece of the state
+const menuState = globalThis.state.menu.select((state) => state.mode);
+
+// react to menu mode changes
+menuState.subscribe((mode) => {
+  console.log(mode);
+});
+```
+
+### Player Context
+
+The player context contains comprehensive player data including inventory, monsters, equipment, and progress.
+
+```javascript
+const playerContext = globalThis.state.player.getSnapshot().context;
+```
+
+Key properties include:
+```javascript
+{
+  "id": 1,                       // Player ID
+  "version": 159,                // Data version
+  "name": "playerName",          // Player name
+  "outfitId": 1457,              // Current outfit ID
+  "head": 94,                    // Head appearance
+  "body": 0,                     // Body appearance
+  "legs": 0,                     // Legs appearance
+  "feet": 114,                   // Feet appearance
+  "outfits": [12, 129],          // Available outfits
+  "flags": 1056702426,           // Player flags
+  "loyaltyPoints": 9250,         // Loyalty points
+  "exp": 150,                    // Experience
+  "gold": 450,                   // Gold currency
+  "coin": 100,                   // Premium currency
+  "dust": 59,                    // Dust currency
+  "staminaWillBeFullAt": 1745887162173, // Timestamp when stamina will be full
+  "battleWillBeReadyAt": 1745873835589, // Timestamp when battle will be ready
+  
+  // Room completion data
+  "rooms": {
+    "kof": {                     // Room ID
+      "rank": 4,                 // Player's rank
+      "count": 184,              // Completion count
+      "ticks": 131               // Best completion time
+    }
+    // Other rooms...
+  },
+  
+  // Quest information
+  "questLog": {
+    "task": {
+      "rank": 238,               // Quest rank
+      "ready": false,            // Is quest ready
+      "gameId": 4,               // Quest game ID
+      "points": 1,               // Quest points
+      "resetAt": 1745865031058,  // Quest reset timestamp
+      "killCount": 17            // Required kills
+    },
+    "seashell": {
+      "streak": 58,              // Streak count
+      "readyAt": 1745923169408   // Ready timestamp
+    },
+    "tutorial": {
+      "step": 18,                // Tutorial step
+      "ready": false,            // Is tutorial ready
+      "monstersKilled": 0        // Monsters killed in tutorial
+    }
+  },
+  
+  // Player's monsters
+  "monsters": [
+    {
+      "ad": 20,                  // Attack damage
+      "ap": 20,                  // Ability power
+      "hp": 20,                  // Health points
+      "id": "6kAyyQEY",          // Unique ID
+      "exp": 11214750,           // Experience
+      "tier": 4,                 // Monster tier
+      "armor": 20,               // Armor value
+      "gameId": 4,               // Game ID (monster type)
+      "locked": true,            // Is locked (protected)
+      "equipId": "VOb5wixj",     // Equipped item ID
+      "createdAt": 1731944856501, // Creation timestamp
+      "magicResist": 20          // Magic resistance
+    }
+    // More monsters...
+  ],
+  
+  // Player's equipment
+  "equips": [
+    {
+      "id": "X7PmpV0i",          // Unique ID
+      "stat": "ad",              // Stat bonus type (ad, ap, hp)
+      "tier": 4,                 // Equipment tier
+      "gameId": 3                // Game ID (equipment type)
+    }
+    // More equipment...
+  ],
+  
+  // Inventory items
+  "inventory": {
+    "stamina1": 14,              // Stamina potions tier 1
+    "stamina2": 13,              // Stamina potions tier 2
+    "equipChest": 0,             // Equipment chests
+    "outfitBag1": 67,            // Outfit bags
+    "insightStone1": 0,          // Insight stones tier 1
+    // More inventory items...
+  },
+  
+  // Saved board configurations
+  "boardConfigs": {
+    "kof": [                     // Room ID
+      {
+        "equipId": "ZgZ_kioY",   // Equipment ID
+        "monsterId": "Si99h-vf", // Monster ID
+        "tileIndex": 38          // Board position
+      }
+      // More configurations...
+    ]
+    // More rooms...
+  }
+}
+```
+
+## Board Management
+
+The board component controls the game board, map selection, and gameplay mode.
+
+### Accessing Board State
+
+```javascript
+// Get current board state
+const boardState = globalThis.state.board.getSnapshot();
+console.log(boardState.context);
+```
+
+### Setting Game Mode
+
+```javascript
+// Set game to sandbox mode
+globalThis.state.board.send({ type: "setPlayMode", mode: "sandbox" });
+
+// Set game to autoplay mode
+globalThis.state.board.send({ type: "setPlayMode", mode: "autoplay" });
+
+// Set game to manual mode
+globalThis.state.board.send({ type: "setPlayMode", mode: "manual" });
+```
+
+### Selecting Maps
+
+```javascript
+// Select a specific map using its ID
+globalThis.state.board.send({
+  type: "selectRoomById",
+  roomId: globalThis.state.utils.ROOM_ID.abbane,
+});
+```
+
+### Custom Board Setup
+
+```javascript
+// Set up monsters on specific tiles
+globalThis.state.board.send({
+  type: "autoSetupBoard",
+  setup: [
+    {
+      monsterId: monsterId, // From player.monsters
+      equipId: equipId, // From player.equips
+      tileIndex: tileIndex, // Tile position (0-based)
+    },
+  ],
+});
+```
+
+### Setting Custom Seeds
+
+```javascript
+// Set a custom seed for sandbox mode
+globalThis.state.board.send({
+  type: "setState",
+  fn: (prev) => ({ ...prev, customSandboxSeed: -1 }),
+});
+```
+
+## Player State
+
+The player component contains inventory, monsters, equipment, and other player data.
+
+### Accessing Player Data
+
+```javascript
+// Get player state
+const playerState = globalThis.state.player.getSnapshot();
+const { monsters, equips } = playerState.context;
+```
+
+#### Getting Quest Reset Time
+
+You can find out when a new hunting task will be available:
+
+```javascript
+const getTaskResetAt = () => {
+  const task = globalThis.state.player.get().context.questLog.task;
+  if (!task) return null;
+  return task.resetAt;
+};
+
+getTaskResetAt() // returns null or a timestamp
+```
+
+### Modifying Equipment
+
+```javascript
+// Change equipment stats without mutation
+const equips = globalThis.state.player.getSnapshot().context.equips;
+const nextEquips = equips.map((equip) =>
+  equip.id === targetEquipId ? { ...equip, stat: "ap", tier: 5 } : equip
+);
+
+globalThis.state.player.send({
+  type: "setState",
+  fn: (prev) => ({ ...prev, equips: nextEquips }),
+});
+```
+
+### Modifying Monsters
+
+```javascript
+// Change monster stats without mutation
+const monsters = globalThis.state.player.getSnapshot().context.monsters;
+const nextMonsters = monsters.map((monster) =>
+  monster.id === targetMonsterId
+    ? {
+        ...monster,
+        hp: 20,
+        ad: 20,
+        ap: 20,
+        armor: 20,
+        magicResist: 20,
+      }
+    : monster
+);
+
+globalThis.state.player.send({
+  type: "setState",
+  fn: (prev) => ({ ...prev, monsters: nextMonsters }),
+});
+```
+
+### Subscribing to Player State Changes
+
+You can subscribe to player state changes to react to updates:
+
+```javascript
+globalThis.state.player.subscribe((playerState) => {
+  // react to player state changes
+  console.log(playerState);
+});
+```
+
+## Season and Game Version
+
+```javascript
+globalThis.state.CURRENT_SEASON; // 2 (number)
+globalThis.state.GAME_VERSION;   // '3' (string)
+```
+
+Both sit directly on `globalThis.state` (not `state.utils`).
+
+`Mod_Settings.js` (`getGameSeasonAndVersion()`) includes both in the Firebase best-runs upload metadata as `gameSeason` / `gameVersion`.
+
+## Game Utilities
+
+The utils component provides helper functions and game data.
+
+### Room Data
+
+```javascript
+// Access room IDs and names
+const roomIds = globalThis.state.utils.ROOM_ID;
+const roomNames = globalThis.state.utils.ROOM_NAME;
+
+console.log(roomIds.rkswrs); // "rkswrs"
+console.log(roomNames.rkswrs); // "Sewers"
+
+// Access all room data
+const rooms = globalThis.state.utils.ROOMS;
+
+// Access all region data
+const regions = globalThis.state.utils.REGIONS;
+
+// Get initial board setup for a specific room
+const abbaneSetup = globalThis.state.utils.getBoardMonstersFromRoomId('abbane');
+// Returns an array of board entities:
+[
+    {
+        "type": "file",        // Source type (from file vs custom)
+        "key": "D_9b",         // Unique identifier
+        "tileIndex": 85,       // Position on the board
+        "villain": true,       // Enemy (true) or ally (false)
+        "gameId": 1,           // Monster type ID
+        "direction": "west",   // Facing direction
+        "level": 10,           // Monster level
+        "tier": 0,             // Monster tier
+        "equip": null          // Equipment (null if none)
+    }
+    // More monsters may be included
+]
+```
+
+#### `getBoardMonstersFromRoomId` takes one argument only — it is floor-blind
+
+The function's real signature is `getBoardMonstersFromRoomId(roomId)`. There is **no second
+argument** — no `floor`, no `boosted`, no options object of any kind. Passing one (e.g.
+`getBoardMonstersFromRoomId(roomId, { floor: 10, boosted: false })`) is silently ignored; the
+call still resolves the same way as `getBoardMonstersFromRoomId(roomId)` alone.
+
+For ordinary single-floor rooms this is fine — the room's `file.data.actors` is the only layout
+that exists. But for **multi-floor quest rooms** (`room.type === 'multi'`, e.g. *The Behemoth
+Quest* and *The Annihilator Quest*, id `edanni`), each floor has its own actor layout in
+`room.floorFiles[floorIndex].data.actors`, and `getBoardMonstersFromRoomId` has no way to select
+one — it silently falls back to **floor 0's** layout regardless of which floor is actually
+current. This was confirmed live against room `edanni` on floor 10: the call kept returning
+floor 0's monsters (gameId `11/11/15/5/11/11`) instead of floor 10's real ones (raw
+`floorFiles[10].data.actors` has id `40/40/41/41/40/40`).
+
+**Preferred: use the shared helper.**
+`window.mapsDatabase.getBoardMonstersForFloor(roomId, floorIndex)` (in `database/maps-database.js`)
+implements the pattern below. `mods/Super_Mods/Awaken_Tracker.js` uses it (Paladin only exists on
+`edcow` floors 11–15, so the floor-0 getter never saw it).
+
+**Underlying pattern for any room that might be multi-floor:**
+
+```javascript
+function getBoardMonstersForFloor(roomId, floorIndex) {
+  const room = globalThis.state.utils.ROOMS?.find(r => r?.id === roomId);
+
+  if (room?.type === 'multi') {
+    const rawActors = room.floorFiles?.[floorIndex]?.data?.actors;
+    if (!Array.isArray(rawActors)) return [];
+    return rawActors
+      .map((actor, tileIndex) => actor && ({
+        type: 'file',
+        key: `multi-floor-enemy-${tileIndex}`,
+        tileIndex,
+        villain: true,
+        gameId: actor.id,
+        direction: actor.direction,
+        level: actor.level,
+        equip: actor.equip ?? null,
+        shiny: actor.shiny ?? false,
+      }))
+      .filter(Boolean); // rawActors is dense-with-null; skip empty tiles
+  }
+
+  return globalThis.state.utils.getBoardMonstersFromRoomId(roomId) || [];
+}
+
+// Current floor comes from board context, not from any argument to the getter:
+const floorIndex = globalThis.state.board.getSnapshot()?.context?.floor ?? 0;
+getBoardMonstersForFloor('edanni', floorIndex);
+```
+
+`globalThis.state.utils.ROOMS` filtered to `r.type === 'multi'` gives every room that needs this
+treatment (also exposed as `database/maps-database.js`'s `getMultiFloorRoomIds()`, a live scan
+rather than a hardcoded list). This pattern is already implemented independently in
+`content/ba-sandbox-utils.mjs` (`$replay`'s `configureBoard`), `mods/Official_Mods/Setup_Manager.js`
+(`getEnemyTeamConfigForRoom`), and `mods/Super_Mods/Cyclopedia.js` — reuse one of those rather than
+re-deriving it.
+
+**When the floor-blindness does and doesn't matter:** it matters whenever a caller needs the
+floor's actual board — correct levels/tiers/positions to place custom pieces or replay a fight
+(the three call sites above). It also matters for "which floors does creature X exist on":
+rosters are *not* identical across floors (Paladin only exists on `edcow` floors 11–15).
+`mods/Super_Mods/Better_Tasker.js` therefore scans every floor via
+`mapsDatabase.getBoardMonstersForFloor` (`findFloorsForCreatureInMultiFloorRoom`,
+`getMultiFloorRoomsWithCreature`, `resolveRoomTarget`) to list a creature's rooms, restrict its
+floor dropdown, and pick the floor to navigate to.
+
+For the plain question "is creature X on any map at all" there is a shared, floor-aware scan:
+`mapsDatabase.getBoardMonsterGameIds({ includeRaids, includeDrops })` returns a cached
+`Set<gameId>` over every room's `file.data.actors` and every `floorFiles[].data.actors`. Both
+flags default to `false` (Better Tasker: taskable creatures only — no raids/events, no
+drop-only creatures); `Autoseller.js` passes both `true`. `includeDrops` adds `extraMonsterDrops`
+(creatures never placed on a board, e.g. the Demon on Orshabaal Raid). It returns an empty set
+while room data isn't loaded yet — treat that as "unknown", not "no creature".
+
+### Experience and Level Calculations
+
+The game provides utility functions for calculating experience points and levels:
+
+```javascript
+// Calculate experience points needed for a specific level
+const expForLevel5 = globalThis.state.utils.expAtLevel(5);
+console.log(expForLevel5); // 11250
+
+// Calculate level based on experience points
+const levelForExp = globalThis.state.utils.expToCurrentLevel(440425);
+console.log(levelForExp); // 25
+```
+
+#### Experience After Battle Formula
+
+Below is the experience after battle formula provided by [Xandjiji](https://github.com/xandjiji):
+
+```javascript
+const xpValue = defeatedLevelSum * 562.5
+const rngMultiplier = (rollD20() - 10) / 100
+
+const expDrop = Math.round(xpValue * (1 + rngMultiplier))
+```
+
+#### Level Formula
+
+Below is the level formula in TypeScript provided by [Xandjiji](https://github.com/xandjiji):
+
+```typescript
+export const ENEMY_XP_DROP_PER_LVL = 56.25; // arbitrary
+const XP_RATE = 10; // higher = faster xp rate
+export const ROOM_XP_DROP_PER_LEVEL = ENEMY_XP_DROP_PER_LVL * XP_RATE;
+
+const getLevelSteepness = (level: number) =>
+  0.00970941 * Math.pow(1.14111, level) + 1;
+
+export const expAtLevel = (level: number) => {
+  const steepness = level * getLevelSteepness(level);
+
+  const xpRequired = (level - 1) * ROOM_XP_DROP_PER_LEVEL;
+
+  const result = Math.round(steepness * xpRequired);
+  return result - (result % 250);
+};
+```
+
+### Player Flags
+
+The game uses a bitwise flag system for tracking player abilities and achievements:
+
+```javascript
+// Get player flags
+const playerFlags = globalThis.state.player.getSnapshot().context.flags;
+
+// Create Flags object for easier access
+const flags = new globalThis.state.utils.Flags(playerFlags);
+
+// Check if specific flags are set
+console.log(flags.isSet("sandbox")); // true or false
+console.log(flags.isSet("autoplay")); // true or false
+
+// Access flag values
+const autoplayFlagValue = globalThis.state.utils.Flags.getFlagValue("autoplay");
+console.log(autoplayFlagValue); // 65536
+
+// Example flag values:
+const flagDictionary = {
+    "banned": 0,
+    "premium": 1,
+    "alt": 2,
+    "storeBestiaryContainer": 3,
+    "monsterTier": 4,
+    "taskBestiaryContainer": 5,
+    "tutorialBestiaryContainer": 6,
+    "rookgaardDlc": 7,
+    "sandbox": 8,
+    "carlinDlc": 9,
+    "boostedMap": 10,
+    "yasir": 11,
+    "yasirBestiaryContainer": 12,
+    "monsterSqueezer": 13,
+    "forge": 14,
+    "autosetup": 15,
+    "autoplay": 16,
+    "genie": 17,
+    "achievSeashell": 18,
+    "achievCreature95": 19,
+    // ... and more
+};
+```
+
+Room and region data structures are detailed below:
+
+```javascript
+// Room structure example
+const roomExample = {
+  "id": "rkswrs",               // Unique room identifier
+  "file": {
+    "name": "rookgaard-sewers", // File name
+    "data": {
+      "tiles": [                // Map tiles information
+        [
+          {
+            "id": 353,
+            "cropX": 1,
+            "cropY": 0,
+            "bank": 140
+          },
+          {
+            "id": 3994
+          }
+        ]
+      ],
+      "floorBelowTiles": [],    // Lower level tiles
+      "actors": [               // NPCs and enemies
+        {
+          "id": 1,              // Monster ID
+          "direction": "west",  // Facing direction
+          "level": 10           // Level
+        },
+        null
+      ],
+      "hitboxes": [             // Collision information
+        true, true, false, true // etc.
+      ],
+      "blocked": []             // Blocked positions
+    }
+  },
+  "difficulty": 1,              // Room difficulty (1-5)
+  "maxTeamSize": 1,             // Maximum player team size
+  "staminaCost": 3              // Stamina cost to play
+};
+
+// Multi-floor quest room example (e.g. The Annihilator Quest, id "edanni").
+// type: 'multi' rooms have NO top-level maxTeamSize/staminaCost — those vary per floor
+// instead. Reading room.maxTeamSize directly (the single-floor pattern above) silently
+// returns undefined for these; several bugs shipped from exactly that (see
+// mods/Official_Mods/Setup_Manager.js getMaxTeamSize()). The current floor is
+// globalThis.state.board.getSnapshot().context.floor (0-indexed) — index into floorRules
+// (and floorFiles) with it.
+const multiFloorRoomExample = {
+  "id": "edanni",
+  "isUnlocked": true,
+  "type": "multi",
+  "difficulty": 3,
+  "floorFiles": [                    // One entry per floor, board layout only
+    { "name": "edanni1", "data": { "tiles": [/* ... */], "actors": [/* ... */] } }
+    // ...16 floors total for The Annihilator Quest (indices 0-15)
+  ],
+  "floorRules": [                    // Parallel array — per-floor battle rules
+    { "maxTeamSize": 4, "staminaCost": 12, "setupKey": "edanni" },  // floors 0-14
+    // ...
+    { "maxTeamSize": 6, "staminaCost": 18, "setupKey": "edanni2" }  // floor 15 (index 15)
+    // A rule may also carry "extraMonsterDrops": [{ "gameId": 123, ... }] — see
+    // "extraMonsterDrops" under "Monster Drop System" below (e.g. edcow floors 11-15).
+  ]
+};
+
+// Region structure example
+const regionExample = {
+  "id": "rook",                // Region identifier
+  "minimapOffset": "-330px -1230px", // Position on minimap
+  "rooms": [                   // Rooms in this region (same structure as above)
+    {
+      "id": "rkswrs",
+      "file": {
+        "name": "rookgaard-sewers",
+        "data": {} // Same structure as above
+      },
+      "difficulty": 1,
+      "maxTeamSize": 1,
+      "staminaCost": 3
+    }
+  ]
+};
+```
+
+### Monster Data
+
+```javascript
+// Get monster data by ID
+const rat = globalThis.state.utils.getMonster(1);
+console.log(rat.metadata.name); // "Rat"
+console.log(rat.metadata.baseStats); // HP, AD, AP, etc.
+```
+
+### Equipment Data
+
+```javascript
+// Get equipment data by ID
+const boots = globalThis.state.utils.getEquipment(1);
+console.log(boots.metadata.name); // "Boots of Haste"
+
+// Render equipment effect tooltips with tier-scaled values (T1–T5)
+const host = document.createElement('div');
+const component = window.equipmentDatabase.mountEquipmentEffectComponent(
+  host,
+  boots.metadata.EffectComponent,
+  4 // player's equipment tier — effect numbers scale with tier (T5 = max)
+);
+// component.unmount() when done
+
+// Tier stat bonuses (forge tiers Grey → Yellow) live on equipment-database.js:
+// window.equipmentDatabase.EQUIPMENT_TIER_STAT_BONUSES
+```
+
+#### Equipment forge tiers (T1–T5)
+
+Player inventory equipment uses **numeric** `tier` values `1`–`5` (Grey → Yellow). `player.context.equips[].tier` never exceeds `5`.
+
+- `window.equipmentDatabase.clampEquipmentTier()` clamps to `1`–`5`.
+- `mountEquipmentEffectComponent()` and `createUIComponent(root, EffectComponent, { tier })` expect a number in that range for forge tiers.
+- **Do not pass `tier: 6`** — the game's effect scaler only knows forge tiers and will render `NaN` for cooldowns and similar values.
+
+#### Awaken Cyclops upgrade (in-battle “T6” preview)
+
+This is **not** a sixth forge tier. When an **awakened Cyclops** upgrades an adjacent ally's equipment during a fight, the game shows a special rarity frame and adjusted effect numbers.
+
+| Surface | Value |
+| --- | --- |
+| Portrait `data-rarity` | `AWAKEN-CYCLOPS-TIER` |
+| Effect tooltip `createUIComponent` props | `{ tier: 'AWAKEN-CYCLOPS-TIER' }` |
+| Player `equips[].tier` | Still `1`–`5` (unchanged in inventory) |
+
+Example ([Amazon Armor](https://bestiaryarena.wiki.gg/wiki/Amazon_Armor)): forge T5 cooldown **9s**; with Awaken Cyclops upgrade **8s**.
+
+```javascript
+// Portrait rarity (after createItemPortrait with tier: 5)
+portrait.querySelector('[data-rarity]').setAttribute('data-rarity', 'AWAKEN-CYCLOPS-TIER');
+
+// Effect tooltip for Cyclops-upgraded values
+const createUIComponent = globalThis.state?.utils?.createUIComponent;
+const component = createUIComponent(
+  host,
+  boots.metadata.EffectComponent,
+  { tier: 'AWAKEN-CYCLOPS-TIER' }
+);
+if (component?.mount) component.mount();
+```
+
+**Cyclopedia (Arsenal tab):** Equipment details include a **T1–T6** selector above the portrait. T1–T5 use numeric forge tiers (default **T5**). **T6** previews the Awaken Cyclops upgrade (rarity + effect props above). The selected tier persists until the Cyclopedia modal closes, then resets to T5.
+
+If `{ tier: 'AWAKEN-CYCLOPS-TIER' }` fails to render, Cyclopedia retries `{ tier: 5, awakenCyclops: true }`, then `{ tier: 5, cyclopsUpgrade: true }`, then plain T5 as a last resort.
+
+### Monster Drop System
+
+Below is the internal monster drop logic provided by [Xandjiji](https://github.com/xandjiji). It handles normal drops, shiny rolls, and sealed monster drops based on floor depth:
+
+```typescript
+function tryForMonsterDrop({
+  roomId,
+  floor,
+  isBoosted,
+  isRaid,
+}: {
+  roomId: string;
+  floor: number;
+  isBoosted: boolean;
+  isRaid: boolean;
+}) {
+  const monsterDropPool = getMonsterDropPool(roomId);
+  if (!monsterDropPool.length) return;
+
+  const shiny = rollForShinyMonster(isRaid ? "raidDrop" : "normalDrop", floor);
+
+  if (floor < BASE_RED_FLOORS || shiny) {
+    const m = rollForMonsterDrop(monsterDropPool, isBoosted);
+    if (shiny) mutateShiny(m);
+    return m;
+  }
+
+  return rollForSealedMonsterDrop({
+    monsterDropPool,
+    floor,
+    boostedOrRaid: isBoosted || isRaid,
+  });
+}
+```
+
+**Related internal functions:**
+- `getMonsterDropPool(roomId)` — returns the list of possible monster drops for a room
+- `rollForShinyMonster(type, floor)` — rolls for a shiny based on drop type and floor
+- `rollForMonsterDrop(pool, isBoosted)` — picks a monster from the pool and rolls its genes (see below)
+- `mutateShiny(monster)` — converts a monster into its shiny variant
+- `rollForSealedMonsterDrop({ monsterDropPool, floor, boostedOrRaid })` — rolls a sealed monster drop on higher floors
+- `BASE_RED_FLOORS` — floor threshold where sealed drops replace normal drops
+
+#### `extraMonsterDrops` — drop-only creatures on a room
+
+A room in `globalThis.state.utils.ROOMS` may carry `extraMonsterDrops: { gameId: number, allowNonSealedOnRedFloors?: boolean }[]`
+— monsters that can drop from the room even though they are not placed on its board. **Entries are
+objects, not bare ids** (verified in console 2026-10-27), so match with `.some(d => d.gameId === id)`,
+never `.includes(id)`. Multi-floor rooms put it on each floor instead:
+`room.floorRules[floor].extraMonsterDrops`.
+
+```javascript
+const room = globalThis.state.utils.ROOMS.find(r => r.id === 'edorsha'); // Orshabaal Raid
+room.extraMonsterDrops; // [{ gameId: 132 }]  (Demon)
+```
+
+Known uses (console-verified 2026-10-27): Kings' Lab (`klab`) → Dwarf Geomancer (56); Orshabaal Raid
+(`edorsha`) → Demon (132); `edsta` → The Pale Count (121) + Vampire Bride (122); `edcow` floors
+11–15 (`floorRules`) → Paladin (123, `allowNonSealedOnRedFloors: true`).
+
+- Entry fields:
+
+  | Field | Type | Meaning |
+  |---|---|---|
+  | `gameId` | `number` | Monster that can drop. Always present. |
+  | `allowNonSealedOnRedFloors` | `boolean?` | Only seen on `edcow` floors 11–15 (Paladin). Absent elsewhere (treat as `false`). **Inferred, not read from source:** past `BASE_RED_FLOORS` the native roll switches to `rollForSealedMonsterDrop`; this flag presumably lets the creature still drop as a normal (non-sealed) monster there. |
+
+  `getMonsterDropPool` is server-side, so the flag's exact effect is unverified. Check it against real
+  drops before relying on it.
+- The game validates each entry at load: it must be a known monster and must **not** be in the
+  non-playable set (`state.utils` has no export for it), otherwise it throws
+  `Non-playable extra monster drop`.
+- Orshabaal Raid's board actors (Orshabaal, Rostein, Shooter, Healer) are all non-playable, so the
+  Demon is the only creature that can drop there.
+- The drop pool is presumably the room's playable actors plus `extraMonsterDrops`. `getMonsterDropPool`
+  itself is not in the client chunks (server-side), so that combination is inferred, not read.
+- Anything that asks "can this creature come from a map?" by scanning `room.file.data.actors` /
+  `room.floorFiles[].data.actors` alone will miss these creatures. Autoseller's
+  `mapsDatabase.getBoardMonsterGameIds({ includeDrops: true })` (used by Autoseller) adds `extraMonsterDrops` for this reason.
+
+#### `rollForMonsterDrop` source (game code, TypeScript, pasted 2026-09-29)
+
+Reference copy of the native gene-roll for a normal (non-sealed) monster drop. Useful for
+drop-odds calculators, simulators, and sanity-checking "is this gene spread plausible".
+
+```ts
+export function rollForMonsterDrop(
+  monsterDropPool: { id: number; level: number }[],
+  boosted: boolean,
+): DBMonster {
+  const rng = new RNG();
+  const monsterDrop = rng.sampleFrom(monsterDropPool);
+
+  let hp = 1;
+  let ad = 1;
+  let ap = 1;
+  let armor = 1;
+  let magicResist = 1;
+
+  if (boosted) {
+    hp = rng.dice.d20();
+    ad = rng.dice.d20();
+    ap = rng.dice.d20();
+    armor = rng.dice.d20();
+    magicResist = rng.dice.d20();
+  } else {
+    [hp, ad, ap, armor, magicResist] = rng.shuffle([
+      rng.dice.advantageRoll(rng.dice.d20, monsterDrop.level >= 30 ? 0 : -1),
+      rng.dice.advantageRoll(rng.dice.d20, monsterDrop.level >= 35 ? 0 : -1),
+      rng.dice.advantageRoll(rng.dice.d20, monsterDrop.level >= 40 ? 0 : -1),
+      rng.dice.advantageRoll(rng.dice.d20, monsterDrop.level >= 45 ? 0 : -1),
+      rng.dice.advantageRoll(rng.dice.d20, monsterDrop.level >= 50 ? 0 : -1),
+    ]);
+  }
+
+  return {
+    id: generateMonsterId(),
+    gameId: monsterDrop.id,
+    exp: LEVEL_TO_XP_TABLE[10],
+    createdAt: Date.now(),
+    hp, ad, ap, armor, magicResist,
+  };
+}
+```
+
+**Takeaways:**
+- The monster is picked **uniformly** from the pool (`sampleFrom`) — no per-monster weighting here.
+- **Boosted**: each of the 5 genes is a plain, independent `d20` (1–20). No level scaling at all.
+- **Non-boosted**: five rolls, each `advantageRoll(d20, mod)`, where `mod` is `-1` (disadvantage) until
+  the *pool entry's* `level` reaches that roll's threshold (30/35/40/45/50), then `0` (plain d20).
+  The five rolled values are then **shuffled** across `hp/ad/ap/armor/magicResist`, so the
+  thresholds don't map to specific stats — they only decide how many of the five rolls are
+  disadvantaged. A level-50+ pool entry therefore rolls the same as a boosted one.
+- Drops always start at `LEVEL_TO_XP_TABLE[10]` exp (level 10).
+- Not covered here: `rollForShinyMonster`, `mutateShiny`, and `rollForSealedMonsterDrop`
+  (floors ≥ `BASE_RED_FLOORS`) — those are separate code paths.
+- `advantageRoll`'s exact semantics weren't in the paste; `-1` is assumed to mean "roll twice, keep
+  the lower". Verify against the game's `RNG` source before relying on exact probabilities.
+
+### Updating State: `send` vs. `trigger`
+
+This doc's own examples above use two different call shapes for the same kind of update:
+
+```javascript
+// Form 1 — send() with a "setState" action (used in the Board/Player examples above)
+globalThis.state.board.send({ type: "setState", fn: (prev) => ({ ...prev, floor: 10 }) });
+
+// Form 2 — trigger.setState() (used in the Client Configuration examples below)
+globalThis.state.board.trigger.setState({ fn: (prev) => ({ ...prev, floor: 10 }) });
+```
+
+Both exist on every state component. **`trigger.setState({ fn })` is the current, actively-used
+form** — it's what the mod codebase itself uses almost everywhere state is written (`Raid_Hunter.js`,
+`Better_Setups.js`, `Outfiter.js`, `Map_Editor.js`, `Board_Analyzer.js`, `Bestiary_Automator.js`,
+`Autoseller.js`, `content/custom-battles.js`, `content/ba-sandbox-utils.mjs`, etc.). `send({ type:
+"setState", fn })` still works and is kept as a defensive fallback in a few call sites for when
+`trigger` isn't present, following the pattern used in `Map_Editor.js` and `custom-battles.js`:
+
+```javascript
+if (globalThis.state.board.trigger?.setState) {
+  globalThis.state.board.trigger.setState({ fn });
+} else if (globalThis.state.board.send) {
+  globalThis.state.board.send({ type: "setState", fn });
+}
+```
+
+**When writing new code, prefer `trigger.setState({ fn })`.** The `send({ type: "setState", ... })`
+examples elsewhere in this doc remain valid (both forms are live in the current game build), but new
+call sites in this codebase consistently use `trigger`.
+
+## Public Highscores API (Trophy Room)
+
+`game.getFullTrophyRoomData` returns every room's #1 tick, rank and floor record, plus the global top-20 boards, in **one public GET** (no login needed, ~43 KB). It returns the same records as the logged-in `game.getTickHighscores` + `game.getRoomsHighscores` pair (verified identical for all 100 rooms, 2026-09-23), so prefer it for new code. All bundled mods (Better Highscores, Highscore Improvements, Cyclopedia, Guilds, Mod Settings run-upload validation) now use it; only `game.getTickLeaderboards` (per-room top lists) is still fetched separately.
+
+In mods, fetch it through the shared helper rather than calling `fetch` yourself:
+
+```javascript
+const { highscores, leaderboards } = await window.BestiaryModAPI.util.fetchTrophyRoomData();
+
+highscores.tick.rkswrs;   // #1 speedrun on Sewers
+highscores.rank.rkswrs;   // #1 rank-points run
+highscores.floor.rkswrs;  // #1 floor run
+leaderboards.floor;       // global top 20 by total floors
+```
+
+`util.fetchTrophyRoomData()` (in `content/client.js`) always fetches fresh, but has a **2-second cooldown** shared by every mod: calls made within 2 s of the last request (or while it's in flight) get that request's result. The cooldown runs from when the last request finished. This way several mods reacting to the same map change or battle end cost one request. The game's rate limit is shared across its whole API (e.g. Guilds' profile bursts), so on a `429` the helper waits `Retry-After` (default 1 s, max 5 s) and retries once. If a fetch still fails, it returns the **last successful payload** instead of rejecting; it only rejects if nothing has loaded yet. Don't add a longer cache on top for one-off reads: consumers are expected to get the latest records. The exception is a **bulk operation that also spends the server's budget of 30 requests per 10 s** (e.g. Guilds' panel load, which sends up to 28 profile requests per 10 s). Take one snapshot for the whole operation and send it through the same rate limiter. Guilds' `getRoomsHighscoresCached()` does this (30 s snapshot via `withProfileRateLimit`); re-fetching every 2 s there caused profile 429s and 10 s back-offs.
+
+If you call the endpoint directly: it's a plain GET (`/api/trpc/game.getFullTrophyRoomData`), **not** the `?batch=1&input=…` form, so the payload is `json.result.data.json` (no `[0]`).
+
+Every entry also carries the holder's `userId`, `userName` and outfit (`outfitId`, `head`, `body`, `legs`, `feet`):
+
+| Path | Keyed by | Extra fields |
+|------|----------|--------------|
+| `highscores.tick[roomCode]` | room code | `ticks` |
+| `highscores.rank[roomCode]` | room code | `rank` (points), `ticks` |
+| `highscores.floor[roomCode]` | room code | `floor`, `ticks` (the old `getRoomsHighscores` could also say `floorTicks`) |
+| `leaderboards.tick[]` | top 20, sorted | `ticks` (sum over rooms) |
+| `leaderboards.rank[]` | top 20, sorted | `points`, `ticks` |
+| `leaderboards.floor[]` | top 20, sorted | `floors` (sum), `ticks` |
+
+## Mod Databases (`database/*`)
+
+Scripts in `database/` run before game mods and expose `window.*` globals (static game data and lookup helpers) so mods do not hardcode creature, equipment or map lists.
+
+- `creatureDatabase`, `equipmentDatabase` and `playerEquipmentDatabase` poll `state.utils` and start as a **placeholder object**; real data is merged into that same object later. Caching the global early is safe, but arrays are empty and lookups return `null` / `[]` until init finishes. Never reassign these globals; mutate in place (see `.claude/CLAUDE.md`).
+- `mapsDatabase` and `inventoryDatabase` are ready at load. `mapsDatabase` getters scan `state.utils.ROOMS` live and may return empty results while room data loads, so call them at use time and prefer them over the static snapshots (`ALL_MAPS`, ...).
+- Use optional chaining (`window.creatureDatabase?.findMonsterByName?.(n)`) and handle empty results.
+- `window.FirebaseAdminsAPI` is documented in [chat_documentation.md](chat_documentation.md#firebase-admins-api).
+
+### `window.creatureDatabase`
+
+Source: `database/creature-database.js`.
+
+Data:
+
+- `ALL_CREATURES` — every creature (built from `state.utils`).
+- `UNOBTAINABLE_CREATURES`, `NON_AWAKENABLE_CREATURES`, `NON_SCROLL_CREATURES`, `EVENT_CREATURES`
+- `CYCLOPEDIA_EXTRA_CREATURES`, `CYCLOPEDIA_HIDDEN_CREATURES`, `SHINY_ALIAS_CREATURES`
+- `ALL_GAZER_GAME_IDS`, `MYSTIC_GAZER_GAME_ID`
+- `HARDCODED_MAP_MONSTER_STATS`, `MONSTER_STAT_DISPLAY_CONFIG`
+
+Lookups:
+
+- `findMonsterByGameId(gameId)` → `{ gameId, ...monster }` or `null`.
+- `findMonsterByName(name)` → same shape; case-insensitive; resolves shiny alias display names.
+- `getMonsterNameMap()` → cached lowercase name → `{ monster, gameId, index }`.
+- `getAllMonstersWithPortraits()`, `getMonsterPortraitUrl(...)`, `getMonsterPortraitUrls(...)`
+
+Classification predicates (take a creature name unless stated):
+
+- `isEventCreatureName`, `isNonScrollCreatureName`, `isGazerCreatureName`,
+  `isCreatureAwakenableName`, `isShinyProgressCreatureName`, `isGazerMonster(monster)`
+
+Display / picker helpers:
+
+- `resolveCreatureDisplay(name)`, `creatureHasShinyVariant(name)`,
+  `filterMonstersForCreatureDisplay(...)`, `monsterMatchesCreatureDisplay(...)`,
+  `getDisplayNameForOwnedMonster(monster)`, `buildOldOutfitsCss(...)`
+- Name lists: `getCyclopediaCreatureNames()`, `getCreaturePickerNames()`,
+  `getAutoscrollAutosellerCreaturePickerNames()`, `getGazerCreatureNames()`,
+  `getShinyProgressCreatureNames()`
+
+**Used by**
+
+- `Autoseller` (`findMonsterByGameId`, `EVENT_CREATURES`)
+- `Awaken_Tracker` (`ALL_CREATURES`, `NON_AWAKENABLE_CREATURES`, `UNOBTAINABLE_CREATURES`, finders)
+- `Better_Tasker` (finders)
+- Also `Autoscroller`, `Better_Analytics`, `Better_Teleporter`, `Cyclopedia`, `Depot_Manager`, `Hunt_Analyzer`, `Manual_Runner`, `Mod_Settings`, `Challenges`, `Map_Editor`, `Quests`, `content/event-competition.js`
+
+### `window.equipmentDatabase`
+
+Source: `database/equipment-database.js`.
+
+Data:
+
+- `ALL_EQUIPMENT` — every equipment item (`{ gameId, ...item }`).
+- `EQUIPMENT_BY_STAT` — `{ ad, ap, hp, armor, magicResist }`. Catalog items carry no fixed stat
+  (stat lives on owned equips), so these are normally empty.
+- `HARDCODED_BOOSTED_MAP` — equipment name → comma-separated map display names where it can be
+  boosted. Used by `Better_Boosted_Maps`.
+- `EVENT_EQUIPMENT`
+- `EQUIPMENT_TIER_STAT_BONUSES`, `EQUIPMENT_TIER_COLOR_BY_NUMBER`, `DEFAULT_EQUIPMENT_EFFECT_TIER`
+
+Functions: `getAllEquipment()` (raw uncached scan), `getEquipmentNameMap()` (cached lowercase name →
+`{ gameId, item }`), `isEventEquipmentName(name)`, `getBisProgressEquipmentNames()`,
+`getEquipmentCdrPercentByGameIdMap()`, `getEquipmentCooldownReductionPercent(...)`,
+`clampEquipmentTier(tier)` (1–5), `getEquipmentTierColorLabel(...)`,
+`mountEquipmentEffectComponent(...)` (see [game_state_api.md](game_state_api.md)).
+
+**Used by**
+
+- `Better_Boosted_Maps` (`HARDCODED_BOOSTED_MAP`, `ALL_EQUIPMENT`)
+- `Autoseller` (`ALL_EQUIPMENT`)
+- Also `Better_Analytics`, `Better_Exaltation_Chest`, `Better_Forge`, `Cyclopedia`, `Mod_Settings`, `Map_Editor`
+
+### `window.playerEquipmentDatabase`
+
+Source: `database/playereq-database.js`.
+
+- `EQUIPMENT_BY_SLOT` — equipment grouped by slot. Placeholder has the slot keys with empty arrays.
+  Reuses `equipmentDatabase.getAllEquipment`. Read by `Guilds.js`.
+
+**Used by**
+
+- `Guilds` (`EQUIPMENT_BY_SLOT`)
+
+### `window.mapsDatabase`
+
+Source: `database/maps-database.js`.
+
+Static snapshots (built at load; prefer the getters): `ALL_MAPS`, `RAID_MAPS`, `NON_RAID_MAPS`,
+`MAPS_BY_DIFFICULTY` (`{1,2,3}`), `MAP_EXPANSIONS`, `DIFFICULTY_LABELS`, `EVENT_TO_ROOM_MAPPING`,
+`MAP_ORDER_UNKNOWN`.
+
+Rooms and filters:
+
+- `getAllMaps()`, `getMapById(id)`, `getMapIdByDisplayName(name)` → id or `null`
+- `getMapsByDifficulty(d)`, `getMapsByMaxTeamSize(n)`, `getMapsByStaminaCost(n)`
+- `getRaidMaps()`, `getNonRaidMaps()`, `isRaid(mapId)`, `isMapRaidComprehensive(mapId)`,
+  `isDynamicEventMap(mapId)`, `getMapType(mapId)` → `'raid' | 'event' | false`
+- `getDifficultyLabel(d)`
+
+Board monsters (see [game_state_api.md](game_state_api.md) for the floor rules):
+
+- `getMultiFloorRoomIds()` → `string[]`, live scan of `state.utils.ROOMS`.
+- `getBoardMonstersForFloor(roomId, floorIndex = 0)` → board pieces (`villain: true`, `gameId`, `level`, ...).
+- `getBoardMonsterGameIds({ includeRaids = false, includeDrops = false })` → `Set<number>`; empty
+  while room data is not loaded. `includeDrops` adds `extraMonsterDrops`.
+- `getExtraMonsterDropGameIds(roomOrId, floorIndex?)` → `number[]` of drop-only creatures (may
+  contain duplicates across floors). With `floorIndex`, only that floor's `floorRules[floorIndex]`.
+- `getExtraMonsterDropFloors(roomOrId, gameId)` → `null` when the room itself lists the creature
+  (every floor), else the 0-based `floorRules` indices that list it (`[]` = does not drop here).
+
+Regions and ordering:
+
+- `getRegionsInOrder()`, `getRegionDisplayName(regionId)`, `getRegionDisplayNameFromRegion(region)`
+- `getRegionRune(...)`, `getExpansionMapIds(...)`, `getExpansionNameForMapId(mapId)`,
+  `getExpansionForRegion(...)`
+- `getCanonicalTableRowOrder()`, `buildMapOrderIndex()`, `getMapOrderIndex(mapId)`,
+  `compareMapsByGameOrder(a, b)`
+
+**Used by**
+
+- `Autoseller` (`getBoardMonsterGameIds`, `getExtraMonsterDropGameIds`)
+- `Awaken_Tracker` (`isRaid`, `getExtraMonsterDrop*`)
+- `Better_Tasker` (`getBoardMonsterGameIds`, `getBoardMonstersForFloor`, `getMultiFloorRoomIds`, `getMapById`)
+- `Raid_Hunter` (`getRegionDisplayName*`, `EVENT_TO_ROOM_MAPPING`)
+- `Better_Boosted_Maps` (`getRegionDisplayName*`)
+- Also `Battle_Helper`, `Better_Setups`, `Better_Teleporter`, `Cyclopedia`, `Hunt_Analyzer`, `Mod_Settings`, `RunTracker`, `Stamina_Optimizer`, `Challenges`, `Map_Editor`, `Highscore_Improvements`, `Usage_List`
+
+### `window.inventoryDatabase`
+
+Source: `database/inventory-database.js`.
+
+Data tables: `tooltips`, `categories`, `variants`, `staticItems`, `upgradeableItems`, `rarityText`,
+`rarityGameText`, `rarityColors`, `itemKeyGroups`, `itemKeyAliases`, `gameDisplayNames`,
+`nameAliases`, `tierLabels`, `miniIcons`, `customStyles`, `gazerVariants`, `runeKeysOrder`,
+`runeNonSacrificableKeys`.
+
+Functions: `resolveItemKey(...)`, `findItemKey(...)`, `findItemKeyByIcon(...)`,
+`getInventoryItemCount(...)`, `getRuneType(...)`, `getRuneTypes()`, `getRecyclableRuneTypes()`.
+
+`window.inventoryTooltips` is kept for backward compatibility (same data as `tooltips`).
+
+**Used by**
+
+- `Autoscroller`, `Better_Rune_Recycler`, `Cyclopedia`, `Depot_Manager`, `Hunt_Analyzer`, `Bestiary_Automator`
+
+## Utility Functions
+
+This document describes the utility functions available through the Mod Loader API for working with Bestiary Arena game data. The utility was made by [Mathias Bynens](https://github.com/mathiasbynens).
+
+### Overview
+
+The utility functions provide a standardized way to:
+- Convert between region/map/monster/equipment names and IDs
+- Manipulate game state (force seeds, configure boards)
+- Serialize and replay board configurations
+
+### Accessing the Utility Functions
+
+The utility functions are available through the `BestiaryModAPI.utility` object:
+
+```javascript
+// Example: Serializing the current board
+const boardData = JSON.parse(window.BestiaryModAPI.utility.serializeBoard());
+console.log('Current board data:', boardData);
+
+// Example: Replaying a board configuration
+window.BestiaryModAPI.utility.replay(boardConfig);
+```
+
+To ensure the utility functions are available before using them, you can wait for the `utility-api-ready` event:
+
+```javascript
+document.addEventListener('utility-api-ready', () => {
+  console.log('Utility API is ready');
+  
+  // Now you can safely use the utility functions
+  const maps = window.BestiaryModAPI.utility.maps;
+  // ...
+});
+```
+
+### Available Functions
+
+#### `serializeBoard()`
+
+Serializes the current board state into a JSON string that can be used with `replay()` or `configureBoard()`.
+
+**Returns:** A JSON string representing the board configuration.
+
+```javascript
+// Get the board as a JavaScript object
+const boardData = JSON.parse(window.BestiaryModAPI.utility.serializeBoard());
+```
+
+#### `replay(config)`
+
+Replays a board configuration, optionally with a specific seed.
+
+**Parameters:**
+- `config`: An object containing:
+  - `region`: The region name (e.g., 'Rookgaard')
+  - `map`: The map name (e.g., 'Goblin Camp')
+  - `board`: An array of piece configurations
+  - `seed` (optional): A specific seed to use for the replay
+
+```javascript
+window.BestiaryModAPI.utility.replay({
+  region: 'Rookgaard',
+  map: 'Goblin Camp',
+  seed: 12345,
+  board: [
+    {
+      tile: 7,
+      monster: {
+        name: 'troll',
+        hp: 10,
+        ad: 5,
+        ap: 0,
+        armor: 2,
+        magicResist: 0,
+        level: 5  // Monster level (will be converted to experience)
+      },
+      equipment: {
+        name: 'axe',
+        stat: 'ad',
+        tier: 2
+      }
+    }
+    // ... more pieces
+  ]
+});
+```
+
+#### `configureBoard(config)`
+
+Sets up the board based on a given configuration. Similar to `replay()` but without forcing a seed.
+
+**Parameters:**
+- `config`: The board configuration object (same as for `replay()`)
+
+#### `forceSeed(seed)`
+
+Forces the game to use a specific seed for random number generation.
+
+**Parameters:**
+- `seed`: The numeric seed to use
+
+#### `removeSeed()`
+
+Removes a previously forced seed, allowing the game to use random seeds again.
+
+#### Level and Experience Functions
+
+These utility functions are available through the game state utility:
+
+```javascript
+// Calculate experience points needed for a specific level
+const expForLevel5 = globalThis.state.utils.expAtLevel(5);
+console.log(expForLevel5); // 11250
+
+// Calculate level based on experience points
+const levelForExp = globalThis.state.utils.expToCurrentLevel(440425);
+console.log(levelForExp); // 25
+```
+
+**Note:** When serializing or configuring the board, monster levels are automatically converted to the appropriate experience points.
+
+### Available Maps
+
+The utility functions also provide access to various mapping objects through `BestiaryModAPI.utility.maps`:
+
+#### Region Maps
+- `regionNamesToIds`: Maps region names to their internal IDs
+- `regionIdsToNames`: Maps region IDs to their display names
+
+#### Map Maps
+- `mapNamesToIds`: Maps map names to their internal IDs
+- `mapIdsToNames`: Maps map IDs to their display names
+
+#### Monster Maps
+- `monsterNamesToGameIds`: Maps monster names to their game IDs
+- `monsterGameIdsToNames`: Maps monster game IDs to their names
+
+#### Equipment Maps
+- `equipmentNamesToGameIds`: Maps equipment names to their game IDs
+- `equipmentGameIdsToNames`: Maps equipment game IDs to their names
+
+### Example Usage
+
+Here's a complete example of using the utility functions in a mod:
+
+```javascript
+// Wait for the utility API to be ready
+document.addEventListener('utility-api-ready', () => {
+  console.log('Utility API is ready');
+  
+  // Get the equipment ID for a sword
+  const swordId = window.BestiaryModAPI.utility.maps.equipmentNamesToGameIds.get('sword');
+  console.log('Sword ID:', swordId);
+  
+  // Serialize the current board
+  const boardData = JSON.parse(window.BestiaryModAPI.utility.serializeBoard());
+  console.log('Current board:', boardData);
+  
+  // Save the board data to be replayed later
+  localStorage.setItem('saved_board', JSON.stringify(boardData));
+  
+  // Create a replay function
+  const replaySavedBoard = () => {
+    const savedBoard = JSON.parse(localStorage.getItem('saved_board'));
+    if (savedBoard) {
+      window.BestiaryModAPI.utility.replay(savedBoard);
+    }
+  };
+  
+  // Add a button to replay the saved board
+  api.ui.addButton({
+    id: 'replay-button',
+    text: 'Replay Saved Board',
+    onClick: replaySavedBoard
+  });
+});
+``` 
+
+## Events and Listeners
+
+The game uses XState under the hood, providing a powerful event system for monitoring and interacting with game state.
+
+### Basic Event Subscription
+
+```javascript
+// Listen for board state changes
+globalThis.state.board.on("before-game-start", (event) => {
+  console.log("Game about to start:", event);
+  // Custom code here
+});
+```
+
+### Inspecting State Transitions
+
+```javascript
+// Monitor all state transitions (useful for debugging)
+globalThis.state.board.inspect(console.log);
+
+// Sample output of events:
+/*
+{
+  actorRef: {sessionId: 'wrcv0mf', ...},
+  event: {type: 'autoSetupBoard', setup: Array(1)},
+  rootId: "wrcv0mf",
+  sourceRef: undefined,
+  type: "@xstate.event"
+}
+*/
+```
+
+### Common Event Types
+
+The game uses several standard action types:
+
+- `@xstate.init` - Initialization event when a state machine starts
+- `setState` - Updates state context properties
+- `setPlayMode` - Changes game mode (sandbox, autoplay, manual)
+- `autoSetupBoard` - Places game pieces on the board
+- `selectRoomById` - Selects a specific map/room
+
+### Subscription to Game State
+
+```javascript
+// Subscribe to all state changes
+const subscription = globalThis.state.board.subscribe((state) => {
+  console.log("Board state changed:", state);
+});
+
+// Unsubscribe when finished
+subscription.unsubscribe();
+```
+
+### Checking State Machine Status
+
+```javascript
+// Get current state information including active state
+const snapshot = globalThis.state.board.getSnapshot();
+console.log(snapshot.status); // 'active' or other status
+
+// Get context data (contains most game state)
+console.log(snapshot.context);
+```
+
+### Listening for New Raids
+
+The raids component allows you to listen for new raid events:
+
+```javascript
+// Listen for new raids
+const unsubscribe = globalThis.state.raids.on("newRaid", (e) => {
+  // Will execute every time a new raid appears
+  console.log("new raid", e.raid);
+});
+
+// Unsubscribe when finished
+unsubscribe();
+```
+
+## Client Configuration
+
+The clientConfig component allows you to customize various client-side behaviors and filters.
+
+### Customizing Dragon Plant Monster Filter
+
+You can customize which monsters are automatically sold when using the Dragon Plant feature:
+
+```javascript
+// Set a custom monster filter
+globalThis.state.clientConfig.trigger.setState({
+  fn: (prev) => ({
+    ...prev,
+    plantMonsterFilter: (monster) => {
+      // If you want to sell the creature, return TRUE
+      // If you want to keep it, return FALSE
+
+      if (monster.totalGenes < 95) return true;
+      if (monster.metadata.name === "Orc Spearman") return true;
+
+      return false;
+    },
+  }),
+});
+
+// Remove any custom filter (use default behavior)
+globalThis.state.clientConfig.trigger.setState({
+  fn: (prev) => ({ ...prev, plantMonsterFilter: undefined }),
+});
+
+The `monster` argument commonly includes:
+
+```javascript
+{
+  id, gameId, createdAt, exp, tier, shiny, hundo, locked, hidden, level,
+  genes: { hp, ad, ap, armor, magicResist },
+  totalGenes, rarityLevel, isExpCapped,
+  metadata: {
+    name, roles, queryTags, lookType, spriteId, corpseId,
+    portraitTranslate, bloodColor, baseStats, skill
+  }
+}
+```
+
+To always keep Sealed creatures (tier 5):
+
+```javascript
+globalThis.state.clientConfig.trigger.setState({
+  fn: (prev) => ({
+    ...prev,
+    plantMonsterFilter: (monster) => {
+      // Keep Sealed creatures
+      if (monster.tier === 5) return false;
+
+      // Sell/devour everything else
+      return true;
+    },
+  }),
+});
+```
+
+### Customizing Autoplay Delay
+
+You can customize the delay between autoplay actions:
+
+```javascript
+// Set autoplay delay to 0ms (instant)
+globalThis.state.clientConfig.trigger.setState({
+  fn: (prev) => ({
+    ...prev,
+    autoplayDelayMs: 0
+  }),
+});
+```
+```
+
+## Advanced Use Cases
+
+### Forcing a Specific Seed
+
+```javascript
+// Force a specific seed for testing or replay
+globalThis.state.board.send({
+  type: "setState",
+  fn: (prev) => ({ ...prev, customSandboxSeed: -876305199 }),
+});
+```
+
+### Custom Board Setup
+
+```javascript
+// Place custom entities on the board
+globalThis.state.board.send({
+  type: "setState",
+  fn: (prev) => ({
+    ...prev,
+    boardConfig: [
+      {
+        type: "custom",
+        nickname: null,
+        equip: { stat: "ap", tier: 2, gameId: 8 },
+        gameId: 9,
+        tier: 3,
+        genes: {
+          hp: 1,
+          magicResist: 1,
+          ad: 1,
+          ap: 1,
+          armor: 1,
+        },
+        villain: true,
+        key: "unique-arbitrary-key",
+        level: 15,
+        direction: "west",
+        tileIndex: 40,
+      },
+      {
+        type: "custom",
+        nickname: "Custom Nickname",
+        equip: { stat: "hp", tier: 2, gameId: 4 },
+        gameId: 8,
+        tier: 3,
+        genes: {
+          hp: 1,
+          magicResist: 1,
+          ad: 1,
+          ap: 1,
+          armor: 1,
+        },
+        villain: false,
+        key: "unique-arbitrary-key-2",
+        level: 999,
+        direction: "east",
+        tileIndex: 23,
+      },
+    ],
+  }),
+});
+```
+
+### Listening for Game Events
+
+```javascript
+// Listen for new game events and access the world object
+globalThis.state.board.on('newGame', (event) => {
+    console.log('New game started with seed:', event.world.RNG.seed);
+    console.log('World object:', event.world);
+});
+```
+
+You can also listen to game events and subscribe to world events:
+
+```javascript
+const listener = globalThis.state.board.on("newGame", (game) => {
+  console.log(game.world); // this is the game object
+
+  game.world.grid.onActorDeath.subscribe((event) => {
+    console.log(`Actor died: ${event.killedActor.name}`);
+  });
+
+  game.world.onGameEnd.once(() => {
+    listener.unsubscribe(); // unsubscribe
+  });
+});
+```
+
+The board also emits specific events for game start and end:
+
+```javascript
+// Listen for game start event
+globalThis.state.board.on('emitNewGame', (event) => {
+    console.log('Game started:', event);
+    // Handle game start logic
+});
+
+// Listen for game end event
+globalThis.state.board.on('emitEndGame', (event) => {
+    console.log('Game ended:', event);
+    // Handle game end logic
+});
+```
+
+### Monitoring Game Timer
+
+```javascript
+// Track game ticks and results
+globalThis.state.gameTimer.subscribe((data) => {
+  const { currentTick, state, readableGrade, rankPoints } = data.context;
+  console.log(`Current tick: ${currentTick}`);
+  
+  if (state !== 'initial') {
+    console.log(`Game ended with grade: ${readableGrade}`);
+    console.log(`Rank points: ${rankPoints}`);
+  }
+});
+```
+
+## Limitations and Considerations
+
+- **State Mutations**: Always use the proper state update patterns (creating new objects rather than mutating existing ones) to ensure state updates work correctly.
+- **Timing**: State updates may not be immediate due to the asynchronous nature of state machines.
+- **Browser Compatibility**: Some advanced techniques may not work in all browsers.
+- **Game Updates**: The state structure and API may change with game updates.
+- **Performance**: Be cautious with extensive state monitoring which can impact performance.
+- **Sandbox Mode**: Most state modifications only work properly in sandbox mode to prevent cheating in normal gameplay.
+- **XState Version 3**: The game has been upgraded to use XState v3, which may introduce breaking changes in the API. If your mods stop working, check for compatibility issues.
+
+## Integration with Client API
+
+The Game State API works seamlessly with the [Client API](client_api.md). While the Client API provides high-level functions for common tasks, the Game State API gives you direct access to the underlying state for more advanced operations.
+
+```javascript
+// Example of using both APIs together
+function setupCustomBoard() {
+  // Use Client API to show a loading modal
+  api.showModal({
+    title: 'Loading',
+    content: 'Setting up custom board...'
+  });
+  
+  try {
+    // Use Game State API for direct state manipulation
+    globalThis.state.board.send({ type: "setPlayMode", mode: "sandbox" });
+    
+    // More state manipulation...
+    
+    // Use Client API again to notify completion
+    api.showModal({
+      title: 'Success',
+      content: 'Custom board setup complete!',
+      buttons: [{ text: 'OK', primary: true }]
+    });
+  } catch (error) {
+    console.error('Error setting up board:', error);
+  }
+}
+``` 
