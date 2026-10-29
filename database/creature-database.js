@@ -294,7 +294,9 @@ function monsterMatchesCreatureDisplay(displayName, monster) {
 // Creature database with shiny portrait support
 function getAllMonsters() {
   const monsters = [];
-  for (let i = 1; i < 1000; i++) {
+  // getMonster() can throw on an id gap; skip it instead of dropping every higher id.
+  let consecutiveFailures = 0;
+  for (let i = 1; i < 1000 && consecutiveFailures < 50; i++) {
     try {
       const state = globalThis.state || window.state || (typeof state !== 'undefined' ? state : null);
       if (!state?.utils?.getMonster) {
@@ -302,6 +304,7 @@ function getAllMonsters() {
         break;
       }
       const monster = state.utils.getMonster(i);
+      consecutiveFailures = monster?.metadata?.name ? 0 : consecutiveFailures + 1;
       if (monster?.metadata?.name) {
         monsters.push({ 
           gameId: i, 
@@ -312,7 +315,7 @@ function getAllMonsters() {
           }
         });
       }
-    } catch (e) { break; }
+    } catch (e) { consecutiveFailures += 1; }
   }
   return monsters;
 }

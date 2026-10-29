@@ -4,6 +4,26 @@
   },
   "notes": [
     {
+      "version": "5.1.13",
+      "changes": [
+        {
+          "mod": "Better Tasker",
+          "type": "fixed",
+          "text": "Tasks whose creature only appears in a multi-floor map are no longer skipped; it now goes to the floor that has the creature. Autoplay is also no longer treated as stuck when the game is running but the autoplay button looks different than expected."
+        },
+        {
+          "mod": "creature-database.js",
+          "type": "fixed",
+          "text": "Loading the full creature list no longer stops at the first monster id that fails to load, which could drop every higher id."
+        },
+        {
+          "mod": "Map Editor",
+          "type": "fixed",
+          "text": "The Asset list now includes tiles and floor-below sprites from every floor of multi-floor maps, and the Creature list now reads both the main and per-floor creatures of those maps."
+        }
+      ]
+    },
+    {
       "version": "5.1.12",
       "changes": [
         {

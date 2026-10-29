@@ -338,6 +338,39 @@ function pickAlternateMapForCreature(creatureName) {
     }
 }
 
+// For a multi-floor room, find the first floor whose board includes the creature
+// (via mapsDatabase.getBoardMonstersForFloor, the shared floor-aware getter).
+// Returns the floor index, or null when the creature is not on any floor.
+function findFloorForCreatureInMultiFloorRoom(roomId, creatureName) {
+    try {
+        const creatureGameId = getCreatureGameIdByName(creatureName);
+        if (creatureGameId == null) return null;
+        const rooms = globalThis.state?.utils?.ROOMS;
+        const room = Array.isArray(rooms) ? rooms.find((r) => r?.id === roomId) : null;
+        const getBoardMonstersForFloor = globalThis.mapsDatabase?.getBoardMonstersForFloor;
+        if (!Array.isArray(room?.floorFiles) || typeof getBoardMonstersForFloor !== 'function') return null;
+        for (let floorIndex = 0; floorIndex < room.floorFiles.length; floorIndex++) {
+            const pieces = getBoardMonstersForFloor(roomId, floorIndex);
+            if (pieces.some((piece) => Number(piece?.gameId) === creatureGameId)) return floorIndex;
+        }
+        return null;
+    } catch (_) {
+        return null;
+    }
+}
+
+// Resolve where to go when the task's map is a multi-floor room: prefer a normal alternate
+// map for the creature; otherwise stay in the multi-floor room and pick the floor that
+// actually contains the creature (e.g. The Pale Count only lives in Bloody Crypt).
+// Returns { roomId, floor } (floor null = keep the configured floor) or null if unresolvable.
+function resolveMultiFloorTarget(roomId, creatureName) {
+    const alternate = pickAlternateMapForCreature(creatureName);
+    if (alternate) return { roomId: alternate.id, floor: null, alternateName: alternate.name };
+    const floor = findFloorForCreatureInMultiFloorRoom(roomId, creatureName);
+    if (floor != null) return { roomId, floor, alternateName: null };
+    return null;
+}
+
 function getAllMapOptions(creatureName = null) {
     try {
         const roomNameMap = globalThis.state?.utils?.ROOM_NAME;
@@ -5451,17 +5484,19 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                     taskingMapId,
                     selectedRoomId: roomId
                 });
+                let multiFloorTarget = null;
                 if (isMultiFloorRoom(roomId)) {
-                    console.log('[Better Tasker] Stored tasking map is a multi-floor quest room (different creatures per floor) - looking for an alternate map for this creature:', { roomId, activeCreatureName });
-                    const alternate = pickAlternateMapForCreature(activeCreatureName);
-                    if (!alternate) {
-                        console.log(`[Better Tasker] No alternate non-multi-floor map found for "${activeCreatureName}" - cannot proceed with this task automatically`);
+                    console.log('[Better Tasker] Stored tasking map is a multi-floor quest room (different creatures per floor) - resolving alternate map or creature floor:', { roomId, activeCreatureName });
+                    multiFloorTarget = resolveMultiFloorTarget(roomId, activeCreatureName);
+                    if (!multiFloorTarget) {
+                        console.log(`[Better Tasker] "${activeCreatureName}" not found on any floor of ${roomId} and no alternate map exists - cannot proceed with this task automatically`);
                         return false;
                     }
-                    console.log(`[Better Tasker] Using alternate map for "${activeCreatureName}" instead of multi-floor suggestion: ${alternate.name} (${alternate.id})`);
-                    roomId = alternate.id;
+                    console.log(`[Better Tasker] Multi-floor target for "${activeCreatureName}": room ${multiFloorTarget.roomId}, floor ${multiFloorTarget.floor ?? 'configured'}`);
+                    roomId = multiFloorTarget.roomId;
                 }
                 const roomAutomation = resolveTaskerAutomationSettingsForRoom(roomId, runtimeSettings, resolvedFloor);
+                if (multiFloorTarget?.floor != null) roomAutomation.floor = multiFloorTarget.floor;
                 runtimeSettings = {
                     ...runtimeSettings,
                     setupMethod: roomAutomation.setupMethod,
@@ -5641,17 +5676,19 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
             });
             
             if (roomId) {
+                let multiFloorTarget = null;
                 if (isMultiFloorRoom(roomId)) {
-                    console.log('[Better Tasker] Suggested map is a multi-floor quest room (different creatures per floor) - looking for an alternate map for this creature:', { roomId, mapName, activeCreatureName });
-                    const alternate = pickAlternateMapForCreature(activeCreatureName);
-                    if (!alternate) {
-                        console.log(`[Better Tasker] No alternate non-multi-floor map found for "${activeCreatureName}" - cannot proceed with this task automatically`);
+                    console.log('[Better Tasker] Suggested map is a multi-floor quest room (different creatures per floor) - resolving alternate map or creature floor:', { roomId, mapName, activeCreatureName });
+                    multiFloorTarget = resolveMultiFloorTarget(roomId, activeCreatureName);
+                    if (!multiFloorTarget) {
+                        console.log(`[Better Tasker] "${activeCreatureName}" not found on any floor of ${roomId} and no alternate map exists - cannot proceed with this task automatically`);
                         return false;
                     }
-                    console.log(`[Better Tasker] Using alternate map for "${activeCreatureName}" instead of multi-floor suggestion: ${alternate.name} (${alternate.id})`);
-                    roomId = alternate.id;
+                    console.log(`[Better Tasker] Multi-floor target for "${activeCreatureName}": room ${multiFloorTarget.roomId}, floor ${multiFloorTarget.floor ?? 'configured'}`);
+                    roomId = multiFloorTarget.roomId;
                 }
                 const roomAutomation = resolveTaskerAutomationSettingsForRoom(roomId, runtimeSettings, resolvedFloor);
+                if (multiFloorTarget?.floor != null) roomAutomation.floor = multiFloorTarget.floor;
                 runtimeSettings = {
                     ...runtimeSettings,
                     setupMethod: roomAutomation.setupMethod,
@@ -7325,7 +7362,27 @@ async function handleTaskFinishing() {
                             console.log('[Better Tasker] Autoplay button transitioned to accessible state');
                         } else {
                             console.log('[Better Tasker] Autoplay button never transitioned, skipping quest log check');
-                            return;
+                            const boardCtx = globalThis.state?.board?.getSnapshot?.()?.context;
+                            try {
+                                console.log('[Better Tasker] Autoplay transition diagnostics:', {
+                                    mode: boardCtx?.mode,
+                                    floor: boardCtx?.floor,
+                                    gameStarted: boardCtx?.gameStarted,
+                                    roomId: getCurrentRoomId(),
+                                    buttons: Array.from(document.querySelectorAll('button[data-state="closed"][data-full]')).map((b) => ({
+                                        text: b.textContent.trim().slice(0, 30),
+                                        full: b.getAttribute('data-full'),
+                                        disabled: b.hasAttribute('disabled')
+                                    }))
+                                });
+                            } catch (_) { /* diagnostics only */ }
+                            // The DOM button heuristic can miss (e.g. multi-floor rooms); trust the board
+                            // state when it says autoplay is genuinely running.
+                            if (boardCtx?.mode === 'autoplay' && boardCtx?.gameStarted) {
+                                console.log('[Better Tasker] Board state confirms autoplay is running - continuing despite button state');
+                            } else {
+                                return;
+                            }
                         }
                     }
                 }

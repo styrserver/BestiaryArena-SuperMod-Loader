@@ -532,7 +532,9 @@ call the plain floor-0 getter against multi-floor rooms and that's fine, because
 Quest and The Annihilator Quest reuse the same creature roster across all their floors (just
 scaled stats/levels per floor) — floor 0's `gameId` set already equals every other floor's. Don't
 "fix" those two to use the per-floor pattern above; they're identity checks, not board-accuracy
-checks.
+checks. (Exception: when Better Tasker's task creature lives only in a multi-floor room, e.g. The
+Pale Count in `edvamp`, `findFloorForCreatureInMultiFloorRoom()` scans each floor with
+`mapsDatabase.getBoardMonstersForFloor` to pick the floor to navigate to.)
 
 ### Experience and Level Calculations
 

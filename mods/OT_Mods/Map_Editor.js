@@ -11004,8 +11004,7 @@ function getConfiguredAssetsFromAllRooms() {
   // tile-indexed layer of sprite configs (array-or-single per tile, same shape as a
   // tiles[] entry once normalized) — skipping it dropped every sprite that only
   // appears beneath the floor, which on bridge/water maps is most of the art.
-  const scanRoom = (room) => {
-    const data = room?.file?.data;
+  const scanRoomData = (data, room) => {
     if (!data) return;
     if (Array.isArray(data.tiles)) {
       data.tiles.forEach((layer) => {
@@ -11020,6 +11019,15 @@ function getConfiguredAssetsFromAllRooms() {
         const layer = slot && !Array.isArray(slot) && Array.isArray(slot.sprites) ? slot.sprites : slot;
         normalizeSpriteLayerConfig(layer).forEach((config) => addEntry(config, room));
       });
+    }
+  };
+  // Multi-floor rooms (e.g. The Annihilator Quest) keep each floor's tiles in
+  // room.floorFiles[n].data, not room.file.data — scan every floor, plus file.data
+  // when a room has both.
+  const scanRoom = (room) => {
+    scanRoomData(room?.file?.data, room);
+    if (Array.isArray(room?.floorFiles)) {
+      room.floorFiles.forEach((floorFile) => scanRoomData(floorFile?.data, room));
     }
   };
 
@@ -13507,7 +13515,6 @@ function collectMapUsedCreatures() {
           if (actor) addActor(actor, room);
         });
       });
-      return;
     }
     const actors = room?.file?.data?.actors;
     if (!Array.isArray(actors)) return;
