@@ -87,8 +87,8 @@ function getMapById(mapId) {
  * drop from the room (e.g. the Demon on Orshabaal Raid). Entries are `{ gameId, ... }`
  * objects (older shape: bare gameId numbers).
  * @param {Object|string} roomOrId - Room object, or room ID
- * @param {number} [floorIndex] - Only that floor's `floorRules[floorIndex]` drops; when
- *   omitted, the room's own drops plus every floor's.
+ * @param {number} [floorIndex] - Drops that apply on that floor: the room's own drops plus
+ *   `floorRules[floorIndex]`'s; when omitted, the room's own drops plus every floor's.
  * @returns {number[]} gameIds (may contain duplicates across floors)
  */
 function getExtraMonsterDropGameIds(roomOrId, floorIndex) {
@@ -102,11 +102,11 @@ function getExtraMonsterDropGameIds(roomOrId, floorIndex) {
       if (Number.isFinite(gameId)) ids.push(gameId);
     }
   };
+  add(room.extraMonsterDrops);
   if (floorIndex !== undefined) {
     add(room.floorRules?.[floorIndex]?.extraMonsterDrops);
     return ids;
   }
-  add(room.extraMonsterDrops);
   if (Array.isArray(room.floorRules)) {
     for (const rule of room.floorRules) add(rule?.extraMonsterDrops);
   }
@@ -208,6 +208,26 @@ function getBoardMonstersForFloor(roomId, floorIndex = 0) {
     return pieces;
   }
   return globalThis.state?.utils?.getBoardMonstersFromRoomId?.(roomId) || [];
+}
+
+/**
+ * Unique gameIds of every creature that can appear on one floor of a room: board villains
+ * first, then drop-only creatures (`extraMonsterDrops` of the room plus that floor's
+ * `floorRules`). Floor-aware, so use it instead of state.utils.getBoardMonstersFromRoomId
+ * when the current floor matters.
+ * @param {string} roomId
+ * @param {number} [floorIndex=0]
+ * @returns {Set<number>}
+ */
+function getFloorCreatureGameIds(roomId, floorIndex = 0) {
+  const ids = new Set();
+  for (const piece of getBoardMonstersForFloor(roomId, floorIndex)) {
+    if (piece?.villain !== true) continue;
+    const gameId = Number(piece.gameId);
+    if (Number.isFinite(gameId)) ids.add(gameId);
+  }
+  for (const gameId of getExtraMonsterDropGameIds(roomId, floorIndex)) ids.add(gameId);
+  return ids;
 }
 
 const boardMonsterGameIdCache = new Map();
@@ -728,6 +748,7 @@ mapsDatabase.getMapsByDifficulty = getMapsByDifficulty;
 mapsDatabase.getMapsByMaxTeamSize = getMapsByMaxTeamSize;
 mapsDatabase.getMultiFloorRoomIds = getMultiFloorRoomIds;
 mapsDatabase.getBoardMonstersForFloor = getBoardMonstersForFloor;
+mapsDatabase.getFloorCreatureGameIds = getFloorCreatureGameIds;
 mapsDatabase.getBoardMonsterGameIds = getBoardMonsterGameIds;
 mapsDatabase.getMapsByStaminaCost = getMapsByStaminaCost;
 mapsDatabase.getRaidMaps = getRaidMaps;

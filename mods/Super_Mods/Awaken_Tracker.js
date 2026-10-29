@@ -109,6 +109,11 @@
         return !getUnobtainableNames().has(lname) && !isNonAwakenableName(lname);
     }
 
+    /** Seasonal event creatures (Clot, Gummy Raider, ...) cannot awaken but still show on their map. */
+    function isEventCreature(name) {
+        return window.creatureDatabase?.isEventCreatureName?.(name) === true;
+    }
+
     const AWAKEN_TIER = 6;
     const STATS = ['hp', 'ad', 'ap', 'armor', 'magicResist'];
     /** Larger than max gene-sum term (100 * 100) so shiny awakened always ranks above non-shiny awakened. */
@@ -266,6 +271,7 @@
     let renderDebounceId = null;
     let boardSubscription = null;
     let lastSeenRoomId = null;
+    let lastSeenFloor = null;
 
     const AWAKEN_ANALYSIS_BLOCKING_MODS = ['Board Analyzer'];
     const AWAKEN_ANALYSIS_HIDDEN_ATTR = 'data-ba-analysis-panel-hidden';
@@ -877,40 +883,25 @@
         return globalThis.state?.utils?.getBoardMonstersFromRoomId?.(roomId) || [];
     }
 
+    function getRoomFloorCreatureIds(roomId, floor) {
+        return window.mapsDatabase?.getFloorCreatureGameIds?.(roomId, floor) || new Set();
+    }
+
     function updateCurrentMapEnemies() {
         try {
             const roomId = resolveCurrentRoomId();
             state.currentRoomId = roomId || null;
-            if (!roomId) {
+            if (!roomId || typeof globalThis.state?.utils?.getBoardMonstersFromRoomId !== 'function') {
                 state.currentMapEnemies = [];
                 scheduleRender();
                 return;
             }
-            if (typeof globalThis.state?.utils?.getBoardMonstersFromRoomId !== 'function') {
-                state.currentMapEnemies = [];
-                scheduleRender();
-                return;
-            }
-            const monsters = getBoardMonstersForFloor(roomId, resolveCurrentFloor());
-            const dedup = new Map();
-            for (const piece of monsters) {
-                if (!piece || piece.villain !== true) continue;
-                const gameId = Number(piece.gameId);
-                if (!Number.isFinite(gameId)) continue;
-                if (!dedup.has(gameId)) {
-                    const name = resolveName(gameId);
-                    if (!isCreatureEligibleForAwaken(name)) continue;
-                    dedup.set(gameId, { gameId, name });
-                }
-            }
-            const extraDropIds = window.mapsDatabase?.getExtraMonsterDropGameIds?.(roomId) || [];
-            for (const gameId of extraDropIds) {
-                if (dedup.has(gameId)) continue;
+            const enemies = [];
+            for (const gameId of getRoomFloorCreatureIds(roomId, resolveCurrentFloor())) {
                 const name = resolveName(gameId);
-                if (!isCreatureEligibleForAwaken(name)) continue;
-                dedup.set(gameId, { gameId, name });
+                if (isCreatureEligibleForAwaken(name) || isEventCreature(name)) enemies.push({ gameId, name });
             }
-            state.currentMapEnemies = Array.from(dedup.values());
+            state.currentMapEnemies = enemies;
             ensureMapBaseline(roomId);
             scheduleRender();
             scheduleSave();
@@ -927,13 +918,16 @@
         boardSubscription = board.subscribe(() => {
             if (awakenPausedForAnalysis) return;
             const roomId = resolveCurrentRoomId();
-            if (roomId !== lastSeenRoomId) {
+            const floor = resolveCurrentFloor();
+            if (roomId !== lastSeenRoomId || floor !== lastSeenFloor) {
                 lastSeenRoomId = roomId;
+                lastSeenFloor = floor;
                 updateCurrentMapEnemies();
                 if (typeof farmerRuntime.uiRefresh === 'function') farmerRuntime.uiRefresh();
             }
         });
         lastSeenRoomId = resolveCurrentRoomId();
+        lastSeenFloor = resolveCurrentFloor();
         updateCurrentMapEnemies();
     }
 
@@ -943,6 +937,7 @@
             boardSubscription = null;
         }
         lastSeenRoomId = null;
+        lastSeenFloor = null;
     }
 
     // Light subscription to player state: re-render with heavy debounce when inventory changes
@@ -1631,11 +1626,30 @@
         const results = [];
         let orderIdx = 0;
         const requireFarmFloor = options.requireFarmFloor !== false;
+        const entries = [];
+        const seenRoomIds = new Set();
         for (const region of utils.REGIONS) {
             if (!region?.id) continue;
             const regionName = regionIdsToNames[region.id] || region.id;
             for (const room of (region.rooms || [])) {
                 if (!room?.id) continue;
+                seenRoomIds.add(String(room.id));
+                entries.push({ room, regionName });
+            }
+        }
+        // Active events/raids whose room is not listed under any region still need to show.
+        try {
+            const activeRaids = globalThis.state?.raids?.getSnapshot?.()?.context?.list || [];
+            for (const raid of activeRaids) {
+                const rid = raid?.roomId;
+                if (!rid || seenRoomIds.has(String(rid))) continue;
+                seenRoomIds.add(String(rid));
+                const room = window.mapsDatabase?.getMapById?.(rid)
+                    || (Array.isArray(utils.ROOMS) ? utils.ROOMS.find(r => r?.id === rid) : null);
+                if (room?.id) entries.push({ room, regionName: 'Event' });
+            }
+        } catch (_) { /* raids store unavailable */ }
+        for (const { room, regionName } of entries) {
                 const isRaid = isRaidRoomId(room.id, room);
                 // Inactive raids are not farmable — only include them while active when farming.
                 if (requireFarmFloor && isRaid && !isRaidCurrentlyActive(room.id)) continue;
@@ -1649,15 +1663,10 @@
                 const villains = board.filter(p => p?.villain === true);
                 const boardIds = new Set(villains.map(v => Number(v.gameId)));
                 // Drop-only creatures (extraMonsterDrops) are not on the board; count each wanted one once.
-                // Floor-gated drops (floorRules) only count when the farm floor is one of them.
+                // Floor-gated drops (floorRules) only count on the farm floor (any floor when none is unlocked).
                 const extraDropIds = new Set(
-                    (window.mapsDatabase?.getExtraMonsterDropGameIds?.(room.id) || [])
-                        .filter(id => {
-                            if (!wantedIds.has(id) || boardIds.has(id)) return false;
-                            const floors = window.mapsDatabase.getExtraMonsterDropFloors(room.id, id);
-                            if (floors === null) return true;
-                            return farmFloor == null ? floors.length > 0 : floors.includes(farmFloor);
-                        })
+                    (window.mapsDatabase?.getExtraMonsterDropGameIds?.(room.id, farmFloor ?? undefined) || [])
+                        .filter(id => wantedIds.has(id) && !boardIds.has(id))
                 );
                 if (!villains.length && extraDropIds.size === 0) continue;
 
@@ -1701,6 +1710,7 @@
                     regionName, stamina, totalVillains, wantedTotal, uniqueWanted,
                     density, wantedPerStamina, bestWantedSum, defaultOrder: orderIdx++,
                     isRaid,
+                    isActiveRaid: isRaid && isRaidCurrentlyActive(room.id),
                     farmFloor,
                     maxUnlockedFloor: getMaxUnlockedFloorForRoom(room.id),
                     wantedDetails: Array.from(wantedByCreature.entries()).map(([id, info]) => ({
@@ -1712,7 +1722,6 @@
                         count: info.count, avgLevel: info.totalLevel / info.count
                     })).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
                 });
-            }
         }
         results.sort((a, b) =>
             b.uniqueWanted - a.uniqueWanted
@@ -2780,10 +2789,10 @@
     function farmerMapStillHasTargets(roomId, wantedIds) {
         if (!roomId || !wantedIds?.size) return false;
         try {
-            const board = getBoardMonstersForFloor(roomId, resolveCurrentFloor());
-            if (board.some(p => p?.villain === true && wantedIds.has(Number(p.gameId)))) return true;
-            const extraDropIds = window.mapsDatabase?.getExtraMonsterDropGameIds?.(roomId) || [];
-            return extraDropIds.some(id => wantedIds.has(id));
+            for (const id of getRoomFloorCreatureIds(roomId, resolveCurrentFloor())) {
+                if (wantedIds.has(id)) return true;
+            }
+            return false;
         } catch (_) { return false; }
     }
 
@@ -4489,7 +4498,7 @@
                 const densityColor = densityPct >= 70 ? '#7dd87d' : densityPct >= 40 ? '#e0c060' : '#d87d7d';
                 const effStr = r.wantedPerStamina.toFixed(2);
                 const raidBadge = r.isRaid
-                    ? ` <span style="display:inline-block;background:#7a1f1f;color:#ffd6d6;font-size:9px;font-weight:bold;padding:1px 5px;border-radius:3px;letter-spacing:0.5px;vertical-align:1px;" title="${t('mods.awakenTracker.raidBadgeTooltip')}">${t('mods.awakenTracker.raidBadge')}</span>`
+                    ? ` <span style="display:inline-block;background:${r.isActiveRaid ? '#1f7a3a' : '#7a1f1f'};color:#ffd6d6;font-size:9px;font-weight:bold;padding:1px 5px;border-radius:3px;letter-spacing:0.5px;vertical-align:1px;" title="${t('mods.awakenTracker.raidBadgeTooltip')}">${t('mods.awakenTracker.raidBadge')}</span>`
                     : '';
                 const titleAttr = r.isRaid
                     ? t('mods.awakenTracker.raidTitleAttr', { mapName: r.mapName })

@@ -20,6 +20,10 @@ const defaultConfig = {
   showAbilityOnHover: false,
   useOldOutfits: false,
   showSetupLabels: false,
+  showPerfOverlay: false,
+  perfOverlayAdvanced: false,
+  perfOverlayFilter: 'all', // 'all' | 'mod' | 'native' | 'other'
+  perfOverlayPos: null, // { x, y } px from top-left after a drag; null = top-left default
   enableSetupShortcutsAndHover: true,
   hotkeySetupSource: 'betterSetups', // 'betterSetups' | 'setupManager'
   enableShinyEnemies: false,
@@ -3188,6 +3192,462 @@ const subscriptions = {
   autoplayRefreshSetPlayMode: null
 };
 
+
+// FPS + API request-rate overlay (server rate limit: 30 requests / 10 s)
+const PERF_RATE_WINDOW_MS = 10000;
+const PERF_RATE_LIMIT = 30;
+const PERF_OVERLAY_REFRESH_MS = 500;
+const PERF_FPS_GOOD = 60;
+
+const perfOverlay = {
+  el: null,
+  rafId: 0,
+  refreshTimer: null,
+  frames: 0,
+  lastSampleTs: 0,
+  fps: 0,
+  body: null,
+  detailsBtn: null,
+  filterBar: null,
+  filterBtns: null,
+  list: null,
+  copyBtn: null,
+  hover: false,
+  copyBtnResetTimer: null,
+  requests: [], // entries inside the last 10s: { perf, ts, method, path, caller, status, ms }
+  captures: [], // frozen snapshots taken when the limit is reached (newest last)
+  captureArmed: true,
+  peak: 0,
+  rateLimited: 0,
+  originalFetch: null,
+  fetchWrapper: null,
+  active: false
+};
+const PERF_MAX_CAPTURES = 5;
+
+function perfParseApiRequest(input, init) {
+  try {
+    const raw = typeof input === 'string' ? input : (input && input.url) || String(input);
+    const u = new URL(raw, window.location.href);
+    if (u.origin !== window.location.origin || !u.pathname.startsWith('/api/')) return null;
+    const method = String((init && init.method) || (input && input.method) || 'GET').toUpperCase();
+    return { method, path: u.pathname.replace(/^\/api\/trpc\//, 'trpc:') };
+  } catch (_) {
+    return null;
+  }
+}
+
+// Other mods' fetch patches sit between the real caller and us; skip them so they don't claim the request.
+const PERF_FETCH_WRAPPER_FN = /^(window\.|globalThis\.)?fetch$|fetch.*(wrapper|hook|patch|intercept)|(wrapper|hook|patched).*fetch/i;
+
+// Walks the stack above the wrapper. source = who made the nearest relevant frame:
+// 'mod' (/bestiary-mod/<Mod>.js), 'native' (the game's /_next/static chunks), else 'other' (loader/extension).
+// caller = up to 4 distinct "File.js:line" frames.
+function perfClassifyStack() {
+  const frames = String(new Error().stack || '').split('\n').slice(1);
+  const chain = [];
+  let source = null;
+  let name = null;
+  for (const f of frames) {
+    // our own frames (classifier + wrapper) live in Mod_Settings.js and would otherwise be classed as MOD
+    if (f.includes('perfCountingFetch') || f.includes('perfClassifyStack')) continue;
+    const fm = f.match(/^\s*at\s+(?:async\s+)?(?:(.+?)\s+\()?/);
+    if (fm && fm[1] && PERF_FETCH_WRAPPER_FN.test(fm[1])) continue;
+    const mod = f.match(/bestiary-mod\/([^:)\s]+):(\d+)/);
+    const nat = !mod && f.match(/\/_next\/static\/[^)\s]*?([^/:)\s]+\.js):(\d+)/);
+    const oth = !mod && !nat && f.match(/\/([^/:)\s]+\.(?:js|mjs)):(\d+)/);
+    const m = mod || nat || oth;
+    if (!m) continue;
+    if (!source) {
+      source = mod ? 'mod' : nat ? 'native' : 'other';
+      // native chunk names are hashed noise, so native requests are just "game"
+      name = nat ? 'game' : m[1].replace(/\.m?js$/, '');
+    }
+    const tag = `${m[1]}:${m[2]}`;
+    if (!chain.includes(tag)) chain.push(tag);
+    if (chain.length >= 4) break;
+  }
+  return { source: source || 'other', name: name || 'unknown', caller: chain.join(' < ') || 'unknown' };
+}
+
+const PERF_SOURCE_LABEL = { mod: 'MOD', native: 'NATIVE', other: 'OTHER' };
+const PERF_SOURCE_COLOR = { mod: '#6cb8ff', native: '#c79bff', other: '#aaa' };
+
+function perfEscape(s) {
+  return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
+
+function perfCurrentRate(now) {
+  const cutoff = now - PERF_RATE_WINDOW_MS;
+  const reqs = perfOverlay.requests;
+  while (reqs.length && reqs[0].perf < cutoff) reqs.shift();
+  return reqs.length;
+}
+
+function perfTakeCapture(reason) {
+  if (!perfOverlay.requests.length) return;
+  perfOverlay.captures.push({
+    reason,
+    ts: Date.now(),
+    // same entry objects, so status/ms of still-pending requests fill in later
+    requests: perfOverlay.requests.slice()
+  });
+  if (perfOverlay.captures.length > PERF_MAX_CAPTURES) perfOverlay.captures.shift();
+  renderPerfOverlay();
+}
+
+function perfFormatCaptures() {
+  const tally = (list, key) => {
+    const counts = new Map();
+    list.forEach((r) => counts.set(r[key], (counts.get(r[key]) || 0) + 1));
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([k, n]) => `  ${n}x ${k}`).join('\n');
+  };
+  const blocks = perfOverlay.captures.slice().reverse().map((cap, i) => {
+    const reqs = cap.requests;
+    const t0 = reqs[0].perf;
+    const lines = reqs.map((r) =>
+      `+${String(Math.round(r.perf - t0)).padStart(5)}ms  [${PERF_SOURCE_LABEL[r.source]} ${r.name}] ${r.method} ${r.path}  ` +
+      `${r.status == null ? 'pending' : r.status}${r.ms == null ? '' : ` ${r.ms}ms`}  <- ${r.caller}`
+    );
+    return [
+      `=== Capture ${i + 1}/${perfOverlay.captures.length} (${cap.reason}) at ${new Date(cap.ts).toISOString()} - ${reqs.length} API requests in 10s ===`,
+      'By mod/source:', tally(reqs.map((r) => ({ s: `${PERF_SOURCE_LABEL[r.source]} ${r.name}` })), 's'),
+      'By mod/source + endpoint:',
+      tally(reqs.map((r) => ({ s: `${PERF_SOURCE_LABEL[r.source]} ${r.name} -> ${r.path}` })), 's'),
+      'Timeline:', ...lines
+    ].join('\n');
+  });
+  return `Bestiary Arena API request log (limit ${PERF_RATE_LIMIT}/10s, 429s seen: ${perfOverlay.rateLimited})\n\n${blocks.join('\n\n')}`;
+}
+
+async function copyPerfCaptures() {
+  const text = perfFormatCaptures();
+  let ok = false;
+  try {
+    await navigator.clipboard.writeText(text);
+    ok = true;
+  } catch (_) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.cssText = 'position:fixed;left:-9999px;top:0;';
+    document.body.appendChild(ta);
+    ta.select();
+    try { ok = document.execCommand('copy'); } catch (__) { /* ignore */ }
+    ta.remove();
+  }
+  if (!perfOverlay.copyBtn) return;
+  perfOverlay.copyBtn.textContent = ok ? 'Copied!' : 'Copy failed';
+  clearTimeout(perfOverlay.copyBtnResetTimer);
+  perfOverlay.copyBtnResetTimer = setTimeout(() => {
+    perfOverlay.copyBtnResetTimer = null;
+    renderPerfOverlay();
+  }, 1500);
+}
+
+function installPerfFetchHook() {
+  if (perfOverlay.fetchWrapper) return;
+  const original = window.fetch;
+  perfOverlay.originalFetch = original;
+  perfOverlay.fetchWrapper = function perfCountingFetch(input, init) {
+    const info = perfOverlay.active ? perfParseApiRequest(input, init) : null;
+    const startedAt = performance.now();
+    const promise = original.apply(this, arguments);
+    if (info) {
+      const { source, name, caller } = perfClassifyStack();
+      const entry = {
+        perf: startedAt, ts: Date.now(), method: info.method, path: info.path,
+        source, name, caller, status: null, ms: null
+      };
+      perfOverlay.requests.push(entry);
+      const rate = perfCurrentRate(startedAt);
+      if (rate >= PERF_RATE_LIMIT && perfOverlay.captureArmed) {
+        perfOverlay.captureArmed = false;
+        perfTakeCapture(`reached ${rate} requests`);
+      } else if (rate < PERF_RATE_LIMIT) {
+        perfOverlay.captureArmed = true;
+      }
+      promise.then((res) => {
+        entry.status = res ? res.status : '?';
+        entry.ms = Math.round(performance.now() - startedAt);
+        if (res && res.status === 429) {
+          perfOverlay.rateLimited++;
+          const last = perfOverlay.captures[perfOverlay.captures.length - 1];
+          if (!last || Date.now() - last.ts > PERF_RATE_WINDOW_MS) perfTakeCapture('got HTTP 429');
+        }
+      }, () => {
+        entry.status = 'network error';
+        entry.ms = Math.round(performance.now() - startedAt);
+      });
+    }
+    return promise;
+  };
+  window.fetch = perfOverlay.fetchWrapper;
+}
+
+function uninstallPerfFetchHook() {
+  // Only restore if nobody wrapped us afterwards; otherwise the wrapper stays as a pass-through (active=false).
+  if (perfOverlay.fetchWrapper && window.fetch === perfOverlay.fetchWrapper) {
+    window.fetch = perfOverlay.originalFetch;
+    perfOverlay.fetchWrapper = null;
+    perfOverlay.originalFetch = null;
+  }
+}
+
+// health 1 = green, 0 = red, hue sweeps through yellow/orange in between
+function perfHealthColor(health) {
+  const h = Math.max(0, Math.min(1, health));
+  return `hsl(${Math.round(h * 120)}, 85%, 60%)`;
+}
+
+// Advanced view: live list of the requests inside the 10s window, filterable by who made them.
+function renderPerfAdvanced(now) {
+  const advanced = !!config.perfOverlayAdvanced;
+  perfOverlay.detailsBtn.textContent = advanced ? '▾ Details' : '▸ Details';
+  perfOverlay.filterBar.style.display = advanced ? 'flex' : 'none';
+  perfOverlay.list.style.display = advanced ? 'block' : 'none';
+  if (!advanced) return;
+  const reqs = perfOverlay.requests;
+  const counts = { all: reqs.length, mod: 0, native: 0, other: 0 };
+  reqs.forEach((r) => { counts[r.source]++; });
+  const filter = config.perfOverlayFilter || 'all';
+  const total = reqs.length;
+  perfOverlay.filterBtns.forEach((b, key) => {
+    const selected = key === filter;
+    // OTHER is noise unless something actually landed there
+    b.style.display = key === 'other' && !counts.other && !selected ? 'none' : '';
+    b.textContent = `${key === 'all' ? 'All' : key === 'native' ? 'NAT' : PERF_SOURCE_LABEL[key]} ${counts[key]}`;
+    b.style.opacity = selected ? '1' : '.55';
+    b.style.borderColor = selected ? '#fff' : '#666';
+    b.style.background = selected ? 'rgba(255,255,255,.22)' : 'rgba(255,255,255,.06)';
+  });
+  // One row per (who, endpoint): "12x Autoseller  game.sellMonster"
+  const groups = new Map();
+  for (const r of reqs) {
+    if (filter !== 'all' && r.source !== filter) continue;
+    const key = `${r.source}|${r.name}|${r.method} ${r.path}`;
+    let g = groups.get(key);
+    if (!g) {
+      g = { source: r.source, name: r.name, method: r.method, path: r.path, n: 0, limited: 0, last: 0, callers: new Set() };
+      groups.set(key, g);
+    }
+    g.n++;
+    if (r.status === 429) g.limited++;
+    if (r.perf > g.last) g.last = r.perf;
+    g.callers.add(r.caller);
+  }
+  // Each row's background fills to its share of the window's requests, so the biggest spender
+  // is visible at a glance without reading numbers.
+  const sorted = [...groups.values()].sort((a, b) => b.n - a.n).slice(0, 40);
+  const rows = sorted.map((g, i) => {
+    const endpoint = (g.method === 'GET' ? '' : g.method + ' ') + g.path.replace(/^trpc:/, '');
+    const pct = total ? Math.round((g.n / total) * 100) : 0;
+    const top = i === 0 && total >= 6 && pct >= 30;
+    return (
+      `<div style="overflow:hidden;text-overflow:ellipsis;padding:1px 3px;border-radius:2px;margin-bottom:1px;` +
+      `background:linear-gradient(90deg,${PERF_SOURCE_COLOR[g.source]}44 ${pct}%,transparent ${pct}%)" ` +
+      `title="${perfEscape(`${pct}% of window · last ${((now - g.last) / 1000).toFixed(0)}s ago\n${[...g.callers].join('\n')}`)}">` +
+      `<b style="display:inline-block;min-width:2.2em;text-align:right">${g.n}×</b> ` +
+      `<span style="color:${PERF_SOURCE_COLOR[g.source]};${top ? 'font-weight:bold;' : ''}">${perfEscape(g.name)}</span> ` +
+      `${perfEscape(endpoint)}` +
+      (g.limited ? ` <span style="color:#ff6b6b">429×${g.limited}</span>` : '') + `</div>`
+    );
+  });
+  perfOverlay.list.innerHTML = rows.join('') || '<div style="opacity:.6">no requests</div>';
+}
+
+function renderPerfOverlay() {
+  if (!perfOverlay.el) return;
+  const now = performance.now();
+  const rate = perfCurrentRate(now);
+  if (rate > perfOverlay.peak) perfOverlay.peak = rate;
+  const rateColor = perfHealthColor(1 - rate / PERF_RATE_LIMIT);
+  const fpsColor = perfHealthColor(perfOverlay.fps / PERF_FPS_GOOD);
+  const fill = Math.min(100, Math.round((rate / PERF_RATE_LIMIT) * 100));
+  const lastCap = perfOverlay.captures[perfOverlay.captures.length - 1];
+  perfOverlay.body.innerHTML =
+    `<div style="display:flex;justify-content:space-between;gap:8px">` +
+    `<span style="color:${fpsColor}"><b>${perfOverlay.fps}</b> FPS</span>` +
+    `<span style="color:${rateColor}" title="API requests in the last 10s"><b>${rate}</b>/${PERF_RATE_LIMIT} req</span></div>` +
+    // budget bar: how much of the 30-per-10s allowance is in use right now
+    `<div style="height:4px;margin:3px 0;border-radius:2px;background:rgba(255,255,255,.15);overflow:hidden">` +
+    `<div style="height:100%;width:${fill}%;background:${rateColor}"></div></div>` +
+    `<div style="opacity:.7;font-size:10px">peak ${perfOverlay.peak}` +
+    (perfOverlay.rateLimited ? ` · <span style="color:#ff6b6b">429×${perfOverlay.rateLimited}</span>` : '') +
+    (lastCap ? ` · <span style="color:#ff6b6b" title="Limit last hit at ${new Date(lastCap.ts).toLocaleTimeString()}">⚠ ${new Date(lastCap.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>` : '') +
+    `</div>`;
+  // Calm + collapsed = dim and unobtrusive; anything notable (or hover/details) brings it to full strength.
+  const alarming = rate >= PERF_RATE_LIMIT * 2 / 3 || perfOverlay.captures.length > 0 || perfOverlay.fps < 30;
+  const calm = !alarming && !config.perfOverlayAdvanced && !perfOverlay.hover;
+  perfOverlay.el.style.opacity = calm ? '.55' : '1';
+  perfOverlay.el.style.boxShadow = perfOverlay.captures.length
+    ? '0 0 0 1px #ff6b6b'
+    : rate >= PERF_RATE_LIMIT * 2 / 3 ? `0 0 0 1px ${rateColor}` : 'none';
+  perfOverlay.el.style.width = config.perfOverlayAdvanced ? '230px' : '';
+  renderPerfAdvanced(now);
+  const btn = perfOverlay.copyBtn;
+  btn.style.display = perfOverlay.captures.length ? 'block' : 'none';
+  if (!perfOverlay.copyBtnResetTimer) btn.textContent = `Copy log (${perfOverlay.captures.length})`;
+}
+
+function perfFrameTick(ts) {
+  if (!perfOverlay.active) return;
+  perfOverlay.frames++;
+  const elapsed = ts - perfOverlay.lastSampleTs;
+  if (elapsed >= PERF_OVERLAY_REFRESH_MS) {
+    perfOverlay.fps = Math.round((perfOverlay.frames * 1000) / elapsed);
+    perfOverlay.frames = 0;
+    perfOverlay.lastSampleTs = ts;
+    renderPerfOverlay();
+  }
+  perfOverlay.rafId = requestAnimationFrame(perfFrameTick);
+}
+
+function setPerfOverlayPosition(el, x, y) {
+  const maxX = Math.max(0, window.innerWidth - el.offsetWidth);
+  const maxY = Math.max(0, window.innerHeight - el.offsetHeight);
+  const cx = Math.min(Math.max(0, x), maxX);
+  const cy = Math.min(Math.max(0, y), maxY);
+  el.style.left = cx + 'px';
+  el.style.top = cy + 'px';
+  el.style.bottom = 'auto';
+  return { x: cx, y: cy };
+}
+
+// Pointer capture keeps move/up events on the element, so no document listeners to clean up.
+function bindPerfOverlayDrag(el) {
+  let grabDx = 0;
+  let grabDy = 0;
+  let dragging = false;
+  el.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0 || e.target.closest('button')) return;
+    const rect = el.getBoundingClientRect();
+    grabDx = e.clientX - rect.left;
+    grabDy = e.clientY - rect.top;
+    dragging = true;
+    el.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  });
+  el.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    setPerfOverlayPosition(el, e.clientX - grabDx, e.clientY - grabDy);
+  });
+  const endDrag = (e) => {
+    if (!dragging) return;
+    dragging = false;
+    try { el.releasePointerCapture(e.pointerId); } catch (_) { /* already released */ }
+    const rect = el.getBoundingClientRect();
+    config.perfOverlayPos = { x: Math.round(rect.left), y: Math.round(rect.top) };
+    saveConfig();
+  };
+  el.addEventListener('pointerup', endDrag);
+  el.addEventListener('pointercancel', endDrag);
+}
+
+function startPerfOverlay() {
+  if (perfOverlay.active) return;
+  perfOverlay.active = true;
+  perfOverlay.requests = [];
+  perfOverlay.captures = [];
+  perfOverlay.captureArmed = true;
+  perfOverlay.peak = 0;
+  perfOverlay.rateLimited = 0;
+  perfOverlay.frames = 0;
+  perfOverlay.lastSampleTs = performance.now();
+  installPerfFetchHook();
+  const el = document.createElement('div');
+  el.id = 'mod-settings-perf-overlay';
+  el.style.cssText =
+    'position:fixed;left:6px;top:6px;z-index:2147483000;cursor:move;user-select:none;touch-action:none;' +
+    'font:11px/1.3 monospace;color:#fff;background:rgba(0,0,0,.78);padding:4px 7px;border-radius:4px;' +
+    'text-align:left;white-space:nowrap;transition:opacity .2s;';
+  el.addEventListener('mouseenter', () => { perfOverlay.hover = true; renderPerfOverlay(); });
+  el.addEventListener('mouseleave', () => { perfOverlay.hover = false; renderPerfOverlay(); });
+  // body is rewritten every refresh; the button is a persistent sibling so clicks are never lost mid-render
+  const body = document.createElement('div');
+  const smallBtnCss =
+    'cursor:pointer;font:10px monospace;color:#fff;background:rgba(255,255,255,.1);' +
+    'border:1px solid #666;border-radius:3px;padding:1px 4px;';
+  const detailsBtn = document.createElement('button');
+  detailsBtn.type = 'button';
+  detailsBtn.style.cssText = `margin-top:3px;width:100%;${smallBtnCss}`;
+  detailsBtn.addEventListener('click', () => {
+    config.perfOverlayAdvanced = !config.perfOverlayAdvanced;
+    saveConfig();
+    renderPerfOverlay();
+  });
+  const filterBar = document.createElement('div');
+  filterBar.style.cssText = 'display:none;gap:3px;margin-top:3px;';
+  const filterBtns = new Map();
+  ['all', 'mod', 'native', 'other'].forEach((key) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.style.cssText = `flex:1;${smallBtnCss}`;
+    b.addEventListener('click', () => {
+      config.perfOverlayFilter = key;
+      saveConfig();
+      renderPerfOverlay();
+    });
+    filterBtns.set(key, b);
+    filterBar.appendChild(b);
+  });
+  const list = document.createElement('div');
+  list.style.cssText =
+    'display:none;margin-top:3px;max-height:240px;overflow-x:hidden;overflow-y:auto;font:10px/1.4 monospace;' +
+    'cursor:default;';
+  const copyBtn = document.createElement('button');
+  copyBtn.type = 'button';
+  copyBtn.title = 'Copy the request log captured when the limit was reached';
+  copyBtn.style.cssText =
+    'display:none;margin-top:3px;width:100%;cursor:pointer;font:10px monospace;color:#fff;' +
+    'background:#a33;border:1px solid #d66;border-radius:3px;padding:1px 4px;';
+  copyBtn.addEventListener('click', copyPerfCaptures);
+  el.append(body, detailsBtn, filterBar, list, copyBtn);
+  document.body.appendChild(el);
+  perfOverlay.el = el;
+  perfOverlay.body = body;
+  perfOverlay.detailsBtn = detailsBtn;
+  perfOverlay.filterBar = filterBar;
+  perfOverlay.filterBtns = filterBtns;
+  perfOverlay.list = list;
+  perfOverlay.copyBtn = copyBtn;
+  const pos = config.perfOverlayPos;
+  if (pos && Number.isFinite(pos.x) && Number.isFinite(pos.y)) {
+    setPerfOverlayPosition(el, pos.x, pos.y);
+  }
+  bindPerfOverlayDrag(el);
+  renderPerfOverlay();
+  perfOverlay.rafId = requestAnimationFrame(perfFrameTick);
+  // rAF is paused in background tabs; keep the request counter's window ageing out regardless.
+  perfOverlay.refreshTimer = setInterval(renderPerfOverlay, 1000);
+}
+
+function stopPerfOverlay() {
+  perfOverlay.active = false;
+  if (perfOverlay.rafId) {
+    cancelAnimationFrame(perfOverlay.rafId);
+    perfOverlay.rafId = 0;
+  }
+  if (perfOverlay.refreshTimer) {
+    clearInterval(perfOverlay.refreshTimer);
+    perfOverlay.refreshTimer = null;
+  }
+  clearTimeout(perfOverlay.copyBtnResetTimer);
+  perfOverlay.copyBtnResetTimer = null;
+  if (perfOverlay.el) {
+    perfOverlay.el.remove();
+    perfOverlay.el = null;
+    perfOverlay.body = null;
+    perfOverlay.hover = false;
+    perfOverlay.detailsBtn = null;
+    perfOverlay.filterBar = null;
+    perfOverlay.filterBtns = null;
+    perfOverlay.list = null;
+    perfOverlay.copyBtn = null;
+  }
+  perfOverlay.requests = [];
+  perfOverlay.captures = [];
+  uninstallPerfFetchHook();
+}
 
 // Playercount state
 const PLAYER_COUNT_POLL_MS = 60000;
@@ -8294,7 +8754,14 @@ function showSettingsModal() {
       } else if (categoryId === 'advanced') {
         const advancedContent = document.createElement('div');
         advancedContent.innerHTML = `
-          <div id="firebase-runs-settings-section" style="margin-top: 0; padding-top: 0;">
+          <div id="debug-section" style="margin-top: 0; padding-bottom: 20px; border-bottom: 1px solid rgba(255,255,255,0.1);">
+            <h4 style="margin: 0 0 10px 0; color: #ffaa00; font-size: 14px;">${t('mods.betterUI.debugSectionTitle')}</h4>
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+              <input type="checkbox" id="perf-overlay-toggle" style="transform: scale(1.2);">
+              <span style="color: #ccc;">${t('mods.betterUI.showPerfOverlay')}</span>
+            </label>
+          </div>
+          <div id="firebase-runs-settings-section" style="margin-top: 20px; padding-top: 0;">
             <div style="margin-bottom: 15px; text-align: center;">
               <h4 style="margin: 0 0 15px 0; color: #ffaa00; font-size: 14px; cursor: help; display: inline-flex; align-items: center; gap: 6px; justify-content: center;" title="${t('mods.betterUI.firebaseBestRunsUploadTooltip')}">
                 <span id="firebase-runs-unavailable-warning" hidden style="cursor: help; color: #f0c36d; font-size: 12px;">⚠️</span>
@@ -10143,6 +10610,11 @@ function showSettingsModal() {
         });
       }
       
+      const perfOverlayCheckbox = content.querySelector('#perf-overlay-toggle');
+      if (perfOverlayCheckbox) {
+        createSettingsCheckboxHandler('showPerfOverlay', startPerfOverlay, stopPerfOverlay)(perfOverlayCheckbox);
+      }
+
       // Hunt Analyzer settings
       bindHuntAnalyzerCheckbox(content.querySelector('#hunt-analyzer-persist-toggle'), {
         settingsKey: 'persistData',
@@ -18953,6 +19425,8 @@ function initBetterUI() {
       console.log('[Mod Settings] Setup labels visibility applied:', config.showSetupLabels);
     }, 1000); // Delay to ensure DOM is ready
 
+    if (config.showPerfOverlay) startPerfOverlay();
+
     // Subscribe once for map-dependent features
     if (config.showLastVisitedMapButton || config.alwaysNavigateMaxFloor) {
       scheduleTimeout(() => {
@@ -19107,8 +19581,9 @@ function cleanupBetterUI() {
       timerState.updateThrottle = null;
     }
     
+    stopPerfOverlay();
     observers.stamina = disconnectObserver(observers.stamina, 'Stamina');
-    observers.tab = disconnectObserver(observers.tab, 'Tab');
+    observers.tab =disconnectObserver(observers.tab, 'Tab');
     observers.creature = disconnectObserver(observers.creature, 'Creature container');
     observers.setupLabels = disconnectObserver(observers.setupLabels, 'Setup labels');
     observers.scrollLock = disconnectObserver(observers.scrollLock, 'Scroll lock');

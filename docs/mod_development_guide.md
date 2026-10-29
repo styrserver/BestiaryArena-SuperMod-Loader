@@ -1284,6 +1284,16 @@ Background delivery uses a once-per-page-load guard (`registeredTabs`). That gua
 
 See also [`content/platform.js`](../content/platform.js) and [`content/local_mods.js`](../content/local_mods.js). For Orion/WebKit platform constraints and extension URL encoding, see [Orion iOS Compatibility](mobile.md).
 
+### Request-rate overlay (Mod Settings → Advanced → Debug)
+
+The game's API allows **30 requests per 10 s**, shared by the game and every mod. To see who spends that budget, turn on **Show FPS and API requests per 10s** (`showPerfOverlay`). It draws a draggable overlay (default top-left, position saved in `perfOverlayPos`).
+
+- **FPS / Req n/30 / peak / 429×n.** Both counters fade green → red. `Req` is a sliding 10 s window; `peak` is the highest value since the option was turned on; `429×n` counts HTTP 429 responses.
+- **Counting.** `window.fetch` is wrapped and every same-origin `/api/*` call is recorded (tRPC batches count once, as the server sees them). Other origins such as Firebase are not counted. Disabling the option restores `fetch` only if nothing wrapped it afterwards.
+- **Details** (`perfOverlayAdvanced`) lists one row per mod and endpoint, e.g. `12× Autoseller game.sellMonster`, with All / MOD / NATIVE / OTHER filters (`perfOverlayFilter`). Hover a row for the full caller chain.
+- **Classification** reads the stack above the wrapper: the nearest frame in `/bestiary-mod/<Mod>.js` is **MOD** (named after the file), one in `/_next/static/…` is **NATIVE** (shown as `game`), anything else is **OTHER**. Other mods' `fetch` patches with `wrapper`/`hook`/`patch`/`intercept` in their function name are skipped. Firefox/Orion stack formats parse the file and line, but not that skip rule.
+- **Copy log.** When the window reaches 30 requests (or a 429 arrives), a snapshot is frozen (last 5 kept). The red **Copy log (n)** button copies them: totals by mod and by mod + endpoint, then a timeline with method, path, status, duration and caller.
+
 ### Error Log (popup Debug)
 
 Since **4.2.10**, the extension popup includes an **Error Log** under the **Debug** collapsible section (below **Extras**) for debugging without DevTools (especially on mobile WebExtensions such as Orion iOS).

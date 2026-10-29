@@ -9341,11 +9341,28 @@ function createNPCCooldownManager() {
   const arenaLeaderboardNameStatus = new Map(); // name(lower) -> 'exists' | 'missing' | 'unknown'
   let arenaLeaderboardSweepDone = false;
   const ARENA_LB_SWEEP_MIN_AGE_MS = 24 * 60 * 60 * 1000; // skip entries touched in the last day
-  const ARENA_LB_SWEEP_GAP_MS = 1500; // pause between profile lookups
+  const ARENA_LB_SWEEP_GAP_MS = 3000; // pause between profile lookups (~3 per 10 s of the shared 30)
+  const ARENA_LB_SWEEP_INTERVAL_MS = 24 * 60 * 60 * 1000; // renames are slow-moving: sweep at most daily
+  const ARENA_LB_SWEEP_STORAGE_KEY = 'quests-arena-lb-sweep-at';
+
+  function arenaLeaderboardSweepRecentlyDone() {
+    try {
+      const at = Number(localStorage.getItem(ARENA_LB_SWEEP_STORAGE_KEY));
+      return Number.isFinite(at) && at > 0 && (Date.now() - at) < ARENA_LB_SWEEP_INTERVAL_MS;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  // Only called once a sweep actually finished, so a reload mid-sweep resumes on the next load.
+  function markArenaLeaderboardSweepDone() {
+    try { localStorage.setItem(ARENA_LB_SWEEP_STORAGE_KEY, String(Date.now())); } catch (_) { /* ignore */ }
+  }
 
   async function sweepRenamedArenaLeaderboardEntries() {
     try {
       if (arenaLeaderboardSweepDone) return;
+      if (arenaLeaderboardSweepRecentlyDone()) return;
       const checkProfileStatus = globalThis.Guilds?.checkProfileStatus;
       if (typeof checkProfileStatus !== 'function') return; // no reliable existence signal
 
@@ -9355,7 +9372,10 @@ function createNPCCooldownManager() {
       arenaLeaderboardSweepDone = true;
 
       const entries = await loadArenaLeaderboard(true);
-      if (!Array.isArray(entries) || entries.length < 2) return;
+      if (!Array.isArray(entries) || entries.length < 2) {
+        if (Array.isArray(entries)) markArenaLeaderboardSweepDone();
+        return;
+      }
 
       const now = Date.now();
       const currentPlayer = String(getCurrentPlayerName() || '').trim().toLowerCase();
@@ -9365,7 +9385,10 @@ function createNPCCooldownManager() {
         const at = Number(entry.updatedAt);
         return !(Number.isFinite(at) && at > 0 && (now - at) < ARENA_LB_SWEEP_MIN_AGE_MS);
       });
-      if (!candidates.length) return;
+      if (!candidates.length) {
+        markArenaLeaderboardSweepDone();
+        return;
+      }
 
       let checked = 0;
       let missing = 0;
@@ -9392,6 +9415,7 @@ function createNPCCooldownManager() {
         return;
       }
       if (!toDelete.length) {
+        markArenaLeaderboardSweepDone();
         console.log('[Quests Mod][Arena Leaderboard] Sweep complete — no renamed/orphaned entries found', { checked });
         return;
       }
@@ -9406,6 +9430,7 @@ function createNPCCooldownManager() {
       }
       arenaLeaderboardCache = null;
       arenaLeaderboardCacheTime = 0;
+      markArenaLeaderboardSweepDone();
       console.log(`[Quests Mod][Arena Leaderboard] Sweep complete — pruned ${toDelete.length} orphaned entr${toDelete.length === 1 ? 'y' : 'ies'} of ${checked} checked`);
     } catch (error) {
       console.warn('[Quests Mod][Arena Leaderboard] Sweep failed:', error);

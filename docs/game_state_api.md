@@ -1091,10 +1091,13 @@ Board monsters (see [game_state_api.md](game_state_api.md) for the floor rules):
 
 - `getMultiFloorRoomIds()` → `string[]`, live scan of `state.utils.ROOMS`.
 - `getBoardMonstersForFloor(roomId, floorIndex = 0)` → board pieces (`villain: true`, `gameId`, `level`, ...).
+- `getFloorCreatureGameIds(roomId, floorIndex = 0)` → `Set<number>`: board villains on that floor plus
+  its drop-only creatures (`getExtraMonsterDropGameIds(roomId, floorIndex)`), deduplicated.
 - `getBoardMonsterGameIds({ includeRaids = false, includeDrops = false })` → `Set<number>`; empty
   while room data is not loaded. `includeDrops` adds `extraMonsterDrops`.
 - `getExtraMonsterDropGameIds(roomOrId, floorIndex?)` → `number[]` of drop-only creatures (may
-  contain duplicates across floors). With `floorIndex`, only that floor's `floorRules[floorIndex]`.
+  contain duplicates across floors). With `floorIndex`, the room's own drops plus that floor's
+  `floorRules[floorIndex]`; without it, the room's own drops plus every floor's.
 - `getExtraMonsterDropFloors(roomOrId, gameId)` → `null` when the room itself lists the creature
   (every floor), else the 0-based `floorRules` indices that list it (`[]` = does not drop here).
 
@@ -1109,7 +1112,7 @@ Regions and ordering:
 **Used by**
 
 - `Autoseller` (`getBoardMonsterGameIds`, `getExtraMonsterDropGameIds`)
-- `Awaken_Tracker` (`isRaid`, `getExtraMonsterDrop*`)
+- `Awaken_Tracker` (`isRaid`, `getFloorCreatureGameIds`, `getExtraMonsterDropGameIds`, `getBoardMonstersForFloor`)
 - `Better_Tasker` (`getBoardMonsterGameIds`, `getBoardMonstersForFloor`, `getMultiFloorRoomIds`, `getMapById`)
 - `Raid_Hunter` (`getRegionDisplayName*`, `EVENT_TO_ROOM_MAPPING`)
 - `Better_Boosted_Maps` (`getRegionDisplayName*`)

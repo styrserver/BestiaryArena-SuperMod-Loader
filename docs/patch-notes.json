@@ -4,6 +4,36 @@
   },
   "notes": [
     {
+      "version": "5.1.15",
+      "changes": [
+        {
+          "mod": "Awaken Tracker",
+          "type": "fixed",
+          "text": "The current map list now follows the floor you are on, including drop-only creatures for that floor, and refreshes when the floor changes. Event creatures such as Clot and Gummy Raider now show on their map, and active events missing from the region list now appear in the farm map list with a green badge."
+        },
+        {
+          "mod": "maps-database.js",
+          "type": "added",
+          "text": "New getFloorCreatureGameIds() returns every creature on a map floor, board creatures and drop-only creatures, without duplicates."
+        },
+        {
+          "mod": "maps-database.js",
+          "type": "changed",
+          "text": "getExtraMonsterDropGameIds() with a floor now also includes the map's own drop-only creatures, not just that floor's."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "added",
+          "text": "New Advanced → Debug option shows a draggable FPS and API request counter (requests in the last 10s against the limit of 30), colored green to red with a usage bar. It dims when everything is healthy and highlights near the limit. Details groups requests by mod or the game with each one's share of the total, can be filtered to mods or native, and a Copy log button appears when the limit is reached."
+        },
+        {
+          "mod": "Quests",
+          "type": "changed",
+          "text": "The startup cleanup of renamed players' leaderboard entries (admins only) now runs at most once a day instead of every page load, and waits 3 seconds between profile lookups, leaving more of the 30-requests-per-10-seconds limit for the game and other mods."
+        }
+      ]
+    },
+    {
       "version": "5.1.14",
       "changes": [
         {
