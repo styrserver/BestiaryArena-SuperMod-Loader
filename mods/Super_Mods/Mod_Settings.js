@@ -3224,6 +3224,49 @@ const perfOverlay = {
   active: false
 };
 const PERF_MAX_CAPTURES = 5;
+const PERF_STORAGE_KEY = 'mod-settings-perf-captures';
+const PERF_PERSIST_MIN_MS = 5 * 60 * 1000;
+const PERF_PERSIST_SETTLE_MS = 1500;
+let perfPersistTimer = null;
+let perfLastPersistAt = 0;
+let perfPersistDirty = false;
+
+// Captures are the evidence of a limit hit, so they survive a page refresh. Writes are at most one
+// per PERF_PERSIST_MIN_MS (later changes coalesce into one trailing write); the first one waits a
+// moment so still-pending requests get their status/ms filled in.
+function perfPersistNow() {
+  clearTimeout(perfPersistTimer);
+  perfPersistTimer = null;
+  perfPersistDirty = false;
+  perfLastPersistAt = Date.now();
+  writeJSONToStorage(PERF_STORAGE_KEY, {
+    captures: perfOverlay.captures,
+    peak: perfOverlay.peak,
+    rateLimited: perfOverlay.rateLimited
+  });
+}
+
+function perfPersistSoon() {
+  perfPersistDirty = true;
+  if (perfPersistTimer) return;
+  const wait = Math.max(PERF_PERSIST_SETTLE_MS, perfLastPersistAt + PERF_PERSIST_MIN_MS - Date.now());
+  perfPersistTimer = setTimeout(perfPersistNow, wait);
+}
+
+// A refresh/close must not lose an unsaved capture, so flush it once on the way out.
+function perfFlushOnPageHide() {
+  if (perfPersistDirty) perfPersistNow();
+}
+
+function perfRestorePersisted() {
+  const saved = readJSONFromStorage(PERF_STORAGE_KEY, null);
+  if (!saved || !Array.isArray(saved.captures)) return;
+  perfOverlay.captures = saved.captures
+    .filter((c) => c && Array.isArray(c.requests) && c.requests.length)
+    .slice(-PERF_MAX_CAPTURES);
+  perfOverlay.peak = Number(saved.peak) || 0;
+  perfOverlay.rateLimited = Number(saved.rateLimited) || 0;
+}
 
 function perfParseApiRequest(input, init) {
   try {
@@ -3251,8 +3294,9 @@ function perfClassifyStack() {
   for (const f of frames) {
     // our own frames (classifier + wrapper) live in Mod_Settings.js and would otherwise be classed as MOD
     if (f.includes('perfCountingFetch') || f.includes('perfClassifyStack')) continue;
-    const fm = f.match(/^\s*at\s+(?:async\s+)?(?:(.+?)\s+\()?/);
-    if (fm && fm[1] && PERF_FETCH_WRAPPER_FN.test(fm[1])) continue;
+    // Chrome frames: "at fn (url:l:c)"; Firefox/Safari frames: "fn@url:l:c"
+    const fm = f.match(/^\s*at\s+(?:async\s+)?(.+?)\s+\(/) || f.match(/^\s*([^@\s]+)@/);
+    if (fm && PERF_FETCH_WRAPPER_FN.test(fm[1])) continue;
     const mod = f.match(/bestiary-mod\/([^:)\s]+):(\d+)/);
     const nat = !mod && f.match(/\/_next\/static\/[^)\s]*?([^/:)\s]+\.js):(\d+)/);
     const oth = !mod && !nat && f.match(/\/([^/:)\s]+\.(?:js|mjs)):(\d+)/);
@@ -3293,6 +3337,7 @@ function perfTakeCapture(reason) {
     requests: perfOverlay.requests.slice()
   });
   if (perfOverlay.captures.length > PERF_MAX_CAPTURES) perfOverlay.captures.shift();
+  perfPersistSoon();
   renderPerfOverlay();
 }
 
@@ -3369,6 +3414,7 @@ function installPerfFetchHook() {
       promise.then((res) => {
         entry.status = res ? res.status : '?';
         entry.ms = Math.round(performance.now() - startedAt);
+        if (perfOverlay.captures.length) perfPersistSoon();
         if (res && res.status === 429) {
           perfOverlay.rateLimited++;
           const last = perfOverlay.captures[perfOverlay.captures.length - 1];
@@ -3551,6 +3597,8 @@ function startPerfOverlay() {
   perfOverlay.captureArmed = true;
   perfOverlay.peak = 0;
   perfOverlay.rateLimited = 0;
+  perfRestorePersisted();
+  window.addEventListener('pagehide', perfFlushOnPageHide);
   perfOverlay.frames = 0;
   perfOverlay.lastSampleTs = performance.now();
   installPerfFetchHook();
@@ -3633,6 +3681,8 @@ function stopPerfOverlay() {
   }
   clearTimeout(perfOverlay.copyBtnResetTimer);
   perfOverlay.copyBtnResetTimer = null;
+  window.removeEventListener('pagehide', perfFlushOnPageHide);
+  if (perfPersistDirty) perfPersistNow();
   if (perfOverlay.el) {
     perfOverlay.el.remove();
     perfOverlay.el = null;

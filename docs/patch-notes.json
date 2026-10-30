@@ -4,6 +4,26 @@
   },
   "notes": [
     {
+      "version": "5.1.16",
+      "changes": [
+        {
+          "mod": "Loader",
+          "type": "fixed",
+          "text": "On Firefox, a game tab left on a browser error page after a network or server outage now reloads on its own once the game is reachable again. The recovery check was being blocked by the extension's security policy and could never succeed."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "changed",
+          "text": "The API request debug log captured when the limit is reached is now saved and restored after a page refresh. It is written at most once every 5 minutes, plus once when the page closes."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "fixed",
+          "text": "On Firefox, the API request debug counter no longer credits every request to a mod that wraps fetch. Game requests now show as native."
+        }
+      ]
+    },
+    {
       "version": "5.1.15",
       "changes": [
         {
