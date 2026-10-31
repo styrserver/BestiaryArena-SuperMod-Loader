@@ -985,6 +985,170 @@ Every entry also carries the holder's `userId`, `userName` and outfit (`outfitId
 | `leaderboards.rank[]` | top 20, sorted | `points`, `ticks` |
 | `leaderboards.floor[]` | top 20, sorted | `floors` (sum), `ticks` |
 
+## Game tRPC API (chunk review, 2026-10-31)
+
+Found by downloading every chunk in the build manifest (`/_next/static/<buildId>/_buildManifest.js`)
+plus the home-page chunks, and searching the minified source for `<router>.<procedure>.useMutation /
+useQuery / mutate`. Re-verify after a game update. Before this review, `docs/` documented only
+`game.getFullTrophyRoomData` (see `game_state_api.md` → Public Highscores API); every other
+procedure below was undocumented.
+
+**Do not call these from a mod unless a mod already does.** They are the game's own server API. Many
+spend gold, dust, coins or stamina, and the server is the authority. The mod-side request budget
+(25 `/api/` calls per 10 s across all mods, see `docs/mod_development_guide.md`) applies.
+
+### Transport
+
+- Endpoint `POST /api/trpc/<router>.<procedure>`; reads are `GET` with `?batch=1&input=<json>`.
+- Batched body shape, as used by `Autoscroller.js` / `Autoseller.js`: `{ "0": { "json": <input> } }`.
+  The response is `[{ result: { data: { json: ... } } }]`.
+- Plain `GET /api/trpc/game.getFullTrophyRoomData` is unbatched: payload is `json.result.data.json`.
+- Two client objects exist in the bundle: a React hook client (`x.S.<router>.<proc>.useMutation`) and
+  a vanilla client (`ea.ID.` / `ea.iX.<router>.<proc>.mutate()`).
+- The only non-tRPC route is `GET /api/player-count`.
+
+### Routers and procedure counts
+
+| Router | Procedures | Notes |
+| --- | --- | --- |
+| `game` | 16 | battle start/skip/log, selling, locking, equipping, leaderboards, player/daily/raid snapshots |
+| `inventory` | 31 | every consumable and rune, daycare, forge, nicknames |
+| `quest` | 32 | hunting tasks, Halloween (`hwQuest*`), achievement rewards, DLC expansions |
+| `store` | 42 | every `buy*`, plus Yasir stock/exchange |
+| `account` | 7 | outfit, coins, gift codes, level reward, Pix payments |
+| `admin` | 42 | server-gated; **never call** |
+| `serverSide` | 1+ | `serverSide.profilePageData` (used by `Guilds.js`) |
+
+`game.hideMonster` is also called by a mod (`/api/trpc/game.hideMonster`) but is not in the chunks'
+React hooks.
+
+### `game` router
+
+| Procedure | Kind | What the client does |
+| --- | --- | --- |
+| `getFullPlayerData` | mutation | Called once at `/game` page load and cached (`ef`); fills `state.player` |
+| `getLatestDailyData` | mutation | Boosted map, Yasir stock, `msUntilNextEpochDay`, `willUpdateAt`; refetched by a timer set to `msUntilNextEpochDay` |
+| `getLatestRaids` | mutation | Raid list; refetched on the same kind of timer, gated on the `raids` flag in `flagsB` |
+| `gameServer` | mutation | **Starts a battle.** Server returns `serverResults`. Retried while `attempt < 2`, never when the error message contains `"Raid is over"` |
+| `logMatch` | mutation | Mismatch telemetry, see below |
+| `skipBattle` | mutation | Skips a pending/manual battle; response `{ nextStaminaWillBeFullAt, staminaExcessMsDiff }` |
+| `sellMonster` / `multisellMonster` | mutation | Single id / array of ids (`Autoseller.js` posts `{ "0": { json: id } }`) |
+| `equipToDust` / `equipsToDust` | mutation | Disenchant one / many equipment ids |
+| `lockMonster` | mutation | `{ locked, monsterId }` |
+| `setMonsterEquip` | mutation | `{ monsterId }` plus the equipment change |
+| `getRoomsHighscores`, `getTickLeaderboards`, `getRankLeaderboards`, `getFloorLeaderboards` | query | Leaderboard views |
+
+#### Server-authoritative battle flow
+
+The client simulates the battle, but the server decides the result:
+
+1. Start: `game.gameServer` returns `serverResults`, stored in the game-store context
+   (`setState({ serverResults, gameStarted: true, enableFreeSkip: serverResults.enableSkip, openRewards: false })`).
+2. `serverResults` carries `seed`, `next.staminaWillBeFullAt`, `next.staminaExcessMsDiff`,
+   `next.battleWillBeReadyAt`, and `rewardScreen` (`victory`, `roomId`, `floor`, `gameTicks`,
+   `rankPoints`, `readableGrade`; reward items not itemised here). The player store gets the `next.*` values
+   immediately (`staminaWillBeFullAt`, `staminaExcessMs += staminaExcessMsDiff`, `battleWillBeReadyAt`).
+3. The client replays the battle with that `seed`. On a winning rewardScreen with a `boardConfig`
+   it also saves `boardConfigs[roomKey(roomId, floor)]` locally.
+4. `onGameEnd`: if the local winner (`nonVillains` vs `villains`) disagrees with
+   `rewardScreen.victory` (and the client is not in the sandbox), the client sends
+   `game.logMatch` with a JSON **string**:
+
+```js
+{ type: "mismatch", userId, userName, userAgent /* + " / brave" */, timestamp,
+  clientResult,            // "nonVillains" | "villains"
+  ticks,                   // world.tickEngine.getCurrentTick()
+  roomId,
+  comp: { seed, setup /* non-villain gameMonsterData */, floor } }
+```
+
+   A mod that forces a seed or edits the board will make the client disagree with the server and
+   will **send this report with the user's id, name and user agent**. Sandbox mode (`Q`) returns
+   from `onGameEnd` before the comparison, so it never reports (verified). That sandbox also skips
+   `gameServer` is inferred, not confirmed. Keep custom/sandbox battles out of the real result path.
+5. If the server says a new game version exists, the client shows "A new update is available,
+   please refresh" with a `?v=<gameVersion>` link (the same `gameVersion` as `state.utils`).
+6. Power-saving mode (`powerSaving.mode` `on`/`turningOn`) records `gameStartedAt` and
+   `gameWillEndAt = now + ticksToMs(gameTicks) + 2000` so the UI can sleep through the replay.
+
+### `inventory` router (31)
+
+`input` is what the client sends (only where the call site was readable).
+
+| Group | Procedures (input) |
+| --- | --- |
+| Chests/bags | `equipChest`, `outfitBag`, `hunterOutfitBag`, `surpriseCube`, `summonScroll` (rarity) |
+| Fusion | `fuseSummonScrolls { rarity }`, `fuseDiceManipulators { rarity }`, `forgeEquips { equipA, equipB }` |
+| Stamina | `staminaPotion { rarity, amount }`, `staminaRefill` |
+| Monster upgrade | `monsterStatRune { rune, monsterId }`, `insightStone { rarity, monsterId }`, `upgradeMonsterTier`, `monsterSoup`, `equipSoup`, `monsterSqueezer`, `diceManipulator` |
+| Runes | `useBlankRune`, `useConversionRune { rune, equipId }`, `useDowngradeEquipRune { equipId }`, `useRecycleRune (list)`, `useRecycleMonsterRune (monster ids)`, `useShinyTransferRune { shinyId, recipientId }`, `useAvariceRune`, `useGenie`, `useDoctor` |
+| Daycare | `addToDaycare { slotId, monsterId }`, `removeFromDaycare { slotId }`, `levelUpAtDaycare { slotId }` |
+| Names | `nicknameMonster { monsterId, nickname? }` (omit `nickname` to remove it), `nicknameChange` |
+
+### `quest` router (32)
+
+- Hunting tasks: `setNewHuntingTask`, `finishHuntingTask`, `removeHuntingTask`,
+  `refreshHuntingTaskCooldown`, `huntingTaskStore`.
+- Halloween event: `hwQuestA` … `hwQuestL`, `hwQuestAll`, `hwTokens`, `hwCashoutBank`,
+  `getHwStoreAchievementReward`. The "full bestiary" variants (`fullBestiary: t >= a`) are the ones
+  gated on the player's collection size.
+- Achievement rewards: `getBestiaryContainerFromAchievement`,
+  `getBestiaryContainerFromAllMapsAchievement`, `getAnnihilatorAchievementReward`,
+  `getBlackKnightReward`, `getAmazonReward`.
+- DLC/expansion claims: `getKazExpansion`, `getOrcFortressExpansion`.
+- Others: `tutorial`, `seashell`, `plantEat { monsterIds }`, `plantRedeem`.
+
+### `store` router (42)
+
+All `buy*` mutations. Currency is chosen by input where a product has two prices:
+`buyBestiaryContainerSlots { currency: "coin" | "gold" }`. The gold / Beast Coin grouping below
+comes from the price icon next to each button (`goldpile.png` vs `beastcoin.png`); a few
+(`buyExtraStaminaPoints`, `buyGoldenOutfit`, DLC packs) were not checked individually. Products:
+
+- **Gold:** `buyAutosetup`, `buyBoostedMap`, `buyDaycareSlot`, `buyDoctor`, `buyFloors`, `buyForge`,
+  `buyGenie`, `buyGoto`, `buyMonsterSoup`, `buyMonsterSqueezer`, `buyNicknameChange`,
+  `buyNicknameMonster`, `buyNpcTask`, `buyRaids`, `buySandbox`, `buyYasir`, `buyExtraStaminaPoints`,
+  `buyAnkDlc`, `buyCarlinDlc`, `buyRookgaardDlc`, `buyVillainDlc`, `buyMountainFortress`,
+  `buyMountainFortressB`, `buyGoldenOutfit`.
+- **Beast Coin:** `buyPremium`, `buyEquipChest`, `buyOutfitBag1`, `buyOutfitBag1Bundle`,
+  `buyStamina5`, `buySummonScroll5`, `buySurpriseCube5`, `buyDiceManipulator5`, `buyGazerBundle`,
+  `buyStarterBundle`, `buyBestiaryContainerSlots`, `buyDoctor` (alt price).
+- **Event:** `buyHalloween`, `buyHalloweenPass`.
+- **Yasir (daily NPC):** `yasirDailyStock { amount, location }` (`"libertyBay"` | `"carlin"`),
+  `yasirDustExchange { amount, location }`, `buyRecycleRuneYasir { amount }`.
+- Pure UI redirects: `buyPlant`, `buyStaminaRefiller` just open the store to the `autoplay` item.
+
+Flag names in the product gating (`s.floors`, `s.forge`, `s.raids`, `s.yasir`, `s.boostedMap`,
+`s.monsterSqueezer`, `s.doctor`, `s.sandbox`…) are the same bit-flag set as `flagsB`
+(see Player Flags above).
+
+### `account` router (7)
+
+`changeOutfit { outfitId, alt, mountId }` (outfit objects may also carry `head/body/legs/feet`
+colors), `getPlayerCoins`, `getCoinHistory { pageIndex, pageSize }`, `redeemPlayerLevelReward`,
+`useGiftCode`, `createPix` / `pollPixStatus { pixPaymentId }` (Brazilian Pix payments).
+
+### `admin` router (42): listed, not for use
+
+Gift codes (`create/list/deleteGiftCode`), raids (`create/list/deleteRaid`), highscore moderation
+(`insert/list/promote/reset/hardDeleteHighscore`), player edits (`setPlayerGold/Dust/Flag`,
+`managePlayerCoins/Inventory`, `edit/deletePlayerMonster`, `togglePlayerMonsterLock`,
+`downgradePlayerFloors/Ranks`, `resetPlayerTicks`, `resetAccount`, `changeNickname`,
+`swapDiscordAccounts`, `toggleBanPlayer`, `setTestAccount`), data views (`getUserByName`,
+`getUserStats`, `listUsers`, `listGameLogs`, `listPurchaseLogs`, `getPlayerBestiary`,
+`getPlayerInventory`, `getPlayerGoldDust`, `getPlayerCoinHistory`, `generateCsv`), revenue
+(`getMtdRevenue`, `getRevenueStatsByTag`), and global ops (`nukeRoomData`, `resetHalloweenEvent`,
+`takeCurrentSeasonSnapshot`). The `/admin` page and these procedures are server-gated. Nothing in
+the loader should call them.
+
+### Still not covered
+
+- `game.gameServer` **input** shape: the mutate call site is built through a wrapper that this
+  review did not resolve.
+- Exact `serverResults.rewardScreen` field list beyond the names above.
+- Server-side validation rules (the chunks hold only the client).
+- `serverSide.*` procedures other than `profilePageData`.
+
 ## Mod Databases (`database/*`)
 
 Scripts in `database/` run before game mods and expose `window.*` globals (static game data and lookup helpers) so mods do not hardcode creature, equipment or map lists.
@@ -1004,7 +1168,7 @@ Data:
 - `UNOBTAINABLE_CREATURES`, `NON_AWAKENABLE_CREATURES`, `NON_SCROLL_CREATURES`, `EVENT_CREATURES`
 - `CYCLOPEDIA_EXTRA_CREATURES`, `CYCLOPEDIA_HIDDEN_CREATURES`, `SHINY_ALIAS_CREATURES`, `BOSS_ALIAS_CREATURES` (display-only room bosses, e.g. Hemorrhage = nicknamed Clot; see "Villain / room-script creature mechanics" below)
 - `ALL_GAZER_GAME_IDS`, `MYSTIC_GAZER_GAME_ID`
-- `HARDCODED_MAP_MONSTER_STATS`, `MONSTER_STAT_DISPLAY_CONFIG`
+- `getMapMonsterBaseStats(name, speciesBaseStats)` (map-only creature stats computed from the species `baseStats`; see "Map creature stats" below), `getCreatureCombatData(gameId)` (ability constants snapshot; see "Per-creature ability constants"), `MONSTER_STAT_DISPLAY_CONFIG`
 
 Lookups:
 
@@ -1112,6 +1276,261 @@ T5 HP equipment piece instead of copying the mother's; clones killed under a vil
 `resolveCreatureDisplay()` reports `bossOnly: true`; boss entries never match owned monsters, have
 no shiny variant, and count as event creatures. Cyclopedia shows Clot's species stats; the room's
 level 125 and the cap rules are not modelled.
+
+#### Map creature stats
+
+An actor's stats are `scaledBaseStats[stat] = scaleStat({ stat: baseStats[stat], level, geneValue: genes[stat] })` (actor constructor, chunk 509; `state.utils.scaleStat`). Fitted constants: `ceil(stat*0.2 + stat*0.8*(level/50 + gene/20)/2)`. No map-only creature has stored stats: Map-only means a name in `UNOBTAINABLE_CREATURES`; there is no stored level list. The level is read at runtime from the highest-level room actor of that species (`getMapMonsterRoomLevel()`; no board, no scaling), and `getMapMonsterBaseStats()` scales the species `baseStats` at max genes (20) with no equipment, which is what Cyclopedia and the Lua export show.
+
+Genes and equipment are not read because room actors only carry them optionally and the room data is not in the chunks (it only exists at runtime). A room can give its own copy different numbers, so these are not always what a creature has in a fight. Checked 2026-10-31 against the old stored totals: seven matched exactly (Old Giant Spider, Willi Wasp, Dead Tree, Earth/Magma Crystal, Morguthis, Grynch Clan Mastermind). The old totals that differed, now replaced by the formula, were: Rahemos (fits genes of about 24 on every stat), Regeneration Tank (HP exactly 2x), the four Tibian Legends (about 1.86x on every stat, so not equipment alone), and Cobra Statue, Dharalion, Energy Crystal, Obelisk, Omruc and Monster Cauldron (unexplained or partly gear). Multi-floor quest rooms also scale monsters +20% per floor.
+
+#### Awakened ability availability
+
+The Cyclopedia awaken button is data-driven (`isCreatureAwakenableName` in `creature-database.js`). A creature's ability is `skill.TooltipContent`, either `() => ...` (takes no props, so no awakened text) or `t => ...` (reads `awaken`). The button shows when the tooltip takes props, so Orshabaal and Monster Cauldron (and therefore Tentugly) have none. A boss alias is judged by its base species (`findMonsterByName` resolves it by `gameId`), so Hemorrhage follows Clot, whose tooltip also takes no props. Gazers, `EVENT_CREATURES` (non-alias) and `NON_AWAKENABLE_CREATURES` are still excluded by name: they have awaken-aware tooltips, but the loader treats them as not awakenable, and the game chunks hold no rule for it.
+
+#### Other hidden game mechanics (chunk review, 2026-10-31)
+
+Found by downloading every chunk in the build manifest (`/_next/static/<buildId>/_buildManifest.js`,
+59 files including lazy page chunks) and searching the minified source. Re-verify after a game
+update. Nothing here is read by a mod yet unless stated.
+
+**Hidden pages.** The manifest lists these Next.js pages besides `/` and `/game`:
+
+| Page | What it is | Loader use |
+| --- | --- | --- |
+| `/abilities` | "Abilities viewer" | Ability script data is already used for the Units / ability-CD previews |
+| `/recolor` | "Color palette editor" with image import (drop zone, color filter) | none |
+| `/seasons` | Season / rank-badge info page ("Awakening system", "Phoenix Evoker", "Challenger") | referenced by `Cyclopedia.js`, `Mod_Settings.js` |
+| `/admin` | Server-gated admin tools (gift codes, create raid, highscore management, test accounts, revenue stats) | only the admin check in `Mod_Settings.js` / `firebase-admins.js`; do not call its endpoints |
+| `/background`, `/iframe`, `/iframe-obs-2`, `/iframe-obs-3`, `/iframe-obs-4`, `/promo-chest`, `/promo-scroll` | embed, stream-overlay and promo pages | none |
+
+The only non-tRPC `/api/` route found in the chunks is `/api/player-count`. The full tRPC procedure inventory (170 procedures) and the server-authoritative battle flow are in
+"Game tRPC API" below.
+
+**World state flags.** The world constructor (`979-*.js`) initializes, besides
+`_customRoomVariables`:
+
+```js
+this.roomId = "";
+this.killedGummy = 0;
+this.killedClot = 0;
+this.tentuglyTransformed = false;
+this.wcEventWin = false;
+this.grynchBAllyGoblinAchievement = false;
+this.calculateExtraRankPoints = () => 0;
+this.gameEndCondition = { villains: [], nonVillains: [] };
+```
+
+| Flag | Set by |
+| --- | --- |
+| `killedGummy` | `++` when a summoned Gummy dies |
+| `killedClot` | `++` when a villain Clot clone dies (`o$` skill, see Hemorrhage above) or a villain `o3` Clot dies |
+| `tentuglyTransformed` | `true` when Tentugly casts its transform |
+| `grynchBAllyGoblinAchievement` | `true` when Grynch's mind control hits an actor on the other side from Grynch |
+| `wcEventWin` | `true` when the World Cup event ends with the villain score at 0 |
+| `calculateExtraRankPoints` | Replaced by one creature type to return the count of living spawn-villains carrying its misc tag; the result is added to the win's rank points |
+
+No client code reads the five counters/booleans, so they are most likely checked server-side as
+achievement conditions. This is inferred from the source, not confirmed in the live game. The
+achievements UI exists (`trophyRoom` category `achievements`, text "Requires achievement").
+`calculateExtraRankPoints` is read by the end-of-game handler, which sends
+`rankPoints` and `readableGrade` in the `setState` victory/defeat event.
+
+**World Cup event room.** `isEvent()` is true when `world.roomId` equals one fixed room id. In it
+a scoreboard counts villain vs non-villain points, `buffTeam` is applied to the scoring side, and
+the game ends with a "Red wins!" / "Green wins!" text on tile 82. Creatures tagged
+`immuneToWcEventMindControl` ignore the event's mind control.
+
+**Creature tags.** Set with `tags.add("...")` in the creature constructors. Counts are uses in
+the bundle. None are referenced by the loader.
+
+| Tag | Uses | Meaning (from context) |
+| --- | --- | --- |
+| `cantChangeVillany` | 34 | `villany.canChangeVillany` is false, so `villany.setVillain` cannot flip the creature to the other side |
+| `shamanCantRevive` | 23 | verified: an Orc Shaman's revive on a kill skips a killed actor with this tag |
+| `disableSkullHelmet` | 22 | verified: the Skull Helmet health-pool passive is disabled on the owner |
+| `ghostCantRevive` | 17 | not verified: no `tags.has("ghostCantRevive")` reader found in the chunks; probably the ghost-revive equivalent of `shamanCantRevive` |
+| `noImpactAnalyser` | 15 | not verified: summons such as Gummy carry it |
+| `monsterCauldronShouldNotRevive` | 7 | verified: Tentugly's transform skips actors with this tag (no HP drain, no revive) |
+| `noXPDrop` | 3 | gives no XP |
+| `immuneToWcEventMindControl` | 3 | see World Cup event room |
+| `playerMonster` | 2 | marks player-owned monsters; used to count living player creatures for rank points |
+| `grynchObstacle`, `grynchBarrel`, `grynchGoblinGumslinger` | 1 each | Grynch encounter objects |
+| `hitByWaterElementalBall`, `regenerationTank`, `obelisk`, `hasPaladinArmor`, `witch`, `witchHat`, `vampSlippers`, `wasp` | 1 each | per-creature bookkeeping |
+
+**Tentugly floor effects.** When Tentugly transforms it creates four floor entities named
+`tentuglyFloorA` to `tentuglyFloorD` on tiles 125, 126, 140 and 141. Their effect is not modelled
+by the loader.
+
+Transform (from the `ll` class in the game chunk): every enemy without the
+`monsterCauldronShouldNotRevive` tag is, in turn, either dropped to 1 HP with true damage (only
+when `world.floor > 0`) or, if dead, revived with 1 HP. It then summons tentacles around tile 129.
+Tentugly is not a species: the game builds a Monster Cauldron (`gameId` 83, class `la` metadata)
+and renames it to "Tentugly" at transform. The loader therefore lists it as a `BOSS_ALIAS_CREATURES`
+entry (`baseSpecies: 'Monster Cauldron'`), so Cyclopedia shows the Cauldron's stats and abilities,
+and its Special ability text comes from `CREATURE_ABILITY_NOTES` in `database/creature-database.js`.
+Tentugly is no longer in `CYCLOPEDIA_HIDDEN_CREATURES`.
+
+**Room-script check coverage gap.** `tools/check-room-scripts.mjs` (`loadChunks()`) scans only
+chunk URLs found in the HTML of `/`. The build manifest lists more, including the large
+`pages/game` and numbered chunks. The 13-script count above may be a lower bound. To widen the
+scan, also read `_buildManifest.js` and rerun the tool.
+
+#### Combat engine rules (chunk review, 2026-10-31)
+
+Read from `509-*.js` (actor, HP, cooldown, movement, stun, modifier classes), `979-*.js` (world,
+tick engine) and the shared constants module (`88057`, in `_app-*.js`). Minified names in
+parentheses. Re-verify after a game update. Per-creature numbers are in
+`CREATURE_COMBAT_DATA` in `database/creature-database.js` (see "Per-creature ability constants" below).
+
+**Time.** 1 tick = 62.5 ms (`Qb`, 16 ticks/s). `ms -> ticks = round(0.016 * ms)` (`HX`),
+`ticks -> ms = round(62.5 * ticks)` (`aD`). A battle ends in a draw at `maxDurationTicks = 1440`
+(`V7`, 90 s). Win check (`getWinner`, run every tick): players win if every villain is dead (checked
+first, so a simultaneous wipe is a player win); villains win if every player unit is dead **or**
+`tick >= maxDurationTicks`. So timing out is a loss, not a separate draw result. The world also has
+`serverPlay()`, which loops `_advanceTick()` until a winner exists and returns
+`{ villainsWon, ticks, draw, crash }` (an exception counts as a villain win with `crash: true`).
+That is the same engine running headless, which is how the server reproduces a battle from its
+seed. Each tick the world pops scheduled actions,
+dispatches queued events, then calls `notifyTick` on every entity. If the timer runs late, the tick
+engine replays the missed ticks (`floor(lag / interval)`) before scheduling the next one, so
+results do not depend on frame rate. The RNG is `xoroshiro128plus(seed)`; helpers are `dice.d6/d10/d20`,
+`advantageRoll`, `shuffle`, `sampleFrom`.
+
+**Grid.** The world is 15 x 11 (`YO`); the playable area is 10 x 10 starting at x=2, y=0 (`t0`).
+Neighbours are 8-directional. Range distance is Chebyshev (`max(|dx|, |dy|)`). Pathfinding is A*
+with cost 1 for cardinal and sqrt 2 for diagonal steps and a Manhattan heuristic. A path counts as
+found once the goal is within the wanted range.
+
+**Tier enum** (`Vf`): `STARS_0..STARS_4` = 0-4, `SEALED_5` = 5, `AWAKEN_6` = 6. Level caps by tier:
+30 / 35 / 40 / 45 / 50 / 50 / 99. Genes range 1-20 per stat. Max level is 99. `hundo` = total
+genes >= 100 **and** tier `AWAKEN_6` **and** level >= 99.
+
+**Stat scaling** (`sn`), with `maxLevel = 50` even for levels above 50:
+
+```js
+scaled = ceil(stat * 0.2 + stat * 0.8 * (level / 50 + gene / 20) / 2)
+```
+
+So a level-99, gene-20 monster scales to about 1.99x the base stat. `speed` and `attackDelayTicks`
+are **not** scaled. A villain's `floorGeneMultiplier = genes.ap / 20`.
+
+**Stat modifiers** (`14973`, used by `ad`, `ap`, `attackDelay`, `armor`, `magicResist`, `speed`,
+`lifesteal`). Flat and percentage modifiers are kept separately:
+
+```js
+value = round(flat) + round(flat) * percent        // then clamped to min / max
+percent = r2(1 - prod(1 - p for p > 0)) - r2(1 - prod(1 - |p| for p < 0))   // r2 = round to 2 dp
+```
+
+Positive and negative percentages each combine multiplicatively (diminishing returns), then are
+subtracted. A percentage below -1 throws. Min values: `ad` 0, `ap` 0, `armor` 0, `magicResist` 0,
+**`attackDelay` 3 ticks (187.5 ms)**. Default attack delay is `mL = 2000 ms` (32 ticks) when a
+creature's metadata sets none. Because armor and MR are floored at 0, negative resist never
+amplifies damage.
+
+**Damage** (`HP.calculateAppliedDamage`):
+
+```js
+if (type !== "trueDamage") dmg *= 100 / (100 + (type === "physical" ? armor : magicResist));
+dmg = max(floor(dmg), 0)              // 0 damage is a no-op; HP floors at 0
+```
+
+Damage types are `physical`, `magic`, `trueDamage`. Each armor/MR point is worth `1/(1+x/100)`, so 100
+armor halves physical damage. Healing is `floor(abs(points))`, capped at `max - hp`, and runs
+through the before-healing hooks. Lifesteal is `lifesteal.currentValue / 100`.
+
+**Damage hooks.** `addOnBeforeApplyingDamage({ fn, priority })` handlers run highest priority first and
+each can rewrite the damage. The named priorities (`l` table) show the exact order the game resolves
+effects in:
+
+| Priority | Names |
+| --- | --- |
+| 100 | `RAHEMOS_PEACE`, `VLADRUKH_DMG_CAP` |
+| 90 | `GOLDEN_ARMOR_ZHONYA` |
+| 62 / 61 | `BEHEMOTH_DMG_REDUCTION` / `AMAZON_ARMOR_BLOCK` |
+| 60 | `BAT_INVULNERABILITY`, `DODGE` |
+| 50 | `NIGHTSTALKER_INVULNERABILITY`, `GRYNCH_REFLECT_IMMUNITY`, `GRYNCH_BARREL_AOE`, `WILLI_WASP`, `ECTOPLASMIC_SHIELD`, `YETI_AUTO_ATTACK_SNOW`, `GREEN_DJINN_JAR`, `GHOST_AWAKEN_CHANNEL` |
+| 10 | `AMAZON_HELMET_REDUCTION` |
+| 5 | `CORYM_VANGUARD_PASSIVE`, `DWARF_GUARD_PASSIVE`, `DEMON_ARMOR_REDUCTION` |
+| -99 | `ORC_BERSERKER_AWAKEN_IMMORTALITY` |
+| -100 / -101 | `AMULET_OF_LOSS` / `DEMON_NON_FATAL` |
+
+Before-healing hooks have one named priority: `50_REDUCE_HEAL`. Dodge runs before every other
+50-or-lower effect, and Amulet of Loss runs after everything else, so it sees the final damage.
+Kill credit (`participation`) lasts 8000 ms (128 ticks) after the last damaging hit.
+
+**Cooldowns** (`40159`). A cooldown counts down by 1 per tick and can only be refreshed to a
+higher value (`addNonStackingCooldown`). `setBaseCooldown(n)` keeps the same fraction of the cooldown
+remaining. Every actor has `cooldown.autoAttack`, whose base follows `attackDelay`. The ability
+cooldown is a separate `abilityCooldown`. Creatures built on the common pattern (seen in the Orc
+Leader-style classes; not checked for all 135) rebuild its base on every cooldown-reduction update
+as `max(COOLDOWN_MS_in_ticks * percentageBasis + flatTicks, MIN_COOLDOWN_TICKS)`. That is how
+equipment CDR and `CDR_PER_AP` apply.
+
+**Walking** (`61256`). Step time depends on the speed stat `s`:
+
+```js
+e = s > -261.29 ? max(floor(857.36 * ln(s / 2 + 261.29) - 4794.51), 1) : 1;
+stepMs = floor(100000 / e);            // walk cooldown = round(0.016 * stepMs) ticks
+```
+
+Example (computed from the formula): speed 100 -> 787 ms per step, about 1.27 steps/s. A diagonal step doubles the walk
+cooldown. Wander cooldown is `walk cooldown * 2`. Idle wandering picks a random cardinal neighbour.
+`Map_Editor.js` already has this formula (`nativeWalkCooldownTicksFromSpeed`).
+
+**Targeting and the attack loop.** Each tick a living, non-stunned actor runs its `onTick`: with
+a target, it attacks if the auto-attack cooldown is ready and the target is in range, otherwise it
+walks toward it; with no target it asks `targetSelection.tryFindTarget()`, and if that finds
+nothing and it can wander, it wanders. Default selection (`findByDistance`, criteria
+`"closest"`) takes enemies that are alive, **not invisible**, and reachable by path within range,
+sorted by **Euclidean** distance (nearest first). `"farthest"` takes the last. `findByHPPercent`
+(`"lowest"` / `"highest"`) sorts by HP fraction, then distance. Target selectors can be stacked with
+priorities (`ELVISH_BOW` 10, `CYC_DRONE_JUMP_TARGET` 1, `ANNI_MINO_MAGE` 1, `DEFAULT` 0).
+While mind-controlled, an actor runs the mind-control effect's `onTick` instead of its own.
+
+**Stun** (`40589`). A non-stacking cooldown: a new stun only matters if it is longer than what is
+left. A stunned actor skips `onTick` entirely, but its cooldowns and passives keep ticking
+(`notifyTick` still runs). `setIgnoreStun(fn)` registers immunities; an ignored stun fires
+`onStunIgnored` instead.
+
+**Other actor status components.** `invisibility` (counted stack; enemy targeting skips invisible
+actors), `silenced` (counted), `cantBeDisplaced` (stack), `mindControl` (immunity list; an actor
+cannot control itself), `setAwaken` / `setTempAwakenModifier` (stacked temporary awaken, so effects
+can wake a unit for part of a fight). The actor event list shows which status effects exist:
+`onSlow`, `onPoison`, `onBuff`, `onDebuff`, `onDisarmed`, `onHealReduction`, `onDisplaced`.
+
+**Per-creature ability constants.** The chunk holds 135 creature metadata entries (119 have a
+`gameId`; the rest are summons such as Larva or Bat), plus event variants written as
+`{...Base, queryTags:[..., "event"], skill:{...}}` (Clot = Slime, Reindeer = Deer B, Dwarf
+Merrymancer, Gummy Raider). A variant inherits its base's numbers and overrides those its own
+tooltip reads; its id comes from its own `name` or the first creature name its tooltip prints.
+The snapshot has 126 creatures. Still missing: Chubby / Spiky / Psychic / Sturdy / Mystic Gazer and
+Football Elemental (their metadata is not in either shape the tool reads). For each, the numbers its ability tooltip
+reads (cooldowns, durations, damage bases, AP ratios, caps) are stored in the `CREATURE_COMBAT_DATA`
+snapshot in `database/creature-database.js`, keyed by `gameId`. Only plain numbers are kept (nested
+tables such as `EXORI_CD_MS`, fractions and references are skipped). `*_TICKS` constants are stored
+in ms under a `*_MS` name. `ad: null` means the 2000 ms default attack delay. Ranges the tooltip
+does not print (`rangeComponent.range`) are not included. A second `Minotaur Archer` entry differs
+from the first; only the first is kept.
+
+- Read it with `creatureDatabase.getCreatureCombatData(gameId)` ->
+  `{ name, attackDelayMs, constants }` or `null`.
+- The Cyclopedia creature page uses it for a title-bar toggle button (same style as the shiny / old
+  sprites buttons, green when on) beside the creature name, which swaps the stat bars for the combat
+  numbers (the choice is kept across creatures; the button is not shown when the snapshot has no
+  entry). The numbers are grouped into Basics / Ability / Timing / Awakened sections, and all times
+  show in seconds by default (a Seconds/Ticks button in the Basics heading switches; state is
+  `cyclopediaState.combatTimeUnit`, also used by the hover text). The stat bars also get
+  hover text: armor / magic resist show the share of damage taken, speed shows ticks per step, and
+  Attack Damage shows attack delay and DPS (damage per second). Those use the live
+  `metadata.baseStats` (including `attackDelayTicks`), not the snapshot.
+- The ability constants are **not** exposed by the game API, only by the chunk. After a game update
+  run `node tools/check-creature-combat.mjs` (exit 1 on `NEW` / `CHANGED` / `REMOVED`, exit 2 on a
+  download or parsing failure) and `--update` to rewrite the block. Unlike the room-script check,
+  it has no automatic admin run in `Mod_Settings.js`.
+
+**Reading the stats in a mod.** The stat half is available at runtime:
+`state.utils.getMonster(id).metadata.baseStats` (includes `speed` and `attackDelayTicks`).
 
 ### `window.equipmentDatabase`
 

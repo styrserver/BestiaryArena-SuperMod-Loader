@@ -4,6 +4,26 @@
   },
   "notes": [
     {
+      "version": "5.2.3",
+      "changes": [
+        {
+          "mod": "Cyclopedia",
+          "type": "added",
+          "text": "Tentugly now has its own entry under Unobtainable, with the Monster Cauldron's picture, stats and abilities and a Special ability note describing its transform. New Combat Details button next to the creature name (like the shiny and old sprites buttons) swaps the stat bars for the creature's attack delay and ability numbers such as cooldowns, durations, damage and scaling, in seconds or game ticks (switch inside the panel). The stat panel now shows the damage cut for Armor and Magic Resist (for example -28.1%) and the damage per second for Attack Damage in their own column, lined up under each other, and hovering Speed shows the time per step."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "changed",
+          "text": "Stats of map-only creatures (such as Dead Tree, Morguthis and Vladrukh) are now calculated from the creature's base stats and the level it has on its map instead of stored numbers, and no longer include equipment. The awakened-ability button now shows only when a creature's ability actually changes when awakened, for every creature including bosses (it no longer appears for Orshabaal, Hemorrhage or Tentugly). Owned creatures now show as a grid of small tiles (level, shiny and star icons, rarity colour) under a plain \"Owned (n)\" heading, and hovering one shows its genes. Click a tile to show that creature's real stats (level and genes applied) in the stat panel and the large picture, and to set the shiny and awakened buttons to match; click it again to go back to the standard creature. Player usage moved under the owned creatures (each takes half the column height), the three columns are now 40% / 35% / 25% wide, and the stat panel grows with its column and uses a smaller font. Role badges (such as DPS or Support) stay on one row; ones that do not fit collapse into a +N badge that lists them on hover. The stamina icon in the Location list is back at its normal size, and the Special ability note has less padding."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "fixed",
+          "text": "A creature whose ability text is only a quote (such as Orshabaal) no longer shows an empty Ability box. The quote is now kept when there is nothing else to show. Tentugly's Location panel no longer says \"No locations found\"; it now shows the same rooms as the Monster Cauldron."
+        }
+      ]
+    },
+    {
       "version": "5.2.2",
       "changes": [
         {

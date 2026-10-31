@@ -247,7 +247,7 @@ dumpCreatureWikiLua({ download: false, copy: true });
 getCreatureExportSections();                       // inspect regular / event / unobtainable / gazer lists
 ```
 
-Live stats (hitpoints, attack, ability_power, armor, magic_resist, movement_speed, `roles`, `is_poisonous`) come from `getMonster` and `creature-database.js` `HARDCODED_MAP_MONSTER_STATS`. Wiki-only fields (`attack_speed`, `scales_ad`, `scales_ap`, specials) are in `WIKI_CREATURE_EXTRA_FIELDS` inside the exporter — update there when wiki rules change.
+Live stats (hitpoints, attack, ability_power, armor, magic_resist, movement_speed, `roles`, `is_poisonous`) come from `getMonster` and `creature-database.js` `getMapMonsterBaseStats` (computed from each unobtainable creature's room level). Wiki-only fields (`attack_speed`, `scales_ad`, `scales_ap`, specials) are in `WIKI_CREATURE_EXTRA_FIELDS` inside the exporter — update there when wiki rules change.
 
 **Maps** (`maps-lua-export.js`):
 

@@ -165,6 +165,9 @@ const LAYOUT_CONSTANTS = {
   CREATURE_DETAIL_COL1_MIN_WIDTH: '250px',
   CREATURE_DETAIL_TOP_MIN_HEIGHT: 175,
   CREATURE_DETAIL_FLEX_COL_MIN: 200,
+  CREATURE_DETAIL_OWNED_COL_MIN_WIDTH: 172, // fits four owned-creature tiles
+  // Creature detail columns: info / location / owned creatures.
+  CREATURE_DETAIL_COL_PERCENTS: [40, 35, 25],
   EQUIPMENT_DETAIL_COL_MIN: 280,
   EQUIPMENT_OWNED_COL_MIN: 220,
   MAPS_DETAIL_COL_MIN: 150,
@@ -312,18 +315,20 @@ const CYCLOPEDIA_WIDGET_TITLE_STYLE = {
 };
 /** Title beside a narrow toggle button (Creatures shiny / Ability awakened). */
 const CYCLOPEDIA_WIDGET_TITLE_SPLIT_STYLE = {
-  width: '83%',
-  flex: '0 0 83%'
+  width: 'auto',
+  flex: '1 1 0',
+  minWidth: '0'
 };
+// Fixed width, so every toggle button is the same size whatever column it sits in.
 const CYCLOPEDIA_WIDGET_TITLE_TOGGLE_STYLE = {
-  width: '15%',
-  flex: '0 0 15%',
+  width: '32px',
+  flex: '0 0 32px',
   cursor: 'pointer',
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
   minHeight: '16px',
-  height: '100%',
+  height: 'auto', // not 100%: a percentage never resolves in an auto-height row, so align-self: stretch would not apply
   alignSelf: 'stretch',
   outline: 'none'
 };
@@ -501,8 +506,27 @@ const mapsDbRef = (typeof globalThis !== 'undefined' && globalThis.mapsDatabase)
 const itemKeyGroups = inventoryDatabase.itemKeyGroups || {};
 
 const MONSTER_STATS_CONFIG = creatureDbRef.MONSTER_STAT_DISPLAY_CONFIG || [];
-const HARDCODED_MONSTER_STATS = creatureDbRef.HARDCODED_MAP_MONSTER_STATS || {};
-const HIDE_FROM_CYCLOPEDIA = creatureDbRef.CYCLOPEDIA_HIDDEN_CREATURES || ['Tentugly', 'Dwarf Henchman'];
+const HIDE_FROM_CYCLOPEDIA = creatureDbRef.CYCLOPEDIA_HIDDEN_CREATURES || ['Dwarf Henchman'];
+
+/**
+ * Removes the lore quote (`blockquote` plus its leading separator) from an ability tooltip, but
+ * only while other ability text remains. A creature whose tooltip is only a quote (e.g.
+ * Orshabaal) keeps it, so the Ability box is never left empty.
+ */
+function removeLoreBlocksKeepingOnlyContent(root) {
+  const loreBlocks = root.querySelectorAll('blockquote');
+  if (!loreBlocks.length) return;
+  const rest = root.cloneNode(true);
+  rest.querySelectorAll('blockquote').forEach((block) => block.remove());
+  if (!rest.textContent.trim()) return;
+  loreBlocks.forEach((loreBlock) => {
+    const previous = loreBlock.previousElementSibling;
+    if (previous && previous.classList && previous.classList.contains('separator')) {
+      previous.remove();
+    }
+    loreBlock.remove();
+  });
+}
 
 const UNOBTAINABLE_CREATURES = (creatureDbRef.UNOBTAINABLE_CREATURES || [])
   .filter(name => !HIDE_FROM_CYCLOPEDIA.includes(name));
@@ -1152,6 +1176,8 @@ const cyclopediaState = {
   monsterNameMap: null, monsterNameMapBuilt: false, monsterLocationCache: new Map(),
   /** When true, creature detail shows awakened ability text until toggled off. */
   creatureDetailShowAwakenedAbility: false,
+  creatureDetailShowCombat: false,
+  combatTimeUnit: 'seconds', // 'seconds' | 'ticks'
   searchDebounceTimer: null, searchedUsername: null,
   lazyLoadQueue: [], isProcessingQueue: false,
   cache: {
@@ -3275,8 +3301,10 @@ function findMonsterLocations(monsterName) {
   try {
     // A boss alias (e.g. Hemorrhage) is a nicknamed actor of its base species, so match on both.
     const bossDisplay = cyclopediaResolveCreatureQuery(monsterName);
-    const bossNickname = bossDisplay?.bossOnly ? bossDisplay.displayName : null;
-    const monsterGameId = bossNickname ? bossDisplay.gameId : LOCATION_UTILS.getMonsterGameId(monsterName);
+    // A transformed form (Tentugly) is the same un-nicknamed actor as its base species (Monster
+    // Cauldron), so it matches that species' actors by id alone.
+    const bossNickname = bossDisplay?.bossOnly && !bossDisplay.transformedForm ? bossDisplay.displayName : null;
+    const monsterGameId = bossDisplay?.bossOnly ? bossDisplay.gameId : LOCATION_UTILS.getMonsterGameId(monsterName);
     if (!monsterGameId) {
       cyclopediaState.monsterLocationCache.set(cacheKey, locations);
       return locations;
@@ -7681,6 +7709,394 @@ function createStartPage() {
 // 9. Shared Render Components
 // =======================
 
+// Combat formulas read from the game's engine (docs/game_state_api.md, "Combat engine rules").
+// Combat times are shown in seconds by default, or in game ticks (1 tick = 62.5 ms, the unit the engine runs on).
+const COMBAT_DEFAULT_ATTACK_DELAY_TICKS = 32;
+const COMBAT_MS_PER_TICK = 62.5;
+
+function formatCombatNumber(value, maxDecimals = 2) {
+  return String(Number(value.toFixed(maxDecimals)));
+}
+
+/** Engine ms -> ticks conversion (the game's `HX`). */
+function combatMsToTicks(ms) {
+  return Math.round(0.016 * ms);
+}
+
+/** A duration given in ticks, shown in seconds (default) or ticks per `cyclopediaState.combatTimeUnit`. */
+function formatCombatTicks(ticks) {
+  if (cyclopediaState.combatTimeUnit === 'ticks') {
+    return `${formatCombatNumber(ticks)} ${ticks === 1 ? 'tick' : 'ticks'}`;
+  }
+  return `${formatCombatNumber(ticks * COMBAT_MS_PER_TICK / 1000, 3)}s`;
+}
+
+/** Base auto-attack delay in ticks: the live metadata value when present, else the engine default. */
+function getBaseAttackDelayTicks(baseStats) {
+  const ticks = baseStats?.attackDelayTicks;
+  return Number.isFinite(ticks) && ticks > 0 ? ticks : COMBAT_DEFAULT_ATTACK_DELAY_TICKS;
+}
+
+/** Auto-attack damage per second before armor: attack damage over the attack delay. */
+function getBaseDps(attackDamage, baseStats) {
+  return attackDamage / (getBaseAttackDelayTicks(baseStats) * COMBAT_MS_PER_TICK / 1000);
+}
+
+/** Ticks for one walking step at a speed stat (engine walk-cooldown formula). */
+function getWalkStepTicks(speed) {
+  let e = 1;
+  if (speed > -261.29) e = Math.max(Math.floor(857.36 * Math.log(speed / 2 + 261.29) - 4794.51), 1);
+  return combatMsToTicks(Math.floor(1e5 / e));
+}
+
+/** Hover text with the effect of a displayed stat value, or '' when there is nothing to add. */
+function getDerivedStatTitle(statKey, value, baseStats) {
+  if (!Number.isFinite(value)) return '';
+  if (statKey === 'armor' || statKey === 'magicResist') {
+    const taken = 100 / (100 + Math.max(value, 0));
+    const kind = statKey === 'armor' ? 'physical' : 'magic';
+    return `Takes ${formatCombatNumber(taken * 100, 1)}% of ${kind} damage (${formatCombatNumber((1 - taken) * 100, 1)}% less)`;
+  }
+  if (statKey === 'speed') {
+    const stepTicks = getWalkStepTicks(value);
+    return `${formatCombatTicks(stepTicks)} per step (${formatCombatTicks(stepTicks * 2)} diagonally)`;
+  }
+  if (statKey === 'ad') {
+    const delayTicks = getBaseAttackDelayTicks(baseStats);
+    return `Attack delay ${formatCombatTicks(delayTicks)}, `
+      + `about ${formatCombatNumber(getBaseDps(value, baseStats), 1)} DPS before armor`;
+  }
+  return '';
+}
+
+const COMBAT_WORD_LABELS = {
+  AP: 'AP', AD: 'AD', HP: 'HP', MR: 'MR', CDR: 'CDR', DMG: 'damage', MIN: 'min', MAX: 'max',
+  PERCENT: '', PCT: '' // the value itself is shown with a % sign
+};
+
+/** Sentence-case text from constant-name words ("BASE", "DMG" -> "Base damage"). */
+function formatCombatWords(words) {
+  const text = words.map((w) => COMBAT_WORD_LABELS[w] ?? w.toLowerCase()).filter(Boolean).join(' ');
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/**
+ * A bare number, a time in ticks, or a percentage (`*_PERCENT*`). Values are milliseconds when the
+ * name has `MS` / `TICKS` in it or starts with `CDR` (the game prints those with its seconds
+ * formatter). `exact` keeps fractions of a tick, for per-stat amounts such as "1.28 ticks per AP".
+ */
+function formatCombatAmount(key, value, exact = false) {
+  if (/(?:^|_)(?:MS|TICKS)(?:_|$)|^CDR(?:_|$)/.test(key)) {
+    return formatCombatTicks(exact ? value * 0.016 : combatMsToTicks(value));
+  }
+  // ATTACK_SPEED constants are fractions the game prints as a percentage ("+1% attack speed").
+  if (/PERCENT|LIFESTEAL|ATTACK_SPEED/.test(key) && Math.abs(value) <= 1) return `${formatCombatNumber(value * 100)}%`;
+  return formatCombatNumber(value);
+}
+
+/** Which panel section a constant belongs to. */
+function getCombatSection(key) {
+  if (key.startsWith('AWAKEN_')) return 'Awakened';
+  if (/COOLDOWN|CDR|RECHARGE|FREQUENCY|DELAY|DURATION/.test(key)) return 'Timing';
+  return 'Ability';
+}
+
+/**
+ * Label and value for one ability constant. Scaling constants read as "Heal scaling: x 0.15 AP" or
+ * "CDR scaling: 80 per AP" instead of the raw "HEAL_AP_RATIO" / "CDR_PER_AP".
+ */
+function describeCombatConstant(key, value) {
+  let words = key.replace(/^AWAKEN_/, '').split('_').filter((w) => w && w !== 'MS');
+  const ratio = /(?:^|_)(AP|AD)_RATIO$/.exec(key);
+  const perStat = /_PER_(?:USER_)?(AP|AD)$/.exec(key);
+  if (ratio) {
+    words = words.slice(0, -2);
+    return { label: `${formatCombatWords(words) || 'Damage'} scaling`.replace(/^ /, ''), value: `× ${formatCombatNumber(value)} ${ratio[1]}` };
+  }
+  if (perStat) {
+    const end = key.includes('_PER_USER_') ? -3 : -2;
+    words = words.slice(0, end);
+    const sign = value > 0 ? '+' : '';
+    return { label: `${formatCombatWords(words) || 'Bonus'} scaling`, value: `${sign}${formatCombatAmount(key, value, true)} per ${perStat[1]}` };
+  }
+  return { label: formatCombatWords(words), value: formatCombatAmount(key, value) };
+}
+
+/** Whether the creature-database snapshot has combat numbers for this creature. */
+function hasCreatureCombatData(gameId) {
+  return !!creatureDbRef.getCreatureCombatData?.(gameId);
+}
+
+/**
+ * "Combat details" panel shown in place of the stat bars (same 160x160 frame, scrolls): attack
+ * delay, then the ability's numbers from the creature-database snapshot grouped into Ability /
+ * Timing / Awakened sections. Times follow `cyclopediaState.combatTimeUnit`; the Basics heading holds
+ * the seconds/ticks switch, which calls `onToggleUnit`. Returns null when the snapshot has none for this id.
+ */
+function renderCreatureCombatDetails(gameId, baseStats, onToggleUnit) {
+  const data = creatureDbRef.getCreatureCombatData?.(gameId);
+  if (!data) return null;
+
+  const sections = [
+    ['Basics', [{ label: 'Attack delay', value: formatCombatTicks(getBaseAttackDelayTicks(baseStats)) }]],
+    ['Ability', []], ['Timing', []], ['Awakened', []]
+  ];
+  const byName = new Map(sections);
+  Object.entries(data.constants).forEach(([key, value]) => {
+    if (!Number.isFinite(value)) return;
+    // Some constants exist as both FOO_MS and FOO_TICKS with the same duration; show it once.
+    if (key.endsWith('_TICKS') && key.replace(/_TICKS$/, '_MS') in data.constants) return;
+    byName.get(getCombatSection(key)).push(describeCombatConstant(key, value));
+  });
+
+  const panel = document.createElement('div');
+  panel.className = 'frame-pressed-1 surface-dark revert-pixel-font-spacing ' + FONT_CONSTANTS.SIZES.SMALL;
+  panel.setAttribute('data-combat-details', 'true');
+  panel.style.cssText = 'margin: 2px; width: auto; height: 160px; padding: 4px; box-sizing: border-box; '
+    + 'overflow-y: auto; overflow-x: hidden; text-align: left; align-self: center; flex: 1 1 0; '
+    + `color: ${COLOR_CONSTANTS.TEXT};`;
+
+  sections.forEach(([title, rows]) => {
+    if (!rows.length) return;
+    const heading = document.createElement('div');
+    heading.textContent = title;
+    heading.style.cssText = 'color: #ffe066; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; '
+      + 'margin: 4px 0 2px; padding-bottom: 1px; border-bottom: 1px solid rgba(255, 224, 102, 0.4);';
+    if (panel.children.length === 0) {
+      heading.style.marginTop = '0';
+      heading.style.display = 'flex';
+      heading.style.justifyContent = 'space-between';
+      heading.style.alignItems = 'center';
+      const unitButton = document.createElement('button');
+      unitButton.type = 'button';
+      const inTicks = cyclopediaState.combatTimeUnit === 'ticks';
+      unitButton.textContent = inTicks ? 'Ticks' : 'Seconds';
+      unitButton.title = inTicks ? 'Showing ticks. Click for seconds.' : 'Showing seconds. Click for ticks.';
+      unitButton.style.cssText = 'font: inherit; font-weight: 400; text-transform: none; letter-spacing: 0; cursor: pointer; '
+        + 'color: #ccc; background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 224, 102, 0.4); '
+        + 'padding: 0 4px; line-height: 1.2;';
+      unitButton.addEventListener('click', (e) => {
+        e.stopPropagation();
+        cyclopediaState.combatTimeUnit = inTicks ? 'seconds' : 'ticks';
+        onToggleUnit?.();
+      });
+      heading.appendChild(unitButton);
+    }
+    panel.appendChild(heading);
+    rows.forEach(({ label, value }, i) => {
+      const row = document.createElement('div');
+      row.style.cssText = 'display: flex; justify-content: space-between; align-items: baseline; gap: 6px; '
+        + `padding: 1px 2px; ${i % 2 ? 'background: rgba(255, 255, 255, 0.05);' : ''}`;
+      const labelEl = document.createElement('span');
+      labelEl.textContent = label;
+      labelEl.style.cssText = 'min-width: 0;';
+      const valueEl = document.createElement('span');
+      valueEl.textContent = value;
+      valueEl.className = 'text-whiteExp';
+      valueEl.style.cssText = 'white-space: nowrap; text-align: right; flex: 0 0 auto;';
+      row.append(labelEl, valueEl);
+      panel.appendChild(row);
+    });
+  });
+
+  return panel;
+}
+
+// Owned creatures: a tile grid (like the Daycare / Depot pickers) with a detail card for the selected copy.
+const OWNED_GENE_MAX = 20;
+const OWNED_STAT_KEYS = ['hp', 'ad', 'ap', 'armor', 'magicResist'];
+const OWNED_STAR_TIER_CAP = 5; // star-tier-N icons exist for N = 1..5; awakened has its own icon
+
+/** Level, gene total and rarity flags of one owned creature copy. */
+function getOwnedMonsterStatus(monster, creatureCanAwaken) {
+  const level = getLevelFromExp(monster.exp);
+  const totalGenes = OWNED_STAT_KEYS.reduce((sum, key) => sum + (Number(monster[key]) || 0), 0);
+  const isAwakened = creatureCanAwaken && (
+    monster.awaken === true || monster.awakened === true || monster.isAwakened === true
+    || Number(monster.tier) >= 6 || Number(monster.starTier) >= 6 || level > 50
+  );
+  const isMaxAwakened = creatureCanAwaken && level >= 99 && totalGenes >= 100;
+  let rarity = 1;
+  if (totalGenes >= 80) rarity = 5;
+  else if (totalGenes >= 70) rarity = 4;
+  else if (totalGenes >= 60) rarity = 3;
+  else if (totalGenes >= 50) rarity = 2;
+  return { level, totalGenes, isAwakened, isMaxAwakened, rarity, tier: Number(monster.tier) || 0 };
+}
+
+function createOwnedCreatureTile(monster, status, selected, onClick) {
+  const { level, isAwakened, isMaxAwakened, rarity, tier } = status;
+  const isShiny = monster.shiny === true;
+
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'focus-style-visible relative';
+  button.style.cssText = 'width: 34px; height: 34px; padding: 0; border: none; background: none; cursor: pointer;'
+    + (selected ? ' outline: 2px solid #ffe066; outline-offset: 1px;' : '');
+
+  const slot = document.createElement('div');
+  slot.className = 'container-slot surface-darker relative flex items-center justify-center overflow-hidden pointer-events-none';
+  button.appendChild(slot);
+
+  const rarityBg = document.createElement('div');
+  rarityBg.setAttribute('role', 'none');
+  if (isMaxAwakened && isShiny) rarityBg.className = 'absolute inset-0 z-1 opacity-80 rarity-shiny';
+  else if (isMaxAwakened) rarityBg.className = 'absolute inset-0 z-1 opacity-80 rarity-hundo';
+  else if (isAwakened) rarityBg.className = 'absolute inset-0 z-1 opacity-80 rarity-awaken';
+  else {
+    rarityBg.className = 'has-rarity absolute inset-0 z-1 opacity-80';
+    rarityBg.setAttribute('data-rarity', String(rarity));
+  }
+  slot.appendChild(rarityBg);
+
+  const starSrc = isMaxAwakened ? (isShiny ? CYCLOPEDIA_ASSETS.starTierShiny : CYCLOPEDIA_ASSETS.starTierHundo)
+    : isAwakened ? CYCLOPEDIA_ASSETS.starTierAwaken
+    : tier > 0 ? `/assets/icons/star-tier-${Math.min(OWNED_STAR_TIER_CAP, tier)}.png` : null;
+  if (starSrc) {
+    const star = document.createElement('img');
+    star.alt = 'star tier';
+    star.src = starSrc;
+    star.className = 'tier-stars pixelated absolute right-0 top-0 z-2 opacity-75';
+    star.style.cssText = 'filter: drop-shadow(black 0px 0px 1px);';
+    slot.appendChild(star);
+  }
+
+  const portrait = document.createElement('img');
+  portrait.className = 'pixelated ml-auto';
+  portrait.alt = 'creature';
+  portrait.width = 32;
+  portrait.height = 32;
+  portrait.src = `/assets/portraits/${monster.gameId}${isShiny ? '-shiny' : ''}.png`;
+  portrait.onerror = () => { portrait.style.visibility = 'hidden'; };
+  slot.appendChild(portrait);
+
+  const levelEl = document.createElement('span');
+  levelEl.textContent = String(level);
+  levelEl.className = 'pixel-font-16 absolute bottom-0 left-0 z-3 text-whiteExp';
+  levelEl.style.cssText = 'line-height: 0.9; padding-left: 2px; text-shadow: 1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000;';
+  slot.appendChild(levelEl);
+
+  if (isShiny) {
+    const shiny = document.createElement('img');
+    shiny.src = CYCLOPEDIA_ASSETS.shinyStar;
+    shiny.alt = 'shiny';
+    shiny.style.cssText = 'position: absolute; bottom: 1px; right: 0; z-index: 3; width: 12px; height: 12px; image-rendering: pixelated;';
+    slot.appendChild(shiny);
+  }
+
+  button.addEventListener('click', onClick);
+  button.addEventListener('mouseenter', () => showOwnedGenesTooltip(button, monster));
+  button.addEventListener('mouseleave', hideOwnedGenesTooltip);
+  return button;
+}
+
+// Hover tooltip with just the genes (same look as the Mod Settings hover tooltip): one bar per gene, out of 20.
+const OWNED_GENE_ROWS = [
+  ['Hitpoints', 'hp'], ['Attack', 'ad'], ['Ability Power', 'ap'], ['Armor', 'armor'], ['Magic Resist', 'magicResist']
+];
+let ownedGenesTooltip = null;
+
+function hideOwnedGenesTooltip() {
+  ownedGenesTooltip?.remove();
+  ownedGenesTooltip = null;
+}
+
+function createOwnedGeneRow(label, value) {
+  const row = document.createElement('div');
+  row.className = 'pixel-font-16 whitespace-nowrap text-whiteRegular';
+  const top = document.createElement('div');
+  top.className = 'flex justify-between';
+  const labelEl = document.createElement('span');
+  labelEl.textContent = label;
+  const valueEl = document.createElement('span');
+  valueEl.className = 'text-right text-whiteExp';
+  valueEl.style.width = '3ch';
+  valueEl.textContent = String(value);
+  top.append(labelEl, valueEl);
+  const bar = document.createElement('div');
+  bar.className = 'frame-pressed-1 relative h-1 w-full overflow-hidden border border-solid border-black bg-black';
+  const fill = document.createElement('div');
+  fill.className = 'h-full shrink-0';
+  fill.style.cssText = `width: ${Math.min(100, Math.max(0, value / OWNED_GENE_MAX * 100))}%; background: rgb(96, 192, 96);`;
+  bar.appendChild(fill);
+  row.append(top, bar);
+  return row;
+}
+
+function showOwnedGenesTooltip(tile, monster) {
+  hideOwnedGenesTooltip();
+  const tooltip = document.createElement('div');
+  tooltip.style.cssText = 'position: fixed; z-index: 10000; pointer-events: none;';
+  const content = document.createElement('div');
+  content.className = 'frame-pressed-1 surface-dark flex shrink-0 flex-col gap-1.5 px-2 py-1 pb-2';
+  OWNED_GENE_ROWS.forEach(([label, key]) => content.appendChild(createOwnedGeneRow(label, Number(monster[key]) || 0)));
+  tooltip.appendChild(content);
+  document.body.appendChild(tooltip);
+  ownedGenesTooltip = tooltip;
+
+  const rect = tile.getBoundingClientRect();
+  const size = tooltip.getBoundingClientRect();
+  let left = rect.right + 8;
+  if (left + size.width > window.innerWidth - 8) left = rect.left - size.width - 8;
+  const top = Math.max(8, Math.min(rect.top, window.innerHeight - size.height - 8));
+  tooltip.style.left = `${Math.max(8, left)}px`;
+  tooltip.style.top = `${top}px`;
+}
+
+/**
+ * Real stats of one owned copy: the species `baseStats` scaled by its level and genes (no equipment),
+ * in the shape renderMonsterStats reads. Returns null when the game's stat scaling or the species
+ * data is not available.
+ */
+function getOwnedCreatureBaseStats(monster, status) {
+  const utils = globalThis.state?.utils;
+  const speciesStats = utils?.getMonster?.(monster.gameId || monster.id)?.metadata?.baseStats;
+  if (typeof utils?.scaleStat !== 'function' || !speciesStats) return null;
+  const baseStats = { ...speciesStats };
+  OWNED_STAT_KEYS.forEach((key) => {
+    if (typeof speciesStats[key] !== 'number') return;
+    baseStats[key] = utils.scaleStat({ stat: speciesStats[key], level: status.level, geneValue: Number(monster[key]) || 0 });
+  });
+  return baseStats;
+}
+
+/**
+ * Owned-creature view for the creature detail's right column: a tile grid (highest level first).
+ * Clicking a tile marks it and calls `onSelect({ monster, status, baseStats })` (baseStats: that copy's
+ * real stats) so the first column can show it; clicking the marked tile again unmarks it (`onSelect(null)`).
+ * Nothing is marked at first.
+ */
+function renderOwnedCreatureList(ownedMonsters, creatureCanAwaken, onSelect) {
+  const root = document.createElement('div');
+  const entries = ownedMonsters
+    .map((monster) => ({ monster, status: getOwnedMonsterStatus(monster, creatureCanAwaken) }))
+    .sort((a, b) => (b.status.level - a.status.level)
+      || (b.status.tier - a.status.tier)
+      || (b.status.totalGenes - a.status.totalGenes));
+  let selectedId = null;
+
+  const render = () => {
+    hideOwnedGenesTooltip();
+    root.textContent = '';
+    const grid = document.createElement('div');
+    grid.style.cssText = 'display: grid; grid-template-columns: repeat(auto-fill, 34px); gap: 4px; justify-content: center; margin: 8px 8px 0;';
+    entries.forEach((entry) => {
+      grid.appendChild(createOwnedCreatureTile(entry.monster, entry.status, entry.monster.id === selectedId, () => {
+        selectedId = selectedId === entry.monster.id ? null : entry.monster.id;
+        render();
+        onSelect?.(selectedId == null ? null : {
+          monster: entry.monster,
+          status: entry.status,
+          baseStats: getOwnedCreatureBaseStats(entry.monster, entry.status)
+        });
+      }));
+    });
+    root.appendChild(grid);
+  };
+  render();
+  return root;
+}
+
 function renderMonsterStats(monsterData) {
   try {
     if (!monsterData || typeof monsterData !== 'object') {
@@ -7693,7 +8109,7 @@ function renderMonsterStats(monsterData) {
       flex: '1 1 0',
       textAlign: 'left',
       margin: '2px',
-      width: '160px',
+      width: 'auto',
       height: '160px',
       alignSelf: 'center',
       padding: '4px',
@@ -7717,6 +8133,11 @@ function renderMonsterStats(monsterData) {
       return statsDiv;
     }
 
+    // Value column width: the longest value in this panel plus a character of slack (the pixel font's
+    // digits are wider than 1ch), so big numbers like 3960 are not clipped and every row still aligns.
+    const valueColumnChars = Math.max(3, ...GAME_DATA.MONSTER_STATS_CONFIG
+      .map((s) => String(baseStats[s.key] ?? 0).length)) + 1;
+
     GAME_DATA.MONSTER_STATS_CONFIG.forEach(stat => {
       try {
         if (!stat || typeof stat !== 'object' || !stat.key || !stat.label || !stat.icon) {
@@ -7732,10 +8153,12 @@ function renderMonsterStats(monsterData) {
         const createStatRow = () => {
           const statRow = document.createElement('div');
           statRow.setAttribute('data-transparent', 'false');
-          statRow.className = 'pixel-font-16 whitespace-nowrap text-whiteRegular data-[transparent=\'true\']:opacity-25';
+          statRow.className = 'pixel-font-14 whitespace-nowrap text-whiteRegular data-[transparent=\'true\']:opacity-25';
+          const derivedTitle = getDerivedStatTitle(stat.key, value, baseStats);
+          if (derivedTitle) statRow.title = derivedTitle;
 
           const topRow = document.createElement('div');
-          topRow.className = 'flex justify-between items-center';
+          topRow.className = 'items-center';
 
           const left = document.createElement('span');
           left.className = 'flex items-center';
@@ -7764,17 +8187,25 @@ function renderMonsterStats(monsterData) {
           const valueSpan = document.createElement('span');
           valueSpan.textContent = value;
           valueSpan.className = 'text-right text-whiteExp';
-          Object.assign(valueSpan.style, {
-            textAlign: 'right',
-            minWidth: '3.5ch',
-            maxWidth: '5ch',
-            marginLeft: '6px',
-            overflow: 'hidden',
-            whiteSpace: 'nowrap',
-            display: 'inline-block'
-          });
+          valueSpan.style.cssText = 'text-align: right; overflow: hidden; white-space: nowrap;';
 
+          // Middle column (before the value): damage cut for Armor / Magic Resist (same formula as the hover text), DPS for
+          // Attack Damage. Every row has the cell, so names, values and extras line up in columns.
+          const extraSpan = document.createElement('span');
+          extraSpan.style.cssText = 'color: #aaa; overflow: hidden; white-space: nowrap; text-align: right; padding-right: 6px;';
+          if ((stat.key === 'armor' || stat.key === 'magicResist') && Number.isFinite(value)) {
+            const cut = Math.max(value, 0) / (100 + Math.max(value, 0)) * 100;
+            extraSpan.textContent = `(-${formatCombatNumber(cut, 1)}%)`;
+          } else if (stat.key === 'ad' && Number.isFinite(value)) {
+            extraSpan.textContent = `(${formatCombatNumber(getBaseDps(value, baseStats), 1)} DPS)`;
+          }
+
+          topRow.style.display = 'grid';
+          topRow.style.gridTemplateColumns = `minmax(0, 1fr) 10ch ${valueColumnChars}ch`;
+          left.style.minWidth = '0';
+          left.style.overflow = 'hidden';
           topRow.appendChild(left);
+          topRow.appendChild(extraSpan);
           topRow.appendChild(valueSpan);
 
           const barRow = document.createElement('div');
@@ -7855,7 +8286,11 @@ function renderMonsterStats(monsterData) {
   }
 }
 
-function renderCreatureTemplate(name, showShinyPortraits = false, showOldSprites = false) {
+/**
+ * `hooks.onShinyChange(on)`: called when marking / unmarking an owned copy so the Bestiary tab can
+ * switch its shiny button to the marked copy's shiny state (off when nothing is marked).
+ */
+function renderCreatureTemplate(name, showShinyPortraits = false, showOldSprites = false, hooks = {}) {
   let monstersArr = null;
   if (
     globalThis.state &&
@@ -7928,8 +8363,8 @@ function renderCreatureTemplate(name, showShinyPortraits = false, showOldSprites
 
   const col1 = document.createElement('div');
   Object.assign(col1.style, creatureTemplateColStyle, {
-    flex: `0 0 ${LAYOUT_CONSTANTS.CREATURE_DETAIL_COL1_MIN_WIDTH}`,
-    width: LAYOUT_CONSTANTS.COLUMN_WIDTH,
+    flex: `0 0 ${LAYOUT_CONSTANTS.CREATURE_DETAIL_COL_PERCENTS[0]}%`,
+    width: `${LAYOUT_CONSTANTS.CREATURE_DETAIL_COL_PERCENTS[0]}%`,
     minWidth: LAYOUT_CONSTANTS.CREATURE_DETAIL_COL1_MIN_WIDTH,
     maxWidth: 'none'
   });
@@ -7961,6 +8396,7 @@ function renderCreatureTemplate(name, showShinyPortraits = false, showOldSprites
   }
   let monsterId = null;
   let monster = null;
+  let col1PortraitWrap = null; // the large sprite; swapped to the marked owned copy's look
 
   const displayQuery = cyclopediaResolveCreatureQuery(name);
   const lookupName = (displayQuery.baseSpecies || name).toLowerCase();
@@ -8066,6 +8502,7 @@ function renderCreatureTemplate(name, showShinyPortraits = false, showOldSprites
       
       
       col1Picture.appendChild(portraitWrap);
+      col1PortraitWrap = portraitWrap;
       const allDivs = Array.from(monsterSprite.querySelectorAll('div'));
       let firstFixedDiv = null;
       allDivs.forEach((div, idx) => {
@@ -8193,6 +8630,10 @@ function renderCreatureTemplate(name, showShinyPortraits = false, showOldSprites
   statsDiv.style.padding = '0';
   statsDiv.style.margin = '0';
   statsDiv.style.alignSelf = 'unset';
+  // Holds the stat / combat panel: grows with the column, between the old fixed width and a cap.
+  statsDiv.style.flex = '1 1 0';
+  statsDiv.style.minWidth = '160px';
+  statsDiv.style.maxWidth = '240px';
   let currentStatsMonsterData = null;
 
   const getDisplayMonsterDataForStats = (monsterData, useAwakenedScaling = false) => {
@@ -8202,7 +8643,10 @@ function renderCreatureTemplate(name, showShinyPortraits = false, showOldSprites
 
     // Check if this creature has hardcoded stats (for unobtainable creatures with different map stats)
     const creatureNameLower = monsterData?.metadata?.name?.toLowerCase();
-    const hasHardcodedStats = !!(creatureNameLower && HARDCODED_MONSTER_STATS[creatureNameLower] && monsterData?.metadata?.baseStats);
+    const mapStats = creatureNameLower && monsterData?.metadata?.baseStats
+      ? creatureDbRef.getMapMonsterBaseStats?.(creatureNameLower, monsterData.metadata.baseStats)
+      : null;
+    const hasHardcodedStats = !!mapStats;
     if (hasHardcodedStats) {
       // Clone only the baseStats object using spread to avoid mutating internal game state
       const clonedBaseStats = { ...monsterData.metadata.baseStats };
@@ -8211,7 +8655,7 @@ function renderCreatureTemplate(name, showShinyPortraits = false, showOldSprites
       const originalSpeed = clonedBaseStats?.speed;
 
       // Replace baseStats with hardcoded values
-      Object.assign(clonedBaseStats, HARDCODED_MONSTER_STATS[creatureNameLower].baseStats);
+      Object.assign(clonedBaseStats, mapStats);
 
       // Restore speed from original data
       if (originalSpeed !== undefined) {
@@ -8267,12 +8711,92 @@ function renderCreatureTemplate(name, showShinyPortraits = false, showOldSprites
     };
   };
 
+  // Title-bar toggle (same look as the shiny / old sprites buttons) that swaps the stat bars for the
+  // combat details and back. Only added to the title when the creature has combat data.
+  const combatToggleButton = document.createElement('button');
+  combatToggleButton.type = 'button';
+  applyCyclopediaWidgetTitleChrome(combatToggleButton, CYCLOPEDIA_WIDGET_TITLE_TOGGLE_STYLE);
+  const combatToggleIcon = document.createElement('img');
+  combatToggleIcon.src = '/assets/icons/attackdamage.png';
+  combatToggleIcon.alt = 'combat details';
+  combatToggleIcon.className = 'pixelated';
+  combatToggleIcon.style.cssText = 'width: 10px; height: 10px;';
+  combatToggleButton.appendChild(combatToggleIcon);
+  const updateCombatToggleButton = () => {
+    const showCombat = cyclopediaState.creatureDetailShowCombat;
+    combatToggleButton.title = showCombat ? 'Combat Details: On' : 'Combat Details: Off';
+    setCyclopediaToggleActive(combatToggleButton, showCombat);
+  };
+  combatToggleButton.addEventListener('click', (e) => {
+    e.stopPropagation();
+    cyclopediaState.creatureDetailShowCombat = !cyclopediaState.creatureDetailShowCombat;
+    rerenderCreatureStats(cyclopediaState.creatureDetailShowAwakenedAbility);
+  });
+
+  // Real stats of the owned copy marked in the right column, or null for the standard creature.
+  let selectedOwnedBaseStats = null;
+  let applyAwakenedMode = null; // set below when the creature can awaken
+
+  // Gives the large sprite the marked owned copy's look (shiny state and rarity border); null restores
+  // the standard look. Item-look creatures have no such variants.
+  let col1PortraitDefaultLook = null;
+  const setCol1PortraitOwnedLook = (selected) => {
+    const sprite = col1PortraitWrap?.firstElementChild;
+    const border = sprite?.querySelector('.has-rarity, .rarity-awaken, .rarity-shiny, .rarity-hundo');
+    const img = sprite?.querySelector('img.actor.spritesheet');
+    if (!sprite || !img || monster?.metadata?.lookType === 'item') return;
+    if (!col1PortraitDefaultLook) {
+      col1PortraitDefaultLook = {
+        borderClass: border?.className ?? '',
+        rarity: border?.getAttribute('data-rarity') ?? null
+      };
+    }
+    const look = col1PortraitDefaultLook;
+    const shiny = selected ? selected.monster.shiny === true : displayQuery.forceShiny === true;
+    if (shiny) img.setAttribute('data-shiny', 'true');
+    else img.removeAttribute('data-shiny');
+    col1PortraitWrap.querySelectorAll('img[alt="shiny"]').forEach((icon) => icon.remove());
+    if (shiny) {
+      const shinyIcon = document.createElement('img');
+      shinyIcon.src = CYCLOPEDIA_ASSETS.shinyStar;
+      shinyIcon.alt = 'shiny';
+      shinyIcon.title = selected || !displayQuery.forceShiny ? 'Shiny' : 'Albino (shiny Mystic Gazer)';
+      shinyIcon.style.cssText = 'position: absolute; top: 4px; left: 4px; width: 10px; height: 10px; z-index: 10;';
+      sprite.appendChild(shinyIcon);
+    }
+    if (!border) return;
+    if (!selected) {
+      border.className = look.borderClass;
+      if (look.rarity != null) border.setAttribute('data-rarity', look.rarity);
+      else border.removeAttribute('data-rarity');
+      return;
+    }
+    const { isMaxAwakened, isAwakened, rarity } = selected.status;
+    if (isMaxAwakened && selected.monster.shiny === true) border.className = 'absolute inset-0 z-2 opacity-80 rarity-shiny';
+    else if (isMaxAwakened) border.className = 'absolute inset-0 z-1 opacity-80 rarity-hundo';
+    else if (isAwakened) border.className = 'absolute inset-0 z-2 opacity-80 rarity-awaken';
+    else {
+      border.className = 'has-rarity absolute inset-0 z-2';
+      border.setAttribute('data-rarity', String(rarity));
+      return;
+    }
+    border.removeAttribute('data-rarity');
+  };
+
   const rerenderCreatureStats = (showAwakenedMode = false) => {
     if (!currentStatsMonsterData) return;
     const displayMonsterData = getDisplayMonsterDataForStats(currentStatsMonsterData, showAwakenedMode);
-    const actualStatsDiv = renderMonsterStats(displayMonsterData);
+    const hasCombat = hasCreatureCombatData(monsterId);
+    if (!hasCombat) cyclopediaState.creatureDetailShowCombat = false;
+    const combatPanel = cyclopediaState.creatureDetailShowCombat
+      ? renderCreatureCombatDetails(monsterId, currentStatsMonsterData.metadata?.baseStats,
+        () => rerenderCreatureStats(showAwakenedMode))
+      : null;
     statsDiv.innerHTML = '';
-    statsDiv.appendChild(actualStatsDiv);
+    statsDiv.appendChild(combatPanel ?? renderMonsterStats(
+      selectedOwnedBaseStats ? { metadata: { baseStats: selectedOwnedBaseStats } } : displayMonsterData
+    ));
+    updateCombatToggleButton();
   };
 
   if (monsterId) {
@@ -8317,7 +8841,7 @@ function renderCreatureTemplate(name, showShinyPortraits = false, showOldSprites
     alignItems: 'center',
     justifyContent: 'center',
     minHeight: '16px',
-    height: '100%',
+    height: 'auto',
     alignSelf: 'stretch'
   });
   abilityTitleContainer.appendChild(abilityTitle);
@@ -8325,10 +8849,7 @@ function renderCreatureTemplate(name, showShinyPortraits = false, showOldSprites
   let awakenIconButton = null;
   if (creatureCanAwaken) {
   awakenIconButton = document.createElement('button');
-  applyCyclopediaWidgetTitleChrome(awakenIconButton, {
-    ...CYCLOPEDIA_WIDGET_TITLE_TOGGLE_STYLE,
-    height: '23px'
-  });
+  applyCyclopediaWidgetTitleChrome(awakenIconButton, CYCLOPEDIA_WIDGET_TITLE_TOGGLE_STYLE);
   awakenIconButton.title = 'Normal Mode';
   
   const awakenIconImg = document.createElement('img');
@@ -8339,27 +8860,17 @@ function renderCreatureTemplate(name, showShinyPortraits = false, showOldSprites
 
   if (cyclopediaState.creatureDetailShowAwakenedAbility) {
     awakenIconButton.title = 'Awakened Mode';
-    awakenIconButton.style.background = 'url("https://bestiaryarena.com/_next/static/media/background-green.be515334.png") repeat';
-    awakenIconButton.style.border = '1px solid #4CAF50';
+    setCyclopediaToggleActive(awakenIconButton, true);
   }
   
   // Add click handler to toggle between normal and awakened ability
-  awakenIconButton.addEventListener('click', (e) => {
-    e.stopPropagation();
-    cyclopediaState.creatureDetailShowAwakenedAbility = !cyclopediaState.creatureDetailShowAwakenedAbility;
-    const showAwakenedAbility = cyclopediaState.creatureDetailShowAwakenedAbility;
+  // Sets the awakened-ability mode (button look, stat preview and ability text); also used when an owned copy is marked.
+  applyAwakenedMode = (showAwakenedAbility) => {
+    cyclopediaState.creatureDetailShowAwakenedAbility = showAwakenedAbility;
     awakenIconButton.title = showAwakenedAbility ? 'Awakened Mode' : 'Normal Mode';
     rerenderCreatureStats(showAwakenedAbility);
     
-    // Update background and border color to show toggle state
-    if (showAwakenedAbility) {
-      awakenIconButton.style.background = 'url("https://bestiaryarena.com/_next/static/media/background-green.be515334.png") repeat';
-      awakenIconButton.style.border = '1px solid #4CAF50';
-    } else {
-      // Reset to default widget-top styling
-      awakenIconButton.style.background = '';
-      awakenIconButton.style.border = '';
-    }
+    setCyclopediaToggleActive(awakenIconButton, showAwakenedAbility);
     
     try {
       const abilityMonsterData = monsterId ? safeGetMonsterData(monsterId) : null;
@@ -8404,16 +8915,7 @@ function renderCreatureTemplate(name, showShinyPortraits = false, showOldSprites
             currentAbilityContainer.appendChild(rootElement);
             currentTooltipComponent = tooltipComponent;
             
-            const removeLoreBlocks = () => {
-              const loreBlocks = rootElement.querySelectorAll('blockquote');
-              loreBlocks.forEach((loreBlock) => {
-                const previous = loreBlock.previousElementSibling;
-                if (previous && previous.classList && previous.classList.contains('separator')) {
-                  previous.remove();
-                }
-                loreBlock.remove();
-              });
-            };
+            const removeLoreBlocks = () => removeLoreBlocksKeepingOnlyContent(rootElement);
             // Some tooltip content renders asynchronously; run cleanup more than once.
             removeLoreBlocks();
             requestAnimationFrame(removeLoreBlocks);
@@ -8439,6 +8941,10 @@ function renderCreatureTemplate(name, showShinyPortraits = false, showOldSprites
     } catch (error) {
       console.error('[Cyclopedia] Error toggling awakened ability:', error);
     }
+  };
+  awakenIconButton.addEventListener('click', (e) => {
+    e.stopPropagation();
+    applyAwakenedMode(!cyclopediaState.creatureDetailShowAwakenedAbility);
   });
   abilityTitleContainer.appendChild(awakenIconButton);
   }
@@ -8508,16 +9014,7 @@ function renderCreatureTemplate(name, showShinyPortraits = false, showOldSprites
           tooltipComponent.mount();
           abilityContainer.appendChild(rootElement);
           
-          const removeLoreBlocks = () => {
-            const loreBlocks = rootElement.querySelectorAll('blockquote');
-            loreBlocks.forEach((loreBlock) => {
-              const previous = loreBlock.previousElementSibling;
-              if (previous && previous.classList && previous.classList.contains('separator')) {
-                previous.remove();
-              }
-              loreBlock.remove();
-            });
-          };
+          const removeLoreBlocks = () => removeLoreBlocksKeepingOnlyContent(rootElement);
           // Some tooltip content renders asynchronously; run cleanup more than once.
           removeLoreBlocks();
           requestAnimationFrame(removeLoreBlocks);
@@ -8553,14 +9050,24 @@ function renderCreatureTemplate(name, showShinyPortraits = false, showOldSprites
   abilityList.appendChild(abilityContainer);
   abilityScrollContainer.appendChild(abilityList);
   abilitySection.appendChild(abilityScrollContainer);
-  
+
   if (tooltipComponent) {
     abilitySection._tooltipComponent = tooltipComponent;
   }
 
   col1FlexRows.appendChild(col1TopArea);
   col1FlexRows.appendChild(abilitySection);
-  col1.appendChild(col1Title);
+  if (monsterId && hasCreatureCombatData(monsterId)) {
+    // Name title + narrow toggle, like the Creatures title with its shiny / old sprites buttons.
+    const col1TitleRow = document.createElement('div');
+    col1TitleRow.style.cssText = 'display: flex; align-items: center; justify-content: space-between; '
+      + 'width: 100%; padding: 0; gap: 1px; margin-bottom: 5px;';
+    Object.assign(col1Title.style, { ...CYCLOPEDIA_WIDGET_TITLE_SPLIT_STYLE, marginBottom: '0', display: 'block' });
+    col1TitleRow.append(col1Title, combatToggleButton);
+    col1.appendChild(col1TitleRow);
+  } else {
+    col1.appendChild(col1Title);
+  }
   
   // Add creature roles if available - positioned directly under the title
   const roles = getCreatureRoles(name);
@@ -8568,13 +9075,15 @@ function renderCreatureTemplate(name, showShinyPortraits = false, showOldSprites
     const rolesContainer = document.createElement('div');
     rolesContainer.style.cssText = `
       display: flex;
-      flex-wrap: wrap;
+      flex-wrap: nowrap;
+      overflow: hidden;
       gap: 4px;
       justify-content: center;
       margin: 8px 0;
       padding: 0 8px;
     `;
     
+    const roleBadges = [];
     roles.forEach(role => {
       const roleBadge = document.createElement('span');
       roleBadge.textContent = role;
@@ -8590,16 +9099,46 @@ function renderCreatureTemplate(name, showShinyPortraits = false, showOldSprites
         margin: 0;
         border-radius: 0;
         display: inline-block;
+        white-space: nowrap;
+        flex: 0 0 auto;
       `;
       rolesContainer.appendChild(roleBadge);
+      roleBadges.push(roleBadge);
     });
-    
+
+    // One row only: badges that do not fit collapse into a "+N" badge whose hover lists them.
+    const plusBadge = roleBadges[0].cloneNode(false);
+    plusBadge.style.cursor = 'default';
+    const fitRoleBadges = () => {
+      if (!rolesContainer.clientWidth) return;
+      plusBadge.remove();
+      roleBadges.forEach((badge) => { badge.style.display = 'inline-block'; });
+      if (rolesContainer.scrollWidth <= rolesContainer.clientWidth) return;
+      rolesContainer.appendChild(plusBadge);
+      for (let shown = roleBadges.length - 1; shown >= 0; shown--) {
+        roleBadges.forEach((badge, i) => { badge.style.display = i < shown ? 'inline-block' : 'none'; });
+        plusBadge.textContent = `+${roleBadges.length - shown}`;
+        plusBadge.title = roles.slice(shown).join(', ');
+        if (rolesContainer.scrollWidth <= rolesContainer.clientWidth) return;
+      }
+    };
+
     col1.appendChild(rolesContainer);
+    requestAnimationFrame(fitRoleBadges);
+    if (typeof ResizeObserver !== 'undefined') {
+      const roleObserver = new ResizeObserver(fitRoleBadges);
+      roleObserver.observe(rolesContainer);
+      registerModalObserver(roleObserver, 'cyclopediaRoleBadges');
+    }
   }
   
   col1.appendChild(col1FlexRows);
   const col2 = document.createElement('div');
-  Object.assign(col2.style, creatureTemplateColStyle);
+  Object.assign(col2.style, creatureTemplateColStyle, {
+    flex: `0 0 ${LAYOUT_CONSTANTS.CREATURE_DETAIL_COL_PERCENTS[1]}%`,
+    width: `${LAYOUT_CONSTANTS.CREATURE_DETAIL_COL_PERCENTS[1]}%`,
+    minWidth: `${LAYOUT_CONSTANTS.CREATURE_DETAIL_FLEX_COL_MIN}px`
+  });
   col2.style.padding = '0';
   col2.style.margin = '0';
   col2.style.marginLeft = '0';
@@ -8619,36 +9158,6 @@ function renderCreatureTemplate(name, showShinyPortraits = false, showOldSprites
   const dropsTitle = createCyclopediaWidgetTitle('Location', { width: '100%' });
   const dropsTitleP = dropsTitle;
   const isGazerCreatureDetail = isCyclopediaGazerCreatureName(name);
-  if (!isGazerCreatureDetail && !isUnobtainable) {
-    const usageSection = document.createElement('div');
-    usageSection.style.display = 'flex';
-    usageSection.style.flexDirection = 'column';
-    usageSection.style.flex = '0 0 auto';
-
-    const usageTitle = createCyclopediaWidgetTitle('Player usage', { width: '100%' });
-    const usageTitleP = usageTitle;
-
-    const usageContent = document.createElement('div');
-    usageContent.className = FONT_CONSTANTS.SIZES.SMALL;
-    usageContent.style.cssText = 'padding: 6px 8px 8px 8px; color:#e6d7b0; display:flex; flex-direction:column; gap:2px; line-height:1.15;';
-    const usageStats = getBoardConfigUsageStatsForCreature(monsterId);
-    const usedRow = document.createElement('div');
-    usedRow.textContent = `Used ${usageStats.count} times`;
-    const pctRow = document.createElement('div');
-    pctRow.textContent = `Usage percentage: ${usageStats.percentage}%`;
-    usageContent.appendChild(usedRow);
-    usageContent.appendChild(pctRow);
-    usageSection.appendChild(usageTitle);
-    usageSection.appendChild(usageContent);
-
-    const usageSeparator = document.createElement('div');
-    usageSeparator.className = 'separator my-2.5';
-    usageSeparator.setAttribute('role', 'none');
-    usageSeparator.style.margin = '2px 0';
-
-    dropsSection.appendChild(usageSection);
-    dropsSection.appendChild(usageSeparator);
-  }
   dropsSection.appendChild(dropsTitle);
   const dropsList = document.createElement('div');
   dropsList.style.padding = '8px 10px 8px 10px';
@@ -8747,8 +9256,6 @@ function renderCreatureTemplate(name, showShinyPortraits = false, showOldSprites
             const icon = document.createElement('img');
             icon.src = CYCLOPEDIA_ASSETS.stamina;
             icon.alt = 'Stamina';
-            icon.style.width = '18px';
-            icon.style.height = '18px';
             icon.style.marginLeft = '2px';
             icon.style.display = 'inline-block';
             const costSpan = document.createElement('span');
@@ -8859,7 +9366,11 @@ function renderCreatureTemplate(name, showShinyPortraits = false, showOldSprites
   col2.appendChild(dropsSection);
 
   const col3 = document.createElement('div');
-  Object.assign(col3.style, creatureTemplateColStyle);
+  Object.assign(col3.style, creatureTemplateColStyle, {
+    flex: `0 0 ${LAYOUT_CONSTANTS.CREATURE_DETAIL_COL_PERCENTS[2]}%`,
+    width: `${LAYOUT_CONSTANTS.CREATURE_DETAIL_COL_PERCENTS[2]}%`,
+    minWidth: `${LAYOUT_CONSTANTS.CREATURE_DETAIL_OWNED_COL_MIN_WIDTH}px`
+  });
   col3.style.maxHeight = '100%';
   col3.style.overflowY = 'hidden';
 
@@ -8922,17 +9433,13 @@ function renderCreatureTemplate(name, showShinyPortraits = false, showOldSprites
   } catch (e) {}
   const ownedName = name || '';
   const ownedCount = ownedMonsters.length;
-  let pluralName = ownedName;
-  if (ownedCount > 1 && ownedName) {
-    pluralName = ownedName + 's';
-  }
 
   const col3Title = createCyclopediaWidgetTitle('', { width: '100%' });
   const col3TitleP = col3Title;
   if (isUnobtainable) {
     col3Title.textContent = ownedName;
   } else {
-    col3Title.textContent = `Owned ${pluralName}${pluralName ? ` (${ownedCount})` : ''}`;
+    col3Title.textContent = `Owned (${ownedCount})`;
   }
 
   const col3Content = document.createElement('div');
@@ -8948,196 +9455,13 @@ function renderCreatureTemplate(name, showShinyPortraits = false, showOldSprites
   col3Content.style.scrollbarColor = '#444 #222';
   col3Content.style.marginTop = '0';
   if (ownedMonsters.length > 0) {
-    ownedMonsters.sort((a, b) => {
-      const levelA = getLevelFromExp(a.exp);
-      const levelB = getLevelFromExp(b.exp);
-      if (levelB !== levelA) return levelB - levelA;
-
-      const tierA = a.tier || 1;
-      const tierB = b.tier || 1;
-      if (tierB !== tierA) return tierB - tierA;
-
-      const statSumA = (a.hp || 0) + (a.ad || 0) + (a.ap || 0) + (a.armor || 0) + (a.magicResist || 0);
-      const statSumB = (b.hp || 0) + (b.ad || 0) + (b.ap || 0) + (b.armor || 0) + (b.magicResist || 0);
-
-      let rarityA = 1;
-      let rarityB = 1;
-      if (statSumA >= 80) rarityA = 5;
-      else if (statSumA >= 70) rarityA = 4;
-      else if (statSumA >= 60) rarityA = 3;
-      else if (statSumA >= 50) rarityA = 2;
-      if (statSumB >= 80) rarityB = 5;
-      else if (statSumB >= 70) rarityB = 4;
-      else if (statSumB >= 60) rarityB = 3;
-      else if (statSumB >= 50) rarityB = 2;
-
-      return rarityB - rarityA;
-    });
-    
-    // Use DocumentFragment for better performance
-    const fragment = document.createDocumentFragment();
-    
-    ownedMonsters.forEach(monster => {
-      const row = document.createElement('div');
-      row.style.display = 'flex';
-      row.style.alignItems = 'center';
-      row.style.justifyContent = 'flex-start';
-      row.style.gap = '20px';
-      row.style.height = '82px';
-      row.style.margin = '8px 20px 0 20px';
-
-      const level = getLevelFromExp(monster.exp);
-      const totalGenes = (Number(monster.hp) || 0) + (Number(monster.ad) || 0) + (Number(monster.ap) || 0) + (Number(monster.armor) || 0) + (Number(monster.magicResist) || 0);
-      const isAwakened = creatureCanAwaken && (
-        monster.awaken === true || monster.awakened === true || monster.isAwakened === true
-        || Number(monster.tier) >= 6 || Number(monster.starTier) >= 6 || level > 50
-      );
-      const isMaxAwakened = creatureCanAwaken && level >= 99 && totalGenes >= 100;
-
-      const portrait = api.ui.components.createFullMonster({
-        monsterId: monster.gameId || monster.id,
-        tier: 1,
-        starTier: monster.tier ?? 0,
-        level,
-        size: 'small'
-      });
-      portrait.style.margin = '0';
-
-      // createFullMonster always emits `.sprite.outfit`, but item-look creatures (e.g. Clot)
-      // only have `.item.id-N` sprite CSS, so the portrait renders as a broken image.
-      if (globalThis.state?.utils?.getMonster?.(monster.gameId || monster.id)?.metadata?.lookType === 'item') {
-        portrait.querySelectorAll('.sprite.outfit').forEach((sprite) => {
-          sprite.classList.replace('outfit', 'item');
-        });
-      }
-
-      // Set shiny attribute on the sprite if creature is shiny
-      if (monster.shiny === true) {
-        
-        const spriteImg = portrait.querySelector('img.actor.spritesheet');
-        if (spriteImg) {
-          spriteImg.setAttribute('data-shiny', 'true');
-        }
-        
-        // Add shiny star overlay
-        const shinyIcon = document.createElement('img');
-        shinyIcon.src = CYCLOPEDIA_ASSETS.shinyStar;
-        shinyIcon.alt = 'shiny';
-        shinyIcon.title = 'Shiny';
-        shinyIcon.style.position = 'absolute';
-        shinyIcon.style.top = '4px';
-        shinyIcon.style.left = '4px';
-        shinyIcon.style.width = '10px';
-        shinyIcon.style.height = '10px';
-        shinyIcon.style.pointerEvents = 'none';
-        shinyIcon.style.zIndex = '10';
-        portrait.appendChild(shinyIcon);
-      }
-
-      if (isMaxAwakened) {
-        // Replace existing awakened/star-tier icon instead of stacking another icon.
-        // Match getCreatureStatus: shiny max → shiny star; non-shiny max → hundo star.
-        const starTierIcon = portrait.querySelector('img[alt="star tier"]');
-        if (starTierIcon) {
-          if (monster.shiny === true) {
-            starTierIcon.src = CYCLOPEDIA_ASSETS.starTierShiny;
-            starTierIcon.alt = 'shiny-tier';
-            starTierIcon.title = 'Has level 99 max-genes shiny creature';
-          } else {
-            starTierIcon.src = CYCLOPEDIA_ASSETS.starTierHundo;
-            starTierIcon.alt = 'hundo-tier';
-            starTierIcon.title = 'Has level 99 max-genes creature';
-          }
-        }
-      }
-
-      const levelBadge = portrait.querySelector('span.pixel-font-16');
-      if (levelBadge) levelBadge.remove();
-      const statsGrid = document.createElement('div');
-      statsGrid.style.display = 'grid';
-      statsGrid.style.gridTemplateColumns = 'auto auto';
-      statsGrid.style.gridTemplateRows = 'repeat(3, auto)';
-      statsGrid.style.gap = '2px 12px';
-      statsGrid.style.alignSelf = 'center';
-      statsGrid.className = FONT_CONSTANTS.SIZES.SMALL;
-      statsGrid.style.color = COLOR_CONSTANTS.TEXT;
-      statsGrid.style.fontWeight = 'bold';
-      statsGrid.style.overflow = 'hidden';
-      statsGrid.style.textOverflow = 'ellipsis';
-      statsGrid.style.whiteSpace = 'nowrap';
-      statsGrid.style.maxWidth = '120px';
-      function statCell(icon, value, isLabel) {
-        const cell = document.createElement('div');
-        cell.style.display = 'flex';
-        cell.style.alignItems = 'center';
-        cell.style.gap = '4px';
-        cell.style.overflow = 'hidden';
-        cell.style.textOverflow = 'ellipsis';
-        cell.style.whiteSpace = 'nowrap';
-
-        if (isLabel) {
-          const label = document.createElement('span');
-          label.textContent = icon;
-          label.style.fontWeight = 'bold';
-          label.className = FONT_CONSTANTS.SIZES.TINY;
-          cell.appendChild(label);
-        } else {
-          const img = document.createElement('img');
-          img.src = icon;
-          img.style.width = '18px';
-          img.style.height = '18px';
-          img.style.display = 'inline-block';
-          img.style.verticalAlign = 'middle';
-          cell.appendChild(img);
-        }
-
-        const num = document.createElement('span');
-        num.textContent = value;
-        num.style.fontWeight = 'bold';
-        num.className = FONT_CONSTANTS.SIZES.TINY;
-        cell.appendChild(num);
-        return cell;
-      }
-      statsGrid.appendChild(statCell('Lv.', level, true));
-      statsGrid.appendChild(statCell('/assets/icons/abilitypower.png', monster.ap));
-      statsGrid.appendChild(statCell('/assets/icons/heal.png', monster.hp));
-      statsGrid.appendChild(statCell('/assets/icons/armor.png', monster.armor));
-      statsGrid.appendChild(statCell('/assets/icons/attackdamage.png', monster.ad));
-      statsGrid.appendChild(statCell('/assets/icons/magicresist.png', monster.magicResist));
-
-      row.appendChild(portrait);
-      row.appendChild(statsGrid);
-      fragment.appendChild(row);
-      const statSum = (monster.hp || 0) + (monster.ad || 0) + (monster.ap || 0) + (monster.armor || 0) + (monster.magicResist || 0);
-      let rarity = 1;
-      if (statSum >= 80) rarity = 5;
-      else if (statSum >= 70) rarity = 4;
-      else if (statSum >= 60) rarity = 3;
-      else if (statSum >= 50) rarity = 2;
-
-      // Use requestAnimationFrame for smoother DOM updates
-      requestAnimationFrame(() => {
-        const borderElem = portrait.querySelector('.has-rarity, .rarity-awaken, .rarity-shiny, .rarity-hundo');
-        if (borderElem) {
-          if (isMaxAwakened && monster.shiny === true) {
-            borderElem.className = 'absolute inset-0 z-2 opacity-80 rarity-shiny';
-            borderElem.removeAttribute('data-rarity');
-          } else if (isMaxAwakened) {
-            borderElem.className = 'absolute inset-0 z-1 opacity-80 rarity-hundo';
-            borderElem.removeAttribute('data-rarity');
-          } else if (isAwakened) {
-            borderElem.className = 'absolute inset-0 z-2 opacity-80 rarity-awaken';
-            borderElem.removeAttribute('data-rarity');
-          } else {
-            borderElem.className = 'has-rarity absolute inset-0 z-2';
-            borderElem.setAttribute('data-rarity', rarity);
-          }
-        }
-      });
-    });
-    
-    // Append all rows at once for better performance
-    col3Content.appendChild(fragment);
+    col3Content.appendChild(renderOwnedCreatureList(ownedMonsters, creatureCanAwaken, (selected) => {
+      selectedOwnedBaseStats = selected?.baseStats ?? null;
+      setCol1PortraitOwnedLook(selected);
+      hooks.onShinyChange?.(selected?.monster.shiny === true);
+      if (applyAwakenedMode) applyAwakenedMode(selected?.status.isAwakened === true);
+      else rerenderCreatureStats(cyclopediaState.creatureDetailShowAwakenedAbility);
+    }));
   } else {
     if (isUnobtainable) {
       col3Content.className = FONT_CONSTANTS.SIZES.BODY;
@@ -9151,7 +9475,7 @@ function renderCreatureTemplate(name, showShinyPortraits = false, showOldSprites
       // Placeholder is centered; a Special ability note is left-aligned from the top.
       const leftAligned = !!abilityNote;
       col3Content.style.textAlign = leftAligned ? 'left' : 'center';
-      col3Content.style.padding = '20px';
+      col3Content.style.padding = '6px 8px';
       col3Content.style.display = 'flex';
       col3Content.style.alignItems = leftAligned ? 'flex-start' : 'center';
       col3Content.style.justifyContent = leftAligned ? 'flex-start' : 'center';
@@ -9160,15 +9484,46 @@ function renderCreatureTemplate(name, showShinyPortraits = false, showOldSprites
       col3Content.textContent = 'You do not own this creature.';
       // Center the text both horizontally and vertically
       col3Content.style.textAlign = 'center';
-      col3Content.style.padding = '20px';
+      col3Content.style.padding = '6px 8px';
       col3Content.style.display = 'flex';
       col3Content.style.alignItems = 'center';
       col3Content.style.justifyContent = 'center';
       col3Content.style.height = '100%';
     }
   }
-  col3.appendChild(col3Title);
-  col3.appendChild(col3Content);
+  const ownedSection = document.createElement('div');
+  ownedSection.style.cssText = 'display: flex; flex-direction: column; flex: 1 1 0; min-height: 0; overflow: hidden;';
+  ownedSection.append(col3Title, col3Content);
+  col3.appendChild(ownedSection);
+
+  // Player usage sits under the owned creatures.
+  if (!isGazerCreatureDetail && !isUnobtainable) {
+    const usageSeparator = document.createElement('div');
+    usageSeparator.className = 'separator my-2.5';
+    usageSeparator.setAttribute('role', 'none');
+    usageSeparator.style.margin = '2px 0';
+
+    const usageSection = document.createElement('div');
+    usageSection.style.display = 'flex';
+    usageSection.style.flexDirection = 'column';
+    usageSection.style.flex = '1 1 0'; // same height as the owned creatures above
+    usageSection.style.minHeight = '0';
+    usageSection.style.overflowY = 'auto';
+
+    const usageTitle = createCyclopediaWidgetTitle('Player usage', { width: '100%' });
+    const usageContent = document.createElement('div');
+    usageContent.className = FONT_CONSTANTS.SIZES.SMALL;
+    usageContent.style.cssText = 'padding: 6px 8px 8px 8px; color:#e6d7b0; display:flex; flex-direction:column; gap:2px; line-height:1.15;';
+    const usageStats = getBoardConfigUsageStatsForCreature(monsterId);
+    const usedRow = document.createElement('div');
+    usedRow.textContent = `Used ${usageStats.count} times`;
+    const pctRow = document.createElement('div');
+    pctRow.textContent = `Usage percentage: ${usageStats.percentage}%`;
+    usageContent.append(usedRow, pctRow);
+    usageSection.append(usageTitle, usageContent);
+
+    col3.append(usageSeparator, usageSection);
+  }
   container.appendChild(col1);
   container.appendChild(col2);
   container.appendChild(col3);
@@ -9176,7 +9531,10 @@ function renderCreatureTemplate(name, showShinyPortraits = false, showOldSprites
   const creatureCol1Width = parseInt(LAYOUT_CONSTANTS.COLUMN_WIDTH, 10) || 250;
   setupCyclopediaStackableColumnsLayout({
     container,
-    stackThreshold: creatureCol1Width + (LAYOUT_CONSTANTS.CREATURE_DETAIL_FLEX_COL_MIN * 2),
+    stackThreshold: Math.max(
+      creatureCol1Width + LAYOUT_CONSTANTS.CREATURE_DETAIL_FLEX_COL_MIN + LAYOUT_CONSTANTS.CREATURE_DETAIL_OWNED_COL_MIN_WIDTH,
+      creatureCol1Width / (LAYOUT_CONSTANTS.CREATURE_DETAIL_COL_PERCENTS[0] / 100)
+    ),
     columns: [
       { el: col1 },
       { el: col2 },
@@ -15187,13 +15545,30 @@ function createBestiaryTabPage(selectedCreature, selectedEquipment, selectedInve
   // Shiny portrait toggle state
   let showShinyPortraits = false;
   let showOldSprites = false;
+  let shinyToggleButton = null;
+  let shinySetByMark = false;
+
+  const setShinyMode = (on) => {
+    showShinyPortraits = on;
+    if (shinyToggleButton) {
+      shinyToggleButton.title = on ? 'Shiny Mode' : 'Normal Mode';
+      setCyclopediaToggleActive(shinyToggleButton, on);
+    }
+  };
+  // A marked owned copy drives the shiny button without rebuilding the view (that would drop the mark).
+  // Old sprites have no shiny art, so that mode is left alone.
+  const onMarkedShinyChange = (on) => {
+    if (showOldSprites) return;
+    shinySetByMark = on;
+    setShinyMode(on);
+  };
 
   const { root: d, leftCol, rightCol } = createCyclopediaTabShell();
   
   function updateRightColInternal() {
     rightCol.innerHTML = '';
     if (selectedCreature) {
-      rightCol.appendChild(renderCreatureTemplate(selectedCreature, showShinyPortraits, showOldSprites));
+      rightCol.appendChild(renderCreatureTemplate(selectedCreature, showShinyPortraits, showOldSprites, { onShinyChange: onMarkedShinyChange }));
     } else {
       const msg = DOMUtils.createElement('div', FONT_CONSTANTS.SIZES.BODY, 'Select a creature from the left column to view.');
       Object.assign(msg.style, {
@@ -15208,7 +15583,11 @@ function createBestiaryTabPage(selectedCreature, selectedEquipment, selectedInve
     const box = createBox({
       title, items, type: 'creature',
       selectedCreature, selectedEquipment, selectedInventory,
-    setSelectedCreature: v => { selectedCreature = v; updateRightColInternal(); },
+    setSelectedCreature: v => {
+      selectedCreature = v;
+      if (shinySetByMark) { shinySetByMark = false; setShinyMode(false); } // the mark does not outlive its creature
+      updateRightColInternal();
+    },
       setSelectedEquipment, setSelectedInventory,
     updateRightCol: updateRightColInternal
   });
@@ -15229,13 +15608,14 @@ function createBestiaryTabPage(selectedCreature, selectedEquipment, selectedInve
           gap: 1px;
         `;
         
-        const creaturesTitle = createCyclopediaWidgetTitle('Creatures', { ...CYCLOPEDIA_WIDGET_TITLE_SPLIT_STYLE, width: '68%', flex: '0 0 68%' });
+        const creaturesTitle = createCyclopediaWidgetTitle('Creatures', { ...CYCLOPEDIA_WIDGET_TITLE_SPLIT_STYLE });
         titleContainer.appendChild(creaturesTitle);
 
         const oldSpritesButton = document.createElement('button');
         const toggleButton = document.createElement('button');
         applyCyclopediaWidgetTitleChrome(toggleButton, CYCLOPEDIA_WIDGET_TITLE_TOGGLE_STYLE);
         toggleButton.title = showShinyPortraits ? 'Shiny Mode' : 'Normal Mode';
+        shinyToggleButton = toggleButton;
         
         const buttonImg = document.createElement('img');
         buttonImg.src = CYCLOPEDIA_ASSETS.shinyStar;
@@ -15245,9 +15625,8 @@ function createBestiaryTabPage(selectedCreature, selectedEquipment, selectedInve
         
         toggleButton.addEventListener('click', (e) => {
           e.stopPropagation(); // Prevent title click event
-          showShinyPortraits = !showShinyPortraits;
-          toggleButton.title = showShinyPortraits ? 'Shiny Mode' : 'Normal Mode';
-          setCyclopediaToggleActive(toggleButton, showShinyPortraits);
+          shinySetByMark = false;
+          setShinyMode(!showShinyPortraits);
           // Shiny and Old Sprites are mutually exclusive (no shiny version of the old art).
           if (showShinyPortraits && showOldSprites) {
             showOldSprites = false;

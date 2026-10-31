@@ -13,10 +13,10 @@ Maintainer workflow
 1. Reload extension + game; confirm "[creature-lua-export.js] Loading..." in console.
 2. Run dumpCreatureWikiLua(); downloads creature-wiki-YYYY-MM-DD.lua — paste into the wiki page.
 3. Live stats (hitpoints, attack, ability_power, armor, magic_resist, movement_speed,
-   is_poisonous, roles) come from getMonster + creature-database HARDCODED_MAP_MONSTER_STATS.
+   is_poisonous, roles) come from getMonster + creature-database getMapMonsterBaseStats (map-only creatures).
    Obtainable creatures export maxed lvl 50 and lvl 99 via scaleStat as "50 (99)" when they differ.
    Gazers and unobtainable creatures use fixed base stats (no level scaling).
-4. Wiki-only fields (attack_speed, scales_ad, scales_ap, Picture_Creature, Albino Gazer stats)
+4. Wiki-only fields (attack_speed, scales_ad, scales_ap, Picture_Creature, Albino Gazer)
    live in WIKI_CREATURE_EXTRA_FIELDS below — update when wiki rules change.
 5. Section lists follow creature-database.js (ALL_CREATURES, EVENT_CREATURES,
    UNOBTAINABLE_CREATURES, gazer species + Albino Gazer).
@@ -24,7 +24,6 @@ Maintainer workflow
 Sync map (edit the matching source when rules change):
   EVENT_CREATURES              ↔  database/creature-database.js
   UNOBTAINABLE_CREATURES       ↔  database/creature-database.js (+ WIKI_EXTRA_UNOBTAINABLE)
-  HARDCODED_MAP_MONSTER_STATS  ↔  database/creature-database.js (Cyclopedia map bosses)
   WIKI_CREATURE_EXTRA_FIELDS   ↔  wiki creature stats module (attack_speed / scales / specials)
 ================================================================================
 */
@@ -60,12 +59,11 @@ const WIKI_EXTRA_UNOBTAINABLE = [
 ];
 
 /**
- * Wiki-only fields and stat overrides (attack_speed, scales, specials).
- * Live base stats still come from getMonster unless `stats` is set here.
+ * Wiki-only fields (attack_speed, scales, specials). Stats are never stored here: live base stats
+ * come from getMonster, and map-only creatures from creature-database getMapMonsterBaseStats.
  */
 const WIKI_CREATURE_EXTRA_FIELDS = {
   'Albino Gazer': {
-    stats: { hp: 84, ad: 0, ap: 0, armor: 0, magicResist: 17, speed: 105 },
     attack_speed: 0.5,
     scales_ad: 'auto',
     scales_ap: ''
@@ -118,7 +116,6 @@ const WIKI_CREATURE_EXTRA_FIELDS = {
   'Knight': { attack_speed: 0.15, scales_ad: 'auto', scales_ap: 'spell' },
   'Lavahole': { attack_speed: 0.5 },
   'Larva': {
-    stats: { hp: 324, ad: 0, ap: 0, armor: 15, magicResist: 11, speed: 45 },
     attack_speed: 0.5
   },
   'Magma Crystal': { attack_speed: 0.5 },
@@ -150,7 +147,6 @@ const WIKI_CREATURE_EXTRA_FIELDS = {
   'Rotworm': { attack_speed: 0.33, scales_ad: 'auto', scales_ap: 'spell' },
   'Scorpion': { attack_speed: 0.33, scales_ad: 'auto', scales_ap: 'spell' },
   'Scarab': {
-    stats: { hp: 2400, ad: 0, ap: 0, armor: 48, magicResist: 30, speed: 45 },
     attack_speed: 0.5
   },
   'Sheep': { attack_speed: 0.5, scales_ad: '', scales_ap: 'spell' },
@@ -320,11 +316,9 @@ function getGameNameForWikiKey(wikiKey) {
   return wikiKey;
 }
 
-function getHardcodedMapStats(creatureName) {
+function getHardcodedMapStats(creatureName, speciesBaseStats) {
   const db = getCreatureDb();
-  const table = db?.HARDCODED_MAP_MONSTER_STATS || {};
-  const entry = table[String(creatureName ?? '').toLowerCase()];
-  return entry?.baseStats || null;
+  return db?.getMapMonsterBaseStats?.(String(creatureName ?? ''), speciesBaseStats) || null;
 }
 
 function readAttackSpeedFromMonster(monster) {
@@ -369,8 +363,8 @@ function resolveCreatureStats(creatureName, section) {
     } catch (_) {}
   }
 
-  const hardcoded = getHardcodedMapStats(lookupName);
   const baseFromMonster = monster?.metadata?.baseStats || {};
+  const hardcoded = getHardcodedMapStats(lookupName, baseFromMonster);
   const mergedBase = {
     hp: 0,
     ad: 0,
@@ -379,8 +373,7 @@ function resolveCreatureStats(creatureName, section) {
     magicResist: 0,
     speed: 0,
     ...baseFromMonster,
-    ...(hardcoded || {}),
-    ...(extras.stats || {})
+    ...(hardcoded || {})
   };
 
   const attackSpeed =
