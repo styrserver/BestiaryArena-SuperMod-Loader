@@ -4,6 +4,21 @@
   },
   "notes": [
     {
+      "version": "5.2.2",
+      "changes": [
+        {
+          "mod": "Guilds",
+          "type": "fixed",
+          "text": "Loading guild profiles could use up most of the game's request allowance in one burst, making the game's own requests fail with rate-limit errors. Guilds now counts requests from the game and other mods too, and always leaves at least 5 of every 30 per 10 seconds free."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "added",
+          "text": "New Debugger overlay (Mod Settings → Debug) that helps find what slows the game down. It shows FPS, frame times, API requests, memory and DOM size in a compact grid, and a Details list ranking every mod and script by time spent in slow frames next to its API requests. Minimize it to a small fixed-size view that shows the numbers plus a single alert for what is wrong right now, and bring it back with the + that appears on hover (remembered). It matches Hunt Analyzer and Awaken Tracker, can be resized, is translated, and keeps the last 15 minutes of slow-frame data across page refreshes. Copy report gathers everything needed for troubleshooting; Clear All wipes the data. Script timing needs a Chromium-based browser."
+        }
+      ]
+    },
+    {
       "version": "5.2.1",
       "changes": [
         {

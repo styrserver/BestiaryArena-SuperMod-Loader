@@ -21,9 +21,9 @@ const defaultConfig = {
   useOldOutfits: false,
   showSetupLabels: false,
   showPerfOverlay: false,
-  perfOverlayAdvanced: false,
-  perfOverlayFilter: 'all', // 'all' | 'mod' | 'native' | 'other'
+  perfOverlayMinimized: false,
   perfOverlayPos: null, // { x, y } px from top-left after a drag; null = top-left default
+  perfOverlaySize: null, // { w, h } px after a resize; null = default widths. h only applies while maximized
   enableSetupShortcutsAndHover: true,
   hotkeySetupSource: 'betterSetups', // 'betterSetups' | 'setupManager'
   enableShinyEnemies: false,
@@ -3200,19 +3200,12 @@ const PERF_OVERLAY_REFRESH_MS = 500;
 const PERF_FPS_GOOD = 60;
 
 const perfOverlay = {
-  el: null,
+  ui: null, // panel nodes ({ el, header, body, ... }) while the overlay is on; null when off
   rafId: 0,
   refreshTimer: null,
   frames: 0,
   lastSampleTs: 0,
   fps: 0,
-  body: null,
-  detailsBtn: null,
-  filterBar: null,
-  filterBtns: null,
-  list: null,
-  copyBtn: null,
-  hover: false,
   copyBtnResetTimer: null,
   requests: [], // entries inside the last 10s: { perf, ts, method, path, caller, status, ms }
   captures: [], // frozen snapshots taken when the limit is reached (newest last)
@@ -3221,8 +3214,162 @@ const perfOverlay = {
   rateLimited: 0,
   originalFetch: null,
   fetchWrapper: null,
-  active: false
+  active: false,
+  layoutKey: '',
+  lastRenderAt: 0, // performance.now() of the last render, so the 1s timer only fills gaps
+  styleEl: null,
+  lastFrameTs: 0,
+  frameDts: [], // { t, dt } rAF deltas inside the last PERF_FRAME_WINDOW_MS
+  heap: [], // { t, v } usedJSHeapSize samples inside the last PERF_HEAP_WINDOW_MS (Chromium only)
+  dom: 0,
+  domAt: -Infinity,
+  domFirst: null, // first DOM node count seen, to report growth since the overlay started
+  loafDropped: 0, // slow frames pushed out by the PERF_MAX_LOAF cap (not by age) this session
+  loaf: [], // slow frames inside the last PERF_CPU_WINDOW_MS: { perf, ts, dur, blocking, scripts[] }
+  loafObserver: null,
+  loafType: null // 'long-animation-frame' (per-script attribution) | 'longtask' (totals only) | null
 };
+const PERF_FRAME_WINDOW_MS = 10000;
+const PERF_HEAP_WINDOW_MS = 60000;
+// Slow frames are kept for 15 minutes (max PERF_MAX_LOAF) and saved across refreshes, like the rate-limit captures.
+const PERF_CPU_WINDOW_MS = 15 * 60 * 1000;
+const PERF_CPU_WINDOW_LABEL = '15 min';
+const PERF_MAX_LOAF_SCRIPTS = 10; // scripts kept per saved frame
+const PERF_JANK_MS = 50;
+const PERF_MAX_LOAF = 100;
+// Game icons (/assets/icons, same files the other mods use): warning = triangle.
+function perfIcon(name) {
+  return `<img src="/assets/icons/${name}.png" alt="" class="pixelated" ` +
+    `style="display:inline-block;vertical-align:-1px;image-rendering:pixelated;">`;
+}
+const PERF_LINE_CSS = 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+// Details list columns, shared by the title row and the rows so they always line up.
+const PERF_COL_SCRIPT = 'flex:0 0 50px;text-align:right;';
+const PERF_COL_REQ = 'flex:0 0 34px;text-align:right;';
+const PERF_COL_LAYOUT = 'flex:0 0 46px;text-align:right;';
+const PERF_WIDTH_COMPACT = '195px'; // fits the memory line ("103MB (-13) · 5.1k nodes") without clipping
+const PERF_WIDTH_MAXIMIZED = '340px';
+// The game's frame classes draw a 1-3px border; Hunt Analyzer and Awaken Tracker draw the same images thicker
+// (slice and width scaled up, centre filled). Overriding just those properties keeps the game's own image URL.
+function perfFrameThickness(px) {
+  return `border-width:${px}px;border-image-slice:${px} fill;border-image-width:1;border-image-repeat:stretch;`;
+}
+// Gray buttons sit on the dark texture like Hunt Analyzer's (its grey gradient is an invalid background-color there,
+// so the texture is all that shows). Text color and font come from the stylesheet injected in startPerfOverlay.
+const PERF_BTN_TONES = {
+  gray: ['frame-1', 'surface-dark'],
+  red: ['frame-1-red', 'surface-red', 'text-whiteHighlight']
+};
+const PERF_STYLE_ID = 'mod-settings-perf-style';
+const PERF_OVERLAY_ID = 'mod-settings-perf-overlay';
+
+// t() returns the raw key until translations load, so fall back to English for that first moment.
+// The overlay re-renders every second, so labels switch to the translation as soon as it is ready.
+function perfT(key, fallback) {
+  const v = t(`mods.betterUI.${key}`);
+  return !v || v === `mods.betterUI.${key}` ? fallback : v;
+}
+
+// innerHTML only when the markup differs from what was last written (the render runs twice a second).
+function perfSetHtml(node, html) {
+  if (node._perfHtml === html) return;
+  node._perfHtml = html;
+  node.innerHTML = html;
+}
+
+function perfSetText(node, text) {
+  if (node && node.textContent !== text) node.textContent = text;
+}
+
+function perfSetMinimizeButton(btn, minimized) {
+  perfSetText(btn, minimized ? '+' : '–');
+  btn.title = minimized ? perfT('debuggerMaximize', 'Maximize') : perfT('debuggerMinimize', 'Minimize');
+}
+
+// Static labels (title, Details, Clear All and tooltips). The report text itself stays English: it is pasted to maintainers.
+function perfApplyLabels() {
+  const l = perfOverlay.ui && perfOverlay.ui.labels;
+  if (!l) return;
+  perfSetText(l.title, perfT('debuggerTitle', 'Debugger'));
+  perfSetText(l.details, t('common.details') === 'common.details' ? 'Details' : t('common.details'));
+  perfSetText(l.clearBtn, perfT('debuggerClearAll', 'Clear All'));
+  l.restoreBtn.title = perfT('debuggerMaximize', 'Maximize');
+  l.closeBtn.title = perfT('debuggerCloseTip', 'Turn the debugger off (it can be turned back on in Mod Settings)');
+  l.clearBtn.title = perfT('debuggerClearTip', 'Clear the collected data, including what is saved for after a refresh');
+}
+
+// Buttons keep the game's frame look; the tone is swapped through classList so a pressed class set by
+// perfBindPress is not wiped by the next refresh.
+function perfSetBtnTone(btn, tone) {
+  if (btn.dataset.tone === tone) return;
+  btn.dataset.tone = tone;
+  btn.classList.remove(...PERF_BTN_TONES.gray, ...PERF_BTN_TONES.red);
+  btn.classList.add(...PERF_BTN_TONES[tone]);
+}
+
+// The game's pressed frame is a class of its own (its `active:` variant is not in the shipped CSS).
+function perfBindPress(btn) {
+  let swapped = null; // { rest, pressed } while a press is in progress
+  btn.addEventListener('pointerdown', () => {
+    const red = btn.dataset.tone === 'red';
+    swapped = { rest: red ? 'frame-1-red' : 'frame-1', pressed: red ? 'frame-pressed-1-red' : 'frame-pressed-1' };
+    btn.classList.replace(swapped.rest, swapped.pressed);
+  });
+  const release = () => {
+    if (!swapped) return;
+    btn.classList.replace(swapped.pressed, swapped.rest);
+    swapped = null;
+  };
+  ['pointerup', 'pointerleave', 'pointercancel'].forEach((ev) => btn.addEventListener(ev, release));
+}
+
+// A gray game-styled button (frame/surface classes, press frame) with its inline css and click handler.
+function perfMakeButton(css, onClick) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'focus-style-visible';
+  perfSetBtnTone(btn, 'gray');
+  perfBindPress(btn);
+  btn.style.cssText = css;
+  btn.addEventListener('click', onClick);
+  return btn;
+}
+
+// A framed panel section (game frame class + the siblings' 6px frame thickness).
+function perfSection(className, css) {
+  const s = document.createElement('div');
+  s.className = className;
+  s.style.cssText = `${perfFrameThickness(6)}box-sizing:border-box;${css}`;
+  return s;
+}
+
+// Runtime counterpart of perfFrameThickness: scales the drawn frame width but keeps the 6px slice, because the
+// frame images are 6px-slice art and a smaller slice crops the corners and edges so the frame looks cut out.
+function perfSetFrameWidth(node, px) {
+  node.style.borderWidth = `${px}px`;
+  node.style.borderImageSlice = '6 fill';
+}
+
+function perfSetMinimized(minimized) {
+  config.perfOverlayMinimized = minimized;
+  saveConfig();
+  renderPerfOverlay();
+}
+
+// Drops all collected data and restarts the counters (start, Clear All and stop all begin from here).
+function perfResetData() {
+  perfOverlay.requests = [];
+  perfOverlay.captures = [];
+  perfOverlay.captureArmed = true;
+  perfOverlay.peak = 0;
+  perfOverlay.rateLimited = 0;
+  perfOverlay.loaf = [];
+  perfOverlay.loafDropped = 0;
+  perfOverlay.domFirst = null;
+  perfOverlay.frameDts = [];
+  perfOverlay.heap = [];
+}
+
 const PERF_MAX_CAPTURES = 5;
 const PERF_STORAGE_KEY = 'mod-settings-perf-captures';
 const PERF_PERSIST_MIN_MS = 5 * 60 * 1000;
@@ -3239,10 +3386,22 @@ function perfPersistNow() {
   perfPersistTimer = null;
   perfPersistDirty = false;
   perfLastPersistAt = Date.now();
+  const round1 = (v) => Math.round(v * 10) / 10;
   writeJSONToStorage(PERF_STORAGE_KEY, {
     captures: perfOverlay.captures,
     peak: perfOverlay.peak,
-    rateLimited: perfOverlay.rateLimited
+    rateLimited: perfOverlay.rateLimited,
+    // Slow frames, trimmed: perf timestamps are meaningless after a reload (ts is rebuilt on restore), and a
+    // script URL is only worth keeping where the name alone can't identify the source.
+    loaf: perfOverlay.loaf.slice(-PERF_MAX_LOAF).map((f) => ({
+      ts: f.ts,
+      dur: round1(f.dur),
+      blocking: round1(f.blocking),
+      scripts: f.scripts.slice(0, PERF_MAX_LOAF_SCRIPTS).map((s) => ({
+        source: s.source, name: s.name, dur: round1(s.dur), forced: round1(s.forced), invoker: s.invoker,
+        url: s.source === 'other' ? s.url : ''
+      }))
+    }))
   });
 }
 
@@ -3266,6 +3425,23 @@ function perfRestorePersisted() {
     .slice(-PERF_MAX_CAPTURES);
   perfOverlay.peak = Number(saved.peak) || 0;
   perfOverlay.rateLimited = Number(saved.rateLimited) || 0;
+  // Rebuild each frame's performance.now() timestamp from its wall-clock one so the age window keeps working.
+  const nowPerf = performance.now();
+  const nowWall = Date.now();
+  perfOverlay.loaf = (Array.isArray(saved.loaf) ? saved.loaf : [])
+    .filter((f) => f && Number.isFinite(f.ts) && Array.isArray(f.scripts) && nowWall - f.ts < PERF_CPU_WINDOW_MS)
+    .slice(-PERF_MAX_LOAF)
+    .map((f) => ({ ...f, perf: nowPerf - (nowWall - f.ts) }));
+}
+
+// Drops everything collected so far, in memory and in storage (the "Clear" button).
+function clearPerfData() {
+  clearTimeout(perfPersistTimer);
+  perfPersistTimer = null;
+  perfPersistDirty = false;
+  perfResetData();
+  try { localStorage.removeItem(PERF_STORAGE_KEY); } catch (_) { /* storage unavailable */ }
+  renderPerfOverlay();
 }
 
 function perfParseApiRequest(input, init) {
@@ -3315,7 +3491,10 @@ function perfClassifyStack() {
 }
 
 const PERF_SOURCE_LABEL = { mod: 'MOD', native: 'NATIVE', other: 'OTHER' };
-const PERF_SOURCE_COLOR = { mod: '#6cb8ff', native: '#c79bff', other: '#aaa' };
+// One Dark palette shared with Hunt Analyzer and Awaken Tracker.
+const PERF_C = { text: '#ABB2BF', good: '#98C379', warn: '#E5C07B', bad: '#E06C75', info: '#61AFEF', purple: '#C678DD' };
+const PERF_RGB = { good: [152, 195, 121], warn: [229, 192, 123], bad: [224, 108, 117] };
+const PERF_SOURCE_COLOR = { mod: PERF_C.info, native: PERF_C.purple, other: PERF_C.text };
 
 function perfEscape(s) {
   return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -3366,7 +3545,7 @@ function perfFormatCaptures() {
 }
 
 async function copyPerfCaptures() {
-  const text = perfFormatCaptures();
+  const text = perfFormatReport();
   let ok = false;
   try {
     await navigator.clipboard.writeText(text);
@@ -3380,8 +3559,8 @@ async function copyPerfCaptures() {
     try { ok = document.execCommand('copy'); } catch (__) { /* ignore */ }
     ta.remove();
   }
-  if (!perfOverlay.copyBtn) return;
-  perfOverlay.copyBtn.textContent = ok ? 'Copied!' : 'Copy failed';
+  if (!perfOverlay.ui) return;
+  perfOverlay.ui.copyBtn.textContent = ok ? perfT('debuggerCopied', 'Copied!') : perfT('debuggerCopyFailed', 'Copy failed');
   clearTimeout(perfOverlay.copyBtnResetTimer);
   perfOverlay.copyBtnResetTimer = setTimeout(() => {
     perfOverlay.copyBtnResetTimer = null;
@@ -3439,105 +3618,471 @@ function uninstallPerfFetchHook() {
   }
 }
 
-// health 1 = green, 0 = red, hue sweeps through yellow/orange in between
-function perfHealthColor(health) {
-  const h = Math.max(0, Math.min(1, health));
-  return `hsl(${Math.round(h * 120)}, 85%, 60%)`;
+// --- Script-time metrics -------------------------------------------------------------------------
+// Slow frames come from the browser itself (Long Animation Frames API, Chromium): each one lists the
+// scripts that ran in it with their sourceURL, which for mods is the /bestiary-mod/<Mod>.js trailer
+// local_mods.js appends. No timer/listener patching, so no overhead when nothing is slow.
+
+function perfClassifyScriptUrl(url, invoker) {
+  const mod = url.match(/bestiary-mod\/([^/?#]+?)(?:\.m?js)?(?:[?#]|$)/);
+  if (mod) return { source: 'mod', name: mod[1] };
+  if (url.includes('/_next/static/') || url.startsWith(window.location.origin)) {
+    return { source: 'native', name: /^Worker/.test(invoker || '') ? 'game worker' : 'game' };
+  }
+  const seg = url.match(/\/([^/?#]+)(?:[?#]|$)/);
+  return { source: 'other', name: seg ? seg[1].replace(/\.m?js$/, '') : (invoker || 'unknown') };
 }
 
-// Advanced view: live list of the requests inside the 10s window, filterable by who made them.
-function renderPerfAdvanced(now) {
-  const advanced = !!config.perfOverlayAdvanced;
-  perfOverlay.detailsBtn.textContent = advanced ? '▾ Details' : '▸ Details';
-  perfOverlay.filterBar.style.display = advanced ? 'flex' : 'none';
-  perfOverlay.list.style.display = advanced ? 'block' : 'none';
-  if (!advanced) return;
-  const reqs = perfOverlay.requests;
-  const counts = { all: reqs.length, mod: 0, native: 0, other: 0 };
-  reqs.forEach((r) => { counts[r.source]++; });
-  const filter = config.perfOverlayFilter || 'all';
-  const total = reqs.length;
-  perfOverlay.filterBtns.forEach((b, key) => {
-    const selected = key === filter;
-    // OTHER is noise unless something actually landed there
-    b.style.display = key === 'other' && !counts.other && !selected ? 'none' : '';
-    b.textContent = `${key === 'all' ? 'All' : key === 'native' ? 'NAT' : PERF_SOURCE_LABEL[key]} ${counts[key]}`;
-    b.style.opacity = selected ? '1' : '.55';
-    b.style.borderColor = selected ? '#fff' : '#666';
-    b.style.background = selected ? 'rgba(255,255,255,.22)' : 'rgba(255,255,255,.06)';
-  });
-  // One row per (who, endpoint): "12x Autoseller  game.sellMonster"
-  const groups = new Map();
-  for (const r of reqs) {
-    if (filter !== 'all' && r.source !== filter) continue;
-    const key = `${r.source}|${r.name}|${r.method} ${r.path}`;
-    let g = groups.get(key);
-    if (!g) {
-      g = { source: r.source, name: r.name, method: r.method, path: r.path, n: 0, limited: 0, last: 0, callers: new Set() };
-      groups.set(key, g);
-    }
-    g.n++;
-    if (r.status === 429) g.limited++;
-    if (r.perf > g.last) g.last = r.perf;
-    g.callers.add(r.caller);
+function perfOnSlowFrames(list) {
+  if (!perfOverlay.active) return;
+  for (const e of list.getEntries()) {
+    const scripts = (e.scripts || []).map((s) => ({
+      ...perfClassifyScriptUrl(s.sourceURL || '', s.invoker),
+      dur: s.duration,
+      forced: s.forcedStyleAndLayoutDuration || 0,
+      invoker: s.invoker || s.invokerType || '',
+      url: s.sourceURL || ''
+    }));
+    // ts is when the frame started, not when the observer reported it (reports arrive in batches, so frames
+    // of different lengths would otherwise share one timestamp).
+    perfOverlay.loaf.push({ perf: e.startTime, ts: Math.round(performance.timeOrigin + e.startTime), dur: e.duration, blocking: e.blockingDuration || 0, scripts });
   }
-  // Each row's background fills to its share of the window's requests, so the biggest spender
-  // is visible at a glance without reading numbers.
-  const sorted = [...groups.values()].sort((a, b) => b.n - a.n).slice(0, 40);
-  const rows = sorted.map((g, i) => {
-    const endpoint = (g.method === 'GET' ? '' : g.method + ' ') + g.path.replace(/^trpc:/, '');
-    const pct = total ? Math.round((g.n / total) * 100) : 0;
-    const top = i === 0 && total >= 6 && pct >= 30;
-    return (
-      `<div style="overflow:hidden;text-overflow:ellipsis;padding:1px 3px;border-radius:2px;margin-bottom:1px;` +
-      `background:linear-gradient(90deg,${PERF_SOURCE_COLOR[g.source]}44 ${pct}%,transparent ${pct}%)" ` +
-      `title="${perfEscape(`${pct}% of window · last ${((now - g.last) / 1000).toFixed(0)}s ago\n${[...g.callers].join('\n')}`)}">` +
-      `<b style="display:inline-block;min-width:2.2em;text-align:right">${g.n}×</b> ` +
-      `<span style="color:${PERF_SOURCE_COLOR[g.source]};${top ? 'font-weight:bold;' : ''}">${perfEscape(g.name)}</span> ` +
-      `${perfEscape(endpoint)}` +
-      (g.limited ? ` <span style="color:#ff6b6b">429×${g.limited}</span>` : '') + `</div>`
+  if (perfOverlay.loaf.length > PERF_MAX_LOAF) {
+    perfOverlay.loafDropped += perfOverlay.loaf.length - PERF_MAX_LOAF;
+    perfOverlay.loaf.splice(0, perfOverlay.loaf.length - PERF_MAX_LOAF);
+  }
+  perfPersistSoon();
+}
+
+function startPerfSlowFrameObserver() {
+  const types = (typeof PerformanceObserver !== 'undefined' && PerformanceObserver.supportedEntryTypes) || [];
+  const type = types.includes('long-animation-frame') ? 'long-animation-frame' : types.includes('longtask') ? 'longtask' : null;
+  perfOverlay.loafType = type;
+  if (!type) return;
+  try {
+    perfOverlay.loafObserver = new PerformanceObserver(perfOnSlowFrames);
+    perfOverlay.loafObserver.observe({ type, buffered: false });
+  } catch (_) {
+    perfOverlay.loafObserver = null;
+    perfOverlay.loafType = null;
+  }
+}
+
+function perfFrameStats(now) {
+  const dts = perfOverlay.frameDts;
+  while (dts.length && dts[0].t < now - PERF_FRAME_WINDOW_MS) dts.shift();
+  if (!dts.length) return { p95: 0, worst: 0, jank: 0 };
+  const sorted = dts.map((d) => d.dt).sort((a, b) => a - b);
+  return {
+    p95: sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))],
+    worst: sorted[sorted.length - 1],
+    jank: sorted.reduce((n, v) => n + (v > PERF_JANK_MS ? 1 : 0), 0)
+  };
+}
+
+// Heap sampled at most once a second; the DOM node count (a full tree walk) only every 5s.
+function perfSampleMemory(now) {
+  const mem = performance.memory;
+  const heap = perfOverlay.heap;
+  if (mem && (!heap.length || now - heap[heap.length - 1].t >= 1000)) {
+    heap.push({ t: now, v: mem.usedJSHeapSize });
+  }
+  while (heap.length && heap[0].t < now - PERF_HEAP_WINDOW_MS) heap.shift();
+  if (now - perfOverlay.domAt >= 5000) {
+    perfOverlay.dom = document.getElementsByTagName('*').length;
+    perfOverlay.domAt = now;
+    if (perfOverlay.domFirst === null) perfOverlay.domFirst = perfOverlay.dom;
+  }
+}
+
+// Folds the slow frames of the last minute into one row per (source, script).
+function perfAggregateCpu(now) {
+  const cutoff = now - PERF_CPU_WINDOW_MS;
+  while (perfOverlay.loaf.length && perfOverlay.loaf[0].perf < cutoff) perfOverlay.loaf.shift();
+  const groups = new Map();
+  let frameMs = 0;
+  let scriptMs = 0;
+  let blockingMs = 0;
+  for (const f of perfOverlay.loaf) {
+    frameMs += f.dur;
+    blockingMs += f.blocking || 0;
+    for (const s of f.scripts) {
+      scriptMs += s.dur;
+      const key = `${s.source}|${s.name}`;
+      let g = groups.get(key);
+      if (!g) {
+        g = { source: s.source, name: s.name, total: 0, n: 0, max: 0, forced: 0, invokers: new Map(), url: s.url };
+        groups.set(key, g);
+      }
+      g.total += s.dur;
+      g.n++;
+      g.forced += s.forced;
+      if (s.dur > g.max) g.max = s.dur;
+      g.invokers.set(s.invoker, (g.invokers.get(s.invoker) || 0) + s.dur);
+    }
+  }
+  return {
+    frames: perfOverlay.loaf.length,
+    frameMs,
+    scriptMs,
+    blockingMs,
+    groups: [...groups.values()].sort((a, b) => b.total - a.total)
+  };
+}
+
+function perfTopInvokers(g, limit) {
+  return [...g.invokers.entries()].sort((a, b) => b[1] - a[1]).slice(0, limit)
+    .map(([inv, ms]) => `${inv || '(unknown)'} ${Math.round(ms)}ms`);
+}
+
+// Frame scripts folded by (name, trigger): "Hunt_Analyzer 13× FrameRequestCallback 148ms", biggest first.
+function perfDescribeFrameScripts(scripts) {
+  const groups = new Map();
+  scripts.forEach((s) => {
+    const key = `${s.name}|${s.invoker}`;
+    const g = groups.get(key) || { name: s.name, invoker: s.invoker, n: 0, ms: 0 };
+    g.n++;
+    g.ms += s.dur;
+    groups.set(key, g);
+  });
+  const sorted = [...groups.values()].sort((a, b) => b.ms - a.ms);
+  const shown = sorted.slice(0, 5).map((g) => `${g.name} ${g.n > 1 ? `${g.n}× ` : ''}${g.invoker || '?'} ${Math.round(g.ms)}ms`);
+  if (sorted.length > 5) shown.push(`+${sorted.length - 5} more`);
+  return shown.join('; ') || 'no script attributed (style/layout/paint/GC)';
+}
+
+// Where and on what the report was made, so a pasted report can be reproduced.
+function perfReportContext() {
+  const lines = [
+    `Generated: ${new Date().toISOString()}`,
+    `Page: ${window.location.pathname}${window.location.search}`,
+    `Browser: ${navigator.userAgent}`,
+    `Viewport: ${window.innerWidth}x${window.innerHeight} @${window.devicePixelRatio}x`
+  ];
+  try {
+    lines.push(`Log level: ${globalThis.BestiaryLogger.getLevel()}`);
+  } catch (_) { /* logger unavailable */ }
+  try {
+    // Same underscore form as the script names in the Script time rows, so the two lists can be matched.
+    const mods = (window.localMods || []).filter((m) => m && m.enabled).map((m) => String(m.name).replace(/\s+/g, '_'));
+    if (mods.length) lines.push(`Mods enabled (${mods.length}): ${mods.join(', ')}`);
+  } catch (_) { /* mod list unavailable */ }
+  lines.push(
+    `Windows: frames ${PERF_FRAME_WINDOW_MS / 1000}s, memory ${PERF_HEAP_WINDOW_MS / 1000}s, slow frames ${PERF_CPU_WINDOW_LABEL} ` +
+    `(max ${PERF_MAX_LOAF}), API requests ${PERF_RATE_WINDOW_MS / 1000}s`
+  );
+  return lines.join('\n');
+}
+
+function perfFormatCpuReport() {
+  const now = performance.now();
+  const agg = perfAggregateCpu(now);
+  const stats = perfFrameStats(now);
+  const heap = perfOverlay.heap;
+  const mb = (v) => `${(v / 1048576).toFixed(0)}MB`;
+  // min/max tells a GC drop from a leak: a leak's floor keeps rising, a GC dip shows a wide range.
+  const heapLine = heap.length
+    ? `JS heap ${mb(heap[heap.length - 1].v)} (${heap.length > 1 ? `${((heap[heap.length - 1].v - heap[0].v) / 1048576).toFixed(1)}MB` : 'n/a'} over ${Math.round((heap[heap.length - 1].t - heap[0].t) / 1000)}s, ` +
+      `min ${mb(Math.min(...heap.map((h) => h.v)))} max ${mb(Math.max(...heap.map((h) => h.v)))}), `
+    : '';
+  const domGrowth = perfOverlay.domFirst === null ? '' : ` (${perfOverlay.dom - perfOverlay.domFirst >= 0 ? '+' : ''}${perfOverlay.dom - perfOverlay.domFirst} since the overlay started)`;
+  const first = perfOverlay.loaf[0];
+  const last = perfOverlay.loaf[perfOverlay.loaf.length - 1];
+  const coverage = first
+    ? `covers ${new Date(first.ts).toISOString()} to ${new Date(last.ts).toISOString()}` +
+      (perfOverlay.loafDropped ? `; ${perfOverlay.loafDropped} older frame${perfOverlay.loafDropped === 1 ? '' : 's'} dropped by the ${PERF_MAX_LOAF}-frame cap this session, so shares below cover only these` : '')
+    : 'no frames';
+  const lines = [
+    `== Frames (last ${PERF_FRAME_WINDOW_MS / 1000}s) ==`,
+    `${perfOverlay.fps} FPS, p95 ${stats.p95.toFixed(1)}ms, worst ${stats.worst.toFixed(1)}ms, ${stats.jank} frame${stats.jank === 1 ? '' : 's'} over ${PERF_JANK_MS}ms`,
+    '',
+    `== Memory (last ${PERF_HEAP_WINDOW_MS / 1000}s) ==`,
+    `${heapLine}${perfOverlay.dom} DOM nodes${domGrowth}`,
+    '',
+    `== Script time (last ${PERF_CPU_WINDOW_LABEL}; slow frames only, source: ${perfOverlay.loafType || 'unsupported in this browser'}) ==`,
+    `${agg.frames} slow frames (${coverage}), ${Math.round(agg.frameMs)}ms total, ${Math.round(agg.blockingMs)}ms blocking input, ${Math.round(agg.scriptMs)}ms in scripts (rest = style/layout/paint/GC)`,
+    'total ms | share | calls | max ms | forced layout (share of its script time) | triggers'
+  ];
+  agg.groups.forEach((g) => {
+    const share = agg.scriptMs ? Math.round((g.total / agg.scriptMs) * 100) : 0;
+    const layoutShare = g.total ? Math.round((g.forced / g.total) * 100) : 0;
+    lines.push(
+      `${String(Math.round(g.total)).padStart(7)}ms ${String(share).padStart(3)}%  ${String(g.n).padStart(4)}x  max ${Math.round(g.max)}ms  ` +
+      `layout ${Math.round(g.forced)}ms (${layoutShare}%)  [${PERF_SOURCE_LABEL[g.source]} ${g.name}${g.name === 'Mod_Settings' ? ' *' : ''}]  <- ${perfTopInvokers(g, 3).join(', ')}`
     );
   });
-  perfOverlay.list.innerHTML = rows.join('') || '<div style="opacity:.6">no requests</div>';
+  if (agg.groups.some((g) => g.name === 'Mod_Settings')) lines.push('* = this debugger itself');
+  if (!agg.groups.length) lines.push(perfOverlay.loafType === 'long-animation-frame' ? '(no slow frames)' : '(needs long-animation-frame support, Chromium 123+)');
+  lines.push('', 'Slowest frames (scripts folded by name and trigger):');
+  perfOverlay.loaf.slice().sort((a, b) => b.dur - a.dur).slice(0, 10).forEach((f) => {
+    lines.push(`  ${Math.round(f.dur)}ms (${Math.round(f.blocking || 0)}ms blocking) at ${new Date(f.ts).toISOString()}: ${perfDescribeFrameScripts(f.scripts)}`);
+  });
+  return lines.join('\n');
+}
+
+function perfFormatReport() {
+  const reqs = perfOverlay.requests;
+  const tally = new Map();
+  reqs.forEach((r) => {
+    const k = `[${PERF_SOURCE_LABEL[r.source]} ${r.name}] ${r.method} ${r.path}`;
+    const t = tally.get(k) || { n: 0, done: 0, sum: 0, max: 0 };
+    t.n++;
+    if (typeof r.ms === 'number') {
+      t.done++;
+      t.sum += r.ms;
+      if (r.ms > t.max) t.max = r.ms;
+    }
+    tally.set(k, t);
+  });
+  const apiLines = [...tally.entries()].sort((a, b) => b[1].n - a[1].n).map(([k, t]) =>
+    `  ${t.n}x ${k}${t.done ? `  avg ${Math.round(t.sum / t.done)}ms max ${t.max}ms` : '  pending'}`);
+  const parts = [
+    `BESTIARY ARENA DEBUGGER REPORT\n${perfReportContext()}`,
+    perfFormatCpuReport(),
+    // Only the last 10s are listed, so peak and the last limit hit say whether a burst happened before the copy.
+    [`== API requests (last ${PERF_RATE_WINDOW_MS / 1000}s; limit ${PERF_RATE_LIMIT}, 429s seen: ${perfOverlay.rateLimited}) ==`,
+      `${reqs.length} requests now; peak ${perfOverlay.peak}/${PERF_RATE_LIMIT} per ${PERF_RATE_WINDOW_MS / 1000}s` +
+      (perfOverlay.captures.length ? `; limit last hit ${new Date(perfOverlay.captures[perfOverlay.captures.length - 1].ts).toISOString()}` : '; limit never hit'),
+      ...apiLines].join('\n')
+  ];
+  if (perfOverlay.captures.length) parts.push(`== Limit-hit captures ==\n${perfFormatCaptures()}`);
+  return parts.join('\n\n');
+}
+
+// health 1 = green, 0 = red, passing through gold; same palette Hunt Analyzer / Awaken Tracker use
+function perfHealthColor(health) {
+  const h = Math.max(0, Math.min(1, health));
+  const [from, to, t] = h < 0.5 ? [PERF_RGB.bad, PERF_RGB.warn, h * 2] : [PERF_RGB.warn, PERF_RGB.good, (h - 0.5) * 2];
+  return `rgb(${from.map((c, i) => Math.round(c + (to[i] - c) * t)).join(',')})`;
+}
+
+// Details: one row per (source, script) merging script time (last 15 min) and API requests (last 10s),
+// biggest script-time spender first. The row background fills to its share of script time.
+function renderPerfAdvanced(now) {
+  const advanced = !config.perfOverlayMinimized; // the list is always open when maximized
+  perfOverlay.ui.list.style.display = advanced ? 'flex' : 'none';
+  if (!advanced) return;
+  const agg = perfAggregateCpu(now);
+  const rows = new Map();
+  const rowFor = (source, name) => {
+    const key = `${source}|${name}`;
+    let r = rows.get(key);
+    if (!r) {
+      r = { source, name, group: null, reqs: 0, limited: 0, endpoints: new Map() };
+      rows.set(key, r);
+    }
+    return r;
+  };
+  agg.groups.forEach((g) => { rowFor(g.source, g.name).group = g; });
+  perfOverlay.requests.forEach((q) => {
+    const r = rowFor(q.source, q.name);
+    r.reqs++;
+    if (q.status === 429) r.limited++;
+    const ep = (q.method === 'GET' ? '' : q.method + ' ') + q.path.replace(/^trpc:/, '');
+    r.endpoints.set(ep, (r.endpoints.get(ep) || 0) + 1);
+  });
+  const sorted = [...rows.values()]
+    .sort((a, b) => ((b.group ? b.group.total : 0) - (a.group ? a.group.total : 0)) || (b.reqs - a.reqs))
+    .slice(0, 40);
+  const html = sorted.map((r) => {
+    const g = r.group;
+    const pct = g && agg.scriptMs ? Math.round((g.total / agg.scriptMs) * 100) : 0;
+    const color = PERF_SOURCE_COLOR[r.source];
+    const eps = [...r.endpoints.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([ep, n]) => `${n}× ${ep}`);
+    const tip = [
+      g ? `${pct}% of script time · ${g.n} calls · max ${Math.round(g.max)}ms · forced layout ${Math.round(g.forced)}ms` : `no slow script in the last ${PERF_CPU_WINDOW_LABEL}`,
+      ...(g ? perfTopInvokers(g, 3) : []),
+      ...eps,
+      g ? g.url : ''
+    ].filter(Boolean).join('\n');
+    // Four fixed columns (script time, requests, name, layout) shared with the title row; the name ellipsizes.
+    return (
+      `<div style="display:flex;align-items:baseline;gap:4px;padding:0 3px;margin-bottom:1px;` +
+      `background:linear-gradient(90deg,${color}44 ${pct}%,transparent ${pct}%)" title="${perfEscape(tip)}">` +
+      `<b style="${PERF_COL_SCRIPT}white-space:nowrap">${g ? Math.round(g.total) + 'ms' : '–'}</b>` +
+      `<b style="${PERF_COL_REQ}white-space:nowrap;opacity:${r.reqs ? 1 : .4}">${r.reqs ? r.reqs + 'r' : '–'}</b>` +
+      `<span style="flex:1 1 0;min-width:0;${PERF_LINE_CSS}color:${color}">${perfEscape(r.name)}` +
+      (r.limited ? ` <span style="color:${PERF_C.bad}" title="Requests that got HTTP 429">429×${r.limited}</span>` : '') + `</span>` +
+      `<span style="${PERF_COL_LAYOUT}white-space:nowrap;color:${PERF_C.warn}">${g && g.forced >= 5 ? Math.round(g.forced) + 'ms' : ''}</span></div>`
+    );
+  }).join('');
+  const note = perfOverlay.loafType ? '' : ' · Chromium only';
+  const reqCount = perfOverlay.requests.length;
+  const list = perfOverlay.ui.list;
+  // Title row on top, scrolling rows in the middle, totals pinned at the bottom (like a table's total row).
+  const dim = 'opacity:.6;';
+  const titleCss = `display:flex;align-items:baseline;gap:4px;flex:none;padding:0 3px 1px;font-size:10px;border-bottom:1px solid rgba(255,255,255,.15);`;
+  const stat = (label, value) => `<span style="white-space:nowrap"><span style="${dim}">${label}</span> <b>${value}</b></span>`;
+  const listHtml =
+    `<div style="${titleCss}">` +
+    `<span style="${PERF_COL_SCRIPT}${dim}" title="Script time in slow frames (last ${PERF_CPU_WINDOW_LABEL})">Script</span>` +
+    `<span style="${PERF_COL_REQ}${dim}" title="API requests in the last 10s">Req</span>` +
+    `<span style="flex:1 1 0;min-width:0;${dim}" title="Mod or part of the game. The bar behind a row is its share of all script time.">Name</span>` +
+    `<span style="${PERF_COL_LAYOUT}${dim}" title="Forced style/layout time caused by its scripts (shown from 5ms)">Layout</span></div>` +
+    `<div data-perf-rows style="flex:1 1 auto;min-height:0;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;padding-top:2px">` +
+    `${html || '<div style="opacity:.6;padding:0 3px">nothing slow yet</div>'}</div>` +
+    `<div style="display:flex;flex-wrap:wrap;justify-content:space-between;column-gap:8px;flex:none;padding:2px 3px 0;border-top:1px solid rgba(255,255,255,.15)" ` +
+    `title="${perfEscape(`${Math.round(agg.scriptMs)}ms of ${Math.round(agg.frameMs)}ms in slow frames was script; the rest was style/layout/paint/GC (last ${PERF_CPU_WINDOW_LABEL}, saved across refreshes).`)}">` +
+    stat('Slow frames', `${agg.frames}${note}`) +
+    stat('Script', `${Math.round(agg.scriptMs)} / ${Math.round(agg.frameMs)}ms`) +
+    stat('Requests', reqCount) + `</div>`;
+  // Only touch the DOM when the markup changed: most refreshes leave this list as it was, and rewriting it
+  // costs layout time (and resets hover tooltips). Keep the rows' scroll position when it does change.
+  if (list._perfHtml !== listHtml) {
+    const oldRows = list.querySelector('[data-perf-rows]');
+    const scrollTop = oldRows ? oldRows.scrollTop : 0;
+    perfSetHtml(list, listHtml);
+    const rowsEl = list.querySelector('[data-perf-rows]');
+    if (rowsEl && scrollTop) rowsEl.scrollTop = scrollTop;
+  }
+}
+
+// The one-line culprit for the compact view: top script when frames are janky, else top API requester when
+// the request budget is nearly spent. Null while everything is healthy.
+// modOnly (minimized view): only name other mods, since the game's own scripts and requests can't be fixed from here
+// and the debugger itself would just be noise.
+function perfFindSuspect(now, janky, rateHigh, modOnly) {
+  if (janky) {
+    const g = perfAggregateCpu(now).groups.find((x) => !modOnly || (x.source === 'mod' && x.name !== 'Mod_Settings'));
+    // Short total ("3.4s/15m") so the name keeps its room in a narrow panel.
+    const total = g && (g.total >= 1000 ? `${(g.total / 1000).toFixed(1)}s` : `${Math.round(g.total)}ms`);
+    if (g) return { source: g.source, name: g.name, text: `${total}/${PERF_CPU_WINDOW_LABEL.replace(' ', '')}`, tip: `${total} of script time in slow frames over the last ${PERF_CPU_WINDOW_LABEL}\n${perfTopInvokers(g, 3).join('\n')}` };
+  }
+  if (rateHigh) {
+    const counts = new Map();
+    perfOverlay.requests.forEach((r) => {
+      if (modOnly && (r.source !== 'mod' || r.name === 'Mod_Settings')) return;
+      const k = `${r.source}|${r.name}`;
+      counts.set(k, (counts.get(k) || 0) + 1);
+    });
+    const top = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
+    if (top) {
+      const [source, name] = top[0].split('|');
+      return { source, name, text: `${top[1]} req/10s`, tip: 'Biggest API requester in the last 10s' };
+    }
+  }
+  return null;
 }
 
 function renderPerfOverlay() {
-  if (!perfOverlay.el) return;
+  const ui = perfOverlay.ui;
+  if (!ui) return;
   const now = performance.now();
+  perfOverlay.lastRenderAt = now;
   const rate = perfCurrentRate(now);
   if (rate > perfOverlay.peak) perfOverlay.peak = rate;
   const rateColor = perfHealthColor(1 - rate / PERF_RATE_LIMIT);
   const fpsColor = perfHealthColor(perfOverlay.fps / PERF_FPS_GOOD);
   const fill = Math.min(100, Math.round((rate / PERF_RATE_LIMIT) * 100));
   const lastCap = perfOverlay.captures[perfOverlay.captures.length - 1];
-  perfOverlay.body.innerHTML =
-    `<div style="display:flex;justify-content:space-between;gap:8px">` +
-    `<span style="color:${fpsColor}"><b>${perfOverlay.fps}</b> FPS</span>` +
-    `<span style="color:${rateColor}" title="API requests in the last 10s"><b>${rate}</b>/${PERF_RATE_LIMIT} req</span></div>` +
-    // budget bar: how much of the 30-per-10s allowance is in use right now
-    `<div style="height:4px;margin:3px 0;border-radius:2px;background:rgba(255,255,255,.15);overflow:hidden">` +
-    `<div style="height:100%;width:${fill}%;background:${rateColor}"></div></div>` +
-    `<div style="opacity:.7;font-size:10px">peak ${perfOverlay.peak}` +
-    (perfOverlay.rateLimited ? ` · <span style="color:#ff6b6b">429×${perfOverlay.rateLimited}</span>` : '') +
-    (lastCap ? ` · <span style="color:#ff6b6b" title="Limit last hit at ${new Date(lastCap.ts).toLocaleTimeString()}">⚠ ${new Date(lastCap.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>` : '') +
-    `</div>`;
-  // Calm + collapsed = dim and unobtrusive; anything notable (or hover/details) brings it to full strength.
-  const alarming = rate >= PERF_RATE_LIMIT * 2 / 3 || perfOverlay.captures.length > 0 || perfOverlay.fps < 30;
-  const calm = !alarming && !config.perfOverlayAdvanced && !perfOverlay.hover;
-  perfOverlay.el.style.opacity = calm ? '.55' : '1';
-  perfOverlay.el.style.boxShadow = perfOverlay.captures.length
-    ? '0 0 0 1px #ff6b6b'
-    : rate >= PERF_RATE_LIMIT * 2 / 3 ? `0 0 0 1px ${rateColor}` : 'none';
-  perfOverlay.el.style.width = config.perfOverlayAdvanced ? '230px' : '';
+  perfSampleMemory(now);
+  const fs = perfFrameStats(now);
+  const heap = perfOverlay.heap;
+  const heapNow = heap.length ? heap[heap.length - 1].v / 1048576 : 0;
+  const heapDelta = heap.length > 1 ? heapNow - heap[0].v / 1048576 : 0;
+  // Minimized: only an alert for what is wrong right now, and not for the game's own scripts. Maximized names those too.
+  const compact = !!config.perfOverlayMinimized;
+  const full = !compact;
+  // The alert slot is always reserved so the panel keeps one fixed size and never jumps: it holds at most ONE
+  // alert, most urgent first, or a quiet status when all is well.
+  const alertRow = (color, text, tip) =>
+    `<div style="display:flex;gap:4px" title="${perfEscape(tip || '')}"><span style="flex:none">${perfIcon('warning')}</span>` +
+    `<span style="flex:1 1 0;min-width:0;${PERF_LINE_CSS}color:${color}">${text}</span></div>`;
+  const lag = perfOverlay.fps < 30 || fs.p95 > 33;
+  const rateHigh = rate >= PERF_RATE_LIMIT * 2 / 3;
+  let alertHtml = '';
+  if (lastCap && Date.now() - lastCap.ts < 60000) {
+    alertHtml = alertRow(PERF_C.bad, `API limit hit ${new Date(lastCap.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`, 'The request limit was reached in the last minute');
+  } else {
+    const s = perfFindSuspect(now, lag, rateHigh, compact);
+    if (s) alertHtml = alertRow(PERF_SOURCE_COLOR[s.source], `${perfEscape(s.name)} <span style="color:${PERF_C.text}">${s.text}</span>`, s.tip);
+    else if (lag) alertHtml = alertRow(PERF_C.bad, `Lag: p95 ${fs.p95.toFixed(0)}ms`, 'Frame time over the last 10s is high');
+    else if (heapDelta > 30) alertHtml = alertRow(PERF_C.warn, `Memory +${heapDelta.toFixed(0)}MB/min`, 'JS heap grew quickly over the last minute');
+  }
+  if (!alertHtml) {
+    alertHtml = `<div style="${PERF_LINE_CSS}line-height:16px;opacity:.7" title="No problems detected right now">` +
+      `<span style="color:${PERF_C.good}">✓</span> No issues` +
+      (full && perfOverlay.rateLimited ? ` · <span style="color:${PERF_C.bad}">429×${perfOverlay.rateLimited} seen</span>` : '') + `</div>`;
+  }
+  // Two-column grid, the same in both views, grouped by topic: rendering (FPS, p95, max, jank), API (req, peak),
+  // memory (heap, nodes). Left cells align left, right cells align right; label is dim, value is colored by health.
+  const cell = (label, value, color, tip, right) =>
+    `<div style="${PERF_LINE_CSS}${right ? 'text-align:right;' : ''}" title="${perfEscape(tip)}">` +
+    `<span style="opacity:.6">${label}</span> <b style="color:${color}">${value}</b></div>`;
+  const nodes = perfOverlay.dom >= 1000 ? `${(perfOverlay.dom / 1000).toFixed(1)}k` : perfOverlay.dom;
+  // The heap change only appears maximized, and says over what period: a drop is just garbage collection.
+  const heapText = !heap.length ? '–'
+    : `${heapNow.toFixed(0)}MB` + (full ? ` <span style="font-weight:normal;color:${heapDelta > 20 ? PERF_C.bad : PERF_C.text}">(${heapDelta >= 0 ? '+' : ''}${heapDelta.toFixed(0)}/min)</span>` : '');
+  // Short titles when minimized (narrow panel), spelled out when maximized.
+  const L = (long, short) => (full ? long : short);
+  const cells =
+    cell('FPS', perfOverlay.fps, fpsColor, 'Frames per second') +
+    cell(L('Frame p95', 'p95'), `${fs.p95.toFixed(0)}ms`, perfHealthColor(1 - (fs.p95 - 16.7) / 33), 'Frame time: 95% of frames in the last 10s were faster than this', true) +
+    cell(L('Worst frame', 'max'), `${fs.worst.toFixed(0)}ms`, perfHealthColor(1 - fs.worst / 200), 'Slowest frame in the last 10s') +
+    cell(L('Jank frames', 'jank'), fs.jank, fs.jank ? PERF_C.bad : PERF_C.text, `Frames slower than ${PERF_JANK_MS}ms in the last 10s`, true) +
+    cell(L('Requests', 'req'), `${rate}/${PERF_RATE_LIMIT}`, rateColor, 'API requests in the last 10s') +
+    cell(L('Peak requests', 'peak'), `${perfOverlay.peak}/${PERF_RATE_LIMIT}`, perfHealthColor(1 - perfOverlay.peak / PERF_RATE_LIMIT), 'Highest request count in any 10s since the debugger started', true) +
+    cell(L('JS heap', 'heap'), heapText, PERF_C.text, 'JS heap in use, and its change over the last minute (Chromium only)') +
+    cell(L('DOM nodes', 'nodes'), nodes, PERF_C.text, 'DOM nodes on the page', true);
+  // Budget bar (maximized only): how much of the 30-per-10s allowance is in use right now.
+  const budgetBar = full
+    ? `<div style="height:4px;margin:3px 0;border-radius:2px;background:rgba(255,255,255,.15);overflow:hidden" title="Share of the request limit in use right now">` +
+      `<div style="height:100%;width:${fill}%;background:${rateColor}"></div></div>`
+    : '';
+  perfSetHtml(ui.body,
+    `<div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);column-gap:8px;white-space:nowrap">${cells}</div>` +
+    budgetBar +
+    `<div style="height:16px;margin-top:2px;overflow:hidden">${alertHtml}</div>`);
+  ui.el.style.boxShadow = '0 0 15px rgba(0,0,0,.7)' + (perfOverlay.captures.length
+    ? `, 0 0 0 1px ${PERF_C.bad}`
+    : rate >= PERF_RATE_LIMIT * 2 / 3 ? `, 0 0 0 1px ${rateColor}` : '');
+  // Minimized hides the title bar; a discreet arrow (shown on hover) maximizes again.
+  ui.header.style.display = compact ? 'none' : 'flex';
+  ui.restoreBtn.style.display = compact ? 'block' : 'none';
+  ui.detailsSection.style.display = compact ? 'none' : 'flex';
+  perfSetFrameWidth(ui.el, compact ? 3 : 6);
+  perfSetFrameWidth(ui.header, compact ? 3 : 6);
+  perfSetFrameWidth(ui.body, compact ? 3 : 6);
+  ui.el.style.padding = compact ? '2px' : '0 2px 2px';
+  ui.body.style.padding = compact ? '4px 6px' : '4px';
+  perfSetMinimizeButton(ui.minBtn, compact);
+  const size = config.perfOverlaySize;
+  const customH = !!(full && size && size.h);
+  ui.el.style.width = compact ? PERF_WIDTH_COMPACT : size && size.w ? `${Math.max(PERF_MIN_W, size.w)}px` : PERF_WIDTH_MAXIMIZED;
+  ui.el.style.height = customH ? `${size.h}px` : '';
+  // With a custom height the list fills the panel; otherwise it is capped and the panel hugs its content.
+  ui.list.style.maxHeight = customH ? 'none' : 'min(240px, 40vh)';
+  // Only the Details section absorbs a custom height; otherwise it hugs its content, and the other sections never shrink.
+  ui.detailsSection.style.flex = customH ? '1 1 0' : '0 0 auto';
+  ui.detailsSection.style.minHeight = customH ? '190px' : ''; // frame + padding + button + the list's 120px minimum
+  ui.resizeHandles.forEach((h) => { h.style.display = compact ? 'none' : ''; });
   renderPerfAdvanced(now);
-  const btn = perfOverlay.copyBtn;
-  btn.style.display = perfOverlay.captures.length ? 'block' : 'none';
-  if (!perfOverlay.copyBtnResetTimer) btn.textContent = `Copy log (${perfOverlay.captures.length})`;
+  const btn = ui.copyBtn;
+  const caps = perfOverlay.captures.length;
+  ui.footer.style.display = compact ? 'none' : 'flex'; // Copy report is the main action: always there when maximized
+  perfSetBtnTone(btn, caps ? 'red' : 'gray');
+  if (!perfOverlay.copyBtnResetTimer) {
+    perfSetText(btn, caps ? perfT('debuggerCopyReportHits', 'Copy report ({n} hits)').replace('{n}', caps) : perfT('debuggerCopyReport', 'Copy report'));
+  }
+  perfApplyLabels();
+  // A wider/taller layout (maximize) must not push the panel off-screen.
+  const layoutKey = `${full}|${caps > 0}`;
+  if (layoutKey !== perfOverlay.layoutKey) {
+    perfOverlay.layoutKey = layoutKey;
+    const rect = ui.el.getBoundingClientRect();
+    if (rect.right > window.innerWidth || rect.bottom > window.innerHeight) {
+      setPerfOverlayPosition(ui.el, rect.left, rect.top);
+    }
+  }
 }
 
 function perfFrameTick(ts) {
   if (!perfOverlay.active) return;
   perfOverlay.frames++;
+  const dt = ts - perfOverlay.lastFrameTs;
+  perfOverlay.lastFrameTs = ts;
+  // a gap over 1s means rAF was paused (hidden tab), not a slow frame
+  if (dt > 0 && dt < 1000) perfOverlay.frameDts.push({ t: ts, dt });
   const elapsed = ts - perfOverlay.lastSampleTs;
   if (elapsed >= PERF_OVERLAY_REFRESH_MS) {
     perfOverlay.fps = Math.round((perfOverlay.frames * 1000) / elapsed);
@@ -3565,7 +4110,7 @@ function bindPerfOverlayDrag(el) {
   let grabDy = 0;
   let dragging = false;
   el.addEventListener('pointerdown', (e) => {
-    if (e.button !== 0 || e.target.closest('button')) return;
+    if (e.button !== 0 || e.target.closest('button, [data-dir]')) return;
     const rect = el.getBoundingClientRect();
     grabDx = e.clientX - rect.left;
     grabDy = e.clientY - rect.top;
@@ -3589,75 +4134,168 @@ function bindPerfOverlayDrag(el) {
   el.addEventListener('pointercancel', endDrag);
 }
 
+// Edge and corner grips like Hunt_Analyzer's. Pointer capture keeps move/up events on the grip, so there are
+// no document listeners to clean up. Dragging n/w keeps the opposite edge fixed.
+const PERF_MIN_W = 270; // narrower clips the frame-stats and memory lines
+const PERF_MAX_W = 520;
+const PERF_MIN_H = 400; // header + stats + Details button + 120px list + footer, with 6px frames
+
+function addPerfResizeHandles(el) {
+  return ['n', 'e', 's', 'w', 'ne', 'se', 'sw', 'nw'].map((dir) => {
+    const h = document.createElement('div');
+    h.dataset.dir = dir;
+    h.setAttribute('aria-label', `Resize ${dir}`);
+    const edge = dir.length === 1;
+    const sideCss = edge
+      ? (dir === 'n' || dir === 's' ? `height:6px;width:100%;left:0;${dir === 'n' ? 'top' : 'bottom'}:0;` : `width:6px;height:100%;top:0;${dir === 'w' ? 'left' : 'right'}:0;`)
+      : `width:12px;height:12px;${dir.includes('n') ? 'top' : 'bottom'}:0;${dir.includes('w') ? 'left' : 'right'}:0;`;
+    h.style.cssText = `position:absolute;z-index:1;touch-action:none;cursor:${dir}-resize;${sideCss}`;
+    let start = null;
+    h.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      start = { x: e.clientX, y: e.clientY, rect: el.getBoundingClientRect() };
+      h.setPointerCapture(e.pointerId);
+      e.preventDefault();
+    });
+    h.addEventListener('pointermove', (e) => {
+      if (!start) return;
+      const { rect } = start;
+      const dx = e.clientX - start.x;
+      const dy = e.clientY - start.y;
+      const vertical = !config.perfOverlayMinimized; // the minimized view has a fixed size
+      const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), Math.max(lo, hi));
+      const maxW = Math.min(PERF_MAX_W, window.innerWidth - 12);
+      const maxH = window.innerHeight - 12;
+      let w = rect.width;
+      let ht = rect.height;
+      let left = rect.left;
+      let top = rect.top;
+      if (dir.includes('e')) w = clamp(rect.width + dx, PERF_MIN_W, maxW);
+      if (dir.includes('w')) {
+        w = clamp(rect.width - dx, PERF_MIN_W, maxW);
+        left = rect.left + rect.width - w;
+      }
+      if (vertical && dir.includes('s')) ht = clamp(rect.height + dy, PERF_MIN_H, maxH);
+      if (vertical && dir.includes('n')) {
+        ht = clamp(rect.height - dy, PERF_MIN_H, maxH);
+        top = rect.top + rect.height - ht;
+      }
+      const prevH = config.perfOverlaySize && config.perfOverlaySize.h;
+      config.perfOverlaySize = { w: Math.round(w), h: vertical ? Math.round(ht) : (prevH || null) };
+      const pos = setPerfOverlayPosition(el, left, top);
+      config.perfOverlayPos = pos;
+      renderPerfOverlay();
+    });
+    const end = (e) => {
+      if (!start) return;
+      start = null;
+      try { h.releasePointerCapture(e.pointerId); } catch (_) { /* already released */ }
+      saveConfig();
+    };
+    h.addEventListener('pointerup', end);
+    h.addEventListener('pointercancel', end);
+    el.appendChild(h);
+    return h;
+  });
+}
+
 function startPerfOverlay() {
   if (perfOverlay.active) return;
   perfOverlay.active = true;
-  perfOverlay.requests = [];
-  perfOverlay.captures = [];
-  perfOverlay.captureArmed = true;
-  perfOverlay.peak = 0;
-  perfOverlay.rateLimited = 0;
+  perfResetData();
   perfRestorePersisted();
   window.addEventListener('pagehide', perfFlushOnPageHide);
   perfOverlay.frames = 0;
   perfOverlay.lastSampleTs = performance.now();
+  perfOverlay.lastFrameTs = perfOverlay.lastSampleTs;
+  perfOverlay.dom = 0;
+  perfOverlay.domAt = -Infinity;
+  startPerfSlowFrameObserver();
   installPerfFetchHook();
   const el = document.createElement('div');
-  el.id = 'mod-settings-perf-overlay';
+  el.id = PERF_OVERLAY_ID;
+  // Same shell as Hunt Analyzer / Awaken Tracker: a game frame on a dark game surface, Inter text, and a z-index
+  // (150) above the board UI but below native menus and modals. Width is fixed so text can ellipsize instead of
+  // resizing the panel on every refresh, and max-width keeps it inside narrow viewports.
+  el.className = 'frame-3 surface-darker';
   el.style.cssText =
-    'position:fixed;left:6px;top:6px;z-index:2147483000;cursor:move;user-select:none;touch-action:none;' +
-    'font:11px/1.3 monospace;color:#fff;background:rgba(0,0,0,.78);padding:4px 7px;border-radius:4px;' +
-    'text-align:left;white-space:nowrap;transition:opacity .2s;';
-  el.addEventListener('mouseenter', () => { perfOverlay.hover = true; renderPerfOverlay(); });
-  el.addEventListener('mouseleave', () => { perfOverlay.hover = false; renderPerfOverlay(); });
-  // body is rewritten every refresh; the button is a persistent sibling so clicks are never lost mid-render
-  const body = document.createElement('div');
-  const smallBtnCss =
-    'cursor:pointer;font:10px monospace;color:#fff;background:rgba(255,255,255,.1);' +
-    'border:1px solid #666;border-radius:3px;padding:1px 4px;';
-  const detailsBtn = document.createElement('button');
-  detailsBtn.type = 'button';
-  detailsBtn.style.cssText = `margin-top:3px;width:100%;${smallBtnCss}`;
-  detailsBtn.addEventListener('click', () => {
-    config.perfOverlayAdvanced = !config.perfOverlayAdvanced;
+    'position:fixed;left:6px;top:6px;z-index:150;cursor:move;touch-action:none;box-sizing:border-box;' +
+    `width:${PERF_WIDTH_COMPACT};max-width:calc(100vw - 12px);padding:0 2px 2px;text-align:left;${perfFrameThickness(6)}` +
+    `font:11px/1.3 Inter,sans-serif;font-variant-numeric:tabular-nums;color:${PERF_C.text};` +
+    'display:flex;flex-direction:column;';
+  // Button typography and hover match Hunt Analyzer's .ha-styled-button (frames and focus ring come from game classes).
+  const styleEl = document.createElement('style');
+  styleEl.id = PERF_STYLE_ID;
+  styleEl.textContent =
+    `#${PERF_OVERLAY_ID} button{font:700 11px/1.1 'Trebuchet MS','Arial Black',Arial,sans-serif;min-height:24px;` +
+    `padding:2px 10px;transition:color .15s,border-image .1s,filter .15s}` +
+    `#${PERF_OVERLAY_ID} button[data-tone="gray"]{color:${PERF_C.text}}` +
+    `#${PERF_OVERLAY_ID} button[data-tone="gray"]:hover{color:${PERF_C.bad}}` +
+    `#${PERF_OVERLAY_ID} button[data-tone="red"]:hover{filter:brightness(1.12);color:#fff}` +
+    `#${PERF_OVERLAY_ID} .perf-restore{opacity:0;transition:opacity .15s,color .15s}` +
+    `#${PERF_OVERLAY_ID}:hover .perf-restore{opacity:1}` +
+    `#${PERF_OVERLAY_ID} .perf-restore:hover{color:${PERF_C.bad}!important}`; // same accent red as the title and button hover
+  document.head.appendChild(styleEl);
+  perfOverlay.styleEl = styleEl;
+  // Titled bar like the siblings' headers, with minimize and close buttons (close turns the overlay off and unticks the setting).
+  const header = perfSection('frame-4 surface-dark', 'display:flex;align-items:center;gap:5px;flex:none;margin-bottom:2px;padding:2px 4px;');
+  const title = document.createElement('span'); // text is set by perfApplyLabels
+  title.style.cssText =
+    `flex:1 1 0;min-width:0;color:${PERF_C.bad};font-size:14px;font-weight:bold;${PERF_LINE_CSS}`;
+  // Same box as Hunt Analyzer's .ha-icon-button: 20x18 minimum, 6px side padding, centred glyph.
+  const iconBtnCss = `flex:none;cursor:pointer;padding:0 6px;min-width:20px;min-height:18px;display:flex;align-items:center;justify-content:center;${perfFrameThickness(4)}`;
+  const closeBtn = perfMakeButton(iconBtnCss, () => {
+    config.showPerfOverlay = false;
     saveConfig();
-    renderPerfOverlay();
+    const toggle = document.getElementById('perf-overlay-toggle');
+    if (toggle) toggle.checked = false;
+    stopPerfOverlay();
   });
-  const filterBar = document.createElement('div');
-  filterBar.style.cssText = 'display:none;gap:3px;margin-top:3px;';
-  const filterBtns = new Map();
-  ['all', 'mod', 'native', 'other'].forEach((key) => {
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.style.cssText = `flex:1;${smallBtnCss}`;
-    b.addEventListener('click', () => {
-      config.perfOverlayFilter = key;
-      saveConfig();
-      renderPerfOverlay();
-    });
-    filterBtns.set(key, b);
-    filterBar.appendChild(b);
+  closeBtn.textContent = '×';
+  const minBtn = perfMakeButton(iconBtnCss, () => perfSetMinimized(!config.perfOverlayMinimized));
+  header.append(title, minBtn, closeBtn);
+  // Bare "+" like Setup Manager's map-shortcuts toggle (no frame, text shadow); only visible while the panel is hovered.
+  const restoreBtn = document.createElement('button');
+  restoreBtn.type = 'button';
+  restoreBtn.className = 'perf-restore';
+  restoreBtn.textContent = '+';
+  restoreBtn.style.cssText =
+    "display:none;position:absolute;top:-2px;right:3px;z-index:2;cursor:pointer;padding:0;margin:0;min-width:0;min-height:0;" +
+    "background:none;border:none;border-radius:0;color:#fff;font:bold 20px/1 'Courier New',monospace;text-shadow:1px 1px 0 #000,0 0 3px #000;";
+  restoreBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    perfSetMinimized(false);
   });
+  // body is rewritten every refresh; the buttons are persistent siblings so clicks are never lost mid-render.
+  // Same layering as Hunt Analyzer's default theme: darker panel, dark header, lighter "regular" content sections.
+  const body = perfSection('frame-4 surface-regular', 'flex:none;padding:0 2px;');
+  // Section title like Hunt Analyzer's (centred, accent colour); not a button, so it cannot be collapsed.
+  const detailsTitle = document.createElement('div'); // text is set by perfApplyLabels
+  detailsTitle.style.cssText = `flex:none;text-align:center;margin-bottom:3px;color:${PERF_C.bad};font-size:14px;font-weight:bold;${PERF_LINE_CSS}`;
   const list = document.createElement('div');
-  list.style.cssText =
-    'display:none;margin-top:3px;max-height:240px;overflow-x:hidden;overflow-y:auto;font:10px/1.4 monospace;' +
-    'cursor:default;';
-  const copyBtn = document.createElement('button');
-  copyBtn.type = 'button';
-  copyBtn.title = 'Copy the request log captured when the limit was reached';
-  copyBtn.style.cssText =
-    'display:none;margin-top:3px;width:100%;cursor:pointer;font:10px monospace;color:#fff;' +
-    'background:#a33;border:1px solid #d66;border-radius:3px;padding:1px 4px;';
-  copyBtn.addEventListener('click', copyPerfCaptures);
-  el.append(body, detailsBtn, filterBar, list, copyBtn);
+  list.className = 'frame-pressed-1 surface-regular';
+  list.style.cssText = perfFrameThickness(4) +
+    'display:none;flex-direction:column;flex:1 1 auto;min-height:120px;box-sizing:border-box;margin-top:4px;padding:0 2px;max-height:min(240px,40vh);' +
+    'overflow:hidden;cursor:default;'; // title row, scrolling rows and totals are children (see renderPerfAdvanced)
+  // Two equal-width buttons, like Hunt Analyzer's Clear All / Copy Log row.
+  const rowBtnCss = `flex:1 1 0;min-width:0;cursor:pointer;${perfFrameThickness(4)}${PERF_LINE_CSS}`;
+  const clearBtn = perfMakeButton(rowBtnCss, clearPerfData);
+  const copyBtn = perfMakeButton(rowBtnCss, copyPerfCaptures);
+  const footer = perfSection('frame-4 surface-regular', 'display:none;flex:none;gap:8px;margin-top:2px;padding:4px;');
+  footer.append(clearBtn, copyBtn); // Clear All first, like Hunt Analyzer's Clear All / Copy Log row
+  // The Details title and its list share one framed section, like Hunt Analyzer's titled display sections.
+  const detailsSection = perfSection('frame-4 surface-regular', 'flex:0 0 auto;display:flex;flex-direction:column;margin-top:2px;padding:4px;overflow:hidden;');
+  detailsSection.append(detailsTitle, list);
+  el.append(header, body, detailsSection, footer, restoreBtn);
   document.body.appendChild(el);
-  perfOverlay.el = el;
-  perfOverlay.body = body;
-  perfOverlay.detailsBtn = detailsBtn;
-  perfOverlay.filterBar = filterBar;
-  perfOverlay.filterBtns = filterBtns;
-  perfOverlay.list = list;
-  perfOverlay.copyBtn = copyBtn;
+  perfOverlay.ui = {
+    el, header, body, detailsSection, list, footer, copyBtn, minBtn, restoreBtn,
+    labels: { title, closeBtn, clearBtn, restoreBtn, details: detailsTitle }, // translatable, refreshed every render
+    resizeHandles: addPerfResizeHandles(el)
+  };
+  const size = config.perfOverlaySize;
+  if (size && size.w) el.style.width = `${size.w}px`;
   const pos = config.perfOverlayPos;
   if (pos && Number.isFinite(pos.x) && Number.isFinite(pos.y)) {
     setPerfOverlayPosition(el, pos.x, pos.y);
@@ -3666,7 +4304,10 @@ function startPerfOverlay() {
   renderPerfOverlay();
   perfOverlay.rafId = requestAnimationFrame(perfFrameTick);
   // rAF is paused in background tabs; keep the request counter's window ageing out regardless.
-  perfOverlay.refreshTimer = setInterval(renderPerfOverlay, 1000);
+  // Only renders when the frame tick has not (it is the one that keeps the panel fresh while the tab is visible).
+  perfOverlay.refreshTimer = setInterval(() => {
+    if (performance.now() - perfOverlay.lastRenderAt >= 900) renderPerfOverlay();
+  }, 1000);
 }
 
 function stopPerfOverlay() {
@@ -3683,19 +4324,21 @@ function stopPerfOverlay() {
   perfOverlay.copyBtnResetTimer = null;
   window.removeEventListener('pagehide', perfFlushOnPageHide);
   if (perfPersistDirty) perfPersistNow();
-  if (perfOverlay.el) {
-    perfOverlay.el.remove();
-    perfOverlay.el = null;
-    perfOverlay.body = null;
-    perfOverlay.hover = false;
-    perfOverlay.detailsBtn = null;
-    perfOverlay.filterBar = null;
-    perfOverlay.filterBtns = null;
-    perfOverlay.list = null;
-    perfOverlay.copyBtn = null;
+  if (perfOverlay.ui) {
+    perfOverlay.ui.el.remove();
+    perfOverlay.ui = null;
+    perfOverlay.layoutKey = '';
   }
-  perfOverlay.requests = [];
-  perfOverlay.captures = [];
+  if (perfOverlay.styleEl) {
+    perfOverlay.styleEl.remove();
+    perfOverlay.styleEl = null;
+  }
+  perfResetData();
+  if (perfOverlay.loafObserver) {
+    perfOverlay.loafObserver.disconnect();
+    perfOverlay.loafObserver = null;
+  }
+  perfOverlay.loafType = null;
   uninstallPerfFetchHook();
 }
 

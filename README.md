@@ -476,6 +476,7 @@ Centralized mod configuration and backup system with UI enhancements:
 - Live player count display in header with 30-second updates and setup labels visibility toggle
 - Backup/restore configuration including active mods, settings, and game data with integrated settings panel
 - Firebase best runs upload: Upload your best runs to Firebase with password encryption, auto-upload when new best runs are recorded, and download runs as .txt files with $replay links
+- Debugger overlay (Advanced → Debug): live FPS, frame times, API requests against the 30 per 10 seconds limit, memory and DOM size, plus a list ranking mods and scripts by time spent in slow frames; minimize it to a small fixed-size view, and copy a report for troubleshooting
 
 #### Outfiter
 Comprehensive outfit management system:

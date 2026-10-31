@@ -1096,7 +1096,43 @@ function buildProfileApiUrl(playerName) {
 // API (the game's own calls and other mods count too), so leave headroom.
 const PROFILE_RATE_WINDOW_MS = 10000;
 const PROFILE_RATE_MAX = 25;
+// Guilds' own cap is PROFILE_RATE_MAX, but it also yields to everyone else's traffic: it only sends while
+// ALL same-origin /api/ calls in the window (game, other mods, Guilds itself) stay under the server limit
+// minus a reserve, so the game's own calls always have headroom.
+const BA_API_LIMIT = 30;
+const PROFILE_SHARED_RESERVE = 5;
+const PROFILE_SHARED_MAX = BA_API_LIMIT - PROFILE_SHARED_RESERVE;
 const profileRequestTimestamps = [];
+const apiCallTimestamps = [];
+let apiCounterOriginalFetch = null;
+let apiCounterWrapper = null;
+
+// Counts every same-origin /api/ fetch (any caller) so the profile queue can see the shared budget.
+function installApiCallCounter() {
+  if (apiCounterWrapper) return;
+  const original = window.fetch;
+  apiCounterOriginalFetch = original;
+  apiCounterWrapper = function guildsCountingFetch(input) {
+    // After cleanup (when another mod wrapped fetch on top of us) this is a pure pass-through.
+    if (!apiCounterWrapper) return original.apply(this, arguments);
+    try {
+      const raw = typeof input === 'string' ? input : (input && input.url) || String(input);
+      const u = new URL(raw, window.location.href);
+      if (u.origin === window.location.origin && u.pathname.startsWith('/api/')) apiCallTimestamps.push(Date.now());
+    } catch (_) { /* unparsable URL: not counted */ }
+    return original.apply(this, arguments);
+  };
+  window.fetch = apiCounterWrapper;
+}
+
+function uninstallApiCallCounter() {
+  // Only restore if nobody wrapped us afterwards; otherwise the wrapper stays as a pass-through.
+  if (apiCounterWrapper && window.fetch === apiCounterWrapper) window.fetch = apiCounterOriginalFetch;
+  apiCounterWrapper = null;
+  apiCounterOriginalFetch = null;
+  apiCallTimestamps.length = 0;
+}
+installApiCallCounter();
 const profileRateLimitQueue = [];
 let profileQueueTimer = null;
 // On a 429 the whole queue pauses until the server's Retry-After has passed. Otherwise the
@@ -1128,6 +1164,15 @@ function processProfileRateLimitQueue() {
   if (profileRequestTimestamps.length >= PROFILE_RATE_MAX) {
     const waitMs = Math.min(PROFILE_RATE_WINDOW_MS, profileRequestTimestamps[0] + PROFILE_RATE_WINDOW_MS - now + 50);
     scheduleProfileQueue(Math.max(100, waitMs));
+    return;
+  }
+  // Shared budget: wait until enough calls from anyone have aged out to leave the reserve free.
+  while (apiCallTimestamps.length && apiCallTimestamps[0] < now - PROFILE_RATE_WINDOW_MS) {
+    apiCallTimestamps.shift();
+  }
+  if (apiCallTimestamps.length >= PROFILE_SHARED_MAX) {
+    const frees = apiCallTimestamps[apiCallTimestamps.length - PROFILE_SHARED_MAX];
+    scheduleProfileQueue(Math.max(100, Math.min(PROFILE_RATE_WINDOW_MS, frees + PROFILE_RATE_WINDOW_MS - now + 50)));
     return;
   }
   if (profileInitPaced && profileRequestTimestamps.length) {
@@ -11900,6 +11945,7 @@ exports = {
   
   cleanup: function() {
     try {
+      uninstallApiCallCounter();
       teardownGuildsAnalysisCoordination();
       // Stop account menu observer
       if (accountMenuObserver) {
