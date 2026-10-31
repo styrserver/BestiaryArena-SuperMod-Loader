@@ -8,6 +8,7 @@ This guide provides comprehensive documentation on creating mods for Bestiary Ar
   - [Table of Contents](#table-of-contents)
   - [Introduction](#introduction)
   - [Getting Started](#getting-started)
+    - [Sharing a Mod as a Community Mod](#sharing-a-mod-as-a-community-mod)
     - [Adding a New Built-in Mod to the Extension](#adding-a-new-built-in-mod-to-the-extension)
     - [Logging & Error Log](#logging--error-log-popup-debug)
     - [Basic Mod Template](#basic-mod-template)
@@ -63,6 +64,22 @@ To create a mod, you need to:
 1. Create a JavaScript file
 2. Add it to the extension through the popup interface, either as a local mod or via a Gist URL
 3. Enable the mod in the Mod Loader settings
+
+### Sharing a Mod as a Community Mod
+
+Community mods are public GitHub Gists listed on the wiki [Scripts page](https://bestiaryarena.wiki.gg/wiki/Scripts). The popup's **Community** tab reads that page and installs a mod from its Gist in one click (installed disabled, so players switch it on themselves).
+
+**Description.** The text shown under your mod's name comes from the **Gist description** field, the single line above the file editor when you create a Gist (or via **Edit** on an existing one). Keep it to one short sentence about what the mod does. If the Gist has no description, the popup uses the description from the wiki table, and if that is empty too it shows *"The author has not provided a description."* The description is saved with the mod when a player installs it, and refreshed when they update it.
+
+**Updates.** Each edit to your Gist is a new revision. The popup compares the latest revision with the one a player installed and shows an **Update** button. Once a Gist has been revised, the list also shows an **Updated** date and revision number (`rev N`, the count of revisions, so several edits on one day can be told apart). Revisions have no name or message, so put a version in your script header if you want one visible. Players can also enable **Auto-update** per mod (off by default); it checks every 6 hours and when they press **Refresh**, and the new script is used on the next game page load. Only edit the Gist with changes you want everyone on Auto-update to receive.
+
+**Checklist.**
+
+1. Create a public Gist containing a single script file (the same format as the template below).
+2. Fill in the Gist description.
+3. Add a row to the wiki Scripts table with your Gist link, a description, the date and your profile link.
+
+Community mods are not reviewed by the extension team, and players are warned in the popup that installing them is at their own risk.
 
 ### Adding a New Built-in Mod to the Extension
 

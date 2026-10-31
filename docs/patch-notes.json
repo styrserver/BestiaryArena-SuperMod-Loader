@@ -4,6 +4,41 @@
   },
   "notes": [
     {
+      "version": "5.2.0",
+      "changes": [
+        {
+          "mod": "Guilds",
+          "type": "changed",
+          "text": "Network failures while loading equipped items are no longer reported in the Error Log."
+        },
+        {
+          "mod": "Mod Loader",
+          "type": "added",
+          "text": "New Community tab in the popup (replaces Custom Mods) lists the community-made mods from the wiki, newest update first, with author, description (read from the Gist), upload date, and last-updated date and revision once revised. Mods link to their Gist and install in one click, disabled by default, under an at-your-own-risk warning. Installed mods show an Update button for new revisions, and can opt in to Auto-update (off by default), checked every 6 hours and on Refresh, and the card shows when it last updated or if the last check failed. The list is cached for 6 hours and links to the wiki page for adding your own mod. Add Script now lives in this tab."
+        },
+        {
+          "mod": "Mod Loader",
+          "type": "changed",
+          "text": "The All view now shows one titled box per category, including Community (which says so when no community mods are installed), and filtering to a category shows its title too. Category names are shorter (Original, Super, OT, Community), and tabs, titles and card badges share the same category colors. The \"Find more user-generated mods here!\" link was removed, and the Extras section moved to Mod Settings. Errors and delete confirmations now appear inside the popup instead of browser dialogs and the popup no longer rebuilds the mod list when nothing changed. Popup buttons now share one style, with the same hover, pressed, keyboard focus and disabled look and no animation when reduced motion is on."
+        },
+        {
+          "mod": "Mod Loader",
+          "type": "fixed",
+          "text": "Switching language quickly in the popup could duplicate mod cards, uninstalling a community mod left its button on Installed, and the same script could be added twice. Scripts added with Add Script now pick up their Gist description. Toggle switches show a keyboard focus ring, and the language and category buttons report their selected state to screen readers. Community update checks no longer count against GitHub's hourly request limit when nothing changed. Installing or updating a community mod now always downloads the latest revision instead of a cached older copy, and Refresh tells you when Auto-update lacks GitHub access or GitHub's request limit was reached. A long network outage no longer fills the Error Log with repeated tab recovery retry entries."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "added",
+          "text": "The Interface tab now has an Extras section with Unlock all outfits and Show the welcome page on page load, moved from the popup. The welcome page can now be switched off as well as on, and both apply to the open game page no matter which browser tab is active. Unlocking outfits takes effect immediately; turning it off needs a page refresh."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "changed",
+          "text": "Network failures while fetching the player online highscore are no longer reported in the Error Log, and a failed fetch is no longer logged twice."
+        }
+      ]
+    },
+    {
       "version": "5.1.16",
       "changes": [
         {

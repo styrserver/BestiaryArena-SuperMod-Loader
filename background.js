@@ -533,7 +533,12 @@ async function getLocalMods() {
       enabled: mod.enabled !== false,
       type: 'manual',
       content: mod.content,
-      originalName: mod.name
+      description: mod.description,
+      originalName: mod.name,
+      gistHash: mod.gistHash,
+      autoUpdate: !!mod.autoUpdate,
+      lastAutoUpdate: mod.lastAutoUpdate,
+      autoUpdateFailed: !!mod.autoUpdateFailed
     }));
     
     // Add bundled mods from mod-registry that are not yet in storage (e.g. after an extension update).
@@ -1217,6 +1222,11 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message.action === 'runCommunityAutoUpdate') {
+    runCommunityModAutoUpdate().then(sendResponse);
+    return true;
+  }
+
   if (message.action === 'getLocalMods') {
     getLocalMods()
       .then(mods => {
@@ -1521,10 +1531,8 @@ async function runDeadTabRecoveryProbe(tabId) {
     return;
   }
   if (!(await isGameServerReachable())) {
+    // Expected while offline: console only, so a long outage doesn't flood the Error Log.
     console.warn(`[Background] Tab ${tabId} recovery probe #${state.probes} failed: ${lastProbeFailure}`);
-    if (state.probes === 1 || state.probes % 4 === 0) {
-      recordTabRecoveryDiagnostic(`Tab ${tabId} server probe #${state.probes} failed (${lastProbeFailure}) — will retry`);
-    }
     scheduleDeadTabRecovery(tabId);
     return;
   }
@@ -1541,8 +1549,120 @@ async function runDeadTabRecoveryProbe(tabId) {
   }
 }
 
+// Community mods installed from a gist can opt in (`autoUpdate`) to pick up new gist
+// revisions. Runs from an alarm, so it works without the popup being open; the new
+// script is used on the next game page load.
+const COMMUNITY_AUTOUPDATE_ALARM = 'community-mod-autoupdate';
+const COMMUNITY_AUTOUPDATE_PERIOD_MIN = 360;
+
+// Resolves `{ success, reason? }` so the popup can tell the user why nothing updated.
+// reason: 'permission' (GitHub host access missing) | 'rateLimit' (GitHub API limit hit).
+async function runCommunityModAutoUpdate() {
+  let reason;
+  try {
+    const { manualMods = [] } = await browserAPI.storage.local.get('manualMods');
+    const targets = manualMods.filter((m) => m.autoUpdate && m.gistHash);
+    if (!targets.length) return { success: true };
+    if (browserAPI.permissions?.contains) {
+      const granted = await browserAPI.permissions.contains({ origins: ['*://gist.githubusercontent.com/*'] });
+      if (!granted) {
+        const failed = new Set(targets.map((m) => m.gistHash));
+        const fresh = (await browserAPI.storage.local.get('manualMods')).manualMods || [];
+        for (const mod of fresh) {
+          if (mod.autoUpdate && failed.has(mod.gistHash)) mod.autoUpdateFailed = true;
+        }
+        await browserAPI.storage.local.set({ manualMods: fresh });
+        return { success: false, reason: 'permission' };
+      }
+    }
+
+    const updates = new Map();
+    for (const mod of targets) {
+      try {
+        const headers = mod.etag ? { 'If-None-Match': mod.etag } : {};
+        // no-cache: api.github.com answers with max-age=60, which could hide a fresh revision.
+        const res = await fetch(`https://api.github.com/gists/${mod.gistHash}`, { headers, cache: 'no-cache' });
+        if (res.status === 304) {
+          updates.set(mod.gistHash, { autoUpdateFailed: false });
+          continue;
+        }
+        if (!res.ok) {
+          if (res.status === 429 || (res.status === 403 && res.headers.get('X-RateLimit-Remaining') === '0')) {
+            reason = 'rateLimit';
+          }
+          updates.set(mod.gistHash, { autoUpdateFailed: true });
+          continue;
+        }
+        const gist = await res.json();
+        const revision = gist.history?.[0]?.version;
+        const etag = res.headers.get('ETag');
+        if (!revision || revision === mod.revision) {
+          updates.set(mod.gistHash, { autoUpdateFailed: false, ...(etag && { etag }) });
+          continue;
+        }
+        // The unpinned /raw/<hash> URL is CDN-cached for minutes and can return the old code
+        // while we record the new revision. The API's raw_url is pinned to the revision.
+        const rawUrl = Object.values(gist.files || {})[0]?.raw_url || `https://gist.githubusercontent.com/raw/${mod.gistHash}`;
+        const raw = await fetch(rawUrl, { cache: 'no-store' });
+        const content = raw.ok ? await raw.text() : '';
+        if (!content) {
+          updates.set(mod.gistHash, { autoUpdateFailed: true });
+          continue;
+        }
+        const description = (gist.description || '').trim();
+        updates.set(mod.gistHash, {
+          content, revision, etag,
+          autoUpdateFailed: false,
+          lastAutoUpdate: Date.now(),
+          ...(description && { description })
+        });
+      } catch (error) {
+        console.warn('[Background] Community mod auto-update check failed:', mod.name, error);
+        updates.set(mod.gistHash, { autoUpdateFailed: true });
+      }
+    }
+    if (!updates.size) return { success: true };
+
+    // Re-read right before writing so concurrent popup edits are not clobbered.
+    const fresh = (await browserAPI.storage.local.get('manualMods')).manualMods || [];
+    let changed = false;
+    for (const mod of fresh) {
+      const update = mod.autoUpdate && mod.gistHash && updates.get(mod.gistHash);
+      if (update) {
+        Object.assign(mod, update);
+        changed = true;
+      }
+    }
+    if (changed) await browserAPI.storage.local.set({ manualMods: fresh });
+    return reason ? { success: false, reason } : { success: true };
+  } catch (error) {
+    console.warn('[Background] Community mod auto-update failed:', error);
+    return { success: false };
+  }
+}
+
+async function ensureCommunityAutoUpdateAlarm() {
+  try {
+    if (!browserAPI.alarms) return;
+    const existing = await browserAPI.alarms.get(COMMUNITY_AUTOUPDATE_ALARM);
+    if (!existing) {
+      browserAPI.alarms.create(COMMUNITY_AUTOUPDATE_ALARM, {
+        delayInMinutes: 1,
+        periodInMinutes: COMMUNITY_AUTOUPDATE_PERIOD_MIN
+      });
+    }
+  } catch (error) {
+    console.warn('[Background] Could not schedule community mod auto-update:', error);
+  }
+}
+ensureCommunityAutoUpdateAlarm();
+
 if (browserAPI.alarms?.onAlarm) {
   browserAPI.alarms.onAlarm.addListener((alarm) => {
+    if (alarm?.name === COMMUNITY_AUTOUPDATE_ALARM) {
+      runCommunityModAutoUpdate();
+      return;
+    }
     if (!alarm?.name?.startsWith(TAB_RECOVERY_ALARM_PREFIX)) return;
     const tabId = Number(alarm.name.slice(TAB_RECOVERY_ALARM_PREFIX.length));
     if (Number.isInteger(tabId)) runDeadTabRecoveryProbe(tabId);

@@ -13,10 +13,10 @@
         View Patch Notes
       </button>
       <div class="language-toggle">
-        <button id="lang-en" class="lang-btn active" title="English" aria-label="English">
+        <button id="lang-en" class="lang-btn active" aria-pressed="true" title="English" aria-label="English">
           <img class="lang-flag" src="../assets/icons/flag-us.svg" alt="English" width="20" height="14">
         </button>
-        <button id="lang-pt" class="lang-btn" title="Português" aria-label="Português">
+        <button id="lang-pt" class="lang-btn" aria-pressed="false" title="Português" aria-label="Português">
           <img class="lang-flag" src="../assets/icons/flag-br.svg" alt="Português" width="20" height="14">
         </button>
       </div>
@@ -38,97 +38,67 @@
   </div>
   
   <main>
+    <div id="popup-notice" class="popup-notice" role="alert" hidden></div>
+
     <!-- Search and Filter Bar -->
     <div class="store-controls">
       <div class="search-container">
         <input type="text" id="mod-search" class="search-input" data-localize-placeholder="popup.searchPlaceholder">
       </div>
       <div class="category-filters">
-        <button class="category-filter active" data-category="all" data-localize="popup.categoryAll">All</button>
-        <button class="category-filter" data-category="official" data-localize="popup.categoryOfficial">Original Mods</button>
-        <button class="category-filter" data-category="super" data-localize="popup.categorySuper">SuperMods</button>
-        <button class="category-filter" data-category="ot" data-localize="popup.categoryOt">OT Mods</button>
-        <button class="category-filter" data-category="custom" data-localize="popup.categoryCustom">Custom Mods</button>
+        <button class="category-filter active" aria-pressed="true" data-category="all" data-localize="popup.categoryAll">All</button>
+        <button class="category-filter" aria-pressed="false" data-category="official" data-localize="popup.categoryOfficial">Original</button>
+        <button class="category-filter" aria-pressed="false" data-category="super" data-localize="popup.categorySuper">Super</button>
+        <button class="category-filter" aria-pressed="false" data-category="ot" data-localize="popup.categoryOt">OT</button>
+        <button class="category-filter" aria-pressed="false" data-category="custom" data-localize="popup.categoryCustom">Community</button>
       </div>
     </div>
 
     <!-- Mods Grid Container -->
     <section id="mods-store">
-      <div id="mods-grid" class="mods-grid"></div>
+      <div id="mods-grid" class="mods-groups"></div>
       <div id="empty-state" class="empty-state" style="display: none;">
         <p data-localize="popup.noModsFound">No mods found matching your search.</p>
       </div>
-    </section>
-
-    <!-- Collapsible Add Script Section -->
-    <details class="collapsible-section">
-      <summary class="collapsible-header">
-        <span data-localize="popup.addScript">Add Script</span>
-        <span class="collapse-icon">▼</span>
-      </summary>
-      <div class="collapsible-content">
-        <form id="hash-form">
-          <div class="form-group">
-            <label for="hash-input" data-localize="popup.gistHashLabel">Gist hash or Gist URL</label>
-            <input type="text" id="hash-input" data-localize-placeholder="popup.gistHashPlaceholder" required>
-          </div>
-          <div class="form-hint" data-localize="popup.gistHashHelp">
-            Supports: GitHub Gist hash (e.g. <code>abcdef1234567890</code>) or Gist URL (e.g. <code>https://gist.github.com/user/abcdef1234567890</code>)
-          </div>
-          <div class="form-group">
-            <label for="name-input" data-localize="popup.scriptNameLabel">Script Name (optional)</label>
-            <input type="text" id="name-input" data-localize-placeholder="popup.scriptNamePlaceholder">
-          </div>
-          <button type="submit" class="primary-button" data-localize="popup.addButton">Add</button>
-        </form>
-      </div>
-    </details>
-
-    <!-- External Link -->
-    <div class="external-link">
-      <a href="https://bestiaryarena.wiki.gg/wiki/Scripts" target="_blank" data-localize="popup.findMoreMods">
-        Find more user-generated mods here! →
-      </a>
-    </div>
-
-    <!-- Collapsible Extras Section -->
-    <details class="collapsible-section" data-section="extras">
-      <summary class="collapsible-header">
-        <span data-localize="popup.extras">Extras</span>
-        <span class="collapse-icon">▼</span>
-      </summary>
-      <div class="collapsible-content">
-        <!-- Outfiter -->
-        <div class="setting-item">
-          <div class="setting-header">
-            <label for="outfiter-toggle" data-localize="popup.outfiter">🎭 Outfiter</label>
-            <div class="setting-control">
-              <span id="outfiter-status" data-localize="popup.off">OFF</span>
-              <label class="toggle-switch">
-                <input type="checkbox" id="outfiter-toggle">
-                <span class="slider"></span>
-              </label>
+      <!-- Community category box (wiki Scripts page + installed community mods) -->
+      <div id="community-mods" class="mod-group" data-category="custom" style="display: none;">
+        <div class="mod-group-header">
+          <h3 class="mod-group-title" data-localize="popup.communityMods">Community</h3>
+          <button type="button" id="community-mods-refresh" class="primary-button community-mods-refresh" data-localize="popup.communityRefresh">Refresh</button>
+        </div>
+        <div class="community-mods-warning" role="note" data-localize="popup.communityRiskWarning">⚠ Community mods are made by third parties and are not reviewed. Installing and running them is at your own risk.</div>
+        <div id="community-installed-empty" class="empty-state" style="display: none;">
+          <p data-localize="popup.noModsFound">No mods found matching your search.</p>
+        </div>
+        <div id="community-installed" class="mods-grid"></div>
+        <div id="community-mods-status" class="form-hint"></div>
+        <div id="community-mods-list" class="community-mods-list"></div>
+        <a class="community-mods-wiki-link" href="https://bestiaryarena.wiki.gg/wiki/Scripts" target="_blank" rel="noopener noreferrer" data-localize="popup.communityAddToWiki">Made a mod? Add it to the wiki list →</a>
+      <!-- Collapsible Add Script Section -->
+      <details class="collapsible-section">
+        <summary class="collapsible-header">
+          <span data-localize="popup.addScript">Add Script</span>
+          <span class="collapse-icon">▼</span>
+        </summary>
+        <div class="collapsible-content">
+          <form id="hash-form">
+            <div class="form-group">
+              <label for="hash-input" data-localize="popup.gistHashLabel">Gist hash or Gist URL</label>
+              <input type="text" id="hash-input" data-localize-placeholder="popup.gistHashPlaceholder" required>
             </div>
-          </div>
-          <p class="setting-description" data-localize="popup.outfiterDescription">
-            Locally unlocks all outfits in the outfit selector. Changes require page refresh.
-          </p>
+            <div class="form-hint" data-localize="popup.gistHashHelp">
+              Supports: GitHub Gist hash (e.g. <code>abcdef1234567890</code>) or Gist URL (e.g. <code>https://gist.github.com/user/abcdef1234567890</code>)
+            </div>
+            <div class="form-group">
+              <label for="name-input" data-localize="popup.scriptNameLabel">Script Name (optional)</label>
+              <input type="text" id="name-input" data-localize-placeholder="popup.scriptNamePlaceholder">
+            </div>
+            <button type="submit" class="primary-button" data-localize="popup.addButton">Add</button>
+          </form>
         </div>
-
-        <!-- Welcome Page -->
-        <div class="setting-item">
-          <div class="setting-header">
-            <label data-localize="popup.welcomePage">Welcome Page</label>
-            <button id="enable-welcome-btn" class="welcome-btn" data-localize="popup.enableWelcomePage">
-              Enable Welcome Page
-            </button>
-          </div>
-          <p class="setting-description" data-localize="popup.welcomePageDescription">
-            Enable the welcome page to show on next page load.
-          </p>
-        </div>
+      </details>
       </div>
-    </details>
+    </section>
 
     <!-- Collapsible Debug Section -->
     <details class="collapsible-section" data-section="debug">

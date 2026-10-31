@@ -9598,7 +9598,11 @@ async function getEquippedItems() {
         equippedItemsCache = { playerName, data: normalized, fetchedAt: Date.now() };
         return normalized;
       } catch (error) {
-        console.error('[Equipment] Error loading equipped items from Firebase:', error);
+        if (error instanceof TypeError) {
+          console.warn('[Equipment] Error loading equipped items from Firebase (network):', error);
+        } else {
+          console.error('[Equipment] Error loading equipped items from Firebase:', error);
+        }
         return {};
       } finally {
         if (equippedItemsInFlight && equippedItemsInFlight.promise === promise) {

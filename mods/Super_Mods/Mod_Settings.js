@@ -8477,6 +8477,21 @@ function showSettingsModal() {
               </button>
             </div>
           </div>
+          <div style="${uiSectionWrapperStyle}">
+            <h4 style="${uiSectionTitleStyle}">${t('mods.betterUI.interfaceSectionExtras')}</h4>
+            <div style="${uiOptionStyle}">
+              <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;" title="${t('mods.betterUI.outfiterDescription')}">
+                <input type="checkbox" id="outfiter-toggle" style="transform: scale(1.2);">
+                <span>${t('mods.betterUI.outfiterLabel')}</span>
+              </label>
+            </div>
+            <div style="${uiOptionStyle}">
+              <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                <input type="checkbox" id="welcome-page-toggle" style="transform: scale(1.2);">
+                <span>${t('mods.betterUI.welcomePageLabel')}</span>
+              </label>
+            </div>
+          </div>
         `;
         rightColumn.appendChild(uiContent);
       } else if (categoryId === 'creatures') {
@@ -10664,6 +10679,27 @@ function showSettingsModal() {
       if (perfOverlayCheckbox) {
         createSettingsCheckboxHandler('showPerfOverlay', startPerfOverlay, stopPerfOverlay)(perfOverlayCheckbox);
       }
+
+      // Extras (moved from the popup): these write the same page-side flags the
+      // popup used to inject, so they work regardless of which tab is focused.
+      const bindPageFlagCheckbox = (selector, storageKey, windowKey, action, isEnabled) => {
+        const checkbox = content.querySelector(selector);
+        if (!checkbox) return;
+        try {
+          checkbox.checked = isEnabled(localStorage.getItem(storageKey));
+        } catch (_) {}
+        checkbox.addEventListener('change', () => {
+          const enabled = checkbox.checked;
+          try {
+            localStorage.setItem(storageKey, String(enabled));
+          } catch (_) {}
+          window[windowKey] = enabled;
+          window.postMessage({ from: 'BESTIARY_EXTENSION', action, enabled }, '*');
+        });
+      };
+      bindPageFlagCheckbox('#outfiter-toggle', 'outfiter-enabled', 'OUTFITER_ENABLED', 'updateOutfiterMode', (v) => v === 'true');
+      // The welcome page is on unless explicitly disabled.
+      bindPageFlagCheckbox('#welcome-page-toggle', 'welcome-enabled', 'WELCOME_ENABLED', 'updateWelcomeMode', (v) => v !== 'false');
 
       // Hunt Analyzer settings
       bindHuntAnalyzerCheckbox(content.querySelector('#hunt-analyzer-persist-toggle'), {
@@ -18493,7 +18529,11 @@ async function fetchPlayerOnlineHighscore() {
     return null;
   } catch (error) {
     playercountState.onlineRecordFetchSucceeded = false;
-    console.error('[Mod Settings] Error fetching player online highscore:', error);
+    if (error instanceof TypeError) {
+      console.warn('[Mod Settings] Error fetching player online highscore (network):', error);
+    } else {
+      console.error('[Mod Settings] Error fetching player online highscore:', error);
+    }
     return playercountState.onlineRecord;
   }
 }
@@ -18525,7 +18565,11 @@ async function updatePlayerOnlineHighscoreIfHigher(count) {
   } catch (error) {
     playercountState.onlineRecordFetchSucceeded = false;
     console.warn('[Mod Settings] Skipping player online highscore update because latest record could not be fetched');
-    console.error('[Mod Settings] Error fetching player online highscore:', error);
+    if (error instanceof TypeError) {
+      console.warn('[Mod Settings] Error fetching player online highscore (network):', error);
+    } else {
+      console.error('[Mod Settings] Error fetching player online highscore:', error);
+    }
     return playercountState.onlineRecord;
   }
 
