@@ -12,26 +12,61 @@ const SHINY_ALIAS_CREATURES = [
     shinyOnly: true
   }
 ];
+/**
+ * Named room bosses that are a native species under a `nickname`, but play by different rules
+ * (see docs/game_state_api.md, "Villain / room-script creature mechanics"). Display-only: no player can own one, so they never match an
+ * inventory monster, have no shiny, and count as event creatures (no awaken / scroll / shiny).
+ */
+const BOSS_ALIAS_CREATURES = [
+  {
+    displayName: 'Hemorrhage',
+    gameId: 127,
+    baseSpecies: 'Clot',
+    bossOnly: true,
+    // The native Clot tooltip still says "Up to 2 clones"; the real rule is the room script's
+    // (text lives in mapsDatabase.ROOM_SCRIPT_NOTES, shared with the map stats panel).
+    roomScript: 'crhw2'
+  }
+];
+// Boss aliases are listed under Unobtainable (UNOBTAINABLE_CREATURES), not as extra Creatures.
 const CYCLOPEDIA_EXTRA_CREATURES = SHINY_ALIAS_CREATURES.map((entry) => entry.displayName);
 
-function getShinyAliasByDisplayName(creatureName) {
+function findAliasByDisplayName(aliases, creatureName) {
   const norm = String(creatureName ?? '').trim().toLowerCase();
   if (!norm) return null;
-  return SHINY_ALIAS_CREATURES.find((entry) => entry.displayName.toLowerCase() === norm) ?? null;
+  return aliases.find((entry) => entry.displayName.toLowerCase() === norm) ?? null;
+}
+
+function getShinyAliasByDisplayName(creatureName) {
+  return findAliasByDisplayName(SHINY_ALIAS_CREATURES, creatureName);
+}
+
+function getBossAliasByDisplayName(creatureName) {
+  return findAliasByDisplayName(BOSS_ALIAS_CREATURES, creatureName);
+}
+
+function aliasToDisplayQuery(alias, extras) {
+  return {
+    displayName: alias.displayName,
+    gameId: alias.gameId,
+    baseSpecies: alias.baseSpecies,
+    forceShiny: false,
+    shinyOnly: false,
+    nonShinyOnly: false,
+    ...extras
+  };
 }
 
 function resolveCreatureDisplay(creatureName) {
-  const alias = getShinyAliasByDisplayName(creatureName);
-  if (alias) {
-    return {
-      displayName: alias.displayName,
-      gameId: alias.gameId,
-      baseSpecies: alias.baseSpecies,
-      forceShiny: true,
-      shinyOnly: true,
-      nonShinyOnly: false
-    };
+  const boss = getBossAliasByDisplayName(creatureName);
+  if (boss) {
+    return aliasToDisplayQuery(boss, {
+      bossOnly: true,
+      abilityNote: globalThis.mapsDatabase?.ROOM_SCRIPT_NOTES?.[boss.roomScript] ?? null
+    });
   }
+  const alias = getShinyAliasByDisplayName(creatureName);
+  if (alias) return aliasToDisplayQuery(alias, { forceShiny: true, shinyOnly: true });
 
   const monster = findMonsterByName(creatureName);
   const gameId = monster?.gameId ?? null;
@@ -48,22 +83,25 @@ function resolveCreatureDisplay(creatureName) {
   };
 }
 
+/** Whether an owned monster belongs to a resolved display query (boss aliases are never owned). */
+function queryMatchesMonster(query, monster) {
+  if (query.gameId == null || query.bossOnly || !monster) return false;
+  if (Number(monster.gameId) !== Number(query.gameId)) return false;
+  if (query.shinyOnly) return monster.shiny === true;
+  if (query.nonShinyOnly) return monster.shiny !== true;
+  return true;
+}
+
 function filterMonstersForCreatureDisplay(creatureName, monsters) {
+  if (!Array.isArray(monsters)) return [];
   const query = resolveCreatureDisplay(creatureName);
-  if (query.gameId == null || !Array.isArray(monsters)) return [];
-  let filtered = monsters.filter((m) => m && m.gameId === query.gameId);
-  if (query.shinyOnly) {
-    filtered = filtered.filter((m) => m.shiny === true);
-  } else if (query.nonShinyOnly) {
-    filtered = filtered.filter((m) => m.shiny !== true);
-  }
-  return filtered;
+  return monsters.filter((m) => queryMatchesMonster(query, m));
 }
 
 function creatureHasShinyVariant(creatureName) {
   const resolved = resolveCreatureDisplay(creatureName);
   if (!resolved?.gameId) return true;
-  if (resolved.shinyOnly) return false;
+  if (resolved.shinyOnly || resolved.bossOnly) return false;
   if (GAZER_GAME_IDS_WITHOUT_SHINY.has(resolved.gameId)) return false;
   if (resolved.gameId === MYSTIC_GAZER_GAME_ID) return false;
   return true;
@@ -184,6 +222,7 @@ const EVENT_CREATURES = [
 function isEventCreatureName(creatureName) {
   const norm = String(creatureName ?? '').trim().toLowerCase();
   if (!norm) return false;
+  if (getBossAliasByDisplayName(norm)) return true;
   return EVENT_CREATURES.some((name) => name.toLowerCase() === norm);
 }
 
@@ -283,12 +322,7 @@ function getDisplayNameForOwnedMonster(monster) {
 
 /** Whether an inventory monster belongs to a Cyclopedia/display creature name. */
 function monsterMatchesCreatureDisplay(displayName, monster) {
-  const query = resolveCreatureDisplay(displayName);
-  if (query.gameId == null || !monster) return false;
-  if (Number(monster.gameId) !== Number(query.gameId)) return false;
-  if (query.shinyOnly) return monster.shiny === true;
-  if (query.nonShinyOnly) return monster.shiny !== true;
-  return true;
+  return queryMatchesMonster(resolveCreatureDisplay(displayName), monster);
 }
 
 // Creature database with shiny portrait support
@@ -358,7 +392,11 @@ function buildCreatureDatabase() {
       .filter(m => hardcodedUnobtainable.includes(m.metadata.name))
       .map(m => m.metadata.name);
     
-    const unobtainableCreatures = [...new Set([...hardcodedUnobtainable, ...unobtainableFromMonsters])]
+    const unobtainableCreatures = [...new Set([
+      ...hardcodedUnobtainable,
+      ...unobtainableFromMonsters,
+      ...BOSS_ALIAS_CREATURES.map((entry) => entry.displayName)
+    ])]
       .sort((a, b) => a.localeCompare(b));
     
     const nonAwakenableCreatures = [...new Set([
@@ -382,6 +420,7 @@ function buildCreatureDatabase() {
       ALL_GAZER_GAME_IDS,
       GAZER_GAME_IDS_WITHOUT_SHINY,
       SHINY_ALIAS_CREATURES,
+      BOSS_ALIAS_CREATURES,
       getCyclopediaCreatureNames: () => getCyclopediaCreatureNames(obtainableCreatures),
       getCreaturePickerNames: () => getCyclopediaCreatureNames(obtainableCreatures),
       getAutoscrollAutosellerCreaturePickerNames: () => getAutoscrollAutosellerCreaturePickerNames(obtainableCreatures),
@@ -506,7 +545,7 @@ function getMonsterNameMap() {
 }
 
 function findMonsterByName(name) {
-  const alias = getShinyAliasByDisplayName(name);
+  const alias = getShinyAliasByDisplayName(name) ?? getBossAliasByDisplayName(name);
   if (alias) {
     return findMonsterByGameId(alias.gameId);
   }
@@ -601,6 +640,7 @@ const placeholderDatabase = {
   MONSTER_STAT_DISPLAY_CONFIG,
   MYSTIC_GAZER_GAME_ID,
   SHINY_ALIAS_CREATURES,
+  BOSS_ALIAS_CREATURES,
   getCyclopediaCreatureNames: () => getCyclopediaCreatureNames([]),
   getMonsterNameMap,
   resolveCreatureDisplay,

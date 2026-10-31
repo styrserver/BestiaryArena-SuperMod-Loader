@@ -4,6 +4,31 @@
   },
   "notes": [
     {
+      "version": "5.2.1",
+      "changes": [
+        {
+          "mod": "Cyclopedia",
+          "type": "added",
+          "text": "Hemorrhage now has its own entry under Unobtainable, with its location and a Special ability note explaining how it differs from a regular Clot. The Maps tab now lists special room rules per floor range (for example creatures that start awakened or have altered stats), read from the game's own floor data so they stay in step with the floors."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "changed",
+          "text": "The Maps tab no longer shows the run-tracking bullets or the \"saved top records\" line; rooms without special rules now say so, centered in the box."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "fixed",
+          "text": "A creature that appears once on every floor of a multi-floor room (like Hemorrhage) showed a multiplier such as ×5 in its Location list; the multiplier now counts per floor, so one creature per floor shows no multiplier."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "added",
+          "text": "Maintainers (Firebase admins) now get a once-a-day check that the Cyclopedia's room rule notes still match the game, reported in the Error Log when a rule is new or has changed, with a toast and an automatic text report that lists what to fix and includes the game's current rule data, ready to hand to whoever updates the notes."
+        }
+      ]
+    },
+    {
       "version": "5.2.0",
       "changes": [
         {

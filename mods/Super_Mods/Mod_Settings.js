@@ -20383,6 +20383,117 @@ const unsubscribeFromMapChanges = () => {
 };
 
 // =======================
+// Admin: room-script drift check
+// =======================
+// The game's room scripts (special villain rules) are minified code, so the notes in
+// mapsDatabase.ROOM_SCRIPT_NOTES are hand-written. For Firebase admins, compare the live game's
+// scripts with those notes (same logic as tools/check-room-scripts.mjs) at most once a day and
+// report drift to the Error Log. Non-admins never run it or make the requests.
+const ROOM_SCRIPT_CHECK_STORAGE_KEY = 'ba-room-script-check-last';
+// Signature of the problems already alerted, so unchanged drift is not re-downloaded every day.
+const ROOM_SCRIPT_CHECK_REPORTED_KEY = 'ba-room-script-check-reported';
+const ROOM_SCRIPT_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const ROOM_SCRIPT_CHECK_DELAY_MS = 20000;
+let roomScriptCheckTimer = null;
+
+function downloadTextFile(filename, text) {
+  const url = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function getLoadedGameChunkUrls() {
+  const urls = new Set();
+  Array.from(document.scripts, (script) => script.src).forEach((src) => urls.add(src));
+  try {
+    performance.getEntriesByType('resource').forEach((entry) => urls.add(entry.name));
+  } catch (_) { /* ignore */ }
+  return [...urls].filter((url) => url && url.includes('/_next/static/chunks/') && url.endsWith('.js'));
+}
+
+async function runAdminRoomScriptCheck() {
+  const mapsDb = window.mapsDatabase;
+  if (typeof mapsDb?.extractRoomScripts !== 'function' || typeof mapsDb?.diffRoomScripts !== 'function') return;
+  const name = getCurrentPlayerName();
+  if (!name || typeof window.FirebaseAdminsAPI?.isPlayerAdminAsync !== 'function') return;
+  if (!(await window.FirebaseAdminsAPI.isPlayerAdminAsync(name))) return;
+  try {
+    const last = Number(localStorage.getItem(ROOM_SCRIPT_CHECK_STORAGE_KEY)) || 0;
+    if (Date.now() - last < ROOM_SCRIPT_CHECK_INTERVAL_MS) return;
+  } catch (_) { /* storage unavailable: just run */ }
+
+  try {
+    const urls = getLoadedGameChunkUrls();
+    const texts = await Promise.all(urls.map(async (url) => {
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`${url} -> HTTP ${response.status}`);
+      return response.text();
+    }));
+    const sources = mapsDb.readRoomScriptSources(texts);
+    const gameScripts = await mapsDb.extractRoomScripts(sources);
+    const problems = mapsDb.diffRoomScripts(gameScripts);
+    // Only a completed check starts the 24h wait; a failed one is retried on the next load.
+    try { localStorage.setItem(ROOM_SCRIPT_CHECK_STORAGE_KEY, String(Date.now())); } catch (_) { /* ignore */ }
+    if (problems.length === 0) {
+      try { localStorage.removeItem(ROOM_SCRIPT_CHECK_REPORTED_KEY); } catch (_) { /* ignore */ }
+      console.info('[Mod Settings] Room script check: all notes up to date');
+      return;
+    }
+    window.BestiaryLoaderErrorLog?.report(
+      'Room script check',
+      `${problems.length} game room script(s) need their ROOM_SCRIPT_NOTES reviewed`,
+      problems.map((p) => `${p.kind} ${p.message}`).join('\n')
+    );
+
+    // Toast + .txt report once per distinct set of problems (the Error Log entry repeats daily).
+    const signature = mapsDb.roomScriptProblemsSignature(problems);
+    let alreadyAlerted = false;
+    try { alreadyAlerted = localStorage.getItem(ROOM_SCRIPT_CHECK_REPORTED_KEY) === signature; } catch (_) { /* ignore */ }
+    if (alreadyAlerted) return;
+    try { localStorage.setItem(ROOM_SCRIPT_CHECK_REPORTED_KEY, signature); } catch (_) { /* ignore */ }
+    let downloaded = false;
+    try {
+      downloadTextFile(
+        `room-script-report-${new Date().toISOString().slice(0, 10)}.txt`,
+        mapsDb.buildRoomScriptReport(problems, sources, gameScripts)
+      );
+      downloaded = true;
+    } catch (error) {
+      console.warn('[Mod Settings] Room script report download failed:', error);
+    }
+    createToast({
+      message: downloaded
+        ? `${problems.length} room script(s) changed in the game. Report downloaded: paste it to Claude.`
+        : `${problems.length} room script(s) changed in the game. See the Error Log in the popup.`,
+      type: 'warning',
+      duration: 15000
+    });
+  } catch (error) {
+    console.warn('[Mod Settings] Room script check failed:', error);
+  }
+}
+
+function scheduleAdminRoomScriptCheck() {
+  if (roomScriptCheckTimer) return;
+  roomScriptCheckTimer = setTimeout(() => {
+    roomScriptCheckTimer = null;
+    runAdminRoomScriptCheck();
+  }, ROOM_SCRIPT_CHECK_DELAY_MS);
+}
+
+function cancelAdminRoomScriptCheck() {
+  if (roomScriptCheckTimer) {
+    clearTimeout(roomScriptCheckTimer);
+    roomScriptCheckTimer = null;
+  }
+}
+
+// =======================
 // 18. Exports & Lifecycle Management
 // =======================
 
@@ -20391,6 +20502,7 @@ exports = {
   init: function() {
     try {
       initBetterUI();
+      scheduleAdminRoomScriptCheck();
       return true;
     } catch (error) {
       console.error('[Mod Settings] Initialization error:', error);
@@ -20400,6 +20512,7 @@ exports = {
   
   cleanup: function() {
     try {
+      cancelAdminRoomScriptCheck();
       cleanupBetterUI();
       try { if (window.__baRestorePreimportBackup === restorePreimportBackup) delete window.__baRestorePreimportBackup; } catch (_) {}
       return true;

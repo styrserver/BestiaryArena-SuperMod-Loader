@@ -170,7 +170,6 @@ const LAYOUT_CONSTANTS = {
   MAPS_DETAIL_COL_MIN: 150,
   MAPS_DETAIL_COL_MAX: 230,
   MAPS_STAT_COL_MIN: 150,
-  MAPS_MAP_STATS_MIN_WIDTH: 500,
   MODAL_WIDTH: 1000,
   MODAL_HEIGHT: 660,
   MODAL_VIEWPORT_PADDING: 16,
@@ -3210,9 +3209,9 @@ const LOCATION_UTILS = {
     const maps = window.BestiaryModAPI?.utility?.maps;
     return maps?.monsterNamesToGameIds?.get(monsterName.toLowerCase());
   },
-  createLocationData: (actor, index) => ({
+  createLocationData: (actor, index, floor = null) => ({
     tileIndex: null, direction: actor.direction || 'unknown', level: actor.level || 1,
-    tier: 0, villain: true, equipment: null, actorIndex: index
+    tier: 0, villain: true, equipment: null, actorIndex: index, floor
   })
 };
 
@@ -3274,11 +3273,15 @@ function findMonsterLocations(monsterName) {
 
   const locations = [];
   try {
-    const monsterGameId = LOCATION_UTILS.getMonsterGameId(monsterName);
+    // A boss alias (e.g. Hemorrhage) is a nicknamed actor of its base species, so match on both.
+    const bossDisplay = cyclopediaResolveCreatureQuery(monsterName);
+    const bossNickname = bossDisplay?.bossOnly ? bossDisplay.displayName : null;
+    const monsterGameId = bossNickname ? bossDisplay.gameId : LOCATION_UTILS.getMonsterGameId(monsterName);
     if (!monsterGameId) {
       cyclopediaState.monsterLocationCache.set(cacheKey, locations);
       return locations;
     }
+    const isTargetActor = (actor) => actor?.id === monsterGameId && (!bossNickname || actor.nickname === bossNickname);
 
     getCyclopediaAllRoomEntries().forEach(([roomKey, room]) => {
       try {
@@ -3293,11 +3296,11 @@ function findMonsterLocations(monsterName) {
           room.floorFiles.forEach((floorFile, floorIndex) => {
             const actors = floorFile?.data?.actors;
             if (!Array.isArray(actors)) return;
-            const monsterInFloor = actors.filter(actor => actor?.id === monsterGameId);
+            const monsterInFloor = actors.filter(isTargetActor);
             if (monsterInFloor.length === 0) return;
             floors.add(floorIndex);
             monsterInFloor.forEach((actor) => {
-              roomLocations.push(LOCATION_UTILS.createLocationData(actor, roomLocations.length));
+              roomLocations.push(LOCATION_UTILS.createLocationData(actor, roomLocations.length, floorIndex));
             });
           });
           // Drop-only creatures (floorRules[].extraMonsterDrops) are not on the board, so they
@@ -3316,7 +3319,7 @@ function findMonsterLocations(monsterName) {
 
         // Drop-only creatures (room.extraMonsterDrops) are not placed on the board, so they
         // still get a room row but with no position details.
-        const monsterInRoom = (room.file?.data?.actors ?? []).filter(actor => actor?.id === monsterGameId);
+        const monsterInRoom = (room.file?.data?.actors ?? []).filter(isTargetActor);
         const isExtraDrop = !!globalThis.mapsDatabase?.getExtraMonsterDropGameIds?.(room)?.includes(monsterGameId);
         if (monsterInRoom.length > 0 || isExtraDrop) {
           const roomName = getCyclopediaRoomDisplayName(room?.id ?? roomKey);
@@ -8779,11 +8782,19 @@ function renderCreatureTemplate(name, showShinyPortraits = false, showOldSprites
             });
           }
           dropsList.appendChild(roomDiv);
-          const levelCounts = new Map();
+          // "×N" is how many appear together on one board. Multi-floor rooms list the creature once
+          // per floor, so count within each floor and keep the largest, not the total across floors.
+          const perFloorCounts = new Map(); // level -> Map(floor -> count)
           positions.forEach((pos) => {
             const level = pos?.level ?? 1;
-            levelCounts.set(level, (levelCounts.get(level) || 0) + 1);
+            const floor = pos?.floor ?? 0;
+            if (!perFloorCounts.has(level)) perFloorCounts.set(level, new Map());
+            const floorCounts = perFloorCounts.get(level);
+            floorCounts.set(floor, (floorCounts.get(floor) || 0) + 1);
           });
+          const levelCounts = new Map(
+            [...perFloorCounts].map(([level, floorCounts]) => [level, Math.max(...floorCounts.values())])
+          );
           [...levelCounts.entries()]
             .sort((a, b) => a[0] - b[0])
             .forEach(([level, count]) => {
@@ -9130,13 +9141,20 @@ function renderCreatureTemplate(name, showShinyPortraits = false, showOldSprites
   } else {
     if (isUnobtainable) {
       col3Content.className = FONT_CONSTANTS.SIZES.BODY;
-      col3Content.textContent = 'This creature is unobtainable.';
-      // Center the text and add padding for unobtainable creatures
-      col3Content.style.textAlign = 'center';
+      // Boss aliases (e.g. Hemorrhage) describe their special ability here; others get the placeholder.
+      const abilityNote = cyclopediaResolveCreatureQuery(name)?.abilityNote;
+      if (abilityNote) {
+        appendSpecialAbilitySection(col3Content, [{ label: null, rows: abilityNote.split('\n') }]);
+      } else {
+        col3Content.textContent = 'This creature is unobtainable.';
+      }
+      // Placeholder is centered; a Special ability note is left-aligned from the top.
+      const leftAligned = !!abilityNote;
+      col3Content.style.textAlign = leftAligned ? 'left' : 'center';
       col3Content.style.padding = '20px';
       col3Content.style.display = 'flex';
-      col3Content.style.alignItems = 'center';
-      col3Content.style.justifyContent = 'center';
+      col3Content.style.alignItems = leftAligned ? 'flex-start' : 'center';
+      col3Content.style.justifyContent = leftAligned ? 'flex-start' : 'center';
     } else {
       col3Content.className = FONT_CONSTANTS.SIZES.BODY;
       col3Content.textContent = 'You do not own this creature.';
@@ -11379,10 +11397,57 @@ function renderDailyContextColumn() {
 
 // --- 10b. Maps Tab ---
 
+/**
+ * Room-script rules for a room, read from its live floor files (mapsDatabase.getRoomScriptNotes),
+ * as `{ label, rows }` groups, e.g. `{ label: 'Floors 6-10', rows: [...] }` (`label` is null for
+ * single-board rooms). A note separates distinct abilities with a newline, one row each.
+ */
+function getMapMechanicGroups(roomId) {
+  const notes = mapsDbRef.getRoomScriptNotes?.(roomId) ?? [];
+  return notes.map(({ text, firstFloor, lastFloor }) => ({
+    label: firstFloor == null ? null
+      : (firstFloor === lastFloor ? `Floor ${firstFloor}` : `Floors ${firstFloor}-${lastFloor}`),
+    rows: text.split('\n')
+  }));
+}
+
+/**
+ * Shared special-ability block (Bestiary boss column and Maps room rules): an optional gold
+ * underlined "Special ability" heading, then each group's optional label and one row per ability,
+ * left-aligned.
+ * @param {HTMLElement} container
+ * @param {{ label: string|null, rows: string[] }[]} groups
+ * @param {boolean} [showHeading=true] - the Maps tab omits it (its panel title already says so)
+ */
+function appendSpecialAbilitySection(container, groups, showHeading = true) {
+  if (showHeading) {
+    const heading = document.createElement('div');
+    heading.textContent = 'Special ability';
+    // word-spacing: the game's body font uses a negative value that swallows the space ("SPECIALABILITY").
+    heading.style.cssText = 'color: #ffe066; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; word-spacing: 0.25em; margin-bottom: 6px; padding-bottom: 3px; border-bottom: 1px solid #ffe066; width: 100%; text-align: left;';
+    container.appendChild(heading);
+  }
+  groups.forEach(({ label, rows }) => {
+    if (label) {
+      const labelEl = document.createElement('div');
+      labelEl.textContent = label;
+      labelEl.style.cssText = 'color: #e6d7b0; font-weight: 700; margin-bottom: 2px; text-align: left;';
+      container.appendChild(labelEl);
+    }
+    rows.forEach((row) => {
+      const rowEl = document.createElement('div');
+      rowEl.textContent = row;
+      rowEl.style.cssText = 'margin-bottom: 6px; text-align: left;';
+      container.appendChild(rowEl);
+    });
+  });
+  // No trailing gap under the last row.
+  if (container.lastElementChild) container.lastElementChild.style.marginBottom = '0';
+}
+
 // Helper function to create statistics section
 function createStatisticsSection(selectedMap, leaderboardData) {
   const statsLineTruncate = 'width: 100%; max-width: 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; box-sizing: border-box;';
-  const mapStatsMinWidth = `${LAYOUT_CONSTANTS.MAPS_MAP_STATS_MIN_WIDTH}px`;
   const statsContainer = document.createElement('div');
   statsContainer.className = 'cyclopedia-map-stats-panel';
   statsContainer.style.display = 'flex';
@@ -11586,7 +11651,7 @@ function createStatisticsSection(selectedMap, leaderboardData) {
   // Row 2: Top 5 tables (max 180px height)
   const row2 = document.createElement('div');
   row2.style.flexShrink = '0';
-  row2.style.minWidth = mapStatsMinWidth;
+  row2.style.minWidth = '0';
   row2.style.maxWidth = '100%';
   row2.style.width = '100%';
   row2.style.boxSizing = 'border-box';
@@ -11601,10 +11666,11 @@ function createStatisticsSection(selectedMap, leaderboardData) {
   // Left column: Top 5 Speedruns
   const speedrunTableCol = document.createElement('div');
   speedrunTableCol.setAttribute('data-table-type', 'speedrun');
-  speedrunTableCol.style.flex = '0 0 160px';
-  speedrunTableCol.style.width = '160px';
-  speedrunTableCol.style.maxWidth = '160px';
-  speedrunTableCol.style.minWidth = '160px';
+  speedrunTableCol.style.flex = '160 1 0';
+  speedrunTableCol.style.width = 'auto';
+  speedrunTableCol.style.maxWidth = 'none';
+  speedrunTableCol.style.minWidth = '0';
+  speedrunTableCol.style.overflow = 'hidden';
   speedrunTableCol.style.boxSizing = 'border-box';
   speedrunTableCol.style.display = 'flex';
   speedrunTableCol.style.flexDirection = 'column';
@@ -11933,7 +11999,7 @@ function createStatisticsSection(selectedMap, leaderboardData) {
                 row3.statusBar.style.color = '#4CAF50';
                 // Reset status bar after 3 seconds
                 row3.statusBarTimeout = setTimeout(() => {
-                  row3.statusBar.textContent = 'These are your saved top records.';
+                  row3.statusBar.textContent = '';
                   row3.statusBar.style.color = '#ccc';
                   row3.statusBarTimeout = null;
                 }, 3000);
@@ -11957,7 +12023,7 @@ function createStatisticsSection(selectedMap, leaderboardData) {
                 row3.statusBar.style.color = '#f44336';
                 // Reset status bar after 3 seconds
                 row3.statusBarTimeout = setTimeout(() => {
-                  row3.statusBar.textContent = 'These are your saved top records.';
+                  row3.statusBar.textContent = '';
                   row3.statusBar.style.color = '#ccc';
                   row3.statusBarTimeout = null;
                 }, 3000);
@@ -12022,7 +12088,7 @@ function createStatisticsSection(selectedMap, leaderboardData) {
                       row3.statusBar.textContent = 'Run deleted successfully!';
                       row3.statusBar.style.color = '#4CAF50';
                       row3.statusBarTimeout = setTimeout(() => {
-                        row3.statusBar.textContent = 'These are your saved top records.';
+                        row3.statusBar.textContent = '';
                         row3.statusBar.style.color = '#ccc';
                         row3.statusBarTimeout = null;
                       }, 3000);
@@ -12089,10 +12155,10 @@ function createStatisticsSection(selectedMap, leaderboardData) {
   // Right column: Floors
   const floorsTableCol = document.createElement('div');
   floorsTableCol.setAttribute('data-table-type', 'floors');
-  floorsTableCol.style.flex = '0 0 180px';
-  floorsTableCol.style.width = '180px';
-  floorsTableCol.style.maxWidth = '180px';
-  floorsTableCol.style.minWidth = '180px';
+  floorsTableCol.style.flex = '180 1 0';
+  floorsTableCol.style.width = 'auto';
+  floorsTableCol.style.maxWidth = 'none';
+  floorsTableCol.style.minWidth = '0';
   floorsTableCol.style.boxSizing = 'border-box';
   floorsTableCol.style.overflow = 'hidden';
   floorsTableCol.style.display = 'flex';
@@ -12627,10 +12693,11 @@ function createStatisticsSection(selectedMap, leaderboardData) {
   // Middle column: Top 5 Ranks
   const ranksTableCol = document.createElement('div');
   ranksTableCol.setAttribute('data-table-type', 'ranks');
-  ranksTableCol.style.flex = '0 0 160px';
-  ranksTableCol.style.width = '160px';
-  ranksTableCol.style.maxWidth = '160px';
-  ranksTableCol.style.minWidth = '160px';
+  ranksTableCol.style.flex = '160 1 0';
+  ranksTableCol.style.width = 'auto';
+  ranksTableCol.style.maxWidth = 'none';
+  ranksTableCol.style.minWidth = '0';
+  ranksTableCol.style.overflow = 'hidden';
   ranksTableCol.style.boxSizing = 'border-box';
   ranksTableCol.style.display = 'flex';
   ranksTableCol.style.flexDirection = 'column';
@@ -13080,7 +13147,7 @@ function createStatisticsSection(selectedMap, leaderboardData) {
                       row3.statusBar.textContent = 'Run deleted successfully!';
                       row3.statusBar.style.color = '#4CAF50';
                       row3.statusBarTimeout = setTimeout(() => {
-                        row3.statusBar.textContent = 'These are your saved top records.';
+                        row3.statusBar.textContent = '';
                         row3.statusBar.style.color = '#ccc';
                         row3.statusBarTimeout = null;
                       }, 3000);
@@ -13154,29 +13221,52 @@ function createStatisticsSection(selectedMap, leaderboardData) {
   row3.style.flex = '1 1 0';
   row3.style.display = 'flex';
   row3.style.flexDirection = 'column';
-  row3.style.padding = '10px';
+  row3.style.padding = '6px 10px';
   row3.style.borderTop = '3px solid transparent';
   row3.style.borderImage = `url("${START_PAGE_CONFIG.FRAME_IMAGE_URL}") 6 6 6 6 fill stretch`;
   row3.style.backgroundColor = 'rgba(255, 255, 255, 0.02)';
   row3.style.marginTop = '10px';
+  // Let row3 shrink to the space left under the tables so only its text area scrolls.
+  row3.style.minHeight = '0';
+  row3.style.overflow = 'hidden';
   
 
   
   // Descriptive bullet points
   const bulletPoints = document.createElement('div');
-  bulletPoints.style.marginBottom = '15px';
+  bulletPoints.style.marginBottom = '0';
   bulletPoints.style.fontSize = '11px';
   bulletPoints.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
   bulletPoints.style.color = '#ccc';
   bulletPoints.style.lineHeight = '1.4';
-  bulletPoints.innerHTML = `
-    <div style="margin-bottom: 8px;">• All runs made in Autoplay and manual mode will automatically be added here.</div>
-    <div>• If it's the same creatures, equipment and placement, the run will be overwritten with the better run, else it will be copied to a new row.</div>
-  `;
+  // Only this text area scrolls (vertically), not the whole stats panel.
+  bulletPoints.style.flex = '1 1 0';
+  bulletPoints.style.minHeight = '0';
+  bulletPoints.style.overflowY = 'auto';
+  bulletPoints.style.overflowX = 'hidden';
+  bulletPoints.style.scrollbarWidth = 'thin';
+  bulletPoints.style.scrollbarColor = '#444 #222';
+  const mapGroups = getMapMechanicGroups(selectedMap);
+  if (mapGroups.length) {
+    appendSpecialAbilitySection(bulletPoints, mapGroups, false);
+  } else {
+    bulletPoints.textContent = 'This room has no special effects.';
+    bulletPoints.style.fontStyle = 'italic';
+    // Center the placeholder horizontally and vertically in the box.
+    bulletPoints.style.flex = '1 1 auto';
+    bulletPoints.style.display = 'flex';
+    bulletPoints.style.alignItems = 'center';
+    bulletPoints.style.justifyContent = 'center';
+    bulletPoints.style.textAlign = 'center';
+    bulletPoints.style.marginBottom = '0';
+  }
   row3.appendChild(bulletPoints);
   
   // Status bar
+  // Empty by default; only shows while a copy/delete message is displayed.
+  injectCyclopediaStyle('cyclopedia-run-status-css', '.cyclopedia-run-status:empty { display: none !important; }');
   const statusBar = document.createElement('div');
+  statusBar.className = 'cyclopedia-run-status';
   statusBar.style.padding = '8px 12px';
   statusBar.style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
   statusBar.style.border = '1px solid #444';
@@ -13189,7 +13279,7 @@ function createStatisticsSection(selectedMap, leaderboardData) {
   statusBar.style.display = 'flex';
   statusBar.style.alignItems = 'center';
   statusBar.style.justifyContent = 'center';
-  statusBar.textContent = 'These are your saved top records.';
+  statusBar.textContent = '';
   row3.appendChild(statusBar);
   
   // Store status bar reference for later use
@@ -13213,7 +13303,7 @@ function createStatisticsSection(selectedMap, leaderboardData) {
         clearTimeout(row3.statusBarTimeout);
         row3.statusBarTimeout = null;
       }
-      row3.statusBar.textContent = 'These are your saved top records.';
+      row3.statusBar.textContent = '';
       row3.statusBar.style.color = '#ccc';
     }
   };
@@ -14827,7 +14917,7 @@ function createMapsTabPage(selectedCreature, selectedEquipment, selectedInventor
   col3Content.style.minHeight = mapsContentMinHeight;
   col3Content.style.minWidth = '0';
   col3Content.style.width = '100%';
-  col3Content.style.overflowX = 'auto';
+  col3Content.style.overflowX = 'hidden';
   col3Content.style.overflowY = 'auto';
   col3Content.style.boxSizing = 'border-box';
 

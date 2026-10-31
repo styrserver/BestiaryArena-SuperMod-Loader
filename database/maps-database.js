@@ -138,6 +138,264 @@ function getExtraMonsterDropFloors(roomOrId, gameId) {
 }
 
 /**
+ * Player-facing text for the native game's room scripts (`setupGameMap` runs `scripts[file.name]`
+ * for each room/floor file; see docs/game_state_api.md, "Villain / room-script creature
+ * mechanics"). Keyed by the script (= room file) name, never by room id or floor number, so
+ * floors that move or share a script stay correct without editing anything here. To document a
+ * new script, add one entry. Separate distinct abilities within a note with a newline (`\n`);
+ * the UI shows each on its own row.
+ */
+const ROOM_SCRIPT_NOTES = {
+  crhw2: 'Hemorrhage (a Clot) is awakened from the start and can have up to 12 clones at once instead of 2.\nEach clone gets a random T5 HP equipment piece.',
+  crhw3: "The Pale Count's bat ability lasts the whole fight.",
+  vcage1: 'Villain Witches cast their frog spell on a fixed set of tiles in the middle of the board instead of around their target, and recast it in half the cooldown.\nThey have 50% less AP.',
+  vcage2: 'Villain Witches cast their frog spell on a fixed set of tiles in the middle of the board instead of around their target, and recast it in half the cooldown.\nThey have 50% less AP.',
+  vcage3: 'Villain Witches cast their frog spell on a fixed set of tiles in the middle of the board instead of around their target, and recast it in half the cooldown.\nThey have 80% less AP.\nEvery other villain has 40% less AD.',
+  edanni1: "Villain spiders' ability cooldowns are staggered evenly across them.",
+  edanni7: 'Villain Minotaur Mages also target the closest enemy at any range.',
+  edanni12: 'Villains have 30 less magic resist, 50 less armor and 10 less AD.',
+  edanni13: 'Villains have 50 less magic resist, 50 less armor and 55 less AP.',
+  edanni14: 'Villains have 25 less magic resist, 25 less armor and 40 less AP.',
+  edvamp2: 'Villain Vampire Brides from the bloody crypt spawn their heart at the pool when a pool tile is free.',
+  vmama1: 'Villain spiders are awakened and raised to at least 1002 max HP.',
+  vmama2: 'Villain spiders are awakened and raised to at least 1002 max HP.'
+};
+
+/**
+ * Fingerprint (hash of the numeric/string literals) of each game room script at the time its
+ * ROOM_SCRIPT_NOTES entry was reviewed. Compared against the live game by `diffRoomScripts` to
+ * flag new or changed scripts. Generated: `node tools/check-room-scripts.mjs --update` rewrites
+ * the block between the markers; do not edit by hand.
+ */
+// BEGIN ROOM_SCRIPT_FINGERPRINTS
+const ROOM_SCRIPT_FINGERPRINTS = {
+  edanni1: '929d87088d1f',
+  edanni7: '1ede5a25354b',
+  edanni12: '8e27fbfe0e91',
+  edanni13: 'fa6371f6c0af',
+  edanni14: '65b28d3cda0c',
+  edvamp2: 'aa93b93cb2d3',
+  vmama1: 'cf9bbabaca3d',
+  vmama2: 'cf9bbabaca3d',
+  vcage1: '135c53aa19d7',
+  vcage2: '135c53aa19d7',
+  vcage3: '8ed65220ba40',
+  crhw2: 'a0b818492577',
+  crhw3: 'b6589fc6ab0d'
+};
+// END ROOM_SCRIPT_FINGERPRINTS
+
+// The scripts table in the game bundle: keys look like `edanni1:t=>{t.` (each takes the world as `t`).
+const ROOM_SCRIPT_KEY = /([a-z][a-z0-9]*):t=>\{t\./g;
+// Keys of one table sit close together; a bigger gap means a different object.
+const ROOM_SCRIPT_MAX_GAP = 6000;
+const ROOM_SCRIPT_LITERALS = /"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|\b\d+(?:\.\d+)?(?:e[+-]?\d+)?\b|\.\d+/g;
+
+async function fingerprintLiterals(literals) {
+  const bytes = new TextEncoder().encode(literals.join('|'));
+  const digest = await globalThis.crypto.subtle.digest('SHA-1', bytes);
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('').slice(0, 12);
+}
+
+/**
+ * Source text of each of the game's room scripts, read from its (minified) bundle.
+ * @param {string[]} chunkTexts - source of the game's JS chunks
+ * @returns {Object<string, string>} script name -> source of that script
+ * @throws when no chunk defines `setupGameMap` (the bundle layout changed)
+ */
+function readRoomScriptSources(chunkTexts) {
+  for (const text of chunkTexts) {
+    const setupAt = text.indexOf('setupGameMap');
+    if (setupAt < 0) continue;
+    const matches = [...text.slice(0, setupAt).matchAll(ROOM_SCRIPT_KEY)];
+    if (matches.length === 0) continue;
+    // The table is the cluster of consecutive keys that ends closest before `setupGameMap`.
+    let first = matches.length - 1;
+    while (first > 0 && matches[first].index - matches[first - 1].index < ROOM_SCRIPT_MAX_GAP) first--;
+    const cluster = matches.slice(first);
+    const tableEnd = text.indexOf('};', cluster[cluster.length - 1].index + 1);
+    const sources = {};
+    for (let i = 0; i < cluster.length; i++) {
+      const end = i + 1 < cluster.length ? cluster[i + 1].index : tableEnd;
+      if (end < 0) throw new Error(`could not find the end of room script ${cluster[i][1]}`);
+      sources[cluster[i][1]] = text.slice(cluster[i].index, end);
+    }
+    return sources;
+  }
+  throw new Error('no chunk defines setupGameMap; the game bundle layout changed');
+}
+
+/**
+ * Fingerprints of the game's room scripts. Only the numbers and strings are hashed, so the
+ * bundler renaming variables does not change a fingerprint.
+ * @param {string[]|Object<string, string>} chunkTextsOrSources - game JS chunks, or the result of
+ *   `readRoomScriptSources` (avoids reading the bundle twice)
+ * @returns {Promise<Object<string, string>>} script name -> fingerprint
+ */
+async function extractRoomScripts(chunkTextsOrSources) {
+  const sources = Array.isArray(chunkTextsOrSources)
+    ? readRoomScriptSources(chunkTextsOrSources)
+    : chunkTextsOrSources;
+  const scripts = {};
+  for (const [name, source] of Object.entries(sources)) {
+    scripts[name] = await fingerprintLiterals(source.match(ROOM_SCRIPT_LITERALS) || []);
+  }
+  return scripts;
+}
+
+/** "crhw floors 6-10, vmama floors 0-5" for the rooms whose floor files use this script. */
+function describeRoomScriptUsage(scriptName) {
+  const usage = [];
+  for (const room of getAllMaps()) {
+    const files = Array.isArray(room?.floorFiles) ? room.floorFiles : [room?.file];
+    const floors = files.flatMap((file, i) => (file?.name === scriptName ? [i] : []));
+    if (floors.length === 0) continue;
+    const label = Array.isArray(room.floorFiles) ? ` floors ${floors[0]}-${floors[floors.length - 1]}` : '';
+    usage.push(`${room.id}${label}`);
+  }
+  return usage.join(', ') || 'no room in the current game data';
+}
+
+/**
+ * Plain-text report of room-script drift, written as a self-contained task for whoever fixes the
+ * notes (it is pasted to Claude): what to do, in which files, the style to follow, and per script
+ * the action, usage, current note, live constants and live source.
+ * @param {{ kind: string, name: string, message: string }[]} problems - from `diffRoomScripts`
+ * @param {Object<string, string>} sources - from `readRoomScriptSources`
+ * @param {Object<string, string>} gameScripts - fingerprints from `extractRoomScripts`
+ * @returns {string}
+ */
+function buildRoomScriptReport(problems, sources, gameScripts) {
+  const actions = {
+    NEW: 'ADD an entry: the game has this script and ROOM_SCRIPT_NOTES has no note for it.',
+    CHANGED: "REWRITE the entry: the script's numbers/strings differ from when its note was reviewed.",
+    REMOVED: 'DELETE the entry: the game no longer has this script.'
+  };
+  const fence = '```';
+  const lines = [
+    'ROOM SCRIPT DRIFT REPORT',
+    `Generated: ${new Date().toISOString()}`,
+    '',
+    '## TASK',
+    "The game's room scripts no longer match ROOM_SCRIPT_NOTES in this repo. Fix every script listed under",
+    'PROBLEMS, then verify. Nothing outside the files below needs to change.',
+    '',
+    '## STEPS',
+    '1. database/maps-database.js: edit ROOM_SCRIPT_NOTES. One `scriptName: \'text\',` line per script.',
+    '   ADD / REWRITE / DELETE as given per script below. Never edit ROOM_SCRIPT_FINGERPRINTS by hand.',
+    '2. docs/game_state_api.md: update the matching rows of the room-script table',
+    '   (section "Villain / room-script creature mechanics").',
+    '3. Run `node tools/check-room-scripts.mjs`: it should flag exactly the scripts listed here.',
+    '   Then run `node tools/check-room-scripts.mjs --update` (rewrites ROOM_SCRIPT_FINGERPRINTS) and run the',
+    '   check once more: it must print OK.',
+    '4. If players should hear about it, add a line to the newest entry of docs/patch-notes.json',
+    '   (no room names, NPCs, rewards or other quest spoilers).',
+    '',
+    '## NOTE STYLE',
+    '- Player-facing plain English, one short sentence per ability. Put "\\n" between abilities inside the string:',
+    '  the UI shows each on its own row.',
+    '- Do not write floor numbers: floor ranges are generated from the live floor data.',
+    '- State only what the source does, using its numbers (percentages, counts, tiers). Match the tone of the',
+    '  existing notes at the bottom of this report.',
+    '- The source is minified: `t` is the world, `.villain` marks the enemy side, `addPercentageModifier(-.5)` is -50%,',
+    '  `addFlatModifier(-30)` is -30 flat, `.tags.add(...)` / `.miscTags.add(...)` mark creatures for other code.',
+    '  If a script only sets a tag or variable, search the game chunks for that tag/variable to see what reads it.',
+    '',
+    `## PROBLEMS (${problems.length})`,
+    ...problems.map((p) => `- ${p.kind} ${p.name}: ${actions[p.kind] ?? ''}`),
+    ''
+  ];
+  for (const { kind, name } of problems) {
+    const note = ROOM_SCRIPT_NOTES[name];
+    const constants = sources[name] ? (sources[name].match(ROOM_SCRIPT_LITERALS) || []).join(', ') : '';
+    lines.push(
+      `## SCRIPT ${name} [${kind}]`,
+      `Action: ${actions[kind] ?? ''}`,
+      `Used by: ${describeRoomScriptUsage(name)}`,
+      `Reviewed fingerprint: ${ROOM_SCRIPT_FINGERPRINTS[name] ?? '(none)'} | Live fingerprint: ${gameScripts[name] ?? '(script gone)'}`,
+      `Current note: ${note ? JSON.stringify(note) : '(none)'}`
+    );
+    if (sources[name]) {
+      lines.push(
+        `Numbers and strings in the live source: ${constants || '(none)'}`,
+        'Live source (minified):',
+        fence,
+        sources[name],
+        fence
+      );
+    }
+    lines.push('');
+  }
+  lines.push(
+    '## EXISTING NOTES (style reference; current contents of ROOM_SCRIPT_NOTES)',
+    fence,
+    ...Object.entries(ROOM_SCRIPT_NOTES).map(([name, text]) => `${name}: ${JSON.stringify(text)}`),
+    fence,
+    ''
+  );
+  return lines.join('\n');
+}
+
+/** Summary of the problems; same list means the same report, so it needs no second alert. */
+function roomScriptProblemsSignature(problems) {
+  return problems.map((p) => `${p.kind}:${p.name}:${p.message}`).join('|');
+}
+
+/**
+ * Compares the live game's room scripts with ROOM_SCRIPT_NOTES / ROOM_SCRIPT_FINGERPRINTS.
+ * @param {Object<string, string>} gameScripts - result of `extractRoomScripts`
+ * @returns {{ kind: 'NEW'|'CHANGED'|'REMOVED', name: string, message: string }[]}
+ */
+function diffRoomScripts(gameScripts) {
+  const problems = [];
+  for (const [name, fingerprint] of Object.entries(gameScripts)) {
+    if (!(name in ROOM_SCRIPT_NOTES)) {
+      problems.push({ kind: 'NEW', name, message: `${name}: no ROOM_SCRIPT_NOTES entry` });
+    } else if (ROOM_SCRIPT_FINGERPRINTS[name] !== fingerprint) {
+      problems.push({
+        kind: 'CHANGED',
+        name,
+        message: `${name}: constants differ from the reviewed fingerprint (${ROOM_SCRIPT_FINGERPRINTS[name] ?? 'none'} -> ${fingerprint})`
+      });
+    }
+  }
+  for (const name of Object.keys(ROOM_SCRIPT_NOTES)) {
+    if (!(name in gameScripts)) {
+      problems.push({ kind: 'REMOVED', name, message: `${name}: note exists but the game has no such script` });
+    }
+  }
+  return problems;
+}
+
+/**
+ * Room-script notes that apply to a room, read from its live floor files.
+ * @param {Object|string} roomOrId - Room object, or room ID
+ * @returns {{ text: string, firstFloor: number|null, lastFloor: number|null }[]} One entry per run
+ *   of consecutive floors sharing the same note (floors are 0-based, as in the game UI);
+ *   `firstFloor`/`lastFloor` are `null` for single-board rooms.
+ */
+function getRoomScriptNotes(roomOrId) {
+  const room = typeof roomOrId === 'string' ? getMapById(roomOrId) : roomOrId;
+  if (!room) return [];
+  if (!Array.isArray(room.floorFiles)) {
+    const text = ROOM_SCRIPT_NOTES[room.file?.name];
+    return text ? [{ text, firstFloor: null, lastFloor: null }] : [];
+  }
+  const runs = [];
+  room.floorFiles.forEach((floorFile, floorIndex) => {
+    const text = ROOM_SCRIPT_NOTES[floorFile?.name];
+    if (!text) return;
+    const last = runs[runs.length - 1];
+    if (last && last.text === text && last.lastFloor === floorIndex - 1) {
+      last.lastFloor = floorIndex;
+    } else {
+      runs.push({ text, firstFloor: floorIndex, lastFloor: floorIndex });
+    }
+  });
+  return runs;
+}
+
+/**
  * Get maps by difficulty level
  * @param {number} difficulty - The difficulty level (1, 2, or 3)
  * @returns {Array} Array of maps with the specified difficulty
@@ -744,6 +1002,14 @@ mapsDatabase.getAllMaps = getAllMaps;
 mapsDatabase.getMapById = getMapById;
 mapsDatabase.getExtraMonsterDropGameIds = getExtraMonsterDropGameIds;
 mapsDatabase.getExtraMonsterDropFloors = getExtraMonsterDropFloors;
+mapsDatabase.ROOM_SCRIPT_NOTES = ROOM_SCRIPT_NOTES;
+mapsDatabase.getRoomScriptNotes = getRoomScriptNotes;
+mapsDatabase.ROOM_SCRIPT_FINGERPRINTS = ROOM_SCRIPT_FINGERPRINTS;
+mapsDatabase.readRoomScriptSources = readRoomScriptSources;
+mapsDatabase.extractRoomScripts = extractRoomScripts;
+mapsDatabase.buildRoomScriptReport = buildRoomScriptReport;
+mapsDatabase.roomScriptProblemsSignature = roomScriptProblemsSignature;
+mapsDatabase.diffRoomScripts = diffRoomScripts;
 mapsDatabase.getMapsByDifficulty = getMapsByDifficulty;
 mapsDatabase.getMapsByMaxTeamSize = getMapsByMaxTeamSize;
 mapsDatabase.getMultiFloorRoomIds = getMultiFloorRoomIds;

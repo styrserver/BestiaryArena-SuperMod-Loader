@@ -1002,7 +1002,7 @@ Data:
 
 - `ALL_CREATURES` — every creature (built from `state.utils`).
 - `UNOBTAINABLE_CREATURES`, `NON_AWAKENABLE_CREATURES`, `NON_SCROLL_CREATURES`, `EVENT_CREATURES`
-- `CYCLOPEDIA_EXTRA_CREATURES`, `CYCLOPEDIA_HIDDEN_CREATURES`, `SHINY_ALIAS_CREATURES`
+- `CYCLOPEDIA_EXTRA_CREATURES`, `CYCLOPEDIA_HIDDEN_CREATURES`, `SHINY_ALIAS_CREATURES`, `BOSS_ALIAS_CREATURES` (display-only room bosses, e.g. Hemorrhage = nicknamed Clot; see "Villain / room-script creature mechanics" below)
 - `ALL_GAZER_GAME_IDS`, `MYSTIC_GAZER_GAME_ID`
 - `HARDCODED_MAP_MONSTER_STATS`, `MONSTER_STAT_DISPLAY_CONFIG`
 
@@ -1033,6 +1033,85 @@ Display / picker helpers:
 - `Awaken_Tracker` (`ALL_CREATURES`, `NON_AWAKENABLE_CREATURES`, `UNOBTAINABLE_CREATURES`, finders)
 - `Better_Tasker` (finders)
 - Also `Autoscroller`, `Better_Analytics`, `Better_Teleporter`, `Cyclopedia`, `Depot_Manager`, `Hunt_Analyzer`, `Manual_Runner`, `Mod_Settings`, `Challenges`, `Map_Editor`, `Quests`, `content/event-competition.js`
+
+#### Villain / room-script creature mechanics
+
+Findings from the native game chunks (`https://bestiaryarena.com/_next/static/chunks/*.js`).
+Nothing in the game keys off a creature's `nickname`; a creature behaves differently because of
+its **villain flag** plus a **per-room script variable**. Re-verify against the live chunks after
+a game update.
+
+World defaults (`979-*.js`):
+`_customRoomVariables = { halloweenSlimeMaxSpawn: 0, halloweenPaleCountAbilityDurationMs: null }`.
+Floor numbers below are the Cyclopedia / in-game 0-15 indices. Room scripts are keyed by the **room file name** (`setupGameMap` runs `scripts[file.name]`), and a
+room's `floorFiles` picks the file per floor. Scripts set the variables at world creation; creature
+code reads them only when `actor.villany.wasSpawnVillain` is true, so a player-owned copy is
+unaffected. Player-facing text for each script lives in `mapsDatabase.ROOM_SCRIPT_NOTES` (keyed by
+script name); `mapsDatabase.getRoomScriptNotes(room)` groups a room's floors by their live
+`floorFiles[i].name`, so floor ranges are never hardcoded. The Cyclopedia map stats panel and a
+boss alias's "Special ability" column (`BOSS_ALIAS_CREATURES[].roomScript`) both read from it. To
+document a new script, add one `ROOM_SCRIPT_NOTES` entry (plus a `roomScript` on a boss alias if it
+has a nicknamed creature).
+
+| Room (floors) | Script | Effect |
+| --- | --- | --- |
+| `crhw` Halloween Mansion (6-10) | `crhw2` | `halloweenSlimeMaxSpawn = 9`; on game start every villain gets `setAwaken(true)` |
+| `crhw` (11-15) | `crhw3` | `halloweenPaleCountAbilityDurationMs = maxDurationTicks` in ms (Pale Count bats last the whole fight, end on his death) |
+| `vcage` (0-5) | `vcage1` | villain Witches (`witch-perma-frog`): frog spell hits a fixed 18-tile set instead of a 5x5 diamond around the target, recast cooldown halved, AP -50% |
+| `vcage` (6-10) | `vcage2` | same as `vcage1` |
+| `vcage` (11-15) | `vcage3` | same `witch-perma-frog` behaviour, AP -80%; other villains AD -40% |
+| `vmama` (0-5 / 6-15) | `vmama1` / `vmama2` | villain spiders awakened, raised to at least 1002 max HP |
+| `edanni` (0) | `edanni1` | villains tagged `regular-spider-annihi`: ability cooldowns staggered evenly (`baseCooldown / n * i`) |
+| `edanni` (6) | `edanni7` | villains tagged `minotaur-mage-annihi` get an extra "closest enemy, range 999" target selection |
+| `edanni` (11 / 12 / 13) | `edanni12` / `13` / `14` | flat villain stat cuts: MR -30/-50/-25, armor -50/-50/-25, and AD -10 / AP -55 / AP -40 |
+| `edvamp` (6-10) | `edvamp2` | villains tagged `vampire-bride-bloody-crypt` get `vampire-bride-spawn-heart-at-pool`: heart spawns on tile 111/112 if free |
+
+These are all 13 room scripts in the game's main bundles (only the chunks the home page loads were
+checked; lazily loaded chunks could hold more). Every script has a `ROOM_SCRIPT_NOTES` entry.
+
+The note text is hand-written (the scripts are minified code), so drift is checked two ways, both
+using `mapsDatabase.extractRoomScripts` / `diffRoomScripts` and the `ROOM_SCRIPT_FINGERPRINTS`
+block in `maps-database.js`. They report `NEW` (script with no note), `CHANGED` (a script's
+numeric/string literals differ from the fingerprint stored when its note was reviewed) and
+`REMOVED`:
+
+- **Manual:** `node tools/check-room-scripts.mjs` downloads the game's chunks. Exit code 1 means
+  review the flagged scripts, fix `ROOM_SCRIPT_NOTES`, then run it with `--update` to rewrite the
+  fingerprint block; exit code 2 means the download or the extraction pattern failed (never read as
+  OK).
+- **Automatic, Firebase admins only:** `Mod_Settings.js` (`runAdminRoomScriptCheck`) runs the same
+  check about 20 s after load, at most once per 24 h (`localStorage` key
+  `ba-room-script-check-last`, stamped only after a completed check), and reports drift to the
+  popup Error Log as source "Room script check". For each new set of problems (signature kept in
+  `ba-room-script-check-reported`, so unchanged drift is not re-alerted daily) it also shows a toast
+  and auto-downloads `room-script-report-<date>.txt` (`mapsDatabase.buildRoomScriptReport`), written
+  as a self-contained task to paste to Claude: TASK, STEPS (which files to edit, the check/`--update`
+  commands, patch notes), NOTE STYLE, PROBLEMS with an ADD / REWRITE / DELETE action each, one
+  section per script (room usage, current note, fingerprints, the numbers and strings in the live
+  source, the minified source) and all existing notes as a style reference. If the browser blocks the download, the toast points to
+  the Error Log instead. Non-admins never run it or make the requests.
+
+**Clot / Hemorrhage.** Hemorrhage is a Clot (`gameId` 127) placed by room `crhw`
+(Halloween Mansion floors 6-10) as `{ id: 127, level: 125, nickname: "Hemorrhage" }`. Clone cap
+(`o$` component, `skill.src: "summonslime"`):
+
+```js
+cap = MAX_SPAWN_COUNT + 1 + (owner.awaken ? AWAKEN_EXTRA_SPAWN : 0);  // 2 + 1 (+1)
+if (owner.villany.wasSpawnVillain) cap += world._customRoomVariables.halloweenSlimeMaxSpawn;
+if (original.hp.isAlive + original.spawnList.length >= cap) return;   // else spawnSlime()
+```
+
+Player-owned or ordinary-room Clot: 3 (4 awakened). Villain Clot in a `crhw2` room: 12 (13
+awakened). Constants: `MAX_SPAWN_COUNT 2`, `AWAKEN_EXTRA_SPAWN 1`, `STARTING_HP 5`,
+`BASE_COOLDOWN_MS 12000`, `CDR_PER_AP 80`. When the cap variable is `> 0`, each clone gets a random
+T5 HP equipment piece instead of copying the mother's; clones killed under a villain mother bump
+`world.killedClot`; an awakened mother's death promotes a living clone.
+
+**Loader representation.** `BOSS_ALIAS_CREATURES` (`{ displayName, gameId: 127, baseSpecies:
+'Clot', bossOnly: true }`) gives Hemorrhage its own Cyclopedia / picker entry.
+`resolveCreatureDisplay()` reports `bossOnly: true`; boss entries never match owned monsters, have
+no shiny variant, and count as event creatures. Cyclopedia shows Clot's species stats; the room's
+level 125 and the cap rules are not modelled.
 
 ### `window.equipmentDatabase`
 
