@@ -4042,8 +4042,15 @@ function renderPerfOverlay() {
   ui.detailsSection.style.display = compact ? 'none' : 'flex';
   perfSetFrameWidth(ui.el, compact ? 3 : 6);
   perfSetFrameWidth(ui.header, compact ? 3 : 6);
-  perfSetFrameWidth(ui.body, compact ? 3 : 6);
-  ui.el.style.padding = compact ? '2px' : '0 2px 2px';
+  // Minimized: the outer frame is the only border (a framed body inside it drew a second, doubled border).
+  if (compact) {
+    ui.body.style.borderWidth = '0';
+    ui.body.style.borderImageSource = 'none';
+  } else {
+    ui.body.style.borderImageSource = '';
+    perfSetFrameWidth(ui.body, 6);
+  }
+  ui.el.style.padding = compact ? '0' : '0 2px 2px';
   ui.body.style.padding = compact ? '4px 6px' : '4px';
   perfSetMinimizeButton(ui.minBtn, compact);
   const size = config.perfOverlaySize;

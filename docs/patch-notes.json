@@ -4,6 +4,26 @@
   },
   "notes": [
     {
+      "version": "5.2.5",
+      "changes": [
+        {
+          "mod": "Manual Runner",
+          "type": "added",
+          "text": "The running window and the results report now show how many sealed creatures were injected and how many creatures were autosold, with the gold gained. Each row appears only when auto-inject or autosell is enabled."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "fixed",
+          "text": "The minimized Debugger no longer draws a doubled border around its numbers."
+        },
+        {
+          "mod": "Popup",
+          "type": "fixed",
+          "text": "The popup is now much larger and readable on iPhone instead of being shrunk to a tiny desktop-sized layout. On narrow phones the mod list uses one column and the title wraps."
+        }
+      ]
+    },
+    {
       "version": "5.2.4",
       "changes": [
         {

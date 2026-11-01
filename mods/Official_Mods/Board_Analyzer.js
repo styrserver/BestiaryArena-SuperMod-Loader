@@ -1720,6 +1720,8 @@ class StatisticsCalculator {
     this.ticksArray = [];
     this.runTimes = [];
     this.runTimesSum = 0;
+    this.fastestRunTime = Infinity;
+    this.slowestRunTime = 0;
     this.totalEstimatedExp = 0;
     this.expCount = 0;
     this.rankPointsCounts = {};
@@ -1729,6 +1731,8 @@ class StatisticsCalculator {
     this.totalRuns++;
     this.runTimes.push(runTime);
     this.runTimesSum += runTime;
+    if (runTime < this.fastestRunTime) this.fastestRunTime = runTime;
+    if (runTime > this.slowestRunTime) this.slowestRunTime = runTime;
 
     if (result.skipped) {
       this.skippedRuns++;
@@ -1736,7 +1740,15 @@ class StatisticsCalculator {
     }
     
     // Exclude skipped runs from tick metrics (min/max/median/average ticks)
-    this.ticksArray.push(result.ticks);
+    // Kept sorted (binary insert) so the median is O(1) instead of a per-run full sort.
+    let lo = 0;
+    let hi = this.ticksArray.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (this.ticksArray[mid] < result.ticks) lo = mid + 1;
+      else hi = mid;
+    }
+    this.ticksArray.splice(lo, 0, result.ticks);
     this.ticksSum += result.ticks;
     this.timedRuns++;
     
@@ -1806,8 +1818,8 @@ class StatisticsCalculator {
       averageTicks,
       maxRankPoints: this.maxRankPoints,
       averageRunTime,
-      fastestRunTime: this.runTimes.length > 0 ? Math.min(...this.runTimes) : 0,
-      slowestRunTime: this.runTimes.length > 0 ? Math.max(...this.runTimes) : 0,
+      fastestRunTime: this.runTimes.length > 0 ? this.fastestRunTime : 0,
+      slowestRunTime: this.runTimes.length > 0 ? this.slowestRunTime : 0,
       totalEstimatedExp: this.totalEstimatedExp,
       averageEstimatedExp: this.expCount > 0 ? Math.round(this.totalEstimatedExp / this.expCount) : 0,
       expCount: this.expCount,
@@ -1819,7 +1831,7 @@ class StatisticsCalculator {
     if (array.length === 0) return 0;
     if (array.length === 1) return array[0];
     
-    const sorted = [...array].sort((a, b) => a - b);
+    const sorted = array; // already sorted by addRun
     const mid = Math.floor(sorted.length / 2);
     
     if (sorted.length % 2 === 0) {

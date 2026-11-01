@@ -777,6 +777,18 @@ html.popup-mobile-host .mods-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+@media (max-width: 480px) {
+  html.popup-mobile-host .mods-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  html.popup-mobile-host h1 {
+    white-space: normal;
+    text-align: left;
+    line-height: 1.2;
+  }
+}
+
 /* Mod Card Styles */
 .mod-card {
   background-color: var(--ba-card-off-bg, #2b2224);

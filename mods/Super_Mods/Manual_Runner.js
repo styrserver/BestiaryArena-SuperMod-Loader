@@ -738,6 +738,10 @@ let pendingServerResults = new Map(); // Map of seed -> serverResults for matchi
 let lastInjectProcessedSeed = null; // Avoid double-inject on the same reward
 let defeatsCount = 0; // Track number of defeats
 let victoriesCount = 0; // Track number of victories
+let injectedCount = 0; // Sealed creatures injected this run (live modal row)
+let soldCount = 0; // Creature drops autosold this run (live modal row)
+let injectedGold = 0; // Gold gained from injects this run
+let soldGold = 0; // Gold gained from autosell this run
 let totalStaminaSpent = 0; // Track total stamina spent
 let openRewardsSubscription = null; // Subscription to openRewards state
 
@@ -3223,6 +3227,9 @@ async function manualRunnerAutoInjectSealedCreatures(serverResults) {
         });
         removeMonsterFromLocalInventory(monster.id);
         consumedServerIds.add(monster.id);
+        injectedCount++;
+        injectedGold += Number(goldDiff) || 0;
+        updateTextContent('manual-runner-injected', formatCountWithGold(injectedCount, injectedGold));
         injectSucceeded = true;
         break;
       } else if (!result.success && result.status === 429) {
@@ -3371,7 +3378,14 @@ async function ensureRewardScreenHandled() {
     } else if (!getOpenRewardsStateWithFallback()) {
       console.warn('[Manual Runner] Autosell skipped: reward screen already closed before sell');
     } else {
+      const goldBeforeSell = readPlayerGold();
       autoSellSuccess = await autoSellCreatures();
+      if (autoSellSuccess) {
+        soldGold += await pollGoldGainSince(goldBeforeSell);
+        const soldThisReward = [...rewardMonsterIds].filter((id) => !consumedByInject.has(id)).length;
+        soldCount += soldThisReward;
+        updateTextContent('manual-runner-sold', formatCountWithGold(soldCount, soldGold));
+      }
     }
   }
 
@@ -3599,6 +3613,31 @@ function appendStatRow(container, labelText, valueText, { labelStyle, valueStyle
   return { label, value };
 }
 
+function readPlayerGold() {
+  const gold = Number(globalThis.state?.player?.getSnapshot?.()?.context?.gold);
+  return Number.isFinite(gold) ? gold : null;
+}
+
+/** Gold gained since `before`; waits briefly for the player store to catch up after a sell. */
+async function pollGoldGainSince(before) {
+  if (before === null) return 0;
+  for (let i = 0; i < 10; i++) {
+    const now = readPlayerGold();
+    if (now !== null && now !== before) return Math.max(0, now - before);
+    await sleep(150);
+  }
+  return 0;
+}
+
+function formatCountWithGold(count, gold) {
+  if (gold <= 0) return String(count);
+  // Shared game rounding (api.util.formatItemCount) so gold reads like inventory badges.
+  const goldText = typeof api !== 'undefined' && typeof api?.util?.formatItemCount === 'function'
+    ? api.util.formatItemCount(gold)
+    : String(gold);
+  return `${count} (+${goldText} gold)`;
+}
+
 function updateTextContent(id, text) {
   const el = document.getElementById(id);
   if (el) {
@@ -3664,8 +3703,12 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
     allAttempts = [];
     defeatsCount = 0;
     victoriesCount = 0;
+    injectedCount = 0;
+    soldCount = 0;
+    injectedGold = 0;
+    soldGold = 0;
     totalStaminaSpent = 0;
-    
+
     // Setup board subscription to capture serverResults
     setupBoardSubscription();
     
@@ -4765,7 +4808,14 @@ function showRunningAnalysisModal(
     String(staminaSpent),
     'manual-runner-stamina'
   );
-  
+
+  if (config.enableAutoInjectSealedCreatures) {
+    createLiveRow('Injected', formatCountWithGold(injectedCount, injectedGold), 'manual-runner-injected');
+  }
+  if (config.enableAutoSellCreatures) {
+    createLiveRow('Sold', formatCountWithGold(soldCount, soldGold), 'manual-runner-sold');
+  }
+
   // Create self-contained HTML modal to avoid conflicts with other modals
   injectManualRunnerStyles();
   const wrapper = document.createElement('div');
@@ -5081,6 +5131,13 @@ async function showResultsModal(results) {
     appendStatRow(statsContainer, t('mods.manualRunner.staminaSpent').replace(': {n}', ':'), (stats.staminaSpentTotal || 0).toString());
 
     appendStatRow(statsContainer, t('mods.manualRunner.skips'), (stats.skips || 0).toString());
+
+    if (config.enableAutoInjectSealedCreatures) {
+      appendStatRow(statsContainer, 'Injected:', formatCountWithGold(injectedCount, injectedGold));
+    }
+    if (config.enableAutoSellCreatures) {
+      appendStatRow(statsContainer, 'Sold:', formatCountWithGold(soldCount, soldGold));
+    }
     
     const finalVictory = results.finalResult?.victory === true || results.finalResult?.completed === true;
     if (finalVictory && results.finalResult) {
@@ -5608,6 +5665,10 @@ function cleanupManualRunner() {
     lastInjectProcessedSeed = null;
     defeatsCount = 0;
     victoriesCount = 0;
+    injectedCount = 0;
+    soldCount = 0;
+    injectedGold = 0;
+    soldGold = 0;
     totalStaminaSpent = 0;
     skipCount = 0;
     activeRunningModal = null;
