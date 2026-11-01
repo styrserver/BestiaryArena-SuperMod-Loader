@@ -18,7 +18,8 @@ const TOOLS = [
   { file: 'check-creature-combat.mjs', fix: '/creature-snapshot' },
   { file: 'check-inventory-items.mjs', fix: '/inventory-check' },
   { file: 'check-database-names.mjs', fix: 'fix the STALE/RENAMED list entries in database/' },
-  { file: 'check-room-scripts.mjs', fix: 'review ROOM_SCRIPT_NOTES, then node tools/check-room-scripts.mjs --update' }
+  { file: 'check-room-scripts.mjs', fix: 'review ROOM_SCRIPT_NOTES, then node tools/check-room-scripts.mjs --update' },
+  { file: 'check-outfits-mounts.mjs', fix: 'node tools/check-outfits-mounts.mjs --update (Outfiter.js snapshot)' }
 ];
 const VERDICT = { 0: 'OK', 1: 'DRIFT', 2: 'FAILED' };
 

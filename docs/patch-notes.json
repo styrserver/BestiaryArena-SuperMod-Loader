@@ -4,6 +4,21 @@
   },
   "notes": [
     {
+      "version": "5.2.6",
+      "changes": [
+        {
+          "mod": "Outfiter",
+          "type": "added",
+          "text": "A Mount item under OT Mods in the account menu opens a mount picker with every mount sorted by rarity then name. The preview shows your outfit riding the selected mount, or the mount alone when riding is off. The Riding on/off switch and your last mount are remembered when you switch mounts, and a mountable outfit is picked for you when yours cannot ride. Mounts are local only. The Change outfit list now marks mountable outfits with a paw icon and outfits Outfiter adds as not owned, with a tooltip when you hover the icon."
+        },
+        {
+          "mod": "Outfiter",
+          "type": "changed",
+          "text": "The outfit, mount and outfit color lists are now read from the game at startup, so new outfits and mounts show up after a game update. A built-in list is used if that fails."
+        }
+      ]
+    },
+    {
       "version": "5.2.5",
       "changes": [
         {
