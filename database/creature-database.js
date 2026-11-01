@@ -1,13 +1,19 @@
 console.log('[creature-database.js] Loading creature database...');
 
-/** Gazer species: only Mystic Gazer (97) has a shiny portrait; shiny displays as Albino Gazer in Cyclopedia. */
-const MYSTIC_GAZER_GAME_ID = 97;
-const GAZER_GAME_IDS_WITHOUT_SHINY = new Set([93, 94, 95, 96]);
-const ALL_GAZER_GAME_IDS = new Set([93, 94, 95, 96, MYSTIC_GAZER_GAME_ID]);
+/**
+ * Gazer species: only Mystic Gazer has a shiny portrait; shiny displays as Albino Gazer in Cyclopedia.
+ * The ids come from the live monster registry (every monster named "*gazer*"; see populateGazerIds)
+ * and are filled in place, so references taken before the registry was ready stay valid.
+ */
+const MYSTIC_GAZER_NAME = 'mystic gazer';
+let MYSTIC_GAZER_GAME_ID = null;
+const GAZER_GAME_IDS_WITHOUT_SHINY = new Set();
+const ALL_GAZER_GAME_IDS = new Set();
 const SHINY_ALIAS_CREATURES = [
   {
     displayName: 'Albino Gazer',
-    gameId: MYSTIC_GAZER_GAME_ID,
+    gameId: null, // set to the Mystic Gazer id by populateGazerIds
+
     baseSpecies: 'Mystic Gazer',
     shinyOnly: true
   }
@@ -89,7 +95,7 @@ const CREATURE_COMBAT_DATA = {
   31: {"n":"Frost Troll","ad":4000,"c":{"SNOWBALL_DAMAGE_BASE":15,"SNOWBALL_DAMAGE_AP_RATIO":0.7,"SNOWMAN_DURABILITY":3,"AWAKEN_ATTACK_DELAY_DEBUFF_PERCENT":0.1,"AWAKEN_ATTACK_SPEED_DEBUFF_MS":3000,"COOLDOWN_MS":7000,"MIN_COOLDOWN_MS":1500}},
   32: {"n":"Winter Wolf","ad":null,"c":{"DAMAGE_BASE":15,"DAMAGE_AP_RATIO":0.5,"ATTACK_DELAY_DEBUFF_PERCENT":0.15,"ATTACK_SPEED_DEBUFF_MS":3000,"CDR_MS":2000,"PROC_EVERY_BITES":3,"COOLDOWN_MS":10000,"STUN_MS":1000,"CDR_TICKS":2000,"MIN_COOLDOWN_MS":3000}},
   33: {"n":"Water Elemental","ad":3000,"c":{"MAX_BOUNCES":5,"DMG_BASE":5,"DMG_RATIO":0.6,"FLAT_MR_BUFF":15,"BUFF_DURATION_MS":4000,"HEAL_BASE":8,"HEAL_RATIO":0.4,"COOLDOWN_MS":7000,"AWAKEN_BONUS_BOUNCES":1,"MIN_COOLDOWN_MS":2500}},
-  34: {"n":"Minotaur Archer","ad":4000,"c":{"BONUS_ATTACK_DELAY_CAP":0.9,"AWAKEN_HP_THRESHOLD":0.25,"AWAKEN_LIFESTEAL":0.25}},
+  34: {"n":"Minotaur Archer","ad":5000,"c":{"BOLT_COUNT":1,"AMMO_DMG":4,"MAX_AMMO":6}},
   35: {"n":"Minotaur Guard","ad":3000,"c":{"TAUNT_BASE_DURATION_MS":5000,"HEAL_BASE_PER_UNIT":5,"HEAL_PER_AP_PER_UNIT":0.6,"REFLECT_BASE_DMG":6,"REFLECT_DMG_PER_AP":0.3,"AWAKEN_ATTACK_SPEED_PERCENT":0.4,"AWAKEN_AD_DEBUFF_FLAT":-15,"AWAKEN_DEBUFF_DURATION_MS":2000,"COOLDOWN_MS":7000,"MIN_COOLDOWN_MS":2000}},
   36: {"n":"Wyvern","ad":null,"c":{"DMG_BASE":5,"DMG_AP_RATIO":0.2,"HEAL_BASE":10,"HEAL_AP_RATIO":0.2,"AWAKEN_FLEE_STUN_MS":1000,"COOLDOWN_BASE_MS":3000,"PUSH_TARGET_SPEED":255,"FLEE_HP_PERCENT":0.3,"MIN_COOLDOWN_MS":2000}},
   37: {"n":"Deer","ad":null,"c":{"ATTACK_DELAY_PERCENT_BUFF_BASE":-0.25,"MAX_BUFF":-0.8,"BUFF_DURATION":3500,"AWAKEN_RANGE":3,"RANGE":2,"ATTACK_DELAY_PERCENT_BUFF_PER_AP":-0.0025}},
@@ -245,7 +251,7 @@ function resolveCreatureDisplay(creatureName) {
     forceShiny: false,
     shinyOnly: false,
     // Mystic Gazer shiny copies are listed as Albino Gazer in Cyclopedia.
-    nonShinyOnly: gameId === MYSTIC_GAZER_GAME_ID
+    nonShinyOnly: isMysticGazerId(gameId)
   };
 }
 
@@ -269,7 +275,7 @@ function creatureHasShinyVariant(creatureName) {
   if (!resolved?.gameId) return true;
   if (resolved.shinyOnly || resolved.bossOnly) return false;
   if (GAZER_GAME_IDS_WITHOUT_SHINY.has(resolved.gameId)) return false;
-  if (resolved.gameId === MYSTIC_GAZER_GAME_ID) return false;
+  if (isMysticGazerId(resolved.gameId)) return false;
   return true;
 }
 
@@ -521,7 +527,7 @@ function isShinyProgressCreatureName(creatureName) {
 /** Display name for an owned monster (shiny Mystic Gazer → Albino Gazer). */
 function getDisplayNameForOwnedMonster(monster) {
   if (!monster || monster.gameId == null) return null;
-  if (Number(monster.gameId) === MYSTIC_GAZER_GAME_ID) {
+  if (isMysticGazerId(monster.gameId)) {
     return monster.shiny === true ? 'Albino Gazer' : 'Mystic Gazer';
   }
   const data = findMonsterByGameId(monster.gameId);
@@ -533,33 +539,48 @@ function monsterMatchesCreatureDisplay(displayName, monster) {
   return queryMatchesMonster(resolveCreatureDisplay(displayName), monster);
 }
 
-// Creature database with shiny portrait support
-function getAllMonsters() {
-  const monsters = [];
-  // getMonster() can throw on an id gap; skip it instead of dropping every higher id.
+const MONSTER_SCAN_MAX_ID = 1000;
+// getMonster() can throw or return nothing on an id gap; tolerate this many before giving up.
+const MONSTER_SCAN_MAX_GAP = 50;
+
+let monsterScanCache = null;
+
+/**
+ * The one place that reads state.utils.getMonster. Returns [{ gameId, monster }] for every id,
+ * cached once non-empty (an empty result means the registry is not ready and is never cached).
+ */
+function scanMonsters() {
+  if (monsterScanCache) return monsterScanCache;
+  const getMonster = (globalThis.state || window.state)?.utils?.getMonster;
+  if (typeof getMonster !== 'function') return [];
+
+  const found = [];
   let consecutiveFailures = 0;
-  for (let i = 1; i < 1000 && consecutiveFailures < 50; i++) {
+  for (let i = 1; i < MONSTER_SCAN_MAX_ID && consecutiveFailures < MONSTER_SCAN_MAX_GAP; i++) {
     try {
-      const state = globalThis.state || window.state || (typeof state !== 'undefined' ? state : null);
-      if (!state?.utils?.getMonster) {
-        console.warn('[creature-database.js] state.utils.getMonster not available yet');
-        break;
-      }
-      const monster = state.utils.getMonster(i);
-      consecutiveFailures = monster?.metadata?.name ? 0 : consecutiveFailures + 1;
+      const monster = getMonster(i);
       if (monster?.metadata?.name) {
-        monsters.push({ 
-          gameId: i, 
-          ...monster,
-          portraits: {
-            normal: `/assets/portraits/${i}.png`,
-            shiny: `/assets/portraits/${i}-shiny.png`
-          }
-        });
+        consecutiveFailures = 0;
+        found.push({ gameId: i, monster });
+      } else {
+        consecutiveFailures += 1;
       }
     } catch (e) { consecutiveFailures += 1; }
   }
-  return monsters;
+  if (found.length > 0) monsterScanCache = found;
+  return found;
+}
+
+// Creature database with shiny portrait support
+function getAllMonsters() {
+  return scanMonsters().map(({ gameId, monster }) => ({
+    gameId,
+    ...monster,
+    portraits: {
+      normal: `/assets/portraits/${gameId}.png`,
+      shiny: `/assets/portraits/${gameId}-shiny.png`
+    }
+  }));
 }
 
 function buildCreatureDatabase() {
@@ -684,72 +705,62 @@ function getMonsterPortraitUrls(monsterId) {
   };
 }
 
-function findMonsterByGameId(gameId) {
-  const id = Number(gameId);
-  const map = getMonsterNameMap();
-  for (const entry of map.values()) {
-    const entryId = entry.gameId ?? entry.index;
-    if (entryId === id && entry.monster) {
-      return { gameId: entryId, ...entry.monster };
-    }
-  }
-  return findMonsterByGameIdUncached(gameId);
-}
-
-function findMonsterByGameIdUncached(gameId) {
-  const allMonsters = getAllMonsters();
-  return allMonsters.find((monster) => monster.gameId === gameId);
-}
-
 let monsterNameMapCache = null;
+let monsterIdMapCache = null;
+
+function ensureMonsterMaps() {
+  if (monsterNameMapCache && monsterIdMapCache) return;
+  const scanned = scanMonsters();
+  // Not ready: callers get uncached empty maps (see getMonsterNameMap) so a later call can build.
+  if (scanned.length === 0) return;
+  const nameMap = new Map();
+  const idMap = new Map();
+  for (const { gameId, monster } of scanned) {
+    const entry = { monster, gameId, index: gameId };
+    nameMap.set(monster.metadata.name.toLowerCase(), entry);
+    idMap.set(gameId, entry);
+  }
+  monsterNameMapCache = nameMap;
+  monsterIdMapCache = idMap;
+  populateGazerIds(scanned);
+}
+
+/** Whether a game id is Mystic Gazer's (false until the registry has been scanned). */
+function isMysticGazerId(gameId) {
+  return MYSTIC_GAZER_GAME_ID != null && gameId != null && Number(gameId) === MYSTIC_GAZER_GAME_ID;
+}
+
+/** Fills the gazer id sets from the scanned registry, mutating them in place. */
+function populateGazerIds(scanned) {
+  ALL_GAZER_GAME_IDS.clear();
+  GAZER_GAME_IDS_WITHOUT_SHINY.clear();
+  MYSTIC_GAZER_GAME_ID = null;
+  for (const { gameId, monster } of scanned) {
+    const name = String(monster?.metadata?.name ?? '').toLowerCase();
+    if (!name.includes('gazer')) continue;
+    ALL_GAZER_GAME_IDS.add(gameId);
+    if (name === MYSTIC_GAZER_NAME) MYSTIC_GAZER_GAME_ID = gameId;
+    else GAZER_GAME_IDS_WITHOUT_SHINY.add(gameId);
+  }
+  SHINY_ALIAS_CREATURES.forEach((alias) => { alias.gameId = MYSTIC_GAZER_GAME_ID; });
+}
 
 /** Cached lowercase name → { monster, gameId, index } for O(1) lookups. */
 function getMonsterNameMap() {
-  if (monsterNameMapCache) return monsterNameMapCache;
+  ensureMonsterMaps();
+  return monsterNameMapCache || new Map();
+}
 
-  monsterNameMapCache = new Map();
-  const state = globalThis.state || window.state;
-  if (!state?.utils?.getMonster) return monsterNameMapCache;
+/** Raw game monster for an id (no gameId merged in), or null. The single id accessor for mods. */
+function getMonsterById(gameId) {
+  ensureMonsterMaps();
+  return monsterIdMapCache?.get(Number(gameId))?.monster ?? null;
+}
 
-  const maxSearchId = 1000;
-  const maxConsecutiveFailures = 10;
-  let maxId = 200;
-  let consecutiveFailures = 0;
-
-  try {
-    for (let i = 1; i < maxSearchId; i++) {
-      try {
-        const monster = state.utils.getMonster(i);
-        if (!monster?.metadata?.name) {
-          if (++consecutiveFailures >= maxConsecutiveFailures) {
-            maxId = Math.max(1, i - maxConsecutiveFailures);
-            break;
-          }
-        } else {
-          consecutiveFailures = 0;
-          maxId = i;
-        }
-      } catch (error) {
-        if (++consecutiveFailures >= maxConsecutiveFailures) {
-          maxId = Math.max(1, i - maxConsecutiveFailures);
-          break;
-        }
-      }
-    }
-  } catch (error) {
-    console.warn('[creature-database.js] Error probing monster ids:', error);
-  }
-
-  for (let i = 1; i <= maxId; i++) {
-    try {
-      const monster = state.utils.getMonster(i);
-      if (monster?.metadata?.name) {
-        monsterNameMapCache.set(monster.metadata.name.toLowerCase(), { monster, gameId: i, index: i });
-      }
-    } catch (error) { /* skip */ }
-  }
-
-  return monsterNameMapCache;
+function findMonsterByGameId(gameId) {
+  ensureMonsterMaps();
+  const entry = monsterIdMapCache?.get(Number(gameId));
+  return entry ? { gameId: entry.gameId, ...entry.monster } : undefined;
 }
 
 function findMonsterByName(name) {
@@ -758,38 +769,33 @@ function findMonsterByName(name) {
     return findMonsterByGameId(alias.gameId);
   }
   const entry = getMonsterNameMap().get(String(name).toLowerCase());
-  if (entry?.monster) {
-    return { gameId: entry.gameId ?? entry.index, ...entry.monster };
-  }
-  const allMonsters = getAllMonsters();
-  return allMonsters.find((monster) =>
-    monster.metadata?.name?.toLowerCase() === String(name).toLowerCase()
-  );
+  return entry ? { gameId: entry.gameId, ...entry.monster } : undefined;
 }
 
-function waitForGameState(callback, retries = 0, maxRetries = 20) {
+/** Ready once the game's monster registry answers; the database reads nothing else. */
+function isMonsterRegistryReady() {
   try {
     const state = globalThis.state || window.state;
-    const hasPlayerState = state?.player?.getSnapshot;
-    const hasBoardState = state?.board?.getSnapshot;
-    const hasUtils = state?.utils?.getMonster;
-    
-    if (hasPlayerState && hasBoardState && hasUtils) {
-      callback();
-    } else if (retries < maxRetries) {
-      setTimeout(() => waitForGameState(callback, retries + 1, maxRetries), 250);
-    } else {
-      console.warn('[creature-database.js] Game state not ready after max retries, building database anyway');
-      callback();
-    }
+    return !!state?.utils?.getMonster?.(1)?.metadata?.name;
   } catch (error) {
-    console.error('[creature-database.js] Error checking game state:', error);
-    if (retries < maxRetries) {
-      setTimeout(() => waitForGameState(callback, retries + 1, maxRetries), 250);
-    } else {
-      console.warn('[creature-database.js] Building database despite errors');
-      callback();
-    }
+    return false;
+  }
+}
+
+// Fast phase (250ms x 20), then a slow phase (2s x 60) so a cold load never ends with a
+// permanently empty database. The database is only built once the registry is ready.
+function waitForGameState(callback, retries = 0, maxRetries = 20, maxSlowRetries = 60) {
+  if (isMonsterRegistryReady()) {
+    callback();
+    return;
+  }
+  if (retries < maxRetries + maxSlowRetries) {
+    setTimeout(
+      () => waitForGameState(callback, retries + 1, maxRetries, maxSlowRetries),
+      retries < maxRetries ? 250 : 2000
+    );
+  } else {
+    console.warn('[creature-database.js] Monster registry never became ready; database left empty');
   }
 }
 
@@ -799,7 +805,8 @@ let databaseInitialized = false;
 
 function initializeDatabase() {
   if (databaseInitialized) return creatureDatabase;
-  
+
+  ensureMonsterMaps(); // fills the gazer id sets before the build reads them
   creatureDatabase = buildCreatureDatabase();
   
   creatureDatabase.getMonsterPortraitUrl = getMonsterPortraitUrl;
@@ -834,6 +841,7 @@ function initializeDatabase() {
   creatureDatabase.getCreatureCombatData = getCreatureCombatData;
   creatureDatabase.MONSTER_STAT_DISPLAY_CONFIG = MONSTER_STAT_DISPLAY_CONFIG;
   creatureDatabase.getMonsterNameMap = getMonsterNameMap;
+  creatureDatabase.getMonsterById = getMonsterById;
   
   databaseInitialized = true;
   return creatureDatabase;
@@ -853,6 +861,7 @@ const placeholderDatabase = {
   BOSS_ALIAS_CREATURES,
   getCyclopediaCreatureNames: () => getCyclopediaCreatureNames([]),
   getMonsterNameMap,
+  getMonsterById,
   resolveCreatureDisplay,
   creatureHasShinyVariant,
   buildOldOutfitsCss,
@@ -943,6 +952,7 @@ waitForGameState(() => {
     globalWindow.creatureDatabase.getCreatureCombatData = getCreatureCombatData;
     globalWindow.creatureDatabase.MONSTER_STAT_DISPLAY_CONFIG = MONSTER_STAT_DISPLAY_CONFIG;
     globalWindow.creatureDatabase.getMonsterNameMap = getMonsterNameMap;
+    globalWindow.creatureDatabase.getMonsterById = getMonsterById;
     globalWindow.creatureDatabase.findMonsterByGameId = findMonsterByGameId;
     globalWindow.creatureDatabase.findMonsterByName = findMonsterByName;
     globalWindow.creatureDatabase.getAllMonstersWithPortraits = getAllMonsters;

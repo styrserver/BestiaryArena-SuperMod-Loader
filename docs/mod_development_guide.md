@@ -98,7 +98,7 @@ export const SUPER_MODS = [
 ];
 ```
 
-**2. `background.js`** — In the `getModCounts` message handler, update the hardcoded `modCounts` object so `database`, `official`, `super`, and `ot` match the lengths in `mod-registry.js`. Chromium uses this fallback because the service worker cannot dynamically import the registry. Search for the comment *Keep these in sync with content/mod-registry.js*.
+**2. `background.js`** — In the `getModCounts` message handler, update the hardcoded `HARDCODED_MOD_COUNTS` constant so `database`, `official`, `super`, and `ot` match the lengths in `mod-registry.js`. Chromium uses this fallback because the service worker cannot dynamically import the registry. Search for `HARDCODED_MOD_COUNTS`.
 
 **3. `popup/popup.js`** — Update the static name arrays so the popup lists match `mod-registry.js` (search for *kept in sync with mod-registry.js*). Also add a short entry to `modDescriptions` and, if you use translated tooltips, `assets/locales/en-US.json` and `assets/locales/pt-BR.json` under `popup.modDescriptions`.
 
@@ -884,6 +884,15 @@ For more details on the game state API, see the [Game State API Documentation](g
 - Use event delegation where possible
 - Use `setTimeout` and `requestAnimationFrame` for animations instead of loops
 
+### Creature lookups
+
+Look creatures up through `window.creatureDatabase`, never by scanning `state.utils.getMonster(i)`
+yourself: `getMonsterById(id)` (raw game monster), `findMonsterByGameId(id)`, `findMonsterByName(name)`
+and `getMonsterNameMap()`. The database does the one cached scan, tolerates id gaps, and returns
+uncached empty results until the game's monster registry is ready, so a call made too early is
+retried later instead of caching nothing. Never read `ALL_CREATURES` / `UNOBTAINABLE_CREATURES` into
+a module-level constant at load: the database reassigns them when it hydrates, so read them at use time.
+
 ### Cleanup & memory leaks
 
 `exports.cleanup()` runs on disable and before every soft reload (see [Lifecycle](#lifecycle)).
@@ -1261,6 +1270,7 @@ User scripts stored in localStorage are automatically integrated:
 
 `injector.js` loads page scripts in this order:
 
+0. **`content/ba-logger.js`** — first script in the page (MAIN) world; installs the `console` proxy (see [Logging & Error Log](#logging--error-log-popup-debug))
 1. **`content/extension-url.js`** — encodes extension URLs and maps logical mod paths (e.g. `Official Mods/`) to on-disk paths
 2. **`content/platform.js`** — sets `window.BestiaryPlatform` (desktop strict vs mobile relaxed loader)
 3. **`content/client.js`** — `BestiaryModAPI`, UI components

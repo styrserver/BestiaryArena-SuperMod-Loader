@@ -274,6 +274,7 @@ const CYCLOPEDIA_TAB_LAYOUT = {
 // Color scheme constants for UI theming
 const COLOR_CONSTANTS = {
   PRIMARY: '#ffe066',
+  PRIMARY_HOVER: '#fff2b2',
   SECONDARY: '#e6d7b0',
   BACKGROUND: '#232323',
   TEXT: '#fff',
@@ -284,7 +285,13 @@ const COLOR_CONSTANTS = {
   HUNDO: '#A4D8FF',
   AWAKENED: '#FFB347',
   UNOWNED: '#666',
-  HOVER: '#888'
+  HOVER: '#888',
+  RECORD: '#ff8',
+  PERSONAL: '#8f8',
+  SOFT: '#ccc',
+  SUBTLE: '#aaa',
+  DIVIDER: '#444',
+  DIVIDER_STRONG: '#555'
 };
 
 // pixel-font classes for in-modal game panels; Trebuchet lives in cyclopedia-box/subnav injected CSS
@@ -303,6 +310,26 @@ const FONT_CONSTANTS = {
     TINY: FONT_SMALL_CLASS
   }
 };
+
+/** Leaderboards map entry: [map icon] | [stat rows]. Every stat row shares the same tracks so the You/Top columns line up. */
+/** Column header text (Map | name | Top), larger than the stat values so the titles read as titles. */
+const LEADERBOARD_HEADER_FONT_SIZE = '12px';
+const LEADERBOARD_ENTRY_TRACKS = '110px minmax(0, 1fr)';
+const LEADERBOARD_STAT_TRACKS = '16px minmax(0, 1fr) minmax(0, 1fr)'; // icon | subject | top
+
+/** Dense numeric text (stat values, table cells). Headings and labels use the pixel-font classes instead. */
+const CYCLOPEDIA_STATS_FONT = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
+
+/** Dense list-row text rhythm shared by the Location / Found in rows (inline-style and cssText forms). */
+const CYCLOPEDIA_ROW_TEXT_STYLE = {
+  lineHeight: '1',
+  letterSpacing: '.0625rem',
+  wordSpacing: '-.1875rem'
+};
+const CYCLOPEDIA_ROW_TEXT_CSS = 'line-height: 1; letter-spacing: 0.0625rem; word-spacing: -0.1875rem;';
+
+/** Arsenal preview tier accents, T1..T6 (T6 is the in-battle Cyclops upgrade). */
+const CYCLOPEDIA_EQUIPMENT_TIER_COLORS = ['#9e9e9e', '#4caf50', '#42a5f5', '#ab47bc', '#ffc107', '#ff5722'];
 
 /** Standard Cyclopedia column/box header (matches Bestiary "Creatures" title). */
 const CYCLOPEDIA_WIDGET_TITLE_CLASS = 'widget-top widget-top-text pixel-font-16';
@@ -378,13 +405,9 @@ const CYCLOPEDIA_UI = {
   errorHttp: 'Failed to fetch profile data. Please try again.',
   errorUnexpected: 'An unexpected error occurred while loading the profile data.',
   errorConnectionHint: 'Please check your internet connection and try again.',
-  welcome: 'Welcome!',
-  welcomeName: (name) => `Welcome ${name}!`,
-  seasonStatsTitle: 'Season stats',
   seasonStatsSeason: (n) => `Season ${n}`,
   viewFullSeasonsLeaderboard: 'View full seasons leaderboard',
   notAvailable: 'N/A',
-  welcomeFallback: 'Welcome to Cyclopedia!',
   searchTitle: 'Search',
   searchPlaceholder: 'Search Cyclopedia',
   searchTooltip:
@@ -528,11 +551,15 @@ function removeLoreBlocksKeepingOnlyContent(root) {
   });
 }
 
-const UNOBTAINABLE_CREATURES = (creatureDbRef.UNOBTAINABLE_CREATURES || [])
-  .filter(name => !HIDE_FROM_CYCLOPEDIA.includes(name));
+function getCyclopediaUnobtainableCreatures() {
+  return (window.creatureDatabase?.UNOBTAINABLE_CREATURES || [])
+    .filter(name => !HIDE_FROM_CYCLOPEDIA.includes(name));
+}
 
-const ALL_CREATURES = (creatureDbRef.ALL_CREATURES || [])
-  .filter(name => !HIDE_FROM_CYCLOPEDIA.includes(name));
+function getCyclopediaObtainableCreatures() {
+  return (window.creatureDatabase?.ALL_CREATURES || [])
+    .filter(name => !HIDE_FROM_CYCLOPEDIA.includes(name));
+}
 
 /** Obtainable species + Cyclopedia-only entries (e.g. Albino Gazer = shiny Mystic Gazer). */
 function getCyclopediaAllCreatures() {
@@ -540,7 +567,7 @@ function getCyclopediaAllCreatures() {
   if (typeof db?.getCyclopediaCreatureNames === 'function') {
     return db.getCyclopediaCreatureNames(db.ALL_CREATURES);
   }
-  const base = (db?.ALL_CREATURES?.length ? db.ALL_CREATURES : ALL_CREATURES)
+  const base = (db?.ALL_CREATURES?.length ? db.ALL_CREATURES : getCyclopediaObtainableCreatures())
     .filter((name) => !HIDE_FROM_CYCLOPEDIA.includes(name));
   const extra = db?.CYCLOPEDIA_EXTRA_CREATURES ?? ['Albino Gazer'];
   return [...new Set([...base, ...extra])].sort((a, b) => a.localeCompare(b));
@@ -600,48 +627,17 @@ function getCyclopediaGazerSeashellRewards(creatureName) {
 }
 
 function appendCyclopediaGazerObtainSourceHeader(dropsList, { label, iconSrc, iconAlt }) {
-  const sourceDiv = document.createElement('div');
-  sourceDiv.style.fontWeight = '700';
-  sourceDiv.className = FONT_CONSTANTS.SIZES.BODY;
-  sourceDiv.style.color = COLOR_CONSTANTS.TEXT;
-  sourceDiv.style.background = "url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat";
-  sourceDiv.style.border = '6px solid transparent';
-  sourceDiv.style.borderColor = '#ffe066';
-  sourceDiv.style.borderImage = "url('https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png') 6 fill stretch";
-  sourceDiv.style.borderRadius = '0';
-  sourceDiv.style.boxSizing = 'border-box';
-  sourceDiv.style.textAlign = 'center';
-  sourceDiv.style.padding = '1px 4px';
-  sourceDiv.style.margin = '1px 0 0 0';
-  sourceDiv.style.display = 'flex';
-  sourceDiv.style.alignItems = 'center';
-  sourceDiv.style.justifyContent = 'center';
-  sourceDiv.style.gap = '6px';
-  if (iconSrc) {
-    const icon = document.createElement('img');
-    icon.src = iconSrc;
-    icon.alt = iconAlt || label;
-    icon.style.width = '16px';
-    icon.style.height = '16px';
-    icon.style.flexShrink = '0';
-    if (iconAlt === 'Chromatic Scroll') {
-      icon.style.filter = 'drop-shadow(rgb(240, 240, 0) 0px 0px 2px)';
-    }
-    sourceDiv.appendChild(icon);
-  }
-  const sourceText = document.createElement('span');
-  sourceText.textContent = label;
-  sourceDiv.appendChild(sourceText);
-  dropsList.appendChild(sourceDiv);
+  dropsList.appendChild(createCyclopediaRegionHeader(label, {
+    iconSrc,
+    iconAlt: iconAlt || label,
+    iconFilter: iconAlt === 'Chromatic Scroll' ? 'drop-shadow(rgb(240, 240, 0) 0px 0px 2px)' : ''
+  }));
 }
 
 function appendCyclopediaGazerObtainRow(dropsList, text) {
   const row = document.createElement('div');
-  row.style.fontWeight = 'bold';
   row.className = FONT_CONSTANTS.SIZES.SMALL;
-  row.style.lineHeight = '1';
-  row.style.letterSpacing = '.0625rem';
-  row.style.wordSpacing = '-.1875rem';
+  Object.assign(row.style, CYCLOPEDIA_ROW_TEXT_STYLE);
   row.style.margin = '0';
   row.style.padding = '2px 6px';
   row.style.borderRadius = '4px';
@@ -802,9 +798,10 @@ const NavigationHandler = {
     
     element.addEventListener('click', (e) => {
       e.stopPropagation();
-      this.navigateToMapByName(mapName);
+      if (cfg.roomId) this.navigateToMapByRoomId(cfg.roomId);
+      else this.navigateToMapByName(mapName);
     });
-    
+
     element.addEventListener('mouseenter', () => {
       element.style.background = cfg.hoverBackground;
       element.style.color = cfg.hoverTextColor;
@@ -876,6 +873,24 @@ function findCyclopediaRegionById(regionId) {
   return getCyclopediaRegionsList().find((region) => region.id === regionId) || null;
 }
 
+/**
+ * Region display name for a saved run: the name RunTracker already stored, else the region that
+ * owns the map, else whatever region the board currently has selected.
+ */
+function resolveRunRegionName(run, mapId) {
+  if (run.regionName) return run.regionName;
+  try {
+    const foundRegion = findCyclopediaRegionByMapId(mapId);
+    if (foundRegion) return cyclopediaGetRegionDisplayName(foundRegion.id);
+    const selectedRegion = globalThis.state?.board?.getSnapshot()?.context?.selectedMap?.selectedRegion;
+    if (selectedRegion?.name) return selectedRegion.name;
+    if (selectedRegion?.id) return cyclopediaGetRegionDisplayName(selectedRegion.id);
+  } catch (e) {
+    console.warn('[Cyclopedia] Error getting region from game state:', e);
+  }
+  return 'Unknown Region';
+}
+
 function findCyclopediaRegionByMapId(mapId) {
   if (!mapId) return null;
   const regions = getCyclopediaRegionsList();
@@ -924,6 +939,33 @@ function getCyclopediaRoomByMapId(mapId) {
   if (fromRooms) return fromRooms;
   const region = findCyclopediaRegionByMapId(mapId);
   return region?.rooms?.find((room) => room.id === mapId) || null;
+}
+
+/**
+ * Stamina cost to show for a room: the flat staminaCost of a single-floor room, or - for multi-floor quest rooms
+ * (type 'multi'), which have no top-level staminaCost - the cost per floor from room.floorRules, as one number when
+ * every floor costs the same and as "min-max" when they differ. `floors` (a Set/array of floor indices, as in a
+ * creature or item's location) limits that to the floors it actually appears on. Null when the room has no stamina data.
+ */
+function getCyclopediaRoomStaminaLabel(roomId, floors = null) {
+  const floorFilter = floors && (floors.size ?? floors.length) ? new Set(floors) : null;
+  const candidates = [getCyclopediaRoomByMapId(roomId), globalThis.state?.utils?.ROOMS?.[roomId]];
+  for (const room of candidates) {
+    if (!room) continue;
+    if (typeof room.staminaCost === 'number') return String(room.staminaCost);
+    if (Array.isArray(room.floorRules)) {
+      const costs = room.floorRules
+        .filter((rule, floorIndex) => !floorFilter || floorFilter.has(floorIndex))
+        .map((rule) => rule?.staminaCost)
+        .filter((cost) => typeof cost === 'number');
+      if (costs.length) {
+        const min = Math.min(...costs);
+        const max = Math.max(...costs);
+        return min === max ? String(min) : `${min}-${max}`;
+      }
+    }
+  }
+  return null;
 }
 
 function getCyclopediaRoomDisplayName(roomIdOrKey) {
@@ -979,8 +1021,13 @@ function getCyclopediaAllRoomEntries() {
 
 const GAME_DATA = {
   MONSTER_STATS_CONFIG,
-  UNOBTAINABLE_CREATURES,
-  ALL_CREATURES,
+  // Live getters: creatureDatabase hydrates after load and reassigns these arrays.
+  get UNOBTAINABLE_CREATURES() {
+    return getCyclopediaUnobtainableCreatures();
+  },
+  get ALL_CREATURES() {
+    return getCyclopediaObtainableCreatures();
+  },
   get ALL_EQUIPMENT() {
     return getCyclopediaAllEquipmentNames();
   },
@@ -999,29 +1046,40 @@ function renderCyclopediaProfileLoadingHtml() {
   return `
       <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1 1 0; width: 100%; min-width: 0; min-height: 0; color: ${COLOR_CONSTANTS.TEXT}; text-align: center; padding: 20px; box-sizing: border-box;">
         <div style="font-size: 24px; margin-bottom: 16px;">📚</div>
-        <div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">${CYCLOPEDIA_UI.loadingTitle}</div>
-        <div style="font-size: 14px; color: #888;">${CYCLOPEDIA_UI.loadingSubtitle}</div>
+        <div class="${FONT_CONSTANTS.SIZES.TITLE}" style="margin-bottom: 8px;">${CYCLOPEDIA_UI.loadingTitle}</div>
+        <div class="${FONT_CONSTANTS.SIZES.SMALL}" style="color: ${COLOR_CONSTANTS.WARNING};">${CYCLOPEDIA_UI.loadingSubtitle}</div>
+      </div>`;
+}
+
+/** Centered icon + title + message (+ hint / extra block) panel for a column's loading, empty or error state. */
+function renderCyclopediaStatusHtml({ icon, iconSize = 24, title, message = '', hint = '', extraHtml = '', error = false }) {
+  return `
+      <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${error ? COLOR_CONSTANTS.ERROR : COLOR_CONSTANTS.TEXT}; text-align: center; padding: 20px;">
+        <div style="font-size: ${iconSize}px; margin-bottom: 16px;">${icon}</div>
+        <div class="${FONT_CONSTANTS.SIZES.TITLE}" style="margin-bottom: 8px;">${title}</div>
+        ${message ? `<div class="${FONT_CONSTANTS.SIZES.SMALL}" style="margin-bottom: ${hint || extraHtml ? 16 : 0}px; color: ${COLOR_CONSTANTS.WARNING};">${message}</div>` : ''}
+        ${extraHtml}
+        ${hint ? `<div class="${FONT_CONSTANTS.SIZES.SMALL}" style="color: ${COLOR_CONSTANTS.UNOWNED};">${hint}</div>` : ''}
       </div>`;
 }
 
 function renderCyclopediaProfileErrorHtml(message, options = {}) {
   const { showRetry = false, showConnectionHint = false } = options;
   const retryBtn = showRetry
-    ? `<button id="retry-profile-load" class="${FONT_CONSTANTS.PRIMARY} ${FONT_CONSTANTS.SIZES.BODY}" style="padding: 8px 16px; background: #444; border: 1px solid #666; border-radius: 4px; color: white; cursor: pointer;">${CYCLOPEDIA_UI.retry}</button>`
+    ? `<button id="retry-profile-load" type="button" class="focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular frame-1 active:frame-pressed-1 surface-regular gap-1 px-2 py-0.5 pb-[3px] ${FONT_CONSTANTS.SIZES.SMALL}" style="cursor: pointer;">${CYCLOPEDIA_UI.retry}</button>`
     : '';
   const hint = showConnectionHint
-    ? `<div style="font-size: 12px; color: #666;">${CYCLOPEDIA_UI.errorConnectionHint}</div>`
+    ? `<div class="${FONT_CONSTANTS.SIZES.SMALL}" style="color: ${COLOR_CONSTANTS.UNOWNED};">${CYCLOPEDIA_UI.errorConnectionHint}</div>`
     : '';
   return `
       <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${COLOR_CONSTANTS.ERROR}; text-align: center; padding: 20px;">
         <div style="font-size: 48px; margin-bottom: 16px;">⚠️</div>
-        <div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">${CYCLOPEDIA_UI.errorTitle}</div>
-        <div style="font-size: 14px; margin-bottom: 16px; color: #888;">${message}</div>
+        <div class="${FONT_CONSTANTS.SIZES.TITLE}" style="margin-bottom: 8px;">${CYCLOPEDIA_UI.errorTitle}</div>
+        <div class="${FONT_CONSTANTS.SIZES.SMALL}" style="margin-bottom: 16px; color: ${COLOR_CONSTANTS.WARNING};">${message}</div>
         ${hint}
         ${retryBtn}
       </div>`;
 }
-
 
 function debounce(func, wait) {
   return function executedFunction(...args) {
@@ -1070,6 +1128,64 @@ function createCyclopediaSearchBar(placeholder) {
   searchContainer.appendChild(searchInput);
   searchContainer.appendChild(filterBtn);
   return { searchContainer, searchInput, filterBtn };
+}
+
+/**
+ * Row metadata for a Cyclopedia list box: the row, its label span, a normalised label, and
+ * whatever `extra(label)` adds (usage counts, sort keys). Remembers the original order so
+ * "Name" mode can restore it, and strips a leading "NN% " left behind by a previous sort mode.
+ */
+function buildCyclopediaListRowMeta(box, extra) {
+  const rows = Array.from(box.querySelectorAll('div.pixel-font-16'))
+    .filter((el) => !!el.querySelector('span'));
+  return rows.map((row, idx) => {
+    if (!row.dataset.originalOrder) row.dataset.originalOrder = String(idx);
+    const span = row.querySelector('span');
+    if (span && !span.dataset.baseLabel) {
+      span.dataset.baseLabel = (span.textContent || '').trim().replace(/^d+%s+/, '');
+    }
+    const label = (span?.dataset.baseLabel || span?.textContent || row.textContent || '').trim().replace(/^d+%s+/, '');
+    return { row, idx, span, label, labelNorm: label.toLowerCase(), ...extra(label) };
+  });
+}
+
+/**
+ * Sorts (`comparator`, or original order when null), relabels (`formatLabel`) and
+ * search-filters the rows built by buildCyclopediaListRowMeta. Returns the visible count.
+ */
+function filterCyclopediaListRows(box, rowMeta, searchTerm, { comparator = null, formatLabel = null } = {}) {
+  const q = (searchTerm || '').toLowerCase();
+  const listGrid = box.querySelector('div[data-nopadding="true"]');
+  if (listGrid) {
+    const order = comparator || ((a, b) => Number(a.row.dataset.originalOrder) - Number(b.row.dataset.originalOrder));
+    rowMeta.slice().sort(order).forEach((m) => listGrid.appendChild(m.row));
+  }
+  let visibleCount = 0;
+  rowMeta.forEach((meta) => {
+    if (meta.span && formatLabel) meta.span.textContent = formatLabel(meta);
+    const isVisible = !q || meta.labelNorm.includes(q);
+    meta.row.style.display = isVisible ? '' : 'none';
+    if (isVisible) visibleCount++;
+  });
+  return visibleCount;
+}
+
+/** Player context plus its saved board configs as [roomCode, configs[]] rows, minus dynamic event maps. */
+function getCyclopediaBoardConfigRooms() {
+  const context = globalThis.state?.player?.getSnapshot?.()?.context;
+  const boardConfigs = context?.boardConfigs && typeof context.boardConfigs === 'object' ? context.boardConfigs : {};
+  const rooms = Object.entries(boardConfigs).filter(([roomCode, cfgs]) => Array.isArray(cfgs) && !isDynamicEventMap(roomCode));
+  return { context, rooms };
+}
+
+/** Centered one-line placeholder for a Cyclopedia detail column with nothing to show. */
+function createCyclopediaEmptyState(text) {
+  const el = document.createElement('div');
+  el.className = FONT_CONSTANTS.SIZES.BODY;
+  el.style.textAlign = 'center';
+  el.style.color = COLOR_CONSTANTS.TEXT;
+  el.textContent = text;
+  return el;
 }
 
 function createNoResultsMessage(text) {
@@ -1122,6 +1238,14 @@ const FormatUtils = {
   },
 
   number: function(n) { return n !== undefined ? n.toLocaleString() : '-'; },
+
+  /** 7825 -> "7.8k", 1250000 -> "1.3M"; smaller numbers stay as they are. */
+  compact: function(n) {
+    n = Number(n) || 0;
+    if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
+    if (n >= 1_000) return (n / 1_000).toFixed(1) + 'k';
+    return String(n);
+  },
 
   date: function(ts) {
     if (!ts) return '-';
@@ -1273,12 +1397,7 @@ function getCyclopediaProfileSeasons() {
 }
 
 const CYCLOPEDIA_ASSETS = {
-  seasonIcon: 'https://bestiaryarena.com/assets/icons/season.png',
-  bracketSilver: 'https://bestiaryarena.com/assets/icons/bracket-silver.png',
-  bracketGold: 'https://bestiaryarena.com/assets/icons/bracket-gold.png',
-  bracketPlatinum: 'https://bestiaryarena.com/assets/icons/bracket-platinum.png',
-  bracketDiamond: 'https://bestiaryarena.com/assets/icons/bracket-diamond.png',
-  bracketChallenger: 'https://bestiaryarena.com/assets/icons/bracket-challenger.png',
+  frame4: 'https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png',
   shinyStar: 'https://bestiaryarena.com/assets/icons/shiny-star.png',
   starTierShiny: 'https://bestiaryarena.com/assets/icons/star-tier-shiny.png',
   starTierHundo: 'https://bestiaryarena.com/assets/icons/star-tier-hundo.png',
@@ -1290,19 +1409,9 @@ const CYCLOPEDIA_ASSETS = {
   raid: 'https://bestiaryarena.com/assets/icons/raid.png',
   eventMini: 'https://bestiaryarena.com/assets/icons/event-mini-icon.png',
   enemy: 'https://bestiaryarena.com/assets/icons/enemy.png',
-  stamina: 'https://bestiaryarena.com/assets/icons/stamina.png'
+  stamina: 'https://bestiaryarena.com/assets/icons/stamina.png',
+  backgroundDark: 'https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png'
 };
-
-function cyclopediaBracketIconUrl(bracketName) {
-  if (bracketName == null || bracketName === '') return null;
-  const u = String(bracketName).trim().toUpperCase();
-  if (u.includes('CHALLENGER')) return CYCLOPEDIA_ASSETS.bracketChallenger;
-  if (u.includes('DIAMOND')) return CYCLOPEDIA_ASSETS.bracketDiamond;
-  if (u.includes('PLATINUM')) return CYCLOPEDIA_ASSETS.bracketPlatinum;
-  if (u.includes('GOLD')) return CYCLOPEDIA_ASSETS.bracketGold;
-  if (u.includes('SILVER')) return CYCLOPEDIA_ASSETS.bracketSilver;
-  return null;
-}
 
 function getSeason2RankBracketFromPosition(positionRaw, totalRaw) {
   const rankPos = Number(positionRaw);
@@ -2750,16 +2859,18 @@ function queueMonsterDataLoad(monsterId, callback) {
   if (!cyclopediaState.isProcessingQueue) processLazyLoadQueue();
 }
 
+/** Raw game monster for an id via creatureDatabase (the single id accessor), or null. */
+function getGameMonster(monsterId) {
+  return window.creatureDatabase?.getMonsterById?.(monsterId) ?? null;
+}
+
 function safeGetMonsterData(monsterId) {
-  try {
-    if (!globalThis.state?.utils?.getMonster) throw new Error('Monster API not available');
-    const monsterData = globalThis.state.utils.getMonster(monsterId);
-    if (!monsterData?.metadata) throw new Error('Invalid monster data');
-    return monsterData;
-  } catch (error) {
-    console.error(`[Cyclopedia] Error getting monster data for ID ${monsterId}:`, error);
+  const monsterData = getGameMonster(monsterId);
+  if (!monsterData?.metadata) {
+    console.warn(`[Cyclopedia] No monster data for ID ${monsterId}`);
     return null;
   }
+  return monsterData;
 }
 
 // =======================
@@ -3152,25 +3263,17 @@ const CreatureListManager = {
   }
 };
 
-const buildCyclopediaMonsterNameMap = MemoizationUtils.memoize(function() {
-  const db = window.creatureDatabase;
-  if (typeof db?.getMonsterNameMap === 'function') {
-    cyclopediaState.monsterNameMap = db.getMonsterNameMap();
+// Not memoized: the database returns an uncached empty map until the registry is ready, so
+// only a populated map is kept here and an early call can still be redone.
+function buildCyclopediaMonsterNameMap() {
+  const nameMap = window.creatureDatabase?.getMonsterNameMap?.();
+  if (nameMap?.size) {
+    cyclopediaState.monsterNameMap = nameMap;
     cyclopediaState.monsterNameMapBuilt = true;
-    return cyclopediaState.monsterNameMap;
+    return nameMap;
   }
-  if (typeof db?.buildMonsterNameMap === 'function') {
-    cyclopediaState.monsterNameMap = db.buildMonsterNameMap();
-    cyclopediaState.monsterNameMapBuilt = true;
-    return cyclopediaState.monsterNameMap;
-  }
-  if (cyclopediaState.monsterNameMapBuilt && cyclopediaState.monsterNameMap) {
-    return cyclopediaState.monsterNameMap;
-  }
-  cyclopediaState.monsterNameMap = new Map();
-  cyclopediaState.monsterNameMapBuilt = true;
-  return cyclopediaState.monsterNameMap;
-});
+  return cyclopediaState.monsterNameMap || new Map();
+}
 
 // Regex patterns for item detection
 const ITEM_PATTERNS = {
@@ -3291,6 +3394,109 @@ function appendFloorPercentBadge(span, floors) {
   addPart('-', null);
   addPart(`${max}`, floorPercentColor(max));
   addPart('%)', null);
+}
+
+/** Region banner shared by the Bestiary "Location" and Arsenal "Found in" columns. */
+function createCyclopediaRegionHeader(regionName, { iconSrc = null, iconAlt = '', iconFilter = '' } = {}) {
+  const header = document.createElement('div');
+  header.className = FONT_CONSTANTS.SIZES.BODY;
+  Object.assign(header.style, {
+    color: 'var(--theme-text, #e6d7b0)',
+    background: "url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat",
+    border: '6px solid transparent',
+    borderColor: COLOR_CONSTANTS.PRIMARY,
+    borderImage: `url("${CYCLOPEDIA_ASSETS.frame4}") 6 fill stretch`,
+    borderRadius: '0',
+    boxSizing: 'border-box',
+    textAlign: 'center',
+    padding: '1px 4px',
+    margin: '1px 0 0 0',
+    display: 'block'
+  });
+  if (!iconSrc) {
+    header.textContent = regionName;
+    return header;
+  }
+  Object.assign(header.style, { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' });
+  const icon = document.createElement('img');
+  icon.src = iconSrc;
+  icon.alt = iconAlt || regionName;
+  Object.assign(icon.style, { width: '16px', height: '16px', flexShrink: '0' });
+  if (iconFilter) icon.style.filter = iconFilter;
+  const text = document.createElement('span');
+  text.textContent = regionName;
+  header.appendChild(icon);
+  header.appendChild(text);
+  return header;
+}
+
+/**
+ * Clickable map row shared by the Bestiary "Location" and Arsenal "Found in" columns.
+ * Two grid tracks: the name (which wraps, with its floor-percent badge kept whole) and an auto-sized `right`
+ * node at the row's right edge (e.g. the stamina cost), so `right` is always visible however long the name is.
+ * `roomId` navigates by id instead of by display name.
+ */
+function createCyclopediaMapRow({ mapName, floors = null, right = null, roomId = null, padding = '2px 6px' }) {
+  const row = document.createElement('div');
+  row.className = FONT_CONSTANTS.SIZES.SMALL;
+  Object.assign(row.style, {
+    ...CYCLOPEDIA_ROW_TEXT_STYLE,
+    margin: '0',
+    display: 'grid',
+    gridTemplateColumns: right ? 'minmax(0, 1fr) auto' : 'minmax(0, 1fr)',
+    alignItems: 'center',
+    textAlign: 'left',
+    background: 'transparent',
+    color: COLOR_CONSTANTS.TEXT
+  });
+  const nameSpan = document.createElement('span');
+  nameSpan.style.minWidth = '0';
+  nameSpan.style.overflowWrap = 'anywhere';
+  nameSpan.appendChild(document.createTextNode(mapName));
+  // The "(220-400%)" badge is one unit: it moves to the next line whole instead of splitting at the dash.
+  const badgeHost = document.createElement('span');
+  badgeHost.style.whiteSpace = 'nowrap';
+  appendFloorPercentBadge(badgeHost, floors);
+  nameSpan.appendChild(badgeHost);
+  row.appendChild(nameSpan);
+  if (right) row.appendChild(right);
+  NavigationHandler.attachMapNavigation(row, mapName, { padding, roomId });
+  return row;
+}
+
+/** Right-edge "cost + stamina icon" of a map row. Empty (but still a node, so spacing stays) when the room has no stamina cost. */
+function createCyclopediaStaminaCostSpan(roomId, floors = null) {
+  const right = document.createElement('span');
+  right.style.display = 'flex';
+  right.style.alignItems = 'center';
+  right.style.gap = '2px';
+  right.style.marginLeft = '8px';
+  right.style.whiteSpace = 'nowrap';
+  const staminaCost = roomId ? getCyclopediaRoomStaminaLabel(roomId, floors) : null;
+  if (staminaCost != null) {
+    const icon = document.createElement('img');
+    icon.src = CYCLOPEDIA_ASSETS.stamina;
+    icon.alt = 'Stamina';
+    icon.style.marginLeft = '2px';
+    icon.style.display = 'inline-block';
+    const costSpan = document.createElement('span');
+    costSpan.textContent = staminaCost;
+    costSpan.style.color = COLOR_CONSTANTS.PRIMARY;
+    costSpan.style.marginLeft = '2px';
+    right.appendChild(costSpan);
+    right.appendChild(icon);
+  }
+  return right;
+}
+
+/** Room id for a map's display name (the wiki boosted-map lists only carry names). */
+function resolveCyclopediaRoomIdByName(mapName) {
+  const roomNames = globalThis.state?.utils?.ROOM_NAME;
+  if (!roomNames) return null;
+  for (const [roomId, displayName] of Object.entries(roomNames)) {
+    if (displayName === mapName) return roomId;
+  }
+  return null;
 }
 
 function findMonsterLocations(monsterName) {
@@ -3497,11 +3703,6 @@ function refreshCyclopediaRecordsOnOpen() {
 function truncatePlayerName(name) {
   if (!name || typeof name !== 'string') return name || '';
   return name.length > 8 ? name.substring(0, 8) + '...' : name;
-}
-
-function truncateListPlayerName(name) {
-  if (!name || typeof name !== 'string') return name || '';
-  return name.length > 6 ? name.substring(0, 6) + '...' : name;
 }
 
 function getCyclopediaCurrentPlayerName() {
@@ -4331,15 +4532,17 @@ const CyclopediaHomeSearch = (() => {
 
   function ensureRoomCreatureIndex() {
     if (roomCreatureIndex) return roomCreatureIndex;
+
+    const utils = globalThis.state?.utils;
+    // Not ready: return an uncached empty index so the next search can build the real one.
+    if (!utils || !getGameMonster(1)) return new Map();
+
     roomCreatureIndex = new Map();
     creatureToRoomIds = new Map();
     equipmentToRoomIds = new Map();
     creatureToEquipmentNames = new Map();
 
-    const utils = globalThis.state?.utils;
-    if (!utils?.getMonster) return roomCreatureIndex;
-
-    const getMonster = utils.getMonster;
+    const getMonster = getGameMonster;
     const getEquipment = utils.getEquipment;
     const getBoard = utils.getBoardMonstersFromRoomId;
     const regions = safeGetRegions();
@@ -6128,7 +6331,7 @@ const CyclopediaHomeSearch = (() => {
 
 // 7. DOM/CSS Injection & Entry Points
 // =======================
-const CYCLOPEDIA_BUTTON_CSS = `.cyclopedia-subnav { display: flex; gap: 0; margin-bottom: 0; width: 100%; } nav.cyclopedia-subnav > button.cyclopedia-btn, nav.cyclopedia-subnav > button.cyclopedia-btn:hover, nav.cyclopedia-subnav > button.cyclopedia-btn:focus { background: url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat !important; border: 6px solid transparent !important; border-color: #ffe066 !important; border-image: url('https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png') 6 fill stretch !important; color: var(--theme-text, #e6d7b0) !important; font-weight: 700 !important; border-radius: 0 !important; box-sizing: border-box !important; transition: color 0.2s, border-image 0.1s !important; font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif !important; outline: none !important; position: relative !important; display: inline-flex !important; align-items: center !important; justify-content: center !important; font-size: 16px !important; padding: 7px 24px !important; cursor: pointer; flex: 1 1 0; min-width: 0; } nav.cyclopedia-subnav > button.cyclopedia-btn.pressed, nav.cyclopedia-subnav > button.cyclopedia-btn:active { border-image: url('https://bestiaryarena.com/_next/static/media/1-frame-pressed.e3fabbc5.png') 6 fill stretch !important; } nav.cyclopedia-subnav > button.cyclopedia-btn.active { border-image: url('https://bestiaryarena.com/_next/static/media/1-frame-pressed.e3fabbc5.png') 6 fill stretch !important; } nav.cyclopedia-subnav > button.cyclopedia-btn[data-tab="home"], nav.cyclopedia-subnav > button.cyclopedia-btn[data-tab="wiki"] { width: 42px !important; height: 42px !important; min-width: 42px !important; min-height: 42px !important; max-width: 42px !important; max-height: 42px !important; flex: 0 0 42px !important; padding: 0 !important; font-size: 12px !important; }`;
+const CYCLOPEDIA_BUTTON_CSS = `.cyclopedia-subnav { display: flex; gap: 0; margin-bottom: 0; width: 100%; } nav.cyclopedia-subnav > button.cyclopedia-btn, nav.cyclopedia-subnav > button.cyclopedia-btn:hover, nav.cyclopedia-subnav > button.cyclopedia-btn:focus { background: url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat !important; border: 6px solid transparent !important; border-color: #ffe066 !important; border-image: url('${CYCLOPEDIA_ASSETS.frame4}') 6 fill stretch !important; color: var(--theme-text, #e6d7b0) !important; font-weight: 700 !important; border-radius: 0 !important; box-sizing: border-box !important; transition: color 0.2s, border-image 0.1s !important; font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif !important; outline: none !important; position: relative !important; display: inline-flex !important; align-items: center !important; justify-content: center !important; font-size: 16px !important; padding: 7px 24px !important; cursor: pointer; flex: 1 1 0; min-width: 0; } nav.cyclopedia-subnav > button.cyclopedia-btn.pressed, nav.cyclopedia-subnav > button.cyclopedia-btn:active { border-image: url('https://bestiaryarena.com/_next/static/media/1-frame-pressed.e3fabbc5.png') 6 fill stretch !important; } nav.cyclopedia-subnav > button.cyclopedia-btn.active { border-image: url('https://bestiaryarena.com/_next/static/media/1-frame-pressed.e3fabbc5.png') 6 fill stretch !important; } nav.cyclopedia-subnav > button.cyclopedia-btn[data-tab="home"], nav.cyclopedia-subnav > button.cyclopedia-btn[data-tab="wiki"] { width: 42px !important; height: 42px !important; min-width: 42px !important; min-height: 42px !important; max-width: 42px !important; max-height: 42px !important; flex: 0 0 42px !important; padding: 0 !important; font-size: 12px !important; }`;
 function injectCyclopediaButtonStyles() { injectCyclopediaStyle('cyclopedia-btn-css', CYCLOPEDIA_BUTTON_CSS); }
 
 const CYCLOPEDIA_BOX_CSS = `.cyclopedia-box { display: flex; flex-direction: column; border: none; background: none; margin-bottom: 16px; min-height: 120px; box-sizing: border-box; } .cyclopedia-box-title { border: 6px solid transparent; border-image: url('https://bestiaryarena.com/_next/static/media/4-frame-top.b7a55115.png') 6 6 0 6 stretch; border-bottom: none; background: #232323; color: #ffe066; font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif; font-size: 15px; font-weight: bold; padding: 4px 12px; text-align: left; letter-spacing: 1px; } .cyclopedia-box-content { flex: 1 1 0; overflow-y: auto; background: url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat; padding: 8px 12px; color: #e6d7b0; font-size: 14px; font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif; min-height: 0; max-height: none; scrollbar-width: thin !important; scrollbar-color: #444 #222 !important; } .cyclopedia-box-content::-webkit-scrollbar { width: 12px !important; background: transparent !important; } .cyclopedia-box-content::-webkit-scrollbar-thumb { background: url('https://bestiaryarena.com/_next/static/media/scrollbar-handle-vertical.962972d4.png') repeat-y !important; border-radius: 4px !important; } .cyclopedia-box-content::-webkit-scrollbar-corner { background: transparent !important; }`;
@@ -6137,7 +6340,7 @@ function injectCyclopediaBoxStyles() { injectCyclopediaStyle('cyclopedia-box-css
 const CYCLOPEDIA_SELECTED_CSS = `.cyclopedia-selected { background: rgba(255,255,255,0.18) !important; color: inherit !important; } .cyclopedia-box .equipment-portrait .absolute { background: none !important; } .cyclopedia-box .equipment-portrait[data-highlighted="true"] .absolute { background: none !important; } .cyclopedia-box .equipment-portrait .absolute[style*="radial-gradient"] { background: none !important; } .cyclopedia-box .equipment-portrait .absolute[style*="background: radial-gradient"] { background: none !important; } .cyclopedia-box .equipment-portrait .absolute[style*="rgba(0, 0, 0, 0.5)"] { background: none !important; } .cyclopedia-box .equipment-portrait .absolute.bottom-0.left-0 { background: none !important; }`;
 function injectCyclopediaSelectedCss() { injectCyclopediaStyle('cyclopedia-selected-css', CYCLOPEDIA_SELECTED_CSS); }
 
-const CYCLOPEDIA_MAPS_ROW_CSS = `.cyclopedia-maps-list { container-type: inline-size; container-name: cyclopedia-maps-list; width: 100%; } .cyclopedia-map-row { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto auto auto; align-items: center; gap: 8px; padding: 8px; border: 2px solid #666; border-radius: 4px; cursor: pointer; transition: background-color 0.2s; box-sizing: border-box; width: 100%; min-width: 0; } .cyclopedia-map-thumb { width: 64px; height: 64px; object-fit: cover; border: 1px solid #666; border-radius: 4px; } .cyclopedia-map-name { font-size: 14px; font-weight: bold; hyphens: auto; word-break: break-word; overflow-wrap: anywhere; min-width: 0; } .cyclopedia-map-stats { display: contents; } .cyclopedia-map-stat { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 4px; min-width: 40px; max-width: 100px; font-size: 9px; font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif; text-align: center; box-sizing: border-box; } .cyclopedia-map-stat--floors { min-width: 40px; } @container cyclopedia-maps-list (max-width: 400px) { .cyclopedia-map-row { grid-template-columns: 64px minmax(0, 1fr); grid-template-rows: auto auto; align-items: start; } .cyclopedia-map-stats { display: flex; flex-direction: row; flex-wrap: wrap; justify-content: space-evenly; align-items: flex-start; gap: 8px; grid-column: 1 / -1; width: 100%; padding-top: 8px; margin-top: 4px; border-top: 1px solid rgba(102, 102, 102, 0.45); } .cyclopedia-map-stat { flex: 1 1 40px; max-width: none; min-width: 40px; } }`;
+const CYCLOPEDIA_MAPS_ROW_CSS = `.cyclopedia-maps-list { container-type: inline-size; container-name: cyclopedia-maps-list; width: 100%; } .cyclopedia-map-row { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto auto auto; align-items: center; gap: 8px; padding: 8px; border: 2px solid #666; border-radius: 4px; cursor: pointer; transition: background-color 0.2s; box-sizing: border-box; width: 100%; min-width: 0; } .cyclopedia-map-thumb { width: 64px; height: 64px; object-fit: cover; border: 1px solid #666; border-radius: 4px; } .cyclopedia-map-name { hyphens: auto; word-break: break-word; overflow-wrap: anywhere; min-width: 0; } .cyclopedia-map-stats { display: contents; } .cyclopedia-map-stat { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 4px; min-width: 40px; max-width: 100px; font-size: 10px; font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif; text-align: center; box-sizing: border-box; } .cyclopedia-map-stat--floors { min-width: 40px; } @container cyclopedia-maps-list (max-width: 400px) { .cyclopedia-map-row { grid-template-columns: 64px minmax(0, 1fr); grid-template-rows: auto auto; align-items: start; } .cyclopedia-map-stats { display: flex; flex-direction: row; flex-wrap: wrap; justify-content: space-evenly; align-items: flex-start; gap: 8px; grid-column: 1 / -1; width: 100%; padding-top: 8px; margin-top: 4px; border-top: 1px solid rgba(102, 102, 102, 0.45); } .cyclopedia-map-stat { flex: 1 1 40px; max-width: none; min-width: 40px; } }`;
 function injectCyclopediaMapsRowStyles() { injectCyclopediaStyle('cyclopedia-maps-row-css', CYCLOPEDIA_MAPS_ROW_CSS); }
 
 function removeCyclopediaFromMenus() {
@@ -6241,7 +6444,7 @@ function showDeleteConfirmationModal(runType, runData, onConfirm) {
     maxWidth: '450px',
     width: '90%',
     boxShadow: '0 8px 32px rgba(0, 0, 0, 0.6)',
-    fontFamily: "'Trebuchet MS', 'Arial Black', Arial, sans-serif",
+    fontFamily: CYCLOPEDIA_STATS_FONT,
     position: 'relative'
   });
   
@@ -6316,7 +6519,7 @@ function showDeleteConfirmationModal(runType, runData, onConfirm) {
     padding: '12px 24px',
     cursor: 'pointer',
     fontSize: '16px',
-    fontFamily: "'Trebuchet MS', 'Arial Black', Arial, sans-serif",
+    fontFamily: CYCLOPEDIA_STATS_FONT,
     fontWeight: 'bold',
     transition: 'all 0.2s ease',
     minWidth: '100px'
@@ -6335,7 +6538,7 @@ function showDeleteConfirmationModal(runType, runData, onConfirm) {
     padding: '12px 24px',
     cursor: 'pointer',
     fontSize: '16px',
-    fontFamily: "'Trebuchet MS', 'Arial Black', Arial, sans-serif",
+    fontFamily: CYCLOPEDIA_STATS_FONT,
     fontWeight: 'bold',
     transition: 'all 0.2s ease',
     minWidth: '100px'
@@ -6455,7 +6658,7 @@ function createBox({
       let hasHundoTier = false;
 
       if (type === 'creature') {
-        const isUnobtainable = UNOBTAINABLE_CREATURES.some(c => c.toLowerCase() === name.toLowerCase());
+        const isUnobtainable = getCyclopediaUnobtainableCreatures().some(c => c.toLowerCase() === name.toLowerCase());
         if (!isUnobtainable) {
           const status = getCreatureDisplayStatus(name);
           isOwned = status.owned;
@@ -6529,7 +6732,7 @@ function createBox({
             // Check item status and restore appropriate styling
             const itemName = getListItemBaseName(el);
             if (type === 'creature') {
-              const isUnobtainable = UNOBTAINABLE_CREATURES.some(c => c.toLowerCase() === itemName.toLowerCase());
+              const isUnobtainable = getCyclopediaUnobtainableCreatures().some(c => c.toLowerCase() === itemName.toLowerCase());
               if (!isUnobtainable) {
                 applyCreatureListItemStyle(el, getCreatureDisplayStatus(itemName), { isUnobtainable });
               } else {
@@ -8050,7 +8253,7 @@ function showOwnedGenesTooltip(tile, monster) {
  */
 function getOwnedCreatureBaseStats(monster, status) {
   const utils = globalThis.state?.utils;
-  const speciesStats = utils?.getMonster?.(monster.gameId || monster.id)?.metadata?.baseStats;
+  const speciesStats = getGameMonster(monster.gameId || monster.id)?.metadata?.baseStats;
   if (typeof utils?.scaleStat !== 'function' || !speciesStats) return null;
   const baseStats = { ...speciesStats };
   OWNED_STAT_KEYS.forEach((key) => {
@@ -8336,7 +8539,7 @@ function renderCreatureTemplate(name, showShinyPortraits = false, showOldSprites
   if (!creatureCanAwaken) {
     cyclopediaState.creatureDetailShowAwakenedAbility = false;
   }
-  const isUnobtainable = UNOBTAINABLE_CREATURES.some(c => c.toLowerCase() === (name || '').toLowerCase());
+  const isUnobtainable = getCyclopediaUnobtainableCreatures().some(c => c.toLowerCase() === (name || '').toLowerCase());
   const container = document.createElement('div');
   container.style.display = 'flex';
   container.style.flexDirection = 'row';
@@ -9167,9 +9370,7 @@ function renderCreatureTemplate(name, showShinyPortraits = false, showOldSprites
   dropsList.style.marginTop = '4px';
   dropsList.style.marginBottom = '4px';
   dropsList.className = FONT_CONSTANTS.SIZES.BODY;
-  dropsList.style.lineHeight = '1';
-  dropsList.style.letterSpacing = '.0625rem';
-  dropsList.style.wordSpacing = '-.1875rem';
+  Object.assign(dropsList.style, CYCLOPEDIA_ROW_TEXT_STYLE);
   dropsList.style.color = COLOR_CONSTANTS.TEXT;
   dropsList.style.flex = '1 1 0';
   dropsList.style.minHeight = '0';
@@ -9198,97 +9399,15 @@ function renderCreatureTemplate(name, showShinyPortraits = false, showOldSprites
     });
     if (regionMap.size > 0) {
       for (const [regionName, rooms] of regionMap.entries()) {
-        const regionDiv = document.createElement('div');
-        regionDiv.style.fontWeight = '700'; // Match cyclopedia-subnav
-        regionDiv.className = FONT_CONSTANTS.SIZES.BODY;
-        regionDiv.style.color = COLOR_CONSTANTS.TEXT;
-        regionDiv.style.background = "url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat";
-        regionDiv.style.border = '6px solid transparent';
-        regionDiv.style.borderColor = '#ffe066';
-        regionDiv.style.borderImage = "url('https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png') 6 fill stretch";
-        regionDiv.style.color = 'var(--theme-text, #e6d7b0)';
-        regionDiv.style.fontWeight = '700';
-        regionDiv.style.borderRadius = '0';
-        regionDiv.style.boxSizing = 'border-box';
-        regionDiv.style.textAlign = 'center';
-        regionDiv.style.padding = '1px 4px';
-        regionDiv.style.margin = '1px 0 0 0';
-        regionDiv.style.display = 'block';
-        regionDiv.style.textAlign = 'center';
-        regionDiv.textContent = regionName;
-        dropsList.appendChild(regionDiv);
+        dropsList.appendChild(createCyclopediaRegionHeader(regionName));
         rooms.forEach(({ roomName, positions, floors }) => {
-          const roomDiv = document.createElement('div');
-          roomDiv.style.fontWeight = 'bold';
-          roomDiv.className = FONT_CONSTANTS.SIZES.SMALL;
-          roomDiv.style.lineHeight = '1';
-          roomDiv.style.letterSpacing = '.0625rem';
-          roomDiv.style.wordSpacing = '-.1875rem';
-          roomDiv.style.margin = '0';
-          roomDiv.style.padding = '2px 6px';
-          roomDiv.style.borderRadius = '4px';
-          roomDiv.style.display = 'flex';
-          roomDiv.style.justifyContent = 'space-between';
-          roomDiv.style.alignItems = 'center';
-          roomDiv.style.textAlign = 'left';
-          roomDiv.textContent = '';
-          const nameSpan = document.createElement('span');
-          nameSpan.textContent = roomName;
-          appendFloorPercentBadge(nameSpan, floors);
-          nameSpan.style.flex = '1 1 auto';
-          nameSpan.style.overflow = 'hidden';
-          nameSpan.style.textOverflow = 'ellipsis';
-          nameSpan.style.whiteSpace = 'nowrap';
-          const rightSpan = document.createElement('span');
-          rightSpan.style.display = 'flex';
-          rightSpan.style.alignItems = 'center';
-          rightSpan.style.gap = '2px';
-          rightSpan.style.marginLeft = '8px';
           const foundLocation = monsterLocations.find(
             (loc) => (loc.roomName || getCyclopediaRoomDisplayName(loc.roomId)) === roomName
           );
-          let staminaCost = null;
           const foundRoom = foundLocation ? getCyclopediaRoomByMapId(foundLocation.roomId) : null;
-          if (foundRoom?.staminaCost != null) {
-            staminaCost = foundRoom.staminaCost;
-          }
-          if (staminaCost != null) {
-            const icon = document.createElement('img');
-            icon.src = CYCLOPEDIA_ASSETS.stamina;
-            icon.alt = 'Stamina';
-            icon.style.marginLeft = '2px';
-            icon.style.display = 'inline-block';
-            const costSpan = document.createElement('span');
-            costSpan.textContent = staminaCost;
-            costSpan.style.fontWeight = 'bold';
-            costSpan.style.color = '#ffe066';
-            costSpan.style.marginLeft = '2px';
-            rightSpan.appendChild(costSpan);
-            rightSpan.appendChild(icon);
-          }
-          roomDiv.appendChild(nameSpan);
-          roomDiv.appendChild(rightSpan);
-          roomDiv.style.cursor = MAP_INTERACTION_CONFIG.cursor;
-          roomDiv.style.textDecoration = MAP_INTERACTION_CONFIG.textDecoration;
-          roomDiv.title = MAP_INTERACTION_CONFIG.tooltip;
-          let foundLoc = foundLocation;
-          if (foundLoc) {
-            roomDiv.addEventListener('mouseenter', () => {
-              roomDiv.style.background = MAP_INTERACTION_CONFIG.hoverBackground;
-              roomDiv.style.color = MAP_INTERACTION_CONFIG.hoverTextColor;
-            });
-            roomDiv.addEventListener('mouseleave', () => {
-              roomDiv.style.background = MAP_INTERACTION_CONFIG.defaultBackground;
-              roomDiv.style.color = MAP_INTERACTION_CONFIG.defaultTextColor;
-            });
-            roomDiv.addEventListener('click', () => {
-              const roomCode = foundRoom?.id;
-              if (roomCode) {
-                NavigationHandler.navigateToMapByRoomId(roomCode);
-              }
-            });
-          }
-          dropsList.appendChild(roomDiv);
+          dropsList.appendChild(createCyclopediaMapRow({
+            mapName: roomName, floors, right: createCyclopediaStaminaCostSpan(foundRoom?.id, floors), roomId: foundRoom?.id
+          }));
           // "×N" is how many appear together on one board. Multi-floor rooms list the creature once
           // per floor, so count within each floor and keep the largest, not the total across floors.
           const perFloorCounts = new Map(); // level -> Map(floor -> count)
@@ -9308,9 +9427,7 @@ function renderCreatureTemplate(name, showShinyPortraits = false, showOldSprites
             const detail = document.createElement('div');
             detail.style.color = COLOR_CONSTANTS.TEXT;
             detail.className = FONT_CONSTANTS.SIZES.TINY;
-            detail.style.lineHeight = '1';
-            detail.style.letterSpacing = '.0625rem';
-            detail.style.wordSpacing = '-.1875rem';
+            Object.assign(detail.style, CYCLOPEDIA_ROW_TEXT_STYLE);
             detail.style.marginLeft = '6px';
             detail.style.marginTop = '0px';
             detail.style.display = 'flex';
@@ -9323,7 +9440,6 @@ function renderCreatureTemplate(name, showShinyPortraits = false, showOldSprites
               const multSpan = document.createElement('span');
               multSpan.textContent = `×${count}`;
               multSpan.style.color = COLOR_CONSTANTS.PRIMARY;
-              multSpan.style.fontWeight = 'bold';
               multSpan.style.textShadow = '1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 0 0 4px rgba(0, 0, 0, 0.6)';
               detail.appendChild(multSpan);
             }
@@ -9333,6 +9449,8 @@ function renderCreatureTemplate(name, showShinyPortraits = false, showOldSprites
           separator.className = 'separator my-2.5';
           separator.setAttribute('role', 'none');
           separator.style.margin = '6px 0';
+          // dropsList is a scrolling flex column: an empty div would shrink to 0px once the list overflows.
+          separator.style.flexShrink = '0';
           dropsList.appendChild(separator);
         });
       }
@@ -9341,9 +9459,7 @@ function renderCreatureTemplate(name, showShinyPortraits = false, showOldSprites
       noLocationItem.textContent = 'No locations found';
       noLocationItem.style.color = COLOR_CONSTANTS.TEXT;
       noLocationItem.className = FONT_CONSTANTS.SIZES.BODY;
-      noLocationItem.style.lineHeight = '1';
-      noLocationItem.style.letterSpacing = '.0625rem';
-      noLocationItem.style.wordSpacing = '-.1875rem';
+      Object.assign(noLocationItem.style, CYCLOPEDIA_ROW_TEXT_STYLE);
       noLocationItem.style.fontStyle = 'italic';
       dropsList.appendChild(noLocationItem);
     }
@@ -9352,11 +9468,7 @@ function renderCreatureTemplate(name, showShinyPortraits = false, showOldSprites
     const noLocationItem = document.createElement('div');
     noLocationItem.textContent = 'No locations found';
     noLocationItem.style.color = COLOR_CONSTANTS.TEXT;
-    noLocationItem.style.fontFamily = 'var(--font-filled)';
-    noLocationItem.style.fontSize = '16px';
-    noLocationItem.style.lineHeight = '1';
-    noLocationItem.style.letterSpacing = '.0625rem';
-    noLocationItem.style.wordSpacing = '-.1875rem';
+    Object.assign(noLocationItem.style, CYCLOPEDIA_ROW_TEXT_STYLE);
     noLocationItem.style.fontStyle = 'italic';
     noLocationItem.className = FONT_CONSTANTS.SIZES.BODY;
     dropsList.appendChild(noLocationItem);
@@ -9377,19 +9489,14 @@ function renderCreatureTemplate(name, showShinyPortraits = false, showOldSprites
   function getBoardConfigUsageStatsForCreature(targetMonsterGameId) {
     const emptyStats = { count: 0, total: 0, percentage: 0 };
     try {
-      const playerContext = globalThis.state?.player?.getSnapshot?.().context;
+      const { context: playerContext, rooms } = getCyclopediaBoardConfigRooms();
       const monsters = Array.isArray(playerContext?.monsters) ? playerContext.monsters : [];
-      const boardConfigs = playerContext?.boardConfigs && typeof playerContext.boardConfigs === 'object'
-        ? playerContext.boardConfigs
-        : {};
       if (!monsters.length) return emptyStats;
 
       const monsterLookup = new Map(monsters.map((m) => [m.id, m.gameId]));
       let total = 0; // total maps with config arrays
       let count = 0;
-      Object.entries(boardConfigs).forEach(([roomCode, cfgs]) => {
-        if (!Array.isArray(cfgs)) return;
-        if (isDynamicEventMap(roomCode)) return;
+      rooms.forEach(([, cfgs]) => {
         total++;
         let foundOnMap = false;
         cfgs.forEach((cfg) => {
@@ -9580,21 +9687,21 @@ function createCyclopediaSeasonsLeaderboardLink() {
   seasonLink.target = '_blank';
   seasonLink.rel = 'noopener noreferrer';
   seasonLink.textContent = CYCLOPEDIA_UI.viewFullSeasonsLeaderboard;
+  seasonLink.className = FONT_CONSTANTS.SIZES.SMALL;
   Object.assign(seasonLink.style, {
     display: 'inline-flex',
     alignItems: 'center',
     justifyContent: 'center',
-    fontSize: '12px',
-    color: '#ffe066',
+    color: COLOR_CONSTANTS.PRIMARY,
     textDecoration: 'underline',
     cursor: 'pointer',
     flexShrink: '0'
   });
   seasonLink.addEventListener('mouseover', () => {
-    seasonLink.style.color = '#fff2b2';
+    seasonLink.style.color = COLOR_CONSTANTS.PRIMARY_HOVER;
   });
   seasonLink.addEventListener('mouseout', () => {
-    seasonLink.style.color = '#ffe066';
+    seasonLink.style.color = COLOR_CONSTANTS.PRIMARY;
   });
   return seasonLink;
 }
@@ -9777,236 +9884,6 @@ function renderCyclopediaProfileColumn(profileData) {
   linkFooter.appendChild(createCyclopediaSeasonsLeaderboardLink());
   wrapper.appendChild(linkFooter);
   return wrapper;
-}
-
-function renderCyclopediaWelcomeColumn(playerName, profileData, onSeasonChange, options = {}) {
-  const { showSeasonToggle = true } = options;
-  try {
-    const activeSeason = cyclopediaState.profileSeason || 1;
-    const pd = unwrapProfilePageJson(profileData) || {};
-    const s = findProfileSeasonEntry(pd, activeSeason);
-    const season2RankBracket = getSeason2MetricBracket(pd, s, activeSeason, 'rank');
-    const season2TicksBracket = getSeason2MetricBracket(pd, s, activeSeason, 'ticks');
-    const season2FloorsBracket = getSeason2MetricBracket(pd, s, activeSeason, 'floors');
-    const pickPlacement = (...candidates) => {
-      for (const c of candidates) {
-        const n = Number(c);
-        if (Number.isFinite(n) && n > 0) return n;
-      }
-      return null;
-    };
-    const seasonStats = {
-      // For current season, profile payload can expose live aggregates only at top level.
-      ticks: s?.ticks ?? pd.ticks,
-      rank: s?.rank ?? pd.rankPoints,
-      floors: s?.floors ?? pd.floors,
-      ticksPlacement: pickPlacement(s?.ticksPosition, s?.ticksPos, pd?.ticksPosition, pd?.ticksPos),
-      rankPlacement: pickPlacement(s?.rankPosition, s?.position, s?.rankPos, pd?.rankPosition, pd?.position, pd?.rankPointsPosition),
-      floorsPlacement: pickPlacement(s?.floorsPosition, s?.floorsPos, pd?.floorsPosition, pd?.floorsPos),
-      ticksBracket: season2TicksBracket || s?.ticksBracket,
-      rankBracket: season2RankBracket || s?.rankBracket,
-      floorsBracket: season2FloorsBracket || s?.floorsBracket
-    };
-
-    const div = document.createElement('div');
-    div.style.flex = '0 1 auto';
-    div.style.display = 'flex';
-    div.style.flexDirection = 'column';
-    div.style.justifyContent = 'flex-start';
-    div.style.alignItems = 'center';
-    div.style.padding = '24px';
-    div.style.width = '100%';
-    div.style.maxHeight = '100%';
-    div.style.minHeight = '0';
-    div.style.overflowY = 'auto';
-    div.style.boxSizing = 'border-box';
-
-    const headline = document.createElement('h2');
-    headline.style.color = '#ffe066';
-    headline.style.fontSize = '22px';
-    headline.style.marginBottom = '12px';
-    headline.style.marginTop = '0';
-    headline.style.textAlign = 'center';
-    headline.style.width = '100%';
-    headline.textContent = playerName
-      ? CYCLOPEDIA_UI.welcomeName(playerName)
-      : CYCLOPEDIA_UI.welcome;
-    div.appendChild(headline);
-
-    if (showSeasonToggle) {
-      div.appendChild(renderCyclopediaSeasonToggleRow(onSeasonChange));
-    }
-
-    const statsWrap = document.createElement('div');
-    statsWrap.style.width = '100%';
-    statsWrap.style.flex = '0 0 auto';
-    statsWrap.style.display = 'flex';
-    statsWrap.style.flexDirection = 'column';
-    statsWrap.style.gap = '10px';
-
-    const title = document.createElement('div');
-    title.style.color = '#ffe066';
-    title.style.fontSize = '16px';
-    title.style.fontWeight = 'bold';
-    title.style.textAlign = 'center';
-    title.style.width = '100%';
-    title.style.display = 'flex';
-    title.style.alignItems = 'center';
-    title.style.justifyContent = 'center';
-    title.style.gap = '6px';
-    const titleIcon = document.createElement('img');
-    titleIcon.src = CYCLOPEDIA_ASSETS.seasonIcon;
-    titleIcon.alt = '';
-    titleIcon.width = 18;
-    titleIcon.height = 18;
-    titleIcon.className = 'pixelated';
-    Object.assign(titleIcon.style, { width: '18px', height: '18px', flexShrink: '0' });
-    const titleLabel = document.createElement('span');
-    titleLabel.textContent = CYCLOPEDIA_UI.seasonStatsTitle;
-    title.appendChild(titleIcon);
-    title.appendChild(titleLabel);
-    statsWrap.appendChild(title);
-
-    const appendStatRow = (parent, labelKey, rawValue, bracket, placement) => {
-      const na = cyclopediaSeasonNA();
-      const row = document.createElement('div');
-      row.style.display = 'flex';
-      row.style.justifyContent = 'space-between';
-      row.style.alignItems = 'center';
-      row.style.gap = '8px';
-      row.style.fontSize = '13px';
-      row.style.color = '#e6d7b0';
-      row.style.height = '20px';
-      row.style.minHeight = '20px';
-      row.style.maxHeight = '20px';
-      row.style.boxSizing = 'border-box';
-      const tooltipParts = [];
-      if (placement != null) tooltipParts.push(`Placement: #${FormatUtils.number(placement)}`);
-      if (bracket != null && bracket !== '') tooltipParts.push(`Bracket: ${String(bracket)}`);
-      if (tooltipParts.length > 0) row.title = tooltipParts.join(' | ');
-      const lab = document.createElement('span');
-      lab.style.flexShrink = '0';
-      lab.textContent = String(labelKey);
-      const val = document.createElement('span');
-      val.style.display = 'flex';
-      val.style.flex = '1 1 auto';
-      val.style.minWidth = '0';
-      val.style.justifyContent = 'flex-end';
-      val.style.alignItems = 'center';
-      val.style.textAlign = 'right';
-      const inner = document.createElement('span');
-      inner.style.display = 'inline-flex';
-      inner.style.flexDirection = 'row';
-      inner.style.flexWrap = 'nowrap';
-      inner.style.alignItems = 'center';
-      inner.style.gap = '4px';
-      inner.style.maxWidth = '100%';
-      const hasVal = rawValue !== undefined && rawValue !== null;
-      const numSpan = document.createElement('span');
-      numSpan.style.flexShrink = '0';
-      numSpan.textContent = hasVal ? (typeof rawValue === 'number' ? FormatUtils.number(rawValue) : String(rawValue)) : na;
-      inner.appendChild(numSpan);
-      if (hasVal && bracket != null && bracket !== '') {
-        const iconUrl = cyclopediaBracketIconUrl(bracket);
-        const brOuter = document.createElement('span');
-        brOuter.style.display = 'inline-flex';
-        brOuter.style.alignItems = 'center';
-        brOuter.style.gap = '3px';
-        brOuter.style.flexShrink = '0';
-        if (iconUrl) {
-          const img = document.createElement('img');
-          img.src = iconUrl;
-          img.alt = String(bracket);
-          img.width = 18;
-          img.height = 18;
-          img.className = 'pixelated';
-          Object.assign(img.style, { width: '18px', height: '18px', verticalAlign: 'middle' });
-          brOuter.appendChild(img);
-        }
-        const brTxt = document.createElement('span');
-        brTxt.style.fontSize = '11px';
-        brTxt.style.color = '#c9b896';
-        brTxt.textContent = `(${bracket})`;
-        brOuter.appendChild(brTxt);
-        inner.appendChild(brOuter);
-      }
-      val.appendChild(inner);
-      row.appendChild(lab);
-      row.appendChild(val);
-      parent.appendChild(row);
-    };
-
-    const block = document.createElement('div');
-    block.style.border = '1px solid #444';
-    block.style.borderRadius = '4px';
-    block.style.padding = '8px 10px';
-    block.style.background = 'rgba(0,0,0,0.25)';
-    block.style.boxSizing = 'border-box';
-    block.style.height = '100px';
-    block.style.minHeight = '100px';
-    block.style.maxHeight = '100px';
-    block.style.overflowY = 'auto';
-
-    const sn = document.createElement('div');
-    sn.style.color = '#ffe066';
-    sn.style.fontSize = '14px';
-    sn.style.fontWeight = 'bold';
-    sn.style.marginBottom = '6px';
-    sn.style.display = 'flex';
-    sn.style.alignItems = 'center';
-    sn.style.justifyContent = 'center';
-    sn.style.gap = '6px';
-    const snIcon = document.createElement('img');
-    snIcon.src = CYCLOPEDIA_ASSETS.seasonIcon;
-    snIcon.alt = '';
-    snIcon.width = 16;
-    snIcon.height = 16;
-    snIcon.className = 'pixelated';
-    Object.assign(snIcon.style, { width: '16px', height: '16px', flexShrink: '0' });
-    const snText = document.createElement('span');
-    snText.textContent = CYCLOPEDIA_UI.seasonStatsSeason(activeSeason);
-    sn.appendChild(snIcon);
-    sn.appendChild(snText);
-    block.appendChild(sn);
-
-    appendStatRow(block, 'Speedrun', seasonStats.ticks, seasonStats.ticksBracket, seasonStats.ticksPlacement);
-    appendStatRow(block, 'Rank Points', seasonStats.rank, seasonStats.rankBracket, seasonStats.rankPlacement);
-    appendStatRow(block, 'Difficulty', seasonStats.floors, seasonStats.floorsBracket, seasonStats.floorsPlacement);
-
-    statsWrap.appendChild(block);
-
-    const seasonLink = document.createElement('a');
-    seasonLink.href = 'https://bestiaryarena.com/seasons';
-    seasonLink.target = '_blank';
-    seasonLink.rel = 'noopener noreferrer';
-    seasonLink.textContent = CYCLOPEDIA_UI.viewFullSeasonsLeaderboard;
-    Object.assign(seasonLink.style, {
-      display: 'inline-flex',
-      alignSelf: 'center',
-      marginTop: '2px',
-      fontSize: '12px',
-      color: '#ffe066',
-      textDecoration: 'underline',
-      cursor: 'pointer'
-    });
-    seasonLink.addEventListener('mouseover', () => {
-      seasonLink.style.color = '#fff2b2';
-    });
-    seasonLink.addEventListener('mouseout', () => {
-      seasonLink.style.color = '#ffe066';
-    });
-    statsWrap.appendChild(seasonLink);
-
-    div.appendChild(statsWrap);
-    return div;
-  } catch (error) {
-    console.error('[Cyclopedia] Error rendering welcome column:', error);
-    const fallbackDiv = document.createElement('div');
-    fallbackDiv.style.padding = '24px';
-    fallbackDiv.style.color = '#e6d7b0';
-    fallbackDiv.textContent = CYCLOPEDIA_UI.welcomeFallback;
-    return fallbackDiv;
-  }
 }
 
 const CYCLOPEDIA_HOME_SEARCH_INPUT_ID = 'cyclopedia-home-search-input';
@@ -10509,11 +10386,51 @@ function cyclopediaNavigateToEquipmentPage(equipmentName) {
   }
 }
 
+/** Stamina cost badge in the top-left corner of a map thumbnail. No-op when the room has no stamina cost. */
+function appendCyclopediaStaminaOverlay(thumbnailContainer, roomId, { paddingPx = 4 } = {}) {
+  const staminaCost = getCyclopediaRoomStaminaLabel(roomId);
+  if (staminaCost == null || !thumbnailContainer) return;
+
+  // Same plate as the creature role badges (e.g. "Tank"): the game's pressed frame on the dark surface.
+  const badge = document.createElement('div');
+  badge.className = 'frame-pressed-1 surface-dark';
+  badge.title = 'Stamina cost';
+  badge.style.cssText = `
+    position: absolute;
+    top: ${paddingPx}px;
+    left: ${paddingPx}px;
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 2px 6px;
+    margin: 0;
+    font-family: ${CYCLOPEDIA_STATS_FONT};
+    font-size: 11px;
+    font-weight: bold;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+    color: ${COLOR_CONSTANTS.PRIMARY};
+    border-radius: 0;
+    z-index: 2;
+    pointer-events: auto;
+  `;
+  const cost = document.createElement('span');
+  cost.textContent = staminaCost;
+  const icon = document.createElement('img');
+  icon.src = CYCLOPEDIA_ASSETS.stamina;
+  icon.alt = 'Stamina';
+  icon.className = 'pixelated';
+  icon.style.cssText = 'display: block; flex-shrink: 0;';
+  badge.appendChild(cost);
+  badge.appendChild(icon);
+  thumbnailContainer.appendChild(badge);
+}
+
 function appendCyclopediaBoostedEquipmentOverlay(
   thumbnailContainer,
   roomId,
   roomName,
-  { iconSizePx = CYCLOPEDIA_HOME_SEARCH_ICON_PX, gapPx = 2, paddingPx = 4 } = {}
+  { iconSizePx = CYCLOPEDIA_HOME_SEARCH_ICON_PX, gapPx = 2, paddingPx = 4, maxPerRow = 4 } = {}
 ) {
   const equipmentNames = getBoostedEquipmentForRoom(roomId, roomName);
   if (!equipmentNames.length || !thumbnailContainer) return;
@@ -10531,7 +10448,8 @@ function appendCyclopediaBoostedEquipmentOverlay(
     justify-content: flex-start;
     align-items: flex-start;
     gap: ${gapPx}px;
-    max-width: calc(100% - ${paddingPx * 2}px);
+    /* at most maxPerRow icons per row, then the row breaks; never wider than the picture */
+    max-width: min(${maxPerRow * iconSizePx + (maxPerRow - 1) * gapPx}px, calc(100% - ${paddingPx * 2}px));
     z-index: 2;
     pointer-events: none;
   `;
@@ -10992,11 +10910,8 @@ function countUniqueObtainableShinyCreatureGameIds(monsters) {
     if (db?.findMonsterByGameId) {
       const monster = db.findMonsterByGameId(m.gameId);
       name = monster?.metadata?.name;
-    } else if (globalThis.state?.utils?.getMonster) {
-      try {
-        const monster = globalThis.state.utils.getMonster(m.gameId);
-        name = monster?.metadata?.name;
-      } catch (e) {}
+    } else {
+      name = getGameMonster(m.gameId)?.metadata?.name;
     }
     if (name && obtainableLower.has(name.toLowerCase())) {
       ids.add(m.gameId);
@@ -11019,11 +10934,8 @@ function getUniqueOwnedEventShinyCreatureNames(monsters) {
     if (!name && db?.findMonsterByGameId) {
       const monster = db.findMonsterByGameId(m.gameId);
       name = monster?.metadata?.name;
-    } else if (!name && globalThis.state?.utils?.getMonster) {
-      try {
-        const monster = globalThis.state.utils.getMonster(m.gameId);
-        name = monster?.metadata?.name;
-      } catch (e) {}
+    } else if (!name) {
+      name = getGameMonster(m.gameId)?.metadata?.name;
     }
     if (name && typeof db?.isEventCreatureName === 'function' && db.isEventCreatureName(name)) {
       namesByGameId.set(m.gameId, name);
@@ -11814,13 +11726,15 @@ function createStatisticsSection(selectedMap, leaderboardData) {
   statsContainer.style.minWidth = '0';
   statsContainer.style.height = '100%';
   statsContainer.style.boxSizing = 'border-box';
+  // Both rows (stat headers, Top 5 tables) share these tracks so their column separators line up at any width.
+  const STATS_COLUMN_TRACKS = 'minmax(0, 160fr) minmax(0, 160fr) minmax(0, 180fr)';
   const MAPS_TABLE_HEADER_GRID_BORDER = '1px solid #444';
   const MAPS_TABLE_ROW_GRID_BORDER = '1px solid #333';
   
   // Row 1: 30% height, split into 2 columns
   const row1 = document.createElement('div');
-  row1.style.display = 'flex';
-  row1.style.flexDirection = 'row';
+  row1.style.display = 'grid';
+  row1.style.gridTemplateColumns = STATS_COLUMN_TRACKS;
   row1.style.flexShrink = '0';
   row1.style.minWidth = '0';
   row1.style.maxWidth = '100%';
@@ -11835,10 +11749,7 @@ function createStatisticsSection(selectedMap, leaderboardData) {
   
   // Column 1: Speedrun
   const speedrunCol = document.createElement('div');
-  speedrunCol.style.flex = '0 0 160px';
-  speedrunCol.style.width = '160px';
-  speedrunCol.style.maxWidth = '160px';
-  speedrunCol.style.minWidth = '160px';
+  speedrunCol.style.minWidth = '0';
   speedrunCol.style.boxSizing = 'border-box';
   speedrunCol.style.display = 'flex';
   speedrunCol.style.flexDirection = 'column';
@@ -11849,9 +11760,8 @@ function createStatisticsSection(selectedMap, leaderboardData) {
   
   const speedrunTitle = document.createElement('h3');
   speedrunTitle.style.margin = '0 0 10px 0';
-  speedrunTitle.style.fontSize = '16px';
-  speedrunTitle.style.fontWeight = 'bold';
-  speedrunTitle.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
+  speedrunTitle.className = FONT_CONSTANTS.SIZES.TITLE;
+  speedrunTitle.style.fontWeight = 'normal';
   speedrunTitle.style.textAlign = 'center';
   speedrunTitle.style.color = COLOR_CONSTANTS.TEXT;
   speedrunTitle.style.display = 'flex';
@@ -11878,9 +11788,9 @@ function createStatisticsSection(selectedMap, leaderboardData) {
   speedrunContent.style.flexDirection = 'column';
   speedrunContent.style.justifyContent = 'center';
   speedrunContent.style.alignItems = 'center';
-  speedrunContent.style.color = '#888';
+  speedrunContent.style.color = COLOR_CONSTANTS.WARNING;
   speedrunContent.style.fontSize = '14px';
-  speedrunContent.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
+  speedrunContent.style.fontFamily = CYCLOPEDIA_STATS_FONT;
   speedrunContent.style.textAlign = 'center';
   speedrunContent.style.padding = '2px';
   speedrunContent.style.width = '100%';
@@ -11891,10 +11801,7 @@ function createStatisticsSection(selectedMap, leaderboardData) {
   
   // Column 2: Rank Points
   const rankPointsCol = document.createElement('div');
-  rankPointsCol.style.flex = '0 0 160px';
-  rankPointsCol.style.width = '160px';
-  rankPointsCol.style.maxWidth = '160px';
-  rankPointsCol.style.minWidth = '160px';
+  rankPointsCol.style.minWidth = '0';
   rankPointsCol.style.boxSizing = 'border-box';
   rankPointsCol.style.display = 'flex';
   rankPointsCol.style.flexDirection = 'column';
@@ -11905,9 +11812,8 @@ function createStatisticsSection(selectedMap, leaderboardData) {
   
   const rankPointsTitle = document.createElement('h3');
   rankPointsTitle.style.margin = '0 0 10px 0';
-  rankPointsTitle.style.fontSize = '16px';
-  rankPointsTitle.style.fontWeight = 'bold';
-  rankPointsTitle.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
+  rankPointsTitle.className = FONT_CONSTANTS.SIZES.TITLE;
+  rankPointsTitle.style.fontWeight = 'normal';
   rankPointsTitle.style.textAlign = 'center';
   rankPointsTitle.style.color = COLOR_CONSTANTS.TEXT;
   rankPointsTitle.style.display = 'flex';
@@ -11934,9 +11840,9 @@ function createStatisticsSection(selectedMap, leaderboardData) {
   rankPointsContent.style.flexDirection = 'column';
   rankPointsContent.style.justifyContent = 'center';
   rankPointsContent.style.alignItems = 'center';
-  rankPointsContent.style.color = '#888';
+  rankPointsContent.style.color = COLOR_CONSTANTS.WARNING;
   rankPointsContent.style.fontSize = '14px';
-  rankPointsContent.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
+  rankPointsContent.style.fontFamily = CYCLOPEDIA_STATS_FONT;
   rankPointsContent.style.textAlign = 'center';
   rankPointsContent.style.padding = '2px';
   rankPointsContent.style.width = '100%';
@@ -11947,10 +11853,7 @@ function createStatisticsSection(selectedMap, leaderboardData) {
   
   // Column 3: Floors
   const floorsCol = document.createElement('div');
-  floorsCol.style.flex = '0 0 180px';
-  floorsCol.style.width = '180px';
-  floorsCol.style.maxWidth = '180px';
-  floorsCol.style.minWidth = '180px';
+  floorsCol.style.minWidth = '0';
   floorsCol.style.boxSizing = 'border-box';
   floorsCol.style.display = 'flex';
   floorsCol.style.flexDirection = 'column';
@@ -11961,9 +11864,8 @@ function createStatisticsSection(selectedMap, leaderboardData) {
   
   const floorsTitle = document.createElement('h3');
   floorsTitle.style.margin = '0 0 10px 0';
-  floorsTitle.style.fontSize = '16px';
-  floorsTitle.style.fontWeight = 'bold';
-  floorsTitle.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
+  floorsTitle.className = FONT_CONSTANTS.SIZES.TITLE;
+  floorsTitle.style.fontWeight = 'normal';
   floorsTitle.style.textAlign = 'center';
   floorsTitle.style.color = COLOR_CONSTANTS.TEXT;
   floorsTitle.style.display = 'flex';
@@ -11990,9 +11892,9 @@ function createStatisticsSection(selectedMap, leaderboardData) {
   floorsContent.style.flexDirection = 'column';
   floorsContent.style.justifyContent = 'center';
   floorsContent.style.alignItems = 'center';
-  floorsContent.style.color = '#888';
+  floorsContent.style.color = COLOR_CONSTANTS.WARNING;
   floorsContent.style.fontSize = '14px';
-  floorsContent.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
+  floorsContent.style.fontFamily = CYCLOPEDIA_STATS_FONT;
   floorsContent.style.textAlign = 'center';
   floorsContent.style.padding = '2px';
   floorsContent.style.width = '100%';
@@ -12016,17 +11918,13 @@ function createStatisticsSection(selectedMap, leaderboardData) {
   row2.style.overflowX = 'visible';
   row2.style.maxHeight = '180px';
   row2.style.height = '180px';
-  row2.style.display = 'flex';
-  row2.style.flexDirection = 'row';
+  row2.style.display = 'grid';
+  row2.style.gridTemplateColumns = STATS_COLUMN_TRACKS;
   row2.style.alignItems = 'center';
-  row2.style.justifyContent = 'flex-start';
   
   // Left column: Top 5 Speedruns
   const speedrunTableCol = document.createElement('div');
   speedrunTableCol.setAttribute('data-table-type', 'speedrun');
-  speedrunTableCol.style.flex = '160 1 0';
-  speedrunTableCol.style.width = 'auto';
-  speedrunTableCol.style.maxWidth = 'none';
   speedrunTableCol.style.minWidth = '0';
   speedrunTableCol.style.overflow = 'hidden';
   speedrunTableCol.style.boxSizing = 'border-box';
@@ -12037,8 +11935,7 @@ function createStatisticsSection(selectedMap, leaderboardData) {
   speedrunTableCol.style.borderImage = `url("${START_PAGE_CONFIG.FRAME_IMAGE_URL}") 6 6 6 6 fill stretch`;
   
   const speedrunTableTitle = document.createElement('div');
-  speedrunTableTitle.style.fontSize = '16px';
-  speedrunTableTitle.style.fontWeight = 'bold';
+  speedrunTableTitle.className = FONT_CONSTANTS.SIZES.TITLE;
   speedrunTableTitle.style.color = COLOR_CONSTANTS.TEXT;
   speedrunTableTitle.style.marginBottom = '10px';
   speedrunTableTitle.style.textAlign = 'center';
@@ -12047,7 +11944,7 @@ function createStatisticsSection(selectedMap, leaderboardData) {
   
   const speedrunTable = DOMUtils.createStyledElement('div', {
     border: '6px solid transparent',
-    borderImage: 'url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch',
+    borderImage: `url("${CYCLOPEDIA_ASSETS.frame4}") 6 fill stretch`,
     borderRadius: '0',
     overflow: 'hidden',
     overflowY: 'visible',
@@ -12072,7 +11969,7 @@ function createStatisticsSection(selectedMap, leaderboardData) {
     zIndex: '2',
     fontWeight: 'bold',
     fontSize: '11px',
-    fontFamily: "'Trebuchet MS', 'Arial Black', Arial, sans-serif",
+    fontFamily: CYCLOPEDIA_STATS_FONT,
     color: COLOR_CONSTANTS.TEXT
   });
   
@@ -12154,9 +12051,10 @@ function createStatisticsSection(selectedMap, leaderboardData) {
           row.style.minHeight = '20px';
           row.style.boxSizing = 'border-box';
           row.style.borderBottom = i < 5 ? MAPS_TABLE_ROW_GRID_BORDER : 'none';
-          row.style.fontSize = '10px';
-          row.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
-          row.style.color = '#666';
+          row.style.fontSize = '11px';
+          row.style.lineHeight = '1';
+          row.style.fontFamily = CYCLOPEDIA_STATS_FONT;
+          row.style.color = COLOR_CONSTANTS.UNOWNED;
           
           const timeCell = document.createElement('div');
           timeCell.style.padding = '4px 2px';
@@ -12192,14 +12090,15 @@ function createStatisticsSection(selectedMap, leaderboardData) {
         row.style.minHeight = '20px';
         row.style.boxSizing = 'border-box';
         row.style.borderBottom = i < 4 ? MAPS_TABLE_ROW_GRID_BORDER : 'none';
-        row.style.fontSize = '10px';
-        row.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
+        row.style.fontSize = '11px';
+        row.style.lineHeight = '1';
+        row.style.fontFamily = CYCLOPEDIA_STATS_FONT;
         
         const run = localRuns[i];
         
         if (!run) {
           // No run for this slot - show "No runs" without buttons
-          row.style.color = '#666';
+          row.style.color = COLOR_CONSTANTS.UNOWNED;
           
           const timeCell = document.createElement('div');
           timeCell.style.padding = '4px 2px';
@@ -12226,7 +12125,7 @@ function createStatisticsSection(selectedMap, leaderboardData) {
         }
         
         // Has run data - show with buttons
-        row.style.color = '#ccc';
+        row.style.color = COLOR_CONSTANTS.SOFT;
         
         const timeCell = document.createElement('div');
         timeCell.style.padding = '4px 2px';
@@ -12294,39 +12193,8 @@ function createStatisticsSection(selectedMap, leaderboardData) {
             let replayData = {};
             
             // Get proper region and map names
-            let regionName = 'Unknown Region';
+            let regionName = resolveRunRegionName(run, selectedMap);
             let mapName = resolveMapName(selectedMap); // Use resolved map name
-            
-            // First, try to use the region name that RunTracker already resolved and saved
-            if (run.regionName) {
-              regionName = run.regionName;
-              
-            } else {
-              // Try to determine region from the map name/ID using game state utils
-              try {
-                const mapId = selectedMap;
-                const foundRegion = findCyclopediaRegionByMapId(mapId);
-                
-                if (foundRegion) {
-                  regionName = cyclopediaGetRegionDisplayName(foundRegion.id);
-                  
-                } else {
-                  // Fallback: try to get region from current game state (this is the problematic part)
-                  const boardSnapshot = globalThis.state?.board?.getSnapshot();
-                  if (boardSnapshot?.context?.selectedMap?.selectedRegion?.name) {
-                    regionName = boardSnapshot.context.selectedMap.selectedRegion.name;
-                    
-                  } else if (boardSnapshot?.context?.selectedMap?.selectedRegion?.id) {
-                    regionName = boardSnapshot.context.selectedMap.selectedRegion.id;
-                    // Capitalize region name
-                    regionName = cyclopediaGetRegionDisplayName(regionName);
-                    
-                  }
-                }
-              } catch (e) {
-                console.warn('[Cyclopedia] Error getting region from game state:', e);
-              }
-            }
             
             replayData.region = regionName;
             replayData.map = mapName;
@@ -12358,7 +12226,7 @@ function createStatisticsSection(selectedMap, leaderboardData) {
                 // Reset status bar after 3 seconds
                 row3.statusBarTimeout = setTimeout(() => {
                   row3.statusBar.textContent = '';
-                  row3.statusBar.style.color = '#ccc';
+                  row3.statusBar.style.color = COLOR_CONSTANTS.SOFT;
                   row3.statusBarTimeout = null;
                 }, 3000);
               }
@@ -12382,7 +12250,7 @@ function createStatisticsSection(selectedMap, leaderboardData) {
                 // Reset status bar after 3 seconds
                 row3.statusBarTimeout = setTimeout(() => {
                   row3.statusBar.textContent = '';
-                  row3.statusBar.style.color = '#ccc';
+                  row3.statusBar.style.color = COLOR_CONSTANTS.SOFT;
                   row3.statusBarTimeout = null;
                 }, 3000);
               }
@@ -12447,7 +12315,7 @@ function createStatisticsSection(selectedMap, leaderboardData) {
                       row3.statusBar.style.color = '#4CAF50';
                       row3.statusBarTimeout = setTimeout(() => {
                         row3.statusBar.textContent = '';
-                        row3.statusBar.style.color = '#ccc';
+                        row3.statusBar.style.color = COLOR_CONSTANTS.SOFT;
                         row3.statusBarTimeout = null;
                       }, 3000);
                     }
@@ -12513,9 +12381,6 @@ function createStatisticsSection(selectedMap, leaderboardData) {
   // Right column: Floors
   const floorsTableCol = document.createElement('div');
   floorsTableCol.setAttribute('data-table-type', 'floors');
-  floorsTableCol.style.flex = '180 1 0';
-  floorsTableCol.style.width = 'auto';
-  floorsTableCol.style.maxWidth = 'none';
   floorsTableCol.style.minWidth = '0';
   floorsTableCol.style.boxSizing = 'border-box';
   floorsTableCol.style.overflow = 'hidden';
@@ -12527,8 +12392,7 @@ function createStatisticsSection(selectedMap, leaderboardData) {
   floorsTableCol.style.borderImage = `url("${START_PAGE_CONFIG.FRAME_IMAGE_URL}") 6 6 6 6 fill stretch`;
   
   const floorsTableTitle = document.createElement('div');
-  floorsTableTitle.style.fontSize = '16px';
-  floorsTableTitle.style.fontWeight = 'bold';
+  floorsTableTitle.className = FONT_CONSTANTS.SIZES.TITLE;
   floorsTableTitle.style.color = COLOR_CONSTANTS.TEXT;
   floorsTableTitle.style.marginBottom = '10px';
   floorsTableTitle.style.textAlign = 'center';
@@ -12537,7 +12401,7 @@ function createStatisticsSection(selectedMap, leaderboardData) {
   
   const floorsTable = DOMUtils.createStyledElement('div', {
     border: '6px solid transparent',
-    borderImage: 'url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch',
+    borderImage: `url("${CYCLOPEDIA_ASSETS.frame4}") 6 fill stretch`,
     borderRadius: '0',
     overflow: 'visible',
     overflowX: 'auto',
@@ -12564,7 +12428,7 @@ function createStatisticsSection(selectedMap, leaderboardData) {
     zIndex: '2',
     fontWeight: 'bold',
     fontSize: '11px',
-    fontFamily: "'Trebuchet MS', 'Arial Black', Arial, sans-serif",
+    fontFamily: CYCLOPEDIA_STATS_FONT,
     color: COLOR_CONSTANTS.TEXT
   });
   
@@ -12675,9 +12539,10 @@ function createStatisticsSection(selectedMap, leaderboardData) {
           row.style.boxSizing = 'border-box';
           row.style.minWidth = 'max-content';
           row.style.borderBottom = i < 5 ? MAPS_TABLE_ROW_GRID_BORDER : 'none';
-          row.style.fontSize = '10px';
-          row.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
-          row.style.color = '#666';
+          row.style.fontSize = '11px';
+          row.style.lineHeight = '1';
+          row.style.fontFamily = CYCLOPEDIA_STATS_FONT;
+          row.style.color = COLOR_CONSTANTS.UNOWNED;
           
           const floorCell = document.createElement('div');
           floorCell.style.padding = '4px 2px';
@@ -12721,14 +12586,15 @@ function createStatisticsSection(selectedMap, leaderboardData) {
         row.style.minHeight = '20px';
         row.style.boxSizing = 'border-box';
         row.style.borderBottom = i < rowCount - 1 ? MAPS_TABLE_ROW_GRID_BORDER : 'none';
-        row.style.fontSize = '10px';
-        row.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
+        row.style.fontSize = '11px';
+        row.style.lineHeight = '1';
+        row.style.fontFamily = CYCLOPEDIA_STATS_FONT;
         
         const run = localRuns[i];
         
         if (!run) {
           // No run for this slot - show "No runs" without buttons
-          row.style.color = '#666';
+          row.style.color = COLOR_CONSTANTS.UNOWNED;
           
           const floorCell = document.createElement('div');
           floorCell.style.padding = '4px 2px';
@@ -12762,7 +12628,7 @@ function createStatisticsSection(selectedMap, leaderboardData) {
         }
         
         // Has run data - show with buttons
-        row.style.color = '#ccc';
+        row.style.color = COLOR_CONSTANTS.SOFT;
         
         const floorCell = document.createElement('div');
         floorCell.style.padding = '4px 2px';
@@ -12866,39 +12732,8 @@ function createStatisticsSection(selectedMap, leaderboardData) {
             let replayData = {};
             
             // Get proper region and map names
-            let regionName = 'Unknown Region';
+            let regionName = resolveRunRegionName(run, selectedMap);
             let mapName = resolveMapName(selectedMap); // Use resolved map name
-            
-            // First, try to use the region name that RunTracker already resolved and saved
-            if (run.regionName) {
-              regionName = run.regionName;
-              
-            } else {
-              // Try to determine region from the map name/ID using game state utils
-              try {
-                const mapId = selectedMap;
-                const foundRegion = findCyclopediaRegionByMapId(mapId);
-                
-                if (foundRegion) {
-                  regionName = cyclopediaGetRegionDisplayName(foundRegion.id);
-                  
-                } else {
-                  // Fallback: try to get region from current game state
-                  const boardSnapshot = globalThis.state?.board?.getSnapshot();
-                  if (boardSnapshot?.context?.selectedMap?.selectedRegion?.name) {
-                    regionName = boardSnapshot.context.selectedMap.selectedRegion.name;
-                    
-                  } else if (boardSnapshot?.context?.selectedMap?.selectedRegion?.id) {
-                    regionName = boardSnapshot.context.selectedMap.selectedRegion.id;
-                    // Capitalize region name
-                    regionName = cyclopediaGetRegionDisplayName(regionName);
-                    
-                  }
-                }
-              } catch (e) {
-                console.warn('[Cyclopedia] Error getting region from game state:', e);
-              }
-            }
             
             replayData.region = regionName;
             replayData.map = mapName;
@@ -12919,7 +12754,7 @@ function createStatisticsSection(selectedMap, leaderboardData) {
                 // Reset status bar after 3 seconds
                 setTimeout(() => {
                   row3.statusBar.textContent = 'Select to copy or delete run.';
-                  row3.statusBar.style.color = '#ccc';
+                  row3.statusBar.style.color = COLOR_CONSTANTS.SOFT;
                 }, 3000);
               }
             }).catch(err => {
@@ -12929,7 +12764,7 @@ function createStatisticsSection(selectedMap, leaderboardData) {
                 row3.statusBar.style.color = '#ff6b6b';
                 setTimeout(() => {
                   row3.statusBar.textContent = 'Select to copy or delete run.';
-                  row3.statusBar.style.color = '#ccc';
+                  row3.statusBar.style.color = COLOR_CONSTANTS.SOFT;
                 }, 3000);
               }
             });
@@ -12983,7 +12818,7 @@ function createStatisticsSection(selectedMap, leaderboardData) {
                       row3.statusBar.style.color = '#4CAF50';
                       setTimeout(() => {
                         row3.statusBar.textContent = 'Select to copy or delete run.';
-                        row3.statusBar.style.color = '#ccc';
+                        row3.statusBar.style.color = COLOR_CONSTANTS.SOFT;
                       }, 3000);
                     }
                   } else {
@@ -12993,7 +12828,7 @@ function createStatisticsSection(selectedMap, leaderboardData) {
                       row3.statusBar.style.color = '#ff6b6b';
                       setTimeout(() => {
                         row3.statusBar.textContent = 'Select to copy or delete run.';
-                        row3.statusBar.style.color = '#ccc';
+                        row3.statusBar.style.color = COLOR_CONSTANTS.SOFT;
                       }, 3000);
                     }
                   }
@@ -13009,7 +12844,7 @@ function createStatisticsSection(selectedMap, leaderboardData) {
               // Reset status bar
               if (row3 && row3.statusBar) {
                 row3.statusBar.textContent = 'Select to copy or delete run.';
-                row3.statusBar.style.color = '#ccc';
+                row3.statusBar.style.color = COLOR_CONSTANTS.SOFT;
               }
             } else {
               // Enter confirmation mode
@@ -13051,9 +12886,6 @@ function createStatisticsSection(selectedMap, leaderboardData) {
   // Middle column: Top 5 Ranks
   const ranksTableCol = document.createElement('div');
   ranksTableCol.setAttribute('data-table-type', 'ranks');
-  ranksTableCol.style.flex = '160 1 0';
-  ranksTableCol.style.width = 'auto';
-  ranksTableCol.style.maxWidth = 'none';
   ranksTableCol.style.minWidth = '0';
   ranksTableCol.style.overflow = 'hidden';
   ranksTableCol.style.boxSizing = 'border-box';
@@ -13065,8 +12897,7 @@ function createStatisticsSection(selectedMap, leaderboardData) {
   ranksTableCol.style.borderImage = `url("${START_PAGE_CONFIG.FRAME_IMAGE_URL}") 6 6 6 6 fill stretch`;
   
   const ranksTableTitle = document.createElement('div');
-  ranksTableTitle.style.fontSize = '16px';
-  ranksTableTitle.style.fontWeight = 'bold';
+  ranksTableTitle.className = FONT_CONSTANTS.SIZES.TITLE;
   ranksTableTitle.style.color = COLOR_CONSTANTS.TEXT;
   ranksTableTitle.style.marginBottom = '10px';
   ranksTableTitle.style.textAlign = 'center';
@@ -13075,7 +12906,7 @@ function createStatisticsSection(selectedMap, leaderboardData) {
   
   const ranksTable = document.createElement('div');
   ranksTable.style.border = '6px solid transparent';
-  ranksTable.style.borderImage = 'url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch';
+  ranksTable.style.borderImage = `url("${CYCLOPEDIA_ASSETS.frame4}") 6 fill stretch`;
   ranksTable.style.borderRadius = '0';
   ranksTable.style.overflow = 'hidden';
   ranksTable.style.overflowY = 'visible';
@@ -13099,7 +12930,7 @@ function createStatisticsSection(selectedMap, leaderboardData) {
   ranksHeader.style.zIndex = '2';
   ranksHeader.style.fontWeight = 'bold';
   ranksHeader.style.fontSize = '11px';
-  ranksHeader.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
+  ranksHeader.style.fontFamily = CYCLOPEDIA_STATS_FONT;
   ranksHeader.style.color = COLOR_CONSTANTS.TEXT;
   
   const ranksRankHeader = document.createElement('div');
@@ -13201,9 +13032,10 @@ function createStatisticsSection(selectedMap, leaderboardData) {
           row.style.minHeight = '20px';
           row.style.boxSizing = 'border-box';
           row.style.borderBottom = i < 5 ? MAPS_TABLE_ROW_GRID_BORDER : 'none';
-          row.style.fontSize = '10px';
-          row.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
-          row.style.color = '#666';
+          row.style.fontSize = '11px';
+          row.style.lineHeight = '1';
+          row.style.fontFamily = CYCLOPEDIA_STATS_FONT;
+          row.style.color = COLOR_CONSTANTS.UNOWNED;
           
           const rankCell = document.createElement('div');
           rankCell.style.padding = '4px 2px';
@@ -13247,14 +13079,15 @@ function createStatisticsSection(selectedMap, leaderboardData) {
         row.style.boxSizing = 'border-box';
         row.style.minWidth = 'max-content';
         row.style.borderBottom = i < 4 ? MAPS_TABLE_ROW_GRID_BORDER : 'none';
-        row.style.fontSize = '10px';
-        row.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
+        row.style.fontSize = '11px';
+        row.style.lineHeight = '1';
+        row.style.fontFamily = CYCLOPEDIA_STATS_FONT;
         
         const run = localRuns[i];
         
         if (!run) {
           // No run for this slot - show "No runs" without buttons
-          row.style.color = '#666';
+          row.style.color = COLOR_CONSTANTS.UNOWNED;
           
           const rankCell = document.createElement('div');
           rankCell.style.padding = '4px 2px';
@@ -13288,7 +13121,7 @@ function createStatisticsSection(selectedMap, leaderboardData) {
         }
         
         // Has run data - show with buttons
-        row.style.color = '#ccc';
+        row.style.color = COLOR_CONSTANTS.SOFT;
         
         const rankCell = document.createElement('div');
         rankCell.style.padding = '4px 2px';
@@ -13376,39 +13209,8 @@ function createStatisticsSection(selectedMap, leaderboardData) {
             let replayData = {};
             
             // Get proper region and map names
-            let regionName = 'Unknown Region';
+            let regionName = resolveRunRegionName(run, selectedMap);
             let mapName = resolveMapName(selectedMap); // Use resolved map name
-            
-            // First, try to use the region name that RunTracker already resolved and saved
-            if (run.regionName) {
-              regionName = run.regionName;
-              
-            } else {
-              // Try to determine region from the map name/ID using game state utils
-              try {
-                const mapId = selectedMap;
-                const foundRegion = findCyclopediaRegionByMapId(mapId);
-                
-                if (foundRegion) {
-                  regionName = cyclopediaGetRegionDisplayName(foundRegion.id);
-                  
-                } else {
-                  // Fallback: try to get region from current game state (this is the problematic part)
-                  const boardSnapshot = globalThis.state?.board?.getSnapshot();
-                  if (boardSnapshot?.context?.selectedMap?.selectedRegion?.name) {
-                    regionName = boardSnapshot.context.selectedMap.selectedRegion.name;
-                    
-                  } else if (boardSnapshot?.context?.selectedMap?.selectedRegion?.id) {
-                    regionName = boardSnapshot.context.selectedMap.selectedRegion.id;
-                    // Capitalize region name
-                    regionName = cyclopediaGetRegionDisplayName(regionName);
-                    
-                  }
-                }
-              } catch (e) {
-                console.warn('[Cyclopedia] Error getting region from game state:', e);
-              }
-            }
             
             replayData.region = regionName;
             replayData.map = mapName;
@@ -13429,7 +13231,7 @@ function createStatisticsSection(selectedMap, leaderboardData) {
                 // Reset status bar after 3 seconds
                 setTimeout(() => {
                   row3.statusBar.textContent = 'Select to copy or delete run.';
-                  row3.statusBar.style.color = '#ccc';
+                  row3.statusBar.style.color = COLOR_CONSTANTS.SOFT;
                 }, 3000);
               }
             }).catch(err => {
@@ -13441,7 +13243,7 @@ function createStatisticsSection(selectedMap, leaderboardData) {
                 // Reset status bar after 3 seconds
                 setTimeout(() => {
                   row3.statusBar.textContent = 'Select to copy or delete run.';
-                  row3.statusBar.style.color = '#ccc';
+                  row3.statusBar.style.color = COLOR_CONSTANTS.SOFT;
                 }, 3000);
               }
             });
@@ -13506,7 +13308,7 @@ function createStatisticsSection(selectedMap, leaderboardData) {
                       row3.statusBar.style.color = '#4CAF50';
                       row3.statusBarTimeout = setTimeout(() => {
                         row3.statusBar.textContent = '';
-                        row3.statusBar.style.color = '#ccc';
+                        row3.statusBar.style.color = COLOR_CONSTANTS.SOFT;
                         row3.statusBarTimeout = null;
                       }, 3000);
                     }
@@ -13594,8 +13396,8 @@ function createStatisticsSection(selectedMap, leaderboardData) {
   const bulletPoints = document.createElement('div');
   bulletPoints.style.marginBottom = '0';
   bulletPoints.style.fontSize = '11px';
-  bulletPoints.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
-  bulletPoints.style.color = '#ccc';
+  bulletPoints.style.fontFamily = CYCLOPEDIA_STATS_FONT;
+  bulletPoints.style.color = COLOR_CONSTANTS.SOFT;
   bulletPoints.style.lineHeight = '1.4';
   // Only this text area scrolls (vertically), not the whole stats panel.
   bulletPoints.style.flex = '1 1 0';
@@ -13630,8 +13432,8 @@ function createStatisticsSection(selectedMap, leaderboardData) {
   statusBar.style.border = '1px solid #444';
   statusBar.style.borderRadius = '4px';
   statusBar.style.fontSize = '11px';
-  statusBar.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
-  statusBar.style.color = '#ccc';
+  statusBar.style.fontFamily = CYCLOPEDIA_STATS_FONT;
+  statusBar.style.color = COLOR_CONSTANTS.SOFT;
   statusBar.style.textAlign = 'center';
   statusBar.style.minHeight = '20px';
   statusBar.style.display = 'flex';
@@ -13662,7 +13464,7 @@ function createStatisticsSection(selectedMap, leaderboardData) {
         row3.statusBarTimeout = null;
       }
       row3.statusBar.textContent = '';
-      row3.statusBar.style.color = '#ccc';
+      row3.statusBar.style.color = COLOR_CONSTANTS.SOFT;
     }
   };
   
@@ -13690,13 +13492,13 @@ function createStatisticsSection(selectedMap, leaderboardData) {
       // Check if data contains error information
       if (data.error) {
         if (data.error === 'rate_limited') {
-          speedrunContent.innerHTML = '<div style="color: #ff6b6b; font-size: 12px;">Rate limited. Please wait.</div>';
-          rankPointsContent.innerHTML = '<div style="color: #ff6b6b; font-size: 12px;">Rate limited. Please wait.</div>';
-          floorsContent.innerHTML = '<div style="color: #ff6b6b; font-size: 12px;">Rate limited. Please wait.</div>';
+          speedrunContent.innerHTML = `<div style="color: ${COLOR_CONSTANTS.ERROR}; font-size: 12px;">Rate limited. Please wait.</div>`;
+          rankPointsContent.innerHTML = `<div style="color: ${COLOR_CONSTANTS.ERROR}; font-size: 12px;">Rate limited. Please wait.</div>`;
+          floorsContent.innerHTML = `<div style="color: ${COLOR_CONSTANTS.ERROR}; font-size: 12px;">Rate limited. Please wait.</div>`;
         } else {
-          speedrunContent.innerHTML = '<div style="color: #888; font-size: 12px;">Data temporarily unavailable</div>';
-          rankPointsContent.innerHTML = '<div style="color: #888; font-size: 12px;">Data temporarily unavailable</div>';
-          floorsContent.innerHTML = '<div style="color: #888; font-size: 12px;">Data temporarily unavailable</div>';
+          speedrunContent.innerHTML = `<div style="color: ${COLOR_CONSTANTS.WARNING}; font-size: 12px;">Data temporarily unavailable</div>`;
+          rankPointsContent.innerHTML = `<div style="color: ${COLOR_CONSTANTS.WARNING}; font-size: 12px;">Data temporarily unavailable</div>`;
+          floorsContent.innerHTML = `<div style="color: ${COLOR_CONSTANTS.WARNING}; font-size: 12px;">Data temporarily unavailable</div>`;
         }
         return;
       }
@@ -13746,23 +13548,23 @@ function createStatisticsSection(selectedMap, leaderboardData) {
       let speedrunHtml = '';
       if (allowGlobalWorldRecords && bestTicks > 0) {
         speedrunHtml = `
-          <div style="margin-bottom: 4px; color: #ff8; font-weight: bold; font-size: 12px;">World Record</div>
+          <div class="${FONT_CONSTANTS.SIZES.SMALL}" style="margin-bottom: 4px; color: ${COLOR_CONSTANTS.RECORD};">World Record</div>
           <div style="margin-bottom: 2px; font-size: 12px; color: #fff; ${statsLineTruncate}" title="${bestTicks} ticks">${bestTicks} ticks</div>
           <div data-stats-player-slot></div>
         `;
         if (yourTicks > 0) {
           speedrunHtml += `
-            <div style="margin-bottom: 4px; color: #8f8; font-weight: bold; font-size: 12px;">Your Best</div>
-            <div style="font-size: 12px; color: #ccc; ${statsLineTruncate}" title="${yourTicks} ticks">${yourTicks} ticks</div>
+            <div class="${FONT_CONSTANTS.SIZES.SMALL}" style="margin-bottom: 4px; color: ${COLOR_CONSTANTS.PERSONAL};">Your Best</div>
+            <div style="font-size: 12px; color: ${COLOR_CONSTANTS.SOFT}; ${statsLineTruncate}" title="${yourTicks} ticks">${yourTicks} ticks</div>
           `;
         }
       } else if (yourTicks > 0) {
         speedrunHtml = `
-          <div style="margin-bottom: 4px; color: #8f8; font-weight: bold; font-size: 12px;">Your Best</div>
-          <div style="font-size: 12px; color: #ccc; ${statsLineTruncate}" title="${yourTicks} ticks">${yourTicks} ticks</div>
+          <div class="${FONT_CONSTANTS.SIZES.SMALL}" style="margin-bottom: 4px; color: ${COLOR_CONSTANTS.PERSONAL};">Your Best</div>
+          <div style="font-size: 12px; color: ${COLOR_CONSTANTS.SOFT}; ${statsLineTruncate}" title="${yourTicks} ticks">${yourTicks} ticks</div>
         `;
       } else {
-        speedrunHtml = '<div style="color: #666; font-size: 12px;">No records yet</div>';
+        speedrunHtml = `<div style="color: ${COLOR_CONSTANTS.UNOWNED}; font-size: 12px;">No records yet</div>`;
       }
       speedrunContent.innerHTML = speedrunHtml;
       if (allowGlobalWorldRecords && bestTicks > 0) {
@@ -13785,25 +13587,25 @@ function createStatisticsSection(selectedMap, leaderboardData) {
       if (allowGlobalWorldRecords && bestRankPoints > 0) {
         const bestRankDisplay = `${bestRankPoints.toLocaleString()}${bestRankTicks !== undefined && bestRankTicks !== null ? ` (${bestRankTicks} ticks)` : ' (null)'}`;
         rankPointsHtml = `
-          <div style="margin-bottom: 4px; color: #ff8; font-weight: bold; font-size: 12px;">World Record</div>
+          <div class="${FONT_CONSTANTS.SIZES.SMALL}" style="margin-bottom: 4px; color: ${COLOR_CONSTANTS.RECORD};">World Record</div>
           <div style="margin-bottom: 2px; font-size: 12px; color: #fff; ${statsLineTruncate}" title="${bestRankDisplay}">${bestRankPoints.toLocaleString()}${bestRankTicks !== undefined && bestRankTicks !== null ? ` <i style="color: #aaa;">(${bestRankTicks} ticks)</i>` : ' (null)'}</div>
           <div data-stats-player-slot></div>
         `;
         if (hasYourRankData) {
           const yourRankDisplay = `${yourRankPoints.toLocaleString()}${yourRankTicks !== undefined && yourRankTicks !== null ? ` (${yourRankTicks} ticks)` : ' (null)'}`;
           rankPointsHtml += `
-            <div style="margin-bottom: 4px; color: #8f8; font-weight: bold; font-size: 12px;">Your Best</div>
-            <div style="font-size: 12px; color: #ccc; ${statsLineTruncate}" title="${yourRankDisplay}">${yourRankPoints.toLocaleString()}${yourRankTicks !== undefined && yourRankTicks !== null ? ` <i style="color: #aaa;">(${yourRankTicks} ticks)</i>` : ' (null)'}</div>
+            <div class="${FONT_CONSTANTS.SIZES.SMALL}" style="margin-bottom: 4px; color: ${COLOR_CONSTANTS.PERSONAL};">Your Best</div>
+            <div style="font-size: 12px; color: ${COLOR_CONSTANTS.SOFT}; ${statsLineTruncate}" title="${yourRankDisplay}">${yourRankPoints.toLocaleString()}${yourRankTicks !== undefined && yourRankTicks !== null ? ` <i style="color: #aaa;">(${yourRankTicks} ticks)</i>` : ' (null)'}</div>
           `;
         }
       } else if (hasYourRankData) {
         const yourRankDisplay = `${yourRankPoints.toLocaleString()}${yourRankTicks !== undefined && yourRankTicks !== null ? ` (${yourRankTicks} ticks)` : ''}`;
         rankPointsHtml = `
-          <div style="margin-bottom: 4px; color: #8f8; font-weight: bold; font-size: 12px;">Your Best</div>
-          <div style="font-size: 12px; color: #ccc; ${statsLineTruncate}" title="${yourRankDisplay}">${yourRankPoints.toLocaleString()}${yourRankTicks !== undefined && yourRankTicks !== null ? ` <i style="color: #aaa;">(${yourRankTicks} ticks)</i>` : ''}</div>
+          <div class="${FONT_CONSTANTS.SIZES.SMALL}" style="margin-bottom: 4px; color: ${COLOR_CONSTANTS.PERSONAL};">Your Best</div>
+          <div style="font-size: 12px; color: ${COLOR_CONSTANTS.SOFT}; ${statsLineTruncate}" title="${yourRankDisplay}">${yourRankPoints.toLocaleString()}${yourRankTicks !== undefined && yourRankTicks !== null ? ` <i style="color: #aaa;">(${yourRankTicks} ticks)</i>` : ''}</div>
         `;
       } else {
-        rankPointsHtml = '<div style="color: #666; font-size: 12px;">No records yet</div>';
+        rankPointsHtml = `<div style="color: ${COLOR_CONSTANTS.UNOWNED}; font-size: 12px;">No records yet</div>`;
       }
       rankPointsContent.innerHTML = rankPointsHtml;
       if (allowGlobalWorldRecords && bestRankPoints > 0) {
@@ -13820,7 +13622,7 @@ function createStatisticsSection(selectedMap, leaderboardData) {
       if (allowGlobalWorldRecords && bestFloorTicks > 0) {
         const bestFloorDisplay = `Floor ${bestFloor}${bestFloorTicks !== undefined && bestFloorTicks !== null ? ` (${bestFloorTicks} ticks)` : ''}`;
         floorsHtml = `
-          <div style="margin-bottom: 4px; color: #ff8; font-weight: bold; font-size: 12px;">World Record</div>
+          <div class="${FONT_CONSTANTS.SIZES.SMALL}" style="margin-bottom: 4px; color: ${COLOR_CONSTANTS.RECORD};">World Record</div>
           <div style="margin-bottom: 2px; font-size: 12px; color: #fff; ${statsLineTruncate}" title="${bestFloorDisplay}">Floor ${bestFloor}${bestFloorTicks !== undefined && bestFloorTicks !== null ? ` <i style="color: #aaa;">(${bestFloorTicks} ticks)</i>` : ''}</div>
           <div data-stats-player-slot></div>
         `;
@@ -13828,19 +13630,19 @@ function createStatisticsSection(selectedMap, leaderboardData) {
         if (yourFloor !== undefined && yourFloor !== null) {
           const yourFloorDisplay = `Floor ${yourFloor}${yourFloorTicks !== undefined && yourFloorTicks !== null ? ` (${yourFloorTicks} ticks)` : ''}`;
           floorsHtml += `
-            <div style="margin-bottom: 4px; color: #8f8; font-weight: bold; font-size: 12px;">Your Best</div>
-            <div style="font-size: 12px; color: #ccc; ${statsLineTruncate}" title="${yourFloorDisplay}">Floor ${yourFloor}${yourFloorTicks !== undefined && yourFloorTicks !== null ? ` <i style="color: #aaa;">(${yourFloorTicks} ticks)</i>` : ''}</div>
+            <div class="${FONT_CONSTANTS.SIZES.SMALL}" style="margin-bottom: 4px; color: ${COLOR_CONSTANTS.PERSONAL};">Your Best</div>
+            <div style="font-size: 12px; color: ${COLOR_CONSTANTS.SOFT}; ${statsLineTruncate}" title="${yourFloorDisplay}">Floor ${yourFloor}${yourFloorTicks !== undefined && yourFloorTicks !== null ? ` <i style="color: #aaa;">(${yourFloorTicks} ticks)</i>` : ''}</div>
           `;
         }
       } else if (yourFloor !== undefined && yourFloor !== null) {
         const yourFloorDisplay = `Floor ${yourFloor}${yourFloorTicks !== undefined && yourFloorTicks !== null ? ` (${yourFloorTicks} ticks)` : ''}`;
         // Only show "Your Best" if no world record but user has data
         floorsHtml = `
-          <div style="margin-bottom: 4px; color: #8f8; font-weight: bold; font-size: 12px;">Your Best</div>
-          <div style="font-size: 12px; color: #ccc; ${statsLineTruncate}" title="${yourFloorDisplay}">Floor ${yourFloor}${yourFloorTicks !== undefined && yourFloorTicks !== null ? ` <i style="color: #aaa;">(${yourFloorTicks} ticks)</i>` : ''}</div>
+          <div class="${FONT_CONSTANTS.SIZES.SMALL}" style="margin-bottom: 4px; color: ${COLOR_CONSTANTS.PERSONAL};">Your Best</div>
+          <div style="font-size: 12px; color: ${COLOR_CONSTANTS.SOFT}; ${statsLineTruncate}" title="${yourFloorDisplay}">Floor ${yourFloor}${yourFloorTicks !== undefined && yourFloorTicks !== null ? ` <i style="color: #aaa;">(${yourFloorTicks} ticks)</i>` : ''}</div>
         `;
       } else {
-        floorsHtml = '<div style="color: #666; font-size: 12px;">No records yet</div>';
+        floorsHtml = `<div style="color: ${COLOR_CONSTANTS.UNOWNED}; font-size: 12px;">No records yet</div>`;
       }
       floorsContent.innerHTML = floorsHtml;
       if (allowGlobalWorldRecords && bestFloorTicks > 0) {
@@ -13857,13 +13659,13 @@ function createStatisticsSection(selectedMap, leaderboardData) {
     console.error('[Cyclopedia] Error loading maps leaderboard data:', error);
 
     if (error.message.includes('Rate limited')) {
-      speedrunContent.innerHTML = '<div style="color: #ff6b6b; font-size: 12px;">Rate limited. Please wait.</div>';
-      rankPointsContent.innerHTML = '<div style="color: #ff6b6b; font-size: 12px;">Rate limited. Please wait.</div>';
-      floorsContent.innerHTML = '<div style="color: #ff6b6b; font-size: 12px;">Rate limited. Please wait.</div>';
+      speedrunContent.innerHTML = `<div style="color: ${COLOR_CONSTANTS.ERROR}; font-size: 12px;">Rate limited. Please wait.</div>`;
+      rankPointsContent.innerHTML = `<div style="color: ${COLOR_CONSTANTS.ERROR}; font-size: 12px;">Rate limited. Please wait.</div>`;
+      floorsContent.innerHTML = `<div style="color: ${COLOR_CONSTANTS.ERROR}; font-size: 12px;">Rate limited. Please wait.</div>`;
     } else {
-      speedrunContent.innerHTML = '<div style="color: #888; font-size: 12px;">Data temporarily unavailable</div>';
-      rankPointsContent.innerHTML = '<div style="color: #888; font-size: 12px;">Data temporarily unavailable</div>';
-      floorsContent.innerHTML = '<div style="color: #888; font-size: 12px;">Data temporarily unavailable</div>';
+      speedrunContent.innerHTML = `<div style="color: ${COLOR_CONSTANTS.WARNING}; font-size: 12px;">Data temporarily unavailable</div>`;
+      rankPointsContent.innerHTML = `<div style="color: ${COLOR_CONSTANTS.WARNING}; font-size: 12px;">Data temporarily unavailable</div>`;
+      floorsContent.innerHTML = `<div style="color: ${COLOR_CONSTANTS.WARNING}; font-size: 12px;">Data temporarily unavailable</div>`;
     }
   };
 
@@ -13968,8 +13770,8 @@ function buildCreatureRow(actor, mapsTabNav = {}) {
           creatureName = cachedData.data.name;
         } else {
           try {
-            if (globalThis.state?.utils?.getMonster) {
-              const monsterData = globalThis.state.utils.getMonster(actor.id);
+            {
+              const monsterData = getGameMonster(actor.id);
               if (monsterData?.metadata?.name) {
                 creatureName = monsterData.metadata.name;
                 // Cache the data
@@ -13988,9 +13790,8 @@ function buildCreatureRow(actor, mapsTabNav = {}) {
         // Room actors can carry a custom nickname (e.g. Halloween Mansion's "Hemorrhage" Clot);
         // show it next to the species, but keep click/title on the species name.
         nameElement.textContent = actor.nickname ? `${actor.nickname} (${creatureName})` : creatureName;
+        nameElement.classList.add(FONT_CONSTANTS.SIZES.SMALL);
         nameElement.style.cssText = `
-          font-weight: bold;
-          font-size: 14px;
           color: ${COLOR_CONSTANTS.TEXT};
           text-align: center;
           cursor: pointer;
@@ -14012,9 +13813,9 @@ function buildCreatureRow(actor, mapsTabNav = {}) {
         
         const levelElement = document.createElement('div');
         levelElement.textContent = `Level ${actor.level || 1}`;
+        levelElement.classList.add(FONT_CONSTANTS.SIZES.SMALL);
         levelElement.style.cssText = `
-          font-size: 12px;
-          color: #888;
+          color: ${COLOR_CONSTANTS.WARNING};
           text-align: center;
         `;
         
@@ -14127,7 +13928,6 @@ function buildCreatureRow(actor, mapsTabNav = {}) {
                 equipmentContainer.style.cssText += `
                   font-size: 12px;
                   color: #888;
-                  font-weight: bold;
                 `;
               }
             } else {
@@ -14136,7 +13936,6 @@ function buildCreatureRow(actor, mapsTabNav = {}) {
               equipmentContainer.style.cssText += `
                 font-size: 12px;
                 color: #888;
-                font-weight: bold;
               `;
             }
           } catch (error) {
@@ -14146,7 +13945,6 @@ function buildCreatureRow(actor, mapsTabNav = {}) {
             equipmentContainer.style.cssText += `
               font-size: 12px;
               color: #888;
-              font-weight: bold;
             `;
           }
 
@@ -14264,9 +14062,8 @@ function createCreatureListSection(roomActors, selectedMap, mapsTabNav = {}, flo
     consolidateIdenticalFloors(nonEmptyFloorGroups)
       .forEach((group) => {
         const floorHeader = document.createElement('div');
+        floorHeader.classList.add(FONT_CONSTANTS.SIZES.SMALL);
         floorHeader.style.cssText = `
-          font-weight: bold;
-          font-size: 12px;
           color: ${COLOR_CONSTANTS.TEXT};
           text-align: center;
           margin: 8px 0 4px;
@@ -14316,8 +14113,8 @@ function createCompactStatColumn(iconSrc, iconAlt, mapId, mapData, leaderboardDa
   statCol.style.alignItems = 'center';
   statCol.style.justifyContent = 'center';
   statCol.style.padding = '4px';
-  statCol.style.fontSize = '9px';
-  statCol.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
+  statCol.style.fontSize = '10px';
+  statCol.style.fontFamily = CYCLOPEDIA_STATS_FONT;
   statCol.style.textAlign = 'center';
   
   // Icon
@@ -14353,30 +14150,28 @@ function createCompactStatColumn(iconSrc, iconAlt, mapId, mapData, leaderboardDa
     
     if (allowGlobalWorldRecords && bestTicks > 0) {
       const wrDiv = document.createElement('div');
-      wrDiv.style.color = '#ff8';
-      wrDiv.style.fontWeight = 'bold';
-      wrDiv.style.fontSize = '8px';
+      wrDiv.style.color = COLOR_CONSTANTS.RECORD;
+      wrDiv.style.fontSize = '10px';
       wrDiv.textContent = 'WR';
       content.appendChild(wrDiv);
       
       const wrValue = document.createElement('div');
       wrValue.style.color = '#fff';
-      wrValue.style.fontSize = '9px';
+      wrValue.style.fontSize = '11px';
       wrValue.textContent = `${bestTicks}`;
       content.appendChild(wrValue);
     }
     
     if (yourTicks > 0) {
       const yourDiv = document.createElement('div');
-      yourDiv.style.color = '#8f8';
-      yourDiv.style.fontWeight = 'bold';
-      yourDiv.style.fontSize = '8px';
+      yourDiv.style.color = COLOR_CONSTANTS.PERSONAL;
+      yourDiv.style.fontSize = '10px';
       yourDiv.textContent = 'You';
       content.appendChild(yourDiv);
       
       const yourValue = document.createElement('div');
-      yourValue.style.color = isPersonalWR ? '#8f8' : '#ccc';
-      yourValue.style.fontSize = '9px';
+      yourValue.style.color = isPersonalWR ? COLOR_CONSTANTS.PERSONAL : COLOR_CONSTANTS.SOFT;
+      yourValue.style.fontSize = '11px';
       yourValue.style.fontWeight = isPersonalWR ? 'bold' : 'normal';
       yourValue.style.textDecoration = isPersonalWR ? 'underline' : 'none';
       yourValue.textContent = `${yourTicks}`;
@@ -14385,8 +14180,8 @@ function createCompactStatColumn(iconSrc, iconAlt, mapId, mapData, leaderboardDa
     
     if (bestTicks === 0 && yourTicks === 0) {
       const noData = document.createElement('div');
-      noData.style.color = '#666';
-      noData.style.fontSize = '8px';
+      noData.style.color = COLOR_CONSTANTS.UNOWNED;
+      noData.style.fontSize = '10px';
       noData.textContent = '—';
       content.appendChild(noData);
     }
@@ -14402,40 +14197,38 @@ function createCompactStatColumn(iconSrc, iconAlt, mapId, mapData, leaderboardDa
     
     if (allowGlobalWorldRecords && bestRank > 0) {
       const wrDiv = document.createElement('div');
-      wrDiv.style.color = '#ff8';
-      wrDiv.style.fontWeight = 'bold';
-      wrDiv.style.fontSize = '8px';
+      wrDiv.style.color = COLOR_CONSTANTS.RECORD;
+      wrDiv.style.fontSize = '10px';
       wrDiv.textContent = 'WR';
       content.appendChild(wrDiv);
       
       const wrValue = document.createElement('div');
       wrValue.style.color = '#fff';
-      wrValue.style.fontSize = '9px';
-      wrValue.innerHTML = `${bestRank}${bestRankTicks !== undefined && bestRankTicks !== null ? ` <i style="color: #aaa; font-size: 7px;">(${bestRankTicks})</i>` : ''}`;
+      wrValue.style.fontSize = '11px';
+      wrValue.innerHTML = `${bestRank}${bestRankTicks !== undefined && bestRankTicks !== null ? ` <i style="color: #aaa; font-size: 9px;">(${bestRankTicks})</i>` : ''}`;
       content.appendChild(wrValue);
     }
     
     if (yourRank > 0) {
       const yourDiv = document.createElement('div');
-      yourDiv.style.color = '#8f8';
-      yourDiv.style.fontWeight = 'bold';
-      yourDiv.style.fontSize = '8px';
+      yourDiv.style.color = COLOR_CONSTANTS.PERSONAL;
+      yourDiv.style.fontSize = '10px';
       yourDiv.textContent = 'You';
       content.appendChild(yourDiv);
       
       const yourValue = document.createElement('div');
-      yourValue.style.color = isPersonalWR ? '#8f8' : '#ccc';
-      yourValue.style.fontSize = '9px';
+      yourValue.style.color = isPersonalWR ? COLOR_CONSTANTS.PERSONAL : COLOR_CONSTANTS.SOFT;
+      yourValue.style.fontSize = '11px';
       yourValue.style.fontWeight = isPersonalWR ? 'bold' : 'normal';
       yourValue.style.textDecoration = isPersonalWR ? 'underline' : 'none';
-      yourValue.innerHTML = `${yourRank}${yourRankTicks !== undefined && yourRankTicks !== null ? ` <i style="color: #aaa; font-size: 7px;">(${yourRankTicks})</i>` : ''}`;
+      yourValue.innerHTML = `${yourRank}${yourRankTicks !== undefined && yourRankTicks !== null ? ` <i style="color: #aaa; font-size: 9px;">(${yourRankTicks})</i>` : ''}`;
       content.appendChild(yourValue);
     }
     
     if (bestRank === 0 && yourRank === 0) {
       const noData = document.createElement('div');
-      noData.style.color = '#666';
-      noData.style.fontSize = '8px';
+      noData.style.color = COLOR_CONSTANTS.UNOWNED;
+      noData.style.fontSize = '10px';
       noData.textContent = '—';
       content.appendChild(noData);
     }
@@ -14454,24 +14247,22 @@ function createCompactStatColumn(iconSrc, iconAlt, mapId, mapData, leaderboardDa
     
     if (allowGlobalWorldRecords && (bestFloorTicks > 0 || bestFloor > 0)) {
       const wrDiv = document.createElement('div');
-      wrDiv.style.color = '#ff8';
-      wrDiv.style.fontWeight = 'bold';
-      wrDiv.style.fontSize = '8px';
+      wrDiv.style.color = COLOR_CONSTANTS.RECORD;
+      wrDiv.style.fontSize = '10px';
       wrDiv.textContent = 'WR';
       content.appendChild(wrDiv);
       
       const wrValue = document.createElement('div');
       wrValue.style.color = '#fff';
-      wrValue.style.fontSize = '9px';
-      wrValue.innerHTML = `Floor ${bestFloor}${bestFloorTicks !== undefined && bestFloorTicks !== null ? ` <i style="color: #aaa; font-size: 7px;">(${bestFloorTicks})</i>` : ''}`;
+      wrValue.style.fontSize = '11px';
+      wrValue.innerHTML = `Floor ${bestFloor}${bestFloorTicks !== undefined && bestFloorTicks !== null ? ` <i style="color: #aaa; font-size: 9px;">(${bestFloorTicks})</i>` : ''}`;
       content.appendChild(wrValue);
     }
     
     if (yourFloor !== undefined && yourFloor !== null) {
       const yourDiv = document.createElement('div');
-      yourDiv.style.color = '#8f8';
-      yourDiv.style.fontWeight = 'bold';
-      yourDiv.style.fontSize = '8px';
+      yourDiv.style.color = COLOR_CONSTANTS.PERSONAL;
+      yourDiv.style.fontSize = '10px';
       yourDiv.textContent = 'You';
       content.appendChild(yourDiv);
       
@@ -14479,18 +14270,18 @@ function createCompactStatColumn(iconSrc, iconAlt, mapId, mapData, leaderboardDa
       const isMaxFloor = yourFloor === 15;
       
       const yourValue = document.createElement('div');
-      yourValue.style.color = isMaxFloor ? '#8f8' : '#ccc';
-      yourValue.style.fontSize = '9px';
+      yourValue.style.color = isMaxFloor ? COLOR_CONSTANTS.PERSONAL : COLOR_CONSTANTS.SOFT;
+      yourValue.style.fontSize = '11px';
       yourValue.style.fontWeight = isMaxFloor ? 'bold' : 'normal';
       yourValue.style.textDecoration = isMaxFloor ? 'underline' : 'none';
-      yourValue.innerHTML = `Floor ${yourFloor}${yourFloorTicks !== undefined && yourFloorTicks !== null ? ` <i style="color: #aaa; font-size: 7px;">(${yourFloorTicks})</i>` : ''}`;
+      yourValue.innerHTML = `Floor ${yourFloor}${yourFloorTicks !== undefined && yourFloorTicks !== null ? ` <i style="color: #aaa; font-size: 9px;">(${yourFloorTicks})</i>` : ''}`;
       content.appendChild(yourValue);
     }
     
     if ((bestFloorTicks === 0 || bestFloor === 0) && (yourFloor === undefined || yourFloor === null)) {
       const noData = document.createElement('div');
-      noData.style.color = '#666';
-      noData.style.fontSize = '8px';
+      noData.style.color = COLOR_CONSTANTS.UNOWNED;
+      noData.style.fontSize = '10px';
       noData.textContent = '—';
       content.appendChild(noData);
     }
@@ -14522,8 +14313,8 @@ function createRegionMapsSection(mapsInRegion, regionId, onMapSelect, leaderboar
   const regionName = cyclopediaGetRegionDisplayName(regionId);
   regionTitle.textContent = regionName;
   regionTitle.style.margin = '0 0 15px 0';
-  regionTitle.style.fontSize = '18px';
-  regionTitle.style.fontWeight = 'bold';
+  regionTitle.classList.add(FONT_CONSTANTS.SIZES.TITLE);
+  regionTitle.style.fontWeight = 'normal';
   regionTitle.style.textAlign = 'center';
   regionMapsDiv.appendChild(regionTitle);
 
@@ -14562,7 +14353,7 @@ function createRegionMapsSection(mapsInRegion, regionId, onMapSelect, leaderboar
       
       // Map name (Column 2)
       const mapName = document.createElement('div');
-      mapName.className = 'cyclopedia-map-name';
+      mapName.className = 'cyclopedia-map-name ' + FONT_CONSTANTS.SIZES.SMALL;
       mapName.textContent = addSoftHyphensToLongWords(map.name);
       mapItem.appendChild(mapName);
       
@@ -14770,14 +14561,14 @@ function createRegionStatisticsSection(regionId, mapsInRegion, leaderboardData) 
     const speedrunValue = statsContainer.querySelector('.speedrun-total-ticks');
     if (speedrunValue) {
       speedrunValue.textContent = `${totalTicks.toLocaleString()} / ${totalWRTicks > 0 ? totalWRTicks.toLocaleString() : '—'} ticks`;
-      speedrunValue.style.color = totalWRTicks > 0 && totalTicks <= totalWRTicks ? '#8f8' : '#ff8';
+      speedrunValue.style.color = totalWRTicks > 0 && totalTicks <= totalWRTicks ? COLOR_CONSTANTS.PERSONAL : COLOR_CONSTANTS.RECORD;
     }
     
     // Update raid speedrun display if it exists
     const raidSpeedrunValue = statsContainer.querySelector('.speedrun-raid-ticks');
     if (raidSpeedrunValue) {
       raidSpeedrunValue.textContent = `Raids: ${totalRaidTicks.toLocaleString()} / ${totalWRRaidTicks > 0 ? totalWRRaidTicks.toLocaleString() : '—'} ticks`;
-      raidSpeedrunValue.style.color = totalWRRaidTicks > 0 && totalRaidTicks <= totalWRRaidTicks ? '#8f8' : '#ff8';
+      raidSpeedrunValue.style.color = totalWRRaidTicks > 0 && totalRaidTicks <= totalWRRaidTicks ? COLOR_CONSTANTS.PERSONAL : COLOR_CONSTANTS.RECORD;
     }
   }
   
@@ -14787,8 +14578,8 @@ function createRegionStatisticsSection(regionId, mapsInRegion, leaderboardData) 
   // Header already contains season; avoid repeating "Region · Season N" inside the card.
   title.textContent = regionName;
   title.style.margin = '0 0 12px 0';
-  title.style.fontSize = '16px';
-  title.style.fontWeight = 'bold';
+  title.classList.add(FONT_CONSTANTS.SIZES.TITLE);
+  title.style.fontWeight = 'normal';
   title.style.textAlign = 'center';
   title.style.color = COLOR_CONSTANTS.TEXT;
   statsContainer.appendChild(title);
@@ -14808,26 +14599,23 @@ function createRegionStatisticsSection(regionId, mapsInRegion, leaderboardData) 
   
   const exploredLabel = document.createElement('div');
   exploredLabel.textContent = 'Explored Maps';
-  exploredLabel.style.fontSize = '13px';
-  exploredLabel.style.fontWeight = 'bold';
+  exploredLabel.classList.add(FONT_CONSTANTS.SIZES.SMALL);
   exploredLabel.style.marginBottom = '6px';
   exploredLabel.style.color = COLOR_CONSTANTS.TEXT;
   exploredDiv.appendChild(exploredLabel);
   
   const exploredValue = document.createElement('div');
   exploredValue.textContent = `${exploredCount} / ${totalNonRaidMaps} maps`;
-  exploredValue.style.fontSize = '18px';
-  exploredValue.style.fontWeight = 'bold';
-  exploredValue.style.color = exploredCount === totalNonRaidMaps ? '#8f8' : '#ff8';
+  exploredValue.classList.add(FONT_CONSTANTS.SIZES.BODY);
+  exploredValue.style.color = exploredCount === totalNonRaidMaps ? COLOR_CONSTANTS.PERSONAL : COLOR_CONSTANTS.RECORD;
   exploredDiv.appendChild(exploredValue);
   
   // Show explored raids if there are any raids in the region
   if (totalRaidMaps > 0) {
     const exploredRaidsValue = document.createElement('div');
     exploredRaidsValue.textContent = `Raids: ${exploredRaidsCount} / ${totalRaidMaps} maps`;
-    exploredRaidsValue.style.fontSize = '12px';
-    exploredRaidsValue.style.fontWeight = 'normal';
-    exploredRaidsValue.style.color = exploredRaidsCount === totalRaidMaps ? '#8f8' : '#ff8';
+    exploredRaidsValue.classList.add(FONT_CONSTANTS.SIZES.SMALL);
+    exploredRaidsValue.style.color = exploredRaidsCount === totalRaidMaps ? COLOR_CONSTANTS.PERSONAL : COLOR_CONSTANTS.RECORD;
     exploredRaidsValue.style.marginTop = '6px';
     exploredDiv.appendChild(exploredRaidsValue);
   }
@@ -14843,8 +14631,7 @@ function createRegionStatisticsSection(regionId, mapsInRegion, leaderboardData) 
   
   const speedrunLabel = document.createElement('div');
   speedrunLabel.textContent = 'Speedrun';
-  speedrunLabel.style.fontSize = '13px';
-  speedrunLabel.style.fontWeight = 'bold';
+  speedrunLabel.classList.add(FONT_CONSTANTS.SIZES.SMALL);
   speedrunLabel.style.marginBottom = '6px';
   speedrunLabel.style.color = COLOR_CONSTANTS.TEXT;
   speedrunDiv.appendChild(speedrunLabel);
@@ -14852,9 +14639,8 @@ function createRegionStatisticsSection(regionId, mapsInRegion, leaderboardData) 
   const speedrunValue = document.createElement('div');
   speedrunValue.className = 'speedrun-total-ticks';
   speedrunValue.textContent = `${totalTicks.toLocaleString()} / — ticks`;
-  speedrunValue.style.fontSize = '18px';
-  speedrunValue.style.fontWeight = 'bold';
-  speedrunValue.style.color = '#ff8';
+  speedrunValue.classList.add(FONT_CONSTANTS.SIZES.BODY);
+  speedrunValue.style.color = COLOR_CONSTANTS.RECORD;
   speedrunDiv.appendChild(speedrunValue);
   
   // Show raid speedrun if there are any raids in the region
@@ -14862,9 +14648,8 @@ function createRegionStatisticsSection(regionId, mapsInRegion, leaderboardData) 
     const raidSpeedrunValue = document.createElement('div');
     raidSpeedrunValue.className = 'speedrun-raid-ticks';
     raidSpeedrunValue.textContent = `Raids: ${totalRaidTicks.toLocaleString()} / — ticks`;
-    raidSpeedrunValue.style.fontSize = '12px';
-    raidSpeedrunValue.style.fontWeight = 'normal';
-    raidSpeedrunValue.style.color = '#ff8';
+    raidSpeedrunValue.classList.add(FONT_CONSTANTS.SIZES.SMALL);
+    raidSpeedrunValue.style.color = COLOR_CONSTANTS.RECORD;
     raidSpeedrunValue.style.marginTop = '6px';
     speedrunDiv.appendChild(raidSpeedrunValue);
   }
@@ -14880,26 +14665,23 @@ function createRegionStatisticsSection(regionId, mapsInRegion, leaderboardData) 
   
   const rankPointsLabel = document.createElement('div');
   rankPointsLabel.textContent = 'Rank Points';
-  rankPointsLabel.style.fontSize = '13px';
-  rankPointsLabel.style.fontWeight = 'bold';
+  rankPointsLabel.classList.add(FONT_CONSTANTS.SIZES.SMALL);
   rankPointsLabel.style.marginBottom = '6px';
   rankPointsLabel.style.color = COLOR_CONSTANTS.TEXT;
   rankPointsDiv.appendChild(rankPointsLabel);
   
   const rankPointsValue = document.createElement('div');
   rankPointsValue.textContent = `${totalRankPoints.toLocaleString()} / ${maxRankPoints.toLocaleString()} points`;
-  rankPointsValue.style.fontSize = '18px';
-  rankPointsValue.style.fontWeight = 'bold';
-  rankPointsValue.style.color = totalRankPoints === maxRankPoints ? '#8f8' : '#ff8';
+  rankPointsValue.classList.add(FONT_CONSTANTS.SIZES.BODY);
+  rankPointsValue.style.color = totalRankPoints === maxRankPoints ? COLOR_CONSTANTS.PERSONAL : COLOR_CONSTANTS.RECORD;
   rankPointsDiv.appendChild(rankPointsValue);
   
   // Show raid rank points if there are any raids in the region
   if (totalRaidMaps > 0) {
     const raidRankPointsValue = document.createElement('div');
     raidRankPointsValue.textContent = `Raids: ${totalRaidRankPoints.toLocaleString()} / ${maxRaidRankPoints.toLocaleString()} points`;
-    raidRankPointsValue.style.fontSize = '12px';
-    raidRankPointsValue.style.fontWeight = 'normal';
-    raidRankPointsValue.style.color = totalRaidRankPoints === maxRaidRankPoints ? '#8f8' : '#ff8';
+    raidRankPointsValue.classList.add(FONT_CONSTANTS.SIZES.SMALL);
+    raidRankPointsValue.style.color = totalRaidRankPoints === maxRaidRankPoints ? COLOR_CONSTANTS.PERSONAL : COLOR_CONSTANTS.RECORD;
     raidRankPointsValue.style.marginTop = '6px';
     rankPointsDiv.appendChild(raidRankPointsValue);
   }
@@ -14915,26 +14697,23 @@ function createRegionStatisticsSection(regionId, mapsInRegion, leaderboardData) 
   
   const floorsLabel = document.createElement('div');
   floorsLabel.textContent = 'Floors';
-  floorsLabel.style.fontSize = '13px';
-  floorsLabel.style.fontWeight = 'bold';
+  floorsLabel.classList.add(FONT_CONSTANTS.SIZES.SMALL);
   floorsLabel.style.marginBottom = '6px';
   floorsLabel.style.color = COLOR_CONSTANTS.TEXT;
   floorsDiv.appendChild(floorsLabel);
   
   const floorsValue = document.createElement('div');
   floorsValue.textContent = `${totalFloors.toLocaleString()} / ${maxFloors.toLocaleString()} floors`;
-  floorsValue.style.fontSize = '18px';
-  floorsValue.style.fontWeight = 'bold';
-  floorsValue.style.color = totalFloors === maxFloors ? '#8f8' : '#ff8';
+  floorsValue.classList.add(FONT_CONSTANTS.SIZES.BODY);
+  floorsValue.style.color = totalFloors === maxFloors ? COLOR_CONSTANTS.PERSONAL : COLOR_CONSTANTS.RECORD;
   floorsDiv.appendChild(floorsValue);
   
   // Show raid floors if there are any raids in the region
   if (totalRaidMaps > 0) {
     const raidFloorsValue = document.createElement('div');
     raidFloorsValue.textContent = `Raids: ${totalRaidFloors.toLocaleString()} / ${maxRaidFloors.toLocaleString()} floors`;
-    raidFloorsValue.style.fontSize = '12px';
-    raidFloorsValue.style.fontWeight = 'normal';
-    raidFloorsValue.style.color = totalRaidFloors === maxRaidFloors ? '#8f8' : '#ff8';
+    raidFloorsValue.classList.add(FONT_CONSTANTS.SIZES.SMALL);
+    raidFloorsValue.style.color = totalRaidFloors === maxRaidFloors ? COLOR_CONSTANTS.PERSONAL : COLOR_CONSTANTS.RECORD;
     raidFloorsValue.style.marginTop = '6px';
     floorsDiv.appendChild(raidFloorsValue);
   }
@@ -14997,6 +14776,7 @@ function createMapInfoSection(selectedMap, roomName) {
   thumbnail.src = `/assets/room-thumbnails/${selectedMap}.png`;
   
   thumbnailContainer.appendChild(thumbnail);
+  appendCyclopediaStaminaOverlay(thumbnailContainer, selectedMap, { paddingPx: 6 });
   appendCyclopediaBoostedEquipmentOverlay(thumbnailContainer, selectedMap, roomName, {
     paddingPx: 6
   });
@@ -15012,8 +14792,8 @@ function createMapInfoSection(selectedMap, roomName) {
   const title = document.createElement('h3');
   title.textContent = roomName;
   title.style.margin = '10px 0 0 0';
-  title.style.fontSize = '16px';
-  title.style.fontWeight = 'bold';
+  title.classList.add(FONT_CONSTANTS.SIZES.TITLE);
+  title.style.fontWeight = 'normal';
   title.style.textAlign = 'center';
   title.style.cursor = MAP_INTERACTION_CONFIG.cursor;
   title.title = MAP_INTERACTION_CONFIG.tooltip;
@@ -15059,7 +14839,7 @@ function createMapInfoSection(selectedMap, roomName) {
       countOverlay.style.color = '#fff7da';
       countOverlay.style.fontSize = '11px';
       countOverlay.style.fontWeight = 'bold';
-      countOverlay.style.fontFamily = 'Arial, Helvetica, sans-serif';
+      countOverlay.style.fontFamily = CYCLOPEDIA_STATS_FONT;
       countOverlay.style.textAlign = 'center';
       countOverlay.style.display = 'flex';
       countOverlay.style.alignItems = 'center';
@@ -15067,14 +14847,15 @@ function createMapInfoSection(selectedMap, roomName) {
       countOverlay.style.gap = '4px';
       countOverlay.style.letterSpacing = '0';
       countOverlay.style.wordSpacing = 'normal';
-      countOverlay.style.lineHeight = '1.2';
+      countOverlay.style.lineHeight = '1';
       countOverlay.style.textShadow = '0 1px 1px #000';
-      countOverlay.style.padding = '5px 6px';
+      countOverlay.style.padding = '1px 6px';
       countOverlay.style.borderRadius = '4px';
       countOverlay.style.border = '3px solid transparent';
       countOverlay.style.borderImage = 'url("https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png") 3 fill';
-      const formattedDefeatCount = defeatCount.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
-      countOverlay.innerHTML = `<span>Defeated</span><span>${formattedDefeatCount}</span><span>times</span>`;
+      const formattedDefeatCount = FormatUtils.compact(defeatCount);
+      countOverlay.title = `${FormatUtils.number(Number(defeatCount))} victories`;
+      countOverlay.innerHTML = `<span>${formattedDefeatCount}</span><span>victories</span>`;
       thumbnailContainer.appendChild(countOverlay);
     }
   } catch (error) {
@@ -15169,7 +14950,7 @@ function createMapsTabPage(selectedCreature, selectedEquipment, selectedInventor
       errorBox.style.justifyContent = 'center';
       errorBox.style.alignItems = 'center';
       errorBox.style.color = COLOR_CONSTANTS.TEXT;
-      errorBox.style.fontWeight = 'bold';
+      errorBox.classList.add(FONT_CONSTANTS.SIZES.BODY);
       errorBox.style.textAlign = 'center';
       errorBox.innerHTML = 'Error loading maps.';
       leftCol._bottomBox = errorBox;
@@ -15235,8 +15016,8 @@ function createMapsTabPage(selectedCreature, selectedEquipment, selectedInventor
   const col2 = document.createElement('div');
   Object.assign(col2.style, mapsNarrowColStyle, {
     height: '100%', display: 'flex', flexDirection: 'column',
-    alignItems: 'center', justifyContent: 'flex-start', fontSize: '16px',
-    fontWeight: 'bold', color: COLOR_CONSTANTS.TEXT,
+    alignItems: 'center', justifyContent: 'flex-start',
+    color: COLOR_CONSTANTS.TEXT,
     borderRight: '6px solid transparent',
     borderImage: `url("${START_PAGE_CONFIG.FRAME_IMAGE_URL}") 6 6 6 6 fill stretch`,
     boxSizing: 'border-box', overflowX: 'hidden', minHeight: '0'
@@ -15246,8 +15027,8 @@ function createMapsTabPage(selectedCreature, selectedEquipment, selectedInventor
   const col3 = document.createElement('div');
   Object.assign(col3.style, mapsWideColStyle, {
     height: '100%', display: 'flex', flexDirection: 'column',
-    alignItems: 'center', justifyContent: 'flex-start', fontSize: '16px',
-    fontWeight: 'bold', color: COLOR_CONSTANTS.TEXT,
+    alignItems: 'center', justifyContent: 'flex-start',
+    color: COLOR_CONSTANTS.TEXT,
     boxSizing: 'border-box', overflowX: 'auto', overflowY: 'hidden', minHeight: '0'
   });
   col3.classList.add('text-whiteHighlight');
@@ -15493,7 +15274,7 @@ function createMapsTabPage(selectedCreature, selectedEquipment, selectedInventor
         col2Msg.style.height = '100%';
         col2Msg.style.width = '100%';
         col2Msg.style.color = COLOR_CONSTANTS.TEXT;
-        col2Msg.style.fontWeight = 'bold';
+        col2Msg.classList.add(FONT_CONSTANTS.SIZES.BODY);
         col2Msg.style.textAlign = 'center';
         col2Msg.textContent = 'Select a map to view information.';
         col2Content.appendChild(col2Msg);
@@ -15505,7 +15286,7 @@ function createMapsTabPage(selectedCreature, selectedEquipment, selectedInventor
         col3Msg.style.height = '100%';
         col3Msg.style.width = '100%';
         col3Msg.style.color = COLOR_CONSTANTS.TEXT;
-        col3Msg.style.fontWeight = 'bold';
+        col3Msg.classList.add(FONT_CONSTANTS.SIZES.BODY);
         col3Msg.style.textAlign = 'center';
         col3Msg.textContent = 'Select a map to view statistics.';
         col3Content.appendChild(col3Msg);
@@ -15678,16 +15459,11 @@ function createBestiaryTabPage(selectedCreature, selectedEquipment, selectedInve
     const usageMap = new Map();
     let totalMaps = 0;
     try {
-      const playerContext = globalThis.state?.player?.getSnapshot?.().context;
+      const { context: playerContext, rooms } = getCyclopediaBoardConfigRooms();
       const monsters = Array.isArray(playerContext?.monsters) ? playerContext.monsters : [];
-      const boardConfigs = playerContext?.boardConfigs && typeof playerContext.boardConfigs === 'object'
-        ? playerContext.boardConfigs
-        : {};
       const monsterLookup = new Map(monsters.map((m) => [m.id, m.gameId]));
 
-      Object.entries(boardConfigs).forEach(([roomCode, cfgs]) => {
-        if (!Array.isArray(cfgs)) return;
-        if (isDynamicEventMap(roomCode)) return;
+      rooms.forEach(([, cfgs]) => {
         totalMaps++;
         const seenOnMap = new Set();
         cfgs.forEach((cfg) => {
@@ -15734,7 +15510,7 @@ function createBestiaryTabPage(selectedCreature, selectedEquipment, selectedInve
         el.style.background = 'none';
         const creatureName = getBestiaryListItemBaseName(el);
         if (box === creaturesBox) {
-          const isUnobtainable = UNOBTAINABLE_CREATURES.some(c => c.toLowerCase() === creatureName.toLowerCase());
+          const isUnobtainable = getCyclopediaUnobtainableCreatures().some(c => c.toLowerCase() === creatureName.toLowerCase());
           if (!isUnobtainable) {
             applyCreatureListItemStyle(el, getCreatureDisplayStatus(creatureName));
           } else {
@@ -15753,26 +15529,9 @@ function createBestiaryTabPage(selectedCreature, selectedEquipment, selectedInve
   unobtainableBox.clearAllSelections = clearAllBestiarySelections;
 
   function buildBestiaryRowMeta(box) {
-    const rows = Array.from(box.querySelectorAll('div.pixel-font-16'))
-      .filter((el) => !!el.querySelector('span'));
-    return rows.map((row, idx) => {
-      if (!row.dataset.originalOrder) {
-        row.dataset.originalOrder = String(idx);
-      }
-      const span = row.querySelector('span');
-      if (span && !span.dataset.baseLabel) {
-        const raw = (span.textContent || '').trim();
-        span.dataset.baseLabel = raw.replace(/^\d+%\s+/, '');
-      }
-      const label = (span?.dataset.baseLabel || span?.textContent || row.textContent || '').trim();
-      const labelClean = label.replace(/^\d+%\s+/, '');
+    return buildCyclopediaListRowMeta(box, (labelClean) => {
       const awakenKey = getAwakenTrackerBestiarySortKey(labelClean);
       return {
-        row,
-        idx,
-        span,
-        label: labelClean,
-        labelNorm: labelClean.toLowerCase(),
         usageCount: getCreatureUsageCountByName(labelClean),
         genePct: awakenKey.topTierGenePct,
         awakenKey
@@ -15783,77 +15542,51 @@ function createBestiaryTabPage(selectedCreature, selectedEquipment, selectedInve
   let creaturesRowMetaCache = null;
   let unobtainableRowMetaCache = null;
 
-  function filterBoxItems(box, searchTerm, mode = 'name', cachedRowMeta = null) {
-    const q = (searchTerm || '').toLowerCase();
-    const rowMeta = cachedRowMeta || buildBestiaryRowMeta(box);
-
-    const listGrid = box.querySelector('div[data-nopadding="true"]');
-    if (mode === 'usage' && listGrid) {
-      rowMeta
-        .slice()
-        .sort((a, b) => {
-          if (b.usageCount !== a.usageCount) return b.usageCount - a.usageCount;
-          const ka = a.awakenKey;
-          const kb = b.awakenKey;
-          if (ka.categoryRank !== kb.categoryRank) return ka.categoryRank - kb.categoryRank;
-          if (ka.anyAwakened && kb.anyAwakened) {
-            const pa = ka.anyAwakenedShiny ? 0 : 1;
-            const pb = kb.anyAwakenedShiny ? 0 : 1;
-            if (pa !== pb) return pa - pb;
-          }
-          if (kb.bestSum !== ka.bestSum) return kb.bestSum - ka.bestSum;
-          if (kb.bestRank !== ka.bestRank) return kb.bestRank - ka.bestRank;
-          return a.labelNorm.localeCompare(b.labelNorm);
-        })
-        .forEach((m) => listGrid.appendChild(m.row));
-    } else if (mode === 'tier' && listGrid) {
-      rowMeta
-        .slice()
-        .sort((a, b) => {
-          const ka = a.awakenKey;
-          const kb = b.awakenKey;
-          if (ka.categoryRank !== kb.categoryRank) return ka.categoryRank - kb.categoryRank;
-          if (ka.anyAwakened && kb.anyAwakened) {
-            const pa = ka.anyAwakenedShiny ? 0 : 1;
-            const pb = kb.anyAwakenedShiny ? 0 : 1;
-            if (pa !== pb) return pa - pb;
-          }
-          if (b.genePct !== a.genePct) return b.genePct - a.genePct;
-          if (a.genePct === 100) {
-            if (kb.bestRank !== ka.bestRank) return kb.bestRank - ka.bestRank;
-            if (kb.topTierLevel !== ka.topTierLevel) return kb.topTierLevel - ka.topTierLevel;
-          } else if (kb.bestRank !== ka.bestRank) {
-            return kb.bestRank - ka.bestRank;
-          }
-          return a.labelNorm.localeCompare(b.labelNorm);
-        })
-        .forEach((m) => listGrid.appendChild(m.row));
-    } else if (mode === 'name' && listGrid) {
-      rowMeta
-        .slice()
-        .sort((a, b) => Number(a.row.dataset.originalOrder) - Number(b.row.dataset.originalOrder))
-        .forEach((m) => listGrid.appendChild(m.row));
+  const compareBestiaryUsage = (a, b) => {
+    if (b.usageCount !== a.usageCount) return b.usageCount - a.usageCount;
+    const ka = a.awakenKey;
+    const kb = b.awakenKey;
+    if (ka.categoryRank !== kb.categoryRank) return ka.categoryRank - kb.categoryRank;
+    if (ka.anyAwakened && kb.anyAwakened) {
+      const pa = ka.anyAwakenedShiny ? 0 : 1;
+      const pb = kb.anyAwakenedShiny ? 0 : 1;
+      if (pa !== pb) return pa - pb;
     }
+    if (kb.bestSum !== ka.bestSum) return kb.bestSum - ka.bestSum;
+    if (kb.bestRank !== ka.bestRank) return kb.bestRank - ka.bestRank;
+    return a.labelNorm.localeCompare(b.labelNorm);
+  };
 
-    let visibleCount = 0;
-    rowMeta.forEach((meta) => {
-      if (meta.span) {
-        const pct = creatureUsageByMapStats.totalMaps > 0 ? Math.floor((meta.usageCount / creatureUsageByMapStats.totalMaps) * 100) : 0;
+  const compareBestiaryTier = (a, b) => {
+    const ka = a.awakenKey;
+    const kb = b.awakenKey;
+    if (ka.categoryRank !== kb.categoryRank) return ka.categoryRank - kb.categoryRank;
+    if (ka.anyAwakened && kb.anyAwakened) {
+      const pa = ka.anyAwakenedShiny ? 0 : 1;
+      const pb = kb.anyAwakenedShiny ? 0 : 1;
+      if (pa !== pb) return pa - pb;
+    }
+    if (b.genePct !== a.genePct) return b.genePct - a.genePct;
+    if (a.genePct === 100) {
+      if (kb.bestRank !== ka.bestRank) return kb.bestRank - ka.bestRank;
+      if (kb.topTierLevel !== ka.topTierLevel) return kb.topTierLevel - ka.topTierLevel;
+    } else if (kb.bestRank !== ka.bestRank) {
+      return kb.bestRank - ka.bestRank;
+    }
+    return a.labelNorm.localeCompare(b.labelNorm);
+  };
+
+  function filterBoxItems(box, searchTerm, mode = 'name', cachedRowMeta = null) {
+    return filterCyclopediaListRows(box, cachedRowMeta || buildBestiaryRowMeta(box), searchTerm, {
+      comparator: mode === 'usage' ? compareBestiaryUsage : mode === 'tier' ? compareBestiaryTier : null,
+      formatLabel: (meta) => {
         if (mode === 'usage') {
-          meta.span.textContent = `${pct}% ${meta.label}`;
-        } else if (mode === 'tier') {
-          meta.span.textContent = `${meta.genePct}% ${meta.label}`;
-        } else {
-          meta.span.textContent = meta.label;
+          const pct = creatureUsageByMapStats.totalMaps > 0 ? Math.floor((meta.usageCount / creatureUsageByMapStats.totalMaps) * 100) : 0;
+          return `${pct}% ${meta.label}`;
         }
+        return mode === 'tier' ? `${meta.genePct}% ${meta.label}` : meta.label;
       }
-      const nameMatch = !q || meta.labelNorm.includes(q);
-      const usageMatch = true;
-      const isVisible = nameMatch && usageMatch;
-      meta.row.style.display = isVisible ? '' : 'none';
-      if (isVisible) visibleCount++;
     });
-    return visibleCount;
   }
 
   const noResultsCreatures = createNoResultsMessage('No results in Creatures');
@@ -15903,7 +15636,6 @@ function createBestiaryTabPage(selectedCreature, selectedEquipment, selectedInve
 function createEquipmentTabPage(selectedCreature, selectedEquipment, selectedInventory, setSelectedCreature, setSelectedEquipment, setSelectedInventory, updateRightCol, arsenalTabNav = {}) {
   const { setActiveTab, tabPages } = arsenalTabNav;
   let equipmentPreviewTier = window.equipmentDatabase?.DEFAULT_EQUIPMENT_EFFECT_TIER ?? 5;
-  const EQUIPMENT_PREVIEW_TIER_COLORS = ['#9e9e9e', '#4caf50', '#42a5f5', '#ab47bc', '#ffc107', '#ff5722'];
   const EQUIPMENT_PREVIEW_TIER_MAX = 6;
   const EQUIPMENT_PREVIEW_CYCLOPS_RARITY = 'AWAKEN-CYCLOPS-TIER';
 
@@ -16015,17 +15747,18 @@ function createEquipmentTabPage(selectedCreature, selectedEquipment, selectedInv
     for (let tier = 1; tier <= EQUIPMENT_PREVIEW_TIER_MAX; tier++) {
       const btn = document.createElement('button');
       btn.type = 'button';
+      btn.className = FONT_CONSTANTS.SIZES.SMALL;
       btn.textContent = `T${tier}`;
       btn.title = tier === EQUIPMENT_PREVIEW_TIER_MAX
         ? 'Awaken Cyclops upgrade (in-battle)'
         : `Tier ${tier}`;
       const isActive = tier === equipmentPreviewTier;
-      const accent = EQUIPMENT_PREVIEW_TIER_COLORS[tier - 1];
+      const accent = CYCLOPEDIA_EQUIPMENT_TIER_COLORS[tier - 1];
       btn.style.cssText =
         `background:${isActive ? accent : 'rgba(255,255,255,0.1)'};` +
-        `color:${isActive ? '#1a1a1a' : '#e6d7b0'};` +
+        `color:${isActive ? '#1a1a1a' : COLOR_CONSTANTS.SECONDARY};` +
         `border:1px solid ${isActive ? accent : 'rgba(255,255,255,0.2)'};` +
-        'padding:2px 6px; border-radius:2px; font-size:11px; cursor:pointer; font-family:inherit; outline:none; min-width:24px; line-height:1.2;';
+        'padding:2px 6px; border-radius:2px; cursor:pointer; outline:none; min-width:24px; line-height:1.2;';
       btn.addEventListener('mouseenter', () => {
         if (equipmentPreviewTier !== tier) {
           btn.style.background = 'rgba(255,255,255,0.2)';
@@ -16036,7 +15769,7 @@ function createEquipmentTabPage(selectedCreature, selectedEquipment, selectedInv
         if (equipmentPreviewTier !== tier) {
           btn.style.background = 'rgba(255,255,255,0.1)';
           btn.style.borderColor = 'rgba(255,255,255,0.2)';
-          btn.style.color = '#e6d7b0';
+          btn.style.color = COLOR_CONSTANTS.SECONDARY;
         }
       });
       btn.addEventListener('click', (e) => {
@@ -16055,8 +15788,8 @@ function createEquipmentTabPage(selectedCreature, selectedEquipment, selectedInv
   const EQUIPMENT_STYLES = {
     column: {
       flex: '1 1 0', minWidth: '0', height: '100%', display: 'flex', flexDirection: 'column',
-      alignItems: 'center', justifyContent: 'flex-start', fontSize: '16px',
-      fontWeight: 'bold', color: COLOR_CONSTANTS.TEXT,
+      alignItems: 'center', justifyContent: 'flex-start',
+      color: COLOR_CONSTANTS.TEXT,
       borderRight: '6px solid transparent',
       borderImage: `url("${START_PAGE_CONFIG.FRAME_IMAGE_URL}") 6 6 6 6 fill stretch`
     }
@@ -16155,10 +15888,7 @@ function createEquipmentTabPage(selectedCreature, selectedEquipment, selectedInv
     const registerActor = (equipId, creatureId, roomCode, floorIndex) => {
       let creatureName = 'Unknown Creature';
       try {
-        if (globalThis.state?.utils?.getMonster) {
-          const monsterData = globalThis.state.utils.getMonster(creatureId);
-          creatureName = monsterData?.metadata?.name || creatureName;
-        }
+        creatureName = getGameMonster(creatureId)?.metadata?.name || creatureName;
       } catch (error) {
         // Skip if can't get creature name
       }
@@ -16247,6 +15977,7 @@ function createEquipmentTabPage(selectedCreature, selectedEquipment, selectedInv
           if (!entry.creatures.size) return;
           usageData.push({
             mapName: baseNameForRoom(roomCode),
+            roomId: roomCode,
             floors: entry.floors,
             creatures: Array.from(entry.creatures).sort(),
             regionName: 'Other Maps'
@@ -16270,6 +16001,7 @@ function createEquipmentTabPage(selectedCreature, selectedEquipment, selectedInv
           handledRoomCodes.add(room.id);
           orderedUsage.push({
             mapName: baseNameForRoom(room.id),
+            roomId: room.id,
             floors: entry.floors,
             creatures: Array.from(entry.creatures).sort(),
             regionName: regionName
@@ -16284,6 +16016,7 @@ function createEquipmentTabPage(selectedCreature, selectedEquipment, selectedInv
         if (handledRoomCodes.has(roomCode) || !entry.creatures.size) return;
         orderedUsage.push({
           mapName: baseNameForRoom(roomCode),
+            roomId: roomCode,
           floors: entry.floors,
           creatures: Array.from(entry.creatures).sort(),
           regionName: resolveCyclopediaRoomRegionName(roomCode)
@@ -16337,11 +16070,8 @@ function createEquipmentTabPage(selectedCreature, selectedEquipment, selectedInv
     };
 
     try {
-      const playerContext = globalThis.state?.player?.getSnapshot?.()?.context;
+      const { context: playerContext, rooms } = getCyclopediaBoardConfigRooms();
       const equips = Array.isArray(playerContext?.equips) ? playerContext.equips : [];
-      const boardConfigs = playerContext?.boardConfigs && typeof playerContext.boardConfigs === 'object'
-        ? playerContext.boardConfigs
-        : {};
 
       if (!equips.length) return emptyStats;
 
@@ -16354,9 +16084,7 @@ function createEquipmentTabPage(selectedCreature, selectedEquipment, selectedInv
       let itemCount = 0;
       const statUsage = { ad: 0, ap: 0, hp: 0 };
 
-      Object.entries(boardConfigs).forEach(([roomCode, cfgs]) => {
-        if (!Array.isArray(cfgs)) return;
-        if (isDynamicEventMap(roomCode)) return;
+      rooms.forEach(([, cfgs]) => {
         cfgs.forEach((cfg) => {
           const gameId = resolveConfigEquipmentGameId(cfg, equipLookup, equipGameIdSet);
           if (gameId == null) return;
@@ -16388,6 +16116,533 @@ function createEquipmentTabPage(selectedCreature, selectedEquipment, selectedInv
     }
   }
 
+  function openCreatureInBestiary(creatureNameRaw) {
+    openCreatureInBestiaryTab(creatureNameRaw, {
+      setActiveTabFn: setActiveTab,
+      clickListItemFn: cyclopediaClickListItem,
+      getTabPageFn: () => tabPages[1],
+      getInventoryTabPageFn: () => tabPages[3],
+      findBoxByTitleFn: cyclopediaFindBoxByTitle,
+      timerLabel: 'equipmentMapCreatureSelect'
+    });
+  }
+
+  function appendStyledMapRow(parentEl, mapName, creaturesLabel, floors, roomId = null) {
+    const usageDiv = document.createElement('div');
+    usageDiv.style.cssText = `
+          padding: 2px 4px; display: flex; flex-direction: column; gap: 2px;
+          margin-top: 1px; margin-bottom: 1px; ${CYCLOPEDIA_ROW_TEXT_CSS}
+          color: rgb(255, 255, 255);
+        `;
+    usageDiv.className = FONT_CONSTANTS.SIZES.BODY;
+
+    usageDiv.appendChild(createCyclopediaMapRow({
+      mapName, floors, padding: '1px 4px', roomId, right: createCyclopediaStaminaCostSpan(roomId, floors)
+    }));
+
+    if (creaturesLabel) {
+      const creatureInfoDiv = document.createElement('div');
+      creatureInfoDiv.className = FONT_CONSTANTS.SIZES.SMALL;
+      creatureInfoDiv.style.cssText = `
+          color: rgb(170, 170, 170); ${CYCLOPEDIA_ROW_TEXT_CSS}
+          margin-left: 6px; margin-top: 0px; font-style: italic;
+        `;
+      const names = String(creaturesLabel)
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+      names.forEach((name, i) => {
+        if (i > 0) {
+          creatureInfoDiv.appendChild(document.createTextNode(', '));
+        }
+        const nameSpan = document.createElement('span');
+        nameSpan.textContent = name;
+        nameSpan.style.cursor = 'pointer';
+        nameSpan.style.textDecoration = 'underline';
+        nameSpan.style.textDecorationStyle = 'solid';
+        nameSpan.style.color = 'rgb(170, 170, 170)';
+        nameSpan.title = `Open ${name} in Bestiary`;
+        nameSpan.addEventListener('click', (e) => {
+          e.stopPropagation();
+          openCreatureInBestiary(name);
+        });
+        nameSpan.addEventListener('mouseenter', () => {
+          nameSpan.style.color = 'rgb(255, 255, 255)';
+        });
+        nameSpan.addEventListener('mouseleave', () => {
+          nameSpan.style.color = 'rgb(170, 170, 170)';
+        });
+        creatureInfoDiv.appendChild(nameSpan);
+      });
+      usageDiv.appendChild(creatureInfoDiv);
+    }
+
+    const separator = document.createElement('div');
+    separator.className = 'separator my-2.5';
+    separator.setAttribute('role', 'none');
+    separator.style.cssText = 'margin: 1px 0px;';
+    usageDiv.appendChild(separator);
+
+    parentEl.appendChild(usageDiv);
+  }
+
+  function buildMapNameToRegionMeta() {
+    const roomNames = globalThis.state?.utils?.ROOM_NAME || {};
+    const regions = getCyclopediaRegionsList();
+    const map = new Map();
+    const indexByRegion = new Map();
+    let idx = 0;
+    regions.forEach((region) => {
+      if (!region?.rooms || !Array.isArray(region.rooms)) return;
+      const regionName = cyclopediaGetRegionDisplayName(region.id);
+      if (!indexByRegion.has(regionName)) {
+        indexByRegion.set(regionName, idx++);
+      }
+      region.rooms.forEach((room) => {
+        const roomCode = room?.id;
+        if (!roomCode) return;
+        const mapName = roomNames[roomCode] || roomCode;
+        map.set(mapName, { regionName, regionIndex: indexByRegion.get(regionName) });
+      });
+    });
+    return map;
+  }
+
+  const EQUIPMENT_STAT_ICONS = {
+    hp: '/assets/icons/heal.png',
+    ad: '/assets/icons/attackdamage.png',
+    ap: '/assets/icons/abilitypower.png'
+  };
+  const EQUIP_TOP_COL_LEFT = 'grid-column:1; min-width:0;';
+  const EQUIP_TOP_COL_RIGHT = 'grid-column:3; min-width:0; padding-left:4px; box-sizing:border-box;';
+
+  const createEquipmentSeparator = (style) => {
+    const sep = document.createElement('div');
+    sep.className = 'separator my-2.5';
+    sep.setAttribute('role', 'none');
+    sep.style.cssText = style;
+    return sep;
+  };
+
+  const createEquipmentMutedNote = (text, padding, title = '') => {
+    const note = document.createElement('div');
+    note.className = FONT_CONSTANTS.SIZES.SMALL;
+    note.style.textAlign = 'center';
+    note.style.color = COLOR_CONSTANTS.WARNING;
+    note.style.padding = padding;
+    note.style.fontStyle = 'italic';
+    note.textContent = text;
+    if (title) note.title = title;
+    return note;
+  };
+
+  // Item portrait + effect text (left half of the details row). Mounts the effect component
+  // on equipDetailsTop so updateRightCol can unmount it on the next selection.
+  function createEquipmentDetailsBody(equipData, previewTier) {
+    const previewSpriteId = resolveEquipmentPreviewSpriteId(equipData?.metadata, previewTier);
+
+    let portrait = api.ui.components.createItemPortrait({
+      itemId: previewSpriteId ?? equipData?.metadata?.spriteId,
+      tier: previewTier >= EQUIPMENT_PREVIEW_TIER_MAX ? 5 : previewTier
+    });
+    if (portrait.tagName === 'BUTTON' && portrait.firstChild) {
+      portrait = portrait.firstChild;
+    }
+    applyEquipmentPreviewPortraitTier(portrait, previewTier);
+
+    portrait.style.display = 'block';
+    portrait.style.margin = '0';
+    portrait.style.justifySelf = 'center';
+    portrait.style.alignSelf = 'center';
+    portrait.style.imageRendering = 'pixelated';
+    portrait.querySelectorAll('img').forEach((img) => { img.style.imageRendering = 'pixelated'; });
+
+    const tooltipDiv = document.createElement('div');
+    tooltipDiv.className = FONT_CONSTANTS.SIZES.SMALL;
+    tooltipDiv.style.textAlign = 'left';
+    tooltipDiv.style.color = COLOR_CONSTANTS.SECONDARY;
+    tooltipDiv.style.margin = '0';
+    tooltipDiv.style.overflowY = 'auto';
+    tooltipDiv.style.maxHeight = '80px';
+    tooltipDiv.style.wordBreak = 'break-word';
+    tooltipDiv.style.width = '100%';
+    tooltipDiv.style.minWidth = '0';
+    tooltipDiv.style.justifySelf = 'stretch';
+    tooltipDiv.style.boxSizing = 'border-box';
+
+    if (equipData?.metadata?.description) {
+      tooltipDiv.innerHTML = equipData.metadata.description;
+    } else if (equipData?.metadata?.EffectComponent) {
+      const tooltipComponent = mountEquipmentPreviewEffect(
+        tooltipDiv,
+        equipData.metadata.EffectComponent,
+        previewTier,
+        equipDetailsTop
+      );
+      if (!tooltipComponent) {
+        tooltipDiv.textContent = 'No description available.';
+      } else {
+        equipDetailsTop._effectTooltipComponent = tooltipComponent;
+      }
+    } else {
+      tooltipDiv.textContent = 'No description available.';
+    }
+
+    const detailsBody = document.createElement('div');
+    detailsBody.style.cssText =
+      `${EQUIP_TOP_COL_LEFT} display:grid; grid-template-columns:1fr; grid-template-rows:40px auto; gap:8px; min-height:0; width:100%;`;
+    detailsBody.appendChild(portrait);
+    detailsBody.appendChild(tooltipDiv);
+    return detailsBody;
+  }
+
+  // "Player usage" numbers (right half of the details row).
+  function createEquipmentUsageBody(equipId) {
+    const usageBody = document.createElement('div');
+    usageBody.className = FONT_CONSTANTS.SIZES.SMALL;
+    usageBody.style.cssText =
+      `${EQUIP_TOP_COL_RIGHT} text-align:left; color:${COLOR_CONSTANTS.SECONDARY}; display:flex; flex-direction:column; align-items:stretch; justify-content:center; overflow-y:auto; min-height:0; line-height:1.15; width:100%;`;
+
+    const usage = getBoardConfigUsageStatsForEquipment(equipId);
+
+    if (usage.totalUsage <= 0) {
+      const noData = document.createElement('div');
+      noData.className = FONT_CONSTANTS.SIZES.SMALL;
+      noData.textContent = 'No saved configurations found.';
+      noData.style.fontStyle = 'italic';
+      noData.style.color = COLOR_CONSTANTS.SUBTLE;
+      usageBody.appendChild(noData);
+      return usageBody;
+    }
+
+    const usageCount = document.createElement('div');
+    usageCount.textContent = `Used ${usage.itemCount} times`;
+    usageCount.style.marginBottom = '1px';
+    usageBody.appendChild(usageCount);
+
+    const usagePct = document.createElement('div');
+    usagePct.textContent = `Usage percentage: ${usage.percentage}%`;
+    usagePct.style.marginBottom = '3px';
+    usageBody.appendChild(usagePct);
+
+    const usageDist = document.createElement('div');
+    usageDist.textContent = 'Stats distribution:';
+    usageDist.style.marginTop = '1px';
+    usageDist.style.marginBottom = '1px';
+    usageBody.appendChild(usageDist);
+
+    const statRows = document.createElement('div');
+    statRows.style.cssText = 'display:flex; flex-direction:row; gap:10px; margin-top:1px; align-items:center; flex-wrap:wrap;';
+
+    const makeStatRow = (iconPath, label, count) => {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex; align-items:center; gap:6px;';
+      const icon = document.createElement('img');
+      icon.src = iconPath;
+      icon.alt = label;
+      icon.style.cssText = 'width:14px; height:14px; image-rendering:pixelated; flex:0 0 auto;';
+      const text = document.createElement('span');
+      text.textContent = `${count}`;
+      row.appendChild(icon);
+      row.appendChild(text);
+      return row;
+    };
+
+    statRows.appendChild(makeStatRow(EQUIPMENT_STAT_ICONS.ad, 'Attack Damage', usage.statUsage.ad));
+    statRows.appendChild(makeStatRow(EQUIPMENT_STAT_ICONS.ap, 'Ability Power', usage.statUsage.ap));
+    statRows.appendChild(makeStatRow(EQUIPMENT_STAT_ICONS.hp, 'Health Points', usage.statUsage.hp));
+    usageBody.appendChild(statRows);
+    return usageBody;
+  }
+
+  // Top half of the details column: tier selector, details | usage grid.
+  function createEquipmentTopRow(equipId, equipData) {
+    // 3-col grid: left | centered divider | right
+    const topRow = document.createElement('div');
+    topRow.style.cssText =
+      'display:grid; grid-template-columns:3fr 8px 2fr; grid-template-rows:auto auto minmax(0,1fr); gap:6px 0; width:100%; max-width:100%; align-items:stretch; min-height:0; flex:1 1 auto; box-sizing:border-box; padding:0 10px 8px;';
+
+    const previewTier = clampEquipmentPreviewTier(equipmentPreviewTier);
+
+    const tierSelector = createEquipmentTierSelector(updateRightCol);
+    tierSelector.style.cssText += `${EQUIP_TOP_COL_LEFT} margin:0; height:100%;`;
+    topRow.appendChild(tierSelector);
+
+    const usageTitle = document.createElement('div');
+    usageTitle.className = FONT_CONSTANTS.SIZES.SMALL;
+    usageTitle.style.cssText =
+      `${EQUIP_TOP_COL_RIGHT} color:${COLOR_CONSTANTS.PRIMARY}; letter-spacing:0.02em; text-align:center; display:flex; align-items:center; justify-content:center; height:100%; width:100%;`;
+    usageTitle.textContent = 'Player usage';
+    topRow.appendChild(usageTitle);
+
+    topRow.appendChild(createEquipmentSeparator(`${EQUIP_TOP_COL_LEFT} margin:0 0 4px 0;`));
+    topRow.appendChild(createEquipmentSeparator(`${EQUIP_TOP_COL_RIGHT} margin:0 0 4px 0;`));
+
+    topRow.appendChild(createEquipmentDetailsBody(equipData, previewTier));
+    topRow.appendChild(createEquipmentUsageBody(equipId));
+
+    const colDivider = document.createElement('div');
+    colDivider.setAttribute('role', 'presentation');
+    colDivider.style.cssText =
+      `grid-column:2; grid-row:1/-1; width:1px; justify-self:center; align-self:stretch; background:${COLOR_CONSTANTS.DIVIDER}; min-height:0;`;
+    topRow.appendChild(colDivider);
+    return topRow;
+  }
+
+  // One titled, scrolling column of the "Found in" row.
+  function createEquipmentFoundInColumn(title, extraStyle = '') {
+    const column = document.createElement('div');
+    column.style.cssText =
+      `flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 3px; overflow: hidden; ${extraStyle}`;
+    const colTitle = document.createElement('div');
+    colTitle.className = FONT_CONSTANTS.SIZES.SMALL;
+    colTitle.textContent = title;
+    colTitle.style.cssText =
+      `color: ${COLOR_CONSTANTS.PRIMARY}; text-align: center; width: 100%; padding: 2px 4px 3px; border-bottom: 1px solid ${COLOR_CONSTANTS.DIVIDER_STRONG}; box-sizing: border-box;`;
+    const scroll = document.createElement('div');
+    scroll.style.cssText = `
+      width: 100%; flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 3px; box-sizing: border-box;
+      display: flex; flex-direction: column; gap: 2px;
+    `;
+    column.appendChild(colTitle);
+    column.appendChild(scroll);
+    return { column, scroll };
+  }
+
+  // Bottom half of the details column: maps where the item drops | wiki boosted maps.
+  function createEquipmentFoundInRow(equipId, equipName) {
+    const foundInRow = document.createElement('div');
+    foundInRow.style.cssText =
+      'display: flex; flex-direction: row; flex: 1 1 auto; min-height: 0; width: 100%; gap: 6px; align-items: stretch; box-sizing: border-box;';
+
+    const { column: mapsColumn, scroll: creatureUsageContainer } = createEquipmentFoundInColumn('Maps');
+    const creatureUsageData = getCreatureUsageForEquipment(equipId);
+
+    if (creatureUsageData.length === 0) {
+      creatureUsageContainer.appendChild(createEquipmentMutedNote('No map data', '6px'));
+    } else {
+      const mapsByRegion = {};
+      creatureUsageData.forEach((usage) => {
+        const regionName = usage.regionName || 'Other Maps';
+        if (!mapsByRegion[regionName]) {
+          mapsByRegion[regionName] = [];
+        }
+        mapsByRegion[regionName].push(usage);
+      });
+
+      Object.entries(mapsByRegion).forEach(([regionName, maps]) => {
+        creatureUsageContainer.appendChild(createCyclopediaRegionHeader(regionName));
+        maps.forEach((usage) => {
+          appendStyledMapRow(creatureUsageContainer, usage.mapName, usage.creatures.join(', '), usage.floors, usage.roomId);
+        });
+      });
+    }
+
+    const { column: boostedColumn, scroll: boostedScroll } = createEquipmentFoundInColumn(
+      'Boosted Maps',
+      `border-left: 1px solid ${COLOR_CONSTANTS.DIVIDER}; padding-left: 6px; box-sizing: border-box;`
+    );
+    const boostedWiki = GAME_DATA.HARDCODED_BOOSTED_MAP[equipName];
+    if (boostedWiki === false) {
+      boostedScroll.appendChild(createEquipmentMutedNote('—', '6px'));
+    } else if (typeof boostedWiki === 'string') {
+      const mapToRegionMeta = buildMapNameToRegionMeta();
+      const boostedByRegion = new Map();
+      boostedWiki
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .forEach((mapName) => {
+          const meta = mapToRegionMeta.get(mapName) || { regionName: 'Other Maps', regionIndex: Number.MAX_SAFE_INTEGER };
+          if (!boostedByRegion.has(meta.regionName)) {
+            boostedByRegion.set(meta.regionName, { regionIndex: meta.regionIndex, maps: [] });
+          }
+          boostedByRegion.get(meta.regionName).maps.push(mapName);
+        });
+      [...boostedByRegion.entries()]
+        .sort((a, b) => {
+          if (a[1].regionIndex !== b[1].regionIndex) {
+            return a[1].regionIndex - b[1].regionIndex;
+          }
+          return a[0].localeCompare(b[0]);
+        })
+        .forEach(([regionName, meta]) => {
+          boostedScroll.appendChild(createCyclopediaRegionHeader(regionName));
+          meta.maps.forEach((mapName) => {
+            appendStyledMapRow(boostedScroll, mapName, null, null, resolveCyclopediaRoomIdByName(mapName));
+          });
+        });
+    } else {
+      boostedScroll.appendChild(createEquipmentMutedNote('—', '12px', 'Not in wiki boosted map list'));
+    }
+
+    foundInRow.appendChild(mapsColumn);
+    foundInRow.appendChild(boostedColumn);
+    return foundInRow;
+  }
+
+  // Left column: details + "Found in" for the selected item.
+  function renderEquipmentDetails(equipName) {
+    equipDetailsTitleP.textContent = equipName;
+    creatureUsageTitleP.textContent = 'Found in:';
+
+    const equipId = resolveCyclopediaEquipmentGameId(equipName);
+    if (equipId == null) {
+      equipDetailsTop.appendChild(createCyclopediaEmptyState('Equipment item not found'));
+      equipDetailsBottom.appendChild(createCyclopediaEmptyState('Equipment item not found'));
+      return;
+    }
+
+    const equipData = globalThis.state.utils.getEquipment(equipId);
+    equipDetailsTop.appendChild(createEquipmentTopRow(equipId, equipData));
+    equipDetailsBottom.appendChild(createEquipmentFoundInRow(equipId, equipName));
+  }
+
+  // Right column: owned copies of the selected item, grouped by stat and tier.
+  function renderOwnedEquipment(equipName) {
+    const equipId = resolveCyclopediaEquipmentGameId(equipName);
+
+    const playerEquips = globalThis.state?.player?.getSnapshot?.().context?.equips || [];
+    const owned = playerEquips
+      .filter(e => e.gameId === equipId)
+      .sort((a, b) => {
+        if ((b.tier || 0) !== (a.tier || 0)) return (b.tier || 0) - (a.tier || 0);
+        const sa = (a.stat || '').toLowerCase();
+        const sb = (b.stat || '').toLowerCase();
+        return sa < sb ? -1 : sa > sb ? 1 : 0;
+      });
+
+    ownedEquipTitleP.textContent = `Owned ${equipName} (${owned.length})`;
+
+    if (owned.length === 0) {
+      const noEquipmentDiv = document.createElement('div');
+      noEquipmentDiv.className = FONT_CONSTANTS.SIZES.BODY;
+      noEquipmentDiv.textContent = 'You do not own this equipment item.';
+      // Center the text both horizontally and vertically
+      noEquipmentDiv.style.textAlign = 'center';
+      noEquipmentDiv.style.padding = '20px';
+      noEquipmentDiv.style.display = 'flex';
+      noEquipmentDiv.style.alignItems = 'center';
+      noEquipmentDiv.style.justifyContent = 'center';
+      noEquipmentDiv.style.height = '100%';
+      ownedEquipCol.appendChild(noEquipmentDiv);
+      return;
+    }
+
+    const statTypes = ['hp', 'ad', 'ap'];
+    const tierGroups = { hp: {}, ad: {}, ap: {} };
+    owned.forEach(eq => {
+      if (statTypes.includes(eq.stat)) {
+        const tier = eq.tier || 1;
+        if (!tierGroups[eq.stat][tier]) {
+          tierGroups[eq.stat][tier] = [];
+        }
+        tierGroups[eq.stat][tier].push(eq);
+      }
+    });
+
+    const createStatColumn = (gap = null) => {
+      const col = document.createElement('div');
+      col.style.flex = '1 1 0';
+      col.style.display = 'flex';
+      col.style.flexDirection = 'column';
+      col.style.alignItems = 'center';
+      col.style.justifyContent = 'flex-start';
+      if (gap) col.style.gap = gap;
+      return col;
+    };
+
+    const headerRow = document.createElement('div');
+    Object.assign(headerRow.style, {
+      display: 'flex', flexDirection: 'row', width: '100%', gap: '0'
+    });
+
+    statTypes.forEach(stat => {
+      const col = createStatColumn();
+
+      const labelWrap = document.createElement('div');
+      Object.assign(labelWrap.style, {
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        marginTop: '2px', marginBottom: '2px'
+      });
+
+      const icon = document.createElement('img');
+      icon.src = EQUIPMENT_STAT_ICONS[stat];
+      icon.alt = stat.toUpperCase();
+      Object.assign(icon.style, {
+        width: '22px', height: '22px', display: 'inline-block', marginRight: '4px',
+        imageRendering: 'pixelated'
+      });
+      labelWrap.appendChild(icon);
+
+      const countSpan = document.createElement('span');
+      countSpan.className = FONT_CONSTANTS.SIZES.BODY;
+      countSpan.textContent = `(${Object.values(tierGroups[stat]).reduce((sum, group) => sum + group.length, 0)})`;
+      labelWrap.appendChild(countSpan);
+
+      col.appendChild(labelWrap);
+      col.appendChild(createEquipmentSeparator('margin: 0px 0px;'));
+      headerRow.appendChild(col);
+    });
+
+    ownedEquipCol.appendChild(headerRow);
+
+    let eqData = null;
+    try {
+      if (equipId != null && globalThis.state?.utils?.getEquipment) {
+        eqData = globalThis.state.utils.getEquipment(equipId);
+      }
+    } catch (e) {
+      console.warn('[Cyclopedia] Error reading equipment data for owned list:', e);
+    }
+
+    const grid = document.createElement('div');
+    Object.assign(grid.style, {
+      display: 'flex', flexDirection: 'row', width: '100%', gap: '0',
+      overflowY: 'auto', flex: '1 1 0', minHeight: '0', height: 'auto'
+    });
+
+    statTypes.forEach(stat => {
+      const col = createStatColumn('4px');
+
+      for (let tier = 5; tier >= 1; tier--) {
+        const count = (tierGroups[stat][tier] || []).length;
+
+        const tierRow = document.createElement('div');
+        Object.assign(tierRow.style, {
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          gap: '8px', margin: '2px 0'
+        });
+
+        let portrait = api.ui.components.createItemPortrait({
+          itemId: eqData?.metadata?.spriteId,
+          stat: stat,
+          tier: tier
+        });
+        if (portrait.tagName === 'BUTTON' && portrait.firstChild) {
+          portrait = portrait.firstChild;
+        }
+        Object.assign(portrait.style, { margin: '0', display: 'block' });
+        tierRow.appendChild(portrait);
+
+        const countLabel = document.createElement('span');
+        countLabel.className = count === 0 ? FONT_CONSTANTS.SIZES.TINY : FONT_CONSTANTS.SIZES.SMALL;
+        countLabel.textContent = `x${count}`;
+        if (count === 0) {
+          Object.assign(countLabel.style, { color: COLOR_CONSTANTS.WARNING, opacity: '0.7' });
+        } else {
+          countLabel.style.color = COLOR_CONSTANTS.TEXT;
+        }
+        tierRow.appendChild(countLabel);
+        col.appendChild(tierRow);
+      }
+
+      grid.appendChild(col);
+    });
+
+    ownedEquipCol.appendChild(grid);
+  }
+
   function updateRightCol() {
     if (equipDetailsTop._effectTooltipComponent) {
       try {
@@ -16402,612 +16657,24 @@ function createEquipmentTabPage(selectedCreature, selectedEquipment, selectedInv
     equipDetailsTop.appendChild(equipDetailsTitle);
     equipDetailsBottom.innerHTML = '';
     equipDetailsBottom.appendChild(creatureUsageTitle);
-
-    // Get the current selectedEquipment value from the outer scope
-    // We need to access the updated value, not the captured one
-    let currentSelectedEquipment = null;
-    
-    // Try to get the current value from the outer scope
-    try {
-      // Access the global selectedEquipment variable
-      if (typeof window !== 'undefined' && window.cyclopediaSelectedEquipment !== undefined) {
-        currentSelectedEquipment = window.cyclopediaSelectedEquipment;
-      } else {
-        // Fallback to the captured value
-        currentSelectedEquipment = selectedEquipment;
-      }
-    } catch (e) {
-      currentSelectedEquipment = selectedEquipment;
-    }
-    
-    if (!currentSelectedEquipment) {
-      equipDetailsTitleP.textContent = 'Equipment Details';
-      equipDetailsTop.innerHTML += '<div class="' + FONT_CONSTANTS.SIZES.BODY + '" style="text-align:center;">Select equipment item to view details</div>';
-      creatureUsageTitleP.textContent = 'Found in:';
-      equipDetailsBottom.innerHTML += '<div class="' + FONT_CONSTANTS.SIZES.BODY + '" style="text-align:center;">Select equipment item to view locations</div>';
-    } else {
-      equipDetailsTitleP.textContent = currentSelectedEquipment;
-      creatureUsageTitleP.textContent = 'Found in:';
-      
-      // Find equipment ID by name
-      let equipId = resolveCyclopediaEquipmentGameId(currentSelectedEquipment);
-
-      if (equipId == null) {
-        equipDetailsTop.innerHTML += '<div class="' + FONT_CONSTANTS.SIZES.BODY + '" style="text-align:center;">Equipment item not found</div>';
-        equipDetailsBottom.innerHTML += '<div class="' + FONT_CONSTANTS.SIZES.BODY + '" style="text-align:center;">Equipment item not found</div>';
-      } else {
-        const equipData = globalThis.state.utils.getEquipment(equipId);
-        
-        // Equipment details + usage stats (3-col grid: left | centered divider | right)
-        const topRow = document.createElement('div');
-        topRow.style.cssText =
-          'display:grid; grid-template-columns:3fr 8px 2fr; grid-template-rows:auto auto minmax(0,1fr); gap:6px 0; width:100%; max-width:100%; align-items:stretch; min-height:0; flex:1 1 auto; box-sizing:border-box; padding:0 10px 8px;';
-
-        const equipTopColLeft = 'grid-column:1; min-width:0;';
-        const equipTopColRight = 'grid-column:3; min-width:0; padding-left:4px; box-sizing:border-box;';
-
-        const previewTier = clampEquipmentPreviewTier(equipmentPreviewTier);
-
-        const previewSpriteId = resolveEquipmentPreviewSpriteId(equipData?.metadata, previewTier);
-
-        let portrait = api.ui.components.createItemPortrait({
-          itemId: previewSpriteId ?? equipData?.metadata?.spriteId,
-          tier: previewTier >= EQUIPMENT_PREVIEW_TIER_MAX ? 5 : previewTier
-        });
-
-        if (portrait.tagName === 'BUTTON' && portrait.firstChild) {
-          portrait = portrait.firstChild;
-        }
-
-        applyEquipmentPreviewPortraitTier(portrait, previewTier);
-
-        portrait.style.display = 'block';
-        portrait.style.margin = '0';
-        portrait.style.justifySelf = 'center';
-        portrait.style.alignSelf = 'center';
-
-        const tooltipDiv = document.createElement('div');
-        tooltipDiv.className = FONT_CONSTANTS.SIZES.SMALL;
-        tooltipDiv.style.textAlign = 'left';
-        tooltipDiv.style.color = '#e6d7b0';
-        tooltipDiv.style.margin = '0';
-        tooltipDiv.style.overflowY = 'auto';
-        tooltipDiv.style.maxHeight = '80px';
-        tooltipDiv.style.wordBreak = 'break-word';
-        tooltipDiv.style.width = '100%';
-        tooltipDiv.style.minWidth = '0';
-        tooltipDiv.style.justifySelf = 'stretch';
-        tooltipDiv.style.boxSizing = 'border-box';
-
-        if (equipData?.metadata?.description) {
-          tooltipDiv.innerHTML = equipData.metadata.description;
-        } else if (equipData?.metadata?.EffectComponent) {
-          const tooltipComponent = mountEquipmentPreviewEffect(
-            tooltipDiv,
-            equipData.metadata.EffectComponent,
-            previewTier,
-            equipDetailsTop
-          );
-          if (!tooltipComponent) {
-            tooltipDiv.textContent = 'No description available.';
-          } else {
-            equipDetailsTop._effectTooltipComponent = tooltipComponent;
-          }
-        } else {
-          tooltipDiv.textContent = 'No description available.';
-        }
-
-        const tierSelector = createEquipmentTierSelector(updateRightCol);
-        tierSelector.style.cssText += `${equipTopColLeft} margin:0; height:100%;`;
-        topRow.appendChild(tierSelector);
-
-        const usageTitle = document.createElement('div');
-        usageTitle.className = FONT_CONSTANTS.SIZES.SMALL;
-        usageTitle.style.cssText =
-          `${equipTopColRight} font-weight:700; color:#ffe066; letter-spacing:0.02em; text-align:center; display:flex; align-items:center; justify-content:center; height:100%; width:100%;`;
-        usageTitle.textContent = 'Player usage';
-        topRow.appendChild(usageTitle);
-
-        const tierSeparator = document.createElement('div');
-        tierSeparator.className = 'separator my-2.5';
-        tierSeparator.setAttribute('role', 'none');
-        tierSeparator.style.cssText = `${equipTopColLeft} margin:0 0 4px 0;`;
-        topRow.appendChild(tierSeparator);
-
-        const usageSeparator = document.createElement('div');
-        usageSeparator.className = 'separator my-2.5';
-        usageSeparator.setAttribute('role', 'none');
-        usageSeparator.style.cssText = `${equipTopColRight} margin:0 0 4px 0;`;
-        topRow.appendChild(usageSeparator);
-
-        const detailsBody = document.createElement('div');
-        detailsBody.style.cssText =
-          `${equipTopColLeft} display:grid; grid-template-columns:1fr; grid-template-rows:40px auto; gap:8px; min-height:0; width:100%;`;
-        detailsBody.appendChild(portrait);
-        detailsBody.appendChild(tooltipDiv);
-        topRow.appendChild(detailsBody);
-
-        const usageBody = document.createElement('div');
-        usageBody.className = FONT_CONSTANTS.SIZES.SMALL;
-        usageBody.style.cssText =
-          `${equipTopColRight} text-align:left; color:#e6d7b0; display:flex; flex-direction:column; align-items:stretch; justify-content:center; overflow-y:auto; min-height:0; line-height:1.15; width:100%;`;
-
-        const usage = getBoardConfigUsageStatsForEquipment(equipId);
-
-        if (usage.totalUsage <= 0) {
-          const noData = document.createElement('div');
-          noData.textContent = 'No saved configurations found.';
-          noData.style.fontStyle = 'italic';
-          noData.style.color = '#aaa';
-          noData.style.fontSize = '12px';
-          usageBody.appendChild(noData);
-        } else {
-          const usageCount = document.createElement('div');
-          usageCount.textContent = `Used ${usage.itemCount} times`;
-          usageCount.style.marginBottom = '1px';
-          usageBody.appendChild(usageCount);
-
-          const usagePct = document.createElement('div');
-          usagePct.textContent = `Usage percentage: ${usage.percentage}%`;
-          usagePct.style.marginBottom = '3px';
-          usageBody.appendChild(usagePct);
-
-          const usageDist = document.createElement('div');
-          usageDist.textContent = 'Stats distribution:';
-          usageDist.style.marginTop = '1px';
-          usageDist.style.marginBottom = '1px';
-          usageBody.appendChild(usageDist);
-
-          const statRows = document.createElement('div');
-          statRows.style.cssText = 'display:flex; flex-direction:row; gap:10px; margin-top:1px; align-items:center; flex-wrap:wrap;';
-
-          const makeStatRow = (iconPath, label, count) => {
-            const row = document.createElement('div');
-            row.style.cssText = 'display:flex; align-items:center; gap:6px;';
-            const icon = document.createElement('img');
-            icon.src = iconPath;
-            icon.alt = label;
-            icon.style.cssText = 'width:14px; height:14px; image-rendering:pixelated; flex:0 0 auto;';
-            const text = document.createElement('span');
-            text.textContent = `${count}`;
-            row.appendChild(icon);
-            row.appendChild(text);
-            return row;
-          };
-
-          statRows.appendChild(makeStatRow('/assets/icons/attackdamage.png', 'Attack Damage', usage.statUsage.ad));
-          statRows.appendChild(makeStatRow('/assets/icons/abilitypower.png', 'Ability Power', usage.statUsage.ap));
-          statRows.appendChild(makeStatRow('/assets/icons/heal.png', 'Health Points', usage.statUsage.hp));
-          usageBody.appendChild(statRows);
-        }
-
-        topRow.appendChild(usageBody);
-
-        const colDivider = document.createElement('div');
-        colDivider.setAttribute('role', 'presentation');
-        colDivider.style.cssText =
-          'grid-column:2; grid-row:1/-1; width:1px; justify-self:center; align-self:stretch; background:#444; min-height:0;';
-        topRow.appendChild(colDivider);
-
-        equipDetailsTop.appendChild(topRow);
-
-        const foundInRow = document.createElement('div');
-        foundInRow.style.cssText =
-          'display: flex; flex-direction: row; flex: 1 1 auto; min-height: 0; width: 100%; gap: 6px; align-items: stretch; box-sizing: border-box;';
-
-        const mapsColumn = document.createElement('div');
-        mapsColumn.style.cssText =
-          'flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 3px; overflow: hidden;';
-        const mapsColTitle = document.createElement('div');
-        mapsColTitle.className = FONT_CONSTANTS.SIZES.SMALL;
-        mapsColTitle.textContent = 'Maps';
-        mapsColTitle.style.cssText =
-          'font-weight: 700; color: #ffe066; text-align: center; width: 100%; padding: 2px 4px 3px; border-bottom: 1px solid #555; box-sizing: border-box;';
-
-        const creatureUsageContainer = document.createElement('div');
-        creatureUsageContainer.style.cssText = `
-          width: 100%; flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 3px; box-sizing: border-box;
-          display: flex; flex-direction: column; gap: 2px;
-        `;
-
-        const creatureUsageData = getCreatureUsageForEquipment(equipId);
-
-        function openCreatureInBestiary(creatureNameRaw) {
-          openCreatureInBestiaryTab(creatureNameRaw, {
-            setActiveTabFn: setActiveTab,
-            clickListItemFn: cyclopediaClickListItem,
-            getTabPageFn: () => tabPages[1],
-            getInventoryTabPageFn: () => tabPages[3],
-            findBoxByTitleFn: cyclopediaFindBoxByTitle,
-            timerLabel: 'equipmentMapCreatureSelect'
-          });
-        }
-
-        function appendStyledMapRow(parentEl, mapName, creaturesLabel, floors) {
-          const usageDiv = document.createElement('div');
-          usageDiv.style.cssText = `
-                padding: 2px 4px; display: flex; flex-direction: column; gap: 2px;
-                margin-top: 1px; margin-bottom: 1px; line-height: 1;
-                letter-spacing: 0.0625rem; word-spacing: -0.1875rem;
-                color: rgb(255, 255, 255);
-              `;
-          usageDiv.className = FONT_CONSTANTS.SIZES.BODY;
-
-          const mapNameDiv = document.createElement('div');
-          mapNameDiv.className = FONT_CONSTANTS.SIZES.SMALL;
-          mapNameDiv.style.cssText = `
-                font-weight: bold; line-height: 1; letter-spacing: 0.0625rem;
-                word-spacing: -0.1875rem; margin: 0px; padding: 1px 4px;
-                border-radius: 4px; display: flex; justify-content: space-between;
-                align-items: center; text-align: left; cursor: pointer;
-                text-decoration: underline; background: transparent;
-                color: rgb(255, 255, 255);
-              `;
-          mapNameDiv.title = 'Click to go to this map';
-
-          const mapNameSpan = document.createElement('span');
-          mapNameSpan.style.cssText = `
-                flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis;
-                white-space: nowrap;
-              `;
-          mapNameSpan.textContent = mapName;
-          appendFloorPercentBadge(mapNameSpan, floors);
-
-          NavigationHandler.attachMapNavigation(mapNameDiv, mapName);
-
-          mapNameDiv.appendChild(mapNameSpan);
-          usageDiv.appendChild(mapNameDiv);
-
-          if (creaturesLabel) {
-            const creatureInfoDiv = document.createElement('div');
-            creatureInfoDiv.className = FONT_CONSTANTS.SIZES.SMALL;
-            creatureInfoDiv.style.cssText = `
-                color: rgb(170, 170, 170); line-height: 1;
-                letter-spacing: 0.0625rem; word-spacing: -0.1875rem;
-                margin-left: 6px; margin-top: 0px; font-style: italic;
-              `;
-            const names = String(creaturesLabel)
-              .split(',')
-              .map((s) => s.trim())
-              .filter(Boolean);
-            names.forEach((name, i) => {
-              if (i > 0) {
-                creatureInfoDiv.appendChild(document.createTextNode(', '));
-              }
-              const nameSpan = document.createElement('span');
-              nameSpan.textContent = name;
-              nameSpan.style.cursor = 'pointer';
-              nameSpan.style.textDecoration = 'underline';
-              nameSpan.style.textDecorationStyle = 'solid';
-              nameSpan.style.color = 'rgb(170, 170, 170)';
-              nameSpan.title = `Open ${name} in Bestiary`;
-              nameSpan.addEventListener('click', (e) => {
-                e.stopPropagation();
-                openCreatureInBestiary(name);
-              });
-              nameSpan.addEventListener('mouseenter', () => {
-                nameSpan.style.color = 'rgb(255, 255, 255)';
-              });
-              nameSpan.addEventListener('mouseleave', () => {
-                nameSpan.style.color = 'rgb(170, 170, 170)';
-              });
-              creatureInfoDiv.appendChild(nameSpan);
-            });
-            usageDiv.appendChild(creatureInfoDiv);
-          }
-
-          const separator = document.createElement('div');
-          separator.className = 'separator my-2.5';
-          separator.setAttribute('role', 'none');
-          separator.style.cssText = 'margin: 1px 0px;';
-          usageDiv.appendChild(separator);
-
-          parentEl.appendChild(usageDiv);
-        }
-
-        function appendRegionHeader(parentEl, regionName) {
-          const regionHeader = document.createElement('div');
-          regionHeader.className = FONT_CONSTANTS.SIZES.BODY;
-          regionHeader.style.cssText = `
-              font-weight: 700; color: var(--theme-text, #e6d7b0);
-              background: url("https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png");
-              border-width: 6px; border-style: solid; border-color: rgb(255, 224, 102);
-              border-image: url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill;
-              border-radius: 0px; box-sizing: border-box; text-align: center;
-              padding: 0px 4px; margin: 0px; display: block;
-            `;
-          regionHeader.textContent = regionName;
-          parentEl.appendChild(regionHeader);
-        }
-
-        function buildMapNameToRegionMeta() {
-          const roomNames = globalThis.state?.utils?.ROOM_NAME || {};
-          const regions = getCyclopediaRegionsList();
-          const map = new Map();
-          const indexByRegion = new Map();
-          let idx = 0;
-          regions.forEach((region) => {
-            if (!region?.rooms || !Array.isArray(region.rooms)) return;
-            const regionName = cyclopediaGetRegionDisplayName(region.id);
-            if (!indexByRegion.has(regionName)) {
-              indexByRegion.set(regionName, idx++);
-            }
-            region.rooms.forEach((room) => {
-              const roomCode = room?.id;
-              if (!roomCode) return;
-              const mapName = roomNames[roomCode] || roomCode;
-              map.set(mapName, { regionName, regionIndex: indexByRegion.get(regionName) });
-            });
-          });
-          return map;
-        }
-
-        if (creatureUsageData.length === 0) {
-          const noUsageDiv = document.createElement('div');
-          noUsageDiv.className = FONT_CONSTANTS.SIZES.SMALL;
-          noUsageDiv.style.textAlign = 'center';
-          noUsageDiv.style.color = '#888';
-          noUsageDiv.style.padding = '6px';
-          noUsageDiv.style.fontStyle = 'italic';
-          noUsageDiv.textContent = 'No map data';
-          creatureUsageContainer.appendChild(noUsageDiv);
-        } else {
-          const mapsByRegion = {};
-          creatureUsageData.forEach((usage) => {
-            const regionName = usage.regionName || 'Other Maps';
-            if (!mapsByRegion[regionName]) {
-              mapsByRegion[regionName] = [];
-            }
-            mapsByRegion[regionName].push(usage);
-          });
-
-          Object.entries(mapsByRegion).forEach(([regionName, maps]) => {
-            appendRegionHeader(creatureUsageContainer, regionName);
-
-            maps.forEach((usage) => {
-              appendStyledMapRow(creatureUsageContainer, usage.mapName, usage.creatures.join(', '), usage.floors);
-            });
-          });
-        }
-
-        mapsColumn.appendChild(mapsColTitle);
-        mapsColumn.appendChild(creatureUsageContainer);
-
-        const boostedColumn = document.createElement('div');
-        boostedColumn.style.cssText =
-          'flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 3px; overflow: hidden; border-left: 1px solid #444; padding-left: 6px; box-sizing: border-box;';
-        const boostedColTitle = document.createElement('div');
-        boostedColTitle.className = FONT_CONSTANTS.SIZES.SMALL;
-        boostedColTitle.textContent = 'Boosted Maps';
-        boostedColTitle.style.cssText =
-          'font-weight: 700; color: #ffe066; text-align: center; width: 100%; padding: 2px 4px 3px; border-bottom: 1px solid #555; box-sizing: border-box;';
-
-        const boostedScroll = document.createElement('div');
-        boostedScroll.style.cssText = `
-          width: 100%; flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 3px; box-sizing: border-box;
-          display: flex; flex-direction: column; gap: 2px;
-        `;
-
-        const boostedWiki = GAME_DATA.HARDCODED_BOOSTED_MAP[currentSelectedEquipment];
-        if (boostedWiki === false) {
-          const noBoosted = document.createElement('div');
-          noBoosted.className = FONT_CONSTANTS.SIZES.SMALL;
-          noBoosted.style.textAlign = 'center';
-          noBoosted.style.color = '#888';
-          noBoosted.style.padding = '6px';
-          noBoosted.style.fontStyle = 'italic';
-          noBoosted.textContent = '—';
-          boostedScroll.appendChild(noBoosted);
-        } else if (typeof boostedWiki === 'string') {
-          const mapToRegionMeta = buildMapNameToRegionMeta();
-          const boostedByRegion = new Map();
-          boostedWiki
-            .split(',')
-            .map((s) => s.trim())
-            .filter(Boolean)
-            .forEach((mapName) => {
-              const meta = mapToRegionMeta.get(mapName) || { regionName: 'Other Maps', regionIndex: Number.MAX_SAFE_INTEGER };
-              if (!boostedByRegion.has(meta.regionName)) {
-                boostedByRegion.set(meta.regionName, { regionIndex: meta.regionIndex, maps: [] });
-              }
-              boostedByRegion.get(meta.regionName).maps.push(mapName);
-            });
-          [...boostedByRegion.entries()]
-            .sort((a, b) => {
-              if (a[1].regionIndex !== b[1].regionIndex) {
-                return a[1].regionIndex - b[1].regionIndex;
-              }
-              return a[0].localeCompare(b[0]);
-            })
-            .forEach(([regionName, meta]) => {
-              appendRegionHeader(boostedScroll, regionName);
-              meta.maps.forEach((mapName) => {
-                appendStyledMapRow(boostedScroll, mapName, null);
-              });
-            });
-        } else {
-          const unk = document.createElement('div');
-          unk.className = FONT_CONSTANTS.SIZES.SMALL;
-          unk.style.textAlign = 'center';
-          unk.style.color = '#888';
-          unk.style.padding = '12px';
-          unk.style.fontStyle = 'italic';
-          unk.textContent = '—';
-          unk.title = 'Not in wiki boosted map list';
-          boostedScroll.appendChild(unk);
-        }
-
-        boostedColumn.appendChild(boostedColTitle);
-        boostedColumn.appendChild(boostedScroll);
-
-        foundInRow.appendChild(mapsColumn);
-        foundInRow.appendChild(boostedColumn);
-        equipDetailsBottom.appendChild(foundInRow);
-      }
-    }
-
     ownedEquipCol.innerHTML = '';
     ownedEquipCol.appendChild(ownedEquipTitle);
 
+    // The tab nav keeps window.cyclopediaSelectedEquipment current; the captured argument can be stale.
+    const currentSelectedEquipment = window.cyclopediaSelectedEquipment !== undefined
+      ? window.cyclopediaSelectedEquipment
+      : selectedEquipment;
+
     if (!currentSelectedEquipment) {
+      equipDetailsTitleP.textContent = 'Equipment Details';
+      equipDetailsTop.appendChild(createCyclopediaEmptyState('Select equipment item to view details'));
+      creatureUsageTitleP.textContent = 'Found in:';
+      equipDetailsBottom.appendChild(createCyclopediaEmptyState('Select equipment item to view locations'));
       ownedEquipTitleP.textContent = 'Owned Equipment';
-      ownedEquipCol.innerHTML += '<div class="' + FONT_CONSTANTS.SIZES.BODY + '" style="text-align:center;">Select equipment item to view owned</div>';
+      ownedEquipCol.appendChild(createCyclopediaEmptyState('Select equipment item to view owned'));
     } else {
-      const equipId = resolveCyclopediaEquipmentGameId(currentSelectedEquipment);
-
-      const playerEquips = globalThis.state?.player?.getSnapshot?.().context?.equips || [];
-      let owned = playerEquips.filter(e => e.gameId === equipId);
-      owned = owned.sort((a, b) => {
-        if ((b.tier || 0) !== (a.tier || 0)) return (b.tier || 0) - (a.tier || 0);
-        if ((a.stat || '').toLowerCase() < (b.stat || '').toLowerCase()) return -1;
-        if ((a.stat || '').toLowerCase() > (b.stat || '').toLowerCase()) return 1;
-        return 0;
-      });
-
-      ownedEquipTitleP.textContent = `Owned ${currentSelectedEquipment} (${owned.length})`;
-
-      if (owned.length === 0) {
-        const noEquipmentDiv = document.createElement('div');
-        noEquipmentDiv.className = FONT_CONSTANTS.SIZES.BODY;
-        noEquipmentDiv.textContent = 'You do not own this equipment item.';
-        // Center the text both horizontally and vertically
-        noEquipmentDiv.style.textAlign = 'center';
-        noEquipmentDiv.style.padding = '20px';
-        noEquipmentDiv.style.display = 'flex';
-        noEquipmentDiv.style.alignItems = 'center';
-        noEquipmentDiv.style.justifyContent = 'center';
-        noEquipmentDiv.style.height = '100%';
-        ownedEquipCol.appendChild(noEquipmentDiv);
-      } else {
-        const statTypes = ['hp', 'ad', 'ap'];
-        const statIcons = {
-          hp: '/assets/icons/heal.png',
-          ad: '/assets/icons/attackdamage.png',
-          ap: '/assets/icons/abilitypower.png'
-        };
-
-        const tierGroups = { hp: {}, ad: {}, ap: {} };
-        owned.forEach(eq => {
-          if (statTypes.includes(eq.stat)) {
-            const tier = eq.tier || 1;
-            if (!tierGroups[eq.stat][tier]) {
-              tierGroups[eq.stat][tier] = [];
-            }
-            tierGroups[eq.stat][tier].push(eq);
-          }
-        });
-
-        const headerRow = document.createElement('div');
-        Object.assign(headerRow.style, {
-          display: 'flex', flexDirection: 'row', width: '100%', gap: '0'
-        });
-
-        statTypes.forEach(stat => {
-          const col = document.createElement('div');
-          col.style.flex = '1 1 0';
-          col.style.display = 'flex';
-          col.style.flexDirection = 'column';
-          col.style.alignItems = 'center';
-          col.style.justifyContent = 'flex-start';
-
-          const labelWrap = document.createElement('div');
-          Object.assign(labelWrap.style, {
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            marginTop: '2px', marginBottom: '2px'
-          });
-
-          const icon = document.createElement('img');
-          icon.src = statIcons[stat];
-          icon.alt = stat.toUpperCase();
-          Object.assign(icon.style, {
-            width: '22px', height: '22px', display: 'inline-block', marginRight: '4px'
-          });
-          labelWrap.appendChild(icon);
-
-          const countSpan = document.createElement('span');
-          countSpan.className = FONT_CONSTANTS.SIZES.BODY;
-          countSpan.textContent = `(${Object.values(tierGroups[stat]).reduce((sum, group) => sum + group.length, 0)})`;
-          labelWrap.appendChild(countSpan);
-
-          col.appendChild(labelWrap);
-
-          const sep = document.createElement('div');
-          sep.className = 'separator my-2.5';
-          sep.setAttribute('role', 'none');
-          sep.style.margin = '0px 0px';
-          col.appendChild(sep);
-
-          headerRow.appendChild(col);
-        });
-
-        ownedEquipCol.appendChild(headerRow);
-
-        const grid = document.createElement('div');
-        Object.assign(grid.style, {
-          display: 'flex', flexDirection: 'row', width: '100%', gap: '0',
-          overflowY: 'auto', flex: '1 1 0', minHeight: '0', height: 'auto'
-        });
-
-        statTypes.forEach(stat => {
-          const col = document.createElement('div');
-          col.style.flex = '1 1 0';
-          col.style.display = 'flex';
-          col.style.flexDirection = 'column';
-          col.style.alignItems = 'center';
-          col.style.justifyContent = 'flex-start';
-          col.style.gap = '4px';
-
-          for (let tier = 5; tier >= 1; tier--) {
-            const tierGroup = tierGroups[stat][tier] || [];
-            const count = tierGroup.length;
-
-            const tierRow = document.createElement('div');
-            Object.assign(tierRow.style, {
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              gap: '8px', margin: '2px 0'
-            });
-
-            let eqData = null;
-            try {
-              if (equipId != null && globalThis.state?.utils?.getEquipment) {
-                eqData = globalThis.state.utils.getEquipment(equipId);
-              }
-            } catch (e) {
-      console.warn('[Cyclopedia] Error in creature ownership check:', e);
-    }
-
-            let portrait = api.ui.components.createItemPortrait({
-              itemId: eqData?.metadata?.spriteId,
-              stat: stat,
-              tier: tier
-            });
-
-            if (portrait.tagName === 'BUTTON' && portrait.firstChild) {
-              portrait = portrait.firstChild;
-            }
-
-            Object.assign(portrait.style, { margin: '0', display: 'block' });
-            tierRow.appendChild(portrait);
-
-            const countLabel = document.createElement('span');
-            countLabel.className = count === 0 ? FONT_CONSTANTS.SIZES.TINY : FONT_CONSTANTS.SIZES.SMALL;
-            countLabel.textContent = `x${count}`;
-
-            if (count === 0) {
-              Object.assign(countLabel.style, { color: '#888', opacity: '0.7' });
-            } else {
-              countLabel.style.color = COLOR_CONSTANTS.TEXT;
-            }
-
-            tierRow.appendChild(countLabel);
-            col.appendChild(tierRow);
-          }
-
-          grid.appendChild(col);
-        });
-
-        ownedEquipCol.appendChild(grid);
-      }
+      renderEquipmentDetails(currentSelectedEquipment);
+      renderOwnedEquipment(currentSelectedEquipment);
     }
     rightCol._relayoutStackableColumns?.();
   }
@@ -17033,16 +16700,11 @@ function createEquipmentTabPage(selectedCreature, selectedEquipment, selectedInv
     const byName = new Map();
     let total = 0;
     try {
-      const playerContext = globalThis.state?.player?.getSnapshot?.().context;
+      const { context: playerContext, rooms } = getCyclopediaBoardConfigRooms();
       const equips = Array.isArray(playerContext?.equips) ? playerContext.equips : [];
-      const boardConfigs = playerContext?.boardConfigs && typeof playerContext.boardConfigs === 'object'
-        ? playerContext.boardConfigs
-        : {};
       const equipLookup = new Map(equips.map((e) => [e.id, e.gameId]));
       const equipGameIdSet = new Set(equips.map((e) => e.gameId));
-      Object.entries(boardConfigs).forEach(([roomCode, cfgs]) => {
-        if (!Array.isArray(cfgs)) return;
-        if (isDynamicEventMap(roomCode)) return;
+      rooms.forEach(([, cfgs]) => {
         cfgs.forEach((cfg) => {
           const gid = resolveConfigEquipmentGameId(cfg, equipLookup, equipGameIdSet);
           if (gid == null) return;
@@ -17093,66 +16755,27 @@ function createEquipmentTabPage(selectedCreature, selectedEquipment, selectedInv
   const equipmentUsageSnapshot = getEquipmentUsageSnapshot();
 
   function buildEquipmentRowMeta(box, usageSnapshot) {
-    const rows = Array.from(box.querySelectorAll('div.pixel-font-16'))
-      .filter((el) => !!el.querySelector('span'));
-    return rows.map((row, idx) => {
-      if (!row.dataset.originalOrder) {
-        row.dataset.originalOrder = String(idx);
-      }
-      const span = row.querySelector('span');
-      if (span && !span.dataset.baseLabel) {
-        span.dataset.baseLabel = (span.textContent || '').trim();
-      }
-      const label = (span?.dataset.baseLabel || span?.textContent || row.textContent || '').trim();
-      return {
-        row,
-        idx,
-        span,
-        label,
-        labelNorm: label.toLowerCase(),
-        usageCount: getEquipmentUsageCountByName(label, usageSnapshot)
-      };
-    });
+    return buildCyclopediaListRowMeta(box, (label) => ({
+      usageCount: getEquipmentUsageCountByName(label, usageSnapshot)
+    }));
   }
 
   let equipmentRowMetaCache = null;
 
   function filterEquipmentBoxItems(searchTerm, mode = 'name') {
-    const q = (searchTerm || '').toLowerCase();
     if (!equipmentRowMetaCache) {
       equipmentRowMetaCache = buildEquipmentRowMeta(equipmentBox, equipmentUsageSnapshot);
     }
-    const rowMeta = equipmentRowMetaCache;
-
-    const listGrid = equipmentBox.querySelector('div[data-nopadding="true"]');
-    if (mode === 'usage' && listGrid) {
-      rowMeta
-        .slice()
-        .sort((a, b) => {
-          if (b.usageCount !== a.usageCount) return b.usageCount - a.usageCount;
-          return a.labelNorm.localeCompare(b.labelNorm);
-        })
-        .forEach((m) => listGrid.appendChild(m.row));
-    } else if (mode === 'name' && listGrid) {
-      rowMeta
-        .slice()
-        .sort((a, b) => Number(a.row.dataset.originalOrder) - Number(b.row.dataset.originalOrder))
-        .forEach((m) => listGrid.appendChild(m.row));
-    }
-
-    let visibleCount = 0;
-    rowMeta.forEach((meta) => {
-      if (meta.span) {
+    return filterCyclopediaListRows(equipmentBox, equipmentRowMetaCache, searchTerm, {
+      comparator: mode === 'usage'
+        ? (a, b) => (b.usageCount - a.usageCount) || a.labelNorm.localeCompare(b.labelNorm)
+        : null,
+      formatLabel: (meta) => {
+        if (mode !== 'usage') return meta.label;
         const pct = equipmentUsageSnapshot.total > 0 ? Math.floor((meta.usageCount / equipmentUsageSnapshot.total) * 100) : 0;
-        meta.span.textContent = mode === 'usage' ? `${pct}% ${meta.label}` : meta.label;
+        return `${pct}% ${meta.label}`;
       }
-      const nameMatch = !q || meta.labelNorm.includes(q);
-      const usageMatch = true;
-      const isVisible = nameMatch && usageMatch;
-      meta.row.style.display = isVisible ? '' : 'none';
-      if (isVisible) visibleCount++;
     });
-    return visibleCount;
   }
 
   const noResultsEquipment = createNoResultsMessage('No results in Equipment');
@@ -17605,7 +17228,7 @@ function createInventoryTabPage(selectedCreature, selectedEquipment, selectedInv
     if (noRarityKeys.includes(itemKey)) rarity = '';
 
     if (!iconSrc) {
-      return `<div style="width: ${size}px; height: ${size}px; background: #333; border-radius: 4px; color: #666; font-size: 10px; display: flex; align-items: center; justify-content: center;">?</div>`;
+      return `<div class="${FONT_CONSTANTS.SIZES.SMALL}" style="width: ${size}px; height: ${size}px; background: #333; border-radius: 4px; color: ${COLOR_CONSTANTS.UNOWNED}; display: flex; align-items: center; justify-content: center;">?</div>`;
     }
 
     return `
@@ -17617,19 +17240,41 @@ function createInventoryTabPage(selectedCreature, selectedEquipment, selectedInv
     `;
   };
 
+  // Header shared by a variant card and the item details view: icon, rarity-coloured name, rarity label.
+  const renderInventoryItemHeader = ({ itemKey, displayName, realIcon, realRarity, count, rarityColors }) => {
+    const isNoRarity = GAME_DATA.NO_RARITY_KEYS.includes(itemKey);
+    const nameColor = isNoRarity ? COLOR_CONSTANTS.TEXT : (rarityColors[realRarity] || COLOR_CONSTANTS.TEXT);
+    const raritySpan = isNoRarity
+      ? ''
+      : `<div class="${FONT_CONSTANTS.SIZES.SMALL}" style="color: ${rarityColors[realRarity] || COLOR_CONSTANTS.UNOWNED};">${getRarityDisplayText(realRarity)}</div>`;
+    const iconHtml = realIcon && realIcon.startsWith('sprite://')
+      ? renderSpriteIcon(realIcon, realRarity, 28)
+      : renderStyledImgPortrait(realIcon || '', displayName, realRarity, 28, count, itemKey);
+    return `
+      <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
+        <div style="width: 40px; height: 40px; display: flex; align-items: center; justify-content: center;">
+          ${iconHtml}
+        </div>
+        <div style="flex: 1; min-width: 0;">
+          <h3 class="${FONT_CONSTANTS.SIZES.TITLE}" style="margin: 0; font-weight: normal; color: ${nameColor};">${displayName}</h3>
+          ${raritySpan}
+        </div>
+      </div>
+    `;
+  };
+
   const renderItemVariants = (categoryName) => {
     const variants = INVENTORY_CONFIG.variants[categoryName] || [];
     const currencyKeys = GAME_DATA.CURRENCY_KEYS;
     
     if (variants.length === 0) {
       return `
-        <div style="display: flex; justify-content: center; align-items: center; height: 100%; color: ${COLOR_CONSTANTS.TEXT}; font-weight: bold; text-align: center;">
+        <div class="${FONT_CONSTANTS.SIZES.BODY}" style="display: flex; justify-content: center; align-items: center; height: 100%; color: ${COLOR_CONSTANTS.TEXT}; text-align: center;">
           No variants found for ${categoryName}
         </div>
       `;
     }
 
-    const noRarityKeys = GAME_DATA.NO_RARITY_KEYS;
     const inventory = getPlayerInventory();
 
     const variantsHtml = variants.map(itemKey => {
@@ -17653,36 +17298,25 @@ function createInventoryTabPage(selectedCreature, selectedEquipment, selectedInv
         
         const obtainMethod = getItemObtainMethod(itemKey);
         const rarityColors = INVENTORY_CONFIG.rarityColors;
-        const isNoRarity = noRarityKeys.includes(itemKey);
-        const nameColor = isNoRarity ? COLOR_CONSTANTS.TEXT : (rarityColors[realRarity] || '#fff');
-        const raritySpan = isNoRarity ? '' : `<span style="color: ${rarityColors[realRarity] || '#666'}; font-size: 11px;">${getRarityDisplayText(realRarity)}</span>`;
 
         const upgradeKeys = GAME_DATA.UPGRADE_KEYS;
         const upgradeableItems = (inventoryDatabase && inventoryDatabase.upgradeableItems) || [];
         const isUpgradeable = upgradeableItems.includes(itemKey);
         const formattedCount = currencyKeys.includes(itemKey)
-          ? `<span style=\"color: #ffe066; font-weight: bold; cursor: help;\" title=\"${count.toLocaleString()}\">${FormatUtils.currency(count)}</span>`
+          ? `<span style=\"color: ${COLOR_CONSTANTS.PRIMARY}; cursor: help;\" title=\"${count.toLocaleString()}\">${FormatUtils.currency(count)}</span>`
           : upgradeKeys.includes(itemKey)
-          ? `<span style=\"color: #888; font-style: italic;\">${isUpgradeable ? 'Upgradeable' : 'One-time purchase'}</span>`
-          : `<span style=\"color: #ffe066; font-weight: bold;\">${count}</span>`;
+          ? `<span style=\"color: ${COLOR_CONSTANTS.WARNING}; font-style: italic;\">${isUpgradeable ? 'Upgradeable' : 'One-time purchase'}</span>`
+          : `<span style=\"color: ${COLOR_CONSTANTS.PRIMARY};\">${count}</span>`;
 
         return `
           <div style="background: rgba(255,255,255,0.03); border: 1px solid #333; border-radius: 6px; padding: 16px; margin-bottom: 12px; cursor: pointer;" 
                onclick="window.cyclopediaSelectVariant && window.cyclopediaSelectVariant('${itemKey}')"
                onmouseenter="this.style.background='rgba(255,255,255,0.08)'"
                onmouseleave="this.style.background='rgba(255,255,255,0.03)'">
-            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
-              <div style="width: 40px; height: 40px; display: flex; align-items: center; justify-content: center;">
-                ${realIcon && realIcon.startsWith('sprite://') ? renderSpriteIcon(realIcon, realRarity, 28) : renderStyledImgPortrait(realIcon || '', displayName, realRarity, 28, count, itemKey)}
-              </div>
-              <div style="flex: 1;">
-                <h4 style="margin: 0; color: ${nameColor}; font-size: 16px; font-weight: bold;">${displayName}</h4>
-                ${raritySpan}
-              </div>
-            </div>
-            <div style="color: #e6d7b0; font-size: 12px; line-height: 1.3; margin-bottom: 8px;">${description}</div>
-            <div style="display: flex; justify-content: space-between; align-items: center; font-size: 11px;">
-              <span style="color: #888;">${obtainMethod || 'Unknown source'}</span>
+            ${renderInventoryItemHeader({ itemKey, displayName, realIcon, realRarity, count, rarityColors })}
+            <div class="${FONT_CONSTANTS.SIZES.SMALL}" style="color: ${COLOR_CONSTANTS.SECONDARY}; line-height: 1.3; margin-bottom: 8px;">${description}</div>
+            <div class="${FONT_CONSTANTS.SIZES.SMALL}" style="display: flex; justify-content: space-between; align-items: center;">
+              <span style="color: ${COLOR_CONSTANTS.WARNING};">${obtainMethod || 'Unknown source'}</span>
               ${formattedCount}
             </div>
           </div>
@@ -17690,8 +17324,8 @@ function createInventoryTabPage(selectedCreature, selectedEquipment, selectedInv
       } catch (error) {
 
         return `
-          <div style="background: rgba(255,0,0,0.1); border: 1px solid #f00; border-radius: 6px; padding: 16px; margin-bottom: 12px;">
-            <div style="color: #f00; font-size: 12px;">Error loading ${itemKey}</div>
+          <div style="background: rgba(255,0,0,0.1); border: 1px solid ${COLOR_CONSTANTS.ERROR}; border-radius: 6px; padding: 16px; margin-bottom: 12px;">
+            <div class="${FONT_CONSTANTS.SIZES.SMALL}" style="color: ${COLOR_CONSTANTS.ERROR};">Error loading ${itemKey}</div>
           </div>
         `;
       }
@@ -17700,10 +17334,10 @@ function createInventoryTabPage(selectedCreature, selectedEquipment, selectedInv
     return `
       <div style="display: flex; flex-direction: column; min-height: 0;">
         <div style="padding: 16px; border-bottom: 1px solid #333; background: rgba(255,255,255,0.02);">
-          <h3 style="margin: 0; color: ${COLOR_CONSTANTS.TEXT}; font-size: 18px; font-weight: bold;">
+          <h3 class="${FONT_CONSTANTS.SIZES.TITLE}" style="margin: 0; font-weight: normal; color: ${COLOR_CONSTANTS.TEXT};">
             ${categoryName}
           </h3>
-          <span style="color: #888; font-size: 12px;">(${variants.length} variants)</span>
+          <span class="${FONT_CONSTANTS.SIZES.SMALL}" style="color: ${COLOR_CONSTANTS.WARNING};">(${variants.length} variants)</span>
         </div>
         <div style="flex: 1; overflow-y: auto; padding: 16px; min-height: 0;">
           ${variantsHtml}
@@ -17746,10 +17380,6 @@ function createInventoryTabPage(selectedCreature, selectedEquipment, selectedInv
 
       const obtainMethod = getItemObtainMethod(itemKey);
 
-      const noRarityKeys = GAME_DATA.NO_RARITY_KEYS;
-      const isNoRarity = noRarityKeys.includes(itemKey);
-      const nameColor = isNoRarity ? COLOR_CONSTANTS.TEXT : (rarityColors[realRarity] || '#fff');
-      const raritySpan = isNoRarity ? '' : `<span style="color: ${rarityColors[realRarity] || '#666'}; font-size: 12px;">${getRarityDisplayText(realRarity)}</span>`;
 
       const currencyKeys = GAME_DATA.CURRENCY_KEYS;
       const upgradeKeys = GAME_DATA.UPGRADE_KEYS;
@@ -17763,31 +17393,23 @@ function createInventoryTabPage(selectedCreature, selectedEquipment, selectedInv
 
       return `
         <div style="display: flex; flex-direction: column; gap: 16px; padding: 16px; min-height: 0; overflow-y: auto;">
-          <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
-            <div style="width: 40px; height: 40px; display: flex; align-items: center; justify-content: center;">
-              ${realIcon && realIcon.startsWith('sprite://') ? renderSpriteIcon(realIcon, realRarity, 28) : renderStyledImgPortrait(realIcon || '', displayName, realRarity, 28, count, itemKey)}
-            </div>
-            <div>
-              <h3 style="margin: 0; color: ${nameColor}; font-size: 18px; font-weight: bold;">${displayName}</h3>
-              ${raritySpan}
-            </div>
-          </div>
-          <div style="background: rgba(255,255,255,0.05); padding: 12px; border-radius: 4px; border-left: 3px solid ${rarityColors[realRarity] || '#666'};">
-            <p style="margin: 0; color: #e6d7b0; line-height: 1.4; font-size: 14px;">${description}</p>
+          ${renderInventoryItemHeader({ itemKey, displayName, realIcon, realRarity, count, rarityColors })}
+          <div style="background: rgba(255,255,255,0.05); padding: 12px; border-radius: 4px; border-left: 3px solid ${rarityColors[realRarity] || COLOR_CONSTANTS.UNOWNED};">
+            <p class="${FONT_CONSTANTS.SIZES.SMALL}" style="margin: 0; color: ${COLOR_CONSTANTS.SECONDARY}; line-height: 1.4;">${description}</p>
           </div>
           <div style="display: flex; flex-direction: column; gap: 8px;">
             <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #333;">
-              <span style="color: #888; font-size: 12px;">Category:</span>
-              <span style="color: #e6d7b0; font-size: 12px;">${category}</span>
+              <span class="${FONT_CONSTANTS.SIZES.SMALL}" style="color: ${COLOR_CONSTANTS.WARNING};">Category:</span>
+              <span class="${FONT_CONSTANTS.SIZES.SMALL}" style="color: ${COLOR_CONSTANTS.SECONDARY};">${category}</span>
             </div>
             <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #333;">
-              <span style="color: #888; font-size: 12px;">Obtain:</span>
-              <span style="color: #e6d7b0; font-size: 12px;">${obtainMethod}</span>
+              <span class="${FONT_CONSTANTS.SIZES.SMALL}" style="color: ${COLOR_CONSTANTS.WARNING};">Obtain:</span>
+              <span class="${FONT_CONSTANTS.SIZES.SMALL}" style="color: ${COLOR_CONSTANTS.SECONDARY};">${obtainMethod}</span>
             </div>
             <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #333;">
-              <span style="color: #888; font-size: 12px;">${upgradeKeys.includes(itemKey) ? 'Status:' : 'In Your Inventory:'}</span>
+              <span class="${FONT_CONSTANTS.SIZES.SMALL}" style="color: ${COLOR_CONSTANTS.WARNING};">${upgradeKeys.includes(itemKey) ? 'Status:' : 'In Your Inventory:'}</span>
               <span 
-                style="color: #ffe066; font-size: 16px; font-weight: bold;"
+                class="${FONT_CONSTANTS.SIZES.BODY}" style="color: ${COLOR_CONSTANTS.PRIMARY};"
               >
                 ${formattedCount}
               </span>
@@ -17799,7 +17421,7 @@ function createInventoryTabPage(selectedCreature, selectedEquipment, selectedInv
       console.error('[Cyclopedia] Error rendering item details:', error);
       return `
         <div style="display: flex; flex-direction: column; gap: 16px; padding: 16px; min-height: 0; overflow-y: auto;">
-          <div style="display: flex; justify-content: center; align-items: center; height: 100%; color: ${COLOR_CONSTANTS.TEXT}; font-weight: bold; text-align: center;">
+          <div class="${FONT_CONSTANTS.SIZES.BODY}" style="display: flex; justify-content: center; align-items: center; height: 100%; color: ${COLOR_CONSTANTS.TEXT}; text-align: center;">
             Error loading item details for ${itemKey}.<br>Inventory tooltips not available.
           </div>
         </div>
@@ -17906,7 +17528,7 @@ function createInventoryTabPage(selectedCreature, selectedEquipment, selectedInv
       errorBox.style.justifyContent = 'center';
       errorBox.style.alignItems = 'center';
       errorBox.style.color = COLOR_CONSTANTS.TEXT;
-      errorBox.style.fontWeight = 'bold';
+      errorBox.classList.add(FONT_CONSTANTS.SIZES.BODY);
       errorBox.style.textAlign = 'center';
       errorBox.innerHTML = 'Error loading inventory items.';
       leftCol._bottomBox = errorBox;
@@ -17955,11 +17577,11 @@ function createInventoryTabPage(selectedCreature, selectedEquipment, selectedInv
         const emptyMessage = selectedCategory === CYCLOPEDIA_GAZERS_CATEGORY
           ? 'Select a gazer to view details.'
           : 'Select an item category to view variants.';
-        rightCol.innerHTML = '<div class="' + FONT_CONSTANTS.SIZES.BODY + '" style="display:flex;justify-content:center;align-items:center;height:100%;width:100%;color:' + COLOR_CONSTANTS.TEXT + ';font-weight:bold;text-align:center;">' + emptyMessage + '</div>';
+        rightCol.innerHTML = '<div class="' + FONT_CONSTANTS.SIZES.BODY + '" style="display:flex;justify-content:center;align-items:center;height:100%;width:100%;color:' + COLOR_CONSTANTS.TEXT + ';text-align:center;">' + emptyMessage + '</div>';
       }
     } catch (error) {
       console.error('[Cyclopedia] Error updating right column:', error);
-      rightCol.innerHTML = '<div class="' + FONT_CONSTANTS.SIZES.BODY + '" style="display:flex;justify-content:center;align-items:center;height:100%;width:100%;color:' + COLOR_CONSTANTS.TEXT + ';font-weight:bold;text-align:center;">Error loading content.</div>';
+      rightCol.innerHTML = '<div class="' + FONT_CONSTANTS.SIZES.BODY + '" style="display:flex;justify-content:center;align-items:center;height:100%;width:100%;color:' + COLOR_CONSTANTS.TEXT + ';text-align:center;">Error loading content.</div>';
     }
   }
 
@@ -18107,7 +17729,7 @@ function centerPlayerSearchBoxContent(playerSearchBox) {
   }
 }
 
-function createCharactersTabPage(selectedCreature, selectedEquipment, selectedInventory, setSelectedCreature, setSelectedEquipment, setSelectedInventory, updateRightCol) {
+function createCharactersTabPage(selectedCreature, selectedEquipment, selectedInventory, setSelectedCreature, setSelectedEquipment, setSelectedInventory, updateRightCol, charactersTabNav = {}) {
   const { root: d, leftCol: col1, rightCol } = createCyclopediaTabShell({ rightColRow: true });
   const { col2, col3, sharedScrollContainer } = createCharactersTabColumns(col1, rightCol);
   const charactersColFrameBorder = {
@@ -18120,6 +17742,7 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
     const isStacked = getCharactersIsStacked();
     col3.style.display = 'flex';
     sharedScrollContainer.style.flexDirection = isStacked ? 'column' : 'row';
+    sharedScrollContainer.style.alignItems = '';
     sharedScrollContainer.style.overflowY = 'hidden';
     sharedScrollContainer.style.overflowX = 'hidden';
     col2.style.flex = '1 1 0';
@@ -18133,6 +17756,7 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
     col2.style.minHeight = '';
     col3.style.maxWidth = isStacked ? '100%' : '50%';
     col3.style.height = '100%';
+    col3.style.minHeight = '';
   }
 
   function applyCharactersLeaderboardsColumnLayout() {
@@ -18146,10 +17770,16 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
     col3.style.height = 'auto';
     col2.style.overflow = 'visible';
     col3.style.overflow = 'visible';
+    // Side by side: columns are as tall as their own content (at least the scroll box). With the default stretch they
+    // would only be as tall as the visible box, and the divider between them would end after the first screenful.
+    sharedScrollContainer.style.alignItems = isStacked ? '' : 'flex-start';
+    col2.style.minHeight = isStacked ? '' : '100%';
+    col3.style.minHeight = isStacked ? '' : '100%';
   }
 
   function applyCharactersRankingsColumnLayout() {
     col3.style.display = 'none';
+    sharedScrollContainer.style.alignItems = '';
     sharedScrollContainer.style.overflowY = 'hidden';
     sharedScrollContainer.style.overflowX = 'hidden';
     col2.style.flex = '1 1 0';
@@ -18167,10 +17797,6 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
 
   function showLoadingState(col2) {
     col2.innerHTML = renderCyclopediaProfileLoadingHtml();
-  }
-
-  function showErrorState(col2, message) {
-    col2.innerHTML = renderCyclopediaProfileErrorHtml(message, { showConnectionHint: true });
   }
 
   function createUserStatsContainer(profileData) {
@@ -18235,11 +17861,6 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
       }
 
       // Handle special categories
-      if (selectedCategory === 'Speedrun' || selectedCategory === 'Rank Points') {
-        await displaySpeedrunOrRankData(selectedCategory, playerState);
-        return;
-      }
-      
       if (selectedCategory === 'Leaderboards') {
         await displayCombinedLeaderboardsData(playerState);
         return;
@@ -18289,42 +17910,14 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
     } catch (error) {
       console.error('[Cyclopedia] Error displaying user stats:', error);
       
-      col2.innerHTML = `
-        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${COLOR_CONSTANTS.TEXT}; text-align: center; padding: 20px;">
-          <div style="font-size: 48px; margin-bottom: 16px;">⚠️</div>
-          <div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">Failed to Load Stats</div>
-          <div style="font-size: 14px; margin-bottom: 16px; color: #888;">Click to retry</div>
-          <button onclick="displayUserStats('${selectedCategory}')" style="background: #ffe066; color: #232323; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-weight: bold;">Retry</button>
-        </div>
-      `;
-    }
-  }
-
-  async function displaySpeedrunOrRankData(category, playerState) {
-    try {
-      const ROOM_NAMES = globalThis.state.utils.ROOM_NAME;
-      const roomsScoped = getYourRoomsForCyclopediaSeason(playerState.rooms || {});
-
-      let best, lbs, roomsHighscores;
-
-      // Always fetch fresh world records; fall back to the last good copy if the request fails
-      const bundle = await CyclopediaApi.fetchLeaderboardBundle();
-      if (bundle) {
-        ({ best, lbs, roomsHighscores } = bundle);
-        setCachedLeaderboardData('speedrun-rank', { best, lbs, roomsHighscores });
-      } else {
-        const cachedData = getCachedLeaderboardData('speedrun-rank');
-        if (cachedData) {
-          ({ best, lbs, roomsHighscores } = cachedData);
-        }
-      }
-
-      displayUserSpeedrunOrRankData(category, playerState.name, roomsScoped, ROOM_NAMES, best, roomsHighscores, col2);
-      updateSearchForSpeedrunOrRank(category, playerState.rooms || {}, ROOM_NAMES, best, roomsHighscores);
-
-    } catch (error) {
-      console.error('[Cyclopedia] Error displaying speedrun/rank data:', error);
-      col2.innerHTML = `<div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${COLOR_CONSTANTS.ERROR}; text-align: center; padding: 20px;"><div style="font-size: 48px; margin-bottom: 16px;">⚠️</div><div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">Failed to Load ${category} Data</div><div style="font-size: 14px; margin-bottom: 16px; color: #888;">Could not fetch game data</div><div style="font-size: 12px; color: #666;">Please check your internet connection and try again.</div></div>`;
+      col2.innerHTML = renderCyclopediaStatusHtml({
+        icon: '⚠️',
+        iconSize: 48,
+        title: 'Failed to Load Stats',
+        message: 'Click to retry',
+        extraHtml: `<button type="button" data-retry-user-stats class="focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular frame-1 active:frame-pressed-1 surface-regular gap-1 px-2 py-0.5 pb-[3px] ${FONT_CONSTANTS.SIZES.SMALL}" style="cursor: pointer;">Retry</button>`
+      });
+      col2.querySelector('[data-retry-user-stats]')?.addEventListener('click', () => displayUserStats(selectedCategory));
     }
   }
 
@@ -18355,7 +17948,7 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
 
     } catch (error) {
       console.error('[Cyclopedia] Error displaying combined leaderboards data:', error);
-      col2.innerHTML = `<div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${COLOR_CONSTANTS.ERROR}; text-align: center; padding: 20px;"><div style="font-size: 48px; margin-bottom: 16px;">⚠️</div><div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">Failed to Load Leaderboards Data</div><div style="font-size: 14px; margin-bottom: 16px; color: #888;">Could not fetch game data</div><div style="font-size: 12px; color: #666;">Please check your internet connection and try again.</div></div>`;
+      col2.innerHTML = renderCyclopediaStatusHtml({ icon: '⚠️', iconSize: 48, title: `Failed to Load Leaderboards Data`, message: `Could not fetch game data`, hint: `Please check your internet connection and try again.`, error: true });
     }
   }
 
@@ -18393,11 +17986,13 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
       let isLoadingRankings = false;
 
       const rankingsPanelFrame = 'url("https://bestiaryarena.com/_next/static/media/3-frame.87c349c1.png") 6 fill';
-      const rankingsSectionFrame = 'url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch';
+      const rankingsSectionFrame = `url("${CYCLOPEDIA_ASSETS.frame4}") 6 fill stretch`;
       const rankingsCellFrame = 'url("https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png") 4 fill';
-      const rankingsPlayerCol = 'minmax(150px, 250px)';
-      const rankingsGridColumns = `48px ${rankingsPlayerCol} 53px 53px 40px 48px 40px 40px 40px 40px 40px 40px 40px`;
-      const rankingsTableMinWidth = '672px';
+      // Column tracks in one place; the table's minimum width is derived from them.
+      const rankingsColumns = { rank: 48, playerMin: 150, playerMax: 250, rest: [53, 53, 40, 48, 40, 40, 40, 40, 40, 40, 40] };
+      const rankingsPlayerCol = `minmax(${rankingsColumns.playerMin}px, ${rankingsColumns.playerMax}px)`;
+      const rankingsGridColumns = [`${rankingsColumns.rank}px`, rankingsPlayerCol, ...rankingsColumns.rest.map((w) => `${w}px`)].join(' ');
+      const rankingsTableMinWidth = `${rankingsColumns.rank + rankingsColumns.playerMin + rankingsColumns.rest.reduce((sum, w) => sum + w, 0)}px`;
 
       const containerDiv = document.createElement('div');
       Object.assign(containerDiv.style, {
@@ -18429,7 +18024,7 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
         border-radius: 6px;
         box-shadow: 0 0 15px rgba(0, 0, 0, 0.45);
         overflow: hidden;
-        font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif;
+        font-family: ${CYCLOPEDIA_STATS_FONT};
         font-size: 10px;
         position: relative;
         flex: 1;
@@ -18536,7 +18131,7 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
-        font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif;
+        font-family: ${CYCLOPEDIA_STATS_FONT};
         font-size: 10px;
         box-sizing: border-box;
       `;
@@ -18584,8 +18179,8 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
         padding: 8px 10px;
         border-top: 1px solid rgba(255, 224, 102, 0.25);
         background: rgba(0, 0, 0, 0.25);
-        font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif;
-        font-size: 11px;
+        font-family: ${CYCLOPEDIA_STATS_FONT};
+        font-size: 10px;
         color: #ccc;
         flex-shrink: 0;
       `;
@@ -18593,19 +18188,13 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
       const paginationInfo = document.createElement('span');
       const prevPageBtn = document.createElement('button');
       prevPageBtn.textContent = '◀ Prev';
-      prevPageBtn.style.cssText = `
-        background: rgba(255, 224, 102, 0.15);
-        color: ${COLOR_CONSTANTS.PRIMARY};
-        border: 1px solid rgba(255, 224, 102, 0.35);
-        padding: 4px 10px;
-        border-radius: 4px;
-        cursor: pointer;
-        font-family: inherit;
-        font-size: 11px;
-      `;
+      const rankingsButtonClass = `focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular disabled:cursor-not-allowed frame-1 active:frame-pressed-1 surface-regular gap-1 px-2 py-0.5 pb-[3px] ${FONT_CONSTANTS.SIZES.SMALL}`;
+      prevPageBtn.type = 'button';
+      prevPageBtn.className = rankingsButtonClass;
       const nextPageBtn = document.createElement('button');
       nextPageBtn.textContent = 'Next ▶';
-      nextPageBtn.style.cssText = prevPageBtn.style.cssText;
+      nextPageBtn.type = 'button';
+      nextPageBtn.className = rankingsButtonClass;
 
       const paginationControls = document.createElement('div');
       paginationControls.style.cssText = 'display: flex; align-items: center; gap: 6px;';
@@ -18627,8 +18216,8 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
         border-radius: 8px;
         padding: 12px;
         color: #fff;
-        font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif;
-        font-size: 12px;
+        font-family: ${CYCLOPEDIA_STATS_FONT};
+        font-size: 11px;
         line-height: 1.4;
         opacity: 0;
         visibility: hidden;
@@ -18654,9 +18243,9 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
           ? new Date(rankingsTimestamp).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
           : null;
         tooltip.innerHTML = `
-          <div style="font-size: 16px; margin-bottom: 8px; color: ${COLOR_CONSTANTS.PRIMARY}; font-weight: bold;">📊 Data Source</div>
+          <div class="${FONT_CONSTANTS.SIZES.TITLE}" style="margin-bottom: 8px; color: ${COLOR_CONSTANTS.PRIMARY};">📊 Data Source</div>
           <div style="margin-bottom: 6px;">Rankings fetched from <a href="https://bestiary-arena-ranking.vercel.app/api/v1/rankings" target="_blank" style="color: #ffe066; text-decoration: underline;">Bestiary Arena Rankings API</a></div>
-          <div style="margin-bottom: 6px; font-size: 11px; color: #ccc;">${getCyclopediaRankingsSectionLabel(activeSeason)} — qualified players (≥${CYCLOPEDIA_SETTINGS.playerStatCaps.exploredMaps} maps), sorted by ${rankingsState.sort} (${rankingsState.order})</div>
+          <div style="margin-bottom: 6px; font-size: 10px; color: ${COLOR_CONSTANTS.SOFT};">${getCyclopediaRankingsSectionLabel(activeSeason)} — qualified players (≥${CYCLOPEDIA_SETTINGS.playerStatCaps.exploredMaps} maps), sorted by ${rankingsState.sort} (${rankingsState.order})</div>
           <div style="font-size: 10px; color: #888;">${formattedTimestamp ? `Updated: ${formattedTimestamp}` : 'No timestamp available'}</div>
         `;
       }
@@ -18689,8 +18278,8 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
           padding: 24px;
           text-align: center;
           color: #888;
-          font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif;
-          font-size: 12px;
+          font-family: ${CYCLOPEDIA_STATS_FONT};
+          font-size: 11px;
         `;
         loadingCell.textContent = 'Loading rankings...';
         dataRowsContainer.appendChild(loadingCell);
@@ -18705,8 +18294,8 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
             padding: 24px;
             text-align: center;
             color: #888;
-            font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif;
-            font-size: 12px;
+            font-family: ${CYCLOPEDIA_STATS_FONT};
+            font-size: 11px;
           `;
           emptyCell.textContent = isLoadingRankings ? 'Loading rankings...' : 'No rankings available';
           dataRowsContainer.appendChild(emptyCell);
@@ -18789,7 +18378,7 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
             sortIndicator.textContent = rankingsState.order === 'desc' ? ' ▼' : ' ▲';
             sortIndicator.style.cssText = `
               margin-left: 4px;
-              font-size: 8px;
+              font-size: 9px;
               color: ${COLOR_CONSTANTS.PRIMARY};
             `;
             cell.appendChild(sortIndicator);
@@ -18849,7 +18438,7 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
           }
           if (!dataRowsContainer.isConnected) return;
           dataRowsContainer.innerHTML = `
-            <div style="grid-column: 1 / -1; padding: 24px; text-align: center; color: ${COLOR_CONSTANTS.ERROR}; font-size: 12px;">
+            <div style="grid-column: 1 / -1; padding: 24px; text-align: center; color: ${COLOR_CONSTANTS.ERROR}; font-size: 11px;">
               Failed to load rankings. Please try again.
             </div>
           `;
@@ -18875,7 +18464,7 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
           display: flex;
           align-items: center;
           justify-content: ${item.key === 'name' ? 'flex-start' : 'center'};
-          font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif;
+          font-family: ${CYCLOPEDIA_STATS_FONT};
           font-size: 10px;
           ${item.sortable ? 'cursor: pointer;' : 'cursor: default;'}
           transition: all 0.2s ease;
@@ -18906,7 +18495,7 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
           sortIndicator.textContent = rankingsState.order === 'desc' ? ' ▼' : ' ▲';
           sortIndicator.style.cssText = `
             margin-left: 4px;
-            font-size: 8px;
+            font-size: 9px;
             color: ${COLOR_CONSTANTS.PRIMARY};
           `;
           headerCell.appendChild(sortIndicator);
@@ -18989,7 +18578,7 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
         align-items: center;
         justify-content: center;
         cursor: pointer;
-        font-size: 12px;
+        font-size: 11px;
         transition: all 0.2s ease;
         color: ${COLOR_CONSTANTS.PRIMARY};
       `;
@@ -19056,271 +18645,20 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
 
     } catch (error) {
       console.error('[Cyclopedia] Error displaying rankings data:', error);
-      col2.innerHTML = `<div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${COLOR_CONSTANTS.ERROR}; text-align: center; padding: 20px;"><div style="font-size: 48px; margin-bottom: 16px;">⚠️</div><div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">Failed to Load Rankings</div><div style="font-size: 14px; margin-bottom: 16px; color: #888;">Could not fetch rankings from server</div><div style="font-size: 12px; color: #666;">Please check your internet connection and try again.</div></div>`;
+      col2.innerHTML = renderCyclopediaStatusHtml({ icon: '⚠️', iconSize: 48, title: `Failed to Load Rankings`, message: `Could not fetch rankings from server`, hint: `Please check your internet connection and try again.`, error: true });
     }
-  }
-
-  function displayUserSpeedrunOrRankData(category, playerName, rooms, ROOM_NAMES, best, roomsHighscores, container, isTemplate = false) {
-    const formatTime = FormatUtils.milliseconds;
-    const containerDiv = document.createElement('div');
-    Object.assign(containerDiv.style, {
-      display: 'flex', flexDirection: 'column', width: '100%', height: '100%',
-      padding: '20px', boxSizing: 'border-box'
-    });
-
-    const header = document.createElement('div');
-    header.style.cssText = `font-size: 18px; font-weight: bold; color: ${COLOR_CONSTANTS.PRIMARY}; margin-bottom: 20px; text-align: center; padding: 10px; background: rgba(255, 224, 102, 0.1); border-radius: 8px;`;
-    header.textContent = isTemplate ? 'Search Results' : `Your ${category} Data`;
-    containerDiv.appendChild(header);
-
-    // Add local runs section for non-template displays
-    if (!isTemplate) {
-      const localRunsSection = document.createElement('div');
-      localRunsSection.style.cssText = 'margin-bottom: 15px; padding: 10px; background: rgba(255,255,255,0.05); border-radius: 6px; border-left: 3px solid #ffe066;';
-      
-      const localTitle = document.createElement('h4');
-      localTitle.textContent = 'Your Local Runs';
-      localTitle.style.cssText = 'margin: 0 0 10px 0; color: #ffe066; font-size: 14px;';
-      localRunsSection.appendChild(localTitle);
-      
-      // Get local runs for current map (if available)
-      const mapName = selectedMap ? (globalThis.state?.utils?.ROOM_NAME?.[selectedMap] || selectedMap) : null;
-      const currentMapKey = mapName ? `map_${mapName.toLowerCase().replace(/\s+/g, '_')}` : null;
-      if (currentMapKey) {
-        getLocalRunsForMap(currentMapKey, category).then(localRuns => {
-          if (localRuns && localRuns.length > 0) {
-            const localTable = document.createElement('table');
-            localTable.style.cssText = 'width: 100%; border-collapse: collapse; font-size: 12px;';
-            
-            // Header
-            const headerRow = document.createElement('tr');
-            headerRow.innerHTML = `
-              <th style="text-align: left; padding: 4px; color: #ffe066;">Rank</th>
-              <th style="text-align: left; padding: 4px; color: #ffe066;">${category === 'speedrun' ? 'Time' : 'Points'}</th>
-              <th style="text-align: left; padding: 4px; color: #ffe066;">Date</th>
-            `;
-            localTable.appendChild(headerRow);
-            
-            // Local runs
-            localRuns.slice(0, 5).forEach((run, index) => {
-              const row = document.createElement('tr');
-              const value = category === 'speedrun' ? FormatUtils.ticks(run.time) : run.points;
-              row.innerHTML = `
-                <td style="padding: 4px; color: #fff;">${index + 1}</td>
-                <td style="padding: 4px; color: #fff; font-weight: bold;">${value}</td>
-                <td style="padding: 4px; color: #ccc;">${run.date}</td>
-              `;
-              localTable.appendChild(row);
-            });
-            
-            // Fill remaining slots with dashes if less than 5 runs
-            for (let i = localRuns.length; i < 5; i++) {
-              const row = document.createElement('tr');
-              row.innerHTML = `
-                <td style="padding: 4px; color: #888;">${i + 1}</td>
-                <td style="padding: 4px; color: #888;">-</td>
-                <td style="padding: 4px; color: #888;">-</td>
-              `;
-              localTable.appendChild(row);
-            }
-            
-            localRunsSection.appendChild(localTable);
-          } else {
-            // Create table with dashes for all 5 slots
-            const localTable = document.createElement('table');
-            localTable.style.cssText = 'width: 100%; border-collapse: collapse; font-size: 12px;';
-            
-            // Header
-            const headerRow = document.createElement('tr');
-            headerRow.innerHTML = `
-              <th style="text-align: left; padding: 4px; color: #ffe066;">Rank</th>
-              <th style="text-align: left; padding: 4px; color: #ffe066;">${category === 'speedrun' ? 'Time' : 'Points'}</th>
-              <th style="text-align: left; padding: 4px; color: #ffe066;">Date</th>
-            `;
-            localTable.appendChild(headerRow);
-            
-            // Empty slots with dashes
-            for (let i = 0; i < 5; i++) {
-              const row = document.createElement('tr');
-              row.innerHTML = `
-                <td style="padding: 4px; color: #888;">${i + 1}</td>
-                <td style="padding: 4px; color: #888;">-</td>
-                <td style="padding: 4px; color: #888;">-</td>
-              `;
-              localTable.appendChild(row);
-            }
-            
-            localRunsSection.appendChild(localTable);
-          }
-        });
-      } else {
-        const noMapText = document.createElement('p');
-        noMapText.textContent = 'Select a map to view your local runs.';
-        noMapText.style.cssText = 'margin: 0; color: #888; font-size: 12px;';
-        localRunsSection.appendChild(noMapText);
-      }
-      
-      containerDiv.appendChild(localRunsSection);
-    }
-
-    const contentContainer = document.createElement('div');
-    contentContainer.style.cssText = `flex: 1; padding: 10px;`;
-
-    if (isTemplate) {
-      const organizedRooms = {
-        'Rookgaard': [
-          { roomCode: 'rookgaard', roomName: 'Rookgaard' },
-          { roomCode: 'sewers', roomName: 'Sewers' },
-          { roomCode: 'wheatfield', roomName: 'Wheat Field' },
-          { roomCode: 'evergreen', roomName: 'Evergreen Fields' },
-          { roomCode: 'wolfsden', roomName: 'Wolf\'s Den' },
-          { roomCode: 'honeyflower', roomName: 'Honeyflower Tower' }
-        ]
-      };
-
-      Object.entries(organizedRooms).forEach(([regionName, regionRooms]) => {
-        const regionHeader = document.createElement('div');
-        regionHeader.style.cssText = `font-size: 14px; font-weight: bold; color: ${COLOR_CONSTANTS.PRIMARY}; margin: 8px 0 4px 0; padding: 4px 6px; background: rgba(255, 224, 102, 0.15); border-radius: 4px; border-left: 3px solid ${COLOR_CONSTANTS.PRIMARY};`;
-        regionHeader.textContent = regionName;
-        contentContainer.appendChild(regionHeader);
-
-        regionRooms.forEach(({ roomCode, roomName }) => {
-          const roomEntry = document.createElement('div');
-          roomEntry.style.cssText = `margin-bottom: 12px; padding: 12px; background: rgba(255, 255, 255, 0.05); border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.1);`;
-
-          const roomHeader = document.createElement('div');
-          roomHeader.style.cssText = `display: flex; align-items: center; gap: 10px; margin-bottom: 8px;`;
-
-          const thumbnail = RoomThumbnailCache.createThumbnail(roomCode, roomName, 32);
-
-          const roomTitle = document.createElement('div');
-          roomTitle.style.cssText = `font-weight: bold; color: ${COLOR_CONSTANTS.TEXT}; font-size: 14px;`;
-          roomTitle.textContent = roomName;
-
-          roomHeader.appendChild(thumbnail);
-          roomHeader.appendChild(roomTitle);
-          roomEntry.appendChild(roomHeader);
-
-          const dataRow = document.createElement('div');
-          dataRow.style.cssText = `display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: #ccc;`;
-
-          const yourData = document.createElement('div');
-          yourData.innerHTML = `<div style="color: #8f8; font-weight: bold;">You:</div><div style="color: #888;">[ticks] ticks</div>`;
-
-          const bestData = document.createElement('div');
-          bestData.innerHTML = `<div style="color: #ff8; font-weight: bold;">Best:</div><div style="color: #888;">[ticks] ticks</div><div style="font-size: 10px; color: #888;">by [Player]</div>`;
-
-          dataRow.appendChild(yourData);
-          dataRow.appendChild(bestData);
-          roomEntry.appendChild(dataRow);
-
-          contentContainer.appendChild(roomEntry);
-        });
-      });
-
-      const searchInstruction = document.createElement('div');
-      searchInstruction.style.cssText = `text-align: center; padding: 20px; color: ${COLOR_CONSTANTS.WARNING}; font-size: 14px; background: rgba(255, 255, 255, 0.05); border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.1); margin-top: 16px;`;
-      searchInstruction.innerHTML = `<div style="font-size: 24px; margin-bottom: 8px;">🔍</div><div style="font-weight: bold; margin-bottom: 4px;">Search for a Player</div><div style="color: #888;">Use the search box to compare leaderboard data</div>`;
-      contentContainer.appendChild(searchInstruction);
-    } else {
-      const allRoomCodes = Object.keys(ROOM_NAMES).sort();
-
-      allRoomCodes.forEach(roomCode => {
-        const roomName = ROOM_NAMES[roomCode];
-        const yourRoom = rooms[roomCode];
-
-        if (!yourRoom) return;
-
-        const roomEntry = document.createElement('div');
-        roomEntry.style.cssText = `margin-bottom: 12px; padding: 12px; background: rgba(255, 255, 255, 0.05); border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.1);`;
-
-        const roomHeader = document.createElement('div');
-        roomHeader.style.cssText = `display: flex; align-items: center; gap: 10px; margin-bottom: 8px;`;
-
-        const thumbnail = RoomThumbnailCache.createThumbnail(roomCode, roomName, 32);
-
-        const roomTitle = document.createElement('div');
-        roomTitle.style.cssText = `font-weight: bold; color: ${COLOR_CONSTANTS.TEXT}; font-size: 14px;`;
-        roomTitle.textContent = roomName;
-
-        roomHeader.appendChild(thumbnail);
-        roomHeader.appendChild(roomTitle);
-        roomEntry.appendChild(roomHeader);
-
-        if (category === 'Speedrun') {
-          const yourTicks = yourRoom.ticks || 0;
-          const bestTicks = best[roomCode]?.ticks || 0;
-          const bestPlayer = best[roomCode]?.userName || 'Unknown';
-          
-          const dataRow = document.createElement('div');
-          dataRow.style.cssText = `display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: #ccc;`;
-
-          const yourData = document.createElement('div');
-          yourData.innerHTML = `<div style="color: #8f8; font-weight: bold;">You:</div><div>${yourTicks} ticks</div>`;
-
-          const bestData = document.createElement('div');
-          bestData.innerHTML = `<div style="color: #ff8; font-weight: bold;">Best:</div><div>${bestTicks} ticks</div><div style="font-size: 10px; color: #888;">by ${bestPlayer}</div>`;
-
-          dataRow.appendChild(yourData);
-          dataRow.appendChild(bestData);
-          roomEntry.appendChild(dataRow);
-
-        } else if (category === 'Rank Points') {
-          const yourRank = yourRoom.rank || 0;
-          const topRank = roomsHighscores?.rank?.[roomCode]?.rank || 0;
-          const topPlayer = roomsHighscores?.rank?.[roomCode]?.userName || 'Unknown';
-
-          const dataRow = document.createElement('div');
-          dataRow.style.cssText = `display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: #ccc;`;
-
-          const yourData = document.createElement('div');
-          yourData.innerHTML = `<div style="color: #8f8; font-weight: bold;">You:</div><div>${yourRank} points</div>`;
-
-          const topData = document.createElement('div');
-          topData.innerHTML = `<div style="color: #ff8; font-weight: bold;">Top:</div><div>${topRank} points</div><div style="font-size: 10px; color: #888;">by ${topPlayer}</div>`;
-
-          dataRow.appendChild(yourData);
-          dataRow.appendChild(topData);
-          roomEntry.appendChild(dataRow);
-
-        } else if (category === 'Floors') {
-          const { floor: yourFloor, floorTicks: yourFloorTicks } = normalizeUserFloorData(yourRoom);
-          const { floor: bestFloor, floorTicks: bestFloorTicks, playerName: bestFloorPlayer } = normalizeBestFloorData(roomCode, roomsHighscores, best);
-
-          const dataRow = document.createElement('div');
-          dataRow.style.cssText = `display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: #ccc;`;
-
-          const yourData = document.createElement('div');
-          yourData.innerHTML = `<div style="color: #8f8; font-weight: bold;">You:</div><div>Floor ${yourFloor !== undefined && yourFloor !== null ? yourFloor : '-'}${yourFloorTicks !== undefined && yourFloorTicks !== null ? ` <i style="color: #aaa;">(${yourFloorTicks} ticks)</i>` : ''}</div>`;
-
-          const bestData = document.createElement('div');
-          bestData.innerHTML = `<div style="color: #ff8; font-weight: bold;">Best:</div><div>Floor ${bestFloor !== undefined && bestFloor !== null ? bestFloor : '-'}${bestFloorTicks !== undefined && bestFloorTicks !== null ? ` <i style="color: #aaa;">(${bestFloorTicks} ticks)</i>` : ''}</div><div style="font-size: 10px; color: #888;">by ${bestFloorPlayer}</div>`;
-
-          dataRow.appendChild(yourData);
-          dataRow.appendChild(bestData);
-          roomEntry.appendChild(dataRow);
-        }
-
-        contentContainer.appendChild(roomEntry);
-      });
-    }
-
-    containerDiv.appendChild(contentContainer);
-
-    container.innerHTML = '';
-    container.appendChild(containerDiv);
-  }
-
-  function updateSearchForSpeedrunOrRank(category, yourRooms, ROOM_NAMES, best, roomsHighscores) {
-    window.currentSpeedrunRankCategory = category;
-    window.currentSpeedrunRankData = { yourRooms: getYourRoomsForCyclopediaSeason(yourRooms), ROOM_NAMES, best, roomsHighscores };
   }
 
   function updateSearchForCombinedLeaderboards(yourRooms, ROOM_NAMES, best, roomsHighscores) {
     window.currentSpeedrunRankCategory = 'Combined';
     window.currentSpeedrunRankData = { yourRooms: getYourRoomsForCyclopediaSeason(yourRooms), ROOM_NAMES, best, roomsHighscores };
     
-    col3.innerHTML = `<div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${COLOR_CONSTANTS.TEXT}; text-align: center; padding: 20px;"><div style="font-size: 24px; margin-bottom: 16px;">🔍</div><div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">Search Results</div><div style="font-size: 14px; color: #888; margin-bottom: 16px;">Use the search box above to compare leaderboard data</div><div style="background: rgba(255, 255, 255, 0.05); border-radius: 8px; padding: 16px; margin-top: 16px; border: 1px solid rgba(255, 255, 255, 0.1);"><div style="font-size: 14px; font-weight: bold; color: ${COLOR_CONSTANTS.PRIMARY}; margin-bottom: 8px;">How to use:</div><div style="font-size: 12px; color: #ccc; text-align: left; line-height: 1.4;">• Enter a player name in the search box<br>• View their leaderboard data compared to yours</div></div></div>`;
+    col3.innerHTML = renderCyclopediaStatusHtml({
+      icon: '🔍',
+      title: 'Search Results',
+      message: 'Use the search box above to compare leaderboard data',
+      extraHtml: `<div style="background: rgba(255, 255, 255, 0.05); border-radius: 8px; padding: 16px; border: 1px solid rgba(255, 255, 255, 0.1);"><div class="${FONT_CONSTANTS.SIZES.SMALL}" style="color: ${COLOR_CONSTANTS.PRIMARY}; margin-bottom: 8px;">How to use:</div><div class="${FONT_CONSTANTS.SIZES.SMALL}" style="color: ${COLOR_CONSTANTS.SOFT}; text-align: left; line-height: 1.4;">• Enter a player name in the search box<br>• View their leaderboard data compared to yours</div></div>`
+    });
   }
 
   function showPlayerProfileTemplate(container) {
@@ -19347,7 +18685,7 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
       alignItems: 'center',
       gap: '8px',
       marginBottom: '12px',
-      fontSize: '16px',
+      fontSize: '15px',
       fontWeight: 'bold',
       color: COLOR_CONSTANTS.PRIMARY
     }, '', '');
@@ -19359,7 +18697,7 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
       alignItems: 'center',
       gap: '8px',
       marginBottom: '8px',
-      fontSize: '14px',
+      fontSize: '13px',
       color: '#ccc'
     }, '', '');
     playerName.innerHTML = `<span style="color: #4CAF50;">🛡️</span><span style="color: #888;">[Player Name]</span>`;
@@ -19367,7 +18705,7 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
 
     const level = DOMUtils.createStyledElement('div', {
       marginBottom: '8px',
-      fontSize: '14px',
+      fontSize: '13px',
       color: '#ccc'
     }, '', '');
     level.innerHTML = `<span>Level</span><div style="display: flex; align-items: center; gap: 8px; margin-top: 4px;"><div style="flex: 1; height: 8px; background: rgba(255, 255, 255, 0.1); border-radius: 4px;"><div style="width: 50%; height: 100%; background: #FFD700; border-radius: 4px;"></div></div><span style="color: #888;">[Level]</span></div>`;
@@ -19375,7 +18713,7 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
 
     const createdAt = DOMUtils.createStyledElement('div', {
       marginBottom: '8px',
-      fontSize: '14px',
+      fontSize: '13px',
       color: '#ccc'
     }, '', '');
     createdAt.innerHTML = `
@@ -19386,7 +18724,7 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
 
     const status = DOMUtils.createStyledElement('div', {
       marginBottom: '8px',
-      fontSize: '14px',
+      fontSize: '13px',
       color: '#ccc'
     }, '', '');
     status.innerHTML = `
@@ -19399,7 +18737,7 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
     playerInfoSection.appendChild(status);
 
     const loyaltyPoints = DOMUtils.createStyledElement('div', {
-      fontSize: '14px',
+      fontSize: '13px',
       color: '#ccc'
     }, '', '');
     loyaltyPoints.innerHTML = `
@@ -19417,7 +18755,7 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
       alignItems: 'center',
       gap: '8px',
       marginBottom: '12px',
-      fontSize: '16px',
+      fontSize: '15px',
       fontWeight: 'bold',
       color: COLOR_CONSTANTS.PRIMARY
     }, '', '');
@@ -19431,19 +18769,19 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
       marginBottom: '12px'
     }, '', '');
     currentTotal.innerHTML = `
-      <div style="font-size: 14px; font-weight: bold; color: #ccc; margin-bottom: 8px;">Current total</div>
+      <div style="font-size: 13px; font-weight: bold; color: #ccc; margin-bottom: 8px;">Current total</div>
       <div style="display: flex; flex-direction: column; gap: 4px;">
-        <div style="display: flex; align-items: center; gap: 8px; font-size: 14px; color: #ccc;">
+        <div style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: #ccc;">
           <span style="color: #FF9800;">🐚</span>
           <span>Daily Seashell</span>
           <span style="color: #888;">[Count]x</span>
         </div>
-        <div style="display: flex; align-items: center; gap: 8px; font-size: 14px; color: #ccc;">
+        <div style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: #ccc;">
           <span style="color: #8BC34A;">🎯</span>
           <span>Hunting tasks</span>
           <span style="color: #888;">[Count]x</span>
         </div>
-        <div style="display: flex; align-items: center; gap: 8px; font-size: 14px; color: #ccc;">
+        <div style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: #ccc;">
           <span style="color: #2196F3;">🔄</span>
           <span>Total runs</span>
           <span style="color: #888;">[Count]x</span>
@@ -19457,24 +18795,24 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
       margin-bottom: 12px;
     `;
     progress.innerHTML = `
-      <div style="font-size: 14px; font-weight: bold; color: #ccc; margin-bottom: 8px;">Progress</div>
+      <div style="font-size: 13px; font-weight: bold; color: #ccc; margin-bottom: 8px;">Progress</div>
       <div style="display: flex; flex-direction: column; gap: 4px;">
-        <div style="display: flex; align-items: center; gap: 8px; font-size: 14px; color: #ccc;">
+        <div style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: #ccc;">
           <span style="color: #4CAF50;">✅</span>
           <span>Perfect Creatures</span>
           <span style="color: #888;">[Progress]</span>
         </div>
-        <div style="display: flex; align-items: center; gap: 8px; font-size: 14px; color: #ccc;">
+        <div style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: #ccc;">
           <span style="color: #4CAF50;">✅</span>
           <span>BIS Equipments</span>
           <span style="color: #888;">[Progress]</span>
         </div>
-        <div style="display: flex; align-items: center; gap: 8px; font-size: 14px; color: #ccc;">
+        <div style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: #ccc;">
           <span style="color: #4CAF50;">✅</span>
           <span>Explored maps</span>
           <span style="color: #888;">[Progress]</span>
         </div>
-        <div style="display: flex; align-items: center; gap: 8px; font-size: 14px; color: #ccc;">
+        <div style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: #ccc;">
           <span style="color: #4CAF50;">✅</span>
           <span>Bag Outfits</span>
           <span style="color: #888;">[Progress]</span>
@@ -19485,14 +18823,14 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
 
     const rankings = document.createElement('div');
     rankings.innerHTML = `
-      <div style="font-size: 14px; font-weight: bold; color: #ccc; margin-bottom: 8px;">Rankings</div>
+      <div style="font-size: 13px; font-weight: bold; color: #ccc; margin-bottom: 8px;">Rankings</div>
       <div style="display: flex; flex-direction: column; gap: 4px;">
-        <div style="display: flex; align-items: center; gap: 8px; font-size: 14px; color: #ccc;">
+        <div style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: #ccc;">
           <span style="color: #FFD700;">⭐</span>
           <span>Rank points</span>
           <span style="color: #888;">[Points]</span>
         </div>
-        <div style="display: flex; align-items: center; gap: 8px; font-size: 14px; color: #ccc;">
+        <div style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: #ccc;">
           <span style="color: #FFD700;">⏱️</span>
           <span>Time sum</span>
           <span style="color: #888;">[Time]</span>
@@ -19508,13 +18846,13 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
       text-align: center;
       padding: 20px;
       color: ${COLOR_CONSTANTS.WARNING};
-      font-size: 14px;
+      font-size: 13px;
       background: rgba(255, 255, 255, 0.05);
       border-radius: 8px;
       border: 1px solid rgba(255, 255, 255, 0.1);
     `;
     searchInstruction.innerHTML = `
-      <div style="font-size: 24px; margin-bottom: 8px;">🔍</div>
+      <div style="font-size: 23px; margin-bottom: 8px;">🔍</div>
       <div style="font-weight: bold; margin-bottom: 4px;">Search for a Player</div>
       <div style="color: #888;">Use the search box to compare profiles</div>
     `;
@@ -19604,15 +18942,27 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
     const defeatCount = document.createElement('div');
     const actualCount = count || 0;
     defeatCount.style.cssText = `
+      font-family: ${CYCLOPEDIA_STATS_FONT};
       font-size: 10px;
-      color: ${actualCount === 0 ? '#ff4444' : '#aaa'};
+      color: ${actualCount === 0 ? COLOR_CONSTANTS.ERROR : COLOR_CONSTANTS.SUBTLE};
       text-align: center;
       width: 100%;
-      margin-top: 2px;
+      margin-top: 0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     `;
-    const formattedCount = actualCount >= 1000 ? `${(actualCount / 1000).toFixed(1)}k` : actualCount;
-    defeatCount.textContent = `${formattedCount} completions`;
+    defeatCount.textContent = `${FormatUtils.compact(actualCount)} victories`;
     return defeatCount;
+  }
+
+  // Open a map in the Cyclopedia Maps tab (selects its region, then the map).
+  function openMapInMapsTab(roomCode, roomName) {
+    const { setActiveTab, tabPages } = charactersTabNav;
+    if (typeof setActiveTab !== 'function' || !tabPages) return;
+    const region = findCyclopediaRegionByMapId(roomCode);
+    const regionName = region ? cyclopediaGetRegionDisplayName(region.id) : resolveCyclopediaRoomRegionName(roomCode);
+    cyclopediaNavigateFromHome({ type: 'map', regionName, mapName: roomName }, { setActiveTab, tabPages });
   }
 
   // Helper function to create map column (icon + name + completion count)
@@ -19622,32 +18972,36 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: 4px;
-      width: 80px;
-      min-width: 80px;
-      max-width: 80px;
+      gap: 3px;
+      min-width: 0;
     `;
 
     const mapIcon = document.createElement('div');
     mapIcon.style.cssText = `
-      width: 32px;
-      height: 32px;
-      border-radius: 4px;
+      width: 28px;
+      height: 28px;
+      border-radius: 3px;
       overflow: hidden;
     `;
-    const thumbnail = RoomThumbnailCache.createThumbnail(roomCode, roomName, 32);
+    const thumbnail = RoomThumbnailCache.createThumbnail(roomCode, roomName, 28);
     thumbnail.style.width = '100%';
     thumbnail.style.height = '100%';
     mapIcon.appendChild(thumbnail);
 
     const mapName = document.createElement('div');
     mapName.style.cssText = `
-      font-size: 12px;
-      font-weight: bold;
+      font-family: ${CYCLOPEDIA_STATS_FONT};
+      font-size: 11px;
+      line-height: 1.1;
       color: ${COLOR_CONSTANTS.PRIMARY};
       text-align: center;
       width: 100%;
-      word-wrap: break-word;
+      max-width: 100%;
+      overflow: hidden;
+      overflow-wrap: anywhere;
+      display: -webkit-box;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 2;
     `;
     mapName.textContent = roomName;
 
@@ -19655,12 +19009,115 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
     mapColumn.appendChild(mapName);
     mapColumn.appendChild(createCompletionCountElement(completionCount));
 
+    mapColumn.title = roomName;
+    mapColumn.style.cursor = 'pointer';
+    mapColumn.addEventListener('click', () => openMapInMapsTab(roomCode, roomName));
+    mapColumn.addEventListener('mouseenter', () => { mapName.style.textDecoration = 'underline'; });
+    mapColumn.addEventListener('mouseleave', () => { mapName.style.textDecoration = 'none'; });
+
     return mapColumn;
   }
 
-  function displayUserCombinedLeaderboardsData(playerName, rooms, ROOM_NAMES, best, roomsHighscores, container) {
-    const formatTime = FormatUtils.milliseconds;
+  // ---- Leaderboards: one set of builders shared by "your" and "searched player" columns
+  const leaderboardSpeedImg = `<img src="${CYCLOPEDIA_ASSETS.speed}" alt="Speedrun" title="Speedrun" style="width: 12px; height: 12px; display: block; image-rendering: pixelated;">`;
+  const leaderboardRankImg = `<img src="${CYCLOPEDIA_ASSETS.starTier}" alt="Rank points" title="Rank points" style="width: 9px; height: 10px; display: block; image-rendering: pixelated;">`;
+  const leaderboardFloorImg = '<img src="https://bestiaryarena.com/assets/UI/floor-15.png" alt="Floors" title="Floors" style="width: 14px; height: 7px; display: block; image-rendering: pixelated;">';
+  const leaderboardTicksSuffix = (ticks, emptyText = '') =>
+    ticks !== undefined && ticks !== null ? ` <i style="color: ${COLOR_CONSTANTS.SUBTLE};">(${ticks})</i>` : emptyText;
 
+  // One icon | subject value | Top value row. The sticky column header (createLeaderboardColumnHeader) names the columns.
+  function createLeaderboardStatRow({ iconHtml, isTop, subjectHtml, topHtml }) {
+    const row = document.createElement('div');
+    row.style.cssText = `
+      display: grid;
+      grid-template-columns: ${LEADERBOARD_STAT_TRACKS};
+      align-items: center;
+      gap: 6px;
+      padding: 3px 4px;
+      background: ${isTop ? 'url("https://bestiaryarena.com/_next/static/media/background-green.be515334.png")' : 'rgba(255, 255, 255, 0.03)'};
+      border-radius: 3px;
+      min-width: 0;
+      max-width: 100%;
+    `;
+    const createCell = (valueHtml) => {
+      const cell = document.createElement('div');
+      cell.style.cssText = `min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ${CYCLOPEDIA_STATS_FONT}; font-size: 11px; color: ${COLOR_CONSTANTS.SOFT}; font-weight: ${isTop ? 'bold' : 'normal'};`;
+      cell.innerHTML = valueHtml;
+      return cell;
+    };
+    const iconCell = document.createElement('div');
+    iconCell.style.cssText = 'display: flex; align-items: center; justify-content: center;';
+    iconCell.innerHTML = iconHtml;
+    row.appendChild(iconCell);
+    row.appendChild(createCell(subjectHtml));
+    row.appendChild(createCell(topHtml));
+    return row;
+  }
+
+  // The card every Leaderboards line sits in: [map column] | [stat rows]. Entries and the column header share it,
+  // so their padding, gaps and tracks (and therefore their columns) are identical.
+  function createLeaderboardEntryShell() {
+    const shell = document.createElement('div');
+    shell.style.cssText = `
+      display: grid;
+      grid-template-columns: ${LEADERBOARD_ENTRY_TRACKS};
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 3px;
+      padding: 5px 6px;
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: 4px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      min-width: 0;
+      max-width: 100%;
+      word-spacing: normal;
+      letter-spacing: normal;
+    `;
+    return shell;
+  }
+
+  // Names the two value columns, under each region banner: the very same stat row as the lines below it, in the
+  // very same card, so it sits on the same layered background (card rgba 0.05 under row rgba 0.03) instead of on
+  // the bare page.
+  function createLeaderboardColumnHeader(subjectLabel) {
+    const row = createLeaderboardStatRow({ iconHtml: '', isTop: false, subjectHtml: '', topHtml: '' });
+    row.style.background = 'none'; // one uniform background: the header's own texture, no lighter strip
+    const [, subjectCell, topCell] = row.children;
+    subjectCell.textContent = subjectLabel;
+    subjectCell.title = subjectLabel;
+    topCell.textContent = 'Top';
+    [subjectCell, topCell].forEach((cell) => {
+      cell.style.fontSize = LEADERBOARD_HEADER_FONT_SIZE;
+      cell.style.fontWeight = 'bold';
+    });
+
+    const mapTitle = document.createElement('div');
+    mapTitle.textContent = 'Map';
+    mapTitle.style.cssText = `text-align: center; font-family: ${CYCLOPEDIA_STATS_FONT}; font-size: ${LEADERBOARD_HEADER_FONT_SIZE}; font-weight: bold; color: ${COLOR_CONSTANTS.SOFT};`;
+
+    const shell = createLeaderboardEntryShell();
+    // No frame and no vertical padding: a title line, not a card. Side padding 7px = the entry's 6px padding + 1px border,
+    // so the columns still line up with the entries below.
+    shell.style.border = 'none';
+    shell.style.padding = '0 7px';
+    shell.style.background = `url("${CYCLOPEDIA_ASSETS.backgroundDark}") repeat`;
+    shell.appendChild(mapTitle);
+    shell.appendChild(row);
+    return shell;
+  }
+
+  function createLeaderboardMapEntry({ roomCode, roomName, completionCount, rows }) {
+    const roomEntry = createLeaderboardEntryShell();
+    const dataColumn = document.createElement('div');
+    dataColumn.style.cssText = 'display: flex; flex-direction: column; gap: 3px; width: 100%; min-width: 0; max-width: 100%;';
+    rows.forEach((row) => dataColumn.appendChild(createLeaderboardStatRow(row)));
+    roomEntry.appendChild(createMapColumn(roomCode, roomName, completionCount));
+    roomEntry.appendChild(dataColumn);
+    return roomEntry;
+  }
+
+  // Region-grouped list of map entries. getRoomData(roomCode) -> { completionCount, rows }.
+  function buildLeaderboardsView(ROOM_NAMES, subjectLabel, getRoomData) {
     const containerDiv = document.createElement('div');
     Object.assign(containerDiv.style, {
       display: 'flex',
@@ -19674,440 +19131,77 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
     });
 
     const contentContainer = document.createElement('div');
-    contentContainer.style.cssText = `
-      flex: 1;
-      padding: 2px;
-      min-width: 0;
-      max-width: 100%;
-    `;
+    contentContainer.style.cssText = 'flex: 1; padding: 2px; min-width: 0; max-width: 100%;';
 
-    // Organize rooms by region (show all maps)
     const organizedRooms = organizeRoomsByRegion(createAllRoomsObject(ROOM_NAMES), ROOM_NAMES);
-
     Object.entries(organizedRooms).forEach(([regionName, regionRooms]) => {
       const regionHeader = DOMUtils.createTitle(`${regionName} (${regionRooms.length} maps)`, FONT_CONSTANTS.SIZES.SMALL);
-      Object.assign(regionHeader.style, {
-        margin: '8px 0 4px 0',
-        width: '100%',
-        position: 'sticky',
-        top: '0',
-        zIndex: '10',
-        backgroundColor: '#232323'
-      });
-      contentContainer.appendChild(regionHeader);
+      regionHeader.style.width = '100%';
+      regionHeader.style.margin = '0';
+
+      // Banner + column names stick together at the top while that region scrolls past.
+      const regionGroup = document.createElement('div');
+      regionGroup.style.cssText = `position: sticky; top: 0; z-index: 10; margin: 6px 0 3px 0; background: url("${CYCLOPEDIA_ASSETS.backgroundDark}") repeat;`;
+      regionGroup.appendChild(regionHeader);
+      regionGroup.appendChild(createLeaderboardColumnHeader(subjectLabel));
+      contentContainer.appendChild(regionGroup);
 
       regionRooms.forEach(({ roomCode, roomName }) => {
-        const yourRoom = rooms[roomCode];
+        const { completionCount, rows } = getRoomData(roomCode);
+        contentContainer.appendChild(createLeaderboardMapEntry({ roomCode, roomName, completionCount, rows }));
+      });
+    });
 
-      const roomEntry = document.createElement('div');
-      roomEntry.style.cssText = `
-        display: grid;
-        grid-template-columns: 80px 1fr;
-        align-items: center;
-        gap: 8px;
-        margin-bottom: 4px;
-        padding: 6px;
-        background: rgba(255, 255, 255, 0.05);
-        border-radius: 4px;
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        min-width: 0;
-        max-width: 100%;
-      `;
+    containerDiv.appendChild(contentContainer);
+    return containerDiv;
+  }
 
-      // Column 1: Map Icon + Map Name + Completion Count
-      const mapColumn = createMapColumn(roomCode, roomName, yourRoom?.count);
-
-      const dataColumn = document.createElement('div');
-      dataColumn.style.cssText = `
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-        width: 100%;
-        min-width: 0;
-        max-width: 100%;
-      `;
-
-      const speedrunRow = document.createElement('div');
-      const isSpeedrunTop = yourRoom?.ticks && best?.[roomCode]?.ticks && yourRoom?.ticks === best[roomCode].ticks;
-      speedrunRow.style.cssText = `
-        display: grid;
-        grid-template-columns: 120px 120px;
-        align-items: center;
-        gap: 6px;
-        padding: 4px;
-        background: ${isSpeedrunTop ? 'url("https://bestiaryarena.com/_next/static/media/background-green.be515334.png")' : 'rgba(255, 255, 255, 0.03)'};
-        border-radius: 3px;
-        border-left: 3px solid #4CAF50;
-        min-width: 0;
-        max-width: 100%;
-      `;
+  function displayUserCombinedLeaderboardsData(playerName, rooms, ROOM_NAMES, best, roomsHighscores, container) {
+    const view = buildLeaderboardsView(ROOM_NAMES, playerName, (roomCode) => {
+      const yourRoom = rooms[roomCode];
 
       const yourTicks = yourRoom?.ticks || 0;
       const topTicks = best?.[roomCode]?.ticks || 0;
-      const topPlayer = best?.[roomCode]?.userName || 'Unknown';
-
-      const yourSpeedrun = document.createElement('div');
-      yourSpeedrun.style.cssText = `
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        font-size: 13px;
-        color: #ccc;
-        width: 120px;
-        font-weight: ${isSpeedrunTop ? 'bold' : 'normal'};
-      `;
-      yourSpeedrun.innerHTML = `
-        <span style="color: #8f8; font-weight: bold;">You:</span>
-        <span>${yourTicks} ticks</span>
-      `;
-
-      const topSpeedrun = document.createElement('div');
-      topSpeedrun.style.cssText = `
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        font-size: 13px;
-        color: #ccc;
-        width: 120px;
-        font-weight: ${isSpeedrunTop ? 'bold' : 'normal'};
-      `;
-      topSpeedrun.innerHTML = `
-        <span style="color: #ff8; font-weight: bold;">Top:</span>
-        <span>${topTicks} ticks</span>
-      `;
-
-      speedrunRow.appendChild(yourSpeedrun);
-      speedrunRow.appendChild(topSpeedrun);
+      const isSpeedrunTop = yourRoom?.ticks && best?.[roomCode]?.ticks && yourRoom?.ticks === best[roomCode].ticks;
 
       const yourRank = yourRoom?.rank || 0;
       const yourRankTicks = yourRoom?.rankTicks;
       const topRank = roomsHighscores?.rank?.[roomCode]?.rank || 0;
       const topRankTicks = roomsHighscores?.rank?.[roomCode]?.ticks;
-      const topRankPlayer = roomsHighscores?.rank?.[roomCode]?.userName || 'Unknown';
-
-      const isRankTop = yourRank && topRank && yourRank === topRank && 
-        (yourRankTicks === topRankTicks || 
+      const isRankTop = yourRank && topRank && yourRank === topRank &&
+        (yourRankTicks === topRankTicks ||
          ((yourRankTicks === undefined || yourRankTicks === null) && (topRankTicks === undefined || topRankTicks === null)));
 
-      const rankRow = document.createElement('div');
-      rankRow.style.cssText = `
-        display: grid;
-        grid-template-columns: 120px 120px;
-        align-items: center;
-        min-width: 0;
-        max-width: 100%;
-        gap: 6px;
-        padding: 4px;
-        background: ${isRankTop ? 'url("https://bestiaryarena.com/_next/static/media/background-green.be515334.png")' : 'rgba(255, 255, 255, 0.03)'};
-        border-radius: 3px;
-        border-left: 3px solid #FF9800;
-      `;
-
-      const yourRankData = document.createElement('div');
-      yourRankData.style.cssText = `
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        font-size: 13px;
-        color: #ccc;
-        width: 120px;
-        font-weight: ${isRankTop ? 'bold' : 'normal'};
-      `;
-      yourRankData.innerHTML = `
-        <span style="color: #8f8; font-weight: bold;">You:</span>
-        <span style="white-space: nowrap;"><img src="${CYCLOPEDIA_ASSETS.starTier}" alt="Rank" style="width: 9px; height: 10px; vertical-align: middle; margin-right: 2px; display: inline-block;">${yourRank}${yourRankTicks !== undefined && yourRankTicks !== null ? ` <i style="color: #aaa;">(${yourRankTicks})</i>` : ' (null)'}</span>
-      `;
-
-      const topRankData = document.createElement('div');
-      topRankData.style.cssText = `
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        font-size: 13px;
-        color: #ccc;
-        width: 120px;
-        font-weight: ${isRankTop ? 'bold' : 'normal'};
-      `;
-      topRankData.innerHTML = `
-        <span style="color: #ff8; font-weight: bold;">Top:</span>
-        <span style="white-space: nowrap;"><img src="${CYCLOPEDIA_ASSETS.starTier}" alt="Rank" style="width: 9px; height: 10px; vertical-align: middle; margin-right: 2px; display: inline-block;">${topRank}${topRankTicks !== undefined && topRankTicks !== null ? ` <i style="color: #aaa;">(${topRankTicks})</i>` : ' (null)'}</span>
-      `;
-
-      rankRow.appendChild(yourRankData);
-      rankRow.appendChild(topRankData);
-
-      // Floor row
       const { floor: yourFloor, floorTicks: yourFloorTicks } = normalizeUserFloorData(yourRoom);
-      const { floor: bestFloor, floorTicks: bestFloorTicks, playerName: bestFloorPlayer } = normalizeBestFloorData(roomCode, roomsHighscores, best);
-
+      const { floor: bestFloor, floorTicks: bestFloorTicks } = normalizeBestFloorData(roomCode, roomsHighscores, best);
       const isFloorTop = yourFloor !== null && bestFloor !== null && yourFloor === bestFloor &&
         (yourFloorTicks === bestFloorTicks ||
          ((yourFloorTicks === undefined || yourFloorTicks === null) && (bestFloorTicks === undefined || bestFloorTicks === null)));
 
-      const floorRow = document.createElement('div');
-      floorRow.style.cssText = `
-        display: grid;
-        grid-template-columns: 120px 120px;
-        align-items: center;
-        min-width: 0;
-        max-width: 100%;
-        gap: 6px;
-        padding: 4px;
-        background: ${isFloorTop ? 'url("https://bestiaryarena.com/_next/static/media/background-green.be515334.png")' : 'rgba(255, 255, 255, 0.03)'};
-        border-radius: 3px;
-        border-left: 3px solid #9C27B0;
-      `;
-
-      const yourFloorData = document.createElement('div');
-      yourFloorData.style.cssText = `
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        font-size: 13px;
-        color: #ccc;
-        width: 120px;
-        font-weight: ${isFloorTop ? 'bold' : 'normal'};
-      `;
-      yourFloorData.innerHTML = `
-        <span style="color: #8f8; font-weight: bold;">You:</span>
-        <span style="white-space: nowrap;"><img src="https://bestiaryarena.com/assets/UI/floor-15.png" alt="Floor" style="width: 14px; height: 7px; vertical-align: middle; margin-right: 2px; display: inline-block;">${yourFloor !== null && yourFloor >= 0 ? yourFloor : '-'}${yourFloorTicks !== undefined && yourFloorTicks !== null ? ` <i style="color: #aaa;">(${yourFloorTicks})</i>` : ''}</span>
-      `;
-
-      const topFloorData = document.createElement('div');
-      topFloorData.style.cssText = `
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        font-size: 13px;
-        color: #ccc;
-        width: 120px;
-        font-weight: ${isFloorTop ? 'bold' : 'normal'};
-      `;
-      topFloorData.innerHTML = `
-        <span style="color: #ff8; font-weight: bold;">Top:</span>
-        <span style="white-space: nowrap;"><img src="https://bestiaryarena.com/assets/UI/floor-15.png" alt="Floor" style="width: 14px; height: 7px; vertical-align: middle; margin-right: 2px; display: inline-block;">${bestFloor !== null ? bestFloor : '-'}${bestFloorTicks !== undefined && bestFloorTicks !== null ? ` <i style="color: #aaa;">(${bestFloorTicks})</i>` : ''}</span>
-      `;
-
-      floorRow.appendChild(yourFloorData);
-      floorRow.appendChild(topFloorData);
-
-      dataColumn.appendChild(speedrunRow);
-      dataColumn.appendChild(rankRow);
-      dataColumn.appendChild(floorRow);
-
-      roomEntry.appendChild(mapColumn);
-      roomEntry.appendChild(dataColumn);
-      contentContainer.appendChild(roomEntry);
-      });
+      return {
+        completionCount: yourRoom?.count,
+        rows: [
+          {
+            iconHtml: leaderboardSpeedImg, isTop: isSpeedrunTop,
+            subjectHtml: `${yourTicks} ticks`,
+            topHtml: `${topTicks} ticks`
+          },
+          {
+            iconHtml: leaderboardRankImg, isTop: isRankTop,
+            subjectHtml: `${yourRank}${leaderboardTicksSuffix(yourRankTicks, ' (null)')}`,
+            topHtml: `${topRank}${leaderboardTicksSuffix(topRankTicks, ' (null)')}`
+          },
+          {
+            iconHtml: leaderboardFloorImg, isTop: isFloorTop,
+            subjectHtml: `${yourFloor !== null && yourFloor >= 0 ? yourFloor : '-'}${leaderboardTicksSuffix(yourFloorTicks)}`,
+            topHtml: `${bestFloor !== null ? bestFloor : '-'}${leaderboardTicksSuffix(bestFloorTicks)}`
+          }
+        ]
+      };
     });
-
-    containerDiv.appendChild(contentContainer);
 
     container.innerHTML = '';
-    container.appendChild(containerDiv);
-  }
-
-  function displaySpeedrunRankSearchResults(category, playerName, searchedRooms, yourRooms, ROOM_NAMES, best, roomsHighscores, container) {
-    const containerDiv = document.createElement('div');
-    Object.assign(containerDiv.style, {
-      display: 'flex',
-      flexDirection: 'column',
-      width: '100%',
-      height: '100%',
-      padding: '20px',
-      boxSizing: 'border-box'
-    });
-
-    const header = document.createElement('div');
-    header.style.cssText = `
-      font-size: 18px;
-      font-weight: bold;
-      color: ${COLOR_CONSTANTS.PRIMARY};
-      margin-bottom: 20px;
-      text-align: center;
-      padding: 10px;
-      background: rgba(255, 224, 102, 0.1);
-      border-radius: 8px;
-    `;
-    header.textContent = `${truncatePlayerName(playerName)}'s ${category} Data`;
-    containerDiv.appendChild(header);
-
-    const contentContainer = document.createElement('div');
-    contentContainer.style.cssText = `
-      flex: 1;
-      padding: 10px;
-    `;
-
-    const allRoomCodes = Object.keys(ROOM_NAMES).sort();
-
-    allRoomCodes.forEach(roomCode => {
-      const roomName = ROOM_NAMES[roomCode];
-      const searchedRoom = searchedRooms[roomCode];
-      const yourRoom = yourRooms[roomCode];
-
-      const roomEntry = document.createElement('div');
-      roomEntry.style.cssText = `
-        margin-bottom: 12px;
-        padding: 12px;
-        background: rgba(255, 255, 255, 0.05);
-        border-radius: 8px;
-        border: 1px solid rgba(255, 255, 255, 0.1);
-      `;
-
-      // Room header
-      const roomHeader = document.createElement('div');
-      roomHeader.style.cssText = `
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        margin-bottom: 8px;
-      `;
-
-      const thumbnail = createRoomThumbnail(roomCode, roomName, 32);
-
-      const roomTitle = document.createElement('div');
-      roomTitle.style.cssText = `
-        font-weight: bold;
-        color: ${COLOR_CONSTANTS.TEXT};
-        font-size: 14px;
-      `;
-      roomTitle.textContent = roomName;
-
-      roomHeader.appendChild(thumbnail);
-      roomHeader.appendChild(roomTitle);
-      roomEntry.appendChild(roomHeader);
-
-      if (category === 'Speedrun') {
-        const searchedTicks = searchedRoom.ticks || 0;
-        const yourTicks = yourRoom?.ticks || 0;
-        const bestTicks = best[roomCode]?.ticks || 0;
-        const bestPlayer = best[roomCode]?.userName || 'Unknown';
-
-        const dataRow = document.createElement('div');
-        dataRow.style.cssText = `
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          font-size: 12px;
-          color: #ccc;
-        `;
-
-        const searchedData = document.createElement('div');
-        searchedData.innerHTML = `
-          <div style="color: ${COLOR_CONSTANTS.PRIMARY}; font-weight: bold;">${truncatePlayerName(playerName)}:</div>
-          <div>${searchedTicks} ticks</div>
-        `;
-
-        const yourData = document.createElement('div');
-        yourData.innerHTML = `
-          <div style="color: #8f8; font-weight: bold;">You:</div>
-          <div>${yourTicks} ticks</div>
-        `;
-
-        const bestData = document.createElement('div');
-        bestData.innerHTML = `
-          <div style="color: #ff8; font-weight: bold;">Best:</div>
-          <div>${bestTicks} ticks</div>
-          <div style="font-size: 10px; color: #888;">by ${truncatePlayerName(bestPlayer)}</div>
-        `;
-
-        dataRow.appendChild(searchedData);
-        dataRow.appendChild(yourData);
-        dataRow.appendChild(bestData);
-        roomEntry.appendChild(dataRow);
-
-      } else if (category === 'Rank Points') {
-        const searchedRank = searchedRoom.rank || 0;
-        const searchedRankTicks = searchedRoom.rankTicks;
-        const yourRank = yourRoom?.rank || 0;
-        const yourRankTicks = yourRoom?.rankTicks;
-        const topRank = roomsHighscores?.rank?.[roomCode]?.rank || 0;
-        const topRankTicks = roomsHighscores?.rank?.[roomCode]?.ticks;
-        const topPlayer = roomsHighscores?.rank?.[roomCode]?.userName || 'Unknown';
-
-        const dataRow = document.createElement('div');
-        dataRow.style.cssText = `
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          font-size: 12px;
-          color: #ccc;
-        `;
-
-        const searchedData = document.createElement('div');
-        searchedData.innerHTML = `
-          <div style="color: ${COLOR_CONSTANTS.PRIMARY}; font-weight: bold;">${truncatePlayerName(playerName)}:</div>
-          <div>${searchedRank}${searchedRankTicks !== undefined && searchedRankTicks !== null ? ` <i style="color: #aaa;">(${searchedRankTicks})</i>` : ' (null)'}</div>
-        `;
-
-        const yourData = document.createElement('div');
-        yourData.innerHTML = `
-          <div style="color: #8f8; font-weight: bold;">You:</div>
-          <div>${yourRank}${yourRankTicks !== undefined && yourRankTicks !== null ? ` <i style="color: #aaa;">(${yourRankTicks})</i>` : ' (null)'}</div>
-        `;
-
-        const topData = document.createElement('div');
-        topData.innerHTML = `
-          <div style="color: #ff8; font-weight: bold;">Top:</div>
-          <div>${topRank}${topRankTicks !== undefined && topRankTicks !== null ? ` <i style="color: #aaa;">(${topRankTicks})</i>` : ' (null)'}</div>
-          <div style="font-size: 10px; color: #888;">by ${truncatePlayerName(topPlayer)}</div>
-        `;
-
-        dataRow.appendChild(searchedData);
-        dataRow.appendChild(yourData);
-        dataRow.appendChild(topData);
-        roomEntry.appendChild(dataRow);
-
-      } else if (category === 'Floors') {
-        const { floor: searchedFloor, floorTicks: searchedFloorTicks } = normalizeUserFloorData(searchedRoom);
-        const { floor: yourFloor, floorTicks: yourFloorTicks } = normalizeUserFloorData(yourRoom);
-        const { floor: bestFloor, floorTicks: bestFloorTicks, playerName: bestFloorPlayer } = normalizeBestFloorData(roomCode, roomsHighscores, best);
-
-        const dataRow = document.createElement('div');
-        dataRow.style.cssText = `
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          font-size: 12px;
-          color: #ccc;
-        `;
-
-        const searchedData = document.createElement('div');
-        searchedData.innerHTML = `
-          <div style="color: ${COLOR_CONSTANTS.PRIMARY}; font-weight: bold;">${truncatePlayerName(playerName)}:</div>
-          <div>Floor ${searchedFloor !== undefined && searchedFloor !== null ? searchedFloor : '-'}${searchedFloorTicks !== undefined && searchedFloorTicks !== null ? ` <i style="color: #aaa;">(${searchedFloorTicks} ticks)</i>` : ''}</div>
-        `;
-
-        const yourData = document.createElement('div');
-        yourData.innerHTML = `
-          <div style="color: #8f8; font-weight: bold;">You:</div>
-          <div>Floor ${yourFloor !== undefined && yourFloor !== null ? yourFloor : '-'}${yourFloorTicks !== undefined && yourFloorTicks !== null ? ` <i style="color: #aaa;">(${yourFloorTicks} ticks)</i>` : ''}</div>
-        `;
-
-        const bestData = document.createElement('div');
-        bestData.innerHTML = `
-          <div style="color: #ff8; font-weight: bold;">Best:</div>
-          <div>Floor ${bestFloor !== undefined && bestFloor !== null ? bestFloor : '-'}${bestFloorTicks !== undefined && bestFloorTicks !== null ? ` <i style="color: #aaa;">(${bestFloorTicks} ticks)</i>` : ''}</div>
-          <div style="font-size: 10px; color: #888;">by ${truncatePlayerName(bestFloorPlayer)}</div>
-        `;
-
-        dataRow.appendChild(searchedData);
-        dataRow.appendChild(yourData);
-        dataRow.appendChild(bestData);
-        roomEntry.appendChild(dataRow);
-      }
-
-      contentContainer.appendChild(roomEntry);
-    });
-
-    containerDiv.appendChild(contentContainer);
-
-    container.innerHTML = '';
-    container.appendChild(containerDiv);
-  }
-
-  function displaySearchResults(category, playerName, searchedRooms, yourRooms, ROOM_NAMES, best, roomsHighscores, container) {
-    displaySpeedrunRankSearchResults(category, playerName, searchedRooms, yourRooms, ROOM_NAMES, best, roomsHighscores, container);
+    container.appendChild(view);
   }
 
   function displayCombinedLeaderboardsSearchResults(playerName, searchedProfileData, yourRooms, ROOM_NAMES, best, roomsHighscores, container) {
@@ -20123,14 +19217,7 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
       });
       
       if (container) {
-        container.innerHTML = `
-          <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${COLOR_CONSTANTS.ERROR}; text-align: center; padding: 20px;">
-            <div style="font-size: 48px; margin-bottom: 16px;">⚠️</div>
-            <div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">Data Error</div>
-            <div style="font-size: 14px; margin-bottom: 16px; color: #888;">Could not load leaderboard data</div>
-            <div style="font-size: 12px; color: #666;">Please try searching again.</div>
-          </div>
-        `;
+        container.innerHTML = renderCyclopediaStatusHtml({ icon: '⚠️', iconSize: 48, title: `Data Error`, message: `Could not load leaderboard data`, hint: `Please try searching again.`, error: true });
       }
       return;
     }
@@ -20140,7 +19227,6 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
     // Use new rooms data from profilePageData if available, otherwise fall back to highscores
     const searchedRooms = scopedProfile.rooms || {};
     const searchedHighscores = scopedProfile.highscores || [];
-    const yourRoomsScoped = getYourRoomsForCyclopediaSeason(yourRooms);
     
     const searchedHighscoresMap = {};
     const searchedRankPointsMap = {};
@@ -20171,281 +19257,64 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
         }
       });
     }
-    const formatTime = FormatUtils.milliseconds;
+    const view = buildLeaderboardsView(ROOM_NAMES, playerName, (roomCode) => {
+      const searchedScore = searchedHighscoresMap[roomCode];
+      const searchedRoom = searchedRooms[roomCode];
 
-    const containerDiv = document.createElement('div');
-    Object.assign(containerDiv.style, {
-      display: 'flex',
-      flexDirection: 'column',
-      width: '100%',
-      height: '100%',
-      padding: '8px',
-      boxSizing: 'border-box',
-      minWidth: '0',
-      maxWidth: '100%'
-    });
-
-    const contentContainer = document.createElement('div');
-    contentContainer.style.cssText = `
-      flex: 1;
-      padding: 2px;
-      min-width: 0;
-      max-width: 100%;
-    `;
-
-    // Organize rooms by region (show all maps)
-    const organizedRooms = organizeRoomsByRegion(createAllRoomsObject(ROOM_NAMES), ROOM_NAMES);
-
-    // Create room entries organized by region
-    Object.entries(organizedRooms).forEach(([regionName, regionRooms]) => {
-      // Create region header using the title system with sticky positioning
-      const regionHeader = DOMUtils.createTitle(`${regionName} (${regionRooms.length} maps)`, FONT_CONSTANTS.SIZES.SMALL);
-      Object.assign(regionHeader.style, {
-        margin: '8px 0 4px 0',
-        width: '100%',
-        position: 'sticky',
-        top: '0',
-        zIndex: '10',
-        backgroundColor: '#232323'
-      });
-      contentContainer.appendChild(regionHeader);
-
-      regionRooms.forEach(({ roomCode, roomName }) => {
-        const searchedScore = searchedHighscoresMap[roomCode];
-        const yourRoom = yourRoomsScoped[roomCode];
-        const searchedRoom = searchedRooms[roomCode];
-
-        const hasSearchedScore = searchedScore && searchedScore.ticks;
-        const hasSearchedRankScore = searchedRankPointsMap[roomCode];
-
-        const roomEntry = document.createElement('div');
-        roomEntry.style.cssText = `
-          display: grid;
-          grid-template-columns: 80px 1fr;
-          align-items: center;
-          gap: 8px;
-          margin-bottom: 4px;
-          padding: 6px;
-          background: rgba(255, 255, 255, 0.05);
-          border-radius: 4px;
-          border: 1px solid rgba(255, 255, 255, 0.1);
-          min-width: 0;
-          max-width: 100%;
-        `;
-
-      const mapColumn = createMapColumn(roomCode, roomName, searchedRoom?.count);
-
-      const dataColumn = document.createElement('div');
-      dataColumn.style.cssText = `
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-        width: 100%;
-        min-width: 0;
-        max-width: 100%;
-      `;
-
-      const searchedTicks = hasSearchedScore ? searchedScore.ticks : null;
+      const searchedTicks = searchedScore && searchedScore.ticks ? searchedScore.ticks : null;
       const topTicks = best?.[roomCode]?.ticks || null;
-
-      const speedrunRow = document.createElement('div');
       const isSpeedrunTop = searchedTicks !== null && topTicks !== null && searchedTicks === topTicks;
-      speedrunRow.style.cssText = `
-        display: grid;
-        grid-template-columns: 120px 120px;
-        align-items: center;
-        gap: 6px;
-        padding: 4px;
-        background: ${isSpeedrunTop ? 'url("https://bestiaryarena.com/_next/static/media/background-green.be515334.png")' : 'rgba(255, 255, 255, 0.03)'};
-        border-radius: 3px;
-        border-left: 3px solid #4CAF50;
-        min-width: 0;
-        max-width: 100%;
-      `;
-
-      const searchedSpeedrun = document.createElement('div');
-      searchedSpeedrun.style.cssText = `
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        font-size: 13px;
-        color: #ccc;
-        width: 120px;
-        font-weight: ${isSpeedrunTop ? 'bold' : 'normal'};
-      `;
-      searchedSpeedrun.innerHTML = `
-        <span style="color: ${COLOR_CONSTANTS.PRIMARY}; font-weight: bold;">${truncateListPlayerName(playerName)}:</span>
-        <span>${searchedTicks !== null && searchedTicks >= 0 ? searchedTicks + ' ticks' : '-'}</span>
-      `;
-
-      const topSpeedrun = document.createElement('div');
-      topSpeedrun.style.cssText = `
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        font-size: 13px;
-        color: #ccc;
-        width: 120px;
-        font-weight: ${isSpeedrunTop ? 'bold' : 'normal'};
-      `;
-      topSpeedrun.innerHTML = `
-        <span style="color: #ff8; font-weight: bold;">Top:</span>
-        <span>${topTicks !== null ? topTicks + ' ticks' : '-'}</span>
-      `;
-
-      speedrunRow.appendChild(searchedSpeedrun);
-      speedrunRow.appendChild(topSpeedrun);
 
       const searchedRankScore = searchedRankPointsMap[roomCode];
       const searchedRank = searchedRankScore ? searchedRankScore.rank : null;
       const searchedRankTicks = searchedRankScore?.rankTicks || searchedRooms[roomCode]?.rankTicks;
       const topRank = roomsHighscores?.rank?.[roomCode]?.rank || null;
       const topRankTicks = roomsHighscores?.rank?.[roomCode]?.ticks;
-
       const isRankTop = searchedRank !== null && topRank !== null && searchedRank === topRank &&
         (searchedRankTicks === topRankTicks ||
          ((searchedRankTicks === undefined || searchedRankTicks === null) && (topRankTicks === undefined || topRankTicks === null)));
 
-      const rankRow = document.createElement('div');
-      rankRow.style.cssText = `
-        display: grid;
-        grid-template-columns: 120px 120px;
-        align-items: center;
-        min-width: 0;
-        max-width: 100%;
-        gap: 6px;
-        padding: 4px;
-        background: ${isRankTop ? 'url("https://bestiaryarena.com/_next/static/media/background-green.be515334.png")' : 'rgba(255, 255, 255, 0.03)'};
-        border-radius: 3px;
-        border-left: 3px solid #FF9800;
-      `;
-
-      const searchedRankData = document.createElement('div');
-      searchedRankData.style.cssText = `
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        font-size: 13px;
-        color: #ccc;
-        width: 120px;
-        font-weight: ${isRankTop ? 'bold' : 'normal'};
-      `;
-      searchedRankData.innerHTML = `
-        <span style="color: ${COLOR_CONSTANTS.PRIMARY}; font-weight: bold;">${truncateListPlayerName(playerName)}:</span>
-        <span style="white-space: nowrap;"><img src="${CYCLOPEDIA_ASSETS.starTier}" alt="Rank" style="width: 9px; height: 10px; vertical-align: middle; margin-right: 2px; display: inline-block;">${searchedRank !== null && searchedRank >= 0 ? searchedRank + (searchedRankTicks !== undefined && searchedRankTicks !== null ? ` <i style="color: #aaa;">(${searchedRankTicks})</i>` : ' (null)') : '-'}</span>
-      `;
-
-      const topRankData = document.createElement('div');
-      topRankData.style.cssText = `
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        font-size: 13px;
-        color: #ccc;
-        width: 120px;
-        font-weight: ${isRankTop ? 'bold' : 'normal'};
-      `;
-      topRankData.innerHTML = `
-        <span style="color: #ff8; font-weight: bold;">Top:</span>
-        <span style="white-space: nowrap;"><img src="${CYCLOPEDIA_ASSETS.starTier}" alt="Rank" style="width: 9px; height: 10px; vertical-align: middle; margin-right: 2px; display: inline-block;">${topRank !== null ? topRank + (topRankTicks !== undefined && topRankTicks !== null ? ` <i style="color: #aaa;">(${topRankTicks})</i>` : ' (null)') : '-'}</span>
-      `;
-
-      rankRow.appendChild(searchedRankData);
-      rankRow.appendChild(topRankData);
-
-      // Floor row
       const { floor: searchedFloor, floorTicks: searchedFloorTicks } = normalizeUserFloorData(searchedRoom);
-      const { floor: yourFloor, floorTicks: yourFloorTicks } = normalizeUserFloorData(yourRoom);
       const { floor: bestFloor, floorTicks: bestFloorTicks } = normalizeBestFloorData(roomCode, roomsHighscores, best);
-
       const isFloorTop = searchedFloor !== null && bestFloor !== null && searchedFloor === bestFloor &&
         (searchedFloorTicks === bestFloorTicks ||
          ((searchedFloorTicks === undefined || searchedFloorTicks === null) && (bestFloorTicks === undefined || bestFloorTicks === null)));
 
-      const floorRow = document.createElement('div');
-      floorRow.style.cssText = `
-        display: grid;
-        grid-template-columns: 120px 120px;
-        align-items: center;
-        min-width: 0;
-        max-width: 100%;
-        gap: 6px;
-        padding: 4px;
-        background: ${isFloorTop ? 'url("https://bestiaryarena.com/_next/static/media/background-green.be515334.png")' : 'rgba(255, 255, 255, 0.03)'};
-        border-radius: 3px;
-        border-left: 3px solid #9C27B0;
-      `;
-
-      const searchedFloorData = document.createElement('div');
-      searchedFloorData.style.cssText = `
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        font-size: 13px;
-        color: #ccc;
-        width: 120px;
-        font-weight: ${isFloorTop ? 'bold' : 'normal'};
-      `;
-      searchedFloorData.innerHTML = `
-        <span style="color: ${COLOR_CONSTANTS.PRIMARY}; font-weight: bold;">${truncateListPlayerName(playerName)}:</span>
-        <span style="white-space: nowrap;">${searchedFloor !== null && searchedFloor >= 0 ? `<img src="https://bestiaryarena.com/assets/UI/floor-15.png" alt="Floor" style="width: 14px; height: 7px; vertical-align: middle; margin-right: 2px; display: inline-block;">${searchedFloor}${searchedFloorTicks !== undefined && searchedFloorTicks !== null ? ` <i style="color: #aaa;">(${searchedFloorTicks})</i>` : ''}` : '-'}</span>
-      `;
-
-      const topFloorData = document.createElement('div');
-      topFloorData.style.cssText = `
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        font-size: 13px;
-        color: #ccc;
-        width: 120px;
-        font-weight: ${isFloorTop ? 'bold' : 'normal'};
-      `;
-      topFloorData.innerHTML = `
-        <span style="color: #ff8; font-weight: bold;">Top:</span>
-        <span style="white-space: nowrap;">${bestFloor !== null ? `<img src="https://bestiaryarena.com/assets/UI/floor-15.png" alt="Floor" style="width: 14px; height: 7px; vertical-align: middle; margin-right: 2px; display: inline-block;">${bestFloor}${bestFloorTicks !== undefined && bestFloorTicks !== null ? ` <i style="color: #aaa;">(${bestFloorTicks})</i>` : ''}` : '-'}</span>
-      `;
-
-      floorRow.appendChild(searchedFloorData);
-      floorRow.appendChild(topFloorData);
-
-      dataColumn.appendChild(speedrunRow);
-      dataColumn.appendChild(rankRow);
-      dataColumn.appendChild(floorRow);
-
-      roomEntry.appendChild(mapColumn);
-      roomEntry.appendChild(dataColumn);
-      contentContainer.appendChild(roomEntry);
-      });
+      return {
+        completionCount: searchedRoom?.count,
+        rows: [
+          {
+            iconHtml: leaderboardSpeedImg, isTop: isSpeedrunTop,
+            subjectHtml: searchedTicks !== null && searchedTicks >= 0 ? `${searchedTicks} ticks` : '-',
+            topHtml: topTicks !== null ? `${topTicks} ticks` : '-'
+          },
+          {
+            iconHtml: leaderboardRankImg, isTop: isRankTop,
+            subjectHtml: `${searchedRank !== null && searchedRank >= 0 ? searchedRank + leaderboardTicksSuffix(searchedRankTicks, ' (null)') : '-'}`,
+            topHtml: `${topRank !== null ? topRank + leaderboardTicksSuffix(topRankTicks, ' (null)') : '-'}`
+          },
+          {
+            iconHtml: leaderboardFloorImg, isTop: isFloorTop,
+            subjectHtml: searchedFloor !== null && searchedFloor >= 0 ? `${searchedFloor}${leaderboardTicksSuffix(searchedFloorTicks)}` : '-',
+            topHtml: bestFloor !== null ? `${bestFloor}${leaderboardTicksSuffix(bestFloorTicks)}` : '-'
+          }
+        ]
+      };
     });
 
-    containerDiv.appendChild(contentContainer);
-
     container.innerHTML = '';
-    container.appendChild(containerDiv);
+    container.appendChild(view);
   }
 
   // Function to display searched player's stats in col3
   const displaySearchedPlayerStats = (playerName, profileData, targetColumn = col3) => {
-    // Check if we're in Speedrun, Rank Points, or Combined Leaderboards mode
+    // Leaderboards search (the only mode that sets currentSpeedrunRankCategory)
     if (window.currentSpeedrunRankCategory && window.currentSpeedrunRankData) {
       if (window.currentSpeedrunRankCategory === 'Combined') {
         // Handle Combined Leaderboards search
         displayCombinedLeaderboardsSearchResults(
           playerName,
           profileData,
-          window.currentSpeedrunRankData.yourRooms,
-          window.currentSpeedrunRankData.ROOM_NAMES,
-          window.currentSpeedrunRankData.best,
-          window.currentSpeedrunRankData.roomsHighscores,
-          targetColumn
-        );
-      } else {
-        // Handle Speedrun/Rank Points search
-        displaySpeedrunRankSearchResults(
-          window.currentSpeedrunRankCategory,
-          playerName,
-          profileData.rooms,
           window.currentSpeedrunRankData.yourRooms,
           window.currentSpeedrunRankData.ROOM_NAMES,
           window.currentSpeedrunRankData.best,
@@ -20666,7 +19535,7 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
           backgroundColor: '#232323',
           color: COLOR_CONSTANTS.TEXT,
           fontFamily: FONT_CONSTANTS.PRIMARY,
-          fontSize: '12px',
+          fontSize: '11px',
           boxSizing: 'border-box'
         });
 
@@ -20677,7 +19546,7 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
           right: '6px',
           top: '50%',
           transform: 'translateY(-50%)',
-          fontSize: '14px',
+          fontSize: '13px',
           pointerEvents: 'none',
           display: 'none'
         });
@@ -20711,7 +19580,7 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
           backgroundColor: '#232323',
           color: COLOR_CONSTANTS.TEXT,
           fontFamily: FONT_CONSTANTS.PRIMARY,
-          fontSize: '12px',
+          fontSize: '11px',
           cursor: 'pointer',
           boxSizing: 'border-box'
         });
@@ -20831,13 +19700,7 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
           }
           
           // Show loading state only in col3 (col2 keeps user's stats)
-          col3.innerHTML = `
-            <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${COLOR_CONSTANTS.TEXT}; text-align: center; padding: 20px;">
-              <div style="font-size: 24px; margin-bottom: 16px;">🔍</div>
-              <div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">Searching...</div>
-              <div style="font-size: 14px; color: #888;">Looking for player: ${searchTerm}</div>
-            </div>
-          `;
+          col3.innerHTML = renderCyclopediaStatusHtml({ icon: '🔍', iconSize: 24, title: `Searching...`, message: `Looking for player: ${searchTerm}` });
           
           try {
             // Check cache first for the searched player's profile data
@@ -20861,14 +19724,7 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
               statusIndicator.style.display = 'block';
               
               // Show "Player doesn't exist" message only in col3
-              col3.innerHTML = `
-                <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${COLOR_CONSTANTS.ERROR}; text-align: center; padding: 20px;">
-                  <div style="font-size: 48px; margin-bottom: 16px;">⚠️</div>
-                  <div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">Player doesn't exist</div>
-                  <div style="font-size: 14px; margin-bottom: 16px; color: #888;">Could not find player: ${truncatePlayerName(searchTerm)}</div>
-                  <div style="font-size: 12px; color: #666;">Please check the spelling and try again.</div>
-                </div>
-              `;
+              col3.innerHTML = renderCyclopediaStatusHtml({ icon: '⚠️', iconSize: 48, title: `Player doesn't exist`, message: `Could not find player: ${truncatePlayerName(searchTerm)}`, hint: `Please check the spelling and try again.`, error: true });
               return;
             }
 
@@ -20876,14 +19732,7 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
               statusIndicator.innerHTML = 'X';
               statusIndicator.style.color = '#ff6b6b';
               statusIndicator.style.display = 'block';
-              col3.innerHTML = `
-                <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${COLOR_CONSTANTS.ERROR}; text-align: center; padding: 20px;">
-                  <div style="font-size: 48px; margin-bottom: 16px;">⚠️</div>
-                  <div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">Invalid search result</div>
-                  <div style="font-size: 14px; margin-bottom: 16px; color: #888;">No usable profile data found for: ${truncatePlayerName(searchTerm)}</div>
-                  <div style="font-size: 12px; color: #666;">Try a different player name.</div>
-                </div>
-              `;
+              col3.innerHTML = renderCyclopediaStatusHtml({ icon: '⚠️', iconSize: 48, title: `Invalid search result`, message: `No usable profile data found for: ${truncatePlayerName(searchTerm)}`, hint: `Try a different player name.`, error: true });
               return;
             }
             
@@ -20904,14 +19753,7 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
                 
               } catch (error) {
                 console.error('[Cyclopedia] Error displaying leaderboard search results:', error);
-                col3.innerHTML = `
-                  <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${COLOR_CONSTANTS.ERROR}; text-align: center; padding: 20px;">
-                    <div style="font-size: 48px; margin-bottom: 16px;">⚠️</div>
-                    <div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">Search Error</div>
-                    <div style="font-size: 14px; margin-bottom: 16px; color: #888;">Could not search for: ${truncatePlayerName(searchTerm)}</div>
-                    <div style="font-size: 12px; color: #666;">Please try again later.</div>
-                  </div>
-                `;
+                col3.innerHTML = renderCyclopediaStatusHtml({ icon: '⚠️', iconSize: 48, title: `Search Error`, message: `Could not search for: ${truncatePlayerName(searchTerm)}`, hint: `Please try again later.`, error: true });
                 
                 // Show red cross for search error
                 statusIndicator.innerHTML = 'X';
@@ -20951,14 +19793,7 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
             }
             
             // Show error state only in col3
-            col3.innerHTML = `
-              <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${COLOR_CONSTANTS.ERROR}; text-align: center; padding: 20px;">
-                <div style="font-size: 48px; margin-bottom: 16px;">⚠️</div>
-                <div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">${errorMessage}</div>
-                <div style="font-size: 14px; margin-bottom: 16px; color: #888;">${errorDetails}</div>
-                <div style="font-size: 12px; color: #666;">Search term: ${searchTerm}</div>
-              </div>
-            `;
+            col3.innerHTML = renderCyclopediaStatusHtml({ icon: '⚠️', iconSize: 48, title: `${errorMessage}`, message: `${errorDetails}`, hint: `Search term: ${searchTerm}`, error: true });
           }
         };
 
@@ -21072,13 +19907,7 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
                 let profileData = getCachedProfileData(playerState.name);
                 if (!profileData) {
                   // Show loading state
-                  col3.innerHTML = `
-                    <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${COLOR_CONSTANTS.TEXT}; text-align: center; padding: 20px;">
-                      <div style="font-size: 24px; margin-bottom: 16px;">📚</div>
-                      <div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">Loading...</div>
-                      <div style="font-size: 14px; color: #888;">Fetching profile data</div>
-                    </div>
-                  `;
+                  col3.innerHTML = renderCyclopediaStatusHtml({ icon: '📚', iconSize: 24, title: `Loading...`, message: `Fetching profile data` });
                   
                   // Fetch profile data
                   try {
@@ -21151,13 +19980,7 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
               let profileData = getCachedProfileData(playerState.name);
               if (!profileData) {
                 // Show loading state
-                col3.innerHTML = `
-                  <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${COLOR_CONSTANTS.TEXT}; text-align: center; padding: 20px;">
-                    <div style="font-size: 24px; margin-bottom: 16px;">📚</div>
-                    <div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">Loading...</div>
-                    <div style="font-size: 14px; color: #888;">Fetching profile data</div>
-                  </div>
-                `;
+                col3.innerHTML = renderCyclopediaStatusHtml({ icon: '📚', iconSize: 24, title: `Loading...`, message: `Fetching profile data` });
                 
                 // Fetch profile data
                 try {
@@ -21258,13 +20081,7 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
                 // Load leaderboard data first, then populate col3
                 if (playerState?.name) {
                   // Show loading state in col3
-                  col3.innerHTML = `
-                    <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${COLOR_CONSTANTS.TEXT}; text-align: center; padding: 20px;">
-                      <div style="font-size: 24px; margin-bottom: 16px;">📊</div>
-                      <div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">Loading Leaderboards...</div>
-                      <div style="font-size: 14px; color: #888;">Preparing ${truncatePlayerName(cyclopediaState.searchedUsername)}'s data</div>
-                    </div>
-                  `;
+                  col3.innerHTML = renderCyclopediaStatusHtml({ icon: '📊', iconSize: 24, title: `Loading Leaderboards...`, message: `Preparing ${truncatePlayerName(cyclopediaState.searchedUsername)}'s data` });
                   
                   // Load leaderboard data
                   displayCombinedLeaderboardsData(playerState).then(() => {
@@ -21283,14 +20100,7 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
                     }
                   }).catch(error => {
                     console.error('[Cyclopedia] Error loading leaderboard data for searched player:', error);
-                    col3.innerHTML = `
-                      <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${COLOR_CONSTANTS.ERROR}; text-align: center; padding: 20px;">
-                        <div style="font-size: 48px; margin-bottom: 16px;">⚠️</div>
-                        <div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">Load Error</div>
-                        <div style="font-size: 14px; margin-bottom: 16px; color: #888;">Could not load leaderboard data</div>
-                        <div style="font-size: 12px; color: #666;">Please try again later.</div>
-                      </div>
-                    `;
+                    col3.innerHTML = renderCyclopediaStatusHtml({ icon: '⚠️', iconSize: 48, title: `Load Error`, message: `Could not load leaderboard data`, hint: `Please try again later.`, error: true });
                   });
                 }
               }
@@ -21298,13 +20108,7 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
               // No searched profile data, but we have a username - try to fetch it
               if (playerState?.name) {
                 // Show loading state in col3
-                col3.innerHTML = `
-                  <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${COLOR_CONSTANTS.TEXT}; text-align: center; padding: 20px;">
-                    <div style="font-size: 24px; margin-bottom: 16px;">📊</div>
-                    <div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">Loading Leaderboards...</div>
-                    <div style="font-size: 14px; color: #888;">Preparing ${cyclopediaState.searchedUsername}'s data</div>
-                  </div>
-                `;
+                col3.innerHTML = renderCyclopediaStatusHtml({ icon: '📊', iconSize: 24, title: `Loading Leaderboards...`, message: `Preparing ${cyclopediaState.searchedUsername}'s data` });
                 
                 // Load leaderboard data first, then fetch and display searched player's data
                 displayCombinedLeaderboardsData(playerState).then(() => {
@@ -21326,59 +20130,26 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
                       }
                     } else {
                       // Player doesn't exist
-                      col3.innerHTML = `
-                        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${COLOR_CONSTANTS.ERROR}; text-align: center; padding: 20px;">
-                          <div style="font-size: 48px; margin-bottom: 16px;">⚠️</div>
-                          <div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">Player doesn't exist</div>
-                          <div style="font-size: 14px; margin-bottom: 16px; color: #888;">Could not find player: ${truncatePlayerName(cyclopediaState.searchedUsername)}</div>
-                          <div style="font-size: 12px; color: #666;">Please check the spelling and try again.</div>
-                        </div>
-                      `;
+                      col3.innerHTML = renderCyclopediaStatusHtml({ icon: '⚠️', iconSize: 48, title: `Player doesn't exist`, message: `Could not find player: ${truncatePlayerName(cyclopediaState.searchedUsername)}`, hint: `Please check the spelling and try again.`, error: true });
                     }
                   }).catch(error => {
                     console.error('[Cyclopedia] Error fetching searched player data:', error);
-                    col3.innerHTML = `
-                      <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${COLOR_CONSTANTS.ERROR}; text-align: center; padding: 20px;">
-                        <div style="font-size: 48px; margin-bottom: 16px;">⚠️</div>
-                        <div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">Search Error</div>
-                        <div style="font-size: 14px; margin-bottom: 16px; color: #888;">Could not search for: ${truncatePlayerName(cyclopediaState.searchedUsername)}</div>
-                        <div style="font-size: 12px; color: #666;">Please try again later.</div>
-                      </div>
-                    `;
+                    col3.innerHTML = renderCyclopediaStatusHtml({ icon: '⚠️', iconSize: 48, title: `Search Error`, message: `Could not search for: ${truncatePlayerName(cyclopediaState.searchedUsername)}`, hint: `Please try again later.`, error: true });
                   });
                 }).catch(error => {
                   console.error('[Cyclopedia] Error loading leaderboard data:', error);
-                  col3.innerHTML = `
-                    <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${COLOR_CONSTANTS.ERROR}; text-align: center; padding: 20px;">
-                      <div style="font-size: 48px; margin-bottom: 16px;">⚠️</div>
-                      <div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">Load Error</div>
-                      <div style="font-size: 14px; margin-bottom: 16px; color: #888;">Could not load leaderboard data</div>
-                      <div style="font-size: 12px; color: #666;">Please try again later.</div>
-                    </div>
-                  `;
+                  col3.innerHTML = renderCyclopediaStatusHtml({ icon: '⚠️', iconSize: 48, title: `Load Error`, message: `Could not load leaderboard data`, hint: `Please try again later.`, error: true });
                 });
               } else {
                 // Show loading state in col3
-                col3.innerHTML = `
-                  <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${COLOR_CONSTANTS.TEXT}; text-align: center; padding: 20px;">
-                    <div style="font-size: 24px; margin-bottom: 16px;">📊</div>
-                    <div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">Loading Leaderboards...</div>
-                    <div style="font-size: 14px; color: #888;">Preparing search functionality</div>
-                  </div>
-                `;
+                col3.innerHTML = renderCyclopediaStatusHtml({ icon: '📊', iconSize: 24, title: `Loading Leaderboards...`, message: `Preparing search functionality` });
               }
             }
           } else {
             // No searched username, show default behavior
             if (playerState?.name) {
               // Show loading state in col3
-              col3.innerHTML = `
-                <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${COLOR_CONSTANTS.TEXT}; text-align: center; padding: 20px;">
-                  <div style="font-size: 24px; margin-bottom: 16px;">📊</div>
-                  <div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">Loading Leaderboards...</div>
-                  <div style="font-size: 14px; color: #888;">Preparing search functionality</div>
-                </div>
-              `;
+              col3.innerHTML = renderCyclopediaStatusHtml({ icon: '📊', iconSize: 24, title: `Loading Leaderboards...`, message: `Preparing search functionality` });
             
               // Update search functionality for Leaderboards
               displayCombinedLeaderboardsData(playerState).then(() => {
@@ -21744,7 +20515,7 @@ function openCyclopediaModal(options) {
       ),
       () => createInventoryTabPage(selectedCreature, selectedEquipment, selectedInventory, v => { selectedCreature = v; }, v => { selectedEquipment = v; }, v => { selectedInventory = v; }, () => {}, pendingGazerSelection),
       () => createMapsTabPage(selectedCreature, selectedEquipment, selectedInventory, v => { selectedCreature = v; }, v => { selectedEquipment = v; }, v => { selectedInventory = v; }, () => {}, { setActiveTab, tabPages }),
-      () => createCharactersTabPage(selectedCreature, selectedEquipment, selectedInventory, v => { selectedCreature = v; }, v => { selectedEquipment = v; }, v => { selectedInventory = v; }, () => {})
+      () => createCharactersTabPage(selectedCreature, selectedEquipment, selectedInventory, v => { selectedCreature = v; }, v => { selectedEquipment = v; }, v => { selectedInventory = v; }, () => {}, { setActiveTab, tabPages })
     ];
 
     const tabNames = ['Home', 'Bestiary', 'Arsenal', 'Inventory', 'Maps', 'Characters'];
@@ -21807,7 +20578,7 @@ function openCyclopediaModal(options) {
     flexRow.style.height = 'auto';
     flexRow.style.boxSizing = 'border-box';
     flexRow.style.border = '6px solid transparent';
-    flexRow.style.borderImage = 'url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch';
+    flexRow.style.borderImage = `url("${CYCLOPEDIA_ASSETS.frame4}") 6 fill stretch`;
     flexRow.style.overflow = 'hidden';
 
     const mainContent = document.createElement('div');

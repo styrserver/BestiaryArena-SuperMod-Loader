@@ -35,7 +35,7 @@ let modBaseUrl = '';
 // Embedded fallback when dynamic import of mod-registry.js fails (e.g. Orion iOS).
 // Keep in sync with content/mod-registry.js
 const FALLBACK_DATABASE_MODS = [
-  'welcome.js', 'inventory-database.js', 'creature-database.js', 'equipment-database.js',
+  'welcome.js', 'inventory-database.js', 'creature-database.js', 'equipment-database.js', 'tool-runs.js',
   'maps-database.js', 'equipment-lua-export.js', 'creature-lua-export.js',
   'maps-lua-export.js', 'regions-lua-export.js', 'playereq-database.js', 'firebase-admins.js'
 ];
@@ -76,7 +76,7 @@ function ensureWelcomeModAlwaysEnabled(mods) {
 
 const FALLBACK_DEFAULT_ENABLED_MODS = [
   'database/welcome.js', 'database/inventory-database.js', 'database/creature-database.js',
-  'database/equipment-database.js', 'database/maps-database.js', 'database/equipment-lua-export.js',
+  'database/equipment-database.js', 'database/tool-runs.js', 'database/maps-database.js', 'database/equipment-lua-export.js',
   'database/creature-lua-export.js',
   'database/maps-lua-export.js', 'database/regions-lua-export.js',
   'database/playereq-database.js', 'database/firebase-admins.js',
@@ -751,6 +751,7 @@ let defaultEnabledMods = [
   'database/inventory-database.js',
   'database/creature-database.js',
   'database/equipment-database.js',
+  'database/tool-runs.js',
   'database/maps-database.js',
   'database/equipment-lua-export.js',
   'database/creature-lua-export.js',

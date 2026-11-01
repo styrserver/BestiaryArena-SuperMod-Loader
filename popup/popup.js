@@ -149,6 +149,7 @@ const hiddenMods = [
   'creature-database.js',
   'welcome.js',
   'equipment-database.js',
+  'tool-runs.js',
   'maps-database.js',
   'equipment-lua-export.js',
   'creature-lua-export.js',

@@ -71,10 +71,18 @@ function getEquipmentSlotType(equipment) {
     'bear skin': 'armor',
     'bloody edge': 'weapon',
     'cranial basher': 'weapon',
+    'depth calcei': 'boots',
+    'djinn blade': 'weapon',
+    'dreaded cleaver': 'weapon',
     'epee': 'weapon',
     'glass of goo': 'ammo',
+    'grey tome': 'shield',
+    'haunted blade': 'weapon',
     'ice rapier': 'weapon',
+    'orclops santa': 'ammo',
     'ratana': 'weapon',
+    'spellbook of ancient arcana': 'shield',
+    'vampire silk slippers': 'boots',
     'white skull': 'ammo'
   };
   

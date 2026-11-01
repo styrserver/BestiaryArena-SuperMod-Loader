@@ -4,6 +4,81 @@
   },
   "notes": [
     {
+      "version": "5.2.4",
+      "changes": [
+        {
+          "mod": "Better Analytics",
+          "type": "fixed",
+          "text": "Creature names and ids are now looked up only through the shared creature database instead of a separate scan of game creatures. Downloaded game data is released when the mod is disabled, and a slow download is cancelled after 15 seconds."
+        },
+        {
+          "mod": "Better Daycare",
+          "type": "fixed",
+          "text": "The Cyclopedia is no longer mistaken for the Daycare window when the Daycare item is shown in its Inventory tab (it was renamed and got a Queue button)."
+        },
+        {
+          "mod": "creature-database.js",
+          "type": "changed",
+          "text": "Gazer species ids are now read from the game's creature list instead of a hardcoded list, so a new Gazer is picked up automatically."
+        },
+        {
+          "mod": "creature-database.js",
+          "type": "fixed",
+          "text": "Creature lookups no longer get stuck empty when the database loads before the game is ready; it keeps retrying until the game data is available. Lookups by id and name are faster, and mods can use the new getMonsterById instead of scanning game creatures themselves."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "added",
+          "text": "Leaderboards now have a column header with your name and Top instead of repeating \"You\" and the name on every row, one icon per stat row, and clickable maps that open in the Maps tab (hover for the full name). The Maps tab shows each map's stamina cost on its picture, and the Arsenal map lists show stamina like the Bestiary does; for multi-floor quest rooms it covers only the floors where the creature or item appears. Victory counts are short (7.8k), with the exact number on hover."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "changed",
+          "text": "Text is sharper and more consistent across the Home, Maps, Inventory, Characters and Arsenal tabs, and the Statistics and Leaderboards columns line up at any width. Long map names wrap so the stamina cost stays visible, boosted-item icons break into rows of 4, and loading and error screens have a new look with a working Retry button."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "fixed",
+          "text": "Minotaur Archer now shows its own stats and ability numbers instead of those of the Old Minotaur Archer boss. The Unobtainable list, creature search and map search no longer stay empty if the Cyclopedia loads before the game data is ready. The Retry button on a failed stats load works again."
+        },
+        {
+          "mod": "docs/game_state_api.md",
+          "type": "fixed",
+          "text": "Corrected the creatureDatabase reference (ALL_CREATURES is obtainable species only, missing lookups return undefined) and documented getMonsterById."
+        },
+        {
+          "mod": "inventory-database.js",
+          "type": "changed",
+          "text": "The Creature Awakening tooltip now uses the game's wording, and the Daily Boosted Map tooltip no longer has an invented quote."
+        },
+        {
+          "mod": "maps-database.js",
+          "type": "added",
+          "text": "diffHardcodedNames compares the hand-written name lists in the databases (event creatures, boosted-map equipment, expansion maps) with the game, shared by the admin check and the tools."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "added",
+          "text": "Firebase admins get a once-a-day check that the hand-written name lists in the databases still exist in the game, and a reminder to re-run the tools after the game is updated."
+        },
+        {
+          "mod": "playereq-database.js",
+          "type": "fixed",
+          "text": "Eight items (the blades and cleaver, the two footwear items, the spellbook, the tome and the Santa item) are no longer left without an equipment slot, which hid them from slot filters. The name check now also flags any new equipment that cannot be placed in a slot."
+        },
+        {
+          "mod": "tool-runs.js",
+          "type": "added",
+          "text": "Records when each drift-check tool last ran and against which game build."
+        },
+        {
+          "mod": "tools",
+          "type": "added",
+          "text": "check-all.mjs runs every drift check at once. New checks compare inventory item keys, store prices and tooltip text, and the hand-written name lists in the databases, with the live game."
+        }
+      ]
+    },
+    {
       "version": "5.2.3",
       "changes": [
         {

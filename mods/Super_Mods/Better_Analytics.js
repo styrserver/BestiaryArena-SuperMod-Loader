@@ -1106,6 +1106,7 @@
     function cleanup() {
         try {
             cleanupRuntime();
+            releaseGameScriptChunks();
             isPausedForBlockingMod = false;
 
             if (pageUnloadHandler) {
@@ -1419,7 +1420,6 @@
     let slowMotionEnabled = false;
     let tickSpeedSubscription = null;
     let turboSuspendedForSlowMotion = false;
-    let gameIdByNameCache = null;
     let collapsedOverrides = new Map();
     let openAbilityOverrides = new Map();
     const abilityTooltipRefreshTimers = new WeakMap();
@@ -4734,33 +4734,10 @@
         }
     }
 
-    function buildGameIdByNameMap() {
-        if (gameIdByNameCache) return gameIdByNameCache;
-        const map = new Map();
-        const getMonster = globalThis.state?.utils?.getMonster;
-        if (typeof getMonster !== 'function') {
-            gameIdByNameCache = map;
-            return map;
-        }
-        for (let i = 1; i < 600; i++) {
-            try {
-                const m = getMonster(i);
-                if (!m?.metadata?.name) break;
-                map.set(m.metadata.name.toLowerCase(), i);
-            } catch {
-                break;
-            }
-        }
-        gameIdByNameCache = map;
-        return map;
-    }
-
     function resolveGameIdFromName(name) {
         if (!name) return null;
-        const fromDb = window.creatureDatabase?.findMonsterByName?.(name);
-        const dbId = fromDb?.gameId;
-        if (dbId != null && Number.isFinite(Number(dbId))) return Number(dbId);
-        return buildGameIdByNameMap().get(String(name).toLowerCase()) ?? null;
+        const dbId = window.creatureDatabase?.findMonsterByName?.(name)?.gameId;
+        return dbId != null && Number.isFinite(Number(dbId)) ? Number(dbId) : null;
     }
 
     function resolveGameId(actor) {
@@ -4774,13 +4751,7 @@
 
     function getMonsterMetadata(gameId) {
         if (gameId == null) return null;
-        const fromDb = window.creatureDatabase?.findMonsterByGameId?.(gameId);
-        if (fromDb?.metadata) return fromDb.metadata;
-        try {
-            return globalThis.state?.utils?.getMonster?.(gameId)?.metadata ?? null;
-        } catch {
-            return null;
-        }
+        return window.creatureDatabase?.getMonsterById?.(gameId)?.metadata ?? null;
     }
 
     function getMonsterPortraitSrc(gameId) {
@@ -9812,11 +9783,36 @@
         return profile.markers.every((marker) => text.includes(marker));
     }
 
+    const GAME_SCRIPT_FETCH_TIMEOUT_MS = 15000;
+    const gameScriptFetchControllers = new Set();
+
     async function fetchScriptTextFromUrl(url) {
-        const res = await fetch(url, { credentials: 'same-origin' });
-        if (!res.ok) return null;
-        const text = await res.text();
-        return text || null;
+        const controller = new AbortController();
+        gameScriptFetchControllers.add(controller);
+        const timer = setTimeout(() => controller.abort(), GAME_SCRIPT_FETCH_TIMEOUT_MS);
+        try {
+            const res = await fetch(url, { credentials: 'same-origin', signal: controller.signal });
+            if (!res.ok) return null;
+            const text = await res.text();
+            return text || null;
+        } catch {
+            return null;
+        } finally {
+            clearTimeout(timer);
+            gameScriptFetchControllers.delete(controller);
+        }
+    }
+
+    /** Drops every downloaded game chunk and aborts in-flight downloads (mod cleanup). */
+    function releaseGameScriptChunks() {
+        gameScriptFetchControllers.forEach((controller) => controller.abort());
+        gameScriptFetchControllers.clear();
+        gameScriptTextCacheByUrl.clear();
+        discoveredGameChunkUrlByProfile.clear();
+        cachedGameChunk661Text = null;
+        cachedGameChunk661Promise = null;
+        cachedGameChunk235Text = null;
+        cachedGameChunk235Promise = null;
     }
 
     async function fetchScriptTextCached(url) {
@@ -9847,8 +9843,10 @@
         const tryUrl = async (url) => {
             if (!url || tried.has(url)) return null;
             tried.add(url);
-            const text = await fetchScriptTextCached(url);
+            const text = await fetchScriptTextFromUrl(url);
             if (text && scriptTextMatchesProfile(text, profile)) {
+                // Only the matching chunk is kept; scanned non-matches are dropped.
+                gameScriptTextCacheByUrl.set(url, text);
                 discoveredGameChunkUrlByProfile.set(profile.key, url);
                 return url;
             }
@@ -16699,7 +16697,6 @@
         invalidateBoardPreviewCache({ clearMechanicsLog: true });
         clearScalingRuntimeCaches();
         cachedSpawnTileKeyLookup = null;
-        gameIdByNameCache = null;
         lastUnitsRenderKey = '';
         pendingUnitsForceRefresh = false;
         const panel = document.getElementById(PANEL_ID);

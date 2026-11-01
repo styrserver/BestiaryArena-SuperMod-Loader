@@ -26,6 +26,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { recordRun } from './tool-runs.mjs';
 
 const ORIGIN = 'https://bestiaryarena.com';
 const MAPS_DB_PATH = join(dirname(fileURLToPath(import.meta.url)), '..', 'database', 'maps-database.js');
@@ -79,14 +80,17 @@ async function main() {
     console.log(`Updated ROOM_SCRIPT_FINGERPRINTS in ${MAPS_DB_PATH}`);
     const unresolved = problems.filter((p) => p.kind !== 'CHANGED');
     if (unresolved.length) console.log(`Still unresolved:\n${unresolved.map((p) => `${p.kind.padEnd(8)} ${p.message}`).join('\n')}`);
+    await recordRun('roomScripts', unresolved.length ? 'drift' : 'ok');
     return;
   }
   if (problems.length) {
+    await recordRun('roomScripts', 'drift');
     console.log(`\n${problems.map((p) => `${p.kind.padEnd(8)} ${p.message}`).join('\n')}\n\nReview the flagged scripts, update ROOM_SCRIPT_NOTES, then run with --update.`);
     process.exitCode = 1;
     return;
   }
   console.log('OK: every room script has a note and none changed since it was reviewed.');
+  await recordRun('roomScripts', 'ok');
 }
 
 main().catch((err) => {

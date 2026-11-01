@@ -426,7 +426,7 @@ const inventoryTooltips = {
   },
   creatureAwakening: {
     displayName: "Creature Awakening",
-    text: 'Awakening your creature raises its maximum level and reveals its hidden ability.\n\nCreatures must have max tier and max genes to be awakened.',
+    text: 'Awaken a creature to increase its maximum level and reveal its hidden ability.\n\nCreatures must have max tier and max genes to be awakened.',
     icon: '/assets/icons/mountainfortressAwaken.png',
     rarity: '5',
     obtain: 'Store (65,000 gold)'
@@ -454,7 +454,7 @@ const inventoryTooltips = {
   },
   dailyBoostedMap: {
     displayName: "Daily Boosted Map",
-    text: 'Unlocks the daily boosted map feature.\n\n"Experience enhanced rewards and challenges on specially boosted maps each day."',
+    text: 'Unlocks the daily boosted map feature.',
     icon: '/assets/icons/boosted-map.png',
     rarity: '4',
     obtain: 'Store (10,000 gold)'

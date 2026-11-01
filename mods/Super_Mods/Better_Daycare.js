@@ -570,6 +570,9 @@
 
   function isDaycareDialog(dialog) {
     if (!dialog) return false;
+    // The Cyclopedia renders the Daycare item's icon as <img alt="Daycare"> (Inventory > Upgrades >
+    // Daycare), which would otherwise pass the icon test below and get this dialog rebranded.
+    if (dialog.querySelector('.cyclopedia-modal-root')) return false;
     // Icon-based match, not title text — the dialog's title is localized (e.g. "Creche" in
     // Portuguese instead of "Daycare"), but the info-row icon's alt stays "Daycare" in every locale
     // we've seen. The Inventory dialog also contains a "Daycare" icon (the nav button that opens

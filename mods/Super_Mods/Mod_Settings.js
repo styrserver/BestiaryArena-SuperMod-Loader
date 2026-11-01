@@ -21059,12 +21059,123 @@ function getLoadedGameChunkUrls() {
   return [...urls].filter((url) => url && url.includes('/_next/static/chunks/') && url.endsWith('.js'));
 }
 
+async function isCurrentPlayerFirebaseAdmin() {
+  const name = getCurrentPlayerName();
+  if (!name || typeof window.FirebaseAdminsAPI?.isPlayerAdminAsync !== 'function') return false;
+  return !!(await window.FirebaseAdminsAPI.isPlayerAdminAsync(name));
+}
+
+// Remind Firebase admins to re-run the tools/ drift checks once the game has been redeployed since
+// they last ran. database/tool-runs.js records the game build each tool last ran against (written by
+// the tools themselves); the live build is Next's `__NEXT_DATA__.buildId`.
+const TOOL_RUN_REMINDER_KEY = 'ba-tool-run-reminder-build';
+
+async function runAdminToolRunReminder() {
+  const toolRuns = window.toolRuns;
+  const liveBuild = window.__NEXT_DATA__?.buildId;
+  if (!toolRuns?.runs || !liveBuild) return;
+  const stale = Object.keys(toolRuns.runs).filter((key) => toolRuns.runs[key]?.buildId !== liveBuild);
+  if (stale.length === 0) return;
+  if (!(await isCurrentPlayerFirebaseAdmin())) return;
+  // One reminder per live build, not one per page load.
+  try {
+    if (localStorage.getItem(TOOL_RUN_REMINDER_KEY) === liveBuild) return;
+    localStorage.setItem(TOOL_RUN_REMINDER_KEY, liveBuild);
+  } catch (_) { /* storage unavailable: remind on every load */ }
+  createToast({
+    message: 'The game was updated since the tools last ran. Run: node tools/check-all.mjs',
+    type: 'warning',
+    duration: 15000
+  });
+}
+
+// Hand-written name lists in database/* (event creatures, boosted-map equipment, expansion maps...)
+// must still name things the game has. Compared with the live registries, the same ones the databases
+// scan (state.utils.getMonster / getEquipment / ROOM_NAME), so nothing is downloaded. The comparison
+// is mapsDatabase.diffHardcodedNames, shared with tools/check-database-names.mjs; that tool also
+// covers the Lua-export lists, which are not exposed in the page.
+const NAME_LIST_CHECK_STORAGE_KEY = 'ba-name-list-check-last';
+const NAME_LIST_CHECK_REPORTED_KEY = 'ba-name-list-check-reported';
+
+/** Lists to check, read from the databases' own exposed globals. A list a database does not expose is skipped. */
+function collectHardcodedNameLists() {
+  const creatureDb = window.creatureDatabase;
+  const equipmentDb = window.equipmentDatabase;
+  const mapsDb = window.mapsDatabase;
+  const lists = [];
+  const add = (source, list, kind, names) => { if (Array.isArray(names) && names.length) lists.push({ source, list, kind, names }); };
+  // CYCLOPEDIA_HIDDEN_CREATURES is left to tools/check-database-names.mjs: it hides summons such as
+  // Dwarf Henchman, which the game defines but getMonster() has no id for, so a registry scan cannot
+  // tell them from removed creatures.
+  for (const list of ['EVENT_CREATURES', 'NON_SCROLL_CREATURES']) {
+    add('creature-database.js', list, 'creature', creatureDb?.[list]);
+  }
+  for (const list of ['SHINY_ALIAS_CREATURES', 'BOSS_ALIAS_CREATURES']) {
+    add('creature-database.js', `${list}.baseSpecies`, 'creature', creatureDb?.[list]?.map((entry) => entry.baseSpecies));
+  }
+  add('equipment-database.js', 'EVENT_EQUIPMENT', 'equipment', equipmentDb?.EVENT_EQUIPMENT);
+  const boosted = Object.entries(equipmentDb?.HARDCODED_BOOSTED_MAP || {});
+  add('equipment-database.js', 'HARDCODED_BOOSTED_MAP', 'equipment', boosted.map(([item]) => item));
+  add('equipment-database.js', 'HARDCODED_BOOSTED_MAP maps', 'map', boosted.flatMap(([, maps]) => String(maps).split(/,\s*/).filter(Boolean)));
+  add('maps-database.js', 'MAP_EXPANSIONS', 'map',
+    Object.values(mapsDb?.MAP_EXPANSIONS || {}).flatMap((expansion) => expansion?.mapNames || []));
+  return lists;
+}
+
+/** Problems found, or null while the live registries are not ready (an empty registry proves nothing). */
+function findStaleDatabaseNames() {
+  const mapsDb = window.mapsDatabase;
+  const rooms = globalThis.state?.utils?.ROOM_NAME;
+  const creatures = new Set((window.creatureDatabase?.getAllMonstersWithPortraits?.() || []).map((m) => m?.metadata?.name).filter(Boolean));
+  const equipment = new Set(window.equipmentDatabase?.ALL_EQUIPMENT || []);
+  if (typeof mapsDb?.diffHardcodedNames !== 'function' || !rooms || !creatures.size || !equipment.size) return null;
+  const maps = new Set(Object.values(rooms));
+  return mapsDb.diffHardcodedNames(collectHardcodedNameLists(), {
+    hasCreature: (name) => creatures.has(name),
+    hasEquipment: (name) => equipment.has(name),
+    hasMap: (name) => maps.has(name),
+    rooms,
+    eventRooms: Object.entries(mapsDb.EVENT_TO_ROOM_MAPPING || {})
+  });
+}
+
+async function runAdminNameListCheck() {
+  if (!(await isCurrentPlayerFirebaseAdmin())) return;
+  try {
+    const last = Number(localStorage.getItem(NAME_LIST_CHECK_STORAGE_KEY)) || 0;
+    if (Date.now() - last < ROOM_SCRIPT_CHECK_INTERVAL_MS) return;
+  } catch (_) { /* storage unavailable: just run */ }
+  const problems = findStaleDatabaseNames();
+  if (!problems) return; // registries not ready: retried on the next load
+  try { localStorage.setItem(NAME_LIST_CHECK_STORAGE_KEY, String(Date.now())); } catch (_) { /* ignore */ }
+  if (problems.length === 0) {
+    try { localStorage.removeItem(NAME_LIST_CHECK_REPORTED_KEY); } catch (_) { /* ignore */ }
+    console.info('[Mod Settings] Database name check: all hardcoded names exist in the game');
+    return;
+  }
+  const lines = problems.map((p) => `${p.kind} ${p.message}`);
+  window.BestiaryLoaderErrorLog?.report(
+    'Database name check',
+    `${problems.length} hardcoded name(s) in database/* no longer match the game`,
+    lines.join('\n')
+  );
+  // Toast once per distinct set of problems (the Error Log entry repeats daily).
+  const signature = lines.join('|');
+  try {
+    if (localStorage.getItem(NAME_LIST_CHECK_REPORTED_KEY) === signature) return;
+    localStorage.setItem(NAME_LIST_CHECK_REPORTED_KEY, signature);
+  } catch (_) { /* storage unavailable: toast every load */ }
+  createToast({
+    message: `${problems.length} hardcoded name(s) in database/* no longer match the game. See the Error Log.`,
+    type: 'warning',
+    duration: 15000
+  });
+}
+
 async function runAdminRoomScriptCheck() {
   const mapsDb = window.mapsDatabase;
   if (typeof mapsDb?.extractRoomScripts !== 'function' || typeof mapsDb?.diffRoomScripts !== 'function') return;
-  const name = getCurrentPlayerName();
-  if (!name || typeof window.FirebaseAdminsAPI?.isPlayerAdminAsync !== 'function') return;
-  if (!(await window.FirebaseAdminsAPI.isPlayerAdminAsync(name))) return;
+  if (!(await isCurrentPlayerFirebaseAdmin())) return;
   try {
     const last = Number(localStorage.getItem(ROOM_SCRIPT_CHECK_STORAGE_KEY)) || 0;
     if (Date.now() - last < ROOM_SCRIPT_CHECK_INTERVAL_MS) return;
@@ -21126,6 +21237,8 @@ function scheduleAdminRoomScriptCheck() {
   roomScriptCheckTimer = setTimeout(() => {
     roomScriptCheckTimer = null;
     runAdminRoomScriptCheck();
+    runAdminToolRunReminder().catch((error) => console.warn('[Mod Settings] Tool run reminder failed:', error));
+    runAdminNameListCheck().catch((error) => console.warn('[Mod Settings] Database name check failed:', error));
   }, ROOM_SCRIPT_CHECK_DELAY_MS);
 }
 

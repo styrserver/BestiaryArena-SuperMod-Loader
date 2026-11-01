@@ -208,6 +208,7 @@ const HARDCODED_DEFAULT_ENABLED_MODS = [
   'database/inventory-database.js',
   'database/creature-database.js',
   'database/equipment-database.js',
+  'database/tool-runs.js',
   'database/maps-database.js',
   'database/equipment-lua-export.js',
   'database/creature-lua-export.js',

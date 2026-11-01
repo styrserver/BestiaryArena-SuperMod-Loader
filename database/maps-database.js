@@ -1010,6 +1010,7 @@ mapsDatabase.extractRoomScripts = extractRoomScripts;
 mapsDatabase.buildRoomScriptReport = buildRoomScriptReport;
 mapsDatabase.roomScriptProblemsSignature = roomScriptProblemsSignature;
 mapsDatabase.diffRoomScripts = diffRoomScripts;
+mapsDatabase.diffHardcodedNames = diffHardcodedNames;
 mapsDatabase.getMapsByDifficulty = getMapsByDifficulty;
 mapsDatabase.getMapsByMaxTeamSize = getMapsByMaxTeamSize;
 mapsDatabase.getMultiFloorRoomIds = getMultiFloorRoomIds;
@@ -1041,8 +1042,46 @@ mapsDatabase.DIFFICULTY_LABELS = { ...DIFFICULTY_LABELS };
 mapsDatabase.getDifficultyLabel = getDifficultyLabel;
 mapsDatabase.getMapType = getMapType;
 
+/**
+ * Flags hand-written name lists (event creatures, boosted-map equipment, expansion maps, ...) that
+ * name something the game no longer has. Shared by the in-game admin check in Mod_Settings.js, which
+ * reads `lists` from the databases and `live` from state.utils, and tools/check-database-names.mjs,
+ * which parses `lists` from the source files and builds `live` from the game chunks.
+ *
+ * @param {{ source: string, list: string, kind: 'creature'|'equipment'|'map', names: string[] }[]} lists
+ * @param {{ hasCreature: (n: string) => boolean, hasEquipment: (n: string) => boolean,
+ *           hasMap: (n: string) => boolean, rooms: Object<string, string>,
+ *           eventRooms: [string, string][],
+ *           mentionsCreature?: (n: string) => boolean }} live  rooms is room id -> map name;
+ *           eventRooms are EVENT_TO_ROOM_MAPPING pairs [event name, room id]; mentionsCreature is an
+ *           optional weaker fallback (reported as LOOSE, not STALE)
+ * @returns {{ kind: 'STALE'|'RENAMED'|'LOOSE', message: string }[]}
+ */
+function diffHardcodedNames(lists, live) {
+  const problems = [];
+  const present = { creature: live.hasCreature, equipment: live.hasEquipment, map: live.hasMap };
+  const label = { creature: 'a creature in the game', equipment: 'an equipment name in the game', map: 'a map in the game' };
+  for (const { source, list, kind, names } of lists) {
+    for (const name of names) {
+      if (present[kind](name)) continue;
+      if (kind === 'creature' && live.mentionsCreature?.(name)) {
+        problems.push({ kind: 'LOOSE', message: `${source} ${list}: "${name}" is not in the creature table, only named in game text` });
+      } else {
+        problems.push({ kind: 'STALE', message: `${source} ${list}: "${name}" is not ${label[kind]}` });
+      }
+    }
+  }
+  for (const [event, id] of live.eventRooms) {
+    if (!(id in live.rooms)) problems.push({ kind: 'STALE', message: `maps-database.js EVENT_TO_ROOM_MAPPING: "${id}" is not a room id in the game` });
+    else if (live.rooms[id] !== event) {
+      problems.push({ kind: 'RENAMED', message: `maps-database.js EVENT_TO_ROOM_MAPPING: ${id} is "${event}" here, "${live.rooms[id]}" in the game` });
+    }
+  }
+  return problems;
+}
+
 // Export for use in other mods
-const globalWindow = globalThis.window || window || (typeof window !== 'undefined' ? window : null);
+const globalWindow =globalThis.window || window || (typeof window !== 'undefined' ? window : null);
 if (globalWindow) {
   globalWindow.mapsDatabase = mapsDatabase;
   console.log(`[maps-database.js] Loaded ${mapsDatabase.ALL_MAPS.length} maps dynamically (cached for all mods)`);

@@ -22,6 +22,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { recordRun } from './tool-runs.mjs';
 
 const ORIGIN = 'https://bestiaryarena.com';
 const DB_PATH = join(dirname(fileURLToPath(import.meta.url)), '..', 'database', 'creature-database.js');
@@ -34,7 +35,7 @@ async function fetchText(url) {
   return res.text();
 }
 
-async function loadChunks() {
+export async function loadChunks() {
   const html = await fetchText(`${ORIGIN}/`);
   const paths = new Set(html.match(/\/_next\/static\/chunks\/[^"'\\\s]+?\.js/g) || []);
   const buildId = /\/_next\/static\/([^/"]+)\/_buildManifest\.js/.exec(html)?.[1];
@@ -119,9 +120,22 @@ function parseNameToId(src) {
   return JSON.parse(json);
 }
 
-export function extractCombatData(chunks) {
+function findCreatureBundle(chunks) {
   const src = chunks.find((c) => c.includes('queryTags:') && c.includes('Rat:1,Minotaur:2'));
   if (!src) throw new Error('creature bundle not found in the downloaded chunks');
+  return src;
+}
+
+/** Every creature name the game knows: playable ones (name -> id table) plus all metadata entries (bosses, summons). */
+export function extractCreatureNames(chunks) {
+  const src = findCreatureBundle(chunks);
+  const names = new Set(Object.keys(parseNameToId(src)));
+  for (const m of src.matchAll(/name:"([^"]+)",roles:\[[^\]]*\],queryTags:/g)) names.add(m[1]);
+  return names;
+}
+
+export function extractCombatData(chunks) {
+  const src = findCreatureBundle(chunks);
   const nameToId = parseNameToId(src);
   const objects = indexConstantObjects(src);
   const metas = [...src.matchAll(/name:"([^"]+)",roles:\[[^\]]*\],queryTags:/g)];
@@ -162,6 +176,14 @@ export function extractCombatData(chunks) {
     const id = nameToId[m[1]];
     if (id && !out[id]) out[id] = entry; // summons have no id; later duplicates are variants
   });
+
+  // Two metadata objects can share a name (the "Old Minotaur Archer" boss reuses "Minotaur Archer"
+  // with other numbers), so the first one is not always the playable creature. The registry
+  // `34:{constructor:rH,metadata:rX}` says which one the game actually builds for each id.
+  for (const reg of src.matchAll(/[,{ ](\d+):\{constructor:[\w$]+,metadata:([\w$]+)\}/g)) {
+    const entry = byVar.get(reg[2]);
+    if (entry && nameToId[entry.n] === Number(reg[1])) out[reg[1]] = entry;
+  }
 
   // Event variants are written as `X={...Base,queryTags:[...],skill:{...}}` (Clot = Slime, Reindeer =
   // Deer B, ...): they inherit Base's numbers and override whatever their own tooltip reads. The
@@ -223,12 +245,17 @@ async function main() {
   const game = extractCombatData(await loadChunks());
   const { text, data } = readSnapshot();
   const lines = diff(game, data);
-  if (!lines.length) { console.log(`OK: ${Object.keys(game).length} creatures match the snapshot.`); return; }
+  if (!lines.length) {
+    console.log(`OK: ${Object.keys(game).length} creatures match the snapshot.`);
+    await recordRun('creatureCombat', 'ok');
+    return;
+  }
   console.log(lines.join('\n'));
-  if (!update) { process.exitCode = 1; return; }
+  if (!update) { await recordRun('creatureCombat', 'drift'); process.exitCode = 1; return; }
   const next = text.replace(DATA_BLOCK, (_, a, b) => `${a}${serialize(game)}\n${b}`);
   writeFileSync(DB_PATH, next);
   console.log(`Updated CREATURE_COMBAT_DATA (${Object.keys(game).length} creatures).`);
+  await recordRun('creatureCombat', 'ok');
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {

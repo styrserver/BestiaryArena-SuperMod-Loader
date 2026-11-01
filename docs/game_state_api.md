@@ -1164,7 +1164,7 @@ Source: `database/creature-database.js`.
 
 Data:
 
-- `ALL_CREATURES` — every creature (built from `state.utils`).
+- `ALL_CREATURES` — obtainable creatures only (built from `state.utils`; map-only species are in `UNOBTAINABLE_CREATURES`). These arrays are reassigned when the database hydrates, so read them at use time, never into a load-time constant.
 - `UNOBTAINABLE_CREATURES`, `NON_AWAKENABLE_CREATURES`, `NON_SCROLL_CREATURES`, `EVENT_CREATURES`
 - `CYCLOPEDIA_EXTRA_CREATURES`, `CYCLOPEDIA_HIDDEN_CREATURES`, `SHINY_ALIAS_CREATURES`, `BOSS_ALIAS_CREATURES` (display-only room bosses, e.g. Hemorrhage = nicknamed Clot; see "Villain / room-script creature mechanics" below)
 - `ALL_GAZER_GAME_IDS`, `MYSTIC_GAZER_GAME_ID`
@@ -1172,9 +1172,10 @@ Data:
 
 Lookups:
 
-- `findMonsterByGameId(gameId)` → `{ gameId, ...monster }` or `null`.
-- `findMonsterByName(name)` → same shape; case-insensitive; resolves shiny alias display names.
-- `getMonsterNameMap()` → cached lowercase name → `{ monster, gameId, index }`.
+- `getMonsterById(gameId)` → the raw game monster (no `gameId` merged in) or `null`. Use this instead of calling `state.utils.getMonster` in a mod.
+- `findMonsterByGameId(gameId)` → `{ gameId, ...monster }` or `undefined`.
+- `findMonsterByName(name)` → same shape (`undefined` on a miss); case-insensitive; resolves shiny alias and boss alias display names.
+- `getMonsterNameMap()` → cached lowercase name → `{ monster, gameId, index }`. All lookups share one cached scan of `state.utils.getMonster`; until the game's monster registry is ready they return an uncached empty result, so an early call is retried later.
 - `getAllMonstersWithPortraits()`, `getMonsterPortraitUrl(...)`, `getMonsterPortraitUrls(...)`
 
 Classification predicates (take a creature name unless stated):
@@ -1510,8 +1511,9 @@ reads (cooldowns, durations, damage bases, AP ratios, caps) are stored in the `C
 snapshot in `database/creature-database.js`, keyed by `gameId`. Only plain numbers are kept (nested
 tables such as `EXORI_CD_MS`, fractions and references are skipped). `*_TICKS` constants are stored
 in ms under a `*_MS` name. `ad: null` means the 2000 ms default attack delay. Ranges the tooltip
-does not print (`rangeComponent.range`) are not included. A second `Minotaur Archer` entry differs
-from the first; only the first is kept.
+does not print (`rangeComponent.range`) are not included. A second `Minotaur Archer` entry (the "Old
+Minotaur Archer" boss: lifesteal below 25% HP) is not the playable one; the tool uses the registry
+`34:{constructor:..,metadata:..}` to pick the entry the game builds per id.
 
 - Read it with `creatureDatabase.getCreatureCombatData(gameId)` ->
   `{ name, attackDelayMs, constants }` or `null`.
@@ -1524,6 +1526,7 @@ from the first; only the first is kept.
   hover text: armor / magic resist show the share of damage taken, speed shows ticks per step, and
   Attack Damage shows attack delay and DPS (damage per second). Those use the live
   `metadata.baseStats` (including `attackDelayTicks`), not the snapshot.
+- Manual update steps: `docs/creature_combat_snapshot.md`.
 - The ability constants are **not** exposed by the game API, only by the chunk. After a game update
   run `node tools/check-creature-combat.mjs` (exit 1 on `NEW` / `CHANGED` / `REMOVED`, exit 2 on a
   download or parsing failure) and `--update` to rewrite the block. Unlike the room-script check,
