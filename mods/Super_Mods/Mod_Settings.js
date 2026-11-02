@@ -3906,7 +3906,6 @@ function renderPerfAdvanced(now) {
       `<span style="${PERF_COL_LAYOUT}white-space:nowrap;color:${PERF_C.warn}">${g && g.forced >= 5 ? Math.round(g.forced) + 'ms' : ''}</span></div>`
     );
   }).join('');
-  const note = perfOverlay.loafType ? '' : ' · Chromium only';
   const reqCount = perfOverlay.requests.length;
   const list = perfOverlay.ui.list;
   // Title row on top, scrolling rows in the middle, totals pinned at the bottom (like a table's total row).
@@ -3923,7 +3922,7 @@ function renderPerfAdvanced(now) {
     `${html || '<div style="opacity:.6;padding:0 3px">nothing slow yet</div>'}</div>` +
     `<div style="display:flex;flex-wrap:wrap;justify-content:space-between;column-gap:8px;flex:none;padding:2px 3px 0;border-top:1px solid rgba(255,255,255,.15)" ` +
     `title="${perfEscape(`${Math.round(agg.scriptMs)}ms of ${Math.round(agg.frameMs)}ms in slow frames was script; the rest was style/layout/paint/GC (last ${PERF_CPU_WINDOW_LABEL}, saved across refreshes).`)}">` +
-    stat('Slow frames', `${agg.frames}${note}`) +
+    (perfOverlay.loafType ? stat('Slow frames', `${agg.frames}`) : '') +
     stat('Script', `${Math.round(agg.scriptMs)} / ${Math.round(agg.frameMs)}ms`) +
     stat('Requests', reqCount) + `</div>`;
   // Only touch the DOM when the markup changed: most refreshes leave this list as it was, and rewriting it

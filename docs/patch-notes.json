@@ -4,6 +4,26 @@
   },
   "notes": [
     {
+      "version": "5.2.7",
+      "changes": [
+        {
+          "mod": "Cyclopedia",
+          "type": "changed",
+          "text": "Cyclopedia now fits iPhone and other narrow screens. The tab buttons wrap onto two rows, and the columns on every tab stack vertically when there is not enough room, including the Maps statistics and the Home search results."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "changed",
+          "text": "The Debugger now hides Slow frames in browsers that cannot measure it, instead of showing \"Chromium only\"."
+        },
+        {
+          "mod": "Outfiter",
+          "type": "changed",
+          "text": "The account menu item is now named Mounts. The paw and not-owned icons, and their tooltips, now only appear in the Change outfit list, not in other windows such as the Store. The Mounts window, its tooltips and its error messages are now translated to Portuguese."
+        }
+      ]
+    },
+    {
       "version": "5.2.6",
       "changes": [
         {

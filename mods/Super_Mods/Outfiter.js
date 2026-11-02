@@ -9,6 +9,13 @@ console.log('[Outfiter] initializing...');
 // 2. Configuration & Constants
 // =======================
 
+// Translation helper (api.i18n.t returns the raw key when missing, so keys must exist in both locales)
+const t = (key) => {
+  if (typeof api !== 'undefined' && api.i18n && api.i18n.t) return api.i18n.t(key);
+  if (typeof context !== 'undefined' && context.api && context.api.i18n && context.api.i18n.t) return context.api.i18n.t(key);
+  return key;
+};
+
 // Cache DATA availability to avoid repeated checks
 const DATA_AVAILABLE = typeof DATA !== 'undefined';
 
@@ -673,6 +680,9 @@ async function loadGameTables(signal) {
 
 // Outfits the account really has, versus the ones this mod adds locally. Whatever is in the player
 // state that we did not add ourselves counts as owned (so an outfit bought later stays unmarked).
+// Only the native "Change outfit" dialog: it is the one dialog with the Customize button (lucide
+// palette icon). Other dialogs (Store, ...) also list outfit canvases and must stay untouched.
+const OUTFIT_DIALOG = '[role="dialog"]:has(svg.lucide-palette)';
 const ownedOutfits = new Set();
 let addedOutfits = new Set();
 let outfitBadgeStyle = null;
@@ -693,13 +703,13 @@ function updateOutfitBadgeStyle() {
     outfitBadgeStyle.id = 'outfiter-unowned-outfit-style';
     document.head.appendChild(outfitBadgeStyle);
   }
-  const slotFor = (id) => `[role="dialog"] button > .container-slot:has(> .relative > canvas[data-outfit="${id}"])`;
+  const slotFor = (id) => `${OUTFIT_DIALOG} button > .container-slot:has(> .relative > canvas[data-outfit="${id}"])`;
   const group = (ids, pseudo = '') => ids.map((id) => `${slotFor(id)}${pseudo}`).join(',');
   const added = [...addedOutfits];
 
   let css = '';
   if (rideableIds.length) {
-    // The account dropdown's "Mount" item uses this same lucide paw-print.
+    // The account dropdown's "Mounts" item uses this same lucide paw-print.
     const paw = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#e6d6ff" ` +
       `stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="4" r="2"/>` +
       `<circle cx="18" cy="8" r="2"/><circle cx="20" cy="16" r="2"/>` +
@@ -734,17 +744,17 @@ let outfitIconMove = null;
 let outfitIconHide = null;
 
 function iconTipFor(event) {
-  const slot = event.target?.closest?.('[role="dialog"] button > .container-slot');
+  const slot = event.target?.closest?.(`${OUTFIT_DIALOG} button > .container-slot`);
   const id = slot?.querySelector(':scope > .relative > canvas[data-outfit]')?.dataset.outfit;
   if (!slot || id === undefined) return null;
   const rect = slot.getBoundingClientRect();
   const x = event.clientX - rect.left;
   const y = event.clientY - rect.top;
   if (addedOutfits.has(Number(id)) && x >= rect.width - ICON_HAT.size && y <= ICON_HAT.size) {
-    return 'Not owned (added by Outfiter)';
+    return t('mods.outfiter.tooltipNotOwned');
   }
   if (id in MOUNTABLE_OUTFITS && x <= ICON_PAW.inset + ICON_PAW.size && y >= rect.height - ICON_PAW.inset - ICON_PAW.size) {
-    return 'Can ride mounts';
+    return t('mods.outfiter.tooltipCanRide');
   }
   return null;
 }
@@ -1047,7 +1057,7 @@ function interceptOutfitChangeErrors() {
                 // Other types of errors - show warning but don't override
                 console.warn('[Outfiter] Outfit change failed with error:', data);
                 showOutfitChangeNotification(
-                  'Outfit change failed - server error', 
+                  t('mods.outfiter.outfitChangeFailed'),
                   'warning'
                 );
               }
@@ -1064,7 +1074,7 @@ function interceptOutfitChangeErrors() {
         }).catch(error => {
           console.error('[Outfiter] Network error during outfit change:', error);
           showOutfitChangeNotification(
-            'Network error - outfit change may have failed', 
+            t('mods.outfiter.networkError'),
             'warning'
           );
           throw error; // Re-throw to maintain normal error handling
@@ -1214,7 +1224,7 @@ function openMountSelector() {
   dialog.className = 'auto-centered fixed z-modals w-full shadow-lg outline-none max-w-[300px]';
   dialog.innerHTML = `
     <div>
-      <h2 class="widget-top widget-top-text"><p>Change mount</p></h2>
+      <h2 class="widget-top widget-top-text"><p data-mount-title></p></h2>
       <div class="widget-bottom pixel-font-16 p-3 text-whiteRegular">
         <div class="grid gap-3">
           <div class="grid grid-cols-[min-content_1fr] gap-2">
@@ -1235,12 +1245,15 @@ function openMountSelector() {
         </div>
         <div role="none" class="separator my-2.5"></div>
         <div class="flex justify-end gap-2">
-          <button data-mount-cancel class="focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular frame-1 active:frame-pressed-1 surface-regular gap-1 px-2 py-0.5 pb-[3px] pixel-font-14">Cancel</button>
-          <button data-mount-save class="focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular frame-1-green active:frame-pressed-1-green surface-green gap-1 px-2 py-0.5 pb-[3px] pixel-font-14">Save</button>
+          <button data-mount-cancel class="focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular frame-1 active:frame-pressed-1 surface-regular gap-1 px-2 py-0.5 pb-[3px] pixel-font-14"></button>
+          <button data-mount-save class="focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular frame-1-green active:frame-pressed-1-green surface-green gap-1 px-2 py-0.5 pb-[3px] pixel-font-14"></button>
         </div>
       </div>
     </div>`;
   dialog.querySelector('.pixel-font-32').textContent = player?.name || '';
+  dialog.querySelector('[data-mount-title]').textContent = t('mods.outfiter.changeMount');
+  dialog.querySelector('[data-mount-cancel]').textContent = t('common.cancel');
+  dialog.querySelector('[data-mount-save]').textContent = t('common.save');
 
   const grid = dialog.querySelector('[data-mount-grid]');
   const preview = dialog.querySelector('[data-mount-preview]');
@@ -1253,7 +1266,7 @@ function openMountSelector() {
   // switches the outfit on Save, see pickMountableOutfit).
   const canRide = player?.outfitId in MOUNTABLE_OUTFITS;
   const note = dialog.querySelector('[data-mount-note]');
-  note.textContent = 'Outfit cannot ride: picking a mount switches it.';
+  note.textContent = t('mods.outfiter.cannotRideNote');
   note.hidden = canRide;
 
   // The preview is your own outfit, riding the selected mount when riding is on (like the game's canvas).
@@ -1295,9 +1308,9 @@ function openMountSelector() {
     else paintPreview(riding ? (switchTo ?? player?.outfitId) : null, selected);
     previewRarity.setAttribute('data-rarity', selected === null ? '' : String(MOUNTS[selected][1]));
     nameEl.textContent = selected === null
-      ? 'No mount'
+      ? t('mods.outfiter.noMount')
       : MOUNTS[selected][0] + (switchTo !== null ? ` + ${MOUNTABLE_OUTFITS[switchTo]}` : '');
-    rideBtn.textContent = ride ? 'Riding: On' : 'Riding: Off';
+    rideBtn.textContent = ride ? t('mods.outfiter.ridingOn') : t('mods.outfiter.ridingOff');
     rideBtn.className = 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular gap-1 px-2 py-0.5 pb-[3px] pixel-font-14 mt-auto ' +
       (ride ? 'frame-1-green active:frame-pressed-1-green surface-green' : 'frame-1 active:frame-pressed-1 surface-regular');
     rideBtn.disabled = selected === null;
@@ -1308,7 +1321,7 @@ function openMountSelector() {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'group focus-style-visible';
-    btn.title = id === null ? 'No mount' : `${MOUNTS[id][0]} (${id})${canRide ? '' : ' - needs a mountable outfit'}`;
+    btn.title = id === null ? t('mods.outfiter.noMount') : `${MOUNTS[id][0]} (${id})${canRide ? '' : ` - ${t('mods.outfiter.needsMountableOutfit')}`}`;
     const slot = document.createElement('div');
     slot.className = 'container-slot surface-darker relative p-0.5 flex justify-end border-whiteDark pb-1 pr-1 pt-3.5';
     slot.style.cssText = 'width:79px;height:52px;box-sizing:border-box;';
@@ -1326,7 +1339,7 @@ function openMountSelector() {
       slot.style.cssText += 'align-items:center;justify-content:center;padding:0;';
       slot.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="26" height="26" viewBox="0 0 24 24" fill="none" ' +
         'stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.7" ' +
-        'aria-label="No mount"><circle cx="12" cy="12" r="10"></circle><path d="m4.9 4.9 14.2 14.2"></path></svg>';
+        `aria-label="${t('mods.outfiter.noMount')}"><circle cx="12" cy="12" r="10"></circle><path d="m4.9 4.9 14.2 14.2"></path></svg>`;
     }
     btn.appendChild(slot);
     // Switching mounts keeps the Riding state. The "none" slot is just riding off (the selected mount
@@ -1394,8 +1407,9 @@ function injectMountMenuItem(menu) {
       <circle cx="11" cy="4" r="2"></circle><circle cx="18" cy="8" r="2"></circle><circle cx="20" cy="16" r="2"></circle>
       <path d="M9 10a5 5 0 0 1 5 5v3.5a3.5 3.5 0 0 1-6.84 1.045Q6.52 17.48 4.46 16.84A3.5 3.5 0 0 1 5.5 10Z"></path>
     </svg>
-    Mount
+    <span data-outfiter-mounts-label></span>
   `;
+  item.querySelector('[data-outfiter-mounts-label]').textContent = t('mods.outfiter.mountsMenuItem');
   item.addEventListener('click', (e) => {
     e.stopPropagation();
     // Close the account menu first; opening the dialog before the Escape lands

@@ -52,6 +52,19 @@ Important Orion notes:
 - **Popup opens but mod scripts fail:** Open **Debug -> Error Log**, copy the errors, then share them for diagnosis.
 - **After update, still broken:** Disable and re-enable the extension, then reload Bestiary Arena.
 
+### Cyclopedia on narrow screens
+
+The Cyclopedia modal shrinks to the screen, so on a phone each tab stacks its columns vertically (list on top, detail below) and scrolls, instead of squeezing them side by side. Layout is keyed to the width of the element being laid out, not the browser window, so a small modal in a wide window behaves the same.
+
+For mod authors editing [`mods/Super_Mods/Cyclopedia.js`](../mods/Super_Mods/Cyclopedia.js):
+
+- **Tab bar:** a `ResizeObserver` adds `cyclopedia-subnav-phone` to the nav when it is under `PHONE_SHELL_MAX_WIDTH` (560px); the CSS wraps the buttons onto two rows. Do not use a `@media` query: it follows the window, not the modal.
+- **List/detail tabs (Bestiary, Arsenal, Inventory, Maps, Characters):** `createCyclopediaTabShell()` stacks the left list above the detail under 560px via `setupCyclopediaPhoneShellLayout()`. The list gets a fixed share of the height (`phoneListHeight`, default 40%); a tab can also pass `onPhoneChange(isPhone)` to adjust its own boxes (Characters rebalances its search/list split).
+- **Fixed height, not `auto`:** list boxes and many detail panels size by flex share or `height: 100%`. Under an auto-height parent they collapse to 0 and look empty (Home search results did exactly this). Give a stacked column an explicit height, or relax it with `relaxScroll` in `setupCyclopediaStackableColumnsLayout()`.
+- **`keepChildren`:** the stacking helper also "relaxes" flex children of each column. Set `keepChildren: true` on a column whose inner box must keep its height (the Home search column).
+- **Inner column groups** stack on their own thresholds: Home under 400px, Maps under 400px (`MAPS_STAT_COL_MIN`), the Maps Statistics block under 420px (`MAPS_STATS_STACK_WIDTH`, three stat columns and three Top 5 tables become one column), Arsenal under 500px (`EQUIPMENT_DETAIL_COL_MIN` + `EQUIPMENT_OWNED_COL_MIN`), and the Characters leaderboards under 400px. Wide layouts are restored from a style snapshot, so a resize back up is exact.
+- **Testing without a phone:** open Cyclopedia and force the dialog narrow in DevTools (`width`/`max-width` of `[data-cyclopedia-dialog]` to about 358px), then check every tab, with and without a selection, and scroll to the bottom of each. Also check the wide layout restores.
+
 ---
 
 ## 1. Executive summary and core platform constraints

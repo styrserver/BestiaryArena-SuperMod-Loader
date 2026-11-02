@@ -398,6 +398,7 @@ A comprehensive game data viewer and player profile manager with advanced featur
 * '''Player Profiles''': Search and view detailed player profiles with statistics and achievements
 * '''Rankings''': Season-aware player rankings via the Bestiary Arena Rankings API (paginated table, sort, and search)
 * '''Run Tracking''': View and analyze personal run history with RunTracker integration
+* '''Phone layout''': On narrow screens (iPhone and other phones) the tab buttons wrap onto two rows and each tab's columns stack vertically instead of being squeezed side by side (see [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/docs/mobile.md#cyclopedia-on-narrow-screens Mobile guide])
 
 ==== Depot Manager ====
 A complete depot overview and inventory utility for tracking stored resources:
