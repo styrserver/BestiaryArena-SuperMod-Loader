@@ -2714,6 +2714,52 @@ if (window.CustomBattles) {
                 return false;
             }
 
+            /**
+             * Per-piece old / current creature art. A piece with `spriteVariant` 'old' | 'current'
+             * gets `data-ba-sprite` on its `.sprite.outfit` node; CSS keyed on that attribute
+             * (database buildOldOutfitsCss) does the rest. Nodes are found by spawn tile during
+             * setup and keep their tag through the battle (the node follows the creature); a tag
+             * whose piece is gone or changed is removed or updated.
+             */
+            applySpriteVariantTags() {
+                const pieces = this.getConfiguredCustomPieces()
+                    .filter((piece) => piece.spriteVariant === 'old' || piece.spriteVariant === 'current');
+                const pieceKey = (piece) => `${piece.tileIndex}:${piece.gameId}`;
+                const wanted = new Map(pieces.map((piece) => [pieceKey(piece), piece.spriteVariant]));
+
+                document.querySelectorAll('[data-ba-sprite-piece]').forEach((sprite) => {
+                    const variant = wanted.get(sprite.dataset.baSpritePiece);
+                    if (!variant) {
+                        delete sprite.dataset.baSpritePiece;
+                        delete sprite.dataset.baSprite;
+                    } else if (sprite.dataset.baSprite !== variant) {
+                        sprite.dataset.baSprite = variant;
+                    }
+                });
+
+                if (!pieces.length || this.isBoardBattleActive()) return;
+                const tagged = [];
+                pieces.forEach((piece) => {
+                    let found = 0;
+                    this.findBoardPieceButtonsForTile(piece.tileIndex).forEach((button) => {
+                        if (!this.buttonBelongsToCustomPiece(button, piece)) return;
+                        button.querySelectorAll('.sprite.outfit').forEach((sprite) => {
+                            if (sprite.dataset.customBattleItemOverlay === '1') return;
+                            found += 1;
+                            if (sprite.dataset.baSpritePiece !== pieceKey(piece)) sprite.dataset.baSpritePiece = pieceKey(piece);
+                            if (sprite.dataset.baSprite !== piece.spriteVariant) sprite.dataset.baSprite = piece.spriteVariant;
+                        });
+                    });
+                    tagged.push(`${piece.tileIndex}:${piece.spriteVariant}:${found}`);
+                });
+                // Logged only when the result changes, so the periodic sync does not spam.
+                const logKey = tagged.join(',');
+                if (logKey !== this._lastSpriteVariantLogKey) {
+                    this._lastSpriteVariantLogKey = logKey;
+                    console.log(`[Custom Battles][${this.config.name || 'Battle'}] Sprite variant tags (tile:variant:spritesFound)`, tagged);
+                }
+            }
+
             buttonBelongsToCustomPiece(button, piece) {
                 if (!button || !piece) return false;
 
@@ -3116,6 +3162,7 @@ if (window.CustomBattles) {
                 }
                 this.restoreForeignPiecesOnCustomTiles();
                 this.applyVillainOutfitSpriteOverrides();
+                this.applySpriteVariantTags();
                 this.applyCustomPieceInteractionLocks();
                 this.hideCustomPieceBattleControls();
             }
