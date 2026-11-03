@@ -530,6 +530,7 @@ Automates routine gameplay actions to streamline your Bestiary Arena experience:
 ==== Board Analyzer ====
 Analyzes and simulates board setups for optimal strategies and performance:
 * Advanced board setup analysis and simulation
+* Optional '''Fast simulation''': runs the game's combat engine without the board, checks itself against real runs first, and falls back to real simulation if anything differs
 * Performance optimization recommendations
 * Strategic planning tools for complex scenarios
 * Testing environment for different configurations

@@ -218,6 +218,7 @@ Mods have access to the game's state through `globalThis.state`, which provides 
 - [Client API Documentation](docs/client_api.md) - Complete reference for the game's Client API
 - [Game State API Documentation](docs/game_state_api.md) - Game state, mod databases, utility functions (`serializeBoard`, `replay`, name/ID maps)
 - [Custom Board Setups](docs/custom_board_setups.md) - Examples for board placement and game events
+- [Fast Simulation](docs/fast_simulation.md) - Board Analyzer's headless simulation mode, how it is verified, and what to do after a game update
 - [Raid System API](docs/raid_system_api.md) - Raid state machine reference for automation mods
 - [Firebase Best Runs API](docs/firebase_runs_api.md) - Fetch and decrypt Mod Settings best-runs uploads
 - [Fetch Best Runs (HTML tool)](docs/fetch-best-runs.html) - Browser UI for fetching and decrypting uploaded runs
@@ -568,6 +569,7 @@ Automates routine gameplay actions to streamline your Bestiary Arena experience:
 #### Board Analyzer
 Analyzes and simulates board setups for optimal strategies and performance:
 - Advanced board setup analysis and simulation
+- Optional Fast simulation: runs the game's combat engine without the board, checks itself against real runs first, and falls back to real simulation if anything differs
 - Performance optimization recommendations
 - Strategic planning tools for complex scenarios
 - Testing environment for different configurations

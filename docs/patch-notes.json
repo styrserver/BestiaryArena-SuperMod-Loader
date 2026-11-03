@@ -4,6 +4,16 @@
   },
   "notes": [
     {
+      "version": "5.2.8",
+      "changes": [
+        {
+          "mod": "Board Analyzer",
+          "type": "added",
+          "text": "A Fast simulation option in the Analysis settings runs the game's combat engine without the board. It checks itself against a few real runs first and falls back to real simulation if anything differs. Verified rooms are remembered for a day. Off by default. By Orw."
+        }
+      ]
+    },
+    {
       "version": "5.2.7",
       "changes": [
         {

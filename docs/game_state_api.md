@@ -1391,7 +1391,8 @@ first, so a simultaneous wipe is a player win); villains win if every player uni
 `serverPlay()`, which loops `_advanceTick()` until a winner exists and returns
 `{ villainsWon, ticks, draw, crash }` (an exception counts as a villain win with `crash: true`).
 That is the same engine running headless, which is how the server reproduces a battle from its
-seed. Each tick the world pops scheduled actions,
+seed. Board Analyzer's Fast simulation runs it that way in the page: see `docs/fast_simulation.md`.
+Each tick the world pops scheduled actions,
 dispatches queued events, then calls `notifyTick` on every entity. If the timer runs late, the tick
 engine replays the missed ticks (`floor(lag / interval)`) before scheduling the next one, so
 results do not depend on frame rate. The RNG is `xoroshiro128plus(seed)`; helpers are `dice.d6/d10/d20`,

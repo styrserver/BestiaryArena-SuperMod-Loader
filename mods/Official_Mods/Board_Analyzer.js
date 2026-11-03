@@ -16,7 +16,8 @@ const defaultConfig = {
   stopAfterTicks: 0, // 0 means no limit
   stopWhenTicksReached: 0, // Stop when finding a run with this number of ticks or less
   estimateExperience: false,
-  showAdvancedLiveStats: true
+  showAdvancedLiveStats: true,
+  fastSimulation: false // true = isolated engine (verified against the game), false = live game
 };
 
 // Initialize with saved config or defaults
@@ -1542,6 +1543,32 @@ function ensureSandboxMode() {
   }
 }
 
+// Undo hideGameBoardIfConfigured() and the Better Highscores preservation
+function restoreBoardVisibility() {
+  // Restore game board visibility
+  const gameFrame = document.querySelector('main .frame-4');
+  if (gameFrame && gameFrame.style.display === 'none') {
+    gameFrame.style.display = '';
+  }
+
+  // Reset body overflow if it was modified
+  if (document.body.style.overflow === 'hidden') {
+    document.body.style.overflow = '';
+  }
+
+  // Restore Better Highscores container if it exists
+  if (window.BetterHighscores && typeof window.BetterHighscores.restoreContainer === 'function') {
+    try {
+      // Small delay to ensure DOM is ready
+      setTimeout(() => {
+        window.BetterHighscores.restoreContainer();
+      }, BOARD_RESTORE_DELAY_MS);
+    } catch (error) {
+      console.warn('[Board Analyzer] Error restoring Better Highscores container:', error);
+    }
+  }
+}
+
 // Function to properly restore the board state
 function restoreBoardState() {
   try {
@@ -1570,28 +1597,7 @@ function restoreBoardState() {
       removeSeed();
     }
     
-    // Restore game board visibility
-    const gameFrame = document.querySelector('main .frame-4');
-    if (gameFrame && gameFrame.style.display === 'none') {
-      gameFrame.style.display = '';
-    }
-    
-    // Reset body overflow if it was modified
-    if (document.body.style.overflow === 'hidden') {
-      document.body.style.overflow = '';
-    }
-    
-    // Restore Better Highscores container if it exists
-    if (window.BetterHighscores && typeof window.BetterHighscores.restoreContainer === 'function') {
-      try {
-        // Small delay to ensure DOM is ready
-        setTimeout(() => {
-          window.BetterHighscores.restoreContainer();
-        }, BOARD_RESTORE_DELAY_MS);
-      } catch (error) {
-        console.warn('[Board Analyzer] Error restoring Better Highscores container:', error);
-      }
-    }
+    restoreBoardVisibility();
     
     // Restore the original map that was active before analysis
     if (currentRoomId) {
@@ -2049,6 +2055,399 @@ const getLastTick = (analysisId = null) => {
 
 
 // =======================
+// 5. Fast Simulation Engine
+// =======================
+
+// Credit: the isolated-engine code is adapted from Orw's Better Board Analyzer (https://bestiaryarena.com/profile/orw).
+// "Fast" mode runs the game's own World class headless (same tick loop as its serverPlay)
+// without the board, React or turbo. The minified export names below are matched by source
+// shape, so every failure path falls back to the real (live game) simulation. A fast engine is
+// only trusted for a room/floor after finishFastEngine() reproduces real runs seed-for-seed.
+const FAST_SIMULATION_CREDIT_URL = 'https://bestiaryarena.com/profile/orw';
+const FAST_VERIFY_SEEDS = 3;
+const FAST_YIELD_BUDGET_MS = 10;
+const FAST_TICKS_PER_BLOCK = 32;
+// A verified room/floor is remembered across sessions for a day, keyed by the game's build id.
+// Bump the revision whenever getNativeCombat()/createFastRunner() change behavior.
+const FAST_ENGINE_REVISION = 1;
+const FAST_VERIFIED_STORAGE_KEY = 'board-analyzer-fast-verified';
+const FAST_VERIFIED_TTL_MS = 24 * 60 * 60 * 1000;
+const verifiedFastEngines = new Map(); // `${gameVersion}|${roomId}|${floor}` -> boolean
+let activeFastEngine = null;
+let fastNative = null;
+let analysisTouchedBoard = false;
+
+function getNativeCombat(game = globalThis.state, chunks = globalThis.webpackChunk_N_E) {
+  if (!game?.utils?.getMonster || !game.board?.getSnapshot || !chunks?.push) throw new Error('gameUnavailable');
+  let requireGame;
+  const probe = [[`board-analyzer-${Date.now()}-${Math.random()}`], {}, require => { requireGame = require; }];
+  chunks.push(probe);
+  const probeIndex = chunks.indexOf(probe);
+  if (probeIndex !== -1) chunks.splice(probeIndex, 1);
+  if (!requireGame?.m) throw new Error('unsupportedGame');
+  const factories = Object.entries(requireGame.m);
+  function findModule(predicate, validate) {
+    for (const [id, factory] of factories) {
+      if (!predicate(Function.prototype.toString.call(factory))) continue;
+      const exports = requireGame(id);
+      if (validate(exports)) return exports;
+    }
+    throw new Error('unsupportedGame');
+  }
+  const worldModule = findModule(source => source.includes('this.serverPlay=') && source.includes('this.spawnMonster='),
+    exports => Object.values(exports).some(value => typeof value === 'function' && value.toString().includes('this.tickEngine=')));
+  const World = Object.values(worldModule).find(value => typeof value === 'function' && value.toString().includes('this.tickEngine='));
+  const levelSource = Function.prototype.toString.call(game.utils.expToCurrentLevel);
+  const rules = findModule(source => source.includes(levelSource), exports => Object.values(exports).includes(game.utils.expToCurrentLevel));
+  const maps = findModule(source => source.includes('floorFiles:') && source.includes('maxGameDurationTicks:'),
+    exports => Object.values(exports).includes(game.utils.ROOMS));
+  const ranks = findModule(source => source.includes('aliveCount:') && source.includes('maxTeamSize:') && source.includes('"S+"') && !source.includes('onGameEnd'),
+    exports => typeof exports.yk === 'function' && typeof exports.tE === 'function');
+  const tiers = findModule(source => source.includes('sacrificeCount:') && source.includes('Invalid current tier'),
+    exports => typeof exports.DG === 'function');
+  if (typeof World !== 'function' || typeof maps.aD !== 'function' || !rules.Fc || !Number.isFinite(rules.B$) ||
+      !Number.isInteger(rules.tt) || !rules.nb?.maxByTier || typeof rules.js !== 'function') throw new Error('unsupportedGame');
+
+  const geneKeys = ['hp', 'ad', 'ap', 'armor', 'magicResist'];
+
+  // Snapshot of the live board as plain data; never mutates game state.
+  function capture() {
+    const board = game.board.getSnapshot().context;
+    const player = game.player?.getSnapshot()?.context;
+    const roomId = board.selectedMap?.selectedRoom?.id;
+    const floor = board.floor ?? 0;
+    if (!roomId || !Array.isArray(board.boardConfig) || !Array.isArray(player?.monsters) || !Array.isArray(player.equips)) throw new Error('gameUnavailable');
+    const room = maps.aD({ roomId, floor });
+    if (!Array.isArray(room?.file?.data?.hitboxes) || !Number.isInteger(room.maxTeamSize) || !Number.isInteger(room.maxGameDurationTicks)) throw new Error('unsupportedGame');
+    const monsters = new Map(player.monsters.map(monster => [monster.id, monster]));
+    const equipment = new Map(player.equips.map(item => [item.id, item]));
+    const pieces = board.boardConfig.map(piece => {
+      if (piece.type === 'custom') return { ...piece, genes: { ...piece.genes }, equip: piece.equip ? { ...piece.equip } : null };
+      if (piece.type === 'file') {
+        return { ...piece, tier: tiers.DG({ floor, level: piece.level }),
+          genes: Object.fromEntries(Object.entries(rules.Fc).map(([key, value]) => [key, value + rules.B$ * floor])),
+          awaken: floor >= rules.tt, equip: piece.equip ? { ...piece.equip } : null };
+      }
+      if (piece.type !== 'player') throw new Error('unsupportedPiece');
+      const monster = monsters.get(piece.databaseId);
+      if (!monster) throw new Error('missingMonster');
+      const equip = piece.equipId ? equipment.get(piece.equipId) : null;
+      if (piece.equipId && !equip) throw new Error('missingEquipment');
+      return { gameId: monster.gameId, tileIndex: piece.tileIndex, villain: Boolean(piece.villain),
+        genes: Object.fromEntries(geneKeys.map(key => [key, monster[key]])),
+        level: Math.min(game.utils.expToCurrentLevel(monster.exp), rules.nb.maxByTier[monster.tier ?? 0]),
+        tier: monster.tier ?? 0, shiny: monster.shiny, direction: 'south', nickname: monster.nickname ?? null,
+        equip: equip ? { gameId: equip.gameId, tier: equip.tier, stat: equip.stat, id: equip.id } : null,
+        awaken: rules.js(monster.tier ?? 0) };
+    });
+    const occupied = new Set();
+    for (const piece of pieces) {
+      if (!Number.isInteger(piece.gameId) || !Number.isInteger(piece.tileIndex) || piece.tileIndex < 0 ||
+          piece.tileIndex >= room.file.data.hitboxes.length || occupied.has(piece.tileIndex) || !Number.isFinite(piece.level) ||
+          !piece.genes || geneKeys.some(key => !Number.isFinite(piece.genes[key]))) throw new Error('invalidSetup');
+      occupied.add(piece.tileIndex);
+    }
+    if (!pieces.some(piece => !piece.villain) || !pieces.some(piece => piece.villain)) throw new Error('invalidSetup');
+    return { roomId, floor, roomFile: room.file, maxTicks: room.maxGameDurationTicks, maxTeamSize: room.maxTeamSize,
+      pieces: pieces.sort((a, b) => Number(b.villain) - Number(a.villain) || a.tileIndex - b.tileIndex),
+      playerTeamSize: pieces.filter(piece => !piece.villain).length };
+  }
+
+  function createWorld(setup, seed) {
+    const world = new World({ seed, floor: setup.floor, maxDurationTicks: setup.maxTicks, perfMode: true, sandbox: true });
+    try {
+      world.setupGameMap(setup.roomId, setup.roomFile);
+      // Native sandbox setup tags every spawned piece; the rank's alive count relies on it.
+      for (const piece of setup.pieces) {
+        world.spawnMonster({ ...piece, genes: { ...piece.genes }, equip: piece.equip ? { ...piece.equip } : null }).tags.add('playerMonster');
+      }
+      if (typeof world.tickEngine?._advanceTick !== 'function') throw new Error('unsupportedGame');
+      return world;
+    } catch (error) { world.unsubscribeTickEngine?.(); throw error; }
+  }
+
+  // Same survivor count as the game's own rank calculation.
+  function result(world, winner, setup) {
+    const completed = winner === 'nonVillains';
+    let alive = 0;
+    for (const actor of world.grid.actors) {
+      if (!actor.villany.wasSpawnVillain && actor.hp.isAlive && actor.tags.has('playerMonster')) alive++;
+    }
+    const rankPoints = completed
+      ? ranks.yk({ aliveCount: alive, maxTeamSize: setup.maxTeamSize, playerTeamSize: setup.playerTeamSize }) + world.calculateExtraRankPoints()
+      : 0;
+    return { ticks: world.tickEngine.getCurrentTick(), completed, rankPoints,
+      grade: completed ? ranks.tE({ rank: rankPoints, maxTeamSize: setup.maxTeamSize }) : 'F' };
+  }
+
+  return { capture, createWorld, result, version: game.GAME_VERSION ?? null };
+}
+
+function createFastRunner(native) {
+  let disposed = false, pendingYield = null, deadline = 0;
+  const stats = { runs: 0, createMs: 0, tickMs: 0 };
+  const channel = new MessageChannel();
+  channel.port1.onmessage = () => { const resolve = pendingYield; pendingYield = null; resolve?.(); };
+  const yieldWork = () => new Promise(resolve => { pendingYield = resolve; channel.port2.postMessage(0); });
+
+  // Resolves null when aborted. Same start event and tick method as the native serverPlay;
+  // an exception counts as a villain win, exactly like serverPlay's crash result.
+  async function simulate(setup, seed, { tickLimit = 0, shouldAbort = null } = {}) {
+    if (disposed) return null;
+    if (!deadline) deadline = performance.now() + FAST_YIELD_BUDGET_MS;
+    const createStart = performance.now();
+    const world = native.createWorld(setup, seed);
+    stats.runs++;
+    stats.createMs += performance.now() - createStart;
+    let winner = null;
+    const unsubscribeEnd = world.onGameEnd.once(value => { winner = value; });
+    try {
+      world.onGameStart.publish();
+      while (!winner) {
+        if (disposed || shouldAbort?.()) return null;
+        const blockStart = performance.now();
+        try {
+          for (let tick = 0; tick < FAST_TICKS_PER_BLOCK && !winner; tick++) {
+            world.tickEngine._advanceTick();
+            if (!winner && tickLimit > 0 && world.tickEngine.getCurrentTick() >= tickLimit) {
+              return { seed, ticks: world.tickEngine.getCurrentTick(), completed: false, grade: 'F', rankPoints: 0, skipped: true };
+            }
+          }
+        } catch (error) {
+          console.warn('[Board Analyzer] Fast simulation crashed on seed', seed, error);
+          return { seed, ticks: world.tickEngine.getCurrentTick(), completed: false, grade: 'F', rankPoints: 0, crash: true };
+        } finally {
+          stats.tickMs += performance.now() - blockStart;
+        }
+        if (!winner && performance.now() >= deadline) {
+          await yieldWork();
+          deadline = performance.now() + FAST_YIELD_BUDGET_MS;
+        }
+      }
+      return { ...native.result(world, winner, setup), seed };
+    } finally {
+      unsubscribeEnd?.();
+      world.unsubscribeTickEngine();
+    }
+  }
+
+  function cleanup() {
+    if (disposed) return;
+    disposed = true;
+    channel.port1.close();
+    channel.port2.close();
+    const resolve = pendingYield;
+    pendingYield = null;
+    resolve?.();
+  }
+
+  return { simulate, cleanup, getStats: () => ({ ...stats }) };
+}
+
+const FAST_WARNING_TOOLTIP_MAX_WIDTH_PX = 280;
+let fastWarningTooltip = null;
+
+function hideFastWarningTooltip() {
+  if (fastWarningTooltip) {
+    fastWarningTooltip.remove();
+    fastWarningTooltip = null;
+  }
+}
+
+function showFastWarningTooltip(anchor) {
+  hideFastWarningTooltip();
+  const tooltip = document.createElement('div');
+  tooltip.textContent = t('mods.boardAnalyzer.fastSimulationWarning');
+  tooltip.style.cssText = `position: fixed; z-index: 2147483647; pointer-events: none; box-sizing: border-box; max-width: min(${FAST_WARNING_TOOLTIP_MAX_WIDTH_PX}px, calc(100vw - 16px)); padding: 6px 8px; background: #222; color: #fff; border: 1px solid #666; border-radius: 4px; font-size: 12px; line-height: 1.35; white-space: normal;`;
+  // The config panel sits above anything appended to <body>, so mount inside the
+  // panel's own root (the outermost ancestor under <body>) to share its stacking context.
+  let host = anchor;
+  while (host.parentElement && host.parentElement !== document.body) host = host.parentElement;
+  (host.parentElement === document.body ? host : document.body).appendChild(tooltip);
+  // A transformed ancestor makes `fixed` relative to itself; measure that origin and compensate.
+  tooltip.style.left = '0px';
+  tooltip.style.top = '0px';
+  const origin = tooltip.getBoundingClientRect();
+  const rect = anchor.getBoundingClientRect();
+  const left = Math.min(Math.max(8, rect.left), window.innerWidth - origin.width - 8);
+  const above = rect.top - origin.height - 6;
+  tooltip.style.left = `${left - origin.left}px`;
+  tooltip.style.top = `${(above >= 8 ? above : rect.bottom + 6) - origin.top}px`;
+  fastWarningTooltip = tooltip;
+}
+
+function createRunSeed() {
+  return Math.max(1, Math.floor((Date.now() * Math.random()) % 2147483647));
+}
+
+// One real (live game) run for a given seed. Used to cross-check the fast engine.
+async function runRealSeedOnce(seed, analysisId) {
+  globalThis.state.board.send({
+    type: 'setState',
+    fn: prevState => ({ ...prevState, customSandboxSeed: seed, gameStarted: true })
+  });
+  try {
+    return await getLastTick(analysisId);
+  } finally {
+    globalThis.state.board.send({
+      type: 'setState',
+      fn: prevState => ({ ...prevState, gameStarted: false })
+    });
+  }
+}
+
+function readPersistedFastVerification(persistKey) {
+  try {
+    const verifiedAt = JSON.parse(localStorage.getItem(FAST_VERIFIED_STORAGE_KEY) || '{}')[persistKey];
+    return Number.isFinite(verifiedAt) && Date.now() - verifiedAt < FAST_VERIFIED_TTL_MS;
+  } catch (_) {
+    return false;
+  }
+}
+
+function writePersistedFastVerification(persistKey) {
+  try {
+    const now = Date.now();
+    const stored = JSON.parse(localStorage.getItem(FAST_VERIFIED_STORAGE_KEY) || '{}');
+    for (const [storedKey, verifiedAt] of Object.entries(stored)) {
+      if (!Number.isFinite(verifiedAt) || now - verifiedAt >= FAST_VERIFIED_TTL_MS) delete stored[storedKey];
+    }
+    stored[persistKey] = now;
+    localStorage.setItem(FAST_VERIFIED_STORAGE_KEY, JSON.stringify(stored));
+  } catch (_) { /* storage is optional */ }
+}
+
+// Identifies a room/floor for verification. Without a build id there is nothing to tie a stored
+// result to, so only this session's result is trusted.
+function getFastVerificationKeys(setup) {
+  const key = `${fastNative.version}|${setup.roomId}|${setup.floor}`;
+  const buildId = globalThis.__NEXT_DATA__?.buildId;
+  return { key, persistKey: buildId ? `${buildId}|r${FAST_ENGINE_REVISION}|${key}` : null };
+}
+
+function isFastVerified({ key, persistKey }) {
+  if (verifiedFastEngines.get(key) === false) throw new Error('verificationFailed');
+  if (verifiedFastEngines.get(key) === true) return true;
+  if (persistKey && readPersistedFastVerification(persistKey)) {
+    verifiedFastEngines.set(key, true);
+    return true;
+  }
+  return false;
+}
+
+function isSandboxMode() {
+  try {
+    return globalThis.state.board.getSnapshot().context.mode === 'sandbox';
+  } catch (_) {
+    return false;
+  }
+}
+
+// Read-only step: builds the engine from the live board and reports whether this room/floor is
+// already verified. Returns null (with a toast) when fast mode is unavailable.
+function prepareFastEngine() {
+  let runner = null;
+  try {
+    fastNative ||= getNativeCombat();
+    const setup = fastNative.capture();
+    // Outside sandbox the analyzer switches modes, which rebuilds the board; that path re-captures.
+    const verified = isFastVerified(getFastVerificationKeys(setup)) && isSandboxMode();
+    runner = createFastRunner(fastNative);
+    return { runner, setup, verified };
+  } catch (error) {
+    runner?.cleanup();
+    fastNative = null;
+    console.warn('[Board Analyzer] Fast simulation unavailable, using real simulation:', error.message);
+    showBoardAnalyzerToast(t('mods.boardAnalyzer.fastSimulationFallback'));
+    return null;
+  }
+}
+
+function formatFastCheckResult(result) {
+  if (!result) return 'aborted';
+  return `${result.ticks}t ${result.completed ? `win rank ${result.rankPoints}` : 'loss'}`;
+}
+
+function recordFastVerification(setup, matched) {
+  const { key, persistKey } = getFastVerificationKeys(setup);
+  verifiedFastEngines.set(key, matched);
+  if (matched && persistKey) writePersistedFastVerification(persistKey);
+  return key;
+}
+
+// Plays the same seeds through the real game and the fast engine and logs each comparison.
+// Needs a running analysis (getLastTick) and a prepared board. Returns
+// { stopped, matched, compared, total } and stops at the first mismatch.
+async function compareFastAgainstReal(runner, setup, total, analysisId) {
+  const savedStopOnSPlus = config.stopOnSPlus;
+  const savedStopAfterTicks = config.stopAfterTicks;
+  // getLastTick reads these; they must not cut the reference runs short.
+  config.stopOnSPlus = false;
+  config.stopAfterTicks = 0;
+  let matched = 0, compared = 0;
+  try {
+    for (let i = 0; i < total; i++) {
+      if (!shouldContinueAnalysis(analysisId)) return { stopped: true, matched, compared, total };
+      const seed = createRunSeed();
+      const real = await runRealSeedOnce(seed, analysisId);
+      if (real.forceStopped) return { stopped: true, matched, compared, total };
+      const fast = await runner.simulate(setup, seed);
+      const same = Boolean(fast) && fast.ticks === real.ticks && fast.completed === real.completed &&
+        (!real.completed || fast.rankPoints === real.rankPoints);
+      compared++;
+      if (same) matched++;
+      const line = `[Board Analyzer] Fast check ${i + 1}/${total} seed ${seed}: real ${formatFastCheckResult(real)} | fast ${formatFastCheckResult(fast)} | ${same ? 'match' : 'MISMATCH'}`;
+      if (same) console.log(line); else console.warn(line);
+      if (!same) break;
+    }
+    return { stopped: false, matched, compared, total };
+  } finally {
+    config.stopOnSPlus = savedStopOnSPlus;
+    config.stopAfterTicks = savedStopAfterTicks;
+  }
+}
+
+// Verifies the engine against real runs when needed. Returns the engine, or null when it
+// disagrees with the game or the analysis was stopped. Needs the board prepared (sandbox/turbo)
+// only when the room/floor is not verified yet.
+async function finishFastEngine(ready, analysisId) {
+  const { runner } = ready;
+  let { setup } = ready;
+  let verified = ready.verified;
+  try {
+    if (!verified) {
+      // The board was prepared (sandbox mode may have rebuilt it), so capture it again.
+      setup = fastNative.capture();
+      verified = isFastVerified(getFastVerificationKeys(setup));
+    }
+    const { key } = getFastVerificationKeys(setup);
+    if (!verified) {
+      const outcome = await compareFastAgainstReal(runner, setup, FAST_VERIFY_SEEDS, analysisId);
+      if (outcome.stopped) { runner.cleanup(); return null; }
+      if (outcome.matched !== outcome.total) {
+        recordFastVerification(setup, false);
+        throw new Error('verificationFailed');
+      }
+      recordFastVerification(setup, true);
+      console.log(`[Board Analyzer] Fast simulation verified: ${outcome.matched}/${outcome.total} seeds identical (${key})`);
+    } else {
+      console.log(`[Board Analyzer] Fast simulation already verified (${key})`);
+    }
+
+    return {
+      run: (seed, shouldAbort) => runner.simulate(setup, seed, { tickLimit: config.stopAfterTicks, shouldAbort }),
+      getStats: runner.getStats,
+      cleanup: () => runner.cleanup()
+    };
+  } catch (error) {
+    runner.cleanup();
+    console.warn('[Board Analyzer] Fast simulation unavailable, using real simulation:', error.message);
+    showBoardAnalyzerToast(t('mods.boardAnalyzer.fastSimulationFallback'));
+    return null;
+  }
+}
+
+// =======================
 // 6. Analysis Engine
 // =======================
 
@@ -2375,7 +2774,7 @@ function uninstallXpDebugFetchHook() {
 }
 
 // Helper function to run the main analysis loop
-async function runAnalysisLoop(runs, thisAnalysisId, statsCalculator, bestRuns, timing, statusCallback, perf = null) {
+async function runAnalysisLoop(runs, thisAnalysisId, statsCalculator, bestRuns, timing, statusCallback, perf = null, fastEngine = null) {
   const results = [];
   
   for (let i = 1; i <= runs; i++) {
@@ -2388,7 +2787,7 @@ async function runAnalysisLoop(runs, thisAnalysisId, statsCalculator, bestRuns, 
     timing.lastRunStart = performance.now();
     
     // Process individual run
-    const runResult = await processSingleRun(i, runs, thisAnalysisId, statsCalculator, bestRuns, timing, perf);
+    const runResult = await processSingleRun(i, runs, thisAnalysisId, statsCalculator, bestRuns, timing, perf, fastEngine);
     
     if (runResult === null) {
       // Analysis was stopped
@@ -2544,27 +2943,35 @@ function updateStatusCallback(currentRun, totalRuns, statsCalculator, statusCall
 }
 
 // Helper function to process a single analysis run
-async function processSingleRun(runIndex, totalRuns, thisAnalysisId, statsCalculator, bestRuns, timing, perf = null) {
+async function processSingleRun(runIndex, totalRuns, thisAnalysisId, statsCalculator, bestRuns, timing, perf = null, fastEngine = null) {
   // Generate a new unique seed for this run
-  const runSeed = Math.floor((Date.now() * Math.random()) % 2147483647);
+  const runSeed = createRunSeed();
 
   try {
-    // Start the game using direct state manipulation with embedded seed
-    const startSendStart = performance.now();
-    globalThis.state.board.send({
-      type: "setState",
-      fn: prevState => ({
-        ...prevState,
-        customSandboxSeed: runSeed,
-        gameStarted: true
-      })
-    });
-    const startSendMs = performance.now() - startSendStart;
-    if (perf) perf.recordStartSend(startSendMs);
-
-    // Wait for game to complete
+    let startSendMs = 0;
+    let result;
     const waitStart = performance.now();
-    const result = await getLastTick(thisAnalysisId);
+    if (fastEngine) {
+      // Isolated engine: no board state is touched. null means the run was aborted.
+      result = await fastEngine.run(runSeed, () => !shouldContinueAnalysis(thisAnalysisId));
+      if (!result) result = { forceStopped: true };
+    } else {
+      // Start the game using direct state manipulation with embedded seed
+      const startSendStart = performance.now();
+      globalThis.state.board.send({
+        type: "setState",
+        fn: prevState => ({
+          ...prevState,
+          customSandboxSeed: runSeed,
+          gameStarted: true
+        })
+      });
+      startSendMs = performance.now() - startSendStart;
+      if (perf) perf.recordStartSend(startSendMs);
+
+      // Wait for game to complete
+      result = await getLastTick(thisAnalysisId);
+    }
     const tickWaitMs = performance.now() - waitStart;
     if (perf) perf.recordTickWait(tickWaitMs);
 
@@ -2605,16 +3012,19 @@ async function processSingleRun(runIndex, totalRuns, thisAnalysisId, statsCalcul
     if (perf) perf.recordProcessResults(processResultsMs);
 
     // Stop the game using direct state manipulation
-    const stopSendStart = performance.now();
-    globalThis.state.board.send({
-      type: "setState",
-      fn: prevState => ({
-        ...prevState,
-        gameStarted: false
-      })
-    });
-    const stopSendMs = performance.now() - stopSendStart;
-    if (perf) perf.recordStopSend(stopSendMs);
+    let stopSendMs = 0;
+    if (!fastEngine) {
+      const stopSendStart = performance.now();
+      globalThis.state.board.send({
+        type: "setState",
+        fn: prevState => ({
+          ...prevState,
+          gameStarted: false
+        })
+      });
+      stopSendMs = performance.now() - stopSendStart;
+      if (perf) perf.recordStopSend(stopSendMs);
+    }
 
     // Live per-run breakdown, gated by the normal console.log level (info/verbose) —
     // lets you watch script overhead accumulate in real time instead of waiting for
@@ -2743,8 +3153,25 @@ function processRunResults(result, runIndex, statsCalculator, bestRuns) {
 
 // Helper function to cleanup analysis resources
 function cleanupAnalysisResources(thisAnalysisId) {
-  // Use the proper board restoration function (includes global state reset)
-  restoreBoardState();
+  if (activeFastEngine) {
+    const { runs, createMs, tickMs } = activeFastEngine.getStats();
+    if (runs > 0) {
+      console.log(`[Board Analyzer] Fast engine: ${runs} runs, world setup ${(createMs / runs).toFixed(2)}ms/run, ticks ${(tickMs / runs).toFixed(2)}ms/run`);
+    }
+    activeFastEngine.cleanup();
+    activeFastEngine = null;
+  }
+
+  if (analysisTouchedBoard) {
+    analysisTouchedBoard = false;
+    // Use the proper board restoration function (includes global state reset)
+    restoreBoardState();
+  } else {
+    restoreBoardVisibility();
+    if (window.ModCoordination) {
+      window.ModCoordination.updateModState('Board Analyzer', { active: false, metadata: { endTime: Date.now() } });
+    }
+  }
   
   // Disable turbo mode if it was enabled
   if (config.enableTurboAutomatically && turboActive) {
@@ -2802,15 +3229,32 @@ async function analyzeBoard(runs = config.runs, statusCallback = null, perfTrack
     
     const perf = perfTracker || createAnalysisPerformanceTracker();
 
+    // Optional isolated engine (read-only setup); null means the live game runs every simulation
+    const fastReady = config.fastSimulation ? prepareFastEngine() : null;
+
     // Prepare analysis environment
     const setupStart = performance.now();
-    const modeSwitched = await prepareAnalysisEnvironment();
+    let modeSwitched = false;
+    if (fastReady?.verified) {
+      // The isolated engine never touches game state: skip sandbox/turbo and the later restore.
+      captureCurrentBoardState();
+      captureMapInformation();
+      preserveBetterHighscores();
+      hideGameBoardIfConfigured();
+    } else {
+      analysisTouchedBoard = true;
+      modeSwitched = await prepareAnalysisEnvironment();
+    }
     perf.setupMs = performance.now() - setupStart;
     console.log('[Board Analyzer] Analyzing', currentRoomName || currentRoomId, 'floor', currentFloor ?? 0, `(${runs} planned runs)`);
-    
+
+    if (fastReady) {
+      activeFastEngine = await finishFastEngine(fastReady, thisAnalysisId);
+    }
+
     // Run the main analysis loop
     const loopStart = performance.now();
-    const results = await runAnalysisLoop(runs, thisAnalysisId, statsCalculator, bestRuns, timing, statusCallback, perf);
+    const results = await runAnalysisLoop(runs, thisAnalysisId, statsCalculator, bestRuns, timing, statusCallback, perf, activeFastEngine);
     perf.loopMs = performance.now() - loopStart;
     
     // Calculate final statistics
@@ -3177,6 +3621,49 @@ function createConfigPanel(startAnalysisCallback) {
   const displayBody = createSection(t('mods.boardAnalyzer.sectionDisplay'), 'display', false);
   const stopBody = createSection(t('mods.boardAnalyzer.sectionStopConditions'), 'stop-conditions', false);
 
+  // Fast simulation checkbox
+  const fastContainer = document.createElement('div');
+  fastContainer.style.cssText = 'display: flex; align-items: center; gap: 8px;';
+
+  const fastInput = document.createElement('input');
+  fastInput.type = 'checkbox';
+  fastInput.id = 'fast-simulation-input';
+  fastInput.checked = config.fastSimulation;
+
+  const fastLabel = document.createElement('label');
+  fastLabel.htmlFor = 'fast-simulation-input';
+  fastLabel.textContent = t('mods.boardAnalyzer.fastSimulationLabel');
+  fastLabel.title = t('mods.boardAnalyzer.fastSimulationTooltip');
+
+  const fastWarning = document.createElement('span');
+  fastWarning.textContent = '⚠️';
+  fastWarning.setAttribute('role', 'img');
+  fastWarning.setAttribute('aria-label', t('mods.boardAnalyzer.fastSimulationWarning'));
+  fastWarning.tabIndex = 0;
+  fastWarning.style.cssText = 'cursor: help;';
+  // Native title tooltips cannot be width-limited, so use a small custom one.
+  fastWarning.addEventListener('mouseenter', () => showFastWarningTooltip(fastWarning));
+  fastWarning.addEventListener('focus', () => showFastWarningTooltip(fastWarning));
+  fastWarning.addEventListener('mouseleave', hideFastWarningTooltip);
+  fastWarning.addEventListener('blur', hideFastWarningTooltip);
+
+  fastContainer.appendChild(fastInput);
+  fastContainer.appendChild(fastLabel);
+  fastContainer.appendChild(fastWarning);
+  analysisBody.appendChild(fastContainer);
+
+  const fastCredit = document.createElement('div');
+  fastCredit.style.cssText = 'font-size: 11px; opacity: 0.75; margin-top: -4px; padding-left: 24px;';
+  fastCredit.append(`${t('mods.boardAnalyzer.fastSimulationCredit')} `);
+  const fastCreditLink = document.createElement('a');
+  fastCreditLink.href = FAST_SIMULATION_CREDIT_URL;
+  fastCreditLink.textContent = 'Orw';
+  fastCreditLink.target = '_blank';
+  fastCreditLink.rel = 'noopener noreferrer';
+  fastCreditLink.style.cssText = 'color: #6cf; text-decoration: underline;';
+  fastCredit.appendChild(fastCreditLink);
+  analysisBody.appendChild(fastCredit);
+
   // Runs input
   const runsContainer = document.createElement('div');
   runsContainer.style.cssText = 'display: flex; justify-content: space-between; align-items: center;';
@@ -3484,7 +3971,8 @@ function createConfigPanel(startAnalysisCallback) {
     config.stopWhenTicksReached = parseInt(document.getElementById('stop-when-ticks-input').value, 10);
     config.estimateExperience = document.getElementById('estimate-exp-input').checked;
     config.showAdvancedLiveStats = document.getElementById('advanced-live-stats-input').checked;
-    
+    config.fastSimulation = document.getElementById('fast-simulation-input').checked;
+
     // Save configuration
     api.service.updateScriptConfig(context.hash, config);
   }
@@ -4810,6 +5298,7 @@ context.exports = {
   },
   // Cleanup function for modal manager
   cleanup: () => {
+    hideFastWarningTooltip();
     uninstallXpDebugFetchHook();
     clearBoardAnalyzerModalLayoutCleanup();
     // Abort a running analysis and tear down its resources (turbo mode, its gameTimer

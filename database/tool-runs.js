@@ -3,7 +3,8 @@
  *
  * The block between the markers is rewritten by tools/tool-runs.mjs (recordRun) at the end of every
  * completed run of tools/check-creature-combat.mjs, check-inventory-items.mjs,
- * check-room-scripts.mjs, check-database-names.mjs and check-outfits-mounts.mjs. Never edit it by hand.
+ * check-room-scripts.mjs, check-database-names.mjs, check-outfits-mounts.mjs and check-fast-simulation.mjs.
+ * Never edit it by hand.
  *
  *   buildId  Next.js build id of the game when the tool ran (changes on every deploy)
  *   at       ISO time of the run
@@ -14,11 +15,12 @@
  */
 // BEGIN TOOL_RUNS
 const TOOL_RUNS = {
-  creatureCombat: {"buildId":"gxMbrIpi9uHTuJKWB80ae","at":"2026-11-01T08:20:12.460Z","status":"ok"},
-  inventoryItems: {"buildId":"gxMbrIpi9uHTuJKWB80ae","at":"2026-11-01T08:20:13.878Z","status":"ok"},
-  roomScripts: {"buildId":"gxMbrIpi9uHTuJKWB80ae","at":"2026-11-01T08:20:14.700Z","status":"ok"},
-  databaseNames: {"buildId":"gxMbrIpi9uHTuJKWB80ae","at":"2026-11-01T08:40:20.053Z","status":"ok"},
-  outfitsMounts: {"buildId":"gxMbrIpi9uHTuJKWB80ae","at":"2026-11-01T15:41:16.947Z","status":"ok"}
+  creatureCombat: {"buildId":"G63aArHsrfaeZKknNhxai","at":"2026-11-03T10:37:55.561Z","status":"ok"},
+  inventoryItems: {"buildId":"G63aArHsrfaeZKknNhxai","at":"2026-11-03T10:37:58.262Z","status":"ok"},
+  roomScripts: {"buildId":"G63aArHsrfaeZKknNhxai","at":"2026-11-03T10:37:59.588Z","status":"ok"},
+  databaseNames: {"buildId":"G63aArHsrfaeZKknNhxai","at":"2026-11-03T10:37:56.232Z","status":"ok"},
+  outfitsMounts: {"buildId":"G63aArHsrfaeZKknNhxai","at":"2026-11-03T10:37:58.906Z","status":"ok"},
+  fastSimulation: {"buildId":"G63aArHsrfaeZKknNhxai","at":"2026-11-03T10:37:56.729Z","status":"ok"}
 };
 // END TOOL_RUNS
 
