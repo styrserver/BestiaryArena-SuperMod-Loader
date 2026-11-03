@@ -22,12 +22,14 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 import { recordRun } from './tool-runs.mjs';
+
+const { isCreatureBundle, analyze, parseNameToId } = createRequire(import.meta.url)('../content/ba-combat-chunk.js');
 
 const ORIGIN = 'https://bestiaryarena.com';
 const DB_PATH = join(dirname(fileURLToPath(import.meta.url)), '..', 'database', 'creature-database.js');
 const DATA_BLOCK = /(\/\/ BEGIN CREATURE_COMBAT_DATA\r?\n)[\s\S]*?(\/\/ END CREATURE_COMBAT_DATA)/;
-const MS_PER_TICK = 62.5;
 
 async function fetchText(url) {
   const res = await fetch(url);
@@ -46,82 +48,8 @@ export async function loadChunks() {
   return Promise.all([...paths].map((p) => fetchText(ORIGIN + p)));
 }
 
-/** Reads a `{...}` literal starting at `start`, splitting on top-level commas. */
-function readTopLevel(src, start, limit = 4000) {
-  let depth = 0;
-  let cur = '';
-  const parts = [];
-  for (let i = start; i < src.length && i - start < limit; i++) {
-    const c = src[i];
-    if (c === '{' || c === '(' || c === '[') {
-      depth++;
-      if (depth > 1) cur += c;
-    } else if (c === '}' || c === ')' || c === ']') {
-      depth--;
-      if (depth === 0) { parts.push(cur); return parts; }
-      cur += c;
-    } else if (c === ',' && depth === 1) { parts.push(cur); cur = ''; }
-    else cur += c;
-  }
-  return null;
-}
-
-function indexConstantObjects(src) {
-  const byVar = new Map();
-  const re = /(?:^|[,;{ ])([A-Za-z_$][\w$]{0,5})=\{(?=[A-Z][A-Z0-9_]+:)/g;
-  let m;
-  while ((m = re.exec(src))) {
-    const parts = readTopLevel(src, m.index + m[0].length - 1);
-    if (!parts) continue;
-    const obj = {};
-    let ok = true;
-    for (const kv of parts) {
-      const km = /^([A-Z][A-Z0-9_]+):([\s\S]*)$/.exec(kv);
-      if (!km) { ok = false; break; }
-      obj[km[1]] = km[2];
-    }
-    if (!ok || !Object.keys(obj).length) continue;
-    if (!byVar.has(m[1])) byVar.set(m[1], []);
-    byVar.get(m[1]).push({ at: m.index, obj });
-  }
-  return byVar;
-}
-
-/** Returns { v, ms } (ms: already milliseconds, i.e. wrapped in the game's ms->ticks `HX()`). */
-function scalar(raw) {
-  const v = String(raw).trim();
-  const ms = /^\(0,[A-Za-z_$][\w$]*\.HX\)\(([\d.e+-]+)\)$/.exec(v);
-  if (ms) return { v: Number(ms[1]), ms: true };
-  if (/^-?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?$/i.test(v)) return { v: Number(v), ms: false };
-  return undefined; // nested objects, fractions, references: not shown
-}
-
-/** Index just past the `}` that closes the object literal opening at `start` (capped at 20000 chars). */
-function objectEnd(src, start) {
-  let depth = 0;
-  const limit = Math.min(src.length, start + 20000);
-  for (let i = start; i < limit; i++) {
-    const c = src[i];
-    if (c === '{' || c === '(' || c === '[') depth++;
-    else if (c === '}' || c === ')' || c === ']') {
-      depth--;
-      if (depth === 0) return i + 1;
-    }
-  }
-  return limit;
-}
-
-function parseNameToId(src) {
-  const anchor = src.indexOf('Rat:1,Minotaur:2,"Minotaur Mage":3');
-  if (anchor < 0) throw new Error('creature name -> id table not found');
-  const open = src.lastIndexOf('{', anchor);
-  const close = src.indexOf('}', anchor);
-  const json = src.slice(open, close + 1).replace(/([{,])([A-Za-z_$][\w$]*):/g, '$1"$2":');
-  return JSON.parse(json);
-}
-
 function findCreatureBundle(chunks) {
-  const src = chunks.find((c) => c.includes('queryTags:') && c.includes('Rat:1,Minotaur:2'));
+  const src = chunks.find(isCreatureBundle);
   if (!src) throw new Error('creature bundle not found in the downloaded chunks');
   return src;
 }
@@ -134,76 +62,10 @@ export function extractCreatureNames(chunks) {
   return names;
 }
 
+/** Snapshot shape of every creature: { [gameId]: { n, ad, c } }. The parsing lives in content/ba-combat-chunk.js. */
 export function extractCombatData(chunks) {
-  const src = findCreatureBundle(chunks);
-  const nameToId = parseNameToId(src);
-  const objects = indexConstantObjects(src);
-  const metas = [...src.matchAll(/name:"([^"]+)",roles:\[[^\]]*\],queryTags:/g)];
-  if (metas.length < 100) throw new Error(`only ${metas.length} creature entries found`);
-
-  /** Constants and attack delay read from the metadata text starting at `from`. */
-  const readEntry = (from, to) => {
-    const seg = src.slice(from, Math.min(to, from + 14000));
-    const constants = {};
-    for (const r of seg.matchAll(/\b([A-Za-z_$][\w$]{0,5})\.([A-Z][A-Z0-9_]{2,})\b/g)) {
-      const defs = objects.get(r[1]);
-      if (!defs) continue;
-      let def = null;
-      for (const d of defs) if (d.at <= from + 14000) def = d; // nearest preceding
-      const val = def && r[2] in def.obj ? scalar(def.obj[r[2]]) : undefined;
-      if (!val) continue;
-      // *_TICKS constants are stored in milliseconds under a *_MS name, so the panel has one unit.
-      // A raw tick count is converted; an HX() value is already milliseconds.
-      const isTicks = r[2].endsWith('_TICKS');
-      const msName = r[2].replace(/_TICKS$/, '_MS');
-      const name = isTicks && !(msName in def.obj) ? msName : r[2];
-      constants[name] = isTicks && !val.ms ? val.v * MS_PER_TICK : val.v;
-    }
-    const delay = /attackDelayTicks:(?:\(0,[\w$]+\.HX\)\(([\d.e+-]+)\)|(\d+))/.exec(seg);
-    return {
-      ad: delay ? (delay[1] ? Number(delay[1]) : Number(delay[2]) * MS_PER_TICK) : null,
-      c: constants
-    };
-  };
-
-  const out = {};
-  const byVar = new Map(); // minified variable of a metadata object -> its entry
-  metas.forEach((m, k) => {
-    const end = k + 1 < metas.length ? metas[k + 1].index : src.length;
-    const entry = { n: m[1], ...readEntry(m.index, end) };
-    const owner = /(?:^|[,;{ ])([A-Za-z_$][\w$]*)=\{$/.exec(src.slice(Math.max(0, m.index - 24), m.index));
-    if (owner) byVar.set(owner[1], entry);
-    const id = nameToId[m[1]];
-    if (id && !out[id]) out[id] = entry; // summons have no id; later duplicates are variants
-  });
-
-  // Two metadata objects can share a name (the "Old Minotaur Archer" boss reuses "Minotaur Archer"
-  // with other numbers), so the first one is not always the playable creature. The registry
-  // `34:{constructor:rH,metadata:rX}` says which one the game actually builds for each id.
-  for (const reg of src.matchAll(/[,{ ](\d+):\{constructor:[\w$]+,metadata:([\w$]+)\}/g)) {
-    const entry = byVar.get(reg[2]);
-    if (entry && nameToId[entry.n] === Number(reg[1])) out[reg[1]] = entry;
-  }
-
-  // Event variants are written as `X={...Base,queryTags:[...],skill:{...}}` (Clot = Slime, Reindeer =
-  // Deer B, ...): they inherit Base's numbers and override whatever their own tooltip reads. The
-  // variant's id comes from its own `name:"..."`, else from the first creature name its tooltip prints.
-  const spreads = [...src.matchAll(/(?:^|[,;{ ])([A-Za-z_$][\w$]*)=\{\.\.\.([A-Za-z_$][\w$]*),queryTags:/g)];
-  for (const sp of spreads) {
-    const base = byVar.get(sp[2]);
-    if (!base) continue;
-    const objStart = src.indexOf('{', sp.index);
-    const from = sp.index + sp[0].length - 'queryTags:'.length;
-    const objEnd = objectEnd(src, objStart); // the variant's own object, not the code after it
-    const head = src.slice(from, objEnd);
-    const ownName = /^[^]{0,400}?\bname:"([^"]+)"/.exec(head)?.[1]
-      ?? /className:"text-monster",children:"([^"]+?)(?:'s)?"/.exec(head)?.[1]; // "Gummy Raider's"
-    const id = nameToId[ownName];
-    if (!id || out[id]) continue;
-    const own = readEntry(from, objEnd);
-    out[id] = { n: ownName, ad: own.ad ?? base.ad, c: { ...base.c, ...own.c } };
-  }
-  return out;
+  const entries = analyze(findCreatureBundle(chunks));
+  return Object.fromEntries(Object.entries(entries).map(([id, e]) => [id, { n: e.n, ad: e.ad, c: e.c }]));
 }
 
 function readSnapshot() {

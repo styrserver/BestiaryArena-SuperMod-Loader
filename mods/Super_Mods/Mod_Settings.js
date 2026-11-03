@@ -7276,56 +7276,67 @@ async function downloadRunsAsTxt(playerName, password, source = 'local') {
 }
 
 // Auto-upload hook for RunTracker
-let lastUploadedRunCount = 0;
-let autoUploadCheckInterval = null;
+// RunTracker fires `runtracker:runsUpdated` on every stored change (new, replaced, or improved
+// record), so listen to that instead of polling the run count (replacements keep the count equal).
+let autoUploadListening = false;
+let autoUploadDebounceTimer = null;
+let autoUploadInFlight = false;
+let autoUploadDirty = false;
+const AUTO_UPLOAD_DEBOUNCE_MS = 4000; // > uploadBestRuns' 3s rate limit
+
+function autoUploadEnabled() {
+  return !!(config.autoUploadRuns && config.enableFirebaseRunsUpload && config.firebaseRunsPassword);
+}
+
+async function runAutoUpload() {
+  autoUploadDebounceTimer = null;
+  if (!autoUploadEnabled()) return;
+  if (autoUploadInFlight) {
+    autoUploadDirty = true;
+    return;
+  }
+  autoUploadInFlight = true;
+  try {
+    const result = await uploadBestRuns();
+    if (result.success) {
+      console.log('[Mod Settings] Auto-upload successful');
+    } else {
+      console.error('[Mod Settings] Auto-upload failed:', result.error);
+    }
+  } finally {
+    autoUploadInFlight = false;
+    if (autoUploadDirty) {
+      autoUploadDirty = false;
+      handleAutoUploadRunsUpdated();
+    }
+  }
+}
+
+function handleAutoUploadRunsUpdated() {
+  if (!autoUploadEnabled()) return;
+  if (autoUploadDebounceTimer) clearTimeout(autoUploadDebounceTimer);
+  autoUploadDebounceTimer = setTimeout(runAutoUpload, AUTO_UPLOAD_DEBOUNCE_MS);
+}
 
 function startAutoUploadMonitor() {
-  if (autoUploadCheckInterval) {
-    clearInterval(autoUploadCheckInterval);
-  }
-  
   if (!config.autoUploadRuns || !config.enableFirebaseRunsUpload) {
     return;
   }
-  
-  // Initialize last count
-  if (window.RunTrackerAPI && window.RunTrackerAPI.getRunStats) {
-    const stats = window.RunTrackerAPI.getRunStats();
-    lastUploadedRunCount = stats.totalRuns || 0;
-  }
-  
-  // Check every 10 seconds for new runs
-  autoUploadCheckInterval = setInterval(async () => {
-    if (!config.autoUploadRuns || !config.enableFirebaseRunsUpload || !config.firebaseRunsPassword) {
-      return;
-    }
-    
-    if (!window.RunTrackerAPI || !window.RunTrackerAPI.getRunStats) {
-      return;
-    }
-    
-    const stats = window.RunTrackerAPI.getRunStats();
-    const currentRunCount = stats.totalRuns || 0;
-    
-    // If run count increased, upload
-    if (currentRunCount > lastUploadedRunCount) {
-      console.log('[Mod Settings] New runs detected, auto-uploading...');
-      const result = await uploadBestRuns();
-      if (result.success) {
-        lastUploadedRunCount = currentRunCount;
-        console.log('[Mod Settings] Auto-upload successful');
-      } else {
-        console.error('[Mod Settings] Auto-upload failed:', result.error);
-      }
-    }
-  }, 60000); // Check every 60 seconds
+  if (autoUploadListening) return;
+  window.addEventListener('runtracker:runsUpdated', handleAutoUploadRunsUpdated);
+  autoUploadListening = true;
 }
 
 function stopAutoUploadMonitor() {
-  if (autoUploadCheckInterval) {
-    clearInterval(autoUploadCheckInterval);
-    autoUploadCheckInterval = null;
+  if (autoUploadListening) {
+    window.removeEventListener('runtracker:runsUpdated', handleAutoUploadRunsUpdated);
+    autoUploadListening = false;
   }
+  if (autoUploadDebounceTimer) {
+    clearTimeout(autoUploadDebounceTimer);
+    autoUploadDebounceTimer = null;
+  }
+  autoUploadDirty = false;
 }
 
 // One-time copy of the pre-per-season Firebase record into its season slot

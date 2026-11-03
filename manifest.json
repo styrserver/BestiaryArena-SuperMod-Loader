@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "BestiaryArena SuperMod Loader",
-  "version": "5.2.9",
+  "version": "5.2.10",
   "description": "SuperMod loader for Bestiary Arena - Advanced mod management system with enhanced features and custom mods.",
   "icons": {
     "16": "assets/icons/icon-16.png",
@@ -22,6 +22,24 @@
     "service_worker": "background.js"
   },
   "content_scripts": [
+    {
+      "matches": [
+        "*://bestiaryarena.com/game",
+        "*://bestiaryarena.com/game/*",
+        "*://*.bestiaryarena.com/game",
+        "*://*.bestiaryarena.com/game/*",
+        "*://bestiaryarena.com/pt/game",
+        "*://bestiaryarena.com/pt/game/*",
+        "*://*.bestiaryarena.com/pt/game",
+        "*://*.bestiaryarena.com/pt/game/*"
+      ],
+      "js": [
+        "content/ba-combat-chunk.js",
+        "content/ba-combat-overrides.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
     {
       "matches": [
         "*://bestiaryarena.com/game",

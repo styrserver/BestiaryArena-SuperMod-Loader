@@ -659,6 +659,130 @@ function parsePalette(chunks) {
 }
 // END OUTFIT_MOUNT_PARSER
 
+// Mounts the game has no sprite for, taken from the Sleqqus Tibia LookType Generator (sleqqus.com/tlg).
+// Each image is a 64x64 mount-only sprite rebuilt from TLG renders with different riders (a pixel one rider
+// covers is read from the others; magenta background made transparent), so it composites with the player
+// outfit like a native one. The rider offset is 0,0 for all of them. A mount the game later ships natively
+// (an id in MOUNTS) wins over its entry here. id -> [name, rarity, image]
+const SLEQQUS_MOUNTS = {
+  1363: ["Krakoloss", 3,
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAADtUlEQVR42u2ZwWpTQRSG79KFBr2irYZSpUYCLaJSIdAgIooLFxIQcVEiuHLpWn0AF65cCULfou/gC/gKvsaU/9R//HM6IW6EOXEOHHKT3Jb7f/PPOTOTrmvRokWLFi1atGjRokWLFi1atGjRokWLFiEi/c7/TrDlfD5Ps9lsbSEknxsbzyyHw6ElxE+nU/tsHd2Qfv04Sscf76QHo0tpPP5gSeF4hfDt7bklrvt+slYg0s/vLwwCXgEBub9/ZKlAkIAAALiGK6JDMNE71y/kxHu6AYkRLzkCEMbjcWgAJhSiv87uWn5+vpeF47svh1t2jXsAQacAcjDYtYwKwcRR+PuHI0teEwQgvH28aRBYHFkg+76PDYBiX9/bSgc3LufEe35OEIRAF7AGRIaQRx1CCYHX/A6fKQB1AWpAVABJASiEVQB2rlzMLmBrBACAiAQhF0CFQBCsBXQFAezd7NOj3VsGAckiCPGYDpG6golH72f7g2BNzn0dfYg/fDJNn968sleCYEtEXYgAILc2AOAqUNcC2gYpfvP8uZyEgKQjItWBLFBXgJoeCHv/qd0nGQSdAAiRlsZWuBRCSTgrvd8DcN7jM7pBAMQogFzeEgLtzj7PPYAueAhh0Q29QYgCQB8yb3K81bnpAQSI5h4AYukIXKsbACEEACx7CYIjTZF+00MXcArQATwb4AIo2iLIIFwddJZqd4rU97wPydFnvw8LAGLePe3S7Wt/IPhRpnjcNxmdvfd0CqwEUGVnMCEqCqOtx2CsD7xP79V7lojPNebby/s65eqyPwR5AJoEwPsUAIofrglTINgKkuJrG317KD4g5zXFY73PV14Tgq8BdIZOIw+gtpHPALDJod0hRked33EDxE6httfaoPXB/w+CqOrgA6PCB/QJ0XzlFpgQ/HG5rw0CoPNOqAoAt7cq2I+c3wbrtODfsAYUxHcqviYIC0dfOudLANQpvE+PyBRCSXyN02DhwMMvidUR+F6LJQHoYan+DwWpByrVAfBHXCpcHtTe85TYg+Hn3k0luOqEauqAQtCTH293fq/i1B36G4IvquqUGpfHxUNPLXil+a7tkRCYCsMDrXY7rOf/vt35dujtrAemPhVahDOBYhcAjNKCyNtdHeSE1w+ABc3bV0dcBflRX7aYcoUwxi9CJfv6hZDWjGWW1wVUmCngfxHStuiEnPnN0Le8KOI7ne8lC3NkpTAurR1LukiMUyFujnwLWyEm+VYapfCtXBgVBP1tJwkdpanQosU/jBNigF7UYDMyKQAAAABJRU5ErkJggg=="],
+  1430: ["Shellodon", 3,
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAEXElEQVR42u1aPWtUQRR9FoIYArIEknQuCMYsFpLChCzaiEGIhXamEIWAoJWWFqKFkEIsBDsLf4GVhQiKvT/ARkt/x8iZ5EzOu5n3dmzcu2YGLu/ty8vdOWfu58w2TR111FFHHXXUUUcdddRRRx111FFHHXV4G+FAji8BXz6/z5FwbIgJ441zFmwXKf+dece/f7i3EXYvD/lueLX3oAS8e4LC9vZ23yTjKhMsSLh+fjFnDZ36d3Z23JIQJwcZjUZdkwxmFcPb25eiJYCISZZToN8HAePxOBSaa1z9F1urloRQqN+f+WOCdIMJK5XcgSTg2hMLjuh36waYIFYJBExyB4DG6oOACW4Qdap+t1agEyyYaARfQEBWv7/8Ph4fIaDPCubmhi0pJUB0+rQCJcCQ0JK1tXdJVlefh+FwNz4/uzRIkiO4gFw/BOjnvYd3kty/OgpnTp6IwCEK+vevH1G+f/vUSpsk1H6PKxfQSWoceHLrSrixshBlZeF0JAEEYNUBGmAJ3FhAS5dnElqT0yyA1QZoXCn4DFJAwsunj1urj+tgsB4tYzAYtHTpd8T78kry35DAyebA0wIg+pwkwAoIHoLYoASoXtYQhX3EdEhQAhS8JQH3IEHBIyuAAFytFWj36LWLTBP9GwJg8kyJ++a/np5l0l4wV5+tMfzcEkDg6hoMiAS/vHwzCj4zPc7k3gCjvw2AeMYgCCFggMWVrkASZoGA7BYX0p2uPlOgZgBmAZJA8CQA1w7zd7sZEiM6gNkCiPmfQY/gbQbQ1TcW4HJjRCcVBfkcV5JA0JDNzY8H0X29lfuVBPV/3Ktu811+CNAKkASwnGVKg4CAwxR3SAIJoNmzEIJQL/cFCvYcptMJaq5maYt7gAFogqeQFFaCdAn8j83/BK/VpsteQCcNQFxNksDuj8LUx76ALqFFle0DMp2mn9SnVsAYkCMAgFWYBRgP9skbHNE5E5sjegBigUI02mvUJwHqCpnUF3V7bIZaJLBRsStMl7DWoGSQhK7dJM/NUGvnl9ag4AH2wuJ8lKX5U0lYCkvpGybp9n6kFjKHIoGboTwiw4YoBCTw77SEvrMCz81Qy3etr1sSLAE2JthCyH1PoJO29b0Sg9VXK7AWox2hNkuuTd4GPJ18rmFCHOg5H2zp0CziMvWxqlMScv7P97n6IKEvXpAIBsnCc4TpADf9ewL19VkTHm016XcB9H97OIp7vIf3X989BN9D7nTBs8LTFJaZYPj5Zp8AAMaK5wjgc7yH90EC3Yq6tW7wQEIqZuiXmJSSQkvAal672LSAUkgAsgCueA/v0wJUFwsoo3+6FmAmktpfS4IKT4V5MErw9j0CVv2eLCDFgMxqJBK6Chk1/UwWyIFvxRw3BAB8B9DO52hktPKT+4n/6zEV2tUKHVVh5x5i5pcfvVblyQUa2++XNDNmIyPX13fGFVNf+KoCMxmgKSWhY3cn6fQKPNcEFf/2r8RdZqkRmvr4A4gzBHZ3Z5CbAAAAAElFTkSuQmCC"],
+  1599: ["Mutated Abomination", 3,
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAE30lEQVR42u2avWtTURjGQ9PSktTU1DS0TUpKkwqW2sFKW8QPlFJLlQpWKlhwsIiO1cXNDxwUCqKLk4MIBUHEVdzEQTcnZ8F/QBxcXI48pzyn7z09N0mX3nuTc+Dl3I9z0zy/9+skaSrlhx9++OGHH3744Ycffvjhhx9++BHvoYS1n/iFhQU1OzurisWiakcYWmw2mzUQpqamVK1Wa7uI8BAIoVqtGgjlcrm90gEAZE1opyjQohkBpVJJ5fP5tokCLR7CYYRAAK0eBVowC6AEIKOgVQGoQqGgcx6CeQwQEN/qaRDwtsv7sFZqiapZo3hEBIDgWtLTQD06P6EF/P64FWpyHcUTBkEkUvzW2owR/2tlVNvPZ3eN4ZzrrkyV1NnagJJ7AgkiiZ8TjFc3yt1q63CPgUDDNa6TACCe3meLpCUOAoQRQpjhvvQ+N0aYYQDCLgFLUjSYNztSLtQ1QmIxlF0C4ldXV03bTFJt0KEOgXOVfh3qd86MB2Zc5zrMz4fnzQaJ+U8QbJkEgIIZdwjq3+ZFAwDpYBsBYB2gsBPIL0kIBNel+CQAMHVAet0VAawB44MptZyb0GbtBJ1tMkoAzRQjLfD4SN7pfRkBtOmxbQgE4dgJauHcNkcFYNdGJmzdem5apwAguPIf97AGuQ/xV0+k1LnJHRC45wIgC+J+Q9Ci/3z/YjY0DgiK4uHF96du6hCn13Fui6fX710KQrCizAjmnmC/9wZaLEQDAEy9W9cbGrYwWH//rBobu6WKxXk9QyDbHY4BBcJhP9aeGAAQ/+q2E4Cdeq55/6o6DMIBAMcE8Pj+A/2GIbpUWjEzQEAkBOMYgCAckSC9L1OA55jjVOm1WEKgeBsAw59RQBg4zmRGA8YUwEzRFC5rgSvFIoPALaxLPMIbMzwMUTIS4PnOzgMBA4Tu7gGTGoSA1wAAGREUPnQw2sjQYiUEnC8vLhrPd3Rs1wOEOERRfC43GTAAwDpCYNGUYgGAECg+DqmhRX/6/E29efvBiIfgdDprWheiQAIYHLygKpXrqlA4rQH09Aw7Ich9AYRKABAfdQRoAF1deWP2NzuZTCUAALkPg2iIlwBcEOx8Z1pAOIzpEVkKQGChcFINDS2r3t6aNhzjGsUfG8gF9gIy/6V4GM/rFDdnVEQVBVro0qGs7gKIAOQ8jnEN97Dm8pHKLgB9fUd3FcEQCM6/y2LI7rCxFGEUQCwMx3jz8pzi2RUgnMbrEgJTok4kaLH0OoX/fbkeHQDu+IKf1La9v7k4Z65BNHu+PCYEV13APSsapFj1eman7nydL0aTBvTyw6cvdCdAR5C5j24gC5vc/OCcxY4Q0CFc3UH+TYoFDCE8uk6wcu2GqmbS2uOYAYJvigAolKKleBprgGyRsAafAyLfHusogHgYjmESgsx3xw8hgdciBEQCC6P9STB+P3Fl0gEDAKaALHSWoLqvKdujhNDk8/sLAGLpeRggCAApCcLKa9UMhDr1IJ4QLPGBdbLNNQBh1oUUxfilQoPvB403pSDmetgzWCs7g6wPift1KER0w1TAej4rukKyxKO1MacJgN7EvXpbX6aBnBMHQHrd8mLDFLCjpglo8QNgb2khwrGhUWHQLMHJjAIpgCnRKPTlM4iGuO0C9wpgV1FsVADreL0l/mFqr15sev1/b+WZYf+RrRcAAAAASUVORK5CYII="],
+  1724: ["Gorgon Hydra", 3,
+    "data:image/png;base64,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"],
+  1810: ["Primal Demonosaur", 3,
+    "data:image/png;base64,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"],
+};
+const SLEQQUS_ICON = "data:image/png;base64,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";
+
+// Entry for any mount id: the game's own table first, then the Sleqqus extras.
+function mountEntry(id) { return MOUNTS[id] ?? SLEQQUS_MOUNTS[id]; }
+function isSleqqusMount(id) { return !(id in MOUNTS) && id in SLEQQUS_MOUNTS; }
+function mountSpriteUrl(id) { return isSleqqusMount(id) ? SLEQQUS_MOUNTS[id][2] : `/assets/playerMount/${id}.png`; }
+
+// Makes the game itself draw the Sleqqus mounts (profile, board): its outfit canvas only rides a mount
+// whose id is in the game's mount Map, and loads the sprite with `new Image().src = '/assets/playerMount/<id>.png'`.
+// So (1) add the ids to that Map, found in webpack's module cache by shape (an exported `G` Map holding
+// mount 368 plus an `X` name table), and (2) answer those sprite URLs from SLEQQUS_MOUNTS.
+const NATIVE_MOUNT_PATH = /^\/assets\/playerMount\/(\d+)\.png(?:[?#].*)?$/;
+let nativeMountMap = null;
+let nativeMountsTimer = null;
+let nativeMountsTries = 0;
+let imageSrcDescriptor = null;
+let imageSrcPatch = null;
+
+function findNativeMountMap() {
+  const registry = window.webpackChunk_N_E;
+  if (!Array.isArray(registry) || typeof registry.push !== 'function') return null;
+  let webpackRequire = null;
+  try { registry.push([['ba-outfiter-mounts-probe'], {}, (req) => { webpackRequire = req; }]); } catch (_) { /* not ready */ }
+  if (typeof webpackRequire !== 'function') return null;
+  const isMountTable = (exp) => exp?.G instanceof Map && exp.G.has(368) && exp.X && typeof exp.X === 'object';
+  for (const mod of Object.values(webpackRequire.c || {})) {
+    if (isMountTable(mod?.exports)) return mod.exports.G;
+  }
+  // Not in the module cache (not loaded yet, or the cache is not exposed): find the module by its
+  // source and require it.
+  for (const [id, factory] of Object.entries(webpackRequire.m || {})) {
+    if (typeof factory !== 'function' || !String(factory).includes('"Widow Queen"')) continue;
+    try {
+      const exp = webpackRequire(id);
+      if (isMountTable(exp)) return exp.G;
+    } catch (_) { /* try the next candidate */ }
+  }
+  return null;
+}
+
+// The game's outfit canvas re-reads the mount table only when its props change, so a player already
+// wearing a Sleqqus mount needs a state nudge once the table knows it.
+function refreshWornSleqqusMount() {
+  const mountId = currentMountId();
+  if (mountId === null || !isSleqqusMount(mountId)) return;
+  globalThis.state.player.trigger.setState({ fn: (p) => ({ ...p, mountId: null }) });
+  nativeMountsTimer = setTimeout(() => {
+    nativeMountsTimer = null;
+    globalThis.state.player.trigger.setState({ fn: (p) => ({ ...p, mountId }) });
+  }, 100);
+}
+
+function installSleqqusMounts() {
+  if (!imageSrcPatch) {
+    const desc = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'src');
+    if (desc?.set && desc.configurable) {
+      imageSrcDescriptor = desc;
+      imageSrcPatch = {
+        ...desc,
+        set(value) {
+          const match = typeof value === 'string' ? NATIVE_MOUNT_PATH.exec(value) : null;
+          desc.set.call(this, match && isSleqqusMount(Number(match[1])) ? SLEQQUS_MOUNTS[match[1]][2] : value);
+        }
+      };
+      Object.defineProperty(HTMLImageElement.prototype, 'src', imageSrcPatch);
+    }
+  }
+  if (nativeMountMap || nativeMountsTimer) return;
+  const attempt = () => {
+    nativeMountsTimer = null;
+    nativeMountMap = findNativeMountMap();
+    if (nativeMountMap) {
+      for (const id of Object.keys(SLEQQUS_MOUNTS).map(Number)) {
+        if (isSleqqusMount(id) && !nativeMountMap.has(id)) {
+          nativeMountMap.set(id, { id, name: SLEQQUS_MOUNTS[id][0], rarity: SLEQQUS_MOUNTS[id][1], group: 'sleqqus' });
+        }
+      }
+      console.log('[Outfiter] Sleqqus mounts registered in the game mount table:',
+        Object.keys(SLEQQUS_MOUNTS).filter((id) => nativeMountMap.get(Number(id))?.group === 'sleqqus').join(', ') || 'none (all native)',
+        '| image src patch:', imageSrcPatch ? 'on' : 'FAILED');
+      refreshWornSleqqusMount();
+      return;
+    }
+    if (++nativeMountsTries < 40) nativeMountsTimer = setTimeout(attempt, 500);
+    else console.warn('[Outfiter] Game mount table not found; Sleqqus mounts show only in the Outfiter picker');
+  };
+  attempt();
+}
+
+function uninstallSleqqusMounts() {
+  if (nativeMountsTimer) clearTimeout(nativeMountsTimer);
+  nativeMountsTimer = null;
+  nativeMountsTries = 0;
+  if (nativeMountMap) {
+    for (const id of Object.keys(SLEQQUS_MOUNTS).map(Number)) {
+      if (nativeMountMap.get(id)?.group === 'sleqqus') nativeMountMap.delete(id);
+    }
+    nativeMountMap = null;
+  }
+  // Only restore if nobody patched on top of us.
+  if (imageSrcPatch && Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'src')?.set === imageSrcPatch.set) {
+    Object.defineProperty(HTMLImageElement.prototype, 'src', imageSrcDescriptor);
+  }
+  imageSrcPatch = null;
+  imageSrcDescriptor = null;
+}
+
 function replaceContents(target, source) {
   if (Array.isArray(target)) {
     target.length = 0;
@@ -688,6 +812,29 @@ const ownedOutfits = new Set();
 let addedOutfits = new Set();
 let outfitBadgeStyle = null;
 
+// ---- Corner badges (outfit list + mount picker) ----------------------------------------------
+// One look for every "not owned / imported" marker: the icon on a soft dark glow, in a slot corner.
+// The outfit list's slots are React-virtualized, so its badges are CSS pseudo-elements; the mount
+// picker is ours, so its badges are real elements. Both use badgeDeclarations().
+const BADGE = { size: 28, icon: 18 };
+const BADGE_GLOW = 'radial-gradient(circle at center, rgba(8,4,18,0.9) 0%, rgba(8,4,18,0.8) 40%, rgba(8,4,18,0) 72%)';
+
+// The extension's own icon, served via web_accessible_resources (assets/icons/*); the base URL is set
+// by client.js and may not exist yet, in which case the badge is just the glow.
+function outfiterIconUrl() {
+  const base = window.BESTIARY_EXTENSION_BASE_URL;
+  return base ? `${base}assets/icons/icon-32.png` : null;
+}
+
+// CSS declarations for a corner badge showing `icon` (null: glow only). corner: 'left' | 'right'.
+function badgeDeclarations(icon, corner) {
+  return `position:absolute;top:0;${corner}:0;z-index:2;width:${BADGE.size}px;height:${BADGE.size}px;image-rendering:pixelated;` +
+    'background-repeat:no-repeat;background-position:center;' +
+    (icon
+      ? `background-image:url("${icon}"),${BADGE_GLOW};background-size:${BADGE.icon}px ${BADGE.icon}px,100% 100%;`
+      : `background-image:${BADGE_GLOW};background-size:100% 100%;`);
+}
+
 // Marks the mod-added outfits in the native "Change outfit" list with CSS only: that list is a
 // React-virtualized grid whose slots are recycled while scrolling, so injected nodes would go stale.
 // Each slot is `button > .container-slot > .relative > canvas[data-outfit=<id>]`.
@@ -696,7 +843,7 @@ function updateOutfitBadgeStyle() {
   if (addedOutfits.size === 0 && rideableIds.length === 0) {
     outfitBadgeStyle?.remove();
     outfitBadgeStyle = null;
-    stopOutfitIconHover();
+    stopIconHover();
     return;
   }
   if (!outfitBadgeStyle) {
@@ -720,38 +867,33 @@ function updateOutfitBadgeStyle() {
       `background: url("data:image/svg+xml,${encodeURIComponent(paw)}") center / contain no-repeat; }\n`;
   }
   if (added.length) {
-    // The extension's own icon, served via web_accessible_resources (assets/icons/*); the base URL
-    // is set by client.js and may not exist yet, in which case a plain purple dot is used.
-    const base = window.BESTIARY_EXTENSION_BASE_URL;
-    const badge = base
-      ? `background: url("${base}assets/icons/icon-32.png") center / contain no-repeat; image-rendering: pixelated; ` +
-        'filter: drop-shadow(0 0 1px #000) drop-shadow(0 0 2px #a56bff);'
-      : 'background: #7b3fe4; border-radius: 50%;';
-    css += `${group(added)} { box-shadow: inset 0 0 0 1px #a56bff; }\n` +
-      `${group(added, '::after')} { content: ''; position: absolute; top: 0; right: 0; ` +
-      `z-index: 2; width: ${ICON_HAT.size}px; height: ${ICON_HAT.size}px; pointer-events: none; ${badge} }\n`;
+    css += `${group(added, '::after')} { content: ''; pointer-events: none; ${badgeDeclarations(outfiterIconUrl(), OUTFIT_BADGE_CORNER)} }
+`;
   }
   outfitBadgeStyle.textContent = css;
-  startOutfitIconHover();
+  startIconHover();
 }
 
-// Hover tooltips for the two icons. The icons are CSS pseudo-elements, which cannot be hovered on
-// their own (hovering one hovers the whole slot), so one delegated listener checks whether the
-// pointer is inside an icon's corner of the slot and shows a tooltip we own, outside React's tree.
-const ICON_HAT = { size: 22 }; // top-right: outfit added by Outfiter (not owned)
+// Hover tooltips. One delegated listener shows a tooltip we own, outside React's tree. A real badge
+// carries its text in data-outfiter-tip (mount picker). The outfit list's icons are CSS
+// pseudo-elements, which cannot be hovered on their own (hovering one hovers the whole slot), so
+// there the listener checks whether the pointer is inside an icon's corner of the slot.
+const OUTFIT_BADGE_CORNER = 'right'; // outfit added by Outfiter (not owned); the left holds the native star tier
 const ICON_PAW = { size: 14, inset: 2 }; // bottom-left: outfit can ride mounts
-let outfitIconTip = null;
-let outfitIconMove = null;
-let outfitIconHide = null;
+let iconTip = null;
+let iconMove = null;
+let iconHide = null;
 
 function iconTipFor(event) {
+  const badge = event.target?.closest?.('[data-outfiter-tip]');
+  if (badge) return badge.dataset.outfiterTip;
   const slot = event.target?.closest?.(`${OUTFIT_DIALOG} button > .container-slot`);
   const id = slot?.querySelector(':scope > .relative > canvas[data-outfit]')?.dataset.outfit;
   if (!slot || id === undefined) return null;
   const rect = slot.getBoundingClientRect();
   const x = event.clientX - rect.left;
   const y = event.clientY - rect.top;
-  if (addedOutfits.has(Number(id)) && x >= rect.width - ICON_HAT.size && y <= ICON_HAT.size) {
+  if (addedOutfits.has(Number(id)) && x >= rect.width - BADGE.size && y <= BADGE.size) {
     return t('mods.outfiter.tooltipNotOwned');
   }
   if (id in MOUNTABLE_OUTFITS && x <= ICON_PAW.inset + ICON_PAW.size && y >= rect.height - ICON_PAW.inset - ICON_PAW.size) {
@@ -760,40 +902,40 @@ function iconTipFor(event) {
   return null;
 }
 
-function startOutfitIconHover() {
-  if (outfitIconMove) return;
-  outfitIconHide = () => { if (outfitIconTip) outfitIconTip.style.display = 'none'; };
-  outfitIconMove = (event) => {
+function startIconHover() {
+  if (iconMove) return;
+  iconHide = () => { if (iconTip) iconTip.style.display = 'none'; };
+  iconMove = (event) => {
     const text = iconTipFor(event);
-    if (!text) { outfitIconHide(); return; }
-    if (!outfitIconTip) {
-      outfitIconTip = document.createElement('div');
-      outfitIconTip.style.cssText = 'position:fixed;z-index:2147483647;pointer-events:none;white-space:nowrap;' +
+    if (!text) { iconHide(); return; }
+    if (!iconTip) {
+      iconTip = document.createElement('div');
+      iconTip.style.cssText = 'position:fixed;z-index:2147483647;pointer-events:none;white-space:nowrap;' +
         'padding:2px 6px;font-size:11px;line-height:13px;color:#e6d6ff;background:rgba(20,10,40,0.95);' +
         'border:1px solid #a56bff;';
-      document.body.appendChild(outfitIconTip);
+      document.body.appendChild(iconTip);
     }
-    outfitIconTip.textContent = text;
-    outfitIconTip.style.display = 'block';
-    const width = outfitIconTip.offsetWidth;
-    outfitIconTip.style.left = `${Math.min(event.clientX + 12, window.innerWidth - width - 4)}px`;
-    outfitIconTip.style.top = `${event.clientY + 16}px`;
+    iconTip.textContent = text;
+    iconTip.style.display = 'block';
+    const width = iconTip.offsetWidth;
+    iconTip.style.left = `${Math.min(event.clientX + 12, window.innerWidth - width - 4)}px`;
+    iconTip.style.top = `${event.clientY + 16}px`;
   };
-  document.addEventListener('mousemove', outfitIconMove, true);
-  document.addEventListener('wheel', outfitIconHide, true); // the list scrolls under a still pointer
-  window.addEventListener('blur', outfitIconHide);
+  document.addEventListener('mousemove', iconMove, true);
+  document.addEventListener('wheel', iconHide, true); // the list scrolls under a still pointer
+  window.addEventListener('blur', iconHide);
 }
 
-function stopOutfitIconHover() {
-  if (outfitIconMove) {
-    document.removeEventListener('mousemove', outfitIconMove, true);
-    document.removeEventListener('wheel', outfitIconHide, true);
-    window.removeEventListener('blur', outfitIconHide);
+function stopIconHover() {
+  if (iconMove) {
+    document.removeEventListener('mousemove', iconMove, true);
+    document.removeEventListener('wheel', iconHide, true);
+    window.removeEventListener('blur', iconHide);
   }
-  outfitIconMove = null;
-  outfitIconHide = null;
-  outfitIconTip?.remove();
-  outfitIconTip = null;
+  iconMove = null;
+  iconHide = null;
+  iconTip?.remove();
+  iconTip = null;
 }
 
 function mergeOutfitsIntoPlayer() {
@@ -871,8 +1013,8 @@ function pickMountableOutfit(ctx) {
 
 // Sorted by rarity, then name.
 function getMountIds() {
-  return Object.keys(MOUNTS).map(Number).sort((a, b) =>
-    MOUNTS[a][1] - MOUNTS[b][1] || MOUNTS[a][0].localeCompare(MOUNTS[b][0]));
+  return [...new Set([...Object.keys(MOUNTS), ...Object.keys(SLEQQUS_MOUNTS)])].map(Number).sort((a, b) =>
+    mountEntry(a)[1] - mountEntry(b)[1] || mountEntry(a)[0].localeCompare(mountEntry(b)[0]));
 }
 
 function saveOutfitToStorage(outfitId, colors = null, mountId) {
@@ -1196,7 +1338,7 @@ function tintOutfit(data, width, height, colors) {
 // alone (outfitId null).
 async function renderOutfit(canvas, outfitId, colors, mountId) {
   if (outfitId === null) {
-    const mountOnly = await loadSprite(`/assets/playerMount/${mountId}.png`);
+    const mountOnly = await loadSprite(mountSpriteUrl(mountId));
     canvas.width = mountOnly.width;
     canvas.height = mountOnly.height;
     canvas.getContext('2d').drawImage(mountOnly, 0, 0);
@@ -1208,7 +1350,7 @@ async function renderOutfit(canvas, outfitId, colors, mountId) {
     : `/assets/${OUTFIT_SPRITE_OVERRIDES.has(outfitId) ? 'playerOutfitOverride' : 'playerOutfit'}/${outfitId}.png`;
   const [rider, mount] = await Promise.all([
     loadSprite(riderUrl),
-    mounted ? loadSprite(`/assets/playerMount/${mountId}.png`) : null
+    mounted ? loadSprite(mountSpriteUrl(mountId)) : null
   ]);
 
   const work = document.createElement('canvas');
@@ -1242,7 +1384,7 @@ const LAST_MOUNT_KEY = 'outfiter-last-mount';
 function readLastMount() {
   try {
     const id = Number(localStorage.getItem(LAST_MOUNT_KEY));
-    return id in MOUNTS ? id : null;
+    return mountEntry(id) ? id : null;
   } catch (_) { return null; }
 }
 
@@ -1255,6 +1397,7 @@ function openMountSelector() {
 
   const player = globalThis.state?.player?.getSnapshot?.().context;
   const initial = currentMountId();
+  const ownedMounts = new Set(player?.mounts || []);
   let selected = initial ?? readLastMount();
   let ride = initial !== null; // the toggle: ride the selected mount, or not
 
@@ -1331,8 +1474,8 @@ function openMountSelector() {
 
   const sprite = (id) => {
     const img = document.createElement('img');
-    img.src = `/assets/playerMount/${id}.png`;
-    img.alt = MOUNTS[id][0];
+    img.src = mountSpriteUrl(id);
+    img.alt = mountEntry(id)[0];
     img.className = 'pixelated pointer-events-none absolute bottom-0 right-0';
     return img;
   };
@@ -1351,10 +1494,10 @@ function openMountSelector() {
     // Riding on: you on the mount. Riding off: the mount alone. No mount picked: just you.
     if (selected === null) paintPreview(player?.outfitId, null);
     else paintPreview(riding ? (switchTo ?? player?.outfitId) : null, selected);
-    previewRarity.setAttribute('data-rarity', selected === null ? '' : String(MOUNTS[selected][1]));
+    previewRarity.setAttribute('data-rarity', selected === null ? '' : String(mountEntry(selected)[1]));
     nameEl.textContent = selected === null
       ? t('mods.outfiter.noMount')
-      : MOUNTS[selected][0] + (switchTo !== null ? ` + ${MOUNTABLE_OUTFITS[switchTo]}` : '');
+      : mountEntry(selected)[0] + (switchTo !== null ? ` + ${MOUNTABLE_OUTFITS[switchTo]}` : '');
     rideBtn.textContent = ride ? t('mods.outfiter.ridingOn') : t('mods.outfiter.ridingOff');
     rideBtn.className = 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular gap-1 px-2 py-0.5 pb-[3px] pixel-font-14 mt-auto ' +
       (ride ? 'frame-1-green active:frame-pressed-1-green surface-green' : 'frame-1 active:frame-pressed-1 surface-regular');
@@ -1366,7 +1509,7 @@ function openMountSelector() {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'group focus-style-visible';
-    btn.title = id === null ? t('mods.outfiter.noMount') : `${MOUNTS[id][0]} (${id})${canRide ? '' : ` - ${t('mods.outfiter.needsMountableOutfit')}`}`;
+    btn.title = id === null ? t('mods.outfiter.noMount') : `${mountEntry(id)[0]} (${id})${canRide ? '' : ` - ${t('mods.outfiter.needsMountableOutfit')}`}`;
     const slot = document.createElement('div');
     slot.className = 'container-slot surface-darker relative p-0.5 flex justify-end border-whiteDark pb-1 pr-1 pt-3.5';
     slot.style.cssText = 'width:79px;height:52px;box-sizing:border-box;';
@@ -1374,11 +1517,20 @@ function openMountSelector() {
       const rarity = document.createElement('div');
       rarity.setAttribute('role', 'none');
       rarity.className = 'has-rarity absolute inset-0 opacity-60';
-      rarity.setAttribute('data-rarity', String(MOUNTS[id][1]));
+      rarity.setAttribute('data-rarity', String(mountEntry(id)[1]));
       const box = document.createElement('div');
       box.className = 'relative z-1 h-sprite w-sprite';
       box.appendChild(sprite(id));
       slot.append(rarity, box);
+      // One badge per slot, top-left, like the native outfit list's: the Sleqqus icon on a mount whose
+      // image comes from sleqqus.com, else the Outfiter icon on any other mount the account does not own.
+      const imported = isSleqqusMount(id);
+      if (imported || !ownedMounts.has(id)) {
+        const mark = document.createElement('span');
+        mark.dataset.outfiterTip = t(imported ? 'mods.outfiter.tooltipMountSleqqus' : 'mods.outfiter.tooltipMountNotOwned');
+        mark.style.cssText = badgeDeclarations(imported ? SLEQQUS_ICON : outfiterIconUrl(), 'left');
+        slot.append(mark);
+      }
     } else {
       // The slot's native padding is lopsided (pt-3.5 pr-1) and would push the icon off-center.
       slot.style.cssText += 'align-items:center;justify-content:center;padding:0;';
@@ -1431,6 +1583,7 @@ function openMountSelector() {
   });
 
   document.body.append(overlay, dialog);
+  startIconHover();
   mountModal = { close };
 }
 
@@ -1567,6 +1720,7 @@ function executeOutfiter() {
     mergeOutfitsIntoPlayer();
     startOutfitGuard();
     refreshGameTables();
+    installSleqqusMounts();
 
     // Define excluded items from bag pool (only if DATA is available)
     if (DATA_AVAILABLE) {
@@ -1644,6 +1798,7 @@ exports = {
         
         stopMountMenuObserver();
         stopOutfitGuard();
+        uninstallSleqqusMounts();
         tablesSettled = false;
         if (tablesAbort) {
           tablesAbort.abort();
@@ -1651,7 +1806,7 @@ exports = {
         }
         outfitBadgeStyle?.remove();
         outfitBadgeStyle = null;
-        stopOutfitIconHover();
+        stopIconHover();
         ownedOutfits.clear();
         addedOutfits = new Set();
 
@@ -1722,6 +1877,7 @@ function outfitsApplied() {
 // Undo executeOutfiter(): drop the outfits this mod added (owned ones stay), and remove its UI/hooks.
 function revertOutfiter() {
   stopOutfitGuard();
+  uninstallSleqqusMounts();
   stopMountMenuObserver();
   if (restoreTimer) {
     clearTimeout(restoreTimer);
@@ -1739,7 +1895,7 @@ function revertOutfiter() {
   addedOutfits = new Set();
   outfitBadgeStyle?.remove();
   outfitBadgeStyle = null;
-  stopOutfitIconHover();
+  stopIconHover();
   releaseOutfitChangeErrors();
 }
 

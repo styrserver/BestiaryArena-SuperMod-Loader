@@ -874,11 +874,12 @@ function noteCoordinationWait(context, ms, ops) {
   currentAttemptTrace.waits.push({ label: shortenCoordinationLabel(context, ops), ms: Math.round(ms) });
 }
 
-function logAttemptSummary(attemptNumber, { victory, ticks, grade, rankPoints, staminaThis, attemptMs }) {
+function logAttemptSummary(attemptNumber, { victory, ticks, grade, rankPoints, targetRankPoints, staminaThis, attemptMs }) {
   const t = currentAttemptTrace;
   const outcome = victory ? 'W' : 'L';
   const seed = t?.seed != null ? ` seed=${t.seed}` : '';
-  const parts = [`#${attemptNumber} ${outcome} ${ticks}t ${grade} +${rankPoints}rp ${staminaThis}sta${seed}`];
+  const rank = targetRankPoints != null ? `${rankPoints}/${targetRankPoints}` : `+${rankPoints}`;
+  const parts = [`#${attemptNumber} ${outcome} ${ticks}t ${grade} rank ${rank} ${staminaThis}sta${seed}`];
   const extras = [];
   if (t?.skipped) extras.push('skip');
   if (t?.reward) {
@@ -1008,12 +1009,18 @@ function getMaxTeamSize(serverResults = null) {
       if (roomData && typeof roomData.maxTeamSize === 'number') {
         return roomData.maxTeamSize;
       }
+      // type: 'multi' rooms have no top-level maxTeamSize; rank and speedrun are always scored on floor 0.
+      const multiSize = roomData?.floorRules?.[0]?.maxTeamSize;
+      if (typeof multiSize === 'number') {
+        return multiSize;
+      }
     }
   } catch (error) {
     console.warn('[Manual Runner] Error getting maxTeamSize:', error);
   }
-  
+
   // Default fallback (most common is 5, but some maps are different)
+  console.warn('[Manual Runner] maxTeamSize not found for room — falling back to 5; S+ target may be wrong');
   return 5;
 }
 
@@ -3880,6 +3887,7 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
         ticks: result.ticks,
         grade: result.grade,
         rankPoints: result.rankPoints,
+        targetRankPoints,
         staminaThis: attemptStaminaSpent,
         attemptMs: runTime
       });
@@ -4003,12 +4011,20 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
 
       let victoryContinueDueToTicks = false;
 
+      if (isVictory && !victoryConditionMet && runStop.stopCondition === 'max') {
+        const rs = serverResults?.rewardScreen;
+        console.log(
+          `[Manual Runner] Victory not stopping: rank ${result.rankPoints} < target rank ${targetRankPoints} ` +
+          `(grade=${result.grade}, rewardScreen.rank=${rs?.rank}, rewardScreen.grade=${rs?.grade})`
+        );
+      }
+
       if (victoryConditionMet) {
         if (runStop.stopWhenTicksReached > 0) {
           // ticks === 0 is never a real fast win here (skip stub / stale read); require a positive count.
           if (result.ticks > 0 && result.ticks <= runStop.stopWhenTicksReached) {
             const totalTime = performance.now() - startTime;
-            const rankSuffix = targetRankPoints != null ? `rank ${result.rankPoints} (S+${targetRankPoints})` : `rank ${result.rankPoints}`;
+            const rankSuffix = targetRankPoints != null ? `rank ${result.rankPoints}/${targetRankPoints}` : `rank ${result.rankPoints}`;
             console.log(`[Manual Runner] ✓ Stop: victory, ${rankSuffix}, ticks ${result.ticks} ≤ ${runStop.stopWhenTicksReached} — ${formatMilliseconds(totalTime)} (${attemptCount} attempts)`);
 
             const finalResult = {
@@ -4036,7 +4052,7 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
           }
         } else {
           const totalTime = performance.now() - startTime;
-          const rankSuffix = targetRankPoints != null ? `rank ${result.rankPoints} (S+${targetRankPoints})` : `rank ${result.rankPoints}`;
+          const rankSuffix = targetRankPoints != null ? `rank ${result.rankPoints}/${targetRankPoints}` : `rank ${result.rankPoints}`;
           console.log(`[Manual Runner] ✓ Stop: victory, ${rankSuffix}, ticks ${result.ticks} — ${formatMilliseconds(totalTime)} (${attemptCount} attempts)`);
 
           const finalResult = {
@@ -5110,7 +5126,7 @@ async function showResultsModal(results) {
             valueStyle: 'text-align: right; color: #FFD700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;'
           });
 
-          appendStatRow(statsContainer, t('mods.manualRunner.targetRank'), `S+${targetRankPoints}`, {
+          appendStatRow(statsContainer, t('mods.manualRunner.targetRank'), `${targetRankPoints}`, {
             valueStyle: 'text-align: right; color: #FFD700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;'
           });
         } catch (e) {
@@ -5146,11 +5162,8 @@ async function showResultsModal(results) {
         style: 'text-align: center; color: #2ecc71; margin-bottom: 15px; font-size: 1.2em; font-weight: bold;'
       }));
 
-      let finalResultText = results.finalResult.grade || 'N/A';
-      if (results.finalResult.grade === 'S+' && results.finalResult.rankPoints) {
-        finalResultText = `S+${results.finalResult.rankPoints}`;
-      }
-      finalResultText += ` (${results.finalResult.ticks} ticks)`;
+      const finalResultText =
+        `${results.finalResult.grade || 'N/A'} · rank ${results.finalResult.rankPoints ?? 0} (${results.finalResult.ticks} ticks)`;
 
       appendStatRow(statsContainer, t('mods.manualRunner.finalResult'), finalResultText);
     }
@@ -5466,7 +5479,9 @@ async function runAnalysis() {
     if (config.stopCondition === 'max') {
       const maxTeamSize = getMaxTeamSize(null);
       const playerTeamSize = getPlayerTeamSize();
-      targetRankPoints = Math.max(0, (2 * maxTeamSize) - playerTeamSize);
+      // playerTeamSize reads 0 when the board isn't readable; a team has ≥1, so cap at the game's max (2*max - 1).
+      targetRankPoints = Math.max(0, (2 * maxTeamSize) - Math.max(1, playerTeamSize));
+      console.log(`[Manual Runner] Target rank ${targetRankPoints} (maxTeamSize=${maxTeamSize}, playerTeamSize=${playerTeamSize})`);
     }
 
     // Optional: enable auto-refill stamina via Bestiary Automator

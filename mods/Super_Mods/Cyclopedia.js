@@ -8008,11 +8008,6 @@ function formatCombatNumber(value, maxDecimals = 2) {
   return String(Number(value.toFixed(maxDecimals)));
 }
 
-/** Engine ms -> ticks conversion (the game's `HX`). */
-function combatMsToTicks(ms) {
-  return Math.round(0.016 * ms);
-}
-
 /** A duration given in ticks, shown in seconds (default) or ticks per `cyclopediaState.combatTimeUnit`. */
 function formatCombatTicks(ticks) {
   if (cyclopediaState.combatTimeUnit === 'ticks') {
@@ -8034,9 +8029,7 @@ function getBaseDps(attackDamage, baseStats) {
 
 /** Ticks for one walking step at a speed stat (engine walk-cooldown formula). */
 function getWalkStepTicks(speed) {
-  let e = 1;
-  if (speed > -261.29) e = Math.max(Math.floor(857.36 * Math.log(speed / 2 + 261.29) - 4794.51), 1);
-  return combatMsToTicks(Math.floor(1e5 / e));
+  return creatureDbRef.walkStepTicks(speed);
 }
 
 /** Hover text with the effect of a displayed stat value, or '' when there is nothing to add. */
@@ -8059,59 +8052,6 @@ function getDerivedStatTitle(statKey, value, baseStats) {
   return '';
 }
 
-const COMBAT_WORD_LABELS = {
-  AP: 'AP', AD: 'AD', HP: 'HP', MR: 'MR', CDR: 'CDR', DMG: 'damage', MIN: 'min', MAX: 'max',
-  PERCENT: '', PCT: '' // the value itself is shown with a % sign
-};
-
-/** Sentence-case text from constant-name words ("BASE", "DMG" -> "Base damage"). */
-function formatCombatWords(words) {
-  const text = words.map((w) => COMBAT_WORD_LABELS[w] ?? w.toLowerCase()).filter(Boolean).join(' ');
-  return text.charAt(0).toUpperCase() + text.slice(1);
-}
-
-/**
- * A bare number, a time in ticks, or a percentage (`*_PERCENT*`). Values are milliseconds when the
- * name has `MS` / `TICKS` in it or starts with `CDR` (the game prints those with its seconds
- * formatter). `exact` keeps fractions of a tick, for per-stat amounts such as "1.28 ticks per AP".
- */
-function formatCombatAmount(key, value, exact = false) {
-  if (/(?:^|_)(?:MS|TICKS)(?:_|$)|^CDR(?:_|$)/.test(key)) {
-    return formatCombatTicks(exact ? value * 0.016 : combatMsToTicks(value));
-  }
-  // ATTACK_SPEED constants are fractions the game prints as a percentage ("+1% attack speed").
-  if (/PERCENT|LIFESTEAL|ATTACK_SPEED/.test(key) && Math.abs(value) <= 1) return `${formatCombatNumber(value * 100)}%`;
-  return formatCombatNumber(value);
-}
-
-/** Which panel section a constant belongs to. */
-function getCombatSection(key) {
-  if (key.startsWith('AWAKEN_')) return 'Awakened';
-  if (/COOLDOWN|CDR|RECHARGE|FREQUENCY|DELAY|DURATION/.test(key)) return 'Timing';
-  return 'Ability';
-}
-
-/**
- * Label and value for one ability constant. Scaling constants read as "Heal scaling: x 0.15 AP" or
- * "CDR scaling: 80 per AP" instead of the raw "HEAL_AP_RATIO" / "CDR_PER_AP".
- */
-function describeCombatConstant(key, value) {
-  let words = key.replace(/^AWAKEN_/, '').split('_').filter((w) => w && w !== 'MS');
-  const ratio = /(?:^|_)(AP|AD)_RATIO$/.exec(key);
-  const perStat = /_PER_(?:USER_)?(AP|AD)$/.exec(key);
-  if (ratio) {
-    words = words.slice(0, -2);
-    return { label: `${formatCombatWords(words) || 'Damage'} scaling`.replace(/^ /, ''), value: `× ${formatCombatNumber(value)} ${ratio[1]}` };
-  }
-  if (perStat) {
-    const end = key.includes('_PER_USER_') ? -3 : -2;
-    words = words.slice(0, end);
-    const sign = value > 0 ? '+' : '';
-    return { label: `${formatCombatWords(words) || 'Bonus'} scaling`, value: `${sign}${formatCombatAmount(key, value, true)} per ${perStat[1]}` };
-  }
-  return { label: formatCombatWords(words), value: formatCombatAmount(key, value) };
-}
-
 /** Whether the creature-database snapshot has combat numbers for this creature. */
 function hasCreatureCombatData(gameId) {
   return !!creatureDbRef.getCreatureCombatData?.(gameId);
@@ -8124,20 +8064,13 @@ function hasCreatureCombatData(gameId) {
  * the seconds/ticks switch, which calls `onToggleUnit`. Returns null when the snapshot has none for this id.
  */
 function renderCreatureCombatDetails(gameId, baseStats, onToggleUnit) {
-  const data = creatureDbRef.getCreatureCombatData?.(gameId);
-  if (!data) return null;
+  const abilitySections = creatureDbRef.describeCreatureCombatSections?.(gameId, formatCombatTicks);
+  if (!abilitySections) return null;
 
   const sections = [
     ['Basics', [{ label: 'Attack delay', value: formatCombatTicks(getBaseAttackDelayTicks(baseStats)) }]],
-    ['Ability', []], ['Timing', []], ['Awakened', []]
+    ...abilitySections
   ];
-  const byName = new Map(sections);
-  Object.entries(data.constants).forEach(([key, value]) => {
-    if (!Number.isFinite(value)) return;
-    // Some constants exist as both FOO_MS and FOO_TICKS with the same duration; show it once.
-    if (key.endsWith('_TICKS') && key.replace(/_TICKS$/, '_MS') in data.constants) return;
-    byName.get(getCombatSection(key)).push(describeCombatConstant(key, value));
-  });
 
   const panel = document.createElement('div');
   panel.className = 'frame-pressed-1 surface-dark revert-pixel-font-spacing ' + FONT_CONSTANTS.SIZES.SMALL;

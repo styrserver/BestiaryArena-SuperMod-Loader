@@ -471,6 +471,10 @@ const CREATURE_COMBAT_STAT_KEYS = [
   { key: 'speed', label: 'SPD' }
 ];
 const CREATURE_LIVE_APPLY_MS = 500;
+const DEFAULT_PLACED_CREATURE_LEVEL = 100;
+/** Per-placed-creature art override: absent = follow the Mod Settings "Use old outfits" setting. */
+const SPRITE_VARIANTS = ['old', 'current'];
+const FORCED_OLD_SPRITE_STYLE_ID = 'me-forced-old-sprites-style';
 
 // Combat-tuning overrides. None has a spawn-time config the game reads — CustomBattles'
 // enforceConfiguredAbilityCooldowns patches them onto the live actor's Cooldown/Range
@@ -10433,6 +10437,8 @@ function stopMapEditorSandboxTest(options = {}) {
   }
 
   editorState.sandboxTestActive = false;
+  syncNativeCombatConstants([]);
+  syncForcedOldSpriteStyle([]);
   notifyMapEditorOpenChanged();
   if (!shouldKeepMapEditorFloorLocked()) exitMapEditorFloorLock();
   clearSandboxTestPersistence();
@@ -11938,6 +11944,9 @@ function buildMapEditorVillainConfig(tileIndex, gameId, actorConfig = null) {
   if (actorConfig?.awakened === true || actorConfig?.awaken === true || actorConfig?.isAwakened === true) {
     config.awakened = true;
   }
+  const combatConstants = sanitizeCombatConstants(actorConfig?.combatConstants);
+  if (combatConstants) config.combatConstants = combatConstants;
+  if (SPRITE_VARIANTS.includes(actorConfig?.spriteVariant)) config.spriteVariant = actorConfig.spriteVariant;
   // Forwarded to CustomBattles as villain/ally config so its cooldown/range enforcement
   // (getConfiguredAbilityCooldownPieces / enforceConfiguredAbilityCooldowns) can find and
   // patch the live actor's ability / auto-attack / movement Cooldown component (or its
@@ -11992,7 +12001,9 @@ function buildActorConfigFromVillainConfig(villain) {
     attackCooldownTicks: villain.attackCooldownTicks,
     moveCooldownTicks: villain.moveCooldownTicks,
     moveSpeed: villain.moveSpeed,
-    range: villain.range
+    range: villain.range,
+    combatConstants: villain.combatConstants,
+    spriteVariant: villain.spriteVariant
   });
 }
 
@@ -12090,6 +12101,11 @@ function normalizeActorConfig(raw) {
   });
   if (normalized.abilityCooldown && normalized.ability?.cooldown) delete normalized.ability.cooldown;
   delete normalized.moveSpeed;
+
+  const combatConstants = sanitizeCombatConstants(normalized.combatConstants);
+  if (combatConstants) normalized.combatConstants = combatConstants;
+  else delete normalized.combatConstants;
+  if (!SPRITE_VARIANTS.includes(normalized.spriteVariant)) delete normalized.spriteVariant;
 
   return normalized;
 }
@@ -12274,6 +12290,7 @@ function buildCreatureEditorFormState(actor, tileIndex = null) {
     direction: CREATURE_DIRECTIONS.includes(actor?.direction) ? actor.direction : 'south',
     shiny: actor?.shiny === true,
     awakened: isActorAwakened(actor),
+    spriteVariant: SPRITE_VARIANTS.includes(actor?.spriteVariant) ? actor.spriteVariant : '',
     genes: getActorUiGenes(actor, tileIndex),
     nickname: actor?.nickname || '',
     equipGameId: equip?.gameId ?? '',
@@ -12357,6 +12374,11 @@ function buildActorConfigFromCreatureForm(baseActor, formState) {
   CREATURE_COMBAT_FIELDS.forEach((field) => {
     applyCooldownFieldToActorConfig(merged, field, formState[field.formKey]);
   });
+  const constants = sanitizeCombatConstants(formState.combatConstants);
+  if (constants) merged.combatConstants = constants;
+  else delete merged.combatConstants;
+  if (SPRITE_VARIANTS.includes(formState.spriteVariant)) merged.spriteVariant = formState.spriteVariant;
+  else delete merged.spriteVariant;
 
   return normalizeActorConfig(merged);
 }
@@ -12367,6 +12389,14 @@ function appendCreatureFormRow(parent, labelText, control) {
   const label = document.createElement('label');
   label.className = 'me-creature-form-label';
   label.textContent = labelText;
+  // Clicking the label focuses its field.
+  const target = control.matches?.('input, select, textarea')
+    ? control
+    : control.querySelector?.('input:not([type="hidden"]), select, textarea');
+  if (target) {
+    target.id = target.id || `me-creature-field-${++creatureFieldUid}`;
+    label.htmlFor = target.id;
+  }
   row.append(label, control);
   parent.appendChild(row);
   return row;
@@ -12408,6 +12438,8 @@ function readCreatureEditorFormState(formRoot) {
   });
   return {
     ...cooldownState,
+    combatConstants: readCreatureConstantInputs(formRoot),
+    spriteVariant: formRoot.querySelector('[data-creature-sprite-variant]')?.value || '',
     level: formRoot.querySelector('[data-creature-level]')?.value,
     direction: formRoot.querySelector('[data-creature-direction]')?.value,
     shiny: !!formRoot.querySelector('[data-creature-shiny]')?.checked,
@@ -12487,6 +12519,13 @@ function attachCreatureFormLiveApply(formRoot, tileIndex, getActorBase, gameId) 
 }
 
 function applyCreatureEditorForm(tileIndex, baseActor, formRoot, options = {}) {
+  const startedAt = performance.now();
+  const ok = applyCreatureEditorFormInner(tileIndex, baseActor, formRoot, options);
+  logMapEditor('creatureFormApplied', { tileIndex, ok, ms: Math.round(performance.now() - startedAt) });
+  return ok;
+}
+
+function applyCreatureEditorFormInner(tileIndex, baseActor, formRoot, options = {}) {
   const { live = false } = options;
   const actorConfig = buildActorConfigFromCreatureForm(baseActor, readCreatureEditorFormState(formRoot));
   if (!actorConfig) {
@@ -12593,13 +12632,7 @@ function readLiveCreatureCooldowns(tileIndex) {
 function nativeWalkCooldownTicksFromSpeed(speed) {
   const s = Number(speed);
   if (!Number.isFinite(s)) return null;
-  let t = 1;
-  if (s > -261.29) {
-    t = Math.floor(857.36 * Math.log(s / 2 + 261.29) - 4794.51);
-    if (t <= 0) t = 1;
-  }
-  const stepMs = Math.floor(100000 / t);
-  const ticks = Math.round(stepMs / 62.5);
+  const ticks = getCreatureDatabase()?.walkStepTicks?.(s);
   return Number.isFinite(ticks) && ticks > 0 ? ticks : null;
 }
 
@@ -12659,17 +12692,24 @@ function rememberNativeRange(gameId, range) {
   saveNativeRangeCache();
 }
 
+/** Snapshot-derived tuning defaults ({ abilityTicks, minAbilityTicks, range }) or null. */
+function getCreatureCombatTuningDefaults(gameId) {
+  return getCreatureDatabase()?.getCreatureCombatTuningDefaults?.(gameId) ?? null;
+}
+
 /**
  * A creature's native (pre-battle) value for one Combat-tuning field, in that field's unit.
  * Attack (`attackDelayTicks`, ticks) and move (`speed`, SPD) live in generic
- * `metadata.baseStats`; ability cooldown is buried in the ability script chunk, so returns
- * null for it. Range has no metadata source at all — see the cache above instead.
+ * `metadata.baseStats`; ability cooldown comes from the creature-database combat snapshot
+ * (`COOLDOWN_MS`), null when the creature has none. Range has no metadata source: a
+ * live-observed value (cache above) wins over the snapshot's bare `RANGE` constant.
  */
 function nativeCreatureFieldValue(gameId, field) {
   if (field.unit === 'range') {
     const cached = nativeRangeCacheByGameId.get(Number(gameId));
-    return Number.isFinite(cached) ? cached : null;
+    return Number.isFinite(cached) ? cached : getCreatureCombatTuningDefaults(gameId)?.range ?? null;
   }
+  if (field.liveKey === 'ability') return getCreatureCombatTuningDefaults(gameId)?.abilityTicks ?? null;
   const baseStats = globalThis.state?.utils?.getMonster?.(gameId)?.metadata?.baseStats;
   if (!baseStats || typeof baseStats !== 'object') return null;
   if (field.unit === 'speed') {
@@ -12683,27 +12723,114 @@ function nativeCreatureFieldValue(gameId, field) {
   return null;
 }
 
-/** "Combat tuning" section: ability / attack cooldown (ticks), movement (SPD), and range (tiles) overrides. */
-function appendCreatureCooldownSection(form, formState, tileIndex, actor) {
-  const title = document.createElement('div');
-  title.className = 'me-creature-section-title';
-  title.textContent = t('mods.mapEditor.creatureCombatTuning', 'Combat tuning');
-  form.appendChild(title);
+/** Remembered per section so a form rebuild (live apply, board update) keeps what you had open. */
+const creatureSectionOpen = { basics: true, stats: true, combat: false, equipment: false, appearance: false, constants: false };
+let creatureFieldUid = 0;
 
+/** A collapsible form section: `<details>` whose summary carries a "N changed" badge. */
+function createCreatureSection(id, titleText) {
+  const details = document.createElement('details');
+  details.className = 'me-creature-section';
+  details.dataset.creatureSection = id;
+  details.open = !!creatureSectionOpen[id];
+  details.addEventListener('toggle', () => { creatureSectionOpen[id] = details.open; });
+  const summary = document.createElement('summary');
+  summary.className = 'me-creature-section-summary';
+  const title = document.createElement('span');
+  title.textContent = titleText;
+  const badge = document.createElement('span');
+  badge.className = 'me-creature-badge';
+  badge.hidden = true;
+  summary.append(title, badge);
+  const body = document.createElement('div');
+  body.className = 'me-creature-form-grid me-creature-section-body';
+  details.append(summary, body);
+  return { details, body };
+}
+
+/**
+ * One row of the Combat table: name (+ small subtitle), native value, override input, reset ×.
+ * The row is marked `is-modified` while the input holds a value; the section badge counts those.
+ */
+function createCombatRow({ label, sub, nativeText, input }) {
+  const row = document.createElement('div');
+  row.className = 'me-combat-row';
+  input.id = input.id || `me-creature-field-${++creatureFieldUid}`;
+  input.classList.add('me-combat-input');
+
+  const name = document.createElement('div');
+  name.className = 'me-combat-name';
+  const nameLabel = document.createElement('label');
+  nameLabel.htmlFor = input.id;
+  nameLabel.textContent = label;
+  name.appendChild(nameLabel);
+  if (sub) {
+    const subEl = document.createElement('span');
+    subEl.className = 'me-combat-sub';
+    subEl.textContent = sub;
+    name.appendChild(subEl);
+  }
+
+  const native = document.createElement('span');
+  native.className = 'me-combat-native';
+  native.textContent = nativeText || '—';
+
+  const reset = document.createElement('button');
+  reset.type = 'button';
+  reset.className = 'me-combat-reset';
+  reset.textContent = '×';
+  reset.title = t('mods.mapEditor.creatureResetValue', 'Reset to native');
+
+  const sync = () => {
+    const modified = input.value.trim() !== '' && !input.disabled;
+    row.classList.toggle('is-modified', modified);
+    reset.style.visibility = modified ? 'visible' : 'hidden';
+  };
+  input.addEventListener('input', sync);
+  reset.addEventListener('click', () => {
+    input.value = '';
+    sync();
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  sync();
+
+  row.append(name, native, input, reset);
+  return { row, name };
+}
+
+/**
+ * "Combat" section body: ability / attack cooldown (ticks), movement (SPD) and range (tiles)
+ * overrides as one table with the native value beside each box, then the native ability constants.
+ */
+function appendCreatureCooldownSection(body, formState, tileIndex, actor) {
   const gameId = resolveCreatureGameId(actor);
   const live = readLiveCreatureCooldowns(tileIndex);
+  const unitText = { ticks: 'ticks', speed: 'SPD', range: 'tiles' };
+
+  const header = document.createElement('div');
+  header.className = 'me-combat-row me-combat-header';
+  [
+    t('mods.mapEditor.creatureColSetting', 'Setting'),
+    t('mods.mapEditor.creatureColNative', 'Native'),
+    t('mods.mapEditor.creatureColOverride', 'Override'),
+    ''
+  ].forEach((text) => {
+    const cell = document.createElement('span');
+    cell.textContent = text;
+    header.appendChild(cell);
+  });
+  body.appendChild(header);
 
   CREATURE_COMBAT_FIELDS.forEach((field) => {
     const input = createCreatureNumberInput(formState[field.formKey], {
       min: field.unit === 'speed' || field.unit === 'range' ? 1 : 0
     });
     input.setAttribute(field.datasetAttr, '1');
-    input.classList.add('me-creature-input-compact');
 
     // Metadata native value (works pre-battle) preferred; for tick fields (and range, which
     // has no metadata source at all — see nativeCreatureFieldValue) fall back to the live
-    // actor's current base cooldown/range. Shown greyed in the empty box as the "is my
-    // number better or worse" anchor.
+    // actor's current base cooldown/range.
     const liveTicks = (field.unit === 'ticks' || field.unit === 'range') && live
       && Number.isFinite(Number(live[field.liveKey]))
       ? Number(live[field.liveKey])
@@ -12714,17 +12841,18 @@ function appendCreatureCooldownSection(form, formState, tileIndex, actor) {
     if (field.unit === 'range' && liveTicks != null && formState[field.formKey] === '') {
       rememberNativeRange(gameId, liveTicks);
     }
-    const nativeValue = nativeCreatureFieldValue(gameId, field) ?? liveTicks;
-    input.placeholder = nativeValue != null
-      ? String(nativeValue)
-      : t(
-          field.unit === 'range' ? 'mods.mapEditor.creatureRangePlaceholder' : 'mods.mapEditor.creatureAbilityCdPlaceholder',
-          field.unit === 'range' ? 'Tiles (optional)' : 'Ticks (optional)'
-        );
+    // Ability CD: the live actor's value (CDR-aware) beats the snapshot constant.
+    const nativeValue = field.liveKey === 'ability'
+      ? liveTicks ?? nativeCreatureFieldValue(gameId, field)
+      : nativeCreatureFieldValue(gameId, field) ?? liveTicks;
+    input.placeholder = nativeValue != null ? String(nativeValue) : unitText[field.unit];
 
-    const row = document.createElement('div');
-    row.className = 'me-row me-creature-ability-cd-row';
-    row.appendChild(input);
+    const { row, name } = createCombatRow({
+      label: t(field.labelKey, field.labelFallback),
+      sub: unitText[field.unit],
+      nativeText: nativeValue != null ? String(nativeValue) : '',
+      input
+    });
 
     // Ability with no cooldown clock (e.g. Cyclops' passive Groundshaker): a test battle
     // proved the live actor has no ability-cooldown component, so the field can't do
@@ -12733,32 +12861,333 @@ function appendCreatureCooldownSection(form, formState, tileIndex, actor) {
       input.disabled = true;
       input.value = '';
       input.placeholder = '';
-      const note = document.createElement('span');
-      note.className = 'me-creature-form-hint';
-      note.textContent = t('mods.mapEditor.creatureAbilityNoCooldownShort', 'no ability cooldown');
-      row.appendChild(note);
+      row.classList.add('is-disabled');
+      row.classList.remove('is-modified');
       row.title = t(
         'mods.mapEditor.creatureAbilityNoCooldown',
         "This creature's ability has no cooldown to change."
       );
+      row.querySelector('.me-combat-native').textContent = t('mods.mapEditor.creatureAbilityNoCooldownShort', 'no ability cooldown');
     }
 
-    appendCreatureFormRow(form, t(field.labelKey, field.labelFallback), row);
+    // Below the snapshot's MIN_COOLDOWN_MS floor the game may clamp or re-derive the value
+    // when AP / CDR change, so flag it instead of letting the override look guaranteed.
+    const minTicks = field.liveKey === 'ability' && !input.disabled
+      ? getCreatureCombatTuningDefaults(gameId)?.minAbilityTicks
+      : null;
+    if (minTicks != null) {
+      const minNote = document.createElement('span');
+      minNote.className = 'me-combat-sub me-combat-warn';
+      const updateMinNote = () => {
+        const v = input.value.trim();
+        const below = v !== '' && Number(v) < minTicks;
+        minNote.textContent = below
+          ? t('mods.mapEditor.creatureAbilityBelowMin', 'below native min {min}').replace('{min}', String(minTicks))
+          : '';
+        minNote.title = below
+          ? t('mods.mapEditor.creatureAbilityBelowMinTitle', 'Native minimum cooldown is {min} ticks; the game may clamp lower values.').replace('{min}', String(minTicks))
+          : '';
+      };
+      input.addEventListener('input', updateMinNote);
+      updateMinNote();
+      name.appendChild(minNote);
+    }
+    body.appendChild(row);
   });
+
+  appendNativeCombatReference(body, gameId, actor?.combatConstants);
+}
+
+const MS_PER_COMBAT_TICK = 62.5;
+
+/** Live constant access from content/ba-combat-overrides.js (null when that script is not loaded). */
+function getCombatOverridesApi() {
+  return globalThis.BestiaryCombatOverrides ?? null;
+}
+
+const formatNativeCombatTicks = (ticks) => `${Number(ticks.toFixed(2))} ${ticks === 1 ? 'tick' : 'ticks'}`;
+
+/**
+ * "Native constants" sub-section of Combat: every ability constant from the creature-database snapshot
+ * as an editable row (times in ticks, everything else as the game's raw number). The numbers are
+ * saved on this placed creature (`actor.combatConstants`, snapshot units) like Attack CD, and applied
+ * to the game's constant tables only while the test battle runs (see syncNativeCombatConstants).
+ * The ability cooldown constant is left out because the Ability CD row above sets the same value,
+ * unless a value for it is already saved (so nothing saved is ever hidden).
+ */
+function appendNativeCombatReference(body, gameId, savedConstants) {
+  const sections = getCreatureDatabase()?.describeCreatureCombatSections?.(gameId, formatNativeCombatTicks);
+  if (!sections?.length) return;
+  const sameAsAbilityCd = ['COOLDOWN_MS', 'BASE_COOLDOWN_MS']
+    .find((key) => sections.some(([, rows]) => rows.some((row) => row.key === key)));
+
+  const details = document.createElement('details');
+  details.className = 'me-creature-native-combat';
+  details.open = !!creatureSectionOpen.constants;
+  details.addEventListener('toggle', () => { creatureSectionOpen.constants = details.open; });
+  const summary = document.createElement('summary');
+  summary.className = 'me-creature-section-summary';
+  const summaryTitle = document.createElement('span');
+  summaryTitle.textContent = t('mods.mapEditor.creatureNativeCombat', 'Native combat constants (experimental)');
+  const badge = document.createElement('span');
+  badge.className = 'me-creature-badge me-native-const-badge';
+  badge.hidden = true;
+  summary.append(summaryTitle, badge);
+  details.appendChild(summary);
+
+  const note = document.createElement('div');
+  note.className = 'me-creature-form-hint';
+  note.textContent = getCombatOverridesApi()
+    ? t('mods.mapEditor.creatureNativeCombatNote', 'Applies to this creature type during the test battle only.')
+    : t(
+      'mods.mapEditor.creatureNativeCombatUnsupported',
+      'Needs the Chrome build (the page-start script did not load); values are saved but not applied.'
+    );
+  details.appendChild(note);
+
+  const inputs = [];
+  sections.forEach(([sectionTitle, rows]) => {
+    const visibleRows = rows.filter((row) => row.key !== sameAsAbilityCd || savedConstants?.[row.key] != null);
+    if (!visibleRows.length) return;
+    const heading = document.createElement('div');
+    heading.className = 'me-creature-section-title';
+    heading.textContent = sectionTitle;
+    details.appendChild(heading);
+    visibleRows.forEach(({ key, label, native, isTime }) => {
+      const input = createCreatureNumberInput(
+        '', { min: isTime ? 0 : -999999, step: 'any', className: 'me-input me-creature-input-compact' }
+      );
+      input.dataset.creatureConst = key;
+      input.dataset.creatureConstTime = isTime ? '1' : '';
+      const nativeShown = isTime ? Number((native * 0.016).toFixed(3)) : native;
+      input.placeholder = String(nativeShown);
+      const stored = Number(savedConstants?.[key]);
+      if (savedConstants?.[key] != null && Number.isFinite(stored)) {
+        input.value = String(isTime ? Number((stored * 0.016).toFixed(3)) : stored);
+      }
+      inputs.push(input);
+      const { row } = createCombatRow({
+        label,
+        sub: isTime ? `${key} · ticks` : key,
+        nativeText: String(nativeShown),
+        input
+      });
+      details.appendChild(row);
+    });
+  });
+
+  const resetButton = document.createElement('button');
+  resetButton.type = 'button';
+  resetButton.className = 'me-btn me-btn-compact';
+  resetButton.textContent = t('mods.mapEditor.creatureNativeCombatReset', 'Reset constants');
+  resetButton.addEventListener('click', () => {
+    inputs.forEach((input) => { input.value = ''; input.dispatchEvent(new Event('input', { bubbles: true })); });
+    inputs[0]?.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  details.appendChild(resetButton);
+
+  body.appendChild(details);
+}
+
+/** { KEY: ms-or-raw number } from the form's constant inputs (blank inputs are skipped). */
+function readCreatureConstantInputs(formRoot) {
+  const constants = {};
+  formRoot.querySelectorAll('[data-creature-const]').forEach((input) => {
+    const raw = input.value.trim();
+    const shown = Number(raw);
+    if (raw === '' || !Number.isFinite(shown)) return;
+    constants[input.dataset.creatureConst] = input.dataset.creatureConstTime
+      ? Number((shown * MS_PER_COMBAT_TICK).toFixed(3))
+      : shown;
+  });
+  return constants;
+}
+
+/** Keeps only finite numbers; null when nothing is left. */
+function sanitizeCombatConstants(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const out = {};
+  Object.entries(raw).forEach(([key, value]) => {
+    if (value === '' || value == null) return;
+    const num = Number(value);
+    if (/^[A-Z][A-Z0-9_]*$/.test(key) && Number.isFinite(num)) out[key] = num;
+  });
+  return Object.keys(out).length ? out : null;
+}
+
+/**
+ * Keeps the style sheet that draws forced-old creatures (`data-ba-sprite="old"`, set by
+ * CustomBattles.applySpriteVariantTags) in step with the placed creatures: present while any
+ * creature is forced old, removed otherwise. Forced-current needs no sheet of its own: the
+ * Mod Settings old-outfits rules skip `data-ba-sprite="current"` sprites.
+ */
+let lastSpriteVariantLogKey = null;
+
+function syncForcedOldSpriteStyle(configs) {
+  const variants = (configs || []).map((entry) => entry?.spriteVariant || '').join(',');
+  if (variants.replace(/,/g, '') && variants !== lastSpriteVariantLogKey) {
+    lastSpriteVariantLogKey = variants;
+    logMapEditor('spriteVariants', {
+      forcedOld: (configs || []).filter((entry) => entry?.spriteVariant === 'old').map((entry) => entry.tileIndex),
+      forcedCurrent: (configs || []).filter((entry) => entry?.spriteVariant === 'current').map((entry) => entry.tileIndex),
+      taggedSprites: document.querySelectorAll('[data-ba-sprite]').length
+    });
+  }
+  const needed = (configs || []).some((entry) => entry?.spriteVariant === 'old');
+  const existing = document.getElementById(FORCED_OLD_SPRITE_STYLE_ID);
+  if (!needed) {
+    existing?.remove();
+    if (!configs?.length) {
+      document.querySelectorAll('[data-ba-sprite-piece]').forEach((sprite) => {
+        delete sprite.dataset.baSpritePiece;
+        delete sprite.dataset.baSprite;
+      });
+    }
+    return;
+  }
+  if (existing) return;
+  const css = getCreatureDatabase()?.buildOldOutfitsCss?.(':root:root', '', '[data-ba-sprite="old"]');
+  if (!css) {
+    logMapEditor('forcedOldSpritesCssUnavailable', 'game stylesheet rule not found yet');
+    return;
+  }
+  const style = document.createElement('style');
+  style.id = FORCED_OLD_SPRITE_STYLE_ID;
+  style.textContent = css;
+  document.head.appendChild(style);
+  logMapEditor('forcedOldSpritesStyleAdded', { rules: style.sheet?.cssRules.length ?? 0 });
+}
+
+/**
+ * Puts the placed creatures' `combatConstants` onto the game's constant tables while the test battle
+ * runs, and restores every original value when it is not running. Creatures of the same type with
+ * different values share one table, so the last one wins.
+ */
+let lastCombatConstantsLogKey = null;
+
+function syncNativeCombatConstants(configs) {
+  const api = getCombatOverridesApi();
+  const wanted = (configs || []).filter((entry) => sanitizeCombatConstants(entry?.combatConstants)).length;
+  if (!api) {
+    // Only worth saying when a creature actually carries constants.
+    if (wanted && lastCombatConstantsLogKey !== 'no-api') {
+      lastCombatConstantsLogKey = 'no-api';
+      logMapEditor('combatConstants', 'BestiaryCombatOverrides missing: page-start script not loaded (reload the extension and the page after updating)');
+    }
+    return;
+  }
+  if (!editorState.sandboxTestActive) {
+    // Final read counts: 0 reads for a value means the battle never used it.
+    const finalReport = api.getReport();
+    if (finalReport.length) {
+      finalReport.forEach((r) => logMapEditor('combatConstantFinal', `${r.gameId}.${r.key} ${r.original}->${r.value} (${r.reads} reads)`));
+    }
+    api.restoreLive();
+    lastCombatConstantsLogKey = null;
+    return;
+  }
+  const overrides = {};
+  (configs || []).forEach((entry) => {
+    const constants = sanitizeCombatConstants(entry?.combatConstants);
+    const gameId = resolveCreatureGameId(entry);
+    if (constants && gameId != null) overrides[gameId] = { ...(overrides[gameId] || {}), ...constants };
+  });
+  const result = api.applyLive(overrides);
+  if (!wanted && lastCombatConstantsLogKey == null) return;
+  // Per value: the game's first read of it also changes the key, so "never read" vs "read" shows up.
+  const report = api.getReport();
+  const battleState = globalThis.state?.board?.getSnapshot?.()?.context?.gameStarted === true ? 'battle' : 'setup';
+  const logKey = `${api.isReady()}:${result.applied}:${result.missed.join(',')}:${battleState}:`
+    + report.map((r) => `${r.gameId}.${r.key}=${r.value}/${r.reads > 0 ? 'read' : 'unread'}`).join(',');
+  if (logKey === lastCombatConstantsLogKey) return;
+  lastCombatConstantsLogKey = logKey;
+  logMapEditor('combatConstants', {
+    creaturesWithConstants: wanted,
+    ready: api.isReady(),
+    applied: result.applied,
+    missed: result.missed,
+    battle: battleState
+  });
+  // One short line per value (a single long string gets cut off in the console).
+  report.forEach((r) => logMapEditor('combatConstant', `${r.gameId}.${r.key} ${r.original}->${r.value} (${r.reads} reads, ${battleState})`));
+}
+
+/** Updates every section's "N changed" badge from the form's current values. */
+function refreshCreatureSectionBadges(panel) {
+  const setBadge = (badge, count) => {
+    if (!badge) return;
+    badge.hidden = count <= 0;
+    badge.textContent = t('mods.mapEditor.creatureChangedBadge', '{n} changed').replace('{n}', String(count));
+  };
+  const sectionBadge = (id) => panel.querySelector(`[data-creature-section="${id}"] > summary .me-creature-badge`);
+  setBadge(sectionBadge('combat'), panel.querySelectorAll('.me-combat-row.is-modified').length);
+  setBadge(
+    panel.querySelector('.me-native-const-badge'),
+    panel.querySelectorAll('.me-combat-row.is-modified [data-creature-const]').length
+  );
+  setBadge(
+    sectionBadge('stats'),
+    Array.from(panel.querySelectorAll('[data-creature-gene]')).filter((s) => Number(s.value) < Number(s.max)).length
+  );
+  setBadge(sectionBadge('equipment'), panel.querySelector('[data-creature-equip-game-id]')?.value ? 1 : 0);
+  setBadge(
+    sectionBadge('appearance'),
+    ['[data-creature-nickname]', '[data-creature-outfit-id]', '[data-creature-item-id]', '[data-creature-sprite-variant]']
+      .filter((selector) => String(panel.querySelector(selector)?.value ?? '').trim() !== '').length
+  );
+}
+
+/** Copies this creature's combat overrides and sprite art to the other creatures of the same type on the map. */
+function copyCreatureOverridesToSameType(tileIndex, gameId) {
+  const source = getActorOnTile(tileIndex);
+  if (!source) return 0;
+  const targets = collectMapVillainConfigs()
+    .filter((villain) => villain.tileIndex !== tileIndex && resolveCreatureGameId(villain) === gameId);
+  let copied = 0;
+  targets.forEach((villain) => {
+    const base = getActorOnTile(villain.tileIndex);
+    if (!base) return;
+    const merged = cloneJson(base);
+    CREATURE_COMBAT_FIELDS.forEach((field) => {
+      if (source[field.storeKey] != null) merged[field.storeKey] = cloneJson(source[field.storeKey]);
+      else delete merged[field.storeKey];
+    });
+    ['combatConstants', 'spriteVariant'].forEach((key) => {
+      if (source[key] != null) merged[key] = cloneJson(source[key]);
+      else delete merged[key];
+    });
+    if (setActorOnTile(villain.tileIndex, normalizeActorConfig(merged), { skipThrottle: true })) copied += 1;
+  });
+  return copied;
 }
 
 function createCreatureEditorPanel(tileIndex, actor) {
+  const buildStartedAt = performance.now();
   const panel = document.createElement('div');
   panel.className = 'me-sprite-edit me-creature-edit';
   panel.dataset.creatureForm = '1';
+
+  const gameId = resolveCreatureGameId(actor);
+  const formState = buildCreatureEditorFormState(actor, tileIndex);
+  const getActorBase = () => getActorOnTile(tileIndex) || actor;
 
   const hint = document.createElement('div');
   hint.className = 'me-muted me-creature-edit-hint';
   hint.textContent = t(
     'mods.mapEditor.creatureEditHint',
-    'Changes apply automatically while you edit. Ability cooldown is saved for native maps/quests only.'
+    'Changes apply automatically. Highlighted rows differ from the creature’s native values.'
   );
   panel.appendChild(hint);
+
+  const quickActions = document.createElement('div');
+  quickActions.className = 'me-creature-quick-actions';
+  panel.appendChild(quickActions);
+
+  const form = document.createElement('div');
+  form.className = 'me-creature-sections';
+
+  // --- Basics -----------------------------------------------------------------------------
+  const basics = createCreatureSection('basics', t('mods.mapEditor.creatureSectionBasics', 'Basics'));
 
   const allyRow = document.createElement('label');
   allyRow.className = 'me-check-row';
@@ -12784,16 +13213,12 @@ function createCreatureEditorPanel(tileIndex, actor) {
     allyCheckbox,
     document.createTextNode(t('mods.mapEditor.creatureAllyToggle', 'Fights as ally (forced teammate, not a villain)'))
   );
-  panel.appendChild(allyRow);
-
-  const form = document.createElement('div');
-  form.className = 'me-creature-form-grid';
-  const formState = buildCreatureEditorFormState(actor, tileIndex);
+  basics.body.appendChild(allyRow);
 
   const levelInput = createCreatureNumberInput(formState.level, { min: 1, max: 999 });
   levelInput.dataset.creatureLevel = '1';
   levelInput.classList.add('me-creature-input-compact');
-  appendCreatureFormRow(form, t('mods.mapEditor.creatureLevel', 'Level'), levelInput);
+  appendCreatureFormRow(basics.body, t('mods.mapEditor.creatureLevel', 'Level'), levelInput);
 
   const directionSelect = createCreatureSelect(
     CREATURE_DIRECTIONS.map((dir) => ({
@@ -12804,7 +13229,7 @@ function createCreatureEditorPanel(tileIndex, actor) {
     'me-input me-creature-input-compact'
   );
   directionSelect.dataset.creatureDirection = '1';
-  appendCreatureFormRow(form, t('mods.mapEditor.creatureDirection', 'Facing'), directionSelect);
+  appendCreatureFormRow(basics.body, t('mods.mapEditor.creatureDirection', 'Facing'), directionSelect);
 
   const flagsRow = document.createElement('div');
   flagsRow.className = 'me-creature-form-row me-creature-check-row';
@@ -12825,12 +13250,16 @@ function createCreatureEditorPanel(tileIndex, actor) {
   awakenedLabel.append(awakenedCheck, document.createTextNode(t('mods.mapEditor.creatureAwakened', 'Awakened')));
 
   flagsRow.append(shinyLabel, awakenedLabel);
-  form.appendChild(flagsRow);
+  basics.body.appendChild(flagsRow);
+  form.appendChild(basics.details);
+
+  // --- Stats (genes + resulting stats) ----------------------------------------------------
+  const stats = createCreatureSection('stats', t('mods.mapEditor.creatureSectionStats', 'Genes & stats'));
 
   const genesTitle = document.createElement('div');
   genesTitle.className = 'me-creature-section-title';
   genesTitle.textContent = t('mods.mapEditor.creatureGenes', 'Genes');
-  form.appendChild(genesTitle);
+  stats.body.appendChild(genesTitle);
 
   const genesWrap = document.createElement('div');
   genesWrap.className = 'me-creature-genes';
@@ -12851,6 +13280,7 @@ function createCreatureEditorPanel(tileIndex, actor) {
     slider.value = String(formState.genes[key]);
     slider.dataset.creatureGene = key;
     slider.className = 'me-creature-gene-slider';
+    slider.setAttribute('aria-label', label);
 
     const valueLabel = document.createElement('span');
     valueLabel.className = 'me-creature-gene-value';
@@ -12862,12 +13292,12 @@ function createCreatureEditorPanel(tileIndex, actor) {
     geneRow.append(geneLabel, slider, valueLabel);
     genesWrap.appendChild(geneRow);
   });
-  form.appendChild(genesWrap);
+  stats.body.appendChild(genesWrap);
 
   const statsTitle = document.createElement('div');
   statsTitle.className = 'me-creature-section-title';
   statsTitle.textContent = t('mods.mapEditor.creatureCombatStats', 'Combat stats');
-  form.appendChild(statsTitle);
+  stats.body.appendChild(statsTitle);
 
   const statsPanel = document.createElement('div');
   statsPanel.className = 'me-creature-stats';
@@ -12885,17 +13315,16 @@ function createCreatureEditorPanel(tileIndex, actor) {
     statRow.append(statLabel, statValue);
     statsPanel.appendChild(statRow);
   });
-  form.appendChild(statsPanel);
+  stats.body.appendChild(statsPanel);
+  form.appendChild(stats.details);
 
-  appendCreatureCooldownSection(form, formState, tileIndex, actor);
+  // --- Combat (tuning table + native constants) -------------------------------------------
+  const combat = createCreatureSection('combat', t('mods.mapEditor.creatureSectionCombat', 'Combat'));
+  appendCreatureCooldownSection(combat.body, formState, tileIndex, actor);
+  form.appendChild(combat.details);
 
-  const equipTitle = document.createElement('div');
-  equipTitle.className = 'me-creature-section-title';
-  equipTitle.textContent = t('mods.mapEditor.creatureEquip', 'Equipment');
-  form.appendChild(equipTitle);
-
-  const equipFields = document.createElement('div');
-  equipFields.className = 'me-creature-equip-fields';
+  // --- Equipment --------------------------------------------------------------------------
+  const equipment = createCreatureSection('equipment', t('mods.mapEditor.creatureEquip', 'Equipment'));
   const equipGameIdSelect = createEquipmentSelect(
     formState.equipGameId,
     'me-input me-creature-input-compact me-creature-equip-select'
@@ -12918,15 +13347,13 @@ function createCreatureEditorPanel(tileIndex, actor) {
     // Default to max tier when picking equipment.
     equipTierInput.value = String(CREATURE_EQUIP_TIER_DEFAULT);
   });
-  appendCreatureFormRow(equipFields, t('mods.mapEditor.creatureEquipItem', 'Item'), equipGameIdSelect);
-  appendCreatureFormRow(equipFields, t('mods.mapEditor.creatureEquipStat', 'Stat'), equipStatSelect);
-  appendCreatureFormRow(equipFields, t('mods.mapEditor.creatureEquipTier', 'Equip tier'), equipTierInput);
-  form.appendChild(equipFields);
+  appendCreatureFormRow(equipment.body, t('mods.mapEditor.creatureEquipItem', 'Item'), equipGameIdSelect);
+  appendCreatureFormRow(equipment.body, t('mods.mapEditor.creatureEquipStat', 'Stat'), equipStatSelect);
+  appendCreatureFormRow(equipment.body, t('mods.mapEditor.creatureEquipTier', 'Equip tier'), equipTierInput);
+  form.appendChild(equipment.details);
 
-  const visualsTitle = document.createElement('div');
-  visualsTitle.className = 'me-creature-section-title';
-  visualsTitle.textContent = t('mods.mapEditor.creatureVisuals', 'Visuals');
-  form.appendChild(visualsTitle);
+  // --- Appearance -------------------------------------------------------------------------
+  const appearance = createCreatureSection('appearance', t('mods.mapEditor.creatureSectionAppearance', 'Appearance'));
 
   const nicknameInput = document.createElement('input');
   nicknameInput.type = 'text';
@@ -12934,11 +13361,11 @@ function createCreatureEditorPanel(tileIndex, actor) {
   nicknameInput.dataset.creatureNickname = '1';
   nicknameInput.value = formState.nickname;
   nicknameInput.placeholder = t('mods.mapEditor.creatureNicknamePlaceholder', 'Nickname (optional)');
-  appendCreatureFormRow(form, t('mods.mapEditor.creatureNickname', 'Nickname'), nicknameInput);
+  appendCreatureFormRow(appearance.body, t('mods.mapEditor.creatureNickname', 'Nickname'), nicknameInput);
 
   const outfitInput = document.createElement('input');
   outfitInput.type = 'text';
-  outfitInput.className = 'me-input me-creature-input-compact';
+  outfitInput.className = 'me-input me-creature-input-grow';
   outfitInput.value = actor?.customSpriteKey != null
     ? formatCustomSpriteKeyDisplay(actor.customSpriteKey)
     : (formState.outfitSpriteId === '' || formState.outfitSpriteId == null
@@ -12981,19 +13408,94 @@ function createCreatureEditorPanel(tileIndex, actor) {
     'me-btn me-btn-compact'
   );
   outfitRow.appendChild(outfitOwnIdBtn);
-  appendCreatureFormRow(form, t('mods.mapEditor.creatureOutfitId', 'Outfit sprite'), outfitRow);
+  appendCreatureFormRow(appearance.body, t('mods.mapEditor.creatureOutfitId', 'Outfit sprite'), outfitRow);
 
   const itemInput = createCreatureNumberInput(formState.itemSpriteId, { min: 1 });
   itemInput.dataset.creatureItemId = '1';
   itemInput.classList.add('me-creature-input-compact');
   itemInput.placeholder = t('mods.mapEditor.creatureSpriteIdPlaceholder', 'Sprite ID');
-  appendCreatureFormRow(form, t('mods.mapEditor.creatureItemId', 'Item sprite'), itemInput);
+  appendCreatureFormRow(appearance.body, t('mods.mapEditor.creatureItemId', 'Item sprite'), itemInput);
+
+  // Old / current creature art for just this placed creature: Auto | Old | Current.
+  const spriteVariantInput = document.createElement('input');
+  spriteVariantInput.type = 'hidden';
+  spriteVariantInput.dataset.creatureSpriteVariant = '1';
+  spriteVariantInput.value = formState.spriteVariant;
+  const spriteVariantGroup = document.createElement('div');
+  spriteVariantGroup.className = 'me-segmented';
+  spriteVariantGroup.setAttribute('role', 'group');
+  spriteVariantGroup.setAttribute('aria-label', t('mods.mapEditor.creatureSpriteArt', 'Sprite art'));
+  const spriteVariantButtons = [
+    ['', t('mods.mapEditor.creatureSpriteAutoShort', 'Auto'), t('mods.mapEditor.creatureSpriteAuto', 'Auto (follow settings)')],
+    ['old', t('mods.mapEditor.creatureSpriteOldShort', 'Old'), t('mods.mapEditor.creatureSpriteOld', 'Old sprite (forced)')],
+    ['current', t('mods.mapEditor.creatureSpriteCurrentShort', 'Current'), t('mods.mapEditor.creatureSpriteCurrent', 'Current sprite (forced)')]
+  ].map(([value, text, title]) => {
+    const button = createPanelButton(text, () => setSpriteVariant(value), 'me-btn me-btn-compact');
+    button.title = title;
+    button.dataset.spriteVariantValue = value;
+    spriteVariantGroup.appendChild(button);
+    return button;
+  });
+  function setSpriteVariant(value) {
+    if (spriteVariantInput.value === value) return;
+    spriteVariantInput.value = value;
+    refreshSpriteVariantButtons();
+    spriteVariantInput.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  function refreshSpriteVariantButtons() {
+    spriteVariantButtons.forEach((button) => {
+      const active = button.dataset.spriteVariantValue === spriteVariantInput.value;
+      button.classList.toggle('is-active', active);
+      button.setAttribute('aria-pressed', String(active));
+    });
+  }
+  refreshSpriteVariantButtons();
+  const spriteVariantRow = document.createElement('div');
+  spriteVariantRow.className = 'me-row';
+  spriteVariantRow.append(spriteVariantGroup, spriteVariantInput);
+  appendCreatureFormRow(appearance.body, t('mods.mapEditor.creatureSpriteArt', 'Sprite art'), spriteVariantRow);
+  form.appendChild(appearance.details);
 
   panel.appendChild(form);
 
-  const gameId = resolveCreatureGameId(actor);
-  const getActorBase = () => getActorOnTile(tileIndex) || actor;
+  // --- Quick actions ----------------------------------------------------------------------
+  quickActions.appendChild(createPanelButton(
+    t('mods.mapEditor.creatureResetAll', 'Reset all overrides'),
+    () => {
+      panel.querySelectorAll(
+        '[data-creature-ability-cd], [data-creature-attack-cd], [data-creature-move-spd], [data-creature-range], [data-creature-const]'
+      ).forEach((input) => {
+        input.value = '';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      spriteVariantInput.value = '';
+      refreshSpriteVariantButtons();
+      spriteVariantInput.dispatchEvent(new Event('change', { bubbles: true }));
+    },
+    'me-btn me-btn-compact'
+  ));
+  // The same-type lookup scans the whole room, so it runs on click, not on every panel rebuild.
+  quickActions.appendChild(createPanelButton(
+    t('mods.mapEditor.creatureCopyToSameType', 'Copy overrides to same creatures'),
+    () => {
+      flushCreatureLiveApply(tileIndex, getActorBase, panel);
+      const copied = copyCreatureOverridesToSameType(tileIndex, gameId);
+      setStatusMessage(
+        copied > 0
+          ? t('mods.mapEditor.creatureCopiedToSameType', 'Copied combat overrides and sprite art to {n} creature(s).')
+            .replace('{n}', String(copied))
+          : t('mods.mapEditor.creatureCopyNone', 'No other creature of this type on the map.')
+      );
+    },
+    'me-btn me-btn-compact'
+  ));
+
   attachCreatureFormLiveApply(panel, tileIndex, getActorBase, gameId);
+
+  const updateBadges = () => refreshCreatureSectionBadges(panel);
+  panel.addEventListener('input', updateBadges);
+  panel.addEventListener('change', updateBadges);
+  updateBadges();
 
   panel.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
@@ -13006,6 +13508,11 @@ function createCreatureEditorPanel(tileIndex, actor) {
     editorState.creatureEditFocusPending = false;
     requestAnimationFrame(() => levelInput.focus());
   }
+  logMapEditor('creaturePanelBuilt', {
+    tileIndex,
+    ms: Math.round(performance.now() - buildStartedAt),
+    fields: panel.querySelectorAll('input, select').length
+  });
   return panel;
 }
 
@@ -13276,6 +13783,8 @@ function applyEditorVillainsToBoard(options = {}) {
   }));
   syncMapEditorVillainKeyPrefixes();
   syncMapEditorAllyKeyPrefixes();
+  syncNativeCombatConstants([...mapEditorTestBattle.config.villains, ...mapEditorTestBattle.config.allies]);
+  syncForcedOldSpriteStyle([...mapEditorTestBattle.config.villains, ...mapEditorTestBattle.config.allies]);
 
   // Ability cooldown isn't part of the board-config piece createCustomVillainEntity builds
   // (see its call site below) — it only ever exists on the LIVE runtime actor once a battle
@@ -13380,12 +13889,17 @@ function applyEditorVillainsToBoard(options = {}) {
 function buildDefaultActorConfig(gameId, sampleActor = null) {
   const id = resolveCreatureGameId(sampleActor) ?? resolveCreatureGameId(gameId);
   if (id == null) return null;
-  const level = Number(sampleActor?.level);
-  return {
+  // Every newly placed creature starts at level 100 and awakened (when it can awaken); the
+  // sample actor only supplies its facing.
+  const name = globalThis.state?.utils?.getMonster?.(id)?.metadata?.name;
+  const canAwaken = getCreatureDatabase()?.isCreatureAwakenableName?.(name) ?? true;
+  const config = {
     id,
     direction: sampleActor?.direction || 'south',
-    level: Number.isFinite(level) && level > 0 ? Math.floor(level) : 1
+    level: DEFAULT_PLACED_CREATURE_LEVEL
   };
+  if (canAwaken) config.awakened = true;
+  return config;
 }
 
 function clearActorOnTile(tileIndex, options = {}) {
@@ -17304,6 +17818,186 @@ function injectStyles() {
       color: #888;
       white-space: nowrap;
     }
+    #${PANEL_ID} .me-creature-sections {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      width: 100%;
+    }
+    #${PANEL_ID} .me-creature-section,
+    #${PANEL_ID} .me-creature-native-combat {
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 3px;
+      padding: 2px 6px 4px;
+      background: rgba(0, 0, 0, 0.18);
+    }
+    #${PANEL_ID} .me-creature-native-combat {
+      margin-top: 6px;
+    }
+    #${PANEL_ID} .me-creature-section-summary {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      cursor: pointer;
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--me-gold);
+      padding: 3px 0;
+      user-select: none;
+    }
+    #${PANEL_ID} .me-creature-badge {
+      font-weight: 400;
+      font-size: 10px;
+      color: #1b1b1b;
+      background: var(--me-gold);
+      border-radius: 8px;
+      padding: 0 6px;
+    }
+    #${PANEL_ID} .me-creature-section-body {
+      margin-top: 4px;
+    }
+    #${PANEL_ID} .me-creature-quick-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin: 4px 0;
+    }
+    #${PANEL_ID} .me-creature-input-grow {
+      flex: 1 1 120px;
+      min-width: 0;
+    }
+    #${PANEL_ID} .me-combat-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 52px 84px 14px;
+      align-items: center;
+      gap: 6px;
+      padding: 2px 3px;
+      border-radius: 2px;
+      font-size: 11px;
+      color: #ccc;
+    }
+    #${PANEL_ID} .me-combat-header {
+      color: #888;
+      font-size: 10px;
+      text-transform: uppercase;
+    }
+    #${PANEL_ID} .me-combat-row.is-modified {
+      background: rgba(255, 224, 102, 0.12);
+      box-shadow: inset 2px 0 0 var(--me-gold);
+    }
+    #${PANEL_ID} .me-combat-row.is-disabled {
+      opacity: 0.55;
+    }
+    #${PANEL_ID} .me-combat-name {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+    }
+    #${PANEL_ID} .me-combat-sub {
+      font-size: 9px;
+      color: #888;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    #${PANEL_ID} .me-combat-warn {
+      color: #ff9d57;
+    }
+    #${PANEL_ID} .me-combat-native {
+      color: #9ab;
+      text-align: right;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    /* Extra class: the generic .me-input rule (width 110px, min-width 80px) comes later in the sheet. */
+    #${PANEL_ID} .me-combat-row .me-combat-input.me-input {
+      width: 100%;
+      min-width: 0;
+      padding: 2px 4px;
+    }
+    #${PANEL_ID} .me-creature-section-body .me-creature-form-hint,
+    #${PANEL_ID} .me-creature-native-combat .me-creature-form-hint {
+      white-space: normal;
+      line-height: 1.35;
+    }
+    #${PANEL_ID} .me-creature-section-body,
+    #${PANEL_ID} .me-creature-native-combat {
+      min-width: 0;
+    }
+    /* Breathing room: between sections, inside each open section, and under the last one. */
+    #${PANEL_ID} .me-creature-section {
+      margin-bottom: 4px;
+    }
+    #${PANEL_ID} .me-creature-section[open] > .me-creature-section-body {
+      padding-bottom: 8px;
+    }
+    #${PANEL_ID} .me-creature-sections {
+      padding-bottom: 12px;
+    }
+    #${PANEL_ID} .me-creature-form-grid {
+      gap: 8px;
+    }
+    /* Fields share the row with their label instead of wrapping underneath; buttons wrap, not clip. */
+    #${PANEL_ID} .me-creature-form-row > .me-input-wide,
+    #${PANEL_ID} .me-creature-form-row > .me-creature-equip-select {
+      flex: 1 1 0;
+      width: auto;
+      min-width: 0;
+    }
+    #${PANEL_ID} .me-creature-form-row > .me-row {
+      flex: 1 1 0;
+      min-width: 0;
+      flex-wrap: wrap;
+    }
+    #${PANEL_ID} .me-creature-form-row > .me-row > .me-btn {
+      flex: 0 0 auto;
+    }
+    #${PANEL_ID} .me-combat-reset {
+      border: 0;
+      background: transparent;
+      color: #ff7777;
+      cursor: pointer;
+      padding: 0;
+      font-size: 13px;
+      line-height: 1;
+    }
+    #${PANEL_ID} .me-segmented {
+      display: inline-flex;
+      gap: 2px;
+    }
+    #${PANEL_ID} .me-segmented .me-btn {
+      cursor: pointer;
+      transition: background-color 0.1s, filter 0.1s;
+    }
+    #${PANEL_ID} .me-segmented .me-btn:hover {
+      filter: brightness(1.25);
+    }
+    #${PANEL_ID} .me-segmented .me-btn:active,
+    #${PANEL_ID} .me-creature-quick-actions .me-btn:active,
+    #${PANEL_ID} .me-creature-native-combat .me-btn:active {
+      filter: brightness(0.8);
+      transform: translateY(1px);
+    }
+    #${PANEL_ID} .me-segmented .me-btn.is-active {
+      outline: 1px solid var(--me-gold);
+      outline-offset: -1px;
+      color: var(--me-gold);
+      background-color: rgba(255, 224, 102, 0.16);
+    }
+    #${PANEL_ID} .me-creature-edit .me-btn:focus-visible,
+    #${PANEL_ID} .me-creature-section-summary:focus-visible,
+    #${PANEL_ID} .me-combat-reset:focus-visible {
+      outline: 2px solid var(--me-gold);
+      outline-offset: 1px;
+    }
+    #${PANEL_ID} .me-creature-section-summary:hover {
+      filter: brightness(1.2);
+    }
+    #${PANEL_ID} .me-combat-reset:hover {
+      color: #ff4444;
+      transform: scale(1.2);
+    }
     #${PANEL_ID} .me-creature-check-row {
       gap: 12px;
       padding: 2px 0;
@@ -18215,6 +18909,8 @@ function initMapEditorButton() {
 
 function cleanupMapEditor() {
   stopMapEditorSandboxTest({ silent: true, reloadRoom: false });
+  getCombatOverridesApi()?.restoreLive();
+  syncForcedOldSpriteStyle([]);
   if (editorState.open) closeMapEditor();
   else {
     editorState.open = false;

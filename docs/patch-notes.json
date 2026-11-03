@@ -4,6 +4,56 @@
   },
   "notes": [
     {
+      "version": "5.2.10",
+      "changes": [
+        {
+          "mod": "Manual Runner",
+          "type": "changed",
+          "text": "Each attempt in the log now shows rank against the target, such as rank 3/3, and the run start logs the target. The final result shows the game's own grade together with the rank. A win that does not stop the run now logs why."
+        },
+        {
+          "mod": "Manual Runner",
+          "type": "fixed",
+          "text": "Maximum Rank could keep running after reaching the maximum rank when the team size could not be read. The target is now always based on at least one creature, and multi-floor maps use the first floor's team size, since rank is always scored there."
+        },
+        {
+          "mod": "Map Editor",
+          "type": "added",
+          "text": "Creature editor: Native combat constants (experimental) let you edit a placed creature's ability numbers, such as damage, scaling, durations and cooldowns. They apply during the test battle only and need the Chrome build. Sprite art switch (Auto, Old, Current) forces the old or current look for one creature. New Reset all overrides and Copy overrides to same creatures buttons."
+        },
+        {
+          "mod": "Map Editor",
+          "type": "changed",
+          "text": "The creature editor is now split into collapsible sections that remember what you had open and show how many values you changed. Cooldown, speed and range overrides sit in one table with the native value beside each, a highlight on changed rows and a reset button. New creatures start at level 100 and awakened when they can awaken."
+        },
+        {
+          "mod": "Mod Loader",
+          "type": "added",
+          "text": "A page-start script (Chrome only) gives the Map Editor access to creature ability numbers. Reload the extension after updating."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "changed",
+          "text": "Use old outfits now skips creatures the Map Editor forces to the current look."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "fixed",
+          "text": "Auto-upload runs now uploads shortly after any new or improved record. Before, it checked once a minute and skipped records that replaced an existing run, such as a faster time on the same setup or a new record on a map with a full list."
+        },
+        {
+          "mod": "Outfiter",
+          "type": "added",
+          "text": "Five more mounts: Krakoloss, Shellodon, Mutated Abomination, Gorgon Hydra and Primal Demonosaur. They only show for you, in the Mounts window, your profile and on the board."
+        },
+        {
+          "mod": "Outfiter",
+          "type": "changed",
+          "text": "Mounts you do not own are now marked in the Mounts window with the Outfiter icon, and the imported mounts with the Sleqqus icon."
+        }
+      ]
+    },
+    {
       "version": "5.2.9",
       "changes": [
         {

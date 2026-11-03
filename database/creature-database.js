@@ -198,6 +198,123 @@ function getCreatureCombatData(gameId) {
   return { name: row.n, attackDelayMs: row.ad ?? DEFAULT_ATTACK_DELAY_MS, constants: row.c };
 }
 
+// Shared by Cyclopedia (read-only combat panel) and Map Editor (combat tuning defaults/reference).
+// Engine ms -> ticks conversion (the game's `HX`); 1 tick = 62.5 ms.
+function combatMsToTicks(ms) {
+  return Math.round(0.016 * ms);
+}
+
+/** Ticks for one walking step at a speed stat (engine walk-cooldown formula). */
+function walkStepTicks(speed) {
+  let e = 1;
+  if (speed > -261.29) e = Math.max(Math.floor(857.36 * Math.log(speed / 2 + 261.29) - 4794.51), 1);
+  return combatMsToTicks(Math.floor(1e5 / e));
+}
+
+function formatCombatNumber(value, maxDecimals = 2) {
+  return String(Number(value.toFixed(maxDecimals)));
+}
+
+const COMBAT_WORD_LABELS = {
+  AP: 'AP', AD: 'AD', HP: 'HP', MR: 'MR', CDR: 'CDR', DMG: 'damage', MIN: 'min', MAX: 'max',
+  PERCENT: '', PCT: '' // the value itself is shown with a % sign
+};
+
+/** Sentence-case text from constant-name words ("BASE", "DMG" -> "Base damage"). */
+function formatCombatWords(words) {
+  const text = words.map((w) => COMBAT_WORD_LABELS[w] ?? w.toLowerCase()).filter(Boolean).join(' ');
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/** Whether a constant's value is a time in milliseconds. */
+function isCombatTimeKey(key) {
+  return /(?:^|_)(?:MS|TICKS)(?:_|$)|^CDR(?:_|$)/.test(key);
+}
+
+/**
+ * A bare number, a time (via `formatTicks`), or a percentage (`*_PERCENT*`). Values are milliseconds
+ * when the name has `MS` / `TICKS` in it or starts with `CDR` (the game prints those with its seconds
+ * formatter). `exact` keeps fractions of a tick, for per-stat amounts such as "1.28 ticks per AP".
+ */
+function formatCombatAmount(key, value, formatTicks, exact = false) {
+  if (isCombatTimeKey(key)) {
+    return formatTicks(exact ? value * 0.016 : combatMsToTicks(value));
+  }
+  // ATTACK_SPEED constants are fractions the game prints as a percentage ("+1% attack speed").
+  if (/PERCENT|LIFESTEAL|ATTACK_SPEED/.test(key) && Math.abs(value) <= 1) return `${formatCombatNumber(value * 100)}%`;
+  return formatCombatNumber(value);
+}
+
+/** Which panel section a constant belongs to. */
+function getCombatSection(key) {
+  if (key.startsWith('AWAKEN_')) return 'Awakened';
+  if (/COOLDOWN|CDR|RECHARGE|FREQUENCY|DELAY|DURATION/.test(key)) return 'Timing';
+  return 'Ability';
+}
+
+/**
+ * Label and value for one ability constant. Scaling constants read as "Heal scaling: x 0.15 AP" or
+ * "CDR scaling: 80 per AP" instead of the raw "HEAL_AP_RATIO" / "CDR_PER_AP".
+ */
+function describeCombatConstant(key, value, formatTicks) {
+  let words = key.replace(/^AWAKEN_/, '').split('_').filter((w) => w && w !== 'MS');
+  const ratio = /(?:^|_)(AP|AD)_RATIO$/.exec(key);
+  const perStat = /_PER_(?:USER_)?(AP|AD)$/.exec(key);
+  if (ratio) {
+    words = words.slice(0, -2);
+    return { key, label: `${formatCombatWords(words) || 'Damage'} scaling`.replace(/^ /, ''), value: `× ${formatCombatNumber(value)} ${ratio[1]}` };
+  }
+  if (perStat) {
+    const end = key.includes('_PER_USER_') ? -3 : -2;
+    words = words.slice(0, end);
+    const sign = value > 0 ? '+' : '';
+    return { key, label: `${formatCombatWords(words) || 'Bonus'} scaling`, value: `${sign}${formatCombatAmount(key, value, formatTicks, true)} per ${perStat[1]}` };
+  }
+  return { key, label: formatCombatWords(words), value: formatCombatAmount(key, value, formatTicks) };
+}
+
+/**
+ * A creature's ability constants grouped as [['Ability'|'Timing'|'Awakened', [{key, label, value, native, isTime}]], ...],
+ * empty groups dropped. `native` is the snapshot number (ms when `isTime`). Times are rendered by `formatTicks(ticks)`. Null when the snapshot has no entry.
+ */
+function describeCreatureCombatSections(gameId, formatTicks) {
+  const data = getCreatureCombatData(gameId);
+  if (!data) return null;
+  const sections = new Map([['Ability', []], ['Timing', []], ['Awakened', []]]);
+  Object.entries(data.constants).forEach(([key, value]) => {
+    if (!Number.isFinite(value)) return;
+    // Some constants exist as both FOO_MS and FOO_TICKS with the same duration; show it once.
+    if (key.endsWith('_TICKS') && key.replace(/_TICKS$/, '_MS') in data.constants) return;
+    sections.get(getCombatSection(key)).push({
+      ...describeCombatConstant(key, value, formatTicks),
+      native: value,
+      isTime: isCombatTimeKey(key)
+    });
+  });
+  return [...sections].filter(([, rows]) => rows.length);
+}
+
+/**
+ * Snapshot-derived defaults for the Map Editor's combat-tuning fields, or null without a snapshot
+ * entry. Ticks; each field is null when the creature has no matching constant. `range` only takes
+ * a bare `RANGE` / `AUTO_ATTACK_RANGE`: FIREBALL_RANGE, AWAKEN_RANGE etc. are not rangeComponent.baseRange.
+ */
+function getCreatureCombatTuningDefaults(gameId) {
+  const data = getCreatureCombatData(gameId);
+  if (!data) return null;
+  const c = data.constants;
+  const ticksOf = (...keys) => {
+    const key = keys.find((k) => Number.isFinite(c[k]));
+    return key ? combatMsToTicks(c[key]) : null;
+  };
+  const rangeKey = ['RANGE', 'AUTO_ATTACK_RANGE'].find((k) => Number.isFinite(c[k]) && c[k] >= 1);
+  return {
+    abilityTicks: ticksOf('COOLDOWN_MS', 'BASE_COOLDOWN_MS'),
+    minAbilityTicks: ticksOf('MIN_COOLDOWN_MS', 'MIN_CD_MS'),
+    range: rangeKey ? Math.floor(c[rangeKey]) : null
+  };
+}
+
 // Boss aliases are listed under Unobtainable (UNOBTAINABLE_CREATURES), not as extra Creatures.
 const CYCLOPEDIA_EXTRA_CREATURES = SHINY_ALIAS_CREATURES.map((entry) => entry.displayName);
 
@@ -298,10 +415,13 @@ function findGameOldOutfitsRule(rules) {
  * specificity so it outranks the game's `.spritesheet[data-shiny=true]` rules). Reading the
  * game's own stylesheet keeps the id → old-sheet map out of our code. Returns null when the
  * stylesheet isn't loaded yet. `excludeSelector` (optional) leaves everything inside matching
- * containers untouched.
+ * containers untouched. `outfitAttr` is added to every `.outfit` in the rules: by default it skips
+ * sprites a mod tagged `data-ba-sprite="current"` (forced current art), and
+ * `[data-ba-sprite="old"]` builds the rules that apply to forced-old sprites only.
  */
-function buildOldOutfitsCss(scopePrefix, excludeSelector = '') {
+function buildOldOutfitsCss(scopePrefix, excludeSelector = '', outfitAttr = ':not([data-ba-sprite="current"])') {
   const exclude = excludeSelector ? `:not(${excludeSelector} *)` : '';
+  const scopeOutfit = (selector) => selector.replace(/\.outfit\.id-/g, `.outfit${outfitAttr}.id-`);
   let rule = null;
   for (const sheet of document.styleSheets) {
     try {
@@ -314,11 +434,11 @@ function buildOldOutfitsCss(scopePrefix, excludeSelector = '') {
   // browser prints nested CSS (`& .outfit…` vs `.outfit…`).
   const rules = Array.from(rule.cssRules)
     .filter((r) => r.selectorText)
-    .map((r) => `${scopePrefix} ${r.selectorText.replace(/^&\s*/, '')}${exclude} { ${r.style.cssText} }`);
+    .map((r) => `${scopePrefix} ${scopeOutfit(r.selectorText.replace(/^&\s*/, ''))}${exclude} { ${r.style.cssText} }`);
   // The game's own old-outfit rule gives these a smaller --size than their sheet's frame
   // size (Demon: 64px frames declared as 32px), which crops the sprite.
   for (const [outfitId, size] of Object.entries(OLD_OUTFIT_SIZE_FIXES)) {
-    rules.push(`${scopePrefix} .outfit.id-${outfitId}${exclude} { --size: ${size}px; }`);
+    rules.push(`${scopePrefix} ${scopeOutfit(`.outfit.id-${outfitId}`)}${exclude} { --size: ${size}px; }`);
   }
   return rules.join('\n');
 }
@@ -839,6 +959,9 @@ function initializeDatabase() {
   creatureDatabase.CYCLOPEDIA_HIDDEN_CREATURES = CYCLOPEDIA_HIDDEN_CREATURES;
   creatureDatabase.getMapMonsterBaseStats = getMapMonsterBaseStats;
   creatureDatabase.getCreatureCombatData = getCreatureCombatData;
+  creatureDatabase.describeCreatureCombatSections = describeCreatureCombatSections;
+  creatureDatabase.getCreatureCombatTuningDefaults = getCreatureCombatTuningDefaults;
+  creatureDatabase.walkStepTicks = walkStepTicks;
   creatureDatabase.MONSTER_STAT_DISPLAY_CONFIG = MONSTER_STAT_DISPLAY_CONFIG;
   creatureDatabase.getMonsterNameMap = getMonsterNameMap;
   creatureDatabase.getMonsterById = getMonsterById;
@@ -855,6 +978,9 @@ const placeholderDatabase = {
   CYCLOPEDIA_HIDDEN_CREATURES,
   getMapMonsterBaseStats,
   getCreatureCombatData,
+  describeCreatureCombatSections,
+  getCreatureCombatTuningDefaults,
+  walkStepTicks,
   MONSTER_STAT_DISPLAY_CONFIG,
   MYSTIC_GAZER_GAME_ID,
   SHINY_ALIAS_CREATURES,
@@ -950,6 +1076,9 @@ waitForGameState(() => {
     globalWindow.creatureDatabase.CYCLOPEDIA_HIDDEN_CREATURES = CYCLOPEDIA_HIDDEN_CREATURES;
     globalWindow.creatureDatabase.getMapMonsterBaseStats = getMapMonsterBaseStats;
     globalWindow.creatureDatabase.getCreatureCombatData = getCreatureCombatData;
+    globalWindow.creatureDatabase.describeCreatureCombatSections = describeCreatureCombatSections;
+    globalWindow.creatureDatabase.getCreatureCombatTuningDefaults = getCreatureCombatTuningDefaults;
+    globalWindow.creatureDatabase.walkStepTicks = walkStepTicks;
     globalWindow.creatureDatabase.MONSTER_STAT_DISPLAY_CONFIG = MONSTER_STAT_DISPLAY_CONFIG;
     globalWindow.creatureDatabase.getMonsterNameMap = getMonsterNameMap;
     globalWindow.creatureDatabase.getMonsterById = getMonsterById;
