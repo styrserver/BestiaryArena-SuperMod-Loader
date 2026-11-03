@@ -523,7 +523,23 @@
           if (!owned || (child.parentNode && child.isConnected)) touch('insertBefore', [this, child]);
         }
       } catch { /* ignore */ }
-      return nativeInsert.apply(this, arguments);
+      try {
+        return nativeInsert.apply(this, arguments);
+      } catch (e) {
+        captureDomFault('insertBefore', this, child, arguments[1], e);
+        throw e;
+      }
+    };
+    // Dump at the throw site: by the time the global error handler runs, React
+    // has already unmounted the tree and the root fiber is gone.
+    const nativeRemove = NP.removeChild;
+    NP.removeChild = function (child) {
+      try {
+        return nativeRemove.apply(this, arguments);
+      } catch (e) {
+        captureDomFault('removeChild', this, child, null, e);
+        throw e;
+      }
     };
     // React never uses the ChildNode helpers, so any live-tree call is a mod's.
     for (const name of ['remove', 'before', 'after', 'replaceWith', 'prepend', 'append']) {
@@ -555,8 +571,23 @@
     return f && f.stateNode && f.stateNode.current;
   }
 
+  function captureDomFault(op, parent, node, ref, err) {
+    try {
+      if (!err || err.name !== 'NotFoundError') return;
+      const extra = [`fault site: ${op} on ${describePath(parent)}${describeTouch(parent)}`,
+        `  node: ${describePath(node)}${describeTouch(node)}`];
+      if (op === 'insertBefore') {
+        extra.push(`  ref: ${ref ? describePath(ref) : String(ref)}${ref ? describeTouch(ref) : ''}`);
+        if (ref) extra.push(`  ref actually in: ${ref.parentNode ? describePath(ref.parentNode) : '(detached)'}`);
+      } else {
+        extra.push(`  node actually in: ${node && node.parentNode ? describePath(node.parentNode) : '(detached)'}`);
+      }
+      dumpDomForensics(err, extra);
+    } catch { /* ignore */ }
+  }
+
   let lastForensicsAt = 0;
-  function dumpDomForensics(err) {
+  function dumpDomForensics(err, extra) {
     if (!IS_PAGE) return;
     const now = Date.now();
     if (now - lastForensicsAt < 500) return;
@@ -599,6 +630,7 @@
       } else {
         lines.push('(could not locate React root fiber)');
       }
+      if (extra) lines.push(...extra);
       lines.push(`error: ${err && err.name}: ${err && err.message}`);
       lines.push(`fibers scanned: ${visited}`);
       lines.push(`native nodes not under their React parent: ${mismatched.length}`);

@@ -4,6 +4,36 @@
   },
   "notes": [
     {
+      "version": "5.2.9",
+      "changes": [
+        {
+          "mod": "Board Analyzer",
+          "type": "changed",
+          "text": "The warning icon now appears before the Fast simulation label."
+        },
+        {
+          "mod": "Mod Loader",
+          "type": "changed",
+          "text": "The Error Log now records which mod last touched the page elements involved when the game crashes with a \"not a child of this node\" error."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "fixed",
+          "text": "Mod Settings now opens on the first click after it was closed by something other than its own Close button."
+        },
+        {
+          "mod": "Outfiter",
+          "type": "changed",
+          "text": "The setting is now named Unlock all outfits and mounts. The Mounts item now sits right under Outfits in the account menu. Choosing the no-mount slot in the Mounts window now deselects the mount and removes it from the preview."
+        },
+        {
+          "mod": "Outfiter",
+          "type": "fixed",
+          "text": "Turning Unlock all outfits and mounts on or off now applies right away, and stays applied when the game refreshes your account data. A warning icon appears next to the setting if it could not be applied live and a page refresh is needed."
+        }
+      ]
+    },
+    {
       "version": "5.2.8",
       "changes": [
         {

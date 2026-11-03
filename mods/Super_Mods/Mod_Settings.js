@@ -8716,7 +8716,9 @@ function createSettingsDropdownHandler(configKey, onChangeCallback) {
 // Show settings modal
 function showSettingsModal() {
   try {
-    if (modSettingsModalInstance || document.querySelector('.mod-settings-modal-root')) {
+    // Open only if the modal is really in the page. A stale instance (modal removed by something
+    // else, e.g. another mod's modal or Escape) must not swallow the click as a "close".
+    if (document.querySelector('.mod-settings-modal-root')) {
       if (modSettingsModalInstance && typeof modSettingsModalInstance.close === 'function') {
         modSettingsModalInstance.close();
       } else {
@@ -9132,6 +9134,7 @@ function showSettingsModal() {
               <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;" title="${t('mods.betterUI.outfiterDescription')}">
                 <input type="checkbox" id="outfiter-toggle" style="transform: scale(1.2);">
                 <span>${t('mods.betterUI.outfiterLabel')}</span>
+                <span id="outfiter-refresh-warning" hidden title="${t('mods.betterUI.outfiterNeedsRefresh')}" style="cursor: help;">⚠️</span>
               </label>
             </div>
             <div style="${uiOptionStyle}">
@@ -11347,6 +11350,22 @@ function showSettingsModal() {
         });
       };
       bindPageFlagCheckbox('#outfiter-toggle', 'outfiter-enabled', 'OUTFITER_ENABLED', 'updateOutfiterMode', (v) => v === 'true');
+      // Apply Outfiter live and verify it; if that cannot be confirmed, show the refresh warning.
+      const outfiterCheckbox = content.querySelector('#outfiter-toggle');
+      const outfiterWarning = content.querySelector('#outfiter-refresh-warning');
+      if (outfiterCheckbox && outfiterWarning) {
+        outfiterCheckbox.addEventListener('change', () => {
+          const enabled = outfiterCheckbox.checked;
+          let applied = false;
+          try {
+            applied = window.Outfiter?.setEnabled?.(enabled) === true;
+          } catch (error) {
+            console.error('[Mod Settings] Outfiter live toggle failed:', error);
+          }
+          console.log('[Mod Settings] Outfiter live toggle:', { enabled, applied, outfiterLoaded: !!window.Outfiter?.setEnabled });
+          outfiterWarning.hidden = applied;
+        });
+      }
       // The welcome page is on unless explicitly disabled.
       bindPageFlagCheckbox('#welcome-page-toggle', 'welcome-enabled', 'WELCOME_ENABLED', 'updateWelcomeMode', (v) => v !== 'false');
 

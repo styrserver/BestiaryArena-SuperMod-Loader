@@ -20,8 +20,9 @@ const t = (key) => {
 const DATA_AVAILABLE = typeof DATA !== 'undefined';
 
 // Store original fetch for cleanup
-let originalFetch = null;
 let outfiterFetchWrapper = null;
+let outfiterFetchRestore = null;
+let outfiterFetchActive = false;
 
 // Store timer IDs for cleanup
 let restoreTimer = null;
@@ -810,12 +811,40 @@ function mergeOutfitsIntoPlayer() {
   updateOutfitBadgeStyle();
 }
 
+// The game rewrites player.outfits from server data (login hydration, account mutations), which drops
+// the outfits merged in above. Re-merge whenever any are missing while the toggle is on, so enabling
+// at runtime does not depend on the merge having happened after the game's last sync.
+let playerGuardSub = null;
+
+function startOutfitGuard() {
+  if (playerGuardSub) return;
+  playerGuardSub = globalThis.state.player.subscribe(() => {
+    try {
+      if (localStorage.getItem('outfiter-enabled') !== 'true') return;
+      const have = new Set(globalThis.state.player.getSnapshot().context.outfits);
+      if (getOutfitIds().some((id) => !have.has(id))) mergeOutfitsIntoPlayer();
+    } catch (_) { /* storage or state unavailable */ }
+  });
+}
+
+function stopOutfitGuard() {
+  const sub = playerGuardSub;
+  playerGuardSub = null;
+  if (typeof sub === 'function') sub();
+  else sub?.unsubscribe?.();
+}
+
+// Reading the tables re-downloads and scans every game chunk (seconds of main-thread work), so it
+// runs once per page load; later toggles reuse MOUNTS/OUTFIT_IDS as they stand (live or snapshot).
+let tablesSettled = false;
+
 function refreshGameTables() {
-  if (tablesAbort) return;
+  if (tablesAbort || tablesSettled) return;
   const controller = new AbortController();
   tablesAbort = controller;
   loadGameTables(controller.signal).then((tables) => {
     if (controller.signal.aborted) return;
+    tablesSettled = true;
     replaceContents(MOUNTS, tables.mounts);
     replaceContents(MOUNTABLE_OUTFITS, tables.mountable);
     replaceContents(OUTFIT_IDS, tables.outfitIds);
@@ -824,6 +853,7 @@ function refreshGameTables() {
     console.log('[Outfiter] Loaded live game tables:', OUTFIT_IDS.length, 'outfits,', Object.keys(MOUNTS).length, 'mounts');
   }).catch((error) => {
     if (!controller.signal.aborted) {
+      tablesSettled = true;
       console.warn('[Outfiter] Live game tables unavailable, using bundled snapshot:', error.message);
     }
   }).finally(() => {
@@ -990,20 +1020,35 @@ function showOutfitChangeNotification(message, type = 'success') {
   }
 }
 
+// Stop intercepting. Unhook only if we are still the top of the fetch chain; otherwise the wrapper
+// stays installed as a pass-through (removing it would break the mods wrapped on top of it).
+function releaseOutfitChangeErrors() {
+  outfiterFetchActive = false;
+  if (outfiterFetchWrapper && window.fetch === outfiterFetchWrapper) {
+    outfiterFetchRestore?.();
+    outfiterFetchWrapper = null;
+    outfiterFetchRestore = null;
+  }
+}
+
 function interceptOutfitChangeErrors() {
   try {
-    // Store original fetch if not already stored
-    if (!originalFetch) {
-      originalFetch = window.fetch;
-    }
-    
-    // Hook into fetch to intercept outfit change API calls
+    outfiterFetchActive = true;
+    // An earlier wrapper may still be in the fetch chain (other mods wrapped on top of it, so it
+    // could not be unhooked); re-arm it instead of stacking a second one on itself.
+    if (outfiterFetchWrapper) return true;
+
+    // Hook into fetch to intercept outfit change API calls. `next` is the fetch this wrapper
+    // delegates to; it is fixed at install time so it can never loop back into the wrapper.
+    const next = window.fetch;
+    outfiterFetchRestore = () => { window.fetch = next; };
     outfiterFetchWrapper = function(...args) {
       const [url, options] = args;
+      if (!outfiterFetchActive) return next.apply(this, args);
 
       // Check if this is an outfit change request
       if (url && url.includes('account.changeOutfit') && options && options.method === 'POST') {
-        return originalFetch.apply(this, args).then(async response => {
+        return next.apply(this, args).then(async response => {
           // Extract outfit data from request
           let outfitId = null;
           let colors = null;
@@ -1082,7 +1127,7 @@ function interceptOutfitChangeErrors() {
       }
       
       // For non-outfit requests, use original fetch
-      return originalFetch.apply(this, args);
+      return next.apply(this, args);
     };
     window.fetch = outfiterFetchWrapper;
 
@@ -1342,10 +1387,11 @@ function openMountSelector() {
         `aria-label="${t('mods.outfiter.noMount')}"><circle cx="12" cy="12" r="10"></circle><path d="m4.9 4.9 14.2 14.2"></path></svg>`;
     }
     btn.appendChild(slot);
-    // Switching mounts keeps the Riding state. The "none" slot is just riding off (the selected mount
-    // is kept); only the very first pick turns riding on, so Save does something.
+    // Switching mounts keeps the Riding state. The "none" slot deselects the mount (preview shows just
+    // the outfit); only the first pick after that turns riding on, so Save does something.
     btn.addEventListener('click', () => {
       if (id === null) {
+        selected = null;
         ride = false;
       } else {
         if (selected === null) ride = true;
@@ -1422,7 +1468,23 @@ function injectMountMenuItem(menu) {
     mountMenuTimers.add(timer);
   });
 
-  // Append-only: never splice into this React-owned Radix group (see CLAUDE.md).
+  // Append-only: never splice into this React-owned Radix group (see CLAUDE.md). To show the item
+  // right under the native "Outfits" entry, reorder visually with CSS `order` instead: the entries up
+  // to and including "Outfits" get negative orders, ours lands just after, and everything else (incl.
+  // items other mods append later) keeps order 0 in DOM order.
+  const natives = [...group.children].filter((el) => el !== item);
+  const outfitsIdx = natives.findIndex((el) => /outfit|traje/i.test(el.textContent || ''));
+  if (outfitsIdx >= 0) {
+    if (!/flex|grid/.test(getComputedStyle(group).display)) {
+      group.style.display = 'flex';
+      group.style.flexDirection = 'column';
+    }
+    natives.slice(0, outfitsIdx + 1).forEach((el, i) => { el.style.order = String((i - 1000) * 2); });
+    item.style.order = String((outfitsIdx - 1000) * 2 + 1);
+    group.appendChild(item);
+    return;
+  }
+
   // Another OT Mods item may already have added the shared section title.
   if (!group.querySelector('.ot-mods-menu-title')) {
     const sep = () => {
@@ -1503,6 +1565,7 @@ function executeOutfiter() {
     // Set outfits in player state (merge with existing outfits); the snapshot is used
     // until refreshGameTables() swaps in the live list.
     mergeOutfitsIntoPlayer();
+    startOutfitGuard();
     refreshGameTables();
 
     // Define excluded items from bag pool (only if DATA is available)
@@ -1580,6 +1643,8 @@ exports = {
         }
         
         stopMountMenuObserver();
+        stopOutfitGuard();
+        tablesSettled = false;
         if (tablesAbort) {
           tablesAbort.abort();
           tablesAbort = null;
@@ -1606,11 +1671,9 @@ exports = {
         
         // Restore original fetch — only if our wrapper is still the current one
         // (don't clobber a mod that patched fetch on top of us).
-        if (originalFetch && (outfiterFetchWrapper == null || window.fetch === outfiterFetchWrapper)) {
-          window.fetch = originalFetch;
-        }
-        originalFetch = null;
+        releaseOutfitChangeErrors();
         outfiterFetchWrapper = null;
+        outfiterFetchRestore = null;
       }
       
       console.log('[Outfiter] Cleaned up successfully');
@@ -1628,6 +1691,8 @@ if (typeof window !== 'undefined') {
     init: exports.init,
     cleanup: exports.cleanup,
     get mountIds() { return getMountIds(); },
+    // Live-apply the "Unlock all outfits and mounts" toggle; true when verified in the player state.
+    setEnabled: applyEnabled,
     // Local-only mount: pass a mountIds entry, or null to dismount. Persists across reloads.
     setMount: function(mountId) {
       if (mountId !== null && !getMountIds().includes(mountId)) {
@@ -1648,20 +1713,68 @@ if (typeof window !== 'undefined') {
   };
 }
 
+// True when every outfit this mod manages is in the player state right now.
+function outfitsApplied() {
+  const have = new Set(globalThis.state?.player?.getSnapshot?.().context.outfits || []);
+  return getOutfitIds().every((id) => have.has(id));
+}
+
+// Undo executeOutfiter(): drop the outfits this mod added (owned ones stay), and remove its UI/hooks.
+function revertOutfiter() {
+  stopOutfitGuard();
+  stopMountMenuObserver();
+  if (restoreTimer) {
+    clearTimeout(restoreTimer);
+    restoreTimer = null;
+  }
+  const added = addedOutfits;
+  globalThis.state.player.trigger.setState({
+    fn: (prev) => {
+      const outfits = prev.outfits.filter((id) => !added.has(id));
+      // Wearing an outfit we added: fall back to one the account really owns.
+      const outfitId = outfits.includes(prev.outfitId) ? prev.outfitId : (outfits[0] ?? prev.outfitId);
+      return { ...prev, outfits, outfitId };
+    },
+  });
+  addedOutfits = new Set();
+  outfitBadgeStyle?.remove();
+  outfitBadgeStyle = null;
+  stopOutfitIconHover();
+  releaseOutfitChangeErrors();
+}
+
+// Apply the toggle to the running page. Returns true only if the result is verified in the player
+// state, so the caller can warn that a page refresh is still needed.
+function applyEnabled(enabled) {
+  try {
+    // Mod Settings calls this directly and also posts a message; the second call is a no-op.
+    if (enabled && playerGuardSub && outfitsApplied()) return true;
+    if (!enabled && !playerGuardSub && addedOutfits.size === 0) return true;
+    if (enabled) {
+      if (restoreTimer) clearTimeout(restoreTimer);
+      const ran = executeOutfiter();
+      const applied = ran && outfitsApplied();
+      console.log('[Outfiter] applyEnabled(true):', { ran, applied, outfits: globalThis.state?.player?.getSnapshot?.().context.outfits?.length });
+      return applied;
+    }
+    revertOutfiter();
+    const cleared = !getOutfitIds().some((id) => addedOutfits.has(id)) &&
+      (globalThis.state.player.getSnapshot().context.outfits || []).every((id) => ownedOutfits.has(id));
+    console.log('[Outfiter] applyEnabled(false):', { cleared });
+    return cleared;
+  } catch (error) {
+    console.error('[Outfiter] applyEnabled failed:', error);
+    return false;
+  }
+}
+
 // Message handler for outfiter toggle changes
 function handleOutfiterToggle(event) {
   if (event.source !== window) return;
-  
+
   if (event.data && event.data.from === 'BESTIARY_EXTENSION' && event.data.action === 'updateOutfiterMode') {
-    const enabled = event.data.enabled;
-    console.log('[Outfiter] Received toggle update:', enabled);
-    
-    if (enabled) {
-      // Re-execute when enabled
-      executeOutfiter();
-    } else {
-      console.log('[Outfiter] Disabled via toggle - no action needed');
-    }
+    console.log('[Outfiter] Received toggle update:', event.data.enabled);
+    applyEnabled(!!event.data.enabled);
   }
 }
 

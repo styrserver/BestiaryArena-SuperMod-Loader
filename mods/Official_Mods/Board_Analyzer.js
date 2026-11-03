@@ -3648,8 +3648,8 @@ function createConfigPanel(startAnalysisCallback) {
   fastWarning.addEventListener('blur', hideFastWarningTooltip);
 
   fastContainer.appendChild(fastInput);
-  fastContainer.appendChild(fastLabel);
   fastContainer.appendChild(fastWarning);
+  fastContainer.appendChild(fastLabel);
   analysisBody.appendChild(fastContainer);
 
   const fastCredit = document.createElement('div');
