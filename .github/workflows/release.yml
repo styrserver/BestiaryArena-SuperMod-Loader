@@ -1,0 +1,129 @@
+# Builds both store zips and uploads them to the Chrome Web Store and Firefox AMO.
+#
+# Release: bump the version in manifest.json + manifest_firefox.json, add the docs/patch-notes.json
+# entry, commit and push, then:   git tag v5.2.12 && git push origin v5.2.12
+# Dry run (build + zips as a downloadable artifact, no upload): Actions tab -> Release -> Run workflow.
+#
+# Secrets (Settings -> Secrets and variables -> Actions):
+#   CWS_CLIENT_ID, CWS_CLIENT_SECRET, CWS_REFRESH_TOKEN   Chrome Web Store API (Google Cloud OAuth)
+#   CWS_PUBLISHER_ID                                      Chrome Web Store dashboard -> Account
+#   AMO_JWT_ISSUER, AMO_JWT_SECRET                        Firefox AMO API keys (developer hub)
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CWS_EXTENSION_ID: hloidpjbdbbhhkihgeeddnofmpgbffjd
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Read manifest version
+        id: ver
+        run: echo "version=$(node -p "require('./manifest.json').version")" >> "$GITHUB_OUTPUT"
+      - name: Tag must match manifest version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          if [ "${GITHUB_REF_NAME#v}" != "${{ steps.ver.outputs.version }}" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match manifest version ${{ steps.ver.outputs.version }}"
+            exit 1
+          fi
+      - name: Build zips (also runs the patch-notes check)
+        run: node tools/package.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: store-zips
+          path: dist/*.zip
+          if-no-files-found: error
+
+  # Read-only: proves the Chrome credentials + publisher ID work. Actions tab -> Release -> Run workflow.
+  chrome-status:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch Chrome Web Store item status
+        env:
+          CWS_CLIENT_ID: ${{ secrets.CWS_CLIENT_ID }}
+          CWS_CLIENT_SECRET: ${{ secrets.CWS_CLIENT_SECRET }}
+          CWS_REFRESH_TOKEN: ${{ secrets.CWS_REFRESH_TOKEN }}
+          CWS_PUBLISHER_ID: ${{ secrets.CWS_PUBLISHER_ID }}
+        run: |
+          set -euo pipefail
+          TOKEN=$(curl -sS --fail-with-body https://oauth2.googleapis.com/token             -d client_id="$CWS_CLIENT_ID" -d client_secret="$CWS_CLIENT_SECRET"             -d refresh_token="$CWS_REFRESH_TOKEN" -d grant_type=refresh_token             | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).access_token")
+          echo "::add-mask::$TOKEN"
+          curl -sS --fail-with-body -H "Authorization: Bearer $TOKEN"             "https://chromewebstore.googleapis.com/v2/publishers/$CWS_PUBLISHER_ID/items/$CWS_EXTENSION_ID:fetchStatus"
+
+  chrome:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: store-zips
+          path: dist
+      - name: Upload and publish to the Chrome Web Store (API v2)
+        env:
+          CWS_CLIENT_ID: ${{ secrets.CWS_CLIENT_ID }}
+          CWS_CLIENT_SECRET: ${{ secrets.CWS_CLIENT_SECRET }}
+          CWS_REFRESH_TOKEN: ${{ secrets.CWS_REFRESH_TOKEN }}
+          CWS_PUBLISHER_ID: ${{ secrets.CWS_PUBLISHER_ID }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          set -euo pipefail
+          BASE="https://chromewebstore.googleapis.com"
+          ITEM="publishers/$CWS_PUBLISHER_ID/items/$CWS_EXTENSION_ID"
+          TOKEN=$(curl -sS --fail-with-body https://oauth2.googleapis.com/token             -d client_id="$CWS_CLIENT_ID" -d client_secret="$CWS_CLIENT_SECRET"             -d refresh_token="$CWS_REFRESH_TOKEN" -d grant_type=refresh_token             | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).access_token")
+          echo "::add-mask::$TOKEN"
+          UPLOAD=$(curl -sS --fail-with-body -X POST -H "Authorization: Bearer $TOKEN"             -T "dist/chrome-$VERSION.zip" "$BASE/upload/v2/$ITEM:upload")
+          echo "$UPLOAD"
+          STATE=$(echo "$UPLOAD" | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).uploadState")
+          # Large uploads can come back IN_PROGRESS: poll fetchStatus until it settles.
+          for i in 1 2 3 4 5 6; do
+            [ "$STATE" = "IN_PROGRESS" ] || break
+            sleep 10
+            STATE=$(curl -sS --fail-with-body -H "Authorization: Bearer $TOKEN" "$BASE/v2/$ITEM:fetchStatus"               | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).lastAsyncUploadState || 'IN_PROGRESS'")
+          done
+          if [ "$STATE" != "SUCCEEDED" ] && [ "$STATE" != "SUCCESS" ]; then
+            echo "Upload did not succeed: $STATE"; exit 1
+          fi
+          curl -sS --fail-with-body -X POST -H "Authorization: Bearer $TOKEN"             -H "Content-Length: 0" "$BASE/v2/$ITEM:publish"
+
+  firefox:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          name: store-zips
+          path: dist
+      - name: Submit a new listed version to AMO
+        env:
+          AMO_JWT_ISSUER: ${{ secrets.AMO_JWT_ISSUER }}
+          AMO_JWT_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          set -euo pipefail
+          unzip -q "dist/firefox-$VERSION.zip" -d dist/firefox
+          npx --yes web-ext@8 sign \
+            --source-dir dist/firefox \
+            --channel listed \
+            --api-key "$AMO_JWT_ISSUER" \
+            --api-secret "$AMO_JWT_SECRET"
