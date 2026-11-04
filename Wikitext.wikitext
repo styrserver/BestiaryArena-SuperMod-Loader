@@ -106,7 +106,7 @@ The extension requests only what it needs to run mods on Bestiary Arena. See [ht
 The extension does '''not''' request the <code>tabs</code> permission (Chrome’s “Read browsing history” wording). After a permission update, reload the extension in <code>chrome://extensions/</code> (or remove and re-add once) if Chrome still shows old prompts.
 
 == Mod Development ==
-Mods can be written in JavaScript and have access to the game's state and a powerful API for interacting with the game. See the Mod Development Guide for detailed information on creating mods.
+Mods can be written in JavaScript and have access to the game's state and a powerful API for interacting with the game. See the [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/docs/mod_development_guide.md Mod Development Guide] for detailed information on creating mods.
 
 === Adding a mod that ships inside the extension ===
 Bundled mods must be registered in more than one place (browser limits: the popup and background worker cannot always share the same module graph as the content scripts). When you add or rename an official, super, OT, or database script under <code>mods/</code> or <code>database/</code>:
@@ -175,8 +175,8 @@ Mods have access to the game's state through <code>globalThis.state</code>, whic
 ** <code>maps-database.js</code> - Maps reference data
 ** <code>equipment-lua-export.js</code> - Console helpers to export equipment wiki Lua (<code>dumpEquipmentWikiLua()</code>)
 ** <code>creature-lua-export.js</code> - Console helpers to export creature stats wiki Lua (<code>dumpCreatureWikiLua()</code>)
-** <code>maps-lua-export.js</code> - Console helpers to export map wikitext pages (<code>dumpMapWiki()</code>)
-** <code>regions-lua-export.js</code> - Console helpers to export region wikitext pages (<code>dumpRegionWiki()</code>)
+** <code>maps-lua-export.js</code> - Console helpers to export maps wiki Lua (<code>dumpMapsWikiLua()</code>)
+** <code>regions-lua-export.js</code> - Console helpers to export regions wiki Lua (<code>dumpRegionsWikiLua()</code>) and region page bodies (<code>dumpRegionPageBody()</code>)
 ** <code>playereq-database.js</code> - Player equipment helpers (slot types, dynamic equipment lists)
 ** <code>firebase-admins.js</code> - Firebase admin allowlist for privileged mod features
 * <code>mods/</code> - Local mod files, organized as follows:
@@ -196,6 +196,7 @@ Mods have access to the game's state through <code>globalThis.state</code>, whic
 * [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/docs/client_api.md Client API Documentation] - Complete reference for the game's Client API
 * [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/docs/game_state_api.md Game State API Documentation] - Game state, mod databases, utility functions (<code>serializeBoard</code>, <code>replay</code>, name/ID maps)
 * [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/docs/custom_board_setups.md Custom Board Setups] - Examples for board placement and game events
+* [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/docs/fast_simulation.md Fast Simulation] - Board Analyzer's headless simulation mode, how it is verified, and what to do after a game update
 * [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/docs/raid_system_api.md Raid System API] - Raid state machine reference for automation mods
 * [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/docs/firebase_runs_api.md Firebase Best Runs API] - Fetch and decrypt Mod Settings best-runs uploads
 * [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/docs/fetch-best-runs.html Fetch Best Runs (HTML tool)] - Browser UI for fetching and decrypting uploaded runs
@@ -220,12 +221,13 @@ dumpCreatureWikiLua();                               // downloads creature-wiki-
 dumpCreatureWikiLua({ download: false, copy: true });
 getCreatureExportSections();                       // inspect regular / event / unobtainable / gazer lists
 </syntaxhighlight>
-Live stats (hitpoints, attack, ability_power, armor, magic_resist, movement_speed, <code>roles</code>, <code>is_poisonous</code>) come from <code>getMonster</code> and <code>creature-database.js</code> <code>HARDCODED_MAP_MONSTER_STATS</code>. Wiki-only fields (<code>attack_speed</code>, <code>scales_ad</code>, <code>scales_ap</code>, specials) are in <code>WIKI_CREATURE_EXTRA_FIELDS</code> inside the exporter — update there when wiki rules change.
+Live stats (hitpoints, attack, ability_power, armor, magic_resist, movement_speed, <code>roles</code>, <code>is_poisonous</code>) come from <code>getMonster</code> and <code>creature-database.js</code> <code>getMapMonsterBaseStats</code> (computed from each unobtainable creature's room level). Wiki-only fields (<code>attack_speed</code>, <code>scales_ad</code>, <code>scales_ap</code>, specials) are in <code>WIKI_CREATURE_EXTRA_FIELDS</code> inside the exporter — update there when wiki rules change.
 
 '''Maps''' (<code>maps-lua-export.js</code>):
 <syntaxhighlight lang="javascript">
 dumpMapsWikiLua();                                    // downloads maps-wiki-YYYY-MM-DD.lua
 dumpMapsWikiLua({ download: false, copy: true });
+buildMapsExportData();                                // inspect the structured data
 </syntaxhighlight>
 Same shape as the equipment/creature exporters: a <code>Module:MapsData/data</code>-style Lua table (<code>region</code>, <code>difficulty</code>, <code>stamina</code>, <code>max_rank_points</code>, <code>type</code>), grouped into region sections. <code>Template:Maps</code> currently reads raw params, not a module (confirmed via <code>action=raw</code>) — pair this data page with a <code>Module:MapsData</code> logic module (mirroring <code>Module:EquipmentData</code>'s <code>getItemData</code>) as a one-time wiki-side change. <code>type</code> is "raid", "event", or false — matches the wiki's own Raids/Events split (same logic <code>regions-lua-export.js</code> already uses); no infobox slot consumes it yet, it's there for future use. No <code>drops</code> field here on purpose — <code>Module:EquipmentData/data</code> already knows which Map/Raid/BoostedMap each item comes from; <code>Template:Maps</code>' drops field should reverse-query that module live instead of duplicating it.
 
@@ -233,6 +235,7 @@ Same shape as the equipment/creature exporters: a <code>Module:MapsData/data</co
 <syntaxhighlight lang="javascript">
 dumpRegionsWikiLua();                                 // downloads regions-wiki-YYYY-MM-DD.lua
 dumpRegionsWikiLua({ download: false, copy: true });
+buildRegionsExportData();                             // inspect the structured data
 </syntaxhighlight>
 Same idea, a <code>Module:RegionsData/data</code>-style table (<code>order</code>, <code>unlock_starting</code>, <code>unlock_map</code>, <code>unlock_region</code>, <code>rune</code>, <code>expansion</code>, <code>regular_map_count</code>, <code>expansion_map_count</code>, <code>raid_count</code>, <code>event_count</code>, <code>raids</code>, <code>events</code>). <code>expansion</code> auto-resolves from <code>maps-database.js</code>'s <code>MAP_EXPANSIONS</code>, and <code>rune</code> auto-resolves from <code>inventory-database.js</code>'s per-item <code>obtain</code> field (via <code>maps-database.js</code> <code>getRegionRune()</code>) — neither duplicated here. Only <code>unlock_map</code>/<code>unlock_region</code> (always a map, despite the name) has no source at all, pre-filled by hand in <code>REGION_UNLOCK_INFO</code> for all 7 current regions. Yasir prices have no static source at all (read live from the DOM by Better Yasir) and aren't part of this table.
 
@@ -313,11 +316,11 @@ Enhances the native Monstrous Cauldron interface with powerful search and filter
 
 ==== Better Daycare ====
 Adds a Queue tab to the native Daycare dialog for automated level-ups, ejections, and queue-based slot filling:
-* Autohandle Daycare: toggle directly from the dialog's info tooltip; automatically levels up ready creatures, ejects maxed ones, and refills empty slots via the game's own API
+* Autohandle Daycare: toggle directly from the dialog's info tooltip; automatically levels up ready creatures, ejects maxed ones, and refills empty slots via the game's own API (no clicking through menus)
 * Queue: click or drag-and-drop any eligible creature into the queue, in your own order; drag a queued creature onto another to reorder, or drag it back onto the picker to remove it
 * Eligible creatures are sorted the same way Cyclopedia sorts owned creatures (level, then tier, then gene-stat rarity), and automatically exclude Gazers and creatures already in the Daycare or queue
 * "Maxed" follows the game's real level caps: 99 for awakened creatures, otherwise 30/35/40/45/50 by tier (1-5)
-* Queue tab swaps in place of the native Daycare view, matching the game's own dialog styling
+* Queue tab swaps in place of the native Daycare view, matching the game's own dialog styling, with the dialog title rebranded "Better Daycare" while it's open
 
 ==== Better Exaltation Chest ====
 Enhances the Exaltation Chest interface with automated opening and intelligent equipment management:
@@ -381,7 +384,7 @@ Enhances the native in-game map teleporter dialog:
 * Adds an XP/Stam column with 3-state sort on Map and XP/Stam, plus sticky per-region headers
 * Colors raid maps red and dynamic event maps green for quick identification
 * Inline region filter and Hide raids & events controls beside the search box
-* Search keywords {{code|raid}}/{{code|raids}} and {{code|event}}/{{code|events}}; hover tooltips on creature and equipment portraits
+* Search keywords <code>raid</code>/<code>raids</code> and <code>event</code>/<code>events</code>; hover tooltips on creature and equipment portraits
 
 ==== Better Yasir ====
 Enhances Yasir's traveling merchant shop with bulk transaction capabilities and smart pricing:
@@ -523,7 +526,6 @@ These are the core mods that provide essential gameplay enhancements. All 10 Off
 Automates routine gameplay actions to streamline your Bestiary Arena experience:
 * Automatic stamina refilling when low
 * Auto-collection of available rewards
-* Automatic handling of Day Care tasks
 * Customizable automation settings for safe and efficient play
 * Streamlined gameplay experience with minimal manual intervention
 

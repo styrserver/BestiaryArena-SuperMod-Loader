@@ -12900,7 +12900,7 @@ function appendCreatureCooldownSection(body, formState, tileIndex, actor) {
 
 const MS_PER_COMBAT_TICK = 62.5;
 
-/** Live constant access from content/ba-combat-overrides.js (null when that script is not loaded). */
+/** Live constant access from content/ba-combat.js (null when that script is not loaded). */
 function getCombatOverridesApi() {
   return globalThis.BestiaryCombatOverrides ?? null;
 }

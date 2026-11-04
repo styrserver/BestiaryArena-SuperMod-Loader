@@ -1733,12 +1733,15 @@ class StatisticsCalculator {
     this.rankPointsCounts = {};
   }
   
+  // runTime null = counted in the results but kept out of the timing stats.
   addRun(result, runTime) {
     this.totalRuns++;
-    this.runTimes.push(runTime);
-    this.runTimesSum += runTime;
-    if (runTime < this.fastestRunTime) this.fastestRunTime = runTime;
-    if (runTime > this.slowestRunTime) this.slowestRunTime = runTime;
+    if (runTime != null) {
+      this.runTimes.push(runTime);
+      this.runTimesSum += runTime;
+      if (runTime < this.fastestRunTime) this.fastestRunTime = runTime;
+      if (runTime > this.slowestRunTime) this.slowestRunTime = runTime;
+    }
 
     if (result.skipped) {
       this.skippedRuns++;
@@ -2378,7 +2381,9 @@ function recordFastVerification(setup, matched) {
 // Plays the same seeds through the real game and the fast engine and logs each comparison.
 // Needs a running analysis (getLastTick) and a prepared board. Returns
 // { stopped, matched, compared, total } and stops at the first mismatch.
-async function compareFastAgainstReal(runner, setup, total, analysisId) {
+// Each matching real result is a valid sample: onVerifiedRun(result) records it as it finishes
+// and returns true when the analysis should stop.
+async function compareFastAgainstReal(runner, setup, total, analysisId, onVerifiedRun = null) {
   const savedStopOnSPlus = config.stopOnSPlus;
   const savedStopAfterTicks = config.stopAfterTicks;
   // getLastTick reads these; they must not cut the reference runs short.
@@ -2390,7 +2395,7 @@ async function compareFastAgainstReal(runner, setup, total, analysisId) {
       if (!shouldContinueAnalysis(analysisId)) return { stopped: true, matched, compared, total };
       const seed = createRunSeed();
       const real = await runRealSeedOnce(seed, analysisId);
-      if (real.forceStopped) return { stopped: true, matched, compared, total };
+      if (real.forceStopped || real.analysisChanged || real.analysisReset) return { stopped: true, matched, compared, total };
       const fast = await runner.simulate(setup, seed);
       const same = Boolean(fast) && fast.ticks === real.ticks && fast.completed === real.completed &&
         (!real.completed || fast.rankPoints === real.rankPoints);
@@ -2399,6 +2404,13 @@ async function compareFastAgainstReal(runner, setup, total, analysisId) {
       const line = `[Board Analyzer] Fast check ${i + 1}/${total} seed ${seed}: real ${formatFastCheckResult(real)} | fast ${formatFastCheckResult(fast)} | ${same ? 'match' : 'MISMATCH'}`;
       if (same) console.log(line); else console.warn(line);
       if (!same) break;
+      // Recorded under the caller's own stop/tick settings, not the overrides above.
+      config.stopOnSPlus = savedStopOnSPlus;
+      config.stopAfterTicks = savedStopAfterTicks;
+      const shouldStop = onVerifiedRun?.({ ...real, seed });
+      config.stopOnSPlus = false;
+      config.stopAfterTicks = 0;
+      if (shouldStop) return { stopped: true, matched, compared, total };
     }
     return { stopped: false, matched, compared, total };
   } finally {
@@ -2410,7 +2422,7 @@ async function compareFastAgainstReal(runner, setup, total, analysisId) {
 // Verifies the engine against real runs when needed. Returns the engine, or null when it
 // disagrees with the game or the analysis was stopped. Needs the board prepared (sandbox/turbo)
 // only when the room/floor is not verified yet.
-async function finishFastEngine(ready, analysisId) {
+async function finishFastEngine(ready, analysisId, onVerifiedRun = null) {
   const { runner } = ready;
   let { setup } = ready;
   let verified = ready.verified;
@@ -2422,7 +2434,7 @@ async function finishFastEngine(ready, analysisId) {
     }
     const { key } = getFastVerificationKeys(setup);
     if (!verified) {
-      const outcome = await compareFastAgainstReal(runner, setup, FAST_VERIFY_SEEDS, analysisId);
+      const outcome = await compareFastAgainstReal(runner, setup, FAST_VERIFY_SEEDS, analysisId, onVerifiedRun);
       if (outcome.stopped) { runner.cleanup(); return null; }
       if (outcome.matched !== outcome.total) {
         recordFastVerification(setup, false);
@@ -2774,15 +2786,17 @@ function uninstallXpDebugFetchHook() {
 }
 
 // Helper function to run the main analysis loop
-async function runAnalysisLoop(runs, thisAnalysisId, statsCalculator, bestRuns, timing, statusCallback, perf = null, fastEngine = null) {
-  const results = [];
-  
-  for (let i = 1; i <= runs; i++) {
+async function runAnalysisLoop(runs, thisAnalysisId, statsCalculator, bestRuns, timing, statusCallback, perf = null, fastEngine = null, verified = { results: [], count: 0, stopped: false }) {
+  // Runs already recorded while verifying the fast engine come first.
+  const results = verified.results;
+  if (verified.stopped) return results;
+
+  for (let i = verified.count + 1; i <= runs; i++) {
     // Check if analysis should continue
     if (!shouldContinueAnalysis(thisAnalysisId)) {
       break;
     }
-    
+
     // Start timing this run
     timing.lastRunStart = performance.now();
     
@@ -3248,13 +3262,32 @@ async function analyzeBoard(runs = config.runs, statusCallback = null, perfTrack
     perf.setupMs = performance.now() - setupStart;
     console.log('[Board Analyzer] Analyzing', currentRoomName || currentRoomId, 'floor', currentFloor ?? 0, `(${runs} planned runs)`);
 
+    // The real runs that verify the fast engine are valid samples: record each one live (no timing
+    // stats, they are slower than fast runs) so the modal updates as they finish.
+    const verified = { results: [], count: 0, stopped: false };
+    const recordVerifiedRun = (result) => {
+      if (verified.count >= runs) return true;
+      const runIndex = ++verified.count;
+      if (config.stopAfterTicks > 0 && result.ticks > config.stopAfterTicks) {
+        Object.assign(result, { ticks: config.stopAfterTicks, completed: false, grade: 'F', rankPoints: 0, skipped: true });
+      } else if (config.estimateExperience) {
+        result.estimatedExp = estimateRunExperience(result.completed);
+      }
+      statsCalculator.addRun(result, null);
+      const shouldStop = processRunResults(result, runIndex, statsCalculator, bestRuns);
+      if (!result.skipped) verified.results.push(result);
+      updateStatusCallback(runIndex, runs, statsCalculator, statusCallback, timing, perf);
+      if (shouldStop || verified.count >= runs) verified.stopped = true;
+      return verified.stopped;
+    };
+
     if (fastReady) {
-      activeFastEngine = await finishFastEngine(fastReady, thisAnalysisId);
+      activeFastEngine = await finishFastEngine(fastReady, thisAnalysisId, recordVerifiedRun);
     }
 
     // Run the main analysis loop
     const loopStart = performance.now();
-    const results = await runAnalysisLoop(runs, thisAnalysisId, statsCalculator, bestRuns, timing, statusCallback, perf, activeFastEngine);
+    const results = await runAnalysisLoop(runs, thisAnalysisId, statsCalculator, bestRuns, timing, statusCallback, perf, activeFastEngine, verified);
     perf.loopMs = performance.now() - loopStart;
     
     // Calculate final statistics

@@ -4,6 +4,31 @@
   },
   "notes": [
     {
+      "version": "5.2.11",
+      "changes": [
+        {
+          "mod": "Board Analyzer",
+          "type": "changed",
+          "text": "Fast simulation: the 3 real runs played to verify the engine now count as the first runs of the analysis instead of being discarded. They are left out of the run time stats."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "changed",
+          "text": "On phones, the list column (Creatures, Equipment, Maps, Regions and others) now has a minimum height so the lists show more rows."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "fixed",
+          "text": "Region stats: the maximum rank points were too low for multi-floor maps, so the total could exceed the maximum. Multi-floor maps now use the first floor's team size."
+        },
+        {
+          "mod": "Manual Runner",
+          "type": "fixed",
+          "text": "S+ wins were logged as S. The grade is now taken from the game's own rank grading, so S+ is recognised from the correct rank points."
+        }
+      ]
+    },
+    {
       "version": "5.2.10",
       "changes": [
         {

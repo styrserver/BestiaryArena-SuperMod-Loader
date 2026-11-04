@@ -949,6 +949,16 @@ function getCyclopediaRoomByMapId(mapId) {
 }
 
 /**
+ * Max rank points for a room: (2 * maxTeamSize) - 1. Multi-floor quest rooms (type 'multi') have no top-level
+ * maxTeamSize - it lives per floor in room.floorRules - so use the first floor's limit (rank is always scored on
+ * the first floor). Falls back to 1 when no limit is known.
+ */
+function getCyclopediaRoomMaxRankPoints(roomData) {
+  const maxTeamSize = roomData?.maxTeamSize || roomData?.floorRules?.[0]?.maxTeamSize;
+  return maxTeamSize > 0 ? (2 * maxTeamSize) - 1 : 1;
+}
+
+/**
  * Stamina cost to show for a room: the flat staminaCost of a single-floor room, or - for multi-floor quest rooms
  * (type 'multi'), which have no top-level staminaCost - the cost per floor from room.floorRules, as one number when
  * every floor costs the same and as "min-max" when they differ. `floors` (a Set/array of floor indices, as in a
@@ -7437,6 +7447,8 @@ function setupCyclopediaStackableColumnsLayout({ container, columns, stackThresh
  */
 const PHONE_SHELL_MAX_WIDTH = 560;
 const PHONE_SHELL_LIST_HEIGHT = '40%';
+// Floor for the stacked list column so Creatures/Equipment/Maps/Regions lists stay browsable on short phones.
+const PHONE_SHELL_LIST_MIN_HEIGHT = '260px';
 
 function setupCyclopediaPhoneShellLayout(root, leftCol, rightCol, { listHeight = PHONE_SHELL_LIST_HEIGHT, onPhoneChange } = {}) {
   if (typeof ResizeObserver === 'undefined') return;
@@ -7461,6 +7473,7 @@ function setupCyclopediaPhoneShellLayout(root, leftCol, rightCol, { listHeight =
         minWidth: '0',
         maxWidth: '100%',
         height: listHeight,
+        minHeight: PHONE_SHELL_LIST_MIN_HEIGHT,
         borderRight: 'none',
         borderBottom: '6px solid transparent',
         borderImage: frameBorderImage
@@ -14488,16 +14501,8 @@ function createRegionStatisticsSection(regionId, mapsInRegion, leaderboardData) 
   // Calculate max possible values for non-raid maps
   nonRaidMaps.forEach(map => {
     // Find room data from ROOMS array (ROOMS is an array, not an object)
-    const roomData = getCyclopediaRoomByMapId(map.id);
-    if (roomData && roomData.maxTeamSize) {
-      // Calculate max rank points = (2 * maxTeamSize) - 1 per map
-      const mapMaxRankPoints = (2 * roomData.maxTeamSize) - 1;
-      maxRankPoints += mapMaxRankPoints;
-    } else {
-      // Fallback: if no room data found, assume maxTeamSize of 1
-      maxRankPoints += 1; // (2 * 1) - 1 = 1
-    }
-    
+    maxRankPoints += getCyclopediaRoomMaxRankPoints(getCyclopediaRoomByMapId(map.id));
+
     // Max floor is always 15 per map
     maxFloors += 15;
   });
@@ -14505,16 +14510,8 @@ function createRegionStatisticsSection(regionId, mapsInRegion, leaderboardData) 
   // Calculate max possible values for static raid maps (exclude dynamic events)
   staticRaidMaps.forEach(map => {
     // Find room data from ROOMS array (ROOMS is an array, not an object)
-    const roomData = getCyclopediaRoomByMapId(map.id);
-    if (roomData && roomData.maxTeamSize) {
-      // Calculate max rank points = (2 * maxTeamSize) - 1 per map
-      const mapMaxRankPoints = (2 * roomData.maxTeamSize) - 1;
-      maxRaidRankPoints += mapMaxRankPoints;
-    } else {
-      // Fallback: if no room data found, assume maxTeamSize of 1
-      maxRaidRankPoints += 1; // (2 * 1) - 1 = 1
-    }
-    
+    maxRaidRankPoints += getCyclopediaRoomMaxRankPoints(getCyclopediaRoomByMapId(map.id));
+
     // Max floor is always 15 per map (for raids too)
     maxRaidFloors += 15;
   });

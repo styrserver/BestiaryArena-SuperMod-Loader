@@ -86,9 +86,10 @@ editable number (times in ticks). Like Attack CD, the numbers are saved on the p
 (`actor.combatConstants`, snapshot units) and apply only while the Map Editor test battle runs; leaving
 the test restores the originals.
 
-- `content/ba-combat-chunk.js`: shared parser. `tools/check-creature-combat.mjs` uses the same code, so
-  a drift check that passes means the instrumenter still finds the same constant objects.
-- `content/ba-combat-overrides.js`: MAIN-world script (`world: "MAIN"`, `document_start` in
+- `content/ba-combat.js`, part 1: shared parser. `tools/check-creature-combat.mjs` `require`s the same
+  file, so a drift check that passes means the instrumenter still finds the same constant objects.
+  (Part 2 is a no-op under Node.)
+- `content/ba-combat.js`, part 2: MAIN-world script (`world: "MAIN"`, `document_start` in
   `manifest.json`). Wraps `webpackChunk_N_E.push` and instruments the creature module so each constant
   object registers itself (`self.__baCT`); no value is changed at load. API:
   `window.BestiaryCombatOverrides.applyLive(overrides)` / `restoreLive()` / `isReady()`.
@@ -98,4 +99,4 @@ the test restores the originals.
 - Chrome build only. `manifest_firefox.json` (MV2) has no MAIN-world content scripts, so the panel
   says so and the values are saved but not applied.
 - If a game update changes the module layout, the hook leaves the original module untouched and logs an
-  Error Log entry; run the check tool, fix `ba-combat-chunk.js`, then `--update`.
+  Error Log entry; run the check tool, fix `ba-combat.js`, then `--update`.

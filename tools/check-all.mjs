@@ -23,6 +23,7 @@ const FIXES = {
   'check-database-names.mjs': 'fix the STALE/RENAMED list entries in database/',
   'check-room-scripts.mjs': 'review ROOM_SCRIPT_NOTES, then node tools/check-room-scripts.mjs --update',
   'check-outfits-mounts.mjs': 'node tools/check-outfits-mounts.mjs --update (Outfiter.js snapshot)',
+  'check-patch-notes.mjs': 'add/fix the top entry in docs/patch-notes.json so it matches the manifest version',
   'check-fast-simulation.mjs': 'update getNativeCombat()/createFastRunner() in Board_Analyzer.js, bump FAST_ENGINE_REVISION, re-run'
 };
 const TOOLS = readdirSync(DIR)

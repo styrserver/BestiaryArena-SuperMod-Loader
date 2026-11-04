@@ -935,18 +935,13 @@ function calculateGradeFromRankPoints(rankPoints, maxTeamSize) {
   // Higher rankPoints = lower rankGrade = better grade
   const rankGrade = maxGrade - rankPoints;
   
-  // Special case: When maxTeamSize ≤ 1 and rankPoints >= maxTeamSize, it's S+
-  // This represents exceptional performance in small team size maps
-  if (maxTeamSize <= 1 && rankPoints >= maxTeamSize) {
+  // Wiki (Rank_points): S+ = rankPoints >= maxGrade (rankGrade <= 0), S = maxGrade - 1.
+  // 5v5: S+ = 6+, S = 5. Reached by fielding fewer creatures than the map allows.
+  // maxTeamSize ≤ 1 has maxGrade 0, so any scoring win (rankPoints >= 1) is S+.
+  if (rankPoints > 0 && rankGrade <= 0) {
     return 'S+';
   }
-  
-  // S+ is also achieved with very high rankPoints (typically >= maxTeamSize * 2)
-  // This represents exceptional performance beyond normal S grade
-  if (maxTeamSize > 1 && rankPoints >= maxTeamSize * 2) {
-    return 'S+';
-  }
-  
+
   // Map rankGrade to letter grade (lower rankGrade = better grade)
   // rankGrade 1 = S (as per user's example)
   // rankGrade 2 = A
@@ -954,13 +949,10 @@ function calculateGradeFromRankPoints(rankPoints, maxTeamSize) {
   // rankGrade 4 = C
   // rankGrade 5 = D
   // rankGrade 6 = E
-  // rankGrade <= 0 (rankPoints >= maxGrade) = S (fallback, though S+ would catch most)
+  // rankGrade <= 0 (rankPoints >= maxGrade) = S+ (handled above)
   // rankGrade >= 7 = F
-  
-  if (rankGrade <= 0) {
-    // rankPoints >= maxGrade, should be S (or S+ if already handled above)
-    return 'S';
-  } else if (rankGrade === 1) {
+
+  if (rankGrade <= 1) {
     return 'S';
   } else if (rankGrade === 2) {
     return 'A';
@@ -976,6 +968,60 @@ function calculateGradeFromRankPoints(rankPoints, maxTeamSize) {
     // rankGrade >= 7, which means rankPoints <= maxGrade - 7 (very low)
     return 'F';
   }
+}
+
+// The game's own rank→grade function (exports `tE`), found by source shape like Board_Analyzer's
+// getNativeCombat(). Authoritative: includes S+ rules the wiki formula omits. Scanning every
+// webpack factory is expensive, so the result (including "not found") is cached once.
+let nativeRankGrader; // undefined = not looked up yet, null = unavailable
+function getNativeRankGrader() {
+  if (nativeRankGrader !== undefined) return nativeRankGrader;
+  nativeRankGrader = null;
+  try {
+    const chunks = globalThis.webpackChunk_N_E;
+    if (!chunks?.push) return null;
+    let requireGame;
+    const probe = [[`manual-runner-${Date.now()}-${Math.random()}`], {}, require => { requireGame = require; }];
+    chunks.push(probe);
+    const probeIndex = chunks.indexOf(probe);
+    if (probeIndex !== -1) chunks.splice(probeIndex, 1);
+    if (!requireGame?.m) return null;
+    for (const [id, factory] of Object.entries(requireGame.m)) {
+      const source = Function.prototype.toString.call(factory);
+      if (!(source.includes('aliveCount:') && source.includes('maxTeamSize:') && source.includes('"S+"') && !source.includes('onGameEnd'))) continue;
+      const exports = requireGame(id);
+      if (typeof exports?.tE === 'function') {
+        nativeRankGrader = exports.tE;
+        break;
+      }
+    }
+  } catch (error) {
+    console.warn('[Manual Runner] Native rank grader unavailable, using local formula:', error);
+  }
+  return nativeRankGrader;
+}
+
+/**
+ * Single source of truth for a run's letter grade.
+ * The gameTimer/rewardScreen `grade` can be a tick-speed grade (stale on skip), so a victory's
+ * grade is derived from its rank points: game's `tE` first, local formula if the game build
+ * changed. Reported grade is used only when there are no rank points.
+ */
+function resolveRunGrade({ completed, rankPoints, maxTeamSize, reportedGrade }) {
+  if (!completed) return 'F';
+  if (typeof rankPoints === 'number' && typeof maxTeamSize === 'number') {
+    const native = getNativeRankGrader();
+    if (native) {
+      try {
+        const grade = native({ rank: rankPoints, maxTeamSize });
+        if (typeof grade === 'string' && grade) return grade;
+      } catch (error) {
+        console.warn('[Manual Runner] Native rank grader failed, using local formula:', error);
+      }
+    }
+    return calculateGradeFromRankPoints(rankPoints, maxTeamSize);
+  }
+  return reportedGrade || 'F';
 }
 
 // Get maxTeamSize for current room (optionally from serverResults roomId)
@@ -1812,9 +1858,8 @@ async function waitForGameCompletion(analysisId) {
   const gameTimerContext = globalThis.state.gameTimer.getSnapshot().context;
   const gameState = gameTimerContext.state;
   
-  // Get grade and rank from gameTimer context (authoritative source, like Board Analyzer)
-  // Use gameTimer's readableGrade directly if available and valid (non-empty string)
-  // Empty string means grade not yet available
+  // gameTimer's readableGrade is only a hint (can be a tick-speed grade); the final grade is
+  // derived from rank points in resolveRunGrade().
   let readableGrade = (gameTimerContext.readableGrade && 
                       gameTimerContext.readableGrade !== '' && 
                       gameTimerContext.readableGrade !== null && 
@@ -1854,34 +1899,18 @@ async function waitForGameCompletion(analysisId) {
     if (typeof serverResults.rewardScreen.rank === 'number') {
       rankPoints = serverResults.rewardScreen.rank;
     }
-    
-    // Check if serverResults has grade field
-    if (serverResults.rewardScreen.grade && 
-        serverResults.rewardScreen.grade !== '' && 
-        typeof serverResults.rewardScreen.grade === 'string') {
-      readableGrade = serverResults.rewardScreen.grade;
-    }
-    // Only calculate grade if neither gameTimer nor serverResults provided a valid one
-    else if (!readableGrade || readableGrade === '' || readableGrade === 'F') {
-      // Get maxTeamSize for proper grade calculation (fallback only) - pass serverResults for roomId lookup
-      const maxTeamSize = getMaxTeamSize(serverResults);
-      readableGrade = calculateGradeFromRankPoints(rankPoints, maxTeamSize);
-    }
-  } else {
-    // Only calculate grade if gameTimer didn't provide a valid one (use game's calculation as authoritative)
-    if (!readableGrade || readableGrade === '' || readableGrade === 'F') {
-      const maxTeamSize = getMaxTeamSize(null);
-      readableGrade = calculateGradeFromRankPoints(rankPoints, maxTeamSize);
-    }
   }
 
   if (currentAttemptTrace?.skipped) {
     skippedThisRun = true;
   }
 
-  if (!completed) {
-    readableGrade = 'F';
-  }
+  readableGrade = resolveRunGrade({
+    completed,
+    rankPoints,
+    maxTeamSize: getMaxTeamSize(serverResults),
+    reportedGrade: serverResults?.rewardScreen?.grade || readableGrade
+  });
 
   return {
     ticks: currentTick,
@@ -3472,16 +3501,12 @@ function applyRewardScreenToRunResult(result, serverResults) {
   if (typeof rs.rank === 'number') {
     result.rankPoints = rs.rank;
   }
-  if (isVictory) {
-    if (rs.grade && typeof rs.grade === 'string' && rs.grade !== '') {
-      result.grade = rs.grade;
-    } else if (typeof result.rankPoints === 'number') {
-      const maxTeamSize = getMaxTeamSize(serverResults);
-      result.grade = calculateGradeFromRankPoints(result.rankPoints, maxTeamSize);
-    }
-  } else {
-    result.grade = 'F';
-  }
+  result.grade = resolveRunGrade({
+    completed: isVictory,
+    rankPoints: result.rankPoints,
+    maxTeamSize: getMaxTeamSize(serverResults),
+    reportedGrade: rs.grade || result.grade
+  });
   if (typeof rs.victory === 'boolean') {
     result.completed = rs.victory;
   }

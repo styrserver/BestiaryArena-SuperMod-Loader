@@ -25,7 +25,7 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { recordRun } from './tool-runs.mjs';
 
-const { isCreatureBundle, analyze, parseNameToId } = createRequire(import.meta.url)('../content/ba-combat-chunk.js');
+const { isCreatureBundle, analyze, parseNameToId } = createRequire(import.meta.url)('../content/ba-combat.js');
 
 const ORIGIN = 'https://bestiaryarena.com';
 const DB_PATH = join(dirname(fileURLToPath(import.meta.url)), '..', 'database', 'creature-database.js');
@@ -62,7 +62,7 @@ export function extractCreatureNames(chunks) {
   return names;
 }
 
-/** Snapshot shape of every creature: { [gameId]: { n, ad, c } }. The parsing lives in content/ba-combat-chunk.js. */
+/** Snapshot shape of every creature: { [gameId]: { n, ad, c } }. The parsing lives in content/ba-combat.js. */
 export function extractCombatData(chunks) {
   const entries = analyze(findCreatureBundle(chunks));
   return Object.fromEntries(Object.entries(entries).map(([id, e]) => [id, { n: e.n, ad: e.ad, c: e.c }]));

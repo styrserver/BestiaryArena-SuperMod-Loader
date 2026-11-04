@@ -44,14 +44,14 @@ For full mobile steps, see [Mobile guide](docs/mobile.md#installation-android-fi
 ## Alternative Installation
 
 ### Firefox Installation (Alternative)
-1. Download the extension files from the [https://github.com/styrserver/BestiaryArena-SuperMod-Loader GitHub repository]
+1. Download the extension files from the [GitHub repository](https://github.com/styrserver/BestiaryArena-SuperMod-Loader)
 2. Clone this repository or download it as a ZIP file
 3. Open Firefox and navigate to <code>about:debugging</code>
 4. Click "This Firefox" tab
 5. Click "Load Temporary Add-on" and select the <code>manifest_firefox.json</code> file
 
 ### Chromium Installation (Alternative)
-1. Download the extension files from the [https://github.com/styrserver/BestiaryArena-SuperMod-Loader GitHub repository]
+1. Download the extension files from the [GitHub repository](https://github.com/styrserver/BestiaryArena-SuperMod-Loader)
 2. Unzip the files to a location on your computer
 3. Open your Chrome-based browser (Chrome, Edge, Brave, etc.)
 4. Go to <code>chrome://extensions/</code> in your browser
@@ -196,8 +196,8 @@ Mods have access to the game's state through `globalThis.state`, which provides 
   - `maps-database.js` - Maps reference data
   - `equipment-lua-export.js` - DevTools/console helpers to export equipment wiki Lua (`dumpEquipmentWikiLua()`)
   - `creature-lua-export.js` - DevTools/console helpers to export creature stats wiki Lua (`dumpCreatureWikiLua()`)
-  - `maps-lua-export.js` - DevTools/console helpers to export map wikitext pages (`dumpMapWiki()`)
-  - `regions-lua-export.js` - DevTools/console helpers to export region wikitext pages (`dumpRegionWiki()`)
+  - `maps-lua-export.js` - DevTools/console helpers to export maps wiki Lua (`dumpMapsWikiLua()`)
+  - `regions-lua-export.js` - DevTools/console helpers to export regions wiki Lua (`dumpRegionsWikiLua()`) and region page bodies (`dumpRegionPageBody()`)
   - `playereq-database.js` - Player equipment helpers (slot types, dynamic equipment lists)
   - `firebase-admins.js` - Firebase admin allowlist for privileged mod features
 - `mods/` - Local mod files, organized as follows:
