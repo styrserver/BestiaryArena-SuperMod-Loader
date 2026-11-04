@@ -1,8 +1,43 @@
 {
   "_meta": {
-    "_comment": "From 4.6.0 onward: sort by mod name, then type (added → changed → fixed) within each mod. Older versions: sort by type → mod → text. Keep notes simple and concise. Do not have duplicate mod+type entries — merge them into one. Never include quest spoilers (no NPC names, map/room names, rewards, objectives, or solution hints)."
+    "_comment": "From 4.6.0 onward: sort by mod name, then type (added → changed → fixed) within each mod. Older versions: sort by type → mod → text. Keep notes optimized, simple and concise: player-facing, no implementation detail; when merging, reword shorter instead of appending. Do not have duplicate mod+type entries — merge them into one. Never include quest spoilers (no NPC names, map/room names, rewards, objectives, or solution hints)."
   },
   "notes": [
+    {
+      "version": "5.2.12",
+      "changes": [
+        {
+          "mod": "Autoseller",
+          "type": "fixed",
+          "text": "Fixed a game crash after dusting an equipment drop from the loot screen."
+        },
+        {
+          "mod": "Better Highscores",
+          "type": "fixed",
+          "text": "Tying a world record now keeps the real holder shown, with your score beside it."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "added",
+          "text": "Creature search supports role:name, and clicking a role badge filters by it. All search boxes share one look with a red x and Esc to clear."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "fixed",
+          "text": "Creature stat bars scale to real creature stats at level 99 awakened, and hovering shows value / scale. Faster list search, and searches in different lists no longer cancel each other."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "changed",
+          "text": "Hotkeys: a toast shows when a binding takes another action's key, duplicates are cleaned up, new installs no longer use F5 for a setup slot, Enter, arrows and lock keys can't be bound, and Turbo works during battles. Debugger: Clear All asks for a second click to confirm."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "fixed",
+          "text": "Hotkeys: Shift+Return-to-Map goes to the next map even with the Last Visited Map button off, Tab/PageUp/PageDown keep normal behavior when idle, and the Cyclopedia hotkey no longer clashes with Monstrous Cauldron. Auto-upload of runs retries quietly after its cooldown."
+        }
+      ]
+    },
     {
       "version": "5.2.11",
       "changes": [

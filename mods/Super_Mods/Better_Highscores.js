@@ -2795,8 +2795,13 @@
     const isLegacy = isLegacyHighscore(userScores, wrEntry, config, playerUserId);
 
     if (wrEntry) {
-      const userHoldsWorldRecord = userBeatsOrTiesWorldRecord(userScores, wrEntry, config) && !isLegacy;
       const userTiesWorldRecord = scoresAreEqual(userScores, wrEntry, config);
+      // Tie with someone else's record: keep showing the real holder, add our score beside it.
+      const userTiesOtherHolder = userTiesWorldRecord && !isLegacy &&
+        !isServerWorldRecordHolder(wrEntry, playerUserId) &&
+        !(playerName && wrEntry.userName === playerName);
+      const userHoldsWorldRecord = userBeatsOrTiesWorldRecord(userScores, wrEntry, config) &&
+        !isLegacy && !userTiesOtherHolder;
       const shouldShowUserValue = config.isFloor
         ? (!userHoldsWorldRecord || isLegacy)
         : (userValue !== null && userValue !== undefined && (!userHoldsWorldRecord || isLegacy));
@@ -2805,7 +2810,7 @@
         appendUserScoreEntry(section, config, userScores, { isLegacy, userTiesWorldRecord, userValue });
       }
 
-      const topEntry = isLegacy
+      const topEntry = (isLegacy || userTiesOtherHolder)
         ? wrEntry
         : buildTopDisplayEntry(wrEntry, userScores, config, playerName);
       if (topEntry) {

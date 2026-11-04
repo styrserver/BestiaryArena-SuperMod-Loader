@@ -1,0 +1,39 @@
+# Checks every pull request into main. Local-only checks, no secrets, nothing is published.
+#   - every shipped script parses (node tools/check-syntax.mjs)
+#   - manifests and patch notes are consistent (node tools/check-patch-notes.mjs)
+#   - the PR does not change "version" in a manifest: a version change on main publishes to both stores,
+#     so only the maintainer's release (tools/release.mjs) may do that
+name: PR check
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Syntax of every shipped script
+        run: node tools/check-syntax.mjs
+      - name: Manifests and patch notes agree
+        run: node tools/check-patch-notes.mjs
+      - name: PR must not change the extension version
+        run: |
+          for f in manifest.json manifest_firefox.json; do
+            BASE=$(git show "origin/${{ github.base_ref }}:$f" | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).version")
+            HEAD=$(node -p "require('./$f').version")
+            if [ "$BASE" != "$HEAD" ]; then
+              echo "::error file=$f::version changed ($BASE -> $HEAD). Leave it to the maintainer's release: a version change on main publishes to the stores."
+              exit 1
+            fi
+          done
+          echo "versions unchanged"

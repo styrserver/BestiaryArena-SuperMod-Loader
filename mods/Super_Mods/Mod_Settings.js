@@ -102,10 +102,10 @@ const defaultConfig = {
   hotkeySetupSlot2: 'f2',
   hotkeySetupSlot3: 'f3',
   hotkeySetupSlot4: 'f4',
-  hotkeySetupSlot5: 'f5',
-  hotkeySetupSlot6: 'f6',
-  hotkeySetupSlot7: 'f7',
-  hotkeySetupSlot8: 'f8',
+  hotkeySetupSlot5: 'f6',
+  hotkeySetupSlot6: 'f7',
+  hotkeySetupSlot7: 'f8',
+  hotkeySetupSlot8: 'f9',
   enableHotkeys: false
 };
 
@@ -114,10 +114,13 @@ const STORAGE_KEY = 'better-ui-config';
 
 // Load config from localStorage
 let config;
+// Raw saved JSON (before defaults are merged) so legacy-key migrations can tell "never saved" from "default".
+let rawSavedConfig = {};
 try {
   const savedConfig = localStorage.getItem(STORAGE_KEY);
   if (savedConfig) {
-    config = Object.assign({}, defaultConfig, JSON.parse(savedConfig));
+    rawSavedConfig = JSON.parse(savedConfig) || {};
+    config = Object.assign({}, defaultConfig, rawSavedConfig);
     console.log('[Mod Settings] Config loaded from localStorage:', config);
   } else {
     config = Object.assign({}, defaultConfig);
@@ -131,76 +134,19 @@ window.betterUIConfig = config;
 delete config.enableFavorites;
 delete config.favoriteSymbol;
 delete config.enableAntiIdleSounds;
-config.hotkeyOpenInventory = sanitizeStoredHotkey(config.hotkeyOpenInventory, '');
-if (config.hotkeyOpenQuestLog === undefined) config.hotkeyOpenQuestLog = 'q';
-if (config.hotkeyOpenStore === undefined) config.hotkeyOpenStore = 's';
-if (config.hotkeyOpenTrophyRoom === undefined) config.hotkeyOpenTrophyRoom = 't';
-if (config.hotkeyOpenDaycare === undefined) config.hotkeyOpenDaycare = 'd';
-if (config.hotkeyOpenBestiary === undefined) config.hotkeyOpenBestiary = 'b';
-if (config.hotkeyOpenDrMephistopheles === undefined) config.hotkeyOpenDrMephistopheles = 'e';
-if (config.hotkeyOpenHygenie === undefined) config.hotkeyOpenHygenie = 'h';
-if (config.hotkeyOpenForge === undefined) config.hotkeyOpenForge = 'f';
-if (config.hotkeyOpenMountainFortress === undefined) config.hotkeyOpenMountainFortress = 'm';
-if (config.hotkeyOpenArsenal === undefined) config.hotkeyOpenArsenal = 'a';
-if (config.hotkeyOpenMonstrousCauldron === undefined) config.hotkeyOpenMonstrousCauldron = 'o';
-if (config.hotkeyOpenCyclopedia === undefined) {
-  config.hotkeyOpenCyclopedia = 'c';
-  if (config.hotkeyOpenMonstrousCauldron === 'c') {
-    config.hotkeyOpenMonstrousCauldron = 'o';
-  }
+// Legacy migrations. Defaults are already merged in, so these must look at the raw saved JSON.
+if (rawSavedConfig.hotkeyOpenCyclopedia === undefined && config.hotkeyOpenMonstrousCauldron === 'c') {
+  config.hotkeyOpenMonstrousCauldron = 'o';
 }
-if (config.hotkeyOpenMonsterSqueezer === undefined) config.hotkeyOpenMonsterSqueezer = 'x';
-if (config.hotkeyOpenRunes === undefined) config.hotkeyOpenRunes = 'n';
-if (config.hotkeyOpenDragonPlant === undefined) config.hotkeyOpenDragonPlant = 'l';
-if (config.hotkeyOpenPawAndFurSociety === undefined) config.hotkeyOpenPawAndFurSociety = 'w';
+if (rawSavedConfig.hotkeyOpenBetterTeleporter === undefined && rawSavedConfig.hotkeyOpenRoomHopper !== undefined) {
+  config.hotkeyOpenBetterTeleporter = rawSavedConfig.hotkeyOpenRoomHopper;
+}
 delete config.hotkeyOpenRunesPlantPawDefaultsApplied;
-config.hotkeyOpenQuestLog = sanitizeStoredHotkey(config.hotkeyOpenQuestLog, '');
-config.hotkeyOpenStore = sanitizeStoredHotkey(config.hotkeyOpenStore, '');
-config.hotkeyOpenTrophyRoom = sanitizeStoredHotkey(config.hotkeyOpenTrophyRoom, '');
-config.hotkeyOpenDaycare = sanitizeStoredHotkey(config.hotkeyOpenDaycare, '');
-config.hotkeyOpenBestiary = sanitizeStoredHotkey(config.hotkeyOpenBestiary, '');
-config.hotkeyOpenDrMephistopheles = sanitizeStoredHotkey(config.hotkeyOpenDrMephistopheles, '');
-config.hotkeyOpenForge = sanitizeStoredHotkey(config.hotkeyOpenForge, '');
-config.hotkeyOpenHygenie = sanitizeStoredHotkey(config.hotkeyOpenHygenie, '');
-config.hotkeyOpenMountainFortress = sanitizeStoredHotkey(config.hotkeyOpenMountainFortress, '');
-config.hotkeyOpenArsenal = sanitizeStoredHotkey(config.hotkeyOpenArsenal, '');
-config.hotkeyOpenMonstrousCauldron = sanitizeStoredHotkey(config.hotkeyOpenMonstrousCauldron, '');
-config.hotkeyOpenMonsterSqueezer = sanitizeStoredHotkey(config.hotkeyOpenMonsterSqueezer, '');
-config.hotkeyOpenRunes = sanitizeStoredHotkey(config.hotkeyOpenRunes, '');
-config.hotkeyOpenDragonPlant = sanitizeStoredHotkey(config.hotkeyOpenDragonPlant, '');
-config.hotkeyOpenPawAndFurSociety = sanitizeStoredHotkey(config.hotkeyOpenPawAndFurSociety, '');
-if (config.hotkeyReturnToMap === undefined) config.hotkeyReturnToMap = 'g';
-config.hotkeyReturnToMap = sanitizeStoredHotkey(config.hotkeyReturnToMap, '');
-if (config.hotkeyFloorUp === undefined) config.hotkeyFloorUp = 'pageup';
-if (config.hotkeyFloorDown === undefined) config.hotkeyFloorDown = 'pagedown';
-if (config.hotkeyCycleBestiaryEquipmentTab === undefined) config.hotkeyCycleBestiaryEquipmentTab = 'tab';
-if (config.hotkeyResetCurrentMapDefault === undefined) config.hotkeyResetCurrentMapDefault = 'r';
-if (config.hotkeyCycleBattleStyle === undefined) config.hotkeyCycleBattleStyle = 'v';
-if (config.hotkeyPreviousMap === undefined) config.hotkeyPreviousMap = 'j';
-if (config.hotkeyNextMap === undefined) config.hotkeyNextMap = 'k';
-if (config.hotkeyStartOrSkip === undefined) config.hotkeyStartOrSkip = 'z';
-if (config.hotkeyToggleTurboMode === undefined) config.hotkeyToggleTurboMode = 'y';
-config.hotkeyFloorUp = sanitizeStoredHotkey(config.hotkeyFloorUp, '');
-config.hotkeyFloorDown = sanitizeStoredHotkey(config.hotkeyFloorDown, '');
-config.hotkeyCycleBestiaryEquipmentTab = sanitizeStoredHotkey(config.hotkeyCycleBestiaryEquipmentTab, '');
-config.hotkeyResetCurrentMapDefault = sanitizeStoredHotkey(config.hotkeyResetCurrentMapDefault, '');
-config.hotkeyCycleBattleStyle = sanitizeStoredHotkey(config.hotkeyCycleBattleStyle, '');
-config.hotkeyPreviousMap = sanitizeStoredHotkey(config.hotkeyPreviousMap, '');
-config.hotkeyNextMap = sanitizeStoredHotkey(config.hotkeyNextMap, '');
-config.hotkeyStartOrSkip = sanitizeStoredHotkey(config.hotkeyStartOrSkip, '');
-config.hotkeyToggleTurboMode = sanitizeStoredHotkey(config.hotkeyToggleTurboMode, '');
-if (config.hotkeyOpenBetterTeleporter === undefined) {
-  config.hotkeyOpenBetterTeleporter = config.hotkeyOpenRoomHopper ?? 'p';
-}
-config.hotkeyOpenBetterTeleporter = sanitizeStoredHotkey(config.hotkeyOpenBetterTeleporter, '');
 delete config.hotkeyOpenRoomHopper;
-config.hotkeyOpenCyclopedia = sanitizeStoredHotkey(config.hotkeyOpenCyclopedia, '');
-if (config.hotkeyAutoSetup === undefined) config.hotkeyAutoSetup = 'u';
-config.hotkeyAutoSetup = sanitizeStoredHotkey(config.hotkeyAutoSetup, '');
-for (let setupSlot = 1; setupSlot <= 8; setupSlot++) {
-  const setupKey = `hotkeySetupSlot${setupSlot}`;
-  if (config[setupKey] === undefined) config[setupKey] = `f${setupSlot}`;
-  config[setupKey] = sanitizeStoredHotkey(config[setupKey], '');
+for (const hotkeyConfigKey of Object.keys(defaultConfig)) {
+  if (hotkeyConfigKey.startsWith('hotkey') && hotkeyConfigKey !== 'hotkeySetupSource') {
+    config[hotkeyConfigKey] = sanitizeStoredHotkey(config[hotkeyConfigKey], '');
+  }
 }
 if (config.enableHotkeys === undefined) config.enableHotkeys = false;
 if (config.enableSetupShortcutsAndHover === undefined) config.enableSetupShortcutsAndHover = true;
@@ -955,14 +901,14 @@ const hotkeysState = {
 function normalizeHotkeyIdentifierFromKey(key) {
   if (key == null || key === '') return '';
   if (key === ' ') return 'space';
-  return key.length === 1 ? key.toLowerCase() : key.toLowerCase();
+  return key.toLowerCase();
 }
 
 function sanitizeStoredHotkey(raw, fallback = 'i') {
   if (raw == null || typeof raw !== 'string') return fallback;
   const s = raw.trim();
   if (!s) return fallback;
-  return s.length === 1 ? s.toLowerCase() : s.toLowerCase();
+  return s.toLowerCase();
 }
 
 function isBattleActiveForHotkeys() {
@@ -1004,7 +950,14 @@ function formatHotkeyForDisplay(id, fallbackWhenEmpty = 'i') {
   return map[safe] || (safe.length <= 4 ? safe.toUpperCase() : safe.slice(0, 4).toUpperCase());
 }
 
-const IGNORED_HOTKEY_IDS = new Set(['control', 'shift', 'alt', 'meta', 'os', 'contextmenu', 'dead', 'help']);
+// Keys that can never be bound: modifiers, lock/IME/unidentified keys, and keys the game UI needs
+// for confirming dialogs and moving focus (Enter, arrows). Escape/Delete/Backspace are handled by capture itself.
+const IGNORED_HOTKEY_IDS = new Set([
+  'control', 'shift', 'alt', 'altgraph', 'meta', 'os', 'super', 'hyper', 'contextmenu', 'dead', 'help',
+  'capslock', 'numlock', 'scrolllock', 'fn', 'fnlock', 'pause', 'printscreen',
+  'unidentified', 'process', 'compose',
+  'enter', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'
+]);
 
 function isTypingIntoInput(target) {
   if (!target) return false;
@@ -1544,12 +1497,13 @@ function setBoardFloorFromHotkey(nextFloor) {
   }
 }
 
+/** @returns {boolean} true when the floor actually changed (so the key is consumed). */
 function changeFloorFromHotkey(delta) {
   const currentFloor = getCurrentBoardFloorForHotkey();
-  if (currentFloor === null) return;
+  if (currentFloor === null) return false;
   const boundedFloor = Math.max(0, Math.min(15, currentFloor + delta));
-  if (boundedFloor === currentFloor) return;
-  setBoardFloorFromHotkey(boundedFloor);
+  if (boundedFloor === currentFloor) return false;
+  return setBoardFloorFromHotkey(boundedFloor);
 }
 
 function isInventorySubtabButtonActive(button) {
@@ -1593,13 +1547,14 @@ function findBestiaryEquipmentTabsForCycling() {
   return { bestiaryTab: null, equipmentTab: null };
 }
 
+/** @returns {boolean} true when a tab was switched (so the key is consumed; otherwise Tab keeps normal focus behavior). */
 function cycleBestiaryEquipmentTabFromHotkey() {
   const { bestiaryTab, equipmentTab } = findBestiaryEquipmentTabsForCycling();
   const bestiaryButton = bestiaryTab;
   const equipmentButton = equipmentTab;
   if (!bestiaryButton && !equipmentButton) {
     console.warn('[Mod Settings] Cycle Bestiary/Equipment hotkey: visible Bestiary/Arsenal tab pair not found');
-    return;
+    return false;
   }
   const bestiaryActive = isInventorySubtabButtonActive(bestiaryButton);
   const equipmentActive = isInventorySubtabButtonActive(equipmentButton);
@@ -1607,9 +1562,10 @@ function cycleBestiaryEquipmentTabFromHotkey() {
   const nextButton = activeButton === bestiaryButton ? equipmentButton : bestiaryButton;
   if (!nextButton) {
     console.warn('[Mod Settings] Cycle Bestiary/Equipment hotkey: next tab button missing');
-    return;
+    return false;
   }
   activateTabButtonFromHotkey(nextButton);
+  return true;
 }
 
 function activateTabButtonFromHotkey(button) {
@@ -2421,7 +2377,8 @@ const NAV_HOTKEY_BINDING_KEYS = NAV_HOTKEY_ENTRIES.map((e) => e.configKey);
 const HOTKEY_ALLOWLIST_DURING_BATTLE_KEYS = [
   ...NAV_HOTKEY_BINDING_KEYS,
   'hotkeyCycleBestiaryEquipmentTab',
-  'hotkeyStartOrSkip'
+  'hotkeyStartOrSkip',
+  'hotkeyToggleTurboMode'
 ];
 const NAV_HOTKEY_UI_ROWS = NAV_HOTKEY_ENTRIES.map(({ configKey, captureId, resetId, labelKey, initialDisplay }) => ({
   configKey,
@@ -2537,35 +2494,42 @@ function handleGlobalHotkeys(event) {
   }
   const returnMapId = sanitizeStoredHotkey(config.hotkeyReturnToMap, '');
   if (returnMapId && pressedId === returnMapId) {
+    // Shift+key = next map; it does not depend on the Last Visited Map button.
+    if (event.shiftKey) {
+      event.preventDefault();
+      event.stopPropagation();
+      goToNextMapFromHotkey();
+      return;
+    }
     if (!config.showLastVisitedMapButton) return;
     event.preventDefault();
     event.stopPropagation();
-    if (event.shiftKey) {
-      goToNextMapFromHotkey();
-    } else {
-      triggerReturnToMapFromHotkey();
-    }
+    triggerReturnToMapFromHotkey();
     return;
   }
+  // Floor and tab-cycle keys (PageUp/PageDown/Tab by default) have native meanings: only consume them when they acted.
   const floorUpId = sanitizeStoredHotkey(config.hotkeyFloorUp, '');
   if (floorUpId && pressedId === floorUpId) {
-    event.preventDefault();
-    event.stopPropagation();
-    changeFloorFromHotkey(1);
+    if (changeFloorFromHotkey(1)) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
     return;
   }
   const floorDownId = sanitizeStoredHotkey(config.hotkeyFloorDown, '');
   if (floorDownId && pressedId === floorDownId) {
-    event.preventDefault();
-    event.stopPropagation();
-    changeFloorFromHotkey(-1);
+    if (changeFloorFromHotkey(-1)) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
     return;
   }
   const cycleBestiaryEquipmentId = sanitizeStoredHotkey(config.hotkeyCycleBestiaryEquipmentTab, '');
   if (cycleBestiaryEquipmentId && pressedId === cycleBestiaryEquipmentId) {
-    event.preventDefault();
-    event.stopPropagation();
-    cycleBestiaryEquipmentTabFromHotkey();
+    if (cycleBestiaryEquipmentTabFromHotkey()) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
     return;
   }
   const resetCurrentMapId = sanitizeStoredHotkey(config.hotkeyResetCurrentMapDefault, '');
@@ -2644,6 +2608,7 @@ function handleGlobalHotkeys(event) {
 }
 
 function initHotkeys() {
+  dedupeHotkeyBindings();
   if (hotkeysState.keydownListener) {
     window.removeEventListener('keydown', hotkeysState.keydownListener, true);
   }
@@ -2887,12 +2852,77 @@ function effectiveNavHotkeyBinding(configKey) {
   return sanitizeStoredHotkey(config[configKey], '');
 }
 
-/** Clears the same key from other hotkey rows (nav + mods + setups) so only one row owns it. */
+/** Clears the same key from other hotkey rows (nav + mods + setups) so only one row owns it. Returns the cleared config keys. */
 function clearConflictingNavHotkeys(boundId, exceptConfigKey) {
+  const cleared = [];
+  if (!boundId) return cleared;
   for (const k of ALL_HOTKEY_BINDING_KEYS) {
     if (k === exceptConfigKey) continue;
-    if (effectiveNavHotkeyBinding(k) === boundId) config[k] = '';
+    if (effectiveNavHotkeyBinding(k) === boundId) {
+      config[k] = '';
+      cleared.push(k);
+    }
   }
+  return cleared;
+}
+
+const HOTKEY_ROW_LABEL_KEYS = {
+  hotkeyReturnToMap: 'mods.betterUI.hotkeyLabelReturnToMap',
+  hotkeyToggleTurboMode: 'mods.betterUI.hotkeyLabelToggleTurbo',
+  hotkeyOpenCyclopedia: 'mods.betterUI.hotkeyLabelCyclopedia',
+  hotkeyOpenBetterTeleporter: 'mods.betterUI.hotkeyLabelBetterTeleporter',
+  hotkeyAutoSetup: 'mods.betterUI.hotkeyLabelAutoSetup'
+};
+
+function getHotkeyRowLabelText(configKey) {
+  const row = ALL_HOTKEY_UI_ROWS.find((r) => r.configKey === configKey);
+  const labelKey = row?.labelKey || HOTKEY_ROW_LABEL_KEYS[configKey];
+  if (labelKey) return t(labelKey);
+  const slot = /^hotkeySetupSlot(\d+)$/.exec(configKey);
+  return slot ? `Setup ${slot[1]}` : configKey;
+}
+
+/** Toast telling the player which hotkey rows lost their key to a new binding. */
+function notifyHotkeysMoved(boundId, clearedConfigKeys) {
+  if (!clearedConfigKeys.length) return;
+  try {
+    const key = formatHotkeyForDisplay(boundId, '');
+    for (const k of clearedConfigKeys) {
+      createToast({
+        message: escapeHtmlForToast(
+          tReplace('mods.betterUI.hotkeyMovedFrom', { key, name: getHotkeyRowLabelText(k) })
+        ),
+        type: 'info',
+        duration: 3000
+      });
+    }
+  } catch (error) {
+    console.warn('[Mod Settings] Could not show hotkey moved toast:', error);
+  }
+}
+
+/**
+ * Startup pass: if two rows hold the same key (e.g. a new default colliding with a custom binding),
+ * keep the customised one (else the first) and clear the rest, so dispatch order never decides silently.
+ */
+function dedupeHotkeyBindings() {
+  const owners = new Map();
+  let changed = false;
+  for (const k of ALL_HOTKEY_BINDING_KEYS) {
+    const id = effectiveNavHotkeyBinding(k);
+    if (!id) continue;
+    const prev = owners.get(id);
+    if (prev === undefined) {
+      owners.set(id, k);
+      continue;
+    }
+    const prevIsDefault = effectiveNavHotkeyBinding(prev) === sanitizeStoredHotkey(defaultConfig[prev], '');
+    const loser = prevIsDefault && effectiveNavHotkeyBinding(k) !== sanitizeStoredHotkey(defaultConfig[k], '') ? prev : k;
+    config[loser] = '';
+    if (loser === prev) owners.set(id, k);
+    changed = true;
+  }
+  if (changed) saveConfig();
 }
 
 function clearHotkeyCaptureForcedSize(captureButton) {
@@ -3152,10 +3182,11 @@ function bindHotkeyConfigRowInModal(captureButton, resetButton, configKey, defau
         return;
       }
 
-      clearConflictingNavHotkeys(boundId, configKey);
+      const movedFrom = clearConflictingNavHotkeys(boundId, configKey);
       config[configKey] = boundId;
       saveConfig();
       syncAllNavHotkeyCaptureDisplays();
+      notifyHotkeysMoved(boundId, movedFrom);
     };
 
     const onCapturePointerDown = (pointerEvent) => {
@@ -3179,9 +3210,10 @@ function bindHotkeyConfigRowInModal(captureButton, resetButton, configKey, defau
         hotkeysState.detachHotkeyCapture();
       }
       config[configKey] = defaultKeyForReset;
-      clearConflictingNavHotkeys(defaultKeyForReset, configKey);
+      const movedFrom = clearConflictingNavHotkeys(sanitizeStoredHotkey(defaultKeyForReset, ''), configKey);
       saveConfig();
       syncAllNavHotkeyCaptureDisplays();
+      notifyHotkeysMoved(sanitizeStoredHotkey(defaultKeyForReset, ''), movedFrom);
     });
   }
 }
@@ -3207,6 +3239,8 @@ const perfOverlay = {
   lastSampleTs: 0,
   fps: 0,
   copyBtnResetTimer: null,
+  clearArmed: false, // Clear All asks for a second click (like Hunt Analyzer's) before dropping the data
+  clearArmTimer: null,
   requests: [], // entries inside the last 10s: { perf, ts, method, path, caller, status, ms }
   captures: [], // frozen snapshots taken when the limit is reached (newest last)
   captureArmed: true,
@@ -3292,7 +3326,12 @@ function perfApplyLabels() {
   if (!l) return;
   perfSetText(l.title, perfT('debuggerTitle', 'Debugger'));
   perfSetText(l.details, t('common.details') === 'common.details' ? 'Details' : t('common.details'));
-  perfSetText(l.clearBtn, perfT('debuggerClearAll', 'Clear All'));
+  const armed = perfOverlay.clearArmed;
+  const confirmReset = t('mods.huntAnalyzer.confirmReset');
+  perfSetBtnTone(l.clearBtn, armed ? 'red' : 'gray');
+  perfSetText(l.clearBtn, armed
+    ? (confirmReset === 'mods.huntAnalyzer.confirmReset' ? 'Confirm reset' : confirmReset)
+    : perfT('debuggerClearAll', 'Clear All'));
   l.restoreBtn.title = perfT('debuggerMaximize', 'Maximize');
   l.closeBtn.title = perfT('debuggerCloseTip', 'Turn the debugger off (it can be turned back on in Mod Settings)');
   l.clearBtn.title = perfT('debuggerClearTip', 'Clear the collected data, including what is saved for after a refresh');
@@ -3432,6 +3471,33 @@ function perfRestorePersisted() {
     .filter((f) => f && Number.isFinite(f.ts) && Array.isArray(f.scripts) && nowWall - f.ts < PERF_CPU_WINDOW_MS)
     .slice(-PERF_MAX_LOAF)
     .map((f) => ({ ...f, perf: nowPerf - (nowWall - f.ts) }));
+}
+
+// First click arms the button, a second click within 4s (or none outside it) clears; any other click disarms.
+function perfDisarmClear() {
+  clearTimeout(perfOverlay.clearArmTimer);
+  perfOverlay.clearArmTimer = null;
+  document.removeEventListener('pointerdown', perfClearOutsideHandler, true);
+  if (!perfOverlay.clearArmed) return;
+  perfOverlay.clearArmed = false;
+  if (perfOverlay.ui) perfApplyLabels();
+}
+
+function perfClearOutsideHandler(event) {
+  const btn = perfOverlay.ui && perfOverlay.ui.labels.clearBtn;
+  if (event.target !== btn) perfDisarmClear();
+}
+
+function perfOnClearClick() {
+  if (!perfOverlay.clearArmed) {
+    perfOverlay.clearArmed = true;
+    perfApplyLabels();
+    perfOverlay.clearArmTimer = setTimeout(perfDisarmClear, 4000);
+    document.addEventListener('pointerdown', perfClearOutsideHandler, true);
+    return;
+  }
+  perfDisarmClear();
+  clearPerfData();
 }
 
 // Drops everything collected so far, in memory and in storage (the "Clear" button).
@@ -4286,7 +4352,7 @@ function startPerfOverlay() {
     'overflow:hidden;cursor:default;'; // title row, scrolling rows and totals are children (see renderPerfAdvanced)
   // Two equal-width buttons, like Hunt Analyzer's Clear All / Copy Log row.
   const rowBtnCss = `flex:1 1 0;min-width:0;cursor:pointer;${perfFrameThickness(4)}${PERF_LINE_CSS}`;
-  const clearBtn = perfMakeButton(rowBtnCss, clearPerfData);
+  const clearBtn = perfMakeButton(rowBtnCss, perfOnClearClick);
   const copyBtn = perfMakeButton(rowBtnCss, copyPerfCaptures);
   const footer = perfSection('frame-4 surface-regular', 'display:none;flex:none;gap:8px;margin-top:2px;padding:4px;');
   footer.append(clearBtn, copyBtn); // Clear All first, like Hunt Analyzer's Clear All / Copy Log row
@@ -4328,6 +4394,7 @@ function stopPerfOverlay() {
   }
   clearTimeout(perfOverlay.copyBtnResetTimer);
   perfOverlay.copyBtnResetTimer = null;
+  perfDisarmClear();
   window.removeEventListener('pagehide', perfFlushOnPageHide);
   if (perfPersistDirty) perfPersistNow();
   if (perfOverlay.ui) {
@@ -6687,8 +6754,9 @@ async function uploadBestRuns(options = {}) {
     const minUploadInterval = 3000; // 3 seconds in milliseconds
     
     if (timeSinceLastUpload < minUploadInterval) {
-      const remainingSeconds = ((minUploadInterval - timeSinceLastUpload) / 1000).toFixed(1);
-      return { success: false, error: `Please wait ${remainingSeconds} seconds before uploading again` };
+      const remainingMs = minUploadInterval - timeSinceLastUpload;
+      const remainingSeconds = (remainingMs / 1000).toFixed(1);
+      return { success: false, rateLimited: true, retryInMs: remainingMs, error: `Please wait ${remainingSeconds} seconds before uploading again` };
     }
     
     const playerName = getCurrentPlayerName();
@@ -7300,6 +7368,10 @@ async function runAutoUpload() {
     const result = await uploadBestRuns();
     if (result.success) {
       console.log('[Mod Settings] Auto-upload successful');
+    } else if (result.rateLimited) {
+      // Not a failure: retry once the cooldown has passed.
+      if (autoUploadDebounceTimer) clearTimeout(autoUploadDebounceTimer);
+      autoUploadDebounceTimer = setTimeout(runAutoUpload, Math.max(500, result.retryInMs + 250));
     } else {
       console.error('[Mod Settings] Auto-upload failed:', result.error);
     }

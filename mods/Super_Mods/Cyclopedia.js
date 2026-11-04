@@ -63,7 +63,12 @@ function getCyclopediaListItemBaseName(el) {
   if (labeledSpan?.dataset?.baseLabel) return labeledSpan.dataset.baseLabel;
   const plainSpan = el?.querySelector?.('span');
   const raw = String((plainSpan?.textContent || el?.textContent || '')).trim();
-  return raw.replace(/^\d+%\s+/, '');
+  return stripCyclopediaPercentPrefix(raw);
+}
+
+/** Drops the "12% " prefix that Tier / Usage sort modes add to a list row label. */
+function stripCyclopediaPercentPrefix(label) {
+  return String(label ?? '').trim().replace(/^\d+%\s+/, '');
 }
 
 function injectCyclopediaStyle(styleId, cssText) {
@@ -1098,41 +1103,94 @@ function renderCyclopediaProfileErrorHtml(message, options = {}) {
       </div>`;
 }
 
+/** Trailing-edge debounce. Each returned function owns its timer, so separate debounced handlers never cancel each other. */
 function debounce(func, wait) {
+  let timer = null;
   return function executedFunction(...args) {
-    const later = () => {
-      if (cyclopediaState.searchDebounceTimer) {
-        TimerManager.remove(cyclopediaState.searchDebounceTimer);
-      }
+    TimerManager.remove(timer);
+    timer = setTimeout(() => {
+      TimerManager.remove(timer);
+      timer = null;
       func(...args);
-    };
-    if (cyclopediaState.searchDebounceTimer) {
-      TimerManager.remove(cyclopediaState.searchDebounceTimer);
-    }
-    cyclopediaState.searchDebounceTimer = setTimeout(later, wait);
-    TimerManager.addTimeout(cyclopediaState.searchDebounceTimer, 'searchDebounce');
+    }, wait);
+    TimerManager.addTimeout(timer, 'searchDebounce');
   };
 }
 
+/** Dark strip that holds a search field (and its button / dropdown); shared by every Cyclopedia search. */
+const CYCLOPEDIA_SEARCH_ROW_STYLE = 'display: flex; align-items: center; gap: 4px; padding: 4px 6px; background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 3px; margin: 0; width: 100%; box-sizing: border-box; min-width: 0;';
+/** Button / dropdown that sits next to a search field. */
+const CYCLOPEDIA_SEARCH_CONTROL_STYLE = 'background: rgba(255, 255, 255, 0.1); color: #fff; border: 1px solid rgba(255, 255, 255, 0.2); padding: 3px 8px; border-radius: 2px; font-size: 12px; cursor: pointer; font-family: inherit; outline: none; white-space: nowrap; min-width: 56px; flex-shrink: 0;';
+
+/**
+ * The one Cyclopedia search field (creature / equipment lists, start-page search, player compare):
+ * styled input, a red "x" that clears it (shown only while it has text), and Escape to clear.
+ * Clearing dispatches a normal `input` event, so every consumer's own input handler reacts the same
+ * way as to typing; `onClear` is for extra work only (e.g. resetting a result state).
+ *
+ * @param {object} [opts]
+ * @param {string} [opts.placeholder]
+ * @param {string} [opts.value]
+ * @param {object} [opts.attrs] extra input properties (id, title, autocomplete, spellcheck, ...)
+ * @param {number} [opts.trailingInset] extra right padding (px) for a caller-owned icon next to the "x"
+ * @param {() => void} [opts.onClear]
+ * @returns {{ wrap: HTMLDivElement, input: HTMLInputElement, clearBtn: HTMLButtonElement }}
+ */
+function createCyclopediaSearchInput({ placeholder = '', value = '', attrs = null, trailingInset = 0, onClear = null } = {}) {
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.placeholder = placeholder;
+  input.value = value;
+  if (attrs) Object.assign(input, attrs);
+  input.style.cssText = `background: rgba(255, 255, 255, 0.1); color: #fff; border: 1px solid rgba(255, 255, 255, 0.2); padding: 3px ${22 + trailingInset}px 3px 6px; border-radius: 2px; font-size: 12px; width: 100%; min-width: 0; font-family: inherit; outline: none; box-sizing: border-box;`;
+  input.addEventListener('focus', () => { input.style.borderColor = 'rgba(255, 255, 255, 0.4)'; });
+  input.addEventListener('blur', () => { input.style.borderColor = 'rgba(255, 255, 255, 0.2)'; });
+
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'position: relative; flex: 1 1 0%; min-width: 0; display: flex; align-items: center;';
+
+  const clearBtn = document.createElement('button');
+  clearBtn.type = 'button';
+  clearBtn.textContent = '×';
+  clearBtn.title = 'Clear search';
+  clearBtn.setAttribute('aria-label', 'Clear search');
+  clearBtn.style.cssText = 'position: absolute; right: 2px; top: 50%; transform: translateY(-50%); display: none; width: 18px; height: 18px; padding: 0; line-height: 16px; background: none; border: none; color: #ff6b6b; font-size: 16px; cursor: pointer; font-family: inherit; outline: none;';
+  clearBtn.addEventListener('mouseenter', () => { clearBtn.style.color = '#ff9a9a'; });
+  clearBtn.addEventListener('mouseleave', () => { clearBtn.style.color = '#ff6b6b'; });
+
+  const syncClearBtn = () => { clearBtn.style.display = input.value ? 'block' : 'none'; };
+  const clear = () => {
+    input.value = '';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    onClear?.();
+  };
+  input.addEventListener('input', syncClearBtn);
+  input.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || !input.value) return;
+    e.stopPropagation(); // clearing must not also close the dialog
+    clear();
+  });
+  clearBtn.addEventListener('click', () => {
+    clear();
+    input.focus();
+  });
+  syncClearBtn();
+
+  wrap.appendChild(input);
+  wrap.appendChild(clearBtn);
+  return { wrap, input, clearBtn };
+}
+
+/** List search row: shared search field plus a sort-mode button (Name / Tier / Usage). */
 function createCyclopediaSearchBar(placeholder) {
   const searchContainer = document.createElement('div');
-  searchContainer.style.cssText = 'display: flex; align-items: center; gap: 4px; padding: 4px 6px; background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 3px; margin: 0; width: 100%; margin-left: 0; margin-right: 0; box-sizing: border-box; min-width: 0;';
+  searchContainer.style.cssText = CYCLOPEDIA_SEARCH_ROW_STYLE;
 
-  const searchInput = document.createElement('input');
-  searchInput.type = 'text';
-  searchInput.placeholder = placeholder;
-  searchInput.style.cssText = 'background: rgba(255, 255, 255, 0.1); color: #fff; border: 1px solid rgba(255, 255, 255, 0.2); padding: 3px 6px; border-radius: 2px; font-size: 12px; flex: 1 1 0%; min-width: 0; font-family: inherit; outline: none; box-sizing: border-box;';
-
-  searchInput.addEventListener('focus', () => {
-    searchInput.style.borderColor = 'rgba(255, 255, 255, 0.4)';
-  });
-  searchInput.addEventListener('blur', () => {
-    searchInput.style.borderColor = 'rgba(255, 255, 255, 0.2)';
-  });
+  const { wrap: inputWrap, input: searchInput } = createCyclopediaSearchInput({ placeholder });
 
   const filterBtn = document.createElement('button');
   filterBtn.textContent = 'Name';
-  filterBtn.style.cssText = 'background: rgba(255, 255, 255, 0.1); color: #fff; border: 1px solid rgba(255, 255, 255, 0.2); padding: 3px 8px; border-radius: 2px; font-size: 12px; cursor: pointer; font-family: inherit; outline: none; white-space: nowrap; min-width: 56px; flex-shrink: 0;';
+  filterBtn.style.cssText = CYCLOPEDIA_SEARCH_CONTROL_STYLE;
   filterBtn.addEventListener('mouseenter', () => {
     filterBtn.style.background = 'rgba(255, 255, 255, 0.2)';
     filterBtn.style.borderColor = 'rgba(255, 255, 255, 0.4)';
@@ -1142,7 +1200,7 @@ function createCyclopediaSearchBar(placeholder) {
     filterBtn.style.borderColor = 'rgba(255, 255, 255, 0.2)';
   });
 
-  searchContainer.appendChild(searchInput);
+  searchContainer.appendChild(inputWrap);
   searchContainer.appendChild(filterBtn);
   return { searchContainer, searchInput, filterBtn };
 }
@@ -1159,29 +1217,81 @@ function buildCyclopediaListRowMeta(box, extra) {
     if (!row.dataset.originalOrder) row.dataset.originalOrder = String(idx);
     const span = row.querySelector('span');
     if (span && !span.dataset.baseLabel) {
-      span.dataset.baseLabel = (span.textContent || '').trim().replace(/^d+%s+/, '');
+      span.dataset.baseLabel = stripCyclopediaPercentPrefix(span.textContent);
     }
-    const label = (span?.dataset.baseLabel || span?.textContent || row.textContent || '').trim().replace(/^d+%s+/, '');
-    return { row, idx, span, label, labelNorm: label.toLowerCase(), ...extra(label) };
+    const label = stripCyclopediaPercentPrefix(span?.dataset.baseLabel || span?.textContent || row.textContent);
+    const meta = { row, idx, span, label, labelNorm: label.toLowerCase() };
+    // Copy property descriptors, not values, so `extra` can return lazy getters (see memoizeLazy)
+    // that only run when a sort mode or filter actually reads them.
+    return Object.defineProperties(meta, Object.getOwnPropertyDescriptors(extra(label)));
   });
+}
+
+/** Runs `compute` on first call and returns that result afterwards. */
+function memoizeLazy(compute) {
+  let done = false;
+  let value;
+  return () => {
+    if (!done) {
+      value = compute();
+      done = true;
+    }
+    return value;
+  };
+}
+
+/**
+ * Splits a list-search string into free text and `role:` filters: `role:mage` or `role:"two words"`.
+ * Several `role:` terms must all match (AND). Lowercased; a dangling `role:` (still being typed) is
+ * ignored. Rows only match a role when their meta carries a lowercase `roles` array.
+ */
+function parseCyclopediaSearchQuery(searchTerm) {
+  const roles = [];
+  const text = String(searchTerm || '')
+    .replace(/(^|\s)role:(?:"([^"]+)"|(\S+))/gi, (_, lead, quoted, bare) => {
+      roles.push((quoted ?? bare).trim().toLowerCase());
+      return lead;
+    })
+    .replace(/(^|\s)role:(?=\s|$)/gi, '$1')
+    .trim()
+    .toLowerCase();
+  return { text, roles };
+}
+
+/** Search string that filters a creature list to one role, e.g. `role:Mage` or `role:"Foo Bar"`. */
+function buildRoleSearchQuery(role) {
+  return /\s/.test(role) ? `role:"${role}"` : `role:${role}`;
 }
 
 /**
  * Sorts (`comparator`, or original order when null), relabels (`formatLabel`) and
  * search-filters the rows built by buildCyclopediaListRowMeta. Returns the visible count.
+ *
+ * `orderKey` names the current sort mode: the sort/relabel pass (which re-appends every row) only
+ * runs when it differs from the box's last applied key, so typing only toggles row visibility.
+ * Omit it to force the pass on every call.
  */
-function filterCyclopediaListRows(box, rowMeta, searchTerm, { comparator = null, formatLabel = null } = {}) {
-  const q = (searchTerm || '').toLowerCase();
-  const listGrid = box.querySelector('div[data-nopadding="true"]');
-  if (listGrid) {
-    const order = comparator || ((a, b) => Number(a.row.dataset.originalOrder) - Number(b.row.dataset.originalOrder));
-    rowMeta.slice().sort(order).forEach((m) => listGrid.appendChild(m.row));
+function filterCyclopediaListRows(box, rowMeta, searchTerm, { comparator = null, formatLabel = null, orderKey = null } = {}) {
+  const { text: q, roles: wantedRoles } = parseCyclopediaSearchQuery(searchTerm);
+  if (orderKey == null || box._cyclopediaOrderKey !== orderKey) {
+    const listGrid = box.querySelector('div[data-nopadding="true"]');
+    if (listGrid) {
+      const order = comparator || ((a, b) => Number(a.row.dataset.originalOrder) - Number(b.row.dataset.originalOrder));
+      rowMeta.slice().sort(order).forEach((m) => listGrid.appendChild(m.row));
+    }
+    if (formatLabel) {
+      rowMeta.forEach((meta) => {
+        if (meta.span) meta.span.textContent = formatLabel(meta);
+      });
+    }
+    box._cyclopediaOrderKey = orderKey;
   }
   let visibleCount = 0;
   rowMeta.forEach((meta) => {
-    if (meta.span && formatLabel) meta.span.textContent = formatLabel(meta);
-    const isVisible = !q || meta.labelNorm.includes(q);
-    meta.row.style.display = isVisible ? '' : 'none';
+    const isVisible = (!q || meta.labelNorm.includes(q))
+      && wantedRoles.every((role) => meta.roles?.includes(role));
+    const display = isVisible ? '' : 'none';
+    if (meta.row.style.display !== display) meta.row.style.display = display;
     if (isVisible) visibleCount++;
   });
   return visibleCount;
@@ -1319,7 +1429,7 @@ const cyclopediaState = {
   creatureDetailShowAwakenedAbility: false,
   creatureDetailShowCombat: false,
   combatTimeUnit: 'seconds', // 'seconds' | 'ticks'
-  searchDebounceTimer: null, searchedUsername: null,
+  searchedUsername: null,
   lazyLoadQueue: [], isProcessingQueue: false,
   cache: {
     profileData: new Map(), leaderboardData: new Map(), lastFetch: new Map(), roomThumbnails: new Map(),
@@ -1402,7 +1512,7 @@ const cyclopediaState = {
     this.timers.clear();
     this.observer = null; this.modalOpen = false; this.currentModal = null;
     this.profileData = null; this.lastFetch = 0; this.fetchInProgress = false;
-    this.searchDebounceTimer = null; this.lazyLoadQueue = []; this.isProcessingQueue = false;
+    this.setBestiarySearchQuery = null; this.lazyLoadQueue = []; this.isProcessingQueue = false;
     this.searchedUsername = null;
     this.refreshRankingsTable = null;
     this.refreshLocalRunTables = null;
@@ -8333,6 +8443,63 @@ function renderOwnedCreatureList(ownedMonsters, creatureCanAwaken, onSelect) {
   return root;
 }
 
+const STAT_SCALE_PERCENTILE = 0.95;
+const STAT_SCALE_HEADROOM = 0.5; // +50% on top of the percentile, so even top creatures leave the bar room
+
+const STAT_SCALE_ROUNDING = 10; // scale is rounded to the nearest 10 (1296 -> 1300); fine enough for small stats like AP
+
+// Per-stat bar scale: the 95th-percentile value (+50% headroom, rounded to the nearest 10) among obtainable species at level 99 / gene 20
+// (scaleStat; the awakened preview and the ceiling of any owned copy). Every stat bar uses this one
+// scale. Built lazily, so a not-yet-ready creatureDatabase / state.utils yields null (config
+// fallback) and is retried on the next render.
+let statScaleMaxCache = null;
+
+function getStatScaleMaxes() {
+  if (statScaleMaxCache) return statScaleMaxCache;
+  const db = window.creatureDatabase;
+  const names = db?.ALL_CREATURES;
+  if (!Array.isArray(names) || !names.length || typeof db.findMonsterByName !== 'function') return null;
+  const scaleStat = globalThis.state?.utils?.scaleStat;
+  if (typeof scaleStat !== 'function') return null;
+
+  const valuesByKey = {};
+  let seen = 0;
+  names.forEach((name) => {
+    const stats = db.findMonsterByName(name)?.metadata?.baseStats;
+    if (!stats) return;
+    seen += 1;
+    GAME_DATA.MONSTER_STATS_CONFIG.forEach(({ key }) => {
+      let v = stats[key];
+      if (typeof v !== 'number' || !Number.isFinite(v)) return;
+      if (OWNED_STAT_KEYS.includes(key)) {
+        v = scaleStat({ stat: v, level: 99, geneValue: 20 });
+      }
+      (valuesByKey[key] ||= []).push(v);
+    });
+  });
+  if (!seen) return null;
+
+  // 95th percentile, not the true maximum: object-like entries in the species list (e.g. a
+  // 999-armor snowman) would otherwise squash the bar of every ordinary creature. Values above
+  // the scale still clamp to a full bar and say so in the bar's hover text.
+  const maxes = {};
+  Object.entries(valuesByKey).forEach(([key, values]) => {
+    values.sort((a, b) => a - b);
+    const percentileValue = values[Math.max(0, Math.ceil(values.length * STAT_SCALE_PERCENTILE) - 1)];
+    maxes[key] = Math.round(percentileValue * (1 + STAT_SCALE_HEADROOM) / STAT_SCALE_ROUNDING) * STAT_SCALE_ROUNDING;
+  });
+  statScaleMaxCache = maxes;
+  return maxes;
+}
+
+/** Positive finite max for a stat: derived from live species data, else the config's `max`, else null. */
+function resolveStatBarMax(stat) {
+  const derived = Number(getStatScaleMaxes()?.[stat.key]);
+  if (derived > 0) return derived;
+  const configured = Number(stat.max);
+  return configured > 0 ? configured : null;
+}
+
 function renderMonsterStats(monsterData) {
   try {
     if (!monsterData || typeof monsterData !== 'object') {
@@ -8382,9 +8549,13 @@ function renderMonsterStats(monsterData) {
         }
 
         const value = baseStats[stat.key] !== undefined ? baseStats[stat.key] : 0;
-        const maxValue = stat.max || 100;
-        const percent = Math.max(0, Math.min(1, value / maxValue));
+        const maxValue = resolveStatBarMax(stat);
+        const numericValue = Number(value);
+        const percent = maxValue && Number.isFinite(numericValue)
+          ? Math.max(0, Math.min(1, numericValue / maxValue))
+          : 0;
         const barWidth = Math.round(percent * 100);
+        const exceedsScale = !!maxValue && numericValue > maxValue;
 
         const createStatRow = () => {
           const statRow = document.createElement('div');
@@ -8450,6 +8621,10 @@ function renderMonsterStats(monsterData) {
           const barOuter = document.createElement('div');
           barOuter.className = 'h-1 w-full border border-solid border-black bg-black frame-pressed-1 relative overflow-hidden duration-300 fill-mode-forwards gene-stats-bar-filled';
           barOuter.style.animationDelay = '700ms';
+          if (maxValue) {
+            const scaleText = `${formatCombatNumber(numericValue, 0)} / ${formatCombatNumber(maxValue, 0)}`;
+            barOuter.title = exceedsScale ? `${scaleText} (above the bar scale)` : scaleText;
+          }
 
           const barFillWrap = document.createElement('div');
           barFillWrap.className = 'absolute left-0 top-0 flex h-full w-full';
@@ -9338,6 +9513,23 @@ function renderCreatureTemplate(name, showShinyPortraits = false, showOldSprites
         white-space: nowrap;
         flex: 0 0 auto;
       `;
+      roleBadge.style.cursor = 'pointer';
+      roleBadge.style.transition = 'color 0.1s, background-color 0.1s, filter 0.1s';
+      roleBadge.title = `Show all creatures with the ${role} role`;
+      roleBadge.setAttribute('role', 'button');
+      roleBadge.addEventListener('mouseenter', () => {
+        roleBadge.style.color = '#fff';
+        roleBadge.style.backgroundColor = 'rgba(255, 224, 102, 0.18)';
+        roleBadge.style.filter = 'brightness(1.25)';
+      });
+      roleBadge.addEventListener('mouseleave', () => {
+        roleBadge.style.color = '#ffe066';
+        roleBadge.style.backgroundColor = '';
+        roleBadge.style.filter = '';
+      });
+      roleBadge.addEventListener('click', () => {
+        cyclopediaState.setBestiarySearchQuery?.(buildRoleSearchQuery(role));
+      });
       rolesContainer.appendChild(roleBadge);
       roleBadges.push(roleBadge);
     });
@@ -9929,11 +10121,6 @@ function focusCyclopediaHomeSearchInput() {
   requestAnimationFrame(() => requestAnimationFrame(() => attemptFocus(24)));
 }
 
-const CYCLOPEDIA_HOME_SEARCH_FILTER_CONTROL_CLASS = `${FONT_SMALL_CLASS} bg-grayDark text-whiteHighlight`;
-const CYCLOPEDIA_HOME_SEARCH_FILTER_INPUT_STYLE =
-  'flex: 1; min-width: 0; padding: 4px 8px; border: none; border-radius: 3px; outline: none;';
-const CYCLOPEDIA_HOME_SEARCH_FILTER_SELECT_STYLE =
-  'padding: 4px 8px; border: none; border-radius: 3px; outline: none;';
 /** Fixed column widths (% of table) for start-page search table. */
 const CYCLOPEDIA_HOME_SEARCH_COL_WIDTHS = {
   entry: '40%',
@@ -10609,24 +10796,23 @@ function renderCyclopediaSearchColumn() {
   });
 
   const filterBar = document.createElement('div');
-  filterBar.style.cssText = 'display: flex; flex-wrap: wrap; gap: 8px; align-items: center;';
+  filterBar.style.cssText = CYCLOPEDIA_SEARCH_ROW_STYLE;
 
-  const searchInput = document.createElement('input');
-  searchInput.id = CYCLOPEDIA_HOME_SEARCH_INPUT_ID;
-  searchInput.type = 'text';
-  searchInput.placeholder = CYCLOPEDIA_UI.searchPlaceholder;
-  searchInput.title = CYCLOPEDIA_UI.searchTooltip;
-  searchInput.autocomplete = 'off';
-  searchInput.autocapitalize = 'off';
-  searchInput.spellcheck = false;
-  searchInput.setAttribute('name', `cyclopedia-home-search-${Date.now()}`);
-  searchInput.className = CYCLOPEDIA_HOME_SEARCH_FILTER_CONTROL_CLASS;
-  searchInput.style.cssText = CYCLOPEDIA_HOME_SEARCH_FILTER_INPUT_STYLE;
-  filterBar.appendChild(searchInput);
+  const { wrap: searchInputWrap, input: searchInput } = createCyclopediaSearchInput({
+    placeholder: CYCLOPEDIA_UI.searchPlaceholder,
+    attrs: {
+      id: CYCLOPEDIA_HOME_SEARCH_INPUT_ID,
+      title: CYCLOPEDIA_UI.searchTooltip,
+      autocomplete: 'off',
+      autocapitalize: 'off',
+      spellcheck: false,
+      name: `cyclopedia-home-search-${Date.now()}`
+    }
+  });
+  filterBar.appendChild(searchInputWrap);
 
   const kindSelect = document.createElement('select');
-  kindSelect.className = CYCLOPEDIA_HOME_SEARCH_FILTER_CONTROL_CLASS;
-  kindSelect.style.cssText = CYCLOPEDIA_HOME_SEARCH_FILTER_SELECT_STYLE;
+  kindSelect.style.cssText = CYCLOPEDIA_SEARCH_CONTROL_STYLE;
   CYCLOPEDIA_HOME_SEARCH_TYPE_OPTIONS.forEach(([value, label]) => {
     const opt = document.createElement('option');
     opt.value = value;
@@ -10680,14 +10866,16 @@ function renderCyclopediaSearchColumn() {
   let abilityRefreshToken = 0;
   let pendingNavigateTarget = null;
   let pendingNavigatePollId = null;
+  // Tracked in TimerManager so closing/unloading the modal cancels a pending search.
   let searchDebounceTimer = null;
+  function cancelPendingSearch() {
+    TimerManager.remove(searchDebounceTimer);
+    searchDebounceTimer = null;
+  }
 
   function abortBackgroundWorkForPriorityNavigation() {
     try { abilityRefreshToken++; } catch { /* ignore */ }
-    try {
-      if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
-      searchDebounceTimer = null;
-    } catch { /* ignore */ }
+    cancelPendingSearch();
     try {
       if (CyclopediaHomeSearch?.abortAbilityIndexing) CyclopediaHomeSearch.abortAbilityIndexing();
       if (CyclopediaHomeSearch?.abortEquipmentEffectIndexing) CyclopediaHomeSearch.abortEquipmentEffectIndexing();
@@ -10863,15 +11051,15 @@ function renderCyclopediaSearchColumn() {
   const recompute = () => renderResults(searchInput.value || '');
 
   searchInput.addEventListener('input', () => {
-    if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
-    searchDebounceTimer = setTimeout(recompute, 150);
+    cancelPendingSearch();
+    searchDebounceTimer = setTimeout(() => {
+      cancelPendingSearch();
+      recompute();
+    }, 150);
+    TimerManager.addTimeout(searchDebounceTimer, 'homeSearchDebounce');
   });
   searchInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') {
-      searchInput.value = '';
-      recompute();
-      searchInput.blur();
-    } else if (e.key === 'Enter') {
+    if (e.key === 'Enter') {
       const first = tbody.querySelector('tr[data-home-search-result="true"]');
       if (first) first.click();
     }
@@ -15425,12 +15613,13 @@ function createBestiaryTabPage(selectedCreature, selectedEquipment, selectedInve
     return box;
   };
 
-  const { searchContainer: bestiarySearchContainer, searchInput: bestiarySearchInput, filterBtn: bestiaryFilterBtn } = createCyclopediaSearchBar('Search creatures');
+  const { searchContainer: bestiarySearchContainer, searchInput: bestiarySearchInput, filterBtn: bestiaryFilterBtn } = createCyclopediaSearchBar('Search creatures (or role:mage)');
   let bestiaryFilterMode = 'name';
   const creaturesBox = createCreatureBox('Creatures', getCyclopediaBestiaryCreatures());
   const unobtainableBox = createCreatureBox('Unobtainable', GAME_DATA.UNOBTAINABLE_CREATURES);
 
-  const creatureUsageByMapStats = (() => {
+  // Walks every saved board config, so it runs only when Usage mode first needs it.
+  const getCreatureUsageByMapStats = memoizeLazy(() => {
     const usageMap = new Map();
     let totalMaps = 0;
     try {
@@ -15456,7 +15645,7 @@ function createBestiaryTabPage(selectedCreature, selectedEquipment, selectedInve
       console.warn('[Cyclopedia] Failed building creature usage map:', e);
     }
     return { usageMap, totalMaps };
-  })();
+  });
 
   const getCreatureUsageCountByName = (creatureName) => {
     const normalized = String(creatureName || '').trim().toLowerCase();
@@ -15468,7 +15657,7 @@ function createBestiaryTabPage(selectedCreature, selectedEquipment, selectedInve
       gameId = entry?.monster?.gameId ?? entry?.index;
     }
     if (gameId == null) return 0;
-    return creatureUsageByMapStats.usageMap.get(gameId) || 0;
+    return getCreatureUsageByMapStats().usageMap.get(gameId) || 0;
   };
 
   // Set custom flex values for height proportions: Creatures 60%, Unobtainable 40%
@@ -15504,12 +15693,16 @@ function createBestiaryTabPage(selectedCreature, selectedEquipment, selectedInve
   unobtainableBox.clearAllSelections = clearAllBestiarySelections;
 
   function buildBestiaryRowMeta(box) {
+    // Lazy getters: only Tier / Usage sorting and `role:` filtering read these, so plain name search never pays for them.
     return buildCyclopediaListRowMeta(box, (labelClean) => {
-      const awakenKey = getAwakenTrackerBestiarySortKey(labelClean);
+      const getRoles = memoizeLazy(() => (getCreatureRoles(labelClean) || []).map((role) => String(role).toLowerCase()));
+      const getUsageCount = memoizeLazy(() => getCreatureUsageCountByName(labelClean));
+      const getAwakenKey = memoizeLazy(() => getAwakenTrackerBestiarySortKey(labelClean));
       return {
-        usageCount: getCreatureUsageCountByName(labelClean),
-        genePct: awakenKey.topTierGenePct,
-        awakenKey
+        get roles() { return getRoles(); },
+        get usageCount() { return getUsageCount(); },
+        get awakenKey() { return getAwakenKey(); },
+        get genePct() { return getAwakenKey().topTierGenePct; }
       };
     });
   }
@@ -15556,10 +15749,12 @@ function createBestiaryTabPage(selectedCreature, selectedEquipment, selectedInve
 
   function filterBoxItems(box, searchTerm, mode = 'name', cachedRowMeta = null) {
     return filterCyclopediaListRows(box, cachedRowMeta || buildBestiaryRowMeta(box), searchTerm, {
+      orderKey: mode,
       comparator: mode === 'usage' ? compareBestiaryUsage : mode === 'tier' ? compareBestiaryTier : null,
       formatLabel: (meta) => {
         if (mode === 'usage') {
-          const pct = creatureUsageByMapStats.totalMaps > 0 ? Math.floor((meta.usageCount / creatureUsageByMapStats.totalMaps) * 100) : 0;
+          const { totalMaps } = getCreatureUsageByMapStats();
+          const pct = totalMaps > 0 ? Math.floor((meta.usageCount / totalMaps) * 100) : 0;
           return `${pct}% ${meta.label}`;
         }
         return mode === 'tier' ? `${meta.genePct}% ${meta.label}` : meta.label;
@@ -15583,6 +15778,13 @@ function createBestiaryTabPage(selectedCreature, selectedEquipment, selectedInve
     noResultsUnobtainable.style.display = showNoResults && unobtainableVisible === 0 ? 'block' : 'none';
   }, 150);
   bestiarySearchInput.addEventListener('input', applyBestiarySearch);
+  // Lets a creature's role badge (detail column) fill this search with `role:<name>`.
+  cyclopediaState.setBestiarySearchQuery = (query) => {
+    if (!bestiarySearchInput.isConnected) return false;
+    bestiarySearchInput.value = query;
+    bestiarySearchInput.dispatchEvent(new Event('input', { bubbles: true }));
+    return true;
+  };
   bestiaryFilterBtn.addEventListener('click', () => {
     bestiaryFilterMode = bestiaryFilterMode === 'name' ? 'tier' : bestiaryFilterMode === 'tier' ? 'usage' : 'name';
     bestiaryFilterBtn.textContent = bestiaryFilterMode === 'name' ? 'Name' : bestiaryFilterMode === 'tier' ? 'Tier' : 'Usage';
@@ -16717,27 +16919,31 @@ function createEquipmentTabPage(selectedCreature, selectedEquipment, selectedInv
     equipmentBox.prepend(equipmentSearchContainer);
   }
 
-  const equipmentUsageSnapshot = getEquipmentUsageSnapshot();
+  // Walks every saved board config, so it runs only when Usage mode first needs it.
+  const getEquipmentUsage = memoizeLazy(getEquipmentUsageSnapshot);
 
-  function buildEquipmentRowMeta(box, usageSnapshot) {
-    return buildCyclopediaListRowMeta(box, (label) => ({
-      usageCount: getEquipmentUsageCountByName(label, usageSnapshot)
-    }));
+  function buildEquipmentRowMeta(box) {
+    return buildCyclopediaListRowMeta(box, (label) => {
+      const getUsageCount = memoizeLazy(() => getEquipmentUsageCountByName(label, getEquipmentUsage()));
+      return { get usageCount() { return getUsageCount(); } };
+    });
   }
 
   let equipmentRowMetaCache = null;
 
   function filterEquipmentBoxItems(searchTerm, mode = 'name') {
     if (!equipmentRowMetaCache) {
-      equipmentRowMetaCache = buildEquipmentRowMeta(equipmentBox, equipmentUsageSnapshot);
+      equipmentRowMetaCache = buildEquipmentRowMeta(equipmentBox);
     }
     return filterCyclopediaListRows(equipmentBox, equipmentRowMetaCache, searchTerm, {
+      orderKey: mode,
       comparator: mode === 'usage'
         ? (a, b) => (b.usageCount - a.usageCount) || a.labelNorm.localeCompare(b.labelNorm)
         : null,
       formatLabel: (meta) => {
         if (mode !== 'usage') return meta.label;
-        const pct = equipmentUsageSnapshot.total > 0 ? Math.floor((meta.usageCount / equipmentUsageSnapshot.total) * 100) : 0;
+        const { total } = getEquipmentUsage();
+        const pct = total > 0 ? Math.floor((meta.usageCount / total) * 100) : 0;
         return `${pct}% ${meta.label}`;
       }
     });
@@ -19470,34 +19676,22 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
 
         // Create a container for the search input and status indicator
         const searchInputContainer = DOMUtils.createElement('div');
-        Object.assign(searchInputContainer.style, {
-          position: 'relative',
-          width: '100%',
-          marginBottom: '4px'
-        });
+        searchInputContainer.style.cssText = `${CYCLOPEDIA_SEARCH_ROW_STYLE} margin-bottom: 4px;`;
 
-        const playerSearchInput = DOMUtils.createElement('input');
-        playerSearchInput.type = 'text';
-        playerSearchInput.placeholder = 'Compare with...';
-        playerSearchInput.value = cyclopediaState.searchedUsername || ''; // Persist searched username
-        Object.assign(playerSearchInput.style, {
-          width: '100%',
-          padding: '4px 8px',
-          paddingRight: '24px', // Make room for the status indicator
-          border: '1px solid #444',
-          borderRadius: '2px',
-          backgroundColor: '#232323',
-          color: COLOR_CONSTANTS.TEXT,
-          fontFamily: FONT_CONSTANTS.PRIMARY,
-          fontSize: '11px',
-          boxSizing: 'border-box'
+        // Same field as every other Cyclopedia search; clearing it resets the comparison
+        // (performSearch handles an empty term) and the status icon sits left of the "x".
+        const { wrap: playerSearchWrap, input: playerSearchInput } = createCyclopediaSearchInput({
+          placeholder: 'Compare with...',
+          value: cyclopediaState.searchedUsername || '', // Persist searched username
+          trailingInset: 18,
+          onClear: () => { performSearch(); }
         });
 
         // Create status indicator element
         const statusIndicator = DOMUtils.createElement('div');
         Object.assign(statusIndicator.style, {
           position: 'absolute',
-          right: '6px',
+          right: '24px',
           top: '50%',
           transform: 'translateY(-50%)',
           fontSize: '13px',
@@ -19505,8 +19699,8 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
           display: 'none'
         });
 
-        searchInputContainer.appendChild(playerSearchInput);
-        searchInputContainer.appendChild(statusIndicator);
+        playerSearchWrap.appendChild(statusIndicator);
+        searchInputContainer.appendChild(playerSearchWrap);
         
         // Show status indicator if there's already a searched username
         if (cyclopediaState.searchedUsername) {

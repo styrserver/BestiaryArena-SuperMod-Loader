@@ -17,6 +17,7 @@ Thank you for your interest in contributing to the Bestiary Arena SuperMod Loade
     - [Pull Requests](#pull-requests)
     - [Code Style](#code-style)
   - [Building and Testing](#building-and-testing)
+  - [Releasing](#releasing)
   - [Documentation](#documentation)
   - [Creating Mods](#creating-mods)
     - [Bundled mods that ship with the extension](#bundled-mods-that-ship-with-the-extension)
@@ -40,6 +41,7 @@ If you're new to the project, we recommend starting with:
 ### Prerequisites
 
 - Git
+- Node.js 18 or newer (only for the scripts in `tools/`, such as the drift checks)
 - A Chromium-based browser (Chrome, Edge, Brave, etc.) and/or **Firefox** for loading the unpacked or temporary add-on
 - Text editor or IDE (VS Code recommended)
 
@@ -92,7 +94,7 @@ When submitting a Pull Request:
 1. Reference any related issues
 2. Provide a clear description of the changes
 3. Include screenshots if the changes affect the UI
-4. Manually verify behavior (this repository does not run automated checks on every PR): reload the extension, exercise affected UI, and test with mods on or off when relevant
+4. Run `node tools/check-syntax.mjs` locally (the PR workflow runs it too, and also rejects any change to `version` in the manifests), then manually verify behavior: reload the extension, exercise affected UI, and test with mods on or off when relevant
 5. Keep PRs focused on a single change to facilitate review
 
 ### Code Style
@@ -116,6 +118,14 @@ The extension doesn't require a traditional build process, but you should:
 4. Verify that your changes don't break existing functionality
 5. After changing `manifest.json` or `manifest_firefox.json` permissions, confirm [`README.md`](README.md) and [`privacy_policy.md`](privacy_policy.md) still describe the permission set accurately
 6. If you touch remote mod loading, test Gist import with GitHub optional permissions both granted and denied (popup should prompt on open or import)
+
+## Releasing
+
+Releases are done by the maintainer: `node tools/release.mjs` checks, pushes to GitHub and submits to the Chrome Web
+Store and Firefox AMO. **Contributors: do not change `version` in `manifest.json` or `manifest_firefox.json`.** A
+change to that version on `main` publishes to both stores. Describe player-visible changes in your PR and the
+maintainer adds the [`docs/patch-notes.json`](docs/patch-notes.json) entry. Procedure, setup and gotchas:
+[`docs/release.md`](docs/release.md).
 
 ## Documentation
 

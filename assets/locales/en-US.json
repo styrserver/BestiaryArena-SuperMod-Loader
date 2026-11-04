@@ -638,6 +638,7 @@
       "hotkeyLabelResetCurrentMapDefault": "Reset map",
       "hotkeyLabelAutoSetup": "Auto-setup",
       "hotkeySetupLoaded": "Successfully loaded {name}",
+      "hotkeyMovedFrom": "{key} moved from {name}",
       "hotkeyResetBinding": "Reset",
       "hotkeyCaptureTitle": "Click, then press a key (Del or Backspace clears)",
       "hotkeySetupLabel": "Setup {n}",

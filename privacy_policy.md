@@ -1,6 +1,6 @@
 # Privacy Policy - Bestiary Arena SuperMod Loader
 
-## Last updated: June 12, 2026
+## Last updated: November 4, 2026
 
 This privacy policy describes how Bestiary Arena SuperMod Loader ("we", "our", or "extension") collects, uses, and shares information.
 
@@ -27,7 +27,8 @@ This data is stored locally in your browser using extension storage APIs (includ
 Our extension requires the following permissions:
 
 - **storage** / **unlimitedStorage**: To save your settings and local mod cache.
-- **scripting**: To inject mod code into the Bestiary Arena website.
+- **scripting** (Chrome): To inject mod code into the Bestiary Arena website. Firefox uses its content-script declarations instead.
+- **alarms** (Chrome): To schedule short retry timers, for example to reconnect to a game tab after the browser suspends the extension. No data leaves your device through it.
 - **activeTab**: When you open the extension popup, temporary access to the current tab so toggles and messages reach the open game tab (not broad browsing-history access).
 - **Host access to bestiaryarena.com**: To run mods on the game site and communicate with open Bestiary Arena tabs. Automatic mod loading uses the content script on game pages, not the `tabs` permission.
 
@@ -40,9 +41,10 @@ Our extension requires the following permissions:
 The extension and bundled mods may communicate with the following destinations, depending on what you configure and which mods you use:
 
 - **gist.githubusercontent.com** and **raw.githubusercontent.com** (optional): To download mod sources you add (Gists and raw GitHub file URLs supported by the loader). GitHub handles these requests under [GitHub’s policies](https://docs.github.com/en/site-policy).
+- **api.github.com** (optional): To read the public Gist API for a mod you added (import and update checks). Requests contain the Gist ID, not personal data.
 - **bestiaryarena.com** (and subdomains): Where the game runs and mods are applied. Bundled mods may also call the game’s own **API** endpoints on that host (for example `bestiaryarena.com/api/...`). The game’s operator handles that traffic under their own terms.
 - **bestiary-arena-ranking.vercel.app**: Cyclopedia Rankings API (public leaderboard data).
-- **bestiaryarena.wiki.gg**: Links in the extension UI only; rankings use the Vercel API above.
+- **bestiaryarena.wiki.gg**: Links in the extension UI, and the popup reads the wiki’s public “Scripts” page to list community mods (cached on your device for 6 hours). Rankings use the Vercel API above.
 
 ### Firebase
 

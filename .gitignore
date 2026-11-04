@@ -1,1 +1,6 @@
 dist/
+web-ext-artifacts/
+*.xpi
+.env
+.env.*
+.claude/settings.local.json

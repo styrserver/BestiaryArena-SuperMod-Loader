@@ -1303,6 +1303,15 @@ update. Nothing here is read by a mod yet unless stated.
 | `/seasons` | Season / rank-badge info page ("Awakening system", "Phoenix Evoker", "Challenger") | referenced by `Cyclopedia.js`, `Mod_Settings.js` |
 | `/admin` | Server-gated admin tools (gift codes, create raid, highscore management, test accounts, revenue stats) | only the admin check in `Mod_Settings.js` / `firebase-admins.js`; do not call its endpoints |
 | `/background`, `/iframe`, `/iframe-obs-2`, `/iframe-obs-3`, `/iframe-obs-4`, `/promo-chest`, `/promo-scroll` | embed, stream-overlay and promo pages | none |
+| `/profile/[player]` | Public player profile (the README links to it) | none |
+
+Full page list from the live build manifest (build `G63aArHsrfaeZKknNhxai`, checked 2026-11-04): `/`, `/game`,
+`/profile/[player]`, `/abilities`, `/recolor`, `/seasons`, `/admin`, `/background`, `/iframe`, `/iframe-obs-2`,
+`/iframe-obs-3`, `/iframe-obs-4`, `/promo-chest`, `/promo-scroll` (plus Next.js internals `/_app`, `/_error`; every
+page also exists under the `/pt` locale prefix). No video or movie page exists. `manifest.json` injects content
+scripts only on `/game` and `/pt/game`; `host_permissions` covers the whole site, so the other pages are reachable
+but get no mods. To refresh the list: read `buildId` from the home page HTML, then
+`curl https://bestiaryarena.com/_next/static/<buildId>/_buildManifest.js`.
 
 The only non-tRPC `/api/` route found in the chunks is `/api/player-count`. The full tRPC procedure inventory (170 procedures) and the server-authoritative battle flow are in
 "Game tRPC API" below.

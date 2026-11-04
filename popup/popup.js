@@ -1022,6 +1022,8 @@ async function loadPatchNotes() {
       const data = await response.json();
       // Handle both old array format and new object format with metadata
       PATCH_NOTES = Array.isArray(data) ? data : (data.notes || []);
+      // The in-progress version is opened with no changes yet: show only versions that have notes.
+      PATCH_NOTES = PATCH_NOTES.filter((note) => !Array.isArray(note.changes) || note.changes.length > 0);
       return PATCH_NOTES;
     }
   } catch (error) {

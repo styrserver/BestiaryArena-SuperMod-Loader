@@ -2939,15 +2939,18 @@
             const portraits = root.querySelectorAll('.equipment-portrait');
             if (!portraits || portraits.length === 0) return false;
 
-            const target = portraits[0];
-            const removable =
-                target.closest('button') ||
-                target.closest('.container-slot') ||
-                target.parentElement;
-
-            if (!removable) return false;
-            removable.remove();
-            return true;
+            // Never remove() a React-managed node (crashes React's next commit);
+            // hide it and skip tiles already hidden.
+            for (const target of portraits) {
+                const removable =
+                    target.closest('button') ||
+                    target.closest('.container-slot') ||
+                    target.parentElement;
+                if (!removable || removable.style.display === 'none') continue;
+                removable.style.display = 'none';
+                return true;
+            }
+            return false;
         };
 
         let removed = false;
