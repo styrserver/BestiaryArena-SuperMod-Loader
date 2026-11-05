@@ -102,7 +102,7 @@
 
   /**
    * Every creature's combat numbers from the creature module source:
-   *   { [gameId]: { n: name, ad: attack delay ms | null, c: { SNAPSHOT_KEY: number },
+   *   { [gameId]: { n: name, ad: attack delay ms | null, r?: attack range, rc?: ranged flag, ic?: first-cast delay ms, s?: [{ n, st: baseStats, r?, rc?, ic? }] summons, c: { SNAPSHOT_KEY: number },
    *                 loc: { SNAPSHOT_KEY: { table, rawKey, ms, isTicks } } } }
    * `c` is the shape stored in CREATURE_COMBAT_DATA; `loc` says which constant object (`table`: the
    * source offset of its `{`) and key hold the value, and how the game wrote it (see tableValue).
@@ -157,6 +157,125 @@
       if (id && !out[id]) out[id] = entry; // summons have no id; later duplicates are variants
     });
 
+    // Some numbers are not ability constants: each creature class writes them inline after
+    // `super({...t,...<metadataVar>})`, e.g. `rangeComponent=this.addComponent(new h.e({range:4,rangedCreature:!0,...}))`
+    // and `new g.e({cooldownMilliseconds:..,initialCooldownTicks:(0,o.HX)(5e3)})`. Stored beside `c`, not in it:
+    // there is no constant object to override live. A class with several different literals (a ranged/melee
+    // switch, a computed value) is left out.
+    //   r: attack range   rc: true = ranged creature   ic: first ability cast delay in ms
+    const classes = [...src.matchAll(/class ([\w$]+) extends [\w$.]+\{constructor\(\w*\)\{super\(\{([^}]{0,80})\}/g)]
+      .map((m) => ({ name: m[1], index: m.index, metaVar: [...m[2].matchAll(/\.\.\.([\w$]+)/g)].map((x) => x[1]).find((v) => v !== 't') }));
+    const single = (body, re, read) => {
+      const found = new Set();
+      for (const m of body.matchAll(re)) found.add(read(m));
+      const [only] = found;
+      return found.size === 1 && only != null ? only : undefined;
+    };
+    const classFields = (cls, k, constants) => {
+      const end = Math.min(k + 1 < classes.length ? classes[k + 1].index : src.length, cls.index + 20000);
+      const body = src.slice(cls.index, end);
+      const fields = {};
+      const range = single(body, /rangeComponent=this\.addComponent\(new [\w$.]+\(\{range:(\d+),rangedCreature:!([01])/g, (m) => `${m[1]}:${m[2]}`);
+      if (range) {
+        const [r, flag] = range.split(':');
+        fields.r = Number(r);
+        fields.rc = flag === '0';
+      }
+      // Creatures that already list INITIAL_*COOLDOWN* among their constants keep that single source.
+      if (!Object.keys(constants || {}).some((key) => /INITIAL.*COOLDOWN|COOLDOWN.*INITIAL/.test(key))) {
+        const ic = single(body, /initialCooldownTicks:(?:\(0,[\w$]+\.HX\)\(([\d.e+-]+)\)|(\d+))[,}]/g,
+          (m) => (m[1] ? Number(m[1]) : Number(m[2]) * MS_PER_TICK));
+        if (ic > 0) fields.ic = ic;
+      }
+      return fields;
+    };
+    classes.forEach((cls, k) => {
+      const entry = cls.metaVar && byVar.get(cls.metaVar);
+      if (entry) Object.assign(entry, classFields(cls, k, entry.c));
+    });
+
+    // Summons (no id in the name table: Werefox Statue, Larva, Troll-Trained Salamander ...) belong to the
+    // creature that spawns them. Linked by code: the owner's class contains `new <summonClass>(`; else by
+    // tooltip: it prints the summon's name (any case, plural ok), or reads `<summonMetaVar>.baseStats`; last, by position. Summons with neither link come
+    // back in `unlinkedSummons` so a tool can warn instead of silently dropping them.
+    const unlinkedSummons = [];
+    const summonStats = (from, to) => {
+      const bs = /baseStats:\{([^}]*)\}/.exec(src.slice(from, Math.min(to, from + 1200)))?.[1];
+      if (!bs) return null;
+      const st = {};
+      for (const key of ['hp', 'ad', 'ap', 'armor', 'magicResist', 'speed']) {
+        const v = new RegExp(String.raw`(?:^|,)${key}:(-?[\d.e+-]+)(?=,|$)`).exec(bs)?.[1];
+        if (v != null) st[key] = Number(v);
+      }
+      return Object.keys(st).length ? st : null;
+    };
+    const ownerClassAt = (index) => {
+      for (let i = classes.length - 1; i >= 0; i--) {
+        if (classes[i].index >= index) continue;
+        const e = classes[i].metaVar && byVar.get(classes[i].metaVar);
+        return e && nameToId[e.n] ? i : -1;
+      }
+      return -1;
+    };
+    metas.forEach((m, k) => {
+      if (nameToId[m[1]]) return;
+      const owner = /(?:^|[,;{ ])([A-Za-z_$][\w$]*)=\{$/.exec(src.slice(Math.max(0, m.index - 24), m.index))?.[1];
+      if (!owner || byVar.get(owner)?.n !== m[1]) return;
+      const end = k + 1 < metas.length ? metas[k + 1].index : src.length;
+      const st = summonStats(m.index, end);
+      if (!st) return;
+      const summon = { n: m[1], st };
+      const ci = classes.findIndex((c) => c.metaVar === owner);
+      let ownerEntry;
+      if (ci >= 0) {
+        Object.assign(summon, classFields(classes[ci], ci, null));
+        const esc = classes[ci].name.replace(/\$/g, '\\$');
+        for (const use of src.matchAll(new RegExp(String.raw`new ${esc}\(`, 'g'))) {
+          const oi = ownerClassAt(use.index);
+          if (oi >= 0) { ownerEntry = byVar.get(classes[oi].metaVar); break; }
+        }
+      }
+      if (!ownerEntry) {
+        // Tooltip text names its summons (Ancient Scarab's tooltip prints "Larva" and "Scarab"): if exactly one
+        // creature's tooltip prints this summon's name as a string, that creature owns it.
+        const nameRe = new RegExp(String.raw`\b${m[1].replace(/[^\w ]/g, '.')}s?\b`);
+        // Longer creature names that contain this one ("Ancient Scarab" holds "Scarab") are blanked out first.
+        const longer = Object.keys(nameToId).filter((n) => n !== m[1] && n.includes(m[1]));
+        const prints = (text) => {
+          for (const lit of text.matchAll(/"((?:[^"\\]|\\.)*)"/g)) {
+            if (nameRe.test(longer.reduce((t, n) => t.split(n).join(''), lit[1]))) return true;
+          }
+          return false;
+        };
+        const holdersOf = () => metas.filter((o, j) => nameToId[o[1]]
+          && prints(src.slice(o.index, Math.min(j + 1 < metas.length ? metas[j + 1].index : src.length, o.index + 14000))));
+        const holders = holdersOf();
+        if (holders.length === 1) {
+          const ownerVar = /(?:^|[,;{ ])([A-Za-z_$][\w$]*)=\{$/.exec(src.slice(Math.max(0, holders[0].index - 24), holders[0].index))?.[1];
+          ownerEntry = ownerVar && byVar.get(ownerVar);
+        }
+      }
+      if (!ownerEntry) {
+        const esc = owner.replace(/\$/g, '\\$');
+        const reader = metas.find((o, j) => {
+          const e = byVar.get(/(?:^|[,;{ ])([A-Za-z_$][\w$]*)=\{$/.exec(src.slice(Math.max(0, o.index - 24), o.index))?.[1] ?? '');
+          return e && e.n !== m[1] && nameToId[e.n]
+            && new RegExp(String.raw`(?<![\w$.])${esc}\.baseStats`).test(src.slice(o.index, Math.min(j + 1 < metas.length ? metas[j + 1].index : src.length, o.index + 14000)));
+        });
+        if (reader) ownerEntry = byVar.get(/(?:^|[,;{ ])([A-Za-z_$][\w$]*)=\{$/.exec(src.slice(Math.max(0, reader.index - 24), reader.index))[1]);
+      }
+      if (!ownerEntry) {
+        // Last resort: the game defines a summon's metadata right after its owner's class (`class X..{}} let h8={name:"Statue"`)
+        // when other modules spawn it, so the nearest creature class with no other metadata in between is the owner.
+        const oi = ownerClassAt(m.index);
+        const near = oi >= 0 && m.index - classes[oi].index < 20000
+          && !metas.some((o) => o.index > classes[oi].index && o.index < m.index);
+        if (near) ownerEntry = byVar.get(classes[oi].metaVar);
+      }
+      if (!ownerEntry) { unlinkedSummons.push(m[1]); return; }
+      (ownerEntry.s ||= []).push(summon);
+    });
+
     // Two metadata objects can share a name (the "Old Minotaur Archer" boss reuses "Minotaur Archer"
     // with other numbers), so the first one is not always the playable creature. The registry
     // `34:{constructor:rH,metadata:rX}` says which one the game actually builds for each id.
@@ -165,10 +284,10 @@
       if (entry && nameToId[entry.n] === Number(reg[1])) out[reg[1]] = entry;
     }
 
-    // Event variants are written as `X={...Base,queryTags:[...],skill:{...}}` (Clot = Slime, Reindeer =
+    // Event variants are written as `X={...Base,queryTags:[...],skill:{...}}` (or with a few sprite fields before queryTags) (Clot = Slime, Reindeer =
     // Deer B, ...): they inherit Base's numbers and override whatever their own tooltip reads. The
     // variant's id comes from its own `name:"..."`, else from the first creature name its tooltip prints.
-    const spreads = [...src.matchAll(/(?:^|[,;{ ])([A-Za-z_$][\w$]*)=\{\.\.\.([A-Za-z_$][\w$]*),queryTags:/g)];
+    const spreads = [...src.matchAll(/(?:^|[,;{ ])([A-Za-z_$][\w$]*)=\{\.\.\.([A-Za-z_$][\w$]*),(?:[A-Za-z]+:[\w$.]+,){0,4}queryTags:/g)];
     for (const sp of spreads) {
       const base = byVar.get(sp[2]);
       if (!base) continue;
@@ -182,8 +301,9 @@
       if (!id || out[id]) continue;
       const own = readEntry(from, objEnd);
       out[id] = { n: ownName, ad: own.ad ?? base.ad, c: { ...base.c, ...own.c }, loc: { ...base.loc, ...own.loc } };
+      for (const key of ['r', 'rc', 'ic', 's']) if (base[key] != null) out[id][key] = base[key];
     }
-    return { entries: out, objects };
+    return { entries: out, objects, unlinkedSummons };
   }
 
   /**
@@ -219,7 +339,7 @@
     return { src: next, creatures };
   }
 
-  return { MS_PER_TICK, isCreatureBundle, analyze, instrument, tableValue, parseNameToId };
+  return { MS_PER_TICK, isCreatureBundle, analyze, analyzeFull, instrument, tableValue, parseNameToId };
 });
 
 // ---- Part 2: live overrides (browser MAIN world only; skipped when required from Node) ----

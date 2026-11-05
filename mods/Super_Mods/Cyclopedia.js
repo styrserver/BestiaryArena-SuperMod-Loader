@@ -1240,22 +1240,69 @@ function memoizeLazy(compute) {
   };
 }
 
+/** Plain words a creature search reads as `is:` / `has:` filters. */
+const CYCLOPEDIA_BARE_FLAGS = {
+  event: 'event', events: 'event', unobtainable: 'unobtainable', ranged: 'ranged', melee: 'melee',
+  summon: 'has:summon', summons: 'has:summon', summoner: 'has:summon'
+};
+
+/** Base-stat search keys -> the metadata / snapshot field they read (`hp:>500`, `mr:30-60`, `range:>=4`). */
+const CYCLOPEDIA_STAT_FILTERS = {
+  hp: 'hp', ad: 'ad', ap: 'ap', armor: 'armor', mr: 'magicResist', speed: 'speed', range: 'range'
+};
+
 /**
- * Splits a list-search string into free text and `role:` filters: `role:mage` or `role:"two words"`.
- * Several `role:` terms must all match (AND). Lowercased; a dangling `role:` (still being typed) is
- * ignored. Rows only match a role when their meta carries a lowercase `roles` array.
+ * Splits a list-search string into free text and `key:value` filters, all lowercased and all ANDed:
+ *   role:mage  tag:poison  is:event  has:summon   (value may be quoted: role:"two words")
+ *   hp:500  hp:>500  hp:<=300  hp:200-400   for hp / ad / ap / armor / mr / speed / range
+ * A dangling `key:` (still being typed) is ignored. Rows match a filter only when their meta carries the
+ * matching field (`roles`, `tags`, `flags`, `stats`), so a list without them shows nothing for that filter.
  */
-function parseCyclopediaSearchQuery(searchTerm) {
+function parseCyclopediaSearchQuery(searchTerm, bareFlags = false) {
   const roles = [];
+  const tags = [];
+  const flags = [];
+  const stats = [];
+  const num = String.raw`(\d+(?:\.\d+)?)`;
+  const statKeys = Object.keys(CYCLOPEDIA_STAT_FILTERS).join('|');
+  const statRe = new RegExp(String.raw`(^|\s)(${statKeys}):(>=|<=|>|<|=)?${num}(?:-${num})?(?=\s|$)`, 'gi');
   const text = String(searchTerm || '')
-    .replace(/(^|\s)role:(?:"([^"]+)"|(\S+))/gi, (_, lead, quoted, bare) => {
-      roles.push((quoted ?? bare).trim().toLowerCase());
+    .replace(statRe, (_, lead, key, op, a, b) => {
+      stats.push({ stat: CYCLOPEDIA_STAT_FILTERS[key.toLowerCase()], op: b != null ? '-' : (op || '='), a: Number(a), b: Number(b) });
       return lead;
     })
-    .replace(/(^|\s)role:(?=\s|$)/gi, '$1')
+    .replace(/(^|\s)(role|tag|is|has):(?:"([^"]+)"|(\S+))/gi, (_, lead, key, quoted, bare) => {
+      const value = (quoted ?? bare).trim().toLowerCase();
+      const k = key.toLowerCase();
+      if (k === 'role') roles.push(value);
+      else if (k === 'tag') tags.push(value);
+      else flags.push(k === 'has' ? `has:${value}` : value);
+      return lead;
+    })
+    .replace(new RegExp(String.raw`(^|\s)(?:role|tag|is|has|${statKeys}):(?=\s|$)`, 'gi'), '$1')
     .trim()
     .toLowerCase();
-  return { text, roles };
+  if (!bareFlags) return { text, roles, tags, flags, stats };
+  // Creature lists: a lone keyword word is a flag too, so `event` works like `is:event`.
+  const rest = text.split(/\s+/).filter((word) => {
+    const flag = CYCLOPEDIA_BARE_FLAGS[word];
+    if (flag) flags.push(flag);
+    return word && !flag;
+  });
+  return { text: rest.join(' '), roles, tags, flags, stats };
+}
+
+/** Whether `value` satisfies one parsed stat filter (`=` also accepts the exact number only). */
+function matchesCyclopediaStatFilter(value, { op, a, b }) {
+  if (!Number.isFinite(value)) return false;
+  switch (op) {
+    case '>': return value > a;
+    case '<': return value < a;
+    case '>=': return value >= a;
+    case '<=': return value <= a;
+    case '-': return value >= Math.min(a, b) && value <= Math.max(a, b);
+    default: return value === a;
+  }
 }
 
 /** Search string that filters a creature list to one role, e.g. `role:Mage` or `role:"Foo Bar"`. */
@@ -1271,8 +1318,8 @@ function buildRoleSearchQuery(role) {
  * runs when it differs from the box's last applied key, so typing only toggles row visibility.
  * Omit it to force the pass on every call.
  */
-function filterCyclopediaListRows(box, rowMeta, searchTerm, { comparator = null, formatLabel = null, orderKey = null } = {}) {
-  const { text: q, roles: wantedRoles } = parseCyclopediaSearchQuery(searchTerm);
+function filterCyclopediaListRows(box, rowMeta, searchTerm, { comparator = null, formatLabel = null, orderKey = null, bareFlags = false } = {}) {
+  const { text: q, roles: wantedRoles, tags: wantedTags, flags: wantedFlags, stats: wantedStats } = parseCyclopediaSearchQuery(searchTerm, bareFlags);
   if (orderKey == null || box._cyclopediaOrderKey !== orderKey) {
     const listGrid = box.querySelector('div[data-nopadding="true"]');
     if (listGrid) {
@@ -1289,7 +1336,10 @@ function filterCyclopediaListRows(box, rowMeta, searchTerm, { comparator = null,
   let visibleCount = 0;
   rowMeta.forEach((meta) => {
     const isVisible = (!q || meta.labelNorm.includes(q))
-      && wantedRoles.every((role) => meta.roles?.includes(role));
+      && wantedRoles.every((role) => meta.roles?.includes(role))
+      && wantedTags.every((tag) => meta.tags?.includes(tag))
+      && wantedFlags.every((flag) => meta.flags?.has(flag))
+      && wantedStats.every((filter) => matchesCyclopediaStatFilter(meta.stats?.[filter.stat], filter));
     const display = isVisible ? '' : 'none';
     if (meta.row.style.display !== display) meta.row.style.display = display;
     if (isVisible) visibleCount++;
@@ -2508,8 +2558,8 @@ function applyCreatureListItemStyle(el, status, options = {}) {
   el.style.filter = filter;
 }
 
-// Function to get creature roles from monster data
-function getCreatureRoles(creatureName) {
+// Monster metadata (roles, queryTags, baseStats) for a creature name, or null.
+function getCreatureMetadata(creatureName) {
   try {
     if (typeof creatureName !== 'string') {
       return null;
@@ -2523,27 +2573,52 @@ function getCreatureRoles(creatureName) {
 
     const nameMap = window.creatureDatabase?.getMonsterNameMap?.() || cyclopediaState.monsterNameMap;
     const entry = nameMap?.get?.(lookupName);
-    if (entry?.monster?.metadata?.roles) {
-      return entry.monster.metadata.roles;
+    if (entry?.monster?.metadata) {
+      return entry.monster.metadata;
     }
 
     if (gameId != null) {
       const fromDbById = window.creatureDatabase?.findMonsterByGameId?.(gameId);
-      if (fromDbById?.metadata?.roles) {
-        return fromDbById.metadata.roles;
+      if (fromDbById?.metadata) {
+        return fromDbById.metadata;
       }
     }
 
-    const fromDb = window.creatureDatabase?.findMonsterByName?.(creatureName);
-    if (fromDb?.metadata?.roles) {
-      return fromDb.metadata.roles;
-    }
-
-    return null;
+    return window.creatureDatabase?.findMonsterByName?.(creatureName)?.metadata ?? null;
   } catch (error) {
-    console.warn('[Cyclopedia] Error getting creature roles:', error);
+    console.warn('[Cyclopedia] Error getting creature metadata:', error);
     return null;
   }
+}
+
+// Function to get creature roles from monster data
+function getCreatureRoles(creatureName) {
+  return getCreatureMetadata(creatureName)?.roles ?? null;
+}
+
+/**
+ * Search facts for one creature, read only when a `tag:` / `is:` / `has:` / stat filter needs them:
+ * `tags` (lowercase queryTags), `flags` (Set: event, unobtainable, ranged, melee, has:summon) and `stats`
+ * (base hp / ad / ap / armor / magicResist / speed, plus snapshot `range`).
+ */
+function getCreatureSearchFacts(creatureName) {
+  const metadata = getCreatureMetadata(creatureName);
+  const tags = (metadata?.queryTags || []).map((tag) => String(tag).toLowerCase());
+  const gameId = resolveCreatureGameId(creatureName).gameId;
+  const combat = gameId != null ? window.creatureDatabase?.getCreatureCombatData?.(gameId) : null;
+  const flags = new Set();
+  if (tags.includes('event')) flags.add('event');
+  if (tags.includes('ranged')) flags.add('ranged');
+  else if (metadata) flags.add('melee');
+  if (combat?.summons?.length) flags.add('has:summon');
+  const lower = creatureName.toLowerCase();
+  if (getCyclopediaUnobtainableCreatures().some((name) => name.toLowerCase() === lower)) flags.add('unobtainable');
+  const base = metadata?.baseStats || {};
+  const stats = {
+    hp: base.hp, ad: base.ad, ap: base.ap, armor: base.armor, magicResist: base.magicResist, speed: base.speed,
+    range: combat?.range ?? undefined
+  };
+  return { tags, flags, stats };
 }
 
 // =======================
@@ -8180,6 +8255,18 @@ function hasCreatureCombatData(gameId) {
   return !!creatureDbRef.getCreatureCombatData?.(gameId);
 }
 
+/** Rows of one summon's block in the combat panel: base stats, then range and first cast when the game defines them. */
+function getSummonCombatRows(summon, formatTicks) {
+  const st = summon.st || {};
+  const stat = (label, key) => (Number.isFinite(st[key]) ? [{ label, value: formatCombatNumber(st[key]) }] : []);
+  return [
+    ...stat('HP', 'hp'), ...stat('Attack damage', 'ad'), ...stat('Ability power', 'ap'),
+    ...stat('Armor', 'armor'), ...stat('Magic resist', 'magicResist'), ...stat('Speed', 'speed'),
+    ...(Number.isFinite(summon.r) ? [{ label: 'Range', value: summon.rc == null ? String(summon.r) : `${summon.r} (${summon.rc ? 'ranged' : 'reach'})` }] : []),
+    ...(Number.isFinite(summon.ic) ? [{ label: 'First cast', value: formatTicks(Math.round(0.016 * summon.ic)) }] : [])
+  ];
+}
+
 /**
  * "Combat details" panel shown in place of the stat bars (same 160x160 frame, scrolls): attack
  * delay, then the ability's numbers from the creature-database snapshot grouped into Ability /
@@ -8189,10 +8276,23 @@ function hasCreatureCombatData(gameId) {
 function renderCreatureCombatDetails(gameId, baseStats, onToggleUnit) {
   const abilitySections = creatureDbRef.describeCreatureCombatSections?.(gameId, formatCombatTicks);
   if (!abilitySections) return null;
+  const combat = creatureDbRef.getCreatureCombatData?.(gameId);
+  const range = combat?.range;
+  const initialMs = combat?.initialCooldownMs;
 
   const sections = [
-    ['Basics', [{ label: 'Attack delay', value: formatCombatTicks(getBaseAttackDelayTicks(baseStats)) }]],
-    ...abilitySections
+    ['Basics', [
+      { label: 'Attack delay', value: formatCombatTicks(getBaseAttackDelayTicks(baseStats)) },
+      ...(Number.isFinite(range)
+        ? [{ label: 'Range', value: combat.ranged == null ? String(range) : `${range} (${combat.ranged ? 'ranged' : 'reach'})` }]
+        : []),
+      ...(Number.isFinite(initialMs) ? [{ label: 'First cast', value: formatCombatTicks(Math.round(0.016 * initialMs)) }] : [])
+    ]],
+    ...abilitySections,
+    ...(combat?.summons || []).flatMap((summon) => [
+      [`Summon: ${summon.n}`, getSummonCombatRows(summon, formatCombatTicks)],
+      [`${summon.n} from owner`, creatureDbRef.describeSummonOwnerRows?.(gameId, summon, formatCombatTicks) || []]
+    ])
   ];
 
   const panel = document.createElement('div');
@@ -8701,6 +8801,100 @@ function renderMonsterStats(monsterData) {
  * `hooks.onShinyChange(on)`: called when marking / unmarking an owned copy so the Bestiary tab can
  * switch its shiny button to the marked copy's shiny state (off when nothing is marked).
  */
+/**
+ * The game's per-creature `translate` is tuned for its own layouts, so art sits off-centre in the big
+ * Cyclopedia slot. Measure the visible pixels of the shown frame and shift the sprite so they land on
+ * the slot centre. Retries a few frames until the sprite is laid out; silently keeps native on failure.
+ */
+const cyclopediaSpriteCenterDeltas = new Map();
+
+function cyclopediaSpriteCenterKey(sprite, variant) {
+  const id = /\bid-(\d+)\b/.exec(sprite.className)?.[1];
+  const shiny = sprite.querySelector('img.actor.spritesheet')?.hasAttribute('data-shiny') ? 's' : 'n';
+  const kind = sprite.classList.contains('item') ? 'i' : 'o'; // item and outfit sprite ids overlap
+  return id ? `${kind}${id}|${shiny}|${variant}` : null;
+}
+
+function cyclopediaApplySpriteShift(sprite, dx, dy) {
+  const [tx, ty] = (sprite.style.translate || '0px 0px').split(' ').map(parseFloat);
+  sprite.style.translate = `${(tx || 0) + dx}px ${(ty || 0) + dy}px`;
+}
+
+/**
+ * The game's per-creature `translate` is tuned for its own layouts, so art sits off-centre in the big
+ * Cyclopedia slot. Measure the visible pixels of the shown frame and shift the sprite so they land on
+ * the slot centre. The shift is cached per creature look and applied at once on later renders; the
+ * first render hides the sprite until measured so it never visibly jumps. Keeps native on failure.
+ */
+function cyclopediaCenterOutfitSprite(slot, variant = '', tries = 0) {
+  const MAX_TRIES = 30;
+  const sprite = slot.querySelector('.sprite.outfit, .sprite.item');
+  const reveal = () => { if (sprite) sprite.style.visibility = ''; };
+  const retry = (why) => {
+    // Not checking isConnected: on the first call the slot is built but not attached yet.
+    if (tries < MAX_TRIES) {
+      requestAnimationFrame(() => cyclopediaCenterOutfitSprite(slot, variant, tries + 1));
+    } else {
+      reveal();
+      console.log('[Cyclopedia] sprite centering skipped:', why);
+    }
+  };
+  const viewport = sprite?.querySelector('.viewport');
+  const img = viewport?.querySelector('img.spritesheet'); // outfits add .actor, items do not
+  if (!sprite || !viewport || !img) return retry('no sprite nodes');
+  const key = cyclopediaSpriteCenterKey(sprite, variant);
+  if (tries === 0) {
+    const cached = key && cyclopediaSpriteCenterDeltas.get(key);
+    if (cached) { cyclopediaApplySpriteShift(sprite, cached.dx, cached.dy); return; }
+    sprite.style.visibility = 'hidden';
+  }
+  if (!viewport.getBoundingClientRect().width || !img.getBoundingClientRect().width) return retry('not laid out');
+  const cs = getComputedStyle(img);
+  const m = /url\((["']?)(.*?)\1\)/.exec(cs.content + ' ' + cs.backgroundImage + ' ' + getComputedStyle(viewport).backgroundImage);
+  const src = img.currentSrc || img.getAttribute('src') || m?.[2];
+  if (!src) return retry('no sheet url');
+  const sheet = new Image();
+  sheet.onerror = () => { reveal(); console.log('[Cyclopedia] sprite centering skipped: sheet load failed'); };
+  sheet.onload = () => {
+    try {
+      // Read every rect in this one synchronous block: a layout shift between reads skews the shift.
+      const vp = viewport.getBoundingClientRect();
+      const ir = img.getBoundingClientRect();
+      const sr = slot.getBoundingClientRect();
+      if (!vp.width || !ir.width || !sr.width) return retry('not laid out');
+      const s = ir.width / sheet.naturalWidth; // screen px per sheet px
+      if (!s) return reveal();
+      const sw = Math.round(vp.width / s), sh = Math.round(vp.height / s);
+      const sx = (vp.left - ir.left) / s, sy = (vp.top - ir.top) / s;
+      const c = document.createElement('canvas');
+      c.width = sw; c.height = sh;
+      const ctx = c.getContext('2d', { willReadFrequently: true });
+      ctx.drawImage(sheet, sx, sy, sw, sh, 0, 0, sw, sh);
+      const d = ctx.getImageData(0, 0, sw, sh).data;
+      let x0 = sw, y0 = sh, x1 = -1, y1 = -1;
+      for (let y = 0; y < sh; y++) for (let x = 0; x < sw; x++) {
+        if (d[(y * sw + x) * 4 + 3] > 16) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+      }
+      if (x1 < 0 || !slot.isConnected) return reveal();
+      const dx = sr.left + sr.width / 2 - (vp.left + ((x0 + x1 + 1) / 2) * s);
+      const dy = sr.top + sr.height / 2 - (vp.top + ((y0 + y1 + 1) / 2) * s);
+      cyclopediaApplySpriteShift(sprite, dx, dy);
+      if (key) cyclopediaSpriteCenterDeltas.set(key, { dx, dy });
+      reveal();
+      console.log('[Cyclopedia] sprite centred ' + JSON.stringify({
+        key, dx, dy, bbox: [x0, y0, x1, y1], win: [sw, sh],
+        touchesEdge: x0 === 0 || y0 === 0 || x1 === sw - 1 || y1 === sh - 1,
+        viewport: [vp.width, vp.height], img: [ir.width, ir.height],
+        sheet: [sheet.naturalWidth, sheet.naturalHeight], scale: s
+      }));
+    } catch (e) {
+      reveal();
+      console.log('[Cyclopedia] sprite centering skipped:', e?.message || e);
+    }
+  };
+  sheet.src = src;
+}
+
 function renderCreatureTemplate(name, showShinyPortraits = false, showOldSprites = false, hooks = {}) {
   let monstersArr = null;
   if (
@@ -8891,13 +9085,7 @@ function renderCreatureTemplate(name, showShinyPortraits = false, showOldSprites
           existingShinyIcons.forEach(icon => icon.remove());
         }
       }
-      [monsterSprite.style.width,
-       monsterSprite.style.height,
-       monsterSprite.style.minWidth,
-       monsterSprite.style.minHeight,
-       monsterSprite.style.maxWidth,
-       monsterSprite.style.maxHeight] =
-       ['70px', '70px', '70px', '70px', '70px', '70px'];
+      // Keep the native slot size: the game's per-creature sprite offsets are tuned for it.
       const levelBadge = monsterSprite.querySelector('span.pixel-font-16');
       if (levelBadge) levelBadge.remove();
       const starTierIcon = monsterSprite.querySelector('img[alt="star tier"]');
@@ -8906,36 +9094,30 @@ function renderCreatureTemplate(name, showShinyPortraits = false, showOldSprites
       // Wrap portrait to allow overlays (e.g., shiny star)
       const portraitWrap = document.createElement('div');
       portraitWrap.style.position = 'relative';
-      portraitWrap.style.width = '110px';
-      portraitWrap.style.height = '110px';
-      portraitWrap.style.display = 'inline-block';
+      portraitWrap.style.width = '72px';
+      portraitWrap.style.height = '72px';
+      portraitWrap.style.display = 'inline-flex';
+      portraitWrap.style.alignItems = 'center';
+      portraitWrap.style.justifyContent = 'center';
       portraitWrap.appendChild(monsterSprite);
-      
-      
+      // The slot is a fixed 72x72 block here, so its 48px sprite box hugs the top. Centre it.
+      const portraitSlot = monsterSprite.matches('.container-slot')
+        ? monsterSprite
+        : monsterSprite.querySelector('.container-slot');
+      if (portraitSlot && monster?.metadata?.lookType !== 'item') {
+        portraitSlot.style.display = 'flex';
+        portraitSlot.style.alignItems = 'center';
+        portraitSlot.style.justifyContent = 'center';
+        cyclopediaCenterOutfitSprite(portraitSlot, showOldSprites ? 'old' : 'new');
+      } else if (monster?.metadata?.lookType === 'item') {
+        // Item-look creatures (statues, crates, barrels) sit off-centre in their 70px portrait the same way.
+        const itemSlot = monsterSprite.matches('.equipment-portrait')
+          ? monsterSprite
+          : monsterSprite.querySelector('.equipment-portrait');
+        if (itemSlot) cyclopediaCenterOutfitSprite(itemSlot, 'item');
+      }
       col1Picture.appendChild(portraitWrap);
       col1PortraitWrap = portraitWrap;
-      const allDivs = Array.from(monsterSprite.querySelectorAll('div'));
-      let firstFixedDiv = null;
-      allDivs.forEach((div, idx) => {
-        const style = div.getAttribute('style') || '';
-        if (style.includes('max-width: 34px') || style.includes('max-height: 34px')) {
-          div.style.width = '110px';
-          div.style.height = '110px';
-          div.style.maxWidth = '110px';
-          div.style.maxHeight = '110px';
-          if (!firstFixedDiv) firstFixedDiv = div;
-        }
-      });
-      if (firstFixedDiv) {
-        let parent = firstFixedDiv.parentElement;
-        let step = 0;
-        while (parent && step < 3) {
-          parent.style.width = '110px';
-          parent.style.maxWidth = '110px';
-          parent = parent.parentElement;
-          step++;
-        }
-      }
     } else {
       col1Picture.textContent = 'Picture Placeholder';
     }
@@ -11158,12 +11340,25 @@ function countUniqueEventShinyCreatureGameIds(monsters) {
 
 const CYCLOPEDIA_MAX_VALUES = CYCLOPEDIA_SETTINGS.playerStatCaps;
 
+/** Completed-raids max, same formula as the native /profile page: raid rooms with the ladder enabled. */
+function getStaticRaidsMaxFromDatabase() {
+  const count = (globalThis.state?.utils?.ROOMS ?? []).filter((r) => r.raid && !r.ladderDisabled).length;
+  return count > 0 ? count : CYCLOPEDIA_MAX_VALUES.raids;
+}
+
+/** Explored-maps max, same formula as the native /profile page: ladder-enabled rooms that are not raids. */
+function getExploredMapsMaxFromDatabase() {
+  const rooms = globalThis.state?.utils?.ROOMS ?? [];
+  const count = rooms.filter((r) => !r.ladderDisabled && !r.raid).length;
+  return count > 0 ? count : CYCLOPEDIA_MAX_VALUES.exploredMaps;
+}
+
 const CYCLOPEDIA_PROGRESS_STATS = [
   { key: 'perfectCreatures', icon: '/assets/icons/enemy.png', max: getObtainableCreatureCountFromDatabase },
   { key: 'shinyCreatures', icon: CYCLOPEDIA_ASSETS.shinyStar, max: getObtainableCreatureCountFromDatabase },
   { key: 'bisEquipments', icon: '/assets/icons/equips.png', max: getBisEquipmentMaxFromDatabase },
-  { key: 'raids', icon: '/assets/icons/raid.png', max: CYCLOPEDIA_MAX_VALUES.raids },
-  { key: 'exploredMaps', icon: '/assets/icons/map.png', max: CYCLOPEDIA_MAX_VALUES.exploredMaps },
+  { key: 'raids', icon: '/assets/icons/raid.png', max: getStaticRaidsMaxFromDatabase },
+  { key: 'exploredMaps', icon: '/assets/icons/map.png', max: getExploredMapsMaxFromDatabase },
   { key: 'bagOutfits', icon: '/assets/icons/mini-outfitbag.png', max: CYCLOPEDIA_MAX_VALUES.bagOutfits }
 ];
 
@@ -15613,7 +15808,15 @@ function createBestiaryTabPage(selectedCreature, selectedEquipment, selectedInve
     return box;
   };
 
-  const { searchContainer: bestiarySearchContainer, searchInput: bestiarySearchInput, filterBtn: bestiaryFilterBtn } = createCyclopediaSearchBar('Search creatures (or role:mage)');
+  const { searchContainer: bestiarySearchContainer, searchInput: bestiarySearchInput, filterBtn: bestiaryFilterBtn } = createCyclopediaSearchBar('Search...');
+  bestiarySearchInput.title = [
+    'Filters (combine freely):',
+    'event  unobtainable  ranged  melee  summon',
+    'role:mage  tag:poison  is:event  is:unobtainable',
+    'is:ranged  is:melee  has:summon',
+    'hp:>500  ad:30-60  mr:<=20  range:>=4',
+    '(also ap, armor, speed; base stats)'
+  ].join(String.fromCharCode(10));
   let bestiaryFilterMode = 'name';
   const creaturesBox = createCreatureBox('Creatures', getCyclopediaBestiaryCreatures());
   const unobtainableBox = createCreatureBox('Unobtainable', GAME_DATA.UNOBTAINABLE_CREATURES);
@@ -15698,8 +15901,12 @@ function createBestiaryTabPage(selectedCreature, selectedEquipment, selectedInve
       const getRoles = memoizeLazy(() => (getCreatureRoles(labelClean) || []).map((role) => String(role).toLowerCase()));
       const getUsageCount = memoizeLazy(() => getCreatureUsageCountByName(labelClean));
       const getAwakenKey = memoizeLazy(() => getAwakenTrackerBestiarySortKey(labelClean));
+      const getFacts = memoizeLazy(() => getCreatureSearchFacts(labelClean));
       return {
         get roles() { return getRoles(); },
+        get tags() { return getFacts().tags; },
+        get flags() { return getFacts().flags; },
+        get stats() { return getFacts().stats; },
         get usageCount() { return getUsageCount(); },
         get awakenKey() { return getAwakenKey(); },
         get genePct() { return getAwakenKey().topTierGenePct; }
@@ -15750,6 +15957,7 @@ function createBestiaryTabPage(selectedCreature, selectedEquipment, selectedInve
   function filterBoxItems(box, searchTerm, mode = 'name', cachedRowMeta = null) {
     return filterCyclopediaListRows(box, cachedRowMeta || buildBestiaryRowMeta(box), searchTerm, {
       orderKey: mode,
+      bareFlags: true,
       comparator: mode === 'usage' ? compareBestiaryUsage : mode === 'tier' ? compareBestiaryTier : null,
       formatLabel: (meta) => {
         if (mode === 'usage') {
@@ -18425,7 +18633,7 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
         tooltip.innerHTML = `
           <div class="${FONT_CONSTANTS.SIZES.TITLE}" style="margin-bottom: 8px; color: ${COLOR_CONSTANTS.PRIMARY};">📊 Data Source</div>
           <div style="margin-bottom: 6px;">Rankings fetched from <a href="https://bestiary-arena-ranking.vercel.app/api/v1/rankings" target="_blank" style="color: #ffe066; text-decoration: underline;">Bestiary Arena Rankings API</a></div>
-          <div style="margin-bottom: 6px; font-size: 10px; color: ${COLOR_CONSTANTS.SOFT};">${getCyclopediaRankingsSectionLabel(activeSeason)} — qualified players (≥${CYCLOPEDIA_SETTINGS.playerStatCaps.exploredMaps} maps), sorted by ${rankingsState.sort} (${rankingsState.order})</div>
+          <div style="margin-bottom: 6px; font-size: 10px; color: ${COLOR_CONSTANTS.SOFT};">${getCyclopediaRankingsSectionLabel(activeSeason)} — qualified players (≥${getExploredMapsMaxFromDatabase()} maps), sorted by ${rankingsState.sort} (${rankingsState.order})</div>
           <div style="font-size: 10px; color: #888;">${formattedTimestamp ? `Updated: ${formattedTimestamp}` : 'No timestamp available'}</div>
         `;
       }

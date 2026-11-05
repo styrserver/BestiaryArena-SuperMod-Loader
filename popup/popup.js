@@ -891,6 +891,18 @@ async function formatErrorLogEnvironmentHeader() {
     // keep default
   }
 
+  let modsLine = 'unavailable';
+  try {
+    const response = await window.browserAPI.runtime.sendMessage({ action: 'getLocalMods' });
+    if (response?.success && Array.isArray(response.mods)) {
+      const toggleable = response.mods.filter((m) => !isHiddenMod(m));
+      const enabled = toggleable.filter((m) => m.enabled).map((m) => m.name.split('/').pop().replace(/\.js$/, ''));
+      modsLine = `${enabled.length}/${toggleable.length}${enabled.length ? ` — ${enabled.join(', ')}` : ''}`;
+    }
+  } catch {
+    // keep default
+  }
+
   const lines = [
     '--- Device / Browser ---',
     `Extension: v${extVersion}`,
@@ -901,6 +913,7 @@ async function formatErrorLogEnvironmentHeader() {
     `URL: ${info.url}`,
     `User-Agent: ${info.userAgent}`,
     `Captured: ${new Date().toISOString()}`,
+    `Enabled mods: ${modsLine}`,
     '---'
   ];
   return lines.join('\n');
@@ -1427,6 +1440,12 @@ function normalizeModName(name) {
   return name.replace(/\s+/g, '').toLowerCase();
 }
 
+// Mods the popup never lists (no toggle), e.g. database/* and welcome.js.
+function isHiddenMod(mod) {
+  const modFileName = mod.name.split('/').pop();
+  return hiddenMods.some((hidden) => normalizeModName(hidden) === normalizeModName(modFileName));
+}
+
 function getModCategory(mod) {
   const modFileName = mod.name.split('/').pop();
   if (mod.type === 'manual') return 'custom';
@@ -1735,12 +1754,7 @@ async function renderLocalMods(mods) {
   }
 
   // Filter out hidden mods
-  const visibleMods = mods.filter(mod => {
-    const modFileName = mod.name.split('/').pop();
-    return !hiddenMods.some(hidden => 
-      normalizeModName(hidden) === normalizeModName(modFileName)
-    );
-  });
+  const visibleMods = mods.filter(mod => !isHiddenMod(mod));
 
   // Store all mods for filtering
   allMods = visibleMods;

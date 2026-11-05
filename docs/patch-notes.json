@@ -4,6 +4,61 @@
   },
   "notes": [
     {
+      "version": "5.3.0",
+      "changes": [
+        {
+          "mod": "Autoseller",
+          "type": "changed",
+          "text": "Autoplant now clicks the Dragon Plant at most once every 2 seconds."
+        },
+        {
+          "mod": "Autoseller",
+          "type": "fixed",
+          "text": "Selling, squeezing and dusting now keep working in Power saving mode, with far fewer server requests so rate limits no longer stop autoplay. When Autoplant skips a creature, the reason shows in the Error Log."
+        },
+        {
+          "mod": "Bestiary Automator",
+          "type": "fixed",
+          "text": "Faster Autoplay now also speeds up Power saving mode, which added a fixed 2 s wait after every battle."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "added",
+          "text": "Combat details now show attack range, first-cast delay and summons, and include Football Elemental. Creature search adds filters like event, ranged, has:summon, tag:poison and hp:>500."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "changed",
+          "text": "Explored maps and completed raids totals now follow the game's map list instead of fixed numbers."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "fixed",
+          "text": "The large creature picture is now centered in its frame, including object-type creatures."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "fixed",
+          "text": "The Quest Log now keeps the current creature art when Old Outfits is on."
+        },
+        {
+          "mod": "Outfiter",
+          "type": "added",
+          "text": "Mount picker tooltips now show the mount's animal family."
+        },
+        {
+          "mod": "Manual Runner",
+          "type": "changed",
+          "text": "Run and result windows now use icons, with injects, sold gold and squeezed dust in one row; injects only show on floors 11-15."
+        },
+        {
+          "mod": "Popup",
+          "type": "changed",
+          "text": "Copied Error Log now lists your enabled mods."
+        }
+      ]
+    },
+    {
       "version": "5.2.12",
       "changes": [
         {
@@ -34,7 +89,7 @@
         {
           "mod": "Mod Settings",
           "type": "fixed",
-          "text": "Hotkeys: Shift+Return-to-Map goes to the next map even with the Last Visited Map button off, Tab/PageUp/PageDown keep normal behavior when idle, and the Cyclopedia hotkey no longer clashes with Monstrous Cauldron. Auto-upload of runs retries quietly after its cooldown."
+          "text": "Hotkeys: Shift+Return-to-Map goes to the next map even with the Last Visited Map button off, Tab/PageUp/PageDown keep normal behavior when idle, and the Cyclopedia hotkey no longer clashes with Monstrous Cauldron. Auto-upload of runs retries quietly after its cooldown. Old Sprites no longer changes creatures in the Quest Log."
         }
       ]
     },

@@ -14,7 +14,7 @@
  *   node tools/package.mjs
  */
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync, existsSync } from 'node:fs';
 import { dirname, join, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { deflateRawSync } from 'node:zlib';
@@ -115,6 +115,7 @@ function buildZip(entries) {
   return Buffer.concat([...locals, centralBuf, end]);
 }
 
+rmSync(DIST, { recursive: true, force: true }); // drop zips from older versions
 mkdirSync(DIST, { recursive: true });
 let failed = false;
 for (const target of [

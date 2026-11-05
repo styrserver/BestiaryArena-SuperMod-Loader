@@ -25,10 +25,12 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { recordRun } from './tool-runs.mjs';
 
-const { isCreatureBundle, analyze, parseNameToId } = createRequire(import.meta.url)('../content/ba-combat.js');
+const { isCreatureBundle, analyze, analyzeFull, parseNameToId } = createRequire(import.meta.url)('../content/ba-combat.js');
 
 const ORIGIN = 'https://bestiaryarena.com';
 const DB_PATH = join(dirname(fileURLToPath(import.meta.url)), '..', 'database', 'creature-database.js');
+/** Snapshot fields read from the creature class, not from constants: range, ranged flag, first-cast delay (ms). */
+const OPTIONAL_FIELDS = ['r', 'rc', 'ic', 's'];
 const DATA_BLOCK = /(\/\/ BEGIN CREATURE_COMBAT_DATA\r?\n)[\s\S]*?(\/\/ END CREATURE_COMBAT_DATA)/;
 
 async function fetchText(url) {
@@ -62,10 +64,15 @@ export function extractCreatureNames(chunks) {
   return names;
 }
 
-/** Snapshot shape of every creature: { [gameId]: { n, ad, c } }. The parsing lives in content/ba-combat.js. */
+/** Summons the parser found but could not tie to an owner creature (not in the snapshot). */
+export function findUnlinkedSummons(chunks) {
+  return analyzeFull(findCreatureBundle(chunks)).unlinkedSummons;
+}
+
+/** Snapshot shape of every creature: { [gameId]: { n, ad, c, r?, rc?, ic? } } (class-level range, ranged flag, first-cast delay). The parsing lives in content/ba-combat.js. */
 export function extractCombatData(chunks) {
   const entries = analyze(findCreatureBundle(chunks));
-  return Object.fromEntries(Object.entries(entries).map(([id, e]) => [id, { n: e.n, ad: e.ad, c: e.c }]));
+  return Object.fromEntries(Object.entries(entries).map(([id, e]) => [id, { n: e.n, ad: e.ad, c: e.c, ...Object.fromEntries(OPTIONAL_FIELDS.filter((k) => e[k] != null).map((k) => [k, e[k]])) }]));
 }
 
 function readSnapshot() {
@@ -89,6 +96,11 @@ function diff(game, snap) {
       const changed = [...keys].filter((k) => game[id].c[k] !== snap[id].c[k])
         .map((k) => `${k}: ${snap[id].c[k]} -> ${game[id].c[k]}`);
       if (game[id].ad !== snap[id].ad) changed.push(`attackDelayMs: ${snap[id].ad} -> ${game[id].ad}`);
+      for (const k of OPTIONAL_FIELDS) {
+        if (JSON.stringify(game[id][k]) !== JSON.stringify(snap[id][k])) {
+          changed.push(k === 's' ? 'summons changed' : `${k}: ${snap[id][k]} -> ${game[id][k]}`);
+        }
+      }
       lines.push(`CHANGED  ${id} ${game[id].n}: ${changed.join('; ') || 'name'}`);
     }
   }
@@ -104,7 +116,10 @@ function serialize(data) {
 
 async function main() {
   const update = process.argv.includes('--update');
-  const game = extractCombatData(await loadChunks());
+  const chunks = await loadChunks();
+  const game = extractCombatData(chunks);
+  const unlinked = findUnlinkedSummons(chunks);
+  if (unlinked.length) console.log(`WARN     summons with no owner link (not in the snapshot): ${unlinked.join(', ')}`);
   const { text, data } = readSnapshot();
   const lines = diff(game, data);
   if (!lines.length) {

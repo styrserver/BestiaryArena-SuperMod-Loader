@@ -580,6 +580,10 @@ const OUTFIT_PALETTE = [ // colour index -> [r, g, b] (0-255), used to tint outf
 ];
 // END OUTFIT_MOUNT_DATA
 
+// id -> animal-family tag ("equine", "bovine", ...). Live only: filled from the game's chunk by
+// refreshGameTables, not part of the snapshot, so it is empty until that load succeeds.
+const MOUNT_GROUPS = {};
+
 function getOutfitIds() {
   return OUTFIT_IDS;
 }
@@ -612,6 +616,15 @@ const unquoteName = (raw) => { try { return JSON.parse(raw); } catch (_) { retur
 
 // Reads the outfit table (entries carry `mountable:!0|!1`) and the mount table (entries carry
 // `riderOffset:{...}` for some mounts) out of the game's chunk sources.
+//
+// Mount table entry shape in the game bundle (read from minified source, name of the table not
+// confirmed): `{ id, name, rarity, group, riderOffset? }`.
+//   - `rarity`: 1-5 (kept in MOUNTS).
+//   - `group`: animal-family tag, apparently for grouping/filtering in the game UI. Values seen:
+//     equine, bovine, monkey, canine, bird, aquatic, scaled, mythological, machine, voidling,
+//     christmas. Parsed into MOUNT_GROUPS (live only, not in the snapshot) and shown in the mount
+//     picker's tooltip. `group` also appears as this file's own `'sleqqus'` marker on injected
+//     custom mounts (see nativeMountMap).
 function parseGameTables(chunks) {
   const table = (src, marker) => {
     const at = src.indexOf(marker);
@@ -625,10 +638,12 @@ function parseGameTables(chunks) {
   if (!outfitSrc || !mountSrc) throw new Error('outfit/mount chunk not found');
 
   const mounts = {};
-  for (const m of table(mountSrc, 'riderOffset:{').matchAll(/\{id:(\d+),name:("(?:[^"\\]|\\.)*"),rarity:(\d)(?:,riderOffset:\{x:(-?\d+),y:(-?\d+)\})?/g)) {
+  const mountGroups = {};
+  for (const m of table(mountSrc, 'riderOffset:{').matchAll(/\{id:(\d+),name:("(?:[^"\\]|\\.)*"),rarity:(\d)(?:,riderOffset:\{x:(-?\d+),y:(-?\d+)\})?(?:,group:"([^"]*)")?/g)) {
     const entry = [unquoteName(m[2]), +m[3]];
     if (m[4] !== undefined && (+m[4] || +m[5])) entry.push(+m[4], +m[5]); // rider offset, only when not 0,0
     mounts[+m[1]] = entry;
+    if (m[6]) mountGroups[+m[1]] = m[6];
   }
   const mountable = {};
   const outfitIds = [];
@@ -637,7 +652,7 @@ function parseGameTables(chunks) {
     if (m[3].includes('mountable:!0')) mountable[+m[1]] = unquoteName(m[2]);
   }
   if (Object.keys(mounts).length < 50 || outfitIds.length < 50) throw new Error('table sizes look wrong');
-  return { mounts, mountable, outfitIds, palette: parsePalette(chunks) };
+  return { mounts, mountGroups, mountable, outfitIds, palette: parsePalette(chunks) };
 }
 
 // The outfit colour palette (head/body/legs/feet index -> RGB), as 0-255 triples. null if not found.
@@ -988,6 +1003,7 @@ function refreshGameTables() {
     if (controller.signal.aborted) return;
     tablesSettled = true;
     replaceContents(MOUNTS, tables.mounts);
+    replaceContents(MOUNT_GROUPS, tables.mountGroups);
     replaceContents(MOUNTABLE_OUTFITS, tables.mountable);
     replaceContents(OUTFIT_IDS, tables.outfitIds);
     if (tables.palette) replaceContents(OUTFIT_PALETTE, tables.palette);
@@ -1509,7 +1525,7 @@ function openMountSelector() {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'group focus-style-visible';
-    btn.title = id === null ? t('mods.outfiter.noMount') : `${mountEntry(id)[0]} (${id})${canRide ? '' : ` - ${t('mods.outfiter.needsMountableOutfit')}`}`;
+    btn.title = id === null ? t('mods.outfiter.noMount') : `${mountEntry(id)[0]} (${id})${MOUNT_GROUPS[id] ? ` - ${MOUNT_GROUPS[id]}` : ''}${canRide ? '' : ` - ${t('mods.outfiter.needsMountableOutfit')}`}`;
     const slot = document.createElement('div');
     slot.className = 'container-slot surface-darker relative p-0.5 flex justify-end border-whiteDark pb-1 pr-1 pt-3.5';
     slot.style.cssText = 'width:79px;height:52px;box-sizing:border-box;';

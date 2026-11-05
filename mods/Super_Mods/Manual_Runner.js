@@ -373,6 +373,7 @@ const ESC_KEY_EVENT_INIT = {
 const ENSURE_RESULTS_SAFE_TIMEOUT_MS = 3500;
 const ENSURE_RESULTS_POLL_DELAY_MS = 120;
 const DEFER_RESULTS_OPEN_MS = 250;
+const GRADE_BAR_COLORS = { 'S+': '#FFD700', S: '#4CAF50', A: '#2196F3', B: '#9C27B0', default: '#4CAF50' };
 const S_PLUS_COLORS = ['#FFD700', '#FFA500', '#FF8C00', '#FF6347', '#FF4500', '#FF0000', '#DC143C', '#8B0000'];
 
 // Chart rendering constants
@@ -739,8 +740,8 @@ let lastInjectProcessedSeed = null; // Avoid double-inject on the same reward
 let defeatsCount = 0; // Track number of defeats
 let victoriesCount = 0; // Track number of victories
 let injectedCount = 0; // Sealed creatures injected this run (live modal row)
-let soldCount = 0; // Creature drops autosold this run (live modal row)
 let injectedGold = 0; // Gold gained from injects this run
+let squeezedDust = 0; // Dust received from squeezing this run
 let soldGold = 0; // Gold gained from autosell this run
 let totalStaminaSpent = 0; // Track total stamina spent
 let openRewardsSubscription = null; // Subscription to openRewards state
@@ -3265,7 +3266,7 @@ async function manualRunnerAutoInjectSealedCreatures(serverResults) {
         consumedServerIds.add(monster.id);
         injectedCount++;
         injectedGold += Number(goldDiff) || 0;
-        updateTextContent('manual-runner-injected', formatCountWithGold(injectedCount, injectedGold));
+        updateRewardsRow();
         injectSucceeded = true;
         break;
       } else if (!result.success && result.status === 429) {
@@ -3415,12 +3416,14 @@ async function ensureRewardScreenHandled() {
       console.warn('[Manual Runner] Autosell skipped: reward screen already closed before sell');
     } else {
       const goldBeforeSell = readPlayerGold();
+      const dustBeforeSell = readPlayerDust();
       autoSellSuccess = await autoSellCreatures();
       if (autoSellSuccess) {
-        soldGold += await pollGoldGainSince(goldBeforeSell);
-        const soldThisReward = [...rewardMonsterIds].filter((id) => !consumedByInject.has(id)).length;
-        soldCount += soldThisReward;
-        updateTextContent('manual-runner-sold', formatCountWithGold(soldCount, soldGold));
+        const { gold, dust } = await pollSellGainSince(goldBeforeSell, dustBeforeSell);
+        // Sell pays gold, squeeze pays dust.
+        soldGold += gold;
+        squeezedDust += dust;
+        updateRewardsRow();
       }
     }
   }
@@ -3626,6 +3629,8 @@ function createTextElement(tag, { id, text, style, className } = {}) {
   return el;
 }
 
+const GOLD_VALUE_STYLE = 'text-align: right; color: #FFD700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
+
 function appendStatRow(container, labelText, valueText, { labelStyle, valueStyle } = {}) {
   const defaultLabelStyle = 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
   const defaultValueStyle = 'text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
@@ -3650,24 +3655,102 @@ function readPlayerGold() {
   return Number.isFinite(gold) ? gold : null;
 }
 
-/** Gold gained since `before`; waits briefly for the player store to catch up after a sell. */
-async function pollGoldGainSince(before) {
-  if (before === null) return 0;
-  for (let i = 0; i < 10; i++) {
-    const now = readPlayerGold();
-    if (now !== null && now !== before) return Math.max(0, now - before);
-    await sleep(150);
-  }
-  return 0;
+function readPlayerDust() {
+  const snapshot = globalThis.state?.player?.getSnapshot?.();
+  const dust = Number(snapshot?.inventory?.dust ?? snapshot?.dust ?? snapshot?.context?.dust);
+  return Number.isFinite(dust) ? dust : null;
 }
 
-function formatCountWithGold(count, gold) {
-  if (gold <= 0) return String(count);
+/** Gold/dust gained since the given readings; waits briefly for the player store to catch up after a sell or squeeze. */
+async function pollSellGainSince(goldBefore, dustBefore) {
+  for (let i = 0; i < 10; i++) {
+    const goldNow = readPlayerGold();
+    const dustNow = readPlayerDust();
+    const gold = goldBefore !== null && goldNow !== null ? Math.max(0, goldNow - goldBefore) : 0;
+    const dust = dustBefore !== null && dustNow !== null ? Math.max(0, dustNow - dustBefore) : 0;
+    if (gold > 0 || dust > 0) return { gold, dust };
+    await sleep(150);
+  }
+  return { gold: 0, dust: 0 };
+}
+
+function formatGoldAmount(gold) {
   // Shared game rounding (api.util.formatItemCount) so gold reads like inventory badges.
-  const goldText = typeof api !== 'undefined' && typeof api?.util?.formatItemCount === 'function'
+  return typeof api !== 'undefined' && typeof api?.util?.formatItemCount === 'function'
     ? api.util.formatItemCount(gold)
     : String(gold);
-  return `${count} (+${goldText} gold)`;
+}
+
+const ICON_BASE = 'https://bestiaryarena.com/assets/icons/';
+const ICON_ITEM_STYLE = 'display: inline-flex; gap: 3px; align-items: center;';
+
+/** Icon <img> that removes itself (or becomes its text label) if the game asset fails to load. */
+function createIconImg(src, alt, fallbackText = null) {
+  const icon = document.createElement('img');
+  icon.src = src;
+  icon.alt = alt;
+  icon.style.cssText = 'vertical-align: middle;';
+  icon.addEventListener('error', () => {
+    if (fallbackText) icon.replaceWith(document.createTextNode(fallbackText));
+    else icon.remove();
+  }, { once: true });
+  return icon;
+}
+
+const REWARDS_CELLS = [
+  { key: 'inject', labelKey: 'mods.manualRunner.rewardInjected', src: `${ICON_BASE}star-tier-5.png` },
+  { key: 'sold', labelKey: 'mods.manualRunner.rewardSold', src: `${ICON_BASE}goldpile.png` },
+  { key: 'squeeze', labelKey: 'mods.manualRunner.rewardSqueezed', src: `${ICON_BASE}dust.png` }
+];
+
+/**
+ * One row for [inject count] [gold from selling] [dust from squeezing], each with its icon.
+ * Cells are built once per container and only their text / visibility change afterwards.
+ * Inject shows on floors 11-15 only (sealed drops); `showInjectAlways` keeps it for the results modal.
+ */
+function renderRewardsRow(container, { showInjectAlways = false } = {}) {
+  if (!container) return;
+  if (!container._mrCells) {
+    container.style.cssText = `${ICON_ITEM_STYLE} gap: 10px; justify-content: flex-end;`;
+    container._mrCells = {};
+    for (const { key, labelKey, src } of REWARDS_CELLS) {
+      const label = t(labelKey);
+      const item = document.createElement('span');
+      item.style.cssText = ICON_ITEM_STYLE;
+      item.title = label;
+      const text = document.createTextNode('');
+      item.appendChild(createIconImg(src, label, `${label}:`));
+      item.appendChild(text);
+      container.appendChild(item);
+      container._mrCells[key] = { item, text };
+    }
+  }
+  const cells = container._mrCells;
+  const showInject = config.enableAutoInjectSealedCreatures === true
+    && (showInjectAlways || getCurrentFloor() >= 11);
+  const showSell = config.enableAutoSellCreatures === true;
+  cells.inject.item.hidden = !showInject;
+  cells.sold.item.hidden = !showSell;
+  cells.squeeze.item.hidden = !showSell;
+  cells.inject.text.nodeValue = String(injectedCount);
+  cells.sold.text.nodeValue = formatGoldAmount(soldGold);
+  cells.squeeze.text.nodeValue = formatGoldAmount(squeezedDust);
+}
+
+/** "N" followed by the stamina icon; the icon is created once. */
+function renderStaminaValue(el, amount) {
+  if (!el) return;
+  if (!el._mrText) {
+    el.style.cssText = `${ICON_ITEM_STYLE} justify-content: flex-end;`;
+    el._mrText = document.createTextNode('');
+    el.appendChild(el._mrText);
+    el.appendChild(createIconImg(`${ICON_BASE}stamina.png`, 'Stamina'));
+  }
+  el._mrText.nodeValue = String(amount);
+}
+
+function updateRewardsRow() {
+  renderRewardsRow(document.getElementById('manual-runner-rewards'));
 }
 
 function updateTextContent(id, text) {
@@ -3736,9 +3819,9 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
     defeatsCount = 0;
     victoriesCount = 0;
     injectedCount = 0;
-    soldCount = 0;
     injectedGold = 0;
     soldGold = 0;
+    squeezedDust = 0;
     totalStaminaSpent = 0;
 
     // Setup board subscription to capture serverResults
@@ -4793,14 +4876,28 @@ function showRunningAnalysisModal(
   const content = document.createElement('div');
   content.className = 'manual-runner-live-section';
 
-  const createLiveRow = (labelText, valueText, valueId) => {
+  const createLiveRow = (labelText, valueText, valueId, iconSrc = null) => {
     const row = document.createElement('div');
     row.className = 'manual-runner-live-row';
 
     const label = createTextElement('span', {
-      text: labelText,
+      text: iconSrc ? '' : labelText,
       className: 'manual-runner-live-label'
     });
+    if (iconSrc) {
+      label.title = labelText;
+      label.setAttribute('aria-label', labelText);
+      const icon = document.createElement('img');
+      icon.src = iconSrc;
+      icon.alt = labelText;
+      icon.style.cssText = 'vertical-align: middle;';
+      // Fall back to the text label if the game icon fails to load
+      icon.addEventListener('error', () => {
+        icon.remove();
+        label.textContent = labelText;
+      }, { once: true });
+      label.appendChild(icon);
+    }
     const value = createTextElement('span', {
       id: valueId,
       text: valueText,
@@ -4844,17 +4941,16 @@ function showRunningAnalysisModal(
   }
   
   // Add stamina usage
-  createLiveRow(
-    'Stamina',
-    String(staminaSpent),
+  const staminaValue = createLiveRow(
+    t('mods.manualRunner.staminaSpent').replace(': {n}', ':'),
+    '',
     'manual-runner-stamina'
   );
+  renderStaminaValue(staminaValue, staminaSpent);
 
-  if (config.enableAutoInjectSealedCreatures) {
-    createLiveRow('Injected', formatCountWithGold(injectedCount, injectedGold), 'manual-runner-injected');
-  }
-  if (config.enableAutoSellCreatures) {
-    createLiveRow('Sold', formatCountWithGold(soldCount, soldGold), 'manual-runner-sold');
+  if (config.enableAutoInjectSealedCreatures || config.enableAutoSellCreatures) {
+    const rewardsValue = createLiveRow(t('mods.manualRunner.rewardsLabel'), '', 'manual-runner-rewards');
+    renderRewardsRow(rewardsValue);
   }
 
   // Create self-contained HTML modal to avoid conflicts with other modals
@@ -4947,6 +5043,24 @@ function showRunningAnalysisModal(
   return modalObject;
 }
 
+/** Copies `$replay(...)` for an attempt (or its seed as fallback) and shows a toast. */
+function copyAttemptReplay(attempt, notifyWhenNone = false) {
+  const replayData = createReplayDataForAttempt(attempt);
+  if (replayData) {
+    const ok = copyToClipboard(`$replay(${JSON.stringify(replayData)})`);
+    showCopyNotification(t(ok ? 'mods.manualRunner.copiedReplay' : 'mods.manualRunner.failedCopyReplay'), !ok);
+  } else if (attempt?.seed) {
+    const seedText = attempt.seed.toString();
+    const ok = copyToClipboard(seedText);
+    showCopyNotification(
+      ok ? t('mods.manualRunner.copiedSeed').replace('{seed}', seedText) : t('mods.manualRunner.failedCopySeed'),
+      !ok
+    );
+  } else if (notifyWhenNone) {
+    showCopyNotification(t('mods.manualRunner.noReplayOrSeed'), true);
+  }
+}
+
 // Calculate statistics from attempts
 function calculateStatistics(attempts) {
   if (!attempts || attempts.length === 0) {
@@ -4972,45 +5086,59 @@ function calculateStatistics(attempts) {
     };
   }
   
-  const completedAttempts = attempts.filter(a => a.completed);
-  const sPlusAttempts = attempts.filter(a => a.completed && a.grade === 'S+');
-  const ticksArray = attempts.map(a => a.ticks);
-  const rankPointsArray = attempts.filter(a => a.rankPoints).map(a => a.rankPoints);
-  
-  const sPlusRate = attempts.length > 0 ? (sPlusAttempts.length / attempts.length * 100).toFixed(2) : '0.00';
-  const completionRate = attempts.length > 0 ? (completedAttempts.length / attempts.length * 100).toFixed(2) : '0.00';
-  
-  const minTicks = completedAttempts.length > 0 ? Math.min(...completedAttempts.map(a => a.ticks)) : 0;
-  const maxTicks = attempts.length > 0 ? Math.max(...ticksArray) : 0;
-  const averageTicks = ticksArray.length > 0 ? ticksArray.reduce((a, b) => a + b, 0) / ticksArray.length : 0;
-  
-  // Calculate median
-  let medianTicks = 0;
-  if (ticksArray.length > 0) {
-    const sorted = [...ticksArray].sort((a, b) => a - b);
-    const mid = Math.floor(sorted.length / 2);
-    medianTicks = sorted.length % 2 === 0 
-      ? (sorted[mid - 1] + sorted[mid]) / 2 
-      : sorted[mid];
+  // Single pass over attempts (no spreads into Math.min/max: those throw on very large arrays)
+  const ticksArray = [];
+  const rankPointsArray = [];
+  const floorArray = [];
+  let completedCount = 0;
+  let sPlusCount = 0;
+  let skips = 0;
+  let staminaSpentTotal = 0;
+  let minTicks = Infinity;
+  let maxTicks = 0;
+  let ticksSum = 0;
+  let maxRankPoints = 0;
+  let maxFloor = 0;
+  let minFloor = Infinity;
+  for (const a of attempts) {
+    ticksArray.push(a.ticks);
+    ticksSum += a.ticks;
+    if (a.ticks > maxTicks) maxTicks = a.ticks;
+    if (a.completed) {
+      completedCount++;
+      if (a.ticks < minTicks) minTicks = a.ticks;
+      if (a.grade === 'S+') sPlusCount++;
+    }
+    if (a.rankPoints) {
+      rankPointsArray.push(a.rankPoints);
+      if (a.rankPoints > maxRankPoints) maxRankPoints = a.rankPoints;
+    }
+    if (a.floor !== null && a.floor !== undefined) {
+      floorArray.push(a.floor);
+      if (a.floor > maxFloor) maxFloor = a.floor;
+      if (a.floor < minFloor) minFloor = a.floor;
+    }
+    staminaSpentTotal += a.staminaSpent || 0;
+    if (a.skipped) skips++;
   }
-  
-  const maxRankPoints = rankPointsArray.length > 0 ? Math.max(...rankPointsArray) : 0;
-  
-  // Calculate floor statistics
-  const floorArray = attempts.filter(a => a.floor !== null && a.floor !== undefined).map(a => a.floor);
-  const maxFloor = floorArray.length > 0 ? Math.max(...floorArray) : 0;
-  const minFloor = floorArray.length > 0 ? Math.min(...floorArray) : 0;
-  const finalFloor = attempts.length > 0 && attempts[attempts.length - 1].floor !== null && attempts[attempts.length - 1].floor !== undefined 
-    ? attempts[attempts.length - 1].floor 
-    : null;
-  
-  const staminaSpentTotal = attempts.reduce((sum, a) => sum + (a.staminaSpent || 0), 0);
-  const skips = attempts.filter(a => a.skipped).length;
+  if (minTicks === Infinity) minTicks = 0;
+  if (minFloor === Infinity) minFloor = 0;
+
+  const sPlusRate = (sPlusCount / attempts.length * 100).toFixed(2);
+  const completionRate = (completedCount / attempts.length * 100).toFixed(2);
+  const averageTicks = ticksSum / attempts.length;
+
+  const sorted = [...ticksArray].sort((x, y) => x - y);
+  const mid = Math.floor(sorted.length / 2);
+  const medianTicks = sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+
+  const lastFloor = attempts[attempts.length - 1].floor;
+  const finalFloor = lastFloor !== null && lastFloor !== undefined ? lastFloor : null;
 
   return {
     totalAttempts: attempts.length,
-    completedAttempts: completedAttempts.length,
-    sPlusCount: sPlusAttempts.length,
+    completedAttempts: completedCount,
+    sPlusCount,
     sPlusRate,
     completionRate,
     minTicks,
@@ -5094,22 +5222,16 @@ async function showResultsModal(results) {
       // Floor mode: Show floor-related stats
       // Show max floor completed (use maxFloor which represents the highest floor reached)
       if (stats.maxFloor > 0) {
-        appendStatRow(statsContainer, t('mods.manualRunner.maxFloorCompleted') || 'Max Floor Completed:', stats.maxFloor.toString(), {
-          valueStyle: 'text-align: right; color: #FFD700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;'
-        });
+        appendStatRow(statsContainer, t('mods.manualRunner.maxFloorCompleted') || 'Max Floor Completed:', stats.maxFloor.toString(), { valueStyle: GOLD_VALUE_STYLE });
       }
       
       if (config.maxFloor !== undefined) {
-        appendStatRow(statsContainer, t('mods.manualRunner.targetFloor') || 'Target Floor:', config.maxFloor.toString(), {
-          valueStyle: 'text-align: right; color: #FFD700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;'
-        });
+        appendStatRow(statsContainer, t('mods.manualRunner.targetFloor') || 'Target Floor:', config.maxFloor.toString(), { valueStyle: GOLD_VALUE_STYLE });
       }
     } else if (config.stopCondition === 'max') {
       // Rank mode: Show rank-related stats
       if (stats.sPlusCount > 0) {
-        appendStatRow(statsContainer, t('mods.manualRunner.sPlusRate'), `${stats.sPlusRate}% (${stats.sPlusCount}/${stats.totalAttempts})`, {
-          valueStyle: 'text-align: right; color: #FFD700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;'
-        });
+        appendStatRow(statsContainer, t('mods.manualRunner.sPlusRate'), `${stats.sPlusRate}% (${stats.sPlusCount}/${stats.totalAttempts})`, { valueStyle: GOLD_VALUE_STYLE });
 
         try {
           const sPlusResults = attempts.filter(a => a.grade === 'S+' && a.rankPoints);
@@ -5147,37 +5269,27 @@ async function showResultsModal(results) {
           const playerTeamSizeForTarget = getPlayerTeamSize();
           const targetRankPoints = Math.max(0, (2 * maxTeamSizeForTarget) - playerTeamSizeForTarget);
 
-          appendStatRow(statsContainer, t('mods.manualRunner.highestRankPoints'), (stats.maxRankPoints || 0).toString(), {
-            valueStyle: 'text-align: right; color: #FFD700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;'
-          });
+          appendStatRow(statsContainer, t('mods.manualRunner.highestRankPoints'), (stats.maxRankPoints || 0).toString(), { valueStyle: GOLD_VALUE_STYLE });
 
-          appendStatRow(statsContainer, t('mods.manualRunner.targetRank'), `${targetRankPoints}`, {
-            valueStyle: 'text-align: right; color: #FFD700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;'
-          });
+          appendStatRow(statsContainer, t('mods.manualRunner.targetRank'), `${targetRankPoints}`, { valueStyle: GOLD_VALUE_STYLE });
         } catch (e) {
           console.warn('[Manual Runner] Could not compute target rank points for display:', e);
         }
       }
 
       if (stats.maxRankPoints > 0) {
-        appendStatRow(statsContainer, t('mods.manualRunner.maxRankPoints'), stats.maxRankPoints.toString(), {
-          valueStyle: 'text-align: right; color: #FFD700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;'
-        });
+        appendStatRow(statsContainer, t('mods.manualRunner.maxRankPoints'), stats.maxRankPoints.toString(), { valueStyle: GOLD_VALUE_STYLE });
       }
-    } else {
-      // Any victory mode: Show general stats (no rank points)
-      // Just show completion rate and basic stats
     }
 
-    appendStatRow(statsContainer, t('mods.manualRunner.staminaSpent').replace(': {n}', ':'), (stats.staminaSpentTotal || 0).toString());
+    const { value: staminaResultValue } = appendStatRow(statsContainer, t('mods.manualRunner.staminaSpent').replace(': {n}', ':'), '');
+    renderStaminaValue(staminaResultValue, stats.staminaSpentTotal || 0);
 
     appendStatRow(statsContainer, t('mods.manualRunner.skips'), (stats.skips || 0).toString());
 
-    if (config.enableAutoInjectSealedCreatures) {
-      appendStatRow(statsContainer, 'Injected:', formatCountWithGold(injectedCount, injectedGold));
-    }
-    if (config.enableAutoSellCreatures) {
-      appendStatRow(statsContainer, 'Sold:', formatCountWithGold(soldCount, soldGold));
+    if (config.enableAutoInjectSealedCreatures || config.enableAutoSellCreatures) {
+      const { value: rewardsValue } = appendStatRow(statsContainer, t('mods.manualRunner.rewardsLabel') + ':', '');
+      renderRewardsRow(rewardsValue, { showInjectAlways: injectedCount > 0 });
     }
     
     const finalVictory = results.finalResult?.victory === true || results.finalResult?.completed === true;
@@ -5200,10 +5312,8 @@ async function showResultsModal(results) {
       const victoryAttempts = attempts.filter(a => a && (a.completed || a.victory) && a.floor !== null && a.floor !== undefined);
       if (victoryAttempts.length > 0) {
         // Sort victories by floor, then by order in attempts array
-        const sortedVictories = [...victoryAttempts].sort((a, b) => {
-          if (a.floor !== b.floor) return a.floor - b.floor;
-          return attempts.indexOf(a) - attempts.indexOf(b);
-        });
+        // Array.prototype.sort is stable, so ties keep attempt order
+        const sortedVictories = [...victoryAttempts].sort((a, b) => a.floor - b.floor);
         
         // Find max ticks for scaling
         const maxTicks = Math.max(...sortedVictories.map(v => v.ticks), 1);
@@ -5248,17 +5358,7 @@ async function showResultsModal(results) {
           const barHeight = Math.max(CHART_MIN_HEIGHT, Math.floor((victory.ticks / maxTicks) * CHART_MAX_HEIGHT));
           const bar = document.createElement('div');
           
-          // Determine bar color based on grade
-          let barColor = '#4CAF50'; // Green for completed
-          if (victory.grade === 'S+') {
-            barColor = '#FFD700'; // Gold for S+
-          } else if (victory.grade === 'S') {
-            barColor = '#4CAF50'; // Green for S
-          } else if (victory.grade === 'A') {
-            barColor = '#2196F3'; // Blue for A
-          } else if (victory.grade === 'B') {
-            barColor = '#9C27B0'; // Purple for B
-          }
+          const barColor = GRADE_BAR_COLORS[victory.grade] || GRADE_BAR_COLORS.default;
           
           bar.style.cssText = `
             position: absolute;
@@ -5294,26 +5394,7 @@ async function showResultsModal(results) {
           });
           
           // Click handler to copy replay
-          bar.addEventListener('click', () => {
-            const replayData = createReplayDataForAttempt(victory);
-            if (replayData) {
-              const replayText = `$replay(${JSON.stringify(replayData)})`;
-              const success = copyToClipboard(replayText);
-              if (success) {
-                showCopyNotification(t('mods.manualRunner.copiedReplay'));
-              } else {
-                showCopyNotification(t('mods.manualRunner.failedCopyReplay'), true);
-              }
-            } else if (victory.seed) {
-              const seedText = victory.seed.toString();
-              const success = copyToClipboard(seedText);
-              if (success) {
-                showCopyNotification(t('mods.manualRunner.copiedSeed').replace('{seed}', seedText));
-              } else {
-                showCopyNotification(t('mods.manualRunner.failedCopySeed'), true);
-              }
-            }
-          });
+          bar.addEventListener('click', () => copyAttemptReplay(victory));
           
           barsContainer.appendChild(bar);
         });
@@ -5386,29 +5467,7 @@ async function showResultsModal(results) {
       copyReplayBtn.className = 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1 active:frame-pressed-1 surface-regular gap-1 px-2 py-0.5 pb-[3px] pixel-font-14';
       copyReplayBtn.style.cssText = 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12px;';
 
-      copyReplayBtn.addEventListener('click', () => {
-        const attempt = victoryAttempt;
-        const replayData = createReplayDataForAttempt(attempt);
-        if (replayData) {
-          const replayText = `$replay(${JSON.stringify(replayData)})`;
-          const success = copyToClipboard(replayText);
-          if (success) {
-            showCopyNotification(t('mods.manualRunner.copiedReplay'));
-          } else {
-            showCopyNotification(t('mods.manualRunner.failedCopyReplay'), true);
-          }
-        } else if (attempt && attempt.seed) {
-          const seedText = attempt.seed.toString();
-          const success = copyToClipboard(seedText);
-          if (success) {
-            showCopyNotification(t('mods.manualRunner.copiedSeed').replace('{seed}', seedText));
-          } else {
-            showCopyNotification(t('mods.manualRunner.failedCopySeed'), true);
-          }
-        } else {
-          showCopyNotification(t('mods.manualRunner.noReplayOrSeed'), true);
-        }
-      });
+      copyReplayBtn.addEventListener('click', () => copyAttemptReplay(victoryAttempt, true));
 
       replayContainer.appendChild(copyReplayBtn);
       content.appendChild(replayContainer);
@@ -5553,6 +5612,7 @@ async function runAnalysis() {
       } else {
         updateTextContent('manual-runner-target', 'Victory');
       }
+      updateRewardsRow(); // floor may have crossed the inject-visibility threshold
 
       const v = status.victories !== undefined ? status.victories : 0;
       const d = status.defeats !== undefined ? status.defeats : 0;
@@ -5562,7 +5622,7 @@ async function runAnalysis() {
       );
 
       if (status.staminaSpent !== undefined) {
-        updateTextContent('manual-runner-stamina', String(status.staminaSpent));
+        renderStaminaValue(document.getElementById('manual-runner-stamina'), status.staminaSpent);
       }
     });
     
@@ -5600,11 +5660,6 @@ async function runAnalysis() {
       console.log('[Manual Runner] runAnalysis finally: Ensuring state is reset. Current state:', analysisState.state);
       analysisState.reset();
     }
-    // Update coordination system state
-    if (window.ModCoordination) {
-      window.ModCoordination.updateModState('Manual Runner', { active: false });
-    }
-    
     // Update coordination system state
     if (window.ModCoordination) {
       window.ModCoordination.updateModState('Manual Runner', { active: false });
@@ -5706,9 +5761,9 @@ function cleanupManualRunner() {
     defeatsCount = 0;
     victoriesCount = 0;
     injectedCount = 0;
-    soldCount = 0;
     injectedGold = 0;
     soldGold = 0;
+    squeezedDust = 0;
     totalStaminaSpent = 0;
     skipCount = 0;
     activeRunningModal = null;

@@ -43,6 +43,7 @@
         AFTER_GAME_END_BEFORE_ACTIVATE_MS: 200, // Delay after game end before checking Dragon Plant
         DRAGON_PLANT_ACTIVATE_RETRY_MS: 400, // Retry plant click while drop UI settles (esp. power saving)
         DRAGON_PLANT_ACTIVATE_MAX_ATTEMPTS: 12,
+        DRAGON_PLANT_MIN_CLICK_INTERVAL_MS: 2000, // Never click the plant button more than once per 2 seconds
         
         // Delay after operation before removing from local inventory
         BEFORE_REMOVE_FROM_INVENTORY_MS: 100,  // Used for squeeze
@@ -206,6 +207,12 @@
     let timeoutIds = []; // Track all setTimeout calls for cleanup
     let isCleaningUp = false; // Flag to prevent execution during cleanup
     let gameEndSubscription = null; // Track game.world.onGameEnd subscription
+    let handleGameEndFired = null;  // Latest game-end handler (also run by the Power saving watcher)
+    let powerSavingGameEndSub = null;
+    let powerSavingPrevGameStarted = false;
+    let powerSavingGameEndLogged = false;
+    let newGamesSinceGameEnd = 0;   // Debug watchdog: newGame events since our onGameEnd last fired
+    let lastGameEndFiredAt = 0;
     const pendingGameEndBySeed = new Map(); // seed -> serverResults snapshot for retry after canRun block
     const pendingGameEndMeta = new Map(); // seed -> { attempts, queuedAt, reasons[] }
     const gameEndSeenSeeds = new Set(); // seeds whose onGameEnd already fired (safe to dust)
@@ -223,6 +230,7 @@
     let dragonPlantActivateAttempts = 0;
     let dragonPlantActivateGiveUpForDrop = false;
     let dragonPlantActivateLastDropSig = '';
+    let dragonPlantLastClickAt = 0;
     // quest.plantEat requests currently awaiting a response; re-clicking while one is
     // in flight fires a duplicate batch that fails with "User version mismatch".
     let plantEatInFlight = 0;
@@ -6845,6 +6853,63 @@
         console.log(`[Autoseller][${channel}] ${message}`);
     }
 
+    // Same as logAutosellerDebug but at most once per `ms` per key (for polled/retry paths).
+    const debugThrottleAt = new Map();
+    function logAutosellerDebugThrottled(channel, message, key, ms = 2000) {
+        const now = Date.now();
+        if (now - (debugThrottleAt.get(key) || 0) < ms) return;
+        debugThrottleAt.set(key, now);
+        if (debugThrottleAt.size > 100) debugThrottleAt.clear();
+        logAutosellerDebug(channel, message);
+    }
+
+    // Any HTTP 429 (from our calls or the game's own) pauses every Autoseller API call for a while:
+    // retries and plant clicks otherwise keep hammering the server and the game's own autoplay
+    // request fails ("Something went wrong"), which stops autoplay.
+    let apiBackoffUntil = 0;
+    const API_BACKOFF_MS = 5000;
+    function noteApiRateLimit(response, url) {
+        if (response?.status !== 429) return;
+        const wasBacking = Date.now() < apiBackoffUntil;
+        apiBackoffUntil = Date.now() + API_BACKOFF_MS;
+        if (!wasBacking) {
+            logAutosellerDebug('RateLimit', `HTTP 429 from ${String(url).split('?')[0].split('/').pop()} — pausing Autoseller API calls for ${API_BACKOFF_MS}ms`);
+        }
+    }
+    function apiBackoffRemainingMs() {
+        return Math.max(0, apiBackoffUntil - Date.now());
+    }
+
+    // One-line snapshot of everything that can stall the game-end → squeeze → plant chain.
+    function autosellerDebugState() {
+        let ps = '?';
+        let board = '?';
+        try {
+            const ctx = globalThis.state?.board?.getSnapshot?.()?.context;
+            ps = ctx?.powerSaving?.mode ?? '?';
+            board = `${ctx?.autoplay?.state ?? '?'}/started=${ctx?.gameStarted}`;
+        } catch (_) { /* ignore */ }
+        return `vis=${document.visibilityState} powersave=${ps} board=${board} ` +
+            `queue=${pendingGameEndBySeed.size} retryTimer=${!!gameEndRetryTimer} ` +
+            `plantInFlight=${plantEatInFlight} plantTimer=${!!dragonPlantActivateRetryTimer} ` +
+            `plantAttempts=${dragonPlantActivateAttempts} plantGiveUp=${dragonPlantActivateGiveUpForDrop} ` +
+            `lastRunAgo=${Date.now() - stateManager.lastRun}ms`;
+    }
+
+    // Dragon Plant skipped silently: report once per reason/drop (60s) to the popup Error Log
+    // so a missing click can be diagnosed without verbose logging.
+    const plantSkipReportedAt = new Map();
+    function reportPlantSkip(reason, detail) {
+        const key = `${reason}|${detail || ''}`;
+        const now = Date.now();
+        if (now - (plantSkipReportedAt.get(key) || 0) < 60000) return;
+        plantSkipReportedAt.set(key, now);
+        if (plantSkipReportedAt.size > 50) plantSkipReportedAt.clear();
+        try {
+            window.BestiaryLoaderErrorLog?.report?.('Autoseller', `Dragon Plant not clicked: ${reason}`, detail || '');
+        } catch (_) { /* diagnostics only */ }
+    }
+
     function formatMonsterForDebug(monster) {
         if (!monster) return 'unknown';
         const name = monster?.metadata?.name || monster?.name || `gameId:${monster?.gameId ?? '?'}`;
@@ -6879,6 +6944,7 @@
                 }
                 plantEatInFlight += 1;
                 return originalFetch.apply(this, args).then(response => {
+                    noteApiRateLimit(response, urlStr);
                     // Clone the response so we can read it without affecting the original
                     const clonedResponse = response.clone();
                     if (!response.ok) {
@@ -6955,6 +7021,7 @@
             // game.gameServer carries rewardScreen.equipDrop with a reliable instance id
             if (urlStr.includes('gameServer?batch=1') || urlStr.includes('game.gameServer')) {
                 return originalFetch.apply(this, args).then(response => {
+                    noteApiRateLimit(response, urlStr);
                     const clonedResponse = response.clone();
                     clonedResponse.json().then((responseData) => {
                         try {
@@ -6967,7 +7034,10 @@
                 });
             }
             
-            return originalFetch.apply(this, args);
+            return originalFetch.apply(this, args).then((response) => {
+                noteApiRateLimit(response, urlStr);
+                return response;
+            });
         };
         window.fetch = autosellerFetchWrapper;
     }
@@ -7335,6 +7405,11 @@
         },
         
         canRun() {
+            const backoffMs = apiBackoffRemainingMs();
+            if (backoffMs > 0) {
+                logAutosellerDebugThrottled('RateLimit', `canRun blocked: API backoff ${backoffMs}ms left after HTTP 429`, 'canrun-backoff', 2000);
+                return false;
+            }
             const now = Date.now();
             const elapsed = now - this.lastRun;
             const tabVisible = typeof document !== 'undefined' && document.visibilityState === 'visible';
@@ -7424,6 +7499,8 @@
         },
         
         addPendingEquipment(id) {
+            // Already dusted / gone on server: re-adding would retry a missing id until the TTL drop
+            if (id && this.processedIds.has(id)) return;
             if (id) {
                 // Safety limit to prevent memory leak (max 100 pending equipment)
                 if (this.pendingEquipmentIds.size >= 100) {
@@ -11196,10 +11273,18 @@
         const elapsed = Date.now() - stateManager.lastRun;
         const tabVisible = typeof document !== 'undefined' && document.visibilityState === 'visible';
         const minGap = tabVisible ? 800 : AUTOSELLER_MIN_DELAY_MS;
-        const delay = Math.max(OPERATION_DELAYS.UI_SETTLE_MS, minGap - elapsed + 50);
+        const delay = Math.max(OPERATION_DELAYS.UI_SETTLE_MS, minGap - elapsed + 50, apiBackoffRemainingMs() + 50);
+        logAutosellerDebug(
+            'GameEnd',
+            `retry timer set: ${delay}ms (minGap=${minGap}ms) queuedSeeds=[${[...pendingGameEndBySeed.keys()].join(',')}] (${autosellerDebugState()})`
+        );
         gameEndRetryTimer = setTimeout(async () => {
             gameEndRetryTimer = null;
-            await drainPendingGameEndQueue();
+            try {
+                await drainPendingGameEndQueue();
+            } catch (drainError) {
+                console.error('[Autoseller][GameEnd] drainPendingGameEndQueue threw', drainError);
+            }
         }, delay);
         timeoutIds.push(gameEndRetryTimer);
     }
@@ -11335,9 +11420,20 @@
 
         // Never reuse the 5s cache here: a snapshot from before the drop landed would hide it from every retry
         serverMonsterCache.clear();
-        const inventorySnapshot = await fetchServerMonsters();
+        // Autoplant leaves every non-squeeze, non-inject creature to the Dragon Plant, so the
+        // (rate-limited) inventory fetch only matters when a squeeze / inject candidate dropped.
+        const needsMonsterInventory = settings.autoMode !== 'autoplant' || squeezeRewardExpected || injectRewardExpected;
+        const inventoryFetchStart = Date.now();
+        const inventorySnapshot = needsMonsterInventory ? await fetchServerMonsters() : null;
+        if (squeezeRewardExpected || injectRewardExpected || Date.now() - inventoryFetchStart > 1500) {
+            logAutosellerDebug(
+                'GameEnd',
+                `seed=${currentSeed} inventory fetched in ${Date.now() - inventoryFetchStart}ms ` +
+                `(${inventorySnapshot?.length ?? 'null'} monsters) squeezeBandReward=${squeezeRewardExpected} injectReward=${injectRewardExpected}`
+            );
+        }
 
-        if (rewardMonsterIds.size > 0) {
+        if (needsMonsterInventory && rewardMonsterIds.size > 0) {
             const matchedMonsters = filterMonstersByServerIds(inventorySnapshot, rewardMonsterIds);
             const sealedCandidateCount = matchedMonsters.filter(invMonster => {
                 const creatureName = getCreatureNameFromMonster(invMonster);
@@ -11407,7 +11503,21 @@
                     const monstersToSqueeze = await filterMonstersForAutosqueeze(matchedMonsters, settings, inventorySnapshot);
                     if (monstersToSqueeze.length > 0) {
                         console.log('[Autoseller] Processing autosqueeze for', monstersToSqueeze.length, 'monsters');
-                        const squeezeResult = await processEligibleMonsters(monstersToSqueeze, 'squeeze');
+                        const squeezeStart = Date.now();
+                        const squeezeHangWatch = setTimeout(() => {
+                            logAutosellerDebug('Squeeze', `WATCHDOG: seed=${currentSeed} processEligibleMonsters(squeeze) still running after 10s (${autosellerDebugState()})`);
+                        }, 10000);
+                        timeoutIds.push(squeezeHangWatch);
+                        let squeezeResult;
+                        try {
+                            squeezeResult = await processEligibleMonsters(monstersToSqueeze, 'squeeze');
+                        } finally {
+                            clearTimeout(squeezeHangWatch);
+                            const squeezeMs = Date.now() - squeezeStart;
+                            if (squeezeMs > 5000) {
+                                logAutosellerDebug('Squeeze', `seed=${currentSeed} processEligibleMonsters(squeeze) was slow: ${squeezeMs}ms`);
+                            }
+                        }
                         if (squeezeResult?.incomplete) {
                             needsActionRetry = true;
                             actionRetryReason = 'squeeze-incomplete';
@@ -11461,10 +11571,27 @@
         if (globalThis.state?.board?.on) {
             emitNewGameHandler2 = (game) => {
                 if (window.ModCoordination?.isModActive('Board Analyzer')) {
+                    logAutosellerDebugThrottled('GameEnd', 'newGame: NOT subscribing to onGameEnd — Board Analyzer is active', 'ba-active', 5000);
                     return;
                 }
 
-                game.world.onGameEnd.once(async () => {
+                // Watchdog: games keep starting but our game-end handler never fires.
+                newGamesSinceGameEnd += 1;
+                if (newGamesSinceGameEnd >= 3) {
+                    logAutosellerDebugThrottled(
+                        'GameEnd',
+                        `WATCHDOG: ${newGamesSinceGameEnd} newGame events without onGameEnd firing; ` +
+                        `last onGameEnd ${lastGameEndFiredAt ? Math.round((Date.now() - lastGameEndFiredAt) / 1000) + 's ago' : 'never'} (${autosellerDebugState()})`,
+                        'no-gameend',
+                        5000
+                    );
+                }
+
+                // Stored so the Power saving watcher can run the same handler: in Power saving mode
+                // the game has no sandbox world, so `newGame` / `world.onGameEnd` never fire.
+                game.world.onGameEnd.once(handleGameEndFired = async () => {
+                    lastGameEndFiredAt = Date.now();
+                    newGamesSinceGameEnd = 0;
                     const boardSnap = cloneServerResults(
                         globalThis.state?.board?.getSnapshot?.()?.context?.serverResults
                     );
@@ -11542,6 +11669,10 @@
                         }
 
                         if (!stateManager.canRun()) {
+                            logAutosellerDebug(
+                                'GameEnd',
+                                `seed=${refreshed.seed} canRun blocked — queued for retry and Dragon Plant NOT activated for this battle (${autosellerDebugState()})`
+                            );
                             const blockedIds = extractEquipmentFromServerResults(refreshed).rewardEquipmentIds;
                             if (blockedIds.size > 0) {
                                 logEquipDropFlow('3/canRun-blocked', `seed=${refreshed.seed} ids=[${[...blockedIds].join(',')}] — queued for retry`);
@@ -11552,12 +11683,28 @@
                             return;
                         }
 
-                        await processGameEndRewards(refreshed, 'captured-at-gameEnd');
+                        const processStart = Date.now();
+                        const processHangWatch = setTimeout(() => {
+                            logAutosellerDebug('GameEnd', `WATCHDOG: processGameEndRewards seed=${refreshed.seed} still running after 10s (${autosellerDebugState()})`);
+                        }, 10000);
+                        timeoutIds.push(processHangWatch);
+                        try {
+                            await processGameEndRewards(refreshed, 'captured-at-gameEnd');
+                        } catch (processError) {
+                            console.error(`[Autoseller][GameEnd] processGameEndRewards threw for seed=${refreshed.seed} — Dragon Plant will NOT be activated for this battle`, processError);
+                            throw processError;
+                        } finally {
+                            clearTimeout(processHangWatch);
+                            const processMs = Date.now() - processStart;
+                            if (processMs > 3000) {
+                                logAutosellerDebug('GameEnd', `seed=${refreshed.seed} processGameEndRewards was slow: ${processMs}ms (${autosellerDebugState()})`);
+                            }
+                        }
                         // Catch equips whose gameServer landed during processing
                         dustCachedGameServerEquips('post-gameEnd-sweep');
                         const pendingSeed = refreshed?.seed;
                         if (pendingSeed != null && pendingGameEndBySeed.has(pendingSeed)) {
-                            logAutosellerDebug('GameEnd', `deferring plant activation — pending retry for seed=${pendingSeed}`);
+                            logAutosellerDebug('GameEnd', `deferring plant activation — pending retry for seed=${pendingSeed} (${autosellerDebugState()})`);
                         } else {
                             checkAndActivateDragonPlant();
                         }
@@ -11567,10 +11714,38 @@
                 gameEndSubscription = game.world.onGameEnd;
             };
             globalThis.state.board.on('newGame', emitNewGameHandler2);
+            setupPowerSavingGameEndWatcher();
 
         } else {
             console.warn(`[${modName}] Board state not available for game end listener`);
         }
+    }
+
+    // Power saving mode runs battles without a sandbox world, so world.onGameEnd never fires and
+    // the whole game-end pipeline (squeeze / sell / dust) would be skipped. Detect the end from
+    // board state instead (gameStarted true → false while powerSaving.mode is 'on').
+    function setupPowerSavingGameEndWatcher() {
+        if (powerSavingGameEndSub || !globalThis.state?.board?.subscribe) return;
+        powerSavingPrevGameStarted = !!globalThis.state.board.getSnapshot?.()?.context?.gameStarted;
+        powerSavingGameEndSub = globalThis.state.board.subscribe(() => {
+            if (isCleaningUp) return;
+            const ctx = globalThis.state?.board?.getSnapshot?.()?.context;
+            if (!ctx) return;
+            const started = !!ctx.gameStarted;
+            const wasStarted = powerSavingPrevGameStarted;
+            powerSavingPrevGameStarted = started;
+            if (!wasStarted || started || ctx.powerSaving?.mode !== 'on') return;
+            if (window.ModCoordination?.isModActive('Board Analyzer')) return;
+            if (!handleGameEndFired) {
+                logAutosellerDebugThrottled('GameEnd', 'powersave game end seen but no handler yet (no newGame since load) — skipped', 'ps-no-handler', 5000);
+                return;
+            }
+            if (!powerSavingGameEndLogged) {
+                powerSavingGameEndLogged = true;
+                logAutosellerDebug('GameEnd', `Power saving: game ends are detected from board state (no sandbox world) (${autosellerDebugState()})`);
+            }
+            handleGameEndFired();
+        });
     }
     
     function clickDragonPlantButton() {
@@ -11578,12 +11753,14 @@
         const widgetBottom = findAutoplayContainer();
         if (!widgetBottom) {
             console.log('[Autoseller] Autoplay container not found for dragon plant click');
+            reportPlantSkip('autoplay widget not found at click time');
             return false;
         }
         
         const dragonPlantButton = findDragonPlantButton(widgetBottom);
         if (!dragonPlantButton) {
             console.log('[Autoseller] Dragon Plant button not found');
+            reportPlantSkip('plant button not found at click time (sprite id may have changed)');
             return false;
         }
         
@@ -11592,6 +11769,7 @@
         
         if (isDisabled) {
             console.log('[Autoseller] Dragon Plant button is disabled, skipping click');
+            reportPlantSkip('plant button disabled at click time');
             return false;
         }
         
@@ -11680,7 +11858,16 @@
         const dropSig = getPlantableCreatureDropSignature(widgetBottom);
         const hasDrop = !!dropSig;
 
+        if (!widgetBottom) {
+            reportPlantSkip('autoplay widget not found or minimized');
+        }
+
         if (!hasDrop) {
+            // Plant button enabled but no creature portrait seen: drop detection may be outdated
+            const enabledBtn = widgetBottom ? findDragonPlantButton(widgetBottom) : null;
+            if (isDragonPlantButtonClickable(enabledBtn)) {
+                reportPlantSkip('plant button is enabled but no creature drop was detected (drop markup may have changed)');
+            }
             clearDragonPlantActivateRetries();
             dragonPlantActivateGiveUpForDrop = false;
             dragonPlantActivateLastDropSig = '';
@@ -11694,6 +11881,7 @@
         }
 
         if (dragonPlantActivateGiveUpForDrop) {
+            logAutosellerDebugThrottled('DragonPlant', `skip: gave up for drop=${dropSig} (${autosellerDebugState()})`, 'plant-giveup', 3000);
             return;
         }
 
@@ -11706,7 +11894,20 @@
             return;
         }
 
+        if (apiBackoffRemainingMs() > 0) {
+            logAutosellerDebugThrottled('RateLimit', `plant click waiting: API backoff ${apiBackoffRemainingMs()}ms left after HTTP 429`, 'plant-backoff', 2000);
+            scheduleDragonPlantActivateAttempt(apiBackoffRemainingMs() + 50);
+            return;
+        }
+
         if (isDragonPlantButtonClickable(button)) {
+            // Rate limit: wait out the remainder of the interval without burning an attempt.
+            const sinceLastClick = Date.now() - dragonPlantLastClickAt;
+            if (sinceLastClick < OPERATION_DELAYS.DRAGON_PLANT_MIN_CLICK_INTERVAL_MS) {
+                scheduleDragonPlantActivateAttempt(OPERATION_DELAYS.DRAGON_PLANT_MIN_CLICK_INTERVAL_MS - sinceLastClick);
+                return;
+            }
+            dragonPlantLastClickAt = Date.now();
             const clicked = clickDragonPlantButton();
             dragonPlantActivateAttempts += 1;
             logAutosellerDebug(
@@ -11720,17 +11921,29 @@
                 dragonPlantActivateGiveUpForDrop = true;
                 clearDragonPlantActivateRetries();
                 logAutosellerDebug('DragonPlant', `give up for drop=${dropSig} after max attempts`);
+                reportPlantSkip('gave up after max click attempts, drop still shown (game filter likely rejects every creature: check the Autoplant keep/sell lists and gene threshold)', dropSig);
             }
             return;
         }
 
         // Drop present but button not ready yet (common under power saving) — keep trying
+        logAutosellerDebugThrottled(
+            'DragonPlant',
+            `button not clickable: found=${!!button} disabled=${button?.hasAttribute?.('disabled')} ` +
+            `dataState=${button?.getAttribute?.('data-state')} attempt=${dragonPlantActivateAttempts} (${autosellerDebugState()})`,
+            'plant-notclickable',
+            2000
+        );
         if (dragonPlantActivateAttempts < OPERATION_DELAYS.DRAGON_PLANT_ACTIVATE_MAX_ATTEMPTS) {
             dragonPlantActivateAttempts += 1;
             scheduleDragonPlantActivateAttempt(OPERATION_DELAYS.DRAGON_PLANT_ACTIVATE_RETRY_MS);
             return;
         }
 
+        reportPlantSkip(
+            button ? 'plant button stayed disabled or open' : 'plant button not found (sprite id may have changed)',
+            dropSig
+        );
         dragonPlantActivateGiveUpForDrop = true;
         clearDragonPlantActivateRetries();
     }
@@ -11754,6 +11967,7 @@
         const settings = getSettings();
         if (settings.autoMode !== 'autoplant') return;
         // Re-assert plant filter + checkbox after power-saving DOM/state churn, then retry plant click
+        logAutosellerDebug('DragonPlant', `ba-power-saving-mode-changed → re-asserting plant filter (${autosellerDebugState()})`);
         updatePlantMonsterFilter();
         applyLocalStorageToGameCheckbox();
         checkAndActivateDragonPlant();
@@ -12412,6 +12626,15 @@
                                 globalThis.state.board.off('newGame', emitNewGameHandler2);
                                 emitNewGameHandler2 = null;
                             }
+                            if (powerSavingGameEndSub) {
+                                try {
+                                    typeof powerSavingGameEndSub === 'function'
+                                        ? powerSavingGameEndSub()
+                                        : powerSavingGameEndSub.unsubscribe?.();
+                                } catch (_) { /* ignore */ }
+                                powerSavingGameEndSub = null;
+                            }
+                            handleGameEndFired = null;
                             if (emitEndGameHandler1) {
                                 globalThis.state.board.off('emitEndGame', emitEndGameHandler1);
                                 emitEndGameHandler1 = null;

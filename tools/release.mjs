@@ -25,7 +25,7 @@
  * The patch-notes entry is written by hand first (docs/patch-notes.json): it is player-facing copy.
  */
 import { spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { fileURLToPath } from 'node:url';
@@ -110,6 +110,7 @@ if (!DRY && wanted === undefined && compare(version, remoteVersion) === 0) fail(
 if (!node('check-patch-notes.mjs', '--release')) fail(`add the ${version} entry to docs/patch-notes.json first (it is player-facing copy, write it by hand)`);
 if (flag('--full') && !node('check-all.mjs')) fail('check-all found drift or a failure: fix it (see /check-game-update), then re-run');
 if (!node('package.mjs')) fail('store zips did not build');
+rmSync(join(ROOT, 'dist'), { recursive: true, force: true }); // build check only: CI rebuilds the zips from the pushed commit
 
 // 4. summary + confirmation
 step('Ready');

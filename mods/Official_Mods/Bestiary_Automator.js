@@ -5110,6 +5110,53 @@ function updateSettingsModalUI() {
   }
 }
 
+// Power saving pads every battle by a fixed 2000 ms in the game itself
+// (powerSaving.gameWillEndAt = now + battle length + 2000), on top of the autoplay delay.
+// With Faster Autoplay on, trim that padding so only the configured delay separates battles.
+const POWER_SAVING_END_PADDING_MS = 2000;
+let powerSavingPacingSub = null;
+let powerSavingTrimmedStartedAt = 0;
+
+const trimPowerSavingEndPadding = () => {
+  try {
+    if (!config.fasterAutoplay) return;
+    const board = globalThis.state?.board;
+    const ps = board?.getSnapshot?.()?.context?.powerSaving;
+    if (!ps || ps.mode !== 'on' || !ps.gameStartedAt || !ps.gameWillEndAt) return;
+    if (ps.gameStartedAt === powerSavingTrimmedStartedAt) return;
+    powerSavingTrimmedStartedAt = ps.gameStartedAt;
+    const startedAt = ps.gameStartedAt;
+    const trimmedEnd = ps.gameWillEndAt - POWER_SAVING_END_PADDING_MS;
+    // Defer: never write board state from inside its own subscriber callback.
+    setTimeout(() => {
+      board.trigger.setState({
+        fn: (prev) => (prev.powerSaving?.gameStartedAt === startedAt
+          ? { ...prev, powerSaving: { ...prev.powerSaving, gameWillEndAt: trimmedEnd } }
+          : prev),
+      });
+    }, 0);
+  } catch (error) {
+    console.warn('[Bestiary Automator] Could not trim power saving end padding:', error);
+  }
+};
+
+const startPowerSavingPacing = () => {
+  if (powerSavingPacingSub || !globalThis.state?.board?.subscribe) return;
+  powerSavingPacingSub = globalThis.state.board.subscribe(trimPowerSavingEndPadding);
+};
+
+const stopPowerSavingPacing = () => {
+  const sub = powerSavingPacingSub;
+  powerSavingPacingSub = null;
+  powerSavingTrimmedStartedAt = 0;
+  try {
+    if (typeof sub === 'function') sub();
+    else sub?.unsubscribe?.();
+  } catch (_) { /* ignore */ }
+};
+
+startPowerSavingPacing();
+
 // Export functionality
 context.exports = {
   toggleAutomation,
@@ -5156,6 +5203,7 @@ context.exports = {
   cleanup: () => {
     // Cleanup function for when mod is disabled
     stopAutomation();
+    stopPowerSavingPacing();
 
     // stopAutomation() early-returns when the loop isn't running (`if (!automationInterval)`),
     // so tear these down directly too — otherwise the game-state observers + visibility

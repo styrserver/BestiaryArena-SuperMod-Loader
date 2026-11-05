@@ -1512,16 +1512,29 @@ can wake a unit for part of a fight). The actor event list shows which status ef
 
 **Per-creature ability constants.** The chunk holds 135 creature metadata entries (119 have a
 `gameId`; the rest are summons such as Larva or Bat), plus event variants written as
-`{...Base, queryTags:[..., "event"], skill:{...}}` (Clot = Slime, Reindeer = Deer B, Dwarf
+`{...Base, queryTags:[..., "event"], skill:{...}}` (Football Elemental also lists spriteId / corpseId before queryTags) (Clot = Slime, Reindeer = Deer B, Dwarf
 Merrymancer, Gummy Raider). A variant inherits its base's numbers and overrides those its own
 tooltip reads; its id comes from its own `name` or the first creature name its tooltip prints.
-The snapshot has 126 creatures. Still missing: Chubby / Spiky / Psychic / Sturdy / Mystic Gazer and
-Football Elemental (their metadata is not in either shape the tool reads). For each, the numbers its ability tooltip
+The snapshot has 127 creatures. Still missing: Chubby / Spiky / Psychic / Sturdy / Mystic Gazer
+(their metadata is not in either shape the tool reads). For each, the numbers its ability tooltip
 reads (cooldowns, durations, damage bases, AP ratios, caps) are stored in the `CREATURE_COMBAT_DATA`
 snapshot in `database/creature-database.js`, keyed by `gameId`. Only plain numbers are kept (nested
 tables such as `EXORI_CD_MS`, fractions and references are skipped). `*_TICKS` constants are stored
-in ms under a `*_MS` name. `ad: null` means the 2000 ms default attack delay. Ranges the tooltip
-does not print (`rangeComponent.range`) are not included. A second `Minotaur Archer` entry (the "Old
+in ms under a `*_MS` name. `ad: null` means the 2000 ms default attack delay. Numbers written inline in a
+creature's class instead of a constant object are stored beside `c`, each only when the class holds
+exactly one literal (a ranged/melee switch or a computed value is left out): `r` attack range
+(`rangeComponent ... range:4`; `99` is the game's own unlimited reach), `rc` whether it is a ranged
+creature (`rangedCreature`), `ic` first-cast delay in ms (`initialCooldownTicks`, skipped when the
+constants already hold an `INITIAL_*COOLDOWN*`). `getCreatureCombatData` returns them as `range`,
+`ranged`, `initialCooldownMs`. `s` lists the creature's summons (`[{ n, st: baseStats, r?, rc?, ic? }]`,
+returned as `summons`): summon metadata has no creature id, so each one is tied to its owner by
+`new <summonClass>(` inside the owner's class, else by the owner's tooltip reading `<summonVar>.baseStats`,
+else by sitting right after the owner's class with no other metadata between (the game's layout when another
+module spawns it; a heuristic). The tooltip rule matches a whole word (plural ok) inside a string literal and
+blanks longer creature names first ("Ancient Scarab" does not hold "Scarab"). The tool prints `WARN` for
+summons it cannot place (currently Trash and Ball, map objects) instead of dropping them silently.
+`describeSummonOwnerRows(gameId, summon, formatTicks)` picks the owner constants that feed a summon: keys with a
+word of the summon's name (`WOLF_BASE_HP` for War Wolf) or `USER` / `PARENT` / `SPAWN` (`HP_PER_USER_AP`). A second `Minotaur Archer` entry (the "Old
 Minotaur Archer" boss: lifesteal below 25% HP) is not the playable one; the tool uses the registry
 `34:{constructor:..,metadata:..}` to pick the entry the game builds per id.
 

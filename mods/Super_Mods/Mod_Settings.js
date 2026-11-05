@@ -17825,10 +17825,14 @@ const OLD_OUTFITS_STYLE_ID = 'mod-settings-old-outfits-style';
 
 // Re-scope the game's old-outfits CSS to the whole page (shinies too: no old shiny sheets
 // exist). `:root:root` outranks the game's `.spritesheet[data-shiny=true]` rules. The
-// Cyclopedia modal is excluded: only its own Old button changes sprites there.
+// Cyclopedia modal is excluded: only its own Old button changes sprites there. The Quest Log
+// list (its scroll viewport is tagged by Quests.js) keeps the current art too.
 function applyOldOutfits(attempt = 0) {
   if (document.getElementById(OLD_OUTFITS_STYLE_ID)) return;
-  const cssText = window.creatureDatabase?.buildOldOutfitsCss?.(':root:root', '[data-cyclopedia-dialog="1"]');
+  const cssText = window.creatureDatabase?.buildOldOutfitsCss?.(
+    ':root:root',
+    ':is([data-cyclopedia-dialog="1"], [data-quests-scroll-bound])'
+  );
   if (!cssText) {
     // Database or game stylesheet may not be ready yet on a cold load: retry for ~5s.
     if (attempt < 10) {
