@@ -6854,13 +6854,25 @@
     }
 
     // Same as logAutosellerDebug but at most once per `ms` per key (for polled/retry paths).
+    // `message` may be a function: it is only called when the line is actually printed, so the
+    // state snapshot is not built on every throttled poll.
     const debugThrottleAt = new Map();
     function logAutosellerDebugThrottled(channel, message, key, ms = 2000) {
         const now = Date.now();
         if (now - (debugThrottleAt.get(key) || 0) < ms) return;
         debugThrottleAt.set(key, now);
         if (debugThrottleAt.size > 100) debugThrottleAt.clear();
-        logAutosellerDebug(channel, message);
+        logAutosellerDebug(channel, typeof message === 'function' ? message() : message);
+    }
+
+    // Sandbox battles (Custom Battles, Better Analytics, Hero Editor ...) have no real rewards: game-end
+    // processing there would act on the previous real battle's leftover results and drop widget.
+    function isBoardSandboxMode() {
+        try {
+            return globalThis.state?.board?.getSnapshot?.()?.context?.mode === 'sandbox';
+        } catch (_) {
+            return false;
+        }
     }
 
     // Any HTTP 429 (from our calls or the game's own) pauses every Autoseller API call for a while:
@@ -10729,6 +10741,8 @@
                 });
                 
                 if (!hasRelevantMutations) return;
+                // Sandbox battles spawn a burst of DOM changes at start and have no autoplay widget to track.
+                if (isBoardSandboxMode()) return;
 
                 if (!isCleaningUp) {
                     schedulePositionAutoBadges();
@@ -11575,12 +11589,17 @@
                     return;
                 }
 
+                if (isBoardSandboxMode()) {
+                    logAutosellerDebugThrottled('GameEnd', 'newGame: sandbox mode — Autoseller game-end processing skipped', 'sandbox', 10000);
+                    return;
+                }
+
                 // Watchdog: games keep starting but our game-end handler never fires.
                 newGamesSinceGameEnd += 1;
                 if (newGamesSinceGameEnd >= 3) {
                     logAutosellerDebugThrottled(
                         'GameEnd',
-                        `WATCHDOG: ${newGamesSinceGameEnd} newGame events without onGameEnd firing; ` +
+                        () => `WATCHDOG: ${newGamesSinceGameEnd} newGame events without onGameEnd firing; ` +
                         `last onGameEnd ${lastGameEndFiredAt ? Math.round((Date.now() - lastGameEndFiredAt) / 1000) + 's ago' : 'never'} (${autosellerDebugState()})`,
                         'no-gameend',
                         5000
@@ -11590,6 +11609,7 @@
                 // Stored so the Power saving watcher can run the same handler: in Power saving mode
                 // the game has no sandbox world, so `newGame` / `world.onGameEnd` never fire.
                 game.world.onGameEnd.once(handleGameEndFired = async () => {
+                    if (isBoardSandboxMode()) return;
                     lastGameEndFiredAt = Date.now();
                     newGamesSinceGameEnd = 0;
                     const boardSnap = cloneServerResults(
@@ -11734,7 +11754,7 @@
             const started = !!ctx.gameStarted;
             const wasStarted = powerSavingPrevGameStarted;
             powerSavingPrevGameStarted = started;
-            if (!wasStarted || started || ctx.powerSaving?.mode !== 'on') return;
+            if (!wasStarted || started || ctx.powerSaving?.mode !== 'on' || ctx.mode === 'sandbox') return;
             if (window.ModCoordination?.isModActive('Board Analyzer')) return;
             if (!handleGameEndFired) {
                 logAutosellerDebugThrottled('GameEnd', 'powersave game end seen but no handler yet (no newGame since load) — skipped', 'ps-no-handler', 5000);
@@ -11881,7 +11901,7 @@
         }
 
         if (dragonPlantActivateGiveUpForDrop) {
-            logAutosellerDebugThrottled('DragonPlant', `skip: gave up for drop=${dropSig} (${autosellerDebugState()})`, 'plant-giveup', 3000);
+            logAutosellerDebugThrottled('DragonPlant', () => `skip: gave up for drop=${dropSig} (${autosellerDebugState()})`, 'plant-giveup', 3000);
             return;
         }
 
@@ -11929,7 +11949,7 @@
         // Drop present but button not ready yet (common under power saving) — keep trying
         logAutosellerDebugThrottled(
             'DragonPlant',
-            `button not clickable: found=${!!button} disabled=${button?.hasAttribute?.('disabled')} ` +
+            () => `button not clickable: found=${!!button} disabled=${button?.hasAttribute?.('disabled')} ` +
             `dataState=${button?.getAttribute?.('data-state')} attempt=${dragonPlantActivateAttempts} (${autosellerDebugState()})`,
             'plant-notclickable',
             2000
@@ -11953,6 +11973,7 @@
         
         // Only proceed if autoplant is enabled
         if (settings.autoMode !== 'autoplant') return;
+        if (isBoardSandboxMode()) return;
 
         // Observer/plant path often runs without our onGameEnd mark in background tabs
         noteBattleEndedForEquipDust('plant-activate');

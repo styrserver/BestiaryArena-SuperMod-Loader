@@ -3912,6 +3912,13 @@ function perfFormatReport() {
       ...apiLines].join('\n')
   ];
   if (perfOverlay.captures.length) parts.push(`== Limit-hit captures ==\n${perfFormatCaptures()}`);
+  // Mods can add their own timings (window.BestiaryPerfReportProviders: functions returning a line or lines).
+  try {
+    const extra = (window.BestiaryPerfReportProviders || [])
+      .map((fn) => { try { return fn(); } catch (_) { return ''; } })
+      .filter(Boolean);
+    if (extra.length) parts.push(`== Mod timings (what the mods measured themselves) ==\n${extra.join('\n')}`);
+  } catch (_) { /* optional section */ }
   return parts.join('\n\n');
 }
 

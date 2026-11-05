@@ -4,6 +4,36 @@
   },
   "notes": [
     {
+      "version": "5.3.1",
+      "changes": [
+        {
+          "mod": "Autoseller",
+          "type": "fixed",
+          "text": "Autoseller no longer reacts to sandbox battles."
+        },
+        {
+          "mod": "Better Analytics",
+          "type": "added",
+          "text": "New Advanced button in the battle log shows, under each hit, how raw damage became the final number (armor / magic resist reduction, overkill)."
+        },
+        {
+          "mod": "Better Analytics",
+          "type": "fixed",
+          "text": "Copying the battle log no longer freezes for a moment, and repeat battles start with less delay."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "fixed",
+          "text": "Cyclops Smith's combat details now show the right damage (1 + 100% AD) instead of numbers borrowed from Dark Magician."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "added",
+          "text": "The debugger report now includes a Mod timings section."
+        }
+      ]
+    },
+    {
       "version": "5.3.0",
       "changes": [
         {

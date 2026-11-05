@@ -126,7 +126,10 @@
         const defs = objects.get(r[1]);
         if (!defs) continue;
         let def = null;
-        for (const d of defs) if (d.at <= from + 14000) def = d; // nearest preceding
+        // Nearest preceding definition. One defined after the next creature's metadata starts (`d.at >= to`)
+        // belongs to that later creature: the segment only reaches it through a tooltip helper function
+        // that sits between two creatures (Cyclops Smith used to read Dark Magician's DMG_BASE 5 / DMG_PER_AP 0.6).
+        for (const d of defs) if (d.at <= from + 14000 && d.at < to) def = d;
         const field = def && r[2] in def.obj ? def.obj[r[2]] : undefined;
         const val = field ? scalar(field.raw) : undefined;
         if (!val) continue;

@@ -1127,12 +1127,20 @@
 
             modLifecycleHandlersSetup = false;
             teardownModCoordination();
+            const perfProviders = window.BestiaryPerfReportProviders;
+            if (Array.isArray(perfProviders)) {
+                const at = perfProviders.indexOf(perfReportProvider);
+                if (at >= 0) perfProviders.splice(at, 1);
+            }
             // Reset the module-load guard so a re-enable / soft reload re-runs the body.
             try { delete window.__betterAnalyticsLoaded; } catch (_) { window.__betterAnalyticsLoaded = false; }
         } catch (error) {
             console.error(`[${modName}][ERROR][cleanup] Error during cleanup:`, error);
         }
     }
+    // Timings show up in the Mod Settings debugger report ("Mod timings"); removed again in cleanup().
+    (window.BestiaryPerfReportProviders = window.BestiaryPerfReportProviders || []).push(perfReportProvider);
+
     function cleanupAllDPSDisplays() {
         try {
             // Remove all DPS displays, including those in wrong locations
@@ -1216,6 +1224,7 @@
     const LOG_BODY_ID = 'mod-better-sandbox-log-body';
     const LOG_LIST_ID = 'mod-better-sandbox-log-list';
     const LOG_SUBTITLE_ID = 'mod-better-sandbox-log-subtitle';
+    const LOG_ADVANCED_BTN_ID = 'mod-better-sandbox-log-advanced';
     const LOG_COPY_BTN_ID = 'mod-better-sandbox-log-copy';
     const LOG_CLEAR_BTN_ID = 'mod-better-sandbox-log-clear';
     const LOG_SEARCH_INPUT_ID = 'mod-better-sandbox-log-search-input';
@@ -1283,6 +1292,7 @@
         left: 120, top: 80, width: 400, height: 520, isOpen: false,
         activeTab: 'units', gameSpeedPercent: 100, slowMotionEnabled: false,
         coloringBordersEnabled: true, breadcrumbTrailsEnabled: true,
+        logAdvanced: false,
         logFilters: { ...LOG_FILTER_DEFAULTS }
     };
     const PANEL_LAYOUT = { minWidth: 300, maxWidth: 900, minHeight: 280, maxHeight: 900 };
@@ -1415,6 +1425,7 @@
     const lastActorTileByActor = new WeakMap();
     let logFilters = { ...LOG_FILTER_DEFAULTS };
     let logSearchQuery = '';
+    let logAdvancedMetrics = false; // battle log: show the damage calculation under each hit
     let activeTab = 'units';
     let gameSpeedPercent = 100;
     let slowMotionEnabled = false;
@@ -3024,10 +3035,15 @@
         } else {
             Object.assign(logFilters, LOG_FILTER_DEFAULTS);
         }
+        const perf = createPerfStages('toggleAllLogFilters');
         saveLogFilters();
+        perf.mark('saveFilters');
         invalidateBattleLogView();
         updateLogFilterUi();
+        perf.mark('filterUi');
         renderBattleLog(true);
+        perf.mark('render');
+        perf.done();
     }
 
     function debounce(fn, wait) {
@@ -3099,7 +3115,25 @@
 
     function getLogViewSignature() {
         const q = (logSearchQuery || '').trim().toLowerCase();
-        return `${getLogFiltersSignature()}:${q}`;
+        return `${getLogFiltersSignature()}:${q}:${logAdvancedMetrics ? 'adv' : 'std'}`;
+    }
+
+    function updateAdvancedMetricsUi() {
+        const btn = document.getElementById(LOG_ADVANCED_BTN_ID);
+        if (!btn) return;
+        btn.classList.toggle('active', logAdvancedMetrics);
+        btn.setAttribute('aria-pressed', logAdvancedMetrics ? 'true' : 'false');
+        btn.title = t(logAdvancedMetrics
+            ? 'mods.betterAnalytics.advancedMetricsTitleHide'
+            : 'mods.betterAnalytics.advancedMetricsTitleShow');
+    }
+
+    function toggleAdvancedMetrics() {
+        logAdvancedMetrics = !logAdvancedMetrics;
+        savePanelSettings({ logAdvanced: logAdvancedMetrics });
+        updateAdvancedMetricsUi();
+        invalidateBattleLogView();
+        renderBattleLog(true);
     }
 
     function invalidateBattleLogView() {
@@ -3442,9 +3476,10 @@
         if (breadcrumbTrailsEnabled && isPanelOpen()) scheduleBreadcrumbRender();
     }
 
-    function buildFilteredBattleLogText() {
+    function buildFilteredBattleLogText(perf) {
         const lines = [];
         const entries = buildDisplayBattleLogEntries(battleLog);
+        perf?.mark('displayEntries');
         lines.push(t('mods.betterAnalytics.battleLogTitle'));
         const activeFilters = getActiveLogFilterLabels();
         lines.push(tReplace('mods.betterAnalytics.exportTotalEntries', { count: entries.length }));
@@ -3465,10 +3500,13 @@
             );
             return lines.join('\n');
         }
+        const summaryKeyBefore = cachedPreparedBattleLogSummaryKey;
         getPreparedBattleLogSummary();
+        perf?.mark(`summary(${summaryKeyBefore !== cachedPreparedBattleLogSummaryKey ? 'rebuilt' : 'cached'})`);
         for (const entry of entries) {
             lines.push(formatBattleLogEntryForExport(entry));
         }
+        perf?.mark('formatLines');
         return lines.join('\n');
     }
 
@@ -3500,8 +3538,11 @@
 
     async function copyFilteredBattleLog(button) {
         try {
-            const text = buildFilteredBattleLogText();
+            const perf = createPerfStages('copyFilteredBattleLog');
+            const text = buildFilteredBattleLogText(perf);
             const ok = await copyTextToClipboard(text);
+            perf.mark('clipboard');
+            perf.done(` chars=${text.length}`);
             if (button) {
                 const original = button.textContent;
                 button.textContent = ok
@@ -3599,6 +3640,8 @@
             amount,
             rawAmount: rawAmount != null && rawAmount !== amount ? rawAmount : null,
             overkill: !isHeal && event.overkill > 0 ? Math.abs(Math.round(Number(event.overkill))) : 0,
+            defKey: !isHeal ? (event.defKey ?? null) : null,
+            defValue: !isHeal && event.defValue != null ? event.defValue : null,
             damageType,
             actionSource: event.actionSource || (isHeal ? 'heal' : 'unknown'),
             crit: event.crit === true
@@ -4551,6 +4594,22 @@
         return points;
     }
 
+    // Armor / magic resist the target had when the hit landed (read before the damage is applied),
+    // so the log tooltip can show the exact `raw × 100 / (100 + stat)` calculation. Cheap primary
+    // read only: this runs on every damage event.
+    function readHitDefense(actor, damageType) {
+        if (damageType === 'trueDamage') return { key: null, value: null };
+        const key = damageType === 'magic' ? 'magicResist' : 'armor';
+        try {
+            const hp = actor?.hp;
+            for (const alias of (LIVE_STAT_ALIASES[key] || [key])) {
+                const live = describeStatBag(hp?.[alias])?.readLive;
+                if (live != null && Number.isFinite(Number(live))) return { key, value: Number(live) };
+            }
+        } catch (_) { /* tooltip falls back to the implied range */ }
+        return { key, value: null };
+    }
+
     function peekAppliedDamageBreakdown(hp, opts) {
         if (typeof hp.calculateAppliedDamage !== 'function') return null;
         const damageType = opts.damageType || 'physical';
@@ -4583,6 +4642,7 @@
             hp.applyDamage = (opts = {}) => {
                 actor.__bsSuppressHpStatLog = true;
                 const preCalc = peekAppliedDamageBreakdown(hp, opts);
+                const hitDefense = readHitDefense(actor, opts.damageType || 'physical');
                 const result = actor.__bsOrigApplyDamage(opts);
                 const rawAmount = Number(opts.points);
                 const appliedAmount = Number(result);
@@ -4597,6 +4657,8 @@
                         points: -appliedAmount,
                         rawAmount: Number.isFinite(rawAmount) ? rawAmount : null,
                         overkill: overkill > 0 ? overkill : null,
+                        defKey: hitDefense.key,
+                        defValue: hitDefense.value,
                         damageType: opts.damageType || result?.damageType || 'physical',
                         crit: opts.crit === true || result?.crit === true,
                         actionSource: resolveActionSourceDisplay(opts, result, fromActor, false)
@@ -13431,7 +13493,15 @@
         return statsMap;
     }
 
+    // The roster names/tiles only depend on the board setup. Resolving every piece costs ~130 ms, and the
+    // board preview cache is dropped at every battle end, so keep the registry per setup signature: the
+    // next Start of the same setup (and Copy / summary after a fight) skip the work.
+    let cachedRosterRegistry = null;
+    let cachedRosterRegistrySig = '';
+
     function buildBattleLogRosterRegistry() {
+        const rosterSig = getBoardPreviewCacheSig();
+        if (cachedRosterRegistry && cachedRosterRegistrySig === rosterSig) return cachedRosterRegistry;
         const units = getBoardPreviewUnits();
         const allyNames = new Set();
         const enemyNames = new Set();
@@ -13450,7 +13520,13 @@
             if (unit.villain) enemyNames.add(unit.name);
             else allyNames.add(unit.name);
         }
-        return { allyNames, enemyNames, rosterKeys, rosterUnits };
+        const registry = { allyNames, enemyNames, rosterKeys, rosterUnits };
+        // An empty roster means the board was not resolved yet: do not keep it.
+        if (rosterUnits.length) {
+            cachedRosterRegistry = registry;
+            cachedRosterRegistrySig = rosterSig;
+        }
+        return registry;
     }
 
     function findBattleLogStatsByRosterName(statsMap, name, villain) {
@@ -14014,6 +14090,84 @@
         content.innerHTML = buildBattleLogSummaryPanelHtml();
     }
 
+    function fmtCalcNum(n) {
+        return String(Number(Number(n).toFixed(2)));
+    }
+
+    // Advanced metrics for one damage line: how raw damage became the applied number. Game rule:
+    // dmg × 100 / (100 + armor | magic resist), rounded down; true damage skips it.
+    // Returns an ordered list of { cls, label?, value, sub? } chips (empty when there is nothing to add).
+    function buildDamageAdvancedChips(entry) {
+        if (!entry || entry.kind !== 'damage') return [];
+        const applied = entry.amount;
+        const raw = entry.rawAmount != null ? entry.rawAmount : applied;
+        const chips = [];
+        const rawChip = { cls: 'raw', label: t('mods.betterAnalytics.advRaw'), value: fmtCalcNum(raw) };
+        if (entry.damageType === 'trueDamage') {
+            chips.push(rawChip, { cls: 'true', value: t('mods.betterAnalytics.advTrueDamage') });
+        } else {
+            const isMagic = entry.damageType === 'magic';
+            const defLabel = t(isMagic ? 'mods.betterAnalytics.advMrShort' : 'mods.betterAnalytics.advArmorShort');
+            const defCls = isMagic ? 'mr' : 'arm';
+            if (entry.defValue != null) {
+                const def = Math.max(0, entry.defValue);
+                const exact = (raw * 100) / (100 + def);
+                const expected = Math.max(Math.floor(exact), 0);
+                const takes = 10000 / (100 + def);
+                chips.push(
+                    rawChip,
+                    {
+                        cls: defCls,
+                        label: defLabel,
+                        value: fmtCalcNum(def),
+                        sub: tReplace('mods.betterAnalytics.advReduces', { pct: fmtCalcNum(100 - takes) })
+                    },
+                    {
+                        cls: 'calc',
+                        value: `${fmtCalcNum(raw)} × 100 / (100 + ${fmtCalcNum(def)}) = ${fmtCalcNum(exact)} → ${expected}`
+                    }
+                );
+                if (expected !== applied && !(entry.overkill > 0)) {
+                    chips.push({
+                        cls: 'warn',
+                        value: tReplace('mods.betterAnalytics.advOther', { expected, applied })
+                    });
+                }
+            } else if (raw !== applied && applied > 0) {
+                // Stat not captured: show the range of values that would turn this raw into this applied amount.
+                const lo = Math.max(0, (100 * raw) / (applied + 1) - 100);
+                const hi = Math.max(0, (100 * raw) / applied - 100);
+                chips.push(rawChip, {
+                    cls: `${defCls} implied`,
+                    label: defLabel,
+                    value: `≈ ${fmtCalcNum(lo)}–${fmtCalcNum(hi)}`,
+                    sub: t('mods.betterAnalytics.advImplied')
+                });
+            } else {
+                chips.push(rawChip, { cls: 'muted', value: t('mods.betterAnalytics.advNoReduction') });
+            }
+        }
+        if (entry.overkill > 0) {
+            chips.push({
+                cls: 'overkill',
+                value: tReplace('mods.betterAnalytics.advOverkill', { n: entry.overkill })
+            });
+        }
+        return chips;
+    }
+
+    function renderDamageAdvancedHtml(entry) {
+        if (!logAdvancedMetrics) return '';
+        const chips = buildDamageAdvancedChips(entry);
+        if (!chips.length) return '';
+        const html = chips.map((chip) => {
+            const label = chip.label ? `<span class="bs-adv-label">${escapeHtml(chip.label)}</span>` : '';
+            const sub = chip.sub ? `<span class="bs-adv-sub">${escapeHtml(chip.sub)}</span>` : '';
+            return `<span class="bs-adv-chip ${chip.cls}">${label}<span class="bs-adv-value">${escapeHtml(chip.value)}</span>${sub}</span>`;
+        }).join('');
+        return `<div class="bs-log-adv">${html}</div>`;
+    }
+
     function renderLogDamageAmount(entry) {
         const { applied, showRaw, raw } = resolveLogDamageDisplay(entry.amount, entry.rawAmount, { roundRaw: false });
         if (showRaw) {
@@ -14021,6 +14175,7 @@
         }
         return `<span class="bs-log-dmg">${applied}</span>`;
     }
+
 
     function buildPanelExportText() {
         const lines = [];
@@ -14545,6 +14700,51 @@
             #${PANEL_ID} .bs-log-toolbar-actions .bs-log-filter.filter-all {
                 font-weight: bold;
             }
+            #${PANEL_ID} .bs-log-advanced { color: #888; }
+            #${PANEL_ID} .bs-log-advanced.active { color: var(--bs-gold); font-weight: bold; }
+            #${PANEL_ID} .bs-log-adv {
+                display: flex;
+                flex-wrap: wrap;
+                align-items: stretch;
+                gap: 3px 4px;
+                margin: 2px 0 3px 14px;
+                padding-left: 6px;
+                border-left: 2px solid rgba(229, 192, 123, 0.35);
+                font-size: 9px;
+                line-height: 1.3;
+            }
+            #${PANEL_ID} .bs-adv-chip {
+                display: inline-flex;
+                align-items: baseline;
+                gap: 4px;
+                padding: 1px 6px;
+                background: rgba(255, 255, 255, 0.05);
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                color: #ABB2BF;
+                white-space: nowrap;
+            }
+            #${PANEL_ID} .bs-adv-label {
+                color: #777;
+                text-transform: uppercase;
+                letter-spacing: 0.04em;
+                font-size: 8px;
+            }
+            #${PANEL_ID} .bs-adv-value { color: #D7DAE0; font-weight: 600; }
+            #${PANEL_ID} .bs-adv-sub { color: #98C379; }
+            #${PANEL_ID} .bs-adv-chip.raw .bs-adv-value { color: #E5C07B; }
+            #${PANEL_ID} .bs-adv-chip.arm { border-color: rgba(229, 192, 123, 0.35); }
+            #${PANEL_ID} .bs-adv-chip.arm .bs-adv-label { color: #E5C07B; }
+            #${PANEL_ID} .bs-adv-chip.mr { border-color: rgba(97, 175, 239, 0.4); }
+            #${PANEL_ID} .bs-adv-chip.mr .bs-adv-label { color: #61AFEF; }
+            #${PANEL_ID} .bs-adv-chip.implied .bs-adv-value { color: #ABB2BF; font-style: italic; }
+            #${PANEL_ID} .bs-adv-chip.implied .bs-adv-sub { color: #777; }
+            #${PANEL_ID} .bs-adv-chip.calc { background: transparent; border-style: dashed; color: #888; }
+            #${PANEL_ID} .bs-adv-chip.calc .bs-adv-value { color: #ABB2BF; font-weight: 400; }
+            #${PANEL_ID} .bs-adv-chip.true .bs-adv-value { color: #C678DD; }
+            #${PANEL_ID} .bs-adv-chip.overkill .bs-adv-value { color: #E06C75; }
+            #${PANEL_ID} .bs-adv-chip.warn { border-color: rgba(224, 108, 117, 0.5); }
+            #${PANEL_ID} .bs-adv-chip.warn .bs-adv-value { color: #E06C75; font-weight: 400; }
+            #${PANEL_ID} .bs-adv-chip.muted .bs-adv-value { color: #777; font-weight: 400; }
             #${PANEL_ID} .bs-log-pathing { color: #9db4d8; }
             #${PANEL_ID} .bs-log-stat { color: #d4b896; }
             #${PANEL_ID} .bs-log-stat-delta.positive { color: #9fd49f; }
@@ -16047,7 +16247,8 @@
         }
         return `<div class="bs-log-line">${tickLabel} ${renderLogName(entry.from, entry.fromVillain, entry.fromKey)} → ` +
             `${renderLogName(entry.to, entry.toVillain, entry.toKey)}: ` +
-            `${renderLogDamageAmount(entry)} ${sourceLabel}${typeLabel}${renderFoldedStatsHtml(entry.foldedStats)}${defeatedHtml}</div>`;
+            `${renderLogDamageAmount(entry)} ${sourceLabel}${typeLabel}${renderFoldedStatsHtml(entry.foldedStats)}${defeatedHtml}` +
+            `${renderDamageAdvancedHtml(entry)}</div>`;
     }
 
     function scheduleBattleLogRender() {
@@ -16081,15 +16282,67 @@
         lastScrolledBattleLogRevision = battleLogRevision;
     }
 
+    // Stage timer for the battle log's heavy paths. Logs (verbose level) only when the whole thing is slow,
+    // with a per-stage breakdown, so a slow click can be diagnosed from the console alone.
+    // Slow samples (>= PERF_SAMPLE_MIN_MS) are kept (last 40) and handed to the Debugger report ("Mod timings"),
+    // so a slow Start / click can be read from one copy of that report without opening the console.
+    // Fast calls only cost a few performance.now() reads: nothing is allocated or formatted for them.
+    const PERF_SAMPLE_MIN_MS = 15;
+    const perfSamples = [];
+    function recordPerfSample(label, totalMs, detail) {
+        perfSamples.push({ ts: Date.now(), label, totalMs, detail });
+        if (perfSamples.length > 40) perfSamples.shift();
+    }
+    function perfReportProvider() {
+        if (!perfSamples.length) return '';
+        const rows = perfSamples.slice(-12).map((s) =>
+            `  ${new Date(s.ts).toISOString().slice(11, 23)} ${s.label}: ${Math.round(s.totalMs * 10) / 10}ms ${s.detail}`.trimEnd());
+        const worstByLabel = new Map();
+        for (const s of perfSamples) {
+            const prev = worstByLabel.get(s.label);
+            if (!prev || s.totalMs > prev.totalMs) worstByLabel.set(s.label, s);
+        }
+        const worstRows = [...worstByLabel.values()]
+            .sort((a, b) => b.totalMs - a.totalMs)
+            .map((s) => `  ${s.label}: ${Math.round(s.totalMs * 10) / 10}ms ${s.detail}`.trimEnd());
+        const NL = '\n';
+        return `[${modName}] last ${rows.length} slow timings (>= ${PERF_SAMPLE_MIN_MS}ms)${NL}${rows.join(NL)}` +
+            (worstRows.length > 1 ? `${NL}[${modName}] slowest per kind${NL}${worstRows.join(NL)}` : '');
+    }
+
+    function createPerfStages(label, logThresholdMs = 40) {
+        const t0 = performance.now();
+        let last = t0;
+        const names = [];
+        const times = [];
+        return {
+            mark(name) {
+                const now = performance.now();
+                names.push(name);
+                times.push(now - last);
+                last = now;
+            },
+            done(extra = '') {
+                const total = performance.now() - t0;
+                if (total < PERF_SAMPLE_MIN_MS) return;
+                const detail = `(${names.map((n, i) => `${n}=${Math.round(times[i])}ms`).join(', ')})${extra}`;
+                recordPerfSample(label, total, detail);
+                if (total >= logThresholdMs) console.log(`[${modName}][Perf] ${label} took ${Math.round(total)}ms ${detail}`);
+            }
+        };
+    }
+
     function renderBattleLog(force) {
         const list = document.getElementById(LOG_LIST_ID);
         const body = document.getElementById(LOG_BODY_ID);
         const panel = document.getElementById(PANEL_ID);
         if (!list || !body || !panel || panel.style.display === 'none') return;
 
+        const perf = createPerfStages('renderBattleLog');
         const filterSig = getLogViewSignature();
         const shouldScroll = battleLogRevision > lastScrolledBattleLogRevision;
         const visible = getVisibleBattleLogEntries();
+        perf.mark('visibleEntries');
         let consolExtra = 0;
         for (const entry of visible) {
             if (entry.defeated) consolExtra++;
@@ -16130,13 +16383,23 @@
         }
 
         // Full re-render: consolidation may rewrite earlier lines (death → prior hit).
-        list.innerHTML = visible.map(buildBattleLogEntryHtml).join('');
+        const summaryKeyBefore = cachedPreparedBattleLogSummaryKey;
+        getPreparedBattleLogSummary(); // names / colors for every line come from it
+        const summaryRebuilt = summaryKeyBefore !== cachedPreparedBattleLogSummaryKey;
+        perf.mark('summary');
+        const html = visible.map(buildBattleLogEntryHtml).join('');
+        perf.mark('buildHtml');
+        list.innerHTML = html;
+        perf.mark('innerHTML');
         lastRenderedVisibleCount = visible.length;
         lastRenderedFilterSig = filterSig;
         lastRenderedLogSignature = signature;
         lastRenderedBattleLogRevision = battleLogRevision;
         updateLogToolbarTitle();
+        perf.mark('toolbar');
         if (shouldScroll) scrollBattleLogToEnd(body);
+        perf.mark('scroll');
+        perf.done(` entries=${visible.length} summaryRebuilt=${summaryRebuilt}`);
     }
 
     function switchTab(tab) {
@@ -16205,23 +16468,33 @@
         syncBoardTrackFromContext();
 
         const onNewGame = (event) => {
+            // Runs synchronously inside the game's Start click, so any time here is felt as start lag.
+            const perf = createPerfStages('onNewGame (battle start)', 15);
             snapshotOpenAbilityKeysFromDom(document.getElementById(UNITS_BODY_ID));
+            perf.mark('openAbilityKeys');
             teardownWorldSubscriptions();
             activeWorld = event?.world ?? getBoardContext()?.world ?? null;
             resetBattleLogState();
             resetPanelFightTickState();
+            perf.mark('resetState');
             if (activeWorld) ensureFightTracking(activeWorld);
+            perf.mark('ensureFightTracking');
             boardTrack.gameStarted = true;
             boardTrack.roomId = resolveCurrentRoomId();
             syncBoardTrackFromContext();
             teardownPanelGameTimerSub();
             syncPanelTickTracking();
             lastUnitsRenderKey = '';
+            perf.mark('boardTrackSync');
             render();
+            perf.mark('render');
             if (isPanelOpen()) scheduleBoardDuplicateBordersRefresh();
+            perf.mark('borders');
+            perf.done(` panelOpen=${isPanelOpen()} tab=${activeTab}`);
         };
 
         const onEnd = () => {
+            const perfEnd = createPerfStages('onEnd (battle end)', 15);
             if (!slowMotionEnabled) restoreTurboIfSuspended();
             const world = getActiveWorld() || getBoardContext()?.world;
             if (world?.tickEngine?.setTickInterval) {
@@ -16242,8 +16515,11 @@
             pendingUnitsForceRefresh = true;
             syncPanelFightTickFromSnapshot();
             syncPanelTickTracking();
+            perfEnd.mark('teardown');
             render();
+            perfEnd.mark('render');
             if (isPanelOpen()) scheduleBoardDuplicateBordersRefresh();
+            perfEnd.done(` panelOpen=${isPanelOpen()} tab=${activeTab}`);
         };
 
         boardUnsubs.push(board.on('newGame', onNewGame));
@@ -16511,6 +16787,16 @@
             toggleAllLogFilters();
         });
         toolbarActions.appendChild(allFilterBtn);
+        const advancedBtn = document.createElement('button');
+        advancedBtn.type = 'button';
+        advancedBtn.id = LOG_ADVANCED_BTN_ID;
+        advancedBtn.className = 'bs-log-clear bs-log-advanced';
+        advancedBtn.textContent = t('mods.betterAnalytics.advancedMetrics');
+        advancedBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleAdvancedMetrics();
+        });
+        toolbarActions.appendChild(advancedBtn);
         const copyBtn = document.createElement('button');
         copyBtn.type = 'button';
         copyBtn.id = LOG_COPY_BTN_ID;
@@ -16581,6 +16867,8 @@
         slowMotionEnabled = s.slowMotionEnabled === true;
         coloringBordersEnabled = s.coloringBordersEnabled !== false;
         breadcrumbTrailsEnabled = s.breadcrumbTrailsEnabled !== false;
+        logAdvancedMetrics = s.logAdvanced === true;
+        updateAdvancedMetricsUi();
         syncTurboBlockFlag();
         if (slowMotionEnabled) suspendTurboForSlowMotion();
         updateSpeedSliderUi();
