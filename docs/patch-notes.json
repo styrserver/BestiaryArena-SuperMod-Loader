@@ -4,6 +4,26 @@
   },
   "notes": [
     {
+      "version": "5.3.2",
+      "changes": [
+        {
+          "mod": "Mod Settings",
+          "type": "added",
+          "text": "Auto-refresh browser now has two rules: every N minutes (the timer-mode choice is gone; whichever timer comes first applies) and when battles run much slower than at page load. Both wait for the battle to end. Hover tooltips now wrap at a maximum width. The debugger report lists which part of the page owns growing DOM nodes."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "added",
+          "text": "Maps tab shows the most-victories record holder for the selected map."
+        },
+        {
+          "mod": "Autoseller",
+          "type": "fixed",
+          "text": "Autosqueeze and Autosell now run after every battle in Power saving mode; skipped squeezes list the reason in the Error Log."
+        }
+      ]
+    },
+    {
       "version": "5.3.1",
       "changes": [
         {

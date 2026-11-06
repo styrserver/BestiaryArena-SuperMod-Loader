@@ -13,6 +13,41 @@
  *   - Modal fallback MutationObserver + ESC when onClose path fails
  *   - Better Bestiary cross-mod contracts (window.BetterBestiary.isOpen, simulateEscapePresses)
  *
+ * RANKINGS API (CONFIG.RANKINGS_API_URL; read-only, PostgreSQL-backed, used by the Rankings tab)
+ *   Base URL: https://bestiary-arena-ranking.vercel.app  (NOT bestiaryarena.com — that is the game server, /api/trpc only)
+ *   Auth: none. Methods: GET, OPTIONS only. CORS origin from API_CORS_ORIGIN env (default *).
+ *   Override in browser: localStorage.setItem('cyclopedia_rankings_api_url', 'https://<host>/api/v1/rankings')
+ *
+ *   GET /api/v1/rankings — leaderboard for one season
+ *     season     default 2; 0 = lifetime / all-time. For season > 0 players come from lifetime stats; per-season
+ *                rankPoints/ticks/floors are used when a player_stats row exists, else lifetime values fall back.
+ *     qualified  default true = only players who completed every ladder map (mapsRequired, currently 82; ~80 rows).
+ *                qualified=false = everyone with synced stats (~600+).
+ *     limit      1–5000; omitted = all matching rows.      offset  default 0; `rank` = offset + index.
+ *     sort       level (default) | name | rankPoints | timeSum | floors | successfulRuns | dailySeashell |
+ *                huntingTasks | raids | perfectCreatures | bisEquipment | bagOutfits
+ *     order      desc (default) | asc.      search  case-insensitive username substring (`name` alias).
+ *     200 → { total, limit|null, offset, rankings: [{ rank, name, level, successfulRuns, rankPoints, timeSum, floors,
+ *             dailySeashell, huntingTasks, raids, perfectCreatures, bisEquipment, bagOutfits }], timestamp }
+ *     Default sort level desc, then name asc. Cache-Control: public, s-maxage=300, stale-while-revalidate=600.
+ *     Errors: 400 {error:"Invalid season|limit|offset|sort|order"}, 405 Method not allowed, 500 {error}.
+ *
+ *   GET /api/v1/maps — every ROOMS room with victory totals, sorted by totalCount desc
+ *     200 → { mapsRequired, maps: [{ roomId, name|null, ladder, raid, players (>=1 victory), totalCount }], timestamp }
+ *
+ *   GET /api/v1/maps/rankings — per-map leaderboard (only players with count > 0)
+ *     room (required, `roomId` alias; e.g. kof), limit default 100 (1–5000), offset, search,
+ *     sort count (default) | name | rankPoints | ticks | floor, order desc (default) | asc.
+ *     200 → { room: {roomId,name,ladder,raid}, total, limit, offset,
+ *             rankings: [{ rank, name, count, rankPoints, floor, ticks, rankTicks, floorTicks }], timestamp }
+ *     rankPoints/floor/ticks/rankTicks/floorTicks = player's personal bests on that room (same as profile `rooms`).
+ *     Refreshed with each profile sync (every 6h). Errors: 400 Invalid room|limit|offset|sort|order.
+ *
+ *   GET /api/v1/health — 200 { ok, playerCount, qualifiedCount, mapsRequired, lifetimeStatsCount (season=0 rows),
+ *     lastSyncAt|null }; 503 { ok:false, error:"Database unavailable" }.
+ *
+ *   Server env (Vercel): DATABASE_URL (required, PostgreSQL), API_CORS_ORIGIN (optional).
+ *
  * SECTION INDEX (incremental refactor — line numbers shift as code moves):
  *   1. Configuration & Constants
  *   2. Formatting & Small UI Helpers (FormatUtils, debounce, profile HTML, search bar)
@@ -1587,6 +1622,8 @@ const CYCLOPEDIA_ASSETS = {
   eventMini: 'https://bestiaryarena.com/assets/icons/event-mini-icon.png',
   enemy: 'https://bestiaryarena.com/assets/icons/enemy.png',
   stamina: 'https://bestiaryarena.com/assets/icons/stamina.png',
+  highscore: 'https://bestiaryarena.com/assets/icons/highscore.png',
+  matchCount: 'https://bestiaryarena.com/assets/icons/match-count.png',
   backgroundDark: 'https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png'
 };
 
@@ -3083,6 +3120,32 @@ const cyclopediaApiPendingRequests = new Map();
 
 function clearCyclopediaApiPendingRequests() {
   cyclopediaApiPendingRequests.clear();
+}
+
+const MAP_RECORD_TTL_MS = 10 * 60 * 1000;
+/**
+ * Most-victories leader for a room via /maps/rankings?room=<id>&limit=1 (sibling of RANKINGS_API_URL).
+ * Resolves { name, count, players } or null when the API has no rows for the room (or on any failure).
+ * Cached in cyclopediaState.cache.leaderboardData, so it is cleared with the rest of the cache.
+ */
+async function fetchMapRecordLeader(roomId, signal = null) {
+  if (!roomId) return null;
+  const cacheKey = `map-record-leader-${roomId}`;
+  const cached = cyclopediaState.getLeaderboardData(cacheKey);
+  if (cached && Date.now() - cached.timestamp < MAP_RECORD_TTL_MS) return cached.data;
+  try {
+    const base = START_PAGE_CONFIG.RANKINGS_API_URL.replace(/\/rankings\/?$/, '');
+    const url = `${base}/maps/rankings?room=${encodeURIComponent(roomId)}&limit=1`;
+    const data = await fetchWithDeduplication(url, cacheKey, 0, signal);
+    const top = Array.isArray(data?.rankings) ? data.rankings[0] : null;
+    const count = Number(top?.count);
+    const leader = top?.name && count > 0 ? { name: String(top.name), count, players: Number(data.total) || 0 } : null;
+    cyclopediaState.setLeaderboardData(cacheKey, { data: leader, timestamp: Date.now() });
+    return leader;
+  } catch (error) {
+    if (!isFetchAborted(error)) console.warn(`[Cyclopedia] Map record fetch failed for ${roomId}:`, error);
+    return null;
+  }
 }
 
 function isFetchAborted(error) {
@@ -15222,7 +15285,65 @@ function createMapInfoSection(selectedMap, roomName) {
   } catch (error) {
     console.warn('[Cyclopedia] Error accessing defeat count:', error);
   }
-  
+
+  // Most-played record (top player by victories): banner in the victories-overlay style, icons instead of words.
+  // Sits above the player's own victories overlay when present. Placeholder until the API returns a row.
+  const hasOwnCount = !!thumbnailContainer.lastElementChild?.title?.endsWith('victories');
+  const recordBanner = document.createElement('div');
+  recordBanner.style.cssText = `
+    position: absolute;
+    bottom: ${hasOwnCount ? 38 : 8}px;
+    left: 8px;
+    right: 8px;
+    background-image: url("https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png");
+    background-repeat: repeat;
+    background-position: center;
+    color: #fff7da;
+    font-size: 11px;
+    font-weight: bold;
+    font-family: ${CYCLOPEDIA_STATS_FONT};
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    line-height: 1;
+    text-shadow: 0 1px 1px #000;
+    padding: 1px 6px;
+    border-radius: 4px;
+    border: 3px solid transparent;
+    border-image: url("https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png") 3 fill;
+  `;
+  const makeRecordIcon = (src, alt) => {
+    const icon = document.createElement('img');
+    icon.src = src;
+    icon.alt = alt;
+    icon.className = 'pixelated';
+    icon.style.cssText = 'display: block; flex-shrink: 0;';
+    return icon;
+  };
+  const recordName = document.createElement('span');
+  recordName.style.cssText = 'overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;';
+  const recordCount = document.createElement('span');
+  recordCount.style.whiteSpace = 'nowrap';
+  const renderRecordBanner = (leader) => {
+    recordName.textContent = leader ? leader.name : '-';
+    recordCount.textContent = leader ? FormatUtils.compact(leader.count) : '-';
+    recordBanner.title = leader
+      ? `Record: ${leader.name}, ${FormatUtils.number(leader.count)} victories (${FormatUtils.number(leader.players)} players)`
+      : 'No record available yet';
+  };
+  renderRecordBanner(null);
+  recordBanner.append(
+    makeRecordIcon(CYCLOPEDIA_ASSETS.highscore, 'Record'),
+    recordName,
+    makeRecordIcon(CYCLOPEDIA_ASSETS.matchCount, 'Victories'),
+    recordCount
+  );
+  thumbnailContainer.appendChild(recordBanner);
+  fetchMapRecordLeader(selectedMap).then((leader) => {
+    if (leader) renderRecordBanner(leader);
+  });
+
   return mapInfoDiv;
 }
 

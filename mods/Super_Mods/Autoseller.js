@@ -6922,6 +6922,32 @@
         } catch (_) { /* diagnostics only */ }
     }
 
+    // Squeeze skipped for a creature drop: say why in the popup Error Log (default log level hides console.log).
+    const squeezeSkipReportedAt = new Map();
+    function reportSqueezeSkip(reason, detail) {
+        const key = `${reason}|${detail || ""}`;
+        const now = Date.now();
+        if (now - (squeezeSkipReportedAt.get(key) || 0) < 60000) return;
+        squeezeSkipReportedAt.set(key, now);
+        if (squeezeSkipReportedAt.size > 50) squeezeSkipReportedAt.clear();
+        try {
+            window.BestiaryLoaderErrorLog?.report?.("Autoseller", `Not squeezed: ${reason}`, detail || "");
+        } catch (_) { /* diagnostics only */ }
+    }
+
+    function explainSqueezeSkip(monster, settings) {
+        if (!settings.autosqueezeChecked) return "Autosqueeze is off";
+        if (isShinyCreature(monster)) return "shiny";
+        if (isSealedTierFiveCreature(monster)) return "sealed tier-5 cannot be squeezed";
+        const name = getCreatureNameFromMonster(monster) || monster?.name;
+        if (name && isItemKeptByFilterList(name, "autosqueezeIgnoreList", settings)) return "on Autosqueeze ignore list";
+        const min = settings.autosqueezeGenesMin ?? UI_CONSTANTS.SQUEEZE_GENE_MIN;
+        const max = settings.autosqueezeGenesMax ?? UI_CONSTANTS.SQUEEZE_GENE_MAX;
+        const genes = calculateTotalGenes(monster);
+        if (genes < min || genes > max) return `genes ${genes} outside band ${min}-${max}`;
+        return "unknown";
+    }
+
     function formatMonsterForDebug(monster) {
         if (!monster) return 'unknown';
         const name = monster?.metadata?.name || monster?.name || `gameId:${monster?.gameId ?? '?'}`;
@@ -11423,6 +11449,13 @@
 
         const squeezeRewardExpected = battleRewardsIncludeSqueezeBandMonsters(battleRewardMonsters, settings);
         const injectRewardExpected = battleRewardsIncludeSealedInjectCandidates(battleRewardMonsters, settings);
+        if (settings.autoMode === "autoplant" && !squeezeRewardExpected && !injectRewardExpected) {
+            battleRewardMonsters.forEach((drop) => {
+                const monster = drop?.monster || drop;
+                if (!monster || typeof monster !== "object") return;
+                reportSqueezeSkip(explainSqueezeSkip(monster, settings), formatMonsterForDebug(monster));
+            });
+        }
         let needsActionRetry = false;
         let actionRetryReason = null;
         let deferForInventorySync = false;
@@ -11581,7 +11614,134 @@
         }
     }
 
+    // Shared game-end pipeline: run by world.onGameEnd (normal) and by the Power saving watcher.
+    async function onGameEndDetected() {
+        if (isBoardSandboxMode()) return;
+        lastGameEndFiredAt = Date.now();
+        newGamesSinceGameEnd = 0;
+        const boardSnap = cloneServerResults(
+            globalThis.state?.board?.getSnapshot?.()?.context?.serverResults
+        );
+        const apiSnap = cloneServerResults(latestServerResults);
+        const capturedAtFire = preferServerResultsWithEquipIds(boardSnap, apiSnap) || boardSnap || apiSnap;
+        const capturedSeed = capturedAtFire?.seed ?? '?';
+        markGameEndSeen(capturedAtFire?.seed);
+
+        // If gameServer already cached equips for this seed, merge them in
+        const cachedApi = cachedGameServerBySeed.get(capturedAtFire?.seed);
+        const mergedAtFire = preferServerResultsWithEquipIds(
+            capturedAtFire,
+            cloneServerResults(cachedApi)
+        ) || capturedAtFire;
+
+        const boardEquipIds = extractEquipmentFromServerResults(boardSnap || {}).rewardEquipmentIds;
+        const apiEquipIds = extractEquipmentFromServerResults(apiSnap || {}).rewardEquipmentIds;
+        const cachedEquipIds = extractEquipmentFromServerResults(cachedApi || {}).rewardEquipmentIds;
+        const capturedEquipIds = extractEquipmentFromServerResults(mergedAtFire || {}).rewardEquipmentIds;
+
+        if (boardEquipIds.size > 0 || apiEquipIds.size > 0 || cachedEquipIds.size > 0 || capturedEquipIds.size > 0) {
+            logEquipDropFlow(
+                '2/onGameEnd',
+                `seed=${capturedSeed} boardIds=[${[...boardEquipIds].join(',') || 'none'}] ` +
+                `apiIds=[${[...apiEquipIds].join(',') || 'none'}] ` +
+                `cachedIds=[${[...cachedEquipIds].join(',') || 'none'}] ` +
+                `using=[${[...capturedEquipIds].join(',') || 'none'}] ` +
+                `(delay ${OPERATION_DELAYS.AFTER_GAME_END_BEFORE_ACTIVATE_MS}ms, ` +
+                `${isTabVisible() ? 'foreground' : 'background'})`
+            );
+        }
+
+        logAutosellerDebug('GameEnd', `onGameEnd fired seed=${capturedSeed} (delay ${OPERATION_DELAYS.AFTER_GAME_END_BEFORE_ACTIVATE_MS}ms before processing)`);
+        if (isCleaningUp) {
+            logAutosellerDebug('GameEnd', 'skip: cleanup in progress');
+            return;
+        }
+
+        const timeoutId = setTimeout(async () => {
+            if (isCleaningUp) {
+                logAutosellerDebug('GameEnd', 'skip: cleanup in progress (after delay)');
+                return;
+            }
+
+            const settings = getSettings();
+            if (!settings.autoMode && !settings.autosqueezeChecked && !settings.autodusterChecked) {
+                logAutosellerDebug('GameEnd', 'skip: autosell/autosqueeze/autoduster all off');
+                return;
+            }
+
+            // Re-merge after the delay — gameServer may have arrived with equipDrop.id
+            const refreshed = preferServerResultsWithEquipIds(
+                preferServerResultsWithEquipIds(
+                    mergedAtFire,
+                    cloneServerResults(latestServerResults)
+                ),
+                cloneServerResults(cachedGameServerBySeed.get(mergedAtFire?.seed))
+            ) || mergedAtFire;
+
+            if (!refreshed) {
+                logAutosellerDebug('GameEnd', 'no serverResults captured at onGameEnd');
+                return;
+            }
+
+            const beforeIds = extractEquipmentFromServerResults(mergedAtFire || {}).rewardEquipmentIds;
+            const afterIds = extractEquipmentFromServerResults(refreshed).rewardEquipmentIds;
+            if (afterIds.size > 0 || beforeIds.size > 0) {
+                logEquipDropFlow(
+                    '3/pre-process',
+                    `seed=${refreshed.seed} atFire=[${[...beforeIds].join(',') || 'none'}] ` +
+                    `afterDelay=[${[...afterIds].join(',') || 'none'}]` +
+                    (afterIds.size > beforeIds.size ? ' (picked up late gameServer ids)' : '') +
+                    ` (${isTabVisible() ? 'foreground' : 'background'})`
+                );
+            }
+
+            if (!stateManager.canRun()) {
+                logAutosellerDebug(
+                    'GameEnd',
+                    `seed=${refreshed.seed} canRun blocked — queued for retry and Dragon Plant NOT activated for this battle (${autosellerDebugState()})`
+                );
+                const blockedIds = extractEquipmentFromServerResults(refreshed).rewardEquipmentIds;
+                if (blockedIds.size > 0) {
+                    logEquipDropFlow('3/canRun-blocked', `seed=${refreshed.seed} ids=[${[...blockedIds].join(',')}] — queued for retry`);
+                }
+                logEquipmentDropDebug(refreshed, 'canRun-blocked');
+                queueGameEndForRetry(refreshed, 'canRun-blocked');
+                queueEquipmentFromServerResults(refreshed, 'canRun-blocked');
+                return;
+            }
+
+            const processStart = Date.now();
+            const processHangWatch = setTimeout(() => {
+                logAutosellerDebug('GameEnd', `WATCHDOG: processGameEndRewards seed=${refreshed.seed} still running after 10s (${autosellerDebugState()})`);
+            }, 10000);
+            timeoutIds.push(processHangWatch);
+            try {
+                await processGameEndRewards(refreshed, 'captured-at-gameEnd');
+            } catch (processError) {
+                console.error(`[Autoseller][GameEnd] processGameEndRewards threw for seed=${refreshed.seed} — Dragon Plant will NOT be activated for this battle`, processError);
+                throw processError;
+            } finally {
+                clearTimeout(processHangWatch);
+                const processMs = Date.now() - processStart;
+                if (processMs > 3000) {
+                    logAutosellerDebug('GameEnd', `seed=${refreshed.seed} processGameEndRewards was slow: ${processMs}ms (${autosellerDebugState()})`);
+                }
+            }
+            // Catch equips whose gameServer landed during processing
+            dustCachedGameServerEquips('post-gameEnd-sweep');
+            const pendingSeed = refreshed?.seed;
+            if (pendingSeed != null && pendingGameEndBySeed.has(pendingSeed)) {
+                logAutosellerDebug('GameEnd', `deferring plant activation — pending retry for seed=${pendingSeed} (${autosellerDebugState()})`);
+            } else {
+                checkAndActivateDragonPlant();
+            }
+        }, OPERATION_DELAYS.AFTER_GAME_END_BEFORE_ACTIVATE_MS);
+        timeoutIds.push(timeoutId);
+    }
+
     function setupGameEndListener() {
+        // Set up front: in Power saving no `newGame` may ever fire, so the watcher needs it now.
+        handleGameEndFired = onGameEndDetected;
         if (globalThis.state?.board?.on) {
             emitNewGameHandler2 = (game) => {
                 if (window.ModCoordination?.isModActive('Board Analyzer')) {
@@ -11608,129 +11768,7 @@
 
                 // Stored so the Power saving watcher can run the same handler: in Power saving mode
                 // the game has no sandbox world, so `newGame` / `world.onGameEnd` never fire.
-                game.world.onGameEnd.once(handleGameEndFired = async () => {
-                    if (isBoardSandboxMode()) return;
-                    lastGameEndFiredAt = Date.now();
-                    newGamesSinceGameEnd = 0;
-                    const boardSnap = cloneServerResults(
-                        globalThis.state?.board?.getSnapshot?.()?.context?.serverResults
-                    );
-                    const apiSnap = cloneServerResults(latestServerResults);
-                    const capturedAtFire = preferServerResultsWithEquipIds(boardSnap, apiSnap) || boardSnap || apiSnap;
-                    const capturedSeed = capturedAtFire?.seed ?? '?';
-                    markGameEndSeen(capturedAtFire?.seed);
-
-                    // If gameServer already cached equips for this seed, merge them in
-                    const cachedApi = cachedGameServerBySeed.get(capturedAtFire?.seed);
-                    const mergedAtFire = preferServerResultsWithEquipIds(
-                        capturedAtFire,
-                        cloneServerResults(cachedApi)
-                    ) || capturedAtFire;
-
-                    const boardEquipIds = extractEquipmentFromServerResults(boardSnap || {}).rewardEquipmentIds;
-                    const apiEquipIds = extractEquipmentFromServerResults(apiSnap || {}).rewardEquipmentIds;
-                    const cachedEquipIds = extractEquipmentFromServerResults(cachedApi || {}).rewardEquipmentIds;
-                    const capturedEquipIds = extractEquipmentFromServerResults(mergedAtFire || {}).rewardEquipmentIds;
-
-                    if (boardEquipIds.size > 0 || apiEquipIds.size > 0 || cachedEquipIds.size > 0 || capturedEquipIds.size > 0) {
-                        logEquipDropFlow(
-                            '2/onGameEnd',
-                            `seed=${capturedSeed} boardIds=[${[...boardEquipIds].join(',') || 'none'}] ` +
-                            `apiIds=[${[...apiEquipIds].join(',') || 'none'}] ` +
-                            `cachedIds=[${[...cachedEquipIds].join(',') || 'none'}] ` +
-                            `using=[${[...capturedEquipIds].join(',') || 'none'}] ` +
-                            `(delay ${OPERATION_DELAYS.AFTER_GAME_END_BEFORE_ACTIVATE_MS}ms, ` +
-                            `${isTabVisible() ? 'foreground' : 'background'})`
-                        );
-                    }
-
-                    logAutosellerDebug('GameEnd', `onGameEnd fired seed=${capturedSeed} (delay ${OPERATION_DELAYS.AFTER_GAME_END_BEFORE_ACTIVATE_MS}ms before processing)`);
-                    if (isCleaningUp) {
-                        logAutosellerDebug('GameEnd', 'skip: cleanup in progress');
-                        return;
-                    }
-
-                    const timeoutId = setTimeout(async () => {
-                        if (isCleaningUp) {
-                            logAutosellerDebug('GameEnd', 'skip: cleanup in progress (after delay)');
-                            return;
-                        }
-
-                        const settings = getSettings();
-                        if (!settings.autoMode && !settings.autosqueezeChecked && !settings.autodusterChecked) {
-                            logAutosellerDebug('GameEnd', 'skip: autosell/autosqueeze/autoduster all off');
-                            return;
-                        }
-
-                        // Re-merge after the delay — gameServer may have arrived with equipDrop.id
-                        const refreshed = preferServerResultsWithEquipIds(
-                            preferServerResultsWithEquipIds(
-                                mergedAtFire,
-                                cloneServerResults(latestServerResults)
-                            ),
-                            cloneServerResults(cachedGameServerBySeed.get(mergedAtFire?.seed))
-                        ) || mergedAtFire;
-
-                        if (!refreshed) {
-                            logAutosellerDebug('GameEnd', 'no serverResults captured at onGameEnd');
-                            return;
-                        }
-
-                        const beforeIds = extractEquipmentFromServerResults(mergedAtFire || {}).rewardEquipmentIds;
-                        const afterIds = extractEquipmentFromServerResults(refreshed).rewardEquipmentIds;
-                        if (afterIds.size > 0 || beforeIds.size > 0) {
-                            logEquipDropFlow(
-                                '3/pre-process',
-                                `seed=${refreshed.seed} atFire=[${[...beforeIds].join(',') || 'none'}] ` +
-                                `afterDelay=[${[...afterIds].join(',') || 'none'}]` +
-                                (afterIds.size > beforeIds.size ? ' (picked up late gameServer ids)' : '') +
-                                ` (${isTabVisible() ? 'foreground' : 'background'})`
-                            );
-                        }
-
-                        if (!stateManager.canRun()) {
-                            logAutosellerDebug(
-                                'GameEnd',
-                                `seed=${refreshed.seed} canRun blocked — queued for retry and Dragon Plant NOT activated for this battle (${autosellerDebugState()})`
-                            );
-                            const blockedIds = extractEquipmentFromServerResults(refreshed).rewardEquipmentIds;
-                            if (blockedIds.size > 0) {
-                                logEquipDropFlow('3/canRun-blocked', `seed=${refreshed.seed} ids=[${[...blockedIds].join(',')}] — queued for retry`);
-                            }
-                            logEquipmentDropDebug(refreshed, 'canRun-blocked');
-                            queueGameEndForRetry(refreshed, 'canRun-blocked');
-                            queueEquipmentFromServerResults(refreshed, 'canRun-blocked');
-                            return;
-                        }
-
-                        const processStart = Date.now();
-                        const processHangWatch = setTimeout(() => {
-                            logAutosellerDebug('GameEnd', `WATCHDOG: processGameEndRewards seed=${refreshed.seed} still running after 10s (${autosellerDebugState()})`);
-                        }, 10000);
-                        timeoutIds.push(processHangWatch);
-                        try {
-                            await processGameEndRewards(refreshed, 'captured-at-gameEnd');
-                        } catch (processError) {
-                            console.error(`[Autoseller][GameEnd] processGameEndRewards threw for seed=${refreshed.seed} — Dragon Plant will NOT be activated for this battle`, processError);
-                            throw processError;
-                        } finally {
-                            clearTimeout(processHangWatch);
-                            const processMs = Date.now() - processStart;
-                            if (processMs > 3000) {
-                                logAutosellerDebug('GameEnd', `seed=${refreshed.seed} processGameEndRewards was slow: ${processMs}ms (${autosellerDebugState()})`);
-                            }
-                        }
-                        // Catch equips whose gameServer landed during processing
-                        dustCachedGameServerEquips('post-gameEnd-sweep');
-                        const pendingSeed = refreshed?.seed;
-                        if (pendingSeed != null && pendingGameEndBySeed.has(pendingSeed)) {
-                            logAutosellerDebug('GameEnd', `deferring plant activation — pending retry for seed=${pendingSeed} (${autosellerDebugState()})`);
-                        } else {
-                            checkAndActivateDragonPlant();
-                        }
-                    }, OPERATION_DELAYS.AFTER_GAME_END_BEFORE_ACTIVATE_MS);
-                    timeoutIds.push(timeoutId);
-                });
+                game.world.onGameEnd.once(onGameEndDetected);
                 gameEndSubscription = game.world.onGameEnd;
             };
             globalThis.state.board.on('newGame', emitNewGameHandler2);

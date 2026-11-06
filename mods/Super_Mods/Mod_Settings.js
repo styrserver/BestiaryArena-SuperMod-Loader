@@ -31,8 +31,9 @@ const defaultConfig = {
   enableAutoplayRefresh: false,
   alwaysNavigateMaxFloor: false,
   autoplayRefreshMinutes: 30,
-  autoplayRefreshTimerMode: 'autoplay', // 'autoplay', 'internal', or 'both'
   disableAutoReload: false,
+  enableLagRefresh: false,
+  lagRefreshMinutes: 2,
   disableQuestHelpers: false,
   muteAllGameSounds: false,
   removeWebsiteFooter: false,
@@ -228,6 +229,16 @@ function isBlockedByAnalysisMods() {
   return window.ModCoordination?.isModActive('Board Analyzer') ||
          window.ModCoordination?.isModActive('Manual Runner') ||
          window.ModCoordination?.isModActive('Autoscroller');
+}
+
+// Every automatic refresh goes through here so "disable auto-reload" always wins.
+function reloadBrowser(reason) {
+  if (config.disableAutoReload) {
+    console.log(`[Mod Settings] Auto-reload disabled - skipping refresh (${reason})`);
+    return;
+  }
+  console.log(`[Mod Settings] Refreshing browser: ${reason}`);
+  location.reload();
 }
 
 function isAnalysisBlockingModActive() {
@@ -751,7 +762,6 @@ const TIMEOUT_DELAYS = {
   INIT_RETRY: 500,
   OBSERVER_RETRY: 1000,
   CONTAINER_DEBOUNCE: 200,
-  BROWSER_REFRESH: 1000,
   /** Creature stat / advanced hover tooltip delay (matches Depot Manager). */
   HOVER_TOOLTIP_SHOW: 150
 };
@@ -3231,12 +3241,58 @@ const PERF_RATE_LIMIT = 30;
 const PERF_OVERLAY_REFRESH_MS = 500;
 const PERF_FPS_GOOD = 60;
 
+// A gap this long between animation frames means the tab was hidden or suspended, not that the game is slow.
+const FRAME_GAP_MS = 5000;
+
+// One requestAnimationFrame loop for everything that needs the frame rate (the debugger and the lag refresh).
+// onFrame(ts, dt) runs every frame; onSample(fps, ts) once per sampleMs; onGap() after a FRAME_GAP_MS pause,
+// when the FPS window restarts instead of counting the pause as slow frames.
+function createFrameSampler({ sampleMs, onFrame, onSample, onGap }) {
+  let rafId = 0;
+  let last = 0;
+  let windowStart = 0;
+  let frames = 0;
+  const tick = (ts) => {
+    rafId = requestAnimationFrame(tick);
+    const dt = last ? ts - last : 0;
+    last = ts;
+    if (dt > FRAME_GAP_MS) {
+      windowStart = 0;
+      if (onGap) onGap();
+    } else if (dt > 0 && onFrame) {
+      onFrame(ts, dt);
+    }
+    if (!windowStart) {
+      windowStart = ts;
+      frames = 0;
+      return;
+    }
+    frames++;
+    const elapsed = ts - windowStart;
+    if (elapsed < sampleMs) return;
+    const fps = (frames * 1000) / elapsed;
+    windowStart = ts;
+    frames = 0;
+    onSample(fps, ts);
+  };
+  return {
+    start() {
+      if (!rafId) rafId = requestAnimationFrame(tick);
+    },
+    stop() {
+      if (rafId) cancelAnimationFrame(rafId);
+      rafId = 0;
+      last = 0;
+      windowStart = 0;
+      frames = 0;
+    }
+  };
+}
+
 const perfOverlay = {
   ui: null, // panel nodes ({ el, header, body, ... }) while the overlay is on; null when off
-  rafId: 0,
+  sampler: null, // createFrameSampler() handle while the overlay is on
   refreshTimer: null,
-  frames: 0,
-  lastSampleTs: 0,
   fps: 0,
   copyBtnResetTimer: null,
   clearArmed: false, // Clear All asks for a second click (like Hunt Analyzer's) before dropping the data
@@ -3252,12 +3308,14 @@ const perfOverlay = {
   layoutKey: '',
   lastRenderAt: 0, // performance.now() of the last render, so the 1s timer only fills gaps
   styleEl: null,
-  lastFrameTs: 0,
   frameDts: [], // { t, dt } rAF deltas inside the last PERF_FRAME_WINDOW_MS
   heap: [], // { t, v } usedJSHeapSize samples inside the last PERF_HEAP_WINDOW_MS (Chromium only)
   dom: 0,
   domAt: -Infinity,
   domFirst: null, // first DOM node count seen, to report growth since the overlay started
+  domPeak: 0, // highest DOM node count seen since the overlay started
+  domPeakAt: 0, // Date.now() of that peak
+  domBase: null, // Map of body-child owner -> node count taken with domFirst, to show which owner grew
   loafDropped: 0, // slow frames pushed out by the PERF_MAX_LOAF cap (not by age) this session
   loaf: [], // slow frames inside the last PERF_CPU_WINDOW_MS: { perf, ts, dur, blocking, scripts[] }
   loafObserver: null,
@@ -3405,6 +3463,9 @@ function perfResetData() {
   perfOverlay.loaf = [];
   perfOverlay.loafDropped = 0;
   perfOverlay.domFirst = null;
+  perfOverlay.domBase = null;
+  perfOverlay.domPeak = 0;
+  perfOverlay.domPeakAt = 0;
   perfOverlay.frameDts = [];
   perfOverlay.heap = [];
 }
@@ -3757,8 +3818,58 @@ function perfSampleMemory(now) {
   if (now - perfOverlay.domAt >= 5000) {
     perfOverlay.dom = document.getElementsByTagName('*').length;
     perfOverlay.domAt = now;
-    if (perfOverlay.domFirst === null) perfOverlay.domFirst = perfOverlay.dom;
+    if (perfOverlay.dom > perfOverlay.domPeak) {
+      perfOverlay.domPeak = perfOverlay.dom;
+      perfOverlay.domPeakAt = Date.now();
+    }
+    if (perfOverlay.domFirst === null) {
+      perfOverlay.domFirst = perfOverlay.dom;
+      perfOverlay.domBase = perfDomCensus();
+    }
   }
+}
+
+// Node count per direct child of <body>, keyed by id, else first class, else tag. Mods append their panels,
+// toasts and tooltips straight to <body>, so a growing key points at the mod that owns it. The game's own
+// React root shows as one big key; nodes mods inject inside it are not separable here.
+function perfDomCensus() {
+  const census = new Map();
+  const add = (key, el) => census.set(key, (census.get(key) || 0) + el.getElementsByTagName('*').length + 1);
+  const keyOf = (el) => {
+    if (el.id) return `#${el.id}`;
+    const cls = typeof el.className === 'string'
+      ? el.className.trim().split(/\s+/).filter(Boolean).slice(0, 2).map((c) => c.slice(0, 18)).join('.')
+      : '';
+    return el.tagName.toLowerCase() + (cls ? `.${cls}` : '');
+  };
+  // The React root is one huge entry, so it is split by element path to a fixed depth (mods inject buttons and
+  // panels into the game's own tree). The depth does not depend on node counts, so the baseline and a later
+  // census always use the same keys. Same-looking siblings share a key and their counts add up.
+  const walk = (el, path, depth) => {
+    if (depth === 0 || !el.children.length) {
+      add(path, el);
+      return;
+    }
+    for (const child of el.children) walk(child, `${path} > ${keyOf(child)}`, depth - 1);
+  };
+  for (const el of document.body.children) {
+    if (el.id === '__next') walk(el, keyOf(el), 4);
+    else add(keyOf(el), el);
+  }
+  return census;
+}
+
+// "owner: now (+delta)" lines, biggest growth first, then biggest owners; only owners that grew or are large.
+function perfDescribeDomCensus() {
+  const base = perfOverlay.domBase;
+  if (!base) return [];
+  const rows = [...perfDomCensus()].map(([key, n]) => ({ key, n, d: n - (base.get(key) || 0) }));
+  base.forEach((n, key) => {
+    if (!rows.some((r) => r.key === key)) rows.push({ key, n: 0, d: -n });
+  });
+  rows.sort((a, b) => b.d - a.d || b.n - a.n);
+  return rows.filter((r) => r.d !== 0 || r.n >= 100).slice(0, 15)
+    .map((r) => `  ${r.key}: ${r.n} (${r.d >= 0 ? '+' : ''}${r.d})`);
 }
 
 // Folds the slow frames of the last minute into one row per (source, script).
@@ -3852,6 +3963,7 @@ function perfFormatCpuReport() {
       `min ${mb(Math.min(...heap.map((h) => h.v)))} max ${mb(Math.max(...heap.map((h) => h.v)))}), `
     : '';
   const domGrowth = perfOverlay.domFirst === null ? '' : ` (${perfOverlay.dom - perfOverlay.domFirst >= 0 ? '+' : ''}${perfOverlay.dom - perfOverlay.domFirst} since the overlay started)`;
+  const domCensus = perfDescribeDomCensus();
   const first = perfOverlay.loaf[0];
   const last = perfOverlay.loaf[perfOverlay.loaf.length - 1];
   const coverage = first
@@ -3863,7 +3975,9 @@ function perfFormatCpuReport() {
     `${perfOverlay.fps} FPS, p95 ${stats.p95.toFixed(1)}ms, worst ${stats.worst.toFixed(1)}ms, ${stats.jank} frame${stats.jank === 1 ? '' : 's'} over ${PERF_JANK_MS}ms`,
     '',
     `== Memory (last ${PERF_HEAP_WINDOW_MS / 1000}s) ==`,
-    `${heapLine}${perfOverlay.dom} DOM nodes${domGrowth}`,
+    `${heapLine}${perfOverlay.dom} DOM nodes${domGrowth}` +
+      (perfOverlay.domPeak > perfOverlay.dom ? `, peak ${perfOverlay.domPeak} at ${new Date(perfOverlay.domPeakAt).toISOString()}` : ''),
+    ...(domCensus.length ? ['DOM nodes by <body> child (now, change since the overlay started):', ...domCensus] : []),
     '',
     `== Script time (last ${PERF_CPU_WINDOW_LABEL}; slow frames only, source: ${perfOverlay.loafType || 'unsupported in this browser'}) ==`,
     `${agg.frames} slow frames (${coverage}), ${Math.round(agg.frameMs)}ms total, ${Math.round(agg.blockingMs)}ms blocking input, ${Math.round(agg.scriptMs)}ms in scripts (rest = style/layout/paint/GC)`,
@@ -4155,21 +4269,18 @@ function renderPerfOverlay() {
   }
 }
 
-function perfFrameTick(ts) {
-  if (!perfOverlay.active) return;
-  perfOverlay.frames++;
-  const dt = ts - perfOverlay.lastFrameTs;
-  perfOverlay.lastFrameTs = ts;
-  // a gap over 1s means rAF was paused (hidden tab), not a slow frame
-  if (dt > 0 && dt < 1000) perfOverlay.frameDts.push({ t: ts, dt });
-  const elapsed = ts - perfOverlay.lastSampleTs;
-  if (elapsed >= PERF_OVERLAY_REFRESH_MS) {
-    perfOverlay.fps = Math.round((perfOverlay.frames * 1000) / elapsed);
-    perfOverlay.frames = 0;
-    perfOverlay.lastSampleTs = ts;
-    renderPerfOverlay();
-  }
-  perfOverlay.rafId = requestAnimationFrame(perfFrameTick);
+function createPerfSampler() {
+  return createFrameSampler({
+    sampleMs: PERF_OVERLAY_REFRESH_MS,
+    // A gap over 1s is a throttled or hidden tab, not a slow frame (the slow-frame list never shows it).
+    onFrame: (ts, dt) => {
+      if (dt < 1000) perfOverlay.frameDts.push({ t: ts, dt });
+    },
+    onSample: (fps) => {
+      perfOverlay.fps = Math.round(fps);
+      renderPerfOverlay();
+    }
+  });
 }
 
 function setPerfOverlayPosition(el, x, y) {
@@ -4284,9 +4395,6 @@ function startPerfOverlay() {
   perfResetData();
   perfRestorePersisted();
   window.addEventListener('pagehide', perfFlushOnPageHide);
-  perfOverlay.frames = 0;
-  perfOverlay.lastSampleTs = performance.now();
-  perfOverlay.lastFrameTs = perfOverlay.lastSampleTs;
   perfOverlay.dom = 0;
   perfOverlay.domAt = -Infinity;
   startPerfSlowFrameObserver();
@@ -4381,7 +4489,8 @@ function startPerfOverlay() {
   }
   bindPerfOverlayDrag(el);
   renderPerfOverlay();
-  perfOverlay.rafId = requestAnimationFrame(perfFrameTick);
+  perfOverlay.sampler = createPerfSampler();
+  perfOverlay.sampler.start();
   // rAF is paused in background tabs; keep the request counter's window ageing out regardless.
   // Only renders when the frame tick has not (it is the one that keeps the panel fresh while the tab is visible).
   perfOverlay.refreshTimer = setInterval(() => {
@@ -4391,9 +4500,9 @@ function startPerfOverlay() {
 
 function stopPerfOverlay() {
   perfOverlay.active = false;
-  if (perfOverlay.rafId) {
-    cancelAnimationFrame(perfOverlay.rafId);
-    perfOverlay.rafId = 0;
+  if (perfOverlay.sampler) {
+    perfOverlay.sampler.stop();
+    perfOverlay.sampler = null;
   }
   if (perfOverlay.refreshTimer) {
     clearInterval(perfOverlay.refreshTimer);
@@ -9480,16 +9589,17 @@ function showSettingsModal() {
         const gameplayContent = document.createElement('div');
         gameplayContent.innerHTML = `
           <div style="margin-bottom: 15px;">
-            <label style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap; cursor: pointer;">
-              <input type="checkbox" id="autoplay-refresh-toggle" checked="" style="transform: scale(1.2);">
-              ${warningLabelSpanHtml('', { title: t('mods.betterUI.autoplayRefreshWarning') })}
-              <select id="autoplay-refresh-timer-mode" style="width: fit-content; background: #333; color: #ccc; border: 1px solid #555; padding: 4px 30px 4px 10px; border-radius: 4px; pointer-events: auto;" title="${t('mods.betterUI.autoplayRefreshTimerModeWarning')}" onclick="event.stopPropagation();">
-                <option value="autoplay">${t('mods.betterUI.autoplaySessionText')}</option>
-                <option value="internal">${t('mods.betterUI.internalTimer')}</option>
-                <option value="both">${t('mods.betterUI.bothTimers')}</option>
-              </select>
-              <span style="color: #ccc;">${t('mods.betterUI.refreshesBrowserEvery')}</span>
+            <div style="color: #ccc; margin-bottom: 6px;">${t('mods.betterUI.autoRefreshTitle')}</div>
+            <label style="display: flex; align-items: center; gap: 10px; flex-wrap: nowrap; white-space: nowrap; cursor: pointer; margin-bottom: 6px;">
+              <input type="checkbox" id="autoplay-refresh-toggle" style="transform: scale(1.2);">
+              ${warningLabelSpanHtml(t('mods.betterUI.autoRefreshEvery'), { title: t('mods.betterUI.autoplayRefreshWarning') })}
               <input type="number" id="autoplay-refresh-minutes" value="30" min="1" max="120" style="width: 50px; padding: 4px 4px; border: 1px solid #555; background: #2a2a2a; color: #fff; border-radius: 4px; text-align: center; pointer-events: auto;" onclick="event.stopPropagation();">
+              <span style="color: #ccc;">${t('mods.betterUI.autoplayRefreshMinutesText')}</span>
+            </label>
+            <label style="display: flex; align-items: center; gap: 10px; flex-wrap: nowrap; white-space: nowrap; cursor: pointer;">
+              <input type="checkbox" id="lag-refresh-toggle" style="transform: scale(1.2);">
+              ${warningLabelSpanHtml(t('mods.betterUI.lagRefreshLabel'), { title: t('mods.betterUI.lagRefreshWarning') })}
+              <input type="number" id="lag-refresh-minutes" value="2" min="1" max="30" style="width: 50px; padding: 4px 4px; border: 1px solid #555; background: #2a2a2a; color: #fff; border-radius: 4px; text-align: center; pointer-events: auto;" onclick="event.stopPropagation();">
               <span style="color: #ccc;">${t('mods.betterUI.autoplayRefreshMinutesText')}</span>
             </label>
           </div>
@@ -10554,6 +10664,7 @@ function showSettingsModal() {
         } else {
           console.log('[Mod Settings] Autoplay refresh disabled via settings');
           stopAutoplayRefreshMonitor();
+          if (!config.enableLagRefresh) cancelSafeReload();
         }
       });
     }
@@ -10573,32 +10684,27 @@ function showSettingsModal() {
       });
     }
     
-    const autoplayRefreshTimerModeSelect = content.querySelector('#autoplay-refresh-timer-mode');
-    if (autoplayRefreshTimerModeSelect) {
-      // Set initial value based on config (backward compatibility)
-      if (config.autoplayRefreshTimerMode) {
-        autoplayRefreshTimerModeSelect.value = config.autoplayRefreshTimerMode;
-      } else {
-        // Migrate old boolean config
-        autoplayRefreshTimerModeSelect.value = config.useInternalTimer ? 'internal' : 'autoplay';
-        config.autoplayRefreshTimerMode = autoplayRefreshTimerModeSelect.value;
-        delete config.useInternalTimer;
+    const lagRefreshCheckbox = content.querySelector('#lag-refresh-toggle');
+    if (lagRefreshCheckbox) {
+      lagRefreshCheckbox.checked = config.enableLagRefresh;
+      lagRefreshCheckbox.addEventListener('change', () => {
+        config.enableLagRefresh = lagRefreshCheckbox.checked;
         saveConfig();
-      }
-      
-      autoplayRefreshTimerModeSelect.addEventListener('change', () => {
-        const selectedMode = autoplayRefreshTimerModeSelect.value;
-        config.autoplayRefreshTimerMode = selectedMode;
-        saveConfig();
-        
-        if (config.enableAutoplayRefresh) {
-          // Restart monitor to apply the new timer mode
-          stopAutoplayRefreshMonitor();
-          startAutoplayRefreshMonitor();
-        }
+        if (config.enableLagRefresh) startLagRefreshMonitor();
+        else stopLagRefreshMonitor();
+        if (!config.enableLagRefresh && !config.enableAutoplayRefresh) cancelSafeReload();
       });
     }
-    
+    const lagRefreshMinutesInput = content.querySelector('#lag-refresh-minutes');
+    if (lagRefreshMinutesInput) {
+      lagRefreshMinutesInput.value = config.lagRefreshMinutes;
+      // The monitor reads config on every sample, so no restart is needed.
+      lagRefreshMinutesInput.addEventListener('input', () => {
+        config.lagRefreshMinutes = Math.max(1, Math.min(30, parseInt(lagRefreshMinutesInput.value, 10) || 2));
+        saveConfig();
+      });
+    }
+
     const persistAutomatorAutoRefillCheckbox = content.querySelector('#persist-automator-autorefill-toggle');
     if (persistAutomatorAutoRefillCheckbox) {
       // Set initial state from Bestiary Automator's config
@@ -18833,11 +18939,7 @@ function startAutoplayRefreshMonitor(options = {}) {
         console.log(`[Mod Settings] setPlayMode event - mode: ${event.mode}`);
         if (event.mode === 'autoplay') {
           console.log('[Mod Settings] Autoplay mode set - checking refresh threshold');
-          // Reset internal timer when switching to autoplay if using internal timer mode or both mode
-          const timerMode = config.autoplayRefreshTimerMode || (config.useInternalTimer ? 'internal' : 'autoplay');
-          if (timerMode === 'internal' || timerMode === 'both') {
-            resetInternalTimer();
-          }
+          resetInternalTimer();
           checkAutoplayRefreshThreshold();
         }
       });
@@ -18870,14 +18972,10 @@ function startAutoplayRefreshMonitor(options = {}) {
     // Initialize board activity timer
     resetBoardActivityTimer();
     
-    // Initialize internal timer if using internal timer mode or both mode
-    const timerMode = config.autoplayRefreshTimerMode || (config.useInternalTimer ? 'internal' : 'autoplay');
-    if (timerMode === 'internal' || timerMode === 'both') {
-      if (quiet) {
-        internalTimerStartTime = Date.now();
-      } else {
-        resetInternalTimer();
-      }
+    if (quiet) {
+      internalTimerStartTime = Date.now();
+    } else {
+      resetInternalTimer();
     }
     
     // Set up periodic check interval (check every 10 seconds)
@@ -18950,90 +19048,219 @@ function checkAutoplayRefreshThreshold() {
   try {
     if (isBlockedByAnalysisMods()) return;
 
-    let thresholdReached = false;
+    // Whichever comes first: an independent stopwatch, the session widget, or a board that stopped changing.
+    if (internalTimerStartTime === null) resetInternalTimer();
+    const limit = config.autoplayRefreshMinutes;
+    const internalMinutes = (Date.now() - internalTimerStartTime) / 60000;
+    const sessionMinutes = getAutoplaySessionTime();
+    const inactivityMinutes = (Date.now() - lastBoardActivityTime) / 60000;
     let reason = '';
-    
-    // Get timer mode (backward compatibility)
-    const timerMode = config.autoplayRefreshTimerMode || (config.useInternalTimer ? 'internal' : 'autoplay');
-    
-    if (timerMode === 'both') {
-      // Combined mode - check both timers and refresh when whichever comes first
-      if (internalTimerStartTime === null) {
-        resetInternalTimer();
-      }
-      
-      const internalMinutes = (Date.now() - internalTimerStartTime) / (1000 * 60);
-      const sessionMinutes = getAutoplaySessionTime();
-      const inactivityMinutes = (Date.now() - lastBoardActivityTime) / (1000 * 60);
-      
-      // Check internal timer threshold
-      const internalThresholdReached = internalMinutes >= config.autoplayRefreshMinutes;
-      
-      // Check session time threshold
-      const sessionThresholdReached = sessionMinutes > 0 && sessionMinutes >= config.autoplayRefreshMinutes;
-      
-      // Check board inactivity threshold
-      const inactivityThresholdReached = inactivityMinutes >= config.autoplayRefreshMinutes;
-      
-      thresholdReached = internalThresholdReached || sessionThresholdReached || inactivityThresholdReached;
-      
-      if (internalThresholdReached) {
-        reason = 'internal timer';
-      } else if (sessionThresholdReached) {
-        reason = 'session time';
-      } else {
-        reason = 'board inactivity';
-      }
-    } else if (timerMode === 'internal') {
-      // Use internal timer mode - track time independently
-      if (internalTimerStartTime === null) {
-        // Initialize timer if not already set
-        resetInternalTimer();
-      }
-      
-      const internalMinutes = (Date.now() - internalTimerStartTime) / (1000 * 60);
-      const inactivityMinutes = (Date.now() - lastBoardActivityTime) / (1000 * 60);
-      
-      // Check internal timer threshold
-      const internalThresholdReached = internalMinutes >= config.autoplayRefreshMinutes;
-      
-      // Check board inactivity threshold
-      const inactivityThresholdReached = inactivityMinutes >= config.autoplayRefreshMinutes;
-      
-      thresholdReached = internalThresholdReached || inactivityThresholdReached;
-      reason = internalThresholdReached ? 'internal timer' : 'board inactivity';
-    } else {
-      // Use autoplay session time mode (original behavior)
-      const currentMinutes = getAutoplaySessionTime();
-      const inactivityMinutes = (Date.now() - lastBoardActivityTime) / (1000 * 60);
-      
-      // Check session time threshold
-      const sessionThresholdReached = currentMinutes > 0 && currentMinutes >= config.autoplayRefreshMinutes;
-      
-      // Check board inactivity threshold
-      const inactivityThresholdReached = inactivityMinutes >= config.autoplayRefreshMinutes;
-      
-      thresholdReached = sessionThresholdReached || inactivityThresholdReached;
-      reason = sessionThresholdReached ? 'session time' : 'board inactivity';
-    }
-    
+    if (internalMinutes >= limit) reason = 'internal timer';
+    else if (sessionMinutes > 0 && sessionMinutes >= limit) reason = 'session time';
+    else if (inactivityMinutes >= limit) reason = 'board inactivity';
+    const thresholdReached = reason !== '';
+
     if (thresholdReached) {
-      console.log(`[Mod Settings] Autoplay refresh threshold reached (${reason}). Refreshing page in 1 second...`);
-      
-      // Wait 1 second before refreshing
-      scheduleTimeout(() => {
-        // Check if auto-reload is disabled
-        if (config.disableAutoReload) {
-          console.log('[Mod Settings] Auto-reload disabled - skipping autoplay refresh');
-          return;
-        }
-        console.log('[Mod Settings] Refreshing browser...');
-        location.reload();
-      }, TIMEOUT_DELAYS.BROWSER_REFRESH);
+      console.log(`[Mod Settings] Autoplay refresh threshold reached (${reason}).`);
+      reloadWhenSafe(`autoplay ${reason}`);
     }
   } catch (error) {
     console.error('[Mod Settings] Error checking autoplay refresh threshold:', error);
   }
+}
+
+// Reloads once a battle has ended and no window is open, so a refresh never cuts a run in half.
+// A window left open (or a battle that never ends) only delays it by SAFE_RELOAD_MAX_WAIT_MS.
+const SAFE_RELOAD_MAX_WAIT_MS = 2 * 60 * 1000;
+let safeReloadTimer = null;
+
+function isSafeToReload() {
+  const battleRunning = globalThis.state?.board?.getSnapshot?.()?.context?.gameStarted === true;
+  return !battleRunning && !document.querySelector('div[role="dialog"]');
+}
+
+function cancelSafeReload() {
+  if (safeReloadTimer) {
+    clearInterval(safeReloadTimer);
+    safeReloadTimer = null;
+  }
+}
+
+function reloadWhenSafe(reason) {
+  if (safeReloadTimer) return;
+  const since = Date.now();
+  const attempt = () => {
+    if (!isSafeToReload() && Date.now() - since < SAFE_RELOAD_MAX_WAIT_MS) return;
+    cancelSafeReload();
+    reloadBrowser(reason);
+  };
+  safeReloadTimer = setInterval(attempt, 250);
+  attempt();
+}
+
+// Reloads the page when the frame rate during battles stays well under what it was shortly after page load,
+// for config.lagRefreshMinutes. Compares like with like (battle seconds only), so a fast menu or a 165Hz screen
+// does not matter. A reload only clears lag that builds up over time; the cooldown stops a loop when it does not.
+const LAG_REFRESH_COOLDOWN_MS = 10 * 60 * 1000;
+const LAG_REFRESH_STORAGE_KEY = 'ba-lag-refresh-at';
+const LAG_BASELINE_SAMPLES = 90; // battle seconds measured after load
+const LAG_WINDOW_SAMPLES = 30; // battle seconds averaged against the baseline
+const LAG_DROP_RATIO = 0.5; // lagging = average under this share of the baseline
+const LAG_MIN_BASELINE_FPS = 30; // a slower baseline means the page started laggy: use LAG_FLOOR_FPS instead
+const LAG_FLOOR_FPS = 20;
+let lagRefreshSampler = null;
+
+function lagRefreshInCooldown() {
+  try {
+    const last = Number(sessionStorage.getItem(LAG_REFRESH_STORAGE_KEY));
+    return last > 0 && Date.now() - last < LAG_REFRESH_COOLDOWN_MS;
+  } catch (_) {
+    return false;
+  }
+}
+
+function startLagRefreshMonitor() {
+  stopLagRefreshMonitor();
+  const baselineSamples = [];
+  const recent = [];
+  let baseline = 0;
+  let lowSince = 0;
+  lagRefreshSampler = createFrameSampler({
+    sampleMs: 1000,
+    onGap: () => {
+      lowSince = 0;
+      recent.length = 0;
+    },
+    onSample: (fps, ts) => {
+      // Analysis mods run the game flat out on purpose; outside a battle the frame rate says nothing about the game.
+      if (isBlockedByAnalysisMods() || globalThis.state?.board?.getSnapshot?.()?.context?.gameStarted !== true) return;
+      if (!baseline) {
+        baselineSamples.push(fps);
+        if (baselineSamples.length >= LAG_BASELINE_SAMPLES) {
+          // 25th percentile: a few fast seconds must not set a bar the game can rarely reach again.
+          baseline = baselineSamples.sort((a, b) => a - b)[Math.floor(baselineSamples.length / 4)];
+        }
+        return;
+      }
+      recent.push(fps);
+      if (recent.length > LAG_WINDOW_SAMPLES) recent.shift();
+      if (recent.length < LAG_WINDOW_SAMPLES) return;
+      const avg = recent.reduce((sum, v) => sum + v, 0) / recent.length;
+      const limit = baseline >= LAG_MIN_BASELINE_FPS ? baseline * LAG_DROP_RATIO : LAG_FLOOR_FPS;
+      if (avg >= limit) {
+        lowSince = 0;
+        return;
+      }
+      if (!lowSince) lowSince = ts;
+      if (ts - lowSince < config.lagRefreshMinutes * 60000) return;
+      lowSince = 0;
+      if (lagRefreshInCooldown()) return;
+      try {
+        sessionStorage.setItem(LAG_REFRESH_STORAGE_KEY, String(Date.now()));
+      } catch (_) { /* cooldown unavailable; the minutes window still spaces reloads */ }
+      reloadWhenSafe(`FPS ${avg.toFixed(0)} vs ${baseline.toFixed(0)} at load for ${config.lagRefreshMinutes} min`);
+    }
+  });
+  lagRefreshSampler.start();
+}
+
+function stopLagRefreshMonitor() {
+  if (lagRefreshSampler) {
+    lagRefreshSampler.stop();
+    lagRefreshSampler = null;
+  }
+}
+
+// Native title="" tooltips cannot be sized by page code, so long ones (the warning texts) stretch across the screen.
+// While the pointer rests on an element with a title, the title is moved to data-ba-title (silencing the native
+// tooltip) and shown in our own box with a max width, then put back when the pointer leaves.
+const TITLE_TOOLTIP_DELAY_MS = 400;
+const TITLE_TOOLTIP_ID = 'ba-title-tooltip';
+const titleTooltip = { active: false, target: null, box: null, showTimer: null, watchTimer: null };
+
+function hideTitleTooltip() {
+  clearTimeout(titleTooltip.showTimer);
+  clearInterval(titleTooltip.watchTimer);
+  titleTooltip.showTimer = null;
+  titleTooltip.watchTimer = null;
+  const el = titleTooltip.target;
+  if (el) {
+    const text = el.getAttribute('data-ba-title');
+    // A re-render may have set a fresh title meanwhile; keep that one.
+    if (text !== null && !el.hasAttribute('title')) el.setAttribute('title', text);
+    el.removeAttribute('data-ba-title');
+    titleTooltip.target = null;
+  }
+  if (titleTooltip.box) {
+    titleTooltip.box.remove();
+    titleTooltip.box = null;
+  }
+}
+
+function showTitleTooltip(el, x, y) {
+  const text = el.getAttribute('data-ba-title');
+  if (!text) return;
+  const box = document.createElement('div');
+  box.id = TITLE_TOOLTIP_ID;
+  box.textContent = text;
+  box.style.cssText =
+    'position:fixed;z-index:2147483000;pointer-events:none;left:0;top:0;box-sizing:border-box;' +
+    'max-width:min(320px,calc(100vw - 16px));padding:6px 8px;white-space:pre-wrap;overflow-wrap:anywhere;' +
+    'background:#1f1f1f;color:#e6e6e6;border:1px solid #666;box-shadow:0 2px 8px rgba(0,0,0,.6);font-size:13px;line-height:1.3;';
+  document.body.appendChild(box);
+  const w = box.offsetWidth;
+  const h = box.offsetHeight;
+  let left = x + 12;
+  let top = y + 18;
+  if (left + w > window.innerWidth - 8) left = window.innerWidth - 8 - w;
+  if (top + h > window.innerHeight - 8) top = y - h - 8;
+  box.style.left = `${Math.max(8, left)}px`;
+  box.style.top = `${Math.max(8, top)}px`;
+  titleTooltip.box = box;
+  // No mouseout arrives when React removes the hovered element, so check it is still there.
+  titleTooltip.watchTimer = setInterval(() => {
+    if (!titleTooltip.target || !document.contains(titleTooltip.target)) hideTitleTooltip();
+  }, 500);
+}
+
+function onTitleTooltipOver(e) {
+  const el = e.target instanceof Element ? e.target.closest('[title], [data-ba-title]') : null;
+  if (el === titleTooltip.target) return;
+  hideTitleTooltip();
+  if (!el || !el.getAttribute('title')) return;
+  el.setAttribute('data-ba-title', el.getAttribute('title'));
+  el.removeAttribute('title');
+  titleTooltip.target = el;
+  const { clientX, clientY } = e;
+  titleTooltip.showTimer = setTimeout(() => {
+    titleTooltip.showTimer = null;
+    if (titleTooltip.target === el) showTitleTooltip(el, clientX, clientY);
+  }, TITLE_TOOLTIP_DELAY_MS);
+}
+
+function onTitleTooltipOut(e) {
+  if (!e.relatedTarget) hideTitleTooltip(); // pointer left the window
+}
+
+function initTitleTooltips() {
+  if (titleTooltip.active) return;
+  titleTooltip.active = true;
+  document.addEventListener('mouseover', onTitleTooltipOver, true);
+  document.addEventListener('mouseout', onTitleTooltipOut, true);
+  document.addEventListener('pointerdown', hideTitleTooltip, true);
+  document.addEventListener('keydown', hideTitleTooltip, true);
+  window.addEventListener('wheel', hideTitleTooltip, { capture: true, passive: true });
+}
+
+function removeTitleTooltips() {
+  if (!titleTooltip.active) return;
+  titleTooltip.active = false;
+  hideTitleTooltip();
+  document.removeEventListener('mouseover', onTitleTooltipOver, true);
+  document.removeEventListener('mouseout', onTitleTooltipOut, true);
+  document.removeEventListener('pointerdown', hideTitleTooltip, true);
+  document.removeEventListener('keydown', hideTitleTooltip, true);
+  window.removeEventListener('wheel', hideTitleTooltip, true);
 }
 
 // Stop monitoring the autoplay session timer
@@ -20241,6 +20468,9 @@ function initBetterUI() {
       applyAdvancedStatsOnHover();
     }
     
+    if (config.enableLagRefresh) startLagRefreshMonitor();
+    initTitleTooltips();
+
     if (config.enableAutoplayRefresh) {
       console.log('[Mod Settings] Autoplay refresh enabled in config, starting monitor');
       startAutoplayRefreshMonitor();
@@ -20473,6 +20703,9 @@ function cleanupBetterUI() {
     }
     
     stopAutoplayRefreshMonitor();
+    stopLagRefreshMonitor();
+    cancelSafeReload();
+    removeTitleTooltips();
     disableMuteAllGameSounds();
     unsubscribeFromMapChanges();
     removeLastMapNavButton();
