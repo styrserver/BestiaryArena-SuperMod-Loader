@@ -4,6 +4,31 @@
   },
   "notes": [
     {
+      "version": "5.3.3",
+      "changes": [
+        {
+          "mod": "Autoseller",
+          "type": "fixed",
+          "text": "Creatures skipped by Autosqueeze (outside the gene range, shiny, ignored) no longer flood the Error Log."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "added",
+          "text": "Hovering a creature's ability icon (marked with a small play badge) shows a numbered-tile scene of its area and effect, playing after half a second. Marked BETA."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "changed",
+          "text": "Map record holder links to their profile, turns green when it is you, and shows a loading spinner; all records load in one request and are kept across refreshes until the server updates them. Map rows in a region show a Victories column with the record and your count."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "added",
+          "text": "The debugger report lists the last automatic refreshes with the reason, time, FPS and memory, kept across reloads."
+        }
+      ]
+    },
+    {
       "version": "5.3.2",
       "changes": [
         {

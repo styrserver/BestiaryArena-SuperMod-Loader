@@ -1196,16 +1196,12 @@
 
         battleRewardMonsters.forEach((drop, index) => {
             const monster = drop?.monster || drop || {};
-            const hp = Number(monster.hp ?? 0);
-            const ad = Number(monster.ad ?? 0);
-            const ap = Number(monster.ap ?? 0);
-            const armor = Number(monster.armor ?? 0);
-            const magicResist = Number(monster.magicResist ?? 0);
+            const { hp, ad, ap, armor, magicResist } = getMonsterGeneStats(monster);
             const genes = hp + ad + ap + armor + magicResist;
             const tier = monster.tier ?? monster.metadata?.tier ?? 'unknown';
             const serverId = monster.id || monster.databaseId || drop?.monsterId || 'unknown';
             const gameId = monster.gameId ?? monster.metadata?.id ?? 'unknown';
-            const name = monster.name || monster.metadata?.name || `gameId:${gameId}`;
+            const name = monster.name || monster.metadata?.name || getCreatureNameFromMonster(monster) || `gameId:${gameId}`;
 
             console.log(
                 `[Autoseller][DropDebug] Floor ${floorNum} drop #${index + 1}: ` +
@@ -6905,7 +6901,7 @@
             `queue=${pendingGameEndBySeed.size} retryTimer=${!!gameEndRetryTimer} ` +
             `plantInFlight=${plantEatInFlight} plantTimer=${!!dragonPlantActivateRetryTimer} ` +
             `plantAttempts=${dragonPlantActivateAttempts} plantGiveUp=${dragonPlantActivateGiveUpForDrop} ` +
-            `lastRunAgo=${Date.now() - stateManager.lastRun}ms`;
+            `lastRunAgo=${stateManager.lastRun ? `${Date.now() - stateManager.lastRun}ms` : 'never'}`;
     }
 
     // Dragon Plant skipped silently: report once per reason/drop (60s) to the popup Error Log
@@ -6922,10 +6918,16 @@
         } catch (_) { /* diagnostics only */ }
     }
 
-    // Squeeze skipped for a creature drop: say why in the popup Error Log (default log level hides console.log).
+    // Squeeze skipped for a creature drop. Expected skips (off, shiny, sealed, ignore list, gene band) are
+    // normal (the Plant devours those): verbose log only. Only an unexplained skip goes to the popup Error Log,
+    // throttled per reason + creature (detail holds per-drop genes, so it must not be part of the key).
     const squeezeSkipReportedAt = new Map();
-    function reportSqueezeSkip(reason, detail) {
-        const key = `${reason}|${detail || ""}`;
+    function reportSqueezeSkip(reason, detail, gameId) {
+        if (reason !== "unknown") {
+            logAutosellerDebug("Squeeze", `Not squeezed: ${reason} — ${detail || ""}`);
+            return;
+        }
+        const key = `${reason}|${gameId ?? ""}`;
         const now = Date.now();
         if (now - (squeezeSkipReportedAt.get(key) || 0) < 60000) return;
         squeezeSkipReportedAt.set(key, now);
@@ -6948,12 +6950,15 @@
         return "unknown";
     }
 
-    function formatMonsterForDebug(monster) {
+    // `drop` is the reward-screen wrapper: a fresh drop carries its server id as `drop.monsterId`
+    // (or none yet), not on the inner monster object.
+    function formatMonsterForDebug(monster, drop) {
         if (!monster) return 'unknown';
-        const name = monster?.metadata?.name || monster?.name || `gameId:${monster?.gameId ?? '?'}`;
+        const name = monster?.metadata?.name || monster?.name || getCreatureNameFromMonster(monster) || `gameId:${monster?.gameId ?? '?'}`;
         const stats = getMonsterGeneStats(monster);
         const totalGenes = stats.hp + stats.ad + stats.ap + stats.armor + stats.magicResist;
-        return `${name} id=${monster.id ?? '?'} genes=${totalGenes} tier=${monster?.tier ?? '?'}`;
+        const id = monster.id || monster.databaseId || drop?.monsterId || drop?.id || 'not-assigned-yet';
+        return `${name} (gameId:${monster?.gameId ?? '?'}) id=${id} genes=${totalGenes} tier=${monster?.tier ?? '?'}`;
     }
     
     // Monitor Dragon Plant + gameServer APIs (equipDrop.id is reliable on gameServer)
@@ -11453,7 +11458,7 @@
             battleRewardMonsters.forEach((drop) => {
                 const monster = drop?.monster || drop;
                 if (!monster || typeof monster !== "object") return;
-                reportSqueezeSkip(explainSqueezeSkip(monster, settings), formatMonsterForDebug(monster));
+                reportSqueezeSkip(explainSqueezeSkip(monster, settings), formatMonsterForDebug(monster, drop), monster.gameId);
             });
         }
         let needsActionRetry = false;
@@ -11698,7 +11703,7 @@
             if (!stateManager.canRun()) {
                 logAutosellerDebug(
                     'GameEnd',
-                    `seed=${refreshed.seed} canRun blocked — queued for retry and Dragon Plant NOT activated for this battle (${autosellerDebugState()})`
+                    `seed=${refreshed.seed} canRun blocked — queued for retry; Dragon Plant deferred until the retry runs (${autosellerDebugState()})`
                 );
                 const blockedIds = extractEquipmentFromServerResults(refreshed).rewardEquipmentIds;
                 if (blockedIds.size > 0) {
@@ -11811,7 +11816,10 @@
         const widgetBottom = findAutoplayContainer();
         if (!widgetBottom) {
             console.log('[Autoseller] Autoplay container not found for dragon plant click');
-            reportPlantSkip('autoplay widget not found at click time');
+            reportPlantSkip(
+                'autoplay widget not found at click time',
+                `autoplayIcons=${document.querySelectorAll('img[alt="Autoplay"]').length}`
+            );
             return false;
         }
         
@@ -11917,7 +11925,13 @@
         const hasDrop = !!dropSig;
 
         if (!widgetBottom) {
-            reportPlantSkip('autoplay widget not found or minimized');
+            const icons = document.querySelectorAll('img[alt="Autoplay"]').length;
+            const minimized = document.querySelectorAll('.widget-bottom[data-minimized="true"]').length;
+            reportPlantSkip(
+                'autoplay widget not found or minimized',
+                `autoplayIcons=${icons} minimizedWidgets=${minimized} ` +
+                (icons === 0 ? '(widget not mounted)' : minimized > 0 ? '(widget minimized)' : '(icon present, container lookup failed)')
+            );
         }
 
         if (!hasDrop) {

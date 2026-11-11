@@ -2,7 +2,7 @@
  * When each tools/ drift check last ran, and against which game build.
  *
  * The block between the markers is rewritten by tools/tool-runs.mjs (recordRun) at the end of every
- * completed run of tools/check-creature-combat.mjs, check-inventory-items.mjs,
+ * completed run of tools/check-creature-combat.mjs, check-ability-scenes.mjs, check-inventory-items.mjs,
  * check-room-scripts.mjs, check-database-names.mjs, check-outfits-mounts.mjs and check-fast-simulation.mjs.
  * Never edit it by hand.
  *
@@ -15,12 +15,13 @@
  */
 // BEGIN TOOL_RUNS
 const TOOL_RUNS = {
-  creatureCombat: {"buildId":"G63aArHsrfaeZKknNhxai","at":"2026-11-06T11:30:27.293Z","status":"ok"},
-  inventoryItems: {"buildId":"G63aArHsrfaeZKknNhxai","at":"2026-11-06T11:30:29.787Z","status":"ok"},
-  roomScripts: {"buildId":"G63aArHsrfaeZKknNhxai","at":"2026-11-06T11:30:30.811Z","status":"ok"},
-  databaseNames: {"buildId":"G63aArHsrfaeZKknNhxai","at":"2026-11-06T11:30:27.914Z","status":"ok"},
-  outfitsMounts: {"buildId":"G63aArHsrfaeZKknNhxai","at":"2026-11-06T11:30:30.282Z","status":"ok"},
-  fastSimulation: {"buildId":"G63aArHsrfaeZKknNhxai","at":"2026-11-06T11:30:28.392Z","status":"ok"}
+  abilityScenes: {"buildId":"mlfKwy34EiJuBlWokiziL","at":"2026-11-11T17:15:55.175Z","status":"ok"},
+  creatureCombat: {"buildId":"mlfKwy34EiJuBlWokiziL","at":"2026-11-11T17:15:55.900Z","status":"ok"},
+  inventoryItems: {"buildId":"mlfKwy34EiJuBlWokiziL","at":"2026-11-11T17:15:58.332Z","status":"ok"},
+  roomScripts: {"buildId":"mlfKwy34EiJuBlWokiziL","at":"2026-11-11T17:15:59.470Z","status":"ok"},
+  databaseNames: {"buildId":"mlfKwy34EiJuBlWokiziL","at":"2026-11-11T17:15:56.446Z","status":"ok"},
+  outfitsMounts: {"buildId":"mlfKwy34EiJuBlWokiziL","at":"2026-11-11T17:15:58.829Z","status":"ok"},
+  fastSimulation: {"buildId":"mlfKwy34EiJuBlWokiziL","at":"2026-11-11T17:15:56.932Z","status":"ok"}
 };
 // END TOOL_RUNS
 

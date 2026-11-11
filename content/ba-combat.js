@@ -102,7 +102,7 @@
 
   /**
    * Every creature's combat numbers from the creature module source:
-   *   { [gameId]: { n: name, ad: attack delay ms | null, r?: attack range, rc?: ranged flag, ic?: first-cast delay ms, s?: [{ n, st: baseStats, r?, rc?, ic? }] summons, c: { SNAPSHOT_KEY: number },
+   *   { [gameId]: { n: name, ad: attack delay ms | null, r?: attack range, rc?: ranged flag, ic?: first-cast delay ms, s?: [{ n, st: baseStats, r?, rc?, ic? }] summons, sc?: ability scene hints (see sceneFields), c: { SNAPSHOT_KEY: number },
    *                 loc: { SNAPSHOT_KEY: { table, rawKey, ms, isTicks } } } }
    * `c` is the shape stored in CREATURE_COMBAT_DATA; `loc` says which constant object (`table`: the
    * source offset of its `{`) and key hold the value, and how the game wrote it (see tableValue).
@@ -174,10 +174,59 @@
       const [only] = found;
       return found.size === 1 && only != null ? only : undefined;
     };
-    const classFields = (cls, k, constants) => {
+    // Area masks are written once as `l6=(0,K.fO)("\nOOXOO\nXX+XX\n...")` ('+' = origin tile, 'X' = hit) and
+    // used in a class as `l6(t.position)` (around the target) or `l6(this.position)` (around the caster).
+    const maskDefs = new Map();
+    for (const m of src.matchAll(/(?:^|[,;{ ])([A-Za-z_$][\w$]*)=\(0,[\w$]+\.[\w$]+\)\("((?:\\n[OX+]+)+\\n)"\)/g)) {
+      maskDefs.set(m[1], m[2].split('\\n').filter(Boolean));
+    }
+    // Some classes keep several masks in one object (`tx={inner:(0,K.fO)("..."),outer:(0,K.fO)("...")}`, used as
+    // `tx.inner(this.position)`): indexed as `tx.inner`, `tx.outer`.
+    const maskLiteral = String.raw`\(0,[\w$]+\.[\w$]+\)\("(?:\\n[OX+]+)+\\n"\)`;
+    for (const obj of src.matchAll(new RegExp(String.raw`(?:^|[,;{ ])([A-Za-z_$][\w$]*)=\{((?:[A-Za-z_$][\w$]*:${maskLiteral},?)+)\}`, 'g'))) {
+      for (const prop of obj[2].matchAll(/([A-Za-z_$][\w$]*):\(0,[\w$]+\.[\w$]+\)\("((?:\\n[OX+]+)+\\n)"\)/g)) {
+        maskDefs.set(`${obj[1]}.${prop[1]}`, prop[2].split('\\n').filter(Boolean));
+      }
+    }
+    /**
+     * Ability scene hints from a creature class: `sc = { m: [{ a: 'target'|'self', rows }], mi: [missile names], fx: [{ n, w: 'self'|'target' }] }`.
+     * `fx` are the effects the class publishes on an fxEmitter (`effect:"largeFireExplosion"`); the numeric sprite id
+     * comes from the game's effect table (tools/check-ability-scenes.mjs). Undefined when the class has none of them.
+     */
+    const sceneFields = (body) => {
+      const masks = [];
+      for (const [name, rows] of maskDefs) {
+        const esc = name.replace(/[$.]/g, '\\$&');
+        const use = new RegExp(String.raw`(?<![\w$.])${esc}\(([\w$.]*)\)`).exec(body);
+        if (!use || masks.some((x) => x.rows.join() === rows.join())) continue;
+        masks.push({ a: use[1].startsWith('this.') ? 'self' : 'target', rows });
+      }
+      // `scanCoordinates(<name>(...))` calls whose mask this parser could not resolve (a new way the game defines
+      // masks): reported by the tool so a wrong or missing area never goes unnoticed. 1-char names are callback params.
+      const unresolved = [...new Set([...body.matchAll(/scanCoordinates\(([\w$.]{2,})\(/g)].map((x) => x[1]))]
+        .filter((name) => !maskDefs.has(name));
+      const mi = [...new Set([...body.matchAll(/missile:"(\w+)"/g)].map((x) => x[1]))];
+      // Each effect plays on the caster ('self': `this.fxEmitter.publish`) or elsewhere ('target': another actor's
+      // emitter, or the world's, on tiles). Looked up from the `<owner>.fxEmitter` right before the effect name.
+      const fx = [];
+      for (const x of body.matchAll(/effect:"(\w+)"/g)) {
+        const before = body.slice(Math.max(0, x.index - 120), x.index);
+        const at = before.lastIndexOf('fxEmitter');
+        const owner = at >= 0 ? /([\w$.]+)\.fxEmitter$/.exec(before.slice(0, at + 'fxEmitter'.length))?.[1] : undefined;
+        const w = owner === 'this' ? 'self' : 'target';
+        if (!fx.some((e) => e.n === x[1] && e.w === w)) fx.push({ n: x[1], w });
+      }
+      return masks.length || mi.length || fx.length || unresolved.length
+        ? { m: masks, mi, fx, ...(unresolved.length ? { u: unresolved } : {}) } : undefined;
+    };
+    const classFields = (cls, k, constants, withScene = false) => {
       const end = Math.min(k + 1 < classes.length ? classes[k + 1].index : src.length, cls.index + 20000);
       const body = src.slice(cls.index, end);
       const fields = {};
+      if (withScene) {
+        const sc = sceneFields(body);
+        if (sc) fields.sc = sc;
+      }
       const range = single(body, /rangeComponent=this\.addComponent\(new [\w$.]+\(\{range:(\d+),rangedCreature:!([01])/g, (m) => `${m[1]}:${m[2]}`);
       if (range) {
         const [r, flag] = range.split(':');
@@ -194,7 +243,27 @@
     };
     classes.forEach((cls, k) => {
       const entry = cls.metaVar && byVar.get(cls.metaVar);
-      if (entry) Object.assign(entry, classFields(cls, k, entry.c));
+      if (entry) Object.assign(entry, classFields(cls, k, entry.c, true));
+    });
+    // Ability scene, second pass: found from the class that spreads the creature's metadata into
+    // `super({...t,...<metaVar>})`. Unlike `classes` above this also finds classes with fields or methods before
+    // their constructor, and ends the body at the next class declaration. It replaces the scene read by the first pass.
+    const classStartBefore = (index) => {
+      for (let p = src.lastIndexOf('class ', index); p >= 0; p = src.lastIndexOf('class ', p - 1)) {
+        if (/^class [\w$]+ extends /.test(src.slice(p, p + 80))) return p;
+      }
+      return -1;
+    };
+    byVar.forEach((entry, metaVar) => {
+      const esc = metaVar.replace(/\$/g, '\\$');
+      const sup = new RegExp(String.raw`super\(\{[^}]{0,80}\.\.\.${esc}[,}]`).exec(src);
+      if (!sup) return;
+      const start = classStartBefore(sup.index);
+      if (start < 0) return;
+      const next = src.slice(sup.index).search(/class [\w$]+ extends [\w$.]+\{/);
+      const end = Math.min(next > 0 ? sup.index + next : src.length, start + 20000);
+      const sc = sceneFields(src.slice(start, end));
+      if (sc) entry.sc = sc;
     });
 
     // Summons (no id in the name table: Werefox Statue, Larva, Troll-Trained Salamander ...) belong to the
@@ -304,7 +373,7 @@
       if (!id || out[id]) continue;
       const own = readEntry(from, objEnd);
       out[id] = { n: ownName, ad: own.ad ?? base.ad, c: { ...base.c, ...own.c }, loc: { ...base.loc, ...own.loc } };
-      for (const key of ['r', 'rc', 'ic', 's']) if (base[key] != null) out[id][key] = base[key];
+      for (const key of ['r', 'rc', 'ic', 's', 'sc']) if (base[key] != null) out[id][key] = base[key];
     }
     return { entries: out, objects, unlinkedSummons };
   }

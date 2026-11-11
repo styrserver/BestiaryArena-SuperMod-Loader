@@ -19,6 +19,7 @@ const DIR = dirname(fileURLToPath(import.meta.url));
 // a hint; a check without an entry falls back to its own --update / output.
 const FIXES = {
   'check-creature-combat.mjs': 'follow /check-game-update step "creature combat" (--update rewrites the snapshot)',
+  'check-ability-scenes.mjs': 'node tools/check-ability-scenes.mjs --update (ABILITY_SCENE_DATA in creature-database.js)',
   'check-inventory-items.mjs': 'edit database/inventory-database.js by hand (see /check-game-update)',
   'check-database-names.mjs': 'fix the STALE/RENAMED list entries in database/',
   'check-room-scripts.mjs': 'review ROOM_SCRIPT_NOTES, then node tools/check-room-scripts.mjs --update',

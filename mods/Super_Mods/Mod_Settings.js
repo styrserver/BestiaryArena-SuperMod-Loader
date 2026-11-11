@@ -238,7 +238,46 @@ function reloadBrowser(reason) {
     return;
   }
   console.log(`[Mod Settings] Refreshing browser: ${reason}`);
+  recordAutoRefresh(reason);
   location.reload();
+}
+
+// Survives the reload (localStorage) so the debugger report can show why and when each automatic refresh happened.
+const AUTO_REFRESH_LOG_KEY = 'ba-auto-refresh-log';
+const AUTO_REFRESH_LOG_MAX = 20;
+
+function readAutoRefreshLog() {
+  try {
+    const list = JSON.parse(localStorage.getItem(AUTO_REFRESH_LOG_KEY) || '[]');
+    return Array.isArray(list) ? list : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+function recordAutoRefresh(reason) {
+  try {
+    const entry = {
+      ts: Date.now(),
+      reason: String(reason),
+      fps: typeof perfOverlay?.fps === 'number' ? Math.round(perfOverlay.fps) : null,
+      dom: document.getElementsByTagName('*').length,
+      heapMB: performance?.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576) : null,
+      uptimeMin: Math.round(performance.now() / 60000)
+    };
+    const list = readAutoRefreshLog();
+    list.push(entry);
+    localStorage.setItem(AUTO_REFRESH_LOG_KEY, JSON.stringify(list.slice(-AUTO_REFRESH_LOG_MAX)));
+  } catch (_) { /* storage unavailable: the refresh still happens */ }
+}
+
+function formatAutoRefreshLog() {
+  const list = readAutoRefreshLog();
+  if (!list.length) return '';
+  const rows = list.map((e) =>
+    `  ${new Date(e.ts).toISOString()}  ${e.reason}  | fps ${e.fps ?? '?'}, DOM ${e.dom}` +
+    `${e.heapMB != null ? `, heap ${e.heapMB}MB` : ''}, page up ${e.uptimeMin}min`);
+  return `== Auto refreshes (last ${list.length}, newest last) ==\n${rows.join('\n')}`;
 }
 
 function isAnalysisBlockingModActive() {
@@ -4026,6 +4065,8 @@ function perfFormatReport() {
       ...apiLines].join('\n')
   ];
   if (perfOverlay.captures.length) parts.push(`== Limit-hit captures ==\n${perfFormatCaptures()}`);
+  const refreshLog = formatAutoRefreshLog();
+  if (refreshLog) parts.push(refreshLog);
   // Mods can add their own timings (window.BestiaryPerfReportProviders: functions returning a line or lines).
   try {
     const extra = (window.BestiaryPerfReportProviders || [])

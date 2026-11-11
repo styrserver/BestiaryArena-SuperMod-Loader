@@ -35,7 +35,8 @@
  *   GET /api/v1/maps — every ROOMS room with victory totals, sorted by totalCount desc
  *     200 → { mapsRequired, maps: [{ roomId, name|null, ladder, raid, players (>=1 victory), totalCount }], timestamp }
  *
- *   GET /api/v1/maps/rankings — per-map leaderboard (only players with count > 0)
+ *   GET /api/v1/maps/rankings — per-map leaderboard (only players with count > 0).
+ *     No ?room = every room's #1 in one call ({ rooms:[{ roomId, total, rankings }] }); ?top=N (max 25) per room.
  *     room (required, `roomId` alias; e.g. kof), limit default 100 (1–5000), offset, search,
  *     sort count (default) | name | rankPoints | ticks | floor, order desc (default) | asc.
  *     200 → { room: {roomId,name,ladder,raid}, total, limit, offset,
@@ -1063,6 +1064,356 @@ function cyclopediaGetMonsterPortraitUrl(gameId, isShiny = false) {
   return `/assets/portraits/${gameId}${isShiny ? '-shiny' : ''}.png`;
 }
 
+/**
+ * Looping ability scene. The data comes from `creatureDatabase.getAbilityScene(gameId)` (database/creature-database.js:
+ * extracted from the game's creature classes by tools/check-ability-scenes.mjs, plus hand-written overrides): one
+ * part per ability, each with area masks, projectiles, effect sheets and the ability's real cooldown.
+ *
+ * Per grid (one per area mask of a part): tiles with small index numbers (like Custom_Display's overlay), the
+ * creature's own sprite as caster, the projectile, the hit area flashing, then the game's effect sheets
+ * (/assets/EFFECT/{id}.png, square frames stacked vertically). `a: 'target'` masks sit around a target in the middle
+ * with the caster in the corner; `a: 'self'` masks sit around the caster in the middle. Parts sit side by side, a
+ * part with several abilities gets a caption each.
+ *
+ * Pure Web Animations, created running; the caller rewinds and pauses them (see
+ * restartCyclopediaAbilityScene) so nothing runs while the scene is hidden. Removing the element ends it.
+ * @param {{parts: Array<{label: ?string, masks: Array<{a: string, rows: string[]}>, missiles: Array, effects: Array, cooldownMs: ?number}>}|null} scene
+ * @param {() => HTMLElement} createCaster builds a fresh caster sprite per grid
+ * @returns {HTMLElement|null} null when there is no area to draw.
+ */
+function createCyclopediaAbilityScene(scene, createCaster) {
+  const parts = (scene?.parts || [])
+    .map((part) => ({ ...part, masks: (part.masks || []).filter((m) => Array.isArray(m?.rows) && m.rows.length) }))
+    .filter((part) => part.masks.length);
+  console.log('[Cyclopedia][ability-scene] build', parts.map((part) => ({
+    label: part.label, masks: part.masks.length, missiles: (part.missiles || []).map((m) => m.n),
+    effects: (part.effects || []).map((e) => e.n), cooldownMs: part.cooldownMs
+  })));
+  if (!parts.length) return null;
+
+  const wrap = document.createElement('div');
+  wrap.setAttribute('data-ability-scene', 'true');
+  wrap.style.cssText = 'display:flex;flex-wrap:wrap;justify-content:center;align-items:flex-start;gap:14px;';
+  const fits = [];
+  parts.forEach((part) => {
+    const group = document.createElement('div');
+    group.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:4px;';
+    if (parts.length > 1 && part.label) {
+      const caption = document.createElement('div');
+      caption.textContent = part.label;
+      caption.style.cssText = 'color:#fff;font-size:11px;text-shadow:0 0 2px #000;';
+      group.appendChild(caption);
+    }
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;flex-wrap:wrap;justify-content:center;align-items:flex-start;gap:10px;';
+    part.masks.forEach((mask) => {
+      const { grid, fit } = createCyclopediaAbilityGrid(mask, part, createCaster);
+      row.appendChild(grid);
+      fits.push(fit);
+    });
+    group.appendChild(row);
+    wrap.appendChild(group);
+  });
+  // Sprite sizes can only be measured once the scene is displayed: the caller invokes this on show (idempotent).
+  wrap.fitSprites = () => fits.forEach((fit) => fit());
+  return wrap;
+}
+
+/** Rewinds every animation in the scene to the start and pauses it; `play` then starts them. */
+function restartCyclopediaAbilityScene(sceneEl, play) {
+  const anims = sceneEl.getAnimations({ subtree: true });
+  anims.forEach((a) => { a.pause(); a.currentTime = 0; if (play) a.play(); });
+  return anims.length;
+}
+
+/** Ground sprite the scene tiles use: game sprite id, and how many crop variants per axis its sheet has (4 x 4 = 16). */
+const CYCLOPEDIA_SCENE_FLOOR = { id: 351, crops: 4 };
+
+/** One loop of the scene, as fractions of the duration: projectile lands at `land`, effects end at `end`. */
+const CYCLOPEDIA_SCENE_TIMELINE = { duration: 2600, land: 0.3, landEnd: 0.34, end: 0.7 };
+/** Longest loop: abilities with a very long real cooldown still repeat at least this often. */
+const CYCLOPEDIA_SCENE_MAX_LOOP_MS = 8000;
+
+const cyclopediaSceneProbedUrls = new Set();
+
+/** Loads a scene asset once per URL to log its real size (and error out loudly if the URL is wrong). */
+function probeCyclopediaSceneAsset(label, url, expected) {
+  if (cyclopediaSceneProbedUrls.has(url)) return;
+  cyclopediaSceneProbedUrls.add(url);
+  const img = new Image();
+  img.onload = () => {
+    // expected: { w, h } exact size, or { ratio } = frames stacked vertically (height / width, square frames)
+    const ok = !expected || (expected.ratio != null
+      ? Math.round(img.naturalHeight / img.naturalWidth) === expected.ratio
+      : img.naturalWidth === expected.w && (!expected.h || img.naturalHeight === expected.h));
+    console.log(`[Cyclopedia][ability-scene] asset ${ok ? 'ok' : 'SIZE MISMATCH'}`, {
+      label, url, w: img.naturalWidth, h: img.naturalHeight, expected: expected ?? null
+    });
+  };
+  img.onerror = () => console.error('[Cyclopedia] Ability scene asset failed to load:', label, url);
+  img.src = url;
+}
+
+/** Frame (col,row in the 3x3 sheet) of a missile heading from (fromCol,fromRow) to (toCol,toRow), screen coordinates. */
+function cyclopediaMissileFrame(fromCol, fromRow, toCol, toRow) {
+  const deg = Math.atan2(-(toRow - fromRow), toCol - fromCol) * 180 / Math.PI; // 0 = east, 90 = north
+  const octant = ((Math.round(deg / 45) % 8) + 8) % 8; // 0 E, 1 NE, 2 N, 3 NW, 4 W, 5 SW, 6 S, 7 SE
+  const frames = [[2, 1], [2, 0], [1, 0], [0, 0], [0, 1], [0, 2], [1, 2], [2, 2]];
+  return { octant, col: frames[octant][0], row: frames[octant][1] };
+}
+
+function createCyclopediaAbilityGrid(mask, scene, createCaster) {
+  const rows = mask.rows;
+  const selfAnchored = mask.a === 'self';
+  const maskH = rows.length;
+  const maskW = Math.max(...rows.map((row) => row.length));
+  // Sized to the ability: a square window around the origin tile ('+') that reaches ABILITY_SCENE_PADDING tiles past
+  // the farthest hit tile. Tile numbers are the game board's (15 x 11, row by row, origin = 82); tiles outside the
+  // board have no number.
+  const BOARD_COLS = 15;
+  const BOARD_ROWS = 11;
+  const ABILITY_SCENE_PADDING = 1;
+  const ABILITY_SCENE_MIN_HALF = 2; // at least 5 x 5 so a one-tile ability still has room for the caster and projectile
+  const centerRow = Math.max(0, rows.findIndex((row) => row.includes('+')));
+  const centerCol = Math.max(0, rows[centerRow].indexOf('+'));
+  const reach = Math.max(centerCol, maskW - 1 - centerCol, centerRow, maskH - 1 - centerRow);
+  const half = Math.max(reach + ABILITY_SCENE_PADDING, ABILITY_SCENE_MIN_HALF);
+  const cols = half * 2 + 1;
+  const rowsN = half * 2 + 1;
+  const cell = 24;
+  const midCol = Math.floor(cols / 2);
+  const midRow = Math.floor(rowsN / 2);
+  console.log('[Cyclopedia][ability-scene] grid', { anchor: mask.a, maskW, maskH, cols, rows: rowsN, cell, reach, padding: ABILITY_SCENE_PADDING, originTileIndex: Math.floor(BOARD_ROWS / 2) * BOARD_COLS + Math.floor(BOARD_COLS / 2) });
+
+  const grid = document.createElement('div');
+  grid.style.cssText = `position:relative;width:${cols * cell}px;height:${rowsN * cell}px;overflow:hidden;`;
+
+  // Tile layer: dark bordered tiles with a small index.
+  const tileLayer = document.createElement('div');
+  tileLayer.style.cssText = `display:grid;grid-template-columns:repeat(${cols},${cell}px);grid-auto-rows:${cell}px;`;
+  const labelPx = Math.max(5, Math.floor(cell / 3.4));
+  // Floor: the game's own ground sprite (same markup the Map Editor places: `.sprite.item.id-N` + `img.spritesheet`
+  // with --cropX/--cropY picking one of the sheet's 4x4 variants), varied per tile. The game's stylesheet paints
+  // it; if it does not (sprite not known to the page), the tile keeps its dark fallback colour.
+  const floor = CYCLOPEDIA_SCENE_FLOOR;
+  let firstFloorSprite = null;
+  for (let i = 0; i < cols * rowsN; i++) {
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    const t = document.createElement('div');
+    t.style.cssText = 'position:relative;box-sizing:border-box;overflow:hidden;'
+      + 'border:1px solid rgba(255,255,255,0.3);background:rgba(0,0,0,0.5);';
+    const sprite = document.createElement('div');
+    sprite.className = `sprite item relative id-${floor.id}`;
+    sprite.style.cssText = 'position:absolute;left:0;top:0;transform-origin:0 0;pointer-events:none;'
+      + 'transform:scale(var(--scene-tile-scale,1));';
+    const viewport = document.createElement('div');
+    viewport.className = 'viewport';
+    viewport.style.overflow = 'hidden';
+    const img = document.createElement('img');
+    img.alt = String(floor.id);
+    img.className = 'spritesheet';
+    img.setAttribute('data-cropped', 'true');
+    img.style.setProperty('--cropX', String((i * 5 + row * 3) % floor.crops));
+    img.style.setProperty('--cropY', String((row * 7 + col * 11) % floor.crops));
+    viewport.appendChild(img);
+    sprite.appendChild(viewport);
+    t.appendChild(sprite);
+    if (!firstFloorSprite) firstFloorSprite = sprite;
+
+    const label = document.createElement('div');
+    const boardCol = Math.floor(BOARD_COLS / 2) + (col - midCol);
+    const boardRow = Math.floor(BOARD_ROWS / 2) + (row - midRow);
+    label.textContent = boardCol >= 0 && boardCol < BOARD_COLS && boardRow >= 0 && boardRow < BOARD_ROWS
+      ? String(boardRow * BOARD_COLS + boardCol) : '';
+    label.style.cssText = 'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;'
+      + 'background:rgba(0,0,0,0.25);color:rgba(255,255,255,0.9);'
+      + `font-family:"Press Start 2P","VT323",monospace;font-size:${labelPx}px;line-height:1;`
+      + 'text-shadow:0 0 2px #000,0 0 3px #000;pointer-events:none;';
+    t.appendChild(label);
+    tileLayer.appendChild(t);
+  }
+  grid.appendChild(tileLayer);
+  // The sprite is 32px * the page zoom natively: scale it to the tile once it is laid out (scene starts hidden).
+  let floorFitted = false;
+  const fitFloor = () => {
+    if (floorFitted) return;
+    const w = firstFloorSprite.offsetWidth;
+    if (!w) return;
+    floorFitted = true;
+    const scale = cell / w;
+    grid.style.setProperty('--scene-tile-scale', String(scale));
+    const img = firstFloorSprite.querySelector('img');
+    const cs = getComputedStyle(img);
+    console.log('[Cyclopedia][ability-scene] floor sprite', {
+      id: floor.id, nativePx: w, scale: Number(scale.toFixed(3)),
+      painted: img.naturalWidth > 0 || (cs.content && cs.content !== 'none' && cs.content !== 'normal'),
+      naturalSize: [img.naturalWidth, img.naturalHeight], content: String(cs.content).slice(0, 90)
+    });
+  };
+
+  const place = (el, col, row) => {
+    el.style.position = 'absolute';
+    el.style.left = `${col * cell}px`;
+    el.style.top = `${row * cell}px`;
+    el.style.width = `${cell}px`;
+    el.style.height = `${cell}px`;
+    el.style.boxSizing = 'border-box';
+    return el;
+  };
+
+  // Caster tile: the corner for target-anchored abilities, the middle for self-anchored ones.
+  const casterCol = selfAnchored ? midCol : 0;
+  const casterRow = selfAnchored ? midRow : rowsN - 1;
+
+  // Timing close to the game's: one loop is the ability's real cooldown; the projectile flies at about 70ms per
+  // tile; effects play for their frames (~60ms each, the game's own fire effect runs 600ms), the area flash lasts a
+  // little longer than the projectile. Without a known cooldown the default loop is used.
+  const tilesToTarget = Math.max(Math.abs(midCol - casterCol), Math.abs(midRow - casterRow));
+  const duration = scene.cooldownMs
+    ? Math.min(Math.max(scene.cooldownMs, 1500), CYCLOPEDIA_SCENE_MAX_LOOP_MS)
+    : CYCLOPEDIA_SCENE_TIMELINE.duration;
+  const flightMs = selfAnchored || !(scene.missiles || []).length ? 120 : Math.max(200, tilesToTarget * 70);
+  const effectMs = Math.max(500, ...(scene.effects || []).map((e) => Math.min((Number(e.f) || 1) * 60, 1500)));
+  const T = {
+    duration,
+    land: Math.min(flightMs / duration, 0.4),
+    landEnd: Math.min((flightMs + 60) / duration, 0.45),
+    end: Math.min((flightMs + effectMs) / duration, 0.9)
+  };
+  console.log('[Cyclopedia][ability-scene] timing', { cooldownMs: scene.cooldownMs ?? null, durationMs: duration, flightMs, effectMs, tilesToTarget });
+
+  // Hit tiles: the mask's 'X' / '+' tiles around the origin, or (mask.line) the straight run of tiles from the caster
+  // to the target (chain/electric abilities whose length depends on the distance).
+  const hitTiles = [];
+  if (mask.line && !selfAnchored) {
+    let c = casterCol;
+    let r = casterRow;
+    const steps = Math.max(Math.abs(midCol - casterCol), Math.abs(midRow - casterRow));
+    for (let i = 1; i <= steps; i++) {
+      c = Math.round(casterCol + ((midCol - casterCol) * i) / steps);
+      r = Math.round(casterRow + ((midRow - casterRow) * i) / steps);
+      hitTiles.push([c, r]);
+    }
+  } else {
+    rows.forEach((row, r) => {
+      for (let c = 0; c < row.length; c++) {
+        if (row[c] === 'X' || row[c] === '+') hitTiles.push([midCol + (c - centerCol), midRow + (r - centerRow)]);
+      }
+    });
+  }
+
+  // Hit area, flashing when the projectile lands.
+  hitTiles.forEach(([col, row]) => {
+    const tile = place(document.createElement('div'), col, row);
+    tile.style.background = 'rgba(255,110,30,0.4)';
+    tile.style.pointerEvents = 'none';
+    tile.style.opacity = '0';
+    tile.animate(
+      [{ opacity: 0, offset: 0 }, { opacity: 0, offset: T.land }, { opacity: 1, offset: T.landEnd },
+        { opacity: 0, offset: T.end }, { opacity: 0, offset: 1 }],
+      { duration: T.duration, iterations: Infinity }
+    );
+    grid.appendChild(tile);
+  });
+
+  // Target ring (target-anchored masks only).
+  if (!selfAnchored) {
+    const target = place(document.createElement('div'), midCol, midRow);
+    target.style.border = '2px solid rgba(255,255,255,0.8)';
+    target.style.borderRadius = '50%';
+    grid.appendChild(target);
+  }
+
+  // Caster: the same creature sprite the Cyclopedia shows, scaled to about 1.5 tiles.
+  const casterTile = place(document.createElement('div'), casterCol, casterRow);
+  casterTile.style.overflow = 'visible';
+  let fitCaster = () => {};
+  try {
+    const sprite = createCaster?.();
+    if (sprite) {
+      sprite.style.position = 'absolute';
+      sprite.style.left = '50%';
+      sprite.style.top = '50%';
+      sprite.style.margin = '0';
+      sprite.style.transform = 'translate(-50%,-50%)';
+      sprite.style.pointerEvents = 'none';
+      casterTile.appendChild(sprite);
+      let casterFitted = false;
+      fitCaster = () => {
+        if (casterFitted) return;
+        const w = sprite.offsetWidth;
+        const h = sprite.offsetHeight;
+        if (!w || !h) return;
+        casterFitted = true;
+        const scale = (cell * 1.5) / Math.max(w, h);
+        sprite.style.transform = `translate(-50%,-50%) scale(${scale})`;
+        console.log('[Cyclopedia][ability-scene] caster fit', { w, h, scale: Number(scale.toFixed(3)) });
+      };
+    } else {
+      console.log('[Cyclopedia][ability-scene] no caster sprite');
+    }
+  } catch (casterError) {
+    console.error('[Cyclopedia] Error building ability-scene caster:', casterError);
+  }
+  grid.appendChild(casterTile);
+
+  // Projectile (target-anchored only): the game's missile sheet (/assets/MISSILE/{id}.png, 96x96, eight 32px
+  // direction frames in a 3x3 layout), facing from the caster to the target.
+  const missileInfo = scene.missiles?.[0];
+  if (!selfAnchored && missileInfo) {
+    const M = cell * 2;
+    const dir = cyclopediaMissileFrame(casterCol, casterRow, midCol, midRow);
+    const url = `https://bestiaryarena.com/assets/MISSILE/${missileInfo.id}.png`;
+    console.log('[Cyclopedia][ability-scene] missile', { name: missileInfo.n, id: missileInfo.id, url, octant: dir.octant, frame: [dir.col, dir.row], px: M });
+    probeCyclopediaSceneAsset(`missile ${missileInfo.n}`, url, { w: 96, h: 96 });
+    const missile = document.createElement('div');
+    missile.style.cssText = `position:absolute;width:${M}px;height:${M}px;left:${casterCol * cell + cell / 2 - M / 2}px;top:${casterRow * cell + cell / 2 - M / 2}px;`
+      + `background:url(${url}) ${-dir.col * M}px ${-dir.row * M}px / ${M * 3}px ${M * 3}px no-repeat;`
+      + 'image-rendering:pixelated;pointer-events:none;';
+    const dx = (midCol - casterCol) * cell;
+    const dy = (midRow - casterRow) * cell;
+    missile.animate(
+      [{ transform: 'translate(0,0)', opacity: 1, offset: 0 },
+        { transform: `translate(${dx}px,${dy}px)`, opacity: 1, offset: T.land },
+        { transform: `translate(${dx}px,${dy}px)`, opacity: 0, offset: T.landEnd },
+        { transform: 'translate(0,0)', opacity: 0, offset: 1 }],
+      { duration: T.duration, iterations: Infinity, easing: 'linear' }
+    );
+    grid.appendChild(missile);
+  }
+
+  // Effects: the game's sheets, played when the projectile lands. A burst effect (`b` in the data: the game's
+  // "large*" effects) is one big animation on the origin tile; any other effect covers every tile of the hit area.
+  (scene.effects || []).forEach((effect) => {
+    const frames = Math.max(1, Number(effect.f) || 1);
+    const burst = effect.b === 1;
+    const E = burst ? cell * 3 : cell;
+    const onSelf = effect.w === 'self'; // plays on the caster (buffs), not on the target / the hit tiles
+    const spots = onSelf ? [[casterCol, casterRow]] : burst ? [[midCol, midRow]] : hitTiles;
+    const effectUrl = `https://bestiaryarena.com/assets/EFFECT/${effect.id}.png`;
+    console.log('[Cyclopedia][ability-scene] effect', { name: effect.n, id: effect.id, url: effectUrl, frames, burst, px: E, tiles: spots.length });
+    probeCyclopediaSceneAsset(`effect ${effect.n}`, effectUrl, { ratio: frames });
+    spots.forEach(([col, row]) => {
+      const fx = document.createElement('div');
+      fx.style.cssText = `position:absolute;width:${E}px;height:${E}px;left:${col * cell + cell / 2 - E / 2}px;top:${row * cell + cell / 2 - E / 2}px;`
+        + `background:url(${effectUrl}) 0 0 / ${E}px ${E * frames}px no-repeat;`
+        + 'image-rendering:pixelated;opacity:0;pointer-events:none;';
+      fx.animate(
+        [{ offset: 0, opacity: 0, backgroundPositionY: '0px' },
+          { offset: T.land, opacity: 1, backgroundPositionY: '0px', easing: `steps(${frames},end)` },
+          { offset: T.end - 0.001, opacity: 1, backgroundPositionY: `${-E * frames}px` },
+          { offset: T.end, opacity: 0, backgroundPositionY: `${-E * frames}px` },
+          { offset: 1, opacity: 0, backgroundPositionY: '0px' }],
+        { duration: T.duration, iterations: Infinity }
+      );
+      grid.appendChild(fx);
+    });
+  });
+
+  return { grid, fit: () => { fitFloor(); fitCaster(); } };
+}
+
 /** [roomKey, room] pairs for actor scans — prefers mapsDatabase.getAllMaps(). */
 function getCyclopediaAllRoomEntries() {
   const fromDb = mapsDbRef.getAllMaps?.();
@@ -1517,7 +1868,7 @@ const cyclopediaState = {
   searchedUsername: null,
   lazyLoadQueue: [], isProcessingQueue: false,
   cache: {
-    profileData: new Map(), leaderboardData: new Map(), lastFetch: new Map(), roomThumbnails: new Map(),
+    profileData: new Map(), leaderboardData: new Map(), mapRecordLeaders: new Map(), lastFetch: new Map(), roomThumbnails: new Map(),
     maxSize: { profileData: 50, leaderboardData: 20, roomThumbnails: 100 },
     defaultTTL: { profileData: 900000, leaderboardData: 600000, roomThumbnails: 3600000 }
   },
@@ -1561,7 +1912,7 @@ const cyclopediaState = {
   
   clearCache: function(type = 'all') {
     if (type === 'all') {
-      this.cache.profileData.clear(); this.cache.leaderboardData.clear();
+      this.cache.profileData.clear(); this.cache.leaderboardData.clear(); this.cache.mapRecordLeaders.clear(); resetMapRecordSyncCheck();
       this.cache.lastFetch.clear(); this.cache.roomThumbnails.clear();
       clearCyclopediaApiPendingRequests();
     } else if (this.cache[type]) this.cache[type].clear();
@@ -3122,28 +3473,227 @@ function clearCyclopediaApiPendingRequests() {
   cyclopediaApiPendingRequests.clear();
 }
 
-const MAP_RECORD_TTL_MS = 10 * 60 * 1000;
+const MAP_RECORD_TTL_MS = 60 * 60 * 1000; // fallback when the API's last-sync time is unavailable
+const MAP_RECORD_FAIL_TTL_MS = 30 * 1000;
+const MAP_RECORD_SYNC_CHECK_MS = 5 * 60 * 1000;
+const MAP_RECORD_CACHE_MAX = 200;
+const mapRecordSync = { at: 0, value: null, promise: null };
+
+// Records survive a browser refresh via localStorage; each entry still validates against the API's lastSyncAt.
+const MAP_RECORD_STORAGE_KEY = 'ba-cyclopedia-map-records';
+let mapRecordsHydrated = false;
+
+function hydrateMapRecords() {
+  if (mapRecordsHydrated) return;
+  mapRecordsHydrated = true;
+  try {
+    const raw = localStorage.getItem(MAP_RECORD_STORAGE_KEY);
+    const rows = JSON.parse(raw || '[]');
+    if (!Array.isArray(rows)) return;
+    const cache = cyclopediaState.cache.mapRecordLeaders;
+    for (const [roomId, entry] of rows.slice(-MAP_RECORD_CACHE_MAX)) {
+      if (typeof roomId === 'string' && entry && typeof entry.timestamp === 'number' && entry.syncAt) {
+        cache.set(roomId, { data: entry.data ?? null, timestamp: entry.timestamp, failed: false, syncAt: entry.syncAt });
+      }
+    }
+    console.log(`[Cyclopedia] Map records hydrated from storage: ${cache.size} of ${rows.length} rows`, { keyPresent: raw !== null });
+  } catch (error) {
+    console.log('[Cyclopedia] Map records hydrate failed (starting empty):', error);
+  }
+}
+
+function persistMapRecords() {
+  try {
+    // Merge into what is already stored (newest entry per room wins) instead of overwriting it: another
+    // script instance (e.g. a mod soft-reload leaving an older copy alive) may have saved rooms this one lacks.
+    const merged = new Map();
+    try {
+      for (const [roomId, entry] of JSON.parse(localStorage.getItem(MAP_RECORD_STORAGE_KEY) || '[]')) {
+        if (entry && entry.syncAt) merged.set(roomId, entry);
+      }
+    } catch (_) { /* corrupt: rebuilt from memory below */ }
+    let skippedNoSync = 0;
+    for (const [roomId, entry] of cyclopediaState.cache.mapRecordLeaders) {
+      if (entry.failed) continue;
+      if (!entry.syncAt) { skippedNoSync++; continue; }
+      const stored = merged.get(roomId);
+      if (!stored || entry.timestamp >= stored.timestamp) {
+        merged.set(roomId, { data: entry.data, timestamp: entry.timestamp, syncAt: entry.syncAt });
+      }
+    }
+    const rows = [...merged].slice(-MAP_RECORD_CACHE_MAX);
+    localStorage.setItem(MAP_RECORD_STORAGE_KEY, JSON.stringify(rows));
+    if (skippedNoSync) console.log(`[Cyclopedia] Map records persisted: ${rows.length}; ${skippedNoSync} not saved (no lastSyncAt when fetched)`);
+  } catch (error) {
+    console.log('[Cyclopedia] Map records persist failed (memory cache still works):', error);
+  }
+}
+
+function resetMapRecordSyncCheck() {
+  mapRecordSync.at = 0;
+  mapRecordSync.value = null;
+  mapRecordSync.promise = null;
+}
+
+/**
+ * The API's lastSyncAt (/health). Record data only changes when that moves, so cached records stay valid
+ * until then. Checked at most every 5 min, deduped; resolves null when unavailable (callers fall back to the TTL).
+ */
+function fetchRecordsSyncAt() {
+  if (mapRecordSync.at && Date.now() - mapRecordSync.at < MAP_RECORD_SYNC_CHECK_MS) return Promise.resolve(mapRecordSync.value);
+  if (mapRecordSync.promise) return mapRecordSync.promise;
+  const promise = (async () => {
+    let value = null;
+    try {
+      if (!isCyclopediaRateLimited()) {
+        const res = await fetch(`${getRankingsApiBase()}/health`, { headers: { Accept: 'application/json' } });
+        if (res.ok) value = (await res.json())?.lastSyncAt ?? null;
+      }
+    } catch (_) { /* fall back to TTL */ }
+    if (mapRecordSync.promise === promise) {
+      mapRecordSync.value = value;
+      mapRecordSync.at = Date.now();
+      mapRecordSync.promise = null;
+    }
+    return value;
+  })();
+  mapRecordSync.promise = promise;
+  return promise;
+}
+
+/** True when `name` is the current player (case-insensitive). */
+function isOwnRecordHolder(name) {
+  const me = getCyclopediaCurrentPlayerName().toLowerCase();
+  return !!me && String(name || '').toLowerCase() === me;
+}
+
+/** Tooltip shared by every place that shows a map's most-victories record. */
+function formatMapRecordTooltip(leader, isOwnRecord) {
+  return `Record: ${leader.name}${isOwnRecord ? ' (you!)' : ''}\n${FormatUtils.number(leader.count)} victories — #1 of ${FormatUtils.number(leader.players)} players on this map`;
+}
+
+/** Small spinning circle shown while a map record loads. */
+function createRecordSpinner() {
+  const spinner = document.createElement('span');
+  spinner.style.cssText = 'display: inline-block; box-sizing: border-box; width: 10px; height: 10px; border-radius: 50%; border: 2px solid rgba(255, 247, 218, 0.3); border-top-color: #fff7da;';
+  spinner.animate([{ transform: 'rotate(0deg)' }, { transform: 'rotate(360deg)' }], { duration: 800, iterations: Infinity });
+  return spinner;
+}
+
+/** Rankings API root without the trailing /rankings (siblings: /maps, /maps/rankings, /health). */
+function getRankingsApiBase() {
+  return START_PAGE_CONFIG.RANKINGS_API_URL.replace(/\/rankings\/?$/, '');
+}
+
+/** One rule for "is this cached record still good": same lastSyncAt, else a TTL (short for failures). */
+function isMapRecordValid(entry, syncAt) {
+  const age = Date.now() - entry.timestamp;
+  if (entry.failed) return age < MAP_RECORD_FAIL_TTL_MS;
+  return syncAt && entry.syncAt ? syncAt === entry.syncAt : age < MAP_RECORD_TTL_MS;
+}
+
+/** Synchronous cache peek (no network, last known sync time). Returns the leader/null if cached and valid, else undefined. */
+function peekMapRecordLeader(roomId) {
+  hydrateMapRecords();
+  const cached = cyclopediaState.cache.mapRecordLeaders.get(roomId);
+  if (!cached || cached.failed || !isMapRecordValid(cached, mapRecordSync.value)) return undefined;
+  return cached.data;
+}
+
+const mapRecordPending = new Map();
 /**
  * Most-victories leader for a room via /maps/rankings?room=<id>&limit=1 (sibling of RANKINGS_API_URL).
  * Resolves { name, count, players } or null when the API has no rows for the room (or on any failure).
- * Cached in cyclopediaState.cache.leaderboardData, so it is cleared with the rest of the cache.
+ * Cached per room in cyclopediaState.cache.mapRecordLeaders (own LRU-ish map, so browsing maps never
+ * evicts the shared 20-slot leaderboardData entries). An entry stays valid until the API's lastSyncAt changes
+ * (TTL fallback if unknown); failures are cached briefly to avoid request storms. Concurrent calls share one lookup.
  */
-async function fetchMapRecordLeader(roomId, signal = null) {
-  if (!roomId) return null;
+function fetchMapRecordLeader(roomId, signal = null) {
+  if (!roomId) return Promise.resolve(null);
+  if (mapRecordPending.has(roomId)) return mapRecordPending.get(roomId);
+  const promise = loadMapRecordLeader(roomId, signal).finally(() => mapRecordPending.delete(roomId));
+  mapRecordPending.set(roomId, promise);
+  return promise;
+}
+
+/** { rankings:[{name,count}], total } for one room -> { name, count, players } or null. */
+function parseMapRecordLeader(room) {
+  const top = Array.isArray(room?.rankings) ? room.rankings[0] : null;
+  const count = Number(top?.count);
+  return top?.name && count > 0 ? { name: String(top.name), count, players: Number(room.total) || 0 } : null;
+}
+
+let mapRecordBulkPending = null;
+/**
+ * GET /maps/rankings (no room) = every room's #1 in one request. Stores each room in the record cache and
+ * resolves Map(roomId -> leader|null), or null when the API doesn't answer with a rooms list (callers fall
+ * back to the per-room request). Shared by concurrent callers, so it takes no per-caller abort signal.
+ */
+function fetchAllMapRecordLeaders(syncAt) {
+  if (mapRecordBulkPending) return mapRecordBulkPending;
+  const promise = (async () => {
+    try {
+      const data = await fetchWithDeduplication(`${getRankingsApiBase()}/maps/rankings`, 'map-record-leaders-all', 0, null);
+      if (!Array.isArray(data?.rooms) || !data.rooms.length) return null;
+      const recordCache = cyclopediaState.cache.mapRecordLeaders;
+      const leaders = new Map();
+      const now = Date.now();
+      for (const room of data.rooms) {
+        if (!room?.roomId) continue;
+        const leader = parseMapRecordLeader(room);
+        leaders.set(room.roomId, leader);
+        recordCache.delete(room.roomId);
+        recordCache.set(room.roomId, { data: leader, timestamp: now, failed: false, syncAt });
+      }
+      while (recordCache.size > MAP_RECORD_CACHE_MAX) recordCache.delete(recordCache.keys().next().value);
+      persistMapRecords();
+      return leaders;
+    } catch (error) {
+      console.warn('[Cyclopedia] Bulk map records fetch failed, falling back to per-room:', error);
+      return null;
+    }
+  })().finally(() => { mapRecordBulkPending = null; });
+  mapRecordBulkPending = promise;
+  return promise;
+}
+
+async function loadMapRecordLeader(roomId, signal) {
   const cacheKey = `map-record-leader-${roomId}`;
-  const cached = cyclopediaState.getLeaderboardData(cacheKey);
-  if (cached && Date.now() - cached.timestamp < MAP_RECORD_TTL_MS) return cached.data;
+  hydrateMapRecords();
+  const recordCache = cyclopediaState.cache.mapRecordLeaders;
+  const syncAt = await fetchRecordsSyncAt();
+  const cached = recordCache.get(roomId);
+  if (cached) {
+    const age = Date.now() - cached.timestamp;
+    if (isMapRecordValid(cached, syncAt)) {
+      console.log(`[Cyclopedia] Map record ${roomId}: cache HIT`, { syncAt, ageSec: Math.round(age / 1000), failed: !!cached.failed });
+      return cached.data;
+    }
+    console.log(`[Cyclopedia] Map record ${roomId}: cache STALE, refetching`, { syncAt, cachedSyncAt: cached.syncAt, ageSec: Math.round(age / 1000) });
+    recordCache.delete(roomId);
+  } else {
+    console.log(`[Cyclopedia] Map record ${roomId}: cache MISS, fetching`, { syncAt });
+  }
+  const store = (data, failed = false) => {
+    recordCache.delete(roomId);
+    recordCache.set(roomId, { data, timestamp: Date.now(), failed, syncAt });
+    if (recordCache.size > MAP_RECORD_CACHE_MAX) recordCache.delete(recordCache.keys().next().value);
+    persistMapRecords();
+  };
   try {
-    const base = START_PAGE_CONFIG.RANKINGS_API_URL.replace(/\/rankings\/?$/, '');
-    const url = `${base}/maps/rankings?room=${encodeURIComponent(roomId)}&limit=1`;
+    // One call with no ?room returns every room's #1; fill the cache for all rooms from it.
+    const bulk = await fetchAllMapRecordLeaders(syncAt);
+    if (bulk) return bulk.has(roomId) ? bulk.get(roomId) : (store(null), null);
+    const url = `${getRankingsApiBase()}/maps/rankings?room=${encodeURIComponent(roomId)}&limit=1`;
     const data = await fetchWithDeduplication(url, cacheKey, 0, signal);
-    const top = Array.isArray(data?.rankings) ? data.rankings[0] : null;
-    const count = Number(top?.count);
-    const leader = top?.name && count > 0 ? { name: String(top.name), count, players: Number(data.total) || 0 } : null;
-    cyclopediaState.setLeaderboardData(cacheKey, { data: leader, timestamp: Date.now() });
+    const leader = parseMapRecordLeader(data);
+    store(leader);
     return leader;
   } catch (error) {
-    if (!isFetchAborted(error)) console.warn(`[Cyclopedia] Map record fetch failed for ${roomId}:`, error);
+    if (!isFetchAborted(error)) {
+      console.warn(`[Cyclopedia] Map record fetch failed for ${roomId}:`, error);
+      store(null, true);
+    }
     return null;
   }
 }
@@ -3960,6 +4510,7 @@ function refreshCyclopediaRecordsOnOpen() {
   // Refresh WR + personal records when Cyclopedia opens (keep rankings cache).
   cyclopediaState.cache.profileData.clear();
   clearNonRankingsLeaderboardCache();
+  // Map records are not cleared here: they self-validate against the API's lastSyncAt.
   cyclopediaState.cache.roomThumbnails.clear();
   cyclopediaState.cache.lastFetch.clear();
   clearCyclopediaApiPendingRequests();
@@ -6605,7 +7156,7 @@ function injectCyclopediaBoxStyles() { injectCyclopediaStyle('cyclopedia-box-css
 const CYCLOPEDIA_SELECTED_CSS = `.cyclopedia-selected { background: rgba(255,255,255,0.18) !important; color: inherit !important; } .cyclopedia-box .equipment-portrait .absolute { background: none !important; } .cyclopedia-box .equipment-portrait[data-highlighted="true"] .absolute { background: none !important; } .cyclopedia-box .equipment-portrait .absolute[style*="radial-gradient"] { background: none !important; } .cyclopedia-box .equipment-portrait .absolute[style*="background: radial-gradient"] { background: none !important; } .cyclopedia-box .equipment-portrait .absolute[style*="rgba(0, 0, 0, 0.5)"] { background: none !important; } .cyclopedia-box .equipment-portrait .absolute.bottom-0.left-0 { background: none !important; }`;
 function injectCyclopediaSelectedCss() { injectCyclopediaStyle('cyclopedia-selected-css', CYCLOPEDIA_SELECTED_CSS); }
 
-const CYCLOPEDIA_MAPS_ROW_CSS = `.cyclopedia-maps-list { container-type: inline-size; container-name: cyclopedia-maps-list; width: 100%; } .cyclopedia-map-row { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto auto auto; align-items: center; gap: 8px; padding: 8px; border: 2px solid #666; border-radius: 4px; cursor: pointer; transition: background-color 0.2s; box-sizing: border-box; width: 100%; min-width: 0; } .cyclopedia-map-thumb { width: 64px; height: 64px; object-fit: cover; border: 1px solid #666; border-radius: 4px; } .cyclopedia-map-name { hyphens: auto; word-break: break-word; overflow-wrap: anywhere; min-width: 0; } .cyclopedia-map-stats { display: contents; } .cyclopedia-map-stat { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 4px; min-width: 40px; max-width: 100px; font-size: 10px; font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif; text-align: center; box-sizing: border-box; } .cyclopedia-map-stat--floors { min-width: 40px; } @container cyclopedia-maps-list (max-width: 400px) { .cyclopedia-map-row { grid-template-columns: 64px minmax(0, 1fr); grid-template-rows: auto auto; align-items: start; } .cyclopedia-map-stats { display: flex; flex-direction: row; flex-wrap: wrap; justify-content: space-evenly; align-items: flex-start; gap: 8px; grid-column: 1 / -1; width: 100%; padding-top: 8px; margin-top: 4px; border-top: 1px solid rgba(102, 102, 102, 0.45); } .cyclopedia-map-stat { flex: 1 1 40px; max-width: none; min-width: 40px; } }`;
+const CYCLOPEDIA_MAPS_ROW_CSS = `.cyclopedia-maps-list { container-type: inline-size; container-name: cyclopedia-maps-list; width: 100%; } .cyclopedia-map-row { display: grid; grid-template-columns: 64px minmax(0, 1fr) 38px 50px 50px 48px; align-items: center; gap: 8px; padding: 8px; border: 2px solid #666; border-radius: 4px; cursor: pointer; transition: background-color 0.2s; box-sizing: border-box; width: 100%; min-width: 0; } .cyclopedia-map-thumb { width: 64px; height: 64px; object-fit: cover; border: 1px solid #666; border-radius: 4px; } .cyclopedia-map-name { hyphens: auto; word-break: break-word; overflow-wrap: anywhere; min-width: 0; } .cyclopedia-map-stats { display: contents; } .cyclopedia-map-stat { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 4px; min-width: 0; max-width: 100px; font-size: 10px; font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif; text-align: center; box-sizing: border-box; } .cyclopedia-map-stat--floors { min-width: 0; } @container cyclopedia-maps-list (max-width: 400px) { .cyclopedia-map-row { grid-template-columns: 64px minmax(0, 1fr); grid-template-rows: auto auto; align-items: start; } .cyclopedia-map-stats { display: flex; flex-direction: row; flex-wrap: wrap; justify-content: space-evenly; align-items: flex-start; gap: 8px; grid-column: 1 / -1; width: 100%; padding-top: 8px; margin-top: 4px; border-top: 1px solid rgba(102, 102, 102, 0.45); } .cyclopedia-map-stat { flex: 1 1 40px; max-width: none; min-width: 40px; } }`;
 function injectCyclopediaMapsRowStyles() { injectCyclopediaStyle('cyclopedia-maps-row-css', CYCLOPEDIA_MAPS_ROW_CSS); }
 
 function removeCyclopediaFromMenus() {
@@ -9705,6 +10256,103 @@ function renderCreatureTemplate(name, showShinyPortraits = false, showOldSprites
   
   abilityList.appendChild(abilityContainer);
   abilityScrollContainer.appendChild(abilityList);
+  try {
+    const sceneData = monsterId != null ? window.creatureDatabase?.getAbilityScene?.(monsterId) : null;
+    const hasScene = !!sceneData?.parts?.some((part) => part.masks?.some((mask) => mask?.rows?.length));
+    console.log('[Cyclopedia][ability-scene] detail', { monsterId, hasSceneData: !!sceneData, hasArea: hasScene, parts: sceneData?.parts?.length ?? 0 });
+    if (hasScene) {
+      // Small play badge in the icon's top-right corner: tells the player there is a preview to see on hover.
+      abilityIconFrame.style.position = 'relative';
+      abilityIconFrame.style.cursor = 'help';
+      const hint = document.createElement('span');
+      hint.textContent = '▶';
+      hint.setAttribute('data-ability-scene-hint', 'true');
+      hint.title = 'Hover to preview (beta)';
+      hint.style.cssText = 'position:absolute;right:2px;top:2px;width:14px;height:14px;border-radius:3px;'
+        + 'display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.75);'
+        + 'border:1px solid rgba(255,255,255,0.6);color:#fff;font-size:8px;line-height:1;padding-left:1px;'
+        + 'pointer-events:none;';
+      abilityIconFrame.appendChild(hint);
+      // The scene is built lazily on the first hover (most creature views never hover) and reused. It shows in a
+      // fixed panel just right of the ability icon, the same place for every creature (appended to <body> so no
+      // parent clips it, and ignoring the mouse so the hover stays stable). On hover it shows at once, frozen at its
+      // first frame, then plays after 0.5s from the beginning, every hover.
+      const createSceneCaster = () => {
+        const sprite = api.ui.components.createFullMonster({
+          monsterId, tier: 1, starTier: 1, level: 1, size: 'small'
+        });
+        sprite.querySelector('span.pixel-font-16')?.remove();
+        sprite.querySelector('img[alt="star tier"]')?.remove();
+        return sprite;
+      };
+      let abilityScene = null;
+      let scenePanel = null;
+      const ensureAbilityScene = () => {
+        if (scenePanel) return scenePanel;
+        abilityScene = createCyclopediaAbilityScene(sceneData, createSceneCaster);
+        if (!abilityScene) return null;
+        scenePanel = document.createElement('div');
+        scenePanel.setAttribute('data-ability-scene-panel', 'true');
+        scenePanel.style.cssText = 'position:fixed;z-index:2147483000;pointer-events:none;display:none;padding:10px;'
+          + 'background:rgba(20,20,20,0.97);outline:1px solid rgba(255,255,255,0.25);box-shadow:0 4px 18px rgba(0,0,0,0.6);'
+          + 'max-width:calc(100vw - 16px);max-height:calc(100vh - 16px);overflow:hidden;';
+        scenePanel.appendChild(abilityScene);
+        const betaTag = document.createElement('span');
+        betaTag.textContent = 'BETA';
+        betaTag.setAttribute('data-ability-scene-beta', 'true');
+        betaTag.style.cssText = 'position:absolute;left:4px;top:4px;padding:1px 4px;border-radius:3px;'
+          + 'background:rgba(230,160,30,0.95);color:#111;font-size:9px;font-weight:bold;line-height:1.2;'
+          + 'letter-spacing:0.5px;pointer-events:none;z-index:1;';
+        scenePanel.appendChild(betaTag);
+        return scenePanel;
+      };
+      // Right of the icon, top-aligned with it, kept inside the window.
+      const placeScenePanel = () => {
+        const icon = abilityIconFrame.getBoundingClientRect();
+        const size = scenePanel.getBoundingClientRect();
+        scenePanel.style.left = `${Math.max(8, Math.min(icon.right + 10, window.innerWidth - size.width - 8))}px`;
+        scenePanel.style.top = `${Math.max(8, Math.min(icon.top, window.innerHeight - size.height - 8))}px`;
+      };
+      const ABILITY_SCENE_PLAY_DELAY_MS = 500;
+      let scenePlayTimer = null;
+      let sceneGuardTimer = null;
+      const hideAbilityScene = () => {
+        if (scenePlayTimer) { TimerManager.remove(scenePlayTimer); scenePlayTimer = null; }
+        if (sceneGuardTimer) { TimerManager.remove(sceneGuardTimer); sceneGuardTimer = null; }
+        if (scenePanel) { scenePanel.style.display = 'none'; scenePanel.remove(); }
+      };
+      abilityIconFrame.addEventListener('mouseenter', () => {
+        const panel = ensureAbilityScene();
+        if (!panel) return;
+        if (scenePlayTimer) TimerManager.remove(scenePlayTimer);
+        if (!panel.isConnected) document.body.appendChild(panel);
+        panel.style.display = 'block';
+        abilityScene.fitSprites();
+        placeScenePanel();
+        const count = restartCyclopediaAbilityScene(abilityScene, false);
+        console.log('[Cyclopedia][ability-scene] hover start: shown paused', { animations: count, playInMs: ABILITY_SCENE_PLAY_DELAY_MS });
+        scenePlayTimer = setTimeout(() => {
+          TimerManager.remove(scenePlayTimer);
+          scenePlayTimer = null;
+          const started = restartCyclopediaAbilityScene(abilityScene, true);
+          console.log('[Cyclopedia][ability-scene] playing', { animations: started });
+        }, ABILITY_SCENE_PLAY_DELAY_MS);
+        TimerManager.addTimeout(scenePlayTimer, 'abilityScenePlay');
+        // The creature view can be replaced while hovering (mouseleave then never fires): drop the panel with it.
+        if (!sceneGuardTimer) {
+          sceneGuardTimer = setInterval(() => { if (!abilityIconFrame.isConnected) hideAbilityScene(); }, 300);
+          TimerManager.addInterval(sceneGuardTimer, 'abilityScenePanelGuard');
+        }
+      });
+      abilityIconFrame.addEventListener('mouseleave', () => {
+        const pending = !!scenePlayTimer;
+        hideAbilityScene();
+        console.log('[Cyclopedia][ability-scene] hover end', { leftBeforePlay: pending });
+      });
+    }
+  } catch (sceneError) {
+    console.error('[Cyclopedia] Error rendering ability scene:', sceneError);
+  }
   abilitySection.appendChild(abilityScrollContainer);
 
   if (tooltipComponent) {
@@ -14021,21 +14669,26 @@ function createStatisticsSection(selectedMap, leaderboardData) {
       const activeSeason = Number(cyclopediaState.profileSeason || 1);
       // World records are live data: only valid for the game's current season.
       const allowGlobalWorldRecords = activeSeason === getCurrentGameSeason();
-      console.log(
-        '[Cyclopedia] Leaderboard data for map',
-        selectedMap,
-        '| Cyclopedia season toggle:',
-        activeSeason,
-        '| game.getFullTrophyRoomData highscores are global room WRs (no season in API payload).',
-        '| world record rendering enabled:',
-        allowGlobalWorldRecords,
-        {
-          best: best?.[selectedMap],
-          rank: roomsHighscores?.rank?.[selectedMap],
-          floor: roomsHighscores?.floor?.[selectedMap],
-          ticks: roomsHighscores?.ticks?.[selectedMap]
-        }
-      );
+      const logRank = roomsHighscores?.rank?.[selectedMap];
+      const logFloor = roomsHighscores?.floor?.[selectedMap];
+      const logMap = selectedMap;
+      // Victories leader comes from the ranking API (cached/deduped), so log once it settles.
+      fetchMapRecordLeader(logMap).then((leader) => {
+        console.log(
+          '[Cyclopedia] Leaderboard data for map',
+          logMap,
+          '| season toggle:',
+          activeSeason,
+          '| WR rendering (global WRs, current season only):',
+          allowGlobalWorldRecords,
+          {
+            ticks: best?.[logMap] && { ticks: best[logMap].ticks, player: best[logMap].userName },
+            rank: logRank && { rank: logRank.rank, ticks: logRank.ticks, player: logRank.userName },
+            floor: logFloor && { floor: logFloor.floor, ticks: logFloor.ticks, player: logFloor.userName },
+            victories: leader ? { count: leader.count, player: leader.name, players: leader.players } : null
+          }
+        );
+      });
       const playerState = globalThis.state?.player?.getSnapshot?.()?.context;
       const yourRooms = getYourRoomsForCyclopediaSeason(playerState?.rooms || {});
 
@@ -14626,7 +15279,7 @@ function createCompactStatColumn(iconSrc, iconAlt, mapId, mapData, leaderboardDa
   statCol.style.flexDirection = 'column';
   statCol.style.alignItems = 'center';
   statCol.style.justifyContent = 'center';
-  statCol.style.padding = '4px';
+  statCol.style.padding = '4px 0';
   statCol.style.fontSize = '10px';
   statCol.style.fontFamily = CYCLOPEDIA_STATS_FONT;
   statCol.style.textAlign = 'center';
@@ -14651,6 +15304,7 @@ function createCompactStatColumn(iconSrc, iconAlt, mapId, mapData, leaderboardDa
   const isSpeedrun = iconAlt === 'Speed';
   const isRankPoints = iconAlt === 'Grade';
   const isFloors = iconAlt === 'Floors';
+  const isVictories = iconAlt === 'Victories';
   const activeSeason = Number(cyclopediaState.profileSeason || 1);
   const allowGlobalWorldRecords = activeSeason === getCurrentGameSeason();
 
@@ -14674,14 +15328,26 @@ function createCompactStatColumn(iconSrc, iconAlt, mapId, mapData, leaderboardDa
     }
     valueDiv.innerHTML = valueHtml;
     content.appendChild(valueDiv);
+    return [labelDiv, valueDiv];
   };
-  const appendWorldRecord = (valueHtml) => appendStatEntry('WR', COLOR_CONSTANTS.RECORD, valueHtml);
+  let lastWorldRecord = null;
+  const appendWorldRecord = (valueHtml) => {
+    lastWorldRecord = { html: valueHtml, els: appendStatEntry('WR', COLOR_CONSTANTS.RECORD, valueHtml) };
+  };
   // `emphasized`: the player's value matches the record / the max, shown bold + underlined in the personal color.
-  const appendPersonalBest = (valueHtml, emphasized) =>
-    appendStatEntry('You', COLOR_CONSTANTS.PERSONAL, valueHtml, {
-      valueColor: emphasized ? COLOR_CONSTANTS.PERSONAL : COLOR_CONSTANTS.SOFT,
+  // When it is identical to the record shown just above (you hold it), the two entries merge into one green "WR".
+  // `holderName`: who holds the record. Matching it while someone else holds it (a tie) is shown in the record yellow.
+  const appendPersonalBest = (valueHtml, emphasized, holderName = '') => {
+    const mergeWithRecord = emphasized && lastWorldRecord && lastWorldRecord.html === valueHtml;
+    if (mergeWithRecord) lastWorldRecord.els.forEach((el) => el.remove());
+    lastWorldRecord = null;
+    const tiedNotHolder = emphasized && !!holderName && holderName !== 'Unknown' && !isOwnRecordHolder(holderName);
+    const accent = tiedNotHolder ? COLOR_CONSTANTS.RECORD : COLOR_CONSTANTS.PERSONAL;
+    appendStatEntry(mergeWithRecord ? 'WR' : 'You', mergeWithRecord ? accent : COLOR_CONSTANTS.PERSONAL, valueHtml, {
+      valueColor: emphasized ? accent : COLOR_CONSTANTS.SOFT,
       emphasized
     });
+  };
   const appendNoData = () => {
     const noData = document.createElement('div');
     noData.style.color = COLOR_CONSTANTS.UNOWNED;
@@ -14695,7 +15361,7 @@ function createCompactStatColumn(iconSrc, iconAlt, mapId, mapData, leaderboardDa
     const bestTicks = leaderboardData?.best?.[mapId]?.ticks || 0;
 
     if (allowGlobalWorldRecords && bestTicks > 0) appendWorldRecord(`${bestTicks}`);
-    if (yourTicks > 0) appendPersonalBest(`${yourTicks}`, bestTicks > 0 && yourTicks === bestTicks);
+    if (yourTicks > 0) appendPersonalBest(`${yourTicks}`, bestTicks > 0 && yourTicks === bestTicks, leaderboardData?.best?.[mapId]?.userName);
     if (bestTicks === 0 && yourTicks === 0) appendNoData();
   } else if (isRankPoints) {
     const yourRank = mapData?.rank || 0;
@@ -14705,31 +15371,69 @@ function createCompactStatColumn(iconSrc, iconAlt, mapId, mapData, leaderboardDa
 
     if (allowGlobalWorldRecords && bestRank > 0) appendWorldRecord(`${bestRank}${tickSuffix(bestRankTicks)}`);
     // Personal rank equals the world record (ticks ignored).
-    if (yourRank > 0) appendPersonalBest(`${yourRank}${tickSuffix(yourRankTicks)}`, bestRank > 0 && yourRank === bestRank);
+    if (yourRank > 0) {
+      appendPersonalBest(`${yourRank}${tickSuffix(yourRankTicks)}`, bestRank > 0 && yourRank === bestRank, leaderboardData?.roomsHighscores?.rank?.[mapId]?.userName);
+    }
     if (bestRank === 0 && yourRank === 0) appendNoData();
   } else if (isFloors) {
     const { floor: yourFloor, floorTicks: yourFloorTicks } = normalizeUserFloorData(mapData);
 
     let bestFloor = 0;
     let bestFloorTicks = null;
+    let bestFloorPlayer = '';
     if (leaderboardData) {
       const bestFloorData = normalizeBestFloorData(mapId, leaderboardData.roomsHighscores, leaderboardData.best);
+      bestFloorPlayer = bestFloorData.playerName;
       bestFloor = bestFloorData.floor !== undefined && bestFloorData.floor !== null ? bestFloorData.floor : 0;
       bestFloorTicks = bestFloorData.floorTicks;
     }
     const hasYourFloor = yourFloor !== undefined && yourFloor !== null;
 
     if (allowGlobalWorldRecords && (bestFloorTicks > 0 || bestFloor > 0)) {
-      appendWorldRecord(`Floor ${bestFloor}${tickSuffix(bestFloorTicks)}`);
+      appendWorldRecord(`${bestFloor}${tickSuffix(bestFloorTicks)}`);
     }
     // Floor 15 is the max floor.
-    if (hasYourFloor) appendPersonalBest(`Floor ${yourFloor}${tickSuffix(yourFloorTicks)}`, yourFloor === 15);
+    if (hasYourFloor) appendPersonalBest(`${yourFloor}${tickSuffix(yourFloorTicks)}`, yourFloor === 15, bestFloorPlayer);
     if ((bestFloorTicks === 0 || bestFloor === 0) && !hasYourFloor) appendNoData();
+  } else if (isVictories) {
+    // Record = most victories on this map (rankings API, cached); fills in when it arrives.
+    const yourCount = Number(mapData?.count) || 0;
+    const renderVictories = (leader, loading = false) => {
+      content.replaceChildren();
+      lastWorldRecord = null;
+      statCol.title = '';
+      if (loading) {
+        content.appendChild(createRecordSpinner());
+        return;
+      }
+      const isOwnRecord = !!leader && isOwnRecordHolder(leader.name);
+      if (leader) {
+        appendWorldRecord(FormatUtils.compact(leader.count));
+        statCol.title = formatMapRecordTooltip(leader, isOwnRecord);
+      }
+      if (yourCount > 0) appendPersonalBest(FormatUtils.compact(yourCount), isOwnRecord, leader?.name);
+      if (!leader && yourCount === 0) appendNoData();
+    };
+    if (allowGlobalWorldRecords) {
+      const peeked = peekMapRecordLeader(mapId);
+      renderVictories(peeked === undefined ? null : peeked, peeked === undefined);
+      fetchMapRecordLeader(mapId).then((leader) => renderVictories(leader));
+    } else {
+      renderVictories(null);
+    }
   }
 
   statCol.appendChild(content);
   return statCol;
 }
+
+// Region map row stat columns, in grid order: Speed, Grade (rank points), Floors, Victories (record vs yours).
+const MAP_ROW_STAT_COLUMNS = [
+  [CYCLOPEDIA_ASSETS.speed, 'Speed'],
+  [CYCLOPEDIA_ASSETS.grade, 'Grade'],
+  [CYCLOPEDIA_ASSETS.floors, 'Floors'],
+  [CYCLOPEDIA_ASSETS.matchCount, 'Victories']
+];
 
 // Helper function to create region maps section (shows all maps in a region)
 function createRegionMapsSection(mapsInRegion, regionId, onMapSelect, leaderboardData) {
@@ -14803,32 +15507,10 @@ function createRegionMapsSection(mapsInRegion, regionId, onMapSelect, leaderboar
       const statsRow = document.createElement('div');
       statsRow.className = 'cyclopedia-map-stats';
       
-      // Speedrun column (Column 3)
-      statsRow.appendChild(createCompactStatColumn(
-        CYCLOPEDIA_ASSETS.speed,
-        'Speed',
-        map.id,
-        mapData,
-        data
-      ));
-      
-      // Rank Points column (Column 4)
-      statsRow.appendChild(createCompactStatColumn(
-        CYCLOPEDIA_ASSETS.grade,
-        'Grade',
-        map.id,
-        mapData,
-        data
-      ));
-      
-      // Floors column (Column 5)
-      statsRow.appendChild(createCompactStatColumn(
-        CYCLOPEDIA_ASSETS.floors,
-        'Floors',
-        map.id,
-        mapData,
-        data
-      ));
+      // Stat columns 3-6 (must match the grid tracks in the .cyclopedia-map-row CSS)
+      for (const [iconSrc, iconAlt] of MAP_ROW_STAT_COLUMNS) {
+        statsRow.appendChild(createCompactStatColumn(iconSrc, iconAlt, map.id, mapData, data));
+      }
       
       mapItem.appendChild(statsRow);
       
@@ -14905,7 +15587,7 @@ function createRegionStatisticsSection(regionId, mapsInRegion, leaderboardData) 
   let totalRaidTicks = 0; // Personal total ticks (raids)
   let totalWRTicks = 0; // World record total ticks (non-raid)
   let totalWRRaidTicks = 0; // World record total ticks (raids)
-  
+
   // Only count non-raid maps for explored count and rank points/floors
   nonRaidMaps.forEach(map => {
     const isExplored = playerRooms[map.id] !== undefined;
@@ -15077,7 +15759,7 @@ function createRegionStatisticsSection(regionId, mapsInRegion, leaderboardData) 
     raidSpeedrunValue.style.marginTop = '6px';
     speedrunDiv.appendChild(raidSpeedrunValue);
   }
-  
+
   statsGrid.appendChild(speedrunDiv);
   
   // Rank Points
@@ -15289,6 +15971,9 @@ function createMapInfoSection(selectedMap, roomName) {
   // Most-played record (top player by victories): banner in the victories-overlay style, icons instead of words.
   // Sits above the player's own victories overlay when present. Placeholder until the API returns a row.
   const hasOwnCount = !!thumbnailContainer.lastElementChild?.title?.endsWith('victories');
+  const ownOverlay = hasOwnCount ? thumbnailContainer.lastElementChild : null;
+  const ownOverlayHtml = ownOverlay?.innerHTML || '';
+  const ownOverlayTitle = ownOverlay?.title || '';
   const recordBanner = document.createElement('div');
   recordBanner.style.cssText = `
     position: absolute;
@@ -15325,14 +16010,57 @@ function createMapInfoSection(selectedMap, roomName) {
   recordName.style.cssText = 'overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;';
   const recordCount = document.createElement('span');
   recordCount.style.whiteSpace = 'nowrap';
-  const renderRecordBanner = (leader) => {
+  // Name links to the holder's profile; the handler reads the current holder, so re-renders never stack listeners.
+  let recordHolderName = '';
+  let recordNameColor = '';
+  recordName.addEventListener('click', () => {
+    if (recordHolderName) NavigationHandler.navigateToProfile(recordHolderName);
+  });
+  // Link look appears only on hover: underline + highlight colour (own record keeps green).
+  recordName.addEventListener('mouseenter', () => {
+    if (!recordHolderName) return;
+    recordName.style.textDecoration = 'underline';
+    recordName.style.color = recordNameColor || COLOR_CONSTANTS.PRIMARY;
+  });
+  recordName.addEventListener('mouseleave', () => {
+    recordName.style.textDecoration = '';
+    recordName.style.color = recordNameColor;
+  });
+  const renderRecordBanner = (leader, loading = false) => {
+    recordHolderName = leader ? leader.name : '';
+    const isOwnRecord = !!recordHolderName && isOwnRecordHolder(recordHolderName);
+    recordNameColor = isOwnRecord ? COLOR_CONSTANTS.PERSONAL : '';
+    recordName.style.color = recordNameColor;
+    recordName.style.cursor = leader ? 'pointer' : '';
+    recordName.style.textDecoration = '';
+    if (loading) {
+      recordName.replaceChildren(createRecordSpinner());
+      recordCount.replaceChildren(createRecordSpinner());
+      recordBanner.title = 'Loading record...';
+      return;
+    }
+    // Own record: fold into the single victories bar (record icon + green) and hide this banner.
+    const mergeIntoOwnBar = isOwnRecord && !!ownOverlay;
+    recordBanner.style.display = mergeIntoOwnBar ? 'none' : 'flex';
+    if (ownOverlay) {
+      ownOverlay.innerHTML = ownOverlayHtml;
+      ownOverlay.title = ownOverlayTitle;
+      ownOverlay.style.color = '';
+      if (mergeIntoOwnBar) {
+        ownOverlay.prepend(makeRecordIcon(CYCLOPEDIA_ASSETS.highscore, 'Record'));
+        ownOverlay.style.color = COLOR_CONSTANTS.PERSONAL;
+        ownOverlay.title = formatMapRecordTooltip(leader, true);
+      }
+    }
     recordName.textContent = leader ? leader.name : '-';
     recordCount.textContent = leader ? FormatUtils.compact(leader.count) : '-';
     recordBanner.title = leader
-      ? `Record: ${leader.name}, ${FormatUtils.number(leader.count)} victories (${FormatUtils.number(leader.players)} players)`
+      ? formatMapRecordTooltip(leader, isOwnRecord)
       : 'No record available yet';
   };
-  renderRecordBanner(null);
+  // Cached record paints at once (no spinner); the fetch below still revalidates it.
+  const peekedLeader = peekMapRecordLeader(selectedMap);
+  renderRecordBanner(peekedLeader === undefined ? null : peekedLeader, peekedLeader === undefined);
   recordBanner.append(
     makeRecordIcon(CYCLOPEDIA_ASSETS.highscore, 'Record'),
     recordName,
@@ -15340,9 +16068,7 @@ function createMapInfoSection(selectedMap, roomName) {
     recordCount
   );
   thumbnailContainer.appendChild(recordBanner);
-  fetchMapRecordLeader(selectedMap).then((leader) => {
-    if (leader) renderRecordBanner(leader);
-  });
+  fetchMapRecordLeader(selectedMap).then((leader) => renderRecordBanner(leader));
 
   return mapInfoDiv;
 }
