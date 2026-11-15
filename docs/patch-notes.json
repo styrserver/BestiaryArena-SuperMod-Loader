@@ -4,6 +4,34 @@
   },
   "notes": [
     {
+      "version": "5.3.4",
+      "changes": [
+        {
+          "mod": "Awaken Tracker",
+          "type": "fixed",
+          "text": "Awaken Farmer no longer turns on Bestiary Automator auto-refill when there is nothing to farm, and restores your setting when it stops."
+        },
+        {
+          "mod": "Better Setups",
+          "type": "added",
+          "text": "Private (admins only): Private ticks, Private rank and Private floor setups hold your best runs for the current map, following its floor sets on multi-floor maps, so Raid Hunter and other setup pickers can use them.",
+          "admin": true
+        },
+        {
+          "mod": "Highscore Improvements",
+          "type": "added",
+          "text": "Private (admins only): each map automatically shows faster setups from a private runs repository, with Apply and Copy run.",
+          "admin": true
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "added",
+          "text": "Private (admins only): new section to set the runs repository and token.",
+          "admin": true
+        }
+      ]
+    },
+    {
       "version": "5.3.3",
       "changes": [
         {

@@ -44,6 +44,7 @@ The extension and bundled mods may communicate with the following destinations, 
 - **api.github.com** (optional): To read the public Gist API for a mod you added (import and update checks). Requests contain the Gist ID, not personal data.
 - **bestiaryarena.com** (and subdomains): Where the game runs and mods are applied. Bundled mods may also call the game’s own **API** endpoints on that host (for example `bestiaryarena.com/api/...`). The game’s operator handles that traffic under their own terms.
 - **bestiary-arena-ranking.vercel.app**: Cyclopedia Rankings API (public leaderboard data).
+- **api.github.com, private runs repository** (Firebase admins only, off by default): read only when a Firebase admin turns on “Private runs repository” in Mod Settings and enters a repository name and their own GitHub token. Requests contain the file path and that token, sent through the extension’s background worker. The token is stored only in your browser’s local storage and is never sent anywhere else.
 - **bestiaryarena.wiki.gg**: Links in the extension UI, and the popup reads the wiki’s public “Scripts” page to list community mods (cached on your device for 6 hours). Rankings use the Vercel API above.
 
 ### Firebase

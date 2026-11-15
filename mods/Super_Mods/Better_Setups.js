@@ -148,6 +148,28 @@ const STORAGE_KEYS = {
   STORED_SETUPS: 'stored-setups'
 };
 
+// Labels of the game setups that hold the best private runs (section 9b), one per goal. Managed by
+// this mod only: the label editors never list them.
+const PRIVATE_RUNS_LABELS = { ticks: 'Private ticks', rank: 'Private rank', floor: 'Private floor' };
+const PRIVATE_RUNS_LABEL_LIST = Object.values(PRIVATE_RUNS_LABELS);
+const PRIVATE_RUNS_CATEGORIES = Object.keys(PRIVATE_RUNS_LABELS);
+
+// State of section 9b. Declared here, not next to its code: processSetupInterface() runs while this
+// file is still being evaluated (early init) and reaches lockPrivateRunsControls, which reads
+// privateRunsTitles. A `let` further down the file would still be in its temporal dead zone.
+let privateRunsSubs = [];
+let privateRunsTimer = null;
+let privateRunsSeq = 0; // a newer pass supersedes an older one still waiting on the network
+let privateRunsLast = { key: '', storageKeys: [] }; // storageKeys: the setups written for `key`
+let privateRunsRetryAt = 0;
+let privateRunsRoster = { monsters: null, equips: null, signature: '' };
+let privateRunsMayHaveData = false;
+let privateRunsSweptFor = ''; // the room whose neighbours' stored setups were last cleared
+let privateRunsTitles = {};
+// privateRunsMayHaveData: labels or stored setups of ours may exist. Disconnected players (almost
+// everyone) pay one cleanup pass per page load, then nothing on later board updates.
+// privateRunsTitles: button captions shown instead of the game's fixed "Setup (<label>)" text.
+
 const BETTER_SETUPS_TOAST_DURATION = 5000;
 const BETTER_SETUPS_WARNING_TOAST_DURATION = 10000;
 const BETTER_SETUPS_TOAST_CONTAINER_ID = 'better-setups-toast-container';
@@ -167,6 +189,8 @@ function waitForGameAndActivate() {
     
     // Activate setups immediately
     activateSetups();
+    // Deferred: section 9b's state is declared further down this file, after this first call.
+    setTimeout(startPrivateRuns, 0);
     
     // Try immediate injection, then fallback with shorter delays
     if (!processSetupInterface()) {
@@ -481,6 +505,7 @@ function addTrashButtonConfirmation(trashButton) {
 // Function to inject edit buttons into a specific setup button
 function injectEditButton(setupButton) {
   const buttonText = setupButton.textContent.trim();
+  if (PRIVATE_RUNS_LABEL_LIST.includes(extractLabelFromSetupButton(buttonText))) return false; // not editable
   
   // Check if this is a setup/save button and doesn't already have an edit button
   if ((buttonText.includes('Setup (') || buttonText.includes('Save (')) && 
@@ -634,6 +659,7 @@ function processSetupInterface() {
     const buttonText = button.textContent.trim();
     if (buttonText.includes('Setup (') || buttonText.includes('Save (')) {
       attachSetupButtonHoverPreview(button);
+      lockPrivateRunsControls(button);
     }
     if (injectEditButton(button)) {
       injectedCount++;
@@ -2718,7 +2744,7 @@ function getCurrentLabels() {
       }
     }
     
-    return currentLabels;
+    return Array.isArray(currentLabels) ? currentLabels.filter((label) => !PRIVATE_RUNS_LABEL_LIST.includes(label)) : currentLabels;
   } catch (error) {
     console.error('[Better Setups] Error getting current labels:', error);
     return getDefaultLabels();
@@ -2754,6 +2780,8 @@ function refreshSetupInterface() {
     }
   }));
   
+  schedulePrivateRunsPass(true); // label editors write the list without the reserved labels
+
   // Re-inject all buttons immediately, then again after a tiny delay for safety
   processSetupInterface();
   
@@ -3770,6 +3798,294 @@ function getMapSetupData(mapId) {
 }
 
 // =======================
+// 9b. Private runs (best runs of a private repository as native saved setups)
+// =======================
+// Mod Settings exposes window.BestiaryRunsSite for Firebase admins who connected a private runs
+// repository. For the room and floor on screen, the best run the player can field for each of
+// three goals (ticks, rank, floor) is written as one of the game's own saved setups, under the
+// reserved labels in PRIVATE_RUNS_LABELS. The game then shows its normal green "Setup (Private
+// ticks)" style buttons, and mods that pick a setup by label (Raid Hunter, Better Boosted Maps,
+// Better Tasker) use them like any other. Nothing here clicks or intercepts a native button. A
+// grey button means "nothing to offer": those mods fall back to Auto-setup.
+//
+// The game stores a saved setup as localStorage["<label>-<roomId>"] = its board config: the room's
+// non-player pieces plus { type: 'player', key, tileIndex, villain: false, databaseId, equipId }
+// per player piece (the same shape its autoSetupBoard action builds). The key has no floor, so the
+// values are rewritten whenever the room, floor or roster changes.
+
+const PRIVATE_RUNS_DEBOUNCE_MS = 250;
+const PRIVATE_RUNS_RETRY_MS = 30 * 1000;
+
+
+const PRIVATE_RUNS_STYLE_ID = 'better-setups-private-runs-style';
+// The game renders "Setup (<label>)" and offers no way to change that text. Mods find these buttons
+// by that text, so it stays untouched in the DOM (never edited: React owns it) and is only hidden;
+// the caption we want is drawn in its place from a data attribute.
+const PRIVATE_RUNS_STYLE = `
+  button[data-private-runs-title] { font-size: 0 !important; }
+  button[data-private-runs-title]::after {
+    content: attr(data-private-runs-title);
+    font-size: var(--private-runs-font-size, 16px);
+  }
+`;
+
+function getPrivateRunsApi() {
+  const runsSite = window.BestiaryRunsSite;
+  return runsSite?.isEnabled?.() ? runsSite : null;
+}
+
+// Changes whenever a roster change could alter which runs the player can field.
+function getPrivateRunsRosterSignature() {
+  const { monsters, equips } = globalThis.state.player.getSnapshot().context;
+  if (monsters === privateRunsRoster.monsters && equips === privateRunsRoster.equips) return privateRunsRoster.signature;
+  const levelOf = globalThis.state.utils?.expToCurrentLevel;
+  const parts = [];
+  for (const m of monsters || []) parts.push(`${m.id}.${m.tier}.${levelOf ? levelOf(m.exp) : m.exp}`);
+  for (const e of equips || []) parts.push(`${e.id}.${e.tier}`);
+  let hash = 5381;
+  for (const ch of parts.join('|')) hash = ((hash * 33) ^ ch.charCodeAt(0)) >>> 0;
+  privateRunsRoster = { monsters, equips, signature: `${parts.length}:${hash}` };
+  return privateRunsRoster.signature;
+}
+
+function notifyGameOfStorageKey(key) {
+  window.dispatchEvent(new StorageEvent('storage', {
+    key,
+    newValue: window.localStorage.getItem(key),
+    oldValue: null,
+    storageArea: window.localStorage
+  }));
+}
+
+// "Ticks (46 ticks)", "Rank S+4 (337 ticks)", "Floor 15 (204 ticks)"; no setup means nothing to offer.
+// Localised: mods.betterSetups.privateRuns.{ticks,rank,floor} and .none{Ticks,Rank,Floor}.
+function getPrivateRunsTitle(category, best) {
+  if (!best) return t(`mods.betterSetups.privateRuns.none${category[0].toUpperCase()}${category.slice(1)}`);
+  return tReplace(`mods.betterSetups.privateRuns.${category}`, { ticks: best.run.ticks, points: best.run.rankPoints, floor: best.floor });
+}
+
+function applyPrivateRunsTitle(button, title) {
+  if (!title) {
+    delete button.dataset.privateRunsTitle;
+    button.style.removeProperty('--private-runs-font-size');
+    return;
+  }
+  // Read the game's font size before our rule zeroes it, so the caption matches the other buttons.
+  const size = getComputedStyle(button).fontSize;
+  if (size && size !== '0px') button.style.setProperty('--private-runs-font-size', size);
+  button.dataset.privateRunsTitle = title;
+}
+
+// Keep the reserved labels in the game's label list exactly while the feature is connected.
+function syncPrivateRunsLabels(active) {
+  if (window.localStorage.getItem(STORAGE_KEYS.STORED_SETUPS) !== 'true') return;
+  let labels;
+  try {
+    labels = JSON.parse(window.localStorage.getItem(STORAGE_KEYS.SETUP_LABELS));
+  } catch (error) {
+    return;
+  }
+  if (!Array.isArray(labels)) return;
+  const next = active
+    ? [...labels, ...PRIVATE_RUNS_LABEL_LIST.filter((label) => !labels.includes(label))]
+    : labels.filter((label) => !PRIVATE_RUNS_LABEL_LIST.includes(label));
+  if (next.length === labels.length) return;
+  window.localStorage.setItem(STORAGE_KEYS.SETUP_LABELS, JSON.stringify(next));
+  notifyGameOfStorageKey(STORAGE_KEYS.SETUP_LABELS);
+}
+
+// Only the room on screen can show the buttons, so other rooms' stored runs are just stale ids.
+function removePrivateRunsSetups(keepKeys) {
+  for (const key of Object.keys(window.localStorage)) {
+    if (PRIVATE_RUNS_LABEL_LIST.some((label) => key.startsWith(`${label}-`)) && !keepKeys.includes(key)) {
+      window.localStorage.removeItem(key);
+    }
+  }
+}
+
+// The room's non-player pieces (its enemies, for the current floor) plus the run's player pieces,
+// skipping tiles already taken, like the game's own autoSetupBoard.
+function buildPrivateRunsBoardConfig(setup) {
+  const current = globalThis.state.board.getSnapshot().context.boardConfig || [];
+  const base = current.filter((piece) => piece.type !== 'player');
+  const taken = new Set(base.map((piece) => piece.tileIndex));
+  const players = setup
+    .filter((piece) => !taken.has(piece.tileIndex))
+    .map((piece) => ({
+      type: 'player',
+      key: Math.random().toString(36).slice(2, 6),
+      tileIndex: piece.tileIndex,
+      villain: false,
+      databaseId: piece.monsterId,
+      equipId: piece.equipId ?? null
+    }));
+  return [...base, ...players];
+}
+
+async function runPrivateRunsPass() {
+  const runsSite = getPrivateRunsApi();
+  if (!runsSite) {
+    if (privateRunsMayHaveData) {
+      syncPrivateRunsLabels(false);
+      removePrivateRunsSetups([]);
+      privateRunsMayHaveData = false;
+      privateRunsSweptFor = '';
+      clearPrivateRunsTitles();
+    }
+    privateRunsLast = { key: '', storageKeys: [] };
+    return;
+  }
+  privateRunsMayHaveData = true;
+  syncPrivateRunsLabels(true);
+  if (Date.now() < privateRunsRetryAt) return;
+
+  const board = globalThis.state.board.getSnapshot().context;
+  const roomId = board.selectedMap?.selectedRoom?.id;
+  const floor = board.floor ?? 0;
+  if (!roomId) return;
+  const key = `${roomId}|${floor}|${getPrivateRunsRosterSignature()}`;
+  // Up to date already (and no stored value was cleared since, e.g. by a trash button).
+  if (key === privateRunsLast.key && privateRunsLast.storageKeys.every((k) => window.localStorage.getItem(k) !== null)) return;
+
+  const seq = ++privateRunsSeq;
+  let results;
+  try {
+    results = await Promise.all(PRIVATE_RUNS_CATEGORIES.map((category) => runsSite.bestFor(roomId, category, floor)));
+  } catch (error) {
+    console.warn('[Better Setups] Private runs lookup failed:', error);
+    privateRunsRetryAt = Date.now() + PRIVATE_RUNS_RETRY_MS;
+    return;
+  }
+  // Superseded by a newer pass, or the player moved on while we waited: that pass owns the result.
+  if (seq !== privateRunsSeq || getCurrentMapId() !== roomId) return;
+
+  // Ticks and floor can land on the very same run (a floor set whose only run is its floor run, or a
+  // floor-0 run that also carries the best floor odds): offer it once, on Floor, whose caption says
+  // which floor it is for.
+  const ticksAt = PRIVATE_RUNS_CATEGORIES.indexOf('ticks');
+  const floorAt = PRIVATE_RUNS_CATEGORIES.indexOf('floor');
+  if (results[ticksAt] && results[floorAt] && results[ticksAt].run.path === results[floorAt].run.path) results[ticksAt] = null;
+
+  const storageKeys = [];
+  privateRunsTitles = {};
+  PRIVATE_RUNS_CATEGORIES.forEach((category, i) => {
+    privateRunsTitles[category] = getPrivateRunsTitle(category, results[i]);
+    const storageKey = `${PRIVATE_RUNS_LABELS[category]}-${roomId}`;
+    storageKeys.push(storageKey); // empty setups too: they are ours to keep and to check
+    if (results[i]) {
+      window.localStorage.setItem(storageKey, JSON.stringify(buildPrivateRunsBoardConfig(results[i].setup)));
+    } else {
+      // "Nothing to offer" is an empty setup, the same value the game's own trash button stores. The
+      // game's storage hook ignores events whose new value is null, so removing the key would leave
+      // the previous floor's setup loadable on a button captioned "(none)".
+      window.localStorage.setItem(storageKey, '[]');
+    }
+    notifyGameOfStorageKey(storageKey);
+  });
+  // Scanning every localStorage key is the one costly step here, and only a room change leaves stale ones.
+  if (privateRunsSweptFor !== roomId) {
+    removePrivateRunsSetups(storageKeys);
+    privateRunsSweptFor = roomId;
+  }
+  privateRunsLast = { key, storageKeys };
+  applyPrivateRunsTitlesToDom(); // captions for the buttons that are already on screen
+}
+
+function schedulePrivateRunsPass(force = false) {
+  if (force) {
+    privateRunsLast = { key: '', storageKeys: [] };
+    privateRunsRetryAt = 0;
+  }
+  clearTimeout(privateRunsTimer);
+  privateRunsTimer = setTimeout(() => {
+    privateRunsTimer = null;
+    runPrivateRunsPass().catch((error) => console.error('[Better Setups] Private runs pass failed:', error));
+  }, PRIVATE_RUNS_DEBOUNCE_MS);
+}
+
+// The private setups are managed by this mod only: players can load them, never save over, edit
+// or delete them. The game renders each label as a row of buttons [Setup|Save (label)] [trash].
+function getPrivateRunsMainButton(row) {
+  if (!row) return null;
+  const main = Array.from(row.children).find((el) => el.tagName === 'BUTTON' && /^(Setup|Save) \(/.test(el.textContent.trim()));
+  return main && PRIVATE_RUNS_LABEL_LIST.includes(extractLabelFromSetupButton(main.textContent.trim())) ? main : null;
+}
+
+// Hide the trash button (never removed: the game's React tree owns it) and dim Save.
+function lockPrivateRunsControls(button) {
+  const main = getPrivateRunsMainButton(button.parentElement);
+  if (!main) return;
+  const isSave = main.textContent.trim().startsWith('Save (');
+  const category = PRIVATE_RUNS_CATEGORIES.find((c) => PRIVATE_RUNS_LABELS[c] === extractLabelFromSetupButton(main.textContent.trim()));
+  applyPrivateRunsTitle(main, privateRunsTitles[category]);
+  main.style.pointerEvents = isSave ? 'none' : '';
+  main.style.opacity = isSave ? '0.6' : '';
+  for (const sibling of button.parentElement.children) {
+    if (sibling.querySelector?.('svg.lucide-trash2')) sibling.style.display = 'none';
+  }
+}
+
+// Capture phase, before the game's own handlers (and Better Setups' trash confirmation): swallow
+// every click on a private label's Save and trash buttons, including keyboard activation. Only
+// the green Setup button stays clickable, for players and for mods that pick setups by label.
+function privateRunsClickGuard(event) {
+  const button = event.target?.closest?.('button');
+  const main = getPrivateRunsMainButton(button?.parentElement);
+  if (!main) return;
+  if (button !== main || main.textContent.trim().startsWith('Save (')) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  }
+}
+
+function applyPrivateRunsTitlesToDom() {
+  document.querySelectorAll('.mb-2.flex.items-center.gap-2 button').forEach(lockPrivateRunsControls);
+}
+
+function clearPrivateRunsTitles() {
+  privateRunsTitles = {};
+  document.querySelectorAll('button[data-private-runs-title]').forEach((button) => applyPrivateRunsTitle(button, ''));
+}
+
+function onPrivateRunsConnectionChanged() {
+  schedulePrivateRunsPass(true);
+}
+
+function startPrivateRuns() {
+  if (privateRunsSubs.length > 0) return;
+  const { board, player } = globalThis.state;
+  const onChange = () => schedulePrivateRunsPass();
+  privateRunsSubs = [board.subscribe(onChange), player.subscribe(onChange)];
+  privateRunsMayHaveData = true; // clears what an earlier session left behind if we are not connected now
+  window.addEventListener('betterSetupsPrivateRunsChanged', onPrivateRunsConnectionChanged);
+  document.addEventListener('click', privateRunsClickGuard, true);
+  if (!document.getElementById(PRIVATE_RUNS_STYLE_ID)) {
+    const style = document.createElement('style');
+    style.id = PRIVATE_RUNS_STYLE_ID;
+    style.textContent = PRIVATE_RUNS_STYLE;
+    document.head.appendChild(style);
+  }
+  schedulePrivateRunsPass(true);
+}
+
+function stopPrivateRuns() {
+  privateRunsSubs.forEach((sub) => (typeof sub === 'function' ? sub() : sub?.unsubscribe?.()));
+  privateRunsSubs = [];
+  window.removeEventListener('betterSetupsPrivateRunsChanged', onPrivateRunsConnectionChanged);
+  document.removeEventListener('click', privateRunsClickGuard, true);
+  clearPrivateRunsTitles();
+  document.getElementById(PRIVATE_RUNS_STYLE_ID)?.remove();
+  clearTimeout(privateRunsTimer);
+  privateRunsTimer = null;
+  privateRunsSeq++; // drop any pass still waiting on the network
+  syncPrivateRunsLabels(false);
+  removePrivateRunsSetups([]);
+  privateRunsMayHaveData = false;
+  privateRunsSweptFor = '';
+  privateRunsLast = { key: '', storageKeys: [] };
+}
+
+// =======================
 // 10. Exports & Lifecycle Management
 // =======================
 
@@ -3780,6 +4096,7 @@ function getMapSetupData(mapId) {
       Object.assign(config, newConfig);
     },
     cleanup: () => {
+      stopPrivateRuns();
       clearBetterSetupsModalLayoutCleanup();
       hideSetupPreview();
       stopSetupInterfaceObserver();

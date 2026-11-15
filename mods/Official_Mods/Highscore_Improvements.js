@@ -149,6 +149,7 @@ function clearHighscoresModalCleanup() {
   }
   clearHighscoresModalTabsCleanup();
   clearHighscoresModalLayoutCleanup();
+  clearRunsSiteAutoLoad();
 }
 
 function attachHighscoresModalCloseCleanup(modalRef) {
@@ -1227,6 +1228,204 @@ function createSummaryContent(entries, you, yourName, improvementStats) {
   };
 }
 
+// =======================
+// 11b. Suggested runs (community runs site)
+// =======================
+// Optional: enabled in Mod Settings → Community runs site. The data layer lives in
+// Mod_Settings (window.BestiaryRunsSite); this section only renders it. Each improvement row
+// loads its suggestions on its own once scrolled into view, two maps at a time, so opening a
+// tab never fetches every map at once.
+
+const RUNS_SITE_CONCURRENCY = 2;
+const runsSiteRowTasks = new WeakMap(); // row element -> load task
+let runsSiteObserver = null;
+let runsSiteQueue = [];
+let runsSiteActive = 0;
+
+function getRunsSiteApi() {
+  const runsSite = window.BestiaryRunsSite;
+  return runsSite?.isEnabled?.() ? runsSite : null;
+}
+
+function getYourBestForRunsSite(code) {
+  const r = globalThis.state.player.getSnapshot().context.rooms?.[code] || {};
+  return {
+    ticks: normalizeYourTicks(r),
+    rank: normalizeYourRank(r) ?? 0,
+    rankTicks: normalizeYourRankTicks(r),
+    floor: getEffectiveYourFloor(r),
+    floorTicks: getEffectiveYourFloorTicks(r)
+  };
+}
+
+function formatRunsSiteChance(chance) {
+  if (chance === null || chance === undefined) return '?';
+  return chance >= 0.01 ? `${Math.round(chance * 100)}%` : `1 in ${Math.round(1 / chance).toLocaleString()}`;
+}
+
+function copyTextToClipboard(text) {
+  if (navigator.clipboard?.writeText) {
+    return navigator.clipboard.writeText(text).then(() => true, () => false);
+  }
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.style.cssText = 'position:fixed;left:-9999px;';
+  document.body.appendChild(textarea);
+  textarea.select();
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch (_) { /* ignore */ }
+  textarea.remove();
+  return Promise.resolve(ok);
+}
+
+function notifyRunsSite(key, type, duration, items = '') {
+  api.ui.notify?.({ message: t(`mods.highscore.${key}`).replace('{items}', items), type, duration });
+}
+
+function runsSiteSummaryText(run, category) {
+  const parts = [`${run.ticks} ticks`];
+  if (category === 'rank' && run.rankPoints != null) parts.unshift(`S+${run.rankPoints}`);
+  if (category === 'floor') parts.unshift(`${100 + 20 * run.floor}%`);
+  parts.push(t('mods.highscore.runsSiteWinrate').replace('{rate}', formatRunsSiteChance(run.winrate)));
+  parts.push(t('mods.highscore.runsSiteTickChance').replace('{rate}', formatRunsSiteChance(run.tickChance)));
+  if (run.credit) parts.push(run.credit);
+  return parts.join(' · ');
+}
+
+function runsSiteBoardText(run) {
+  return run.board.map((p) => {
+    const monster = `${p.monster.name}${p.monster.awakened ? ' ★' : ''} L${p.monster.level ?? 50}`;
+    const gear = p.equipment ? ` + ${p.equipment.name} (${p.equipment.stat} T${p.equipment.tier})` : '';
+    return `${monster}${gear} @${p.tile}`;
+  }).join('; ');
+}
+
+function createRunsSiteText(text, color, extraStyle = '') {
+  const el = document.createElement('div');
+  el.className = 'pixel-font-14';
+  el.style.cssText = `color:${color};${extraStyle}`;
+  el.textContent = text;
+  return el;
+}
+
+function createRunsSiteButton(label, onClick, disabled = false) {
+  const button = document.createElement('button');
+  button.className = 'focus-style-visible active:opacity-70 pixel-font-14';
+  button.style.cssText = `padding:2px 8px;${disabled ? 'opacity:0.5;cursor:not-allowed;' : ''}`;
+  button.textContent = label;
+  button.disabled = disabled;
+  button.addEventListener('click', onClick);
+  return button;
+}
+
+function applyRunsSiteRun(runsSite, code, run) {
+  try {
+    const result = runsSite.apply(code, run);
+    if (!result.ok) return notifyRunsSite('runsSiteMissing', 'error', 5000, result.missing.join(', '));
+    notifyRunsSite('runsSiteApplied', 'success', 3000);
+    closeHighscoresModal();
+  } catch (error) {
+    console.error('[Highscores] Applying community run failed:', error);
+    notifyRunsSite('runsSiteError', 'error', 5000);
+  }
+}
+
+async function copyRunsSiteRun(runsSite, code, run) {
+  const ok = await copyTextToClipboard(runsSite.buildSnippet(code, run));
+  notifyRunsSite(ok ? 'runsSiteCopied' : 'runsSiteError', ok ? 'success' : 'error', 3000);
+}
+
+function createRunsSiteRunRow(runsSite, code, category, run) {
+  const check = runsSite.check(code, run);
+  const actions = document.createElement('div');
+  actions.className = 'flex items-center gap-2';
+  actions.append(
+    createRunsSiteButton(t('mods.highscore.runsSiteApply'), () => applyRunsSiteRun(runsSite, code, run), !check.ok),
+    createRunsSiteButton(t('mods.highscore.runsSiteCopy'), () => copyRunsSiteRun(runsSite, code, run))
+  );
+
+  const row = document.createElement('div');
+  row.style.cssText = 'display:grid;gap:2px;padding:4px;border-top:1px solid rgba(255,255,255,0.1);';
+  row.append(
+    createRunsSiteText(runsSiteSummaryText(run, category), runsSite.isReliable(run) ? '#8f8' : '#fc6'),
+    createRunsSiteText(runsSiteBoardText(run), '#aaa', 'word-break:break-word;'),
+    actions
+  );
+  if (!check.ok) {
+    row.append(createRunsSiteText(t('mods.highscore.runsSiteMissing').replace('{items}', check.missing.join(', ')), '#f88'));
+  } else if (check.substituted.length) {
+    row.append(createRunsSiteText(t('mods.highscore.runsSiteSubstituted').replace('{items}', [...new Set(check.substituted)].join(', ')), '#fc6'));
+  }
+  return row;
+}
+
+async function loadRunsSiteSuggestions(runsSite, box, button, code, category) {
+  button.disabled = true;
+  button.textContent = t('mods.highscore.runsSiteLoading');
+  try {
+    const suggestions = await runsSite.suggest(code, getYourBestForRunsSite(code));
+    box.replaceChildren();
+    if (!suggestions) {
+      box.textContent = t('mods.highscore.runsSiteNotListed');
+    } else if (suggestions[category].length === 0) {
+      box.textContent = t('mods.highscore.runsSiteNone');
+    } else {
+      box.append(...suggestions[category].map((run) => createRunsSiteRunRow(runsSite, code, category, run)));
+    }
+    button.remove();
+  } catch (error) {
+    console.error('[Highscores] Community runs lookup failed:', error);
+    button.disabled = false;
+    button.textContent = t('mods.highscore.runsSiteFind');
+    box.textContent = t('mods.highscore.runsSiteError');
+  }
+}
+
+function pumpRunsSiteQueue() {
+  while (runsSiteActive < RUNS_SITE_CONCURRENCY && runsSiteQueue.length > 0) {
+    const task = runsSiteQueue.shift();
+    runsSiteActive++;
+    Promise.resolve(task()).finally(() => {
+      runsSiteActive--;
+      pumpRunsSiteQueue();
+    });
+  }
+}
+
+function observeRunsSiteRow(itemEl, task) {
+  if (typeof IntersectionObserver === 'undefined') return;
+  runsSiteRowTasks.set(itemEl, task);
+  runsSiteObserver ??= new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      if (!entry.isIntersecting) continue;
+      runsSiteObserver.unobserve(entry.target);
+      runsSiteQueue.push(runsSiteRowTasks.get(entry.target));
+      pumpRunsSiteQueue();
+    }
+  });
+  runsSiteObserver.observe(itemEl);
+}
+
+function clearRunsSiteAutoLoad() {
+  runsSiteObserver?.disconnect();
+  runsSiteObserver = null;
+  runsSiteQueue = [];
+}
+
+// Adds the suggestion area to one improvement row. Skipped where it cannot help: you already
+// hold the world record, or the map is locked (Apply would fail).
+function appendRunsSiteSuggestion(itemEl, o, category) {
+  const runsSite = getRunsSiteApi();
+  const host = itemEl.querySelector('.grid');
+  if (!runsSite || !host || o.ownsWr || o.isUnlocked === false) return;
+  const button = createRunsSiteButton(t('mods.highscore.runsSiteFind'), () => load());
+  button.style.cssText += 'justify-self:start;';
+  const box = createRunsSiteText('', '#aaa');
+  const load = () => loadRunsSiteSuggestions(runsSite, box, button, o.code, category);
+  host.append(button, box);
+  observeRunsSiteRow(itemEl, load);
+}
+
 // Helper function to create an item sprite element
 function createItemSprite(itemId) {
   // Create the sprite container
@@ -1289,6 +1488,7 @@ function createTickContent(opportunities, minTheo, hasTickWrData) {
         </div>
       `;
       tagImprovementListItem(itemEl, { code: o.code, name: o.name, hasPersonalData: o.hasPersonalData });
+      appendRunsSiteSuggestion(itemEl, o, 'ticks');
       scrollContainer.addContent(itemEl);
     });
   } else {
@@ -1350,6 +1550,7 @@ function createRankContent(opportunities, hasRankWrData) {
         </div>
       `;
       tagImprovementListItem(itemEl, { code: o.code, name: o.name, hasPersonalData: o.hasPersonalData });
+      appendRunsSiteSuggestion(itemEl, o, 'rank');
       scrollContainer.addContent(itemEl);
     });
   } else {
@@ -1410,6 +1611,7 @@ function createFloorContent(opportunities, hasFloorWrData) {
         </div>
       `;
       tagImprovementListItem(itemEl, { code: o.code, name: o.name, hasPersonalData: o.hasPersonalData });
+      appendRunsSiteSuggestion(itemEl, o, 'floor');
       scrollContainer.addContent(itemEl);
     });
   } else {

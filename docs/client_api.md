@@ -177,7 +177,13 @@ api.util.formatItemCount(11972); // '11K'   (10000+: floored to whole K)
 // Game-reported season and version (globalThis.state.CURRENT_SEASON / GAME_VERSION).
 api.util.getCurrentSeason(); // 2   (number, or null until game state is ready)
 api.util.getGameVersion();   // '3' (string, or null until game state is ready)
+
+// Firebase admins only (Mod Settings -> Private runs repository): one file of the connected private GitHub
+// repository, read through the background worker with the admin's own token. Returns the file text.
+const text = await api.util.fetchRunsRepoFile('owner/name', 'solution-index.json', token);
 ```
+
+See [`private_runs.md`](private_runs.md) for the feature built on it.
 
 ## Hook API
 

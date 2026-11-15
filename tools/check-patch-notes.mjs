@@ -6,7 +6,7 @@
  *   - manifest.json and manifest_firefox.json disagree on "version"
  *   - the first patch-notes entry is not that version (a release shipped without a note)
  *   - a version appears twice, or entries are not strictly newest-first
- *   - an entry has no changes, an unknown type, or a missing mod/text
+ *   - an entry has no changes, an unknown type, or a missing mod/text, or an "admin" that is not a boolean
  *   - the newest entry lists the same mod+type twice (the file's rules say to merge them)
  *
  * Also a warning (never a failure): mods under mods/ changed since origin/main that no line of the newest
@@ -75,6 +75,7 @@ if (!Array.isArray(notes) || !notes.length) {
     (entry.changes ?? []).forEach((c, j) => {
       if (!c.mod || !c.text) problems.push(`${entry.version} change #${j + 1}: missing mod or text`);
       if (!TYPES.has(c.type)) problems.push(`${entry.version} change #${j + 1}: unknown type "${c.type}"`);
+      if (c.admin !== undefined && typeof c.admin !== 'boolean') problems.push(`${entry.version} change #${j + 1}: "admin" must be true or false`);
     });
   });
   const pairs = new Set();

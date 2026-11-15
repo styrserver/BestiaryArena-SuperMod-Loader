@@ -164,6 +164,23 @@ function mirrorAutoReloadDisabled(disabled) {
   }
 }
 
+// Mirror "this player is a Firebase admin" (reported by Mod Settings) for the popup, which hides
+// admin-only patch notes from everyone else. Cosmetic: nothing is protected by it.
+const ADMIN_STATUS_STORAGE_KEY = 'ba-is-admin';
+let mirroredAdminStatus = null;
+
+function mirrorAdminStatus(isAdmin) {
+  if (!IS_TOP_FRAME || !browserAPI?.storage?.local) return;
+  const value = isAdmin === true;
+  if (value === mirroredAdminStatus) return;
+  mirroredAdminStatus = value;
+  try {
+    browserAPI.storage.local.set({ [ADMIN_STATUS_STORAGE_KEY]: value });
+  } catch {
+    // ignore storage failures
+  }
+}
+
 try {
   const savedModSettings = JSON.parse(localStorage.getItem('better-ui-config') || 'null');
   mirrorAutoReloadDisabled(savedModSettings?.disableAutoReload === true);
@@ -177,6 +194,8 @@ window.addEventListener('message', (event) => {
     appendLoaderError(event.data.entry);
   } else if (event.data?.from === 'BA_AUTO_RELOAD_PREF') {
     mirrorAutoReloadDisabled(event.data.disabled);
+  } else if (event.data?.from === 'BA_ADMIN_STATUS') {
+    mirrorAdminStatus(event.data.isAdmin);
   }
 });
 

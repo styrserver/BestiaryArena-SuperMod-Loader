@@ -1455,6 +1455,14 @@ if (typeof browserAPI === 'undefined') {
        * is returned instead (rejects only when nothing has ever loaded).
        * @returns {Promise<object>} the payload (`result.data.json`)
        */
+      // Private runs repository (Firebase admins only): one file from a GitHub repo, read with the
+      // admin's own token through the background worker. Returns the file text.
+      fetchRunsRepoFile: async function(repo, path, token) {
+        const response = await sendMessageToExtension({ action: 'fetchRunsRepoFile', repo, path, token });
+        if (!response?.success) throw new Error(response?.error || 'Runs repository request failed');
+        return response.text;
+      },
+
       fetchTrophyRoomData: function() {
         const now = Date.now();
         if (trophyRoomRequest && (trophyRoomRequestAt === 0 || now - trophyRoomRequestAt < TROPHY_ROOM_COOLDOWN_MS)) {

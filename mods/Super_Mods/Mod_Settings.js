@@ -66,6 +66,9 @@ const defaultConfig = {
   autoHideNonShinyNonAwakenedMonsters: false,
   enableFirebaseRunsUpload: false, // Enable uploading best runs to Firebase
   firebaseRunsPassword: '', // Encryption password for Firebase runs (stored encrypted)
+  runsSiteEnabled: false, // Admin-only: show suggested runs from the private runs repository in Highscore Improvements
+  runsSiteRepo: '', // owner/name of that repository, typed by the admin (nothing is pre-filled)
+  runsSiteToken: '', // the admin's own GitHub token, never shipped
   autoUploadRuns: false, // Automatically upload when new best run is recorded
   firebaseUploadRegions: {}, // regionId -> false when disabled; missing keys = enabled (all ON by default)
   lastFirebaseUploadedMapHashes: {}, // "s<season>:<mapKey>" -> payload hash for delta Firebase uploads (v2)
@@ -113,6 +116,15 @@ const defaultConfig = {
 // Storage key for this mod
 const STORAGE_KEY = 'better-ui-config';
 
+// Passwords must never reach the console (it is copied into bug reports).
+function redactedConfigForLog(cfg) {
+  return {
+    ...cfg,
+    firebaseRunsPassword: cfg.firebaseRunsPassword ? '***' : '',
+    runsSiteToken: cfg.runsSiteToken ? '***' : ''
+  };
+}
+
 // Load config from localStorage
 let config;
 // Raw saved JSON (before defaults are merged) so legacy-key migrations can tell "never saved" from "default".
@@ -122,7 +134,7 @@ try {
   if (savedConfig) {
     rawSavedConfig = JSON.parse(savedConfig) || {};
     config = Object.assign({}, defaultConfig, rawSavedConfig);
-    console.log('[Mod Settings] Config loaded from localStorage:', config);
+    console.log('[Mod Settings] Config loaded from localStorage:', redactedConfigForLog(config));
   } else {
     config = Object.assign({}, defaultConfig);
     console.log('[Mod Settings] No saved config, using defaults:', config);
@@ -131,6 +143,8 @@ try {
   console.error('[Mod Settings] Error loading config from localStorage:', error);
   config = Object.assign({}, defaultConfig);
 }
+// The first runs-site build stored a site URL and login; drop them so they do not linger.
+for (const key of ['runsSiteUrl', 'runsSiteUsername', 'runsSitePassword']) delete config[key];
 window.betterUIConfig = config;
 delete config.enableFavorites;
 delete config.favoriteSymbol;
@@ -5241,7 +5255,7 @@ function saveConfig() {
     // The background worker can't read page localStorage; the injector mirrors this
     // flag into extension storage so its browser-error-page recovery honours it.
     window.postMessage({ from: 'BA_AUTO_RELOAD_PREF', disabled: config.disableAutoReload === true }, window.location.origin);
-    console.log('[Mod Settings] Configuration saved to localStorage:', config);
+    console.log('[Mod Settings] Configuration saved to localStorage:', redactedConfigForLog(config));
   } catch (error) {
     console.error('[Mod Settings] Error saving config:', error);
   }
@@ -5319,6 +5333,420 @@ function writeDepotConfigToStorage(next) {
     window.depotManager.reloadDepotConfigFromStorage();
   }
 }
+
+// =======================
+// 4.4. Private runs repository (admin-only suggested runs in Highscore Improvements)
+// =======================
+// Reads a private GitHub repository of analysed board solutions through the contents API.
+// Firebase admins only (config/admins): the repository is private, so the admin types its
+// name and their own token in Mod Settings; nothing is shipped. Requests go through the
+// background worker (BestiaryModAPI.util.fetchRunsRepoFile).
+//
+// solution-index.json summarises every solution (map, floor, runs, victories, min ticks, rank
+// points, ...), so ranking runs from that one file. A solution's board lives in its own small
+// file and is fetched only for the few runs that are actually shown.
+
+const RUNS_REPO_INDEX_PATH = 'solution-index.json';
+const RUNS_REPO_INDEX_TTL_MS = 10 * 60 * 1000;
+const RUNS_REPO_ADMIN_RECHECK_MS = 30 * 1000;
+const RUNS_SITE_MAX_PER_CATEGORY = 3; // runs listed per category in Highscore Improvements
+const RUNS_SITE_BEST_MAX_TRIES = 8; // candidates whose boards are checked per automatic pick
+
+let runsSiteAdmin = false;
+let runsSiteAdminKnown = false; // Firebase answered; a definite answer is never asked for again
+let runsSiteAdminCheckedAt = 0;
+let runsSiteIndex = null; // { at, byMap: Map<mapName, solution[]>, floorSets: Map<mapName, { from, to }[]>, count }
+let runsSiteIndexPromise = null;
+const runsSiteBoards = new Map(); // solution path -> Promise<{ board, credit }>
+
+// The popup hides admin-only patch notes from everyone else; it cannot ask Firebase itself, so the
+// answer is mirrored into extension storage by the injector. (Cosmetic only, not an access check.)
+function mirrorAdminStatus(isAdmin) {
+  window.postMessage({ from: 'BA_ADMIN_STATUS', isAdmin: isAdmin === true }, window.location.origin);
+}
+
+// Admin status is checked lazily: the admins API may not be loaded yet when a mod first asks, so it
+// retries (at most every RUNS_REPO_ADMIN_RECHECK_MS) only while that API cannot answer.
+function runsSiteRefreshAdmin() {
+  if (runsSiteAdminKnown || Date.now() - runsSiteAdminCheckedAt < RUNS_REPO_ADMIN_RECHECK_MS) return Promise.resolve(runsSiteAdmin);
+  runsSiteAdminCheckedAt = Date.now();
+  return getPlayerAdminStatus().then((status) => {
+    if (status !== null) {
+      runsSiteAdminKnown = true;
+      runsSiteAdmin = status;
+      mirrorAdminStatus(status);
+    }
+    return runsSiteAdmin;
+  }, () => runsSiteAdmin);
+}
+
+function runsSiteIsEnabled() {
+  runsSiteRefreshAdmin();
+  return !!(runsSiteAdmin && config.runsSiteEnabled && config.runsSiteRepo && config.runsSiteToken);
+}
+
+// Accepts "owner/name" or a pasted github.com URL.
+function runsSiteNormalizeRepo(value) {
+  const repo = String(value || '').trim().replace(/^https:\/\/github\.com\//, '').replace(/\.git$/, '').replace(/\/+$/, '');
+  return /^[\w.-]+\/[\w.-]+$/.test(repo) ? repo : '';
+}
+
+function runsSiteFetchFile(path) {
+  return window.BestiaryModAPI.util.fetchRunsRepoFile(config.runsSiteRepo, path, config.runsSiteToken);
+}
+
+async function runsSiteLoadIndex(force) {
+  if (!force && runsSiteIndex && Date.now() - runsSiteIndex.at < RUNS_REPO_INDEX_TTL_MS) return runsSiteIndex;
+  runsSiteIndexPromise ??= (async () => {
+    const data = JSON.parse(await runsSiteFetchFile(RUNS_REPO_INDEX_PATH));
+    const byMap = new Map();
+    for (const [path, summary] of Object.entries(data.solutions || {})) {
+      if (!byMap.has(summary.map)) byMap.set(summary.map, []);
+      byMap.get(summary.map).push({ path, ...summary });
+    }
+    // Category keys are "<map>" or, for maps whose floors differ in enemies, tiles or team size,
+    // "<map> floors 0–5" / "<map> floor 3": each such key is one floor set.
+    const floorSets = new Map();
+    for (const key of Object.keys(data.categories || {})) {
+      const m = key.match(/^(.*?)(?: floors? (\d+)(?:[–-](\d+))?)?$/);
+      const from = m[2] === undefined ? 0 : Number(m[2]);
+      const to = m[2] === undefined ? Infinity : Number(m[3] ?? m[2]);
+      if (!floorSets.has(m[1])) floorSets.set(m[1], []);
+      floorSets.get(m[1]).push({ from, to });
+    }
+    for (const sets of floorSets.values()) sets.sort((a, b) => a.from - b.from);
+    runsSiteIndex = { at: Date.now(), byMap, floorSets, count: Object.keys(data.solutions || {}).length };
+    return runsSiteIndex;
+  })();
+  try {
+    return await runsSiteIndexPromise;
+  } finally {
+    runsSiteIndexPromise = null;
+  }
+}
+
+// The solutions of one room and its floor sets ({ solutions, floorSets }), or null when the map is
+// not covered. A solution belongs to the floor set that contains its floor.
+function runsSiteMapFor(index, roomCode) {
+  const name = globalThis.state?.utils?.ROOM_NAME?.[roomCode];
+  const floorSets = name ? index.floorSets.get(name) : null;
+  let solutions = floorSets ? index.byMap.get(name) : null;
+  if (!solutions?.length) return null;
+  const regions = new Set(solutions.map((s) => s.region));
+  if (regions.size > 1) {
+    // The same map name in several regions: pick the room's own region when it can be resolved.
+    const room = (globalThis.state?.utils?.ROOMS || []).find?.((r) => r?.id === roomCode);
+    const regionId = room?.region ?? room?.regionId;
+    const region = (globalThis.state?.utils?.REGIONS || []).find?.((r) => r?.id === regionId)?.name;
+    if (!region) return null;
+    solutions = solutions.filter((s) => s.region === region);
+  }
+  return { solutions, floorSets };
+}
+
+// Index summary -> the shape the Highscore UI renders. Chances are fractions in [0, 1].
+function runsSiteToRun(summary) {
+  const runs = summary.runs || 0;
+  const wins = summary.victories || 0;
+  return {
+    path: summary.path,
+    floor: summary.floor,
+    ticks: summary.minTicks,
+    winrate: runs ? wins / runs : null,
+    // Given a win, how often it lands on the listed (fastest) tick count.
+    tickChance: wins ? (summary.maintenance?.minTicksCount ?? 0) / wins : null,
+    rankPoints: summary.rankPoints > 0 ? summary.rankPoints : null,
+    rankChance: runs ? (summary.rankCount ?? 0) / runs : null
+  };
+}
+
+function runsSiteLoadBoard(run) {
+  if (!runsSiteBoards.has(run.path)) {
+    const load = runsSiteFetchFile(run.path).then((text) => {
+      const file = JSON.parse(text);
+      return { board: file.config.board, credit: file.credits || '' };
+    });
+    runsSiteBoards.set(run.path, load);
+    load.catch(() => runsSiteBoards.delete(run.path));
+  }
+  return runsSiteBoards.get(run.path);
+}
+
+// Reliable = it nearly always wins and nearly always hits the listed ticks.
+function runsSiteIsReliable(run) {
+  return (run.winrate ?? 0) >= 0.9 && (run.tickChance ?? 0) >= 0.5;
+}
+
+// Winrate of one solution on a given floor, from its [floor, runs, victories] tuples. Rank and
+// high-floor solutions carry no tuples: their own numbers describe the floor they were made for.
+function runsSiteWinrateAt(summary, floor) {
+  const row = (summary.floors || []).find((entry) => entry[0] === floor);
+  if (row) return row[1] ? row[2] / row[1] : null;
+  return floor === summary.floor && summary.runs ? summary.victories / summary.runs : null;
+}
+
+// How many of each monster and item (by name; items also by stat) the player owns. Cached per roster.
+let runsSiteRosterCache = { monsters: null, equips: null, counts: null };
+
+function runsSiteRosterCounts() {
+  const { monsters, equips } = globalThis.state.player.getSnapshot().context;
+  if (runsSiteRosterCache.monsters === monsters && runsSiteRosterCache.equips === equips) return runsSiteRosterCache.counts;
+  const utils = globalThis.state.utils;
+  const nameOf = (get, id) => { try { return get(id).metadata.name.toLowerCase(); } catch (_) { return null; } };
+  const monsterCounts = new Map();
+  const equipCounts = new Map();
+  const bump = (map, key) => map.set(key, (map.get(key) || 0) + 1);
+  for (const m of monsters || []) { const name = nameOf(utils.getMonster, m.gameId); if (name) bump(monsterCounts, name); }
+  for (const e of equips || []) { const name = nameOf(utils.getEquipment, e.gameId); if (name) bump(equipCounts, `${name}|${e.stat}`); }
+  runsSiteRosterCache = { monsters, equips, counts: { monsterCounts, equipCounts } };
+  return runsSiteRosterCache.counts;
+}
+
+// Cheap pre-check from the index's [monster, item, stat] combos, so candidates the player cannot
+// possibly field are dropped without downloading their boards. Levels, genes and tiers are left to
+// the exact check afterwards.
+function runsSiteRosterCovers(combos) {
+  if (!combos?.length) return true;
+  const { monsterCounts, equipCounts } = runsSiteRosterCounts();
+  const needMonsters = new Map();
+  const needEquips = new Map();
+  for (const [monster, equip, stat] of combos) {
+    needMonsters.set(monster, (needMonsters.get(monster) || 0) + 1);
+    if (equip) needEquips.set(`${equip}|${stat}`, (needEquips.get(`${equip}|${stat}`) || 0) + 1);
+  }
+  for (const [name, n] of needMonsters) if ((monsterCounts.get(name) || 0) < n) return false;
+  for (const [key, n] of needEquips) if ((equipCounts.get(key) || 0) < n) return false;
+  return true;
+}
+
+// What "best" means is the game's own scoring, the same ordering the Cyclopedia runs tables use
+// (ticks: fewest; rank: most S+ points, then fewest ticks; floor: highest floor, then fewest
+// ticks). No odds thresholds on purpose: the best run is the best run, however rarely it comes off.
+// The only requirement is evidence that the run can happen at all (a simulated win, or for rank a
+// simulated run that reached its S+ points); the odds break ties and are shown next to every run.
+// Both consumers use these rules: the automatic setups (runsSiteBestFor) and the Highscore list
+// (runsSiteSuggest).
+//
+// `designed` = the run was made for this floor, so its ticks are the ticks on this floor. A run made
+// for another floor only has odds on this one (floors tuples), not ticks, so it never competes on ticks.
+const RUNS_SITE_GOALS = {
+  // fewest ticks on floor 0
+  ticks: {
+    usable: (entry) => entry.designed,
+    order: (a, b) => (a.summary.minTicks - b.summary.minTicks) || (b.rate - a.rate),
+    beats: (summary, yours) => summary.minTicks < (yours.ticks ?? Infinity)
+  },
+  // most S+ rank points on floor 0, then fewest ticks
+  rank: {
+    usable: (entry) => entry.designed && entry.summary.rankPoints > 0 && (entry.summary.rankCount ?? 0) > 0,
+    order: (a, b) => (b.summary.rankPoints - a.summary.rankPoints) || (a.summary.minTicks - b.summary.minTicks) || (b.rate - a.rate),
+    beats: (summary, yours) => summary.rankPoints > (yours.rank ?? 0) ||
+      (summary.rankPoints === (yours.rank ?? 0) && summary.minTicks < (yours.rankTicks ?? Infinity))
+  },
+  // on the highest floor that has a usable run: runs made for that floor by fewest ticks, then
+  // runs made for other floors by their odds on it
+  floor: {
+    usable: () => true,
+    order: (a, b) => (Number(b.designed) - Number(a.designed)) ||
+      (a.designed ? a.summary.minTicks - b.summary.minTicks : 0) || (b.rate - a.rate),
+    beats: (summary, yours) => summary.floor > (yours.floor ?? -1) ||
+      (summary.floor === (yours.floor ?? -1) && summary.minTicks < (yours.floorTicks ?? Infinity))
+  }
+};
+
+// A solution as a candidate for one floor: its odds there, and whether it was made for that floor.
+function runsSiteEntryAt(summary, floor) {
+  return { summary, rate: runsSiteWinrateAt(summary, floor), designed: summary.floor === floor };
+}
+
+/**
+ * Runs that beat the player's current best, per goal, with their boards loaded, for the Highscore
+ * list: the same candidates and ordering as the automatic setups, over every floor of the map.
+ * yours: { ticks, rank, rankTicks, floor, floorTicks } (null where unplayed)
+ * Returns null when the map is not covered.
+ */
+async function runsSiteSuggest(roomCode, yours) {
+  const index = await runsSiteLoadIndex(false);
+  const map = runsSiteMapFor(index, roomCode);
+  if (!map) return null;
+  const picked = {};
+  for (const [goal, rule] of Object.entries(RUNS_SITE_GOALS)) {
+    // Each goal is scored on one floor: floor 0 for ticks and rank, the run's own floor for floor.
+    picked[goal] = map.solutions
+      .map((summary) => runsSiteEntryAt(summary, goal === 'floor' ? summary.floor : 0))
+      .filter((entry) => (entry.rate ?? 0) > 0 && rule.usable(entry) && rule.beats(entry.summary, yours))
+      .sort(rule.order)
+      .slice(0, RUNS_SITE_MAX_PER_CATEGORY)
+      .map((entry) => runsSiteToRun(entry.summary));
+  }
+  // The same solution can win several goals; load each board once.
+  await Promise.all([...new Set(Object.values(picked).flat())].map(async (run) => Object.assign(run, await runsSiteLoadBoard(run))));
+  return picked;
+}
+
+// One floor, one goal: the first suitable candidate the player can field, or null.
+async function runsSitePickFor(roomCode, solutions, rule, floor) {
+  const entries = solutions.map((summary) => runsSiteEntryAt(summary, floor));
+  const suitable = entries.filter((entry) => (entry.rate ?? 0) > 0 && rule.usable(entry));
+  const owned = suitable.filter((entry) => runsSiteRosterCovers(entry.summary.combos));
+  const ranked = owned.sort(rule.order).slice(0, RUNS_SITE_BEST_MAX_TRIES);
+  for (const { summary, rate } of ranked) {
+    const run = runsSiteToRun(summary);
+    Object.assign(run, await runsSiteLoadBoard(run));
+    const check = runsSiteApplyRun({ roomCode, floor, board: run.board, apply: false });
+    if (check.ok) {
+      return { run, floor, winrate: rate, setup: check.setup, substituted: check.substituted, counts: { suitable: suitable.length, owned: owned.length } };
+    }
+  }
+  return { none: { suitable: suitable.length, owned: owned.length, checked: ranked.length } };
+}
+
+/**
+ * The run to use automatically for one goal, for the floor set of the floor on screen (maps whose
+ * floors differ in enemies, tiles or team size have several; most have one covering every floor):
+ *   'ticks' - the fewest ticks on floor 0 or, in a floor set without floor 0, on the highest floor
+ *             that set has runs for
+ *   'rank'  - the most S+ rank points, on those same floors (the repository only has S+ points
+ *             for floor 0, so sets without it have none)
+ *   'floor' - the best run on the highest floor of the set that has one the player can field
+ * Maps with a single floor set: ticks and rank are about floor 0. In every case the first candidate
+ * the player can field is taken. Returns { run, floor, winrate, setup, substituted } or null (map not covered, no such run in this floor set, or nothing fieldable). The log line
+ * (Verbose level) says which of those it was.
+ * `setup` is the autoSetupBoard piece list: [{ tileIndex, monsterId, equipId }].
+ */
+async function runsSiteBestFor(roomCode, goal, currentFloor = 0) {
+  const rule = RUNS_SITE_GOALS[goal];
+  if (!rule) throw new Error(`Unknown goal: ${goal}`);
+  const tag = `[Mod Settings] Private runs ${roomCode} ${goal}:`;
+  const index = await runsSiteLoadIndex(false);
+  const map = runsSiteMapFor(index, roomCode);
+  if (!map) {
+    console.log(tag, 'map not in the repository');
+    return null;
+  }
+  const set = map.floorSets.find((s) => currentFloor >= s.from && currentFloor <= s.to) || map.floorSets[0];
+  const solutions = map.solutions.filter((s) => s.floor >= set.from && s.floor <= set.to);
+  let floors;
+  if (goal === 'ticks' || goal === 'rank') {
+    // Floor 0, or for a later floor set the highest floor its runs were made for.
+    floors = solutions.length ? [set.from === 0 ? 0 : Math.max(...solutions.map((s) => s.floor))] : [];
+  } else {
+    // Runs made for floor 0 also carry odds for the floors above it (floors tuples), so the highest
+    // floor with a run is the highest any of them reaches, within this set.
+    const reached = solutions.flatMap((s) => [s.floor, ...(s.floors || []).map((f) => f[0])]);
+    const highest = Math.min(set.to, Math.max(0, ...reached));
+    floors = Array.from({ length: Math.max(0, highest - Math.max(set.from, 1) + 1) }, (_, i) => highest - i);
+  }
+  if (!floors.length) {
+    console.log(tag, `no ${goal} setup applies to floors ${set.from}-${set.to === Infinity ? 'max' : set.to}`);
+    return null;
+  }
+  let last = null;
+  for (const floor of floors) {
+    const result = await runsSitePickFor(roomCode, solutions, rule, floor);
+    if (!result.none) {
+      console.log(tag, `picked ${result.run.path} for floor ${floor} (${solutions.length} solutions in floors ${set.from}-${set.to === Infinity ? 'max' : set.to}, ${result.counts.suitable} suitable, ${result.counts.owned} covered by your roster)`);
+      return result;
+    }
+    last = result.none;
+  }
+  const why = !last || last.suitable === 0 ? 'no suitable run'
+    : last.owned === 0 ? 'your roster lacks the monsters or items of every suitable run'
+    : 'no covered run matched your exact levels, genes or item tiers';
+  console.log(tag, `none (${solutions.length} solutions, floors ${floors[0]}..${floors[floors.length - 1]}): ${why}`);
+  return null;
+}
+
+// Self-contained on purpose: the same function is applied by the mod and serialised
+// (Function.prototype.toString) into the "Copy run" console snippet, so it must not
+// reference anything outside its own body. `run` = { roomCode, floor, board, apply }.
+function runsSiteApplyRun(run) {
+  const utils = globalThis.state.utils;
+  const keepCase = new Set(['Thalas', 'The Pale Count']);
+  const index = (getter, normalize) => {
+    const map = new Map();
+    for (let i = 1; ; i++) {
+      let name;
+      try { name = getter(i).metadata.name; } catch (_) { break; }
+      map.set(normalize(name), i);
+    }
+    return map;
+  };
+  // Name tables never change during a session; build them once (the function refers to itself
+  // by name, which also holds in the copied console snippet).
+  runsSiteApplyRun.ids ??= {
+    monsters: index(utils.getMonster, (n) => (keepCase.has(n) ? n : n.toLowerCase())),
+    equips: index(utils.getEquipment, (n) => n.toLowerCase())
+  };
+  const monsterIds = runsSiteApplyRun.ids.monsters;
+  const equipIds = runsSiteApplyRun.ids.equips;
+  const { monsters, equips } = globalThis.state.player.getSnapshot().context;
+  const levelOf = (m) => utils.expToCurrentLevel(m.exp) ?? 50;
+  const genes = ['hp', 'ad', 'ap', 'armor', 'magicResist'];
+  const geneSum = (m) => genes.reduce((s, g) => s + m[g], 0);
+  const usedMonsters = new Set();
+  const usedEquips = new Set();
+  const missing = [];
+  const substituted = [];
+  const setup = [];
+  for (const piece of run.board) {
+    const want = piece.monster;
+    const gameId = monsterIds.get(want.name);
+    const awakened = Boolean(want.awakened);
+    const wantLevel = want.level ?? 50;
+    const pool = monsters.filter((m) => !usedMonsters.has(m.id) && m.gameId === gameId && (m.tier === 6) === awakened);
+    const exact = pool.find((m) => levelOf(m) === wantLevel && genes.every((g) => m[g] === want[g]));
+    const monster = exact || pool.slice().sort((a, b) => levelOf(b) - levelOf(a) || geneSum(b) - geneSum(a))[0];
+    if (!monster) {
+      missing.push(`${awakened ? 'awakened ' : ''}${want.name}`);
+      continue;
+    }
+    if (!exact) substituted.push(want.name);
+    usedMonsters.add(monster.id);
+    let equipId;
+    if (piece.equipment) {
+      const gear = piece.equipment;
+      const owned = equips.filter((e) => !usedEquips.has(e.id) && e.gameId === equipIds.get(gear.name) && e.stat === gear.stat);
+      const item = owned.find((e) => e.tier === gear.tier) || owned.filter((e) => e.tier > gear.tier).sort((a, b) => b.tier - a.tier)[0];
+      if (item) {
+        usedEquips.add(item.id);
+        equipId = item.id;
+        if (item.tier !== gear.tier) substituted.push(gear.name);
+      } else {
+        missing.push(`${gear.name} (${gear.stat} T${gear.tier})`);
+      }
+    }
+    setup.push({ tileIndex: piece.tile, monsterId: monster.id, equipId });
+  }
+  const ok = missing.length === 0;
+  if (ok && run.apply !== false) {
+    globalThis.state.board.send({ type: 'selectRoomById', roomId: run.roomCode });
+    globalThis.state.board.trigger.setState({ fn: (state) => ({ ...state, floor: run.floor }) });
+    globalThis.state.board.send({ type: 'autoSetupBoard', setup });
+  }
+  return { ok, missing, substituted, setup };
+}
+
+const runsSiteApi = {
+  isEnabled: runsSiteIsEnabled,
+  isAdmin: runsSiteRefreshAdmin,
+  suggest: runsSiteSuggest,
+  bestFor: runsSiteBestFor,
+  isReliable: runsSiteIsReliable,
+  // Dry run: can the player field this run? -> { ok, missing, substituted }
+  check: (roomCode, run) => runsSiteApplyRun({ roomCode, floor: run.floor, board: run.board, apply: false }),
+  apply: (roomCode, run) => runsSiteApplyRun({ roomCode, floor: run.floor, board: run.board }),
+  buildSnippet: (roomCode, run) =>
+    `(${runsSiteApplyRun.toString()})(${JSON.stringify({ roomCode, floor: run.floor, board: run.board })});`,
+  async test() {
+    const index = await runsSiteLoadIndex(true);
+    return { maps: index.byMap.size, solutions: index.count };
+  },
+  reset() {
+    runsSiteIndex = null;
+    runsSiteBoards.clear();
+  }
+};
 
 // =======================
 // 4.5. Firebase Best Runs Upload Functions
@@ -6415,6 +6843,64 @@ function updateFirebaseStatus(statusDiv, message, color = '#7f8fa4') {
     statusDiv.textContent = message;
     statusDiv.style.color = color;
   }
+}
+
+// Settings UI for the private runs repository (section 4.4). Admin-only: the section stays
+// hidden until the Firebase admin check passes. The elements live in the settings modal, so
+// their listeners go away with it.
+function initRunsSiteSettings(content) {
+  const section = content.querySelector('#runs-site-settings-section');
+  const toggle = content.querySelector('#runs-site-toggle');
+  const repoInput = content.querySelector('#runs-site-repo');
+  const tokenInput = content.querySelector('#runs-site-token');
+  const saveBtn = content.querySelector('#runs-site-save-btn');
+  const statusDiv = content.querySelector('#runs-site-status');
+  if (!section || !toggle || !repoInput || !tokenInput || !saveBtn) return;
+
+  runsSiteApi.isAdmin().then((allowed) => {
+    section.style.display = allowed ? 'block' : 'none';
+  });
+
+  toggle.checked = !!config.runsSiteEnabled;
+  repoInput.value = config.runsSiteRepo || '';
+  if (config.runsSiteToken) tokenInput.placeholder = t('mods.betterUI.runsSiteTokenSetPlaceholder');
+
+  toggle.addEventListener('change', () => {
+    config.runsSiteEnabled = toggle.checked;
+    saveConfig();
+    window.dispatchEvent(new CustomEvent('betterSetupsPrivateRunsChanged'));
+  });
+
+  saveBtn.addEventListener('click', async () => {
+    const repo = runsSiteNormalizeRepo(repoInput.value);
+    const token = tokenInput.value.trim() || config.runsSiteToken;
+    if (!repo || !token) {
+      updateFirebaseStatus(statusDiv, t('mods.betterUI.runsSiteMissingCredentials'), '#dc3545');
+      return;
+    }
+    const previous = { repo: config.runsSiteRepo, token: config.runsSiteToken };
+    config.runsSiteRepo = repo;
+    config.runsSiteToken = token;
+    runsSiteApi.reset();
+    saveBtn.disabled = true;
+    updateFirebaseStatus(statusDiv, t('mods.betterUI.runsSiteTesting'), '#7f8fa4');
+    try {
+      const { maps, solutions } = await runsSiteApi.test();
+      saveConfig();
+      repoInput.value = repo;
+      tokenInput.value = '';
+      tokenInput.placeholder = t('mods.betterUI.runsSiteTokenSetPlaceholder');
+      updateFirebaseStatus(statusDiv, tReplace('mods.betterUI.runsSiteConnected', { maps, solutions }), '#4ade80');
+      window.dispatchEvent(new CustomEvent('betterSetupsPrivateRunsChanged'));
+    } catch (error) {
+      config.runsSiteRepo = previous.repo;
+      config.runsSiteToken = previous.token;
+      runsSiteApi.reset();
+      updateFirebaseStatus(statusDiv, tReplace('mods.betterUI.runsSiteFailed', { error: error.message }), '#dc3545');
+    } finally {
+      saveBtn.disabled = false;
+    }
+  });
 }
 
 function normalizeReplayEntityName(name, id, idToNameMap, lookupFromGameState) {
@@ -9772,6 +10258,22 @@ function showSettingsModal() {
             <div id="firebase-runs-status" style="margin-top: 10px; font-size: 12px; color: #7f8fa4; min-height: 20px;">
             </div>
           </div>
+          <div id="runs-site-settings-section" style="display: none; margin-top: 20px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.1);">
+            <h4 style="margin: 0 0 10px 0; color: #ff6b6b; font-size: 14px; text-align: center;">${t('mods.betterUI.runsSiteTitle')}</h4>
+            <p style="margin: 0 0 12px 0; font-size: 11px; color: #888;">${t('mods.betterUI.runsSiteDesc')}</p>
+            <div style="margin-bottom: 12px;">
+              <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                <input type="checkbox" id="runs-site-toggle" style="transform: scale(1.2);">
+                <span style="color: #ccc;">${t('mods.betterUI.runsSiteEnableLabel')}</span>
+              </label>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px;">
+              <input type="text" id="runs-site-repo" autocomplete="off" placeholder="${t('mods.betterUI.runsSiteRepoPlaceholder')}" style="width: 100%; padding: 6px; border: 1px solid #555; background: #2a2a2a; color: #fff; border-radius: 4px; pointer-events: auto;" onclick="event.stopPropagation();">
+              <input type="password" id="runs-site-token" autocomplete="off" placeholder="${t('mods.betterUI.runsSiteTokenPlaceholder')}" style="width: 100%; padding: 6px; border: 1px solid #555; background: #2a2a2a; color: #fff; border-radius: 4px; pointer-events: auto;" onclick="event.stopPropagation();">
+            </div>
+            <button type="button" id="runs-site-save-btn" class="btn btn-secondary" style="width: 100%; pointer-events: auto;" onclick="event.stopPropagation();">${t('mods.betterUI.runsSiteSaveButton')}</button>
+            <div id="runs-site-status" style="margin-top: 10px; font-size: 12px; color: #7f8fa4; min-height: 20px;"></div>
+          </div>
           <div id="guild-skill-admin-section" style="margin-top: 20px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.1); display: none;">
             <h4 style="margin: 0 0 10px 0; color: #ff6b6b; font-size: 14px;">Guild skill admin</h4>
             <p style="margin: 0 0 12px 0; font-size: 11px; color: #888;">Only names in Firebase <code>config/admins</code>. Deletes <strong>player-skills</strong> and <strong>player-equipment</strong> for <strong>all players</strong>.</p>
@@ -11051,6 +11553,9 @@ function showSettingsModal() {
       }
 
       initFirebaseUploadRegionToggles(content);
+      initRunsSiteSettings(content);
+      const runsSiteSaveBtn = content.querySelector('#runs-site-save-btn');
+      if (runsSiteSaveBtn) applyAdvancedActionButtonStyle(runsSiteSaveBtn, { variant: 'blue' });
       
       const firebaseRunsPasswordInput = content.querySelector('#firebase-runs-password');
       const uploadRunsBtn = content.querySelector('#upload-runs-btn');
@@ -21452,10 +21957,16 @@ function getLoadedGameChunkUrls() {
   return [...urls].filter((url) => url && url.includes('/_next/static/chunks/') && url.endsWith('.js'));
 }
 
-async function isCurrentPlayerFirebaseAdmin() {
+// true / false once the Firebase admins API has answered, null while it cannot yet (no player name or
+// the admins API not loaded).
+async function getPlayerAdminStatus() {
   const name = getCurrentPlayerName();
-  if (!name || typeof window.FirebaseAdminsAPI?.isPlayerAdminAsync !== 'function') return false;
+  if (!name || typeof window.FirebaseAdminsAPI?.isPlayerAdminAsync !== 'function') return null;
   return !!(await window.FirebaseAdminsAPI.isPlayerAdminAsync(name));
+}
+
+async function isCurrentPlayerFirebaseAdmin() {
+  return (await getPlayerAdminStatus()) === true;
 }
 
 // Remind Firebase admins to re-run the tools/ drift checks once the game has been redeployed since
@@ -21651,6 +22162,8 @@ exports = {
   init: function() {
     try {
       initBetterUI();
+      window.BestiaryRunsSite = runsSiteApi;
+      runsSiteRefreshAdmin();
       scheduleAdminRoomScriptCheck();
       return true;
     } catch (error) {
@@ -21662,6 +22175,9 @@ exports = {
   cleanup: function() {
     try {
       cancelAdminRoomScriptCheck();
+      if (window.BestiaryRunsSite === runsSiteApi) delete window.BestiaryRunsSite;
+      clearTimeout(runsSiteSaveTimer);
+      runsSiteSaveTimer = null;
       cleanupBetterUI();
       try { if (window.__baRestorePreimportBackup === restorePreimportBackup) delete window.__baRestorePreimportBackup; } catch (_) {}
       return true;

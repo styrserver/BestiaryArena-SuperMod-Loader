@@ -708,7 +708,41 @@ try {
   console.error('Error getting extension URL:', error);
 }
 
+// Private runs repository (Mod Settings → Private runs repository, Firebase admins only). The
+// page world cannot call the GitHub API with the admin's token itself, so it asks us. Only the
+// contents endpoint of one owner/name repository is ever requested; the token arrives with each
+// request and is never stored here.
+const RUNS_REPO_PATTERN = /^[\w.-]+\/[\w.-]+$/;
+
+async function fetchRunsRepoFile(repo, path, token) {
+  if (!RUNS_REPO_PATTERN.test(String(repo || ''))) throw new Error('Repository must look like owner/name');
+  const parts = String(path || '').split('/');
+  if (parts.some(part => !part || part === '..')) throw new Error('Invalid path');
+  if (!token) throw new Error('Missing token');
+  const url = `https://api.github.com/repos/${repo}/contents/${parts.map(encodeURIComponent).join('/')}`;
+  const res = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/vnd.github.raw+json',
+      'X-GitHub-Api-Version': '2022-11-28'
+    },
+    credentials: 'omit',
+    cache: 'no-cache' // revalidates by ETag, so an unchanged file costs a 304
+  });
+  if (res.status === 401 || res.status === 403) throw new Error('GitHub refused the token (wrong token or no access)');
+  if (res.status === 404) throw new Error('Not found: check the repository name and the token access');
+  if (!res.ok) throw new Error(`GitHub → ${res.status}`);
+  return res.text();
+}
+
 browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.action === 'fetchRunsRepoFile') {
+    fetchRunsRepoFile(message.repo, message.path, message.token)
+      .then(text => sendResponse({ success: true, text }))
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  }
+
   // Handle service worker wake-up for Chrome
   if (message.action === 'ping') {
     console.log('Background script pinged, responding...');

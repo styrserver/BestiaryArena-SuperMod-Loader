@@ -1745,6 +1745,7 @@
         boardClaimed: false,
         currentRoomId: null,
         enabledRefill: false,
+        prevAutomatorRefill: undefined,
         status: 'idle',
         lastBlockReason: null,
         uiRefresh: null
@@ -2484,12 +2485,31 @@
         try {
             const automator = farmerFindBestiaryAutomator();
             if (!automator?.updateConfig) return false;
+            // Remember the user's own Automator value once, so stopping the farmer can put it back.
+            if (farmerRuntime.prevAutomatorRefill === undefined) {
+                farmerRuntime.prevAutomatorRefill = !!automator.config?.autoRefillStamina;
+            }
+            console.log(`[Awaken Farmer] Setting Bestiary Automator autoRefillStamina=${!!enabled} (was ${!!automator.config?.autoRefillStamina})`);
             automator.updateConfig({ autoRefillStamina: !!enabled });
             farmerRuntime.enabledRefill = !!enabled;
             return true;
         } catch (e) {
             console.warn('[Awaken Farmer] Automator refill toggle failed:', e);
             return false;
+        }
+    }
+
+    function farmerRestoreAutomatorRefill() {
+        const prev = farmerRuntime.prevAutomatorRefill;
+        farmerRuntime.prevAutomatorRefill = undefined;
+        if (prev === undefined) return;
+        try {
+            const automator = farmerFindBestiaryAutomator();
+            if (!automator?.updateConfig || !!automator.config?.autoRefillStamina === prev) return;
+            console.log(`[Awaken Farmer] Restoring Bestiary Automator autoRefillStamina=${prev}`);
+            automator.updateConfig({ autoRefillStamina: prev });
+        } catch (e) {
+            console.warn('[Awaken Farmer] Automator refill restore failed:', e);
         }
     }
 
@@ -2826,6 +2846,7 @@
                     console.log('[Awaken Farmer] Done — all awakened creatures are gene-capped');
                 }
                 farmerRuntime.status = 'done';
+                farmerRestoreAutomatorRefill();
                 if (farmerRuntime.wasInitiatedByMod) farmerStopAutoplay();
                 else farmerReleaseBoardClaim();
                 if (typeof farmerRuntime.uiRefresh === 'function') farmerRuntime.uiRefresh();
@@ -2839,6 +2860,7 @@
                     console.log('[Awaken Farmer] No eligible maps (need unlocked floor 11–15)');
                 }
                 farmerRuntime.status = 'no-maps';
+                farmerRestoreAutomatorRefill();
                 if (farmerRuntime.wasInitiatedByMod) farmerStopAutoplay();
                 else farmerReleaseBoardClaim();
                 if (typeof farmerRuntime.uiRefresh === 'function') farmerRuntime.uiRefresh();
@@ -3012,7 +3034,7 @@
         const settings = loadFarmerSettings();
         if (!settings.enabled) return;
         syncFarmerModCoordination();
-        if (settings.autoRefillStamina) farmerApplyAutomatorRefill(true);
+        // Automator refill is applied per map in farmerRunTick, only once there is something to farm.
         farmerRuntime.status = 'starting';
         farmerRuntime.lastBlockReason = null;
         console.log('[Awaken Farmer] Starting farm loop');
@@ -3037,10 +3059,9 @@
         } else if (releaseControl) {
             farmerReleaseBoardClaim();
         }
-        if (farmerRuntime.enabledRefill) {
-            // Leave Automator refill as-is if user may want it; only clear our tracking flag.
-            farmerRuntime.enabledRefill = false;
-        }
+        // Restart (releaseControl=false) keeps our override; a real stop gives the user's value back.
+        if (releaseControl) farmerRestoreAutomatorRefill();
+        farmerRuntime.enabledRefill = false;
         farmerRuntime.status = 'idle';
         syncFarmerModCoordination();
         if (typeof farmerRuntime.uiRefresh === 'function') farmerRuntime.uiRefresh();
@@ -4146,8 +4167,9 @@
         });
         farmerRefillInput.addEventListener('change', () => {
             saveFarmerSettings({ autoRefillStamina: farmerRefillInput.checked });
-            if (loadFarmerSettings().enabled && farmerRefillInput.checked) {
-                farmerApplyAutomatorRefill(true);
+            // Only touch the Automator while actually farming; the tick applies it per map otherwise.
+            if (loadFarmerSettings().enabled && farmerRuntime.status === 'farming') {
+                farmerApplyAutomatorRefill(farmerRefillInput.checked);
             }
         });
         farmerSetupSelect.addEventListener('change', () => {

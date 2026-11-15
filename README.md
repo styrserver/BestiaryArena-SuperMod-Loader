@@ -111,6 +111,7 @@ The extension requests only what it needs to run mods on Bestiary Arena. See [`p
 - **bestiaryarena.com** — run mods and talk to open game tabs (automatic mod delivery uses `contentScriptReady`, not tab queries)
 - **bestiary-arena-ranking.vercel.app** — Cyclopedia Rankings API
 - **vip-list-messages-default-rtdb.europe-west1.firebasedatabase.app** — optional Firebase-backed features (VIP List, Guilds, Quests, Challenges, Mod Settings best-runs sync)
+- **api.github.com (private runs repository)** — admin-only suggested runs in Highscore Improvements (off by default; a Firebase admin enters a repository and their own token)
 
 **Optional (on demand):**
 - **gist.githubusercontent.com** / **raw.githubusercontent.com** — prompted when you open the popup or import a remote Gist/GitHub mod

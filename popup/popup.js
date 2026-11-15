@@ -1028,6 +1028,16 @@ async function updateVersionDisplay() {
   }
 }
 
+function readIsAdminFlag() {
+  return new Promise((resolve) => {
+    try {
+      chrome.storage.local.get('ba-is-admin', (result) => resolve(result?.['ba-is-admin'] === true));
+    } catch {
+      resolve(false);
+    }
+  });
+}
+
 async function loadPatchNotes() {
   try {
     const response = await fetch(chrome.runtime.getURL('docs/patch-notes.json'));
@@ -1035,7 +1045,13 @@ async function loadPatchNotes() {
       const data = await response.json();
       // Handle both old array format and new object format with metadata
       PATCH_NOTES = Array.isArray(data) ? data : (data.notes || []);
-      // The in-progress version is opened with no changes yet: show only versions that have notes.
+      // Lines marked "admin": true are for Firebase admins only (Mod Settings mirrors the status).
+      const isAdmin = await readIsAdminFlag();
+      PATCH_NOTES = PATCH_NOTES.map((note) => (Array.isArray(note.changes)
+        ? { ...note, changes: note.changes.filter((change) => !change.admin || isAdmin) }
+        : note));
+      // The in-progress version is opened with no changes yet, and a version of admin-only lines is
+      // empty for everyone else: show only versions that have notes.
       PATCH_NOTES = PATCH_NOTES.filter((note) => !Array.isArray(note.changes) || note.changes.length > 0);
       return PATCH_NOTES;
     }

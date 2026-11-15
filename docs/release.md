@@ -57,6 +57,9 @@ check only proves an entry exists, not that it is complete.
 
 - New entry on top, same version as the manifests. `check-patch-notes.mjs` fails the release otherwise.
 - Types: `added`, `changed`, `fixed`, `removed`. Within an entry sort by mod name, then type.
+- A line only Firebase admins should see (an admin-only feature) gets `"admin": true`; the popup hides it from
+  everyone else (Mod Settings mirrors the admin status into extension storage) and starts its text with
+  "Private (admins only):". A version whose lines are all admin-only is hidden too.
 - One entry per mod + type: merge duplicates (the check enforces this for the newest entry).
 - Short, player-facing sentences. **No quest spoilers**: no NPC names, map/room names, rewards or hints.
 - Keep the entry optimized, simple and concise: no implementation detail, and when merging into an existing
