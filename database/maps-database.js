@@ -676,8 +676,7 @@ function getDifficultyLabel(difficulty) {
 
 /**
  * "raid" | "event" | false — single source for the wiki's Raids/Events section split
- * (matches EVENT_TO_ROOM_MAPPING above: a raid room not in that static list is a
- * dynamic/seasonal event).
+ * (see isDynamicEventMap: events are read live from the game's room data).
  * @param {string} mapId
  * @returns {'raid'|'event'|false}
  */
@@ -686,8 +685,9 @@ function getMapType(mapId) {
   return isDynamicEventMap(mapId) ? 'event' : 'raid';
 }
 
-// Static event-name to room-id mapping for backward compatibility fallbacks.
-// This is the single source of truth for static raid events.
+// Static event-name to room-id mapping of the PERMANENT raids. Classifying a raid as event or permanent no
+// longer depends on it (isDynamicEventMap reads the game's own unlock rule); it remains the fallback when a
+// room's rule cannot be read, and the source of Raid Hunter's permanent raid names.
 const EVENT_TO_ROOM_MAPPING = {
   'Rat Plague': 'rkcent',
   'Buzzing Madness': 'crwasp',
@@ -821,6 +821,42 @@ function getExpansionForRegion(regionId) {
 }
 
 /**
+ * Seasonal quest-log flag an event raid unlocks on ('halloween', 'xmas', 'wc', ...), read from the
+ * game's own room data (its minified `isUnlocked` source). Permanent raids unlock on progress only.
+ * @param {string} mapId
+ * @returns {string|null|undefined} flag name; null = no seasonal flag (permanent); undefined = unreadable
+ */
+const eventFlagCache = new Map(); // mapId -> flag | null; room rules do not change during a session
+
+function getEventFlag(mapId) {
+  if (eventFlagCache.has(mapId)) return eventFlagCache.get(mapId);
+  try {
+    const room = getMapById(mapId);
+    if (!room || typeof room.isUnlocked !== 'function') return undefined; // game data not ready: do not cache
+    const source = String(room.isUnlocked);
+    const log = source.match(/questLog:(\w+)/)?.[1];
+    const flag = log ? source.match(new RegExp('\\b' + log + '\\.(\\w+)'))?.[1] || null : null;
+    eventFlagCache.set(mapId, flag);
+    return flag;
+  } catch (error) {
+    return undefined;
+  }
+}
+
+/**
+ * Room ids released together with an event raid (same seasonal flag), including itself.
+ * @param {string} mapId
+ * @returns {string[]} [mapId] alone when it has no seasonal flag
+ */
+function getEventRaidSetIds(mapId) {
+  const flag = getEventFlag(mapId);
+  if (!flag) return [mapId];
+  const rooms = globalThis.state?.utils?.ROOMS;
+  if (!Array.isArray(rooms)) return [mapId];
+  return rooms.filter((room) => room.raid === true && getEventFlag(room.id) === flag).map((room) => room.id);
+}
+
+/**
  * Check if a map is a dynamic event map.
  * Dynamic event maps are raids not present in the static raid list.
  * @param {string} mapId - The map ID to check
@@ -830,6 +866,11 @@ function isDynamicEventMap(mapId) {
   if (!mapId) return false;
   if (!isRaid(mapId)) return false;
 
+  // Live: the game unlocks event raids on a seasonal quest-log flag, permanent ones on progress only.
+  const flag = getEventFlag(mapId);
+  if (flag !== undefined) return flag !== null;
+
+  // Unlock rule unreadable: fall back to the static permanent list.
   const state = globalThis.state || window.state;
   const mapName = state?.utils?.ROOM_NAME?.[mapId];
   if (!mapName) return false;
@@ -1023,6 +1064,8 @@ mapsDatabase.getNonRaidMaps = getNonRaidMaps;
 mapsDatabase.isRaid = isRaid;
 mapsDatabase.isMapRaidComprehensive = isMapRaidComprehensive;
 mapsDatabase.isDynamicEventMap = isDynamicEventMap;
+mapsDatabase.getEventFlag = getEventFlag;
+mapsDatabase.getEventRaidSetIds = getEventRaidSetIds;
 mapsDatabase.getRegionsInOrder = getRegionsInOrder;
 mapsDatabase.getCanonicalTableRowOrder = getCanonicalTableRowOrder;
 mapsDatabase.buildMapOrderIndex = buildMapOrderIndex;

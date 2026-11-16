@@ -1374,6 +1374,8 @@
       "runsSiteSubstituted": "Usa substitutos: {items}",
       "runsSiteWinrate": "{rate} de vitória",
       "runsSiteTickChance": "ticks {rate}",
+      "runsSiteMore": "+{count} mais",
+      "runsSiteLess": "Mostrar menos",
       "youHoldWr": "Você tem o WR",
       "ticksUnavailable": "Ticks indisponíveis",
       "ticksAhead": "{ticks} ticks à frente",

@@ -166,6 +166,10 @@ let privateRunsRoster = { monsters: null, equips: null, signature: '' };
 let privateRunsMayHaveData = false;
 let privateRunsSweptFor = ''; // the room whose neighbours' stored setups were last cleared
 let privateRunsTitles = {};
+let privateRunsSettledKey = ''; // room|floor|roster whose setups are written and on screen (isPrivateRunsPending)
+let privateRunsInFlight = 0; // passes currently waiting on the network
+let privateRunsInFlightKey = ''; // room|floor|roster the newest running pass is for
+let privateRunsWait = { key: '', since: 0 }; // when a caller first had to wait for the current key
 // privateRunsMayHaveData: labels or stored setups of ours may exist. Disconnected players (almost
 // everyone) pay one cleanup pass per page load, then nothing on later board updates.
 // privateRunsTitles: button captions shown instead of the game's fixed "Setup (<label>)" text.
@@ -3815,6 +3819,10 @@ function getMapSetupData(mapId) {
 
 const PRIVATE_RUNS_DEBOUNCE_MS = 250;
 const PRIVATE_RUNS_RETRY_MS = 30 * 1000;
+const PRIVATE_RUNS_SETTLE_MS = 150; // the game re-renders its buttons on the next tick after a storage event
+// Callers that pick a setup by label retry for about 2 s; stop making them wait before that, so a slow
+// network ends in their normal Auto-setup fallback instead of a "button not found" failure.
+const PRIVATE_RUNS_MAX_WAIT_MS = 1500;
 
 
 const PRIVATE_RUNS_STYLE_ID = 'better-setups-private-runs-style';
@@ -3922,6 +3930,14 @@ function buildPrivateRunsBoardConfig(setup) {
   return [...base, ...players];
 }
 
+function getPrivateRunsPosition() {
+  const board = globalThis.state.board.getSnapshot().context;
+  const roomId = board.selectedMap?.selectedRoom?.id;
+  if (!roomId) return null;
+  const floor = board.floor ?? 0;
+  return { roomId, floor, key: `${roomId}|${floor}|${getPrivateRunsRosterSignature()}` };
+}
+
 async function runPrivateRunsPass() {
   const runsSite = getPrivateRunsApi();
   if (!runsSite) {
@@ -3937,27 +3953,45 @@ async function runPrivateRunsPass() {
   }
   privateRunsMayHaveData = true;
   syncPrivateRunsLabels(true);
-  if (Date.now() < privateRunsRetryAt) return;
-
-  const board = globalThis.state.board.getSnapshot().context;
-  const roomId = board.selectedMap?.selectedRoom?.id;
-  const floor = board.floor ?? 0;
-  if (!roomId) return;
-  const key = `${roomId}|${floor}|${getPrivateRunsRosterSignature()}`;
+  const position = getPrivateRunsPosition();
+  if (!position) return;
+  const { roomId, floor, key } = position;
+  // Backing off after a failed lookup: callers must not wait for something that is not coming.
+  if (Date.now() < privateRunsRetryAt) {
+    privateRunsSettledKey = key;
+    return;
+  }
   // Up to date already (and no stored value was cleared since, e.g. by a trash button).
-  if (key === privateRunsLast.key && privateRunsLast.storageKeys.every((k) => window.localStorage.getItem(k) !== null)) return;
+  if (key === privateRunsLast.key && privateRunsLast.storageKeys.every((k) => window.localStorage.getItem(k) !== null)) {
+    privateRunsSettledKey = key;
+    return;
+  }
+
+  // The same board is already being looked up (boot fires several board/player changes in a row).
+  if (privateRunsInFlight > 0 && privateRunsInFlightKey === key) return;
 
   const seq = ++privateRunsSeq;
   let results;
+  privateRunsInFlight++;
+  privateRunsInFlightKey = key;
   try {
     results = await Promise.all(PRIVATE_RUNS_CATEGORIES.map((category) => runsSite.bestFor(roomId, category, floor)));
   } catch (error) {
     console.warn('[Better Setups] Private runs lookup failed:', error);
     privateRunsRetryAt = Date.now() + PRIVATE_RUNS_RETRY_MS;
+    privateRunsSettledKey = key;
+    return;
+  } finally {
+    privateRunsInFlight--;
+  }
+  // Superseded by a newer pass, or the player moved on while we waited (other room, or the same room on
+  // another floor: callers set the floor right after selecting the room): this result is for the wrong
+  // board, so drop it and run again for the one on screen.
+  if (seq !== privateRunsSeq) return;
+  if (getPrivateRunsPosition()?.key !== key) {
+    schedulePrivateRunsPass();
     return;
   }
-  // Superseded by a newer pass, or the player moved on while we waited: that pass owns the result.
-  if (seq !== privateRunsSeq || getCurrentMapId() !== roomId) return;
 
   // Ticks and floor can land on the very same run (a floor set whose only run is its floor run, or a
   // floor-0 run that also carries the best floor odds): offer it once, on Floor, whose caption says
@@ -3989,11 +4023,36 @@ async function runPrivateRunsPass() {
   }
   privateRunsLast = { key, storageKeys };
   applyPrivateRunsTitlesToDom(); // captions for the buttons that are already on screen
+  // Give the game its re-render before callers may look for the buttons.
+  await new Promise((resolve) => setTimeout(resolve, PRIVATE_RUNS_SETTLE_MS));
+  if (seq === privateRunsSeq) privateRunsSettledKey = key;
 }
+
+// For mods that pick a setup by label right after navigating (Raid Hunter, Better Boosted Maps, Better
+// Tasker): true while the private setups of the room and floor on screen are still being prepared, so
+// they keep retrying instead of finding a grey button and falling back to Auto-setup. Starts the work
+// now (no debounce) and gives up waiting after PRIVATE_RUNS_MAX_WAIT_MS.
+function isPrivateRunsPending(label) {
+  if (!PRIVATE_RUNS_LABEL_LIST.includes(label) || !getPrivateRunsApi()) return false;
+  const position = getPrivateRunsPosition();
+  if (!position || position.key === privateRunsSettledKey) return false;
+  if (privateRunsWait.key !== position.key) privateRunsWait = { key: position.key, since: Date.now() };
+  if (Date.now() - privateRunsWait.since > PRIVATE_RUNS_MAX_WAIT_MS) return false;
+  // Nothing running, or the running pass is for another floor/room than the one on screen.
+  if (privateRunsInFlight === 0 || privateRunsInFlightKey !== position.key) {
+    clearTimeout(privateRunsTimer);
+    privateRunsTimer = null;
+    runPrivateRunsPass().catch((error) => console.error('[Better Setups] Private runs pass failed:', error));
+  }
+  return true;
+}
+
+const betterSetupsApi = { isPrivateRunsPending };
 
 function schedulePrivateRunsPass(force = false) {
   if (force) {
     privateRunsLast = { key: '', storageKeys: [] };
+    privateRunsSettledKey = '';
     privateRunsRetryAt = 0;
   }
   clearTimeout(privateRunsTimer);
@@ -4059,6 +4118,7 @@ function startPrivateRuns() {
   privateRunsMayHaveData = true; // clears what an earlier session left behind if we are not connected now
   window.addEventListener('betterSetupsPrivateRunsChanged', onPrivateRunsConnectionChanged);
   document.addEventListener('click', privateRunsClickGuard, true);
+  window.BetterSetupsAPI = betterSetupsApi;
   if (!document.getElementById(PRIVATE_RUNS_STYLE_ID)) {
     const style = document.createElement('style');
     style.id = PRIVATE_RUNS_STYLE_ID;
@@ -4073,6 +4133,7 @@ function stopPrivateRuns() {
   privateRunsSubs = [];
   window.removeEventListener('betterSetupsPrivateRunsChanged', onPrivateRunsConnectionChanged);
   document.removeEventListener('click', privateRunsClickGuard, true);
+  if (window.BetterSetupsAPI === betterSetupsApi) delete window.BetterSetupsAPI;
   clearPrivateRunsTitles();
   document.getElementById(PRIVATE_RUNS_STYLE_ID)?.remove();
   clearTimeout(privateRunsTimer);
@@ -4082,6 +4143,7 @@ function stopPrivateRuns() {
   removePrivateRunsSetups([]);
   privateRunsMayHaveData = false;
   privateRunsSweptFor = '';
+  privateRunsSettledKey = '';
   privateRunsLast = { key: '', storageKeys: [] };
 }
 

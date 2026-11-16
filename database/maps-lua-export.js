@@ -42,11 +42,10 @@ Maintainer workflow
    getRoomStaminaCost below); they are NOT a genuine flat cost for the whole dungeon.
 7. `type` is "raid", "event", or false (regular map) — matches the wiki's own
    Raids/Events section split, same logic regions-lua-export.js already uses.
-   CAVEAT: a raid room only becomes "event" if it's NOT in maps-database.js's
-   EVENT_TO_ROOM_MAPPING (isDynamicEventMap). That table is manually maintained and
-   can drift behind newly added raids — a raid missing from it will be misclassified
-   as "event" here. Spot-check before publishing; add missing raids to
-   EVENT_TO_ROOM_MAPPING in maps-database.js rather than patching here.
+   NOTE: "event" comes from isDynamicEventMap in maps-database.js, which reads the game's own
+   room data (an event raid unlocks on a seasonal quest-log flag; a permanent raid on progress
+   only). The static EVENT_TO_ROOM_MAPPING list is only a fallback for rooms whose rule cannot be
+   read, so a new raid is classified correctly without editing it.
 8. `creatures` (linked-list field) and `expansion` (string|false) exist so a
    Module:MapsData.makeRegionTable-style Lua function (mirrors Module:CreatureData's
    makeTable) can build a region's Maps/Expansion/Raids/Events wikitables LIVE from

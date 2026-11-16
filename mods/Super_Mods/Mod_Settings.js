@@ -5614,6 +5614,15 @@ async function runsSitePickFor(roomCode, solutions, rule, floor) {
  * (Verbose level) says which of those it was.
  * `setup` is the autoSetupBoard piece list: [{ tileIndex, monsterId, equipId }].
  */
+// A pick is looked up on every room/floor/roster change and by the prefetch; log it only when it differs
+// from the last line for the same room and goal.
+const runsSiteLastLog = new Map();
+function runsSiteLogPick(tag, message) {
+  if (runsSiteLastLog.get(tag) === message) return;
+  runsSiteLastLog.set(tag, message);
+  console.log(tag, message);
+}
+
 async function runsSiteBestFor(roomCode, goal, currentFloor = 0) {
   const rule = RUNS_SITE_GOALS[goal];
   if (!rule) throw new Error(`Unknown goal: ${goal}`);
@@ -5638,14 +5647,14 @@ async function runsSiteBestFor(roomCode, goal, currentFloor = 0) {
     floors = Array.from({ length: Math.max(0, highest - Math.max(set.from, 1) + 1) }, (_, i) => highest - i);
   }
   if (!floors.length) {
-    console.log(tag, `no ${goal} setup applies to floors ${set.from}-${set.to === Infinity ? 'max' : set.to}`);
+    runsSiteLogPick(tag, `no ${goal} setup applies to floors ${set.from}-${set.to === Infinity ? 'max' : set.to}`);
     return null;
   }
   let last = null;
   for (const floor of floors) {
     const result = await runsSitePickFor(roomCode, solutions, rule, floor);
     if (!result.none) {
-      console.log(tag, `picked ${result.run.path} for floor ${floor} (${solutions.length} solutions in floors ${set.from}-${set.to === Infinity ? 'max' : set.to}, ${result.counts.suitable} suitable, ${result.counts.owned} covered by your roster)`);
+      runsSiteLogPick(tag, `picked ${result.run.path} for floor ${floor} (${solutions.length} solutions in floors ${set.from}-${set.to === Infinity ? 'max' : set.to}, ${result.counts.suitable} suitable, ${result.counts.owned} covered by your roster)`);
       return result;
     }
     last = result.none;
@@ -5653,7 +5662,7 @@ async function runsSiteBestFor(roomCode, goal, currentFloor = 0) {
   const why = !last || last.suitable === 0 ? 'no suitable run'
     : last.owned === 0 ? 'your roster lacks the monsters or items of every suitable run'
     : 'no covered run matched your exact levels, genes or item tiers';
-  console.log(tag, `none (${solutions.length} solutions, floors ${floors[0]}..${floors[floors.length - 1]}): ${why}`);
+  runsSiteLogPick(tag, `none (${solutions.length} solutions, floors ${floors[0]}..${floors[floors.length - 1]}): ${why}`);
   return null;
 }
 
@@ -5733,6 +5742,16 @@ const runsSiteApi = {
   suggest: runsSiteSuggest,
   bestFor: runsSiteBestFor,
   isReliable: runsSiteIsReliable,
+  // Warm the index and boards of the three automatic setups for a map about to be visited, so Better
+  // Setups has them ready on arrival. Fire and forget; resolves to nothing, never throws.
+  async prefetch(roomCode, floor = 0) {
+    try {
+      if (!runsSiteIsEnabled() || !roomCode) return;
+      await Promise.all(Object.keys(RUNS_SITE_GOALS).map((goal) => runsSiteBestFor(roomCode, goal, floor)));
+    } catch (error) {
+      console.warn('[Mod Settings] Private runs prefetch failed:', error);
+    }
+  },
   // Dry run: can the player field this run? -> { ok, missing, substituted }
   check: (roomCode, run) => runsSiteApplyRun({ roomCode, floor: run.floor, board: run.board, apply: false }),
   apply: (roomCode, run) => runsSiteApplyRun({ roomCode, floor: run.floor, board: run.board }),
@@ -21534,7 +21553,8 @@ function applyBestCompletedFloorForRoom(roomId, source = 'unknown') {
       mapFloorSyncTimeoutId = null;
       if (shouldSkipMaxFloorSync(source)) return;
       try {
-        globalThis.state.board.trigger.setState({ fn: (prev) => ({ ...prev, floor: targetFloor }) });
+        // Native setFloor also rebuilds the floor's enemy layout (boardConfig); setState({ floor }) only changes the number.
+        globalThis.state.board.send({ type: 'setFloor', floor: targetFloor });
         console.log(`[Mod Settings] Applied max floor ${targetFloor} for ${roomId} (${source})`);
       } catch (error) {
         console.error('[Mod Settings] Failed applying max floor:', error);

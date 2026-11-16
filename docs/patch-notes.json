@@ -4,6 +4,53 @@
   },
   "notes": [
     {
+      "version": "5.3.5",
+      "changes": [
+        {
+          "mod": "Better Boosted Maps",
+          "type": "fixed",
+          "text": "The floor it picks now loads that floor's enemies, not floor 0's. A setup deleted in Better Setups falls back to the default instead of a blank Setup Method."
+        },
+        {
+          "mod": "Better Highscores",
+          "type": "fixed",
+          "text": "The Tibia Ball League floor bar now loads the chosen floor's enemies, not floor 0's."
+        },
+        {
+          "mod": "Better Setups",
+          "type": "fixed",
+          "text": "Private (admins only): Raid Hunter, Better Boosted Maps and Better Tasker now prepare the map's private setup before navigating and wait for it on arrival instead of falling back to Auto-setup.",
+          "admin": true
+        },
+        {
+          "mod": "Better Tasker",
+          "type": "fixed",
+          "text": "The floor it picks now loads that floor's enemies, not floor 0's. A setup deleted in Better Setups falls back to the default instead of a blank Setup Method."
+        },
+        {
+          "mod": "Highscore Improvements",
+          "type": "changed",
+          "text": "Private (admins only): suggested runs show the creatures and items with game portraits and buttons, one compact row per run, the best first and the rest behind \"+N more\".",
+          "admin": true
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "fixed",
+          "text": "Always navigate max floor now loads that floor's enemies, not floor 0's."
+        },
+        {
+          "mod": "Raid Hunter",
+          "type": "fixed",
+          "text": "The floor it picks now loads that floor's enemies, not floor 0's. Event maps are only listed in the raid map settings while their event is running, and all maps of an event together. A setup deleted in Better Setups falls back to the default setup."
+        },
+        {
+          "mod": "Stamina Optimizer",
+          "type": "fixed",
+          "text": "The floor it picks now loads that floor's enemies, not floor 0's."
+        }
+      ]
+    },
+    {
       "version": "5.3.4",
       "changes": [
         {

@@ -1053,6 +1053,15 @@ function getAvailableSetupOptions() {
 }
 
 /**
+ * A saved setup label can be deleted in Better Setups afterwards. Returns the first candidate that still
+ * exists, else Auto-setup: a dropdown never shows a blank choice and a run never looks for a missing button.
+ */
+function resolveSetupOption(...candidates) {
+    const options = getAvailableSetupOptions();
+    return candidates.find((c) => c && options.includes(c)) || options[0];
+}
+
+/**
  * Check if a Better Setups button has a saved setup (green button = has setup, grey = no setup)
  * @param {HTMLElement} button - The button element to check
  * @returns {boolean} True if button has a saved setup
@@ -1077,6 +1086,10 @@ function findSetupButton(option) {
         return findButtonByText('Auto-setup');
     }
     
+    // Better Setups is still preparing this map's private setup (it starts on navigation): report "not
+    // there yet" so the retry loop waits, instead of finding a grey button and using Auto-setup.
+    if (window.BetterSetupsAPI?.isPrivateRunsPending?.(option)) return null;
+
     // Look for Better Setups buttons with patterns "Setup (LabelName)" or "Save (LabelName)"
     const buttons = Array.from(document.querySelectorAll('button'));
     const setupButton = buttons.find(button => {
@@ -2448,7 +2461,7 @@ function createBoostedMapContextMenu(mapId, mapName, x, y, onClose) {
         ? mapSetting.autoRefillStamina
         : !!settings.autoRefillStamina;
     const defaultSetup = settings.setupMethod || t('mods.betterBoostedMaps.autoSetup');
-    const currentSetupMethod = mapSetting.setupMethod || defaultSetup;
+    const currentSetupMethod = resolveSetupOption(mapSetting.setupMethod, defaultSetup);
     
     const overlay = document.createElement('div');
     overlay.style.position = 'fixed';
@@ -4196,7 +4209,7 @@ function createBoostedMapSettings(settings) {
         'boosted-maps-setupMethod',
         t('common.setupMethod'),
         '',
-        settings.setupMethod || t('mods.betterBoostedMaps.autoSetup'),
+        resolveSetupOption(settings.setupMethod),
         getAvailableSetupOptions()
     );
     settingsWrapper.appendChild(setupMethodDiv);
@@ -5327,6 +5340,12 @@ async function startBoostedMapFarming(force = false) {
         // Show toast notification
         showBoostedMapStartToast(!!farmCheck.isFallback);
         
+        // Warm the private setups of the target map during the start delay (admin feature; no-op otherwise).
+        try {
+            const prefetchFloor = bbmResolveAutomationForFarmCheck(farmCheck, farmingSettings)?.floor ?? 0;
+            window.BestiaryRunsSite?.prefetch?.(farmCheck.roomId, prefetchFloor);
+        } catch (error) { /* optional */ }
+
         // Close any open modals (3 ESC presses for consistency)
         console.log('[Better Boosted Maps] Clearing modals before navigation...');
         clearModalsWithEsc(3);
@@ -5369,7 +5388,7 @@ async function startBoostedMapFarming(force = false) {
             }
             const { floor } = navAutomation;
             console.log(`[Better Boosted Maps] Setting floor to ${floor} for map ${farmCheck.roomId}`);
-            globalThis.state.board.trigger.setState({ fn: (prev) => ({ ...prev, floor: floor }) });
+            globalThis.state.board.send({ type: 'setFloor', floor }); // native: also rebuilds the floor's enemy layout
             await sleep(100);
             
             console.log('[Better Boosted Maps] Navigation completed');
@@ -5388,7 +5407,9 @@ async function startBoostedMapFarming(force = false) {
             cancelBoostedMapFarming('No automation settings resolved after navigation');
             return;
         }
-        const { setupMethod, autoRefillStamina: effectiveAutoRefill } = setupAutomation;
+        const { autoRefillStamina: effectiveAutoRefill } = setupAutomation;
+        // A setup deleted in Better Setups since it was chosen falls back to the global one, then Auto-setup.
+        const setupMethod = resolveSetupOption(setupAutomation.setupMethod, loadSettings().setupMethod);
         
         // Find and click the appropriate setup button
         console.log(`[Better Boosted Maps] Looking for ${setupMethod} button...`);

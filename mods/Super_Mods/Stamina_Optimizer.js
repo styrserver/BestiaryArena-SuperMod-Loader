@@ -842,9 +842,7 @@ async function setFloor(floor) {
     try {
         console.log(`[Stamina Optimizer] Setting floor to: ${floor}`);
         
-        globalThis.state.board.trigger.setState({
-            fn: (prev) => ({ ...prev, floor: floor })
-        });
+        globalThis.state.board.send({ type: 'setFloor', floor }); // native: also rebuilds the floor's enemy layout
         
         await sleep(100);
         return true;

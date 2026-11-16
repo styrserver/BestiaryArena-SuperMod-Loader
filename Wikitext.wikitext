@@ -99,7 +99,7 @@ The extension requests only what it needs to run mods on Bestiary Arena. See [ht
 * '''bestiaryarena.com''' — run mods and talk to open game tabs (automatic mod delivery uses <code>contentScriptReady</code>, not tab queries)
 * '''bestiary-arena-ranking.vercel.app''' — Cyclopedia Rankings API
 * '''vip-list-messages-default-rtdb.europe-west1.firebasedatabase.app''' — optional Firebase-backed features (VIP List, Guilds, Quests, Challenges, Mod Settings best-runs sync)
-* '''api.github.com (private runs repository)''' — admin-only suggested runs in Highscore Improvements (off by default; a Firebase admin enters a repository and their own token)
+* '''api.github.com (private runs repository)''' — admin-only suggested runs and automatic setups in Highscore Improvements and Better Setups (off by default; a Firebase admin enters a repository and their own token)
 
 '''Optional (on demand):'''
 * '''gist.githubusercontent.com''' / '''raw.githubusercontent.com''' — prompted when you open the popup or import a remote Gist/GitHub mod
@@ -460,6 +460,8 @@ Advanced raid automation system for Bestiary Arena:
 * Auto-setup and autoplay integration for seamless raid execution
 * Stamina monitoring and auto-refill integration with Bestiary Automator
 * Real-time raid status monitoring with countdown timers and queue system for multiple raids
+* Event raid maps are listed in the settings only while their event is running (all maps of an event are listed together)
+* A chosen setup that was deleted in Better Setups falls back to the default setup
 * Comprehensive settings panel for customization and raid map selection
 
 ==== RunTracker ====

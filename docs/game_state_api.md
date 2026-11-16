@@ -924,6 +924,22 @@ export function rollForMonsterDrop(
 - `advantageRoll`'s exact semantics weren't in the paste; `-1` is assumed to mean "roll twice, keep
   the lower". Verify against the game's `RNG` source before relying on exact probabilities.
 
+### Changing the floor: use `setFloor`, not `setState`
+
+```javascript
+globalThis.state.board.send({ type: "setFloor", floor: 15 }); // right
+globalThis.state.board.trigger.setState({ fn: (prev) => ({ ...prev, floor: 15 }) }); // number only
+```
+
+`setFloor` is the action the game's own floor picker runs. For multi-floor rooms it also rebuilds `boardConfig`
+from that floor's file (`floorFiles[floor]`) and keeps your player pieces only when the new floor has the same
+`setupKey`. `setState({ floor })` changes just the number, so the board keeps the previous floor's enemies
+while everything else (Highscores, RunTracker, setups) believes it is on the new floor. `selectRoomById` resets
+the floor to 0 (or to the suggested floor) and rebuilds the board for it, so set the floor **after** the room is
+selected. `Mod_Settings.applyBestCompletedFloorForRoom`, Raid Hunter, Better Boosted Maps, Better Tasker, Stamina
+Optimizer and the Tibia Ball League floor bar all use `setFloor`. `content/custom-battles.js` still uses
+`setState`, on purpose: its rooms are not in the game's room list.
+
 ### Updating State: `send` vs. `trigger`
 
 This doc's own examples above use two different call shapes for the same kind of update:
@@ -1609,6 +1625,12 @@ Rooms and filters:
 - `getMapsByDifficulty(d)`, `getMapsByMaxTeamSize(n)`, `getMapsByStaminaCost(n)`
 - `getRaidMaps()`, `getNonRaidMaps()`, `isRaid(mapId)`, `isMapRaidComprehensive(mapId)`,
   `isDynamicEventMap(mapId)`, `getMapType(mapId)` → `'raid' | 'event' | false`
+- `getEventFlag(mapId)` → the seasonal quest-log flag an event raid unlocks on (`'halloween'`, `'xmas'`, `'wc'`, …),
+  `null` for a permanent raid, `undefined` while the game data is not ready. Read live from the room's own
+  `isUnlocked` source and cached. `isDynamicEventMap` uses it (the static `EVENT_TO_ROOM_MAPPING` is only the
+  fallback), so a new event or permanent raid needs no list edit.
+- `getEventRaidSetIds(mapId)` → the room ids released together with an event raid (same flag), including itself;
+  `[mapId]` for anything without a flag. Raid Hunter lists a whole set while any map of it is running.
 - `getDifficultyLabel(d)`
 
 Board monsters (see [game_state_api.md](game_state_api.md) for the floor rules):

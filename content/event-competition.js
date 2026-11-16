@@ -5685,9 +5685,8 @@ async function navigateTblToFloor(floor) {
       return;
     }
 
-    globalThis.state?.board?.trigger?.setState?.({
-      fn: (prev) => ({ ...prev, floor: targetFloor })
-    });
+    // Native setFloor also rebuilds the floor's enemy layout; setState({ floor }) only changes the number.
+    globalThis.state.board.send({ type: 'setFloor', floor: targetFloor });
 
     state.lastBarFloor = targetFloor;
     closeTblFloorLeagueModal();

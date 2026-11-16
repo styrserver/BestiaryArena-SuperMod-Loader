@@ -835,8 +835,9 @@ globalThis.state.board.send({
 // Getting current selected floor (ranges from 0-15)
 const currentFloor = globalThis.state.board.get().context.floor;
 
-// Setting current floor
-globalThis.state.board.trigger.setState({ fn: (prev) => ({ ...prev, floor: 10 }) });
+// Setting current floor: use setFloor (the game's own action, it also rebuilds that floor's enemy layout).
+// setState({ floor }) only changes the number and leaves the previous floor's enemies on the board.
+globalThis.state.board.send({ type: 'setFloor', floor: 10 });
 
 // Subscribe to game state changes
 const unsubscribe = globalThis.state.board.subscribe((state) => {

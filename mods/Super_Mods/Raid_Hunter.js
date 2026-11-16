@@ -166,20 +166,13 @@ function getRaidSetupMethod(raidName) {
     try {
         const settings = loadSettings();
         const raidSettings = settings.raidSettings || {};
-        const raidSetting = raidSettings[raidName];
-        if (raidSetting && raidSetting.setupMethod) {
-            // If "default" is set, use global setting
-            if (raidSetting.setupMethod === 'default') {
-                return settings.setupMethod || 'Auto-setup';
-            }
-            return raidSetting.setupMethod;
-        }
-        // Fall back to global setting
-        return settings.setupMethod || 'Auto-setup';
+        const own = raidSettings[raidName]?.setupMethod;
+        // "default" (or a per-raid setup that was deleted since) uses the global setting; a deleted global
+        // setup uses Auto-setup.
+        return resolveSetupOption(own !== 'default' ? own : null, settings.setupMethod);
     } catch (error) {
         console.error('[Raid Hunter] Error getting raid setup method:', error);
-        const settings = loadSettings();
-        return settings.setupMethod || 'Auto-setup';
+        return 'Auto-setup';
     }
 }
 
@@ -635,10 +628,30 @@ function skipInvalidRaidAndRetry(reason, allowInterrupt = false) {
     }
 }
 
-// Seasonal/event raids that are only shown in Raid map list when currently an active raid
-const HALLOWEEN_MANSION_RAID = 'Halloween Mansion';
-const JOLLY_AXEMAN_RAIDS = ['Jolly Axeman Tavern', 'Dog Raceway', "Ruprecht's Hut", 'White Wave Cellar'];
-const WORLD_CUP_RAIDS = ['Tibia Ball League', 'Three on Three'];
+// Event raids are only shown in the Raid map list while one is running. The game itself says which raid
+// rooms are events: an event unlocks on a seasonal quest-log flag (halloween, xmas, wc, ...), a permanent
+// raid on progress only (mapsDatabase.isDynamicEventMap / getEventRaidSetIds read that live). Events are
+// released as a set: while any map of a set is running, all of its maps are listed, so they can be set up
+// in advance.
+let roomIdByNameSource = null;
+let roomIdByName = null;
+function getRoomIdForRaidName(raidName) {
+    const names = globalThis.state?.utils?.ROOM_NAME;
+    if (!names) return null;
+    if (roomIdByNameSource !== names) { // built once per game-data object
+        roomIdByNameSource = names;
+        roomIdByName = new Map(Object.entries(names).map(([id, name]) => [name, id]));
+    }
+    return roomIdByName.get(raidName) || null;
+}
+
+function getRaidEventSetNames(raidName) {
+    const names = globalThis.state?.utils?.ROOM_NAME || {};
+    const roomId = getRoomIdForRaidName(raidName);
+    const ids = roomId ? globalThis.mapsDatabase?.getEventRaidSetIds?.(roomId) : null;
+    const setNames = (ids || []).map((id) => names[id]).filter(Boolean);
+    return setNames.length ? setNames : [raidName];
+}
 
 // Live accessors — always read from maps-database (do not snapshot at load time).
 function getEventToRoomMapping() {
@@ -649,8 +662,15 @@ function getStaticRaidEventNames() {
     return Object.keys(getEventToRoomMapping());
 }
 
+// Permanent raid = not an event. Live from the game's room data; the static list is only the fallback
+// for a name the game does not know (or before its data is ready).
 function isStaticRaidEventName(raidName) {
     if (!raidName) return false;
+    const roomId = getRoomIdForRaidName(raidName);
+    const db = globalThis.mapsDatabase;
+    if (roomId && db?.isRaid?.(roomId) && db.getEventFlag?.(roomId) !== undefined && typeof db.isDynamicEventMap === 'function') {
+        return !db.isDynamicEventMap(roomId);
+    }
     return Object.prototype.hasOwnProperty.call(getEventToRoomMapping(), raidName);
 }
 
@@ -1287,6 +1307,15 @@ function getAvailableSetupOptions() {
 }
 
 /**
+ * A saved setup label can be deleted in Better Setups afterwards. Returns the first candidate that still
+ * exists, else Auto-setup: a dropdown never shows a blank choice and a run never looks for a missing button.
+ */
+function resolveSetupOption(...candidates) {
+    const options = getAvailableSetupOptions();
+    return candidates.find((c) => c && options.includes(c)) || options[0];
+}
+
+/**
  * Check if a Better Setups button has a saved setup (green button = has setup, grey = no setup)
  * @param {HTMLElement} button - The button element to check
  * @returns {boolean} True if button has a saved setup
@@ -1313,6 +1342,10 @@ function findSetupButton(option) {
         return findButtonByText('Auto-setup');
     }
     
+    // Better Setups is still preparing this map's private setup (it starts on navigation): report "not
+    // there yet" so the retry loop waits, instead of finding a grey button and using Auto-setup.
+    if (window.BetterSetupsAPI?.isPrivateRunsPending?.(option)) return null;
+
     // Look for Better Setups buttons with patterns "Setup (LabelName)" or "Save (LabelName)"
     const buttons = Array.from(document.querySelectorAll('button'));
     const setupButton = buttons.find(button => {
@@ -4235,9 +4268,18 @@ async function handleEventOrRaid(roomId) {
 
     // Load settings once at the beginning (used throughout the function)
     const settings = loadSettings();
-    
+
     // Get raid name at function scope so it's accessible throughout the function
     const raidName = getEventNameForRoomId(roomId);
+
+    // Warm the private setups of the raid map during the start delay (admin feature; no-op otherwise).
+    try {
+        const floorSetting = (settings.raidFloors || {})[raidName];
+        const prefetchFloor = isAutoFloorMode(floorSetting)
+            ? (autoFloorState[raidName]?.currentFloor ?? 1)
+            : (Number(floorSetting) || 0);
+        window.BestiaryRunsSite?.prefetch?.(roomId, prefetchFloor);
+    } catch (error) { /* optional */ }
 
     try {
         // Fixed initial delay before navigation
@@ -4287,7 +4329,7 @@ async function handleEventOrRaid(roomId) {
                 console.log(`[Raid Hunter] Setting floor to ${floor} for ${raidName}`);
             }
             
-            globalThis.state.board.trigger.setState({ fn: (prev) => ({ ...prev, floor: floor }) });
+            globalThis.state.board.send({ type: 'setFloor', floor }); // native: also rebuilds the floor's enemy layout
             await sleep(100);
         }
         
@@ -5464,7 +5506,7 @@ function createAutoRaidSettings() {
         'setupMethod',
         t('common.setupMethod'),
         '',
-        loadSettings().setupMethod || t('mods.raidHunter.autoSetup'),
+        resolveSetupOption(loadSettings().setupMethod),
         getAvailableSetupOptions()
     );
     settingsWrapper.appendChild(setupMethodDiv);
@@ -5806,20 +5848,25 @@ function createRaidMapSelection() {
         console.error('[Raid Hunter] Error populating all raid maps:', error);
     }
 
-    // Hide seasonal raids when they are not currently active
+    // Hide every event raid that is not running now (the list above adds every raid room of the game,
+    // so finished events stayed listed forever). Running = in the game's raid list and not expired.
+    // Hiding only affects this list: autoSaveSettings keeps the saved state of hidden event raids.
     const raidStateForFilter = globalThis.state?.raids?.getSnapshot?.();
     const activeRaidList = raidStateForFilter?.context?.list || [];
-    const activeRaidNames = new Set(activeRaidList.map(r => getEventNameForRoomId(r.roomId)).filter(Boolean));
-    const isJollyAxemanActive = JOLLY_AXEMAN_RAIDS.some(name => activeRaidNames.has(name));
-    const isWorldCupActive = WORLD_CUP_RAIDS.some(name => activeRaidNames.has(name));
+    const now = Date.now();
+    const activeRaidNames = new Set(
+        activeRaidList
+            .filter(r => !(r?.expiresAt && r.expiresAt < now))
+            .map(r => getEventNameForRoomId(r.roomId))
+            .filter(Boolean)
+    );
+    const isRaidListed = (raidName) => {
+        if (isStaticRaidEventName(raidName)) return true; // permanent raids are always listed
+        return getRaidEventSetNames(raidName).some(name => activeRaidNames.has(name));
+    };
 
     Object.keys(raidGroups).forEach(region => {
-        raidGroups[region] = raidGroups[region].filter(raidName => {
-            if (raidName === HALLOWEEN_MANSION_RAID && !activeRaidNames.has(HALLOWEEN_MANSION_RAID)) return false;
-            if (JOLLY_AXEMAN_RAIDS.includes(raidName) && !isJollyAxemanActive) return false;
-            if (WORLD_CUP_RAIDS.includes(raidName) && !isWorldCupActive) return false;
-            return true;
-        });
+        raidGroups[region] = raidGroups[region].filter(isRaidListed);
     });
 
     // Create checkboxes for each raid group
@@ -6292,7 +6339,8 @@ function createRaidContextMenu(raidName, x, y, onClose) {
         setupSelect.appendChild(optionElement);
     });
     
-    setupSelect.value = currentSetupMethod;
+    // A per-raid setup that was deleted in Better Setups falls back to "default".
+    setupSelect.value = currentSetupMethod === 'default' || availableOptions.includes(currentSetupMethod) ? currentSetupMethod : 'default';
     setupContainer.appendChild(setupSelect);
     menu.appendChild(setupContainer);
     
@@ -6839,7 +6887,7 @@ function loadAndApplySettings() {
         if (settings.setupMethod !== undefined) {
             const setupMethodSelect = document.getElementById('setupMethod');
             if (setupMethodSelect) {
-                setupMethodSelect.value = settings.setupMethod;
+                setupMethodSelect.value = resolveSetupOption(settings.setupMethod);
                 // Note: auto-save listener is already added in createDropdownSetting function
             }
         }

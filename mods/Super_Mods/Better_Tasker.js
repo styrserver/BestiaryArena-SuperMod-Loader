@@ -715,7 +715,7 @@ function createCreatureContextMenu(creatureName, x, y, onClose) {
         optionElement.textContent = option;
         setupSelect.appendChild(optionElement);
     });
-    setupSelect.value = setupOptions.includes(existing.setupMethod) ? existing.setupMethod : (settings.setupMethod || setupOptions[0]);
+    setupSelect.value = resolveSetupOption(existing.setupMethod, settings.setupMethod);
 
     const rebuildMapOptions = () => {
         const selectedBefore = mapSelect.value;
@@ -2200,6 +2200,15 @@ function getAvailableSetupOptions() {
 }
 
 /**
+ * A saved setup label can be deleted in Better Setups afterwards. Returns the first candidate that still
+ * exists, else Auto-setup: a dropdown never shows a blank choice and a run never looks for a missing button.
+ */
+function resolveSetupOption(...candidates) {
+    const options = getAvailableSetupOptions();
+    return candidates.find((c) => c && options.includes(c)) || options[0];
+}
+
+/**
  * Check if a Better Setups button has a saved setup (green button = has setup, grey = no setup)
  * @param {HTMLElement} button - The button element to check
  * @returns {boolean} True if button has a saved setup
@@ -2224,6 +2233,10 @@ function findSetupButton(option) {
         return findButtonByText(t('mods.betterTasker.autoSetup'));
     }
     
+    // Better Setups is still preparing this map's private setup (it starts on navigation): report "not
+    // there yet" so the retry loop waits, instead of finding a grey button and using Auto-setup.
+    if (window.BetterSetupsAPI?.isPrivateRunsPending?.(option)) return null;
+
     // Look for Better Setups buttons with patterns "Setup (LabelName)" or "Save (LabelName)"
     const buttons = Array.from(document.querySelectorAll('button'));
     const setupButton = buttons.find(button => {
@@ -4740,7 +4753,7 @@ function createGeneralSettings() {
         'setupMethod',
         t('mods.betterTasker.setupMethod'),
         '',
-        loadSettings().setupMethod || t('mods.betterTasker.autoSetup'),
+        resolveSetupOption(loadSettings().setupMethod),
         getAvailableSetupOptions()
     );
     settingsWrapper.appendChild(setupMethodDiv);
@@ -5194,7 +5207,7 @@ function loadAndApplySettings() {
         if (settings.setupMethod !== undefined) {
             const setupMethodSelect = document.getElementById('setupMethod');
             if (setupMethodSelect) {
-                setupMethodSelect.value = settings.setupMethod;
+                setupMethodSelect.value = resolveSetupOption(settings.setupMethod);
                 // Add auto-save listener
                 setupMethodSelect.addEventListener('change', autoSaveSettings);
             }
@@ -5311,6 +5324,8 @@ function enableBestiaryAutomatorSettings(returnSuccess = false, settingsOverride
 
 // Handle quest log state - close quest log first, then navigate to suggested map
 async function handleQuestLogState(roomId, targetFloor = 0) {
+    // Warm the private setups of the target map while the quest log closes (admin feature; no-op otherwise).
+    window.BestiaryRunsSite?.prefetch?.(roomId, Math.max(0, Math.min(15, Number(targetFloor) || 0)));
     console.log('[Better Tasker] Closing quest log before navigation...');
     await closeQuestLogIfOpen();
     console.log('[Better Tasker] Quest log close step completed');
@@ -5336,7 +5351,7 @@ async function handleQuestLogState(roomId, targetFloor = 0) {
     // Set floor from override (default 0)
     const resolvedFloor = Math.max(0, Math.min(15, Number(targetFloor) || 0));
     console.log(`[Better Tasker] Setting floor to ${resolvedFloor}`);
-    globalThis.state.board.trigger.setState({ fn: (prev) => ({ ...prev, floor: resolvedFloor }) });
+    globalThis.state.board.send({ type: 'setFloor', floor: resolvedFloor }); // native: also rebuilds the floor's enemy layout
     await sleep(100);
     
     // Wait for map to load
@@ -5480,7 +5495,7 @@ function resolveBoostedMapsEquipmentRuleSettings(roomId) {
 }
 
 function resolveTaskerAutomationSettingsForRoom(roomId, baseSettings, baseFloor) {
-    const fallbackSetupMethod = baseSettings?.setupMethod || 'Auto-setup';
+    const fallbackSetupMethod = resolveSetupOption(baseSettings?.setupMethod);
     const fallbackAutoRefill = baseSettings?.autoRefillStamina !== undefined
         ? !!baseSettings.autoRefillStamina
         : false;
@@ -5537,7 +5552,7 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
         const settings = loadSettings();
         const activeCreatureName = preferredCreatureName || getActiveTaskCreatureNameFromGameState() || extractCreatureFromTask();
         const creatureOverride = getCreatureOverrides(activeCreatureName);
-        const resolvedSetupMethod = creatureOverride?.setupMethod || settings.setupMethod || 'Auto-setup';
+        const resolvedSetupMethod = resolveSetupOption(creatureOverride?.setupMethod, settings.setupMethod);
         const resolvedFloor = creatureOverride?.floor != null ? creatureOverride.floor : getDefaultTaskerFloor(settings);
         const resolvedAutoRefillStamina = creatureOverride?.autoRefillStamina !== undefined
             ? !!creatureOverride.autoRefillStamina
@@ -5593,7 +5608,7 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                 taskingMapId = roomId;
                 
                 // Continue with setup...
-                const setupMethod = roomAutomation.setupMethod || runtimeSettings.setupMethod || 'Auto-setup';
+                const setupMethod = resolveSetupOption(roomAutomation.setupMethod, runtimeSettings.setupMethod);
                 
                 // Find and click the appropriate setup button
                 console.log(`[Better Tasker] Looking for ${setupMethod} button...`);
@@ -5776,7 +5791,7 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                 taskingMapId = roomId;
                 
                 // Get user's selected setup method
-                const setupMethod = roomAutomation.setupMethod || runtimeSettings.setupMethod || 'Auto-setup';
+                const setupMethod = resolveSetupOption(roomAutomation.setupMethod, runtimeSettings.setupMethod);
                 
                 // Find and click the appropriate setup button
                 console.log(`[Better Tasker] Looking for ${setupMethod} button...`);

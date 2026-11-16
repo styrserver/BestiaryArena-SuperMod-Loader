@@ -8,7 +8,7 @@ not in Firebase `config/admins` sees none of it (no section, no buttons, no labe
 |---|---|---|
 | Data layer + settings UI | `mods/Super_Mods/Mod_Settings.js` (section 4.4, `initRunsSiteSettings`) | Reads the repository, picks runs, exposes `window.BestiaryRunsSite` |
 | Fetch | `background.js` (`fetchRunsRepoFile`), `content/client.js` (`util.fetchRunsRepoFile`) | One file from the repo through the GitHub contents API |
-| Highscore list | `mods/Official_Mods/Highscore_Improvements.js` (section 11b) | Faster runs than yours per map, with **Apply** and **Copy run** |
+| Highscore list | `mods/Official_Mods/Highscore_Improvements.js` (section 11b) | Faster runs than yours per map: one compact row per run (game creature and item portraits from `BestiaryUIComponents`, game-styled **Apply** / **Copy run** buttons), the best first and the rest behind "+N more" |
 | Automatic setups | `mods/Super_Mods/Better_Setups.js` (section 9b) | Three native saved setups per map: Private ticks / rank / floor |
 | Admin patch notes | `popup/popup.js`, `content/injector.js`, `docs/patch-notes.json` | Lines with `"admin": true` are hidden from non-admins |
 
@@ -78,13 +78,24 @@ Raid Hunter, Better Boosted Maps and Better Tasker (which pick a setup by label 
   `Setup (<label>)` text with a CSS `::after` from a `data-private-runs-title` attribute. The original text stays in
   the DOM (mods match on it; React owns it). Localised in `mods.betterSetups.privateRuns.*`.
 - Disconnecting (or disabling Better Setups) removes the labels and every stored setup.
+- **Waiting after navigation.** The setups of a room are only written once the repository lookup finishes (a few hundred
+  ms), but Raid Hunter, Better Boosted Maps and Better Tasker look for the `Setup (Private …)` button right after they
+  navigate, and used to find it grey and fall back to Auto-setup. Better Setups therefore exposes
+  `window.BetterSetupsAPI.isPrivateRunsPending(label)`: true while the setups of the room, floor and roster on screen are
+  still being prepared (it also starts the work immediately, without the debounce) and for 150 ms after they are
+  written (the game re-renders its buttons on the next tick). The three consumers call it first in `findSetupButton` and
+  return null while it is true, so their existing retry loop waits. Waiting is capped at 1.5 s, inside their 2 s retry
+  budget (5 attempts x 500 ms), so a slow network ends in the normal Auto-setup fallback and never in a "button not
+  found" failure.
 
 ## `window.BestiaryRunsSite`
 
 `isEnabled()` (admin + toggle + repo + token), `isAdmin()`, `suggest(roomCode, yours)` (Highscore list),
 `bestFor(roomCode, goal, floor)` (automatic setups; resolves to `{ run, floor, winrate, setup, substituted }` or null),
 `check(roomCode, run)` / `apply(roomCode, run)` (dry run / apply), `buildSnippet(roomCode, run)` (self-contained
-console snippet), `isReliable(run)`, `test()`, `reset()`.
+console snippet), `isReliable(run)`, `prefetch(roomCode, floor)` (warms the index and boards for a map about to be
+visited; Better Tasker, Better Boosted Maps and Raid Hunter call it before navigating, so the setups are ready on
+arrival and the 1.5 s wait rarely matters), `test()`, `reset()`.
 
 ## Admin patch notes
 

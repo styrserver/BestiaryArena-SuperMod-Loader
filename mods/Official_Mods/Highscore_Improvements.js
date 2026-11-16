@@ -1282,13 +1282,12 @@ function notifyRunsSite(key, type, duration, items = '') {
   api.ui.notify?.({ message: t(`mods.highscore.${key}`).replace('{items}', items), type, duration });
 }
 
-function runsSiteSummaryText(run, category) {
-  const parts = [`${run.ticks} ticks`];
-  if (category === 'rank' && run.rankPoints != null) parts.unshift(`S+${run.rankPoints}`);
-  if (category === 'floor') parts.unshift(`${100 + 20 * run.floor}%`);
-  parts.push(t('mods.highscore.runsSiteWinrate').replace('{rate}', formatRunsSiteChance(run.winrate)));
-  parts.push(t('mods.highscore.runsSiteTickChance').replace('{rate}', formatRunsSiteChance(run.tickChance)));
-  if (run.credit) parts.push(run.credit);
+// Prefix chip of a run's headline: rank points or floor percentage where they matter.
+function runsSiteHeadline(run, category) {
+  const parts = [];
+  if (category === 'rank' && run.rankPoints != null) parts.push(`S+${run.rankPoints}`);
+  if (category === 'floor') parts.push(`${100 + 20 * run.floor}%`);
+  parts.push(`${run.ticks} ticks`);
   return parts.join(' · ');
 }
 
@@ -1308,14 +1307,68 @@ function createRunsSiteText(text, color, extraStyle = '') {
   return el;
 }
 
-function createRunsSiteButton(label, onClick, disabled = false) {
+// The game's own button look (as in Cyclopedia): framed, pressed on click; green for the main action.
+function createRunsSiteButton(label, onClick, { disabled = false, green = false, title = '' } = {}) {
   const button = document.createElement('button');
-  button.className = 'focus-style-visible active:opacity-70 pixel-font-14';
-  button.style.cssText = `padding:2px 8px;${disabled ? 'opacity:0.5;cursor:not-allowed;' : ''}`;
+  button.type = 'button';
+  button.className = `focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular frame-1 active:frame-pressed-1 ${green ? 'surface-green' : 'surface-regular'} gap-1 px-2 py-0.5 pb-[3px] pixel-font-14`;
+  button.style.cssText = `white-space:nowrap;${disabled ? 'opacity:0.5;cursor:not-allowed;' : 'cursor:pointer;'}`;
   button.textContent = label;
   button.disabled = disabled;
+  if (title) button.title = title;
   button.addEventListener('click', onClick);
   return button;
+}
+
+const RUNS_SITE_PORTRAIT_SIZE = 34;
+
+function toRunsSiteSlot(root, selector) {
+  const slot = root?.matches?.(selector) ? root : root?.querySelector?.(selector);
+  if (!slot) return null;
+  slot.remove?.();
+  slot.style.width = `${RUNS_SITE_PORTRAIT_SIZE}px`;
+  slot.style.height = `${RUNS_SITE_PORTRAIT_SIZE}px`;
+  slot.style.maxWidth = slot.style.maxHeight = `${RUNS_SITE_PORTRAIT_SIZE}px`;
+  slot.classList.add('shrink-0');
+  return slot;
+}
+
+// One board piece as the game draws it: creature portrait (rarity from its genes) next to its item
+// (stat icon and tier colour). Names the game cannot resolve fall back to text in the tooltip only.
+function createRunsSiteBoardPiece(piece) {
+  const components = window.BestiaryUIComponents;
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'display:flex;gap:2px;align-items:center;';
+  const monsterId = window.monsterNamesToGameIds?.get(String(piece.monster.name).toLowerCase());
+  const genes = ['hp', 'ad', 'ap', 'armor', 'magicResist'].reduce((sum, g) => sum + (piece.monster[g] || 0), 0);
+  const tier = genes >= 80 ? 5 : genes >= 70 ? 4 : genes >= 60 ? 3 : genes >= 50 ? 2 : 1;
+  try {
+    if (monsterId && components?.createMonsterPortrait) {
+      const root = components.createMonsterPortrait({ monsterId, level: piece.monster.level ?? 50, tier });
+      const slot = toRunsSiteSlot(root, '.container-slot');
+      if (slot) {
+        slot.style.display = 'flex';
+        slot.style.alignItems = 'center';
+        slot.style.justifyContent = 'center';
+        slot.style.overflow = 'hidden';
+        slot.querySelector('img[alt="creature"]')?.setAttribute('width', RUNS_SITE_PORTRAIT_SIZE);
+        wrap.append(slot);
+      }
+    }
+    const equipId = piece.equipment && window.equipmentNamesToGameIds?.get(String(piece.equipment.name).toLowerCase());
+    const spriteId = equipId && globalThis.state?.utils?.getEquipment?.(equipId)?.metadata?.spriteId;
+    if (spriteId && components?.createItemPortrait) {
+      const root = components.createItemPortrait({ itemId: spriteId, stat: piece.equipment.stat, tier: piece.equipment.tier });
+      const slot = toRunsSiteSlot(root, '.equipment-portrait');
+      if (slot) wrap.append(slot);
+    }
+  } catch (error) {
+    console.warn('[Highscores] Run portrait failed:', error);
+  }
+  const gear = piece.equipment ? ` + ${piece.equipment.name} (${piece.equipment.stat} T${piece.equipment.tier})` : '';
+  wrap.title = `${piece.monster.name}${piece.monster.awakened ? ' ★' : ''} L${piece.monster.level ?? 50}${gear} @${piece.tile}`;
+  if (!wrap.children.length) wrap.append(createRunsSiteText(wrap.title, '#aaa'));
+  return wrap;
 }
 
 function applyRunsSiteRun(runsSite, code, run) {
@@ -1337,26 +1390,64 @@ async function copyRunsSiteRun(runsSite, code, run) {
 
 function createRunsSiteRunRow(runsSite, code, category, run) {
   const check = runsSite.check(code, run);
+  const reliable = runsSite.isReliable(run);
+  const substituted = check.ok ? [...new Set(check.substituted)] : [];
+  const problem = !check.ok
+    ? t('mods.highscore.runsSiteMissing').replace('{items}', check.missing.join(', '))
+    : substituted.length ? t('mods.highscore.runsSiteSubstituted').replace('{items}', substituted.join(', ')) : '';
+
+  const pieces = document.createElement('div');
+  pieces.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px;flex:1 1 auto;min-width:0;';
+  pieces.append(...run.board.map(createRunsSiteBoardPiece));
+
+  const winrate = t('mods.highscore.runsSiteWinrate').replace('{rate}', formatRunsSiteChance(run.winrate));
+  const tickChance = t('mods.highscore.runsSiteTickChance').replace('{rate}', formatRunsSiteChance(run.tickChance));
+  const headline = createRunsSiteText(runsSiteHeadline(run, category), '#fff', 'white-space:nowrap;');
+  const rate = createRunsSiteText(winrate, reliable ? '#8f8' : '#fc6', 'white-space:nowrap;');
+  const topLine = document.createElement('div');
+  topLine.style.cssText = 'display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;';
+  topLine.append(headline, rate);
+  const detail = [tickChance, run.credit].filter(Boolean).join(' · ');
+  const stats = document.createElement('div');
+  stats.style.cssText = 'display:grid;gap:1px;flex:0 0 auto;';
+  stats.title = runsSiteBoardText(run);
+  stats.append(topLine, createRunsSiteText(detail, '#aaa', 'white-space:nowrap;'));
+  if (problem) stats.append(createRunsSiteText(problem, check.ok ? '#fc6' : '#f88', 'white-space:nowrap;'));
+
   const actions = document.createElement('div');
-  actions.className = 'flex items-center gap-2';
+  actions.style.cssText = 'display:grid;gap:3px;flex:0 0 auto;';
   actions.append(
-    createRunsSiteButton(t('mods.highscore.runsSiteApply'), () => applyRunsSiteRun(runsSite, code, run), !check.ok),
+    createRunsSiteButton(t('mods.highscore.runsSiteApply'), () => applyRunsSiteRun(runsSite, code, run), { disabled: !check.ok, green: true, title: problem }),
     createRunsSiteButton(t('mods.highscore.runsSiteCopy'), () => copyRunsSiteRun(runsSite, code, run))
   );
 
   const row = document.createElement('div');
-  row.style.cssText = 'display:grid;gap:2px;padding:4px;border-top:1px solid rgba(255,255,255,0.1);';
-  row.append(
-    createRunsSiteText(runsSiteSummaryText(run, category), runsSite.isReliable(run) ? '#8f8' : '#fc6'),
-    createRunsSiteText(runsSiteBoardText(run), '#aaa', 'word-break:break-word;'),
-    actions
-  );
-  if (!check.ok) {
-    row.append(createRunsSiteText(t('mods.highscore.runsSiteMissing').replace('{items}', check.missing.join(', ')), '#f88'));
-  } else if (check.substituted.length) {
-    row.append(createRunsSiteText(t('mods.highscore.runsSiteSubstituted').replace('{items}', [...new Set(check.substituted)].join(', ')), '#fc6'));
-  }
+  row.className = 'frame-pressed-1 surface-dark';
+  row.style.cssText = 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:4px;';
+  row.append(pieces, stats, actions);
   return row;
+}
+
+// The best run is shown; the others sit behind a "+N more" toggle so a map row stays compact.
+function renderRunsSiteRuns(runsSite, code, category, runs, box) {
+  const rows = runs.map((run) => createRunsSiteRunRow(runsSite, code, category, run));
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'display:grid;gap:3px;';
+  wrap.append(rows[0]);
+  if (rows.length > 1) {
+    const extra = document.createElement('div');
+    extra.style.cssText = 'display:none;gap:3px;grid-template-columns:1fr;';
+    extra.append(...rows.slice(1));
+    const moreLabel = t('mods.highscore.runsSiteMore').replace('{count}', rows.length - 1);
+    const toggle = createRunsSiteButton(moreLabel, () => {
+      const open = extra.style.display === 'none';
+      extra.style.display = open ? 'grid' : 'none';
+      toggle.textContent = open ? t('mods.highscore.runsSiteLess') : moreLabel;
+    });
+    toggle.style.cssText += 'justify-self:start;';
+    wrap.append(toggle, extra);
+  }
+  box.append(wrap);
 }
 
 async function loadRunsSiteSuggestions(runsSite, box, button, code, category) {
@@ -1370,7 +1461,7 @@ async function loadRunsSiteSuggestions(runsSite, box, button, code, category) {
     } else if (suggestions[category].length === 0) {
       box.textContent = t('mods.highscore.runsSiteNone');
     } else {
-      box.append(...suggestions[category].map((run) => createRunsSiteRunRow(runsSite, code, category, run)));
+      renderRunsSiteRuns(runsSite, code, category, suggestions[category], box);
     }
     button.remove();
   } catch (error) {
