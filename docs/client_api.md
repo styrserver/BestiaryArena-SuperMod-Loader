@@ -183,8 +183,6 @@ api.util.getGameVersion();   // '3' (string, or null until game state is ready)
 const text = await api.util.fetchRunsRepoFile('owner/name', 'solution-index.json', token);
 ```
 
-See [`private_runs.md`](private_runs.md) for the feature built on it.
-
 ## Hook API
 
 The Hook API allows intercepting and modifying game methods:

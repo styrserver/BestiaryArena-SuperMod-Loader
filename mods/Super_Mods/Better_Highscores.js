@@ -765,9 +765,8 @@
     CONTAINER_DEBOUNCE_AUTOPLAY: 50,
     UPDATE_THROTTLE: 100,
     POST_BATTLE_FRESH_WINDOW: 8000,
-    // fetchTrophyRoomData's 2s cooldown runs from when a request settles, so this must exceed
-    // BATTLE_REFRESH + request time + 2000 or the retry just gets the first refresh's result
-    HIGHSCORE_RETRY: 3500
+    // Post-battle forced refreshes (ms after battle end); stop early once records change
+    HIGHSCORE_RETRIES: [500, 2500, 6000, 12000]
   };
   
   const UI_CONFIG = {
@@ -1498,9 +1497,9 @@
   // Public (no login) per-room #1 records for tick, rank and floor in one request.
   // Shape: { highscores: { tick, rank, floor }, leaderboards: { tick, rank, floor } }
   // Always fresh; the shared API helper collapses calls within its 2s cooldown into one request.
-  async function fetchTrophyRoomData() {
+  async function fetchTrophyRoomData(force = false) {
     console.log('[Better Highscores] 🌐 API REQUEST: game.getFullTrophyRoomData');
-    return window.BestiaryModAPI.util.fetchTrophyRoomData();
+    return window.BestiaryModAPI.util.fetchTrophyRoomData(force ? { force: true } : undefined);
   }
 
   // Function to get current map code using proper game state API
@@ -1558,12 +1557,16 @@
     }
   }
 
+  // Signature of the last records fetched (per map), used to stop post-battle retries once the
+  // server data changes.
+  let lastFetchedSignature = null;
+
   // Function to fetch leaderboard data (always fresh — no per-map cache)
-  async function fetchLeaderboardData(mapCode) {
+  async function fetchLeaderboardData(mapCode, force = false) {
     try {
       console.log('[Better Highscores] Fetching leaderboard data for map:', mapCode);
-      
-      const trophyData = await fetchTrophyRoomData();
+
+      const trophyData = await fetchTrophyRoomData(force);
       const highscores = trophyData?.highscores || {};
       
       console.log('[Better Highscores] Leaderboard response:', highscores);
@@ -1576,6 +1579,7 @@
       console.log('[Better Highscores] Extracted rank data for map', mapCode, ':', rankData);
       console.log('[Better Highscores] Extracted floor data for map', mapCode, ':', floorData);
       
+      lastFetchedSignature = { mapCode, sig: JSON.stringify([tickData, rankData, floorData]) };
       return {
         tickData,
         rankData,
@@ -1632,15 +1636,20 @@
     }
   }
   
-  async function refreshLeaderboardForMap(mapCode) {
+  async function refreshLeaderboardForMap(mapCode, force = false) {
     if (modDisposed || isBetterHighscoresHidden() || isLeaderboardSuppressed() || !mapCode || isBoardAnalyzing()) {
       return false;
     }
 
-    try {
-      const { tickData, rankData, floorData } = await fetchLeaderboardData(mapCode);
+    // Delayed retries outlive navigation: never draw a map the player has left.
+    if (getCurrentMapCode() !== mapCode) {
+      return false;
+    }
 
-      if (modDisposed) {
+    try {
+      const { tickData, rankData, floorData } = await fetchLeaderboardData(mapCode, force);
+
+      if (modDisposed || getCurrentMapCode() !== mapCode) {
         return false;
       }
 
@@ -1670,6 +1679,8 @@
     }
   }
 
+  let refreshGeneration = 0;
+
   function scheduleLeaderboardRefresh(mapCode, reason = 'refresh') {
     if (!mapCode || isBetterHighscoresHidden() || isLeaderboardSuppressed()) {
       return;
@@ -1678,13 +1689,19 @@
     console.log(`[Better Highscores] Scheduling leaderboard refresh (${reason}) for map: ${mapCode}`);
     BetterHighscoresState.lastBattleCompletionAt = Date.now();
 
-    scheduleTimeout(() => {
-      refreshLeaderboardForMap(mapCode);
-    }, DELAYS.BATTLE_REFRESH);
-
-    scheduleTimeout(() => {
-      refreshLeaderboardForMap(mapCode);
-    }, DELAYS.HIGHSCORE_RETRY);
+    // The server may take several seconds to save a new record: force-fetch on a backoff and
+    // stop as soon as the fetched records differ from what was known when the battle ended.
+    const baseline = lastFetchedSignature?.mapCode === mapCode ? lastFetchedSignature.sig : null;
+    let generation = ++refreshGeneration;
+    DELAYS.HIGHSCORE_RETRIES.forEach((delay) => {
+      scheduleTimeout(async () => {
+        if (generation !== refreshGeneration || getCurrentMapCode() !== mapCode) return;
+        await refreshLeaderboardForMap(mapCode, true);
+        if (baseline !== null && lastFetchedSignature?.mapCode === mapCode && lastFetchedSignature.sig !== baseline) {
+          generation = -1; // changed: cancel remaining retries
+        }
+      }, delay);
+    });
   }
 
   function handlePlayerScoreUpdate() {
@@ -1976,6 +1993,10 @@
             BetterHighscoresState.wasInSandboxMode = true;
           }
           
+          // Score/battle-end handlers were skipped while analysis ran: re-check for a new
+          // personal best now (refreshes world records only if one was actually set).
+          scheduleTimeout(() => handlePlayerScoreUpdate(), DELAYS.UPDATE);
+
           // Restore container if we have one preserved
           if (BetterHighscoresState.preservedContainer) {
             console.log('[Better Highscores] Board analysis completed, restoring preserved container');
@@ -3364,7 +3385,16 @@
           BetterHighscoresState.subscriptions.push(playerUnsubscribe);
           resetTrackedUserScores(getCurrentMapCode());
         }
-        
+
+        // isBoardAnalyzing() only notices the end of an analysis when something calls it, and
+        // nothing may for a while after the last run. Listen so the post-analysis score re-check
+        // (and record refresh) fires right away.
+        if (window.ModCoordination?.on) {
+          BetterHighscoresState.subscriptions.push(
+            window.ModCoordination.on('modActiveChanged', () => { isBoardAnalyzing(); })
+          );
+        }
+
         ensureOverlayPositionListener();
 
         console.log('[Better Highscores] Initialization complete');

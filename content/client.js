@@ -1463,9 +1463,13 @@ if (typeof browserAPI === 'undefined') {
         return response.text;
       },
 
-      fetchTrophyRoomData: function() {
+      // opts.force: skip the cooldown (still joins an in-flight request) and reject on failure
+      // instead of serving last-good data, so callers waiting for a new record never mistake
+      // stale data for fresh.
+      fetchTrophyRoomData: function(opts) {
+        const force = opts?.force === true;
         const now = Date.now();
-        if (trophyRoomRequest && (trophyRoomRequestAt === 0 || now - trophyRoomRequestAt < TROPHY_ROOM_COOLDOWN_MS)) {
+        if (trophyRoomRequest && (trophyRoomRequestAt === 0 || (!force && now - trophyRoomRequestAt < TROPHY_ROOM_COOLDOWN_MS))) {
           return trophyRoomRequest; // in flight (At === 0) or settled within the cooldown
         }
         trophyRoomRequestAt = 0;
@@ -1475,7 +1479,7 @@ if (typeof browserAPI === 'undefined') {
           return data;
         }, (error) => {
           trophyRoomRequestAt = Date.now();
-          if (!trophyRoomLastGood) throw error;
+          if (force || !trophyRoomLastGood) throw error;
           console.warn('[BestiaryModAPI] fetchTrophyRoomData failed, serving last good data:', error.message);
           return trophyRoomLastGood;
         });

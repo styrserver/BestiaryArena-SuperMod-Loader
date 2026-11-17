@@ -5350,7 +5350,16 @@ const RUNS_REPO_INDEX_PATH = 'solution-index.json';
 const RUNS_REPO_INDEX_TTL_MS = 10 * 60 * 1000;
 const RUNS_REPO_ADMIN_RECHECK_MS = 30 * 1000;
 const RUNS_SITE_MAX_PER_CATEGORY = 3; // runs listed per category in Highscore Improvements
-const RUNS_SITE_BEST_MAX_TRIES = 8; // candidates whose boards are checked per automatic pick
+const RUNS_SITE_BEST_MAX_TRIES = 8; // credited candidates whose boards are checked per automatic pick
+const RUNS_SITE_MAX_LOADS = 24; // board files downloaded per pick or goal while looking for credited runs
+
+// TEMP while testing private runs (admin-only feature): print its debug lines whatever the Log Level is,
+// through the real console. Set to false (or delete) before release.
+const RUNS_SITE_DEBUG = false;
+function runsSiteDebug(...args) {
+  if (!RUNS_SITE_DEBUG) return;
+  (globalThis.BestiaryLogger?.native?.log || console.log).call(globalThis.BestiaryLogger?.native || console, '[Private runs]', ...args);
+}
 
 let runsSiteAdmin = false;
 let runsSiteAdminKnown = false; // Firebase answered; a definite answer is never asked for again
@@ -5441,7 +5450,84 @@ function runsSiteMapFor(index, roomCode) {
     if (!region) return null;
     solutions = solutions.filter((s) => s.region === region);
   }
-  return { solutions, floorSets };
+  return { solutions: solutions.concat(runsSiteOwnSolutions(name)), floorSets };
+}
+
+// The player's own RunTracker runs of this map, as candidates beside the repository's: the player may
+// already hold the best run. Same summary shape as an index entry; the board is built here and kept in
+// runsSiteOwnBoards (path "own:..."). A run is credited to the player by definition, so the credits
+// check never skips it. It has one observed win, so its odds read 100%: the repository's simulated odds
+// are the more honest number, which is why own runs have no tick chance and are never marked reliable.
+const runsSiteOwnBoards = new Map();
+const RUNS_SITE_NO_TICKS = 999999; // a stored run without a tick count sorts last
+const RUNS_SITE_KEEP_CASE = new Map([['thalas', 'Thalas'], ['the pale count', 'The Pale Count']]);
+
+function runsSiteMyName() {
+  return String(globalThis.state?.player?.getSnapshot?.().context?.name || '').trim();
+}
+
+// RunTracker setup pieces -> { board, combos } in the repository's board shape, or null when a piece
+// lacks what applying needs. RunTracker does not store awakened; like its replays, level > 50 means it.
+function runsSiteOwnBoardOf(pieces) {
+  const board = [];
+  const combos = [];
+  for (const piece of pieces) {
+    const stats = piece.monsterStats;
+    if (!piece.monsterName || !stats || !Number.isFinite(piece.tile)) return null;
+    const monster = String(piece.monsterName).toLowerCase();
+    const level = piece.level || 50;
+    const stat = piece.equipmentStat || 'ap';
+    const equipment = piece.equipmentName ? { name: String(piece.equipmentName).toLowerCase(), stat, tier: piece.equipmentTier || 5 } : undefined;
+    board.push({
+      tile: piece.tile,
+      monster: { name: RUNS_SITE_KEEP_CASE.get(monster) || monster, awakened: level > 50, level, hp: stats.hp, ad: stats.ad, ap: stats.ap, armor: stats.armor, magicResist: stats.magicResist },
+      equipment
+    });
+    combos.push([monster, equipment?.name || null, stat]);
+  }
+  return { board, combos };
+}
+
+function runsSiteOwnSolutions(roomName) {
+  const stored = window.RunTrackerAPI?.getRuns?.(`map_${roomName.toLowerCase().replace(/\s+/g, '_')}`);
+  const me = runsSiteMyName();
+  if (!stored || !me) return [];
+  // Only this season's runs (the world record they are compared with is this season's), and only runs
+  // made by this player: RunTracker can import other players' runs, which must keep their credits.
+  const season = window.BestiaryModAPI?.util?.getCurrentSeason?.();
+  const isMine = (run) => {
+    const by = String(run.credits || run.player || '').trim();
+    return !by || /^you$/i.test(by) || runsSiteIsCredited(by);
+  };
+  const merged = new Map();
+  for (const category of ['speedrun', 'rank', 'floor']) {
+    for (const run of stored[category] || []) {
+      if (!run?.setup?.pieces?.length || !isMine(run) || (season && (run.season ?? 1) !== season)) continue;
+      const own = runsSiteOwnBoardOf(run.setup.pieces);
+      if (!own) continue;
+      const floor = Number(run.floor) || 0;
+      // Above floor 0 only floorTicks is comparable: `time` (the reward screen's gameTicks) is the whole
+      // battle, not the ticks the floor record and the repository count.
+      const time = Number(floor > 0 ? run.floorTicks : run.time);
+      const ticks = time > 0 ? time : RUNS_SITE_NO_TICKS;
+      const points = floor === 0 && run.points > 0 ? run.points : 0;
+      const key = `${floor}:${JSON.stringify(own.board)}`;
+      const known = merged.get(key);
+      if (known) {
+        // The same setup in several categories: it achieved the best of each.
+        known.minTicks = Math.min(known.minTicks, ticks);
+        known.rankPoints = Math.max(known.rankPoints, points);
+        known.rankCount = known.rankPoints > 0 ? 1 : 0;
+        continue;
+      }
+      let hash = 5381;
+      for (let i = 0; i < key.length; i++) hash = ((hash * 33) ^ key.charCodeAt(i)) >>> 0;
+      const path = `own:${roomName}:${floor}:${hash.toString(36)}`;
+      runsSiteOwnBoards.set(path, { board: own.board, credit: me });
+      merged.set(key, { path, own: true, map: roomName, floor, runs: 1, victories: 1, combos: own.combos, minTicks: ticks, rankPoints: points, rankCount: points > 0 ? 1 : 0 });
+    }
+  }
+  return [...merged.values()];
 }
 
 // Index summary -> the shape the Highscore UI renders. Chances are fractions in [0, 1].
@@ -5461,6 +5547,7 @@ function runsSiteToRun(summary) {
 }
 
 function runsSiteLoadBoard(run) {
+  if (runsSiteOwnBoards.has(run.path)) return Promise.resolve(runsSiteOwnBoards.get(run.path));
   if (!runsSiteBoards.has(run.path)) {
     const load = runsSiteFetchFile(run.path).then((text) => {
       const file = JSON.parse(text);
@@ -5471,6 +5558,51 @@ function runsSiteLoadBoard(run) {
   }
   return runsSiteBoards.get(run.path);
 }
+
+// Anti-theft: a repository run that would beat the world record is only offered to the player named
+// in its credits. Credits may list several names ("A, B & C"); each is compared whole and
+// case-insensitively, so "Dan" never matches "Daniel".
+function runsSiteIsCredited(credit) {
+  const me = runsSiteMyName().toLowerCase();
+  if (!me || typeof credit !== 'string') return false;
+  return credit.split(/[,;&/+|]|\band\b/i).some((name) => name.trim().toLowerCase() === me);
+}
+
+// The room's current world records ({ tick, rank, floor } entries, each null when unset), or null when
+// they cannot be fetched (then every run counts as record-breaking: fail closed).
+async function runsSiteWorldRecords(roomCode) {
+  try {
+    const highscores = (await window.BestiaryModAPI.util.fetchTrophyRoomData())?.highscores || {};
+    return { tick: highscores.tick?.[roomCode] || null, rank: highscores.rank?.[roomCode] || null, floor: highscores.floor?.[roomCode] || null };
+  } catch (_) {
+    return null;
+  }
+}
+
+// Would this solution, made for `floor`, beat the world record of that goal? Unknown numbers count as yes.
+function runsSiteBeatsWorldRecord(goal, summary, floor, wrs) {
+  const wr = wrs?.[goal === 'ticks' ? 'tick' : goal];
+  if (!wr) return true;
+  const ticks = summary.minTicks;
+  if (goal === 'ticks') return !(Number(wr.ticks) > 0) || ticks < wr.ticks;
+  if (goal === 'rank') {
+    const wrPoints = Number(wr.rank ?? wr.rankPoints);
+    if (!Number.isFinite(wrPoints)) return true;
+    return summary.rankPoints > wrPoints || (summary.rankPoints === wrPoints && !(Number(wr.ticks) > 0 && ticks >= wr.ticks));
+  }
+  const wrFloor = Number(wr.floor);
+  if (!Number.isFinite(wrFloor)) return true;
+  const wrTicks = Number(wr.floorTicks ?? wr.ticks);
+  return floor > wrFloor || (floor === wrFloor && !(wrTicks > 0 && summary.floor === floor && ticks >= wrTicks));
+}
+
+// Credits matter only for a run that would set a new world record (a tie is not one).
+function runsSiteMayOffer(goal, summary, floor, credit, wrs) {
+  return !runsSiteBeatsWorldRecord(goal, summary, floor, wrs) || runsSiteIsCredited(credit);
+}
+
+// The floor a goal scores a solution on: floor 0 for ticks and rank, the run's own floor for floor.
+const runsSiteGoalFloor = (goal, summary) => (goal === 'floor' ? summary.floor : 0);
 
 // Reliable = it nearly always wins and nearly always hits the listed ticks.
 function runsSiteIsReliable(run) {
@@ -5570,35 +5702,55 @@ async function runsSiteSuggest(roomCode, yours) {
   const map = runsSiteMapFor(index, roomCode);
   if (!map) return null;
   const picked = {};
-  for (const [goal, rule] of Object.entries(RUNS_SITE_GOALS)) {
-    // Each goal is scored on one floor: floor 0 for ticks and rank, the run's own floor for floor.
-    picked[goal] = map.solutions
-      .map((summary) => runsSiteEntryAt(summary, goal === 'floor' ? summary.floor : 0))
+  const wrs = await runsSiteWorldRecords(roomCode);
+  runsSiteDebug(`suggest ${roomCode}: you=${JSON.stringify(runsSiteMyName())} yours=${JSON.stringify(yours)} worldRecords=${JSON.stringify(wrs)} ownRuns=${map.solutions.filter((s) => s.own).length}`);
+  await Promise.all(Object.entries(RUNS_SITE_GOALS).map(async ([goal, rule]) => {
+    const candidates = map.solutions
+      .map((summary) => runsSiteEntryAt(summary, runsSiteGoalFloor(goal, summary)))
       .filter((entry) => (entry.rate ?? 0) > 0 && rule.usable(entry) && rule.beats(entry.summary, yours))
       .sort(rule.order)
-      .slice(0, RUNS_SITE_MAX_PER_CATEGORY)
-      .map((entry) => runsSiteToRun(entry.summary));
-  }
-  // The same solution can win several goals; load each board once.
-  await Promise.all([...new Set(Object.values(picked).flat())].map(async (run) => Object.assign(run, await runsSiteLoadBoard(run))));
+      .slice(0, RUNS_SITE_MAX_LOADS)
+      .map((entry) => ({ summary: entry.summary, run: runsSiteToRun(entry.summary) }));
+    // Boards are cached, so a solution shared by several goals is downloaded once. Load in batches,
+    // best first; a run that would beat the world record is kept only if the player is in its credits.
+    const kept = [];
+    for (let i = 0; i < candidates.length && kept.length < RUNS_SITE_MAX_PER_CATEGORY; i += RUNS_SITE_MAX_PER_CATEGORY) {
+      const batch = candidates.slice(i, i + RUNS_SITE_MAX_PER_CATEGORY);
+      await Promise.all(batch.map(async ({ run }) => Object.assign(run, await runsSiteLoadBoard(run))));
+      kept.push(...batch
+        .filter(({ summary, run }) => runsSiteMayOffer(goal, summary, runsSiteGoalFloor(goal, summary), run.credit, wrs))
+        .map(({ run }) => run));
+    }
+    picked[goal] = kept.slice(0, RUNS_SITE_MAX_PER_CATEGORY);
+    runsSiteDebug(`suggest ${roomCode} ${goal}: ${candidates.length} beat yours, shown ${picked[goal].map((r) => r.path).join(', ') || 'none'}`);
+  }));
   return picked;
 }
 
 // One floor, one goal: the first suitable candidate the player can field, or null.
-async function runsSitePickFor(roomCode, solutions, rule, floor) {
+async function runsSitePickFor(roomCode, solutions, goal, rule, floor, wrs) {
   const entries = solutions.map((summary) => runsSiteEntryAt(summary, floor));
   const suitable = entries.filter((entry) => (entry.rate ?? 0) > 0 && rule.usable(entry));
   const owned = suitable.filter((entry) => runsSiteRosterCovers(entry.summary.combos));
-  const ranked = owned.sort(rule.order).slice(0, RUNS_SITE_BEST_MAX_TRIES);
+  const ranked = owned.sort(rule.order).slice(0, RUNS_SITE_MAX_LOADS);
+  let tried = 0;
+  let uncredited = 0;
   for (const { summary, rate } of ranked) {
+    if (tried >= RUNS_SITE_BEST_MAX_TRIES) break;
     const run = runsSiteToRun(summary);
     Object.assign(run, await runsSiteLoadBoard(run));
+    // Would break the world record but the player is not in its credits: skip to the next best run
+    // (does not use up a try).
+    const mayOffer = runsSiteMayOffer(goal, summary, floor, run.credit, wrs);
+    if (RUNS_SITE_DEBUG) runsSiteDebug(`${roomCode} ${goal} floor ${floor}: ${summary.path} ticks=${summary.minTicks} rank=${summary.rankPoints} credit=${JSON.stringify(run.credit)} -> ${mayOffer ? 'offer' : 'SKIP (beats the world record, not in credits)'}`);
+    if (!mayOffer) { uncredited++; continue; }
+    tried++;
     const check = runsSiteApplyRun({ roomCode, floor, board: run.board, apply: false });
     if (check.ok) {
       return { run, floor, winrate: rate, setup: check.setup, substituted: check.substituted, counts: { suitable: suitable.length, owned: owned.length } };
     }
   }
-  return { none: { suitable: suitable.length, owned: owned.length, checked: ranked.length } };
+  return { none: { suitable: suitable.length, owned: owned.length, checked: tried, uncredited } };
 }
 
 /**
@@ -5621,6 +5773,7 @@ function runsSiteLogPick(tag, message) {
   if (runsSiteLastLog.get(tag) === message) return;
   runsSiteLastLog.set(tag, message);
   console.log(tag, message);
+  runsSiteDebug(tag, message);
 }
 
 async function runsSiteBestFor(roomCode, goal, currentFloor = 0) {
@@ -5631,6 +5784,7 @@ async function runsSiteBestFor(roomCode, goal, currentFloor = 0) {
   const map = runsSiteMapFor(index, roomCode);
   if (!map) {
     console.log(tag, 'map not in the repository');
+    runsSiteDebug(tag, 'map not in the repository');
     return null;
   }
   const set = map.floorSets.find((s) => currentFloor >= s.from && currentFloor <= s.to) || map.floorSets[0];
@@ -5651,8 +5805,10 @@ async function runsSiteBestFor(roomCode, goal, currentFloor = 0) {
     return null;
   }
   let last = null;
+  const wrs = await runsSiteWorldRecords(roomCode);
+  runsSiteDebug(`${tag} you=${JSON.stringify(runsSiteMyName())} worldRecords=${JSON.stringify(wrs)} ownRuns=${solutions.filter((s) => s.own).length} floors=${floors.join(',')}`);
   for (const floor of floors) {
-    const result = await runsSitePickFor(roomCode, solutions, rule, floor);
+    const result = await runsSitePickFor(roomCode, solutions, goal, rule, floor, wrs);
     if (!result.none) {
       runsSiteLogPick(tag, `picked ${result.run.path} for floor ${floor} (${solutions.length} solutions in floors ${set.from}-${set.to === Infinity ? 'max' : set.to}, ${result.counts.suitable} suitable, ${result.counts.owned} covered by your roster)`);
       return result;
@@ -5661,6 +5817,7 @@ async function runsSiteBestFor(roomCode, goal, currentFloor = 0) {
   }
   const why = !last || last.suitable === 0 ? 'no suitable run'
     : last.owned === 0 ? 'your roster lacks the monsters or items of every suitable run'
+    : last.checked === 0 && last.uncredited > 0 ? `you are not in the credits of any of the ${last.uncredited} best covered runs that beat the world record`
     : 'no covered run matched your exact levels, genes or item tiers';
   runsSiteLogPick(tag, `none (${solutions.length} solutions, floors ${floors[0]}..${floors[floors.length - 1]}): ${why}`);
   return null;
@@ -5753,6 +5910,10 @@ const runsSiteApi = {
     }
   },
   // Dry run: can the player field this run? -> { ok, missing, substituted }
+  // The player's own RunTracker runs of a room as candidates, with boards, for testing:
+  // BestiaryRunsSite.own(roomCode) -> run[]; pass one to check() / apply().
+  own: (roomCode) => runsSiteOwnSolutions(globalThis.state?.utils?.ROOM_NAME?.[roomCode] || '')
+    .map((summary) => ({ ...runsSiteToRun(summary), ...runsSiteOwnBoards.get(summary.path) })),
   check: (roomCode, run) => runsSiteApplyRun({ roomCode, floor: run.floor, board: run.board, apply: false }),
   apply: (roomCode, run) => runsSiteApplyRun({ roomCode, floor: run.floor, board: run.board }),
   buildSnippet: (roomCode, run) =>
@@ -5764,6 +5925,7 @@ const runsSiteApi = {
   reset() {
     runsSiteIndex = null;
     runsSiteBoards.clear();
+    runsSiteOwnBoards.clear();
   }
 };
 

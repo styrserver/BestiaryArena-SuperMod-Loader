@@ -4,6 +4,16 @@
   },
   "notes": [
     {
+      "version": "5.3.6",
+      "changes": [
+        {
+          "mod": "Better Highscores",
+          "type": "fixed",
+          "text": "Your new records, and world records, now show right after a battle or a Board Analyzer / Manual Runner run."
+        }
+      ]
+    },
+    {
       "version": "5.3.5",
       "changes": [
         {
