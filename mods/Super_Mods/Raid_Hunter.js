@@ -189,11 +189,11 @@ function getRaidAutoRefillStamina(raidName) {
         if (raidSetting && raidSetting.hasOwnProperty('autoRefillStamina')) {
             return raidSetting.autoRefillStamina === true;
         }
-        // Per-raid setting: default to true if not set
-        return true;
+        // No per-raid override: inherit the global default
+        return settings.autoRefillStamina === true;
     } catch (error) {
         console.error('[Raid Hunter] Error getting raid autoRefillStamina:', error);
-        return true;
+        return false;
     }
 }
 
@@ -6217,7 +6217,7 @@ function createRaidContextMenu(raidName, x, y, onClose) {
     // Get current values
     const currentAutoRefillStamina = raidSetting.hasOwnProperty('autoRefillStamina') 
         ? raidSetting.autoRefillStamina 
-        : true; // Default to true
+        : settings.autoRefillStamina === true; // Inherit global default
     const currentSetupMethod = raidSetting.setupMethod || 'default';
     
     // Create overlay to close menu on outside click

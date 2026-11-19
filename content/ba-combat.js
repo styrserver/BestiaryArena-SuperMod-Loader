@@ -219,6 +219,29 @@
       return masks.length || mi.length || fx.length || unresolved.length
         ? { m: masks, mi, fx, ...(unresolved.length ? { u: unresolved } : {}) } : undefined;
     };
+    // The regular attack of a class body: { aa: false } when it has no auto-attack component (a healer / support), else { am } with the missile its attack fires
+    // (`missile:"arrow"` inside `this.autoAttack=this.addComponent(new r.A({... attack: ...}))`); no `am` for a melee attack or one that goes through a shared helper.
+    const attackFields = (own) => {
+      const attackAt = own.indexOf('this.autoAttack=this.addComponent(');
+      if (attackAt < 0) return { aa: false };
+      const attackBody = own.slice(attackAt, attackAt + 1200);
+      const stop = attackBody.search(/this\.targetSelection=|this\.onTick=|this\.targetComponent=/);
+      const missile = /missile:"(\w+)"/.exec(stop > 0 ? attackBody.slice(0, stop) : attackBody);
+      return missile ? { am: missile[1] } : {};
+    };
+    // The cooldown bar a class shows above the creature (`this.renderCooldownBars.add(this.<cooldown>)`, the cooldown made by `new g.e({... color:"cooldown" ...})`): { cb: its colour, cv: 1 when it only
+    // shows while the cooldown runs (`visibleOnlyWhileInProgress`) }. A bar that drains (`invertBar`: a duration, not a cooldown) is left out.
+    const barFields = (own) => {
+      for (const m of own.matchAll(/renderCooldownBars\.add\(this\.([\w$]+)\)/g)) {
+        const at = own.indexOf('this.' + m[1] + '=new g.e({');
+        if (at < 0) continue;
+        const opts = own.slice(at, own.indexOf('})', at));
+        if (/invertBar:!0/.test(opts)) continue;
+        const color = /color:"(\w+)"/.exec(opts)?.[1];
+        if (color) return { cb: color, ...(/visibleOnlyWhileInProgress:!0/.test(opts) ? { cv: 1 } : {}) };
+      }
+      return {};
+    };
     const classFields = (cls, k, constants, withScene = false) => {
       const end = Math.min(k + 1 < classes.length ? classes[k + 1].index : src.length, cls.index + 20000);
       const body = src.slice(cls.index, end);
@@ -227,6 +250,10 @@
         const sc = sceneFields(body);
         if (sc) fields.sc = sc;
       }
+      // Read from this class only: `body` can run on into the classes after it (it ends at the next class matching the pattern above, or 20000 characters on).
+      const nextDecl = /\}class [\w$]+ extends /g;
+      nextDecl.lastIndex = cls.index + 10;
+      Object.assign(fields, attackFields(src.slice(cls.index, Math.min(end, nextDecl.exec(src)?.index ?? end))));
       const range = single(body, /rangeComponent=this\.addComponent\(new [\w$.]+\(\{range:(\d+),rangedCreature:!([01])/g, (m) => `${m[1]}:${m[2]}`);
       if (range) {
         const [r, flag] = range.split(':');
@@ -256,14 +283,44 @@
     };
     byVar.forEach((entry, metaVar) => {
       const esc = metaVar.replace(/\$/g, '\\$');
-      const sup = new RegExp(String.raw`super\(\{[^}]{0,80}\.\.\.${esc}[,}]`).exec(src);
+      // Or a class shared by several creatures that takes its metadata as a default parameter, `constructor(t,e=<metaVar>)`
+      // (Dwarf Geomancer / Merrymancer).
+      const sup = new RegExp(String.raw`super\(\{[^}]{0,80}\.\.\.${esc}[,}]`).exec(src)
+        || new RegExp(String.raw`constructor\([\w$]+,[\w$]+=${esc}\)`).exec(src);
       if (!sup) return;
       const start = classStartBefore(sup.index);
       if (start < 0) return;
       const next = src.slice(sup.index).search(/class [\w$]+ extends [\w$.]+\{/);
       const end = Math.min(next > 0 ? sup.index + next : src.length, start + 20000);
-      const sc = sceneFields(src.slice(start, end));
-      if (sc) entry.sc = sc;
+      const body = src.slice(start, end);
+      const sc = sceneFields(body);
+      delete entry.aa; delete entry.am; delete entry.cb; delete entry.cv;
+      Object.assign(entry, attackFields(body), barFields(body));
+      // Mechanics the Cyclopedia has a scene template for (see ABILITY_SCENE_TEMPLATES in database/creature-database.js),
+      // found by code shape: `push` = the auto attack displaces its target (displaceTarget), `arena` = it raises an arena of spikes (Behemoth), `perimeter` = it drops stones along the board rim (Dwarf Geomancer), `barrel` = it drops a barrel that explodes later (Dwarf), `walls` = it roots enemies with runes on their neighbour tiles (Elf), `sleep` = it sleeps and heals,
+      // then wakes and attacks (sleepPassiveTicker).
+      const t = [];
+      // Only the auto attack counts: the Wyvern's screech also displaces, but over an area (its own extracted scene).
+      if (/autoAttack=this\.addComponent\(new [\w$.]+\(\{[^]{0,500}?displaceTarget/.test(body)) t.push('push');
+      if (/sleepPassiveTicker/.test(body)) t.push('sleep');
+      // Named game assets the class (and the helper classes it builds with `new X(`) refers to, as `o.pE.floorSpike`:
+      // effect sheets, item sprites. Only names; a tool resolves them against the game's effect / sprite tables, so
+      // each creature's real assets are found, not guessed. `refs` is information (nothing draws from it by itself).
+      const refNames = new Set();
+      const scanRefs = (text) => {
+        for (const m of text.matchAll(/(?<![\w$.])[\w$]{1,2}\.([\w$]{1,3})\.([A-Za-z][\w$]{2,})\b/g)) refNames.add(m[2]);
+      };
+      scanRefs(body);
+      for (const helper of new Set([...body.matchAll(/new ([\w$]{1,3})\(/g)].map((x) => x[1]))) {
+        const at = src.indexOf(`class ${helper} extends `);
+        if (at >= 0) scanRefs(src.slice(at, at + 3000));
+      }
+      if (refNames.size) entry.refs = [...refNames].slice(0, 80);
+      if (/tryCreateArena|innerArenaTiles/.test(body)) t.push('arena');
+      if (/castWalls/.test(body)) t.push('walls');
+      if (/trySetBarrel/.test(body)) t.push('barrel');
+      if (/getConvexHull/.test(body)) t.push('perimeter');
+      if (sc || t.length) entry.sc = { ...(sc || { m: [], mi: [], fx: [] }), ...(t.length ? { t } : {}) };
     });
 
     // Summons (no id in the name table: Werefox Statue, Larva, Troll-Trained Salamander ...) belong to the
@@ -408,10 +465,55 @@
     }));
     let next = src;
     edits.sort((a, b) => b.at - a.at).forEach((e) => { next = next.slice(0, e.at) + e.text + next.slice(e.at); });
-    return { src: next, creatures };
+    return { src: next, creatures, entries };
   }
 
-  return { MS_PER_TICK, isCreatureBundle, analyze, analyzeFull, instrument, tableValue, parseNameToId };
+  /** The game's id tables are plain object literals, e.g. `{bleed:1,drown:2,...}`; null when `src` has none. */
+  function parseIdTable(src, firstPairs) {
+    const m = new RegExp(String.raw`\{${firstPairs},[^}]*\}`).exec(src);
+    return m ? JSON.parse(m[0].replace(/([{,])([A-Za-z_$][\w$]*):/g, '$1"$2":')) : null;
+  }
+  const parseEffectIds = (src) => parseIdTable(src, 'bleed:1,drown:2');
+  const parseMissileIds = (src) => parseIdTable(src, 'spear:1,bolt:2');
+
+  /**
+   * One ability-scene row from an analyzed creature entry (`analyze` output) and the game's id tables:
+   * `{ m, mi: [{ n, id }], fx: [{ n, id, b?, w? }] }` (no frame count `f`: the caller measures the sheet), or null
+   * when the creature has no scene. `unknown` lists effect / missile names the tables lack. Shared by the offline
+   * tool (tools/check-ability-scenes.mjs) and the live Cyclopedia, so both build the same scene from the same source.
+   */
+  function sceneRowFrom(entry, effectIds, missileIds) {
+    const sc = entry && entry.sc;
+    if (!sc) return null;
+    // The class scans an area through a mask the parser could not resolve: a generic one-tile scene would be wrong.
+    if (sc.u && sc.u.length && !sc.m.length && !(sc.t && sc.t.length)) return null; // a tagged template draws it anyway
+    // No area mask in the class (single-target hits, buffs): a one-tile scene, around the target when the ability
+    // throws a missile or plays an effect elsewhere, around the caster when every effect is on itself. g: 1 marks it.
+    let masks = sc.m;
+    if (!masks.length) {
+      if (sc.mi.length || sc.fx.some((x) => x.w === 'target')) masks = [{ a: 'target', rows: ['+'], g: 1 }];
+      else if (sc.fx.length) masks = [{ a: 'self', rows: ['+'], g: 1 }];
+      else if (sc.t && sc.t.length) masks = [{ a: 'self', rows: ['+'], g: 1 }]; // a template draws the scene
+      else return null;
+    }
+    const unknown = [];
+    const fx = [];
+    for (const { n, w } of sc.fx) {
+      const id = effectIds[n];
+      if (id == null) { unknown.push(n); continue; }
+      // b: 1 = one big burst on the origin tile (the game's "large*" effects); otherwise it covers every hit tile.
+      fx.push({ n, id, ...(/^large/i.test(n) ? { b: 1 } : {}), ...(w === 'self' ? { w: 'self' } : {}) });
+    }
+    const mi = [];
+    for (const n of sc.mi) {
+      const id = missileIds[n];
+      if (id == null) unknown.push(`missile ${n}`);
+      else mi.push({ n, id });
+    }
+    return { m: masks, mi, fx, ...(sc.t && sc.t.length ? { t: sc.t } : {}), unknown };
+  }
+
+  return { MS_PER_TICK, isCreatureBundle, analyze, analyzeFull, instrument, tableValue, parseNameToId, parseEffectIds, parseMissileIds, sceneRowFrom };
 });
 
 // ---- Part 2: live overrides (browser MAIN world only; skipped when required from Node) ----
@@ -444,6 +546,12 @@
   /** `${table}:${rawKey}` -> { object, rawKey, original } for every value currently overridden. */
   const changed = new Map();
   let patchedModules = 0;
+  /** gameId -> analyzed creature entry (name, cooldown constants `c`, scene hints `sc`), from the creature module. */
+  let liveEntries = null;
+  /** Every module factory seen, scanned lazily (once) for the effect / missile id tables. */
+  const factories = [];
+  let idTables = null;
+  let liveScenes = null;
 
   Object.defineProperty(self, '__baCT', {
     configurable: true,
@@ -458,6 +566,7 @@
     Object.keys(modules).forEach((id) => {
       const factory = modules[id];
       if (typeof factory !== 'function' || factory.__baCombatPatched) return;
+      factories.push(factory);
       let src;
       try {
         src = Function.prototype.toString.call(factory);
@@ -471,6 +580,8 @@
         patched.__baCombatPatched = true;
         modules[id] = patched;
         creatures = result.creatures;
+        liveEntries = result.entries;
+        liveScenes = null;
         patchedModules += 1;
       } catch (error) {
         // Leave the original factory in place: the game runs unmodified.
@@ -518,7 +629,61 @@
     changed.clear();
   }
 
+  /** Effect and missile id tables, found by scanning the module sources seen so far; null until both are found. */
+  function findIdTables() {
+    if (idTables) return idTables;
+    let effects = null;
+    let missiles = null;
+    for (const factory of factories) {
+      let src;
+      try { src = Function.prototype.toString.call(factory); } catch (_) { continue; }
+      if (!effects && src.includes('bleed:1,drown:2')) effects = lib.parseEffectIds(src);
+      if (!missiles && src.includes('spear:1,bolt:2')) missiles = lib.parseMissileIds(src);
+      if (effects && missiles) break;
+    }
+    if (!effects || !missiles) return null; // the module may not have loaded yet: scanned again on the next call
+    idTables = { effects, missiles };
+    return idTables;
+  }
+
+  /**
+   * Live ability scenes, the same rows as the snapshot's ABILITY_SCENE_DATA but without effect frame counts:
+   * `{ entries: { [gameId]: { n, c, row: { m, mi, fx } | null } } , unknown: [...] }`, or null while the creature
+   * module or the id tables are not loaded (callers fall back to the snapshot). Computed once, then cached.
+   */
+  function getLiveScenes() {
+    if (liveScenes) return liveScenes;
+    const tables = liveEntries && findIdTables();
+    if (!tables) return null;
+    const entries = {};
+    const unknown = new Set();
+    Object.entries(liveEntries).forEach(([id, e]) => {
+      const row = lib.sceneRowFrom(e, tables.effects, tables.missiles);
+      if (row) row.unknown.forEach((u) => unknown.add(`${e.n}: ${u}`));
+      entries[id] = { n: e.n, c: e.c, r: e.r, rc: e.rc, row: row && { m: row.m, mi: row.mi, fx: row.fx, ...(row.t ? { t: row.t } : {}) } };
+    });
+    liveScenes = { entries, unknown: [...unknown], effectIds: tables.effects };
+    return liveScenes;
+  }
+
+  /** A game sprite id from its enum entry (`spikesA:388`), scanning the module sources seen; cached, null if not found. */
+  const spriteIds = new Map();
+  function findSpriteId(name) {
+    if (!/^\w+$/.test(name)) return null;
+    if (spriteIds.has(name)) return spriteIds.get(name);
+    const re = new RegExp(`[,{]${name}:(\\d+)[,}]`);
+    for (const factory of factories) {
+      let src;
+      try { src = Function.prototype.toString.call(factory); } catch (_) { continue; }
+      const m = re.exec(src);
+      if (m) { spriteIds.set(name, Number(m[1])); return Number(m[1]); }
+    }
+    return null; // not cached: the module may load later
+  }
+
   globalThis.BestiaryCombatOverrides = {
+    getLiveScenes,
+    findSpriteId,
     /** True once the creature module was instrumented and ran (its constant tables registered). */
     isReady() {
       return patchedModules > 0 && tables.size > 0;

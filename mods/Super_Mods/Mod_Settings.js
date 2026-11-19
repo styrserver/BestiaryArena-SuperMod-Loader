@@ -3392,7 +3392,7 @@ const PERF_LINE_CSS = 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap
 const PERF_COL_SCRIPT = 'flex:0 0 50px;text-align:right;';
 const PERF_COL_REQ = 'flex:0 0 34px;text-align:right;';
 const PERF_COL_LAYOUT = 'flex:0 0 46px;text-align:right;';
-const PERF_WIDTH_COMPACT = '195px'; // fits the memory line ("103MB (-13) · 5.1k nodes") without clipping
+const PERF_WIDTH_COMPACT = '201px'; // fits the memory line ("103MB (-13) · 5.1k nodes") without clipping
 const PERF_WIDTH_MAXIMIZED = '340px';
 // The game's frame classes draw a 1-3px border; Hunt Analyzer and Awaken Tracker draw the same images thicker
 // (slice and width scaled up, centre filled). Overriding just those properties keeps the game's own image URL.
@@ -4281,8 +4281,9 @@ function renderPerfOverlay() {
   ui.header.style.display = compact ? 'none' : 'flex';
   ui.restoreBtn.style.display = compact ? 'block' : 'none';
   ui.detailsSection.style.display = compact ? 'none' : 'flex';
-  perfSetFrameWidth(ui.el, compact ? 3 : 6);
-  perfSetFrameWidth(ui.header, compact ? 3 : 6);
+  // Always the art's native 6px: squeezing the 6px-slice frame to 3px distorts its corners and edges.
+  perfSetFrameWidth(ui.el, 6);
+  perfSetFrameWidth(ui.header, 6);
   // Minimized: the outer frame is the only border (a framed body inside it drew a second, doubled border).
   if (compact) {
     ui.body.style.borderWidth = '0';

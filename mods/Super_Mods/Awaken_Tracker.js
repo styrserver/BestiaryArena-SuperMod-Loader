@@ -89,29 +89,41 @@
         mapSettings: {} // roomId -> { floor?: 11-15, setupLabel?: string, autoRefillStamina?: boolean }
     };
 
-    function getUnobtainableNames() {
-        const db = window.creatureDatabase?.UNOBTAINABLE_CREATURES;
-        return new Set(Array.isArray(db) ? db.map(n => n.toLowerCase()) : []);
+    /**
+     * Lower-cased name Set for a creatureDatabase list, rebuilt only when the list's identity or
+     * length changes (the database fills its arrays in place once the game state is ready).
+     */
+    function makeNameSetGetter(listKey) {
+        let src = null, len = -1, set = new Set();
+        return () => {
+            const list = window.creatureDatabase?.[listKey];
+            if (!Array.isArray(list)) return (set = new Set(), src = null, len = -1, set);
+            if (list !== src || list.length !== len) {
+                src = list;
+                len = list.length;
+                set = new Set(list.map(n => n.toLowerCase()));
+            }
+            return set;
+        };
+    }
+    const getUnobtainableNames = makeNameSetGetter('UNOBTAINABLE_CREATURES');
+    const getNonAwakenableNames = makeNameSetGetter('NON_AWAKENABLE_CREATURES');
+
+    /**
+     * Event creatures can awaken, but trackers only follow them while their event is live;
+     * the Overview passes `showAllEvents` to list them always.
+     */
+    function isNonAwakenableName(lname, showAllEvents = false) {
+        if (getNonAwakenableNames().has(lname) || lname.includes('gazer')) return true;
+        if (showAllEvents) return false;
+        const db = window.creatureDatabase;
+        return db?.isEventCreatureName?.(lname) === true && db?.isEventCreatureLive?.(lname) !== true;
     }
 
-    function getNonAwakenableNames() {
-        const db = window.creatureDatabase?.NON_AWAKENABLE_CREATURES;
-        return new Set(Array.isArray(db) ? db.map(n => n.toLowerCase()) : []);
-    }
-
-    function isNonAwakenableName(lname) {
-        return getNonAwakenableNames().has(lname) || lname.includes('gazer');
-    }
-
-    function isCreatureEligibleForAwaken(name) {
+    function isCreatureEligibleForAwaken(name, showAllEvents = false) {
         if (!name) return false;
         const lname = String(name).toLowerCase();
-        return !getUnobtainableNames().has(lname) && !isNonAwakenableName(lname);
-    }
-
-    /** Seasonal event creatures (Clot, Gummy Raider, ...) cannot awaken but still show on their map. */
-    function isEventCreature(name) {
-        return window.creatureDatabase?.isEventCreatureName?.(name) === true;
+        return !getUnobtainableNames().has(lname) && !isNonAwakenableName(lname, showAllEvents);
     }
 
     const AWAKEN_TIER = 6;
@@ -899,7 +911,7 @@
             const enemies = [];
             for (const gameId of getRoomFloorCreatureIds(roomId, resolveCurrentFloor())) {
                 const name = resolveName(gameId);
-                if (isCreatureEligibleForAwaken(name) || isEventCreature(name)) enemies.push({ gameId, name });
+                if (isCreatureEligibleForAwaken(name)) enemies.push({ gameId, name });
             }
             state.currentMapEnemies = enemies;
             ensureMapBaseline(roomId);
@@ -4234,7 +4246,7 @@
             const findByName = window.creatureDatabase?.findMonsterByName;
             if (typeof findByName === 'function') {
                 for (const creatureName of window.creatureDatabase?.ALL_CREATURES || []) {
-                    if (!isCreatureEligibleForAwaken(creatureName)) continue;
+                    if (!isCreatureEligibleForAwaken(creatureName, true)) continue;
                     const gameId = findByName(creatureName)?.gameId;
                     if (gameId == null || byGameId.has(gameId)) continue;
                     byGameId.set(gameId, {
@@ -4253,7 +4265,7 @@
                 const name = resolveName(g.gameId);
                 const lname = String(name).toLowerCase();
                 if (getUnobtainableNames().has(lname)) { skippedUnobtainable++; continue; }
-                if (isNonAwakenableName(lname)) { skippedNonAwakenable++; continue; }
+                if (isNonAwakenableName(lname, true)) { skippedNonAwakenable++; continue; }
                 groups.push({ ...g, name });
             }
 

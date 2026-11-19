@@ -4014,69 +4014,8 @@
         return placeholder;
     }
 
-    function getActiveRaidRoomIds() {
-        try {
-            const raidSnapshot = globalThis.state?.raids?.getSnapshot?.();
-            const activeRaids = raidSnapshot?.context?.list || [];
-            return activeRaids
-                .map((raid) => String(raid?.roomId || '').trim())
-                .filter(Boolean);
-        } catch (error) {
-            return [];
-        }
-    }
-
     function getAutosellerActiveRaidEventCreatures() {
-        const activeRoomIds = getActiveRaidRoomIds();
-        if (activeRoomIds.length === 0) return [];
-
-        const state = globalThis.state;
-        const mapsDb = globalThis.mapsDatabase;
-        const db = window.creatureDatabase;
-        if (!Array.isArray(db?.EVENT_CREATURES)) return [];
-        if (!state?.utils || typeof state.utils.getBoardMonstersFromRoomId !== 'function') return [];
-
-        const isEventName = new Set(
-            db.EVENT_CREATURES
-                .filter((name) => typeof name === 'string' && name.trim().length > 0)
-                .map((name) => name.toLowerCase())
-        );
-        if (isEventName.size === 0) return [];
-
-        const activeEventCreatures = new Set();
-        for (const roomId of activeRoomIds) {
-            if (typeof mapsDb?.isDynamicEventMap === 'function' && !mapsDb.isDynamicEventMap(roomId)) {
-                continue;
-            }
-            // getBoardMonstersFromRoomId is floor-blind (floor 0 only), so also read every
-            // floor's raw actors (floorFiles for multi-floor rooms, e.g. Halloween Mansion's
-            // Clot on floors 7-11).
-            const roomMonsters = [...(state.utils.getBoardMonstersFromRoomId(roomId) || [])];
-            const room = (state.utils.ROOMS || []).find((r) => r?.id === roomId);
-            const floorActorLists = [room?.file?.data?.actors];
-            if (Array.isArray(room?.floorFiles)) {
-                for (const floorFile of room.floorFiles) floorActorLists.push(floorFile?.data?.actors);
-            }
-            for (const actors of floorActorLists) {
-                if (!Array.isArray(actors)) continue;
-                for (const actor of actors) {
-                    if (actor && actor.id != null) roomMonsters.push({ gameId: actor.id });
-                }
-            }
-            for (const roomMonster of roomMonsters) {
-                const creatureName = roomMonster?.metadata?.name
-                    || roomMonster?.name
-                    || (roomMonster?.gameId && state.utils.getMonster?.(roomMonster.gameId)?.metadata?.name)
-                    || getCreatureNameFromMonster(roomMonster)
-                    || '';
-                const normName = String(creatureName).trim().toLowerCase();
-                if (normName && isEventName.has(normName)) {
-                    activeEventCreatures.add(creatureName);
-                }
-            }
-        }
-
-        return [...activeEventCreatures];
+        return window.creatureDatabase?.getLiveEventCreatureNames?.() || [];
     }
 
     // gameIds of every monster that can come from any map (all floors): placed actors plus
@@ -11927,11 +11866,21 @@
         if (!widgetBottom) {
             const icons = document.querySelectorAll('img[alt="Autoplay"]').length;
             const minimized = document.querySelectorAll('.widget-bottom[data-minimized="true"]').length;
-            reportPlantSkip(
-                'autoplay widget not found or minimized',
-                `autoplayIcons=${icons} minimizedWidgets=${minimized} ` +
-                (icons === 0 ? '(widget not mounted)' : minimized > 0 ? '(widget minimized)' : '(icon present, container lookup failed)')
-            );
+            // Not mounted / minimized is the player's own layout (nothing to click, no drop is visible):
+            // verbose log only. Only a visible, un-minimized widget we still cannot locate is a real fault.
+            if (icons > 0 && minimized === 0) {
+                reportPlantSkip(
+                    'autoplay widget container not found',
+                    `autoplayIcons=${icons} minimizedWidgets=${minimized} (icon present, container lookup failed)`
+                );
+            } else {
+                logAutosellerDebugThrottled(
+                    'DragonPlant',
+                    `autoplay widget ${icons === 0 ? 'not mounted' : 'minimized'}: plant skipped`,
+                    'plant-widget-hidden',
+                    5000
+                );
+            }
         }
 
         if (!hasDrop) {

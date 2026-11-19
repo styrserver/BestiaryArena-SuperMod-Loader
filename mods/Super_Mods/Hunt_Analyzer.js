@@ -1878,7 +1878,20 @@ function beginBattleTiming(world) {
   const now = Date.now();
   const previous = HuntAnalyzerState.timeTracking.currentBattle;
   if (previous && !previous.endMs) {
-    logBattleTiming(`previous battle never reported its end after ${formatSecondsForLog(now - previous.startMs)}; it keeps no duration`);
+    if (previous.session) {
+      // Skipped battle (Manual Runner): the world never fires onGameEnd. Close it at the skip click,
+      // else when its result arrived, so the cycle's loot/restart waits count as idle, not battle.
+      const skipAt = window.__baManualRunnerSkipAt;
+      const closeMs = typeof skipAt === 'number' && skipAt > previous.startMs && skipAt <= now
+        ? skipAt
+        : previous.startMs + (previous.resultAfterMs || 0);
+      previous.endMs = Math.min(now, closeMs);
+      lastBattleEndMs = previous.endMs;
+      logBattleTiming(`previous battle was skipped (no onGameEnd); closed at ${formatSecondsForLog(previous.endMs - previous.startMs)}`);
+      applyBattleDuration(previous);
+    } else {
+      logBattleTiming(`previous battle never reported its end after ${formatSecondsForLog(now - previous.startMs)}; it keeps no duration`);
+    }
   }
 
   // Idle timer: gap since the previous battle ended (reward screen, restart, time away). Measured
@@ -1892,6 +1905,7 @@ function beginBattleTiming(world) {
   }
   try {
     world.onGameEnd.once(() => {
+      if (battle.endMs) return; // already closed as a skipped battle
       battle.endMs = Date.now();
       lastBattleEndMs = battle.endMs;
       applyBattleDuration(battle);
@@ -1934,9 +1948,15 @@ function applyBattleDuration(battle) {
   const battleTotalMs = getFilteredBattleTimeMs();
   const idleTotalMs = getFilteredIdleMs();
   const formatOptional = (value) => (value == null ? 'n/a' : formatSecondsForLog(value));
+  // Manual Runner skip click time (if one happened during this battle), to see where battle time goes
+  const skipAt = window.__baManualRunnerSkipAt;
+  const skipAfterMs = typeof skipAt === 'number' && skipAt >= battle.startMs && skipAt <= battle.endMs
+    ? skipAt - battle.startMs
+    : null;
   logBattleTiming(
     `battle=${formatSecondsForLog(ms)} idleBefore=${formatOptional(battle.idleBeforeMs)} ` +
-    `resultAfter=${formatOptional(battle.resultAfterMs)} | totals: battle=${formatOptional(battleTotalMs)} idle=${formatOptional(idleTotalMs)}`
+    `resultAfter=${formatOptional(battle.resultAfterMs)} skipClickAfter=${formatOptional(skipAfterMs)} ` +
+    `endAfterSkip=${formatOptional(skipAfterMs == null ? null : battle.endMs - skipAt)} | totals: battle=${formatOptional(battleTotalMs)} idle=${formatOptional(idleTotalMs)}`
   );
 }
 

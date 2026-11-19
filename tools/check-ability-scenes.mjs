@@ -15,6 +15,8 @@
  * Usage:
  *   node tools/check-ability-scenes.mjs            check; exit code 1 on any difference
  *   node tools/check-ability-scenes.mjs --update   rewrite the ABILITY_SCENE_DATA block
+ *   node tools/check-ability-scenes.mjs --assets   also list the real game assets (effects, item sprites) each creature
+ *                                                  refers to that its scene does not draw (information only)
  *
  * Creatures with no extracted scene and no hand-written entry in ABILITY_SCENE_OVERRIDES are listed as TODO
  * (information only; it does not change the exit code).
@@ -31,9 +33,10 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { recordRun } from './tool-runs.mjs';
+import { EFFECT_SHEET_BLOCK, fetchGameCss, fetchEffectSheets, serializeEffectSheets, readEffectSheetSnapshot } from './effect-sheets.mjs';
 import { loadChunks } from './check-creature-combat.mjs';
 
-const { isCreatureBundle, analyze } = createRequire(import.meta.url)('../content/ba-combat.js');
+const { isCreatureBundle, analyze, sceneRowFrom } =createRequire(import.meta.url)('../content/ba-combat.js');
 
 const ORIGIN = 'https://bestiaryarena.com';
 const DB_PATH = join(dirname(fileURLToPath(import.meta.url)), '..', 'database', 'creature-database.js');
@@ -70,6 +73,45 @@ async function fetchFrameCount(id) {
   return Math.max(1, Math.round(buf.readUInt32BE(20) / buf.readUInt32BE(16)));
 }
 
+/** Every effect sheet id the scenes can draw: the snapshot's, plus the hand-written overrides and templates in creature-database.js. */
+function usedEffectIds(snapshotScenes, dbText) {
+  const used = new Set();
+  Object.values(snapshotScenes).forEach((r) => (r.sc.fx || []).forEach((x) => used.add(x.id)));
+  for (const m of dbText.matchAll(/id:\s*(\d+),\s*f:\s*\d+/g)) used.add(Number(m[1]));
+  for (const m of dbText.matchAll(/"id":(\d+),"f":\d+/g)) used.add(Number(m[1]));
+  return used;
+}
+
+/**
+ * Real game assets each creature refers to by name (`entry.refs`, see content/ba-combat.js) that its scene does not
+ * already draw: effect sheets from the effect table, item sprites from the sprite enum. Information for building or
+ * reviewing templates, e.g. Behemoth: effect floorSpike(294), item spikesA(388).
+ */
+export function findCreatureAssets(chunks, scenes) {
+  const effects = extractEffectIds(chunks);
+  const itemIds = new Map();
+  const itemId = (name) => {
+    if (itemIds.has(name)) return itemIds.get(name);
+    const re = new RegExp(`[,{]${name}:(\\d+)[,}]`);
+    let id = null;
+    for (const src of chunks) { const m = re.exec(src); if (m) { id = Number(m[1]); break; } }
+    itemIds.set(name, id);
+    return id;
+  };
+  const out = {};
+  for (const [id, e] of Object.entries(analyze(chunks.find(isCreatureBundle)))) {
+    const used = new Set([...(scenes[id]?.sc.fx || []).map((x) => x.n), ...(scenes[id]?.sc.mi || []).map((x) => x.n)]);
+    const found = [];
+    for (const name of e.refs || []) {
+      if (used.has(name) || /^[A-Z]/.test(name) || name.length < 4) continue; // capitalised names are creature sprites, short ones are not assets
+      if (effects[name] != null) found.push(`effect ${name}(${effects[name]})`);
+      else if (itemId(name) != null) found.push(`item ${name}(${itemId(name)})`);
+    }
+    if (found.length) out[id] = { n: e.n, assets: found };
+  }
+  return out;
+}
+
 export async function extractSceneData(chunks) {
   const bundle = chunks.find(isCreatureBundle);
   if (!bundle) throw new Error('creature bundle not found in the downloaded chunks');
@@ -87,34 +129,25 @@ export async function extractSceneData(chunks) {
     // The class scans an area through a mask the parser could not resolve: a generic one-tile scene would be wrong,
     // so it is left out (listed as TODO) until the parser or an override covers it.
     if (e.sc.u?.length) unresolvedScans.push(`${e.n} (${e.sc.u.join(', ')})`);
-    if (e.sc.u?.length && !e.sc.m.length) continue;
-    // No area mask in the class (single-target hits, buffs): a one-tile scene, around the target when the ability
-    // throws a missile or plays an effect elsewhere, around the caster when every effect is on itself. g: 1 marks it.
-    let masks = e.sc.m;
-    if (!masks.length) {
-      if (e.sc.mi.length || e.sc.fx.some((x) => x.w === 'target')) masks = [{ a: 'target', rows: ['+'], g: 1 }];
-      else if (e.sc.fx.length) masks = [{ a: 'self', rows: ['+'], g: 1 }];
-      else continue;
-    }
+    // Same row the live Cyclopedia builds (content/ba-combat.js sceneRowFrom); here the sheets are also checked.
+    const row = sceneRowFrom(e, effectIds, missileIds);
+    if (!row) continue;
+    row.unknown.forEach((u) => unknown.add(u));
     const fx = [];
-    for (const { n: name, w } of e.sc.fx) {
-      const sheet = effectIds[name];
-      if (sheet == null) { unknown.add(name); continue; }
+    for (const { n: name, id: sheet, ...rest } of row.fx) {
       if (!frames.has(sheet)) frames.set(sheet, await fetchFrameCount(sheet));
       if (frames.get(sheet) == null) { unknown.add(`${name}(${sheet})`); continue; }
-      // b: 1 = one big burst on the origin tile (the game's "large*" effects); otherwise it covers every hit tile.
-      fx.push({ n: name, id: sheet, f: frames.get(sheet), ...(/^large/i.test(name) ? { b: 1 } : {}), ...(w === 'self' ? { w: 'self' } : {}) });
+      fx.push({ n: name, id: sheet, f: frames.get(sheet), ...rest });
     }
     const mi = [];
-    for (const name of e.sc.mi) {
-      const sheet = missileIds[name];
-      if (sheet != null && !missileSheets.has(sheet)) {
+    for (const { n: name, id: sheet } of row.mi) {
+      if (!missileSheets.has(sheet)) {
         missileSheets.set(sheet, (await fetch(`${ORIGIN}/assets/MISSILE/${sheet}.png`, { method: 'HEAD' })).ok);
       }
-      if (sheet == null || !missileSheets.get(sheet)) unknown.add(`missile ${name}${sheet != null ? `(${sheet})` : ''}`);
+      if (!missileSheets.get(sheet)) unknown.add(`missile ${name}(${sheet})`);
       else mi.push({ n: name, id: sheet });
     }
-    out[id] = { n: e.n, sc: { m: masks, mi, fx } };
+    out[id] = { n: e.n, sc: { m: row.m, mi, fx, ...(row.t ? { t: row.t } : {}) } };
   }
   return { data: out, unknownEffects: [...unknown], names, unresolvedScans };
 }
@@ -165,7 +198,29 @@ async function main() {
   const { data: game, unknownEffects, names, unresolvedScans } = await extractSceneData(chunks);
   if (unresolvedScans.length) console.log(`WARN     area scans with a mask the parser cannot resolve (area may be wrong): ${unresolvedScans.join('; ')}`);
   if (unknownEffects.length) console.log(`WARN     effects or missiles with no sprite sheet (left out): ${unknownEffects.join(', ')}`);
+  if (process.argv.includes('--assets')) {
+    const assets = findCreatureAssets(chunks, game);
+    Object.values(assets).forEach((a) => console.log(`ASSETS   ${a.n}: ${a.assets.join(', ')}`));
+    console.log(`ASSETS   ${Object.keys(assets).length} creatures refer to game assets their scene does not draw`);
+  }
   const { text, data } = readSnapshot();
+  // Frame size and playback of every effect the scenes draw, from the game's stylesheet (see tools/effect-sheets.mjs).
+  const css = await fetchGameCss(ORIGIN);
+  const { data: sheets, unreadable } = await fetchEffectSheets(ORIGIN, usedEffectIds(game, text), css);
+  if (unreadable.length) console.log(`WARN     effect sheets with no readable rule in the game stylesheet (drawn as square frames): ${unreadable.join(', ')}`);
+  const oldSheets = readEffectSheetSnapshot(text) || {};
+  const sheetDrift = [];
+  for (const id of Object.keys(sheets)) {
+    if (!oldSheets[id]) sheetDrift.push(`NEW      effect sheet ${id}`);
+    else if (JSON.stringify(sheets[id]) !== JSON.stringify(oldSheets[id])) sheetDrift.push(`CHANGED  effect sheet ${id}`);
+  }
+  for (const id of Object.keys(oldSheets)) if (!sheets[id]) sheetDrift.push(`REMOVED  effect sheet ${id}`);
+  sheetDrift.forEach((l) => console.log(l));
+  if (sheetDrift.length && process.argv.includes('--update')) {
+    const eol0 = text.includes('\r\n') ? '\r\n' : '\n';
+    writeFileSync(DB_PATH, readFileSync(DB_PATH, 'utf8').replace(EFFECT_SHEET_BLOCK, (_, x, y) => `${x}${serializeEffectSheets(sheets).replace(/\n/g, eol0)}${eol0}${y}`));
+    console.log(`Updated EFFECT_SHEET_DATA (${Object.keys(sheets).length} effects).`);
+  } else if (sheetDrift.length) process.exitCode = 1;
   const overrides = readOverrideIds(text);
   const uncovered = Object.keys(names).filter((id) => !game[id] && !overrides.has(id)).map((id) => names[id]);
   const handWritten = [...overrides].filter((id) => !game[id]).length;
@@ -174,7 +229,7 @@ async function main() {
   const lines = diff(game, data);
   if (!lines.length) {
     console.log(`OK: ${Object.keys(game).length} creatures with scenes match the snapshot.`);
-    await recordRun('abilityScenes', 'ok');
+    await recordRun('abilityScenes', sheetDrift.length && !process.argv.includes('--update') ? 'drift' : 'ok');
     return;
   }
   console.log(lines.join('\n'));

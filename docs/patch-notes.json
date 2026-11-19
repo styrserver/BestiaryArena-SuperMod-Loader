@@ -4,6 +4,56 @@
   },
   "notes": [
     {
+      "version": "5.3.7",
+      "changes": [
+        {
+          "mod": "Autoseller",
+          "type": "fixed",
+          "text": "No more false Error Log entries about the Dragon Plant when the autoplay widget is minimized or hidden."
+        },
+        {
+          "mod": "Awaken Tracker",
+          "type": "changed",
+          "text": "Event creatures can awaken: the Overview always lists them, other tracking only while their event is live."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "changed",
+          "text": "Event creatures now show their awakened ability. Ability previews now match the game: real areas, projectiles, effects, walking, stuns, status icons and normal attacks, with the awakened toggle, hidden when empty, opened by tap or keyboard focus, and sized to fit the window."
+        },
+        {
+          "mod": "Hunt Analyzer",
+          "type": "fixed",
+          "text": "Manual Runner runs no longer inflate the hunt time; skipped battles now count only their fight time."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "fixed",
+          "text": "The minimized debugger panel has a clean border again."
+        },
+        {
+          "mod": "Outfiter",
+          "type": "added",
+          "text": "New Wheelchair outfit, listed first."
+        },
+        {
+          "mod": "Outfiter",
+          "type": "changed",
+          "text": "When your outfit cannot ride, the Mounts window only previews mounts and saves nothing."
+        },
+        {
+          "mod": "Raid Hunter",
+          "type": "fixed",
+          "text": "Raids without custom settings now follow the default Auto-refill Stamina setting instead of always refilling."
+        },
+        {
+          "mod": "RunTracker",
+          "type": "fixed",
+          "text": "When browser storage is full, the oldest replays are dropped instead of failing to save new runs."
+        }
+      ]
+    },
+    {
       "version": "5.3.6",
       "changes": [
         {

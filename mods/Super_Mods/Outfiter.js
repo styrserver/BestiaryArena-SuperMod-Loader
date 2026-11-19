@@ -585,7 +585,8 @@ const OUTFIT_PALETTE = [ // colour index -> [r, g, b] (0-255), used to tint outf
 const MOUNT_GROUPS = {};
 
 function getOutfitIds() {
-  return OUTFIT_IDS;
+  const extra = customOutfitIds().filter((id) => !OUTFIT_IDS.includes(id));
+  return extra.length ? [...extra, ...OUTFIT_IDS] : OUTFIT_IDS;
 }
 
 // BEGIN OUTFIT_MOUNT_PARSER
@@ -693,6 +694,18 @@ const SLEQQUS_MOUNTS = {
 };
 const SLEQQUS_ICON = "data:image/png;base64,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";
 
+// Outfits the game has no sprite for. Each image is a 128x64 outfit sheet in the game's own layout (left 64x64 =
+// the sprite, right 64x64 = the head/body/legs/feet colour mask), so it tints like a native outfit. Ids sit far
+// above the game's own (highest is 20010) and are registered in its outfit table at runtime, so the native
+// "Change outfit" dialog lists them; sprite requests are answered from here (see installSleqqusMounts).
+// id -> [name, rarity, image]
+const CUSTOM_OUTFITS = {
+  90001: ["Wheelchair", 1,
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIAAAABACAYAAADS1n9/AAAErklEQVR42u2cPW4UQRCFBwJERuaI3BISEolTAiDwJYDMEZwBcwciInwCXwCfgBtY4hJOCAe9kd/oubZ6/rz2ds3Us0o7u7Nj2X5fV1dXz7ppUqlUKpVKpVKpVCqVSqVSqVQqlUqlUqlUKpVKpVKpVCqVSqVSqYlqb+Oxr03VYP7R0VF7fHy8xMj7XJuqBYCTk5POyCUA3OPaVAKQqgIApPBnT5/ciZcvnrdTr40OQNs2rRebMB9mX1xctFdXV13oMc5JkecGAIhcA5TM3wQEMBhGX19fd0Hj9Tnec3p6OhhRp4Ex81cPAcyF0Tc3N10oBMwGiBIEZ2dnXRCAaBBMBWC1EFgAPBAIAEz2glMAa4FIECQAtwB4UwCPz8+/7RSIGhaGSH2BOQC0jR+rAAAmIz5/+tgfsxhkBsBrOj1YOAgBACAMtUOwDwDCgkDjYDCM//3jS/v38nsfeI3ms1gcmyYQAAD1Qe2ZoDNuIMXPBSAcCBz9b16/an99fd+Z/u/Pzx4AvAYI8IiegK4OaL4eM4OwYGQ9UCsEvWkD87uemwpAGAh0/gcEMBlZABDgEecJAs7bJaL2CzwInCaRF4cHYOLPMQeAEBBoDwDGwWQCoFmAGQLv0ZHPJaLWCjzGewEUzWc2sHFIEOYYNtf8EBDAIBZ2MA6/JyFg4PmHd2/7ekBHPJ5r4cjzhIR1gZptlogHXTZONWup+SEg0GmAGzswnQFzAYBtEOlzXRLCdJ0iuKfAmgBNI8fsKiB4CPNDAACTEQQAj5rWvdHvrQBgMszme/Eapw8cox4oANAcqi7wjLqP0WFrAZiEnx8mEgCOZtsX8ADQPQPdTeTKggBIFmhqgWCfo35JcVkVAByh3g4hi0A+6lzP85zz8X1wzKIyEgD7gCBkU0gB0OlBVwpDWYDLP53rtUuoS0ILgTwPD0HUrnBvjC7P7HYxTOaxLgu5GkDBSAi0uOOu4QQAmppuMl0EQNCNo94c3dvHse0CKgQc/TCeqwbWAnaZxyLQjPbGmRLaqBD0X5EBUOMAAAyFwUz3HOnsEbBPYFvB+j1t80enmkJNEAqAna/I04ACgVFLCJAJaDyDzSRtDOnOoAXKWe+PLQubmiEofkUF4NYgjsreNG4Ha3/A2yBiT0ALPpsFHAA8w6uaBgasXiUAd+ZpAmDN9gBQCCYAYB93slBYANaQBfQ1e+cQCz/WBrYo5GYQl5fexo8tBmsuBBcBEBQEN03bO4K47mddYJtGDLaY7fccWQY2q8gAK4CgsY0h2xkkBN7tYnrbmM0s4QDYGATFlG1rAY50bgLpbqCCUqgvmhEI6ruTaMtTAQ1SCHRFoJlAO4ScIsa2fQvdwPr+cIvM58pxBRBwj4BFIILrf4LArqDeLOIUhEMQ1HtH8ZjBxXNt/A6hZgF7S5je/aP1gr07qDTFOCO/4j9YqSk49XzMDmEfGOV2rrcAlM6Pfdg0xn8c2RYAOyBYg/VeAK9x5ABQhCvGx8q2CcAgEPaOXzaC9AMjuj8Q/x9KjJm7EfNLHxr1otpWb2oRAM2M+dwzPyFYQwaYmdKDzvmpZqBLN7Sps6/rUgEgaB/4ulTlU8FjXLc5/QcBDl68/COjdgAAAABJRU5ErkJggg=="],
+};
+const NATIVE_OUTFIT_PATH = /^\/assets\/playerOutfit\/(\d+)\.png(?:[?#].*)?$/;
+const customOutfitIds = () => Object.keys(CUSTOM_OUTFITS).map(Number);
+
 // Entry for any mount id: the game's own table first, then the Sleqqus extras.
 function mountEntry(id) { return MOUNTS[id] ?? SLEQQUS_MOUNTS[id]; }
 function isSleqqusMount(id) { return !(id in MOUNTS) && id in SLEQQUS_MOUNTS; }
@@ -743,7 +756,74 @@ function refreshWornSleqqusMount() {
   }, 100);
 }
 
+// The native "Change outfit" dialog lists `Object.values(table).filter(owned)`, so a custom outfit needs an
+// entry in the game's outfit table: the module exporting `rP` (keyed by name, holds "Golden Outfit").
+const NATIVE_OUTFIT_TABLE_KEY = 'Golden Outfit';
+let nativeOutfitTable = null;
+let nativeOutfitsTimer = null;
+let nativeOutfitsTries = 0;
+
+function findNativeOutfitTable() {
+  const registry = window.webpackChunk_N_E;
+  if (!Array.isArray(registry) || typeof registry.push !== 'function') return null;
+  let webpackRequire = null;
+  try { registry.push([['ba-outfiter-outfits-probe'], {}, (req) => { webpackRequire = req; }]); } catch (_) { /* not ready */ }
+  if (typeof webpackRequire !== 'function') return null;
+  const isOutfitTable = (exp) => exp?.rP && typeof exp.rP === 'object' && NATIVE_OUTFIT_TABLE_KEY in exp.rP;
+  for (const mod of Object.values(webpackRequire.c || {})) {
+    if (isOutfitTable(mod?.exports)) return mod.exports.rP;
+  }
+  for (const [id, factory] of Object.entries(webpackRequire.m || {})) {
+    if (typeof factory !== 'function' || !String(factory).includes(`"${NATIVE_OUTFIT_TABLE_KEY}":{id:`)) continue;
+    try {
+      const exp = webpackRequire(id);
+      if (isOutfitTable(exp)) return exp.rP;
+    } catch (_) { /* try the next candidate */ }
+  }
+  return null;
+}
+
+function installCustomOutfits() {
+  if (nativeOutfitTable || nativeOutfitsTimer) return;
+  const attempt = () => {
+    nativeOutfitsTimer = null;
+    nativeOutfitTable = findNativeOutfitTable();
+    if (nativeOutfitTable) {
+      // Custom entries go first: re-insert the table's own entries after them (same object, so every holder sees it).
+      const own = Object.entries(nativeOutfitTable);
+      const added = {};
+      for (const id of customOutfitIds()) {
+        const [name, rarity] = CUSTOM_OUTFITS[id];
+        if (!own.some(([, o]) => o.id === id)) added[name] = { id, name, rarity, mountable: false, custom: 'outfiter' };
+      }
+      if (Object.keys(added).length) {
+        for (const [key] of own) delete nativeOutfitTable[key];
+        Object.assign(nativeOutfitTable, added, Object.fromEntries(own));
+      }
+      console.log('[Outfiter] Custom outfits registered in the game outfit table:', customOutfitIds().join(', '));
+      if (localStorage.getItem('outfiter-enabled') === 'true') mergeOutfitsIntoPlayer(); // re-run the dialog's owned-outfit filter
+      return;
+    }
+    if (++nativeOutfitsTries < 40) nativeOutfitsTimer = setTimeout(attempt, 500);
+    else console.warn('[Outfiter] Game outfit table not found; custom outfits will not show in the native dialog');
+  };
+  attempt();
+}
+
+function uninstallCustomOutfits() {
+  if (nativeOutfitsTimer) clearTimeout(nativeOutfitsTimer);
+  nativeOutfitsTimer = null;
+  nativeOutfitsTries = 0;
+  if (nativeOutfitTable) {
+    for (const [name, entry] of Object.entries(nativeOutfitTable)) {
+      if (entry?.custom === 'outfiter') delete nativeOutfitTable[name];
+    }
+    nativeOutfitTable = null;
+  }
+}
+
 function installSleqqusMounts() {
+  installCustomOutfits();
   if (!imageSrcPatch) {
     const desc = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'src');
     if (desc?.set && desc.configurable) {
@@ -751,8 +831,14 @@ function installSleqqusMounts() {
       imageSrcPatch = {
         ...desc,
         set(value) {
-          const match = typeof value === 'string' ? NATIVE_MOUNT_PATH.exec(value) : null;
-          desc.set.call(this, match && isSleqqusMount(Number(match[1])) ? SLEQQUS_MOUNTS[match[1]][2] : value);
+          let next = value;
+          if (typeof value === 'string') {
+            const mount = NATIVE_MOUNT_PATH.exec(value);
+            const outfit = mount ? null : NATIVE_OUTFIT_PATH.exec(value);
+            if (mount && isSleqqusMount(Number(mount[1]))) next = SLEQQUS_MOUNTS[mount[1]][2];
+            else if (outfit && Number(outfit[1]) in CUSTOM_OUTFITS) next = CUSTOM_OUTFITS[outfit[1]][2];
+          }
+          desc.set.call(this, next);
         }
       };
       Object.defineProperty(HTMLImageElement.prototype, 'src', imageSrcPatch);
@@ -781,6 +867,7 @@ function installSleqqusMounts() {
 }
 
 function uninstallSleqqusMounts() {
+  uninstallCustomOutfits();
   if (nativeMountsTimer) clearTimeout(nativeMountsTimer);
   nativeMountsTimer = null;
   nativeMountsTries = 0;
@@ -909,7 +996,7 @@ function iconTipFor(event) {
   const x = event.clientX - rect.left;
   const y = event.clientY - rect.top;
   if (addedOutfits.has(Number(id)) && x >= rect.width - BADGE.size && y <= BADGE.size) {
-    return t('mods.outfiter.tooltipNotOwned');
+    return t(Number(id) in CUSTOM_OUTFITS ? 'mods.outfiter.tooltipModOnly' : 'mods.outfiter.tooltipNotOwned');
   }
   if (id in MOUNTABLE_OUTFITS && x <= ICON_PAW.inset + ICON_PAW.size && y >= rect.height - ICON_PAW.inset - ICON_PAW.size) {
     return t('mods.outfiter.tooltipCanRide');
@@ -1508,6 +1595,7 @@ function openMountSelector() {
     const riding = ride && selected !== null;
     const switchTo = riding ? pickMountableOutfit(player) : null;
     // Riding on: you on the mount. Riding off: the mount alone. No mount picked: just you.
+    // A mount pick always previews (on a rideable outfit if yours cannot ride), but Save ignores it then.
     if (selected === null) paintPreview(player?.outfitId, null);
     else paintPreview(riding ? (switchTo ?? player?.outfitId) : null, selected);
     previewRarity.setAttribute('data-rarity', selected === null ? '' : String(mountEntry(selected)[1]));
@@ -1517,8 +1605,10 @@ function openMountSelector() {
     rideBtn.textContent = ride ? t('mods.outfiter.ridingOn') : t('mods.outfiter.ridingOff');
     rideBtn.className = 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular gap-1 px-2 py-0.5 pb-[3px] pixel-font-14 mt-auto ' +
       (ride ? 'frame-1-green active:frame-pressed-1-green surface-green' : 'frame-1 active:frame-pressed-1 surface-regular');
-    rideBtn.disabled = selected === null;
-    rideBtn.style.opacity = selected === null ? '0.5' : '';
+    rideBtn.disabled = selected === null || !canRide;
+    // Greyed and disabled when the outfit cannot ride.
+    rideBtn.style.opacity = selected === null || !canRide ? '0.5' : '';
+    rideBtn.style.filter = canRide ? '' : 'grayscale(1)';
   };
 
   const addSlot = (id) => {
@@ -1591,10 +1681,10 @@ function openMountSelector() {
     refresh();
   });
   dialog.querySelector('[data-mount-save]').addEventListener('click', () => {
+    if (!canRide) { close(); return; } // preview only: an outfit that cannot ride saves nothing
     const target = ride ? selected : null;
     if (selected !== null) writeLastMount(selected);
-    const needsOutfit = target !== null && pickMountableOutfit(player) !== null;
-    if (target !== initial || needsOutfit) window.Outfiter.setMount(target);
+    if (target !== initial) window.Outfiter.setMount(target);
     close();
   });
 

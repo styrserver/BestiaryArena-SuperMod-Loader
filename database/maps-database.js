@@ -488,6 +488,31 @@ function getFloorCreatureGameIds(roomId, floorIndex = 0) {
   return ids;
 }
 
+/** Adds the gameIds of every actor placed on a room's board, all floors, to `ids`. */
+function addRoomActorGameIds(room, ids) {
+  const addActors = (actors) => {
+    if (!Array.isArray(actors)) return;
+    for (const actor of actors) {
+      if (actor && actor.id != null && Number.isFinite(Number(actor.id))) ids.add(Number(actor.id));
+    }
+  };
+  addActors(room?.file?.data?.actors);
+  if (Array.isArray(room?.floorFiles)) {
+    for (const floorFile of room.floorFiles) addActors(floorFile?.data?.actors);
+  }
+  return ids;
+}
+
+/**
+ * gameIds of every creature placed on one room's board across all floors (floor-aware, unlike
+ * state.utils.getBoardMonstersFromRoomId). Not cached: room data can change.
+ * @param {string} roomId
+ * @returns {Set<number>}
+ */
+function getRoomBoardGameIds(roomId) {
+  return addRoomActorGameIds(getMapById(roomId), new Set());
+}
+
 const boardMonsterGameIdCache = new Map();
 
 /**
@@ -505,19 +530,10 @@ function getBoardMonsterGameIds({ includeRaids = false, includeDrops = false } =
   const cached = boardMonsterGameIdCache.get(cacheKey);
   if (cached) return cached;
   const ids = new Set();
-  const addActors = (actors) => {
-    if (!Array.isArray(actors)) return;
-    for (const actor of actors) {
-      if (actor && actor.id != null && Number.isFinite(Number(actor.id))) ids.add(Number(actor.id));
-    }
-  };
   for (const room of getAllMaps()) {
     if (!room?.id) continue;
     if (!includeRaids && (room.raid === true || isMapRaidComprehensive(room.id))) continue;
-    addActors(room.file?.data?.actors);
-    if (Array.isArray(room.floorFiles)) {
-      for (const floorFile of room.floorFiles) addActors(floorFile?.data?.actors);
-    }
+    addRoomActorGameIds(room, ids);
     if (includeDrops) {
       for (const gameId of getExtraMonsterDropGameIds(room)) ids.add(gameId);
     }
@@ -1058,6 +1074,7 @@ mapsDatabase.getMultiFloorRoomIds = getMultiFloorRoomIds;
 mapsDatabase.getBoardMonstersForFloor = getBoardMonstersForFloor;
 mapsDatabase.getFloorCreatureGameIds = getFloorCreatureGameIds;
 mapsDatabase.getBoardMonsterGameIds = getBoardMonsterGameIds;
+mapsDatabase.getRoomBoardGameIds = getRoomBoardGameIds;
 mapsDatabase.getMapsByStaminaCost = getMapsByStaminaCost;
 mapsDatabase.getRaidMaps = getRaidMaps;
 mapsDatabase.getNonRaidMaps = getNonRaidMaps;

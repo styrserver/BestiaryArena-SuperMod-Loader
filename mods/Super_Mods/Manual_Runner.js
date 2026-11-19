@@ -2086,6 +2086,8 @@ async function handleSkipButton() {
       if (isStaminaSkipButton(skipButton)) {
         noteStaminaSkipCost();
       }
+      // Timestamp read by Hunt Analyzer's battle-timing log (diagnosing inflated battle time)
+      window.__baManualRunnerSkipAt = Date.now();
       skipButton.click();
       await sleep(500); // Wait for skip to process
 

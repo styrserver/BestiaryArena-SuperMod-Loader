@@ -30,7 +30,7 @@ const { isCreatureBundle, analyze, analyzeFull, parseNameToId } = createRequire(
 const ORIGIN = 'https://bestiaryarena.com';
 const DB_PATH = join(dirname(fileURLToPath(import.meta.url)), '..', 'database', 'creature-database.js');
 /** Snapshot fields read from the creature class, not from constants: range, ranged flag, first-cast delay (ms). */
-const OPTIONAL_FIELDS = ['r', 'rc', 'ic', 's'];
+const OPTIONAL_FIELDS = ['r', 'rc', 'ic', 's', 'am', 'aa', 'cb', 'cv'];
 const DATA_BLOCK = /(\/\/ BEGIN CREATURE_COMBAT_DATA\r?\n)[\s\S]*?(\/\/ END CREATURE_COMBAT_DATA)/;
 
 async function fetchText(url) {

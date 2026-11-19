@@ -9,7 +9,14 @@ bundle (area masks like `"\nOOXOO\nXX+XX\n..."`, `missile:"fire"`, `effect:"larg
 effect sprite ids in a separate effect table (`{bleed:1,...,largeFireExplosion:7,...}`). So the mod ships a
 snapshot, same idea as `docs/creature_combat_snapshot.md`:
 
-- `ABILITY_SCENE_DATA` in `database/creature-database.js`, between the `// BEGIN ABILITY_SCENE_DATA` and
+- **Live first.** The page-start hook (`BestiaryCombatOverrides.getLiveScenes()` in `content/ba-combat.js`) already
+  holds the creature module; it parses the scenes and the effect / missile id tables from the running game, so a game
+  update needs no snapshot refresh. `getAbilityScene` order: hand-written `ABILITY_SCENE_OVERRIDES`, then live data,
+  then the snapshot (used when the hook is absent or the game is not loaded). Cooldown constants are live too. The
+  row builder `sceneRowFrom` is shared with the tool. Effect frame counts come from the snapshot, else are measured
+  from the sheet on first use (the effect is omitted until it has loaded); missile sheets are probed the same way.
+  Verbose log: `[CreatureDB][ability-scene] source` says `live game data` or `snapshot`.
+- `ABILITY_SCENE_DATA` (now the fallback, and the check that live parsing still matches) in `database/creature-database.js`, between the `// BEGIN ABILITY_SCENE_DATA` and
   `// END ABILITY_SCENE_DATA` markers. Never edit it by hand: `tools/check-ability-scenes.mjs` writes it.
 - Read through `creatureDatabase.getAbilityScene(gameId)` -> `{ name, masks, missiles, effects }`.
 - Parser: the `sc` field in `content/ba-combat.js` (`sceneFields`), shared with the combat snapshot parser.
@@ -120,3 +127,51 @@ play and end. A creature without scene data logs `hasSceneData: false`.
 
 If the parser stops finding masks, check the regexes in `sceneFields` against the live bundle first (the
 mask is `<var>=(0,<mod>.<fn>)("\n...")`, used as `<var>(t.position)` or `<var>(this.position)`).
+
+## Mechanic tags and templates
+
+Some abilities have no area to draw (a push, a sleep then charge). The parser tags them by code shape (`sc.t`, in
+`content/ba-combat.js`): `push` = the auto attack calls `displaceTarget` (Ancient Scarab; the Wyvern's screech also
+displaces, but over an area, so it keeps its extracted scene) and `sleep` = `sleepPassiveTicker` (Bear), `arena` = `tryCreateArena` (Behemoth). Tags travel in
+the snapshot row (`"t":["push"]`, written by the tool) and the live row. `getAbilityScene` replaces the extracted area
+by the tag's template in `ABILITY_SCENE_TEMPLATES` (`database/creature-database.js`), drawn against a dummy by
+`createCyclopediaPushGrid` (modes `push`, `charge`). A new mechanic = a tag regex, a template, and (if it moves
+actors) a renderer mode; creatures that match nothing keep the generic area scene or are listed as TODO by the tool.
+Hand-written `ABILITY_SCENE_OVERRIDES` still win over tags.
+
+## Effect sheets: frame size and playback come from the game's stylesheet
+
+Every effect (`/assets/EFFECT/N.png`) has its frame size, frame order and timing in the game CSS (`.effect.id-N`,
+`@keyframes effect-N`): e.g. `floorSpike` (294) is 64x64 frames over 1.2s (frame jumps at 0/17/25/67/75/83/92%), `smoke` (242)
+is 12 frames of 32x64 and plays frames 6-11 in 0.6s. A frame sits with its bottom-right on the tile (so a 64px frame spills one
+tile up and left). Nothing of this is hardcoded in the scenes:
+
+- `creatureDatabase.getEffectSheet(id)` reads it **live**: it puts an element with the game's own markup (`sprite effect id-N`)
+  in the page and lets the browser's CSS cascade resolve the size and animation, then reads the named `@keyframes`.
+- `EFFECT_SHEET_DATA` in `creature-database.js` is only the fallback (when the page has no rule). `node tools/check-ability-scenes.mjs`
+  reads the same rules from the live site's stylesheet (`tools/effect-sheets.mjs`) and fails on drift; `--update` rewrites the fallback.
+- The scene draws effects through `cyclopediaSceneEffectPlan` / `...Css` / `...Keyframes` in `Cyclopedia.js`.
+  Only hand-sized bursts (`sz`, e.g. Blue Djinn) and the Elf/Geomancer rune and stone sprites use their own code.
+
+## Writing a hand-built scene (the `scene<Creature>()` functions)
+
+Most creatures from id 1 on have a function in `database/creature-database.js` (`sceneKnight()`, `sceneCyclopsSmith(awaken)`, ...) wired in `ABILITY_SCENE_OVERRIDES`, and a second entry in `ABILITY_SCENE_AWAKENED` when the awakened class differs. Build one from the creature's **class in the game bundle** (`loadChunks()` in `tools/check-creature-combat.mjs`), not from the tooltip: colours, sizes, timings and effect ids all come from the code.
+
+- **Shared helpers** (next to `SCENE_FX`): `sceneSelf()` (the caster alone), `sceneDmg(at, on, how, crit, dtype)` / `sceneHeal(at, on, crit)` / `sceneTaunt` / `sceneArea(mask)`, `SCENE_FX` (`heal`, `poof`, `magicPoof`, `teleportBlue`, `haste`, `moe`, `raiseStat`), `SCENE_BAR` (cooldown blue, ability power purple), `SCENE_TICK_MS` (62.5), `walkStepMs(speed)`, `sceneInvisibleLoops(at, count, where)` (the looping `heal` that stands in for an invisible creature), `SCENE_MISSILE_MS` (225: every missile flies that long) and `SCENE_VILLAIN_TI` (the villain Ti attacker). Reuse them; do not retype an effect id.
+- **Coordinates:** effect `tiles` count from the TARGET tile (the caster in a self-anchored scene); `to`, status icon / bar / stun / number `on` count from the CASTER; `anchor: 'target'` for mates and overlays placed from the target; flight `from` / `to` are relative to the scene centre.
+- **Things that move:** a number, bar, stun or status icon whose `on` is `'self'` follows the walking caster (`casterFlee`), and one whose `on` is the tile a walking mate STARTS on follows that mate (`cyclopediaMateWalkKeys`). An `on` that is already the tile it ends on stays where it is.
+- **Cooldown bar:** automatic from the class (`cb` / `cv` in the snapshot, drawn over `cooldownMs` from the cast, `cooldownCastAt` to move the cast). `noCooldownBar: true` when the scene draws its own `bars`.
+- **Normal attacks:** a generic attack loop is added for creatures with a ranged or melee auto attack; `noAutoAttack: true` (and the `SCENE_NO_AUTO_ATTACK` list) when the scene already draws its own hits.
+- **Which parts show:** `getAbilityScene` drops a part that animates nothing. A part counts when it has `mi`, `fx`, `overlays`, `flights`, `mates` or `passives` (or an `X` in a mask); a scene with only `numbers` / `bars` is dropped.
+- **Left out on purpose:** effects and missiles with no sprite sheet (`corymVanguardFx`, `thalasArrow`, `hunterTrap`), the Monster Cauldron head transformation, awakened-only buffs that change nothing visible. Say so in the function's comment.
+- **Always write the function comment first:** one paragraph with what the class does (numbers, timings, ids) and what the preview shows.
+
+### Checking a scene
+
+```
+node tools/check-ability-scenes.mjs        # snapshot + effect sheets vs the live game
+node tools/check-scene-data.mjs            # every scene is well formed (kinds, ranges, timings; warns on numbers 1-100 ms from a landing)
+node tools/audit-scenes.mjs --from 59 --md docs/scene-audit.md   # what each class does that its scene does not
+```
+
+The five `check-scene-data` warnings for Elf Scout, Magma Crystal and Cake Drake are intentional (the game schedules those hits just before or after the missile lands). The audit reads code, not pixels: a wrong position or timing still needs a look in the Cyclopedia. After a refactor of `creature-database.js`, run `node tools/dump-scenes.mjs before.json` and again after, then `node tools/dump-scenes.mjs --diff before.json after.json`: the scenes must be identical.

@@ -610,7 +610,35 @@ const StorageManager = {
   },
   
   async saveStorage() {
-    return Utils.safeLocalStorage.set(RUN_STORAGE_KEY, runStorage);
+    if (Utils.safeLocalStorage.set(RUN_STORAGE_KEY, runStorage)) return true;
+    // Quota full: replays are the only unbounded data, so drop the oldest ones and retry.
+    return this.evictOldestReplaysAndSave();
+  },
+
+  evictOldestReplaysAndSave() {
+    const replays = runStorage && runStorage.replays;
+    if (!replays) return false;
+    const all = [];
+    for (const mapKey of Object.keys(replays)) {
+      for (const replay of replays[mapKey]) all.push({ mapKey, replay });
+    }
+    all.sort((a, b) => (a.replay.timestamp || 0) - (b.replay.timestamp || 0));
+    const batch = Math.max(1, Math.ceil(all.length * 0.1));
+    for (let attempt = 0; attempt < 8 && all.length > 0; attempt++) {
+      for (const { mapKey, replay } of all.splice(0, batch)) {
+        const list = replays[mapKey];
+        const i = list.indexOf(replay);
+        if (i !== -1) list.splice(i, 1);
+        if (list.length === 0) delete replays[mapKey];
+      }
+      runStorage.metadata.totalReplays = all.length;
+      try {
+        localStorage.setItem(RUN_STORAGE_KEY, JSON.stringify(runStorage));
+        console.warn(`[RunTracker] Storage full: dropped oldest replays, ${all.length} kept`);
+        return true;
+      } catch (error) { /* still too big, drop more */ }
+    }
+    return false;
   }
 };
 
