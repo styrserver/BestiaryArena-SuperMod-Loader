@@ -6126,6 +6126,26 @@ async function decryptRunsData(encryptedText, password) {
   }
 }
 
+// Offline / blocked network is the player's connection, not a mod bug: warn (level-gated, never
+// stored in the Error Log) instead of error. Timestamp lets callers that only see a generic failure
+// (e.g. auto-upload) tell it apart.
+let lastNetworkFetchErrorAt = 0;
+function isNetworkFetchError(error) {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return true;
+  return error instanceof TypeError && /NetworkError|Failed to fetch|Load failed|network/i.test(error.message || '');
+}
+function reportFetchError(message, error) {
+  if (isNetworkFetchError(error)) {
+    lastNetworkFetchErrorAt = Date.now();
+    console.warn(`${message} (network unavailable)`, error);
+  } else {
+    console.error(message, error);
+  }
+}
+function recentlyHadNetworkFetchError(withinMs = 15000) {
+  return Date.now() - lastNetworkFetchErrorAt < withinMs;
+}
+
 // Firebase service functions
 const FirebaseRunsService = {
   async get(path, errorContext, defaultReturn = null) {
@@ -6139,7 +6159,7 @@ const FirebaseRunsService = {
       }
       return await response.json();
     } catch (error) {
-      console.error(`[Mod Settings] Error ${errorContext}:`, error);
+      reportFetchError(`[Mod Settings] Error ${errorContext}:`, error);
       return defaultReturn;
     }
   },
@@ -6335,7 +6355,7 @@ async function uploadBestRunsToFirebase(playerName, bestRuns, password, options 
     }
     return true;
   } catch (error) {
-    console.error('[Mod Settings] Error uploading runs to Firebase:', error);
+    reportFetchError('[Mod Settings] Error uploading runs to Firebase:', error);
     return false;
   }
 }
@@ -8198,7 +8218,11 @@ async function runAutoUpload() {
       if (autoUploadDebounceTimer) clearTimeout(autoUploadDebounceTimer);
       autoUploadDebounceTimer = setTimeout(runAutoUpload, Math.max(500, result.retryInMs + 250));
     } else {
-      console.error('[Mod Settings] Auto-upload failed:', result.error);
+      if (recentlyHadNetworkFetchError()) {
+        console.warn('[Mod Settings] Auto-upload failed (network unavailable):', result.error);
+      } else {
+        console.error('[Mod Settings] Auto-upload failed:', result.error);
+      }
     }
   } finally {
     autoUploadInFlight = false;
@@ -20376,7 +20400,7 @@ async function fetchLivePlayerCount() {
     console.log(`[Mod Settings] Player count updated: ${count}`);
     return count;
   } catch (error) {
-    console.error('[Mod Settings] Error fetching player count:', error);
+    reportFetchError('[Mod Settings] Error fetching player count:', error);
     return null;
   }
 }

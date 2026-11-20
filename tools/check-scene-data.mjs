@@ -27,7 +27,7 @@ const db = g.creatureDatabase;
 const errors = [];
 const warns = [];
 const TIME_KEYS = ['at', 'ms', 'until', 'from', 'lead', 'holdMs'];
-const OVERLAY_KINDS = new Set(['aura', 'drop', 'timed', 'fall', 'ping', 'loop', 'glow', 'circle', 'rune', 'fade', 'float', 'roar', 'say', 'bonk', 'dark', 'haze']);
+const OVERLAY_KINDS = new Set(['aura', 'drop', 'timed', 'fall', 'ping', 'loop', 'glow', 'circle', 'rune', 'fade', 'float', 'roar', 'say', 'bonk', 'dark', 'haze', 'chipKnife', 'trap']);
 const STATUS_ICONS = new Set(['poison', 'slow', 'debuff', 'heal-reduction', 'taunt', 'buff']);
 const TIME_STRING = /^(land|hit)([+-]\d+(\.\d+)?)?$/;
 const isNum = (v) => typeof v === 'number' && Number.isFinite(v);

@@ -11869,9 +11869,12 @@
             // Not mounted / minimized is the player's own layout (nothing to click, no drop is visible):
             // verbose log only. Only a visible, un-minimized widget we still cannot locate is a real fault.
             if (icons > 0 && minimized === 0) {
+                const bottoms = Array.from(document.querySelectorAll('.widget-bottom'))
+                    .map((el) => `min=${el.getAttribute('data-minimized')}`).join(',') || 'none';
                 reportPlantSkip(
                     'autoplay widget container not found',
-                    `autoplayIcons=${icons} minimizedWidgets=${minimized} (icon present, container lookup failed)`
+                    `autoplayIcons=${icons} minimizedWidgets=${minimized} widgetBottoms=[${bottoms}] ` +
+                    `autosetupDivs=${document.querySelectorAll('div[data-autosetup]').length} (icon present, container lookup failed)`
                 );
             } else {
                 logAutosellerDebugThrottled(

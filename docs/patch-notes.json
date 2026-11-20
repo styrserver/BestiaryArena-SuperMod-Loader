@@ -4,6 +4,31 @@
   },
   "notes": [
     {
+      "version": "5.3.8",
+      "changes": [
+        {
+          "mod": "Cyclopedia",
+          "type": "changed",
+          "text": "Ability previews now cover many more creatures, start with 1 second of cooldown left, show normal attacks twice as fast and follow moving creatures; about 25 previews were reworked to match the game."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "fixed",
+          "text": "Going offline no longer floods the Error Log with network errors."
+        },
+        {
+          "mod": "Outfiter",
+          "type": "fixed",
+          "text": "Mod-only outfits like Wheelchair no longer revert to your real outfit after the game syncs."
+        },
+        {
+          "mod": "Raid Hunter",
+          "type": "fixed",
+          "text": "Other automation mods now resume when a raid ends instead of staying blocked."
+        }
+      ]
+    },
+    {
       "version": "5.3.7",
       "changes": [
         {

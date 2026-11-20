@@ -1059,14 +1059,31 @@ function mergeOutfitsIntoPlayer() {
 // the outfits merged in above. Re-merge whenever any are missing while the toggle is on, so enabling
 // at runtime does not depend on the merge having happened after the game's last sync.
 let playerGuardSub = null;
+let lastSeenOutfitId = null;
+
+// The server never stores a mod-only outfit (changeOutfit is rejected, we only force it locally), so any
+// later player sync from server data puts the server's outfit back. Re-apply the saved one in that case.
+function reassertCustomOutfit(ctx) {
+  const saved = loadOutfitFromStorage();
+  if (!saved || !(Number(saved.outfitId) in CUSTOM_OUTFITS)) return;
+  if (ctx.outfitId === saved.outfitId) return;
+  console.log('[Outfiter] Player outfit reset by game sync:', ctx.outfitId, '-> re-applying', saved.outfitId);
+  restoreSavedOutfit();
+}
 
 function startOutfitGuard() {
   if (playerGuardSub) return;
   playerGuardSub = globalThis.state.player.subscribe(() => {
     try {
       if (localStorage.getItem('outfiter-enabled') !== 'true') return;
-      const have = new Set(globalThis.state.player.getSnapshot().context.outfits);
+      const ctx = globalThis.state.player.getSnapshot().context;
+      if (ctx.outfitId !== lastSeenOutfitId) {
+        console.log('[Outfiter] Player outfitId changed:', lastSeenOutfitId, '->', ctx.outfitId);
+        lastSeenOutfitId = ctx.outfitId;
+      }
+      const have = new Set(ctx.outfits);
       if (getOutfitIds().some((id) => !have.has(id))) mergeOutfitsIntoPlayer();
+      reassertCustomOutfit(ctx);
     } catch (_) { /* storage or state unavailable */ }
   });
 }
@@ -1149,9 +1166,26 @@ function loadOutfitFromStorage() {
   return null;
 }
 
+// Parsed changeOutfit request when it asks for an outfit or mount the account does not really own
+// (the server would reject it); null for a request the server can accept.
+function modOnlyOutfitChange(body) {
+  try {
+    const json = JSON.parse(body)?.['0']?.json;
+    if (!json || json.outfitId == null) return null;
+    const ctx = globalThis.state.player.getSnapshot().context;
+    const outfitModOnly = Number(json.outfitId) in CUSTOM_OUTFITS || addedOutfits.has(json.outfitId);
+    const mountModOnly = json.mountId != null && !(ctx.mounts || []).includes(json.mountId);
+    return outfitModOnly || mountModOnly ? { outfitId: json.outfitId, colors: json.colors, mountId: json.mountId } : null;
+  } catch (_) {
+    return null;
+  }
+}
+
 function forceOutfitChangeLocally(outfitId, colors = null, mountId) {
   try {
     console.log('[Outfiter] Forcing local outfit change for ID:', outfitId, 'mount:', mountId);
+    // Save first: the player-state guard reads the saved outfit and would revert this change otherwise.
+    saveOutfitToStorage(outfitId, colors, mountId);
 
     globalThis.state.player.trigger.setState({
       fn: (prev) => ({
@@ -1167,9 +1201,6 @@ function forceOutfitChangeLocally(outfitId, colors = null, mountId) {
         }),
       }),
     });
-    
-    // Save to localStorage for persistence
-    saveOutfitToStorage(outfitId, colors, mountId);
 
     console.log('[Outfiter] Successfully forced local outfit change');
     return true;
@@ -1293,6 +1324,15 @@ function interceptOutfitChangeErrors() {
 
       // Check if this is an outfit change request
       if (url && url.includes('account.changeOutfit') && options && options.method === 'POST') {
+        // The server would reject a mod-only outfit/mount with a 400 (logged by the browser as a network
+        // error), so answer it locally without sending the request.
+        const localOnly = modOnlyOutfitChange(options.body);
+        if (localOnly) {
+          forceOutfitChangeLocally(localOnly.outfitId, localOnly.colors, localOnly.mountId);
+          return Promise.resolve(new Response(JSON.stringify([{
+            result: { data: { success: true, outfitId: localOnly.outfitId, colors: localOnly.colors } }
+          }]), { status: 200, statusText: 'OK', headers: { 'Content-Type': 'application/json' } }));
+        }
         return next.apply(this, args).then(async response => {
           // Extract outfit data from request
           let outfitId = null;

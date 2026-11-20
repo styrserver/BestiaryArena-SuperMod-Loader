@@ -547,6 +547,19 @@ function cancelCurrentRaid(reason = 'unknown') {
 
 // Helper function to perform standard raid cleanup (quest button, monitoring stops)
 function performRaidCleanup() {
+    // Hand autoplay + quest button back, or Better Tasker / Automator / Awaken Farmer stay locked
+    // out until a page reload (which is skipped when auto-reload is off or a game is running).
+    try {
+        if (window.AutoplayManager?.getCurrentOwner?.() === 'Raid Hunter') {
+            if (globalThis.state?.board?.getSnapshot?.()?.context?.mode === 'autoplay') {
+                globalThis.state.board.send({ type: 'setPlayMode', mode: 'manual' });
+            }
+            window.AutoplayManager.releaseControl('Raid Hunter');
+        }
+        window.QuestButtonManager?.releaseControl?.('Raid Hunter');
+    } catch (error) {
+        console.error('[Raid Hunter] Error releasing control after raid:', error);
+    }
     restoreQuestButtonAppearance();
     stopAutoplayStateMonitoring();
     stopQuestButtonValidation();

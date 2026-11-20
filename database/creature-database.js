@@ -235,6 +235,8 @@ const EFFECT_SHEET_DATA = {
   53: {"w":64,"h":64,"sw":128,"n":44,"ms":1200,"keys":[[0,0],[4,2],[8,4],[13,6],[17,8],[21,10],[25,12],[29,14],[33,16],[38,18],[42,20],[46,22],[58,24],[63,26],[67,28],[71,30],[75,32],[79,34],[83,36],[87,38],[92,40],[96,42],[99,42]]},
   54: {"w":64,"h":64,"n":9,"ms":900,"from":0,"to":9,"steps":9},
   55: {"w":64,"h":64,"n":14,"ms":1400,"from":0,"to":14,"steps":14},
+  56: {"w":64,"h":64,"n":8,"ms":820,"keys":[[0,0],[10,1],[22,2],[34,3],[48,4],[62,5],[76,6],[88,7],[99,7]]},
+  57: {"w":32,"h":32,"n":14,"ms":1400,"from":0,"to":14,"steps":14},
   63: {"w":64,"h":32,"n":12,"ms":1500,"keys":[[0,0],[27,1],[33,2],[40,3],[47,4],[53,5],[60,6],[67,7],[73,8],[80,9],[87,10],[93,11],[99,11]]},
   66: {"w":32,"h":32,"n":24,"ms":2500,"keys":[[0,0],[4,1],[8,2],[12,3],[16,4],[20,5],[24,6],[28,7],[32,8],[38,9],[42,10],[46,11],[50,12],[54,13],[58,14],[62,15],[66,16],[70,17],[76,18],[80,19],[84,20],[88,21],[92,22],[96,23],[99,23]]},
   67: {"w":64,"h":64,"n":21,"ms":2100,"from":0,"to":21,"steps":21},
@@ -440,9 +442,19 @@ const SCENE_FX = {
 const SCENE_BAR = { cool: '#6699ff', ap: '#c084fc' };
 // One game tick in ms, and a creature's walking step at a speed stat in ms.
 const SCENE_TICK_MS = 62.5;
+// The villain Ti's speed stat (the game's Ti: 100): the scenes are built when the file loads, before the game's data is readable, so a speed that depends on it is written here.
+const SCENE_TI_SPEED = 100;
 const walkStepMs = (speed) => walkStepTicks(speed) * SCENE_TICK_MS;
 // The caster alone on its own tile (the base of every self-anchored scene; a fresh object each time).
 const sceneSelf = () => ({ m: [{ a: 'self', rows: ['+'] }], mi: [] });
+// The target tile alone, for a scene that spells everything out in effects (a fresh object each time).
+// The caster alone on a board `half` tiles out from the middle (7 x 7 is half 3), with no blood: the base of most hand-written scenes.
+const sceneBoard = (half) => ({ ...sceneSelf(), gridHalf: half, noBlood: 1 });
+// The spider's webs (items spiderWebCenter / spiderWeb0-3) on the target's tile and the four beside it, there from `at` for `ms`.
+const sceneWebs = (at, ms) => [[12747, 0, 0], [12749, 0, -1], [12751, -1, 0], [12755, 1, 0], [12753, 0, 1]].map(([id, dx, dy]) => ({ kind: 'timed', anchor: 'target', id, dx, dy, at, ms }));
+const sceneTarget = () => ({ m: [{ a: 'target', rows: ['+'], g: 1 }], mi: [] });
+// A villain Ti standing at [dx, dy] (the scenes' default enemy) facing a direction; `extra` adds mate options (walk, shake, hop...).
+const sceneTiMate = (dx, dy, facing, extra) => ({ id: SCENE_VILLAIN_TI.id, dx, dy, facing, ...extra });
 // An invisible creature is drawn as a looping `heal` effect (880ms a loop): `count` loops from `at` on `where` ({ w: 'self' } or { tiles: [[dx, dy]] }).
 const sceneInvisibleLoops = (at, count, where = { w: 'self' }) => Array.from({ length: count }, (_, i) => ({ ...SCENE_FX.heal, ...where, at: at + i * 880 }));
 
@@ -451,15 +463,17 @@ const sceneInvisibleLoops = (at, count, where = { w: 'self' }) => Array.from({ l
 // implemented in shared components, pulses on neighbouring tiles, buffs...). Same row shape as ABILITY_SCENE_DATA
 // ({ n, sc: { m, mi, fx } }); an entry here wins over the extracted row. The tool never rewrites this block; it lists
 // creatures with neither as TODO. Mask rows: '+' origin tile, 'X' hit, 'O' not; a: 'target' | 'self'.
-// Banshee's screech as one scene part: the one ability at 40% HP or less, where it shows everything (the heal and the green notes, the flee); `awaken` adds
-// the heal-reduction debuff on the enemies hit.
+// Banshee's screech as one scene part, above 40% HP: red notes on her and the two waves, she keeps fighting. (At 40% HP or less she also heals, plays green notes and flees: `part(label, true)` still
+// builds that, but it is not shown.) `awaken` adds the heal-reduction debuff on the enemies hit. She casts the moment the ability is ready, the first time at the start of the battle.
 const BANSHEE_INNER = ['XXX', 'X+X', 'XXX'];
 const BANSHEE_OUTER = ['OXXXO', 'XOOOX', 'XO+OX', 'XOOOX', 'OXXXO'];
 function sceneBansheeParts(awaken) {
   const part = (label, low) => ({
     l: label,
-    m: [{ a: 'self', rows: BANSHEE_INNER }, { a: 'self', rows: BANSHEE_OUTER }], mi: [],
-    mates: [{ id: 119, dx: 1, dy: 0, facing: 'west' }, { id: 119, dx: 2, dy: 0, facing: 'west' }],
+    // the red area tiles light as each wave HITS (3 and 8 ticks after the cast), not at the start: spelled out as `flashes` (the masks would light them at the loop start, before the cast)
+    ...sceneSelf(), gridHalf: 2,
+    flashes: [{ at: 687.5, ms: 800, tiles: sceneArea(BANSHEE_INNER) }, { at: 1000, ms: 800, tiles: sceneArea(BANSHEE_OUTER) }],
+    mates: [sceneTiMate(1, 0, 'west'), sceneTiMate(2, 0, 'west')],
     // fleeing (the game walks her away in the same tick as the cast, from every living enemy)
     ...(low ? { casterFlee: { at: 500, from: [[1, 0], [2, 0]] } } : {}),
     numbers: [...(low ? [sceneHeal(500, 'self', true)] : []), sceneDmg(690, [1, 0], 'magic', true), sceneDmg(1000, [2, 0], 'magic', true)],
@@ -474,7 +488,7 @@ function sceneBansheeParts(awaken) {
       { n: 'bleed', id: 1, f: 6, to: [1, 0], at: 690 }, { n: 'bleed', id: 1, f: 6, to: [2, 0], at: 1000 }
     ]
   });
-  return [part(null, true)];
+  return [part(null, false)];
 }
 
 // Dragon Lord's fire fields (`fireFieldFull`, item 2118: 64px frames, 5 of them, 0.6s a loop) on the target tile and every tile of the 5x5 mask from `at` ms.
@@ -499,7 +513,7 @@ function sceneWaterElemental(awaken) {
   const last = hits.length - 1;
   return {
     numbers: hits.map((h, i) => (ally(h) ? sceneHeal(at(i), on(h), true) : sceneDmg(at(i), on(h), 'drowning', true))),
-    m: [{ a: 'target', rows: ['+'], g: 1 }], mi: [], castRange: 3, noBlood: 1,
+    ...sceneTarget(), castRange: 3, noBlood: 1,
     mates: [{ id: 119, anchor: 'target', dx: -1, dy: 0, facing: 'east' }, { anchor: 'target', dx: -1, dy: 1, facing: 'east' }, { id: 119, anchor: 'target', dx: 0, dy: 1, facing: 'north' }],
     flights: hits.map((h, i) => ({ shot: { n: 'pinkBall', id: 62 }, from: i ? hits[i - 1] : [3, 3], to: h, at: start(i), ms: flight[i] })),
     passives: [{ src: 'splash', windows: [[at(0), at(last) + 4000]] }],
@@ -541,9 +555,9 @@ function sceneMinotaurGuard(awaken) {
   const enemies = [[-1, 0], [1, 0], [0, 1]];
   return {
     numbers: [sceneHeal(T + 62.5 * (tiles.length + 3), 'self', true), sceneDmg(2210, 'self', 'fire'), sceneDmg(2335, [-1, 0], 'magic')],
-    m: [{ a: 'self', rows: MINOTAUR_GUARD_MASK }], mi: [],
+    ...sceneSelf(), gridHalf: 2, flashes: [{ at: T, tiles: sceneArea(MINOTAUR_GUARD_MASK) }], // the area lights with the taunt, not at the loop start
     attacker: { ...SCENE_VILLAIN_TI, dx: -1, dy: 0, aim: [0, 0], at: 2210 - SCENE_MISSILE_MS },
-    mates: [{ id: 119, dx: 1, dy: 0, facing: 'west' }, { id: 119, dx: 0, dy: 1, facing: 'north' }],
+    mates: [sceneTiMate(1, 0, 'west'), sceneTiMate(0, 1, 'north')],
     statusIcons: enemies.map((e) => sceneTaunt(tauntAt(e), e)),
     passives: [{ src: 'exeta', windows: [[T, T + 5000]] }, ...(awaken ? [{ src: 'minotaur-guard-buff', windows: [[T + 250, T + 2250]] }] : [])],
     fx: [...sceneTauntRings(T, tiles), { ...SCENE_FX.moe, to: [0, 0], at: 2210 }, { ...SCENE_FX.haste, w: 'self', at: T + 62.5 * (tiles.length + 3) }]
@@ -559,7 +573,7 @@ function sceneWyvern(awaken) {
   const T = 500;
   const push = (dx, dy, step) => ({ id: 119, dx, dy, facing: dx < 0 ? 'east' : 'west', walk: { at: T, steps: [step], speed: 255, onEnter: { fx: { n: 'magicSparkle', id: 32, f: 14 }, number: 'magic', tiles: [[dx + step[0], dy + step[1]]] } } });
   return {
-    numbers: [sceneHeal(T, 'self')], m: [{ a: 'self', rows: WYVERN_MASK }], mi: [],
+    numbers: [sceneHeal(T, 'self')], ...sceneSelf(), gridHalf: 3, flashes: [{ at: T, tiles: sceneArea(WYVERN_MASK) }], // the area lights with the screech, not at the loop start
     mates: [push(-1, 0, [-1, 0]), push(2, 1, [1, 0])], casterFlee: { at: T, from: [[-1, 0], [2, 1]] },
     ...(awaken ? { stuns: [{ at: T + 312, ms: 1000, on: [-2, 0], shake: false }] } : {}),
     fx: [{ n: 'musicNotesBlue', id: 24, f: 11, tiles: sceneArea(WYVERN_MASK), at: T, opacity: 0.3 }, { n: 'musicNotesGreen', id: 19, f: 11, w: 'self', at: T },
@@ -606,7 +620,7 @@ function scenePolarBear() {
   const waves = POLAR_ICICLES.flatMap(([start, ms, rows]) => sceneArea(rows).map((tile) => { const d = delay(n++); return { n: 'icicleFall', id: 42, f: 12, tiles: [tile], at: T + start + d, ms: ms + d, reverse: true, opacity: 0.5 }; }));
   const enemies = [[-2, 0], [1, -1]];
   return {
-    numbers: enemies.map((e) => sceneDmg(T + 4375, e, 'ice', true)), m: [{ a: 'self', rows: POLAR_BOOM_MASK }], mi: [], // the boom hits the whole 5x5, corners too
+    numbers: enemies.map((e) => sceneDmg(T + 4375, e, 'ice', true)), ...sceneSelf(), gridHalf: 2, flashes: [{ at: T + 4375, ms: 800, tiles: sceneArea(POLAR_BOOM_MASK) }], // the boom hits the whole 5x5, corners too: lit when it booms
     mates: enemies.map(([dx, dy]) => ({ id: 119, dx, dy, facing: dx < 0 ? 'east' : 'south' })),
     statusIcons: enemies.map((e) => ({ at: T, icon: 'slow', on: e })),
     bars: [{ at: T, ms: 4500, on: 'self', color: '#c084fc' }],
@@ -624,7 +638,7 @@ function scenePolarBear() {
 // awakened its arrows are crits of TRUE damage at an enemy trapped in the runes (all its neighbours blocked). While alive it gives its ranged allies +1 range (`raiseStat`, a
 // pulse, the `distance` chip). The runes' fall is compressed to the game's real 6s here; the ally in the scene is a ranged Minotaur Archer.
 const ELF_RUNE_TILES = sceneArea(['XXX', 'X+X', 'XXX']);
-const ELF_ENEMIES = [[0, 0], [-3, 2]]; // the Dead Tree (the target) and a villain Ti: the runes go round EVERY enemy, each enemy's ring one tile per tick from the same moment
+const ELF_ENEMIES = [[0, 0], [-3, 2]]; // the target dummy (a villain Ti) and a second villain Ti: the runes go round EVERY enemy, each enemy's ring one tile per tick from the same moment
 function sceneElf(awaken) {
   const T = 500;
   const shot = 2000; // the Elf shoots once the runes are down
@@ -654,7 +668,7 @@ function sceneElfScout(awaken) {
   const hits = shots.map((t) => t + flightMs);
   return {
     numbers: [...hits.map((at) => sceneDmg(at)), ...(awaken ? [sceneDmg(500 + flightMs)] : [])],
-    castRange: 3, m: [{ a: 'target', rows: ['+'], g: 1 }], mi: [],
+    castRange: 3, ...sceneTarget(),
     statusIcons: [{ at: slowAt, icon: 'slow' }],
     passives: [{ src: 'icearrowslow', windows: [[slowAt, hits[hits.length - 1] + 2500]] }],
     mates: awaken ? [{ id: 39, anchor: 'target', dx: 3, dy: -2, facing: 'west' }] : [],
@@ -788,7 +802,7 @@ function sceneOrcRider(awaken) {
   const bites = volleys.flatMap((v) => [v, ...wolves.map((_, i) => v + 125 * (i + 1))]);
   return {
     numbers: bites.map((at) => sceneDmg(at, 'target', 'physical')),
-    m: [{ a: 'target', rows: ['+'], g: 1 }], mi: [], noBlood: 1,
+    ...sceneTarget(), noBlood: 1,
     mates: wolves.map((w) => ({ outfit: 3, dx: w.dx, dy: w.dy, facing: w.facing, at: T })),
     holdMs: volleys[volleys.length - 1] + 125 * wolves.length + 900,
     fx: [{ n: 'musicNotesWhite', id: 25, f: 11, w: 'self', at: T },
@@ -816,7 +830,7 @@ function sceneOrcWarlord() {
     ...sceneSelf(), gridHalf: 3,
     attacker: { id: 39, shot: arrow, dx: elf[0], dy: elf[1], aim: ti, at: ATTACK },
     flights: [{ shot: arrow, from: elf, to: ti, at: SHOT2 }],
-    mates: [{ id: 119, dx: ti[0], dy: ti[1], facing: 'west' }],
+    mates: [sceneTiMate(ti[0], ti[1], 'west')],
     bars: [{ at: 0, until: land2 + 1200, on: 'self', levels: [[0, 29 / 30, '#ff9900'], [ATTACK, 1, '#ff9900'], [ROAR, 0, '#ff9900']] }],
     casterFilter: [[0, 'brightness(1)'], [BUFF + 500, 'brightness(1)'], [BUFF + 650, 'brightness(2)'], [BUFF + 800, 'brightness(1)'], [BUFF + 950, 'brightness(2)'], [BUFF + 1100, 'brightness(1)']],
     overlays: [{ kind: 'say', text: 'Orc buta bana! Ranat Ulderek!', dx: 0, dy: 0, at: ROAR, ms: 3000 },
@@ -842,7 +856,7 @@ function sceneGoblinScavenger(awaken) {
   const glow = (a) => `drop-shadow(0 0 3px rgba(151,201,219,${a}))`;
   return {
     numbers: [...attacks.map((at) => sceneDmg(at, 'target', 'physical')), sceneDmg(double, 'target', 'physical'), ...(awaken ? [] : [sceneDmg(tiHit, 'self', 'fire')])],
-    m: [{ a: 'target', rows: ['+'], g: 1 }], mi: [], noBlood: 1,
+    ...sceneTarget(), noBlood: 1,
     attacker: { ...SCENE_VILLAIN_TI, dx: 2, dy: -1, aim: [1, 0], at: tiHit - SCENE_MISSILE_MS }, // inside the 5 x 5 board (the caster stands one tile east of the target)
     bars: [{ at: T, until: double + 1200, on: 'self', levels: [[T, 1, '#999999'], ...(awaken ? [] : [[tiHit, 0.9, '#999999']])] }],
     overlays: [{ kind: 'drop', id: 5924, f: 1, loopMs: 1000, dx: 0, dy: 0, at: T, ms: 600, fadeDelay: 200, op: 0.5 }],
@@ -867,7 +881,7 @@ function sceneGoblinAssassin(awaken) {
   const tiShot = T + INVISIBLE + 300 + SCENE_MISSILE_MS; // after it is visible again
   return {
     numbers: [sceneDmg(hit, 'target', 'physical'), sceneDmg(execute, 'target', 'death', true, 'true')],
-    m: [{ a: 'target', rows: ['+'], g: 1 }], mi: [], noBlood: 1, noDummy: true,
+    ...sceneTarget(), noBlood: 1, noDummy: true,
     mates: [{ id: 119, dx: -1, dy: 0, dies: { at: execute } }],
     transform: { at: T, until: T + INVISIBLE, fade: 200 },
     stuns: [{ at: T, ms: INVISIBLE, on: 'self', shake: false, color: '#97c9db' }],
@@ -945,7 +959,7 @@ function sceneCyclops(awaken) {
   return {
     numbers: [sceneDmg(inner[0], ti1, 'magic', true), sceneDmg(inner[0], ally, 'magic', true), sceneDmg(outer[0], ti2, 'magic', true)],
     ...sceneSelf(), gridHalf: 3, casterFlee: { at: T, steps: [[1, 0]] },
-    mates: [{ dx: ally[0], dy: ally[1], ...(awaken ? { pulse: [500 + FORGE] } : {}) }, { id: 119, dx: ti1[0], dy: ti1[1], facing: 'west' }, { id: 119, dx: ti2[0], dy: ti2[1], facing: 'north' }],
+    mates: [{ dx: ally[0], dy: ally[1], ...(awaken ? { pulse: [500 + FORGE] } : {}) }, sceneTiMate(ti1[0], ti1[1], 'west'), sceneTiMate(ti2[0], ti2[1], 'north')],
     ...(awaken ? { casterFacing: 'south', overlays: [{ kind: 'fall', id: 3458, f: 1, loopMs: 1000, dx: anvil[0], dy: anvil[1], at: 500, ms: 2300 }],
       passives: [{ right: true, windows: [[0, null]], equip: { spriteId: 3057, stat: 'hp', tiers: [{ tier: 3, from: 0, until: 500 + FORGE }, { tier: 4, from: 500 + FORGE, until: null }] } }] } : {}),
     flashes: [inner, outer].map(([when, tiles]) => ({ at: when, ms: 500, tiles: tiles.map(([dx, dy]) => [centre[0] + dx, centre[1] + dy]) })), // the area tiles, lit as the waves hit
@@ -971,7 +985,7 @@ function sceneWarlock(awaken) {
   const attack = 1000 + 2 * golemStep;
   return {
     numbers: [sceneHeal(T, 'self', true), sceneDmg(SPELL, 'target', 'energy', true, 'magic'), sceneDmg(BOMB, 'target', 'fire', true, 'magic'), ...[0, 3000, 6000].map((d) => sceneDmg(attack + d, 'target', 'physical'))],
-    castRange: 3, m: [{ a: 'target', rows: ['+'], g: 1 }], mi: [], noBlood: 1, transform: { at: T },
+    castRange: 3, ...sceneTarget(), noBlood: 1, transform: { at: T },
     mates: [{ outfit: 67, anchor: 'target', dx: golem[0], dy: golem[1], facing: 'west', at: T, walk: { at: 1000, speed: 90, steps: [[-1, 0], [0, -1]] } }],
     flights: [{ shot: { n: 'energyBeam', id: 5 }, from: [3, 3], to: golem, at: T }, { shot: { n: 'energy', id: 36 }, from: [3, 3], to: [0, 0], at: SPELL }, { shot: { n: 'fire', id: 4 }, from: [3, 3], to: [0, 0], at: BOMB }],
     flashes: [{ at: BOMB, ms: 700, tiles: bombTiles }],
@@ -1050,7 +1064,7 @@ function sceneDwarf(awaken) {
   const ti = [2, 0];
   return {
     numbers: [sceneDmg(E, 'target', 'stamina-low', true, 'magic'), sceneDmg(E, { target: ti }, 'stamina-low', true, 'magic')],
-    castRange: 2, gridHalf: 4, m: [{ a: 'target', rows: ['+'], g: 1 }], mi: [], noBlood: 1, // the board is wide enough for the Dwarf (it casts from a corner) to run two tiles away
+    castRange: 2, gridHalf: 4, ...sceneTarget(), noBlood: 1, // the board is wide enough for the Dwarf (it casts from a corner) to run two tiles away
     mates: [{ id: 119, anchor: 'target', dx: ti[0], dy: ti[1], facing: 'west' }],
     ...(awaken ? {} : { casterFlee: { at: T, from: [[barrel[0] - 2, barrel[1] - 2]], speedBonus: 30 } }),
     overlays: [{ kind: 'rune', id: 23486, f: 4, loopMs: 200, w: 2, h: 2, anchor: 'target', dx: barrel[0], dy: barrel[1], at: T, ms: E - T, op: 1, fadeMs: 500, dropMs: 600, drop: 'soft' }],
@@ -1071,7 +1085,7 @@ function sceneDwarfSoldier(awaken) {
   const tiles = [[0, 0], ...flank];
   return {
     numbers: attacks.flatMap((at) => tiles.map((t) => sceneDmg(at, t[0] === 0 && t[1] === 0 ? 'target' : { target: t }, 'physical'))),
-    castRange: R, m: [{ a: 'target', rows: ['+'], g: 1 }], mi: [], noBlood: 1,
+    castRange: R, ...sceneTarget(), noBlood: 1,
     mates: [{ id: 119, anchor: 'target', dx: 1, dy: 0, facing: 'east' }, { id: 119, anchor: 'target', dx: 0, dy: 1, facing: 'south' }],
     flights: attacks.flatMap((at) => tiles.map((to) => ({ shot: { n: 'piercingBolt', id: 24 }, from: [R, R], to, at, ms: 160 }))),
     flashes: attacks.map((at) => ({ at, ms: 500, tiles })),
@@ -1089,7 +1103,7 @@ function sceneDwarfGuard(awaken) {
   const STUN = 3000; // 1000ms per tile of distance
   return {
     numbers: [sceneDmg(T, 'target', 'physical')],
-    castRange: 3, m: [{ a: 'target', rows: ['+'], g: 1 }], mi: [], noBlood: 1,
+    castRange: 3, ...sceneTarget(), noBlood: 1,
     flights: [{ shot: { n: 'exoriHurAxe', id: 26 }, from: [3, 3], to: [0, 0], at: T }],
     stuns: [{ at: T, ms: STUN }],
     ...(awaken ? { overlays: [{ kind: 'float', src: 'spells/xmasrangedebuff.png', anchor: 'target', dx: 0, dy: -1, w: 1, h: 1, at: T, inMs: 200, ms: 1750, bobDelay: 300, pulse: true }] } : {}),
@@ -1143,7 +1157,7 @@ function sceneDwarfGeomancer(awaken) {
   const levels = [[0, 1, AP], ...casts.flatMap((c) => [[c.at, 1, AP], [c.at + 1, 0, AP], [c.at + CAST, 1, AP]]), [empty, 1, AP], [empty + 1, 0, MANA], [cleanup + 1700, Math.min(1, (cleanup + 1700 - empty) / 8000), MANA]];
   return {
     numbers: [...hits.map((h) => sceneDmg(h.at, off(ti), 'stamina-low', false, 'physical')), sceneHeal(cleanup, 'self', true)],
-    ...sceneSelf(), gridHalf: 3, noBlood: 1, noCooldownBar: true,
+    ...sceneBoard(3), noCooldownBar: true,
     mates: [{ id: 119, dx: off(ti)[0], dy: off(ti)[1], facing: 'east', ...(awaken ? { at: hits[0].at } : {}) }], // awakened: invisible until the first stone
     bars: [{ at: 0, until: cleanup + 1700, on: 'self', y: -2, smooth: true, levels: levels.filter((k, i, all) => i === 0 || k[0] >= all[i - 1][0]) }],
     overlays: stones.map((st) => ({ kind: 'rune', id: stoneIds[n++ % stoneIds.length], f: 1, w: 1, h: 1, dx: off(st.tile)[0], dy: off(st.tile)[1], at: st.at, ms: cleanup - st.at, op: 1, outMs: 700 })),
@@ -1167,8 +1181,8 @@ function sceneEnergyCrystal() {
   const COOL = SCENE_BAR.cool;
   return {
     numbers: attacks.map((at) => sceneDmg(at, ti, 'physical')),
-    ...sceneSelf(), gridHalf: 3, noBlood: 1, noCooldownBar: true,
-    mates: [{ id: 119, dx: ti[0], dy: ti[1], facing: 'west' }, ...spawns.map((sp) => ({ outfit: 500006, dx: sp.tile[0], dy: sp.tile[1], facing: 'east', at: sp.at }))],
+    ...sceneBoard(3), noCooldownBar: true,
+    mates: [sceneTiMate(ti[0], ti[1], 'west'), ...spawns.map((sp) => ({ outfit: 500006, dx: sp.tile[0], dy: sp.tile[1], facing: 'east', at: sp.at }))],
     bars: [{ at: 0, until: end + 500, on: 'self', y: -2, smooth: true, levels: [[0, 1, COOL], [T, 1, COOL], [T + 1, 0, COOL], [T + EVERY, 1, COOL], [T + EVERY + 1, 0, COOL], [end + 500, Math.min(1, (end + 500 - T - EVERY) / EVERY), COOL]] }],
     holdMs: end + 500,
     fx: [...spawns.flatMap((sp) => [{ ...SCENE_FX.heal, w: 'self', at: sp.at }, { ...SCENE_FX.teleportBlue, tiles: [sp.tile], at: sp.at }]),
@@ -1186,31 +1200,37 @@ function sceneMagmaCrystal() {
   const strikes = targets.map((tile, k) => ({ tile, at: T + WAIT + (k + 1) * 62.5 }));
   return {
     numbers: strikes.map((st) => sceneDmg(st.at, st.tile, 'fire', true, 'true')),
-    ...sceneSelf(), gridHalf: 3, noBlood: 1,
-    mates: [{ id: 119, dx: 3, dy: 0, facing: 'west' }, { dx: 0, dy: 2, facing: 'north' }, { id: 119, dx: -2, dy: -2, facing: 'south' }],
+    ...sceneBoard(3),
+    mates: [sceneTiMate(3, 0, 'west'), { dx: 0, dy: 2, facing: 'north' }, sceneTiMate(-2, -2, 'south')],
     flights: strikes.map((st) => ({ shot: { n: 'fire', id: 4 }, from: [0, 0], to: st.tile, at: st.at })),
     holdMs: strikes[strikes.length - 1].at + 1500,
     fx: [{ n: 'avatarPoof', id: 244, f: 11, w: 'self', at: T }, ...strikes.map((st) => ({ n: 'largeFireExplosion', id: 7, f: 14, b: 1, tiles: [st.tile], at: st.at }))]
   };
 }
 
-// Rorc (hit and run): it chases its target and its attack (every 4s: the ability IS the attack cooldown) is a crit of physical damage (silent), which STUNS the target for 1.5s (`groundshaker` on
-// it, the stun bar) and heals Rorc (60% lifesteal + 0.25% per AP of the damage, a crit heal above 50). Right after it FLEES: +100 speed until the attack is ready again (`raiseStat` hue-rotated
-// 305, a 500ms brightness pulse). Awakened the hit also splashes 10% of its damage on every creature next to the target (`groundshaker` at half opacity on the 8 tiles), which counts for the lifesteal.
+// Rorc (hit and run): a state machine. It CHASES its target at its own speed (150) until it is next to it, and its attack (every 4s: the ability IS the attack cooldown) is a crit of physical damage (silent), which STUNS
+// the target for 1.5s (`groundshaker` on it, the stun bar) and heals Rorc (60% lifesteal + 0.25% per AP of the damage, a crit heal above 50). Right after the hit it FLEES from every enemy at +100 speed until the attack is ready
+// again (`raiseStat` hue-rotated 305 and a 500ms brightness pulse), then picks the next target and chases it. Awakened the hit also splashes 10% of its damage on every creature next to the target (`groundshaker` at half
+// opacity on the 8 tiles), which counts for the lifesteal. Here Rorc starts three tiles east of a villain Ti, runs two tiles to it, hits it and runs back two tiles.
 function sceneRorc(awaken) {
   const T = 500;
+  const START = [3, 0]; // Rorc starts three tiles east of the middle, where the target stands
+  const SPEED = 150;
+  const run = walkStepMs(SPEED);
+  const hit = T + 2 * run; // it arrives next to the target and attacks
   const ring = [[-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1]];
   const ti = [0, 1]; // beside the target (awakened: hit by the splash)
+  const at = [1, 0]; // where Rorc stands when it hits (from the middle)
   return {
-    numbers: [sceneDmg(T, 'target', 'physical', true), sceneHeal(T, 'self', true), ...(awaken ? [sceneDmg(T, { target: ti }, 'physical')] : [])],
-    m: [{ a: 'target', rows: ['+'], g: 1 }], mi: [], noBlood: 1, gridHalf: 3,
-    casterFlee: { at: T, speedBonus: 100 },
-    casterFilter: [[0, 'brightness(1)'], [T, 'brightness(1)'], [T + 250, 'brightness(2)'], [T + 500, 'brightness(1)']],
-    stuns: [{ at: T, ms: 1500 }],
-    ...(awaken ? { mates: [{ id: 119, anchor: 'target', dx: ti[0], dy: ti[1], facing: 'north' }] } : {}),
-    holdMs: T + 1800,
-    fx: [{ n: 'groundshaker', id: 35, f: 11, tiles: [[0, 0]], at: T }, { n: 'raiseStat', id: 260, f: 10, w: 'self', at: T, filter: 'hue-rotate(305deg)' }, { n: 'bleed', id: 1, f: 6, tiles: [[0, 0]], at: T },
-      ...(awaken ? ring.map((tile) => ({ n: 'groundshaker', id: 35, f: 11, tiles: [tile], at: T, opacity: 0.5 })) : [])]
+    numbers: [sceneDmg(hit, { target: [0, 0] }, 'physical', true), sceneHeal(hit, 'self', true), ...(awaken ? [sceneDmg(hit, { target: ti }, 'physical')] : [])],
+    ...sceneSelf(), noBlood: 1, gridHalf: 4, casterOffset: START, baseSpeed: SPEED, cooldownCastAt: hit, casterFacing: 'west',
+    casterFlee: { at: T, steps: [[-1, 0, 0], [-1, 0, 0], [1, 0, 100], [1, 0, 100]] },
+    casterFilter: [[0, 'brightness(1)'], [hit, 'brightness(1)'], [hit + 250, 'brightness(2)'], [hit + 500, 'brightness(1)']],
+    stuns: [{ at: hit, ms: 1500, on: [-START[0], -START[1]] }],
+    mates: [{ id: 119, anchor: 'target', dx: 0, dy: 0, facing: 'east' }, ...(awaken ? [{ id: 119, anchor: 'target', dx: ti[0], dy: ti[1], facing: 'north' }] : [])],
+    holdMs: hit + 2400,
+    fx: [{ n: 'groundshaker', id: 35, f: 11, tiles: [[0, 0]], at: hit }, { n: 'raiseStat', id: 260, f: 10, tiles: [at], at: hit, filter: 'hue-rotate(305deg)' }, { n: 'bleed', id: 1, f: 6, tiles: [[0, 0]], at: hit },
+      ...(awaken ? ring.map((tile) => ({ n: 'groundshaker', id: 35, f: 11, tiles: [tile], at: hit, opacity: 0.5 })) : [])]
   };
 }
 
@@ -1221,8 +1241,8 @@ function sceneWilliWasp() {
   const T = 500;
   const enemies = [[2, 0], [-2, 1]];
   return {
-    ...sceneSelf(), gridHalf: 3, noBlood: 1,
-    casterFlee: { at: T + 500, from: enemies },
+    ...sceneBoard(3),
+    casterFlee: { at: T + 500, steps: [[0, 1], [0, 1], [1, 0], [1, 0]] }, // away from both Ti, south and then east: an explicit path so it never runs through the Wasp ally standing north of it
     mates: [...enemies.map(([dx, dy]) => ({ id: 119, dx, dy, facing: dx > 0 ? 'west' : 'east' })), { id: 6, dx: 0, dy: -2, facing: 'south' }],
     statusIcons: enemies.map((e, i) => sceneTaunt(T + i * 62.5, e)),
     overlays: [{ kind: 'glow', range: 0.45, color: '#f8c810', at: T - 300 }],
@@ -1234,25 +1254,35 @@ function sceneWilliWasp() {
 
 // Corym Charlatan (the snatcher): it goes for enemies that carry equipment. Its attack hits as usual and, when it has room for one (no equipment, or awakened), SNATCHES the target's first piece: it
 // shouts "Yoink!", `smoothSlap` hits the target for a crit of magic damage (20 + 2 AP) and the equipment moves to the Charlatan (here the chip appears on it). Holding one, its Exori-like cooldown
-// (9s) turns into a draining bar (ability power purple); when it runs out it EATS the equipment: a squash (`yum`), "Yummy!" and a crit heal of 20 + 1 AP, and the bar starts over (the cooldown
-// colour, filling). Awakened it can hold equipment AND go on snatching: it never eats it. Here a villain Ti with an item is the target.
+// (9s; the preview runs it at half length, 4.5s) turns into a draining bar (ability power purple); when it runs out it EATS the equipment: a squash (`yum`), "Yummy!" and a crit heal of 20 + 1 AP, and the bar starts over (the cooldown
+// colour, filling). Awakened it can hold equipment AND go on snatching: it never eats it, and every time the cooldown is ready its next hit takes another piece (the bar empties again and refills). Here a villain Ti
+// with an item is the target; awakened a SECOND villain Ti with an item (a creature carries one piece) stands beside the Charlatan and it takes that one when the cooldown is up.
 function sceneCorymCharlatan(awaken) {
   const T = 500;
-  const EAT = T + 9000;
+  const CD = 4500; // the preview runs the 9s cooldown at half length (the real one is 9s)
+  const EAT = T + CD;
   const AP = SCENE_BAR.ap;
   const COOL = SCENE_BAR.cool;
   const ITEM = 3057;
-  const end = awaken ? T + 2500 : EAT + 1800;
+  const SECOND = T + 62.5 + CD; // awakened: the cooldown is up again, the next hit snatches the second item
+  const ITEM2 = 3049;
+  const SECOND_TI = [1, -1]; // from the target tile: the tile north of the Charlatan (which stands east of the first Ti)
+  const end = awaken ? SECOND + 1800 : EAT + 1800;
   return {
-    numbers: [sceneDmg(T, 'target', 'physical'), sceneDmg(T + 62.5, 'target', 'magic', true), ...(awaken ? [] : [sceneHeal(EAT, 'self', true)])],
-    m: [{ a: 'target', rows: ['+'], g: 1 }], mi: [], noBlood: 1, noDummy: true, noCooldownBar: true,
-    mates: [{ id: 119, anchor: 'target', dx: 0, dy: 0, facing: 'east' }],
-    overlays: [{ kind: 'say', text: 'Yoink!', dx: 0, dy: 0, at: T + 62.5, ms: 1500, size: 12 }, ...(awaken ? [] : [{ kind: 'say', text: 'Yummy!', dx: 0, dy: 0, at: EAT + 1000, ms: 1500, size: 12 }])],
-    passives: [{ right: true, windows: [[T + 62.5, awaken ? null : EAT + 300]], equip: { spriteId: ITEM, stat: 'hp', tiers: [{ tier: 5, from: T + 62.5, until: awaken ? null : EAT + 300 }] } }],
-    bars: [{ at: 0, until: end, on: 'self', y: -2, smooth: true, levels: awaken ? [[0, 1, COOL]]
-      : [[0, 1, COOL], [T + 62.5, 1, COOL], [T + 63.5, 1, AP], [EAT, 0, AP], [EAT + 1, 0, COOL], [end, Math.min(1, (end - EAT) / 9000), COOL]] }],
+    numbers: [sceneDmg(T, 'target', 'physical'), sceneDmg(T + 62.5, 'target', 'magic', true), ...(awaken ? [sceneDmg(SECOND - 62.5, { target: SECOND_TI }, 'physical'), sceneDmg(SECOND, { target: SECOND_TI }, 'magic', true)] : [sceneHeal(EAT, 'self', true)])],
+    ...sceneTarget(), noBlood: 1, noDummy: true, noCooldownBar: true,
+    mates: [{ id: 119, anchor: 'target', dx: 0, dy: 0, facing: 'east' }, ...(awaken ? [{ id: 119, anchor: 'target', dx: SECOND_TI[0], dy: SECOND_TI[1], facing: 'south' }] : [])],
+    overlays: [{ kind: 'say', text: 'Yoink!', dx: 0, dy: 0, at: T + 62.5, ms: 1500, size: 12 }, ...(awaken ? [{ kind: 'say', text: 'Yoink!', dx: 0, dy: 0, at: SECOND, ms: 1500, size: 12 }] : [{ kind: 'say', text: 'Yummy!', dx: 0, dy: 0, at: EAT + 1000, ms: 1500, size: 12 }])],
+    passives: [{ right: true, windows: [[T + 62.5, awaken ? null : EAT + 300]], equip: { spriteId: ITEM, stat: 'hp', tiers: [{ tier: 5, from: T + 62.5, until: awaken ? null : EAT + 300 }] } },
+      ...(awaken ? [{ right: true, windows: [[SECOND, null]], equip: { spriteId: ITEM2, stat: 'hp', tiers: [{ tier: 5, from: SECOND, until: null }] } }] : [])],
+    // The ability is ready at the start, so like every ability the loop starts with 1s of cooldown left (the scene moves 0.5s later as a whole: 1.06s to the snatch) and the bar fills to ready as it snatches. The
+    // snatch starts the 9s cooldown (equipping it): holding the item the bar DRAINS (ability power purple) until it eats; awakened it never eats, the bar is the normal cooldown, filling, and the next snatch waits for it.
+    bars: [{ at: 0, until: end, on: 'self', y: -2, smooth: true, levels: awaken
+      ? [[0, 1 - 1062.5 / CD, COOL], [T + 62.5, 1, COOL], [T + 63.5, 0, COOL], [SECOND, 1, COOL], [SECOND + 1, 0, COOL], [end, Math.min(1, (end - SECOND) / CD), COOL]]
+      : [[0, 1 - 1062.5 / CD, COOL], [T + 62.5, 1, COOL], [T + 63.5, 1, AP], [EAT, 0, AP], [EAT + 1, 0, COOL], [end, Math.min(1, (end - EAT) / CD), COOL]] }],
     holdMs: end,
-    fx: [{ n: 'smoothSlap', id: 213, f: 18, tiles: [[0, 0]], at: T + 62.5 }, { n: 'bleed', id: 1, f: 6, tiles: [[0, 0]], at: T }]
+    fx: [{ n: 'smoothSlap', id: 213, f: 18, tiles: [[0, 0]], at: T + 62.5 }, { n: 'bleed', id: 1, f: 6, tiles: [[0, 0]], at: T },
+      ...(awaken ? [{ n: 'smoothSlap', id: 213, f: 18, tiles: [SECOND_TI], at: SECOND }, { n: 'bleed', id: 1, f: 6, tiles: [SECOND_TI], at: SECOND - 62.5 }] : [])]
   };
 }
 
@@ -1268,7 +1298,7 @@ function scenePerchtQueen() {
   const end = T + 2200;
   const COOL = SCENE_BAR.cool;
   return {
-    ...sceneSelf(), gridHalf: 3, noBlood: 1, noCooldownBar: true,
+    ...sceneBoard(3), noCooldownBar: true,
     mates: summons.map((sm) => ({ id: sm.id, dx: sm.tile[0], dy: sm.tile[1], facing: 'south', at: T })),
     bars: [{ at: 0, until: end, on: 'self', y: -2, smooth: true, levels: [[0, 0, COOL], [T, 1, COOL], [T + 1, 0, COOL], [end, (end - T) / next, COOL]] }],
     holdMs: end,
@@ -1281,33 +1311,42 @@ function scenePerchtQueen() {
 // Every spider ally has +30% attack speed (a red glow, not drawn) and the Old Giant Spider heals from the magic damage its spider allies deal. Here it stands 3 tiles from the target.
 function sceneOldGiantSpider() {
   const T = 500;
+  const LAND = T + 210; // the earth missile's flight from three tiles out (the Spider's web lands at 710)
+  const WEB = 5000;
   return {
-    numbers: [sceneDmg(T, 'target', 'earth', true, 'magic')],
-    castRange: 3, m: [{ a: 'target', rows: ['+'], g: 1 }], mi: [], noBlood: 1, cooldownCastAt: T,
-    dummyTint: { at: T, filter: 'grayscale(0.9)' }, stuns: [{ at: T, ms: 3000, shake: false }],
-    overlays: [[12747, 0, 0], [12749, 0, -1], [12751, -1, 0], [12755, 1, 0], [12753, 0, 1]].map(([id, dx, dy]) => ({ kind: 'timed', anchor: 'target', id, dx, dy, at: T, ms: 5000 })),
-    holdMs: T + 5200
+    numbers: [sceneDmg('land', 'target', 'earth', true, 'magic')],
+    // the web is thrown first: an `earthSpell` missile, then `earthSpinningRoots` on the target, which goes grey over the 5s (`spiderGrayscale`: 10% in, 10% out) as the webs lie on its tile and the four beside it
+    castRange: 3, m: [{ a: 'target', rows: ['+'], g: 1 }], mi: [{ n: 'earthSpell', id: 30 }], lead: T, cooldownCastAt: T,
+    dummyTint: { at: LAND, until: LAND + WEB, filter: 'grayscale(1)', ramp: WEB / 10 }, stuns: [{ at: LAND, ms: 3000, shake: false }], passives: [{ src: 'spidervictim', windows: [[LAND, LAND + WEB]] }], // the cocoon's chip: stunned and +100 armor
+    overlays: sceneWebs(LAND, WEB),
+    holdMs: LAND + WEB + 200,
+    fx: [{ n: 'earthSpinningRoots', id: 55, f: 14, b: 1 }]
   };
 }
 
-// Corym Vanguard (the squeak): it IGNORES every hit that would deal 22 damage or less (awakened also any hit of 140 or more): the hit does nothing, the Vanguard heals 5 + 0.1 AP (silent) and a
-// counter (the `minoshield` bar over it, green) goes up one; at 20 it SQUEAKS ("Squeeeeeeak!", `corymVanguardFx`) and hits every creature next to it (and its target) for 1 + 0.5 AD physical two ticks
-// later, resetting the counter. Here a villain Ti beside it has landed 18 ignored hits already (the bar starts at 18/20); two more fill it and the squeak follows. The `corymVanguardFx` effect has no
-// sheet of its own in the game's stylesheet, so it is not drawn.
+// Corym Vanguard (the squeak): its counter goes up with HITS, not with time. Every hit it would take for 22 damage or less (before mitigation it is the damage after armor / resist; awakened also any hit of
+// 140 or more) is IGNORED: it does nothing, the Vanguard heals 5 + 0.1 AP a tick later (silent) and the endurance counter (the `minoshield` bar over it, green, and its chip) goes up one. At 20 it SQUEAKS at once
+// (the next tick: "Squeeeeeeak!", `corymVanguardFx`), resets the counter and, two ticks later, hits every creature next to it (and its target) for 1 + 0.5 AD physical. Here a villain Ti beside it has already landed 18
+// ignored hits (the counter starts at 18/20); its next two arrows are ignored (19, 20) and the squeak follows the second. The `corymVanguardFx` effect has no sheet of its own in the game's stylesheet, so it is not drawn.
 function sceneCorymVanguard() {
   const T = 500;
-  const hits = [T + 500, T + 1500];
-  const burst = hits[1] + 62.5;
+  const SHOTS = [T, T + 1500]; // the Ti's arrows (its attack delay): each one is an ignored hit
+  const land = SHOTS.map((at) => at + SCENE_MISSILE_MS);
+  const burst = land[1] + SCENE_TICK_MS; // the next tick after the 20th stack
   const GREEN = '#60c060';
   const ti = [1, 0];
   return {
-    numbers: [sceneDmg(burst + 125, ti, 'physical')],
-    ...sceneSelf(), gridHalf: 3, noBlood: 1,
-    mates: [{ id: 119, dx: ti[0], dy: ti[1], facing: 'west' }],
-    bars: [{ at: 0, until: burst + 1800, on: 'self', y: 0, levels: [[0, 0.9, GREEN], [hits[0], 0.95, GREEN], [hits[1], 1, GREEN], [burst, 0, GREEN]] }],
+    numbers: [sceneDmg(burst + 2 * SCENE_TICK_MS, ti, 'physical')],
+    // an ignored hit shows NO number (0 damage) but the game still plays a `poof` on the Vanguard (the effect for a 0 physical hit) and its `hp.bleed` leaves blood on the floor
+    bleeds: land.map((at) => ({ at, on: 'self' })),
+    ...sceneBoard(2), noCooldownBar: true, noAutoAttack: true,
+    mates: [sceneTiMate(ti[0], ti[1], 'west')],
+    flights: SHOTS.map((at) => ({ shot: SCENE_VILLAIN_TI.shot, from: ti, to: [0, 0], at })),
+    bars: [{ at: 0, until: burst + 1800, on: 'self', y: 0, levels: [[0, 18 / 20, GREEN], [land[0], 19 / 20, GREEN], [land[1], 1, GREEN], [burst, 0, GREEN]] }],
+    passives: [{ src: 'minoshield', counts: [{ at: 0, n: 18 }, { at: land[0], n: 19 }, { at: land[1], n: 20 }, { at: burst, n: 0 }] }],
     overlays: [{ kind: 'say', text: 'Squeeeeeeak!', dx: 0, dy: 0, at: burst, ms: 1500, size: 16, color: '#ffffff' }],
     holdMs: burst + 1800,
-    fx: []
+    fx: land.map((at) => ({ ...SCENE_FX.poof, w: 'self', at }))
   };
 }
 
@@ -1322,7 +1361,7 @@ function sceneGrynchCommander() {
   const COOL = SCENE_BAR.cool;
   const end = T + tiles.length * TICK + 2500;
   return {
-    ...sceneSelf(), gridHalf: 4, noBlood: 1, noCooldownBar: true,
+    ...sceneBoard(4), noCooldownBar: true,
     mates: tiles.map((tile, i) => ({ id: 85, dx: tile[0], dy: tile[1], facing: 'south', at: T + (i + 1) * TICK })),
     bars: [{ at: 0, until: end, on: 'self', y: -2, smooth: true, levels: [[0, 0, COOL], [T, 1, COOL], [T + 1, 0, COOL], [end, (end - T) / 12000, COOL]] }],
     holdMs: end,
@@ -1340,9 +1379,9 @@ function sceneBonelord() {
   const end = T + 2500;
   return {
     numbers: [sceneHeal(T, 'self', true)],
-    ...sceneSelf(), gridHalf: 3, noBlood: 1, cooldownCastAt: T,
+    ...sceneBoard(3), cooldownCastAt: T,
     casterFlee: { at: T, from: [[0, -3]] },
-    mates: [...allies.map(([dx, dy]) => ({ dx, dy, facing: 'south' })), { id: 119, dx: 0, dy: -3, facing: 'south' }],
+    mates: [...allies.map(([dx, dy]) => ({ dx, dy, facing: 'south' })), sceneTiMate(0, -3, 'south')],
     bars: allies.map((tile) => ({ at: 0, until: end, on: tile, y: -2, smooth: true, levels: [[0, 0.2, COOL], [T, 0.45, COOL], [T + 1, 1, COOL], [end, 1, COOL]] })),
     holdMs: end,
     fx: [{ n: 'bookMagicFast', id: 297, f: 19, w: 'self', at: T, filter: 'drop-shadow(0 0 5px #00000090)', z: 2 }, ...allies.map((tile) => ({ n: 'cooldownRefresh', id: 232, f: 14, tiles: [tile], at: T }))]
@@ -1373,20 +1412,26 @@ function sceneDharalion() {
   };
 }
 
-// Thalas (the hook; every 9s, the first after 4s): it hooks its FARTHEST enemy (one that cannot be displaced is skipped) and drags it to the free tile next to itself, six grey `thalasArrow`s
-// following the target's path (the missile has no sheet in the game's art files, so it is not drawn). The target is moved at a speed of 165, takes a crit of magic damage (10 + 0.7 AP, silent) when it
-// lands and, if it was 4 or more tiles away, is also stunned (500ms on top of the trip): `poof` and a hop (`bounceJump`). Awakened the cooldown is only 3s when the target is already next to it. Here
-// a villain Ti 4 tiles east is hooked across three tiles.
+// Thalas (the hook; every 9s, the first after 4s): it hooks its FARTHEST enemy (one that cannot be displaced is skipped) and PULLS it to the free tile next to itself: the target is moved there at a speed of 165 (the
+// game's `walkTo`; the hook ADDS a flat 165 to the target's own speed: it brings its speed modifiers up to 165, so a Ti of speed 100 is pulled at 265), drawn over the others (z-index 999) while six grey `thalasArrow`s (the `thalas-missile` sheet, 60% opacity) follow its path from where it stood to the landing tile, each a tick quicker than the
+// last, and a HAND (`thalasHandRight` / `thalasHandDown`: 15 frames, played once over the pull and the stun, fading in over 100ms and out over the last 300ms) reaches from the landing tile. When it lands the target takes a crit
+// of magic damage (10 + 0.7 AP, silent); if it was 4 or more tiles away (and does not ignore stuns) it is also STUNNED for the whole pull plus 500ms, and lands with a `poof`, a hop (`bounceJump`, 500ms) and a shake
+// (`shaking`, 100ms). Thalas cannot move meanwhile. Awakened the cooldown is only 3s when the target is already next to it. The pull is ONE `walkTo` jump: the target glides the whole way in a single step's time (about 0.3s at speed 265), so it is nearly instant. Here a villain Ti 4 tiles east is pulled across three tiles.
 function sceneThalas() {
   const T = 500;
-  const stepMs = walkStepMs(165);
-  const arrive = T + 3 * stepMs;
+  const speed = SCENE_TI_SPEED + 165; // the target's own speed plus the hook's flat 165 (a function that runs at load cannot read the game's data)
+  const stepMs = walkStepMs(speed);
+  const pull = stepMs; // `walkTo` is ONE jump to the landing tile: a single step's glide, however far
+  const arrive = T + pull;
+  const STUN = 500;
   return {
     numbers: [sceneDmg(arrive, [1, 0], 'magic', true)],
-    ...sceneSelf(), gridHalf: 4, noBlood: 1, cooldownCastAt: T,
-    mates: [{ id: 119, dx: 4, dy: 0, facing: 'west', walk: { at: T, speed: 165, steps: [[-1, 0], [-1, 0], [-1, 0]] } }],
-    stuns: [{ at: arrive, ms: 500, on: [1, 0], shake: false }],
-    holdMs: arrive + 1200,
+    ...sceneBoard(4), cooldownCastAt: T, casterFacing: 'east',
+    mates: [{ id: 119, dx: 4, dy: 0, facing: 'west', walk: { at: T, speed, steps: [[-3, 0]] }, hop: { at: arrive, ms: 500, shakeMs: 100 } }],
+    flights: Array.from({ length: 6 }, (_, i) => ({ shot: { n: 'thalasArrow', id: 50001, src: 'misc/thalas-missile.png', filter: 'grayscale(1) opacity(0.6)' }, from: [4, 0], to: [1, 0], at: T, ms: pull - i * SCENE_TICK_MS })),
+    overlays: [{ kind: 'fade', id: 999979, f: 15, loopMs: pull + STUN, w: 1, h: 2, dx: 1, dy: 0, at: T, fadeMs: 100, outAt: arrive + STUN - 300, outMs: 300, ease: 'linear' }],
+    stuns: [{ at: T, ms: pull + STUN, on: [4, 0], shake: false }],
+    holdMs: arrive + STUN + 1200,
     fx: [{ ...SCENE_FX.poof, tiles: [[1, 0]], at: arrive }]
   };
 }
@@ -1407,7 +1452,7 @@ function sceneAncientScarab(awaken) {
   const end = REVIVE + 1500;
   return {
     numbers: [sceneDmg(T, [1, 0], 'physical', true), sceneDmg(DEATH, 'self', 'fire'), sceneHeal(REVIVE, 'self', true)],
-    ...sceneSelf(), gridHalf: 3, noBlood: 1, casterFacing: 'east',
+    ...sceneBoard(3), casterFacing: 'east',
     attacker: { ...SCENE_VILLAIN_TI, dx: 0, dy: 3, aim: [0, 0], at: DEATH - SCENE_MISSILE_MS },
     mates: [{ id: 119, dx: 1, dy: 0, facing: 'west', walk: { at: T, speed: 250, steps: [[1, 0]] } },
       { outfit: awaken ? 83 : 82, dx: larvaFrom[0], dy: larvaFrom[1], facing: 'south', at: DEATH, walk: { at: DEATH, speed: 45, steps: larvaSteps } }],
@@ -1429,7 +1474,7 @@ function sceneVladrukh(awaken) {
   const SWAP = T + 500;
   const ti = [2, 0];
   return {
-    ...sceneSelf(), gridHalf: 3, noBlood: 1, cooldownCastAt: SWAP, casterFacing: 'east',
+    ...sceneBoard(3), cooldownCastAt: SWAP, casterFacing: 'east',
     mates: [{ id: 119, dx: ti[0], dy: ti[1], facing: 'west', dies: { at: SWAP, corpse: false } }, ...(awaken ? [] : [{ dx: ti[0], dy: ti[1], facing: 'west', at: SWAP }])],
     stuns: [{ at: T, ms: 500, on: ti, shake: false }],
     holdMs: SWAP + 2500,
@@ -1439,24 +1484,25 @@ function sceneVladrukh(awaken) {
 }
 
 // Cyclops Drone (the seismic jump; every 7s, 5s attack delay): it picks its FARTHEST enemy and jumps to the free tile next to it that has the most enemies around (a squash, a 1s bounce at +300
-// speed), and halfway (500ms) lands with `groundshaker` (twice the size): every enemy around it, and its target, takes a crit of magic damage (10 + 0.6 AP, silent), is STUNNED (500ms and
-// the trip) and PUSHED straight away from it at speed 1360 until something blocks it (`poof` where it stops; one pushed 3 or more tiles hops instead of shaking). Awakened, hitting 3 or more
-// enemies halves the cooldown. Here the Drone jumps two tiles to three villain Ti and pushes them.
-function sceneCyclopsDrone() {
+// speed; when that tile is its own it bounces on the spot), and halfway (500ms) lands with `groundshaker` (twice the size): every enemy around it, and its target, takes a crit of magic damage (10 + 0.6 AP, silent),
+// is STUNNED (500ms and the trip) and PUSHED straight away from it at speed 1360 until something blocks it (`poof` where it stops; one pushed 3 or more tiles hops instead of shaking). Awakened, hitting 3 or more
+// enemies HALVES the cooldown (the pushed creatures shake where they stop, `--shake` 4 for 125ms, a push of 3 or more tiles hops instead; it is set to half its length: the bar refills over 3.5s instead of 7s; `cooldownScale`). Here the Drone starts two tiles east of the middle of a compact 9x9 board, jumps to the middle and pushes three villain Ti two tiles.
+function sceneCyclopsDrone(awaken) {
   const T = 500;
   const LAND = T + 500;
   const pushStep = walkStepMs(1360);
-  const ti = [[-3, 0], [-3, -1], [-3, 1]];
+  const START = [2, 0]; // the Drone starts two tiles east of the middle (tile 84) and jumps to the middle, next to the Ti
+  const ti = [[-1, 0], [-1, -1], [-1, 1]]; // from the middle of the board
   const dirs = [[-1, 0], [-1, -1], [-1, 1]];
   const arrive = LAND + 2 * pushStep;
   return {
-    numbers: ti.map((tile) => sceneDmg(LAND, tile, 'magic', true)),
-    ...sceneSelf(), gridHalf: 5, noBlood: 1, cooldownCastAt: LAND,
-    casterFlee: { at: T, steps: [[-1, 0], [-1, 0]], speedBonus: 300 },
-    mates: ti.map(([dx, dy], i) => ({ id: 119, dx, dy, facing: 'east', walk: { at: LAND, speed: 1360, steps: [dirs[i], dirs[i]] } })),
-    stuns: ti.map(([dx, dy], i) => ({ at: arrive, ms: 600, on: [dx + 2 * dirs[i][0], dy + 2 * dirs[i][1]], shake: false })),
-    holdMs: arrive + 1500,
-    fx: [{ n: 'groundshaker', id: 35, f: 11, tiles: [[-2, 0]], at: LAND, z: 2 }, ...ti.map(([dx, dy], i) => ({ ...SCENE_FX.poof, tiles: [[dx + 2 * dirs[i][0], dy + 2 * dirs[i][1]]], at: arrive }))]
+    numbers: ti.map((tile) => sceneDmg(LAND, { target: tile }, 'magic', true)),
+    ...sceneSelf(), gridHalf: 4, casterOffset: START, noBlood: 1, cooldownCastAt: LAND, ...(awaken ? { cooldownScale: 0.5 } : {}),
+    casterFlee: { at: T, steps: [[-1, 0], [-1, 0]], speedBonus: 300 }, casterJump: { at: T }, // it falls onto the new tile (the game's squash-factor animation, 1s)
+    mates: ti.map(([dx, dy], i) => ({ id: 119, anchor: 'target', dx, dy, facing: 'east', walk: { at: LAND, speed: 1360, steps: [dirs[i], dirs[i]] }, shake: { at: arrive, factor: 4, ms: 125 } })),
+    stuns: ti.map(([dx, dy], i) => ({ at: arrive, ms: 600, on: [dx + 2 * dirs[i][0] - START[0], dy + 2 * dirs[i][1] - START[1]], shake: false })),
+    holdMs: arrive + 2500,
+    fx: [{ n: 'groundshaker', id: 35, f: 11, tiles: [[0, 0]], at: LAND, z: 2, tx: 0.25, ty: 0.25 }, ...ti.map(([dx, dy], i) => ({ ...SCENE_FX.poof, tiles: [[dx + 2 * dirs[i][0], dy + 2 * dirs[i][1]]], at: arrive }))]
   };
 }
 
@@ -1469,7 +1515,7 @@ function sceneOmruc() {
   const others = [[2, 0], [-2, 1]];
   const heals = (tile) => Array.from({ length: Math.ceil(LONG / 880) }, (_, i) => ({ ...SCENE_FX.heal, ...(tile ? { tiles: [tile] } : { w: 'self' }), at: T + i * 880 })).filter((e) => e.at < T + LONG);
   return {
-    ...sceneSelf(), gridHalf: 3, noBlood: 1, cooldownCastAt: T, transform: { at: T, until: T + LONG, fade: 200 },
+    ...sceneBoard(3), cooldownCastAt: T, transform: { at: T, until: T + LONG, fade: 200 },
     mates: [{ dx: others[0][0], dy: others[0][1], facing: 'west', dies: { at: T, until: T + LONG, corpse: false } }, { id: 119, dx: others[1][0], dy: others[1][1], facing: 'east', dies: { at: T, until: T + LONG, corpse: false } }],
     overlays: [{ kind: 'dark', dx: 0, dy: 0, at: T, until: T + LONG }],
     passives: [{ src: 'omruc', windows: [[T, T + LONG]] }],
@@ -1489,7 +1535,7 @@ function sceneGiantSpider() {
   const COOL = SCENE_BAR.cool;
   return {
     numbers: [sceneDmg(KILL, eggTile, 'fire')],
-    ...sceneSelf(), gridHalf: 3, noBlood: 1, noCooldownBar: true,
+    ...sceneBoard(3), noCooldownBar: true,
     attacker: { ...SCENE_VILLAIN_TI, dx: -3, dy: 0, aim: eggTile, at: KILL - SCENE_MISSILE_MS },
     mates: [{ id: 76, dx: eggTile[0], dy: eggTile[1], facing: 'east', at: HATCH }],
     bars: [{ at: 0, until: LAY, on: 'self', y: -2, smooth: true, levels: [[0, 0, COOL], [LAY, 1, COOL]] }],
@@ -1500,43 +1546,55 @@ function sceneGiantSpider() {
   };
 }
 
-// Monster Cauldron (the event cauldron; it cannot be moved): when the Regeneration Tank falls and the enemy wears vampire slippers it TRANSFORMS (a double-size `avatarPoof` with a black shadow; it
-// becomes the Tentugly head, which this scene does not draw). A `pinkBall` flies to the tentacle tile and a tentacle appears there (`avatarPoof`). Then every enemy is struck in turn, two ticks apart
-// from 14 ticks in: an `sd` missile and true damage that leaves it with 1 HP (a crit, the `abilityPower` colour; silent), `purpleSmoke`; dead allies are revived with `bigWhiteGlow`. Finally a
-// helper appears with `teleportPurple`. Here the three villain Ti are struck and one helper arrives.
+// Monster Cauldron (the event cauldron; it cannot be moved): it waits until the Regeneration Tank dies. Then a `pinkBall` flies from the Tank to the enemy that wears the vampire slippers, `purpleEnergy` plays on it and a
+// second `pinkBall` flies from it to the Cauldron, which TRANSFORMS two flights later: a double-size `avatarPoof` with a black shadow (it becomes the Tentugly head, which this scene does not draw), a `pinkBall` flies to the
+// tentacle tile and a tentacle (item 35122) appears there with its own `avatarPoof`. Then every enemy is struck in turn, two ticks apart from 14 ticks in: an `sd` missile and true damage that leaves it with 1 HP (a crit, the
+// `abilityPower` colour; silent), the target shakes (`superImpact`, 250ms) and `purpleSmoke` plays on it; fallen enemies are revived with 1 HP and `bigWhiteGlow` (not drawn). Finally a helper appears next to the tentacle
+// with `teleportPurple`. From then on the Cauldron shoots `energyBeam`s at the closest enemy (range 99; magic crits), which the preview leaves out. Here the three villain Ti are struck (one wears the slippers) and one helper arrives.
 function sceneMonsterCauldron() {
-  const T = 500;
+  const T0 = 500;
+  const tank = [-3, -3];
+  const slippers = [1, -2]; // the enemy wearing the vampire slippers
+  const T = T0 + 2 * SCENE_MISSILE_MS; // the transformation, two flights after the Tank dies
   const tentacle = [3, 3];
-  const targets = [[-2, 0], [1, -2], [2, 1]];
+  const targets = [[-2, 0], slippers, [2, 1]];
   const strikes = targets.map((tile, k) => ({ tile, at: T + 14 * 62.5 + k * 125 }));
   const helperAt = strikes[strikes.length - 1].at + 700;
   return {
     numbers: strikes.map((st) => sceneDmg(st.at + SCENE_MISSILE_MS, st.tile, 'abilityPower', true, 'true')),
-    ...sceneSelf(), gridHalf: 3, noBlood: 1,
-    mates: [...targets.map(([dx, dy]) => ({ id: 119, dx, dy, facing: 'south' })), { dx: -3, dy: 3, facing: 'east', at: helperAt }],
-    flights: [{ shot: { n: 'pinkBall', id: 62 }, from: [0, 0], to: tentacle, at: T }, ...strikes.map((st) => ({ shot: { n: 'sd', id: 32 }, from: [0, 0], to: st.tile, at: st.at }))],
+    ...sceneBoard(3), noAutoAttack: true, noCooldownBar: true,
+    mates: [{ id: 81, dx: tank[0], dy: tank[1], dies: { at: T0, corpse: false } },
+      ...targets.map(([dx, dy], k) => ({ id: 119, dx, dy, facing: 'south', shake: { at: strikes[k].at + SCENE_MISSILE_MS, factor: 1, ms: 250 } })),
+      { item: 35122, dx: tentacle[0], dy: tentacle[1], at: T + 500 }, { dx: -3, dy: 3, facing: 'east', at: helperAt }],
+    flights: [{ shot: { n: 'pinkBall', id: 62 }, from: tank, to: slippers, at: T0 }, { shot: { n: 'pinkBall', id: 62 }, from: slippers, to: [0, 0], at: T0 + SCENE_MISSILE_MS },
+      { shot: { n: 'pinkBall', id: 62 }, from: [0, 0], to: tentacle, at: T }, ...strikes.map((st) => ({ shot: { n: 'sd', id: 32 }, from: [0, 0], to: st.tile, at: st.at }))],
     holdMs: helperAt + 1500,
-    fx: [{ n: 'avatarPoof', id: 244, f: 11, w: 'self', at: T, z: 2, filter: 'drop-shadow(0 0 10px #000)' }, { n: 'avatarPoof', id: 244, f: 11, tiles: [tentacle], at: T + 500, filter: 'drop-shadow(0 0 10px #000)' },
+    fx: [{ n: 'purpleEnergy', id: 48, f: 17, tiles: [slippers], at: T0 + SCENE_MISSILE_MS }, { n: 'avatarPoof', id: 244, f: 11, w: 'self', at: T, z: 2, filter: 'drop-shadow(0 0 10px #000)' }, { n: 'avatarPoof', id: 244, f: 11, tiles: [tentacle], at: T + 500, filter: 'drop-shadow(0 0 10px #000)' },
       ...strikes.map((st) => ({ n: 'purpleSmoke', id: 170, f: 12, tiles: [st.tile], at: st.at + SCENE_MISSILE_MS })), { n: 'teleportPurple', id: 222, f: 11, tiles: [[-3, 3]], at: helperAt }]
   };
 }
 
 // The Pale Count (the blood moon; the first cast after 6s, then every 8s): `musicNotesRed` on it, a red haze fades over the whole board (400ms in and out) for 7s, every enemy forgets its target and bats
 // (Bats: 140 HP, speed 190, `teleportRed` two ticks in) fill 40% of the free tiles at random; the bats' bites are TRUE damage (their attack + 10% of the Count's) and heal the Count (10% + 1% per AP of it).
-// A draining bar (red) counts the 7s with the `bloodmoon` chip; when it ends every bat `poof`s away and the cooldown bar refills. Here six bats and a villain Ti.
+// A draining bar (red) counts the 7s with the `bloodmoon` chip; when it ends every bat `poof`s away and the cooldown bar refills. The game spawns ceil(40% of the board's FREE tiles) bats (about 60 on a full
+// board); here 40% of the free tiles of the 7x7 preview board (47 free: 19 bats), on tiles picked at random (a fixed shuffle, so the loop is the same every time), and a villain Ti.
 function scenePaleCount() {
   const T = 500;
   const DUR = 7000;
-  const batTiles = [[-3, -1], [-2, 2], [-1, -3], [2, 3], [3, -2], [1, 1]];
   const ti = [-2, 0];
+  const free = [];
+  for (let y = -3; y <= 3; y++) for (let x = -3; x <= 3; x++) if ((x || y) && !(x === ti[0] && y === ti[1])) free.push([x, y]);
+  let seed = 7; // a fixed pseudo-random shuffle
+  for (let i = free.length - 1; i > 0; i--) { seed = (seed * 1103515245 + 12345) % 2147483648; const j = seed % (i + 1); [free[i], free[j]] = [free[j], free[i]]; }
+  const batTiles = free.slice(0, Math.ceil(free.length * 0.4));
   const hits = [T + 1500, T + 2500, T + 3500];
   const RED = '#ff0000';
   const COOL = SCENE_BAR.cool;
   const end = T + DUR + 1500;
   return {
     numbers: hits.map((at) => sceneDmg(at, ti, 'true', false, 'true')),
-    ...sceneSelf(), gridHalf: 3, noBlood: 1, noCooldownBar: true,
-    mates: [{ id: 119, dx: ti[0], dy: ti[1], facing: 'east' }, ...batTiles.map(([dx, dy]) => ({ outfit: 122, dx, dy, facing: 'south', at: T, dies: { at: T + DUR, corpse: false } }))],
+    ...sceneBoard(3), noCooldownBar: true,
+    mates: [sceneTiMate(ti[0], ti[1], 'east'), ...batTiles.map(([dx, dy]) => ({ outfit: 122, dx, dy, facing: 'south', at: T, dies: { at: T + DUR, corpse: false } }))],
     bars: [{ at: 0, until: end, on: 'self', y: -2, smooth: true, levels: [[0, 1, COOL], [T, 1, COOL], [T + 1, 1, RED], [T + DUR, 0, RED], [T + DUR + 1, 0, COOL], [end, (end - T - DUR) / 8000, COOL]] }],
     overlays: [{ kind: 'haze', image: 'filters/palehaze.svg', dx: 0, dy: 0, at: T, until: T + DUR }],
     passives: [{ src: 'bloodmoon', windows: [[T, T + DUR]] }],
@@ -1546,23 +1604,61 @@ function scenePaleCount() {
   };
 }
 
-// Vampire Bride (the heart): at the start it summons its HEART (a rotten heart that floats beside it and keeps away from it). Every 3s, if the heart is next to it, it BITES it: `bite` on the
-// heart, a 100ms flinch and a crit of magic damage (1 x its AD, silent) that it keeps; a draining bar (ability power purple, 800ms) is the charge; then `circlingHearts` and it heals itself for that
-// damage x (250% + 0.15% per AP) as a crit (silent). Awakened its attacks hurt (magic). Here the heart floats beside the Bride and is bitten once.
+// Vampire Bride (the heart): at the start it summons its HEART (a rotten heart that floats, speed 190, and RUNS from the Bride: each step it takes the free tile that keeps it farthest from her, and it is only caught when it is
+// cornered) and the Bride (speed 110) CHASES it. Whenever its cooldown (3s) is done and the heart is next to it, it BITES it: `bite` on the heart (which stands still while she charges), a 100ms flinch and a crit of magic damage
+// (1 x its AD, silent) that it keeps; a draining bar (ability power purple, 800ms) is the charge; then `circlingHearts` and it heals itself for that damage x (250% + 0.15% per AP) as a crit (silent), the cooldown starts and the
+// chase goes on. Awakened its attacks hurt (magic). The chase and the bites here are simulated tick by tick with those rules on a 7 x 7 board (the first bite after the preview's 1s start), two bites long.
 function sceneVampireBride() {
-  const T = 500;
   const CHARGE = 800;
+  const COOLDOWN = 3000;
   const AP = SCENE_BAR.ap;
   const COOL = SCENE_BAR.cool;
-  const end = T + CHARGE + 2800;
-  const heart = [1, 0];
+  const START = 300;
+  const FIRST_READY = 1000; // the preview starts every cooldown with 1s left
+  const BITES = 2;
+  const R = 3; // the board is 7 x 7
+  const heartStart = [2, 0];
+  const stepH = walkStepMs(190);
+  const stepB = walkStepMs(110);
+  const inBoard = ([x, y]) => Math.abs(x) <= R && Math.abs(y) <= R;
+  const dist = ([ax, ay], [bx, by]) => Math.hypot(ax - bx, ay - by);
+  const next = (pos, [dx, dy]) => [pos[0] + dx, pos[1] + dy];
+  let heart = heartStart.slice(), bride = [0, 0];
+  let hNext = START, bNext = START, frozenUntil = 0, readyAt = FIRST_READY;
+  const heartSteps = [], brideSteps = [], bites = [];
+  let lastH = null, lastB = null;
+  const record = (list, last, t, step, stepMs) => list.push([step[0], step[1], list.length ? Math.max(0, t - (last + stepMs)) : t - START]);
+  for (let t = START; t < 20000 && bites.length < BITES; t += SCENE_TICK_MS) {
+    const adjacent = Math.max(Math.abs(heart[0] - bride[0]), Math.abs(heart[1] - bride[1])) <= 1;
+    if (adjacent && t >= readyAt && t >= frozenUntil) { // the bite
+      bites.push({ at: t, heart: heart.slice(), bride: bride.slice() });
+      frozenUntil = t + CHARGE; readyAt = t + CHARGE + COOLDOWN; hNext = Math.max(hNext, frozenUntil); bNext = Math.max(bNext, frozenUntil);
+      continue;
+    }
+    if (t < frozenUntil) continue;
+    if (t >= hNext) { // the heart steps to the free tile farthest from the Bride (it stays when every tile is no better: cornered)
+      const options = [[1, 0], [0, 1], [-1, 0], [0, -1]].map((d) => next(heart, d)).filter((q) => inBoard(q) && (q[0] !== bride[0] || q[1] !== bride[1]));
+      const best = options.sort((q1, q2) => dist(q2, bride) - dist(q1, bride))[0];
+      if (best && dist(best, bride) > dist(heart, bride)) {
+        record(heartSteps, lastH, t, [best[0] - heart[0], best[1] - heart[1]], stepH); lastH = t; heart = best; hNext = t + stepH;
+      } else hNext = t + SCENE_TICK_MS;
+    }
+    if (t >= bNext && !adjacent) { // the Bride steps toward the heart along its longer axis
+      const dx = heart[0] - bride[0], dy = heart[1] - bride[1];
+      const step = Math.abs(dx) >= Math.abs(dy) ? [Math.sign(dx), 0] : [0, Math.sign(dy)];
+      record(brideSteps, lastB, t, step, stepB); lastB = t; bride = next(bride, step); bNext = t + stepB;
+    }
+  }
+  const end = bites[bites.length - 1].at + CHARGE + 1500;
+  const levels = [[0, 2 / 3, COOL], [FIRST_READY, 1, COOL]];
+  bites.forEach((b, i) => { levels.push([b.at, 1, COOL], [b.at + 1, 1, AP], [b.at + CHARGE, 0, AP], [b.at + CHARGE + 1, 0, COOL], [Math.min(b.at + CHARGE + COOLDOWN, bites[i + 1]?.at ?? end), Math.min(1, (Math.min(b.at + CHARGE + COOLDOWN, bites[i + 1]?.at ?? end) - b.at - CHARGE) / COOLDOWN), COOL]); });
   return {
-    numbers: [sceneDmg(T, heart, 'abilityPower', true, 'magic')],
-    ...sceneSelf(), gridHalf: 3, noBlood: 1, noCooldownBar: true,
-    bars: [{ at: 0, until: end, on: 'self', y: -2, smooth: true, levels: [[0, 1, COOL], [T, 1, COOL], [T + 1, 1, AP], [T + CHARGE, 0, AP], [T + CHARGE + 1, 0, COOL], [end, (end - T - CHARGE) / 3000, COOL]] }],
-    overlays: [{ kind: 'loop', id: 31589, f: 6, loopMs: 900, w: 1, h: 1, dx: heart[0], dy: heart[1], at: 0, filter: 'drop-shadow(0 0 5px #ffffff)' }],
+    numbers: bites.flatMap((b) => [sceneDmg(b.at, heartStart, 'abilityPower', true, 'magic'), sceneHeal(b.at + CHARGE, 'self', true)]),
+    ...sceneSelf(), gridHalf: R, noBlood: 1, noCooldownBar: true, cooldownCastAt: bites[0].at, casterFlee: { at: START + (brideSteps[0]?.[2] || 0), steps: brideSteps.map(([dx, dy, w], i) => [dx, dy, undefined, i ? w : 0]) },
+    mates: [{ item: 31589, dx: heartStart[0], dy: heartStart[1], facing: 'east', walk: { at: START, steps: heartSteps, speed: 190 }, tint: { at: 0, filter: 'drop-shadow(0 0 5px #ffffff)' } }],
+    bars: [{ at: 0, until: end, on: 'self', y: -2, smooth: true, levels }],
     holdMs: end,
-    fx: [{ n: 'bite', id: 214, f: 7, tiles: [heart], at: T }, { n: 'circlingHearts', id: 265, f: 12, w: 'self', at: T + CHARGE }]
+    fx: bites.flatMap((b) => [{ n: 'bite', id: 214, f: 7, tiles: [b.heart], at: b.at }, { n: 'circlingHearts', id: 265, f: 12, tiles: [b.bride], at: b.at + CHARGE }])
   };
 }
 
@@ -1574,8 +1670,8 @@ function sceneNomad(awaken) {
   const a = [3, -1]; // the enchanted enemy
   const b = [-2, 2]; // the one it is set against
   return {
-    ...sceneSelf(), gridHalf: 3, noBlood: 1, cooldownCastAt: T,
-    mates: [{ id: 119, dx: a[0], dy: a[1], facing: 'west', tint: { at: T, until: T + 5000, filter: 'drop-shadow(0 0 5px #dc143c)' } }, { id: 119, dx: b[0], dy: b[1], facing: 'east' }],
+    ...sceneBoard(3), cooldownCastAt: T,
+    mates: [{ id: 119, dx: a[0], dy: a[1], facing: 'west', tint: { at: T, until: T + 5000, filter: 'drop-shadow(0 0 5px #dc143c)' } }, sceneTiMate(b[0], b[1], 'east')],
     flights: [{ shot: { n: 'ice', id: 37, filter: 'hue-rotate(160deg)' }, from: [0, 0], to: b, at: T }, { shot: { n: 'ice', id: 37, filter: 'hue-rotate(160deg)' }, from: a, to: b, at: T }],
     statusIcons: [sceneTaunt(T, a)],
     holdMs: T + 1800,
@@ -1586,8 +1682,9 @@ function sceneNomad(awaken) {
 // Bog Raider (the goo; every 4s, it needs a creature next to it): it pays 25 HP (true damage, silent), `nasty` plays on it (twice the size, half opacity), every enemy next to it (and its target) takes magic
 // `earth` damage (20 + 1 AP, a crit from 10 AP) and a `poisonSting` (50ms) flies to the tile BEHIND each one (or to the creature when that tile is blocked). A mucus plug (item `mucusPlug`, green pool,
 // it fades in over 200ms, wobbles, lasts 10s) appears on one of those tiles and the Raider WALKS to it and eats it: +25% of its max HP. Awakened it also gets armor for every 1% of HP it is missing
-// (the `gooshell` chip: nothing to draw). Here two villain Ti stand next to it and it goes for the plug.
-function sceneBogRaider() {
+// (the `gooshell` chip: nothing to draw). Here two villain Ti stand next to it and it goes for the plug. The Gummy Raider is its event variant (its class is the same, with the `gummyshell` skill): the plug is a
+// Chocolate Bar (item 6574) instead of the mucus plug (16102).
+function sceneBogRaider(plugId = 16102) {
   const T = 500;
   const ti = [[0, -1], [1, -1]];
   const behind = [[0, -2], [2, -2]];
@@ -1598,10 +1695,10 @@ function sceneBogRaider() {
   const arrive = walkAt + path.length * stepMs;
   return {
     numbers: [...ti.map((t) => sceneDmg(T, t, 'earth', false, 'magic')), sceneHeal(arrive, 'self')],
-    ...sceneSelf(), gridHalf: 3, noBlood: 1, casterFlee: { at: walkAt, steps: path },
+    ...sceneBoard(3), casterFlee: { at: walkAt, steps: path },
     mates: ti.map(([dx, dy]) => ({ id: 119, dx, dy, facing: 'south' })),
     flights: behind.map((to) => ({ shot: { n: 'poisonSting', id: 15 }, from: [0, 0], to, at: T, ms: 50 })),
-    overlays: [{ kind: 'fade', id: 16102, f: 1, loopMs: 1000, w: 1, h: 1, dx: plug[0], dy: plug[1], at: T + 250, fadeMs: 200, ease: 'ease-in', outAt: arrive, outMs: 1 }],
+    overlays: [{ kind: 'fade', id: plugId, f: 1, loopMs: 1000, w: 1, h: 1, dx: plug[0], dy: plug[1], at: T + 250, fadeMs: 200, ease: 'ease-in', outAt: arrive, outMs: 1 }],
     holdMs: arrive + 1200,
     fx: [{ n: 'nasty', id: 17, f: 6, w: 'self', at: T, z: 2, tx: 0.125, ty: 0.125, opacity: 0.5 }]
   };
@@ -1613,7 +1710,7 @@ function sceneSwampTroll(awaken) {
   const T = 2000;
   const tiles = [[-2, -1], [2, 1], [0, 2], ...(awaken ? [[-1, -2]] : [])].slice(0, awaken ? 3 : 2);
   return {
-    ...sceneSelf(), gridHalf: 3, noBlood: 1, cooldownCastAt: T,
+    ...sceneBoard(3), cooldownCastAt: T,
     mates: tiles.map(([dx, dy]) => ({ outfit: 407, dx, dy, at: T })),
     holdMs: T + 2500,
     fx: [...tiles.map((tile) => ({ n: 'earthPoof', id: 21, f: 12, tiles: [tile], at: T })), { ...SCENE_FX.heal, w: 'self', at: T }]
@@ -1627,7 +1724,7 @@ function sceneRegenerationTank() {
   const CD = 3000;
   const spawns = [[1, 0], [-1, 1]];
   return {
-    ...sceneSelf(), gridHalf: 3, noBlood: 1, cooldownCastAt: T,
+    ...sceneBoard(2), cooldownCastAt: T,
     mates: spawns.map(([dx, dy], i) => ({ id: 82, dx, dy, at: T + i * CD })),
     holdMs: T + CD + 1500,
     fx: spawns.flatMap(([dx, dy], i) => [{ ...SCENE_FX.teleportBlue, tiles: [[dx, dy]], at: T + i * CD }, { ...SCENE_FX.heal, w: 'self', at: T + i * CD }])
@@ -1640,8 +1737,8 @@ function sceneMorguthis() {
   const T = 500;
   const ti = [2, -1];
   return {
-    ...sceneSelf(), gridHalf: 3, noBlood: 1, noCooldownBar: true, noAutoAttack: true,
-    mates: [{ id: 119, dx: ti[0], dy: ti[1], facing: 'west' }, { id: 119, dx: -ti[0], dy: ti[1], facing: 'east', at: T, tint: { at: 0, filter: 'grayscale(1)' } }],
+    ...sceneBoard(3), noCooldownBar: true, noAutoAttack: true,
+    mates: [sceneTiMate(ti[0], ti[1], 'west'), { id: 119, dx: -ti[0], dy: ti[1], facing: 'east', at: T, tint: { at: 0, filter: 'grayscale(1)' } }],
     holdMs: T + 2500,
     fx: [{ n: 'teleportRed', id: 223, f: 11, tiles: [[-ti[0], ti[1]]], at: T, opacity: 0.7 }]
   };
@@ -1656,7 +1753,7 @@ function sceneGreenDjinn(awaken) {
   const ally = [1, 0];
   const around = sceneArea(['XXX', 'X+X', 'XXX']);
   return {
-    ...sceneSelf(), gridHalf: 3, noBlood: 1, cooldownCastAt: T,
+    ...sceneBoard(2), cooldownCastAt: T,
     mates: [{ dx: ally[0], dy: ally[1], facing: 'west', dies: { at: T, until: T + DUR, corpse: false } }],
     overlays: [{ kind: 'fade', id: 21936, f: 1, loopMs: 1000, w: 1, h: 1, dx: ally[0], dy: ally[1], at: T, fadeMs: 1, outAt: T + DUR, outMs: 1 }],
     passives: [{ src: 'jar', windows: [[T, T + DUR]] }],
@@ -1673,8 +1770,8 @@ function sceneCobraStatue() {
   const thalas = [-2, 0];
   return {
     numbers: [sceneHeal(T, thalas, false)],
-    ...sceneSelf(), gridHalf: 3, noBlood: 1, cooldownCastAt: T,
-    mates: [{ id: 101, dx: thalas[0], dy: thalas[1], facing: 'east' }, { id: 119, dx: 3, dy: 0, facing: 'west' }],
+    ...sceneBoard(3), cooldownCastAt: T,
+    mates: [{ id: 101, dx: thalas[0], dy: thalas[1], facing: 'east' }, sceneTiMate(3, 0, 'west')],
     holdMs: T + 2500,
     fx: [{ ...SCENE_FX.heal, tiles: [thalas], at: T }]
   };
@@ -1689,7 +1786,7 @@ function sceneCyclopsSmith(awaken) {
   const chain = [[1, 0], [2, 0], [2, 1], [1, 1], ...(awaken ? [[0, 1]] : [])];
   return {
     numbers: chain.flatMap((tile, i) => [sceneDmg(T + HOP * (i + 1), tile, 'physical', false, 'physical'), sceneHeal(T + HOP * (i + 1), 'self')]),
-    ...sceneSelf(), gridHalf: 3, noBlood: 1, cooldownCastAt: T, casterFacing: 'east',
+    ...sceneBoard(3), cooldownCastAt: T, casterFacing: 'east',
     mates: chain.map(([dx, dy]) => ({ id: 119, dx, dy, facing: 'west' })),
     flights: chain.map((to, i) => ({ shot: { n: 'exoriHurClub', id: 27 }, from: i ? chain[i - 1] : [0, 0], to, at: T + HOP * i, ms: HOP })),
     holdMs: T + 2500
@@ -1705,7 +1802,7 @@ function sceneHero() {
   const kill = hits[1];
   return {
     numbers: [...hits.map((at) => sceneDmg(at, ti, 'physical', false, 'physical')), ...hits.map((at) => sceneHeal(at, 'self'))],
-    ...sceneSelf(), gridHalf: 3, noBlood: 1, noCooldownBar: true, noAutoAttack: true, casterFacing: 'east',
+    ...sceneBoard(3), noCooldownBar: true, noAutoAttack: true, casterFacing: 'east',
     mates: [{ id: 119, dx: ti[0], dy: ti[1], facing: 'west', dies: { at: kill } }],
     flights: hits.map((at) => ({ shot: { n: 'arrow', id: 3 }, from: [0, 0], to: ti, at: at - SCENE_MISSILE_MS })),
     passives: [{ src: 'heroicdeed', counts: [{ at: 0, n: 0 }, { at: kill + 400, n: 1 }] }],
@@ -1725,8 +1822,8 @@ function sceneValkyrie() {
   const second = land + 187.5;
   return {
     numbers: [sceneDmg(land, ti, 'physical', false, 'physical'), sceneHeal(land, 'self'), sceneDmg(second, ti, 'physical', false, 'physical'), sceneDmg(second + 62.5, ti, 'physical', false, 'physical'), sceneHeal(second + 62.5, 'self', true)],
-    ...sceneSelf(), gridHalf: 3, noBlood: 1, cooldownCastAt: T, noAutoAttack: true, casterFacing: 'east',
-    mates: [{ id: 119, dx: ti[0], dy: ti[1], facing: 'west' }, { dx: ally[0], dy: ally[1], facing: 'east' }],
+    ...sceneBoard(3), cooldownCastAt: T, noAutoAttack: true, casterFacing: 'east',
+    mates: [sceneTiMate(ti[0], ti[1], 'west'), { dx: ally[0], dy: ally[1], facing: 'east' }],
     flights: [{ shot: { n: 'spear', id: 1, filter: 'drop-shadow(0 0 5px #f8c810)' }, from: [0, 0], to: ti, at: T },
       ...[second, second + 62.5].map((at) => ({ shot: { n: 'arrow', id: 3 }, from: ally, to: ti, at: at - SCENE_MISSILE_MS }))],
     holdMs: second + 2200
@@ -1734,7 +1831,7 @@ function sceneValkyrie() {
 }
 
 // Hunter (the trap; every 9s, range 3): it stops for 200ms to set a trap on its own tile (`poof`) and walks on. The first enemy to step on it takes a crit of magic damage (10 + 1 AP, the ability power colour),
-// is ROOTED for 3.5s (a draining stun bar, a black-glow crosshair over it, the `hunter-trap` chip), and the Hunter gets +40 speed for as long (`raiseStat`), is drawn to it and shoots it from up to 4 tiles
+// is ROOTED for 3.5s (a draining stun bar, a black-glow crosshair over it, the `hunter-trap` chip) and the trap (`/assets/misc/trap-spritesheet.png`) snaps shut under it, and the Hunter gets +40 speed for as long (`raiseStat`), is drawn to it and shoots it from up to 4 tiles
 // farther. Awakened, below 8% HP, every spent trap re-arms. Here a villain Ti walks onto the trap and is shot.
 function sceneHunter() {
   const T = 500;
@@ -1747,10 +1844,10 @@ function sceneHunter() {
   const stun = '#ffc107';
   return {
     numbers: [sceneDmg(arrive, [0, 0], 'abilityPower', true, 'magic'), sceneDmg(hit, [0, 0], 'physical', false, 'physical')],
-    ...sceneSelf(), gridHalf: 4, noBlood: 1, cooldownCastAt: T, noAutoAttack: true, casterFlee: { at: SET, steps: [[-1, 0], [-1, 0]] },
+    ...sceneBoard(4), cooldownCastAt: T, noAutoAttack: true, casterFlee: { at: SET, steps: [[-1, 0], [-1, 0]] },
     mates: [{ id: 119, dx: 3, dy: 0, facing: 'west', walk: { at: walkIn, speed: 100, steps: [[-1, 0], [-1, 0], [-1, 0]] } }],
     flights: [{ shot: { n: 'arrow', id: 3 }, from: [-2, 0], to: [0, 0], at: arrive }],
-    overlays: [{ kind: 'fade', id: 52793, f: 1, loopMs: 1000, w: 1, h: 1, dx: 0, dy: 0, at: arrive, fadeMs: 300, outAt: arrive + ROOT, outMs: 1 }],
+    overlays: [{ kind: 'trap', dx: 0, dy: 0, at: SET, closeAt: arrive }, { kind: 'fade', id: 52793, f: 1, loopMs: 1000, w: 1, h: 1, dx: 0, dy: 0, at: arrive, fadeMs: 300, outAt: arrive + ROOT, outMs: 1 }],
     bars: [{ at: arrive, until: arrive + ROOT, on: [0, 0], y: -2, smooth: true, levels: [[arrive, 1, stun], [arrive + ROOT, 0, stun]] }],
     passives: [{ src: 'hunter-trap', windows: [[arrive, arrive + ROOT]] }],
     holdMs: arrive + 2500,
@@ -1769,9 +1866,9 @@ function sceneNightstalker(awaken) {
   const ti = [3, 1];
   return {
     numbers: [sceneDmg(land, ti, 'physical', false, 'physical'), sceneDmg(land, ti, 'abilityPower', true, 'magic')],
-    ...sceneSelf(), gridHalf: 3, noBlood: 1, cooldownCastAt: T, noAutoAttack: true, baseSpeed: 120,
-    casterFlee: { at: T, steps, speedBonus: 300 },
-    mates: [{ id: 119, dx: ti[0], dy: ti[1], facing: 'west' }],
+    ...sceneBoard(3), cooldownCastAt: T, noAutoAttack: true, baseSpeed: 120,
+    casterFlee: { at: T, steps, speedBonus: 300 }, casterJump: { at: T, kind: 'squash' }, // the blink: the game's `squash` animation, 600ms ease-in, plays on it as it moves (+300 speed): it vanishes and drops in beside the target
+    mates: [sceneTiMate(ti[0], ti[1], 'west')],
     passives: awaken ? [{ src: 'nightmareboots', windows: [[T, land + 750]] }] : [],
     holdMs: land + 2200,
     fx: [{ ...SCENE_FX.poof, tiles: [ti], at: land }, { ...SCENE_FX.poof, tiles: [[2, 1]], at: land }]
@@ -1780,19 +1877,19 @@ function sceneNightstalker(awaken) {
 
 // Corym Skirmisher (the shadow; the first cast after 3s, then every 8s): it turns itself AND its ally invisible for 5s (`magicPoof` on each, a `rot` flies to the ally; the game draws a looping `heal` effect in place of an
 // invisible creature; a draining bar and the `cancelinvisibility` chip count it). An invisible Skirmisher's attacks `scratchWhite` the target and lower its ARMOR by 3 (6 awakened) per hit for 3s (the `scratch` chip counts
-// it); a hit on an invisible one cancels it (`poof`). Here an ally and the Skirmisher vanish and it scratches a villain Ti twice.
+// it); a hit on an invisible one cancels it (`poof`). Here an ally and the Skirmisher vanish and it scratches a villain Ti next to it twice (it is a melee creature).
 function sceneCorymSkirmisher(awaken) {
   const T = 500;
   const INVI = 5000;
   const ally = [-2, 1];
-  const ti = [2, 0];
+  const ti = [1, 0]; // a melee attacker: the enemy is next to it
   const hits = [T + 1500, T + 3500];
   const per = awaken ? 6 : 3;
   return {
     numbers: hits.map((at) => sceneDmg(at, ti, 'physical', false, 'physical')),
-    ...sceneSelf(), gridHalf: 3, noBlood: 1, cooldownCastAt: T, noAutoAttack: true, casterFacing: 'east',
+    ...sceneBoard(3), cooldownCastAt: T, noAutoAttack: true, casterFacing: 'east',
     transform: { at: T, until: T + INVI, fade: 200 },
-    mates: [{ dx: ally[0], dy: ally[1], facing: 'east', dies: { at: T, until: T + INVI, corpse: false } }, { id: 119, dx: ti[0], dy: ti[1], facing: 'west' }],
+    mates: [{ dx: ally[0], dy: ally[1], facing: 'east', dies: { at: T, until: T + INVI, corpse: false } }, sceneTiMate(ti[0], ti[1], 'west')],
     flights: [{ shot: { n: 'rot', id: 39 }, from: [0, 0], to: ally, at: T }],
     stuns: [{ at: T, ms: INVI, on: 'self', shake: false, color: '#97c9db' }],
     passives: [{ src: 'cancelinvisibility', windows: [[T, T + INVI]] }, { src: 'scratch', counts: [{ at: 0, n: 0 }, { at: hits[0], n: -per }, { at: hits[1], n: -2 * per }, { at: hits[0] + 3000, n: -per }, { at: hits[1] + 3000, n: 0 }] }],
@@ -1803,22 +1900,31 @@ function sceneCorymSkirmisher(awaken) {
   };
 }
 
-// Black Knight (the quest knight; it taunts every enemy that targets someone else every 2s): it fights dead trees first: it walks up and hits one (`bonk`, the tree flinches, no damage) and gets a SPEAR
-// (the `royalspear` bar counts them). With a spear its next attack is a ranged one: a `royalSpear` flies at the lowest-HP enemy for 5x its AD, a crit, and takes a spear. Here it bonks a tree, then throws.
+// Black Knight (the quest knight, speed 160, attack delay 0.5s; it taunts every enemy that targets someone else every 2s): its room has FOUR dead trees, one in each corner, and it works through them. With no spear it runs to the
+// nearest tree that is ready and hits it (`bonk`: the knight axe flies up, the tree flinches, no damage; the tree is then not ready for 7s) and gets a SPEAR (the `royalspear` bar counts them). With a spear its next attack is a
+// ranged one (range 99): a `royalSpear` flies at the lowest-HP enemy for 5x its AD, a crit, and takes a spear. Then it runs to the next tree. Here it makes the round of the four trees, throwing a spear after each, at a villain Ti.
 function sceneBlackKnight() {
   const T = 500;
-  const tree = [1, 0];
-  const ti = [4, 1];
-  const BONK = T + 600;
-  const throwAt = BONK + 2000;
+  const stepMs = walkStepMs(160);
+  const LEG = 4; // steps from tree to tree (it stands diagonally next to each)
+  const DELAY = 500; // its attack delay: it throws half a second after the bonk, then runs on
+  const trees = [[3, -3], [-3, -3], [-3, 3], [3, 3]]; // counter-clockwise: top right, top left, bottom left, bottom right
+  const stands = [[2, -2], [-2, -2], [-2, 2], [2, 2]];
+  const ti = [3, 0];
+  const legs = [[[1, 0], [1, 0], [0, -1], [0, -1]], [[-1, 0], [-1, 0], [-1, 0], [-1, 0]], [[0, 1], [0, 1], [0, 1], [0, 1]], [[1, 0], [1, 0], [1, 0], [1, 0]]];
+  const steps = legs.flatMap((leg, i) => leg.map(([dx, dy], j) => (i && !j ? [dx, dy, undefined, DELAY] : [dx, dy])));
+  const arrive = trees.map((_, i) => T + (i + 1) * LEG * stepMs + i * DELAY);
+  const throws = arrive.map((at) => at + DELAY);
+  const land = throws.map((at) => at + SCENE_MISSILE_MS);
   return {
-    numbers: [sceneDmg(throwAt + SCENE_MISSILE_MS, ti, 'physical', true, 'physical')],
-    ...sceneSelf(), gridHalf: 4, noBlood: 1, noCooldownBar: true, noAutoAttack: true, casterFacing: 'east',
-    mates: [{ id: 75, dx: tree[0], dy: tree[1] }, { id: 119, dx: ti[0], dy: ti[1], facing: 'west' }],
+    numbers: land.map((at) => sceneDmg(at, ti, 'physical', true, 'physical')),
+    ...sceneBoard(4), noCooldownBar: true, noAutoAttack: true, casterFacing: 'east', casterFlee: { at: T, steps },
+    mates: [...trees.map(([dx, dy]) => ({ id: 75, dx, dy })), sceneTiMate(ti[0], ti[1], 'west')],
     statusIcons: [sceneTaunt(T + 100, ti)],
-    flights: [{ shot: { n: 'royalSpear', id: 21 }, from: [0, 0], to: ti, at: throwAt }],
-    passives: [{ src: 'royalspear', counts: [{ at: 0, n: 0 }, { at: BONK, n: 1 }, { at: throwAt, n: 0 }] }],
-    holdMs: throwAt + 1800
+    overlays: trees.map(([dx, dy], i) => ({ kind: 'bonk', id: 3318, dx, dy: dy - 1, at: arrive[i] })),
+    flights: stands.map((from, i) => ({ shot: { n: 'royalSpear', id: 21 }, from, to: ti, at: throws[i] })),
+    passives: [{ src: 'royalspear', counts: [{ at: 0, n: 0 }, ...arrive.flatMap((at, i) => [{ at, n: 1 }, { at: throws[i], n: 0 }])] }],
+    holdMs: land[3] + 1800
   };
 }
 
@@ -1830,7 +1936,7 @@ function sceneMateusz() {
   const allies = [[2, 1], [-3, 0]];
   return {
     numbers: [sceneHeal(T, 'self', true), ...allies.map((a) => sceneHeal(T, a, true))],
-    ...sceneSelf(), gridHalf: 3, noBlood: 1, cooldownCastAt: T, noAutoAttack: true,
+    ...sceneBoard(3), cooldownCastAt: T, noAutoAttack: true,
     mates: allies.map(([dx, dy]) => ({ dx, dy })),
     holdMs: T + 2400,
     fx: [...sceneArea(mask).map((tile) => ({ ...SCENE_FX.heal, tiles: [tile], at: T })), { ...SCENE_FX.heal, w: 'self', at: T }]
@@ -1847,8 +1953,8 @@ function scenePaladin(awaken) {
   const land = T + SCENE_MISSILE_MS;
   return {
     numbers: [sceneDmg(land, first, 'abilityPower', false, 'magic'), sceneDmg(land + 62.5, target, 'physical', false, 'physical')],
-    ...sceneSelf(), gridHalf: 3, noBlood: 1, noCooldownBar: true, noAutoAttack: true, casterFacing: 'east',
-    mates: [{ id: 119, dx: first[0], dy: first[1], facing: 'west' }, { id: 119, dx: target[0], dy: target[1], facing: 'west' }, ...(awaken ? [{ id: 119, dx: 0, dy: 1, facing: 'north' }] : [])],
+    ...sceneBoard(3), noCooldownBar: true, noAutoAttack: true, casterFacing: 'east',
+    mates: [sceneTiMate(first[0], first[1], 'west'), sceneTiMate(target[0], target[1], 'west'), ...(awaken ? [sceneTiMate(0, 1, 'north')] : [])],
     flights: [{ shot: { n: 'assassinStar', id: 19 }, from: [0, 0], to: target, at: T },
       { shot: { n: 'assassinStar', id: 19, filter: 'grayscale(1) opacity(0.5)' }, from: [0, 0], to: target, at: T + 62.5 }],
     passives: awaken ? [{ src: 'mastermindshield', counts: [{ at: 0, n: 18 }] }] : [],
@@ -1872,26 +1978,328 @@ function sceneCakeDrake() {
   const hits = [target, far];
   return {
     numbers: hits.map((t) => sceneDmg(at(t), t, 'fire', false, 'magic')),
-    ...sceneSelf(), gridHalf: 3, noBlood: 1, cooldownCastAt: T, casterFacing: 'east',
+    ...sceneBoard(3), cooldownCastAt: T, casterFacing: 'east',
     mates: hits.map(([dx, dy]) => ({ id: 119, dx, dy, facing: 'west' })),
     flights: [{ shot: { n: 'fire', id: 4 }, from: [0, 0], to: target, at: T }],
-    passives: [{ src: 'soulfire', windows: [[at(target), at(target) + 1500], [at(far), at(far) + 1500]] }],
+    passives: [{ src: 'soulfire', windows: [[at(target), at(far) + 1500]] }], // the two debuffs overlap: one window
     holdMs: T + RING * 6 + 2000,
     fx: tiles.map((t) => ({ n: 'fire', id: 16, f: 9, tiles: [t], at: at(t), ms: 600 }))
   };
 }
 
 // Clot (the slime; every 12s, less 80ms per AP): it CLONES itself onto a free tile beside it: `teleportBlue` on the tile and `heal` on the Clot; the Squidgy Clot has the same stats but 5 HP and the same gear, and
-// fights on; up to 2 clones at a time (3 awakened). If the main Clot dies a clone takes its place (`slimeParticlesGreen`, a pulse). Here two clones appear (the second after the AP-shortened wait).
+// fights on; up to 2 clones at a time (3 awakened). If the main Clot dies a clone takes its place (`slimeParticlesGreen`, a pulse). Here two clones appear (the second after a wait shortened for the preview).
 function sceneClot() {
   const T = 500;
-  const second = T + 7200;
+  const second = T + 3500; // the real wait is 12s less 80ms per AP (about 7s here); the preview shortens it so the loop is not mostly still
   const spawns = [[1, 0], [-1, 1]];
   return {
-    ...sceneSelf(), gridHalf: 3, noBlood: 1, cooldownCastAt: T, noAutoAttack: true,
+    ...sceneBoard(2), cooldownCastAt: T, noAutoAttack: true,
     mates: spawns.map(([dx, dy], i) => ({ id: 127, dx, dy, at: i ? second : T })),
     holdMs: second + 1800,
     fx: spawns.flatMap(([dx, dy], i) => [{ ...SCENE_FX.teleportBlue, tiles: [[dx, dy]], at: i ? second : T }, { ...SCENE_FX.heal, w: 'self', at: i ? second : T }])
+  };
+}
+
+// Amazon (the vicious knives; range 4; the ability is ready from the start, so the FIRST throw is the special one): while the ability is ready its next knife is thrown with a crimson glow
+// (`drop-shadow(0 0 5px #dc143c)`), starts the cooldown (3.5s; the bar is full until that throw, empty at it, then fills) and sticks a vicious knife in the target (the `vicious-knife` counter, up to 2),
+// besides its normal physical hit. A normal throw (cooldown running) or a special one at 2 knives PULLS the knives: magic damage of 1% of the target's max HP + 0.1% per AP per knife (a crit with 2),
+// `megaBleed`, a knife that spins away (`chippingKnife`, crimson glow, the energy colour with 2 knives), and the Amazon heals 80% of the physical damage. The target dying pulls them too. Awakened the pull
+// also makes the target BLEED for 5s (`amazon-bleed`: 6 true damage a second, `megaBleed` each tick) and heal 25% less. The attack delay (3s) is shorter than the cooldown, so knives only stack with
+// cooldown reduction: here a 20% cut (2.8s) so three special throws in a row stack two knives and pull both. The Amazon stands in the corner, four tiles from the target (its range) in the middle.
+function sceneAmazon(awaken) {
+  const T = 500;
+  const DELAY = 3000;
+  const CD = 2800;
+  const from = [4, 4]; // the Amazon's corner, relative to the target in the middle
+  const throws = [T, T + DELAY, T + 2 * DELAY];
+  const land = throws.map((at) => at + SCENE_MISSILE_MS);
+  const pull = land[2];
+  const COOL = SCENE_BAR.cool;
+  const ticks = awaken ? [1, 2, 3, 4, 5].map((i) => pull + i * 1000) : [];
+  const end = awaken ? pull + 5500 : pull + 1800;
+  const glow = { filter: 'drop-shadow(0 0 5px #dc143c)' };
+  return {
+    numbers: [...land.map((at) => sceneDmg(at, 'target', 'physical', false, 'physical')), sceneDmg(pull, 'target', 'abilityPower', true, 'magic'), sceneHeal(pull, 'self'), ...ticks.map((at) => sceneDmg(at, 'target', 'hpBlack', false, 'true'))],
+    ...sceneTarget(), castRange: 4, gridHalf: 4, noBlood: 1, noAutoAttack: true, noCooldownBar: true,
+    bars: [{ at: 0, until: end, on: 'self', y: -2, smooth: true, levels: [[0, 1, COOL], ...throws.flatMap((at) => [[at, 1, COOL], [at + 1, 0, COOL], [at + CD, 1, COOL]])].filter((k, i, all) => i === 0 || k[0] >= all[i - 1][0]) }],
+    flights: throws.map((at) => ({ shot: { n: 'throwingKnife', id: 9, ...glow }, from, to: [0, 0], at })),
+    overlays: [{ kind: 'chipKnife', anchor: 'target', dx: 0, dy: 0, at: pull, strong: true }],
+    passives: [{ src: 'vicious-knife', counts: [{ at: 0, n: 0 }, { at: land[0], n: 1 }, { at: land[1], n: 2 }, { at: pull, n: 0 }] }, ...(awaken ? [{ src: 'amazon-bleed', windows: [[pull, pull + 5000]] }] : [])],
+    holdMs: end,
+    fx: [...land.map((at) => ({ n: 'bleed', id: 1, f: 6, tiles: [[0, 0]], at })), // the blood of each normal hit (the scene places its own: `noBlood`)
+      { n: 'megaBleed', id: 268, f: 4, tiles: [[0, 0]], at: pull }, ...ticks.map((at) => ({ n: 'megaBleed', id: 268, f: 4, tiles: [[0, 0]], at }))]
+  };
+}
+
+// Blue Djinn (the blue boom; every 7s, the first at the start; the ability is ready, so it casts at once): it plays `moeExoriBlue` on itself (a 32px burst, 700ms, 90% opacity, a white glow) that HOLDS its size for the
+// first 57% and then scales up to 5x over the rest (`blueDjinnScale`: 1 -> 5), while a round aura 5 tiles across (an ally green border, a mana-blue radial fill, no zoom, a 150ms fade) shows for 700ms. 6 ticks (375ms)
+// after the cast every enemy in the 5x5 (corners cut) takes a crit of magic damage (15 + 0.7 AP, the mana colour: a pool of blood) and is SILENCED for 3.5s (the `blueboom` chip; the little silence icon the game pops over it is not drawn); an
+// awakened Djinn cannot be silenced itself. Here two villain Ti stand in the area.
+const BLUE_DJINN_MASK = ['OXXXO', 'XXXXX', 'XX+XX', 'XXXXX', 'OXXXO'];
+function sceneBlueDjinn() {
+  const T = 500;
+  const hit = T + 375;
+  const enemies = [[1, 0], [-2, 1]];
+  return {
+    numbers: enemies.map((e) => ({ at: hit, kind: 'damage', on: e, type: 'magic', dtype: 'magic', color: '#6699ff', crit: true })),
+    ...sceneSelf(), gridHalf: 3, cooldownCastAt: T, noAutoAttack: true, noBlood: 1,
+    mates: enemies.map(([dx, dy]) => ({ id: 119, dx, dy, facing: dx > 0 ? 'west' : 'east' })),
+    flashes: [{ at: hit, ms: 800, tiles: sceneArea(BLUE_DJINN_MASK) }],
+    overlays: [{ kind: 'circle', still: true, tiles: 5, border: 'rgba(96,192,96,0.7)', fill: 'radial-gradient(circle at center, #6699ff40 0%, #6699ff40 25%, transparent 70%)', at: T, until: T + 700 }],
+    passives: [{ src: 'blueboom', windows: [[hit, hit + 3500]] }],
+    holdMs: hit + 2200,
+    fx: [{ n: 'moeExoriBlue', id: 287, f: 11, w: 'self', at: T, grow: { at: 0.57, to: 5 }, filter: 'drop-shadow(0 0 5px #ffffff70)', opacity: 0.9 }, ...enemies.map((e) => ({ n: 'bleed', id: 1, f: 6, tiles: [e], at: hit }))]
+  };
+}
+
+// Demon (two abilities, both shown in one scene, in sequence): first the ENERGY BEAM, then the GREAT FIREBALL.
+// Energy beam (every 4s, the first after 1s; range 8, only along a row or a column): a straight line of 8 tiles (the game's line mask `sr`, north / east / south / west only: never diagonal); there is no missile: an effect
+// plays on every tile of the line at once (`oldEnergyFx`, which has no sheet of its own, so the `energy` sheet stands in) and every enemy on it takes a crit of magic damage (15 + 0.5 AP, the energy colour, silent) at
+// the same tick; one it would kill is left at 1 HP and CONVERTED to the Demon's side (a brain over it for 2s).
+// Great fireball (every 5s, range 4): a `fire` missile flies to the target, `oldBurn` on it, and every enemy in the 7x7 area around it (its corners cut) and the target take magic fire damage (5 + 0.3 AP; awakened it
+// also never kills: it leaves 1 HP) and `oldFireFx` (70% opacity) plays on every tile of the area (`fire` stands in: the old ones have no sheet). The Demon stands at the west end of the board, the Ti on its row.
+const DEMON_FIREBALL_MASK = ['OOXXXOO', 'OXXXXXO', 'XXXXXXX', 'XXX+XXX', 'XXXXXXX', 'OXXXXXO', 'OOXXXOO'];
+function sceneDemon() {
+  const BEAM = 500;
+  const BALL = BEAM + 2500; // the fireball is cast a moment after the beam (its own cooldown)
+  const land = BALL + SCENE_MISSILE_MS;
+  const ti = [[-1, 0], [2, 0]]; // from the middle of the board (the Demon stands at [-4, 0])
+  const area = sceneArea(DEMON_FIREBALL_MASK).map(([dx, dy]) => [dx - 1, dy]); // around the target, the first Ti
+  return {
+    ...sceneSelf(), gridHalf: 5, casterOffset: [-4, 0], casterFacing: 'east', cooldownCastAt: BEAM, noBlood: 1,
+    numbers: [...ti.map((on) => ({ at: BEAM, kind: 'damage', on: { target: on }, type: 'magic', dtype: 'magic', color: '#cc33ff', crit: true })), ...ti.map((on) => ({ at: land, kind: 'damage', on: { target: on }, type: 'magic', dtype: 'magic', color: '#ff9900' }))],
+    mates: ti.map(([dx, dy]) => ({ id: 119, anchor: 'target', dx, dy, facing: 'west' })),
+    flights: [{ shot: { n: 'fire', id: 4 }, from: [-4, 0], to: [-1, 0], at: BALL }],
+    flashes: [{ at: land, ms: 800, tiles: area }],
+    holdMs: land + 2200,
+    fx: [...Array.from({ length: 8 }, (_, i) => ({ n: 'energy', id: 12, f: 17, tiles: [[-3 + i, 0]], at: BEAM })), { n: 'fire', id: 16, f: 9, tiles: [[-1, 0]], at: land }, ...area.map((tile) => ({ n: 'fire', id: 16, f: 9, tiles: [tile], at: land, opacity: 0.7 }))]
+  };
+}
+
+// Dragon (the fireball; every 8s, the first after 2s; any range): a `fire` missile flies to the target and the fireball component burns it: the TARGET tile at once (15 + 1 AP magic fire damage, a crit and its first
+// piece of equipment burnt away), then the 3x3 ring around it 2 ticks (125ms) later for 2/3 of that and the 5x5 outer ring (corners cut) 2 ticks after that for 1/3; each tile plays `fire` (600ms). Every creature within 2
+// tiles of the target also gets `soulfire` for 5s (-15% attack damage and ability power, -0.3% more per AP). AWAKENED the fireball engulfs the ENTIRE BATTLEFIELD: a flood fill from the target tile spreading one ring (8 neighbours,
+// 2 ticks apart) at a time over every free tile of the board, the target tile 75 and each of the next rings 2/3, then 1/3 for all the rest. Here the Dragon stands in the bottom right corner of a 9x9 board, a villain Ti
+// is the target, another is next to it and (awakened) a third is far away, in the fourth ring.
+function sceneDragon(awaken) {
+  const T = 500;
+  const land = T + SCENE_MISSILE_MS;
+  const RING = 125;
+  const rings = awaken ? 8 : 2; // the rings that burn (rings 0..)
+  const targets = [[0, 0], [1, 1], ...(awaken ? [[-3, 2]] : [])];
+  const ringOf = (t) => Math.max(Math.abs(t[0]), Math.abs(t[1]));
+  const tiles = [];
+  for (let y = -4; y <= 4; y++) for (let x = -4; x <= 4; x++) {
+    const r = ringOf([x, y]);
+    if (r > rings) continue;
+    if (!awaken && r === 2 && Math.abs(x) + Math.abs(y) === 4 && Math.abs(x) === 2) continue; // the outer ring's corners are cut
+    tiles.push([x, y]);
+  }
+  const at = (t) => land + (awaken ? (ringOf(t) + 1) * RING : ringOf(t) * RING);
+  const dmg = (t) => ringOf(t) === 0 ? 75 : ringOf(t) === 1 ? 50 : 25; // for the colour only: the numbers are words
+  const near = targets.filter((t) => ringOf(t) <= 2);
+  return {
+    numbers: targets.map((t) => ({ at: at(t), kind: 'damage', on: { target: t }, type: 'magic', dtype: 'magic', color: '#ff9900', ...(ringOf(t) === 0 ? { crit: true } : {}) })),
+    m: [{ a: 'target', rows: ['+'], g: 1 }], mi: [{ n: 'fire', id: 4 }], gridHalf: 4, lead: T, noBlood: 1, ...(awaken ? { fullBoard: true } : {}),
+    // the hit area lights ring by ring as each layer burns (the target tile, then the 3x3 ring, then the outer ring; awakened every ring out to the edge of the board)
+    flashes: [...new Set(tiles.map(at))].sort((x, y) => x - y).map((time) => ({ at: time, ms: 1100, tiles: tiles.filter((t) => at(t) === time) })),
+    mates: targets.map(([dx, dy]) => ({ id: 119, anchor: 'target', dx, dy, facing: 'east' })),
+    passives: [{ src: 'soulfire', windows: near.map((t) => [at(t), at(t) + 5000]).slice(0, 1) }],
+    holdMs: land + (awaken ? (rings + 1) * RING : 2 * RING) + 2200,
+    fx: tiles.map((t) => ({ n: 'fire', id: 16, f: 9, tiles: [t], at: at(t), ms: 600 }))
+  };
+}
+
+// Goblin Gumslinger (distance fighting; range 4): it throws a CANDY CANE (`candyCane`, the event variant of the Goblin's `smallStone`) at its target with every attack for its attack damage (physical). Each throw adds a
+// stone to the counter over it (the `earth` green bar): at the Nth throw (round(4 x 1.2^level): 5 at level 1, 6 at level 2, ...) it LEVELS UP: +3 attack damage, a pulse and `raiseStat` on it, the counter empties and
+// the `distancelevel` chip goes up one. Awakened every level up also gives all allied goblins +1% attack speed (the `frontsweep` chip). Here it throws five candy canes (a second apart) and levels up on the fifth. The
+// base class (the Goblin's) holds the attack, so the data parser could not read it.
+function sceneGoblinGumslinger(awaken) {
+  const T = 500;
+  const GAP = 1000;
+  const throwsAt = Array.from({ length: 5 }, (_, i) => T + i * GAP);
+  const land = throwsAt.map((at) => at + SCENE_MISSILE_MS);
+  const from = [4, 4]; // the Gumslinger's corner, 4 tiles from the target in the middle
+  const EARTH = '#00ff00';
+  return {
+    numbers: land.map((at) => sceneDmg(at, 'target', 'physical', false, 'physical')),
+    ...sceneTarget(), castRange: 4, noAutoAttack: true, noCooldownBar: true,
+    flights: throwsAt.map((at) => ({ shot: { n: 'candyCane', id: 61 }, from, to: [0, 0], at })),
+    bars: [{ at: 0, until: land[4] + 1500, on: 'self', y: -2, levels: [[0, 0, EARTH], ...land.slice(0, 4).map((at, i) => [at, (i + 1) / 5, EARTH]), [land[4], 0, EARTH]] }],
+    passives: [{ src: 'distancelevel', counts: [{ at: 0, n: 1 }, { at: land[4], n: 2 }] }, ...(awaken ? [{ src: 'frontsweep', windows: [[land[4], null]], counts: [{ at: land[4], n: '1%' }] }] : [])],
+    holdMs: land[4] + 1800,
+    fx: [{ ...SCENE_FX.raiseStat, w: 'self', at: land[4] }]
+  };
+}
+
+// Werefox (the fox coin; every 9s, the first after 5s; range 4): it summons a Werefox STATUE on its own tile (`magicPoof`; the statue, item 37812, drops in with `bouncyFall`, 300ms) and goes INVISIBLE for 3.5s with 60% faster
+// attacks and +160 speed. The statue TAUNTS every enemy next to it (the taunt icon and the `exeta` chip) and shows a draining stun-coloured bar; it has no attack of its own. The Werefox treats the statue as its target: each
+// attack at it is turned into a splash, a `royalStar` to every enemy next to the statue for its attack damage (physical) divided among them (split in two per extra enemy: full damage for one) and it heals (1 + 0.05 AP) per
+// enemy hit. Casting again while the statue stands only refreshes it. When the time runs out the statue goes with a `magicPoof` at half opacity. Awakened its allies (lupines) go invisible too. Here the Werefox walks three tiles west while invisible and a villain Ti stands next to the statue.
+function sceneWerefox(awaken) {
+  const T = 500;
+  const EFF = 3500;
+  const ti = [1, 0];
+  const ally = [-2, 1];
+  // Invisible and +160 speed, the Werefox walks off the statue's tile to where it can shoot (range 4): three tiles west. An invisible creature is drawn as looping `heal` effects, which cannot follow it, so one plays on each tile it crosses.
+  const stepMs = walkStepMs(105 + 160);
+  const go = T + 100;
+  const arrive = go + 3 * stepMs;
+  const away = [-3, 0];
+  const hits = [0, 1, 2].map((i) => arrive - 100 + i * 1100 + SCENE_MISSILE_MS);
+  const trail = [[0, 0], [-1, 0], [-2, 0]].map((tile, i) => ({ ...SCENE_FX.heal, tiles: [tile], at: i === 0 ? T : go + i * stepMs, ms: i === 0 ? go + stepMs - T : stepMs }));
+  return {
+    numbers: [...hits.map((at) => sceneDmg(at, ti, 'physical', false, 'physical')), ...hits.map((at) => sceneHeal(at, away))],
+    ...sceneBoard(3), cooldownCastAt: T, noAutoAttack: true, casterFacing: 'east',
+    casterFlee: { at: go, steps: [[-1, 0, 160], [-1, 0, 160], [-1, 0, 160]] }, casterInvisible: { at: T, until: T + EFF }, // it walks to the new tile at +160 speed and stays there when the statue is gone
+    mates: [{ item: 37812, dx: 0, dy: 0, at: T, bouncyFall: true, dies: { at: T + EFF, corpse: false } }, sceneTiMate(ti[0], ti[1], 'west'),
+      ...(awaken ? [{ dx: ally[0], dy: ally[1], facing: 'east', dies: { at: T, until: T + EFF, corpse: false } }] : [])],
+    flights: hits.map((at) => ({ shot: { n: 'royalStar', id: 59 }, from: away, to: ti, at: at - SCENE_MISSILE_MS })),
+    statusIcons: [sceneTaunt(T + 125, ti)],
+    stuns: [{ at: T, ms: EFF, on: [0, 0], shake: false }],
+    passives: [{ src: 'foxcoin', windows: [[T, T + EFF]] }, { src: 'exeta', windows: [[T + 125, T + EFF]] }],
+    holdMs: T + EFF + 1200,
+    fx: [{ ...SCENE_FX.magicPoof, tiles: [[0, 0]], at: T }, { ...SCENE_FX.magicPoof, tiles: [[0, 0]], at: T + EFF, opacity: 0.5 },
+      ...trail, ...[0, 1, 2, 3].map((i) => ({ ...SCENE_FX.heal, tiles: [away], at: arrive + i * 880 })),
+      ...(awaken ? [{ ...SCENE_FX.magicPoof, tiles: [ally], at: T }, ...sceneInvisibleLoops(T, 4, { tiles: [ally] })] : [])]
+  };
+}
+
+// Yeti (the snowstorm; cooldown 8s, the first after 5s): it starts a SNOWSTORM that lasts 6s (the ability bar is replaced by an ice-coloured one that drains over the 6s; the cooldown restarts when it ends): a snow circle (a
+// 160px / 5 tile ring with the ally colour and a white radial fill, with three layers of snow particles spinning inside it like a whirlwind) around it. At once and then every second (16 ticks), every enemy within 2 tiles (and its target) is SLOWED 25% for 2s (the slow icon, the \`snowstorm\` chip), takes
+// magic ice damage of 2 + 0.1 AP (silent, no particle effect) and the Yeti heals (5 + 0.05 AP) for each of them, a crit above two. Awakened, auto-attacks that do not come from a Yeti deal no damage to anything in the snow (not drawn). Two villain Ti stand in the circle.
+function sceneYeti() {
+  const T = 500;
+  const STORM = 6000;
+  const ticks = [0, 1, 2, 3, 4, 5].map((i) => T + i * 1000);
+  const enemies = [[-2, 0], [1, 1]];
+  const ICE = '#66ccff';
+  const COOL = SCENE_BAR.cool;
+  const end = T + STORM + 1500;
+  return {
+    numbers: [...ticks.flatMap((at) => enemies.map((e) => sceneDmg(at, e, 'ice', false, 'magic'))), ...ticks.map((at) => sceneHeal(at, 'self'))],
+    ...sceneBoard(2), noCooldownBar: true, cooldownCastAt: T,
+    mates: enemies.map(([dx, dy]) => ({ id: 119, dx, dy, facing: dx < 0 ? 'east' : 'north' })),
+    statusIcons: enemies.map((e) => ({ at: T, icon: 'slow', on: e })),
+    bars: [{ at: 0, until: end, on: 'self', y: -2, smooth: true, levels: [[0, 1, COOL], [T, 1, COOL], [T + 1, 1, ICE], [T + STORM, 0, ICE], [T + STORM + 1, 0, COOL], [end, (end - T - STORM) / 8000, COOL]] }],
+    overlays: [{ kind: 'circle', tiles: 5, border: 'rgba(96,192,96,0.7)', fill: 'radial-gradient(circle at center, rgba(255,255,255,0.38) 0%, rgba(255,255,255,0.38) 25%, transparent 70%)', whirl: true, at: T, until: T + STORM }],
+    passives: [{ src: 'snowstorm', windows: [[T, T + STORM + 2000]] }],
+    holdMs: end
+  };
+}
+
+// Beer Barrel (the Grynch artifact, 10 HP, no attack): it only does something when it is DESTROYED: a \`largeFireExplosion\` plays on every tile of a big area around it (the 10 x 13 mask below, 3 tiles west of the barrel
+// and 6 east, 6 north and 6 south) and every creature in it takes 300 TRUE damage (a fire-coloured crit, silent). The barrel itself takes only 20% of area damage. Here a villain Ti shoots it dead (it leaves its
+// barrel corpse, item 3140) and two creatures standing in the area are hit.
+const BEER_BARREL_MASK = ['OOXXXOOOOO', 'OXXXXXOOOO', 'XXXXXXXOOO', 'XXXXXXXOOO', 'XXXXXXXXOO', 'XXXXXXXXXO', 'XXX+XXXXXX', 'XXXXXXXXXO', 'XXXXXXXXOO', 'XXXXXXXOOO', 'XXXXXXXOOO', 'OXXXXXOOOO', 'OOXXXOOOOO'];
+function sceneBeerBarrel() {
+  const HIT = 1000;
+  const BOOM = HIT + 60;
+  const area = [[0, 0], ...sceneArea(BEER_BARREL_MASK)].filter(([x, y]) => Math.abs(x) <= 4 && Math.abs(y) <= 4); // what shows on the 9 x 9 board
+  const victims = [[3, -2], [-2, 3], [-2, 0]]; // every creature in the area is hurt: two bystanders and the shooter itself (the attacker Ti, two tiles west)
+  return {
+    numbers: [sceneDmg(HIT, 'self', 'physical'), ...victims.map((v) => sceneDmg(BOOM, v, 'fire', true, 'true'))],
+    m: [{ a: 'self', rows: ['+'] }], mi: [], noAutoAttack: true, noCooldownBar: true, gridHalf: 4, fullBoard: true, // the board is 9 x 9: the blast (10 x 13) is cut at its edge
+    bleeds: [{ at: BOOM, on: [-2, 0], crit: true }], // every creature it hurts bleeds, the shooter too
+    flashes: [{ at: BOOM, ms: 1800, tiles: area }],
+    attacker: { ...SCENE_VILLAIN_TI, dx: -2, dy: 0, at: HIT - SCENE_MISSILE_MS },
+    mates: victims.slice(0, 2).map(([dx, dy]) => ({ dx, dy, facing: 'west' })),
+    transform: { at: BOOM, corpse: 3140 },
+    holdMs: BOOM + 1800,
+    fx: [{ n: 'largeFireExplosion', id: 7, f: 14, tiles: area, at: BOOM }]
+  };
+}
+
+// Earth Crystal (it cannot be moved; it NEVER attacks and has no damage): every 3s it HEALS every crystal that is hurt (itself too): `greenFireworks` on each and a crit heal of 100 (silent, no particle). The crystals
+// are the Energy, Magma and Earth Crystals. Here the Earth Crystal heals itself and two hurt crystals.
+function sceneEarthCrystal() {
+  const T = 500;
+  const others = [[2, 0], [0, 2]];
+  return {
+    numbers: [sceneHeal(T, 'self', true), ...others.map((o) => sceneHeal(T, o, true))],
+    ...sceneBoard(3), cooldownCastAt: T, noAutoAttack: true,
+    mates: [{ id: 57, dx: others[0][0], dy: others[0][1] }, { id: 58, dx: others[1][0], dy: others[1][1] }],
+    holdMs: T + 2000,
+    fx: [[0, 0], ...others].map((tile) => ({ n: 'greenFireworks', id: 196, f: 10, tiles: [tile], at: T }))
+  };
+}
+
+// Lavahole (it cannot be moved; speed 0; cooldown 2s): it picks its closest enemy and CHARGES for 1.5s: `blackSmoke` on it, a red bar fills, it shakes and heats, and the target's tile is MARKED (the `squareFocus` frame
+// and the `arrowFocus` arrow over it). Then `smoke` plays on it, a `fire` missile flies to the marked tile and everything standing there (its target; its own side only when it is the target) takes 35% of its MAX HP as true damage, a crit
+// in `fire` colour (silent), with `fire` on it. Here a villain Ti stands three tiles east and one south of the Lavahole.
+function sceneLavahole() {
+  const T = 500;
+  const CHARGE = 1500;
+  const ti = [3, 1];
+  const land = T + CHARGE + SCENE_MISSILE_MS;
+  return {
+    numbers: [sceneDmg(land, ti, 'fire', true, 'true')],
+    ...sceneBoard(3), noAutoAttack: true, noCooldownBar: true, cooldownCastAt: T + CHARGE,
+    mates: [sceneTiMate(ti[0], ti[1], 'west')],
+    bars: [{ at: T, ms: CHARGE, on: 'self', color: '#e03030' }],
+    flights: [{ shot: { n: 'fire', id: 4 }, from: [0, 0], to: ti, at: T + CHARGE }],
+    holdMs: land + 1500,
+    fx: [{ n: 'blackSmoke', id: 158, f: 7, w: 'self', at: T, tx: -0.25, ty: -0.25 }, { n: 'squareFocus', id: 57, f: 14, tiles: [ti], at: T, ms: CHARGE }, { n: 'arrowFocus', id: 56, f: 8, tiles: [ti], at: T, ms: CHARGE },
+      { n: 'smoke', id: 242, f: 24, w: 'self', at: T + CHARGE, tx: -0.5, ty: -0.25 }, { n: 'fire', id: 16, f: 9, tiles: [ti], at: land }]
+  };
+}
+
+// Orshabaal (the fireball; range 99): the same 11 x 11 diamond as the game's, on a board one tile smaller each side than the mask would make it (11 x 11 instead of 13 x 13): the caster stands four tiles out, and the
+// explosion is spelled out in effect tiles on a full board, so the rim of the diamond sits on the edge of the board.
+const ORSHABAAL_MASK = ['OOOOOXOOOOO', 'OOOXXXXXOOO', 'OOXXXXXXXOO', 'OXXXXXXXXXO', 'OXXXXXXXXXO', 'XXXXX+XXXXX', 'OXXXXXXXXXO', 'OXXXXXXXXXO', 'OOXXXXXXXOO', 'OOOXXXXXOOO', 'OOOOOXOOOOO'];
+function sceneOrshabaal() {
+  const T = 500;
+  const land = T + 4 * 120;
+  const area = [[0, 0], ...sceneArea(ORSHABAAL_MASK)];
+  return {
+    numbers: [sceneDmg(land, 'target', 'fire', false, 'magic')],
+    ...sceneTarget(), castRange: 4, gridHalf: 5, fullBoard: true, lead: T,
+    flights: [{ shot: { n: 'fire', id: 4 }, from: [4, 4], to: [0, 0], at: T }],
+    flashes: [{ at: land, ms: 1100, tiles: area }],
+    holdMs: land + 1800,
+    fx: [{ n: 'largeFireExplosion', id: 7, f: 14, tiles: area, at: land }, { n: 'fire', id: 16, f: 9, tiles: [[0, 0]], at: land }]
+  };
+}
+
+// Sweaty Cyclops (the fire axe; speed 55): a FIRE AXE (item 3320) lies on a tile near it (it fades in over 600ms and drops in with a bounce). The Cyclops walks next to it and HAMMERS it: once a second (the cooldown) the axe
+// jumps (`superImpact`, 250ms) with a `chip` on it and the `smith` counter over the Cyclops goes up one, to 3. At 3, six ticks later, the axe is handed on: the closest ally with no equipment gets it (the axe fades out and in over
+// 700ms, the ally pulses twice and the axe drops onto it, half opacity, fading out); with no such ally the Cyclops takes it itself. The holder's attack damage goes up (a tier-5 equipment) and the Cyclops then fights; it
+// always regenerates 2% + 0.8% per AP of its max HP every second (silent), the `greathealthpotion` chip. Here an ally Ti gets the axe.
+function sceneSweatyCyclops() {
+  const T = 500;
+  const stepMs = walkStepMs(55);
+  const axe = [3, 0];
+  const steps = [[1, 0], [1, 0]]; // two tiles, to stand next to the axe
+  const arrive = T + steps.length * stepMs;
+  const hammers = [0, 1, 2].map((i) => arrive + i * 1000);
+  const give = hammers[2] + 6 * SCENE_TICK_MS;
+  const ally = [0, 2];
+  return {
+    ...sceneBoard(3), noAutoAttack: true, noCooldownBar: true, casterFacing: 'east', casterFlee: { at: T, steps },
+    mates: [{ id: 119, dx: ally[0], dy: ally[1], facing: 'north', pulse: [give, give + 300] }],
+    overlays: [{ kind: 'fade', id: 3320, f: 1, loopMs: 1000, w: 1, h: 1, dx: axe[0], dy: axe[1], at: 0, fadeMs: 600, outAt: give, outMs: 300 },
+      { kind: 'drop', id: 3320, dx: ally[0], dy: ally[1], at: give + 300, ms: 1000, fadeDelay: 200, fadeMs: 800, op: 0.5 }],
+    passives: [{ src: 'greathealthpotion', windows: [[0, null]] }, { src: 'smith', counts: [{ at: 0, n: 0 }, ...hammers.map((at, i) => ({ at, n: i + 1 })), { at: give, n: 0 }] }],
+    holdMs: give + 1800,
+    fx: hammers.map((at) => ({ n: 'chip', id: 4, f: 8, tiles: [axe], at }))
+  };
+}
+
+// Ti (the thief; cooldown 1s): every second, if it is not on cooldown, it looks at the tiles around it and its own for an enemy that wears equipment: it says "ss?" (the speech bubble), `smoothSlap` plays on that enemy, the
+// piece is TAKEN off it (its first one) and a copy goes on Ti (the chip appears on it), and the cooldown starts. Its attacks (a `burstArrow`, range 7, magic fire damage with a `moe` on the target and the tiles around it) and its
+// slow walk east are not drawn here. Here an enemy with an amulet stands next to Ti.
+function sceneTi() {
+  const T = 500;
+  const victim = [1, 0];
+  const ITEM = 3057;
+  return {
+    ...sceneBoard(2), noAutoAttack: true, cooldownCastAt: T, casterFacing: 'east',
+    mates: [{ dx: victim[0], dy: victim[1], facing: 'west' }],
+    overlays: [{ kind: 'say', text: 'ss?', dx: 0, dy: 0, at: T, ms: 1500, size: 12 }],
+    passives: [{ right: true, windows: [[T, null]], equip: { spriteId: ITEM, stat: 'hp', tiers: [{ tier: 5, from: T, until: null }] } }],
+    holdMs: T + 2400,
+    fx: [{ n: 'smoothSlap', id: 213, f: 18, tiles: [victim], at: T }]
   };
 }
 
@@ -1903,7 +2311,7 @@ const ABILITY_SCENE_OVERRIDES = {
   // chip). Here a villain Ti beside it shoots it twice. When the meditation ends it blasts the enemies around it (`holyArrow` flies to each,
   // `holyExory` on it) for that damage x 40% (+ 0.125% per AP) as silent holy magic (yellow, a crit). It starts 500ms into the loop.
   24: { n: 'Monk', sc: { numbers: [sceneDmg(1640, 'self', 'fire'), sceneDmg(3640, 'self', 'fire'), sceneHeal(2000, 'self'), sceneHeal(3500, 'self'), sceneHeal(5000, 'self'), sceneHeal(6500, 'self'), sceneDmg(6640, [1, 0], 'holy', true)],
-    m: [{ a: 'self', rows: ['XXX', 'X+X', 'XXX'] }], mi: [], casterFacing: 'south', meditate: { from: 500, until: 6500 },
+    ...sceneSelf(), gridHalf: 2, flashes: [{ at: 6640, tiles: sceneArea(['XXX', 'X+X', 'XXX']) }], casterFacing: 'south', meditate: { from: 500, until: 6500 }, // the blast area lights when it blasts
     attacker: { ...SCENE_VILLAIN_TI, dx: 1, dy: 0, aim: [0, 0], at: 1640 - SCENE_MISSILE_MS },
     passives: [{ src: 'levitate', windows: [[500, 6500]] }, { src: 'holyburst', windows: [[500, 6500]] }],
     flights: [{ shot: SCENE_VILLAIN_TI.shot, from: [1, 0], to: [0, 0], at: 3640 - SCENE_MISSILE_MS }, { shot: { n: 'holyArrow', id: 38 }, from: [0, 0], to: [1, 0], at: 6640 - SCENE_MISSILE_MS }],
@@ -1917,7 +2325,7 @@ const ABILITY_SCENE_OVERRIDES = {
   // heal number), and +20 (+0.5 per AP) ability power for 6s (the `ultimatehealing` chip). It always flees from enemies: the step away comes in the same tick as the
   // cast. Here the ally Astronis (up left) is healed and a villain Ti stands to the right, so the Druid runs west. Awakened: see ABILITY_SCENE_AWAKENED.
   29: { n: 'Druid', sc: { numbers: [sceneHeal(500, [-2, -2])], m: [{ a: 'self', rows: ['+'], g: 1 }], mi: [],
-    mates: [{ dx: -2, dy: -2 }, { id: 119, dx: 2, dy: 0, facing: 'west' }], casterFlee: { at: 500, from: [[2, 0]] },
+    mates: [{ dx: -2, dy: -2 }, sceneTiMate(2, 0, 'west')], casterFlee: { at: 500, from: [[2, 0]] },
     passives: [{ src: 'ultimatehealing', windows: [[500, 6500]] }],
     fx: [{ n: 'slowYellowHeal', id: 182, f: 22, to: [-2, -2], at: 500 }] } },
   // Fire Devil (range 2, always keeps its distance): a `fire` missile; at the target a big `largeFireExplosion` + `fire` burn, then an explosion
@@ -1937,7 +2345,7 @@ const ABILITY_SCENE_OVERRIDES = {
   // Monster Cauldron: see sceneMonsterCauldron.
   83: { n: 'Monster Cauldron', sc: sceneMonsterCauldron() },
   // Cyclops Drone: see sceneCyclopsDrone.
-  112: { n: 'Cyclops Drone', sc: sceneCyclopsDrone() },
+  112: { n: 'Cyclops Drone', sc: sceneCyclopsDrone(false) },
   // Omruc: see sceneOmruc.
   106: { n: 'Omruc', sc: sceneOmruc() },
   // Ancient Scarab: see sceneAncientScarab.
@@ -1997,9 +2405,9 @@ const ABILITY_SCENE_OVERRIDES = {
   ] } },
   // Scorpion: its auto attack (a physical hit, so blood) poisons the target for 12s: a magic tick every 1.5s (`earth` on it, silent, the game's
   // green poison filter, the `envenom` chip). If a poisoned enemy dies it bursts as a poison bomb: `earthPoof` (zoomed 2x, half opacity) on it, a
-  // critical magic hit on the enemies next to it, which get poisoned too. Here the Dead Tree dies of the poison and a villain Ti beside it is hit.
+  // critical magic hit on the enemies next to it, which get poisoned too. Here the target (a villain Ti) dies of the poison and a villain Ti beside it is hit.
   23: { n: 'Scorpion', sc: { statusIcons: [{ at: 500, icon: 'poison' }], numbers: [sceneDmg('land'), sceneDmg(2000, 'target', 'earth'), sceneDmg(3500, 'target', 'earth'), sceneDmg(5000, [-1, -1], 'earth', true)],
-    m: [{ a: 'target', rows: ['+'], g: 1 }], mi: [], lead: 500,
+    ...sceneTarget(), lead: 500,
     dummyTint: { at: 500, filter: SCENE_POISON_FILTER }, dummyHidden: { from: 5000, until: 99999 },
     mates: [{ id: 119, dx: -1, dy: -1, tint: { at: 5000, filter: SCENE_POISON_FILTER } }],
     passives: [{ src: 'envenom', windows: [[500, 5000]] }],
@@ -2026,7 +2434,7 @@ const ABILITY_SCENE_OVERRIDES = {
   // it casts. Awakened it only picks the weakest enemy (nothing to draw).
   27: { n: 'Stalker', sc: { numbers: [sceneDmg(500, 'target', 'true', true), sceneDmg(2500, 'target', 'true', true), sceneDmg(4500, 'target', 'true', true),
       ...[1300, 2100, 2900, 3700, 4500, 5300, 6100].map((at) => sceneHeal(at, 'self'))],
-    m: [{ a: 'target', rows: ['+'], g: 1 }], mi: [], noBlood: 1, transform: { at: 500, until: 6500 },
+    ...sceneTarget(), noBlood: 1, transform: { at: 500, until: 6500 },
     passives: [{ src: 'utanigranhur', windows: [[500, 6500]] }],
     fx: [
       { ...SCENE_FX.poof, w: 'self', at: 500 },
@@ -2040,7 +2448,7 @@ const ABILITY_SCENE_OVERRIDES = {
   // Mummy; the first two steps are crits. Awakened: every 2s everyone alive takes true damage (0.15 AP, grey `zombie`) in order of distance, nearest first
   // (one per tick), and `blackBlood` (zoomed 2x, half opacity) bursts on the Mummy.
   28: { n: 'Mummy', sc: { numbers: [sceneDmg(500)], statusIcons: [{ at: 500, icon: 'slow' }],
-    m: [{ a: 'target', rows: ['+'], g: 1 }], mi: [], noBlood: 1, noDummy: true, gridHalf: 3, // a 7x7 grid: Ti runs 3 tiles west
+    ...sceneTarget(), noBlood: 1, noDummy: true, gridHalf: 3, // a 7x7 grid: Ti runs 3 tiles west
     passives: [{ src: 'slowmud', windows: [[500, 4500]] }],
     mates: [{ id: 119, anchor: 'target', dx: 0, dy: 0, facing: 'east', tint: { at: 500, filter: 'grayscale(0.5)' },
       walk: { at: 700, steps: [[-1, 0], [-1, 0], [-1, 0]], speedScale: 0.5,
@@ -2074,6 +2482,10 @@ const ABILITY_SCENE_OVERRIDES = {
   34: { n: 'Minotaur Archer', sc: sceneMinotaurArcher(false) },
   // Minotaur Guard: see sceneMinotaurGuard.
   35: { n: 'Minotaur Guard', sc: sceneMinotaurGuard(false) },
+  // Witch (range 99): the extracted scene with the caster three tiles out, so the board is 7 x 7 instead of 9 x 9 or more.
+  66: { n: 'Witch', sc: { m: [{ a: 'target', rows: ['OXXXO', 'XXXXX', 'XX+XX', 'XXXXX', 'OXXXO'] }], mi: [{ n: 'energyBeam', id: 5 }], fx: [{ n: 'magicPoof', id: 241, f: 9 }, { n: 'teleportBlue', id: 226, f: 11 }], castRange: 3 } },
+  // Werefox: see sceneWerefox.
+  110: { n: 'Werefox', sc: sceneWerefox(false) },
   // Wyvern: see sceneWyvern.
   36: { n: 'Wyvern', sc: sceneWyvern(false) },
   // Polar Bear: see scenePolarBear.
@@ -2114,13 +2526,7 @@ const ABILITY_SCENE_OVERRIDES = {
   11: { n: 'Spider', sc: { numbers: [sceneDmg('land', 'target', 'earth', true)], castRange: 3, lead: 500, m: [{ a: 'target', rows: ['OXO', 'X+X', 'OXO'] }], mi: [{ n: 'earthSpell', id: 30 }],
     fx: [{ n: 'earthSpinningRoots', id: 55, f: 14, b: 1 }],
     dummyTint: { at: 710, filter: 'grayscale(0.9)' }, stuns: [{ at: 710, ms: 3500, shake: false }], // the web stuns for 3.5s (bar only)
-    overlays: [
-      { kind: 'timed', anchor: 'target', id: 12747, dx: 0, dy: 0, at: 710, ms: 3500 },
-      { kind: 'timed', anchor: 'target', id: 12749, dx: 0, dy: -1, at: 710, ms: 3500 },
-      { kind: 'timed', anchor: 'target', id: 12751, dx: -1, dy: 0, at: 710, ms: 3500 },
-      { kind: 'timed', anchor: 'target', id: 12755, dx: 1, dy: 0, at: 710, ms: 3500 },
-      { kind: 'timed', anchor: 'target', id: 12753, dx: 0, dy: 1, at: 710, ms: 3500 }
-    ] } },
+    overlays: sceneWebs(710, 3500) } },
   // Goblin: throws `smallStone` at its target (physical, so blood on it); every so many throws its distance fighting levels up:
   // `raiseStat` on itself (and a 2-blink pulse, not drawn) for +3 attack damage. Range 4 (shown from 3). Awakened: each level
   // up also gives every allied goblin attack speed, with `raiseStat` on them too (see ABILITY_SCENE_AWAKENED).
@@ -2222,16 +2628,8 @@ const ABILITY_SCENE_OVERRIDES = {
       { kind: 'drop', id: 5899, dx: 1, at: 2200, ms: 600, fadeDelay: 200, fadeMs: 400, op: 0.5 }
     ] } },
   // Ghoul: pulse on its own tile and the neighbours (`tile.neighbors` + own tile).
-  // Blue Djinn: the game scales ONE blue burst (`blueDjinnScale`, 700ms) out from the caster over the whole 5x5 area;
-  // the extracted row put it on the caster tile only. Here it is one burst (`b`) sized to the area (`sz`, tiles).
-  104: {
-    n: 'Blue Djinn',
-    sc: {
-      m: [{ a: 'self', rows: ['OXXXO', 'XXXXX', 'XX+XX', 'XXXXX', 'OXXXO'] }],
-      mi: [],
-      fx: [{ n: 'moeExoriBlue', id: 287, f: 11, b: 1, sz: 5 }]
-    }
-  },
+  // Blue Djinn: see sceneBlueDjinn.
+  104: { n: 'Blue Djinn', sc: sceneBlueDjinn() },
   // Banshee: the screech spreads over the 3x3 area, then the outer ring; the music notes play on every hit tile (the
   // extracted row put them on the caster only).
   // Banshee: every 6s a screech. A wave hits the enemies in the 3x3 around her 3 ticks (187ms) after the cast and one hits the ring two tiles out 8 ticks
@@ -2239,43 +2637,10 @@ const ABILITY_SCENE_OVERRIDES = {
   // she flees and the screech also heals her (a crit heal, `musicNotesGreen` instead of the red notes on her): the scene shows that case. Awakened, a hit enemy heals 80% less
   // and has -15 magic resist for 2.5s (the heal-reduction icon pops over it, the `heal-reduction` chip). A villain Ti stands in each ring.
   25: { n: 'Banshee', sc: { p: sceneBansheeParts(false) } },
-  // Dragon: fireball at the target (fireball component: target tile, then the 3x3 ring, then the next ring out).
-  65: {
-    n: 'Dragon',
-    sc: {
-      m: [{ a: 'target', rows: ['OXXXO', 'XXXXX', 'XX+XX', 'XXXXX', 'OXXXO'] }],
-      mi: [{ n: 'fire', id: 4 }],
-      fx: [{ n: 'fire', id: 16, f: 9 }]
-    }
-  },
-  // Demon: two abilities, two scenes (`p`: parts, each with its own cooldown constant `cd`). The energy beam hits
-  // every enemy on the straight line towards the target (range 8: the game's line mask `sr`, drawn with `line`);
-  // the great fireball hits the 7x7 area `sn` around the target. The game's own fire missile / effect names for the
-  // Demon (oldFire, oldFireFx, oldEnergyFx) have no image sheet, so the regular fire ones stand in.
-  132: {
-    n: 'Demon',
-    sc: {
-      m: [],
-      mi: [],
-      fx: [],
-      p: [
-        {
-          l: 'Energy beam',
-          cd: 'COOLDOWN_MS',
-          m: [{ a: 'target', line: 1, rows: ['OOOOOOO', 'OOOOOOO', 'OOOOOOO', 'OOO+OOO', 'OOOOOOO', 'OOOOOOO', 'OOOOOOO'] }],
-          mi: [{ n: 'energyBeam', id: 5 }],
-          fx: []
-        },
-        {
-          l: 'Great fireball',
-          cd: 'FIREBALL_COOLDOWN_MS',
-          m: [{ a: 'target', rows: ['OOXXXOO', 'OXXXXXO', 'XXXXXXX', 'XXX+XXX', 'XXXXXXX', 'OXXXXXO', 'OOXXXOO'] }],
-          mi: [{ n: 'fire', id: 4 }],
-          fx: [{ n: 'fire', id: 16, f: 9 }]
-        }
-      ]
-    }
-  },
+  // Dragon: see sceneDragon (awakened: the fireball engulfs the whole board).
+  65: { n: 'Dragon', sc: sceneDragon(false) },
+  // Demon: both abilities in one scene, in sequence: the energy beam, then the great fireball (see sceneDemon).
+  132: { n: 'Demon', sc: sceneDemon() },
   // Single-target hits (read from the ability text; no area).
   // Orc Spearman: throws the Enchanted Spear (missile 18); the spear item (7367, 5 animated frames, 500ms) drops at once on the
   // tile around the target farthest from the thrower (`dropSpear`) and lies there through the 10s cooldown until he picks it
@@ -2283,9 +2648,16 @@ const ABILITY_SCENE_OVERRIDES = {
   // `pickupAt` = when it is picked up (it is gone until the next throw). `lead` = the throw starts this many ms into the loop.
   4: { n: 'Orc Spearman', sc: { numbers: [sceneDmg('land', 'target', 'physical', true)], m: [{ a: 'target', rows: ['+'] }], mi: [{ n: 'enchantedSpear', id: 18 }], fx: [], lead: 500, ground: { id: 7367, f: 5, ms: 500, dx: -1, dy: -1, pickupAt: 0 } } },
   117: { n: 'Astronis', sc: { m: [{ a: 'target', rows: ['+'] }], mi: [], fx: [] } },
-  // Yeti: snowstorm on a 7 x 4 area around itself (the mask the Percht Queen's class also uses; the parser reads
-  // hers but not his).
-  80: { n: 'Yeti', sc: { m: [{ a: 'self', rows: ['XXXXXXX', 'XXX+XXX', 'XXXXXXX', 'XXXXXXX'] }], mi: [], fx: [] } },
+  // Orshabaal: see sceneOrshabaal.
+  128: { n: 'Orshabaal', sc: sceneOrshabaal() },
+  // Lavahole: see sceneLavahole.
+  70: { n: 'Lavahole', sc: sceneLavahole() },
+  // Earth Crystal: see sceneEarthCrystal.
+  59: { n: 'Earth Crystal', sc: sceneEarthCrystal() },
+  // Beer Barrel: see sceneBeerBarrel.
+  92: { n: 'Beer Barrel', sc: sceneBeerBarrel() },
+  // Yeti: see sceneYeti.
+  80: { n: 'Yeti', sc: sceneYeti() },
   // Dark Apprentice / Dark Magician: electric missile, then energy on every tile of the path to the target
   // (`line`: the scene draws the straight run of tiles from caster to target; the mask only sizes the grid).
   124: {
@@ -2307,10 +2679,14 @@ const ABILITY_SCENE_OVERRIDES = {
   // Passives, buffs, auras and summons: nothing lands on a target, so a scene on the creature itself.
   // Deer: see sceneDeer.
   37: { n: 'Deer', sc: sceneDeer(false) },
+  // Amazon: see sceneAmazon.
+  68: { n: 'Amazon', sc: sceneAmazon(false) },
   // Paladin, Cake Drake, Clot: see their functions.
   123: { n: 'Paladin', sc: scenePaladin(false) },
   115: { n: 'Cake Drake', sc: sceneCakeDrake() },
   127: { n: 'Clot', sc: sceneClot() },
+  // Goblin Gumslinger: see sceneGoblinGumslinger.
+  85: { n: 'Goblin Gumslinger', sc: sceneGoblinGumslinger(false) },
   // Nightstalker, Corym Skirmisher, Black Knight, Mateusz: see their functions.
   61: { n: 'Nightstalker', sc: sceneNightstalker(false) },
   72: { n: 'Corym Skirmisher', sc: sceneCorymSkirmisher(false) },
@@ -2335,14 +2711,16 @@ const ABILITY_SCENE_OVERRIDES = {
   88: { n: 'Reindeer', sc: sceneDeer(false) },
   // Orc Berserker: see sceneOrcBerserker.
   42: { n: 'Orc Berserker', sc: sceneOrcBerserker() },
-  // Sweaty Cyclops: once it holds the fire axe it heals itself every second (2% + 0.8% per AP of its max HP, silent: no numbers), shown by the `greathealthpotion` chip.
-  64: { n: 'Sweaty Cyclops', sc: { ...sceneSelf(), fx: [], noBlood: 1, holdMs: 4000, passives: [{ src: 'greathealthpotion', windows: [[0, null]] }] } },
+  // Ti: see sceneTi.
+  119: { n: 'Ti', sc: sceneTi() },
+  // Sweaty Cyclops: see sceneSweatyCyclops.
+  64: { n: 'Sweaty Cyclops', sc: sceneSweatyCyclops() },
   75: { n: 'Dead Tree', sc: { ...sceneSelf(), fx: [] } },
   78: { n: 'Willi Wasp', sc: sceneWilliWasp() },
   // Bog Raider / Gummy Raider: pays HP, then hits the 8 neighbouring tiles (`tile.neighbors`; the centre '+' is
   // drawn as hit too, it is only the origin) and plays "nasty" on itself.
   62: { n: 'Bog Raider', sc: sceneBogRaider() },
-  82: { n: 'Gummy Raider', sc: { m: [{ a: 'self', rows: ['XXX', 'X+X', 'XXX'] }], mi: [], fx: [{ n: 'nasty', id: 17, f: 6, w: 'self' }] } },
+  82: { n: 'Gummy Raider', sc: sceneBogRaider(6574) },
   // No scene on purpose: nothing a small grid shows correctly.
   // Bug: a passive. For every other vermin alive it gains stats (I lifesteal, II attack speed, III attack damage, IV magic resist,
   // V speed) and its sprite glows (`bugStage<n>`, 900ms per stage: 1 -> 1.5, 1 -> 1.75, then from 3 vermin pulsing: 1.5 <-> 3, 1.5 <-> 5,
@@ -2380,8 +2758,12 @@ const ABILITY_SCENE_OVERRIDES = {
   77: { n: 'Swamp Troll', sc: sceneSwampTroll(false) },
   // Goblin Assassin: see sceneGoblinAssassin.
   48: { n: 'Goblin Assassin', sc: sceneGoblinAssassin(false) },
+  // Goblin Saboteur: the event variant of the Goblin Assassin (its class extends it with the same ability), so the same scene.
+  86: { n: 'Goblin Saboteur', sc: sceneGoblinAssassin(false) },
   // Goblin Scavenger: see sceneGoblinScavenger.
   47: { n: 'Goblin Scavenger', sc: sceneGoblinScavenger(false) },
+  // Unionized Goblin: the event variant of the Goblin Scavenger (its class extends it, the same constants and ability), so the same scene.
+  87: { n: 'Unionized Goblin', sc: sceneGoblinScavenger(false) },
   // Orc Warlord: see sceneOrcWarlord.
   46: { n: 'Orc Warlord', sc: sceneOrcWarlord() },
   // Orc Rider: see sceneOrcRider.
@@ -2418,7 +2800,7 @@ const ABILITY_SCENE_OVERRIDES = {
   // scratches (`scratch` on the target), then turns back (magicPoof on itself). `transform`: outfit id, and `at` / `until` (ms)
   // = the Cave Rat's time on screen; fx `at` = start time (ms). Hits follow the attack delay: Rat 2000ms, Cave Rat -30% =
   // 1400ms apart (the first enraged hit comes one delay after the transforming attack).
-  1: { n: 'Rat', sc: { numbers: [sceneDmg(2000, 'target', 'physical', true), sceneDmg(3400, 'target', 'physical', true)], m: [{ a: 'target', rows: ['+'], g: 1 }], mi: [], transform: { outfit: 56, at: 600, until: 4400 },
+  1: { n: 'Rat', sc: { numbers: [sceneDmg(2000, 'target', 'physical', true), sceneDmg(3400, 'target', 'physical', true)], ...sceneTarget(), transform: { outfit: 56, at: 600, until: 4400 },
     // The fury passive chip (`fierceberserk`): +10 per attack to 100 (it transforms), then -15 per second and +5 per enraged hit. The
     // real Cave Rat lasts about 9s until the fury is gone; the preview cuts that short, so the last value is the revert.
     passives: [{ src: 'fierceberserk', counts: [{ at: 0, n: 90 }, { at: 600, n: 100 }, { at: 1600, n: 85 }, { at: 2000, n: 90 }, { at: 2600, n: 75 }, { at: 3400, n: 80 }, { at: 3600, n: 65 }, { at: 4400, n: 0 }] }],
@@ -2446,12 +2828,16 @@ function cooldownBarOf(id) {
   const d = CREATURE_COMBAT_DATA[Number(id)];
   return d?.cb && !SCENE_NO_COOLDOWN_BAR.has(Number(id)) ? { color: d.cb, hideWhenReady: !!d.cv } : null;
 }
+// The previews play the normal attacks 100% faster than the real attack delay (delay / 2, rounded to the nearest 100 ms, never under 500 ms) to keep the loops lively. Only the GENERIC attacks (`autoAttackOf`) use it;
+// the explicit hit times of the hand-built scenes (a Knight's stun, the Amazon's 3s throws) are the real ones.
+const SCENE_ATTACK_SPEEDUP = 2;
+const SCENE_MIN_ATTACK_MS = 500;
 /** A creature's regular attack for the Cyclopedia scenes: { delayMs, missile } (missile null = melee or a shared helper), or null when it has none. */
 function autoAttackOf(id) {
   const d = CREATURE_COMBAT_DATA[Number(id)];
   if (!d || d.aa === false || SCENE_NO_AUTO_ATTACK.has(Number(id))) return null;
   const missile = d.am && MISSILE_IDS[d.am] ? { n: d.am, id: MISSILE_IDS[d.am] } : null;
-  return { delayMs: d.ad ?? DEFAULT_ATTACK_DELAY_MS, missile };
+  return { delayMs: Math.max(SCENE_MIN_ATTACK_MS, Math.round((d.ad ?? DEFAULT_ATTACK_DELAY_MS) / SCENE_ATTACK_SPEEDUP / 100) * 100), missile, ranged: !!d.rc };
 }
 
 // Live ability scenes: the page-start hook (content/ba-combat.js) parses the game's own creature module and id tables,
@@ -2525,8 +2911,8 @@ function probeSceneMissileSheet(sheet) {
 // Scene templates for mechanics the parser tags (`sc.t`, content/ba-combat.js): the game has no area to draw for them, so
 // a template replaces the extracted scene. `push`: the attack displaces its target one tile (Ancient Scarab, Wyvern:
 // `displaceTarget` = slash + poof on the target); `sleep`: sleeps and heals, wakes, walks to its enemy and hits it
-// (Bear). Both are drawn against a dummy (Dead Tree sprite, id 75; same as CYCLOPEDIA_SCENE_DUMMY_ID in Cyclopedia.js) by the Cyclopedia's push grid.
-const SCENE_TEMPLATE_DUMMY_ID = 75;
+// (Bear). Both are drawn against a dummy (the villain Ti, id 119; same as CYCLOPEDIA_SCENE_DUMMY_ID in Cyclopedia.js) by the Cyclopedia's push grid.
+const SCENE_TEMPLATE_DUMMY_ID = 119; // the villain Ti, the enemy the push / charge / arena scenes act on
 const SCENE_TEMPLATE_FX = { haste: { id: 15, f: 22 }, bleed: { id: 1, f: 6 }, slash: { id: 216, f: 6 }, poof: { id: 3, f: 8 }, heal: { id: 13, f: 22 }, smoke: { id: 242, f: 24 }, floorSpike: { id: 294, f: 7 }, tauntYellow: { id: 220, f: 8 }, splash: { id: 54, f: 9 }, soup: { id: 8, f: 8 }, fallingStones: { id: 45, f: 8 } }; // used when the live id table is unavailable
 function sceneTemplateFx(name, w) {
   const liveId = globalThis.BestiaryCombatOverrides?.getLiveScenes?.()?.effectIds?.[name];
@@ -2550,9 +2936,20 @@ const ABILITY_SCENE_TEMPLATES = {
   // arena: a wall of spikes (item sprite `spikesA`) on the ring two tiles out and floor spikes (effect `floorSpike`) on the 3x3, for ARENA_DURATION_MS (Behemoth).
   arena: (c) => ({ l: 'Arena', push: { dummyId: SCENE_TEMPLATE_DUMMY_ID, mode: 'arena', arenaMs: c.ARENA_DURATION_MS, wallSpriteId: globalThis.BestiaryCombatOverrides?.findSpriteId?.('spikesA') ?? 388 }, m: [], mi: [], fx: [sceneTemplateFx('smoke'), sceneTemplateFx('floorSpike')] }),
   push: () => ({ l: 'Push', push: { dummyId: SCENE_TEMPLATE_DUMMY_ID, pushes: 2 }, m: [], mi: [], fx: [sceneTemplateFx('slash'), sceneTemplateFx('poof')] }),
-  // Bear: hibernates in its sleeping costume (item `sleepingBear`: 64 x 32 px frames, 16 of them per 8s) healing every 1.25s (`haste`),
-  // wakes, charges, and hits the dummy (`poof` + blood) before hibernating again. See the charge branch of the push grid.
-  sleep: (c) => ({ l: 'Charge', stuns: [{ at: 'hit', ms: c.STUN_MS ?? 2000 }], passives: [{ src: 'sleeping', windows: 'asleep' }], numbers: [sceneDmg('hit', 'target', 'physical', true), sceneHeal(1250, 'self'), sceneHeal(2500, 'self')], push: { dummyId: SCENE_TEMPLATE_DUMMY_ID, mode: 'charge', costume: { id: globalThis.BestiaryCombatOverrides?.findSpriteId?.('sleepingBear') ?? 7175, f: 16, loopMs: 8000, w: 2 } }, m: [], mi: [], fx: [sceneTemplateFx('haste', 'self'), sceneTemplateFx('poof'), sceneTemplateFx('bleed')] })
+  // Bear: hibernates in its sleeping costume (item `sleepingBear`: 64 x 32 px frames, 16 of them per 8s) for the whole cooldown (7.5s, the bar fills as it sleeps) healing every 1.25s (`haste`),
+  // wakes, charges, and hits the dummy (`poof` + blood) before hibernating again. Awakened (`sc.awaken`) a stun is ignored while it sleeps and wakes it at once (the 'activate'; a stun bar flashes over it for 250ms as the stun lands): it heals the ticks
+  // it missed as one crit and charges. See the charge branch of the push grid.
+  sleep: (c, r, id, sc) => {
+    const tick = c.HEAL_TICK_FREQUENCY_MS ?? 1250;
+    const total = Math.round((c.COOLDOWN_MS ?? 7500) / tick); // heal ticks of a full hibernation
+    // Like every ability the loop starts with 1s of cooldown left: the Bear has already slept for all but the last second (its heal ticks keep their rhythm: the last one lands as it wakes).
+    const sleptMs = (c.COOLDOWN_MS ?? 7500) - 1000;
+    const healAt = Array.from({ length: total }, (_, i) => (i + 1) * tick - sleptMs).filter((at) => at > 0);
+    const wake = sc?.awaken ? 600 : healAt[healAt.length - 1] ?? 1000; // awakened: a stun wakes it at once (the tick it would still have healed comes as one crit)
+    const ticks = healAt.filter((at) => at <= wake).map((at) => sceneHeal(at, 'self'));
+    const missed = sc?.awaken ? total - (total - healAt.length) - ticks.length : 0;
+    return { l: 'Charge', stuns: [{ at: 'hit', ms: c.STUN_MS ?? 2000 }, ...(sc?.awaken ? [{ at: wake - 250, ms: 250, on: 'self', shake: false }] : [])], passives: [{ src: 'sleeping', windows: 'asleep' }], numbers: [sceneDmg('hit', 'target', 'physical', true), ...ticks, ...(missed > 0 ? [sceneHeal(wake, 'self', true)] : [])], push: { dummyId: SCENE_TEMPLATE_DUMMY_ID, mode: 'charge', healAt: ticks.map((t) => t.at), sleepStartFill: 1 - 1000 / (c.COOLDOWN_MS ?? 7500), ...(sc?.awaken ? { activate: { at: wake } } : { wakeMs: wake }), costume: { id: globalThis.BestiaryCombatOverrides?.findSpriteId?.('sleepingBear') ?? 7175, f: 16, loopMs: 8000, w: 2 } }, m: [], mi: [], fx: [sceneTemplateFx('haste', 'self'), sceneTemplateFx('poof'), sceneTemplateFx('bleed')] };
+  }
 };
 
 /**
@@ -2561,13 +2958,17 @@ const ABILITY_SCENE_TEMPLATES = {
  * the normal scene when `getAbilityScene(id, true)`. Numbers-only awakenings need nothing here.
  */
 const ABILITY_SCENE_AWAKENED = {
+  // Bear: awakened, a stun is ignored while it hibernates and wakes it at once (see the `sleep` template).
+  9: { n: 'Bear', sc: { ...sceneTarget(), fx: [{ n: 'poof', id: 3, f: 8 }], t: ['sleep'], awaken: true } },
   // Elf Scout: awakened, allied elves' auto attacks slow too (see sceneElfScout).
   40: { n: 'Elf Scout', sc: sceneElfScout(true) },
   // Elf: awakened, its arrows are true-damage crits against an enemy trapped in the runes (see sceneElf).
   39: { n: 'Elf', sc: sceneElf(true) },
   45: { n: 'Orc Rider', sc: sceneOrcRider(true) }, // a third wolf
   47: { n: 'Goblin Scavenger', sc: sceneGoblinScavenger(true) },
+  87: { n: 'Unionized Goblin', sc: sceneGoblinScavenger(true) },
   48: { n: 'Goblin Assassin', sc: sceneGoblinAssassin(true) },
+  86: { n: 'Goblin Saboteur', sc: sceneGoblinAssassin(true) },
   49: { n: 'Firestarter', sc: sceneFirestarter(true) },
   50: { n: 'Cyclops', sc: sceneCyclops(true) },
   51: { n: 'Warlock', sc: sceneWarlock(true) },
@@ -2585,7 +2986,12 @@ const ABILITY_SCENE_AWAKENED = {
   88: { n: 'Reindeer', sc: sceneDeer(true) },
   114: { n: 'Cyclops Smith', sc: sceneCyclopsSmith(true) },
   61: { n: 'Nightstalker', sc: sceneNightstalker(true) },
+  112: { n: 'Cyclops Drone', sc: sceneCyclopsDrone(true) },
   123: { n: 'Paladin', sc: scenePaladin(true) },
+  68: { n: 'Amazon', sc: sceneAmazon(true) },
+  85: { n: 'Goblin Gumslinger', sc: sceneGoblinGumslinger(true) },
+  110: { n: 'Werefox', sc: sceneWerefox(true) },
+  65: { n: 'Dragon', sc: sceneDragon(true) },
   72: { n: 'Corym Skirmisher', sc: sceneCorymSkirmisher(true) },
   98: { n: 'Green Djinn', sc: sceneGreenDjinn(true) },
   109: { n: 'Football Elemental', sc: sceneWaterElemental(true) },
@@ -2733,22 +3139,24 @@ const ABILITY_SCENE_AWAKENED = {
   // the blast is 5x5 (a second villain two tiles out is hit too) and Monk heals 25% of the damage it took (a crit heal on it).
   24: { n: 'Monk', sc: { ...ABILITY_SCENE_OVERRIDES[24].sc,
     numbers: [...ABILITY_SCENE_OVERRIDES[24].sc.numbers, sceneHeal(6640, 'self', true), sceneDmg(6640, [2, 0], 'holy', true)],
-    m: [{ a: 'self', rows: ['XXXXX', 'XXXXX', 'XX+XX', 'XXXXX', 'XXXXX'] }],
-    mates: [{ id: 119, dx: 2, dy: 0, facing: 'west' }],
+    ...sceneSelf(), gridHalf: 2, flashes: [{ at: 6640, tiles: sceneArea(['XXXXX', 'XXXXX', 'XX+XX', 'XXXXX', 'XXXXX']) }], // the awakened 5x5 blast lights when it blasts
+    mates: [sceneTiMate(2, 0, 'west')],
     flights: [...ABILITY_SCENE_OVERRIDES[24].sc.flights, { shot: { n: 'holyArrow', id: 38 }, from: [0, 0], to: [2, 0], at: 6640 - SCENE_MISSILE_MS }],
     fx: [...ABILITY_SCENE_OVERRIDES[24].sc.fx.filter((e) => e.id !== 246),
       ...[500, 1700, 2900, 4100, 5300].map((at) => ({ n: 'holyCircleAwaken', id: 99002, src: 'misc/monk-aura-awaken.png', f: 12, w: 'self', at })),
       { n: 'holyExory', id: 40, f: 14, to: [2, 0], at: 6640 }] } },  // Druid: awakened, one 7x7 area heal (a `heal` effect on every tile) instead of a single-ally heal.
   // Druid: awakened, Exura Gran Mas Res: the `heal` effect on every tile of the 7x7 diamond around it, then `slowYellowHeal` on the tiles that hold an ally
   // (the Druid itself too), and each ally is healed and buffed at half strength. Three allies stand in it.
-  29: { n: 'Druid', sc: { numbers: [sceneHeal(500, [-2, -2]), sceneHeal(500, [2, -2]), sceneHeal(500, [-2, 2]), sceneHeal(500, 'self')], m: [{ a: 'self', rows: DRUID_AWAKEN_MASK }], mi: [], areaKind: 'buff', // a heal area: tinted green, not the damage orange
+  29: { n: 'Druid', sc: { numbers: [sceneHeal(500, [-2, -2]), sceneHeal(500, [2, -2]), sceneHeal(500, [-2, 2]), sceneHeal(500, 'self')], ...sceneSelf(), gridHalf: 3, flashes: [{ at: 500, kind: 'buff', tiles: sceneArea(DRUID_AWAKEN_MASK) }], // a heal area: tinted green, not the damage orange; lit with the heal
     // three allies in the diamond; a villain Ti in the far corner, outside it (so it is not healed), is what the Druid flees from
-    mates: [{ dx: -2, dy: -2 }, { dx: 2, dy: -2 }, { dx: -2, dy: 2 }, { id: 119, dx: 3, dy: 3, facing: 'west' }], casterFlee: { at: 500, from: [[3, 3]] },
+    mates: [{ dx: -2, dy: -2 }, { dx: 2, dy: -2 }, { dx: -2, dy: 2 }, sceneTiMate(3, 3, 'west')], casterFlee: { at: 500, from: [[3, 3]] },
     passives: [{ src: 'ultimatehealing', windows: [[500, 6500]] }],
     fx: [{ ...SCENE_FX.heal, tiles: [[0, 0], ...sceneArea(DRUID_AWAKEN_MASK)], at: 500 },
       { n: 'slowYellowHeal', id: 182, f: 22, tiles: [[-2, -2], [2, -2], [-2, 2], [0, 0]], at: 500 }] } },
   // Fire Devil: every 3rd awakened cast is a Great Fireball over the 7x7 area (iB) instead of the 5x5.
   20: { n: 'Fire Devil', sc: { castRange: 2, gridHalf: 3, m: [{ a: 'target', rows: ['+'] }], mi: [],
+    // The cooldown bar follows the casts: they are 2s apart, so the bar refills over 2s (`cooldownScale` 2/3 of the real 3s) and is ready exactly at each cast (`cooldownCasts`: the missile launches).
+    cooldownScale: 2 / 3, cooldownCasts: [700, 2700, 4700].map((hit) => hit - SCENE_MISSILE_MS),
     // Three casts (shown 2s apart; the real cooldown is 3s): two fireballs over the 5x5 diamond, then the Great Fireball over the 7x7 one. Each
     // cast: a `fire` missile, a big explosion + a burn on the target, an explosion on every tile of the area (70% opacity), blood, and
     // a magic `fire` damage number. The `greatfireball` chip counts: blank, 1, 2 (glowing), blank again after the Great Fireball.
@@ -2869,7 +3277,7 @@ const SCENE_BLEED_FX = { n: 'bleed', id: 1, f: 6, b: 1, land: 1 };
  * (allies beside the caster), flights (free-flying projectiles), targetBorders (timed red target boxes: a shooter
  * re-targeting), passives (the game's passive chips under the scene: icon + a counter that changes over time; `windows` = when a chip is there), flinch (the target shakes when hit, `{ at }` ms), dummyHidden (the dummy is replaced for `{ from, until }` ms), casterGrow (`{ at, scale }`), casterFilter (the caster's css filter over time), numbers (floating damage / heal numbers: the game's, with a word: see the Cyclopedia), gridHalf (how many tiles around the centre the grid must reach, for a scene that draws its area with effect `tiles`), flashes (the hit area lit when an AoE lands: `{ at, tiles }`), stand (the caster holds the idle pose instead of the walk cycle)..
  */
-const SCENE_OPTIONS = ['transform', 'ground', 'lead', 'noBlood', 'allyTarget', 'dummyTint', 'attacker', 'overlays', 'mates', 'flights', 'targetBorders', 'passives', 'flinch', 'dummyHidden', 'casterGrow', 'casterFilter', 'numbers', 'gridHalf', 'flashes', 'casterFlee', 'casterFacing', 'statusIcons', 'meditate', 'noDummy', 'stuns', 'holdMs', 'areaKind', 'apSlider', 'bars', 'noAutoAttack', 'autoAttackAs', 'noCooldownBar', 'cooldownCastAt'];
+const SCENE_OPTIONS = ['transform', 'ground', 'lead', 'noBlood', 'allyTarget', 'dummyTint', 'attacker', 'overlays', 'mates', 'flights', 'targetBorders', 'passives', 'flinch', 'dummyHidden', 'casterGrow', 'casterFilter', 'numbers', 'gridHalf', 'flashes', 'casterFlee', 'casterFacing', 'statusIcons', 'meditate', 'noDummy', 'stuns', 'holdMs', 'areaKind', 'apSlider', 'bars', 'noAutoAttack', 'autoAttackAs', 'noCooldownBar', 'cooldownCastAt', 'bleeds', 'cooldownScale', 'casterOffset', 'casterJump', 'casterAxis', 'fullBoard', 'cooldownCasts', 'casterInvisible'];
 const pickSceneOptions = (src) => Object.fromEntries(SCENE_OPTIONS.filter((key) => src[key] !== undefined).map((key) => [key, src[key]]));
 // A plain hit on the target also shows the game's floating damage number (physical) when it lands, unless the scene lists its own `numbers`.
 const SCENE_HIT_NUMBER = { at: 'land', kind: 'damage', type: 'physical', on: 'target' };
@@ -2949,9 +3357,9 @@ function getAbilityScene(gameId, awakened = false) {
   const tag = (row.sc.t || []).find((x) => ABILITY_SCENE_TEMPLATES[x]);
   // The creature's own speed stat (the game's monster data): the Cyclopedia times every walk in a scene from it (the game's step formula).
   const baseSpeed = getMonsterById(id)?.metadata?.baseStats?.speed;
-  const parts = (row.sc.p || [tag ? ABILITY_SCENE_TEMPLATES[tag](constants, range, gameId) : { m: row.sc.m, mi: row.sc.mi, fx: row.sc.fx, ...pickSceneOptions(row.sc) }])
+  const parts = (row.sc.p || [tag ? ABILITY_SCENE_TEMPLATES[tag](constants, range, gameId, row.sc) : { m: row.sc.m, mi: row.sc.mi, fx: row.sc.fx, ...pickSceneOptions(row.sc) }])
     .filter(animates)
-    .map((p) => ({ label: p.l || null, masks: p.m, missiles: p.mi, effects: hasTargetHit(p) ? [...(p.fx || []), SCENE_BLEED_FX] : p.fx, cooldownMs: cooldownOf(p.cd), range, push: p.push || null, baseSpeed: Number.isFinite(baseSpeed) ? baseSpeed : null, autoAttack: p.noAutoAttack ? null : autoAttackOf(id), cooldownBar: p.noCooldownBar ? null : cooldownBarOf(id), ...(hasTargetHit(p) && p.numbers === undefined ? { numbers: [SCENE_HIT_NUMBER] } : {}), ...pickSceneOptions(p) }))
+    .map((p) => ({ label: p.l || null, masks: p.m, missiles: p.mi, effects: hasTargetHit(p) ? [...(p.fx || []), SCENE_BLEED_FX] : p.fx, cooldownMs: cooldownOf(p.cd) && cooldownOf(p.cd) * (p.cooldownScale ?? 1), range, push: p.push || null, baseSpeed: Number.isFinite(baseSpeed) ? baseSpeed : null, bloodColor: getMonsterById(id)?.metadata?.bloodColor ?? null, autoAttack: p.noAutoAttack ? null : autoAttackOf(id), cooldownBar: p.noCooldownBar ? null : cooldownBarOf(id), ...(hasTargetHit(p) && p.numbers === undefined ? { numbers: [SCENE_HIT_NUMBER] } : {}), ...pickSceneOptions(p) }))
     // Mates (allies standing in the scene) that walk need their own speed.
     .map((p) => (p.mates ? { ...p, mates: p.mates.map((m) => { const sp = getMonsterById(m.id ?? 117)?.metadata?.baseStats?.speed; return Number.isFinite(sp) ? { ...m, baseSpeed: sp } : m; }) } : p))
     .map(withMateStepEffects);

@@ -1108,13 +1108,15 @@ function cyclopediaGetMonsterPortraitUrl(gameId, isShiny = false) {
 // ---------------------------------------------------------------------------
 
 /** Layout numbers of the ability scene (px; the *Ms entries are milliseconds). */
-/** Creature drawn as the victim on the target tile (game id 75, the Dead Tree: the same dummy as SCENE_TEMPLATE_DUMMY_ID in creature-database.js, used by the push scenes). */
-const CYCLOPEDIA_SCENE_DUMMY_ID = 75;
+/** Creature drawn as the victim on the target tile (game id 119, the villain Ti: the same dummy as SCENE_TEMPLATE_DUMMY_ID in creature-database.js, used by the push scenes). */
+const CYCLOPEDIA_SCENE_DUMMY_ID = 119;
+/** The Dead Tree (game id 75): an object, drawn from its item sprite; only scenes that need a real tree use it (the Black Knight's). */
+const CYCLOPEDIA_SCENE_TREE_ID = 75;
 /** Creature drawn for an ally: on the target tile (`allyTarget` in the scene data, e.g. Sheep healing) and as a `mates` entry without an `id` (Tortoise): game id 117, Astronis. */
 const CYCLOPEDIA_SCENE_ALLY_DUMMY_ID = 117;
 /** The Dead Tree's item sprite (`deadTree` in the game's sprite table), used when the live table cannot be read. */
 const CYCLOPEDIA_SCENE_DUMMY_ITEM_ID = 3634;
-/** How big the Dead Tree dummy is drawn, as a fraction of its native size (64px art = 2 tiles). */
+/** How big the Dead Tree is drawn, as a fraction of its native size (64px art = 2 tiles). */
 const CYCLOPEDIA_SCENE_DUMMY_SCALE = 1;
 
 /** Scene layers (z-index inside the grid): the game stacks actor effects and area effects over actors, missiles over both. */
@@ -1263,7 +1265,26 @@ function placeCyclopediaSceneEl(el, col, row) {
  * farthest hit tile; `a: 'target'` masks sit around a target in the middle with the caster in the bottom-right corner,
  * `a: 'self'` masks sit around the caster in the middle.
  */
-function computeCyclopediaSceneGeometry(masks, range = null, melee = false, gridHalf = 0) {
+/**
+ * How far from the scene's centre (the target tile; the caster in a self-anchored scene) its spelled-out AREA reaches: the tiles of its flashes, and of an effect that covers 3 or more tiles at the same moment (a wave,
+ * a burst). An effect on one creature's tile (a `poof` on a Ti, notes on an ally) is not an area and does not widen the grid. The grid always keeps one more tile around that (`L.padding`).
+ */
+function cyclopediaSceneAreaReach(scene) {
+  if (scene.fullBoard) return 0; // the spell covers the whole board (the awakened Dragon's fireball): the grid IS the board, no margin beyond it
+  let reach = 0;
+  const take = (t) => { if (Array.isArray(t) && t.length === 2 && t.every(Number.isFinite)) reach = Math.max(reach, Math.abs(t[0]), Math.abs(t[1])); };
+  (scene.flashes || []).forEach((f) => (f.tiles || []).forEach(take));
+  const waves = new Map();
+  (scene.effects || []).forEach((e) => {
+    if (!e.tiles?.length) return;
+    const key = `${e.n}@${Math.round(e.at ?? -1)}`;
+    waves.set(key, [...(waves.get(key) || []), ...e.tiles]);
+  });
+  waves.forEach((tiles) => { if (tiles.length >= 3) tiles.forEach(take); });
+  return reach;
+}
+
+function computeCyclopediaSceneGeometry(masks, range = null, melee = false, gridHalf = 0, casterOffset = null, casterAxis = false) {
   const L = CYCLOPEDIA_SCENE_LAYOUT;
   const selfAnchored = masks[0].a === 'self';
   // Several masks of one anchor are stages of one ability (a wave that widens ring by ring): they share the origin
@@ -1292,10 +1313,13 @@ function computeCyclopediaSceneGeometry(masks, range = null, melee = false, grid
   const dist = ranged ? range : (meleeNext ? 1 : half);
   return {
     stages, selfAnchored, reach, cols, rowsN, midCol, midRow,
-    // The caster stands to the EAST of the target (the native-size Dead Tree hangs over the tiles to its west): a melee one on the
+    // The caster stands to the EAST of the target (the target's art may hang over the tiles to its west): a melee one on the
     // next tile (83 for target 82), a ranged one `range` tiles out on the diagonal; both face the target.
-    casterCol: selfAnchored ? midCol : midCol + dist,
-    casterRow: selfAnchored || meleeNext ? midRow : midRow + dist
+    // `casterOffset` [dCol, dRow] (self-anchored scenes): the caster starts that far from the middle of the board, where the spell happens (the Cyclops Drone starts two tiles east and jumps to the middle). `tiles`, `{ target: ... }`
+    // and anchor-'target' entries then count from the middle; `to`, `on` and the other caster-relative entries from where the caster stands.
+    casterCol: selfAnchored ? midCol + (casterOffset?.[0] || 0) : midCol + dist,
+    // `casterAxis`: the caster stands on the target's row (a straight attack: the Demon's energy beam only goes north, east, south or west)
+    casterRow: selfAnchored ? midRow + (casterOffset?.[1] || 0) : meleeNext || casterAxis ? midRow : midRow + dist
   };
 }
 
@@ -1327,14 +1351,15 @@ function computeCyclopediaSceneTimeline(scene, geo) {
   const stageDelayMs = (geo.stages.length - 1) * TM.stageStagger;
   effectPlan.forEach((p) => { if (!p.onSelf && !p.effect.b) p.endMs += stageDelayMs; });
   const hitEndMs = Math.max(flightMs + stageDelayMs + TM.minEffect, ...effectPlan.filter((p) => !p.onSelf).map((p) => p.endMs));
-  const overlayEndMs = (scene.overlays || []).map((o) => (o.held || o.kind === 'loop' ? 0 : o.kind === 'glow' || o.kind === 'circle' ? (o.at || 0) + 300 : o.kind === 'rune' ? o.at + o.ms + (o.outMs || 0) : o.kind === 'fade' ? o.outAt + o.outMs : o.kind === 'roar' ? o.at + 500 : o.kind === 'dark' || o.kind === 'haze' ? o.until + 400 : o.kind === 'bonk' ? o.at + 1000 : o.kind === 'say' ? o.at + o.ms : o.kind === 'float' ? o.at + o.ms + 300 : Math.max(...[].concat(o.at)) + (o.kind === 'drop' || o.kind === 'timed' || o.kind === 'fall' || o.kind === 'ping' ? o.ms : o.fadeMs))).concat((scene.mates || []).map((m) => (m.grow ? m.grow.at + 300 : m.dies ? m.dies.at : m.at || 0)))
+  const overlayEndMs = (scene.overlays || []).map((o) => (o.held || o.kind === 'loop' ? 0 : o.kind === 'glow' || o.kind === 'circle' ? (o.at || 0) + 300 : o.kind === 'rune' ? o.at + o.ms + (o.outMs || 0) : o.kind === 'trap' ? (o.closeAt ?? o.at) + 400 : o.kind === 'chipKnife' ? o.at + 1000 : o.kind === 'fade' ? o.outAt + o.outMs : o.kind === 'roar' ? o.at + 500 : o.kind === 'dark' || o.kind === 'haze' ? o.until + 400 : o.kind === 'bonk' ? o.at + 1000 : o.kind === 'say' ? o.at + o.ms : o.kind === 'float' ? o.at + o.ms + 300 : Math.max(...[].concat(o.at)) + (o.kind === 'drop' || o.kind === 'timed' || o.kind === 'fall' || o.kind === 'ping' ? o.ms : o.fadeMs))).concat((scene.mates || []).map((m) => (m.grow ? m.grow.at + 300 : m.dies ? m.dies.at : m.at || 0)))
+    .map((end) => (Number.isFinite(end) ? end : 0)) // an overlay kind with no end rule must not turn the whole timeline into NaN (the scene would not play)
     .concat((scene.flights || []).map((f) => (f.at || 0) + cyclopediaFlightMs(Math.max(Math.abs((f.to?.[0] ?? 0) - f.from[0]), Math.abs((f.to?.[1] ?? 0) - f.from[1])))));
   const flashEndMs = (scene.flashes || []).map((f) => f.at + (f.ms ?? 1100));
   const numberEndMs = (scene.numbers || []).map((n) => resolveCyclopediaSceneTime(n.at, flightMs) + 1000);
   const iconEndMs = (scene.statusIcons || []).map((i) => (i.at || 0) + 1150);
   const stunEndMs = [...(scene.stuns || []), ...(scene.bars || [])].map((b) => (b.until ?? b.at + b.ms) + 300);
   // A walking mate has to finish its walk inside the loop, and the loop then waits a second on its last tile.
-  const mateWalkEndMs = (scene.mates || []).filter((m) => m.walk).map((m) => m.walk.at + cyclopediaMateStepTimes(m).reduce((sum, t) => sum + t.stepMs, 0) + 1000);
+  const mateWalkEndMs = (scene.mates || []).filter((m) => m.walk).map((m) => m.walk.at + cyclopediaMateStepTimes(m).reduce((sum, t) => sum + t.stepMs + t.wait, 0) + 1000);
   const fleeEndMs = planCyclopediaSceneFlee(scene, geo)?.endMs ?? 0;
   const activeMs = Math.max(hitEndMs, fleeEndMs, scene.holdMs || 0, ...iconEndMs, ...stunEndMs, ...mateWalkEndMs, scene.transform?.until ?? scene.transform?.at ?? 0, ...flashEndMs, ...numberEndMs, ...overlayEndMs, ...effectPlan.map((p) => p.endMs));
   const duration = Math.max(activeMs + TM.endPad, TM.minLoop, Math.min(scene.cooldownMs ?? Infinity, activeMs + TM.idle));
@@ -1614,6 +1639,26 @@ function buildCyclopediaSceneProgressBar(D) {
  * The game's `flinch` on a creature that is hit: translate 0 2px -> 0 -1px -> 0 over 100ms (px of a 32px tile, scaled to the
  * preview's tile), starting `atMs` into the loop of `D` ms.
  */
+/**
+ * The Cyclops Drone's jump to another tile (the game's `squash-factor` 1000ms ease-in, `--squash` 0.5): the creature vanishes from where it stood and FALLS onto the new tile from far above, stretched, then lands
+ * squashed flat and wide, bounces tall and thin and settles. Drawn with the individual `translate` / `scale` / `filter` properties so it adds to the walking path (`transform`) and the show / hide windows (opacity)
+ * of the walking copies. The keyframes are the game's, with its 0.5 squash worked out.
+ */
+// `kind`: 'factor' (the Drone: `squash-factor` 1000ms with --squash 0.5) or 'squash' (the Nightstalker's blink: the plain `squash` keyframes, 600ms, full squash).
+const CYCLOPEDIA_SCENE_JUMPS = {
+  factor: { ms: 1000, keys: [[0, -9999, 0.75, 1.25, 0], [0.11, -197, 0.705, 1.295, 0.1], [0.3, -18, 0.625, 1.375, 1], [0.35, -2, 1.35, 0.65, 1], [0.46, 2, 1.4, 0.6, 1], [0.54, 2, 0.9, 1.1, 1], [0.66, 0, 1.1, 0.9, 1], [0.78, 0, 0.975, 1.025, 1], [1, 0, 1, 1, 1]] },
+  squash: { ms: 600, keys: [[0, -9999, 0.5, 1.5, 0], [0.11, -197, 0.41, 1.59, 0.1], [0.3, -18, 0.25, 1.75, 1], [0.35, -2, 1.7, 0.3, 1], [0.46, 2, 1.8, 0.2, 1], [0.54, 2, 0.8, 1.2, 1], [0.66, 0, 1.2, 0.8, 1], [0.78, 0, 0.95, 1.05, 1], [1, 0, 1, 1, 1]] }
+};
+function animateCyclopediaJump(el, D, atMs, kind = 'factor') {
+  const { ms, keys: KEYS } = CYCLOPEDIA_SCENE_JUMPS[kind] || CYCLOPEDIA_SCENE_JUMPS.factor;
+  const f = (ms) => Math.min(0.999, Math.max(0, ms / D));
+  const rest = { translate: '0 0', scale: '1 1', filter: 'opacity(1)' };
+  const keys = [{ offset: 0, ...rest, ...CYCLOPEDIA_SCENE_HOLD }, { offset: f(atMs), ...rest }];
+  KEYS.forEach(([p, ty, sx, sy, op]) => keys.push({ offset: f(atMs + p * ms), translate: `0 ${ty}%`, scale: `${sx} ${sy}`, filter: `opacity(${op})` }));
+  keys.push({ offset: 1, ...rest });
+  el.animate(keys, { duration: D, iterations: Infinity });
+}
+
 function animateCyclopediaFlinch(el, D, atMs) {
   const k = CYCLOPEDIA_SCENE_LAYOUT.cell / 32;
   const points = [[0, 2 * k], [40, -1 * k], [100, 0]];
@@ -1753,10 +1798,29 @@ function createCyclopediaStunBar(col, row, D, bar) {
 
 /** The game's `shaking` keyframes: [fraction of its 100ms, translate X px]. */
 const CYCLOPEDIA_SCENE_SHAKING = [[0, 1], [0.16, -1], [0.33, 1], [0.41, -2], [0.5, 2], [0.66, -1], [0.83, 1], [1, 0]];
-function animateCyclopediaShake(el, D, times) {
+// `factor` is the game's `--shake` style (4 for a pushed creature, 1 by default) and `ms` the length (the game's `shaking` 100ms, `shaking-factor` 125ms for the Cyclops Drone's push).
+/** The game's `bounceJump` keyframes: [fraction, translate Y as a fraction of the element's height]. */
+const CYCLOPEDIA_SCENE_BOUNCE_JUMP = [[0, 0], [0.075, -0.8], [0.125, -0.9], [0.2, -0.95], [0.25, -1], [0.3, -0.95], [0.375, -0.9], [0.425, -0.8], [0.5, 0], [0.575, -0.2], [0.625, -0.22], [0.7, -0.25], [0.75, -0.27], [0.8, -0.25], [0.875, -0.22], [0.925, -0.2], [1, 0]];
+/** A hop (`bounceJump`, `ms` linear) with a shake (`shaking`, `shakeMs`) over its start, sampled every 20ms into one `translate` animation (both set the same property). */
+function animateCyclopediaHop(el, D, atMs, ms = 500, shakeMs = 100) {
+  const k = CYCLOPEDIA_SCENE_LAYOUT.cell / 32;
+  const cell = CYCLOPEDIA_SCENE_LAYOUT.cell;
+  const lerp = (table, p) => { for (let i = 1; i < table.length; i++) if (p <= table[i][0]) { const [p0, v0] = table[i - 1]; const [p1, v1] = table[i]; return v0 + ((v1 - v0) * (p - p0)) / (p1 - p0 || 1); } return table[table.length - 1][1]; };
+  const f = (t) => Math.min(0.998, Math.max(0, t / D));
+  const keys = [{ offset: 0, translate: '0 0', ...CYCLOPEDIA_SCENE_HOLD }];
+  for (let t = 0; t <= ms; t += 20) {
+    const y = lerp(CYCLOPEDIA_SCENE_BOUNCE_JUMP, t / ms) * cell;
+    const x = t <= shakeMs ? lerp(CYCLOPEDIA_SCENE_SHAKING, t / shakeMs) * k : 0;
+    keys.push({ offset: f(atMs + t), translate: `${x}px ${y}px` });
+  }
+  keys.push({ offset: 1, translate: '0 0' });
+  el.animate(keys, { duration: D, iterations: Infinity });
+}
+
+function animateCyclopediaShake(el, D, times, factor = 1, ms = 100) {
   const k = CYCLOPEDIA_SCENE_LAYOUT.cell / 32;
   const keys = [{ offset: 0, translate: '0 0', ...CYCLOPEDIA_SCENE_HOLD }];
-  times.forEach((t) => CYCLOPEDIA_SCENE_SHAKING.forEach(([p, x]) => keys.push({ offset: Math.min(0.998, (t + p * 100) / D), translate: `${x * k}px 0`, easing: 'ease-out' })));
+  times.forEach((t) => CYCLOPEDIA_SCENE_SHAKING.forEach(([p, x]) => keys.push({ offset: Math.min(0.998, (t + p * ms) / D), translate: `${x * k * factor}px 0`, easing: 'ease-out' })));
   keys.push({ offset: 1, translate: '0 0' });
   el.animate(keys, { duration: D, iterations: Infinity });
 }
@@ -1817,7 +1881,14 @@ function createCyclopediaNumber(col, row, D, n) {
  * Shows `el` only inside the given `windows` ([[fromMs, untilMs | null], ...], sorted) of the loop `D` ms: appears and vanishes at
  * once (the holds), `null` = to the end of the loop. For things present only part of the time (a passive chip while a state lasts).
  */
-function showCyclopediaWindows(el, D, windows) {
+function showCyclopediaWindows(el, D, rawWindows) {
+  // Windows that overlap or arrive out of order are merged first: the keyframe offsets must never go backwards (that throws and the whole scene fails to open).
+  const windows = [];
+  [...rawWindows].sort((a, b) => a[0] - b[0]).forEach(([from, until]) => {
+    const prev = windows[windows.length - 1];
+    if (prev && prev[1] != null && from <= prev[1]) prev[1] = until == null ? null : Math.max(prev[1], until);
+    else windows.push([from, until]);
+  });
   const at = (ms) => Math.min(0.998, Math.max(0, ms / D));
   const keys = [{ offset: 0, opacity: windows[0][0] <= 0 ? 1 : 0, ...CYCLOPEDIA_SCENE_HOLD }];
   windows.forEach(([from, until]) => {
@@ -1887,7 +1958,8 @@ function buildCyclopediaScenePassives(passives, D, namedWindows = {}) {
     const windows = typeof passive.windows === 'string' ? namedWindows[passive.windows] : passive.windows;
     if (windows?.length) showCyclopediaWindows(chip, D, windows);
     // `right`: the chip sits at the right end of the row (the row then spans the panel's width).
-    if (passive.right) { chip.style.marginLeft = 'auto'; row.style.alignSelf = 'stretch'; }
+    // Only the FIRST right chip takes the free space (`margin-left:auto`), so several (the Charlatan's equipment) sit together at the far right.
+    if (passive.right) { if (!row.querySelector('[data-scene-chip-right]')) chip.style.marginLeft = 'auto'; chip.setAttribute('data-scene-chip-right', 'true'); row.style.alignSelf = 'stretch'; }
     row.appendChild(chip);
   });
   return row;
@@ -1924,9 +1996,8 @@ function createCyclopediaTargetBorder(col, row, color) {
 
 /**
  * Makes a built creature (`buildCyclopediaSceneCaster` result) grow to `grow.scale` over 300ms at `grow.at` ms of the loop `D`,
- * and returns its fit function. It scales around the middle of the creature's FEET (the bottom edge of its art, horizontally centred on the art),
- * once fitted: its feet stay put and it grows upward and evenly to both sides, so a grown creature stays on its own tile instead of sliding over the
- * neighbours up and to the left. (Scaling the tile around its own centre would swing a 64px sprite, which hangs over the tile, off to the side.)
+ * and returns its fit function. It scales around the BOTTOM-RIGHT corner of its tile, where the game anchors every sprite (an actor sits bottom-right on its tile): its feet stay stuck there and it
+ * grows up and to the left, away from the corner, so it neither slides off its tile nor drifts to the right. (Scaling the tile around its own centre would swing a 64px sprite, which hangs over the tile, off to the side.)
  */
 function growCyclopediaSceneTile(built, D, grow) {
   const L = CYCLOPEDIA_SCENE_LAYOUT;
@@ -1937,15 +2008,8 @@ function growCyclopediaSceneTile(built, D, grow) {
       { offset: end, transform: `scale(${grow.scale})` }, { offset: 1, transform: `scale(${grow.scale})` }],
     { duration: D, iterations: Infinity }
   );
-  return () => {
-    built.fit();
-    const outfit = built.tile.querySelector('.outfit');
-    const tileRect = built.tile.getBoundingClientRect();
-    const o = outfit?.getBoundingClientRect();
-    if (!o || !o.width || !tileRect.width) return;
-    const ps = tileRect.width / L.cell;
-    built.tile.style.transformOrigin = `${(o.x + o.width / 2 - tileRect.x) / ps}px ${(o.y + o.height - tileRect.y) / ps}px`;
-  };
+  built.tile.style.transformOrigin = '100% 100%'; // the tile's bottom-right corner: the feet stay put
+  return () => built.fit();
 }
 
 /**
@@ -1959,7 +2023,7 @@ function buildCyclopediaSceneMates(geo, timeline, mates, createCaster) {
   return mates.map((mate) => {
     // `anchor: 'target'`: `dx` / `dy` count from the target tile, not from the caster (a caster standing in a far corner).
     const [baseCol, baseRow] = mate.anchor === 'target' ? [geo.midCol, geo.midRow] : [geo.casterCol, geo.casterRow];
-    const built = buildCyclopediaSceneCaster({ casterCol: baseCol + (mate.dx || 0), casterRow: baseRow + (mate.dy || 0) }, () => (mate.outfit ? swapCyclopediaOutfit(createCaster(CYCLOPEDIA_SCENE_ALLY_DUMMY_ID), mate.outfit) : createCaster(mate.id ?? CYCLOPEDIA_SCENE_ALLY_DUMMY_ID)));
+    const built = buildCyclopediaSceneCaster({ casterCol: baseCol + (mate.dx || 0), casterRow: baseRow + (mate.dy || 0) }, () => (mate.outfit ? swapCyclopediaOutfit(createCaster(CYCLOPEDIA_SCENE_ALLY_DUMMY_ID), mate.outfit) : mate.item ? createCaster({ item: mate.item }) : createCaster(mate.id ?? CYCLOPEDIA_SCENE_ALLY_DUMMY_ID)));
     // `at`: it only appears then (a summon, with its own `teleportBlue` effect); `outfit`: a game outfit id for a creature without a
     // monster id (Troll-Trained Salamander).
     if (mate.at > 0) { built.tile.style.opacity = '0'; showCyclopediaBetween(built.tile, D, mate.at); }
@@ -1982,7 +2046,7 @@ function buildCyclopediaSceneMates(geo, timeline, mates, createCaster) {
         corpseTile = placeCyclopediaSceneEl(document.createElement('div'), baseCol + (mate.dx || 0), baseRow + (mate.dy || 0));
         corpseTile.style.zIndex = String(CYCLOPEDIA_SCENE_Z.ground);
         corpseTile.style.pointerEvents = 'none';
-        corpseTile.appendChild(createCyclopediaItemSheet(mate.dies.corpse ?? 111));
+        corpseTile.appendChild(createCyclopediaCorpseSprite(mate.dies.corpse ?? 111));
         showCyclopediaBetween(corpseTile, D, mate.dies.at, Number.isFinite(mate.dies.until) ? mate.dies.until : null);
       }
     }
@@ -1997,13 +2061,14 @@ function buildCyclopediaSceneMates(geo, timeline, mates, createCaster) {
       const phases = [];
       let t = w.at;
       w.steps.forEach((st, i) => {
-        const { glideMs, stepMs } = times[i];
+        const { glideMs, stepMs, wait } = times[i];
+        if (wait) { phases.push({ pose: 'stand', facing: i ? facingOf(w.steps[i - 1]) : facingOf(st), from: t, until: t + wait }); t += wait; }
         phases.push({ pose: 'walk', facing: facingOf(st), from: t, until: t + stepMs, glideMs });
         t += stepMs;
       });
       phases.push({ pose: 'stand', facing: facingOf(w.steps[w.steps.length - 1]), from: t, until: null });
       const mateGeo = { casterCol: baseCol + (mate.dx || 0), casterRow: baseRow + (mate.dy || 0) };
-      walker = buildCyclopediaSceneWalker(mateGeo, () => (mate.outfit ? swapCyclopediaOutfit(createCaster(CYCLOPEDIA_SCENE_ALLY_DUMMY_ID), mate.outfit) : createCaster(mate.id ?? CYCLOPEDIA_SCENE_ALLY_DUMMY_ID)), D, { phases, keys, glideMs: times[0].glideMs });
+      walker = buildCyclopediaSceneWalker(mateGeo, () => (mate.outfit ? swapCyclopediaOutfit(createCaster(CYCLOPEDIA_SCENE_ALLY_DUMMY_ID), mate.outfit) : mate.item ? createCaster({ item: mate.item }) : createCaster(mate.id ?? CYCLOPEDIA_SCENE_ALLY_DUMMY_ID)), D, { phases, keys, glideMs: times[0].glideMs });
       if (!mate.dies) showCyclopediaBetween(built.tile, D, Math.max(mate.at || 0, 0), w.at); // a summon that walks is not there before it appears (`mate.at`)
     }
     // `bouncyFall`: a summon drops onto its tile at `mate.at` the game's way (`bouncyFall 300ms linear`: from 80% of a tile above, it lands at 40%, bounces and settles).
@@ -2037,6 +2102,10 @@ function buildCyclopediaSceneMates(geo, timeline, mates, createCaster) {
     }
     const baseFit = mate.grow ? growCyclopediaSceneTile(built, D, mate.grow) : built.fit;
     const fit = walker ? () => { baseFit(); walker.fit(); } : baseFit;
+    // `shake` { at, factor, ms }: it shakes (the game's `shaking-factor`) when it stops: a creature the Cyclops Drone pushed a short way (--shake 4, 125ms).
+    // `hop` { at, ms, shakeMs }: the game's `bounceJump` (a hop up and a smaller bounce, `ms` long, linear) with a `shaking` 100ms over its start: a creature the Thalas hook drops next to it after a long pull.
+    if (mate.hop) [built.tile, ...(walker?.tiles || [])].forEach((tile) => animateCyclopediaHop(tile, D, mate.hop.at, mate.hop.ms ?? 500, mate.hop.shakeMs ?? 100));
+    if (mate.shake) [built.tile, ...(walker?.tiles || [])].forEach((tile) => animateCyclopediaShake(tile, D, [mate.shake.at], mate.shake.factor ?? 1, mate.shake.ms ?? 100));
     return { tile: built.tile, fit, corpseTile, extraTiles: walker?.tiles || [] };
   });
 }
@@ -2045,6 +2114,47 @@ function buildCyclopediaSceneMates(geo, timeline, mates, createCaster) {
  * One sprite from a game item sheet (`/assets/ITEM/{id}.png`: `frames` frames one tile tall and `wTiles` tiles wide, stacked vertically) that
  * steps through its frames once per `loopMs`, the way the game's own animated items do. Shared by ground items and overlays.
  */
+/** The blood sheet's crop (cropX, cropY in tiles) for a blood colour: the game's `bloodColor` table (`none` has no mark). */
+const CYCLOPEDIA_BLOOD_CROP = { blue: [1, 0], red: [2, 0], orange: [3, 0], green: [0, 1], yellow: [1, 1], white: [2, 1], purple: [3, 1], black: [0, 2] };
+/**
+ * Blood on the floor of one tile (the game's `hp.bleed`): the splash item 2889 or the pool item 2886, cut to the creature's blood colour from the 4 x 3 sheet, 40% opacity, from `fromMs` until `untilMs`
+ * (the end of the loop when none). Added to `grid`.
+ */
+function addCyclopediaBloodDecal(grid, D, id, col, row, fromMs, untilMs, color = 'red') {
+  const L = CYCLOPEDIA_SCENE_LAYOUT;
+  const [cx, cy] = CYCLOPEDIA_BLOOD_CROP[color] || [];
+  if (cx === undefined) return; // `none`: nothing on the ground
+  const holder = placeCyclopediaSceneEl(document.createElement('div'), col, row);
+  holder.style.pointerEvents = 'none';
+  holder.style.zIndex = String(CYCLOPEDIA_SCENE_Z.ground);
+  const art = document.createElement('div');
+  art.style.cssText = `position:absolute;inset:0;opacity:0.4;background:url(${CYCLOPEDIA_SCENE_ASSET_BASE}/ITEM/${id}.png) -${cx * L.cell}px -${cy * L.cell}px / ${4 * L.cell}px ${3 * L.cell}px no-repeat;image-rendering:pixelated;`;
+  holder.appendChild(art);
+  holder.style.opacity = '0';
+  showCyclopediaBetween(holder, D, fromMs, untilMs);
+  grid.appendChild(holder);
+}
+
+/**
+ * A corpse lying on its tile (the game's `corpseId` item sprite) at its NATIVE size: the item's PNG is as many 32px tiles wide and tall as it is (a Human corpse is one, the Ancient Scarab's is 2 x 2) and, like
+ * every item, sits with its BOTTOM-RIGHT on the tile (a bigger one reaches up and left). Sized once the image has loaded.
+ */
+function createCyclopediaCorpseSprite(id) {
+  const L = CYCLOPEDIA_SCENE_LAYOUT;
+  const img = document.createElement('img');
+  img.alt = '';
+  img.src = `${CYCLOPEDIA_SCENE_ASSET_BASE}/ITEM/${id}.png`;
+  img.style.cssText = `position:absolute;left:0;top:0;width:${L.cell}px;height:${L.cell}px;image-rendering:pixelated;max-width:none;`;
+  img.onload = () => {
+    const [w, h] = [(img.naturalWidth / 32) * L.cell, (img.naturalHeight / 32) * L.cell];
+    img.style.left = `${L.cell - w}px`;
+    img.style.top = `${L.cell - h}px`;
+    img.style.width = `${w}px`;
+    img.style.height = `${h}px`;
+  };
+  return img;
+}
+
 function createCyclopediaItemSheet(id, frames = 1, loopMs = 1000, wTiles = 1, keys = null, delay = 0, hTiles = 1) {
   const L = CYCLOPEDIA_SCENE_LAYOUT;
   const n = Math.max(1, frames);
@@ -2083,7 +2193,7 @@ function buildCyclopediaSceneOverlays(geo, timeline, overlays) {
     const tile = placeCyclopediaSceneEl(document.createElement('div'), baseCol + (ov.dx || 0), baseRow + (ov.dy || 0));
     tile.style.pointerEvents = 'none';
     tile.style.opacity = '0';
-    tile.style.zIndex = String(ov.kind === 'aura' || ov.kind === 'timed' || ov.kind === 'glow' || ov.kind === 'circle' || ov.kind === 'rune' || ov.kind === 'fade' || ov.ground ? CYCLOPEDIA_SCENE_Z.ground : ov.kind === 'fall' ? CYCLOPEDIA_SCENE_Z.creature : CYCLOPEDIA_SCENE_Z.effect);
+    tile.style.zIndex = String(ov.kind === 'aura' || ov.kind === 'timed' || ov.kind === 'glow' || ov.kind === 'circle' || ov.kind === 'trap' || ov.kind === 'rune' || ov.kind === 'fade' || ov.ground ? CYCLOPEDIA_SCENE_Z.ground : ov.kind === 'fall' ? CYCLOPEDIA_SCENE_Z.creature : CYCLOPEDIA_SCENE_Z.effect);
     if (ov.kind === 'rune') {
       // Elf's Wild Growth rune (the game's `wildGrowth` item, a 64px sprite at 60% opacity): it fades in over 300ms while it drops in from above (`translateFromTopElastic`,
       // 500ms, linear: it falls, overshoots and settles), stays and is removed at once after `ms` (no fade-out); `ms` is how long it lasts from `at`.
@@ -2105,6 +2215,32 @@ function buildCyclopediaSceneOverlays(geo, timeline, overlays) {
       const drop = [[0, first], [0.4, first], [0.6, 11.75], [0.62, 9.27], [0.7, -2.39], [0.72, -2.35], [0.8, 0.39], [0.82, 0.52], [0.9, -0.1], [0.92, -0.08], [1, 0]];
       sheet.animate([{ offset: 0, translate: `0 ${first}%`, ...CYCLOPEDIA_SCENE_HOLD }, ...drop.map(([p, y]) => ({ offset: f(ov.at + p * dropMs), translate: `0 ${y}%` })), { offset: 1, translate: '0 0' }],
         { duration: D, iterations: Infinity, easing: 'linear' });
+      return tile;
+    }
+    if (ov.kind === 'trap') {
+      // The Hunter's trap (the game's `hunterTrap` item: `/assets/misc/trap-spritesheet.png`, 4 frames of 32px stacked): it lies open on its tile from `at`; when something steps on it (`closeAt`) it SNAPS shut
+      // (`trap-close`, 200ms, steps(3): frames 0 -> 3, held shut). The game re-arms it (frame 0 again) after the Hunter's next cast: not drawn.
+      const sheet = document.createElement('div');
+      sheet.style.cssText = `position:absolute;inset:0;background:url(${CYCLOPEDIA_SCENE_ASSET_BASE}/misc/trap-spritesheet.png) 0 0 / ${L.cell}px ${4 * L.cell}px no-repeat;image-rendering:pixelated;`;
+      tile.appendChild(sheet);
+      tile.style.opacity = '1';
+      const close = ov.closeAt;
+      sheet.animate([{ offset: 0, backgroundPositionY: '0px', ...CYCLOPEDIA_SCENE_HOLD }, ...(Number.isFinite(close) ? [{ offset: f(close), backgroundPositionY: '0px', easing: 'steps(3,end)' }, { offset: f(close + 200), backgroundPositionY: `${-3 * L.cell}px` }] : []), { offset: 1, backgroundPositionY: Number.isFinite(close) ? `${-3 * L.cell}px` : '0px' }], { duration: D, iterations: Infinity });
+      showCyclopediaBetween(tile, D, ov.at, null);
+      return tile;
+    }
+    if (ov.kind === 'chipKnife') {
+      // Amazon's pulled knife (the game's `chippingKnife`, 1000ms linear, on the tile ABOVE the target, right edge on the tile): the `orcleaderknife` picture spins up and over to the right and falls away
+      // (translate and rotate keyframes read from the game's stylesheet), fading out in the last 40%. A glow follows it: crimson, or the energy colour when two knives were pulled (`strong`).
+      const pic = document.createElement('div');
+      const glow = ov.strong ? (gameColor('energy') || '#a020f0') : '#dc143c';
+      pic.style.cssText = `position:absolute;left:0;top:${-L.cell}px;width:${L.cell}px;height:${L.cell}px;background:url(${CYCLOPEDIA_SCENE_ASSET_BASE}/misc/orcleaderknife.png) 0 0 / 100% 100% no-repeat;image-rendering:pixelated;filter:drop-shadow(0 0 5px ${glow});opacity:0;`;
+      tile.appendChild(pic);
+      tile.style.opacity = '1';
+      const frames = [[0, 'translate(0,0) rotate(0deg)', 1], [200, 'translate(90%,-100%) rotate(432deg)', 1], [400, 'translate(170%,-90%) rotate(792deg)', 1], [600, 'translate(220%,40%) rotate(1116deg)', 1],
+        [700, 'translate(230%,140%) rotate(1404deg)', 0.5], [800, 'translate(260%,180%) rotate(1656deg)', 0], [1000, 'translate(260%,180%) rotate(1656deg)', 0]];
+      pic.animate([{ offset: 0, opacity: 0, transform: frames[0][1], ...CYCLOPEDIA_SCENE_HOLD }, { offset: f(ov.at), opacity: 0, transform: frames[0][1] },
+        ...frames.map(([ms, transform, opacity]) => ({ offset: f(ov.at + ms), opacity, transform })), { offset: 1, opacity: 0 }], { duration: D, iterations: Infinity, easing: 'linear' });
       return tile;
     }
     if (ov.kind === 'float') {
@@ -2203,9 +2339,24 @@ function buildCyclopediaSceneOverlays(geo, timeline, overlays) {
       const disc = document.createElement('div');
       disc.style.cssText = `position:absolute;left:${(L.cell - size) / 2}px;top:${(L.cell - size) / 2}px;width:${size}px;height:${size}px;box-sizing:border-box;border-radius:50%;`
         + `border:3px solid ${ov.border};background:${ov.fill};pointer-events:none;opacity:0;`;
+      // `whirl` (the Yeti's snowstorm): three layers of the game's snow-particle sheet spin inside it (`animate-spinningGlowing`, 0.7s / 1.2s / 2.2s a turn), blurred with a black glow
+      // and clipped to a ring with a hole in the middle, so the whole circle looks like a whirlwind.
+      if (ov.whirl) {
+        const clip = 'polygon(100% 50%, 100% 100%, 0 100%, 0 0, 100% 0, 100% 50%, 56% 50%,55.48% 47.56%,54.01% 45.54%,51.85% 44.29%,49.37% 44.03%,47% 44.8%,45.15% 46.47%,44.13% 48.75%,44.13% 51.25%,45.15% 53.53%,47% 55.2%,49.37% 55.97%,51.85% 55.71%,54.01% 54.46%,55.48% 52.44%,56% 50%)';
+        [0.7, 1.2, 2.2].forEach((secs) => {
+          const layer = document.createElement('div');
+          layer.className = 'absolute inset-0 size-full animate-spinningGlowing rounded-full';
+          layer.style.cssText = `animation-duration:${secs}s;filter:blur(3px) drop-shadow(0 0 5px black);clip-path:${clip};background-image:url(${CYCLOPEDIA_SCENE_ASSET_BASE}/filters/snowparticles.svg);`;
+          disc.appendChild(layer);
+        });
+      }
       tile.appendChild(disc);
       tile.style.opacity = '1';
       const end = ov.until ?? D;
+      if (ov.still) { // the game's `transition-opacity` (150ms), no zoom
+        disc.animate([{ offset: 0, opacity: 0, ...CYCLOPEDIA_SCENE_HOLD }, { offset: f(ov.at || 0), opacity: 0 }, { offset: f((ov.at || 0) + 150), opacity: 1 }, { offset: f(end), opacity: 1 }, { offset: f(end + 150), opacity: 0 }, { offset: 1, opacity: 0 }], { duration: D, iterations: Infinity });
+        return tile;
+      }
       disc.animate([{ offset: 0, opacity: 0, transform: 'scale(0)', ...CYCLOPEDIA_SCENE_HOLD }, { offset: f(ov.at || 0), opacity: 0, transform: 'scale(0)' },
         { offset: f((ov.at || 0) + 300), opacity: 1, transform: 'scale(1)', ...CYCLOPEDIA_SCENE_HOLD }, { offset: f(end), opacity: 0, transform: 'scale(1)' }, { offset: 1, opacity: 0, transform: 'scale(1)' }], { duration: D, iterations: Infinity });
       return tile;
@@ -2355,11 +2506,7 @@ function buildCyclopediaSceneTransform(geo, timeline, tf, createCaster, normalTi
     corpse.style.zIndex = String(CYCLOPEDIA_SCENE_Z.ground);
     corpse.style.pointerEvents = 'none';
     corpse.style.opacity = '0';
-    const img = document.createElement('img');
-    img.alt = '';
-    img.src = `${CYCLOPEDIA_SCENE_ASSET_BASE}/ITEM/${tf.corpse}.png`;
-    img.style.cssText = `position:absolute;left:0;top:0;width:${L.cell}px;height:${L.cell}px;image-rendering:pixelated;max-width:none;`;
-    corpse.appendChild(img);
+    corpse.appendChild(createCyclopediaCorpseSprite(tf.corpse)); // native size, bottom-right on the tile
     showCyclopediaBetween(corpse, D, tf.at, Number.isFinite(tf.until) ? tf.until : null);
     return { tile: corpse, fit: () => {} };
   }
@@ -2459,7 +2606,7 @@ function buildCyclopediaSceneMissiles(geo, timeline) {
  */
 function createCyclopediaMissile({ info, fromCol, fromRow, dx, dy, dir, leaveF, landF, goneF, duration }) {
   const L = CYCLOPEDIA_SCENE_LAYOUT;
-  const url = `${CYCLOPEDIA_SCENE_ASSET_BASE}/MISSILE/${info.id}.png`;
+  const url = info.src ? `${CYCLOPEDIA_SCENE_ASSET_BASE}/${info.src}` : `${CYCLOPEDIA_SCENE_ASSET_BASE}/MISSILE/${info.id}.png`; // `src`: a sheet outside /assets/MISSILE (Thalas's arrows)
   console.log('[Cyclopedia][ability-scene] missile', { name: info.n, id: info.id, url, octant: dir.octant, frame: [dir.col, dir.row] });
   probeCyclopediaSceneAsset(`missile ${info.n}`, url, { w: 96, h: 96 });
   const missile = document.createElement('div');
@@ -2583,7 +2730,8 @@ function cyclopediaMateStepTimes(mate) {
   return w.steps.map((_, i) => {
     const bonus = w.speedBonusAfter && i > w.speedBonusAfter.step ? w.speedBonusAfter.bonus : 0;
     // `speed`: a fixed speed (a creature pushed at 255, Wyvern's screech); `speedScale`: a slow (x0.5)
-    return cyclopediaSceneStepTimes(w.speed ?? (mate.baseSpeed != null ? (mate.baseSpeed + bonus) * (w.speedScale ?? 1) : null), 280);
+    // a third entry of a step is a pause (ms) BEFORE it: the Bride's heart stands still while she charges her bite
+    return { ...cyclopediaSceneStepTimes(w.speed ?? (mate.baseSpeed != null ? (mate.baseSpeed + bonus) * (w.speedScale ?? 1) : null), 280), wait: w.steps[i][2] || 0 };
   });
 }
 
@@ -2613,10 +2761,13 @@ function planCyclopediaSceneFlee(scene, geo) {
   // `steps` [[dCol, dRow], ...]: an explicit path instead of the flee routine (a creature that walks on its own: the Firestarter laying its fire trail), at the same step times.
   if (f.steps?.length) {
     let [x, y, t] = [0, 0, f.at || 0];
-    const steps = f.steps.map(([dc, dr]) => {
-      x += dc; y += dr;
-      const step = { x, y, facing: dc !== 0 ? (dc > 0 ? 'east' : 'west') : (dr > 0 ? 'south' : 'north'), from: t, walkMs: stepMs, glideMs, waitMs: 0 };
-      t += stepMs;
+    // a step may carry its own speed bonus as a third entry ([dCol, dRow, bonus]): Rorc runs at its speed to its target and +100 faster when it flees after the hit
+    // a fourth entry is a pause (ms) BEFORE the step: the Black Knight stands to chop a tree and throw its spear between its runs
+    const steps = f.steps.map(([dc, dr, bonus, wait]) => {
+      x += dc; y += dr; t += wait || 0;
+      const own = bonus === undefined || scene.baseSpeed == null ? { glideMs, stepMs } : cyclopediaSceneStepTimes(scene.baseSpeed + bonus, 280);
+      const step = { x, y, facing: dc !== 0 ? (dc > 0 ? 'east' : 'west') : (dr > 0 ? 'south' : 'north'), from: t, walkMs: own.stepMs, glideMs: own.glideMs, waitMs: 0 };
+      t += own.stepMs;
       return step;
     });
     return { at: f.at || 0, glideMs, steps, endMs: t, restFacing: steps[steps.length - 1].facing };
@@ -2658,7 +2809,10 @@ function cyclopediaCasterPathKeys(flee, D) {
   const at = (ms) => Math.min(0.998, ms / D);
   const cell = (x, y) => `translate(${x * L.cell}px,${y * L.cell}px)`;
   const keys = [{ offset: 0, transform: 'translate(0,0)', ...CYCLOPEDIA_SCENE_HOLD }, { offset: at(flee.at), transform: 'translate(0,0)' }];
+  let prev = { x: 0, y: 0, end: flee.at };
   flee.steps.forEach((st) => {
+    if (st.from > prev.end + 1) keys.push({ offset: at(st.from), transform: cell(prev.x, prev.y) }); // a pause: hold the last tile until this step starts
+    prev = { x: st.x, y: st.y, end: st.from + st.walkMs };
     keys.push({ offset: at(st.from + st.glideMs), transform: cell(st.x, st.y) });
     if (st.walkMs > st.glideMs) keys.push({ offset: at(st.from + st.walkMs), transform: cell(st.x, st.y) });
   });
@@ -2678,7 +2832,8 @@ function cyclopediaMateWalkKeys(mate, D) {
   const keys = [{ offset: 0, transform: 'translate(0,0)', ...CYCLOPEDIA_SCENE_HOLD }, { offset: at(w.at), transform: 'translate(0,0)' }];
   let [x, y, t] = [0, 0, w.at];
   w.steps.forEach((st, i) => {
-    const { glideMs, stepMs } = times[i];
+    const { glideMs, stepMs, wait } = times[i];
+    if (wait) { keys.push({ offset: at(t), transform: cell(x, y) }); t += wait; keys.push({ offset: at(t), transform: cell(x, y) }); }
     x += st[0]; y += st[1];
     keys.push({ offset: at(t + glideMs), transform: cell(x, y) });
     if (stepMs > glideMs) keys.push({ offset: at(t + stepMs), transform: cell(x, y) });
@@ -2845,6 +3000,14 @@ function buildCyclopediaSceneEffects(geo, timeline, stageTiles) {
         fx.style.cssText = cyclopediaSceneEffectCss(plan, effectUrl, col, row, L.cell,
           (tx || ty ? `translate:${tx * 100}% ${ty * 100}%;` : '') + (effect.filter ? `filter:${effect.filter};` : ''));
         fx.animate(cyclopediaSceneEffectKeyframes(plan, startMs + delayMs, duration, effect.opacity ?? 1), { duration, iterations: Infinity });
+        // `grow` { at, to }: the effect holds its size until `at` (a fraction of its length), then scales up to `to` x by its end (the Blue Djinn's burst: the game's `blueDjinnScale`, 1 -> 5 over the last 43% of 700ms).
+        if (effect.grow) {
+          const t0 = startMs + delayMs;
+          const f = (ms) => Math.min(0.998, Math.max(0, ms / duration));
+          const len = plan.ms || 700;
+          fx.animate([{ offset: 0, scale: '1', ...CYCLOPEDIA_SCENE_HOLD }, { offset: f(t0 + effect.grow.at * len), scale: '1' }, { offset: f(t0 + len), scale: String(effect.grow.to) }, { offset: 1, scale: String(effect.grow.to) }],
+            { duration, iterations: Infinity });
+        }
         // `glide` { dx, dy, ms }: an effect on a creature that is walking onto this tile: it starts on the tile it came from and moves with it over `ms`
         // (the game draws an effect inside the actor's own moving container).
         if (effect.glide) {
@@ -2896,6 +3059,7 @@ function addCyclopediaSceneAutoAttacks(scene, geo) {
   const aa = scene.autoAttack;
   if (!aa || scene.noAutoAttack || geo.selfAnchored || scene.noDummy || scene.allyTarget || scene.dummyHidden) return scene;
   const dist = Math.max(Math.abs(geo.casterCol - geo.midCol), Math.abs(geo.casterRow - geo.midRow));
+  if (!aa.missile && !aa.ranged && dist > 1) return scene; // a MELEE normal attack needs the creature next to its target: one standing far off (a Dragon casting its fireball from the corner) does not strike from there
   const flightMs = aa.missile ? cyclopediaFlightMs(dist) : 0;
   const abilityLand = (scene.lead || 0) + ((scene.missiles || []).length ? cyclopediaFlightMs(dist) : 0);
   const known = [(scene.numbers || []).filter((n) => n.on === 'target' || n.on == null).map((n) => (typeof n.at === 'string' ? abilityLand + (parseInt(n.at.replace(/^[a-z]+/, ''), 10) || 0) : n.at || 0))].flat();
@@ -2918,10 +3082,42 @@ function addCyclopediaSceneAutoAttacks(scene, geo) {
   };
 }
 
+/**
+ * Every ability starts its loop with ONE SECOND of cooldown left: the first cast is at 1s, not earlier. The cast is the scene's `cooldownCastAt`, else its first projectile / effect / `lead`; a scene that casts sooner
+ * is moved later as a whole (`warpCyclopediaSceneStart`) by the difference, and the cooldown bar starts that far from full. Scenes without a cooldown, and the push / charge grids (Bear, walls, arena) keep their timing.
+ */
+const CYCLOPEDIA_SCENE_FIRST_CAST_MS = 1000;
+function cyclopediaSceneCastAt(scene) {
+  const times = [scene.lead, ...(scene.flights || []).map((fl) => fl.at), ...(scene.effects || []).map((e) => e.at)].filter((t) => Number.isFinite(t));
+  return scene.cooldownCastAt ?? (times.length ? Math.min(...times) : 0);
+}
+function cyclopediaSceneStartShift(scene) {
+  if (scene.push || !(scene.cooldownMs > 0)) return 0;
+  const castAt = cyclopediaSceneCastAt(scene);
+  return castAt > 0 ? Math.max(0, CYCLOPEDIA_SCENE_FIRST_CAST_MS - castAt) : 0; // a cast at 0 was moved by `lead` instead
+}
+/** Moves everything on `root` that loops over `D` ms later by `S` ms: the loop grows to D + S and every keyframe after the first keeps its distance in ms (the first keyframe is the state the scene starts in). */
+function warpCyclopediaSceneStart(root, D, S) {
+  if (!(S > 0)) return;
+  const D2 = D + S;
+  root.getAnimations({ subtree: true }).forEach((anim) => {
+    if (typeof CSSAnimation !== 'undefined' && anim instanceof CSSAnimation) return; // sprite walk cycles and the like run on their own clock
+    const timing = anim.effect?.getTiming?.();
+    if (!timing || timing.iterations !== Infinity || Math.abs(timing.duration - D) > 0.5) return;
+    const keys = anim.effect.getKeyframes();
+    if (!keys.length) return;
+    // a keyframe without an offset is spaced evenly (its computed offset); one at the very start stays there (a state the scene starts in), one at the end stays at the end
+    anim.effect.setKeyframes(keys.map(({ computedOffset, ...k }) => { const o = k.offset ?? computedOffset; return { ...k, offset: o <= 0 ? 0 : o >= 1 ? 1 : (o * D + S) / D2 }; }));
+    anim.effect.updateTiming({ duration: D2 });
+  });
+}
+
 function createCyclopediaAbilityGrid(masks, sceneIn, createCaster) {
   const L = CYCLOPEDIA_SCENE_LAYOUT;
-  const geo = computeCyclopediaSceneGeometry(masks, sceneIn.range, !sceneIn.range && !(sceneIn.missiles || []).length, sceneIn.gridHalf || 0);
-  const scene = addCyclopediaSceneAutoAttacks(sceneIn, geo);
+  const geo = computeCyclopediaSceneGeometry(masks, sceneIn.range, !sceneIn.range && !(sceneIn.missiles || []).length, Math.max(sceneIn.gridHalf || 0, cyclopediaSceneAreaReach(sceneIn) ? cyclopediaSceneAreaReach(sceneIn) + CYCLOPEDIA_SCENE_LAYOUT.padding : 0), sceneIn.casterOffset || null, !!sceneIn.casterAxis); // an area spelled out in effect / flash tiles keeps one tile of margin too
+  // A scene that casts at once (no explicit times: the extracted ones) starts its attack 1s in (`lead`); one with its own times is moved later as a whole when its loop is first shown (`warpCyclopediaSceneStart`).
+  const castsAtOnce = !sceneIn.push && sceneIn.cooldownMs > 0 && cyclopediaSceneCastAt(sceneIn) <= 0;
+  const scene = addCyclopediaSceneAutoAttacks(castsAtOnce ? { ...sceneIn, lead: (sceneIn.lead || 0) + CYCLOPEDIA_SCENE_FIRST_CAST_MS } : sceneIn, geo);
   const timeline = computeCyclopediaSceneTimeline(scene, geo);
   // Each stage keeps only the tiles no earlier stage already covers (a ring mask repeats its origin tile).
   const covered = new Set();
@@ -2963,7 +3159,7 @@ function createCyclopediaAbilityGrid(masks, sceneIn, createCaster) {
 
   // The target highlight (see createCyclopediaTargetBorder): red around an enemy target, green around the ally Sheep heals.
   if (!geo.selfAnchored) grid.appendChild(createCyclopediaTargetBorder(geo.midCol, geo.midRow, scene.allyTarget ? '#00ff00' : '#ff0000'));
-  // A dummy (the Dead Tree, like the push scenes use) stands on the target tile so the hit has something to land on.
+  // A dummy (the villain Ti, like the push scenes use) stands on the target tile so the hit has something to land on.
   // `noDummy`: no creature stands on the target tile at the start (the scene brings its own target, which walks: Mummy's Ti).
   const dummy = geo.selfAnchored || scene.noDummy ? null : buildCyclopediaSceneCaster({ casterCol: geo.midCol, casterRow: geo.midRow },
     () => createCaster(scene.allyTarget ? CYCLOPEDIA_SCENE_ALLY_DUMMY_ID : CYCLOPEDIA_SCENE_DUMMY_ID));
@@ -2977,8 +3173,8 @@ function createCyclopediaAbilityGrid(masks, sceneIn, createCaster) {
       { duration: timeline.duration, iterations: Infinity }
     );
   }
-  // An ally dummy (a creature) just stands still, facing south: it never walks in place while the scene plays.
-  if (dummy) holdCyclopediaSceneStill(dummy.tile);
+  // The dummy just stands still: it never walks in place while the scene plays. The enemy faces the caster (standing to its east); an ally faces south.
+  if (dummy) holdCyclopediaSceneStill(dummy.tile, scene.allyTarget ? 'south' : 'east');
   if (dummy && scene.dummyHidden) {
     // `dummyHidden` { from, until } ms: the dummy is replaced by something else for a while (Snake's statue), then comes back.
     const D = timeline.duration;
@@ -3010,6 +3206,49 @@ function createCyclopediaAbilityGrid(masks, sceneIn, createCaster) {
       : n.on.target ? [geo.midCol + n.on.target[0], geo.midRow + n.on.target[1]] : [geo.casterCol + n.on[0], geo.casterRow + n.on[1]]; // `{ target: [dCol, dRow] }`: from the target tile
     grid.appendChild(follow(createCyclopediaNumber(col, row, timeline.duration, { ...n, at: resolveCyclopediaSceneTime(n.at, timeline.flightMs) }), n.on));
   });
+  // Blood on the ground, the way the game's `hp.bleed` does it: every hit on a creature that bleeds leaves a splash on its tile (the `SPLASH` item 2889, a LARGE one) and a hit that crits or kills
+  // leaves a pool instead (the `POOL` item 2886, which stays a pool); both are the creature's blood colour (red for Ti: the sheet's cropX 2 / cropY 0), drawn at 40% opacity on the floor layer and lasting
+  // longer than the loop (LARGE 7s, then smaller). The colour is the blood colour of the creature on that tile (a mate's own, else the red of the Ti dummy; `none` leaves
+  // nothing). `noBlood` only stops the automatic blood EFFECT (a scene that places its own): the creatures on its tiles still bleed on the ground.
+  {
+    const colorOf = (mate) => (mate?.id != null ? globalThis.creatureDatabase?.getMonsterById?.(mate.id)?.metadata?.bloodColor : null) || 'red';
+    const mateAt = (col, row) => (scene.mates || []).find((m) => (m.anchor === 'target' ? geo.midCol : geo.casterCol) + (m.dx || 0) === col && (m.anchor === 'target' ? geo.midRow : geo.casterRow) + (m.dy || 0) === row);
+    const tiles = new Map();
+    const bleedOn = (col, row, at, pool, color) => {
+      const t = tiles.get(`${col},${row}`) || { col, row, first: Infinity, pool: Infinity, color };
+      t.first = Math.min(t.first, at);
+      if (pool) t.pool = Math.min(t.pool, at);
+      tiles.set(`${col},${row}`, t);
+    };
+    (scene.numbers || []).forEach((n) => {
+      if (n.kind !== 'damage') return;
+      if (n.on === 'self') { // the creature itself is hit (a villain's arrow, its own HP cost): it bleeds in its own colour, where it stands (not while it walks away)
+        if (!scene.casterFlee && scene.bloodColor && scene.bloodColor !== 'none') bleedOn(geo.casterCol, geo.casterRow, resolveCyclopediaSceneTime(n.at, timeline.flightMs), !!n.crit, scene.bloodColor);
+        return;
+      }
+      const bare = n.on === 'target' || n.on == null; // the dummy on the target tile
+      const [col, row] = bare ? [geo.midCol, geo.midRow] : n.on.target ? [geo.midCol + n.on.target[0], geo.midRow + n.on.target[1]] : [geo.casterCol + n.on[0], geo.casterRow + n.on[1]];
+      const mate = mateAt(col, row);
+      if (!mate && (bare ? scene.allyTarget || scene.noDummy || geo.selfAnchored : geo.selfAnchored)) return; // nothing known stands there
+      bleedOn(col, row, resolveCyclopediaSceneTime(n.at, timeline.flightMs), !!n.crit, colorOf(mate));
+    });
+    // `bleeds` [{ at, on, crit }]: a hit with no damage number (an IGNORED hit: 0 damage) still runs the game's `hp.bleed`; `on` is 'self', 'target' or [dCol, dRow] from the caster, as for `numbers`.
+    (scene.bleeds || []).forEach((b) => {
+      const self = b.on === 'self';
+      if (self && (scene.casterFlee || !scene.bloodColor || scene.bloodColor === 'none')) return;
+      const [col, row] = self ? [geo.casterCol, geo.casterRow] : b.on === 'target' ? [geo.midCol, geo.midRow] : [geo.casterCol + b.on[0], geo.casterRow + b.on[1]];
+      bleedOn(col, row, resolveCyclopediaSceneTime(b.at, timeline.flightMs), !!b.crit, self ? scene.bloodColor : colorOf(mateAt(col, row)));
+    });
+    (scene.mates || []).forEach((m) => { // a kill leaves a pool where it fell (the mates that were hit)
+      if (!m.dies) return;
+      const [col, row] = m.anchor === 'target' ? [geo.midCol + (m.dx || 0), geo.midRow + (m.dy || 0)] : [geo.casterCol + (m.dx || 0), geo.casterRow + (m.dy || 0)];
+      if (tiles.has(`${col},${row}`)) bleedOn(col, row, m.dies.at, true, colorOf(m));
+    });
+    tiles.forEach(({ col, row, first, pool, color }) => {
+      addCyclopediaBloodDecal(grid, timeline.duration, 2889, col, row, first, pool < Infinity ? pool : undefined, color);
+      if (pool < Infinity) addCyclopediaBloodDecal(grid, timeline.duration, 2886, col, row, pool, undefined, color);
+    });
+  }
   // Area flashes (`flashes`: `at` ms, `tiles` [dCol, dRow] from the TARGET tile): the hit area lit when an AoE lands, for a scene whose casts
   // are spelled out in effect `tiles` (so its mask gives no flash of its own). Lit for 1.1s, the length of the fire explosion.
   (scene.flashes || []).forEach((flash) => {
@@ -3031,12 +3270,24 @@ function createCyclopediaAbilityGrid(masks, sceneIn, createCaster) {
   // The creature's own cooldown bar (`cooldownBar` { color, hideWhenReady }, from the game's class): ready (full) until its cast, empty at the cast and then filling over the ability's cooldown
   // (`cooldownMs`), as far as the loop runs. The cast is the scene's `cooldownCastAt`, else its first projectile / effect / `lead`.
   if (scene.cooldownBar && scene.cooldownMs > 0) {
-    const times = [scene.lead, ...(scene.flights || []).map((fl) => fl.at), ...(scene.effects || []).map((e) => e.at)].filter((t) => Number.isFinite(t));
-    const castAt = scene.cooldownCastAt ?? (times.length ? Math.min(...times) : 0);
+    const castAt = cyclopediaSceneCastAt(scene);
     const D = timeline.duration;
     const fillTo = Math.min(1, (D - castAt) / scene.cooldownMs);
     const color = gameColor(scene.cooldownBar.color) || '#6699ff';
-    const levels = [[0, 1, color], [castAt, 1, color], [castAt + 1, 0, color], [D, fillTo, color]].filter((k, i, all) => i === 0 || k[0] >= all[i - 1][0]);
+    // it starts with the cooldown left until the first cast (1s at least: the whole scene is moved later by `warpCyclopediaSceneStart`) and fills to ready at the cast
+    const startFill = Math.max(0, 1 - (castAt + cyclopediaSceneStartShift(scene)) / scene.cooldownMs);
+    // `cooldownCasts` [ms, ...]: a scene with several casts (the awakened Fire Devil's three fireballs): the bar empties at each, fills over the cooldown and is ready exactly when the next cast comes if the casts are one cooldown apart.
+    // The bar always follows the cooldown the scene shows: when the scene spaces its casts differently from the real cooldown it says so with `cooldownScale` (the part's `cooldownMs` is scaled).
+    const casts = scene.cooldownCasts?.length ? scene.cooldownCasts : [castAt];
+    const raw = [[0, startFill, color]];
+    casts.forEach((c, i) => {
+      raw.push([c, 1, color], [c + 1, 0, color]);
+      const next = casts[i + 1];
+      const ready = c + scene.cooldownMs;
+      if (next === undefined) raw.push([D, Math.min(1, (D - c) / scene.cooldownMs), color]);
+      else if (ready < next) raw.push([ready, 1, color]); // ready before the next cast
+    });
+    const levels = raw.filter((k, i, all) => i === 0 || k[0] >= all[i - 1][0]);
     grid.appendChild(follow(createCyclopediaStunBar(geo.casterCol, geo.casterRow, D, scene.cooldownBar.hideWhenReady
       ? { at: castAt, until: Math.min(D, castAt + scene.cooldownMs), levels: levels.slice(1), smooth: true, y: -2 } : { at: 0, until: D, levels, smooth: true, y: -2 }), 'self'));
   }
@@ -3105,17 +3356,23 @@ function createCyclopediaAbilityGrid(masks, sceneIn, createCaster) {
   if (flee) {
     const D = timeline.duration;
     const keys = cyclopediaCasterPathKeys(flee, D);
-    const phases = [...flee.steps.map((st) => ({ pose: 'walk', facing: st.facing, from: st.from, until: st.from + st.walkMs })), { pose: 'stand', facing: flee.restFacing, from: flee.endMs, until: null }];
+    const phases = [...flee.steps.flatMap((st, i) => { const before = flee.steps[i - 1]; const walk = { pose: 'walk', facing: st.facing, from: st.from, until: st.from + st.walkMs }; const gapFrom = before ? before.from + before.walkMs : flee.at; return st.from > gapFrom + 1 ? [{ pose: 'stand', facing: before?.facing ?? st.facing, from: gapFrom, until: st.from }, walk] : [walk]; }), { pose: 'stand', facing: flee.restFacing, from: flee.endMs, until: null }];
     fleeing = buildCyclopediaSceneWalker(geo, createCaster, D, { phases, keys, glideMs: flee.glideMs });
-    fleeing.tiles.forEach((tile) => grid.appendChild(tile));
+    fleeing.tiles.forEach((tile) => { grid.appendChild(tile); if (scene.casterJump) animateCyclopediaJump(tile, timeline.duration, scene.casterJump.at, scene.casterJump.kind); }); // `casterJump` { at, kind }: the Drone's jump (or the Nightstalker's blink) to the new tile
     showCyclopediaBetween(caster.tile, D, 0, flee.at);
+    // `casterInvisible` { at, until }: the walking caster vanishes over 200ms from `at` and is back at `until` (the Werefox's invisibility: it moves on while unseen and stays where it stopped). A `filter` fade, because each walking copy already fades with `opacity`.
+    const inv = scene.casterInvisible;
+    if (inv) {
+      const q = (ms) => Math.min(0.998, Math.max(0, ms / D));
+      fleeing.tiles.forEach((tile) => tile.animate([{ offset: 0, filter: 'opacity(1)', ...CYCLOPEDIA_SCENE_HOLD }, { offset: q(inv.at), filter: 'opacity(1)' }, { offset: q(inv.at + 200), filter: 'opacity(0)' }, { offset: q(inv.until), filter: 'opacity(0)' }, { offset: q(inv.until + 200), filter: 'opacity(1)' }, { offset: 1, filter: 'opacity(1)' }], { duration: D, iterations: Infinity }));
+    }
   }
   // The caster stands in its idle pose (it does not move here); only the push scenes, where it really walks, play the walk cycle.
   [caster.tile, transformed?.tile].forEach((el) => el && idleCyclopediaSceneCreature(el));
   buildCyclopediaSceneMissiles(geo, timeline).forEach((el) => grid.appendChild(el));
   buildCyclopediaSceneEffects(geo, timeline, stageTiles).forEach((el) => grid.appendChild(el));
 
-  return { grid, fit: () => { floor.fit(); casterFit(); fleeing?.fit(); dummy?.fit(); shooter?.fit(); mates.forEach((m) => m.fit()); transformed?.fit(); }, preview: [], duration: timeline.duration };
+  return { grid, fit: () => { floor.fit(); casterFit(); fleeing?.fit(); dummy?.fit(); shooter?.fit(); mates.forEach((m) => m.fit()); transformed?.fit(); }, preview: [], duration: timeline.duration, startShift: cyclopediaSceneStartShift(scene) };
 }
 
 /** Turns the creature sprite(s) inside `el` to face `direction` ('north' | 'south' | 'east' | 'west'). */
@@ -3226,6 +3483,7 @@ function createCyclopediaPerimeterGrid(part, createCaster) {
   grid.appendChild(caster.tile);
   setCyclopediaSceneFacing(caster.tile, 'west');
   setCyclopediaSceneFacing(dummy.tile, 'east');
+  idleCyclopediaSceneCreature(dummy.tile); // a stunned / rooted / pushed creature stands: it does not walk in place
 
   // One-shot sprite-sheet effect on a tile (or the creature) at `atMs`.
   const playEffect = (eff, col, row, atMs, sizeTiles) => {
@@ -3267,7 +3525,7 @@ function createCyclopediaPerimeterGrid(part, createCaster) {
     sprites.forEach((s) => s.style.setProperty('--scene-tile-scale', String(L.cell / w)));
     console.log('[Cyclopedia][ability-scene] perimeter stone sprite', { ids: stoneIds, nativePx: w });
   };
-  return { grid, fit: () => { floor.fit(); fitStones(); caster.fit(); dummy.fit(); }, preview: [] };
+  return { grid, fit: () => { floor.fit(); fitStones(); caster.fit(); dummy.fit(); }, preview: [], duration: D };
 }
 
 /**
@@ -3300,6 +3558,7 @@ function createCyclopediaBarrelGrid(part, createCaster) {
   const dummy = buildCyclopediaSceneCaster({ casterCol: dummyCol, casterRow: row }, () => createCaster(part.push.dummyId));
   grid.appendChild(dummy.tile);
   setCyclopediaSceneFacing(dummy.tile, 'west');
+  idleCyclopediaSceneCreature(dummy.tile); // a stunned / rooted / pushed creature stands: it does not walk in place
 
   // The barrel: drops in, waits, vanishes when it explodes.
   const barrel = placeCyclopediaSceneEl(document.createElement('div'), barrelCol, row);
@@ -3378,7 +3637,7 @@ function createCyclopediaBarrelGrid(part, createCaster) {
     barrelSprite.style.setProperty('--scene-tile-scale', String(L.cell / w));
     console.log('[Cyclopedia][ability-scene] barrel sprite', { id: part.push.barrelSpriteId, nativePx: w });
   };
-  return { grid, fit: () => { floor.fit(); fitBarrel(); dwarf.fit(); dummy.fit(); }, preview: [] };
+  return { grid, fit: () => { floor.fit(); fitBarrel(); dwarf.fit(); dummy.fit(); }, preview: [], duration: D };
 }
 
 /**
@@ -3488,6 +3747,7 @@ function createCyclopediaWallsGrid(part, createCaster) {
   grid.appendChild(caster.tile);
   setCyclopediaSceneFacing(caster.tile, 'east');
   setCyclopediaSceneFacing(dummy.tile, 'west');
+  idleCyclopediaSceneCreature(dummy.tile); // a stunned / rooted / pushed creature stands: it does not walk in place
   idleCyclopediaSceneCreature(caster.tile); // the creature stands while it taunts
 
   // The taunt burst on the creature as it casts.
@@ -3512,7 +3772,7 @@ function createCyclopediaWallsGrid(part, createCaster) {
     grid.appendChild(fx);
   }
 
-  return { grid, fit: () => { floor.fit(); fitRunes(); caster.fit(); dummy.fit(); }, preview: [] };
+  return { grid, fit: () => { floor.fit(); fitRunes(); caster.fit(); dummy.fit(); }, preview: [], duration: D };
 }
 
 /**
@@ -3527,7 +3787,9 @@ function createCyclopediaArenaGrid(part, createCaster) {
   const TM = CYCLOPEDIA_SCENE_TIMING;
   const FADE_MS = 300; // the game's ARENA_FADE_OUT_MS
   const arenaMs = Math.min(8000, Math.max(3000, part.push.arenaMs || 5000));
-  const D = arenaMs + 600;
+  // Like every ability the loop starts with 1s of cooldown left: the arena rises at `START` (nothing of it is on screen before), the cooldown bar fills to ready then.
+  const START = CYCLOPEDIA_SCENE_FIRST_CAST_MS;
+  const D = START + arenaMs + 600;
   const geo = { cols: 7, rowsN: 7, midCol: 3, midRow: 3 };
   const smoke = (part.effects || []).find((e) => e.n === 'smoke');
   const spikes = (part.effects || []).find((e) => e.n === 'floorSpike');
@@ -3548,8 +3810,8 @@ function createCyclopediaArenaGrid(part, createCaster) {
 
   // The arena exists from the start to `arenaMs`, fading in and out.
   const fade = (el) => el.animate(
-    [{ offset: 0, opacity: 0 }, { offset: FADE_MS / D, opacity: 1 }, { offset: (arenaMs - FADE_MS) / D, opacity: 1 },
-      { offset: arenaMs / D, opacity: 0 }, { offset: 1, opacity: 0 }],
+    [{ offset: 0, opacity: 0 }, { offset: START / D, opacity: 0 }, { offset: (START + FADE_MS) / D, opacity: 1 }, { offset: (START + arenaMs - FADE_MS) / D, opacity: 1 },
+      { offset: (START + arenaMs) / D, opacity: 0 }, { offset: 1, opacity: 0 }],
     { duration: D, iterations: Infinity }
   );
 
@@ -3598,14 +3860,14 @@ function createCyclopediaArenaGrid(part, createCaster) {
     ring.forEach(([col, row]) => {
       const fx = document.createElement('div');
       fx.style.cssText = cyclopediaSceneEffectCss(plan, url, col, row, L.cell, `z-index:${CYCLOPEDIA_SCENE_Z.effect};`);
-      fx.animate(cyclopediaSceneEffectKeyframes(plan, 0, D, 0.7), { duration: D, iterations: Infinity });
+      fx.animate(cyclopediaSceneEffectKeyframes(plan, START, D, 0.7), { duration: D, iterations: Infinity });
       grid.appendChild(fx);
     });
   }
 
   // The dummy steps (4,2) -> (4,3) -> (4,4) across the floor spikes and flinches after each step.
   const STEP_MS = 300;
-  const steps = [[1200, 1], [2400, 2]]; // [when it starts the step, row offset it ends on]
+  const steps = [[START + 1200, 1], [START + 2400, 2]]; // [when it starts the step, row offset it ends on]
   const stepped = new Map(); // "col,row" -> ms the dummy arrives there (the spikes there play)
   steps.forEach(([t, dy]) => stepped.set(`4,${2 + dy}`, t + STEP_MS));
 
@@ -3635,11 +3897,7 @@ function createCyclopediaArenaGrid(part, createCaster) {
 
   const caster = buildCyclopediaSceneCaster({ casterCol: 3, casterRow: 3 }, () => createCaster());
   idleCyclopediaSceneCreature(caster.tile); // the creature stands while it casts
-  const dummy = buildCyclopediaSceneCaster({ casterCol: 4, casterRow: 2 }, () => createCaster(part.push.dummyId));
-  grid.appendChild(dummy.tile);
-  grid.appendChild(caster.tile);
-  setCyclopediaSceneFacing(dummy.tile, 'west');
-
+  // The dummy walks only while it moves from one tile to the next (a step) and stands in between and while it flinches: separate walking and standing copies take turns.
   const frames = [{ offset: 0, transform: 'translate(0px,0px)' }];
   steps.forEach(([t, dy]) => {
     const y = dy * L.cell;
@@ -3647,9 +3905,28 @@ function createCyclopediaArenaGrid(part, createCaster) {
     frames.push({ offset: t / D, transform: `translate(0px,${(dy - 1) * L.cell}px)` }, at(t + STEP_MS), at(t + STEP_MS + 60, 3), at(t + STEP_MS + 140, -2), at(t + STEP_MS + 220));
   });
   frames.push({ offset: 1, transform: frames[frames.length - 1].transform });
-  dummy.tile.animate(frames, { duration: D, iterations: Infinity });
+  const dummyPhases = [];
+  let dummyFrom = 0;
+  let dummyFacing = 'west'; // it faces the attacker until it starts walking, then the way it walks
+  steps.forEach(([t]) => { dummyPhases.push({ pose: 'stand', facing: dummyFacing, from: dummyFrom, until: t }, { pose: 'walk', facing: 'south', from: t, until: t + STEP_MS }); dummyFrom = t + STEP_MS; dummyFacing = 'south'; });
+  dummyPhases.push({ pose: 'stand', facing: dummyFacing, from: dummyFrom, until: null });
+  const dummyWalker = buildCyclopediaSceneWalker({ casterCol: 4, casterRow: 2 }, () => createCaster(part.push.dummyId), D, { phases: dummyPhases, keys: frames, glideMs: STEP_MS });
+  dummyWalker.tiles.forEach((tile) => grid.appendChild(tile));
+  // An enemy that steps onto an inner spike takes the spike's damage 5 ticks (312.5ms) after it enters (a crit of physical damage, 10 + 0.5 AD): the number, and the blood pool a crit leaves under it.
+  steps.forEach(([t, dy]) => {
+    const hit = t + STEP_MS + 312.5;
+    grid.appendChild(createCyclopediaNumber(4, 2 + dy, D, { at: hit, kind: 'damage', type: 'physical', dtype: 'physical', crit: true }));
+    addCyclopediaBloodDecal(grid, D, 2886, 4, 2 + dy, hit, undefined, 'red');
+  });
+  grid.appendChild(caster.tile);
+  // The creature's cooldown bar (the class's own): 1s left at the start, ready as the arena rises, empty then and filling again.
+  if (part.cooldownBar && part.cooldownMs > 0) {
+    const color = gameColor(part.cooldownBar.color) || '#6699ff';
+    grid.appendChild(createCyclopediaStunBar(3, 3, D, { at: 0, until: D, smooth: true, y: -2,
+      levels: [[0, Math.max(0, 1 - START / part.cooldownMs), color], [START, 1, color], [START + 1, 0, color], [D, Math.min(1, (D - START) / part.cooldownMs), color]] }));
+  }
 
-  return { grid, fit: () => { floor.fit(); fitWall(); caster.fit(); dummy.fit(); }, preview: [] };
+  return { grid, fit: () => { floor.fit(); fitWall(); caster.fit(); dummyWalker.fit(); }, preview: [], duration: D };
 }
 
 /**
@@ -3683,14 +3960,16 @@ function createCyclopediaPushGrid(part, createCaster) {
   if (charge) {
     // Charge (Bear): hibernating in its sleeping costume it heals every 1250ms (`haste` plays on a healed creature); it wakes, runs at
     // the dummy, and hits it (`poof`, blood, a 100ms `flinch` shake; physical damage), then hibernates again: the costume is back
-    // 5 ticks (312ms) after the hit. The real hibernation is 7500ms; the preview wakes it sooner.
-    const WAKE = 3200;
+    // 5 ticks (312ms) after the hit. The hibernation is the real one (`push.wakeMs`, the cooldown: 7500ms; the bar is full when it wakes), or, awakened (`push.activate.at`), it is cut short when a stun
+    // is ignored: the Bear wakes at once (its remaining heal ticks come as one crit heal).
+    const WAKE = part.push.activate?.at ?? part.push.wakeMs ?? 3200;
     const WALK_PER_TILE = walk.stepMs; // the game's step time at the creature's speed (Bear: 5 ticks = 312.5ms)
     const SLEEP_COSTUME_MS = 312;
     const tiles = dummyCol - 1 - startCol;
     const arrive = WAKE + tiles * WALK_PER_TILE;
     casterPath.push([WAKE, 0], [arrive, tiles]);
-    hits.push({ onSelf: true, col: startCol, at: 1250 }, { onSelf: true, col: startCol, at: 2500 }, { onSelf: false, col: dummyCol, at: arrive });
+    (part.push.healAt ?? Array.from({ length: Math.floor(WAKE / 1250) }, (_, i) => (i + 1) * 1250)).forEach((at) => hits.push({ onSelf: true, col: startCol, at })); // a heal (and `haste`) every 1250ms of the hibernation
+    hits.push({ onSelf: false, col: dummyCol, at: arrive });
     dummyFlinch = { at: arrive }; // the dummy shakes (the game's `flinch`) when hit
     hitAtMs = arrive;
     costume = { until: WAKE, backAt: arrive + SLEEP_COSTUME_MS, backCol: startCol + tiles };
@@ -3719,23 +3998,26 @@ function createCyclopediaPushGrid(part, createCaster) {
   const caster = buildCyclopediaSceneCaster({ casterCol: startCol, casterRow: 1 }, () => createCaster());
   const dummy = buildCyclopediaSceneCaster({ casterCol: dummyCol, casterRow: 1 }, () => createCaster(part.push.dummyId));
   grid.appendChild(dummy.tile);
-  let walker = null;
-  if (charge) grid.appendChild(caster.tile);
-  else {
-    // A pushing creature walks only while it steps after a hit and stands in between: the walking and standing copies take turns.
-    const keys = casterPath.map(([t, x]) => ({ offset: Math.min(0.998, t / D), transform: `translate(${x * L.cell}px,0)` }))
-      .concat([{ offset: 1, transform: `translate(${casterPath[casterPath.length - 1][1] * L.cell}px,0)` }]);
-    const phases = [];
+  // The creature walks only while it moves between tiles and stands the rest of the time: the walking and standing copies take turns along one path.
+  const walkKeys = casterPath.map(([t, x]) => ({ offset: Math.min(0.998, t / D), transform: `translate(${x * L.cell}px,0)` }))
+    .concat([{ offset: 1, transform: `translate(${casterPath[casterPath.length - 1][1] * L.cell}px,0)` }]);
+  const walkPhases = [];
+  if (charge) {
+    // asleep in its costume until it wakes (no creature then), it runs to the dummy, stands there until the costume is back
+    walkPhases.push({ pose: 'walk', facing: 'east', from: costume.until, until: casterPath[casterPath.length - 1][0] }, { pose: 'stand', facing: 'east', from: casterPath[casterPath.length - 1][0], until: costume.backAt });
+  } else {
+    // a pushing creature walks only while it steps after a hit and stands in between
     let from = 0;
-    casterWalks.forEach(([a, b]) => { phases.push({ pose: 'stand', facing: 'east', from, until: a }, { pose: 'walk', facing: 'east', from: a, until: b }); from = b; });
-    phases.push({ pose: 'stand', facing: 'east', from, until: null });
-    walker = buildCyclopediaSceneWalker({ casterCol: startCol, casterRow: 1 }, () => createCaster(), D, { phases, keys, glideMs: walk.glideMs });
-    walker.tiles.forEach((tile) => grid.appendChild(tile));
+    casterWalks.forEach(([a, b]) => { walkPhases.push({ pose: 'stand', facing: 'east', from, until: a }, { pose: 'walk', facing: 'east', from: a, until: b }); from = b; });
+    walkPhases.push({ pose: 'stand', facing: 'east', from, until: null });
   }
+  const walker = buildCyclopediaSceneWalker({ casterCol: startCol, casterRow: 1 }, () => createCaster(), D, { phases: walkPhases, keys: walkKeys, glideMs: walk.glideMs });
+  walker.tiles.forEach((tile) => grid.appendChild(tile));
   // The game's outfit sprite takes its facing from a class (north / south / east / west) and the sheet's alt text:
   // the creature faces the way it walks (east), the dummy faces the attacker.
   setCyclopediaSceneFacing(caster.tile, 'east');
   setCyclopediaSceneFacing(dummy.tile, 'west');
+  idleCyclopediaSceneCreature(dummy.tile); // a stunned / rooted / pushed creature stands: it does not walk in place
   setCyclopediaSceneWalkCycle(caster.tile, walk.glideMs);
 
   // x (in tiles) over time -> a translate animation looping with the scene.
@@ -3745,10 +4027,9 @@ function createCyclopediaPushGrid(part, createCaster) {
     { duration: D, iterations: Infinity }
   );
   track(dummy.tile, dummyPath);
-  if (charge) track(caster.tile, casterPath);
   if (dummyFlinch) animateCyclopediaFlinch(dummy.tile, D, dummyFlinch.at);
   // The stun (`stuns`, `at: 'hit'` = when the charge reaches the dummy): the game's stun bar above the dummy while it lasts (Bear's STUN_MS).
-  (part.stuns || []).forEach((st) => grid.appendChild(createCyclopediaStunBar(dummyCol, 1, D, { ...st, at: resolveCyclopediaSceneTime(st.at, 0, hitAtMs) })));
+  (part.stuns || []).forEach((st) => grid.appendChild(createCyclopediaStunBar(st.on === 'self' ? startCol : dummyCol, 1, D, { ...st, at: resolveCyclopediaSceneTime(st.at, 0, hitAtMs) }))); // `on: 'self'`: over the creature itself (the Bear's ignored stun)
   // The sleeping costume (an animated item, 2 tiles wide) replaces the creature while it hibernates: at the start tile until it
   // wakes, and again where it fell asleep after the hit. The creature itself is hidden meanwhile.
   if (costume && part.push.costume) {
@@ -3783,6 +4064,8 @@ function createCyclopediaPushGrid(part, createCaster) {
       grid.appendChild(fx);
     });
   });
+  // Blood on the floor where the dummy is hit: the Bear's charge and the Scarab's push are crits, which leave a blood POOL (item 2886) under the target (the game's `hp.bleed`: a pool on a crit or a kill, a splash otherwise).
+  hits.filter((h) => !h.onSelf).forEach((h) => addCyclopediaBloodDecal(grid, D, 2886, h.col, 1, h.at, undefined, 'red'));
   // The scene's floating numbers: 'target' = the dummy, 'self' = where the creature starts (it sleeps there and heals).
   (part.numbers || []).forEach((n) => grid.appendChild(createCyclopediaNumber(n.on === 'self' ? startCol : dummyCol, 1, D, { ...n, at: resolveCyclopediaSceneTime(n.at, 0, hitAtMs) })));
   // The creature's own cooldown bar (`cooldownBar`, from the game's class) over it, following it as it moves. The Bear's only shows while its hibernation runs (`hideWhenReady`): it fills from
@@ -3791,7 +4074,7 @@ function createCyclopediaPushGrid(part, createCaster) {
     const color = gameColor(part.cooldownBar.color) || '#6699ff';
     const fillOver = (a, b) => Math.min(1, (b - a) / part.cooldownMs);
     const segments = part.cooldownBar.hideWhenReady
-      ? (costume ? [[0, costume.until, 0, fillOver(0, costume.until)], [costume.backAt, D, 0, fillOver(costume.backAt, D)]] : [[0, D, 0, fillOver(0, D)]])
+      ? (costume ? [[0, costume.until, part.push?.sleepStartFill ?? 0, Math.min(1, (part.push?.sleepStartFill ?? 0) + fillOver(0, costume.until))], [costume.backAt, D, 0, fillOver(costume.backAt, D)]] : [[0, D, 0, fillOver(0, D)]]) // the first hibernation starts with `sleepStartFill` (1s of cooldown left)
       : [[0, D, 1, 1, hits.find((h) => !h.onSelf)?.at ?? 0]];
     segments.forEach(([from, until, startFill, endFill, castAt]) => {
       const levels = castAt === undefined ? [[from, startFill, color], [until, endFill, color]]
@@ -3837,6 +4120,7 @@ function createCyclopediaAbilityScene(scene, createCaster) {
   wrap.style.cssText = 'display:flex;flex-wrap:wrap;justify-content:center;align-items:flex-start;gap:14px;';
   const fits = [];
   const previews = [];
+  const shifts = [];
   parts.forEach((part) => {
     const group = document.createElement('div');
     group.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:4px;';
@@ -3871,6 +4155,7 @@ function createCyclopediaAbilityScene(scene, createCaster) {
       loop = loop || built;
     });
     group.appendChild(row);
+    if (loop?.startShift > 0) shifts.push({ group, D: loop.duration, S: loop.startShift }); // the loop starts with 1s of cooldown left: see `warpCyclopediaSceneStart`, done at the first show
     // The passives (the game's chips with their counters) go under the part's grid, in the layout, timed to its loop.
     if (part.apSlider && loop?.duration) group.appendChild(buildCyclopediaSceneApSlider(part.apSlider, loop.duration));
     if (part.passives && loop?.duration) group.appendChild(buildCyclopediaScenePassives(part.passives, loop.duration, loop.windows));
@@ -3893,6 +4178,8 @@ function createCyclopediaAbilityScene(scene, createCaster) {
       const img = outfit.querySelector('img.spritesheet');
       if (img) img.style.animationPlayState = play ? 'running' : 'paused';
     });
+    // the animations only exist for the page once the panel is in it: the late start (1s of cooldown left) is applied once, here
+    while (shifts.length) { const { group, D, S } = shifts.pop(); warpCyclopediaSceneStart(group, D, S); }
     const anims = wrap.getAnimations({ subtree: true });
     anims.forEach((a) => { a.pause(); a.currentTime = 0; if (play) a.play(); });
     return anims.length;
@@ -3926,7 +4213,7 @@ function attachCyclopediaAbilityScenePreview(iconFrame, getSceneData, monsterId,
   iconFrame.appendChild(hint);
 
   const createSceneCaster = (spriteId = monsterId) => {
-    if (spriteId === CYCLOPEDIA_SCENE_DUMMY_ID) {
+    if (spriteId === CYCLOPEDIA_SCENE_TREE_ID) {
       // The Dead Tree is an item-style sprite (no outfit sheet). The game's item CSS needs its own `--zoomFactor`, which the
       // scene panel does not have, so draw the 64px art as a plain centred image (64px = 2 tiles, like the other item sprites).
       const itemId = globalThis.BestiaryCombatOverrides?.findSpriteId?.('deadTree') ?? CYCLOPEDIA_SCENE_DUMMY_ITEM_ID;
@@ -3946,37 +4233,37 @@ function attachCyclopediaAbilityScenePreview(iconFrame, getSceneData, monsterId,
       tree.appendChild(img);
       return tree;
     }
-    // A creature that is an ITEM in the game (the crystals, the Lavahole): it has no outfit sheet, so draw its first item frame (the sheet's frames are stacked squares as wide as the sheet), bottom-right on
-    // its tile like the game does (a 32px item sits on the tile, a 64px one reaches one tile up and left).
-    const lookMeta = globalThis.creatureDatabase?.getMonsterById?.(spriteId)?.metadata;
+    // A creature that is an ITEM in the game (the crystals, the Lavahole, the Clot): it has no outfit sheet, so it is drawn with the game's own item markup (`sprite item id-N` > `viewport` > `spritesheet`),
+    // whose stylesheet rules crop the frame and play its idle animation (the Clot's wobble), bottom-right on its tile like the game does (a 32px item sits on the tile, a 64px one reaches one tile up and left).
+    const lookMeta = spriteId?.item ? { lookType: 'item', spriteId: spriteId.item } : globalThis.creatureDatabase?.getMonsterById?.(spriteId)?.metadata; // `{ item: id }`: a creature that is only an item sprite (the Bride's Heart)
     if (lookMeta?.lookType === 'item' && Number.isFinite(lookMeta.spriteId)) {
       const cell = CYCLOPEDIA_SCENE_LAYOUT.cell;
       const box = cell * CYCLOPEDIA_SCENE_LAYOUT.casterFill;
       const holder = document.createElement('div');
       holder.style.cssText = `position:relative;width:${box}px;height:${box}px;`;
-      const art = document.createElement('div'); // crops the sheet to its first frame
+      const art = document.createElement('div');
+      art.className = `sprite item id-${lookMeta.spriteId}`;
+      const viewport = document.createElement('div');
+      viewport.className = 'viewport';
       const img = document.createElement('img');
       img.alt = '';
-      art.appendChild(img);
+      img.className = 'spritesheet';
+      img.setAttribute('data-cropped', 'false');
+      img.style.cssText = '--cropX: 0; --cropY: 0;';
+      viewport.appendChild(img);
+      art.appendChild(viewport);
       art.setAttribute('data-ba-sprite', 'current');
       holder.appendChild(art);
-      img.onload = () => {
-        // One frame is the game's `--width` x `--height` (its item stylesheet): the sheet can hold its frames in a grid (the crystals: 4 frames of 64px in 128 x 128), not only stacked.
-        const probe = document.createElement('div');
-        probe.className = `item id-${lookMeta.spriteId}`;
-        probe.style.cssText = 'position:absolute;visibility:hidden;pointer-events:none;';
-        document.body.appendChild(probe);
-        const css = getComputedStyle(probe);
-        const frameW = parseFloat(css.getPropertyValue('--width')) || img.naturalWidth;
+      // One frame is the game's `--width` x `--height` (its item stylesheet; the sheet can hold its frames in a grid): measured once the element is in the page, then scaled to the tile and centred.
+      const place = () => {
+        const css = getComputedStyle(art);
+        const frameW = parseFloat(css.getPropertyValue('--width')) || 32;
         const frameH = parseFloat(css.getPropertyValue('--height')) || frameW;
-        probe.remove();
         const k = cell / 32;
-        const [w, h] = [frameW * k, frameH * k];
-        const shift = cyclopediaNativeCenterOffset(Math.max(w, h));
-        art.style.cssText = `position:absolute;left:calc(50% + ${shift}px);top:calc(50% + ${shift}px);width:${w}px;height:${h}px;overflow:hidden;transform:translate(-50%,-50%);`;
-        img.style.cssText = `position:absolute;left:0;top:0;width:${img.naturalWidth * k}px;height:${img.naturalHeight * k}px;max-width:none;image-rendering:pixelated;`;
+        const shift = cyclopediaNativeCenterOffset(Math.max(frameW, frameH) * k);
+        art.style.cssText = `position:absolute;left:calc(50% + ${shift}px);top:calc(50% + ${shift}px);transform:translate(-50%,-50%) scale(${k});image-rendering:pixelated;`;
       };
-      img.src = `${CYCLOPEDIA_SCENE_ASSET_BASE}/ITEM/${lookMeta.spriteId}.png`;
+      requestAnimationFrame(() => (art.isConnected ? place() : requestAnimationFrame(place)));
       return holder;
     }
     const sprite = api.ui.components.createFullMonster({
