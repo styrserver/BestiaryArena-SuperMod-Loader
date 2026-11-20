@@ -6288,7 +6288,13 @@ async function uploadBestRunsToFirebase(playerName, bestRuns, password, options 
     const season = Number(bestRuns.metadata?.season) || 1;
     await migrateLegacyFirebaseRuns(playerName);
     const path = await getBestRunsSeasonFirebasePath(playerName, season);
-    const remote = await FirebaseRunsService.get(path, 'fetch runs for delta upload', null);
+    // Only `version` and `metadata` are needed here. The full season record holds every map's encrypted
+    // runs (0.5-1 MB per player), so never download it just to decide between full and delta upload.
+    const [remoteVersion, remoteMetadata] = await Promise.all([
+      FirebaseRunsService.get(`${path}/version`, 'fetch runs version for delta upload', null),
+      FirebaseRunsService.get(`${path}/metadata`, 'fetch runs metadata for delta upload', null)
+    ]);
+    const remote = remoteVersion == null ? null : { version: remoteVersion, metadata: remoteMetadata || {} };
     const now = Date.now();
     const mapHashes = {};
     // Drop legacy entries that stored the full JSON payload instead of a short hash.

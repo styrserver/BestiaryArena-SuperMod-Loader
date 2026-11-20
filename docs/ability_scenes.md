@@ -180,4 +180,4 @@ node tools/check-scene-data.mjs            # every scene is well formed (kinds, 
 node tools/audit-scenes.mjs --from 59 --md docs/scene-audit.md   # what each class does that its scene does not
 ```
 
-The five `check-scene-data` warnings for Elf Scout, Magma Crystal and Cake Drake are intentional (the game schedules those hits just before or after the missile lands). The audit reads code, not pixels: a wrong position or timing still needs a look in the Cyclopedia. After a refactor of `creature-database.js`, run `node tools/dump-scenes.mjs before.json` and again after, then `node tools/dump-scenes.mjs --diff before.json after.json`: the scenes must be identical.
+The seven `check-scene-data` warnings for Elf Scout, Magma Crystal and Cake Drake are intentional (the game schedules those hits just before or after the missile lands). The audit reads code, not pixels: a wrong position or timing still needs a look in the Cyclopedia. After a refactor of `creature-database.js`, run `node tools/dump-scenes.mjs before.json` and again after, then `node tools/dump-scenes.mjs --diff before.json after.json`: the scenes must be identical.

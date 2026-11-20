@@ -4,6 +4,16 @@
   },
   "notes": [
     {
+      "version": "5.3.9",
+      "changes": [
+        {
+          "mod": "Mod Settings",
+          "type": "fixed",
+          "text": "Auto-uploading best runs now uses far less data."
+        }
+      ]
+    },
+    {
       "version": "5.3.8",
       "changes": [
         {
