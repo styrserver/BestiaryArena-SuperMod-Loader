@@ -169,7 +169,20 @@ function sanitizeHTML(html) {
       : 100005;
   }
 
-  function createModal({ title, width = 300, height = 'auto', content, buttons = [] }) {
+  // Open mod modals, oldest first. One document-level Escape handler closes the topmost one, like the game's own
+  // dialogs. It is installed with the first modal and lives as long as the page.
+  const openModals = [];
+  function onModalEscape(e) {
+    if (e.key !== 'Escape') return;
+    while (openModals.length && !openModals[openModals.length - 1].element.isConnected) openModals.pop();
+    const top = openModals[openModals.length - 1];
+    console.log('[BestiaryUI] Escape: ' + (top ? 'closing the top mod modal' : 'no open mod modal') + ' (defaultPrevented=' + e.defaultPrevented + ')');
+    if (!top) return;
+    openModals.pop();
+    top.close();
+  }
+
+  function createModal({ title, width = 300, height = 'auto', content, buttons = [], closeOnEscape = true }) {
     ensureStyles();
 
     const panelZIndex = getModConfigPanelZIndex();
@@ -307,6 +320,14 @@ function sanitizeHTML(html) {
     overlay.addEventListener('click', () => {
       modalObject.close();
     });
+
+    if (closeOnEscape) {
+      // capture phase: a mod's own key handler that stops propagation must not swallow the Escape
+      document.addEventListener('keydown', onModalEscape, true);
+      for (let i = openModals.length - 1; i >= 0; i--) if (!openModals[i].element.isConnected) openModals.splice(i, 1); // closed ones
+      openModals.push(modalObject);
+      console.log('[BestiaryUI] createModal "' + title + '": Escape handler armed (' + openModals.length + ' open)');
+    }
     
     return modalObject;
   }

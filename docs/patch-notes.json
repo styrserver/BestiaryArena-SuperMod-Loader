@@ -4,6 +4,26 @@
   },
   "notes": [
     {
+      "version": "5.4.1",
+      "changes": [
+        {
+          "mod": "Mod Loader",
+          "type": "changed",
+          "text": "Pressing Escape now closes mod windows, like the game's own."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "added",
+          "text": "New Toasts tab: choose which active mods may show toasts (all on by default; errors always show)."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "changed",
+          "text": "The settings window is larger."
+        }
+      ]
+    },
+    {
       "version": "5.4.0",
       "changes": [
         {

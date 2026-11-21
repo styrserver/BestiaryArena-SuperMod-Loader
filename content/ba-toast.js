@@ -23,6 +23,10 @@
  * - `duration` ms; 0 keeps the toast until dismissed through the returned handle.
  *   Clicking a toast dismisses it. Trailing '.' / '!' are stripped; a newline in the message starts a new line.
  *
+ * Muting: the player can switch a mod's toasts off in Mod Settings > Toasts. That list lives in
+ * localStorage 'ba-toast-muted' ({ ids, names }); show() drops non-error toasts whose `mod` is in `names` and
+ * returns an inert handle, so callers never need a null check. Errors always show.
+ *
  * Returns { remove(), update(message), relayout(), isOpen() }. Toasts from all mods share one stack, so they never
  * overlap. Call BAToast.clearMod(name) from a mod's cleanup() to drop its toasts and timers.
  */
@@ -40,8 +44,23 @@
   var NAME_CLASSES = { info: 'text-cooldown', success: 'text-valid', warning: 'text-boosted', error: 'text-invalid' };
   var DEFAULT_DURATION_MS = { info: 4000, success: 4000, warning: 6000, error: 7000 };
 
+  var MUTE_KEY = 'ba-toast-muted';
+  var MUTED_HANDLE = { remove: function () {}, relayout: function () {}, isOpen: function () { return false; }, update: function () {} };
+
   var entries = [];
   var lastShownAt = {};
+
+  // Mod Settings > Toasts keeps the displayed mod names of the switched-off mods here
+  function isMuted(mod, type) {
+    if (!mod || type === 'error') return false;
+    try {
+      var raw = localStorage.getItem(MUTE_KEY);
+      var parsed = raw ? JSON.parse(raw) : null;
+      return !!(parsed && Array.isArray(parsed.names) && parsed.names.indexOf(mod) !== -1);
+    } catch (error) {
+      return false;
+    }
+  }
 
   // One style for everyone: no trailing '.' or '!' (a '?' or '…' stays)
   function normalizeMessage(value) {
@@ -99,6 +118,7 @@
     if (!opts.mod) console.warn('[BAToast] toast shown without a mod name:', message);
     var type = NAME_CLASSES[opts.type] ? opts.type : 'info';
     if (!document.body) return null;
+    if (isMuted(opts.mod, type)) return MUTED_HANDLE;
 
     // Optional de-duplication: the same mod+key is shown at most once per `cooldown` ms
     if (opts.key && opts.cooldown > 0) {
@@ -236,5 +256,5 @@
     entries.slice().forEach(removeEntry);
   }
 
-  window.BAToast = { __version: 2, show: show, clearMod: clearMod, removeAll: removeAll };
+  window.BAToast = { __version: 3, show: show, clearMod: clearMod, removeAll: removeAll, isMuted: isMuted };
 })();

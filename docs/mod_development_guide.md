@@ -892,6 +892,7 @@ window.BAToast?.show({ mod: 'Raid Hunter', message: 'Starting raid', type: 'info
 - For coloured words inside a message use the game's palette classes (`text-valid` green, `text-invalid` red, `text-boosted` gold, `text-cooldown` blue, `text-dust`, `text-shiny`, `text-stamina` ...). `text-success` / `text-error` do not exist in the game CSS and render uncoloured.
 - Messages are one whole translatable string with `{placeholders}`, sentence case, no trailing punctuation, about 60 characters or fewer. Never build one from concatenated fragments.
 - Call `window.BAToast?.clearMod('<Mod Name>')` from `exports.cleanup()` to drop that mod's toasts and timers.
+- Players can switch a mod's toasts off in Mod Settings → Toasts. `BAToast.show()` drops non-error toasts whose `mod` is in the muted list (localStorage `ba-toast-muted`) and returns an inert handle, so keep using the returned handle without a null check. Errors always show. A new mod with toasts needs its entry in `TOAST_SOURCES` in `Mod_Settings.js` (locale namespace + name key, the same string you pass as `mod`).
 - `tools/check-toasts.mjs` (part of `check-all.mjs`) fails if a new file defines its own toast container; its `LEGACY` list is the set of mods still to migrate.
 
 ## Best Practices

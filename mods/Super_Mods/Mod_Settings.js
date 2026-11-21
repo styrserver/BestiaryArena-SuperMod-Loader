@@ -400,11 +400,11 @@ const GAME_CONSTANTS = {
 
 // Modal dimensions
 const MODAL_CONFIG = {
-  width: 600,
-  maxWidth: 600,
-  height: 500,
+  width: 650,
+  maxWidth: 650,
+  height: 550,
   leftColumnWidth: 140,
-  rightColumnWidth: 400,
+  rightColumnWidth: 450,
   viewportPadding: 16,
   minWidth: 280,
   minHeight: 280
@@ -824,6 +824,60 @@ const BESTIARY_SEARCH_INPUT_ID = 'monster-input-id';
 
 // Use shared translation system via API
 const t = (key) => api.i18n.t(key);
+
+// Toast mute list (Mod Settings > Toasts). content/ba-toast.js reads the same localStorage key: it filters by
+// the displayed mod name, so the names are re-resolved from the ids every load (the language may have changed).
+const TOAST_MUTE_KEY = 'ba-toast-muted';
+// [locale namespace, key of the mod name, registry name]: the name is the same string the mod passes as `mod` to
+// BAToast.show; the tab only lists mods whose registry entry is enabled (null = always on).
+const TOAST_SOURCES = [
+  ['automator', 'modName', 'Official Mods/Bestiary Automator.js'],
+  ['autoseller', 'modName', 'Super Mods/Autoseller.js'],
+  ['awakenTracker', 'modName', 'Super Mods/Awaken Tracker.js'],
+  ['battleHelper', 'modName', 'Super Mods/Battle Helper.js'],
+  ['betterBoostedMaps', 'modName', 'Super Mods/Better Boosted Maps.js'],
+  ['betterSetups', 'modName', 'Super Mods/Better Setups.js'],
+  ['betterTasker', 'modName', 'Super Mods/Better Tasker.js'],
+  ['betterYasir', 'modName', 'Super Mods/Better Yasir.js'],
+  ['betterUI', 'modName', null],
+  ['boardAnalyzer', 'modName', 'Official Mods/Board Analyzer.js'],
+  ['challenges', 'modName', 'OT Mods/Challenges.js'],
+  ['guilds', 'modName', 'OT Mods/Guilds.js'],
+  ['highscore', 'modName', 'Official Mods/Highscore Improvements.js'],
+  ['huntAnalyzer', 'buttonText', 'Super Mods/Hunt Analyzer.js'],
+  ['manualRunner', 'modName', 'Super Mods/Manual Runner.js'],
+  ['mapEditor', 'modName', 'OT Mods/Map Editor.js'],
+  ['quests', 'modName', 'OT Mods/Quests.js'],
+  ['raidHunter', 'modName', 'Super Mods/Raid Hunter.js'],
+  ['setupManager', 'modName', 'Official Mods/Setup Manager.js'],
+  ['staminaOptimizer', 'modName', 'Super Mods/Stamina Optimizer.js'],
+  ['teamCopier', 'modName', 'Official Mods/Team Copier.js'],
+  ['welcome', 'modName', null]
+];
+const toastSourceName = (id) => {
+  const source = TOAST_SOURCES.find(([ns]) => ns === id);
+  return source ? t(`mods.${source[0]}.${source[1]}`) : '';
+};
+
+function readMutedToastIds() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(TOAST_MUTE_KEY) || 'null');
+    return Array.isArray(parsed?.ids) ? parsed.ids : [];
+  } catch (error) {
+    return [];
+  }
+}
+
+/** Saves the muted ids plus their current display names (what BAToast filters on). */
+function writeMutedToastIds(ids) {
+  const known = ids.filter((id) => TOAST_SOURCES.some(([ns]) => ns === id));
+  try {
+    if (known.length) localStorage.setItem(TOAST_MUTE_KEY, JSON.stringify({ ids: known, names: known.map(toastSourceName) }));
+    else localStorage.removeItem(TOAST_MUTE_KEY);
+  } catch (error) {
+    console.error('[Mod Settings] Could not save the toast mute list:', error);
+  }
+}
 
 // Helper for dynamic translation with placeholders
 const tReplace = (key, replacements) => {
@@ -9740,6 +9794,7 @@ function showSettingsModal() {
       { id: 'vip-list', label: t('mods.betterUI.menuVipList'), selected: false, requiresMod: true },
       { id: 'ot-mods', label: t('mods.betterUI.menuOtMods'), selected: false, requiresMod: true },
       { id: 'mod-coordination', label: t('mods.betterUI.menuModCoordination'), selected: false },
+      { id: 'toasts', label: t('mods.betterUI.menuToasts'), selected: false },
       { id: 'advanced', label: t('mods.betterUI.menuAdvanced'), selected: false },
       { id: 'backup', label: t('mods.betterUI.menuBackup'), selected: false }
     ];
@@ -10694,6 +10749,58 @@ function showSettingsModal() {
             modSettingsModalCoordinationUnsubscribers = [unsubscribeEnabled, unsubscribeActive];
           }
         }, 0);
+      } else if (categoryId === 'toasts') {
+        const toastsContent = document.createElement('div');
+        const description = document.createElement('p');
+        description.style.cssText = 'color: #a6adc8; margin: 0 0 10px 0; font-size: 13px;';
+        description.textContent = t('mods.betterUI.toastsDescription');
+        const bulkRow = document.createElement('div');
+        bulkRow.style.cssText = 'display: flex; gap: 8px; margin-bottom: 12px;';
+        const list = document.createElement('div');
+        list.style.cssText = 'display: flex; flex-direction: column; gap: 8px;';
+        const boxes = [];
+        const shownIds = new Set();
+        const saveToastChoices = () => {
+          const before = new Set(readMutedToastIds());
+          // a disabled mod has no checkbox: keep its saved choice for when it is enabled again
+          const muted = [...before].filter((id) => !shownIds.has(id))
+            .concat(boxes.filter((box) => !box.checked).map((box) => box.dataset.toastSource));
+          writeMutedToastIds(muted);
+          // a mod just switched off loses the toasts it still has on screen
+          muted.filter((id) => !before.has(id)).forEach((id) => window.BAToast?.clearMod(toastSourceName(id)));
+        };
+        TOAST_SOURCES.filter(([, , registryName]) => !registryName || isLocalModEnabledInRegistry(registryName))
+          .map(([ns]) => ({ id: ns, name: toastSourceName(ns) }))
+          .sort((a, b) => a.name.localeCompare(b.name))
+          .forEach(({ id, name }) => {
+            const label = document.createElement('label');
+            label.style.cssText = 'display: flex; align-items: center; gap: 10px; cursor: pointer;';
+            const box = document.createElement('input');
+            box.type = 'checkbox';
+            box.dataset.toastSource = id;
+            box.style.transform = 'scale(1.2)';
+            box.checked = !readMutedToastIds().includes(id);
+            box.addEventListener('change', saveToastChoices);
+            const text = document.createElement('span');
+            text.textContent = name;
+            label.append(box, text);
+            list.appendChild(label);
+            boxes.push(box);
+            shownIds.add(id);
+          });
+        [['toastsShowAll', true], ['toastsHideAll', false]].forEach(([key, checked]) => {
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.textContent = t(`mods.betterUI.${key}`);
+          applyAdvancedActionButtonStyle(button, { variant: 'gray' });
+          button.addEventListener('click', () => {
+            boxes.forEach((box) => { box.checked = checked; });
+            saveToastChoices();
+          });
+          bulkRow.appendChild(button);
+        });
+        toastsContent.append(description, bulkRow, list);
+        rightColumn.appendChild(toastsContent);
       } else if (categoryId === 'backup') {
         const backupContent = document.createElement('div');
         backupContent.innerHTML = `
@@ -21098,6 +21205,7 @@ function initBetterUI() {
   initState.inProgress = true;
   try {
     console.log('[Mod Settings] Starting initialization');
+    writeMutedToastIds(readMutedToastIds()); // re-resolve the muted display names in the current language
     
     const features = [
       { name: 'Stamina Timer', enabled: config.showStaminaTimer, init: initStaminaTimer },

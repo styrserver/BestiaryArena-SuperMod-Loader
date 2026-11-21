@@ -1077,6 +1077,18 @@ if (typeof browserAPI === 'undefined') {
     return data;
   }
 
+  // Open fallback modals (showModal below), oldest first; the capture-phase Escape handler closes the top-most one.
+  const modSimpleModals = [];
+  function onSimpleModalEscape(e) {
+    if (e.key !== 'Escape') return;
+    while (modSimpleModals.length && !modSimpleModals[modSimpleModals.length - 1].element.isConnected) modSimpleModals.pop();
+    const top = modSimpleModals[modSimpleModals.length - 1];
+    console.log('[BestiaryModAPI] Escape: ' + (top ? 'closing the top mod modal' : 'no open mod modal') + ' (defaultPrevented=' + e.defaultPrevented + ')');
+    if (!top) return;
+    modSimpleModals.pop();
+    top.close();
+  }
+
   window.BestiaryModAPI = {
     showModal: function(options) {
       // Only remove prior *mod* overlays/dialogs. Never detach game React/Radix dialogs
@@ -1252,7 +1264,13 @@ if (typeof browserAPI === 'undefined') {
       
       // Add click event to overlay to close the modal
       overlay.addEventListener('click', closeModal);
-      
+
+      // Escape closes the top-most mod modal, like the game's own dialogs
+      for (let i = modSimpleModals.length - 1; i >= 0; i--) if (!modSimpleModals[i].element.isConnected) modSimpleModals.splice(i, 1); // closed ones
+      modSimpleModals.push({ element: modalEl, close: closeModal });
+      document.addEventListener('keydown', onSimpleModalEscape, true);
+      console.log('[BestiaryModAPI] showModal "' + (title || '') + '": Escape handler armed (' + modSimpleModals.length + ' open)');
+
       return closeModal;
     },
     
