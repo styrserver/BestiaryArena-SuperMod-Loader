@@ -485,6 +485,37 @@ function injectScript(file) {
   return script; // Return the script element
 }
 
+// Scripts the page may request after startup (see local_mods.js ensureModScripts). Only these can be
+// injected on demand; anything else is refused.
+const ON_DEMAND_CONTENT_SCRIPTS = new Set([
+  'content/custom-battles.js',
+  'content/event-competition.js'
+]);
+const onDemandScriptLoads = new Map();
+
+function injectOnDemandScript(file) {
+  if (!ON_DEMAND_CONTENT_SCRIPTS.has(file)) {
+    return Promise.reject(new Error('Script is not injectable on demand: ' + file));
+  }
+  if (!onDemandScriptLoads.has(file)) {
+    onDemandScriptLoads.set(file, new Promise((resolve, reject) => {
+      const script = injectScript(file);
+      const previousOnload = script.onload;
+      const previousOnerror = script.onerror;
+      script.onload = function () {
+        previousOnload?.call(this);
+        resolve();
+      };
+      script.onerror = function (error) {
+        previousOnerror?.call(this, error);
+        onDemandScriptLoads.delete(file);
+        reject(new Error('Failed to load ' + file));
+      };
+    }));
+  }
+  return onDemandScriptLoads.get(file);
+}
+
 // Directly inject important extension URLs into the page
 function injectExtensionURLs() {
   console.log('Injecting extension URLs into page');
@@ -554,42 +585,26 @@ clientScript.onload = function() {
         if (window.ModCoordination) {
           console.log('[Injector] ModCoordination verified and ready');
           clearInterval(checkModCoordination);
-          // Load custom battles system before local_mods.js
-          injectCustomBattles();
+          // Load the shared toast helper before local_mods.js. custom-battles.js and event-competition.js
+          // are no longer part of the startup chain: local_mods.js asks for them (injectContentScript)
+          // right before it runs a mod that needs them.
+          injectToastHelper();
         } else if (retries >= 10) {
           clearInterval(checkModCoordination);
           // Continue anyway - the script may have loaded in a different context
-          injectCustomBattles();
+          injectToastHelper();
         }
       }, 50);
       
-      function injectCustomBattles() {
-        console.log('[Injector] Loading custom-battles.js');
-        const customBattlesScript = injectScript('content/custom-battles.js');
-        customBattlesScript.onload = function() {
-          console.log('[Injector] custom-battles.js script element loaded');
-          // Note: Content scripts run in isolated context, so window.CustomBattles
-          // may not be visible here, but mods (which run in page context) will be able to see it.
-          // The script IS executing in the page context as evidenced by the logs.
-          console.log('[Injector] custom-battles.js loaded - mods will be able to access window.CustomBattles');
-          injectEventCompetition();
-        };
-        customBattlesScript.onerror = function(error) {
-          console.error('[Injector] ✗ ERROR loading custom-battles.js:', error);
-          // Continue anyway
-          injectEventCompetition();
-        };
-      }
-
-      function injectEventCompetition() {
-        console.log('[Injector] Loading event-competition.js');
-        const eventCompetitionScript = injectScript('content/event-competition.js');
-        eventCompetitionScript.onload = function() {
-          console.log('[Injector] event-competition.js loaded - mods will be able to access window.EventCompetition');
+      function injectToastHelper() {
+        console.log('[Injector] Loading ba-toast.js');
+        const toastScript = injectScript('content/ba-toast.js');
+        toastScript.onload = function() {
+          console.log('[Injector] ba-toast.js loaded - mods will be able to access window.BAToast');
           injectLocalMods();
         };
-        eventCompetitionScript.onerror = function(error) {
-          console.error('[Injector] ✗ ERROR loading event-competition.js:', error);
+        toastScript.onerror = function(error) {
+          console.error('[Injector] ✗ ERROR loading ba-toast.js:', error);
           injectLocalMods();
         };
       }
@@ -700,6 +715,16 @@ window.addEventListener('message', function(event) {
             postExtensionBridgeResponse(event.data.id, response);
           });
         });
+      return;
+    }
+
+    if (message.action === 'injectContentScript') {
+      if (!IS_TOP_FRAME) {
+        return;
+      }
+      injectOnDemandScript(message.file)
+        .then(() => postExtensionBridgeResponse(event.data.id, { success: true }))
+        .catch((error) => postExtensionBridgeResponse(event.data.id, { success: false, error: String(error?.message || error) }));
       return;
     }
 

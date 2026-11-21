@@ -53,7 +53,6 @@ const STAMINA_SAFETY_POLL_MS = STAMINA_REGEN_MS;
 // Fixed start delay — same contract as Raid Hunter / Better Tasker / Awaken Farmer / Stamina Optimizer
 const DEFAULT_START_DELAY = 3; // seconds
 const COORDINATION_RESUME_DELAY_MS = 1000; // after a higher-priority mod yields
-const START_TOAST_COOLDOWN_MS = 10000;
 
 // Stamina constants
 const DEFAULT_STAMINA_COST = 30;
@@ -182,10 +181,6 @@ function bbmGetBoostedEquipmentForMap(roomId, mapName) {
 function bbmGetAllBoostedEquipmentNames() {
     const idx = bbmGetBoostedMapToEquipmentIndex();
     return [...idx.boostedEquipmentNames].sort((a, b) => a.localeCompare(b));
-}
-
-function bbmIsBoostedEquipmentName(name) {
-    return bbmGetBoostedMapToEquipmentIndex().boostedEquipmentNames.has(name);
 }
 
 /** Equipment tab: only HARDCODED_BOOSTED_MAP entries with map lists are selectable. */
@@ -1155,99 +1150,11 @@ function clearModalsWithEsc(count = 1) {
 }
 
 function showToast(message, duration = 5000) {
-    try {
-        // Use custom toast implementation (same as welcome.js)
-        // Get or create the main toast container
-        let mainContainer = document.getElementById('bbm-toast-container');
-        if (!mainContainer) {
-            mainContainer = document.createElement('div');
-            mainContainer.id = 'bbm-toast-container';
-            mainContainer.style.cssText = `
-                position: fixed;
-                z-index: 9999;
-                inset: 16px 16px 64px;
-                pointer-events: none;
-            `;
-            document.body.appendChild(mainContainer);
-        }
-        
-        // Count existing toasts to calculate stacking position
-        const existingToasts = mainContainer.querySelectorAll('.toast-item');
-        const stackOffset = existingToasts.length * 46;
-        
-        // Create the flex container for this specific toast
-        const flexContainer = document.createElement('div');
-        flexContainer.className = 'toast-item';
-        flexContainer.style.cssText = `
-            left: 0px;
-            right: 0px;
-            display: flex;
-            position: absolute;
-            transition: 230ms cubic-bezier(0.21, 1.02, 0.73, 1);
-            transform: translateY(-${stackOffset}px);
-            bottom: 0px;
-            justify-content: flex-end;
-        `;
-        
-        // Create toast button
-        const toast = document.createElement('button');
-        toast.className = 'non-dismissable-dialogs shadow-lg animate-in fade-in zoom-in-95 slide-in-from-top lg:slide-in-from-bottom';
-        
-        // Create widget structure
-        const widgetTop = document.createElement('div');
-        widgetTop.className = 'widget-top h-2.5';
-        
-        const widgetBottom = document.createElement('div');
-        widgetBottom.className = 'widget-bottom pixel-font-16 flex items-center gap-2 px-2 py-1 text-whiteHighlight';
-        
-        // Add icon (map icon for boosted maps)
-        const iconImg = document.createElement('img');
-        iconImg.alt = 'map';
-        iconImg.src = 'https://bestiaryarena.com/assets/icons/map.png';
-        iconImg.className = 'pixelated';
-        iconImg.style.cssText = 'width: 16px; height: 16px;';
-        widgetBottom.appendChild(iconImg);
-        
-        // Add message
-        const messageDiv = document.createElement('div');
-        messageDiv.className = 'text-left';
-        messageDiv.textContent = message;
-        widgetBottom.appendChild(messageDiv);
-        
-        // Assemble toast
-        toast.appendChild(widgetTop);
-        toast.appendChild(widgetBottom);
-        flexContainer.appendChild(toast);
-        mainContainer.appendChild(flexContainer);
-        
-        console.log(`[Better Boosted Maps] Toast shown: ${message}`);
-        
-        // Auto-remove after duration
-        setTimeout(() => {
-            if (flexContainer && flexContainer.parentNode) {
-                flexContainer.parentNode.removeChild(flexContainer);
-                
-                // Update positions of remaining toasts
-                const toasts = mainContainer.querySelectorAll('.toast-item');
-                toasts.forEach((toast, index) => {
-                    const offset = index * 46;
-                    toast.style.transform = `translateY(-${offset}px)`;
-                });
-            }
-        }, duration);
-        
-    } catch (error) {
-        console.error('[Better Boosted Maps] Error showing toast:', error);
-    }
+    window.BAToast?.show({ mod: t('mods.betterBoostedMaps.modName'), message, duration });
 }
 
 function showBoostedMapStartToast(isFallback = false) {
-    const now = Date.now();
-    if (now - lastStartToastAt < START_TOAST_COOLDOWN_MS) {
-        return;
-    }
-    lastStartToastAt = now;
-    showToast(t(isFallback ? 'mods.betterBoostedMaps.fallbackStartingToast' : 'mods.betterBoostedMaps.startingToast'));
+    window.BAToast?.show({ mod: t('mods.betterBoostedMaps.modName'), message: t(isFallback ? 'mods.betterBoostedMaps.fallbackStartingToast' : 'mods.betterBoostedMaps.startingToast'), key: 'start', cooldown: 10000 });
 }
 
 function createSelectAllNoneButtons(idPrefix, scrollContainer) {
@@ -1932,6 +1839,7 @@ function toggleBoostedMaps() {
         }, 3000); // 3 second delay
     } else {
         console.log('[Better Boosted Maps] Disabled - cleaning up coordination');
+        restoreBestiaryAutomatorSettings();
         
         // Update coordination system state
         if (window.ModCoordination) {
@@ -5635,10 +5543,50 @@ function createStaminaMonitoringCallback(logPrefix, successMessage) {
 }
 
 // Bestiary Automator integration
+// Values the player had before this mod switched them on, so turning the mod off (or disabling it) puts the
+// player's own choice back instead of leaving Auto-refill / Faster autoplay running.
+const automatorBaseline = {};
+
+function readAutomatorConfig() {
+    const automator = window.bestiaryAutomator;
+    if (typeof automator?.getConfig === 'function') return automator.getConfig();
+    try {
+        return JSON.parse(localStorage.getItem('bestiary-automator-config') || 'null');
+    } catch (_) {
+        return null;
+    }
+}
+
+function rememberAutomatorBaseline(key) {
+    if (key in automatorBaseline) return;
+    const current = readAutomatorConfig();
+    if (current) automatorBaseline[key] = current[key] === true;
+}
+
+function restoreBestiaryAutomatorSettings() {
+    const keys = Object.keys(automatorBaseline);
+    if (!keys.length) return;
+    try {
+        const automator = findMod('bestiaryAutomator');
+        const current = readAutomatorConfig();
+        keys.forEach((key) => {
+            const wasEnabled = automatorBaseline[key] === true;
+            delete automatorBaseline[key];
+            // Leave it alone when the player already changed it themselves
+            if (!automator?.updateConfig || current?.[key] === false) return;
+            automator.updateConfig({ [key]: wasEnabled });
+            console.log('[Better Boosted Maps] Restored Bestiary Automator ' + key + ' to ' + wasEnabled);
+        });
+    } catch (error) {
+        console.error('[Better Boosted Maps] Error restoring Bestiary Automator settings:', error);
+    }
+}
+
 function enableBestiaryAutomatorStaminaRefill() {
     try {
         const automator = findMod('bestiaryAutomator');
         if (automator?.updateConfig) {
+            rememberAutomatorBaseline('autoRefillStamina');
             automator.updateConfig({ autoRefillStamina: true });
             console.log('[Better Boosted Maps] Bestiary Automator stamina refill enabled');
             return true;
@@ -5655,6 +5603,7 @@ function enableBestiaryAutomatorFasterAutoplay() {
     try {
         const automator = findMod('bestiaryAutomator');
         if (automator?.updateConfig) {
+            rememberAutomatorBaseline('fasterAutoplay');
             automator.updateConfig({ fasterAutoplay: true });
             console.log('[Better Boosted Maps] Bestiary Automator faster autoplay enabled');
             return true;
@@ -5935,7 +5884,6 @@ function init() {
     console.log('[Better Boosted Maps] Initialized - waiting for shared boot-ready signal');
 }
 
-let lastStartToastAt = 0;
 let bootReadyUnsubscribe = null;
 
 function teardownBootGrace() {
@@ -6050,6 +5998,8 @@ context.exports = {
     getEquipmentRuleAutomationSettingsForBoostedMap: getEquipmentRuleAutomationSettingsForBoostedMap,
     cleanup: () => {
         console.log('[Better Boosted Maps] Cleaning up...');
+        restoreBestiaryAutomatorSettings();
+        window.BAToast?.clearMod(t('mods.betterBoostedMaps.modName'));
         teardownBootGrace();
         
         // Cleanup daily subscription

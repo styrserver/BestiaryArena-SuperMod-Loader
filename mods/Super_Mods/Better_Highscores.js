@@ -923,9 +923,6 @@
       id: 'better-highscores-tbl-modal',
       stylesId: 'better-highscores-tbl-styles'
     },
-    toast: {
-      containerId: 'better-highscores-tbl-toast-container'
-    },
     countdownToast: {
       maxDays: 7
     }

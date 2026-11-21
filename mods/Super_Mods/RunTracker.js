@@ -31,7 +31,6 @@ const PROFILE_PAGE_DATA_TIMEOUT = 8000;
 const PROFILE_PAGE_DATA_URL = 'https://bestiaryarena.com/api/trpc/serverSide.profilePageData';
 
 // Debounce times
-const RUN_DEBOUNCE_TIME = 2000; // 2 seconds
 const NETWORK_DEBOUNCE_TIME = 1000; // 1 second
 
 // =======================

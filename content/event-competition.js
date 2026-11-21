@@ -33,7 +33,6 @@ if (window.EventCompetition) {
   };
 
   const DEFAULT_TOAST = {
-    containerId: 'event-competition-toast-container',
     durationMs: 10000
   };
 
@@ -2169,104 +2168,36 @@ async function buildTblReplayStringWithRetry(serverResults, floor, setup, maxAtt
   return '';
 }
 
-function getTblToastContainer() {
-  if (typeof document === 'undefined') {
-    return null;
-  }
-  let container = document.getElementById(cfg.toast.containerId);
-  if (!container) {
-    container = document.createElement('div');
-    container.id = cfg.toast.containerId;
-    container.style.cssText = 'position: fixed; z-index: 9999; inset: 16px 16px 64px; pointer-events: none;';
-    document.body.appendChild(container);
-  }
-  return container;
-}
-
-function updateTblToastPositions(container) {
-  if (!container) {
-    return;
-  }
-  container.querySelectorAll('.tbl-event-toast-item').forEach((toast, index) => {
-    toast.style.transform = `translateY(-${index * 46}px)`;
-  });
-}
-
 function showTblEventToast(message, options = {}) {
   const rawMessage = message != null && message !== '' ? String(message) : '';
   if (!rawMessage) {
     return;
   }
-  const useHtml = options.html === true || hasTblEventHighlightTags(rawMessage);
-
-  try {
-    const container = getTblToastContainer();
-    if (!container) {
-      return;
-    }
-
-    const duration = typeof options.duration === 'number' && options.duration > 0
-      ? options.duration
-      : cfg.toast.durationMs;
-    const existingToasts = container.querySelectorAll('.tbl-event-toast-item');
-    const stackOffset = existingToasts.length * 46;
-    const flexContainer = document.createElement('div');
-    flexContainer.className = 'tbl-event-toast-item';
-    flexContainer.style.cssText = `display: flex; position: absolute; transition: 230ms cubic-bezier(0.21, 1.02, 0.73, 1); transform: translateY(-${stackOffset}px); bottom: 0px; right: 0px; justify-content: flex-end; pointer-events: none; width: max-content; max-width: 100%;`;
-
-    const toast = document.createElement('button');
-    toast.type = 'button';
-    toast.className = 'non-dismissable-dialogs shadow-lg animate-in fade-in zoom-in-95 slide-in-from-top lg:slide-in-from-bottom';
-    toast.style.pointerEvents = 'auto';
-
-    const widgetTop = document.createElement('div');
-    widgetTop.className = 'widget-top h-2.5';
-    const widgetBottom = document.createElement('div');
-    widgetBottom.className = 'widget-bottom pixel-font-16 flex items-center gap-2 px-2 py-1 text-whiteHighlight';
-
-    const messageDiv = document.createElement('div');
-    messageDiv.className = 'text-left';
-    messageDiv.style.flex = '1 1 auto';
-    if (rawMessage.indexOf('\n') !== -1) {
-      messageDiv.style.whiteSpace = 'pre-line';
-    }
-    if (useHtml) {
-      messageDiv.innerHTML = formatTblEventHighlightHtml(rawMessage);
-    } else {
-      if (options.messageColor) {
-        messageDiv.style.color = options.messageColor;
-      }
-      messageDiv.textContent = rawMessage.replace(/</g, '&lt;');
-    }
-    widgetBottom.appendChild(messageDiv);
-
-    toast.appendChild(widgetTop);
-    toast.appendChild(widgetBottom);
-    flexContainer.appendChild(toast);
-    container.appendChild(flexContainer);
-
-    const removeToast = () => {
-      if (flexContainer.parentNode) {
-        flexContainer.parentNode.removeChild(flexContainer);
-        updateTblToastPositions(container);
-      }
-    };
-
-    toast.addEventListener('click', () => {
-      removeToast();
-      if (typeof options.onClick === 'function') {
+  const duration = typeof options.duration === 'number' && options.duration > 0
+    ? options.duration
+    : cfg.toast.durationMs;
+  let content;
+  if (options.html === true || hasTblEventHighlightTags(rawMessage)) {
+    const template = document.createElement('template');
+    template.innerHTML = formatTblEventHighlightHtml(rawMessage);
+    content = template.content;
+  } else {
+    content = document.createElement('span');
+    content.textContent = rawMessage;
+    if (options.messageColor) content.style.color = options.messageColor;
+  }
+  window.BAToast?.show({
+    mod: tEvent('ModName'),
+    message: content,
+    duration,
+    onClick: typeof options.onClick === 'function'
+      ? () => {
         Promise.resolve(options.onClick()).catch((error) => {
           console.warn(`${logPrefix} Toast click action failed:`, error);
         });
       }
-    });
-    if (typeof options.onClick === 'function') {
-      toast.style.cursor = 'pointer';
-    }
-    scheduleTimeout(removeToast, duration);
-  } catch (error) {
-    console.warn(`${logPrefix} Toast failed:`, error);
-  }
+      : undefined
+  });
 }
 
 function getTblEventRaidEntry() {
@@ -2819,13 +2750,7 @@ function removeTblBoardSubscription() {
 }
 
 function cleanupTblToastContainer() {
-  if (typeof document === 'undefined') {
-    return;
-  }
-  const container = document.getElementById(cfg.toast.containerId);
-  if (container) {
-    container.remove();
-  }
+  window.BAToast?.clearMod(tEvent('ModName'));
 }
 
 function appendTblSelectedFloorUserEntry(section, floor, yourTicks, youLead) {
@@ -6868,7 +6793,6 @@ function cleanupTblFloorLeague() {
   // is disabled (so the full EventCompetition adapter never registers).
   // ---------------------------------------------------------------------------
   const EVENT_NUDGE_TOAST = {
-    containerId: 'event-competition-nudge-toast-container',
     durationMs: 14000,
     pollIntervalMs: 2000,
     startupGraceMs: 2500
@@ -6878,6 +6802,8 @@ function cleanupTblFloorLeague() {
     {
       id: 'tbl-wcfield',
       roomId: 'wcfield',
+      modNameKey: 'mods.betterUI.tblLeagueModName',
+      modName: 'Tibia Ball League',
       i18nKey: 'mods.betterUI.tblLeagueEventNeedsHighscoresToast',
       fallbackMessage:
         'Event competition [[green]]live[[/green]] for {mapName}!\nEnable [[yellow]]Better Highscores[[/yellow]] to participate.'
@@ -7002,79 +6928,18 @@ function cleanupTblFloorLeague() {
     return null;
   }
 
-  function getNudgeToastContainer() {
-    if (typeof document === 'undefined') {
-      return null;
-    }
-    let container = document.getElementById(EVENT_NUDGE_TOAST.containerId);
-    if (!container) {
-      container = document.createElement('div');
-      container.id = EVENT_NUDGE_TOAST.containerId;
-      container.style.cssText = 'position: fixed; z-index: 9999; inset: 16px 16px 64px; pointer-events: none;';
-      document.body.appendChild(container);
-    }
-    return container;
-  }
-
-  function updateNudgeToastPositions(container) {
-    if (!container) {
-      return;
-    }
-    container.querySelectorAll('.event-competition-nudge-toast-item').forEach((toast, index) => {
-      toast.style.transform = `translateY(-${index * 46}px)`;
-    });
-  }
-
-  function showEventNeedsHighscoresToast(message) {
+  function showEventNeedsHighscoresToast(message, eventDef) {
     const rawMessage = message != null && message !== '' ? String(message) : '';
     if (!rawMessage) {
       return;
     }
-    try {
-      const container = getNudgeToastContainer();
-      if (!container) {
-        return;
-      }
-      const existingToasts = container.querySelectorAll('.event-competition-nudge-toast-item');
-      const stackOffset = existingToasts.length * 46;
-      const flexContainer = document.createElement('div');
-      flexContainer.className = 'event-competition-nudge-toast-item';
-      flexContainer.style.cssText = `display: flex; position: absolute; transition: 230ms cubic-bezier(0.21, 1.02, 0.73, 1); transform: translateY(-${stackOffset}px); bottom: 0px; right: 0px; justify-content: flex-end; pointer-events: none; width: max-content; max-width: 100%;`;
-
-      const toast = document.createElement('button');
-      toast.type = 'button';
-      toast.className = 'non-dismissable-dialogs shadow-lg animate-in fade-in zoom-in-95 slide-in-from-top lg:slide-in-from-bottom';
-      toast.style.pointerEvents = 'auto';
-      toast.style.cursor = 'pointer';
-
-      const widgetTop = document.createElement('div');
-      widgetTop.className = 'widget-top h-2.5';
-      const widgetBottom = document.createElement('div');
-      widgetBottom.className = 'widget-bottom pixel-font-16 flex items-center gap-2 px-2 py-1 text-whiteHighlight';
-
-      const messageDiv = document.createElement('div');
-      messageDiv.className = 'text-left';
-      messageDiv.style.flex = '1 1 auto';
-      messageDiv.style.whiteSpace = 'pre-line';
-      messageDiv.innerHTML = formatNudgeHighlightHtml(rawMessage);
-      widgetBottom.appendChild(messageDiv);
-
-      toast.appendChild(widgetTop);
-      toast.appendChild(widgetBottom);
-      flexContainer.appendChild(toast);
-      container.appendChild(flexContainer);
-
-      const removeToast = () => {
-        if (flexContainer.parentNode) {
-          flexContainer.parentNode.removeChild(flexContainer);
-          updateNudgeToastPositions(container);
-        }
-      };
-      toast.addEventListener('click', removeToast);
-      setTimeout(removeToast, EVENT_NUDGE_TOAST.durationMs);
-    } catch (error) {
-      console.warn('[EventCompetition] Nudge toast failed:', error);
-    }
+    const template = document.createElement('template');
+    template.innerHTML = formatNudgeHighlightHtml(rawMessage);
+    window.BAToast?.show({
+      mod: translateNudge(eventDef.modNameKey, null, eventDef.modName),
+      message: template.content,
+      duration: EVENT_NUDGE_TOAST.durationMs
+    });
   }
 
   function maybeShowEventNeedsHighscoresNudge(eventDef) {
@@ -7109,7 +6974,7 @@ function cleanupTblFloorLeague() {
       eventDef.fallbackMessage.replace(/\{mapName\}/g, mapName)
     );
     nudgeState.shownForLiveKey.set(eventDef.id, liveKey);
-    showEventNeedsHighscoresToast(message);
+    showEventNeedsHighscoresToast(message, eventDef);
   }
 
   function updateEventNeedsHighscoresNudges() {

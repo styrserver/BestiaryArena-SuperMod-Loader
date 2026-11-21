@@ -53,9 +53,6 @@ const BATTLE_HELPER_STATUS_COLORS = {
   progress: '#fbbf24'
 };
 const BATTLE_HELPER_FETCH_MIN_INTERVAL_MS = 400;
-const BATTLE_HELPER_TOAST_STACK_OFFSET_PX = 46;
-const BATTLE_HELPER_TOAST_TRANSITION = '230ms cubic-bezier(0.21, 1.02, 0.73, 1)';
-const BATTLE_HELPER_TOAST_CONTAINER_ID = 'battle-helper-toast-container';
 const BATTLE_HELPER_PROFILE_URL_BASE = 'https://bestiaryarena.com/profile/';
 
 const FIREBASE_URL = 'https://vip-list-messages-default-rtdb.europe-west1.firebasedatabase.app';
@@ -1375,9 +1372,7 @@ function abortHelpBoardInFlightOperations() {
 }
 
 function removeBattleHelperToastContainer() {
-  try {
-    document.getElementById(BATTLE_HELPER_TOAST_CONTAINER_ID)?.remove();
-  } catch (_) { /* ignore */ }
+  window.BAToast?.clearMod(t('mods.battleHelper.modName'));
 }
 
 function syncPublishSetupButtons() {
@@ -1613,83 +1608,9 @@ function restoreOriginalArsenal() {
 // =======================
 // 6.5 Toast
 // =======================
-function getBattleHelperToastContainer() {
-  if (typeof document === 'undefined') return null;
-  let container = document.getElementById(BATTLE_HELPER_TOAST_CONTAINER_ID);
-  if (!container) {
-    container = document.createElement('div');
-    container.id = BATTLE_HELPER_TOAST_CONTAINER_ID;
-    document.body.appendChild(container);
-  }
-  container.style.cssText = 'position: fixed; z-index: 10050; inset: 16px 16px 64px; pointer-events: none;';
-  return container;
-}
-
-function updateBattleHelperToastPositions(container) {
-  if (!container) return;
-  const toasts = container.querySelectorAll('.battle-helper-toast-item');
-  toasts.forEach((toast, index) => {
-    toast.style.transform = `translateY(-${index * BATTLE_HELPER_TOAST_STACK_OFFSET_PX}px)`;
-  });
-}
-
-function createBattleHelperToastFlexContainer(container, extraClass = '') {
-  const stackOffset = container.querySelectorAll('.battle-helper-toast-item').length
-    * BATTLE_HELPER_TOAST_STACK_OFFSET_PX;
-  const flexContainer = document.createElement('div');
-  flexContainer.className = `battle-helper-toast-item${extraClass ? ` ${extraClass}` : ''}`;
-  flexContainer.style.cssText = `display: flex; position: absolute; transition: ${BATTLE_HELPER_TOAST_TRANSITION}; transform: translateY(-${stackOffset}px); bottom: 0px; left: 0px; right: 0px; justify-content: flex-end; pointer-events: none;`;
-  return flexContainer;
-}
-
-function createBattleHelperToastChrome(options = {}) {
-  const { role = 'status', interactive = false } = options;
-  const toast = document.createElement('div');
-  toast.className = 'non-dismissable-dialogs shadow-lg animate-in fade-in zoom-in-95 slide-in-from-top lg:slide-in-from-bottom';
-  toast.setAttribute('role', role);
-  if (interactive) {
-    toast.style.pointerEvents = 'auto';
-    toast.style.cursor = 'default';
-  }
-  const widgetTop = document.createElement('div');
-  widgetTop.className = 'widget-top h-2.5';
-  const widgetBottom = document.createElement('div');
-  widgetBottom.className = 'widget-bottom pixel-font-16 flex items-center gap-2 px-2 py-1 text-whiteHighlight';
-  toast.appendChild(widgetTop);
-  toast.appendChild(widgetBottom);
-  return { toast, widgetBottom };
-}
-
-function mountBattleHelperToast(flexContainer, container) {
-  container.appendChild(flexContainer);
-  updateBattleHelperToastPositions(container);
-}
-
 function showBattleHelperTransientToast(message, duration = 5000) {
-  try {
-    const container = getBattleHelperToastContainer();
-    if (!container || !message) return;
-
-    const flexContainer = createBattleHelperToastFlexContainer(container);
-    const { toast, widgetBottom } = createBattleHelperToastChrome();
-
-    const messageDiv = document.createElement('div');
-    messageDiv.className = 'text-left';
-    messageDiv.textContent = message;
-    widgetBottom.appendChild(messageDiv);
-
-    flexContainer.appendChild(toast);
-    mountBattleHelperToast(flexContainer, container);
-
-    scheduleBattleHelperTimeout(() => {
-      if (flexContainer.parentNode) {
-        flexContainer.parentNode.removeChild(flexContainer);
-        updateBattleHelperToastPositions(container);
-      }
-    }, duration);
-  } catch (error) {
-    console.warn('[Battle Helper] showBattleHelperTransientToast:', error);
-  }
+  if (!message) return;
+  window.BAToast?.show({ mod: t('mods.battleHelper.modName'), message, duration });
 }
 
 function buildBattleHelperProfileUrl(username) {
@@ -1815,13 +1736,11 @@ function removeBattleHelperPersistentToast() {
 
 function showBattleHelperPersistentToast(profileName, username, options = {}) {
   try {
-    const container = getBattleHelperToastContainer();
-    if (!container) return null;
-
     removeBattleHelperPersistentToast();
 
-    const flexContainer = createBattleHelperToastFlexContainer(container);
-    const { toast, widgetBottom } = createBattleHelperToastChrome({ role: 'presentation', interactive: true });
+    // Message + Restore button live in one node rendered by the shared toast stack
+    const widgetBottom = document.createElement('div');
+    widgetBottom.style.cssText = 'display: flex; align-items: center; gap: 8px;';
 
     const messageDiv = document.createElement('div');
     messageDiv.className = 'text-left';
@@ -1847,18 +1766,21 @@ function showBattleHelperPersistentToast(profileName, username, options = {}) {
 
     widgetBottom.appendChild(messageDiv);
     widgetBottom.appendChild(restoreBtn);
-    flexContainer.appendChild(toast);
-    mountBattleHelperToast(flexContainer, container);
+    const shown = window.BAToast?.show({
+      mod: t('mods.battleHelper.modName'),
+      message: widgetBottom,
+      duration: 0,
+      dismissOnClick: false,
+      interactive: true
+    });
 
     const handle = {
       updateProfile(nextProfileName, nextUsername, nextOptions = {}) {
         populateBattleHelperToastMessage(messageDiv, nextProfileName, nextUsername, nextOptions);
+        shown?.relayout();
       },
       remove() {
-        if (flexContainer.parentNode) {
-          flexContainer.parentNode.removeChild(flexContainer);
-          updateBattleHelperToastPositions(container);
-        }
+        shown?.remove();
         if (battleHelperPersistentToastHandle === handle) {
           battleHelperPersistentToastHandle = null;
         }
@@ -1914,13 +1836,10 @@ async function publishHelpSetupFromToast() {
 
 function showBattleHelperPublishSetupToast() {
   try {
-    const container = getBattleHelperToastContainer();
-    if (!container) return null;
-
     removeBattleHelperPublishSetupToast();
 
-    const flexContainer = createBattleHelperToastFlexContainer(container, 'battle-helper-publish-toast');
-    const { toast, widgetBottom } = createBattleHelperToastChrome({ role: 'presentation', interactive: true });
+    const widgetBottom = document.createElement('div');
+    widgetBottom.style.cssText = 'display: flex; align-items: center; gap: 8px;';
 
     const messageDiv = document.createElement('div');
     messageDiv.className = 'text-left';
@@ -1973,15 +1892,20 @@ function showBattleHelperPublishSetupToast() {
 
     widgetBottom.appendChild(messageDiv);
     widgetBottom.appendChild(publishBtn);
-    flexContainer.appendChild(toast);
-    mountBattleHelperToast(flexContainer, container);
+    const shown = window.BAToast?.show({
+      mod: t('mods.battleHelper.modName'),
+      message: widgetBottom,
+      duration: 0,
+      dismissOnClick: false,
+      interactive: true
+    });
 
     const handle = {
+      relayout() {
+        shown?.relayout();
+      },
       remove() {
-        if (flexContainer.parentNode) {
-          flexContainer.parentNode.removeChild(flexContainer);
-          updateBattleHelperToastPositions(container);
-        }
+        shown?.remove();
         if (battleHelperPublishToastHandle === handle) {
           battleHelperPublishToastHandle = null;
         }
@@ -1997,7 +1921,7 @@ function showBattleHelperPublishSetupToast() {
 
 function startBattleHelperPublishSetupToast() {
   if (battleHelperPublishToastHandle) {
-    updateBattleHelperToastPositions(getBattleHelperToastContainer());
+    battleHelperPublishToastHandle.relayout();
     return;
   }
   showBattleHelperPublishSetupToast();
@@ -3502,48 +3426,6 @@ function attachBattleHelperModalCloseCleanup(modalRef) {
   }
 }
 
-function applyBattleHelperModalNaturalLayout(contentRoot) {
-  if (!contentRoot) return;
-  Object.assign(contentRoot.style, {
-    flex: '0 0 auto',
-    minHeight: '0',
-    height: 'auto',
-    maxHeight: 'none',
-    width: '100%',
-    minWidth: '0',
-    maxWidth: '100%',
-    boxSizing: 'border-box',
-    overflowX: 'hidden',
-    overflowY: 'visible',
-    display: 'flex',
-    flexDirection: 'column'
-  });
-}
-
-function applyBattleHelperModalCompactLayout(rootWrapper, contentContainer, contentRoot) {
-  if (rootWrapper) {
-    Object.assign(rootWrapper.style, {
-      height: 'auto',
-      display: 'flex',
-      flexDirection: 'column',
-      flex: '0 0 auto',
-      minHeight: '0',
-      gap: '0'
-    });
-  }
-  if (contentContainer) {
-    Object.assign(contentContainer.style, {
-      flex: '0 0 auto',
-      minHeight: '0',
-      marginTop: '-1px',
-      overflow: 'visible',
-      display: 'flex',
-      flexDirection: 'column'
-    });
-  }
-  applyBattleHelperModalNaturalLayout(contentRoot);
-}
-
 function applyBattleHelperModalScrollLayout(rootWrapper, contentContainer, contentRoot) {
   if (rootWrapper) {
     Object.assign(rootWrapper.style, {
@@ -3577,32 +3459,6 @@ function applyBattleHelperModalScrollLayout(rootWrapper, contentContainer, conte
       flexDirection: 'column'
     });
   }
-}
-
-function measureBattleHelperModalNaturalHeight(dialog, contentRoot) {
-  const rootWrapper = dialog.querySelector(':scope > div');
-  if (rootWrapper?.offsetHeight > 0) {
-    return rootWrapper.offsetHeight;
-  }
-
-  if (!contentRoot) return dialog.scrollHeight;
-
-  const title = dialog.querySelector('.widget-top');
-  const widgetBottom = dialog.querySelector('.widget-bottom');
-  const separator = widgetBottom?.querySelector('.separator');
-  const footer = widgetBottom?.querySelector('.flex.justify-end.gap-2');
-
-  let chrome = 0;
-  if (title) chrome += title.offsetHeight;
-  if (separator) chrome += separator.offsetHeight;
-  if (footer) chrome += footer.offsetHeight;
-  if (widgetBottom) {
-    const style = window.getComputedStyle(widgetBottom);
-    chrome += parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
-    chrome += parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth);
-  }
-
-  return chrome + contentRoot.scrollHeight;
 }
 
 function stabilizeBattleHelperModalRendering(dialog) {

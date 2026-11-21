@@ -2252,7 +2252,7 @@ function showSetupLoadedFromHotkeyToast(setupName) {
   if (!name) return;
   try {
     createToast({
-      message: `<span class="text-success">${tReplace('mods.betterUI.hotkeySetupLoaded', {
+      message: `<span class="text-valid">${tReplace('mods.betterUI.hotkeySetupLoaded', {
         name: escapeHtmlForToast(name)
       })}</span>`,
       type: 'success',
@@ -4144,7 +4144,7 @@ function renderPerfAdvanced(now) {
       `<b style="${PERF_COL_SCRIPT}white-space:nowrap">${g ? Math.round(g.total) + 'ms' : '–'}</b>` +
       `<b style="${PERF_COL_REQ}white-space:nowrap;opacity:${r.reqs ? 1 : .4}">${r.reqs ? r.reqs + 'r' : '–'}</b>` +
       `<span style="flex:1 1 0;min-width:0;${PERF_LINE_CSS}color:${color}">${perfEscape(r.name)}` +
-      (r.limited ? ` <span style="color:${PERF_C.bad}" title="Requests that got HTTP 429">429×${r.limited}</span>` : '') + `</span>` +
+      (r.limited ? ` <span style="color:${PERF_C.bad}" title="${perfT('perfTip429', 'Requests that got HTTP 429')}">429×${r.limited}</span>` : '') + `</span>` +
       `<span style="${PERF_COL_LAYOUT}white-space:nowrap;color:${PERF_C.warn}">${g && g.forced >= 5 ? Math.round(g.forced) + 'ms' : ''}</span></div>`
     );
   }).join('');
@@ -4156,10 +4156,10 @@ function renderPerfAdvanced(now) {
   const stat = (label, value) => `<span style="white-space:nowrap"><span style="${dim}">${label}</span> <b>${value}</b></span>`;
   const listHtml =
     `<div style="${titleCss}">` +
-    `<span style="${PERF_COL_SCRIPT}${dim}" title="Script time in slow frames (last ${PERF_CPU_WINDOW_LABEL})">Script</span>` +
-    `<span style="${PERF_COL_REQ}${dim}" title="API requests in the last 10s">Req</span>` +
-    `<span style="flex:1 1 0;min-width:0;${dim}" title="Mod or part of the game. The bar behind a row is its share of all script time.">Name</span>` +
-    `<span style="${PERF_COL_LAYOUT}${dim}" title="Forced style/layout time caused by its scripts (shown from 5ms)">Layout</span></div>` +
+    `<span style="${PERF_COL_SCRIPT}${dim}" title="${perfT('perfTipScript', 'Script time in slow frames (last {window})').replace('{window}', PERF_CPU_WINDOW_LABEL)}">Script</span>` +
+    `<span style="${PERF_COL_REQ}${dim}" title="${perfT('perfTipReq', 'API requests in the last 10s')}">Req</span>` +
+    `<span style="flex:1 1 0;min-width:0;${dim}" title="${perfT('perfTipName', 'Mod or part of the game. The bar behind a row is its share of all script time.')}">Name</span>` +
+    `<span style="${PERF_COL_LAYOUT}${dim}" title="${perfT('perfTipLayout', 'Forced style/layout time caused by its scripts (shown from 5ms)')}">Layout</span></div>` +
     `<div data-perf-rows style="flex:1 1 auto;min-height:0;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;padding-top:2px">` +
     `${html || '<div style="opacity:.6;padding:0 3px">nothing slow yet</div>'}</div>` +
     `<div style="display:flex;flex-wrap:wrap;justify-content:space-between;column-gap:8px;flex:none;padding:2px 3px 0;border-top:1px solid rgba(255,255,255,.15)" ` +
@@ -4199,7 +4199,7 @@ function perfFindSuspect(now, janky, rateHigh, modOnly) {
     const top = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
     if (top) {
       const [source, name] = top[0].split('|');
-      return { source, name, text: `${top[1]} req/10s`, tip: 'Biggest API requester in the last 10s' };
+      return { source, name, text: `${top[1]} req/10s`, tip: perfT('perfTipTopRequester', 'Biggest API requester in the last 10s') };
     }
   }
   return null;
@@ -4233,15 +4233,15 @@ function renderPerfOverlay() {
   const rateHigh = rate >= PERF_RATE_LIMIT * 2 / 3;
   let alertHtml = '';
   if (lastCap && Date.now() - lastCap.ts < 60000) {
-    alertHtml = alertRow(PERF_C.bad, `API limit hit ${new Date(lastCap.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`, 'The request limit was reached in the last minute');
+    alertHtml = alertRow(PERF_C.bad, `API limit hit ${new Date(lastCap.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`, perfT('perfTipLimitReached', 'The request limit was reached in the last minute'));
   } else {
     const s = perfFindSuspect(now, lag, rateHigh, compact);
     if (s) alertHtml = alertRow(PERF_SOURCE_COLOR[s.source], `${perfEscape(s.name)} <span style="color:${PERF_C.text}">${s.text}</span>`, s.tip);
-    else if (lag) alertHtml = alertRow(PERF_C.bad, `Lag: p95 ${fs.p95.toFixed(0)}ms`, 'Frame time over the last 10s is high');
-    else if (heapDelta > 30) alertHtml = alertRow(PERF_C.warn, `Memory +${heapDelta.toFixed(0)}MB/min`, 'JS heap grew quickly over the last minute');
+    else if (lag) alertHtml = alertRow(PERF_C.bad, `Lag: p95 ${fs.p95.toFixed(0)}ms`, perfT('perfTipLag', 'Frame time over the last 10s is high'));
+    else if (heapDelta > 30) alertHtml = alertRow(PERF_C.warn, `Memory +${heapDelta.toFixed(0)}MB/min`, perfT('perfTipHeap', 'JS heap grew quickly over the last minute'));
   }
   if (!alertHtml) {
-    alertHtml = `<div style="${PERF_LINE_CSS}line-height:16px;opacity:.7" title="No problems detected right now">` +
+    alertHtml = `<div style="${PERF_LINE_CSS}line-height:16px;opacity:.7" title="${perfT('perfTipNoIssues', 'No problems detected right now')}">` +
       `<span style="color:${PERF_C.good}">✓</span> No issues` +
       (full && perfOverlay.rateLimited ? ` · <span style="color:${PERF_C.bad}">429×${perfOverlay.rateLimited} seen</span>` : '') + `</div>`;
   }
@@ -4267,7 +4267,7 @@ function renderPerfOverlay() {
     cell(L('DOM nodes', 'nodes'), nodes, PERF_C.text, 'DOM nodes on the page', true);
   // Budget bar (maximized only): how much of the 30-per-10s allowance is in use right now.
   const budgetBar = full
-    ? `<div style="height:4px;margin:3px 0;border-radius:2px;background:rgba(255,255,255,.15);overflow:hidden" title="Share of the request limit in use right now">` +
+    ? `<div style="height:4px;margin:3px 0;border-radius:2px;background:rgba(255,255,255,.15);overflow:hidden" title="${perfT('perfTipBudget', 'Share of the request limit in use right now')}">` +
       `<div style="height:100%;width:${fill}%;background:${rateColor}"></div></div>`
     : '';
   perfSetHtml(ui.body,
@@ -4390,7 +4390,7 @@ function addPerfResizeHandles(el) {
   return ['n', 'e', 's', 'w', 'ne', 'se', 'sw', 'nw'].map((dir) => {
     const h = document.createElement('div');
     h.dataset.dir = dir;
-    h.setAttribute('aria-label', `Resize ${dir}`);
+    h.setAttribute('aria-label', `${perfT('resize', 'Resize')} ${dir}`);
     const edge = dir.length === 1;
     const sideCss = edge
       ? (dir === 'n' || dir === 's' ? `height:6px;width:100%;left:0;${dir === 'n' ? 'top' : 'bottom'}:0;` : `width:6px;height:100%;top:0;${dir === 'w' ? 'left' : 'right'}:0;`)
@@ -8296,101 +8296,11 @@ function safeRemoveElement(element) {
 
 // Toast creation function
 function createToast({ message, type = 'info', duration = 5000, icon = null }) {
-  // Get or create the main toast container
-  let mainContainer = document.getElementById('better-ui-toast-container');
-  if (!mainContainer) {
-    mainContainer = document.createElement('div');
-    mainContainer.id = 'better-ui-toast-container';
-    mainContainer.style.cssText = `
-      position: fixed;
-      z-index: 9999;
-      inset: 16px 16px 64px;
-      pointer-events: none;
-    `;
-    mainContainer.setAttribute('data-aria-hidden', 'true');
-    mainContainer.setAttribute('aria-hidden', 'true');
-    document.body.appendChild(mainContainer);
-  }
-  
-  // Count existing toasts to calculate stacking position
-  const existingToasts = mainContainer.querySelectorAll('.toast-item');
-  const stackOffset = existingToasts.length * 46; // 46px per toast
-  
-  // Create the flex container for this specific toast
-  const flexContainer = document.createElement('div');
-  flexContainer.className = 'toast-item';
-  flexContainer.style.cssText = `
-    left: 0px;
-    right: 0px;
-    display: flex;
-    position: absolute;
-    transition: 230ms cubic-bezier(0.21, 1.02, 0.73, 1);
-    transform: translateY(-${stackOffset}px);
-    bottom: 0px;
-    justify-content: flex-end;
-  `;
-  
-  // Create toast button with proper animation classes
-  const toast = document.createElement('button');
-  toast.className = 'non-dismissable-dialogs shadow-lg animate-in fade-in zoom-in-95 slide-in-from-top lg:slide-in-from-bottom';
-  
-  // Create widget structure to match game's toast style
-  const widgetTop = document.createElement('div');
-  widgetTop.className = 'widget-top h-2.5';
-  
-  const widgetBottom = document.createElement('div');
-  widgetBottom.className = 'widget-bottom pixel-font-16 flex items-center gap-2 px-2 py-1 text-whiteHighlight';
-  
-  // Add icon if provided
-  if (icon) {
-    const iconImg = document.createElement('img');
-    iconImg.alt = type;
-    iconImg.src = icon;
-    iconImg.className = 'pixelated';
-    iconImg.style.cssText = 'width: 20px; height: 20px;';
-    widgetBottom.appendChild(iconImg);
-  }
-  
-  // Add message
-  const messageDiv = document.createElement('div');
-  messageDiv.className = 'text-left';
-  messageDiv.innerHTML = message; // Use innerHTML to support HTML content
-  widgetBottom.appendChild(messageDiv);
-  
-  // Assemble toast
-  toast.appendChild(widgetTop);
-  toast.appendChild(widgetBottom);
-  flexContainer.appendChild(toast);
-  mainContainer.appendChild(flexContainer);
-  
-  // Auto-remove after duration
-  const timeoutId = setTimeout(() => {
-    if (flexContainer && flexContainer.parentNode) {
-      flexContainer.parentNode.removeChild(flexContainer);
-      updateToastPositions(mainContainer);
-    }
-    activeTimeouts.delete(timeoutId);
-  }, duration);
-  activeTimeouts.add(timeoutId);
-  
-  return {
-    element: flexContainer,
-    remove: () => {
-      if (flexContainer && flexContainer.parentNode) {
-        flexContainer.parentNode.removeChild(flexContainer);
-        updateToastPositions(mainContainer);
-      }
-    }
-  };
-}
-
-// Update positions of remaining toasts when one is removed
-function updateToastPositions(container) {
-  const toasts = container.querySelectorAll('.toast-item');
-  toasts.forEach((toast, index) => {
-    const offset = index * 46;
-    toast.style.transform = `translateY(-${offset}px)`;
-  });
+  // Messages are trusted HTML built by this mod (spans, <br>, emoji); BAToast takes it as a node.
+  const template = document.createElement('template');
+  template.innerHTML = message;
+  const handle = window.BAToast?.show({ mod: t('mods.betterUI.modName'), message: template.content, type, duration, icon });
+  return { remove: () => handle?.remove() };
 }
 
 // Format storage size (KB to MB conversion when >= 1000 KB)
@@ -8758,7 +8668,7 @@ async function exportConfiguration(modal) {
     // Show success message using toast
     try {
       createToast({
-        message: `<span class="text-success">✅ ${t('mods.betterUI.backupExportSuccess')}</span><br><span class="text-whiteHighlight">📦 ${t('mods.betterUI.backupWhatWasSaved')}</span><br>• ${summary.join('<br>• ')}`,
+        message: `<span class="text-valid">✅ ${t('mods.betterUI.backupExportSuccess')}</span><br><span class="text-whiteHighlight">📦 ${t('mods.betterUI.backupWhatWasSaved')}</span><br>• ${summary.join('<br>• ')}`,
         type: 'success',
         duration: 8000
       });
@@ -8793,7 +8703,7 @@ async function exportConfiguration(modal) {
     // Show error message using toast
     try {
       createToast({
-        message: `<span class="text-error">❌ ${t('mods.betterUI.backupExportFailedTitle')}</span><br><span class="text-whiteHighlight">${tReplace('mods.betterUI.backupExportFailed', { error: error.message })}</span>`,
+        message: `<span class="text-invalid">❌ ${t('mods.betterUI.backupExportFailedTitle')}</span><br><span class="text-whiteHighlight">${tReplace('mods.betterUI.backupExportFailed', { error: error.message })}</span>`,
         type: 'error',
         duration: 6000
       });
@@ -9104,7 +9014,7 @@ async function importConfiguration(modal) {
         // Show success message using toast
         try {
           createToast({
-            message: `<span class="text-success">✅ ${t('mods.betterUI.backupImportSuccess')}</span><br><span class="text-whiteHighlight">📦 ${t('mods.betterUI.backupWhatWasRestored')}</span><br>• ${importSummary.join('<br>• ')}<br><br><span class="text-warning">🔄 ${t('mods.betterUI.backupRefreshingSoon')}</span>`,
+            message: `<span class="text-valid">✅ ${t('mods.betterUI.backupImportSuccess')}</span><br><span class="text-whiteHighlight">📦 ${t('mods.betterUI.backupWhatWasRestored')}</span><br>• ${importSummary.join('<br>• ')}<br><br><span class="text-warning">🔄 ${t('mods.betterUI.backupRefreshingSoon')}</span>`,
             type: 'success',
             duration: 10000
           });
@@ -9144,7 +9054,7 @@ async function importConfiguration(modal) {
         // Show error message using toast
         try {
           createToast({
-            message: `<span class="text-error">❌ ${t('mods.betterUI.backupImportFailedTitle')}</span><br><span class="text-whiteHighlight">${tReplace('mods.betterUI.backupImportFailed', { error: error.message })}</span>`,
+            message: `<span class="text-invalid">❌ ${t('mods.betterUI.backupImportFailedTitle')}</span><br><span class="text-whiteHighlight">${tReplace('mods.betterUI.backupImportFailed', { error: error.message })}</span>`,
             type: 'error',
             duration: 6000
           });
@@ -9166,7 +9076,7 @@ async function importConfiguration(modal) {
     console.error('[Mod Settings] Error setting up import:', error);
     try {
       createToast({
-        message: `<span class="text-error">❌ ${t('mods.betterUI.backupImportSetupErrorTitle')}</span><br><span class="text-whiteHighlight">${tReplace('mods.betterUI.backupImportSetupFailed', { error: error.message })}</span>`,
+        message: `<span class="text-invalid">❌ ${t('mods.betterUI.backupImportSetupErrorTitle')}</span><br><span class="text-whiteHighlight">${tReplace('mods.betterUI.backupImportSetupFailed', { error: error.message })}</span>`,
         type: 'error',
         duration: 6000
       });
@@ -9311,7 +9221,7 @@ async function resetAllSettings(modal) {
     // Show success message
     try {
       createToast({
-        message: `<span class="text-success">✅ ${t('mods.betterUI.resetAllSuccess')}</span><br><span class="text-whiteHighlight">${t('mods.betterUI.resetAllSuccessDetail')}</span><br><span class="text-warning">⚠️ ${tReplace('mods.betterUI.resetAllModsPreserved', { count: preservedManualMods.length + preservedLocalMods.length })}</span><br><br><span class="text-warning">🔄 ${t('mods.betterUI.backupRefreshingSoon')}</span>`,
+        message: `<span class="text-valid">✅ ${t('mods.betterUI.resetAllSuccess')}</span><br><span class="text-whiteHighlight">${t('mods.betterUI.resetAllSuccessDetail')}</span><br><span class="text-warning">⚠️ ${tReplace('mods.betterUI.resetAllModsPreserved', { count: preservedManualMods.length + preservedLocalMods.length })}</span><br><br><span class="text-warning">🔄 ${t('mods.betterUI.backupRefreshingSoon')}</span>`,
         type: 'success',
         duration: 10000
       });
@@ -9351,7 +9261,7 @@ async function resetAllSettings(modal) {
     // Show error message
     try {
       createToast({
-        message: `<span class="text-error">❌ ${t('mods.betterUI.resetAllFailedTitle')}</span><br><span class="text-whiteHighlight">${tReplace('mods.betterUI.resetAllFailed', { error: error.message })}</span>`,
+        message: `<span class="text-invalid">❌ ${t('mods.betterUI.resetAllFailedTitle')}</span><br><span class="text-whiteHighlight">${tReplace('mods.betterUI.resetAllFailed', { error: error.message })}</span>`,
         type: 'error',
         duration: 6000
       });
@@ -10918,7 +10828,7 @@ function showSettingsModal() {
               localStorage.removeItem('depot-manager-depot-equipment-ids-v1');
             }
             createToast({
-              message: `<span class="text-success">✅ ${t('mods.betterUI.depotResetToastSuccess')}</span>`,
+              message: `<span class="text-valid">✅ ${t('mods.betterUI.depotResetToastSuccess')}</span>`,
               type: 'success',
               duration: 2500
             });
@@ -11633,7 +11543,7 @@ function showSettingsModal() {
               resetAllQuestsStatus.style.color = '#7dcea0';
             }
             createToast({
-              message: `<span class="text-success">✅ ${t('mods.betterUI.resetAllQuestsSuccess')}</span>`,
+              message: `<span class="text-valid">✅ ${t('mods.betterUI.resetAllQuestsSuccess')}</span>`,
               type: 'success',
               duration: 3000
             });
@@ -20438,7 +20348,7 @@ function maybeShowPlayerOnlineRecordToast(count) {
 
   try {
     createToast({
-      message: `<span class="text-success">${tReplace('mods.betterUI.playerOnlineRecordToast', {
+      message: `<span class="text-valid">${tReplace('mods.betterUI.playerOnlineRecordToast', {
         record: formatPlayerOnlineRecordPeak(count)
       })}</span>`,
       type: 'success',
@@ -20518,7 +20428,7 @@ function updatePlayerCountDisplay(count) {
     playerCountBtn.title = buildPlayerCountTooltip();
     playerCountBtn.style.color = 'inherit';
   } else {
-    playerCountBtn.innerHTML = `<span class="pixel-font-16 text-white animate-in fade-in">Online: <span class="text-error">?</span></span>`;
+    playerCountBtn.innerHTML = `<span class="pixel-font-16 text-white animate-in fade-in">Online: <span class="text-invalid">?</span></span>`;
     playerCountBtn.title = buildPlayerCountTooltip();
     playerCountBtn.style.color = 'inherit';
   }
@@ -20702,7 +20612,7 @@ function addPlayercountHeaderButton() {
     buildLi: () => {
       const li = document.createElement('li');
       const btn = document.createElement('span');
-      btn.innerHTML = '<span class="pixel-font-16 text-white animate-in fade-in">Online: <span class="text-error">?</span></span>';
+      btn.innerHTML = '<span class="pixel-font-16 text-white animate-in fade-in">Online: <span class="text-invalid">?</span></span>';
       btn.className = 'playercount-header-btn';
       btn.title = t('mods.betterUI.playerCountLoading');
       li.appendChild(btn);
@@ -21182,10 +21092,8 @@ function initBetterUI() {
     console.log('[Mod Settings] Initialization already in progress, skipping duplicate call');
     return;
   }
-  if (initState.initialized) {
-    console.log('[Mod Settings] Already initialized, skipping duplicate call');
-    return;
-  }
+  // The module body and exports.init() both call this by design; the second call is a silent no-op.
+  if (initState.initialized) return;
 
   initState.inProgress = true;
   try {
@@ -21480,11 +21388,7 @@ function cleanupBetterUI() {
       console.log('[Mod Settings] Playercount button hidden');
     }
     
-    // Clean up toast container
-    const toastContainer = document.getElementById('better-ui-toast-container');
-    if (toastContainer && toastContainer.parentNode) {
-      toastContainer.parentNode.removeChild(toastContainer);
-    }
+    window.BAToast?.clearMod(t('mods.betterUI.modName'));
     
     // Clean up any remaining modals
     try {

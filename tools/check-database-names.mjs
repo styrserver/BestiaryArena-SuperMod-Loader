@@ -40,6 +40,7 @@ import { fileURLToPath } from 'node:url';
 import { extractCreatureNames, loadChunks } from './check-creature-combat.mjs';
 import { objectEnd } from './check-inventory-items.mjs';
 import { recordRun } from './tool-runs.mjs';
+import { loadMapsDatabase } from './lib.mjs';
 
 const DB_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'database');
 const readDb = (file) => readFileSync(join(DB_DIR, file), 'utf8');
@@ -92,19 +93,6 @@ export function extractRoomNames(chunks) {
   }
   if (Object.keys(names).length < 50) throw new Error(`only ${Object.keys(names).length} rooms found`);
   return names;
-}
-
-/** maps-database.js is a browser script; give it the globals it reads and mute its logging. */
-function loadMapsDatabase() {
-  globalThis.window = globalThis;
-  globalThis.state = { utils: { ROOMS: [] } };
-  const { log, warn } = console;
-  console.log = console.warn = () => {};
-  try {
-    return createRequire(import.meta.url)(join(DB_DIR, 'maps-database.js'));
-  } finally {
-    Object.assign(console, { log, warn });
-  }
 }
 
 /** Equipment names from the chunks: each item is `{spriteId:..,name:"..",[type/compareName,]EffectComponent`. */

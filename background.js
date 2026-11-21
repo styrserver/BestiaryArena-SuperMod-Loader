@@ -191,6 +191,32 @@ function isServiceWorkerContext() {
 const WELCOME_MOD_PATH = 'database/welcome.js';
 const LEGACY_WELCOME_MOD_PATH = 'database/Welcome.js';
 
+// The four wiki export helpers are loaded on first use by database/wiki-export-loader.js, not at startup.
+// They are hidden mods (no toggle), so an enabled state saved by an earlier version is simply stale: put it
+// back to "off" and make sure the loader that replaces them is on.
+const ON_DEMAND_DATABASE_MODS = [
+  'database/equipment-lua-export.js',
+  'database/creature-lua-export.js',
+  'database/maps-lua-export.js',
+  'database/regions-lua-export.js'
+];
+const WIKI_EXPORT_LOADER_MOD_PATH = 'database/wiki-export-loader.js';
+
+function ensureHiddenDatabaseModDefaults(mods) {
+  if (!Array.isArray(mods)) return false;
+  let changed = false;
+  for (const mod of mods) {
+    if (ON_DEMAND_DATABASE_MODS.includes(mod.name) && mod.enabled) {
+      mod.enabled = false;
+      changed = true;
+    } else if (mod.name === WIKI_EXPORT_LOADER_MOD_PATH && !mod.enabled) {
+      mod.enabled = true;
+      changed = true;
+    }
+  }
+  return changed;
+}
+
 function ensureWelcomeModAlwaysEnabled(mods) {
   if (!Array.isArray(mods)) return false;
   let changed = false;
@@ -209,11 +235,8 @@ const HARDCODED_DEFAULT_ENABLED_MODS = [
   'database/creature-database.js',
   'database/equipment-database.js',
   'database/tool-runs.js',
+  'database/wiki-export-loader.js',
   'database/maps-database.js',
-  'database/equipment-lua-export.js',
-  'database/creature-lua-export.js',
-  'database/maps-lua-export.js',
-  'database/regions-lua-export.js',
   'database/playereq-database.js',
   'database/firebase-admins.js',
   'Official Mods/Bestiary_Automator.js',
@@ -230,7 +253,7 @@ const HARDCODED_DEFAULT_ENABLED_MODS = [
 ];
 
 const HARDCODED_MOD_COUNTS = {
-  database: 11,
+  database: 13,
   official: 10,
   super: 28,
   ot: 5
@@ -552,7 +575,8 @@ async function getLocalMods() {
       byName.set(man.name, man);
     }
     const result = sortLocalModsList(Array.from(byName.values()));
-    if (ensureWelcomeModAlwaysEnabled(result)) {
+    const hiddenDefaultsChanged = ensureHiddenDatabaseModDefaults(result);
+    if (ensureWelcomeModAlwaysEnabled(result) || hiddenDefaultsChanged) {
       await browserAPI.storage.sync.set({ localMods: result });
       await browserAPI.storage.local.set({ localMods: result });
     }
@@ -931,6 +955,7 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
           originalName: mod.originalName
         }));
         ensureWelcomeModAlwaysEnabled(localMods);
+        ensureHiddenDatabaseModDefaults(localMods);
         
         console.log('Background: Processed local mods with preserved states:', localMods);
         
@@ -957,6 +982,7 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
           originalName: mod.originalName
         }));
         ensureWelcomeModAlwaysEnabled(localMods);
+        ensureHiddenDatabaseModDefaults(localMods);
         
         console.log('Background: Processed local mods with minimal fallback:', localMods);
         

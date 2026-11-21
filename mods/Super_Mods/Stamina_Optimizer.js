@@ -57,7 +57,6 @@ const PAUSE_BUTTON_UPDATE_DELAY = 300;
 // Fixed start delay — same contract as other farming mods (3s, not user-configurable)
 const DEFAULT_START_DELAY = 3;
 const ACTION_START_DELAY = DEFAULT_START_DELAY * 1000;
-const START_TOAST_COOLDOWN_MS = 10000;
 const ROOM_NAV_POLL_MS = 100;
 const ROOM_NAV_TIMEOUT_MS = 8000;
 const ROOM_NAV_TIMEOUT_HIDDEN_MS = 20000;
@@ -117,7 +116,6 @@ let lastMissingFunctionLog = 0;
 let functionRetryAttempts = 0;
 const MAX_FUNCTION_RETRY_ATTEMPTS = 3;
 const FUNCTION_RETRY_DELAY = 2000; // 2 seconds
-let lastStartToastAt = 0;
 let isActionPending = false;
 let isLifecycleActive = true;
 
@@ -535,24 +533,6 @@ function organizeMapsByRegion() {
     }
 }
 
-// Get all available maps from the game (legacy function for compatibility)
-function getAllMapsList() {
-    try {
-        const organized = organizeMapsByRegion();
-        const allMaps = [];
-        
-        // Flatten organized maps into single array
-        for (const regionMaps of Object.values(organized)) {
-            allMaps.push(...regionMaps.map(m => ({ roomId: m.id, roomName: m.name })));
-        }
-        
-        return allMaps;
-    } catch (error) {
-        console.error('[Stamina Optimizer] Error getting maps list:', error);
-        return [];
-    }
-}
-
 // Get available setup labels from Better Setups
 function getAvailableSetupLabels() {
     try {
@@ -879,86 +859,11 @@ function clearModalsWithEsc(count = 1) {
 }
 
 function showToast(message, duration = 5000) {
-    try {
-        let mainContainer = document.getElementById('stamina-optimizer-toast-container');
-        if (!mainContainer) {
-            mainContainer = document.createElement('div');
-            mainContainer.id = 'stamina-optimizer-toast-container';
-            mainContainer.style.cssText = `
-                position: fixed;
-                z-index: 9999;
-                inset: 16px 16px 64px;
-                pointer-events: none;
-            `;
-            document.body.appendChild(mainContainer);
-        }
-
-        const existingToasts = mainContainer.querySelectorAll('.toast-item');
-        const stackOffset = existingToasts.length * 46;
-
-        const flexContainer = document.createElement('div');
-        flexContainer.className = 'toast-item';
-        flexContainer.style.cssText = `
-            left: 0px;
-            right: 0px;
-            display: flex;
-            position: absolute;
-            transition: 230ms cubic-bezier(0.21, 1.02, 0.73, 1);
-            transform: translateY(-${stackOffset}px);
-            bottom: 0px;
-            justify-content: flex-end;
-        `;
-
-        const toast = document.createElement('button');
-        toast.className = 'non-dismissable-dialogs shadow-lg animate-in fade-in zoom-in-95 slide-in-from-top lg:slide-in-from-bottom';
-
-        const widgetTop = document.createElement('div');
-        widgetTop.className = 'widget-top h-2.5';
-
-        const widgetBottom = document.createElement('div');
-        widgetBottom.className = 'widget-bottom pixel-font-16 flex items-center gap-2 px-2 py-1 text-whiteHighlight';
-
-        const iconImg = document.createElement('img');
-        iconImg.alt = 'stamina';
-        iconImg.src = 'https://bestiaryarena.com/assets/icons/stamina.png';
-        iconImg.className = 'pixelated';
-        iconImg.style.cssText = 'width: 16px; height: 16px;';
-        widgetBottom.appendChild(iconImg);
-
-        const messageDiv = document.createElement('div');
-        messageDiv.className = 'text-left';
-        messageDiv.textContent = message;
-        widgetBottom.appendChild(messageDiv);
-
-        toast.appendChild(widgetTop);
-        toast.appendChild(widgetBottom);
-        flexContainer.appendChild(toast);
-        mainContainer.appendChild(flexContainer);
-
-        console.log(`[Stamina Optimizer] Toast shown: ${message}`);
-
-        setTimeout(() => {
-            if (flexContainer && flexContainer.parentNode) {
-                flexContainer.parentNode.removeChild(flexContainer);
-
-                const toasts = mainContainer.querySelectorAll('.toast-item');
-                toasts.forEach((item, index) => {
-                    item.style.transform = `translateY(-${index * 46}px)`;
-                });
-            }
-        }, duration);
-    } catch (error) {
-        console.error('[Stamina Optimizer] Error showing toast:', error);
-    }
+    window.BAToast?.show({ mod: t('mods.staminaOptimizer.modName'), message, duration });
 }
 
 function showStaminaOptimizerStartToast() {
-    const now = Date.now();
-    if (now - lastStartToastAt < START_TOAST_COOLDOWN_MS) {
-        return;
-    }
-    lastStartToastAt = now;
-    showToast(t('mods.staminaOptimizer.startingToast'));
+    window.BAToast?.show({ mod: t('mods.staminaOptimizer.modName'), message: t('mods.staminaOptimizer.startingToast'), key: 'start', cooldown: 10000 });
 }
 
 // ============================================================================
@@ -3373,6 +3278,7 @@ init();
 // Cleanup function — clears intervals, subscriptions, timers, and listeners
 function cleanupStaminaOptimizer() {
     try {
+        window.BAToast?.clearMod(t('mods.staminaOptimizer.modName'));
         isLifecycleActive = false;
 
         stopStaminaMonitoring();

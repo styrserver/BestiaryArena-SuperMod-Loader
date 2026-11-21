@@ -130,7 +130,7 @@ Bundled mods must be registered in more than one place (browser limits: the popu
 
 1. Update [`content/mod-registry.js`](content/mod-registry.js) — add the filename to `DATABASE_MODS`, `OFFICIAL_MODS`, `SUPER_MODS`, or `OT_MODS` as appropriate (see the file header for the full checklist).
 2. Update [`background.js`](background.js) — add to default-enabled lists and, in the `getModCounts` message handler, adjust the hardcoded `modCounts` object (look for the comment *Keep these in sync with content/mod-registry.js*) so category totals stay correct on Chromium.
-3. Update [`popup/popup.js`](popup/popup.js) — keep the static name lists in sync with `mod-registry.js` where the popup enumerates mods.
+3. Update [`popup/popup.js`](popup/popup.js) — keep the static name lists in sync with `mod-registry.js` where the popup enumerates mods, and add the mod's one-line description under `popup.modDescriptions` in both `assets/locales/en-US.json` and `pt-BR.json` (the locale is the only place descriptions live). `node tools/check-mod-lists.mjs` checks the lists, `background.js` counts and descriptions.
 4. Update [`content/local_mods.js`](content/local_mods.js) — keep `FALLBACK_*` arrays in sync (Orion iOS and other environments where `mod-registry.js` import fails).
 5. For database scripts, add the path to [`manifest_firefox.json`](manifest_firefox.json) `web_accessible_resources` if the file must load in page context.
 
@@ -195,6 +195,7 @@ Mods have access to the game's state through `globalThis.state`, which provides 
   - `creature-database.js` - Creature reference data (lists, map boss stats, shiny/gazer helpers)
   - `equipment-database.js` - Equipment reference data (boosted-map overrides shared with Cyclopedia)
   - `maps-database.js` - Maps reference data
+  - `wiki-export-loader.js` - Defines the wiki export helper names as stubs; the four `*-lua-export.js` files below load on first call, not at startup
   - `equipment-lua-export.js` - DevTools/console helpers to export equipment wiki Lua (`dumpEquipmentWikiLua()`)
   - `creature-lua-export.js` - DevTools/console helpers to export creature stats wiki Lua (`dumpCreatureWikiLua()`)
   - `maps-lua-export.js` - DevTools/console helpers to export maps wiki Lua (`dumpMapsWikiLua()`)

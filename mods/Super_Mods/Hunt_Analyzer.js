@@ -85,30 +85,12 @@ const HUNT_ANALYZER_THEMES = {
       // Entry colors
       entryBackground: 'rgba(59, 64, 72, 0.3)',
       
-      // Dialog colors
-      dialogBackground: '#282C34',
-      dialogBorder: '#E06C75',
-      dialogText: '#ABB2BF',
-      dialogTitle: '#E06C75',
-      confirmButtonBackground: '#E06C75',
-      confirmButtonHover: 'linear-gradient(to bottom, #FF8A96, #E06C75)',
-      confirmButtonActive: 'linear-gradient(to bottom, #E06C75, #C25560)',
-      confirmButtonBorder: '#C25560',
-      
-      // Feedback colors
-      feedbackSuccess: '#98C379',
-      feedbackError: '#E06C75',
-      
       // Shadows
       panelShadow: 'rgba(0,0,0,0.7)',
       textShadow: 'rgba(224, 108, 117, 0.7)',
       buttonShadow: 'rgba(0,0,0,0.5)',
       buttonShadowHover: 'rgba(0,0,0,0.7)',
-      dialogShadow: 'rgba(0,0,0,0.8)',
       dropdownShadow: 'rgba(0,0,0,0.3)',
-      
-      // Overlay
-      overlayBackground: 'rgba(0, 0, 0, 0.7)',
       
       // Button highlights
       buttonHighlight: 'rgba(255,255,255,0.1)',
@@ -152,30 +134,12 @@ const HUNT_ANALYZER_THEMES = {
       // Entry colors
       entryBackground: 'rgba(13, 71, 161, 0.15)',
       
-      // Dialog colors
-      dialogBackground: '#0a1419',
-      dialogBorder: '#80d8ff',
-      dialogText: '#b3d9f2',
-      dialogTitle: '#80d8ff',
-      confirmButtonBackground: '#42a5f5',
-      confirmButtonHover: 'linear-gradient(to bottom, #64b5f6, #42a5f5)',
-      confirmButtonActive: 'linear-gradient(to bottom, #42a5f5, #0277bd)',
-      confirmButtonBorder: '#0277bd',
-      
-      // Feedback colors
-      feedbackSuccess: '#80d8ff',
-      feedbackError: '#e91e63',
-      
       // Shadows - Cool blue glow
       panelShadow: 'rgba(66, 165, 245, 0.3)',
       textShadow: 'rgba(128, 216, 255, 0.5)',
       buttonShadow: 'rgba(0, 0, 0, 0.8)',
       buttonShadowHover: 'rgba(66, 165, 245, 0.4)',
-      dialogShadow: 'rgba(128, 216, 255, 0.4)',
       dropdownShadow: 'rgba(66, 165, 245, 0.3)',
-      
-      // Overlay
-      overlayBackground: 'rgba(0, 0, 0, 0.85)',
       
       // Button highlights - Icy glow
       buttonHighlight: 'rgba(128, 216, 255, 0.1)',
@@ -219,30 +183,12 @@ const HUNT_ANALYZER_THEMES = {
       // Entry colors
       entryBackground: 'rgba(27, 94, 32, 0.15)',
       
-      // Dialog colors
-      dialogBackground: '#0f1a0f',
-      dialogBorder: '#66bb6a',
-      dialogText: '#c8e6c9',
-      dialogTitle: '#66bb6a',
-      confirmButtonBackground: '#43a047',
-      confirmButtonHover: 'linear-gradient(to bottom, #66bb6a, #43a047)',
-      confirmButtonActive: 'linear-gradient(to bottom, #43a047, #2e7d32)',
-      confirmButtonBorder: '#2e7d32',
-      
-      // Feedback colors
-      feedbackSuccess: '#66bb6a',
-      feedbackError: '#d32f2f',
-      
       // Shadows - Natural green glow
       panelShadow: 'rgba(67, 160, 71, 0.3)',
       textShadow: 'rgba(102, 187, 106, 0.5)',
       buttonShadow: 'rgba(0, 0, 0, 0.8)',
       buttonShadowHover: 'rgba(67, 160, 71, 0.4)',
-      dialogShadow: 'rgba(102, 187, 106, 0.4)',
       dropdownShadow: 'rgba(67, 160, 71, 0.3)',
-      
-      // Overlay
-      overlayBackground: 'rgba(0, 0, 0, 0.85)',
       
       // Button highlights - Green glow
       buttonHighlight: 'rgba(102, 187, 106, 0.1)',
@@ -286,30 +232,12 @@ const HUNT_ANALYZER_THEMES = {
       // Entry colors
       entryBackground: 'rgba(139, 0, 0, 0.2)',
       
-      // Dialog colors
-      dialogBackground: '#1a0a0a',
-      dialogBorder: '#ff1744',
-      dialogText: '#ffcccc',
-      dialogTitle: '#ff1744',
-      confirmButtonBackground: '#dc143c',
-      confirmButtonHover: 'linear-gradient(to bottom, #ff1744, #dc143c)',
-      confirmButtonActive: 'linear-gradient(to bottom, #dc143c, #8b0000)',
-      confirmButtonBorder: '#8b0000',
-      
-      // Feedback colors
-      feedbackSuccess: '#ff4444',
-      feedbackError: '#ff1744',
-      
       // Shadows - Fiery red glow
       panelShadow: 'rgba(220, 20, 60, 0.4)',
       textShadow: 'rgba(255, 23, 68, 0.6)',
       buttonShadow: 'rgba(0, 0, 0, 0.8)',
       buttonShadowHover: 'rgba(220, 20, 60, 0.5)',
-      dialogShadow: 'rgba(255, 23, 68, 0.5)',
       dropdownShadow: 'rgba(220, 20, 60, 0.4)',
-      
-      // Overlay
-      overlayBackground: 'rgba(0, 0, 0, 0.85)',
       
       // Button highlights - Fiery glow
       buttonHighlight: 'rgba(255, 23, 68, 0.1)',
@@ -353,37 +281,18 @@ const HUNT_ANALYZER_THEMES = {
       // Entry colors
       entryBackground: 'rgba(74, 20, 140, 0.2)',
       
-      // Dialog colors
-      dialogBackground: '#1a0f1a',
-      dialogBorder: '#ab47bc',
-      dialogText: '#e1bee7',
-      dialogTitle: '#ab47bc',
-      confirmButtonBackground: '#8e24aa',
-      confirmButtonHover: 'linear-gradient(to bottom, #ab47bc, #8e24aa)',
-      confirmButtonActive: 'linear-gradient(to bottom, #8e24aa, #4a148c)',
-      confirmButtonBorder: '#4a148c',
-      
-      // Feedback colors
-      feedbackSuccess: '#ab47bc',
-      feedbackError: '#d32f2f',
-      
       // Shadows - Mystical purple glow
       panelShadow: 'rgba(142, 36, 170, 0.4)',
       textShadow: 'rgba(171, 71, 188, 0.6)',
       buttonShadow: 'rgba(0, 0, 0, 0.8)',
       buttonShadowHover: 'rgba(142, 36, 170, 0.5)',
-      dialogShadow: 'rgba(171, 71, 188, 0.5)',
       dropdownShadow: 'rgba(142, 36, 170, 0.4)',
-      
-      // Overlay
-      overlayBackground: 'rgba(0, 0, 0, 0.85)',
       
       // Button highlights - Purple glow
       buttonHighlight: 'rgba(171, 71, 188, 0.1)',
       buttonHighlightHover: 'rgba(171, 71, 188, 0.2)'
     }, huntAnalyzerPanelBackgrounds('darker', 'dark', 'darker'))
 };
-
 function getCurrentTheme() {
   try {
     if (typeof HuntAnalyzerState !== 'undefined' && HuntAnalyzerState.settings?.theme) {
@@ -658,15 +567,36 @@ function injectHuntAnalyzerStyles() {
             gap: 8px;
         }
 
-        #mod-map-filter-dropdown-button {
+        .ha-grid-empty {
+            grid-column: 1 / -1;
+            padding: 8px;
+            text-align: center;
+            font-size: 12px;
+            opacity: 0.6;
+            color: var(--ha-text);
+        }
+
+        .ha-filter-dd {
+            position: relative;
+            display: inline-block;
+        }
+
+        .ha-filter-dd-button {
+            padding: 2px 8px;
+            font-size: 12px;
+            cursor: pointer;
             width: 100%;
             min-width: 0;
-            max-width: 200px;
             box-sizing: border-box;
+            text-align: left;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 6px;
             overflow: hidden;
         }
 
-        #mod-map-filter-dropdown-label {
+        .ha-filter-dd-label {
             flex: 1 1 auto;
             min-width: 0;
             overflow: hidden;
@@ -674,27 +604,51 @@ function injectHuntAnalyzerStyles() {
             white-space: nowrap;
         }
 
-        #mod-map-filter-dropdown-arrow {
+        .ha-filter-dd-arrow {
             flex: 0 0 auto;
+            font-size: 10px;
         }
 
-        #mod-map-filter-dropdown-menu [data-map-filter-option],
-        #mod-floor-filter-dropdown-menu [data-map-filter-option] {
+        .ha-filter-dd-menu {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            border-radius: 4px;
+            z-index: 100;
+            display: none;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .ha-filter-dd-menu[data-open="true"] {
+            display: block;
+        }
+
+        .ha-filter-dd-option {
+            padding: 8px 12px;
+            cursor: pointer;
+            font-size: 12px;
+            border-bottom: 1px solid var(--ha-border);
+            transition: background-color 0.2s ease;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
             color: var(--ha-text);
             background-color: transparent;
         }
 
-        #mod-map-filter-dropdown-menu [data-map-filter-option][data-selected="true"],
-        #mod-floor-filter-dropdown-menu [data-map-filter-option][data-selected="true"] {
+        .ha-filter-dd-option[data-selected="true"] {
             background-color: var(--ha-dropdown-option-selected);
             color: var(--ha-text-accent);
         }
 
-        #mod-map-filter-dropdown-menu [data-map-filter-option][data-selected="false"]:hover,
-        #mod-floor-filter-dropdown-menu [data-map-filter-option][data-selected="false"]:hover {
+        .ha-filter-dd-option[data-selected="false"]:hover,
+        .ha-filter-dd-option:focus-visible {
             background-color: var(--ha-dropdown-option-hover);
+            outline: none;
         }
-        
+
         .ha-icon-button {
             background-color: var(--ha-button-icon-bg);
             border: 4px solid transparent;
@@ -963,6 +917,12 @@ function getMapResetLabel() {
     return localizedMapReset === 'mods.huntAnalyzer.mapReset' ? 'Map reset' : localizedMapReset;
 }
 
+function getClearButtonTooltip() {
+    if (HuntAnalyzerState.ui.selectedFloorFilter !== 'ALL') return t('mods.huntAnalyzer.clearFloorTooltip');
+    if (HuntAnalyzerState.ui.selectedMapFilter === 'ALL') return t('mods.huntAnalyzer.clearAllTooltip');
+    return t('mods.huntAnalyzer.clearMapTooltip');
+}
+
 function refreshClearButtonLabel() {
     const panel = document.getElementById(PANEL_ID);
     if (!panel) return;
@@ -970,6 +930,7 @@ function refreshClearButtonLabel() {
     const clearButton = panel.querySelector('.button-container button:first-child');
     if (!clearButton || clearButton.dataset.confirmArmed === 'true') return;
     clearButton.textContent = getClearButtonLabel();
+    clearButton.title = getClearButtonTooltip();
 }
 
 function getRoomIdByMapName(mapName) {
@@ -1104,39 +1065,27 @@ function clearAnalyzerDataAndRefresh() {
     showPanelFeedback(panel, resetFeedbackText, true);
 }
 
+// Native tooltips restart whenever `title` changes, so live rows (rewritten every second) must
+// not touch it while the pointer is over them or when the text is unchanged.
+function setTitleIfIdle(element, text) {
+    if (!element || element.title === text) return;
+    if (element.matches(':hover')) return;
+    element.title = text;
+}
+
 function getPanelFrame(panel) {
     if (!panel) return null;
     return panel._frame || panel.querySelector(':scope > .ha-panel-container') || panel;
 }
 
-function showPanelFeedback(panel, text, isSuccess = true) {
-    if (!panel) return;
-    const frame = getPanelFrame(panel);
-    const feedbackMessage = document.createElement('div');
-    feedbackMessage.textContent = text;
-    feedbackMessage.style.position = 'absolute';
-    feedbackMessage.style.bottom = '10px';
-    feedbackMessage.style.left = '50%';
-    feedbackMessage.style.transform = 'translateX(-50%)';
-    feedbackMessage.style.backgroundColor = isSuccess ? '#98C379' : '#E06C75';
-    feedbackMessage.style.color = '#FFFFFF';
-    feedbackMessage.style.padding = '8px 12px';
-    feedbackMessage.style.borderRadius = '5px';
-    feedbackMessage.style.zIndex = '100';
-    feedbackMessage.style.opacity = '0';
-    feedbackMessage.style.transition = 'opacity 0.3s ease-in-out';
-    frame.appendChild(feedbackMessage);
-
-    setTimeout(() => {
-        feedbackMessage.style.opacity = '1';
-    }, 10);
-
-    setTimeout(() => {
-        feedbackMessage.style.opacity = '0';
-        setTimeout(() => {
-            feedbackMessage.remove();
-        }, 300);
-    }, 1500);
+// Shared game-styled toast (content/ba-toast.js). The panel argument is unused; kept so
+// existing call sites stay unchanged.
+function showPanelFeedback(_panel, text, isSuccess = true) {
+    window.BAToast?.show({
+        mod: t('mods.huntAnalyzer.buttonText'),
+        message: text,
+        type: isSuccess ? 'success' : 'error'
+    });
 }
 
 // =======================
@@ -1147,11 +1096,11 @@ const BUTTON_ID = "mod-autoplay-button";
 const DUST_ICON_SRC = '/assets/icons/dust.png';
 const SEALED_ICON_SRC = 'https://bestiaryarena.com/assets/icons/star-tier-5.png';
 const HUNT_ANALYZER_PANEL_RESOURCE_TOTALS = [
-    { amountId: 'mod-total-gold-display', totalKey: 'gold', iconSrc: '/assets/icons/goldpile.png', iconAlt: 'Gold', colorKey: 'textGold' },
-    { amountId: 'mod-total-dust-display', totalKey: 'dust', iconSrc: DUST_ICON_SRC, iconAlt: 'Dust', colorKey: 'textDust' },
-    { amountId: 'mod-total-shiny-display', totalKey: 'shiny', iconSrc: '/assets/icons/shiny-star.png', iconAlt: 'Shiny', colorKey: 'textShiny' },
-    { amountId: 'mod-total-sealed-display', totalKey: 'sealed', iconSrc: SEALED_ICON_SRC, iconAlt: 'Sealed', colorKey: 'textSealed' },
-    { amountId: 'mod-total-runes-display', totalKey: 'runes', iconSrc: 'https://bestiaryarena.com/assets/icons/rune-blank.png', iconAlt: 'Runes', colorKey: 'textRunes' }
+    { amountId: 'mod-total-gold-display', totalKey: 'gold', labelKey: 'mods.huntAnalyzer.gold', iconSrc: '/assets/icons/goldpile.png', colorKey: 'textGold' },
+    { amountId: 'mod-total-dust-display', totalKey: 'dust', labelKey: 'mods.huntAnalyzer.dust', iconSrc: DUST_ICON_SRC, colorKey: 'textDust' },
+    { amountId: 'mod-total-shiny-display', totalKey: 'shiny', labelKey: 'mods.huntAnalyzer.shiny', iconSrc: '/assets/icons/shiny-star.png', colorKey: 'textShiny' },
+    { amountId: 'mod-total-sealed-display', totalKey: 'sealed', labelKey: 'mods.huntAnalyzer.sealed', iconSrc: SEALED_ICON_SRC, colorKey: 'textSealed' },
+    { amountId: 'mod-total-runes-display', totalKey: 'runes', labelKey: 'mods.huntAnalyzer.runes', iconSrc: 'https://bestiaryarena.com/assets/icons/rune-blank.png', colorKey: 'textRunes' }
 ];
 const LAYOUT_MODES = {
     VERTICAL: 'vertical',
@@ -2228,13 +2177,13 @@ function formatStaminaRateLabel(staminaPerHour, netStaminaPerHour, recoveryEffic
 }
 
 function formatStaminaRateTooltip(staminaPerHour, netStaminaPerHour, recoveryEfficiency) {
-  return `${t('mods.huntAnalyzer.staminaPerHour')}: ${formatExactInt(staminaPerHour)} (${t('mods.huntAnalyzer.net')}: ${netStaminaPerHour > 0 ? '+' : ''}${formatExactInt(netStaminaPerHour)}/h) [${recoveryEfficiency}% ${t('mods.huntAnalyzer.recovery')}]`;
+  return `${t('mods.huntAnalyzer.staminaPerHour')}: ${formatExactInt(staminaPerHour)} (${t('mods.huntAnalyzer.net')}: ${netStaminaPerHour > 0 ? '+' : ''}${formatExactInt(netStaminaPerHour)}/h) [${recoveryEfficiency}% ${t('mods.huntAnalyzer.recovery')}]\n${t('mods.huntAnalyzer.staminaRateHelp')}`;
 }
 
 function setStaminaRateLineElement(element, staminaPerHour, netStaminaPerHour, recoveryEfficiency) {
   if (!element) return;
   element.textContent = formatStaminaRateLabel(staminaPerHour, netStaminaPerHour, recoveryEfficiency);
-  element.setAttribute('title', formatStaminaRateTooltip(staminaPerHour, netStaminaPerHour, recoveryEfficiency));
+  setTitleIfIdle(element, formatStaminaRateTooltip(staminaPerHour, netStaminaPerHour, recoveryEfficiency));
 }
 
 // =======================
@@ -2405,7 +2354,6 @@ function teardownHuntAnalyzerAnalysisCoordination(options = {}) {
 // only while a drag/resize is in progress (see beginPanelPointerTracking).
 let panelPointerMoveHandler = null;
 let panelPointerUpHandler = null;
-let dropdownClickHandler = null;
 let documentClickHandler = null;
 let beforeUnloadHandler = null;
 let storageEventHandler = null;
@@ -2500,12 +2448,18 @@ function createInventoryStyleCreaturePortrait(creatureData) {
     containerSlot.appendChild(rarityDiv);
     containerSlot.appendChild(img);
     containerSlot.appendChild(levelSpan);
+
+    const creatureFlags = [
+        creatureData.isShiny ? t('mods.huntAnalyzer.shiny') : '',
+        creatureData.isSealed ? t('mods.huntAnalyzer.sealed') : ''
+    ].filter(Boolean);
+    containerSlot.title = `${creatureData.originalName}${creatureFlags.length ? ` (${creatureFlags.join(', ')})` : ''}: ${formatExactInt(creatureData.count || 1)}`;
     
     // Add shiny indicator if creature is shiny
     if (creatureData.isShiny) {
         const shinyIcon = document.createElement('img');
         shinyIcon.src = 'https://bestiaryarena.com/assets/icons/shiny-star.png';
-        shinyIcon.alt = 'Shiny';
+        shinyIcon.alt = t('mods.huntAnalyzer.shiny');
         shinyIcon.title = t('mods.huntAnalyzer.shiny');
         shinyIcon.style.position = 'absolute';
         shinyIcon.style.bottom = '0px';
@@ -2521,7 +2475,7 @@ function createInventoryStyleCreaturePortrait(creatureData) {
         const sealedIcon = document.createElement('img');
         sealedIcon.src = SEALED_ICON_SRC;
         sealedIcon.className = 'tier-stars pixelated absolute right-0 top-0 z-2 opacity-75';
-        sealedIcon.alt = 'Sealed';
+        sealedIcon.alt = t('mods.huntAnalyzer.sealed');
         sealedIcon.title = t('mods.huntAnalyzer.sealed');
         sealedIcon.style.width = '9px';
         sealedIcon.style.height = '10px';
@@ -2545,6 +2499,7 @@ function createInventoryStyleItemPortrait(itemData) {
             
             // Make sure the sprite container has relative positioning for the count overlay
             spriteDiv.style.position = 'relative';
+            spriteDiv.title = `${itemData.originalName}: ${formatExactInt(itemData.count || 1)}`;
             spriteDiv.appendChild(countSpan);
             const dropRate = createDropRateOverlay(itemData);
             if (dropRate) spriteDiv.appendChild(dropRate);
@@ -2597,6 +2552,7 @@ function createInventoryStyleItemPortrait(itemData) {
     // Count overlay (bottom left like creatures)
     const countSpan = createCountOverlay(itemData.count);
     
+    containerSlot.title = `${itemData.originalName}: ${formatExactInt(itemData.count || 1)}`;
     containerSlot.appendChild(rarityDiv);
     containerSlot.appendChild(img);
     containerSlot.appendChild(countSpan);
@@ -2818,7 +2774,7 @@ async function saveHuntAnalyzerDataAsync() {
             } catch (idbError) {
                 console.error('[Hunt Analyzer] IndexedDB save failed:', idbError);
                 _consecutiveSaveFailures++;
-                showSaveWarning(`Battle history could not be saved to IndexedDB. Totals and playtime were saved.${getHuntAnalyzerStorageResetDismissHint()}`);
+                showSaveWarning(`${t('mods.huntAnalyzer.saveFailedIndexedDb')}${getHuntAnalyzerStorageResetDismissHint()}`);
                 return; // keep the failure count; only a fully successful save resets it
             }
         }
@@ -2832,7 +2788,7 @@ async function saveHuntAnalyzerDataAsync() {
         if (error.name === 'QuotaExceededError' || error.message?.includes('quota')) {
             showSaveWarning(getStorageQuotaWarning());
         } else if (_consecutiveSaveFailures >= 3) {
-            showSaveWarning(`Multiple save failures detected. Use "Copy Log" to back up your data.${getHuntAnalyzerStorageResetDismissHint()}`);
+            showSaveWarning(`${t('mods.huntAnalyzer.saveFailedMultiple')}${getHuntAnalyzerStorageResetDismissHint()}`);
         }
     }
 }
@@ -3444,7 +3400,7 @@ function addStatIconToPortrait(portrait, stat) {
 function createItemSprite(itemId, tooltipKey = '', rarity = 1, stat = null) {
     // Create the main container following Cyclopedia pattern
     const containerSlot = createContainerSlot('34px', 'container-slot surface-darker');
-    containerSlot.title = tooltipKey || `ID-${itemId}`;
+    containerSlot.title = tooltipKey || `#${itemId}`;
 
     // Create rarity container
     const rarityContainer = createRarityBorder(rarity, 'has-rarity relative grid h-full place-items-center');
@@ -4162,9 +4118,113 @@ function updateRoomTitleDisplay(roomId, roomName) {
 // Update map filter dropdown based on available maps
 // Map dropdown options: farmed maps in Cyclopedia region order. With a floor selected, only maps
 // that have battles on that floor are offered (the floor menu is narrowed by map the same way).
-function populateMapFilterMenu(dropdownMenu = document.getElementById("mod-map-filter-dropdown-menu")) {
-    if (!dropdownMenu) return;
-    dropdownMenu.innerHTML = "";
+// Map and floor filters share one dropdown implementation. Each registers itself by id so
+// opening one closes the others and a single document click closes them all.
+const filterDropdowns = new Map();
+
+function closeFilterDropdowns(exceptId) {
+    for (const [id, dropdown] of filterDropdowns) {
+        if (id !== exceptId) dropdown.close();
+    }
+}
+
+function createFilterDropdown({ id, tooltip, getOptions, getSelected, getLabel, onSelect, flex, maxWidth }) {
+    const prefix = `mod-${id}-filter-dropdown`;
+    const container = document.createElement('div');
+    container.className = 'ha-filter-dd';
+    container.style.flex = flex;
+    if (maxWidth) container.style.minWidth = '100px';
+
+    const button = document.createElement('button');
+    button.id = `${prefix}-button`;
+    button.className = 'ha-filter-dd-button';
+    button.title = tooltip;
+    button.setAttribute('aria-haspopup', 'listbox');
+    button.setAttribute('aria-expanded', 'false');
+    if (maxWidth) button.style.maxWidth = maxWidth;
+
+    const labelSpan = document.createElement('span');
+    labelSpan.id = `${prefix}-label`;
+    labelSpan.className = 'ha-filter-dd-label';
+
+    const arrow = document.createElement('span');
+    arrow.id = `${prefix}-arrow`;
+    arrow.className = 'ha-filter-dd-arrow';
+    arrow.textContent = '▼';
+
+    const menu = document.createElement('div');
+    menu.id = `${prefix}-menu`;
+    menu.className = 'ha-filter-dd-menu';
+    menu.setAttribute('role', 'listbox');
+
+    button.append(labelSpan, arrow);
+    container.append(button, menu);
+    applyThemeMapFilterDropdownStyles(button, menu);
+
+    const syncLabel = () => {
+        const label = getLabel(getSelected());
+        labelSpan.textContent = label;
+        labelSpan.title = label;
+    };
+
+    const setOpen = (open) => {
+        menu.dataset.open = open ? 'true' : 'false';
+        arrow.textContent = open ? '▲' : '▼';
+        button.setAttribute('aria-expanded', open ? 'true' : 'false');
+    };
+    const close = () => setOpen(false);
+
+    const populate = () => {
+        const selected = getSelected();
+        menu.replaceChildren(...getOptions().map(({ value, label }) => {
+            const option = document.createElement('div');
+            option.className = 'ha-filter-dd-option';
+            option.setAttribute('role', 'option');
+            option.textContent = label;
+            option.title = label;
+            // Read by isMapListedInFilterDropdown
+            option.dataset.mapFilterOption = String(value);
+            option.dataset.selected = value === selected ? 'true' : 'false';
+            option.setAttribute('aria-selected', option.dataset.selected);
+            option.addEventListener('click', (e) => {
+                e.stopPropagation();
+                close();
+                onSelect(value);
+            });
+            return option;
+        }));
+    };
+
+    // Button is discarded with the row on every rebuild, so an element-scoped listener can't leak
+    button.addEventListener('click', (e) => {
+        e.stopPropagation();
+        closeFilterDropdowns(id);
+        if (menu.dataset.open === 'true') {
+            close();
+        } else {
+            populate();
+            setOpen(true);
+        }
+    });
+    button.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') close();
+    });
+
+    filterDropdowns.set(id, { close, populate, syncLabel });
+    syncLabel();
+    populate();
+    return container;
+}
+
+function populateMapFilterMenu() {
+    filterDropdowns.get('map')?.populate();
+}
+
+function getMapFilterLabel(value) {
+    return value === 'ALL' ? t('mods.huntAnalyzer.allMaps') : value;
+}
+
+function getMapFilterOptions() {
     const farmedMapNames = new Set(
         HuntAnalyzerState.data.sessions
             .filter((session) => sessionMatchesFloorFilter(session))
@@ -4187,12 +4247,33 @@ function populateMapFilterMenu(dropdownMenu = document.getElementById("mod-map-f
     // Maps not found in regions (fallback - should be rare)
     orderedMaps.push(...Array.from(farmedMapNames).sort());
 
-    const selected = HuntAnalyzerState.ui.selectedMapFilter;
-    ["ALL", ...orderedMaps].forEach((mapName) => {
-        const option = createDropdownOption(mapName);
-        option.dataset.selected = mapName === selected ? "true" : "false";
-        dropdownMenu.appendChild(option);
-    });
+    return ['ALL', ...orderedMaps].map((value) => ({ value, label: getMapFilterLabel(value) }));
+}
+
+function selectMapFilter(mapName) {
+    HuntAnalyzerState.ui.selectedMapFilter = mapName;
+    // Floors differ per map: drop a floor selection the new map never recorded
+    if (!getAvailableFloorFilterValues().includes(HuntAnalyzerState.ui.selectedFloorFilter)) {
+        HuntAnalyzerState.ui.selectedFloorFilter = 'ALL';
+    }
+    filterDropdowns.get('map')?.syncLabel();
+    filterDropdowns.get('floor')?.syncLabel();
+    dataProcessor.aggregateData();
+    renderAllSessions();
+    refreshClearButtonLabel();
+    const navigateButton = document.getElementById('mod-map-filter-navigate-button');
+    if (navigateButton) {
+        navigateButton.style.display = mapName === 'ALL' ? 'none' : 'inline-flex';
+    }
+}
+
+function selectFloorFilter(value) {
+    HuntAnalyzerState.ui.selectedFloorFilter = value;
+    filterDropdowns.get('floor')?.syncLabel();
+    populateMapFilterMenu();
+    dataProcessor.aggregateData();
+    renderAllSessions();
+    refreshClearButtonLabel();
 }
 
 function updateMapFilterDropdown() {
@@ -4207,113 +4288,32 @@ function updateMapFilterDropdown() {
     // Prevent listener leaks across dropdown rebuilds.
     if (documentClickHandler) {
         document.removeEventListener("click", documentClickHandler);
-        documentClickHandler = null;
     }
-    const previousDropdownButton = document.getElementById("mod-map-filter-dropdown-button");
-    if (previousDropdownButton && dropdownClickHandler) {
-        previousDropdownButton.removeEventListener("click", dropdownClickHandler);
-        dropdownClickHandler = null;
-    }
+    filterDropdowns.clear();
 
-    // Clear existing content
-    mapFilterRow.innerHTML = "";
-    mapFilterRow.style.display = "flex";
-    mapFilterRow.style.alignItems = "center";
-    mapFilterRow.style.justifyContent = "center";
-    mapFilterRow.style.width = "100%";
-    mapFilterRow.style.gap = "8px";
+    const mapDropdown = createFilterDropdown({
+        id: 'map',
+        tooltip: t('mods.huntAnalyzer.mapFilterTooltip'),
+        // Shrinks (down to 100px) so the floor dropdown still fits beside it in a narrow panel
+        flex: '0 1 200px',
+        maxWidth: '200px',
+        getOptions: getMapFilterOptions,
+        getSelected: () => HuntAnalyzerState.ui.selectedMapFilter,
+        getLabel: getMapFilterLabel,
+        onSelect: selectMapFilter
+    });
+    const floorDropdown = createFilterDropdown({
+        id: 'floor',
+        tooltip: t('mods.huntAnalyzer.floorFilterTooltip'),
+        flex: '0 0 96px',
+        getOptions: () => getAvailableFloorFilterValues().map((value) => ({ value, label: getFloorFilterLabel(value) })),
+        getSelected: () => HuntAnalyzerState.ui.selectedFloorFilter,
+        getLabel: getFloorFilterLabel,
+        onSelect: selectFloorFilter
+    });
 
-    // Create dropdown container
-    const dropdownContainer = document.createElement("div");
-    dropdownContainer.style.position = "relative";
-    dropdownContainer.style.display = "inline-block";
-    // Shrinks (down to 100px) so the floor dropdown still fits beside it in a narrow panel
-    dropdownContainer.style.flex = "0 1 200px";
-    dropdownContainer.style.minWidth = "100px";
-
-    // Create dropdown button
-    const dropdownButton = document.createElement("button");
-    dropdownButton.id = "mod-map-filter-dropdown-button";
-    // 4px game frame (applyThemeMapFilterDropdownStyles) + small padding, like the other buttons
-    dropdownButton.style.padding = "2px 8px";
-    dropdownButton.style.fontSize = "12px";
-    dropdownButton.style.cursor = "pointer";
-    dropdownButton.style.width = "100%";
-    dropdownButton.style.minWidth = "0";
-    dropdownButton.style.maxWidth = "200px";
-    dropdownButton.style.boxSizing = "border-box";
-    dropdownButton.style.textAlign = "left";
-    dropdownButton.style.display = "flex";
-    dropdownButton.style.justifyContent = "space-between";
-    dropdownButton.style.alignItems = "center";
-    dropdownButton.style.gap = "8px";
-    dropdownButton.style.overflow = "hidden";
-
-    const selectedMapLabel = HuntAnalyzerState.ui.selectedMapFilter === "ALL"
-        ? t('mods.huntAnalyzer.allMaps')
-        : HuntAnalyzerState.ui.selectedMapFilter;
-
-    const labelSpan = document.createElement("span");
-    labelSpan.id = "mod-map-filter-dropdown-label";
-    labelSpan.textContent = selectedMapLabel;
-    labelSpan.title = selectedMapLabel;
-
-    const arrow = document.createElement("span");
-    arrow.id = "mod-map-filter-dropdown-arrow";
-    arrow.textContent = "▼";
-    arrow.style.fontSize = "10px";
-    arrow.style.flexShrink = "0";
-
-    dropdownButton.appendChild(labelSpan);
-    dropdownButton.appendChild(arrow);
-
-    // Create dropdown menu
-    const dropdownMenu = document.createElement("div");
-    dropdownMenu.id = "mod-map-filter-dropdown-menu";
-    dropdownMenu.style.position = "absolute";
-    dropdownMenu.style.top = "100%";
-    dropdownMenu.style.left = "0";
-    dropdownMenu.style.right = "0";
-    dropdownMenu.style.borderRadius = "4px";
-    dropdownMenu.style.zIndex = "100";
-    dropdownMenu.style.display = "none";
-    dropdownMenu.style.maxHeight = "200px";
-    dropdownMenu.style.overflowY = "auto";
-
-    populateMapFilterMenu(dropdownMenu);
-
-    // Toggle dropdown visibility
-    dropdownClickHandler = (e) => {
-        e.stopPropagation();
-        closeFloorFilterDropdown();
-        const isVisible = dropdownMenu.style.display === "block";
-        if (isVisible) {
-            dropdownMenu.style.display = "none";
-            arrow.textContent = "▼";
-            syncMapFilterDropdownOptionStyles();
-        } else {
-            syncMapFilterDropdownOptionStyles();
-            dropdownMenu.style.display = "block";
-            arrow.textContent = "▲";
-        }
-    };
-    dropdownButton.addEventListener("click", dropdownClickHandler);
-
-    // Close dropdowns when clicking outside
-    documentClickHandler = () => {
-        dropdownMenu.style.display = "none";
-        arrow.textContent = "▼";
-        syncMapFilterDropdownOptionStyles();
-        closeFloorFilterDropdown();
-    };
+    documentClickHandler = () => closeFilterDropdowns();
     document.addEventListener("click", documentClickHandler);
-
-    applyThemeMapFilterDropdownStyles(dropdownButton, dropdownMenu);
-
-    dropdownContainer.appendChild(dropdownButton);
-    dropdownContainer.appendChild(dropdownMenu);
-    mapFilterRow.appendChild(dropdownContainer);
-    mapFilterRow.appendChild(createFloorFilterDropdown());
 
     const navigateButton = createStyledButton('→');
     navigateButton.id = 'mod-map-filter-navigate-button';
@@ -4335,86 +4335,12 @@ function updateMapFilterDropdown() {
     navigateButton.title = getGoToMapLabel();
     navigateButton.setAttribute('aria-label', getGoToMapLabel());
     navigateButton.addEventListener('click', () => {
-        const navigated = navigateToSelectedMapFilter();
-        if (!navigated) {
-            const panel = document.getElementById(PANEL_ID);
-            showPanelFeedback(panel, getFailedToNavigateMapLabel(), false);
-        }
-    });
-    mapFilterRow.appendChild(navigateButton);
-}
-
-function syncMapFilterDropdownOptionStyles() {
-    const dropdownMenu = document.getElementById('mod-map-filter-dropdown-menu');
-    if (!dropdownMenu) return;
-
-    const selected = HuntAnalyzerState.ui.selectedMapFilter;
-    dropdownMenu.querySelectorAll('[data-map-filter-option]').forEach((option) => {
-        const isSelected = option.dataset.mapFilterOption === selected;
-        option.dataset.selected = isSelected ? 'true' : 'false';
-        option.style.backgroundColor = '';
-        option.style.color = '';
-    });
-}
-
-// Create a dropdown option
-function createDropdownOption(mapName) {
-    const option = document.createElement("div");
-    const optionLabel = mapName === "ALL" ? t('mods.huntAnalyzer.allMaps') : mapName;
-    option.textContent = optionLabel;
-    option.dataset.mapFilterOption = mapName;
-    option.style.padding = "8px 12px";
-    option.style.cursor = "pointer";
-    option.style.fontSize = "12px";
-    option.style.borderBottom = `1px solid ${getThemeColor('border')}`;
-    option.style.transition = "background-color 0.2s ease";
-    option.style.overflow = "hidden";
-    option.style.textOverflow = "ellipsis";
-    option.style.whiteSpace = "nowrap";
-    option.title = optionLabel;
-
-    // Click handler
-    option.addEventListener("click", () => {
-        HuntAnalyzerState.ui.selectedMapFilter = mapName;
-        syncMapFilterDropdownOptionStyles();
-
-        // Update dropdown button text
-        const dropdownButton = document.getElementById("mod-map-filter-dropdown-button");
-        const labelSpan = document.getElementById("mod-map-filter-dropdown-label");
-        if (labelSpan) {
-            labelSpan.textContent = optionLabel;
-            labelSpan.title = optionLabel;
-        }
-        
-        // Close dropdown
-        const dropdownMenu = document.getElementById("mod-map-filter-dropdown-menu");
-        if (dropdownMenu) {
-            dropdownMenu.style.display = "none";
-        }
-        
-        // Update arrow
-        const arrow = document.getElementById("mod-map-filter-dropdown-arrow");
-        if (arrow) {
-            arrow.textContent = "▼";
-        }
-        
-        // Floors differ per map: drop a floor selection the new map never recorded
-        if (!getAvailableFloorFilterValues().includes(HuntAnalyzerState.ui.selectedFloorFilter)) {
-            HuntAnalyzerState.ui.selectedFloorFilter = "ALL";
-        }
-        populateFloorFilterMenu();
-
-        // Refresh data and display
-        dataProcessor.aggregateData();
-        renderAllSessions();
-        refreshClearButtonLabel();
-        const navigateButton = document.getElementById('mod-map-filter-navigate-button');
-        if (navigateButton) {
-            navigateButton.style.display = mapName === 'ALL' ? 'none' : 'inline-flex';
+        if (!navigateToSelectedMapFilter()) {
+            showPanelFeedback(document.getElementById(PANEL_ID), getFailedToNavigateMapLabel(), false);
         }
     });
 
-    return option;
+    mapFilterRow.replaceChildren(mapDropdown, floorDropdown, navigateButton);
 }
 
 function getFloorFilterLabel(value) {
@@ -4442,224 +4368,125 @@ function getAvailableFloorFilterValues() {
     return values;
 }
 
-function closeFloorFilterDropdown() {
-    const menu = document.getElementById("mod-floor-filter-dropdown-menu");
-    if (menu) menu.style.display = "none";
-    const arrow = document.getElementById("mod-floor-filter-dropdown-arrow");
-    if (arrow) arrow.textContent = "▼";
-}
-
-function syncFloorFilterLabel() {
-    const labelSpan = document.getElementById("mod-floor-filter-dropdown-label");
-    if (!labelSpan) return;
-    const label = getFloorFilterLabel(HuntAnalyzerState.ui.selectedFloorFilter);
-    labelSpan.textContent = label;
-    labelSpan.title = label;
-}
-
-function populateFloorFilterMenu() {
-    const menu = document.getElementById("mod-floor-filter-dropdown-menu");
-    if (!menu) return;
-    menu.innerHTML = "";
-    const selected = HuntAnalyzerState.ui.selectedFloorFilter;
-    getAvailableFloorFilterValues().forEach((value) => {
-        const option = document.createElement("div");
-        const label = getFloorFilterLabel(value);
-        option.textContent = label;
-        option.title = label;
-        // Reuses the map filter option styles (data-map-filter-option CSS)
-        option.dataset.mapFilterOption = String(value);
-        option.dataset.selected = value === selected ? 'true' : 'false';
-        option.style.padding = "8px 12px";
-        option.style.cursor = "pointer";
-        option.style.fontSize = "12px";
-        option.style.borderBottom = `1px solid ${getThemeColor('border')}`;
-        option.style.transition = "background-color 0.2s ease";
-        option.style.overflow = "hidden";
-        option.style.textOverflow = "ellipsis";
-        option.style.whiteSpace = "nowrap";
-        option.addEventListener("click", (e) => {
-            e.stopPropagation();
-            HuntAnalyzerState.ui.selectedFloorFilter = value;
-            closeFloorFilterDropdown();
-            populateFloorFilterMenu();
-            syncFloorFilterLabel();
-            populateMapFilterMenu();
-            dataProcessor.aggregateData();
-            renderAllSessions();
-            refreshClearButtonLabel();
-        });
-        menu.appendChild(option);
-    });
-}
-
-// Floor dropdown shown beside the map filter; its button/menu are rebuilt with the row.
-function createFloorFilterDropdown() {
-    const container = document.createElement("div");
-    container.style.position = "relative";
-    container.style.display = "inline-block";
-    container.style.flex = "0 0 auto";
-    container.style.width = "96px";
-
-    const button = document.createElement("button");
-    button.id = "mod-floor-filter-dropdown-button";
-    button.style.padding = "2px 6px";
-    button.style.fontSize = "12px";
-    button.style.cursor = "pointer";
-    button.style.width = "100%";
-    button.style.boxSizing = "border-box";
-    button.style.textAlign = "left";
-    button.style.display = "flex";
-    button.style.justifyContent = "space-between";
-    button.style.alignItems = "center";
-    button.style.gap = "4px";
-    button.style.overflow = "hidden";
-
-    const labelSpan = document.createElement("span");
-    labelSpan.id = "mod-floor-filter-dropdown-label";
-    labelSpan.style.flex = "1 1 auto";
-    labelSpan.style.minWidth = "0";
-    labelSpan.style.overflow = "hidden";
-    labelSpan.style.textOverflow = "ellipsis";
-    labelSpan.style.whiteSpace = "nowrap";
-
-    const arrow = document.createElement("span");
-    arrow.id = "mod-floor-filter-dropdown-arrow";
-    arrow.textContent = "▼";
-    arrow.style.fontSize = "10px";
-    arrow.style.flexShrink = "0";
-
-    button.appendChild(labelSpan);
-    button.appendChild(arrow);
-
-    const menu = document.createElement("div");
-    menu.id = "mod-floor-filter-dropdown-menu";
-    menu.style.position = "absolute";
-    menu.style.top = "100%";
-    menu.style.left = "0";
-    menu.style.right = "0";
-    menu.style.borderRadius = "4px";
-    menu.style.zIndex = "100";
-    menu.style.display = "none";
-    menu.style.maxHeight = "200px";
-    menu.style.overflowY = "auto";
-
-    // Button is discarded with the row on every rebuild, so an element-scoped listener can't leak
-    button.addEventListener("click", (e) => {
-        e.stopPropagation();
-        const mapMenu = document.getElementById("mod-map-filter-dropdown-menu");
-        if (mapMenu) mapMenu.style.display = "none";
-        const mapArrow = document.getElementById("mod-map-filter-dropdown-arrow");
-        if (mapArrow) mapArrow.textContent = "▼";
-        if (menu.style.display === "block") {
-            closeFloorFilterDropdown();
-        } else {
-            populateFloorFilterMenu();
-            menu.style.display = "block";
-            arrow.textContent = "▲";
-        }
-    });
-
-    applyThemeMapFilterDropdownStyles(button, menu);
-
-    const label = getFloorFilterLabel(HuntAnalyzerState.ui.selectedFloorFilter);
-    labelSpan.textContent = label;
-    labelSpan.title = label;
-
-    container.appendChild(button);
-    container.appendChild(menu);
-    // Options are built on open (populateFloorFilterMenu), so the list always reflects current sessions
-    return container;
-}
-
 // =======================
 // 4. Data Processing Functions
 // =======================
 // Renders all stored game sessions to the analyzer panel.
-function renderAllSessions() {
-    // Check if the panel is open first
-    if (!document.getElementById(PANEL_ID)) {
-        return; // Silently return if panel is not open
+// Keeps one persistent grid per container and only rebuilds cells whose data changed (a battle
+// touches a few drops, but every rate badge shares the battle count, so those cells are re-signed).
+// Existing cells are reused and re-ordered instead of recreating every portrait on each battle.
+function syncGrid(container, entries, { keyOf, signatureOf, buildCell }) {
+    if (!container._haGrid || container._haGrid.parentNode !== container) {
+        container.innerHTML = '';
+        container._haGrid = createUnifiedGridContainer();
+        container._haCells = new Map();
+        container.appendChild(container._haGrid);
     }
-    
-    const cachedLootDiv = domCache.get("mod-loot-display");
-    const cachedCreatureDropDiv = domCache.get("mod-creature-drop-display");
-    if (!cachedLootDiv || !cachedCreatureDropDiv) {
+    const grid = container._haGrid;
+    const cells = container._haCells;
+    container._haEmpty?.remove();
+    const seen = new Set();
+    let anchor = grid.firstChild;
+    for (const data of entries) {
+        const key = keyOf(data);
+        const signature = signatureOf(data, key);
+        seen.add(key);
+        let record = cells.get(key);
+        if (!record || record.signature !== signature) {
+            const cell = buildCell(data);
+            if (record?.cell.parentNode === grid) {
+                if (record.cell === anchor) anchor = cell;
+                grid.replaceChild(cell, record.cell);
+            }
+            record = { cell, signature };
+            cells.set(key, record);
+        }
+        if (record.cell === anchor) {
+            anchor = anchor.nextSibling;
+        } else {
+            grid.insertBefore(record.cell, anchor);
+        }
+    }
+    for (const [key, record] of cells) {
+        if (seen.has(key)) continue;
+        record.cell.remove();
+        cells.delete(key);
+    }
+    if (!entries.length) {
+        if (!container._haEmpty) {
+            container._haEmpty = document.createElement('div');
+            container._haEmpty.className = 'ha-grid-empty';
+        }
+        container._haEmpty.textContent = t('mods.huntAnalyzer.noDrops');
+        grid.appendChild(container._haEmpty);
+    }
+}
+
+function getGridSignaturePrefix() {
+    const { settings } = HuntAnalyzerState;
+    return `${api.i18n.getLocale?.() || ''}|${settings.theme}|${settings.showDropRates !== false ? 1 : 0}|${getFilteredDropRates().battles}`;
+}
+
+function renderAllSessions() {
+    if (!document.getElementById(PANEL_ID)) {
+        return; // Panel is not open
+    }
+
+    const lootDiv = domCache.get("mod-loot-display");
+    const creatureDiv = domCache.get("mod-creature-drop-display");
+    if (!lootDiv || !creatureDiv) {
         console.warn("[Hunt Analyzer] Render target divs not available. Panel might not be open.");
         return;
     }
 
-    // Use the new data processor to aggregate data
     dataProcessor.aggregateData();
-    
-    // Use DocumentFragment for efficient batch DOM updates
-    const creatureFragment = document.createDocumentFragment();
-    
-    // Clear previous content - but build fragments first to minimize reflow
-    cachedLootDiv.innerHTML = ''; // Clear previous content
-    cachedCreatureDropDiv.innerHTML = ''; // Clear previous content
-
     updatePanelResourceTotalDisplays();
+    refreshPanelSectionTitles();
 
-    // Get all loot items (Gold and Dust are already excluded from aggregatedLoot)
-    const allLoot = Array.from(HuntAnalyzerState.data.aggregatedLoot.values());
+    const { lootBattlesByKey } = getFilteredDropRates();
+    const prefix = getGridSignaturePrefix();
 
-    // Calculate total loot items for current filter
-    let totalLootItems = 0;
-    allLoot.forEach((data) => {
-        totalLootItems += data.count;
-    });
-
-    updateFilteredSectionTitle('mod-loot-title', 'mods.huntAnalyzer.loot', totalLootItems);
-
-    const sortedFilteredLoot = sortGridEntries(allLoot, compareLootEntries, {
-        getRarity: (entry) => entry.rarity || 0
-    });
-
-    // Create grid container for loot using unified function
-    const lootGridContainer = createUnifiedGridContainer();
-
-    sortedFilteredLoot.forEach((data) => {
-        const lootEntryDiv = createGridEntryCell();
-        const iconWrapper = createGridIconWrapper();
-        mountGridVisual(iconWrapper, resolveLootGridVisual(data), '🎲');
-        lootEntryDiv.appendChild(iconWrapper);
-        lootGridContainer.appendChild(lootEntryDiv);
-    });
-    
-    // Append grid container to loot display
-    cachedLootDiv.appendChild(lootGridContainer);
-
-    const sortedOverallCreatures = sortGridEntries(Array.from(HuntAnalyzerState.data.aggregatedCreatures.values()), compareCreatureEntries, {
-        getRarity: (entry) => entry.tierLevel || 0
-    });
-
-    // Calculate total creature drops for current filter
-    let totalCreatureDrops = 0;
-    sortedOverallCreatures.forEach((data) => {
-        totalCreatureDrops += data.count;
-    });
-
-    updateFilteredSectionTitle('mod-creature-drops-title', 'mods.huntAnalyzer.creatures', totalCreatureDrops);
-
-    // Create grid container for creatures using unified function
-    const gridContainer = createUnifiedGridContainer();
-
-    sortedOverallCreatures.forEach((data) => {
-        const creatureEntryDiv = createGridEntryCell();
-        const iconWrapper = createGridIconWrapper();
-        const creatureVisual = resolveCreatureGridVisual(data);
-        if (creatureVisual instanceof HTMLElement) {
-            const creatureRate = createCreatureDropRateOverlay(data);
-            if (creatureRate) creatureVisual.appendChild(creatureRate);
+    syncGrid(
+        lootDiv,
+        sortGridEntries(Array.from(HuntAnalyzerState.data.aggregatedLoot.values()), compareLootEntries, {
+            getRarity: (entry) => entry.rarity || 0
+        }),
+        {
+            keyOf: buildLootAggregateKey,
+            signatureOf: (data, key) => `${prefix}|${data.count}|${lootBattlesByKey.get(key) || 0}`,
+            buildCell: (data) => {
+                const cell = createGridEntryCell();
+                const iconWrapper = createGridIconWrapper();
+                mountGridVisual(iconWrapper, resolveLootGridVisual(data), '🎲');
+                cell.appendChild(iconWrapper);
+                return cell;
+            }
         }
-        mountGridVisual(iconWrapper, creatureVisual, '👾');
-        creatureEntryDiv.appendChild(iconWrapper);
-        gridContainer.appendChild(creatureEntryDiv);
-    });
-    
-    // Append grid container to creature display
-    cachedCreatureDropDiv.appendChild(gridContainer);
+    );
+
+    const { creatureBattlesByKey } = getFilteredDropRates();
+    syncGrid(
+        creatureDiv,
+        sortGridEntries(Array.from(HuntAnalyzerState.data.aggregatedCreatures.values()), compareCreatureEntries, {
+            getRarity: (entry) => entry.tierLevel || 0
+        }),
+        {
+            keyOf: buildCreatureAggregateKey,
+            signatureOf: (data, key) => `${prefix}|${data.count}|${creatureBattlesByKey.get(key) || 0}`,
+            buildCell: (data) => {
+                const cell = createGridEntryCell();
+                const iconWrapper = createGridIconWrapper();
+                const creatureVisual = resolveCreatureGridVisual(data);
+                if (creatureVisual instanceof HTMLElement) {
+                    const creatureRate = createCreatureDropRateOverlay(data);
+                    if (creatureRate) creatureVisual.appendChild(creatureRate);
+                }
+                mountGridVisual(iconWrapper, creatureVisual, '👾');
+                cell.appendChild(iconWrapper);
+                return cell;
+            }
+        }
+    );
 
     updatePanelDisplay(); // Update overall rates after rendering all sessions
 }
@@ -4678,7 +4505,7 @@ function processAutoplaySummary(serverResults) {
     requestAnimationFrame(() => {
         renderAllSessions();
         if (!isMapListedInFilterDropdown(roomName)) {
-            updateMapFilterDropdown();
+            populateMapFilterMenu();
         }
     });
 }
@@ -5511,14 +5338,15 @@ function updateFilteredSectionTitle(titleId, labelKey, totalCount) {
     title.title = formatExactInt(totalCount);
 }
 
-function setCompactTotalDisplay(element, value) {
+function setCompactTotalDisplay(element, value, label) {
     if (!element) return;
     element.textContent = formatCompactInt(value);
-    element.setAttribute('title', formatExactInt(value));
+    setTitleIfIdle(element, label ? `${label}: ${formatExactInt(value)}` : formatExactInt(value));
 }
 
 function updatePanelResourceTotalDisplays(elementById) {
-    HUNT_ANALYZER_PANEL_RESOURCE_TOTALS.forEach(({ amountId, totalKey }) => {
+    HUNT_ANALYZER_PANEL_RESOURCE_TOTALS.forEach(({ amountId, totalKey, labelKey }) => {
+        const label = t(labelKey);
         const element = elementById?.[amountId]
             ?? domCache.get(amountId)
             ?? document.getElementById(amountId);
@@ -5531,10 +5359,10 @@ function updatePanelResourceTotalDisplays(elementById) {
             const dragonPlantLine = breakdown.includeDragonPlantCollect
                 ? `\n${t('mods.huntAnalyzer.dragonPlant')}: ${formatExactInt(breakdown.dragonPlantBonusGold)}`
                 : '';
-            setCompactTotalDisplay(element, breakdown.total);
-            element.setAttribute(
-                'title',
-                `${t('mods.huntAnalyzer.lootGold')}: ${formatExactInt(breakdown.baseGold)}${creatureLine}${dragonPlantLine}`
+            setCompactTotalDisplay(element, breakdown.total, label);
+            setTitleIfIdle(
+                element,
+                `${label}: ${formatExactInt(breakdown.total)}\n${t('mods.huntAnalyzer.lootGold')}: ${formatExactInt(breakdown.baseGold)}${creatureLine}${dragonPlantLine}`
             );
             return;
         }
@@ -5546,14 +5374,14 @@ function updatePanelResourceTotalDisplays(elementById) {
             const squeezeLine = dustBreakdown.includeDisenchantedEquipments
                 ? `\n${t('mods.huntAnalyzer.creatureSqueezes')}: ${formatExactInt(dustBreakdown.creatureSqueezeDust || 0)}`
                 : '';
-            setCompactTotalDisplay(element, dustBreakdown.total);
-            element.setAttribute(
-                'title',
-                `${t('mods.huntAnalyzer.loot')}: ${formatExactInt(dustBreakdown.lootDust)}${disenchantLine}${squeezeLine}`
+            setCompactTotalDisplay(element, dustBreakdown.total, label);
+            setTitleIfIdle(
+                element,
+                `${label}: ${formatExactInt(dustBreakdown.total)}\n${t('mods.huntAnalyzer.loot')}: ${formatExactInt(dustBreakdown.lootDust)}${disenchantLine}${squeezeLine}`
             );
             return;
         }
-        setCompactTotalDisplay(element, HuntAnalyzerState.totals[totalKey]);
+        setCompactTotalDisplay(element, HuntAnalyzerState.totals[totalKey], label);
     });
 }
 
@@ -5775,7 +5603,6 @@ function teardownOpenPanelResources() {
         document.removeEventListener('click', documentClickHandler);
         documentClickHandler = null;
     }
-    dropdownClickHandler = null;
     armedInlineConfirmResets.forEach((reset) => reset());
     domCache.clear();
     if (updateIntervalId) {
@@ -5819,7 +5646,7 @@ function toggleHuntAnalyzerPanel() {
 // =======================
 
 // Creates a display element with icon and amount
-function createResourceDisplay(iconSrc, iconAlt, amountId, colorKey = 'text', rowHeight) {
+function createResourceDisplay(iconSrc, label, amountId, colorKey = 'text', rowHeight) {
     const displayDiv = document.createElement('div');
     displayDiv.style.display = 'flex';
     displayDiv.style.alignItems = 'center';
@@ -5831,7 +5658,8 @@ function createResourceDisplay(iconSrc, iconAlt, amountId, colorKey = 'text', ro
     icon.style.height = '12px';
     icon.style.imageRendering = 'pixelated';
     icon.src = iconSrc;
-    icon.alt = iconAlt;
+    icon.alt = label;
+    icon.title = label;
 
     const amountSpan = document.createElement('span');
     amountSpan.id = amountId;
@@ -5850,7 +5678,7 @@ function appendPanelResourceTotals(parent, rowHeight) {
     const spansById = {};
     HUNT_ANALYZER_PANEL_RESOURCE_TOTALS.forEach((spec) => {
         const { displayDiv, amountSpan } = createResourceDisplay(
-            spec.iconSrc, spec.iconAlt, spec.amountId, spec.colorKey, rowHeight
+            spec.iconSrc, t(spec.labelKey), spec.amountId, spec.colorKey, rowHeight
         );
         parent.appendChild(displayDiv);
         spansById[spec.amountId] = amountSpan;
@@ -6303,13 +6131,6 @@ function createAutoplayAnalyzerPanel() {
         ellipsis: true,
         initialText: `${t('mods.huntAnalyzer.exp')}: ${formatExpValue(0)} | ${formatExpValue(0)}/h | ${formatExpValue(0)}/${t('mods.huntAnalyzer.expSessionAbbr')}`
     });
-    expRateElement.addEventListener('mouseenter', () => {
-        expRateElement.dataset.haExpTooltipHover = '1';
-    });
-    expRateElement.addEventListener('mouseleave', () => {
-        delete expRateElement.dataset.haExpTooltipHover;
-        updateModExpRateDisplay(expRateElement);
-    });
     leftRatesSection.appendChild(expRateElement);
 
     const totalStaminaSpentElement = createRateDisplay('mod-total-stamina-spent', null, {
@@ -6385,6 +6206,7 @@ function createAutoplayAnalyzerPanel() {
 
 
     const clearButton = createStyledButton(getClearButtonLabel());
+    clearButton.title = getClearButtonTooltip();
     clearButton.style.width = '135px';
     clearButton.dataset.fixedConfirmWidth = '135px';
     attachInlineConfirm(clearButton, {
@@ -6394,6 +6216,7 @@ function createAutoplayAnalyzerPanel() {
     });
 
     const copyLogButton = createStyledButton(t('mods.huntAnalyzer.copyLog'));
+    copyLogButton.title = t('mods.huntAnalyzer.copyLogTooltip');
     copyLogButton.addEventListener("click", () => {
         const summaryText = generateSummaryLogText();
         const success = copyToClipboard(summaryText);
@@ -6614,7 +6437,7 @@ function resolvePanelElement(id, elementById) {
 function setCompactRateDisplay(element, labelKey, ratePerHour, tooltipOverride = null) {
     if (!element) return;
     element.textContent = `${t(labelKey)}: ${formatCompactInt(ratePerHour)}`;
-    element.setAttribute('title', tooltipOverride || `${t(labelKey)}: ${formatExactInt(ratePerHour)}`);
+    setTitleIfIdle(element, tooltipOverride || `${t(labelKey)}: ${formatExactInt(ratePerHour)}`);
 }
 
 function updateSessionCountDisplay(element, filteredTimeHours = getFilteredTimeHours()) {
@@ -6622,7 +6445,7 @@ function updateSessionCountDisplay(element, filteredTimeHours = getFilteredTimeH
     const filteredSessionCount = getFilteredSessionCount();
     const sessionRate = filteredTimeHours > 0 ? Math.floor(filteredSessionCount / filteredTimeHours) : 0;
     element.textContent = `${t('mods.huntAnalyzer.sessions')}: ${filteredSessionCount} (${formatCompactInt(sessionRate)}/h)`;
-    element.setAttribute('title', `${t('mods.huntAnalyzer.sessions')}: ${formatExactInt(filteredSessionCount)} (${formatExactInt(sessionRate)}/h)`);
+    setTitleIfIdle(element, `${t('mods.huntAnalyzer.sessions')}: ${formatExactInt(filteredSessionCount)} (${formatExactInt(sessionRate)}/h)`);
 }
 
 function updateWinLossDisplay(element) {
@@ -6638,7 +6461,7 @@ function updateStaminaSummaryDisplay(element) {
     if (HuntAnalyzerState.settings.visibility?.stamina !== false) {
         element.style.display = 'inline';
     }
-    element.setAttribute('title', `${t('mods.huntAnalyzer.totalStamina')}: ${formatExactInt(HuntAnalyzerState.totals.staminaSpent)}`);
+    setTitleIfIdle(element, `${t('mods.huntAnalyzer.totalStamina')}: ${formatExactInt(HuntAnalyzerState.totals.staminaSpent)}`);
 }
 
 // Playtime = battle time + idle time; the tooltip splits it. filteredTimeHours is the rates time
@@ -6648,12 +6471,12 @@ function updatePlaytimeDisplay(element, filteredTimeHours = getFilteredTimeHours
     const idleMs = getFilteredIdleMs();
     if (idleMs == null) {
         element.textContent = formatPlaytimeLabel(formatPlaytime(filteredTimeHours));
-        element.title = '';
+        setTitleIfIdle(element, '');
         return;
     }
     const battleMs = filteredTimeHours * 60 * 60 * 1000;
     element.textContent = formatPlaytimeLabel(formatTime(battleMs + idleMs));
-    element.title = `${t('mods.huntAnalyzer.battleTime')}: ${formatTime(battleMs)} | ${t('mods.huntAnalyzer.idle')}: ${formatTime(idleMs)}`;
+    setTitleIfIdle(element, `${t('mods.huntAnalyzer.battleTime')}: ${formatTime(battleMs)} | ${t('mods.huntAnalyzer.idle')}: ${formatTime(idleMs)}`);
 }
 
 function calculateStaminaRateMetrics(filteredTimeHours = getFilteredTimeHours()) {
@@ -6708,7 +6531,7 @@ function updatePanelRateDisplays(elementById, filteredTimeHours = getFilteredTim
         if (id === 'mod-gold-rate') return;
         setCompactRateDisplay(resolvePanelElement(id, elementById), labelKey, rates[rateKey]);
     });
-    updateModExpRateDisplay(resolvePanelElement('mod-exp-rate', elementById));
+    updateModExpRateDisplay(resolvePanelElement('mod-exp-rate', elementById), filteredTimeHours);
     updateStaminaRateDisplay(resolvePanelElement('mod-total-stamina-spent', elementById), filteredTimeHours);
 }
 
@@ -6737,9 +6560,8 @@ function refreshPanelLiveStats(elementById) {
 }
 
 /** Live exp row: total (filtered) | smoothed exp/h | avg exp per session. */
-function updateModExpRateDisplay(targetEl) {
+function updateModExpRateDisplay(targetEl, filteredTimeHours = getFilteredTimeHours()) {
     if (!targetEl) return;
-    const filteredTimeHours = getFilteredTimeHours();
     const totalExp = Math.max(0, Math.floor(Number(HuntAnalyzerState.totals.experience) || 0));
     const expRatePerHour = filteredTimeHours > 0
         ? smoothHourlyRate(totalExp, filteredTimeHours)
@@ -6753,14 +6575,7 @@ function updateModExpRateDisplay(targetEl) {
     if (targetEl.textContent !== nextText) {
         targetEl.textContent = nextText;
     }
-    // Do not rewrite `title` while hovered: exp/h ticks every second so the string always changes,
-    // which re-triggers native tooltips. Title refreshes on mouseleave via listener.
-    if (targetEl.dataset.haExpTooltipHover === '1') {
-        return;
-    }
-    if (targetEl.getAttribute('title') !== nextTitle) {
-        targetEl.setAttribute('title', nextTitle);
-    }
+    setTitleIfIdle(targetEl, nextTitle);
 }
 
 // Updates the display in the Hunt Analyzer Mod panel with the current loot, creature drops,
@@ -7397,7 +7212,7 @@ function addResizeHandles(panel) {
         handle.style.zIndex = '10';
         handle.style.background = 'transparent';
         handle.style.userSelect = 'none';
-        handle.setAttribute('aria-label', 'Resize ' + dir);
+        handle.setAttribute('aria-label', t('common.resize'));
         // Position and size for each handle
         if (dir.length === 1) {
             // Edge
@@ -7543,6 +7358,7 @@ async function cleanupHuntAnalyzer() {
     step('timers', () => {
         stopInternalClock();
         clearTrackedTimeouts();
+        window.BAToast?.clearMod(t('mods.huntAnalyzer.buttonText'));
         clearTimeout(persistenceSaveDebounceTimeoutId);
         persistenceSaveDebounceTimeoutId = null;
         clearTimeout(huntAnalyzerPlantCollectBurstTimeoutId);

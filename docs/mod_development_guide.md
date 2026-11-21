@@ -100,7 +100,7 @@ export const SUPER_MODS = [
 
 **2. `background.js`** — In the `getModCounts` message handler, update the hardcoded `HARDCODED_MOD_COUNTS` constant so `database`, `official`, `super`, and `ot` match the lengths in `mod-registry.js`. Chromium uses this fallback because the service worker cannot dynamically import the registry. Search for `HARDCODED_MOD_COUNTS`.
 
-**3. `popup/popup.js`** — Update the static name arrays so the popup lists match `mod-registry.js` (search for *kept in sync with mod-registry.js*). Also add a short entry to `modDescriptions` and, if you use translated tooltips, `assets/locales/en-US.json` and `assets/locales/pt-BR.json` under `popup.modDescriptions`.
+**3. `popup/popup.js`** — Update the static name arrays so the popup lists match `mod-registry.js` (search for *kept in sync with mod-registry.js*). Add the mod's one-line description to **both** `assets/locales/en-US.json` and `assets/locales/pt-BR.json` under `popup.modDescriptions`, keyed by the mod's display name (the locale is the only place descriptions live; there is no copy in `popup.js`).
 
 ```javascript
 const superModNames = [
@@ -113,12 +113,14 @@ const superModNames = [
 
 **4. `content/local_mods.js`** — Add the filename to the matching `FALLBACK_*` array (search for *Keep in sync with content/mod-registry.js*). This list is used when the page cannot dynamically import `mod-registry.js` (for example Orion iOS).
 
+**Then run** `node tools/check-mod-lists.mjs` (also part of `node tools/check-all.mjs`). It fails when the popup, `background.js` (including `HARDCODED_MOD_COUNTS`) or the `local_mods.js` fallbacks disagree with `mod-registry.js`, or when a listed mod has no file.
+
 **After updating:** reload the extension in your browser (`chrome://extensions` → Reload). The popup reads bundled mods from extension storage; `background.js` merges any new registry entries into storage when you open the popup. If a mod still does not appear, refresh a Bestiary Arena tab once so the content script re-registers mods, or use the popup’s **Reset local mods** button and refresh the game tab.
 
 **Why four places?**
 
 - `mod-registry.js` is the source of truth for content scripts (ES modules).
-- The popup cannot load those modules the same way, so it duplicates filenames for categorization and descriptions.
+- The popup keeps its own copy of the filenames for categorization (it does not import the registry; an import could not be verified on every supported browser, Orion/iOS included). Descriptions come from the locale files.
 - `local_mods.js` embeds the same lists for environments where dynamic import fails.
 - On Chrome, the background service worker cannot use `import()` for the registry in all code paths, so category totals use the hardcoded `modCounts` object until that limitation changes.
 
@@ -875,7 +877,22 @@ For more details on the game state API, see the [Game State API Documentation](g
 
 ### Community event competitions
 
-`content/event-competition.js` exposes `window.EventCompetition`, a config-driven framework for Firebase-backed floor/rank leaderboards (join flow, modal UI, auto-submit on victory, raid timer). Better Highscores registers Tibia Ball League via a thin adapter; future timed events can call `EventCompetition.register(config, deps)` with their own `roomId`, Firebase paths, floor ranges, and `i18nPrefix`. The script is injected after `custom-battles.js` by `injector.js` (before `local_mods.js`), so it is available to all bundled mods. Wait for `window.EventCompetition` if your mod loads before the framework (same pattern as `window.CustomBattles` in Quests). When a known event room is live in `state.raids` but no adapter is registered (e.g. Better Highscores disabled), the framework shows a one-shot nudge toast telling the player to enable Better Highscores.
+`content/event-competition.js` exposes `window.EventCompetition`, a config-driven framework for Firebase-backed floor/rank leaderboards (join flow, modal UI, auto-submit on victory, raid timer). Better Highscores registers Tibia Ball League via a thin adapter; future timed events can call `EventCompetition.register(config, deps)` with their own `roomId`, Firebase paths, floor ranges, and `i18nPrefix`. The script is injected on demand (see **On-demand scripts** above), only when a mod that depends on it runs, so a mod that needs it must be listed in `MOD_SCRIPT_DEPENDENCIES` in `local_mods.js`. The framework also contains a one-shot nudge toast for a known live event when no adapter is registered (e.g. Better Highscores disabled). Because the script is no longer loaded for players who do not use Better Highscores, that nudge only runs for the next event if the loader is changed to inject `event-competition.js` while such an event is live.
+
+### Toasts: use `window.BAToast`
+
+`content/ba-toast.js` exposes `window.BAToast`, the one shared toast stack (game-native `widget-top`/`widget-bottom` markup, so every mod looks the same and toasts from different mods stack instead of overlapping). It is injected before `local_mods.js`. Do not build your own `*-toast-container`.
+
+```js
+window.BAToast?.show({ mod: 'Raid Hunter', message: 'Starting raid', type: 'info', icon: 'https://bestiaryarena.com/assets/icons/raid.png' });
+```
+
+- `mod` is required and is shown first (coloured by `type` with the game's own `text-cooldown` / `text-valid` / `text-boosted` / `text-invalid` classes; no bold, the pixel font has no bold face and fakes it blurry), so the player knows which mod spoke. Do not repeat the mod name in `message`.
+- `type`: `info` | `success` | `warning` | `error` (default durations 4s / 4s / 6s / 7s; `duration: 0` stays until the returned handle's `remove()`). `update(message)` edits it in place.
+- For coloured words inside a message use the game's palette classes (`text-valid` green, `text-invalid` red, `text-boosted` gold, `text-cooldown` blue, `text-dust`, `text-shiny`, `text-stamina` ...). `text-success` / `text-error` do not exist in the game CSS and render uncoloured.
+- Messages are one whole translatable string with `{placeholders}`, sentence case, no trailing punctuation, about 60 characters or fewer. Never build one from concatenated fragments.
+- Call `window.BAToast?.clearMod('<Mod Name>')` from `exports.cleanup()` to drop that mod's toasts and timers.
+- `tools/check-toasts.mjs` (part of `check-all.mjs`) fails if a new file defines its own toast container; its `LEGACY` list is the set of mods still to migrate.
 
 ## Best Practices
 
@@ -1276,11 +1293,12 @@ User scripts stored in localStorage are automatically integrated:
 2. **`content/platform.js`** — sets `window.BestiaryPlatform` (desktop strict vs mobile relaxed loader)
 3. **`content/client.js`** — `BestiaryModAPI`, UI components
 4. **`content/mod-coordination.mjs`** — loaded as `text/javascript` (IIFE, not `type="module"`)
-5. **`content/custom-battles.js`**
-6. **`content/event-competition.js`**
-7. **`content/local_mods.js`** — mod discovery, batch execution, completion signal
+5. **`content/ba-toast.js`** — the shared toast stack (`window.BAToast`)
+6. **`content/local_mods.js`** — mod discovery, batch execution, completion signal
 
-`utility_injector.js` (at `document_idle`) loads `ba-sandbox-utils.mjs` (same IIFE / non-module rule). `custom-battles.js` and `event-competition.js` are injected once by `injector.js` to avoid double-loading.
+`utility_injector.js` (at `document_idle`) loads `ba-sandbox-utils.mjs` (same IIFE / non-module rule).
+
+**On-demand scripts.** `custom-battles.js` (327 KB, `window.CustomBattles`) and `event-competition.js` (213 KB, `window.EventCompetition`) are not part of the startup chain. `local_mods.js` injects one right before it runs a mod that needs it (`MOD_SCRIPT_DEPENDENCIES`: Quests, Challenges and Map Editor need `custom-battles.js`; Better Highscores needs `event-competition.js`). It asks `injector.js` with the `injectContentScript` message, waits for the global, then runs the mod, also when the mod is enabled later from the popup. `injector.js` only accepts the files in `ON_DEMAND_CONTENT_SCRIPTS`. To make a new mod depend on one of them, add it to `MOD_SCRIPT_DEPENDENCIES`; to add a new on-demand script, add it to both lists (and to `web_accessible_resources` in both manifests).
 
 #### Mod execution
 

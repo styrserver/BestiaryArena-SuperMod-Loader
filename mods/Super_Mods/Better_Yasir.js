@@ -1567,87 +1567,15 @@
       }
       
       const BETTER_YASIR_PO_TOAST_DURATION_MS = 30000;
-      const BETTER_YASIR_PO_TOAST_CONTAINER_ID = 'better-yasir-po-toast-container';
       
-      /** Transient toast (Challenges.js-style DOM): long duration, × to dismiss, separate id from Challenges. */
+      /** Purchase-order toast: long duration, click to dismiss. */
       function showBetterYasirPurchaseOrderToast(message, durationMs) {
-        const ms = typeof durationMs === 'number' && durationMs > 0 ? durationMs : BETTER_YASIR_PO_TOAST_DURATION_MS;
-        const safeMsg = message != null && message !== '' ? String(message).replace(/</g, '\u003c') : '';
-        try {
-          let container = document.getElementById(BETTER_YASIR_PO_TOAST_CONTAINER_ID);
-          if (!container) {
-            container = document.createElement('div');
-            container.id = BETTER_YASIR_PO_TOAST_CONTAINER_ID;
-            container.style.cssText =
-              'position: fixed; z-index: 10002; inset: 16px 16px 64px; pointer-events: none;';
-            document.body.appendChild(container);
-          }
-          const existing = container.querySelectorAll('.better-yasir-po-toast-item');
-          const stackOffset = existing.length * 46;
-          const flexWrap = document.createElement('div');
-          flexWrap.className = 'better-yasir-po-toast-item';
-          flexWrap.style.cssText =
-            'left: 0; right: 0; display: flex; position: absolute; transition: 230ms cubic-bezier(0.21, 1.02, 0.73, 1); transform: translateY(-' +
-            stackOffset +
-            'px); bottom: 0; justify-content: flex-end; pointer-events: auto;';
-          const toast = document.createElement('div');
-          toast.setAttribute('role', 'status');
-          toast.className =
-            'non-dismissable-dialogs shadow-lg animate-in fade-in zoom-in-95 slide-in-from-top lg:slide-in-from-bottom';
-          toast.style.cssText = 'pointer-events: auto;';
-          const widgetTop = document.createElement('div');
-          widgetTop.className = 'widget-top h-2.5';
-          const widgetBottom = document.createElement('div');
-          widgetBottom.className =
-            'widget-bottom pixel-font-16 flex items-center gap-2 px-2 py-1 text-whiteHighlight';
-          const messageDiv = document.createElement('div');
-          messageDiv.className = 'text-left';
-          messageDiv.style.flex = '1 1 auto';
-          if (safeMsg.indexOf('\n') !== -1) {
-            messageDiv.style.whiteSpace = 'pre-line';
-          } else {
-            messageDiv.style.whiteSpace = 'nowrap';
-            messageDiv.style.overflow = 'hidden';
-            messageDiv.style.textOverflow = 'ellipsis';
-          }
-          messageDiv.style.color = '#b8f5b8';
-          messageDiv.textContent = safeMsg;
-          const closeBtn = document.createElement('button');
-          closeBtn.type = 'button';
-          closeBtn.setAttribute('aria-label', t('mods.betterYasir.poOrderToastDismissAria'));
-          closeBtn.className = 'flex-shrink-0';
-          closeBtn.style.cssText =
-            'width: 16px; height: 16px; padding: 0; border: none; background: transparent; cursor: pointer; color: #e74c3c; font-size: 16px; line-height: 1; display: flex; align-items: center; justify-content: center; border-radius: 2px;';
-          closeBtn.textContent = '\u00d7';
-          widgetBottom.appendChild(messageDiv);
-          widgetBottom.appendChild(closeBtn);
-          toast.appendChild(widgetTop);
-          toast.appendChild(widgetBottom);
-          flexWrap.appendChild(toast);
-          container.appendChild(flexWrap);
-          
-          let autoTimer = null;
-          const dismiss = () => {
-            if (autoTimer != null) {
-              clearTimeout(autoTimer);
-              autoTimer = null;
-            }
-            if (flexWrap.parentNode) {
-              flexWrap.parentNode.removeChild(flexWrap);
-            }
-            const rest = container.querySelectorAll('.better-yasir-po-toast-item');
-            rest.forEach((el, index) => {
-              el.style.transform = 'translateY(-' + index * 46 + 'px)';
-            });
-          };
-          closeBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            dismiss();
-          });
-          autoTimer = setTimeout(dismiss, ms);
-        } catch (e) {
-          handleError(e, 'showBetterYasirPurchaseOrderToast', 'warn');
-        }
+        window.BAToast?.show({
+          mod: t('mods.betterYasir.modName'),
+          message,
+          type: 'success',
+          duration: typeof durationMs === 'number' && durationMs > 0 ? durationMs : BETTER_YASIR_PO_TOAST_DURATION_MS
+        });
       }
     
       function showConfirmationPrompt(quantity, itemKey, actionButton, actionType) {
@@ -2606,91 +2534,6 @@
     // 3. UI Component Creation
     // =======================
       
-      // Add quantity inputs to shop rows
-      function addQuantityInputsToShopRows(shopTable) {
-        // Check if this table has already been processed
-        if (shopTable.dataset.betterYasirTableProcessed) {
-          return;
-        }
-        
-        // Mark table as being processed to prevent duplicates
-        shopTable.dataset.betterYasirTableProcessed = 'processing';
-        
-        // Find all shop rows
-        const shopRows = shopTable.querySelectorAll(SELECTORS.SHOP_ROW);
-        
-        let processedCount = 0;
-        
-        shopRows.forEach((shopRow, index) => {
-          const itemSlot = shopRow.querySelector(SELECTORS.ITEM_SLOT);
-          const originalButton = shopRow.querySelector(SELECTORS.BUY_BUTTON);
-          
-          if (!itemSlot || !originalButton) {
-            return;
-          }
-          
-          // Check if we've already added our custom UI to this row
-          if (shopRow.querySelector('.better-yasir-quantity-input')) {
-            return;
-          }
-          
-          const itemKey = getItemKeyFromSlot(itemSlot);
-          if (!itemKey) {
-            return;
-          }
-          
-          // Check if item is out of stock
-          if (isItemOutOfStock(shopRow)) {
-            return;
-          }
-          
-          // Determine action type based on table context
-          const tableHeader = shopTable.querySelector('thead th');
-          const isExchangeTable = tableHeader && tableHeader.textContent.includes('Exchange');
-          const actionType = isExchangeTable ? 'trade' : 'buy';
-          
-          // Get item price and available quantity
-          const itemPrice = getItemPrice(shopRow);
-          const availableQuantity = getItemQuantity(itemSlot);
-          
-          // For buying, use a reasonable default max quantity based on available resources
-          // For trading, use the available quantity
-          const maxQuantity = actionType === 'buy' ? Math.floor(10000 / itemPrice) : availableQuantity;
-          
-          // Create quantity input
-          const quantityInput = createQuantityInput(maxQuantity);
-          
-          // Create our custom action button
-          const customActionButton = createCustomActionButton(actionType);
-          
-          // Insert our custom UI before the original button
-          originalButton.parentNode.insertBefore(quantityInput, originalButton);
-          originalButton.parentNode.insertBefore(customActionButton, originalButton);
-          
-          // Hide the original button now that we have our custom UI
-          originalButton.style.display = 'none';
-          
-          // Set initial value
-          const initialQuantity = Math.min(1, maxQuantity);
-          quantityInput.value = initialQuantity.toString();
-          
-          // Update button text with price
-          updateActionButtonText(customActionButton, initialQuantity, actionType, itemPrice, itemKey);
-          
-          // Add event listeners
-          addEventListenersToInput(quantityInput, customActionButton, itemKey, maxQuantity, index, itemSlot, actionType, itemPrice);
-          
-          processedCount++;
-        });
-        
-        // Mark table as processed if we successfully processed any rows
-        if (processedCount > 0) {
-          shopTable.dataset.betterYasirTableProcessed = 'true';
-        } else {
-          // If no rows were processed, remove the processing marker
-          delete shopTable.dataset.betterYasirTableProcessed;
-        }
-      }
     
       // Helper functions for flex container processing
       const flexContainerHelpers = {
@@ -3821,16 +3664,6 @@
         return listings * listing;
       }
       
-      function computeYasirPoOrderTotalText(itemKey, qtyRaw, priceRaw) {
-        const p = computeYasirPoOrderTotalParts(itemKey, qtyRaw, priceRaw);
-        if (!p) {
-          return null;
-        }
-        if (p.kind === 'dust') {
-          return `${p.amount} ${t('mods.betterYasir.settingsPoCurrencyDust')}`;
-        }
-        return `${p.amount} ${t('mods.betterYasir.settingsPoCurrencyGold')}`;
-      }
       
       function yasirPoOrderRecordsMatch(a, b) {
         const normLg = (x) => {
@@ -6208,26 +6041,6 @@
         yasirIntroSyncObserver.observe(document.body, { childList: true, subtree: true });
       }
       
-      // Retry mechanism for modal enhancement
-      function retryEnhanceYasirModal(maxAttempts = CONSTANTS.RETRY_MAX_ATTEMPTS, baseDelay = CONSTANTS.RETRY_BASE_DELAY) {
-        let attempts = 0;
-        
-        const tryEnhance = () => {
-          attempts++;
-          if (enhanceYasirModal()) {
-            return; // Success, stop retrying
-          }
-          
-          if (attempts < maxAttempts) {
-            const delay = baseDelay * Math.pow(2, attempts - 1); // Exponential backoff
-            setTimeout(tryEnhance, delay);
-          } else {
-            console.warn('[Better Yasir] Failed to enhance modal after maximum retry attempts');
-          }
-        };
-        
-        tryEnhance();
-      }
       
       function initializeBetterYasir() {
         runYasirPoHistoryCommaMigrationOnce();
@@ -6332,7 +6145,7 @@
       // Export cleanup function for the mod loader
       if (typeof context !== 'undefined') {
         context.exports = {
-          cleanup: cleanup,
+          cleanup: () => { window.BAToast?.clearMod(t('mods.betterYasir.modName')); cleanup(); },
           refreshUI: refreshUIAfterAction,
           debugInventory: () => {
             const gameState = getGameState();

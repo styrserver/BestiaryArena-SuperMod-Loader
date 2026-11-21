@@ -4968,10 +4968,6 @@ function getSeason2RankBracketFromPosition(positionRaw, totalRaw) {
   return null;
 }
 
-function getSeason2RankBracket(profileData, seasonEntry, seasonNum) {
-  return getSeason2MetricBracket(profileData, seasonEntry, seasonNum, 'rank');
-}
-
 function getSeason2MetricBracket(profileData, seasonEntry, seasonNum, metricKey) {
   if (Number(seasonNum) !== 2) return null;
   const metric = String(metricKey || '').trim().toLowerCase();
@@ -5085,6 +5081,10 @@ function patchProfileDataForActiveSeason(profileData, seasonNum) {
   return next;
 }
 
+/**
+ * Build per-room stats from profilePageData for a season (speedrun/rank/floor rows in leaderboards).
+ * Merges `rooms`, `highscores`, and `floorHighscores` when entries carry `season`.
+ */
 function filterRoomsMapBySeason(rooms, seasonNum) {
   if (!rooms || typeof rooms !== 'object') return {};
   const hasSeasonTaggedRooms = Object.values(rooms).some(
@@ -5102,10 +5102,6 @@ function filterRoomsMapBySeason(rooms, seasonNum) {
   return out;
 }
 
-/**
- * Build per-room stats from profilePageData for a season (speedrun/rank/floor rows in leaderboards).
- * Merges `rooms`, `highscores`, and `floorHighscores` when entries carry `season`.
- */
 function mergeProfileRoomsForSeason(profileData, seasonNum) {
   const pd = unwrapProfilePageJson(profileData);
   if (!pd) return {};
@@ -5614,40 +5610,6 @@ function getCreatureStatus(creatureName) {
     console.warn('[Cyclopedia] Error checking creature status:', error);
     return { owned: false, shiny: false, perfect: false, awakened: false, shinyTier: false, hundoTier: false };
   }
-}
-
-// Function to check if user owns a creature
-function isCreatureOwned(creatureName) {
-  return getCreatureStatus(creatureName).owned;
-}
-
-// Function to check if user has any shiny variants of a creature
-function hasShinyCreature(creatureName) {
-  const db = window.creatureDatabase;
-  if (typeof db?.creatureHasShinyVariant === 'function' && !db.creatureHasShinyVariant(creatureName)) {
-    return false;
-  }
-  return getCreatureStatus(creatureName).shiny;
-}
-
-// Function to check if user has any awakened variants of a creature
-function hasAwakenedCreature(creatureName) {
-  return getCreatureStatus(creatureName).awakened;
-}
-
-// Function to check if user has any level 99 max-gene SHINY variants of a creature
-function hasShinyTierCreature(creatureName) {
-  return getCreatureStatus(creatureName).shinyTier;
-}
-
-// Function to check if user has any level 99 max-gene NON-shiny variants of a creature
-function hasHundoTierCreature(creatureName) {
-  return getCreatureStatus(creatureName).hundoTier;
-}
-
-// Function to check if user has a perfect creature (level 50 with 100 total genes)
-function isCreaturePerfect(creatureName) {
-  return getCreatureStatus(creatureName).perfect;
 }
 
 /** Same ordering signals as Awaken Tracker overview (`renderOverview` groups.sort + per-monster rank). */
@@ -6278,7 +6240,6 @@ function getCurrencyFromGameState(currencyType) {
 function getGoldFromUI() { return getCurrencyFromUI('gold'); }
 
 function getBeastCoinsFromUI() { return getCurrencyFromUI('beastCoins'); }
-function getDustFromUI() { return getCurrencyFromUI('dust'); }
 function getDustFromGameState() { return getCurrencyFromGameState('dust'); }
 
 function getHuntingMarksFromUI() {
@@ -10209,184 +10170,6 @@ window.cyclopediaMenuObserver = cyclopediaMenuObserver;
 // --- UI Creation Functions ---
 // =======================
 
-// Creates a custom confirmation modal for deleting runs
-function showDeleteConfirmationModal(runType, runData, onConfirm) {
-  // Create modal overlay
-  const overlay = DOMUtils.createStyledElement('div', {
-    position: 'fixed',
-    top: '0',
-    left: '0',
-    width: '100%',
-    height: '100%',
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
-    zIndex: '10000',
-    display: 'flex',
-    justifyContent: 'center',
-    alignItems: 'center'
-  });
-  
-  // Create modal container
-  const modal = DOMUtils.createStyledElement('div', {
-    backgroundColor: '#232323',
-    border: '3px solid #484848',
-    borderRadius: '8px',
-    padding: '25px',
-    maxWidth: '450px',
-    width: '90%',
-    boxShadow: '0 8px 32px rgba(0, 0, 0, 0.6)',
-    fontFamily: CYCLOPEDIA_STATS_FONT,
-    position: 'relative'
-  });
-  
-  // Create title
-  const titleElement = DOMUtils.createStyledElement('div', {
-    fontSize: '20px',
-    fontWeight: 'bold',
-    color: '#ffe066',
-    marginBottom: '20px',
-    textAlign: 'center',
-    textShadow: '2px 2px 4px rgba(0, 0, 0, 0.5)'
-  }, '', `Delete ${runType} Run`);
-  
-  // Create message
-  const messageElement = DOMUtils.createStyledElement('div', {
-    fontSize: '16px',
-    color: '#fff',
-    marginBottom: '25px',
-    textAlign: 'center',
-    lineHeight: '1.5'
-  });
-  
-  // Create run details
-  const detailsElement = DOMUtils.createStyledElement('div', {
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    border: '1px solid #585858',
-    borderRadius: '6px',
-    padding: '15px',
-    marginBottom: '25px',
-    fontSize: '14px',
-    color: '#c0c0c0'
-  });
-  
-  let detailsHtml = '';
-  if (runData.time) {
-    detailsHtml += `<div style="margin-bottom: 8px;"><strong>Time:</strong> ${runData.time} ticks</div>`;
-  }
-  if (runData.points) {
-    detailsHtml += `<div style="margin-bottom: 8px;"><strong>Rank Points:</strong> ${runData.points}</div>`;
-  }
-  if (runData.mapName) {
-    detailsHtml += `<div style="margin-bottom: 8px;"><strong>Map:</strong> ${runData.mapName}</div>`;
-  }
-  if (runData.seed) {
-    detailsHtml += `<div><strong>Seed:</strong> ${runData.seed}</div>`;
-  }
-  
-  detailsElement.innerHTML = detailsHtml;
-  
-  // Create warning message
-  const warningElement = DOMUtils.createStyledElement('div', {
-    fontSize: '14px',
-    color: '#ff6666',
-    textAlign: 'center',
-    marginBottom: '25px',
-    fontStyle: 'italic'
-  }, '', 'This action cannot be undone.');
-  
-  // Create button container
-  const buttonContainer = DOMUtils.createStyledElement('div', {
-    display: 'flex',
-    justifyContent: 'center',
-    gap: '20px'
-  });
-  
-  // Create cancel button
-  const cancelButton = DOMUtils.createButton('Cancel', {
-    backgroundColor: '#585858',
-    color: '#fff',
-    border: '2px solid #808080',
-    borderRadius: '6px',
-    padding: '12px 24px',
-    cursor: 'pointer',
-    fontSize: '16px',
-    fontFamily: CYCLOPEDIA_STATS_FONT,
-    fontWeight: 'bold',
-    transition: 'all 0.2s ease',
-    minWidth: '100px'
-  }, {
-    backgroundColor: '#808080',
-    borderColor: '#777',
-    transform: 'translateY(-2px)'
-  });
-  
-  // Create delete button
-  const deleteButton = DOMUtils.createButton('Delete', {
-    backgroundColor: '#d32f2f',
-    color: '#fff',
-    border: '2px solid #ff6666',
-    borderRadius: '6px',
-    padding: '12px 24px',
-    cursor: 'pointer',
-    fontSize: '16px',
-    fontFamily: CYCLOPEDIA_STATS_FONT,
-    fontWeight: 'bold',
-    transition: 'all 0.2s ease',
-    minWidth: '100px'
-  }, {
-    backgroundColor: '#ff6666',
-    borderColor: '#ff5252',
-    transform: 'translateY(-2px)'
-  });
-  
-  // Add event listeners
-  const handleEscape = (e) => {
-    if (e.key === 'Escape') {
-      closeModal();
-    }
-  };
-  const closeModal = () => {
-    // Remove the keydown listener on every close path (Cancel / Delete / overlay /
-    // Escape) — previously only the Escape path removed it, leaking one per dialog.
-    document.removeEventListener('keydown', handleEscape);
-    if (overlay?.parentNode) {
-      overlay.parentNode.removeChild(overlay);
-    }
-  };
-
-  cancelButton.addEventListener('click', closeModal);
-  deleteButton.addEventListener('click', () => {
-    closeModal();
-    if (onConfirm) onConfirm();
-  });
-
-  // Close on overlay click
-  overlay.addEventListener('click', (e) => {
-    if (e.target === overlay) {
-      closeModal();
-    }
-  });
-
-  // Close on Escape key
-  document.addEventListener('keydown', handleEscape);
-  
-  // Assemble modal
-  messageElement.textContent = `Are you sure you want to delete this ${runType.toLowerCase()} run?`;
-  buttonContainer.appendChild(cancelButton);
-  buttonContainer.appendChild(deleteButton);
-  modal.appendChild(titleElement);
-  modal.appendChild(messageElement);
-  modal.appendChild(detailsElement);
-  modal.appendChild(warningElement);
-  modal.appendChild(buttonContainer);
-  overlay.appendChild(modal);
-  
-  // Show modal
-  document.body.appendChild(overlay);
-  
-  // Focus cancel button for safety
-  cancelButton.focus();
-}
-
 // Helper function to check if a map is a raid (uses maps-database comprehensive check)
 function isMapRaid(mapId) {
   const classify = globalThis.mapsDatabase?.isMapRaidComprehensive;
@@ -13958,11 +13741,6 @@ function sortCyclopediaHomeSearchResults(results) {
   });
 }
 
-function resolveInventoryCatalogKey(catalogLabel) {
-  const keys = cyclopediaGetInventoryKeysForCatalogLabel(catalogLabel);
-  return keys[0] ?? null;
-}
-
 /** Catalog group label for an item key (e.g. summonScroll6 → "Summon Scrolls"). */
 function cyclopediaGetInventoryCatalogLabelForItemKey(itemKey) {
   if (!itemKey) return null;
@@ -14084,12 +13862,6 @@ function cyclopediaFitPortraitBox(el, sizePx = CYCLOPEDIA_HOME_SEARCH_ICON_PX) {
       portrait.style[prop] = px;
     });
   }
-}
-
-function cyclopediaStripCreaturePortraitChrome(el) {
-  if (!el) return;
-  el.querySelector?.('span.pixel-font-16')?.remove();
-  el.querySelector?.('img[alt="star tier"]')?.remove();
 }
 
 /** Remove stat icon only (keeps frame and rarity border). */
@@ -15348,312 +15120,6 @@ function renderCyclopediaPlayerInfo(profileData, options = {}) {
     return fallbackDiv;
   }
 }
-
-function renderYasirBox(yasir, utils, msUntilNextEpochDay, formatTime) {
-  let yasirLoc = yasir.location;
-  if (utils?.ROOM_NAME && yasirLoc && utils.ROOM_NAME[yasirLoc]) {
-    yasirLoc = utils.ROOM_NAME[yasirLoc];
-  } else if (yasirLoc) {
-    yasirLoc = yasirLoc.replace(/([A-Z])/g, ' $1').replace(/^./, s => s.toUpperCase()).trim();
-  }
-
-  const yasirDiv = document.createElement('div');
-  yasirDiv.style.display = 'flex';
-  yasirDiv.style.alignItems = 'center';
-  yasirDiv.style.justifyContent = 'center';
-  yasirDiv.style.height = '60px';
-  yasirDiv.style.maxHeight = '60px';
-  yasirDiv.style.width = '100%';
-  yasirDiv.style.overflow = 'hidden';
-
-  const yasirFrame = document.createElement('div');
-  yasirFrame.className = 'frame-1 surface-regular grid gap-2 p-1.5 text-left';
-  yasirFrame.style.width = '100%';
-  yasirFrame.style.height = '60px';
-  yasirFrame.style.maxHeight = '60px';
-
-  const yasirRow = document.createElement('div');
-  yasirRow.className = 'flex justify-between gap-2';
-
-  const yasirIconWrap = document.createElement('div');
-  yasirIconWrap.className = 'container-slot surface-darker grid place-items-center px-3.5 py-0.5';
-  const yasirIconRel = document.createElement('div');
-  yasirIconRel.className = 'relative size-sprite';
-  const yasirImg = document.createElement('img');
-  yasirImg.alt = 'Yasir';
-  yasirImg.className = 'pixelated absolute -bottom-0.5 -right-0.5';
-  yasirImg.width = 34;
-  yasirImg.height = 37;
-  yasirImg.src = '/assets/icons/yasir.png';
-  yasirIconRel.appendChild(yasirImg);
-  yasirIconWrap.appendChild(yasirIconRel);
-
-  const yasirInfo = document.createElement('div');
-  yasirInfo.className = 'flex w-full flex-col';
-
-  const yasirTitle = document.createElement('p');
-  yasirTitle.className = 'text-whiteHighlight';
-  yasirTitle.textContent = 'Yasir';
-
-  const yasirLocP = document.createElement('p');
-  yasirLocP.className = FONT_CONSTANTS.SIZES.SMALL;
-  yasirLocP.textContent = 'Current location: ';
-  const yasirLocSpan = document.createElement('span');
-  yasirLocSpan.className = 'focus-within:focused-highlight whitespace-nowrap';
-  yasirLocSpan.style.color = '#4a9eff';
-  yasirLocSpan.textContent = yasirLoc || '-';
-
-  const mapPinSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  mapPinSvg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-  mapPinSvg.setAttribute('width', '24');
-  mapPinSvg.setAttribute('height', '24');
-  mapPinSvg.setAttribute('viewBox', '0 0 24 24');
-  mapPinSvg.setAttribute('fill', 'none');
-  mapPinSvg.setAttribute('stroke', 'currentColor');
-  mapPinSvg.setAttribute('stroke-width', '2');
-  mapPinSvg.setAttribute('stroke-linecap', 'round');
-  mapPinSvg.setAttribute('stroke-linejoin', 'round');
-  mapPinSvg.classList.add('lucide', 'lucide-map-pin', 'ml-0.5', 'inline-block', 'size-3', '-translate-y-0.5');
-  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-  path.setAttribute('d', 'M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z');
-  const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-  circle.setAttribute('cx', '12');
-  circle.setAttribute('cy', '10');
-  circle.setAttribute('r', '3');
-  mapPinSvg.appendChild(path);
-  mapPinSvg.appendChild(circle);
-  yasirLocSpan.appendChild(mapPinSvg);
-  yasirLocP.appendChild(yasirLocSpan);
-
-  const yasirTimeP = document.createElement('p');
-  yasirTimeP.className = 'pixel-font-14 text-right';
-
-  const clockSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  clockSvg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-  clockSvg.setAttribute('width', '24');
-  clockSvg.setAttribute('height', '24');
-  clockSvg.setAttribute('viewBox', '0 0 24 24');
-  clockSvg.setAttribute('fill', 'none');
-  clockSvg.setAttribute('stroke', 'currentColor');
-  clockSvg.setAttribute('stroke-width', '2');
-  clockSvg.setAttribute('stroke-linecap', 'round');
-  clockSvg.setAttribute('stroke-linejoin', 'round');
-  clockSvg.classList.add('lucide', 'lucide-clock', 'mr-1', 'inline-block', 'size-2', '-translate-y-px');
-  const clockCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-  clockCircle.setAttribute('cx', '12');
-  clockCircle.setAttribute('cy', '12');
-  clockCircle.setAttribute('r', '10');
-  const clockPolyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
-  clockPolyline.setAttribute('points', '12 6 12 12 16 14');
-  clockSvg.appendChild(clockCircle);
-  clockSvg.appendChild(clockPolyline);
-  yasirTimeP.appendChild(clockSvg);
-
-  const yasirTimerSpan = document.createElement('span');
-  yasirTimerSpan.className = 'yasir-timer';
-  yasirTimerSpan.textContent = formatTime(msUntilNextEpochDay) + 'h';
-  yasirTimeP.appendChild(yasirTimerSpan);
-
-  yasirInfo.appendChild(yasirTitle);
-  yasirInfo.appendChild(yasirLocP);
-  yasirInfo.appendChild(yasirTimeP);
-  yasirRow.appendChild(yasirIconWrap);
-  yasirRow.appendChild(yasirInfo);
-  yasirFrame.appendChild(yasirRow);
-  yasirDiv.appendChild(yasirFrame);
-  return yasirDiv;
-}
-
-function renderBoostedBox(boosted, utils, formatTime, msUntilNextEpochDay) {
-  let boostedRoomName = boosted.roomId;
-  if (utils?.ROOM_NAME && boostedRoomName && utils.ROOM_NAME[boostedRoomName]) {
-    boostedRoomName = utils.ROOM_NAME[boostedRoomName];
-  } else if (boostedRoomName) {
-    boostedRoomName = boostedRoomName.replace(/([A-Z])/g, ' $1').replace(/^./, s => s.toUpperCase()).trim();
-  }
-
-  const boostedDiv = document.createElement('div');
-  boostedDiv.style.display = 'flex';
-  boostedDiv.style.alignItems = 'center';
-  boostedDiv.style.justifyContent = 'center';
-  boostedDiv.style.height = '60px';
-  boostedDiv.style.maxHeight = '60px';
-  boostedDiv.style.width = '100%';
-  boostedDiv.style.overflow = 'hidden';
-
-  const boostedFrame = document.createElement('div');
-  boostedFrame.className = 'frame-1 surface-regular grid gap-2 p-1.5 text-left';
-  boostedFrame.style.width = '100%';
-  boostedFrame.style.height = '60px';
-  boostedFrame.style.maxHeight = '60px';
-
-  const boostedRow = document.createElement('div');
-  boostedRow.className = 'flex justify-between gap-2';
-
-  const boostedIconWrap = document.createElement('div');
-  boostedIconWrap.className = 'container-slot surface-darker grid place-items-center px-3.5 py-0.5 equipment-portrait relative';
-  boostedIconWrap.innerHTML = '';
-
-  if (boosted.equipId && api?.ui?.components?.createItemPortrait) {
-    let spriteId = boosted.equipId;
-    try {
-      const equipData = globalThis.state.utils.getEquipment(boosted.equipId);
-      if (equipData && equipData.metadata && equipData.metadata.spriteId) {
-        spriteId = equipData.metadata.spriteId;
-      }
-    } catch (e) {}
-
-    let equipPortrait = api.ui.components.createItemPortrait({
-      itemId: spriteId,
-      stat: boosted.equipStat,
-      tier: boosted.equipTier || 1,
-    });
-    equipPortrait.style.background = 'unset';
-
-    if (equipPortrait.tagName === 'BUTTON' && equipPortrait.firstChild) {
-      equipPortrait = equipPortrait.firstChild;
-    }
-    boostedIconWrap.appendChild(equipPortrait);
-  }
-
-  const boostedInfo = document.createElement('div');
-  boostedInfo.className = 'flex w-full flex-col';
-
-  const boostedTitle = document.createElement('p');
-  boostedTitle.className = 'text-whiteHighlight';
-  boostedTitle.textContent = 'Daily boosted map';
-
-  const boostedRoomP = document.createElement('span');
-  boostedRoomP.className = 'action-link focus-within:focused-highlight pixel-font-14 mt-1 !text-boosted no-underline';
-  boostedRoomP.textContent = boostedRoomName || '-';
-
-  const mapPinSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  mapPinSvg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-  mapPinSvg.setAttribute('width', '24');
-  mapPinSvg.setAttribute('height', '24');
-  mapPinSvg.setAttribute('viewBox', '0 0 24 24');
-  mapPinSvg.setAttribute('fill', 'none');
-  mapPinSvg.setAttribute('stroke', 'currentColor');
-  mapPinSvg.setAttribute('stroke-width', '2');
-  mapPinSvg.setAttribute('stroke-linecap', 'round');
-  mapPinSvg.setAttribute('stroke-linejoin', 'round');
-  mapPinSvg.classList.add('lucide', 'lucide-map-pin', 'ml-0.5', 'inline-block', 'size-3', '-translate-y-0.5');
-  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-  path.setAttribute('d', 'M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z');
-  const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-  circle.setAttribute('cx', '12');
-  circle.setAttribute('cy', '10');
-  circle.setAttribute('r', '3');
-  mapPinSvg.appendChild(path);
-  mapPinSvg.appendChild(circle);
-  boostedRoomP.appendChild(mapPinSvg);
-
-  const boostedTimeP = document.createElement('p');
-  boostedTimeP.className = 'pixel-font-14 text-right';
-
-  const clockSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  clockSvg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-  clockSvg.setAttribute('width', '24');
-  clockSvg.setAttribute('height', '24');
-  clockSvg.setAttribute('viewBox', '0 0 24 24');
-  clockSvg.setAttribute('fill', 'none');
-  clockSvg.setAttribute('stroke', 'currentColor');
-  clockSvg.setAttribute('stroke-width', '2');
-  clockSvg.setAttribute('stroke-linecap', 'round');
-  clockSvg.setAttribute('stroke-linejoin', 'round');
-  clockSvg.classList.add('lucide', 'lucide-clock', 'mr-1', 'inline-block', 'size-2', '-translate-y-px');
-  const clockCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-  clockCircle.setAttribute('cx', '12');
-  clockCircle.setAttribute('cy', '12');
-  clockCircle.setAttribute('r', '10');
-  const clockPolyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
-  clockPolyline.setAttribute('points', '12 6 12 12 16 14');
-  clockSvg.appendChild(clockCircle);
-  clockSvg.appendChild(clockPolyline);
-  boostedTimeP.appendChild(clockSvg);
-
-  const boostedTimerSpan = document.createElement('span');
-  boostedTimerSpan.className = 'boosted-timer';
-  boostedTimerSpan.textContent = formatTime(msUntilNextEpochDay) + 'h';
-  boostedTimeP.appendChild(boostedTimerSpan);
-
-  if (boosted.roomId) {
-    boostedRoomP.style.cursor = 'pointer';
-    boostedRoomP.title = 'Go to this map';
-    boostedRoomP.addEventListener('click', (e) => {
-      e.stopPropagation();
-      NavigationHandler.navigateToMapByRoomId(boosted.roomId);
-    });
-  }
-
-  boostedInfo.appendChild(boostedTitle);
-  boostedInfo.appendChild(boostedRoomP);
-  boostedInfo.appendChild(boostedTimeP);
-
-  boostedRow.appendChild(boostedIconWrap);
-  boostedRow.appendChild(boostedInfo);
-  boostedFrame.appendChild(boostedRow);
-  boostedDiv.appendChild(boostedFrame);
-
-  boostedIconWrap.querySelectorAll('.has-rarity[data-rarity="1"]').forEach(el => el.remove());
-  
-  // Use requestAnimationFrame for smoother DOM updates
-  requestAnimationFrame(() => {
-    const gradientElements = boostedDiv.querySelectorAll('.absolute[style*="radial-gradient"]');
-    gradientElements.forEach(el => {
-      el.style.background = 'none';
-    });
-  });
-  
-  return boostedDiv;
-}
-
-function renderDailyContextColumn() {
-  const dailyContext = globalThis.state?.daily?.getSnapshot?.().context || {};
-  const utils = globalThis.state?.utils;
-  const yasir = dailyContext.yasir || {};
-  const boosted = dailyContext.boostedMap || {};
-  const initialMsUntilNextEpochDay = dailyContext.msUntilNextEpochDay;
-  const formatTime = FormatUtils.time;
-
-  const col = document.createElement('div');
-  col.style.display = 'flex';
-  col.style.flexDirection = 'column';
-  col.style.height = '100%';
-  col.style.width = '300px';
-  col.style.minWidth = '300px';
-  col.style.maxWidth = '300px';
-  col.style.padding = '0 12px';
-  col.style.boxSizing = 'border-box';
-  col.style.justifyContent = 'center';
-  col.style.alignItems = 'center';
-
-  const yasirDiv = renderYasirBox(yasir, utils, initialMsUntilNextEpochDay, formatTime);
-  const boostedDiv = renderBoostedBox(boosted, utils, formatTime, initialMsUntilNextEpochDay);
-
-  const separator = createCyclopediaSeparator('10px 0');
-
-  let ms = initialMsUntilNextEpochDay;
-  let lastUpdate = Date.now();
-  let timerInterval = setInterval(() => {
-    const now = Date.now();
-    ms -= (now - lastUpdate);
-    lastUpdate = now;
-    const t = formatTime(ms);
-    const yasirTimer = col.querySelector('.yasir-timer');
-    const boostedTimer = col.querySelector('.boosted-timer');
-    if (yasirTimer) yasirTimer.textContent = t + 'h';
-    if (boostedTimer) boostedTimer.textContent = t + 'h';
-  }, 1000);
-  col._cleanup = () => clearInterval(timerInterval);
-
-  col.appendChild(yasirDiv);
-  col.appendChild(separator);
-  col.appendChild(boostedDiv);
-
-  return col;
-}
-
 
 // =======================
 // 10. Tab Implementations
@@ -21518,24 +20984,6 @@ function createInventoryTabPage(selectedCreature, selectedEquipment, selectedInv
     return '';
   };
 
-  function getPlayerInventoryCount(itemKey) {
-    try {
-      if (!itemKey) return 0;
-      const playerInventory = getPlayerInventory();
-      if (inventoryDatabase.getInventoryItemCount) {
-        return inventoryDatabase.getInventoryItemCount(playerInventory, itemKey);
-      }
-      const itemData = playerInventory[itemKey];
-      if (itemData && typeof itemData === 'object') {
-        return itemData.count || 0;
-      }
-      return playerInventory[itemKey] || 0;
-    } catch (error) {
-      console.error('[Cyclopedia] Error getting inventory count:', error);
-      return 0;
-    }
-  }
-
   const debouncedRefreshInventory = debounce(() => {
     try {
       clearInventoryCache();
@@ -21546,10 +20994,6 @@ function createInventoryTabPage(selectedCreature, selectedEquipment, selectedInv
       return {};
     }
   }, 1000);
-
-  function refreshInventoryData() {
-    return debouncedRefreshInventory();
-  }
 
   function updateBottomBox() {
     try {

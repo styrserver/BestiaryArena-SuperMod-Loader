@@ -383,12 +383,6 @@ function isOwnHighscoreRecord(record, you, yourName) {
     (recordName && yourName && recordName === yourName);
 }
 
-function normalizeYourFloorTicks(roomData) {
-  if (Number.isFinite(Number(roomData.floorTicks))) return Number(roomData.floorTicks);
-  if (Number.isFinite(Number(roomData.ticks))) return Number(roomData.ticks);
-  return null;
-}
-
 function normalizeBestFloorTicks(floorRecord) {
   if (!floorRecord) return null;
   if (Number.isFinite(Number(floorRecord.floorTicks))) return Number(floorRecord.floorTicks);
@@ -1279,7 +1273,7 @@ function copyTextToClipboard(text) {
 }
 
 function notifyRunsSite(key, type, duration, items = '') {
-  api.ui.notify?.({ message: t(`mods.highscore.${key}`).replace('{items}', items), type, duration });
+  window.BAToast?.show({ mod: t('mods.highscore.modName'), message: t(`mods.highscore.${key}`).replace('{items}', items), type, duration });
 }
 
 // Prefix chip of a run's headline: rank points or floor percentage where they matter.
@@ -2254,6 +2248,7 @@ exports = {
 };
 
 exports.cleanup = function() {
+  window.BAToast?.clearMod(t('mods.highscore.modName'));
   console.log('[Highscores] Running cleanup...');
 
   // Close an open map-row context menu (its ESC keydown + document mousedown-capture

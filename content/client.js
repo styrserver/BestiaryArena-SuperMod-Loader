@@ -108,29 +108,6 @@ if (typeof browserAPI === 'undefined') {
     }
 
     return new Promise((resolve, reject) => {
-      // Get the base URL for extension resources
-      const getExtensionBaseUrl = () => {
-        // Try to get from window if it was injected by the content script
-        if (window.BESTIARY_EXTENSION_BASE_URL) {
-          return window.BESTIARY_EXTENSION_BASE_URL;
-        }
-        
-        // Fallback: Try to detect from script sources
-        const scriptElements = document.querySelectorAll('script');
-        for (const script of scriptElements) {
-          const src = script.src || '';
-          if (src.includes('bestiary') && src.includes('extension')) {
-            const urlParts = src.split('/');
-            // Remove the last part (filename)
-            urlParts.pop();
-            return urlParts.join('/');
-          }
-        }
-        
-        // Last resort fallback if all else fails
-        console.warn('Could not determine extension base URL, using fallback');
-        return ''; // This will make it use a relative path
-      };
       
       const script = document.createElement('script');
       // Use the extension's local copy instead of trying to fetch from bestiaryarena.com
@@ -150,7 +127,7 @@ if (typeof browserAPI === 'undefined') {
         // client.js runs in the page world, where browserAPI.runtime is unavailable. A <script>
         // without src never fires onload/onerror, which used to leave this promise pending and
         // stall initializeAPI (no utility API, no bestiary-mod-api-ready). Keep the fallbacks.
-        console.warn('UI Components URL unavailable in this context — using fallback components');
+        console.info('UI Components URL unavailable in this context — using fallback components');
         resolve();
         return;
       }
@@ -805,18 +782,24 @@ if (typeof browserAPI === 'undefined') {
     }
   }
 
+  // translateKey returns the raw key until translations load; fall back to English then.
+  function modUiText(key, fallback) {
+    const value = translateKey(key);
+    return value && value !== key ? value : fallback;
+  }
+
   function updateModButtonsToggleAppearance(toggleButton, layout) {
     toggleButton.textContent = '';
 
     if (layout === 'horizontal') {
       toggleButton.appendChild(createLucideArrowIcon('down'));
-      toggleButton.title = 'Switch to vertical layout';
+      toggleButton.title = modUiText('common.modButtonsSwitchVertical', 'Switch to vertical layout');
     } else if (layout === 'vertical') {
       toggleButton.appendChild(createLucideArrowIcon('left'));
-      toggleButton.title = 'Hide mod buttons';
+      toggleButton.title = modUiText('common.modButtonsHide', 'Hide mod buttons');
     } else {
       toggleButton.appendChild(createLucideArrowIcon('right'));
-      toggleButton.title = 'Show mod buttons';
+      toggleButton.title = modUiText('common.modButtonsShow', 'Show mod buttons');
     }
   }
 
@@ -894,6 +877,9 @@ if (typeof browserAPI === 'undefined') {
     document.body.appendChild(toggleButton);
 
     applyModButtonsLayout(toggleButton, container, getSavedModButtonsLayout());
+    document.addEventListener('bestiary-translations-loaded', () => {
+      updateModButtonsToggleAppearance(toggleButton, toggleButton._layout || 'horizontal');
+    });
     
     return container;
   }
@@ -1610,7 +1596,7 @@ if (typeof browserAPI === 'undefined') {
 
         const legend = document.createElement('legend');
         legend.style.cssText = 'font-weight: bold; color: #0c6; cursor: pointer; user-select: none; display: inline-flex; align-items: center; gap: 4px; padding: 0 2px; font-size: 13px; line-height: 1.2;';
-        legend.title = 'Click to expand/collapse';
+        legend.title = modUiText('common.clickToExpandCollapse', 'Click to expand/collapse');
 
         const chevron = document.createElement('span');
         chevron.className = 'bestiary-config-section-chevron';

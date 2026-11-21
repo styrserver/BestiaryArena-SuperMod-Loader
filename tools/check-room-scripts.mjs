@@ -23,40 +23,13 @@
  * scanned (lazily loaded chunks are not).
  */
 import { readFileSync, writeFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { recordRun } from './tool-runs.mjs';
+import { loadChunks, loadMapsDatabase } from './lib.mjs';
 
-const ORIGIN = 'https://bestiaryarena.com';
 const MAPS_DB_PATH = join(dirname(fileURLToPath(import.meta.url)), '..', 'database', 'maps-database.js');
 const FINGERPRINT_BLOCK = /(\/\/ BEGIN ROOM_SCRIPT_FINGERPRINTS\r?\n)[\s\S]*?(\/\/ END ROOM_SCRIPT_FINGERPRINTS)/;
-
-async function fetchText(url) {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`${url} -> HTTP ${res.status}`);
-  return res.text();
-}
-
-async function loadChunks() {
-  const html = await fetchText(`${ORIGIN}/`);
-  const paths = [...new Set(html.match(/\/_next\/static\/chunks\/[^"'\\\s]+?\.js/g) || [])];
-  if (paths.length === 0) throw new Error('no chunk URLs found on the home page');
-  return Promise.all(paths.map((p) => fetchText(ORIGIN + p)));
-}
-
-function loadMapsDatabase() {
-  // maps-database.js is a browser script; give it the globals it reads and mute its logging.
-  globalThis.window = globalThis;
-  globalThis.state = { utils: { ROOMS: [] } };
-  const { log, warn } = console;
-  console.log = console.warn = () => {};
-  try {
-    return createRequire(import.meta.url)(MAPS_DB_PATH);
-  } finally {
-    Object.assign(console, { log, warn });
-  }
-}
 
 function writeFingerprints(game) {
   const source = readFileSync(MAPS_DB_PATH, 'utf8');
@@ -70,7 +43,7 @@ function writeFingerprints(game) {
 async function main() {
   const update = process.argv.includes('--update');
   const db = loadMapsDatabase();
-  const game = await db.extractRoomScripts(await loadChunks());
+  const game = await db.extractRoomScripts(await loadChunks({ manifest: false }));
   const names = Object.keys(game);
   console.log(`Game has ${names.length} room scripts: ${names.join(', ')}`);
 

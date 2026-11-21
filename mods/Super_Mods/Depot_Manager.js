@@ -400,14 +400,6 @@ function removeOneDepotId(id) {
   if (idx >= 0) depotCreatureState.ids.splice(idx, 1);
 }
 
-function getDepotIdCounts() {
-  const counts = new Map();
-  for (const id of depotCreatureState.ids) {
-    counts.set(id, (counts.get(id) || 0) + 1);
-  }
-  return counts;
-}
-
 function getDepotChestAssetUrl() {
   const assetPath = '/assets/ot/Depot_Chest.gif';
   const base = typeof window !== 'undefined' && window.BESTIARY_EXTENSION_BASE_URL;
@@ -1148,77 +1140,6 @@ function getArsenalGridButtons() {
   });
 }
 
-function createArsenalEquipmentButtonFromRow(row) {
-  let button = null;
-  if (row?.spriteId && typeof api?.ui?.components?.createItemPortrait === 'function') {
-    try {
-      const portrait = api.ui.components.createItemPortrait({
-        itemId: row.spriteId,
-        stat: row.stat,
-        tier: row.tier
-      });
-      if (portrait instanceof HTMLElement) {
-        if (portrait.tagName === 'BUTTON') {
-          button = portrait;
-        } else {
-          button = document.createElement('button');
-          button.className = 'focus-style-visible active:opacity-70';
-          button.appendChild(portrait);
-        }
-      }
-    } catch (e) { /* ignore */ }
-  }
-  if (!button) {
-    button = document.createElement('button');
-    button.className = 'focus-style-visible active:opacity-70';
-    const fallback = document.createElement('div');
-    fallback.className = 'container-slot surface-darker';
-    fallback.style.cssText = 'width:34px;height:34px;display:flex;align-items:center;justify-content:center;font-size:10px;color:#ddd;';
-    fallback.textContent = String(row?.tier || 1);
-    button.appendChild(fallback);
-  }
-  button.setAttribute('data-equipment-id', String(row.id));
-  button.setAttribute('data-tier', String(row.tier || 1));
-  button.setAttribute('data-stat', String(row.stat || 'unknown'));
-  button.setAttribute('data-equipment', String(row.name || ''));
-  if (!button.getAttribute('title')) {
-    button.title = `${row.name} | ${String(row.stat || '').toUpperCase()} | T${row.tier}`;
-  }
-  return button;
-}
-
-function compareArsenalEquipmentSort(a, b) {
-  const tierA = Number(a?.tier || 1);
-  const tierB = Number(b?.tier || 1);
-  if (tierA !== tierB) return tierB - tierA;
-  const nameA = String(a?.name || '');
-  const nameB = String(b?.name || '');
-  const nameCmp = nameA.localeCompare(nameB);
-  if (nameCmp !== 0) return nameCmp;
-  const statA = normalizeEquipmentStat(a?.stat || '');
-  const statB = normalizeEquipmentStat(b?.stat || '');
-  const statOrder = {
-    attackdamage: 0,
-    abilitypower: 1,
-    heal: 2
-  };
-  const rankA = Object.prototype.hasOwnProperty.call(statOrder, statA) ? statOrder[statA] : 999;
-  const rankB = Object.prototype.hasOwnProperty.call(statOrder, statB) ? statOrder[statB] : 999;
-  if (rankA !== rankB) return rankA - rankB;
-  return statA.localeCompare(statB);
-}
-
-function getArsenalSortRowFromButton(button) {
-  if (!button) return null;
-  const title = String(button.getAttribute('title') || '');
-  const titleName = title.includes('|') ? title.split('|')[0].trim() : '';
-  return {
-    tier: Number(getButtonTier(button) || 1),
-    name: String(button.getAttribute('data-equipment') || titleName || ''),
-    stat: normalizeEquipmentStat(button.getAttribute('data-stat') || getButtonStat(button) || '')
-  };
-}
-
 function restoreDepotEquipmentToArsenalDom(row) {
   if (!row?.id) return false;
   // Non-destructive mode: unhide will be handled by applyEquipmentDepotLayout.
@@ -1293,14 +1214,6 @@ function getEquipmentSignatureFromButton(button) {
   const tier = Number(getButtonTier(button) || 1);
   const stat = getButtonStat(button);
   return `${spriteId}|${tier}|${stat}`;
-}
-
-function pruneRecentManualEquipmentDepotRemovals(now = Date.now()) {
-  for (const [signature, payload] of recentManualEquipmentDepotRemovals.entries()) {
-    if (!payload || payload.expiresAt <= now || payload.count <= 0) {
-      recentManualEquipmentDepotRemovals.delete(signature);
-    }
-  }
 }
 
 function getTopSignatureEntries(countsMap, limit = 5) {
@@ -2627,32 +2540,6 @@ function stopMonsterBestiarySearchListener() {
   document.removeEventListener('input', depotMonsterSearchListeners.input, true);
   document.removeEventListener('focusout', depotMonsterSearchListeners.focusout, true);
   depotMonsterSearchListeners = null;
-}
-
-/** Remove inline flex `order` we set for depot vs main (e.g. when toggling depot off). */
-function clearDepotVisualOrderOnGridSlots(grid) {
-  if (!grid) return;
-  grid.querySelectorAll('div.flex').forEach((el) => {
-    if (el.querySelector('img[alt="creature"]')) el.style.removeProperty('order');
-  });
-  grid.querySelectorAll('[data-depot-separator]').forEach((el) => el.style.removeProperty('order'));
-}
-
-/**
- * With `flex-wrap: wrap-reverse`, flex lines stack from the bottom of the container upward, so
- * appending depot nodes last in DOM puts them on the *first* visual row (top). Use explicit
- * `order` so main inventory stays above and depot stays at the bottom regardless of wrap mode.
- */
-function applyDepotVisualOrderToSlots(grid, mainSlots, sep, orderedDepotSlots) {
-  if (!grid) return;
-  const wrap = getComputedStyle(grid).flexWrap;
-  const reverse = wrap === 'wrap-reverse';
-  const mainOrder = reverse ? '2' : '0';
-  const sepOrder = '1';
-  const depotOrder = reverse ? '0' : '2';
-  mainSlots.forEach((s) => s.style.setProperty('order', mainOrder));
-  orderedDepotSlots.forEach((s) => s.style.setProperty('order', depotOrder));
-  if (sep) sep.style.setProperty('order', sepOrder);
 }
 
 function isInMonsterInventoryGrid(imgEl) {

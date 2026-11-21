@@ -65,7 +65,6 @@ const TASKER_STATES = {
     NEW_TASK_ONLY: 'new_task_only',
     ENABLED: 'enabled'
 };
-const DEFAULT_TASKER_STATE = TASKER_STATES.DISABLED;
 
 /** Vanilla quest nav icon (fallback when originalState was never captured). */
 const DEFAULT_QUEST_ICON_SRC = 'https://bestiaryarena.com/assets/icons/quest.png';
@@ -1020,33 +1019,6 @@ async function waitForRoomSelection(roomId) {
     return matched;
 }
 
-async function waitForDocumentVisible(isStillActive = () => true) {
-    if (!isDocumentHidden()) {
-        return true;
-    }
-
-    console.log('[Better Tasker] Waiting for tab to become visible before continuing DOM actions...');
-    return new Promise((resolve) => {
-        const cleanup = () => {
-            document.removeEventListener('visibilitychange', onVisibility);
-            clearInterval(cancelPoll);
-        };
-        const onVisibility = () => {
-            if (!isDocumentHidden()) {
-                cleanup();
-                resolve(true);
-            }
-        };
-        const cancelPoll = setInterval(() => {
-            if (typeof isStillActive === 'function' && !isStillActive()) {
-                cleanup();
-                resolve(false);
-            }
-        }, 2000);
-        document.addEventListener('visibilitychange', onVisibility);
-    });
-}
-
 async function findButtonWithRetries(findFn, label = 'button') {
     const hidden = isDocumentHidden();
     const maxAttempts = hidden ? DOM_ACTION_MAX_ATTEMPTS_HIDDEN : DOM_ACTION_MAX_ATTEMPTS;
@@ -1260,12 +1232,7 @@ function teardownManualPlayDetection() {
 }
 
 function showTaskStartToast() {
-    const now = Date.now();
-    if (now - lastStartToastAt < START_TOAST_COOLDOWN_MS) {
-        return;
-    }
-    lastStartToastAt = now;
-    showToast(t('mods.betterTasker.startingToast'));
+    window.BAToast?.show({ mod: t('mods.betterTasker.modName'), message: t('mods.betterTasker.startingToast'), key: 'start', cooldown: 10000 });
 }
 
 function claimTaskOperation(operationLabel = 'task operation') {
@@ -1677,88 +1644,7 @@ function watchStaminaDepletion(onDepleted) {
 }
 
 function showToast(message, duration = 5000) {
-    try {
-        let mainContainer = document.getElementById('better-tasker-toast-container');
-        if (!mainContainer) {
-            mainContainer = document.createElement('div');
-            mainContainer.id = 'better-tasker-toast-container';
-            mainContainer.style.cssText = `
-                position: fixed;
-                z-index: 9999;
-                inset: 16px 16px 64px;
-                pointer-events: none;
-            `;
-            document.body.appendChild(mainContainer);
-        }
-
-        // Count existing toasts to calculate stacking position
-        const existingToasts = mainContainer.querySelectorAll('.toast-item');
-        const stackOffset = existingToasts.length * 46;
-
-        // Create the flex container for this specific toast
-        const flexContainer = document.createElement('div');
-        flexContainer.className = 'toast-item';
-        flexContainer.style.cssText = `
-            left: 0px;
-            right: 0px;
-            display: flex;
-            position: absolute;
-            transition: 230ms cubic-bezier(0.21, 1.02, 0.73, 1);
-            transform: translateY(-${stackOffset}px);
-            bottom: 0px;
-            justify-content: flex-end;
-        `;
-
-        // Create toast button
-        const toast = document.createElement('button');
-        toast.className = 'non-dismissable-dialogs shadow-lg animate-in fade-in zoom-in-95 slide-in-from-top lg:slide-in-from-bottom';
-
-        // Create widget structure
-        const widgetTop = document.createElement('div');
-        widgetTop.className = 'widget-top h-2.5';
-
-        const widgetBottom = document.createElement('div');
-        widgetBottom.className = 'widget-bottom pixel-font-16 flex items-center gap-2 px-2 py-1 text-whiteHighlight';
-
-        // Add icon (task icon for tasks)
-        const iconImg = document.createElement('img');
-        iconImg.alt = 'task';
-        iconImg.src = 'https://bestiaryarena.com/assets/icons/taskrank.png';
-        iconImg.className = 'pixelated';
-        iconImg.style.cssText = 'width: 16px; height: 16px;';
-        widgetBottom.appendChild(iconImg);
-
-        // Add message
-        const messageDiv = document.createElement('div');
-        messageDiv.className = 'text-left';
-        messageDiv.textContent = message;
-        widgetBottom.appendChild(messageDiv);
-
-        // Assemble toast
-        toast.appendChild(widgetTop);
-        toast.appendChild(widgetBottom);
-        flexContainer.appendChild(toast);
-        mainContainer.appendChild(flexContainer);
-
-        console.log(`[Better Tasker] Toast shown: ${message}`);
-
-        // Auto-remove after duration
-        setTimeout(() => {
-            if (flexContainer && flexContainer.parentNode) {
-                flexContainer.parentNode.removeChild(flexContainer);
-
-                // Update positions of remaining toasts
-                const toasts = mainContainer.querySelectorAll('.toast-item');
-                toasts.forEach((toast, index) => {
-                    const offset = index * 46;
-                    toast.style.transform = `translateY(-${offset}px)`;
-                });
-            }
-        }, duration);
-
-    } catch (error) {
-        console.error('[Better Tasker] Error showing toast:', error);
-    }
+    window.BAToast?.show({ mod: t('mods.betterTasker.modName'), message, duration });
 }
 
 // Helper function to check if there's an active task
@@ -2348,11 +2234,9 @@ let manualPlayPauseUntil = 0;
 let programmaticNavigationUntil = 0;
 let manualPlayBoardUnsubscribe = null;
 let lastTrackedRoomIdForManualPlay = null;
-let lastStartToastAt = 0;
 let taskCompletionInProgress = false;
 let taskCompletionRetryTimeout = null;
 let lastFailsafeTriggerAt = 0;
-const START_TOAST_COOLDOWN_MS = 10000;
 const FINISH_BUTTON_INITIAL_WAIT_MS = 1500;
 const FINISH_BUTTON_POLL_INTERVAL_MS = 200;
 const FINISH_BUTTON_MAX_ATTEMPTS = 20;
@@ -2382,9 +2266,6 @@ const FAILURE_RESET_TIME = 30000; // Reset counter after 30 seconds of no failur
 // Task removal retry tracking (prevents endless loops)
 let taskRemovalRetryCount = 0;
 let lastTaskRemovalAttempt = 0;
-const MAX_TASK_REMOVAL_RETRIES = 3; // Max retries before giving up
-const TASK_REMOVAL_RETRY_COOLDOWN = 20000; // Cooldown after max retries (backoff already spaces attempts)
-const TASK_REMOVAL_RESET_TIME = 30000; // Reset retry counter after quiet period
 
 // Check if it's safe to reload the page (won't interrupt user's active game)
 function isSafeToReload() {
@@ -3760,32 +3641,6 @@ function getCurrentRoomId() {
         return null;
     } catch (error) {
         console.error('[Better Tasker] Error getting current room ID:', error);
-        return null;
-    }
-}
-
-// Function to get room ID for a map name
-function getRoomIdForMapName(mapName) {
-    try {
-        // Get all available maps from the game state
-        const boardContext = globalThis.state.board.getSnapshot().context;
-        if (boardContext && boardContext.maps) {
-            // Look through all maps to find one that matches the name
-            for (const map of boardContext.maps) {
-                if (map.name === mapName) {
-                    // Return the first room ID of this map
-                    if (map.rooms && map.rooms.length > 0) {
-                        console.log(`[Better Tasker] Found room ID for map "${mapName}": ${map.rooms[0].id}`);
-                        return map.rooms[0].id;
-                    }
-                }
-            }
-        }
-        
-        console.log(`[Better Tasker] No room ID found for map: ${mapName}`);
-        return null;
-    } catch (error) {
-        console.error('[Better Tasker] Error getting room ID for map name:', error);
         return null;
     }
 }
@@ -9120,12 +8975,7 @@ function cleanupBetterTasker() {
             window.ModCoordination.unregisterMod('Better Tasker');
         }
 
-        for (const toastContainerId of ['better-tasker-toast-container', 'bt-toast-container']) {
-            const toastContainer = document.getElementById(toastContainerId);
-            if (toastContainer) {
-                toastContainer.remove();
-            }
-        }
+        window.BAToast?.clearMod(t('mods.betterTasker.modName'));
 
         if (window.betterTaskerInitTime) {
             delete window.betterTaskerInitTime;

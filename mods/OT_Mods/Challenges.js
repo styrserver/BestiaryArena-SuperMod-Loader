@@ -44,7 +44,6 @@ const OBSERVER_MIN_INTERVAL = 100;
 const HEADER_BUTTON_CHECK_INTERVAL = 1000;
 
 // Challenge start logic (random map + creatures + CustomBattle)
-const CHALLENGE_DEFAULT_VILLAIN_COUNT = 5;
 const CHALLENGE_TILE_INDEX_MAX = 99;
 const CHALLENGE_CREATURE_GAMEID_MAX = 400;
 const CHALLENGE_CUSTOMBATTLES_WAIT_MS = 50;
@@ -198,6 +197,7 @@ var CHALLENGES_I18N_FALLBACK = {
   'mods.challenges.multiplayer.leaderboardComingSoon': "Rating system coming soon.",
   'mods.challenges.multiplayer.leaderboardRank': "#",
   'mods.challenges.multiplayer.leaderboardTitle': "Leaderboard",
+  'mods.challenges.modName': "Challenges",
   'mods.challenges.multiplayer.leaveQueue': "Leave queue",
   'mods.challenges.multiplayer.liveToastTime': "Time: {time}",
   'mods.challenges.multiplayer.matchAccepted': "Match accepted! Ready to proceed.",
@@ -668,7 +668,7 @@ function navigateToRoomAndFinishMultiplayerMatch(roomId, roomName) {
     console.log('[Challenges MP] navigateToRoomAndFinishMultiplayerMatch', roomId);
     state.board.send({ type: 'selectRoomById', roomId: roomId });
   } else {
-    showChallengeToastNotification(challengesText('mods.challenges.toast.navigateFailed'));
+    showChallengeToastNotification(challengesText('mods.challenges.toast.navigateFailed'), undefined, 'error');
   }
 }
 
@@ -1108,7 +1108,7 @@ function normalizeVillainSpecsArray(specs) {
 function runMultiplayerRollThenStart(roomId, roomName, villainSpecs, matchId, myKey, opponentName, allyGameIds, allyEquips) {
   var specs = normalizeVillainSpecsArray(villainSpecs);
   if (!roomId || !specs.length) {
-    showChallengeToastNotification(challengesText('mods.challenges.toast.invalidRoll'));
+    showChallengeToastNotification(challengesText('mods.challenges.toast.invalidRoll'), undefined, 'error');
     return;
   }
   if (matchId) challengeMpRollStartedForMatchId = matchId;
@@ -1211,14 +1211,14 @@ function onMultiplayerTimeLimitReached(scoreOverride) {
   }).catch(function(err) {
     console.warn('[Challenges MP] submit score error', err);
     stopMultiplayerChallengeToast();
-    showChallengeToastNotification(t('mods.challenges.multiplayer.submitError') || 'Could not submit score.');
+    showChallengeToastNotification(t('mods.challenges.multiplayer.submitError') || 'Could not submit score.', undefined, 'error');
     challengeMultiplayerContext = null;
   });
 }
 
 function showMultiplayerResult(ctx, data) {
   if (!data) {
-    showChallengeToastNotification(challengesText('mods.challenges.multiplayer.timeUp'));
+    showChallengeToastNotification(challengesText('mods.challenges.multiplayer.timeUp'), undefined, 'warning');
     return;
   }
   var myKey = ctx && ctx.myKey;
@@ -1350,7 +1350,7 @@ function startMultiplayerMatchRollSync(matchId, myKey) {
     var allRooms = getAllRoomsForReel();
     if (!allRooms || !allRooms.length) {
       challengeMpRollWriteStartedForMatchId = null;
-      showChallengeToastNotification(challengesText('mods.challenges.toast.noMaps'));
+      showChallengeToastNotification(challengesText('mods.challenges.toast.noMaps'), undefined, 'error');
       return;
     }
     var picked = pickRandomFromArray(allRooms, 1)[0];
@@ -1359,20 +1359,20 @@ function startMultiplayerMatchRollSync(matchId, myKey) {
     var villainSpecs = pickRandomCreatureSpecsForRoom(roomId);
     if (!villainSpecs || !villainSpecs.length) {
       challengeMpRollWriteStartedForMatchId = null;
-      showChallengeToastNotification(challengesText('mods.challenges.toast.rollCreaturesFailed'));
+      showChallengeToastNotification(challengesText('mods.challenges.toast.rollCreaturesFailed'), undefined, 'error');
       return;
     }
     var arsenalCount = getChallengePlayerArsenalCount(villainSpecs);
     var allyGameIds = pickRandomUniqueChallengePlayerGameIds(arsenalCount);
     if (!allyGameIds.length) {
       challengeMpRollWriteStartedForMatchId = null;
-      showChallengeToastNotification(challengesText('mods.challenges.toast.rollPlayerCreaturesFailed'));
+      showChallengeToastNotification(challengesText('mods.challenges.toast.rollPlayerCreaturesFailed'), undefined, 'error');
       return;
     }
     var allyEquips = pickRandomChallengePlayerEquips(arsenalCount);
     if (!allyEquips.length) {
       challengeMpRollWriteStartedForMatchId = null;
-      showChallengeToastNotification(challengesText('mods.challenges.toast.rollPlayerEquipmentFailed'));
+      showChallengeToastNotification(challengesText('mods.challenges.toast.rollPlayerEquipmentFailed'), undefined, 'error');
       return;
     }
     var chosenAt = Date.now();
@@ -1401,7 +1401,7 @@ function startMultiplayerMatchRollSync(matchId, myKey) {
     }).catch(function(err) {
       challengeMpRollWriteStartedForMatchId = null;
       console.warn('[Challenges MP] chooser PATCH full roll failed', err);
-      showChallengeToastNotification(challengesText('mods.challenges.toast.syncRollFailed'));
+      showChallengeToastNotification(challengesText('mods.challenges.toast.syncRollFailed'), undefined, 'error');
     });
   }
 
@@ -1470,7 +1470,7 @@ function startMultiplayerMatchRollSync(matchId, myKey) {
     if (pollCount >= maxPolls) {
       stopPoll();
       console.warn('[Challenges MP] timed out waiting for chooser roll from Firebase');
-      showChallengeToastNotification(challengesText('mods.challenges.toast.opponentRollTimeout'));
+      showChallengeToastNotification(challengesText('mods.challenges.toast.opponentRollTimeout'), undefined, 'error');
     }
   }
 
@@ -1500,9 +1500,6 @@ function showChallengesMatchmakingToast(message, options) {
       removeChallengesPersistentToast();
     }
   });
-}
-function removeChallengesMatchmakingToast() {
-  removeChallengesPersistentToast();
 }
 if (typeof window !== 'undefined') {
   window.__challengesMultiplayerDoLeave = function() {
@@ -1666,26 +1663,6 @@ function getChallengeReplayString() {
     console.warn('[Challenges Mod] getChallengeReplayString:', e);
     return '';
   }
-}
-
-/** Try to get replay with retries (serverResults can appear shortly after victory). */
-function getChallengeReplayStringWithRetry(done, maxAttempts) {
-  maxAttempts = maxAttempts != null ? maxAttempts : 5;
-  var attempt = 0;
-  function tryOnce() {
-    var replay = getChallengeReplayString();
-    if (replay && replay.length > 0) {
-      done(replay);
-      return;
-    }
-    attempt++;
-    if (attempt >= maxAttempts) {
-      done('');
-      return;
-    }
-    setTimeout(tryOnce, attempt * 200);
-  }
-  tryOnce();
 }
 
 /**
@@ -4967,11 +4944,6 @@ function getMatchRollSyncState(match) {
   };
 }
 
-function isChallengePlayerArsenalReady(gameIds, equipSpecs, villainSpecs) {
-  var count = getChallengePlayerArsenalCount(villainSpecs);
-  return countRawFirebaseArray(gameIds) >= count && countRawFirebaseArray(equipSpecs) >= count;
-}
-
 function scheduleSyncedMultiplayerRoll(chosenAt, fn) {
   var base = (typeof chosenAt === 'number' && chosenAt > 0) ? chosenAt : Date.now();
   var syncAt = base + CHALLENGE_MP_ROLL_SYNC_DELAY_MS;
@@ -5468,25 +5440,8 @@ function getChallengePlayerArsenalScoreItemsFromBoard() {
   return items;
 }
 
-function getChallengePlayerArsenalScoreItems(gameIds, equipSpecs) {
-  var boardItems = getChallengePlayerArsenalScoreItemsFromBoard();
-  if (boardItems.length) return boardItems;
-  if (gameIds || equipSpecs) {
-    return getChallengePlayerArsenalScoreItemsFromSpecs(gameIds, equipSpecs);
-  }
-  var arsenal = challengeActivePlayerArsenal || challengePendingPlayerArsenal;
-  if (arsenal) {
-    return getChallengePlayerArsenalScoreItemsFromSpecs(arsenal.gameIds, arsenal.equipSpecs);
-  }
-  return [];
-}
-
 function getChallengePlayerArsenalBonusPoints(villainSpecs) {
   return computeChallengePlayerArsenalBonusFromBoard(villainSpecs).bonus;
-}
-
-function getChallengePlayerArsenalBonusDetails(villainSpecs) {
-  return computeChallengePlayerArsenalBonusFromBoard(villainSpecs);
 }
 
 function formatChallengePlayerArsenalItemScore(points) {
@@ -5979,29 +5934,7 @@ function showChallengeToast(message) {
 
 // Unified toast: one container, transient (duration) or persistent (message + optional Accept/Close).
 var CHALLENGE_TOAST_DURATION = 5000;
-var CHALLENGE_TOAST_CONTAINER_ID = 'challenges-toast-container';
 var challengesPersistentToastHandle = null;
-
-function getChallengesToastContainer() {
-  if (typeof document === 'undefined') return null;
-  var el = document.getElementById(CHALLENGE_TOAST_CONTAINER_ID);
-  if (!el) {
-    el = document.createElement('div');
-    el.id = CHALLENGE_TOAST_CONTAINER_ID;
-    el.style.cssText = 'position: fixed; z-index: 9999; inset: 16px 16px 64px; pointer-events: none;';
-    document.body.appendChild(el);
-  }
-  return el;
-}
-
-function updateChallengesToastPositions(container) {
-  if (!container) return;
-  var toasts = container.querySelectorAll('.challenges-toast-item');
-  toasts.forEach(function(toast, index) {
-    var offset = index * 46;
-    toast.style.transform = 'translateY(-' + offset + 'px)';
-  });
-}
 
 /**
  * Show a toast. Options: duration (transient, ms — e.g. CHALLENGE_QUEUE_WATCH_TOAST_MS = 10s); or persistent with showAccept?, acceptLabel?, onClose?.
@@ -6010,45 +5943,26 @@ function updateChallengesToastPositions(container) {
  */
 function showChallengesToast(message, options) {
   options = options || {};
-  var messageIsNode = isChallengeDomNode(message);
-  var safeMsg = (!messageIsNode && message != null && message !== '') ? String(message).replace(/</g, '&lt;') : '';
   try {
-    var container = getChallengesToastContainer();
-    if (!container) return null;
     var isTransient = typeof options.duration === 'number' && options.duration > 0;
     var useJoinLink = options.withJoinLink === true;
     if (!isTransient) removeChallengesPersistentToast();
-    var existingToasts = container.querySelectorAll('.challenges-toast-item');
-    var stackOffset = existingToasts.length * 46;
-    var flexContainer = document.createElement('div');
-    flexContainer.className = 'challenges-toast-item';
-    flexContainer.style.cssText = 'display: flex; position: absolute; transition: 230ms cubic-bezier(0.21, 1.02, 0.73, 1); transform: translateY(-' + stackOffset + 'px); bottom: 0px; right: 0px; justify-content: flex-end; pointer-events: none; width: max-content; max-width: 100%;';
-    var toast = document.createElement((isTransient && !useJoinLink && !messageIsNode) ? 'button' : 'div');
-    toast.className = 'non-dismissable-dialogs shadow-lg animate-in fade-in zoom-in-95 slide-in-from-top lg:slide-in-from-bottom';
-    if (!isTransient) toast.setAttribute('role', 'presentation');
-    var toastNeedsPointerEvents = isTransient || useJoinLink || messageIsNode || options.showAccept === true || options.acceptLabel !== undefined || typeof options.onClose === 'function';
-    if (toastNeedsPointerEvents) {
-      toast.style.pointerEvents = 'auto';
-      if (useJoinLink || messageIsNode) toast.style.cursor = 'default';
-    }
-    var widgetTop = document.createElement('div');
-    widgetTop.className = 'widget-top h-2.5';
-    var widgetBottom = document.createElement('div');
-    widgetBottom.className = 'widget-bottom pixel-font-16 flex items-center gap-2 px-2 py-1 text-whiteHighlight';
+
+    // Rich content (message + optional Join link / Accept / Cancel / Leave buttons) rendered inside the shared toast
+    var content = document.createElement('div');
+    content.style.cssText = 'display: flex; align-items: center; gap: 8px;';
     var messageDiv = document.createElement('div');
     messageDiv.className = 'text-left';
     messageDiv.style.flex = '1 1 auto';
-    function applyToastMessageContent(content) {
+    function applyToastMessageContent(next) {
       messageDiv.textContent = '';
-      if (isChallengeDomNode(content)) {
-        if (options.messageColor && typeof options.messageColor === 'string') messageDiv.style.color = options.messageColor;
-        messageDiv.appendChild(content);
+      if (options.messageColor && typeof options.messageColor === 'string') messageDiv.style.color = options.messageColor;
+      if (isChallengeDomNode(next)) {
+        messageDiv.appendChild(next);
         return;
       }
-      var text = (content != null && content !== '') ? String(content).replace(/</g, '&lt;') : '';
-      if (text.indexOf('\n') !== -1) messageDiv.style.whiteSpace = 'pre-line';
-      else messageDiv.style.whiteSpace = '';
-      if (options.messageColor && typeof options.messageColor === 'string') messageDiv.style.color = options.messageColor;
+      var text = (next != null && next !== '') ? String(next) : '';
+      messageDiv.style.whiteSpace = text.indexOf('\n') !== -1 ? 'pre-line' : '';
       messageDiv.textContent = text;
     }
     if (useJoinLink) {
@@ -6075,9 +5989,10 @@ function showChallengesToast(message, options) {
       messageDiv.appendChild(joinLinkBtn);
       messageDiv.appendChild(tail);
     } else {
-      applyToastMessageContent(messageIsNode ? message : safeMsg);
+      applyToastMessageContent(message);
     }
-    widgetBottom.appendChild(messageDiv);
+    content.appendChild(messageDiv);
+
     var acceptToastBtn = null;
     if (options.showAccept === true || options.acceptLabel !== undefined) {
       acceptToastBtn = document.createElement('button');
@@ -6091,11 +6006,10 @@ function showChallengesToast(message, options) {
         e.stopPropagation();
         if (typeof window !== 'undefined' && window.__challengesMultiplayerDoAccept) window.__challengesMultiplayerDoAccept();
       });
-      widgetBottom.appendChild(acceptToastBtn);
+      content.appendChild(acceptToastBtn);
     }
-    var cancelToastBtn = null;
     if (options.showCancel === true || typeof options.onCancel === 'function') {
-      cancelToastBtn = document.createElement('button');
+      var cancelToastBtn = document.createElement('button');
       cancelToastBtn.type = 'button';
       cancelToastBtn.setAttribute('aria-label', challengesText('mods.challenges.aria.cancelChallenge'));
       cancelToastBtn.className = 'challenges-btn';
@@ -6103,11 +6017,9 @@ function showChallengesToast(message, options) {
       cancelToastBtn.textContent = typeof options.cancelLabel === 'string' ? options.cancelLabel : challengesText('mods.challenges.cancel');
       cancelToastBtn.addEventListener('click', function(e) {
         e.stopPropagation();
-        if (typeof options.onCancel === 'function') {
-          options.onCancel();
-        }
+        if (typeof options.onCancel === 'function') options.onCancel();
       });
-      widgetBottom.appendChild(cancelToastBtn);
+      content.appendChild(cancelToastBtn);
     }
     if (typeof options.onClose === 'function') {
       var closeBtn = document.createElement('button');
@@ -6120,44 +6032,30 @@ function showChallengesToast(message, options) {
         e.stopPropagation();
         options.onClose();
       });
-      widgetBottom.appendChild(closeBtn);
-    }
-    toast.appendChild(widgetTop);
-    toast.appendChild(widgetBottom);
-    flexContainer.appendChild(toast);
-    container.appendChild(flexContainer);
-
-    if (isTransient) {
-      toast.addEventListener('click', function(e) {
-        if (useJoinLink && e.target && e.target.closest && e.target.closest('[data-challenges-queue-watch-join]')) return;
-        if (messageIsNode && e.target && e.target.closest && e.target.closest('a[href]')) return;
-        if (flexContainer && flexContainer.parentNode) {
-          flexContainer.parentNode.removeChild(flexContainer);
-          updateChallengesToastPositions(container);
-        }
-      });
-      setTimeout(function() {
-        if (flexContainer && flexContainer.parentNode) {
-          flexContainer.parentNode.removeChild(flexContainer);
-          updateChallengesToastPositions(container);
-        }
-      }, options.duration);
-      return null;
+      content.appendChild(closeBtn);
     }
 
-    updateChallengesToastPositions(container);
+    var shown = window.BAToast && window.BAToast.show({
+      mod: challengesText('mods.challenges.modName'),
+      message: content,
+      type: options.type,
+      duration: isTransient ? options.duration : 0,
+      dismissOnClick: isTransient,
+      interactive: true
+    });
+    if (isTransient) return null;
+
     var handle = {
       updateMessage: function(text) {
-        toast.style.pointerEvents = 'auto';
-        toast.style.cursor = 'default';
         applyToastMessageContent(text);
+        if (shown) shown.relayout();
       },
-      setAcceptVisible: acceptToastBtn ? function(visible) { acceptToastBtn.style.display = visible ? 'inline-block' : 'none'; } : function() {},
+      setAcceptVisible: acceptToastBtn ? function(visible) {
+        acceptToastBtn.style.display = visible ? 'inline-block' : 'none';
+        if (shown) shown.relayout();
+      } : function() {},
       remove: function() {
-        if (flexContainer && flexContainer.parentNode) {
-          flexContainer.parentNode.removeChild(flexContainer);
-          updateChallengesToastPositions(container);
-        }
+        if (shown) shown.remove();
         if (challengesPersistentToastHandle === handle) challengesPersistentToastHandle = null;
       }
     };
@@ -6174,8 +6072,8 @@ function removeChallengesPersistentToast() {
   challengesPersistentToastHandle = null;
 }
 
-function showChallengeToastNotification(message, duration) {
-  showChallengesToast(message, { duration: duration || CHALLENGE_TOAST_DURATION });
+function showChallengeToastNotification(message, duration, type) {
+  showChallengesToast(message, { duration: duration || CHALLENGE_TOAST_DURATION, type: type });
 }
 
 function copyReplayToClipboard(text) {
@@ -6567,7 +6465,7 @@ function startChallengeWithVillainConfig(config) {
   console.log('[Challenges Mod] startChallengeWithVillainConfig called', { roomId: config && config.roomId, roomName: config && config.roomName, villains: config && config.villains && config.villains.length });
   if (!config || !config.roomId || !config.villains || !Array.isArray(config.villains) || config.villains.length === 0) {
     console.log('[Challenges Mod] startChallengeWithVillainConfig: invalid config, showing toast');
-    showChallengeToastNotification(challengesText('mods.challenges.toast.invalidSetupConfig'));
+    showChallengeToastNotification(challengesText('mods.challenges.toast.invalidSetupConfig'), undefined, 'error');
     return;
   }
   try {
@@ -7043,5 +6941,5 @@ try {
 exports = {
   openChallengesModal,
   openChallengesModalMultiplayerAndJoinQueue: openChallengesModalMultiplayerAndJoinQueue,
-  cleanup: cleanupChallenges
+  cleanup: function() { window.BAToast?.clearMod(challengesText('mods.challenges.modName')); cleanupChallenges(); }
 };

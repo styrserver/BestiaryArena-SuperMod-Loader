@@ -33,6 +33,8 @@ you are building.
    - [`tools/check-syntax.mjs`](../tools/check-syntax.mjs): `node --check` on every shipped script (a syntax error would break the extension in the store)
    - [`tools/check-patch-notes.mjs`](../tools/check-patch-notes.mjs): both manifests and the newest patch note agree
    - optional `--full`: [`tools/check-all.mjs`](../tools/check-all.mjs) (creature combat, inventory, names, room scripts, outfits, fast simulation)
+     The live-game checks share one download cache (`tools/lib.mjs`, 2 min in the OS temp folder; `BA_TOOLS_NO_CACHE=1` forces fresh fetches).
+     [`tools/compare-game-pt.mjs`](../tools/compare-game-pt.mjs) is separate and report-only: it lists game `t("English","Português")` pairs against the pt-BR locale (run it by hand when reviewing translations).
    - [`tools/package.mjs`](../tools/package.mjs) builds both store zips
    - the version is newer than `origin/main`'s, then you confirm, then commit `Release X.Y.Z` and push
    - after a successful push, it **opens the next patch version locally** (both manifests, plus an empty top
@@ -82,6 +84,30 @@ heuristic against forgotten notes: ignore it for changes with no player-visible 
 
 `.gitignore` keeps `dist/`, `.env*`, `*.xpi`, `web-ext-artifacts/` and `.claude/settings.local.json` out of the
 repo, because `release.mjs` stages everything with `git add -A` and the repo is public.
+
+## In-game smoke test (before the real push)
+
+`check-all` proves the files parse and the data matches the game, not that the mods work. Before `release.mjs` pushes, load the
+extension unpacked and spend ~15 minutes on the shared and risky parts:
+
+- **Toasts** (`content/ba-toast.js`): a start toast (name first, sharp, coloured by type), two mods at once (they stack), pt-BR (translated
+  mod name), and every toast with buttons: Challenges queue (Join / Accept / Cancel), Map Editor workshop Leave, Battle Helper Restore and
+  Publish, the Quests battle-status line, Welcome loading and loaded toasts.
+- **Hunt Analyzer**: win a few battles (grids and rate badges update, order stays right), map and floor dropdowns (Esc closes), Clear, Copy Log,
+  tooltips on live rows do not flicker, empty "No drops yet" state.
+- **Bestiary Automator**: switch Auto-refill off mid-refill and disable the mod mid-refill (no more potions used); end a Raid Hunter raid and toggle
+  Better Boosted Maps off (your own Auto-refill / Faster autoplay come back).
+- **On-demand scripts** (`content/local_mods.js` / `injector.js`): on a fresh page load with only default mods, confirm the console shows no
+  `custom-battles.js` or `event-competition.js` injection. Then enable Quests, Challenges and Map Editor (separately, from the popup and by
+  reload) and Better Highscores: each must work (Quests NPC and battle toasts, Challenges modal, Map Editor panel, Better Highscores leaderboards).
+  Do it in Chrome and Firefox.
+- **Wiki export helpers**: on a fresh page, run `dumpCreatureWikiLua()` and `dumpMapsWikiLua()` in DevTools. Each must load its file and
+  produce the Lua (and the console must show no `*-lua-export.js` execution before the first call).
+- **After a dead-code pass**: open each touched mod and use its main feature once (Quests, Cyclopedia, Better Analytics battle log and export,
+  Guilds, VIP List, Map Editor, Better Teleporter, Mod Settings performance debugger). A removed function only fails when it is called.
+- **Undefined names**: `node --check` cannot see a deleted function that is still called. Run ESLint `no-undef` on `mods/*/*.js` against the
+  last release (`git archive <tag> mods`) and compare: any new undefined name is a break. The removal heuristic "name appears once in the repo"
+  misses spread calls (`...fn()`) and `obj.fn()`, so never trust it alone.
 
 ## Rollback and recovery
 

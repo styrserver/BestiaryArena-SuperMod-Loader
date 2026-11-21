@@ -16,9 +16,6 @@ const t = (key) => {
   return key;
 };
 
-// Cache DATA availability to avoid repeated checks
-const DATA_AVAILABLE = typeof DATA !== 'undefined';
-
 // Store original fetch for cleanup
 let outfiterFetchWrapper = null;
 let outfiterFetchRestore = null;
@@ -1868,31 +1865,6 @@ function executeOutfiter() {
     refreshGameTables();
     installSleqqusMounts();
 
-    // Define excluded items from bag pool (only if DATA is available)
-    if (DATA_AVAILABLE) {
-      const EXCLUDE_FROM_BAG_POOL = [
-        DATA.Newcomer.id,
-        DATA.Gamemaster.id,
-        DATA.Citizen.id, // tutorial reward
-        DATA["Golden Outfit"].id, // store gold sink
-        DATA.Poof.id,
-        DATA.Jester.id, // april fools
-        DATA["Newly Wed"].id, // valentines day
-        DATA["Ceremonial Garb"].id, // carnival
-        DATA.Festive.id, // carnival
-        DATA["Royal Pumpkin"].id, // halloween
-        DATA["Pumpkin Mummy"].id, // halloween
-        DATA["Sinister Archer"].id, // halloween
-        DATA["Merry Garb"].id, // christmas
-        DATA.Elven.id, // christmas
-        DATA["Bat Knight"].id, // oathkeeper amazon achievement
-        DATA["Crusader"].id, // black knight achievement
-      ];
-      console.log('[Outfiter] EXCLUDE_FROM_BAG_POOL defined with', EXCLUDE_FROM_BAG_POOL.length, 'items');
-    } else {
-      console.log('[Outfiter] DATA object not available, skipping EXCLUDE_FROM_BAG_POOL definition');
-    }
-    
     // Set up error interception for outfit changes
     interceptOutfitChangeErrors();
     startMountMenuObserver();

@@ -59,13 +59,10 @@ const DOM_ACTION_RETRY_DELAY_MS = 500;
 const DOM_ACTION_RETRY_DELAY_HIDDEN_MS = 1000;
 const DOM_ACTION_MAX_ATTEMPTS = 5;
 const DOM_ACTION_MAX_ATTEMPTS_HIDDEN = 40;
-const RAID_STATUS_UPDATE_INTERVAL = 600000; // 10 minutes
 const RAID_END_CHECK_INTERVAL = 30000;
-const START_TOAST_COOLDOWN_MS = 10000;
 
 // Count
 const MAX_RETRY_ATTEMPTS = 3;
-const INITIAL_COUNT = 0;
 
 // Priority levels for raid processing (matches user-facing tooltip: High/Medium/Low)
 const RAID_PRIORITY = {
@@ -85,7 +82,6 @@ const COLOR_DARK_GREEN = '#16a34a';
 const COLOR_DARK_GRAY = '#333';
 const COLOR_BORDER = '#444';
 const COLOR_BORDER_DARK = '#555';
-const COLOR_LINK = '#666';
 const COLOR_SUCCESS = '#4ade80';
 
 /** Vanilla quest nav icon (fallback when originalState was never captured). */
@@ -103,13 +99,6 @@ function priorityStringToNumber(priorityString) {
     if (p === 'medium') return RAID_PRIORITY.MEDIUM;
     if (p === 'low') return RAID_PRIORITY.LOW;
     return RAID_PRIORITY.LOW; // Default to low
-}
-
-function priorityNumberToString(priorityNumber) {
-    if (priorityNumber === RAID_PRIORITY.HIGH) return 'high';
-    if (priorityNumber === RAID_PRIORITY.MEDIUM) return 'medium';
-    if (priorityNumber === RAID_PRIORITY.LOW) return 'low';
-    return 'low'; // Default to low
 }
 
 function getPriorityLabel(priorityNumber, detailed = false) {
@@ -130,29 +119,6 @@ function getRaidPriority(raidName) {
     } catch (_) {
         // Default: static raids = MEDIUM, dynamic events = LOW
         return isStaticRaidEventName(raidName) ? RAID_PRIORITY.MEDIUM : RAID_PRIORITY.HIGH;
-    }
-}
-
-/**
- * Get a per-raid setting, falling back to global setting if not set
- * @param {string} raidName - Name of the raid
- * @param {string} settingKey - Key of the setting to retrieve
- * @returns {*} The setting value or undefined if not found
- */
-function getRaidSetting(raidName, settingKey) {
-    try {
-        const settings = loadSettings();
-        const raidSettings = settings.raidSettings || {};
-        const raidSetting = raidSettings[raidName];
-        if (raidSetting && raidSetting.hasOwnProperty(settingKey)) {
-            return raidSetting[settingKey];
-        }
-        // Fall back to global setting
-        return settings[settingKey];
-    } catch (error) {
-        console.error('[Raid Hunter] Error getting raid setting:', error);
-        const settings = loadSettings();
-        return settings[settingKey];
     }
 }
 
@@ -222,7 +188,6 @@ function hasRaidCustomSettings(raidName) {
 
 // Track if all mods have finished loading
 let allModsLoaded = false;
-let lastStartToastAt = 0;
 
 /**
  * Checks if Better Tasker is currently active and performing tasks
@@ -1634,99 +1599,11 @@ function createDropdownSetting(id, label, description, value = 'Auto-setup', opt
 
 // Show toast notification
 function showToast(message, duration = 5000) {
-    try {
-        // Use custom toast implementation (same as welcome.js)
-        // Get or create the main toast container
-        let mainContainer = document.getElementById('raid-hunter-toast-container');
-        if (!mainContainer) {
-            mainContainer = document.createElement('div');
-            mainContainer.id = 'raid-hunter-toast-container';
-            mainContainer.style.cssText = `
-                position: fixed;
-                z-index: 9999;
-                inset: 16px 16px 64px;
-                pointer-events: none;
-            `;
-            document.body.appendChild(mainContainer);
-        }
-        
-        // Count existing toasts to calculate stacking position
-        const existingToasts = mainContainer.querySelectorAll('.toast-item');
-        const stackOffset = existingToasts.length * 46;
-        
-        // Create the flex container for this specific toast
-        const flexContainer = document.createElement('div');
-        flexContainer.className = 'toast-item';
-        flexContainer.style.cssText = `
-            left: 0px;
-            right: 0px;
-            display: flex;
-            position: absolute;
-            transition: 230ms cubic-bezier(0.21, 1.02, 0.73, 1);
-            transform: translateY(-${stackOffset}px);
-            bottom: 0px;
-            justify-content: flex-end;
-        `;
-        
-        // Create toast button
-        const toast = document.createElement('button');
-        toast.className = 'non-dismissable-dialogs shadow-lg animate-in fade-in zoom-in-95 slide-in-from-top lg:slide-in-from-bottom';
-        
-        // Create widget structure
-        const widgetTop = document.createElement('div');
-        widgetTop.className = 'widget-top h-2.5';
-        
-        const widgetBottom = document.createElement('div');
-        widgetBottom.className = 'widget-bottom pixel-font-16 flex items-center gap-2 px-2 py-1 text-whiteHighlight';
-        
-        // Add icon (raid icon for raids)
-        const iconImg = document.createElement('img');
-        iconImg.alt = 'raid';
-        iconImg.src = 'https://bestiaryarena.com/assets/icons/raid.png';
-        iconImg.className = 'pixelated';
-        iconImg.style.cssText = 'width: 16px; height: 16px;';
-        widgetBottom.appendChild(iconImg);
-        
-        // Add message
-        const messageDiv = document.createElement('div');
-        messageDiv.className = 'text-left';
-        messageDiv.textContent = message;
-        widgetBottom.appendChild(messageDiv);
-        
-        // Assemble toast
-        toast.appendChild(widgetTop);
-        toast.appendChild(widgetBottom);
-        flexContainer.appendChild(toast);
-        mainContainer.appendChild(flexContainer);
-        
-        console.log(`[Raid Hunter] Toast shown: ${message}`);
-        
-        // Auto-remove after duration
-        setTimeout(() => {
-            if (flexContainer && flexContainer.parentNode) {
-                flexContainer.parentNode.removeChild(flexContainer);
-                
-                // Update positions of remaining toasts
-                const toasts = mainContainer.querySelectorAll('.toast-item');
-                toasts.forEach((toast, index) => {
-                    const offset = index * 46;
-                    toast.style.transform = `translateY(-${offset}px)`;
-                });
-            }
-        }, duration);
-        
-    } catch (error) {
-        console.error('[Raid Hunter] Error showing toast:', error);
-    }
+    window.BAToast?.show({ mod: t('mods.raidHunter.modName'), message, duration });
 }
 
 function showRaidStartToast() {
-    const now = Date.now();
-    if (now - lastStartToastAt < START_TOAST_COOLDOWN_MS) {
-        return;
-    }
-    lastStartToastAt = now;
-    showToast(t('mods.raidHunter.startingToast'));
+    window.BAToast?.show({ mod: t('mods.raidHunter.modName'), message: t('mods.raidHunter.startingToast'), key: 'start', cooldown: 10000 });
 }
 
 // ============================================================================
@@ -3298,9 +3175,41 @@ function checkBestiaryAutomatorHealth() {
     }
 }
 
+// Values the player had in Bestiary Automator before Raid Hunter changed them, so ending a raid puts the
+// player's own choice back instead of forcing the setting off.
+const automatorBaseline = {};
+
+function readAutomatorConfig() {
+    const automator = window.bestiaryAutomator;
+    if (typeof automator?.getConfig === 'function') return automator.getConfig();
+    try {
+        return JSON.parse(localStorage.getItem('bestiary-automator-config') || 'null');
+    } catch (_) {
+        return null;
+    }
+}
+
+function rememberAutomatorBaseline(configUpdate) {
+    const current = readAutomatorConfig();
+    if (!current) return;
+    Object.keys(configUpdate).forEach((key) => {
+        if (!(key in automatorBaseline)) automatorBaseline[key] = current[key] === true;
+    });
+}
+
+// Put one setting back to what the player had. Leaves it alone when the player changed it during the raid.
+function restoreAutomatorSetting(automator, key) {
+    const wasEnabled = automatorBaseline[key] === true;
+    delete automatorBaseline[key];
+    const current = readAutomatorConfig()?.[key];
+    if (current === false) return; // player already switched it off
+    automator.updateConfig({ [key]: wasEnabled });
+}
+
 // Helper function to update Bestiary Automator config with retry
 function updateBestiaryAutomatorConfig(configUpdate, settingName, verifyProperty) {
     const automator = findBestiaryAutomator();
+    rememberAutomatorBaseline(configUpdate);
     
     if (automator) {
         console.log(`[Raid Hunter] Enabling Bestiary Automator ${settingName}...`);
@@ -3354,9 +3263,9 @@ function disableBestiaryAutomatorStaminaRefill() {
     return withControlCheck(window.BestiaryAutomatorSettingsManager, 'Raid Hunter', () => {
         const automator = findBestiaryAutomator();
         if (automator) {
-            console.log('[Raid Hunter] Disabling Bestiary Automator autorefill stamina...');
-            automator.updateConfig({ autoRefillStamina: false });
-            console.log('[Raid Hunter] Bestiary Automator autorefill stamina disabled');
+            console.log('[Raid Hunter] Restoring Bestiary Automator autorefill stamina...');
+            restoreAutomatorSetting(automator, 'autoRefillStamina');
+            console.log('[Raid Hunter] Bestiary Automator autorefill stamina restored');
             return true;
         } else {
             console.log('[Raid Hunter] Bestiary Automator not available for autorefill stamina');
@@ -3381,9 +3290,9 @@ function disableBestiaryAutomatorFasterAutoplay() {
     return withControlCheck(window.BestiaryAutomatorSettingsManager, 'Raid Hunter', () => {
         const automator = findBestiaryAutomator();
         if (automator) {
-            console.log('[Raid Hunter] Disabling Bestiary Automator faster autoplay...');
-            automator.updateConfig({ fasterAutoplay: false });
-            console.log('[Raid Hunter] Bestiary Automator faster autoplay disabled');
+            console.log('[Raid Hunter] Restoring Bestiary Automator faster autoplay...');
+            restoreAutomatorSetting(automator, 'fasterAutoplay');
+            console.log('[Raid Hunter] Bestiary Automator faster autoplay restored');
             return true;
         } else {
             console.log('[Raid Hunter] Bestiary Automator not available for faster autoplay');
@@ -3499,30 +3408,6 @@ function enableAutosellerDragonPlant() {
 function isElementVisible(el) {
     if (!el || el.disabled) return false;
     return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
-}
-
-/**
- * Gets room ID for event name using game state API (with fallback)
- * @param {string} eventName - The event name
- * @returns {string|null} The room ID or null if not found
- */
-function getRoomIdForEvent(eventName) {
-    try {
-        // Try game state API reverse lookup (if ROOM_NAME exists, find matching ROOM_ID)
-        if (globalThis.state?.utils?.ROOM_NAME) {
-            const roomNames = globalThis.state.utils.ROOM_NAME;
-            for (const [roomId, roomName] of Object.entries(roomNames)) {
-                if (roomName === eventName) {
-                    return roomId;
-                }
-            }
-        }
-    } catch (error) {
-        console.warn('[Raid Hunter] Error accessing game state API for room ID:', error);
-    }
-    
-    // Fallback to hardcoded mapping (backward compatibility)
-    return getEventToRoomMapping()[eventName] || null;
 }
 
 /**
@@ -7888,6 +7773,7 @@ function stopAutoFloorGameEndMonitoring() {
 // Follows mod development guide best practices: "Clean up event listeners and intervals when they're no longer needed"
 function cleanupRaidHunter() {
     try {
+        window.BAToast?.clearMod(t('mods.raidHunter.modName'));
         // 1. Clean up all intervals, observers, and timeouts (centralized cleanup)
         cleanupAll();
         

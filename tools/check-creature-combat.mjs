@@ -24,31 +24,17 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { recordRun } from './tool-runs.mjs';
+import { loadChunks } from './lib.mjs';
 
 const { isCreatureBundle, analyze, analyzeFull, parseNameToId } = createRequire(import.meta.url)('../content/ba-combat.js');
 
-const ORIGIN = 'https://bestiaryarena.com';
 const DB_PATH = join(dirname(fileURLToPath(import.meta.url)), '..', 'database', 'creature-database.js');
 /** Snapshot fields read from the creature class, not from constants: range, ranged flag, first-cast delay (ms). */
 const OPTIONAL_FIELDS = ['r', 'rc', 'ic', 's', 'am', 'aa', 'cb', 'cv'];
 const DATA_BLOCK = /(\/\/ BEGIN CREATURE_COMBAT_DATA\r?\n)[\s\S]*?(\/\/ END CREATURE_COMBAT_DATA)/;
 
-async function fetchText(url) {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`${url} -> HTTP ${res.status}`);
-  return res.text();
-}
-
-export async function loadChunks() {
-  const html = await fetchText(`${ORIGIN}/`);
-  const paths = new Set(html.match(/\/_next\/static\/chunks\/[^"'\\\s]+?\.js/g) || []);
-  const buildId = /\/_next\/static\/([^/"]+)\/_buildManifest\.js/.exec(html)?.[1];
-  if (!buildId) throw new Error('build id not found on the home page');
-  const manifest = await fetchText(`${ORIGIN}/_next/static/${buildId}/_buildManifest.js`);
-  for (const p of manifest.match(/static\/chunks\/[^"'\\\s]+?\.js/g) || []) paths.add('/_next/' + p);
-  if (paths.size === 0) throw new Error('no chunk URLs found');
-  return Promise.all([...paths].map((p) => fetchText(ORIGIN + p)));
-}
+// the other tools import loadChunks from here; it lives in lib.mjs
+export { loadChunks };
 
 function findCreatureBundle(chunks) {
   const src = chunks.find(isCreatureBundle);

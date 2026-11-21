@@ -1096,33 +1096,6 @@
     }, CONSTANTS.DEBOUNCE_DELAY); // Reduced delay for faster input box creation
   }
   
-  function retryEnhanceHygenieModal(maxAttempts = CONSTANTS.RETRY_MAX_ATTEMPTS, baseDelay = CONSTANTS.RETRY_BASE_DELAY) {
-    let attempts = 0;
-    
-    const tryEnhance = () => {
-      attempts++;
-      
-      const inventory = getInventoryState();
-      if (!inventory) {
-        if (attempts < maxAttempts) {
-          const delay = baseDelay * Math.pow(2, attempts - 1);
-          setTimeout(tryEnhance, delay);
-        }
-        return;
-      }
-      
-      if (enhanceHygenieModal()) {
-        return;
-      }
-      
-      if (attempts < maxAttempts) {
-        const delay = baseDelay * Math.pow(2, attempts - 1);
-        setTimeout(tryEnhance, delay);
-      }
-    };
-    
-    tryEnhance();
-  }
   
   function initializeBetterHygenie() {
     injectStyles();

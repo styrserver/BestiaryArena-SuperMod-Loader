@@ -84,7 +84,7 @@ const loadConfig = () => {
 const saveConfigToStorage = (configToSave) => {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(configToSave));
-    console.log('[Bestiary Automator] Config saved to localStorage successfully');
+    console.debug('[Bestiary Automator] Config saved to localStorage successfully');
     return true;
   } catch (error) {
     console.error('[Bestiary Automator] Error saving config to localStorage:', error);
@@ -129,7 +129,6 @@ const getFasterAutoplayDelayMs = () =>
 const TIMING = {
   TOAST_AUTO_REMOVE: 4000,      // Auto-remove toast after 4 seconds
   CUBE_REWARD_TOAST_MS: 10000,   // Cube open reward toast duration
-  TOAST_STACK_OFFSET: 46,        // Offset between stacked toasts
   QUEST_LOG_CLOSE_ATTEMPTS: 3,   // Number of ESC key presses to close quest log
   QUEST_LOG_CLOSE_DELAY: 50,     // Delay between ESC key presses
   STAMINA_REFILL_DELAY: 500,     // Delay for stamina refill operations
@@ -387,171 +386,23 @@ const cancelCurrentCountdown = () => {
 
 // Show a notification message
 function showNotification(message, type = 'info', duration = 3000) {
-  if (api.ui && api.ui.notify) {
-    api.ui.notify({
-      message: message,
-      type: type,
-      duration: duration
-    });
-    return;
-  }
-  
-  // Fallback to a simple modal
-  api.ui.components.createModal({
-    title: type.charAt(0).toUpperCase() + type.slice(1),
-    content: message,
-    buttons: [{ text: t('common.close'), primary: true }]
-  });
+  window.BAToast?.show({ mod: t('mods.automator.modName'), message, type, duration });
 }
 
 // Show stamina restoration toast (matches Raid_Hunter.js toast pattern)
 const showStaminaRestoredToast = (pointsRestored) => {
-  try {
-    // Get or create the main toast container (same pattern as Raid_Hunter.js)
-    let mainContainer = document.getElementById('bestiary-automator-toast-container');
-    if (!mainContainer) {
-      mainContainer = document.createElement('div');
-      mainContainer.id = 'bestiary-automator-toast-container';
-      mainContainer.style.cssText = `
-        position: fixed;
-        z-index: 9999;
-        inset: 16px 16px 64px;
-        pointer-events: none;
-      `;
-      document.body.appendChild(mainContainer);
-    }
-    
-    // Count existing toasts to calculate stacking position
-    const existingToasts = mainContainer.querySelectorAll('.toast-item');
-    const stackOffset = existingToasts.length * TIMING.TOAST_STACK_OFFSET;
-    
-    // Create the flex container for this specific toast
-    const flexContainer = document.createElement('div');
-    flexContainer.className = 'toast-item';
-    flexContainer.style.cssText = `
-      left: 0px;
-      right: 0px;
-      display: flex;
-      position: absolute;
-      transition: 230ms cubic-bezier(0.21, 1.02, 0.73, 1);
-      transform: translateY(-${stackOffset}px);
-      bottom: 0px;
-      justify-content: flex-end;
-    `;
-    
-    // Create toast button
-    const toast = document.createElement('button');
-    toast.className = 'non-dismissable-dialogs shadow-lg animate-in fade-in zoom-in-95 slide-in-from-top lg:slide-in-from-bottom';
-    
-    // Create widget structure
-    const widgetTop = document.createElement('div');
-    widgetTop.className = 'widget-top h-2.5';
-    
-    const widgetBottom = document.createElement('div');
-    widgetBottom.className = 'widget-bottom pixel-font-16 flex items-center gap-2 px-2 py-1 text-whiteHighlight';
-    
-    // Create text content
-    const textLeft = document.createElement('div');
-    textLeft.className = 'text-left';
-    
-    const paragraph = document.createElement('p');
-    paragraph.textContent = t('mods.automator.restoredPrefix');
-    
-    const staminaSpan = document.createElement('span');
-    staminaSpan.className = 'text-stamina';
-    staminaSpan.textContent = t('mods.automator.staminaPointsRestored').replace('{points}', pointsRestored);
-    
-    paragraph.appendChild(staminaSpan);
-    textLeft.appendChild(paragraph);
-    widgetBottom.appendChild(textLeft);
-    
-    // Assemble toast
-    toast.appendChild(widgetTop);
-    toast.appendChild(widgetBottom);
-    flexContainer.appendChild(toast);
-    mainContainer.appendChild(flexContainer);
-    
-    // Auto-remove after duration
-    setTimeout(() => {
-      if (flexContainer && flexContainer.parentNode) {
-        flexContainer.parentNode.removeChild(flexContainer);
-        
-        // Update positions of remaining toasts
-        const toasts = mainContainer.querySelectorAll('.toast-item');
-        toasts.forEach((toast, index) => {
-          const offset = index * TIMING.TOAST_STACK_OFFSET;
-          toast.style.transform = `translateY(-${offset}px)`;
-        });
-      }
-    }, TIMING.TOAST_AUTO_REMOVE);
-    
-  } catch (error) {
-    console.error('[Bestiary Automator] Error showing stamina restored toast:', error);
-  }
+  const paragraph = document.createElement('span');
+  paragraph.textContent = t('mods.automator.restoredPrefix');
+  const staminaSpan = document.createElement('span');
+  staminaSpan.className = 'text-stamina';
+  staminaSpan.textContent = t('mods.automator.staminaPointsRestored').replace('{points}', pointsRestored);
+  paragraph.appendChild(staminaSpan);
+  window.BAToast?.show({ mod: t('mods.automator.modName'), message: paragraph, type: 'success', duration: TIMING.TOAST_AUTO_REMOVE });
 };
 
 // Custom toast stack (Quests.js–style DOM). Never uses modal fallback — avoids blocking dialogs after cube flows.
-const showAutomatorToastMessage = (message, durationMs = TIMING.CUBE_REWARD_TOAST_MS) => {
-  try {
-    let mainContainer = document.getElementById('bestiary-automator-toast-container');
-    if (!mainContainer) {
-      mainContainer = document.createElement('div');
-      mainContainer.id = 'bestiary-automator-toast-container';
-      mainContainer.style.cssText = `
-        position: fixed;
-        z-index: 9999;
-        inset: 16px 16px 64px;
-        pointer-events: none;
-      `;
-      document.body.appendChild(mainContainer);
-    }
-    const existingToasts = mainContainer.querySelectorAll('.toast-item');
-    const stackOffset = existingToasts.length * TIMING.TOAST_STACK_OFFSET;
-    const flexContainer = document.createElement('div');
-    flexContainer.className = 'toast-item';
-    flexContainer.style.cssText = `
-      left: 0px;
-      right: 0px;
-      display: flex;
-      position: absolute;
-      transition: 230ms cubic-bezier(0.21, 1.02, 0.73, 1);
-      transform: translateY(-${stackOffset}px);
-      bottom: 0px;
-      justify-content: flex-end;
-    `;
-    const toast = document.createElement('button');
-    toast.type = 'button';
-    toast.style.pointerEvents = 'auto';
-    toast.className = 'non-dismissable-dialogs shadow-lg animate-in fade-in zoom-in-95 slide-in-from-top lg:slide-in-from-bottom';
-    const widgetTop = document.createElement('div');
-    widgetTop.className = 'widget-top h-2.5';
-    const widgetBottom = document.createElement('div');
-    widgetBottom.className = 'widget-bottom pixel-font-16 flex items-center gap-2 px-2 py-1 text-whiteHighlight';
-    const textLeft = document.createElement('div');
-    textLeft.className = 'text-left';
-    const paragraph = document.createElement('p');
-    paragraph.style.cssText = 'margin: 0; max-width: 28rem; white-space: pre-wrap;';
-    paragraph.textContent = message;
-    textLeft.appendChild(paragraph);
-    widgetBottom.appendChild(textLeft);
-    toast.appendChild(widgetTop);
-    toast.appendChild(widgetBottom);
-    flexContainer.appendChild(toast);
-    mainContainer.appendChild(flexContainer);
-    const remove = () => {
-      if (flexContainer && flexContainer.parentNode) {
-        flexContainer.parentNode.removeChild(flexContainer);
-        const toasts = mainContainer.querySelectorAll('.toast-item');
-        toasts.forEach((el, index) => {
-          el.style.transform = `translateY(-${index * TIMING.TOAST_STACK_OFFSET}px)`;
-        });
-      }
-    };
-    toast.addEventListener('click', remove);
-    setTimeout(remove, durationMs);
-  } catch (error) {
-    console.error('[Bestiary Automator] Error showing automator toast:', error);
-  }
+const showAutomatorToastMessage = (message, durationMs = TIMING.CUBE_REWARD_TOAST_MS, type) => {
+  window.BAToast?.show({ mod: t('mods.automator.modName'), message, type, duration: durationMs });
 };
 
 // Automation Tasks
@@ -883,7 +734,7 @@ const getCurrentStaminaFromGameStateAPI = () => {
         playerContext.staminaExcessMs
       );
       if (currentStamina !== null) {
-        console.log(`[Bestiary Automator] Current stamina from timestamp: ${currentStamina}`);
+        console.debug(`[Bestiary Automator] Current stamina from timestamp: ${currentStamina}`);
         return currentStamina;
       }
     }
@@ -965,7 +816,7 @@ const findLowestTierPotion = (inventory) => {
     
     // This potion is available, enabled, and meets threshold
     const thresholdInfo = config.thresholdsEnabled ? `threshold: ${threshold}` : 'thresholds disabled';
-    console.log(`[Bestiary Automator] Found usable tier ${tier} (${potionName}) potion: ${potionCount} available (${thresholdInfo})`);
+    console.debug(`[Bestiary Automator] Found usable tier ${tier} (${potionName}) potion: ${potionCount} available (${thresholdInfo})`);
     return tier;
   }
   
@@ -1486,45 +1337,9 @@ const showCubeOpenedToast = (tier, rewardContext = {}) => {
       ? tReplace('mods.automator.cubeOpenedToastRewards', { rewards: summaryParts.join(', ') })
       : '';
 
-    let mainContainer = document.getElementById('bestiary-automator-toast-container');
-    if (!mainContainer) {
-      mainContainer = document.createElement('div');
-      mainContainer.id = 'bestiary-automator-toast-container';
-      mainContainer.style.cssText = `
-        position: fixed;
-        z-index: 9999;
-        inset: 16px 16px 64px;
-        pointer-events: none;
-      `;
-      document.body.appendChild(mainContainer);
-    }
-    const existingToasts = mainContainer.querySelectorAll('.toast-item');
-    const stackOffset = existingToasts.length * TIMING.TOAST_STACK_OFFSET;
-    const flexContainer = document.createElement('div');
-    flexContainer.className = 'toast-item';
-    flexContainer.style.cssText = `
-      left: 0px;
-      right: 0px;
-      display: flex;
-      flex-direction: row;
-      align-items: center;
-      position: absolute;
-      transition: 230ms cubic-bezier(0.21, 1.02, 0.73, 1);
-      transform: translateY(-${stackOffset}px);
-      bottom: 0px;
-      justify-content: flex-end;
-    `;
-    const toast = document.createElement('button');
-    toast.type = 'button';
-    toast.style.pointerEvents = 'auto';
-    toast.style.alignSelf = 'flex-end';
-    toast.className = 'non-dismissable-dialogs shadow-lg animate-in fade-in zoom-in-95 slide-in-from-top lg:slide-in-from-bottom';
-    const widgetTop = document.createElement('div');
-    widgetTop.className = 'widget-top h-2.5';
+    // Icons + text are one node rendered by the shared toast stack
     const widgetBottom = document.createElement('div');
-    widgetBottom.className = 'widget-bottom pixel-font-16 flex flex-row items-center gap-2 px-2 py-1 text-whiteHighlight';
-    widgetBottom.style.alignItems = 'center';
-    widgetBottom.style.flexWrap = 'nowrap';
+    widgetBottom.style.cssText = 'display: flex; flex-direction: row; align-items: center; flex-wrap: nowrap; gap: 8px;';
 
     const iconsRow = document.createElement('div');
     iconsRow.style.cssText = 'display: flex; flex-direction: row; align-items: center; gap: 6px; flex: 0 0 auto;';
@@ -1555,21 +1370,7 @@ const showCubeOpenedToast = (tier, rewardContext = {}) => {
 
     widgetBottom.appendChild(iconsRow);
     widgetBottom.appendChild(textLeft);
-    toast.appendChild(widgetTop);
-    toast.appendChild(widgetBottom);
-    flexContainer.appendChild(toast);
-    mainContainer.appendChild(flexContainer);
-    const remove = () => {
-      if (flexContainer && flexContainer.parentNode) {
-        flexContainer.parentNode.removeChild(flexContainer);
-        const toasts = mainContainer.querySelectorAll('.toast-item');
-        toasts.forEach((el, index) => {
-          el.style.transform = `translateY(-${index * TIMING.TOAST_STACK_OFFSET}px)`;
-        });
-      }
-    };
-    toast.addEventListener('click', remove);
-    setTimeout(remove, TIMING.CUBE_REWARD_TOAST_MS);
+    window.BAToast?.show({ mod: t('mods.automator.modName'), message: widgetBottom, type: 'success', duration: TIMING.CUBE_REWARD_TOAST_MS });
   } catch (error) {
     console.error('[Bestiary Automator] Error showing cube opened toast:', error);
   }
@@ -1735,7 +1536,7 @@ const openAllSurpriseCubesFromInventory = async (options = {}) => {
   if (!isGameStateAPIAvailable()) {
     console.log('[Bestiary Automator] [cubes] Batch aborted: no game state');
     if (!suppressCubeErrorToasts) {
-      showAutomatorToastMessage(t('mods.automator.autoOpenCubesNoGameState'), statusToastMs);
+      showAutomatorToastMessage(t('mods.automator.autoOpenCubesNoGameState'), statusToastMs, 'error');
     }
     return 'error';
   }
@@ -1778,7 +1579,7 @@ const openAllSurpriseCubesFromInventory = async (options = {}) => {
     if (opened >= maxOpens) {
       console.log('[Bestiary Automator] [cubes] Batch stopped: max opens', { opened, maxOpens });
       if (!suppressCubeErrorToasts) {
-        showAutomatorToastMessage(t('mods.automator.autoOpenCubesAborted'), statusToastMs);
+        showAutomatorToastMessage(t('mods.automator.autoOpenCubesAborted'), statusToastMs, 'warning');
       }
       return 'error';
     }
@@ -1803,7 +1604,7 @@ const openAllSurpriseCubesFromInventory = async (options = {}) => {
         openResult
       });
       if (!suppressCubeErrorToasts) {
-        showAutomatorToastMessage(t('mods.automator.autoOpenCubesError'), statusToastMs);
+        showAutomatorToastMessage(t('mods.automator.autoOpenCubesError'), statusToastMs, 'error');
       }
       return 'error';
     }
@@ -1930,6 +1731,7 @@ const refillStaminaWithRetry = async (elStamina, staminaElement) => {
         break;
       }
       
+      if (!config.autoRefillStamina) break;
       retryCount++;
       
       clickButtonWithText('mods.automator.usePotion');
@@ -1972,15 +1774,31 @@ const waitForPotionRateLimit = async () => {
   
   if (timeSinceLastPotion < POTION_RATE_LIMIT_MS) {
     const waitTime = POTION_RATE_LIMIT_MS - timeSinceLastPotion;
-    console.log(`[Bestiary Automator] Rate limit: waiting ${Math.ceil(waitTime / 1000)}s before next potion...`);
+    console.debug(`[Bestiary Automator] Rate limit: waiting ${Math.ceil(waitTime / 1000)}s before next potion...`);
     await sleep(waitTime);
   }
   
   lastPotionUsageTime = Date.now();
 };
 
-// Game State-based stamina refill method
+// Only one potion loop may run at a time (interval + game events used to start several in parallel,
+// each burning potions), and a running loop must stop as soon as Auto-refill is switched off or the mod is disabled.
+let staminaRefillInFlight = false;
+let automatorDisposed = false;
+const shouldContinueStaminaRefill = () => !automatorDisposed && config.autoRefillStamina === true;
+
 const refillStaminaViaAPI = async () => {
+  if (staminaRefillInFlight) return false;
+  staminaRefillInFlight = true;
+  try {
+    return await refillStaminaViaAPIUnguarded();
+  } finally {
+    staminaRefillInFlight = false;
+  }
+};
+
+// Game State-based stamina refill method
+const refillStaminaViaAPIUnguarded = async () => {
   // Check game readiness before starting
   if (!isGameReadyForStaminaRefill()) {
     return false;
@@ -2026,6 +1844,10 @@ const refillStaminaViaAPI = async () => {
     // Refill loop: use lowest tier potions first until target is reached
     let potionCount = 0;
     while (currentStamina < config.minimumStaminaWithoutRefill) {
+      if (!shouldContinueStaminaRefill()) {
+        console.log('[Bestiary Automator] Auto-refill turned off - stopping potion loop');
+        break;
+      }
       potionCount++;
       
       // Refresh inventory from Game State API before each potion check
@@ -2068,6 +1890,11 @@ const refillStaminaViaAPI = async () => {
       
       // Wait for rate limit before using potion
       await waitForPotionRateLimit();
+      // The player may have switched Auto-refill off during the wait
+      if (!shouldContinueStaminaRefill()) {
+        console.log('[Bestiary Automator] Auto-refill turned off - stopping potion loop');
+        break;
+      }
       
       // Final inventory check right before API call to prevent unnecessary 404s
       const finalInventory = getPlayerInventory();
@@ -2324,7 +2151,7 @@ const hasStaminaPotions = () => {
           : 0;
         
         if (potionCount > threshold) {
-          console.log(`[Bestiary Automator] Found usable potion: ${potionName} (${potionCount} available, threshold: ${threshold})`);
+          console.debug(`[Bestiary Automator] Found usable potion: ${potionName} (${potionCount} available, threshold: ${threshold})`);
           foundPotion = true;
           break;
         } else {
@@ -2332,7 +2159,7 @@ const hasStaminaPotions = () => {
         }
       } else {
         // If thresholds are disabled, any potion count > 0 is valid
-        console.log(`[Bestiary Automator] Found usable potion: ${potionName} (${potionCount} available, thresholds disabled)`);
+        console.debug(`[Bestiary Automator] Found usable potion: ${potionName} (${potionCount} available, thresholds disabled)`);
         foundPotion = true;
         break;
       }
@@ -3851,17 +3678,6 @@ function isElementVisible(el) {
   return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
 }
 
-// Helper function to check if Stop button is pressed
-function isStopButtonPressed() {
-  try {
-    const stopButton = document.querySelector('button.surface-red[data-state="closed"]');
-    return stopButton && stopButton.textContent.includes('Stop');
-  } catch (error) {
-    console.error('[Bestiary Automator] Error checking Stop button:', error);
-    return false;
-  }
-}
-
 // Click Start button (like Raid Hunter)
 const clickAutoplay = async () => {
   try {
@@ -3968,9 +3784,9 @@ const startAutomation = () => {
   // Add tab visibility change detection
   const handleVisibilityChange = () => {
     if (document.hidden) {
-      console.log('[Bestiary Automator] Tab became hidden - switching to background mode (10s interval)');
+      console.debug('[Bestiary Automator] Tab became hidden - switching to background mode (10s interval)');
     } else {
-      console.log('[Bestiary Automator] Tab became visible - switching to foreground mode (5s interval)');
+      console.debug('[Bestiary Automator] Tab became visible - switching to foreground mode (5s interval)');
       // Kick stamina refill immediately when returning to a Manual Runner farm (Start is
       // often disabled until potions land; the next interval tick can be several seconds away).
       if (
@@ -4222,7 +4038,7 @@ const autoSaveConfig = (propertyPath, value) => {
     // Save to localStorage
     saveConfigToStorage(savedConfig);
     
-    console.log(`[Bestiary Automator] Auto-saved ${propertyPath}:`, value);
+    console.debug(`[Bestiary Automator] Auto-saved ${propertyPath}:`, value);
     
     // Only start automation if it's not already running (prevents redundant initialization)
     if (!automationInterval) {
@@ -4767,14 +4583,14 @@ const applyButtonStyling = (btn) => {
   const regularBgUrl = 'https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png';
   
   {
-    console.log('[Bestiary Automator] Applying button styling:');
-    console.log('  - autoRefillStamina:', config.autoRefillStamina);
-    console.log('  - autoCollectSeashell:', config.autoCollectSeashell);
-    console.log('  - autoCollectLevelUpRewards:', config.autoCollectLevelUpRewards);
-    console.log('  - autoOpenCubes:', config.autoOpenCubes);
-    console.log('  - autoPlayAfterDefeat:', config.autoPlayAfterDefeat);
-    console.log('  - fasterAutoplay:', config.fasterAutoplay);
-    console.log('  - fasterAutoplayRunning:', fasterAutoplayRunning);
+    console.debug('[Bestiary Automator] Applying button styling:');
+    console.debug('  - autoRefillStamina:', config.autoRefillStamina);
+    console.debug('  - autoCollectSeashell:', config.autoCollectSeashell);
+    console.debug('  - autoCollectLevelUpRewards:', config.autoCollectLevelUpRewards);
+    console.debug('  - autoOpenCubes:', config.autoOpenCubes);
+    console.debug('  - autoPlayAfterDefeat:', config.autoPlayAfterDefeat);
+    console.debug('  - fasterAutoplay:', config.fasterAutoplay);
+    console.debug('  - fasterAutoplayRunning:', fasterAutoplayRunning);
   }
   
   const baseText = t('mods.automator.buttonText');
@@ -4796,22 +4612,22 @@ const applyButtonStyling = (btn) => {
   
   if (config.autoRefillStamina) {
     // Priority 1: Green background for auto refill stamina (highest priority - most critical)
-    console.log('[Bestiary Automator] Applying GREEN background for autoRefillStamina');
+    console.debug('[Bestiary Automator] Applying GREEN background for autoRefillStamina');
     btn.style.background = `url('${greenBgUrl}') repeat`;
     btn.style.backgroundSize = "auto";
   } else if (fasterAutoplayRunning) {
     // Priority 2: Special styling when Faster Autoplay is actively running (danger state)
-    console.log('[Bestiary Automator] Applying BLUE background for fasterAutoplayRunning');
+    console.debug('[Bestiary Automator] Applying BLUE background for fasterAutoplayRunning');
     btn.style.background = `url('${blueBgUrl}') repeat`;
     btn.style.backgroundSize = "auto";
   } else if (config.autoCollectSeashell || config.autoCollectLevelUpRewards || config.autoOpenCubes || config.autoPlayAfterDefeat) {
     // Priority 3: Blue background for other auto features
-    console.log('[Bestiary Automator] Applying BLUE background for other features');
+    console.debug('[Bestiary Automator] Applying BLUE background for other features');
     btn.style.background = `url('${blueBgUrl}') repeat`;
     btn.style.backgroundSize = "auto";
   } else {
     // Default: No features enabled
-    console.log('[Bestiary Automator] Applying DEFAULT background');
+    console.debug('[Bestiary Automator] Applying DEFAULT background');
     btn.style.background = `url('${regularBgUrl}') repeat`;
   }
 };
@@ -4906,15 +4722,15 @@ function updateAutomatorButton() {
   // Only update button styling if state has changed
   const stateChanged = JSON.stringify(currentButtonState) !== JSON.stringify(lastButtonState);
   
-  console.log('[Bestiary Automator] updateAutomatorButton called:');
-  console.log('  - Current state:', currentButtonState);
-  console.log('  - Last state:', lastButtonState);
-  console.log('  - State changed:', stateChanged);
+  console.debug('[Bestiary Automator] updateAutomatorButton called:');
+  console.debug('  - Current state:', currentButtonState);
+  console.debug('  - Last state:', lastButtonState);
+  console.debug('  - State changed:', stateChanged);
   
   if (stateChanged) {
     const btn = document.getElementById(CONFIG_BUTTON_ID);
     if (btn) {
-      console.log('[Bestiary Automator] Updating button styling...');
+      console.debug('[Bestiary Automator] Updating button styling...');
       applyButtonStyling(btn);
     } else {
       console.log('[Bestiary Automator] Button not found for styling update');
@@ -4923,15 +4739,15 @@ function updateAutomatorButton() {
     // Update last known state
     lastButtonState = currentButtonState;
   } else {
-    console.log('[Bestiary Automator] No state change detected, skipping button update');
+    console.debug('[Bestiary Automator] No state change detected, skipping button update');
   }
 }
 
 // Update UI elements in the settings modal if it's open
 function updateSettingsModalUI() {
   try {
-    console.log('[Bestiary Automator] Attempting to update settings modal UI...');
-    console.log('[Bestiary Automator] Current config.autoRefillStamina:', config.autoRefillStamina);
+    console.debug('[Bestiary Automator] Attempting to update settings modal UI...');
+    console.debug('[Bestiary Automator] Current config.autoRefillStamina:', config.autoRefillStamina);
     
     // Try multiple ways to find the modal
     let modal = document.querySelector(`#${CONFIG_PANEL_ID}`);
@@ -4948,15 +4764,15 @@ function updateSettingsModalUI() {
     
     // Check if modal is visible
     const isVisible = modal.offsetParent !== null;
-    console.log('[Bestiary Automator] Modal visible:', isVisible);
+    console.debug('[Bestiary Automator] Modal visible:', isVisible);
     
     // Always update UI elements if they exist, regardless of modal visibility
     // This ensures UI stays in sync when config is changed programmatically (e.g., by Raid Hunter)
     if (!isVisible) {
-      console.log('[Bestiary Automator] Settings modal not visible, but updating UI elements anyway for programmatic changes');
+      console.debug('[Bestiary Automator] Settings modal not visible, but updating UI elements anyway for programmatic changes');
     }
     
-    console.log('[Bestiary Automator] Updating settings modal UI with current config values');
+    console.debug('[Bestiary Automator] Updating settings modal UI with current config values');
     
     // Update checkboxes - try multiple selectors for each
     const refillCheckbox = document.getElementById('auto-refill-checkbox') || 
@@ -4978,14 +4794,14 @@ function updateSettingsModalUI() {
     const staminaInput = document.getElementById('min-stamina-input') || 
                         document.querySelector('input[type="number"][id*="stamina"]');
     
-    console.log('[Bestiary Automator] Found elements:');
-    console.log('  - refillCheckbox:', !!refillCheckbox);
-    console.log('  - autoCollectSeashellCheckbox:', !!autoCollectSeashellCheckbox);
-    console.log('  - autoCollectLevelUpRewardsCheckbox:', !!autoCollectLevelUpRewardsCheckbox);
-    console.log('  - autoOpenCubesCheckbox:', !!document.getElementById('auto-open-cubes-checkbox'));
-    console.log('  - autoPlayCheckbox:', !!autoPlayCheckbox);
-    console.log('  - fasterAutoplayCheckbox:', !!fasterAutoplayCheckbox);
-    console.log('  - staminaInput:', !!staminaInput);
+    console.debug('[Bestiary Automator] Found elements:');
+    console.debug('  - refillCheckbox:', !!refillCheckbox);
+    console.debug('  - autoCollectSeashellCheckbox:', !!autoCollectSeashellCheckbox);
+    console.debug('  - autoCollectLevelUpRewardsCheckbox:', !!autoCollectLevelUpRewardsCheckbox);
+    console.debug('  - autoOpenCubesCheckbox:', !!document.getElementById('auto-open-cubes-checkbox'));
+    console.debug('  - autoPlayCheckbox:', !!autoPlayCheckbox);
+    console.debug('  - fasterAutoplayCheckbox:', !!fasterAutoplayCheckbox);
+    console.debug('  - staminaInput:', !!staminaInput);
     
     if (refillCheckbox) {
       const oldValue = refillCheckbox.checked;
@@ -5160,17 +4976,19 @@ startPowerSavingPacing();
 // Export functionality
 context.exports = {
   toggleAutomation,
+  // Read-only snapshot for other mods (they must change settings through updateConfig)
+  getConfig: () => ({ ...config }),
   updateConfig: (newConfig) => {
-    console.log('[Bestiary Automator] updateConfig called with:', newConfig);
+    console.debug('[Bestiary Automator] updateConfig called with:', newConfig);
     if (globalThis.BestiaryLogger?.isEnabled('log')) {
-      console.log('[Bestiary Automator] Current config before update:', JSON.parse(JSON.stringify(config)));
+      console.debug('[Bestiary Automator] Current config before update:', JSON.parse(JSON.stringify(config)));
     }
 
     const oldEnabled = config.enabled;
     Object.assign(config, newConfig);
 
     if (globalThis.BestiaryLogger?.isEnabled('log')) {
-      console.log('[Bestiary Automator] Config after update:', JSON.parse(JSON.stringify(config)));
+      console.debug('[Bestiary Automator] Config after update:', JSON.parse(JSON.stringify(config)));
     }
     
     // Only start or stop automation if the enabled state actually changed
@@ -5193,7 +5011,7 @@ context.exports = {
       }
     } else {
       // Update button styling normally
-      console.log('[Bestiary Automator] Calling updateAutomatorButton...');
+      console.debug('[Bestiary Automator] Calling updateAutomatorButton...');
       updateAutomatorButton();
     }
     
@@ -5201,6 +5019,8 @@ context.exports = {
     updateSettingsModalUI();
   },
   cleanup: () => {
+    automatorDisposed = true;
+    window.BAToast?.clearMod(t('mods.automator.modName'));
     // Cleanup function for when mod is disabled
     stopAutomation();
     stopPowerSavingPacing();

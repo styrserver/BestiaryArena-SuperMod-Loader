@@ -95,7 +95,7 @@
     },
     "mapColour": {
       "productName": "Map to the Mines",
-      "icon": "Map_(Colour).png",
+      "icon": "Map_Colour.png",
       "description": "The map shows the way to the mines in Kazoordoon.",
       "rarity": 1
     },

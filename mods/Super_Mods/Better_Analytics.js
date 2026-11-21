@@ -419,10 +419,6 @@
         return null;
     }
 
-    function getCurrentGameTicks() {
-        return resolveFightDurationTicks();
-    }
-
     function parseAnalyzerEntry(damageValueElement, index) {
         if (!isValidDamageElement(damageValueElement)) return null;
 
@@ -1986,10 +1982,6 @@
         return Math.max(DEFAULT_TICK_INTERVAL_MS / factor, MIN_TICK_INTERVAL_MS);
     }
 
-    function getEffectiveSpeedFactor() {
-        return DEFAULT_TICK_INTERVAL_MS / getTickIntervalMs();
-    }
-
     function applyTickIntervalToWorld(world) {
         if (!world?.tickEngine?.setTickInterval) return;
         if (!slowMotionEnabled || !isSandboxMode()) {
@@ -2591,16 +2583,6 @@
     function actorLabel(actor, fallback = 'Unknown') {
         if (!actor) return fallback;
         return actor.name || actor.nickname || (actor.id != null ? `#${actor.id}` : fallback);
-    }
-
-    function resolveLogActorIdentity(actor) {
-        if (!actor) return null;
-        return {
-            key: resolveFightCollapseKey(actor),
-            name: actorLabel(actor),
-            villain: actor.villain === true,
-            tile: readActorTileIndex(actor)
-        };
     }
 
     function teamClass(villain) {
@@ -5258,21 +5240,6 @@
         return node;
     }
 
-    function readActorStatByDiscovery(actor, statKey) {
-        const pattern = STAT_BAG_PATH_PATTERNS[statKey];
-        if (!pattern) return null;
-        for (const entry of discoverActorStatLikeBags(actor)) {
-            if (statKey !== 'hp' && isHpSubtreePath(entry.path)) continue;
-            const leaf = entry.path.split('.').pop() || entry.path;
-            if (!pattern.test(leaf) && !pattern.test(entry.path)) continue;
-            if (entry.live != null) return entry.live;
-            const bag = getActorPathValue(actor, entry.path);
-            const v = readStatBagLive(bag);
-            if (v != null) return v;
-        }
-        return null;
-    }
-
     function readActorGeneStat(actor, statKey) {
         if (!actor) return null;
         const keys = LIVE_STAT_ALIASES[statKey] || [statKey];
@@ -5525,95 +5492,8 @@
         return detail;
     }
 
-    function resolveActorBaseStatDetailed(actor, metadata, statKey, catalogBase) {
-        const detail = {
-            statKey,
-            value: null,
-            source: 'unresolved',
-            attempts: []
-        };
-        const keys = LIVE_STAT_ALIASES[statKey] || [statKey];
-
-        for (const key of keys) {
-            const bag = actor[key];
-            const base = bag != null ? readStatBagBase(bag) : null;
-            detail.attempts.push({
-                phase: 'actor-direct-base',
-                key,
-                base,
-                bag: describeStatBag(bag)
-            });
-            if (base != null) {
-                detail.value = base;
-                detail.source = `actor.${key} (getBaseValue)`;
-                return detail;
-            }
-        }
-
-        const plainStat = readActorPlainStat(actor, statKey);
-        detail.attempts.push({ phase: 'plain-stats-base', ...plainStat });
-        if (plainStat?.value != null) {
-            detail.value = plainStat.value;
-            detail.source = `${plainStat.source} (plain)`;
-            return detail;
-        }
-
-        for (const container of collectActorStatContainers(actor)) {
-            if (statKey !== 'hp' && isHpBagContainer(actor, container)) continue;
-            const containerLabel = labelActorContainer(actor, container);
-            for (const key of keys) {
-                const bag = container[key];
-                const base = bag != null ? readStatBagBase(bag) : null;
-                detail.attempts.push({
-                    phase: 'container-key-base',
-                    container: containerLabel,
-                    key,
-                    base,
-                    bag: describeStatBag(bag)
-                });
-                if (base != null) {
-                    detail.value = base;
-                    detail.source = `${containerLabel}.${key} (getBaseValue)`;
-                    return detail;
-                }
-            }
-        }
-
-        const pattern = STAT_BAG_PATH_PATTERNS[statKey];
-        const discovered = pattern
-            ? discoverActorStatLikeBags(actor).find((entry) => {
-                if (statKey !== 'hp' && isHpSubtreePath(entry.path)) return false;
-                const leaf = entry.path.split('.').pop() || entry.path;
-                return pattern.test(leaf) || pattern.test(entry.path);
-            })
-            : null;
-        if (discovered?.base != null) {
-            detail.value = discovered.base;
-            detail.source = `discovery:${discovered.path} (base)`;
-            detail.attempts.push({ phase: 'discovery-base', entry: discovered });
-            return detail;
-        }
-
-        const catalog = catalogBase?.[statKey];
-        if (catalog != null) {
-            detail.value = catalog;
-            detail.source = 'metadata.baseStats (template)';
-            detail.attempts.push({ phase: 'catalog-template', catalog });
-        }
-        return detail;
-    }
-
     function readActorStat(actor, statKey) {
         return resolveActorLiveStatDetailed(actor, getMonsterMetadata(resolveGameId(actor)), statKey).value;
-    }
-
-    function readActorStatBase(actor, statKey) {
-        const metadata = getMonsterMetadata(resolveGameId(actor));
-        return resolveActorBaseStatDetailed(actor, metadata, statKey, metadata?.baseStats ?? null).value;
-    }
-
-    function resolveActorLiveStat(actor, metadata, statKey) {
-        return resolveActorLiveStatDetailed(actor, metadata, statKey).value;
     }
 
     function readActorHp(hpBag) {
@@ -5987,74 +5867,6 @@
         return Number.isFinite(base) && base > 0 ? base : null;
     }
 
-    function readActorAttackSpeed(actor, metadata) {
-        const attackDelayInfo = readActorAttackDelay(actor);
-        const delayTicks = attackDelayInfo.delayTicks;
-        if (delayTicks != null && delayTicks > 0) {
-            const attacksPerSecond = TICKS_PER_SECOND / delayTicks;
-            return {
-                value: Math.round(attacksPerSecond * 100) / 100,
-                source: `actor.attackDelay (${delayTicks} ticks)`,
-                delayTicks
-            };
-        }
-
-        const direct = pickFirstNumber(actor, [
-            'attackSpeed', 'attack_speed', 'autoAttackSpeed', 'basicAttackSpeed', 'attackInterval'
-        ]);
-        if (direct != null) return { value: direct, source: 'actor' };
-
-        const discovered = readActorStatByDiscovery(actor, 'attackSpeed');
-        if (discovered != null) return { value: discovered, source: 'discovery' };
-
-        const metaCandidates = [
-            metadata?.attackSpeed,
-            metadata?.attack_speed,
-            metadata?.baseStats?.attackSpeed,
-            metadata?.baseStats?.attack_speed,
-            metadata?.skill?.attackSpeed,
-            metadata?.skill?.attack_speed
-        ];
-        for (const candidate of metaCandidates) {
-            if (typeof candidate === 'number' && Number.isFinite(candidate)) {
-                return { value: candidate, source: 'metadata' };
-            }
-        }
-        return { value: null, source: null };
-    }
-
-    function expectsTimedAbilityCooldown(actor, metadata) {
-        if (!metadata?.skill?.src || !actor) return false;
-        if (metadataHasNoTimedAbilityCooldown(metadata)) return false;
-        if (findActorCooldownComponent(actor, metadata)) return true;
-        const direct = actor.abilityCooldown ?? actor.skillCooldown;
-        return direct != null && isAbilityCooldownCandidate(actor, direct, metadata);
-    }
-
-    function warnUnitsStatGaps(unit, metadata, cooldownInfo, attackSpeedInfo, actor) {
-        const missingStats = ['armor', 'magicResist', 'speed'].filter((k) => unit[k] == null);
-        const missingMechanics = [];
-        if (cooldownInfo.cooldownMs == null && expectsTimedAbilityCooldown(actor, metadata)) {
-            missingMechanics.push('abilityCooldown');
-        }
-        if (attackSpeedInfo.value == null && actorHasAutoAttack(actor)) {
-            missingMechanics.push('attackSpeed');
-        }
-        if (!missingStats.length && !missingMechanics.length) return;
-
-        const logKey = unit.collapseKey || `${unit.name}:${unit.tileIndex ?? 'x'}`;
-        if (unitsStatWarned.has(logKey)) return;
-        unitsStatWarned.add(logKey);
-
-        const prefix = `[${modName}][UnitsStat]`;
-        if (missingStats.length) {
-            console.warn(`${prefix} ${unit.name}: missing stats ${missingStats.join(', ')}`);
-        }
-        if (missingMechanics.length) {
-            console.warn(`${prefix} ${unit.name}: missing mechanics ${missingMechanics.join(', ')}`);
-        }
-    }
-
     function probeActorFast(actor, options = {}) {
         if (!actor) return null;
 
@@ -6182,88 +5994,6 @@
         attachActorSnapshotMeta(snapshot, actor);
         if (!options.bypassCache) setCachedActorProbe(actor, snapshot);
         return snapshot;
-    }
-
-    function probeActor(actor) {
-        if (!actor) return null;
-
-        const hpBag = actor.hp;
-        const hpSnapshot = readActorHp(hpBag);
-
-        const gameId = resolveGameId(actor);
-        const metadata = getMonsterMetadata(gameId);
-        const cooldownInfo = readActorCooldown(actor, metadata, { skipCalculator: true });
-        const attackDelayInfo = readActorAttackDelay(actor);
-        const attackSpeedInfo = readActorAttackSpeed(actor, metadata);
-        const rangeTiles = readActorRange(actor);
-        if (rangeTiles != null) rememberNativeRange(gameId, rangeTiles);
-        const catalogBase = metadata?.baseStats ?? null;
-        const statKeys = ['ad', 'ap', 'armor', 'magicResist', 'speed'];
-        const statResolutions = {};
-        const baseResolutions = {};
-        for (const statKey of statKeys) {
-            statResolutions[statKey] = resolveActorLiveStatDetailed(actor, metadata, statKey);
-            baseResolutions[statKey] = resolveActorBaseStatDetailed(actor, metadata, statKey, catalogBase);
-        }
-
-        const liveBase = {
-            hp: normalizeUnitStatValue('hp', readActorStatBase(actor, 'hp') ?? readStatBagBase(hpBag)),
-            ad: normalizeUnitStatValue('ad', baseResolutions.ad.value),
-            ap: normalizeUnitStatValue('ap', baseResolutions.ap.value),
-            armor: normalizeUnitStatValue('armor', baseResolutions.armor.value),
-            magicResist: normalizeUnitStatValue('magicResist', baseResolutions.magicResist.value),
-            speed: normalizeUnitStatValue('speed', baseResolutions.speed.value)
-        };
-        const fightBaseStats = catalogBase ? { ...catalogBase } : {};
-        for (const [key, value] of Object.entries(liveBase)) {
-            if (value != null) fightBaseStats[key] = value;
-        }
-
-        const unit = {
-            gameId,
-            name: actor.name || actor.nickname || metadata?.name || 'Unknown',
-            villain: actor.villain === true,
-            awaken: resolveActorAwakened(actor),
-            level: readActorStat(actor, 'level') ?? actor.level,
-            alive: hpSnapshot.alive,
-            hp: hpSnapshot.hp,
-            hpMax: hpSnapshot.hpMax,
-            hpPct: hpSnapshot.hpPct,
-            ad: normalizeUnitStatValue('ad', statResolutions.ad.value),
-            ap: normalizeUnitStatValue('ap', statResolutions.ap.value),
-            armor: normalizeUnitStatValue('armor', statResolutions.armor.value),
-            magicResist: normalizeUnitStatValue('magicResist', statResolutions.magicResist.value),
-            speed: normalizeUnitStatValue('speed', statResolutions.speed.value),
-            range: rangeTiles,
-            statSources: Object.fromEntries(statKeys.map((k) => [k, statResolutions[k].source])),
-            attackSpeed: attackSpeedInfo.value,
-            attackSpeedSource: attackSpeedInfo.source,
-            attackDelayTicks: attackDelayInfo.delayTicks ?? attackSpeedInfo.delayTicks ?? null,
-            attackDelayRemainingTicks: attackDelayInfo.delayRemainingTicks,
-            attackDelayReady: attackDelayInfo.delayReady,
-            cooldownMs: cooldownInfo.cooldownMs,
-            cooldownTicks: cooldownInfo.cooldownTicks,
-            cooldownReady: cooldownInfo.cooldownReady,
-            cooldownRemainingMs: cooldownInfo.cooldownRemainingMs,
-            cooldownRemainingTicks: cooldownInfo.cooldownRemainingTicks,
-            abilitySrc: cooldownInfo.abilitySrc,
-            silenced: actor.silenceComponent?.isSilenced === true,
-            buffedCount: Array.isArray(actor.buffed) ? actor.buffed.length : null,
-            statusEffects: shouldShowLiveStatusEffects() ? collectActorStatusEffects(actor) : [],
-            roles: Array.isArray(metadata?.roles) ? metadata.roles : [],
-            baseStats: Object.keys(fightBaseStats).length ? fightBaseStats : null,
-            tileIndex: actor.position?.tile?.index ?? actor.position?.tileIndex ?? null,
-            equipment: resolveEquipmentFromActor(actor),
-            genes: extractBoardGeneStats(actor),
-            shiny: actor.shiny === true,
-            source: 'fight',
-            collapseKey: resolveFightCollapseKey(actor)
-        };
-        const initTile = parseTileFromCollapseKey(unit.collapseKey) ?? unit.tileIndex;
-        if (Number.isFinite(initTile)) unit.spawnTile = initTile;
-
-        warnUnitsStatGaps(unit, metadata, cooldownInfo, attackSpeedInfo, actor);
-        return unit;
     }
 
     const EQUIP_STAT_ICONS = {
@@ -6466,41 +6196,6 @@
         const parsed = parseInt(value, 10);
         if (!Number.isFinite(parsed)) return 1;
         return Math.min(5, Math.max(1, parsed));
-    }
-
-    function resolveEquipmentTierForEffectScale(equipment) {
-        const raw = equipment?.tier ?? equipment?.metadata?.tier;
-        const parsed = parseInt(raw, 10);
-        if (!Number.isFinite(parsed)) return null;
-        return Math.min(5, Math.max(1, parsed));
-    }
-
-    /** Max-tier effect constants from chunk 235 scale linearly by equipment tier (T5 = full value). */
-    function scaleEquipmentEffectForTier(maxValue, tierOrEquipment) {
-        if (maxValue == null || !Number.isFinite(maxValue)) return 0;
-
-        let tier = null;
-        if (tierOrEquipment != null && typeof tierOrEquipment === 'object') {
-            tier = resolveEquipmentTierForEffectScale(tierOrEquipment);
-        } else {
-            const parsed = parseInt(tierOrEquipment, 10);
-            if (Number.isFinite(parsed)) tier = Math.min(5, Math.max(1, parsed));
-        }
-        if (tier == null) return maxValue;
-
-        try {
-            const utils = globalThis.state?.utils;
-            if (typeof utils?.scaleEquipmentEffect === 'function') {
-                const scaled = Number(utils.scaleEquipmentEffect({ value: maxValue, tier }));
-                if (Number.isFinite(scaled)) return scaled;
-            }
-            if (typeof utils?.getEquipmentEffectForTier === 'function') {
-                const scaled = Number(utils.getEquipmentEffectForTier(maxValue, tier));
-                if (Number.isFinite(scaled)) return scaled;
-            }
-        } catch { /* ignore */ }
-
-        return maxValue * tier / 5;
     }
 
     function normalizeEquipmentStatKey(stat) {
@@ -7145,10 +6840,6 @@
         return hasCatalogAttackDelay;
     }
 
-    function resolvePreviewAttackDelayTicks(resolved, metadata) {
-        return resolvePreviewAttackDelayDetailed(resolved, metadata).ticks;
-    }
-
     function loadNativeRangeCache() {
         if (nativeRangeCacheByGameId) return nativeRangeCacheByGameId;
         nativeRangeCacheByGameId = new Map();
@@ -7365,10 +7056,6 @@
             return `preview:enemy:${rid}:${resolved.gameId}:${tile}`;
         }
         return `preview:ally:${resolved.gameId}:${tile}`;
-    }
-
-    function buildPreviewUnitKey(source, resolved, roomId) {
-        return buildStablePreviewKey(resolved, roomId);
     }
 
     function normalizeCollapseKey(key) {
@@ -8935,10 +8622,6 @@
         }
     }
 
-    function scheduleBoardDuplicateBordersAfterBattleStart() {
-        scheduleBoardDuplicateBordersRefresh();
-    }
-
     function syncBoardDuplicateNameplates(units = null) {
         if (!shouldBetterAnalyticsRun()) return;
         if (!isPanelOpen() || !coloringBordersEnabled) {
@@ -9212,10 +8895,6 @@
         if (unit?.ap != null) return { value: unit.ap, label: 'AP' };
         if (unit?.ad != null) return { value: unit.ad, label: 'AD' };
         return { value: null, label: 'stat' };
-    }
-
-    function resolveAbilityScalingStat(wrap, unit) {
-        return resolveAbilityScalingStatInfo(wrap, unit).value;
     }
 
     function parseTooltipPerChunkRatio(text) {
@@ -9580,11 +9259,6 @@
         trimTooltipWrapTrailingContent(wrap);
     }
 
-    function formatAbilityDurationMs(ms) {
-        if (ms == null || !Number.isFinite(ms)) return null;
-        return formatTicks(msToGameCooldownTicks(ms));
-    }
-
     function parseTooltipDurationText(text) {
         const match = String(text || '').trim().match(/^([+-]?[\d.]+)s$/i);
         if (!match) return null;
@@ -9830,10 +9504,6 @@
         return null;
     }
 
-    function findGameChunkScriptUrl(chunkId) {
-        return findWebpackChunkUrlById(chunkId);
-    }
-
     function scriptTextMatchesProfile(text, profile) {
         if (!text || !profile) return false;
         if (profile.key === 'equipment') {
@@ -9929,12 +9599,6 @@
         return null;
     }
 
-    function findGameChunk661ScriptUrl() {
-        return discoveredGameChunkUrlByProfile.get('monsters')
-            ?? findWebpackChunkUrlById(876)
-            ?? findWebpackChunkUrlById(661);
-    }
-
     function onGameChunkScriptLoadedForPreview() {
         scheduleGameChunkScriptPreviewRefresh();
     }
@@ -9979,13 +9643,6 @@
     let cachedGameChunk235Promise = null;
     const runtimeEquipmentCdrPercentCache = new Map();
     const pendingRuntimeEquipmentCdr = new Set();
-
-    function findGameChunk235ScriptUrl() {
-        return discoveredGameChunkUrlByProfile.get('equipment')
-            ?? findWebpackChunkUrlById(876)
-            ?? findWebpackChunkUrlById(277)
-            ?? findWebpackChunkUrlById(235);
-    }
 
     function ensureGameChunk235Text() {
         if (cachedGameChunk235Text
@@ -10426,10 +10083,6 @@
         }
 
         return null;
-    }
-
-    function findMonsterMetadataVarName(scriptText, skillSrc, monsterName) {
-        return findMonsterMetadataAnchor(scriptText, skillSrc, monsterName)?.varName ?? null;
     }
 
     function classSliceUsesIndirectMetadataParam(classSlice, metadataVarName) {
@@ -10971,10 +10624,6 @@
             cooldownReady: true,
             source
         };
-    }
-
-    function resolvePreviewAbilityCooldown(unit, metadata) {
-        return resolvePreviewAbilityCooldownDetailed(unit, metadata).result;
     }
 
     function resolvePreviewAbilityCooldownDetailed(unit, metadata) {
@@ -12027,14 +11676,6 @@
         return `${equipment.stat || 'x'}:${equipment.tier || 'x'}`;
     }
 
-    function abilityMountKey(unit) {
-        if (!unit?.gameId) return null;
-        const ap = unit.ap != null ? Math.round(unit.ap) : 'x';
-        const ad = unit.ad != null ? Math.round(unit.ad) : 'x';
-        const equipSig = buildAbilityScalingEquipSig(unit.equipment);
-        return `${unit.gameId}:${unit.awaken ? 1 : 0}:${ap}:${ad}:${equipSig}`;
-    }
-
     function abilityScalingMountKey(unit) {
         const scaling = resolveUnitAbilityScalingStats(unit) || unit;
         if (!scaling?.gameId) return null;
@@ -12042,36 +11683,6 @@
         const ad = scaling.ad != null ? Math.round(scaling.ad) : 'x';
         const equipSig = buildAbilityScalingEquipSig(scaling.equipment);
         return `${scaling.gameId}:${scaling.awaken ? 1 : 0}:${ap}:${ad}:${equipSig}`;
-    }
-
-    function abilityTooltipScalingDisplayMatchesUnit(root, unit) {
-        if (!root || !unit) return false;
-        const ap = unit.ap != null ? Math.round(unit.ap) : null;
-        const ad = unit.ad != null ? Math.round(unit.ad) : null;
-        if (ap == null && ad == null) return false;
-
-        const equipCdr = resolveAbilityScalingEquipCdr(unit);
-        const unitHasEquipCdr = equipCdr?.basis != null && equipCdr.basis !== 1;
-        const equipPctLabel = formatEquipCdrPercentLabel(equipCdr?.percent);
-
-        let matchedStat = false;
-        for (const span of root.querySelectorAll('.bs-scaled-value')) {
-            const title = span.title || '';
-            if (!title) continue;
-
-            if (title.includes('minimum CD') || title.includes('effective CD')) {
-                const titleHasEquip = title.includes('equip');
-                if (unitHasEquipCdr !== titleHasEquip) return false;
-                if (unitHasEquipCdr && equipPctLabel != null
-                    && !title.includes(`−${equipPctLabel}%`)) {
-                    return false;
-                }
-            }
-
-            if (ap != null && title.includes(`${ap} AP`)) matchedStat = true;
-            if (ad != null && title.includes(`${ad} AD`)) matchedStat = true;
-        }
-        return matchedStat;
     }
 
     function isAbilityTooltipEnhancePending(details) {
@@ -12594,7 +12205,7 @@
         const adAttr = unit.ad != null ? ` data-unit-ad="${escapeHtml(String(Math.round(unit.ad)))}"` : '';
 
         return `<details class="bs-details bs-ability-details"${openAttr}${gameIdAttr}${awakenAttr}${apAttr}${adAttr}>` +
-            `<summary class="bs-ability-summary" title="Click to expand ability details">` +
+            `<summary class="bs-ability-summary" title="${escapeHtml(t('mods.betterAnalytics.abilityDetailsTooltip'))}">` +
                 `<span class="bs-ability-chevron" aria-hidden="true">▶</span>` +
                 `<span class="bs-label">Ability</span>` +
                 summary +
@@ -12610,7 +12221,7 @@
         if (unit?.gameId == null) return '';
         const gameIdAttr = ` data-unit-game-id="${escapeHtml(String(unit.gameId))}"`;
         return `<details class="bs-details bs-raw-source-details"${gameIdAttr}>` +
-            `<summary class="bs-ability-summary" title="This creature's raw class source, extracted live from the game's own script — for checking what the game actually has, not a supported/stable API">` +
+            `<summary class="bs-ability-summary" title="${escapeHtml(t('mods.betterAnalytics.rawSourceTooltip'))}">` +
                 `<span class="bs-ability-chevron" aria-hidden="true">▶</span>` +
                 `<span class="bs-label">Raw source</span>` +
             `</summary>` +
@@ -15203,7 +14814,7 @@
             handle.style.background = 'transparent';
             handle.style.userSelect = 'none';
             handle.style.pointerEvents = 'auto';
-            handle.setAttribute('aria-label', 'Resize ' + dir);
+            handle.setAttribute('aria-label', t('common.resize') + ' ' + dir);
             if (dir.length === 1) {
                 if (dir === 'n' || dir === 's') {
                     handle.style.height = '8px';
@@ -15547,13 +15158,6 @@
         return defaultUnitCollapsed();
     }
 
-    function toggleUnitCollapsed(unitKey) {
-        const stored = readCollapsedOverride(unitKey);
-        const currently = stored === undefined ? defaultUnitCollapsed() : stored;
-        writeCollapsedOverride(unitKey, !currently);
-        markUnitsInteraction();
-    }
-
     function formatStatusChipText(effect) {
         if (effect?.src) return String(effect.src).toLowerCase();
         if (effect?.id && !String(effect.id).startsWith('fx:')) return String(effect.id).toLowerCase();
@@ -15762,17 +15366,6 @@
                 div.innerHTML = compact;
                 meta.appendChild(div);
             }
-        }
-    }
-
-    function patchUnitCardCompactSummaries(body, units) {
-        const unitByKey = new Map();
-        for (const unit of units) {
-            unitByKey.set(normalizeCollapseKey(getUnitCollapseKey(unit)), unit);
-        }
-        for (const card of body.querySelectorAll('.bs-card[data-unit-key]')) {
-            const unit = unitByKey.get(normalizeCollapseKey(card.dataset.unitKey));
-            if (unit) patchUnitCardCompactSummary(card, unit);
         }
     }
 

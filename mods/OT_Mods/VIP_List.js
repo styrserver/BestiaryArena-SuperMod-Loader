@@ -439,13 +439,6 @@ function loadVIPListConfig() {
   return defaultConfig;
 }
 
-// Save config to localStorage
-function saveVIPListConfig(config) {
-  if (storage.set(STORAGE_KEYS.CONFIG, config)) {
-    console.log('[VIP List] Saved config to localStorage:', config);
-  }
-}
-
 // Initialize config - check localStorage first
 const vipListConfig = loadVIPListConfig();
 
@@ -729,7 +722,6 @@ function extractPlayerInfoFromProfile(profileData, playerName) {
 // 7. Messaging/Chat Functions
 // =======================
 
-const CHAT_PANEL_ID_PREFIX = 'vip-chat-panel-';
 const CHAT_PANEL_DIMENSIONS = {
   MIN_WIDTH: 280,
   MAX_WIDTH: 800,
@@ -738,10 +730,6 @@ const CHAT_PANEL_DIMENSIONS = {
   DEFAULT_WIDTH: 320,
   DEFAULT_HEIGHT: 380
 };
-
-function getChatPanelId(playerName) {
-  return `${CHAT_PANEL_ID_PREFIX}${playerName.toLowerCase()}`;
-}
 
 function saveChatPanelPosition(playerName, panel) {
   const positions = loadAllChatPanelPositions();
@@ -1588,12 +1576,6 @@ function getVipListGuildChatApiUrl(guildId) {
 // Get player's guild from localStorage (set by Guilds mod)
 function getPlayerGuild() {
   return storage.get('guilds-data', null);
-}
-
-// Extract guild ID from tab name (e.g., "guild-abc123" -> "abc123")
-function extractGuildIdFromTabName(tabName) {
-  if (!tabName || !tabName.startsWith('guild-')) return null;
-  return tabName.replace('guild-', '');
 }
 
 // Check if a tab name is a guild chat tab
@@ -2703,17 +2685,6 @@ function setupActionButtonHandlers(button, hoverColor = null, defaultColor = CSS
   button.addEventListener('mouseup', () => {
     button.style.borderImage = CSS_CONSTANTS.BORDER_1_FRAME;
   });
-}
-
-// Create flex container style
-function createFlexContainerStyle(direction = 'row', align = 'center', justify = 'flex-start', gap = '0') {
-  return `
-    display: flex;
-    flex-direction: ${direction};
-    align-items: ${align};
-    justify-content: ${justify};
-    gap: ${gap};
-  `;
 }
 
 function updateChatInputState(textarea, sendButton, canChat, hasPrivilege, recipientHasChatEnabled, toPlayer) {
@@ -3978,13 +3949,6 @@ async function checkForMessages() {
     }
     return [];
   }
-}
-
-function getAllChatCleanupMaintainerNames() {
-  if (typeof window.FirebaseAdminsAPI?.getAdminNames === 'function') {
-    return window.FirebaseAdminsAPI.getAdminNames();
-  }
-  return [];
 }
 
 async function canCurrentPlayerRunAllChatCleanup() {
@@ -7021,114 +6985,6 @@ async function loadConversation(player, container, forceScrollToBottom = false, 
   handleChatScroll(panel, container, shouldScrollToBottom, needsFullRebuild);
 }
 
-// Show inline delete confirmation in chat panel
-function showDeleteConfirmation(panel, otherPlayer) {
-  const messagesArea = panel.querySelector(`#chat-messages-${otherPlayer.toLowerCase()}`);
-  if (!messagesArea) return;
-  
-  // Check if confirmation already exists
-  const existingConfirmation = messagesArea.querySelector('.delete-confirmation');
-  if (existingConfirmation) {
-    existingConfirmation.remove();
-  }
-  
-  // Create confirmation message
-  const confirmation = document.createElement('div');
-  confirmation.className = 'delete-confirmation';
-  confirmation.style.cssText = `
-    padding: 16px;
-    margin: 8px;
-    background: rgba(255, 107, 107, 0.2);
-    border: 2px solid ${CSS_CONSTANTS.COLORS.ERROR};
-    border-radius: 4px;
-    color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE};
-    text-align: center;
-    font-size: 12px;
-    line-height: 1.4;
-  `;
-  
-  confirmation.innerHTML = `
-    <div style="font-weight: bold; margin-bottom: 8px; color: ${CSS_CONSTANTS.COLORS.ERROR};">
-      ${t('mods.vipList.deleteConversationTitle')}
-    </div>
-    <div style="margin-bottom: 12px;">
-      ${tReplace('mods.vipList.deleteConversationMessage', { name: otherPlayer })}
-    </div>
-    <div style="display: flex; gap: 8px; justify-content: center;">
-      <button class="confirm-delete-btn" style="
-        padding: 6px 16px;
-        background: ${CSS_CONSTANTS.COLORS.ERROR};
-        color: white;
-        border: none;
-        border-radius: 4px;
-        cursor: pointer;
-        font-size: 12px;
-        font-weight: 600;
-      ">${t('mods.vipList.delete')}</button>
-      <button class="cancel-delete-btn" style="
-        padding: 6px 16px;
-        background: rgba(255, 255, 255, 0.1);
-        color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE};
-        border: 2px solid rgba(255, 255, 255, 0.3);
-        border-radius: 4px;
-        cursor: pointer;
-        font-size: 12px;
-        font-weight: 600;
-      ">${t('mods.vipList.cancelButton')}</button>
-    </div>
-  `;
-  
-  // Add hover effects
-  const confirmBtn = confirmation.querySelector('.confirm-delete-btn');
-  const cancelBtn = confirmation.querySelector('.cancel-delete-btn');
-  
-  confirmBtn.addEventListener('mouseenter', () => {
-    confirmBtn.style.background = '#ff5252';
-  });
-  confirmBtn.addEventListener('mouseleave', () => {
-    confirmBtn.style.background = CSS_CONSTANTS.COLORS.ERROR;
-  });
-  
-  cancelBtn.addEventListener('mouseenter', () => {
-    cancelBtn.style.background = 'rgba(255, 255, 255, 0.2)';
-  });
-  cancelBtn.addEventListener('mouseleave', () => {
-    cancelBtn.style.background = 'rgba(255, 255, 255, 0.1)';
-  });
-  
-  // Handle confirm button click
-  confirmBtn.addEventListener('click', async () => {
-    confirmation.style.opacity = '0.6';
-    confirmBtn.disabled = true;
-    cancelBtn.disabled = true;
-    
-    const success = await deleteConversation(otherPlayer);
-    if (success) {
-      // Remove confirmation dialog
-      confirmation.remove();
-      // Clear messages area completely
-      messagesArea.innerHTML = '';
-      // Refresh the chat panel to show empty state (force refresh to ensure clean state)
-      await loadConversation(otherPlayer, messagesArea, false, true);
-    } else {
-      // Re-enable buttons if deletion failed
-      confirmation.style.opacity = '1';
-      confirmBtn.disabled = false;
-      cancelBtn.disabled = false;
-    }
-  });
-  
-  // Handle cancel button click
-  cancelBtn.addEventListener('click', () => {
-    confirmation.remove();
-  });
-  
-  // Scroll to bottom and append confirmation
-  messagesArea.appendChild(confirmation);
-  // Scroll to bottom to show confirmation (panel is already a parameter)
-  scrollChatToBottom(panel);
-}
-
 async function deleteConversation(otherPlayer) {
   if (!getMessagingApiUrl() || !MESSAGING_CONFIG.enabled) {
     console.warn('[VIP List] Messaging not enabled');
@@ -7257,24 +7113,6 @@ function clearConversationCacheAndState(otherPlayer) {
   }
   
   console.log(`[VIP List] Cleared cache and state for conversation with ${otherPlayer}`);
-}
-
-// Open chat panel (now opens as tab in all-chat panel)
-async function openChatPanel(toPlayer) {
-  if (!getMessagingApiUrl() || !MESSAGING_CONFIG.enabled) {
-    return;
-  }
-  
-  const currentPlayer = getCurrentPlayerName();
-  if (!currentPlayer) {
-    return;
-  }
-  
-  // Hide chat icon in VIP list when opening chat
-  updateVIPListChatIcon(toPlayer, 0);
-  
-  // Always open as tab in all-chat panel
-  await openMessageDialog(toPlayer);
 }
 
 // Create clickable player name with dropdown menu for All Chat
@@ -10100,79 +9938,6 @@ async function minimizeAllChatPanel() {
     // Switch polling mode if no panels open
     updateMessageCheckingMode();
   }
-}
-
-// Minimize chat panel (add tab to all-chat instead of minimizing)
-async function minimizeChatPanel(playerName) {
-  const chatPanelId = getChatPanelId(playerName);
-  const panel = document.getElementById(chatPanelId);
-  
-  if (panel) {
-    // Mark all messages from this player as read in Firebase before closing
-    await markAllMessagesAsReadFromPlayer(playerName);
-    
-    // Check if all-chat panel is open, if so add a tab
-    const allChatPanel = document.getElementById('vip-chat-panel-all-chat');
-    if (allChatPanel) {
-      // Get unread count
-      const messages = await getConversationMessages(playerName);
-      const unreadCount = await getPlayerUnreadCount(messages, playerName);
-      await addAllChatTab(playerName, playerName, unreadCount);
-      // Switch to the tab
-      await switchAllChatTab(playerName);
-    }
-    
-    // Cleanup panel resources
-    // Clean up conversation timestamp tracking
-    const conversationKey = playerName.toLowerCase();
-    conversationLastTimestamps.delete(conversationKey);
-    
-    // Stop frequent checking for this player
-    stopPendingRequestCheck(playerName);
-    
-    // Remove scroll handlers (memory leak prevention)
-    removeScrollDetection(panel, { handlerKey: `_scrollHandler_conversation_${conversationKey}` });
-    
-    // Remove event listeners (stored directly on panel object)
-    const headerContainer = panel.querySelector('div:first-child');
-    removePanelDragHandlers(panel, headerContainer);
-    
-    // Remove panel
-    panel.remove();
-    openChatPanels.delete(playerName.toLowerCase());
-    
-    // Check if there are still unread messages and show icon if needed
-    try {
-      const messages = await getConversationMessages(playerName);
-      const unreadCount = await getPlayerUnreadCount(messages, playerName);
-      updateVIPListChatIcon(playerName, unreadCount);
-    } catch (error) {
-      // Silently fail
-    }
-    
-    // Switch to event-driven if no panels are open (more efficient)
-    updateMessageCheckingMode();
-  }
-}
-
-// Open chat dialog (always opens as HTML panel)
-function openChatDialog(toPlayer) {
-  if (!getMessagingApiUrl() || !MESSAGING_CONFIG.enabled) {
-    openVIPModal({
-      title: t('mods.vipList.messagingDisabled'),
-      content: t('mods.vipList.messagingDisabledText'),
-      buttons: [{ text: t('mods.vipList.closeButton'), primary: true }]
-    });
-    return;
-  }
-  
-  const currentPlayer = getCurrentPlayerName();
-  if (!currentPlayer) {
-    return;
-  }
-  
-  // Always open as panel (no modal version)
-  openChatPanel(toPlayer);
 }
 
 // Open message dialog (opens as tab in all-chat panel)

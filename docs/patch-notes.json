@@ -4,6 +4,166 @@
   },
   "notes": [
     {
+      "version": "5.4.0",
+      "changes": [
+        {
+          "mod": "Autoseller",
+          "type": "changed",
+          "text": "Toasts now start with the mod name."
+        },
+        {
+          "mod": "Awaken Tracker",
+          "type": "changed",
+          "text": "Toast now starts with the mod name."
+        },
+        {
+          "mod": "Battle Helper",
+          "type": "changed",
+          "text": "Toasts now start with the mod name and share one stack."
+        },
+        {
+          "mod": "Bestiary Automator",
+          "type": "changed",
+          "text": "Notifications now show as toasts that start with the mod name."
+        },
+        {
+          "mod": "Bestiary Automator",
+          "type": "fixed",
+          "text": "Switching Auto-refill off (or disabling the mod) now stops a running potion loop, and only one loop runs at a time."
+        },
+        {
+          "mod": "Better Analytics",
+          "type": "fixed",
+          "text": "The ability-details and raw-source tooltips are now translated."
+        },
+        {
+          "mod": "Better Boosted Maps",
+          "type": "changed",
+          "text": "Toast now starts with the mod name."
+        },
+        {
+          "mod": "Better Boosted Maps",
+          "type": "fixed",
+          "text": "Turning the mod off now restores your own Auto-refill and Faster autoplay settings instead of leaving them on."
+        },
+        {
+          "mod": "Better Highscores",
+          "type": "changed",
+          "text": "Event toasts now start with the event name and share one stack."
+        },
+        {
+          "mod": "Better Setups",
+          "type": "changed",
+          "text": "Toasts now start with the mod name."
+        },
+        {
+          "mod": "Better Tasker",
+          "type": "changed",
+          "text": "Toast now starts with the mod name."
+        },
+        {
+          "mod": "Better Yasir",
+          "type": "changed",
+          "text": "Toasts now start with the mod name and share one stack."
+        },
+        {
+          "mod": "Board Analyzer",
+          "type": "changed",
+          "text": "Toasts now start with the mod name."
+        },
+        {
+          "mod": "Challenges",
+          "type": "changed",
+          "text": "Toasts now start with the mod name and share one stack. Error toasts are now red."
+        },
+        {
+          "mod": "Guilds",
+          "type": "changed",
+          "text": "Toasts now start with the mod name and share one stack."
+        },
+        {
+          "mod": "Highscore Improvements",
+          "type": "changed",
+          "text": "Notifications now show as toasts that start with the mod name."
+        },
+        {
+          "mod": "Hunt Analyzer",
+          "type": "changed",
+          "text": "Loot and creature grids update faster and show \"No drops yet\" when empty. Notifications use the game toast style and start with the mod name. More tooltips, and rate tooltips no longer flicker. Map and floor filters close with Escape."
+        },
+        {
+          "mod": "Manual Runner",
+          "type": "changed",
+          "text": "Inject toasts now start with the mod name."
+        },
+        {
+          "mod": "Manual Runner",
+          "type": "fixed",
+          "text": "The floor 11+ autosell warning tooltip is now translated."
+        },
+        {
+          "mod": "Map Editor",
+          "type": "changed",
+          "text": "Toasts now start with the mod name and share one stack."
+        },
+        {
+          "mod": "Mod Loader",
+          "type": "changed",
+          "text": "Pages load faster: the Quests, Challenges, Map Editor and Better Highscores code is now loaded only when one of those mods is on. The wiki export helpers also load only when used."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "changed",
+          "text": "Toasts start with the mod name."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "fixed",
+          "text": "The mod-button bar toggle, collapsible section and performance debugger tooltips are now translated; success and error toasts are now coloured; Portuguese names for Mountain Fortress, Dragon Plant, Dr. Mephistopheles, Hy'genie and Monster Squeezer now match the game."
+        },
+        {
+          "mod": "Popup",
+          "type": "fixed",
+          "text": "The message about allowing GitHub access when importing a remote mod is now translated."
+        },
+        {
+          "mod": "Quests",
+          "type": "changed",
+          "text": "Toasts now start with the mod name and share one stack."
+        },
+        {
+          "mod": "Raid Hunter",
+          "type": "changed",
+          "text": "Toast now starts with the mod name."
+        },
+        {
+          "mod": "Raid Hunter",
+          "type": "fixed",
+          "text": "Ending a raid now restores your own Auto-refill and Faster autoplay settings instead of switching them off."
+        },
+        {
+          "mod": "Setup Manager",
+          "type": "changed",
+          "text": "The button tooltip now describes what it does, and toasts start with the mod name."
+        },
+        {
+          "mod": "Stamina Optimizer",
+          "type": "changed",
+          "text": "Toast now starts with the mod name."
+        },
+        {
+          "mod": "Team Copier",
+          "type": "changed",
+          "text": "The button tooltip now describes what it does. Notifications now show as toasts that start with the mod name."
+        },
+        {
+          "mod": "Welcome",
+          "type": "changed",
+          "text": "The welcome page has a cleaner layout with a version badge. The loading and update toasts now start with the mod name and share one stack."
+        }
+      ]
+    },
+    {
       "version": "5.3.9",
       "changes": [
         {

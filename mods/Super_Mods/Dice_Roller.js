@@ -433,19 +433,6 @@
     return tierMap[tierName] || 1;
   }
 
-  function getCurrentStats(selectedMonsterId) {
-    const monsters = safeGetMonsters();
-    const creature = monsters.find(c => String(c.id) === String(selectedMonsterId));
-    if (!creature) return {};
-    return {
-      hp: creature.hp,
-      ad: creature.ad,
-      ap: creature.ap,
-      armor: creature.armor,
-      magicResist: creature.magicResist
-    };
-  }
-
   function getMonstersFromState() {
     try {
       const context = cachedPlayerState?.context || globalThis.state?.player?.getSnapshot()?.context;
@@ -2820,10 +2807,6 @@
       row.appendChild(wrapper);
     }
     return row;
-  }
-
-  function getDiceRulesRow() {
-    return document.createElement('div');
   }
 
 // =======================

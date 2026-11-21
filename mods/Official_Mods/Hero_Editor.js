@@ -482,53 +482,6 @@ function styleHeroEditorSelect(select) {
 
 injectHeroEditorDropdownStyles();
 
-// Update equipment stats
-function updateEquip(equipMap, name, stat, tier) {
-  const gameId = equipMap.get(name.toLowerCase());
-  if (!gameId) throw `Equipment "${name}" not found`;
-  
-  const playerContext = getPlayerSnapshot();
-  const equips = playerContext.equips;
-  const equip = equips.find(e => e.gameId === gameId);
-  
-  if (!equip) throw `Equipment "${name}" not found in player inventory`;
-  
-  equip.stat = stat; 
-  equip.tier = tier;
-  
-  globalThis.state.player.send({
-    type: "setState",
-    fn: p => ({ ...p, equips: [...equips] })
-  });
-  
-  return equip.id;
-}
-
-// Update item portrait with new equipment data
-function updateItemPortrait(portrait, equipName, stat, tier, equipMap) {
-  if (!portrait || !equipName || !stat || !tier || !equipMap) return null;
-  
-  const gameId = equipMap.get(equipName.toLowerCase());
-  if (!gameId) return null;
-  
-  const equipData = globalThis.state.utils.getEquipment(gameId);
-  if (!equipData || !equipData.metadata) return null;
-  
-  // Create a new portrait with updated data
-  const newPortrait = createHeroEditorItemPortrait({
-    itemId: equipData.metadata.spriteId,
-    stat: stat,
-    tier: clampEquipTier(tier)
-  });
-  
-  // Replace the old portrait with the new one
-  if (portrait && portrait.parentNode) {
-    portrait.parentNode.replaceChild(newPortrait, portrait);
-  }
-  
-  return newPortrait;
-}
-
 // Get serialized board data
 function getSerializedBoard() {
   try {
@@ -963,26 +916,6 @@ function getAllyPieceAtTile(tileIndex) {
   } catch {
     return null;
   }
-}
-
-function getAllyDisplayNameAtTile(tileIndex) {
-  const piece = getAllyPieceAtTile(tileIndex);
-  if (!piece) return null;
-
-  try {
-    if (piece.type === 'player' && piece.databaseId) {
-      const monster = getPlayerSnapshot().monsters?.find(m => m.id === piece.databaseId);
-      if (monster?.gameId) {
-        return globalThis.state.utils.getMonster(monster.gameId).metadata.name;
-      }
-    } else if (piece.type === 'custom' && piece.gameId) {
-      return globalThis.state.utils.getMonster(piece.gameId).metadata.name;
-    }
-  } catch (error) {
-    console.warn('[Hero Editor] Could not resolve ally name:', error);
-  }
-
-  return null;
 }
 
 function closeHeroEditorBoardContextMenu() {
@@ -1560,41 +1493,6 @@ function updateListEquipPortrait(wrap, equipMap, equipName, equipStat, equipTier
   } catch (e) {
     console.error('Error updating list equip portrait:', e);
   }
-}
-
-function createHeroEditorLiveApplyContext(preparedBoard) {
-  const { originalBoardData, boardContext } = preparedBoard;
-  const equipMap = buildEquipmentMap();
-  const monsterMap = buildMonsterMap();
-  const controls = [];
-  let liveApplyTimer = null;
-  const LIVE_APPLY_DELAY_MS = 250;
-
-  const scheduleLiveApply = (immediate = false) => {
-    if (liveApplyTimer) {
-      clearTimeout(liveApplyTimer);
-      liveApplyTimer = null;
-    }
-
-    const runApply = () => {
-      applyHeroChangesFromControls(originalBoardData, controls, equipMap, { silent: true });
-    };
-
-    if (immediate) {
-      runApply();
-    } else {
-      liveApplyTimer = setTimeout(runApply, LIVE_APPLY_DELAY_MS);
-    }
-  };
-
-  const clearLiveApplyTimer = () => {
-    if (liveApplyTimer) {
-      clearTimeout(liveApplyTimer);
-      liveApplyTimer = null;
-    }
-  };
-
-  return { originalBoardData, boardContext, equipMap, monsterMap, controls, scheduleLiveApply, clearLiveApplyTimer };
 }
 
 function mountHeroEditorFloatingPanel(detailContent, clientX, clientY, clearLiveApplyTimer, options = {}) {

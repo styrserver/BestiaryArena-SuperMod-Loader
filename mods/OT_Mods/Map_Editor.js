@@ -628,37 +628,9 @@ function tReplace(key, vars, fallback) {
 
 // Map Editor toasts (Quests/Challenges-style game widgets)
 const MAP_EDITOR_TOAST_DURATION = 5000;
-const MAP_EDITOR_TOAST_CONTAINER_ID = 'map-editor-toast-container';
-const MAP_EDITOR_TOAST_RED_BG = 'https://bestiaryarena.com/_next/static/media/background-red.21d3f4bd.png';
-const MAP_EDITOR_TOAST_FRAME = 'https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png';
-const MAP_EDITOR_TOAST_VARIANT_COLORS = {
-  info: '#c8c8ff',
-  success: '#6ee07a',
-  warning: '#ffb070',
-  error: '#E06C75'
-};
 const MAP_SELECTOR_LOCK_ATTR = 'data-map-editor-map-selector-locked';
 
 let mapEditorPersistentToastHandle = null;
-
-function getMapEditorToastContainer() {
-  if (typeof document === 'undefined') return null;
-  let el = document.getElementById(MAP_EDITOR_TOAST_CONTAINER_ID);
-  if (!el) {
-    el = document.createElement('div');
-    el.id = MAP_EDITOR_TOAST_CONTAINER_ID;
-    el.style.cssText = 'position: fixed; z-index: 9999; inset: 16px 16px 64px; pointer-events: none;';
-    document.body.appendChild(el);
-  }
-  return el;
-}
-
-function updateMapEditorToastPositions(container) {
-  if (!container) return;
-  container.querySelectorAll('.map-editor-toast-item').forEach((toast, index) => {
-    toast.style.transform = `translateY(-${index * 46}px)`;
-  });
-}
 
 function removeMapEditorPersistentToast() {
   if (mapEditorPersistentToastHandle?.remove) {
@@ -667,98 +639,28 @@ function removeMapEditorPersistentToast() {
   mapEditorPersistentToastHandle = null;
 }
 
+// Shared toast stack (content/ba-toast.js). Persistent toasts are click-through status lines that can
+// be updated in place; options.onAction adds a button (e.g. Leave).
 function showMapEditorToast(message, options = {}) {
-  const safeMsg = message != null && message !== '' ? String(message) : '';
-  try {
-    const container = getMapEditorToastContainer();
-    if (!container || !safeMsg) return null;
-
-    const isTransient = typeof options.duration === 'number' && options.duration > 0;
-    const isPersistent = options.persistent === true;
-    const hasAction = typeof options.onAction === 'function';
-
-    if (isPersistent) removeMapEditorPersistentToast();
-
-    const existingToasts = container.querySelectorAll('.map-editor-toast-item');
-    const stackOffset = existingToasts.length * 46;
-    const flexContainer = document.createElement('div');
-    flexContainer.className = 'map-editor-toast-item';
-    flexContainer.style.cssText = `display:flex;position:absolute;transition:230ms cubic-bezier(0.21,1.02,0.73,1);transform:translateY(-${stackOffset}px);bottom:0;right:0;justify-content:flex-end;pointer-events:none;width:max-content;max-width:100%;`;
-
-    const toast = document.createElement(isTransient && !hasAction ? 'button' : 'div');
-    toast.className = 'non-dismissable-dialogs shadow-lg animate-in fade-in zoom-in-95 slide-in-from-top lg:slide-in-from-bottom';
-    if (!isTransient) toast.setAttribute('role', 'presentation');
-    if (isTransient || hasAction) toast.style.pointerEvents = 'auto';
-    if (hasAction) toast.style.cursor = 'default';
-
-    const widgetTop = document.createElement('div');
-    widgetTop.className = 'widget-top h-2.5';
-    const widgetBottom = document.createElement('div');
-    widgetBottom.className = 'widget-bottom pixel-font-16 flex items-center gap-2 px-2 py-1 text-whiteHighlight';
-
-    const messageDiv = document.createElement('div');
-    messageDiv.className = 'text-left';
-    messageDiv.style.flex = '1 1 auto';
-    if (safeMsg.includes('\n')) messageDiv.style.whiteSpace = 'pre-line';
-    const variant = options.variant || 'info';
-    messageDiv.style.color = MAP_EDITOR_TOAST_VARIANT_COLORS[variant] || MAP_EDITOR_TOAST_VARIANT_COLORS.info;
-    messageDiv.textContent = safeMsg;
-    widgetBottom.appendChild(messageDiv);
-
-    if (hasAction) {
-      const actionBtn = document.createElement('button');
-      actionBtn.type = 'button';
-      actionBtn.className = 'me-btn';
-      actionBtn.textContent = options.actionLabel || t('mods.mapEditor.workshopLeave', 'Leave');
-      actionBtn.style.cssText = `flex-shrink:0;padding:4px 10px;font-size:12px;cursor:pointer;background:url("${MAP_EDITOR_TOAST_RED_BG}") repeat !important;border:3px solid transparent !important;border-image:url("${MAP_EDITOR_TOAST_FRAME}") 4 fill stretch !important;color:#fff !important;font-weight:bold;`;
-      actionBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        options.onAction();
-      });
-      widgetBottom.appendChild(actionBtn);
-    }
-
-    toast.appendChild(widgetTop);
-    toast.appendChild(widgetBottom);
-    flexContainer.appendChild(toast);
-    container.appendChild(flexContainer);
-    updateMapEditorToastPositions(container);
-
-    const removeToast = () => {
-      if (flexContainer.parentNode) {
-        flexContainer.parentNode.removeChild(flexContainer);
-        updateMapEditorToastPositions(container);
-      }
-      if (mapEditorPersistentToastHandle?.remove === removeToast) {
-        mapEditorPersistentToastHandle = null;
-      }
-    };
-
-    if (isTransient) {
-      toast.addEventListener('click', (e) => {
-        if (hasAction && e.target?.closest?.('button')) return;
-        e.stopPropagation();
-        removeToast();
-      });
-      setTimeout(removeToast, options.duration);
-      return null;
-    }
-
-    const handle = {
-      updateMessage(text) {
-        const next = text != null && text !== '' ? String(text) : '';
-        messageDiv.textContent = next;
-        messageDiv.style.whiteSpace = next.includes('\n') ? 'pre-line' : '';
-      },
-      remove: removeToast
-    };
-
-    if (isPersistent) mapEditorPersistentToastHandle = handle;
-    return handle;
-  } catch (e) {
-    console.warn('[Map Editor] showMapEditorToast:', e);
-    return null;
-  }
+  const isPersistent = options.persistent === true;
+  if (isPersistent) removeMapEditorPersistentToast();
+  const handle = window.BAToast?.show({
+    mod: t('mods.mapEditor.modName'),
+    message,
+    type: options.variant,
+    duration: isPersistent ? 0 : options.duration,
+    dismissOnClick: !isPersistent,
+    action: typeof options.onAction === 'function'
+      ? { label: options.actionLabel || t('mods.mapEditor.workshopLeave', 'Leave'), onClick: options.onAction }
+      : undefined
+  });
+  if (!handle || !isPersistent) return null;
+  const persistent = {
+    updateMessage: (text) => handle.update(text != null ? String(text) : ''),
+    remove: () => handle.remove()
+  };
+  mapEditorPersistentToastHandle = persistent;
+  return persistent;
 }
 
 function setMapEditorFeedback(message, options = {}) {
@@ -1830,11 +1732,6 @@ function reapplyHiddenSpritesToDom() {
   return applied;
 }
 
-function trackReplacement(tileIndex, spriteEl, fromId, toId) {
-  if (tileIndex == null || !spriteEl) return;
-  editorEdits.replacements.push({ tileIndex, sprite: spriteEl, fromId, toId });
-}
-
 function isEditorAddedSprite(spriteEl) {
   return spriteEl?.hasAttribute(EDITOR_ADDED_ATTR) ?? false;
 }
@@ -2864,11 +2761,6 @@ function setAllowedPlacementTiles(tiles, options = {}) {
     log: options.log === true
   });
   return next;
-}
-
-function isTileAllowedForPlacement(tileIndex) {
-  if (tileIndex == null) return false;
-  return getAllowedPlacementTiles().includes(Math.floor(tileIndex));
 }
 
 function toggleTileAllowedPlacement(tileIndex) {
@@ -4402,23 +4294,6 @@ function buildSpriteElementFromConfig(configEntry) {
   return sprite;
 }
 
-function normalizeSpritePreviewNode(spriteEl) {
-  if (!spriteEl) return null;
-  const clone = spriteEl.cloneNode(true);
-  clone.style.visibility = '';
-  clone.style.display = '';
-  clone.style.pointerEvents = 'none';
-  clone.removeAttribute(HIDDEN_ATTR);
-  clone.classList.remove('map-editor-sprite-probe-node');
-  clone.querySelectorAll(`.${PICK_OVERLAY_CLASS}`).forEach((el) => el.remove());
-
-  const sourceImg = spriteEl.querySelector('img.spritesheet');
-  const cloneImg = clone.querySelector('img.spritesheet');
-  if (sourceImg && cloneImg) copySpriteCropFromReference(sourceImg, cloneImg);
-  preparePanelSpritePreviewLayout(clone);
-  return clone;
-}
-
 function createSpritePreviewBox(spriteEl, configEntry) {
   const box = document.createElement('div');
   box.className = 'me-sprite-preview';
@@ -4489,24 +4364,6 @@ function refreshTilePreview(container, tileEl, sprites, configuredLayer, floorBe
 // =======================
 // 7. Sprite editing
 // =======================
-
-function replaceSpriteOnTile(tileEl, fromId, toId, tileIndex = null) {
-  const sprite = tileEl?.querySelector(`.sprite.id-${fromId}, .sprite.relative.id-${fromId}, .sprite.item.id-${fromId}`);
-  if (!sprite) return false;
-  sprite.classList.remove(`id-${fromId}`);
-  sprite.classList.add(`id-${toId}`);
-  const img = sprite.querySelector('img');
-  if (img) {
-    img.alt = String(toId);
-    img.setAttribute('data-cropped', 'false');
-    img.style.setProperty('--cropX', '0');
-    img.style.setProperty('--cropY', '0');
-  }
-  const resolvedTileIndex = tileIndex ?? getTileIndexFromElement(tileEl);
-  trackReplacement(resolvedTileIndex, sprite, fromId, toId);
-  notifySpriteDomEditsChanged();
-  return true;
-}
 
 function addSpriteToTile(tileEl, spriteId, tileIndex = null, configEntry = null) {
   if (!tileEl) return false;
@@ -4872,49 +4729,6 @@ function applyAddedSpriteEdit(tileIndex, layerIndex, patch = {}, options = {}) {
     editorState.editingCreatureTileIndex = null;
   }
   return true;
-}
-
-function applySpriteEdit(tileIndex, fromId, toId, layerIndex = null, offsetPatch = {}) {
-  const resolvedLayerIndex = layerIndex ?? editorState.editingSprite?.layerIndex;
-  const isAddedEdit = resolvedLayerIndex != null
-    && resolveAddedSpriteAtLayer(tileIndex, resolvedLayerIndex);
-
-  if (isAddedEdit) {
-    const patch = { ...offsetPatch };
-    if (Number.isFinite(toId)) patch.id = toId;
-    const ok = applyAddedSpriteEdit(tileIndex, resolvedLayerIndex, patch);
-    logMapEditor('addedSpriteEditApply', { tileIndex, layerIndex: resolvedLayerIndex, patch, ok });
-    setStatusMessage(
-      ok
-        ? t('mods.mapEditor.addedSpriteEditOk', 'Updated custom sprite.')
-        : t('mods.mapEditor.addedSpriteEditFail', 'Could not update custom sprite.'),
-      !ok
-    );
-    refreshInspector();
-    return;
-  }
-
-  if (tileIndex == null || !Number.isFinite(fromId) || !Number.isFinite(toId)) {
-    setStatusMessage(t('mods.mapEditor.editNeedId', 'Enter a valid new sprite ID.'), true);
-    return;
-  }
-  if (toId === fromId) {
-    cancelSpriteEdit();
-    return;
-  }
-  const ok = replaceSpriteOnTile(getTileElement(tileIndex), fromId, toId, tileIndex);
-  logMapEditor('spriteEditApply', { tileIndex, fromId, toId, ok });
-  editorState.editingSprite = null;
-  editorState.editingCreatureTileIndex = null;
-  setStatusMessage(
-    ok
-      ? t('mods.mapEditor.replaceOk', 'Replaced id-{from} → id-{to}.')
-          .replace('{from}', String(fromId))
-          .replace('{to}', String(toId))
-      : t('mods.mapEditor.replaceFail', 'Sprite id-{from} not found on tile.').replace('{from}', String(fromId)),
-    !ok
-  );
-  refreshInspector();
 }
 
 // ---------------------------------------------------------------------------
@@ -13649,30 +13463,6 @@ function isUserPlacedEditorVillain(tileIndex, villainConfig = null) {
   return !actorConfigsEqual(nativeConfig, placed);
 }
 
-function hydrateEditorPlacedVillainsFromRoom() {
-  if (!globalThis.state?.board?.getSnapshot) return;
-
-  editorPlacedVillains.clear();
-  editorAlliedTiles.clear();
-  const boardConfig = globalThis.state.board.getSnapshot()?.context?.boardConfig || [];
-  boardConfig.forEach((entity) => {
-    if (!entity) return;
-    const isAllyEntity = isMapEditorAllyEntity(entity);
-    if (!isAllyEntity && !isMapEditorVillainEntity(entity)) return;
-    const tileIndex = Number(entity.tileIndex);
-    if (!Number.isFinite(tileIndex)) return;
-    if (isAllyEntity) editorAlliedTiles.add(tileIndex);
-    const villainConfig = buildMapEditorVillainConfig(
-      tileIndex,
-      entity.gameId ?? entity.id,
-      entity
-    );
-    if (villainConfig && (isAllyEntity || isUserPlacedEditorVillain(tileIndex, villainConfig))) {
-      editorPlacedVillains.set(tileIndex, villainConfig);
-    }
-  });
-}
-
 function compactBoardConfigEntries(boardConfig) {
   if (!Array.isArray(boardConfig)) return [];
   return boardConfig.filter((entity) => {
@@ -18492,7 +18282,7 @@ function addResizeHandles(panel) {
     handle.style.background = 'transparent';
     handle.style.userSelect = 'none';
     handle.style.pointerEvents = 'auto';
-    handle.setAttribute('aria-label', `Resize ${dir}`);
+    handle.setAttribute('aria-label', `${t('common.resize', 'Resize')} ${dir}`);
     if (dir.length === 1) {
       if (dir === 'n' || dir === 's') {
         handle.style.height = '8px';
@@ -18969,7 +18759,7 @@ if (typeof context !== 'undefined' && context.api) {
 exports = {
   openMapEditor,
   toggleMapEditor,
-  cleanup: cleanupMapEditor,
+  cleanup: () => { window.BAToast?.clearMod(t('mods.mapEditor.modName')); cleanupMapEditor(); },
   buildWholeMapExport,
   buildUnifiedMapExport,
   buildQuestRoomExport,

@@ -105,7 +105,7 @@ if (window.CustomBattles) {
                 key: 'kraknaknorks-demon',
                 name: "Kraknaknork's Demon",
                 baseGameId: 92, // Beer Barrel
-                idleUrl: "Kraknaknork's Demon.png"
+                idleUrl: "Kraknaknork_Demon.png"
             }
         ];
 

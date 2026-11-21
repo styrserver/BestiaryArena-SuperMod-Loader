@@ -430,66 +430,12 @@
     }
 
     function showAutosellerToast(message, durationMs = 3500) {
-        try {
-            let mainContainer = document.getElementById('autoseller-toast-container');
-            if (!mainContainer) {
-                mainContainer = document.createElement('div');
-                mainContainer.id = 'autoseller-toast-container';
-                mainContainer.style.cssText = 'position: fixed; z-index: 9999; inset: 16px 16px 64px; pointer-events: none;';
-                document.body.appendChild(mainContainer);
-            }
-
-            const existingToasts = mainContainer.querySelectorAll('.autoseller-toast-item');
-            const stackOffset = existingToasts.length * 44;
-
-            const flexContainer = document.createElement('div');
-            flexContainer.className = 'autoseller-toast-item';
-            flexContainer.style.cssText = `left:0;right:0;display:flex;position:absolute;transition:230ms cubic-bezier(0.21, 1.02, 0.73, 1);transform:translateY(-${stackOffset}px);bottom:0;justify-content:flex-end;`;
-
-            const toast = document.createElement('button');
-            toast.type = 'button';
-            toast.style.pointerEvents = 'auto';
-            toast.className = 'non-dismissable-dialogs shadow-lg animate-in fade-in zoom-in-95 slide-in-from-top lg:slide-in-from-bottom';
-
-            const widgetTop = document.createElement('div');
-            widgetTop.className = 'widget-top h-2.5';
-            const widgetBottom = document.createElement('div');
-            widgetBottom.className = 'widget-bottom pixel-font-16 flex items-center gap-2 px-2 py-1 text-whiteHighlight';
-            const textLeft = document.createElement('div');
-            textLeft.className = 'text-left';
-            const paragraph = document.createElement('p');
-            paragraph.style.cssText = 'margin: 0; max-width: 28rem; white-space: pre-wrap;';
-            if (typeof message === 'string') {
-                paragraph.textContent = message;
-            } else if (message instanceof Node) {
-                paragraph.style.whiteSpace = 'normal';
-                paragraph.appendChild(message);
-            } else {
-                paragraph.textContent = String(message ?? '');
-            }
-            colorizeToastStatusText(paragraph);
-
-            textLeft.appendChild(paragraph);
-            widgetBottom.appendChild(textLeft);
-            toast.appendChild(widgetTop);
-            toast.appendChild(widgetBottom);
-            flexContainer.appendChild(toast);
-            mainContainer.appendChild(flexContainer);
-
-            const remove = () => {
-                if (flexContainer && flexContainer.parentNode) {
-                    flexContainer.parentNode.removeChild(flexContainer);
-                    const toasts = mainContainer.querySelectorAll('.autoseller-toast-item');
-                    toasts.forEach((el, index) => {
-                        el.style.transform = `translateY(-${index * 44}px)`;
-                    });
-                }
-            };
-            toast.addEventListener('click', remove);
-            setTimeout(remove, Math.max(1000, durationMs));
-        } catch (error) {
-            console.warn('[Autoseller] Failed to show toast:', error);
-        }
+        // Rich node so enabled/disabled words keep their green/red colour
+        const content = document.createElement('span');
+        if (message instanceof Node) content.appendChild(message);
+        else content.textContent = String(message ?? '');
+        colorizeToastStatusText(content);
+        window.BAToast?.show({ mod: t('mods.autoseller.modName'), message: content, duration: Math.max(1000, durationMs) });
     }
 
     function colorizeToastStatusText(rootNode) {
@@ -530,9 +476,7 @@
                     normalized === 'enabled' ||
                     normalized.startsWith('ativad') ||
                     normalized.startsWith('ligad');
-                statusSpan.style.color = isPositiveStatus
-                    ? 'rgb(100, 255, 100)'
-                    : 'rgb(255, 100, 100)';
+                statusSpan.className = isPositiveStatus ? 'text-valid' : 'text-invalid';
                 fragment.appendChild(statusSpan);
 
                 lastIndex = matchIndex + matchedText.length;
@@ -978,9 +922,6 @@
     // 3. Core Utility Functions
     // =======================
     
-    function getGenes(m) {
-        return (m.hp || 0) + (m.ad || 0) + (m.ap || 0) + (m.armor || 0) + (m.magicResist || 0);
-    }
     
     // Dragon Plant Helper Functions
     const getPlantGold = () => globalThis.state?.player?.getSnapshot?.()?.context?.questLog?.plant?.gold;
@@ -3447,97 +3388,7 @@
         return { row, inputMin, inputMax };
     }
     
-    /**
-     * Creates a segment container (for autoplant and autosqueeze buttons)
-     * @returns {HTMLElement} The segment container element
-     */
-    function createSegmentContainer() {
-        const container = document.createElement('div');
-        const colors = UI_CONSTANTS.BUTTON_COLORS;
-        const sizes = UI_CONSTANTS.BUTTON_SIZES;
-        container.style.display = 'flex';
-        container.style.alignItems = 'center';
-        container.style.justifyContent = 'flex-start';
-        container.style.gap = '0';
-        container.style.width = '100%';
-        container.style.height = sizes.HEIGHT;
-        container.style.border = `2px solid ${colors.BORDER}`;
-        container.style.borderRadius = '4px';
-        container.style.overflow = 'hidden';
-        container.style.backgroundColor = colors.INACTIVE_BG;
-        container.style.pointerEvents = 'auto';
-        container.style.position = 'relative';
-        return container;
-    }
     
-    /**
-     * Creates a segment button (for autoplant and autosqueeze)
-     * @param {string} text - Button text
-     * @param {number} width - Button width in pixels
-     * @param {boolean} borderRight - Whether to show right border
-     * @returns {HTMLElement} The button element
-     */
-    function createSegmentButton(text, width, borderRight = true) {
-        const button = document.createElement('button');
-        button.className = 'pixel-font-14';
-        button.textContent = text;
-        button.type = 'button';
-        
-        // Common styles
-        Object.assign(button.style, {
-            flex: `0 0 ${width}px`,
-            flexGrow: '0',
-            flexShrink: '0',
-            flexBasis: `${width}px`,
-            height: '100%',
-            width: `${width}px`,
-            minWidth: `${width}px`,
-            maxWidth: `${width}px`,
-            border: 'none',
-            borderRight: borderRight ? `1px solid ${UI_CONSTANTS.BUTTON_COLORS.BORDER}` : 'none',
-            backgroundColor: UI_CONSTANTS.BUTTON_COLORS.INACTIVE_BG,
-            color: UI_CONSTANTS.BUTTON_COLORS.INACTIVE_TEXT,
-            cursor: 'pointer',
-            fontSize: '12px',
-            fontWeight: 'bold',
-            transition: 'background-color 0.2s, color 0.2s, text-shadow 0.2s',
-            pointerEvents: 'auto',
-            position: 'relative',
-            zIndex: '10',
-            padding: '0',
-            textAlign: 'center',
-            userSelect: 'none'
-        });
-        
-        // Store original styles for hover effect
-        let isActive = false;
-        let originalBg = '#1a1a1a';
-        let originalColor = '#888888';
-        
-        // Add hover effect for inactive buttons
-        button.addEventListener('mouseenter', () => {
-            if (!isActive) {
-                button.style.backgroundColor = '#2a2a2a';
-                button.style.color = '#aaaaaa';
-            }
-        });
-        
-        button.addEventListener('mouseleave', () => {
-            if (!isActive) {
-                button.style.backgroundColor = originalBg;
-                button.style.color = originalColor;
-            }
-        });
-        
-        // Expose method to update active state
-        button._updateActiveState = (active, bg, color) => {
-            isActive = active;
-            originalBg = bg;
-            originalColor = color;
-        };
-        
-        return button;
-    }
     
     /**
      * Creates a checkbox with label and optional number input row (for autoplant gene settings)
@@ -12497,6 +12348,7 @@
             },
             cleanup: function() {
                 console.log('[Autoseller] Starting cleanup...');
+                window.BAToast?.clearMod(t('mods.autoseller.modName'));
                 
                 try {
                     // 1. Unsubscribe from board and player subscriptions

@@ -681,125 +681,13 @@ async function processFishingSkillIncrease(playerName) {
 // Show notification for skill increase using the same toast system as Quests mod
 function showSkillIncreaseNotification(skillType, oldLevel, newLevel, equipment) {
   const skillConfig = TIBIA_SKILLS_CONFIG.find(config => config.key === skillType);
-  const skillName = skillConfig?.label || skillType;
-
-  // Use the same toast system as Quests mod for consistency
-  const message = tReplace('mods.guilds.skillAdvanced', { old: oldLevel, new: newLevel });
-
-  // Get or create the main toast container (same as Quests mod)
-  let mainContainer = document.getElementById('quest-items-toast-container');
-  if (!mainContainer) {
-    mainContainer = document.createElement('div');
-    mainContainer.id = 'quest-items-toast-container';
-    mainContainer.style.cssText = `
-      position: fixed;
-      bottom: 20px;
-      right: 20px;
-      z-index: 10000;
-      pointer-events: none;
-      display: flex;
-      flex-direction: column;
-      align-items: flex-end;
-    `;
-    document.body.appendChild(mainContainer);
-  }
-
-  const existingToasts = mainContainer.querySelectorAll('.toast-item');
-  const stackOffset = existingToasts.length * 46;
-
-  // Create the flex container for this specific toast
-  const flexContainer = document.createElement('div');
-  flexContainer.className = 'toast-item';
-  flexContainer.style.cssText = `
-    display: flex;
-    position: absolute;
-    transition: 230ms cubic-bezier(0.21, 1.02, 0.73, 1);
-    transform: translateY(-${stackOffset}px);
-    bottom: 0px;
-    right: 0px;
-    justify-content: flex-end;
-  `;
-
-  const toast = document.createElement('button');
-  toast.className = 'non-dismissable-dialogs shadow-lg animate-in fade-in zoom-in-95 slide-in-from-top lg:slide-in-from-bottom';
-
-  const widgetTop = document.createElement('div');
-  widgetTop.className = 'widget-top h-2.5';
-
-  const widgetBottom = document.createElement('div');
-  widgetBottom.className = 'widget-bottom pixel-font-16 flex items-center gap-2 px-2 py-1 text-whiteHighlight';
-
-  // Add skill icon if available
-  if (skillConfig?.icon) {
-    const iconImg = document.createElement('img');
-    const iconUrl = getSkillAssetUrl(skillConfig.icon);
-    console.log(`[Guilds] Loading skill icon: ${skillConfig.icon} -> ${iconUrl}`);
-    iconImg.src = iconUrl;
-    iconImg.style.cssText = `
-      width: 9px;
-      height: 9px;
-      object-fit: contain;
-      flex-shrink: 0;
-    `;
-    iconImg.onload = () => {
-      console.log(`[Guilds] Skill icon loaded successfully: ${skillConfig.icon}`);
-    };
-    iconImg.onerror = () => {
-      console.log(`[Guilds] Skill icon failed to load: ${skillConfig.icon}, using fallback`);
-      // Fallback to text icon if image fails to load
-      iconImg.style.display = 'none'; // Hide the broken image
-      const textIcon = document.createElement('span');
-      textIcon.textContent = '🎣'; // Use fishing rod emoji for fishing
-      textIcon.style.fontSize = '9px';
-      textIcon.style.flexShrink = '0';
-      widgetBottom.insertBefore(textIcon, iconImg); // Insert before the img
-    };
-    widgetBottom.appendChild(iconImg);
-  }
-
-  const messageDiv = document.createElement('div');
-  messageDiv.className = 'text-left';
-  messageDiv.style.cssText = `
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    flex: 1;
-    min-width: 0;
-  `;
-  messageDiv.textContent = message;
-  widgetBottom.appendChild(messageDiv);
-
-  toast.appendChild(widgetTop);
-  toast.appendChild(widgetBottom);
-  flexContainer.appendChild(toast);
-  mainContainer.appendChild(flexContainer);
-
-  console.log(`[Guilds] Skill Increase Toast: ${skillName} ${message} (${equipment})`);
-
-  // Add click event listener for dismissal (same as Quests mod)
-  toast.addEventListener('click', () => {
-    if (flexContainer && flexContainer.parentNode) {
-      flexContainer.parentNode.removeChild(flexContainer);
-      updateToastPositions(mainContainer);
-    }
+  window.BAToast?.show({
+    mod: t('mods.guilds.modName'),
+    message: tReplace('mods.guilds.skillAdvanced', { old: oldLevel, new: newLevel }),
+    type: 'success',
+    icon: skillConfig?.icon ? getSkillAssetUrl(skillConfig.icon) : undefined,
+    duration: 10000
   });
-
-  // Auto-remove after 10 seconds (same as Quests mod's TOAST_DURATION_IMPORTANT)
-  setTimeout(() => {
-    if (flexContainer && flexContainer.parentNode) {
-      flexContainer.parentNode.removeChild(flexContainer);
-      updateToastPositions(mainContainer);
-    }
-  }, 10000);
-
-  // Helper function to update remaining toast positions (same as Quests mod)
-  function updateToastPositions(container) {
-    const toasts = container.querySelectorAll('.toast-item');
-    toasts.forEach((toast, index) => {
-      const offset = index * 46;
-      toast.style.transform = `translateY(-${offset}px)`;
-    });
-  }
 }
 
 // Initialize battle result tracking
@@ -1541,60 +1429,6 @@ function countRecordsInCategory(categoryObj, predicate) {
   return n;
 }
 
-// Check if any guild member holds a world record (ticks, rank, or floor)
-async function checkGuildWorldRecords(memberUsernames) {
-  try {
-    const leaderboardData = await getRoomsHighscoresCached();
-    if (!leaderboardData) return false;
-
-    const memberSet = new Set(memberUsernames.map(name => name.toLowerCase()));
-    const isMember = (userName) => userName && memberSet.has(userName.toLowerCase());
-
-    if (leaderboardData.ticks) {
-      for (const mapCode in leaderboardData.ticks) {
-        const rec = leaderboardData.ticks[mapCode];
-        if (rec && rec.userName && isMember(rec.userName)) return true;
-      }
-    }
-    if (leaderboardData.rank) {
-      for (const mapCode in leaderboardData.rank) {
-        const rec = leaderboardData.rank[mapCode];
-        if (rec && rec.userName && isMember(rec.userName)) return true;
-      }
-    }
-    if (leaderboardData.floor) {
-      for (const mapCode in leaderboardData.floor) {
-        const rec = leaderboardData.floor[mapCode];
-        if (rec && rec.userName && isMember(rec.userName)) return true;
-      }
-    }
-    return false;
-  } catch (error) {
-    console.error('[Guilds] Error checking world records:', error);
-    return false;
-  }
-}
-
-// Count how many world records a specific member holds (ticks + rank + floor)
-async function countMemberWorldRecords(username) {
-  try {
-    const leaderboardData = await getRoomsHighscoresCached();
-    if (!leaderboardData) return 0;
-
-    const usernameLower = (username || '').toLowerCase();
-    const isUser = (userName) => userName && userName.toLowerCase() === usernameLower;
-
-    let count = 0;
-    count += countRecordsInCategory(leaderboardData.ticks, isUser);
-    count += countRecordsInCategory(leaderboardData.rank, isUser);
-    count += countRecordsInCategory(leaderboardData.floor, isUser);
-    return count;
-  } catch (error) {
-    console.error('[Guilds] Error counting member world records:', error);
-    return 0;
-  }
-}
-
 function countMemberWorldRecordsFromLeaderboard(leaderboardData, username) {
   if (!leaderboardData) return 0;
   const usernameLower = (username || '').toLowerCase();
@@ -1704,36 +1538,6 @@ async function getPlayerEquipmentPoints(username, xpSkills = null) {
   } catch (error) {
     console.warn(`[Guilds] Error fetching equipment points for ${username}:`, error);
     return 0;
-  }
-}
-
-// Calculate individual member points and get detailed breakdown
-async function calculateMemberPoints(username) {
-  try {
-    const profile = await fetchPlayerProfile(username);
-    const equipmentPoints = await getPlayerEquipmentPoints(username);
-    const leaderboardData = await getRoomsHighscoresCached();
-    const worldRecordCount = leaderboardData
-      ? countMemberWorldRecordsFromLeaderboard(leaderboardData, username)
-      : 0;
-    return computeMemberPointsDetail(profile, equipmentPoints, worldRecordCount);
-  } catch (error) {
-    console.error('[Guilds] Error calculating member points:', error);
-    return {
-      total: 0,
-      levelPoints: 0,
-      rankPoints: 0,
-      timeSumPenalty: 0,
-      equipmentPoints: 0,
-      floorPoints: 0,
-      level: 0,
-      exp: 0,
-      rankPointsValue: 0,
-      timeSum: 0,
-      floors: 0,
-      hasWorldRecord: false,
-      worldRecordCount: 0
-    };
   }
 }
 
@@ -2172,12 +1976,6 @@ async function calculateGuildPoints(guildId, options = {}) {
   }
 }
 
-// Calculate guild points with detailed breakdown (uses same path as guild panel open)
-async function calculateGuildPointsBreakdown(guildId) {
-  const members = await getGuildMembers(guildId);
-  return loadGuildPanelPointsData(guildId, members, {});
-}
-
 // =======================
 // Helper Functions
 // =======================
@@ -2281,15 +2079,6 @@ function isGuildLeader(guild, currentPlayer) {
     return false;
   }
   return guild.leader.toLowerCase() === currentPlayer.toLowerCase();
-}
-
-// Create ESC key handler factory for modals/dialogs
-function createEscKeyHandler(onClose) {
-  return function handleEsc(e) {
-    if (e.key === 'Escape' || e.keyCode === 27) {
-      onClose();
-    }
-  };
 }
 
 // Setup ESC key handler with automatic cleanup when dialog closes
@@ -2893,113 +2682,7 @@ if (typeof globalThis !== 'undefined') {
 // Creature Products Functions (for Fur_Backpack)
 // =======================
 
-const CREATURE_PRODUCTS_FIREBASE_URL = 'https://vip-list-messages-default-rtdb.europe-west1.firebasedatabase.app/quests/creature-products';
 
-// Derive encryption key for creature products (same as Quests.js)
-async function deriveCreatureProductsKey(username) {
-  try {
-    const encoder = new TextEncoder();
-    const password = encoder.encode(username.toLowerCase());
-    
-    const keyMaterial = await crypto.subtle.importKey(
-      'raw',
-      password,
-      { name: 'PBKDF2' },
-      false,
-      ['deriveBits', 'deriveKey']
-    );
-    
-    const salt = encoder.encode('creature-products-salt');
-    const key = await crypto.subtle.deriveKey(
-      {
-        name: 'PBKDF2',
-        salt: salt,
-        iterations: 100000,
-        hash: 'SHA-256'
-      },
-      keyMaterial,
-      { name: 'AES-GCM', length: 256 },
-      false,
-      ['encrypt', 'decrypt']
-    );
-    
-    return key;
-  } catch (error) {
-    console.error('[Guilds] Error deriving creature products key:', error);
-    throw error;
-  }
-}
-
-// Decrypt creature products (same as Quests.js)
-async function decryptCreatureProducts(encryptedText, username) {
-  try {
-    if (!encryptedText || typeof encryptedText !== 'string') {
-      return {};
-    }
-    
-    let combined;
-    try {
-      combined = Uint8Array.from(atob(encryptedText), c => c.charCodeAt(0));
-    } catch (e) {
-      return {};
-    }
-    
-    if (combined.length < 13) {
-      return {};
-    }
-    
-    const key = await deriveCreatureProductsKey(username);
-    
-    const iv = combined.slice(0, 12);
-    const encrypted = combined.slice(12);
-    
-    const decrypted = await crypto.subtle.decrypt(
-      { name: 'AES-GCM', iv: iv },
-      key,
-      encrypted
-    );
-    
-    const decoder = new TextDecoder();
-    const jsonStr = decoder.decode(decrypted);
-    const products = JSON.parse(jsonStr);
-    return products || {};
-  } catch (error) {
-    console.warn('[Guilds] Error decrypting creature products:', error);
-    return {};
-  }
-}
-
-// Get creature products from Firebase
-async function getCreatureProducts() {
-  try {
-    const currentPlayer = getCurrentPlayerName();
-    if (!currentPlayer) {
-      return {};
-    }
-    
-    const hashedPlayer = await hashUsername(currentPlayer);
-    const response = await fetch(`${CREATURE_PRODUCTS_FIREBASE_URL}/${hashedPlayer}.json`);
-    
-    if (!response.ok) {
-      if (response.status === 404) {
-        return {};
-      }
-      throw new Error(`Failed to fetch creature products: ${response.status}`);
-    }
-    
-    const data = await response.json();
-    if (!data || !data.encrypted) {
-      return {};
-    }
-    
-    return await decryptCreatureProducts(data.encrypted, currentPlayer);
-  } catch (error) {
-    console.error('[Guilds] Error getting creature products:', error);
-    return {};
-  }
-}
-
-// Show toast notification when coins drop (similar to Raid_Hunter.js)
 // =======================
 // Deterministic Drop Calculation
 // =======================
@@ -3024,89 +2707,12 @@ function deterministicRandom(seed, additionalValue = 0) {
 }
 
 function showGuildCoinNotification(amount) {
-  try {
-    // Get or create the main toast container
-    let mainContainer = document.getElementById('guild-coins-toast-container');
-    if (!mainContainer) {
-      mainContainer = document.createElement('div');
-      mainContainer.id = 'guild-coins-toast-container';
-      mainContainer.style.cssText = `
-        position: fixed;
-        z-index: 9999;
-        inset: 16px 16px 64px;
-        pointer-events: none;
-      `;
-      document.body.appendChild(mainContainer);
-    }
-    
-    // Count existing toasts to calculate stacking position
-    const existingToasts = mainContainer.querySelectorAll('.toast-item');
-    const stackOffset = existingToasts.length * 46;
-    
-    // Create the flex container for this specific toast
-    const flexContainer = document.createElement('div');
-    flexContainer.className = 'toast-item';
-    flexContainer.style.cssText = `
-      left: 0px;
-      right: 0px;
-      display: flex;
-      position: absolute;
-      transition: 230ms cubic-bezier(0.21, 1.02, 0.73, 1);
-      transform: translateY(-${stackOffset}px);
-      bottom: 0px;
-      justify-content: flex-end;
-    `;
-    
-    // Create toast button
-    const toast = document.createElement('button');
-    toast.className = 'non-dismissable-dialogs shadow-lg animate-in fade-in zoom-in-95 slide-in-from-top lg:slide-in-from-bottom';
-    
-    // Create widget structure
-    const widgetTop = document.createElement('div');
-    widgetTop.className = 'widget-top h-2.5';
-    
-    const widgetBottom = document.createElement('div');
-    widgetBottom.className = 'widget-bottom pixel-font-16 flex items-center gap-2 px-2 py-1 text-whiteHighlight';
-    
-    // Add guild coin icon
-    const iconImg = document.createElement('img');
-    iconImg.alt = 'Guild Coin';
-    iconImg.src = getGuildAssetUrl('Guild_Coin.png');
-    iconImg.className = 'pixelated';
-    iconImg.style.cssText = 'width: 16px; height: 16px;';
-    widgetBottom.appendChild(iconImg);
-    
-    // Add message
-    const messageDiv = document.createElement('div');
-    messageDiv.className = 'text-left';
-    messageDiv.textContent = tReplace('mods.guilds.guildCoinObtained', { amount });
-    widgetBottom.appendChild(messageDiv);
-    
-    // Assemble toast
-    toast.appendChild(widgetTop);
-    toast.appendChild(widgetBottom);
-    flexContainer.appendChild(toast);
-    mainContainer.appendChild(flexContainer);
-    
-    console.log(`[Guilds] Toast shown: Guild Coin obtained! (+${amount})`);
-    
-    // Auto-remove after 3 seconds
-    setTimeout(() => {
-      if (flexContainer && flexContainer.parentNode) {
-        flexContainer.parentNode.removeChild(flexContainer);
-        
-        // Update positions of remaining toasts
-        const toasts = mainContainer.querySelectorAll('.toast-item');
-        toasts.forEach((toast, index) => {
-          const offset = index * 46;
-          toast.style.transform = `translateY(-${offset}px)`;
-        });
-      }
-    }, 3000);
-    
-  } catch (error) {
-    console.error('[Guilds] Error showing coin toast:', error);
-  }
+  window.BAToast?.show({
+    mod: t('mods.guilds.modName'),
+    message: tReplace('mods.guilds.guildCoinObtained', { amount }),
+    icon: getGuildAssetUrl('Guild_Coin.png'),
+    duration: 3000
+  });
 }
 
 // Board subscription for coin drops
@@ -4124,44 +3730,6 @@ function getGuildChatApiUrl(guildId) {
   return `${firebaseUrl}/guilds/chat/${guildId}`;
 }
 
-async function sendGuildMessage(guildId, text) {
-  try {
-    const currentPlayer = validateCurrentPlayer();
-
-    if (!text || text.trim().length === 0) {
-      return false;
-    }
-
-    if (text.length > GUILD_CONFIG.maxMessageLength) {
-      throw new Error(`Message must be ${GUILD_CONFIG.maxMessageLength} characters or less`);
-    }
-
-    const members = await getGuildMembers(guildId);
-    const currentMember = findMemberByUsername(members, currentPlayer);
-    if (!currentMember) {
-      throw new Error('You are not a member of this guild');
-    }
-
-    const messageText = text.trim();
-    const encryptedText = await encryptGuildMessage(messageText, guildId);
-    
-    const messageData = {
-      from: currentPlayer,
-      fromHashed: await hashUsername(currentPlayer),
-      text: encryptedText,
-      timestamp: Date.now()
-    };
-
-    const messageId = Date.now().toString();
-    await firebaseRequest(`${getGuildChatApiUrl(guildId)}/${messageId}`, 'PUT', messageData, 'send message');
-
-    return true;
-  } catch (error) {
-    console.error('[Guilds] Error sending guild message:', error);
-    throw error;
-  }
-}
-
 async function sendGuildSystemMessage(guildId, messageText) {
   try {
     // Validate guildId
@@ -4225,37 +3793,6 @@ async function sendGuildSystemMessage(guildId, messageText) {
     }
   } catch (error) {
     console.warn('[Guilds] Error sending system message:', error);
-  }
-}
-
-async function getGuildMessages(guildId, limit = 50) {
-  try {
-    const response = await fetch(`${getGuildChatApiUrl(guildId)}.json?orderBy="$key"&limitToLast=${limit}`);
-    const data = await handleFirebaseResponse(response, 'get messages', []);
-    if (!data || typeof data !== 'object') {
-      return [];
-    }
-    const messages = Object.entries(data)
-      .map(([id, message]) => ({ id, ...message }))
-      .sort((a, b) => a.timestamp - b.timestamp);
-    
-    // Decrypt messages
-    const decryptedMessages = await Promise.all(
-      messages.map(async (msg) => {
-        try {
-          const decryptedText = await decryptGuildMessage(msg.text, guildId);
-          return { ...msg, text: decryptedText };
-        } catch (error) {
-          console.warn('[Guilds] Failed to decrypt message:', error);
-          return msg;
-        }
-      })
-    );
-    
-    return decryptedMessages;
-  } catch (error) {
-    console.error('[Guilds] Error getting guild messages:', error);
-    return [];
   }
 }
 
@@ -11945,6 +11482,7 @@ exports = {
   
   cleanup: function() {
     try {
+      window.BAToast?.clearMod(t('mods.guilds.modName'));
       uninstallApiCallCounter();
       teardownGuildsAnalysisCoordination();
       // Stop account menu observer

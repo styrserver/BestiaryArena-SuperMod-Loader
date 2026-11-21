@@ -10,22 +10,9 @@
  * Exit code: 0 all parse, 1 at least one file has a syntax error.
  */
 import { spawnSync } from 'node:child_process';
-import { readdirSync, statSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { ROOT, listScripts } from './lib.mjs';
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-
-function scripts(dir, out = []) {
-  for (const name of readdirSync(join(ROOT, dir))) {
-    const rel = `${dir}/${name}`;
-    if (statSync(join(ROOT, rel)).isDirectory()) scripts(rel, out);
-    else if (/\.m?js$/.test(name)) out.push(rel);
-  }
-  return out;
-}
-
-const files = ['background.js', ...['assets', 'content', 'database', 'mods', 'popup', 'tools'].flatMap((d) => scripts(d))];
+const files = ['background.js', ...['assets', 'content', 'database', 'mods', 'popup', 'tools'].flatMap((d) => listScripts(d))];
 const broken = files.filter((f) => spawnSync(process.execPath, ['--check', f], { cwd: ROOT, stdio: 'pipe' }).status !== 0);
 
 if (broken.length) {

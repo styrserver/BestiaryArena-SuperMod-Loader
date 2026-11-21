@@ -5,16 +5,14 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { ORIGIN, fetchText } from './lib.mjs';
 
-const ORIGIN = 'https://bestiaryarena.com';
 const STAMP_PATH = join(dirname(fileURLToPath(import.meta.url)), '..', 'database', 'tool-runs.js');
 const STAMP_BLOCK = /(\/\/ BEGIN TOOL_RUNS\r?\n)[\s\S]*?(\/\/ END TOOL_RUNS)/;
 
 /** Build id of the deployed game: the same value as `__NEXT_DATA__.buildId` in the page. */
 export async function fetchBuildId() {
-  const res = await fetch(`${ORIGIN}/`);
-  if (!res.ok) throw new Error(`${ORIGIN}/ -> HTTP ${res.status}`);
-  const html = await res.text();
+  const html = await fetchText(`${ORIGIN}/`);
   const id = /"buildId":"([^"]+)"/.exec(html)?.[1] ?? /\/_next\/static\/([^/"]+)\/_buildManifest\.js/.exec(html)?.[1];
   if (!id) throw new Error('build id not found on the home page');
   return id;

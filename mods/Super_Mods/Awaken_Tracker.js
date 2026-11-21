@@ -64,7 +64,6 @@
     const FARMER_TICK_MS = 8000;
     // Fixed start delay — same contract as BBM / Raid Hunter / Better Tasker / Stamina Optimizer
     const DEFAULT_START_DELAY = 3; // seconds
-    const START_TOAST_COOLDOWN_MS = 10000;
     const DEFAULT_STAMINA_COST = 30;
     const STAMINA_REGEN_MS = 60000;
     const STAMINA_TOOLTIP_SELECTOR =
@@ -2957,84 +2956,9 @@
         }
     }
 
-    let lastStartToastAt = 0;
-
-    function showFarmerToast(message, duration = 5000) {
-        try {
-            let mainContainer = document.getElementById('awaken-farmer-toast-container');
-            if (!mainContainer) {
-                mainContainer = document.createElement('div');
-                mainContainer.id = 'awaken-farmer-toast-container';
-                mainContainer.style.cssText = `
-                    position: fixed;
-                    z-index: 9999;
-                    inset: 16px 16px 64px;
-                    pointer-events: none;
-                `;
-                document.body.appendChild(mainContainer);
-            }
-
-            const existingToasts = mainContainer.querySelectorAll('.toast-item');
-            const stackOffset = existingToasts.length * 46;
-
-            const flexContainer = document.createElement('div');
-            flexContainer.className = 'toast-item';
-            flexContainer.style.cssText = `
-                left: 0px;
-                right: 0px;
-                display: flex;
-                position: absolute;
-                transition: 230ms cubic-bezier(0.21, 1.02, 0.73, 1);
-                transform: translateY(-${stackOffset}px);
-                bottom: 0px;
-                justify-content: flex-end;
-            `;
-
-            const toast = document.createElement('button');
-            toast.className = 'non-dismissable-dialogs shadow-lg animate-in fade-in zoom-in-95 slide-in-from-top lg:slide-in-from-bottom';
-
-            const widgetTop = document.createElement('div');
-            widgetTop.className = 'widget-top h-2.5';
-
-            const widgetBottom = document.createElement('div');
-            widgetBottom.className = 'widget-bottom pixel-font-16 flex items-center gap-2 px-2 py-1 text-whiteHighlight';
-
-            const iconImg = document.createElement('img');
-            iconImg.alt = 'awaken';
-            iconImg.src = BADGE_ICONS.awakened;
-            iconImg.className = 'pixelated';
-            iconImg.style.cssText = 'width: 16px; height: 16px; image-rendering: pixelated;';
-            widgetBottom.appendChild(iconImg);
-
-            const messageDiv = document.createElement('div');
-            messageDiv.className = 'text-left';
-            messageDiv.textContent = message;
-            widgetBottom.appendChild(messageDiv);
-
-            toast.appendChild(widgetTop);
-            toast.appendChild(widgetBottom);
-            flexContainer.appendChild(toast);
-            mainContainer.appendChild(flexContainer);
-
-            setTimeout(() => {
-                if (flexContainer && flexContainer.parentNode) {
-                    flexContainer.parentNode.removeChild(flexContainer);
-                    const toasts = mainContainer.querySelectorAll('.toast-item');
-                    toasts.forEach((item, index) => {
-                        item.style.transform = `translateY(-${index * 46}px)`;
-                    });
-                }
-            }, duration);
-        } catch (error) {
-            console.warn('[Awaken Farmer] Error showing toast:', error);
-        }
-    }
 
     function showFarmerStartingToast() {
-        const now = Date.now();
-        if (now - lastStartToastAt < START_TOAST_COOLDOWN_MS) return;
-        lastStartToastAt = now;
-        showFarmerToast(t('mods.awakenTracker.farmerStartingToast'));
+        window.BAToast?.show({ mod: t('mods.awakenTracker.modName'), message: t('mods.awakenTracker.farmerStartingToast'), key: 'start', cooldown: 10000 });
     }
 
     function startFarmerLoop() {
@@ -3534,7 +3458,7 @@
             handle.style.zIndex = '10';
             handle.style.background = 'transparent';
             handle.style.userSelect = 'none';
-            handle.setAttribute('aria-label', 'Resize ' + dir);
+            handle.setAttribute('aria-label', t('common.resize') + ' ' + dir);
             if (dir.length === 1) {
                 if (dir === 'n' || dir === 's') {
                     handle.style.height = '6px';
@@ -4798,10 +4722,7 @@
                 clearTimeout(saveDebounceId);
                 saveDebounceId = null;
             }
-            const toastContainer = document.getElementById('awaken-farmer-toast-container');
-            if (toastContainer) {
-                try { toastContainer.remove(); } catch (_) {}
-            }
+            window.BAToast?.clearMod(t('mods.awakenTracker.modName'));
             const panel = document.getElementById(PANEL_ID);
             if (panel) panel.remove();
             console.log('[Awaken Tracker] Cleanup completed');

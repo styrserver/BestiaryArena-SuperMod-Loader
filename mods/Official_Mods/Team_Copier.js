@@ -187,21 +187,6 @@ function copyToClipboard(text) {
   return success;
 }
 
-// Helper function to compress JSON to make URLs shorter
-function compressData(data) {
-  try {
-    // Convert to JSON string
-    const jsonString = JSON.stringify(data);
-    
-    // Use base64 encoding to make it URL-safe
-    // This is more efficient than percent-encoding the whole JSON
-    return btoa(encodeURIComponent(jsonString));
-  } catch (error) {
-    console.error('Error compressing data:', error);
-    return null;
-  }
-}
-
 // Serialize the current board setup
 function serializeBoard() {
   try {
@@ -601,22 +586,7 @@ function compressCompactFormat(boardData) {
 
 // Show a notification message
 function showNotification(message, type = 'info', duration = 3000) {
-  // Check if the API has a notify function
-  if (api.ui && api.ui.notify) {
-    api.ui.notify({
-      message: message,
-      type: type,
-      duration: duration
-    });
-    return;
-  }
-  
-  // Fallback to a simple modal
-  api.ui.components.createModal({
-    title: type.charAt(0).toUpperCase() + type.slice(1),
-    content: message,
-    buttons: [{ text: 'OK', primary: true }]
-  });
+  window.BAToast?.show({ mod: t('mods.teamCopier.modName'), message, type, duration });
 }
 
 // Create the main Team Copier modal with scrollable vertical layout
@@ -1111,6 +1081,7 @@ function showTeamLoadedNotification(data) {
 
 // Cleanup function for Team Copier mod (exposed for mod system)
 context.exports.cleanup = function() {
+  window.BAToast?.clearMod(t('mods.teamCopier.modName'));
   console.log('[Team Copier] Running cleanup...');
 
   // This assignment replaces the earlier `cleanup: clearTeamCopierModalLayoutCleanup`,

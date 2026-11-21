@@ -3283,27 +3283,6 @@
     forgeState.globalTypeFilter = 'all';
   }
 
-  function clearAutoUpgradeSelection() {
-    // Reset forge confirmation mode if clearing selection
-    if (forgeState.isForgeConfirmationMode) {
-      console.log('[Better Forge] 🔄 Forge confirmation mode reset due to selection cleared');
-    }
-    resetForgeConfirmationModeIfActive();
-    
-    autoUpgradeState.selectedEquipment = null;
-    autoUpgradeState.selectedTier = null;
-    autoUpgradeState.selectedStat = null;
-    forgeState.highlightedEquipment.clear();
-    
-    // Clear equipment filter but preserve global search term
-    forgeState.selectedEquipmentFilter = null;
-    
-    // Only apply filter if modal is open (don't clear search when just switching tabs)
-    const dialog = document.querySelector('div[role="dialog"][data-state="open"]');
-    if (dialog) {
-      filterCol1BySelectedEquipment(null);
-    }
-  }
   
   // Clear only visual selection without affecting search
   function clearAutoUpgradeVisualSelection() {

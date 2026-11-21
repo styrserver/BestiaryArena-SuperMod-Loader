@@ -1606,7 +1606,7 @@ function updateMainButtonSealedWarning() {
     const baseText = t('mods.manualRunner.buttonText') || 'Manual Runner';
     const displayText = showWarning ? `${baseText} ⚠` : baseText;
     const tooltip = showWarning
-      ? 'Autosell or auto-inject is enabled on floor 11+ (sealed creatures may be affected)'
+      ? t('mods.manualRunner.autosellWarningTooltip')
       : (t('mods.manualRunner.buttonTooltip') || 'Run manual mode until victory (restarts on defeat)');
 
     if (typeof api !== 'undefined' && api?.ui?.updateButton) {
@@ -2915,65 +2915,7 @@ function removeMonsterFromLocalInventory(monsterId) {
 }
 
 function showManualRunnerInjectToast(message, durationMs = 5000) {
-  try {
-    let mainContainer = document.getElementById('manual-runner-inject-toast-container');
-    if (!mainContainer) {
-      mainContainer = document.createElement('div');
-      mainContainer.id = 'manual-runner-inject-toast-container';
-      mainContainer.style.cssText = 'position: fixed; z-index: 9999; inset: 16px 16px 64px; pointer-events: none;';
-      document.body.appendChild(mainContainer);
-    }
-
-    const existingToasts = mainContainer.querySelectorAll('.manual-runner-inject-toast-item');
-    const stackOffset = existingToasts.length * 44;
-
-    const flexContainer = document.createElement('div');
-    flexContainer.className = 'manual-runner-inject-toast-item';
-    flexContainer.style.cssText = `left:0;right:0;display:flex;position:absolute;transition:230ms cubic-bezier(0.21, 1.02, 0.73, 1);transform:translateY(-${stackOffset}px);bottom:0;justify-content:flex-end;`;
-
-    const toast = document.createElement('button');
-    toast.type = 'button';
-    toast.style.pointerEvents = 'auto';
-    toast.className = 'non-dismissable-dialogs shadow-lg animate-in fade-in zoom-in-95 slide-in-from-top lg:slide-in-from-bottom';
-
-    const widgetTop = document.createElement('div');
-    widgetTop.className = 'widget-top h-2.5';
-    const widgetBottom = document.createElement('div');
-    widgetBottom.className = 'widget-bottom pixel-font-16 flex items-center gap-2 px-2 py-1 text-whiteHighlight';
-    const textLeft = document.createElement('div');
-    textLeft.className = 'text-left';
-    const paragraph = document.createElement('p');
-    paragraph.style.cssText = 'margin: 0; max-width: 28rem; white-space: pre-wrap;';
-    if (typeof message === 'string') {
-      paragraph.textContent = message;
-    } else if (message instanceof Node) {
-      paragraph.style.whiteSpace = 'normal';
-      paragraph.appendChild(message);
-    } else {
-      paragraph.textContent = String(message ?? '');
-    }
-
-    textLeft.appendChild(paragraph);
-    widgetBottom.appendChild(textLeft);
-    toast.appendChild(widgetTop);
-    toast.appendChild(widgetBottom);
-    flexContainer.appendChild(toast);
-    mainContainer.appendChild(flexContainer);
-
-    const remove = () => {
-      if (flexContainer?.parentNode) {
-        flexContainer.parentNode.removeChild(flexContainer);
-        const toasts = mainContainer.querySelectorAll('.manual-runner-inject-toast-item');
-        toasts.forEach((el, index) => {
-          el.style.transform = `translateY(-${index * 44}px)`;
-        });
-      }
-    };
-    toast.addEventListener('click', remove);
-    setTimeout(remove, Math.max(1000, durationMs));
-  } catch (error) {
-    console.warn('[Manual Runner][Inject] Failed to show toast:', error);
-  }
+  window.BAToast?.show({ mod: t('mods.manualRunner.modName'), message, duration: Math.max(1000, durationMs) });
 }
 
 async function pollTargetStatsAfterInject(awakenedTargetId, targetBeforeStats, awakenedTarget) {
@@ -5742,6 +5684,7 @@ function teardownManualRunnerSubscriptions() {
 }
 
 function cleanupManualRunner() {
+  window.BAToast?.clearMod(t('mods.manualRunner.modName'));
   console.log('[Manual Runner] Starting cleanup...');
   
   try {

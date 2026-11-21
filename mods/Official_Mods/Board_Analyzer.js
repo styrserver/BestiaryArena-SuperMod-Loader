@@ -39,12 +39,8 @@ const DEFAULT_TICK_INTERVAL_MS = 62.5;
 const ANALYSIS_STOP_DELAY_MS = 200;
 const LIVE_STATS_THROTTLE_MS = 50;
 const UI_UPDATE_DELAY_MS = 600;
-const MODAL_CLEANUP_DELAY_MS = 100;
 const BOARD_RESTORE_DELAY_MS = 50;
-const TURBO_RESET_DELAY_MS = 25;
 const NOTIFICATION_DISPLAY_MS = 3000;
-const BOARD_ANALYZER_TOAST_CONTAINER_ID = 'board-analyzer-toast-container';
-const COPY_FEEDBACK_DELAY_MS = 2000;
 
 // Chart rendering constants
 const CHART_BAR_WIDTH = 8;
@@ -2361,7 +2357,7 @@ function prepareFastEngine() {
     runner?.cleanup();
     fastNative = null;
     console.warn('[Board Analyzer] Fast simulation unavailable, using real simulation:', error.message);
-    showBoardAnalyzerToast(t('mods.boardAnalyzer.fastSimulationFallback'));
+    showBoardAnalyzerToast(t('mods.boardAnalyzer.fastSimulationFallback'), { type: 'warning' });
     return null;
   }
 }
@@ -2454,7 +2450,7 @@ async function finishFastEngine(ready, analysisId, onVerifiedRun = null) {
   } catch (error) {
     runner.cleanup();
     console.warn('[Board Analyzer] Fast simulation unavailable, using real simulation:', error.message);
-    showBoardAnalyzerToast(t('mods.boardAnalyzer.fastSimulationFallback'));
+    showBoardAnalyzerToast(t('mods.boardAnalyzer.fastSimulationFallback'), { type: 'warning' });
     return null;
   }
 }
@@ -2742,15 +2738,6 @@ function parseGameServerJson(responseData) {
   }
   if (responseData.rewardScreen) return responseData;
   return null;
-}
-
-function parseServerExpReward(serverResults) {
-  const rewardScreen = serverResults?.rewardScreen;
-  const raw = rewardScreen?.expReward ?? serverResults?.next?.expReward;
-  if (raw === undefined || raw === null || raw === '') return null;
-  const n = typeof raw === 'number' ? raw : Number(raw);
-  if (!Number.isFinite(n) || n <= 0) return null;
-  return Math.floor(n);
 }
 
 function logServerExpReward(serverResults) {
@@ -3518,44 +3505,6 @@ function logAnalysisPerformanceSummary(perf, metrics) {
   console.log('[Board Analyzer] Performance summary:', summary);
 }
 
-// Create replay data in the required format
-function createReplayData(seed = null) {
-  try {
-    // Get board data
-    const boardData = getBoardData(seed);
-    
-    if (!boardData) {
-      console.error('Failed to get board data');
-      return null;
-    }
-    
-    // Verify that we have required fields
-    if (!boardData.region || !boardData.map) {
-      console.warn('Missing region or map in board data');
-    }
-    
-    // Verify that monster and equipment names are included
-    if (boardData.board && boardData.board.length > 0) {
-      const firstPiece = boardData.board[0];
-      if (!firstPiece.monster.name || !firstPiece.equipment.name) {
-        console.warn('Monster or equipment names are missing in board data');
-      }
-    }
-    
-    // Add the seed if provided
-    if (seed) {
-      boardData.seed = seed;
-    } else if (currentSeed) {
-      boardData.seed = currentSeed;
-    }
-    
-    return boardData;
-  } catch (error) {
-    console.error('Error creating replay data:', error);
-    return null;
-  }
-}
-
 // Function to copy text to clipboard
 function copyToClipboard(text) {
   const textarea = document.createElement('textarea');
@@ -3576,46 +3525,6 @@ function copyToClipboard(text) {
     textarea.parentNode.removeChild(textarea);
   }
   return success;
-}
-
-// Function to create a copy button for replay data
-function createCopyReplayButton(replayData) {
-  if (!replayData || !replayData.board || replayData.board.length === 0) {
-    return null;
-  }
-  
-  // Use the exact format with $replay to match the expected output
-  const replayText = `$replay(${JSON.stringify(replayData)})`;
-  
-  const button = document.createElement('button');
-  button.textContent = t('mods.boardAnalyzer.copyReplayButton');
-  button.style.cssText = `
-    background-color: #3498db;
-    color: white;
-    border: none;
-    padding: 6px 12px;
-    border-radius: 4px;
-    cursor: pointer;
-    margin-top: 5px;
-    font-size: 12px;
-    width: 100%;
-    display: block;
-  `;
-  
-  button.addEventListener('click', () => {
-    const success = copyToClipboard(replayText);
-    if (success) {
-      const originalText = button.textContent;
-      button.textContent = t('mods.boardAnalyzer.replayCopiedMessage');
-      button.style.backgroundColor = '#2ecc71';
-      setTimeout(() => {
-        button.textContent = originalText;
-        button.style.backgroundColor = '#3498db';
-      }, 2000);
-    }
-  });
-  
-  return button;
 }
 
 // =======================
@@ -5032,75 +4941,20 @@ function createReplayDataForRun(runResult) {
   }
 }
 
-function getBoardAnalyzerToastContainer() {
-  if (typeof document === 'undefined') return null;
-  let el = document.getElementById(BOARD_ANALYZER_TOAST_CONTAINER_ID);
-  if (!el) {
-    el = document.createElement('div');
-    el.id = BOARD_ANALYZER_TOAST_CONTAINER_ID;
-    el.style.cssText = 'position: fixed; z-index: 9999; inset: 16px 16px 64px; pointer-events: none;';
-    document.body.appendChild(el);
-  }
-  return el;
-}
-
-function updateBoardAnalyzerToastPositions(container) {
-  if (!container) return;
-  container.querySelectorAll('.board-analyzer-toast-item').forEach((toast, index) => {
-    toast.style.transform = `translateY(-${index * 46}px)`;
-  });
-}
-
 function showBoardAnalyzerToast(message, options = {}) {
-  const safeMsg = message != null ? String(message).replace(/</g, '&lt;') : '';
-  const duration = typeof options.duration === 'number' ? options.duration : NOTIFICATION_DISPLAY_MS;
-  try {
-    const container = getBoardAnalyzerToastContainer();
-    if (!container) return;
-    const existingToasts = container.querySelectorAll('.board-analyzer-toast-item');
-    const stackOffset = existingToasts.length * 46;
-    const flexContainer = document.createElement('div');
-    flexContainer.className = 'board-analyzer-toast-item';
-    flexContainer.style.cssText = `display: flex; position: absolute; transition: 230ms cubic-bezier(0.21, 1.02, 0.73, 1); transform: translateY(-${stackOffset}px); bottom: 0px; right: 0px; justify-content: flex-end; pointer-events: none; width: max-content; max-width: 100%;`;
-    const toast = document.createElement('button');
-    toast.className = 'non-dismissable-dialogs shadow-lg animate-in fade-in zoom-in-95 slide-in-from-top lg:slide-in-from-bottom';
-    toast.style.pointerEvents = 'auto';
-    const widgetTop = document.createElement('div');
-    widgetTop.className = 'widget-top h-2.5';
-    const widgetBottom = document.createElement('div');
-    widgetBottom.className = 'widget-bottom pixel-font-16 flex items-center gap-2 px-2 py-1 text-whiteHighlight';
-    const messageDiv = document.createElement('div');
-    messageDiv.className = 'text-left';
-    messageDiv.style.flex = '1 1 auto';
-    if (options.messageColor) messageDiv.style.color = options.messageColor;
-    messageDiv.textContent = safeMsg;
-    widgetBottom.appendChild(messageDiv);
-    toast.appendChild(widgetTop);
-    toast.appendChild(widgetBottom);
-    flexContainer.appendChild(toast);
-    container.appendChild(flexContainer);
-    toast.addEventListener('click', () => {
-      if (flexContainer.parentNode) {
-        flexContainer.parentNode.removeChild(flexContainer);
-        updateBoardAnalyzerToastPositions(container);
-      }
-    });
-    setTimeout(() => {
-      if (flexContainer.parentNode) {
-        flexContainer.parentNode.removeChild(flexContainer);
-        updateBoardAnalyzerToastPositions(container);
-      }
-    }, duration);
-  } catch (e) {
-    console.warn('[Board Analyzer] showBoardAnalyzerToast:', e);
-  }
+  window.BAToast?.show({
+    mod: t('mods.boardAnalyzer.modName'),
+    message,
+    type: options.type,
+    duration: typeof options.duration === 'number' ? options.duration : NOTIFICATION_DISPLAY_MS
+  });
 }
 
 // Function to show copy notification
 function showCopyNotification(message, isError = false) {
   showBoardAnalyzerToast(message, {
     duration: NOTIFICATION_DISPLAY_MS,
-    messageColor: isError ? '#e74c3c' : undefined
+    type: isError ? 'error' : 'success'
   });
 }
 
@@ -5331,6 +5185,7 @@ context.exports = {
   },
   // Cleanup function for modal manager
   cleanup: () => {
+    window.BAToast?.clearMod(t('mods.boardAnalyzer.modName'));
     hideFastWarningTooltip();
     uninstallXpDebugFetchHook();
     clearBoardAnalyzerModalLayoutCleanup();

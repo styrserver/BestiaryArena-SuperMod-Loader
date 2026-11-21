@@ -36,7 +36,7 @@ let modBaseUrl = '';
 // Keep in sync with content/mod-registry.js
 const FALLBACK_DATABASE_MODS = [
   'welcome.js', 'inventory-database.js', 'creature-database.js', 'equipment-database.js', 'tool-runs.js',
-  'maps-database.js', 'equipment-lua-export.js', 'creature-lua-export.js',
+  'wiki-export-loader.js', 'maps-database.js', 'equipment-lua-export.js', 'creature-lua-export.js',
   'maps-lua-export.js', 'regions-lua-export.js', 'playereq-database.js', 'firebase-admins.js'
 ];
 const FALLBACK_OFFICIAL_MODS = [
@@ -76,9 +76,7 @@ function ensureWelcomeModAlwaysEnabled(mods) {
 
 const FALLBACK_DEFAULT_ENABLED_MODS = [
   'database/welcome.js', 'database/inventory-database.js', 'database/creature-database.js',
-  'database/equipment-database.js', 'database/tool-runs.js', 'database/maps-database.js', 'database/equipment-lua-export.js',
-  'database/creature-lua-export.js',
-  'database/maps-lua-export.js', 'database/regions-lua-export.js',
+  'database/equipment-database.js', 'database/tool-runs.js', 'database/wiki-export-loader.js', 'database/maps-database.js',
   'database/playereq-database.js', 'database/firebase-admins.js',
   'Official Mods/Bestiary_Automator.js', 'Official Mods/Board Analyzer.js',
   'Official Mods/Highscore_Improvements.js',
@@ -752,11 +750,8 @@ let defaultEnabledMods = [
   'database/creature-database.js',
   'database/equipment-database.js',
   'database/tool-runs.js',
+  'database/wiki-export-loader.js',
   'database/maps-database.js',
-  'database/equipment-lua-export.js',
-  'database/creature-lua-export.js',
-  'database/maps-lua-export.js',
-  'database/regions-lua-export.js',
   'database/playereq-database.js',
   'database/firebase-admins.js',
   'Official Mods/Bestiary_Automator.js',
@@ -1009,6 +1004,65 @@ async function initLocalMods() {
 }
 
 // Optimized execution function with better error handling and deduplication
+// Big content scripts that only a few mods use are injected on demand, right before such a mod runs, so
+// players who do not use those mods do not download and parse them on every page load.
+const MOD_SCRIPT_DEPENDENCIES = {
+  'OT Mods/Challenges.js': [{ file: 'content/custom-battles.js', global: 'CustomBattles' }],
+  'OT Mods/Quests.js': [{ file: 'content/custom-battles.js', global: 'CustomBattles' }],
+  'OT Mods/Map_Editor.js': [{ file: 'content/custom-battles.js', global: 'CustomBattles' }],
+  'Super Mods/Better Highscores.js': [{ file: 'content/event-competition.js', global: 'EventCompetition' }]
+};
+const onDemandScriptRequests = new Map();
+
+function requestContentScriptInjection(file) {
+  return new Promise((resolve, reject) => {
+    const id = 'inject_script_' + Date.now() + '_' + Math.random();
+    const timeoutId = setTimeout(() => {
+      window.removeEventListener('message', onResponse);
+      reject(new Error('timed out waiting for the injector'));
+    }, 10000);
+    function onResponse(event) {
+      if (event.source !== window || event.data?.from !== 'BESTIARY_EXTENSION' || event.data.id !== id) return;
+      clearTimeout(timeoutId);
+      window.removeEventListener('message', onResponse);
+      if (event.data.response?.success) resolve();
+      else reject(new Error(event.data.response?.error || 'injection failed'));
+    }
+    window.addEventListener('message', onResponse);
+    window.postMessage({ from: 'BESTIARY_CLIENT', id, message: { action: 'injectContentScript', file } }, '*');
+  });
+}
+
+function ensureContentScript({ file, global }) {
+  if (window[global]) return Promise.resolve();
+  if (!onDemandScriptRequests.has(file)) {
+    onDemandScriptRequests.set(file, (async () => {
+      await requestContentScriptInjection(file);
+      // The script element has loaded; give the IIFE a moment to publish its global
+      for (let attempt = 0; attempt < 20 && !window[global]; attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      if (!window[global]) throw new Error('window.' + global + ' missing after loading ' + file);
+    })().catch((error) => {
+      onDemandScriptRequests.delete(file);
+      throw error;
+    }));
+  }
+  return onDemandScriptRequests.get(file);
+}
+
+async function ensureModScripts(modName) {
+  const dependencies = MOD_SCRIPT_DEPENDENCIES[modName];
+  if (!dependencies) return;
+  for (const dependency of dependencies) {
+    try {
+      await ensureContentScript(dependency);
+    } catch (error) {
+      console.error('[Local Mods] Could not load ' + dependency.file + ' for ' + modName + ':', error);
+    }
+  }
+}
+
 async function executeLocalMod(modNameOrObject, forceExecution = false) {
   // Handle both string (mod name) and object (mod object) parameters
   const isModObject = typeof modNameOrObject === 'object' && modNameOrObject !== null;
@@ -1053,6 +1107,8 @@ async function executeLocalMod(modNameOrObject, forceExecution = false) {
   if (!mod.enabled && !forceExecution) {
     return null;
   }
+
+  await ensureModScripts(modName);
 
   let content = null;
   

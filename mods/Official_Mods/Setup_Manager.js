@@ -1430,98 +1430,18 @@ function createSetupEmptyEquipmentPlaceholder(sizePx = SETUP_MANAGER_EQUIPMENT_P
 }
 
 const SETUP_MANAGER_TOAST_DURATION = 5000;
-const SETUP_MANAGER_TOAST_CONTAINER_ID = 'setup-manager-toast-container';
 
-function formatSetupManagerToastMessage(message, type = 'info') {
-  const trimmed = String(message ?? '').trim();
-  if (!trimmed) return trimmed;
-  if (/[.!?…]$/.test(trimmed)) return trimmed;
-
-  if (type === 'success') return `${trimmed}!`;
-  if (type === 'error' || type === 'warning' || type === 'info') return `${trimmed}.`;
-  return `${trimmed}.`;
-}
-
-function getSetupManagerToastContainer() {
-  if (typeof document === 'undefined') return null;
-
-  let container = document.getElementById(SETUP_MANAGER_TOAST_CONTAINER_ID);
-  if (!container) {
-    container = document.createElement('div');
-    container.id = SETUP_MANAGER_TOAST_CONTAINER_ID;
-    container.style.cssText = 'position: fixed; z-index: 9999; inset: 16px 16px 64px; pointer-events: none;';
-    document.body.appendChild(container);
-  }
-  return container;
-}
-
-function updateSetupManagerToastPositions(container) {
-  if (!container) return;
-
-  container.querySelectorAll('.setup-manager-toast-item').forEach((toast, index) => {
-    toast.style.transform = `translateY(-${index * 46}px)`;
+function showSetupManagerToast(message, options = {}) {
+  window.BAToast?.show({
+    mod: t('mods.setupManager.modName'),
+    message,
+    type: options.type,
+    duration: typeof options.duration === 'number' && options.duration > 0 ? options.duration : SETUP_MANAGER_TOAST_DURATION
   });
 }
 
-function showSetupManagerToast(message, options = {}) {
-  const safeMsg = message != null && message !== '' ? String(message).replace(/</g, '&lt;') : '';
-  const duration = typeof options.duration === 'number' && options.duration > 0
-    ? options.duration
-    : SETUP_MANAGER_TOAST_DURATION;
-
-  try {
-    const container = getSetupManagerToastContainer();
-    if (!container) return;
-
-    const existingToasts = container.querySelectorAll('.setup-manager-toast-item');
-    const stackOffset = existingToasts.length * 46;
-
-    const flexContainer = document.createElement('div');
-    flexContainer.className = 'setup-manager-toast-item';
-    flexContainer.style.cssText = `display: flex; position: absolute; transition: 230ms cubic-bezier(0.21, 1.02, 0.73, 1); transform: translateY(-${stackOffset}px); bottom: 0px; right: 0px; justify-content: flex-end; pointer-events: none; width: max-content; max-width: 100%;`;
-
-    const toast = document.createElement('button');
-    toast.type = 'button';
-    toast.className = 'non-dismissable-dialogs shadow-lg animate-in fade-in zoom-in-95 slide-in-from-top lg:slide-in-from-bottom';
-    toast.style.pointerEvents = 'auto';
-
-    const widgetTop = document.createElement('div');
-    widgetTop.className = 'widget-top h-2.5';
-
-    const widgetBottom = document.createElement('div');
-    widgetBottom.className = 'widget-bottom pixel-font-16 flex items-center gap-2 px-2 py-1 text-whiteHighlight';
-
-    const messageDiv = document.createElement('div');
-    messageDiv.className = 'text-left text-whiteRegular';
-    messageDiv.style.flex = '1 1 auto';
-    messageDiv.style.color = '#ffffff';
-    if (safeMsg.indexOf('\n') !== -1) {
-      messageDiv.style.whiteSpace = 'pre-line';
-    }
-    messageDiv.textContent = safeMsg;
-
-    widgetBottom.appendChild(messageDiv);
-    toast.appendChild(widgetTop);
-    toast.appendChild(widgetBottom);
-    flexContainer.appendChild(toast);
-    container.appendChild(flexContainer);
-
-    const removeToast = () => {
-      if (flexContainer.parentNode) {
-        flexContainer.parentNode.removeChild(flexContainer);
-        updateSetupManagerToastPositions(container);
-      }
-    };
-
-    toast.addEventListener('click', removeToast);
-    setTimeout(removeToast, duration);
-  } catch (error) {
-    console.warn('[Setup Manager] showSetupManagerToast:', error);
-  }
-}
-
 function showNotification(message, type = 'info', duration = SETUP_MANAGER_TOAST_DURATION) {
-  showSetupManagerToast(formatSetupManagerToastMessage(message, type), { duration });
+  showSetupManagerToast(message, { duration, type });
 }
 
 // Create a styled button for actions
@@ -3371,7 +3291,7 @@ function createSetupManagerButton() {
     const button = api.ui.addButton({
       id: BUTTON_ID,
       text: t('mods.setupManager.setupManager'),
-      tooltip: t('mods.setupManager.setupManager'),
+      tooltip: t('mods.setupManager.buttonTooltip'),
       modId: MOD_ID,
       primary: false,
       onClick: showSetupManagerModal
@@ -3448,10 +3368,7 @@ function cleanup() {
 
   cleanupMapShortcuts();
 
-  const toastContainer = document.getElementById(SETUP_MANAGER_TOAST_CONTAINER_ID);
-  if (toastContainer?.parentNode) {
-    toastContainer.parentNode.removeChild(toastContainer);
-  }
+  window.BAToast?.clearMod(t('mods.setupManager.modName'));
 }
 
 // Export functionality

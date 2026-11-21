@@ -1,11 +1,14 @@
 /**
  * Popup Script for Bestiary Arena Mod Loader
- * 
+ *
  * IMPORTANT: When adding a new mod, update the static mod lists in this file!
- * Popup cannot load ES6 modules, so we maintain static lists that must be kept in sync with:
+ * This file keeps its own copy of the mod lists (it does not import content/mod-registry.js: an import
+ * could not be verified on every supported browser, Orion/iOS included), so they must be kept in sync with:
  * - content/mod-registry.js (the source of truth)
- * 
+ * tools/check-mod-lists.mjs (part of tools/check-all.mjs) fails when a list drifts.
+ *
  * Search for "kept in sync with mod-registry.js" to find the lists to update.
+ * Mod descriptions are NOT in this file: they live in assets/locales/*.json under popup.modDescriptions.
  */
 
 // =============================================================================
@@ -54,50 +57,6 @@ const POPUP_LAYOUT_CONFIG = {
 };
 
 const POPUP_LAYOUT_MAX_RETRIES = 12;
-
-// Fallback descriptions for mods (aligned with README.md; keys must match getModDisplayName() exactly)
-const modDescriptions = {
-  'Bestiary Automator': 'Automates stamina, rewards, Day Care, and other routine gameplay.',
-  'Board Analyzer': 'Simulates board setups to compare strategies and performance.',
-  'Custom Display': 'Performance Mode and map grid overlay for clearer planning.',
-  'Hero Editor': 'Edit monster stats and gear in-game; save and load test setups.',
-  'Highscore Improvements': 'Richer highscores with extra stats, sorting, and room breakdowns.',
-  'Setup Manager': 'Save, load, and manage named team setups per map.',
-  'Team Copier': 'Share setups as JSON or links, with seeds and recent history.',
-  'Tick Tracker': 'Tracks session ticks (optional ms) with history and copy tools.',
-  'Turbo Mode': 'Speeds up gameplay with custom multipliers and tick display.',
-  'Usage List': 'Creature and equipment usage tiers from each map\'s saved Auto-setup.',
-  'Battle Helper': 'Load another player\'s arsenal into sandbox; restore in one click.',
-  'Autoseller': 'Sells or squeezes creatures by gene thresholds with session stats.',
-  'Autoscroller': 'Auto-uses summon scrolls to hunt targets with tiers and stop rules.',
-  'Better Analytics': 'Impact DPS plus sandbox units, battle log, filters, and fight speed.',
-  'Better Bestiary': 'Bulk-sell duplicates for species you already keep shiny or awakened.',
-  'Better Boosted Maps': 'Farms daily boosted maps with mod coordination and setups.',
-  'Better Cauldron': 'Search and filter Monstrous Cauldron monsters, including by rarity.',
-  'Better Daycare': 'Autohandles Daycare level-ups/ejections and fills slots from a queue.',
-  'Better Exaltation Chest': 'Auto-open chests, filter gear, and disenchant with dust tracking.',
-  'Better Forge': 'Arsenal tools with batch disenchant, search, filters, and dust stats.',
-  'Better Highscores': 'Live tick and rank boards for the current map with medal styling.',
-  'Better Hy\'genie': 'Smarter Hy\'genie fusion UI with quantity inputs and ratios.',
-  'Better Rune Recycler': 'Batch-recycles runes with validation and gold/stat tracking.',
-  'Better Setups': 'Labeled setups (Farm, Speedrun, etc.) with UI and Configurator support.',
-  'Better Tasker': 'Auto-accepts quests and navigates maps; pauses when rewards are ready.',
-  'Better Teleporter': 'Improves the in-game teleporter map selection dialog.',
-  'Better Yasir': 'Bulk buy and sell at Yasir with live prices and confirmations.',
-  'Cyclopedia': 'Monster and gear databases, profiles, season ranks, and RunTracker.',
-  'Dice Roller': 'Auto-rolls dice until your target stats are reached.',
-  'Depot Manager': 'Depot rows, favorites, and quick send-to-depot from the bestiary.',
-  'Challenges': 'Random challenge runs with scoring, leaderboards, and replay sharing.',
-  'Guilds': 'Guilds with roles, encrypted chat, invites, and a browser.',
-  'Hunt Analyzer': 'Autoplay session stats for gold, dust, drops, and export.',
-  'Raid Hunter': 'Detects and joins raids with setup, autoplay, stamina, and queues.',
-  'Manual Runner': 'Repeats manual runs until win, S+, or max floor; stats and replays.',
-  'Stamina Optimizer': 'Starts or stops play at stamina limits; works with farming mods.',
-  'Awaken Tracker': 'Tracks awaken gene progress per map with live deltas and pause-on-cap.',
-  'Quests': 'Quest tracking, NPC dialogs, items, and synced progress.',
-  'VIP List': 'Favorite players with profiles, sortable stats, and Cyclopedia links.',
-  'Map Editor': 'Experimental tile editor: swap sprites, hitboxes, and export quest JSON.'
-};
 
 const modAuthorProfileUrls = {
   'Better Bestiary': 'https://bestiaryarena.com/profile/megafuji',
@@ -150,6 +109,7 @@ const hiddenMods = [
   'welcome.js',
   'equipment-database.js',
   'tool-runs.js',
+  'wiki-export-loader.js',
   'maps-database.js',
   'equipment-lua-export.js',
   'creature-lua-export.js',
@@ -1498,11 +1458,7 @@ async function getModDescription(mod) {
   if (translatedDescription) {
     return translatedDescription;
   }
-  // Fallback to hardcoded English descriptions
-  if (modDescriptions[displayName]) {
-    return modDescriptions[displayName];
-  }
-  // Final fallback with translation
+  // Mod without a description entry in the locale
   const defaultDesc = getTranslationSync('popup.modDescriptions.defaultDescription', `Enhance your Bestiary Arena experience with ${displayName}.`);
   return defaultDesc.replace('{name}', displayName);
 }

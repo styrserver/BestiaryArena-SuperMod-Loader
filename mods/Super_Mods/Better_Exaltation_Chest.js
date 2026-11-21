@@ -460,19 +460,6 @@
   }
   
   /**
-   * Gets player context snapshot (using getSnapshot() for stable state)
-   * @returns {object|null} Player context snapshot or null if unavailable
-   */
-  function getPlayerContextSnapshot() {
-    try {
-      return globalThis.state?.player?.getSnapshot()?.context || null;
-    } catch (error) {
-      console.warn('[Better Exaltation Chest] Error getting player context snapshot:', error);
-      return null;
-    }
-  }
-
-  /**
    * Reads current dust from player snapshot (inventory first — context.dust is often 0).
    * Matches updateLocalStateAfterDisenchant read order.
    */
@@ -2249,117 +2236,7 @@
     // No restoration needed since we don't modify the original modal anymore
   }
   
-  // Disable modal's click-outside behavior temporarily
-  function disableModalClickOutside(modal) {
-    try {
-      // Find the modal overlay (usually a sibling element)
-      const modalOverlay = modal.previousElementSibling || modal.nextElementSibling;
-      if (modalOverlay && modalOverlay.classList.contains('fixed') && modalOverlay.classList.contains('inset-0')) {
-        // Store original click handler
-        modalOverlay._originalClickHandler = modalOverlay.onclick;
-        // Disable click handler
-        modalOverlay.onclick = null;
-        modalOverlay.style.pointerEvents = 'none';
-        console.log('[Better Exaltation Chest] Modal click-outside behavior disabled');
-      }
-      
-      // Add global outside-interceptor to prevent modal closing when interacting with our panel.
-      // Radix dialogs usually dismiss on pointer/focus outside events, not only click.
-      const globalClickInterceptor = (event) => {
-        const target = event.target;
-        const settingsPanel = document.getElementById('better-exaltation-settings-panel');
-        
-        // If click is on our settings panel or its children, prevent modal closing
-        if (settingsPanel && (target === settingsPanel || settingsPanel.contains(target))) {
-          if (typeof event.stopImmediatePropagation === 'function') {
-            event.stopImmediatePropagation();
-          }
-          event.stopPropagation();
-          event.preventDefault();
-          console.log(`[Better Exaltation Chest] ${event.type} on settings panel intercepted`);
-          return false;
-        }
-      };
-      
-      // Store reference for cleanup
-      modal._globalClickInterceptor = globalClickInterceptor;
-      modal._globalClickInterceptorKeys = [
-        addManagedEventListener(document, 'pointerdown', globalClickInterceptor, true),
-        addManagedEventListener(document, 'click', globalClickInterceptor, true),
-        addManagedEventListener(document, 'mousedown', globalClickInterceptor, true),
-        addManagedEventListener(document, 'focusin', globalClickInterceptor, true)
-      ];
-
-      // Radix dialogs dispatch cancellable custom outside events on dialog content.
-      // Cancelling these is the most reliable way to keep the modal open when a
-      // detached settings panel is clicked/focused.
-      const radixOutsideInterceptor = (event) => {
-        const settingsPanel = document.getElementById('better-exaltation-settings-panel');
-        const originalTarget = event?.detail?.originalEvent?.target || event.target;
-        if (settingsPanel && originalTarget && (originalTarget === settingsPanel || settingsPanel.contains(originalTarget))) {
-          if (typeof event.stopImmediatePropagation === 'function') {
-            event.stopImmediatePropagation();
-          }
-          event.stopPropagation();
-          event.preventDefault();
-          console.log(`[Better Exaltation Chest] ${event.type} prevented for settings panel interaction`);
-          return false;
-        }
-      };
-
-      modal._radixOutsideInterceptor = radixOutsideInterceptor;
-      modal._radixOutsideInterceptorKeys = [
-        addManagedEventListener(modal, 'pointerdownoutside', radixOutsideInterceptor, true),
-        addManagedEventListener(modal, 'focusoutside', radixOutsideInterceptor, true),
-        addManagedEventListener(modal, 'interactoutside', radixOutsideInterceptor, true)
-      ];
-      
-    } catch (error) {
-      console.warn('[Better Exaltation Chest] Could not disable modal click-outside:', error);
-    }
-  }
   
-  // Re-enable modal's click-outside behavior
-  function enableModalClickOutside(modal) {
-    try {
-      // Remove Radix outside-event interceptor
-      if (modal._radixOutsideInterceptor) {
-        if (modal._radixOutsideInterceptorKeys) {
-          modal._radixOutsideInterceptorKeys.forEach(key => {
-            removeManagedEventListener(key);
-          });
-          delete modal._radixOutsideInterceptorKeys;
-        }
-        delete modal._radixOutsideInterceptor;
-        console.log('[Better Exaltation Chest] Radix outside-event interceptor removed');
-      }
-
-      // Remove global click interceptor
-      if (modal._globalClickInterceptor) {
-        if (modal._globalClickInterceptorKeys) {
-          modal._globalClickInterceptorKeys.forEach(key => {
-            removeManagedEventListener(key);
-          });
-          delete modal._globalClickInterceptorKeys;
-        }
-        delete modal._globalClickInterceptor;
-        console.log('[Better Exaltation Chest] Global click interceptor removed');
-      }
-      
-      // Find the modal overlay (usually a sibling element)
-      const modalOverlay = modal.previousElementSibling || modal.nextElementSibling;
-      if (modalOverlay && modalOverlay.classList.contains('fixed') && modalOverlay.classList.contains('inset-0')) {
-        // Restore original click handler
-        if (modalOverlay._originalClickHandler) {
-          modalOverlay.onclick = modalOverlay._originalClickHandler;
-        }
-        modalOverlay.style.pointerEvents = '';
-        console.log('[Better Exaltation Chest] Modal click-outside behavior restored');
-      }
-    } catch (error) {
-      console.warn('[Better Exaltation Chest] Could not restore modal click-outside:', error);
-    }
-  }
   
   // Open Exaltation Settings Panel
   function openExaltationSettingsPanel() {

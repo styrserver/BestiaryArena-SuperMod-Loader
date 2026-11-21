@@ -28,19 +28,16 @@ function isWelcomeLocaleReady() {
     return false;
   }
 }
-console.log('Welcome mod initializing...');
+
+function escapeHtml(text) {
+  return String(text).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+}
 
 // =======================
 // 1. Configuration
 // =======================
 
-const defaultConfig = {
-  enabled: true,
-  showWelcome: true
-};
-
-// Initialize with saved config or defaults
-const config = Object.assign({}, defaultConfig, context.config);
+const config = Object.assign({ showWelcome: true }, context.config);
 
 const WELCOME_MODAL_SIZE = {
   width: 700,
@@ -50,25 +47,31 @@ const WELCOME_MODAL_SIZE = {
   minHeight: 300
 };
 
+const ASSET_BASE = 'https://bestiaryarena.com/assets/icons/';
 const WELCOME_ASSETS = {
   logo: 'https://bestiaryarena.com/assets/logo.png',
-  shinyStar: 'https://bestiaryarena.com/assets/icons/shiny-star.png',
-  spellbook: 'https://bestiaryarena.com/assets/icons/spellbook.png',
-  starAwaken: 'https://bestiaryarena.com/assets/icons/star-tier-awaken.png',
-  chat: 'https://bestiaryarena.com/assets/icons/chat.png',
-  chest: 'https://bestiaryarena.com/assets/icons/exaltation-chest.png',
-  quest: 'https://bestiaryarena.com/assets/icons/quest.png',
-  premium: 'https://bestiaryarena.com/assets/icons/premium.png',
-  grade: 'https://bestiaryarena.com/assets/icons/grade.png',
-  starTier: 'https://bestiaryarena.com/assets/icons/star-tier.png',
-  stamina: 'https://bestiaryarena.com/assets/icons/stamina.png'
+  shinyStar: `${ASSET_BASE}shiny-star.png`,
+  spellbook: `${ASSET_BASE}spellbook.png`,
+  starAwaken: `${ASSET_BASE}star-tier-awaken.png`,
+  chat: `${ASSET_BASE}chat.png`,
+  chest: `${ASSET_BASE}exaltation-chest.png`,
+  quest: `${ASSET_BASE}quest.png`,
+  premium: `${ASSET_BASE}premium.png`,
+  grade: `${ASSET_BASE}grade.png`,
+  starTier: `${ASSET_BASE}star-tier.png`,
+  stamina: `${ASSET_BASE}stamina.png`
 };
 
-function welcomeInlineIcon(src, { size = 16, alt = '' } = {}) {
-  return `<img src="${src}" alt="${alt}" class="pixelated welcome-inline-icon" style="display:inline-block;width:${size}px;height:${size}px;vertical-align:-2px;margin-right:4px;">`;
-}
-
+const WELCOME_FRAME_URL = 'https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png';
+const WELCOME_BG_URL = 'https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png';
+const WELCOME_DIALOG_SELECTOR = 'div[role="dialog"][data-welcome-dialog="1"]';
+const WELCOME_ENABLED_KEY = 'welcome-enabled';
+const LAST_SEEN_VERSION_KEY = 'ba-last-seen-version';
 const MOD_LOAD_FALLBACK_DELAY = 15000;
+
+function welcomeInlineIcon(src, { size = 16, alt = '' } = {}) {
+  return `<img src="${src}" alt="${alt}" class="pixelated welcome-inline-icon" style="width:${size}px;height:${size}px;">`;
+}
 
 // =======================
 // 2. Global State
@@ -78,327 +81,15 @@ let loadingToast = null;
 let loadingCompleted = false;
 let modsLoaded = false;
 let modLoadingObserver = null;
-let modalAborted = false;
 let modLoadingFallbackTimer = null;
-let activeTimeouts = new Set();
-let activeEventListeners = new Map();
 let currentModal = null;
+let welcomeEscHandler = null;
 let welcomeModalLayoutCleanup = null;
+const activeTimeouts = new Set();
+const activeEventListeners = [];
 
 // =======================
-// 3. Modal Conflict Helpers
-// =======================
-
-function getModalState(body) {
-  try {
-    if (!body) return { isClean: true, hasModals: false };
-    
-    const hasScrollLock = body.getAttribute('data-scroll-locked') === '1';
-    const hasPointerEvents = body.style.pointerEvents === 'none';
-    const hasCheckeredClass = body.classList.contains('checkered');
-    const hasWideClass = body.classList.contains('w-full-even-down');
-    
-    // Clean state: only "checkered w-full-even-down" with empty style
-    const isClean = hasCheckeredClass && hasWideClass && !hasScrollLock && !hasPointerEvents;
-    const hasModals = hasScrollLock || hasPointerEvents;
-    
-    return { isClean, hasModals, hasScrollLock, hasPointerEvents };
-  } catch (error) {
-    console.warn('[Welcome] Error checking modal state:', error);
-    return { isClean: true, hasModals: false };
-  }
-}
-
-async function tryCloseModalsAndCheck() {
-  try {
-    const body = document.body;
-    if (!body) return false;
-    
-    // Get initial modal state
-    const initialState = getModalState(body);
-    
-    // If it's already clean, no need to close anything
-    if (initialState.isClean) {
-      return false;
-    }
-    
-    // If there are modals, try a single ESC press
-    if (initialState.hasModals) {
-      console.log('[Welcome] Attempting to close modals with single ESC press');
-      
-      // Single ESC press to close any open modals
-      document.dispatchEvent(new KeyboardEvent('keydown', { 
-        key: 'Escape', 
-        keyCode: 27, 
-        which: 27, 
-        bubbles: true 
-      }));
-      
-      // Wait for ESC press to take effect
-      await new Promise(resolve => setTimeout(resolve, 100));
-      
-      // Re-check after ESC press
-      const afterEscState = getModalState(body);
-      
-      if (afterEscState.isClean) {
-        console.log('[Welcome] Modal successfully closed with ESC press');
-        return false; // No modals open now
-      } else {
-        console.log('[Welcome] Modal still open after ESC press');
-        return true; // Still has modals open
-      }
-    }
-    
-    return false; // No modals detected
-  } catch (error) {
-    console.warn('[Welcome] Error trying to close modals:', error);
-    return false; // Default to allowing modal if we can't check
-  }
-}
-
-// =======================
-// 4. User Preferences & Extension API
-// =======================
-
-async function shouldShowWelcome() {
-  try {
-    // Simply check the welcome-enabled setting
-    let welcomeEnabledRaw;
-    
-    if (window.browserAPI && window.browserAPI.storage && window.browserAPI.storage.local) {
-      try {
-        const storageData = await new Promise(resolve => {
-          window.browserAPI.storage.local.get(['welcome-enabled'], resolve);
-        });
-        welcomeEnabledRaw = storageData['welcome-enabled'];
-        console.log('[Welcome Debug] Using extension storage');
-      } catch (storageError) {
-        console.warn('[Welcome Debug] Extension storage failed, using localStorage:', storageError);
-        welcomeEnabledRaw = localStorage.getItem('welcome-enabled');
-      }
-    } else {
-      welcomeEnabledRaw = localStorage.getItem('welcome-enabled');
-      console.log('[Welcome Debug] Using localStorage');
-    }
-    
-    const welcomeEnabled = welcomeEnabledRaw !== 'false'; // Default to true if not set
-    
-    console.log('[Welcome Debug] shouldShowWelcome - welcomeEnabledRaw:', welcomeEnabledRaw);
-    console.log('[Welcome Debug] shouldShowWelcome - welcomeEnabled:', welcomeEnabled);
-    
-    return welcomeEnabled;
-  } catch (error) {
-    console.warn('Could not check welcome preference:', error);
-    return true; // Default to showing welcome if we can't check
-  }
-}
-
-// Set the never show again preference
-async function setNeverShowAgain() {
-  try {
-    // Simply set welcome-enabled to false - this controls both the popup slider and welcome display
-    if (window.browserAPI && window.browserAPI.storage && window.browserAPI.storage.local) {
-      await new Promise(resolve => {
-        window.browserAPI.storage.local.set({
-          'welcome-enabled': 'false'
-        }, resolve);
-      });
-      console.log('Welcome page set to never show again and popup disabled (extension storage)');
-    } else {
-      localStorage.setItem('welcome-enabled', 'false');
-      console.log('Welcome page set to never show again and popup disabled (localStorage)');
-    }
-    
-    // Send message to popup via browser extension messaging
-    if (window.browserAPI && window.browserAPI.runtime) {
-      window.browserAPI.runtime.sendMessage({
-        action: 'disableWelcomeToggle'
-      }).catch(error => {
-        console.warn('Could not send message to popup:', error);
-      });
-    }
-    
-    // Also try window.postMessage as fallback
-    window.postMessage({
-      from: 'BESTIARY_WELCOME',
-      action: 'disableWelcomeToggle'
-    }, '*');
-  } catch (error) {
-    console.warn('Could not save welcome preference:', error);
-  }
-}
-
-// Get extension version dynamically
-async function getExtensionVersion() {
-  console.log('[Welcome] Getting extension version...');
-  try {
-    // Use the same message passing pattern as other mods
-    const response = await new Promise((resolve) => {
-      const messageId = `welcome_version_${Date.now()}_${Math.random()}`;
-      
-      // Set up response listener
-      const handleResponse = (event) => {
-        if (event.data && event.data.from === 'BESTIARY_EXTENSION' && event.data.id === messageId) {
-          window.removeEventListener('message', handleResponse);
-          resolve(event.data.response);
-        }
-      };
-      
-      window.addEventListener('message', handleResponse);
-      
-      // Send request to content script
-      window.postMessage({
-        from: 'BESTIARY_CLIENT',
-        id: messageId,
-        message: { action: 'getVersion' }
-      }, '*');
-      
-      // Timeout after 5 seconds
-      setTimeout(() => {
-        window.removeEventListener('message', handleResponse);
-        resolve({ success: false, error: 'Timeout' });
-      }, 5000);
-    });
-    
-    console.log('[Welcome] Version response:', response);
-    
-    if (response && response.success && response.version) {
-      return response.version;
-    }
-    
-    // If no version found, return unknown
-    console.log('[Welcome] No version found, returning unknown');
-    return 'unknown';
-  } catch (error) {
-    console.warn('[Welcome] Could not get extension version:', error);
-    return 'unknown';
-  }
-}
-
-// =======================
-// 4b. Update Detection
-// =======================
-
-const LAST_SEEN_VERSION_KEY = 'ba-last-seen-version';
-
-async function getStoredValue(key) {
-  if (window.browserAPI && window.browserAPI.storage && window.browserAPI.storage.local) {
-    try {
-      const storageData = await new Promise(resolve => {
-        window.browserAPI.storage.local.get([key], resolve);
-      });
-      return storageData[key];
-    } catch (error) {
-      console.warn(`[Welcome] Extension storage read failed for ${key}, falling back to localStorage:`, error);
-    }
-  }
-  try {
-    return localStorage.getItem(key) ?? undefined;
-  } catch (error) {
-    console.warn(`[Welcome] localStorage read failed for ${key}:`, error);
-    return undefined;
-  }
-}
-
-async function setStoredValue(key, value) {
-  if (window.browserAPI && window.browserAPI.storage && window.browserAPI.storage.local) {
-    try {
-      await new Promise(resolve => {
-        window.browserAPI.storage.local.set({ [key]: value }, resolve);
-      });
-      return;
-    } catch (error) {
-      console.warn(`[Welcome] Extension storage write failed for ${key}, falling back to localStorage:`, error);
-    }
-  }
-  try {
-    localStorage.setItem(key, value);
-  } catch (error) {
-    console.warn(`[Welcome] localStorage write failed for ${key}:`, error);
-  }
-}
-
-// Compares the currently running version against the last one we recorded,
-// shows an "Updated to vX.Y.Z" toast when they differ (including when no
-// version was recorded yet), and persists the new version either way.
-async function checkForVersionUpdate(currentVersion) {
-  if (!currentVersion || currentVersion === 'unknown') return;
-
-  try {
-    const lastSeenVersion = await getStoredValue(LAST_SEEN_VERSION_KEY);
-    console.log('[Welcome] Version check — last seen:', lastSeenVersion, 'current:', currentVersion);
-
-    if (lastSeenVersion !== currentVersion) {
-      createToast({
-        message: `<span style="color:#ffd166;">${wt('mods.welcome.updatedWord', 'Updated')}</span> ${wt('mods.welcome.updatedToVersion', 'to v{version}!', { version: currentVersion })}`,
-        type: 'success',
-        duration: 6000,
-        icon: WELCOME_ASSETS.logo
-      });
-    }
-
-    if (lastSeenVersion !== currentVersion) {
-      await setStoredValue(LAST_SEEN_VERSION_KEY, currentVersion);
-    }
-  } catch (error) {
-    console.warn('[Welcome] Could not check for version update:', error);
-  }
-}
-
-// Get mod counts dynamically
-async function getModCounts() {
-  console.log('[Welcome] Getting mod counts...');
-  try {
-    const response = await new Promise((resolve) => {
-      const messageId = `welcome_modcounts_${Date.now()}_${Math.random()}`;
-      
-      // Set up response listener
-      const handleResponse = (event) => {
-        if (event.data && event.data.from === 'BESTIARY_EXTENSION' && event.data.id === messageId) {
-          window.removeEventListener('message', handleResponse);
-          resolve(event.data.response);
-        }
-      };
-      
-      window.addEventListener('message', handleResponse);
-      
-      // Send request to content script
-      window.postMessage({
-        from: 'BESTIARY_CLIENT',
-        id: messageId,
-        message: { action: 'getModCounts' }
-      }, '*');
-      
-      // Timeout after 5 seconds
-      setTimeout(() => {
-        window.removeEventListener('message', handleResponse);
-        resolve({ success: false, error: 'Timeout' });
-      }, 5000);
-    });
-    
-    console.log('[Welcome] Mod counts response:', response);
-    
-    if (response && response.success && response.counts) {
-      return response.counts;
-    }
-    
-    // If API fails, throw error with details
-    if (response && response.error) {
-      throw new Error(`Background script error: ${response.error}`);
-    } else if (!response) {
-      throw new Error('No response from background script (timeout or message passing failure)');
-    } else {
-      throw new Error('Failed to get mod counts from background script');
-    }
-  } catch (error) {
-    console.error('[Welcome] Could not get mod counts:', error);
-    // Return null to indicate failure - welcome modal will handle gracefully
-    return null;
-  }
-}
-
-// =======================
-// 5. Lifecycle Tracking Helpers
+// 3. Lifecycle Tracking Helpers
 // =======================
 
 function trackTimeout(timeoutId) {
@@ -412,26 +103,156 @@ function clearTrackedTimeout(timeoutId) {
 }
 
 function trackEventListener(element, event, handler) {
-  const key = `${element === window ? 'window' : element.constructor.name}_${event}`;
-  if (!activeEventListeners.has(key)) {
-    activeEventListeners.set(key, []);
-  }
-  activeEventListeners.get(key).push({ element, event, handler });
+  activeEventListeners.push({ element, event, handler });
   element.addEventListener(event, handler);
 }
 
 function removeTrackedEventListener(element, event, handler) {
-  const key = `${element === window ? 'window' : element.constructor.name}_${event}`;
-  const listeners = activeEventListeners.get(key);
-  if (listeners) {
-    const index = listeners.findIndex(l => l.handler === handler);
-    if (index !== -1) {
-      listeners.splice(index, 1);
-      element.removeEventListener(event, handler);
-      if (listeners.length === 0) {
-        activeEventListeners.delete(key);
-      }
+  const index = activeEventListeners.findIndex((l) => l.element === element && l.event === event && l.handler === handler);
+  if (index === -1) return;
+  activeEventListeners.splice(index, 1);
+  element.removeEventListener(event, handler);
+}
+
+// =======================
+// 4. Extension Messaging & Storage
+// =======================
+
+// One request/response round trip to the content script. Always resolves; on
+// timeout the response is { success: false, error: 'Timeout' }.
+function requestExtension(action, timeoutMs = 5000) {
+  return new Promise((resolve) => {
+    const id = `welcome_${action}_${Date.now()}_${Math.random()}`;
+    let timer = null;
+    const finish = (response) => {
+      clearTimeout(timer);
+      window.removeEventListener('message', onMessage);
+      resolve(response);
+    };
+    const onMessage = (event) => {
+      const data = event.data;
+      if (data?.from === 'BESTIARY_EXTENSION' && data.id === id) finish(data.response);
+    };
+    window.addEventListener('message', onMessage);
+    timer = setTimeout(() => finish({ success: false, error: 'Timeout' }), timeoutMs);
+    window.postMessage({ from: 'BESTIARY_CLIENT', id, message: { action } }, '*');
+  });
+}
+
+async function getExtensionVersion() {
+  try {
+    const response = await requestExtension('getVersion');
+    return response?.success && response.version ? response.version : 'unknown';
+  } catch (error) {
+    console.warn('[Welcome] Could not get extension version:', error);
+    return 'unknown';
+  }
+}
+
+// Returns { official, super, ot } or null when the background script cannot be reached.
+async function getModCounts() {
+  const response = await requestExtension('getModCounts');
+  if (response?.success && response.counts) return response.counts;
+  console.error('[Welcome] Could not get mod counts:', response?.error || 'no response from background script');
+  return null;
+}
+
+async function getStoredValue(key) {
+  if (window.browserAPI?.storage?.local) {
+    try {
+      const data = await new Promise((resolve) => window.browserAPI.storage.local.get([key], resolve));
+      return data[key];
+    } catch (error) {
+      console.warn(`[Welcome] Extension storage read failed for ${key}, falling back to localStorage:`, error);
     }
+  }
+  try {
+    return localStorage.getItem(key) ?? undefined;
+  } catch (error) {
+    console.warn(`[Welcome] localStorage read failed for ${key}:`, error);
+    return undefined;
+  }
+}
+
+async function setStoredValue(key, value) {
+  if (window.browserAPI?.storage?.local) {
+    try {
+      await new Promise((resolve) => window.browserAPI.storage.local.set({ [key]: value }, resolve));
+      return;
+    } catch (error) {
+      console.warn(`[Welcome] Extension storage write failed for ${key}, falling back to localStorage:`, error);
+    }
+  }
+  try {
+    localStorage.setItem(key, value);
+  } catch (error) {
+    console.warn(`[Welcome] localStorage write failed for ${key}:`, error);
+  }
+}
+
+// Default to showing the welcome page when the preference is unset or unreadable.
+async function shouldShowWelcome() {
+  try {
+    return (await getStoredValue(WELCOME_ENABLED_KEY)) !== 'false';
+  } catch (error) {
+    console.warn('Could not check welcome preference:', error);
+    return true;
+  }
+}
+
+// 'welcome-enabled' controls both the popup slider and the welcome display.
+async function setNeverShowAgain() {
+  try {
+    await setStoredValue(WELCOME_ENABLED_KEY, 'false');
+    window.browserAPI?.runtime?.sendMessage?.({ action: 'disableWelcomeToggle' })?.catch?.((error) => {
+      console.warn('Could not send message to popup:', error);
+    });
+    window.postMessage({ from: 'BESTIARY_WELCOME', action: 'disableWelcomeToggle' }, '*');
+  } catch (error) {
+    console.warn('Could not save welcome preference:', error);
+  }
+}
+
+// Shows an "Updated to vX.Y.Z" toast when the running version differs from the last
+// recorded one (including when none was recorded yet), then records it.
+async function checkForVersionUpdate(currentVersion) {
+  if (!currentVersion || currentVersion === 'unknown') return;
+  try {
+    const lastSeenVersion = await getStoredValue(LAST_SEEN_VERSION_KEY);
+    if (lastSeenVersion === currentVersion) return;
+
+    createToast({
+      message: `<span style="color:#ffd166;">${wt('mods.welcome.updatedWord', 'Updated')}</span> ${escapeHtml(wt('mods.welcome.updatedToVersion', 'to v{version}!', { version: currentVersion }))}`,
+      type: 'success',
+      duration: 6000
+    });
+    await setStoredValue(LAST_SEEN_VERSION_KEY, currentVersion);
+  } catch (error) {
+    console.warn('[Welcome] Could not check for version update:', error);
+  }
+}
+
+// =======================
+// 5. Modal Conflict Helpers
+// =======================
+
+// The game marks open modals with a scroll lock and/or pointer-events:none on <body>.
+function bodyHasModals(body) {
+  return body.getAttribute('data-scroll-locked') === '1' || body.style.pointerEvents === 'none';
+}
+
+// Returns true when another modal is still open after one ESC press.
+async function tryCloseModalsAndCheck() {
+  try {
+    const body = document.body;
+    if (!body || !bodyHasModals(body)) return false;
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, which: 27, bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    return bodyHasModals(body);
+  } catch (error) {
+    console.warn('[Welcome] Error trying to close modals:', error);
+    return false; // Allow the welcome modal if we cannot tell
   }
 }
 
@@ -442,22 +263,15 @@ function removeTrackedEventListener(element, event, handler) {
 function isGameStateReadyForMods() {
   try {
     const state = globalThis.state;
-    if (!state?.player?.getSnapshot || !state?.board?.getSnapshot) {
-      return false;
-    }
-    const boardCtx = state.board.getSnapshot()?.context;
-    const playerCtx = state.player.getSnapshot()?.context;
-    return !!(boardCtx && playerCtx);
+    if (!state?.player?.getSnapshot || !state?.board?.getSnapshot) return false;
+    return !!(state.board.getSnapshot()?.context && state.player.getSnapshot()?.context);
   } catch {
     return false;
   }
 }
 
 function hasReactHydrationErrorForWelcome() {
-  return !!(
-    window.__BA_REACT_HYDRATION_ERROR__ ||
-    window.localModsAPI?.hasReactHydrationError?.()
-  );
+  return !!(window.__BA_REACT_HYDRATION_ERROR__ || window.localModsAPI?.hasReactHydrationError?.());
 }
 
 function clearModLoadingFallbackTimer() {
@@ -474,15 +288,13 @@ function scheduleModLoadingFallbackTimer() {
     if (loadingCompleted) return;
 
     if (window.localModsAPI?.isBatchExecuting?.()) {
-      console.log('[Welcome] Mod batch still running, extending fallback timer');
       scheduleModLoadingFallbackTimer();
       return;
     }
 
     if (window.localModsAPI?.wasCompletionSignalSent?.()) {
-      const errors = window.localModsAPI.getLastLoadErrors?.() || [];
       console.log('[Welcome] Completion signal sent but message missed — recovering');
-      handleModLoadingFinished(errors);
+      handleModLoadingFinished(window.localModsAPI.getLastLoadErrors?.() || []);
       return;
     }
 
@@ -491,62 +303,47 @@ function scheduleModLoadingFallbackTimer() {
   }, MOD_LOAD_FALLBACK_DELAY));
 }
 
-function onModBatchExecutionStarted() {
-  console.log('[Welcome] Mod batch execution started — arming fallback timer');
-  scheduleModLoadingFallbackTimer();
+// Extra failures the loader's own error list cannot know about. In relaxed-loader
+// mode they are only warnings.
+function collectCompletionErrors(errors, strictCompletion) {
+  const resolved = Array.isArray(errors) ? [...errors] : [];
+  if (resolved.length > 0) return resolved;
+
+  const problems = [];
+  if (!isGameStateReadyForMods()) {
+    const hasGameMods = window.localMods?.some((mod) => mod.enabled && !mod.name.startsWith('database/'));
+    if (hasGameMods) problems.push({ mod: 'loader', error: 'Game state not ready (board/player unavailable)' });
+  }
+  if (hasReactHydrationErrorForWelcome()) {
+    problems.push({ mod: 'loader', error: 'React hydration error detected (#418/#423)' });
+  }
+
+  if (!strictCompletion && problems.length) {
+    console.warn('[Welcome] Relaxed loader: non-fatal completion issues:', problems.map((p) => p.error).join('; '));
+    return [];
+  }
+  return problems;
 }
 
 async function handleModLoadingFinished(errors = []) {
-  console.log('[Welcome] handleModLoadingFinished called, errors:', errors);
-  console.log('[Welcome] loadingToast exists:', !!loadingToast);
-  console.log('[Welcome] loadingCompleted:', loadingCompleted);
-  
-  // Prevent duplicate processing
-  if (loadingCompleted) {
-    console.log('[Welcome] Loading already completed, skipping duplicate call');
-    return;
-  }
-  
+  if (loadingCompleted) return; // Duplicate signal (message + fallback timer)
+
   loadingCompleted = true;
   clearModLoadingFallbackTimer();
+  modLoadingObserver?.disconnect();
+  modLoadingObserver = null;
 
-  if (modLoadingObserver) {
-    modLoadingObserver.disconnect();
-    modLoadingObserver = null;
-  }
-
-  let resolvedErrors = Array.isArray(errors) ? [...errors] : [];
   const strictCompletion = window.BestiaryPlatform?.useStrictLoaderCompletion?.() ?? true;
-
-  if (strictCompletion && resolvedErrors.length === 0 && !isGameStateReadyForMods()) {
-    const hasGameMods = window.localMods?.some(mod => mod.enabled && !mod.name.startsWith('database/'));
-    if (hasGameMods) {
-      resolvedErrors.push({ mod: 'loader', error: 'Game state not ready (board/player unavailable)' });
-      console.warn('[Welcome] Mod batch reported success but game state is not ready — treating as load failure');
-    }
-  } else if (!strictCompletion && resolvedErrors.length === 0 && !isGameStateReadyForMods()) {
-    console.warn('[Welcome] Relaxed loader: game state not ready at completion (non-fatal)');
-  }
-
-  if (strictCompletion && resolvedErrors.length === 0 && hasReactHydrationErrorForWelcome()) {
-    resolvedErrors.push({ mod: 'loader', error: 'React hydration error detected (#418/#423)' });
-    console.warn('[Welcome] React hydration error detected — treating as load failure');
-  } else if (!strictCompletion && resolvedErrors.length === 0 && hasReactHydrationErrorForWelcome()) {
-    console.warn('[Welcome] Relaxed loader: hydration error at completion (non-fatal)');
-  }
-
-  const hasErrors = resolvedErrors.length > 0;
+  const resolvedErrors = collectCompletionErrors(errors, strictCompletion);
 
   loadingToast?.remove?.();
   loadingToast = null;
 
-  if (hasErrors) {
+  if (resolvedErrors.length > 0) {
     modsLoaded = false;
-    const incomingHadErrors = Array.isArray(errors) && errors.length > 0;
-    const failedModNames = resolvedErrors.map(e => e.mod || 'unknown').join(', ');
-    console.log('[Welcome] Mod loading had errors:', failedModNames);
-
-    if (!incomingHadErrors) {
+    console.log('[Welcome] Mod loading had errors:', resolvedErrors.map((e) => e.mod || 'unknown').join(', '));
+    // Errors the loader reported itself were already handled by the loader.
+    if (!(Array.isArray(errors) && errors.length > 0)) {
       window.BestiaryUIComponents?.handleLoaderLoadFailure?.(resolvedErrors);
     }
     return;
@@ -560,313 +357,216 @@ async function handleModLoadingFinished(errors = []) {
     createToast({
       message: `<span class="text-monster">${wt('mods.welcome.modsWord', 'Mods')}</span> ${wt('mods.welcome.loadedSuccessfully', 'loaded successfully!')}`,
       type: 'success',
-      duration: 5000,
-      icon: WELCOME_ASSETS.logo
+      duration: 5000
     });
-
-    console.log('[Welcome] Completion toast created successfully');
-
-    getExtensionVersion()
-      .then(version => checkForVersionUpdate(version))
-      .catch(error => console.warn('[Welcome] Could not resolve version for update check:', error));
-
-    handleCompletionModalClose('(completion toast)');
+    getExtensionVersion().then(checkForVersionUpdate);
   } catch (error) {
     console.error('[Welcome] Error creating completion toast:', error);
-    handleCompletionModalClose('(error fallback)');
   }
-}
-
-async function updateLoadingToComplete(errors = []) {
-  return handleModLoadingFinished(errors);
+  handleCompletionModalClose();
 }
 
 // =======================
-// 7. Layout Utilities & Modal Shell
+// 7. Modal Styles, Content & Layout
 // =======================
 
 function getWelcomeModalDimensions() {
   const pad = WELCOME_MODAL_SIZE.viewportPadding * 2;
   return {
-    width: Math.max(
-      WELCOME_MODAL_SIZE.minWidth,
-      Math.min(WELCOME_MODAL_SIZE.width, window.innerWidth - pad)
-    ),
-    height: Math.max(
-      WELCOME_MODAL_SIZE.minHeight,
-      Math.min(WELCOME_MODAL_SIZE.height, window.innerHeight - pad)
-    )
+    width: Math.max(WELCOME_MODAL_SIZE.minWidth, Math.min(WELCOME_MODAL_SIZE.width, window.innerWidth - pad)),
+    height: Math.max(WELCOME_MODAL_SIZE.minHeight, Math.min(WELCOME_MODAL_SIZE.height, window.innerHeight - pad))
   };
-}
-
-function getWelcomeOpenDialog() {
-  return document.querySelector('div[role="dialog"][data-welcome-dialog="1"]') ||
-    document.querySelector('div[role="dialog"][data-state="open"]') ||
-    document.querySelector('div[role="dialog"]');
 }
 
 function getWelcomeDialog(modalRef) {
   if (modalRef?.element?.isConnected) return modalRef.element;
   if (modalRef instanceof HTMLElement && modalRef.isConnected) return modalRef;
   if (currentModal?.element?.isConnected) return currentModal.element;
-  return getWelcomeOpenDialog();
+  return document.querySelector(WELCOME_DIALOG_SELECTOR) ||
+    document.querySelector('div[role="dialog"][data-state="open"]') ||
+    document.querySelector('div[role="dialog"]');
 }
 
-function ensureWelcomeScrollbarStyles() {
-  if (document.getElementById('welcome-modal-scrollbar-styles')) return;
+function ensureWelcomeStyles() {
+  if (document.getElementById('welcome-modal-styles')) return;
   const style = document.createElement('style');
-  style.id = 'welcome-modal-scrollbar-styles';
+  style.id = 'welcome-modal-styles';
   style.textContent = `
+    .welcome-modal-root {
+      display: flex; flex-direction: column; flex: 1 1 auto;
+      width: 100%; height: 100%; min-width: 0; min-height: 0;
+      box-sizing: border-box; overflow: hidden;
+    }
+    .welcome-main-panel {
+      display: flex; flex-direction: column; flex: 1 1 0;
+      min-width: 0; min-height: 0; box-sizing: border-box; overflow: hidden;
+      border: 6px solid transparent;
+      border-image: url("${WELCOME_FRAME_URL}") 6 fill stretch;
+    }
     .welcome-scroll-area {
-      scrollbar-width: thin !important;
-      scrollbar-color: #444 #222 !important;
+      display: flex; flex-direction: column; flex: 1 1 0;
+      width: 100%; min-width: 0; min-height: 0; box-sizing: border-box;
+      overflow-x: hidden; overflow-y: auto;
+      padding: clamp(8px, 2vw, 14px);
+      text-align: center; color: #a6adc8; line-height: 1.35; word-break: break-word;
+      background: url("${WELCOME_BG_URL}") repeat;
+      scrollbar-width: thin; scrollbar-color: #444 #222;
     }
-    .welcome-scroll-area::-webkit-scrollbar {
-      width: 10px !important;
-      background: #222 !important;
+    .welcome-scroll-area::-webkit-scrollbar { width: 10px; background: #222; }
+    .welcome-scroll-area::-webkit-scrollbar-thumb { background: #444; border: 2px solid #666; border-radius: 2px; }
+    .welcome-scroll-inner { margin: auto 0; width: 100%; display: flex; flex-direction: column; gap: 10px; }
+    .welcome-inline-icon { display: inline-block; vertical-align: -2px; margin-right: 4px; }
+
+    .welcome-hero { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 4px 0 2px; }
+    .welcome-hero h2 { display: flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap; margin: 0; font-size: 18px; line-height: 1.3; color: #e6e9f5; }
+    .welcome-hero h2 .welcome-inline-icon { margin: 0; }
+    .welcome-version {
+      font-size: 12px; line-height: 1; padding: 3px 7px; border-radius: 999px;
+      color: #ffd166; background: rgba(255,209,102,0.12); border: 1px solid rgba(255,209,102,0.35);
     }
-    .welcome-scroll-area::-webkit-scrollbar-thumb {
-      background: #444 !important;
-      border: 2px solid #666 !important;
-      border-radius: 2px !important;
-    }
+    .welcome-tagline { margin: 0; font-size: 14px; line-height: 1.4; }
+
+    .welcome-card { background: rgba(0,0,0,0.2); border-radius: 6px; padding: 10px 12px; box-sizing: border-box; }
+    .welcome-card h3 { display: flex; align-items: center; margin: 0 0 8px; font-size: 15px; text-align: left; }
+    .welcome-feature-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 6px 10px; text-align: left; }
     .welcome-feature-row {
-      display: flex;
-      align-items: flex-start;
-      gap: 4px;
-      margin: 0;
-      font-size: 14px;
-      line-height: 1.35;
+      display: flex; align-items: flex-start; gap: 6px; margin: 0;
+      padding: 5px 7px; border-radius: 4px; font-size: 14px; line-height: 1.35;
+      background: rgba(255,255,255,0.03);
     }
-    .welcome-feature-row .welcome-inline-icon {
-      flex-shrink: 0;
-      margin-top: 1px;
-      margin-right: 0;
+    .welcome-feature-row .welcome-inline-icon { flex-shrink: 0; margin: 1px 0 0; }
+    .welcome-feature-row strong { color: #e6e9f5; }
+
+    .welcome-notes { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
+    .welcome-note {
+      flex: 1 1 180px; min-width: 0; box-sizing: border-box; margin: 0;
+      padding: 8px 10px; border-radius: 6px; font-size: 14px; line-height: 1.4; text-align: left;
+      background: rgba(0,255,0,0.1); border: 1px solid rgba(0,255,0,0.3);
     }
+    .welcome-footer { margin: 0; font-size: 14px; line-height: 1.4; }
+    .welcome-footer-brand { margin: 4px 0 0; font-size: 13px; opacity: 0.7; }
   `;
   document.head.appendChild(style);
 }
 
+function buildWelcomeFeatures({ officialCount, superCount, otCount }) {
+  const t = wt;
+  return [
+    [WELCOME_ASSETS.spellbook, t('mods.welcome.originalModsLabel', '{count} Original Mods:', { count: officialCount }), t('mods.welcome.originalModsText', 'Automator, Board Analyzer, Highscores, tier lists, and more. <em>(6 on by default)</em>')],
+    [WELCOME_ASSETS.starAwaken, t('mods.welcome.superModsLabel', '{count} Super Mods:', { count: superCount }), t('mods.welcome.superModsText', 'Autoseller, Cyclopedia, Hunt Analyzer, Raid Hunter, and more. <em>(Mostly off &mdash; 3 on)</em>')],
+    [WELCOME_ASSETS.chat, t('mods.welcome.otModsLabel', '{count} OT Mods:', { count: otCount }), t('mods.welcome.otModsText', 'Challenges, Guilds, VIP List, Quests. <em>(Off by default)</em>')],
+    [WELCOME_ASSETS.chest, t('mods.welcome.backupsLabel', 'Backups:'), t('mods.welcome.backupsText', 'Import and export settings via Mod Settings.')],
+    [WELCOME_ASSETS.quest, t('mods.welcome.patchNotesLabel', 'Patch Notes:'), t('mods.welcome.patchNotesText', 'See what\'s new each version in the popup.')],
+    [WELCOME_ASSETS.premium, t('mods.welcome.popupLabel', 'Popup Controls:'), t('mods.welcome.popupText', 'Enable mods, add Gist scripts, manage extras.')],
+    [WELCOME_ASSETS.grade, t('mods.welcome.analyticsLabel', 'Analytics:'), t('mods.welcome.analyticsText', 'Hunt Analyzer, Run Tracker, Better Analytics, and more.')]
+  ];
+}
+
 function buildWelcomeModalContent({ officialCount, superCount, otCount, version }) {
-  ensureWelcomeScrollbarStyles();
+  ensureWelcomeStyles();
+
+  const featureRows = buildWelcomeFeatures({ officialCount, superCount, otCount })
+    .map(([icon, label, text]) => `
+      <p class="welcome-feature-row">
+        ${welcomeInlineIcon(icon)}
+        <span><strong>${label}</strong> ${text}</span>
+      </p>`)
+    .join('');
+
+  const versionBadge = version !== 'unknown' ? `<span class="welcome-version">v${escapeHtml(version)}</span>` : '';
+  const versionLabel = version !== 'unknown' ? ` v${escapeHtml(version)}` : '';
 
   const content = document.createElement('div');
   content.className = 'welcome-modal-root';
-  Object.assign(content.style, {
-    display: 'flex',
-    flexDirection: 'column',
-    height: '100%',
-    width: '100%',
-    minHeight: '0',
-    minWidth: '0',
-    flex: '1 1 auto',
-    boxSizing: 'border-box',
-    overflow: 'hidden'
-  });
-
-  const mainPanel = document.createElement('div');
-  mainPanel.className = 'welcome-main-panel';
-  Object.assign(mainPanel.style, {
-    display: 'flex',
-    flexDirection: 'column',
-    flex: '1 1 0',
-    minHeight: '0',
-    minWidth: '0',
-    height: 'auto',
-    boxSizing: 'border-box',
-    overflow: 'hidden',
-    border: '6px solid transparent',
-    borderImage: 'url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch'
-  });
-
-  const scrollArea = document.createElement('div');
-  scrollArea.className = 'welcome-scroll-area';
-  Object.assign(scrollArea.style, {
-    flex: '1 1 0',
-    minHeight: '0',
-    minWidth: '0',
-    width: '100%',
-    boxSizing: 'border-box',
-    display: 'flex',
-    flexDirection: 'column',
-    overflowX: 'hidden',
-    overflowY: 'auto',
-    padding: 'clamp(8px, 2vw, 14px)',
-    textAlign: 'center',
-    color: '#a6adc8',
-    lineHeight: '1.35',
-    background: "url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat",
-    wordBreak: 'break-word'
-  });
-
-  const versionLabel = version !== 'unknown' ? ` v${version}` : '';
-  const featureRow = (icon, label, text) => `
-    <p class="welcome-feature-row">
-      <img src="${icon}" alt="" class="pixelated welcome-inline-icon" width="16" height="16">
-      <span><strong>${label}</strong> ${text}</span>
-    </p>`;
-
-  scrollArea.innerHTML = `
-    <div class="welcome-scroll-inner" style="margin: auto 0; width: 100%;">
-    <div style="margin-bottom: 10px;">
-      <h2 style="color: #a6adc8; margin: 0 0 6px; font-size: 18px; line-height: 1.3;">
-        ${welcomeInlineIcon(WELCOME_ASSETS.logo, { size: 20, alt: 'Bestiary Arena' })}Bestiary Arena SuperMod Loader
-      </h2>
-      <p style="color: #a6adc8; margin: 0; font-size: 14px; line-height: 1.4;">
-        ${wt('mods.welcome.tagline', 'Powerful tools and improvements for a more efficient Bestiary Arena experience.')}
-      </p>
-    </div>
-    <div style="background: rgba(0,0,0,0.2); border-radius: 6px; padding: 10px 12px; margin-bottom: 10px; box-sizing: border-box;">
-      <h3 style="color: #a6adc8; margin: 0 0 8px; font-size: 15px; text-align: left;">
-        ${welcomeInlineIcon(WELCOME_ASSETS.shinyStar, { alt: 'Features' })}${wt('mods.welcome.whatsIncluded', 'What\'s Included')}
-      </h3>
-      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 4px 14px; text-align: left; color: #a6adc8;">
-        ${featureRow(WELCOME_ASSETS.spellbook, wt('mods.welcome.originalModsLabel', '{count} Original Mods:', { count: officialCount }), wt('mods.welcome.originalModsText', 'Automator, Board Analyzer, Highscores, tier lists, and more. <em>(6 on by default)</em>'))}
-        ${featureRow(WELCOME_ASSETS.starAwaken, wt('mods.welcome.superModsLabel', '{count} Super Mods:', { count: superCount }), wt('mods.welcome.superModsText', 'Autoseller, Cyclopedia, Hunt Analyzer, Raid Hunter, and more. <em>(Mostly off &mdash; 3 on)</em>'))}
-        ${featureRow(WELCOME_ASSETS.chat, wt('mods.welcome.otModsLabel', '{count} OT Mods:', { count: otCount }), wt('mods.welcome.otModsText', 'Challenges, Guilds, VIP List, Quests. <em>(Off by default)</em>'))}
-        ${featureRow(WELCOME_ASSETS.chest, wt('mods.welcome.backupsLabel', 'Backups:'), wt('mods.welcome.backupsText', 'Import and export settings via Mod Settings.'))}
-        ${featureRow(WELCOME_ASSETS.quest, wt('mods.welcome.patchNotesLabel', 'Patch Notes:'), wt('mods.welcome.patchNotesText', 'See what\'s new each version in the popup.'))}
-        ${featureRow(WELCOME_ASSETS.premium, wt('mods.welcome.popupLabel', 'Popup Controls:'), wt('mods.welcome.popupText', 'Enable mods, add Gist scripts, manage extras.'))}
-        ${featureRow(WELCOME_ASSETS.grade, wt('mods.welcome.analyticsLabel', 'Analytics:'), wt('mods.welcome.analyticsText', 'Hunt Analyzer, Run Tracker, Better Analytics, and more.'))}
+  content.innerHTML = `
+    <div class="welcome-main-panel">
+      <div class="welcome-scroll-area">
+        <div class="welcome-scroll-inner">
+          <div class="welcome-hero">
+            <h2>${welcomeInlineIcon(WELCOME_ASSETS.logo, { size: 24, alt: 'Bestiary Arena' })}Bestiary Arena SuperMod Loader ${versionBadge}</h2>
+            <p class="welcome-tagline">${wt('mods.welcome.tagline', 'Powerful tools and improvements for a more efficient Bestiary Arena experience.')}</p>
+          </div>
+          <div class="welcome-card">
+            <h3>${welcomeInlineIcon(WELCOME_ASSETS.shinyStar, { alt: 'Features' })}${wt('mods.welcome.whatsIncluded', 'What\'s Included')}</h3>
+            <div class="welcome-feature-grid">${featureRows}</div>
+          </div>
+          <div class="welcome-notes">
+            <p class="welcome-note">${welcomeInlineIcon(WELCOME_ASSETS.starTier, { alt: 'Approved' })}<strong>${wt('mods.welcome.safeTitle', 'Safe & Approved')}</strong> — ${wt('mods.welcome.safeText', 'Officially approved by Xandjiji. Single-player enhancement only.')}</p>
+            <p class="welcome-note">${welcomeInlineIcon(WELCOME_ASSETS.stamina, { alt: 'Tip' })}<strong>${wt('mods.welcome.tipTitle', 'Tip')}</strong> — ${wt('mods.welcome.tipText', 'Open the extension popup to toggle mods. Re-enable this welcome page from Extras anytime.')}</p>
+          </div>
+          <div>
+            <p class="welcome-footer">${welcomeInlineIcon(WELCOME_ASSETS.shinyStar)}${wt('mods.welcome.enjoy', 'Enjoy your enhanced Bestiary Arena experience!')}</p>
+            <p class="welcome-footer-brand">Bestiary Arena SuperMod Loader${versionLabel}</p>
+          </div>
+        </div>
       </div>
-    </div>
-    <div style="display: flex; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; min-width: 0;">
-      <div style="background: rgba(0,255,0,0.1); border: 1px solid rgba(0,255,0,0.3); border-radius: 6px; padding: 8px 10px; flex: 1 1 180px; min-width: 0; box-sizing: border-box;">
-        <p style="color: #a6adc8; margin: 0; font-size: 14px; line-height: 1.4; text-align: left;">
-          ${welcomeInlineIcon(WELCOME_ASSETS.starTier, { alt: 'Approved' })}<strong>${wt('mods.welcome.safeTitle', 'Safe & Approved')}</strong> — ${wt('mods.welcome.safeText', 'Officially approved by Xandjiji. Single-player enhancement only.')}
-        </p>
-      </div>
-      <div style="background: rgba(0,255,0,0.1); border: 1px solid rgba(0,255,0,0.3); border-radius: 6px; padding: 8px 10px; flex: 1 1 180px; min-width: 0; box-sizing: border-box;">
-        <p style="color: #a6adc8; margin: 0; font-size: 14px; line-height: 1.4; text-align: left;">
-          ${welcomeInlineIcon(WELCOME_ASSETS.stamina, { alt: 'Tip' })}<strong>${wt('mods.welcome.tipTitle', 'Tip')}</strong> — ${wt('mods.welcome.tipText', 'Open the extension popup to toggle mods. Re-enable this welcome page from Extras anytime.')}
-        </p>
-      </div>
-    </div>
-    <div style="color: #a6adc8; font-size: 14px; text-align: center;">
-      <p style="margin: 0 0 4px; line-height: 1.4;">
-        ${welcomeInlineIcon(WELCOME_ASSETS.shinyStar, { alt: '' })}${wt('mods.welcome.enjoy', 'Enjoy your enhanced Bestiary Arena experience!')}
-      </p>
-      <p style="font-size: 13px; opacity: 0.7; margin: 0;">Bestiary Arena SuperMod Loader${versionLabel}</p>
-    </div>
-    </div>
-  `;
-
-  mainPanel.appendChild(scrollArea);
-  content.appendChild(mainPanel);
-
+    </div>`;
   return content;
 }
 
-function applyWelcomeModalLayout(modalRef, contentRoot, dimensions) {
-  const dialog = getWelcomeDialog(modalRef);
-  if (!dialog) return;
+// Sizes the game's dialog shell (its own elements, so inline styles are needed to win
+// over the game's classes); the welcome content itself is styled by ensureWelcomeStyles().
+function applyWelcomeModalLayout(dialog, { width, height }) {
+  const maxHeight = window.innerHeight - WELCOME_MODAL_SIZE.viewportPadding * 2;
+  const setHeight = (px) => {
+    dialog.style.height = `${px}px`;
+    dialog.style.maxHeight = `${px}px`;
+  };
 
-  const { width, height } = dimensions;
-  dialog.style.width = `${width}px`;
-  dialog.style.minWidth = '0';
-  dialog.style.maxWidth = `${width}px`;
-  dialog.style.height = `${height}px`;
-  dialog.style.minHeight = '0';
-  dialog.style.maxHeight = `${height}px`;
-  dialog.style.boxSizing = 'border-box';
+  Object.assign(dialog.style, {
+    width: `${width}px`,
+    minWidth: '0',
+    maxWidth: `${width}px`,
+    minHeight: '0',
+    boxSizing: 'border-box'
+  });
+  setHeight(height);
   dialog.classList.remove('max-w-[300px]', 'w-full');
   dialog.setAttribute('data-welcome-dialog', '1');
 
   const innerWrapper = dialog.querySelector(':scope > div') || dialog.firstElementChild;
   if (innerWrapper) {
     Object.assign(innerWrapper.style, {
-      display: 'flex',
-      flexDirection: 'column',
-      height: '100%',
-      minHeight: '0',
-      flex: '1 1 0',
-      boxSizing: 'border-box'
+      display: 'flex', flexDirection: 'column', height: '100%', minHeight: '0', flex: '1 1 0', boxSizing: 'border-box'
     });
   }
 
-  const contentElem = dialog.querySelector('.widget-bottom');
-  if (contentElem) {
-    Object.assign(contentElem.style, {
-      flex: '1 1 auto',
-      minHeight: '0',
-      height: '100%',
-      overflowY: 'hidden',
-      overflowX: 'hidden',
-      display: 'flex',
-      flexDirection: 'column'
+  const body = dialog.querySelector('.widget-bottom');
+  if (body) {
+    Object.assign(body.style, {
+      flex: '1 1 auto', minHeight: '0', height: '100%', overflow: 'hidden', display: 'flex', flexDirection: 'column'
     });
   }
 
-  if (contentRoot) {
-    Object.assign(contentRoot.style, {
-      flex: '1 1 auto',
-      minHeight: '0',
-      minWidth: '0',
-      height: '100%',
-      maxHeight: 'none',
-      width: '100%',
-      boxSizing: 'border-box',
-      overflow: 'hidden',
-      display: 'flex',
-      flexDirection: 'column'
-    });
-  }
+  const footer = dialog.querySelector('.widget-bottom > .flex.justify-end.gap-2');
+  if (footer) footer.style.flexShrink = '0';
 
-  const mainPanel = dialog.querySelector('.welcome-main-panel');
-  if (mainPanel) {
-    Object.assign(mainPanel.style, {
-      flex: '1 1 0',
-      minHeight: '0',
-      minWidth: '0',
-      height: 'auto',
-      maxHeight: 'none',
-      overflow: 'hidden'
-    });
-  }
-
+  // Autofit: grow the dialog to fit its content so the scroll area needs no scrollbar,
+  // clamped to the viewport (beyond that it falls back to scrolling).
   const scrollArea = dialog.querySelector('.welcome-scroll-area');
   if (scrollArea) {
-    Object.assign(scrollArea.style, {
-      flex: '1 1 0',
-      minHeight: '0',
-      minWidth: '0',
-      width: '100%',
-      boxSizing: 'border-box',
-      display: 'flex',
-      flexDirection: 'column',
-      overflowX: 'hidden',
-      overflowY: 'auto'
-    });
-  }
-
-  const buttonFooter = dialog.querySelector('.widget-bottom > .flex.justify-end.gap-2');
-  if (buttonFooter) {
-    buttonFooter.style.flexShrink = '0';
-  }
-
-  // Autofit: grow the dialog to fit its content so the scroll area doesn't need a
-  // scrollbar, clamped to the viewport (below that, it falls back to scrolling).
-  if (scrollArea) {
-    const viewportPad = WELCOME_MODAL_SIZE.viewportPadding * 2;
-    const maxHeight = window.innerHeight - viewportPad;
     const overflow = scrollArea.scrollHeight - scrollArea.clientHeight;
-    if (overflow > 1 && height < maxHeight) {
-      const grownHeight = Math.min(maxHeight, height + overflow);
-      dialog.style.height = `${grownHeight}px`;
-      dialog.style.maxHeight = `${grownHeight}px`;
-    }
+    if (overflow > 1 && height < maxHeight) setHeight(Math.min(maxHeight, height + overflow));
   }
 }
 
-function setupWelcomeModalResponsiveLayout(modalRef, contentRoot) {
+function setupWelcomeModalResponsiveLayout(modalRef) {
   clearWelcomeModalLayoutCleanup();
-  const apply = () => applyWelcomeModalLayout(modalRef, contentRoot, getWelcomeModalDimensions());
-  requestAnimationFrame(() => apply());
-  const onResize = () => apply();
-  window.addEventListener('resize', onResize);
-  welcomeModalLayoutCleanup = () => {
-    window.removeEventListener('resize', onResize);
+
+  const onResize = () => {
+    // Resolve by our own marker only: once the welcome dialog is gone (closed by a
+    // button), stop instead of restyling whatever other dialog is open.
+    const dialog = document.querySelector(WELCOME_DIALOG_SELECTOR);
+    if (!dialog) return clearWelcomeModalLayoutCleanup();
+    applyWelcomeModalLayout(dialog, getWelcomeModalDimensions());
   };
+
+  requestAnimationFrame(() => {
+    const dialog = getWelcomeDialog(modalRef);
+    if (dialog) applyWelcomeModalLayout(dialog, getWelcomeModalDimensions());
+  });
+  window.addEventListener('resize', onResize);
+  welcomeModalLayoutCleanup = () => window.removeEventListener('resize', onResize);
 }
 
 function clearWelcomeModalLayoutCleanup() {
@@ -880,130 +580,31 @@ function clearWelcomeModalLayoutCleanup() {
 // 8. Toasts
 // =======================
 
-function createToast({ message, type = 'info', duration = 3000, icon = null }) {
-  // Get or create the main toast container
-  let mainContainer = document.getElementById('welcome-toast-container');
-  if (!mainContainer) {
-    mainContainer = document.createElement('div');
-    mainContainer.id = 'welcome-toast-container';
-    mainContainer.style.cssText = `
-      position: fixed;
-      z-index: 9999;
-      inset: 16px 16px 64px;
-      pointer-events: none;
-    `;
-    mainContainer.setAttribute('data-aria-hidden', 'true');
-    mainContainer.setAttribute('aria-hidden', 'true');
-    document.body.appendChild(mainContainer);
-  }
-  
-  // Count existing toasts to calculate stacking position
-  const existingToasts = mainContainer.querySelectorAll('.toast-item');
-  const stackOffset = existingToasts.length * 46; // 46px per toast
-  
-  // Create the flex container for this specific toast
-  const flexContainer = document.createElement('div');
-  flexContainer.className = 'toast-item';
-  flexContainer.style.cssText = `
-    left: 0px;
-    right: 0px;
-    display: flex;
-    position: absolute;
-    transition: 230ms cubic-bezier(0.21, 1.02, 0.73, 1);
-    transform: translateY(-${stackOffset}px);
-    bottom: 0px;
-    justify-content: flex-end;
-  `;
-  
-  // Create toast button with proper animation classes
-  const toast = document.createElement('button');
-  toast.className = 'non-dismissable-dialogs shadow-lg animate-in fade-in zoom-in-95 slide-in-from-top lg:slide-in-from-bottom';
-  
-  // Create widget structure to match game's toast style
-  const widgetTop = document.createElement('div');
-  widgetTop.className = 'widget-top h-2.5';
-  
-  const widgetBottom = document.createElement('div');
-  widgetBottom.className = 'widget-bottom pixel-font-16 flex items-center gap-2 px-2 py-1 text-whiteHighlight';
-  
-  // Add icon if provided
-  if (icon) {
-    const iconImg = document.createElement('img');
-    iconImg.alt = type;
-    iconImg.src = icon;
-    iconImg.className = 'pixelated';
-    iconImg.style.cssText = 'width: 16px; height: 16px;';
-    widgetBottom.appendChild(iconImg);
-  }
-  
-  // Add message
-  const messageDiv = document.createElement('div');
-  messageDiv.className = 'text-left';
-  messageDiv.innerHTML = message; // Use innerHTML to support HTML content like spans
-  widgetBottom.appendChild(messageDiv);
-  
-  // Assemble toast
-  toast.appendChild(widgetTop);
-  toast.appendChild(widgetBottom);
-  flexContainer.appendChild(toast);
-  mainContainer.appendChild(flexContainer);
-  
-  // Debug: Log toast creation
-  console.log('[Welcome] Toast created and added to DOM:', {
-    container: !!mainContainer,
-    stackOffset: stackOffset,
-    duration: duration,
-    totalToasts: existingToasts.length + 1
-  });
-  
-  // Auto-remove after duration (duration 0 = keep until manually removed)
-  if (duration > 0) {
-    const timeoutId = trackTimeout(setTimeout(() => {
-      if (flexContainer && flexContainer.parentNode) {
-        console.log('[Welcome] Auto-removing toast after', duration, 'ms');
-        flexContainer.parentNode.removeChild(flexContainer);
-        
-        // Update positions of remaining toasts
-        updateToastPositions(mainContainer);
-      }
-      activeTimeouts.delete(timeoutId);
-    }, duration));
-  }
-  
+// Toasts go through the shared stack (content/ba-toast.js). `message` is trusted HTML built here;
+// duration 0 = keep until removed. Returns { remove, setMessage(html) }.
+const getWelcomeToastMod = () => wt('mods.welcome.modName', 'SuperMod Loader');
+
+function htmlToNode(html) {
+  const template = document.createElement('template');
+  template.innerHTML = html;
+  return template.content;
+}
+
+function createToast({ message, type = 'info', duration = 3000 }) {
+  const handle = window.BAToast?.show({ mod: getWelcomeToastMod(), message: htmlToNode(message), type, duration });
   return {
-    element: flexContainer,
-    setMessage: (html) => {
-      messageDiv.innerHTML = html;
-    },
-    remove: () => {
-      if (flexContainer && flexContainer.parentNode) {
-        flexContainer.parentNode.removeChild(flexContainer);
-        updateToastPositions(mainContainer);
-      }
-    }
+    remove: () => handle?.remove(),
+    setMessage: (html) => handle?.update(htmlToNode(html))
   };
 }
 
-// Update positions of remaining toasts when one is removed
-function updateToastPositions(container) {
-  const toasts = container.querySelectorAll('.toast-item');
-  toasts.forEach((toast, index) => {
-    const offset = index * 46;
-    toast.style.transform = `translateY(-${offset}px)`;
-  });
-}
-
-// Show loading toast
 function showLoadingToast() {
-  console.log('[Welcome] showLoadingToast called');
-  
   try {
     const buildLoadingMessage = () => `<span class="text-monster">${wt('mods.welcome.loadingMods', 'Loading mods')}</span>...`;
     loadingToast = createToast({
       message: buildLoadingMessage(),
       type: 'loading',
-      duration: 0,
-      icon: WELCOME_ASSETS.logo
+      duration: 0
     });
 
     // Shown before the locale is guaranteed to be loaded: relabel once it arrives.
@@ -1014,131 +615,86 @@ function showLoadingToast() {
       };
       trackEventListener(document, 'bestiary-translations-loaded', relabelLoadingToast);
     }
-
-    console.log('[Welcome] Loading toast created:', !!loadingToast);
   } catch (error) {
     console.error('[Welcome] Error creating loading toast:', error);
   }
 }
 
 function hideLoadingToast() {
-  console.log('[Welcome] hideLoadingToast called');
-  console.log('[Welcome] loadingToast exists:', !!loadingToast);
-  console.log('[Welcome] loadingCompleted:', loadingCompleted);
-  
-  if (loadingToast && typeof loadingToast.remove === 'function') {
-    loadingToast.remove();
-    loadingToast = null;
-    console.log('[Welcome] Loading toast hidden successfully');
-  } else {
-    console.warn('[Welcome] Could not hide loading toast - invalid toast object');
-  }
-  
-  // If loading was completed but toast was closed, show welcome modal as fallback
-  if (loadingCompleted) {
-    trackTimeout(setTimeout(() => handleCompletionModalClose('(loading completed but toast was closed)'), 100));
-  }
+  loadingToast?.remove?.();
+  loadingToast = null;
+
+  // Loading finished but the toast was closed: show the welcome modal as fallback.
+  if (loadingCompleted) trackTimeout(setTimeout(handleCompletionModalClose, 100));
 }
 
 // =======================
 // 9. Welcome Modal
 // =======================
 
-async function handleCompletionModalClose(source = '') {
-  const shouldShow = await shouldShowWelcome();
-  if (shouldShow && config.showWelcome) {
-    console.log(`[Welcome] Showing welcome modal after completion modal ${source}`);
-    showWelcomeModal();
-  } else {
-    console.log('[Welcome] Welcome modal skipped (user preference or config)');
-  }
+async function handleCompletionModalClose() {
+  if (config.showWelcome && await shouldShowWelcome()) showWelcomeModal();
+}
+
+function removeWelcomeEscHandler() {
+  if (!welcomeEscHandler) return;
+  removeTrackedEventListener(document, 'keydown', welcomeEscHandler);
+  welcomeEscHandler = null;
 }
 
 async function showWelcomeModal() {
-  // Try to close other modals and check if we can proceed
-  const stillHasModals = await tryCloseModalsAndCheck();
-  if (stillHasModals) {
-    console.log('[Welcome] Aborting welcome modal - other modal is still open after ESC attempts');
-    modalAborted = true; // Mark as aborted to prevent future attempts
+  if (await tryCloseModalsAndCheck()) {
+    console.log('[Welcome] Not showing welcome modal - another modal is still open after ESC');
     return;
   }
-  
-  // If we successfully closed modals, reset the abort flag
-  if (modalAborted) {
-    console.log('[Welcome] Modals were closed successfully, resetting abort flag');
-    modalAborted = false;
-  }
-  
-  if (!api || !api.ui || !api.ui.components) {
+
+  if (!api?.ui?.components) {
     console.error('[Welcome] API not available');
     return;
   }
 
   try {
-    const [version, modCounts] = await Promise.all([
-      getExtensionVersion(),
-      getModCounts()
-    ]);
-    console.log('[Welcome] Version received:', version);
-    console.log('[Welcome] Mod counts received:', modCounts);
-    
-    // Handle case where mod counts couldn't be fetched
-    const officialCount = modCounts?.official || wt('mods.welcome.multiple', 'Multiple');
-    const superCount = modCounts?.super || wt('mods.welcome.multiple', 'Multiple');
-    const otCount = modCounts?.ot || wt('mods.welcome.multiple', 'Multiple');
-    
-    clearWelcomeModalLayoutCleanup();
-
-    const modalDimensions = getWelcomeModalDimensions();
-    let modal = null;
+    const [version, modCounts] = await Promise.all([getExtensionVersion(), getModCounts()]);
+    const fallbackCount = wt('mods.welcome.multiple', 'Multiple');
     const content = buildWelcomeModalContent({
-      officialCount,
-      superCount,
-      otCount,
+      officialCount: modCounts?.official || fallbackCount,
+      superCount: modCounts?.super || fallbackCount,
+      otCount: modCounts?.ot || fallbackCount,
       version
     });
 
-    modal = api.ui.components.createModal({
+    const { width, height } = getWelcomeModalDimensions();
+    const modal = api.ui.components.createModal({
       title: wt('mods.welcome.modalTitle', 'Welcome to Bestiary Arena SuperMod Loader!'),
-      width: modalDimensions.width,
-      height: modalDimensions.height,
+      width,
+      height,
       content,
       buttons: [
-        {
-          text: wt('mods.welcome.neverShowAgain', 'Never Show Again'),
-          variant: 'danger',
-          onClick: () => setNeverShowAgain()
-        },
-        {
-          text: wt('mods.welcome.gotIt', 'Got It!'),
-          primary: true
-        }
+        { text: wt('mods.welcome.neverShowAgain', 'Never Show Again'), variant: 'danger', onClick: () => setNeverShowAgain() },
+        { text: wt('mods.welcome.gotIt', 'Got It!'), primary: true }
       ]
     });
 
-    // Add ESC key support for closing modal
-    const escHandler = (e) => {
-      if (e.key === 'Escape') {
-        modal?.close?.();
-        removeTrackedEventListener(document, 'keydown', escHandler);
-      }
+    removeWelcomeEscHandler();
+    welcomeEscHandler = (e) => {
+      if (e.key !== 'Escape') return;
+      removeWelcomeEscHandler();
+      modal?.close?.();
     };
-    trackEventListener(document, 'keydown', escHandler);
+    trackEventListener(document, 'keydown', welcomeEscHandler);
 
-    setupWelcomeModalResponsiveLayout(modal, content);
+    setupWelcomeModalResponsiveLayout(modal);
 
     const originalClose = modal.close?.bind(modal);
     if (originalClose) {
       modal.close = () => {
         clearWelcomeModalLayoutCleanup();
+        removeWelcomeEscHandler();
         originalClose();
-        if (currentModal === modal) {
-          currentModal = null;
-        }
+        if (currentModal === modal) currentModal = null;
       };
     }
 
-    // Store modal reference for cleanup
     currentModal = modal;
   } catch (error) {
     console.error('[Welcome] Error creating welcome modal:', error);
@@ -1146,136 +702,57 @@ async function showWelcomeModal() {
 }
 
 // =======================
-// 10. Initialization & Messaging
+// 10. Initialization
 // =======================
 
-async function handleWelcomeToggle(event) {
-  if (event.source !== window) return;
-  
-  if (event.data && event.data.from === 'BESTIARY_EXTENSION' && event.data.action === 'updateWelcomeMode') {
-    const enabled = event.data.enabled;
-    console.log('[Welcome] Received toggle update:', enabled);
-    
-    if (enabled) {
-      console.log('[Welcome] Welcome page enabled via popup toggle');
-    } else {
-      console.log('[Welcome] Welcome page disabled via popup toggle');
-    }
-  }
-}
-
-function checkPopupToggleStatus() {
-  try {
-    const welcomeEnabled = localStorage.getItem('welcome-enabled');
-    console.log('[Welcome Debug] checkPopupToggleStatus - welcomeEnabled:', welcomeEnabled);
-  } catch (error) {
-    console.warn('Could not check popup toggle status:', error);
-  }
-}
-
 function setupModLoadingObserver() {
-  console.log('[Welcome] Setting up mod loading completion listener');
-  
-  // Listen for completion and error messages from local_mods.js
   const messageHandler = (event) => {
-    if (event.source !== window) return;
-    
-    
-    if (event.data?.from === 'LOCAL_MODS_LOADER' && event.data?.action === 'modBatchExecutionStarted') {
-      onModBatchExecutionStarted();
-    }
+    if (event.source !== window || event.data?.from !== 'LOCAL_MODS_LOADER') return;
 
-    // Listen for mod loading completion message
-    if (event.data?.from === 'LOCAL_MODS_LOADER' && event.data?.action === 'allModsLoaded') {
-      const errors = event.data.errors || [];
-      console.log('[Welcome] Received mod loading completion signal from local_mods.js', errors.length ? `with ${errors.length} error(s)` : 'without errors');
-      handleModLoadingFinished(errors);
+    if (event.data.action === 'modBatchExecutionStarted') {
+      scheduleModLoadingFallbackTimer();
+    } else if (event.data.action === 'allModsLoaded') {
+      handleModLoadingFinished(event.data.errors || []);
     }
-    
   };
-  
+
   trackEventListener(window, 'message', messageHandler);
-  
-  // Store the handler for cleanup
   modLoadingObserver = {
-    disconnect: () => {
-      removeTrackedEventListener(window, 'message', messageHandler);
-      console.log('[Welcome] Mod loading completion listener removed');
-    }
+    disconnect: () => removeTrackedEventListener(window, 'message', messageHandler)
   };
 
-  if (window.localModsAPI?.isBatchExecuting?.()) {
-    onModBatchExecutionStarted();
-  }
+  if (window.localModsAPI?.isBatchExecuting?.()) scheduleModLoadingFallbackTimer();
 }
 
-async function initializeWelcome() {
-  console.log('[Welcome] initializeWelcome called');
-  
-  // Set up mod loading completion listener immediately (before API check)
-  console.log('[Welcome] Setting up mod loading completion listener...');
-  setupModLoadingObserver();
-  
-  // Show loading toast immediately (no API dependency needed)
-  console.log('[Welcome] Starting loading process');
-  showLoadingToast();
-}
-
-checkPopupToggleStatus();
-initializeWelcome();
-trackEventListener(window, 'message', handleWelcomeToggle);
+// The mod loading listener and loading toast need no game API, so start immediately.
+setupModLoadingObserver();
+showLoadingToast();
 
 // =======================
 // 11. Cleanup & Exports
 // =======================
 
 function cleanup() {
-  console.log('[Welcome] Cleaning up...');
-  
-  // Clear all tracked timeouts
-  activeTimeouts.forEach(timeoutId => {
-    clearTimeout(timeoutId);
-  });
+  activeTimeouts.forEach((timeoutId) => clearTimeout(timeoutId));
   activeTimeouts.clear();
-  
-  // Remove all tracked event listeners
-  activeEventListeners.forEach((listeners, key) => {
-    listeners.forEach(({ element, event, handler }) => {
-      element.removeEventListener(event, handler);
-    });
-  });
-  activeEventListeners.clear();
-  
-  // Disconnect observer
-  clearModLoadingFallbackTimer();
-  if (modLoadingObserver) {
-    modLoadingObserver.disconnect();
-    modLoadingObserver = null;
-  }
-  
+  modLoadingFallbackTimer = null;
+
+  activeEventListeners.splice(0).forEach(({ element, event, handler }) => element.removeEventListener(event, handler));
+  welcomeEscHandler = null;
+  modLoadingObserver = null;
+
   clearWelcomeModalLayoutCleanup();
 
-  // Close any open modal
-  if (currentModal && typeof currentModal.close === 'function') {
-    currentModal.close();
-    currentModal = null;
-  }
-  
-  // Close any open toasts
-  if (loadingToast && typeof loadingToast.remove === 'function') {
-    loadingToast.remove();
-    loadingToast = null;
-  }
-  
-  // Clean up toast container
-  const toastContainer = document.getElementById('welcome-toast-container');
-  if (toastContainer && toastContainer.parentNode) {
-    toastContainer.parentNode.removeChild(toastContainer);
-  }
-  
-  // Reset state variables
+  if (currentModal && typeof currentModal.close === 'function') currentModal.close();
+  currentModal = null;
+
+  loadingToast?.remove?.();
+  loadingToast = null;
+
+  window.BAToast?.clearMod(getWelcomeToastMod());
+  document.getElementById('welcome-modal-styles')?.remove();
+
   loadingCompleted = false;
-  modalAborted = false;
   modsLoaded = false;
 }
 
@@ -1285,10 +762,10 @@ exports = {
   shouldShowWelcome,
   showLoading: showLoadingToast,
   hideLoading: hideLoadingToast,
-  updateLoadingToComplete: updateLoadingToComplete,
+  updateLoadingToComplete: handleModLoadingFinished,
   isModsLoaded: () => modsLoaded,
   updateConfig: (newConfig) => {
     Object.assign(config, newConfig);
   },
-  cleanup: cleanup
+  cleanup
 };

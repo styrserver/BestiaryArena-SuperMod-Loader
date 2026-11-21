@@ -176,7 +176,6 @@ let privateRunsWait = { key: '', since: 0 }; // when a caller first had to wait 
 
 const BETTER_SETUPS_TOAST_DURATION = 5000;
 const BETTER_SETUPS_WARNING_TOAST_DURATION = 10000;
-const BETTER_SETUPS_TOAST_CONTAINER_ID = 'better-setups-toast-container';
 
 // =======================
 // 2. Initialization & Lifecycle
@@ -545,6 +544,12 @@ function injectEditButton(setupButton) {
 // Function to inject utility buttons (Load Setup, Settings) if not present (always last)
 function injectEditLabelsButton(setupContainer) {
   const existingUtilityContainer = setupContainer.querySelector('.better-setups-utility-container');
+  if (existingUtilityContainer && existingUtilityContainer === setupContainer.lastElementChild) {
+    // Already in place at the end: refresh the badge instead of rebuilding (avoids mutation churn).
+    const existingSettings = existingUtilityContainer.querySelector('.settings-btn');
+    if (existingSettings) updateSettingsMissingEquipmentWarningBadge(existingSettings);
+    return true;
+  }
   if (existingUtilityContainer) {
     existingUtilityContainer.remove();
     console.log('[Better Setups] Removed existing utility buttons for reordering');
@@ -917,85 +922,13 @@ function closeModalInstance(modalRef) {
   }
 }
 
-function getBetterSetupsToastContainer() {
-  if (typeof document === 'undefined') return null;
-  let container = document.getElementById(BETTER_SETUPS_TOAST_CONTAINER_ID);
-  if (!container) {
-    container = document.createElement('div');
-    container.id = BETTER_SETUPS_TOAST_CONTAINER_ID;
-    container.style.cssText = 'position: fixed; z-index: 9999; inset: 16px 16px 64px; pointer-events: none;';
-    document.body.appendChild(container);
-  }
-  return container;
-}
-
-function updateBetterSetupsToastPositions(container) {
-  if (!container) return;
-  const toasts = container.querySelectorAll('.better-setups-toast-item');
-  toasts.forEach((toast, index) => {
-    toast.style.transform = `translateY(-${index * 46}px)`;
-  });
-}
-
 function showBetterSetupsToast(message, options = {}) {
-  const safeMsg = (message != null && message !== '') ? String(message).replace(/</g, '&lt;') : '';
-  const duration = typeof options.duration === 'number' && options.duration > 0
-    ? options.duration
-    : BETTER_SETUPS_TOAST_DURATION;
-
-  try {
-    const container = getBetterSetupsToastContainer();
-    if (!container) return;
-
-    const existingToasts = container.querySelectorAll('.better-setups-toast-item');
-    const stackOffset = existingToasts.length * 46;
-
-    const flexContainer = document.createElement('div');
-    flexContainer.className = 'better-setups-toast-item';
-    flexContainer.style.cssText = `display: flex; position: absolute; transition: 230ms cubic-bezier(0.21, 1.02, 0.73, 1); transform: translateY(-${stackOffset}px); bottom: 0px; right: 0px; justify-content: flex-end; pointer-events: none; width: max-content; max-width: 100%;`;
-
-    const toast = document.createElement('button');
-    toast.className = 'non-dismissable-dialogs shadow-lg animate-in fade-in zoom-in-95 slide-in-from-top lg:slide-in-from-bottom';
-    toast.style.pointerEvents = 'auto';
-
-    const widgetTop = document.createElement('div');
-    widgetTop.className = 'widget-top h-2.5';
-
-    const widgetBottom = document.createElement('div');
-    widgetBottom.className = 'widget-bottom pixel-font-16 flex items-center gap-2 px-2 py-1 text-whiteHighlight';
-
-    const messageDiv = document.createElement('div');
-    messageDiv.className = 'text-left';
-    messageDiv.style.flex = '1 1 auto';
-    if (safeMsg.indexOf('\n') !== -1) messageDiv.style.whiteSpace = 'pre-line';
-    messageDiv.style.color = (options.type === 'error' || options.type === 'warning') ? '#e74c3c' : '#fff';
-    messageDiv.textContent = safeMsg;
-
-    widgetBottom.appendChild(messageDiv);
-    toast.appendChild(widgetTop);
-    toast.appendChild(widgetBottom);
-    flexContainer.appendChild(toast);
-    container.appendChild(flexContainer);
-
-    const removeToast = () => {
-      if (flexContainer.parentNode) {
-        flexContainer.parentNode.removeChild(flexContainer);
-        updateBetterSetupsToastPositions(container);
-      }
-    };
-
-    toast.addEventListener('click', removeToast);
-    setTimeout(removeToast, duration);
-  } catch (error) {
-    console.error('[Better Setups] Error showing toast:', error);
-  }
-}
-
-function normalizeToastMessage(message, type = 'info') {
-  const trimmed = String(message ?? '').trim();
-  if (!trimmed || /[.!?]$/.test(trimmed)) return trimmed;
-  if (type === 'success') return `${trimmed}!`;
-  return `${trimmed}.`;
+  window.BAToast?.show({
+    mod: t('mods.betterSetups.modName'),
+    message,
+    type: options.type,
+    duration: typeof options.duration === 'number' && options.duration > 0 ? options.duration : BETTER_SETUPS_TOAST_DURATION
+  });
 }
 
 function showSetupNotification(message, type = 'info', duration) {
@@ -1004,7 +937,7 @@ function showSetupNotification(message, type = 'info', duration) {
       ? BETTER_SETUPS_WARNING_TOAST_DURATION
       : BETTER_SETUPS_TOAST_DURATION
   );
-  showBetterSetupsToast(normalizeToastMessage(message, type), { duration: resolvedDuration, type });
+  showBetterSetupsToast(message, { duration: resolvedDuration, type });
 }
 
 function isStructuredSetupCommand(commandText) {
@@ -3744,63 +3677,6 @@ function getCurrentMapName() {
   }
 }
 
-// Helper function to get map-specific setup data
-function getMapSetupData(mapId) {
-  try {
-    if (!mapId || mapId === 'unknown') {
-      return { setups: [], count: 0 };
-    }
-    
-    // Try to get setup data from localStorage
-    const setupKey = `bestiary-arena-setups-${mapId}`;
-    const setupData = localStorage.getItem(setupKey);
-    
-    if (setupData) {
-      try {
-        const parsed = JSON.parse(setupData);
-        return {
-          setups: parsed.setups || [],
-          count: parsed.setups ? parsed.setups.length : 0,
-          source: 'localStorage'
-        };
-      } catch (e) {
-        console.warn('[Better Setups] Failed to parse setup data for map:', mapId);
-      }
-    }
-    
-    // Try alternative storage keys
-    const alternativeKeys = [
-      `bestiary-arena-setups`,
-      `setup-${mapId}`,
-      `map-setups-${mapId}`
-    ];
-    
-    for (const key of alternativeKeys) {
-      const data = localStorage.getItem(key);
-      if (data) {
-        try {
-          const parsed = JSON.parse(data);
-          // Look for map-specific data within the parsed object
-          if (parsed[mapId]) {
-            return {
-              setups: parsed[mapId].setups || [],
-              count: parsed[mapId].setups ? parsed[mapId].setups.length : 0,
-              source: key
-            };
-          }
-        } catch (e) {
-          continue;
-        }
-      }
-    }
-    
-    return { setups: [], count: 0, source: 'none' };
-  } catch (error) {
-    console.warn('[Better Setups] Error getting map setup data:', error);
-    return { setups: [], count: 0, source: 'error' };
-  }
-}
-
 // =======================
 // 9b. Private runs (best runs of a private repository as native saved setups)
 // =======================
@@ -4158,6 +4034,7 @@ function stopPrivateRuns() {
       Object.assign(config, newConfig);
     },
     cleanup: () => {
+      window.BAToast?.clearMod(t('mods.betterSetups.modName'));
       stopPrivateRuns();
       clearBetterSetupsModalLayoutCleanup();
       hideSetupPreview();
