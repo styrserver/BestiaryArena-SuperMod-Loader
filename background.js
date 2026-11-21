@@ -365,8 +365,12 @@ async function mergeMissingBundledMods(storedMods) {
   if (!changed) return storedMods;
 
   const merged = sortLocalModsList(Array.from(byName.values()));
-  await browserAPI.storage.sync.set({ localMods: merged });
   await browserAPI.storage.local.set({ localMods: merged });
+  try {
+    await browserAPI.storage.sync.set({ localMods: merged });
+  } catch (syncError) {
+    console.warn('[Background] sync write of localMods skipped:', syncError?.message || syncError);
+  }
   console.log('[Background] Merged missing bundled mods from mod-registry into storage');
   return merged;
 }
@@ -540,8 +544,11 @@ async function getLocalMods() {
     const syncData = await browserAPI.storage.sync.get('localMods');
     
     if (syncData.localMods && syncData.localMods.length > 0) {
-      // If found in sync, also update local storage
-      await browserAPI.storage.local.set({ localMods: syncData.localMods });
+      // Sync is source of truth; mirror to local only when it differs (avoid a write per read).
+      const localCopy = (await browserAPI.storage.local.get('localMods')).localMods;
+      if (JSON.stringify(localCopy) !== JSON.stringify(syncData.localMods)) {
+        await browserAPI.storage.local.set({ localMods: syncData.localMods });
+      }
       mods = syncData.localMods;
     } else {
       // Fall back to local storage
@@ -577,8 +584,15 @@ async function getLocalMods() {
     const result = sortLocalModsList(Array.from(byName.values()));
     const hiddenDefaultsChanged = ensureHiddenDatabaseModDefaults(result);
     if (ensureWelcomeModAlwaysEnabled(result) || hiddenDefaultsChanged) {
-      await browserAPI.storage.sync.set({ localMods: result });
-      await browserAPI.storage.local.set({ localMods: result });
+      // Persist only file-based mods: manual mods carry full source in `content` and
+      // live in local `manualMods`. Writing them to sync blows the 8KB per-item quota.
+      const persistable = result.filter((m) => m.type !== 'manual');
+      await browserAPI.storage.local.set({ localMods: persistable });
+      try {
+        await browserAPI.storage.sync.set({ localMods: persistable });
+      } catch (syncError) {
+        console.warn('[Background] sync write of localMods skipped:', syncError?.message || syncError);
+      }
     }
     return result;
   } catch (error) {

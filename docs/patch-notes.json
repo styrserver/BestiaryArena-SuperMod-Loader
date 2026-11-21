@@ -4,6 +4,16 @@
   },
   "notes": [
     {
+      "version": "5.4.2",
+      "changes": [
+        {
+          "mod": "Mod Loader",
+          "type": "fixed",
+          "text": "Fixed mods failing to load with a storage quota error."
+        }
+      ]
+    },
+    {
       "version": "5.4.1",
       "changes": [
         {
