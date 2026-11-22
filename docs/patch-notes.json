@@ -4,6 +4,21 @@
   },
   "notes": [
     {
+      "version": "5.4.4",
+      "changes": [
+        {
+          "mod": "Autoseller",
+          "type": "changed",
+          "text": "The \"auto\" badges now appear and follow their buttons faster, using less CPU."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "changed",
+          "text": "The home page shows the player's real outfit and mount instead of the game logo."
+        }
+      ]
+    },
+    {
       "version": "5.4.3",
       "changes": [
         {

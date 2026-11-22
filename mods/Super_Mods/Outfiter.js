@@ -1982,6 +1982,19 @@ if (typeof window !== 'undefined') {
       });
       saveOutfitToStorage(outfitId, prev?.colors, mountId);
       return true;
+    },
+    // Draws any outfit (colors = { head, body, legs, feet } palette indexes) on a rider's mount into `canvas`,
+    // custom outfits and mounts included. Used by Cyclopedia's home page. Resolves true when drawn.
+    renderOutfit: async function(canvas, outfitId, colors, mountId) {
+      try {
+        // Custom outfits have no mounted sprite (the game could not ride them either): draw them alone.
+        const rides = mountId != null && !(Number(outfitId) in CUSTOM_OUTFITS);
+        await renderOutfit(canvas, outfitId, colors, rides ? mountId : null);
+        return true;
+      } catch (error) {
+        console.warn('[Outfiter] renderOutfit failed:', error);
+        return false;
+      }
     }
   };
 }

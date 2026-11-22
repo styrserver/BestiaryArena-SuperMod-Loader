@@ -184,10 +184,12 @@
     let autoBadgeTrackRafId = null;
     // The track loop runs every frame (up to 240/s). Finding the targets and checking the loot overlay are DOM
     // queries, so the loop redoes them at most this often; only the cheap position read stays per frame.
-    const AUTO_BADGE_RETARGET_MS = 250;
+    const AUTO_BADGE_RETARGET_MS = 100;
+    const AUTO_BADGE_TRACK_MIN_MS = 50;
     let autoBadgeRetargetAt = 0;
     let autoBadgeHideForLootTable = false;
     let autoBadgePositionRafId = null;
+    let autoBadgeUpdateRafId = null;
     let autoBadgeVisualViewportHandler = null;
     let openContextMenu = null; // Track currently open context menu { overlay, menu, closeMenu }
     let lootTableMirrorObserver = null;
@@ -9736,14 +9738,29 @@
         });
     }
 
+    // Next-frame badge create/retarget, so "auto" shows without waiting for the 100ms debounce.
+    function scheduleAutoBadgeUpdate() {
+        if (autoBadgeUpdateRafId !== null) return;
+        autoBadgeUpdateRafId = requestAnimationFrame(() => {
+            autoBadgeUpdateRafId = null;
+            updateAutosellerAutoBadges();
+        });
+    }
+
     function startAutoBadgeTrackLoop() {
         if (autoBadgeTrackRafId !== null) return;
-        const tick = () => {
+        let lastRun = 0;
+        const tick = (ts) => {
             if (isCleaningUp || !Object.values(AUTO_BADGE_SLOTS).some((slot) => slot.el)) {
                 autoBadgeTrackRafId = null;
                 return;
             }
-            positionAutoBadges(true);
+            // Cap at ~20Hz: the getBoundingClientRect read forces layout every run,
+            // and observers/scroll/resize handlers already cover real moves.
+            if (!(ts - lastRun < AUTO_BADGE_TRACK_MIN_MS)) {
+                lastRun = ts;
+                positionAutoBadges(true);
+            }
             autoBadgeTrackRafId = requestAnimationFrame(tick);
         };
         autoBadgeTrackRafId = requestAnimationFrame(tick);
@@ -9829,21 +9846,24 @@
         for (const slot of Object.values(AUTO_BADGE_SLOTS)) {
             if (!slot.el) continue;
 
+            // Write styles only on change: per-frame identical writes still dirty style/layout.
             const target = slot.target;
-            if (hideForLootTable || !target || !document.contains(target)) {
-                slot.el.style.display = 'none';
+            if (hideForLootTable || !target || !target.isConnected) {
+                if (slot.shown !== false) { slot.el.style.display = 'none'; slot.shown = false; }
                 continue;
             }
 
             const rect = target.getBoundingClientRect();
             if (rect.width <= 0 || rect.height <= 0) {
-                slot.el.style.display = 'none';
+                if (slot.shown !== false) { slot.el.style.display = 'none'; slot.shown = false; }
                 continue;
             }
 
-            slot.el.style.display = '';
-            slot.el.style.left = `${rect.left + rect.width / 2}px`;
-            slot.el.style.top = `${rect.top + rect.height / 2}px`;
+            if (slot.shown !== true) { slot.el.style.display = ''; slot.shown = true; }
+            const left = rect.left + rect.width / 2;
+            const top = rect.top + rect.height / 2;
+            if (slot.left !== left) { slot.el.style.left = `${left}px`; slot.left = left; }
+            if (slot.top !== top) { slot.el.style.top = `${top}px`; slot.top = top; }
         }
     }
 
@@ -9854,10 +9874,17 @@
         }
         slot.el = null;
         slot.target = null;
+        slot.shown = undefined;
+        slot.left = undefined;
+        slot.top = undefined;
     }
 
     function stopAutosellerAutoBadgeTracking() {
         stopAutoBadgeTrackLoop();
+        if (autoBadgeUpdateRafId !== null) {
+            cancelAnimationFrame(autoBadgeUpdateRafId);
+            autoBadgeUpdateRafId = null;
+        }
 
         if (autoBadgePositionHandler) {
             window.removeEventListener('resize', autoBadgePositionHandler);
@@ -10588,8 +10615,9 @@
                 if (!isCleaningUp) {
                     schedulePositionAutoBadges();
                     refreshAutoBadgeTargets();
+                    scheduleAutoBadgeUpdate();
                 }
-                
+
                 if (dragonPlantDebounceTimer) {
                     clearTimeout(dragonPlantDebounceTimer);
                 }

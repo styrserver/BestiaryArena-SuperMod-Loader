@@ -14905,6 +14905,27 @@ function renderCyclopediaPlayerInfo(profileData, options = {}) {
   avatarWrap.appendChild(avatarImg);
   avatarSlot.appendChild(avatarWrap);
   topGrid.appendChild(avatarSlot);
+  // The player's real outfit (and mount) replaces the logo once drawn. Your own profile reads the live player
+  // state, so a local-only Outfiter outfit shows; anyone else's comes from the profile data. No Outfiter: logo stays.
+  if (typeof window.Outfiter?.renderOutfit === 'function') {
+    const own = globalThis.state?.player?.getSnapshot?.().context;
+    const src = own?.name && own.name === profileData.name ? own : profileData;
+    if (src.outfitId != null) {
+      const canvas = document.createElement('canvas');
+      window.Outfiter.renderOutfit(
+        canvas,
+        src.outfitId,
+        { head: src.head, body: src.body, legs: src.legs, feet: src.feet },
+        src.mountId ?? null
+      ).then((drawn) => {
+        if (!drawn || !avatarWrap.isConnected) return;
+        // Native size, like the game's own outfit canvas: the 64px sprite sits bottom-right and overflows the 32px slot.
+        canvas.className = 'pixelated absolute bottom-0 right-0';
+        canvas.setAttribute('aria-label', CYCLOPEDIA_UI.playerIconAlt);
+        avatarImg.replaceWith(canvas);
+      });
+    }
+  }
   const nameCol = document.createElement('div');
   nameCol.className = 'truncate pb-px pr-0.5';
   const nameP = document.createElement('p');
