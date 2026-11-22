@@ -415,6 +415,9 @@
       // A browser-masked cross-origin copy ("Script error.", no error object, line 0) carries no
       // information; the page-world logger records the real error with its stack.
       if (!err && event && event.message === 'Script error.' && !event.lineno) return;
+      // Benign browser notice (layout settled over two frames), not a script failure; no error object.
+      if (!err && event && typeof event.message === 'string'
+        && /^ResizeObserver loop (completed with undelivered notifications|limit exceeded)/.test(event.message)) return;
       const location = event && event.filename
         ? `${event.filename}:${event.lineno}:${event.colno}` : undefined;
       maybeDumpForensics(err);

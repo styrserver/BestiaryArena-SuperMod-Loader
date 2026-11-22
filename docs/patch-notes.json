@@ -4,6 +4,26 @@
   },
   "notes": [
     {
+      "version": "5.4.3",
+      "changes": [
+        {
+          "mod": "Autoseller",
+          "type": "fixed",
+          "text": "Fixed slowdowns from the \"auto\" badges and from reopening the sell window."
+        },
+        {
+          "mod": "Mod Loader",
+          "type": "fixed",
+          "text": "The Error Log no longer lists harmless browser resize notices."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "added",
+          "text": "Debugger report now shows main-thread lag and which mod's timers use the most time, so it works in Firefox too."
+        }
+      ]
+    },
+    {
       "version": "5.4.2",
       "changes": [
         {

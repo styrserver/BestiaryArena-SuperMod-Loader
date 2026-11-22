@@ -3219,12 +3219,15 @@ function onPowerSavingModeChanged(event) {
   setPowerSavingSuppressed(!!event?.detail?.enabled);
 }
 
+// Named so cleanupMapShortcuts() can remove it (an inline arrow stayed registered across reloads).
+function onShortcutsHoverChanged() {
+  updateMapShortcuts();
+}
+
 function initMapShortcuts() {
   if (!window.__setupManagerShortcutsHoverListenerAdded) {
     window.__setupManagerShortcutsHoverListenerAdded = true;
-    window.addEventListener('betterUISetupShortcutsAndHoverChanged', () => {
-      updateMapShortcuts();
-    });
+    window.addEventListener('betterUISetupShortcutsAndHoverChanged', onShortcutsHoverChanged);
   }
 
   if (!window.__setupManagerPowerSavingListenerAdded) {
@@ -3258,6 +3261,11 @@ function initMapShortcuts() {
 function cleanupMapShortcuts() {
   hideMapShortcutPreview();
   removeMapShortcutsPositionListener();
+
+  if (window.__setupManagerShortcutsHoverListenerAdded) {
+    window.removeEventListener('betterUISetupShortcutsAndHoverChanged', onShortcutsHoverChanged);
+    window.__setupManagerShortcutsHoverListenerAdded = false;
+  }
 
   if (window.__setupManagerPowerSavingListenerAdded) {
     window.removeEventListener('ba-power-saving-mode-changed', onPowerSavingModeChanged);

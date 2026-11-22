@@ -1063,6 +1063,34 @@ async function ensureModScripts(modName) {
   }
 }
 
+// Per-mod timer attribution for the debugger (Firefox has no long-animation-frame, so this is the only way to name
+// the mod that blocks the main thread there). Instead of patching the global timers, each mod body gets its own
+// setTimeout / setInterval / requestAnimationFrame through `with (context)`: they forward to the real function and
+// time the callback into window.BestiaryModTimings.byMod[label]. Nothing global changes, so there is nothing to restore.
+// Only bare calls are covered; an explicit `window.setTimeout(...)` in a mod is not attributed.
+window.BestiaryModTimings = window.BestiaryModTimings || { byMod: Object.create(null) };
+function createModTimerShims(label) {
+  const byMod = window.BestiaryModTimings.byMod;
+  const rec = byMod[label] || (byMod[label] = { calls: 0, ms: 0, max: 0 });
+  const timed = (fn) => function (...args) {
+    const t0 = performance.now();
+    try {
+      return fn.apply(this, args);
+    } finally {
+      const d = performance.now() - t0;
+      rec.calls++;
+      rec.ms += d;
+      if (d > rec.max) rec.max = d;
+    }
+  };
+  const shim = (name) => (cb, ...rest) => window[name](typeof cb === 'function' ? timed(cb) : cb, ...rest);
+  return {
+    setTimeout: shim('setTimeout'),
+    setInterval: shim('setInterval'),
+    requestAnimationFrame: shim('requestAnimationFrame')
+  };
+}
+
 async function executeLocalMod(modNameOrObject, forceExecution = false) {
   // Handle both string (mod name) and object (mod object) parameters
   const isModObject = typeof modNameOrObject === 'object' && modNameOrObject !== null;
@@ -1218,9 +1246,10 @@ async function executeLocalMod(modNameOrObject, forceExecution = false) {
               BESTIARY_DEBUG: window.BESTIARY_DEBUG || localStorage.getItem('bestiary-debug') === 'true',
               // Seed exports so a bare `exports = {…}` inside `with (context)` binds to
               // THIS property (and `return context.exports` sees it), not a stray global.
-              exports: {}
+              exports: {},
+              ...createModTimerShims(modSourceLabel)
             };
-            
+
             const scriptFunction = new Function('context', `
               // Console verbosity is handled globally by content/ba-logger.js.
               with (context) {
@@ -1266,9 +1295,10 @@ async function executeLocalMod(modNameOrObject, forceExecution = false) {
         // Add debug flag to context
         BESTIARY_DEBUG: window.BESTIARY_DEBUG || localStorage.getItem('bestiary-debug') === 'true',
         // See note above: seed exports so bare `exports = {…}` binds to context.exports.
-        exports: {}
+        exports: {},
+        ...createModTimerShims(modSourceLabel)
       };
-      
+
       const scriptFunction = new Function('context', `
         // Console verbosity is handled globally by content/ba-logger.js.
         with (context) {

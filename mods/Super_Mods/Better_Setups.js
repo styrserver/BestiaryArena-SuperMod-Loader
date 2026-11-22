@@ -226,14 +226,16 @@ function waitForGameAndActivate() {
 }
 
 // Start early initialization attempts for faster button injection
+// Named so cleanup() can remove it (an inline arrow stayed registered across reloads).
+function onShortcutsHoverChanged(event) {
+  hideSetupPreview();
+  if (event.detail?.enabled) {
+    processSetupInterface();
+  }
+}
 if (!window.__betterSetupsShortcutsHoverListenerAdded) {
   window.__betterSetupsShortcutsHoverListenerAdded = true;
-  window.addEventListener('betterUISetupShortcutsAndHoverChanged', (event) => {
-    hideSetupPreview();
-    if (event.detail?.enabled) {
-      processSetupInterface();
-    }
-  });
+  window.addEventListener('betterUISetupShortcutsAndHoverChanged', onShortcutsHoverChanged);
 }
 
 console.log('[Better Setups] Starting early initialization attempts...');
@@ -4040,6 +4042,10 @@ function stopPrivateRuns() {
       hideSetupPreview();
       stopSetupInterfaceObserver();
       teardownSetupPreviewDelegation();
+      if (window.__betterSetupsShortcutsHoverListenerAdded) {
+        window.removeEventListener('betterUISetupShortcutsAndHoverChanged', onShortcutsHoverChanged);
+        window.__betterSetupsShortcutsHoverListenerAdded = false;
+      }
     }
   };
 }

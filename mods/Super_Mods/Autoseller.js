@@ -182,6 +182,11 @@
     let autoBadgeResizeObserver = null;
     let autoBadgeMutationObserver = null;
     let autoBadgeTrackRafId = null;
+    // The track loop runs every frame (up to 240/s). Finding the targets and checking the loot overlay are DOM
+    // queries, so the loop redoes them at most this often; only the cheap position read stays per frame.
+    const AUTO_BADGE_RETARGET_MS = 250;
+    let autoBadgeRetargetAt = 0;
+    let autoBadgeHideForLootTable = false;
     let autoBadgePositionRafId = null;
     let autoBadgeVisualViewportHandler = null;
     let openContextMenu = null; // Track currently open context menu { overlay, menu, closeMenu }
@@ -4038,13 +4043,24 @@
             if (hoverTooltipCleanupBound) return;
             hoverTooltipCleanupBound = true;
 
-            const dismiss = () => hideHoverTooltip();
+            // Registered on document/window once per modal, so they must go when this modal's list leaves the DOM
+            // (they used to stay forever, one set per modal open, each holding the modal's nodes alive).
+            const onKeydown = (e) => {
+                if (e.key === 'Escape') dismiss();
+            };
+            const dismiss = () => {
+                hideHoverTooltip();
+                if (!scrollContainer.isConnected) {
+                    document.removeEventListener('mousedown', dismiss, true);
+                    document.removeEventListener('scroll', dismiss, true);
+                    window.removeEventListener('blur', dismiss);
+                    document.removeEventListener('keydown', onKeydown);
+                }
+            };
             document.addEventListener('mousedown', dismiss, true);
             document.addEventListener('scroll', dismiss, true);
             window.addEventListener('blur', dismiss);
-            document.addEventListener('keydown', (e) => {
-                if (e.key === 'Escape') dismiss();
-            });
+            document.addEventListener('keydown', onKeydown);
         }
 
         function showHoverTooltip(content, x, y) {
@@ -9727,7 +9743,7 @@
                 autoBadgeTrackRafId = null;
                 return;
             }
-            positionAutoBadges();
+            positionAutoBadges(true);
             autoBadgeTrackRafId = requestAnimationFrame(tick);
         };
         autoBadgeTrackRafId = requestAnimationFrame(tick);
@@ -9797,14 +9813,18 @@
         return false;
     }
 
-    function positionAutoBadges() {
+    function positionAutoBadges(throttleRetarget = false) {
         if (isCleaningUp) return;
 
-        refreshAutoBadgeTargets();
-
-        // Plant/squeezer badges are body-fixed at z-index 100; hide them while the
-        // native loot table overlay is open so they don't float over its rows.
-        const hideForLootTable = isLootDropTableOverlayOpen();
+        const now = performance.now();
+        if (!throttleRetarget || now - autoBadgeRetargetAt >= AUTO_BADGE_RETARGET_MS) {
+            autoBadgeRetargetAt = now;
+            refreshAutoBadgeTargets();
+            // Plant/squeezer badges are body-fixed at z-index 100; hide them while the
+            // native loot table overlay is open so they don't float over its rows.
+            autoBadgeHideForLootTable = isLootDropTableOverlayOpen();
+        }
+        const hideForLootTable = autoBadgeHideForLootTable;
 
         for (const slot of Object.values(AUTO_BADGE_SLOTS)) {
             if (!slot.el) continue;

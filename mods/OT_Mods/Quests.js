@@ -46153,10 +46153,11 @@ function createNPCCooldownManager() {
   observeInventory();
   setupQuestItemsDropSystem();
   setupEquipmentSlotObserver();
-  window.addEventListener('betterUIQuestHelpersChanged', () => {
+  // Via EventManager so cleanup()'s EventManager.cleanupAll() removes them (inline arrows piled up on every reload).
+  EventManager.addEventListener(window, 'betterUIQuestHelpersChanged', () => {
     refreshQuestHelpersForExternalToggle();
   });
-  window.addEventListener('mapEditorOpenChanged', () => {
+  EventManager.addEventListener(window, 'mapEditorOpenChanged', () => {
     refreshQuestHelpersForExternalToggle();
   });
 

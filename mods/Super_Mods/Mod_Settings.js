@@ -3426,8 +3426,17 @@ const perfOverlay = {
   loafDropped: 0, // slow frames pushed out by the PERF_MAX_LOAF cap (not by age) this session
   loaf: [], // slow frames inside the last PERF_CPU_WINDOW_MS: { perf, ts, dur, blocking, scripts[] }
   loafObserver: null,
-  loafType: null // 'long-animation-frame' (per-script attribution) | 'longtask' (totals only) | null
+  loafType: null, // 'long-animation-frame' (per-script attribution) | 'longtask' (totals only) | null
+  timerBase: null, // perfSnapshotModTimers() at start/Clear
+  timerBaseAt: 0,
+  lagSamples: [], // { t, lag } timer lateness inside the last PERF_LAG_WINDOW_MS (works in every browser, Firefox included)
+  lagTimer: null
 };
+// A timer that asks to fire every PERF_LAG_TICK_MS fires late by exactly the time the main thread was busy.
+// Firefox has neither long-animation-frame nor longtask, so this is the only blocking measure it can give.
+const PERF_LAG_TICK_MS = 50;
+const PERF_LAG_WINDOW_MS = 60000;
+const PERF_LAG_BAD_MS = 100;
 const PERF_FRAME_WINDOW_MS = 10000;
 const PERF_HEAP_WINDOW_MS = 60000;
 // Slow frames are kept for 15 minutes (max PERF_MAX_LOAF) and saved across refreshes, like the rate-limit captures.
@@ -3575,6 +3584,74 @@ function perfResetData() {
   perfOverlay.domPeakAt = 0;
   perfOverlay.frameDts = [];
   perfOverlay.heap = [];
+  perfOverlay.lagSamples = [];
+  perfOverlay.timerBase = perfSnapshotModTimers();
+  perfOverlay.timerBaseAt = Date.now();
+}
+
+// The loader (content/local_mods.js) times every mod's setTimeout / setInterval / requestAnimationFrame callbacks
+// into window.BestiaryModTimings. Those totals only grow, so the debugger diffs against a baseline taken at start/Clear.
+function perfSnapshotModTimers() {
+  const snap = {};
+  const byMod = (window.BestiaryModTimings && window.BestiaryModTimings.byMod) || {};
+  Object.keys(byMod).forEach((k) => { snap[k] = { calls: byMod[k].calls, ms: byMod[k].ms }; });
+  return snap;
+}
+
+function perfDescribeModTimers() {
+  const byMod = (window.BestiaryModTimings && window.BestiaryModTimings.byMod) || {};
+  const base = perfOverlay.timerBase || {};
+  const secs = Math.max(1, (Date.now() - perfOverlay.timerBaseAt) / 1000);
+  const rows = Object.keys(byMod).map((k) => ({
+    name: k,
+    calls: byMod[k].calls - ((base[k] && base[k].calls) || 0),
+    ms: byMod[k].ms - ((base[k] && base[k].ms) || 0),
+    max: byMod[k].max
+  })).filter((r) => r.calls > 0).sort((a, b) => b.ms - a.ms).slice(0, 12);
+  return rows.map((r) =>
+    `  ${String(Math.round(r.ms)).padStart(7)}ms (${(r.ms / secs / 10).toFixed(2)}% of one core)  ${String(r.calls).padStart(6)}x  ` +
+    `avg ${(r.ms / r.calls).toFixed(2)}ms  max ever ${Math.round(r.max)}ms  [${r.name}${r.name === 'Mod_Settings' ? ' *' : ''}]`);
+}
+
+// Self-rescheduling setTimeout (not setInterval) so a long block cannot queue a burst of catch-up ticks.
+// Hidden tabs throttle timers to ~1s, which is not real lag, so those ticks are skipped.
+function startPerfLagSampler() {
+  if (perfOverlay.lagTimer) return;
+  let expected = performance.now() + PERF_LAG_TICK_MS;
+  let wasHidden = document.hidden;
+  const tick = () => {
+    const now = performance.now();
+    if (!document.hidden && !wasHidden) {
+      perfOverlay.lagSamples.push({ t: now, lag: Math.max(0, now - expected) });
+      const cutoff = now - PERF_LAG_WINDOW_MS;
+      let drop = 0;
+      while (drop < perfOverlay.lagSamples.length && perfOverlay.lagSamples[drop].t < cutoff) drop++;
+      if (drop) perfOverlay.lagSamples.splice(0, drop);
+    }
+    wasHidden = document.hidden;
+    expected = performance.now() + PERF_LAG_TICK_MS;
+    perfOverlay.lagTimer = setTimeout(tick, PERF_LAG_TICK_MS);
+  };
+  perfOverlay.lagTimer = setTimeout(tick, PERF_LAG_TICK_MS);
+}
+
+function stopPerfLagSampler() {
+  if (perfOverlay.lagTimer) {
+    clearTimeout(perfOverlay.lagTimer);
+    perfOverlay.lagTimer = null;
+  }
+}
+
+function perfLagStats() {
+  const s = perfOverlay.lagSamples;
+  if (!s.length) return null;
+  const sorted = s.map((x) => x.lag).sort((a, b) => a - b);
+  return {
+    n: s.length,
+    p95: sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))],
+    worst: sorted[sorted.length - 1],
+    bad: sorted.reduce((n, v) => n + (v > PERF_LAG_BAD_MS ? 1 : 0), 0)
+  };
 }
 
 const PERF_MAX_CAPTURES = 5;
@@ -4077,9 +4154,20 @@ function perfFormatCpuReport() {
     ? `covers ${new Date(first.ts).toISOString()} to ${new Date(last.ts).toISOString()}` +
       (perfOverlay.loafDropped ? `; ${perfOverlay.loafDropped} older frame${perfOverlay.loafDropped === 1 ? '' : 's'} dropped by the ${PERF_MAX_LOAF}-frame cap this session, so shares below cover only these` : '')
     : 'no frames';
+  const lag = perfLagStats();
   const lines = [
     `== Frames (last ${PERF_FRAME_WINDOW_MS / 1000}s) ==`,
     `${perfOverlay.fps} FPS, p95 ${stats.p95.toFixed(1)}ms, worst ${stats.worst.toFixed(1)}ms, ${stats.jank} frame${stats.jank === 1 ? '' : 's'} over ${PERF_JANK_MS}ms`,
+    '',
+    `== Main-thread lag (last ${PERF_LAG_WINDOW_MS / 1000}s; ${PERF_LAG_TICK_MS}ms timer lateness = time the page could not react, visible tab only) ==`,
+    lag
+      ? `p95 ${lag.p95.toFixed(0)}ms, worst ${lag.worst.toFixed(0)}ms, ${lag.bad} of ${lag.n} ticks over ${PERF_LAG_BAD_MS}ms (clicks and server replies wait this long)`
+      : 'no samples yet (tab hidden or just started)',
+    '',
+    `== Mod timer time (since ${new Date(perfOverlay.timerBaseAt).toISOString()}; time inside each mod's own setTimeout/setInterval/requestAnimationFrame callbacks, works in every browser) ==`,
+    ...(perfDescribeModTimers().length
+      ? perfDescribeModTimers()
+      : ['(nothing recorded yet; mods that call window.setTimeout explicitly or run via subscribe/observer/event handlers are not counted)']),
     '',
     `== Memory (last ${PERF_HEAP_WINDOW_MS / 1000}s) ==`,
     `${heapLine}${perfOverlay.dom} DOM nodes${domGrowth}` +
@@ -4087,7 +4175,7 @@ function perfFormatCpuReport() {
     ...(domCensus.length ? ['DOM nodes by <body> child (now, change since the overlay started):', ...domCensus] : []),
     '',
     `== Script time (last ${PERF_CPU_WINDOW_LABEL}; slow frames only, source: ${perfOverlay.loafType || 'unsupported in this browser'}) ==`,
-    `${agg.frames} slow frames (${coverage}), ${Math.round(agg.frameMs)}ms total, ${Math.round(agg.blockingMs)}ms blocking input, ${Math.round(agg.scriptMs)}ms in scripts (rest = style/layout/paint/GC)`,
+    `${perfOverlay.loafType ? `${agg.frames} slow frames` : 'slow frames n/a'} (${coverage}), ${Math.round(agg.frameMs)}ms total, ${Math.round(agg.blockingMs)}ms blocking input, ${Math.round(agg.scriptMs)}ms in scripts (rest = style/layout/paint/GC)`,
     'total ms | share | calls | max ms | forced layout (share of its script time) | triggers'
   ];
   agg.groups.forEach((g) => {
@@ -4099,7 +4187,7 @@ function perfFormatCpuReport() {
     );
   });
   if (agg.groups.some((g) => g.name === 'Mod_Settings')) lines.push('* = this debugger itself');
-  if (!agg.groups.length) lines.push(perfOverlay.loafType === 'long-animation-frame' ? '(no slow frames)' : '(needs long-animation-frame support, Chromium 123+)');
+  if (!agg.groups.length) lines.push(perfOverlay.loafType === 'long-animation-frame' ? '(no slow frames)' : '(not measurable in this browser: no long-animation-frame, Chromium 123+ only. Empty here does NOT mean fast; use the Main-thread lag section above)');
   lines.push('', 'Slowest frames (scripts folded by name and trigger):');
   perfOverlay.loaf.slice().sort((a, b) => b.dur - a.dur).slice(0, 10).forEach((f) => {
     lines.push(`  ${Math.round(f.dur)}ms (${Math.round(f.blocking || 0)}ms blocking) at ${new Date(f.ts).toISOString()}: ${perfDescribeFrameScripts(f.scripts)}`);
@@ -4508,6 +4596,7 @@ function startPerfOverlay() {
   perfOverlay.dom = 0;
   perfOverlay.domAt = -Infinity;
   startPerfSlowFrameObserver();
+  startPerfLagSampler();
   installPerfFetchHook();
   const el = document.createElement('div');
   el.id = PERF_OVERLAY_ID;
@@ -4638,6 +4727,7 @@ function stopPerfOverlay() {
     perfOverlay.loafObserver = null;
   }
   perfOverlay.loafType = null;
+  stopPerfLagSampler();
   uninstallPerfFetchHook();
 }
 
