@@ -4,6 +4,21 @@
   },
   "notes": [
     {
+      "version": "5.4.6",
+      "changes": [
+        {
+          "mod": "Better Bestiary",
+          "type": "changed",
+          "text": "The Advanced details button is back on the right, next to Close."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "fixed",
+          "text": "Ability scene previews open on tap on phones, and wide scenes shrink to fit the screen."
+        }
+      ]
+    },
+    {
       "version": "5.4.5",
       "changes": [
         {

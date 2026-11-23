@@ -1857,14 +1857,16 @@
   // ---- "Advanced details" footer toggle ------------------------------------------------------------------------
   function removeAdvancedFooterButton(modal) {
     modal?.querySelector(`[${ADVANCED_ATTR}]`)?.remove();
+    const closeBtn = findModalFooterCloseButton(modal);
+    if (closeBtn) closeBtn.style.order = '';
   }
 
   function updateAdvancedFooterButton(btn) {
-    // Green when on, red when off (the game's own button colours); `mr-auto` pushes it to the left end of the footer row.
+    // Green when on, red when off (the game's own button colours); it sits in the right-hand button group, just left of Close.
     const color = advancedDetailsOn
       ? 'frame-1-green active:frame-pressed-1-green surface-green'
       : 'frame-1-red active:frame-pressed-1-red surface-red';
-    btn.className = 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular mr-auto '
+    btn.className = 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular '
       + `${color} gap-1 px-2 py-0.5 pb-[3px] pixel-font-14`;
     btn.textContent = t('mods.betterBestiary.advancedDetails');
     btn.title = t('mods.betterBestiary.advancedDetailsTooltip');
@@ -1900,10 +1902,13 @@
       btn.type = 'button';
       btn.setAttribute(ADVANCED_ATTR, 'true');
       btn.addEventListener('click', () => toggleAdvancedDetails());
-      const closeBtn = findModalFooterCloseButton(modal);
-      if (closeBtn) closeBtn.insertAdjacentElement('beforebegin', btn);
-      else row.appendChild(btn);
+      row.appendChild(btn);
     }
+    // React inserts Clear selection / Sell selected before Close later. Flex `order` keeps this button right before Close
+    // the moment they appear (no DOM move, no visible jump): they stay at order 0, this button 1, Close 2.
+    btn.style.order = '1';
+    const closeBtn = findModalFooterCloseButton(modal);
+    if (closeBtn && closeBtn.style.order !== '2') closeBtn.style.order = '2';
     updateAdvancedFooterButton(btn);
   }
 

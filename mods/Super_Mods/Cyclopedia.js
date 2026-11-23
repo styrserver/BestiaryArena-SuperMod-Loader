@@ -4355,7 +4355,7 @@ function attachCyclopediaAbilityScenePreview(iconFrame, getSceneData, monsterId,
     panel.setAttribute('data-ability-scene-panel', 'true');
     panel.style.cssText = 'position:fixed;z-index:2147483000;pointer-events:none;display:none;padding:10px;'
       + 'background:rgba(20,20,20,0.97);outline:1px solid rgba(255,255,255,0.25);box-shadow:0 4px 18px rgba(0,0,0,0.6);'
-      + 'max-width:calc(100vw - 16px);transform-origin:0 0;';
+      + 'width:max-content;transform-origin:0 0;'; // max-content: the true size is measured, so placePanel can scale a scene wider than the screen
     cyclopediaScenePanels.add(panel);
     panel.appendChild(scene);
     return panel;
@@ -4444,8 +4444,9 @@ function attachCyclopediaAbilityScenePreview(iconFrame, getSceneData, monsterId,
   });
   // Keyboard: the icon takes focus, focus shows the scene, blur hides it.
   if (decorate) iconFrame.tabIndex = 0;
-  listen('focus', () => show());
-  listen('blur', () => end('blur'));
+  // A tap also moves focus (and the game's dialog may move it away again): that must not open or close the scene, touchstart owns taps.
+  listen('focus', () => { if (Date.now() >= ignoreMouseUntil) show(); });
+  listen('blur', () => { if (Date.now() >= ignoreMouseUntil) end('blur'); });
   // Touch: a tap on the icon toggles the scene, a tap anywhere else closes it. The browser then fires emulated mouse
   // events for the same tap, which would flip it straight back, so those are ignored briefly.
   listen('touchstart', () => {
