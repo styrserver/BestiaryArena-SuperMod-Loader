@@ -2044,6 +2044,70 @@ function createStaminaMonitoringCallback(logPrefix, successMessage) {
     };
 }
 
+const TASK_STALL_CHECK_MS = 60 * 1000;
+const TASK_STALL_THRESHOLD_MS = 3 * 60 * 1000;
+let taskStallWatchdogTimer = null;
+
+function stopTaskStallWatchdog() {
+    if (taskStallWatchdogTimer) {
+        clearInterval(taskStallWatchdogTimer);
+        taskStallWatchdogTimer = null;
+    }
+}
+
+/**
+ * Safety nets for a running task hunt: depletion watcher (autoplay can run dry in a
+ * background tab with no tooltip) and a stall watchdog (no newGame/endGame for a while).
+ * Call AFTER startStaminaTooltipMonitoring, which clears depletion watchers.
+ */
+function armTaskHuntingSafetyNets() {
+    watchStaminaDepletion(() => {
+        const callback = createStaminaMonitoringCallback(
+            'Stamina depleted during task - restarting',
+            'Task restarted after stamina recovery'
+        );
+        startStaminaTooltipMonitoring(callback, getCurrentMapStaminaCost());
+    });
+
+    lastGameStateChange = Date.now();
+    if (taskStallWatchdogTimer) return;
+    taskStallWatchdogTimer = setInterval(() => {
+        if (!taskHuntingOngoing) {
+            stopTaskStallWatchdog();
+            return;
+        }
+        if (pendingTaskCompletion || taskCompletionInProgress || finalRunPauseIssued) return;
+        if (staminaRecoveryReadyTimer || staminaRecoverySafetyTimer) return; // already waiting for stamina
+        if (isBoardAnalyzerActive() || isRaidHunterBlockingBetterTasker || shouldBetterTaskerYieldToRaidHunter()) return;
+        const idleMs = Date.now() - lastGameStateChange;
+        if (idleMs < TASK_STALL_THRESHOLD_MS) return;
+
+        lastGameStateChange = Date.now(); // rate-limit to one action per threshold
+        const stamina = getCurrentStamina();
+        const cost = getCurrentMapStaminaCost();
+        const sessionActive = isTaskAutoplaySessionActive();
+        console.warn(
+            `[Better Tasker] Stall watchdog: no game events for ${Math.round(idleMs / 1000)}s ` +
+            `(stamina ${stamina}/${cost}, sessionActive=${sessionActive}, hidden=${isDocumentHidden()})`
+        );
+        if (sessionActive) return;
+        if (stamina < cost) {
+            startStaminaTooltipMonitoring(
+                createStaminaMonitoringCallback(
+                    'Stamina recovered after stall - restarting',
+                    'Task restarted after stamina recovery'
+                ),
+                cost
+            );
+            return;
+        }
+        void resumeTaskAutoplayAfterStaminaRecovery(
+            'Stall watchdog - restarting autoplay',
+            'Task restarted after stall'
+        );
+    }, TASK_STALL_CHECK_MS);
+}
+
 // ============================================================================
 // 1.1. BETTER SETUPS INTEGRATION FUNCTIONS
 // ============================================================================
@@ -5551,7 +5615,8 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                 );
                 
                 startStaminaTooltipMonitoring(continuousStaminaMonitoring);
-                
+                armTaskHuntingSafetyNets();
+
                 return true; // Navigation successful
             } else {
                 console.log('[Better Tasker] No stored tasking map ID available - cannot proceed without quest log access');
@@ -5745,7 +5810,8 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                 );
                 
                 startStaminaTooltipMonitoring(continuousStaminaMonitoring);
-                
+                armTaskHuntingSafetyNets();
+
                 await sleep(TASK_START_DELAY);
                 
                 return true; // Navigation successful
@@ -8838,6 +8904,7 @@ function cleanupBetterTasker() {
         teardownBootGrace();
         clearPendingAutomationTimeouts();
         stopNextTaskTimerUpdates();
+        stopTaskStallWatchdog();
 
         // Stop automation (runtime teardown + interval/autoplay cleanup)
         stopAutomation();

@@ -447,9 +447,11 @@
   function detachAllModalObservers() {
     detachGridObserver();
     detachLayoutObserver();
+    detachCombatObserver();
   }
 
   function prepareForExternalClose() {
+    detachCombatScene();
     clearAllTimers();
     detachAllModalObservers();
     isSyncingLayout = false;
@@ -648,6 +650,8 @@
     modal.removeAttribute(SIZED_ATTR);
     modal.removeAttribute(LAYOUT_SIZED_ATTR);
     modal.querySelector(`[${FILTERS_ATTR}="true"]`)?.remove();
+    removeCombatSection(modal);
+    removeAdvancedFooterButton(modal);
     removeDepotFooterButtons(modal);
     modal.querySelector(`[${DETAILS_TITLE_BLOCK_ATTR}="true"]`)?.remove();
     restoreHeaderDetailsLabels(modal);
@@ -1578,6 +1582,7 @@
         refreshDepotMultiselectorButton(modal);
       }
       ensureDepotFooterButtons(modal);
+      ensureAdvancedFooterButton(modal);
     } finally {
       isSyncingLayout = false;
     }
@@ -1609,6 +1614,328 @@
     layoutObserver.observe(detailsCol, { childList: true });
   }
 
+  // ---- Combat details + ability scene for the selected creature -------------------------------------------------
+  // Drawn by the Cyclopedia mod (`window.CyclopediaCombatUI`). That object exists only while Cyclopedia runs, so with it
+  // disabled nothing is added here: this mod never turns Cyclopedia on for it. Native nodes are React's, so this adds only
+  // listeners to the game's own ability icon (the scene) and to its stats box (AD / Armor / Attack Speed / AP / MR / Speed),
+  // plus ONE overlay node inside that box that holds the combat panel while the pointer is over the box. The footer's
+  // "Advanced details" toggle switches both on and off.
+  const COMBAT_ATTR = `data-${NS}-combat`;
+  const ADVANCED_ATTR = `data-${NS}-advanced-details`;
+  const ADVANCED_STORAGE_KEY = 'better-bestiary-advanced-details';
+  const COMBAT_TOOLTIP_DELAY_MS = 150; // the game's tooltip wrapper: delayDuration 150 ...
+  const COMBAT_TOOLTIP_FADE_MS = 150; // ... and animate-in (fade-in-0 zoom-in-95 slide-in-from-bottom-2)
+  let statsBoxEl = null;
+  let statsBoxPosition = '';
+  let statsBoxDetach = null;
+  let combatObserver = null;
+  let combatObserverTarget = null;
+  let combatRaf = null;
+  let sceneDetach = null;
+  let sceneIcon = null;
+  // ON unless the player switched it off: the choice is saved and survives a refresh.
+  let advancedDetailsOn = true;
+  try {
+    advancedDetailsOn = localStorage.getItem(ADVANCED_STORAGE_KEY) !== 'off';
+  } catch {
+    // private window / blocked storage: stay on
+  }
+
+  function getCombatUi() {
+    return window.CyclopediaCombatUI ?? null;
+  }
+
+  /** The monster the native details block shows: its React component carries it as the `monster` prop. */
+  function getDetailsMonster(detailsCol) {
+    const block = getDetailsContentBlock(detailsCol);
+    if (!block) return null;
+    return walkReactFiber(block, (props) => (props?.monster?.gameId != null ? props.monster : undefined), 12) ?? null;
+  }
+
+  /** The native stats box: the grid around the "Attack Damage" stat. */
+  function findStatsBox(detailsCol) {
+    return getDetailsContentBlock(detailsCol)?.querySelector('span[title="Attack Damage"]')?.parentElement ?? null;
+  }
+
+  /** The game's ability icon box in the details card (the tooltip trigger around `img[alt="ability"]`). */
+  function findNativeAbilityIcon(detailsCol) {
+    const img = getDetailsContentBlock(detailsCol)?.querySelector('img[alt="ability"]');
+    return img?.closest('[data-state]') ?? img?.parentElement ?? null;
+  }
+
+  function detachCombatScene() {
+    sceneDetach?.();
+    sceneDetach = null;
+    sceneIcon = null;
+  }
+
+  function removeCombatSection(modal) {
+    detachCombatScene();
+    statsBoxDetach?.();
+    statsBoxDetach = null;
+    modal?.querySelector(`[${COMBAT_ATTR}]`)?.remove();
+    if (statsBoxEl) {
+      statsBoxEl.style.position = statsBoxPosition;
+      statsBoxEl = null;
+    }
+  }
+
+  /**
+   * The overlay inside the stats box. The combat panel is built when the pointer enters the box (a tap toggles it on touch
+   * screens) and dropped when it leaves; the panel is a child of the box, so moving onto it keeps it open and its
+   * seconds / ticks switch can be clicked. Returns { overlay, detach }.
+   */
+  function buildCombatOverlay(ui, monster, key, box) {
+    const overlay = document.createElement('div');
+    overlay.setAttribute(COMBAT_ATTR, key);
+    overlay.style.cssText = 'position:absolute;inset:0;z-index:30;pointer-events:none;';
+    // The game's info icon in the corner: there is more to see on hover.
+    const hint = document.createElement('img');
+    hint.src = 'https://bestiaryarena.com/assets/icons/info.png';
+    hint.alt = '';
+    hint.style.cssText = 'position:absolute;right:2px;top:2px;width:11px;height:11px;image-rendering:pixelated;';
+    overlay.appendChild(hint);
+    let holder = null;
+    let openTimer = null;
+    const hide = () => {
+      clearTimeout(openTimer);
+      openTimer = null;
+      holder?.remove();
+      holder = null;
+    };
+    // Above the box, like the game's own tooltips (side top, 4px off): drawn after the pointer has rested for the game's
+    // 150ms tooltip delay, then fading in with a small zoom and slide. The holder reaches down to the box (padding-bottom
+    // carries the 4px) so the pointer never leaves the box and its panel on the way up.
+    const buildPanel = () => {
+      const panel = ui.renderCombatDetails(monster.gameId, monster.metadata?.baseStats, refresh);
+      if (!panel) return null;
+      // Cyclopedia's panel is a fixed 160px frame that scrolls; here it grows to the size of its content, no scrollbar.
+      panel.style.height = 'auto';
+      panel.style.flex = 'none';
+      panel.style.overflow = 'visible';
+      panel.style.width = 'max-content';
+      return panel;
+    };
+    // Categories are never split: they are packed into columns, a new column starting when the next whole category would
+    // not fit under the max height (what the room above the box allows, at most 260px). Needs the panel in the page to measure.
+    const packColumns = (panel) => {
+      const groups = [...panel.querySelectorAll(':scope > [data-combat-section]')];
+      if (!groups.length) return;
+      const maxHeight = Math.min(260, Math.max(160, box.getBoundingClientRect().top - 16));
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;align-items:flex-start;gap:10px;';
+      const newColumn = () => {
+        if (row.children.length) {
+          // a thin line between columns, in the panel's heading colour
+          const line = document.createElement('div');
+          line.style.cssText = 'align-self:stretch;width:1px;background:rgba(255,224,102,0.3);';
+          row.appendChild(line);
+        }
+        const col = document.createElement('div');
+        col.style.cssText = 'display:flex;flex-direction:column;width:max-content;';
+        row.appendChild(col);
+        return col;
+      };
+      panel.replaceChildren(row);
+      let col = newColumn();
+      for (const group of groups) {
+        // A spreadsheet-style grid without cell borders: every line is a label cell and a value cell, labels sized to their
+        // text (a long one like Stone damage scaling cannot run into its value), and the groups of one column stretch to
+        // the column's width so all the value cells line up on the same edge.
+        group.style.minWidth = '190px';
+        [...group.children].slice(1).forEach((line, i) => {
+          line.style.cssText = `display:grid;grid-template-columns:1fr auto;gap:0;padding:0;`
+            + (i % 2 ? 'background:rgba(255,255,255,0.05);' : '');
+          const [label, value] = [line.children[0], line.children[1]];
+          if (label) Object.assign(label.style, { whiteSpace: 'nowrap', minWidth: 'auto', padding: '1px 6px' });
+          if (value) Object.assign(value.style, { padding: '1px 6px', minWidth: '60px', textAlign: 'right' });
+        });
+        col.appendChild(group);
+        if (col.children.length > 1 && col.offsetHeight > maxHeight) {
+          col.removeChild(group);
+          col = newColumn();
+          col.appendChild(group);
+        }
+      }
+    };
+    // Centred over the stats box, like the game's own tooltips (and kept inside the window sideways: more columns make the panel
+    // wider than the box).
+    const fitSideways = () => {
+      const centred = (box.clientWidth - holder.offsetWidth) / 2;
+      holder.style.left = `${centred}px`;
+      const rect = holder.getBoundingClientRect();
+      const overRight = rect.right - (window.innerWidth - 8);
+      const overLeft = 8 - rect.left;
+      if (overRight > 0) holder.style.left = `${centred - overRight}px`;
+      else if (overLeft > 0) holder.style.left = `${centred + overLeft}px`;
+    };
+    // The seconds / ticks switch: swap the rows in place (no close, no new fade) so the numbers just change.
+    const refresh = () => {
+      const frame = holder?.firstElementChild;
+      const panel = frame ? buildPanel() : null;
+      if (!panel) return;
+      frame.replaceChildren(panel);
+      packColumns(panel);
+      fitSideways();
+    };
+    const reveal = () => {
+      holder?.remove();
+      holder = null;
+      const panel = buildPanel();
+      if (!panel) return;
+      holder = document.createElement('div');
+      holder.style.cssText = 'position:absolute;left:0;bottom:100%;width:max-content;padding-bottom:4px;'
+        + 'pointer-events:auto;transform-origin:bottom center;';
+      const frame = document.createElement('div');
+      frame.style.cssText = 'padding:2px;background:rgba(20,20,20,0.98);outline:1px solid rgba(255,255,255,0.25);'
+        + 'box-shadow:0 4px 18px rgba(0,0,0,0.6);';
+      frame.appendChild(panel);
+      holder.appendChild(frame);
+      overlay.appendChild(holder);
+      packColumns(panel);
+      fitSideways();
+      holder.animate(
+        [{ opacity: 0, translate: '0 8px', scale: '0.95' }, { opacity: 1, translate: '0 0', scale: '1' }],
+        { duration: COMBAT_TOOLTIP_FADE_MS, easing: 'ease-out' }
+      );
+    };
+    const show = () => {
+      if (holder || openTimer) return;
+      openTimer = setTimeout(() => {
+        openTimer = null;
+        reveal();
+      }, COMBAT_TOOLTIP_DELAY_MS);
+    };
+    const onTouch = (e) => {
+      if (holder?.contains(e.target)) return;
+      if (holder) hide();
+      else show();
+    };
+    box.addEventListener('mouseenter', show);
+    box.addEventListener('mouseleave', hide);
+    box.addEventListener('touchstart', onTouch, { passive: true });
+    const detach = () => {
+      box.removeEventListener('mouseenter', show);
+      box.removeEventListener('mouseleave', hide);
+      box.removeEventListener('touchstart', onTouch);
+      hide();
+    };
+    return { overlay, detach };
+  }
+
+  /** Builds, rebuilds (another creature) or removes the overlay and the scene binding so they match the selected creature. */
+  function ensureCombatSection(modal, detailsCol) {
+    const ui = advancedDetailsOn ? getCombatUi() : null;
+    const monster = ui ? getDetailsMonster(detailsCol) : null;
+    const box = monster ? findStatsBox(detailsCol) : null;
+    if (!ui || !monster || !box || !ui.hasCombatData(monster.gameId)) {
+      if (statsBoxEl || sceneDetach || modal.querySelector(`[${COMBAT_ATTR}]`)) removeCombatSection(modal);
+      return;
+    }
+    // The scene follows the creature's state, as the game's own tooltip does: awakened by tier, or by the Hat of the Mad.
+    const awakened = Number(monster.tier) >= AWAKEN_TIER || /hat of the mad/i.test(monster.equip?.metadata?.name ?? '');
+    const key = `${monster.gameId}|${awakened}`;
+    const nativeIcon = ui.hasAbilityScene(monster.gameId, awakened) ? findNativeAbilityIcon(detailsCol) : null;
+    const current = box.querySelector(`:scope > [${COMBAT_ATTR}]`);
+    // Same creature, same stats box, same icon node: nothing to do. (The game updates its card in place, so these nodes
+    // usually survive a creature change: then the overlay and the scene are rebuilt for the new creature below.)
+    if (current?.getAttribute(COMBAT_ATTR) === key && statsBoxEl === box && sceneIcon === nativeIcon) return;
+    removeCombatSection(modal);
+
+    if (nativeIcon) {
+      sceneDetach = ui.attachAbilityScene(nativeIcon, monster.gameId, () => awakened, { decorate: false, hint: true });
+      sceneIcon = nativeIcon;
+    }
+    statsBoxEl = box;
+    statsBoxPosition = box.style.position;
+    box.style.position = 'relative';
+    const { overlay, detach } = buildCombatOverlay(ui, monster, key, box);
+    statsBoxDetach = detach;
+    box.appendChild(overlay);
+  }
+
+  // ---- "Advanced details" footer toggle ------------------------------------------------------------------------
+  function removeAdvancedFooterButton(modal) {
+    modal?.querySelector(`[${ADVANCED_ATTR}]`)?.remove();
+  }
+
+  function updateAdvancedFooterButton(btn) {
+    // Green when on, red when off (the game's own button colours); `mr-auto` pushes it to the left end of the footer row.
+    const color = advancedDetailsOn
+      ? 'frame-1-green active:frame-pressed-1-green surface-green'
+      : 'frame-1-red active:frame-pressed-1-red surface-red';
+    btn.className = 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular mr-auto '
+      + `${color} gap-1 px-2 py-0.5 pb-[3px] pixel-font-14`;
+    btn.textContent = t('mods.betterBestiary.advancedDetails');
+    btn.title = t('mods.betterBestiary.advancedDetailsTooltip');
+    btn.setAttribute('aria-pressed', advancedDetailsOn ? 'true' : 'false');
+  }
+
+  function toggleAdvancedDetails(modal = findBestiaryModal()) {
+    advancedDetailsOn = !advancedDetailsOn;
+    try {
+      localStorage.setItem(ADVANCED_STORAGE_KEY, advancedDetailsOn ? 'on' : 'off');
+    } catch {
+      // not saved: it still applies until the page reloads
+    }
+    if (!modal) return;
+    const btn = modal.querySelector(`[${ADVANCED_ATTR}]`);
+    if (btn) updateAdvancedFooterButton(btn);
+    const detailsCol = findBestiaryDetailsColumn(modal);
+    if (detailsCol) ensureCombatSection(modal, detailsCol);
+  }
+
+  /** The toggle sits left of Close in the footer; it is only offered while Cyclopedia provides the combat UI. */
+  function ensureAdvancedFooterButton(modal) {
+    if (!modal) return;
+    if (!getCombatUi()) {
+      removeAdvancedFooterButton(modal);
+      return;
+    }
+    const row = findModalFooterRow(modal);
+    if (!row) return;
+    let btn = row.querySelector(`[${ADVANCED_ATTR}]`);
+    if (!btn) {
+      btn = document.createElement('button');
+      btn.type = 'button';
+      btn.setAttribute(ADVANCED_ATTR, 'true');
+      btn.addEventListener('click', () => toggleAdvancedDetails());
+      const closeBtn = findModalFooterCloseButton(modal);
+      if (closeBtn) closeBtn.insertAdjacentElement('beforebegin', btn);
+      else row.appendChild(btn);
+    }
+    updateAdvancedFooterButton(btn);
+  }
+
+  function detachCombatObserver() {
+    combatObserver?.disconnect();
+    combatObserver = null;
+    combatObserverTarget = null;
+    if (combatRaf != null) cancelAnimationFrame(combatRaf);
+    combatRaf = null;
+  }
+
+  /** The native details component updates in place when another creature is picked: watch it (not our own nodes) to follow. */
+  function ensureCombatObserver(modal) {
+    const detailsCol = findBestiaryDetailsColumn(modal);
+    if (!detailsCol) return;
+    if (combatObserver && combatObserverTarget === detailsCol && detailsCol.isConnected) return;
+    detachCombatObserver();
+    combatObserverTarget = detailsCol;
+    combatObserver = new MutationObserver((mutations) => {
+      const own = (m) => {
+        const el = m.target.nodeType === 1 ? m.target : m.target.parentElement;
+        return !!el?.closest?.(`[${COMBAT_ATTR}],[${FILTERS_ATTR}]`);
+      };
+      if (mutations.every(own) || combatRaf != null) return;
+      combatRaf = requestAnimationFrame(() => {
+        combatRaf = null;
+        if (findBestiaryModal() === modal && detailsCol.isConnected) ensureCombatSection(modal, detailsCol);
+      });
+    });
+    combatObserver.observe(detailsCol, { childList: true, subtree: true, characterData: true });
+  }
+
   function ensurePresetButtons(modal) {
     const detailsCol = findBestiaryDetailsColumn(modal);
     if (!detailsCol) return null;
@@ -1624,6 +1951,9 @@
     enhanceDetailsTitle(modal);
     const filters = ensureFiltersPanel(detailsCol);
     placeDetailsColumnLayout(detailsCol, filters);
+    ensureCombatSection(modal, detailsCol);
+    ensureCombatObserver(modal);
+    ensureAdvancedFooterButton(modal);
     modal.setAttribute(ENHANCED_ATTR, 'true');
     window.depotManager?.scheduleFavoriteHeartsUpdate?.(250);
     return detailsCol;
@@ -1821,6 +2151,7 @@
     }
     if (activeModal === modal && isModalEnhancementReady(modal)) {
       ensureModalObservers(modal);
+      ensureAdvancedFooterButton(modal);
       return;
     }
     enhanceModal(modal);

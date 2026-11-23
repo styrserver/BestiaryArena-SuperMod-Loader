@@ -245,11 +245,30 @@
       "noItems": "No depot items found.",
       "modalTitle": "Depot"
     },
+    "cyclopedia": {
+      "combat": {
+        "basics": "Basics",
+        "ability": "Ability",
+        "timing": "Timing",
+        "awakened": "Awakened",
+        "summon": "Summon",
+        "fromOwner": "{name} from owner",
+        "firstCast": "First cast",
+        "ranged": "ranged",
+        "reach": "reach",
+        "seconds": "Seconds",
+        "ticks": "Ticks",
+        "showingSeconds": "Showing seconds. Click for ticks.",
+        "showingTicks": "Showing ticks. Click for seconds."
+      }
+    },
     "betterBestiary": {
       "activated": "Better Bestiary activated!",
       "authorCredit": "by megafuji",
       "presetsColumnTitle": "Creature Selector",
       "cosmeticsColumnTitle": "Overlays",
+      "advancedDetails": "Advanced details",
+      "advancedDetailsTooltip": "Show the ability preview (hover the ability) and combat details (hover the stats). Needs the Cyclopedia mod.",
       "cosmeticToggleHint": "(temporary while Bestiary is open)",
       "cosmetics": {
         "maxed": {

@@ -37,6 +37,7 @@ Run from the project folder (the one that contains `tools/` and `database/`). Ne
    | `NEW <id> <name>` (exit 1) | Creature in the game with no snapshot entry. |
    | `CHANGED <id> <name>: KEY: old -> new` (exit 1) | A constant, or `attackDelayMs`, differs. |
    | `REMOVED <id> <name>` (exit 1) | Snapshot entry for a creature the game no longer has. |
+| `EXTRA <id> <name>: KEY = value no longer appears ...` (exit 1) | A hand-written `CREATURE_COMBAT_EXTRA` number is gone from the game's code: the game changed it. Re-read it (see below) and fix the row by hand. |
    | error message (exit 2) | Download or parsing failed. The result is not "OK": do not trust the snapshot as current. |
 
 3. Review the lines. Check that each change is plausible: a rebalance shows as a few `CHANGED`
@@ -72,6 +73,20 @@ Run from the project folder (the one that contains `tools/` and `database/`). Ne
   Football Elemental are known gaps: their metadata is not in either shape the tool reads.
 - **Attack delay.** `ad` is the base auto-attack delay in ms. `null` means the 2000 ms engine
   default.
+
+## Values by variant (`v`)
+
+A constant that is a flat table of numbers by variant (Knight's `EXORI_CD_MS: { NONE, CLUB, SWORD, AXE }`, one cooldown per
+weapon) is extracted into the entry's `v` field, not `c`: there is no single number to override. The Cyclopedia and the Bestiary
+show each variant as its own row ("Exori cd axe"); the Map Editor does not list them.
+
+## Hand-written extras
+
+`CREATURE_COMBAT_EXTRA` (same file, below the generated block) holds numbers the game keeps in unnamed
+minified variables (Wasp poison, Bug stacks, Tortoise armor, Rat transform buffs, ...). The tool cannot
+extract them, so they are written by hand and shown in the Cyclopedia only (the Map Editor never lists
+them). The check confirms each number still appears in its creature's code; it cannot tell what the
+number means, so after an `EXTRA` line read the creature's class in the bundle and update the row.
 
 ## Related
 

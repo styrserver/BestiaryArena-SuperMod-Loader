@@ -25,6 +25,22 @@
     RETRY_DELAY_MS: 500
   };
 
+  // Equipment buttons per render batch (declared up top: never in its temporal dead zone).
+  const EQUIPMENT_RENDER_CHUNK_SIZE = 150;
+
+  // getUserOwnedEquipment() cache. Same pattern as Mod_Settings' runsSiteRosterCounts and
+  // Better_Setups' roster signature: the game replaces context.equips on every inventory change,
+  // so reference + length equality means "unchanged". Declared up top (never in its TDZ).
+  let ownedEquipmentCache = { equips: null, length: -1, list: [] };
+
+  // Arsenal buttons by item id. Selecting/deselecting equipment re-renders the arsenal; reusing the
+  // already-built button (and its portrait) makes that re-render a cheap re-append instead of ~1000
+  // portrait constructions. Entries are pruned when the inventory changes and cleared on modal close.
+  const equipmentButtonCache = new Map();
+
+  // T1 equivalents of one item of the given tier (T1=1, T2=2, T3=4, ...).
+  const t1ValueOf = (tier) => Math.pow(2, tier - 1);
+
   // Hardcoded disenchant values based on equipment tier
   const DISENCHANT_VALUES = {
     1: 25,  // Tier 1 (grey): 25 dust
@@ -603,40 +619,6 @@
   // ============================================================================
   // FORGING PROCESS FUNCTIONS
   // ============================================================================
-
-  function checkIfCanForgeForButton(equipment, stat, targetTier) {
-    try {
-      console.log(`[Better Forge] 🔍 checkIfCanForgeForButton called with:`, { equipment, stat, targetTier });
-      
-      // Check if we have enough items
-      const matchingItems = getMatchingInventoryItems(equipment, stat, targetTier);
-      const itemsByTier = groupItemsByTier(matchingItems);
-      
-      // Convert to count-based format for compatibility
-      const itemsByTierCount = {};
-      Object.keys(itemsByTier).forEach(tierKey => {
-        itemsByTierCount[tierKey] = itemsByTier[tierKey].length;
-      });
-      
-      // Check if we can forge the target tier
-      const canForge = checkIfCanForge(itemsByTierCount, targetTier);
-      
-      if (!canForge.canForge) {
-        console.log(`[Better Forge] ❌ Cannot forge:`, canForge.missing);
-        return false;
-      }
-      
-      // Check if we have enough dust
-      const dustCost = calculateDustCost(equipment, stat, targetTier);
-      const userDust = getUserCurrentDust();
-      console.log(`[Better Forge] 💰 Dust check: Need ${dustCost}, Have ${userDust}`);
-      
-      return userDust >= dustCost;
-    } catch (error) {
-      console.error('[Better Forge] Error in checkIfCanForgeForButton:', error);
-      return false;
-    }
-  }
 
   // Lock (or unlock) the parts of the UI that must stay put while a forge runs:
   // the Disenchant/Auto-upgrade tab buttons and the equipment/tier/stat pickers.
@@ -2315,7 +2297,7 @@
       });
       
       const totalT1Equivalent = calculateT1Equivalents(itemsByTier);
-      const totalT1Needed = Math.pow(2, targetTier - 1);
+      const totalT1Needed = t1ValueOf(targetTier);
       
       if (totalT1Equivalent < totalT1Needed) {
         return { 
@@ -2687,7 +2669,7 @@
     
     // Calculate total T1 items needed: 2^(targetTier - 1)
     const requirements = {
-      items: Math.pow(2, targetTier - 1),
+      items: t1ValueOf(targetTier),
       tiers: []
     };
     
@@ -2769,25 +2751,7 @@
       }
       
       // Check if forging is possible
-      const userInventory = getUserOwnedEquipment();
-      
-      const matchingItems = userInventory.filter(item => 
-        item.name === equipment && 
-        item.stat && 
-        item.stat.toLowerCase() === stat.toLowerCase() &&
-        item.tier < 5 && // Exclude T5 items completely
-        item.tier < tier // Exclude target tier items
-      );
-      
-      const itemsByTier = {};
-      matchingItems.forEach(item => {
-        if (!itemsByTier[item.tier]) {
-          itemsByTier[item.tier] = 0;
-        }
-        itemsByTier[item.tier]++;
-      });
-      
-      const canForge = checkIfCanForge(itemsByTier, tier);
+      const canForge = checkIfCanForge(getItemCountsByTier(equipment, stat, tier), tier);
       
       // Create status message
       const statusDiv = document.createElement('div');
@@ -2861,7 +2825,7 @@
       detailsContent.appendChild(statusDiv);
       
       // Update status based on inventory
-      updateAutoUpgradeStatusBasedOnInventory(equipment, tier, stat);
+      updateAutoUpgradeStatusBasedOnInventory(equipment, tier, stat, canForge);
       
       // Highlight equipment that will be consumed
       highlightEquipmentForForging(equipment, stat, tier);
@@ -2974,12 +2938,22 @@
     return itemsByTier;
   }
   
+  // { tier: count } of owned items below targetTier for equipment+stat.
+  function getItemCountsByTier(equipment, stat, targetTier) {
+    const itemsByTier = groupItemsByTier(getMatchingInventoryItems(equipment, stat, targetTier));
+    const counts = {};
+    Object.keys(itemsByTier).forEach(tierKey => {
+      counts[tierKey] = itemsByTier[tierKey].length;
+    });
+    return counts;
+  }
+
   function calculateT1Equivalents(itemsByTier) {
     let total = 0;
     Object.keys(itemsByTier).forEach(tier => {
       const tierNum = parseInt(tier);
       const count = Array.isArray(itemsByTier[tierNum]) ? itemsByTier[tierNum].length : (itemsByTier[tierNum] || 0);
-      const t1Value = Math.pow(2, tierNum - 1);
+      const t1Value = t1ValueOf(tierNum);
       const tierContribution = (count || 0) * t1Value;
       
       total += tierContribution;
@@ -2993,7 +2967,7 @@
     const itemsByTier = groupItemsByTier(matchingItems);
     
     // Calculate total T1 equivalents needed
-    const totalT1Needed = Math.pow(2, targetTier - 1);
+    const totalT1Needed = t1ValueOf(targetTier);
     const existingT1Equivalent = calculateT1Equivalents(itemsByTier);
     
     // If we don't have enough items, return empty array
@@ -3009,7 +2983,7 @@
     for (let tier = Math.min(targetTier - 1, 4); tier >= 1; tier--) {
       const availableItems = itemsByTier[tier] || [];
       if (availableItems.length > 0 && remainingT1Needed > 0) {
-        const t1Value = Math.pow(2, tier - 1);
+        const t1Value = t1ValueOf(tier);
         const maxCanUse = Math.min(availableItems.length, Math.floor(remainingT1Needed / t1Value));
         
         if (maxCanUse > 0) {
@@ -3042,7 +3016,7 @@
     });
     
     // Calculate total T1 equivalents needed
-    const totalT1Needed = Math.pow(2, targetTier - 1);
+    const totalT1Needed = t1ValueOf(targetTier);
     const existingT1Equivalent = calculateT1Equivalents(itemsByTier);
     
     // If we don't have enough items, return 0 (can't forge)
@@ -3274,6 +3248,7 @@
   }
   
   function resetBetterForgeModalSessionState() {
+    equipmentButtonCache.clear();
     autoUpgradeState.selectedEquipment = null;
     autoUpgradeState.selectedTier = null;
     autoUpgradeState.selectedStat = null;
@@ -3688,7 +3663,7 @@
       container.appendChild(missingLabel);
 
       // Calculate total T1 items needed for the target tier
-      const totalT1Needed = Math.pow(2, targetTier - 1);
+      const totalT1Needed = t1ValueOf(targetTier);
       
       // Use the same calculation method as checkIfCanForge for consistency
       const matchingItems = getMatchingInventoryItems(equipment, stat, targetTier);
@@ -3768,28 +3743,18 @@
     return container;
   }
   
-  function updateAutoUpgradeStatusBasedOnInventory(equipment, tier, stat) {
+  // canForge: result of checkIfCanForge for this exact selection, when the caller already has it.
+  function updateAutoUpgradeStatusBasedOnInventory(equipment, tier, stat, knownCanForge = null) {
     try {
       const requirements = calculateForgeRequirements(tier, 1);
-      
+
       if (requirements.items === 0) {
         updateAutoUpgradeStatus(t('mods.betterForge.invalidTierSelection'));
         return;
       }
-      
-      // Use shared utilities for inventory filtering and grouping
-      const matchingItems = getMatchingInventoryItems(equipment, stat, tier);
-      const itemsByTier = groupItemsByTier(matchingItems);
-      
-      // Convert to count-based format for compatibility
-      const itemsByTierCount = {};
-      Object.keys(itemsByTier).forEach(tierKey => {
-        itemsByTierCount[tierKey] = itemsByTier[tierKey].length;
-      });
-      
-      // Check if we can forge the target tier
-      const canForge = checkIfCanForge(itemsByTierCount, tier);
-      
+
+      const canForge = knownCanForge || checkIfCanForge(getItemCountsByTier(equipment, stat, tier), tier);
+
       if (canForge.canForge) {
         const forgeSteps = canForge.forgeSteps;
         const statusElement = createForgePathVisualization(equipment, stat, tier, forgeSteps, false);
@@ -3812,13 +3777,13 @@
     
     // Calculate what we actually need to reach the target tier
     let currentTier = 1;
-    let remainingT1Needed = Math.pow(2, targetTier - 1);
+    let remainingT1Needed = t1ValueOf(targetTier);
     
     // Start from highest available tier and work down to find the most efficient path
     for (let tier = Math.min(targetTier - 1, 4); tier >= 1; tier--) {
       const available = availableItems[tier] || 0;
       if (available > 0) {
-        const t1Value = Math.pow(2, tier - 1);
+        const t1Value = t1ValueOf(tier);
         const maxCanUse = Math.min(available, Math.floor(remainingT1Needed / t1Value));
         
         if (maxCanUse > 0) {
@@ -3877,7 +3842,7 @@
     };
     
     // Calculate total T1 equivalents needed
-    const totalT1Needed = Math.pow(2, targetTier - 1);
+    const totalT1Needed = t1ValueOf(targetTier);
     const existingT1Equivalent = calculateT1Equivalents(itemsByTier);
     
     if (existingT1Equivalent >= totalT1Needed) {
@@ -3892,7 +3857,7 @@
       for (let tier = Math.min(targetTier - 1, 4); tier >= 1; tier--) {
         const available = Array.isArray(itemsByTier[tier]) ? itemsByTier[tier].length : (itemsByTier[tier] || 0);
         if (available > 0 && remainingT1Needed > 0) {
-          const t1Value = Math.pow(2, tier - 1);
+          const t1Value = t1ValueOf(tier);
           const maxCanUse = Math.min(available, Math.floor(remainingT1Needed / t1Value));
           
           if (maxCanUse > 0) {
@@ -3931,7 +3896,6 @@
         count: missingT1,
         tier: 1
       });
-      console.log(`[Better Forge] ❌ Cannot forge T${targetTier}: Missing ${missingT1} T1 equivalents (have ${existingT1Equivalent}, need ${totalT1Needed})`);
     }
     
     return result;
@@ -4553,8 +4517,7 @@
                      // Apply tier filter using centralized logic
                      filteredEquipment = applyTypeFilter(baseEquipment, currentFilter);
                      
-                     scrollArea.innerHTML = '';
-                     
+                     // No manual clear: the renderers keep the grid and only rebuild when needed.
                      if (currentSearchTerm && currentSearchTerm.trim()) {
                        applyEquipmentSearch(scrollArea, currentSearchTerm, filteredEquipment, transferToDisenchant);
                      } else {
@@ -4591,7 +4554,6 @@
                        return;
                      }
                      
-                     scrollArea.innerHTML = '';
                      scrollArea.style.cssText = 'flex: 1 1 0; height: calc(100% - 40px); min-height: 0; width: 100%; max-width: 100%; overflow-y: auto; display: grid; grid-template-columns: repeat(6, 34px); grid-auto-rows: 34px; gap: 0; padding: 5px; background: rgba(40,40,40,0.96); box-sizing: border-box; justify-content: center;';
                      renderEquipmentList(scrollArea, filteredEquipment, transferToDisenchant);
                      
@@ -4618,26 +4580,33 @@
            console.warn('[Better Forge] ⚠️ Player snapshot not available');
            return [];
          }
-         
+
          const playerContext = playerSnapshot.context;
          if (!playerContext) {
            console.warn('[Better Forge] ⚠️ Player context not available');
            return [];
          }
-         
+
         const userEquips = playerContext.equips || [];
-        
+
+        // Callers sort/filter what they get, so hand out a copy of the cached list.
+        if (userEquips === ownedEquipmentCache.equips && userEquips.length === ownedEquipmentCache.length) {
+          return ownedEquipmentCache.list.slice();
+        }
+
         if (!userEquips || userEquips.length === 0) {
           console.log('[Better Forge] 📦 No equipment found in player state');
           return [];
         }
          
+         let cacheable = true; // false when a name lookup failed (state.utils not ready yet)
          const individualEquipment = userEquips
            .filter(equip => equip && equip.gameId)
            .map((equip, index) => {
              try {
                const equipData = globalThis.state?.utils?.getEquipment(equip.gameId);
                const equipmentName = equipData?.metadata?.name || `Equipment ID ${equip.gameId}`;
+               if (!equipData?.metadata?.name) cacheable = false;
                
                return {
                  id: equip.id || `equip_${index}`,
@@ -4649,6 +4618,7 @@
                };
              } catch (e) {
                console.warn(`[Better Forge] ⚠️ Error processing equipment ${equip.gameId}:`, e);
+               cacheable = false;
                return null;
              }
            })
@@ -4660,8 +4630,13 @@
            return a.stat.localeCompare(b.stat);
          });
          
+        if (cacheable) {
+          ownedEquipmentCache = { equips: userEquips, length: userEquips.length, list: sortedEquipment };
+          pruneEquipmentButtonCache(sortedEquipment);
+          return sortedEquipment.slice();
+        }
         return sortedEquipment;
-         
+
        } catch (error) {
          console.error('[Better Forge] 💥 Error getting user owned equipment:', error);
          return [];
@@ -4825,11 +4800,133 @@
 
 
 
-     function renderEquipmentList(scrollArea, equipmentItems, onSelect) {
-       // Force clear the scroll area
+     // Equipment buttons are built in batches so a full inventory (~1000 items) never blocks one frame.
+     // The first batch is synchronous (fills the visible grid); the rest follow on animation frames.
+     // Cached button for an item, or a new one. A reused button is un-hidden here: it may have been
+     // hidden as "transferred to disenchant"; hideSelectedEquipmentFromArsenal() re-hides it after render.
+     let equipmentRenderStats = { reused: 0, built: 0 };
+     function getEquipmentButton(equipment, onSelect) {
+       const sig = `${equipment.gameId}|${equipment.name}|${equipment.tier}|${equipment.stat}`;
+       const entry = equipmentButtonCache.get(equipment.id);
+       if (entry && entry.sig === sig && entry.onSelect === onSelect) {
+         const btn = entry.btn;
+         btn.style.display = 'flex';
+         // Clear the forge highlight too (reapplyHighlighting() only runs when a full selection exists).
+         btn.style.border = 'none';
+         btn.style.position = 'static';
+         btn.style.zIndex = 'auto';
+         btn.querySelector('.stripe-overlay')?.remove();
+         equipmentRenderStats.reused++;
+         return btn;
+       }
+       equipmentRenderStats.built++;
+       const btn = createEquipmentButton(equipment, onSelect);
+       equipmentButtonCache.set(equipment.id, { btn, sig, onSelect });
+       return btn;
+     }
+
+     // Drop buttons for items no longer in the inventory.
+     function pruneEquipmentButtonCache(currentEquipment) {
+       if (equipmentButtonCache.size === 0) return;
+       const liveIds = new Set(currentEquipment.map(item => item.id));
+       for (const id of equipmentButtonCache.keys()) {
+         if (!liveIds.has(id)) equipmentButtonCache.delete(id);
+       }
+     }
+
+     // Invalidates any batches still queued for this grid (a newer render or a clear supersedes them).
+     function cancelEquipmentRender(scrollArea) {
+       scrollArea._betterForgeRenderToken = (scrollArea._betterForgeRenderToken || 0) + 1;
+       return scrollArea._betterForgeRenderToken;
+     }
+
+     // Appends buttons in batches. Hiding already-transferred items and re-applying the forge
+     // highlight run once the LAST batch is in, because both need every button to exist.
+     // wantedIds (optional Set of string ids): buttons outside it are appended but marked
+     // data-bf-filtered (hidden by CSS), so the grid can hold the whole inventory.
+     function appendEquipmentButtonsChunked(scrollArea, items, onSelect, wantedIds = null) {
+       const token = cancelEquipmentRender(scrollArea);
+       const startedAt = performance.now();
+       equipmentRenderStats = { reused: 0, built: 0 };
+       let index = 0;
+       const appendNextChunk = () => {
+         if (scrollArea._betterForgeRenderToken !== token) return;
+         if (index > 0 && !scrollArea.isConnected) return; // modal closed mid-render
+         const fragment = document.createDocumentFragment();
+         const end = Math.min(index + EQUIPMENT_RENDER_CHUNK_SIZE, items.length);
+         for (; index < end; index++) {
+           const btn = getEquipmentButton(items[index], onSelect);
+           btn.toggleAttribute('data-bf-filtered', wantedIds ? !wantedIds.has(String(items[index].id)) : false);
+           fragment.appendChild(btn);
+         }
+         scrollArea.appendChild(fragment);
+         if (index < items.length) {
+           requestAnimationFrame(appendNextChunk);
+         } else {
+           hideSelectedEquipmentFromArsenal();
+           reapplyHighlighting();
+           console.log(`[Better Forge] Arsenal render: ${items.length} items, ${equipmentRenderStats.reused} reused / ${equipmentRenderStats.built} built, ${Math.round(performance.now() - startedAt)}ms`);
+         }
+       };
+       appendNextChunk();
+     }
+
+     // True when the grid's children are exactly these items' buttons, in this order.
+     function gridHoldsItemsInOrder(scrollArea, items) {
+       const children = scrollArea.children;
+       if (children.length !== items.length) return false;
+       for (let i = 0; i < items.length; i++) {
+         if (children[i].getAttribute('data-equipment-id') !== String(items[i].id)) return false;
+       }
+       return true;
+     }
+
+     // Renders the arsenal grid. The grid holds the WHOLE inventory in display order; wantedItems
+     // (search / selected-equipment / type filters) only decides which buttons are visible, via the
+     // data-bf-filtered attribute. Select -> deselect therefore flips attributes instead of detaching
+     // and re-attaching ~1000 buttons. The grid is rebuilt only when its content or order changed.
+     function renderEquipmentGrid(scrollArea, wantedItems, onSelect) {
+       const startedAt = performance.now();
+       const full = sortEquipmentForDisplay(getUserOwnedEquipment(), forgeState.globalTypeFilter || 'all');
+       const fullIds = new Set(full.map(item => String(item.id)));
+       const wantedIds = new Set(wantedItems.map(item => String(item.id)));
+
+       // Items outside the inventory list (should not happen): keep the plain render.
+       if (wantedItems.some(item => !fullIds.has(String(item.id)))) {
+         cancelEquipmentRender(scrollArea);
+         scrollArea.innerHTML = '';
+         appendEquipmentButtonsChunked(scrollArea, sortEquipmentForDisplay(wantedItems, forgeState.globalTypeFilter || 'all'), onSelect);
+         return;
+       }
+
+       if (gridHoldsItemsInOrder(scrollArea, full)) {
+         cancelEquipmentRender(scrollArea);
+         for (const btn of scrollArea.children) {
+           btn.toggleAttribute('data-bf-filtered', !wantedIds.has(btn.getAttribute('data-equipment-id')));
+           // Drop a stale forge highlight (reapplyHighlighting() only re-adds it for a full selection).
+           if (btn.style.border && btn.style.border !== 'none') {
+             btn.style.border = 'none';
+             btn.style.position = 'static';
+             btn.style.zIndex = 'auto';
+             btn.querySelector('.stripe-overlay')?.remove();
+           }
+         }
+         hideSelectedEquipmentFromArsenal();
+         reapplyHighlighting();
+         console.log(`[Better Forge] Arsenal render: in place, ${wantedItems.length}/${full.length} visible, ${Math.round(performance.now() - startedAt)}ms`);
+         return;
+       }
+
+       cancelEquipmentRender(scrollArea);
        scrollArea.innerHTML = '';
+       appendEquipmentButtonsChunked(scrollArea, full, onSelect, wantedIds);
+     }
+
+     function renderEquipmentList(scrollArea, equipmentItems, onSelect) {
+       cancelEquipmentRender(scrollArea);
        
        if (!equipmentItems.length) {
+         scrollArea.innerHTML = '';
          scrollArea.innerHTML = '<div style="color:#bbb;text-align:center;padding:16px;grid-column: span 6;max-width:100%;word-wrap:break-word;overflow-wrap:break-word;">' + t('mods.betterForge.noEquipmentFound') + '</div>';
          return;
        }
@@ -4839,12 +4936,7 @@
            return;
          }
        
-       const sortedEquipment = sortEquipmentForDisplay(equipmentItems, forgeState.globalTypeFilter || 'all');
-       
-       for (const equipment of sortedEquipment) {
-         const btn = createEquipmentButton(equipment, onSelect);
-         scrollArea.appendChild(btn);
-       }
+       renderEquipmentGrid(scrollArea, equipmentItems, onSelect);
      }
 
      function applyEquipmentSearch(scrollArea, searchValue, equipmentItems, onSelect) {
@@ -4869,11 +4961,13 @@
            const typeFilter = forgeState.globalTypeFilter || 'all';
            const sortedMatches = sortEquipmentForDisplay(matchingEquipment, typeFilter);
            
+           cancelEquipmentRender(scrollArea);
            requestAnimationFrame(() => {
              try {
-               scrollArea.innerHTML = '';
-               
+               cancelEquipmentRender(scrollArea);
+
                if (sortedMatches.length === 0) {
+                 scrollArea.innerHTML = '';
                  const noResultsMsg = document.createElement('div');
                  noResultsMsg.style.cssText = `
                    color: #bbb;
@@ -4887,17 +4981,7 @@
                  noResultsMsg.textContent = t('mods.betterForge.noEquipmentFoundMatching').replace('{search}', searchValue);
                  scrollArea.appendChild(noResultsMsg);
                } else {
-                 const fragment = document.createDocumentFragment();
-                 sortedMatches.forEach(equipment => {
-                   const btn = createEquipmentButton(equipment, onSelect);
-                   fragment.appendChild(btn);
-                 });
-                 scrollArea.appendChild(fragment);
-                 
-                 // Re-apply highlighting after search results are rendered
-                 setTimeout(() => {
-                   reapplyHighlighting();
-                 }, 100);
+                 renderEquipmentGrid(scrollArea, sortedMatches, onSelect);
                }
                
                             } catch (e) {
@@ -5915,6 +5999,7 @@
       const style = document.createElement('style');
       style.id = 'betterforge-btn-css';
       style.textContent = `
+        button[data-bf-filtered] { display: none !important; }
         .betterforge-btn {
           background: url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat !important;
           border: 6px solid transparent !important;
@@ -6224,6 +6309,10 @@
       clearBetterForgeModalLayoutCleanup();
       activeBetterForgeModal = null;
       
+      // Drop the cached inventory (holds a reference to the game's equips array)
+      ownedEquipmentCache = { equips: null, length: -1, list: [] };
+      equipmentButtonCache.clear();
+
       // Reset retry counters
       initRetryCount = 0;
       

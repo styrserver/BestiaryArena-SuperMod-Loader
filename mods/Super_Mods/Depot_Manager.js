@@ -2397,12 +2397,17 @@ function startDepotInventoryObserver() {
   };
   const shouldRunForNode = (node) => {
     if (!node || node.nodeType !== Node.ELEMENT_NODE) return false;
-    return Boolean(
+    if (
       node.classList?.contains('container-inventory-4') ||
       node.querySelector?.('.container-inventory-4') ||
-      node.querySelector?.('button.focus-style-visible') ||
       node.matches?.('[role="tab"]')
-    );
+    ) {
+      return true;
+    }
+    // Inventory slot buttons: only react when added inside the inventory ribbon,
+    // not for every focusable button the board/UI adds elsewhere.
+    const container = getInventoryContainerElement();
+    return Boolean(container && container.contains(node));
   };
   depotObservers.inventory = new MutationObserver((mutations) => {
     for (const mutation of mutations) {
@@ -2429,6 +2434,7 @@ function startDepotInventoryObserver() {
   document.addEventListener('contextmenu', handleInventoryItemContextMenu, true);
   run();
   depotInventoryRefreshInterval = setInterval(() => {
+    if (!getInventoryContainerElement()) return;
     addDepotInventoryButton();
     applyInventoryItemDepotLayout();
   }, 1000);

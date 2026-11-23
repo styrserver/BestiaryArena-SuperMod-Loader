@@ -4,6 +4,46 @@
   },
   "notes": [
     {
+      "version": "5.4.5",
+      "changes": [
+        {
+          "mod": "Better Bestiary",
+          "type": "added",
+          "text": "Hover the stats for combat details and the ability for a preview, with an Advanced details toggle in the footer (needs the Cyclopedia mod)."
+        },
+        {
+          "mod": "Better Forge",
+          "type": "fixed",
+          "text": "Selecting and clearing equipment is much smoother, and repeated \"cannot forge\" console messages are gone."
+        },
+        {
+          "mod": "Better Tasker",
+          "type": "fixed",
+          "text": "Tasks no longer stall silently when stamina runs out in a background tab or autoplay stops."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "changed",
+          "text": "Ability previews show the red hit area of more creatures, the Witch frogs every enemy in its area, the Werefox stays invisible for its whole duration, and AP abilities show magic damage."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "fixed",
+          "text": "Combat details show missing stats for twelve creatures, the right attack delay for three, and no longer show other goblins' stats on two goblins."
+        },
+        {
+          "mod": "Depot Manager",
+          "type": "fixed",
+          "text": "Less lag and frame drops during battles."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "fixed",
+          "text": "Old Sprites no longer apply inside the Bestiary, where they sat off-centre."
+        }
+      ]
+    },
+    {
       "version": "5.4.4",
       "changes": [
         {

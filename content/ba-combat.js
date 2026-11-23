@@ -53,27 +53,60 @@
       const parts = splitTopLevel(src, open);
       if (!parts) continue;
       const obj = {};
-      let ok = true;
       for (const p of parts) {
         const text = src.slice(p.start, p.end);
         const km = /^([A-Z][A-Z0-9_]+):/.exec(text);
-        if (!km) { ok = false; break; }
+        // a lowercase sibling (Elf's `bonusRange:1`) is not a constant: skip it, keep the UPPER ones
+        if (!km) continue;
         obj[km[1]] = { raw: text.slice(km[0].length), start: p.start + km[0].length, end: p.end };
       }
-      if (!ok || !Object.keys(obj).length) continue;
+      if (!Object.keys(obj).length) continue;
       if (!byVar.has(m[1])) byVar.set(m[1], []);
       byVar.get(m[1]).push({ at: m.index, open, close: parts[parts.length - 1].end, obj });
     }
     return byVar;
   }
 
+  /** The number a minified variable is declared as (`iw=3500`, or `ar=HX(1e3)` -> 1000) nearest before `at`, else null. */
+  function declaredNumber(src, name, at) {
+    const decl = new RegExp(String.raw`(?:^|[,;{}\s])${name.replace(/\$/g, '\\$')}=(?:\(0,[A-Za-z_$][\w$]*\.HX\)\()?(\d+\.?\d*(?:e[+-]?\d+)?)\)?(?=[,;])`, 'gi');
+    let found = null;
+    for (let m; (m = decl.exec(src.slice(0, at))); ) found = Number(m[1]);
+    return found;
+  }
+
   /** Returns { v, ms } (ms: already milliseconds, i.e. wrapped in the game's ms->ticks `HX()`). */
-  function scalar(raw) {
+  function scalar(raw, src, at) {
     const v = String(raw).trim();
     const ms = /^\(0,[A-Za-z_$][\w$]*\.HX\)\(([\d.e+-]+)\)$/.exec(v);
     if (ms) return { v: Number(ms[1]), ms: true };
+    // `HX(iw)` with `iw=3500` declared just above the table (Elf Arcanist's channel time): the nearest earlier
+    // numeric declaration of that name.
+    const viaVar = /^\(0,[A-Za-z_$][\w$]*\.HX\)\(([A-Za-z_$][\w$]*)\)$/.exec(v);
+    if (viaVar && src) {
+      const found = declaredNumber(src, viaVar[1], at);
+      if (found != null) return { v: found, ms: true };
+    }
     if (/^-?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?$/i.test(v)) return { v: Number(v), ms: false };
     return undefined; // nested objects, fractions, references: not shown
+  }
+
+  /**
+   * A constant whose value is a flat object of numbers by variant -> { VARIANT: number }, times in milliseconds
+   * (`*_TICKS` raw tick counts converted, `HX(ms)` values already ms), or null when it is anything else.
+   */
+  function variantTable(field, src, isTicks = false) {
+    if (!field.raw.trim().startsWith('{')) return null;
+    const parts = splitTopLevel(src, field.start);
+    if (!parts || parts.length < 2) return null;
+    const table = {};
+    for (const p of parts) {
+      const m = /^([A-Za-z_$][\w$]*):([\s\S]*)$/.exec(src.slice(p.start, p.end));
+      const val = m ? scalar(m[2], src, p.start) : undefined;
+      if (!val) return null;
+      table[m[1]] = isTicks && !val.ms ? val.v * MS_PER_TICK : val.v;
+    }
+    return table;
   }
 
   /** Index just past the `}` that closes the object literal opening at `start` (capped at 20000 chars). */
@@ -116,12 +149,15 @@
     const objects = indexConstantObjects(src);
     const metas = [...src.matchAll(/name:"([^"]+)",roles:\[[^\]]*\],queryTags:/g)];
     if (metas.length < 100) throw new Error(`only ${metas.length} creature entries found`);
+    const metaStarts = metas.map((m) => m.index);
 
     /** Constants and attack delay read from the metadata text starting at `from`. */
     const readEntry = (from, to) => {
       const seg = src.slice(from, Math.min(to, from + 14000));
       const constants = {};
       const loc = {};
+      const variants = {};
+      const ownClass = src.indexOf('class ', from); // behind it comes whatever follows the creature: other creatures' tooltip helpers
       for (const r of seg.matchAll(/\b([A-Za-z_$][\w$]{0,5})\.([A-Z][A-Z0-9_]{2,})\b/g)) {
         const defs = objects.get(r[1]);
         if (!defs) continue;
@@ -130,8 +166,28 @@
         // belongs to that later creature: the segment only reaches it through a tooltip helper function
         // that sits between two creatures (Cyclops Smith used to read Dark Magician's DMG_BASE 5 / DMG_PER_AP 0.6).
         for (const d of defs) if (d.at <= from + 14000 && d.at < to) def = d;
+        // A table written right in front of another creature's metadata is that creature's (Goblin's `al={...}` sits just before
+        // `name:"Goblin"`). Read from behind this creature's class it is a neighbour's tooltip helper: Goblin Scavenger's window holds
+        // the Gumslinger tooltip that prints Goblin's attack speed per level.
+        // A table from another module (Regeneration Tank shares one defined far away) is a deliberate share, not a neighbour's.
+        if (def && from + r.index > ownClass && ownClass > from && Math.abs(from - def.at) < 20000) {
+          // The owner is the creature whose text holds the table (Goblin Assassin's `aw={STEROID...}`), or the one right behind it
+          // (Goblin's `al`). It only counts when that creature's own text uses the table: one left behind by the creature before
+          // it (Obelisk's `BASE_AP`) is nobody else's.
+          const startOf = metaStarts.filter((at) => at <= def.at).pop();
+          const claimedBy = metaStarts.find((at) => at > def.at && at - def.at < 2000);
+          const usedBy = (at) => at != null && at !== from && src.slice(at, metaStarts.find((x) => x > at) ?? src.length).includes(`${r[1]}.${r[2]}`);
+          if (usedBy(startOf) || usedBy(claimedBy)) continue;
+        }
         const field = def && r[2] in def.obj ? def.obj[r[2]] : undefined;
-        const val = field ? scalar(field.raw) : undefined;
+        const val = field ? scalar(field.raw, src, field.start) : undefined;
+        // A table of values by variant (Knight's `EXORI_CD_MS:{NONE:8e3,CLUB:8e3,SWORD:8e3,AXE:3e3}`, one per weapon) is kept
+        // beside the constants, not in them: there is no single value to override live.
+        if (!val && field) {
+          const table = variantTable(field, src, r[2].endsWith('_TICKS'));
+          if (table) variants[r[2].replace(/_TICKS$/, '_MS')] = table;
+          continue;
+        }
         if (!val) continue;
         // *_TICKS constants are stored in milliseconds under a *_MS name, so the panel has one unit.
         // A raw tick count is converted; an HX() value is already milliseconds.
@@ -141,11 +197,36 @@
         constants[name] = isTicks && !val.ms ? val.v * MS_PER_TICK : val.v;
         loc[name] = { table: def.open, rawKey: r[2], ms: val.ms, isTicks };
       }
-      const delay = /attackDelayTicks:(?:\(0,[\w$]+\.HX\)\(([\d.e+-]+)\)|(\d+))/.exec(seg);
+      // A creature whose own text reads no table, but whose tooltip is a shared helper (`TooltipContent:e0("apprentice")`, the
+      // Dark Apprentice, which shares the Dark Magician's ability): the helper reads the shared table, defined after it. Take
+      // that whole table, as the other creature's entry does.
+      if (!Object.keys(constants).length) {
+        const helper = /TooltipContent:([A-Za-z_$][\w$]*)\(/.exec(seg);
+        const at = helper ? src.indexOf(`function ${helper[1]}(`) : -1;
+        const refs = at >= 0 ? src.slice(at, at + 4000).matchAll(/\b([A-Za-z_$][\w$]{0,5})\.([A-Z][A-Z0-9_]{2,})\b/g) : [];
+        for (const r of refs) {
+          const def = objects.get(r[1])?.find((d) => d.at > at && d.at - at < 20000);
+          if (!def) continue;
+          for (const [key, field] of Object.entries(def.obj)) {
+            const val = scalar(field.raw, src, field.start);
+            if (!val) continue;
+            const isTicks = key.endsWith('_TICKS');
+            const msName = key.replace(/_TICKS$/, '_MS');
+            const name = isTicks && !(msName in def.obj) ? msName : key;
+            constants[name] = isTicks && !val.ms ? val.v * MS_PER_TICK : val.v;
+            loc[name] = { table: def.open, rawKey: key, ms: val.ms, isTicks };
+          }
+          break;
+        }
+      }
+      const delay = /attackDelayTicks:(?:\(0,[\w$]+\.HX\)\(([\d.e+-]+)\)|(\d+)|([A-Za-z_$][\w$]*)(?=[,}]))/.exec(seg);
+      // `attackDelayTicks:ar` with `ar=HX(1e3)` declared above (Goblin, Rotworm): read the variable
+      const viaVar = delay?.[3] ? declaredNumber(src, delay[3], from + delay.index) : null;
       return {
-        ad: delay ? (delay[1] ? Number(delay[1]) : Number(delay[2]) * MS_PER_TICK) : null,
+        ad: delay ? (viaVar != null ? viaVar : delay[1] ? Number(delay[1]) : delay[2] ? Number(delay[2]) * MS_PER_TICK : null) : null,
         c: constants,
-        loc
+        loc,
+        v: Object.keys(variants).length ? variants : null
       };
     };
 
@@ -430,7 +511,7 @@
       if (!id || out[id]) continue;
       const own = readEntry(from, objEnd);
       out[id] = { n: ownName, ad: own.ad ?? base.ad, c: { ...base.c, ...own.c }, loc: { ...base.loc, ...own.loc } };
-      for (const key of ['r', 'rc', 'ic', 's', 'sc']) if (base[key] != null) out[id][key] = base[key];
+      for (const key of ['r', 'rc', 'ic', 's', 'sc', 'v']) if (base[key] != null) out[id][key] = base[key];
     }
     return { entries: out, objects, unlinkedSummons };
   }

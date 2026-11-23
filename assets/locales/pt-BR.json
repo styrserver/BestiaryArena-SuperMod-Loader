@@ -245,11 +245,30 @@
       "noItems": "Nenhum item no depósito.",
       "modalTitle": "Depósito"
     },
+    "cyclopedia": {
+      "combat": {
+        "basics": "Básico",
+        "ability": "Habilidade",
+        "timing": "Tempo",
+        "awakened": "Despertado",
+        "summon": "Invocação",
+        "fromOwner": "{name} do dono",
+        "firstCast": "Primeiro uso",
+        "ranged": "à distância",
+        "reach": "corpo a corpo",
+        "seconds": "Segundos",
+        "ticks": "Ticks",
+        "showingSeconds": "Mostrando segundos. Clique para ver ticks.",
+        "showingTicks": "Mostrando ticks. Clique para ver segundos."
+      }
+    },
     "betterBestiary": {
       "activated": "Better Bestiary ativado!",
       "authorCredit": "por megafuji",
       "presetsColumnTitle": "Seletor de Criaturas",
       "cosmeticsColumnTitle": "Destaques",
+      "advancedDetails": "Detalhes avançados",
+      "advancedDetailsTooltip": "Mostra a prévia da habilidade (passe o mouse na habilidade) e os detalhes de combate (passe o mouse nos atributos). Requer o mod Cyclopedia.",
       "cosmeticToggleHint": "(temporário enquanto o Bestiário estiver aberto)",
       "cosmetics": {
         "maxed": {

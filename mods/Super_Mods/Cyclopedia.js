@@ -1144,7 +1144,9 @@ const CYCLOPEDIA_SCENE_LAYOUT = {
   maxRange: 5, // a ranged caster stands at most this far from the target (Minotaur Mage's range is 99: the grid would be 199 x 199)
   burstCells: 3, // "large*" burst effect size in tiles
   casterFill: 2, // caster box as a multiple of one tile (the box carries frame padding, so the art is smaller)
-  playDelayMs: 500 // hover to playing: the scene shows frozen at its first frame meanwhile
+  playDelayMs: 150, // shown to playing: the scene is frozen at its first frame while it fades in (fadeMs), then plays
+  openDelayMs: 150, // hover to showing, and the fade-in: the game's own tooltip timings (its tooltip wrapper: delayDuration 150, animate-in)
+  fadeMs: 150
 };
 
 /** Ground sprite the scene tiles use: game sprite id, and how many crop variants per axis its sheet has (4 x 4 = 16). */
@@ -1176,7 +1178,7 @@ function getCyclopediaSceneFloorVariants() {
     if (Array.isArray(room?.floorFiles)) room.floorFiles.forEach((f) => scan(f?.data));
   });
   cyclopediaSceneFloorVariants = Array.from(found.values()).sort((a, b) => a.cropY - b.cropY || a.cropX - b.cropX);
-  console.log('[Cyclopedia][ability-scene] floor variants', { id: CYCLOPEDIA_SCENE_FLOOR_PREFERRED_ID, count: cyclopediaSceneFloorVariants.length, variants: cyclopediaSceneFloorVariants });
+  cyclopediaSceneLog('floor variants', () => ({ id: CYCLOPEDIA_SCENE_FLOOR_PREFERRED_ID, count: cyclopediaSceneFloorVariants.length, variants: cyclopediaSceneFloorVariants }));
   return cyclopediaSceneFloorVariants;
 }
 
@@ -1219,6 +1221,21 @@ function ensureCyclopediaSceneCasterStyle() {
 }
 
 /** Loads a scene asset once per URL to log its real size (and error out loudly if the URL is wrong). */
+/** `ms` into a loop of `D` ms as an animation keyframe offset, held just under `max` so a key never lands on the loop's end (1) before its own turn. */
+const cyclopediaFrac = (ms, D, max = 0.99) => Math.min(max, ms / D);
+
+/** CSS for an `E`px square centred on the tile at `col`, `row` of a grid of `cell`px tiles (a burst effect, a big overlay). */
+function cyclopediaCentredBoxCss(col, row, E, cell) {
+  return `position:absolute;width:${E}px;height:${E}px;left:${col * cell + cell / 2 - E / 2}px;top:${row * cell + cell / 2 - E / 2}px;`;
+}
+
+/** A debug line about how a scene was built. At the default log level nothing is built or printed (the data object is only made inside `build`). */
+function cyclopediaSceneLog(label, build) {
+  const level = globalThis.BestiaryLogger?.getLevel?.();
+  if (level !== 'verbose' && level !== 'info') return;
+  console.log(`[Cyclopedia][ability-scene] ${label}`, ...(build ? [build()] : []));
+}
+
 function probeCyclopediaSceneAsset(label, url, expected) {
   // Diagnostic only (a second download of an image the scene loads anyway): verbose log level only.
   if (globalThis.BestiaryLogger?.getLevel?.() !== 'verbose') return;
@@ -1284,7 +1301,7 @@ function cyclopediaSceneAreaReach(scene) {
   return reach;
 }
 
-function computeCyclopediaSceneGeometry(masks, range = null, melee = false, gridHalf = 0, casterOffset = null, casterAxis = false) {
+function computeCyclopediaSceneGeometry(masks, range = null, melee = false, gridHalf = 0, casterOffset = null) {
   const L = CYCLOPEDIA_SCENE_LAYOUT;
   const selfAnchored = masks[0].a === 'self';
   // Several masks of one anchor are stages of one ability (a wave that widens ring by ring): they share the origin
@@ -1318,8 +1335,7 @@ function computeCyclopediaSceneGeometry(masks, range = null, melee = false, grid
     // `casterOffset` [dCol, dRow] (self-anchored scenes): the caster starts that far from the middle of the board, where the spell happens (the Cyclops Drone starts two tiles east and jumps to the middle). `tiles`, `{ target: ... }`
     // and anchor-'target' entries then count from the middle; `to`, `on` and the other caster-relative entries from where the caster stands.
     casterCol: selfAnchored ? midCol + (casterOffset?.[0] || 0) : midCol + dist,
-    // `casterAxis`: the caster stands on the target's row (a straight attack: the Demon's energy beam only goes north, east, south or west)
-    casterRow: selfAnchored ? midRow + (casterOffset?.[1] || 0) : meleeNext || casterAxis ? midRow : midRow + dist
+    casterRow: selfAnchored ? midRow + (casterOffset?.[1] || 0) : meleeNext ? midRow : midRow + dist
   };
 }
 
@@ -1342,7 +1358,8 @@ function computeCyclopediaSceneTimeline(scene, geo) {
     const onSelf = effect.w === 'self'; // plays on the caster (buffs), not on the target / the hit tiles
     // `at` = a fixed start time (ms) written in the scene data (e.g. Rat's transform, a few seconds into the loop).
     // `land` = right when the hit lands (does not take a place in the area-effect stagger, like the blood on the target).
-    const startMs = Number.isFinite(effect.at) ? effect.at : effect.land ? flightMs : onSelf ? 0 : flightMs + (areaEffects++) * TM.effectStagger;
+    // `at` can also be `land+4000`: a time counted from the landing (the Witch's frogs turning back).
+    const startMs = typeof effect.at === 'string' ? resolveCyclopediaSceneTime(effect.at, flightMs) : Number.isFinite(effect.at) ? effect.at : effect.land ? flightMs : onSelf ? 0 : flightMs + (areaEffects++) * TM.effectStagger;
     const gameMs = globalThis.creatureDatabase?.getEffectSheet?.(effect.id)?.ms; // the game's own length of this effect
     const lengthMs = effect.ms || gameMs || Math.max(TM.minEffect, Math.min(frames * TM.msPerFrame, TM.maxEffect));
     return { effect, frames, onSelf, startMs, endMs: startMs + lengthMs };
@@ -1471,16 +1488,16 @@ function buildCyclopediaSceneFloor(geo) {
     layer.style.setProperty('--scene-tile-scale', String(scale));
     const img = firstSprite.querySelector('img');
     const cs = getComputedStyle(img);
-    console.log('[Cyclopedia][ability-scene] floor sprite', {
+    cyclopediaSceneLog('floor sprite', () => ({
       id: floor.id, nativePx: w, scale: Number(scale.toFixed(3)),
       painted: img.naturalWidth > 0 || (cs.content && cs.content !== 'none' && cs.content !== 'normal'),
       naturalSize: [img.naturalWidth, img.naturalHeight], content: String(cs.content).slice(0, 90)
-    });
+    }));
   };
   return { layer, fit };
 }
 
-/** Tint of an area's tiles: damage (orange) and buff / heal (the game's `ally` green): a scene says `areaKind: 'buff'`, a flash says `kind: 'buff'`. */
+/** Tint of an area's tiles: damage (orange) and buff / heal (the game's `ally` green): a flash says `kind: 'buff'`. */
 const CYCLOPEDIA_SCENE_AREA_COLORS = { damage: 'rgba(255,110,30,0.4)', buff: 'rgba(96,192,96,0.4)' };
 
 /** One layer holding a tile per hit tile, so a big area runs one animation (or none), not one per tile. */
@@ -1548,11 +1565,11 @@ function buildCyclopediaSceneCaster(geo, createCaster) {
             const dx = (tileRect.right - margin - targetW / 2 - cx - s * (o.x + o.width / 2 - cx)) / ps;
             const dy = (tileRect.bottom - margin - targetH / 2 - cy - s * (o.y + o.height / 2 - cy)) / ps;
             sprite.style.transform = `translate(-50%,-50%) translate(${dx}px,${dy}px) scale(${s})`;
-            console.log('[Cyclopedia][ability-scene] caster native fit', { size, box: [gw, gh], scale: Number(s.toFixed(3)), dx: Number(dx.toFixed(1)), dy: Number(dy.toFixed(1)) });
+            cyclopediaSceneLog('caster native fit', () => ({ size, box: [gw, gh], scale: Number(s.toFixed(3)), dx: Number(dx.toFixed(1)), dy: Number(dy.toFixed(1)) }));
             return;
           }
           // An outfit that is not laid out yet (hidden panel, sheet still loading): try again at the next fit, never settle for the generic frame fit below.
-          console.log('[Cyclopedia][ability-scene] caster fit waits for the outfit box', { classes: outfit.className });
+          cyclopediaSceneLog('caster fit waits for the outfit box', () => ({ classes: outfit.className }));
           return;
         }
         const w = sprite.offsetWidth;
@@ -1561,10 +1578,10 @@ function buildCyclopediaSceneCaster(geo, createCaster) {
         fitted = true;
         const scale = (L.cell * L.casterFill) / Math.max(w, h);
         sprite.style.transform = `translate(-50%,-50%) scale(${scale})`;
-        console.log('[Cyclopedia][ability-scene] caster fit (no outfit element)', { w, h, scale: Number(scale.toFixed(3)), classes: sprite.className });
+        cyclopediaSceneLog('caster fit (no outfit element)', () => ({ w, h, scale: Number(scale.toFixed(3)), classes: sprite.className }));
       };
     } else {
-      console.log('[Cyclopedia][ability-scene] no caster sprite');
+      cyclopediaSceneLog('no caster sprite');
     }
   } catch (casterError) {
     console.error('[Cyclopedia] Error building ability-scene caster:', casterError);
@@ -1616,7 +1633,7 @@ function buildCyclopediaSceneApSlider(sl, D) {
     { duration: D, iterations: Infinity, easing: 'linear' });
   track.appendChild(fill);
   wrap.appendChild(track);
-  console.log('[Cyclopedia][ability-scene] ap slider', { from: sl.from, to: sl.to, atMs: sl.at, ms: sl.ms, steps: steps.length });
+  cyclopediaSceneLog('ap slider', () => ({ from: sl.from, to: sl.to, atMs: sl.at, ms: sl.ms, steps: steps.length }));
   return wrap;
 }
 
@@ -1748,7 +1765,7 @@ function createCyclopediaStatusIcon(col, row, D, icon) {
   img.style.cssText = `position:absolute;left:${centerX - iw / 2}px;bottom:${centerY - ih / 2}px;width:${iw}px;height:${ih}px;max-width:none;image-rendering:pixelated;opacity:0;`;
   tile.appendChild(img);
   const t0 = icon.at || 0;
-  console.log('[Cyclopedia][ability-scene] status icon', { icon: icon.icon, atMs: t0, col, row, px: [(spec.w ?? spec.px) * CYCLOPEDIA_SCENE_STATUS_ICON_ZOOM, (spec.h ?? spec.px) * CYCLOPEDIA_SCENE_STATUS_ICON_ZOOM], up: icon.up ?? spec.up, right: spec.right });
+  cyclopediaSceneLog('status icon', () => ({ icon: icon.icon, atMs: t0, col, row, px: [(spec.w ?? spec.px) * CYCLOPEDIA_SCENE_STATUS_ICON_ZOOM, (spec.h ?? spec.px) * CYCLOPEDIA_SCENE_STATUS_ICON_ZOOM], up: icon.up ?? spec.up, right: spec.right }));
   const at = (ms) => Math.min(0.999, Math.max(0, ms / D));
   const frames = [{ offset: 0, opacity: 0, translate: '0 -300%', ...CYCLOPEDIA_SCENE_HOLD }];
   CYCLOPEDIA_SCENE_EXCLAMATIONS[spec.anim || 'poison'].forEach(([f, y, opacity, transform]) => frames.push({
@@ -1792,7 +1809,7 @@ function createCyclopediaStunBar(col, row, D, bar) {
   const [from, to] = bar.fill ? [0, 1] : [1, 0];
   fill.animate([{ offset: 0, transform: `scaleX(${from})`, ...CYCLOPEDIA_SCENE_HOLD }, { offset: f(bar.at), transform: `scaleX(${from})` }, { offset: f(bar.at + bar.ms), transform: `scaleX(${to})` }, { offset: 1, transform: `scaleX(${to})` }],
     { duration: D, iterations: Infinity, easing: 'linear' });
-  console.log('[Cyclopedia][ability-scene] stun bar', { atMs: bar.at, ms: bar.ms, col, row, px: [w, 2] });
+  cyclopediaSceneLog('stun bar', () => ({ atMs: bar.at, ms: bar.ms, col, row, px: [w, 2] }));
   return tile;
 }
 
@@ -2001,7 +2018,7 @@ function createCyclopediaTargetBorder(col, row, color) {
  */
 function growCyclopediaSceneTile(built, D, grow) {
   const L = CYCLOPEDIA_SCENE_LAYOUT;
-  const at = Math.min(0.99, grow.at / D);
+  const at = cyclopediaFrac(grow.at, D, 0.99);
   const end = Math.min(0.995, (grow.at + 300) / D);
   built.tile.animate(
     [{ offset: 0, transform: 'scale(1)', ...CYCLOPEDIA_SCENE_HOLD }, { offset: at, transform: 'scale(1)' },
@@ -2017,6 +2034,24 @@ function growCyclopediaSceneTile(built, D, grow) {
  * (facing south). `grow: { at, scale }` scales one up at `at` ms over 300ms, like the game's `transform: scale()` style on
  * the Turtle Shell's new holder. Returns [{ tile, fit }].
  */
+/**
+ * A creature that turns into another outfit for a while (the Witch's frog): a second body in `form.outfit` (a game outfit id) on the same
+ * tile from `form.at` to `form.until` ms, while the normal body is hidden. Returns the second body ({ tile, fit }).
+ */
+function buildCyclopediaSceneForm(col, row, D, form, baseTile, createCaster, facing) {
+  const body = buildCyclopediaSceneCaster({ casterCol: col, casterRow: row }, () => swapCyclopediaOutfit(createCaster(CYCLOPEDIA_SCENE_ALLY_DUMMY_ID), form.outfit));
+  body.tile.style.opacity = '0';
+  showCyclopediaBetween(body.tile, D, form.at, form.until);
+  holdCyclopediaSceneStill(body.tile, facing);
+  const gone = cyclopediaFrac(form.at, D, 0.99);
+  const back = Math.min(0.995, Math.max(gone, form.until / D));
+  baseTile.animate(
+    [{ offset: 0, opacity: 1, ...CYCLOPEDIA_SCENE_HOLD }, { offset: gone, opacity: 0 }, { offset: back, opacity: 0 }, { offset: Math.min(0.998, back + 0.002), opacity: 1 }, { offset: 1, opacity: 1 }],
+    { duration: D, iterations: Infinity }
+  );
+  return body;
+}
+
 function buildCyclopediaSceneMates(geo, timeline, mates, createCaster) {
   const L = CYCLOPEDIA_SCENE_LAYOUT;
   const D = timeline.duration;
@@ -2032,10 +2067,10 @@ function buildCyclopediaSceneMates(geo, timeline, mates, createCaster) {
     if (mate.dies) {
       // Killed at `dies.at` ms: it is gone and its corpse (item `dies.corpse`, the game's Human corpse by default) lies there.
       // `dies.until`: it is revived then (Ghost's ally) and stands there again.
-      const at = Math.min(0.99, mate.dies.at / D);
-      const back = Number.isFinite(mate.dies.until) ? Math.min(0.998, mate.dies.until / D) : null;
+      const at = cyclopediaFrac(mate.dies.at, D, 0.99);
+      const back = Number.isFinite(mate.dies.until) ? cyclopediaFrac(mate.dies.until, D, 0.998) : null;
       // `walk`: from `walk.at` the walking / standing copies below take over, so this one is gone again.
-      const gone = mate.walk ? Math.min(0.998, mate.walk.at / D) : null;
+      const gone = mate.walk ? cyclopediaFrac(mate.walk.at, D, 0.998) : null;
       // a mate that only appears at `mate.at` (a summon) is not there before it: this animation replaces the plain show-from-`at` one above
       const appear = mate.at > 0 ? Math.min(at, mate.at / D) : 0;
       built.tile.animate([{ offset: 0, opacity: appear > 0 ? 0 : 1, ...CYCLOPEDIA_SCENE_HOLD }, ...(appear > 0 ? [{ offset: appear, opacity: 1, ...CYCLOPEDIA_SCENE_HOLD }] : []), { offset: at, opacity: 0, ...(back == null ? {} : CYCLOPEDIA_SCENE_HOLD) },
@@ -2073,7 +2108,7 @@ function buildCyclopediaSceneMates(geo, timeline, mates, createCaster) {
     }
     // `bouncyFall`: a summon drops onto its tile at `mate.at` the game's way (`bouncyFall 300ms linear`: from 80% of a tile above, it lands at 40%, bounces and settles).
     if (mate.bouncyFall && mate.at > 0) {
-      const f = (ms) => Math.min(0.998, ms / D);
+      const f = (ms) => cyclopediaFrac(ms, D, 0.998);
       const frames = [[0, -80], [0.1, -70], [0.2, -50], [0.3, -20], [0.4, 0], [0.5, -8], [0.6, -10], [0.8, -8], [0.9, -5], [1, 0]];
       built.tile.animate([{ offset: 0, translate: '0 -80%', ...CYCLOPEDIA_SCENE_HOLD }, ...frames.map(([p, y]) => ({ offset: f(mate.at + p * 300), translate: `0 ${y}%` })), { offset: 1, translate: '0 0' }],
         { duration: D, iterations: Infinity, easing: 'linear' });
@@ -2081,7 +2116,7 @@ function buildCyclopediaSceneMates(geo, timeline, mates, createCaster) {
     // `pulse` [ms, ...]: the game's `pulse` style (its `pulsate` keyframes: brightness 100% -> 200% and back, 300ms, twice) when it is buffed (a creature on Dragon Lord's fire field).
     // Drawn as a brightness() filter so it does not clash with the opacity animations that show and hide the walking copies.
     if (mate.pulse) {
-      const f = (ms) => Math.min(0.998, ms / D);
+      const f = (ms) => cyclopediaFrac(ms, D, 0.998);
       const keys = [{ offset: 0, filter: 'opacity(1)', ...CYCLOPEDIA_SCENE_HOLD }];
       mate.pulse.forEach((t) => [0, 150, 300, 450, 600].forEach((d, i) => keys.push({ offset: f(t + d), filter: i % 2 ? 'brightness(2)' : 'brightness(1)' })));
       keys.push({ offset: 1, filter: 'opacity(1)' });
@@ -2092,21 +2127,24 @@ function buildCyclopediaSceneMates(geo, timeline, mates, createCaster) {
     if (mate.tint) {
       const t = mate.tint;
       // `ramp` ms: the filter fades in over that long and, with `until`, back out over the same (the game's `spiderGrayscale`: 10% in, 10% out).
-      const at = (ms) => Math.min(0.99, ms / D);
+      const at = (ms) => cyclopediaFrac(ms, D, 0.99);
       const keys = t.ramp
         ? [{ offset: 0, filter: 'none', ...CYCLOPEDIA_SCENE_HOLD }, { offset: at(t.at), filter: 'none' }, { offset: at(t.at + t.ramp), filter: t.filter, ...CYCLOPEDIA_SCENE_HOLD },
           ...(t.until ? [{ offset: at(t.until - t.ramp), filter: t.filter }, { offset: at(t.until), filter: 'none', ...CYCLOPEDIA_SCENE_HOLD }, { offset: 1, filter: 'none' }] : [{ offset: 1, filter: t.filter }])]
-        : [{ offset: 0, filter: 'none', ...CYCLOPEDIA_SCENE_HOLD }, { offset: Math.min(0.99, t.at / D), filter: t.filter, ...(t.until ? CYCLOPEDIA_SCENE_HOLD : {}) },
-          ...(t.until ? [{ offset: Math.min(0.995, t.until / D), filter: 'none' }, { offset: 1, filter: 'none' }] : [{ offset: 1, filter: t.filter }])];
+        : [{ offset: 0, filter: 'none', ...CYCLOPEDIA_SCENE_HOLD }, { offset: cyclopediaFrac(t.at, D, 0.99), filter: t.filter, ...(t.until ? CYCLOPEDIA_SCENE_HOLD : {}) },
+          ...(t.until ? [{ offset: cyclopediaFrac(t.until, D, 0.995), filter: 'none' }, { offset: 1, filter: 'none' }] : [{ offset: 1, filter: t.filter }])];
       [built.tile, ...(walker?.tiles || [])].forEach((tile) => tile.animate(keys, { duration: D, iterations: Infinity }));
     }
+    // `form` { outfit, at, until }: it turns into another outfit between `at` and `until` ms (an enemy of the Witch's, as a frog).
+    const formTimes = mate.form ? { ...mate.form, at: resolveCyclopediaSceneTime(mate.form.at, timeline.flightMs), until: resolveCyclopediaSceneTime(mate.form.until, timeline.flightMs) } : null; // `land+4000` style times, as the dummy's `dummyForm`
+    const formBody = formTimes ? buildCyclopediaSceneForm(baseCol + (mate.dx || 0), baseRow + (mate.dy || 0), D, formTimes, built.tile, createCaster, mate.facing) : null;
     const baseFit = mate.grow ? growCyclopediaSceneTile(built, D, mate.grow) : built.fit;
-    const fit = walker ? () => { baseFit(); walker.fit(); } : baseFit;
+    const fit = walker || formBody ? () => { baseFit(); walker?.fit(); formBody?.fit(); } : baseFit;
     // `shake` { at, factor, ms }: it shakes (the game's `shaking-factor`) when it stops: a creature the Cyclops Drone pushed a short way (--shake 4, 125ms).
     // `hop` { at, ms, shakeMs }: the game's `bounceJump` (a hop up and a smaller bounce, `ms` long, linear) with a `shaking` 100ms over its start: a creature the Thalas hook drops next to it after a long pull.
     if (mate.hop) [built.tile, ...(walker?.tiles || [])].forEach((tile) => animateCyclopediaHop(tile, D, mate.hop.at, mate.hop.ms ?? 500, mate.hop.shakeMs ?? 100));
     if (mate.shake) [built.tile, ...(walker?.tiles || [])].forEach((tile) => animateCyclopediaShake(tile, D, [mate.shake.at], mate.shake.factor ?? 1, mate.shake.ms ?? 100));
-    return { tile: built.tile, fit, corpseTile, extraTiles: walker?.tiles || [] };
+    return { tile: built.tile, fit, corpseTile, extraTiles: [...(walker?.tiles || []), ...(formBody ? [formBody.tile] : [])] };
   });
 }
 
@@ -2210,7 +2248,7 @@ function buildCyclopediaSceneOverlays(geo, timeline, overlays) {
         ...(ov.outMs
           ? [{ offset: f(ov.at + ov.ms), opacity: op, easing: 'ease-out' }, { offset: f(ov.at + ov.ms + ov.outMs), opacity: 0 }, { offset: 1, opacity: 0 }] // `outMs`: it fades out (the Geomancer's stones, 700ms)
           : [{ offset: f(ov.at + ov.ms), opacity: op, ...CYCLOPEDIA_SCENE_HOLD }, { offset: Math.min(0.999, f(ov.at + ov.ms) + 0.0005), opacity: 0 }, { offset: 1, opacity: 0 }])], { duration: D, iterations: Infinity, easing: 'linear' });
-      if (ov.dx === -1 && ov.dy === -1) { console.log('[Cyclopedia][ability-scene] rune', { atMs: ov.at, lastsMs: ov.ms, removedAtMs: ov.at + ov.ms, loopMs: D }); }
+      if (ov.dx === -1 && ov.dy === -1) { cyclopediaSceneLog('rune', () => ({ atMs: ov.at, lastsMs: ov.ms, removedAtMs: ov.at + ov.ms, loopMs: D })); }
       const first = ov.drop === 'soft' ? -50 : -100;
       const drop = [[0, first], [0.4, first], [0.6, 11.75], [0.62, 9.27], [0.7, -2.39], [0.72, -2.35], [0.8, 0.39], [0.82, 0.52], [0.9, -0.1], [0.92, -0.08], [1, 0]];
       sheet.animate([{ offset: 0, translate: `0 ${first}%`, ...CYCLOPEDIA_SCENE_HOLD }, ...drop.map(([p, y]) => ({ offset: f(ov.at + p * dropMs), translate: `0 ${y}%` })), { offset: 1, translate: '0 0' }],
@@ -2491,7 +2529,7 @@ function buildCyclopediaSceneTransform(geo, timeline, tf, createCaster, normalTi
   const { duration: D } = timeline;
   if (!tf.outfit) {
     // No other form: the creature is gone from `at` to `until` (dies), then fades back in over `fade` ms (Skeleton's revive).
-    const gone = Math.min(0.99, tf.at / D);
+    const gone = cyclopediaFrac(tf.at, D, 0.99);
     // No `until` = it stays dead (Tortoise's holder): back only when the loop restarts.
     const back = Number.isFinite(tf.until) ? Math.min(0.995, Math.max(gone, tf.until / D)) : 0.995;
     const shown = Math.min(0.998, back + (tf.fade || 0) / D);
@@ -2513,7 +2551,7 @@ function buildCyclopediaSceneTransform(geo, timeline, tf, createCaster, normalTi
   const form = buildCyclopediaSceneCaster(geo, () => {
     return swapCyclopediaOutfit(createCaster(), tf.outfit);
   });
-  const at = Math.min(0.99, tf.at / D);
+  const at = cyclopediaFrac(tf.at, D, 0.99);
   const until = Math.min(0.995, Math.max(at, tf.until / D));
   const grow = Math.min(until, at + 300 / D);
   const hold = CYCLOPEDIA_SCENE_HOLD;
@@ -2569,7 +2607,7 @@ function placeCyclopediaMissileSprite(missile, url, dir, cell, col, row) {
         background: `url(${url}) ${-dir.col * M}px ${-dir.row * M}px / ${M * 3}px ${M * 3}px no-repeat`,
         visibility: 'visible'
       });
-      console.log('[Cyclopedia][ability-scene] missile sized from its sheet', { url, frame: f, px: M, offCentre: [ox, oy] });
+      cyclopediaSceneLog('missile sized from its sheet', () => ({ url, frame: f, px: M, offCentre: [ox, oy] }));
     } catch (_) { /* sheet not readable: the missile stays hidden */ }
   };
   img.src = url;
@@ -2607,7 +2645,7 @@ function buildCyclopediaSceneMissiles(geo, timeline) {
 function createCyclopediaMissile({ info, fromCol, fromRow, dx, dy, dir, leaveF, landF, goneF, duration }) {
   const L = CYCLOPEDIA_SCENE_LAYOUT;
   const url = info.src ? `${CYCLOPEDIA_SCENE_ASSET_BASE}/${info.src}` : `${CYCLOPEDIA_SCENE_ASSET_BASE}/MISSILE/${info.id}.png`; // `src`: a sheet outside /assets/MISSILE (Thalas's arrows)
-  console.log('[Cyclopedia][ability-scene] missile', { name: info.n, id: info.id, url, octant: dir.octant, frame: [dir.col, dir.row] });
+  cyclopediaSceneLog('missile', () => ({ name: info.n, id: info.id, url, octant: dir.octant, frame: [dir.col, dir.row] }));
   probeCyclopediaSceneAsset(`missile ${info.n}`, url, { w: 96, h: 96 });
   const missile = document.createElement('div');
   missile.style.cssText = `position:absolute;left:${fromCol * L.cell}px;top:${fromRow * L.cell}px;width:${L.cell}px;height:${L.cell}px;`
@@ -2770,7 +2808,8 @@ function planCyclopediaSceneFlee(scene, geo) {
       t += own.stepMs;
       return step;
     });
-    return { at: f.at || 0, glideMs, steps, endMs: t, restFacing: steps[steps.length - 1].facing };
+    // `restFacing` in the scene data: it stands facing something else than the way it walked (the Werefox turns to its target)
+    return { at: f.at || 0, glideMs, steps, endMs: t, restFacing: f.restFacing ?? steps[steps.length - 1].facing };
   }
   // The enemies it flees from: `from` [[dCol, dRow], ...] from the caster's tile, else the target tile. The game sums -1 / distance over all of them.
   const enemies = (f.from || [[geo.midCol - geo.casterCol, geo.midRow - geo.casterRow]]).map(([dc, dr]) => [geo.casterCol + dc, geo.casterRow + dr]);
@@ -2806,7 +2845,7 @@ function planCyclopediaSceneFlee(scene, geo) {
  */
 function cyclopediaCasterPathKeys(flee, D) {
   const L = CYCLOPEDIA_SCENE_LAYOUT;
-  const at = (ms) => Math.min(0.998, ms / D);
+  const at = (ms) => cyclopediaFrac(ms, D, 0.998);
   const cell = (x, y) => `translate(${x * L.cell}px,${y * L.cell}px)`;
   const keys = [{ offset: 0, transform: 'translate(0,0)', ...CYCLOPEDIA_SCENE_HOLD }, { offset: at(flee.at), transform: 'translate(0,0)' }];
   let prev = { x: 0, y: 0, end: flee.at };
@@ -2827,7 +2866,7 @@ function cyclopediaMateWalkKeys(mate, D) {
   const L = CYCLOPEDIA_SCENE_LAYOUT;
   const w = mate.walk;
   const times = cyclopediaMateStepTimes(mate);
-  const at = (ms) => Math.min(0.998, ms / D);
+  const at = (ms) => cyclopediaFrac(ms, D, 0.998);
   const cell = (x, y) => `translate(${x * L.cell}px,${y * L.cell}px)`;
   const keys = [{ offset: 0, transform: 'translate(0,0)', ...CYCLOPEDIA_SCENE_HOLD }, { offset: at(w.at), transform: 'translate(0,0)' }];
   let [x, y, t] = [0, 0, w.at];
@@ -2986,7 +3025,7 @@ function buildCyclopediaSceneEffects(geo, timeline, stageTiles) {
     const plan = effect.sz ? null : cyclopediaSceneEffectPlan(effect.id, L.cell, frames, { ms: effect.ms, reverse: effect.reverse });
     if (plan && effect.z) { plan.w *= effect.z; plan.h *= effect.z; plan.sw *= effect.z; } // `z` = the game's `zoom` style on the effect
     const E = L.cell * (effect.sz || L.burstCells);
-    console.log('[Cyclopedia][ability-scene] effect', { name: effect.n, id: effect.id, url: effectUrl, frames, burst, fromGameCss: !!plan?.meta, px: plan ? [plan.w, plan.h] : E, tiles: spots.length });
+    cyclopediaSceneLog('effect', () => ({ name: effect.n, id: effect.id, url: effectUrl, frames, burst, fromGameCss: !!plan?.meta, px: plan ? [plan.w, plan.h] : E, tiles: spots.length }));
     probeCyclopediaSceneAsset(`effect ${effect.n}`, effectUrl, plan?.meta ? { w: Math.round(plan.sw / (L.cell / 32)) } : { ratio: frames });
     spots.forEach(([col, row, delayMs]) => {
       const fx = document.createElement('div');
@@ -3023,7 +3062,7 @@ function buildCyclopediaSceneEffects(geo, timeline, stageTiles) {
       }
       const startF = (startMs + delayMs) / duration;
       const endF = ((onSelf || burst ? endMs : endMs - stageDelayMs + delayMs)) / duration;
-      fx.style.cssText = `position:absolute;width:${E}px;height:${E}px;left:${col * L.cell + L.cell / 2 - E / 2}px;top:${row * L.cell + L.cell / 2 - E / 2}px;`
+      fx.style.cssText = cyclopediaCentredBoxCss(col, row, E, L.cell)
         + `background:url(${effectUrl}) 0 0 / ${E}px ${E * frames}px no-repeat;`
         + 'image-rendering:pixelated;opacity:0;pointer-events:none;';
       fx.animate(
@@ -3071,11 +3110,11 @@ function addCyclopediaSceneAutoAttacks(scene, geo) {
   }
   if (!attacks.length) return scene;
   const from = [geo.casterCol - geo.midCol, geo.casterRow - geo.midRow];
-  console.log('[Cyclopedia][ability-scene] auto attacks', { delayMs: aa.delayMs, missile: aa.missile?.n ?? null, attackMs: attacks.map((a) => a.land) });
+  cyclopediaSceneLog('auto attacks', () => ({ delayMs: aa.delayMs, missile: aa.missile?.n ?? null, attackMs: attacks.map((a) => a.land) }));
   return {
     ...scene,
     // `autoAttackAs` { type, crit, noBlood }: the plain attack is not a plain physical hit in this scene (the awakened Elf's arrows at a trapped enemy are true-damage crits)
-    numbers: [...(scene.numbers || []), ...attacks.map((a) => ({ at: a.land, kind: 'damage', on: 'target', type: scene.autoAttackAs?.type || 'physical', dtype: scene.autoAttackAs?.type || 'physical', ...(scene.autoAttackAs?.crit ? { crit: true } : {}) }))],
+    numbers: [...(scene.numbers || []), ...attacks.map((a) => ({ at: a.land, kind: 'damage', on: 'target', type: scene.autoAttackAs?.type || aa.type || 'physical', dtype: scene.autoAttackAs?.type || aa.type || 'physical', ...(scene.autoAttackAs?.crit ? { crit: true } : {}) }))],
     flights: [...(scene.flights || []), ...(aa.missile ? attacks.map((a) => ({ shot: aa.missile, from, to: [0, 0], at: a.t })) : [])],
     effects: [...(scene.effects || []), ...(scene.autoAttackAs?.noBlood ? [] : attacks.map((a) => ({ n: 'bleed', id: 1, f: 6, tiles: [[0, 0]], at: a.land })))],
     holdMs: Math.max(scene.holdMs || 0, attacks[attacks.length - 1].land + 700)
@@ -3114,7 +3153,7 @@ function warpCyclopediaSceneStart(root, D, S) {
 
 function createCyclopediaAbilityGrid(masks, sceneIn, createCaster) {
   const L = CYCLOPEDIA_SCENE_LAYOUT;
-  const geo = computeCyclopediaSceneGeometry(masks, sceneIn.range, !sceneIn.range && !(sceneIn.missiles || []).length, Math.max(sceneIn.gridHalf || 0, cyclopediaSceneAreaReach(sceneIn) ? cyclopediaSceneAreaReach(sceneIn) + CYCLOPEDIA_SCENE_LAYOUT.padding : 0), sceneIn.casterOffset || null, !!sceneIn.casterAxis); // an area spelled out in effect / flash tiles keeps one tile of margin too
+  const geo = computeCyclopediaSceneGeometry(masks, sceneIn.range, !sceneIn.range && !(sceneIn.missiles || []).length, Math.max(sceneIn.gridHalf || 0, cyclopediaSceneAreaReach(sceneIn) ? cyclopediaSceneAreaReach(sceneIn) + CYCLOPEDIA_SCENE_LAYOUT.padding : 0), sceneIn.casterOffset || null); // an area spelled out in effect / flash tiles keeps one tile of margin too
   // A scene that casts at once (no explicit times: the extracted ones) starts its attack 1s in (`lead`); one with its own times is moved later as a whole when its loop is first shown (`warpCyclopediaSceneStart`).
   const castsAtOnce = !sceneIn.push && sceneIn.cooldownMs > 0 && cyclopediaSceneCastAt(sceneIn) <= 0;
   const scene = addCyclopediaSceneAutoAttacks(castsAtOnce ? { ...sceneIn, lead: (sceneIn.lead || 0) + CYCLOPEDIA_SCENE_FIRST_CAST_MS } : sceneIn, geo);
@@ -3125,14 +3164,14 @@ function createCyclopediaAbilityGrid(masks, sceneIn, createCaster) {
     .filter((tile) => !covered.has(tile.join(',')))
     .map((tile) => { covered.add(tile.join(',')); return tile; }));
   const { T } = timeline;
-  console.log('[Cyclopedia][ability-scene] grid', {
+  cyclopediaSceneLog('grid', () => ({
     anchor: masks[0].a, stages: geo.stages.map((s) => [s.maskW, s.maskH]), cols: geo.cols, rows: geo.rowsN, cell: L.cell, reach: geo.reach,
     padding: L.padding, originTileIndex: Math.floor(L.boardRows / 2) * L.boardCols + Math.floor(L.boardCols / 2)
-  });
-  console.log('[Cyclopedia][ability-scene] timing', {
+  }));
+  cyclopediaSceneLog('timing', () => ({
     cooldownMs: scene.cooldownMs ?? null, durationMs: timeline.duration, flightMs: timeline.flightMs,
     activeMs: timeline.activeMs, tilesToTarget: timeline.tilesToTarget
-  });
+  }));
 
   const grid = document.createElement('div');
   grid.style.cssText = `position:relative;width:${geo.cols * L.cell}px;height:${geo.rowsN * L.cell}px;overflow:visible;`;
@@ -3145,7 +3184,7 @@ function createCyclopediaAbilityGrid(masks, sceneIn, createCaster) {
   const isAoe = stageTiles.flat().length > 1;
   (isAoe ? stageTiles : []).forEach((tiles, k) => {
     const landF = T.land + (k * CYCLOPEDIA_SCENE_TIMING.stageStagger) / T.duration;
-    const flashLayer = buildCyclopediaSceneHitLayer(tiles, CYCLOPEDIA_SCENE_AREA_COLORS[scene.areaKind] || CYCLOPEDIA_SCENE_AREA_COLORS.damage);
+    const flashLayer = buildCyclopediaSceneHitLayer(tiles, CYCLOPEDIA_SCENE_AREA_COLORS.damage);
     flashLayer.style.opacity = '0';
     flashLayer.animate(
       // Shows at the landing and goes off at the end: no slow fade in or out (`steps(1,end)` holds each value).
@@ -3179,10 +3218,17 @@ function createCyclopediaAbilityGrid(masks, sceneIn, createCaster) {
     // `dummyHidden` { from, until } ms: the dummy is replaced by something else for a while (Snake's statue), then comes back.
     const D = timeline.duration;
     dummy.tile.animate(
-      [{ offset: 0, opacity: 1, ...CYCLOPEDIA_SCENE_HOLD }, { offset: Math.min(0.99, scene.dummyHidden.from / D), opacity: 0, ...CYCLOPEDIA_SCENE_HOLD },
-        { offset: Math.min(0.995, scene.dummyHidden.until / D), opacity: 1 }, { offset: 1, opacity: 1 }],
+      [{ offset: 0, opacity: 1, ...CYCLOPEDIA_SCENE_HOLD }, { offset: cyclopediaFrac(scene.dummyHidden.from, D, 0.99), opacity: 0, ...CYCLOPEDIA_SCENE_HOLD },
+        { offset: cyclopediaFrac(scene.dummyHidden.until, D, 0.995), opacity: 1 }, { offset: 1, opacity: 1 }],
       { duration: D, iterations: Infinity }
     );
+  }
+  // `dummyForm` { outfit, at, until }: the target turns into another outfit for a while (the Witch's frog; times in ms, or 'land' / 'land+N').
+  let dummyForm = null;
+  if (dummy && scene.dummyForm) {
+    const when = (t) => resolveCyclopediaSceneTime(t, timeline.flightMs);
+    dummyForm = buildCyclopediaSceneForm(geo.midCol, geo.midRow, timeline.duration, { outfit: scene.dummyForm.outfit, at: when(scene.dummyForm.at), until: when(scene.dummyForm.until) }, dummy.tile, createCaster, scene.allyTarget ? 'south' : 'east');
+    grid.appendChild(dummyForm.tile);
   }
   if (dummy && scene.flinch) animateCyclopediaFlinch(dummy.tile, timeline.duration, scene.flinch.at); // `flinch` in the scene data: the target shakes when hit
   if (scene.ground && !geo.selfAnchored) grid.appendChild(buildCyclopediaSceneGroundItem(geo, timeline, scene.ground));
@@ -3321,7 +3367,7 @@ function createCyclopediaAbilityGrid(masks, sceneIn, createCaster) {
     const D = timeline.duration;
     const pts = scene.casterFilter;
     caster.tile.animate(
-      [...(pts[0][0] > 0 ? [{ offset: 0, filter: pts[0][1] }] : []), ...pts.map(([ms, filter]) => ({ offset: Math.min(0.999, ms / D), filter })), { offset: 1, filter: pts[pts.length - 1][1] }],
+      [...(pts[0][0] > 0 ? [{ offset: 0, filter: pts[0][1] }] : []), ...pts.map(([ms, filter]) => ({ offset: cyclopediaFrac(ms, D, 0.999), filter })), { offset: 1, filter: pts[pts.length - 1][1] }],
       { duration: D, iterations: Infinity }
     );
   }
@@ -3364,7 +3410,8 @@ function createCyclopediaAbilityGrid(masks, sceneIn, createCaster) {
     const inv = scene.casterInvisible;
     if (inv) {
       const q = (ms) => Math.min(0.998, Math.max(0, ms / D));
-      fleeing.tiles.forEach((tile) => tile.animate([{ offset: 0, filter: 'opacity(1)', ...CYCLOPEDIA_SCENE_HOLD }, { offset: q(inv.at), filter: 'opacity(1)' }, { offset: q(inv.at + 200), filter: 'opacity(0)' }, { offset: q(inv.until), filter: 'opacity(0)' }, { offset: q(inv.until + 200), filter: 'opacity(1)' }, { offset: 1, filter: 'opacity(1)' }], { duration: D, iterations: Infinity }));
+      // the standing copy too: it is shown until the walk starts, which can be a moment after the invisibility does
+      [caster.tile, ...fleeing.tiles].forEach((tile) => tile.animate([{ offset: 0, filter: 'opacity(1)', ...CYCLOPEDIA_SCENE_HOLD }, { offset: q(inv.at), filter: 'opacity(1)' }, { offset: q(inv.at + 200), filter: 'opacity(0)' }, { offset: q(inv.until), filter: 'opacity(0)' }, { offset: q(inv.until + 200), filter: 'opacity(1)' }, { offset: 1, filter: 'opacity(1)' }], { duration: D, iterations: Infinity }));
     }
   }
   // The caster stands in its idle pose (it does not move here); only the push scenes, where it really walks, play the walk cycle.
@@ -3372,7 +3419,7 @@ function createCyclopediaAbilityGrid(masks, sceneIn, createCaster) {
   buildCyclopediaSceneMissiles(geo, timeline).forEach((el) => grid.appendChild(el));
   buildCyclopediaSceneEffects(geo, timeline, stageTiles).forEach((el) => grid.appendChild(el));
 
-  return { grid, fit: () => { floor.fit(); casterFit(); fleeing?.fit(); dummy?.fit(); shooter?.fit(); mates.forEach((m) => m.fit()); transformed?.fit(); }, preview: [], duration: timeline.duration, startShift: cyclopediaSceneStartShift(scene) };
+  return { grid, fit: () => { floor.fit(); casterFit(); fleeing?.fit(); dummy?.fit(); dummyForm?.fit(); shooter?.fit(); mates.forEach((m) => m.fit()); transformed?.fit(); }, preview: [], duration: timeline.duration, startShift: cyclopediaSceneStartShift(scene) };
 }
 
 /** Turns the creature sprite(s) inside `el` to face `direction` ('north' | 'south' | 'east' | 'west'). */
@@ -3383,7 +3430,7 @@ function setCyclopediaSceneFacing(el, direction) {
     outfit.classList.add(direction);
     const img = outfit.querySelector('img.spritesheet');
     if (img) img.alt = direction;
-    console.log('[Cyclopedia][ability-scene] facing', { direction, classBefore: before, classAfter: outfit.className, img: !!img });
+    cyclopediaSceneLog('facing', () => ({ direction, classBefore: before, classAfter: outfit.className, img: !!img }));
   });
 }
 
@@ -3431,7 +3478,7 @@ function createCyclopediaPerimeterGrid(part, createCaster) {
   const fadeStart = lastDrop + FADE_IN + cleanupMs;
   const D = fadeStart + FADE_OUT + 500;
   const f = (ms) => ms / D;
-  console.log('[Cyclopedia][ability-scene] perimeter grid', { stones: rim.length, cleanupMs, durationMs: D, stoneSprites: stoneIds.length });
+  cyclopediaSceneLog('perimeter grid', () => ({ stones: rim.length, cleanupMs, durationMs: D, stoneSprites: stoneIds.length }));
 
   const grid = document.createElement('div');
   grid.style.cssText = `position:relative;width:${cols * L.cell}px;height:${rowsN * L.cell}px;overflow:visible;`;
@@ -3494,7 +3541,7 @@ function createCyclopediaPerimeterGrid(part, createCaster) {
     const start = f(atMs);
     const end = Math.min(0.999, start + (frames * TM.msPerFrame) / D);
     const el = document.createElement('div');
-    el.style.cssText = `position:absolute;width:${E}px;height:${E}px;left:${col * L.cell + L.cell / 2 - E / 2}px;top:${row * L.cell + L.cell / 2 - E / 2}px;`
+    el.style.cssText = cyclopediaCentredBoxCss(col, row, E, L.cell)
       + `background:url(${url}) 0 0 / ${E}px ${E * frames}px no-repeat;image-rendering:pixelated;opacity:0;pointer-events:none;z-index:${CYCLOPEDIA_SCENE_Z.missile};`;
     el.animate(
       [{ offset: 0, opacity: 0, backgroundPositionY: '0px' },
@@ -3523,8 +3570,11 @@ function createCyclopediaPerimeterGrid(part, createCaster) {
     if (!w) return;
     fitted = true;
     sprites.forEach((s) => s.style.setProperty('--scene-tile-scale', String(L.cell / w)));
-    console.log('[Cyclopedia][ability-scene] perimeter stone sprite', { ids: stoneIds, nativePx: w });
+    cyclopediaSceneLog('perimeter stone sprite', () => ({ ids: stoneIds, nativePx: w }));
   };
+  // A stone that lands beside the dummy hurts it: physical damage (STONE_BASE_DMG + STONE_DMG_PER_AD x AD), a number each time.
+  rim.filter(([c, r]) => Math.max(Math.abs(c - dummyAt[0]), Math.abs(r - dummyAt[1])) <= 1)
+    .forEach(([, , at]) => grid.appendChild(createCyclopediaNumber(dummyAt[0], dummyAt[1], D, { at: at + FADE_IN, kind: 'damage', type: 'physical', dtype: 'physical' })));
   return { grid, fit: () => { floor.fit(); fitStones(); caster.fit(); dummy.fit(); }, preview: [], duration: D };
 }
 
@@ -3548,7 +3598,7 @@ function createCyclopediaBarrelGrid(part, createCaster) {
   const geo = { cols: 6, rowsN: 5, midCol: 3, midRow: 2 };
   const splash = (part.effects || []).find((e) => e.n === 'splash');
   const soup = (part.effects || []).find((e) => e.n === 'soup');
-  console.log('[Cyclopedia][ability-scene] barrel grid', { chargeMs, durationMs: D, spriteId: part.push.barrelSpriteId ?? null });
+  cyclopediaSceneLog('barrel grid', () => ({ chargeMs, durationMs: D, spriteId: part.push.barrelSpriteId ?? null }));
 
   const grid = document.createElement('div');
   grid.style.cssText = `position:relative;width:${geo.cols * L.cell}px;height:${geo.rowsN * L.cell}px;overflow:visible;`;
@@ -3594,7 +3644,7 @@ function createCyclopediaBarrelGrid(part, createCaster) {
   grid.appendChild(barrel);
 
   // The dwarf: stands facing the target while it drops the barrel, then runs west a tile per step and stands at the left edge.
-  const stepAt = (ms) => Math.min(0.998, ms / D);
+  const stepAt = (ms) => cyclopediaFrac(ms, D, 0.998);
   const keys = [{ offset: 0, transform: 'translate(0,0)', ...CYCLOPEDIA_SCENE_HOLD }, { offset: stepAt(FLEE), transform: 'translate(0,0)' }];
   const phases = [{ pose: 'stand', facing: 'east', from: 0, until: FLEE }];
   for (let i = 0; i < dwarfCol; i++) {
@@ -3635,7 +3685,7 @@ function createCyclopediaBarrelGrid(part, createCaster) {
     if (!w) return;
     fitted = true;
     barrelSprite.style.setProperty('--scene-tile-scale', String(L.cell / w));
-    console.log('[Cyclopedia][ability-scene] barrel sprite', { id: part.push.barrelSpriteId, nativePx: w });
+    cyclopediaSceneLog('barrel sprite', () => ({ id: part.push.barrelSpriteId, nativePx: w }));
   };
   return { grid, fit: () => { floor.fit(); fitBarrel(); dwarf.fit(); dummy.fit(); }, preview: [], duration: D };
 }
@@ -3662,7 +3712,7 @@ function createCyclopediaWallsGrid(part, createCaster) {
   const geo = { cols: dummyCol + 3, rowsN: 5, midCol: Math.floor((dummyCol + 3) / 2), midRow: 2 };
   const taunt = (part.effects || []).find((e) => e.w === 'self');
   const poof = (part.effects || []).find((e) => e.w !== 'self');
-  console.log('[Cyclopedia][ability-scene] walls grid', { wallMs, range, durationMs: D, cols: geo.cols, spriteId: part.push.wallSpriteId ?? null });
+  cyclopediaSceneLog('walls grid', () => ({ wallMs, range, durationMs: D, cols: geo.cols, spriteId: part.push.wallSpriteId ?? null }));
 
   const grid = document.createElement('div');
   grid.style.cssText = `position:relative;width:${geo.cols * L.cell}px;height:${geo.rowsN * L.cell}px;overflow:visible;`;
@@ -3738,7 +3788,7 @@ function createCyclopediaWallsGrid(part, createCaster) {
     if (!w) return;
     spritesFitted = true;
     sprites.forEach((s) => s.style.setProperty('--scene-tile-scale', String(L.cell / w)));
-    console.log('[Cyclopedia][ability-scene] walls rune sprite', { id: part.push.wallSpriteId, nativePx: w });
+    cyclopediaSceneLog('walls rune sprite', () => ({ id: part.push.wallSpriteId, nativePx: w }));
   };
 
   const caster = buildCyclopediaSceneCaster({ casterCol: 1, casterRow: 2 }, () => createCaster());
@@ -3759,7 +3809,7 @@ function createCyclopediaWallsGrid(part, createCaster) {
     const startF = 300 / D;
     const tEnd = Math.min(0.999, startF + 600 / D);
     const fx = document.createElement('div');
-    fx.style.cssText = `position:absolute;width:${E}px;height:${E}px;left:${L.cell + L.cell / 2 - E / 2}px;top:${2 * L.cell + L.cell / 2 - E / 2}px;`
+    fx.style.cssText = cyclopediaCentredBoxCss(1, 2, E, L.cell)
       + `background:url(${url}) 0 0 / ${E}px ${E * frames}px no-repeat;image-rendering:pixelated;opacity:0;pointer-events:none;z-index:${CYCLOPEDIA_SCENE_Z.effect};`;
     fx.animate(
       [{ offset: 0, opacity: 0, backgroundPositionY: '0px' },
@@ -3793,7 +3843,7 @@ function createCyclopediaArenaGrid(part, createCaster) {
   const geo = { cols: 7, rowsN: 7, midCol: 3, midRow: 3 };
   const smoke = (part.effects || []).find((e) => e.n === 'smoke');
   const spikes = (part.effects || []).find((e) => e.n === 'floorSpike');
-  console.log('[Cyclopedia][ability-scene] arena grid', { arenaMs, durationMs: D, dummyId: part.push.dummyId, wallSpriteId: part.push.wallSpriteId, floorSpikeSheet: spikes?.id, floorSpikeFrames: spikes?.f });
+  cyclopediaSceneLog('arena grid', () => ({ arenaMs, durationMs: D, dummyId: part.push.dummyId, wallSpriteId: part.push.wallSpriteId, floorSpikeSheet: spikes?.id, floorSpikeFrames: spikes?.f }));
 
   const ring = [];
   const inner = [];
@@ -3848,7 +3898,7 @@ function createCyclopediaArenaGrid(part, createCaster) {
     if (!w) return;
     wallFitted = true;
     wall.style.setProperty('--scene-tile-scale', String(L.cell / w));
-    console.log('[Cyclopedia][ability-scene] arena wall sprite', { id: part.push.wallSpriteId, nativePx: w });
+    cyclopediaSceneLog('arena wall sprite', () => ({ id: part.push.wallSpriteId, nativePx: w }));
   };
 
   // Smoke on the wall, once per ring tile as the arena rises (the game publishes it at opacity .7); frame size, frames and
@@ -3988,7 +4038,7 @@ function createCyclopediaPushGrid(part, createCaster) {
       hits.push({ onSelf: false, col: dummyCol + i, at: hit });
     }
   }
-  console.log('[Cyclopedia][ability-scene] push grid', { mode: charge ? 'charge' : 'push', cols, rows: geo.rowsN, durationMs: D, dummyId: part.push.dummyId });
+  cyclopediaSceneLog('push grid', () => ({ mode: charge ? 'charge' : 'push', cols, rows: geo.rowsN, durationMs: D, dummyId: part.push.dummyId }));
 
   const grid = document.createElement('div');
   grid.style.cssText = `position:relative;width:${geo.cols * L.cell}px;height:${geo.rowsN * L.cell}px;overflow:visible;`;
@@ -3999,7 +4049,7 @@ function createCyclopediaPushGrid(part, createCaster) {
   const dummy = buildCyclopediaSceneCaster({ casterCol: dummyCol, casterRow: 1 }, () => createCaster(part.push.dummyId));
   grid.appendChild(dummy.tile);
   // The creature walks only while it moves between tiles and stands the rest of the time: the walking and standing copies take turns along one path.
-  const walkKeys = casterPath.map(([t, x]) => ({ offset: Math.min(0.998, t / D), transform: `translate(${x * L.cell}px,0)` }))
+  const walkKeys = casterPath.map(([t, x]) => ({ offset: cyclopediaFrac(t, D, 0.998), transform: `translate(${x * L.cell}px,0)` }))
     .concat([{ offset: 1, transform: `translate(${casterPath[casterPath.length - 1][1] * L.cell}px,0)` }]);
   const walkPhases = [];
   if (charge) {
@@ -4081,7 +4131,7 @@ function createCyclopediaPushGrid(part, createCaster) {
         : [[0, 1, color], [castAt, 1, color], [castAt + 1, 0, color], [D, fillOver(castAt, D), color]];
       const bar = createCyclopediaStunBar(startCol, 1, D, { at: from, until, levels, smooth: true, y: -2 });
       if (charge) track(bar, casterPath);
-      else bar.animate(casterPath.map(([t, x]) => ({ offset: Math.min(0.998, t / D), transform: `translate(${x * L.cell}px,0)` })).concat([{ offset: 1, transform: `translate(${casterPath[casterPath.length - 1][1] * L.cell}px,0)` }]), { duration: D, iterations: Infinity });
+      else bar.animate(casterPath.map(([t, x]) => ({ offset: cyclopediaFrac(t, D, 0.998), transform: `translate(${x * L.cell}px,0)` })).concat([{ offset: 1, transform: `translate(${casterPath[casterPath.length - 1][1] * L.cell}px,0)` }]), { duration: D, iterations: Infinity });
       grid.appendChild(bar);
     });
   }
@@ -4109,10 +4159,10 @@ function createCyclopediaAbilityScene(scene, createCaster) {
   const parts = (scene?.parts || [])
     .map((part) => ({ ...part, masks: (part.masks || []).filter((m) => Array.isArray(m?.rows) && m.rows.length) }))
     .filter((part) => part.masks.length || part.push);
-  console.log('[Cyclopedia][ability-scene] build', parts.map((part) => ({
+  cyclopediaSceneLog('build', () => (parts.map((part) => ({
     label: part.label, masks: part.masks.length, missiles: (part.missiles || []).map((m) => m.n),
     effects: (part.effects || []).map((e) => e.n), cooldownMs: part.cooldownMs
-  })));
+  }))));
   if (!parts.length) return null;
 
   const wrap = document.createElement('div');
@@ -4200,17 +4250,24 @@ function createCyclopediaAbilityScene(scene, createCaster) {
  * @param {object} sceneData result of `creatureDatabase.getAbilityScene`
  * @param {number} monsterId game id of the creature (its sprite is the caster)
  */
-function attachCyclopediaAbilityScenePreview(iconFrame, getSceneData, monsterId, getStateKey = () => '') {
-  iconFrame.style.position = 'relative';
-  iconFrame.style.cursor = 'help';
-  // The game's own info icon at its native 11 x 11 px: just the icon, no badge, border or background.
-  const hint = document.createElement('img');
-  hint.src = 'https://bestiaryarena.com/assets/icons/info.png';
-  hint.alt = '';
-  hint.setAttribute('data-ability-scene-hint', 'true');
-  hint.title = 'Hover, tap or focus to preview (beta)';
-  hint.style.cssText = 'position:absolute;right:2px;top:2px;width:11px;height:11px;image-rendering:pixelated;pointer-events:none;';
-  iconFrame.appendChild(hint);
+function attachCyclopediaAbilityScenePreview(iconFrame, getSceneData, monsterId, getStateKey = () => '', { decorate = true, hint: showHint = decorate } = {}) {
+  // `decorate: false` (an icon the game owns, e.g. the Bestiary's native ability icon): listeners only, no cursor or tab stop.
+  // `hint` (default: with `decorate`) adds the info icon; on an icon the game owns it is the only change, undone by the returned function.
+  let hint = null;
+  let previousPosition = null;
+  if (decorate) iconFrame.style.cursor = 'help';
+  if (showHint) {
+    previousPosition = iconFrame.style.position;
+    iconFrame.style.position = 'relative';
+    // The game's own info icon at its native 11 x 11 px: just the icon, no badge, border or background.
+    hint = document.createElement('img');
+    hint.src = 'https://bestiaryarena.com/assets/icons/info.png';
+    hint.alt = '';
+    hint.setAttribute('data-ability-scene-hint', 'true');
+    hint.title = 'Hover, tap or focus to preview (beta)';
+    hint.style.cssText = 'position:absolute;right:2px;top:2px;width:11px;height:11px;image-rendering:pixelated;pointer-events:none;';
+    iconFrame.appendChild(hint);
+  }
 
   const createSceneCaster = (spriteId = monsterId) => {
     if (spriteId === CYCLOPEDIA_SCENE_TREE_ID) {
@@ -4321,17 +4378,29 @@ function attachCyclopediaAbilityScenePreview(iconFrame, getSceneData, monsterId,
     panel.style.top = `${Math.max(8, Math.min(icon.top, window.innerHeight - h - 8))}px`;
   };
 
+  let openTimer = null;
   let playTimer = null;
   let guardTimer = null;
   let tapListener = null;
   let ignoreMouseUntil = 0;
   const hide = () => {
+    if (openTimer) { TimerManager.remove(openTimer); openTimer = null; }
     if (playTimer) { TimerManager.remove(playTimer); playTimer = null; }
     if (guardTimer) { TimerManager.remove(guardTimer); guardTimer = null; }
     if (tapListener) { document.removeEventListener('touchstart', tapListener, true); tapListener = null; }
     if (panel) { panel.style.display = 'none'; panel.remove(); }
   };
+  // Like the game's own tooltips: nothing until the pointer has rested for `openDelayMs`, then a short fade-in that slides up a little.
   const show = () => {
+    if (openTimer || panel?.isConnected) return;
+    openTimer = setTimeout(() => {
+      TimerManager.remove(openTimer);
+      openTimer = null;
+      reveal();
+    }, CYCLOPEDIA_SCENE_LAYOUT.openDelayMs);
+    TimerManager.addTimeout(openTimer, 'abilityScenePlay');
+  };
+  const reveal = () => {
     const shown = ensurePanel();
     if (!shown) return;
     if (playTimer) TimerManager.remove(playTimer);
@@ -4339,12 +4408,13 @@ function attachCyclopediaAbilityScenePreview(iconFrame, getSceneData, monsterId,
     shown.style.display = 'block';
     scene.fitSprites();
     placePanel();
+    shown.animate([{ opacity: 0, translate: '0 8px' }, { opacity: 1, translate: '0 0' }], { duration: CYCLOPEDIA_SCENE_LAYOUT.fadeMs, easing: 'ease-out' });
     const count = scene.reset();
-    console.log('[Cyclopedia][ability-scene] hover start: shown paused', { animations: count, playInMs: CYCLOPEDIA_SCENE_LAYOUT.playDelayMs });
+    cyclopediaSceneLog('hover start: shown paused', () => ({ animations: count, playInMs: CYCLOPEDIA_SCENE_LAYOUT.playDelayMs }));
     playTimer = setTimeout(() => {
       TimerManager.remove(playTimer);
       playTimer = null;
-      console.log('[Cyclopedia][ability-scene] playing', { animations: scene.play() });
+      cyclopediaSceneLog('playing', () => ({ animations: scene.play() }));
     }, CYCLOPEDIA_SCENE_LAYOUT.playDelayMs);
     TimerManager.addTimeout(playTimer, 'abilityScenePlay');
     // The creature view can be replaced while hovering (mouseleave then never fires): drop the panel with it.
@@ -4356,24 +4426,29 @@ function attachCyclopediaAbilityScenePreview(iconFrame, getSceneData, monsterId,
   const end = (via) => {
     const pending = !!playTimer;
     hide();
-    console.log('[Cyclopedia][ability-scene] hover end', { via, leftBeforePlay: pending });
+    cyclopediaSceneLog('hover end', () => ({ via, leftBeforePlay: pending }));
   };
 
-  iconFrame.addEventListener('mouseenter', () => {
+  const listeners = [];
+  const listen = (type, fn, options) => {
+    iconFrame.addEventListener(type, fn, options);
+    listeners.push([type, fn, options]);
+  };
+  listen('mouseenter', () => {
     if (Date.now() < ignoreMouseUntil) return; // compatibility mouse events right after a tap
     show();
   });
-  iconFrame.addEventListener('mouseleave', () => {
+  listen('mouseleave', () => {
     if (Date.now() < ignoreMouseUntil) return;
     end('mouse');
   });
   // Keyboard: the icon takes focus, focus shows the scene, blur hides it.
-  iconFrame.tabIndex = 0;
-  iconFrame.addEventListener('focus', () => show());
-  iconFrame.addEventListener('blur', () => end('blur'));
+  if (decorate) iconFrame.tabIndex = 0;
+  listen('focus', () => show());
+  listen('blur', () => end('blur'));
   // Touch: a tap on the icon toggles the scene, a tap anywhere else closes it. The browser then fires emulated mouse
   // events for the same tap, which would flip it straight back, so those are ignored briefly.
-  iconFrame.addEventListener('touchstart', () => {
+  listen('touchstart', () => {
     ignoreMouseUntil = Date.now() + 700;
     if (panel?.isConnected) {
       end('tap');
@@ -4386,6 +4461,17 @@ function attachCyclopediaAbilityScenePreview(iconFrame, getSceneData, monsterId,
     };
     document.addEventListener('touchstart', tapListener, true);
   }, { passive: true });
+
+  // Undoes everything above (idempotent): listeners, the hint, the panel and its timers.
+  return () => {
+    listeners.splice(0).forEach(([type, fn, options]) => iconFrame.removeEventListener(type, fn, options));
+    hint?.remove();
+    if (previousPosition != null) iconFrame.style.position = previousPosition;
+    hide();
+    if (panel) cyclopediaScenePanels.delete(panel);
+    panel = null;
+    scene = null;
+  };
 }
 
 /** [roomKey, room] pairs for actor scans — prefers mapsDatabase.getAllMaps(). */
@@ -11627,14 +11713,30 @@ function hasCreatureCombatData(gameId) {
 }
 
 /** Rows of one summon's block in the combat panel: base stats, then range and first cast when the game defines them. */
+/**
+ * Text of the combat panel from the locale files (`mods.cyclopedia.combat.*`), `fallback` (English) when a language lacks it.
+ * Stat and game terms (HP, Armor, Range, Attack delay, AP ...) stay English like in the game itself.
+ */
+function combatText(key, fallback, params) {
+  const full = `mods.cyclopedia.combat.${key}`;
+  let text = null;
+  try { text = api?.i18n?.t?.(full); } catch (_) { /* no i18n: English */ }
+  if (typeof text !== 'string' || !text || text === full) text = fallback;
+  return params ? Object.entries(params).reduce((out, [name, value]) => out.replaceAll(`{${name}}`, String(value)), text) : text;
+}
+
+const COMBAT_SECTION_TEXT = { Basics: ['basics', 'Basics'], Ability: ['ability', 'Ability'], Timing: ['timing', 'Timing'], Awakened: ['awakened', 'Awakened'] };
+const combatSectionTitle = (title) => (COMBAT_SECTION_TEXT[title] ? combatText(...COMBAT_SECTION_TEXT[title]) : title);
+const combatRangeText = (range, ranged) => (ranged == null ? String(range) : `${range} (${ranged ? combatText('ranged', 'ranged') : combatText('reach', 'reach')})`);
+
 function getSummonCombatRows(summon, formatTicks) {
   const st = summon.st || {};
   const stat = (label, key) => (Number.isFinite(st[key]) ? [{ label, value: formatCombatNumber(st[key]) }] : []);
   return [
     ...stat('HP', 'hp'), ...stat('Attack damage', 'ad'), ...stat('Ability power', 'ap'),
     ...stat('Armor', 'armor'), ...stat('Magic resist', 'magicResist'), ...stat('Speed', 'speed'),
-    ...(Number.isFinite(summon.r) ? [{ label: 'Range', value: summon.rc == null ? String(summon.r) : `${summon.r} (${summon.rc ? 'ranged' : 'reach'})` }] : []),
-    ...(Number.isFinite(summon.ic) ? [{ label: 'First cast', value: formatTicks(Math.round(0.016 * summon.ic)) }] : [])
+    ...(Number.isFinite(summon.r) ? [{ label: 'Range', value: combatRangeText(summon.r, summon.rc) }] : []),
+    ...(Number.isFinite(summon.ic) ? [{ label: combatText('firstCast', 'First cast'), value: formatTicks(Math.round(0.016 * summon.ic)) }] : [])
   ];
 }
 
@@ -11645,7 +11747,7 @@ function getSummonCombatRows(summon, formatTicks) {
  * the seconds/ticks switch, which calls `onToggleUnit`. Returns null when the snapshot has none for this id.
  */
 function renderCreatureCombatDetails(gameId, baseStats, onToggleUnit) {
-  const abilitySections = creatureDbRef.describeCreatureCombatSections?.(gameId, formatCombatTicks);
+  const abilitySections = creatureDbRef.describeCreatureCombatSections?.(gameId, formatCombatTicks, true);
   if (!abilitySections) return null;
   const combat = creatureDbRef.getCreatureCombatData?.(gameId);
   const range = combat?.range;
@@ -11655,14 +11757,14 @@ function renderCreatureCombatDetails(gameId, baseStats, onToggleUnit) {
     ['Basics', [
       { label: 'Attack delay', value: formatCombatTicks(getBaseAttackDelayTicks(baseStats)) },
       ...(Number.isFinite(range)
-        ? [{ label: 'Range', value: combat.ranged == null ? String(range) : `${range} (${combat.ranged ? 'ranged' : 'reach'})` }]
+        ? [{ label: 'Range', value: combatRangeText(range, combat.ranged) }]
         : []),
-      ...(Number.isFinite(initialMs) ? [{ label: 'First cast', value: formatCombatTicks(Math.round(0.016 * initialMs)) }] : [])
+      ...(Number.isFinite(initialMs) ? [{ label: combatText('firstCast', 'First cast'), value: formatCombatTicks(Math.round(0.016 * initialMs)) }] : [])
     ]],
     ...abilitySections,
     ...(combat?.summons || []).flatMap((summon) => [
-      [`Summon: ${summon.n}`, getSummonCombatRows(summon, formatCombatTicks)],
-      [`${summon.n} from owner`, creatureDbRef.describeSummonOwnerRows?.(gameId, summon, formatCombatTicks) || []]
+      [`${combatText('summon', 'Summon')}: ${summon.n}`, getSummonCombatRows(summon, formatCombatTicks)],
+      [combatText('fromOwner', '{name} from owner', { name: summon.n }), creatureDbRef.describeSummonOwnerRows?.(gameId, summon, formatCombatTicks) || []]
     ])
   ];
 
@@ -11675,11 +11777,16 @@ function renderCreatureCombatDetails(gameId, baseStats, onToggleUnit) {
 
   sections.forEach(([title, rows]) => {
     if (!rows.length) return;
+    // One block per category (heading + its rows): a consumer can lay the categories out in columns without splitting one.
+    const isFirst = panel.children.length === 0;
+    const group = document.createElement('div');
+    group.setAttribute('data-combat-section', 'true');
+    panel.appendChild(group);
     const heading = document.createElement('div');
-    heading.textContent = title;
+    heading.textContent = combatSectionTitle(title);
     heading.style.cssText = 'color: #ffe066; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; '
       + 'margin: 4px 0 2px; padding-bottom: 1px; border-bottom: 1px solid rgba(255, 224, 102, 0.4);';
-    if (panel.children.length === 0) {
+    if (isFirst) {
       heading.style.marginTop = '0';
       heading.style.display = 'flex';
       heading.style.justifyContent = 'space-between';
@@ -11687,8 +11794,8 @@ function renderCreatureCombatDetails(gameId, baseStats, onToggleUnit) {
       const unitButton = document.createElement('button');
       unitButton.type = 'button';
       const inTicks = cyclopediaState.combatTimeUnit === 'ticks';
-      unitButton.textContent = inTicks ? 'Ticks' : 'Seconds';
-      unitButton.title = inTicks ? 'Showing ticks. Click for seconds.' : 'Showing seconds. Click for ticks.';
+      unitButton.textContent = inTicks ? combatText('ticks', 'Ticks') : combatText('seconds', 'Seconds');
+      unitButton.title = inTicks ? combatText('showingTicks', 'Showing ticks. Click for seconds.') : combatText('showingSeconds', 'Showing seconds. Click for ticks.');
       unitButton.style.cssText = 'font: inherit; font-weight: 400; text-transform: none; letter-spacing: 0; cursor: pointer; '
         + 'color: #c0c0c0; background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 224, 102, 0.4); '
         + 'padding: 0 4px; line-height: 1.2;';
@@ -11699,7 +11806,7 @@ function renderCreatureCombatDetails(gameId, baseStats, onToggleUnit) {
       });
       heading.appendChild(unitButton);
     }
-    panel.appendChild(heading);
+    group.appendChild(heading);
     rows.forEach(({ label, value }, i) => {
       const row = document.createElement('div');
       row.style.cssText = 'display: flex; justify-content: space-between; align-items: baseline; gap: 6px; '
@@ -11712,7 +11819,7 @@ function renderCreatureCombatDetails(gameId, baseStats, onToggleUnit) {
       valueEl.className = 'text-whiteExp';
       valueEl.style.cssText = 'white-space: nowrap; text-align: right; flex: 0 0 auto;';
       row.append(labelEl, valueEl);
-      panel.appendChild(row);
+      group.appendChild(row);
     });
   });
 
@@ -13019,7 +13126,7 @@ function renderCreatureTemplate(name, showShinyPortraits = false, showOldSprites
     const currentSceneAwakened = () => !!(creatureCanAwaken && cyclopediaState.creatureDetailShowAwakenedAbility);
     const drawable = (data) => !!data?.parts?.some((part) => part.push || part.masks?.some((mask) => mask?.rows?.length));
     const hasScene = drawable(sceneFor(false)) || (creatureCanAwaken && drawable(sceneFor(true)));
-    console.log('[Cyclopedia][ability-scene] detail', { monsterId, hasArea: hasScene, awakened: currentSceneAwakened() });
+    cyclopediaSceneLog('detail', () => ({ monsterId, hasArea: hasScene, awakened: currentSceneAwakened() }));
     if (hasScene) {
       attachCyclopediaAbilityScenePreview(abilityIconFrame, () => sceneFor(currentSceneAwakened()), monsterId, () => String(currentSceneAwakened()));
     }
@@ -24446,6 +24553,7 @@ exports = {
         window.cyclopediaMenuObserver = null;
         window.cyclopediaGlobalObserver = null;
         delete window.__cyclopediaOpen;
+        if (window.CyclopediaCombatUI === cyclopediaCombatUi) delete window.CyclopediaCombatUI;
       }
       
       // Clear all caches
@@ -24475,8 +24583,34 @@ exports = {
   }
 };
 
+// Combat UI for other mods (Better Bestiary's creature details). It exists only while this mod runs: `cleanup()` deletes it, so a
+// consumer that finds it missing leaves the feature off instead of enabling Cyclopedia for it.
+const cyclopediaCombatUi = {
+  /** Whether the snapshot has combat numbers for this game id. */
+  hasCombatData: (gameId) => hasCreatureCombatData(gameId),
+  /** Whether the creature has an ability scene to draw (normal, or awakened when `awakened` is set). */
+  hasAbilityScene: (gameId, awakened = false) => {
+    const drawable = (data) => !!data?.parts?.some((part) => part.push || part.masks?.some((mask) => mask?.rows?.length));
+    return drawable(window.creatureDatabase?.getAbilityScene?.(gameId, !!awakened));
+  },
+  /** The "Combat details" panel element (160px frame, scrolls) or null; `onToggleUnit` runs after the seconds/ticks switch is clicked. */
+  renderCombatDetails: (gameId, baseStats, onToggleUnit) => renderCreatureCombatDetails(gameId, baseStats, onToggleUnit),
+  /**
+   * Hover / focus / tap ability scene on `iconFrame` (the preview panel lives on <body> and goes away with `cleanup()`).
+   * `decorate: false` for an icon another owner renders (listeners only). Returns a function that undoes it.
+   */
+  attachAbilityScene: (iconFrame, gameId, getAwakened = () => false, options = {}) => attachCyclopediaAbilityScenePreview(
+    iconFrame,
+    () => window.creatureDatabase?.getAbilityScene?.(gameId, !!getAwakened()),
+    gameId,
+    () => String(!!getAwakened()),
+    options
+  )
+};
+
 // Legacy window object for backward compatibility
 if (typeof window !== 'undefined') {
+  window.CyclopediaCombatUI = cyclopediaCombatUi;
   window.__cyclopediaOpen = (options) => openCyclopediaModal({ fromHeader: true, ...(options || {}) });
   window.Cyclopedia = {
     init: exports.init,
