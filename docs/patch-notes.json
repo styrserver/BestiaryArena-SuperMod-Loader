@@ -4,6 +4,16 @@
   },
   "notes": [
     {
+      "version": "5.4.7",
+      "changes": [
+        {
+          "mod": "Cyclopedia",
+          "type": "fixed",
+          "text": "Ability scene previews now play instead of staying frozen on the first frame."
+        }
+      ]
+    },
+    {
       "version": "5.4.6",
       "changes": [
         {

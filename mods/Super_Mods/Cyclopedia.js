@@ -4414,7 +4414,8 @@ function attachCyclopediaAbilityScenePreview(iconFrame, getSceneData, monsterId,
     playTimer = setTimeout(() => {
       TimerManager.remove(playTimer);
       playTimer = null;
-      cyclopediaSceneLog('playing', () => ({ animations: scene.play() }));
+      const playing = scene.play(); // never inside the log builder: it only runs at verbose/info level
+      cyclopediaSceneLog('playing', () => ({ animations: playing }));
     }, CYCLOPEDIA_SCENE_LAYOUT.playDelayMs);
     TimerManager.addTimeout(playTimer, 'abilityScenePlay');
     // The creature view can be replaced while hovering (mouseleave then never fires): drop the panel with it.
