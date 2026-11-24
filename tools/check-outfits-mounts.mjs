@@ -15,6 +15,10 @@
  *   GONEOUTFIT    outfit in the snapshot, not in the game
  *   MOUNTABLE     outfit whose mountable flag (or name) changed
  *
+ *   HOOK          a game shape Outfiter.js hooks into moved (no snapshot to update: fix Outfiter.js):
+ *                 the mount module exports (`G9` id Map, `Xc` name table), the outfit table (`rP`),
+ *                 the dialog reading owned ids from `codex.outfit` / `codex.mount`, and its Mounts tab
+ *
  * A parser that no longer finds the tables exits 2: that also means the in-game live load is broken
  * and Outfiter.js is running on its snapshot.
  *
@@ -108,18 +112,44 @@ export function diffTables(snapshot, live) {
   return lines;
 }
 
+/** Game shapes Outfiter.js writes into or reads from at runtime. One line per shape that is gone. */
+export function checkHooks(chunks) {
+  const src = chunks.join('\n');
+  const lines = [];
+  const need = (ok, what) => { if (!ok) lines.push('HOOK       ' + what); };
+  need(/G9:function\(\)\{return \w+\}/.test(src) && /Xc:function\(\)\{return \w+\}/.test(src) && src.includes('"Widow Queen":{id:368'),
+    'mount module no longer exports G9 (id Map) + Xc (name table) with "Widow Queen": update findNativeMountMap()');
+  need(/rP:function\(\)\{return \w+\}/.test(src) && src.includes('"Golden Outfit":{id:'),
+    'outfit table rP / "Golden Outfit" not found: update findNativeOutfitTable()');
+  need(/=>(\w+)\((\w+)\.outfit\),\w+=\w+=>\1\(\2\.mount\)/.test(src),
+    'owned outfits/mounts are no longer read from codex.outfit / codex.mount: update mergeOutfitsIntoPlayer() / mergeMountsIntoPlayer()');
+  need(/value:"mounts",disabled:0===\w+\.length/.test(src),
+    'Change outfit dialog has no Mounts tab shaped like before: check the mount badges (updateOutfitBadgeStyle)');
+  need(/"data-mount":\w+,width:64,height:64/.test(src),
+    'mount slot is no longer img[data-mount=id]: update the mount badge selector in updateOutfitBadgeStyle()');
+  return lines;
+}
+
 async function main() {
   const update = process.argv.includes('--update');
   const source = readFileSync(OUTFITER_PATH, 'utf8');
-  const live = loadParser(source)(await loadChunks());
+  const chunks = await loadChunks();
+  const live = loadParser(source)(chunks);
+  const hookLines = checkHooks(chunks);
   const lines = diffTables(readSnapshot(source), live);
 
-  if (lines.length === 0) {
+  if (lines.length === 0 && hookLines.length === 0) {
     await recordRun('outfitsMounts', 'ok');
     console.log(`OK: Outfiter.js snapshot matches the game (${Object.keys(live.mounts).length} mounts, ${live.outfitIds.length} outfits, ${Object.keys(live.mountable).length} mountable).`);
     return;
   }
-  console.log(lines.join('\n'));
+  console.log([...lines, ...hookLines].join('\n'));
+  if (hookLines.length) {
+    await recordRun('outfitsMounts', 'drift');
+    console.log('\n' + hookLines.length + ' HOOK line(s): the game moved something Outfiter.js depends on. No --update for these: fix Outfiter.js, then re-run.');
+    process.exitCode = 1;
+    return;
+  }
   if (!update) {
     await recordRun('outfitsMounts', 'drift');
     console.log(`\n${lines.length} difference(s). Run: node tools/check-outfits-mounts.mjs --update`);

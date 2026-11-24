@@ -185,7 +185,7 @@
     // The track loop runs every frame (up to 240/s). Finding the targets and checking the loot overlay are DOM
     // queries, so the loop redoes them at most this often; only the cheap position read stays per frame.
     const AUTO_BADGE_RETARGET_MS = 100;
-    const AUTO_BADGE_TRACK_MIN_MS = 50;
+    const AUTO_BADGE_TRACK_MIN_MS = 250;
     let autoBadgeRetargetAt = 0;
     let autoBadgeHideForLootTable = false;
     let autoBadgePositionRafId = null;
@@ -9749,26 +9749,22 @@
 
     function startAutoBadgeTrackLoop() {
         if (autoBadgeTrackRafId !== null) return;
-        let lastRun = 0;
-        const tick = (ts) => {
+        // A rAF loop woke the mod on every frame (100+ Hz) only to skip most of them.
+        // A plain interval is enough: observers/scroll/resize handlers cover real moves,
+        // this is the safety net.
+        autoBadgeTrackRafId = setInterval(() => {
             if (isCleaningUp || !Object.values(AUTO_BADGE_SLOTS).some((slot) => slot.el)) {
-                autoBadgeTrackRafId = null;
+                stopAutoBadgeTrackLoop();
                 return;
             }
-            // Cap at ~20Hz: the getBoundingClientRect read forces layout every run,
-            // and observers/scroll/resize handlers already cover real moves.
-            if (!(ts - lastRun < AUTO_BADGE_TRACK_MIN_MS)) {
-                lastRun = ts;
-                positionAutoBadges(true);
-            }
-            autoBadgeTrackRafId = requestAnimationFrame(tick);
-        };
-        autoBadgeTrackRafId = requestAnimationFrame(tick);
+            if (document.hidden) return;
+            positionAutoBadges(true);
+        }, AUTO_BADGE_TRACK_MIN_MS);
     }
 
     function stopAutoBadgeTrackLoop() {
         if (autoBadgeTrackRafId !== null) {
-            cancelAnimationFrame(autoBadgeTrackRafId);
+            clearInterval(autoBadgeTrackRafId);
             autoBadgeTrackRafId = null;
         }
         if (autoBadgePositionRafId !== null) {

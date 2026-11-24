@@ -4773,6 +4773,10 @@ function scheduleTabSwitchReapply(trigger, tabInfo = null) {
   }, TIMEOUT_DELAYS.TAB_REAPPLY);
 }
 
+// Tabs inside a dialog (Change outfit's Outfits/Mounts, Store, ...) never re-render the page's creature or
+// equipment grids, so they must not start a depot re-layout.
+const isTabInsideDialog = (tab) => !!tab?.closest?.('[role="dialog"], [data-radix-dialog-content]');
+
 function startTabButtonObserver() {
   if (depotObservers.tabButtons) return;
 
@@ -4782,7 +4786,8 @@ function startTabButtonObserver() {
         mutation.type === 'attributes' &&
         mutation.attributeName === 'aria-selected' &&
         mutation.target?.getAttribute?.('role') === 'tab' &&
-        mutation.target.getAttribute('aria-selected') === 'true'
+        mutation.target.getAttribute('aria-selected') === 'true' &&
+        !isTabInsideDialog(mutation.target)
       ) {
         depotDebug('tab observer: tab selected', {
           tabId: mutation.target?.id || null,
@@ -4807,7 +4812,7 @@ function startTabButtonObserver() {
   // Fallback for direct tab clicks (mouse/touch).
   depotTabClickListener = (event) => {
     const tab = event.target?.closest?.('[role="tab"]');
-    if (!tab) return;
+    if (!tab || isTabInsideDialog(tab)) return;
     depotDebug('tab click listener: tab clicked', {
       tabId: tab.id || null,
       tabLabel: (tab.textContent || '').trim()

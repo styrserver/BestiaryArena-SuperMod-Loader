@@ -27,10 +27,6 @@ let restoreTimer = null;
 // Store notification cleanup timers
 const notificationTimers = new Set();
 
-// Mount selector (account-menu item under "OT Mods" + modal grid)
-let mountMenuObserver = null;
-let mountModal = null;
-const mountMenuTimers = new Set();
 let tablesAbort = null; // aborts the in-flight live game-table load
 
 // =======================
@@ -77,7 +73,7 @@ const MOUNTS = { // id -> [name, rarity] or [name, rarity, riderX, riderY]
   450: ["Manta Ray", 5],
   502: ["Ironblight", 1],
   503: ["Magma Crawler", 1],
-  506: ["Dragonling", 3],
+  506: ["Dragonling", 4],
   515: ["Gnarlhound", 1],
   521: ["Crimson Ray", 5],
   522: ["Steelbeak", 5],
@@ -150,8 +146,8 @@ const MOUNTS = { // id -> [name, rarity] or [name, rarity, riderX, riderY]
   902: ["Shadow Claw", 2],
   903: ["Snow Pelt", 2],
   905: ["Jackalope", 1],
-  906: ["Dreadhare", 1],
-  907: ["Wolpertinger", 1],
+  906: ["Wolpertinger", 1],
+  907: ["Dreadhare", 1],
   937: ["Stone Rhino", 5],
   950: ["Gold Sphinx", 2],
   951: ["Emerald Sphinx", 2],
@@ -645,7 +641,8 @@ function parseGameTables(chunks) {
   }
   const mountable = {};
   const outfitIds = [];
-  for (const m of table(outfitSrc, 'mountable:!').matchAll(/\{id:(\d+),name:("(?:[^"\\]|\\.)*")([^{}]*)\}/g)) {
+  // An entry can hold one level of nested objects (colors:{...}, altColors:{...}), so the tail allows {...} groups.
+  for (const m of table(outfitSrc, 'mountable:!').matchAll(/\{id:(\d+),name:("(?:[^"\\]|\\.)*")((?:[^{}]|\{[^{}]*\})*)\}/g)) {
     outfitIds.push(+m[1]);
     if (m[3].includes('mountable:!0')) mountable[+m[1]] = unquoteName(m[2]);
   }
@@ -713,21 +710,37 @@ function mountSpriteUrl(id) { return isSleqqusMount(id) ? SLEQQUS_MOUNTS[id][2] 
 // So (1) add the ids to that Map, found in webpack's module cache by shape (an exported `G` Map holding
 // mount 368 plus an `X` name table), and (2) answer those sprite URLs from SLEQQUS_MOUNTS.
 const NATIVE_MOUNT_PATH = /^\/assets\/playerMount\/(\d+)\.png(?:[?#].*)?$/;
-let nativeMountMap = null;
+let nativeMountMap = null; // the game's id -> mount Map (what the outfit canvas reads)
+let nativeMountTable = null; // the game's name -> mount object (what the dialog's Mounts tab lists)
 let nativeMountsTimer = null;
 let nativeMountsTries = 0;
 let imageSrcDescriptor = null;
 let imageSrcPatch = null;
 
-function findNativeMountMap() {
+// The game's webpack `require`, found by pushing a probe chunk whose runtime callback receives it. Webpack only
+// runs that callback the first time a chunk id is pushed (later pushes of the same id are treated as already
+// installed), so every probe gets a fresh id, and the result is kept: the first caller to find it used to
+// leave every later one (custom outfits, Sleqqus mounts) with nothing.
+let gameWebpackRequire = null;
+let webpackProbeSeq = 0;
+
+function getGameWebpackRequire() {
+  if (gameWebpackRequire) return gameWebpackRequire;
   const registry = window.webpackChunk_N_E;
   if (!Array.isArray(registry) || typeof registry.push !== 'function') return null;
-  let webpackRequire = null;
-  try { registry.push([['ba-outfiter-mounts-probe'], {}, (req) => { webpackRequire = req; }]); } catch (_) { /* not ready */ }
-  if (typeof webpackRequire !== 'function') return null;
-  const isMountTable = (exp) => exp?.G instanceof Map && exp.G.has(368) && exp.X && typeof exp.X === 'object';
+  let found = null;
+  try { registry.push([['ba-outfiter-probe-' + (++webpackProbeSeq)], {}, (req) => { found = req; }]); } catch (_) { /* not ready */ }
+  if (typeof found === 'function') gameWebpackRequire = found;
+  return gameWebpackRequire;
+}
+
+function findNativeMountMap() {
+  const webpackRequire = getGameWebpackRequire();
+  if (!webpackRequire) return null;
+  const isMountTable = (exp) => exp?.G9 instanceof Map && exp.G9.has(368) && exp.Xc && typeof exp.Xc === 'object' && 'Widow Queen' in exp.Xc;
+  const tables = (exp) => ({ map: exp.G9, table: exp.Xc });
   for (const mod of Object.values(webpackRequire.c || {})) {
-    if (isMountTable(mod?.exports)) return mod.exports.G;
+    if (isMountTable(mod?.exports)) return tables(mod.exports);
   }
   // Not in the module cache (not loaded yet, or the cache is not exposed): find the module by its
   // source and require it.
@@ -735,7 +748,7 @@ function findNativeMountMap() {
     if (typeof factory !== 'function' || !String(factory).includes('"Widow Queen"')) continue;
     try {
       const exp = webpackRequire(id);
-      if (isMountTable(exp)) return exp.G;
+      if (isMountTable(exp)) return tables(exp);
     } catch (_) { /* try the next candidate */ }
   }
   return null;
@@ -761,11 +774,8 @@ let nativeOutfitsTimer = null;
 let nativeOutfitsTries = 0;
 
 function findNativeOutfitTable() {
-  const registry = window.webpackChunk_N_E;
-  if (!Array.isArray(registry) || typeof registry.push !== 'function') return null;
-  let webpackRequire = null;
-  try { registry.push([['ba-outfiter-outfits-probe'], {}, (req) => { webpackRequire = req; }]); } catch (_) { /* not ready */ }
-  if (typeof webpackRequire !== 'function') return null;
+  const webpackRequire = getGameWebpackRequire();
+  if (!webpackRequire) return null;
   const isOutfitTable = (exp) => exp?.rP && typeof exp.rP === 'object' && NATIVE_OUTFIT_TABLE_KEY in exp.rP;
   for (const mod of Object.values(webpackRequire.c || {})) {
     if (isOutfitTable(mod?.exports)) return mod.exports.rP;
@@ -844,13 +854,19 @@ function installSleqqusMounts() {
   if (nativeMountMap || nativeMountsTimer) return;
   const attempt = () => {
     nativeMountsTimer = null;
-    nativeMountMap = findNativeMountMap();
-    if (nativeMountMap) {
+    const found = findNativeMountMap();
+    if (found) {
+      nativeMountMap = found.map;
+      nativeMountTable = found.table;
       for (const id of Object.keys(SLEQQUS_MOUNTS).map(Number)) {
         if (isSleqqusMount(id) && !nativeMountMap.has(id)) {
-          nativeMountMap.set(id, { id, name: SLEQQUS_MOUNTS[id][0], rarity: SLEQQUS_MOUNTS[id][1], group: 'sleqqus' });
+          const [name, rarity] = SLEQQUS_MOUNTS[id];
+          const entry = { id, name, rarity, group: 'sleqqus' };
+          nativeMountMap.set(id, entry);
+          nativeMountTable[name] = { ...entry, custom: 'outfiter' }; // listed by the dialog's Mounts tab
         }
       }
+      mergeMountsIntoPlayer(); // re-run the dialog's owned-mount filter
       console.log('[Outfiter] Sleqqus mounts registered in the game mount table:',
         Object.keys(SLEQQUS_MOUNTS).filter((id) => nativeMountMap.get(Number(id))?.group === 'sleqqus').join(', ') || 'none (all native)',
         '| image src patch:', imageSrcPatch ? 'on' : 'FAILED');
@@ -858,7 +874,7 @@ function installSleqqusMounts() {
       return;
     }
     if (++nativeMountsTries < 40) nativeMountsTimer = setTimeout(attempt, 500);
-    else console.warn('[Outfiter] Game mount table not found; Sleqqus mounts show only in the Outfiter picker');
+    else console.warn('[Outfiter] Game mount table not found; Sleqqus mounts will not show in the native dialog');
   };
   attempt();
 }
@@ -873,6 +889,12 @@ function uninstallSleqqusMounts() {
       if (nativeMountMap.get(id)?.group === 'sleqqus') nativeMountMap.delete(id);
     }
     nativeMountMap = null;
+  }
+  if (nativeMountTable) {
+    for (const [name, entry] of Object.entries(nativeMountTable)) {
+      if (entry?.custom === 'outfiter') delete nativeMountTable[name];
+    }
+    nativeMountTable = null;
   }
   // Only restore if nobody patched on top of us.
   if (imageSrcPatch && Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'src')?.set === imageSrcPatch.set) {
@@ -909,6 +931,9 @@ async function loadGameTables(signal) {
 const OUTFIT_DIALOG = '[role="dialog"]:has(svg.lucide-palette)';
 const ownedOutfits = new Set();
 let addedOutfits = new Set();
+// Same for mounts: the dialog's Mounts tab lists `Object.values(mountTable).filter(owned)`.
+const ownedMounts = new Set();
+let addedMounts = new Set();
 let outfitBadgeStyle = null;
 
 // ---- Corner badges (outfit list + mount picker) ----------------------------------------------
@@ -939,7 +964,7 @@ function badgeDeclarations(icon, corner) {
 // Each slot is `button > .container-slot > .relative > canvas[data-outfit=<id>]`.
 function updateOutfitBadgeStyle() {
   const rideableIds = Object.keys(MOUNTABLE_OUTFITS);
-  if (addedOutfits.size === 0 && rideableIds.length === 0) {
+  if (addedOutfits.size === 0 && addedMounts.size === 0 && rideableIds.length === 0) {
     outfitBadgeStyle?.remove();
     outfitBadgeStyle = null;
     stopIconHover();
@@ -969,6 +994,12 @@ function updateOutfitBadgeStyle() {
     css += `${group(added, '::after')} { content: ''; pointer-events: none; ${badgeDeclarations(outfiterIconUrl(), OUTFIT_BADGE_CORNER)} }
 `;
   }
+  if (addedMounts.size) {
+    // Mount slots hold an <img data-mount=id> instead of an outfit canvas.
+    const mountSlot = (id) => `${OUTFIT_DIALOG} button > .container-slot:has(> .relative > img[data-mount="${id}"])::after`;
+    css += `${[...addedMounts].map(mountSlot).join(',')} { content: ''; pointer-events: none; ${badgeDeclarations(outfiterIconUrl(), OUTFIT_BADGE_CORNER)} }
+`;
+  }
   outfitBadgeStyle.textContent = css;
   startIconHover();
 }
@@ -987,11 +1018,18 @@ function iconTipFor(event) {
   const badge = event.target?.closest?.('[data-outfiter-tip]');
   if (badge) return badge.dataset.outfiterTip;
   const slot = event.target?.closest?.(`${OUTFIT_DIALOG} button > .container-slot`);
+  const mountId = slot?.querySelector(':scope > .relative > img[data-mount]')?.dataset.mount;
   const id = slot?.querySelector(':scope > .relative > canvas[data-outfit]')?.dataset.outfit;
-  if (!slot || id === undefined) return null;
+  if (!slot || (id === undefined && mountId === undefined)) return null;
   const rect = slot.getBoundingClientRect();
   const x = event.clientX - rect.left;
   const y = event.clientY - rect.top;
+  if (mountId !== undefined) {
+    if (addedMounts.has(Number(mountId)) && x >= rect.width - BADGE.size && y <= BADGE.size) {
+      return t(isSleqqusMount(Number(mountId)) ? 'mods.outfiter.tooltipMountSleqqus' : 'mods.outfiter.tooltipMountNotOwned');
+    }
+    return null;
+  }
   if (addedOutfits.has(Number(id)) && x >= rect.width - BADGE.size && y <= BADGE.size) {
     return t(Number(id) in CUSTOM_OUTFITS ? 'mods.outfiter.tooltipModOnly' : 'mods.outfiter.tooltipNotOwned');
   }
@@ -1037,15 +1075,49 @@ function stopIconHover() {
   iconTip = null;
 }
 
+// The game's Change outfit dialog does not read player.outfits / player.mounts: it lists the ids with a
+// count above 0 in player.codex.outfit / player.codex.mount (the owned-id hooks run `ai(codex.outfit)`).
+// So every id this mod adds is written to both, and owned ids are read from both.
+function ownedIdsOf(list, codexLayer) {
+  const ids = new Set(list || []);
+  for (const [id, count] of Object.entries(codexLayer || {})) if (count > 0) ids.add(Number(id));
+  return ids;
+}
+
+// Copy of a codex layer ({ id: count }) with the given ids owned (count at least 1).
+function withCodexIds(layer, ids) {
+  const next = { ...(layer || {}) };
+  ids.forEach((id) => { if (!(next[id] > 0)) next[id] = 1; });
+  return next;
+}
+
 function mergeOutfitsIntoPlayer() {
   globalThis.state.player.trigger.setState({
     fn: (prev) => {
-      prev.outfits.forEach((id) => { if (!addedOutfits.has(id)) ownedOutfits.add(id); });
+      ownedIdsOf(prev.outfits, prev.codex?.outfit).forEach((id) => { if (!addedOutfits.has(id)) ownedOutfits.add(id); });
       const ids = getOutfitIds();
       addedOutfits = new Set([...addedOutfits, ...ids.filter((id) => !ownedOutfits.has(id))]);
       return {
         ...prev,
         outfits: [...new Set([...prev.outfits, ...ids])], // Merge and deduplicate
+        codex: { ...prev.codex, outfit: withCodexIds(prev.codex?.outfit, ids) },
+      };
+    },
+  });
+  updateOutfitBadgeStyle();
+}
+
+function mergeMountsIntoPlayer() {
+  globalThis.state.player.trigger.setState({
+    fn: (prev) => {
+      const mounts = prev.mounts || [];
+      ownedIdsOf(mounts, prev.codex?.mount).forEach((id) => { if (!addedMounts.has(id)) ownedMounts.add(id); });
+      const ids = getMountIds();
+      addedMounts = new Set([...addedMounts, ...ids.filter((id) => !ownedMounts.has(id))]);
+      return {
+        ...prev,
+        mounts: [...new Set([...mounts, ...ids])],
+        codex: { ...prev.codex, mount: withCodexIds(prev.codex?.mount, ids) },
       };
     },
   });
@@ -1078,8 +1150,10 @@ function startOutfitGuard() {
         console.log('[Outfiter] Player outfitId changed:', lastSeenOutfitId, '->', ctx.outfitId);
         lastSeenOutfitId = ctx.outfitId;
       }
-      const have = new Set(ctx.outfits);
+      const have = ownedIdsOf(ctx.outfits, ctx.codex?.outfit);
       if (getOutfitIds().some((id) => !have.has(id))) mergeOutfitsIntoPlayer();
+      const haveMounts = ownedIdsOf(ctx.mounts, ctx.codex?.mount);
+      if (getMountIds().some((id) => !haveMounts.has(id))) mergeMountsIntoPlayer();
       reassertCustomOutfit(ctx);
     } catch (_) { /* storage or state unavailable */ }
   });
@@ -1092,25 +1166,83 @@ function stopOutfitGuard() {
   else sub?.unsubscribe?.();
 }
 
-// Reading the tables re-downloads and scans every game chunk (seconds of main-thread work), so it
-// runs once per page load; later toggles reuse MOUNTS/OUTFIT_IDS as they stand (live or snapshot).
+// The live tables come straight from the game's own modules (the same objects findNativeMountMap /
+// findNativeOutfitTable already hand us): no network. Only when the modules cannot be reached does it fall
+// back to downloading and scanning every game chunk (~30 files, ~18 MB, seconds of main-thread work), and
+// that result is kept on window so a mod reload never repeats it. The colour palette is not exported by
+// those modules, so it stays as the snapshot says (check-outfits-mounts.mjs watches it).
 let tablesSettled = false;
+let tablesTimer = null;
+let tablesTries = 0;
+const TABLES_MODULE_TRIES = 20;
+
+// Same shape parseGameTables returns (minus the palette), read from the live objects. null if not ready.
+function readTablesFromGameModules() {
+  const mount = findNativeMountMap();
+  const outfits = findNativeOutfitTable();
+  if (!mount?.table || !outfits) return null;
+  const mounts = {};
+  const mountGroups = {};
+  for (const entry of Object.values(mount.table)) {
+    if (!entry || entry.custom === 'outfiter') continue; // ours (Sleqqus), not the game's
+    const row = [entry.name, entry.rarity];
+    const offset = entry.riderOffset;
+    if (offset && (offset.x || offset.y)) row.push(offset.x, offset.y);
+    mounts[entry.id] = row;
+    if (entry.group) mountGroups[entry.id] = entry.group;
+  }
+  const mountable = {};
+  const outfitIds = [];
+  for (const entry of Object.values(outfits)) {
+    if (!entry || entry.custom === 'outfiter') continue;
+    outfitIds.push(entry.id);
+    if (entry.mountable) mountable[entry.id] = entry.name;
+  }
+  if (Object.keys(mounts).length < 50 || outfitIds.length < 50) return null;
+  return { mounts, mountGroups, mountable, outfitIds, palette: null };
+}
+
+function applyGameTables(tables, source) {
+  tablesSettled = true;
+  replaceContents(MOUNTS, tables.mounts);
+  replaceContents(MOUNT_GROUPS, tables.mountGroups);
+  replaceContents(MOUNTABLE_OUTFITS, tables.mountable);
+  replaceContents(OUTFIT_IDS, tables.outfitIds);
+  if (tables.palette) replaceContents(OUTFIT_PALETTE, tables.palette);
+  let enabled = false;
+  try { enabled = localStorage.getItem('outfiter-enabled') === 'true'; } catch (_) { /* storage unavailable */ }
+  if (enabled) { // a late load must not re-add items after the toggle was switched off
+    mergeOutfitsIntoPlayer();
+    mergeMountsIntoPlayer();
+  }
+  console.log('[Outfiter] Loaded live game tables ('+ source + '):', OUTFIT_IDS.length, 'outfits,', Object.keys(MOUNTS).length, 'mounts');
+}
 
 function refreshGameTables() {
-  if (tablesAbort || tablesSettled) return;
+  if (tablesAbort || tablesSettled || tablesTimer) return;
+  const attempt = () => {
+    tablesTimer = null;
+    const live = readTablesFromGameModules();
+    if (live) { applyGameTables(live, 'game modules'); return; }
+    if (++tablesTries < TABLES_MODULE_TRIES) { tablesTimer = setTimeout(attempt, 500); return; }
+    loadTablesFromChunks();
+  };
+  attempt();
+}
+
+// Fallback: scan the chunks. One download per page load, shared across mod reloads.
+function loadTablesFromChunks() {
   const controller = new AbortController();
   tablesAbort = controller;
-  loadGameTables(controller.signal).then((tables) => {
+  if (!window.__BA_OUTFITER_CHUNK_TABLES__) {
+    // The shared promise must not die with one reload's abort signal, so it gets its own controller.
+    window.__BA_OUTFITER_CHUNK_TABLES__ = loadGameTables(new AbortController().signal);
+  }
+  window.__BA_OUTFITER_CHUNK_TABLES__.then((tables) => {
     if (controller.signal.aborted) return;
-    tablesSettled = true;
-    replaceContents(MOUNTS, tables.mounts);
-    replaceContents(MOUNT_GROUPS, tables.mountGroups);
-    replaceContents(MOUNTABLE_OUTFITS, tables.mountable);
-    replaceContents(OUTFIT_IDS, tables.outfitIds);
-    if (tables.palette) replaceContents(OUTFIT_PALETTE, tables.palette);
-    mergeOutfitsIntoPlayer();
-    console.log('[Outfiter] Loaded live game tables:', OUTFIT_IDS.length, 'outfits,', Object.keys(MOUNTS).length, 'mounts');
+    applyGameTables(tables, 'chunk scan');
   }).catch((error) => {
+    window.__BA_OUTFITER_CHUNK_TABLES__ = null; // let a later attempt retry
     if (!controller.signal.aborted) {
       tablesSettled = true;
       console.warn('[Outfiter] Live game tables unavailable, using bundled snapshot:', error.message);
@@ -1124,7 +1256,7 @@ function refreshGameTables() {
 // null when the current outfit already can. Prefers outfits the player owns.
 function pickMountableOutfit(ctx) {
   if (ctx?.outfitId in MOUNTABLE_OUTFITS) return null;
-  const owned = ctx?.outfits || [];
+  const owned = [...ownedIdsOf(ctx?.outfits, ctx?.codex?.outfit)];
   return owned.find(id => id in MOUNTABLE_OUTFITS) ?? Number(Object.keys(MOUNTABLE_OUTFITS)[0]);
 }
 
@@ -1169,9 +1301,8 @@ function modOnlyOutfitChange(body) {
   try {
     const json = JSON.parse(body)?.['0']?.json;
     if (!json || json.outfitId == null) return null;
-    const ctx = globalThis.state.player.getSnapshot().context;
     const outfitModOnly = Number(json.outfitId) in CUSTOM_OUTFITS || addedOutfits.has(json.outfitId);
-    const mountModOnly = json.mountId != null && !(ctx.mounts || []).includes(json.mountId);
+    const mountModOnly = json.mountId != null && addedMounts.has(json.mountId);
     return outfitModOnly || mountModOnly ? { outfitId: json.outfitId, colors: json.colors, mountId: json.mountId } : null;
   } catch (_) {
     return null;
@@ -1518,324 +1649,6 @@ async function renderOutfit(canvas, outfitId, colors, mountId) {
     mount.width - half + offsetX, mount.height - rider.height + offsetY, half, rider.height);
 }
 
-// The mount you last rode, so riding can be switched off and back on without picking again.
-const LAST_MOUNT_KEY = 'outfiter-last-mount';
-
-function readLastMount() {
-  try {
-    const id = Number(localStorage.getItem(LAST_MOUNT_KEY));
-    return mountEntry(id) ? id : null;
-  } catch (_) { return null; }
-}
-
-function writeLastMount(id) {
-  try { localStorage.setItem(LAST_MOUNT_KEY, String(id)); } catch (_) { /* storage unavailable */ }
-}
-
-function openMountSelector() {
-  if (mountModal) mountModal.close();
-
-  const player = globalThis.state?.player?.getSnapshot?.().context;
-  const initial = currentMountId();
-  const ownedMounts = new Set(player?.mounts || []);
-  let selected = initial ?? readLastMount();
-  let ride = initial !== null; // the toggle: ride the selected mount, or not
-
-  const overlay = document.createElement('div');
-  overlay.className = 'fixed inset-0 z-modals';
-  overlay.style.background = 'rgba(0,0,0,0.5)';
-  overlay.style.pointerEvents = 'auto'; // Radix sets body pointer-events:none while a menu is open
-
-  const dialog = document.createElement('div');
-  dialog.setAttribute('role', 'dialog');
-  dialog.style.pointerEvents = 'auto';
-  dialog.className = 'auto-centered fixed z-modals w-full shadow-lg outline-none max-w-[300px]';
-  dialog.innerHTML = `
-    <div>
-      <h2 class="widget-top widget-top-text"><p data-mount-title></p></h2>
-      <div class="widget-bottom pixel-font-16 p-3 text-whiteRegular">
-        <div class="grid gap-3">
-          <div class="grid grid-cols-[min-content_1fr] gap-2">
-            <div class="container-slot surface-darker relative p-0.5 size-[76px]">
-              <div role="none" class="has-rarity absolute inset-0 opacity-60" data-mount-preview-rarity></div>
-              <div class="relative z-1 h-sprite w-sprite"><div class="absolute bottom-[-23px] right-[-23px] size-full" data-mount-preview></div></div>
-            </div>
-            <div class="flex flex-col overflow-hidden">
-              <p class="pixel-font-32 line-clamp-1 text-whiteExp"></p>
-              <p class="line-clamp-1" data-mount-name></p>
-              <button type="button" data-mount-ride class="focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular gap-1 px-2 py-0.5 pb-[3px] pixel-font-14 mt-auto"></button>
-            </div>
-          </div>
-          <div class="relative overflow-hidden frame-pressed-1 surface-dark h-[230px] px-1 pb-0" style="height:230px;">
-            <div data-mount-grid style="height:100%;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;display:grid;grid-template-columns:repeat(3,79px);grid-auto-rows:52px;gap:4px;padding:4px 0;justify-content:center;align-content:start;"></div>
-          </div>
-          <p class="pixel-font-14 opacity-70" data-mount-note hidden></p>
-        </div>
-        <div role="none" class="separator my-2.5"></div>
-        <div class="flex justify-end gap-2">
-          <button data-mount-cancel class="focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular frame-1 active:frame-pressed-1 surface-regular gap-1 px-2 py-0.5 pb-[3px] pixel-font-14"></button>
-          <button data-mount-save class="focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular frame-1-green active:frame-pressed-1-green surface-green gap-1 px-2 py-0.5 pb-[3px] pixel-font-14"></button>
-        </div>
-      </div>
-    </div>`;
-  dialog.querySelector('.pixel-font-32').textContent = player?.name || '';
-  dialog.querySelector('[data-mount-title]').textContent = t('mods.outfiter.changeMount');
-  dialog.querySelector('[data-mount-cancel]').textContent = t('common.cancel');
-  dialog.querySelector('[data-mount-save]').textContent = t('common.save');
-
-  const grid = dialog.querySelector('[data-mount-grid]');
-  const preview = dialog.querySelector('[data-mount-preview]');
-  const previewRarity = dialog.querySelector('[data-mount-preview-rarity]');
-  const nameEl = dialog.querySelector('[data-mount-name]');
-  const rideBtn = dialog.querySelector('[data-mount-ride]');
-  const cells = new Map();
-
-  // Mounts only draw on a mountable outfit; otherwise grey them out (picking one still works and
-  // switches the outfit on Save, see pickMountableOutfit).
-  const canRide = player?.outfitId in MOUNTABLE_OUTFITS;
-  const note = dialog.querySelector('[data-mount-note]');
-  note.textContent = t('mods.outfiter.cannotRideNote');
-  note.hidden = canRide;
-
-  // The preview is your own outfit, riding the selected mount when riding is on (like the game's canvas).
-  const previewCanvas = document.createElement('canvas');
-  previewCanvas.height = 64;
-  previewCanvas.className = 'pixelated absolute bottom-0 right-0 brightness-110';
-  preview.appendChild(previewCanvas);
-  let previewToken = 0;
-  const paintPreview = (outfitId, mountId) => {
-    const token = ++previewToken;
-    if (mountId === null) previewCanvas.removeAttribute('data-mount');
-    else previewCanvas.setAttribute('data-mount', String(mountId));
-    renderOutfit(previewCanvas, outfitId, player, mountId).catch((error) => {
-      if (token === previewToken) console.warn('[Outfiter] Preview failed:', error.message);
-    });
-  };
-
-  const sprite = (id) => {
-    const img = document.createElement('img');
-    img.src = mountSpriteUrl(id);
-    img.alt = mountEntry(id)[0];
-    img.className = 'pixelated pointer-events-none absolute bottom-0 right-0';
-    return img;
-  };
-
-  const refresh = () => {
-    cells.forEach((el, id) => {
-      const slot = el.firstChild;
-      const greyed = !canRide && id !== null && id !== selected;
-      const highlighted = id === null ? !ride : id === selected; // "none" lights up when riding is off
-      slot.setAttribute('data-highlighted', String(highlighted));
-      slot.style.filter = [greyed ? 'grayscale(1)' : '', highlighted ? 'brightness(1.25)' : ''].filter(Boolean).join(' ');
-      slot.style.opacity = greyed ? '0.5' : '';
-    });
-    const riding = ride && selected !== null;
-    const switchTo = riding ? pickMountableOutfit(player) : null;
-    // Riding on: you on the mount. Riding off: the mount alone. No mount picked: just you.
-    // A mount pick always previews (on a rideable outfit if yours cannot ride), but Save ignores it then.
-    if (selected === null) paintPreview(player?.outfitId, null);
-    else paintPreview(riding ? (switchTo ?? player?.outfitId) : null, selected);
-    previewRarity.setAttribute('data-rarity', selected === null ? '' : String(mountEntry(selected)[1]));
-    nameEl.textContent = selected === null
-      ? t('mods.outfiter.noMount')
-      : mountEntry(selected)[0] + (switchTo !== null ? ` + ${MOUNTABLE_OUTFITS[switchTo]}` : '');
-    rideBtn.textContent = ride ? t('mods.outfiter.ridingOn') : t('mods.outfiter.ridingOff');
-    rideBtn.className = 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular gap-1 px-2 py-0.5 pb-[3px] pixel-font-14 mt-auto ' +
-      (ride ? 'frame-1-green active:frame-pressed-1-green surface-green' : 'frame-1 active:frame-pressed-1 surface-regular');
-    rideBtn.disabled = selected === null || !canRide;
-    // Greyed and disabled when the outfit cannot ride.
-    rideBtn.style.opacity = selected === null || !canRide ? '0.5' : '';
-    rideBtn.style.filter = canRide ? '' : 'grayscale(1)';
-  };
-
-  const addSlot = (id) => {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'group focus-style-visible';
-    btn.title = id === null ? t('mods.outfiter.noMount') : `${mountEntry(id)[0]} (${id})${MOUNT_GROUPS[id] ? ` - ${MOUNT_GROUPS[id]}` : ''}${canRide ? '' : ` - ${t('mods.outfiter.needsMountableOutfit')}`}`;
-    const slot = document.createElement('div');
-    slot.className = 'container-slot surface-darker relative p-0.5 flex justify-end border-whiteDark pb-1 pr-1 pt-3.5';
-    slot.style.cssText = 'width:79px;height:52px;box-sizing:border-box;';
-    if (id !== null) {
-      const rarity = document.createElement('div');
-      rarity.setAttribute('role', 'none');
-      rarity.className = 'has-rarity absolute inset-0 opacity-60';
-      rarity.setAttribute('data-rarity', String(mountEntry(id)[1]));
-      const box = document.createElement('div');
-      box.className = 'relative z-1 h-sprite w-sprite';
-      box.appendChild(sprite(id));
-      slot.append(rarity, box);
-      // One badge per slot, top-left, like the native outfit list's: the Sleqqus icon on a mount whose
-      // image comes from sleqqus.com, else the Outfiter icon on any other mount the account does not own.
-      const imported = isSleqqusMount(id);
-      if (imported || !ownedMounts.has(id)) {
-        const mark = document.createElement('span');
-        mark.dataset.outfiterTip = t(imported ? 'mods.outfiter.tooltipMountSleqqus' : 'mods.outfiter.tooltipMountNotOwned');
-        mark.style.cssText = badgeDeclarations(imported ? SLEQQUS_ICON : outfiterIconUrl(), 'left');
-        slot.append(mark);
-      }
-    } else {
-      // The slot's native padding is lopsided (pt-3.5 pr-1) and would push the icon off-center.
-      slot.style.cssText += 'align-items:center;justify-content:center;padding:0;';
-      slot.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="26" height="26" viewBox="0 0 24 24" fill="none" ' +
-        'stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.7" ' +
-        `aria-label="${t('mods.outfiter.noMount')}"><circle cx="12" cy="12" r="10"></circle><path d="m4.9 4.9 14.2 14.2"></path></svg>`;
-    }
-    btn.appendChild(slot);
-    // Switching mounts keeps the Riding state. The "none" slot deselects the mount (preview shows just
-    // the outfit); only the first pick after that turns riding on, so Save does something.
-    btn.addEventListener('click', () => {
-      if (id === null) {
-        selected = null;
-        ride = false;
-      } else {
-        if (selected === null) ride = true;
-        selected = id;
-      }
-      refresh();
-    });
-    cells.set(id, btn);
-    grid.appendChild(btn);
-  };
-
-  addSlot(null);
-  getMountIds().forEach(addSlot);
-  refresh();
-
-  const onKey = (e) => { if (e.key === 'Escape') close(); };
-  const close = () => {
-    document.removeEventListener('keydown', onKey, true);
-    overlay.remove();
-    dialog.remove();
-    if (mountModal && mountModal.close === close) mountModal = null;
-  };
-  document.addEventListener('keydown', onKey, true);
-  overlay.addEventListener('click', close);
-  dialog.querySelector('[data-mount-cancel]').addEventListener('click', close);
-  rideBtn.addEventListener('click', () => {
-    if (selected === null) return;
-    ride = !ride;
-    refresh();
-  });
-  dialog.querySelector('[data-mount-save]').addEventListener('click', () => {
-    if (!canRide) { close(); return; } // preview only: an outfit that cannot ride saves nothing
-    const target = ride ? selected : null;
-    if (selected !== null) writeLastMount(selected);
-    if (target !== initial) window.Outfiter.setMount(target);
-    close();
-  });
-
-  document.body.append(overlay, dialog);
-  startIconHover();
-  mountModal = { close };
-}
-
-function injectMountMenuItem(menu) {
-  const text = (menu.textContent || '').toLowerCase();
-  if (!text.includes('my account') && !text.includes('minha conta')) return;
-  if (menu.querySelector('.outfiter-mount-menu-item')) return;
-
-  const group = menu.querySelector('div[role="group"]');
-  if (!group) return;
-
-  const item = document.createElement('div');
-  item.className = 'dropdown-menu-item relative flex cursor-default select-none items-center gap-2 outline-none text-whiteRegular outfiter-mount-menu-item';
-  item.setAttribute('role', 'menuitem');
-  item.setAttribute('tabindex', '-1');
-  item.setAttribute('data-orientation', 'vertical');
-  item.setAttribute('data-radix-collection-item', '');
-  item.innerHTML = `
-    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-paw-print" aria-hidden="true">
-      <circle cx="11" cy="4" r="2"></circle><circle cx="18" cy="8" r="2"></circle><circle cx="20" cy="16" r="2"></circle>
-      <path d="M9 10a5 5 0 0 1 5 5v3.5a3.5 3.5 0 0 1-6.84 1.045Q6.52 17.48 4.46 16.84A3.5 3.5 0 0 1 5.5 10Z"></path>
-    </svg>
-    <span data-outfiter-mounts-label></span>
-  `;
-  item.querySelector('[data-outfiter-mounts-label]').textContent = t('mods.outfiter.mountsMenuItem');
-  item.addEventListener('click', (e) => {
-    e.stopPropagation();
-    // Close the account menu first; opening the dialog before the Escape lands
-    // would let that same keypress cancel the dialog via its own Esc handler.
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true }));
-    const timer = setTimeout(() => {
-      mountMenuTimers.delete(timer);
-      openMountSelector();
-    }, 100);
-    mountMenuTimers.add(timer);
-  });
-
-  // Append-only: never splice into this React-owned Radix group (see CLAUDE.md). To show the item
-  // right under the native "Outfits" entry, reorder visually with CSS `order` instead: the entries up
-  // to and including "Outfits" get negative orders, ours lands just after, and everything else (incl.
-  // items other mods append later) keeps order 0 in DOM order.
-  const natives = [...group.children].filter((el) => el !== item);
-  const outfitsIdx = natives.findIndex((el) => /outfit|traje/i.test(el.textContent || ''));
-  if (outfitsIdx >= 0) {
-    if (!/flex|grid/.test(getComputedStyle(group).display)) {
-      group.style.display = 'flex';
-      group.style.flexDirection = 'column';
-    }
-    natives.slice(0, outfitsIdx + 1).forEach((el, i) => { el.style.order = String((i - 1000) * 2); });
-    item.style.order = String((outfitsIdx - 1000) * 2 + 1);
-    group.appendChild(item);
-    return;
-  }
-
-  // Another OT Mods item may already have added the shared section title.
-  if (!group.querySelector('.ot-mods-menu-title')) {
-    const sep = () => {
-      const s = document.createElement('div');
-      s.setAttribute('role', 'none');
-      s.setAttribute('aria-orientation', 'horizontal');
-      s.className = 'separator my-1';
-      return s;
-    };
-    const title = document.createElement('div');
-    title.className = 'dropdown-menu-item text-whiteExp ot-mods-menu-title';
-    title.textContent = 'OT Mods';
-    group.append(sep(), title, sep());
-  }
-  group.appendChild(item);
-}
-
-function startMountMenuObserver() {
-  if (mountMenuObserver) return;
-
-  const schedule = (menu) => {
-    const timer = setTimeout(() => {
-      mountMenuTimers.delete(timer);
-      injectMountMenuItem(menu);
-    }, 100);
-    mountMenuTimers.add(timer);
-  };
-
-  mountMenuObserver = new MutationObserver((mutations) => {
-    for (const mutation of mutations) {
-      for (const node of mutation.addedNodes) {
-        if (node.nodeType !== 1) continue;
-        const menu = node.getAttribute?.('role') === 'menu' ? node : node.querySelector?.('[role="menu"]');
-        if (menu) schedule(menu);
-      }
-    }
-  });
-  mountMenuObserver.observe(document.body, { childList: true, subtree: true });
-  document.querySelectorAll('[role="menu"]').forEach(schedule);
-}
-
-function stopMountMenuObserver() {
-  if (mountMenuObserver) {
-    mountMenuObserver.disconnect();
-    mountMenuObserver = null;
-  }
-  mountMenuTimers.forEach(clearTimeout);
-  mountMenuTimers.clear();
-  if (mountModal) {
-    mountModal.close?.();
-    mountModal = null;
-  }
-  document.querySelectorAll('.outfiter-mount-menu-item').forEach(el => el.remove());
-}
-
 // =======================
 // 3. Main Execution
 // =======================
@@ -1861,13 +1674,13 @@ function executeOutfiter() {
     // Set outfits in player state (merge with existing outfits); the snapshot is used
     // until refreshGameTables() swaps in the live list.
     mergeOutfitsIntoPlayer();
+    mergeMountsIntoPlayer();
     startOutfitGuard();
     refreshGameTables();
     installSleqqusMounts();
 
     // Set up error interception for outfit changes
     interceptOutfitChangeErrors();
-    startMountMenuObserver();
 
     // Restore saved outfit after a short delay to ensure state is ready
     restoreTimer = setTimeout(() => {
@@ -1914,10 +1727,12 @@ exports = {
           restoreTimer = null;
         }
         
-        stopMountMenuObserver();
         stopOutfitGuard();
         uninstallSleqqusMounts();
         tablesSettled = false;
+        gameWebpackRequire = null;
+        if (tablesTimer) { clearTimeout(tablesTimer); tablesTimer = null; }
+        tablesTries = 0;
         if (tablesAbort) {
           tablesAbort.abort();
           tablesAbort = null;
@@ -1927,6 +1742,8 @@ exports = {
         stopIconHover();
         ownedOutfits.clear();
         addedOutfits = new Set();
+        ownedMounts.clear();
+        addedMounts = new Set();
 
         // Clear all notification timers
         notificationTimers.forEach(timer => {
@@ -2001,29 +1818,37 @@ if (typeof window !== 'undefined') {
 
 // True when every outfit this mod manages is in the player state right now.
 function outfitsApplied() {
-  const have = new Set(globalThis.state?.player?.getSnapshot?.().context.outfits || []);
-  return getOutfitIds().every((id) => have.has(id));
+  const ctx = globalThis.state?.player?.getSnapshot?.().context;
+  const have = ownedIdsOf(ctx?.outfits, ctx?.codex?.outfit);
+  const haveMounts = ownedIdsOf(ctx?.mounts, ctx?.codex?.mount);
+  return getOutfitIds().every((id) => have.has(id)) && getMountIds().every((id) => haveMounts.has(id));
 }
 
 // Undo executeOutfiter(): drop the outfits this mod added (owned ones stay), and remove its UI/hooks.
 function revertOutfiter() {
   stopOutfitGuard();
   uninstallSleqqusMounts();
-  stopMountMenuObserver();
   if (restoreTimer) {
     clearTimeout(restoreTimer);
     restoreTimer = null;
   }
   const added = addedOutfits;
+  const addedMountIds = addedMounts;
   globalThis.state.player.trigger.setState({
     fn: (prev) => {
       const outfits = prev.outfits.filter((id) => !added.has(id));
       // Wearing an outfit we added: fall back to one the account really owns.
       const outfitId = outfits.includes(prev.outfitId) ? prev.outfitId : (outfits[0] ?? prev.outfitId);
-      return { ...prev, outfits, outfitId };
+      const mounts = (prev.mounts || []).filter((id) => !addedMountIds.has(id));
+      // Riding a mount we added: dismount.
+      const mountId = prev.mountId != null && addedMountIds.has(prev.mountId) ? null : prev.mountId;
+      const dropAdded = (layer, ids) => Object.fromEntries(Object.entries(layer || {}).filter(([id]) => !ids.has(Number(id))));
+      const codex = { ...prev.codex, outfit: dropAdded(prev.codex?.outfit, added), mount: dropAdded(prev.codex?.mount, addedMountIds) };
+      return { ...prev, outfits, outfitId, mounts, mountId, codex };
     },
   });
   addedOutfits = new Set();
+  addedMounts = new Set();
   outfitBadgeStyle?.remove();
   outfitBadgeStyle = null;
   stopIconHover();
@@ -2046,7 +1871,7 @@ function applyEnabled(enabled) {
     }
     revertOutfiter();
     const cleared = !getOutfitIds().some((id) => addedOutfits.has(id)) &&
-      (globalThis.state.player.getSnapshot().context.outfits || []).every((id) => ownedOutfits.has(id));
+      [...ownedIdsOf(globalThis.state.player.getSnapshot().context.outfits, globalThis.state.player.getSnapshot().context.codex?.outfit)].every((id) => ownedOutfits.has(id));
     console.log('[Outfiter] applyEnabled(false):', { cleared });
     return cleared;
   } catch (error) {

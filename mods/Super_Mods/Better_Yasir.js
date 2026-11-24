@@ -2896,6 +2896,139 @@
         }
       };
       
+      // ---- "Exchange your shards for packs": quantity box for the Booster Pack row ----------------
+      // The game's own row trades 1 pack (up to 10 with Shift held). This adds the same box the other rows
+      // have. The game's overlay labels and Trade button are React-owned: they are hidden, never edited or
+      // removed (see .claude/CLAUDE.md), and our own label and button sit beside them.
+      const SHARDS_PER_PACK = 100;
+      const SHARD_PACK_HEADER = /shards for packs|fragmentos por packs/i;
+
+      function getPlayerShards() {
+        return globalThis.state?.player?.getSnapshot?.()?.context?.shards ?? 0;
+      }
+
+      // Our own "Nx" label on a slot, in place of the game's hidden one.
+      function setShardPackLabel(slot, amount) {
+        const host = slot.querySelector('.has-rarity') || slot;
+        let mine = slot.querySelector('.better-yasir-shard-amount');
+        if (!mine) {
+          mine = document.createElement('div');
+          mine.className = 'better-yasir-shard-amount revert-pixel-font-spacing pointer-events-none absolute bottom-[3px] right-px flex h-2.5';
+          const span = document.createElement('span');
+          applySellQuantitySpanStyle(span);
+          mine.appendChild(span);
+          host.appendChild(mine);
+          const native = slot.querySelector('.revert-pixel-font-spacing:not(.better-yasir-shard-amount)');
+          if (native) native.style.display = 'none';
+        }
+        mine.firstChild.textContent = formatQuantityDisplay(amount) + 'x';
+      }
+
+      function enhanceShardPackRows() {
+        document.querySelectorAll('table').forEach((table) => {
+          if (!SHARD_PACK_HEADER.test(table.querySelector('thead th')?.textContent || '')) return;
+          table.querySelectorAll('tbody tr').forEach((row) => {
+            if (row._betterYasirShardPack) {
+              row._betterYasirShardPack.refresh();
+              return;
+            }
+            const cells = row.querySelectorAll(':scope > td');
+            if (cells.length < 2) return;
+            const itemBox = cells[0].querySelector('div.flex.items-center');
+            const nativeButton = cells[1].querySelector('button');
+            const packSlot = itemBox?.querySelector('.container-slot');
+            const shardSlot = cells[1].querySelector('.container-slot');
+            if (!itemBox || !nativeButton || !packSlot || !shardSlot) return;
+
+            const input = createQuantityInput(1, 1, 1);
+            const wrapper = document.createElement('div');
+            wrapper.className = 'better-yasir-shard-wrapper';
+            wrapper.style.cssText = 'display: flex; align-items: center; justify-content: center; margin-left: auto; min-width: 60px;';
+            wrapper.appendChild(input);
+            itemBox.appendChild(wrapper);
+
+            const button = createCustomActionButton('sell');
+            button.classList.add('better-yasir-shard-button');
+            button.textContent = nativeButton.textContent; // the game's own (translated) "Trade"
+            cells[1].appendChild(button);
+            nativeButton.style.display = 'none';
+
+            let busy = false;
+            const readQuantity = () => {
+              const max = Math.floor(getPlayerShards() / SHARDS_PER_PACK);
+              return Math.max(1, Math.min(parseInt(input.value, 10) || 1, Math.max(max, 1)));
+            };
+            const refresh = () => {
+              const max = Math.floor(getPlayerShards() / SHARDS_PER_PACK);
+              input.max = String(max);
+              const quantity = readQuantity();
+              if (document.activeElement !== input && input.value !== String(quantity)) input.value = String(quantity);
+              setShardPackLabel(packSlot, quantity);
+              setShardPackLabel(shardSlot, quantity * SHARDS_PER_PACK);
+              button.disabled = busy || max < 1;
+            };
+            input.addEventListener('input', () => {
+              const typed = input.value.trim();
+              if (typed !== '' && /^\d+$/.test(typed)) {
+                const max = Math.floor(getPlayerShards() / SHARDS_PER_PACK);
+                if (max > 0 && parseInt(typed, 10) > max) input.value = String(max);
+              }
+              refresh();
+            });
+            input.addEventListener('blur', () => {
+              input.value = String(readQuantity());
+              refresh();
+            });
+
+            button.addEventListener('click', async (event) => {
+              event.stopPropagation();
+              if (busy || button.disabled) return;
+              const quantity = readQuantity();
+              busy = true;
+              refresh();
+              try {
+                const response = await fetch('/api/trpc/store.yasirShardExchange?batch=1', {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'X-Game-Version': String(globalThis.state?.GAME_VERSION ?? '1')
+                  },
+                  credentials: 'include',
+                  body: JSON.stringify({ '0': { json: { packs: quantity } } })
+                });
+                if (!response.ok) throw new Error('HTTP error! Status: ' + response.status);
+                const result = await response.json();
+                const data = result?.[0]?.result?.data?.json;
+                if (!data) throw new Error('Unexpected shard exchange response');
+                const diff = { ...(data.inventoryDiff || {}) };
+                if (data.shardsDiff) diff.shards = data.shardsDiff;
+                queueStateUpdate(diff);
+                if (data.questLogDiff && globalThis.state?.player) {
+                  globalThis.state.player.send({
+                    type: 'setState',
+                    fn: (prev) => ({ ...prev, questLog: { ...prev.questLog, ...data.questLogDiff } })
+                  });
+                }
+                showTooltipMessage(
+                  t('mods.betterYasir.successSell').replace('{quantity}', quantity).replace('{itemName}', 'Booster Pack'),
+                  '#32cd32',
+                  5000
+                );
+              } catch (error) {
+                handleError(error, 'Shard exchange failed');
+                showTooltipMessage(String(error?.message || error), '#ff4d4d');
+              } finally {
+                busy = false;
+                setTimeout(refresh, 150);
+              }
+            });
+
+            row._betterYasirShardPack = { refresh };
+            refresh();
+          });
+        });
+      }
+
       // Add quantity inputs to flex container divs (new function for the specific div structure)
       function addQuantityInputsToFlexContainers() {
         const flexContainers = domUtils.findFlexContainers();
@@ -2991,6 +3124,8 @@
           }
         });
         
+        try { enhanceShardPackRows(); } catch (error) { handleError(error, 'Shard pack row failed'); }
+
         // Update section titles and add price headers AFTER processing containers
         const modal = document.querySelector('.widget-bottom');
         if (modal) {
@@ -5893,6 +6028,12 @@
                   return;
                 }
                 
+                // Shards are a root field, like dust and gold
+                if (itemKey === 'shards') {
+                  newState.shards = Math.max(0, (newState.shards || 0) + change);
+                  return;
+                }
+
                 // Handle gold separately from inventory items
                 if (itemKey === 'gold') {
                   newState.gold = Math.max(0, (newState.gold || 0) + change);
@@ -6130,6 +6271,16 @@
           element.remove();
         });
         
+        // Shard -> pack row: drop our box, label and button, show the game's own again
+        document.querySelectorAll('.better-yasir-shard-wrapper, .better-yasir-shard-button, .better-yasir-shard-amount').forEach(element => {
+          element.remove();
+        });
+        document.querySelectorAll('tr').forEach(row => {
+          if (!row._betterYasirShardPack) return;
+          row.querySelectorAll('button, .revert-pixel-font-spacing').forEach(element => { element.style.display = ''; });
+          delete row._betterYasirShardPack;
+        });
+
         // Show original buttons that were hidden
         document.querySelectorAll('button[style*="display: none"]').forEach(button => {
           if (button.parentNode.querySelector('.better-yasir-action-button')) {

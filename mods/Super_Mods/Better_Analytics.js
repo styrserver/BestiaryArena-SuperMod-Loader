@@ -7532,7 +7532,7 @@
 
     function getBoardPreviewUnits() {
         return profileUnitsLag('getBoardPreviewUnits', () => {
-            if (!cachedGameChunk661Text || !cachedGameChunk235Text) {
+            if (!cachedGameChunk661Text) {
                 prefetchGameChunk661ForCdr();
             }
             const cacheSig = getBoardPreviewCacheSig();
@@ -9467,12 +9467,22 @@
     let cachedGameChunk661Promise = null;
     const cachedCdrScriptBounds = new Map();
     const discoveredGameChunkUrlByProfile = new Map();
+    const rejectedGameChunkUrlsByProfile = new Map();
     const gameScriptTextCacheByUrl = new Map();
     let gameChunkScriptPreviewRefreshTimer = null;
 
+    // getBoardPreviewUnits() runs on every render and calls this while the chunk text is missing, so a chunk
+    // that cannot be found (a game update moved it) must not be rescanned on each render: back off.
+    const GAME_CHUNK_PREFETCH_RETRY_MS = 60000;
+    let gameChunkPrefetchFailedAt = 0;
+
     function prefetchGameChunk661ForCdr() {
-        ensureGameChunk661Text().catch(() => { /* ignore */ });
-        ensureGameChunk235Text().catch(() => { /* ignore */ });
+        if (gameChunkPrefetchFailedAt && Date.now() - gameChunkPrefetchFailedAt < GAME_CHUNK_PREFETCH_RETRY_MS) return;
+        // The equipment chunk text is not read by anything (cooldown reduction comes from the rendered
+        // tooltip, see scheduleRuntimeEquipmentCooldownResolution), so it is not downloaded.
+        ensureGameChunk661Text().then((text) => {
+            if (!text) gameChunkPrefetchFailedAt = Date.now();
+        }).catch(() => { gameChunkPrefetchFailedAt = Date.now(); });
     }
 
     function collectWebpackChunkUrls() {
@@ -9541,6 +9551,8 @@
         gameScriptFetchControllers.clear();
         gameScriptTextCacheByUrl.clear();
         discoveredGameChunkUrlByProfile.clear();
+        rejectedGameChunkUrlsByProfile.clear();
+        gameChunkPrefetchFailedAt = 0;
         cachedGameChunk661Text = null;
         cachedGameChunk661Promise = null;
         cachedGameChunk235Text = null;
@@ -9571,11 +9583,17 @@
         const cachedUrl = discoveredGameChunkUrlByProfile.get(profile.key);
         if (cachedUrl) return cachedUrl;
 
-        const tried = new Set();
+        // Remembered across attempts: chunk files are immutable per build, so a rejected one stays rejected.
+        let tried = rejectedGameChunkUrlsByProfile.get(profile.key);
+        if (!tried) {
+            tried = new Set();
+            rejectedGameChunkUrlsByProfile.set(profile.key, tried);
+        }
         const tryUrl = async (url) => {
             if (!url || tried.has(url)) return null;
             tried.add(url);
             const text = await fetchScriptTextFromUrl(url);
+            if (!text) tried.delete(url); // a failed download may work next time
             if (text && scriptTextMatchesProfile(text, profile)) {
                 // Only the matching chunk is kept; scanned non-matches are dropped.
                 gameScriptTextCacheByUrl.set(url, text);

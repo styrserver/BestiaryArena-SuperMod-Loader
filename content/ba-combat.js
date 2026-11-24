@@ -310,11 +310,12 @@
       const missile = /missile:"(\w+)"/.exec(stop > 0 ? attackBody.slice(0, stop) : attackBody);
       return missile ? { am: missile[1] } : {};
     };
-    // The cooldown bar a class shows above the creature (`this.renderCooldownBars.add(this.<cooldown>)`, the cooldown made by `new g.e({... color:"cooldown" ...})`): { cb: its colour, cv: 1 when it only
+    // The cooldown bar a class shows above the creature (`this.renderCooldownBars.add(this.<cooldown>)`, the cooldown made by `new <alias>.e({... color:"cooldown" ...})`): { cb: its colour, cv: 1 when it only
     // shows while the cooldown runs (`visibleOnlyWhileInProgress`) }. A bar that drains (`invertBar`: a duration, not a cooldown) is left out.
     const barFields = (own) => {
       for (const m of own.matchAll(/renderCooldownBars\.add\(this\.([\w$]+)\)/g)) {
-        const at = own.indexOf('this.' + m[1] + '=new g.e({');
+        // The cooldown class's minified alias (`g`, `w`, ...) changes with every game build, so match any.
+        const at = own.search(new RegExp('this\\.' + m[1].replace(/\$/g, '\\$') + '=new [\\w$]+\\.e\\(\\{'));
         if (at < 0) continue;
         const opts = own.slice(at, own.indexOf('})', at));
         if (/invertBar:!0/.test(opts)) continue;

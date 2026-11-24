@@ -4,6 +4,46 @@
   },
   "notes": [
     {
+      "version": "5.4.8",
+      "changes": [
+        {
+          "mod": "Autoseller",
+          "type": "fixed",
+          "text": "Much lower CPU use and less lag while the auto badges are shown."
+        },
+        {
+          "mod": "Better Analytics",
+          "type": "fixed",
+          "text": "Stops downloading the game's scripts over and over, which caused heavy network use and lag."
+        },
+        {
+          "mod": "Better Daycare",
+          "type": "fixed",
+          "text": "Creatures that hit max from a level up are removed in the same visit instead of reopening Daycare."
+        },
+        {
+          "mod": "Better Yasir",
+          "type": "added",
+          "text": "Quantity box for trading shards for Booster Packs."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "added",
+          "text": "Inventory tooltips for the Standard and Premium Booster Packs."
+        },
+        {
+          "mod": "Depot Manager",
+          "type": "fixed",
+          "text": "No longer re-applies the depot layout when you switch tabs inside a window such as Change outfit."
+        },
+        {
+          "mod": "Outfiter",
+          "type": "fixed",
+          "text": "All mounts now show in the game's own Mounts tab in the Change outfit window; the separate mount window is gone. No longer downloads about 18 MB of game scripts on every load."
+        }
+      ]
+    },
+    {
       "version": "5.4.7",
       "changes": [
         {

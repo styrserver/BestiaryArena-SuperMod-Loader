@@ -1647,14 +1647,7 @@
       "tooltipMountNotOwned": "Not owned (added by Outfiter)",
       "tooltipMountSleqqus": "Imported from Sleqqus (not in the game, only visible to you)",
       "outfitChangeFailed": "Outfit change failed - server error",
-      "networkError": "Network error - outfit change may have failed",
-      "changeMount": "Change mount",
-      "cannotRideNote": "Outfit cannot ride: mounts are preview only.",
-      "noMount": "No mount",
-      "ridingOn": "Riding: On",
-      "ridingOff": "Riding: Off",
-      "needsMountableOutfit": "needs a mountable outfit",
-      "mountsMenuItem": "Mounts"
+      "networkError": "Network error - outfit change may have failed"
     },
     "vipList": {
       "otModsMenuTitle": "OT Mods",

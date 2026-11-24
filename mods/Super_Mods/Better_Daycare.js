@@ -487,8 +487,10 @@
         await sleep(1000);
       }
 
-      // Eject every maxed creature
-      if (foundMaxedCreature) {
+      // Eject every maxed creature. Always scan the live dialog (not the pre-level-up
+      // foundMaxedCreature flag): a creature that just hit max from our Level up click must be
+      // ejected in this same open, not on a second open/close.
+      {
         let ejectionCount = 0;
         while (ejectionCount < 4) {
           const daycareSlots = document.querySelectorAll('div.relative.flex.items-center.gap-2');

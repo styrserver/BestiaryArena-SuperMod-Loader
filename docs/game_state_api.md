@@ -181,6 +181,9 @@ Key properties include:
   "legs": 0,                     // Legs appearance
   "feet": 114,                   // Feet appearance
   "outfits": [12, 129],          // Available outfits
+  "mountId": null,               // Current mount ID (null: none)
+  "mounts": [368],               // Mount IDs (legacy: the Change outfit dialog does not read this or `outfits`)
+  "codex": { "monster": {}, "outfit": { "12": 1 }, "mount": { "368": 1 }, "backpack": {} }, // id -> count; an outfit/mount is owned when its count is above 0
   "flags": 1056702426,           // Player flags
   "loyaltyPoints": 9250,         // Loyalty points
   "exp": 150,                    // Experience
@@ -275,6 +278,8 @@ Key properties include:
   }
 }
 ```
+
+**Owned outfits and mounts live in `codex.outfit` / `codex.mount`.** The Change outfit dialog (Outfits and Mounts tabs) lists the ids whose codex count is above 0; the `outfits` / `mounts` arrays are not what it reads. A mod that unlocks an outfit or mount (Outfiter) must set the codex entry as well as the array, writing new objects so the game's selectors notice. Mount lookups for drawing use the game's mount map (`G9`) and the Mounts tab lists its mount table (`Xc`), both exported by one module (found by the `"Widow Queen"` key).
 
 ## Board Management
 

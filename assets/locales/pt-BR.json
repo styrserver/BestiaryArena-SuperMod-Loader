@@ -1647,14 +1647,7 @@
       "tooltipMountSleqqus": "Importado do Sleqqus (não existe no jogo, só você vê)",
       "tooltipCanRide": "Pode usar montarias",
       "outfitChangeFailed": "Falha ao mudar o traje - erro do servidor",
-      "networkError": "Erro de rede - a mudança de traje pode ter falhado",
-      "changeMount": "Mudar montaria",
-      "cannotRideNote": "O traje não pode montar: as montarias são só pré-visualização.",
-      "noMount": "Sem montaria",
-      "ridingOn": "Montado: Sim",
-      "ridingOff": "Montado: Não",
-      "needsMountableOutfit": "requer um traje que possa montar",
-      "mountsMenuItem": "Montarias"
+      "networkError": "Erro de rede - a mudança de traje pode ter falhado"
     },
     "vipList": {
       "otModsMenuTitle": "OT Mods",
