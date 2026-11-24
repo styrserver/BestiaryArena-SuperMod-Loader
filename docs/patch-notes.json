@@ -4,6 +4,41 @@
   },
   "notes": [
     {
+      "version": "5.4.9",
+      "changes": [
+        {
+          "mod": "Better Tasker",
+          "type": "added",
+          "text": "Hunting Mark shop has a quantity box and a confirm step to buy several Dice Manipulators, Summon Scrolls, Blank Runes, Booster Packs, Exaltation Chests or Rainbow Shields at once."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "added",
+          "text": "Home and player search show Codex progress like the game does (outfits, mounts, creatures, equipment, maps, backpacks), plus spare cards."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "changed",
+          "text": "Window is 90px taller on screens with room. The empty comparison card shows the Codex rows too."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "fixed",
+          "text": "Clearing the player search no longer leaves the comparison column blank, and unknown names no longer log an error."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "removed",
+          "text": "Bag Outfits progress row and the removed Outfit Bag items; Booster Pack sources updated."
+        },
+        {
+          "mod": "Outfiter",
+          "type": "fixed",
+          "text": "No longer errors on load when the game has not finished loading your outfits yet."
+        }
+      ]
+    },
+    {
       "version": "5.4.8",
       "changes": [
         {

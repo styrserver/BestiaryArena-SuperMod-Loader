@@ -187,6 +187,7 @@ const START_PAGE_CONFIG = {
   SEARCH_COLUMN_MIN_WIDTH: '150px',
   STACKED_SEARCH_HEIGHT: '420px',
   API_BASE_URL: 'https://bestiaryarena.com/api/trpc/serverSide.profilePageData',
+  PROFILE_PAGE_URL: 'https://bestiaryarena.com/profile/',
   RANKINGS_API_URL: 'https://bestiary-arena-ranking.vercel.app/api/v1/rankings',
   RANKINGS_PAGE_SIZE: 50,
   RANKINGS_PREFETCH_LIMIT: 500,
@@ -216,7 +217,7 @@ const LAYOUT_CONSTANTS = {
   MAPS_DETAIL_COL_MAX: 230,
   MAPS_STAT_COL_MIN: 250, // stack below 400px; stat cards are unreadable at ~110px
   MODAL_WIDTH: 1000,
-  MODAL_HEIGHT: 660,
+  MODAL_HEIGHT: 750,
   MODAL_VIEWPORT_PADDING: 16,
   MODAL_MIN_WIDTH: 280,
   MODAL_MIN_HEIGHT: 360,
@@ -504,6 +505,9 @@ const CYCLOPEDIA_UI = {
   playerStats: 'Player stats',
   currentTotal: 'Current total',
   progress: 'Progress',
+  codex: 'Codex',
+  codexAllTitle: 'Exclusive cards are not counted',
+  codexSparesTitle: 'Duplicate pack cards that can be sharded or traded',
   rankings: 'Rankings',
   rankingsSeason: (n) => `Rankings - Season ${n}`,
   premiumPassAlt: 'Premium pass',
@@ -521,7 +525,14 @@ const CYCLOPEDIA_UI = {
     bisEquipments: 'BIS Equipments',
     raids: 'Completed raids',
     exploredMaps: 'Explored maps',
-    bagOutfits: 'Bag Outfits',
+    codexAll: 'All cards',
+    codexOutfits: 'Outfits',
+    codexMounts: 'Mounts',
+    codexCreatures: 'Creatures',
+    codexEquipment: 'Equipment',
+    codexMaps: 'Maps',
+    codexBackpacks: 'Backpacks',
+    codexSpares: 'Spare cards',
     rankPoints: 'Rank points',
     timeSum: 'Time sum',
     floorsSum: 'Floors sum',
@@ -538,7 +549,6 @@ const CYCLOPEDIA_SETTINGS = {
     // Perfect/Shiny max comes from creature-database (game monsters), not a hardcoded cap.
     bisEquipments: 165,
     exploredMaps: 82,
-    bagOutfits: 211,
     raids: 19
   }
 };
@@ -812,7 +822,7 @@ function resolveCyclopediaEquipmentGameId(equipmentName) {
 }
 
 const GAME_KEYS = {
-  NO_RARITY: itemKeyGroups.noRarity || ['nicknameChange', 'nicknameMonster', 'hunterOutfitBag', 'outfitBag1'],
+  NO_RARITY: itemKeyGroups.noRarity || ['nicknameChange', 'nicknameMonster'],
   CURRENCY: itemKeyGroups.currency || ['gold', 'dust', 'beastCoins', 'huntingMarks'],
   UPGRADE: itemKeyGroups.upgrade || ['babyDragonPlant', 'creatureAwakening', 'dailyBoostedMap', 'daycare', 'dungeonAscension', 'dragonPlant', 'drMephistopheles', 'hygenie', 'monsterCauldron', 'monsterRaids', 'monsterSqueezer', 'mountainFortress', 'premium', 'forge', 'yasirTradingContract']
 };
@@ -6725,7 +6735,7 @@ function isFetchAborted(error) {
   return error?.name === 'AbortError';
 }
 
-async function fetchWithDeduplication(url, key, priority = 0, signal = null) {
+async function fetchWithDeduplication(url, key, priority = 0, signal = null, extraHeaders = null) {
   try {
     if (isCyclopediaRateLimited()) {
       throw new Error('Rate limited. Please wait before trying again.');
@@ -6734,7 +6744,7 @@ async function fetchWithDeduplication(url, key, priority = 0, signal = null) {
     if (cyclopediaApiPendingRequests.has(key)) return await cyclopediaApiPendingRequests.get(key);
 
     const fetchOptions = {
-      headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' }
+      headers: { 'Accept': 'application/json', 'Content-Type': 'application/json', ...extraHeaders }
     };
     if (signal) fetchOptions.signal = signal;
 
@@ -6758,7 +6768,8 @@ async function fetchWithDeduplication(url, key, priority = 0, signal = null) {
     cyclopediaApiPendingRequests.set(key, requestPromise);
     return await requestPromise;
   } catch (error) {
-    if (!isFetchAborted(error)) {
+    // A 404 is an unknown player name (a normal search result), not a fault: callers show "not found".
+    if (!isFetchAborted(error) && !String(error?.message).startsWith('HTTP 404')) {
       console.error(`[Cyclopedia] Error in fetchWithDeduplication for ${key}:`, error);
     }
     throw error;
@@ -6786,6 +6797,12 @@ const CyclopediaApi = {
     if (cached) return this.parseProfileResponse(cached);
 
     const effectiveSignal = signal || (activeModalLifecycle?.isActive ? getModalFetchSignal() : null);
+    // Another player's Codex is not in profilePageData: it comes with their profile page data. Your own is read
+    // from the live state, so it is not fetched. A failed codex request only hides the Codex block.
+    const ownName = globalThis.state?.player?.getSnapshot?.()?.context?.name;
+    const codexPromise = playerName === ownName
+      ? Promise.resolve(null)
+      : this.fetchCodexData(playerName, effectiveSignal).catch(() => null);
     const raw = await fetchWithDeduplication(
       this.buildProfileUrl(playerName),
       `profile-${playerName}`,
@@ -6795,9 +6812,27 @@ const CyclopediaApi = {
 
     const profile = this.parseProfileResponse(raw);
     if (profile?.name) {
+      const codexData = await codexPromise;
+      if (codexData) profile.codexData = codexData;
       cyclopediaState.setProfileData(playerName, profile);
     }
     return profile;
+  },
+
+  /**
+   * `{ codex, rooms, completedRegionIds, highscoreRoomIds, raidsUnlocked }` from a player's profile page data
+   * (docs/game_state_api.md, "Codex"). The `x-nextjs-data` header makes the page route answer with its JSON
+   * instead of the full HTML page.
+   */
+  async fetchCodexData(playerName, signal = null) {
+    const data = await fetchWithDeduplication(
+      `${START_PAGE_CONFIG.PROFILE_PAGE_URL}${encodeURIComponent(playerName)}`,
+      `codex-${playerName}`,
+      1,
+      signal,
+      { 'x-nextjs-data': '1' }
+    );
+    return data?.pageProps?.pageData?.codexData ?? null;
   },
 
   fetchTRPC(method) {
@@ -14404,7 +14439,7 @@ function cyclopediaMountSearchEntryPortrait(iconSlot, result) {
       break;
     }
     case 'inventoryCategory':
-      portrait = cyclopediaCreateInventoryPortrait('outfitBag1', sizePx);
+      portrait = cyclopediaCreateInventoryPortrait('pack', sizePx);
       break;
     default:
       break;
@@ -14824,6 +14859,152 @@ function countUniqueEventShinyCreatureGameIds(monsters) {
 
 const CYCLOPEDIA_MAX_VALUES = CYCLOPEDIA_SETTINGS.playerStatCaps;
 
+/**
+ * The game's Codex card catalog (docs/game_state_api.md, "Codex"). Read from the game's webpack module found by
+ * its source ("Unknown codex availability"); exports are matched by shape, not by minified name, so a rename
+ * does not break it. Holds the Codex view rows per category (`{ group, card, codexAvailability }`), the game's
+ * own progress resolver (`wM`) and its region-completion check (`Up` / `xY`). Only a hit is cached; null when the
+ * game's modules cannot be read. `resolver` / `regions` may be null on their own: totals still work without them.
+ */
+const CYCLOPEDIA_CODEX_VIEW = ['outfit', 'mount', 'monster', 'equip', 'room', 'backpack'];
+const CYCLOPEDIA_CODEX_STORED = { outfit: 'outfitId', mount: 'mountId', monster: 'gameId', backpack: 'spriteId' };
+const CYCLOPEDIA_CODEX_MAX_TRIES = 3;
+let cyclopediaCodexCatalog = null;
+let cyclopediaCodexTries = 0;
+
+function getCyclopediaCodexCatalog() {
+  if (cyclopediaCodexCatalog) return cyclopediaCodexCatalog;
+  if (cyclopediaCodexTries >= CYCLOPEDIA_CODEX_MAX_TRIES) return null;
+  cyclopediaCodexTries++;
+  try {
+    const registry = window.webpackChunk_N_E;
+    if (!Array.isArray(registry) || typeof registry.push !== 'function') return null;
+    let webpackRequire = null;
+    registry.push([['cyclopedia-codex-probe-' + Date.now()], {}, (req) => { webpackRequire = req; }]);
+    if (typeof webpackRequire !== 'function') return null;
+    const factories = webpackRequire.m || {};
+    const sourceHas = (id, text) => typeof factories[id] === 'function' && String(factories[id]).includes(text);
+    const moduleId = Object.keys(factories).find((id) => sourceHas(id, 'Unknown codex availability'));
+    if (moduleId === undefined) return null;
+    const exp = webpackRequire(moduleId);
+    const rows = Object.values(exp || {}).find((value) => value && typeof value === 'object'
+      && CYCLOPEDIA_CODEX_VIEW.every((key) => Array.isArray(value[key])));
+    if (!rows) return null;
+    const resolver = Object.values(exp).find((value) => typeof value === 'function' && String(value).includes('Unknown codex card source')) ?? null;
+    let regions = null;
+    for (const id of Object.keys(factories)) {
+      if (!sourceHas(id, 'Up:function') || !sourceHas(id, 'xY:function')) continue;
+      try {
+        const regionExports = webpackRequire(id);
+        if (Array.isArray(regionExports?.Up) && typeof regionExports.xY === 'function' && Array.isArray(regionExports.Up[0]?.rooms)) {
+          regions = regionExports;
+          break;
+        }
+      } catch (_) { /* try the next candidate */ }
+    }
+    const catalog = { rows, resolver, regions, ids: {}, packIds: {} };
+    for (const [category, idKey] of Object.entries(CYCLOPEDIA_CODEX_STORED)) {
+      // Rows with source "codex" are the cards stored in player.codex; the others (owned creatures, regions) are derived.
+      const cards = rows[category].filter((row) => row?.card?.source === 'codex' && Number.isFinite(Number(row.card[idKey])));
+      catalog.ids[category] = cards.map((row) => Number(row.card[idKey]));
+      catalog.packIds[category] = new Set(cards.filter((row) => row.codexAvailability === 'pack').map((row) => Number(row.card[idKey])));
+    }
+    if (!Object.values(catalog.ids).some((ids) => ids.length > 0)) return null;
+    cyclopediaCodexCatalog = catalog;
+    return catalog;
+  } catch (error) {
+    console.warn('[Cyclopedia] Codex catalog unavailable:', error);
+    return null;
+  }
+}
+
+const CYCLOPEDIA_CODEX_ROWS = [
+  { key: 'codexOutfits', category: 'outfit', icon: '/assets/icons/outfits.png' },
+  { key: 'codexMounts', category: 'mount', icon: '/assets/icons/mount.png' },
+  { key: 'codexCreatures', category: 'monster', icon: '/assets/icons/creature.png' },
+  { key: 'codexEquipment', category: 'equip', icon: '/assets/icons/equips.png' },
+  { key: 'codexMaps', category: 'room', icon: '/assets/icons/map.png' },
+  { key: 'codexBackpacks', category: 'backpack', icon: '/assets/icons/bag.png' }
+];
+
+/**
+ * Codex progress for the Home profile column, counted like the game's own Codex dialog: per category, `total`
+ * leaves out exclusive cards while `owned` includes the exclusives you hold (so it can exceed `total`), and the
+ * headline `all` counts non-exclusive cards only. Every category goes through the game's resolver. Your own
+ * profile reads the live state; another player's comes from `profileData.codexData` (their profile page data, see
+ * CyclopediaApi.fetchCodexData) plus their profile monsters and equips. Without the resolver or that data it falls
+ * back to your own outfit and mount cards, or null for other players. Returns null when the catalog is unreadable.
+ */
+function getCyclopediaCodexProgress(profileData) {
+  const catalog = getCyclopediaCodexCatalog();
+  if (!catalog) return null;
+  const ctx = globalThis.state?.player?.getSnapshot?.()?.context;
+  const own = !!(ctx?.codex && profileData?.name && ctx.name === profileData.name);
+  const total = (category) => catalog.rows[category].filter((row) => row.codexAvailability !== 'exclusive').length;
+
+  // The empty right-hand profile card (before a search) shows the same rows at zero.
+  if (profileData?.placeholder) {
+    const rows = CYCLOPEDIA_CODEX_ROWS.map(({ key, category, icon }) => ({ key, icon, owned: 0, total: total(category) }));
+    const allTotal = rows.reduce((sum, row) => sum + row.total, 0);
+    return { all: { key: 'codexAll', icon: '/assets/icons/codex.png', owned: 0, total: allTotal }, rows, spares: 0 };
+  }
+
+  let resolve = null;
+  try {
+    if (catalog.resolver && own && catalog.regions) {
+      const completedRegions = new Set(catalog.regions.Up.map((region) => region.id).filter((id) => catalog.regions.xY(id, ctx)));
+      resolve = catalog.resolver({ codex: ctx.codex, monsters: ctx.monsters, equips: ctx.equips, rooms: ctx.rooms, completedRegions, highscoreRoomIds: new Set() });
+    } else if (catalog.resolver && !own && profileData?.codexData?.codex) {
+      const data = profileData.codexData;
+      resolve = catalog.resolver({
+        codex: data.codex,
+        monsters: (profileData.monsters ?? []).filter((monster) => !monster.hidden),
+        equips: profileData.equips ?? [],
+        rooms: data.rooms ?? {},
+        completedRegions: new Set(data.completedRegionIds ?? []),
+        highscoreRoomIds: new Set(data.highscoreRoomIds ?? [])
+      });
+    }
+  } catch (error) {
+    console.warn('[Cyclopedia] Codex progress resolver failed:', error);
+  }
+  if (!resolve && !own) return null;
+
+  let allOwned = 0;
+  let allTotal = 0;
+  const rows = [];
+  for (const { key, category, icon } of CYCLOPEDIA_CODEX_ROWS) {
+    let owned = null;
+    if (resolve) {
+      owned = 0;
+      for (const row of catalog.rows[category]) {
+        if (resolve(row.card).count > 0) {
+          owned++;
+          if (row.codexAvailability !== 'exclusive') allOwned++;
+        }
+      }
+    } else if (category === 'outfit' || category === 'mount') {
+      const have = new Set(Object.keys(ctx.codex[category] ?? {}).map(Number));
+      owned = catalog.ids[category].filter((id) => have.has(id)).length;
+    }
+    if (owned === null) continue;
+    allTotal += total(category);
+    rows.push({ key, icon, owned, total: total(category) });
+  }
+  if (rows.length === 0) return null;
+  const all = resolve ? { key: 'codexAll', icon: '/assets/icons/codex.png', owned: allOwned, total: allTotal } : null;
+  // Spares: copies above the first of each pack card (what can be sharded or traded), from the same codex counts.
+  const heldCodex = own ? ctx.codex : profileData?.codexData?.codex;
+  let spares = null;
+  if (heldCodex) {
+    spares = 0;
+    for (const category of Object.keys(CYCLOPEDIA_CODEX_STORED)) {
+      for (const id of catalog.packIds[category]) spares += Math.max(0, (heldCodex[category]?.[id] ?? 0) - 1);
+    }
+  }
+  return { all, rows, spares };
+}
+
 /** Completed-raids max, same formula as the native /profile page: raid rooms with the ladder enabled. */
 function getStaticRaidsMaxFromDatabase() {
   const count = (globalThis.state?.utils?.ROOMS ?? []).filter((r) => r.raid && !r.ladderDisabled).length;
@@ -14842,8 +15023,7 @@ const CYCLOPEDIA_PROGRESS_STATS = [
   { key: 'shinyCreatures', icon: CYCLOPEDIA_ASSETS.shinyStar, max: getObtainableCreatureCountFromDatabase },
   { key: 'bisEquipments', icon: '/assets/icons/equips.png', max: getBisEquipmentMaxFromDatabase },
   { key: 'raids', icon: '/assets/icons/raid.png', max: getStaticRaidsMaxFromDatabase },
-  { key: 'exploredMaps', icon: '/assets/icons/map.png', max: getExploredMapsMaxFromDatabase },
-  { key: 'bagOutfits', icon: '/assets/icons/mini-outfitbag.png', max: CYCLOPEDIA_MAX_VALUES.bagOutfits }
+  { key: 'exploredMaps', icon: '/assets/icons/map.png', max: getExploredMapsMaxFromDatabase }
 ];
 
 const CYCLOPEDIA_PROFILE_VALUE = {
@@ -14874,7 +15054,6 @@ const CYCLOPEDIA_PROFILE_VALUE = {
   bisEquipments: { value: d => d.bisEquips },
   raids: { value: d => d.raids },
   exploredMaps: { value: d => d.maps },
-  bagOutfits: { value: d => d.ownedOutfits },
   rankPoints: { value: d => d.rankPoints },
   timeSum: { value: d => d.ticks },
   floorsSum: { value: d => d.floors },
@@ -15196,6 +15375,28 @@ function renderCyclopediaPlayerInfo(profileData, options = {}) {
       valueClass: isMax ? 'stat-maxed' : undefined
     });
   });
+
+  const codexProgress = getCyclopediaCodexProgress(profileData);
+  if (codexProgress) {
+    addRow({ label: CYCLOPEDIA_UI.codex, highlight: true, colspan: 2 });
+    [codexProgress.all, ...codexProgress.rows].filter(Boolean).forEach((row) => {
+      addRow({
+        label: CYCLOPEDIA_UI.stats[row.key],
+        icon: row.icon,
+        value: `${FormatUtils.number(row.owned)}/${FormatUtils.number(row.total)}`,
+        title: row.key === 'codexAll' ? CYCLOPEDIA_UI.codexAllTitle : undefined,
+        valueClass: row.owned >= row.total ? 'stat-maxed' : undefined
+      });
+    });
+    if (codexProgress.spares !== null) {
+      addRow({
+        label: CYCLOPEDIA_UI.stats.codexSpares,
+        icon: '/assets/icons/codex.png',
+        value: FormatUtils.number(codexProgress.spares),
+        title: CYCLOPEDIA_UI.codexSparesTitle
+      });
+    }
+  }
 
   addRow({
     label: getCyclopediaRankingsSectionLabel(season),
@@ -20626,7 +20827,6 @@ function createInventoryTabPage(selectedCreature, selectedEquipment, selectedInv
 
     const spriteMapping = {
       '35909': { key: 'diceManipulator1', name: 'Dice Manipulator (Common)' },
-      '653': { key: 'outfitBag1', name: 'Outfit Bag' },
       '21383': { key: 'insightStone1', name: 'Stone of Insight (Glimpse)' },
       '43672': { key: 'monsterCauldron', name: 'Monstrous Cauldron' },
       '42363': { key: 'hygenie', name: 'Hy\'genie' }
@@ -20660,7 +20860,6 @@ function createInventoryTabPage(selectedCreature, selectedEquipment, selectedInv
       'player-nickname': () => ({ key: 'nicknamePlayer', name: 'Player Nickname' }),
       'nickname-change': () => ({ key: 'nicknameChange', name: 'Change Nickname' }),
       'exaltation-chest': () => ({ key: 'equipChest', name: 'Exaltation Chest' }),
-      'hunteroutfitbag': () => ({ key: 'hunterOutfitBag', name: 'Hunter Outfit Bag' }),
       'daycare': () => ({ key: 'daycare', name: 'Daycare' }),
       'mountainfortress': () => ({ key: 'mountainFortress', name: 'Mountain Fortress' }),
       'monster-squeezer': () => ({ key: 'monsterSqueezer', name: 'Monster Squeezer' }),
@@ -20679,7 +20878,6 @@ function createInventoryTabPage(selectedCreature, selectedEquipment, selectedInv
       'monster-cauldron': () => ({ key: 'monsterCauldron', name: 'Monstrous Cauldron' }),
       'yasir-trading-contract': () => ({ key: 'yasirTradingContract', name: 'Yasir\'s Trading Contract' }),
       'boosted-map': () => ({ key: 'dailyBoostedMap', name: 'Daily Boosted Map' }),
-      'outfit-bag': () => ({ key: 'outfitBag1', name: 'Outfit Bag' }),
       'nickname-monster': () => ({ key: 'nicknameMonster', name: 'Nickname Creature' }),
       'rune-blank': () => ({ key: 'runeBlank', name: 'Blank Rune' }),
       'rune-hp': () => ({ key: 'runeHp', name: 'Augment Rune (HP)' }),
@@ -21420,9 +21618,11 @@ function createPlaceholderProfilePanel(overflowY) {
     perfectMonsters: 0,
     bisEquips: 0,
     maps: 0,
+    raids: 0,
     ownedOutfits: 0,
     rankPoints: 0,
-    ticks: 0
+    ticks: 0,
+    placeholder: true
   }, { showShinyCreatures: false })));
   return container;
 }
@@ -23053,7 +23253,6 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
         perfectCreatures: '-',
         bisEquipments: '-',
         exploredMaps: '-',
-        bagOutfits: '-',
         rankPoints: '-',
         timeSum: '-'
       }, { showShinyCreatures: false });
@@ -23326,6 +23525,10 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
                   console.error('[Cyclopedia] Error refreshing leaderboards after reset:', error);
                 });
               }
+            } else if (window.selectedCharacterItem === 'Player Information') {
+              // Back to the empty comparison card instead of a blank column
+              col3.innerHTML = '';
+              col3.appendChild(createPlaceholderProfilePanel('scroll'));
             } else {
               // For other tabs, clear col3 to show default content
               col3.innerHTML = '';

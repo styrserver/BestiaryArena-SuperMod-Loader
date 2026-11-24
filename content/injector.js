@@ -601,10 +601,20 @@ clientScript.onload = function() {
         const toastScript = injectScript('content/ba-toast.js');
         toastScript.onload = function() {
           console.log('[Injector] ba-toast.js loaded - mods will be able to access window.BAToast');
-          injectLocalMods();
+          injectQuantityInputHelper();
         };
         toastScript.onerror = function(error) {
           console.error('[Injector] ✗ ERROR loading ba-toast.js:', error);
+          injectQuantityInputHelper();
+        };
+      }
+
+      // Shared quantity box (window.BAQuantityInput) used by Better Yasir, Better Hy'genie and Better Tasker.
+      function injectQuantityInputHelper() {
+        const script = injectScript('content/ba-quantity-input.js');
+        script.onload = injectLocalMods;
+        script.onerror = function(error) {
+          console.error('[Injector] ✗ ERROR loading ba-quantity-input.js:', error);
           injectLocalMods();
         };
       }

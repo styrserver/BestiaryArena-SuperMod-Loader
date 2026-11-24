@@ -4188,7 +4188,10 @@ function handleTaskProcessing(mutations) {
 function processAllMutations(mutations) {
     // Handle quest log detection immediately (button insertion)
     handleQuestLogDetection(mutations);
-    
+
+    // Hunting Mark shop quantity inputs (cheap no-op when the dialog is closed)
+    scheduleHuntingShopEnhance();
+
     // Handle task processing with debounce (task logic)
     handleTaskProcessing(mutations);
 }
@@ -8895,6 +8898,297 @@ function teardownBootGrace() {
 init();
 
 // ============================================================================
+// 14b. HUNTING MARK SHOP QUANTITY (Paw and Fur Society reward shop)
+// ============================================================================
+
+const HUNT_SHOP_WRAP_CLASS = 'better-tasker-shop-qty';
+const HUNT_SHOP_INPUT_CLASS = 'better-tasker-shop-qty-input';
+// Stackable rows only (outfits, shield and container upgrade are one-time/tiered).
+// Matched by icon so it works in every game language.
+const HUNT_SHOP_ITEMS = [
+    { itemKey: 'diceManipulator3', amount: 5, match: (row) => !!row.querySelector('.sprite.item.id-35909, img[alt="Dice Manipulator"]') },
+    { itemKey: 'summonScroll4', amount: 1, match: (row) => !!row.querySelector('img[src*="summonscroll4"]') },
+    { itemKey: 'runeBlank', amount: 1, match: (row) => !!row.querySelector('img[src*="rune-blank"]') },
+    { itemKey: 'pack', amount: 1, match: (row) => !!row.querySelector('img[src$="/pack.png"]') },
+    { itemKey: 'equipChest', amount: 1, match: (row) => !!row.querySelector('img[src*="exaltation-chest"]') },
+    // Each purchase adds a new piece to the Arsenal; the server refuses once it is full (loop stops).
+    { itemKey: 'rainbowShield', amount: 1, match: (row) => !!row.querySelector('.sprite.item.id-8077') }
+];
+let huntShopRaf = null;
+let huntShopBusy = false;
+let huntShopArmed = null; // { wrap, qty } while the confirmation message is showing
+let huntShopOutsideHandler = null;
+let huntShopNoticeTimer = null;
+
+function findHuntingShopDialog() {
+    for (const title of document.querySelectorAll('div[role="dialog"] h2.widget-top-text')) {
+        if (title.textContent?.includes('Paw and Fur Society')) {
+            return title.closest('div[role="dialog"]');
+        }
+    }
+    return null;
+}
+
+function getHuntingMarkBalance() {
+    return Number(globalThis.state?.player?.getSnapshot?.()?.context?.questLog?.task?.points) || 0;
+}
+
+function applyHuntingStoreResult(data) {
+    globalThis.state?.player?.send?.({
+        type: 'setState',
+        fn: (prev) => {
+            const next = { ...prev };
+            if (data.nextState) {
+                next.questLog = { ...prev.questLog, task: data.nextState };
+            }
+            if (data.inventoryDiff) {
+                next.inventory = { ...prev.inventory };
+                for (const [key, change] of Object.entries(data.inventoryDiff)) {
+                    next.inventory[key] = Math.max(0, (next.inventory[key] || 0) + change);
+                }
+            }
+            if (data.nextEquip) {
+                next.equips = [...(prev.equips || []), data.nextEquip];
+            }
+            return next;
+        }
+    });
+}
+
+async function buyHuntingShopItem(itemKey) {
+    const response = await fetch('/api/trpc/quest.huntingTaskStore?batch=1', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-Game-Version': String(globalThis.state?.GAME_VERSION ?? '1')
+        },
+        credentials: 'include',
+        body: JSON.stringify({ '0': { json: itemKey } })
+    });
+    if (!response.ok) {
+        throw new Error(`huntingTaskStore ${itemKey}: HTTP ${response.status} ${await response.text()}`);
+    }
+    const result = await response.json();
+    const data = result?.[0]?.result?.data?.json;
+    if (!data) {
+        throw new Error(`huntingTaskStore ${itemKey}: unexpected response ${JSON.stringify(result)}`);
+    }
+    applyHuntingStoreResult(data);
+}
+
+function getHuntingShopItemName(row) {
+    const itemCell = row?.cells?.[0];
+    if (!itemCell) return '';
+    const walker = document.createTreeWalker(itemCell, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const text = node.textContent.trim();
+        if (text && !node.parentElement.closest('.container-slot, .equipment-portrait, p, input')) return text;
+    }
+    return '';
+}
+
+// Replaces the tooltip description with one line (React's nodes are hidden, never rewritten).
+function showHuntingShopTooltipText(wrap, text, color, autoClearMs) {
+    clearHuntingShopNotice();
+    const tooltip = wrap.closest('div[role="dialog"]')?.querySelector('.tooltip-prose');
+    if (!tooltip) return;
+    tooltip.querySelectorAll(':scope > p:not(:first-child), :scope > blockquote').forEach((node) => {
+        node.dataset.betterTaskerHidden = '1';
+        node.style.display = 'none';
+    });
+    const note = document.createElement('p');
+    note.className = 'inline better-tasker-shop-confirm-msg';
+    note.style.color = color;
+    note.textContent = text;
+    tooltip.appendChild(note);
+    if (autoClearMs) huntShopNoticeTimer = setTimeout(clearHuntingShopNotice, autoClearMs);
+}
+
+function clearHuntingShopNotice() {
+    if (huntShopNoticeTimer) {
+        clearTimeout(huntShopNoticeTimer);
+        huntShopNoticeTimer = null;
+    }
+    document.querySelectorAll('.better-tasker-shop-confirm-msg').forEach((node) => node.remove());
+    // Give the tooltip's own text back (it was only hidden, never edited).
+    document.querySelectorAll('[data-better-tasker-hidden]').forEach((node) => {
+        node.style.display = '';
+        delete node.dataset.betterTaskerHidden;
+    });
+}
+
+function disarmHuntingShopConfirm() {
+    if (huntShopOutsideHandler) {
+        document.removeEventListener('click', huntShopOutsideHandler, true);
+        huntShopOutsideHandler = null;
+    }
+    clearHuntingShopNotice();
+    if (huntShopArmed) {
+        const button = huntShopArmed.wrap.querySelector('button');
+        if (button) {
+            button.style.boxShadow = '';
+            button.style.outline = '';
+        }
+        huntShopArmed = null;
+    }
+}
+
+// First click shows the question (a node of ours appended to the tooltip, React's text is never touched).
+function armHuntingShopConfirm(wrap, qty) {
+    disarmHuntingShopConfirm();
+    const price = Number(wrap.dataset.price) || 1;
+    const amount = Number(wrap.dataset.amount) || 1;
+    const message = t('mods.betterTasker.huntShopConfirmBuy')
+        .replace('{quantity}', String(qty * amount))
+        .replace('{itemName}', getHuntingShopItemName(wrap.closest('tr')))
+        .replace('{cost}', String(qty * price));
+    showHuntingShopTooltipText(wrap, message, '#ff4d4d');
+    const button = wrap.querySelector('button');
+    button.style.boxShadow = '0 0 8px rgba(50, 205, 50, 0.6)';
+    button.style.outline = '1px solid #32cd32';
+    huntShopArmed = { wrap, qty };
+    huntShopOutsideHandler = (event) => {
+        if (!event.target.closest?.('.' + HUNT_SHOP_WRAP_CLASS + ' button')) disarmHuntingShopConfirm();
+    };
+    document.addEventListener('click', huntShopOutsideHandler, true);
+}
+
+function syncHuntingShopRow(wrap) {
+    const price = Number(wrap.dataset.price) || 1;
+    const input = wrap._qtyInput;
+    const buy = wrap.querySelector('button');
+    const max = Math.floor(getHuntingMarkBalance() / price);
+    const limit = String(Math.max(1, max));
+    if (input.max !== limit) input.max = limit;
+    let qty = parseInt(input.value, 10);
+    if (!Number.isFinite(qty) || qty < 1) qty = 1;
+    if (max >= 1 && qty > max) qty = max;
+    if (document.activeElement !== input && input.value !== String(qty)) input.value = String(qty);
+    // Only write on change: the observer watches the whole body and would loop on no-op writes.
+    const label = buy.querySelector('span');
+    const total = String(qty * price);
+    if (label.textContent !== total) label.textContent = total;
+    const disabled = huntShopBusy || max < 1 || qty > max;
+    if (buy.disabled !== disabled) buy.disabled = disabled;
+}
+
+// Button goes in the price cell; the quantity input sits at the right edge of the item cell.
+function createHuntingShopWrap(itemKey, price, amount) {
+    const wrap = document.createElement('div');
+    wrap.className = HUNT_SHOP_WRAP_CLASS;
+    wrap.dataset.itemKey = itemKey;
+    wrap.dataset.price = String(price);
+    wrap.dataset.amount = String(amount);
+
+    // Shared quantity box (content/ba-quantity-input.js); only layout is set here.
+    const input = window.BAQuantityInput.create({ max: 1, min: 1, value: 1, className: HUNT_SHOP_INPUT_CLASS });
+    input.inputMode = 'numeric';
+    input.style.cssText = 'width:40px;flex:none;height:24px;margin:0 0 0 auto;';
+    input.addEventListener('input', () => {
+        if (huntShopArmed?.wrap === wrap) disarmHuntingShopConfirm();
+        syncHuntingShopRow(wrap);
+    });
+    input.addEventListener('blur', () => syncHuntingShopRow(wrap));
+    wrap._qtyInput = input;
+
+    const buy = document.createElement('button');
+    buy.className = 'focus-style-visible flex items-center justify-center tracking-wide disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-blue active:frame-pressed-1-blue surface-blue gap-1 px-2 py-0.5 pb-[3px] pixel-font-16 w-full text-whiteHighlight';
+    buy.innerHTML = '<img alt="hunting mark" src="/assets/icons/huntingmark.png" height="15" width="15" class="translate-y-px"><span></span>';
+    buy.addEventListener('click', async () => {
+        if (huntShopBusy) return;
+        syncHuntingShopRow(wrap);
+        const qty = parseInt(input.value, 10) || 1;
+        if (!(huntShopArmed && huntShopArmed.wrap === wrap && huntShopArmed.qty === qty)) {
+            armHuntingShopConfirm(wrap, qty);
+            return; // wait for the second click
+        }
+        const itemName = getHuntingShopItemName(wrap.closest('tr'));
+        const unitAmount = Number(wrap.dataset.amount) || 1;
+        const unitPrice = Number(wrap.dataset.price) || 1;
+        let bought = 0;
+        disarmHuntingShopConfirm();
+        huntShopBusy = true;
+        syncHuntingShopRow(wrap);
+        try {
+            for (let i = 0; i < qty; i++) {
+                await buyHuntingShopItem(itemKey);
+                bought++;
+            }
+        } catch (error) {
+            console.error('[Better Tasker] Hunting shop purchase failed:', error);
+        } finally {
+            huntShopBusy = false;
+            input.value = '1';
+            if (bought > 0) {
+                showHuntingShopTooltipText(wrap, t('mods.betterTasker.huntShopSuccessBuy')
+                    .replace('{quantity}', String(bought * unitAmount))
+                    .replace('{itemName}', itemName)
+                    .replace('{cost}', String(bought * unitPrice)), '#32cd32', 5000);
+            }
+            scheduleHuntingShopEnhance();
+        }
+    });
+
+    wrap.append(buy);
+    syncHuntingShopRow(wrap);
+    return wrap;
+}
+
+function getHuntingShopInputHost(priceCell) {
+    const itemCell = priceCell.previousElementSibling;
+    return itemCell ? (itemCell.firstElementChild || itemCell) : null;
+}
+
+function enhanceHuntingShop() {
+    huntShopRaf = null;
+    const dialog = findHuntingShopDialog();
+    if (!dialog) return;
+    for (const row of dialog.querySelectorAll('tbody tr')) {
+        const nativeButton = row.querySelector('button[data-cuelume-press]');
+        if (!nativeButton || !nativeButton.querySelector('img[alt="hunting mark"]')) continue;
+        const cell = nativeButton.closest('td');
+        if (!cell) continue;
+        const existing = cell.querySelector(`.${HUNT_SHOP_WRAP_CLASS}`);
+        const entry = HUNT_SHOP_ITEMS.find((item) => item.match(row));
+        const price = parseInt(nativeButton.textContent, 10);
+        if (!entry || !Number.isFinite(price) || price < 1) continue;
+        // Native button disabled while we can afford it = locked by rank: leave it alone.
+        if (!existing && nativeButton.disabled && getHuntingMarkBalance() >= price) continue;
+        const wrap = existing || createHuntingShopWrap(entry.itemKey, price, entry.amount);
+        if (!existing) {
+            // One trailing node in the React-owned cell; native button is hidden, never removed.
+            cell.appendChild(wrap);
+            nativeButton.style.display = 'none';
+        }
+        // Re-attach the input if React re-rendered the item cell.
+        if (!wrap._qtyInput.isConnected) getHuntingShopInputHost(cell)?.appendChild(wrap._qtyInput);
+        wrap.dataset.price = String(price);
+        syncHuntingShopRow(wrap);
+    }
+}
+
+function scheduleHuntingShopEnhance() {
+    if (huntShopRaf) return;
+    huntShopRaf = requestAnimationFrame(enhanceHuntingShop);
+}
+
+function cleanupHuntingShopQuantity() {
+    if (huntShopRaf) {
+        cancelAnimationFrame(huntShopRaf);
+        huntShopRaf = null;
+    }
+    disarmHuntingShopConfirm();
+    document.querySelectorAll(`.${HUNT_SHOP_INPUT_CLASS}`).forEach((input) => input.remove());
+    document.querySelectorAll(`.${HUNT_SHOP_WRAP_CLASS}`).forEach((wrap) => {
+        const cell = wrap.closest('td');
+        const nativeButton = cell?.querySelector('button[data-cuelume-press]');
+        if (nativeButton) nativeButton.style.display = '';
+        wrap.remove();
+    });
+    huntShopBusy = false;
+}
+
+// ============================================================================
 // 15. CLEANUP & EXPORTS
 // ============================================================================
 
@@ -8924,7 +9218,8 @@ function cleanupBetterTasker() {
         
         // Clean up quest log observer
         stopQuestLogMonitoring();
-        
+        cleanupHuntingShopQuantity();
+
         // Clean up quest button validation and restore appearance
         stopQuestButtonValidation();
         restoreQuestButtonAppearance();

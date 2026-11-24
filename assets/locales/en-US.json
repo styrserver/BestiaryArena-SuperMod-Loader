@@ -2143,6 +2143,8 @@
       "priorityLowDesc": "Yields to Medium/High Priority and Better Tasker when active"
     },
     "betterTasker": {
+      "huntShopConfirmBuy": "Are you sure you want to buy {quantity} {itemName} for {cost} Hunting Marks?",
+      "huntShopSuccessBuy": "Successfully bought {quantity} {itemName} for {cost} Hunting Marks!",
       "modName": "Better Tasker",
       "defaultSettings": "Default Settings",
       "modalTitle": "Better Tasker Settings",

@@ -41,50 +41,11 @@
   let confirmationOutsideHandler = null;
   
   const QUANTITY_INPUT_STYLES = `
+    /* Base look comes from content/ba-quantity-input.js (.ba-quantity-input). */
     .better-hygenie-quantity-input {
-      width: 100%;
       max-width: ${CONSTANTS.MAX_INPUT_WIDTH}px;
-      height: 20px;
-      background-image: url('https://bestiaryarena.com/_next/static/media/background-darker.2679c837.png');
-      background-size: auto;
-      background-repeat: repeat;
-      background-position: center;
-      border: none;
-      color: white;
-      font-family: 'Courier New', monospace;
-      font-size: 12px;
-      text-align: center;
-      padding: 2px;
-      margin-bottom: 1px;
-      border-radius: 2px;
-      display: block;
       margin-left: auto;
       margin-right: auto;
-      position: relative;
-    }
-    
-    .better-hygenie-quantity-input::before {
-      content: '';
-      position: absolute;
-      top: -2px;
-      left: -2px;
-      right: -2px;
-      bottom: -2px;
-      background-image: url('https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png');
-      background-size: 100% 100%;
-      background-repeat: no-repeat;
-      background-position: center;
-      z-index: -1;
-      border-radius: 4px;
-    }
-    .better-hygenie-quantity-input:focus {
-      outline: none;
-      box-shadow: 0 0 0 2px rgba(106, 106, 106, 0.5);
-    }
-    .better-hygenie-quantity-input::-webkit-inner-spin-button,
-    .better-hygenie-quantity-input::-webkit-outer-spin-button {
-      -webkit-appearance: none;
-      margin: 0;
     }
     .better-hygenie-fuse-button {
       display: flex !important;
@@ -479,35 +440,12 @@
   }
 
   function createQuantityInput(maxQuantity) {
-    const input = document.createElement('input');
-    input.type = 'text';
-    input.className = 'better-hygenie-quantity-input';
-    input.placeholder = '1';
-    
-    input.addEventListener('input', function() {
-      const value = this.value.trim();
-      
-      if (value === '') {
-        return;
-      }
-      
-      const numValue = parseInt(value);
-      if (isNaN(numValue) || numValue < 1) {
-        this.value = '1';
-      } else if (numValue > maxQuantity) {
-        this.value = maxQuantity.toString();
-      }
+    return window.BAQuantityInput.create({
+      max: maxQuantity,
+      min: 1,
+      value: '',
+      className: 'better-hygenie-quantity-input'
     });
-    
-    input.addEventListener('blur', function() {
-      const value = this.value.trim();
-      
-      if (value === '') {
-        this.value = '1';
-      }
-    });
-    
-    return input;
   }
   
   function updateFuseButtonText(button, quantity) {

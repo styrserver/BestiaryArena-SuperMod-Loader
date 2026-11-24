@@ -183,7 +183,7 @@ Key properties include:
   "outfits": [12, 129],          // Available outfits
   "mountId": null,               // Current mount ID (null: none)
   "mounts": [368],               // Mount IDs (legacy: the Change outfit dialog does not read this or `outfits`)
-  "codex": { "monster": {}, "outfit": { "12": 1 }, "mount": { "368": 1 }, "backpack": {} }, // id -> count; an outfit/mount is owned when its count is above 0
+  "codex": { "monster": {}, "outfit": { "12": 1 }, "mount": { "368": 1 }, "backpack": {} }, // id -> count; an outfit/mount is owned when its count is above 0 (see "Codex" below)
   "flags": 1056702426,           // Player flags
   "loyaltyPoints": 9250,         // Loyalty points
   "exp": 150,                    // Experience
@@ -259,7 +259,6 @@ Key properties include:
     "stamina1": 14,              // Stamina potions tier 1
     "stamina2": 13,              // Stamina potions tier 2
     "equipChest": 0,             // Equipment chests
-    "outfitBag1": 67,            // Outfit bags
     "insightStone1": 0,          // Insight stones tier 1
     // More inventory items...
   },
@@ -280,6 +279,81 @@ Key properties include:
 ```
 
 **Owned outfits and mounts live in `codex.outfit` / `codex.mount`.** The Change outfit dialog (Outfits and Mounts tabs) lists the ids whose codex count is above 0; the `outfits` / `mounts` arrays are not what it reads. A mod that unlocks an outfit or mount (Outfiter) must set the codex entry as well as the array, writing new objects so the game's selectors notice. Mount lookups for drawing use the game's mount map (`G9`) and the Mounts tab lists its mount table (`Xc`), both exported by one module (found by the `"Widow Queen"` key).
+
+### Codex (`state.player` context `codex`)
+
+Verified live (2026-11-24, account with 240 outfits / 235 mounts): `context.codex` is
+`{ monster, outfit, mount, backpack }`, each a plain object mapping a **string id** to an integer
+count `>= 1`. Missing id = not owned (zero-count entries are never stored). Keys:
+
+| Category | Key | Example count |
+| --- | --- | --- |
+| `monster` | game creature id | `"57": 3` |
+| `outfit` | outfit id | `"12": 2` |
+| `mount` | mount id | `"368": 2` |
+| `backpack` | sprite id | `"3244": 2` |
+
+- Count 1 = owned; every copy above 1 is a **spare**. The last copy can never be removed.
+- On that account `context.outfits` and `context.mounts` held exactly the ids of `codex.outfit` /
+  `codex.mount` (no extras either way), so they mirror the codex there. Still treat the codex as the
+  source of truth (see above).
+- New accounts start with the Newcomer outfit card (`createInitial`).
+- Related context fields: `shards` (currency from selling spares), `dust`, `loyaltyPoints`,
+  `lastTradeId`. The game adds cards client-side with `state.player` `setState` + `withCard(codex, card)`
+  after each mutation. Server-side code validates card ids against its catalog (unknown card throws
+  `Card [category:id] not found`).
+- **Reading the catalog (Cyclopedia Home "Codex" block).** Find the webpack module whose source holds
+  `"Unknown codex availability"` and `require` it; the export whose value is an object of arrays for
+  `outfit, mount, monster, equip, room, backpack` holds the Codex view rows (`{ group, card,
+  codexAvailability }`). Rows with `card.source === "codex"` are the cards stored in `player.codex`
+  (verified live: outfit 236, mount 230, creature 43, backpack 40 = 549). Match by export *shape*, not
+  the minified name (`RS`). The `Vy` export (pack-card sources) also lists `hidden` outfits, which the
+  view drops. Cards held but missing from the view (hidden outfits, Outfiter's custom outfit/mounts)
+  make `codex` larger than the catalog, so count owned cards by catalog id, not `Object.keys(codex)`.
+- **Reproducing the game's Codex numbers** (dialog header, e.g. `768/786`). The same module exports the
+  progress resolver (function whose source contains `"Unknown codex card source"`, minified `wM`):
+  `wM({ codex, monsters, equips, rooms, completedRegions, highscoreRoomIds })` returns `card =>
+  { count, rarity, foil }`. `completedRegions` is a `Set` of region ids from the module exporting `Up`
+  (regions, each with `rooms`) and `xY(regionId, playerContext)`. A card is owned when `count > 0`.
+  Per category `total` skips rows whose `codexAvailability` is `exclusive`, while `owned` includes the
+  exclusives you hold (so `236/221` is normal); the header skips exclusives on both sides. Verified live:
+  outfit 236/221 (15 exclusive), mount 230/210 (20), creature 139/143, equip 60/55 (5), room 110/110,
+  backpack 33/47, all 768/786.
+- **Not in `serverSide.profilePageData`.** That response had `outfits` / `mounts` id lists until the Codex
+  update; they are gone (checked 2026-11-24: absent for every player tried), and it never had card counts.
+  Another player's Codex is in their **profile page data**: `GET https://bestiaryarena.com/profile/<name>`
+  with header `x-nextjs-data: 1` answers with JSON (about 170 KB; without the header it is the 700 KB HTML
+  page, whose `__NEXT_DATA__` holds the same object). The Codex part is
+  `pageProps.pageData.codexData = { codex, rooms, completedRegionIds, highscoreRoomIds, raidsUnlocked }`
+  (`codex` has the same `{ monster, outfit, mount, backpack }` count shape; `rooms` has the per-room
+  `{ rank, count, floor, ticks, ... }` rows). Feeding it, the profile's `monsters` (hidden ones filtered out,
+  as the profile page does) and `equips` to the progress resolver gives the game's own numbers for any player.
+  The `/_next/data/<buildId>/...` route is not needed (and 404s without the locale segment).
+
+**Card catalog** (from the game chunks, `181-*.js` module `71632`). Every outfit, mount, backpack
+and creature definition has a `rarity` (1-5), a `group` and a `codexAvailability`; creatures and
+mounts may also have `foil`:
+
+| `codexAvailability` | Meaning |
+| --- | --- |
+| `pack` | can drop from packs |
+| `obtainable` | earned another way (quests, store, rooms) |
+| `exclusive` | limited, shown last in lists |
+| `hidden` | not shown (monsters with this get no card) |
+
+Codex views by category: `outfit`, `mount`, `monster`, `equip`, `room`, `backpack`. Only
+outfit / mount / monster / backpack cards are stored. `equip` and `room` rows are derived from the
+player's equips and room clears (`rooms` rarity from best floor; foil = has a highscore).
+Backpack rows can also come from region completion.
+
+**Packs, shards, loyalty.**
+- `inventory.openPacks { amount, variant }` (`variant`: `"pack"` or `"premiumPack"`) returns
+  `{ packs: card[][], inventoryDiff }`; each card is added to `codex`.
+- A spare sells for 5 shards (regular) or 25 (foil). Exchange goes through
+  `store.yasirShardExchange`.
+- `account.redeemLoyaltyReward` grants a mount card at loyalty-point milestones.
+- Trades are applied client-side from `{ give, get }` entries newer than `lastTradeId`; the network
+  call was not located.
 
 ## Board Management
 
@@ -1098,12 +1172,13 @@ The client simulates the battle, but the server decides the result:
 
 | Group | Procedures (input) |
 | --- | --- |
-| Chests/bags | `equipChest`, `outfitBag`, `hunterOutfitBag`, `surpriseCube`, `summonScroll` (rarity) |
+| Chests/bags | `equipChest`, `surpriseCube`, `summonScroll` (rarity). `outfitBag` / `hunterOutfitBag` were removed in the Codex update (old bags became Standard packs) |
 | Fusion | `fuseSummonScrolls { rarity }`, `fuseDiceManipulators { rarity }`, `forgeEquips { equipA, equipB }` |
 | Stamina | `staminaPotion { rarity, amount }`, `staminaRefill` |
 | Monster upgrade | `monsterStatRune { rune, monsterId }`, `insightStone { rarity, monsterId }`, `upgradeMonsterTier`, `monsterSoup`, `equipSoup`, `monsterSqueezer`, `diceManipulator` |
 | Runes | `useBlankRune`, `useConversionRune { rune, equipId }`, `useDowngradeEquipRune { equipId }`, `useRecycleRune (list)`, `useRecycleMonsterRune (monster ids)`, `useShinyTransferRune { shinyId, recipientId }`, `useAvariceRune`, `useGenie`, `useDoctor` |
 | Daycare | `addToDaycare { slotId, monsterId }`, `removeFromDaycare { slotId }`, `levelUpAtDaycare { slotId }` |
+| Codex | `openPacks { amount, variant }` (`"pack"` \| `"premiumPack"`) |
 | Names | `nicknameMonster { monsterId, nickname? }` (omit `nickname` to remove it), `nicknameChange` |
 
 ### `quest` router (32)
@@ -1131,7 +1206,7 @@ comes from the price icon next to each button (`goldpile.png` vs `beastcoin.png`
   `buyNicknameMonster`, `buyNpcTask`, `buyRaids`, `buySandbox`, `buyYasir`, `buyExtraStaminaPoints`,
   `buyAnkDlc`, `buyCarlinDlc`, `buyRookgaardDlc`, `buyVillainDlc`, `buyMountainFortress`,
   `buyMountainFortressB`, `buyGoldenOutfit`.
-- **Beast Coin:** `buyPremium`, `buyEquipChest`, `buyOutfitBag1`, `buyOutfitBag1Bundle`,
+- **Beast Coin:** `buyPremium`, `buyEquipChest`,
   `buyStamina5`, `buySummonScroll5`, `buySurpriseCube5`, `buyDiceManipulator5`, `buyGazerBundle`,
   `buyStarterBundle`, `buyBestiaryContainerSlots`, `buyDoctor` (alt price).
 - **Event:** `buyHalloween`, `buyHalloweenPass`.
@@ -1147,7 +1222,7 @@ Flag names in the product gating (`s.floors`, `s.forge`, `s.raids`, `s.yasir`, `
 
 `changeOutfit { outfitId, alt, mountId }` (outfit objects may also carry `head/body/legs/feet`
 colors), `getPlayerCoins`, `getCoinHistory { pageIndex, pageSize }`, `redeemPlayerLevelReward`,
-`useGiftCode`, `createPix` / `pollPixStatus { pixPaymentId }` (Brazilian Pix payments).
+`redeemLoyaltyReward` (mount card, see Codex), `useGiftCode`, `createPix` / `pollPixStatus { pixPaymentId }` (Brazilian Pix payments).
 
 ### `admin` router (42): listed, not for use
 

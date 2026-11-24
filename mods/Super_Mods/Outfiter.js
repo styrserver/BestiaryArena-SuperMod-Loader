@@ -1094,12 +1094,13 @@ function withCodexIds(layer, ids) {
 function mergeOutfitsIntoPlayer() {
   globalThis.state.player.trigger.setState({
     fn: (prev) => {
-      ownedIdsOf(prev.outfits, prev.codex?.outfit).forEach((id) => { if (!addedOutfits.has(id)) ownedOutfits.add(id); });
+      const outfits = prev.outfits || [];
+      ownedIdsOf(outfits, prev.codex?.outfit).forEach((id) => { if (!addedOutfits.has(id)) ownedOutfits.add(id); });
       const ids = getOutfitIds();
       addedOutfits = new Set([...addedOutfits, ...ids.filter((id) => !ownedOutfits.has(id))]);
       return {
         ...prev,
-        outfits: [...new Set([...prev.outfits, ...ids])], // Merge and deduplicate
+        outfits: [...new Set([...outfits, ...ids])], // Merge and deduplicate
         codex: { ...prev.codex, outfit: withCodexIds(prev.codex?.outfit, ids) },
       };
     },
@@ -1836,7 +1837,7 @@ function revertOutfiter() {
   const addedMountIds = addedMounts;
   globalThis.state.player.trigger.setState({
     fn: (prev) => {
-      const outfits = prev.outfits.filter((id) => !added.has(id));
+      const outfits = (prev.outfits || []).filter((id) => !added.has(id));
       // Wearing an outfit we added: fall back to one the account really owns.
       const outfitId = outfits.includes(prev.outfitId) ? prev.outfitId : (outfits[0] ?? prev.outfitId);
       const mounts = (prev.mounts || []).filter((id) => !addedMountIds.has(id));

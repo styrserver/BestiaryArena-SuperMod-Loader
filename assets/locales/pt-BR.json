@@ -1588,7 +1588,7 @@
       "error": "Erro!",
       "confirmBuy": "Tem certeza que deseja comprar {quantity} {itemName}{costText}?",
       "confirmSell": "Tem certeza que deseja vender {quantity} {itemName}{costText}?",
-      "successBuy": "Comprou {quantity} {itemName} com sucesso!",
+      "successBuy": "Comprou {quantity} {itemName} por {cost} Marcas de Caça com sucesso!",
       "successBuyWithCost": "Comprou {quantity} {itemName} por {cost}.",
       "historyCostGold": "{amount} de ouro",
       "historyCostDust": "{amount} de poeira",
@@ -2143,6 +2143,8 @@
       "priorityLowDesc": "Cede à prioridade média/alta e ao Better Tasker quando ativo"
     },
     "betterTasker": {
+      "huntShopConfirmBuy": "Tem certeza que deseja comprar {quantity} {itemName} por {cost} Marcas de Caça?",
+      "huntShopSuccessBuy": "Comprou {quantity} {itemName} com sucesso!",
       "modName": "Better Tasker",
       "defaultSettings": "Configurações padrão",
       "modalTitle": "Configurações do Better Tasker",

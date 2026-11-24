@@ -58,21 +58,14 @@ const inventoryTooltips = {
     text: 'Contains collection cards.',
     icon: '/assets/icons/pack.png',
     rarity: '4',
-    obtain: 'Yasir (100 greater shards)'
+    obtain: 'Yasir (100 greater shards), Reward Shop (3 hunting marks), Daily Seashell (6th and 20th day, free players)'
   },
   premiumPack: {
     displayName: "Booster Pack (Premium)",
     text: 'Contains more rare cards for outfits, mounts, creatures and backpacks. Guaranteed 1 foil card.',
     icon: '/assets/icons/pack-premium.png',
     rarity: '5',
-    obtain: 'Store (120 Beast Coins)'
-  },
-  hunterOutfitBag: {
-    displayName: "Hunter Outfit Bag",
-    text: 'Contains a random hunter outfit.',
-    icon: '/assets/icons/hunteroutfitbag.png',
-    rarity: '2',
-    obtain: 'Store (100 Beast Coins), Level-up Reward, Reward Shop (3 hunting marks)'
+    obtain: 'Store (120 Beast Coins), Daily Seashell (6th and 20th day, Premium players)'
   },
   insightStone1: {
     displayName: "Stone of Insight (Glimpse)",
@@ -115,13 +108,6 @@ const inventoryTooltips = {
     icon: '/assets/icons/nickname-change.png',
     rarity: '2',
     obtain: 'Store (4,000 gold)'
-  },
-  outfitBag1: {
-    displayName: "Outfit Bag",
-    text: 'Contains a random outfit.',
-    icon: 'sprite://653',
-    rarity: '4',
-    obtain: 'Store (125 Beast Coins for 1x OR 250 Beast Coins for 3x), Level-up Reward, Reward Shop (3 hunting marks)'
   },
   stamina1: {
     displayName: "Stamina Potion (Mini)",
@@ -498,7 +484,7 @@ const inventoryTooltips = {
 
 // Inventory item categories for organizing items in the UI
 const INVENTORY_CATEGORIES = {
-  'Consumables': ['Booster Packs', 'Change Nickname', 'Dice Manipulators', 'Exaltation Chests', 'Nickname Creature', 'Outfit Bags', 'Stamina Potions', 'Stones of Insight', 'Summon Scrolls', 'Surprise Cubes'],
+  'Consumables': ['Booster Packs', 'Change Nickname', 'Dice Manipulators', 'Exaltation Chests', 'Nickname Creature', 'Stamina Potions', 'Stones of Insight', 'Summon Scrolls', 'Surprise Cubes'],
   'Currency': ['Beast Coins', 'Dust', 'Gold', 'Hunting Marks'],
   'Gazers': [],
   'Runes': ['Avarice Rune', 'Augment Rune (HP)', 'Augment Rune (AD)', 'Augment Rune (AP)', 'Augment Rune (AR)', 'Augment Rune (MR)', 'Blank Rune', 'Recycle Rune', 'Kaleidoscopic Rune', 'Transfusion Rune', 'Conversion Rune (HP)', 'Conversion Rune (AD)', 'Conversion Rune (AP)', 'Downgrade Rune'],
@@ -509,7 +495,7 @@ const INVENTORY_VARIANTS = {
   'Booster Packs': ['pack', 'premiumPack'],
   'Change Nickname': ['nicknameChange'],
   'Dice Manipulators': ['diceManipulator1', 'diceManipulator2', 'diceManipulator3', 'diceManipulator4', 'diceManipulator5'],
-  'Exaltation Chests': ['equipChest'], 'Nickname Creature': ['nicknameMonster'], 'Outfit Bags': ['hunterOutfitBag', 'outfitBag1'],
+  'Exaltation Chests': ['equipChest'], 'Nickname Creature': ['nicknameMonster'],
   'Stamina Potions': ['stamina1', 'stamina2', 'stamina3', 'stamina4', 'stamina5'],
   'Stones of Insight': ['insightStone1', 'insightStone2', 'insightStone3', 'insightStone4', 'insightStone5'],
   'Summon Scrolls': ['summonScroll1', 'summonScroll2', 'summonScroll3', 'summonScroll4', 'summonScroll5', 'summonScroll6', 'summonScroll7'],
@@ -539,7 +525,6 @@ const INVENTORY_STATIC_ITEMS = {
   'nicknameMonster': { name: 'Nickname Creature', rarity: '3' }, 'nicknameChange': { name: 'Change Nickname', rarity: '2' },
   'nicknamePlayer': { name: 'Player Nickname', rarity: '2' }, 'equipChest': { name: 'Exaltation Chest', rarity: '5' },
   'pack': { name: 'Booster Pack (Standard)', rarity: '4' }, 'premiumPack': { name: 'Booster Pack (Premium)', rarity: '5' },
-  'hunterOutfitBag': { name: 'Hunter Outfit Bag', rarity: '2' }, 'outfitBag1': { name: 'Outfit Bag', rarity: '4' },
   'babyDragonPlant': { name: 'Baby Dragon Plant', rarity: '3' }, 'dailyBoostedMap': { name: 'Daily Boosted Map', rarity: '4' }, 'daycare': { name: 'Daycare', rarity: '3' },
   'dungeonAscension': { name: 'Dungeon Ascension', rarity: '5' }, 'dragonPlant': { name: 'Dragon Plant', rarity: '4' }, 'hygenie': { name: 'Hy\'genie', rarity: '5' }, 'monsterCauldron': { name: 'Monstrous Cauldron', rarity: '4' },
   'creatureAwakening': { name: 'Creature Awakening', rarity: '5' },
@@ -586,8 +571,6 @@ const RUNE_NON_SACRIFICABLE_KEYS = [
 // In-game display names (when they differ from mod-friendly tooltip names)
 const INVENTORY_GAME_DISPLAY_NAMES = {
   summonScroll7: 'Christmas Scroll',
-  outfitBag1: 'Outfit Bag',
-  hunterOutfitBag: 'Hunter Outfit Bag',
   equipChest: 'Exaltation Chest'
 };
 
@@ -657,8 +640,6 @@ const INVENTORY_MINI_ICONS = {
   surpriseCube3: '/assets/icons/mini-cube.png',
   surpriseCube4: '/assets/icons/mini-cube.png',
   surpriseCube5: '/assets/icons/mini-cube.png',
-  outfitBag1: '/assets/icons/mini-outfitbag.png',
-  hunterOutfitBag: '/assets/icons/mini-hunteroutfitbag.png',
   equipChest: '/assets/icons/mini-exaltationchest.png',
   runeHp: '/assets/icons/rune-hp-mini.png',
   runeAp: '/assets/icons/rune-ap-mini.png',
@@ -810,7 +791,7 @@ const findItemKeyByIcon = (src) => {
 // Item key groups for inventory UI (currency, no-rarity consumables, upgrades)
 const ITEM_KEY_GROUPS = {
   currency: ['gold', 'dust', 'beastCoins', 'huntingMarks'],
-  noRarity: ['nicknameChange', 'nicknameMonster', 'hunterOutfitBag', 'outfitBag1'],
+  noRarity: ['nicknameChange', 'nicknameMonster'],
   upgrade: [
     'babyDragonPlant', 'creatureAwakening', 'dailyBoostedMap', 'daycare', 'dungeonAscension',
     'dragonPlant', 'drMephistopheles', 'hygenie', 'monsterCauldron', 'monsterRaids',

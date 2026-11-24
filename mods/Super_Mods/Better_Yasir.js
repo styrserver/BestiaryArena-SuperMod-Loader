@@ -130,48 +130,9 @@
       
       // CSS styles for the quantity input and action buttons
       const QUANTITY_INPUT_STYLES = `
+        /* Base look comes from content/ba-quantity-input.js (.ba-quantity-input). */
         .better-yasir-quantity-input {
-          width: 100%;
           max-width: ${CONSTANTS.MAX_INPUT_WIDTH}px;
-          height: 20px;
-          background-image: url('https://bestiaryarena.com/_next/static/media/background-darker.2679c837.png');
-          background-size: auto;
-          background-repeat: repeat;
-          background-position: center;
-          border: none;
-          color: white;
-          font-family: 'Courier New', monospace;
-          font-size: 12px;
-          text-align: center;
-          padding: 2px;
-          margin-bottom: 1px;
-          border-radius: 2px;
-          display: block;
-          position: relative;
-        }
-        
-        .better-yasir-quantity-input::before {
-          content: '';
-          position: absolute;
-          top: -2px;
-          left: -2px;
-          right: -2px;
-          bottom: -2px;
-          background-image: url('https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png');
-          background-size: 100% 100%;
-          background-repeat: no-repeat;
-          background-position: center;
-          z-index: -1;
-          border-radius: 4px;
-        }
-        .better-yasir-quantity-input:focus {
-          outline: none;
-          box-shadow: 0 0 0 2px rgba(106, 106, 106, 0.5);
-        }
-        .better-yasir-quantity-input::-webkit-inner-spin-button,
-        .better-yasir-quantity-input::-webkit-outer-spin-button {
-          -webkit-appearance: none;
-          margin: 0;
         }
         .better-yasir-action-button {
           /* Only override specific behaviors, let original classes handle styling */
@@ -1052,7 +1013,6 @@
               const spriteMapping = {
                 '35909': 'diceManipulator',
                 '21383': 'insightStone',
-                '653': 'outfitBag1',
                 '43672': 'monsterCauldron',
                 '42363': 'hygenie'
               };
@@ -1171,47 +1131,12 @@
     
       // Create quantity input element
       function createQuantityInput(maxQuantity, defaultValue = 1, minQuantity = 1) {
-        const input = document.createElement('input');
-        input.type = 'text';
-        input.className = 'better-yasir-quantity-input';
-        input.placeholder = minQuantity.toString();
-        input.value = defaultValue.toString();
-        input.max = maxQuantity; // Set initial max attribute
-        
-        // Handle input validation
-        input.addEventListener('input', function() {
-          const value = this.value.trim();
-          
-          // Allow empty input (user can delete all numbers)
-          if (value === '') {
-            return;
-          }
-          
-          // Get current max value from the input's max attribute (which gets updated)
-          const currentMax = parseInt(this.max) || maxQuantity;
-          
-          // Check if it's a valid number
-          const numValue = parseInt(value);
-          if (isNaN(numValue) || numValue < minQuantity) {
-            this.value = minQuantity.toString();
-          } else if (numValue > currentMax) {
-            this.value = currentMax.toString();
-          }
-          
-          // Removed hard limit of 100 items
+        return window.BAQuantityInput.create({
+          max: maxQuantity,
+          min: minQuantity,
+          value: defaultValue,
+          className: 'better-yasir-quantity-input'
         });
-        
-        // Handle blur event to set default value when input loses focus
-        input.addEventListener('blur', function() {
-          const value = this.value.trim();
-          
-          // If empty, set to minimum quantity
-          if (value === '') {
-            this.value = minQuantity.toString();
-          }
-        });
-        
-        return input;
       }
       
       // Update action button text based on quantity and price
