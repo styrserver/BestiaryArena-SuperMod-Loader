@@ -1489,6 +1489,7 @@ function calculateGuildPointsFromEquipmentAndSkills(equippedItems, xpSkills) {
   let totalPoints = 0;
   if (equippedItems && typeof equippedItems === 'object') {
     for (const item of Object.values(equippedItems)) {
+      normalizeEquippedBackpackTier(item);
       if (item && item.tier) {
         totalPoints += item.tier;
       }
@@ -4675,6 +4676,7 @@ async function populatePlayerEquipmentGrid(container, equippedItems) {
         item = equippedItems['shield'];
       }
     }
+    normalizeEquippedBackpackTier(item);
     
     // Store item data on slot for tooltip access
     slot._equippedItem = item;
@@ -4704,7 +4706,7 @@ async function populatePlayerEquipmentGrid(container, equippedItems) {
           slot.appendChild(itemPortrait);
         } else if (spriteId) {
           // For inventory items, create viewport structure manually
-          const viewportStructure = createViewportStructureForSlot(spriteId);
+          const viewportStructure = createViewportStructureForSlot(spriteId, item.tier);
           slot.appendChild(viewportStructure);
         } else {
           loadDefaultSlotImageIntoSlot(slot, slotType, name);
@@ -4713,7 +4715,7 @@ async function populatePlayerEquipmentGrid(container, equippedItems) {
         // For inventory items that can't be accessed via getEquipment, try using gameId directly
         try {
           const spriteId = item.gameId;
-          const viewportStructure = createViewportStructureForSlot(spriteId);
+          const viewportStructure = createViewportStructureForSlot(spriteId, item.tier);
           slot.appendChild(viewportStructure);
         } catch (e2) {
           console.warn(`[Guilds] Error displaying equipped item:`, e2);
@@ -8291,13 +8293,61 @@ function isQuestsModEnabled() {
   }
 }
 
+// Backpacks owned through the Codex (`player.codex.backpack`, keyed by sprite id). They have no equipment entry,
+// so like the special backpacks above they are listed by sprite id; refreshed by getUserOwnedEquipment().
+const codexBackpackIds = new Set();
+let codexBackpackDefsCache = null; // Map: sprite id -> backpack definition ({ name, ... }) from the game
+let codexBackpackDefsTries = 0;
+const CODEX_BACKPACK_DEFS_MAX_TRIES = 3;
+
+/**
+ * The game's backpack definitions, found by their source in the webpack module that exports the sprite-id map
+ * (shape-matched, not by minified name). Only a hit is cached; null when the game's modules cannot be read.
+ */
+function getCodexBackpackDefs() {
+  if (codexBackpackDefsCache) return codexBackpackDefsCache;
+  if (codexBackpackDefsTries >= CODEX_BACKPACK_DEFS_MAX_TRIES) return null;
+  codexBackpackDefsTries++;
+  try {
+    const registry = window.webpackChunk_N_E;
+    if (!Array.isArray(registry) || typeof registry.push !== 'function') return null;
+    let webpackRequire = null;
+    registry.push([['guilds-backpack-probe-' + Date.now()], {}, (req) => { webpackRequire = req; }]);
+    if (typeof webpackRequire !== 'function') return null;
+    const factories = webpackRequire.m || {};
+    const moduleId = Object.keys(factories).find((id) => typeof factories[id] === 'function'
+      && String(factories[id]).includes('spriteId:2854,name:"Backpack"'));
+    if (moduleId === undefined) return null;
+    const defs = Object.values(webpackRequire(moduleId) || {}).find((value) => value instanceof Map
+      && value.size > 0 && typeof value.values().next().value?.name === 'string');
+    if (!defs) return null;
+    codexBackpackDefsCache = defs;
+    return defs;
+  } catch (error) {
+    console.warn('[Guilds] Backpack definitions unavailable:', error);
+    return null;
+  }
+}
+
 // Helper functions for special backpacks
 function isSpecialBackpack(gameId) {
-  return SPECIAL_BACKPACK_IDS.includes(parseInt(gameId));
+  const id = parseInt(gameId);
+  return SPECIAL_BACKPACK_IDS.includes(id) || codexBackpackIds.has(id);
+}
+
+/**
+ * An equipped backpack's tier is its Codex rarity, whatever tier was saved when it was equipped (older saves hold 1).
+ * Mutates the stored item so every reader (slot grid, tooltips, guild points, bonus) sees the same tier.
+ */
+function normalizeEquippedBackpackTier(item) {
+  if (!item || item.stat || !item.gameId) return item;
+  const rarity = Number(getCodexBackpackDefs()?.get(Number(item.gameId))?.rarity);
+  if (rarity >= 1) item.tier = rarity;
+  return item;
 }
 
 function getBackpackName(gameId) {
-  return BACKPACK_NAMES[gameId] || `Item ${gameId}`;
+  return BACKPACK_NAMES[gameId] || getCodexBackpackDefs()?.get(Number(gameId))?.name || `Item ${gameId}`;
 }
 
 async function getBackpackCountFromInventory(backpackId, inventory) {
@@ -8333,7 +8383,8 @@ function createBackpackEquipmentItem(backpackId, itemData, count) {
     id: `backpack_${backpackId}`,
     gameId: backpackId,
     name: backpackName,
-    tier: itemData?.tier || 1,
+    // A backpack's tier is its Codex rarity (1-5); the tier drives its guild points and bonus.
+    tier: itemData?.tier || Number(getCodexBackpackDefs()?.get(Number(backpackId))?.rarity) || 1,
     count: count
     // Note: Backpacks have no stat field
   };
@@ -8939,7 +8990,7 @@ function createEquipmentSlot(slotType, x, y, name) {
           // No title attribute - we use custom tooltip instead
         } else if (spriteId) {
           // For inventory items, create viewport structure manually
-          const viewportStructure = createViewportStructureForSlot(spriteId);
+          const viewportStructure = createViewportStructureForSlot(spriteId, equippedItem.tier);
           slot.appendChild(viewportStructure);
         } else {
           // Fallback: show default image
@@ -8949,7 +9000,7 @@ function createEquipmentSlot(slotType, x, y, name) {
         // For inventory items that can't be accessed via getEquipment, try using gameId directly
         try {
           const spriteId = equippedItem.gameId;
-          const viewportStructure = createViewportStructureForSlot(spriteId);
+          const viewportStructure = createViewportStructureForSlot(spriteId, equippedItem.tier);
           slot.appendChild(viewportStructure);
         } catch (e2) {
           console.warn(`[Equipment] Error loading equipped item:`, e2);
@@ -9174,6 +9225,7 @@ async function getEquippedItems() {
           if (item && parseInt(item.gameId) === 99999 && item.name !== 'Fur Backpack') {
             item.name = 'Fur Backpack';
           }
+          normalizeEquippedBackpackTier(item);
         });
 
         const normalized = data || {};
@@ -9561,7 +9613,7 @@ async function updateEquipmentStats(container) {
 
 // Update the visual display of a slot
 // Helper function to create viewport structure for inventory items (like Cyclopedia)
-function createViewportStructureForSlot(itemId) {
+function createViewportStructureForSlot(itemId, frameRarity = null) {
   const containerSlot = document.createElement('div');
   containerSlot.className = 'container-slot surface-darker';
   containerSlot.setAttribute('data-hoverable', 'true');
@@ -9570,6 +9622,7 @@ function createViewportStructureForSlot(itemId) {
   
   const rarityDiv = document.createElement('div');
   rarityDiv.className = 'has-rarity relative grid h-full place-items-center';
+  if (frameRarity) rarityDiv.setAttribute('data-rarity', String(frameRarity)); // the tier frame
   
   const spriteContainer = document.createElement('div');
   spriteContainer.className = 'sprite item relative';
@@ -9670,7 +9723,7 @@ async function updateSlotDisplay(slotType) {
           slot.appendChild(itemPortrait);
         } else if (spriteId) {
           // For inventory items, create viewport structure manually
-          const viewportStructure = createViewportStructureForSlot(spriteId);
+          const viewportStructure = createViewportStructureForSlot(spriteId, equippedItem.tier);
           slot.appendChild(viewportStructure);
         } else {
           // Fallback: show default image
@@ -9680,7 +9733,7 @@ async function updateSlotDisplay(slotType) {
         // For inventory items that can't be accessed via getEquipment, try using gameId directly
         try {
           const spriteId = equippedItem.gameId;
-          const viewportStructure = createViewportStructureForSlot(spriteId);
+          const viewportStructure = createViewportStructureForSlot(spriteId, equippedItem.tier);
           slot.appendChild(viewportStructure);
         } catch (e2) {
           console.warn(`[Equipment] Error displaying equipped item:`, e2);
@@ -9766,7 +9819,7 @@ async function getUserOwnedEquipment() {
     
     const userEquips = playerContext.equips || [];
     
-    const individualEquipment = userEquips
+    let individualEquipment = userEquips
       .filter(equip => equip && equip.gameId)
       .map((equip, index) => {
         try {
@@ -9787,22 +9840,27 @@ async function getUserOwnedEquipment() {
         }
       })
       .filter(Boolean);
+
+    // One entry per owned piece (ownership is all that matters, not how many copies): the highest-tier copy stands for it.
+    const bestCopies = new Map();
+    for (const equip of individualEquipment) {
+      const current = bestCopies.get(equip.gameId);
+      if (!current || equip.tier > current.tier) bestCopies.set(equip.gameId, equip);
+    }
+    individualEquipment = [...bestCopies.values()];
     
-    // Always include specific backpack IDs (inventory items) - these are always available
+    // Backpacks are listed only when owned: the Codex ones below, plus the special inventory backpacks held in the inventory.
     const inventory = playerContext.inventory || {};
-    
+
     for (const backpackId of SPECIAL_BACKPACK_IDS) {
-      // Skip Fur_Backpack if Quests mod is not enabled
-      if (parseInt(backpackId) === 99999 && !isQuestsModEnabled()) {
+      // The Fur Backpack is granted by the Quests mod (no inventory entry), so it follows that mod being enabled.
+      const isFur = parseInt(backpackId) === 99999;
+      if (isFur ? !isQuestsModEnabled() : !(Number(inventory[String(backpackId)]) > 0)) {
         continue;
       }
-
-      // Check if already in list
-      const alreadyExists = individualEquipment.some(eq => eq.gameId === backpackId);
-      if (alreadyExists) {
+      if (individualEquipment.some(eq => eq.gameId === backpackId)) {
         continue;
       }
-
       // Inventory backpacks may not exist in the game equipment dictionary
       let itemData = null;
       try {
@@ -9812,7 +9870,17 @@ async function getUserOwnedEquipment() {
       const count = await getBackpackCountFromInventory(backpackId, inventory);
       individualEquipment.push(createBackpackEquipmentItem(backpackId, itemData, count || 1));
     }
-    
+
+    // Every backpack owned in the Codex (sprite id -> count) can be worn in the backpack slot too.
+    codexBackpackIds.clear();
+    for (const [idKey, count] of Object.entries(playerContext.codex?.backpack || {})) {
+      const backpackId = parseInt(idKey);
+      if (!Number.isFinite(backpackId) || !(Number(count) > 0)) continue;
+      codexBackpackIds.add(backpackId);
+      if (individualEquipment.some(eq => eq.gameId === backpackId)) continue;
+      individualEquipment.push(createBackpackEquipmentItem(backpackId, null, Number(count)));
+    }
+
     const sortedEquipment = individualEquipment.sort((a, b) => {
       if (a.tier !== b.tier) return b.tier - a.tier;
       if (a.name !== b.name) return a.name.localeCompare(b.name);
@@ -9973,7 +10041,14 @@ function createEquipmentButton(equipment, onSelect) {
         targetSlotType = slotType; // Store the database slot type
         // Format slot name nicely for display
         if (slotType === 'weapon') {
-          equipmentSlot = 'Weapon (Right Hand)';
+          // Name the weapon kind the game gives it (Sword, Club, Axe, Distance, Magic) instead of a generic "Weapon".
+          let weaponKind = '';
+          try {
+            weaponKind = String(globalThis.state?.utils?.getEquipment(equipment.gameId)?.metadata?.group || '');
+          } catch (_) { /* keep the generic label */ }
+          equipmentSlot = weaponKind
+            ? weaponKind.charAt(0).toUpperCase() + weaponKind.slice(1)
+            : 'Weapon (Right Hand)';
         } else if (slotType === 'shield') {
           equipmentSlot = 'Shield';
         } else {
@@ -10010,8 +10085,13 @@ function createEquipmentButton(equipment, onSelect) {
     return normalizeSlotTypeFromDb(targetSlotType);
   };
   
+  // Tier frame colour: an equipment piece uses its tier, a Codex backpack its Codex rarity, other backpacks none.
+  const frameRarity = codexBackpackIds.has(parseInt(equipment.gameId))
+    ? (Number(getCodexBackpackDefs()?.get(Number(equipment.gameId))?.rarity) || null)
+    : (isSpecialBackpack(equipment.gameId) ? null : equipment.tier);
+
   // Function to create viewport structure manually (like Cyclopedia)
-  const createViewportStructure = (itemId) => {
+  const createViewportStructure = (itemId, frameRarity = null) => {
     const containerSlot = document.createElement('div');
     containerSlot.className = 'container-slot surface-darker';
     containerSlot.setAttribute('data-hoverable', 'true');
@@ -10020,6 +10100,7 @@ function createEquipmentButton(equipment, onSelect) {
     
     const rarityDiv = document.createElement('div');
     rarityDiv.className = 'has-rarity relative grid h-full place-items-center';
+    if (frameRarity) rarityDiv.setAttribute('data-rarity', String(frameRarity)); // the tier frame
     
     const spriteContainer = document.createElement('div');
     spriteContainer.className = 'sprite item relative';
@@ -10091,19 +10172,21 @@ function createEquipmentButton(equipment, onSelect) {
     } catch (e) {
       // Fallback to manual viewport structure
       btn.innerHTML = '';
-      btn.appendChild(createViewportStructure(spriteId));
+      btn.appendChild(createViewportStructure(spriteId, frameRarity));
     }
   } else if (spriteId) {
     // For inventory items or when createItemPortrait is not available, create viewport manually
     btn.innerHTML = '';
-    btn.appendChild(createViewportStructure(spriteId));
+    btn.appendChild(createViewportStructure(spriteId, frameRarity));
   } else {
     btn.textContent = equipName.charAt(0).toUpperCase();
   }
   
   // No title attribute - we use custom tooltip instead
   
-  // Create tooltip for equipment
+  // The tooltip is built on first hover: the arsenal can hold a thousand+ buttons and building each one up front made opening it lag.
+  let tooltip = null;
+  const buildTooltip = () => {
   const tooltip = createTooltipElement();
   
   // Build tooltip content
@@ -10141,12 +10224,15 @@ function createEquipmentButton(equipment, onSelect) {
   }
   
   tooltip.appendChild(tooltipContent);
+  return tooltip;
+  };
   
   // Show/hide tooltip on hover
   let tooltipTimeout;
   const showTooltip = (e) => {
     if (tooltipTimeout) clearTimeout(tooltipTimeout);
     tooltipTimeout = setTimeout(() => {
+      tooltip = tooltip || buildTooltip();
       showEquipmentTooltip(tooltip);
       updateTooltipPosition(e);
     }, 300);
@@ -10154,6 +10240,7 @@ function createEquipmentButton(equipment, onSelect) {
   
   const hideTooltip = () => {
     if (tooltipTimeout) clearTimeout(tooltipTimeout);
+    if (!tooltip) return;
     if (currentEquipmentTooltip === tooltip) {
       hideCurrentEquipmentTooltip();
     } else {
@@ -10162,6 +10249,7 @@ function createEquipmentButton(equipment, onSelect) {
   };
   
   const updateTooltipPosition = (e) => {
+    if (!tooltip) return;
     const rect = btn.getBoundingClientRect();
     const tooltipRect = tooltip.getBoundingClientRect();
     const position = calculateTooltipPosition(rect, tooltipRect);
@@ -10192,8 +10280,37 @@ function createEquipmentButton(equipment, onSelect) {
   return btn;
 }
 
+// Arsenal order: slot it is worn in, then tier (highest first), then name.
+const ARSENAL_SLOT_ORDER = ['helmet', 'amulet', 'armor', 'weapon', 'shield', 'ring', 'legs', 'boots', 'ammo', 'bag', 'unknown'];
+let arsenalSlotByName = null;
+
+function getArsenalSlotRank(equipment) {
+  let slot = 'unknown';
+  if (isSpecialBackpack(equipment.gameId)) {
+    slot = 'bag';
+  } else {
+    const bySlot = window.playerEquipmentDatabase?.EQUIPMENT_BY_SLOT;
+    if (!arsenalSlotByName && bySlot) {
+      const map = new Map();
+      for (const [slotType, names] of Object.entries(bySlot)) {
+        for (const name of names) map.set(name.toLowerCase(), slotType);
+      }
+      if (map.size > 0) arsenalSlotByName = map; // only a populated catalog is kept
+    }
+    slot = arsenalSlotByName?.get(String(equipment.name).toLowerCase()) || 'unknown';
+  }
+  const rank = ARSENAL_SLOT_ORDER.indexOf(slot);
+  return rank === -1 ? ARSENAL_SLOT_ORDER.length : rank;
+}
+
+function compareArsenalItems(a, b) {
+  return (getArsenalSlotRank(a) - getArsenalSlotRank(b))
+    || (b.tier - a.tier)
+    || String(a.name).localeCompare(String(b.name))
+    || String(a.stat || '').localeCompare(String(b.stat || ''));
+}
+
 function renderEquipmentList(scrollArea, equipmentItems, onSelect) {
-  console.log('[Equipment] Rendering equipment list with items:', equipmentItems);
   scrollArea.innerHTML = '';
   
   if (!equipmentItems.length) {
@@ -10201,16 +10318,13 @@ function renderEquipmentList(scrollArea, equipmentItems, onSelect) {
     return;
   }
   
-  const sortedEquipment = [...equipmentItems].sort((a, b) => {
-    if (a.tier !== b.tier) return b.tier - a.tier;
-    if (a.name !== b.name) return a.name.localeCompare(b.name);
-    return a.stat.localeCompare(b.stat);
-  });
+  const sortedEquipment = [...equipmentItems].sort(compareArsenalItems);
   
+  const fragment = document.createDocumentFragment();
   for (const equipment of sortedEquipment) {
-    const btn = createEquipmentButton(equipment, onSelect);
-    scrollArea.appendChild(btn);
+    fragment.appendChild(createEquipmentButton(equipment, onSelect));
   }
+  scrollArea.appendChild(fragment);
 }
 
 function applyEquipmentSearch(scrollArea, searchValue, equipmentItems, onSelect) {
@@ -10227,11 +10341,7 @@ function applyEquipmentSearch(scrollArea, searchValue, equipmentItems, onSelect)
       );
       
       if (matchingEquipment.length > 0) {
-        matchingEquipment.sort((a, b) => {
-          if (a.tier !== b.tier) return b.tier - a.tier;
-          if (a.name !== b.name) return a.name.localeCompare(b.name);
-          return a.stat.localeCompare(b.stat);
-        });
+        matchingEquipment.sort(compareArsenalItems);
       }
       
       requestAnimationFrame(() => {
@@ -10296,7 +10406,7 @@ async function getArsenalContent() {
     div.style.cssText = 'padding: 10px; display: flex; flex-direction: column; gap: 0; height: 100%; width: 100%; box-sizing: border-box;';
     
     const availableEquipment = await getUserOwnedEquipment();
-    console.log('[Equipment] Arsenal loaded with equipment:', availableEquipment);
+    console.log(`[Equipment] Arsenal loaded with ${availableEquipment.length} items`);
 
     const { searchContainer, searchInput, filterBtn } = createEquipmentSearchBar();
     div.appendChild(searchContainer);

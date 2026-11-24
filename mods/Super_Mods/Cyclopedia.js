@@ -12332,7 +12332,8 @@ function cyclopediaSpriteCenterKey(sprite, variant) {
 
 function cyclopediaApplySpriteShift(sprite, dx, dy) {
   const [tx, ty] = (sprite.style.translate || '0px 0px').split(' ').map(parseFloat);
-  sprite.style.translate = `${(tx || 0) + dx}px ${(ty || 0) + dy}px`;
+  // Whole pixels only: a half-pixel shift puts the clip box between pixels and a sliver of the next sheet frame shows beside the sprite.
+  sprite.style.translate = `${Math.round((tx || 0) + dx)}px ${Math.round((ty || 0) + dy)}px`;
 }
 
 /**
@@ -12408,6 +12409,92 @@ function cyclopediaCenterOutfitSprite(slot, variant = '', tries = 0) {
     }
   };
   sheet.src = src;
+}
+
+const CYCLOPEDIA_CODEX_RARITY_COLORS = { 1: '#c0c0c0', 2: '#00f000', 3: '#20a0ff', 4: '#ff68ff', 5: '#f0f000' }; // game's rarity-N colours
+
+/**
+ * The Codex's fixed data for a creature: `rarity` (1-5, NaN when unknown) and `foil` (a creature can be foil by
+ * itself, owned shiny or not). Read from the game's creature metadata, else its Codex rows.
+ */
+function cyclopediaGetCodexInfo(monsterId, metadata) {
+  const valid = (v) => (CYCLOPEDIA_CODEX_RARITY_COLORS[Number(v)] ? Number(v) : NaN);
+  let rarity = valid(metadata?.rarity);
+  let foil = metadata?.foil === true;
+  if (!rarity) {
+    const rows = getCyclopediaCodexCatalog()?.rows?.monster;
+    const matches = Array.isArray(rows) ? rows.filter((r) => Number(r?.card?.gameId ?? r?.card?.id) === Number(monsterId)) : [];
+    for (const r of matches) {
+      const v = valid(r.card?.rarity ?? r.card?.metadata?.rarity ?? r.rarity);
+      if (v) { rarity = v; foil = foil || r.card?.foil === true || r.card?.metadata?.foil === true; break; }
+    }
+    if (!rarity) {
+      console.log('[Cyclopedia] codex rarity not found', JSON.stringify({ monsterId, metadataKeys: metadata ? Object.keys(metadata) : null, rows: matches.length }));
+    }
+  }
+  return { rarity, foil };
+}
+
+/** Sets the Codex glow of a slot already styled by cyclopediaApplyCodexPortrait: tier colour (shiny: the foil yellow), soft white with no tier, plus the foil sheen when shiny. */
+function cyclopediaSetCodexGlow(slot, rarity, shiny = false) {
+  const glowEl = slot?.querySelector('[data-cyclopedia-codex="glow"]');
+  if (!glowEl) return;
+  const color = CYCLOPEDIA_CODEX_RARITY_COLORS[shiny ? 5 : rarity];
+  glowEl.style.background = `radial-gradient(circle at 50% 60%, ${color ? `${color}50` : 'rgba(255, 255, 255, 0.14)'}, transparent 70%)`;
+  const foil = slot.querySelector('[data-cyclopedia-codex="foil"]');
+  if (!shiny) {
+    foil?.remove();
+    slot.querySelectorAll('[data-cyclopedia-codex="spark"]').forEach((el) => el.remove());
+    return;
+  }
+  if (foil) return;
+  // The three magic sparkles the Codex card plays over a foil creature.
+  [['left: 16px; top: 26px;', 250], ['left: 34px; top: 40px;', 500], ['left: 28px; top: 18px;', 750]].forEach(([pos, delay]) => {
+    const spark = document.createElement('div');
+    spark.setAttribute('data-cyclopedia-codex', 'spark');
+    spark.className = 'sprite effect id-32 pointer-events-none absolute animate-in fade-in';
+    spark.style.cssText = `${pos} --zoomFactor: 1; z-index: 5; translate: 0 calc(-16px * var(--zoomFactor)); animation-delay: ${delay}ms; animation-fill-mode: backwards;`;
+    spark.innerHTML = `<div class="viewport"><img alt="32" data-cropped="false" class="spritesheet" style="--cropX: 0; --cropY: 0; --finalOpacity: 0; animation-iteration-count: 1; animation-delay: ${delay}ms;"></div>`;
+    slot.appendChild(spark);
+  });
+  const el = document.createElement('div');
+  el.setAttribute('role', 'none');
+  el.setAttribute('data-cyclopedia-codex', 'foil');
+  el.className = 'pointer-events-none absolute inset-0';
+  el.style.cssText = 'z-index: 4; opacity: .25; mix-blend-mode: color-dodge; background-size: 250% 250%; background-position: 50% 50%;'
+    + 'background-image: linear-gradient(115deg, transparent 40%, rgb(198,161,255) 45%, rgb(127,216,255) 47.5%, rgb(168,255,176) 50%, rgb(255,245,154) 52.5%, rgb(255,158,216) 55%, transparent 60%);';
+  slot.appendChild(el);
+}
+
+/** Codex-card art area for the big portrait slot: tier glow, inset vignette, foil sheen when shiny. */
+function cyclopediaApplyCodexPortrait(slot, isShiny, rarity, hideBorder = false, tierBorder = false) {
+  if (!slot || slot.querySelector('[data-cyclopedia-codex]')) return;
+  const layer = (kind, css) => {
+    const el = document.createElement('div');
+    el.setAttribute('role', 'none');
+    el.setAttribute('data-cyclopedia-codex', kind);
+    el.className = 'pointer-events-none absolute inset-0';
+    el.style.cssText = css;
+    return el;
+  };
+  slot.style.position = 'relative';
+  const sprite = slot.querySelector('.sprite.outfit, .sprite.item');
+  if (sprite) sprite.style.position = 'relative';
+  const glow = layer('glow', '');
+  const vignette = layer('vignette', 'box-shadow: inset 0 0 12px 4px rgba(0,0,0,0.7);');
+  slot.insertBefore(vignette, slot.firstChild);
+  slot.insertBefore(glow, vignette);
+  cyclopediaSetCodexGlow(slot, rarity, isShiny);
+  const border = slot.querySelector('.has-rarity, .rarity-awaken, .rarity-shiny, .rarity-hundo');
+  if (tierBorder && isShiny && border) {
+    border.className = 'absolute inset-0 z-2 opacity-80 rarity-foil';
+    border.removeAttribute('data-rarity');
+  } else if (tierBorder && CYCLOPEDIA_CODEX_RARITY_COLORS[rarity] && border) {
+    border.className = 'has-rarity absolute inset-0 z-2 opacity-80';
+    border.setAttribute('data-rarity', String(rarity));
+  } else if (hideBorder) {
+    border?.style.setProperty('display', 'none');
+  }
 }
 
 function renderCreatureTemplate(name, showShinyPortraits = false, showOldSprites = false, hooks = {}) {
@@ -12516,6 +12603,7 @@ function renderCreatureTemplate(name, showShinyPortraits = false, showOldSprites
   }
   let monsterId = null;
   let monster = null;
+  let codexInfo = { rarity: NaN, foil: false }; // the creature's fixed Codex tier / foil
   let col1PortraitWrap = null; // the large sprite; swapped to the marked owned copy's look
 
   const displayQuery = cyclopediaResolveCreatureQuery(name);
@@ -12529,6 +12617,7 @@ function renderCreatureTemplate(name, showShinyPortraits = false, showOldSprites
     if (entry) {
       monster = entry.monster;
       monsterId = displayQuery.gameId ?? (monster.gameId !== undefined ? monster.gameId : entry.index);
+      codexInfo = cyclopediaGetCodexInfo(monsterId, monster.metadata);
       if (monsterId === undefined) {
         // Monster ID not found
       }
@@ -12586,7 +12675,7 @@ function renderCreatureTemplate(name, showShinyPortraits = false, showOldSprites
           shinyIcon.style.width = '10px';
           shinyIcon.style.height = '10px';
           shinyIcon.style.zIndex = '10';
-          monsterSprite.appendChild(shinyIcon);
+          if (showOldSprites) monsterSprite.appendChild(shinyIcon); // the Codex look shows shiny through the foil instead
         } else if (!isUnobtainable) {
           // Remove shiny attribute when switching back to normal mode (only for obtainable creatures)
           const spriteImg = monsterSprite.querySelector('img.actor.spritesheet');
@@ -12624,12 +12713,19 @@ function renderCreatureTemplate(name, showShinyPortraits = false, showOldSprites
         portraitSlot.style.alignItems = 'center';
         portraitSlot.style.justifyContent = 'center';
         cyclopediaCenterOutfitSprite(portraitSlot, showOldSprites ? 'old' : 'new');
+        // Codex look only for current sprites, never old ones.
+        if (!showOldSprites) {
+          cyclopediaApplyCodexPortrait(portraitSlot, codexInfo.foil || (effectiveShinyPortraits && !isUnobtainable), codexInfo.rarity, true, true);
+        }
       } else if (monster?.metadata?.lookType === 'item') {
         // Item-look creatures (statues, crates, barrels) sit off-centre in their 70px portrait the same way.
         const itemSlot = monsterSprite.matches('.equipment-portrait')
           ? monsterSprite
           : monsterSprite.querySelector('.equipment-portrait');
         if (itemSlot) cyclopediaCenterOutfitSprite(itemSlot, 'item');
+        if (itemSlot && !showOldSprites) {
+          cyclopediaApplyCodexPortrait(itemSlot, codexInfo.foil || (effectiveShinyPortraits && !isUnobtainable), codexInfo.rarity, true, true);
+        }
       }
       col1Picture.appendChild(portraitWrap);
       col1PortraitWrap = portraitWrap;
@@ -12851,8 +12947,9 @@ function renderCreatureTemplate(name, showShinyPortraits = false, showOldSprites
   const setCol1PortraitOwnedLook = (selected) => {
     const sprite = col1PortraitWrap?.firstElementChild;
     const border = sprite?.querySelector('.has-rarity, .rarity-awaken, .rarity-shiny, .rarity-hundo');
-    const img = sprite?.querySelector('img.actor.spritesheet');
-    if (!sprite || !img || monster?.metadata?.lookType === 'item') return;
+    const isItemLook = monster?.metadata?.lookType === 'item';
+    const img = sprite?.querySelector(isItemLook ? 'img.spritesheet' : 'img.actor.spritesheet');
+    if (!sprite || !img) return;
     if (!col1PortraitDefaultLook) {
       col1PortraitDefaultLook = {
         borderClass: border?.className ?? '',
@@ -12861,10 +12958,15 @@ function renderCreatureTemplate(name, showShinyPortraits = false, showOldSprites
     }
     const look = col1PortraitDefaultLook;
     const shiny = selected ? selected.monster.shiny === true : displayQuery.forceShiny === true;
+    // Codex glow and foil follow the shown copy's tier (gene total) and shininess.
+    const codexSlot = sprite.matches('.container-slot, .equipment-portrait') ? sprite : sprite.querySelector('.container-slot, .equipment-portrait');
+    const codexTier = codexInfo.rarity || selected?.status?.rarity; // the Codex shows the creature's fixed tier
+    const codexFoil = codexInfo.foil || shiny;
+    cyclopediaSetCodexGlow(codexSlot, codexTier, codexFoil);
     if (shiny) img.setAttribute('data-shiny', 'true');
     else img.removeAttribute('data-shiny');
     col1PortraitWrap.querySelectorAll('img[alt="shiny"]').forEach((icon) => icon.remove());
-    if (shiny) {
+    if (shiny && showOldSprites) {
       const shinyIcon = document.createElement('img');
       shinyIcon.src = CYCLOPEDIA_ASSETS.shinyStar;
       shinyIcon.alt = 'shiny';
@@ -12873,6 +12975,20 @@ function renderCreatureTemplate(name, showShinyPortraits = false, showOldSprites
       sprite.appendChild(shinyIcon);
     }
     if (!border) return;
+    if (!showOldSprites) {
+      // Codex frame: foil for a shiny copy, the tier colour otherwise, none while no copy is shown.
+      border.style.removeProperty('display');
+      if (codexFoil) {
+        border.className = 'absolute inset-0 z-2 opacity-80 rarity-foil';
+        border.removeAttribute('data-rarity');
+      } else if (CYCLOPEDIA_CODEX_RARITY_COLORS[codexTier]) {
+        border.className = 'has-rarity absolute inset-0 z-2 opacity-80';
+        border.setAttribute('data-rarity', String(codexTier));
+      } else {
+        border.style.setProperty('display', 'none');
+      }
+      return;
+    }
     if (!selected) {
       border.className = look.borderClass;
       if (look.rarity != null) border.setAttribute('data-rarity', look.rarity);
@@ -13492,9 +13608,14 @@ function renderCreatureTemplate(name, showShinyPortraits = false, showOldSprites
   col3Content.style.scrollbarColor = '#484848 #222';
   col3Content.style.marginTop = '0';
   if (ownedMonsters.length > 0) {
+    // With no copy marked the portrait shows the best one owned: highest tier, shiny first.
+    const bestOwnedLook = showOldSprites ? null : ownedMonsters
+      .map((m) => ({ monster: m, status: getOwnedMonsterStatus(m, creatureCanAwaken) }))
+      .sort((a, b) => (b.status.rarity - a.status.rarity) || ((b.monster.shiny === true) - (a.monster.shiny === true)))[0] ?? null;
+    if (bestOwnedLook) setCol1PortraitOwnedLook(bestOwnedLook);
     col3Content.appendChild(renderOwnedCreatureList(ownedMonsters, creatureCanAwaken, (selected) => {
       selectedOwnedBaseStats = selected?.baseStats ?? null;
-      setCol1PortraitOwnedLook(selected);
+      setCol1PortraitOwnedLook(selected ?? bestOwnedLook);
       hooks.onShinyChange?.(selected?.monster.shiny === true);
       if (applyAwakenedMode) applyAwakenedMode(selected?.status.isAwakened === true);
       else rerenderCreatureStats(cyclopediaState.creatureDetailShowAwakenedAbility);
@@ -20160,6 +20281,7 @@ function createEquipmentTabPage(selectedCreature, selectedEquipment, selectedInv
       portrait = portrait.firstChild;
     }
     applyEquipmentPreviewPortraitTier(portrait, previewTier);
+    cyclopediaApplyCodexPortrait(portrait, false, previewTier >= EQUIPMENT_PREVIEW_TIER_MAX ? 5 : previewTier);
 
     portrait.style.display = 'block';
     portrait.style.margin = '0';

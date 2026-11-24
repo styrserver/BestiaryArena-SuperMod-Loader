@@ -50,88 +50,36 @@ function resolveEquipmentStatKey(item) {
   return null;
 }
 
-// Function to determine equipment slot type from equipment data
+// The game sorts every equipment piece into a Codex section through its metadata `group`; the slot follows from it.
+// Weapons are split into several groups (melee kinds, distance, magic) and "other" is the Codex's Trinket section.
+const EQUIPMENT_GROUP_TO_SLOT = {
+  armor: 'armor',
+  helmet: 'helmet',
+  legs: 'legs',
+  boots: 'boots',
+  amulet: 'amulet',
+  ring: 'ring',
+  shield: 'shield',
+  bag: 'bag',
+  sword: 'weapon',
+  axe: 'weapon',
+  club: 'weapon',
+  melee: 'weapon',
+  distance: 'weapon',
+  magic: 'weapon',
+  other: 'ammo'
+};
+const unmappedEquipmentGroups = new Set();
+
+// Slot type of an equipment entry, read from the game's own `group`; 'unknown' when the game gives none we know.
 function getEquipmentSlotType(equipment) {
-  // First, check if metadata has a slot property
-  if (equipment?.metadata?.slot) {
-    return equipment.metadata.slot.toLowerCase();
+  const group = String(equipment?.metadata?.group ?? '').toLowerCase();
+  const slot = EQUIPMENT_GROUP_TO_SLOT[group];
+  if (!slot && !unmappedEquipmentGroups.has(group)) {
+    unmappedEquipmentGroups.add(group);
+    console.warn(`[playereq-database.js] No slot for equipment group "${group}" (${equipment?.metadata?.name})`);
   }
-  
-  // Explicit gameId mappings for specific equipment
-  const gameId = equipment?.gameId;
-  if (gameId === 10327 || gameId === 21445) {
-    return 'bag';
-  }
-  
-  // If not, try to determine from equipment name patterns
-  const name = equipment?.metadata?.name?.toLowerCase() || '';
-  
-  // Specific equipment mappings (check exact names first)
-  const specificMappings = {
-    'bear skin': 'armor',
-    'bloody edge': 'weapon',
-    'cranial basher': 'weapon',
-    'depth calcei': 'boots',
-    'djinn blade': 'weapon',
-    'dreaded cleaver': 'weapon',
-    'epee': 'weapon',
-    'glass of goo': 'ammo',
-    'grey tome': 'shield',
-    'haunted blade': 'weapon',
-    'ice rapier': 'weapon',
-    'orclops santa': 'ammo',
-    'ratana': 'weapon',
-    'spellbook of ancient arcana': 'shield',
-    'vampire silk slippers': 'boots',
-    'white skull': 'ammo'
-  };
-  
-  if (specificMappings[name]) {
-    return specificMappings[name];
-  }
-  
-  // Slot detection patterns (order matters - more specific first)
-  if (name.includes('helmet') || name.includes('hat') || name.includes('cap')) {
-    return 'helmet';
-  }
-  if (name.includes('shield') || name.includes('buckler')) {
-    return 'shield';
-  }
-  if (name.includes('weapon') || name.includes('sword') || name.includes('axe') || 
-      name.includes('mace') || name.includes('wand') || name.includes('staff') ||
-      name.includes('bow') || name.includes('crossbow') || name.includes('dagger') ||
-      name.includes('spear') || name.includes('club') || name.includes('hammer') ||
-      name.includes('chain') || name.includes('bolter') || name.includes('rod') ||
-      name.includes('rapier') || name.includes('edge') || name.includes('basher')) {
-    return 'weapon';
-  }
-  if (name.includes('amulet') || name.includes('necklace') || name.includes('pendant')) {
-    return 'amulet';
-  }
-  if (name.includes('ring')) {
-    return 'ring';
-  }
-  if (name.includes('armor') || name.includes('plate') || name.includes('mail') ||
-      name.includes('robe') || name.includes('vest') || name.includes('skin')) {
-    return 'armor';
-  }
-  if (name.includes('legs') || name.includes('leggings') || name.includes('pants') ||
-      name.includes('trousers')) {
-    return 'legs';
-  }
-  if (name.includes('boots') || name.includes('shoes') || name.includes('footwear')) {
-    return 'boots';
-  }
-  if (name.includes('bag') || name.includes('backpack') || name.includes('pack')) {
-    return 'bag';
-  }
-  if (name.includes('ammo') || name.includes('arrow') || name.includes('bolt') ||
-      name.includes('quiver') || name.includes('goo') || name.includes('skull')) {
-    return 'ammo';
-  }
-  
-  // Default: unknown slot
-  return 'unknown';
+  return slot || 'unknown';
 }
 
 // Function to build equipment lists from dynamic data

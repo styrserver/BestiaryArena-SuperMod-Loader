@@ -8987,6 +8987,11 @@ function getHuntingShopItemName(row) {
     return '';
 }
 
+// "Booster Pack" -> "Booster Packs" when more than one is bought.
+function pluralizeHuntingShopItemName(itemKey, itemName, quantity) {
+    return itemKey === 'pack' && quantity > 1 && itemName ? itemName + 's' : itemName;
+}
+
 // Replaces the tooltip description with one line (React's nodes are hidden, never rewritten).
 function showHuntingShopTooltipText(wrap, text, color, autoClearMs) {
     clearHuntingShopNotice();
@@ -9040,7 +9045,7 @@ function armHuntingShopConfirm(wrap, qty) {
     const amount = Number(wrap.dataset.amount) || 1;
     const message = t('mods.betterTasker.huntShopConfirmBuy')
         .replace('{quantity}', String(qty * amount))
-        .replace('{itemName}', getHuntingShopItemName(wrap.closest('tr')))
+        .replace('{itemName}', pluralizeHuntingShopItemName(wrap.dataset.itemKey, getHuntingShopItemName(wrap.closest('tr')), qty * amount))
         .replace('{cost}', String(qty * price));
     showHuntingShopTooltipText(wrap, message, '#ff4d4d');
     const button = wrap.querySelector('button');
@@ -9122,7 +9127,7 @@ function createHuntingShopWrap(itemKey, price, amount) {
             if (bought > 0) {
                 showHuntingShopTooltipText(wrap, t('mods.betterTasker.huntShopSuccessBuy')
                     .replace('{quantity}', String(bought * unitAmount))
-                    .replace('{itemName}', itemName)
+                    .replace('{itemName}', pluralizeHuntingShopItemName(itemKey, itemName, bought * unitAmount))
                     .replace('{cost}', String(bought * unitPrice)), '#32cd32', 5000);
             }
             scheduleHuntingShopEnhance();

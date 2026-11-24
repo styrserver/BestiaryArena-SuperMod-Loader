@@ -10,8 +10,6 @@
  *
  *   STALE    list entry whose name is not in the game
  *   RENAMED  EVENT_TO_ROOM_MAPPING entry whose room id exists but now has a different name
- *   NOSLOT   equipment in the game that playereq-database.js cannot place in a slot (the game has no
- *            slot field; the slot is guessed from the name, see checkEquipmentSlots)
  *   LOOSE    (--verbose only, never fails) creature not in the creature table but still named in the
  *            game's text: room-script spawns (Orc Warrior, Squidgy Slime) and boss nicknames (Tentugly)
  *
@@ -34,7 +32,6 @@
  * Fix the lists by hand from the report.
  */
 import { readFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { extractCreatureNames, loadChunks } from './check-creature-combat.mjs';
@@ -104,37 +101,6 @@ export function extractEquipmentNames(chunks) {
 }
 
 /**
- * The game has no equipment slot field, so playereq-database.js guesses the slot from the name. Runs
- * that script against the game's equipment names and flags every item it cannot place (slot
- * `unknown`). Fix by adding the item to specificMappings there ('unknown' acknowledges an item
- * whose slot is not confirmed).
- */
-export function checkEquipmentSlots(names) {
-  globalThis.window = globalThis;
-  globalThis.state = {
-    player: { getSnapshot: () => ({}) },
-    board: { getSnapshot: () => ({}) },
-    utils: { getEquipment: (i) => (names[i - 1] ? { metadata: { name: names[i - 1] } } : undefined) }
-  };
-  const { log, warn } = console;
-  console.log = console.warn = () => {};
-  let db;
-  try {
-    db = createRequire(import.meta.url)(join(DB_DIR, 'playereq-database.js'));
-  } finally {
-    Object.assign(console, { log, warn });
-  }
-  const bySlot = db?.EQUIPMENT_BY_SLOT;
-  if (!bySlot) throw new Error('playereq-database.js did not build EQUIPMENT_BY_SLOT');
-  const acknowledged = new Set(
-    [...readDb('playereq-database.js').matchAll(/'([^']+)':\s*'unknown'/g)].map((m) => m[1])
-  );
-  return (bySlot.unknown || [])
-    .filter((n) => !acknowledged.has(n.toLowerCase()))
-    .map((n) => `NOSLOT   ${n}: playereq-database.js cannot place this item in an equipment slot (add it to specificMappings)`);
-}
-
-/**
  * Reads the hand-written lists out of the database source files and hands them, with the game's
  * names, to mapsDatabase.diffHardcodedNames (the same comparison the in-game admin check runs).
  */
@@ -187,7 +153,7 @@ async function main() {
     hasString: (name) => allText.includes(JSON.stringify(name)) || allText.includes(`'${name}'`)
   };
   if (game.creatures.size < 100) throw new Error(`only ${game.creatures.size} creature names found`);
-  const lines = [...checkNames(game), ...checkEquipmentSlots(extractEquipmentNames(chunks))];
+  const lines = [...checkNames(game)];
   const failing = lines.filter((l) => !l.startsWith('LOOSE'));
   const shown = process.argv.includes('--verbose') ? lines : failing;
   await recordRun('databaseNames', failing.length ? 'drift' : 'ok');

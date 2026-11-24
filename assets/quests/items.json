@@ -195,7 +195,7 @@
     },
     "bosstiary": {
       "productName": "Bosstiary",
-      "icon": "Bosstiary_Icon.gif",
+      "iconUrl": "https://bestiaryarena.com/assets/icons/codex.png",
       "description": "You see a bosstiary.\nIt holds soul cores from bosses you have defeated.",
       "rarity": 0,
       "maxCount": 1,

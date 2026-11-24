@@ -4,6 +4,31 @@
   },
   "notes": [
     {
+      "version": "5.4.10",
+      "changes": [
+        {
+          "mod": "Better Tasker",
+          "type": "fixed",
+          "text": "Hunting Mark shop confirm and success messages say \"Booster Packs\" when buying several."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "changed",
+          "text": "Creature and equipment portraits use the Codex card look, glowing in their tier colour (not with old sprites)."
+        },
+        {
+          "mod": "Guilds",
+          "type": "changed",
+          "text": "The equipment picker is faster and lists each piece you own once, plus your Codex backpacks (tier from rarity), sorted by slot, tier, name. Weapons show their kind (Sword, Club, Axe...)."
+        },
+        {
+          "mod": "Quests",
+          "type": "changed",
+          "text": "Bosstiary uses the Codex icon."
+        }
+      ]
+    },
+    {
       "version": "5.4.9",
       "changes": [
         {
