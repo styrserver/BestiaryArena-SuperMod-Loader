@@ -4,6 +4,16 @@
   },
   "notes": [
     {
+      "version": "5.4.11",
+      "changes": [
+        {
+          "mod": "Cyclopedia",
+          "type": "changed",
+          "text": "Rankings show All Cards (Codex) instead of Bag Outfits."
+        }
+      ]
+    },
+    {
       "version": "5.4.10",
       "changes": [
         {

@@ -25,10 +25,10 @@
  *                qualified=false = everyone with synced stats (~600+).
  *     limit      1–5000; omitted = all matching rows.      offset  default 0; `rank` = offset + index.
  *     sort       level (default) | name | rankPoints | timeSum | floors | successfulRuns | dailySeashell |
- *                huntingTasks | raids | perfectCreatures | bisEquipment | bagOutfits
+ *                huntingTasks | raids | perfectCreatures | bisEquipment | allCards
  *     order      desc (default) | asc.      search  case-insensitive username substring (`name` alias).
  *     200 → { total, limit|null, offset, rankings: [{ rank, name, level, successfulRuns, rankPoints, timeSum, floors,
- *             dailySeashell, huntingTasks, raids, perfectCreatures, bisEquipment, bagOutfits }], timestamp }
+ *             dailySeashell, huntingTasks, raids, perfectCreatures, bisEquipment, allCards }], timestamp }
  *     Default sort level desc, then name asc. Cache-Control: public, s-maxage=300, stale-while-revalidate=600.
  *     Errors: 400 {error:"Invalid season|limit|offset|sort|order"}, 405 Method not allowed, 500 {error}.
  *
@@ -22115,7 +22115,7 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
         { type: 'icon', src: CYCLOPEDIA_ASSETS.raid, alt: 'Raids', key: 'raids', sortable: true },
         { type: 'icon', src: '/assets/icons/enemy.png', alt: 'Perfect creatures', key: 'perfectCreatures', sortable: true },
         { type: 'icon', src: '/assets/icons/equips.png', alt: 'BIS equipments', key: 'bisEquipment', sortable: true },
-        { type: 'icon', src: '/assets/icons/mini-outfitbag.png', alt: 'Bag outfits', key: 'bagOutfits', sortable: true }
+        { type: 'icon', src: '/assets/icons/codex.png', alt: 'All cards', key: 'allCards', sortable: true }
       ];
 
       const scrollableContainer = document.createElement('div');
@@ -22358,7 +22358,7 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
             ranking.raids.toLocaleString(),
             ranking.perfectCreatures.toLocaleString(),
             ranking.bisEquipment.toLocaleString(),
-            ranking.bagOutfits.toLocaleString()
+            (ranking.allCards ?? 0).toLocaleString()
           ];
 
           return cellData.map((text, cellIndex) => {
