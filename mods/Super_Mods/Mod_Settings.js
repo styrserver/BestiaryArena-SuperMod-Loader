@@ -18811,7 +18811,8 @@ function applyOldOutfits(attempt = 0) {
     ':root:root',
     // The Bestiary keeps the current art too: its details portrait is positioned for the current sprites (an inline `translate`), so old
     // sheets sit off-centre there. The dialog is recognised by its enhanced mark, or by its own 246px details layout (Better Bestiary off).
-    ':is([data-cyclopedia-dialog="1"], [data-quests-scroll-bound], [data-better-bestiary-enhanced], [role="dialog"]:has([class*="246px_1fr"]))'
+    ':is([data-cyclopedia-dialog="1"], [data-quests-scroll-bound], [data-better-bestiary-enhanced], [role="dialog"]:has([class*="246px_1fr"]), [role="dialog"]:has(img[alt="Creature"][src$="/icons/enemy.png"]))'
+    // Last selector: Victory/reward dialog, recognised by its "Creature drop" header icon.
   );
   if (!cssText) {
     // Database or game stylesheet may not be ready yet on a cold load: retry for ~5s.

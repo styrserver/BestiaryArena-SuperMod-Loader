@@ -3903,6 +3903,9 @@ async function runPrivateRunsPass() {
   applyPrivateRunsTitlesToDom(); // captions for the buttons that are already on screen
   // Give the game its re-render before callers may look for the buttons.
   await new Promise((resolve) => setTimeout(resolve, PRIVATE_RUNS_SETTLE_MS));
+  // The game flips "Save (x)" to "Setup (x)" only now; re-lock so Save's dimmed, click-blocked look
+  // does not stay on a button that has become a loadable Setup.
+  applyPrivateRunsTitlesToDom();
   if (seq === privateRunsSeq) privateRunsSettledKey = key;
 }
 

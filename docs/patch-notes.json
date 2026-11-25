@@ -4,6 +4,16 @@
   },
   "notes": [
     {
+      "version": "5.4.12",
+      "changes": [
+        {
+          "mod": "Mod Settings",
+          "type": "fixed",
+          "text": "Old Sprites no longer changes creatures on the victory reward screen."
+        }
+      ]
+    },
+    {
       "version": "5.4.11",
       "changes": [
         {
