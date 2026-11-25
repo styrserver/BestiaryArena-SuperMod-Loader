@@ -8254,7 +8254,7 @@ async function removeCurrentTaskIfNotAllowed({ forceRecheck = false } = {}) {
         let removeButton = null;
         const allButtons = document.querySelectorAll('button');
         for (const btn of allButtons) {
-            const trashIcon = btn.querySelector('svg.lucide-trash2');
+            const trashIcon = btn.querySelector('svg:is(.lucide-trash2, .lucide-trash-2)');
             if (trashIcon && isElementVisible(btn)) {
                 // Use centralized function to check for remove button text
                 const possibleTexts = getBothLanguages('mods.betterTasker.remove');
@@ -8322,7 +8322,7 @@ async function removeTaskDirectlyFromQuestLog() {
         while (!removeButton && attempts < maxAttempts) {
             const allButtons = document.querySelectorAll('button');
             for (const btn of allButtons) {
-                const trashIcon = btn.querySelector('svg.lucide-trash2');
+                const trashIcon = btn.querySelector('svg:is(.lucide-trash2, .lucide-trash-2)');
                 if (trashIcon && isElementVisible(btn)) {
                     const text = btn.textContent.trim().toLowerCase();
                     // More specific matching to avoid false positives

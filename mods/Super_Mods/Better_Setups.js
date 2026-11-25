@@ -69,6 +69,9 @@ function isSetupShortcutsAndHoverEnabled() {
 // Global observer for setup interface changes
 let setupInterfaceObserver = null;
 
+// The game's trash icon. Its lucide class was renamed (trash2 -> trash-2); match both.
+const TRASH_ICON = 'svg:is(.lucide-trash2, .lucide-trash-2)';
+
 // Track trash buttons in confirmation mode (pending deletion)
 const trashButtonsInConfirmation = new WeakSet();
 const trashButtonTimeouts = new WeakMap();
@@ -355,7 +358,7 @@ function activateSetups() {
 function cancelAllConfirmations() {
   const setupContainer = document.querySelector('.mb-2.flex.items-center.gap-2');
   if (setupContainer) {
-    const trashButtons = setupContainer.querySelectorAll('button svg.lucide-trash2');
+    const trashButtons = setupContainer.querySelectorAll(`button ${TRASH_ICON}`);
     trashButtons.forEach(trashIcon => {
       const trashButton = trashIcon.closest('button');
       if (trashButton && trashButtonsInConfirmation.has(trashButton)) {
@@ -422,7 +425,7 @@ function addTrashButtonConfirmation(trashButton) {
       // confirm click restarts confirmation instead of deleting.
       const btn = e.target.closest('button');
       const clickedTrashButton =
-        btn && btn.querySelector('svg.lucide-trash2') ? btn : null;
+        btn && btn.querySelector(TRASH_ICON) ? btn : null;
       if (!clickedTrashButton) {
         cancelAllConfirmations();
       }
@@ -524,7 +527,7 @@ function injectEditButton(setupButton) {
     
     // Find trash button and insert edit button after it if it exists
     const parent = setupButton.parentElement;
-    const trashButton = parent.querySelector('button svg.lucide-trash2')?.closest('button');
+    const trashButton = parent.querySelector(`button ${TRASH_ICON}`)?.closest('button');
     
     if (trashButton) {
       // Add confirmation handler to trash button
@@ -654,7 +657,7 @@ function processSetupInterface() {
   console.log('[Better Setups] Processing setup interface...');
   
   // First, add confirmation handlers to all existing trash buttons
-  const allTrashButtons = setupContainer.querySelectorAll('button svg.lucide-trash2');
+  const allTrashButtons = setupContainer.querySelectorAll(`button ${TRASH_ICON}`);
   allTrashButtons.forEach(trashIcon => {
     const trashButton = trashIcon.closest('button');
     if (trashButton) {
@@ -747,7 +750,7 @@ function startSetupInterfaceObserver() {
                     shouldProcess = true;
                   }
                   // Also check if it's a trash button
-                  if (node.querySelector && node.querySelector('svg.lucide-trash2')) {
+                  if (node.querySelector && node.querySelector(TRASH_ICON)) {
                     shouldProcess = true;
                   }
                 }
@@ -763,7 +766,7 @@ function startSetupInterfaceObserver() {
                   });
                   
                   // Also check for trash buttons
-                  const trashButtons = node.querySelectorAll('button svg.lucide-trash2');
+                  const trashButtons = node.querySelectorAll(`button ${TRASH_ICON}`);
                   if (trashButtons.length > 0) {
                     shouldProcess = true;
                   }
@@ -3961,7 +3964,7 @@ function lockPrivateRunsControls(button) {
   main.style.pointerEvents = isSave ? 'none' : '';
   main.style.opacity = isSave ? '0.6' : '';
   for (const sibling of button.parentElement.children) {
-    if (sibling.querySelector?.('svg.lucide-trash2')) sibling.style.display = 'none';
+    if (sibling.querySelector?.(TRASH_ICON)) sibling.style.display = 'none';
   }
 }
 

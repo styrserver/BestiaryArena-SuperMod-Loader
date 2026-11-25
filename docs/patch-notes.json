@@ -4,6 +4,36 @@
   },
   "notes": [
     {
+      "version": "5.5.0",
+      "changes": [
+        {
+          "mod": "Better Codex",
+          "type": "added",
+          "text": "New mod. Type a player name in the Codex search to see their profile and which cards you can trade each other. Cards you can trade for list who has them, and you can get notified when a missing one becomes available (marked with an exclamation mark). Completed categories show in green. The trade window remembers Only missing cards. Notifies you of waiting trade offers, with optional auto-accept and auto-decline (off by default, never gives away a foil)."
+        },
+        {
+          "mod": "Better Setups",
+          "type": "fixed",
+          "text": "Deleting a setup asks for a second click again."
+        },
+        {
+          "mod": "Better Tasker",
+          "type": "fixed",
+          "text": "Removing a task works again."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "added",
+          "text": "The debugger's auto refresh list shows lag and the busiest mods before each refresh."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "fixed",
+          "text": "The debugger report shows all page growth, explains its * mark and no longer blames Guilds for others' requests."
+        }
+      ]
+    },
+    {
       "version": "5.4.13",
       "changes": [
         {

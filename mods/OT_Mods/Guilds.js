@@ -1000,7 +1000,7 @@ function installApiCallCounter() {
   if (apiCounterWrapper) return;
   const original = window.fetch;
   apiCounterOriginalFetch = original;
-  apiCounterWrapper = function guildsCountingFetch(input) {
+  apiCounterWrapper = function guildsFetchWrapper(input) {
     // After cleanup (when another mod wrapped fetch on top of us) this is a pure pass-through.
     if (!apiCounterWrapper) return original.apply(this, arguments);
     try {

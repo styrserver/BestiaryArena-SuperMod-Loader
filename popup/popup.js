@@ -71,6 +71,7 @@ const superModNames = [
   'Better Bestiary.js',
   'Better Boosted Maps.js',
   'Better Cauldron.js',
+  'Better Codex.js',
   'Better Daycare.js',
   'Better Exaltation Chest.js',
   'Better Forge.js',

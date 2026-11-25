@@ -351,6 +351,18 @@ Enhances the native Monstrous Cauldron interface with powerful search and filter
 - Automatic detection and enhancement of the cauldron modal
 - Efficient filtering system for managing large monster collections
 
+#### Better Codex
+Adds player trading to the native Codex dialog, retitled "Better Codex" with your completion percentage:
+- Player search: when a search matches no cards but is a player's exact name, that player is shown with their outfit and mount, account details and Codex counts (the name links to their profile), the cards you can get from them (click one to ask for it) and give them, with their other missing cards folded away
+- Waiting offers: a toast when someone has sent you a trade offer (one offer toast at a time)
+- Auto-accept (in the Trades window, off by default): accepts incoming offers that pass your rules, after you confirm turning it on; it never gives away a foil card (receiving one is fine). It can also decline offers that fail those rules (offers with any foil are left for you). The Codex's Trades button turns rainbow while auto-accept is on, and trades it made are tagged "(Auto)" in History
+- Notify me: switch it on for a card you are missing to mark it with an exclamation mark (grey while watching, gold once found) and get a toast when a player has a spare (checked every 5 minutes while the game is open)
+- "Only missing cards" in the trade window is remembered
+- Trade player: opens the game's own trade window over the Codex
+- Card holders: below "Search for this card", the players who have it are listed with a trade button
+- Completed categories and groups are counted in green
+- Disabling the mod restores the original dialog
+
 #### Better Daycare
 Adds a Queue tab to the native Daycare dialog for automated level-ups, ejections, and queue-based slot filling:
 - **Autohandle Daycare**: toggle directly from the dialog's info tooltip; automatically levels up ready creatures, ejects maxed ones, and refills empty slots via the game's own API (no clicking through menus)

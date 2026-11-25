@@ -269,15 +269,29 @@ function readAutoRefreshLog() {
   }
 }
 
+// Busiest mods by timer time since page load (not the debugger's baseline), so it works with the overlay off.
+function topModTimersSinceLoad() {
+  const byMod = window.BestiaryModTimings?.byMod || {};
+  const upMs = Math.max(1, performance.now());
+  return Object.entries(byMod)
+    .filter(([, rec]) => rec.calls > 0)
+    .sort(([, a], [, b]) => b.ms - a.ms)
+    .slice(0, 3)
+    .map(([name, rec]) => ({ name, pct: Number((rec.ms / upMs * 100).toFixed(2)), maxMs: Math.round(rec.max) }));
+}
+
 function recordAutoRefresh(reason) {
   try {
+    const lag = perfLagStats(); // null while the debugger is off: only it samples lag
     const entry = {
       ts: Date.now(),
       reason: String(reason),
       fps: typeof perfOverlay?.fps === 'number' ? Math.round(perfOverlay.fps) : null,
       dom: document.getElementsByTagName('*').length,
       heapMB: performance?.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576) : null,
-      uptimeMin: Math.round(performance.now() / 60000)
+      uptimeMin: Math.round(performance.now() / 60000),
+      lag: lag && { p95: Math.round(lag.p95), worst: Math.round(lag.worst), bad: lag.bad, n: lag.n },
+      timers: topModTimersSinceLoad()
     };
     const list = readAutoRefreshLog();
     list.push(entry);
@@ -288,9 +302,17 @@ function recordAutoRefresh(reason) {
 function formatAutoRefreshLog() {
   const list = readAutoRefreshLog();
   if (!list.length) return '';
-  const rows = list.map((e) =>
-    `  ${new Date(e.ts).toISOString()}  ${e.reason}  | fps ${e.fps ?? '?'}, DOM ${e.dom}` +
-    `${e.heapMB != null ? `, heap ${e.heapMB}MB` : ''}, page up ${e.uptimeMin}min`);
+  // Entries saved by older versions have no lag or timers.
+  const rows = list.map((e) => {
+    const detail = [];
+    if (e.lag) detail.push(`lag p95 ${e.lag.p95}ms, worst ${e.lag.worst}ms, ${e.lag.bad}/${e.lag.n} over ${PERF_LAG_BAD_MS}ms`);
+    if (e.timers?.length) {
+      detail.push(`timers since load: ${e.timers.map((m) => `${m.name} ${m.pct}% (max ${m.maxMs}ms)`).join(', ')}`);
+    }
+    return `  ${new Date(e.ts).toISOString()}  ${e.reason}  | fps ${e.fps ?? '?'}, DOM ${e.dom}` +
+      `${e.heapMB != null ? `, heap ${e.heapMB}MB` : ''}, page up ${e.uptimeMin}min` +
+      (detail.length ? `\n      ${detail.join(' | ')}` : '');
+  });
   return `== Auto refreshes (last ${list.length}, newest last) ==\n${rows.join('\n')}`;
 }
 
@@ -836,6 +858,7 @@ const TOAST_SOURCES = [
   ['awakenTracker', 'modName', 'Super Mods/Awaken Tracker.js'],
   ['battleHelper', 'modName', 'Super Mods/Battle Helper.js'],
   ['betterBoostedMaps', 'modName', 'Super Mods/Better Boosted Maps.js'],
+  ['betterCodex', 'modName', 'Super Mods/Better Codex.js'],
   ['betterSetups', 'modName', 'Super Mods/Better Setups.js'],
   ['betterTasker', 'modName', 'Super Mods/Better Tasker.js'],
   ['betterYasir', 'modName', 'Super Mods/Better Yasir.js'],
@@ -4013,9 +4036,9 @@ function perfSampleMemory(now) {
   }
 }
 
-// Node count per direct child of <body>, keyed by id, else first class, else tag. Mods append their panels,
-// toasts and tooltips straight to <body>, so a growing key points at the mod that owns it. The game's own
-// React root shows as one big key; nodes mods inject inside it are not separable here.
+// Node count per direct child of <body>, <head> and <html>, keyed by id, else first class, else tag. Mods append
+// their panels, toasts and tooltips straight to <body> and their styles to <head>, so a growing key points at the
+// owner. The game's React root is split by element path.
 function perfDomCensus() {
   const census = new Map();
   const add = (key, el) => census.set(key, (census.get(key) || 0) + el.getElementsByTagName('*').length + 1);
@@ -4039,6 +4062,11 @@ function perfDomCensus() {
   for (const el of document.body.children) {
     if (el.id === '__next') walk(el, keyOf(el), 4);
     else add(keyOf(el), el);
+  }
+  // Everything outside <body> counts toward the total too.
+  for (const el of document.head.children) add(`head > ${keyOf(el)}`, el);
+  for (const el of document.documentElement.children) {
+    if (el !== document.head && el !== document.body) add(`html > ${keyOf(el)}`, el);
   }
   return census;
 }
@@ -4168,11 +4196,12 @@ function perfFormatCpuReport() {
     ...(perfDescribeModTimers().length
       ? perfDescribeModTimers()
       : ['(nothing recorded yet; mods that call window.setTimeout explicitly or run via subscribe/observer/event handlers are not counted)']),
+    ...(perfDescribeModTimers().some((line) => line.endsWith('*]')) ? ['* = includes this debugger itself'] : []),
     '',
     `== Memory (last ${PERF_HEAP_WINDOW_MS / 1000}s) ==`,
     `${heapLine}${perfOverlay.dom} DOM nodes${domGrowth}` +
       (perfOverlay.domPeak > perfOverlay.dom ? `, peak ${perfOverlay.domPeak} at ${new Date(perfOverlay.domPeakAt).toISOString()}` : ''),
-    ...(domCensus.length ? ['DOM nodes by <body> child (now, change since the overlay started):', ...domCensus] : []),
+    ...(domCensus.length ? ['DOM nodes by owner (now, change since the overlay started):', ...domCensus] : []),
     '',
     `== Script time (last ${PERF_CPU_WINDOW_LABEL}; slow frames only, source: ${perfOverlay.loafType || 'unsupported in this browser'}) ==`,
     `${perfOverlay.loafType ? `${agg.frames} slow frames` : 'slow frames n/a'} (${coverage}), ${Math.round(agg.frameMs)}ms total, ${Math.round(agg.blockingMs)}ms blocking input, ${Math.round(agg.scriptMs)}ms in scripts (rest = style/layout/paint/GC)`,
