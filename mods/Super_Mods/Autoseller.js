@@ -3016,9 +3016,9 @@
         box.style.padding = '0';
         box.style.minHeight = '0';
         box.style.height = '100%';
-        box.style.background = "url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat";
+        box.style.background = "url('" + window.BAAssets.url('background-dark') + "') repeat";
         box.style.border = '4px solid transparent';
-        box.style.borderImage = `url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch`;
+        box.style.borderImage = `url("${window.BAAssets.url('4-frame')}") 6 fill stretch`;
         box.style.borderRadius = '6px';
         box.style.overflow = 'hidden';
         
@@ -3985,9 +3985,9 @@
         box.style.padding = '0';
         box.style.minHeight = '0';
         box.style.height = '100%';
-        box.style.background = "url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat";
+        box.style.background = "url('" + window.BAAssets.url('background-dark') + "') repeat";
         box.style.border = '4px solid transparent';
-        box.style.borderImage = `url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch`;
+        box.style.borderImage = `url("${window.BAAssets.url('4-frame')}") 6 fill stretch`;
         box.style.borderRadius = '6px';
         box.style.overflow = 'hidden';
         
@@ -4669,9 +4669,9 @@
         menu.style.top = `${y}px`;
         menu.style.zIndex = '9999';
         menu.style.minWidth = '200px';
-        menu.style.background = "url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat";
+        menu.style.background = "url('" + window.BAAssets.url('background-dark') + "') repeat";
         menu.style.border = '4px solid transparent';
-        menu.style.borderImage = `url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch`;
+        menu.style.borderImage = `url("${window.BAAssets.url('4-frame')}") 6 fill stretch`;
         menu.style.borderRadius = '6px';
         menu.style.padding = '12px';
         menu.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.5)';
@@ -5179,9 +5179,9 @@
         menu.style.top = `${y}px`;
         menu.style.zIndex = '9999';
         menu.style.minWidth = '200px';
-        menu.style.background = "url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat";
+        menu.style.background = "url('" + window.BAAssets.url('background-dark') + "') repeat";
         menu.style.border = '4px solid transparent';
-        menu.style.borderImage = `url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch`;
+        menu.style.borderImage = `url("${window.BAAssets.url('4-frame')}") 6 fill stretch`;
         menu.style.borderRadius = '6px';
         menu.style.padding = '12px';
         menu.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.5)';
@@ -8383,8 +8383,8 @@
                 flexDirection: 'column',
                 flex: '1 1 auto',
                 border: '6px solid transparent',
-                borderImage: 'url("https://bestiaryarena.com/_next/static/media/3-frame.87c349c1.png") 6 fill',
-                backgroundImage: 'url("https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png")',
+                borderImage: 'url("' + window.BAAssets.url('3-frame') + '") 6 fill',
+                backgroundImage: 'url("' + window.BAAssets.url('background-dark') + '")',
                 padding: '8px'
             });
             
@@ -8415,7 +8415,7 @@
                 padding: '0px',
                 margin: '0px 10px 0px 0px',
                 borderRight: '6px solid transparent',
-                borderImage: 'url("https://bestiaryarena.com/_next/static/media/3-frame.87c349c1.png") 6 fill',
+                borderImage: 'url("' + window.BAAssets.url('3-frame') + '") 6 fill',
                 overflowY: 'auto',
                 minHeight: '0px'
             });
@@ -8439,11 +8439,11 @@
             function applyMenuItemStyle(element, selected, enabled) {
                 if (selected) {
                     element.style.border = '6px solid transparent';
-                    element.style.borderImage = 'url("https://bestiaryarena.com/_next/static/media/1-frame-pressed.e3fabbc5.png") 6 fill';
+                    element.style.borderImage = 'url("' + window.BAAssets.url('1-frame-pressed') + '") 6 fill';
                     element.style.backgroundColor = 'transparent';
                 } else {
                     element.style.border = '6px solid transparent';
-                    element.style.borderImage = 'url("https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png") 6 fill';
+                    element.style.borderImage = 'url("' + window.BAAssets.url('1-frame') + '") 6 fill';
                     element.style.backgroundColor = 'transparent';
                 }
                 
@@ -8774,9 +8774,9 @@
                             fontWeight: 'bold',
                             border: '6px solid transparent',
                             borderColor: '#ffe066',
-                            borderImage: 'url(https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png) 6 fill stretch',
+                            borderImage: 'url(' + window.BAAssets.url('4-frame') + ') 6 fill stretch',
                             color: '#e6d7b0',
-                            background: 'url(https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png) repeat',
+                            background: 'url(' + window.BAAssets.url('background-regular') + ') repeat',
                             borderRadius: '0',
                             fontFamily: "'Trebuchet MS', 'Arial Black', Arial, sans-serif"
                         }

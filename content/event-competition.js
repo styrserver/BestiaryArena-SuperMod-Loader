@@ -6589,9 +6589,9 @@ function decorateTblFloorSection(section, userScores) {
       height: '100%',
       boxSizing: 'border-box',
       border: '4px solid transparent',
-      borderImage: 'url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 4 stretch',
+      borderImage: 'url("' + window.BAAssets.url('4-frame') + '") 4 stretch',
       borderRadius: '4px',
-      background: 'url("https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png")',
+      background: 'url("' + window.BAAssets.url('background-regular') + '")',
       backgroundSize: 'auto',
       backgroundRepeat: 'repeat',
       padding: '0 6px'

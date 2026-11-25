@@ -4,6 +4,31 @@
   },
   "notes": [
     {
+      "version": "5.4.13",
+      "changes": [
+        {
+          "mod": "Better Bestiary",
+          "type": "fixed",
+          "text": "Selection presets select all matching creatures again, not just one."
+        },
+        {
+          "mod": "Better Exaltation Chest",
+          "type": "fixed",
+          "text": "No more false \"failed to enhance\" warning in the Error Log when the chest modal isn't open."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "added",
+          "text": "Shards now show in the Currency inventory."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "fixed",
+          "text": "Currency and item tiers now use the game's own names and colours."
+        }
+      ]
+    },
+    {
       "version": "5.4.12",
       "changes": [
         {

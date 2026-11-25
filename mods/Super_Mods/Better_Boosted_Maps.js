@@ -802,7 +802,7 @@ const BBM_CTX_PANEL_BG = 'rgba(0, 0, 0, 0.2)';
 const BBM_CTX_INSET_BG = 'rgba(0, 0, 0, 0.3)';
 /** Same repeating texture as the main Better Boosted Maps settings panel (not flat black). */
 const BBM_CTX_PANEL_TEXTURE =
-    "url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat";
+    "url('" + window.BAAssets.url('background-dark') + "') repeat";
 /** Fixed shell height so the panel does not grow/shrink with content; inner areas scroll. */
 const BBM_CTX_MENU_HEIGHT = 'min(400px, 85vh)';
 /** Fixed shell width so adding rules / equipment does not widen the menu (viewport-capped). */
@@ -4026,7 +4026,7 @@ function createSettingsContent() {
         color: #fff;
         font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif;
         border: 4px solid transparent;
-        border-image: url('https://bestiaryarena.com/_next/static/media/3-frame.87c349c1.png') 6 fill stretch;
+        border-image: url('${window.BAAssets.url('3-frame')}') 6 fill stretch;
         border-radius: 6px;
     `;
     

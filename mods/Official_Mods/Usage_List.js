@@ -279,9 +279,9 @@ function showUsageListTooltip(anchorEl, html) {
     position: fixed;
     z-index: 10000001;
     max-width: 240px;
-    background: url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat;
+    background: url('${window.BAAssets.url('background-dark')}') repeat;
     border: 4px solid transparent;
-    border-image: url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch;
+    border-image: url("${window.BAAssets.url('4-frame')}") 6 fill stretch;
     border-radius: 6px;
     padding: 8px 10px;
     color: #eee;

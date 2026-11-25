@@ -190,6 +190,7 @@ Key properties include:
   "gold": 450,                   // Gold currency
   "coin": 100,                   // Premium currency
   "dust": 59,                    // Dust currency
+  "shards": 120,                 // Shards currency (from sharding spare Codex cards; exchanged for packs)
   "staminaWillBeFullAt": 1745887162173, // Timestamp when stamina will be full
   "battleWillBeReadyAt": 1745873835589, // Timestamp when battle will be ready
   
@@ -1749,8 +1750,13 @@ Regions and ordering:
 
 Source: `database/inventory-database.js`.
 
+Currencies: the player context holds `gold`, `coin` (Beast Coins), `dust` and `shards`; Hunting Marks are
+`questLog.task.points`. The Cyclopedia lists the keys in `itemKeyGroups.currency` and reads their balances from
+`CURRENCY_SOURCES` in `Cyclopedia.js` (state path per key); name, icon and tier come from `tooltips`. A new
+currency needs a `tooltips` entry, a `variants` label, the `itemKeyGroups.currency` key and its state path.
+
 Data tables: `tooltips`, `categories`, `variants`, `staticItems`, `upgradeableItems`, `rarityText`,
-`rarityGameText`, `rarityColors`, `itemKeyGroups`, `itemKeyAliases`, `gameDisplayNames`,
+`rarityColors` (the game's own names and colours), `itemKeyGroups`, `itemKeyAliases`, `gameDisplayNames`,
 `nameAliases`, `tierLabels`, `miniIcons`, `customStyles`, `gazerVariants`, `runeKeysOrder`,
 `runeNonSacrificableKeys`.
 

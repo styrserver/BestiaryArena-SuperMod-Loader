@@ -364,6 +364,13 @@ const inventoryTooltips = {
     rarity: '1',
     obtain: 'Loot, Quests, Events, Daily Activities'
   },
+  shards: {
+    displayName: "Shards",
+    text: 'Exchange your shards for packs.',
+    icon: '/assets/icons/shards.png',
+    rarity: '3',
+    obtain: 'Shard duplicate Codex cards'
+  },
   huntingMarks: {
     displayName: "Hunting Marks",
     text: `You earn a Hunting Mark for every completed hunting task.\n\n"These can also be spent at the Jukebox, but Grizzly Adams doesn't like sharing the aux cord"`,
@@ -485,7 +492,7 @@ const inventoryTooltips = {
 // Inventory item categories for organizing items in the UI
 const INVENTORY_CATEGORIES = {
   'Consumables': ['Booster Packs', 'Change Nickname', 'Dice Manipulators', 'Exaltation Chests', 'Nickname Creature', 'Stamina Potions', 'Stones of Insight', 'Summon Scrolls', 'Surprise Cubes'],
-  'Currency': ['Beast Coins', 'Dust', 'Gold', 'Hunting Marks'],
+  'Currency': ['Beast Coins', 'Dust', 'Gold', 'Hunting Marks', 'Shards'],
   'Gazers': [],
   'Runes': ['Avarice Rune', 'Augment Rune (HP)', 'Augment Rune (AD)', 'Augment Rune (AP)', 'Augment Rune (AR)', 'Augment Rune (MR)', 'Blank Rune', 'Recycle Rune', 'Kaleidoscopic Rune', 'Transfusion Rune', 'Conversion Rune (HP)', 'Conversion Rune (AD)', 'Conversion Rune (AP)', 'Downgrade Rune'],
   'Upgrades': ['Baby Dragon Plant', 'Creature Awakening', 'Daily Boosted Map', 'Daycare', 'Dungeon Ascension', 'Dragon Plant', 'Dr. Mephistopheles', 'Hy\'genie', 'Monstrous Cauldron', 'Monster Raids', 'Monster Squeezer', 'Mountain Fortress', 'Premium', 'The Sweaty Cyclop\'s Forge', 'Yasir\'s Trading Contract']
@@ -500,7 +507,7 @@ const INVENTORY_VARIANTS = {
   'Stones of Insight': ['insightStone1', 'insightStone2', 'insightStone3', 'insightStone4', 'insightStone5'],
   'Summon Scrolls': ['summonScroll1', 'summonScroll2', 'summonScroll3', 'summonScroll4', 'summonScroll5', 'summonScroll6', 'summonScroll7'],
   'Surprise Cubes': ['surpriseCube1', 'surpriseCube2', 'surpriseCube3', 'surpriseCube4', 'surpriseCube5'],
-  'Beast Coins': ['beastCoins'], 'Dust': ['dust'], 'Gold': ['gold'], 'Hunting Marks': ['huntingMarks'],
+  'Beast Coins': ['beastCoins'], 'Dust': ['dust'], 'Gold': ['gold'], 'Hunting Marks': ['huntingMarks'], 'Shards': ['shards'],
   'Avarice Rune': ['runeAvarice'], 'Augment Rune (HP)': ['runeHp'], 'Augment Rune (AD)': ['runeAd'], 'Augment Rune (AP)': ['runeAp'], 'Augment Rune (AR)': ['runeAr'], 'Augment Rune (MR)': ['runeMr'],
   'Blank Rune': ['runeBlank'], 'Recycle Rune': ['runeRecycle'],
   'Kaleidoscopic Rune': ['runeKaleidoscopic'], 'Transfusion Rune': ['runeTransfusion'],
@@ -514,8 +521,6 @@ const INVENTORY_VARIANTS = {
 };
 
 const INVENTORY_STATIC_ITEMS = {
-  'beastCoins': { name: 'Beast Coins', rarity: '1' }, 'dust': { name: 'Dust', rarity: '2' },
-  'gold': { name: 'Gold', rarity: '3' }, 'huntingMarks': { name: 'Hunting Marks', rarity: '4' },
   'runeAvarice': { name: 'Avarice Rune', rarity: '2' }, 'runeHp': { name: 'Augment Rune (HP)', rarity: '3' }, 'runeAd': { name: 'Augment Rune (AD)', rarity: '3' }, 'runeAp': { name: 'Augment Rune (AP)', rarity: '3' }, 
   'runeAr': { name: 'Augment Rune (AR)', rarity: '3' }, 'runeMr': { name: 'Augment Rune (MR)', rarity: '3' },
   'runeBlank': { name: 'Blank Rune', rarity: '4' }, 'runeRecycle': { name: 'Recycle Rune', rarity: '4' },
@@ -539,11 +544,10 @@ const INVENTORY_UPGRADEABLE_ITEMS = [
   'dragonPlant'
 ];
 
-// Rarity configuration for items and equipment
+// Rarity configuration for items and equipment. Names and colours are the game's own (its `text-rarity-N` classes).
 const RARITY_CONFIG = {
-  text: { '1': 'Common', '2': 'Uncommon', '3': 'Rare', '4': 'Epic', '5': 'Legendary' },
-  gameText: { '1': 'Common', '2': 'Uncommon', '3': 'Rare', '4': 'Mythic', '5': 'Legendary' },
-  colors: { '1': '#9d9d9d', '2': '#1eff00', '3': '#0070dd', '4': '#a335ee', '5': '#ff8000' }
+  text: { '1': 'Common', '2': 'Uncommon', '3': 'Rare', '4': 'Mythic', '5': 'Legendary' },
+  colors: { '1': '#c0c0c0', '2': '#00f000', '3': '#20a0ff', '4': '#ff68ff', '5': '#f0f000' }
 };
 
 // Game API keys that differ from canonical database keys
@@ -790,7 +794,7 @@ const findItemKeyByIcon = (src) => {
 
 // Item key groups for inventory UI (currency, no-rarity consumables, upgrades)
 const ITEM_KEY_GROUPS = {
-  currency: ['gold', 'dust', 'beastCoins', 'huntingMarks'],
+  currency: ['gold', 'dust', 'beastCoins', 'shards', 'huntingMarks'],
   noRarity: ['nicknameChange', 'nicknameMonster'],
   upgrade: [
     'babyDragonPlant', 'creatureAwakening', 'dailyBoostedMap', 'daycare', 'dungeonAscension',
@@ -807,7 +811,6 @@ const inventoryDatabase = {
   staticItems: INVENTORY_STATIC_ITEMS,
   upgradeableItems: INVENTORY_UPGRADEABLE_ITEMS,
   rarityText: RARITY_CONFIG.text,
-  rarityGameText: RARITY_CONFIG.gameText,
   rarityColors: RARITY_CONFIG.colors,
   itemKeyGroups: ITEM_KEY_GROUPS,
   itemKeyAliases: ITEM_KEY_ALIASES,

@@ -2613,9 +2613,9 @@
     box.style.padding = '0';
     box.style.minHeight = '0';
     box.style.height = '100%';
-    box.style.background = "url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat";
+    box.style.background = "url('" + window.BAAssets.url('background-dark') + "') repeat";
     box.style.border = '4px solid transparent';
-    box.style.borderImage = `url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch`;
+    box.style.borderImage = `url("${window.BAAssets.url('4-frame')}") 6 fill stretch`;
     box.style.borderRadius = '6px';
     box.style.overflow = 'hidden';
     box.style.boxSizing = 'border-box';
@@ -5149,7 +5149,7 @@
        const disenchantBtn = document.createElement('button');
       disenchantBtn.id = 'better-forge-disenchant-action-btn';
        
-       disenchantBtn.style.cssText = 'background: url("https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png") repeat; border: 6px solid transparent; border-image: url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch; font-weight: 700; border-radius: 0; padding: 4px 12px; cursor: pointer; font-family: "Trebuchet MS", "Arial Black", Arial, sans-serif; font-size: 14px; outline: none; flex: 1; text-align: center; white-space: pre-line; line-height: 1.2;';
+       disenchantBtn.style.cssText = 'background: url("' + window.BAAssets.url('background-regular') + '") repeat; border: 6px solid transparent; border-image: url("' + window.BAAssets.url('4-frame') + '") 6 fill stretch; font-weight: 700; border-radius: 0; padding: 4px 12px; cursor: pointer; font-family: "Trebuchet MS", "Arial Black", Arial, sans-serif; font-size: 14px; outline: none; flex: 1; text-align: center; white-space: pre-line; line-height: 1.2;';
        
        if (forgeState.isConfirmationMode) {
          const hasHighTier = hasHighTierItems();
@@ -5161,22 +5161,22 @@
        }
        
        eventManager.add(disenchantBtn, 'mousedown', () => {
-         disenchantBtn.style.borderImage = 'url("https://bestiaryarena.com/_next/static/media/1-frame-pressed.e3fabbc5.png") 6 fill stretch';
+         disenchantBtn.style.borderImage = 'url("' + window.BAAssets.url('1-frame-pressed') + '") 6 fill stretch';
        });
        eventManager.add(disenchantBtn, 'mouseup', () => {
-         disenchantBtn.style.borderImage = 'url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch';
+         disenchantBtn.style.borderImage = 'url("' + window.BAAssets.url('4-frame') + '") 6 fill stretch';
        });
        eventManager.add(disenchantBtn, 'mouseleave', () => {
-         disenchantBtn.style.borderImage = 'url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch';
+         disenchantBtn.style.borderImage = 'url("' + window.BAAssets.url('4-frame') + '") 6 fill stretch';
        });
        eventManager.add(disenchantBtn, 'keydown', e => {
          if (e.key === ' ' || e.key === 'Enter') {
-           disenchantBtn.style.borderImage = 'url("https://bestiaryarena.com/_next/static/media/1-frame-pressed.e3fabbc5.png") 6 fill stretch';
+           disenchantBtn.style.borderImage = 'url("' + window.BAAssets.url('1-frame-pressed') + '") 6 fill stretch';
          }
        });
        eventManager.add(disenchantBtn, 'keyup', e => {
          if (e.key === ' ' || e.key === 'Enter') {
-           disenchantBtn.style.borderImage = 'url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch';
+           disenchantBtn.style.borderImage = 'url("' + window.BAAssets.url('4-frame') + '") 6 fill stretch';
          }
        });
        
@@ -5462,17 +5462,17 @@
       
       const forgeBtn = document.createElement('button');
       forgeBtn.id = 'auto-upgrade-forge-btn';
-      forgeBtn.style.cssText = 'background: url("https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png") repeat; border: 6px solid transparent; border-image: url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch; font-weight: 700; border-radius: 0; padding: 4px 12px; cursor: pointer; font-family: "Trebuchet MS", "Arial Black", Arial, sans-serif; font-size: 14px; outline: none; flex: 0.6; color: #888888;';
+      forgeBtn.style.cssText = 'background: url("' + window.BAAssets.url('background-regular') + '") repeat; border: 6px solid transparent; border-image: url("' + window.BAAssets.url('4-frame') + '") 6 fill stretch; font-weight: 700; border-radius: 0; padding: 4px 12px; cursor: pointer; font-family: "Trebuchet MS", "Arial Black", Arial, sans-serif; font-size: 14px; outline: none; flex: 0.6; color: #888888;';
       forgeBtn.textContent = t('mods.betterForge.forge');
       
       eventManager.add(forgeBtn, 'mousedown', () => {
-        forgeBtn.style.borderImage = 'url("https://bestiaryarena.com/_next/static/media/1-frame-pressed.e3fabbc5.png") 6 fill stretch';
+        forgeBtn.style.borderImage = 'url("' + window.BAAssets.url('1-frame-pressed') + '") 6 fill stretch';
       });
       eventManager.add(forgeBtn, 'mouseup', () => {
-        forgeBtn.style.borderImage = 'url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch';
+        forgeBtn.style.borderImage = 'url("' + window.BAAssets.url('4-frame') + '") 6 fill stretch';
       });
       eventManager.add(forgeBtn, 'mouseleave', () => {
-        forgeBtn.style.borderImage = 'url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch';
+        forgeBtn.style.borderImage = 'url("' + window.BAAssets.url('4-frame') + '") 6 fill stretch';
       });
       
       eventManager.add(forgeBtn, 'click', () => {
@@ -6001,10 +6001,10 @@
       style.textContent = `
         button[data-bf-filtered] { display: none !important; }
         .betterforge-btn {
-          background: url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat !important;
+          background: url(window.BAAssets.url('background-regular')) repeat !important;
           border: 6px solid transparent !important;
           border-color: #ffe066 !important;
-          border-image: url('https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png') 6 fill stretch !important;
+          border-image: url(window.BAAssets.url('4-frame')) 6 fill stretch !important;
           color: var(--theme-text, #e6d7b0) !important;
           font-weight: 700 !important;
           border-radius: 0 !important;
@@ -6025,7 +6025,7 @@
         }
         .betterforge-btn.pressed,
         .betterforge-btn:active {
-          border-image: url('https://bestiaryarena.com/_next/static/media/1-frame-pressed.e3fabbc5.png') 6 fill stretch !important;
+          border-image: url(window.BAAssets.url('1-frame-pressed')) 6 fill stretch !important;
         }
         
         .auto-upgrade-item {

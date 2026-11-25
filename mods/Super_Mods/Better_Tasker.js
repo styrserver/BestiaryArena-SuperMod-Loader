@@ -621,7 +621,7 @@ function createCreatureContextMenu(creatureName, x, y, onClose) {
         overflow: hidden;
         border-radius: 5px;
         border: 1px solid #444;
-        background: url("https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png") repeat;
+        background: url("${window.BAAssets.url('background-dark')}") repeat;
         color: #fff;
         box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
         box-sizing: border-box;
@@ -3667,7 +3667,7 @@ function updateToggleButton() {
             toggleButton.textContent = t('mods.betterTasker.newTaskPlus');
             toggleButton.className = 'focus-style-visible flex items-center justify-center tracking-wide disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-blue active:frame-pressed-1-blue surface-blue gap-1 px-1 py-0.5 pixel-font-16 flex-1 text-whiteHighlight';
             // Set custom blue background
-            toggleButton.style.background = 'url("https://bestiaryarena.com/_next/static/media/background-blue.7259c4ed.png")';
+            toggleButton.style.background = 'url("' + window.BAAssets.url('background-blue') + '")';
             toggleButton.style.backgroundSize = 'cover';
             toggleButton.style.backgroundPosition = 'center';
             break;
@@ -4580,11 +4580,11 @@ function createSettingsContent() {
         flex: 1 1 auto;
         box-sizing: border-box;
         overflow: hidden;
-        background: url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat;
+        background: url('${window.BAAssets.url('background-dark')}') repeat;
         color: #fff;
         font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif;
         border: 4px solid transparent;
-        border-image: url('https://bestiaryarena.com/_next/static/media/3-frame.87c349c1.png') 6 fill stretch;
+        border-image: url('${window.BAAssets.url('3-frame')}') 6 fill stretch;
         border-radius: 6px;
     `;
     

@@ -4559,9 +4559,9 @@ const createButtons = () => {
 // Simple background image preloading
 const preloadBackgroundImages = () => {
   const imageUrls = [
-    'https://bestiaryarena.com/_next/static/media/background-green.be515334.png',
-    'https://bestiaryarena.com/_next/static/media/background-blue.7259c4ed.png',
-    'https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png'
+    window.BAAssets.url('background-green'),
+    window.BAAssets.url('background-blue'),
+    window.BAAssets.url('background-regular')
   ];
   
   imageUrls.forEach(url => {
@@ -4578,9 +4578,9 @@ const applyButtonStyling = (btn) => {
   btn.style.background = '';
   btn.style.backgroundColor = '';
   
-  const greenBgUrl = 'https://bestiaryarena.com/_next/static/media/background-green.be515334.png';
-  const blueBgUrl = 'https://bestiaryarena.com/_next/static/media/background-blue.7259c4ed.png';
-  const regularBgUrl = 'https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png';
+  const greenBgUrl = window.BAAssets.url('background-green');
+  const blueBgUrl = window.BAAssets.url('background-blue');
+  const regularBgUrl = window.BAAssets.url('background-regular');
   
   {
     console.debug('[Bestiary Automator] Applying button styling:');

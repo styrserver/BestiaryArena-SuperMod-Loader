@@ -86,17 +86,17 @@ let missingEquipmentAuditBadgeCache = {
 
 // Game UI media URLs (loaded from bestiaryarena.com CDN)
 const MEDIA_URLS = {
-  BACKGROUND_BLUE: 'https://bestiaryarena.com/_next/static/media/background-blue.7259c4ed.png',
-  BORDER_BLUE: 'https://bestiaryarena.com/_next/static/media/1-frame-blue.cf300a6a.png',
-  BACKGROUND_GREEN: 'https://bestiaryarena.com/_next/static/media/background-green.be515334.png',
-  BORDER_GREEN: 'https://bestiaryarena.com/_next/static/media/1-frame-green.fe32d59c.png',
-  BACKGROUND_RED: 'https://bestiaryarena.com/_next/static/media/background-red.21d3f4bd.png',
-  BORDER_RED: 'https://bestiaryarena.com/_next/static/media/1-frame-red.946aade9.png',
-  BACKGROUND_REGULAR: 'https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png',
-  BORDER_REGULAR: 'https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png',
-  BACKGROUND_DARK: 'https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png',
-  BACKGROUND_DARKER: 'https://bestiaryarena.com/_next/static/media/background-darker.2679c837.png',
-  FRAME_BORDER: 'https://bestiaryarena.com/_next/static/media/3-frame.87c349c1.png'
+  BACKGROUND_BLUE: window.BAAssets.url('background-blue'),
+  BORDER_BLUE: window.BAAssets.url('1-frame-blue'),
+  BACKGROUND_GREEN: window.BAAssets.url('background-green'),
+  BORDER_GREEN: window.BAAssets.url('1-frame-green'),
+  BACKGROUND_RED: window.BAAssets.url('background-red'),
+  BORDER_RED: window.BAAssets.url('1-frame-red'),
+  BACKGROUND_REGULAR: window.BAAssets.url('background-regular'),
+  BORDER_REGULAR: window.BAAssets.url('1-frame'),
+  BACKGROUND_DARK: window.BAAssets.url('background-dark'),
+  BACKGROUND_DARKER: window.BAAssets.url('background-darker'),
+  FRAME_BORDER: window.BAAssets.url('3-frame')
 };
 
 const SETTINGS_MODAL_CONFIG = {

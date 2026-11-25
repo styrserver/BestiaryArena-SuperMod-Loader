@@ -67,8 +67,8 @@
       margin: 0 !important;
       
       background-image: 
-        url('https://bestiaryarena.com/_next/static/media/1-frame-blue.cf300a6a.png'),
-        url('https://bestiaryarena.com/_next/static/media/background-blue.7259c4ed.png') !important;
+        url('${window.BAAssets.url('1-frame-blue')}'),
+        url('${window.BAAssets.url('background-blue')}') !important;
       background-size: 100% 100%, cover !important;
       background-repeat: no-repeat, no-repeat !important;
       background-position: center, center !important;
@@ -94,8 +94,8 @@
     
     .better-hygenie-fuse-button:active {
       background-image: 
-        url('https://bestiaryarena.com/_next/static/media/1-frame-pressed.e3fabbc5.png'),
-        url('https://bestiaryarena.com/_next/static/media/background-blue.7259c4ed.png') !important;
+        url('${window.BAAssets.url('1-frame-pressed')}'),
+        url('${window.BAAssets.url('background-blue')}') !important;
       background-size: 100% 100%, cover !important;
       background-repeat: no-repeat, no-repeat !important;
       background-position: center, center !important;
@@ -104,8 +104,8 @@
     
     .better-hygenie-fuse-button.confirm {
       background-image:
-        url('https://bestiaryarena.com/_next/static/media/1-frame-green.fe32d59c.png'),
-        url('https://bestiaryarena.com/_next/static/media/background-green.be515334.png') !important;
+        url('${window.BAAssets.url('1-frame-green')}'),
+        url('${window.BAAssets.url('background-green')}') !important;
     }
 
     .better-hygenie-fuse-button svg {

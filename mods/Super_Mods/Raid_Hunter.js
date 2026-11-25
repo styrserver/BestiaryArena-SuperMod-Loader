@@ -5310,11 +5310,11 @@ function createSettingsContent() {
         flex: 1 1 auto;
         box-sizing: border-box;
         overflow: hidden;
-        background: url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat;
+        background: url('${window.BAAssets.url('background-dark')}') repeat;
         color: ${COLOR_WHITE};
         font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif;
         border: 4px solid transparent;
-        border-image: url('https://bestiaryarena.com/_next/static/media/3-frame.87c349c1.png') 6 fill stretch;
+        border-image: url('${window.BAAssets.url('3-frame')}') 6 fill stretch;
         border-radius: 6px;
     `;
     
@@ -6137,9 +6137,9 @@ function createRaidContextMenu(raidName, x, y, onClose) {
     menu.style.top = `${y}px`;
     menu.style.zIndex = '9999';
     menu.style.minWidth = '250px';
-    menu.style.background = "url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat";
+    menu.style.background = "url('" + window.BAAssets.url('background-dark') + "') repeat";
     menu.style.border = '4px solid transparent';
-    menu.style.borderImage = `url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch`;
+    menu.style.borderImage = `url("${window.BAAssets.url('4-frame')}") 6 fill stretch`;
     menu.style.borderRadius = '6px';
     menu.style.padding = '12px';
     menu.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.5)';

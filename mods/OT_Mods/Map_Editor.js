@@ -16882,10 +16882,10 @@ function injectStyles() {
       box-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
     }
     #${PANEL_ID} {
-      --me-frame-3: url("https://bestiaryarena.com/_next/static/media/3-frame.87c349c1.png") 6 fill;
-      --me-frame-4: url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch;
-      --me-frame-1: url("https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png") 4 fill;
-      --me-bg: url("https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png");
+      --me-frame-3: url("${window.BAAssets.url('3-frame')}") 6 fill;
+      --me-frame-4: url("${window.BAAssets.url('4-frame')}") 6 fill stretch;
+      --me-frame-1: url("${window.BAAssets.url('1-frame')}") 4 fill;
+      --me-bg: url("${window.BAAssets.url('background-dark')}");
       --me-panel-bg: #282C34;
       --me-inset: 8px;
       --me-gap: 4px;

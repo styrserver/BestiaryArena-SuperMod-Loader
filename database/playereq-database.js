@@ -175,31 +175,10 @@ function buildEquipmentDatabase() {
 // not ready yet), and unlike equipment-database.js/creature-database.js this database has
 // no retry otherwise. Guilds.js reads window.playerEquipmentDatabase.EQUIPMENT_BY_SLOT
 // directly, so an empty catalog here silently breaks its equip-slot filtering.
-function waitForGameState(callback, retries = 0, maxRetries = 20) {
-  try {
-    const state = globalThis.state || window.state;
-    const hasPlayerState = state?.player?.getSnapshot;
-    const hasBoardState = state?.board?.getSnapshot;
-    const hasUtils = state?.utils?.getEquipment;
-
-    if (hasPlayerState && hasBoardState && hasUtils) {
-      callback();
-    } else if (retries < maxRetries) {
-      setTimeout(() => waitForGameState(callback, retries + 1, maxRetries), 250);
-    } else {
-      console.warn('[playereq-database.js] Game state not ready after max retries, building database anyway');
-      callback();
-    }
-  } catch (error) {
-    console.error('[playereq-database.js] Error checking game state:', error);
-    if (retries < maxRetries) {
-      setTimeout(() => waitForGameState(callback, retries + 1, maxRetries), 250);
-    } else {
-      console.warn('[playereq-database.js] Building database despite errors');
-      callback();
-    }
-  }
-}
+const waitForGameState = (callback) => globalThis.BAWait ? globalThis.BAWait.gameState(callback, {
+  label: 'playereq-database.js',
+  ready: (state) => !!(state?.player?.getSnapshot && state?.board?.getSnapshot && state?.utils?.getEquipment)
+}) : setTimeout(callback, 0); // no loader (offline tools): build with whatever exists
 
 const placeholderDatabase = {
   ALL_EQUIPMENT: [],

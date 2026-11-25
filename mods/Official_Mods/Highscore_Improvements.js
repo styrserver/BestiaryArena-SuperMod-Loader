@@ -935,9 +935,9 @@ function createHighscoresMapContextMenu(x, y, code, name) {
     top: 0;
     z-index: 10000001;
     min-width: 180px;
-    background: url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat;
+    background: url('${window.BAAssets.url('background-dark')}') repeat;
     border: 4px solid transparent;
-    border-image: url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch;
+    border-image: url("${window.BAAssets.url('4-frame')}") 6 fill stretch;
     border-radius: 6px;
     padding: 10px 12px;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);

@@ -13903,10 +13903,10 @@
                 overflow: visible;
             }
             #${PANEL_ID} {
-                --bs-frame-3: url("https://bestiaryarena.com/_next/static/media/3-frame.87c349c1.png") 6 fill;
-                --bs-frame-4: url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch;
-                --bs-frame-1: url("https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png") 4 fill;
-                --bs-bg: url(/_next/static/media/background-dark.95edca67.png);
+                --bs-frame-3: url("${window.BAAssets.url('3-frame')}") 6 fill;
+                --bs-frame-4: url("${window.BAAssets.url('4-frame')}") 6 fill stretch;
+                --bs-frame-1: url("${window.BAAssets.url('1-frame')}") 4 fill;
+                --bs-bg: url("${window.BAAssets.url('background-dark')}");
                 --bs-panel-bg: #282C34;
                 --bs-panel-inset: 8px;
                 --bs-panel-gap: 4px;

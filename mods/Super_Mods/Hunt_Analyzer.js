@@ -13,12 +13,12 @@ const t = (key) => api.i18n.t(key);
 const HUNT_ANALYZER_DEFAULT_THEME_KEY = 'original';
 
 const HUNT_ANALYZER_ASSET_BG = {
-    darker: '/_next/static/media/background-darker.2679c837.png',
-    dark: '/_next/static/media/background-dark.95edca67.png',
-    regular: '/_next/static/media/background-regular.b0337118.png',
-    blue: '/_next/static/media/background-blue.7259c4ed.png',
-    green: '/_next/static/media/background-green.be515334.png',
-    red: '/_next/static/media/background-red.21d3f4bd.png'
+    darker: window.BAAssets.url('background-darker'),
+    dark: window.BAAssets.url('background-dark'),
+    regular: window.BAAssets.url('background-regular'),
+    blue: window.BAAssets.url('background-blue'),
+    green: window.BAAssets.url('background-green'),
+    red: window.BAAssets.url('background-red')
 };
 
 function huntAnalyzerBgUrl(assetPath) {
@@ -394,10 +394,10 @@ function buildHuntAnalyzerCssVariableBlock(theme) {
             --ha-button-highlight-hover: ${theme.colors.buttonHighlightHover};
             --ha-dropdown-option-hover: ${theme.colors.dropdownOptionHover};
             --ha-dropdown-option-selected: ${theme.colors.dropdownOptionSelected};
-            --ha-frame-3: url("https://bestiaryarena.com/_next/static/media/3-frame.87c349c1.png") 6 fill;
-            --ha-frame-1: url("https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png") 4 fill;
-            --ha-frame-1-pressed: url("https://bestiaryarena.com/_next/static/media/1-frame-pressed.e3fabbc5.png") 4 fill;
-            --ha-frame-4: url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch;
+            --ha-frame-3: url("${window.BAAssets.url('3-frame')}") 6 fill;
+            --ha-frame-1: url("${window.BAAssets.url('1-frame')}") 4 fill;
+            --ha-frame-1-pressed: url("${window.BAAssets.url('1-frame-pressed')}") 4 fill;
+            --ha-frame-4: url("${window.BAAssets.url('4-frame')}") 6 fill stretch;
         }`;
 }
 
@@ -1140,7 +1140,7 @@ const UI_LAYOUT = {
     FRAME_BORDER: '6px solid transparent',
     FRAME_BORDER_IMAGE: 'var(--ha-frame-4)'
 };
-const DEMONIC_CONFIRM_BG = 'url(/_next/static/media/background-red.21d3f4bd.png)';
+const DEMONIC_CONFIRM_BG = 'url(' + window.BAAssets.url('background-red') + ')';
 
 // =======================
 // 2.4. Centralized State Management

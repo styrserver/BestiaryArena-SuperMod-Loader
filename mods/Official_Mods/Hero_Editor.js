@@ -1515,9 +1515,9 @@ function mountHeroEditorFloatingPanel(detailContent, clientX, clientY, clearLive
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    background: url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat;
+    background: url('${window.BAAssets.url('background-dark')}') repeat;
     border: 4px solid transparent;
-    border-image: url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch;
+    border-image: url("${window.BAAssets.url('4-frame')}") 6 fill stretch;
     border-radius: 6px;
     padding: 8px;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
@@ -1944,8 +1944,8 @@ function showHeroEditorModal(options) {
       awakenButton.style.height = TOP_BUTTON_SIZE;
       awakenButton.style.outline = 'none';
       awakenButton.style.flexShrink = '0';
-      const GREEN_BUTTON_BG = "url('https://bestiaryarena.com/_next/static/media/background-green.be515334.png') repeat";
-      const REGULAR_BUTTON_BG = "url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat";
+      const GREEN_BUTTON_BG = "url('" + window.BAAssets.url('background-green') + "') repeat";
+      const REGULAR_BUTTON_BG = "url('" + window.BAAssets.url('background-regular') + "') repeat";
 
       const awakenIcon = document.createElement('img');
       awakenIcon.src = '/assets/icons/star-tier-awaken.png';

@@ -36,11 +36,11 @@ const ONLINE_THRESHOLD_MS = 15 * 60 * 1000;
 
 // CSS constants
 const CSS_CONSTANTS = {
-  BACKGROUND_URL: 'https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png',
-  BORDER_4_FRAME: 'url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch',
-  BORDER_1_FRAME: 'url("https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png") 4 fill',
-  BORDER_1_FRAME_PRESSED: 'url("https://bestiaryarena.com/_next/static/media/1-frame-pressed.e3fabbc5.png") 4 fill',
-  BORDER_3_FRAME: 'url("https://bestiaryarena.com/_next/static/media/3-frame.87c349c1.png") 6 fill',
+  BACKGROUND_URL: window.BAAssets.url('background-dark'),
+  BORDER_4_FRAME: 'url("' + window.BAAssets.url('4-frame') + '") 6 fill stretch',
+  BORDER_1_FRAME: 'url("' + window.BAAssets.url('1-frame') + '") 4 fill',
+  BORDER_1_FRAME_PRESSED: 'url("' + window.BAAssets.url('1-frame-pressed') + '") 4 fill',
+  BORDER_3_FRAME: 'url("' + window.BAAssets.url('3-frame') + '") 6 fill',
   FONT_FAMILY: "'Trebuchet MS', 'Arial Black', Arial, sans-serif",
   FONT_FAMILY_SYSTEM: 'system-ui, -apple-system, sans-serif',
   COLORS: {

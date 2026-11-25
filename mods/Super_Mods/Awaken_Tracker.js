@@ -2302,9 +2302,9 @@
             'z-index:9999',
             'min-width:220px',
             'max-width:260px',
-            "background:url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat",
+            "background:url('" + window.BAAssets.url('background-dark') + "') repeat",
             'border:4px solid transparent',
-            'border-image:url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch',
+            'border-image:url("' + window.BAAssets.url('4-frame') + '") 6 fill stretch',
             'border-radius:4px',
             'padding:8px 10px',
             'box-shadow:0 4px 12px rgba(0,0,0,0.5)',
@@ -3022,8 +3022,8 @@
 
     function applyAwakenTrackerButtonStyling(btn) {
         if (!btn) return;
-        const regularBgUrl = 'https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png';
-        const greenBgUrl = 'https://bestiaryarena.com/_next/static/media/background-green.be515334.png';
+        const regularBgUrl = window.BAAssets.url('background-regular');
+        const greenBgUrl = window.BAAssets.url('background-green');
         btn.style.background = '';
         btn.style.backgroundColor = '';
         if (loadFarmerSettings().enabled) {
@@ -3050,13 +3050,13 @@
         style.id = AT_STYLE_ID;
         style.textContent = `
             #${PANEL_ID} {
-                --at-frame-3: url("https://bestiaryarena.com/_next/static/media/3-frame.87c349c1.png") 6 fill;
-                --at-frame-1: url("https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png") 4 fill;
-                --at-frame-1-pressed: url("https://bestiaryarena.com/_next/static/media/1-frame-pressed.e3fabbc5.png") 4 fill;
-                --at-frame-4: url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch;
-                --at-bg-panel: url(/_next/static/media/background-dark.95edca67.png);
-                --at-bg-header: url(/_next/static/media/background-dark.95edca67.png);
-                --at-bg-section: url(/_next/static/media/background-regular.b0337118.png);
+                --at-frame-3: url("${window.BAAssets.url('3-frame')}") 6 fill;
+                --at-frame-1: url("${window.BAAssets.url('1-frame')}") 4 fill;
+                --at-frame-1-pressed: url("${window.BAAssets.url('1-frame-pressed')}") 4 fill;
+                --at-frame-4: url("${window.BAAssets.url('4-frame')}") 6 fill stretch;
+                --at-bg-panel: url("${window.BAAssets.url('background-dark')}");
+                --at-bg-header: url("${window.BAAssets.url('background-dark')}");
+                --at-bg-section: url("${window.BAAssets.url('background-regular')}");
                 --at-panel-bg: #282C34;
                 --at-section-bg: #323234;
                 --at-text: #ABB2BF;
@@ -3408,10 +3408,10 @@
                 background-size: auto;
             }
             #${PANEL_ID} .at-farmer-toggle.is-on {
-                background-image: url('https://bestiaryarena.com/_next/static/media/background-green.be515334.png');
+                background-image: url('${window.BAAssets.url('background-green')}');
             }
             #${PANEL_ID} .at-farmer-toggle.is-off {
-                background-image: url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png');
+                background-image: url('${window.BAAssets.url('background-regular')}');
                 color: var(--at-text);
             }
             #${PANEL_ID} .at-farmer-toggle:hover {

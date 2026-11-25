@@ -9742,8 +9742,8 @@ function showSettingsModal() {
       flexDirection: 'column',
       flex: '1 1 auto',
       border: '6px solid transparent',
-      borderImage: 'url("https://bestiaryarena.com/_next/static/media/3-frame.87c349c1.png") 6 fill',
-      backgroundImage: 'url("https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png")',
+      borderImage: 'url("' + window.BAAssets.url('3-frame') + '") 6 fill',
+      backgroundImage: 'url("' + window.BAAssets.url('background-dark') + '")',
       padding: '8px'
     });
     
@@ -9776,7 +9776,7 @@ function showSettingsModal() {
       padding: '0px',
       margin: '0px 10px 0px 0px',
       borderRight: '6px solid transparent',
-      borderImage: 'url("https://bestiaryarena.com/_next/static/media/3-frame.87c349c1.png") 6 fill',
+      borderImage: 'url("' + window.BAAssets.url('3-frame') + '") 6 fill',
       overflowY: 'auto',
       minHeight: '0px'
     });
@@ -9802,11 +9802,11 @@ function showSettingsModal() {
     function applyMenuItemStyle(element, selected) {
       if (selected) {
         element.style.border = '6px solid transparent';
-        element.style.borderImage = 'url("https://bestiaryarena.com/_next/static/media/1-frame-pressed.e3fabbc5.png") 6 fill';
+        element.style.borderImage = 'url("' + window.BAAssets.url('1-frame-pressed') + '") 6 fill';
         element.style.backgroundColor = 'transparent';
       } else {
         element.style.border = '6px solid transparent';
-        element.style.borderImage = 'url("https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png") 6 fill';
+        element.style.borderImage = 'url("' + window.BAAssets.url('1-frame') + '") 6 fill';
         element.style.backgroundColor = 'transparent';
       }
     }
@@ -17723,12 +17723,12 @@ const CUSTOM_BACKGROUND_ASSET_ORIGIN = 'https://bestiaryarena.com';
 // The game's own tiled panel-background textures (same assets Hunt Analyzer's themes draw
 // from), offered here as flat, deduplicated preset swatches — one entry per distinct image.
 const CUSTOM_BACKGROUND_PRESETS_LIST = [
-  { key: 'darker', name: 'Original', asset: '/_next/static/media/background-darker.2679c837.png' },
-  { key: 'dark', name: 'Dark', asset: '/_next/static/media/background-dark.95edca67.png' },
-  { key: 'regular', name: 'Regular', asset: '/_next/static/media/background-regular.b0337118.png' },
-  { key: 'blue', name: 'Frosty', asset: '/_next/static/media/background-blue.7259c4ed.png' },
-  { key: 'green', name: 'Venomous', asset: '/_next/static/media/background-green.be515334.png' },
-  { key: 'red', name: 'Demonic', asset: '/_next/static/media/background-red.21d3f4bd.png' }
+  { key: 'darker', name: 'Original', asset: window.BAAssets.url('background-darker') },
+  { key: 'dark', name: 'Dark', asset: window.BAAssets.url('background-dark') },
+  { key: 'regular', name: 'Regular', asset: window.BAAssets.url('background-regular') },
+  { key: 'blue', name: 'Frosty', asset: window.BAAssets.url('background-blue') },
+  { key: 'green', name: 'Venomous', asset: window.BAAssets.url('background-green') },
+  { key: 'red', name: 'Demonic', asset: window.BAAssets.url('background-red') }
 ];
 
 function resolveCustomBackgroundAssetUrl(asset) {
@@ -17834,9 +17834,9 @@ function showCustomBackgroundDeleteMenu(x, y) {
     left: `${x}px`,
     top: `${y}px`,
     zIndex: '200002',
-    background: "url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat",
+    background: "url('" + window.BAAssets.url('background-dark') + "') repeat",
     border: '4px solid transparent',
-    borderImage: 'url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch',
+    borderImage: 'url("' + window.BAAssets.url('4-frame') + '") 6 fill stretch',
     borderRadius: '6px',
     padding: '4px',
     boxShadow: '0 4px 12px rgba(0, 0, 0, 0.5)'

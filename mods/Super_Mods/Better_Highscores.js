@@ -375,7 +375,7 @@
       position: 'relative',
       boxSizing: 'border-box',
       border: '4px solid transparent',
-      borderImage: 'url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 4 stretch',
+      borderImage: 'url("' + window.BAAssets.url('4-frame') + '") 4 stretch',
       borderRadius: '4px',
       padding: '4px',
       color: 'white',
@@ -509,9 +509,9 @@
       top: 0;
       z-index: 10000001;
       min-width: 280px;
-      background: url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat;
+      background: url('${window.BAAssets.url('background-dark')}') repeat;
       border: 4px solid transparent;
-      border-image: url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch;
+      border-image: url("${window.BAAssets.url('4-frame')}") 6 fill stretch;
       border-radius: 6px;
       padding: 12px;
       box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
@@ -734,11 +734,11 @@
     Object.assign(restoreButton.style, {
       cursor: 'pointer',
       padding: '4px 8px',
-      background: 'url("https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png")',
+      background: 'url("' + window.BAAssets.url('background-regular') + '")',
       backgroundSize: 'auto',
       backgroundRepeat: 'repeat',
       border: '4px solid transparent',
-      borderImage: 'url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 4 stretch',
+      borderImage: 'url("' + window.BAAssets.url('4-frame') + '") 4 stretch',
       borderRadius: '4px',
       color: 'white',
       fontFamily: "'Courier New', monospace",
@@ -778,11 +778,11 @@
       height: 'auto'
     },
              CONTAINER_STYLE: {
-      background: 'url("https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png")',
+      background: 'url("' + window.BAAssets.url('background-regular') + '")',
       backgroundSize: 'auto',
       backgroundRepeat: 'repeat',
       border: '4px solid transparent',
-      borderImage: 'url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 4 stretch',
+      borderImage: 'url("' + window.BAAssets.url('4-frame') + '") 4 stretch',
       borderRadius: '4px',
       padding: '4px',
       color: 'white',
@@ -814,8 +814,8 @@
   const ASSETS = {
     ACHIEVEMENT_ICON: 'https://bestiaryarena.com/assets/icons/achievement.png',
     HIGHSCORE_ICON: 'https://bestiaryarena.com/assets/icons/highscore.png',
-    BACKGROUND: 'https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png',
-    FRAME: 'https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png'
+    BACKGROUND: window.BAAssets.url('background-regular'),
+    FRAME: window.BAAssets.url('4-frame')
   };
 
   const SECTION_WRAPPER_STYLE = {
@@ -2962,7 +2962,7 @@
       left: '0',
       right: '0',
       bottom: '0',
-      background: 'url("https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png")',
+      background: 'url("' + window.BAAssets.url('background-regular') + '")',
       backgroundSize: 'auto',
       backgroundRepeat: 'repeat',
       opacity: opacity,

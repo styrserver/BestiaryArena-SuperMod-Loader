@@ -85,15 +85,6 @@ function parseCommaSeparatedInt(text) {
   return Number.isFinite(n) && !isNaN(n) ? n : null;
 }
 
-function getFirstNumericGameStateValue(context, paths) {
-  if (!context || !Array.isArray(paths)) return null;
-  for (const path of paths) {
-    const value = path.split('?.').reduce((obj, key) => obj?.[key], context);
-    if (typeof value === 'number' && !isNaN(value) && value >= 0) return value;
-  }
-  return null;
-}
-
 function getCyclopediaListItemBaseName(el) {
   const labeledSpan = el?.querySelector?.('span[data-base-label]');
   if (labeledSpan?.dataset?.baseLabel) return labeledSpan.dataset.baseLabel;
@@ -191,7 +182,7 @@ const START_PAGE_CONFIG = {
   RANKINGS_API_URL: 'https://bestiary-arena-ranking.vercel.app/api/v1/rankings',
   RANKINGS_PAGE_SIZE: 50,
   RANKINGS_PREFETCH_LIMIT: 500,
-  FRAME_IMAGE_URL: 'https://bestiaryarena.com/_next/static/media/3-frame.87c349c1.png'
+  FRAME_IMAGE_URL: window.BAAssets.url('3-frame')
 };
 const inventoryTooltips = (typeof window !== 'undefined' && window.inventoryTooltips) || {};
 const inventoryDatabase = (typeof window !== 'undefined' && window.inventoryDatabase) || {};
@@ -442,7 +433,7 @@ const CYCLOPEDIA_WIDGET_TITLE_TOGGLE_STYLE = {
 
 /** Green "active" look shared by the title-bar toggle buttons. */
 function setCyclopediaToggleActive(button, active) {
-  button.style.background = active ? 'url("https://bestiaryarena.com/_next/static/media/background-green.be515334.png") repeat' : '';
+  button.style.background = active ? 'url("' + window.BAAssets.url('background-green') + '") repeat' : '';
   button.style.border = active ? '1px solid #60c060' : '';
 }
 
@@ -543,16 +534,6 @@ const CYCLOPEDIA_UI = {
   }
 };
 
-/** Centralized Cyclopedia settings for easy future tuning. */
-const CYCLOPEDIA_SETTINGS = {
-  playerStatCaps: {
-    // Perfect/Shiny max comes from creature-database (game monsters), not a hardcoded cap.
-    bisEquipments: 165,
-    exploredMaps: 82,
-    raids: 19
-  }
-};
-
 // Maps Tab DOM Optimization System
 const MapsTabDOMOptimizer = {
   // Cache for reusable DOM elements
@@ -600,25 +581,15 @@ const MapsTabDOMOptimizer = {
 const INVENTORY_CONFIG = inventoryDatabase;
 const CURRENCY_CONFIG = {};
 
-const HUNTING_MARKS_PATHS = [
-  'questLog?.task?.points',
-  'questLog?.task?.marks',
-  'questLog?.hunting?.marks',
-  'huntingMarks',
-  'player?.huntingMarks'
-];
-
-const HUNTING_MARKS_UI_SELECTORS = [
-  '.sprite.item.relative.id-35572', '.sprite.item.relative[class*="id-35572"]',
-  'img[src*="huntingmarks.png"]', '[data-item*="hunting"]', '[data-item*="mark"]'
-];
+// Level / gene thresholds of the creature tiers: Perfect (level 50), Hundo and Shiny (level 99), 100 total genes.
+const CYCLOPEDIA_CAPS = { perfectLevel: 50, maxLevel: 99, maxGenes: 100 };
 
 const creatureDbRef = (typeof window !== 'undefined' && window.creatureDatabase) || {};
 const mapsDbRef = (typeof globalThis !== 'undefined' && globalThis.mapsDatabase) || {};
 const itemKeyGroups = inventoryDatabase.itemKeyGroups || {};
 
 const MONSTER_STATS_CONFIG = creatureDbRef.MONSTER_STAT_DISPLAY_CONFIG || [];
-const HIDE_FROM_CYCLOPEDIA = creatureDbRef.CYCLOPEDIA_HIDDEN_CREATURES || ['Dwarf Henchman'];
+const HIDE_FROM_CYCLOPEDIA = creatureDbRef.CYCLOPEDIA_HIDDEN_CREATURES || [];
 
 /**
  * Removes the lore quote (`blockquote` plus its leading separator) from an ability tooltip, but
@@ -658,7 +629,7 @@ function getCyclopediaAllCreatures() {
   }
   const base = (db?.ALL_CREATURES?.length ? db.ALL_CREATURES : getCyclopediaObtainableCreatures())
     .filter((name) => !HIDE_FROM_CYCLOPEDIA.includes(name));
-  const extra = db?.CYCLOPEDIA_EXTRA_CREATURES ?? ['Albino Gazer'];
+  const extra = db?.CYCLOPEDIA_EXTRA_CREATURES ?? [];
   return [...new Set([...base, ...extra])].sort((a, b) => a.localeCompare(b));
 }
 
@@ -700,19 +671,8 @@ function getCyclopediaInventoryCategories() {
   return categories;
 }
 
-/** Daily Seashell streak days that reward gazers (matches in-game shell tooltip). */
-const CYCLOPEDIA_GAZER_SEASHELL_REWARDS = {
-  'Albino Gazer': [{ day: 27, rewardLabel: 'Albino Gazer' }],
-  default: [
-    { day: 13, rewardLabel: 'Random Gazer' },
-    { day: 20, rewardLabel: 'Random Gazer' }
-  ]
-};
-
 function getCyclopediaGazerSeashellRewards(creatureName) {
-  const norm = String(creatureName || '').trim().toLowerCase();
-  if (norm === 'albino gazer') return CYCLOPEDIA_GAZER_SEASHELL_REWARDS['Albino Gazer'];
-  return CYCLOPEDIA_GAZER_SEASHELL_REWARDS.default;
+  return window.creatureDatabase?.getGazerSeashellRewards?.(creatureName) ?? [];
 }
 
 function appendCyclopediaGazerObtainSourceHeader(dropsList, { label, iconSrc, iconAlt }) {
@@ -822,9 +782,9 @@ function resolveCyclopediaEquipmentGameId(equipmentName) {
 }
 
 const GAME_KEYS = {
-  NO_RARITY: itemKeyGroups.noRarity || ['nicknameChange', 'nicknameMonster'],
-  CURRENCY: itemKeyGroups.currency || ['gold', 'dust', 'beastCoins', 'huntingMarks'],
-  UPGRADE: itemKeyGroups.upgrade || ['babyDragonPlant', 'creatureAwakening', 'dailyBoostedMap', 'daycare', 'dungeonAscension', 'dragonPlant', 'drMephistopheles', 'hygenie', 'monsterCauldron', 'monsterRaids', 'monsterSqueezer', 'mountainFortress', 'premium', 'forge', 'yasirTradingContract']
+  NO_RARITY: itemKeyGroups.noRarity || [],
+  CURRENCY: itemKeyGroups.currency || [],
+  UPGRADE: itemKeyGroups.upgrade || []
 };
 
 const MAP_INTERACTION_CONFIG = {
@@ -5032,7 +4992,7 @@ function getCyclopediaProfileSeasons() {
 }
 
 const CYCLOPEDIA_ASSETS = {
-  frame4: 'https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png',
+  frame4: window.BAAssets.url('4-frame'),
   shinyStar: 'https://bestiaryarena.com/assets/icons/shiny-star.png',
   starTierShiny: 'https://bestiaryarena.com/assets/icons/star-tier-shiny.png',
   starTierHundo: 'https://bestiaryarena.com/assets/icons/star-tier-hundo.png',
@@ -5047,7 +5007,7 @@ const CYCLOPEDIA_ASSETS = {
   stamina: 'https://bestiaryarena.com/assets/icons/stamina.png',
   highscore: 'https://bestiaryarena.com/assets/icons/highscore.png',
   matchCount: 'https://bestiaryarena.com/assets/icons/match-count.png',
-  backgroundDark: 'https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png'
+  backgroundDark: window.BAAssets.url('background-dark')
 };
 
 function getSeason2RankBracketFromPosition(positionRaw, totalRaw) {
@@ -5670,7 +5630,7 @@ function getCreatureStatus(creatureName) {
       if (monster.shiny !== true) return false;
       const level = getMonsterLevel(monster);
       const totalGenes = getGeneValues(monster).reduce((sum, value) => sum + value, 0);
-      return level >= 99 && totalGenes >= 100;
+      return level >= CYCLOPEDIA_CAPS.maxLevel && totalGenes >= CYCLOPEDIA_CAPS.maxGenes;
     });
 
     // Hundo tier: a NON-shiny creature at level 99 with max genes (100 total).
@@ -5678,7 +5638,7 @@ function getCreatureStatus(creatureName) {
       if (monster.shiny === true) return false;
       const level = getMonsterLevel(monster);
       const totalGenes = getGeneValues(monster).reduce((sum, value) => sum + value, 0);
-      return level >= 99 && totalGenes >= 100;
+      return level >= CYCLOPEDIA_CAPS.maxLevel && totalGenes >= CYCLOPEDIA_CAPS.maxGenes;
     });
     
     // Check for perfect creatures (level 50 with 100 total genes)
@@ -5693,7 +5653,7 @@ function getCreatureStatus(creatureName) {
         
       }
       
-      return level >= 50 && totalGenes >= 100;
+      return level >= CYCLOPEDIA_CAPS.perfectLevel && totalGenes >= CYCLOPEDIA_CAPS.maxGenes;
     });
     
     return {
@@ -5756,7 +5716,7 @@ function getAwakenTrackerBestiarySortKey(creatureName) {
     };
 
     const rankMon = (i) =>
-      (i.awakened && i.capped && i.level >= 99 ? 10_000_000 : 0)
+      (i.awakened && i.capped && i.level >= CYCLOPEDIA_CAPS.maxLevel ? 10_000_000 : 0)
       + (i.awakened && i.capped ? 1_000_000 : 0)
       + (i.awakened ? 100_000 : 0)
       + (i.awakened && i.shiny ? AWAKEN_TRACKER_SHINY_AWAKENED_RANK_BOOST : 0)
@@ -5786,7 +5746,7 @@ function getAwakenTrackerBestiarySortKey(creatureName) {
       if (mon.awakened) anyAwakened = true;
       if (mon.awakened && mon.shiny) anyAwakenedShiny = true;
       if (mon.awakened && mon.capped) anyCapped = true;
-      if (mon.awakened && mon.capped && mon.level >= 99) anyPerfect = true;
+      if (mon.awakened && mon.capped && mon.level >= CYCLOPEDIA_CAPS.maxLevel) anyPerfect = true;
 
       if (!best || rankMon(mon) > rankMon(best)) best = mon;
     }
@@ -6298,160 +6258,18 @@ const MemoizationUtils = {
   }
 };
 
-const CURRENCY_UI_SELECTORS = { gold: { button: true, title: 'Gold', alt: 'Player gold' }, beastCoins: { button: true, title: 'Beast Coins', alt: 'Player Beast Coins' }, dust: { div: true, title: 'Dust', alt: 'Dust' } };
-const CURRENCY_GAME_STATE_PATHS = { dust: ['inventory?.dust', 'inventory?.dust?.count', 'resources?.dust', 'player?.dust', 'dust'], huntingMarks: ['inventory?.huntingMarks', 'inventory?.huntingMarks?.count', 'resources?.huntingMarks', 'player?.huntingMarks', 'huntingMarks', 'hunting?.marks', 'marks', 'huntingMarks?.count', 'huntingMarks?.amount', 'huntingMarks?.quantity', 'hunting?.huntingMarks', 'hunting?.huntingMarks?.count', 'player?.hunting?.marks', 'player?.hunting?.huntingMarks', 'player?.huntingMarks', 'player?.marks', 'inventory?.marks', 'inventory?.marks?.count', 'player?.inventory?.huntingMarks', 'player?.inventory?.huntingMarks?.count', 'player?.resources?.huntingMarks', 'player?.resources?.huntingMarks?.count', 'context?.inventory?.huntingMarks', 'context?.inventory?.huntingMarks?.count', 'context?.player?.huntingMarks', 'context?.player?.huntingMarks?.count', 'context?.huntingMarks', 'context?.huntingMarks?.count', 'context?.hunting?.marks', 'context?.hunting?.marks?.count', 'questLog?.hunting?.marks', 'questLog?.hunting?.huntingMarks', 'questLog?.task?.huntingMarks', 'questLog?.task?.marks', 'questLog?.task?.points', 'questLog?.seashell?.huntingMarks', 'questLog?.seashell?.marks', 'huntingMarks', 'huntingMarksCount', 'huntingMarksAmount', 'huntingMarksQuantity', 'huntingMarksTotal', 'totalHuntingMarks', 'huntingMarksEarned', 'huntingMarksCollected'] };
-function getCurrencyFromUI(currencyType) { 
-  try { 
-    const config = CURRENCY_UI_SELECTORS[currencyType]; 
-    if (!config) return null; 
-    
-    const selector = config.button ? 'button' : 'div'; 
-    const elements = DOMCache.getAll(selector);
-    
-    // Use for...of loop instead of Array.from().find() for better performance
-    for (const el of elements) {
-      const div = el.querySelector(`.frame-pressed-1[title="${config.title}"]`);
-      const img = el.querySelector(`img[alt="${config.alt}"]`);
-      if (div || img) {
-        const span = el.querySelector('span');
-        if (span) {
-          return parseCommaSeparatedInt(span.textContent);
-        }
-      }
-    }
-    return null;
-  } catch (error) { 
-    console.warn(`[Cyclopedia] Error getting ${currencyType} from UI:`, error); 
-    return null; 
-  } 
+// Where each balance sits in the player state; name, icon and tier come from inventory-database.js.
+const CURRENCY_SOURCES = {
+  gold: 'gold',
+  beastCoins: 'coin',
+  dust: 'dust',
+  shards: 'shards',
+  huntingMarks: 'questLog.task.points'
+};
+for (const [key, gameStatePath] of Object.entries(CURRENCY_SOURCES)) {
+  const tip = inventoryTooltips[key] || {};
+  CURRENCY_CONFIG[key] = { gameStatePath, name: tip.displayName || key, icon: tip.icon, rarity: tip.rarity };
 }
-function getCurrencyFromGameState(currencyType) {
-  try {
-    const gameState = globalThis.state?.player?.getSnapshot()?.context;
-    if (!gameState) return null;
-    const paths = CURRENCY_GAME_STATE_PATHS[currencyType];
-    return getFirstNumericGameStateValue(gameState, paths);
-  } catch (error) {
-    return null;
-  }
-}
-function getGoldFromUI() { return getCurrencyFromUI('gold'); }
-
-function getBeastCoinsFromUI() { return getCurrencyFromUI('beastCoins'); }
-function getDustFromGameState() { return getCurrencyFromGameState('dust'); }
-
-function getHuntingMarksFromUI() {
-  try {
-    let huntingMarksSprite = null;
-    // Use for...of loop instead of reduce for better performance
-    for (const selector of HUNTING_MARKS_UI_SELECTORS) {
-      const element = DOMCache.get(selector);
-      if (element) {
-        huntingMarksSprite = element?.tagName === 'IMG' ? element.closest('.sprite.item.relative') : element;
-        break;
-      }
-    }
-    
-    if (!huntingMarksSprite) {
-      const allElements = DOMCache.getAll('*');
-      let huntingMarksText = null;
-      // Use for...of loop instead of Array.from().find() for better performance
-      for (const el of allElements) {
-        if (el.textContent?.includes('Hunting Marks')) {
-          huntingMarksText = el;
-          break;
-        }
-      }
-      huntingMarksSprite = huntingMarksText?.closest('.sprite.item.relative') || huntingMarksText;
-    }
-    
-    if (!huntingMarksSprite) return null;
-    
-    let span = huntingMarksSprite.querySelector('.font-outlined-fill') || 
-               Array.from(huntingMarksSprite.querySelectorAll('span')).find(s => 
-                 /^\d+$/.test(s.textContent.trim().replace(/,/g, ''))
-               );
-    
-    const textContent = span?.textContent || huntingMarksSprite.textContent;
-      const numberMatch = textContent.match(/(\d{1,3}(?:,\d{3})*)/);
-      if (numberMatch) {
-      const parsedValue = parseCommaSeparatedInt(numberMatch[1]);
-        if (parsedValue !== null) return parsedValue;
-    }
-    
-    return null;
-  } catch (error) { 
-      return null;
-    }
-}
-
-function getHuntingMarksFromGameState() {
-  try {
-    const gameState = globalThis.state?.player?.getSnapshot()?.context;
-    if (!gameState) return null;
-    
-    for (const path of HUNTING_MARKS_PATHS) {
-      const value = path.split('?.').reduce((obj, key) => obj?.[key], gameState);
-          if (typeof value === 'number' && !isNaN(value) && value >= 0) return value;
-        }
-        
-      return null;
-  } catch (error) { 
-    return null; 
-  }
-}
-
-async function getHuntingMarksFromProfileAPI() {
-  try {
-    let playerName = globalThis.state?.player?.getSnapshot()?.context?.player?.name;
-    if (!playerName) playerName = globalThis.state?.player?.getSnapshot()?.context?.name;
-    if (!playerName) return null;
-
-    const data = await CyclopediaApi.fetchProfile(playerName);
-    
-    const searchForHuntingMarks = (obj) => {
-      if (!obj || typeof obj !== 'object') return null;
-      
-      for (const [key, value] of Object.entries(obj)) {
-        if (key.toLowerCase().includes('hunting') && key.toLowerCase().includes('mark')) {
-          if (typeof value === 'number' && !isNaN(value) && value >= 0) return value;
-        }
-        if (typeof value === 'object' && value !== null) {
-          const result = searchForHuntingMarks(value);
-          if (result !== null) return result;
-        }
-      }
-      return null;
-    };
-    
-    const huntingMarks = searchForHuntingMarks(data);
-    if (huntingMarks !== null) return huntingMarks;
-    return null;
-  } catch (error) {
-    console.error('[Cyclopedia] Error fetching hunting marks from API:', error);
-    
-    if (typeof context !== 'undefined' && context.api && context.api.ui) {
-      try {
-        context.api.ui.components.createModal({
-          title: 'Connection Error',
-          content: '<p>Failed to fetch hunting marks data. Please check your internet connection and try again.</p>',
-          buttons: [{ text: 'OK', primary: true }]
-        });
-      } catch (modalError) {
-        console.error('[Cyclopedia] Error showing error modal:', modalError);
-      }
-    }
-    
-    return null;
-  }
-}
-
-Object.assign(CURRENCY_CONFIG, {
-  gold: { uiGetter: getGoldFromUI, gameStatePath: 'gold', name: 'Gold', icon: '/assets/icons/goldpile.png', rarity: '1' },
-  beastCoins: { uiGetter: getBeastCoinsFromUI, gameStatePath: 'coin', name: 'Beast Coins', icon: '/assets/icons/beastcoin.png', rarity: '2' },
-  dust: { gameStateGetter: getDustFromGameState, gameStatePath: 'dust', name: 'Dust', icon: '/assets/icons/dust.png', rarity: '3' },
-  huntingMarks: { uiGetter: getHuntingMarksFromUI, gameStateGetter: getHuntingMarksFromGameState, apiGetter: getHuntingMarksFromProfileAPI, gameStatePath: 'questLog.task.points', name: 'Hunting Marks', icon: 'sprite://35572', rarity: '3' }
-});
 
 async function processLazyLoadQueue() {
   if (cyclopediaState.isProcessingQueue || cyclopediaState.lazyLoadQueue.length === 0) return;
@@ -7085,7 +6903,7 @@ const CreatureListManager = {
         position: relative;
         border-radius: 4px;
         overflow: hidden;
-        background: url('https://bestiaryarena.com/_next/static/media/background-darker.2679c837.png') repeat;
+        background: url('${window.BAAssets.url('background-darker')}') repeat;
         border: 1px solid #808080;
       `;
       return div;
@@ -7275,7 +7093,7 @@ function createCyclopediaRegionHeader(regionName, { iconSrc = null, iconAlt = ''
   header.className = FONT_CONSTANTS.SIZES.BODY;
   Object.assign(header.style, {
     color: 'var(--theme-text, #e6d7b0)',
-    background: "url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat",
+    background: "url('" + window.BAAssets.url('background-regular') + "') repeat",
     border: '6px solid transparent',
     borderColor: COLOR_CONSTANTS.PRIMARY,
     borderImage: `url("${CYCLOPEDIA_ASSETS.frame4}") 6 fill stretch`,
@@ -10205,10 +10023,10 @@ const CyclopediaHomeSearch = (() => {
 
 // 7. DOM/CSS Injection & Entry Points
 // =======================
-const CYCLOPEDIA_BUTTON_CSS = `.cyclopedia-subnav { display: flex; gap: 0; margin-bottom: 0; width: 100%; } nav.cyclopedia-subnav > button.cyclopedia-btn, nav.cyclopedia-subnav > button.cyclopedia-btn:hover, nav.cyclopedia-subnav > button.cyclopedia-btn:focus { background: url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat !important; border: 6px solid transparent !important; border-color: #ffe066 !important; border-image: url('${CYCLOPEDIA_ASSETS.frame4}') 6 fill stretch !important; color: var(--theme-text, #e6d7b0) !important; font-weight: 700 !important; border-radius: 0 !important; box-sizing: border-box !important; transition: color 0.2s, border-image 0.1s !important; font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif !important; outline: none !important; position: relative !important; display: inline-flex !important; align-items: center !important; justify-content: center !important; font-size: 16px !important; padding: 7px 24px !important; cursor: pointer; flex: 1 1 0; min-width: 0; } nav.cyclopedia-subnav > button.cyclopedia-btn.pressed, nav.cyclopedia-subnav > button.cyclopedia-btn:active { border-image: url('https://bestiaryarena.com/_next/static/media/1-frame-pressed.e3fabbc5.png') 6 fill stretch !important; } nav.cyclopedia-subnav > button.cyclopedia-btn.active { border-image: url('https://bestiaryarena.com/_next/static/media/1-frame-pressed.e3fabbc5.png') 6 fill stretch !important; } nav.cyclopedia-subnav > button.cyclopedia-btn[data-tab="home"], nav.cyclopedia-subnav > button.cyclopedia-btn[data-tab="wiki"] { width: 42px !important; height: 42px !important; min-width: 42px !important; min-height: 42px !important; max-width: 42px !important; max-height: 42px !important; flex: 0 0 42px !important; padding: 0 !important; font-size: 12px !important; }`;
+const CYCLOPEDIA_BUTTON_CSS = `.cyclopedia-subnav { display: flex; gap: 0; margin-bottom: 0; width: 100%; } nav.cyclopedia-subnav > button.cyclopedia-btn, nav.cyclopedia-subnav > button.cyclopedia-btn:hover, nav.cyclopedia-subnav > button.cyclopedia-btn:focus { background: url('${window.BAAssets.url('background-regular')}') repeat !important; border: 6px solid transparent !important; border-color: #ffe066 !important; border-image: url('${CYCLOPEDIA_ASSETS.frame4}') 6 fill stretch !important; color: var(--theme-text, #e6d7b0) !important; font-weight: 700 !important; border-radius: 0 !important; box-sizing: border-box !important; transition: color 0.2s, border-image 0.1s !important; font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif !important; outline: none !important; position: relative !important; display: inline-flex !important; align-items: center !important; justify-content: center !important; font-size: 16px !important; padding: 7px 24px !important; cursor: pointer; flex: 1 1 0; min-width: 0; } nav.cyclopedia-subnav > button.cyclopedia-btn.pressed, nav.cyclopedia-subnav > button.cyclopedia-btn:active { border-image: url("${window.BAAssets.url('1-frame-pressed')}") 6 fill stretch !important; } nav.cyclopedia-subnav > button.cyclopedia-btn.active { border-image: url("${window.BAAssets.url('1-frame-pressed')}") 6 fill stretch !important; } nav.cyclopedia-subnav > button.cyclopedia-btn[data-tab="home"], nav.cyclopedia-subnav > button.cyclopedia-btn[data-tab="wiki"] { width: 42px !important; height: 42px !important; min-width: 42px !important; min-height: 42px !important; max-width: 42px !important; max-height: 42px !important; flex: 0 0 42px !important; padding: 0 !important; font-size: 12px !important; }`;
 function injectCyclopediaButtonStyles() { injectCyclopediaStyle('cyclopedia-btn-css', CYCLOPEDIA_BUTTON_CSS); }
 
-const CYCLOPEDIA_BOX_CSS = `.cyclopedia-box { display: flex; flex-direction: column; border: none; background: none; margin-bottom: 16px; min-height: 120px; box-sizing: border-box; } .cyclopedia-box-title { border: 6px solid transparent; border-image: url('https://bestiaryarena.com/_next/static/media/4-frame-top.b7a55115.png') 6 6 0 6 stretch; border-bottom: none; background: #232323; color: #ffe066; font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif; font-size: 15px; font-weight: bold; padding: 4px 12px; text-align: left; letter-spacing: 1px; } .cyclopedia-box-content { flex: 1 1 0; overflow-y: auto; background: url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat; padding: 8px 12px; color: #e6d7b0; font-size: 14px; font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif; min-height: 0; max-height: none; scrollbar-width: thin !important; scrollbar-color: #484848 #222 !important; } .cyclopedia-box-content::-webkit-scrollbar { width: 12px !important; background: transparent !important; } .cyclopedia-box-content::-webkit-scrollbar-thumb { background: url('https://bestiaryarena.com/_next/static/media/scrollbar-handle-vertical.962972d4.png') repeat-y !important; border-radius: 4px !important; } .cyclopedia-box-content::-webkit-scrollbar-corner { background: transparent !important; }`;
+const CYCLOPEDIA_BOX_CSS = `.cyclopedia-box { display: flex; flex-direction: column; border: none; background: none; margin-bottom: 16px; min-height: 120px; box-sizing: border-box; } .cyclopedia-box-title { border: 6px solid transparent; border-image: url('${window.BAAssets.url('4-frame-top')}') 6 6 0 6 stretch; border-bottom: none; background: #232323; color: #ffe066; font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif; font-size: 15px; font-weight: bold; padding: 4px 12px; text-align: left; letter-spacing: 1px; } .cyclopedia-box-content { flex: 1 1 0; overflow-y: auto; background: url("${window.BAAssets.url('background-dark')}") repeat; padding: 8px 12px; color: #e6d7b0; font-size: 14px; font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif; min-height: 0; max-height: none; scrollbar-width: thin !important; scrollbar-color: #484848 #222 !important; } .cyclopedia-box-content::-webkit-scrollbar { width: 12px !important; background: transparent !important; } .cyclopedia-box-content::-webkit-scrollbar-thumb { background: url("${window.BAAssets.url('scrollbar-handle-vertical')}") repeat-y !important; border-radius: 4px !important; } .cyclopedia-box-content::-webkit-scrollbar-corner { background: transparent !important; }`;
 function injectCyclopediaBoxStyles() { injectCyclopediaStyle('cyclopedia-box-css', CYCLOPEDIA_BOX_CSS); }
 
 const CYCLOPEDIA_SELECTED_CSS = `.cyclopedia-selected { background: rgba(255,255,255,0.18) !important; color: inherit !important; } .cyclopedia-box .equipment-portrait .absolute { background: none !important; } .cyclopedia-box .equipment-portrait[data-highlighted="true"] .absolute { background: none !important; } .cyclopedia-box .equipment-portrait .absolute[style*="radial-gradient"] { background: none !important; } .cyclopedia-box .equipment-portrait .absolute[style*="background: radial-gradient"] { background: none !important; } .cyclopedia-box .equipment-portrait .absolute[style*="rgba(0, 0, 0, 0.5)"] { background: none !important; } .cyclopedia-box .equipment-portrait .absolute.bottom-0.left-0 { background: none !important; }`;
@@ -11874,9 +11692,9 @@ function getOwnedMonsterStatus(monster, creatureCanAwaken) {
   const totalGenes = OWNED_STAT_KEYS.reduce((sum, key) => sum + (Number(monster[key]) || 0), 0);
   const isAwakened = creatureCanAwaken && (
     monster.awaken === true || monster.awakened === true || monster.isAwakened === true
-    || Number(monster.tier) >= 6 || Number(monster.starTier) >= 6 || level > 50
+    || Number(monster.tier) >= 6 || Number(monster.starTier) >= 6 || level > CYCLOPEDIA_CAPS.perfectLevel
   );
-  const isMaxAwakened = creatureCanAwaken && level >= 99 && totalGenes >= 100;
+  const isMaxAwakened = creatureCanAwaken && level >= CYCLOPEDIA_CAPS.maxLevel && totalGenes >= CYCLOPEDIA_CAPS.maxGenes;
   let rarity = 1;
   if (totalGenes >= 80) rarity = 5;
   else if (totalGenes >= 70) rarity = 4;
@@ -12411,7 +12229,8 @@ function cyclopediaCenterOutfitSprite(slot, variant = '', tries = 0) {
   sheet.src = src;
 }
 
-const CYCLOPEDIA_CODEX_RARITY_COLORS = { 1: '#c0c0c0', 2: '#00f000', 3: '#20a0ff', 4: '#ff68ff', 5: '#f0f000' }; // game's rarity-N colours
+// The game's rarity-N colours, from inventory-database.js (1-5).
+const CYCLOPEDIA_CODEX_RARITY_COLORS = inventoryDatabase.rarityColors || {};
 
 /**
  * The Codex's fixed data for a creature: `rarity` (1-5, NaN when unknown) and `foil` (a creature can be foil by
@@ -12786,7 +12605,7 @@ function renderCreatureTemplate(name, showShinyPortraits = false, showOldSprites
   abilityIconFrame.style.display = 'flex';
   abilityIconFrame.style.alignItems = 'center';
   abilityIconFrame.style.justifyContent = 'center';
-  abilityIconFrame.style.backgroundImage = "url('https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png')";
+  abilityIconFrame.style.backgroundImage = "url('" + window.BAAssets.url('1-frame') + "')";
   abilityIconFrame.style.backgroundSize = 'cover';
   abilityIconFrame.style.backgroundRepeat = 'no-repeat';
   abilityIconFrame.style.backgroundPosition = 'center';
@@ -13709,7 +13528,7 @@ function renderCreatureTemplate(name, showShinyPortraits = false, showOldSprites
         background: transparent !important;
       }
       #cyclopedia-owned-scroll::-webkit-scrollbar-thumb {
-        background: url('https://bestiaryarena.com/_next/static/media/scrollbar-handle-vertical.962972d4.png') repeat-y !important;
+        background: url('${window.BAAssets.url('scrollbar-handle-vertical')}') repeat-y !important;
         border-radius: 4px !important;
       }
       #cyclopedia-owned-scroll::-webkit-scrollbar-corner {
@@ -13757,9 +13576,9 @@ function createCyclopediaSeasonsLeaderboardLink() {
 const CYCLOPEDIA_SEASON_TAB_BTN_CLASS =
   'focus-style-visible relative whitespace-nowrap px-1 text-center';
 const CYCLOPEDIA_SEASON_TAB_FRAME =
-  'url("https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png") 4 fill';
+  'url("' + window.BAAssets.url('1-frame') + '") 4 fill';
 const CYCLOPEDIA_SEASON_TAB_FRAME_ACTIVE =
-  'url("https://bestiaryarena.com/_next/static/media/1-frame-pressed.e3fabbc5.png") 4 fill';
+  'url("' + window.BAAssets.url('1-frame-pressed') + '") 4 fill';
 
 function setCyclopediaSeasonTabLabel(btn, seasonNum, currentSeason) {
   btn.textContent = '';
@@ -14905,7 +14724,7 @@ function getBisEquipmentMaxFromDatabase() {
   if (progressNames.length > 0) {
     return progressNames.length * 3;
   }
-  return CYCLOPEDIA_SETTINGS.playerStatCaps.bisEquipments;
+  return null; // equipment database not ready yet: shown as '?'
 }
 
 /** Obtainable species names for Perfect/Shiny progress (excludes event/gazer species; see creature-database getShinyProgressCreatureNames). */
@@ -14978,7 +14797,6 @@ function countUniqueEventShinyCreatureGameIds(monsters) {
   return getUniqueOwnedEventShinyCreatureNames(monsters).length;
 }
 
-const CYCLOPEDIA_MAX_VALUES = CYCLOPEDIA_SETTINGS.playerStatCaps;
 
 /**
  * The game's Codex card catalog (docs/game_state_api.md, "Codex"). Read from the game's webpack module found by
@@ -15129,14 +14947,14 @@ function getCyclopediaCodexProgress(profileData) {
 /** Completed-raids max, same formula as the native /profile page: raid rooms with the ladder enabled. */
 function getStaticRaidsMaxFromDatabase() {
   const count = (globalThis.state?.utils?.ROOMS ?? []).filter((r) => r.raid && !r.ladderDisabled).length;
-  return count > 0 ? count : CYCLOPEDIA_MAX_VALUES.raids;
+  return count > 0 ? count : null;
 }
 
 /** Explored-maps max, same formula as the native /profile page: ladder-enabled rooms that are not raids. */
 function getExploredMapsMaxFromDatabase() {
   const rooms = globalThis.state?.utils?.ROOMS ?? [];
   const count = rooms.filter((r) => !r.ladderDisabled && !r.raid).length;
-  return count > 0 ? count : CYCLOPEDIA_MAX_VALUES.exploredMaps;
+  return count > 0 ? count : null;
 }
 
 const CYCLOPEDIA_PROGRESS_STATS = [
@@ -15468,7 +15286,7 @@ function renderCyclopediaPlayerInfo(profileData, options = {}) {
 
   progressStats.forEach(stat => {
     const val = getProfileValue(stat.key);
-    const maxVal = typeof stat.max === 'function' ? stat.max() : stat.max;
+    const maxVal = (typeof stat.max === 'function' ? stat.max() : stat.max) ?? '?';
     const isMax = typeof val === 'number' && val === maxVal;
     let valueStr = (val === null || val === undefined || val === '-')
       ? `-/${maxVal}`
@@ -15918,7 +15736,7 @@ function createStatisticsSection(selectedMap, leaderboardData) {
     padding: '0 1px',
     height: '140px',
     maxHeight: '140px',
-    background: 'url("https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png") repeat'
+    background: 'url("' + window.BAAssets.url('background-dark') + '") repeat'
   });
   
   // Table header
@@ -15928,7 +15746,7 @@ function createStatisticsSection(selectedMap, leaderboardData) {
     height: '25px',
     minHeight: '25px',
     boxSizing: 'border-box',
-    background: 'url("https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png") repeat',
+    background: 'url("' + window.BAAssets.url('background-regular') + '") repeat',
     borderBottom: MAPS_TABLE_HEADER_GRID_BORDER,
     position: 'sticky',
     top: '0',
@@ -16376,7 +16194,7 @@ function createStatisticsSection(selectedMap, leaderboardData) {
     padding: '0 1px',
     height: '140px',
     maxHeight: '140px',
-    background: 'url("https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png") repeat'
+    background: 'url("' + window.BAAssets.url('background-dark') + '") repeat'
   });
   
   // Table header
@@ -16387,7 +16205,7 @@ function createStatisticsSection(selectedMap, leaderboardData) {
     minHeight: '25px',
     boxSizing: 'border-box',
     minWidth: 'max-content',
-    background: 'url("https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png") repeat',
+    background: 'url("' + window.BAAssets.url('background-regular') + '") repeat',
     borderBottom: MAPS_TABLE_HEADER_GRID_BORDER,
     position: 'sticky',
     top: '0',
@@ -16880,7 +16698,7 @@ function createStatisticsSection(selectedMap, leaderboardData) {
   ranksTable.style.padding = '0 1px';
   ranksTable.style.height = '140px';
   ranksTable.style.maxHeight = '140px';
-  ranksTable.style.background = 'url("https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png") repeat';
+  ranksTable.style.background = 'url("' + window.BAAssets.url('background-dark') + '") repeat';
   
   // Table header
   const ranksHeader = document.createElement('div');
@@ -16889,7 +16707,7 @@ function createStatisticsSection(selectedMap, leaderboardData) {
   ranksHeader.style.height = '25px';
   ranksHeader.style.minHeight = '25px';
   ranksHeader.style.boxSizing = 'border-box';
-  ranksHeader.style.background = 'url("https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png") repeat';
+  ranksHeader.style.background = 'url("' + window.BAAssets.url('background-regular') + '") repeat';
   ranksHeader.style.borderBottom = MAPS_TABLE_HEADER_GRID_BORDER;
   ranksHeader.style.position = 'sticky';
   ranksHeader.style.top = '0';
@@ -18749,7 +18567,7 @@ function createMapInfoSection(selectedMap, roomName) {
       countOverlay.style.bottom = '8px';
       countOverlay.style.left = '8px';
       countOverlay.style.right = '8px';
-      countOverlay.style.backgroundImage = 'url("https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png")';
+      countOverlay.style.backgroundImage = 'url("' + window.BAAssets.url('background-regular') + '")';
       countOverlay.style.backgroundRepeat = 'repeat';
       countOverlay.style.backgroundPosition = 'center';
       countOverlay.style.color = '#fff7da';
@@ -18768,7 +18586,7 @@ function createMapInfoSection(selectedMap, roomName) {
       countOverlay.style.padding = '1px 6px';
       countOverlay.style.borderRadius = '4px';
       countOverlay.style.border = '3px solid transparent';
-      countOverlay.style.borderImage = 'url("https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png") 3 fill';
+      countOverlay.style.borderImage = 'url("' + window.BAAssets.url('1-frame') + '") 3 fill';
       const formattedDefeatCount = FormatUtils.compact(defeatCount);
       countOverlay.title = `${FormatUtils.number(Number(defeatCount))} victories`;
       countOverlay.innerHTML = `<span>${formattedDefeatCount}</span><span>victories</span>`;
@@ -18790,7 +18608,7 @@ function createMapInfoSection(selectedMap, roomName) {
     bottom: ${hasOwnCount ? 38 : 8}px;
     left: 8px;
     right: 8px;
-    background-image: url("https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png");
+    background-image: url("${window.BAAssets.url('background-regular')}");
     background-repeat: repeat;
     background-position: center;
     color: #fff7da;
@@ -18806,7 +18624,7 @@ function createMapInfoSection(selectedMap, roomName) {
     padding: 1px 6px;
     border-radius: 4px;
     border: 3px solid transparent;
-    border-image: url("https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png") 3 fill;
+    border-image: url("${window.BAAssets.url('1-frame')}") 3 fill;
   `;
   const makeRecordIcon = (src, alt) => {
     const icon = document.createElement('img');
@@ -21144,45 +20962,14 @@ function createInventoryTabPage(selectedCreature, selectedEquipment, selectedInv
     }
 
     let value = null;
-
-    if (typeof config.uiGetter === 'function') {
-      value = config.uiGetter();
-    }
-
-    if (!value && typeof config.gameStateGetter === 'function') {
-      value = config.gameStateGetter();
-    }
-
-    if ((!value || value === 0) && config.gameStatePath) {
-      const gameState = globalThis.state?.player?.getSnapshot()?.context;
-      if (gameState) {
-        const pathParts = config.gameStatePath.split('.');
-        let current = gameState;
-
-        for (const part of pathParts) {
-          if (current && typeof current === 'object' && part in current) {
-            current = current[part];
-          } else {
-            current = null;
-            break;
-          }
-        }
-
-        if (typeof current === 'number' && !isNaN(current) && current >= 0) {
-          value = current;
-        }
+    const gameState = globalThis.state?.player?.getSnapshot()?.context;
+    if (gameState) {
+      let current = gameState;
+      for (const part of config.gameStatePath.split('.')) {
+        current = current && typeof current === 'object' && part in current ? current[part] : null;
+        if (current === null) break;
       }
-    }
-
-    if ((!value || value === 0) && config.apiGetter && typeof config.apiGetter === 'function') {
-      try {
-        const apiValue = await config.apiGetter();
-        if (typeof apiValue === 'number' && !isNaN(apiValue) && apiValue >= 0) {
-          value = apiValue;
-        }
-      } catch (error) {
-        // API getter failed, continue to next method
-      }
+      if (typeof current === 'number' && !isNaN(current) && current >= 0) value = current;
     }
 
     if (typeof value === 'number' && !isNaN(value) && value >= 0) {
@@ -22008,9 +21795,9 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
       let rankingsTimestamp = null;
       let isLoadingRankings = false;
 
-      const rankingsPanelFrame = 'url("https://bestiaryarena.com/_next/static/media/3-frame.87c349c1.png") 6 fill';
+      const rankingsPanelFrame = 'url("' + window.BAAssets.url('3-frame') + '") 6 fill';
       const rankingsSectionFrame = `url("${CYCLOPEDIA_ASSETS.frame4}") 6 fill stretch`;
-      const rankingsCellFrame = 'url("https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png") 4 fill';
+      const rankingsCellFrame = 'url("' + window.BAAssets.url('1-frame') + '") 4 fill';
       // Column tracks in one place; the table's minimum width is derived from them.
       const rankingsColumns = { rank: 48, playerMin: 150, playerMax: 250, rest: [53, 53, 40, 48, 40, 40, 40, 40, 40, 40, 40] };
       const rankingsPlayerCol = `minmax(${rankingsColumns.playerMin}px, ${rankingsColumns.playerMax}px)`;
@@ -23057,7 +22844,7 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
       align-items: center;
       gap: 6px;
       padding: 3px 4px;
-      background: ${isTop ? 'url("https://bestiaryarena.com/_next/static/media/background-green.be515334.png")' : 'rgba(255, 255, 255, 0.03)'};
+      background: ${isTop ? 'url("' + window.BAAssets.url('background-green') + '")' : 'rgba(255, 255, 255, 0.03)'};
       border-radius: 3px;
       min-width: 0;
       max-width: 100%;
@@ -23416,9 +23203,9 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
         // Create profile button
         const profileButton = document.createElement('button');
         Object.assign(profileButton.style, {
-          background: 'url("https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png") repeat',
+          background: 'url("' + window.BAAssets.url('background-dark') + '") repeat',
           border: '1px solid transparent',
-          borderImage: 'url("https://bestiaryarena.com/_next/static/media/3-frame.87c349c1.png") 1 fill stretch',
+          borderImage: 'url("' + window.BAAssets.url('3-frame') + '") 1 fill stretch',
           color: '#e6d7b0',
           cursor: 'pointer',
           borderRadius: '0',
@@ -23447,11 +23234,11 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
         
         // Add hover effects
         profileButton.addEventListener('mouseenter', () => {
-          profileButton.style.borderImage = 'url("https://bestiaryarena.com/_next/static/media/1-frame-pressed.e3fabbc5.png") 1 fill stretch';
+          profileButton.style.borderImage = 'url("' + window.BAAssets.url('1-frame-pressed') + '") 1 fill stretch';
         });
         
         profileButton.addEventListener('mouseleave', () => {
-          profileButton.style.borderImage = 'url("https://bestiaryarena.com/_next/static/media/3-frame.87c349c1.png") 1 fill stretch';
+          profileButton.style.borderImage = 'url("' + window.BAAssets.url('3-frame') + '") 1 fill stretch';
         });
         
         // Add click handler
@@ -23461,11 +23248,11 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
         
         // Add pressed state
         profileButton.addEventListener('mousedown', () => {
-          profileButton.style.borderImage = 'url("https://bestiaryarena.com/_next/static/media/1-frame-pressed.e3fabbc5.png") 1 fill stretch';
+          profileButton.style.borderImage = 'url("' + window.BAAssets.url('1-frame-pressed') + '") 1 fill stretch';
         });
         
         profileButton.addEventListener('mouseup', () => {
-          profileButton.style.borderImage = 'url("https://bestiaryarena.com/_next/static/media/3-frame.87c349c1.png") 1 fill stretch';
+          profileButton.style.borderImage = 'url("' + window.BAAssets.url('3-frame') + '") 1 fill stretch';
         });
         
         // Add to container
@@ -24481,7 +24268,7 @@ function openCyclopediaModal(options) {
     mainContent.style.display = 'flex';
     mainContent.style.flexDirection = 'column';
     mainContent.style.minHeight = '0';
-    mainContent.style.background = "url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat";
+    mainContent.style.background = "url('" + window.BAAssets.url('background-dark') + "') repeat";
     mainContent.style.justifyContent = 'flex-start';
     mainContent.style.alignItems = 'stretch';
     mainContent.style.height = '100%';

@@ -23,22 +23,22 @@ const COL1_WIDTH = COLUMN_WIDTH - 30;
 const COL3_WIDTH = COLUMN_WIDTH + 30;
 // UI theming (reference: Cyclopedia.js COLOR_CONSTANTS)
 const CHALLENGE_COLORS = { TEXT: '#fff', PRIMARY: '#ffe066', SECONDARY: '#e6d7b0', BORDER: '#444' };
-const CHALLENGE_GREEN_BG = 'https://bestiaryarena.com/_next/static/media/background-green.be515334.png';
-const CHALLENGE_BLUE_BG = 'https://bestiaryarena.com/_next/static/media/background-blue.7259c4ed.png';
-const CHALLENGE_RED_BG = 'https://bestiaryarena.com/_next/static/media/background-red.21d3f4bd.png';
+const CHALLENGE_GREEN_BG = '' + window.BAAssets.url('background-green') + '';
+const CHALLENGE_BLUE_BG = '' + window.BAAssets.url('background-blue') + '';
+const CHALLENGE_RED_BG = '' + window.BAAssets.url('background-red') + '';
 
 /** Shared styles for framed widget boxes (placeholder box, matchmaking panel, etc.) */
-const CHALLENGES_FRAME_BOX_STYLE = 'display: flex; flex-direction: column; flex: 1 1 0; min-height: 0; border: 4px solid transparent; border-image: url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch; border-radius: 6px; overflow: hidden;';
+const CHALLENGES_FRAME_BOX_STYLE = 'display: flex; flex-direction: column; flex: 1 1 0; min-height: 0; border: 4px solid transparent; border-image: url("' + window.BAAssets.url('4-frame') + '") 6 fill stretch; border-radius: 6px; overflow: hidden;';
 
 function applyChallengesCol1BoxLayout(box, flexGrow) {
   box.style.flex = (flexGrow != null ? flexGrow : 1) + ' 1 0';
   box.style.minHeight = '0';
 }
 const CHALLENGES_WIDGET_TITLE_STYLE = 'margin: 0; padding: 2px 8px; text-align: center; color: ' + CHALLENGE_COLORS.TEXT + ';';
-const CHALLENGES_WIDGET_BODY_STYLE = 'flex: 1 1 0; overflow-y: auto; padding: 8px 12px; color: ' + CHALLENGE_COLORS.SECONDARY + '; font-size: 14px; line-height: 1.4; min-height: 0; background: url("https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png") repeat;';
+const CHALLENGES_WIDGET_BODY_STYLE = 'flex: 1 1 0; overflow-y: auto; padding: 8px 12px; color: ' + CHALLENGE_COLORS.SECONDARY + '; font-size: 14px; line-height: 1.4; min-height: 0; background: url("' + window.BAAssets.url('background-dark') + '") repeat;';
 
 /** Subnav styling (Cyclopedia-like). Injected when opening Challenges modal so subnav works without opening Cyclopedia first. */
-const CHALLENGES_SUBNAV_CSS = '.challenges-subnav { display: flex; gap: 0; margin-bottom: 0; width: 100%; } nav.challenges-subnav > button.challenges-btn, nav.challenges-subnav > button.challenges-btn:hover, nav.challenges-subnav > button.challenges-btn:focus { background: url(\'https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png\') repeat !important; border: 6px solid transparent !important; border-color: #ffe066 !important; border-image: url(\'https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png\') 6 fill stretch !important; color: var(--theme-text, #e6d7b0) !important; font-weight: 700 !important; border-radius: 0 !important; box-sizing: border-box !important; transition: color 0.2s, border-image 0.1s !important; font-family: \'Trebuchet MS\', \'Arial Black\', Arial, sans-serif !important; outline: none !important; position: relative !important; display: inline-flex !important; align-items: center !important; justify-content: center !important; font-size: 16px !important; padding: 7px 24px !important; cursor: pointer; flex: 1 1 0; min-width: 0; } nav.challenges-subnav > button.challenges-btn.active { border-image: url(\'https://bestiaryarena.com/_next/static/media/1-frame-pressed.e3fabbc5.png\') 6 fill stretch !important; } nav.challenges-subnav > button.challenges-btn[data-tab="help"] { width: 42px !important; height: 42px !important; min-width: 42px !important; min-height: 42px !important; max-width: 42px !important; max-height: 42px !important; flex: 0 0 42px !important; padding: 0 !important; margin-left: 20px !important; }';
+const CHALLENGES_SUBNAV_CSS = '.challenges-subnav { display: flex; gap: 0; margin-bottom: 0; width: 100%; } nav.challenges-subnav > button.challenges-btn, nav.challenges-subnav > button.challenges-btn:hover, nav.challenges-subnav > button.challenges-btn:focus { background: url(\'' + window.BAAssets.url('background-regular') + '\') repeat !important; border: 6px solid transparent !important; border-color: #ffe066 !important; border-image: url(\'' + window.BAAssets.url('4-frame') + '\') 6 fill stretch !important; color: var(--theme-text, #e6d7b0) !important; font-weight: 700 !important; border-radius: 0 !important; box-sizing: border-box !important; transition: color 0.2s, border-image 0.1s !important; font-family: \'Trebuchet MS\', \'Arial Black\', Arial, sans-serif !important; outline: none !important; position: relative !important; display: inline-flex !important; align-items: center !important; justify-content: center !important; font-size: 16px !important; padding: 7px 24px !important; cursor: pointer; flex: 1 1 0; min-width: 0; } nav.challenges-subnav > button.challenges-btn.active { border-image: url(\'' + window.BAAssets.url('1-frame-pressed') + '\') 6 fill stretch !important; } nav.challenges-subnav > button.challenges-btn[data-tab="help"] { width: 42px !important; height: 42px !important; min-width: 42px !important; min-height: 42px !important; max-width: 42px !important; max-height: 42px !important; flex: 0 0 42px !important; padding: 0 !important; margin-left: 20px !important; }';
 const OBSERVER_DEBOUNCE_DELAY = 250;
 const OBSERVER_MIN_INTERVAL = 100;
 const HEADER_BUTTON_CHECK_INTERVAL = 1000;
@@ -1809,7 +1809,7 @@ function createDeleteRunContextMenu(x, y, entry, onDelete, onClose) {
   var overlay = document.createElement('div');
   overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;z-index:9998;background:transparent;pointer-events:auto;cursor:default;';
   var menu = document.createElement('div');
-  menu.style.cssText = 'position:fixed;left:' + x + 'px;top:' + y + 'px;z-index:9999;min-width:180px;background:url(\'https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png\') repeat;border:4px solid transparent;border-image:url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch;border-radius:6px;padding:10px 12px;box-shadow:0 4px 12px rgba(0,0,0,0.5);';
+  menu.style.cssText = 'position:fixed;left:' + x + 'px;top:' + y + 'px;z-index:9999;min-width:180px;background:url(\'' + window.BAAssets.url('background-dark') + '\') repeat;border:4px solid transparent;border-image:url("' + window.BAAssets.url('4-frame') + '") 6 fill stretch;border-radius:6px;padding:10px 12px;box-shadow:0 4px 12px rgba(0,0,0,0.5);';
   var deleteBtn = document.createElement('button');
   deleteBtn.className = 'pixel-font-14';
   var ctxT = challengesText;
@@ -2688,7 +2688,7 @@ function openChallengesModal(initialTabIndex) {
       ratingCell.textContent = row.rating != null ? row.rating : '—';
       tr.appendChild(ratingCell);
       if (currentName && (row.name || row.key || '').trim() === currentName) {
-        var blueBg = 'https://bestiaryarena.com/_next/static/media/background-blue.7259c4ed.png';
+        var blueBg = '' + window.BAAssets.url('background-blue') + '';
         [rankCell, nameCell, matchesCell, ratingCell].forEach(function(c) {
           c.style.backgroundImage = 'url(' + blueBg + ')';
           c.style.backgroundSize = 'cover';
@@ -2771,7 +2771,7 @@ function openChallengesModal(initialTabIndex) {
   var helpBodyCompact = 'padding: 6px 10px; font-size: 12px; line-height: 1.25;';
   [soloHelpBox, mpHelpBox].forEach(function(box) {
     var body = box.querySelector('.widget-bottom');
-    if (body) body.style.cssText = helpBodyCompact + ' flex: 1 1 0; overflow-y: auto; color: ' + CHALLENGE_COLORS.SECONDARY + '; min-height: 0; background: url("https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png") repeat;';
+    if (body) body.style.cssText = helpBodyCompact + ' flex: 1 1 0; overflow-y: auto; color: ' + CHALLENGE_COLORS.SECONDARY + '; min-height: 0; background: url("' + window.BAAssets.url('background-dark') + '") repeat;';
     var title = box.querySelector('.widget-top');
     if (title) title.style.padding = '1px 6px';
   });
@@ -4012,7 +4012,7 @@ function openChallengesModal(initialTabIndex) {
   personalLeaderboardBody.innerHTML = '<p style="margin:0;color:#888;">' + t('mods.challenges.loading') + '</p>';
   rightCol.appendChild(personalLeaderboardBox);
 
-  var CHALLENGE_BLUE_BG_URL = 'https://bestiaryarena.com/_next/static/media/background-blue.7259c4ed.png';
+  var CHALLENGE_BLUE_BG_URL = '' + window.BAAssets.url('background-blue') + '';
 
   function buildLeaderboardTable(entries, showNameColumn, highlightCurrentUser, onDeleteRun) {
     highlightCurrentUser = highlightCurrentUser && showNameColumn;
@@ -4325,9 +4325,9 @@ function openChallengesModal(initialTabIndex) {
   updateChallengesStartButtonState();
 
   // Roll (map + creatures) / Start as modal footer buttons. Start: close modal then run challenge (sandbox + execute).
-  var CHALLENGE_GREEN_BG = 'https://bestiaryarena.com/_next/static/media/background-green.be515334.png';
-  var CHALLENGE_BLUE_BG = 'https://bestiaryarena.com/_next/static/media/background-blue.7259c4ed.png';
-  var CHALLENGE_RED_BG = 'https://bestiaryarena.com/_next/static/media/background-red.21d3f4bd.png';
+  var CHALLENGE_GREEN_BG = '' + window.BAAssets.url('background-green') + '';
+  var CHALLENGE_BLUE_BG = '' + window.BAAssets.url('background-blue') + '';
+  var CHALLENGE_RED_BG = '' + window.BAAssets.url('background-red') + '';
 
   function initializeChallengesModalChrome(dialog) {
     if (!dialog) return;
@@ -6013,7 +6013,7 @@ function showChallengesToast(message, options) {
       cancelToastBtn.type = 'button';
       cancelToastBtn.setAttribute('aria-label', challengesText('mods.challenges.aria.cancelChallenge'));
       cancelToastBtn.className = 'challenges-btn';
-      cancelToastBtn.style.cssText = 'flex-shrink: 0; padding: 4px 10px; font-size: 12px; cursor: pointer; background: url("' + CHALLENGE_RED_BG + '") repeat !important; border: 3px solid transparent !important; border-image: url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 4 fill stretch !important; color: #fff !important; font-weight: bold;';
+      cancelToastBtn.style.cssText = 'flex-shrink: 0; padding: 4px 10px; font-size: 12px; cursor: pointer; background: url("' + CHALLENGE_RED_BG + '") repeat !important; border: 3px solid transparent !important; border-image: url("' + window.BAAssets.url('4-frame') + '") 4 fill stretch !important; color: #fff !important; font-weight: bold;';
       cancelToastBtn.textContent = typeof options.cancelLabel === 'string' ? options.cancelLabel : challengesText('mods.challenges.cancel');
       cancelToastBtn.addEventListener('click', function(e) {
         e.stopPropagation();

@@ -65,8 +65,8 @@
   const TELEPORTER_GRAY_CONTROL_CLASS = 'pixel-font-14 frame-1 surface-regular bg-grayRegular px-2 py-0.5 text-whiteRegular';
   const TELEPORTER_TOGGLE_BUTTON_CLASS = 'focus-style-visible frame-1 active:frame-pressed-1 surface-regular px-2 py-0.5 pb-[3px] pixel-font-14 text-whiteRegular';
   const CONTEXT_MENU_PANEL_MEDIA = {
-    BACKGROUND: 'https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png',
-    FRAME: 'https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png',
+    BACKGROUND: window.BAAssets.url('background-dark'),
+    FRAME: window.BAAssets.url('4-frame'),
   };
   const CONTEXT_MENU_SHIELD_EVENTS = ['mousedown', 'click', 'pointerdown'];
   const CONTEXT_MENU_BUTTON_LAYOUT = {

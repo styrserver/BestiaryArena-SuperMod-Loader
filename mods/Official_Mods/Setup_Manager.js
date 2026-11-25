@@ -2593,8 +2593,8 @@ const MAP_SHORTCUTS_EDGE_GAP_PX = 4;
 // Above board map labels (z-1..z-10), below native game modals (z-modals = 200).
 const MAP_SHORTCUTS_Z_INDEX = 101;
 const MAP_SHORTCUT_PREVIEW_MEDIA = {
-  FRAME_BORDER: 'https://bestiaryarena.com/_next/static/media/3-frame.87c349c1.png',
-  BACKGROUND_DARK: 'https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png'
+  FRAME_BORDER: window.BAAssets.url('3-frame'),
+  BACKGROUND_DARK: window.BAAssets.url('background-dark')
 };
 
 let activeMapShortcutPreview = null;
@@ -2722,11 +2722,11 @@ function getMapShortcutButtonStyles() {
   return {
     cursor: 'pointer',
     padding: '3px 8px',
-    background: 'url("https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png")',
+    background: 'url("' + window.BAAssets.url('background-regular') + '")',
     backgroundSize: 'auto',
     backgroundRepeat: 'repeat',
     border: '4px solid transparent',
-    borderImage: 'url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 4 stretch',
+    borderImage: 'url("' + window.BAAssets.url('4-frame') + '") 4 stretch',
     borderRadius: '4px',
     color: 'white',
     fontFamily: "'Courier New', monospace",

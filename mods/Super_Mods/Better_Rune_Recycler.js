@@ -767,9 +767,9 @@
     box.style.padding = '0';
     box.style.minHeight = '0';
     box.style.height = '100%';
-    box.style.background = "url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat";
+    box.style.background = "url('" + window.BAAssets.url('background-dark') + "') repeat";
     box.style.border = '4px solid transparent';
-    box.style.borderImage = `url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch`;
+    box.style.borderImage = `url("${window.BAAssets.url('4-frame')}") 6 fill stretch`;
     box.style.borderRadius = '6px';
     box.style.overflow = 'hidden';
     

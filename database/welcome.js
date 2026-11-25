@@ -62,8 +62,8 @@ const WELCOME_ASSETS = {
   stamina: `${ASSET_BASE}stamina.png`
 };
 
-const WELCOME_FRAME_URL = 'https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png';
-const WELCOME_BG_URL = 'https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png';
+const WELCOME_FRAME_URL = window.BAAssets.url('4-frame');
+const WELCOME_BG_URL = window.BAAssets.url('background-dark');
 const WELCOME_DIALOG_SELECTOR = 'div[role="dialog"][data-welcome-dialog="1"]';
 const WELCOME_ENABLED_KEY = 'welcome-enabled';
 const LAST_SEEN_VERSION_KEY = 'ba-last-seen-version';

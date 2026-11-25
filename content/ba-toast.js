@@ -37,8 +37,8 @@
 
   var CONTAINER_ID = 'ba-toast-container';
   var GAP_PX = 6;
-  var ACTION_BG = 'https://bestiaryarena.com/_next/static/media/background-red.21d3f4bd.png';
-  var ACTION_FRAME = 'https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png';
+  var ACTION_BG = window.BAAssets.url('background-red');
+  var ACTION_FRAME = window.BAAssets.url('4-frame');
   var MAX_VISIBLE = 6;
   // Game palette classes (not custom hex), so toasts match the native UI: blue / green / gold / red
   var NAME_CLASSES = { info: 'text-cooldown', success: 'text-valid', warning: 'text-boosted', error: 'text-invalid' };

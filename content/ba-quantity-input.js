@@ -26,7 +26,7 @@
     style.textContent = [
       '.' + BASE_CLASS + ' {',
       '  width: 100%; max-width: 50px; height: 20px;',
-      "  background-image: url('https://bestiaryarena.com/_next/static/media/background-darker.2679c837.png');",
+      "  background-image: url('" + window.BAAssets.url('background-darker') + "');",
       '  background-size: auto; background-repeat: repeat; background-position: center;',
       "  border: none; color: white; font-family: 'Courier New', monospace; font-size: 12px;",
       '  text-align: center; padding: 2px; margin-bottom: 1px; border-radius: 2px;',
@@ -34,7 +34,7 @@
       '}',
       '.' + BASE_CLASS + '::before {',
       "  content: ''; position: absolute; top: -2px; left: -2px; right: -2px; bottom: -2px;",
-      "  background-image: url('https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png');",
+      "  background-image: url('" + window.BAAssets.url('1-frame') + "');",
       '  background-size: 100% 100%; background-repeat: no-repeat; background-position: center;',
       '  z-index: -1; border-radius: 4px;',
       '}',

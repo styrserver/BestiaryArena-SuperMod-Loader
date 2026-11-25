@@ -542,12 +542,12 @@ if (typeof browserAPI === 'undefined') {
     border: 4px solid transparent;
     border-radius: 0;
     cursor: pointer;
-    background: url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat;
+    background: url('${window.BAAssets.url('background-regular')}') repeat;
     color: #ffe066;
     font-weight: 700;
     font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif;
     box-sizing: border-box;
-    border-image: url('https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png') 4 fill stretch;
+    border-image: url('${window.BAAssets.url('4-frame')}') 4 fill stretch;
     transition: color 0.2s, border-image 0.1s;
     outline: none;
     display: inline-flex;
@@ -1415,6 +1415,30 @@ if (typeof browserAPI === 'undefined') {
           console.warn('[BestiaryModAPI] util.unsubscribe failed:', error);
         }
         return false;
+      },
+
+      /** Resolves after `ms` milliseconds (default 0). */
+      sleep: function(ms) {
+        return new Promise(function(resolve) { setTimeout(resolve, ms || 0); });
+      },
+
+      /** Escapes `& < > "` for HTML text and double-quoted attribute values. */
+      escapeHtml: function(text) {
+        return String(text).replace(/[&<>"]/g, function(c) {
+          return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+        });
+      },
+
+      /** Returns `fn` delayed until `ms` ms (default 250) passed since its last call; `.cancel()` drops a pending call. */
+      debounce: function(fn, ms) {
+        var timer = null;
+        function debounced() {
+          var self = this, args = arguments;
+          clearTimeout(timer);
+          timer = setTimeout(function() { timer = null; fn.apply(self, args); }, ms == null ? 250 : ms);
+        }
+        debounced.cancel = function() { clearTimeout(timer); timer = null; };
+        return debounced;
       },
 
       /**

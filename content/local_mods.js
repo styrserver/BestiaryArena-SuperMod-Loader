@@ -215,10 +215,6 @@ function prefersRelaxedLoader() {
   return window.BestiaryPlatform?.prefersRelaxedLoader?.() ?? false;
 }
 
-function prefersDirectModFetchFirst() {
-  return window.BestiaryPlatform?.prefersDirectModFetchFirst?.() ?? false;
-}
-
 function getBrowserExtensionApi() {
   return window.browserAPI || window.chrome || window.browser;
 }
@@ -633,10 +629,6 @@ async function checkFileExists(modName) {
       if (isKnownBundledModPath(modName)) {
         console.log(`[Local Mods] Relaxed loader: assuming bundled mod exists: ${modName}`);
         return true;
-      }
-      if (prefersDirectModFetchFirst()) {
-        console.log(`[Local Mods] Mobile direct-fetch: skipping background existence probe for ${modName}`);
-        return false;
       }
       try {
         const content = await fetchModContentViaBackground(modName);

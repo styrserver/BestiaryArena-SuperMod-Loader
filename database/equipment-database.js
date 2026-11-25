@@ -336,31 +336,10 @@ function buildEquipmentDatabase() {
   };
 }
 
-function waitForGameState(callback, retries = 0, maxRetries = 20) {
-  try {
-    const state = globalThis.state || window.state;
-    const hasPlayerState = state?.player?.getSnapshot;
-    const hasBoardState = state?.board?.getSnapshot;
-    const hasUtils = state?.utils?.getEquipment;
-
-    if (hasPlayerState && hasBoardState && hasUtils) {
-      callback();
-    } else if (retries < maxRetries) {
-      setTimeout(() => waitForGameState(callback, retries + 1, maxRetries), 250);
-    } else {
-      console.warn('[equipment-database.js] Game state not ready after max retries, building database anyway');
-      callback();
-    }
-  } catch (error) {
-    console.error('[equipment-database.js] Error checking game state:', error);
-    if (retries < maxRetries) {
-      setTimeout(() => waitForGameState(callback, retries + 1, maxRetries), 250);
-    } else {
-      console.warn('[equipment-database.js] Building database despite errors');
-      callback();
-    }
-  }
-}
+const waitForGameState = (callback) => globalThis.BAWait ? globalThis.BAWait.gameState(callback, {
+  label: 'equipment-database.js',
+  ready: (state) => !!(state?.player?.getSnapshot && state?.board?.getSnapshot && state?.utils?.getEquipment)
+}) : setTimeout(callback, 0); // no loader (offline tools): build with whatever exists
 
 let equipmentDatabase = null;
 let databaseInitialized = false;

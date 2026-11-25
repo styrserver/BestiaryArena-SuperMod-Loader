@@ -455,10 +455,10 @@ function toggleTracking() {
   const btn = document.getElementById(BUTTON_ID);
   if (btn) {
     if (config.enabled) {
-      btn.style.background = "url('https://bestiaryarena.com/_next/static/media/background-green.be515334.png') repeat";
+      btn.style.background = "url('" + window.BAAssets.url('background-green') + "') repeat";
       btn.style.backgroundSize = "auto";
     } else {
-      btn.style.background = "url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat";
+      btn.style.background = "url('" + window.BAAssets.url('background-regular') + "') repeat";
     }
   }
   
@@ -637,10 +637,10 @@ function createConfigPanel() {
           const btn = document.getElementById(BUTTON_ID);
           if (btn) {
             if (config.enabled) {
-              btn.style.background = "url('https://bestiaryarena.com/_next/static/media/background-green.be515334.png') repeat";
+              btn.style.background = "url('" + window.BAAssets.url('background-green') + "') repeat";
               btn.style.backgroundSize = "auto";
             } else {
-              btn.style.background = "url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat";
+              btn.style.background = "url('" + window.BAAssets.url('background-regular') + "') repeat";
             }
           }
           
@@ -719,10 +719,10 @@ function init() {
     const btn = document.getElementById(BUTTON_ID);
     if (btn) {
       if (config.enabled) {
-        btn.style.background = "url('https://bestiaryarena.com/_next/static/media/background-green.be515334.png') repeat";
+        btn.style.background = "url('" + window.BAAssets.url('background-green') + "') repeat";
         btn.style.backgroundSize = "auto";
       } else {
-        btn.style.background = "url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat";
+        btn.style.background = "url('" + window.BAAssets.url('background-regular') + "') repeat";
       }
     }
   }, 100);

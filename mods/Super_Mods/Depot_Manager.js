@@ -1777,7 +1777,7 @@ function setupDepotModalResponsiveLayout(modalRef, contentRoot) {
 function createDepotModalColumnFrame(titleText) {
   const frame = document.createElement('div');
   frame.className = 'depot-modal-column';
-  frame.style.cssText = 'flex:1 1 0;min-width:0;display:flex;flex-direction:column;min-height:0;height:100%;box-sizing:border-box;background:url("https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png") repeat;border:4px solid transparent;border-image:url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch;border-radius:6px;overflow:hidden;';
+  frame.style.cssText = 'flex:1 1 0;min-width:0;display:flex;flex-direction:column;min-height:0;height:100%;box-sizing:border-box;background:url("' + window.BAAssets.url('background-dark') + '") repeat;border:4px solid transparent;border-image:url("' + window.BAAssets.url('4-frame') + '") 6 fill stretch;border-radius:6px;overflow:hidden;';
   const titleEl = document.createElement('h2');
   titleEl.className = 'widget-top widget-top-text pixel-font-16';
   titleEl.style.cssText = 'margin:0;padding:2px 8px;height:24px;min-height:24px;max-height:24px;display:flex;align-items:center;justify-content:center;text-align:center;color:#fff;box-sizing:border-box;';

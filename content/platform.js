@@ -50,11 +50,6 @@
     return !prefersRelaxedLoader();
   }
 
-  // Mobile WebExtensions: content-script bridge fetch first; page/background fetch may fail on WebKit.
-  function prefersDirectModFetchFirst() {
-    return false;
-  }
-
   function prefersLongPressContextMenu() {
     const override = getSessionLongPressOverride();
     if (override !== null) return override;
@@ -177,7 +172,6 @@
   window.BestiaryPlatform = {
     isMobileWebExtension,
     prefersRelaxedLoader,
-    prefersDirectModFetchFirst,
     useStrictLoaderCompletion,
     setPageExtensionFetchWorks,
     getPageExtensionFetchWorks: () => pageExtensionFetchWorks,

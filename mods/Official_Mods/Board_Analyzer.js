@@ -49,7 +49,7 @@ const CHART_BATCH_SIZE = 10;
 const CHART_MIN_HEIGHT = 20;
 const CHART_MAX_HEIGHT = 120;
 const CHART_MAX_BARS = 1000; // Limit chart to prevent performance issues with large analyses
-const CHART_BACKGROUND_STYLE = "url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat";
+const CHART_BACKGROUND_STYLE = "url('" + window.BAAssets.url('background-dark') + "') repeat";
 const SKIPPED_RUN_COLOR = '#9b59b6';
 
 const BOARD_ANALYZER_UI = {
@@ -1455,7 +1455,7 @@ function injectCustomStyles() {
   const styleElement = document.createElement('style');
   styleElement.textContent = `
     #${BUTTON_ID} {
-      background: url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat !important;
+      background: url('${window.BAAssets.url('background-regular')}') repeat !important;
       background-size: auto !important;
     }
     
@@ -5159,7 +5159,7 @@ function init() {
     primary: false,
     onClick: showConfigAndPrepareAnalysis,
     style: {
-      background: "url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat",
+      background: "url('" + window.BAAssets.url('background-regular') + "') repeat",
       backgroundSize: 'auto'
     }
   });

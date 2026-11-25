@@ -651,6 +651,26 @@ clientScript.onload = function() {
 }
 
 function beginPageInjection() {
+  // Shared game-media URL resolver (window.BAAssets): before client.js and every mod that styles with game images.
+  const assetsScript = injectScript('content/ba-assets.js');
+  assetsScript.onload = injectWaitScript;
+  assetsScript.onerror = function(error) {
+    console.warn('[Injector] ba-assets.js failed to load; game images fall back to nothing:', error);
+    injectWaitScript();
+  };
+}
+
+// Shared game-state wait (window.BAWait): the databases build their caches from it.
+function injectWaitScript() {
+  const waitScript = injectScript('content/ba-wait.js');
+  waitScript.onload = injectPlatformScript;
+  waitScript.onerror = function(error) {
+    console.warn('[Injector] ba-wait.js failed to load; databases will not build:', error);
+    injectPlatformScript();
+  };
+}
+
+function injectPlatformScript() {
   const platformScript = injectScript('content/platform.js');
   platformScript.onload = startInjectionChain;
   platformScript.onerror = function(error) {

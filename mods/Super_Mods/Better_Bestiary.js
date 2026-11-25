@@ -65,7 +65,7 @@
   const DEPOT_REMOVE_FROM_ATTR = `data-${NS}-depot-remove-from`;
   const DEPOT_SELECTED_CLASS = `${NS}-depot-selected`;
   const DEPOT_GREEN_BACKGROUND_URL =
-    'https://bestiaryarena.com/_next/static/media/background-green.be515334.png';
+    window.BAAssets.url('background-green');
   const FOOTER_BTN_CLASS =
     'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1 active:frame-pressed-1 surface-regular gap-1 px-2 py-0.5 pb-[3px] pixel-font-14 [&_svg]:size-[11px] [&_svg]:mb-[1px] [&_svg]:mt-[2px]';
   const FOOTER_BTN_SEND_CLASS =
@@ -931,6 +931,15 @@
     );
   }
 
+  /**
+   * Toggle one creature through the game's own Ctrl+click. The game builds each new selection from
+   * the last rendered one, so wait a frame before the next toggle or only the last one survives.
+   */
+  async function ctrlClickCreature(button) {
+    button.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, ctrlKey: true }));
+    await waitFrame();
+  }
+
   async function clearSelection(modal) {
     const clearBtn = findClearSelectionButton(modal);
     if (clearBtn) {
@@ -939,97 +948,30 @@
       return;
     }
 
-    let toggled = false;
     for (const btn of getCreatureButtons(modal)) {
-      if (!isSlotSelected(btn)) continue;
-      const onSelectId = findFiberPropCallback(btn, 'onSelectId');
-      if (onSelectId) onSelectId();
-      else btn.click();
-      toggled = true;
+      if (isSlotSelected(btn)) await ctrlClickCreature(btn);
     }
-    if (toggled) await waitFrame();
   }
 
-  function openContextMenu(button) {
-    const rect = button.getBoundingClientRect();
-    button.dispatchEvent(
-      new MouseEvent('contextmenu', {
-        bubbles: true,
-        cancelable: true,
-        view: window,
-        button: 2,
-        clientX: rect.left + rect.width / 2,
-        clientY: rect.top + rect.height / 2,
-      }),
-    );
-  }
+  async function batchSelectButtons(modal, buttons) {
+    const hasSelection = () => getCreatureButtons(modal).some(isSlotSelected);
 
-  function findSelectMenuItem() {
-    return [...document.querySelectorAll('[role="menuitem"]')].find((el) => {
-      const text = el.textContent.replace(/\s+/g, ' ').trim();
-      return (
-        /^Selecionar \.\.\.$/i.test(text) ||
-        /^Select \.\.\.$/i.test(text) ||
-        (/^Selecionar$/i.test(text) && !/todos|all/i.test(text)) ||
-        (/^Select$/i.test(text) && !/all/i.test(text))
-      );
-    });
-  }
-
-  async function waitForSelectMenuItem(timeout = 800) {
-    const start = Date.now();
-    while (Date.now() - start < timeout) {
-      const item = findSelectMenuItem();
-      if (item) return item;
-      await tick(25);
+    // Start with onSelectId: a first Ctrl+click would also select the focused creature.
+    if (!hasSelection()) {
+      findFiberPropCallback(buttons[0], 'onSelectId')?.();
+      await waitFrame();
     }
-    return null;
-  }
+    if (!hasSelection()) return 0;
 
-  async function enableMultiselectViaContextMenu(button) {
-    openContextMenu(button);
-    const menuItem = await waitForSelectMenuItem();
-    if (!menuItem) return false;
-    menuItem.click();
-    await tick(80);
-    return isSlotSelected(button);
-  }
-
-  async function ensureMultiselectMode(sampleButton) {
-    if (findFiberPropCallback(sampleButton, 'onSelectId')) return true;
-    return enableMultiselectViaContextMenu(sampleButton);
-  }
-
-  async function batchSelectButtons(buttons) {
-    const toSelect = buttons.filter((btn) => !isSlotSelected(btn));
-    if (toSelect.length === 0) return buttons.length;
-
-    if (!(await ensureMultiselectMode(toSelect[0]))) {
-      return buttons.filter(isSlotSelected).length;
+    for (const btn of buttons) {
+      if (!isSlotSelected(btn)) await ctrlClickCreature(btn);
     }
 
-    let usedCallback = false;
-    const leftovers = [];
-    for (const btn of toSelect) {
-      const onSelectId = findFiberPropCallback(btn, 'onSelectId');
-      if (onSelectId) {
-        onSelectId();
-        usedCallback = true;
-      } else {
-        leftovers.push(btn);
-      }
+    // These selections feed bulk selling: never leave a non-match selected.
+    const wanted = new Set(buttons);
+    for (const btn of getCreatureButtons(modal)) {
+      if (!wanted.has(btn) && isSlotSelected(btn)) await ctrlClickCreature(btn);
     }
-
-    if (usedCallback) await waitFrame();
-
-    for (const btn of leftovers) {
-      if (isSlotSelected(btn)) continue;
-      if (await enableMultiselectViaContextMenu(btn)) {
-        usedCallback = true;
-      }
-    }
-
-    if (leftovers.length > 0 && usedCallback) await waitFrame();
 
     return buttons.filter(isSlotSelected).length;
   }
@@ -1070,7 +1012,7 @@
         return;
       }
 
-      const selectedCount = await batchSelectButtons(targetButtons);
+      const selectedCount = await batchSelectButtons(modal, targetButtons);
 
       if (selectedCount === 0) {
         console.warn('[Better Bestiary] Could not select any creatures — try right-clicking one manually first');

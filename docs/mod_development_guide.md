@@ -520,6 +520,12 @@ const sub = globalThis.state.board.select(s => s.context.floor).subscribe(onFloo
 api.util.unsubscribe(sub);   // handles both shapes, null-safe
 ```
 
+#### `api.util.sleep(ms)`, `api.util.escapeHtml(text)`, `api.util.debounce(fn, ms)`
+
+Shared one-liners every mod used to define for itself. `sleep` resolves after `ms`; `escapeHtml` escapes `& < > "`
+for HTML text and double-quoted attributes; `debounce` returns `fn` delayed until `ms` (default 250) after its last
+call, with `.cancel()` for `cleanup()`. Use them in new code and swap a mod's own copy for them when you touch it.
+
 #### `api.util.formatItemCount(count)`
 
 Formats an item count exactly like the game's inventory badges: below 1000 as-is,
@@ -878,6 +884,14 @@ For more details on the game state API, see the [Game State API Documentation](g
 ### Community event competitions
 
 `content/event-competition.js` exposes `window.EventCompetition`, a config-driven framework for Firebase-backed floor/rank leaderboards (join flow, modal UI, auto-submit on victory, raid timer). Better Highscores registers Tibia Ball League via a thin adapter; future timed events can call `EventCompetition.register(config, deps)` with their own `roomId`, Firebase paths, floor ranges, and `i18nPrefix`. The script is injected on demand (see **On-demand scripts** above), only when a mod that depends on it runs, so a mod that needs it must be listed in `MOD_SCRIPT_DEPENDENCIES` in `local_mods.js`. The framework also contains a one-shot nudge toast for a known live event when no adapter is registered (e.g. Better Highscores disabled). Because the script is no longer loaded for players who do not use Better Highscores, that nudge only runs for the next event if the loader is changed to inject `event-competition.js` while such an event is live.
+
+### Game images: use `window.BAAssets`
+
+The game's frames and backgrounds live at `/_next/static/media/<name>.<hash>.png`, and the hash changes when the game
+rebuilds the image, so a hardcoded URL silently 404s after an update. `content/ba-assets.js` exposes
+`window.BAAssets.url('1-frame')` (and `.css('1-frame')` for a `url("…")` value). It reads the live URL from the game's
+stylesheets and falls back to the last known hash. Do not paste `_next/static/media/...` URLs into a mod; if the image
+is missing from `FALLBACK` in `ba-assets.js`, add it. `node tools/check-media-hashes.mjs` fails on any stale hash.
 
 ### Toasts: use `window.BAToast`
 
@@ -1291,11 +1305,13 @@ User scripts stored in localStorage are automatically integrated:
 
 0. **`content/ba-logger.js`** — first script in the page (MAIN) world; installs the `console` proxy (see [Logging & Error Log](#logging--error-log-popup-debug))
 1. **`content/extension-url.js`** — encodes extension URLs and maps logical mod paths (e.g. `Official Mods/`) to on-disk paths
-2. **`content/platform.js`** — sets `window.BestiaryPlatform` (desktop strict vs mobile relaxed loader)
-3. **`content/client.js`** — `BestiaryModAPI`, UI components
-4. **`content/mod-coordination.mjs`** — loaded as `text/javascript` (IIFE, not `type="module"`)
-5. **`content/ba-toast.js`** — the shared toast stack (`window.BAToast`)
-6. **`content/local_mods.js`** — mod discovery, batch execution, completion signal
+2. **`content/ba-assets.js`** — `window.BAAssets.url('1-frame')`, the game's hashed media URLs (read from its stylesheets)
+3. **`content/ba-wait.js`** — `window.BAWait.gameState(cb, options)`, the retry wait the databases build their caches from
+4. **`content/platform.js`** — sets `window.BestiaryPlatform` (desktop strict vs mobile relaxed loader)
+5. **`content/client.js`** — `BestiaryModAPI`, UI components
+6. **`content/mod-coordination.mjs`** — loaded as `text/javascript` (IIFE, not `type="module"`)
+7. **`content/ba-toast.js`** — the shared toast stack (`window.BAToast`)
+8. **`content/local_mods.js`** — mod discovery, batch execution, completion signal
 
 `utility_injector.js` (at `document_idle`) loads `ba-sandbox-utils.mjs` (same IIFE / non-module rule).
 

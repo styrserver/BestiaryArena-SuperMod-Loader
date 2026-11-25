@@ -1902,8 +1902,8 @@ let CROSSING_THE_LINE_ORC_SUCCESS_FRAME_MS = 0;
 const CROSSING_THE_LINE_OK_BORDER_CLASS = 'quests-crossing-tile-ok-border';
 let CROSSING_THE_LINE_OK_BORDER_COLOR = '';
 const COPPER_KEY_CORYM_SUCCESS_EFFECT_CLASS = QUEST_TILE_SUCCESS_EFFECT_CLASS;
-let GAME_FRAME_BORDER_IMAGE = 'url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 4 stretch';
-let GAME_FRAME_BACKGROUND = 'url("https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png")';
+let GAME_FRAME_BORDER_IMAGE = 'url("' + window.BAAssets.url('4-frame') + '") 4 stretch';
+let GAME_FRAME_BACKGROUND = 'url("' + window.BAAssets.url('background-regular') + '")';
 let HONEYFLOWER_TOWER_ROOM_NAME = '';
 let APPRENTICE_SHENG_ROOM_NAME = '';
 let APPRENTICE_SHENG_TILE_INDEX = null;
@@ -3841,7 +3841,7 @@ function createNPCCooldownManager() {
         #${barId} .quests-boss-hp-bg {
           position: absolute;
           inset: 0;
-          background: url("https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png");
+          background: url("${window.BAAssets.url('background-regular')}");
           background-size: auto;
           background-repeat: repeat;
           opacity: 0.92;
@@ -3854,7 +3854,7 @@ function createNPCCooldownManager() {
           z-index: 1;
           box-sizing: border-box;
           border: 4px solid transparent;
-          border-image: url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 4 stretch;
+          border-image: url("${window.BAAssets.url('4-frame')}") 4 stretch;
           border-radius: 4px;
           padding: 6px 10px;
           display: flex;
@@ -7152,9 +7152,9 @@ function createNPCCooldownManager() {
       padding: 2px 4px;
       width: 100%;
       box-sizing: border-box;
-      background: url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat;
+      background: url('${window.BAAssets.url('background-regular')}') repeat;
       border: 4px solid transparent;
-      border-image: url('https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png') 6 fill stretch;
+      border-image: url('${window.BAAssets.url('4-frame')}') 6 fill stretch;
       margin-top: auto;
       flex-shrink: 0;
     `;
@@ -11394,9 +11394,9 @@ function createNPCCooldownManager() {
     menu.style.top = `${y}px`;
     menu.style.zIndex = MENU_Z_PANEL;
     menu.style.minWidth = minWidth;
-    menu.style.background = "url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat";
+    menu.style.background = "url('" + window.BAAssets.url('background-dark') + "') repeat";
     menu.style.border = '4px solid transparent';
-    menu.style.borderImage = `url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch`;
+    menu.style.borderImage = `url("${window.BAAssets.url('4-frame')}") 6 fill stretch`;
     menu.style.borderRadius = '6px';
     menu.style.padding = '8px';
     menu.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.5)';
@@ -11801,8 +11801,8 @@ function createNPCCooldownManager() {
      * @returns {HTMLElement} Framed box element
      */
     createFramedBox({ 
-      background = "url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat",
-      borderImage = "url('https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png') 6 fill stretch",
+      background = "url('" + window.BAAssets.url('background-regular') + "') repeat",
+      borderImage = "url('" + window.BAAssets.url('4-frame') + "') 6 fill stretch",
       padding = '2px 4px',
       minHeight = '80px'
     } = {}) {
@@ -11838,9 +11838,9 @@ function createNPCCooldownManager() {
         padding: 4px 8px;
         font-size: 12px;
         font-family: inherit;
-        background: url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat;
+        background: url('${window.BAAssets.url('background-dark')}') repeat;
         border: 2px solid transparent;
-        border-image: url('https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png') 6 fill stretch;
+        border-image: url('${window.BAAssets.url('4-frame')}') 6 fill stretch;
         color: rgb(230, 215, 176);
         overflow-y: auto;
       `;
@@ -11871,9 +11871,9 @@ function createNPCCooldownManager() {
         padding: 4px 12px;
         height: 27px;
         font-size: 12px;
-        background: url('https://bestiaryarena.com/_next/static/media/background-green.be515334.png') repeat;
+        background: url('${window.BAAssets.url('background-green')}') repeat;
         border: 2px solid transparent;
-        border-image: url('https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png') 6 fill stretch;
+        border-image: url('${window.BAAssets.url('4-frame')}') 6 fill stretch;
         color: rgb(230, 215, 176);
         cursor: pointer;
       `;
@@ -12225,9 +12225,9 @@ function createNPCCooldownManager() {
     box.style.padding = '0';
     box.style.minHeight = '0';
     box.style.height = '100%';
-    box.style.background = "url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat";
+    box.style.background = "url('" + window.BAAssets.url('background-dark') + "') repeat";
     box.style.border = '4px solid transparent';
-    box.style.borderImage = `url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch`;
+    box.style.borderImage = `url("${window.BAAssets.url('4-frame')}") 6 fill stretch`;
     box.style.borderRadius = '6px';
     box.style.overflow = 'hidden';
     
@@ -12550,12 +12550,12 @@ function createNPCCooldownManager() {
 
               if (isEnabled) {
                 toggleButton.textContent = `${itemName} Enabled`;
-                toggleButton.style.setProperty('background-image', 'url("https://bestiaryarena.com/_next/static/media/background-green.be515334.png")', 'important');
+                toggleButton.style.setProperty('background-image', 'url("' + window.BAAssets.url('background-green') + '")', 'important');
                 toggleButton.style.setProperty('background-repeat', 'repeat', 'important');
                 toggleButton.style.setProperty('border-color', '#4CAF50', 'important'); // Green border
               } else {
                 toggleButton.textContent = `Enable ${itemName}`;
-                toggleButton.style.setProperty('background-image', 'url("https://bestiaryarena.com/_next/static/media/background-red.21d3f4bd.png")', 'important');
+                toggleButton.style.setProperty('background-image', 'url("' + window.BAAssets.url('background-red') + '")', 'important');
                 toggleButton.style.setProperty('background-repeat', 'repeat', 'important');
                 toggleButton.style.setProperty('border-color', '#f44336', 'important'); // Red border
               }
@@ -12603,7 +12603,7 @@ function createNPCCooldownManager() {
             openButton.className = 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1 active:frame-pressed-1 surface-regular gap-1 px-3 py-1 pixel-font-12';
             openButton.style.cssText = 'cursor: pointer; white-space: nowrap; box-sizing: border-box; height: 28px; font-size: 12px; margin-top: auto; margin-bottom: 4px; flex-shrink: 0; align-self: center;';
             openButton.textContent = 'Open Present';
-            openButton.style.setProperty('background-image', 'url("https://bestiaryarena.com/_next/static/media/background-red.21d3f4bd.png")', 'important');
+            openButton.style.setProperty('background-image', 'url("' + window.BAAssets.url('background-red') + '")', 'important');
             openButton.style.setProperty('background-repeat', 'repeat', 'important');
             openButton.style.setProperty('border-color', '#f44336', 'important');
             openButton.addEventListener('click', async () => {
@@ -13387,9 +13387,9 @@ function createNPCCooldownManager() {
           box.style.padding = '0';
           box.style.minHeight = '0';
           box.style.height = '100%';
-          box.style.background = 'url("https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png") repeat';
+          box.style.background = 'url("' + window.BAAssets.url('background-dark') + '") repeat';
           box.style.border = '4px solid transparent';
-          box.style.borderImage = 'url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch';
+          box.style.borderImage = 'url("' + window.BAAssets.url('4-frame') + '") 6 fill stretch';
           box.style.borderRadius = '6px';
           box.style.overflow = 'hidden';
 
@@ -13429,9 +13429,9 @@ function createNPCCooldownManager() {
           box.style.padding = '0';
           box.style.minHeight = '0';
           box.style.height = '100%';
-          box.style.background = 'url("https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png") repeat';
+          box.style.background = 'url("' + window.BAAssets.url('background-dark') + '") repeat';
           box.style.border = '4px solid transparent';
-          box.style.borderImage = 'url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch';
+          box.style.borderImage = 'url("' + window.BAAssets.url('4-frame') + '") 6 fill stretch';
           box.style.borderRadius = '6px';
           box.style.overflow = 'hidden';
 
@@ -14207,7 +14207,7 @@ function createNPCCooldownManager() {
         padding: 4px 6px;
         background-color: #333;
         border: 4px solid transparent;
-        border-image: url("https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png") 4 fill;
+        border-image: url("${window.BAAssets.url('1-frame')}") 4 fill;
         color: rgb(255, 255, 255);
         font-family: inherit;
         font-size: 13px;
@@ -14232,12 +14232,12 @@ function createNPCCooldownManager() {
       // Remove focus outline/border
       textarea.addEventListener('focus', () => {
         textarea.style.outline = 'none';
-        textarea.style.borderImage = 'url("https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png") 4 fill';
+        textarea.style.borderImage = 'url("' + window.BAAssets.url('1-frame') + '") 4 fill';
       });
       
       textarea.addEventListener('blur', () => {
         textarea.style.outline = 'none';
-        textarea.style.borderImage = 'url("https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png") 4 fill';
+        textarea.style.borderImage = 'url("' + window.BAAssets.url('1-frame') + '") 4 fill';
       });
       
       const sendButton = document.createElement('button');
@@ -14252,9 +14252,9 @@ function createNPCCooldownManager() {
         display: flex;
         align-items: center;
         justify-content: center;
-        background: url('https://bestiaryarena.com/_next/static/media/background-blue.7259c4ed.png') center center / cover;
+        background: url('${window.BAAssets.url('background-blue')}') center center / cover;
         border: 4px solid transparent;
-        border-image: url("https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png") 4 fill;
+        border-image: url("${window.BAAssets.url('1-frame')}") 4 fill;
         color: rgb(255, 255, 255);
         cursor: pointer;
         font-family: inherit;
@@ -15590,7 +15590,7 @@ function createNPCCooldownManager() {
         padding: 4px 6px;
         background-color: #333;
         border: 4px solid transparent;
-        border-image: url("https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png") 4 fill;
+        border-image: url("${window.BAAssets.url('1-frame')}") 4 fill;
         color: rgb(255, 255, 255);
         font-family: inherit;
         font-size: 13px;
@@ -15615,12 +15615,12 @@ function createNPCCooldownManager() {
       // Remove focus outline/border
       textarea.addEventListener('focus', () => {
         textarea.style.outline = 'none';
-        textarea.style.borderImage = 'url("https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png") 4 fill';
+        textarea.style.borderImage = 'url("' + window.BAAssets.url('1-frame') + '") 4 fill';
       });
 
       textarea.addEventListener('blur', () => {
         textarea.style.outline = 'none';
-        textarea.style.borderImage = 'url("https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png") 4 fill';
+        textarea.style.borderImage = 'url("' + window.BAAssets.url('1-frame') + '") 4 fill';
       });
       // Handle Enter key
       textarea.addEventListener('keydown', (e) => {
@@ -15642,9 +15642,9 @@ function createNPCCooldownManager() {
         display: flex;
         align-items: center;
         justify-content: center;
-        background: url('https://bestiaryarena.com/_next/static/media/background-blue.7259c4ed.png') center center / cover;
+        background: url('${window.BAAssets.url('background-blue')}') center center / cover;
         border: 4px solid transparent;
-        border-image: url("https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png") 4 fill;
+        border-image: url("${window.BAAssets.url('1-frame')}") 4 fill;
         color: rgb(255, 255, 255);
         cursor: pointer;
         font-family: inherit;
@@ -16661,7 +16661,7 @@ function createNPCCooldownManager() {
     const textarea = document.createElement('textarea');
     textarea.setAttribute('wrap', 'off');
     textarea.placeholder = placeholder;
-    textarea.style.cssText = 'flex:1 1 0;min-width:0;height:28px;max-height:28px;min-height:28px;padding:4px 6px;background-color:#333;border:4px solid transparent;border-image:url("https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png") 4 fill;color:rgb(255,255,255);font-size:13px;resize:none;box-sizing:border-box;outline:none;';
+    textarea.style.cssText = 'flex:1 1 0;min-width:0;height:28px;max-height:28px;min-height:28px;padding:4px 6px;background-color:#333;border:4px solid transparent;border-image:url("' + window.BAAssets.url('1-frame') + '") 4 fill;color:rgb(255,255,255);font-size:13px;resize:none;box-sizing:border-box;outline:none;';
 
     const sendBtn = document.createElement('button');
     sendBtn.textContent = 'Send';
@@ -16675,9 +16675,9 @@ function createNPCCooldownManager() {
       display: flex;
       align-items: center;
       justify-content: center;
-      background: url('https://bestiaryarena.com/_next/static/media/background-blue.7259c4ed.png') center center / cover;
+      background: url('${window.BAAssets.url('background-blue')}') center center / cover;
       border: 4px solid transparent;
-      border-image: url("https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png") 4 fill;
+      border-image: url("${window.BAAssets.url('1-frame')}") 4 fill;
       color: rgb(255, 255, 255);
       cursor: pointer;
       font-family: inherit;
@@ -18959,7 +18959,7 @@ function createNPCCooldownManager() {
     // Bleed 8px sideways to cover the scroll wrapper's horizontal padding, and
     // back the tiled texture with a solid opaque colour + a shadow so scrolled
     // rows are fully hidden behind the pinned header instead of showing through.
-    header.style.cssText = `${gridRowStyle}width:calc(100% + 16px);max-width:none;margin:0 -8px;display:grid;grid-template-columns:${ARENA_LEADERBOARD_GRID_COLUMNS};gap:6px;padding:8px 8px 6px;border-bottom:1px solid rgba(255,255,255,0.18);align-items:end;position:sticky;top:0;z-index:5;background-color:#191919;background-image:url("https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png");background-repeat:repeat;box-shadow:0 6px 8px -4px rgba(0,0,0,0.6);color:rgb(255,255,255);`;
+    header.style.cssText = `${gridRowStyle}width:calc(100% + 16px);max-width:none;margin:0 -8px;display:grid;grid-template-columns:${ARENA_LEADERBOARD_GRID_COLUMNS};gap:6px;padding:8px 8px 6px;border-bottom:1px solid rgba(255,255,255,0.18);align-items:end;position:sticky;top:0;z-index:5;background-color:#191919;background-image:url("${window.BAAssets.url('background-dark')}");background-repeat:repeat;box-shadow:0 6px 8px -4px rgba(0,0,0,0.6);color:rgb(255,255,255);`;
 
     const headerLabels = ['#', 'Player', 'Rank', 'Missions\ncompleted'];
     headerLabels.forEach((label, colIndex) => {
@@ -19077,7 +19077,7 @@ function createNPCCooldownManager() {
     const row = document.createElement('div');
     row.className = header ? 'pixel-font-16 text-whiteRegular' : 'pixel-font-16';
     row.style.cssText = header
-      ? `width:calc(100% + 16px);margin:0 -8px;box-sizing:border-box;display:grid;grid-template-columns:${ORSHABAAL_LEADERBOARD_GRID_COLUMNS};gap:6px;padding:8px 8px 6px;border-bottom:1px solid rgba(255,255,255,0.18);align-items:end;position:sticky;top:0;z-index:5;background-color:#191919;background-image:url("https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png");background-repeat:repeat;box-shadow:0 6px 8px -4px rgba(0,0,0,0.6);`
+      ? `width:calc(100% + 16px);margin:0 -8px;box-sizing:border-box;display:grid;grid-template-columns:${ORSHABAAL_LEADERBOARD_GRID_COLUMNS};gap:6px;padding:8px 8px 6px;border-bottom:1px solid rgba(255,255,255,0.18);align-items:end;position:sticky;top:0;z-index:5;background-color:#191919;background-image:url("${window.BAAssets.url('background-dark')}");background-repeat:repeat;box-shadow:0 6px 8px -4px rgba(0,0,0,0.6);`
       : `width:100%;min-width:0;box-sizing:border-box;display:grid;grid-template-columns:${ORSHABAAL_LEADERBOARD_GRID_COLUMNS};gap:6px;padding:4px 0;align-items:center;min-height:28px;border-radius:2px;background:${background};${highlight ? 'box-shadow:inset 2px 0 0 rgb(100,150,255);' : ''}`;
     const color = highlight ? 'rgb(230,215,176)' : 'rgb(255,255,255)';
     cells.forEach((value, colIndex) => {
@@ -20145,7 +20145,7 @@ function createNPCCooldownManager() {
         // Solid background-color fallback behind the tiled texture so scrolled rows
         // are fully hidden behind the pinned header instead of showing through.
         'background-color:#191919',
-        'background-image:url("https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png")',
+        'background-image:url("' + window.BAAssets.url('background-dark') + '")',
         'background-repeat:repeat',
         'box-shadow:0 4px 6px -3px rgba(0,0,0,0.6)'
       ].join(';');

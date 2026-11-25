@@ -540,12 +540,12 @@
     
     const buttonTypes = {
       green: `
-        background-image: url('https://bestiaryarena.com/_next/static/media/background-green.be515334.png');
+        background-image: url('${window.BAAssets.url('background-green')}');
         background-repeat: repeat;
         border: 1px solid #4a7c4a;
       `,
       red: `
-        background-image: url('https://bestiaryarena.com/_next/static/media/background-red.21d3f4bd.png');
+        background-image: url('${window.BAAssets.url('background-red')}');
         background-repeat: repeat;
         border: 1px solid #7c4a4a;
       `,
@@ -1162,14 +1162,14 @@
     if (autoModeEnabled) {
       // Enabled state - Green
       button.className = 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-green active:frame-pressed-1-green surface-green gap-1 px-2 py-0.5 pb-[3px] pixel-font-14 [&_svg]:size-[11px] [&_svg]:mb-[1px] [&_svg]:mt-[2px]';
-      button.style.backgroundImage = 'url("https://bestiaryarena.com/_next/static/media/background-green.be515334.png")';
+      button.style.backgroundImage = 'url("' + window.BAAssets.url('background-green') + '")';
       button.style.backgroundSize = 'cover';
       button.style.backgroundPosition = 'center';
       button.style.backgroundRepeat = 'no-repeat';
     } else {
       // Disabled state - Red
       button.className = 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1 active:frame-pressed-1 surface-regular gap-1 px-2 py-0.5 pb-[3px] pixel-font-14 [&_svg]:size-[11px] [&_svg]:mb-[1px] [&_svg]:mt-[2px]';
-      button.style.backgroundImage = 'url("https://bestiaryarena.com/_next/static/media/background-red.21d3f4bd.png")';
+      button.style.backgroundImage = 'url("' + window.BAAssets.url('background-red') + '")';
       button.style.backgroundSize = 'cover';
       button.style.backgroundPosition = 'center';
       button.style.backgroundRepeat = 'no-repeat';
@@ -2469,11 +2469,11 @@
     const panel = document.createElement('div');
     panel.id = 'better-exaltation-settings-panel';
     panel.style.cssText = `
-      background: url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat;
+      background: url('${window.BAAssets.url('background-dark')}') repeat;
       color: #fff;
       font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif;
       border: 4px solid transparent;
-      border-image: url('https://bestiaryarena.com/_next/static/media/3-frame.87c349c1.png') 6 fill stretch;
+      border-image: url('${window.BAAssets.url('3-frame')}') 6 fill stretch;
       border-radius: 6px;
       box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
       display: flex;
@@ -3806,7 +3806,9 @@
         const delay = baseDelay * Math.pow(2, attempts - 1); // Exponential backoff
         console.log(`Retrying in ${delay}ms...`);
         createTrackedTimeout(tryEnhance, delay);
-      } else {
+      } else if (findExaltationChestModal()) {
+        // Only a real failure when the chest modal is open. The observer also fires for other nodes that
+        // merely mention "Exaltation Chest" (inventory item, tooltip, toast), which have no modal to enhance.
         console.warn('[Better Exaltation Chest] Failed to enhance modal after maximum retry attempts');
       }
     };
@@ -3856,6 +3858,8 @@
       
       observerTimeout = setTimeout(() => {
         pendingTimeouts.delete(observerTimeout);
+        // Other panels (the Cyclopedia inventory, tooltips) mention "Exaltation Chest" too: only a real chest modal gets the retry loop.
+        if (!findExaltationChestModal()) return;
         console.log('[Better Exaltation Chest] Exaltation chest modal detected, enhancing...');
         retryEnhanceExaltationChestModal();
       }, DEBOUNCE_DELAY);

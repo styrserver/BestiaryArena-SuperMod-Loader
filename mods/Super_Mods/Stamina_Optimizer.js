@@ -2191,9 +2191,9 @@ function createButton() {
 
 // Apply button styling based on automation state
 function applyButtonStyling(btn) {
-    const regularBgUrl = 'https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png';
-    const greenBgUrl = 'https://bestiaryarena.com/_next/static/media/background-green.be515334.png';
-    const blueBgUrl = 'https://bestiaryarena.com/_next/static/media/background-blue.7259c4ed.png';
+    const regularBgUrl = window.BAAssets.url('background-regular');
+    const greenBgUrl = window.BAAssets.url('background-green');
+    const blueBgUrl = window.BAAssets.url('background-blue');
     btn.style.background = '';
     btn.style.backgroundColor = '';
     if (isAutomationEnabled) {
@@ -2672,11 +2672,11 @@ function createSettingsContent() {
         min-height: 0;
         max-height: none;
         flex: 1 1 auto;
-        background: url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat;
+        background: url('${window.BAAssets.url('background-dark')}') repeat;
         color: ${COLOR_WHITE};
         font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif;
         border: 4px solid transparent;
-        border-image: url('https://bestiaryarena.com/_next/static/media/3-frame.87c349c1.png') 6 fill stretch;
+        border-image: url('${window.BAAssets.url('3-frame')}') 6 fill stretch;
         border-radius: 6px;
         padding: 20px;
     `;

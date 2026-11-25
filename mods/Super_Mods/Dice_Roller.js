@@ -73,7 +73,7 @@
   };
   
   const API_ENDPOINT = 'https://bestiaryarena.com/api/trpc/inventory.diceManipulator?batch=1';
-  const FRAME_IMAGE_URL = 'https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png';
+  const FRAME_IMAGE_URL = window.BAAssets.url('4-frame');
   
   const PerformanceMonitor = {
     timers: new Map(),
@@ -154,10 +154,10 @@
       style.id = 'diceroller-btn-css';
       style.textContent = `
         .diceroller-btn {
-          background: url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat !important;
+          background: url('${window.BAAssets.url('background-regular')}') repeat !important;
           border: 6px solid transparent !important;
           border-color: #ffe066 !important;
-          border-image: url('https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png') 6 fill stretch !important;
+          border-image: url('${window.BAAssets.url('4-frame')}') 6 fill stretch !important;
           color: var(--theme-text, #e6d7b0) !important;
           font-weight: 700 !important;
           border-radius: 0 !important;
@@ -178,7 +178,7 @@
         }
         .diceroller-btn.pressed,
         .diceroller-btn:active {
-          border-image: url('https://bestiaryarena.com/_next/static/media/1-frame-pressed.e3fabbc5.png') 6 fill stretch !important;
+          border-image: url('${window.BAAssets.url('1-frame-pressed')}') 6 fill stretch !important;
         }
       `;
       document.head.appendChild(style);
@@ -1251,7 +1251,7 @@
     box.style.padding = '0';
     box.style.minHeight = '0';
     box.style.height = '100%';
-    box.style.background = "url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat";
+    box.style.background = "url('" + window.BAAssets.url('background-dark') + "') repeat";
     box.style.border = '4px solid transparent';
     box.style.borderImage = `url("${FRAME_IMAGE_URL}") 6 fill stretch`;
     box.style.borderRadius = '6px';

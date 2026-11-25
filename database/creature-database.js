@@ -3712,6 +3712,17 @@ function buildOldOutfitsCss(scopePrefix, excludeSelector = '', outfitAttr = ':no
 
 const OLD_OUTFIT_SIZE_FIXES = { 35: 64 };
 
+/** Daily Seashell streak days that reward gazers (matches the in-game shell tooltip): the Albino Gazer on day 27, a random gazer on days 13 and 20. */
+const GAZER_SEASHELL_REWARDS = {
+  'albino gazer': [{ day: 27, rewardLabel: 'Albino Gazer' }],
+  default: [
+    { day: 13, rewardLabel: 'Random Gazer' },
+    { day: 20, rewardLabel: 'Random Gazer' }
+  ]
+};
+const getGazerSeashellRewards = (creatureName) =>
+  GAZER_SEASHELL_REWARDS[String(creatureName || '').trim().toLowerCase()] || GAZER_SEASHELL_REWARDS.default;
+
 /** Creatures hidden from Cyclopedia lists only (still in game data). */
 const CYCLOPEDIA_HIDDEN_CREATURES = ['Dwarf Henchman'];
 
@@ -4218,21 +4229,13 @@ function isMonsterRegistryReady() {
 }
 
 // Fast phase (250ms x 20), then a slow phase (2s x 60) so a cold load never ends with a
-// permanently empty database. The database is only built once the registry is ready.
-function waitForGameState(callback, retries = 0, maxRetries = 20, maxSlowRetries = 60) {
-  if (isMonsterRegistryReady()) {
-    callback();
-    return;
-  }
-  if (retries < maxRetries + maxSlowRetries) {
-    setTimeout(
-      () => waitForGameState(callback, retries + 1, maxRetries, maxSlowRetries),
-      retries < maxRetries ? 250 : 2000
-    );
-  } else {
-    console.warn('[creature-database.js] Monster registry never became ready; database left empty');
-  }
-}
+// permanently empty database. The database is only built once the registry is ready (BAWait: content/ba-wait.js).
+const waitForGameState = (callback) => globalThis.BAWait?.gameState(callback, {
+  label: 'creature-database.js',
+  ready: isMonsterRegistryReady,
+  slowRetries: 60,
+  buildAnyway: false
+});
 
 // Initialize database with lazy loading
 let creatureDatabase = null;
@@ -4274,6 +4277,7 @@ function initializeDatabase() {
   creatureDatabase.monsterMatchesCreatureDisplay = monsterMatchesCreatureDisplay;
   creatureDatabase.CYCLOPEDIA_EXTRA_CREATURES = CYCLOPEDIA_EXTRA_CREATURES;
   creatureDatabase.CYCLOPEDIA_HIDDEN_CREATURES = CYCLOPEDIA_HIDDEN_CREATURES;
+  creatureDatabase.getGazerSeashellRewards = getGazerSeashellRewards;
   creatureDatabase.getMapMonsterBaseStats = getMapMonsterBaseStats;
   creatureDatabase.getCreatureCombatData = getCreatureCombatData;
   creatureDatabase.getAbilityScene = getAbilityScene;
@@ -4405,6 +4409,7 @@ waitForGameState(() => {
     globalWindow.creatureDatabase.getDisplayNameForOwnedMonster = getDisplayNameForOwnedMonster;
     globalWindow.creatureDatabase.monsterMatchesCreatureDisplay = monsterMatchesCreatureDisplay;
     globalWindow.creatureDatabase.CYCLOPEDIA_HIDDEN_CREATURES = CYCLOPEDIA_HIDDEN_CREATURES;
+    globalWindow.creatureDatabase.getGazerSeashellRewards = getGazerSeashellRewards;
     globalWindow.creatureDatabase.getMapMonsterBaseStats = getMapMonsterBaseStats;
     globalWindow.creatureDatabase.getCreatureCombatData = getCreatureCombatData;
     globalWindow.creatureDatabase.getAbilityScene = getAbilityScene;

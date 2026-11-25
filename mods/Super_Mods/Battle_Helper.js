@@ -35,7 +35,7 @@ const BATTLE_HELPER_BUTTON_CLASS = {
 };
 const BATTLE_HELPER_BLUE_BUTTON_STYLE = [
   'width: 100%; cursor: pointer; color: rgb(255, 255, 255);',
-  'background-image: url("https://bestiaryarena.com/_next/static/media/background-blue.7259c4ed.png"), url("https://bestiaryarena.com/_next/static/media/1-frame-blue.cf300a6a.png");',
+  'background-image: url("' + window.BAAssets.url('background-blue') + '"), url("' + window.BAAssets.url('1-frame-blue') + '");',
   'background-size: auto, 100% 100%;',
   'background-position: left top, center center;',
   'background-repeat: repeat, no-repeat;'

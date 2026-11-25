@@ -141,7 +141,7 @@
         
         /* Confirmation highlight */
         .better-yasir-action-button.confirm {
-          background-image: url('https://bestiaryarena.com/_next/static/media/background-green.be515334.png') !important;
+          background-image: url('${window.BAAssets.url('background-green')}') !important;
           border: 1px solid #32cd32 !important;
           box-shadow: 0 0 8px rgba(50, 205, 50, 0.6) !important;
         }
@@ -320,7 +320,7 @@
           height: 22px;
           box-sizing: border-box;
           text-align: center;
-          background-image: url('https://bestiaryarena.com/_next/static/media/background-darker.2679c837.png');
+          background-image: url('${window.BAAssets.url('background-darker')}');
           background-size: auto;
           background-repeat: repeat;
           border: none;
@@ -450,9 +450,9 @@
           box-sizing: border-box;
           text-align: left;
           color: #fff;
-          background-image: url('https://bestiaryarena.com/_next/static/media/background-darker.2679c837.png');
+          background-image: url('${window.BAAssets.url('background-darker')}');
           border: 2px solid transparent;
-          border-image: url('https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png') 4 fill stretch;
+          border-image: url('${window.BAAssets.url('1-frame')}') 4 fill stretch;
           cursor: pointer;
         }
         .better-yasir-po-item-trigger .better-yasir-po-item-slot img,
@@ -548,9 +548,9 @@
           box-sizing: border-box;
           text-align: left;
           color: #fff;
-          background-image: url('https://bestiaryarena.com/_next/static/media/background-darker.2679c837.png');
+          background-image: url('${window.BAAssets.url('background-darker')}');
           border: 2px solid transparent;
-          border-image: url('https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png') 4 fill stretch;
+          border-image: url('${window.BAAssets.url('1-frame')}') 4 fill stretch;
           cursor: pointer;
         }
         .better-yasir-po-item-option:hover {
@@ -564,7 +564,7 @@
           place-items: center;
           background: rgba(0, 0, 0, 0.25);
           border: 2px solid transparent;
-          border-image: url('https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png') 4 fill stretch;
+          border-image: url('${window.BAAssets.url('1-frame')}') 4 fill stretch;
         }
     
       `;
@@ -4426,11 +4426,11 @@
         panel.id = 'better-yasir-settings-panel';
         panel.classList.add('better-yasir-orders-typography');
         panel.style.cssText = `
-          background: url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat;
+          background: url('${window.BAAssets.url('background-dark')}') repeat;
           color: #fff;
           font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif;
           border: 4px solid transparent;
-          border-image: url('https://bestiaryarena.com/_next/static/media/3-frame.87c349c1.png') 6 fill stretch;
+          border-image: url('${window.BAAssets.url('3-frame')}') 6 fill stretch;
           border-radius: 6px;
           box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
           display: flex;

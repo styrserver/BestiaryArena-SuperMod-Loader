@@ -405,14 +405,14 @@ function injectManualRunnerStyles() {
   style.id = styleId;
   style.textContent = `
     :root {
-      --mr-frame-3: url("https://bestiaryarena.com/_next/static/media/3-frame.87c349c1.png") 6 fill;
-      --mr-frame-1: url("https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png") 4 fill;
-      --mr-frame-1-pressed: url("https://bestiaryarena.com/_next/static/media/1-frame-pressed.e3fabbc5.png") 4 fill;
-      --mr-frame-4: url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch;
+      --mr-frame-3: url("${window.BAAssets.url('3-frame')}") 6 fill;
+      --mr-frame-1: url("${window.BAAssets.url('1-frame')}") 4 fill;
+      --mr-frame-1-pressed: url("${window.BAAssets.url('1-frame-pressed')}") 4 fill;
+      --mr-frame-4: url("${window.BAAssets.url('4-frame')}") 6 fill stretch;
     }
     /* Themed container matching Hunt Analyzer */
     .manual-runner-modal {
-      background-image: url(/_next/static/media/background-darker.2679c837.png);
+      background-image: url("${window.BAAssets.url('background-darker')}");
       background-repeat: repeat;
       background-color: #282C34;
       border: 6px solid transparent;
@@ -432,7 +432,7 @@ function injectManualRunnerStyles() {
       box-sizing: border-box;
     }
     .manual-runner-modal-header {
-      background-image: url(/_next/static/media/background-regular.b0337118.png);
+      background-image: url("${window.BAAssets.url('background-regular')}");
       background-repeat: repeat;
       background-color: rgba(40,44,52,0.5);
       border: 6px solid transparent;
@@ -448,7 +448,7 @@ function injectManualRunnerStyles() {
       box-sizing: border-box;
     }
     .manual-runner-modal-body {
-      background-image: url(/_next/static/media/background-regular.b0337118.png);
+      background-image: url("${window.BAAssets.url('background-regular')}");
       background-repeat: repeat;
       background-color: rgba(40,44,52,0.5);
       border: 6px solid transparent;
@@ -466,7 +466,7 @@ function injectManualRunnerStyles() {
       flex: 0 0 auto;
       border: 6px solid transparent;
       border-image: var(--mr-frame-4);
-      background-image: url(/_next/static/media/background-regular.b0337118.png);
+      background-image: url("${window.BAAssets.url('background-regular')}");
       background-repeat: repeat;
       background-color: rgba(40,44,52,0.5);
       margin: 0 2px 2px 2px;
@@ -477,7 +477,7 @@ function injectManualRunnerStyles() {
       padding: 2px 10px;
       border: 4px solid transparent;
       border-image: var(--mr-frame-1);
-      background-image: url(/_next/static/media/background-dark.95edca67.png);
+      background-image: url("${window.BAAssets.url('background-dark')}");
       background-repeat: repeat;
       background-color: #4B5563;
       color: #ABB2BF;
@@ -5638,7 +5638,7 @@ function init() {
     primary: false,
     onClick: toggleManualRunnerConfigPanel,
     style: {
-      background: "url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat",
+      background: "url('" + window.BAAssets.url('background-regular') + "') repeat",
       backgroundSize: 'auto'
     }
   });
