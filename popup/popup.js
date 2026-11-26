@@ -1815,9 +1815,9 @@ function applyFilters() {
   const inCommunityTab = category === 'custom';
   emptyState.style.display = visibleCount === 0 && !inCommunityTab ? 'block' : 'none';
   const panelEmpty = document.getElementById('community-installed-empty');
-  // The Community box shows its own empty message in the All view too.
+  // The Community box shows its own "no match" message in the All view too, only during a search.
   const communityVisible = [...document.querySelectorAll('#community-installed .mod-card')].some(c => c.style.display !== 'none');
-  if (panelEmpty) panelEmpty.style.display = !communityVisible && (inCommunityTab || category === 'all') ? 'block' : 'none';
+  if (panelEmpty) panelEmpty.style.display = searchTerm && !communityVisible && (inCommunityTab || category === 'all') ? 'block' : 'none';
   updateCommunityModsVisibility();
 }
 

@@ -22,6 +22,7 @@ const FIXES = {
   'check-ability-scenes.mjs': 'node tools/check-ability-scenes.mjs --update (ABILITY_SCENE_DATA in creature-database.js)',
   'check-scene-data.mjs': 'fix the scene rows named in the output (database/creature-database.js); offline, no game needed',
   'check-inventory-items.mjs': 'edit database/inventory-database.js by hand (see /check-game-update)',
+  'check-better-codex.mjs': 'find the new name in the game chunk, update Better_Codex.js and this tool, test in game',
   'check-database-names.mjs': 'fix the STALE/RENAMED list entries in database/',
   'check-room-scripts.mjs': 'review ROOM_SCRIPT_NOTES, then node tools/check-room-scripts.mjs --update',
   'check-outfits-mounts.mjs': 'node tools/check-outfits-mounts.mjs --update (Outfiter.js snapshot)',

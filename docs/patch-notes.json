@@ -4,6 +4,36 @@
   },
   "notes": [
     {
+      "version": "5.5.4",
+      "changes": [
+        {
+          "mod": "Better Bestiary",
+          "type": "fixed",
+          "text": "Creature Selector selects instantly again."
+        },
+        {
+          "mod": "Better Codex",
+          "type": "added",
+          "text": "Extras tab showing what the game hides from the Codex; click a card to preview it, with map records, map picker and try-on for unlocked outfits."
+        },
+        {
+          "mod": "Better Codex",
+          "type": "fixed",
+          "text": "Less lag, searched players update again, a failed auto-accept no longer blocks other offers, and Outfiter's unlocked outfits no longer count as owned in trades or tracking."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "fixed",
+          "text": "Much less lag during battles, and the Inventory details scroll again."
+        },
+        {
+          "mod": "Popup",
+          "type": "fixed",
+          "text": "Community mods no longer say nothing matched when you have not searched."
+        }
+      ]
+    },
+    {
       "version": "5.5.3",
       "changes": [
         {

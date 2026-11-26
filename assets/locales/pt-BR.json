@@ -170,7 +170,6 @@
       "save": "Salvar",
       "cancel": "Cancelar",
       "confirm": "Confirmar",
-      "yes": "Sim",
       "no": "Não"
     },
     "messages": {
@@ -351,6 +350,8 @@
       "createdAt": "Criado em",
       "modName": "Better Codex",
       "tradeButton": "Trocar com jogador",
+      "extras": "Extras",
+      "noExtras": "Nada oculto encontrado",
       "failed": "Não foi possível abrir uma troca com {name}"
     },
     "betterDaycare": {

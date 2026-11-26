@@ -1782,6 +1782,12 @@ if (typeof window !== 'undefined') {
     init: exports.init,
     cleanup: exports.cleanup,
     get mountIds() { return getMountIds(); },
+    // True for an 'outfit' or 'mount' id this mod put into the player state without the account owning it.
+    // Used by Better Codex, as those ids sit in player.codex with a count of 1.
+    isAdded: function(category, id) {
+      if (category === 'outfit') return addedOutfits.has(Number(id));
+      return category === 'mount' && addedMounts.has(Number(id));
+    },
     // Live-apply the "Unlock all outfits and mounts" toggle; true when verified in the player state.
     setEnabled: applyEnabled,
     // Local-only mount: pass a mountIds entry, or null to dismount. Persists across reloads.

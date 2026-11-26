@@ -170,7 +170,6 @@
       "save": "Save",
       "cancel": "Cancel",
       "confirm": "Confirm",
-      "yes": "Yes",
       "no": "No"
     },
     "messages": {
@@ -351,6 +350,8 @@
       "createdAt": "Created",
       "modName": "Better Codex",
       "tradeButton": "Trade player",
+      "extras": "Extras",
+      "noExtras": "Nothing hidden found",
       "failed": "Could not open a trade with {name}"
     },
     "betterDaycare": {

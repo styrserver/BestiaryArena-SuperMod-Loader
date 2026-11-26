@@ -42,17 +42,45 @@
   let originalTitle = '';
   let opening = false;
   let disposed = false;
-  // Lower-cased search text -> player, or null when there is none.
+  // Lower-cased search text -> { player (null when there is none), at }.
   const players = new Map();
+  // How long a looked-up player is kept. Checked when a search is shown anew, never under your eyes.
+  const PLAYER_TTL = 5 * 60 * 1000;
+  // The search text whose player is on screen.
+  let shownKey = '';
+  // Offer id:revision the game refused to accept: skipped, so it cannot hold back the ones after it.
+  const failedAccepts = new Set();
+  // The tracked cards as stored, until this or another tab writes them.
+  let trackedCache = null;
+  // Held while offers are handled, so two game tabs never accept at the same time.
+  const OFFERS_LOCK = 'better-codex-offers';
   let lookupQuery = '';
   // The name whose lookup has not answered yet.
   let pendingLookup = '';
   let lookupTimer = null;
   let resultNodes = [];
   let hiddenNodes = [];
+  // Whether the Extras view is shown in place of the game's cards.
+  let extrasOpen = false;
+  // The hidden cards, read once per opened Codex, as the sidebar counter needs them on every change.
+  let hiddenCache = null;
+  // { context, resolve }: the game's progress resolver for that player state.
+  let progressCache = null;
+  // The player state the Extras counter was last counted for.
+  let countedFor = null;
+  // The game's records card under an Extras map preview, unmounted when it goes.
+  let recordsView = null;
   let drawObserver = null;
   let catalogRows = null;
   let gameLookups = null;
+  // When an incomplete set of lookups is read again; 0 once it is complete.
+  let lookupsRetryAt = 0;
+  const LOOKUPS_RETRY = 60 * 1000;
+  let webpackRequire = null;
+  // Marker -> the game module holding it.
+  const gameModules = new Map();
+  // Category -> the words of the game's card preview, read from its code.
+  const wordCache = new Map();
   // Last selected card, kept for when the virtual list scrolls it out of the DOM.
   let selected = null;
   // Card key -> { at, request } for the players holding spares of it.
@@ -458,11 +486,23 @@
 
   // The game's own module whose source holds the marker, through webpack's require (read the same
   // way by Cyclopedia, docs/game_state_api.md "Codex").
+  function getWebpackRequire() {
+    if (!webpackRequire) {
+      window.webpackChunk_N_E.push([[`better-codex-${Date.now()}`], {}, (req) => { webpackRequire = req; }]);
+    }
+    return webpackRequire;
+  }
+
   function gameModule(marker) {
-    let webpackRequire = null;
-    window.webpackChunk_N_E.push([[`better-codex-${Date.now()}-${marker}`], {}, (req) => { webpackRequire = req; }]);
+    const cached = gameModules.get(marker);
+    if (cached) return cached;
+    getWebpackRequire();
     const id = Object.keys(webpackRequire.m).find((key) => String(webpackRequire.m[key]).includes(marker));
-    return id === undefined ? {} : webpackRequire(id);
+    // A miss is not remembered: the chunk holding it may load later.
+    if (id === undefined) return {};
+    const found = webpackRequire(id);
+    gameModules.set(marker, found);
+    return found;
   }
 
   // The Codex catalog rows per category ({ card, codexAvailability }).
@@ -484,7 +524,8 @@
   // Card names (outfit, mount and backpack rows carry none) and the game's per-creature sprite
   // offset, which its Codex applies around the creature sprite.
   function getGameLookups() {
-    if (gameLookups) return gameLookups;
+    // This runs once per card drawn, so an incomplete result is read again only after a pause.
+    if (gameLookups && (!lookupsRetryAt || Date.now() < lookupsRetryAt)) return gameLookups;
     gameLookups = { names: {}, creatureOffset: null, slotOffset: {}, groups: {}, foils: {}, mounts: null, mountable: new Set() };
     // A name table is an export whose values have a name and the card's id.
     const tables = { outfit: ['Rift Warrior":{id:', 'id'], mount: ['Widow Queen":{id:', 'id'], backpack: ['Raccoon Backpack":{spriteId:', 'spriteId'] };
@@ -556,6 +597,8 @@
       if (!gameLookups.slotOffset[category]) console.warn('[Better Codex] No slot offset function for', category);
     });
     console.log('[Better Codex] Mounts:', gameLookups.mounts?.size ?? 'none', '- mountable outfits:', gameLookups.mountable.size);
+    const complete = gameLookups.creatureOffset && Object.values(gameLookups.names).every((names) => names.size);
+    lookupsRetryAt = complete ? 0 : Date.now() + LOOKUPS_RETRY;
     return gameLookups;
   }
 
@@ -623,7 +666,7 @@
       rows[category].forEach((row) => {
         const id = row.card?.[CARD_ID_FIELDS[category]];
         if (row.codexAvailability !== 'pack' || id === undefined) return;
-        const own = mine[category]?.[id] || 0;
+        const own = myCopies(category, id);
         const their = theirs[category]?.[id] || 0;
         const card = { category, id, group: row.group, data: row.card };
         if (!their) missing.push({ ...card, copies: own, canGive: own > 1 });
@@ -676,6 +719,13 @@
 
   function cardImage({ category, id, data }, player) {
     if (category === 'backpack') return itemSprite(id);
+    if (category === 'equip') return itemSprite(data.metadata.spriteId);
+    if (category === 'room') {
+      const image = element('img', 'pixelated relative max-w-none size-8');
+      image.src = `/assets/room-thumbnails/${id}.png`;
+      image.alt = '';
+      return image;
+    }
     if (category === 'monster') return creatureSprite(data.metadata, id);
     // Drawn only once scrolled into view, inside the wrapper drawSlot moves.
     const canvas = sizedCanvas();
@@ -823,12 +873,14 @@
   // =======================
 
   function removeResult() {
+    unmountRecords();
     drawObserver?.disconnect();
     drawObserver = null;
     resultNodes.forEach((node) => node.remove());
     hiddenNodes.forEach((node) => node.style.removeProperty('display'));
     resultNodes = [];
     hiddenNodes = [];
+    shownKey = '';
   }
 
   // The game's own nodes are only hidden, never moved or removed, as React owns them.
@@ -922,7 +974,7 @@
     }
     if (disposed) return;
     if (pendingLookup === query) pendingLookup = '';
-    players.set(query.toLowerCase(), player);
+    players.set(query.toLowerCase(), { player, at: Date.now() });
     sync();
   }
 
@@ -939,20 +991,615 @@
     Array.from(panel.children).slice(1).filter((child) => !resultNodes.includes(child)).forEach(hide);
   }
 
+  // =======================
+  // Extras: what the game hides from its Codex
+  // =======================
+
+  const EXTRA_CATEGORIES = [...CATEGORIES, 'equip', 'room'];
+
+  // Read from the game's own tables, as the Codex view drops everything marked hidden.
+  function hiddenCards() {
+    const isHidden = (entry) => entry?.codexAvailability === 'hidden';
+    const found = Object.fromEntries(EXTRA_CATEGORIES.map((category) => [category, []]));
+    const add = (category, read) => {
+      try {
+        found[category] = read();
+      } catch (error) {
+        console.warn('[Better Codex] Hidden cards unavailable for', category, error);
+      }
+    };
+    // Pack-card sources: shaped like the view's rows, without its room and equipment lists.
+    const sources = () => Object.values(gameModule('Unknown codex availability')).find((value) =>
+      value && CATEGORIES.every((category) => Array.isArray(value[category])) && !value.room);
+    ['outfit', 'mount', 'backpack'].forEach((category) => add(category, () => sources()[category]
+      .filter(isHidden)
+      .map((row) => ({ category, id: row.card[CARD_ID_FIELDS[category]], data: { ...row.card, group: row.group } }))));
+    // Creatures come from two tables keyed by id: the monster dictionary, whose entries hold their
+    // metadata, and a smaller one holding the metadata itself.
+    add('monster', () => {
+      const tables = Object.values(gameModule('Monster [".concat(')).filter((value) => value &&
+        typeof value === 'object' && Object.keys(value).length && Object.keys(value).every((id) => Number(id)));
+      const dictionary = tables.find((table) => Object.values(table).every((entry) => entry?.metadata?.name));
+      const extra = tables.find((table) => Object.values(table).every((entry) => entry?.name && entry.lookType));
+      if (!dictionary) throw new Error('monster dictionary not found');
+      return [...Object.entries(dictionary).map(([id, entry]) => [id, entry.metadata]), ...Object.entries(extra || {})]
+        .filter(([, metadata]) => isHidden(metadata))
+        .map(([id, metadata]) => ({ category: 'monster', id: Number(id), data: { metadata } }));
+    });
+    add('equip', () => {
+      const list = [];
+      for (let id = 1; ; id++) {
+        let metadata;
+        try {
+          metadata = globalThis.state.utils.getEquipment(id)?.metadata;
+        } catch (_) {
+          // The game throws past the last id.
+        }
+        if (!metadata) return list;
+        if (isHidden(metadata)) list.push({ category: 'equip', id, data: { metadata } });
+      }
+    });
+    add('room', () => globalThis.state.utils.REGIONS.flatMap((region) => region.rooms).filter(isHidden)
+      .map((room) => ({ category: 'room', id: room.id, data: { ...room, name: globalThis.state.utils.ROOM_NAME[room.id] } })));
+    console.log('[Better Codex] Hidden cards:',
+      EXTRA_CATEGORIES.map((category) => `${category} ${found[category].length}`).join(', '));
+    return found;
+  }
+
+  function getHiddenCards() {
+    return (hiddenCache ||= hiddenCards());
+  }
+
+  // The cards the game derives from what you have, as its own Codex names them.
+  const DERIVED_CARDS = {
+    monster: (id) => ({ source: 'monsters', category: 'monster', gameId: id }),
+    equip: (id) => ({ source: 'equips', category: 'equip', gameId: id }),
+    room: (id) => ({ source: 'rooms', category: 'room', roomId: id })
+  };
+
+  // The game's resolver indexes everything you have, so it is built once per player state: the sidebar
+  // counter asks on every DOM change.
+  function progressResolver() {
+    const context = globalThis.state?.player?.getSnapshot?.()?.context;
+    if (!context) return null;
+    if (progressCache?.context !== context) {
+      const build = Object.values(gameModule('Unknown codex availability'))
+        .find((value) => typeof value === 'function' && String(value).includes('Unknown codex card source'));
+      if (!build) return null;
+      progressCache = {
+        context,
+        resolve: build({
+          codex: context.codex,
+          monsters: context.monsters || [],
+          equips: context.equips || [],
+          rooms: context.rooms || {},
+          completedRegions: new Set(),
+          highscoreRoomIds: new Set()
+        })
+      };
+    }
+    return progressCache.resolve;
+  }
+
+  // { count, rarity, foil } of a derived card from the game's progress resolver, or null.
+  function ownProgress({ category, id }) {
+    try {
+      return progressResolver()?.(DERIVED_CARDS[category](id)) || null;
+    } catch (error) {
+      console.warn('[Better Codex] No progress for', category, id, error);
+      return null;
+    }
+  }
+
+  // What the game's Codex holds, which includes the outfits and mounts Outfiter unlocked. Extras shows
+  // those as owned, as the game does; trades and tracking use ownsCard instead.
+  function codexHolds({ category, id }) {
+    return (globalThis.state?.player?.getSnapshot?.()?.context?.codex?.[category]?.[id] || 0) > 0;
+  }
+
+  // Outfits, mounts and backpacks are Codex cards; the others count once you have them in the game.
+  function ownsExtra(card) {
+    return DERIVED_CARDS[card.category] ? ownProgress(card)?.count > 0 : codexHolds(card);
+  }
+
+  // A derived card you have takes its rarity and foil from your progress, as in the game.
+  function withProgress(card) {
+    const progress = DERIVED_CARDS[card.category] && ownProgress(card);
+    return progress?.count > 0 ? { ...card, data: { ...card.data, rarity: progress.rarity, foil: progress.foil } } : card;
+  }
+
+  // The classes of the game's own slots: hover and selection frame, and the dimming of a missing card.
+  const SLOT_STATES = ['border-whiteDark', 'group-hover:unset-border-image', "group-data-[highlighted='true']:unset-border-image",
+    'group-active:opacity-70', "group-data-[highlighted='true']:border-whiteBrightest"];
+
+  function extraSlot(card, look) {
+    // Creatures, maps and equipment are not Codex cards, so they have no copy count.
+    const copies = CARD_ID_FIELDS[card.category] && card.category !== 'monster' ? myCopies(card.category, card.id) : 0;
+    const slot = buildSlot({ ...card, copies }, look);
+    slot.classList.add(...SLOT_STATES);
+    if (card.category === 'room') {
+      slot.insertBefore(element('div', 'absolute inset-0 shadow-[inset_0_0_4px_2px_rgba(0,0,0,0.8)]'), slot.children[2]);
+    }
+    const owned = ownsExtra(card);
+    // The game marks the rarity of an owned creature, equipment or map in the corner.
+    if (owned && DERIVED_CARDS[card.category]) {
+      const { rarity, foil } = card.data;
+      const star = foil ? 'shiny-star' : rarity > 1 && `star-tier-${rarity - 1}`;
+      if (star) {
+        const image = element('img', 'pixelated pointer-events-none absolute right-0 top-0 z-2 opacity-75');
+        image.src = `/assets/icons/${star}.png`;
+        image.alt = '';
+        slot.appendChild(image);
+      }
+    }
+    if (!owned) {
+      const [glow, art] = slot.children;
+      const border = slot.querySelector('.opacity-60');
+      glow.remove();
+      art.classList.add('data-[dimmed=true]:opacity-60', 'data-[dimmed=true]:grayscale');
+      border.classList.add('data-[dimmed=true]:opacity-40');
+      art.dataset.dimmed = border.dataset.dimmed = 'true';
+    }
+    return slot;
+  }
+
+  // How the game's card preview components name each category.
+  const CARD_TYPES = { outfit: 'Outfit', mount: 'Mount', monster: 'Creature', equip: 'Equipment', room: 'Map', backpack: 'Backpack' };
+
+  // The card type and rarity names of the game's own preview, as { type: { en, pt }, rarities: { en, pt } }.
+  // The game keeps them private, so they are read from its code: the preview component names its
+  // category and calls a rarity function, which picks from two tables { 1: ..., 5: ... }.
+  // sources is webpack's module id -> factory.
+  function parseCardWords(sources, type) {
+    const preview = new RegExp(`flavor:\\(0,(\\w+)\\.(\\w+)\\)\\(\\w+\\),group:[^,]+,category:\\{en:"${type}",pt:"([^"]+)"\\}`);
+    let found;
+    let component;
+    for (const factory of Object.values(sources)) {
+      component = String(factory);
+      found = component.match(preview);
+      if (found) break;
+    }
+    if (!found) return null;
+    const [, alias, exported, pt] = found;
+    const moduleId = component.match(new RegExp(`[ ,]${alias}=\\w+\\((\\d+)\\)`))?.[1];
+    const words = String(sources[moduleId] || '');
+    const local = words.match(new RegExp(`[{,]${exported}:function\\(\\)\\{return (\\w+)\\}`))?.[1];
+    const tables = words.match(new RegExp(`[ ,]${local}=\\w+=>\\(0,\\w+\\.\\w+\\)\\(\\)\\.translate\\((\\w+)\\[\\w+\\],(\\w+)\\[\\w+\\]\\)`));
+    // A table's values in order of rarity, with the minifier's \xHH and \uHHHH escapes decoded.
+    const values = (name) => {
+      const body = words.match(new RegExp(`[ ,]${name}=\\{(1:"[^}]*)\\}`))?.[1] || '';
+      return [...body.matchAll(/\d:"([^"]*)"/g)].map(([, value]) => value
+        .replace(/\\(?:x([0-9a-fA-F]{2})|u([0-9a-fA-F]{4}))/g, (_, x, u) => String.fromCharCode(parseInt(x || u, 16))));
+    };
+    return {
+      type: { en: type, pt },
+      rarities: tables ? { en: values(tables[1]), pt: values(tables[2]) } : { en: [], pt: [] }
+    };
+  }
+
+  function cardWords(category) {
+    if (!wordCache.has(category)) {
+      let words = null;
+      try {
+        words = parseCardWords(getWebpackRequire().m, CARD_TYPES[category]);
+      } catch (error) {
+        console.warn('[Better Codex] Card words unreadable for', category, error);
+      }
+      if (!words?.rarities.en.length) console.warn('[Better Codex] No card words for', category);
+      wordCache.set(category, words);
+    }
+    return wordCache.get(category);
+  }
+
+  // { name, quote } of a card's group; a map's group is its region.
+  function cardGroup({ category, id, data }) {
+    try {
+      if (category !== 'room') return getGameLookups().groups[category]?.[(data.metadata || data).group];
+      const region = globalThis.state.utils.REGIONS.find((entry) => entry.rooms.some((room) => room.id === id));
+      return Object.values(gameModule('ankrahmun:{name:{en:')).find((value) => value?.ankrahmun?.quote)?.[region?.id];
+    } catch (error) {
+      console.warn('[Better Codex] No group for', category, id, error);
+      return undefined;
+    }
+  }
+
+  // The picture of the game's card preview, at its zoom.
+  function previewArt(card, look, name) {
+    if (card.category === 'room') {
+      const image = element('img', 'pixelated max-w-none absolute inset-0 size-full object-cover');
+      image.src = `/assets/room-thumbnails/${card.id}.png`;
+      image.alt = name;
+      return image;
+    }
+    const zoom = element('div', 'pointer-events-none relative grid');
+    zoom.style.scale = ['outfit', 'mount', 'monster'].includes(card.category) ? '3' : '4';
+    if (card.category === 'outfit' || card.category === 'mount') {
+      const canvas = element('canvas', 'pixelated');
+      // Cropped and centred, then shown at its own size so the zoom stays whole pixels.
+      const paint = (target, frame) => {
+        drawCropped(target, frame);
+        target.style.width = `${target.width}px`;
+        target.style.height = `${target.height}px`;
+      };
+      if (card.category === 'outfit') drawOutfit(canvas, { ...look, outfitId: Number(card.id), mountId: null }, paint);
+      else loadFrame(`/assets/playerMount/${card.id}.png`, (frame) => paint(canvas, frame));
+      zoom.appendChild(canvas);
+    } else {
+      zoom.appendChild(cardImage(card, look));
+    }
+    return zoom;
+  }
+
+  // The game's Change outfit window lists the outfits and mounts its Codex holds.
+  function opensOutfitter(card) {
+    return (card.category === 'outfit' || card.category === 'mount') && codexHolds(card);
+  }
+
+  function openOutfitter({ category, id }) {
+    globalThis.state.menu.trigger.setState({
+      fn: (menu) => ({
+        ...menu,
+        mode: 'outfitter',
+        outfitter: { selectedId: id, selected: category },
+        inventory: { selectedItem: false }
+      })
+    });
+  }
+
+  // The game's own "go to this map": its map picker for the room, unless the game holds you back.
+  function openMapPicker({ id }) {
+    try {
+      const goToRoom = Object.values(gameModule('openGotoRoom:!1,mapPickerForm:'))
+        .find((value) => typeof value === 'function' && String(value).includes('mapPickerForm'));
+      globalThis.state.menu.trigger.setState({ fn: (menu) => ({ ...menu, inventory: { selectedItem: false } }) });
+      goToRoom({ roomId: id, suggestedFloor: globalThis.state.player.getSnapshot().context.rooms?.[id]?.floor });
+    } catch (error) {
+      console.warn('[Better Codex] Could not open the map picker for', id, error);
+    }
+  }
+
+  // What an Extras card opens, as its game counterpart does, or null: owned maps their map picker,
+  // outfits and mounts your Codex holds the Change outfit window.
+  function cardAction(card) {
+    if (card.category === 'room') return ownsExtra(card) ? () => openMapPicker(card) : null;
+    return opensOutfitter(card) ? () => openOutfitter(card) : null;
+  }
+
+  // As in the game, such a preview card is a button.
+  function actionButton(action, frame) {
+    const button = element('button', 'focus-style-visible shrink-0');
+    button.type = 'button';
+    button.appendChild(frame);
+    button.addEventListener('click', action);
+    return button;
+  }
+
+  // The game's own card preview.
+  function buildExtraPreview(card, look, name, position) {
+    unmountRecords();
+    const metadata = card.data.metadata || card.data;
+    const language = api?.i18n?.getLocale?.()?.startsWith('pt') ? 'pt' : 'en';
+    const words = cardWords(card.category);
+    const cardRarity = card.data.rarity ?? metadata.rarity;
+    const rarity = cardRarity || 1;
+    const foil = !!(card.data.foil ?? metadata.foil);
+    const group = cardGroup(card);
+
+    const preview = element('div', 'grid content-start justify-items-center');
+    preview.style.cssText = 'min-height:0;overflow-y:auto;';
+    const frame = element('div', 'relative flex shrink-0 flex-col');
+    frame.style.cssText = 'width:232px;height:320px;';
+    const title = element('div', 'widget-top widget-top-text flex items-center gap-1 py-[3px]');
+    title.appendChild(element('span', 'truncate text-whiteBrightest', name));
+    const star = foil ? '/assets/icons/shiny-star.png' : rarity > 1 && `/assets/icons/star-tier-lax-${rarity - 1}.png`;
+    if (star) {
+      const image = element('img', 'pixelated ml-auto shrink-0');
+      image.src = star;
+      image.alt = '';
+      title.appendChild(image);
+    }
+    const body = element('div', 'widget-bottom grid flex-1 grid-rows-[auto_auto_1fr_auto] gap-1.5 p-1.5');
+    const art = element('div', 'container-slot surface-darker relative grid h-[194px] place-items-center overflow-hidden');
+    const glow = element('div', 'absolute inset-0');
+    glow.style.background = `radial-gradient(circle at 50% 60%, rgba(${RARITY_COLORS[rarity] || RARITY_COLORS[1]}, 0.31), transparent 70%)`;
+    const border = element('div', `pointer-events-none absolute inset-0 opacity-80 ${foil ? 'rarity-foil' : 'has-rarity'}`);
+    border.style.borderImageWidth = '12px';
+    if (!foil) border.dataset.rarity = rarity;
+    const shadow = element('div', 'absolute inset-0 shadow-[inset_0_0_12px_4px_rgba(0,0,0,0.7)]');
+    const picture = previewArt(card, look, name);
+    // A map's picture is the backdrop; everything else sits on top of the frame.
+    art.append(...(card.category === 'room' ? [glow, picture, shadow, border] : [glow, shadow, border, picture]));
+
+    const line = element('div', 'pixel-font-14 flex items-center justify-between gap-2');
+    const flavor = element('span', `shrink-0 ${foil ? 'text-foil' : 'has-rarity-text'}`,
+      cardRarity ? words?.rarities[language][rarity - 1] || '' : '');
+    if (!foil) flavor.dataset.rarity = rarity;
+    line.append(element('span', 'truncate text-whiteDark', group?.name?.[language] || metadata.group || ''), flavor);
+    const quote = element('div', 'tooltip-prose pixel-font-14 frame-pressed-1 surface-dark px-1.5 py-1 text-left');
+    if (group?.quote) quote.appendChild(element('blockquote', '', `"${group.quote[language]}"`));
+    const footer = element('div', 'pixel-font-14 flex items-center justify-between text-whiteDarker');
+    footer.append(element('span', '', words?.type[language] || t(card.category)),
+      element('span', '', `#${String(position.number).padStart(2, '0')}/${position.total}`));
+    body.append(art, line, quote, footer);
+    frame.append(title, body);
+
+    const action = cardAction(card);
+    preview.appendChild(action ? actionButton(action, frame) : frame);
+    if (card.category === 'room') {
+      preview.classList.add('gap-2');
+      mountRecords(preview, card);
+    }
+    return preview;
+  }
+
+  // =======================
+  // Map records
+  // =======================
+
+  // Where the game's records card gets its parts, read from the code of the module that holds it: the
+  // names are minified. sources is webpack's module id -> factory.
+  function parseRecordCard(sources) {
+    const source = Object.values(sources).map(String).find((factory) => factory.includes('["Runs: ",'));
+    if (!source) return null;
+    const moduleOf = (alias) => source.match(new RegExp(`[ ,]${alias}=\\w+\\((\\d+)\\)`))?.[1];
+    const call = (pattern) => {
+      const [, alias, name] = source.match(pattern) || [];
+      return alias ? { id: moduleOf(alias), name } : null;
+    };
+    const jsx = source.match(/\(0,(\w+)\.jsx\)\("div"/)?.[1];
+    const found = {
+      jsx: jsx && moduleOf(jsx),
+      best: call(/pb:\(0,(\w+)\.(\w+)\)\(/),
+      grade: call(/grade:\(0,(\w+)\.(\w+)\)\(\{rank/)
+    };
+    return found.jsx && found.best?.id && found.grade?.id ? found : null;
+  }
+
+  // The game's own records card for a map, mounted into node. world is the public Trophy Room data.
+  function renderRecords(node, room, world) {
+    const webpack = getWebpackRequire();
+    const parts = parseRecordCard(webpack.m);
+    const card = Object.values(gameModule('["Runs: ",'))
+      .find((value) => String(value?.type || value).includes('["Runs: ",'));
+    if (!parts || !card) throw new Error('records card not found');
+    const { jsx } = webpack(parts.jsx);
+    // The providers the game's app puts around it: tooltips, the outlined font and the language.
+    const tooltips = Object.values(gameModule('"tooltip.open"')).find((value) => value?.displayName === 'TooltipProvider');
+    const font = Object.values(gameModule('source:"outlined_text"'))
+      .find((value) => typeof value === 'function' && String(value).includes('.Provider'));
+    const language = Object.values(gameModule('locale:"en",isEn:!0,translate:'))
+      .find((value) => typeof value === 'function' && String(value).includes('locale:'));
+    if (!tooltips || !font || !language) throw new Error('records providers not found');
+
+    const context = globalThis.state.player.getSnapshot().context;
+    const { highscores } = world;
+    const entry = {
+      roomId: room.id,
+      roomName: globalThis.state.utils.ROOM_NAME[room.id],
+      pb: webpack(parts.best.id)[parts.best.name](room.id, context.rooms?.[room.id]),
+      wrTicks: highscores.tick?.[room.id],
+      wrFloor: highscores.floor?.[room.id]
+    };
+    const rank = highscores.rank?.[room.id];
+    if (rank) {
+      entry.wrRank = {
+        ...rank,
+        grade: webpack(parts.grade.id)[parts.grade.name]({ rank: rank.rank, maxTeamSize: room.maxTeamSize })
+      };
+    }
+    // As on a profile, so the title is not a button that would open a hidden map.
+    let tree = jsx(card, { entry, player: { type: 'profile', name: context.name } });
+    tree = jsx(language, { locale: api?.i18n?.getLocale?.()?.startsWith('pt') ? 'pt' : 'en', children: tree });
+    tree = jsx(font, { children: tree });
+    const view = globalThis.state.utils.createUIComponent(node, tooltips, {}, tree);
+    view.mount();
+    return view;
+  }
+
+  async function mountRecords(preview, card) {
+    const node = element('div', 'shrink-0');
+    node.style.width = '232px';
+    preview.appendChild(node);
+    try {
+      const world = await window.BestiaryModAPI.util.fetchTrophyRoomData();
+      // Another card was picked, or the view closed, while waiting.
+      if (disposed || !node.isConnected) return;
+      unmountRecords();
+      recordsView = renderRecords(node, card.data, world);
+    } catch (error) {
+      console.warn('[Better Codex] Map records unavailable for', card.id, error);
+      node.remove();
+    }
+  }
+
+  function unmountRecords() {
+    try {
+      recordsView?.unmount();
+    } catch (error) {
+      console.warn('[Better Codex] Map records not unmounted:', error);
+    }
+    recordsView = null;
+  }
+
+  // The category title of the game's Codex list: icon, name, owned/total and a progress bar.
+  function buildExtraHeader(category, cards) {
+    const owned = cards.filter(ownsExtra).length;
+    const header = element('div', 'grid gap-1.5 pt-1');
+    header.style.paddingInline = '8px';
+    const row = element('div', 'flex items-center gap-1.5');
+    const image = icon(`/assets/icons/${CATEGORY_ICONS[category]}.png`, '');
+    image.className = 'pixelated shrink-0';
+    row.append(image, element('span', 'truncate text-whiteBrightest', t(category)),
+      element('span', 'pixel-font-14 ml-auto shrink-0 text-whiteDark', `${owned}/${cards.length}`));
+    const bar = element('div', 'relative w-full border border-solid border-black bg-black frame-pressed-1 h-1.5');
+    const track = element('div', 'absolute left-0 top-0 flex h-full w-full');
+    const fill = element('div', 'h-full shrink-0');
+    fill.style.width = `${(owned / cards.length) * 100}%`;
+    fill.style.background = owned >= cards.length ? 'rgb(248, 200, 16)' : 'rgb(96, 192, 96)';
+    track.appendChild(fill);
+    bar.appendChild(track);
+    header.append(row, bar);
+    return header;
+  }
+
+  // The subgroup line of the game's Codex list, its count gold when complete.
+  function buildExtraSeparator(name, cards) {
+    const owned = cards.filter(ownsExtra).length;
+    const row = element('div', 'pixel-font-14 flex items-center gap-2 pt-2');
+    row.style.paddingInline = '8px';
+    const line = element('div', 'separator my-0 min-w-0 flex-1');
+    line.setAttribute('role', 'none');
+    const count = element('span', "shrink-0 text-whiteDark data-[complete='true']:text-gold", `${owned}/${cards.length}`);
+    count.dataset.complete = String(owned >= cards.length);
+    row.append(element('span', 'shrink-0 text-whiteRegular', name), line, count);
+    return row;
+  }
+
+  // The preview goes in the game's preview column, or above the cards on narrow layouts, which have none.
+  function buildExtras(showPreview) {
+    drawObserver = new IntersectionObserver((entries) => {
+      entries.filter((entry) => entry.isIntersecting).forEach(({ target }) => {
+        drawObserver.unobserve(target);
+        target.betterCodexDraw();
+      });
+    });
+    const list = element('div', 'grid content-start pb-2');
+    // Outfits are drawn in your own colours.
+    const look = globalThis.state?.player?.getSnapshot?.()?.context || {};
+    const language = api?.i18n?.getLocale?.()?.startsWith('pt') ? 'pt' : 'en';
+    const found = getHiddenCards();
+    EXTRA_CATEGORIES.filter((category) => found[category].length).forEach((category) => {
+      list.appendChild(buildExtraHeader(category, found[category]));
+      // Subgroup name -> its cards, in the order found.
+      const groups = new Map();
+      found[category].forEach((card) => {
+        const name = cardGroup(card)?.name?.[language] || (card.data.metadata || card.data).group || '';
+        if (!groups.has(name)) groups.set(name, []);
+        groups.get(name).push(card);
+      });
+      groups.forEach((members, name) => {
+        if (name) list.appendChild(buildExtraSeparator(name, members));
+        const grid = element('div', 'flex flex-wrap gap-1 py-0.5');
+        grid.style.paddingInline = '8px';
+        grid.append(...members.map((card, index) => {
+          const shown = withProgress(card);
+          const slot = extraSlot(shown, look);
+          const button = element('button', 'group focus-style-visible size-fit');
+          button.type = 'button';
+          button.dataset.highlighted = 'false';
+          button.appendChild(slot);
+          button.addEventListener('dblclick', () => cardAction(card)?.());
+          button.addEventListener('click', () => {
+            list.querySelectorAll('[data-highlighted]').forEach((other) => { other.dataset.highlighted = String(other === button); });
+            showPreview(buildExtraPreview(shown, look, slot.title, { number: index + 1, total: members.length }));
+          });
+          return button;
+        }));
+        list.appendChild(grid);
+      });
+    });
+    if (!list.childElementCount) list.appendChild(element('div', 'pixel-font-14 text-whiteDark', t('noExtras')));
+    return list;
+  }
+
+  // Takes the place of the game's list and preview, which are only hidden.
+  function showExtras(panel) {
+    const content = panel.querySelector('[data-radix-scroll-area-viewport] > div');
+    if (!content) return;
+    const column = panel.nextElementSibling;
+    if (resultNodes[0]?.parentElement !== content || !resultNodes[0].dataset.extras ||
+        (column && resultNodes[1]?.parentElement !== column)) {
+      removeResult();
+      const view = element('div', '');
+      view.style.contain = 'inline-size';
+      view.dataset.extras = 'true';
+      const holder = element('div', 'grid min-h-0 content-start');
+      // Takes both rows of the game's column, so a long ability text scrolls inside the card.
+      holder.style.cssText = 'grid-row:1 / -1;grid-template-rows:minmax(0,1fr);';
+      view.appendChild(buildExtras((preview) => {
+        holder.replaceChildren(preview);
+        if (!column) content.parentElement.scrollTop = 0;
+      }));
+      content.appendChild(view);
+      content.parentElement.scrollTop = 0;
+      resultNodes.push(view);
+      if (column) column.appendChild(holder);
+      else view.prepend(holder);
+      resultNodes.push(holder);
+    }
+    [...content.children, ...Array.from(panel.children).slice(1), ...(panel.nextElementSibling?.children || [])]
+      .filter((node) => !resultNodes.includes(node)).forEach(hide);
+  }
+
+  // One wrapper at the end of the sidebar, shaped like the ones around the game's category buttons.
+  function syncExtrasButton(dialog) {
+    const sibling = dialog.querySelector('nav button[data-category="backpack"]');
+    if (!sibling) return;
+    let button = dialog.querySelector('[data-better-codex-extras]');
+    if (!button) {
+      button = element('button', sibling.className);
+      button.type = 'button';
+      button.setAttribute('data-better-codex-extras', '');
+      const label = element('span', 'truncate', t('extras'));
+      const base = window.BESTIARY_EXTENSION_BASE_URL;
+      button.append(icon(base ? `${base}assets/icons/icon-32.png` : '/assets/icons/codex.png', ''), label);
+      button.firstChild.className = 'pixelated shrink-0';
+      button.addEventListener('click', () => {
+        extrasOpen = true;
+        sync();
+      });
+      const wrapper = element('div', 'grid gap-px');
+      wrapper.setAttribute('data-better-codex-extras-row', '');
+      wrapper.appendChild(button);
+      button.appendChild(element('span', 'pixel-font-14 ml-auto shrink-0 text-whiteDark'));
+      sibling.closest('nav').appendChild(wrapper);
+    }
+    const active = String(extrasOpen);
+    if (button.dataset.active !== active) button.dataset.active = active;
+
+    const count = button.lastElementChild;
+    // Counted again only when your data changed or the button is new.
+    const context = globalThis.state?.player?.getSnapshot?.()?.context;
+    if (countedFor === context && count.textContent) return;
+    countedFor = context;
+    const cards = Object.values(getHiddenCards()).flat();
+    const owned = cards.filter(ownsExtra).length;
+    // Written only on change, as writing it is itself a DOM mutation.
+    if (count.textContent !== `${owned}/${cards.length}`) count.textContent = `${owned}/${cards.length}`;
+    count.style.color = cards.length && owned >= cards.length ? MAXED_COLOR : '';
+  }
+
+  // Any of the game's own sidebar buttons goes back to the game's view.
+  function closeExtras(event) {
+    const button = event.target.closest?.('nav button');
+    if (!extrasOpen || !button || button.hasAttribute('data-better-codex-extras') ||
+        !button.closest('[role="dialog"]')?.querySelector(`#${SEARCH_ID}`)) return;
+    extrasOpen = false;
+    sync();
+  }
+
   function syncResult(dialog, query) {
     const panel = dialog.querySelector('.frame-pressed-1.surface-dark.relative.min-h-0');
+    if (extrasOpen && panel) return showExtras(panel);
     const list = panel?.querySelector('[data-radix-scroll-area-viewport] > div > div');
     // Only when the game has no cards to show, and only where trading is offered.
     if (!query || !list || list.childElementCount || !dialog.querySelector(TRADES_BUTTON)) return removeResult();
     const key = query.toLowerCase();
+    const known = players.get(key);
+    if (known && key !== shownKey && Date.now() - known.at > PLAYER_TTL) {
+      players.delete(key);
+      // Or scheduleLookup would take it for the lookup already made.
+      lookupQuery = '';
+    }
     if (!players.has(key)) {
       scheduleLookup(query);
       if (pendingLookup !== query) return removeResult();
       return showSearching(panel, query);
     }
-    const player = players.get(key);
+    const { player } = players.get(key);
     if (!player || isOwnName(player.name)) return removeResult();
     showResult(dialog, panel, player);
+    shownKey = key;
   }
 
   // =======================
@@ -1011,13 +1658,15 @@
 
   // Cards you now own are dropped on every read, as they no longer have a toggle to untick.
   function readTracked() {
-    let tracked;
-    try {
-      tracked = JSON.parse(localStorage.getItem(TRACKED_KEY)) || {};
-    } catch (error) {
-      console.warn('[Better Codex] Tracked cards unreadable:', error);
-      return {};
+    if (!trackedCache) {
+      try {
+        trackedCache = JSON.parse(localStorage.getItem(TRACKED_KEY)) || {};
+      } catch (error) {
+        console.warn('[Better Codex] Tracked cards unreadable:', error);
+        return {};
+      }
     }
+    const tracked = trackedCache;
     const owned = Object.keys(tracked).filter((key) => ownsCard(...key.split(':').slice(1)));
     if (owned.length) {
       owned.forEach((key) => {
@@ -1030,11 +1679,23 @@
   }
 
   function writeTracked(tracked) {
+    trackedCache = tracked;
     localStorage.setItem(TRACKED_KEY, JSON.stringify(tracked));
   }
 
+  // Another tab changed storage (a null key means it was cleared).
+  function handleStorage(event) {
+    if (event.key === TRACKED_KEY || event.key === null) trackedCache = null;
+  }
+
+  // Copies you really have: Outfiter's "unlock all" writes outfits and mounts you lack into the Codex.
+  function myCopies(category, id) {
+    if (window.Outfiter?.isAdded?.(category, id)) return 0;
+    return globalThis.state?.player?.getSnapshot?.()?.context?.codex?.[category]?.[id] || 0;
+  }
+
   function ownsCard(category, id) {
-    return (globalThis.state?.player?.getSnapshot?.()?.context?.codex?.[category]?.[id] || 0) > 0;
+    return myCopies(category, id) > 0;
   }
 
   // One request per tracked card, spaced out. A holder is announced once, and again only if their
@@ -1495,6 +2156,16 @@
     if (checkingOffers) return;
     checkingOffers = true;
     try {
+      // Skipped when another tab holds the lock, as that tab is handling the offers.
+      if (!navigator.locks) await handleOffers();
+      else await navigator.locks.request(OFFERS_LOCK, { ifAvailable: true }, (lock) => lock && handleOffers());
+    } finally {
+      checkingOffers = false;
+    }
+  }
+
+  async function handleOffers() {
+    try {
       const context = globalThis.state?.player?.getSnapshot?.()?.context;
       if (!Number.isInteger(context?.lastTradeId)) {
         console.warn('[Better Codex] Offer check skipped: no player data');
@@ -1525,12 +2196,14 @@
           }
           continue;
         }
+        if (failedAccepts.has(offerKey(offer))) continue;
         try {
           await acceptOffer(offer);
           await recordAutoTrade(offer, context.lastTradeId);
           done = { type: 'success', message: message('acceptedToast') };
         } catch (error) {
           console.warn('[Better Codex] Accepting offer', offer.id, 'failed:', error);
+          failedAccepts.add(offerKey(offer));
           done = { type: 'error', message: message('failedToast') };
         }
         break;
@@ -1545,8 +2218,6 @@
       announceOffers(received.filter((offer) => !declined.includes(offer)), done);
     } catch (error) {
       console.warn('[Better Codex] Offer check failed:', error);
-    } finally {
-      checkingOffers = false;
     }
   }
 
@@ -1557,6 +2228,8 @@
     const changed = (changes) => {
       writeAuto(changes);
       announced.clear();
+      // Changing a setting also tries refused offers again.
+      failedAccepts.clear();
     };
     const checkbox = (key) => {
       const label = element('label', 'flex items-center gap-1');
@@ -1716,20 +2389,36 @@
   }
 
   function handleInput(event) {
-    if (event.target.id === SEARCH_ID) sync();
+    if (event.target.id !== SEARCH_ID) return;
+    extrasOpen = false;
+    sync();
+  }
+
+  // Lets go of what was added to a window that is gone.
+  function releaseCodex() {
+    removeResult();
+    removeSpares();
+    titleNode = null;
+    selected = null;
+    extrasOpen = false;
+    hiddenCache = null;
   }
 
   function sync() {
+    // This runs on every DOM change, and everything below lives in a window.
+    if (!document.querySelector('[role="dialog"]')) {
+      releaseCodex();
+      removeAutoUi();
+      return;
+    }
     syncAutoAccept();
     markAutoTrades();
     restoreOnlyMissing();
     const search = document.getElementById(SEARCH_ID);
     const dialog = search?.closest('[role="dialog"]');
-    if (!dialog) {
-      selected = null;
-      return;
-    }
+    if (!dialog) return releaseCodex();
     applyTitle(dialog);
+    syncExtrasButton(dialog);
     syncResult(dialog, search.value.trim());
     syncSpares(dialog);
     colorComplete(dialog);
@@ -1741,6 +2430,8 @@
   observer.observe(document.body, { childList: true, subtree: true, attributeFilter: ['data-highlighted', 'data-entry-key'] });
   document.addEventListener('input', handleInput);
   document.addEventListener('click', saveOnlyMissing, true);
+  document.addEventListener('click', closeExtras, true);
+  window.addEventListener('storage', handleStorage);
   sync();
   checkWhenLoaded(LOAD_WAIT_SECONDS);
 
@@ -1753,6 +2444,18 @@
       }
       document.removeEventListener('input', handleInput);
       document.removeEventListener('click', saveOnlyMissing, true);
+      document.removeEventListener('click', closeExtras, true);
+      document.querySelectorAll('[data-better-codex-extras-row]').forEach((row) => row.remove());
+      extrasOpen = false;
+      hiddenCache = null;
+      progressCache = null;
+      countedFor = null;
+      window.removeEventListener('storage', handleStorage);
+      trackedCache = null;
+      failedAccepts.clear();
+      gameModules.clear();
+      wordCache.clear();
+      webpackRequire = null;
       onlyMissingBox()?.removeAttribute('data-better-codex-restored');
       clearTimeout(lookupTimer);
       clearTimeout(trackTimer);

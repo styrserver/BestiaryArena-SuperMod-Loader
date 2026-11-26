@@ -953,7 +953,39 @@
     }
   }
 
+  /** The setter of the game's selection state ({ids, anchorId, resetKey, lastChange}) above a creature button. */
+  function findSelectionStateSetter(button) {
+    return walkReactFiber(button, (_props, node) => {
+      for (let hook = node.memoizedState; hook; hook = hook.next) {
+        const state = hook.memoizedState;
+        if (Array.isArray(state?.ids) && 'lastChange' in state && 'resetKey' in state) {
+          return hook.queue?.dispatch;
+        }
+      }
+      return undefined;
+    }) ?? null;
+  }
+
+  /** Sets the whole selection in one render. False when the game's state is not as expected. */
+  async function setNativeSelection(modal, buttons) {
+    const setState = findSelectionStateSetter(buttons[0]);
+    const ids = buttons.map((btn) => walkReactFiber(btn, (props) => props?.monster?.id));
+    if (!setState || ids.some((id) => id == null)) return false;
+
+    setState((state) => ({ ...state, ids, anchorId: null, lastChange: 'toggle' }));
+    await waitFrame();
+
+    // These selections feed bulk selling: accept the result only if no non-match is selected.
+    const wanted = new Set(buttons);
+    const selected = getCreatureButtons(modal).filter(isSlotSelected);
+    return selected.length > 0 && selected.every((btn) => wanted.has(btn));
+  }
+
   async function batchSelectButtons(modal, buttons) {
+    if (await setNativeSelection(modal, buttons)) return buttons.filter(isSlotSelected).length;
+
+    // Slow fallback: one Ctrl+click and two frames per creature.
+    console.warn('[Better Bestiary] Could not set the selection at once, selecting one by one');
     const hasSelection = () => getCreatureButtons(modal).some(isSlotSelected);
 
     // Start with onSelectId: a first Ctrl+click would also select the focused creature.

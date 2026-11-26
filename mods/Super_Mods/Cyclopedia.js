@@ -10088,8 +10088,11 @@ function removeCyclopediaFromMenus() {
            menuText.includes('autoplay') || menuText.includes('sandbox');
   };
   
-  // Process all cyclopedia elements
-  document.querySelectorAll('div, li').forEach(el => {
+  // This runs on every DOM change, so find open menus first and only then look inside them. One
+  // combined descendant selector walks every element's ancestors and is over 10 times slower.
+  const menuItems = [...document.querySelectorAll('[role="menu"], .dropdown-menu')]
+    .flatMap(menu => [...menu.querySelectorAll('div, li')]);
+  menuItems.forEach(el => {
     if (el.textContent.trim().toLowerCase() === 'cyclopedia') {
       // Skip elements that should be excluded (e.g., from VIP List)
       if (el.hasAttribute('data-cyclopedia-exclude') || el.hasAttribute('data-vip-list-item')) {
@@ -10957,8 +10960,9 @@ const PHONE_SHELL_LIST_MIN_HEIGHT = '260px';
 function setupCyclopediaPhoneShellLayout(root, leftCol, rightCol, { listHeight = PHONE_SHELL_LIST_HEIGHT, onPhoneChange } = {}) {
   if (typeof ResizeObserver === 'undefined') return;
   const frameBorderImage = `url("${START_PAGE_CONFIG.FRAME_IMAGE_URL}") 6 6 6 6 fill stretch`;
-  const leftSnapshot = snapshotElementLayoutStyles(leftCol);
-  const rightSnapshot = snapshotElementLayoutStyles(rightCol);
+  // Taken on the way into the phone layout, not here: tabs still style the columns after this call.
+  let leftSnapshot = null;
+  let rightSnapshot = null;
   let phone = null;
 
   const apply = () => {
@@ -10969,6 +10973,8 @@ function setupCyclopediaPhoneShellLayout(root, leftCol, rightCol, { listHeight =
     phone = isPhone;
 
     if (isPhone) {
+      leftSnapshot = snapshotElementLayoutStyles(leftCol);
+      rightSnapshot = snapshotElementLayoutStyles(rightCol);
       root.style.flexDirection = 'column';
       Object.assign(leftCol.style, {
         // Fixed share, not auto: the list boxes size by flex share of the column height and collapse otherwise.
@@ -10992,8 +10998,10 @@ function setupCyclopediaPhoneShellLayout(root, leftCol, rightCol, { listHeight =
       });
     } else {
       root.style.flexDirection = 'row';
-      applyElementLayoutStyles(leftCol, leftSnapshot);
-      applyElementLayoutStyles(rightCol, rightSnapshot);
+      if (leftSnapshot) {
+        applyElementLayoutStyles(leftCol, leftSnapshot);
+        applyElementLayoutStyles(rightCol, rightSnapshot);
+      }
     }
     onPhoneChange?.(isPhone);
   };
@@ -21380,9 +21388,11 @@ function createInventoryTabPage(selectedCreature, selectedEquipment, selectedInv
   updateRightCol();
   
   const cleanupSubscription = () => {
-    if (gameStateSubscription && typeof gameStateSubscription === 'function') {
+    if (gameStateSubscription) {
       try {
-        gameStateSubscription();
+        // state.player.subscribe returns { unsubscribe }, not a function.
+        api.util.unsubscribe(gameStateSubscription);
+        gameStateSubscription = null;
       } catch (error) {
 
       }
