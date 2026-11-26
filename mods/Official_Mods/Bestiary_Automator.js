@@ -1232,40 +1232,22 @@ const buildCubeOpenToastRewardContext = (data) => {
   };
 };
 
-const getSurpriseCubeTierRarityColor = (tier) => {
-  const key = String(tier);
-  const colors = typeof window !== 'undefined' && window.inventoryDatabase && window.inventoryDatabase.rarityColors
-    ? window.inventoryDatabase.rarityColors
-    : null;
-  if (colors && colors[key]) {
-    return colors[key];
-  }
-  const fallback = { '1': '#9d9d9d', '2': '#1eff00', '3': '#0070dd', '4': '#a335ee', '5': '#ff8000' };
-  return fallback[key] || fallback['1'];
-};
-
 /**
- * Icon slot matching Cyclopedia `renderSpriteIcon` / `renderStyledImgPortrait` (game CSS drives spritesheets).
- * @param {string} borderColor
+ * Native game item slot with its rarity frame. The icon matches Cyclopedia `renderSpriteIcon` /
+ * `renderStyledImgPortrait` (game CSS drives spritesheets).
+ * @param {number|string} rarityTier
  * @param {string} itemKey inventory key e.g. `surpriseCube5`, `diceManipulator5`
  */
-const makeCubeToastIconForItemKey = (borderColor, itemKey) => {
+const makeCubeToastIconForItemKey = (rarityTier, itemKey) => {
   const wrap = document.createElement('div');
-  wrap.style.cssText = `
-    flex: 0 0 auto;
-    width: 32px;
-    height: 32px;
-    border-radius: 4px;
-    border: 2px solid ${borderColor};
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    box-sizing: border-box;
-    background: rgba(0, 0, 0, 0.2);
-  `;
+  wrap.className = 'container-slot surface-darker';
+  wrap.style.cssText = 'flex: 0 0 auto; overflow: visible;';
+  const frame = document.createElement('div');
+  frame.className = 'has-rarity relative grid h-full place-items-center';
+  frame.setAttribute('data-rarity', String(rarityTier || 1));
+  wrap.appendChild(frame);
   const tip = getInventoryTooltipForKey(itemKey);
   const icon = tip && tip.icon;
-  const rarity = tip && tip.rarity != null ? String(tip.rarity) : '1';
 
   const appendPlainImg = (url) => {
     const img = document.createElement('img');
@@ -1276,7 +1258,7 @@ const makeCubeToastIconForItemKey = (borderColor, itemKey) => {
     img.draggable = false;
     img.className = 'pixelated';
     img.style.cssText = 'width: 26px; height: 26px; image-rendering: pixelated; display: block; object-fit: contain;';
-    wrap.appendChild(img);
+    frame.appendChild(img);
   };
 
   if (icon && typeof icon === 'string') {
@@ -1288,12 +1270,6 @@ const makeCubeToastIconForItemKey = (borderColor, itemKey) => {
         return wrap;
       }
       if (/^\d+$/.test(id)) {
-        const slot = document.createElement('div');
-        slot.className = 'container-slot surface-darker';
-        slot.style.cssText = 'overflow: visible; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;';
-        const hasRarity = document.createElement('div');
-        hasRarity.className = 'has-rarity relative grid h-full place-items-center';
-        hasRarity.setAttribute('data-rarity', rarity);
         const rel = document.createElement('div');
         rel.className = 'relative size-sprite';
         rel.style.cssText = 'overflow: visible; width: 26px; height: 26px;';
@@ -1310,9 +1286,7 @@ const makeCubeToastIconForItemKey = (borderColor, itemKey) => {
         viewport.appendChild(sheetImg);
         sprite.appendChild(viewport);
         rel.appendChild(sprite);
-        hasRarity.appendChild(rel);
-        slot.appendChild(hasRarity);
-        wrap.appendChild(slot);
+        frame.appendChild(rel);
         return wrap;
       }
     }
@@ -1329,7 +1303,6 @@ const makeCubeToastIconForItemKey = (borderColor, itemKey) => {
  */
 const showCubeOpenedToast = (tier, rewardContext = {}) => {
   try {
-    const tierColor = getSurpriseCubeTierRarityColor(tier);
     const label = tReplace('mods.automator.cubeOpenedToast', { cube: getSurpriseCubeDisplayName(tier) });
     const primary = rewardContext.primaryReward || null;
     const summaryParts = Array.isArray(rewardContext.summaryParts) ? rewardContext.summaryParts : [];
@@ -1344,15 +1317,14 @@ const showCubeOpenedToast = (tier, rewardContext = {}) => {
     const iconsRow = document.createElement('div');
     iconsRow.style.cssText = 'display: flex; flex-direction: row; align-items: center; gap: 6px; flex: 0 0 auto;';
 
-    iconsRow.appendChild(makeCubeToastIconForItemKey(tierColor, `surpriseCube${tier}`));
+    iconsRow.appendChild(makeCubeToastIconForItemKey(tier, `surpriseCube${tier}`));
 
     if (primary && primary.key) {
       const arrow = document.createElement('span');
       arrow.textContent = '→';
       arrow.style.cssText = 'opacity: 0.9; font-size: 18px; line-height: 1; flex: 0 0 auto;';
       iconsRow.appendChild(arrow);
-      const rewardColor = getSurpriseCubeTierRarityColor(primary.rarityTier);
-      iconsRow.appendChild(makeCubeToastIconForItemKey(rewardColor, primary.key));
+      iconsRow.appendChild(makeCubeToastIconForItemKey(primary.rarityTier, primary.key));
     }
 
     const textLeft = document.createElement('div');

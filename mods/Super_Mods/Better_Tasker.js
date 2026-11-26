@@ -83,7 +83,6 @@ const DEFAULT_START_DELAY = 3; // seconds
 const ESC_KEY_DELAY = 50;
 const TASK_START_DELAY = 200;
 const MANUAL_PLAY_PAUSE_MS = 180000; // 3 minutes — back off after user changes map manually
-const PROGRAMMATIC_NAV_GUARD_MS = 5000;
 const ROOM_NAV_POLL_MS = 100;
 const ROOM_NAV_TIMEOUT_MS = 8000;
 const ROOM_NAV_TIMEOUT_HIDDEN_MS = 20000;
@@ -1137,17 +1136,6 @@ async function clearScrollLockIfNeeded() {
     return false;
 }
 
-function markProgrammaticNavigation() {
-    programmaticNavigationUntil = Date.now() + PROGRAMMATIC_NAV_GUARD_MS;
-    if (typeof window.markModSettingsProgrammaticNavFloorGuard === 'function') {
-        window.markModSettingsProgrammaticNavFloorGuard('better-tasker');
-    }
-}
-
-function isProgrammaticNavigationActive() {
-    return Date.now() < programmaticNavigationUntil;
-}
-
 function pauseAutomationForManualPlay(reason) {
     manualPlayPauseUntil = Date.now() + MANUAL_PLAY_PAUSE_MS;
     console.log(
@@ -1200,7 +1188,7 @@ function setupManualPlayDetection() {
                 const previousRoomId = lastTrackedRoomIdForManualPlay;
                 lastTrackedRoomIdForManualPlay = roomId;
 
-                if (isProgrammaticNavigationActive()) {
+                if (window.ModCoordination?.isProgrammaticNavigation()) {
                     return;
                 }
 
@@ -2295,7 +2283,6 @@ let lastNewGameDebounceAt = 0;
 let lastEndGameDebounceAt = 0;
 let lastNoTaskCheck = 0;
 let manualPlayPauseUntil = 0;
-let programmaticNavigationUntil = 0;
 let manualPlayBoardUnsubscribe = null;
 let lastTrackedRoomIdForManualPlay = null;
 let taskCompletionInProgress = false;
@@ -5254,7 +5241,7 @@ async function handleQuestLogState(roomId, targetFloor = 0) {
     
     // Now navigate to the suggested map
     console.log('[Better Tasker] Navigating to selected map via API...');
-    markProgrammaticNavigation();
+    window.ModCoordination?.markProgrammaticNavigation('better-tasker');
     globalThis.state.board.send({
         type: 'selectRoomById',
         roomId: roomId

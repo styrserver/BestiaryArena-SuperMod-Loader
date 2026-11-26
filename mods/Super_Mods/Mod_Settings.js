@@ -217,9 +217,7 @@ let isNavigatingViaButton = false;
 let mapFloorSyncLastRoomId = null;
 let mapFloorSyncTimeoutId = null;
 const REPLAY_MAX_FLOOR_GUARD_MS = 5000;
-const PROGRAMMATIC_NAV_FLOOR_GUARD_MS = 5000;
 let replayMaxFloorGuardUntil = 0;
-let programmaticNavFloorGuardUntil = 0;
 let replayFloorGuardHookInstalled = false;
 let autoHideMonstersInProgress = false;
 const initState = {
@@ -3453,13 +3451,20 @@ const perfOverlay = {
   timerBase: null, // perfSnapshotModTimers() at start/Clear
   timerBaseAt: 0,
   lagSamples: [], // { t, lag } timer lateness inside the last PERF_LAG_WINDOW_MS (works in every browser, Firefox included)
-  lagTimer: null
+  lagTimer: null,
+  stalls: [], // worst PERF_MAX_STALLS late ticks since start/Clear, with what the page was doing
+  worker: null, // second ticker off the main thread, to tell a blocked page from a slow browser/machine
+  workerReady: false,
+  workerLate: [] // { at, lag } late worker ticks (epoch ms)
 };
 // A timer that asks to fire every PERF_LAG_TICK_MS fires late by exactly the time the main thread was busy.
 // Firefox has neither long-animation-frame nor longtask, so this is the only blocking measure it can give.
 const PERF_LAG_TICK_MS = 50;
 const PERF_LAG_WINDOW_MS = 60000;
 const PERF_LAG_BAD_MS = 100;
+const PERF_STALL_MIN_MS = 250;
+const PERF_MAX_STALLS = 10;
+const PERF_MAX_WORKER_LATE = 500;
 const PERF_FRAME_WINDOW_MS = 10000;
 const PERF_HEAP_WINDOW_MS = 60000;
 // Slow frames are kept for 15 minutes (max PERF_MAX_LOAF) and saved across refreshes, like the rate-limit captures.
@@ -3608,6 +3613,8 @@ function perfResetData() {
   perfOverlay.frameDts = [];
   perfOverlay.heap = [];
   perfOverlay.lagSamples = [];
+  perfOverlay.stalls = [];
+  perfOverlay.workerLate = [];
   perfOverlay.timerBase = perfSnapshotModTimers();
   perfOverlay.timerBaseAt = Date.now();
 }
@@ -3617,7 +3624,7 @@ function perfResetData() {
 function perfSnapshotModTimers() {
   const snap = {};
   const byMod = (window.BestiaryModTimings && window.BestiaryModTimings.byMod) || {};
-  Object.keys(byMod).forEach((k) => { snap[k] = { calls: byMod[k].calls, ms: byMod[k].ms }; });
+  Object.keys(byMod).forEach((k) => { snap[k] = { calls: byMod[k].calls, ms: byMod[k].ms, obsMs: byMod[k].obsMs || 0 }; });
   return snap;
 }
 
@@ -3629,23 +3636,108 @@ function perfDescribeModTimers() {
     name: k,
     calls: byMod[k].calls - ((base[k] && base[k].calls) || 0),
     ms: byMod[k].ms - ((base[k] && base[k].ms) || 0),
+    obsMs: (byMod[k].obsMs || 0) - ((base[k] && base[k].obsMs) || 0),
     max: byMod[k].max
   })).filter((r) => r.calls > 0).sort((a, b) => b.ms - a.ms).slice(0, 12);
   return rows.map((r) =>
     `  ${String(Math.round(r.ms)).padStart(7)}ms (${(r.ms / secs / 10).toFixed(2)}% of one core)  ${String(r.calls).padStart(6)}x  ` +
-    `avg ${(r.ms / r.calls).toFixed(2)}ms  max ever ${Math.round(r.max)}ms  [${r.name}${r.name === 'Mod_Settings' ? ' *' : ''}]`);
+    `avg ${(r.ms / r.calls).toFixed(2)}ms  max ever ${Math.round(r.max)}ms  observers ${Math.round(r.obsMs)}ms  [${r.name}${r.name === 'Mod_Settings' ? ' *' : ''}]`);
+}
+
+function perfPageState() {
+  let board = null;
+  try { board = globalThis.state?.board?.getSnapshot?.().context; } catch (e) { /* game not ready */ }
+  return `${document.hasFocus() ? 'focused' : 'unfocused'}, mode ${board?.mode || '?'}, ` +
+    `battle ${board?.gameStarted ? 'running' : 'idle'}${window.__turboState?.active ? ', turbo' : ''}, DOM ${perfOverlay.dom}`;
+}
+
+function perfRecordStall(lag) {
+  const stalls = perfOverlay.stalls;
+  if (lag < PERF_STALL_MIN_MS || (stalls.length >= PERF_MAX_STALLS && lag <= stalls[stalls.length - 1].lag)) return;
+  stalls.push({ at: Date.now(), lag, state: perfPageState() });
+  stalls.sort((a, b) => b.lag - a.lag);
+  if (stalls.length > PERF_MAX_STALLS) stalls.pop();
+}
+
+// The same tick inside a Worker. It computes its own lateness, so a blocked main thread only delays delivery.
+function startPerfLagWorker() {
+  if (perfOverlay.worker) return;
+  const source = `postMessage({ ready: true });
+    let expected;
+    (function tick() {
+      expected = performance.now() + ${PERF_LAG_TICK_MS};
+      setTimeout(() => {
+        const lag = performance.now() - expected;
+        if (lag > ${PERF_LAG_BAD_MS}) postMessage({ at: Date.now(), lag });
+        tick();
+      }, ${PERF_LAG_TICK_MS});
+    })();`;
+  let url = null;
+  try {
+    url = URL.createObjectURL(new Blob([source], { type: 'text/javascript' }));
+    const worker = new Worker(url);
+    worker.onmessage = ({ data }) => {
+      if (data.ready) {
+        perfOverlay.workerReady = true;
+        URL.revokeObjectURL(url);
+        return;
+      }
+      perfOverlay.workerLate.push(data);
+      if (perfOverlay.workerLate.length > PERF_MAX_WORKER_LATE) perfOverlay.workerLate.shift();
+    };
+    worker.onerror = (event) => {
+      event.preventDefault();
+      URL.revokeObjectURL(url);
+      stopPerfLagWorker();
+    };
+    perfOverlay.worker = worker;
+  } catch (e) {
+    if (url) URL.revokeObjectURL(url);
+    console.log('[Mod Settings] Debugger worker tick unavailable:', e);
+  }
+}
+
+function stopPerfLagWorker() {
+  perfOverlay.worker?.terminate();
+  perfOverlay.worker = null;
+  perfOverlay.workerReady = false;
+}
+
+// Worst worker lateness among ticks that overlap [from, to] (epoch ms).
+function perfWorkerLagBetween(from, to) {
+  return perfOverlay.workerLate.reduce((max, w) =>
+    (w.at >= from && w.at - w.lag <= to ? Math.max(max, w.lag) : max), 0);
+}
+
+function perfDescribeStalls() {
+  const ready = perfOverlay.workerReady;
+  const now = Date.now();
+  const workerLine = ready
+    ? `Worker tick (off the main thread), last ${PERF_LAG_WINDOW_MS / 1000}s: worst ${Math.round(perfWorkerLagBetween(now - PERF_LAG_WINDOW_MS, now))}ms late`
+    : 'Worker tick: unavailable (blocked or not started)';
+  const rows = perfOverlay.stalls.map((s) =>
+    `  ${new Date(s.at).toISOString()}  ${Math.round(s.lag)}ms` +
+    (ready ? ` (worker ${Math.round(perfWorkerLagBetween(s.at - s.lag, s.at))}ms)` : '') +
+    ` | ${s.state}`);
+  return [
+    workerLine,
+    `Worst stalls over ${PERF_STALL_MIN_MS}ms since start (page late but worker on time = page blocked or its timers throttled; both late = whole browser or machine):`,
+    ...(rows.length ? rows : ['  (none)'])
+  ];
 }
 
 // Self-rescheduling setTimeout (not setInterval) so a long block cannot queue a burst of catch-up ticks.
 // Hidden tabs throttle timers to ~1s, which is not real lag, so those ticks are skipped.
 function startPerfLagSampler() {
   if (perfOverlay.lagTimer) return;
+  startPerfLagWorker();
   let expected = performance.now() + PERF_LAG_TICK_MS;
   let wasHidden = document.hidden;
   const tick = () => {
     const now = performance.now();
     if (!document.hidden && !wasHidden) {
       perfOverlay.lagSamples.push({ t: now, lag: Math.max(0, now - expected) });
+      perfRecordStall(now - expected);
       const cutoff = now - PERF_LAG_WINDOW_MS;
       let drop = 0;
       while (drop < perfOverlay.lagSamples.length && perfOverlay.lagSamples[drop].t < cutoff) drop++;
@@ -3659,6 +3751,7 @@ function startPerfLagSampler() {
 }
 
 function stopPerfLagSampler() {
+  stopPerfLagWorker();
   if (perfOverlay.lagTimer) {
     clearTimeout(perfOverlay.lagTimer);
     perfOverlay.lagTimer = null;
@@ -4191,11 +4284,12 @@ function perfFormatCpuReport() {
     lag
       ? `p95 ${lag.p95.toFixed(0)}ms, worst ${lag.worst.toFixed(0)}ms, ${lag.bad} of ${lag.n} ticks over ${PERF_LAG_BAD_MS}ms (clicks and server replies wait this long)`
       : 'no samples yet (tab hidden or just started)',
+    ...perfDescribeStalls(),
     '',
-    `== Mod timer time (since ${new Date(perfOverlay.timerBaseAt).toISOString()}; time inside each mod's own setTimeout/setInterval/requestAnimationFrame callbacks, works in every browser) ==`,
+    `== Mod callback time (since ${new Date(perfOverlay.timerBaseAt).toISOString()}; time inside each mod's own setTimeout/setInterval/requestAnimationFrame and Mutation/ResizeObserver callbacks, works in every browser) ==`,
     ...(perfDescribeModTimers().length
       ? perfDescribeModTimers()
-      : ['(nothing recorded yet; mods that call window.setTimeout explicitly or run via subscribe/observer/event handlers are not counted)']),
+      : ['(nothing recorded yet; mods that call window.setTimeout explicitly or run via subscribe/event handlers are not counted)']),
     ...(perfDescribeModTimers().some((line) => line.endsWith('*]')) ? ['* = includes this debugger itself'] : []),
     '',
     `== Memory (last ${PERF_HEAP_WINDOW_MS / 1000}s) ==`,
@@ -21769,10 +21863,6 @@ function cleanupBetterUI() {
       delete window.betterUIConfig;
       console.log('[Mod Settings] Global config reference removed');
     }
-    if (window.markModSettingsProgrammaticNavFloorGuard) {
-      delete window.markModSettingsProgrammaticNavFloorGuard;
-    }
-    programmaticNavFloorGuardUntil = 0;
     initState.initialized = false;
     initState.inProgress = false;
     
@@ -21804,21 +21894,12 @@ function markReplayFloorGuard(replayConfig) {
   }
 }
 
-function markProgrammaticNavFloorGuard(source = 'programmatic-navigation') {
-  try {
-    programmaticNavFloorGuardUntil = Date.now() + PROGRAMMATIC_NAV_FLOOR_GUARD_MS;
-    console.log(`[Mod Settings] Programmatic nav floor guard active (${source})`);
-  } catch (error) {
-    console.warn('[Mod Settings] Could not mark programmatic nav floor guard:', error);
-  }
-}
-
 function shouldSkipMaxFloorSync(source = 'unknown') {
   if (Date.now() <= replayMaxFloorGuardUntil) {
     console.log(`[Mod Settings] Skipping max-floor sync during replay (${source})`);
     return true;
   }
-  if (Date.now() <= programmaticNavFloorGuardUntil) {
+  if (window.ModCoordination?.isProgrammaticNavigation()) {
     console.log(`[Mod Settings] Skipping max-floor sync during programmatic navigation (${source})`);
     return true;
   }
@@ -21901,8 +21982,6 @@ function applyBestCompletedFloorForCurrentMap(source = 'unknown') {
     console.error('[Mod Settings] Error applying max floor for current map:', error);
   }
 }
-
-window.markModSettingsProgrammaticNavFloorGuard = markProgrammaticNavFloorGuard;
 
 // Load map history from localStorage
 const loadLastVisitedMap = () => {

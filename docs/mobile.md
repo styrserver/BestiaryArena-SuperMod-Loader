@@ -233,7 +233,7 @@ Symptom: mods fail once; a normal tab refresh does nothing useful; only force-qu
 
 Two separate behaviors interact:
 
-1. **Relaxed loader skips auto-refresh** — On mobile, `handleLoaderLoadFailure` shows the error toast but does **not** call `location.reload()` (avoids refresh loops when hydration/game-state warnings are non-fatal). Desktop still retries up to 3 times. See [`assets/js/ui_components.js`](../assets/js/ui_components.js) and [Loader Internals](mod_development_guide.md#loader-internals).
+1. **Relaxed loader skips auto-refresh** — On mobile, `handleModLoadFailure` shows the error toast but does **not** call `location.reload()` (avoids refresh loops when hydration/game-state warnings are non-fatal). Desktop still retries up to 3 times. See [`content/local_mods.js`](../content/local_mods.js) and [Loader Internals](mod_development_guide.md#loader-internals).
 
 2. **Same-tab reload must clear background delivery state** — Background keeps an in-memory `registeredTabs` Set so `loadScripts` / `registerLocalMods` run once per page load. Tab IDs survive reload. If the Set is not cleared on navigation / `contentScriptReady`, delivery is skipped until the extension process restarts (matches “only a full browser restart works”). Implementation: `clearTabModDelivery()` in [`background.js`](../background.js) on `contentScriptReady`, `tabs.onUpdated` `loading`, and `tabs.onRemoved`.
 

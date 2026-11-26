@@ -1996,7 +1996,7 @@ function scenePaladin(awaken) {
 // in rings (every free tile around the last ring, diagonals too), a ring every 2 ticks (125ms), each ring a 600ms `fire` on all its tiles. Every enemy in a ring takes 10 + 0.5 AP of magic fire damage, and all of them
 // lose 35% (+0.3% per AP, at most 100%) attack damage and ability power for 1.5s (the `soulfire` chip). Here a villain Ti is hit first and another in the fourth ring; the preview board is 7x7.
 function sceneCakeDrake() {
-  const T = 500;
+  const T = 1000; // the missile; it must stay later than cooldownCastAt, which must stay above 0
   const RING = 125;
   const target = [2, 1];
   const far = [-1, -2];
@@ -2008,7 +2008,7 @@ function sceneCakeDrake() {
   const hits = [target, far];
   return {
     numbers: hits.map((t) => sceneDmg(at(t), t, 'fire', false, 'magic')),
-    ...sceneBoard(3), cooldownCastAt: T, casterFacing: 'east',
+    ...sceneBoard(3), cooldownCastAt: T - 8 * 62.5, casterFacing: 'east', // the game restarts the cooldown 8 ticks before the missile
     mates: hits.map(([dx, dy]) => (sceneTiMate(dx, dy, 'west'))),
     flights: [{ shot: { n: 'fire', id: 4 }, from: [0, 0], to: target, at: T }],
     passives: [{ src: 'soulfire', windows: [[at(target), at(far) + 1500]] }], // the two debuffs overlap: one window

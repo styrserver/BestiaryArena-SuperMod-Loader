@@ -12,6 +12,8 @@
   // Card key -> { card, name, seen: holder ids already announced }.
   const TRACKED_KEY = 'better-codex-tracked';
   const TRACK_INTERVAL = 5 * 60 * 1000;
+  // Least time between two tracked-card requests, to leave room in the request limit all mods share.
+  const TRACK_GAP = 1000;
   // The first check runs as soon as the game has loaded your data, waiting at most this many seconds.
   const LOAD_WAIT_SECONDS = 60;
   // The only verdicts that may decline an offer: a rule it definitely breaks. An offer with a foil on
@@ -59,6 +61,7 @@
   let sparesTimer = null;
   let trackTimer = null;
   let checkingTracked = false;
+  let lastTrackedRequest = 0;
   let checkingOffers = false;
   let autoNodes = [];
   // Offer id:revision already announced.
@@ -1018,17 +1021,27 @@
     return (globalThis.state?.player?.getSnapshot?.()?.context?.codex?.[category]?.[id] || 0) > 0;
   }
 
-  // One request per tracked card, one after another. A holder is announced once, and again only if
-  // their spare was gone in between.
+  // One request per tracked card, spaced out. A holder is announced once, and again only if their
+  // spare was gone in between.
   async function checkTracked() {
     if (checkingTracked) return;
     checkingTracked = true;
     try {
-      for (const [key, { card, name }] of Object.entries(readTracked())) {
+      const done = new Set();
+      for (;;) {
+        // Read each round, so a card ticked during a long run is checked in it.
+        const next = Object.entries(readTracked()).find(([key]) => !done.has(key));
+        if (!next) break;
+        const [key, { card, name }] = next;
+        done.add(key);
         const [, category, id] = key.split(':');
         let holders = null;
         const owned = ownsCard(category, id);
         if (!owned) {
+          const pause = lastTrackedRequest + TRACK_GAP - Date.now();
+          if (pause > 0) await new Promise((resolve) => setTimeout(resolve, pause));
+          if (disposed) return;
+          lastTrackedRequest = Date.now();
           try {
             holders = await fetchSpares(card);
           } catch (error) {
@@ -1068,8 +1081,8 @@
   function scheduleTracked(delay) {
     clearTimeout(trackTimer);
     trackTimer = setTimeout(async () => {
-      await checkTracked();
       await checkOffers();
+      await checkTracked();
       if (!disposed) scheduleTracked(TRACK_INTERVAL);
     }, delay);
   }
@@ -1127,6 +1140,8 @@
     const mark = icon('/assets/icons/exclamationmark.png', '');
     mark.width = 4;
     mark.height = 9;
+    // The shared icon class lifts it 2px, which leaves this tall, thin mark above the button's centre.
+    mark.classList.remove('-translate-y-0.5');
     button.append(mark, t('track'));
     const paint = () => {
       const on = !!readTracked()[key];

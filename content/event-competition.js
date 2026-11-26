@@ -5571,9 +5571,7 @@ async function navigateTblToEventMap() {
   }
 
   try {
-    if (typeof window.markModSettingsProgrammaticNavFloorGuard === 'function') {
-      window.markModSettingsProgrammaticNavFloorGuard('event-competition-toast');
-    }
+    window.ModCoordination?.markProgrammaticNavigation('event-competition-toast');
 
     globalThis.state.board.send({
       type: 'selectRoomById',

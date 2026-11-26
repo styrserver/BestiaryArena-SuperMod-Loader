@@ -2698,9 +2698,7 @@
         if (!mapId || !globalThis.state?.board?.send) return false;
         if (String(farmerGetCurrentMapId()) === String(mapId)) return true;
         try {
-            if (typeof window.markModSettingsProgrammaticNavFloorGuard === 'function') {
-                window.markModSettingsProgrammaticNavFloorGuard('awaken-farmer');
-            }
+            window.ModCoordination?.markProgrammaticNavigation('awaken-farmer');
             globalThis.state.board.send({ type: 'selectRoomById', roomId: mapId });
             for (let i = 0; i < 20; i++) {
                 await farmerSleep(100);

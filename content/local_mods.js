@@ -1055,16 +1055,17 @@ async function ensureModScripts(modName) {
   }
 }
 
-// Per-mod timer attribution for the debugger (Firefox has no long-animation-frame, so this is the only way to name
+// Per-mod callback attribution for the debugger (Firefox has no long-animation-frame, so this is the only way to name
 // the mod that blocks the main thread there). Instead of patching the global timers, each mod body gets its own
-// setTimeout / setInterval / requestAnimationFrame through `with (context)`: they forward to the real function and
-// time the callback into window.BestiaryModTimings.byMod[label]. Nothing global changes, so there is nothing to restore.
-// Only bare calls are covered; an explicit `window.setTimeout(...)` in a mod is not attributed.
+// setTimeout / setInterval / requestAnimationFrame / MutationObserver / ResizeObserver through `with (context)`: they
+// forward to the real one and time the callback into window.BestiaryModTimings.byMod[label] (obsMs = observer share).
+// Nothing global changes, so there is nothing to restore. Only bare names are covered; an explicit
+// `window.setTimeout(...)` in a mod, event listeners and .subscribe() callbacks are not attributed.
 window.BestiaryModTimings = window.BestiaryModTimings || { byMod: Object.create(null) };
 function createModTimerShims(label) {
   const byMod = window.BestiaryModTimings.byMod;
-  const rec = byMod[label] || (byMod[label] = { calls: 0, ms: 0, max: 0 });
-  const timed = (fn) => function (...args) {
+  const rec = byMod[label] || (byMod[label] = { calls: 0, ms: 0, max: 0, obsMs: 0 });
+  const timed = (fn, isObserver) => function (...args) {
     const t0 = performance.now();
     try {
       return fn.apply(this, args);
@@ -1072,15 +1073,26 @@ function createModTimerShims(label) {
       const d = performance.now() - t0;
       rec.calls++;
       rec.ms += d;
+      if (isObserver) rec.obsMs += d;
       if (d > rec.max) rec.max = d;
     }
   };
   const shim = (name) => (cb, ...rest) => window[name](typeof cb === 'function' ? timed(cb) : cb, ...rest);
-  return {
+  const shims = {
     setTimeout: shim('setTimeout'),
     setInterval: shim('setInterval'),
     requestAnimationFrame: shim('requestAnimationFrame')
   };
+  ['MutationObserver', 'ResizeObserver'].forEach((name) => {
+    const Native = window[name];
+    if (typeof Native !== 'function') return;
+    shims[name] = class extends Native {
+      constructor(cb) {
+        super(typeof cb === 'function' ? timed(cb, true) : cb);
+      }
+    };
+  });
+  return shims;
 }
 
 async function executeLocalMod(modNameOrObject, forceExecution = false) {
@@ -1397,6 +1409,74 @@ function generateMessageId() {
   return `mod_msg_${Date.now()}_${messageIdCounter++}`;
 }
 
+// ---- Load failure: error toast, then auto-retry by page refresh ----
+const MOD_LOAD_RETRY_KEY = 'mod-load-retry-count';
+const MAX_MOD_LOAD_RETRIES = 3;
+const MOD_LOAD_REFRESH_DELAY_MS = 3000;
+let loadFailureHandled = false;
+
+function getModLoadRetryCount() {
+  try {
+    return parseInt(sessionStorage.getItem(MOD_LOAD_RETRY_KEY) || '0', 10) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+function resetModLoadRetryCount() {
+  try {
+    sessionStorage.removeItem(MOD_LOAD_RETRY_KEY);
+  } catch {
+    // ignore storage failures
+  }
+}
+
+// A refresh is only safe while the retry count survives it; otherwise it would loop forever.
+function storeModLoadRetryCount(count) {
+  try {
+    sessionStorage.setItem(MOD_LOAD_RETRY_KEY, String(count));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function handleModLoadFailure(errors) {
+  if (!Array.isArray(errors) || errors.length === 0 || loadFailureHandled) return false;
+  loadFailureHandled = true;
+
+  const retryCount = getModLoadRetryCount();
+  console.warn(
+    `[Mod Loader] Load failure (${errors.length} error(s)): ${errors.map((e) => e.mod || 'unknown').join(', ')}`,
+    `(retry ${retryCount}/${MAX_MOD_LOAD_RETRIES})`
+  );
+
+  const relaxed = prefersRelaxedLoader();
+  const willRetry = !relaxed && retryCount < MAX_MOD_LOAD_RETRIES && storeModLoadRetryCount(retryCount + 1);
+  const names = [...new Set(errors.map((e) => String(e.mod || 'unknown').split('/').pop().replace(/\.js$/i, '')))];
+  let message = `Loading failed (${errors.length}): ${names.join(', ')}`;
+  if (willRetry) {
+    message += `. Refreshing in ${MOD_LOAD_REFRESH_DELAY_MS / 1000}s (${retryCount + 1}/${MAX_MOD_LOAD_RETRIES})`;
+  } else if (!relaxed) {
+    message += '. Auto-retry limit reached';
+  }
+
+  window.BAToast?.show({
+    mod: window.BestiaryModAPI?.i18n?.t?.('mods.welcome.modName') || 'SuperMod Loader',
+    message,
+    type: 'error',
+    duration: willRetry ? MOD_LOAD_REFRESH_DELAY_MS : 8000
+  });
+
+  if (willRetry) {
+    setTimeout(() => window.location.reload(), MOD_LOAD_REFRESH_DELAY_MS);
+  }
+  return true;
+}
+
+// welcome.js reports problems it detects itself
+window.BestiaryLoaderFailure = { handle: handleModLoadFailure, resetRetryCount: resetModLoadRetryCount };
+
 // Simple completion signal - send once when all mods are done
 let completionSignalSent = false;
 let lastCompletionErrors = [];
@@ -1449,9 +1529,9 @@ function sendCompletionSignal(results = []) {
   }
 
   if (errors.length > 0) {
-    window.BestiaryUIComponents?.handleLoaderLoadFailure?.(errors);
+    handleModLoadFailure(errors);
   } else {
-    window.BestiaryUIComponents?.resetModLoadRetryCount?.();
+    resetModLoadRetryCount();
     window.__BA_RESET_CRASH_RECOVERY_RETRY__?.();
   }
   
@@ -1469,7 +1549,7 @@ function sendCompletionSignal(results = []) {
 function resetCompletionSignal() {
   completionSignalSent = false;
   lastCompletionErrors = [];
-  window.BestiaryUIComponents?.resetLoaderFailureHandled?.();
+  loadFailureHandled = false;
 }
 
 // Call one executed mod's exports.cleanup(), swallowing any error/rejection.

@@ -4,6 +4,46 @@
   },
   "notes": [
     {
+      "version": "5.5.1",
+      "changes": [
+        {
+          "mod": "Autoseller",
+          "type": "fixed",
+          "text": "Uses less CPU during battles."
+        },
+        {
+          "mod": "Bestiary Automator",
+          "type": "changed",
+          "text": "Opened cube messages use the game's own rarity frames."
+        },
+        {
+          "mod": "Better Codex",
+          "type": "fixed",
+          "text": "Watching many cards no longer sends all its requests at once, and the Notify me mark is centred."
+        },
+        {
+          "mod": "Better Tasker",
+          "type": "fixed",
+          "text": "No longer pauses for 3 minutes when another mod changes the map."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "fixed",
+          "text": "Cake Drake's ability preview restarts its cooldown at the right moment."
+        },
+        {
+          "mod": "Mod Loader",
+          "type": "fixed",
+          "text": "Failed mod loading shows a message again and refreshes the page up to 3 times on desktop."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "changed",
+          "text": "The Debugger report records the worst freezes and more of each mod's work."
+        }
+      ]
+    },
+    {
       "version": "5.5.0",
       "changes": [
         {

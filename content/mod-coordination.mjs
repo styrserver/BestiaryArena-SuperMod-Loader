@@ -174,6 +174,14 @@ try {
     }, BOOT_MAX_WAIT_FOR_SIGNAL_MS);
 
     // =======================
+    // Programmatic navigation marker
+    // =======================
+    // A mod that changes the selected room on its own marks it here first, so
+    // listeners can tell it apart from the player choosing a map.
+    const PROGRAMMATIC_NAV_GUARD_MS = 5000;
+    let programmaticNavigationUntil = 0;
+
+    // =======================
     // ModCoordination Class
     // =======================
 
@@ -619,6 +627,27 @@ try {
             if (listeners) {
                 listeners.delete(callback);
             }
+        }
+
+        // =======================
+        // Programmatic navigation
+        // =======================
+
+        /**
+         * Call right before sending selectRoomById without a player click.
+         * @param {string} source - Who is navigating (for logs)
+         */
+        markProgrammaticNavigation(source) {
+            programmaticNavigationUntil = Date.now() + PROGRAMMATIC_NAV_GUARD_MS;
+            console.log(`[Mod Coordination] Programmatic navigation (${source})`);
+        }
+
+        /**
+         * True while a recently marked programmatic navigation is settling.
+         * @returns {boolean}
+         */
+        isProgrammaticNavigation() {
+            return Date.now() <= programmaticNavigationUntil;
         }
 
         // =======================

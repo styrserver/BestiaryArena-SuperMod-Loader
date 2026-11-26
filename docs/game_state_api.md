@@ -353,8 +353,8 @@ Backpack rows can also come from region completion.
 - A spare sells for 5 shards (regular) or 25 (foil). Exchange goes through
   `store.yasirShardExchange`.
 - `account.redeemLoyaltyReward` grants a mount card at loyalty-point milestones.
-- Trades are applied client-side from `{ give, get }` entries newer than `lastTradeId`; the network
-  call was not located.
+- Trades are applied client-side from `{ give, get }` entries newer than `lastTradeId`; they come from
+  `trade.sync` (see the `trade` router below).
 
 ## Board Management
 
@@ -1112,6 +1112,7 @@ spend gold, dust, coins or stamina, and the server is the authority. The mod-sid
 | `quest` | 32 | hunting tasks, Halloween (`hwQuest*`), achievement rewards, DLC expansions |
 | `store` | 42 | every `buy*`, plus Yasir stock/exchange |
 | `account` | 7 | outfit, coins, gift codes, level reward, Pix payments |
+| `trade` | 7 | card trading: offers, finished trades, history, card holders |
 | `admin` | 42 | server-gated; **never call** |
 | `serverSide` | 1+ | `serverSide.profilePageData` (used by `Guilds.js`) |
 
@@ -1224,6 +1225,36 @@ Flag names in the product gating (`s.floors`, `s.forge`, `s.raids`, `s.yasir`, `
 `changeOutfit { outfitId, alt, mountId }` (outfit objects may also carry `head/body/legs/feet`
 colors), `getPlayerCoins`, `getCoinHistory { pageIndex, pageSize }`, `redeemPlayerLevelReward`,
 `redeemLoyaltyReward` (mount card, see Codex), `useGiftCode`, `createPix` / `pollPixStatus { pixPaymentId }` (Brazilian Pix payments).
+
+### `trade` router (7)
+
+Used by `Better_Codex.js`. `trade.sync`, `findSpares` and `acceptOffer` follow what the mod runs; the
+rest, and every client behaviour noted here, was read from the game's chunks (2026-11-25), not called.
+Send the header `x-game-version: String(state.GAME_VERSION)`. Reads are batched `GET`s and writes
+batched `POST`s, as in Transport above.
+
+| Procedure | Input | Answer / effect |
+| --- | --- | --- |
+| `sync` (query) | `{ afterTradeId }` (the player's `lastTradeId`) | `{ received, sent, trades }`: open offers to you, open offers from you, finished trades newer than `afterTradeId` |
+| `findSpares` (query) | `{ card }` | players with a spare: `[{ id, name, look, sparesPlayerMisses }]` |
+| `getTradeWith` (mutation) | `{ partnerId }` | `status` (`ready`, `playerCantTrade`, `partnerCantTrade`); when ready also the open `offer`, `partnerCodex` and `codex` |
+| `saveOffer` (mutation) | `{ partnerId, give, get, revision }` | sends or changes an offer; `revision` is `null` for a new one |
+| `acceptOffer` (mutation) | `{ offerId, revision }` | makes the trade |
+| `removeOffer` (mutation) | `{ offerId }` | cancels your offer or declines theirs |
+| `getTradeHistory` (query) | none | list of past trades |
+
+- **Offer shape** (`received` / `sent`): `{ id, revision, partner: { id, name }, give, get, proposedByPlayer,
+  expiresAt }`. `give` is always your side.
+- **Items:** `{ type: 'card', amount, card }`. `card` is `{ category }` plus one id field: `outfitId`,
+  `mountId`, `gameId` (monster) or `spriteId` (backpack).
+- **Finished trades** (`trades`) have `id`, `give`, `get`. After parsing them the client also reads
+  `partnerName` and `proposedByPlayer`.
+- **Side rules** the game's editor checks: `EMPTY_SIDE`, `UNEVEN_SIDES`, `TOO_MANY_COPIES`,
+  `NOT_A_PACK_CARD`, `BANNED_CARD`, `REPEATED_CARD`.
+- **Game's own sync:** react-query key `[['trade','sync']]`, refetched every 5 minutes and on window
+  focus; it asks again until a page of `trades` is not full, then applies them to `state.player`. After
+  calling a write yourself, invalidate that key (the `QueryClient` is a `client` prop up the React fiber
+  tree) or the game shows old data until its next sync.
 
 ### `admin` router (42): listed, not for use
 

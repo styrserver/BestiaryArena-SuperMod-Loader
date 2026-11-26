@@ -10003,6 +10003,18 @@
         slot.target = target;
     }
 
+    // The body observer fires on nearly every frame of a battle. A full badge update is only needed when a
+    // badge must be created, removed or retargeted; position is kept by the badge observers and track loop.
+    function autoBadgesNeedUpdate() {
+        const settings = getSettings();
+        const wanted = {
+            plant: settings.autoMode === 'autoplant',
+            squeezer: settings.autosqueezeChecked === true
+        };
+        return Object.entries(AUTO_BADGE_SLOTS).some(([slotKey, slot]) =>
+            wanted[slotKey] ? !slot.el || !slot.target?.isConnected : !!slot.el);
+    }
+
     function updateAutosellerAutoBadges() {
         if (isCleaningUp) return;
 
@@ -10608,9 +10620,7 @@
                 // Sandbox battles spawn a burst of DOM changes at start and have no autoplay widget to track.
                 if (isBoardSandboxMode()) return;
 
-                if (!isCleaningUp) {
-                    schedulePositionAutoBadges();
-                    refreshAutoBadgeTargets();
+                if (!isCleaningUp && autoBadgesNeedUpdate()) {
                     scheduleAutoBadgeUpdate();
                 }
 

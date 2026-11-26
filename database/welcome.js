@@ -344,13 +344,13 @@ async function handleModLoadingFinished(errors = []) {
     console.log('[Welcome] Mod loading had errors:', resolvedErrors.map((e) => e.mod || 'unknown').join(', '));
     // Errors the loader reported itself were already handled by the loader.
     if (!(Array.isArray(errors) && errors.length > 0)) {
-      window.BestiaryUIComponents?.handleLoaderLoadFailure?.(resolvedErrors);
+      window.BestiaryLoaderFailure?.handle(resolvedErrors);
     }
     return;
   }
 
   modsLoaded = true;
-  window.BestiaryUIComponents?.resetModLoadRetryCount?.();
+  window.BestiaryLoaderFailure?.resetRetryCount();
   window.__BA_RESET_CRASH_RECOVERY_RETRY__?.();
 
   try {

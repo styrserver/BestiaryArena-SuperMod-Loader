@@ -5275,9 +5275,7 @@ async function startBoostedMapFarming(force = false) {
         // Navigate to boosted map
         console.log('[Better Boosted Maps] Navigating to map...');
         try {
-            if (typeof window.markModSettingsProgrammaticNavFloorGuard === 'function') {
-                window.markModSettingsProgrammaticNavFloorGuard('better-boosted-maps');
-            }
+            window.ModCoordination?.markProgrammaticNavigation('better-boosted-maps');
             globalThis.state.board.send({
                 type: 'selectRoomById',
                 roomId: farmCheck.roomId
