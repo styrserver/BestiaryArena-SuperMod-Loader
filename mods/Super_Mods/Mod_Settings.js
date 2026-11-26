@@ -3453,6 +3453,8 @@ const perfOverlay = {
   lagSamples: [], // { t, lag } timer lateness inside the last PERF_LAG_WINDOW_MS (works in every browser, Firefox included)
   lagTimer: null,
   stalls: [], // worst PERF_MAX_STALLS late ticks since start/Clear, with what the page was doing
+  gameEvents: [], // recent battle start/end/result changes { at, name }, matched to stalls
+  gameSubs: null, // store subscriptions feeding gameEvents
   worker: null, // second ticker off the main thread, to tell a blocked page from a slow browser/machine
   workerReady: false,
   workerLate: [] // { at, lag } late worker ticks (epoch ms)
@@ -3464,6 +3466,8 @@ const PERF_LAG_WINDOW_MS = 60000;
 const PERF_LAG_BAD_MS = 100;
 const PERF_STALL_MIN_MS = 250;
 const PERF_MAX_STALLS = 10;
+const PERF_EVENT_LOOKBACK_MS = 2000;
+const PERF_MAX_GAME_EVENTS = 50;
 const PERF_MAX_WORKER_LATE = 500;
 const PERF_FRAME_WINDOW_MS = 10000;
 const PERF_HEAP_WINDOW_MS = 60000;
@@ -3614,17 +3618,19 @@ function perfResetData() {
   perfOverlay.heap = [];
   perfOverlay.lagSamples = [];
   perfOverlay.stalls = [];
+  perfOverlay.gameEvents = [];
   perfOverlay.workerLate = [];
   perfOverlay.timerBase = perfSnapshotModTimers();
   perfOverlay.timerBaseAt = Date.now();
 }
 
 // The loader (content/local_mods.js) times every mod's setTimeout / setInterval / requestAnimationFrame callbacks
-// into window.BestiaryModTimings. Those totals only grow, so the debugger diffs against a baseline taken at start/Clear.
+// and game store subscribers into window.BestiaryModTimings. Those totals only grow, so the debugger diffs against a
+// baseline taken at start/Clear.
 function perfSnapshotModTimers() {
   const snap = {};
   const byMod = (window.BestiaryModTimings && window.BestiaryModTimings.byMod) || {};
-  Object.keys(byMod).forEach((k) => { snap[k] = { calls: byMod[k].calls, ms: byMod[k].ms, obsMs: byMod[k].obsMs || 0 }; });
+  Object.keys(byMod).forEach((k) => { snap[k] = { ...byMod[k] }; });
   return snap;
 }
 
@@ -3637,11 +3643,12 @@ function perfDescribeModTimers() {
     calls: byMod[k].calls - ((base[k] && base[k].calls) || 0),
     ms: byMod[k].ms - ((base[k] && base[k].ms) || 0),
     obsMs: (byMod[k].obsMs || 0) - ((base[k] && base[k].obsMs) || 0),
+    subMs: (byMod[k].subMs || 0) - ((base[k] && base[k].subMs) || 0),
     max: byMod[k].max
   })).filter((r) => r.calls > 0).sort((a, b) => b.ms - a.ms).slice(0, 12);
   return rows.map((r) =>
     `  ${String(Math.round(r.ms)).padStart(7)}ms (${(r.ms / secs / 10).toFixed(2)}% of one core)  ${String(r.calls).padStart(6)}x  ` +
-    `avg ${(r.ms / r.calls).toFixed(2)}ms  max ever ${Math.round(r.max)}ms  observers ${Math.round(r.obsMs)}ms  [${r.name}${r.name === 'Mod_Settings' ? ' *' : ''}]`);
+    `avg ${(r.ms / r.calls).toFixed(2)}ms  max ever ${Math.round(r.max)}ms  observers ${Math.round(r.obsMs)}ms  subscribers ${Math.round(r.subMs)}ms  [${r.name}${r.name === 'Mod_Settings' ? ' *' : ''}]`);
 }
 
 function perfPageState() {
@@ -3654,9 +3661,43 @@ function perfPageState() {
 function perfRecordStall(lag) {
   const stalls = perfOverlay.stalls;
   if (lag < PERF_STALL_MIN_MS || (stalls.length >= PERF_MAX_STALLS && lag <= stalls[stalls.length - 1].lag)) return;
-  stalls.push({ at: Date.now(), lag, state: perfPageState() });
+  const at = Date.now();
+  stalls.push({ at, lag, state: `${perfPageState()} | ${perfGameEventsNear(at - lag, at)}` });
   stalls.sort((a, b) => b.lag - a.lag);
   if (stalls.length > PERF_MAX_STALLS) stalls.pop();
+}
+
+// Battle changes from PERF_EVENT_LOOKBACK_MS before a stall until it ended, timed relative to the stall start.
+function perfGameEventsNear(from, to) {
+  const near = perfOverlay.gameEvents
+    .filter((e) => e.at >= from - PERF_EVENT_LOOKBACK_MS && e.at <= to)
+    .map((e) => `${e.name} ${e.at < from ? '' : '+'}${Math.round(e.at - from)}ms`);
+  return near.length ? near.join(', ') : 'no battle change nearby';
+}
+
+// The stores may not exist yet when the debugger starts, so the lag tick retries until they do.
+function startPerfGameEvents() {
+  const { board, gameTimer } = globalThis.state || {};
+  if (perfOverlay.gameSubs || !board?.subscribe || !gameTimer?.subscribe) return;
+  const watch = (store, read, describe) => {
+    let last = read(store.getSnapshot().context);
+    return store.subscribe(({ context }) => {
+      const value = read(context);
+      if (value === last) return;
+      last = value;
+      perfOverlay.gameEvents.push({ at: Date.now(), name: describe(value) });
+      if (perfOverlay.gameEvents.length > PERF_MAX_GAME_EVENTS) perfOverlay.gameEvents.shift();
+    });
+  };
+  perfOverlay.gameSubs = [
+    watch(board, (c) => c.gameStarted === true, (on) => (on ? 'battle start' : 'battle stop')),
+    watch(gameTimer, (c) => c.state, (state) => `timer ${state}`)
+  ];
+}
+
+function stopPerfGameEvents() {
+  perfOverlay.gameSubs?.forEach((sub) => sub?.unsubscribe?.());
+  perfOverlay.gameSubs = null;
 }
 
 // The same tick inside a Worker. It computes its own lateness, so a blocked main thread only delays delivery.
@@ -3735,6 +3776,7 @@ function startPerfLagSampler() {
   let wasHidden = document.hidden;
   const tick = () => {
     const now = performance.now();
+    startPerfGameEvents();
     if (!document.hidden && !wasHidden) {
       perfOverlay.lagSamples.push({ t: now, lag: Math.max(0, now - expected) });
       perfRecordStall(now - expected);
@@ -3752,6 +3794,7 @@ function startPerfLagSampler() {
 
 function stopPerfLagSampler() {
   stopPerfLagWorker();
+  stopPerfGameEvents();
   if (perfOverlay.lagTimer) {
     clearTimeout(perfOverlay.lagTimer);
     perfOverlay.lagTimer = null;
@@ -4286,10 +4329,10 @@ function perfFormatCpuReport() {
       : 'no samples yet (tab hidden or just started)',
     ...perfDescribeStalls(),
     '',
-    `== Mod callback time (since ${new Date(perfOverlay.timerBaseAt).toISOString()}; time inside each mod's own setTimeout/setInterval/requestAnimationFrame and Mutation/ResizeObserver callbacks, works in every browser) ==`,
+    `== Mod callback time (since ${new Date(perfOverlay.timerBaseAt).toISOString()}; time inside each mod's own setTimeout/setInterval/requestAnimationFrame, Mutation/ResizeObserver and game store subscriber callbacks, works in every browser) ==`,
     ...(perfDescribeModTimers().length
       ? perfDescribeModTimers()
-      : ['(nothing recorded yet; mods that call window.setTimeout explicitly or run via subscribe/event handlers are not counted)']),
+      : ['(nothing recorded yet; mods that call window.setTimeout explicitly or run via event handlers are not counted)']),
     ...(perfDescribeModTimers().some((line) => line.endsWith('*]')) ? ['* = includes this debugger itself'] : []),
     '',
     `== Memory (last ${PERF_HEAP_WINDOW_MS / 1000}s) ==`,

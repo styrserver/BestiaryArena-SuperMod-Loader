@@ -10966,12 +10966,12 @@ function createNPCCooldownManager() {
   }
   
   const NotificationService = {
-    show({ productName, message, duration, logPrefix = '[Quests Mod]', variant }) {
+    show({ productName, message, duration, logPrefix = '[Quests Mod]', variant, hideName }) {
       try {
         const resolvedVariant = variant || resolveToastVariant(message);
         const resolvedDuration = duration ?? resolveToastDuration(message, resolvedVariant);
         const { content } = buildQuestToastContent({ message, variant: resolvedVariant, productName });
-        window.BAToast?.show({ mod: t('mods.quests.modName'), message: content, duration: resolvedDuration });
+        window.BAToast?.show({ mod: t('mods.quests.modName'), message: content, duration: resolvedDuration, hideName });
       } catch (error) {
         console.error(`${logPrefix} Error showing toast:`, error);
       }
@@ -11055,8 +11055,8 @@ function createNPCCooldownManager() {
   // Notification System
   // =======================
 
-  function showToast({ productName, message, duration, logPrefix = '[Quests Mod]', variant }) {
-    NotificationService.show({ productName, message, duration, logPrefix, variant });
+  function showToast({ productName, message, duration, logPrefix = '[Quests Mod]', variant, hideName }) {
+    NotificationService.show({ productName, message, duration, logPrefix, variant, hideName });
   }
 
   function showQuestItemNotification(productName, amount) {
@@ -35836,7 +35836,8 @@ function createNPCCooldownManager() {
     const show = (message) => showToast({
       message,
       duration: WORLD_RAID_TOAST_DURATION_MS,
-      logPrefix: '[Quests Mod][World Raid]'
+      logPrefix: '[Quests Mod][World Raid]',
+      hideName: true
     });
     show(TOAST_MESSAGES.worldRaidOrshabaalWarning1);
     worldRaidToastSequenceTimers.push(setTimeout(() => {

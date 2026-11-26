@@ -8,6 +8,7 @@
  *   window.BAToast.show({ mod: 'Raid Hunter', message: 'Starting raid', type: 'info', icon: '…/raid.png' });
  *
  * - `mod`      (required) name shown first, so the player knows which mod spoke.
+ * - `hideName` true shows the message without the name (text spoken in-world). `mod` still drives muting.
  * - `message`  sentence-case fragment, ideally <= 60 chars, one whole translatable string.
  *               May also be a DOM Node for rich content (icons, coloured words); it is used as-is.
  * - `type`     'info' | 'success' | 'warning' | 'error' (colours the mod name with the game's own
@@ -172,7 +173,7 @@
     text.className = 'text-left';
     text.style.maxWidth = '380px';
     text.style.whiteSpace = 'pre-line';
-    if (opts.mod) {
+    if (opts.mod && !opts.hideName) {
       var name = document.createElement('span');
       name.textContent = opts.mod + ':';
       name.className = NAME_CLASSES[type];

@@ -1009,13 +1009,24 @@
   // Tracked cards: a toast when someone has a spare
   // =======================
 
+  // Cards you now own are dropped on every read, as they no longer have a toggle to untick.
   function readTracked() {
+    let tracked;
     try {
-      return JSON.parse(localStorage.getItem(TRACKED_KEY)) || {};
+      tracked = JSON.parse(localStorage.getItem(TRACKED_KEY)) || {};
     } catch (error) {
       console.warn('[Better Codex] Tracked cards unreadable:', error);
       return {};
     }
+    const owned = Object.keys(tracked).filter((key) => ownsCard(...key.split(':').slice(1)));
+    if (owned.length) {
+      owned.forEach((key) => {
+        console.log('[Better Codex] You now own', tracked[key].name, '- no longer tracked');
+        delete tracked[key];
+      });
+      writeTracked(tracked);
+    }
+    return tracked;
   }
 
   function writeTracked(tracked) {
@@ -1039,40 +1050,31 @@
         if (!next) break;
         const [key, { card, name }] = next;
         done.add(key);
-        const [, category, id] = key.split(':');
-        let holders = null;
-        const owned = ownsCard(category, id);
-        if (!owned) {
-          const pause = lastTrackedRequest + TRACK_GAP - Date.now();
-          if (pause > 0) await new Promise((resolve) => setTimeout(resolve, pause));
-          if (disposed) return;
-          lastTrackedRequest = Date.now();
-          try {
-            holders = await fetchSpares(card);
-          } catch (error) {
-            console.warn('[Better Codex] Tracked card check failed:', key, error);
-            continue;
-          }
+        const pause = lastTrackedRequest + TRACK_GAP - Date.now();
+        if (pause > 0) await new Promise((resolve) => setTimeout(resolve, pause));
+        if (disposed) return;
+        lastTrackedRequest = Date.now();
+        let holders;
+        try {
+          holders = await fetchSpares(card);
+        } catch (error) {
+          console.warn('[Better Codex] Tracked card check failed:', key, error);
+          continue;
         }
         if (disposed) return;
-        // Read again, as the card may have been unticked while waiting.
+        // Read again, as the card may have been unticked or received while waiting.
         const tracked = readTracked();
         const entry = tracked[key];
         if (!entry) continue;
-        if (owned) {
-          console.log('[Better Codex] You now own', name, '- no longer tracked');
-          delete tracked[key];
-        } else {
-          const fresh = holders.filter((holder) => !entry.seen.includes(holder.id));
-          entry.seen = holders.map((holder) => holder.id);
-          if (fresh.length) {
-            window.BAToast?.show({
-              mod: MOD_NAME,
-              type: 'success',
-              duration: TOAST_MS,
-              message: t('available').replace('{card}', name).replace('{players}', fresh.slice(0, 3).map((holder) => holder.name).join(', '))
-            });
-          }
+        const fresh = holders.filter((holder) => !entry.seen.includes(holder.id));
+        entry.seen = holders.map((holder) => holder.id);
+        if (fresh.length) {
+          window.BAToast?.show({
+            mod: MOD_NAME,
+            type: 'success',
+            duration: TOAST_MS,
+            message: t('available').replace('{card}', name).replace('{players}', fresh.slice(0, 3).map((holder) => holder.name).join(', '))
+          });
         }
         writeTracked(tracked);
       }

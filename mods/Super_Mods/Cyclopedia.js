@@ -6615,22 +6615,29 @@ const CyclopediaApi = {
     if (cached) return this.parseProfileResponse(cached);
 
     const effectiveSignal = signal || (activeModalLifecycle?.isActive ? getModalFetchSignal() : null);
-    // Another player's Codex is not in profilePageData: it comes with their profile page data. Your own is read
-    // from the live state, so it is not fetched. A failed codex request only hides the Codex block.
+    // profilePageData only matches a name in its exact case. The profile page route matches any case and also
+    // carries another player's Codex, which profilePageData lacks. Your own is read from the live state, so it is
+    // not fetched. A failed page request only hides the Codex block.
     const ownName = globalThis.state?.player?.getSnapshot?.()?.context?.name;
-    const codexPromise = playerName === ownName
+    const isOwn = !!ownName && playerName.toLowerCase() === ownName.toLowerCase();
+    const pagePromise = isOwn
       ? Promise.resolve(null)
-      : this.fetchCodexData(playerName, effectiveSignal).catch(() => null);
-    const raw = await fetchWithDeduplication(
-      this.buildProfileUrl(playerName),
-      `profile-${playerName}`,
+      : this.fetchProfilePage(playerName, effectiveSignal).catch(() => null);
+    const fetchByName = async (name) => this.parseProfileResponse(await fetchWithDeduplication(
+      this.buildProfileUrl(name),
+      `profile-${name}`,
       priority,
       effectiveSignal
-    );
+    ));
 
-    const profile = this.parseProfileResponse(raw);
+    const queryName = isOwn ? ownName : playerName;
+    let profile = await fetchByName(queryName);
+    if (!profile?.name) {
+      const exactName = (await pagePromise)?.name;
+      if (exactName && exactName !== queryName) profile = await fetchByName(exactName);
+    }
     if (profile?.name) {
-      const codexData = await codexPromise;
+      const codexData = (await pagePromise)?.codexData;
       if (codexData) profile.codexData = codexData;
       cyclopediaState.setProfileData(playerName, profile);
     }
@@ -6638,11 +6645,11 @@ const CyclopediaApi = {
   },
 
   /**
-   * `{ codex, rooms, completedRegionIds, highscoreRoomIds, raidsUnlocked }` from a player's profile page data
-   * (docs/game_state_api.md, "Codex"). The `x-nextjs-data` header makes the page route answer with its JSON
+   * A player's profile page data: `name` and `codexData` = `{ codex, rooms, completedRegionIds, highscoreRoomIds,
+   * raidsUnlocked }` (docs/game_state_api.md, "Codex"). The `x-nextjs-data` header makes the page route answer with its JSON
    * instead of the full HTML page.
    */
-  async fetchCodexData(playerName, signal = null) {
+  async fetchProfilePage(playerName, signal = null) {
     const data = await fetchWithDeduplication(
       `${START_PAGE_CONFIG.PROFILE_PAGE_URL}${encodeURIComponent(playerName)}`,
       `codex-${playerName}`,
@@ -6650,7 +6657,7 @@ const CyclopediaApi = {
       signal,
       { 'x-nextjs-data': '1' }
     );
-    return data?.pageProps?.pageData?.codexData ?? null;
+    return data?.pageProps?.pageData ?? null;
   },
 
   fetchTRPC(method) {
@@ -14871,7 +14878,7 @@ const CYCLOPEDIA_CODEX_ROWS = [
  * leaves out exclusive cards while `owned` includes the exclusives you hold (so it can exceed `total`), and the
  * headline `all` counts non-exclusive cards only. Every category goes through the game's resolver. Your own
  * profile reads the live state; another player's comes from `profileData.codexData` (their profile page data, see
- * CyclopediaApi.fetchCodexData) plus their profile monsters and equips. Without the resolver or that data it falls
+ * CyclopediaApi.fetchProfilePage) plus their profile monsters and equips. Without the resolver or that data it falls
  * back to your own outfit and mount cards, or null for other players. Returns null when the catalog is unreadable.
  */
 function getCyclopediaCodexProgress(profileData) {
@@ -21554,43 +21561,34 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
   };
   const getCharactersIsStacked = () => sharedScrollContainer.clientWidth < LAYOUT_CONSTANTS.CREATURE_DETAIL_FLEX_COL_MIN * 2;
 
+  // Player Information and Leaderboards: one shared scrollbar for both columns. Stacked (phones), the profile cards
+  // are taller than the box, so each column takes its content height instead of a share of the box.
   function applyCharactersSplitColumnLayout() {
     const isStacked = getCharactersIsStacked();
     col3.style.display = 'flex';
     sharedScrollContainer.style.flexDirection = isStacked ? 'column' : 'row';
-    sharedScrollContainer.style.alignItems = '';
-    sharedScrollContainer.style.overflowY = 'hidden';
-    sharedScrollContainer.style.overflowX = 'hidden';
-    col2.style.flex = '1 1 0';
-    col2.style.maxWidth = isStacked ? '100%' : '50%';
-    col2.style.height = '100%';
-    col2.style.borderRight = isStacked ? 'none' : charactersColFrameBorder.borderRight;
-    col2.style.borderImage = isStacked ? 'none' : charactersColFrameBorder.borderImage;
-    col2.style.justifyContent = 'center';
-    col2.style.alignItems = 'center';
-    col2.style.overflow = '';
-    col2.style.minHeight = '';
-    col3.style.maxWidth = isStacked ? '100%' : '50%';
-    col3.style.height = '100%';
-    col3.style.minHeight = '';
-  }
-
-  function applyCharactersLeaderboardsColumnLayout() {
-    const isStacked = getCharactersIsStacked();
-    applyCharactersSplitColumnLayout();
-    // Use one shared scrollbar for both leaderboard columns.
-    sharedScrollContainer.style.flexDirection = isStacked ? 'column' : 'row';
-    sharedScrollContainer.style.overflowY = 'auto';
-    sharedScrollContainer.style.overflowX = 'hidden';
-    col2.style.height = 'auto';
-    col3.style.height = 'auto';
-    col2.style.overflow = 'visible';
-    col3.style.overflow = 'visible';
     // Side by side: columns are as tall as their own content (at least the scroll box). With the default stretch they
     // would only be as tall as the visible box, and the divider between them would end after the first screenful.
     sharedScrollContainer.style.alignItems = isStacked ? '' : 'flex-start';
-    col2.style.minHeight = isStacked ? '' : '100%';
-    col3.style.minHeight = isStacked ? '' : '100%';
+    sharedScrollContainer.style.overflowY = 'auto';
+    sharedScrollContainer.style.overflowX = 'hidden';
+    [col2, col3].forEach((col) => {
+      col.style.flex = isStacked ? '0 0 auto' : '1 1 0';
+      col.style.maxWidth = isStacked ? '100%' : '50%';
+      col.style.height = 'auto';
+      col.style.minHeight = isStacked ? '' : '100%';
+      col.style.overflow = 'visible';
+      col.style.justifyContent = 'flex-start';
+    });
+    col2.style.borderRight = isStacked ? 'none' : charactersColFrameBorder.borderRight;
+    col2.style.borderImage = isStacked ? 'none' : charactersColFrameBorder.borderImage;
+    col2.style.alignItems = 'center';
+  }
+
+  function applyCharactersLeaderboardsColumnLayout() {
+    applyCharactersSplitColumnLayout();
+    col2.style.justifyContent = 'center';
+    col3.style.justifyContent = 'center';
   }
 
   function applyCharactersRankingsColumnLayout() {

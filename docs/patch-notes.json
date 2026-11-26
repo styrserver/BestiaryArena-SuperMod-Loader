@@ -4,6 +4,31 @@
   },
   "notes": [
     {
+      "version": "5.5.3",
+      "changes": [
+        {
+          "mod": "Better Codex",
+          "type": "fixed",
+          "text": "Cards you receive are no longer tracked or marked right away."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "fixed",
+          "text": "Player search ignores upper and lower case, and Player Information scrolls on mobile."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "changed",
+          "text": "The debugger report times more mod activity and shows battle changes near stalls."
+        },
+        {
+          "mod": "Quests",
+          "type": "changed",
+          "text": "World raid warnings show without the \"Quests:\" label."
+        }
+      ]
+    },
+    {
       "version": "5.5.2",
       "changes": [
         {

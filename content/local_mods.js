@@ -1059,13 +1059,13 @@ async function ensureModScripts(modName) {
 // the mod that blocks the main thread there). Instead of patching the global timers, each mod body gets its own
 // setTimeout / setInterval / requestAnimationFrame / MutationObserver / ResizeObserver through `with (context)`: they
 // forward to the real one and time the callback into window.BestiaryModTimings.byMod[label] (obsMs = observer share).
-// Nothing global changes, so there is nothing to restore. Only bare names are covered; an explicit
-// `window.setTimeout(...)` in a mod, event listeners and .subscribe() callbacks are not attributed.
+// Only bare names are covered; an explicit `window.setTimeout(...)` in a mod and event listeners are not attributed.
+// The game stores are shared globals, so their subscribe() is wrapped once instead (subMs = subscriber share).
 window.BestiaryModTimings = window.BestiaryModTimings || { byMod: Object.create(null) };
-function createModTimerShims(label) {
+function timeModCallback(label, fn, shareKey) {
   const byMod = window.BestiaryModTimings.byMod;
-  const rec = byMod[label] || (byMod[label] = { calls: 0, ms: 0, max: 0, obsMs: 0 });
-  const timed = (fn, isObserver) => function (...args) {
+  const rec = byMod[label] || (byMod[label] = { calls: 0, ms: 0, max: 0, obsMs: 0, subMs: 0 });
+  return function (...args) {
     const t0 = performance.now();
     try {
       return fn.apply(this, args);
@@ -1073,11 +1073,31 @@ function createModTimerShims(label) {
       const d = performance.now() - t0;
       rec.calls++;
       rec.ms += d;
-      if (isObserver) rec.obsMs += d;
+      if (shareKey) rec[shareKey] += d;
       if (d > rec.max) rec.max = d;
     }
   };
-  const shim = (name) => (cb, ...rest) => window[name](typeof cb === 'function' ? timed(cb) : cb, ...rest);
+}
+
+// Only callbacks registered from a mod's own source (its sourceURL is in the stack) are timed; the game's own
+// subscribers pass through untouched.
+function timeStoreSubscribers() {
+  ['board', 'player', 'game', 'gameTimer', 'daily'].forEach((name) => {
+    const store = globalThis.state?.[name];
+    if (typeof store?.subscribe !== 'function' || store.subscribe.__baTimed) return;
+    const original = store.subscribe;
+    const wrapper = function (observer, ...rest) {
+      const label = typeof observer === 'function' && new Error().stack?.match(/\/bestiary-mod\/([\w.-]+)\.js/)?.[1];
+      return original.call(this, label ? timeModCallback(label, observer, 'subMs') : observer, ...rest);
+    };
+    wrapper.__baTimed = true;
+    store.subscribe = wrapper;
+  });
+}
+
+function createModTimerShims(label) {
+  timeStoreSubscribers();
+  const shim = (name) => (cb, ...rest) => window[name](typeof cb === 'function' ? timeModCallback(label, cb) : cb, ...rest);
   const shims = {
     setTimeout: shim('setTimeout'),
     setInterval: shim('setInterval'),
@@ -1088,7 +1108,7 @@ function createModTimerShims(label) {
     if (typeof Native !== 'function') return;
     shims[name] = class extends Native {
       constructor(cb) {
-        super(typeof cb === 'function' ? timed(cb, true) : cb);
+        super(typeof cb === 'function' ? timeModCallback(label, cb, 'obsMs') : cb);
       }
     };
   });
