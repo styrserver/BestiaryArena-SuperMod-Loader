@@ -840,7 +840,7 @@
 
   // Their cards go inside the list's scroll area, so the game's own scrollbar moves them; their
   // profile card and the trade button replace the preview.
-  // Narrow layouts have no preview column, so there the button sits above the cards.
+  // Narrow layouts have no preview column, so there the button and profile card sit above the cards.
   function showResult(dialog, panel, player) {
     const preview = panel.nextElementSibling?.firstElementChild;
     // The content box of the game's scroll area, which its scrollbar measures.
@@ -863,13 +863,18 @@
       content.appendChild(cards);
       content.parentElement.scrollTop = 0;
       resultNodes.push(cards);
+      const profile = element('div', 'grid justify-items-center gap-2');
+      const playerCard = buildPlayerCard(player, counts);
       if (preview) {
-        const profile = element('div', 'grid justify-items-center gap-2');
-        profile.append(buildPlayerCard(player, counts), button);
+        profile.append(playerCard, button);
         preview.appendChild(profile);
         resultNodes.push(profile);
       } else {
-        cards.prepend(button);
+        // Full height, as the list around it already scrolls.
+        playerCard.style.maxHeight = 'none';
+        profile.classList.add('pt-2');
+        profile.append(button, playerCard);
+        cards.prepend(profile);
       }
       Object.entries(counts?.categories || {}).forEach(([category, text]) => {
         const row = dialog.querySelector(`nav button[data-category="${category}"]`);
@@ -956,7 +961,7 @@
 
   function removeSpares() {
     clearTimeout(sparesTimer);
-    sparesNode?.parentElement?.style.removeProperty('position');
+    ['position', 'max-height', 'overflow-y'].forEach((name) => sparesNode?.parentElement?.style.removeProperty(name));
     sparesNode?.remove();
     sparesNode = null;
   }
@@ -1164,19 +1169,37 @@
     return button;
   }
 
-  // Below the game's "Search for this card" link, which it only shows for cards you can trade for.
-  function syncSpares(dialog) {
+  // Where the selected card's holders go: the preview column, or on narrow layouts, which have none,
+  // the popup a tapped card opens. null unless the game offers its own card search there, which it
+  // only does for cards you can trade for.
+  function spareSpot(dialog) {
     const column = dialog.querySelector('.frame-pressed-1.surface-dark.relative.min-h-0')?.nextElementSibling;
-    const box = column?.children[1];
+    if (column) {
+      const box = column.children[1];
+      const link = box?.querySelector(':scope > .action-link');
+      return link ? { preview: column.firstElementChild, box, link } : null;
+    }
+    // The popup holds the card and then, as its search, a button.
+    for (const popup of document.querySelectorAll('[role="dialog"]')) {
+      const box = popup.querySelector(':scope > div > div.justify-items-center');
+      if (box?.children[1]?.tagName === 'BUTTON') return { preview: box.firstElementChild, box, link: null };
+    }
+    return null;
+  }
+
+  // Below the game's own search for the card.
+  function syncSpares(dialog) {
+    const spot = spareSpot(dialog);
     const entry = dialog.querySelector('[data-entry-key^="codex:"][data-highlighted="true"]');
     if (entry) selected = { key: entry.dataset.entryKey, name: entry.firstElementChild?.title };
     const [, category, id] = selected?.key.split(':') || [];
     const field = CARD_ID_FIELDS[category];
-    const previewName = column?.firstElementChild?.querySelector('.widget-top span')?.textContent;
-    if (!box?.querySelector(':scope > .action-link') || !field || !dialog.querySelector(TRADES_BUTTON) ||
+    const previewName = spot?.preview?.querySelector('.widget-top span')?.textContent;
+    if (!spot || !field || !dialog.querySelector(TRADES_BUTTON) ||
         (selected.name && previewName !== selected.name)) {
       return removeSpares();
     }
+    const { box, link } = spot;
     const key = selected.key;
     if (sparesNode?.parentElement === box && sparesNode.dataset.card === key) return;
 
@@ -1193,11 +1216,17 @@
     wrapper.appendChild(node);
     sparesNode = wrapper;
     box.appendChild(wrapper);
+    if (!link) {
+      console.log('[Better Codex] Card search added to the card popup:', key);
+      wrapper.style.width = '232px';
+      // So the popup scrolls on a short screen instead of running off it.
+      box.style.maxHeight = 'calc(100dvh - 16px)';
+      box.style.overflowY = 'auto';
+    }
     // Laid on the left of the game's "Search for this card" row. It cannot be put inside that row, as
     // the row is React's.
     const toggle = wrapper.querySelector(':scope > button');
-    if (toggle) {
-      const link = box.querySelector(':scope > .action-link');
+    if (toggle && link) {
       box.style.position = 'relative';
       toggle.style.cssText = 'position:absolute;left:0;';
       toggle.style.top = `${link.offsetTop + (link.offsetHeight - toggle.offsetHeight) / 2}px`;

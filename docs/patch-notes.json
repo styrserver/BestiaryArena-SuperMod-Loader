@@ -4,6 +4,16 @@
   },
   "notes": [
     {
+      "version": "5.5.2",
+      "changes": [
+        {
+          "mod": "Better Codex",
+          "type": "fixed",
+          "text": "Card tracking, players with spares and player profiles now show on mobile."
+        }
+      ]
+    },
+    {
       "version": "5.5.1",
       "changes": [
         {
