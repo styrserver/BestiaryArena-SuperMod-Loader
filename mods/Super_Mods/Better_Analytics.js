@@ -111,6 +111,8 @@
         try {
             cleanupSandboxPanel();
             stopDamageTracking();
+            // The server-results path starts the timer while not tracking.
+            stopDpsInterval();
 
             if (processingTimeout) {
                 clearTimeout(processingTimeout);
@@ -362,11 +364,7 @@
                     updateFinalDPSWithGameTicks(gameTicks);
                     
                     // Set up continuous DPS updates for these modes
-                    if (!dpsUpdateInterval) {
-                        dpsUpdateInterval = setInterval(() => {
-                            updateDPSDisplay();
-                        }, TIMING.DPS_UPDATE_INTERVAL);
-                    }
+                    startDpsInterval();
                 }
                 
                 // Also trigger a restoration of frozen DPS displays when server results become available
@@ -385,7 +383,7 @@
         setTimeout(() => {
             const ticks = resolveFightDurationTicks(gameTicks);
             if (!ticks) return;
-            refreshAnalyzerDpsDisplays({ frozen: true, fightTicks: ticks });
+            refreshAnalyzerDpsDisplays({ fightTicks: ticks });
         }, TIMING.FINAL_UPDATE_DELAY);
     }
     
@@ -400,13 +398,17 @@
     }
 
     function resolveFightDurationTicks(explicitTicks = null) {
+        // Mid-fight the analyzer shows damage so far, so only the current engine tick
+        // matches it; the server result already holds the whole fight's length.
+        if (isFightActive()) return readTickFromEngine(getActiveWorld());
+
         if (typeof explicitTicks === 'number' && explicitTicks > 0) return explicitTicks;
 
         const serverTicks = getServerResultFightTicks();
         if (serverTicks != null) return serverTicks;
 
-        const sharedTick = getCurrentTick();
-        if (sharedTick != null && sharedTick > 0) return sharedTick;
+        // Only the frozen (final) panel tick: the live one goes stale if the panel closes.
+        if (panelFightTickFrozen > 0) return panelFightTickFrozen;
 
         try {
             if (gameStartTick != null) {
@@ -440,9 +442,8 @@
 
     function calculateDPSFromDamage(damage, fightTicks) {
         if (!damage || damage <= 0) return 0;
-        const ticks = resolveFightDurationTicks(fightTicks);
-        if (!ticks || ticks <= 0) return 0;
-        return Math.round((damage / ticks) * TICKS_PER_SECOND * 100) / 100;
+        if (!fightTicks || fightTicks <= 0) return 0;
+        return Math.round((damage / fightTicks) * TICKS_PER_SECOND * 100) / 100;
     }
 
     function ensureAnalyzerDpsDisplay(damageValueElement) {
@@ -459,18 +460,23 @@
         if (!entry) return;
 
         const dpsDisplay = ensureAnalyzerDpsDisplay(damageValueElement);
-        const frozen = options.frozen === true;
+        const frozen = !isFightActive();
+
+        // Write only on change: every textContent write wakes all body observers.
+        const setText = (text) => {
+            if (dpsDisplay.textContent !== text) dpsDisplay.textContent = text;
+        };
 
         if (entry.isHeal) {
-            dpsDisplay.textContent = '(0/s)';
+            setText('(0/s)');
             dpsDisplay.style.opacity = '0.7';
             dpsDisplay.style.fontStyle = 'italic';
             dpsDisplay.removeAttribute('title');
             return;
         }
 
-        const dps = calculateDPSFromDamage(entry.damageValue, options.fightTicks);
-        dpsDisplay.textContent = `(${dps}/s)`;
+        const dps = calculateDPSFromDamage(entry.damageValue, resolveFightDurationTicks(options.fightTicks));
+        setText(`(${dps}/s)`);
         dpsDisplay.style.opacity = frozen ? '0.7' : '1';
         dpsDisplay.style.fontStyle = frozen ? 'italic' : 'normal';
         dpsDisplay.removeAttribute('title');
@@ -505,7 +511,7 @@
             retryAttempts++;
             const serverTicks = getServerResultFightTicks();
             if (serverTicks != null) {
-                refreshAnalyzerDpsDisplays({ frozen: true, fightTicks: serverTicks });
+                refreshAnalyzerDpsDisplays({ fightTicks: serverTicks });
                 return;
             }
             if (retryAttempts < maxRetries) {
@@ -574,7 +580,11 @@
             const world = event.world;
             
             if (!world) return;
-            
+
+            // Drop the previous battle's subscriptions so old worlds can be garbage collected.
+            // worldEventSubscriptions[0] is this newGame listener and stays.
+            unsubscribeAll(worldEventSubscriptions.splice(1));
+
             // Track actor deaths for more accurate damage tracking (only when actively tracking)
             const deathSub = world.grid.onActorDeath.subscribe((deathEvent) => {
                 // Only update if we're actively tracking and analyzer panel is available
@@ -923,11 +933,7 @@
     }
     
     function restoreFrozenDPSDisplays() {
-        const fightTicks = resolveFightDurationTicks();
-        refreshAnalyzerDpsDisplays({
-            frozen: true,
-            fightTicks: fightTicks ?? undefined
-        });
+        refreshAnalyzerDpsDisplays();
         scheduleServerResultDpsRetry();
     }
     
@@ -963,10 +969,8 @@
             }, 100);
         }
         
-        dpsUpdateInterval = setInterval(() => {
-            updateDPSDisplay();
-        }, TIMING.DPS_UPDATE_INTERVAL);
-        
+        startDpsInterval();
+
         setTimeout(() => {
             updateDPSDisplay();
         }, 100);
@@ -980,11 +984,7 @@
         
         isTracking = false;
         
-        // Clear the DPS update interval
-        if (dpsUpdateInterval) {
-            clearInterval(dpsUpdateInterval);
-            dpsUpdateInterval = null;
-        }
+        stopDpsInterval();
         
         // Update damage data one final time
         try {
@@ -1007,28 +1007,37 @@
         }
     }
 
+    // Only these two touch dpsUpdateInterval: overwriting a live handle would orphan
+    // a timer that nothing can stop.
+    function startDpsInterval() {
+        if (dpsUpdateInterval) return;
+        dpsUpdateInterval = setInterval(updateDPSDisplay, TIMING.DPS_UPDATE_INTERVAL);
+    }
+
+    function stopDpsInterval() {
+        if (!dpsUpdateInterval) return;
+        clearInterval(dpsUpdateInterval);
+        dpsUpdateInterval = null;
+    }
+
     function updateDamageData() {
-        refreshAnalyzerDpsDisplays({ frozen: false });
+        refreshAnalyzerDpsDisplays();
     }
 
     function calculateDPS(creatureId, currentDamage, gameTicks = null) {
-        return calculateDPSFromDamage(currentDamage, gameTicks);
+        return calculateDPSFromDamage(currentDamage, resolveFightDurationTicks(gameTicks));
     }
 
     function updateDPSDisplay() {
         const boardState = globalThis.state.board.getSnapshot();
         const gameMode = boardState.context?.mode;
         const fightEnded = !boardState.context?.gameStarted;
-        const serverTicks = getServerResultFightTicks();
 
         if (!isTracking && !fightEnded && gameMode !== 'autoplay' && gameMode !== 'manual') {
             return;
         }
 
-        refreshAnalyzerDpsDisplays({
-            frozen: fightEnded || serverTicks != null,
-            fightTicks: serverTicks ?? undefined
-        });
+        refreshAnalyzerDpsDisplays();
     }
     
     function createDPSDisplayElement() {

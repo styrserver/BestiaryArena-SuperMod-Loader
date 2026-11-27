@@ -334,7 +334,8 @@ function recordAutoRefresh(reason) {
       uptimeMin: Math.round(performance.now() / 60000),
       lag: lag && { p95: Math.round(lag.p95), worst: Math.round(lag.worst), bad: lag.bad, n: lag.n },
       timers: topModTimersSinceLoad(),
-      growth: modRateGrowth()
+      growth: modRateGrowth(),
+      domChanges: perfDomChangeStats() // null while the debugger is off
     };
     const list = readAutoRefreshLog();
     list.push(entry);
@@ -355,6 +356,8 @@ function formatAutoRefreshLog() {
     if (e.growth?.length) {
       detail.push(`callbacks/min early -> before refresh: ${e.growth.map((m) => `${m.name} ${m.early} -> ${m.late}`).join(', ')}`);
     }
+    // A block per saved refresh would drown the report: only the newest shows its DOM change places.
+    if (e.domChanges && e === list[list.length - 1]) detail.push(perfFormatDomChanges(e.domChanges).join('\n      '));
     return `  ${new Date(e.ts).toISOString()}  ${e.reason}  | fps ${e.fps ?? '?'}, DOM ${e.dom}` +
       `${e.heapMB != null ? `, heap ${e.heapMB}MB` : ''}, page up ${e.uptimeMin}min` +
       (detail.length ? `\n      ${detail.join(' | ')}` : '');
@@ -3491,6 +3494,7 @@ const perfOverlay = {
   domFirst: null, // first DOM node count seen, to report growth since the overlay started
   domPeak: 0, // highest DOM node count seen since the overlay started
   domPeakAt: 0, // Date.now() of that peak
+  domChanges: null, // DOM change batch counter, see startPerfDomChangeObserver
   domBase: null, // Map of body-child owner -> node count taken with domFirst, to show which owner grew
   loafDropped: 0, // slow frames pushed out by the PERF_MAX_LOAF cap (not by age) this session
   loaf: [], // slow frames inside the last PERF_CPU_WINDOW_MS: { perf, ts, dur, blocking, scripts[] }
@@ -3668,6 +3672,7 @@ function perfResetData() {
   perfOverlay.stalls = [];
   perfOverlay.gameEvents = [];
   perfOverlay.workerLate = [];
+  perfResetDomChanges();
   perfOverlay.timerBase = perfSnapshotModTimers();
   perfOverlay.timerBaseAt = Date.now();
 }
@@ -4223,16 +4228,17 @@ function perfSampleMemory(now) {
 // Node count per direct child of <body>, <head> and <html>, keyed by id, else first class, else tag. Mods append
 // their panels, toasts and tooltips straight to <body> and their styles to <head>, so a growing key points at the
 // owner. The game's React root is split by element path.
+function perfElementKey(el) {
+  if (el.id) return `#${el.id}`;
+  const cls = typeof el.className === 'string'
+    ? el.className.trim().split(/\s+/).filter(Boolean).slice(0, 2).map((c) => c.slice(0, 18)).join('.')
+    : '';
+  return el.tagName.toLowerCase() + (cls ? `.${cls}` : '');
+}
+
 function perfDomCensus() {
   const census = new Map();
   const add = (key, el) => census.set(key, (census.get(key) || 0) + el.getElementsByTagName('*').length + 1);
-  const keyOf = (el) => {
-    if (el.id) return `#${el.id}`;
-    const cls = typeof el.className === 'string'
-      ? el.className.trim().split(/\s+/).filter(Boolean).slice(0, 2).map((c) => c.slice(0, 18)).join('.')
-      : '';
-    return el.tagName.toLowerCase() + (cls ? `.${cls}` : '');
-  };
   // The React root is one huge entry, so it is split by element path to a fixed depth (mods inject buttons and
   // panels into the game's own tree). The depth does not depend on node counts, so the baseline and a later
   // census always use the same keys. Same-looking siblings share a key and their counts add up.
@@ -4241,16 +4247,16 @@ function perfDomCensus() {
       add(path, el);
       return;
     }
-    for (const child of el.children) walk(child, `${path} > ${keyOf(child)}`, depth - 1);
+    for (const child of el.children) walk(child, `${path} > ${perfElementKey(child)}`, depth - 1);
   };
   for (const el of document.body.children) {
-    if (el.id === '__next') walk(el, keyOf(el), 4);
-    else add(keyOf(el), el);
+    if (el.id === '__next') walk(el, perfElementKey(el), 4);
+    else add(perfElementKey(el), el);
   }
   // Everything outside <body> counts toward the total too.
-  for (const el of document.head.children) add(`head > ${keyOf(el)}`, el);
+  for (const el of document.head.children) add(`head > ${perfElementKey(el)}`, el);
   for (const el of document.documentElement.children) {
-    if (el !== document.head && el !== document.body) add(`html > ${keyOf(el)}`, el);
+    if (el !== document.head && el !== document.body) add(`html > ${perfElementKey(el)}`, el);
   }
   return census;
 }
@@ -4266,6 +4272,109 @@ function perfDescribeDomCensus() {
   rows.sort((a, b) => b.d - a.d || b.n - a.n);
   return rows.filter((r) => r.d !== 0 || r.n >= 100).slice(0, 15)
     .map((r) => `  ${r.key}: ${r.n} (${r.d >= 0 ? '+' : ''}${r.d})`);
+}
+
+// Every mod that watches the page runs once per batch of DOM changes, so a batch rate that climbs over a session
+// slows all of them. This counts, per place in the page, how many batches touched it: the second 5 minutes of a
+// session ("early") against the last 5-10 minutes names what started changing more often.
+const PERF_DOM_CHANGE_BUCKET_MS = 5 * 60 * 1000;
+const PERF_DOM_CHANGE_ROWS = 5;
+
+function perfNewDomChangeBucket(now) {
+  return { start: now, batches: 0, places: new Map() };
+}
+
+function perfResetDomChanges() {
+  if (!perfOverlay.domChanges) return;
+  Object.assign(perfOverlay.domChanges, { current: perfNewDomChangeBucket(performance.now()), previous: null, early: null, done: 0 });
+}
+
+// The body child (or head) the node sits under, plus the changed node itself when it is deeper.
+function perfDomPlace(node) {
+  if (!node.isConnected) return '(already removed)';
+  const chain = [];
+  for (let el = node; el && el !== document.body && el !== document.documentElement; el = el.parentElement) chain.unshift(el);
+  if (!chain.length) return node.tagName.toLowerCase();
+  // The React root holds the whole game, so it is named a few levels deeper.
+  const depth = chain[0].id === '__next' ? 5 : 1;
+  const owner = chain.slice(0, depth).map(perfElementKey).join(' > ');
+  return chain.length > depth ? `${owner} .. ${perfElementKey(node)}` : owner;
+}
+
+function perfRotateDomChanges(now) {
+  const state = perfOverlay.domChanges;
+  if (now - state.current.start < PERF_DOM_CHANGE_BUCKET_MS) return;
+  state.current.end = now;
+  state.done += 1;
+  if (state.done === 2) state.early = state.current;
+  state.previous = state.current;
+  state.current = perfNewDomChangeBucket(now);
+}
+
+function perfOnDomChanges(mutations) {
+  const state = perfOverlay.domChanges;
+  if (!state) return;
+  perfRotateDomChanges(performance.now());
+  const places = new Set();
+  const seen = new Set();
+  for (const { target } of mutations) {
+    if (seen.has(target)) continue;
+    seen.add(target);
+    // The debugger redraws itself twice a second; it is not part of what is being measured.
+    if (perfOverlay.ui?.el.contains(target)) continue;
+    places.add(perfDomPlace(target));
+  }
+  if (!places.size) return;
+  const bucket = state.current;
+  bucket.batches += 1;
+  places.forEach((place) => bucket.places.set(place, (bucket.places.get(place) || 0) + 1));
+}
+
+function startPerfDomChangeObserver() {
+  const observer = new MutationObserver(perfOnDomChanges);
+  perfOverlay.domChanges = { observer };
+  perfResetDomChanges();
+  observer.observe(document.documentElement, { childList: true, subtree: true });
+}
+
+function stopPerfDomChangeObserver() {
+  perfOverlay.domChanges?.observer.disconnect();
+  perfOverlay.domChanges = null;
+}
+
+// Batches per minute, in total and per place. "early" is null until 10 minutes have passed.
+function perfDomChangeStats() {
+  const state = perfOverlay.domChanges;
+  if (!state) return null;
+  const now = performance.now();
+  perfRotateDomChanges(now);
+  const late = [state.previous, state.current].filter((b) => b && b !== state.early);
+  const minutes = (b) => ((b.end || now) - b.start) / 60000;
+  const lateMin = late.reduce((n, b) => n + minutes(b), 0);
+  if (lateMin <= 0) return null;
+  const lateRate = (read) => Math.round(late.reduce((n, b) => n + read(b), 0) / lateMin);
+  const earlyRate = (read) => (state.early ? Math.round(read(state.early) / minutes(state.early)) : null);
+  const names = new Set(late.flatMap((b) => [...b.places.keys()]));
+  const places = [...names].map((name) => {
+    const read = (b) => b.places.get(name) || 0;
+    return { name, early: earlyRate(read), late: lateRate(read) };
+  });
+  // Biggest rise first once there is something to compare with, busiest first before that.
+  places.sort((a, b) => (b.late - (b.early || 0)) - (a.late - (a.early || 0)));
+  return {
+    early: earlyRate((b) => b.batches),
+    late: lateRate((b) => b.batches),
+    places: places.slice(0, PERF_DOM_CHANGE_ROWS)
+  };
+}
+
+function perfFormatDomChanges(stats) {
+  if (!stats) return [];
+  const rate = (r) => (r.early === null ? `${r.late}` : `${r.early} -> ${r.late}`);
+  return [
+    `DOM change batches/min${stats.early === null ? '' : ' (early -> recent)'}: ${rate(stats)}`,
+    ...stats.places.map((p) => `  ${rate(p)}  ${p.name}`)
+  ];
 }
 
 // Folds the slow frames of the last minute into one row per (source, script).
@@ -4387,6 +4496,7 @@ function perfFormatCpuReport() {
     `${heapLine}${perfOverlay.dom} DOM nodes${domGrowth}` +
       (perfOverlay.domPeak > perfOverlay.dom ? `, peak ${perfOverlay.domPeak} at ${new Date(perfOverlay.domPeakAt).toISOString()}` : ''),
     ...(domCensus.length ? ['DOM nodes by owner (now, change since the overlay started):', ...domCensus] : []),
+    ...perfFormatDomChanges(perfDomChangeStats()),
     '',
     `== Script time (last ${PERF_CPU_WINDOW_LABEL}; slow frames only, source: ${perfOverlay.loafType || 'unsupported in this browser'}) ==`,
     `${perfOverlay.loafType ? `${agg.frames} slow frames` : 'slow frames n/a'} (${coverage}), ${Math.round(agg.frameMs)}ms total, ${Math.round(agg.blockingMs)}ms blocking input, ${Math.round(agg.scriptMs)}ms in scripts (rest = style/layout/paint/GC)`,
@@ -4813,6 +4923,7 @@ function startPerfOverlay() {
   perfOverlay.dom = 0;
   perfOverlay.domAt = -Infinity;
   startPerfSlowFrameObserver();
+  startPerfDomChangeObserver();
   startPerfLagSampler();
   installPerfFetchHook();
   const el = document.createElement('div');
@@ -4939,6 +5050,7 @@ function stopPerfOverlay() {
     perfOverlay.styleEl = null;
   }
   perfResetData();
+  stopPerfDomChangeObserver();
   if (perfOverlay.loafObserver) {
     perfOverlay.loafObserver.disconnect();
     perfOverlay.loafObserver = null;

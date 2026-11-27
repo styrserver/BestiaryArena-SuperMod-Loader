@@ -6677,7 +6677,10 @@ function addChallengesHeaderButton() {
   if (existingBtn) {
     var existingLi = existingBtn.closest('li');
     if (existingLi) existingLi.style.display = '';
-    existingBtn.textContent = challengesText('mods.challenges.title');
+    // Write only on change: rewriting textContent is a childList mutation that
+    // re-triggers headerObserver (and every other body observer) in a loop.
+    var title = challengesText('mods.challenges.title');
+    if (existingBtn.textContent !== title) existingBtn.textContent = title;
     updateChallengesNavHeaderMatchAlert();
     existingBtn.onclick = function(e) {
       e.preventDefault();

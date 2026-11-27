@@ -4,6 +4,31 @@
   },
   "notes": [
     {
+      "version": "5.5.7",
+      "changes": [
+        {
+          "mod": "Better Analytics",
+          "type": "fixed",
+          "text": "DPS is correct during fights, and memory and background work no longer build up."
+        },
+        {
+          "mod": "Better Tasker",
+          "type": "fixed",
+          "text": "Suggested multi-floor maps are no longer swapped out; it goes there on the floor with your task creature."
+        },
+        {
+          "mod": "Challenges",
+          "type": "fixed",
+          "text": "The top menu button no longer causes constant background work."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "added",
+          "text": "Debugger report now shows which parts of the page change most often."
+        }
+      ]
+    },
+    {
       "version": "5.5.6",
       "changes": [
         {

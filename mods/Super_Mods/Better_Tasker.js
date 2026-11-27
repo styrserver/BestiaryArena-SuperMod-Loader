@@ -298,13 +298,9 @@ function getCreatureNameByGameId(creatureId) {
 
 // Multi-floor quest rooms (type: 'multi', e.g. The Annihilator Quest, The Behemoth Quest —
 // no top-level room.file at all) have a different, unrelated set of creatures per floor
-// (room.floorFiles[floorIndex].data.actors). There's no single "this room has creature X"
-// answer for them, and state.utils.getBoardMonstersFromRoomId(mapId) is floor-blind (always
-// checks floor 0), so treating them like normal rooms either wrongly excludes them (creature
-// only lives on a deeper floor) or wrongly includes them (creature matched floor 0 but the
-// task/override floor points somewhere else entirely). Better Tasker can't reliably resolve
-// "the right floor for this creature" for these rooms, so it ignores them outright — both
-// as per-creature override choices and as automatic quest-log suggestions.
+// (room.floorFiles[floorIndex].data.actors). state.utils.getBoardMonstersFromRoomId(mapId) is
+// floor-blind (always checks floor 0), so every creature lookup for these rooms has to go
+// through mapsDatabase.getBoardMonstersForFloor and carry the floor along with the room.
 function getRoomById(roomId) {
     try {
         const room = globalThis.mapsDatabase?.getMapById?.(roomId);
@@ -382,36 +378,32 @@ function getAllowedFloorsForCreature(creatureName, mapId = '') {
     }
 }
 
-// Resolve the room (and floor) to navigate to for a creature's task. Normal rooms pass
-// through unchanged ({ roomId, floor: null }). For a multi-floor room: when the user chose
-// it for this creature (per-creature override) and the creature is on one of its floors,
-// stay there; otherwise prefer a normal alternate map; otherwise stay in the room if the
-// creature is on one of its floors (e.g. The Pale Count only lives in Bloody Crypt);
-// otherwise use any other multi-floor room that has it (e.g. Annihilator vs Behemoth).
-// Returns { roomId, floor } (floor null = keep the configured floor) or null if unresolvable.
-function resolveRoomTarget(roomId, creatureName, creatureOverride) {
-    if (!isMultiFloorRoom(roomId)) return { roomId, floor: null };
-    console.log('[Better Tasker] Task map is a multi-floor quest room (different creatures per floor) - resolving alternate map or creature floor:', { roomId, creatureName });
-    const [floorHere] = findFloorsForCreatureInMultiFloorRoom(roomId, creatureName);
-    const explicitRoom = creatureOverride?.mapId != null && String(creatureOverride.mapId) === roomId;
-    let target = null;
-    if (explicitRoom && floorHere != null) {
-        target = { roomId, floor: floorHere };
-    } else {
+// The allowed floor closest to the wanted one; floors = null means any floor is fine.
+function nearestAllowedFloor(floors, wanted) {
+    if (!floors) return wanted;
+    return floors.reduce((best, f) => (Math.abs(f - wanted) < Math.abs(best - wanted) ? f : best), floors[0]);
+}
+
+// Resolve the room to navigate to for a creature's task. Normal rooms pass through
+// ({ roomId, floors: null }). A multi-floor room (suggested or chosen) is kept, with the floors
+// that hold the creature. Only if none of its floors do, fall back to a normal map, then to
+// another multi-floor room. Returns null if unresolvable.
+function resolveRoomTarget(roomId, creatureName) {
+    if (!isMultiFloorRoom(roomId)) return { roomId, floors: null };
+    let targetId = roomId;
+    let floors = findFloorsForCreatureInMultiFloorRoom(roomId, creatureName);
+    if (floors.length === 0) {
         const alternate = pickAlternateMapForCreature(creatureName);
-        if (alternate) target = { roomId: alternate.id, floor: null };
-        else if (floorHere != null) target = { roomId, floor: floorHere };
-        else {
-            const other = getMultiFloorRoomsWithCreature(creatureName)[0];
-            if (other) target = { roomId: other.roomId, floor: other.floors[0] };
+        if (alternate) return { roomId: alternate.id, floors: null };
+        const other = getMultiFloorRoomsWithCreature(creatureName)[0];
+        if (!other) {
+            console.log(`[Better Tasker] "${creatureName}" not found on any floor of ${roomId} and no alternate map exists - cannot proceed with this task automatically`);
+            return null;
         }
+        ({ roomId: targetId, floors } = other);
     }
-    if (!target) {
-        console.log(`[Better Tasker] "${creatureName}" not found on any floor of ${roomId} and no alternate map exists - cannot proceed with this task automatically`);
-        return null;
-    }
-    console.log(`[Better Tasker] Multi-floor target for "${creatureName}": room ${target.roomId}, floor ${target.floor ?? 'configured'}`);
-    return target;
+    console.log(`[Better Tasker] Multi-floor target for "${creatureName}": room ${targetId}, floors ${floors.join(', ')}`);
+    return { roomId: targetId, floors };
 }
 
 // includeMultiFloor (needs creatureName): also list multi-floor quest rooms that have the
@@ -690,7 +682,7 @@ function createCreatureContextMenu(creatureName, x, y, onClose) {
     // Snap a floor the creature doesn't exist on (in the chosen map) to the nearest allowed one.
     const clampToAllowedFloor = (floor) => {
         const f = Math.max(0, Math.min(15, Number(floor) || 0));
-        return allowedFloors.reduce((best, a) => (Math.abs(a - f) < Math.abs(best - f) ? a : best), allowedFloors[0]);
+        return nearestAllowedFloor(allowedFloors, f);
     };
     const rebuildFloorOptions = (preferredFloor) => {
         allowedFloors = getAllowedFloorsForCreature(creatureName, mapSelect.value);
@@ -1735,11 +1727,13 @@ function getTaskKillProgress() {
 function getTaskKillsPerRunFromRoom(roomId, taskGameId) {
     const fallback = { killsPerRun: 1, villainMatches: 0 };
     try {
-        if (!roomId || taskGameId == null || !globalThis.state?.utils?.getBoardMonstersFromRoomId) {
+        const getBoardMonstersForFloor = globalThis.mapsDatabase?.getBoardMonstersForFloor;
+        if (!roomId || taskGameId == null || typeof getBoardMonstersForFloor !== 'function') {
             console.log('[Better Tasker] [runs-budget] board scan skipped — kpr=1', { roomId, taskGameId });
             return fallback;
         }
-        const board = globalThis.state.utils.getBoardMonstersFromRoomId(roomId);
+        // The floor only matters for multi-floor rooms, whose enemies differ per floor.
+        const board = getBoardMonstersForFloor(roomId, Number(globalThis.state?.board?.getSnapshot?.()?.context?.floor) || 0);
         if (!Array.isArray(board)) {
             console.log('[Better Tasker] [runs-budget] board scan invalid — kpr=1', { roomId });
             return fallback;
@@ -5495,17 +5489,17 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                     taskingMapId,
                     selectedRoomId: roomId
                 });
-                const roomTarget = resolveRoomTarget(roomId, activeCreatureName, creatureOverride);
+                const roomTarget = resolveRoomTarget(roomId, activeCreatureName);
                 if (!roomTarget) return false;
                 roomId = roomTarget.roomId;
                 const roomAutomation = resolveTaskerAutomationSettingsForRoom(roomId, runtimeSettings, resolvedFloor);
-                if (roomTarget.floor != null) roomAutomation.floor = roomTarget.floor;
+                roomAutomation.floor = nearestAllowedFloor(roomTarget.floors, roomAutomation.floor);
                 runtimeSettings = {
                     ...runtimeSettings,
                     setupMethod: roomAutomation.setupMethod,
                     autoRefillStamina: roomAutomation.autoRefillStamina
                 };
-                
+
                 // Handle quest log state and navigation
                 const navigationCompleted = await handleQuestLogState(roomId, roomAutomation.floor);
                 if (!navigationCompleted) {
@@ -5680,11 +5674,11 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
             });
             
             if (roomId) {
-                const roomTarget = resolveRoomTarget(roomId, activeCreatureName, creatureOverride);
+                const roomTarget = resolveRoomTarget(roomId, activeCreatureName);
                 if (!roomTarget) return false;
                 roomId = roomTarget.roomId;
                 const roomAutomation = resolveTaskerAutomationSettingsForRoom(roomId, runtimeSettings, resolvedFloor);
-                if (roomTarget.floor != null) roomAutomation.floor = roomTarget.floor;
+                roomAutomation.floor = nearestAllowedFloor(roomTarget.floors, roomAutomation.floor);
                 runtimeSettings = {
                     ...runtimeSettings,
                     setupMethod: roomAutomation.setupMethod,
