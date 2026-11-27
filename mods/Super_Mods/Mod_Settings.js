@@ -278,6 +278,50 @@ function topModTimersSinceLoad() {
     .map(([name, rec]) => ({ name, pct: Number((rec.ms / upMs * 100).toFixed(2)), maxMs: Math.round(rec.max) }));
 }
 
+// A mod that piles up timers, observers or subscribers runs more callbacks the longer the page lives, so its
+// rate in an early window is compared with its rate just before the refresh. Averages since load hide that.
+const MOD_RATE_SAMPLE_MS = 5 * 60 * 1000;
+let modRateSampleTimer = null;
+let modRateEarly = [];  // samples at 5 and 10 minutes
+let modRateRecent = []; // the last two samples
+
+function sampleModTimings() {
+  const byMod = {};
+  Object.entries(window.BestiaryModTimings?.byMod || {}).forEach(([name, rec]) => { byMod[name] = rec.calls; });
+  return { t: performance.now(), byMod };
+}
+
+function startModRateSampling() {
+  if (modRateSampleTimer) return;
+  modRateSampleTimer = setInterval(() => {
+    const sample = sampleModTimings();
+    if (modRateEarly.length < 2) modRateEarly.push(sample);
+    modRateRecent = [...modRateRecent, sample].slice(-2);
+  }, MOD_RATE_SAMPLE_MS);
+}
+
+function stopModRateSampling() {
+  clearInterval(modRateSampleTimer);
+  modRateSampleTimer = null;
+  modRateEarly = [];
+  modRateRecent = [];
+}
+
+// The mods whose callbacks per minute grew most, 5-10 minutes after load against the last 5-10 minutes.
+function modRateGrowth() {
+  // Under 15 minutes the two windows would overlap.
+  if (modRateEarly.length < 2 || modRateRecent.length < 2 || modRateRecent[0].t < modRateEarly[1].t) return [];
+  const [from, to] = modRateEarly;
+  const recent = modRateRecent[0];
+  const now = sampleModTimings();
+  const perMin = (a, b, name) => Math.round(((b.byMod[name] || 0) - (a.byMod[name] || 0)) / ((b.t - a.t) / 60000));
+  return Object.keys(now.byMod)
+    .map((name) => ({ name, early: perMin(from, to, name), late: perMin(recent, now, name) }))
+    .filter((m) => m.late > m.early)
+    .sort((a, b) => (b.late - b.early) - (a.late - a.early))
+    .slice(0, 3);
+}
+
 function recordAutoRefresh(reason) {
   try {
     const lag = perfLagStats(); // null while the debugger is off: only it samples lag
@@ -289,7 +333,8 @@ function recordAutoRefresh(reason) {
       heapMB: performance?.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576) : null,
       uptimeMin: Math.round(performance.now() / 60000),
       lag: lag && { p95: Math.round(lag.p95), worst: Math.round(lag.worst), bad: lag.bad, n: lag.n },
-      timers: topModTimersSinceLoad()
+      timers: topModTimersSinceLoad(),
+      growth: modRateGrowth()
     };
     const list = readAutoRefreshLog();
     list.push(entry);
@@ -306,6 +351,9 @@ function formatAutoRefreshLog() {
     if (e.lag) detail.push(`lag p95 ${e.lag.p95}ms, worst ${e.lag.worst}ms, ${e.lag.bad}/${e.lag.n} over ${PERF_LAG_BAD_MS}ms`);
     if (e.timers?.length) {
       detail.push(`timers since load: ${e.timers.map((m) => `${m.name} ${m.pct}% (max ${m.maxMs}ms)`).join(', ')}`);
+    }
+    if (e.growth?.length) {
+      detail.push(`callbacks/min early -> before refresh: ${e.growth.map((m) => `${m.name} ${m.early} -> ${m.late}`).join(', ')}`);
     }
     return `  ${new Date(e.ts).toISOString()}  ${e.reason}  | fps ${e.fps ?? '?'}, DOM ${e.dom}` +
       `${e.heapMB != null ? `, heap ${e.heapMB}MB` : ''}, page up ${e.uptimeMin}min` +
@@ -4380,6 +4428,9 @@ function perfFormatReport() {
   const parts = [
     `BESTIARY ARENA DEBUGGER REPORT\n${perfReportContext()}`,
     perfFormatCpuReport(),
+    // The game and the mods share this quota; a full one breaks saves and can crash the page.
+    `== Storage ==
+${globalThis.BestiaryLogger?.describeLocalStorageUsage?.() || 'unavailable'}`,
     // Only the last 10s are listed, so peak and the last limit hit say whether a burst happened before the copy.
     [`== API requests (last ${PERF_RATE_WINDOW_MS / 1000}s; limit ${PERF_RATE_LIMIT}, 429s seen: ${perfOverlay.rateLimited}) ==`,
       `${reqs.length} requests now; peak ${perfOverlay.peak}/${PERF_RATE_LIMIT} per ${PERF_RATE_WINDOW_MS / 1000}s` +
@@ -22631,6 +22682,7 @@ exports = {
   init: function() {
     try {
       initBetterUI();
+      startModRateSampling();
       window.BestiaryRunsSite = runsSiteApi;
       runsSiteRefreshAdmin();
       scheduleAdminRoomScriptCheck();
@@ -22644,6 +22696,7 @@ exports = {
   cleanup: function() {
     try {
       cancelAdminRoomScriptCheck();
+      stopModRateSampling();
       if (window.BestiaryRunsSite === runsSiteApi) delete window.BestiaryRunsSite;
       clearTimeout(runsSiteSaveTimer);
       runsSiteSaveTimer = null;

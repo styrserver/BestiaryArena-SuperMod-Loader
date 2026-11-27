@@ -4,6 +4,26 @@
   },
   "notes": [
     {
+      "version": "5.5.5",
+      "changes": [
+        {
+          "mod": "Better Codex",
+          "type": "fixed",
+          "text": "Extras tab now shows on mobile, and hides while you search."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "added",
+          "text": "Debugger report shows browser storage use and which mods get busier over long sessions."
+        },
+        {
+          "mod": "RunTracker",
+          "type": "fixed",
+          "text": "Run history no longer fills the browser storage shared with the game."
+        }
+      ]
+    },
+    {
       "version": "5.5.4",
       "changes": [
         {

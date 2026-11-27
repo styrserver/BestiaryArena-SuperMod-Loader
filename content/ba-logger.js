@@ -679,6 +679,7 @@
     },
     native: nativeConsole,
     formatLogArgs,
+    describeLocalStorageUsage,
     record(entry) { emitToSink(entry || {}); }
   };
 })();

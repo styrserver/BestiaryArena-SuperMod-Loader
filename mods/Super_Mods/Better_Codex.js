@@ -1532,30 +1532,45 @@
   }
 
   // One wrapper at the end of the sidebar, shaped like the ones around the game's category buttons.
-  function syncExtrasButton(dialog) {
-    const sibling = dialog.querySelector('nav button[data-category="backpack"]');
+  // Narrow layouts have no sidebar, only a row of category icons, so there it is one more icon.
+  // Offered only with an empty search box: hidden cards are not searched.
+  function syncExtrasButton(dialog, query) {
+    const sibling = dialog.querySelector('button[data-category="backpack"]');
     if (!sibling) return;
+    const sidebar = sibling.closest('nav');
     let button = dialog.querySelector('[data-better-codex-extras]');
     if (!button) {
       button = element('button', sibling.className);
       button.type = 'button';
       button.setAttribute('data-better-codex-extras', '');
-      const label = element('span', 'truncate', t('extras'));
       const base = window.BESTIARY_EXTENSION_BASE_URL;
-      button.append(icon(base ? `${base}assets/icons/icon-32.png` : '/assets/icons/codex.png', ''), label);
-      button.firstChild.className = 'pixelated shrink-0';
+      const image = icon(base ? `${base}assets/icons/icon-32.png` : '/assets/icons/codex.png', '');
+      image.className = 'pixelated shrink-0';
+      image.width = image.height = 16;
+      // The file is padded (art 22x21 of 32x32): pull the padding in, so it takes 11x11 like the others.
+      image.style.margin = '-2px -2.5px -3px';
+      button.appendChild(image);
+      if (sidebar) {
+        button.append(element('span', 'truncate', t('extras')), element('span', 'pixel-font-14 ml-auto shrink-0 text-whiteDark'));
+      } else {
+        button.setAttribute('aria-label', t('extras'));
+      }
       button.addEventListener('click', () => {
         extrasOpen = true;
         sync();
       });
-      const wrapper = element('div', 'grid gap-px');
+      const wrapper = element('div', sidebar ? 'grid gap-px' : 'flex shrink-0');
       wrapper.setAttribute('data-better-codex-extras-row', '');
       wrapper.appendChild(button);
-      button.appendChild(element('span', 'pixel-font-14 ml-auto shrink-0 text-whiteDark'));
-      sibling.closest('nav').appendChild(wrapper);
+      (sidebar || sibling.parentElement).appendChild(wrapper);
     }
+    // A search can also be filled in without an input event, so the view is closed here too.
+    if (query) extrasOpen = false;
+    const display = query ? 'none' : '';
+    if (button.parentElement.style.display !== display) button.parentElement.style.display = display;
     const active = String(extrasOpen);
     if (button.dataset.active !== active) button.dataset.active = active;
+    if (!sidebar) return;
 
     const count = button.lastElementChild;
     // Counted again only when your data changed or the button is new.
@@ -1569,10 +1584,10 @@
     count.style.color = cards.length && owned >= cards.length ? MAXED_COLOR : '';
   }
 
-  // Any of the game's own sidebar buttons goes back to the game's view.
+  // Any of the game's own category or group buttons goes back to the game's view.
   function closeExtras(event) {
-    const button = event.target.closest?.('nav button');
-    if (!extrasOpen || !button || button.hasAttribute('data-better-codex-extras') ||
+    const button = event.target.closest?.('button[data-category], button[data-section]');
+    if (!extrasOpen || !button ||
         !button.closest('[role="dialog"]')?.querySelector(`#${SEARCH_ID}`)) return;
     extrasOpen = false;
     sync();
@@ -2418,7 +2433,7 @@
     const dialog = search?.closest('[role="dialog"]');
     if (!dialog) return releaseCodex();
     applyTitle(dialog);
-    syncExtrasButton(dialog);
+    syncExtrasButton(dialog, search.value.trim());
     syncResult(dialog, search.value.trim());
     syncSpares(dialog);
     colorComplete(dialog);

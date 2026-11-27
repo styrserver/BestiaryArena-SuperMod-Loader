@@ -25,7 +25,11 @@ if (window.RunTrackerAPI && window.RunTrackerAPI._initialized) {
 // =======================
 // 1. Configuration
 // =======================
+// Run history lives in IndexedDB: it outgrew the localStorage quota shared with the game.
+// localStorage under the same key holds only pre-IndexedDB data and fallback saves.
 const RUN_STORAGE_KEY = 'ba_local_runs';
+const RUN_DB_NAME = 'ba-run-tracker';
+const RUN_DB_STORE = 'data';
 const MAX_RUNS_PER_MAP = 5; // Keep top 5 runs per category (speedrun/rank only)
 const PROFILE_PAGE_DATA_TIMEOUT = 8000;
 const PROFILE_PAGE_DATA_URL = 'https://bestiaryarena.com/api/trpc/serverSide.profilePageData';
@@ -584,6 +588,99 @@ function getEquipmentNameFromId(equipId) {
   }
 }
 
+// Set when IndexedDB cannot be used; saves then go to localStorage and are merged back later.
+let useLocalStorageFallback = false;
+
+// One request in its own transaction; resolves only once the transaction has committed.
+function runDbRequest(mode, makeRequest) {
+  return new Promise((resolve, reject) => {
+    const open = indexedDB.open(RUN_DB_NAME, 1);
+    open.onupgradeneeded = () => open.result.createObjectStore(RUN_DB_STORE);
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => {
+      const db = open.result;
+      try {
+        const tx = db.transaction(RUN_DB_STORE, mode);
+        const request = makeRequest(tx.objectStore(RUN_DB_STORE));
+        tx.oncomplete = () => { db.close(); resolve(request.result); };
+        tx.onabort = () => { db.close(); reject(tx.error); };
+      } catch (error) {
+        db.close();
+        reject(error);
+      }
+    };
+  });
+}
+
+const readRunDb = () => runDbRequest('readonly', (store) => store.get(RUN_STORAGE_KEY));
+const writeRunDb = (data) => runDbRequest('readwrite', (store) => store.put(data, RUN_STORAGE_KEY));
+
+// Data in both places (a fallback session, or a rollback to an older version): keep every record.
+function mergeRunData(target, source) {
+  const idOf = (run) => `${run?.seed}|${run?.season || 1}|${run?.timestamp}`;
+  const union = (a = [], b = []) => {
+    const seen = new Set(a.map(idOf));
+    return [...a, ...b.filter((run) => !seen.has(idOf(run)))];
+  };
+  const order = {
+    speedrun: (a, b) => (a.time || Infinity) - (b.time || Infinity),
+    rank: (a, b) => (b.points || 0) - (a.points || 0) || (a.time || Infinity) - (b.time || Infinity),
+    floor: (a, b) => (isBetterFloorRun(a, b) ? -1 : isBetterFloorRun(b, a) ? 1 : 0)
+  };
+
+  if (!target.runs) target.runs = {};
+  for (const [mapKey, mapData] of Object.entries(source.runs || {})) {
+    const into = target.runs[mapKey] || (target.runs[mapKey] = {});
+    for (const category of Object.keys(order)) {
+      into[category] = union(into[category], mapData?.[category]).sort(order[category]);
+    }
+  }
+  if (!target.replays) target.replays = {};
+  for (const [mapKey, list] of Object.entries(source.replays || {})) {
+    target.replays[mapKey] = union(target.replays[mapKey], list).sort((a, b) => b.timestamp - a.timestamp);
+  }
+  target.metadata = {
+    ...source.metadata,
+    ...target.metadata,
+    totalRuns: Object.values(target.runs).reduce((total, map) => total + (map.speedrun?.length || 0) + (map.rank?.length || 0) + (map.floor?.length || 0), 0),
+    totalMaps: Object.keys(target.runs).length,
+    totalReplays: Object.values(target.replays).reduce((total, list) => total + list.length, 0)
+  };
+  target.lastUpdated = Math.max(target.lastUpdated || 0, source.lastUpdated || 0);
+  return target;
+}
+
+// Reads the stored history, moving any localStorage copy into IndexedDB. The localStorage key is
+// removed only after the IndexedDB copy has been read back and matches.
+async function loadStoredRunData() {
+  const local = Utils.safeLocalStorage.get(RUN_STORAGE_KEY);
+  const legacy = local && local.lastUpdated ? local : null;
+  let stored;
+  try {
+    stored = await readRunDb();
+    useLocalStorageFallback = false;
+  } catch (error) {
+    console.warn('[RunTracker] IndexedDB unavailable, using localStorage:', error);
+    useLocalStorageFallback = true;
+    return legacy;
+  }
+  if (!legacy) return stored || null;
+
+  const data = stored ? mergeRunData(stored, legacy) : legacy;
+  try {
+    await writeRunDb(data);
+    if (JSON.stringify(await readRunDb()) !== JSON.stringify(data)) {
+      throw new Error('read-back does not match');
+    }
+    localStorage.removeItem(RUN_STORAGE_KEY);
+    console.log('[RunTracker] Moved run history from localStorage to IndexedDB');
+  } catch (error) {
+    console.error('[RunTracker] Could not move run history to IndexedDB, keeping localStorage:', error);
+    useLocalStorageFallback = true;
+  }
+  return data;
+}
+
 // Storage manager for batch operations
 const StorageManager = {
   pendingSaves: new Set(),
@@ -603,12 +700,21 @@ const StorageManager = {
     }
     
     if (this.pendingSaves.size > 0) {
-      await this.saveStorage();
+      // Cleared first: a change queued while this write is running needs its own write.
       this.pendingSaves.clear();
+      await this.saveStorage();
     }
   },
   
   async saveStorage() {
+    if (!useLocalStorageFallback) {
+      try {
+        await writeRunDb(runStorage);
+        return true;
+      } catch (error) {
+        console.error('[RunTracker] IndexedDB save failed, using localStorage:', error);
+      }
+    }
     if (Utils.safeLocalStorage.set(RUN_STORAGE_KEY, runStorage)) return true;
     // Quota full: replays are the only unbounded data, so drop the oldest ones and retry.
     return this.evictOldestReplaysAndSave();
@@ -652,11 +758,10 @@ async function saveStorage() {
 // Initialize storage
 async function initializeStorage() {
   try {
-    // Use safe localStorage operations
-    const storedData = Utils.safeLocalStorage.get(RUN_STORAGE_KEY);
+    const storedData = await loadStoredRunData();
     if (storedData && storedData.lastUpdated) {
       runStorage = storedData;
-      console.log('[RunTracker] Loaded existing run data from localStorage:', runStorage.metadata);
+      console.log('[RunTracker] Loaded existing run data:', runStorage.metadata);
     } else {
       // No existing data found, start fresh
       console.log('[RunTracker] No existing run data found, starting fresh');
