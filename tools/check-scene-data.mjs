@@ -24,6 +24,18 @@ g.state = { utils: {} }; g.navigator = {}; g.setTimeout = () => 0; g.setInterval
 new Function('window', 'globalThis', 'document', 'state', 'navigator', 'setTimeout', 'setInterval', 'console', readFileSync(join(ROOT, 'database/creature-database.js'), 'utf8'))(g, g, g.document, g.state, g.navigator, g.setTimeout, g.setInterval, g.console);
 const db = g.creatureDatabase;
 
+// Reviewed as intended: one number for a volley of arrows, or a number timed to the cast or the area, not to
+// the missile. The times are part of each line, so a changed scene is reported again.
+const REVIEWED = new Set([
+  '40 Elf Scout part 0: flight 1 lands at 787.5ms, a hit is at 725ms',
+  '40 Elf Scout part 0: flight 4 lands at 2787.5ms, a hit is at 2725ms',
+  '40 Elf Scout (awakened) part 0: flight 1 lands at 1787.5ms, a hit is at 1725ms',
+  '58 Magma Crystal part 0: flight 0 lands at 1662.5ms, a hit is at 1562.5ms',
+  '58 Magma Crystal (awakened) part 0: flight 0 lands at 1662.5ms, a hit is at 1562.5ms',
+  '115 Cake Drake part 0: flight 0 lands at 1225ms, a hit is at 1125ms',
+  '115 Cake Drake (awakened) part 0: flight 0 lands at 1225ms, a hit is at 1125ms'
+]);
+
 const errors = [];
 const warns = [];
 const TIME_KEYS = ['at', 'ms', 'until', 'from', 'lead', 'holdMs'];
@@ -93,7 +105,8 @@ for (let id = 1; id <= 300; id++) {
       const hitTimes = (p.numbers || []).map((n) => n.at).filter(isNum); // damage / heal numbers only: effects may sit on the game's 62.5ms ticks
       for (const l of landings) {
         const near = hitTimes.filter((t) => Math.abs(t - l.land) > 0 && Math.abs(t - l.land) <= 100);
-        if (near.length && !hitTimes.includes(l.land)) warns.push(`${where}: flight ${l.i} lands at ${l.land}ms, a hit is at ${near[0]}ms`);
+        const warn = `${where}: flight ${l.i} lands at ${l.land}ms, a hit is at ${near[0]}ms`;
+        if (near.length && !hitTimes.includes(l.land) && !REVIEWED.has(warn)) warns.push(warn);
       }
     });
   }

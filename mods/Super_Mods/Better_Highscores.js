@@ -595,6 +595,7 @@
         modSettings.showNavButtonUserDisabled = !checked;
         saveSettings();
         applyNavButtonVisibility();
+        showRestoreButton();
       }
     ).row);
 
@@ -722,11 +723,13 @@
       return;
     }
 
-    if (document.querySelector('.better-highscores-nav-btn')) {
+    // Fallback only: the setting decides, as the header button is added after a delay and is
+    // hidden rather than removed when turned off.
+    if (modSettings.showNavButton !== false) {
       return;
     }
 
-    restoreButton = document.createElement('button');
+    restoreButton =document.createElement('button');
     restoreButton.type = 'button';
     restoreButton.className = 'better-highscores-restore-btn';
     restoreButton.title = t('mods.betterUI.betterHighscoresShowPanel');

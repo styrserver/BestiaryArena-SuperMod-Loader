@@ -192,12 +192,17 @@ function serialize(data) {
   return `const ABILITY_SCENE_DATA = {\n${rows.join(',\n')}\n};`;
 }
 
+// Reviewed: the game draws these from its own images, so there is no sprite sheet. Only others are reported.
+const NO_SHEET = new Set(['corymVanguardFx(99005)', 'oldFireFx(99006)', 'oldEnergyFx(99007)', 'oldBurn(99008)',
+  'missile thalasArrow(50001)', 'missile oldFire(50004)']);
+
 async function main() {
   const update = process.argv.includes('--update');
   const chunks = await loadChunks();
   const { data: game, unknownEffects, names, unresolvedScans } = await extractSceneData(chunks);
   if (unresolvedScans.length) console.log(`WARN     area scans with a mask the parser cannot resolve (area may be wrong): ${unresolvedScans.join('; ')}`);
-  if (unknownEffects.length) console.log(`WARN     effects or missiles with no sprite sheet (left out): ${unknownEffects.join(', ')}`);
+  const newUnknown = unknownEffects.filter((name) => !NO_SHEET.has(name));
+  if (newUnknown.length) console.log(`WARN     effects or missiles with no sprite sheet (left out): ${newUnknown.join(', ')}`);
   if (process.argv.includes('--assets')) {
     const assets = findCreatureAssets(chunks, game);
     Object.values(assets).forEach((a) => console.log(`ASSETS   ${a.n}: ${a.assets.join(', ')}`));

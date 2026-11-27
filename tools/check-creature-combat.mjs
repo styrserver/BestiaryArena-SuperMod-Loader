@@ -140,11 +140,14 @@ function serialize(data) {
   return `const CREATURE_COMBAT_DATA = {\n${rows.join(',\n')}\n};`;
 }
 
+// Reviewed: room obstacles (a crate, an event ball), not any creature's summon. Only others are reported.
+const OWNERLESS = new Set(['Trash', 'Ball']);
+
 async function main() {
   const update = process.argv.includes('--update');
   const chunks = await loadChunks();
   const game = extractCombatData(chunks);
-  const unlinked = findUnlinkedSummons(chunks);
+  const unlinked = findUnlinkedSummons(chunks).filter((name) => !OWNERLESS.has(name));
   if (unlinked.length) console.log(`WARN     summons with no owner link (not in the snapshot): ${unlinked.join(', ')}`);
   const { text, data } = readSnapshot();
   const lines = [...diff(game, data), ...diffExtras(chunks, readExtras(text))];

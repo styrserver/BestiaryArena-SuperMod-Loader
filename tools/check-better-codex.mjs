@@ -26,7 +26,7 @@ const MARKERS = [
   'warrior:{name:{en:', 'arachnid:{name:{en:', 'minotaur:{name:{en:', 'classic:{name:{en:',
   'Hand of the Inquisition":{x:', 'Festive Snowman":{x:', 'Monster [".concat(', 'ankrahmun:{name:{en:',
   '["Runs: ",', '"tooltip.open"', 'source:"outlined_text"', 'locale:"en",isEn:!0,translate:',
-  'openGotoRoom:!1,mapPickerForm:'
+  'openGotoRoom:!1,mapPickerForm:', '"DialogFooter"'
 ];
 const STRINGS = [
   'findSpares', 'acceptOffer', 'removeOffer', 'afterTradeId', 'lastTradeId', 'sparesPlayerMisses',

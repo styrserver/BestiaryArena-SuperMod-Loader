@@ -4,6 +4,21 @@
   },
   "notes": [
     {
+      "version": "5.5.6",
+      "changes": [
+        {
+          "mod": "Better Codex",
+          "type": "fixed",
+          "text": "Extras cards open like the game's own on mobile, keep their name, and grey out when missing."
+        },
+        {
+          "mod": "Better Highscores",
+          "type": "fixed",
+          "text": "Floating \"Show highscores\" button now only appears when the header button is turned off."
+        }
+      ]
+    },
+    {
       "version": "5.5.5",
       "changes": [
         {

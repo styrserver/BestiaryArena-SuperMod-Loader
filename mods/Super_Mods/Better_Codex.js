@@ -70,6 +70,8 @@
   let countedFor = null;
   // The game's records card under an Extras map preview, unmounted when it goes.
   let recordsView = null;
+  // The game dialog showing an Extras card where there is no preview column.
+  let previewDialog = null;
   let drawObserver = null;
   let catalogRows = null;
   let gameLookups = null;
@@ -739,12 +741,16 @@
     return wrapper;
   }
 
+  function cardName({ category, id, data }) {
+    return data.name ?? data.metadata?.name ??
+      getGameLookups().names[category]?.get(Number(id)) ?? `#${id}`;
+  }
+
   // Looks like a slot of the game's own Codex.
   function buildSlot(card, player) {
     const rarity = card.data.rarity ?? card.data.metadata?.rarity ?? 1;
     const slot = element('div', 'container-slot surface-darker relative size-[34px]');
-    slot.title = card.data.name ?? card.data.metadata?.name ??
-      getGameLookups().names[card.category]?.get(Number(card.id)) ?? `#${card.id}`;
+    slot.title = cardName(card);
     const glow = element('div', 'absolute inset-0');
     glow.style.background = `radial-gradient(closest-side, rgba(${RARITY_COLORS[rarity] || RARITY_COLORS[1]}, 0.25), transparent)`;
     const art = element('div', 'absolute inset-0 grid grid-cols-[32px] grid-rows-[32px] place-content-center place-items-center overflow-hidden');
@@ -873,6 +879,7 @@
   // =======================
 
   function removeResult() {
+    closePreviewDialog();
     unmountRecords();
     drawObserver?.disconnect();
     drawObserver = null;
@@ -1274,8 +1281,44 @@
     return button;
   }
 
-  // The game's own card preview.
-  function buildExtraPreview(card, look, name, position) {
+  // Layouts without a preview column: the preview opens in the game's own dialog, as its cards do. The
+  // dialog is the game's component, so it stacks over the Codex window like the native one.
+  function openPreviewDialog(preview, name) {
+    closePreviewDialog();
+    try {
+      const webpack = getWebpackRequire();
+      const Dialog = Object.values(gameModule('"DialogFooter"')).find((value) => value?.HeadlessContent);
+      const parts = parseRecordCard(webpack.m);
+      if (!Dialog || !parts) throw new Error('game dialog not found');
+      const { jsx } = webpack(parts.jsx);
+      const content = jsx(Dialog.HeadlessContent, {
+        accessibleTitle: name,
+        className: 'w-auto max-w-none',
+        children: jsx('div', {
+          className: 'grid justify-items-center gap-2',
+          ref: (node) => node?.replaceChildren(preview)
+        })
+      });
+      const onOpenChange = (open) => { if (!open) closePreviewDialog(); };
+      previewDialog = globalThis.state.utils.createUIComponent(
+        document.createElement('div'), Dialog.Root, { open: true, onOpenChange }, content);
+      previewDialog.mount();
+    } catch (error) {
+      console.warn('[Better Codex] Could not open the card preview:', error);
+    }
+  }
+
+  function closePreviewDialog() {
+    try {
+      previewDialog?.unmount();
+    } catch (error) {
+      console.warn('[Better Codex] Card preview not closed:', error);
+    }
+    previewDialog = null;
+  }
+
+  // The game's own card preview. Its dialog shows the card alone, so records only come with the column.
+  function buildExtraPreview(card, look, name, position, withRecords) {
     unmountRecords();
     const metadata = card.data.metadata || card.data;
     const language = api?.i18n?.getLocale?.()?.startsWith('pt') ? 'pt' : 'en';
@@ -1323,9 +1366,13 @@
     body.append(art, line, quote, footer);
     frame.append(title, body);
 
+    // As in the game, a card you are missing is greyed out.
+    const shade = element('div', "data-[owned='false']:grayscale lg:data-[owned='false']:opacity-60");
+    shade.dataset.owned = String(ownsExtra(card));
+    shade.appendChild(frame);
     const action = cardAction(card);
-    preview.appendChild(action ? actionButton(action, frame) : frame);
-    if (card.category === 'room') {
+    preview.appendChild(action ? actionButton(() => { closePreviewDialog(); action(); }, shade) : shade);
+    if (withRecords && card.category === 'room') {
       preview.classList.add('gap-2');
       mountRecords(preview, card);
     }
@@ -1455,7 +1502,6 @@
     return row;
   }
 
-  // The preview goes in the game's preview column, or above the cards on narrow layouts, which have none.
   function buildExtras(showPreview) {
     drawObserver = new IntersectionObserver((entries) => {
       entries.filter((entry) => entry.isIntersecting).forEach(({ target }) => {
@@ -1491,7 +1537,7 @@
           button.addEventListener('dblclick', () => cardAction(card)?.());
           button.addEventListener('click', () => {
             list.querySelectorAll('[data-highlighted]').forEach((other) => { other.dataset.highlighted = String(other === button); });
-            showPreview(buildExtraPreview(shown, look, slot.title, { number: index + 1, total: members.length }));
+            showPreview(shown, look, cardName(shown), { number: index + 1, total: members.length });
           });
           return button;
         }));
@@ -1513,19 +1559,22 @@
       const view = element('div', '');
       view.style.contain = 'inline-size';
       view.dataset.extras = 'true';
-      const holder = element('div', 'grid min-h-0 content-start');
+      // The preview goes in the game's preview column; narrow layouts have none and open a dialog.
+      const holder = column && element('div', 'grid min-h-0 content-start');
       // Takes both rows of the game's column, so a long ability text scrolls inside the card.
-      holder.style.cssText = 'grid-row:1 / -1;grid-template-rows:minmax(0,1fr);';
-      view.appendChild(buildExtras((preview) => {
-        holder.replaceChildren(preview);
-        if (!column) content.parentElement.scrollTop = 0;
+      if (holder) holder.style.cssText = 'grid-row:1 / -1;grid-template-rows:minmax(0,1fr);';
+      view.appendChild(buildExtras((card, look, name, position) => {
+        const preview = buildExtraPreview(card, look, name, position, !!holder);
+        if (holder) holder.replaceChildren(preview);
+        else openPreviewDialog(preview, name);
       }));
       content.appendChild(view);
       content.parentElement.scrollTop = 0;
       resultNodes.push(view);
-      if (column) column.appendChild(holder);
-      else view.prepend(holder);
-      resultNodes.push(holder);
+      if (holder) {
+        column.appendChild(holder);
+        resultNodes.push(holder);
+      }
     }
     [...content.children, ...Array.from(panel.children).slice(1), ...(panel.nextElementSibling?.children || [])]
       .filter((node) => !resultNodes.includes(node)).forEach(hide);
