@@ -101,7 +101,7 @@ try {
     // Shared boot-ready broker
     // =======================
     // Single source of truth for the "allModsLoaded" postMessage signal from
-    // content/local_mods.js plus the post-signal grace period. Previously each
+    // content/local-mods.js plus the post-signal grace period. Previously each
     // automation mod (Awaken Tracker, Better Boosted Maps, Better Tasker,
     // Raid Hunter, Stamina Optimizer) attached its own 'message' listener and
     // ran its own 5s grace timer + 15s fallback timer for this exact signal.
@@ -656,7 +656,7 @@ try {
 
         /**
          * Subscribe to the (once) moment the 'allModsLoaded' postMessage signal
-         * arrives from content/local_mods.js — fires immediately if it already has.
+         * arrives from content/local-mods.js — fires immediately if it already has.
          * @param {Function} callback
          * @returns {Function} Unsubscribe function
          */

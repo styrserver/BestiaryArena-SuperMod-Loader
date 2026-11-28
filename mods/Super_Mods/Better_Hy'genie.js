@@ -41,7 +41,7 @@
   let confirmationOutsideHandler = null;
   
   const QUANTITY_INPUT_STYLES = `
-    /* Base look comes from content/ba-quantity-input.js (.ba-quantity-input). */
+    /* Base look comes from content/ba-shared.js (.ba-quantity-input). */
     .better-hygenie-quantity-input {
       max-width: ${CONSTANTS.MAX_INPUT_WIDTH}px;
       margin-left: auto;

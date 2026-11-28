@@ -4229,7 +4229,7 @@ function isMonsterRegistryReady() {
 }
 
 // Fast phase (250ms x 20), then a slow phase (2s x 60) so a cold load never ends with a
-// permanently empty database. The database is only built once the registry is ready (BAWait: content/ba-wait.js).
+// permanently empty database. The database is only built once the registry is ready (BAWait: content/ba-shared.js).
 const waitForGameState = (callback) => globalThis.BAWait?.gameState(callback, {
   label: 'creature-database.js',
   ready: isMonsterRegistryReady,

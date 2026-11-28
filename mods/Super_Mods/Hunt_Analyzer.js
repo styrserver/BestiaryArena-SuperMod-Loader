@@ -1078,7 +1078,7 @@ function getPanelFrame(panel) {
     return panel._frame || panel.querySelector(':scope > .ha-panel-container') || panel;
 }
 
-// Shared game-styled toast (content/ba-toast.js). The panel argument is unused; kept so
+// Shared game-styled toast (content/ba-shared.js). The panel argument is unused; kept so
 // existing call sites stay unchanged.
 function showPanelFeedback(_panel, text, isSuccess = true) {
     window.BAToast?.show({

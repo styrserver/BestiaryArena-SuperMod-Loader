@@ -7,7 +7,7 @@
  * 1. THIS FILE (content/mod-registry.js) - Add to appropriate array below
  * 2. background.js - Update hardcoded counts in getModCounts (Chrome limitation)
  * 3. popup/popup.js - Add to the static list (search for "kept in sync with mod-registry.js")
- * 4. content/local_mods.js - Update FALLBACK_* arrays when import() of this file fails (Orion iOS, etc.)
+ * 4. content/local-mods.js - Update FALLBACK_* arrays when import() of this file fails (Orion iOS, etc.)
  * 
  * Why 3 places? 
  * - This file is used by content scripts (supports ES6 modules)
@@ -33,7 +33,7 @@ export const DATABASE_MODS = [
   'creature-lua-export.js',
   'maps-lua-export.js',
   'regions-lua-export.js',
-  'playereq-database.js',
+  'player-equipment-database.js',
   'firebase-admins.js'
 ];
 
@@ -102,7 +102,7 @@ export const DEFAULT_ENABLED_MODS = [
   'database/tool-runs.js',
   'database/wiki-export-loader.js',
   'database/maps-database.js',
-  'database/playereq-database.js',
+  'database/player-equipment-database.js',
   'database/firebase-admins.js',
   'Official Mods/Bestiary_Automator.js',
   'Official Mods/Board Analyzer.js',
@@ -133,7 +133,7 @@ export const HIDDEN_MODS = [
   'creature-lua-export.js',
   'maps-lua-export.js',
   'regions-lua-export.js',
-  'playereq-database.js',
+  'player-equipment-database.js',
   'firebase-admins.js',
   'Mod Settings.js',
   'RunTracker.js',

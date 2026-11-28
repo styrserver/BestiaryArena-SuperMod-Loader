@@ -2,7 +2,7 @@
 /**
  * Checks that the copies of the mod lists stay in sync. content/mod-registry.js is the source of truth;
  * these files carry their own copy on purpose (the popup cannot import ES modules, background.js and
- * the Orion/iOS fallback in local_mods.js cannot rely on the dynamic import) and each one says "keep in
+ * the Orion/iOS fallback in local-mods.js cannot rely on the dynamic import) and each one says "keep in
  * sync". A mod added to one list and forgotten in another only shows up as a missing toggle or a mod
  * that is silently off, so this fails the build instead.
  *
@@ -66,12 +66,12 @@ const lists = {
   }
 };
 const copies = [
-  ['content/local_mods.js FALLBACK_DATABASE_MODS', 'content/local_mods.js', 'FALLBACK_DATABASE_MODS', 'database'],
-  ['content/local_mods.js FALLBACK_OFFICIAL_MODS', 'content/local_mods.js', 'FALLBACK_OFFICIAL_MODS', 'official'],
-  ['content/local_mods.js FALLBACK_SUPER_MODS', 'content/local_mods.js', 'FALLBACK_SUPER_MODS', 'super'],
-  ['content/local_mods.js FALLBACK_OT_MODS', 'content/local_mods.js', 'FALLBACK_OT_MODS', 'ot'],
-  ['content/local_mods.js FALLBACK_DEFAULT_ENABLED_MODS', 'content/local_mods.js', 'FALLBACK_DEFAULT_ENABLED_MODS', 'defaults'],
-  ['content/local_mods.js defaultEnabledMods', 'content/local_mods.js', 'defaultEnabledMods', 'defaults'],
+  ['content/local-mods.js FALLBACK_DATABASE_MODS', 'content/local-mods.js', 'FALLBACK_DATABASE_MODS', 'database'],
+  ['content/local-mods.js FALLBACK_OFFICIAL_MODS', 'content/local-mods.js', 'FALLBACK_OFFICIAL_MODS', 'official'],
+  ['content/local-mods.js FALLBACK_SUPER_MODS', 'content/local-mods.js', 'FALLBACK_SUPER_MODS', 'super'],
+  ['content/local-mods.js FALLBACK_OT_MODS', 'content/local-mods.js', 'FALLBACK_OT_MODS', 'ot'],
+  ['content/local-mods.js FALLBACK_DEFAULT_ENABLED_MODS', 'content/local-mods.js', 'FALLBACK_DEFAULT_ENABLED_MODS', 'defaults'],
+  ['content/local-mods.js defaultEnabledMods', 'content/local-mods.js', 'defaultEnabledMods', 'defaults'],
   ['background.js HARDCODED_DEFAULT_ENABLED_MODS', 'background.js', 'HARDCODED_DEFAULT_ENABLED_MODS', 'defaults'],
   ['popup/popup.js superModNames', 'popup/popup.js', 'superModNames', 'super'],
   ['popup/popup.js otModNames', 'popup/popup.js', 'otModNames', 'ot'],

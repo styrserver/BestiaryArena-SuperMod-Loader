@@ -896,7 +896,7 @@ const BESTIARY_SEARCH_INPUT_ID = 'monster-input-id';
 // Use shared translation system via API
 const t = (key) => api.i18n.t(key);
 
-// Toast mute list (Mod Settings > Toasts). content/ba-toast.js reads the same localStorage key: it filters by
+// Toast mute list (Mod Settings > Toasts). content/ba-shared.js reads the same localStorage key: it filters by
 // the displayed mod name, so the names are re-resolved from the ids every load (the language may have changed).
 const TOAST_MUTE_KEY = 'ba-toast-muted';
 // [locale namespace, key of the mod name, registry name]: the name is the same string the mod passes as `mod` to
@@ -3677,7 +3677,7 @@ function perfResetData() {
   perfOverlay.timerBaseAt = Date.now();
 }
 
-// The loader (content/local_mods.js) times every mod's setTimeout / setInterval / requestAnimationFrame callbacks
+// The loader (content/local-mods.js) times every mod's setTimeout / setInterval / requestAnimationFrame callbacks
 // and game store subscribers into window.BestiaryModTimings. Those totals only grow, so the debugger diffs against a
 // baseline taken at start/Clear.
 function perfSnapshotModTimers() {
@@ -4144,7 +4144,7 @@ function uninstallPerfFetchHook() {
 // --- Script-time metrics -------------------------------------------------------------------------
 // Slow frames come from the browser itself (Long Animation Frames API, Chromium): each one lists the
 // scripts that ran in it with their sourceURL, which for mods is the /bestiary-mod/<Mod>.js trailer
-// local_mods.js appends. No timer/listener patching, so no overhead when nothing is slow.
+// local-mods.js appends. No timer/listener patching, so no overhead when nothing is slow.
 
 function perfClassifyScriptUrl(url, invoker) {
   const mod = url.match(/bestiary-mod\/([^/?#]+?)(?:\.m?js)?(?:[?#]|$)/);
@@ -7041,7 +7041,7 @@ async function hideNonShinyAndNonAwakenedMonsters(onProgress = null) {
   });
 
   let hiddenCount = 0;
-  const totalToHide = monstersToHide.length;
+  let totalToHide = monstersToHide.length;
   if (typeof onProgress === 'function') {
     onProgress({
       hiddenCount: 0,
@@ -7050,7 +7050,14 @@ async function hideNonShinyAndNonAwakenedMonsters(onProgress = null) {
     });
   }
 
+  // A creature can be sold or devoured (e.g. by Autoseller) while this slow loop works through the list.
+  const stillOwned = (id) => !!globalThis.state?.player?.getSnapshot?.()?.context?.monsters?.some((m) => m.id === id);
+
   for (const monster of monstersToHide) {
+    if (!stillOwned(monster.id)) {
+      totalToHide--;
+      continue;
+    }
     if (typeof onProgress === 'function') {
       onProgress({
         hiddenCount,
@@ -7083,6 +7090,14 @@ async function hideNonShinyAndNonAwakenedMonsters(onProgress = null) {
       const retryAfterMs = Math.min(10000, (Number(response.headers.get('retry-after')) || 3) * 1000);
       await new Promise((resolve) => setTimeout(resolve, retryAfterMs));
       response = await sendHideRequest(monster);
+    }
+    // 404 is also the answer for a creature the server no longer has: skip it. An unknown procedure stays fatal.
+    const notFoundBody = response.status === 404 ? await response.text() : null;
+    if (notFoundBody !== null && !/procedure/i.test(notFoundBody)) {
+      console.warn('[Mod Settings] Auto-hide skipped a creature the server did not find:', monster.id, notFoundBody.slice(0, 300));
+      totalToHide--;
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      continue;
     }
     if (!response.ok) {
       throw new Error(`Hide request failed (${response.status})`);
@@ -14045,7 +14060,7 @@ function getVisibleArsenalEquipmentButtonsForHover() {
 function isAdvancedHoverDebugEnabled() {
   try {
     if (typeof window !== 'undefined' && window.__MOD_SETTINGS_DEBUG_HOVER__ === true) return true;
-    // Injected by local_mods `with (context)` (same flag as Depot Manager uses).
+    // Injected by local-mods `with (context)` (same flag as Depot Manager uses).
     if (typeof BESTIARY_DEBUG !== 'undefined' && BESTIARY_DEBUG === true) return true;
     if (typeof window !== 'undefined' && window.BESTIARY_DEBUG === true) return true;
     if (localStorage.getItem('bestiary-debug') === 'true') return true;
@@ -14180,7 +14195,7 @@ function logHoveredCreatureResolutionCompare(button) {
 
   const label = `[Mod Settings][hover-compare] ${portrait} gameId=${gameId}${mismatch ? ' ⚠ ID MISMATCH' : ''}`;
   console.groupCollapsed(label);
-  // Use console.info (not .log): local_mods.js silences console.log unless bestiary-debug is on — but when
+  // Use console.info (not .log): local-mods.js silences console.log unless bestiary-debug is on — but when
   // hover debug is enabled via mod-settings-debug-hover alone, info still prints.
   console.info(
     'enable',

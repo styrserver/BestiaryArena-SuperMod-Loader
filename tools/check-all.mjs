@@ -27,7 +27,7 @@ const FIXES = {
   'check-room-scripts.mjs': 'review ROOM_SCRIPT_NOTES, then node tools/check-room-scripts.mjs --update',
   'check-outfits-mounts.mjs': 'node tools/check-outfits-mounts.mjs --update (Outfiter.js snapshot)',
   'check-patch-notes.mjs': 'add/fix the top entry in docs/patch-notes.json so it matches the manifest version',
-  'check-media-hashes.mjs': 'update FALLBACK in content/ba-assets.js; replace each HARDCODED url with window.BAAssets.url(name); add new names to FALLBACK',
+  'check-media-hashes.mjs': 'update FALLBACK in content/ba-shared.js; replace each HARDCODED url with window.BAAssets.url(name); add new names to FALLBACK',
   'check-fast-simulation.mjs': 'update getNativeCombat()/createFastRunner() in Board_Analyzer.js, bump FAST_ENGINE_REVISION, re-run'
 };
 const TOOLS = readdirSync(DIR)

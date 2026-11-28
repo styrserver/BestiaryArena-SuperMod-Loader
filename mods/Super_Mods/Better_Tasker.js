@@ -9066,7 +9066,7 @@ function createHuntingShopWrap(itemKey, price, amount) {
     wrap.dataset.price = String(price);
     wrap.dataset.amount = String(amount);
 
-    // Shared quantity box (content/ba-quantity-input.js); only layout is set here.
+    // Shared quantity box (content/ba-shared.js); only layout is set here.
     const input = window.BAQuantityInput.create({ max: 1, min: 1, value: 1, className: HUNT_SHOP_INPUT_CLASS });
     input.inputMode = 'numeric';
     input.style.cssText = 'width:40px;flex:none;height:24px;margin:0 0 0 auto;';

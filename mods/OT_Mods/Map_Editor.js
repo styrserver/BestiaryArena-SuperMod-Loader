@@ -639,7 +639,7 @@ function removeMapEditorPersistentToast() {
   mapEditorPersistentToastHandle = null;
 }
 
-// Shared toast stack (content/ba-toast.js). Persistent toasts are click-through status lines that can
+// Shared toast stack (content/ba-shared.js). Persistent toasts are click-through status lines that can
 // be updated in place; options.onAction adds a button (e.g. Leave).
 function showMapEditorToast(message, options = {}) {
   const isPersistent = options.persistent === true;

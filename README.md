@@ -131,7 +131,7 @@ Bundled mods must be registered in more than one place (browser limits: the popu
 1. Update [`content/mod-registry.js`](content/mod-registry.js) — add the filename to `DATABASE_MODS`, `OFFICIAL_MODS`, `SUPER_MODS`, or `OT_MODS` as appropriate (see the file header for the full checklist).
 2. Update [`background.js`](background.js) — add to default-enabled lists and, in the `getModCounts` message handler, adjust the hardcoded `modCounts` object (look for the comment *Keep these in sync with content/mod-registry.js*) so category totals stay correct on Chromium.
 3. Update [`popup/popup.js`](popup/popup.js) — keep the static name lists in sync with `mod-registry.js` where the popup enumerates mods, and add the mod's one-line description under `popup.modDescriptions` in both `assets/locales/en-US.json` and `pt-BR.json` (the locale is the only place descriptions live). `node tools/check-mod-lists.mjs` checks the lists, `background.js` counts and descriptions.
-4. Update [`content/local_mods.js`](content/local_mods.js) — keep `FALLBACK_*` arrays in sync (Orion iOS and other environments where `mod-registry.js` import fails).
+4. Update [`content/local-mods.js`](content/local-mods.js) — keep `FALLBACK_*` arrays in sync (Orion iOS and other environments where `mod-registry.js` import fails).
 5. For database scripts, add the path to [`manifest_firefox.json`](manifest_firefox.json) `web_accessible_resources` if the file must load in page context.
 
 ### Standardized UI Components
@@ -182,12 +182,12 @@ Mods have access to the game's state through `globalThis.state`, which provides 
   - `client.js` - Main client-side API and functionality
   - `injector.js` - Main content script: injects `platform.js`, then page context scripts (client, mods, databases) at `document_start`; collects loader errors for the popup Error Log
   - `mod-coordination.mjs` - Global mod coordination system for managing mod states, priorities, and resource control
-  - `local_mods.js` - Manages local mods
+  - `local-mods.js` - Manages local mods
   - `mod-registry.js` - Central lists of database, official, super, and OT mod filenames (must stay in sync with `background.js` and `popup/popup.js`)
   - `custom-battles.js` - Custom battle runtime (`CustomBattle`) for configurable fights (used by mods such as Challenges)
   - `event-competition.js` - Config-driven community event leaderboard framework (`window.EventCompetition`) for Firebase-backed floor/rank competitions (used by Better Highscores for Tibia Ball League)
   - `ba-sandbox-utils.mjs` - Sandbox utility functions
-  - `utility_injector.js` - Utility injection system (`ba-sandbox-utils.mjs`, `custom-battles.js`, `event-competition.js`)
+  - `utility-injector.js` - Utility injection system (`ba-sandbox-utils.mjs`, `custom-battles.js`, `event-competition.js`)
 - `docs/` - Mod developer guides, API references (game state, client, UI, raids, mod databases), the [release procedure](docs/release.md), the best-runs fetch tool, and [`patch-notes.json`](docs/patch-notes.json) (version metadata used by the extension popup patch notes UI)
 - `database/` - Static game data and lookup helpers exposed to mods as `window.*` globals (see "Mod Databases" in [`docs/game_state_api.md`](docs/game_state_api.md))
   - `welcome.js` - Welcome screen data
@@ -200,7 +200,7 @@ Mods have access to the game's state through `globalThis.state`, which provides 
   - `creature-lua-export.js` - DevTools/console helpers to export creature stats wiki Lua (`dumpCreatureWikiLua()`)
   - `maps-lua-export.js` - DevTools/console helpers to export maps wiki Lua (`dumpMapsWikiLua()`)
   - `regions-lua-export.js` - DevTools/console helpers to export regions wiki Lua (`dumpRegionsWikiLua()`) and region page bodies (`dumpRegionPageBody()`)
-  - `playereq-database.js` - Player equipment helpers (slot types, dynamic equipment lists)
+  - `player-equipment-database.js` - Player equipment helpers (slot types, dynamic equipment lists)
   - `firebase-admins.js` - Firebase admin allowlist for privileged mod features
 - `mods/` - Local mod files, organized as follows:
   - `Official_Mods/` - Core mods that provide essential gameplay enhancements and are included by default.

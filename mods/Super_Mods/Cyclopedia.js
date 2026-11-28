@@ -4599,28 +4599,155 @@ function createCyclopediaSearchInput({ placeholder = '', value = '', attrs = nul
   return { wrap, input, clearBtn };
 }
 
-/** List search row: shared search field plus a sort-mode button (Name / Tier / Usage). */
-function createCyclopediaSearchBar(placeholder) {
+/**
+ * Collection filter chips for the list searches. Adapted, with thanks, from "Cyclopedia Filters" by Orw
+ * (https://bestiaryarena.com/profile/orw). Each chip writes `word` / `not:word` into the search field.
+ */
+const CYCLOPEDIA_CREATURE_CHIPS = [
+  { flag: 'owned', label: 'Owned', hint: 'Sealed creatures do not count' },
+  { flag: 'normal', label: 'Normal' },
+  { flag: 'shiny', label: 'Shiny' },
+  { flag: 'perfect-normal', label: 'Perfect normal', hint: 'Awakened, level 99 and all five genes at 20' },
+  { flag: 'perfect-shiny', label: 'Perfect shiny', hint: 'Awakened, level 99 and all five genes at 20' },
+  { flag: 'awakened', label: 'Awakened' },
+  { flag: 'event', label: 'Event' }
+];
+
+const CYCLOPEDIA_EQUIPMENT_CHIPS = [
+  { flag: 'owned', label: 'Owned' },
+  { flag: 'complete', label: 'Complete T5', hint: 'T5 in HP, AD and AP' },
+  { flag: 't5hp', label: 'T5 HP' },
+  { flag: 't5ad', label: 'T5 AD' },
+  { flag: 't5ap', label: 'T5 AP' },
+  { flag: 'event', label: 'Event' }
+];
+
+/** Plain words an equipment search reads as filters. */
+const CYCLOPEDIA_EQUIPMENT_FLAGS = {
+  event: 'event', events: 'event', owned: 'owned', complete: 'complete', t5hp: 't5hp', t5ad: 't5ad', t5ap: 't5ap'
+};
+
+/** Flags read from the player's collection: rows compute them fresh on every search. */
+const CYCLOPEDIA_COLLECTION_FLAGS = new Set([
+  'owned', 'normal', 'shiny', 'perfect-normal', 'perfect-shiny', 'awakened', 'complete', 't5hp', 't5ad', 't5ap'
+]);
+
+/** Flag a single search word asks for (`event`, `is:event`, `not:event`), or null. */
+function readCyclopediaFlagToken(token, words) {
+  const match = /^(?:(is|not):)?(.+)$/.exec(token.toLowerCase());
+  if (!match) return null;
+  const flag = words[match[2]] ?? (match[1] ? match[2] : null);
+  return flag ? { flag, negated: match[1] === 'not' } : null;
+}
+
+/**
+ * The list's one view button and its panel: sort mode on top, filter chips below. The search field's
+ * text stays the only filter state; a new sort mode is announced as an `input` event on that field.
+ */
+function createCyclopediaViewMenu(searchInput, chips, words, sortModes) {
+  let sortMode = sortModes[0].mode;
+  const toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.style.cssText = CYCLOPEDIA_SEARCH_CONTROL_STYLE;
+  toggle.title = 'Sort and filter';
+  toggle.setAttribute('aria-expanded', 'false');
+
+  const panel = document.createElement('div');
+  panel.style.cssText = 'display: none; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 3px; padding: 3px; max-height: 140px; overflow-y: auto; background: rgba(0, 0, 0, 0.3); flex-shrink: 0;';
+
+  const chipStyle = `${CYCLOPEDIA_SEARCH_CONTROL_STYLE} min-width: 0; text-align: left; overflow: hidden; text-overflow: ellipsis;`;
+  const tokens = () => searchInput.value.split(/\s+/).filter(Boolean);
+  const readState = (flag) => {
+    const found = tokens().map((token) => readCyclopediaFlagToken(token, words)).find((t) => t?.flag === flag);
+    if (!found) return 'any';
+    return found.negated ? 'without' : 'with';
+  };
+  const write = (nextTokens) => {
+    searchInput.value = nextTokens.join(' ');
+    searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+  };
+  const without = (flags) => tokens().filter((token) => !flags.includes(readCyclopediaFlagToken(token, words)?.flag));
+
+  const sortRow = document.createElement('div');
+  sortRow.style.cssText = 'grid-column: 1 / -1; display: flex; gap: 3px; padding-bottom: 3px; border-bottom: 1px solid rgba(255, 255, 255, 0.2);';
+  const sortButtons = sortModes.map(({ mode, label }) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = label;
+    button.title = `Sort by ${label.toLowerCase()}`;
+    button.style.cssText = `${CYCLOPEDIA_SEARCH_CONTROL_STYLE} flex: 1 1 0; min-width: 0;`;
+    button.addEventListener('click', () => {
+      sortMode = mode;
+      searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    sortRow.appendChild(button);
+    return { button, mode };
+  });
+  panel.appendChild(sortRow);
+
+  const buttons = chips.map(({ flag, label, hint }) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.style.cssText = chipStyle;
+    button.title = `${hint ? `${hint}. ` : ''}Click: with, without, any`;
+    button.addEventListener('click', () => {
+      const state = readState(flag);
+      const next = without([flag]);
+      if (state === 'any') next.push(flag);
+      else if (state === 'with') next.push(`not:${flag}`);
+      write(next);
+    });
+    panel.appendChild(button);
+    return { button, flag, label };
+  });
+
+  const reset = document.createElement('button');
+  reset.type = 'button';
+  reset.textContent = 'Reset';
+  reset.style.cssText = `${chipStyle} background: rgba(200, 50, 50, 0.6); border-color: #ff6666; text-align: center;`;
+  reset.addEventListener('click', () => write(without(chips.map((chip) => chip.flag))));
+  panel.appendChild(reset);
+
+  const sync = () => {
+    let active = 0;
+    buttons.forEach(({ button, flag, label }) => {
+      const state = readState(flag);
+      if (state !== 'any') active++;
+      button.textContent = state === 'with' ? `✓ ${label}` : state === 'without' ? `✕ ${label}` : label;
+      button.style.color = state === 'with' ? '#a9dfa9' : state === 'without' ? '#f0ba9b' : '#fff';
+    });
+    const sortLabel = sortModes.find((entry) => entry.mode === sortMode).label;
+    toggle.textContent = `${sortLabel}${active ? ` (${active})` : ''} ▾`;
+    sortButtons.forEach(({ button, mode }) => {
+      button.setAttribute('aria-pressed', String(mode === sortMode));
+      button.style.background = mode === sortMode ? 'rgba(255, 255, 255, 0.3)' : 'rgba(255, 255, 255, 0.1)';
+    });
+    toggle.style.color = active ? '#ffe066' : '#fff';
+    reset.style.visibility = active ? 'visible' : 'hidden';
+  };
+  searchInput.addEventListener('input', sync);
+  toggle.addEventListener('click', () => {
+    const open = panel.style.display === 'none';
+    panel.style.display = open ? 'grid' : 'none';
+    toggle.setAttribute('aria-expanded', String(open));
+  });
+  sync();
+  return { toggle, panel, getSortMode: () => sortMode };
+}
+
+/** List search row: shared search field plus the sort and filter button. */
+function createCyclopediaSearchBar(placeholder, chips, words, sortModes) {
   const searchContainer = document.createElement('div');
-  searchContainer.style.cssText = CYCLOPEDIA_SEARCH_ROW_STYLE;
+  searchContainer.style.cssText = 'display: flex; flex-direction: column; width: 100%; min-width: 0; flex-shrink: 0;';
+  const searchRow = document.createElement('div');
+  searchRow.style.cssText = CYCLOPEDIA_SEARCH_ROW_STYLE;
 
   const { wrap: inputWrap, input: searchInput } = createCyclopediaSearchInput({ placeholder });
+  const { toggle, panel, getSortMode } = createCyclopediaViewMenu(searchInput, chips, words, sortModes);
 
-  const filterBtn = document.createElement('button');
-  filterBtn.textContent = 'Name';
-  filterBtn.style.cssText = CYCLOPEDIA_SEARCH_CONTROL_STYLE;
-  filterBtn.addEventListener('mouseenter', () => {
-    filterBtn.style.background = 'rgba(255, 255, 255, 0.2)';
-    filterBtn.style.borderColor = 'rgba(255, 255, 255, 0.4)';
-  });
-  filterBtn.addEventListener('mouseleave', () => {
-    filterBtn.style.background = 'rgba(255, 255, 255, 0.1)';
-    filterBtn.style.borderColor = 'rgba(255, 255, 255, 0.2)';
-  });
-
-  searchContainer.appendChild(inputWrap);
-  searchContainer.appendChild(filterBtn);
-  return { searchContainer, searchInput, filterBtn };
+  searchRow.append(inputWrap, toggle);
+  searchContainer.append(searchRow, panel);
+  return { searchContainer, searchInput, getSortMode };
 }
 
 /**
@@ -4661,7 +4788,9 @@ function memoizeLazy(compute) {
 /** Plain words a creature search reads as `is:` / `has:` filters. */
 const CYCLOPEDIA_BARE_FLAGS = {
   event: 'event', events: 'event', unobtainable: 'unobtainable', ranged: 'ranged', melee: 'melee',
-  summon: 'has:summon', summons: 'has:summon', summoner: 'has:summon'
+  summon: 'has:summon', summons: 'has:summon', summoner: 'has:summon',
+  owned: 'owned', normal: 'normal', shiny: 'shiny', 'perfect-normal': 'perfect-normal',
+  'perfect-shiny': 'perfect-shiny', awakened: 'awakened'
 };
 
 /** Base-stat search keys -> the metadata / snapshot field they read (`hp:>500`, `mr:30-60`, `range:>=4`). */
@@ -4672,14 +4801,16 @@ const CYCLOPEDIA_STAT_FILTERS = {
 /**
  * Splits a list-search string into free text and `key:value` filters, all lowercased and all ANDed:
  *   role:mage  tag:poison  is:event  has:summon   (value may be quoted: role:"two words")
+ *   not:event  not:shiny   (rows without that flag)
  *   hp:500  hp:>500  hp:<=300  hp:200-400   for hp / ad / ap / armor / mr / speed / range
  * A dangling `key:` (still being typed) is ignored. Rows match a filter only when their meta carries the
  * matching field (`roles`, `tags`, `flags`, `stats`), so a list without them shows nothing for that filter.
  */
-function parseCyclopediaSearchQuery(searchTerm, bareFlags = false) {
+function parseCyclopediaSearchQuery(searchTerm, bareFlags = null) {
   const roles = [];
   const tags = [];
   const flags = [];
+  const notFlags = [];
   const stats = [];
   const num = String.raw`(\d+(?:\.\d+)?)`;
   const statKeys = Object.keys(CYCLOPEDIA_STAT_FILTERS).join('|');
@@ -4689,25 +4820,26 @@ function parseCyclopediaSearchQuery(searchTerm, bareFlags = false) {
       stats.push({ stat: CYCLOPEDIA_STAT_FILTERS[key.toLowerCase()], op: b != null ? '-' : (op || '='), a: Number(a), b: Number(b) });
       return lead;
     })
-    .replace(/(^|\s)(role|tag|is|has):(?:"([^"]+)"|(\S+))/gi, (_, lead, key, quoted, bare) => {
+    .replace(/(^|\s)(role|tag|is|has|not):(?:"([^"]+)"|(\S+))/gi, (_, lead, key, quoted, bare) => {
       const value = (quoted ?? bare).trim().toLowerCase();
       const k = key.toLowerCase();
       if (k === 'role') roles.push(value);
       else if (k === 'tag') tags.push(value);
+      else if (k === 'not') notFlags.push(bareFlags?.[value] ?? value);
       else flags.push(k === 'has' ? `has:${value}` : value);
       return lead;
     })
-    .replace(new RegExp(String.raw`(^|\s)(?:role|tag|is|has|${statKeys}):(?=\s|$)`, 'gi'), '$1')
+    .replace(new RegExp(String.raw`(^|\s)(?:role|tag|is|has|not|${statKeys}):(?=\s|$)`, 'gi'), '$1')
     .trim()
     .toLowerCase();
-  if (!bareFlags) return { text, roles, tags, flags, stats };
-  // Creature lists: a lone keyword word is a flag too, so `event` works like `is:event`.
+  if (!bareFlags) return { text, roles, tags, flags, notFlags, stats };
+  // A lone keyword word is a flag too, so `event` works like `is:event`.
   const rest = text.split(/\s+/).filter((word) => {
-    const flag = CYCLOPEDIA_BARE_FLAGS[word];
+    const flag = bareFlags[word];
     if (flag) flags.push(flag);
     return word && !flag;
   });
-  return { text: rest.join(' '), roles, tags, flags, stats };
+  return { text: rest.join(' '), roles, tags, flags, notFlags, stats };
 }
 
 /** Whether `value` satisfies one parsed stat filter (`=` also accepts the exact number only). */
@@ -4736,8 +4868,8 @@ function buildRoleSearchQuery(role) {
  * runs when it differs from the box's last applied key, so typing only toggles row visibility.
  * Omit it to force the pass on every call.
  */
-function filterCyclopediaListRows(box, rowMeta, searchTerm, { comparator = null, formatLabel = null, orderKey = null, bareFlags = false } = {}) {
-  const { text: q, roles: wantedRoles, tags: wantedTags, flags: wantedFlags, stats: wantedStats } = parseCyclopediaSearchQuery(searchTerm, bareFlags);
+function filterCyclopediaListRows(box, rowMeta, searchTerm, { comparator = null, formatLabel = null, orderKey = null, bareFlags = null } = {}) {
+  const { text: q, roles: wantedRoles, tags: wantedTags, flags: wantedFlags, notFlags: unwantedFlags, stats: wantedStats } = parseCyclopediaSearchQuery(searchTerm, bareFlags);
   if (orderKey == null || box._cyclopediaOrderKey !== orderKey) {
     const listGrid = box.querySelector('div[data-nopadding="true"]');
     if (listGrid) {
@@ -4753,10 +4885,21 @@ function filterCyclopediaListRows(box, rowMeta, searchTerm, { comparator = null,
   }
   let visibleCount = 0;
   rowMeta.forEach((meta) => {
+    let collection; // read once per row and search, only when a collection flag is asked for
+    // true / false, or null when the row cannot tell (no such data), which matches neither way.
+    const hasFlag = (flag) => {
+      let set = meta.flags;
+      if (CYCLOPEDIA_COLLECTION_FLAGS.has(flag)) {
+        if (collection === undefined) collection = meta.collection ?? null;
+        set = collection;
+      }
+      return set ? set.has(flag) : null;
+    };
     const isVisible = (!q || meta.labelNorm.includes(q))
       && wantedRoles.every((role) => meta.roles?.includes(role))
       && wantedTags.every((tag) => meta.tags?.includes(tag))
-      && wantedFlags.every((flag) => meta.flags?.has(flag))
+      && wantedFlags.every((flag) => hasFlag(flag) === true)
+      && unwantedFlags.every((flag) => hasFlag(flag) === false)
       && wantedStats.every((filter) => matchesCyclopediaStatFilter(meta.stats?.[filter.stat], filter));
     const display = isVisible ? '' : 'none';
     if (meta.row.style.display !== display) meta.row.style.display = display;
@@ -6001,6 +6144,49 @@ function getCreatureSearchFacts(creatureName) {
     range: combat?.range ?? undefined
   };
   return { tags, flags, stats };
+}
+
+/** Collection flags of one creature row, or null while the player data is not available. */
+function getCreatureCollectionFlags(creatureName) {
+  const monsters = globalThis.state?.player?.getSnapshot?.()?.context?.monsters;
+  const db = window.creatureDatabase;
+  if (!Array.isArray(monsters) || typeof db?.filterMonstersForCreatureDisplay !== 'function') return null;
+  // Sealed copies (tier 5) do not count.
+  const copies = db.filterMonstersForCreatureDisplay(creatureName, monsters).filter((m) => Number(m.tier) !== 5);
+  const isPerfect = (m) => Number(m.tier) === 6
+    && OWNED_STAT_KEYS.every((key) => Number(m[key]) === OWNED_GENE_MAX)
+    && getLevelFromExp(m.exp) >= CYCLOPEDIA_CAPS.maxLevel;
+  const flags = new Set();
+  copies.forEach((m) => {
+    const kind = m.shiny === true ? 'shiny' : 'normal';
+    flags.add('owned').add(kind);
+    if (Number(m.tier) === 6) flags.add('awakened');
+    if (isPerfect(m)) flags.add(`perfect-${kind}`);
+  });
+  return flags;
+}
+
+/** Search flags of one equipment row that do not depend on the collection. */
+function getEquipmentSearchFlags(equipmentName) {
+  const flags = new Set();
+  if (window.equipmentDatabase?.isEventEquipmentName?.(equipmentName)) flags.add('event');
+  return flags;
+}
+
+/** Collection flags of one equipment row, or null while the player data is not available. */
+function getEquipmentCollectionFlags(equipmentName) {
+  const equips = globalThis.state?.player?.getSnapshot?.()?.context?.equips;
+  const key = equipmentName.trim().toLowerCase();
+  const gameId = window.BestiaryModAPI?.utility?.maps?.equipmentNamesToGameIds?.get(key)
+    ?? window.equipmentDatabase?.getEquipmentNameMap?.()?.get(key)?.gameId;
+  if (!Array.isArray(equips) || gameId == null) return null;
+  const copies = equips.filter((e) => e.gameId === gameId);
+  const flags = new Set();
+  if (copies.length) flags.add('owned');
+  const maxed = ['hp', 'ad', 'ap'].filter((stat) => copies.some((e) => e.stat === stat && e.tier >= 5));
+  maxed.forEach((stat) => flags.add(`t5${stat}`));
+  if (maxed.length === 3) flags.add('complete');
+  return flags;
 }
 
 // =======================
@@ -19298,16 +19484,19 @@ function createBestiaryTabPage(selectedCreature, selectedEquipment, selectedInve
     return box;
   };
 
-  const { searchContainer: bestiarySearchContainer, searchInput: bestiarySearchInput, filterBtn: bestiaryFilterBtn } = createCyclopediaSearchBar('Search...');
+  const { searchContainer: bestiarySearchContainer, searchInput: bestiarySearchInput, getSortMode: getBestiarySortMode } = createCyclopediaSearchBar('Search...', CYCLOPEDIA_CREATURE_CHIPS, CYCLOPEDIA_BARE_FLAGS, [
+    { mode: 'name', label: 'Name' }, { mode: 'tier', label: 'Tier' }, { mode: 'usage', label: 'Usage' }
+  ]);
   bestiarySearchInput.title = [
     'Filters (combine freely):',
     'event  unobtainable  ranged  melee  summon',
+    'owned  normal  shiny  perfect-normal  perfect-shiny  awakened',
+    'not:shiny  (without)',
     'role:mage  tag:poison  is:event  is:unobtainable',
     'is:ranged  is:melee  has:summon',
     'hp:>500  ad:30-60  mr:<=20  range:>=4',
     '(also ap, armor, speed; base stats)'
   ].join(String.fromCharCode(10));
-  let bestiaryFilterMode = 'name';
   const creaturesBox = createCreatureBox('Creatures', getCyclopediaBestiaryCreatures());
   const unobtainableBox = createCreatureBox('Unobtainable', GAME_DATA.UNOBTAINABLE_CREATURES);
 
@@ -19396,6 +19585,7 @@ function createBestiaryTabPage(selectedCreature, selectedEquipment, selectedInve
         get roles() { return getRoles(); },
         get tags() { return getFacts().tags; },
         get flags() { return getFacts().flags; },
+        get collection() { return getCreatureCollectionFlags(labelClean); },
         get stats() { return getFacts().stats; },
         get usageCount() { return getUsageCount(); },
         get awakenKey() { return getAwakenKey(); },
@@ -19447,7 +19637,7 @@ function createBestiaryTabPage(selectedCreature, selectedEquipment, selectedInve
   function filterBoxItems(box, searchTerm, mode = 'name', cachedRowMeta = null) {
     return filterCyclopediaListRows(box, cachedRowMeta || buildBestiaryRowMeta(box), searchTerm, {
       orderKey: mode,
-      bareFlags: true,
+      bareFlags: CYCLOPEDIA_BARE_FLAGS,
       comparator: mode === 'usage' ? compareBestiaryUsage : mode === 'tier' ? compareBestiaryTier : null,
       formatLabel: (meta) => {
         if (mode === 'usage') {
@@ -19469,7 +19659,7 @@ function createBestiaryTabPage(selectedCreature, selectedEquipment, selectedInve
     const searchTerm = (bestiarySearchInput.value || '').trim();
     if (!creaturesRowMetaCache) creaturesRowMetaCache = buildBestiaryRowMeta(creaturesBox);
     if (!unobtainableRowMetaCache) unobtainableRowMetaCache = buildBestiaryRowMeta(unobtainableBox);
-    const creaturesVisible = filterBoxItems(creaturesBox, searchTerm, bestiaryFilterMode, creaturesRowMetaCache);
+    const creaturesVisible = filterBoxItems(creaturesBox, searchTerm, getBestiarySortMode(), creaturesRowMetaCache);
     const unobtainableVisible = filterBoxItems(unobtainableBox, searchTerm, 'name', unobtainableRowMetaCache);
     const showNoResults = !!searchTerm;
     noResultsCreatures.style.display = showNoResults && creaturesVisible === 0 ? 'block' : 'none';
@@ -19483,11 +19673,6 @@ function createBestiaryTabPage(selectedCreature, selectedEquipment, selectedInve
     bestiarySearchInput.dispatchEvent(new Event('input', { bubbles: true }));
     return true;
   };
-  bestiaryFilterBtn.addEventListener('click', () => {
-    bestiaryFilterMode = bestiaryFilterMode === 'name' ? 'tier' : bestiaryFilterMode === 'tier' ? 'usage' : 'name';
-    bestiaryFilterBtn.textContent = bestiaryFilterMode === 'name' ? 'Name' : bestiaryFilterMode === 'tier' ? 'Tier' : 'Usage';
-    applyBestiarySearch();
-  });
 
   const creaturesTitle = creaturesBox.querySelector('h2.widget-top');
   if (creaturesTitle && creaturesTitle.parentNode) {
@@ -20558,8 +20743,10 @@ function createEquipmentTabPage(selectedCreature, selectedEquipment, selectedInv
     });
   };
 
-  const { searchContainer: equipmentSearchContainer, searchInput: equipmentSearchInput, filterBtn: equipmentFilterBtn } = createCyclopediaSearchBar('Search equipment...');
-  let equipmentFilterMode = 'name';
+  const { searchContainer: equipmentSearchContainer, searchInput: equipmentSearchInput, getSortMode: getEquipmentSortMode } = createCyclopediaSearchBar('Search equipment...', CYCLOPEDIA_EQUIPMENT_CHIPS, CYCLOPEDIA_EQUIPMENT_FLAGS, [
+    { mode: 'name', label: 'Name' }, { mode: 'usage', label: 'Usage' }
+  ]);
+  equipmentSearchInput.title = ['Filters (combine freely):', 'event  owned  complete  t5hp  t5ad  t5ap', 'not:owned  (without)'].join(String.fromCharCode(10));
 
   const getEquipmentUsageSnapshot = () => {
     const byGameId = new Map();
@@ -20624,7 +20811,12 @@ function createEquipmentTabPage(selectedCreature, selectedEquipment, selectedInv
   function buildEquipmentRowMeta(box) {
     return buildCyclopediaListRowMeta(box, (label) => {
       const getUsageCount = memoizeLazy(() => getEquipmentUsageCountByName(label, getEquipmentUsage()));
-      return { get usageCount() { return getUsageCount(); } };
+      const getFlags = memoizeLazy(() => getEquipmentSearchFlags(label));
+      return {
+        get usageCount() { return getUsageCount(); },
+        get flags() { return getFlags(); },
+        get collection() { return getEquipmentCollectionFlags(label); }
+      };
     });
   }
 
@@ -20636,6 +20828,7 @@ function createEquipmentTabPage(selectedCreature, selectedEquipment, selectedInv
     }
     return filterCyclopediaListRows(equipmentBox, equipmentRowMetaCache, searchTerm, {
       orderKey: mode,
+      bareFlags: CYCLOPEDIA_EQUIPMENT_FLAGS,
       comparator: mode === 'usage'
         ? (a, b) => (b.usageCount - a.usageCount) || a.labelNorm.localeCompare(b.labelNorm)
         : null,
@@ -20653,15 +20846,10 @@ function createEquipmentTabPage(selectedCreature, selectedEquipment, selectedInv
 
   const applyEquipmentSearch = debounce(() => {
     const searchTerm = (equipmentSearchInput.value || '').trim();
-    const visibleCount = filterEquipmentBoxItems(searchTerm, equipmentFilterMode);
+    const visibleCount = filterEquipmentBoxItems(searchTerm, getEquipmentSortMode());
     noResultsEquipment.style.display = searchTerm && visibleCount === 0 ? 'block' : 'none';
   }, 150);
   equipmentSearchInput.addEventListener('input', applyEquipmentSearch);
-  equipmentFilterBtn.addEventListener('click', () => {
-    equipmentFilterMode = equipmentFilterMode === 'name' ? 'usage' : 'name';
-    equipmentFilterBtn.textContent = equipmentFilterMode === 'name' ? 'Name' : 'Usage';
-    applyEquipmentSearch();
-  });
 
   leftCol.appendChild(equipmentBox);
 

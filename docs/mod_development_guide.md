@@ -111,9 +111,9 @@ const superModNames = [
 ];
 ```
 
-**4. `content/local_mods.js`** — Add the filename to the matching `FALLBACK_*` array (search for *Keep in sync with content/mod-registry.js*). This list is used when the page cannot dynamically import `mod-registry.js` (for example Orion iOS).
+**4. `content/local-mods.js`** — Add the filename to the matching `FALLBACK_*` array (search for *Keep in sync with content/mod-registry.js*). This list is used when the page cannot dynamically import `mod-registry.js` (for example Orion iOS).
 
-**Then run** `node tools/check-mod-lists.mjs` (also part of `node tools/check-all.mjs`). It fails when the popup, `background.js` (including `HARDCODED_MOD_COUNTS`) or the `local_mods.js` fallbacks disagree with `mod-registry.js`, or when a listed mod has no file.
+**Then run** `node tools/check-mod-lists.mjs` (also part of `node tools/check-all.mjs`). It fails when the popup, `background.js` (including `HARDCODED_MOD_COUNTS`) or the `local-mods.js` fallbacks disagree with `mod-registry.js`, or when a listed mod has no file.
 
 **After updating:** reload the extension in your browser (`chrome://extensions` → Reload). The popup reads bundled mods from extension storage; `background.js` merges any new registry entries into storage when you open the popup. If a mod still does not appear, refresh a Bestiary Arena tab once so the content script re-registers mods, or use the popup’s **Reset local mods** button and refresh the game tab.
 
@@ -121,7 +121,7 @@ const superModNames = [
 
 - `mod-registry.js` is the source of truth for content scripts (ES modules).
 - The popup keeps its own copy of the filenames for categorization (it does not import the registry; an import could not be verified on every supported browser, Orion/iOS included). Descriptions come from the locale files.
-- `local_mods.js` embeds the same lists for environments where dynamic import fails.
+- `local-mods.js` embeds the same lists for environments where dynamic import fails.
 - On Chrome, the background service worker cannot use `import()` for the registry in all code paths, so category totals use the hardcoded `modCounts` object until that limitation changes.
 
 ### Logging & Error Log (popup Debug)
@@ -883,19 +883,19 @@ For more details on the game state API, see the [Game State API Documentation](g
 
 ### Community event competitions
 
-`content/event-competition.js` exposes `window.EventCompetition`, a config-driven framework for Firebase-backed floor/rank leaderboards (join flow, modal UI, auto-submit on victory, raid timer). Better Highscores registers Tibia Ball League via a thin adapter; future timed events can call `EventCompetition.register(config, deps)` with their own `roomId`, Firebase paths, floor ranges, and `i18nPrefix`. The script is injected on demand (see **On-demand scripts** above), only when a mod that depends on it runs, so a mod that needs it must be listed in `MOD_SCRIPT_DEPENDENCIES` in `local_mods.js`. The framework also contains a one-shot nudge toast for a known live event when no adapter is registered (e.g. Better Highscores disabled). Because the script is no longer loaded for players who do not use Better Highscores, that nudge only runs for the next event if the loader is changed to inject `event-competition.js` while such an event is live.
+`content/event-competition.js` exposes `window.EventCompetition`, a config-driven framework for Firebase-backed floor/rank leaderboards (join flow, modal UI, auto-submit on victory, raid timer). Better Highscores registers Tibia Ball League via a thin adapter; future timed events can call `EventCompetition.register(config, deps)` with their own `roomId`, Firebase paths, floor ranges, and `i18nPrefix`. The script is injected on demand (see **On-demand scripts** above), only when a mod that depends on it runs, so a mod that needs it must be listed in `MOD_SCRIPT_DEPENDENCIES` in `local-mods.js`. The framework also contains a one-shot nudge toast for a known live event when no adapter is registered (e.g. Better Highscores disabled). Because the script is no longer loaded for players who do not use Better Highscores, that nudge only runs for the next event if the loader is changed to inject `event-competition.js` while such an event is live.
 
 ### Game images: use `window.BAAssets`
 
 The game's frames and backgrounds live at `/_next/static/media/<name>.<hash>.png`, and the hash changes when the game
-rebuilds the image, so a hardcoded URL silently 404s after an update. `content/ba-assets.js` exposes
+rebuilds the image, so a hardcoded URL silently 404s after an update. `content/ba-shared.js` exposes
 `window.BAAssets.url('1-frame')` (and `.css('1-frame')` for a `url("…")` value). It reads the live URL from the game's
 stylesheets and falls back to the last known hash. Do not paste `_next/static/media/...` URLs into a mod; if the image
-is missing from `FALLBACK` in `ba-assets.js`, add it. `node tools/check-media-hashes.mjs` fails on any stale hash.
+is missing from `FALLBACK` in `ba-shared.js`, add it. `node tools/check-media-hashes.mjs` fails on any stale hash.
 
 ### Toasts: use `window.BAToast`
 
-`content/ba-toast.js` exposes `window.BAToast`, the one shared toast stack (game-native `widget-top`/`widget-bottom` markup, so every mod looks the same and toasts from different mods stack instead of overlapping). It is injected before `local_mods.js`. Do not build your own `*-toast-container`.
+`content/ba-shared.js` exposes `window.BAToast`, the one shared toast stack (game-native `widget-top`/`widget-bottom` markup, so every mod looks the same and toasts from different mods stack instead of overlapping). It is injected before `local-mods.js`. Do not build your own `*-toast-container`.
 
 ```js
 window.BAToast?.show({ mod: 'Raid Hunter', message: 'Starting raid', type: 'info', icon: 'https://bestiaryarena.com/assets/icons/raid.png' });
@@ -1305,17 +1305,15 @@ User scripts stored in localStorage are automatically integrated:
 
 0. **`content/ba-logger.js`** — first script in the page (MAIN) world; installs the `console` proxy (see [Logging & Error Log](#logging--error-log-popup-debug))
 1. **`content/extension-url.js`** — encodes extension URLs and maps logical mod paths (e.g. `Official Mods/`) to on-disk paths
-2. **`content/ba-assets.js`** — `window.BAAssets.url('1-frame')`, the game's hashed media URLs (read from its stylesheets)
-3. **`content/ba-wait.js`** — `window.BAWait.gameState(cb, options)`, the retry wait the databases build their caches from
-4. **`content/platform.js`** — sets `window.BestiaryPlatform` (desktop strict vs mobile relaxed loader)
-5. **`content/client.js`** — `BestiaryModAPI`, UI components
-6. **`content/mod-coordination.mjs`** — loaded as `text/javascript` (IIFE, not `type="module"`)
-7. **`content/ba-toast.js`** — the shared toast stack (`window.BAToast`)
-8. **`content/local_mods.js`** — mod discovery, batch execution, completion signal
+2. **`content/ba-shared.js`** — shared helpers: `window.BAAssets.url('1-frame')` (the game's hashed media URLs), `window.BAWait.gameState(cb, options)` (the retry wait the databases build their caches from), `window.BAToast` (the shared toast stack) and `window.BAQuantityInput`
+3. **`content/platform.js`** — sets `window.BestiaryPlatform` (desktop strict vs mobile relaxed loader)
+4. **`content/client.js`** — `BestiaryModAPI`, UI components
+5. **`content/mod-coordination.mjs`** — loaded as `text/javascript` (IIFE, not `type="module"`)
+6. **`content/local-mods.js`** — mod discovery, batch execution, completion signal
 
-`utility_injector.js` (at `document_idle`) loads `ba-sandbox-utils.mjs` (same IIFE / non-module rule).
+`utility-injector.js` (at `document_idle`) loads `ba-sandbox-utils.mjs` (same IIFE / non-module rule).
 
-**On-demand scripts.** `custom-battles.js` (327 KB, `window.CustomBattles`) and `event-competition.js` (213 KB, `window.EventCompetition`) are not part of the startup chain. `local_mods.js` injects one right before it runs a mod that needs it (`MOD_SCRIPT_DEPENDENCIES`: Quests, Challenges and Map Editor need `custom-battles.js`; Better Highscores needs `event-competition.js`). It asks `injector.js` with the `injectContentScript` message, waits for the global, then runs the mod, also when the mod is enabled later from the popup. `injector.js` only accepts the files in `ON_DEMAND_CONTENT_SCRIPTS`. To make a new mod depend on one of them, add it to `MOD_SCRIPT_DEPENDENCIES`; to add a new on-demand script, add it to both lists (and to `web_accessible_resources` in both manifests).
+**On-demand scripts.** `custom-battles.js` (327 KB, `window.CustomBattles`) and `event-competition.js` (213 KB, `window.EventCompetition`) are not part of the startup chain. `local-mods.js` injects one right before it runs a mod that needs it (`MOD_SCRIPT_DEPENDENCIES`: Quests, Challenges and Map Editor need `custom-battles.js`; Better Highscores needs `event-competition.js`). It asks `injector.js` with the `injectContentScript` message, waits for the global, then runs the mod, also when the mod is enabled later from the popup. `injector.js` only accepts the files in `ON_DEMAND_CONTENT_SCRIPTS`. To make a new mod depend on one of them, add it to `MOD_SCRIPT_DEPENDENCIES`; to add a new on-demand script, add it to both lists (and to `web_accessible_resources` in both manifests).
 
 #### Mod execution
 
@@ -1345,7 +1343,7 @@ On **mobile WebExtensions** (e.g. Orion iOS), `content/platform.js` enables a **
 
 Background delivery uses a once-per-page-load guard (`registeredTabs`). That guard must reset on same-tab reload / `contentScriptReady` (see [Orion iOS Compatibility — Page refresh / re-delivery](mobile.md#page-refresh--re-delivery-critical)); otherwise a failed load can stick until the browser process restarts.
 
-See also [`content/platform.js`](../content/platform.js) and [`content/local_mods.js`](../content/local_mods.js). For Orion/WebKit platform constraints and extension URL encoding, see [Orion iOS Compatibility](mobile.md).
+See also [`content/platform.js`](../content/platform.js) and [`content/local-mods.js`](../content/local-mods.js). For Orion/WebKit platform constraints and extension URL encoding, see [Orion iOS Compatibility](mobile.md).
 
 ### Debugger overlay (Mod Settings → Advanced → Debug)
 

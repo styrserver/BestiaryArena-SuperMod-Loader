@@ -10641,8 +10641,9 @@ function createAddPlayerHandler(searchInput, addButton, originalPlaceholder) {
     addButton.textContent = t('mods.vipList.addingButton');
     
     try {
-      const profileData = await fetchPlayerData(playerName);
-      
+      const exactName = await window.BAPlayerName.resolve(playerName);
+      const profileData = await fetchPlayerData(exactName);
+
       if (profileData === null) {
         showPlaceholderMessage(
           searchInput,
@@ -10657,10 +10658,10 @@ function createAddPlayerHandler(searchInput, addButton, originalPlaceholder) {
       }
       
       // Extract player info using helper function
-      const playerInfo = extractPlayerInfoFromProfile(profileData, playerName);
-      
+      const playerInfo = extractPlayerInfoFromProfile(profileData, exactName);
+
       // Add to VIP list
-      addToVIPList(playerName, playerInfo);
+      addToVIPList(exactName, playerInfo);
       
       // Refresh display
       await refreshVIPListDisplay();

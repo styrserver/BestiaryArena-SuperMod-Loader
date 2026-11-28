@@ -485,7 +485,7 @@ function injectScript(file) {
   return script; // Return the script element
 }
 
-// Scripts the page may request after startup (see local_mods.js ensureModScripts). Only these can be
+// Scripts the page may request after startup (see local-mods.js ensureModScripts). Only these can be
 // injected on demand; anything else is refused.
 const ON_DEMAND_CONTENT_SCRIPTS = new Set([
   'content/custom-battles.js',
@@ -572,7 +572,7 @@ clientScript.onload = function() {
   };
   
   function loadModCoordination() {
-    // Load mod coordination system BEFORE local_mods.js
+    // Load mod coordination system BEFORE local-mods.js
     console.log('[Injector] Loading mod-coordination.mjs');
     const modCoordinationScript = injectScript('content/mod-coordination.mjs');
     modCoordinationScript.onload = function() {
@@ -585,39 +585,15 @@ clientScript.onload = function() {
         if (window.ModCoordination) {
           console.log('[Injector] ModCoordination verified and ready');
           clearInterval(checkModCoordination);
-          // Load the shared toast helper before local_mods.js. custom-battles.js and event-competition.js
-          // are no longer part of the startup chain: local_mods.js asks for them (injectContentScript)
-          // right before it runs a mod that needs them.
-          injectToastHelper();
+          // custom-battles.js and event-competition.js are no longer part of the startup chain: local-mods.js asks for
+          // them (injectContentScript) right before it runs a mod that needs them.
+          injectLocalMods();
         } else if (retries >= 10) {
           clearInterval(checkModCoordination);
           // Continue anyway - the script may have loaded in a different context
-          injectToastHelper();
+          injectLocalMods();
         }
       }, 50);
-      
-      function injectToastHelper() {
-        console.log('[Injector] Loading ba-toast.js');
-        const toastScript = injectScript('content/ba-toast.js');
-        toastScript.onload = function() {
-          console.log('[Injector] ba-toast.js loaded - mods will be able to access window.BAToast');
-          injectQuantityInputHelper();
-        };
-        toastScript.onerror = function(error) {
-          console.error('[Injector] ✗ ERROR loading ba-toast.js:', error);
-          injectQuantityInputHelper();
-        };
-      }
-
-      // Shared quantity box (window.BAQuantityInput) used by Better Yasir, Better Hy'genie and Better Tasker.
-      function injectQuantityInputHelper() {
-        const script = injectScript('content/ba-quantity-input.js');
-        script.onload = injectLocalMods;
-        script.onerror = function(error) {
-          console.error('[Injector] ✗ ERROR loading ba-quantity-input.js:', error);
-          injectLocalMods();
-        };
-      }
     };
     modCoordinationScript.onerror = function(error) {
       const extUrl = getExtensionUrlApi();
@@ -628,8 +604,8 @@ clientScript.onload = function() {
     };
     
     function injectLocalMods() {
-      // Then inject local_mods.js to set up local mods
-      const localModsScript = injectScript('content/local_mods.js');
+      // Then inject local-mods.js to set up local mods
+      const localModsScript = injectScript('content/local-mods.js');
       localModsScript.onload = function() {
         localModsInjected = true;
         console.log('Local mods script loaded');
@@ -651,21 +627,11 @@ clientScript.onload = function() {
 }
 
 function beginPageInjection() {
-  // Shared game-media URL resolver (window.BAAssets): before client.js and every mod that styles with game images.
-  const assetsScript = injectScript('content/ba-assets.js');
-  assetsScript.onload = injectWaitScript;
-  assetsScript.onerror = function(error) {
-    console.warn('[Injector] ba-assets.js failed to load; game images fall back to nothing:', error);
-    injectWaitScript();
-  };
-}
-
-// Shared game-state wait (window.BAWait): the databases build their caches from it.
-function injectWaitScript() {
-  const waitScript = injectScript('content/ba-wait.js');
-  waitScript.onload = injectPlatformScript;
-  waitScript.onerror = function(error) {
-    console.warn('[Injector] ba-wait.js failed to load; databases will not build:', error);
+  // Shared helpers (BAAssets, BAWait, BAToast, BAQuantityInput): before client.js, the databases and every mod.
+  const sharedScript = injectScript('content/ba-shared.js');
+  sharedScript.onload = injectPlatformScript;
+  sharedScript.onerror = function(error) {
+    console.warn('[Injector] ba-shared.js failed to load; databases, toasts and game images will not work:', error);
     injectPlatformScript();
   };
 }
@@ -767,7 +733,7 @@ window.addEventListener('message', function(event) {
           return;
         }
 
-        // local_mods.js listens for message.action, not id/response pairs
+        // local-mods.js listens for message.action, not id/response pairs
         window.postMessage({
           from: 'BESTIARY_EXTENSION',
           message: {

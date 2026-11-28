@@ -44,7 +44,7 @@ window.browserAPI = window.browserAPI || (typeof browser !== 'undefined' ? brows
   }
 
   // custom-battles.js and event-competition.js are injected on demand by injector.js
-  // (see local_mods.js MOD_SCRIPT_DEPENDENCIES), not here, to avoid double-loading.
+  // (see local-mods.js MOD_SCRIPT_DEPENDENCIES), not here, to avoid double-loading.
   
   // Inject as soon as possible but wait for the document to be ready
   if (document.readyState === 'loading') {

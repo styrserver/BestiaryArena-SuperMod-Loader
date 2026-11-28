@@ -116,7 +116,7 @@ const hiddenMods = [
   'creature-lua-export.js',
   'maps-lua-export.js',
   'regions-lua-export.js',
-  'playereq-database.js',
+  'player-equipment-database.js',
   'firebase-admins.js',
   'Mod Settings.js',
   'RunTracker.js',
@@ -2066,12 +2066,17 @@ document.addEventListener('DOMContentLoaded', async () => {
           const changeType = change.type || 'changed';
           const changeTypeLabel = changeType.charAt(0).toUpperCase() + changeType.slice(1);
           const changeText = escapePatchHtml(change.text || '');
+          // Optional contributor credit; only game links are turned into anchors.
+          const credit = change.credit?.url?.startsWith('https://bestiaryarena.com/') ? change.credit : null;
+          const creditHtml = credit
+            ? ` Thanks to <a href="${escapePatchHtml(credit.url)}" target="_blank" rel="noopener" style="color: inherit; text-decoration: underline;">${escapePatchHtml(credit.name)}</a>.`
+            : '';
           typeSections.push(`
             <div class="patch-note-type-block ${escapePatchHtml(changeType)}">
               <div class="patch-note-type-separator">
                 <span class="patch-note-type-label">${escapePatchHtml(changeTypeLabel)}</span>
               </div>
-              <div class="patch-note-type-text">${changeText}</div>
+              <div class="patch-note-type-text">${changeText}${creditHtml}</div>
             </div>
           `);
         }

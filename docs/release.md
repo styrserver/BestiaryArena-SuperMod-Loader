@@ -90,14 +90,14 @@ repo, because `release.mjs` stages everything with `git add -A` and the repo is 
 `check-all` proves the files parse and the data matches the game, not that the mods work. Before `release.mjs` pushes, load the
 extension unpacked and spend ~15 minutes on the shared and risky parts:
 
-- **Toasts** (`content/ba-toast.js`): a start toast (name first, sharp, coloured by type), two mods at once (they stack), pt-BR (translated
+- **Toasts** (`content/ba-shared.js`): a start toast (name first, sharp, coloured by type), two mods at once (they stack), pt-BR (translated
   mod name), and every toast with buttons: Challenges queue (Join / Accept / Cancel), Map Editor workshop Leave, Battle Helper Restore and
   Publish, the Quests battle-status line, Welcome loading and loaded toasts.
 - **Hunt Analyzer**: win a few battles (grids and rate badges update, order stays right), map and floor dropdowns (Esc closes), Clear, Copy Log,
   tooltips on live rows do not flicker, empty "No drops yet" state.
 - **Bestiary Automator**: switch Auto-refill off mid-refill and disable the mod mid-refill (no more potions used); end a Raid Hunter raid and toggle
   Better Boosted Maps off (your own Auto-refill / Faster autoplay come back).
-- **On-demand scripts** (`content/local_mods.js` / `injector.js`): on a fresh page load with only default mods, confirm the console shows no
+- **On-demand scripts** (`content/local-mods.js` / `injector.js`): on a fresh page load with only default mods, confirm the console shows no
   `custom-battles.js` or `event-competition.js` injection. Then enable Quests, Challenges and Map Editor (separately, from the popup and by
   reload) and Better Highscores: each must work (Quests NPC and battle toasts, Challenges modal, Map Editor panel, Better Highscores leaderboards).
   Do it in Chrome and Firefox.

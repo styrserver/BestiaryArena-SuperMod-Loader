@@ -1,9 +1,149 @@
 /**
- * ba-toast.js — Bestiary Arena SuperMod Loader
+ * ba-shared.js — Bestiary Arena SuperMod Loader
  *
+ * Small page (MAIN) world helpers shared by databases and mods: window.BAAssets, window.BAWait, window.BAToast and
+ * window.BAQuantityInput, in that order (the later ones use BAAssets at load). Injected first by injector.js.
+ */
+
+/**
+ * `window.BAAssets.url('1-frame')` returns the game's own URL for one of its hashed media images
+ * (`/_next/static/media/<name>.<hash>.png`). The hash changes whenever the game rebuilds that image, so a
+ * hardcoded URL silently 404s after an update. The live URL is read from the game's stylesheets (the frames and
+ * backgrounds are all `url(...)` values there); FALLBACK is only the last known hash, used when the stylesheet
+ * has no rule for the image. tools/check-media-hashes.mjs keeps FALLBACK in step with the live game.
+ *
+ *   BAAssets.url('background-dark')   -> 'https://bestiaryarena.com/_next/static/media/background-dark.<hash>.png'
+ *   BAAssets.css('1-frame')           -> 'url("https://…/1-frame.<hash>.png")'
+ */
+(function () {
+  if (window.BAAssets) return;
+
+  // name -> `<name>.<hash>.<ext>`. Keep in step with the game: `node tools/check-media-hashes.mjs`.
+  var FALLBACK = {
+    '1-frame': '1-frame.f1ab7b00.png',
+    '1-frame-pressed': '1-frame-pressed.e3fabbc5.png',
+    '1-frame-blue': '1-frame-blue.cf300a6a.png',
+    '1-frame-green': '1-frame-green.fe32d59c.png',
+    '1-frame-red': '1-frame-red.946aade9.png',
+    '3-frame': '3-frame.87c349c1.png',
+    '4-frame': '4-frame.a58d0c39.png',
+    '4-frame-top': '4-frame-top.b7a55115.png',
+    'background-blue': 'background-blue.7259c4ed.png',
+    'background-dark': 'background-dark.95edca67.png',
+    'background-darker': 'background-darker.2679c837.png',
+    'background-green': 'background-green.be515334.png',
+    'background-red': 'background-red.21d3f4bd.png',
+    'background-regular': 'background-regular.b0337118.png',
+    'scrollbar-handle-vertical': 'scrollbar-handle-vertical.962972d4.png'
+  };
+
+  var BASE = 'https://bestiaryarena.com/_next/static/media/';
+  var MEDIA_RE = /\/_next\/static\/media\/([a-z0-9-]+)\.[0-9a-f]{8}\.(png|webp)/g;
+  var live = {};
+  var scannedSheets = 0;
+
+  /** Reads every `/_next/static/media/<name>.<hash>.<ext>` url the game's stylesheets mention. */
+  function scan() {
+    var sheets;
+    try { sheets = document.styleSheets; } catch (e) { return; }
+    if (!sheets || sheets.length === scannedSheets) return;
+    scannedSheets = sheets.length;
+    for (var i = 0; i < sheets.length; i++) {
+      var rules;
+      try { rules = sheets[i].cssRules; } catch (e) { continue; } // cross-origin sheet
+      if (!rules) continue;
+      for (var j = 0; j < rules.length; j++) {
+        var text = rules[j].cssText;
+        if (!text || text.indexOf('/_next/static/media/') < 0) continue;
+        MEDIA_RE.lastIndex = 0;
+        var m;
+        while ((m = MEDIA_RE.exec(text))) live[m[1]] = m[0].slice('/_next/static/media/'.length);
+      }
+    }
+  }
+
+  function file(name) {
+    if (!live[name]) scan();
+    return live[name] || FALLBACK[name] || null;
+  }
+
+  window.BAAssets = {
+    /** Absolute URL of a game media image, or '' when the name is unknown. */
+    url: function (name) {
+      var f = file(name);
+      return f ? BASE + f : '';
+    },
+    /** `url("…")` ready for a CSS value. */
+    css: function (name) {
+      return 'url("' + window.BAAssets.url(name) + '")';
+    },
+    FALLBACK: FALLBACK
+  };
+})();
+
+/**
+ * `window.BAWait.gameState(callback, options)` runs `callback` once the game's state is ready. database/*.js read
+ * `globalThis.state.utils.*` at load time, and on a slow or cold page load those accessors can still be undefined;
+ * they build their cache from this callback (see the "Modules that read state.utils.* at load time must retry"
+ * note in .claude/CLAUDE.md for what to do with the result).
+ *
+ *   BAWait.gameState(build, { label: 'x-database.js', ready: (state) => !!state?.utils?.getEquipment })
+ *
+ * Options:
+ *   label        prefix of the console warnings
+ *   ready        (state) => boolean; default: player, board and utils.getEquipment exist
+ *   retries      fast checks, `interval` ms apart (default 20 x 250ms)
+ *   slowRetries  extra checks `slowInterval` ms apart after the fast ones (default 0; 60 x 2000ms for a cold load)
+ *   buildAnyway  true (default): after the last check run `callback` anyway; false: give up and leave the cache empty
+ *
+ */
+(function () {
+  if (window.BAWait) return;
+
+  function defaultReady(state) {
+    return !!(state && state.player && state.player.getSnapshot && state.board && state.board.getSnapshot &&
+      state.utils && state.utils.getEquipment);
+  }
+
+  function gameState(callback, options) {
+    var o = options || {};
+    var label = o.label ? '[' + o.label + '] ' : '[BAWait] ';
+    var ready = o.ready || defaultReady;
+    var fast = o.retries == null ? 20 : o.retries;
+    var slow = o.slowRetries || 0;
+    var interval = o.interval || 250;
+    var slowInterval = o.slowInterval || 2000;
+    var buildAnyway = o.buildAnyway !== false;
+    var attempt = 0;
+
+    function check() {
+      var ok = false;
+      try {
+        ok = !!ready(globalThis.state || window.state);
+      } catch (error) {
+        console.error(label + 'Error checking game state:', error);
+      }
+      if (ok) { callback(); return; }
+      if (attempt < fast + slow) {
+        var delay = attempt < fast ? interval : slowInterval;
+        attempt++;
+        setTimeout(check, delay);
+      } else if (buildAnyway) {
+        console.warn(label + 'Game state not ready after max retries, building anyway');
+        callback();
+      } else {
+        console.warn(label + 'Game state never became ready; left empty');
+      }
+    }
+    check();
+  }
+
+  window.BAWait = { gameState: gameState };
+})();
+
+/**
  * One shared toast stack for every mod, in the game's own toast markup
- * (widget-top / widget-bottom, pixel-font-16, same enter animation). Injected into the page
- * (MAIN) world by injector.js before local_mods.js, so mods can call it directly:
+ * (widget-top / widget-bottom, pixel-font-16, same enter animation). Mods can call it directly:
  *
  *   window.BAToast.show({ mod: 'Raid Hunter', message: 'Starting raid', type: 'info', icon: '…/raid.png' });
  *
@@ -258,4 +398,83 @@
   }
 
   window.BAToast = { __version: 3, show: show, clearMod: clearMod, removeAll: removeAll, isMuted: isMuted };
+})();
+
+/**
+ * Shared quantity box for shop-style mods (Better Yasir, Better Hy'genie, Better Tasker hunting-mark shop).
+ *
+ *   const input = window.BAQuantityInput.create({ max: 12, min: 1, value: 1, className: 'my-mod-qty' });
+ *
+ * - Text box styled like the game's dark input; `className` is only an extra hook for the mod's own selectors.
+ * - Typing is clamped to [min, max]; a non-number resets to min; leaving it empty resets to min on blur.
+ *   The live limit is the input's `max` attribute, so a mod can raise/lower it later (`input.max = n`).
+ * - `value: ''` starts empty (placeholder shows `min`).
+ * Mods should not restyle the box from scratch; set layout (width, margin) from their own class.
+ */
+(function () {
+  'use strict';
+  if (window.BAQuantityInput) return;
+
+  var STYLE_ID = 'ba-quantity-input-styles';
+  var BASE_CLASS = 'ba-quantity-input';
+
+  function ensureStyles() {
+    if (document.getElementById(STYLE_ID)) return;
+    var style = document.createElement('style');
+    style.id = STYLE_ID;
+    style.textContent = [
+      '.' + BASE_CLASS + ' {',
+      '  width: 100%; max-width: 50px; height: 20px;',
+      "  background-image: url('" + window.BAAssets.url('background-darker') + "');",
+      '  background-size: auto; background-repeat: repeat; background-position: center;',
+      "  border: none; color: white; font-family: 'Courier New', monospace; font-size: 12px;",
+      '  text-align: center; padding: 2px; margin-bottom: 1px; border-radius: 2px;',
+      '  display: block; position: relative;',
+      '}',
+      '.' + BASE_CLASS + '::before {',
+      "  content: ''; position: absolute; top: -2px; left: -2px; right: -2px; bottom: -2px;",
+      "  background-image: url('" + window.BAAssets.url('1-frame') + "');",
+      '  background-size: 100% 100%; background-repeat: no-repeat; background-position: center;',
+      '  z-index: -1; border-radius: 4px;',
+      '}',
+      '.' + BASE_CLASS + ':focus { outline: none; box-shadow: 0 0 0 2px rgba(106, 106, 106, 0.5); }',
+      '.' + BASE_CLASS + '::-webkit-inner-spin-button,',
+      '.' + BASE_CLASS + '::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }'
+    ].join('\n');
+    (document.head || document.documentElement).appendChild(style);
+  }
+
+  function create(options) {
+    var opts = options || {};
+    var min = Number.isFinite(opts.min) ? opts.min : 1;
+    var max = Number.isFinite(opts.max) ? opts.max : min;
+    var value = opts.value === undefined ? min : opts.value;
+
+    ensureStyles();
+    var input = document.createElement('input');
+    input.type = 'text';
+    input.className = BASE_CLASS + (opts.className ? ' ' + opts.className : '');
+    input.placeholder = String(min);
+    input.value = String(value);
+    input.max = String(max);
+
+    input.addEventListener('input', function () {
+      var text = this.value.trim();
+      if (text === '') return; // allow clearing while typing
+      var limit = parseInt(this.max, 10);
+      if (!Number.isFinite(limit)) limit = max;
+      var n = parseInt(text, 10);
+      if (isNaN(n) || n < min) {
+        this.value = String(min);
+      } else if (n > limit) {
+        this.value = String(limit);
+      }
+    });
+    input.addEventListener('blur', function () {
+      if (this.value.trim() === '') this.value = String(min);
+    });
+    return input;
+  }
+
+  window.BAQuantityInput = { create: create };
 })();

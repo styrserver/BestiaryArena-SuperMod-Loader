@@ -1715,7 +1715,7 @@ Functions: `getAllEquipment()` (raw uncached scan), `getEquipmentNameMap()` (cac
 
 ### `window.playerEquipmentDatabase`
 
-Source: `database/playereq-database.js`.
+Source: `database/player-equipment-database.js`.
 
 - `EQUIPMENT_BY_SLOT` — equipment grouped by slot. Placeholder has the slot keys with empty arrays.
   Reuses `equipmentDatabase.getAllEquipment`. Read by `Guilds.js`.

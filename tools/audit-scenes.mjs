@@ -11,7 +11,7 @@
  *   features    mechanics the class has and the scene has no field for (a stun with no `stuns`, a summon with no `mates`, ...)
  *
  * Usage:
- *   node tools/audit-scenes.mjs [--from 59] [--to 132] [--md docs/scene-audit.md]
+ *   node tools/audit-scenes.mjs [--from 59] [--to 132] [--md docs/scene_audit.md]
  *
  * It reads code, not pixels: a wrong position, size or timing still needs a look at the scene in the Cyclopedia.
  */

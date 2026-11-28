@@ -130,7 +130,7 @@
       
       // CSS styles for the quantity input and action buttons
       const QUANTITY_INPUT_STYLES = `
-        /* Base look comes from content/ba-quantity-input.js (.ba-quantity-input). */
+        /* Base look comes from content/ba-shared.js (.ba-quantity-input). */
         .better-yasir-quantity-input {
           max-width: ${CONSTANTS.MAX_INPUT_WIDTH}px;
         }

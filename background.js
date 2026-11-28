@@ -237,7 +237,7 @@ const HARDCODED_DEFAULT_ENABLED_MODS = [
   'database/tool-runs.js',
   'database/wiki-export-loader.js',
   'database/maps-database.js',
-  'database/playereq-database.js',
+  'database/player-equipment-database.js',
   'database/firebase-admins.js',
   'Official Mods/Bestiary_Automator.js',
   'Official Mods/Board Analyzer.js',
@@ -347,13 +347,22 @@ function sortLocalModsList(mods) {
   });
 }
 
-async function mergeMissingBundledMods(storedMods) {
+async function reconcileBundledMods(storedMods) {
   const bundledPaths = await loadBundledModPathsFromRegistry();
   if (!bundledPaths?.length) return storedMods;
 
   const defaultEnabledMods = await loadDefaultEnabledMods();
   const byName = new Map(storedMods.map((mod) => [mod.name, mod]));
   let changed = false;
+
+  // Drop stored entries for bundled files that were renamed or removed, or the page keeps trying to load them.
+  const bundled = new Set(bundledPaths);
+  for (const name of byName.keys()) {
+    if (REGISTRY_MOD_ARRAYS.some(({ prefix }) => name.startsWith(prefix)) && !bundled.has(name)) {
+      byName.delete(name);
+      changed = true;
+    }
+  }
 
   for (const modPath of bundledPaths) {
     if (!byName.has(modPath)) {
@@ -371,7 +380,7 @@ async function mergeMissingBundledMods(storedMods) {
   } catch (syncError) {
     console.warn('[Background] sync write of localMods skipped:', syncError?.message || syncError);
   }
-  console.log('[Background] Merged missing bundled mods from mod-registry into storage');
+  console.log('[Background] Reconciled stored mods with mod-registry');
   return merged;
 }
 
@@ -572,8 +581,8 @@ async function getLocalMods() {
       autoUpdateFailed: !!mod.autoUpdateFailed
     }));
     
-    // Add bundled mods from mod-registry that are not yet in storage (e.g. after an extension update).
-    mods = await mergeMissingBundledMods(mods);
+    // Match stored bundled mods to mod-registry (files can be added, renamed or removed by an update).
+    mods = await reconcileBundledMods(mods);
 
     // Combine file-based mods and manual mods without duplicates,
     // but PREFER the manual mod entry (so its enabled state wins)
@@ -1974,7 +1983,7 @@ async function refreshAllScripts() {
 }
 
 // All usages of window.browserAPI replaced with browserAPI
-// Removed all DOM-manipulating code below (moved to content/utility_injector.js):
+// Removed all DOM-manipulating code below (moved to content/utility-injector.js):
 // - removeModalOverlayDarkening
 // - patchGlobalModalCreation
-// These functions are now in content/utility_injector.js and injected as a content script. 
+// These functions are now in content/utility-injector.js and injected as a content script. 

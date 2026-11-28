@@ -49,6 +49,28 @@ if (typeof browserAPI === 'undefined') {
   };
 })();
 
+// The game's serverSide.profilePageData API only matches a player name in its exact case, while the profile
+// page route matches any case. Run every name a user typed through BAPlayerName.resolve() before looking it
+// up. An unknown name or a failed request returns the typed name, so the caller's "not found" still applies.
+window.BAPlayerName = window.BAPlayerName || {
+  async resolve(typed) {
+    const name = String(typed || '').trim();
+    if (!name) return name;
+    try {
+      // The x-nextjs-data header makes the page route answer with its JSON instead of HTML.
+      const response = await fetch('https://bestiaryarena.com/profile/' + encodeURIComponent(name), {
+        headers: { 'x-nextjs-data': '1' }
+      });
+      if (!response.ok) return name;
+      const data = await response.json();
+      return data?.pageProps?.pageData?.name || name;
+    } catch (error) {
+      console.warn('[BAPlayerName] Could not resolve player name:', error);
+      return name;
+    }
+  }
+};
+
 (function() {
   if (window.BestiaryModAPI) return;
   

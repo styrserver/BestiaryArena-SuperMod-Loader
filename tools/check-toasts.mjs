@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /**
  * Toast consolidation guard. Every mod should show toasts through the shared stack in
- * content/ba-toast.js (window.BAToast.show({ mod, message, type, icon })), not its own
+ * content/ba-shared.js (window.BAToast.show({ mod, message, type, icon })), not its own
  * `*-toast-container`. LEGACY lists files that may still carry their own copy (empty now: every mod is
  * migrated). This check fails if a file not listed grows its own container, or if a listed file no longer
- * has one (remove it from LEGACY). It also checks ba-toast.js is shipped by both manifests.
+ * has one (remove it from LEGACY). It also checks ba-shared.js is shipped by both manifests.
  * Local only, no network.
  *
  * Usage:
@@ -21,7 +21,7 @@ const problems = [];
 const withContainer = new Set(
   ['content', 'database', 'mods']
     .flatMap((d) => listScripts(d))
-    .filter((f) => f !== 'content/ba-toast.js')
+    .filter((f) => f !== 'content/ba-shared.js')
     .filter((f) => /toast-container['"`]/.test(readFileSync(join(ROOT, f), 'utf8')))
 );
 for (const f of withContainer) {
@@ -33,7 +33,7 @@ for (const f of LEGACY) {
 // Toast mod names must be translated: no string literal for `mod:`, and every mods.<ns>.modName key a file
 // references must exist in both locales.
 const locales = ['en-US', 'pt-BR'].map((l) => JSON.parse(readFileSync(join(ROOT, `assets/locales/${l}.json`), 'utf8')));
-for (const f of ['content', 'database', 'mods'].flatMap((d) => listScripts(d)).filter((x) => x !== 'content/ba-toast.js')) {
+for (const f of ['content', 'database', 'mods'].flatMap((d) => listScripts(d)).filter((x) => x !== 'content/ba-shared.js')) {
   const src = readFileSync(join(ROOT, f), 'utf8');
   let i = src.indexOf('BAToast');
   while (i !== -1) {
@@ -51,8 +51,8 @@ for (const f of ['content', 'database', 'mods'].flatMap((d) => listScripts(d)).f
   }
 }
 for (const manifest of ['manifest.json', 'manifest_firefox.json']) {
-  if (!readFileSync(join(ROOT, manifest), 'utf8').includes('"content/ba-toast.js"')) {
-    problems.push(`${manifest}: content/ba-toast.js missing from web_accessible_resources`);
+  if (!readFileSync(join(ROOT, manifest), 'utf8').includes('"content/ba-shared.js"')) {
+    problems.push(`${manifest}: content/ba-shared.js missing from web_accessible_resources`);
   }
 }
 
@@ -61,4 +61,4 @@ if (problems.length) {
   console.log(`DRIFT: ${problems.length} toast problem(s).`);
   process.exit(1);
 }
-console.log(`OK: toasts use content/ba-toast.js (${LEGACY.size} files still on legacy containers).`);
+console.log(`OK: toasts use content/ba-shared.js (${LEGACY.size} files still on legacy containers).`);

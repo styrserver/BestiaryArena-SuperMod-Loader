@@ -3428,6 +3428,9 @@ async function invitePlayer(guildId, playerName) {
       throw new Error('Guild is full');
     }
 
+    // The name was typed by hand: take its real letter case before looking it up and storing it
+    playerName = await window.BAPlayerName.resolve(playerName);
+
     // Check if player exists before inviting
     const playerExistsCheck = await playerExists(playerName);
     if (!playerExistsCheck) {
@@ -3488,7 +3491,7 @@ async function invitePlayer(guildId, playerName) {
     // Post system message
     await sendGuildSystemMessage(guildId, `${currentPlayer} invited ${playerName} to the guild`);
 
-    return true;
+    return playerName;
   } catch (error) {
     // Don't log expected validation errors as errors
     if (error.message && (
@@ -7053,7 +7056,7 @@ async function openGuildPanel(viewGuildId = null) {
               }
               
               try {
-                await invitePlayer(guild.id, input.value.trim());
+                const invitedName = await invitePlayer(guild.id, input.value.trim());
                 const currentDialog = getOpenDialog();
                 if (currentDialog) currentDialog.remove();
                 // Refresh invite list in guild panel if it's open
@@ -7063,7 +7066,7 @@ async function openGuildPanel(viewGuildId = null) {
                 }
                 const mainDialog = getOpenDialog();
                 if (mainDialog) mainDialog.remove();
-                showWarningModal(t('mods.guilds.success'), tReplace('mods.guilds.inviteSent', { name: input.value.trim() }));
+                showWarningModal(t('mods.guilds.success'), tReplace('mods.guilds.inviteSent', { name: invitedName }));
                 // Refresh the panel to show the new invite
                 await openGuildPanel();
               } catch (error) {
@@ -8554,7 +8557,7 @@ function getEquipmentImageUrl(slotType) {
     return base + path;
   }
   
-  // Try multiple methods to get extension runtime URL (similar to local_mods.js)
+  // Try multiple methods to get extension runtime URL (similar to local-mods.js)
   // Method 1: Try browser API in order: browserAPI, chrome, browser
   // IMPORTANT: Check runtime.id first to ensure extension context is valid
   try {
@@ -9571,7 +9574,7 @@ async function unequipItemFromSlot(slotType) {
   }
 }
 
-// Calculate total stats from equipped items (using playereq-database.js as source of truth)
+// Calculate total stats from equipped items (using player-equipment-database.js as source of truth)
 // Update the equipment stats display
 async function updateEquipmentStats(container) {
   if (!container) {

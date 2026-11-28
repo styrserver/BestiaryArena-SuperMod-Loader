@@ -4,6 +4,42 @@
   },
   "notes": [
     {
+      "version": "5.5.8",
+      "changes": [
+        {
+          "mod": "Battle Helper",
+          "type": "fixed",
+          "text": "Typed player names are no longer case-sensitive, and setups are readable on mobile."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "added",
+          "text": "Bestiary and Arsenal lists have one button to sort and to show or hide owned, shiny, perfect, awakened, T5 and event entries.",
+          "credit": { "name": "Orw", "url": "https://bestiaryarena.com/profile/orw" }
+        },
+        {
+          "mod": "Guilds",
+          "type": "fixed",
+          "text": "Player names you type to invite are no longer case-sensitive."
+        },
+        {
+          "mod": "Mod Loader",
+          "type": "fixed",
+          "text": "A mod that fails to load no longer spams the error message, and files removed by an update are no longer loaded."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "fixed",
+          "text": "Auto-hide no longer stops when a creature is sold or devoured while it runs."
+        },
+        {
+          "mod": "VIP List",
+          "type": "fixed",
+          "text": "Player names you type to add are no longer case-sensitive."
+        }
+      ]
+    },
+    {
       "version": "5.5.7",
       "changes": [
         {

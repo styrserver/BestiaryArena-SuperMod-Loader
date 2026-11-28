@@ -217,7 +217,7 @@ These rules apply to this extension and other WebKit-based mobile WebExtensions.
 
 ### `//# sourceURL` on eval'd code must be an absolute same-origin URL (critical)
 
-- Mods run through `new Function(...)` in [`content/local_mods.js`](../content/local_mods.js) with a `//# sourceURL=` trailer so DevTools and the Error Log show `<Mod_Name>.js:123` instead of `VM123:456`.
+- Mods run through `new Function(...)` in [`content/local-mods.js`](../content/local-mods.js) with a `//# sourceURL=` trailer so DevTools and the Error Log show `<Mod_Name>.js:123` instead of `VM123:456`.
 - **WebKit uses `sourceURL` as the script's real resource URL** and derives that script's origin (and the base for its `fetch()` calls) from it. V8 (Chrome) and SpiderMonkey (Firefox) treat it as a DevTools label only.
 - A scheme-less value (`bestiary-mod/<Mod_Name>.js`) put every mod in an **opaque origin** on Orion. Result: every cross-origin `fetch()` from mod code — all the Firebase sync calls (Guilds, Quests, Equipment, Mod Settings highscore, VIP List, …) — failed with `TypeError: Load failed`, while same-origin game/tRPC traffic kept working. Regression introduced with the `VM123` → `Mod_Name.js` change; fixed by anchoring the trailer to `window.location.origin` (`https://bestiaryarena.com/bestiary-mod/<Mod_Name>.js`).
 - **AI audit:** flag any `//# sourceURL=`, `//@ sourceURL=`, or `eval`/`new Function` label that is not an absolute `http(s)://` URL on the page origin. Also flag whitespace in the label (the directive silently stops at the first space).
@@ -233,7 +233,7 @@ Symptom: mods fail once; a normal tab refresh does nothing useful; only force-qu
 
 Two separate behaviors interact:
 
-1. **Relaxed loader skips auto-refresh** — On mobile, `handleModLoadFailure` shows the error toast but does **not** call `location.reload()` (avoids refresh loops when hydration/game-state warnings are non-fatal). Desktop still retries up to 3 times. See [`content/local_mods.js`](../content/local_mods.js) and [Loader Internals](mod_development_guide.md#loader-internals).
+1. **Relaxed loader skips auto-refresh** — On mobile, `handleModLoadFailure` shows the error toast but does **not** call `location.reload()` (avoids refresh loops when hydration/game-state warnings are non-fatal). Desktop still retries up to 3 times. See [`content/local-mods.js`](../content/local-mods.js) and [Loader Internals](mod_development_guide.md#loader-internals).
 
 2. **Same-tab reload must clear background delivery state** — Background keeps an in-memory `registeredTabs` Set so `loadScripts` / `registerLocalMods` run once per page load. Tab IDs survive reload. If the Set is not cleared on navigation / `contentScriptReady`, delivery is skipped until the extension process restarts (matches “only a full browser restart works”). Implementation: `clearTabModDelivery()` in [`background.js`](../background.js) on `contentScriptReady`, `tabs.onUpdated` `loading`, and `tabs.onRemoved`.
 

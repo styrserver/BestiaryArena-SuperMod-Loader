@@ -23,6 +23,7 @@ if (typeof window.localMods === 'undefined') {
 }
 
 let executedMods = {};
+const batchAttemptedMods = new Set(); // Includes failures, so catch-up never retries them
 let isInitializing = false;
 let initializationPromise = null;
 let isBatchExecuting = false; // Flag to prevent duplicate executions during batch operations
@@ -37,7 +38,7 @@ let modBaseUrl = '';
 const FALLBACK_DATABASE_MODS = [
   'welcome.js', 'inventory-database.js', 'creature-database.js', 'equipment-database.js', 'tool-runs.js',
   'wiki-export-loader.js', 'maps-database.js', 'equipment-lua-export.js', 'creature-lua-export.js',
-  'maps-lua-export.js', 'regions-lua-export.js', 'playereq-database.js', 'firebase-admins.js'
+  'maps-lua-export.js', 'regions-lua-export.js', 'player-equipment-database.js', 'firebase-admins.js'
 ];
 const FALLBACK_OFFICIAL_MODS = [
   'Bestiary_Automator.js', 'Board Analyzer.js', 'Custom_Display.js', 'Hero_Editor.js',
@@ -77,7 +78,7 @@ function ensureWelcomeModAlwaysEnabled(mods) {
 const FALLBACK_DEFAULT_ENABLED_MODS = [
   'database/welcome.js', 'database/inventory-database.js', 'database/creature-database.js',
   'database/equipment-database.js', 'database/tool-runs.js', 'database/wiki-export-loader.js', 'database/maps-database.js',
-  'database/playereq-database.js', 'database/firebase-admins.js',
+  'database/player-equipment-database.js', 'database/firebase-admins.js',
   'Official Mods/Bestiary_Automator.js', 'Official Mods/Board Analyzer.js',
   'Official Mods/Highscore_Improvements.js',
   'Official Mods/Setup_Manager.js', 'Official Mods/Usage_List.js',
@@ -129,7 +130,7 @@ function assertFallbackMatchesRegistry(registry) {
       authoritative.some((v, i) => v !== fallback[i]);
     if (mismatch) {
       console.error(
-        `[Mod Registry] ${localName} in content/local_mods.js is out of sync with ` +
+        `[Mod Registry] ${localName} in content/local-mods.js is out of sync with ` +
         `content/mod-registry.js ${key}. Update the local array to match (these copies are ` +
         `used on browsers that cannot import the registry module, e.g. Orion/iOS).`,
         { registry: authoritative, local: fallback }
@@ -744,7 +745,7 @@ let defaultEnabledMods = [
   'database/tool-runs.js',
   'database/wiki-export-loader.js',
   'database/maps-database.js',
-  'database/playereq-database.js',
+  'database/player-equipment-database.js',
   'database/firebase-admins.js',
   'Official Mods/Bestiary_Automator.js',
   'Official Mods/Board Analyzer.js',
@@ -1293,7 +1294,8 @@ async function executeLocalMod(modNameOrObject, forceExecution = false) {
             
             resolve(executedMods[modName]);
           } catch (error) {
-            console.error(`Error executing mod ${modName}:`, error);
+            // Size and ending tell a cut-off copy apart from a browser rejecting complete code.
+            console.error(`Error executing mod ${modName} (${content.length} chars, ends ${JSON.stringify(content.slice(-40))}):`, error);
             resolve(null);
           }
         };
@@ -1351,6 +1353,7 @@ async function executeLocalMod(modNameOrObject, forceExecution = false) {
 async function runModBatch(mods, forceExecution, results) {
   for (const mod of mods) {
     if (mod.enabled || forceExecution) {
+      batchAttemptedMods.add(mod.name);
       try {
         const result = await executeLocalMod(mod, forceExecution);
         if (result) {
@@ -1502,7 +1505,7 @@ let completionSignalSent = false;
 let lastCompletionErrors = [];
 
 function schedulePostBatchCatchup() {
-  const pending = (window.localMods || []).filter(mod => mod.enabled && !executedMods[mod.name]);
+  const pending = (window.localMods || []).filter(mod => mod.enabled && !executedMods[mod.name] && !batchAttemptedMods.has(mod.name));
   if (pending.length === 0) {
     return;
   }
@@ -1603,6 +1606,7 @@ document.addEventListener('reloadLocalMods', () => {
   runAllExecutedModCleanups('reload');
   window.localMods = [];
   executedMods = {};
+  batchAttemptedMods.clear();
   initializationPromise = null; // Reset initialization promise
   executionTriggered = false;
   clearInitExecutionFallbackTimer();

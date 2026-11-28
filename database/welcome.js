@@ -580,7 +580,7 @@ function clearWelcomeModalLayoutCleanup() {
 // 8. Toasts
 // =======================
 
-// Toasts go through the shared stack (content/ba-toast.js). `message` is trusted HTML built here;
+// Toasts go through the shared stack (content/ba-shared.js). `message` is trusted HTML built here;
 // duration 0 = keep until removed. Returns { remove, setMessage(html) }.
 const getWelcomeToastMod = () => wt('mods.welcome.modName', 'SuperMod Loader');
 

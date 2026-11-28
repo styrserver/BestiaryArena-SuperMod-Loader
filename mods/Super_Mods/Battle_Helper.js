@@ -2272,7 +2272,8 @@ function buildImportPanel(onContentChange, shared) {
       return false;
     }
     setOutput(tReplace('mods.battleHelper.output.fetchingProfile', { username: normalizedName }), 'progress');
-    const profile = await fetchProfileByUsername(normalizedName);
+    const exactName = await window.BAPlayerName.resolve(normalizedName);
+    const profile = await fetchProfileByUsername(exactName);
     if (typeof shouldAbort === 'function' && shouldAbort()) {
       debugLog('fetchAndOptionallyReplace: aborted after fetch (stale seq)');
       return false;
@@ -2281,8 +2282,8 @@ function buildImportPanel(onContentChange, shared) {
     const normalized = normalizeProfileArsenal(profile);
     validateNormalizedArsenal(normalized);
     sessionState.lastNormalized = normalized;
-    sessionState.lastUsername = normalizedName;
-    usernameInput.value = normalizedName;
+    sessionState.lastUsername = exactName;
+    usernameInput.value = exactName;
 
     const switchedToSandbox = ensureSandboxPlayMode();
     if (replace) {
@@ -2994,11 +2995,12 @@ function buildHelpBoardColumns(onContentChange, shared) {
     replies.forEach((reply) => {
       const row = document.createElement('div');
       row.className = 'frame-pressed-1 surface-dark p-1';
-      row.style.cssText = 'display: flex; flex-direction: row; gap: 4px; align-items: center; width: 100%; box-sizing: border-box;';
+      // Narrow (mobile) columns: buttons wrap below the name instead of squeezing it.
+      row.style.cssText = 'display: flex; flex-direction: row; flex-wrap: wrap; justify-content: flex-end; gap: 4px; align-items: center; width: 100%; box-sizing: border-box;';
 
       const info = document.createElement('p');
       info.className = 'pixel-font-14 text-whiteRegular m-0';
-      info.style.cssText = 'flex: 1 1 auto; min-width: 0; word-break: break-word;';
+      info.style.cssText = 'flex: 1 1 8em; min-width: 0; word-break: break-word;';
 
       const nameLink = createBattleHelperProfileLink(
         reply.helperName || '',
